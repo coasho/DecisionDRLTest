@@ -39,7 +39,7 @@ The fixed stack is C++17, VSG 1.1.x and JSBSim 1.3.x, with vsgXchange for model 
 
 | Component | Version | License | Last release / push | Role | Notes |
 | --- | --- | --- | --- | --- | --- |
-| C++ | C++17 (MSVC 2022 17.8+) | — | — | Implementation language | C++17 is VSG's requirement; code stays C++17 so a GCC/Clang Linux port needs no language changes |
+| C++ | C++17 (GCC 16.2, MSYS2 UCRT64 — mandated toolchain at D:\\ENV\\DevLanguages\\Cpp\\msys2\\ucrt64) | — | — | Implementation language | C++17 is VSG's requirement; code stays C++17 so a GCC/Clang Linux port needs no language changes |
 | [VulkanSceneGraph](https://github.com/vsg-dev/VulkanSceneGraph) | 1.1.16 | MIT | 2026-08-21 | Scene graph, Vulkan rendering, windowing, offscreen rendering, viewer, **full-Earth tile streaming (`vsg::TileDatabase` with `imageLayer` + `elevationLayer`)**, serialisation (`.vsgt/.vsgb`) | Requires Vulkan 1.1 SDK; glslang optional |
 | [vsgXchange](https://github.com/vsg-dev/vsgXchange) | tracks VSG | MIT | 2026-08-24 | glTF loader (assimp), KTX/PNG/JPEG image readers, `curl` reader for HTTP tile sources | Only assimp, KTX, stb\_image and curl modules enabled; GDAL module off |
 | [JSBSim](https://github.com/JSBSim-Team/jsbsim) | 1.3.1 | LGPL-2.1 | 2026-05-17 (push 2026-09-15) | Flight dynamics (`FGFDMExec`), stock aircraft/engines/systems, XML scripts, property tree | Linked as a DLL; one instance per vehicle |
@@ -48,7 +48,7 @@ The fixed stack is C++17, VSG 1.1.x and JSBSim 1.3.x, with vsgXchange for model 
 | CMake + vcpkg | ≥ 3.25 / manifest mode | BSD-3 / MIT | — | Build and dependency management | vcpkg has ports for every dependency above |
 | Offline tooling only: GDAL | current | MIT | active | `tools/tile_builder` converts DEM and imagery sources into the tile pyramid | never linked into the platform; runs at data-preparation time |
 
-Compiler and platform for v1: MSVC 2022 (v143) on Windows 10/11 x64 only; Vulkan SDK 1.3.x; NVIDIA, AMD and Intel drivers in the test matrix. A Linux build is not a v1 deliverable but nothing in the stack prevents it.
+Compiler and platform for v1 (owner decision 2026-09-19): MSYS2 **UCRT64** — GCC 16.2, mingw-w64, UCRT — on Windows 10/11 x64; CMake 4.1 and Ninja from the same environment; Vulkan headers/loader, glslang, SPIRV-Tools, assimp and curl from MSYS2 packages. The MSYS2 installation must be kept consistent with `pacman -Syu` (partial upgrades break newly installed packages). MSVC is not used. A Linux build is not a v1 deliverable but nothing in the stack prevents it.
 
 ## 4. Entry point and primary interface evaluation
 
@@ -435,7 +435,7 @@ Headless `fsim.dll`: \~5 MB. Viewer executable: \~9–12 MB. Total install well 
 
 | Topic | Decision |
 | --- | --- |
-| Toolchain | MSVC 2022 v143, CMake ≥ 3.25, Ninja, vcpkg manifest mode, Vulkan SDK 1.3.x for viewer builds only |
+| Toolchain | MSYS2 UCRT64: GCC 16.2, CMake ≥ 3.25, Ninja, MSYS2 pacman packages (vulkan-headers, vulkan-loader, glslang, spirv-tools, assimp, curl); toolchain file cmake/toolchains/ucrt64.cmake; LTO off (GCC LTO collides with dllexport vtables in JSBSim.dll) |
 | CRT | dynamic UCRT, `/MD`; the C ABI carries no CRT types so trainers built with other compilers or runtimes can link `fsim.dll` |
 | Distribution | zip with `bin/` (`fsim.dll`, `JSBSim.dll`, `flightsim.exe`, `flightsim-viewer.exe`), `include/fsim/`, `lib/fsim.lib`, `share/` (assets, scenarios), CMake package config for `find_package(fsim)` |
 | GPU matrix | NVIDIA (RTX), AMD (RDNA), Intel Arc drivers tested in the viewer/vision CI job |
@@ -517,7 +517,7 @@ The largest risks are the ones the stack does not already solve: building and ho
 
 ## 15. Roadmap and milestones
 
-Six milestones take the project from an empty repository to a v1 release; training capability lands first (M0–M2, headless), visualisation second (M3–M4), vision observations and release last. Each milestone ends with CI green and the section 12 metrics recorded. Durations assume one to two developers.
+Six milestones take the project from an empty repository to a v1 release. Re-planned 2026-09-19 at the owner's direction: visualisation is the most important component and comes first (M0 skeleton, then the viewer), the RL API follows, vision observations and release last. Status: M0 done; the viewer milestone is in progress (full-Earth OSM imagery, N vehicles, chase/orbit/overview cameras, ImGui monitor, interpolated motion delivered). Each milestone ends with CI green and the section 12 metrics recorded. Durations assume one to two developers.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |
 | --- | --- | --- | --- | --- |
