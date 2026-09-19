@@ -17,9 +17,14 @@ Milestone **M0 (skeleton) done; viewer (visualisation-first re-plan) in progress
 - `sim::VehiclePool` steps N vehicles in lockstep on a worker pool; trajectories are bit-identical
   for any worker count (tested).
 - `flightsim.exe` headless runner / benchmark.
-- **Viewer** (`flightsim-viewer.exe`): full-Earth `vsg::TileDatabase` imagery, N vehicles driven
-  from a paced simulation thread through a lock-free snapshot buffer, chase/orbit/overview cameras,
-  Dear ImGui monitor and vehicle list.
+- **Viewer** (`flightsim-viewer.exe`): full-Earth `vsg::TileDatabase` with Esri World Imagery (or
+  OSM/Bing/custom XYZ) draped over **real relief** from the free AWS Terrarium elevation tiles, sun +
+  ambient lighting from the current UTC time, N vehicles driven from a paced simulation thread through a
+  lock-free snapshot buffer with render-side interpolation, chase/orbit/overview cameras, Dear ImGui
+  monitor and vehicle list.
+- **Terrain physics**: JSBSim's ground callback samples the *same* elevation tiles the renderer shows
+  (`world::TileGroundProvider`, LRU + background prefetch); `--on-ground` spawns vehicles parked on the
+  terrain via JSBSim's ground trim. Diverged vehicles are reset automatically.
 
 Measured on a 16-thread desktop (Release, 64 × c172x, frame-skip 4):
 
@@ -30,7 +35,9 @@ Measured on a 16-thread desktop (Release, 64 × c172x, frame-skip 4):
 |       8 |           800,000 |
 |      16 |         1,138,000 |
 
-Not yet: RL environment layer (`env`), `fsim` SDK / C ABI, elevation tiles + ground provider over real terrain, glTF vehicle manifests, vision observations.
+Not yet: RL environment layer (`env`), `fsim` SDK / C ABI, glTF vehicle manifests, vision observations, offline tile pyramids (`tools/tile_builder`).
+
+Imagery and elevation come from Esri World Imagery and AWS Terrain Tiles under their respective terms (attribution required); tiles are cached under `%LOCALAPPDATA%lightsim	ilecache`.
 
 ## Build (Windows x64, MSYS2 UCRT64 / GCC)
 
@@ -63,8 +70,12 @@ at runtime (the presets set it for tests); a deploy step that copies the runtime
 ## Run
 
 ```bash
-# Full-Earth viewer: 8 c172x over San Francisco, OpenStreetMap imagery
+# Full-Earth viewer: 8 c172x over San Francisco, satellite imagery + terrain relief
 build/ucrt64-release/bin/flightsim-viewer.exe --vehicles 8
+# Yosemite, 6 vehicles at 3200 m
+build/ucrt64-release/bin/flightsim-viewer.exe --vehicles 6 --lat 37.72 --lon -119.55 --alt 3200 --spread 0.02
+# parked at KSFO
+build/ucrt64-release/bin/flightsim-viewer.exe --vehicles 3 --spread 0.004 --on-ground
 build/ucrt64-release/bin/flightsim-viewer.exe --vehicles 32 --imagery none --time-factor 4
 build/ucrt64-release/bin/flightsim-viewer.exe --help
 

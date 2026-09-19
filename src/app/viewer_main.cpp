@@ -81,7 +81,7 @@ void usage(const char* prog) {
         "  --lat <deg> --lon <deg>  spawn centre (KSFO)\n"
         "  --alt <m>                spawn altitude MSL (1500)\n"
         "  --spread <deg>           spawn scatter (0.03)\n"
-        "  --imagery osm|bing|none|<url template with {z}/{x}/{y}>   (osm)\n"
+        "  --imagery satellite|osm|bing|none|<url template with {z}/{x}/{y}>   (satellite = Esri World Imagery)\n"
         "  --elevation terrarium|none|<url template>   relief from Terrarium-encoded tiles (default terrarium)\n"
         "  --terrain-zoom <z>       tile level used for physics ground height (12)\n"
         "  --no-sun                 headlight instead of sun + ambient lighting\n"
@@ -95,6 +95,7 @@ void usage(const char* prog) {
         "  --debug-layer            Vulkan validation layer\n"
         "  --camera chase|orbit|overview   initial camera (chase)\n"
         "  --probe                  print motion smoothness statistics after ~5 s and exit\n"
+        "  --trace <i>              print vehicle i's state once per second\n"
         "  --no-interpolate         draw raw snapshots (sample-and-hold) instead of interpolating\n"
         "  --log-level <lvl>\n"
         "Keys: space pause, . step, tab next vehicle, c camera, -/= zoom, [ ] time factor, l list, m monitor, esc quit\n",
