@@ -17,3 +17,12 @@ function(fsim_set_warnings target)
             $<$<BOOL:${FSIM_WARNINGS_AS_ERRORS}>:-Werror>)
     endif()
 endfunction()
+
+# fsim_relax_third_party_warnings(<target>)
+# For modules that include VSG and Dear ImGui headers: those APIs mix float and
+# double freely and ImGui macros use C-style casts.
+function(fsim_relax_third_party_warnings target)
+    if(NOT MSVC)
+        target_compile_options(${target} PRIVATE -Wno-double-promotion -Wno-old-style-cast -Wno-useless-cast)
+    endif()
+endfunction()

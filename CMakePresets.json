@@ -1,27 +1,101 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
   "configurePresets": [
     {
-      "name": "msvc-base",
+      "name": "ucrt64-base",
       "hidden": true,
       "generator": "Ninja",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/ucrt64.cmake",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "cl",
-        "CMAKE_CXX_COMPILER": "cl"
+        "CMAKE_PREFIX_PATH": "${sourceDir}/build/deps-ucrt64/install"
       },
-      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+      "environment": {
+        "PATH": "D:/ENV/DevLanguages/Cpp/msys2/ucrt64/bin;$penv{PATH}"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
     },
-    { "name": "msvc-debug",   "inherits": "msvc-base", "displayName": "MSVC Debug",   "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
-    { "name": "msvc-release", "inherits": "msvc-base", "displayName": "MSVC Release", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" } }
+    {
+      "name": "ucrt64-release",
+      "displayName": "flightsim - UCRT64 Release",
+      "inherits": "ucrt64-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "FSIM_WITH_RENDER": "ON"
+      }
+    },
+    {
+      "name": "ucrt64-debug",
+      "displayName": "flightsim - UCRT64 Debug",
+      "inherits": "ucrt64-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "FSIM_WITH_RENDER": "ON"
+      }
+    },
+    {
+      "name": "ucrt64-headless",
+      "displayName": "flightsim - UCRT64 Release, headless (no Vulkan)",
+      "inherits": "ucrt64-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "FSIM_WITH_RENDER": "OFF"
+      }
+    }
   ],
   "buildPresets": [
-    { "name": "msvc-debug",   "configurePreset": "msvc-debug" },
-    { "name": "msvc-release", "configurePreset": "msvc-release" }
+    {
+      "name": "ucrt64-release",
+      "configurePreset": "ucrt64-release"
+    },
+    {
+      "name": "ucrt64-debug",
+      "configurePreset": "ucrt64-debug"
+    },
+    {
+      "name": "ucrt64-headless",
+      "configurePreset": "ucrt64-headless"
+    }
   ],
   "testPresets": [
-    { "name": "msvc-debug",   "configurePreset": "msvc-debug",   "output": { "outputOnFailure": true } },
-    { "name": "msvc-release", "configurePreset": "msvc-release", "output": { "outputOnFailure": true } }
+    {
+      "name": "ucrt64-release",
+      "configurePreset": "ucrt64-release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "PATH": "D:/ENV/DevLanguages/Cpp/msys2/ucrt64/bin;$penv{PATH}"
+      }
+    },
+    {
+      "name": "ucrt64-debug",
+      "configurePreset": "ucrt64-debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "PATH": "D:/ENV/DevLanguages/Cpp/msys2/ucrt64/bin;$penv{PATH}"
+      }
+    },
+    {
+      "name": "ucrt64-headless",
+      "configurePreset": "ucrt64-headless",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "PATH": "D:/ENV/DevLanguages/Cpp/msys2/ucrt64/bin;$penv{PATH}"
+      }
+    }
   ]
 }

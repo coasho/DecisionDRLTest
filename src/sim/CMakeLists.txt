@@ -10,6 +10,9 @@ add_library(fsim_sim STATIC
     JsbsimLog.cpp
     JsbsimModel.h
     JsbsimModel.cpp
+    SimRunner.h
+    SimRunner.cpp
+    SnapshotBuffer.h
     VehiclePool.h
     VehiclePool.cpp
     VehicleState.h)

@@ -37,11 +37,14 @@ if(MSVC)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
-# Link-time optimisation for release builds (design 11.2).
-include(CheckIPOSupported)
-check_ipo_supported(RESULT FSIM_IPO_SUPPORTED OUTPUT FSIM_IPO_MESSAGE)
-if(FSIM_IPO_SUPPORTED)
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+# Link-time optimisation for release builds (design 11.2). Off for MinGW:
+# GCC LTO and __declspec(dllexport) vtables collide when linking JSBSim.dll.
+if(NOT MINGW)
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT FSIM_IPO_SUPPORTED OUTPUT FSIM_IPO_MESSAGE)
+    if(FSIM_IPO_SUPPORTED)
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    endif()
 endif()
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)

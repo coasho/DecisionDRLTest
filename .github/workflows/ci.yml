@@ -6,34 +6,50 @@ on:
   pull_request:
 
 jobs:
-  windows:
-    name: Windows x64 (${{ matrix.config }})
+  windows-ucrt64:
+    name: Windows x64 - MSYS2 UCRT64 (GCC)
     runs-on: windows-2022
-    strategy:
-      fail-fast: false
-      matrix:
-        config: [Debug, Release]
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: msys2/setup-msys2@v2
         with:
-          arch: x64
+          msystem: UCRT64
+          update: true
+          location: D:\ENV\DevLanguages\Cpp\msys2
+          install: >-
+            git
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-vulkan-headers
+            mingw-w64-ucrt-x86_64-vulkan-loader
+            mingw-w64-ucrt-x86_64-glslang
+            mingw-w64-ucrt-x86_64-spirv-tools
+            mingw-w64-ucrt-x86_64-assimp
+            mingw-w64-ucrt-x86_64-curl
 
-      - name: Configure
-        run: cmake --preset msvc-${{ matrix.config == 'Debug' && 'debug' || 'release' }}
+      - name: Build VSG stack
+        run: |
+          cmake -S deps --preset deps-ucrt64
+          cd deps && cmake --build --preset deps-ucrt64
+
+      - name: Configure (viewer + headless)
+        run: cmake --preset ucrt64-release
 
       - name: Build
-        run: cmake --build --preset msvc-${{ matrix.config == 'Debug' && 'debug' || 'release' }} --parallel
+        run: cmake --build --preset ucrt64-release --parallel
 
       - name: Test
-        run: ctest --preset msvc-${{ matrix.config == 'Debug' && 'debug' || 'release' }}
+        run: ctest --preset ucrt64-release
 
       - name: Headless smoke run
-        run: build/msvc-${{ matrix.config == 'Debug' && 'debug' || 'release' }}/bin/flightsim.exe --vehicles 8 --steps 60 --benchmark
+        run: build/ucrt64-release/bin/flightsim.exe --vehicles 8 --steps 60 --benchmark
 
-      - name: Throughput benchmark (Release only)
-        if: matrix.config == 'Release'
-        run: build/msvc-release/bin/flightsim.exe --vehicles 32 --steps 150 --benchmark
+      - name: Throughput benchmark
+        run: build/ucrt64-release/bin/flightsim.exe --vehicles 32 --steps 150 --benchmark

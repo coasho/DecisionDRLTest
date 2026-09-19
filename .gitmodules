@@ -1,3 +1,12 @@
 [submodule "third_party/jsbsim"]
 	path = third_party/jsbsim
 	url = https://github.com/JSBSim-Team/jsbsim.git
+[submodule "third_party/vsg"]
+	path = third_party/vsg
+	url = https://github.com/vsg-dev/VulkanSceneGraph.git
+[submodule "third_party/vsgXchange"]
+	path = third_party/vsgXchange
+	url = https://github.com/vsg-dev/vsgXchange.git
+[submodule "third_party/vsgImGui"]
+	path = third_party/vsgImGui
+	url = https://github.com/vsg-dev/vsgImGui.git

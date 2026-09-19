@@ -52,6 +52,11 @@ struct VehicleState {
     std::uint32_t stepCount = 0;                    ///< FDM steps since reset
     bool onGround = false;
     bool diverged = false;                          ///< NaN/inf detected; vehicle must be reset
+
+    // Appended (viewer): body -> ECEF rotation, row-major. Columns are the body
+    // axes (x forward, y right, z down) expressed in ECEF; equals the transpose
+    // of JSBSim's Tec2b. Redundant with the quaternion but unambiguous.
+    double rotationBodyToEcef[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
 };
 
 } // namespace fsim::sim

@@ -68,6 +68,37 @@ bool pinCurrentThreadToCore(unsigned logicalCore) noexcept {
 #endif
 }
 
+bool enableHighDpiAwareness() noexcept {
+#ifdef _WIN32
+    // Windows 10 1703+: per-monitor v2. Loaded dynamically so older systems fall
+    // back to the system-DPI-aware call from Vista.
+    using SetCtxFn = BOOL(WINAPI*)(DPI_AWARENESS_CONTEXT);
+    if (const auto fn = reinterpret_cast<SetCtxFn>(
+            reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetProcessDpiAwarenessContext")))) {
+        if (fn(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) return true;
+    }
+    return SetProcessDPIAware() != 0;
+#else
+    return false;
+#endif
+}
+
+double systemDpiScale() noexcept {
+#ifdef _WIN32
+    using GetDpiFn = UINT(WINAPI*)();
+    if (const auto fn = reinterpret_cast<GetDpiFn>(
+            reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForSystem")))) {
+        return static_cast<double>(fn()) / 96.0;
+    }
+    const HDC dc = GetDC(nullptr);
+    const int dpi = GetDeviceCaps(dc, LOGPIXELSX);
+    ReleaseDC(nullptr, dc);
+    return dpi > 0 ? dpi / 96.0 : 1.0;
+#else
+    return 1.0;
+#endif
+}
+
 std::filesystem::path executableDir() {
 #ifdef _WIN32
     wchar_t buffer[MAX_PATH];

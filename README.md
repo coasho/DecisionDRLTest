@@ -10,13 +10,16 @@ The architecture, requirements, technology evaluation and roadmap are in
 
 ## Status
 
-Milestone **M0 (skeleton) done, M1 (multi-vehicle FDM) in progress**:
+Milestone **M0 (skeleton) done; viewer (visualisation-first re-plan) in progress**:
 
 - `platform`, `core`, `io`, `sim` modules; JSBSim 1.3.1 adapter (`sim::JsbsimModel`) with a
   terrain `GroundProvider` hooked into JSBSim's ground callback.
 - `sim::VehiclePool` steps N vehicles in lockstep on a worker pool; trajectories are bit-identical
   for any worker count (tested).
 - `flightsim.exe` headless runner / benchmark.
+- **Viewer** (`flightsim-viewer.exe`): full-Earth `vsg::TileDatabase` imagery, N vehicles driven
+  from a paced simulation thread through a lock-free snapshot buffer, chase/orbit/overview cameras,
+  Dear ImGui monitor and vehicle list.
 
 Measured on a 16-thread desktop (Release, 64 × c172x, frame-skip 4):
 
@@ -27,33 +30,50 @@ Measured on a 16-thread desktop (Release, 64 × c172x, frame-skip 4):
 |       8 |           800,000 |
 |      16 |         1,138,000 |
 
-Not yet: RL environment layer (`env`), `fsim` SDK / C ABI, viewer, terrain tiles, vision observations.
+Not yet: RL environment layer (`env`), `fsim` SDK / C ABI, elevation tiles + ground provider over real terrain, glTF vehicle manifests, vision observations.
 
-## Build (Windows x64, MSVC 2022)
+## Build (Windows x64, MSYS2 UCRT64 / GCC)
 
-Requirements: Visual Studio 2022 Build Tools (C++), CMake ≥ 3.25, Ninja, git.
-The headless build needs no Vulkan SDK.
+The mandated toolchain is MSYS2 **UCRT64** at `D:\ENV\DevLanguages\Cpp\msys2\ucrt64`
+(override with `-DFSIM_UCRT64_ROOT=...`). Packages needed in that environment:
+
+```bash
+pacman -S mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,vulkan-headers,vulkan-loader,glslang,spirv-tools,assimp,curl}
+```
+
+Keep the installation consistent (`pacman -Syu`); MSYS2 does not support partial upgrades.
 
 ```bash
 git clone --recursive https://github.com/coasho/DecisionDRLTest.git
 cd DecisionDRLTest
-cmake --preset msvc-release
-cmake --build --preset msvc-release --parallel
-ctest --preset msvc-release
+
+# 1. VSG stack (vsg, vsgXchange, vsgImGui) -> build/deps-ucrt64/install   (once)
+cmake -S deps --preset deps-ucrt64
+cd deps && cmake --build --preset deps-ucrt64 && cd ..
+
+# 2. flightsim (viewer + headless)
+cmake --preset ucrt64-release
+cmake --build --preset ucrt64-release --parallel
+ctest --preset ucrt64-release
 ```
 
-Run from a *Developer PowerShell / Command Prompt for VS 2022* (or any shell where `cl` is on `PATH`).
+`ucrt64-headless` builds without Vulkan or the VSG stack. Executables need `ucrt64/bin` on `PATH`
+at runtime (the presets set it for tests); a deploy step that copies the runtime DLLs is planned.
 
 ## Run
 
 ```bash
-build/msvc-release/bin/flightsim.exe --vehicles 64 --steps 300 --benchmark
-build/msvc-release/bin/flightsim.exe --aircraft f16 --vehicles 8 --steps 120 --print-every 30
-build/msvc-release/bin/flightsim.exe --help
+# Full-Earth viewer: 8 c172x over San Francisco, OpenStreetMap imagery
+build/ucrt64-release/bin/flightsim-viewer.exe --vehicles 8
+build/ucrt64-release/bin/flightsim-viewer.exe --vehicles 32 --imagery none --time-factor 4
+build/ucrt64-release/bin/flightsim-viewer.exe --help
+
+# Headless benchmark
+build/ucrt64-release/bin/flightsim.exe --vehicles 64 --steps 300 --benchmark
 ```
 
-The JSBSim data tree (aircraft, engines, systems) is the `third_party/jsbsim` submodule; pass
-`--jsbsim-root <dir>` to use another one.
+Viewer keys: `space` pause, `.` step, `tab` next vehicle, `c` camera (chase / orbit / overview),
+`-`/`=` zoom, `[`/`]` time factor, `l` vehicle list, `m` monitor, `esc` quit.
 
 ## Layout
 
@@ -64,9 +84,13 @@ src/platform/     OS isolation (the only module with Win32 includes)
 src/core/         logging, registries, module lifecycle, RNG, profiler
 src/io/           asset resolution (config, tile cache and recordings later)
 src/sim/          FlightModel, JsbsimModel, VehiclePool, GroundProvider
-src/app/          flightsim.exe
+src/render/       VSG window, viewer, render graph (viewer builds)
+src/world/        Earth tiles (vsg::TileDatabase), vehicle visuals, cameras
+src/ui/           Dear ImGui monitor / vehicle list, key bindings
+src/app/          flightsim.exe, flightsim-viewer.exe
+deps/             superbuild for the VSG stack
 tests/            Catch2 unit + JSBSim integration tests
-third_party/      JSBSim submodule (LGPL-2.1, built as a DLL)
+third_party/      JSBSim (LGPL-2.1, DLL), VSG, vsgXchange, vsgImGui submodules
 ```
 
 ## License

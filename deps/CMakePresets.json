@@ -1,0 +1,29 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "deps-ucrt64",
+      "displayName": "VSG stack (vsg, vsgXchange, vsgImGui) - UCRT64 Release",
+      "generator": "Ninja",
+      "toolchainFile": "${sourceDir}/../cmake/toolchains/ucrt64.cmake",
+      "binaryDir": "${sourceDir}/../build/deps-ucrt64",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      },
+      "environment": {
+        "PATH": "D:/ENV/DevLanguages/Cpp/msys2/ucrt64/bin;$penv{PATH}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "deps-ucrt64",
+      "configurePreset": "deps-ucrt64"
+    }
+  ]
+}

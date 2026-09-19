@@ -11,6 +11,7 @@
 #include <input_output/FGPropertyManager.h>
 #include <math/FGColumnVector3.h>
 #include <math/FGLocation.h>
+#include <math/FGMatrix33.h>
 #include <math/FGQuaternion.h>
 #include <models/FGAccelerations.h>
 #include <models/FGAuxiliary.h>
@@ -168,7 +169,7 @@ bool JsbsimModel::reset(const InitialConditions& ic) {
 
 void JsbsimModel::applyInitialConditions(const InitialConditions& ic) {
     auto IC = fdm_->GetIC();
-    IC->SetLatitudeDegIC(ic.latitudeDeg);
+    IC->SetGeodLatitudeDegIC(ic.latitudeDeg); // geodetic; SetLatitudeDegIC would be geocentric
     IC->SetLongitudeDegIC(ic.longitudeDeg);
     IC->SetPsiDegIC(ic.headingDeg);
     IC->SetThetaDegIC(ic.pitchDeg);
@@ -298,6 +299,10 @@ void JsbsimModel::state(VehicleState& out) const {
     out.fuelKg = propulsion->GetTanksWeight() * 0.45359237; // tank contents, lbs -> kg
 
     out.onGround = fdm_->GetGroundReactions()->GetWOW();
+
+    const JSBSim::FGMatrix33& tb2ec = prop->GetTb2ec(); // body -> ECEF
+    for (unsigned r = 1; r <= 3; ++r)
+        for (unsigned c = 1; c <= 3; ++c) out.rotationBodyToEcef[(r - 1) * 3 + (c - 1)] = tb2ec(r, c);
 }
 
 PropertyHandle JsbsimModel::property(std::string_view path) {

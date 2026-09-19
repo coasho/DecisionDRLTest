@@ -58,3 +58,16 @@ if(FSIM_BUILD_TESTS)
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 endif()
+
+# ---------------------------------------------------------------------------
+# VulkanSceneGraph stack (MIT) - viewer builds only. Built and installed by the
+# superbuild in deps/ (see deps/CMakeLists.txt); found through CMAKE_PREFIX_PATH.
+# ---------------------------------------------------------------------------
+if(FSIM_WITH_RENDER)
+    find_package(vsg 1.1.14 REQUIRED)
+    find_package(vsgXchange REQUIRED)
+    find_package(vsgImGui REQUIRED)
+    message(STATUS "flightsim: viewer enabled (vsg ${vsg_VERSION})")
+else()
+    message(STATUS "flightsim: headless build (FSIM_WITH_RENDER=OFF)")
+endif()

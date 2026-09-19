@@ -21,3 +21,6 @@ __pycache__/
 *.log
 *.fsrec
 /runs/
+
+# Dear ImGui layout files
+imgui.ini

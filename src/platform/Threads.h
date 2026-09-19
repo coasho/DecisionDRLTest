@@ -18,4 +18,12 @@ void setCurrentThreadName(std::string_view name) noexcept;
 /// false if the OS refused. Used for simulation workers (design 12.2).
 bool pinCurrentThreadToCore(unsigned logicalCore) noexcept;
 
+/// Declare the process per-monitor-DPI aware so window client sizes are in
+/// physical pixels and match the Vulkan swapchain. Must be called before any
+/// window is created; best effort on older Windows. Returns false if refused.
+bool enableHighDpiAwareness() noexcept;
+
+/// Display scale factor of the primary monitor (1.0 = 96 dpi, 1.5 = 150 %).
+double systemDpiScale() noexcept;
+
 } // namespace fsim::platform

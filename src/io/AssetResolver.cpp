@@ -41,7 +41,7 @@ std::optional<fs::path> AssetResolver::jsbsimRoot(const fs::path& explicitRoot) 
         return std::nullopt;
     }
     for (const auto& base : paths_) {
-        for (const fs::path candidate : {base / "jsbsim", base}) {
+        for (const fs::path& candidate : {base / "jsbsim", base}) {
             if (looksLikeJsbsimRoot(candidate)) return fs::weakly_canonical(candidate, ec);
         }
     }
