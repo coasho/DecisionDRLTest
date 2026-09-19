@@ -28,7 +28,7 @@ const char* CameraController::modeName(Mode m) noexcept {
 void CameraController::setMode(Mode mode) {
     if (mode == mode_) return;
     mode_ = mode;
-    haveEye_ = false;
+    haveFwd_ = false;
     if (mode_ == Mode::Orbit) {
         // Resume the trackball from wherever the chase camera left the view.
         trackball_->setViewpoint(vsg::LookAt::create(lookAt_->eye, lookAt_->center, lookAt_->up), 0.0);
@@ -49,22 +49,24 @@ void CameraController::update(const sim::VehicleState& target, double dtSeconds)
         return; // the trackball owns the view
 
     case Mode::Chase: {
-        // Behind along the horizontal projection of the body x axis, above along local up.
+        // Behind along the horizontal projection of the body x axis, above along
+        // local up. The eye is rigidly attached to the (already interpolated)
+        // vehicle position so the eye-target distance never fluctuates; only the
+        // viewing *direction* is smoothed, which damps heading wobble.
         vsg::dvec3 fwd = bodyAxisEcef(target, 0);
         fwd = fwd - up * vsg::dot(fwd, up);
         if (vsg::length(fwd) < 1e-6) fwd = bodyAxisEcef(target, 1);
         fwd = vsg::normalize(fwd);
 
-        const vsg::dvec3 desiredEye = pos - fwd * behind_ + up * above_;
-        if (!haveEye_) {
-            smoothedEye_ = desiredEye;
-            haveEye_ = true;
+        if (!haveFwd_) {
+            smoothedFwd_ = fwd;
+            haveFwd_ = true;
         } else {
-            // Critically damped-ish exponential smoothing, ~0.25 s time constant.
-            const double a = 1.0 - std::exp(-dtSeconds / 0.12);
-            smoothedEye_ = smoothedEye_ + (desiredEye - smoothedEye_) * a;
+            const double a = 1.0 - std::exp(-dtSeconds / 0.35);
+            smoothedFwd_ = vsg::normalize(smoothedFwd_ + (fwd - smoothedFwd_) * a);
+            smoothedFwd_ = vsg::normalize(smoothedFwd_ - up * vsg::dot(smoothedFwd_, up));
         }
-        lookAt_->eye = smoothedEye_;
+        lookAt_->eye = pos - smoothedFwd_ * behind_ + up * above_;
         lookAt_->center = pos;
         lookAt_->up = up;
         return;

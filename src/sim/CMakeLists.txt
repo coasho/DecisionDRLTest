@@ -2,6 +2,7 @@
 # module that includes JSBSim headers (design rule 5.2), and only in .cpp files
 # plus JsbsimModel.h.
 add_library(fsim_sim STATIC
+    Attitude.h
     ControlInputs.h
     FlightModel.h
     FlightModel.cpp

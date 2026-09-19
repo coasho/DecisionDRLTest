@@ -7,4 +7,7 @@ add_library(fsim_platform STATIC
 add_library(fsim::platform ALIAS fsim_platform)
 
 target_include_directories(fsim_platform PUBLIC ${CMAKE_SOURCE_DIR}/src)
+if(WIN32)
+    target_link_libraries(fsim_platform PUBLIC winmm)
+endif()
 fsim_set_warnings(fsim_platform)

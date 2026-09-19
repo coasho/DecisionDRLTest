@@ -37,6 +37,7 @@ void SimRunner::stop() {
 
 void SimRunner::loop() {
     platform::setCurrentThreadName("fsim-sim-runner");
+    platform::requestHighResolutionTimer();
     using clock = platform::Clock::clock;
 
     std::vector<ControlInputs> inputs(pool_->size());
@@ -76,7 +77,11 @@ void SimRunner::loop() {
             windowSteps = 0;
             windowStart = now;
         }
-        std::this_thread::sleep_until(next);
+        // Windows sleeps are coarse (1-15 ms); sleep until ~2 ms before the
+        // deadline, then spin, so snapshots land on an even 60 Hz grid.
+        const auto spinFrom = next - std::chrono::milliseconds(2);
+        if (clock::now() < spinFrom) std::this_thread::sleep_until(spinFrom);
+        while (clock::now() < next) std::this_thread::yield();
     }
 }
 

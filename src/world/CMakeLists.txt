@@ -6,7 +6,9 @@ add_library(fsim_world STATIC
     VehicleVisuals.cpp
     CameraController.h
     CameraController.cpp
-    Frames.h)
+    Frames.h
+    Interpolator.h
+    Interpolator.cpp)
 add_library(fsim::world ALIAS fsim_world)
 
 target_include_directories(fsim_world PUBLIC ${CMAKE_SOURCE_DIR}/src)

@@ -36,12 +36,22 @@ public:
     }
 
     /// Consumer: latest published batch, or nullptr if nothing new since the
-    /// last call. The returned pointer stays valid until the next acquire().
+    /// last call. Pointers returned earlier (and current()) stay valid until an
+    /// acquire() that returns non-null: the read slot only changes when there
+    /// is something new, so the producer can never write into a slot the
+    /// consumer is still reading.
     const SnapshotBatch* acquire() noexcept {
-        const int idx = latest_.exchange(readIndex_, std::memory_order_acq_rel);
-        readIndex_ = idx;
+        // The slot referenced by `latest_` is owned by nobody until exchanged,
+        // so peeking at its sequence is safe; the producer only writes its own
+        // write slot.
+        // After a swap, `latest_` refers to the consumer's *previous* slot, whose
+        // older sequence must not be mistaken for new data: compare monotonically.
+        const int peek = latest_.load(std::memory_order_acquire);
+        const std::uint64_t seq = slots_[peek].sequence;
+        if (seq <= lastSeen_) return nullptr;
+        readIndex_ = latest_.exchange(readIndex_, std::memory_order_acq_rel);
         const SnapshotBatch& b = slots_[readIndex_];
-        if (b.sequence == 0 || b.sequence == lastSeen_) return nullptr;
+        if (b.sequence <= lastSeen_) return nullptr; // producer raced us with the same data: keep ours
         lastSeen_ = b.sequence;
         return &b;
     }

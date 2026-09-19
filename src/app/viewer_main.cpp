@@ -20,6 +20,7 @@
 #include "ui/ViewerControls.h"
 #include "world/CameraController.h"
 #include "world/Earth.h"
+#include "world/Interpolator.h"
 #include "world/VehicleVisuals.h"
 
 #include <vsgImGui/RenderImGui.h>
@@ -27,9 +28,12 @@
 #include <vsgImGui/SendEventsToImGui.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <tuple>
+#include <vector>
 
 using namespace fsim;
 
@@ -53,6 +57,8 @@ struct ViewerOptions {
 
     render::ViewerSettings window;
     int cameraMode = 0; // 0 chase, 1 orbit, 2 overview
+    bool probe = false;       // print motion-smoothness statistics and exit after ~5 s
+    bool interpolate = true;  // --no-interpolate reproduces sample-and-hold for comparison
     bool help = false;
 };
 
@@ -76,6 +82,8 @@ void usage(const char* prog) {
         "  --width <px> --height <px> --fullscreen --msaa <1|2|4|8> --fov <deg>\n"
         "  --debug-layer            Vulkan validation layer\n"
         "  --camera chase|orbit|overview   initial camera (chase)\n"
+        "  --probe                  print motion smoothness statistics after ~5 s and exit\n"
+        "  --no-interpolate         draw raw snapshots (sample-and-hold) instead of interpolating\n"
         "  --log-level <lvl>\n"
         "Keys: space pause, . step, tab next vehicle, c camera, -/= zoom, [ ] time factor, l list, m monitor, esc quit\n",
         prog);
@@ -124,7 +132,9 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--camera") {
                 const std::string v = next();
                 o.cameraMode = v == "orbit" ? 1 : v == "overview" ? 2 : 0;
-            } else if (a == "--log-level") {
+            } else if (a == "--probe") o.probe = true;
+            else if (a == "--no-interpolate") o.interpolate = false;
+            else if (a == "--log-level") {
                 const std::string v = next();
                 log::setLevel(v == "trace" ? log::Level::Trace : v == "debug" ? log::Level::Debug : v == "warn" ? log::Level::Warn : v == "error" ? log::Level::Error : log::Level::Info);
             } else {
@@ -231,22 +241,32 @@ int main(int argc, char** argv) {
     runner->start();
 
     // --- Frame loop ------------------------------------------------------------
+    world::Interpolator interpolator(opt.vehicles);
     const sim::SnapshotBatch* batch = runner->snapshots().current();
+    if (batch) interpolator.push(*batch);
     while (viewer.active() && !controls->quit.load(std::memory_order_relaxed)) {
         // Controls -> sim
-        runner->setPaused(controls->paused.load(std::memory_order_relaxed));
-        runner->setTimeFactor(controls->timeFactor.load(std::memory_order_relaxed));
+        const bool paused = controls->paused.load(std::memory_order_relaxed);
+        const double timeFactor = controls->timeFactor.load(std::memory_order_relaxed);
+        runner->setPaused(paused);
+        runner->setTimeFactor(timeFactor);
         if (controls->singleStep.exchange(false)) runner->singleStep();
 
-        // Sim -> scene
-        if (const auto* fresh = runner->snapshots().acquire()) batch = fresh;
+        // Sim -> scene: snapshots arrive at the agent rate; the interpolator turns
+        // them into smooth per-frame states against a render-side sim clock.
+        if (const auto* fresh = runner->snapshots().acquire()) {
+            batch = fresh;
+            interpolator.push(*fresh);
+        }
         const int selected = std::clamp(controls->selectedVehicle.load(std::memory_order_relaxed), 0, static_cast<int>(opt.vehicles) - 1);
         if (batch) {
-            visuals.update(Span<const sim::VehicleState>(batch->states));
+            interpolator.update(viewer.frameSeconds(), timeFactor, paused);
+            const auto& states = opt.interpolate ? interpolator.states() : batch->states;
+            visuals.update(Span<const sim::VehicleState>(states));
             visuals.setSelected(selected);
             camera.setMode(static_cast<world::CameraController::Mode>(controls->cameraMode.load(std::memory_order_relaxed)));
             if (const double z = controls->cameraZoom.exchange(1.0); z != 1.0) camera.zoom(z);
-            camera.update(batch->states[static_cast<std::size_t>(selected)], viewer.frameSeconds());
+            camera.update(states[static_cast<std::size_t>(selected)], viewer.frameSeconds());
             controls->simTime.store(batch->simTime, std::memory_order_relaxed);
             controls->snapshotSequence.store(batch->sequence, std::memory_order_relaxed);
         }
@@ -256,6 +276,40 @@ int main(int argc, char** argv) {
         controls->simThroughput.store(runner->throughput(), std::memory_order_relaxed);
 
         if (!viewer.frame()) break;
+
+        if (opt.probe && batch) {
+            // Motion-smoothness probe: per-frame speed of the followed vehicle as seen
+            // by the renderer (should be near-constant), and eye-target distance.
+            static std::vector<double> speeds, distances;
+            static vsg::dvec3 lastPos;
+            static bool havePos = false;
+            static int warmup = 60; // skip start-up frames (clock snap, vsync not yet engaged)
+            if (warmup > 0) { --warmup; havePos = false; }
+            const auto& st = (opt.interpolate ? interpolator.states() : batch->states)[static_cast<std::size_t>(selected)];
+            const vsg::dvec3 pos(st.positionEcef[0], st.positionEcef[1], st.positionEcef[2]);
+            if (havePos && viewer.frameSeconds() > 0.0) {
+                speeds.push_back(vsg::length(pos - lastPos) / viewer.frameSeconds());
+                distances.push_back(vsg::length(viewer.lookAt()->eye - pos));
+            }
+            lastPos = pos;
+            havePos = true;
+            if (speeds.size() >= 600) {
+                auto stats = [](const std::vector<double>& v) {
+                    double mean = 0, m2 = 0, lo = 1e300, hi = -1e300;
+                    for (double x : v) { mean += x; lo = std::min(lo, x); hi = std::max(hi, x); }
+                    mean /= static_cast<double>(v.size());
+                    for (double x : v) m2 += (x - mean) * (x - mean);
+                    return std::tuple{mean, std::sqrt(m2 / static_cast<double>(v.size())), lo, hi};
+                };
+                const auto [sm, ss, slo, shi] = stats(speeds);
+                const auto [dm, ds, dlo, dhi] = stats(distances);
+                std::printf("probe (%s, %zu frames): apparent speed mean %.2f m/s sd %.2f min %.2f max %.2f | "
+                            "eye-target mean %.2f m sd %.4f min %.2f max %.2f | sim %.0f veh-steps/s simTime %.2f tas %.1f fps %.0f\n",
+                            opt.interpolate ? "interpolated" : "sample-and-hold", speeds.size(), sm, ss, slo, shi, dm, ds, dlo, dhi,
+                            runner->throughput(), batch->simTime, st.airspeedTrueMs, viewer.fps());
+                break;
+            }
+        }
     }
 
     runner->stop();

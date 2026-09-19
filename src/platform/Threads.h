@@ -23,6 +23,10 @@ bool pinCurrentThreadToCore(unsigned logicalCore) noexcept;
 /// window is created; best effort on older Windows. Returns false if refused.
 bool enableHighDpiAwareness() noexcept;
 
+/// Ask the OS for 1 ms scheduler/timer granularity for this process (Windows
+/// timeBeginPeriod). Idempotent; released at process exit.
+void requestHighResolutionTimer() noexcept;
+
 /// Display scale factor of the primary monitor (1.0 = 96 dpi, 1.5 = 150 %).
 double systemDpiScale() noexcept;
 

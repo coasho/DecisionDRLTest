@@ -4,6 +4,7 @@
 
 #include "core/Log.h"
 #include "core/Rng.h"
+#include "sim/Attitude.h"
 #include "sim/GroundProvider.h"
 #include "sim/JsbsimModel.h"
 #include "sim/VehiclePool.h"
@@ -193,4 +194,30 @@ TEST_CASE("trajectories are bit-identical across worker counts", "[sim][jsbsim][
     }
     // Vehicles really are different from each other (different ICs / ailerons).
     CHECK_FALSE(bitIdentical(serial[0], serial[1]));
+}
+
+TEST_CASE("quaternion helper reproduces JSBSim's body-to-ECEF matrix", "[sim][jsbsim][attitude]") {
+    log::setLevel(log::Level::Warn);
+    auto ground = std::make_shared<FlatGround>(0.0);
+    JsbsimModel model(kDt, ground);
+    InitialConditions ic;
+    ic.headingDeg = 123.0;
+    ic.pitchDeg = 4.0;
+    ic.rollDeg = -17.0;
+    REQUIRE(model.load(AircraftSpec{"c172x", kRoot}, ic));
+    ControlInputs in;
+    in.setThrottleAll(0.7);
+    in.aileron = 0.2;
+    for (int i = 0; i < 90; ++i) model.step(in); // a rolling, turning state
+    VehicleState s;
+    model.state(s);
+
+    double R[9];
+    attitude::bodyToEcefFromQuaternion(s.attitudeEcefToBody, R);
+    for (int i = 0; i < 9; ++i) CHECK(std::abs(R[i] - s.rotationBodyToEcef[i]) < 1e-9);
+
+    // slerp end points are the inputs; the midpoint is a unit quaternion.
+    double q[4];
+    attitude::slerp(s.attitudeEcefToBody, s.attitudeEcefToBody, 0.5, q);
+    for (int i = 0; i < 4; ++i) CHECK(std::abs(q[i] - s.attitudeEcefToBody[i]) < 1e-12);
 }

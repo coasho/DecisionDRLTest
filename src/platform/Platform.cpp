@@ -10,6 +10,7 @@
 #ifdef _WIN32
 #    include <windows.h>
 #    include <shlobj.h>
+#    include <timeapi.h>
 #endif
 
 namespace fsim::platform {
@@ -80,6 +81,16 @@ bool enableHighDpiAwareness() noexcept {
     return SetProcessDPIAware() != 0;
 #else
     return false;
+#endif
+}
+
+void requestHighResolutionTimer() noexcept {
+#ifdef _WIN32
+    static bool done = false;
+    if (done) return;
+    done = true;
+    timeBeginPeriod(1);
+    std::atexit([] { timeEndPeriod(1); });
 #endif
 }
 

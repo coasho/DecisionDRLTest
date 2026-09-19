@@ -42,8 +42,8 @@ private:
     Mode mode_ = Mode::Chase;
     double behind_ = 40.0;
     double above_ = 12.0;
-    vsg::dvec3 smoothedEye_;
-    bool haveEye_ = false;
+    vsg::dvec3 smoothedFwd_;
+    bool haveFwd_ = false;
 };
 
 } // namespace fsim::world
