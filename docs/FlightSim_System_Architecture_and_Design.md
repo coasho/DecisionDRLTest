@@ -196,7 +196,7 @@ sequenceDiagram
 
 ### 6.5 Budget per `step()` (64 environments × 1 vehicle, frame\_skip 4, 16 workers)
 
-JSBSim stepping \~0.6 ms (64 × 4 steps ÷ 16 workers at \~40 µs/step), task and observation assembly < 0.2 ms, call overhead negligible: under 1 ms per call, i.e. \~250,000 vehicle-steps/s. Vision observations add GPU render + readback time and are the dominant cost when enabled (section 8.4).
+Measured 2026-09-19 (M0 build, Release, 16-thread desktop, c172x, frame-skip 4): one JSBSim step costs \~6 µs, not the 40 µs assumed in the first draft. 64 vehicles run at 148,000 vehicle-steps/s on one worker and 1,138,000 on 16 workers (`step()` mean 0.225 ms), i.e. 11× the section 2 target before any tuning; the f16 runs at 757,000 on 6 workers. Vision observations add GPU render + readback time and will be the dominant cost when enabled (section 8.4).
 
 ## 7. Flight dynamics integration (JSBSim)
 
@@ -429,7 +429,7 @@ flightsim/
 | GDAL | `tools/tile_builder` only | separate exe | not shipped with the platform |
 | Vulkan loader | system | `vulkan-1.dll` from the driver | 0 |
 
-Headless `fsim.dll`: \~5 MB. Viewer executable: \~9–12 MB. Total install well under the 20 MB target; LTO and `/OPT:REF,ICF` on for release.
+Headless `fsim.dll`: \~5 MB. Viewer executable: \~9–12 MB. Total install well under the 20 MB target; LTO and `/OPT:REF,ICF` on for release. M0 note: JSBSim is built from the submodule's own `src/` CMake tree (it must ship its data tree anyway) and Catch2 is fetched at configure time; the vcpkg manifest arrives with the VSG dependencies in M3.
 
 ### 11.3 Platform notes (Windows 10/11 x64)
 
@@ -453,7 +453,7 @@ Performance means training throughput: vehicle-steps per second with the trainer
 
 | Metric | Target | Measured by | Fails CI when |
 | --- | --- | --- | --- |
-| Headless throughput, state observations | ≥ 100,000 vehicle-steps/s on 16 physical cores (c172x); ≥ 60,000 (f16, more complex FCS) | `flightsim.exe --benchmark`, CSV | −10 % vs. last release |
+| Headless throughput, state observations | ≥ 100,000 vehicle-steps/s on 16 physical cores (c172x); ≥ 60,000 (f16). Measured at M0: 1,138,000 (c172x, 16 workers), 757,000 (f16, 6 workers) | `flightsim.exe --benchmark`, CSV | −10 % vs. last release |
 | `step()` overhead excluding JSBSim | < 2 µs per vehicle (task + observation assembly) | profiler scopes | > 4 µs |
 | Worker scaling | ≥ 0.85 × linear from 1 to 16 workers | benchmark sweep | < 0.7 |
 | Shared-memory server round trip | < 50 µs per step excluding simulation | benchmark with a dummy trainer process | > 100 µs |
@@ -544,7 +544,7 @@ Each major choice, its alternatives and the driver that decided it; status "acce
 | ADR-6 | Full-Earth rendering via VSG's own `vsg::TileDatabase` (imagery + elevation layers) from a self-hosted tile pyramid | vsgCs / Cesium 3D Tiles, own PagedLOD engine | owner decision (VSG mandatory, no Cesium), lightweight | accepted |
 | ADR-7 | Physics ground from the same elevation tiles, sampled on the CPU by `io::TilePyramid` | separate DEM source; height from rendered mesh | consistency, headless, determinism | proposed |
 | ADR-8 | Vision observations via offscreen VSG views, batched, host readback | per-sensor windows, separate render process | performance | proposed |
-| ADR-9 | VSG object model and serialisation (`.vsgt`) as the codebase-wide base, including scenarios and manifests | own model, JSON everywhere | one model, VSG mandatory | proposed |
+| ADR-9 | VSG object model and serialisation (`.vsgt`) in `world`, `render`, `ui` and for scenarios/manifests; `core`, `sim` and `env` are plain C++ so the headless build has no VSG/Vulkan dependency (revised at M0) | own model, JSON everywhere | one model, VSG mandatory | proposed |
 | ADR-10 | `FlightModel` interface hides JSBSim; SI + ECEF metres at the boundary | JSBSim types used directly | extensibility, testability | proposed |
 | ADR-11 | ECEF double world frame; `TileDatabase` handles Earth precision; floating origin for vehicle subgraphs | flat local tangent plane | full-Earth correctness | proposed |
 | ADR-12 | Windows x64 / MSVC 2022 only for v1; Win32 confined to `platform/` | Linux from day one | owner decision | accepted |
@@ -559,7 +559,7 @@ Each major choice, its alternatives and the driver that decided it; status "acce
 Owner decisions so far are recorded in section 1; the remaining questions below change scope or a proposed ADR.
 
 - [ ] Tile data: build a global 90 m pyramid plus 30 m regional pyramids with `tools/tile_builder` (fully self-hosted, offline), or start from public XYZ imagery (OpenStreetMap/Bing) with elevation only for training regions?
-- [ ] Trainer language: will the first trainer be C++ (LibTorch or custom) or Rust via the C ABI? This decides which example is built first in M2.
+- [ ] Trainer language: decided 2026-09-19 — C++. The first example trainer in M2 is C++ (\`examples/minimal\_trainer\`, then the LibTorch PPO); the Rust C ABI example follows later.
 - [ ] First tasks: which two or three RL tasks should M2 ship with (e.g. altitude/heading hold, waypoint following, pursuit–evasion) and with which stock aircraft?
 - [ ] Vision in v1: are image observations required for the first release (M4 as planned) or can they slip to post-v1 to bring the release forward by \~3 weeks?
 - [ ] Linux timing: post-v1 (as planned) or before the public release, given that most training clusters run Linux?
