@@ -7,6 +7,7 @@
 
 #include <FGFDMExec.h>
 #include <initialization/FGInitialCondition.h>
+#include <initialization/FGTrim.h>
 #include <input_output/FGGroundCallback.h>
 #include <input_output/FGPropertyManager.h>
 #include <math/FGColumnVector3.h>
@@ -72,6 +73,8 @@ private:
 };
 
 bool finite(double v) noexcept { return std::isfinite(v); }
+
+constexpr double kGroundSpawnCgHeightM = 1.5; // CG start height for on-ground spawns before ground trim
 
 #ifdef _WIN32
 constexpr const char* kNullDevice = "NUL";
@@ -141,6 +144,7 @@ bool JsbsimModel::load(const AircraftSpec& aircraft, const InitialConditions& ic
             LOG_ERROR("sim") << "JSBSim RunIC failed for '" << aircraft.name << "'";
             return false;
         }
+        settleOnGround(ic);
     } catch (const std::exception& e) {
         LOG_ERROR("sim") << "JSBSim exception in initial conditions: " << e.what();
         return false;
@@ -160,6 +164,7 @@ bool JsbsimModel::reset(const InitialConditions& ic) {
         applyInitialConditions(ic);
         // Mode 0: reinitialise models and run the IC pass (design 7.2).
         fdm_->ResetToInitialConditions(0);
+        settleOnGround(ic);
     } catch (const std::exception& e) {
         LOG_ERROR("sim") << "JSBSim exception on reset: " << e.what();
         return false;
@@ -177,13 +182,26 @@ void JsbsimModel::applyInitialConditions(const InitialConditions& ic) {
     IC->SetVtrueKtsIC(units::metresPerSecondToKnots(ic.airspeedTrueMs));
 
     if (ic.onGround) {
-        // Let JSBSim place the gear on the provider's terrain.
+        // Start with the CG a gear-height above the provider's terrain; the
+        // ground trim after RunIC() then settles the gear onto the local slope.
+        // (AGL 0 would bury the gear and launch the aircraft off its springs.)
         const double terrainM = ground_->heightAboveEllipsoidM(units::degreesToRadians(ic.latitudeDeg),
                                                                units::degreesToRadians(ic.longitudeDeg));
         IC->SetTerrainElevationFtIC(units::metresToFeet(terrainM));
-        IC->SetAltitudeAGLFtIC(0.0);
+        IC->SetAltitudeAGLFtIC(units::metresToFeet(kGroundSpawnCgHeightM));
     } else {
         IC->SetAltitudeASLFtIC(units::metresToFeet(ic.altitudeMslM));
+    }
+}
+
+void JsbsimModel::settleOnGround(const InitialConditions& ic) {
+    if (!ic.onGround) return;
+    // JSBSim's ground trim: adjusts altitude, pitch and roll until the gear
+    // forces balance the weight on the terrain under each wheel.
+    try {
+        fdm_->DoTrim(JSBSim::tGround);
+    } catch (const std::exception& e) {
+        LOG_WARN("sim") << "ground trim failed (" << e.what() << "); the vehicle will settle dynamically";
     }
 }
 
@@ -230,11 +248,25 @@ bool JsbsimModel::checkDivergence() {
     const auto prop = fdm_->GetPropagate();
     const auto& loc = prop->GetLocation();
     const auto& uvw = prop->GetUVW();
+    const double altM = units::feetToMetres(prop->GetAltitudeASL());
+    const double speedMs = units::feetToMetres(uvw.Magnitude());
+    // Non-finite, or physically impossible for an aircraft: catches the onset of
+    // a numerical blow-up a few steps in instead of after the values overflow.
     const bool ok = finite(loc(1)) && finite(loc(2)) && finite(loc(3)) && finite(uvw(1)) && finite(uvw(2)) &&
-                    finite(uvw(3)) && finite(prop->GetAltitudeASL());
+                    finite(uvw(3)) && finite(altM) && speedMs < 5000.0 && altM > -1000.0 && altM < 200000.0;
     if (!ok && !diverged_) {
         diverged_ = true;
-        LOG_WARN("sim") << "vehicle diverged (non-finite state) at step " << stepCount_;
+        LOG_WARN("sim") << "vehicle diverged (non-finite state) at step " << stepCount_ << "; last good state: lat "
+                        << lastGood_.latDeg << " lon " << lastGood_.lonDeg << " alt " << lastGood_.altM << " m, agl "
+                        << lastGood_.aglM << " m, |v| " << lastGood_.speedMs << " m/s, on ground " << lastGood_.onGround;
+    } else if (ok) {
+        // Keep a compact copy of the last finite state for the divergence report.
+        lastGood_.latDeg = prop->GetGeodLatitudeDeg();
+        lastGood_.lonDeg = prop->GetLongitudeDeg();
+        lastGood_.altM = altM;
+        lastGood_.aglM = units::feetToMetres(prop->GetDistanceAGL());
+        lastGood_.speedMs = speedMs;
+        lastGood_.onGround = fdm_->GetGroundReactions()->GetWOW();
     }
     return !diverged_;
 }

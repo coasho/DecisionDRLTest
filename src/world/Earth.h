@@ -1,5 +1,7 @@
 #pragma once
 
+#include "world/Terrain.h"
+
 #include <vsg/all.h>
 
 #include <string>
@@ -8,16 +10,21 @@ namespace fsim::world {
 
 /// Where the Earth's imagery and elevation tiles come from (design 8.2).
 struct EarthSettings {
-    enum class Source { None, OpenStreetMap, Bing, Custom };
-    Source source = Source::OpenStreetMap;
+    enum class Source { None, OpenStreetMap, EsriWorldImagery, Bing, Custom };
+    Source source = Source::EsriWorldImagery;
 
     std::string bingKey;                 ///< Source::Bing
     std::string bingImagerySet = "Aerial";
 
-    // Source::Custom: XYZ templates with {z}/{x}/{y}, file:// or http(s)://
+    // Source::Custom: XYZ template with {z}/{x}/{y}, file:// or http(s)://
     std::string imageryUrl;
-    std::string elevationUrl;            ///< optional 16-bit PNG heightmaps
     unsigned maxLevel = 17;
+
+    // Elevation (any imagery source): XYZ template + encoding. Empty = smooth ellipsoid.
+    std::string elevationUrl;
+    ElevationEncoding elevationEncoding = ElevationEncoding::Terrarium;
+    unsigned elevationMeshDimension = 64; ///< mesh vertices per tile edge (elevation texels are downsampled to this)
+    unsigned elevationMaxLevel = 15;      ///< deepest level the elevation pyramid has (AWS Terrarium: 15); imagery is capped to it
     bool originTopLeft = true;           ///< XYZ (true) vs TMS (false) row order
     std::string projection = "EPSG:3857";
     double lodTransitionScreenHeightRatio = 0.25;

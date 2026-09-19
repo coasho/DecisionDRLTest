@@ -49,7 +49,7 @@ void SimRunner::loop() {
         const bool doStep = !paused_.load(std::memory_order_relaxed) || singleStep_.exchange(false);
         if (doStep) {
             const SnapshotBatch* previous = snapshots_.current();
-            if (controller_ && previous) controller_(*previous, inputs);
+            if (controller_ && previous) controller_(*previous, *pool_, inputs);
 
             pool_->step(Span<const ControlInputs>(inputs), frameSkip_);
 

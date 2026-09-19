@@ -105,13 +105,19 @@ void MonitorGui::drawVehicleList() const {
             std::snprintf(label, sizeof label, "%zu", i);
             if (ImGui::Selectable(label, static_cast<int>(i) == selected, ImGuiSelectableFlags_SpanAllColumns))
                 controls_->selectedVehicle.store(static_cast<int>(i), std::memory_order_relaxed);
+            if (s.diverged) {
+                for (int c = 1; c <= 5; ++c) { ImGui::TableSetColumnIndex(c); ImGui::TextUnformatted("-"); }
+                ImGui::TableSetColumnIndex(6);
+                ImGui::TextUnformatted("DIVERGED");
+                continue;
+            }
             ImGui::TableSetColumnIndex(1); ImGui::Text("%7.0f", s.altitudeMslM);
             ImGui::TableSetColumnIndex(2); ImGui::Text("%7.0f", s.altitudeAglM);
             ImGui::TableSetColumnIndex(3); ImGui::Text("%5.1f", s.airspeedTrueMs);
             ImGui::TableSetColumnIndex(4); ImGui::Text("%5.0f", units::radiansToDegrees(s.eulerRad[2]));
             ImGui::TableSetColumnIndex(5); ImGui::Text("%5.0f", units::radiansToDegrees(s.eulerRad[0]));
             ImGui::TableSetColumnIndex(6);
-            ImGui::Text("%s", s.diverged ? "DIVERGED" : s.onGround ? "ground" : "airborne");
+            ImGui::TextUnformatted(s.onGround ? "ground" : "airborne");
         }
         ImGui::EndTable();
     }

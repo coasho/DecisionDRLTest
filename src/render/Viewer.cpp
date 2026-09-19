@@ -68,7 +68,7 @@ bool Viewer::setScene(vsg::ref_ptr<vsg::Node> scene, vsg::ref_ptr<vsg::Ellipsoid
     commandGraph->addChild(renderGraph);
 
     auto view = vsg::View::create(camera_, root_);
-    view->addChild(vsg::createHeadlight());
+    if (settings_.headlight) view->addChild(vsg::createHeadlight());
     renderGraph->addChild(view);
     if (imguiOverlay) renderGraph->addChild(imguiOverlay); // same render pass, drawn last
 

@@ -19,8 +19,9 @@ namespace fsim::sim {
 /// directly with no clock.
 class SimRunner {
 public:
-    /// Called on the sim thread before every step to produce the controls.
-    using Controller = std::function<void(const SnapshotBatch& previous, std::vector<ControlInputs>& out)>;
+    /// Called on the sim thread before every step to produce the controls. The
+    /// pool is passed so the controller can reset diverged vehicles in place.
+    using Controller = std::function<void(const SnapshotBatch& previous, VehiclePool& pool, std::vector<ControlInputs>& out)>;
 
     SimRunner(std::unique_ptr<VehiclePool> pool, int frameSkip, Controller controller);
     ~SimRunner();

@@ -15,6 +15,7 @@ struct ViewerSettings {
     bool debugLayer = false;   ///< VK_LAYER_KHRONOS_validation
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_4_BIT;
     double fieldOfViewDeg = 30.0;
+    bool headlight = true;     ///< off when the scene brings its own lights (sun)
 };
 
 /// One window, one vsg::Viewer, one camera, one command graph: scene first,

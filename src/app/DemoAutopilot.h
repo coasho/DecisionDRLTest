@@ -14,7 +14,7 @@ namespace fsim::app {
 /// scenario tasks and trained policies replace it (design 9.1).
 class DemoAutopilot {
 public:
-    DemoAutopilot(std::size_t vehicles, double throttle) : throttle_(throttle) {
+    DemoAutopilot(std::size_t vehicles, double throttle, bool parked = false) : throttle_(throttle), parked_(parked) {
         targets_.resize(vehicles);
         for (std::size_t i = 0; i < vehicles; ++i) {
             // Alternate gentle left/right turns of varying bank so formations spread out.
@@ -24,11 +24,23 @@ public:
         }
     }
 
+    /// Forget the held altitude of a vehicle that was reset.
+    void forget(std::size_t i) {
+        if (i < targets_.size()) targets_[i].altitudeM = 0.0;
+    }
+
     void compute(const std::vector<sim::VehicleState>& states, std::vector<sim::ControlInputs>& out) {
         constexpr double kDeg = 3.14159265358979323846 / 180.0;
         for (std::size_t i = 0; i < states.size() && i < out.size(); ++i) {
             const auto& s = states[i];
             auto& t = targets_[i];
+            if (parked_) { // sit on the terrain: idle, brakes on, gear down
+                sim::ControlInputs& c = out[i];
+                c = sim::ControlInputs{};
+                c.brakeLeft = c.brakeRight = 1.0;
+                c.gearDown = 1.0;
+                continue;
+            }
             if (t.altitudeM <= 0.0) t.altitudeM = s.altitudeMslM;
 
             // Outer loop: altitude -> pitch target (clamped), inner: pitch/roll -> surfaces.
@@ -54,6 +66,7 @@ private:
     };
     std::vector<Target> targets_;
     double throttle_;
+    bool parked_;
 };
 
 } // namespace fsim::app

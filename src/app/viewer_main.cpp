@@ -8,6 +8,7 @@
 #include "app/DemoAutopilot.h"
 #include "core/Log.h"
 #include "core/Rng.h"
+#include "core/Units.h"
 #include "io/AssetResolver.h"
 #include "platform/Threads.h"
 #include "render/Viewer.h"
@@ -21,6 +22,8 @@
 #include "world/CameraController.h"
 #include "world/Earth.h"
 #include "world/Interpolator.h"
+#include "world/Sky.h"
+#include "world/Terrain.h"
 #include "world/VehicleVisuals.h"
 
 #include <vsgImGui/RenderImGui.h>
@@ -52,12 +55,17 @@ struct ViewerOptions {
     double latitudeDeg = 37.6188, longitudeDeg = -122.375, altitudeM = 1500.0, spreadDeg = 0.03;
 
     world::EarthSettings earth;
+    unsigned terrainZoom = 12;   // physics ground sampling level (~30 m/px at mid latitudes)
+    bool sun = true;             // sun + ambient light instead of the headlight
+    double sunUtcHours = -1.0;   // <0 = now
+    bool onGround = false;       // spawn parked on the terrain instead of airborne
     std::string modelPath;
     double modelScale = 1.0;
 
     render::ViewerSettings window;
     int cameraMode = 0; // 0 chase, 1 orbit, 2 overview
     bool probe = false;       // print motion-smoothness statistics and exit after ~5 s
+    int trace = -1;           // --trace <i>: print vehicle i's state once per second
     bool interpolate = true;  // --no-interpolate reproduces sample-and-hold for comparison
     bool help = false;
 };
@@ -74,7 +82,11 @@ void usage(const char* prog) {
         "  --alt <m>                spawn altitude MSL (1500)\n"
         "  --spread <deg>           spawn scatter (0.03)\n"
         "  --imagery osm|bing|none|<url template with {z}/{x}/{y}>   (osm)\n"
-        "  --elevation <url template>   16-bit PNG heightmap tiles (custom imagery only)\n"
+        "  --elevation terrarium|none|<url template>   relief from Terrarium-encoded tiles (default terrarium)\n"
+        "  --terrain-zoom <z>       tile level used for physics ground height (12)\n"
+        "  --no-sun                 headlight instead of sun + ambient lighting\n"
+        "  --sun-utc <hours>        sun position for this UTC hour (default: now)\n"
+        "  --on-ground              spawn parked on the terrain (brakes on)\n"
         "  --bing-key <key>         Bing Maps key for --imagery bing\n"
         "  --max-level <n>          custom pyramid max level (17)\n"
         "  --model <file>           glTF/OBJ vehicle model (placeholder if omitted)\n"
@@ -113,10 +125,19 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
                 const std::string v = next();
                 using S = world::EarthSettings::Source;
                 if (v == "osm") o.earth.source = S::OpenStreetMap;
+                else if (v == "esri" || v == "satellite") o.earth.source = S::EsriWorldImagery;
                 else if (v == "bing") o.earth.source = S::Bing;
                 else if (v == "none") o.earth.source = S::None;
                 else { o.earth.source = S::Custom; o.earth.imageryUrl = v; }
-            } else if (a == "--elevation") o.earth.elevationUrl = next();
+            } else if (a == "--elevation") {
+                const std::string v = next();
+                if (v == "terrarium") o.earth.elevationUrl = world::kAwsTerrariumUrl;
+                else if (v == "none") o.earth.elevationUrl.clear();
+                else o.earth.elevationUrl = v;
+            } else if (a == "--terrain-zoom") o.terrainZoom = static_cast<unsigned>(std::stoul(next()));
+            else if (a == "--no-sun") o.sun = false;
+            else if (a == "--sun-utc") o.sunUtcHours = std::stod(next());
+            else if (a == "--on-ground") o.onGround = true;
             else if (a == "--bing-key") o.earth.bingKey = next();
             else if (a == "--max-level") o.earth.maxLevel = static_cast<unsigned>(std::stoul(next()));
             else if (a == "--model") o.modelPath = next();
@@ -133,6 +154,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
                 const std::string v = next();
                 o.cameraMode = v == "orbit" ? 1 : v == "overview" ? 2 : 0;
             } else if (a == "--probe") o.probe = true;
+            else if (a == "--trace") o.trace = std::stoi(next());
             else if (a == "--no-interpolate") o.interpolate = false;
             else if (a == "--log-level") {
                 const std::string v = next();
@@ -162,6 +184,14 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    // --- Rendering (window first: the terrain ground provider uses VSG's readers) ---
+    render::Viewer viewer;
+    opt.window.title = "flightsim - " + opt.aircraft;
+    if (opt.earth.elevationUrl.empty()) opt.earth.elevationUrl = world::kAwsTerrariumUrl;
+    if (opt.earth.source == world::EarthSettings::Source::None) opt.earth.elevationUrl.clear();
+    opt.window.headlight = !opt.sun;
+    if (!viewer.create(opt.window)) return 1;
+
     // --- Simulation ------------------------------------------------------------
     io::AssetResolver assets;
     const auto root = assets.jsbsimRoot(opt.jsbsimRoot);
@@ -170,41 +200,75 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Physics ground: the same elevation tiles the renderer displays (ADR-7).
+    std::shared_ptr<sim::GroundProvider> ground;
+    std::shared_ptr<world::TileGroundProvider> terrain; // non-null when relief is on
+    if (!opt.earth.elevationUrl.empty()) {
+        auto tiles = std::make_shared<world::TileGroundProvider>(opt.earth.elevationUrl, opt.earth.elevationEncoding,
+                                                                 opt.terrainZoom, viewer.options());
+        tiles->prefetch(units::degreesToRadians(opt.latitudeDeg), units::degreesToRadians(opt.longitudeDeg),
+                        6000.0 + opt.spreadDeg * 111000.0);
+        ground = tiles;
+        terrain = tiles;
+    } else {
+        ground = std::make_shared<sim::FlatGround>(0.0);
+    }
+
     const unsigned physical = platform::physicalCoreCount();
     const unsigned workers = std::min<unsigned>(opt.workers ? opt.workers : std::max(1u, physical > 3 ? physical - 3 : 1u), opt.vehicles);
-    auto ground = std::make_shared<sim::FlatGround>(0.0);
     auto pool = std::make_unique<sim::VehiclePool>(workers);
     const sim::AircraftSpec aircraft{opt.aircraft, *root};
+    auto initialConditions = std::make_shared<std::vector<sim::InitialConditions>>();
     for (unsigned i = 0; i < opt.vehicles; ++i) {
         Rng rng = Rng::forVehicle(opt.seed, 0, i);
         sim::InitialConditions ic;
         ic.latitudeDeg = opt.latitudeDeg + rng.uniform(-opt.spreadDeg, opt.spreadDeg);
         ic.longitudeDeg = opt.longitudeDeg + rng.uniform(-opt.spreadDeg, opt.spreadDeg);
-        ic.altitudeMslM = opt.altitudeM + rng.uniform(-150.0, 150.0);
         ic.headingDeg = rng.uniform(0.0, 360.0);
-        ic.airspeedTrueMs = 58.0 + rng.uniform(-4.0, 4.0);
+        if (opt.onGround) {
+            ic.onGround = true;
+            ic.airspeedTrueMs = 0.0;
+        } else {
+            // Altitude is MSL; keep at least 300 m above the terrain under the spawn point.
+            const double terrainM = ground->heightAboveEllipsoidM(units::degreesToRadians(ic.latitudeDeg),
+                                                                  units::degreesToRadians(ic.longitudeDeg));
+            ic.altitudeMslM = std::max(opt.altitudeM + rng.uniform(-150.0, 150.0), terrainM + 300.0);
+            ic.airspeedTrueMs = 58.0 + rng.uniform(-4.0, 4.0);
+        }
         auto model = std::make_unique<sim::JsbsimModel>(opt.dt, ground);
         if (!model->load(aircraft, ic)) {
             LOG_ERROR("app") << "vehicle " << i << " failed to load";
             return 1;
         }
         pool->add(std::move(model));
+        initialConditions->push_back(ic);
     }
 
-    auto autopilot = std::make_shared<app::DemoAutopilot>(opt.vehicles, opt.throttle);
+    auto autopilot = std::make_shared<app::DemoAutopilot>(opt.vehicles, opt.throttle, opt.onGround);
     auto runner = std::make_unique<sim::SimRunner>(std::move(pool), opt.frameSkip,
-        [autopilot](const sim::SnapshotBatch& prev, std::vector<sim::ControlInputs>& out) { autopilot->compute(prev.states, out); });
+        [autopilot, initialConditions](const sim::SnapshotBatch& prev, sim::VehiclePool& vehicles, std::vector<sim::ControlInputs>& out) {
+            // A diverged vehicle is reset to its initial conditions (design 13 "Errors").
+            for (std::size_t i = 0; i < prev.states.size(); ++i) {
+                if (!prev.states[i].diverged) continue;
+                LOG_WARN("app") << "vehicle " << i << " diverged; resetting to its initial conditions";
+                vehicles.vehicle(i).reset((*initialConditions)[i]);
+                autopilot->forget(i);
+            }
+            autopilot->compute(prev.states, out);
+        });
     runner->setTimeFactor(opt.timeFactor);
     LOG_INFO("app") << opt.vehicles << " x " << opt.aircraft << " on " << workers << " worker(s), agent rate "
                     << 1.0 / (opt.dt * opt.frameSkip) << " Hz";
 
-    // --- Rendering -------------------------------------------------------------
-    render::Viewer viewer;
-    opt.window.title = "flightsim - " + opt.aircraft;
-    if (!viewer.create(opt.window)) return 1;
-
+    // --- Scene -------------------------------------------------------------------
     auto ellipsoid = vsg::EllipsoidModel::create(); // WGS-84
     auto scene = vsg::Group::create();
+    if (opt.sun) {
+        int day; double hours;
+        world::currentUtc(day, hours);
+        if (opt.sunUtcHours >= 0.0) hours = opt.sunUtcHours;
+        scene->addChild(world::createSunLight(day, hours));
+    }
     if (auto earth = world::createEarth(opt.earth, viewer.options(), ellipsoid)) scene->addChild(earth);
 
     world::VehicleVisuals::Settings visualSettings;
@@ -270,6 +334,23 @@ int main(int argc, char** argv) {
             controls->simTime.store(batch->simTime, std::memory_order_relaxed);
             controls->snapshotSequence.store(batch->sequence, std::memory_order_relaxed);
         }
+        if (opt.trace >= 0 && batch && static_cast<std::size_t>(opt.trace) < batch->states.size()) {
+            static double lastTrace = -1.0;
+            if (batch->simTime - lastTrace >= 1.0) {
+                lastTrace = batch->simTime;
+                const auto& st = batch->states[static_cast<std::size_t>(opt.trace)];
+                std::printf("trace t=%6.2f v%d lat %.5f lon %.5f alt %8.2f agl %8.2f tas %7.2f vz %7.2f roll %6.1f pitch %6.1f ground %d%s\n",
+                            batch->simTime, opt.trace, units::radiansToDegrees(st.latitudeRad), units::radiansToDegrees(st.longitudeRad),
+                            st.altitudeMslM, st.altitudeAglM, st.airspeedTrueMs, -st.velocityNedMs[2],
+                            units::radiansToDegrees(st.eulerRad[0]), units::radiansToDegrees(st.eulerRad[1]), st.onGround ? 1 : 0,
+                            st.diverged ? " DIVERGED" : "");
+                std::fflush(stdout);
+            }
+        }
+        // Keep the physics tiles around every vehicle warm (background fetch).
+        static int tileTick = 0;
+        if (terrain && batch && ++tileTick % 60 == 0)
+            for (const auto& st : batch->states) terrain->requestAround(st.latitudeRad, st.longitudeRad);
         gui->setBatch(batch);
         controls->fps.store(viewer.fps(), std::memory_order_relaxed);
         controls->frameMs.store(viewer.frameSeconds() * 1e3, std::memory_order_relaxed);

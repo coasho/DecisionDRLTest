@@ -41,6 +41,7 @@ public:
 
 private:
     void applyInitialConditions(const InitialConditions& ic);
+    void settleOnGround(const InitialConditions& ic);
     void cacheCommandNodes();
     bool checkDivergence();
 
@@ -50,6 +51,10 @@ private:
     bool loaded_ = false;
     bool diverged_ = false;
     std::uint32_t stepCount_ = 0;
+    struct LastGood {
+        double latDeg = 0, lonDeg = 0, altM = 0, aglM = 0, speedMs = 0;
+        bool onGround = false;
+    } lastGood_;
 
     // Cached command nodes (design 12.2: no string lookups in step()).
     PropertyHandle aileronCmd_, elevatorCmd_, rudderCmd_, flapCmd_, gearCmd_, leftBrakeCmd_, rightBrakeCmd_;

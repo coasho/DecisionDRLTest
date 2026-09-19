@@ -8,7 +8,11 @@ add_library(fsim_world STATIC
     CameraController.cpp
     Frames.h
     Interpolator.h
-    Interpolator.cpp)
+    Interpolator.cpp
+    Sky.h
+    Sky.cpp
+    Terrain.h
+    Terrain.cpp)
 add_library(fsim::world ALIAS fsim_world)
 
 target_include_directories(fsim_world PUBLIC ${CMAKE_SOURCE_DIR}/src)
