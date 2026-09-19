@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows:
+    name: Windows x64 (${{ matrix.config }})
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        run: cmake --preset msvc-${{ matrix.config == 'Debug' && 'debug' || 'release' }}
+
+      - name: Build
+        run: cmake --build --preset msvc-${{ matrix.config == 'Debug' && 'debug' || 'release' }} --parallel
+
+      - name: Test
+        run: ctest --preset msvc-${{ matrix.config == 'Debug' && 'debug' || 'release' }}
+
+      - name: Headless smoke run
+        run: build/msvc-${{ matrix.config == 'Debug' && 'debug' || 'release' }}/bin/flightsim.exe --vehicles 8 --steps 60 --benchmark
+
+      - name: Throughput benchmark (Release only)
+        if: matrix.config == 'Release'
+        run: build/msvc-release/bin/flightsim.exe --vehicles 32 --steps 150 --benchmark

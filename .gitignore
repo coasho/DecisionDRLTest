@@ -1,0 +1,23 @@
+# Build
+/build/
+/build-*/
+/out/
+/install/
+CMakeUserPresets.json
+compile_commands.json
+
+# IDE
+/.vs/
+/.vscode/
+/.idea/
+*.user
+*.suo
+
+# Tooling caches
+/.cache/
+__pycache__/
+
+# Runtime output
+*.log
+*.fsrec
+/runs/
