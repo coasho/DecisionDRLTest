@@ -15,6 +15,7 @@ namespace fsim::ui {
 ///   tab / s+tab  next / previous vehicle
 ///   c            cycle camera mode     - / =      zoom out / in
 ///   l            toggle vehicle list   m          toggle monitor
+///   n            toggle name labels    t          toggle trails
 ///   [ / ]        time factor / 2, x 2  esc        quit
 class KeyHandler : public vsg::Inherit<vsg::Visitor, KeyHandler> {
 public:

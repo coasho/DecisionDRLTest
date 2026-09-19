@@ -17,6 +17,8 @@ struct ViewerControls {
     std::atomic<double> cameraZoom{1.0}; ///< multiplicative request, consumed each frame
     std::atomic<bool> showVehicleList{true};
     std::atomic<bool> showMonitor{true};
+    std::atomic<bool> showLabels{true};
+    std::atomic<bool> showTrails{true};
     std::atomic<bool> quit{false};
 
     // Read-only telemetry written by the loop for the GUI.

@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace fsim::ui {
 
@@ -20,15 +21,28 @@ public:
     /// Called by the viewer loop before recording each frame.
     void setBatch(const sim::SnapshotBatch* batch) { batch_ = batch; }
 
+    /// Screen-space vehicle labels for this frame (window pixels).
+    struct Label {
+        float x = 0.0f, y = 0.0f;
+        std::string text;
+        bool selected = false;
+    };
+    void setLabels(std::vector<Label> labels) { labels_ = std::move(labels); }
+    void setShowLabels(bool on) { showLabels_ = on; }
+
     void record(vsg::CommandBuffer&) const override;
 
 private:
     void drawMonitor() const;
     void drawVehicleList() const;
 
+    void drawLabels() const;
+
     std::shared_ptr<ViewerControls> controls_;
     std::string aircraft_;
     const sim::SnapshotBatch* batch_ = nullptr;
+    std::vector<Label> labels_;
+    bool showLabels_ = true;
 };
 
 } // namespace fsim::ui

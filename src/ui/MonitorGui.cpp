@@ -14,8 +14,23 @@ MonitorGui::MonitorGui(std::shared_ptr<ViewerControls> controls, std::string air
     : controls_(std::move(controls)), aircraft_(std::move(aircraft)) {}
 
 void MonitorGui::record(vsg::CommandBuffer&) const {
+    if (showLabels_) drawLabels();
     if (controls_->showMonitor.load(std::memory_order_relaxed)) drawMonitor();
     if (controls_->showVehicleList.load(std::memory_order_relaxed)) drawVehicleList();
+}
+
+void MonitorGui::drawLabels() const {
+    // Background draw list: labels sit under the panels, over the 3D scene.
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    const float k = ImGui::GetIO().FontGlobalScale;
+    for (const Label& l : labels_) {
+        const ImVec2 size = ImGui::CalcTextSize(l.text.c_str());
+        const ImVec2 pos(l.x + 10.0f * k, l.y - size.y * 0.5f);
+        const ImU32 bg = l.selected ? IM_COL32(230, 140, 30, 200) : IM_COL32(20, 30, 50, 170);
+        dl->AddRectFilled(ImVec2(pos.x - 4.0f * k, pos.y - 2.0f * k), ImVec2(pos.x + size.x + 4.0f * k, pos.y + size.y + 2.0f * k), bg, 3.0f * k);
+        dl->AddLine(ImVec2(l.x, l.y), ImVec2(pos.x - 4.0f * k, l.y), bg, 1.5f * k);
+        dl->AddText(pos, IM_COL32(255, 255, 255, 255), l.text.c_str());
+    }
 }
 
 void MonitorGui::drawMonitor() const {

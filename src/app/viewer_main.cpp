@@ -23,6 +23,8 @@
 #include "world/Earth.h"
 #include "world/Interpolator.h"
 #include "world/Sky.h"
+#include "world/SkyDome.h"
+#include "world/Trails.h"
 #include "world/Terrain.h"
 #include "world/VehicleVisuals.h"
 
@@ -64,6 +66,7 @@ struct ViewerOptions {
 
     render::ViewerSettings window;
     int cameraMode = 0; // 0 chase, 1 orbit, 2 overview
+    double chaseDistance = 40.0; // chase camera distance behind the vehicle (m)
     bool probe = false;       // print motion-smoothness statistics and exit after ~5 s
     int trace = -1;           // --trace <i>: print vehicle i's state once per second
     bool interpolate = true;  // --no-interpolate reproduces sample-and-hold for comparison
@@ -98,7 +101,7 @@ void usage(const char* prog) {
         "  --trace <i>              print vehicle i's state once per second\n"
         "  --no-interpolate         draw raw snapshots (sample-and-hold) instead of interpolating\n"
         "  --log-level <lvl>\n"
-        "Keys: space pause, . step, tab next vehicle, c camera, -/= zoom, [ ] time factor, l list, m monitor, esc quit\n",
+        "Keys: space pause, . step, tab next vehicle, c camera, -/= zoom, [ ] time factor, l list, m monitor, n labels, t trails, esc quit\n",
         prog);
 }
 
@@ -151,6 +154,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
                 const int s = std::stoi(next());
                 o.window.samples = s >= 8 ? VK_SAMPLE_COUNT_8_BIT : s >= 4 ? VK_SAMPLE_COUNT_4_BIT : s >= 2 ? VK_SAMPLE_COUNT_2_BIT : VK_SAMPLE_COUNT_1_BIT;
             } else if (a == "--debug-layer") o.window.debugLayer = true;
+            else if (a == "--chase-distance") o.chaseDistance = std::stod(next());
             else if (a == "--camera") {
                 const std::string v = next();
                 o.cameraMode = v == "orbit" ? 1 : v == "overview" ? 2 : 0;
@@ -264,12 +268,13 @@ int main(int argc, char** argv) {
     // --- Scene -------------------------------------------------------------------
     auto ellipsoid = vsg::EllipsoidModel::create(); // WGS-84
     auto scene = vsg::Group::create();
-    if (opt.sun) {
-        int day; double hours;
-        world::currentUtc(day, hours);
-        if (opt.sunUtcHours >= 0.0) hours = opt.sunUtcHours;
-        scene->addChild(world::createSunLight(day, hours));
-    }
+    int day = 172; double hours = 12.0;
+    world::currentUtc(day, hours);
+    if (opt.sunUtcHours >= 0.0) hours = opt.sunUtcHours;
+    const vsg::dvec3 sunDir = world::sunDirectionEcef(day, hours);
+    world::SkyDome sky(viewer.options(), sunDir); // first child: painted before everything, no depth
+    scene->addChild(sky.node());
+    if (opt.sun) scene->addChild(world::createSunLight(day, hours));
     if (auto earth = world::createEarth(opt.earth, viewer.options(), ellipsoid)) scene->addChild(earth);
 
     world::VehicleVisuals::Settings visualSettings;
@@ -277,6 +282,8 @@ int main(int argc, char** argv) {
     visualSettings.modelScale = opt.modelScale;
     world::VehicleVisuals visuals(opt.vehicles, visualSettings, viewer.options());
     scene->addChild(visuals.node());
+    world::Trails trails(opt.vehicles, 900, 0.25, viewer.options()); // ~3.75 min of path per vehicle
+    scene->addChild(trails.node());
 
     auto controls = std::make_shared<ui::ViewerControls>();
     controls->timeFactor.store(opt.timeFactor);
@@ -295,6 +302,7 @@ int main(int argc, char** argv) {
     if (!viewer.setScene(scene, ellipsoid, imgui)) return 1;
 
     world::CameraController camera(viewer.camera(), viewer.lookAt(), ellipsoid);
+    camera.setChaseOffset(opt.chaseDistance, opt.chaseDistance * 0.25);
     viewer.addEventHandler(camera.trackball());
 
     // Place the first snapshot so the camera has a target before the sim thread runs.
@@ -332,6 +340,31 @@ int main(int argc, char** argv) {
             camera.setMode(static_cast<world::CameraController::Mode>(controls->cameraMode.load(std::memory_order_relaxed)));
             if (const double z = controls->cameraZoom.exchange(1.0); z != 1.0) camera.zoom(z);
             camera.update(states[static_cast<std::size_t>(selected)], viewer.frameSeconds());
+            sky.update(viewer.lookAt()->eye);
+
+            trails.setSelected(selected);
+            trails.setVisible(controls->showTrails.load(std::memory_order_relaxed));
+            trails.update(Span<const sim::VehicleState>(batch->states), batch->simTime);
+
+            // Vehicle labels: project ECEF positions to window pixels (Vulkan NDC, y down).
+            gui->setShowLabels(controls->showLabels.load(std::memory_order_relaxed));
+            std::vector<ui::MonitorGui::Label> labels;
+            const vsg::dmat4 viewProj = viewer.camera()->projectionMatrix->transform() * viewer.camera()->viewMatrix->transform();
+            const auto extent = viewer.window()->extent2D();
+            for (std::size_t i = 0; i < states.size(); ++i) {
+                const vsg::dvec4 clip = viewProj * vsg::dvec4(states[i].positionEcef[0], states[i].positionEcef[1], states[i].positionEcef[2], 1.0);
+                if (clip.w <= 0.0) continue;
+                const double nx = clip.x / clip.w, ny = clip.y / clip.w;
+                if (nx < -1.1 || nx > 1.1 || ny < -1.1 || ny > 1.1) continue;
+                ui::MonitorGui::Label l;
+                l.x = static_cast<float>((nx * 0.5 + 0.5) * extent.width);
+                l.y = static_cast<float>((ny * 0.5 + 0.5) * extent.height);
+                l.text = "v" + std::to_string(i) + (states[i].diverged ? " !" : "");
+                l.selected = static_cast<int>(i) == selected;
+                labels.push_back(std::move(l));
+            }
+            gui->setLabels(std::move(labels));
+
             controls->simTime.store(batch->simTime, std::memory_order_relaxed);
             controls->snapshotSequence.store(batch->sequence, std::memory_order_relaxed);
         }

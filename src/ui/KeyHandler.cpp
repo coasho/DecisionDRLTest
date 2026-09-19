@@ -48,6 +48,14 @@ void KeyHandler::apply(vsg::KeyPressEvent& e) {
     case vsg::KEY_Rightbracket:
         c.timeFactor.store(std::min(64.0, c.timeFactor.load(std::memory_order_relaxed) * 2.0), std::memory_order_relaxed);
         break;
+    case vsg::KEY_n:
+    case vsg::KEY_N:
+        c.showLabels.store(!c.showLabels.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        break;
+    case vsg::KEY_t:
+    case vsg::KEY_T:
+        c.showTrails.store(!c.showTrails.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        break;
     case vsg::KEY_Escape:
         c.quit.store(true, std::memory_order_relaxed);
         break;

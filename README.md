@@ -20,7 +20,8 @@ Milestone **M0 (skeleton) done; viewer (visualisation-first re-plan) in progress
 - **Viewer** (`flightsim-viewer.exe`): full-Earth `vsg::TileDatabase` with Esri World Imagery (or
   OSM/Bing/custom XYZ) draped over **real relief** from the free AWS Terrarium elevation tiles, sun +
   ambient lighting from the current UTC time, N vehicles driven from a paced simulation thread through a
-  lock-free snapshot buffer with render-side interpolation, chase/orbit/overview cameras, Dear ImGui
+  lock-free snapshot buffer with render-side interpolation, chase/orbit/overview cameras, an eye-centred
+  gradient sky dome with sun glow and night side, fading flight trails, on-screen vehicle labels, Dear ImGui
   monitor and vehicle list.
 - **Terrain physics**: JSBSim's ground callback samples the *same* elevation tiles the renderer shows
   (`world::TileGroundProvider`, LRU + background prefetch); `--on-ground` spawns vehicles parked on the
@@ -84,7 +85,7 @@ build/ucrt64-release/bin/flightsim.exe --vehicles 64 --steps 300 --benchmark
 ```
 
 Viewer keys: `space` pause, `.` step, `tab` next vehicle, `c` camera (chase / orbit / overview),
-`-`/`=` zoom, `[`/`]` time factor, `l` vehicle list, `m` monitor, `esc` quit.
+`-`/`=` zoom, `[`/`]` time factor, `l` vehicle list, `m` monitor, `n` labels, `t` trails, `esc` quit.
 
 ## Layout
 

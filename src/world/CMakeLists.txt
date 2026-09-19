@@ -9,8 +9,14 @@ add_library(fsim_world STATIC
     Frames.h
     Interpolator.h
     Interpolator.cpp
+    FlatGeometry.h
+    FlatGeometry.cpp
     Sky.h
     Sky.cpp
+    SkyDome.h
+    SkyDome.cpp
+    Trails.h
+    Trails.cpp
     Terrain.h
     Terrain.cpp)
 add_library(fsim::world ALIAS fsim_world)
