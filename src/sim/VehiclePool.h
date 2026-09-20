@@ -43,6 +43,8 @@ public:
 
     /// Recompute snapshots without stepping (after load/reset).
     void refreshStates();
+    /// Recompute one vehicle's snapshot (after an individual reset).
+    void refreshState(std::size_t i) { models_[i]->state(states_[i]); }
 
     std::size_t size() const noexcept { return models_.size(); }
     unsigned workers() const noexcept { return workerCount_; }

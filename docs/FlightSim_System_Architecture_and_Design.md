@@ -517,7 +517,7 @@ The largest risks are the ones the stack does not already solve: building and ho
 
 ## 15. Roadmap and milestones
 
-Six milestones take the project from an empty repository to a v1 release. Re-planned 2026-09-19 at the owner's direction: visualisation is the most important component and comes first (M0 skeleton, then the viewer), the RL API follows, vision observations and release last. Status: M0 done; the viewer milestone is in progress (full-Earth OSM imagery, N vehicles, chase/orbit/overview cameras, ImGui monitor, interpolated motion delivered). Each milestone ends with CI green and the section 12 metrics recorded. Durations assume one to two developers.
+Six milestones take the project from an empty repository to a v1 release. Re-planned 2026-09-19 at the owner's direction: visualisation is the most important component and comes first (M0 skeleton, then the viewer), the RL API follows, vision observations and release last. Status (2026-09-20): M0 done; the viewer delivered (full-Earth satellite imagery over real relief, terrain physics, N vehicles, glTF models, chase/orbit/overview mouse cameras, sky, trails, labels, ImGui monitor, interpolated motion); M2 delivered except the LibTorch PPO and Rust examples (`env::VecEnv`, two tasks, `state`/`surfaces` spaces, `libfsim.dll` with the C++ SDK and C ABI v1, `examples/minimal_trainer` PD baseline at ~0.7 M vehicle-steps/s through the SDK, C ABI tested from C99). Each milestone ends with CI green and the section 12 metrics recorded. Durations assume one to two developers.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |
 | --- | --- | --- | --- | --- |
@@ -560,7 +560,7 @@ Owner decisions so far are recorded in section 1; the remaining questions below 
 
 - [ ] Tile data: build a global 90 m pyramid plus 30 m regional pyramids with `tools/tile_builder` (fully self-hosted, offline), or start from public XYZ imagery (OpenStreetMap/Bing) with elevation only for training regions?
 - [ ] Trainer language: decided 2026-09-19 — C++. The first example trainer in M2 is C++ (\`examples/minimal\_trainer\`, then the LibTorch PPO); the Rust C ABI example follows later.
-- [ ] First tasks: which two or three RL tasks should M2 ship with (e.g. altitude/heading hold, waypoint following, pursuit–evasion) and with which stock aircraft?
+- [x] First tasks: M2 ships `altitude_heading_hold` (targets sampled per episode relative to the initial state) and `level_flight` on the stock c172x; waypoint following and pursuit–evasion are queued behind vision observations.
 - [ ] Vision in v1: are image observations required for the first release (M4 as planned) or can they slip to post-v1 to bring the release forward by \~3 weeks?
 - [ ] Linux timing: post-v1 (as planned) or before the public release, given that most training clusters run Linux?
 - [ ] Aircraft models: placeholder low-poly models for stock JSBSim aircraft are planned; are any licensed glTF models already available?

@@ -40,6 +40,7 @@ public:
     JSBSim::FGFDMExec& exec() noexcept { return *fdm_; }
 
 private:
+    void silenceOutputs();
     void applyInitialConditions(const InitialConditions& ic);
     void settleOnGround(const InitialConditions& ic);
     void cacheCommandNodes();

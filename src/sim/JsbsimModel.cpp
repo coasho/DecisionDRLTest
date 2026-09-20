@@ -127,15 +127,7 @@ bool JsbsimModel::load(const AircraftSpec& aircraft, const InitialConditions& ic
         return false;
     }
 
-    // Aircraft files may declare their own <output> (CSV/socket). The platform
-    // owns logging and recording, so those are disabled - and, because JSBSim
-    // opens output files in RunIC() even when disabled, redirected to the null
-    // device so no stray files appear in the working directory.
-    {
-        auto output = fdm_->GetOutput();
-        for (unsigned i = 0; !output->GetOutputName(i).empty(); ++i) output->SetOutputName(i, kNullDevice);
-        fdm_->DisableOutput();
-    }
+    silenceOutputs();
     cacheCommandNodes();
 
     try {
@@ -162,6 +154,11 @@ bool JsbsimModel::reset(const InitialConditions& ic) {
     stepCount_ = 0;
     try {
         applyInitialConditions(ic);
+        // RunIC() reopens every output file; JSBSim only closes them when a
+        // new output is started, so close them first (keeping the null name)
+        // or the reopen fails and is logged on every reset.
+        silenceOutputs();
+        fdm_->GetOutput()->SetStartNewOutput();
         // Mode 0: reinitialise models and run the IC pass (design 7.2).
         fdm_->ResetToInitialConditions(0);
         settleOnGround(ic);
@@ -170,6 +167,16 @@ bool JsbsimModel::reset(const InitialConditions& ic) {
         return false;
     }
     return true;
+}
+
+// Aircraft files may declare their own <output> (CSV/socket). The platform
+// owns logging and recording, so those are disabled - and, because JSBSim
+// opens output files in RunIC() even when disabled, redirected to the null
+// device so no stray files appear in the working directory.
+void JsbsimModel::silenceOutputs() {
+    auto output = fdm_->GetOutput();
+    for (unsigned i = 0; !output->GetOutputName(i).empty(); ++i) output->SetOutputName(i, kNullDevice);
+    fdm_->DisableOutput();
 }
 
 void JsbsimModel::applyInitialConditions(const InitialConditions& ic) {
