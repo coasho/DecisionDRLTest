@@ -42,7 +42,8 @@ struct WorldOptions {
     std::string name = "default";     ///< viewers attach by this name
     double dt = 1.0 / 120.0;          ///< FDM step, seconds
     int frameSkip = 4;                ///< FDM steps per World::step()
-    unsigned workers = 0;             ///< simulation threads; 0 = automatic
+    unsigned workers = 0;             ///< simulation threads; 0 = automatic (physical cores - 2)
+    bool pinWorkers = true;           ///< one worker per physical core; disable when running several trainers on one machine
     std::uint64_t seed = 0;
     std::uint32_t capacity = 256;     ///< vehicle slots visible to viewers
     bool publish = true;              ///< false = never visible to viewers

@@ -37,6 +37,25 @@ vsg::ref_ptr<vsg::Node> createSunLight(int dayOfYear, double utcHours, float sun
     return group;
 }
 
+void utcOf(double unixSeconds, int& dayOfYear, double& utcHours) {
+    const std::time_t t = static_cast<std::time_t>(unixSeconds);
+    std::tm utc{};
+#ifdef _WIN32
+    gmtime_s(&utc, &t);
+#else
+    gmtime_r(&t, &utc);
+#endif
+    dayOfYear = utc.tm_yday + 1;
+    utcHours = utc.tm_hour + utc.tm_min / 60.0 + utc.tm_sec / 3600.0;
+}
+
+void setSunDirection(vsg::Node* sunLight, const vsg::dvec3& toSunEcef) {
+    auto* group = dynamic_cast<vsg::Group*>(sunLight);
+    if (!group) return;
+    for (auto& child : group->children)
+        if (auto* sun = dynamic_cast<vsg::DirectionalLight*>(child.get())) sun->direction = -toSunEcef;
+}
+
 void currentUtc(int& dayOfYear, double& utcHours) {
     const std::time_t now = std::time(nullptr);
     std::tm utc{};

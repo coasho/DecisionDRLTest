@@ -30,7 +30,7 @@ World::World(const WorldOptions& options) : options_(options), rng_(options.seed
 
     const unsigned physical = platform::physicalCoreCount();
     const unsigned workers = options_.workers ? options_.workers : std::max(1u, physical > 2 ? physical - 2 : 1u);
-    pool_ = std::make_unique<sim::VehiclePool>(workers);
+    pool_ = std::make_unique<sim::VehiclePool>(workers, options_.pinWorkers && workers < physical);
     pool_->setPreStep([this](std::size_t slot, int subStep, sim::FlightModel& model, sim::ControlInputs& inputs) {
         preStep(slot, subStep, model, inputs);
     });

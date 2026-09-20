@@ -18,6 +18,12 @@ public:
     /// Move the dome to the eye and align it with the local up there.
     void update(const vsg::dvec3& eyeEcef);
 
+    /// Change the sun (recolours on the next update).
+    void setSun(const vsg::dvec3& sunDirectionEcef) {
+        sun_ = vsg::normalize(sunDirectionEcef);
+        coloured_ = false;
+    }
+
 private:
     void colour(const vsg::dvec3& upEcef);
 

@@ -16,4 +16,10 @@ vsg::ref_ptr<vsg::Node> createSunLight(int dayOfYear, double utcHours, float sun
 /// Day of year (1-366) and UTC hour (0-24) of "now".
 void currentUtc(int& dayOfYear, double& utcHours);
 
+/// Day of year and UTC hour of a Unix time (seconds).
+void utcOf(double unixSeconds, int& dayOfYear, double& utcHours);
+
+/// Re-aim the sun of a group made by createSunLight().
+void setSunDirection(vsg::Node* sunLight, const vsg::dvec3& toSunEcef);
+
 } // namespace fsim::world

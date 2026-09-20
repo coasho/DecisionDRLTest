@@ -1,15 +1,21 @@
-// flightsim-viewer.exe - full-Earth VSG viewer attached to a live simulation
-// (design 4.4 entry point 3, section 8).
+// flightsim-viewer.exe - the prebuilt visualisation application (design 9.1,
+// 9.7, 9.10).
 //
-// The simulation runs on its own thread (sim::SimRunner) paced to wall time;
-// the render thread reads snapshots through the triple buffer and never blocks
-// the simulation.
+// Default ("mirror") mode: discover a training application's world through
+// shared memory, attach, and mirror its vehicles: creations, resets, state,
+// control level and environment. The training process never knows the
+// viewer exists. `--demo` runs the built-in scenario on an internal simulation
+// thread instead (development, screenshots).
 
 #include "app/DemoAutopilot.h"
 #include "core/Log.h"
 #include "core/Rng.h"
 #include "core/Units.h"
+#include "fsim/Control.h"
 #include "io/AssetResolver.h"
+#include "ipc/WorldMirror.h"
+#include "ipc/WorldRegistry.h"
+#include "platform/Clock.h"
 #include "platform/Threads.h"
 #include "render/Viewer.h"
 #include "sim/GroundProvider.h"
@@ -24,8 +30,8 @@
 #include "world/Interpolator.h"
 #include "world/Sky.h"
 #include "world/SkyDome.h"
-#include "world/Trails.h"
 #include "world/Terrain.h"
+#include "world/Trails.h"
 #include "world/VehicleVisuals.h"
 
 #include <vsgImGui/RenderImGui.h>
@@ -45,6 +51,13 @@ using namespace fsim;
 namespace {
 
 struct ViewerOptions {
+    // Source
+    bool demo = false;
+    bool list = false;
+    std::string worldName;       // --world: attach to this world (default: the newest)
+    unsigned capacity = 256;     // slots to prepare before a world is attached
+
+    // Demo scenario
     std::string aircraft = "c172x";
     std::filesystem::path jsbsimRoot;
     unsigned vehicles = 8;
@@ -55,30 +68,36 @@ struct ViewerOptions {
     double throttle = 0.65;
     double timeFactor = 1.0;
     double latitudeDeg = 37.6188, longitudeDeg = -122.375, altitudeM = 1500.0, spreadDeg = 0.03;
+    bool onGround = false;
 
+    // Scene
     world::EarthSettings earth;
-    unsigned terrainZoom = 12;   // physics ground sampling level (~30 m/px at mid latitudes)
-    bool sun = true;             // sun + ambient light instead of the headlight
-    double sunUtcHours = -1.0;   // <0 = now
-    bool onGround = false;       // spawn parked on the terrain instead of airborne
+    unsigned terrainZoom = 12;
+    bool sun = true;
+    double sunUtcHours = -1.0;
     std::string modelPath;
-    double modelScale = 1.0;
-    std::string modelForward, modelUp; // empty = from the manifest / glTF default
-    double modelScaleOverride = 0.0;    // >0 overrides the manifest
+    std::string modelForward, modelUp;
+    double modelScaleOverride = 0.0;
 
     render::ViewerSettings window;
-    int cameraMode = 0; // 0 chase, 1 orbit, 2 overview
-    double chaseDistance = 40.0; // chase camera distance behind the vehicle (m)
-    double chaseAzimuth = 180.0, chaseElevation = 14.0; // initial view offset (deg)
-    bool probe = false;       // print motion-smoothness statistics and exit after ~5 s
-    int trace = -1;           // --trace <i>: print vehicle i's state once per second
-    bool interpolate = true;  // --no-interpolate reproduces sample-and-hold for comparison
+    int cameraMode = 0;
+    double chaseDistance = 40.0;
+    double chaseAzimuth = 180.0, chaseElevation = 14.0;
+    bool probe = false;
+    int trace = -1;
+    bool interpolate = true;
     bool help = false;
 };
 
 void usage(const char* prog) {
     std::printf(
         "Usage: %s [options]\n"
+        "Mirror mode (default): attach to a training application's world through shared memory.\n"
+        "  --world <name>           attach to this world (default: the newest published one)\n"
+        "  --list                   list live worlds and exit\n"
+        "  --capacity <n>           vehicle slots to prepare (256)\n"
+        "Demo mode: run the built-in scenario on an internal simulation thread.\n"
+        "  --demo                   enable demo mode\n"
         "  --aircraft <name>        JSBSim aircraft (c172x)\n"
         "  --jsbsim-root <dir>      JSBSim data tree (auto)\n"
         "  --vehicles <n>           number of vehicles (8)\n"
@@ -87,12 +106,16 @@ void usage(const char* prog) {
         "  --lat <deg> --lon <deg>  spawn centre (KSFO)\n"
         "  --alt <m>                spawn altitude MSL (1500)\n"
         "  --spread <deg>           spawn scatter (0.03)\n"
+        "  --on-ground              spawn parked on the terrain (brakes on)\n"
+        "  --terrain-zoom <z>       tile level used for physics ground height (12)\n"
+        "  --probe                  print motion smoothness statistics after ~5 s and exit\n"
+        "  --trace <i>              print vehicle i's state once per second\n"
+        "  --no-interpolate         draw raw snapshots (sample-and-hold) instead of interpolating\n"
+        "Scene:\n"
         "  --imagery satellite|osm|bing|none|<url template with {z}/{x}/{y}>   (satellite = Esri World Imagery)\n"
         "  --elevation terrarium|none|<url template>   relief from Terrarium-encoded tiles (default terrarium)\n"
-        "  --terrain-zoom <z>       tile level used for physics ground height (12)\n"
         "  --no-sun                 headlight instead of sun + ambient lighting\n"
-        "  --sun-utc <hours>        sun position for this UTC hour (default: now)\n"
-        "  --on-ground              spawn parked on the terrain (brakes on)\n"
+        "  --sun-utc <hours>        sun position for this UTC hour (default: the world's time)\n"
         "  --bing-key <key>         Bing Maps key for --imagery bing\n"
         "  --max-level <n>          custom pyramid max level (17)\n"
         "  --model <file>           glTF/OBJ vehicle model (placeholder if omitted)\n"
@@ -100,11 +123,9 @@ void usage(const char* prog) {
         "  --width <px> --height <px> --fullscreen --msaa <1|2|4|8> --fov <deg>\n"
         "  --debug-layer            Vulkan validation layer\n"
         "  --camera chase|orbit|overview   initial camera (chase)\n"
-        "  --probe                  print motion smoothness statistics after ~5 s and exit\n"
-        "  --trace <i>              print vehicle i's state once per second\n"
-        "  --no-interpolate         draw raw snapshots (sample-and-hold) instead of interpolating\n"
         "  --log-level <lvl>\n"
-        "Keys: space pause, . step, tab next vehicle, c camera, -/= zoom, r reset view, [ ] time factor, l list, m monitor, n labels, t trails, esc quit\n"
+        "Keys: space pause (demo), . step (demo), tab next vehicle, c camera, -/= zoom, r reset view, [ ] time factor (demo),\n"
+        "      l list, m monitor, n labels, t trails, esc quit\n"
         "Mouse: left drag orbits around the vehicle, wheel / right drag changes distance, middle click resets the view\n",
         prog);
 }
@@ -118,6 +139,10 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
         };
         try {
             if (a == "-h" || a == "--help") o.help = true;
+            else if (a == "--demo") o.demo = true;
+            else if (a == "--list") o.list = true;
+            else if (a == "--world") o.worldName = next();
+            else if (a == "--capacity") o.capacity = static_cast<unsigned>(std::stoul(next()));
             else if (a == "--aircraft") o.aircraft = next();
             else if (a == "--jsbsim-root") o.jsbsimRoot = next();
             else if (a == "--vehicles") o.vehicles = static_cast<unsigned>(std::stoul(next()));
@@ -156,6 +181,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--height") o.window.height = static_cast<std::uint32_t>(std::stoul(next()));
             else if (a == "--fullscreen") o.window.fullscreen = true;
             else if (a == "--fov") o.window.fieldOfViewDeg = std::stod(next());
+            else if (a == "--max-fps") o.window.maxFps = std::stod(next());
             else if (a == "--msaa") {
                 const int s = std::stoi(next());
                 o.window.samples = s >= 8 ? VK_SAMPLE_COUNT_8_BIT : s >= 4 ? VK_SAMPLE_COUNT_4_BIT : s >= 2 ? VK_SAMPLE_COUNT_2_BIT : VK_SAMPLE_COUNT_1_BIT;
@@ -184,6 +210,35 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
     return o.vehicles >= 1;
 }
 
+/// A resting state at a geodetic position, heading north: what the camera
+/// looks at while no vehicle exists.
+sim::VehicleState restingState(const vsg::EllipsoidModel& ellipsoid, double latDeg, double lonDeg, double altM) {
+    sim::VehicleState s;
+    const vsg::dvec3 p = ellipsoid.convertLatLongAltitudeToECEF(vsg::dvec3(latDeg, lonDeg, altM));
+    s.positionEcef[0] = p.x; s.positionEcef[1] = p.y; s.positionEcef[2] = p.z;
+    s.latitudeRad = units::degreesToRadians(latDeg);
+    s.longitudeRad = units::degreesToRadians(lonDeg);
+    s.altitudeMslM = altM;
+    const vsg::dvec3 up = vsg::normalize(p);
+    vsg::dvec3 east = vsg::normalize(vsg::cross(vsg::dvec3(0.0, 0.0, 1.0), up));
+    const vsg::dvec3 north = vsg::cross(up, east);
+    const vsg::dvec3 axes[3] = {north, east, -up}; // body x, y, z
+    for (int r = 0; r < 3; ++r)
+        for (int c = 0; c < 3; ++c) s.rotationBodyToEcef[r * 3 + c] = axes[c][static_cast<std::size_t>(r)];
+    return s;
+}
+
+/// Environment one-liner for the monitor.
+std::string describe(const sim::EnvironmentState& e, double simTime) {
+    int day = 0; double hours = 0.0;
+    world::utcOf(e.epochUtcSeconds + simTime, day, hours);
+    char buf[256];
+    std::snprintf(buf, sizeof buf, "UTC day %d %02d:%02d  wind %.0f deg / %.1f m/s  turb %.2f  T0 %.1f K  p0 %.0f hPa  vis %.0f km",
+                  day, static_cast<int>(hours), static_cast<int>((hours - std::floor(hours)) * 60.0), e.windDirectionDeg, e.windSpeedMs,
+                  e.turbulence, e.temperatureSeaLevelK, e.pressureSeaLevelPa / 100.0, e.visibilityM / 1000.0);
+    return buf;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -196,104 +251,109 @@ int main(int argc, char** argv) {
         usage(argv[0]);
         return 0;
     }
+    if (opt.list) {
+        const auto worlds = ipc::WorldRegistry::list();
+        if (worlds.empty()) std::printf("no published worlds\n");
+        for (const auto& w : worlds) std::printf("%-32s pid %llu\n", w.name.c_str(), static_cast<unsigned long long>(w.pid));
+        return 0;
+    }
 
     // --- Rendering (window first: the terrain ground provider uses VSG's readers) ---
     render::Viewer viewer;
-    opt.window.title = "flightsim - " + opt.aircraft;
+    opt.window.title = opt.demo ? "flightsim - demo " + opt.aircraft : "flightsim - waiting for a training application";
     if (opt.earth.elevationUrl.empty()) opt.earth.elevationUrl = world::kAwsTerrariumUrl;
     if (opt.earth.source == world::EarthSettings::Source::None) opt.earth.elevationUrl.clear();
     opt.window.headlight = !opt.sun;
     if (!viewer.create(opt.window)) return 1;
 
-    // --- Simulation ------------------------------------------------------------
     io::AssetResolver assets;
-    const auto root = assets.jsbsimRoot(opt.jsbsimRoot);
-    if (!root) {
-        LOG_ERROR("app") << "JSBSim data root not found; pass --jsbsim-root <dir>";
-        return 1;
-    }
+    auto ellipsoid = vsg::EllipsoidModel::create(); // WGS-84
 
-    // Physics ground: the same elevation tiles the renderer displays (ADR-7).
-    std::shared_ptr<sim::GroundProvider> ground;
-    std::shared_ptr<world::TileGroundProvider> terrain; // non-null when relief is on
-    if (!opt.earth.elevationUrl.empty()) {
-        auto tiles = std::make_shared<world::TileGroundProvider>(opt.earth.elevationUrl, opt.earth.elevationEncoding,
-                                                                 opt.terrainZoom, viewer.options());
-        tiles->prefetch(units::degreesToRadians(opt.latitudeDeg), units::degreesToRadians(opt.longitudeDeg),
-                        6000.0 + opt.spreadDeg * 111000.0);
-        ground = tiles;
-        terrain = tiles;
-    } else {
-        ground = std::make_shared<sim::FlatGround>(0.0);
-    }
-
-    const unsigned physical = platform::physicalCoreCount();
-    const unsigned workers = std::min<unsigned>(opt.workers ? opt.workers : std::max(1u, physical > 3 ? physical - 3 : 1u), opt.vehicles);
-    auto pool = std::make_unique<sim::VehiclePool>(workers);
-    const sim::AircraftSpec aircraft{opt.aircraft, *root};
-    auto initialConditions = std::make_shared<std::vector<sim::InitialConditions>>();
-    for (unsigned i = 0; i < opt.vehicles; ++i) {
-        Rng rng = Rng::forVehicle(opt.seed, 0, i);
-        sim::InitialConditions ic;
-        ic.latitudeDeg = opt.latitudeDeg + rng.uniform(-opt.spreadDeg, opt.spreadDeg);
-        ic.longitudeDeg = opt.longitudeDeg + rng.uniform(-opt.spreadDeg, opt.spreadDeg);
-        ic.headingDeg = rng.uniform(0.0, 360.0);
-        if (opt.onGround) {
-            ic.onGround = true;
-            ic.airspeedTrueMs = 0.0;
-        } else {
-            // Altitude is MSL; keep at least 300 m above the terrain under the spawn point.
-            const double terrainM = ground->heightAboveEllipsoidM(units::degreesToRadians(ic.latitudeDeg),
-                                                                  units::degreesToRadians(ic.longitudeDeg));
-            ic.altitudeMslM = std::max(opt.altitudeM + rng.uniform(-150.0, 150.0), terrainM + 300.0);
-            ic.airspeedTrueMs = 58.0 + rng.uniform(-4.0, 4.0);
-        }
-        auto model = std::make_unique<sim::JsbsimModel>(opt.dt, ground);
-        if (!model->load(aircraft, ic)) {
-            LOG_ERROR("app") << "vehicle " << i << " failed to load";
+    // --- Demo simulation (only with --demo) --------------------------------------
+    std::unique_ptr<sim::SimRunner> runner;
+    std::shared_ptr<world::TileGroundProvider> terrain; // physics tiles (demo only)
+    std::size_t slots = opt.capacity;
+    if (opt.demo) {
+        const auto root = assets.jsbsimRoot(opt.jsbsimRoot);
+        if (!root) {
+            LOG_ERROR("app") << "JSBSim data root not found; pass --jsbsim-root <dir>";
             return 1;
         }
-        pool->add(std::move(model));
-        initialConditions->push_back(ic);
+        std::shared_ptr<sim::GroundProvider> ground;
+        if (!opt.earth.elevationUrl.empty()) {
+            auto tiles = std::make_shared<world::TileGroundProvider>(opt.earth.elevationUrl, opt.earth.elevationEncoding, opt.terrainZoom, viewer.options());
+            tiles->prefetch(units::degreesToRadians(opt.latitudeDeg), units::degreesToRadians(opt.longitudeDeg), 6000.0 + opt.spreadDeg * 111000.0);
+            ground = tiles;
+            terrain = tiles;
+        } else {
+            ground = std::make_shared<sim::FlatGround>(0.0);
+        }
+        const unsigned physical = platform::physicalCoreCount();
+        const unsigned workers = std::min<unsigned>(opt.workers ? opt.workers : std::max(1u, physical > 3 ? physical - 3 : 1u), opt.vehicles);
+        auto pool = std::make_unique<sim::VehiclePool>(workers);
+        const sim::AircraftSpec aircraft{opt.aircraft, *root};
+        auto initialConditions = std::make_shared<std::vector<sim::InitialConditions>>();
+        for (unsigned i = 0; i < opt.vehicles; ++i) {
+            Rng rng = Rng::forVehicle(opt.seed, 0, i);
+            sim::InitialConditions ic;
+            ic.latitudeDeg = opt.latitudeDeg + rng.uniform(-opt.spreadDeg, opt.spreadDeg);
+            ic.longitudeDeg = opt.longitudeDeg + rng.uniform(-opt.spreadDeg, opt.spreadDeg);
+            ic.headingDeg = rng.uniform(0.0, 360.0);
+            if (opt.onGround) {
+                ic.onGround = true;
+                ic.airspeedTrueMs = 0.0;
+            } else {
+                const double terrainM = ground->heightAboveEllipsoidM(units::degreesToRadians(ic.latitudeDeg), units::degreesToRadians(ic.longitudeDeg));
+                ic.altitudeMslM = std::max(opt.altitudeM + rng.uniform(-150.0, 150.0), terrainM + 300.0);
+                ic.airspeedTrueMs = 58.0 + rng.uniform(-4.0, 4.0);
+            }
+            auto model = std::make_unique<sim::JsbsimModel>(opt.dt, ground);
+            if (!model->load(aircraft, ic)) {
+                LOG_ERROR("app") << "vehicle " << i << " failed to load";
+                return 1;
+            }
+            pool->add(std::move(model));
+            initialConditions->push_back(ic);
+        }
+        auto autopilot = std::make_shared<app::DemoAutopilot>(opt.vehicles, opt.throttle, opt.onGround);
+        runner = std::make_unique<sim::SimRunner>(std::move(pool), opt.frameSkip,
+            [autopilot, initialConditions](const sim::SnapshotBatch& prev, sim::VehiclePool& vehicles, std::vector<sim::ControlInputs>& out) {
+                for (std::size_t i = 0; i < prev.states.size(); ++i) {
+                    if (!prev.states[i].diverged) continue;
+                    LOG_WARN("app") << "vehicle " << i << " diverged; resetting to its initial conditions";
+                    vehicles.vehicle(i).reset((*initialConditions)[i]);
+                    autopilot->forget(i);
+                }
+                autopilot->compute(prev.states, out);
+            });
+        runner->setTimeFactor(opt.timeFactor);
+        slots = opt.vehicles;
+        LOG_INFO("app") << "demo: " << opt.vehicles << " x " << opt.aircraft << " on " << workers << " worker(s)";
     }
 
-    auto autopilot = std::make_shared<app::DemoAutopilot>(opt.vehicles, opt.throttle, opt.onGround);
-    auto runner = std::make_unique<sim::SimRunner>(std::move(pool), opt.frameSkip,
-        [autopilot, initialConditions](const sim::SnapshotBatch& prev, sim::VehiclePool& vehicles, std::vector<sim::ControlInputs>& out) {
-            // A diverged vehicle is reset to its initial conditions (design 13 "Errors").
-            for (std::size_t i = 0; i < prev.states.size(); ++i) {
-                if (!prev.states[i].diverged) continue;
-                LOG_WARN("app") << "vehicle " << i << " diverged; resetting to its initial conditions";
-                vehicles.vehicle(i).reset((*initialConditions)[i]);
-                autopilot->forget(i);
-            }
-            autopilot->compute(prev.states, out);
-        });
-    runner->setTimeFactor(opt.timeFactor);
-    LOG_INFO("app") << opt.vehicles << " x " << opt.aircraft << " on " << workers << " worker(s), agent rate "
-                    << 1.0 / (opt.dt * opt.frameSkip) << " Hz";
-
     // --- Scene -------------------------------------------------------------------
-    auto ellipsoid = vsg::EllipsoidModel::create(); // WGS-84
     auto scene = vsg::Group::create();
     int day = 172; double hours = 12.0;
     world::currentUtc(day, hours);
     if (opt.sunUtcHours >= 0.0) hours = opt.sunUtcHours;
-    const vsg::dvec3 sunDir = world::sunDirectionEcef(day, hours);
-    world::SkyDome sky(viewer.options(), sunDir); // first child: painted before everything, no depth
+    vsg::dvec3 sunDir = world::sunDirectionEcef(day, hours);
+    world::SkyDome sky(viewer.options(), sunDir);
     scene->addChild(sky.node());
-    if (opt.sun) scene->addChild(world::createSunLight(day, hours));
+    vsg::ref_ptr<vsg::Node> sunLight;
+    if (opt.sun) {
+        sunLight = world::createSunLight(day, hours);
+        scene->addChild(sunLight);
+    }
     if (auto earth = world::createEarth(opt.earth, viewer.options(), ellipsoid)) scene->addChild(earth);
 
     world::VehicleVisuals::Settings visualSettings;
-    // Model: --model, else the sample aircraft from the asset tree, else the placeholder.
     if (opt.modelPath.empty()) {
         if (auto sample = assets.find("models/Cesium_Air.glb")) opt.modelPath = sample->string();
     } else if (opt.modelPath == "none") {
         opt.modelPath.clear();
     }
     visualSettings.modelPath = opt.modelPath;
-    world::VehicleVisuals::applyManifest(visualSettings); // forward/up/scale from <model>.manifest
+    world::VehicleVisuals::applyManifest(visualSettings);
     if (opt.modelScaleOverride > 0.0) visualSettings.modelScale = opt.modelScaleOverride;
     auto axis = [](const std::string& a, const vsg::dvec3& fallback) {
         if (a.size() != 2) return fallback;
@@ -307,82 +367,192 @@ int main(int argc, char** argv) {
     };
     visualSettings.modelForward = axis(opt.modelForward, visualSettings.modelForward);
     visualSettings.modelUp = axis(opt.modelUp, visualSettings.modelUp);
-    world::VehicleVisuals visuals(opt.vehicles, visualSettings, viewer.options());
+    world::VehicleVisuals visuals(slots, visualSettings, viewer.options());
     scene->addChild(visuals.node());
-    world::Trails trails(opt.vehicles, 900, 0.25, viewer.options()); // ~3.75 min of path per vehicle
+    world::Trails trails(slots, 900, 0.25, viewer.options());
     scene->addChild(trails.node());
+    if (!opt.demo)
+        for (std::size_t i = 0; i < slots; ++i) { visuals.setVisible(i, false); trails.setEnabled(i, false); }
 
     auto controls = std::make_shared<ui::ViewerControls>();
     controls->timeFactor.store(opt.timeFactor);
     controls->cameraMode.store(opt.cameraMode);
     auto gui = ui::MonitorGui::create(controls, opt.aircraft);
     auto imgui = vsgImGui::RenderImGui::create(viewer.window(), gui);
-    ImGui::GetIO().IniFilename = nullptr; // layout is deterministic; don't litter the cwd with imgui.ini
-    if (const double dpi = platform::systemDpiScale(); dpi > 1.01) { // process is DPI-aware: scale the UI to match
+    ImGui::GetIO().IniFilename = nullptr;
+    if (const double dpi = platform::systemDpiScale(); dpi > 1.01) {
         ImGui::GetIO().FontGlobalScale = static_cast<float>(dpi);
         ImGui::GetStyle().ScaleAllSizes(static_cast<float>(dpi));
     }
-
-    // ImGui must see events first (design 9.6), then our keys, then the trackball.
     viewer.addEventHandler(vsgImGui::SendEventsToImGui::create());
-    viewer.addEventHandler(ui::KeyHandler::create(controls, static_cast<int>(opt.vehicles)));
+    viewer.addEventHandler(ui::KeyHandler::create(controls));
     if (!viewer.setScene(scene, ellipsoid, imgui)) return 1;
-
-    // Play the model's animations (propellers) in a loop; shared subgraph, so one play covers all vehicles.
     for (auto& anim : visuals.animations()) viewer.viewer()->animationManager->play(anim);
 
     auto camera = world::CameraController::create(viewer.camera(), viewer.lookAt(), ellipsoid);
     camera->setChaseOffset(opt.chaseDistance, opt.chaseElevation, opt.chaseAzimuth);
-    viewer.addEventHandler(camera); // mouse orbit / distance; after ImGui so panels keep the pointer
+    viewer.addEventHandler(camera);
 
-    // Place the first snapshot so the camera has a target before the sim thread runs.
-    if (const auto* first = runner->snapshots().acquire()) {
-        visuals.update(Span<const sim::VehicleState>(first->states));
-        camera->update(first->states[0], 0.0);
-        gui->setBatch(first);
-    }
-    runner->start();
+    // --- Source state shared by both modes -----------------------------------------
+    world::Interpolator interpolator(slots);
+    std::vector<unsigned char> alive(slots, opt.demo ? 1 : 0);
+    std::vector<ui::MonitorGui::VehicleMeta> meta;
+    const sim::SnapshotBatch* batch = nullptr;  // latest raw batch (demo: runner's; mirror: `mirrored`)
+    sim::SnapshotBatch mirrored, interpBatch;    // mirror copy; interpolation copy keyed by wall time
+    const sim::VehicleState resting = restingState(*ellipsoid, opt.latitudeDeg, opt.longitudeDeg, opt.altitudeM);
 
-    // --- Frame loop ------------------------------------------------------------
-    world::Interpolator interpolator(opt.vehicles);
-    const sim::SnapshotBatch* batch = runner->snapshots().current();
-    if (batch) interpolator.push(*batch);
-    while (viewer.active() && !controls->quit.load(std::memory_order_relaxed)) {
-        // Controls -> sim
-        const bool paused = controls->paused.load(std::memory_order_relaxed);
-        const double timeFactor = controls->timeFactor.load(std::memory_order_relaxed);
-        runner->setPaused(paused);
-        runner->setTimeFactor(timeFactor);
-        if (controls->singleStep.exchange(false)) runner->singleStep();
+    ipc::WorldMirror mirror;
+    double lastDiscovery = -10.0, lastSunUpdate = -1e9;
+    std::vector<std::string> available;
+    std::uint64_t lastVehicleSteps = 0;
+    double lastStepsWall = 0.0, publishedSps = 0.0;
 
-        // Sim -> scene: snapshots arrive at the agent rate; the interpolator turns
-        // them into smooth per-frame states against a render-side sim clock.
-        if (const auto* fresh = runner->snapshots().acquire()) {
-            batch = fresh;
-            interpolator.push(*fresh);
+    if (runner) {
+        runner->start();
+        if (const auto* first = runner->snapshots().acquire()) {
+            batch = first;
+            interpolator.push(*first);
+            visuals.update(Span<const sim::VehicleState>(first->states));
+            camera->update(first->states[0], 0.0);
         }
-        const int selected = std::clamp(controls->selectedVehicle.load(std::memory_order_relaxed), 0, static_cast<int>(opt.vehicles) - 1);
+    }
+
+    // --- Frame loop ------------------------------------------------------------------
+    double wallSeconds = 0.0;
+    while (viewer.active() && !controls->quit.load(std::memory_order_relaxed)) {
+        wallSeconds += viewer.frameSeconds();
+        bool paused = false;
+        double timeFactor = 1.0;
+
+        if (runner) {
+            paused = controls->paused.load(std::memory_order_relaxed);
+            timeFactor = controls->timeFactor.load(std::memory_order_relaxed);
+            runner->setPaused(paused);
+            runner->setTimeFactor(timeFactor);
+            if (controls->singleStep.exchange(false)) runner->singleStep();
+            if (const auto* fresh = runner->snapshots().acquire()) {
+                batch = fresh;
+                interpolator.push(*fresh);
+            }
+            controls->simThroughput.store(runner->throughput(), std::memory_order_relaxed);
+            if (batch) controls->simTime.store(batch->simTime, std::memory_order_relaxed);
+        } else {
+            // Discovery: attach to the requested (or newest) world; re-attach after a restart.
+            if (!mirror.valid() && wallSeconds - lastDiscovery > 0.5) {
+                lastDiscovery = wallSeconds;
+                const auto worlds = ipc::WorldRegistry::list();
+                available.clear();
+                for (const auto& w : worlds) available.push_back(w.name);
+                std::string pick;
+                if (!opt.worldName.empty()) {
+                    for (const auto& w : worlds) if (w.name == opt.worldName) pick = w.name;
+                } else if (!worlds.empty()) {
+                    pick = worlds.front().name;
+                }
+                if (!pick.empty() && mirror.open(pick)) {
+                    if (mirror.capacity() != slots) LOG_WARN("app") << "world capacity " << mirror.capacity() << " differs from --capacity " << slots
+                                                                     << "; only the first " << std::min<std::size_t>(slots, mirror.capacity()) << " slots are shown";
+                    LOG_INFO("app") << "attached to world '" << pick << "'";
+                    interpolator = world::Interpolator(slots);
+                    for (std::size_t i = 0; i < slots; ++i) trails.setEnabled(i, false);
+                    lastVehicleSteps = mirror.vehicleSteps();
+                    lastStepsWall = wallSeconds;
+                }
+            }
+            if (mirror.valid()) {
+                if (mirror.pollTable()) {
+                    meta.assign(slots, ui::MonitorGui::VehicleMeta{});
+                    const auto& table = mirror.vehicles();
+                    for (std::size_t i = 0; i < slots && i < table.size(); ++i) {
+                        const auto& v = table[i];
+                        alive[i] = v.alive ? 1 : 0;
+                        meta[i].name = v.name;
+                        meta[i].type = v.type;
+                        meta[i].alive = v.alive;
+                        meta[i].level = control::levelName(static_cast<control::Level>(v.controlLevel));
+                        visuals.setVisible(i, v.alive);
+                        trails.setEnabled(i, v.alive);
+                    }
+                    gui->setVehicles(meta);
+                }
+                if (mirror.pollSnapshot(mirrored)) {
+                    if (mirrored.states.size() != slots) mirrored.states.resize(slots);
+                    batch = &mirrored;
+                    interpBatch = mirrored;
+                    interpBatch.simTime = static_cast<double>(mirrored.wallNs) * 1e-9; // interpolate in wall time: the trainer's pace is arbitrary
+                    interpolator.push(interpBatch);
+                }
+                if (wallSeconds - lastStepsWall >= 1.0) {
+                    const std::uint64_t steps = mirror.vehicleSteps();
+                    publishedSps = static_cast<double>(steps - lastVehicleSteps) / (wallSeconds - lastStepsWall);
+                    lastVehicleSteps = steps;
+                    lastStepsWall = wallSeconds;
+                }
+                // Sun from the world's clock (unless overridden on the command line).
+                const auto env = mirror.environment();
+                if (opt.sunUtcHours < 0.0 && env.epochUtcSeconds > 0.0 && wallSeconds - lastSunUpdate > 1.0 && batch) {
+                    lastSunUpdate = wallSeconds;
+                    world::utcOf(env.epochUtcSeconds + batch->simTime, day, hours);
+                    sunDir = world::sunDirectionEcef(day, hours);
+                    sky.setSun(sunDir);
+                    if (sunLight) world::setSunDirection(sunLight, sunDir);
+                }
+                if (!mirror.publisherAlive() && mirror.ageSeconds() > 5.0) {
+                    LOG_INFO("app") << "world '" << mirror.name() << "' has gone; waiting for another";
+                    mirror.close();
+                    batch = nullptr;
+                    std::fill(alive.begin(), alive.end(), 0);
+                    for (std::size_t i = 0; i < slots; ++i) { visuals.setVisible(i, false); trails.setEnabled(i, false); }
+                    meta.clear();
+                    gui->setVehicles(meta);
+                }
+            }
+            ui::MonitorGui::Source src;
+            src.mirror = true;
+            src.attached = mirror.valid();
+            src.world = mirror.name();
+            src.ageSeconds = mirror.ageSeconds();
+            src.publisherAlive = mirror.publisherAlive();
+            src.simTime = batch ? batch->simTime : 0.0;
+            src.vehicleStepsPerSecond = publishedSps;
+            src.available = available;
+            if (mirror.valid()) src.environment = describe(mirror.environment(), src.simTime);
+            gui->setSource(src);
+            if (batch) controls->simTime.store(batch->simTime, std::memory_order_relaxed);
+        }
+
+        // Selection: only live slots.
+        int selected = controls->selectedVehicle.load(std::memory_order_relaxed);
+        if (const int step = controls->selectStep.exchange(0); step != 0) {
+            const int n = static_cast<int>(slots);
+            for (int k = 1; k <= n; ++k) {
+                const int candidate = ((selected + step * k) % n + n) % n;
+                if (alive[static_cast<std::size_t>(candidate)]) { selected = candidate; break; }
+            }
+        }
+        if (selected < 0 || static_cast<std::size_t>(selected) >= slots || !alive[static_cast<std::size_t>(selected)]) {
+            for (std::size_t i = 0; i < slots; ++i)
+                if (alive[i]) { selected = static_cast<int>(i); break; }
+        }
+        controls->selectedVehicle.store(selected, std::memory_order_relaxed);
+
+        // Sim -> scene
+        const bool anyAlive = std::any_of(alive.begin(), alive.end(), [](unsigned char a) { return a != 0; });
         if (batch) {
             interpolator.update(viewer.frameSeconds(), timeFactor, paused);
             const auto& states = opt.interpolate ? interpolator.states() : batch->states;
             visuals.update(Span<const sim::VehicleState>(states));
             visuals.setSelected(selected);
-            camera->setMode(static_cast<world::CameraController::Mode>(controls->cameraMode.load(std::memory_order_relaxed)));
-            if (const double z = controls->cameraZoom.exchange(1.0); z != 1.0) camera->zoom(z);
-            if (controls->cameraReset.exchange(false)) camera->resetView();
-            camera->update(states[static_cast<std::size_t>(selected)], viewer.frameSeconds());
-            sky.update(viewer.lookAt()->eye);
-
             trails.setSelected(selected);
             trails.setVisible(controls->showTrails.load(std::memory_order_relaxed));
-            trails.update(Span<const sim::VehicleState>(batch->states), batch->simTime);
+            trails.update(Span<const sim::VehicleState>(batch->states), runner ? batch->simTime : static_cast<double>(batch->wallNs) * 1e-9);
 
-            // Vehicle labels: project ECEF positions to window pixels (Vulkan NDC, y down).
             gui->setShowLabels(controls->showLabels.load(std::memory_order_relaxed));
             std::vector<ui::MonitorGui::Label> labels;
             const vsg::dmat4 viewProj = viewer.camera()->projectionMatrix->transform() * viewer.camera()->viewMatrix->transform();
             const auto extent = viewer.window()->extent2D();
             for (std::size_t i = 0; i < states.size(); ++i) {
+                if (!alive[i]) continue;
                 const vsg::dvec4 clip = viewProj * vsg::dvec4(states[i].positionEcef[0], states[i].positionEcef[1], states[i].positionEcef[2], 1.0);
                 if (clip.w <= 0.0) continue;
                 const double nx = clip.x / clip.w, ny = clip.y / clip.w;
@@ -390,15 +560,21 @@ int main(int argc, char** argv) {
                 ui::MonitorGui::Label l;
                 l.x = static_cast<float>((nx * 0.5 + 0.5) * extent.width);
                 l.y = static_cast<float>((ny * 0.5 + 0.5) * extent.height);
-                l.text = "v" + std::to_string(i) + (states[i].diverged ? " !" : "");
+                l.text = (i < meta.size() && !meta[i].name.empty() ? meta[i].name : "v" + std::to_string(i)) + (states[i].diverged ? " !" : "");
                 l.selected = static_cast<int>(i) == selected;
                 labels.push_back(std::move(l));
             }
             gui->setLabels(std::move(labels));
-
-            controls->simTime.store(batch->simTime, std::memory_order_relaxed);
             controls->snapshotSequence.store(batch->sequence, std::memory_order_relaxed);
         }
+        camera->setMode(static_cast<world::CameraController::Mode>(controls->cameraMode.load(std::memory_order_relaxed)));
+        if (const double z = controls->cameraZoom.exchange(1.0); z != 1.0) camera->zoom(z);
+        if (controls->cameraReset.exchange(false)) camera->resetView();
+        const sim::VehicleState& target = (batch && anyAlive && selected >= 0)
+            ? (opt.interpolate ? interpolator.states() : batch->states)[static_cast<std::size_t>(selected)] : resting;
+        camera->update(target, viewer.frameSeconds());
+        sky.update(viewer.lookAt()->eye);
+
         if (opt.trace >= 0 && batch && static_cast<std::size_t>(opt.trace) < batch->states.size()) {
             static double lastTrace = -1.0;
             if (batch->simTime - lastTrace >= 1.0) {
@@ -412,24 +588,20 @@ int main(int argc, char** argv) {
                 std::fflush(stdout);
             }
         }
-        // Keep the physics tiles around every vehicle warm (background fetch).
         static int tileTick = 0;
         if (terrain && batch && ++tileTick % 60 == 0)
             for (const auto& st : batch->states) terrain->requestAround(st.latitudeRad, st.longitudeRad);
         gui->setBatch(batch);
         controls->fps.store(viewer.fps(), std::memory_order_relaxed);
         controls->frameMs.store(viewer.frameSeconds() * 1e3, std::memory_order_relaxed);
-        controls->simThroughput.store(runner->throughput(), std::memory_order_relaxed);
 
         if (!viewer.frame()) break;
 
-        if (opt.probe && batch) {
-            // Motion-smoothness probe: per-frame speed of the followed vehicle as seen
-            // by the renderer (should be near-constant), and eye-target distance.
+        if (opt.probe && batch && runner) {
             static std::vector<double> speeds, distances;
             static vsg::dvec3 lastPos;
             static bool havePos = false;
-            static int warmup = 60; // skip start-up frames (clock snap, vsync not yet engaged)
+            static int warmup = 60;
             if (warmup > 0) { --warmup; havePos = false; }
             const auto& st = (opt.interpolate ? interpolator.states() : batch->states)[static_cast<std::size_t>(selected)];
             const vsg::dvec3 pos(st.positionEcef[0], st.positionEcef[1], st.positionEcef[2]);
@@ -458,6 +630,6 @@ int main(int argc, char** argv) {
         }
     }
 
-    runner->stop();
+    if (runner) runner->stop();
     return 0;
 }

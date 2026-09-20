@@ -38,6 +38,10 @@ public:
 
     /// Highlight one vehicle (or none with -1).
     void setSelected(int index);
+
+    /// Show or hide one vehicle (mirror mode: slots without a live vehicle).
+    void setVisible(std::size_t index, bool visible);
+    bool visible(std::size_t index) const noexcept { return index < visible_.size() && visible_[index]; }
     int selected() const noexcept { return selected_; }
 
     std::size_t count() const { return transforms_.size(); }
@@ -53,7 +57,9 @@ private:
     std::vector<vsg::ref_ptr<vsg::MatrixTransform>> transforms_;
     std::vector<vsg::ref_ptr<vsg::Switch>> highlight_;
     int selected_ = -1;
+    std::vector<unsigned char> visible_;
     vsg::Animations animations_;
+    void applySwitch(std::size_t index);
 };
 
 } // namespace fsim::world

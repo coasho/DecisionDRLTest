@@ -47,21 +47,50 @@ void MonitorGui::drawMonitor() const {
     const double sps = controls_->simThroughput.load(std::memory_order_relaxed);
     const double simTime = controls_->simTime.load(std::memory_order_relaxed);
 
-    ImGui::Text("%s  x %zu", aircraft_.c_str(), batch_ ? batch_->states.size() : std::size_t{0});
-    ImGui::Separator();
-    ImGui::Text("render   %6.1f fps   %6.2f ms/frame", fps, frameMs);
-    ImGui::Text("sim      %9.0f vehicle-steps/s", sps);
-    ImGui::Text("sim time %9.2f s", simTime);
+    std::size_t live = 0;
+    if (!vehicles_.empty()) {
+        for (const auto& v : vehicles_) live += v.alive ? 1 : 0;
+    } else if (batch_) {
+        live = batch_->states.size();
+    }
+    if (source_.mirror) {
+        if (!source_.attached) {
+            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "waiting for a training application...");
+            ImGui::TextDisabled("start any program that creates an fsim::World");
+            if (!source_.available.empty()) {
+                ImGui::Text("worlds in the registry:");
+                for (const auto& w : source_.available) ImGui::BulletText("%s", w.c_str());
+            }
+        } else {
+            ImGui::Text("world '%s'  x %zu vehicle(s)", source_.world.c_str(), live);
+            if (!source_.publisherAlive) ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.3f, 1.0f), "training application has exited");
+            else if (source_.ageSeconds > 2.0) ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "not updating (%.0f s)", source_.ageSeconds);
+            else ImGui::TextDisabled("live, last update %.0f ms ago", source_.ageSeconds * 1e3);
+        }
+        ImGui::Separator();
+        ImGui::Text("render   %6.1f fps   %6.2f ms/frame", fps, frameMs);
+        ImGui::Text("trainer  %9.0f vehicle-steps/s", source_.vehicleStepsPerSecond);
+        ImGui::Text("sim time %9.2f s", source_.simTime);
+        if (!source_.environment.empty()) ImGui::TextWrapped("%s", source_.environment.c_str());
+        ImGui::Separator();
+        ImGui::TextDisabled("the training application sets the pace");
+    } else {
+        ImGui::Text("%s  x %zu", aircraft_.c_str(), live);
+        ImGui::Separator();
+        ImGui::Text("render   %6.1f fps   %6.2f ms/frame", fps, frameMs);
+        ImGui::Text("sim      %9.0f vehicle-steps/s", sps);
+        ImGui::Text("sim time %9.2f s", simTime);
 
-    ImGui::Separator();
-    bool paused = controls_->paused.load(std::memory_order_relaxed);
-    if (ImGui::Checkbox("pause  [space]", &paused)) controls_->paused.store(paused, std::memory_order_relaxed);
-    ImGui::SameLine();
-    if (ImGui::Button("step  [.]")) controls_->singleStep.store(true, std::memory_order_relaxed);
+        ImGui::Separator();
+        bool paused = controls_->paused.load(std::memory_order_relaxed);
+        if (ImGui::Checkbox("pause  [space]", &paused)) controls_->paused.store(paused, std::memory_order_relaxed);
+        ImGui::SameLine();
+        if (ImGui::Button("step  [.]")) controls_->singleStep.store(true, std::memory_order_relaxed);
 
-    float factor = static_cast<float>(controls_->timeFactor.load(std::memory_order_relaxed));
-    if (ImGui::SliderFloat("time factor", &factor, 0.1f, 32.0f, "%.2fx", ImGuiSliderFlags_Logarithmic))
-        controls_->timeFactor.store(static_cast<double>(factor), std::memory_order_relaxed);
+        float factor = static_cast<float>(controls_->timeFactor.load(std::memory_order_relaxed));
+        if (ImGui::SliderFloat("time factor", &factor, 0.1f, 32.0f, "%.2fx", ImGuiSliderFlags_Logarithmic))
+            controls_->timeFactor.store(static_cast<double>(factor), std::memory_order_relaxed);
+    }
 
     int mode = controls_->cameraMode.load(std::memory_order_relaxed);
     const char* modes[] = {"chase (follows heading)", "orbit (north-up)", "overview"};
@@ -81,7 +110,9 @@ void MonitorGui::drawMonitor() const {
                                    static_cast<int>(batch_->states.size()) - 1);
         const auto& s = batch_->states[static_cast<std::size_t>(sel)];
         ImGui::Separator();
-        ImGui::Text("vehicle %d  [tab / shift+tab]", sel);
+        const auto* meta = static_cast<std::size_t>(sel) < vehicles_.size() ? &vehicles_[static_cast<std::size_t>(sel)] : nullptr;
+        if (meta && meta->alive) ImGui::Text("%s  (%s, %s)  [tab / shift+tab]", meta->name.c_str(), meta->type.c_str(), meta->level);
+        else ImGui::Text("vehicle %d  [tab / shift+tab]", sel);
         ImGui::Text("alt %7.1f m   agl %7.1f m   tas %5.1f m/s (%4.0f kt)", s.altitudeMslM, s.altitudeAglM,
                     s.airspeedTrueMs, units::metresPerSecondToKnots(s.airspeedTrueMs));
         ImGui::Text("roll %6.1f  pitch %6.1f  hdg %6.1f  alpha %5.2f  n %4.2f", units::radiansToDegrees(s.eulerRad[0]),
@@ -105,9 +136,10 @@ void MonitorGui::drawVehicleList() const {
     const int selected = controls_->selectedVehicle.load(std::memory_order_relaxed);
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollY |
                                   ImGuiTableFlags_SizingFixedFit;
-    if (ImGui::BeginTable("vehicles", 7, flags)) {
+    if (ImGui::BeginTable("vehicles", 8, flags)) {
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("#");
+        ImGui::TableSetupColumn("name");
+        ImGui::TableSetupColumn("control");
         ImGui::TableSetupColumn("alt m");
         ImGui::TableSetupColumn("agl m");
         ImGui::TableSetupColumn("tas m/s");
@@ -116,25 +148,29 @@ void MonitorGui::drawVehicleList() const {
         ImGui::TableSetupColumn("state");
         ImGui::TableHeadersRow();
         for (std::size_t i = 0; i < batch_->states.size(); ++i) {
+            const auto* meta = i < vehicles_.size() ? &vehicles_[i] : nullptr;
+            if (meta && !meta->alive) continue;
             const auto& s = batch_->states[i];
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
-            char label[16];
-            std::snprintf(label, sizeof label, "%zu", i);
+            char label[96];
+            if (meta) std::snprintf(label, sizeof label, "%s##%zu", meta->name.c_str(), i);
+            else std::snprintf(label, sizeof label, "v%zu", i);
             if (ImGui::Selectable(label, static_cast<int>(i) == selected, ImGuiSelectableFlags_SpanAllColumns))
                 controls_->selectedVehicle.store(static_cast<int>(i), std::memory_order_relaxed);
+            ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(meta ? meta->level : "");
             if (s.diverged) {
-                for (int c = 1; c <= 5; ++c) { ImGui::TableSetColumnIndex(c); ImGui::TextUnformatted("-"); }
-                ImGui::TableSetColumnIndex(6);
+                for (int c = 2; c <= 6; ++c) { ImGui::TableSetColumnIndex(c); ImGui::TextUnformatted("-"); }
+                ImGui::TableSetColumnIndex(7);
                 ImGui::TextUnformatted("DIVERGED");
                 continue;
             }
-            ImGui::TableSetColumnIndex(1); ImGui::Text("%7.0f", s.altitudeMslM);
-            ImGui::TableSetColumnIndex(2); ImGui::Text("%7.0f", s.altitudeAglM);
-            ImGui::TableSetColumnIndex(3); ImGui::Text("%5.1f", s.airspeedTrueMs);
-            ImGui::TableSetColumnIndex(4); ImGui::Text("%5.0f", units::radiansToDegrees(s.eulerRad[2]));
-            ImGui::TableSetColumnIndex(5); ImGui::Text("%5.0f", units::radiansToDegrees(s.eulerRad[0]));
-            ImGui::TableSetColumnIndex(6);
+            ImGui::TableSetColumnIndex(2); ImGui::Text("%7.0f", s.altitudeMslM);
+            ImGui::TableSetColumnIndex(3); ImGui::Text("%7.0f", s.altitudeAglM);
+            ImGui::TableSetColumnIndex(4); ImGui::Text("%5.1f", s.airspeedTrueMs);
+            ImGui::TableSetColumnIndex(5); ImGui::Text("%5.0f", units::radiansToDegrees(s.eulerRad[2]));
+            ImGui::TableSetColumnIndex(6); ImGui::Text("%5.0f", units::radiansToDegrees(s.eulerRad[0]));
+            ImGui::TableSetColumnIndex(7);
             ImGui::TextUnformatted(s.onGround ? "ground" : "airborne");
         }
         ImGui::EndTable();

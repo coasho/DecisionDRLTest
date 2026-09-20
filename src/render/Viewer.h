@@ -16,6 +16,7 @@ struct ViewerSettings {
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_4_BIT;
     double fieldOfViewDeg = 30.0;
     bool headlight = true;     ///< off when the scene brings its own lights (sun)
+    double maxFps = 60.0;      ///< frame-rate cap (0 = uncapped); keeps a mirror viewer from competing with the trainer for CPU
 };
 
 /// One window, one vsg::Viewer, one camera, one command graph: scene first,

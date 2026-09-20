@@ -20,14 +20,12 @@ namespace fsim::ui {
 ///   [ / ]        time factor / 2, x 2  esc        quit
 class KeyHandler : public vsg::Inherit<vsg::Visitor, KeyHandler> {
 public:
-    KeyHandler(std::shared_ptr<ViewerControls> controls, int vehicleCount)
-        : controls_(std::move(controls)), vehicles_(vehicleCount) {}
+    explicit KeyHandler(std::shared_ptr<ViewerControls> controls) : controls_(std::move(controls)) {}
 
     void apply(vsg::KeyPressEvent& e) override;
 
 private:
     std::shared_ptr<ViewerControls> controls_;
-    int vehicles_;
 };
 
 } // namespace fsim::ui

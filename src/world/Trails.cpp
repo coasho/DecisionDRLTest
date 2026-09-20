@@ -47,6 +47,7 @@ void Trails::update(Span<const sim::VehicleState> states, double simTime) {
     const std::size_t n = std::min(states.size(), trails_.size());
     for (std::size_t i = 0; i < n; ++i) {
         Trail& t = trails_[i];
+        if (!t.enabled) continue;
         if (states[i].diverged) {
             t.history.clear();
             t.originSet = false;
@@ -77,6 +78,18 @@ void Trails::rewrite(Trail& t, bool selected) {
     t.vertices->dirty();
     t.colors->dirty();
     t.draw->vertexCount = static_cast<std::uint32_t>(count >= 2 ? count : 0);
+}
+
+void Trails::setEnabled(std::size_t index, bool enabled) {
+    if (index >= trails_.size()) return;
+    Trail& t = trails_[index];
+    if (t.enabled == enabled) return;
+    t.enabled = enabled;
+    if (!enabled) {
+        t.history.clear();
+        t.originSet = false;
+        t.draw->vertexCount = 0;
+    }
 }
 
 } // namespace fsim::world

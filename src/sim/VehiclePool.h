@@ -23,7 +23,7 @@ namespace fsim::sim {
 class VehiclePool {
 public:
     /// @param workers number of worker threads; 0 or 1 = step on the calling thread
-    /// @param pinWorkers pin workers to logical cores 1..N (design 12.2)
+    /// @param pinWorkers pin worker i to physical core 1 + i (design 12.2)
     explicit VehiclePool(unsigned workers, bool pinWorkers = false);
     ~VehiclePool();
 

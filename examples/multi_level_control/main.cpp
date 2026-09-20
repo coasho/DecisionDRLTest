@@ -3,7 +3,7 @@
 // plus wind, effects and a beacon protocol. Start flightsim-viewer.exe in
 // another window at any time to watch it.
 //
-//   multi_level_control [--seconds S] [--realtime] [--aircraft c172x] [--name demo]
+//   multi_level_control [--seconds S] [--realtime] [--aircraft c172x] [--name demo] [--extra N] [--quiet]
 
 #include <fsim/BuiltinEffects.h>
 #include <fsim/World.h>
@@ -27,6 +27,8 @@ struct Args {
     bool realtime = false;
     std::string aircraft = "c172x";
     std::string name = "demo";
+    int extra = 0; ///< additional vehicles on the "hold" behaviour (throughput tests)
+    bool quiet = false;
 };
 
 Args parse(int argc, char** argv) {
@@ -38,6 +40,8 @@ Args parse(int argc, char** argv) {
         else if (k == "--realtime") a.realtime = true;
         else if (k == "--aircraft") a.aircraft = next();
         else if (k == "--name") a.name = next();
+        else if (k == "--extra") a.extra = std::atoi(next());
+        else if (k == "--quiet") a.quiet = true;
     }
     return a;
 }
@@ -115,6 +119,14 @@ int main(int argc, char** argv) {
     orbit.params["altitude_m"] = 1350.0;
     loiter.command(orbit);
 
+    // Extra vehicles holding their initial course (for throughput tests).
+    for (int i = 0; i < args.extra; ++i) {
+        Vehicle v = spawn(("hold-" + std::to_string(i)).c_str(), -0.05 + 0.002 * (i % 50), 0.05 + 0.002 * (i / 50), 270.0);
+        control::BehaviorCommand hold;
+        hold.id = "hold";
+        v.command(hold);
+    }
+
     // Effects and communication: noisy sensors on the chaser, gusts everywhere, beacons on all.
     chaser.addEffect<effects::GaussianSensorNoise>();
     world.addEffectToAll<effects::WindGusts>();
@@ -125,7 +137,7 @@ int main(int argc, char** argv) {
     const auto t0 = std::chrono::steady_clock::now();
     for (int k = 1; k <= steps; ++k) {
         world.step();
-        if (k % static_cast<int>(10.0 / stepS) == 0) {
+        if (!args.quiet && k % static_cast<int>(10.0 / stepS) == 0) {
             std::printf("--- %.0f s (received beacons: %llu on '%s')\n", world.time(), static_cast<unsigned long long>(chaser.node()->received()),
                         chaser.name().c_str());
             for (auto& v : world.vehicles()) report(world.time(), v);

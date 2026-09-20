@@ -24,6 +24,8 @@ public:
 
     void setSelected(int index) { selected_ = index; }
     void setVisible(bool on) { root_->setAllChildren(on); }
+    /// Disable (and clear) a vehicle's trail, e.g. for slots without a live vehicle.
+    void setEnabled(std::size_t index, bool enabled);
 
 private:
     struct Trail {
@@ -34,6 +36,7 @@ private:
         std::vector<vsg::dvec3> history; ///< oldest .. newest
         vsg::dvec3 origin;
         bool originSet = false;
+        bool enabled = true;
     };
     void rewrite(Trail& t, bool selected);
 

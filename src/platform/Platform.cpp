@@ -69,6 +69,33 @@ bool pinCurrentThreadToCore(unsigned logicalCore) noexcept {
 #endif
 }
 
+unsigned logicalProcessorOfCore(unsigned physicalCore) noexcept {
+#ifdef _WIN32
+    DWORD length = 0;
+    GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &length);
+    if (length == 0) return physicalCore;
+    std::vector<unsigned char> buffer(length);
+    auto* info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data());
+    if (!GetLogicalProcessorInformationEx(RelationProcessorCore, info, &length)) return physicalCore;
+    unsigned index = 0;
+    for (DWORD offset = 0; offset < length;) {
+        auto* entry = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data() + offset);
+        if (entry->Relationship == RelationProcessorCore) {
+            if (index == physicalCore && entry->Processor.GroupCount > 0) {
+                const KAFFINITY mask = entry->Processor.GroupMask[0].Mask;
+                for (unsigned bit = 0; bit < 64; ++bit)
+                    if (mask & (KAFFINITY{1} << bit)) return bit; // group 0 only
+            }
+            ++index;
+        }
+        offset += entry->Size;
+    }
+    return physicalCore;
+#else
+    return physicalCore;
+#endif
+}
+
 bool enableHighDpiAwareness() noexcept {
 #ifdef _WIN32
     // Windows 10 1703+: per-monitor v2. Loaded dynamically so older systems fall

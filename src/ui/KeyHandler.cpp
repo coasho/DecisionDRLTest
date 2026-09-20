@@ -16,13 +16,9 @@ void KeyHandler::apply(vsg::KeyPressEvent& e) {
     case vsg::KEY_Period:
         c.singleStep.store(true, std::memory_order_relaxed);
         break;
-    case vsg::KEY_Tab: {
-        if (vehicles_ <= 0) break;
-        int sel = c.selectedVehicle.load(std::memory_order_relaxed);
-        sel = shift ? (sel + vehicles_ - 1) % vehicles_ : (sel + 1) % vehicles_;
-        c.selectedVehicle.store(sel, std::memory_order_relaxed);
+    case vsg::KEY_Tab:
+        c.selectStep.store(shift ? -1 : 1, std::memory_order_relaxed); // resolved by the loop (live vehicles only)
         break;
-    }
     case vsg::KEY_c:
     case vsg::KEY_C:
         c.cameraMode.store((c.cameraMode.load(std::memory_order_relaxed) + 1) % 3, std::memory_order_relaxed);

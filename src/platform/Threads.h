@@ -18,6 +18,11 @@ void setCurrentThreadName(std::string_view name) noexcept;
 /// false if the OS refused. Used for simulation workers (design 12.2).
 bool pinCurrentThreadToCore(unsigned logicalCore) noexcept;
 
+/// First logical processor of physical core `physicalCore` (so that threads
+/// pinned to different physical cores never share SMT siblings). Falls back
+/// to `physicalCore` itself when the topology is unknown.
+unsigned logicalProcessorOfCore(unsigned physicalCore) noexcept;
+
 /// Declare the process per-monitor-DPI aware so window client sizes are in
 /// physical pixels and match the Vulkan swapchain. Must be called before any
 /// window is created; best effort on older Windows. Returns false if refused.

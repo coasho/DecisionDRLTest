@@ -152,6 +152,7 @@ World::World(const WorldOptions& options) : environment_(*this) {
     o.dt = options.dt;
     o.frameSkip = options.frameSkip;
     o.workers = options.workers;
+    o.pinWorkers = options.pinWorkers;
     o.seed = options.seed;
     o.capacity = options.capacity;
     o.publish = options.publish;

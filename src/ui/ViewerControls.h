@@ -13,6 +13,7 @@ struct ViewerControls {
     std::atomic<bool> singleStep{false};
     std::atomic<double> timeFactor{1.0};
     std::atomic<int> selectedVehicle{0};
+    std::atomic<int> selectStep{0};      ///< +1 / -1: move the selection to the next / previous live vehicle
     std::atomic<int> cameraMode{0};      ///< world::CameraController::Mode
     std::atomic<double> cameraZoom{1.0}; ///< multiplicative request, consumed each frame
     std::atomic<bool> cameraReset{false};

@@ -78,7 +78,9 @@ void VehiclePool::dispatch(const Job& job) {
 
 void VehiclePool::workerLoop(unsigned index) {
     platform::setCurrentThreadName("fsim-sim-" + std::to_string(index));
-    if (pinWorkers_) platform::pinCurrentThreadToCore(1 + index);
+    // One worker per physical core, starting at core 1 (core 0 is left to the
+    // caller's thread): two workers on SMT siblings would stall the lockstep.
+    if (pinWorkers_) platform::pinCurrentThreadToCore(platform::logicalProcessorOfCore((1 + index) % platform::physicalCoreCount()));
 
     std::uint64_t seen = 0;
     for (;;) {

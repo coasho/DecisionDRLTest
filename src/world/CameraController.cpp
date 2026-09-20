@@ -80,9 +80,10 @@ void CameraController::apply(vsg::MoveEvent& e) {
     lastY_ = e.y;
     if (leftDown_ && (e.mask & vsg::BUTTON_MASK_1)) {
         // The camera follows the mouse: drag right -> the eye moves right around
-        // the target; drag up -> the eye rises (screen y grows downward, hence -dy).
+        // the target; drag down (screen y grows downward) -> the eye rises and
+        // looks down on the target, as if pulling the view over it.
         azimuth_ = wrapAngle(azimuth_ + dx * 0.4 * kDeg);
-        elevation_ = std::clamp(elevation_ - dy * 0.3 * kDeg, kMinElevation, kMaxElevation);
+        elevation_ = std::clamp(elevation_ + dy * 0.3 * kDeg, kMinElevation, kMaxElevation);
         e.handled = true;
     } else if (rightDown_ && (e.mask & vsg::BUTTON_MASK_3)) {
         distance_ = std::clamp(distance_ * std::exp(dy * 0.01), kMinDistance, kMaxDistance); // drag down -> further

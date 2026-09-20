@@ -1,5 +1,8 @@
 #include "render/Viewer.h"
 
+#include <chrono>
+#include <thread>
+
 #include "core/Log.h"
 #include "platform/Paths.h"
 #include "platform/Threads.h"
@@ -95,6 +98,14 @@ bool Viewer::frame() {
     viewer_->update();
     viewer_->recordAndSubmit();
     viewer_->present();
+
+    // Frame cap: sleep the remainder (a viewer beside a training process must
+    // not burn a core spinning at the monitor's refresh rate x N).
+    if (settings_.maxFps > 0.0) {
+        const auto minFrame = std::chrono::duration<double>(1.0 / settings_.maxFps);
+        const auto elapsed = std::chrono::duration<double>(vsg::clock::now() - lastFrame_);
+        if (elapsed < minFrame) std::this_thread::sleep_for(minFrame - elapsed);
+    }
 
     const auto now = vsg::clock::now();
     frameSeconds_ = std::chrono::duration<double>(now - lastFrame_).count();

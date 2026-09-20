@@ -38,6 +38,7 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
 
     transforms_.reserve(count);
     highlight_.reserve(count);
+    visible_.assign(count, 1);
     for (std::size_t i = 0; i < count; ++i) {
         auto transform = vsg::MatrixTransform::create();
         // Shared subgraph under N transforms: one copy of the geometry on the GPU.
@@ -125,16 +126,24 @@ void VehicleVisuals::update(Span<const sim::VehicleState> states) {
     for (std::size_t i = 0; i < n; ++i) transforms_[i]->matrix = bodyToEcef(states[i]);
 }
 
+void VehicleVisuals::applySwitch(std::size_t index) {
+    auto& sw = highlight_[index];
+    sw->setAllChildren(false);
+    if (visible_[index]) sw->setSingleChildOn(static_cast<int>(index) == selected_ ? 1 : 0);
+}
+
 void VehicleVisuals::setSelected(int index) {
     if (selected_ == index) return;
-    if (selected_ >= 0 && static_cast<std::size_t>(selected_) < highlight_.size()) {
-        highlight_[static_cast<std::size_t>(selected_)]->setAllChildren(false);
-        highlight_[static_cast<std::size_t>(selected_)]->setSingleChildOn(0);
-    }
+    const int previous = selected_;
     selected_ = index;
-    if (selected_ >= 0 && static_cast<std::size_t>(selected_) < highlight_.size()) {
-        highlight_[static_cast<std::size_t>(selected_)]->setSingleChildOn(1);
-    }
+    if (previous >= 0 && static_cast<std::size_t>(previous) < highlight_.size()) applySwitch(static_cast<std::size_t>(previous));
+    if (selected_ >= 0 && static_cast<std::size_t>(selected_) < highlight_.size()) applySwitch(static_cast<std::size_t>(selected_));
+}
+
+void VehicleVisuals::setVisible(std::size_t index, bool visible) {
+    if (index >= visible_.size() || (visible_[index] != 0) == visible) return;
+    visible_[index] = visible ? 1 : 0;
+    applySwitch(index);
 }
 
 } // namespace fsim::world

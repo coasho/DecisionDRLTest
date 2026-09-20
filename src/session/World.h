@@ -30,6 +30,7 @@ struct WorldOptions {
     double dt = 1.0 / 120.0;            ///< FDM step
     int frameSkip = 4;                  ///< FDM steps per world step
     unsigned workers = 0;               ///< 0 = physical cores - 2
+    bool pinWorkers = true;             ///< one worker per physical core (throughput stability)
     std::uint64_t seed = 0;
     std::uint32_t capacity = 256;       ///< published vehicle slots
     bool publish = true;                ///< false = invisible to viewers
