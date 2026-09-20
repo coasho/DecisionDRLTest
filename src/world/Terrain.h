@@ -10,6 +10,7 @@
 #include <deque>
 #include <list>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include <unordered_set>
 #include <string>
@@ -50,6 +51,10 @@ public:
 
     double heightAboveEllipsoidM(double latitudeRad, double longitudeRad) const override;
 
+    /// Non-blocking variant for the render thread: the height if the tile is
+    /// cached, else nullopt (and the tile is queued for background loading).
+    std::optional<double> cachedHeightAboveEllipsoidM(double latitudeRad, double longitudeRad);
+
     /// Load every tile within `radiusM` of a position (blocking, parallel).
     void prefetch(double latitudeRad, double longitudeRad, double radiusM, unsigned threads = 8);
 
@@ -75,6 +80,7 @@ private:
     using Tile = vsg::ref_ptr<vsg::floatArray2D>;
 
     Tile tile(unsigned x, unsigned y) const;
+    static double sample(const Tile& t, double tx, double ty);
     Tile load(unsigned x, unsigned y) const;
     std::string tilePath(unsigned x, unsigned y) const;
 

@@ -21,7 +21,7 @@ void KeyHandler::apply(vsg::KeyPressEvent& e) {
         break;
     case vsg::KEY_c:
     case vsg::KEY_C:
-        c.cameraMode.store((c.cameraMode.load(std::memory_order_relaxed) + 1) % 3, std::memory_order_relaxed);
+        c.cameraMode.store((c.cameraMode.load(std::memory_order_relaxed) + 1) % 4, std::memory_order_relaxed);
         break;
     case vsg::KEY_Minus:
         c.cameraZoom.store(1.25, std::memory_order_relaxed);

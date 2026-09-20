@@ -93,14 +93,17 @@ void MonitorGui::drawMonitor() const {
     }
 
     int mode = controls_->cameraMode.load(std::memory_order_relaxed);
-    const char* modes[] = {"chase (follows heading)", "orbit (north-up)", "overview"};
-    if (ImGui::Combo("camera  [c]", &mode, modes, 3)) controls_->cameraMode.store(mode, std::memory_order_relaxed);
+    const char* modes[] = {"chase (follows heading)", "orbit (north-up)", "overview", "free (detached)"};
+    if (ImGui::Combo("camera  [c]", &mode, modes, 4)) controls_->cameraMode.store(mode, std::memory_order_relaxed);
+    ImGui::Text("eye  lat %9.5f  lon %10.5f  alt %8.0f m  dist %8.0f m", controls_->eyeLatDeg.load(std::memory_order_relaxed),
+                controls_->eyeLonDeg.load(std::memory_order_relaxed), controls_->eyeAltM.load(std::memory_order_relaxed),
+                controls_->eyeDistanceM.load(std::memory_order_relaxed));
     if (ImGui::Button("zoom -  [-]")) controls_->cameraZoom.store(1.25, std::memory_order_relaxed);
     ImGui::SameLine();
     if (ImGui::Button("zoom +  [=]")) controls_->cameraZoom.store(0.8, std::memory_order_relaxed);
     ImGui::SameLine();
     if (ImGui::Button("reset view  [r]")) controls_->cameraReset.store(true, std::memory_order_relaxed);
-    ImGui::TextDisabled("mouse: left drag rotate (throw), middle drag pan, right drag / wheel zoom");
+    ImGui::TextDisabled("mouse: left drag rotate, middle drag pan, wheel zoom, right drag zoom / drag the globe (free)");
 
     bool list = controls_->showVehicleList.load(std::memory_order_relaxed);
     if (ImGui::Checkbox("vehicle list  [l]", &list)) controls_->showVehicleList.store(list, std::memory_order_relaxed);

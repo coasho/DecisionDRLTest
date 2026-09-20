@@ -13,8 +13,8 @@ namespace fsim::ui {
 ///
 ///   space        pause / resume        .          single step (while paused)
 ///   tab / s+tab  next / previous vehicle
-///   c            cycle camera mode     - / =      zoom out / in
-///   r            reset view offset     mouse      left drag orbit, wheel / right drag distance
+///   c            cycle camera mode (chase, orbit, overview, free)     - / =   zoom out / in
+///   r            reset view offset     mouse      left drag rotate, middle pan, wheel zoom, right zoom / drag globe
 ///   l            toggle vehicle list   m          toggle monitor
 ///   n            toggle name labels    t          toggle trails
 ///   [ / ]        time factor / 2, x 2  esc        quit

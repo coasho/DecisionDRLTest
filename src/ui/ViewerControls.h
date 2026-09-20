@@ -17,6 +17,8 @@ struct ViewerControls {
     std::atomic<int> cameraMode{0};      ///< world::CameraController::Mode
     std::atomic<double> cameraZoom{1.0}; ///< multiplicative request, consumed each frame
     std::atomic<bool> cameraReset{false};
+    // Camera telemetry written by the loop for the GUI.
+    std::atomic<double> eyeLatDeg{0.0}, eyeLonDeg{0.0}, eyeAltM{0.0}, eyeDistanceM{0.0};
     std::atomic<bool> showVehicleList{true};
     std::atomic<bool> showMonitor{true};
     std::atomic<bool> showLabels{true};

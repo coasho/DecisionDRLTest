@@ -23,11 +23,16 @@ void mercatorTile(double latRad, double lonRad, unsigned zoom, double& tx, doubl
     if (tx >= n) tx -= n;
 }
 
+// Terrarium tiles include bathymetry. Without a water surface the sea floor
+// would render as terrain, and adjacent tiles of different LOD disagree on
+// the depth, so coasts and bays showed stepped "roof tiles". Sea level is the
+// floor: the ocean is flat at 0 in every LOD. (Land below sea level - Death
+// Valley, the Dead Sea - is flattened to 0 as well; a water mask would fix that.)
 float terrarium(const vsg::ubvec4& p) noexcept {
-    return static_cast<float>(p.r) * 256.0f + static_cast<float>(p.g) + static_cast<float>(p.b) / 256.0f - 32768.0f;
+    return std::max(0.0f, static_cast<float>(p.r) * 256.0f + static_cast<float>(p.g) + static_cast<float>(p.b) / 256.0f - 32768.0f);
 }
 float terrarium(const vsg::ubvec3& p) noexcept {
-    return static_cast<float>(p.r) * 256.0f + static_cast<float>(p.g) + static_cast<float>(p.b) / 256.0f - 32768.0f;
+    return std::max(0.0f, static_cast<float>(p.r) * 256.0f + static_cast<float>(p.g) + static_cast<float>(p.b) / 256.0f - 32768.0f);
 }
 
 template <typename Array, typename Fn>
@@ -121,7 +126,30 @@ double TileGroundProvider::heightAboveEllipsoidM(double latitudeRad, double long
     mercatorTile(latitudeRad, longitudeRad, zoom_, tx, ty);
     const double n = static_cast<double>(1u << zoom_);
     const unsigned x = static_cast<unsigned>(std::floor(tx)), y = static_cast<unsigned>(std::clamp(std::floor(ty), 0.0, n - 1.0));
-    const Tile t = tile(x, y);
+    return sample(tile(x, y), tx, ty);
+}
+
+std::optional<double> TileGroundProvider::cachedHeightAboveEllipsoidM(double latitudeRad, double longitudeRad) {
+    double tx, ty;
+    mercatorTile(latitudeRad, longitudeRad, zoom_, tx, ty);
+    const double n = static_cast<double>(1u << zoom_);
+    const Key key{static_cast<unsigned>(std::floor(tx)), static_cast<unsigned>(std::clamp(std::floor(ty), 0.0, n - 1.0))};
+    Tile t;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (auto it = cache_.find(key); it != cache_.end()) {
+            lru_.splice(lru_.begin(), lru_, it->second.second);
+            t = it->second.first;
+        }
+    }
+    if (!t) {
+        requestAround(latitudeRad, longitudeRad); // background load; known next time
+        return std::nullopt;
+    }
+    return sample(t, tx, ty);
+}
+
+double TileGroundProvider::sample(const Tile& t, double tx, double ty) {
     if (!t || t->width() < 2 || t->height() < 2) return 0.0;
 
     // Bilinear sample; tile pixel (0,0) is the north-west corner (top-left origin).

@@ -126,11 +126,12 @@ void usage(const char* prog) {
         "  --model-scale <x>        model scale (1.0)\n"
         "  --width <px> --height <px> --fullscreen --msaa <1|2|4|8> --fov <deg> --max-fps <n> (0 = vsync only)\n"
         "  --debug-layer            Vulkan validation layer\n"
-        "  --camera chase|orbit|overview   initial camera (chase)\n"
+        "  --camera chase|orbit|overview|free   initial camera (chase)\n"
         "  --log-level <lvl>\n"
         "Keys: space pause (demo), . step (demo), tab next vehicle, c camera, -/= zoom, r reset view, [ ] time factor (demo),\n"
         "      l list, m monitor, n labels, t trails, esc quit\n"
-        "Mouse (OSG trackball feel): left drag rotates (release while moving to throw), middle drag pans, right drag zooms (down = closer), wheel zooms\n",
+        "Mouse (OSG feel): left drag rotates, middle drag pans, wheel zooms (6 m .. whole Earth); right drag zooms while following a vehicle\n"
+        "      and drags the globe in free mode / while no vehicle exists; the eye never goes below the terrain\n",
         prog);
 }
 
@@ -195,7 +196,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--chase-elevation") o.chaseElevation = std::stod(next());
             else if (a == "--camera") {
                 const std::string v = next();
-                o.cameraMode = v == "orbit" ? 1 : v == "overview" ? 2 : 0;
+                o.cameraMode = v == "orbit" ? 1 : v == "overview" ? 2 : v == "free" ? 3 : 0;
             } else if (a == "--probe") o.probe = true;
             else if (a == "--stats") o.stats = std::stod(next());
             else if (a == "--trace") o.trace = std::stoi(next());
@@ -213,24 +214,6 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
         }
     }
     return o.vehicles >= 1;
-}
-
-/// A resting state at a geodetic position, heading north: what the camera
-/// looks at while no vehicle exists.
-sim::VehicleState restingState(const vsg::EllipsoidModel& ellipsoid, double latDeg, double lonDeg, double altM) {
-    sim::VehicleState s;
-    const vsg::dvec3 p = ellipsoid.convertLatLongAltitudeToECEF(vsg::dvec3(latDeg, lonDeg, altM));
-    s.positionEcef[0] = p.x; s.positionEcef[1] = p.y; s.positionEcef[2] = p.z;
-    s.latitudeRad = units::degreesToRadians(latDeg);
-    s.longitudeRad = units::degreesToRadians(lonDeg);
-    s.altitudeMslM = altM;
-    const vsg::dvec3 up = vsg::normalize(p);
-    vsg::dvec3 east = vsg::normalize(vsg::cross(vsg::dvec3(0.0, 0.0, 1.0), up));
-    const vsg::dvec3 north = vsg::cross(up, east);
-    const vsg::dvec3 axes[3] = {north, east, -up}; // body x, y, z
-    for (int r = 0; r < 3; ++r)
-        for (int c = 0; c < 3; ++c) s.rotationBodyToEcef[r * 3 + c] = axes[c][static_cast<std::size_t>(r)];
-    return s;
 }
 
 /// Environment one-liner for the monitor.
@@ -280,9 +263,13 @@ int main(int argc, char** argv) {
     io::AssetResolver assets;
     auto ellipsoid = vsg::EllipsoidModel::create(); // WGS-84
 
+    // Elevation tiles on the CPU: camera terrain collision in every mode, physics in demo mode.
+    std::shared_ptr<world::TileGroundProvider> terrain;
+    if (!opt.earth.elevationUrl.empty())
+        terrain = std::make_shared<world::TileGroundProvider>(opt.earth.elevationUrl, opt.earth.elevationEncoding, opt.terrainZoom, viewer.options());
+
     // --- Demo simulation (only with --demo) --------------------------------------
     std::unique_ptr<sim::SimRunner> runner;
-    std::shared_ptr<world::TileGroundProvider> terrain; // physics tiles (demo only)
     std::size_t slots = opt.capacity;
     if (opt.demo) {
         const auto root = assets.jsbsimRoot(opt.jsbsimRoot);
@@ -291,11 +278,9 @@ int main(int argc, char** argv) {
             return 1;
         }
         std::shared_ptr<sim::GroundProvider> ground;
-        if (!opt.earth.elevationUrl.empty()) {
-            auto tiles = std::make_shared<world::TileGroundProvider>(opt.earth.elevationUrl, opt.earth.elevationEncoding, opt.terrainZoom, viewer.options());
-            tiles->prefetch(units::degreesToRadians(opt.latitudeDeg), units::degreesToRadians(opt.longitudeDeg), 6000.0 + opt.spreadDeg * 111000.0);
-            ground = tiles;
-            terrain = tiles;
+        if (terrain) {
+            terrain->prefetch(units::degreesToRadians(opt.latitudeDeg), units::degreesToRadians(opt.longitudeDeg), 6000.0 + opt.spreadDeg * 111000.0);
+            ground = terrain;
         } else {
             ground = std::make_shared<sim::FlatGround>(0.0);
         }
@@ -403,6 +388,13 @@ int main(int argc, char** argv) {
 
     auto camera = world::CameraController::create(viewer.camera(), viewer.lookAt(), ellipsoid);
     camera->setChaseOffset(opt.chaseDistance, opt.chaseElevation, opt.chaseAzimuth);
+    if (terrain) {
+        std::shared_ptr<world::TileGroundProvider> tiles = terrain;
+        camera->setGroundQuery([tiles](double lat, double lon) { return tiles->cachedHeightAboveEllipsoidM(lat, lon); });
+    }
+    // Detached camera focus: the demo spawn area / default location, on the ground.
+    camera->setFocus(ellipsoid->convertLatLongAltitudeToECEF(vsg::dvec3(opt.latitudeDeg, opt.longitudeDeg, 0.0)));
+    if (!opt.demo) camera->zoom(300.0); // no vehicle yet: start with a regional view
     viewer.addEventHandler(camera);
 
     // --- Source state shared by both modes -----------------------------------------
@@ -411,7 +403,6 @@ int main(int argc, char** argv) {
     std::vector<ui::MonitorGui::VehicleMeta> meta;
     const sim::SnapshotBatch* batch = nullptr;  // latest raw batch (demo: runner's; mirror: `mirrored`)
     sim::SnapshotBatch mirrored, interpBatch;    // mirror copy; interpolation copy keyed by wall time
-    const sim::VehicleState resting = restingState(*ellipsoid, opt.latitudeDeg, opt.longitudeDeg, opt.altitudeM);
 
     ipc::WorldMirror mirror;
     double lastDiscovery = -10.0, lastSunUpdate = -1e9;
@@ -425,7 +416,7 @@ int main(int argc, char** argv) {
             batch = first;
             interpolator.push(*first);
             visuals.update(Span<const sim::VehicleState>(first->states));
-            camera->update(first->states[0], 0.0);
+            camera->update(&first->states[0], 0.0);
         }
     }
 
@@ -587,10 +578,17 @@ int main(int argc, char** argv) {
         camera->setMode(static_cast<world::CameraController::Mode>(controls->cameraMode.load(std::memory_order_relaxed)));
         if (const double z = controls->cameraZoom.exchange(1.0); z != 1.0) camera->zoom(z);
         if (controls->cameraReset.exchange(false)) camera->resetView();
-        const sim::VehicleState& target = (batch && anyAlive && selected >= 0)
-            ? (opt.interpolate ? interpolator.states() : batch->states)[static_cast<std::size_t>(selected)] : resting;
+        const sim::VehicleState* target = (batch && anyAlive && selected >= 0)
+            ? &(opt.interpolate ? interpolator.states() : batch->states)[static_cast<std::size_t>(selected)] : nullptr;
         camera->update(target, viewer.frameSeconds());
         sky.update(viewer.lookAt()->eye);
+        {
+            const vsg::dvec3 lla = ellipsoid->convertECEFToLatLongAltitude(viewer.lookAt()->eye);
+            controls->eyeLatDeg.store(lla.x, std::memory_order_relaxed);
+            controls->eyeLonDeg.store(lla.y, std::memory_order_relaxed);
+            controls->eyeAltM.store(lla.z, std::memory_order_relaxed);
+            controls->eyeDistanceM.store(camera->distance(), std::memory_order_relaxed);
+        }
 
         if (opt.trace >= 0 && batch && static_cast<std::size_t>(opt.trace) < batch->states.size()) {
             static double lastTrace = -1.0;
