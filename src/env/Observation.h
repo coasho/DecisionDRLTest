@@ -1,8 +1,8 @@
 #pragma once
 
 #include "env/Task.h"
-#include "sim/ControlInputs.h"
-#include "sim/VehicleState.h"
+#include "fsim/Control.h"
+#include "fsim/VehicleState.h"
 
 #include <cstddef>
 #include <string>
@@ -21,14 +21,16 @@ public:
     virtual void build(const sim::VehicleState& state, const TaskState& task, float* out) const = 0;
 };
 
-/// Maps a normalised action vector to JSBSim control commands (design 9.1
-/// "Actions").
+/// Maps a normalised action vector (each element in [-1, 1]) to a command at
+/// one level of the control stack (design 9.3, 9.9): "surfaces" -> actuators,
+/// "attitude", "acceleration", "velocity" -> the built-in loops fly it.
 class ActionMapper {
 public:
     virtual ~ActionMapper() = default;
     virtual std::size_t size() const noexcept = 0;
     virtual const std::vector<std::string>& names() const noexcept = 0;
-    virtual void map(const float* action, sim::ControlInputs& out) const = 0;
+    virtual control::Level level() const noexcept = 0;
+    virtual control::Command map(const float* action) const = 0;
 };
 
 std::unique_ptr<ObservationBuilder> createObservationBuilder(const std::string& id);

@@ -11,5 +11,5 @@ add_library(fsim_env STATIC
 add_library(fsim::env ALIAS fsim_env)
 
 target_include_directories(fsim_env PUBLIC ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(fsim_env PUBLIC fsim::sim fsim::io fsim::core)
+target_link_libraries(fsim_env PUBLIC fsim::session fsim::control fsim::sim fsim::io fsim::core)
 fsim_set_warnings(fsim_env)

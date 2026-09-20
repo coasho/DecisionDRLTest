@@ -1,12 +1,14 @@
 #pragma once
 
+#include "fsim/Export.h"
+
 class SGPropertyNode; // JSBSim property node; opaque outside the flight model
 
 namespace fsim::sim {
 
 /// Cached, O(1) read/write access to one property after a one-time lookup
 /// (design 7.1). Null-safe: get() on an invalid handle returns 0.
-class PropertyHandle {
+class FSIM_API PropertyHandle {
 public:
     PropertyHandle() = default;
     explicit PropertyHandle(SGPropertyNode* node) noexcept : node_(node) {}

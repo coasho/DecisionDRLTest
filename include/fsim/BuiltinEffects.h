@@ -7,6 +7,11 @@
 #include "fsim/Export.h"
 
 #include <deque>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace fsim::effects {
 
@@ -79,5 +84,9 @@ private:
     double outageUntil_ = -1.0;
     double bias_[2] = {0, 0};
 };
+
+/// Create a built-in effect by id with named parameters (the public fields,
+/// snake_case: "position_sigma_m", "delay_steps", "force_n_x", ...). Null if unknown.
+FSIM_API std::unique_ptr<Effect> createBuiltinEffect(std::string_view id, const std::vector<std::pair<std::string, double>>& params = {});
 
 } // namespace fsim::effects

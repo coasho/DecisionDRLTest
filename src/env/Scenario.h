@@ -22,6 +22,7 @@ struct InitialConditionRange {
 /// What an environment simulates and how it is scored. In-code struct for
 /// now; the .vsgt/JSON loader (design 9.1) maps onto it.
 struct Scenario {
+    std::string worldName = "vecenv";   ///< published world name (viewers attach by it)
     std::string aircraft = "c172x";
     std::filesystem::path jsbsimRoot;   ///< empty = auto-detect
     unsigned vehiclesPerEnv = 1;

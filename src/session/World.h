@@ -99,6 +99,7 @@ public:
     double dt() const noexcept { return options_.dt; }
     int frameSkip() const noexcept { return options_.frameSkip; }
     comm::Network& network() noexcept { return network_; }
+    const comm::Network& network() const noexcept { return network_; }
     Rng& rng() noexcept { return rng_; }
     const std::string& name() const noexcept { return options_.name; }
     bool published() const noexcept { return publisher_ && publisher_->active(); }

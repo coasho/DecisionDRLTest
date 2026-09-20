@@ -75,6 +75,7 @@ fsim::env::Scenario toScenario(const fsim_options& o) {
     ic.airspeedJitterMs = o.airspeed_jitter_ms;
     s.targetAltitudeDeltaM = o.target_altitude_delta_m;
     s.targetHeadingDeltaDeg = o.target_heading_delta_deg;
+    if (o.world_name) s.worldName = o.world_name;
     return s;
 }
 
@@ -98,6 +99,8 @@ fsim_options toOptions(const fsim::VecEnvOptions& o) {
     c.latitude_jitter_deg = o.latitudeJitterDeg; c.longitude_jitter_deg = o.longitudeJitterDeg;
     c.altitude_jitter_m = o.altitudeJitterM; c.heading_jitter_deg = o.headingJitterDeg; c.airspeed_jitter_ms = o.airspeedJitterMs;
     c.target_altitude_delta_m = o.targetAltitudeDeltaM; c.target_heading_delta_deg = o.targetHeadingDeltaDeg;
+    c.world_name = o.worldName.c_str();
+    c.publish = o.publish ? 1 : 0;
     return c;
 }
 
@@ -150,6 +153,8 @@ FSIM_API void fsim_options_init(fsim_options* o) {
     o->airspeed_jitter_ms = 5.0;
     o->target_altitude_delta_m = 300.0;
     o->target_heading_delta_deg = 60.0;
+    o->world_name = "vecenv";
+    o->publish = 1;
 }
 
 FSIM_API int fsim_vecenv_create(const fsim_options* options, fsim_vecenv** out) {
@@ -163,6 +168,7 @@ FSIM_API int fsim_vecenv_create(const fsim_options* options, fsim_vecenv** out) 
         o.numEnvs = options->num_envs;
         o.seed = options->seed;
         o.workers = options->workers;
+        o.publish = options->publish != 0;
         auto* h = new fsim_vecenv(toScenario(*options), o);
         h->last = h->env.reset();
         *out = h;

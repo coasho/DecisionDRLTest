@@ -230,6 +230,12 @@ void JsbsimModel::installExternalReaction() {
     extMomentL_ = property("external_reactions/fsim/l");
     extMomentM_ = property("external_reactions/fsim/m");
     extMomentN_ = property("external_reactions/fsim/n");
+    extLocX_ = property("external_reactions/fsim/location-x-in");
+    extLocY_ = property("external_reactions/fsim/location-y-in");
+    extLocZ_ = property("external_reactions/fsim/location-z-in");
+    cgX_ = property("inertia/cg-x-in");
+    cgY_ = property("inertia/cg-y-in");
+    cgZ_ = property("inertia/cg-z-in");
     extForceMag_.set(0.0);
     extMomentMag_.set(0.0);
 }
@@ -274,6 +280,10 @@ void JsbsimModel::setAtmosphere(double temperatureSeaLevelK, double pressureSeaL
 
 void JsbsimModel::setExternalForceBody(const double forceN[3], const double momentNm[3]) {
     if (!loaded_ || !extForceMag_.valid()) return;
+    // At the centre of gravity (structural frame, inches), so a pure force makes no moment.
+    extLocX_.set(cgX_.get());
+    extLocY_.set(cgY_.get());
+    extLocZ_.set(cgZ_.get());
     const double f = std::sqrt(forceN[0] * forceN[0] + forceN[1] * forceN[1] + forceN[2] * forceN[2]);
     if (f > 1e-9) {
         extForceX_.set(forceN[0] / f);

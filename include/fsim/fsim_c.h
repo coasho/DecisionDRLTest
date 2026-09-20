@@ -47,6 +47,9 @@ typedef struct fsim_options {
     double latitude_jitter_deg, longitude_jitter_deg, altitude_jitter_m, heading_jitter_deg, airspeed_jitter_ms;
     /* task parameters */
     double target_altitude_delta_m, target_heading_delta_deg;
+    /* appended in ABI 1.1 */
+    const char* world_name;     /* published world name for viewers ("vecenv") */
+    int32_t publish;            /* 0 = invisible to viewers */
 } fsim_options;
 
 /* Library-owned buffers, vehicle-major: index = env * K + vehicle. */
@@ -80,6 +83,152 @@ FSIM_API int fsim_vecenv_buffers(const fsim_vecenv* env, fsim_buffers* out);
 FSIM_API const char* fsim_vecenv_observation_name(const fsim_vecenv* env, uint32_t index);
 FSIM_API const char* fsim_vecenv_action_name(const fsim_vecenv* env, uint32_t index);
 FSIM_API uint64_t fsim_vecenv_vehicle_steps(const fsim_vecenv* env);
+
+/* ---------------------------------------------------------------------------
+ * World / vehicle API (design 9.2, 9.8): the object model for any language
+ * with a C FFI. Ids are world-unique and never reused within a world.
+ * ------------------------------------------------------------------------- */
+
+typedef struct fsim_world fsim_world;
+
+/* "keep the current value / let the controller decide" for optional command fields. */
+FSIM_API double fsim_hold(void);
+
+typedef struct fsim_world_options {
+    uint32_t struct_size;
+    const char* name;            /* viewers attach by this name ("default") */
+    double dt;                   /* FDM step, s */
+    int32_t frame_skip;          /* FDM steps per world step */
+    uint32_t workers;            /* 0 = automatic */
+    int32_t pin_workers;         /* 1 = one worker per physical core */
+    uint64_t seed;
+    uint32_t capacity;           /* vehicle slots visible to viewers */
+    int32_t publish;             /* 0 = invisible to viewers */
+    double publish_interval_s;
+    const char* jsbsim_root;     /* NULL = auto-detect */
+} fsim_world_options;
+
+typedef struct fsim_vehicle_spec {
+    uint32_t struct_size;
+    const char* name;            /* NULL = generated */
+    const char* type;            /* "jsbsim:c172x" */
+    double latitude_deg, longitude_deg, altitude_msl_m, heading_deg, pitch_deg, roll_deg, airspeed_ms;
+    int32_t on_ground;
+    const char* model;           /* optional glTF for the viewer */
+    uint32_t control_divider;    /* control stack every N FDM steps (1) */
+} fsim_vehicle_spec;
+
+/* Same layout as fsim::VehicleState (checked at build time). */
+#define FSIM_MAX_ENGINES 4
+typedef struct fsim_vehicle_state {
+    double sim_time;
+    double position_ecef[3];
+    double attitude_ecef_to_body[4];      /* quaternion w,x,y,z */
+    double latitude_rad, longitude_rad, altitude_msl_m, altitude_agl_m;
+    double euler_rad[3];                  /* roll, pitch, yaw */
+    double velocity_body_ms[3], velocity_ned_ms[3], angular_rate_body_rad_s[3], acceleration_body_ms2[3];
+    double airspeed_true_ms, airspeed_calibrated_ms, mach, alpha_rad, beta_rad, load_factor;
+    double aileron_rad, elevator_rad, rudder_rad, flaps_rad, gear_position;
+    int32_t engine_count;
+    double throttle_position[FSIM_MAX_ENGINES], thrust_n[FSIM_MAX_ENGINES], fuel_kg;
+    uint32_t step_count;
+    uint8_t on_ground, diverged;
+    double rotation_body_to_ecef[9];
+} fsim_vehicle_state;
+
+typedef struct fsim_environment {
+    uint32_t struct_size;
+    double epoch_utc_seconds, time_factor;
+    double temperature_sl_k, pressure_sl_pa, humidity;
+    double wind_direction_deg, wind_speed_ms, wind_gust_ms, turbulence;
+    double visibility_m, cloud_base_m, cloud_cover, precipitation;
+} fsim_environment;
+
+/* Control levels (fsim::control::Level). */
+enum fsim_level { FSIM_LEVEL_ACTUATOR = 0, FSIM_LEVEL_ATTITUDE, FSIM_LEVEL_ACCELERATION, FSIM_LEVEL_VELOCITY, FSIM_LEVEL_POSITION, FSIM_LEVEL_BEHAVIOR };
+
+typedef struct fsim_actuator_command { double aileron, elevator, rudder, throttle, flaps, gear_down, brake_left, brake_right; } fsim_actuator_command;
+typedef struct fsim_attitude_command { double roll_rad, pitch_rad, heading_rad, max_bank_rad, throttle, airspeed_ms; } fsim_attitude_command;
+typedef struct fsim_acceleration_command { double load_factor_g, roll_rate_rad_s, longitudinal_ms2, throttle; } fsim_acceleration_command;
+typedef struct fsim_velocity_command { double airspeed_ms, vertical_speed_ms, heading_rad, turn_rate_rad_s; } fsim_velocity_command;
+typedef struct fsim_position_command { double latitude_rad, longitude_rad, altitude_msl_m, airspeed_ms, capture_radius_m; } fsim_position_command;
+typedef struct fsim_behavior_command {
+    const char* id;                        /* "hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics", or a registered id */
+    uint32_t target;                       /* vehicle id for behaviours that need one */
+    const char* const* param_names;
+    const double* param_values;
+    uint32_t param_count;
+    const fsim_position_command* points;   /* route for "waypoints" */
+    uint32_t point_count;
+} fsim_behavior_command;
+
+typedef struct fsim_message {
+    uint32_t from, to, channel, format;
+    double time_sent, time_delivered;
+    const uint8_t* bytes;                  /* valid until the next world step */
+    size_t length;
+} fsim_message;
+
+FSIM_API void fsim_world_options_init(fsim_world_options* options);
+FSIM_API void fsim_vehicle_spec_init(fsim_vehicle_spec* spec);
+FSIM_API void fsim_environment_init(fsim_environment* environment);
+
+FSIM_API int fsim_world_create(const fsim_world_options* options, fsim_world** out);
+FSIM_API void fsim_world_destroy(fsim_world* world);
+FSIM_API int fsim_world_step(fsim_world* world, uint32_t steps);
+FSIM_API double fsim_world_time(const fsim_world* world);
+FSIM_API double fsim_world_step_seconds(const fsim_world* world);
+FSIM_API uint64_t fsim_world_vehicle_steps(const fsim_world* world);
+FSIM_API int fsim_world_published(const fsim_world* world);
+
+FSIM_API int fsim_world_create_vehicle(fsim_world* world, const fsim_vehicle_spec* spec, uint32_t* id);
+FSIM_API int fsim_world_remove_vehicle(fsim_world* world, uint32_t id);
+/* spec NULL = the vehicle's own initial conditions. Only the initial-state fields of `spec` are used. */
+FSIM_API int fsim_world_reset_vehicle(fsim_world* world, uint32_t id, const fsim_vehicle_spec* spec);
+FSIM_API uint32_t fsim_world_find_vehicle(const fsim_world* world, const char* name);
+FSIM_API uint32_t fsim_world_vehicle_count(const fsim_world* world);
+/* Fills up to `capacity` ids; returns the total number of vehicles. */
+FSIM_API uint32_t fsim_world_vehicle_ids(const fsim_world* world, uint32_t* ids, uint32_t capacity);
+FSIM_API const char* fsim_vehicle_name(const fsim_world* world, uint32_t id);
+FSIM_API const char* fsim_vehicle_type(const fsim_world* world, uint32_t id);
+
+/* Pointers stay valid until the vehicle is removed; contents change on every step. */
+FSIM_API const fsim_vehicle_state* fsim_vehicle_state_ptr(const fsim_world* world, uint32_t id);
+FSIM_API const fsim_vehicle_state* fsim_vehicle_sensed_ptr(const fsim_world* world, uint32_t id);
+FSIM_API int fsim_vehicle_get_property(fsim_world* world, uint32_t id, const char* path, double* value);
+FSIM_API int fsim_vehicle_set_property(fsim_world* world, uint32_t id, const char* path, double value);
+
+FSIM_API int fsim_vehicle_command_actuator(fsim_world* world, uint32_t id, const fsim_actuator_command* command);
+FSIM_API int fsim_vehicle_command_attitude(fsim_world* world, uint32_t id, const fsim_attitude_command* command);
+FSIM_API int fsim_vehicle_command_acceleration(fsim_world* world, uint32_t id, const fsim_acceleration_command* command);
+FSIM_API int fsim_vehicle_command_velocity(fsim_world* world, uint32_t id, const fsim_velocity_command* command);
+FSIM_API int fsim_vehicle_command_position(fsim_world* world, uint32_t id, const fsim_position_command* command);
+FSIM_API int fsim_vehicle_command_behavior(fsim_world* world, uint32_t id, const fsim_behavior_command* command);
+FSIM_API int fsim_vehicle_active_level(const fsim_world* world, uint32_t id);
+/* 1 if the running behaviour reports itself finished. */
+FSIM_API int fsim_vehicle_behavior_finished(const fsim_world* world, uint32_t id);
+FSIM_API int fsim_vehicle_use_controller(fsim_world* world, uint32_t id, int level, const char* controller_id);
+FSIM_API int fsim_vehicle_set_controller_parameter(fsim_world* world, uint32_t id, int level, const char* name, double value);
+
+FSIM_API int fsim_world_get_environment(const fsim_world* world, fsim_environment* out);
+FSIM_API int fsim_world_set_environment(fsim_world* world, const fsim_environment* environment);
+
+/* Built-in effects by id ("gaussian_sensor_noise", "sensor_latency", "constant_force", "wind_gusts", "gnss_degradation")
+ * with named parameters; id 0 = every vehicle, present and future. */
+FSIM_API int fsim_vehicle_add_effect(fsim_world* world, uint32_t id, const char* effect_id, const char* const* param_names,
+                                     const double* param_values, uint32_t param_count);
+FSIM_API int fsim_vehicle_clear_effects(fsim_world* world, uint32_t id);
+
+/* Communication: nodes are vehicle ids (external nodes: fsim_comm_create_node). `to` 0xFFFFFFFF = broadcast. */
+FSIM_API int fsim_comm_create_node(fsim_world* world, uint32_t address);
+FSIM_API int fsim_comm_send(fsim_world* world, uint32_t from, uint32_t to, uint32_t channel, uint32_t format, const void* bytes, size_t length);
+FSIM_API uint32_t fsim_comm_inbox_count(const fsim_world* world, uint32_t node);
+FSIM_API int fsim_comm_inbox_get(const fsim_world* world, uint32_t node, uint32_t index, fsim_message* out);
+/* medium: "ideal" | "link" (params: range_m, latency_s, jitter_s, loss_probability) */
+FSIM_API int fsim_comm_set_medium(fsim_world* world, const char* medium_id, const char* const* param_names, const double* param_values, uint32_t param_count);
+/* protocol: "beacon" (params: period_s, channel) */
+FSIM_API int fsim_comm_attach_protocol(fsim_world* world, uint32_t node, const char* protocol_id, const char* const* param_names,
+                                       const double* param_values, uint32_t param_count);
 
 #ifdef __cplusplus
 }

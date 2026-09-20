@@ -5,8 +5,8 @@
 #include "env/Observation.h"
 #include "env/Scenario.h"
 #include "env/Task.h"
+#include "session/World.h"
 #include "sim/GroundProvider.h"
-#include "sim/VehiclePool.h"
 
 #include <cstdint>
 #include <memory>
@@ -32,6 +32,7 @@ public:
         std::uint64_t seed = 0;
         unsigned workers = 0;              ///< 0 = physical cores - 2
         std::shared_ptr<sim::GroundProvider> ground; ///< null = flat at 0 m
+        bool publish = true;               ///< visible to flightsim-viewer.exe
     };
 
     struct StepResult {
@@ -67,8 +68,10 @@ public:
     /// Last observation of environments that auto-reset in the previous step (M*K*O).
     Span<const float> finalObservations() const noexcept { return Span<const float>(finalObs_.data(), finalObs_.size()); }
 
-    /// Raw vehicle states after the last step (for viewers / debugging).
-    Span<const sim::VehicleState> states() const noexcept { return pool_->states(); }
+    /// Raw vehicle state of vehicle `i` (env * K + vehicle) after the last step.
+    const sim::VehicleState& state(std::size_t i) const noexcept { return *world_->vehicleState(ids_[i]); }
+    /// The world behind the environments (vehicles can be inspected or commanded directly).
+    session::World& world() noexcept { return *world_; }
     const TaskState& taskState(std::size_t vehicle) const noexcept { return taskStates_[vehicle]; }
     const Scenario& scenario() const noexcept { return scenario_; }
 
@@ -86,15 +89,14 @@ private:
     std::uint64_t seed_;
     std::uint64_t episodeCounter_ = 0;
 
-    std::shared_ptr<sim::GroundProvider> ground_;
-    std::unique_ptr<sim::VehiclePool> pool_;
+    std::unique_ptr<session::World> world_;
+    std::vector<std::uint32_t> ids_;                          ///< vehicle id per index
     std::unique_ptr<Task> task_;
     std::unique_ptr<ObservationBuilder> obsBuilder_;
     std::unique_ptr<ActionMapper> actionMapper_;
 
     std::vector<TaskState> taskStates_;
     std::vector<sim::InitialConditions> initialConditions_; ///< per vehicle, current episode
-    std::vector<sim::ControlInputs> inputs_;
     std::vector<float> observations_, finalObs_, rewards_;
     std::vector<std::uint8_t> terminated_, truncated_;
     std::vector<std::uint32_t> episodeSteps_;

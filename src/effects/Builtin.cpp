@@ -78,4 +78,39 @@ void GnssDegradation::apply(EffectContext& ctx) {
     ctx.sensed.positionErrorM = std::hypot(bias_[0], bias_[1]);
 }
 
+std::unique_ptr<Effect> createBuiltinEffect(std::string_view id, const std::vector<std::pair<std::string, double>>& params) {
+    auto get = [&](const char* name, double& target) {
+        for (const auto& [k, v] : params)
+            if (k == name) target = v;
+    };
+    if (id == "gaussian_sensor_noise") {
+        auto e = std::make_unique<GaussianSensorNoise>();
+        get("position_sigma_m", e->positionSigmaM); get("altitude_sigma_m", e->altitudeSigmaM); get("velocity_sigma_ms", e->velocitySigmaMs);
+        get("attitude_sigma_rad", e->attitudeSigmaRad); get("rate_sigma_rad_s", e->rateSigmaRadS); get("airspeed_sigma_ms", e->airspeedSigmaMs);
+        return e;
+    }
+    if (id == "sensor_latency") {
+        double steps = 6.0;
+        get("delay_steps", steps);
+        return std::make_unique<SensorLatency>(static_cast<unsigned>(std::max(0.0, steps)));
+    }
+    if (id == "constant_force") {
+        auto e = std::make_unique<ConstantForce>();
+        get("force_n_x", e->forceN[0]); get("force_n_y", e->forceN[1]); get("force_n_z", e->forceN[2]);
+        get("moment_nm_l", e->momentNm[0]); get("moment_nm_m", e->momentNm[1]); get("moment_nm_n", e->momentNm[2]);
+        return e;
+    }
+    if (id == "wind_gusts") {
+        auto e = std::make_unique<WindGusts>();
+        get("mean_interval_s", e->meanIntervalS); get("peak_ms", e->peakMs); get("duration_s", e->durationS);
+        return e;
+    }
+    if (id == "gnss_degradation") {
+        auto e = std::make_unique<GnssDegradation>();
+        get("loss_probability_per_s", e->lossProbabilityPerS); get("outage_s", e->outageS); get("drift_m", e->driftM);
+        return e;
+    }
+    return nullptr;
+}
+
 } // namespace fsim::effects

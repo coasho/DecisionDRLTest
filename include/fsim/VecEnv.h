@@ -41,6 +41,8 @@ struct VecEnvOptions {
     double latitudeDeg = 37.6188, longitudeDeg = -122.375, altitudeM = 1500.0, headingDeg = 0.0, airspeedMs = 60.0;
     double latitudeJitterDeg = 0.02, longitudeJitterDeg = 0.02, altitudeJitterM = 150.0, headingJitterDeg = 180.0, airspeedJitterMs = 5.0;
     double targetAltitudeDeltaM = 300.0, targetHeadingDeltaDeg = 60.0;
+    std::string worldName = "vecenv"; ///< viewers attach by this name
+    bool publish = true;
 };
 
 struct StepResult {
