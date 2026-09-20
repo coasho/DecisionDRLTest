@@ -66,8 +66,13 @@ cmake --build --preset ucrt64-release --parallel
 ctest --preset ucrt64-release
 ```
 
-`ucrt64-headless` builds without Vulkan or the VSG stack. Executables need `ucrt64/bin` on `PATH`
-at runtime (the presets set it for tests); a deploy step that copies the runtime DLLs is planned.
+`ucrt64-headless` builds without Vulkan or the VSG stack.
+
+```bash
+cmake --build --preset ucrt64-release --target deploy   # copy the 27 runtime DLLs next to the executables
+```
+
+After `deploy`, `build/ucrt64-release/bin` runs standalone (no `ucrt64/bin` on `PATH` needed).
 
 ## Run
 

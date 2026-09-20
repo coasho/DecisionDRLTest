@@ -328,6 +328,9 @@ int main(int argc, char** argv) {
     viewer.addEventHandler(ui::KeyHandler::create(controls, static_cast<int>(opt.vehicles)));
     if (!viewer.setScene(scene, ellipsoid, imgui)) return 1;
 
+    // Play the model's animations (propellers) in a loop; shared subgraph, so one play covers all vehicles.
+    for (auto& anim : visuals.animations()) viewer.viewer()->animationManager->play(anim);
+
     auto camera = world::CameraController::create(viewer.camera(), viewer.lookAt(), ellipsoid);
     camera->setChaseOffset(opt.chaseDistance, opt.chaseElevation, opt.chaseAzimuth);
     viewer.addEventHandler(camera); // mouse orbit / distance; after ImGui so panels keep the pointer

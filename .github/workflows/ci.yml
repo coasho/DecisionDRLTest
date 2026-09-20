@@ -45,6 +45,9 @@ jobs:
       - name: Build
         run: cmake --build --preset ucrt64-release --parallel
 
+      - name: Deploy runtime DLLs
+        run: cmake --build --preset ucrt64-release --target deploy
+
       - name: Test
         run: ctest --preset ucrt64-release
 

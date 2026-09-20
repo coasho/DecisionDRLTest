@@ -42,6 +42,9 @@ public:
 
     std::size_t count() const { return transforms_.size(); }
 
+    /// Animations found in the loaded model (e.g. propellers), empty for the placeholder.
+    const vsg::Animations& animations() const { return animations_; }
+
 private:
     vsg::ref_ptr<vsg::Node> buildPlaceholder(const Settings& s, const vsg::vec4& color) const;
     vsg::ref_ptr<vsg::Node> loadModel(const Settings& s, vsg::ref_ptr<vsg::Options> options) const;
@@ -50,6 +53,7 @@ private:
     std::vector<vsg::ref_ptr<vsg::MatrixTransform>> transforms_;
     std::vector<vsg::ref_ptr<vsg::Switch>> highlight_;
     int selected_ = -1;
+    vsg::Animations animations_;
 };
 
 } // namespace fsim::world

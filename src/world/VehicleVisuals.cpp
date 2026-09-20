@@ -95,7 +95,12 @@ vsg::ref_ptr<vsg::Node> VehicleVisuals::loadModel(const Settings& s, vsg::ref_pt
     const vsg::dmat4 modelToBody = vsg::inverse(bodyToModel);
     auto xf = vsg::MatrixTransform::create(modelToBody * vsg::scale(s.modelScale, s.modelScale, s.modelScale));
     xf->addChild(node);
-    LOG_INFO("world") << "vehicle model: " << s.modelPath;
+
+    // Animated parts (propellers, ...): collected so the viewer can play them.
+    auto finder = vsg::visit<vsg::FindAnimations>(node);
+    for (auto& anim : finder.animations) anim->mode = vsg::Animation::REPEAT;
+    const_cast<VehicleVisuals*>(this)->animations_ = finder.animations;
+    LOG_INFO("world") << "vehicle model: " << s.modelPath << " (" << finder.animations.size() << " animation(s))";
     return xf;
 }
 
