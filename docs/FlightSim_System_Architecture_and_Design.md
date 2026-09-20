@@ -6,7 +6,7 @@
 
 This document defines the architecture of a pure C++ flight-simulation platform for AI and reinforcement-learning (RL) training: JSBSim computes flight dynamics for many vehicles at once, VulkanSceneGraph (VSG) renders a full-Earth scene for visualisation and for vision-based observations, and a C++ SDK with a stable C ABI is the primary interface. It is the reference for structure, boundaries and major technical decisions; implementation details live in code and per-module design notes.
 
-In scope: the application skeleton, module boundaries, runtime/threading model, integration of VSG and JSBSim, the RL environment API (C++ and C ABI), the debug viewer, VSG-native full-Earth terrain, build and packaging on Windows, and the extension mechanism. Out of scope for this revision: human-piloted operation (no flight-stick input, cockpit or instrument panels), networking/multiplayer, RL algorithms themselves, and certification-grade fidelity requirements. Project owner decisions of 2026-09-19 that shaped this revision: RL training is the primary purpose, full-Earth visualisation, no human pilot for now, powerful training hardware, open-source licence, Windows only, multiple vehicles, JSBSim used as-is, VSG mandatory, no Cesium, no Python.
+In scope: the application skeleton, module boundaries, runtime/threading model, integration of VSG and JSBSim, the RL environment API (C++ and C ABI), the debug viewer, VSG-native full-Earth terrain, build and packaging on Windows, and the extension mechanism. Out of scope for this revision: human-piloted operation (no flight-stick input, cockpit or instrument panels), networking/multiplayer, RL algorithms themselves, and certification-grade fidelity requirements. Project owner decisions of 2026-09-19 that shaped this revision: RL training is the primary purpose, full-Earth visualisation, no human pilot for now, powerful training hardware, open-source licence, Windows only, multiple vehicles, JSBSim used as-is, VSG mandatory, no Cesium, no Python. Owner workflow statement of 2026-09-20 (section 9): researchers build training applications against the vehicle SDK; a prebuilt viewer mirrors their world through shared memory transparently and without affecting training throughput; vehicles are created by name/type/initial state and controlled through a multi-level control stack; the environment is controllable in real time; effects and communication are abstract, extensible interfaces.
 
 Reading guide: sections 2–4 fix requirements and technology choices; sections 5–10 describe the design; sections 11–13 cover build, performance and cross-cutting concerns; sections 14–17 hold risks, roadmap, decisions and open questions.
 
@@ -118,14 +118,17 @@ flowchart TD
     EXT[ext/*<br/>env_server, recorder, ...] -.-> CORE
 ```
 
-Reading the diagram: `env` is the RL-facing layer and the only thing a trainer sees; `world` and `render` are optional and attach to a running `sim` to visualise it or to produce vision observations; `core` knows neither JSBSim nor Vulkan and runs headless.
+Reading the diagram: the `fsim` SDK (object model in `sim`/`control`/`comm`, batch layer in `env`) is the only thing a trainer sees; `ipc` publishes the world for the viewer; `world` and `render` are optional and attach to a running `sim` to visualise it or to produce vision observations; `core` knows neither JSBSim nor Vulkan and runs headless.
 
 | Module | Responsibility | Depends on | External libs |
 | --- | --- | --- | --- |
-| `fsim` (SDK) | Public C++ headers (`fsim/VecEnv.h`, `fsim/Scenario.h`, `fsim/Spaces.h`) and the `extern "C"` layer `fsim_c.h`; the only exported symbols of `fsim.dll` | `env` | — |
+| `fsim` (SDK) | Public C++ headers (`fsim/World.h`, `fsim/Vehicle.h`, `fsim/Control.h`, `fsim/Environment.h`, `fsim/Effects.h`, `fsim/Comm.h`, `fsim/VecEnv.h`) and the `extern "C"` layer `fsim_c.h`; the only exported symbols of `fsim.dll` | `env`, `control`, `comm`, `ipc` | — |
+| `control` | Multi-level control stack: command types per level, `Controller`/`Behavior` interfaces, cascade, built-in PID loops and behaviours, controller registry | `sim`, `core` | — |
+| `comm` | Communication abstractions: nodes, messages, codecs, protocols, delivery media | `core` | — |
+| `ipc` | Shared-memory world segment: publisher (in `fsim.dll`) and read-only mirror (viewer), registry of live worlds | `sim`, `platform` | Win32 file mapping |
 | `app` | `flightsim.exe` (headless runs, benchmark, record, `--serve`) and `flightsim-viewer.exe`; command line, configuration, module wiring | all | — |
-| `env` | `Environment` = scenario + vehicles + task; `VecEnv` batching M environments; observation and action builders; task/reward/termination interface; seeding; episode bookkeeping | `sim`, `core` | — |
-| `sim` | `VehiclePool`: N `FlightModel` instances stepped in parallel by a worker pool in lockstep; JSBSim adapter; scenario spawning; environment model (atmosphere, wind); `GroundProvider` reading elevation tiles | `core`, `io` | JSBSim |
+| `env` | `VecEnv` batching M environments over the object model; observation and action builders (actions are commands at a chosen control level); task/reward/termination interface; seeding; episode bookkeeping | `control`, `sim`, `core` | — |
+| `sim` | `World` implementation: `VehiclePool` (N `FlightModel` instances stepped in parallel by a worker pool in lockstep), JSBSim adapter, vehicle registry by name/type, environment model (time, atmosphere, wind, weather) applied per step, effects pipeline, sensed-state pipeline, `GroundProvider` reading elevation tiles | `core`, `io` | JSBSim |
 | `world` | Scene composition: `vsg::TileDatabase` Earth (imagery + elevation layers), vehicle visuals and part animation, cameras (chase, orbit, free, per-vehicle sensor cameras), sun and sky; maps sim snapshots to scene transforms | `sim`, `render`, `core` | VSG |
 | `render` | Window and offscreen render targets, viewer, render/command graphs, shader sets, GPU→host readback for vision observations, frame statistics | `core` | VSG, vsgXchange |
 | `ui` | ImGui layers: monitor (throughput, episode stats), telemetry plots, property browser, camera and vehicle selection, scenario controls | `render`, `core` | vsgImGui |
@@ -296,68 +299,177 @@ When a scenario declares a camera observation (`rgb`, `depth`, `segmentation`; r
 
 The install ships shaders, placeholder aircraft models, the JSBSim aircraft tree and the ImGui font (< 20 MB). The tile pyramid is separate data: a global 90 m elevation + low-resolution imagery pyramid is \~3 GB; 30 m elevation with 10 m imagery for a training region of 500×500 km is \~2 GB. Both are built once with `tools/tile_builder` and either copied locally or served from any static HTTP server; the runtime disk cache has a configurable size limit (default 20 GB).
 
-## 9. User interface design: C++ SDK, C ABI and viewer
+## 9. User interface design: the vehicle SDK, transparent visualisation and the C ABI
 
-The primary interface is the `fsim` library — a C++17 SDK and a versioned `extern "C"` ABI over it; the viewer is a set of stateless ImGui layers reading snapshots and emitting commands. Neither contains simulation logic, so both can change freely without touching `sim` or `env`.
+Revised 2026-09-20 to the owner's workflow statement. Researchers write a **training application** against the `fsim` SDK; the platform ships a **prebuilt viewer** (`flightsim-viewer.exe`) that discovers the training application's world through shared memory and mirrors it. The two processes never talk directly, never wait for each other, and the training application contains no visualisation code. The SDK is organised around **vehicle instances** with a **multi-level control stack**, **real-time environment control**, and abstract **effect** and **communication** interfaces; the earlier vectorised `VecEnv` remains as a convenience layer built on top of it.
 
-### 9.1 C++ SDK
+### 9.1 Researcher workflow
 
-```cpp
-#include <fsim/VecEnv.h>
-
-fsim::VecEnvOptions opt;
-opt.numEnvs = 64; opt.seed = 7;
-opt.observation = "state";          // or "state+rgb"
-opt.action = "surfaces";            // or "autopilot"
-fsim::VecEnv env("scenarios/pursuit_f16.vsgt", opt);
-
-auto batch = env.reset();            // spans over library-owned buffers
-std::vector<float> actions(env.actionSize());
-for (int i = 0; i < 10'000; ++i) {
-    policy(batch.observations, actions);         // (M×K×A) float32
-    batch = env.step(actions);                   // obs, reward, terminated, truncated, info
-}
-env.attachViewer();                              // optional window, non-blocking
-auto vc = env.property("velocities/vc-kts");     // cached handle, per vehicle
-env.record("runs/ep1.fsrec");                    // snapshots + actions at agent rate
+```mermaid
+flowchart LR
+    subgraph T[training application - researcher's process]
+        P[policy / learner] --> W[fsim::World]
+        W --> V1[Vehicle red-1]
+        W --> V2[Vehicle blue-1]
+        W --> ENV[Environment]
+        W --> PUB[ipc::WorldPublisher]
+    end
+    PUB -- lock-free writes --> SHM[(shared memory<br/>Local\fsim.world.name)]
+    SHM -- seqlock reads --> SUB[ipc::WorldMirror]
+    subgraph Vw[flightsim-viewer.exe - prebuilt]
+        SUB --> SCENE[world: Earth, models, cameras]
+    end
 ```
 
-| Element | Design |
+1. The researcher reads `include/fsim/*.h` and `docs/sdk/*.md`, links `fsim.dll`, creates a `World`, creates vehicles by name, type and initial state, commands them at whichever control level the experiment needs, and steps the world.
+2. Starting `flightsim-viewer.exe` at any time - before, during or after training starts - shows that world: the viewer lists live worlds, attaches to one, creates a visual for every vehicle it finds and follows creations, resets, state changes and control inputs from then on. Closing it changes nothing in the training process.
+3. Visualisation costs the training application one bounded, lock-free memory copy per publish interval (section 9.7); it never allocates, blocks, or waits for a reader, so training throughput is the same with zero, one or several viewers attached.
+
+### 9.2 Object model
+
+```cpp
+#include <fsim/World.h>
+
+fsim::World world({.name = "dogfight-01", .dt = 1.0 / 120, .frameSkip = 4, .seed = 7});
+world.environment().setWind({.directionDeg = 270, .speedMs = 8, .turbulence = 0.3});
+world.environment().setTime(fsim::Utc{2026, 9, 20, 14, 30, 0});
+
+fsim::Vehicle red  = world.createVehicle({.name = "red-1",  .type = "jsbsim:f16",
+    .initial = {.latitudeDeg = 37.62, .longitudeDeg = -122.38, .altitudeMslM = 3000, .headingDeg = 90, .airspeedTrueMs = 220}});
+fsim::Vehicle blue = world.createVehicle({.name = "blue-1", .type = "jsbsim:f16", .initial = /* ... */});
+
+red.command(fsim::AttitudeCommand{.rollRad = 0.4, .pitchRad = 0.05, .throttle = 0.9});   // attitude loop
+blue.command(fsim::PursuitBehavior{.target = red.id(), .rangeM = 500});                    // behaviour
+
+for (int k = 0; k < 10'000; ++k) {
+    world.step();                                    // all vehicles, lockstep, frameSkip FDM steps
+    const fsim::VehicleState& s = red.state();       // truth
+    const fsim::SensedState&  z = red.sensed();      // through the vehicle's sensor models
+    red.command(policy(z));                          // any level, any time
+}
+```
+
+| Type | Role | Notes |
+| --- | --- | --- |
+| `World` | The simulation session: owns vehicles, the environment, the clock, the worker pool and the shared-memory publisher | `createVehicle`, `removeVehicle`, `vehicle(id/name)`, `vehicles()`, `step(n = 1)`, `time()`, `environment()`, `addEffect` (world-wide), `comm()` (the medium), `reset()`; one `World` per training process is typical, several are allowed (each publishes under its own name) |
+| `VehicleSpec` | What to create: `name` (unique in the world, shown by the viewer), `type` (`"jsbsim:<aircraft>"`; other prefixes map to other `FlightModel` implementations), `initial` state (position, attitude, velocity, on-ground), optional `model` (glTF override for the viewer), `sensors`, `controlRateHz` | The type string is the only thing the viewer needs to pick a model: `models/<aircraft>.glb` + manifest, or the default aircraft |
+| `Vehicle` | A lightweight handle (id + world pointer) to a vehicle instance | `state()`, `sensed()`, `command(...)`, `controls()` (the stack), `reset(initial)`, `addEffect`, `comm()` (this vehicle's endpoint), `property(path)` for raw JSBSim access, `name()`, `type()`, `alive()` |
+| `Environment` | Global conditions applied to every vehicle each step and published for illumination | section 9.4 |
+| `Effect` | A disturbance or fidelity effect attached to a vehicle or the world | section 9.5 |
+| `comm::Node` | A vehicle's or an external node's communication endpoint | section 9.6 |
+| `VecEnv` | The gym-style batch layer: scenario -> vehicles, task -> rewards, spaces -> buffers | section 9.9; built entirely from the public `World`/`Vehicle` API, so it doubles as the reference example |
+
+Rules: every call is on the caller's thread; `step()` is the only call that does work; handles stay valid until `removeVehicle`; nothing in the object model knows about rendering.
+
+### 9.3 Multi-level control architecture
+
+Every vehicle owns a **control stack**: an ordered set of levels, one controller per level, and one *active* command. Commanding a level makes it the active level; each step the stack runs the cascade from the active level down to the actuators, each controller translating its command into a command for a lower level, until an `ActuatorCommand` reaches the flight model. Nothing above the active level runs.
+
+```mermaid
+flowchart TD
+    B[Behavior<br/>pursue, loiter, aerobatics, guidance] --> P
+    P[Position<br/>lat/lon/alt or NED offset, speed] --> V
+    V[Velocity<br/>NED velocity / airspeed + vertical speed + heading] --> A
+    A[Acceleration<br/>body-axis specific accelerations, roll rate] --> T
+    T[Attitude<br/>roll, pitch, yaw or heading, throttle] --> U
+    U[Actuator<br/>aileron, elevator, rudder, throttle, flaps, gear, brakes] --> FDM[FlightModel]
+```
+
+| Concept | Definition |
 | --- | --- |
-| `VecEnv` | `reset(seed, options)`, `step(actions)`, `observationSpace()`, `actionSpace()`, `numEnvs()`, `numVehicles()`, auto-reset with final observation in `info`; all buffers preallocated and owned by the library, returned as `std::span` |
-| Spaces | `Box` float32 for state observations and continuous actions; a `Dict`-like `ObservationLayout` describing offsets when vision or multiple sensors are declared; discrete action mapping available as a builder |
-| Multi-agent | vehicle-major layout `(M×K×…)` so per-agent views are slices; `env.agentView(envIndex, vehicleIndex)` returns spans |
-| Scenario | `.vsgt` (VSG text serialisation, human-readable) or JSON: vehicles (aircraft, IC distributions, optional JSBSim script), task id and parameters, observation/action specs, sensors, tile pyramid, date/time and weather |
-| Tasks | C++ classes registered by id: waypoint following, altitude/heading hold, pursuit–evasion, formation; user tasks implement `fsim::Task` (vectorised `evaluate(batch)`) and register through the SDK without rebuilding the platform |
-| Observations | state builders from `VehicleState` and property handles (normalised); relative-geometry features between vehicles; vision spans from section 8.4 |
-| Actions | `surfaces`: aileron/elevator/rudder/throttle (±1 normalised) written to `fcs/*-cmd-norm`; `autopilot`: targets written to the aircraft's JSBSim autopilot properties, using JSBSim's own FCS as-is |
-| Errors | no exceptions from `step()`; load-time failures throw `fsim::Error` with a code and message; the C ABI returns error codes and a last-error string |
+| `ControlLevel` | `Actuator < Attitude < Acceleration < Velocity < Position < Behavior`; a strict order, so "lower" and "higher" are unambiguous |
+| `Command` | One plain struct per level (`ActuatorCommand`, `AttitudeCommand`, `AccelerationCommand`, `VelocityCommand`, `PositionCommand`, `BehaviorCommand`) held in a `std::variant`; every field has a `hold`/`nan` = "keep current" convention so partial commands are natural |
+| `Controller` | `level()` (the level it accepts) and `update(const ControlContext&, const Command& in) -> Command` returning a command at **any strictly lower** level; the stack keeps cascading from the returned level. A controller is plain C++ with a `reset()` and its own gains/state; built-ins are PID loops written against `VehicleState` only, so they work for any `FlightModel` |
+| `Behavior` | A controller at the `Behavior` level with a lifecycle (`start`, `update`, `finished()`) and parameters, e.g. `Pursuit{target, range}`, `Loiter{centre, radius}`, `Waypoints{...}`, `Aerobatic{Loop, Roll, Immelmann}`; a finished behaviour holds its last output until replaced |
+| `ControlStack` | Per vehicle: `command(Command)` sets the active level and command; `use(level, controllerId)` swaps the controller at a level; `controller(level)` for gain tuning; `activeLevel()`; `derived(level)` returns the command the cascade produced at any lower level last step (introspection, telemetry, observations); `rateHz` (defaults to the FDM rate) |
+| `ControllerRegistry` | `registerController(id, level, factory)` and `registerBehavior(id, factory)` from trainer code or built-in modules; `VehicleSpec.controllers` and `use()` select by id, so a researcher swaps a loop without touching the rest of the stack |
+| `ControlContext` | What a controller sees: truth `state`, `sensed` state, `dt`, the environment, the vehicle's `Rng` stream, the `World` (for behaviours that look at other vehicles) |
 
-### 9.2 C ABI
+Choosing a level is one line (`vehicle.command(VelocityCommand{...})`); extending is one class (`struct MyLoop : fsim::Controller { ... }` + `registerController`); replacing a built-in loop is one call (`vehicle.controls().use(Level::Attitude, "my_attitude")`). Because RL actions are just commands, the same policy can act on surfaces, attitudes or velocities by changing one enum, and hierarchical RL maps to the stack directly (a high-level policy commands `Position`, a low-level policy owns `Attitude`).
 
-`fsim_c.h` exports opaque handles and plain structs: `fsim_vecenv_create(path, const fsim_options*, fsim_vecenv**)`, `fsim_vecenv_reset`, `fsim_vecenv_step(h, const float* actions, size_t n)`, `fsim_vecenv_buffers(h, fsim_buffers*)` (pointers + sizes + layout version), `fsim_vecenv_attach_viewer`, `fsim_vecenv_destroy`, `fsim_abi_version()`. The layout is fixed for a major version; every buffer is 64-byte aligned. This is the binding surface for Rust (`bindgen`), C#, Julia, Go or any other trainer language — the platform ships no bindings itself.
+Built-in controllers (v1): `Actuator` (identity, clamps), `pid_attitude` (roll/pitch/heading with throttle or airspeed hold), `pid_acceleration` (normal/longitudinal acceleration + roll rate to attitude), `pid_velocity` (airspeed, vertical speed, heading to acceleration), `pid_position` (guidance to a point / along a track to velocity), and behaviours `hold`, `waypoints`, `loiter`, `pursuit`, `evade`, `formation`, `aerobatics` (a sequence of attitude/rate segments). Gains are per aircraft type in `assets/control/<type>.json` with defaults that fly the stock JSBSim aircraft.
 
-### 9.3 Shared-memory server (optional module)
+### 9.4 Real-time environment control
 
-`flightsim.exe --serve <scenario> --envs 64 --shm fsim0` maps a named shared-memory region holding the same buffers as 9.2 plus a control block (step counter, command word) and two named semaphores; a trainer in another process writes actions, signals, waits, reads observations. Layout and protocol are documented in `docs/env_server.md`; the trainer never links `fsim`.
+`world.environment()` is a settable model applied to every vehicle's flight model at the start of each step (JSBSim: `FGAtmosphere` and `FGWinds` of every instance) and published to the viewer, which lights the scene accordingly.
 
-### 9.4 Command line
+| Parameter | API | Effect |
+| --- | --- | --- |
+| Time | `setTime(Utc)`, `setTimeFactor(x)`, `time()`; simulation time advances with `step()` | sun position and sky in the viewer; available to sensors and behaviours |
+| Atmosphere | `setAtmosphere({temperatureSlK or deltaK, pressureSlPa, humidity})`, `setProperty(...)` for anything else | density, speed of sound, engine power through JSBSim's standard atmosphere |
+| Wind | `setWind({directionDeg, speedMs, gustMs, turbulence [0..1], shearProfile})` and `setWindField(fn(position, time) -> WindNed)` for spatially varying wind | JSBSim `FGWinds` (steady wind, gusts, Dryden/Milspec turbulence with the vehicle's seed) |
+| Visibility / precipitation | `setWeather({visibilityM, cloudBase, cloudCover, precipitation})` | viewer rendering and sensor models; no FDM effect |
+| Ground | `setGround(GroundProvider)` (flat, terrain tiles, custom) | contact height for every vehicle |
 
-`flightsim.exe --scenario <file> [--envs N] [--steps S] [--benchmark] [--record <file>] [--serve --shm <name>] [--viewer] [--realtime]` and `flightsim-viewer.exe --attach <scenario|recording|shm-name>`. Parsing uses `vsg::CommandLine`; every option maps to the same configuration schema as `config.json`.
+All setters are immediate and take effect at the next step; changes are cheap (a few property writes per vehicle) and may be made every step. Per-vehicle overrides are effects (9.5), not environment settings.
 
-### 9.5 Viewer layers (ImGui)
+### 9.5 Abstract vehicle simulation effects
+
+`fsim::Effect` is the extension point for fidelity and disturbance: `apply(EffectContext&)` runs once per FDM step per vehicle it is attached to, before the flight model steps. The context exposes what an effect may touch:
+
+| Channel | Context call | Implementation |
+| --- | --- | --- |
+| Local wind | `setWindNed(...)`, `addWindNed(...)` | per-instance `FGWinds`, overriding the global wind for that vehicle |
+| External force / moment | `addForceBody(N)`, `addMomentBody(N·m)` | a generic external reaction injected into the JSBSim instance at load time (in-memory `<external_reactions>` element), so no aircraft XML edit is needed |
+| Property | `property(path).set(...)` | any JSBSim/FDM property (mass, fuel, engine health, control-surface limits) |
+| Sensors | `SensedState& sensed()` | noise, bias, drift, dropout, latency on what `vehicle.sensed()` returns; truth is untouched |
+| Electromagnetic / GNSS | `gnss().degrade(...)`, `radio().jam(...)` | marks the sensed state and the communication medium (9.6) |
+| Lifecycle | `onReset()`, `enabled` | effects survive vehicle resets |
+
+Built-in effects (v1): `GaussianSensorNoise`, `SensorLatency`, `ConstantForce`, `WindGustField`, `GnssDegradation`; the interfaces are defined and tested even where an implementation is minimal, so researchers can add electromagnetic interference, icing, damage or actuator faults as effects without touching `sim`.
+
+### 9.6 Abstract communication interfaces
+
+`fsim::comm` models messages between vehicles and other nodes (ground stations, the trainer itself) without fixing a wire format or protocol:
+
+| Concept | Role |
+| --- | --- |
+| `Node` | An endpoint with an address (`vehicle:<id>` or a named external node); `send(Message)`, `receive() -> span<Message>` for messages delivered up to the current step |
+| `Message` | `from`, `to` (address or broadcast/group), `channel`, `timeSent`, `timeDelivered`, `Payload` (bytes + format id) |
+| `Codec` | Encode/decode a typed struct to `Payload` under a format id (`raw`, `json`, `msgpack`, user formats); vehicles exchange typed state reports, commands, or arbitrary bytes |
+| `Protocol` | Application-level rules on top of nodes (request/response, periodic beacons, group membership, ack/retry); registered by id; users add MAVLink-like or custom protocols |
+| `Medium` | Delivery model for the whole world, stepped with the simulation: `IdealMedium` (instant, lossless), `LinkModel` (range, line-of-sight, latency, jitter, loss, bandwidth), later `Bridge` implementations to real transports (UDP/TCP/serial) so simulated vehicles can talk to external software |
+
+Every part is a registry-backed interface; the v1 implementation ships `IdealMedium`, `LinkModel`, the `raw` and `json` codecs and a `beacon` protocol (periodic state reports) that `pursuit`/`formation` behaviours use to find their targets.
+
+### 9.7 Transparent visualisation through shared memory
+
+`ipc::WorldPublisher` (inside `fsim.dll`, created by every `World`) and `ipc::WorldMirror` (inside the viewer) share one named page-file-backed mapping, `Local\fsim.world.<name>`, plus a tiny `Local\fsim.registry` listing live worlds for discovery. No sockets, no daemons, no handshakes.
+
+| Region | Content | Written by | Concurrency |
+| --- | --- | --- | --- |
+| Header | magic, layout version, world name, `dt`, frame skip, capacity, simulation time, wall clock of the last publish, time factor, environment (wind, atmosphere, weather, UTC), `readers` (attached viewers) | publisher (readers increment `readers`) | plain atomics |
+| Vehicle table `[capacity]` | id, `name`, `type`, model override, `generation` (bumped on create/reset/remove), alive flag, control level, initial conditions | publisher on create/reset/remove | per-row seqlock |
+| State slots `[3][capacity]` | `VehicleState` (appended-only layout) + `ControlInputs` + derived commands of the cascade + per-vehicle sensed summary | publisher, triple buffered, at most every `publishIntervalMs` (default 16 ms) | slot seqlock; writer never waits |
+| Event ring | create, remove, reset, effect attached, message sent (metadata only), small fixed-size records | publisher | single-producer ring, readers catch up or skip |
+
+Guarantees: the writer is wait-free (a bounded `memcpy` behind a sequence counter); publishing is rate limited by wall clock so a 5,000× real-time trainer copies at 60 Hz, not at 600 kHz; a reader that lags or dies is never noticed by the writer; a crashed publisher leaves a stale mapping the viewer reports as "not updating". The viewer interpolates between the two latest slots by wall time, exactly as it does today for its own sim thread, and renders vehicle creations/removals as the table's generations change. The same segment is what the optional out-of-process environment server (ADR-17) extends with an action/observation exchange; the mirror is read-only by design.
+
+### 9.8 C ABI
+
+`fsim_c.h` exports the object model as opaque handles and plain structs: `fsim_world_create/destroy/step`, `fsim_world_create_vehicle(world, const fsim_vehicle_spec*, uint32_t* id)`, `fsim_vehicle_state(world, id, fsim_vehicle_state*)`, `fsim_vehicle_command_<level>(world, id, const fsim_<level>_command*)`, `fsim_world_set_wind/atmosphere/time`, `fsim_comm_send/receive`, and the existing `fsim_vecenv_*` batch API. Rules: `struct_size`-versioned structs that only grow within a major version, library-owned buffers, integer return codes with `fsim_last_error()`, no exceptions and no C++ types. This is the binding surface for any language with a C FFI; the platform ships no bindings.
+
+### 9.9 `VecEnv` batch layer
+
+`fsim::VecEnv` is now a thin composition of the object model: a scenario declares vehicles per environment (spec templates + initial-condition ranges), a `Task` produces rewards/terminations from `Vehicle` handles, an `ObservationBuilder` reads `state()`/`sensed()`/derived commands, and an `ActionMapper` issues a command at a chosen level (`"surfaces"` -> `ActuatorCommand`, `"attitude"` -> `AttitudeCommand`, `"velocity"` -> `VelocityCommand`, ...). It keeps its vehicle-major buffers, Gymnasium auto-reset semantics and the `fsim_vecenv_*` C ABI, and gains the viewer for free because its `World` publishes like any other.
+
+### 9.10 Command line
+
+`flightsim-viewer.exe [--world <name>] [--list] [--demo ...]`: with no arguments the viewer lists live worlds in the registry, attaches to the only one (or the newest) and waits, showing "waiting for a training application" until one appears; `--demo` runs the built-in scenario with its own simulation thread as before (development and screenshots). `flightsim.exe` keeps the headless benchmark and `--serve` (ADR-17). Parsing uses `vsg::CommandLine`; every option maps to the same configuration schema as `config.json`.
+
+### 9.11 Viewer layers (ImGui)
 
 | Layer | Content | Default key |
 | --- | --- | --- |
-| Monitor | vehicle-steps/s, `step()` time breakdown, environments and episodes, reward statistics, GPU/CPU frame time | always on |
-| Vehicle list | table of all vehicles with state summary; click to follow; multi-select for labels and trails | `L` |
-| Telemetry | ImPlot strip charts of any property path for the selected vehicles; CSV export | `T` |
-| Property browser | live JSBSim/application property tree with search and (when paused) edit | `P` |
-| Scenario controls | pause/resume stepping (exe only), reset environment, camera mode, time-of-day, quality tier | menu |
+| Monitor | attached world, publish rate and age, vehicle-steps/s reported by the publisher, environment summary, GPU/CPU frame time | always on |
+| Vehicle list | every mirrored vehicle: name, type, control level, state summary; click to follow; multi-select for labels and trails | `L` |
+| Telemetry | ImPlot strip charts of any state field or derived command for the selected vehicles; CSV export | `T` |
+| Control stack | the active level and the cascade's derived commands for the selected vehicle | `K` |
+| Environment | wind, atmosphere, weather, time as published (read-only in mirror mode) | `E` |
 | Sensor preview | thumbnails of vision observations for the selected vehicle | `V` |
-| Debug | VSG statistics, tile streaming status, ground-provider vs. terrain height difference, thread states | `F3` |
+| Debug | VSG statistics, tile streaming status, mirror status (age, dropped slots), thread states | `F3` |
 
-### 9.6 Input and style
+### 9.12 Input and style
 
 Keyboard and mouse only, delivered by VSG to a `ui::EventDispatcher` that offers events to ImGui first and then to the camera controller and key-binding table. One ImGui style, DPI scaling from the window's content scale, a single embedded font.
 
@@ -370,7 +482,7 @@ Extension happens at four levels — data, SDK registration, built-in modules an
 | Level | Mechanism | Examples | Requires platform rebuild |
 | --- | --- | --- | --- |
 | Data | `.vsgt`/JSON scenarios and manifests resolved through `io::AssetResolver`; JSBSim XML; tile pyramids | new aircraft (JSBSim XML + glTF + manifest), scenarios, IC distributions, sensor definitions, quality presets, training regions | no |
-| SDK registration | trainer code implements `fsim::Task`, `fsim::ObservationBuilder` or `fsim::ActionMapper` and registers it by id through the SDK before creating a `VecEnv` | curriculum, reward shaping, custom observation stacks, discrete action sets | no (trainer rebuild only) |
+| SDK registration | trainer code implements `fsim::Controller`, `fsim::Behavior`, `fsim::Effect`, `fsim::comm::Codec`/`Protocol`/`Medium`, `fsim::Task`, `fsim::ObservationBuilder` or `fsim::ActionMapper` and registers it by id through the SDK | a new control loop or manoeuvre, sensor noise or damage model, a message format, curriculum, reward shaping, custom observation stacks | no (trainer rebuild only) |
 | Registries | `core::Registry<T>` keyed by string id, populated in module `init()` | tasks, observation builders, action mappers, flight-model implementations, camera controllers, sensors, UI layers | yes (static) |
 | Modules | `core::Module` interface (`init / start / update(phase) / stop / shutdown`), compiled in behind a CMake option, self-registering | `ext/env_server`, `ext/recorder`, `ext/web_dashboard`, `ext/lidar`, `ext/traffic` | yes |
 | Dynamic plugins | same `Module` interface exported through `extern "C" Module* createModule()`, loaded from a plugin directory | third-party sensors or tasks without source access | no (post-v1) |
@@ -524,6 +636,7 @@ Six milestones take the project from an empty repository to a v1 release. Re-pla
 | M0 | Skeleton | CMake + vcpkg project, `core` services, headless `Application`, CI on Windows | headless exe steps one JSBSim vehicle | 2 weeks |
 | M1 | Multi-vehicle FDM + terrain data | `JsbsimModel`, `VehiclePool` with workers, unit conversions, `io::TilePyramid` + `GroundProvider`, `tools/tile_builder` (90 m global + one 30 m region), golden trajectories, recorder | 64 vehicles headless over real terrain; determinism across worker counts; throughput measured | 4 weeks |
 | M2 | RL API | `env` layer (`VecEnv`, tasks, state observations, action mappers), `fsim` SDK + C ABI, install/export package, `examples/minimal_trainer`, benchmark mode | a C++ PPO (LibTorch example) trains altitude-hold on c172x through the SDK; the C ABI example steps from Rust; ≥ 100k vehicle-steps/s | 3 weeks |
+| M2b | Vehicle SDK + transparent viewer | `World`/`Vehicle` object model, control stack (all six levels, built-in loops and behaviours), environment control, effects and comm interfaces with v1 implementations, `ipc` world segment, viewer mirror mode with discovery, `VecEnv` re-based on the object model, SDK docs (`docs/sdk/`), examples (`multi_level_control`, `dogfight_behaviors`) | a trainer creates vehicles and commands them at every level while the prebuilt viewer, started separately, mirrors them with no measurable change in trainer throughput | 4 weeks |
 | M3 | Viewer | `render`, `world` with `vsg::TileDatabase` full-Earth from the pyramid, vehicle models driven by snapshots, cameras, ImGui monitor/vehicle list/telemetry, `attachViewer()` | watch 64 training vehicles anywhere on Earth at 60 fps without slowing `step()` | 4 weeks |
 | M4 | Vision observations + server | offscreen sensor cameras, batched readback, `rgb`/`depth` observation types, sensor preview layer, `ext/env_server` shared-memory module | 64 × 128×128 RGB per step within budget; an out-of-process trainer steps through shared memory | 3 weeks |
 | M5 | Release v1 | packaging (zip + CMake package), docs and examples, licence generation, crash handler | public MIT release; benchmarks within budget; SDK headers and C ABI v1 frozen | 3 weeks |
@@ -553,6 +666,11 @@ Each major choice, its alternatives and the driver that decided it; status "acce
 | ADR-15 | No scripting runtime anywhere; data + compiled C++ only | Lua/Python module | owner decision, lightweight | accepted |
 | ADR-16 | Shaders compiled to SPIR-V at build time | runtime glslang | size, startup | proposed |
 | ADR-17 | Optional shared-memory environment server for out-of-process trainers; no gRPC | gRPC, TCP-only | lightweight, latency | proposed |
+| ADR-18 | Vehicle-instance SDK (`World`/`Vehicle`) is the primary API; `VecEnv` is a layer over it | gym-only API, scenario-file-only vehicle creation | owner workflow statement 2026-09-20 | accepted |
+| ADR-19 | Visualisation mirrors the training process through a read-only shared-memory world segment written wait-free and rate-limited by the SDK; the viewer is a separate prebuilt process that discovers worlds | in-process viewer (`attachViewer()`), sockets/gRPC streaming, recording playback only | owner: transparent, independent, no training bottleneck | accepted |
+| ADR-20 | Multi-level control stack with strictly ordered levels, one command variant, controllers that cascade to any lower level, behaviours as top-level controllers, registry for replacements | JSBSim autopilot XML only, flat "mode" switch per vehicle, separate APIs per level | owner: multi-level control, extensibility, cohesion | accepted |
+| ADR-21 | Environment (time, atmosphere, wind, weather, ground) is a settable world-level model applied per step; per-vehicle disturbances are `Effect`s with a context that exposes wind, forces, properties and sensed state | scenario-file-only weather, per-vehicle environment objects | owner: real-time environmental control, abstract effects | accepted |
+| ADR-22 | Communication as registry-backed abstractions (`Node`, `Message`, `Codec`, `Protocol`, `Medium`) with an ideal medium and a link model in v1 and transport bridges later | fixed MAVLink/UDP, no comm model | owner: abstract communication, future formats/protocols | accepted |
 
 ## 17. Open questions
 
