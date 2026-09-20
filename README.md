@@ -85,7 +85,9 @@ build/ucrt64-release/bin/flightsim.exe --vehicles 64 --steps 300 --benchmark
 ```
 
 Viewer keys: `space` pause, `.` step, `tab` next vehicle, `c` camera (chase / orbit / overview),
-`-`/`=` zoom, `[`/`]` time factor, `l` vehicle list, `m` monitor, `n` labels, `t` trails, `esc` quit.
+`-`/`=` zoom, `r` reset view, `[`/`]` time factor, `l` vehicle list, `m` monitor, `n` labels, `t` trails, `esc` quit.
+Mouse: **left drag orbits** around the selected vehicle, **wheel / right drag** changes distance, middle click resets.
+Camera modes: *chase* keeps the view relative to the aircraft's heading, *orbit* keeps it north-referenced, *overview* looks straight down.
 
 ## Layout
 

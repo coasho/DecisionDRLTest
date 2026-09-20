@@ -101,7 +101,8 @@ void usage(const char* prog) {
         "  --trace <i>              print vehicle i's state once per second\n"
         "  --no-interpolate         draw raw snapshots (sample-and-hold) instead of interpolating\n"
         "  --log-level <lvl>\n"
-        "Keys: space pause, . step, tab next vehicle, c camera, -/= zoom, [ ] time factor, l list, m monitor, n labels, t trails, esc quit\n",
+        "Keys: space pause, . step, tab next vehicle, c camera, -/= zoom, r reset view, [ ] time factor, l list, m monitor, n labels, t trails, esc quit\n"
+        "Mouse: left drag orbits around the vehicle, wheel / right drag changes distance, middle click resets the view\n",
         prog);
 }
 
@@ -301,14 +302,14 @@ int main(int argc, char** argv) {
     viewer.addEventHandler(ui::KeyHandler::create(controls, static_cast<int>(opt.vehicles)));
     if (!viewer.setScene(scene, ellipsoid, imgui)) return 1;
 
-    world::CameraController camera(viewer.camera(), viewer.lookAt(), ellipsoid);
-    camera.setChaseOffset(opt.chaseDistance, opt.chaseDistance * 0.25);
-    viewer.addEventHandler(camera.trackball());
+    auto camera = world::CameraController::create(viewer.camera(), viewer.lookAt(), ellipsoid);
+    camera->setChaseOffset(opt.chaseDistance);
+    viewer.addEventHandler(camera); // mouse orbit / distance; after ImGui so panels keep the pointer
 
     // Place the first snapshot so the camera has a target before the sim thread runs.
     if (const auto* first = runner->snapshots().acquire()) {
         visuals.update(Span<const sim::VehicleState>(first->states));
-        camera.update(first->states[0], 0.0);
+        camera->update(first->states[0], 0.0);
         gui->setBatch(first);
     }
     runner->start();
@@ -337,9 +338,10 @@ int main(int argc, char** argv) {
             const auto& states = opt.interpolate ? interpolator.states() : batch->states;
             visuals.update(Span<const sim::VehicleState>(states));
             visuals.setSelected(selected);
-            camera.setMode(static_cast<world::CameraController::Mode>(controls->cameraMode.load(std::memory_order_relaxed)));
-            if (const double z = controls->cameraZoom.exchange(1.0); z != 1.0) camera.zoom(z);
-            camera.update(states[static_cast<std::size_t>(selected)], viewer.frameSeconds());
+            camera->setMode(static_cast<world::CameraController::Mode>(controls->cameraMode.load(std::memory_order_relaxed)));
+            if (const double z = controls->cameraZoom.exchange(1.0); z != 1.0) camera->zoom(z);
+            if (controls->cameraReset.exchange(false)) camera->resetView();
+            camera->update(states[static_cast<std::size_t>(selected)], viewer.frameSeconds());
             sky.update(viewer.lookAt()->eye);
 
             trails.setSelected(selected);

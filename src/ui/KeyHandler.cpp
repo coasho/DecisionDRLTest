@@ -48,6 +48,10 @@ void KeyHandler::apply(vsg::KeyPressEvent& e) {
     case vsg::KEY_Rightbracket:
         c.timeFactor.store(std::min(64.0, c.timeFactor.load(std::memory_order_relaxed) * 2.0), std::memory_order_relaxed);
         break;
+    case vsg::KEY_r:
+    case vsg::KEY_R:
+        c.cameraReset.store(true, std::memory_order_relaxed);
+        break;
     case vsg::KEY_n:
     case vsg::KEY_N:
         c.showLabels.store(!c.showLabels.load(std::memory_order_relaxed), std::memory_order_relaxed);

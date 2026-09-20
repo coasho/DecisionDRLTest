@@ -15,6 +15,7 @@ struct ViewerControls {
     std::atomic<int> selectedVehicle{0};
     std::atomic<int> cameraMode{0};      ///< world::CameraController::Mode
     std::atomic<double> cameraZoom{1.0}; ///< multiplicative request, consumed each frame
+    std::atomic<bool> cameraReset{false};
     std::atomic<bool> showVehicleList{true};
     std::atomic<bool> showMonitor{true};
     std::atomic<bool> showLabels{true};

@@ -64,11 +64,14 @@ void MonitorGui::drawMonitor() const {
         controls_->timeFactor.store(static_cast<double>(factor), std::memory_order_relaxed);
 
     int mode = controls_->cameraMode.load(std::memory_order_relaxed);
-    const char* modes[] = {"chase", "orbit (mouse)", "overview"};
+    const char* modes[] = {"chase (follows heading)", "orbit (north-up)", "overview"};
     if (ImGui::Combo("camera  [c]", &mode, modes, 3)) controls_->cameraMode.store(mode, std::memory_order_relaxed);
     if (ImGui::Button("zoom -  [-]")) controls_->cameraZoom.store(1.25, std::memory_order_relaxed);
     ImGui::SameLine();
     if (ImGui::Button("zoom +  [=]")) controls_->cameraZoom.store(0.8, std::memory_order_relaxed);
+    ImGui::SameLine();
+    if (ImGui::Button("reset view  [r]")) controls_->cameraReset.store(true, std::memory_order_relaxed);
+    ImGui::TextDisabled("mouse: left drag orbit, wheel / right drag distance");
 
     bool list = controls_->showVehicleList.load(std::memory_order_relaxed);
     if (ImGui::Checkbox("vehicle list  [l]", &list)) controls_->showVehicleList.store(list, std::memory_order_relaxed);
