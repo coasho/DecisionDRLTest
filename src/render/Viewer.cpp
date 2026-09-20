@@ -4,6 +4,7 @@
 #include <thread>
 
 #include "core/Log.h"
+#include "platform/Clock.h"
 #include "platform/Paths.h"
 #include "platform/Threads.h"
 
@@ -13,6 +14,7 @@ namespace fsim::render {
 
 bool Viewer::create(const ViewerSettings& settings) {
     settings_ = settings;
+
     platform::enableHighDpiAwareness(); // client rect in physical pixels == swapchain extent
 
     options_ = vsg::Options::create();
@@ -29,6 +31,8 @@ bool Viewer::create(const ViewerSettings& settings) {
     traits->samples = settings.samples;
     // Depth precision over the 2 m .. 200 km range of a full-Earth scene (design 12.3).
     traits->depthFormat = VK_FORMAT_D32_SFLOAT;
+    // Vsync (FIFO) paces the loop for free; a frame cap needs a non-blocking present.
+    if (settings_.maxFps > 0.0) traits->swapchainPreferences.presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
 
     viewer_ = vsg::Viewer::create();
     window_ = vsg::Window::create(traits);
@@ -92,22 +96,41 @@ void Viewer::addEventHandler(vsg::ref_ptr<vsg::Visitor> handler) {
 }
 
 bool Viewer::frame() {
-    if (!viewer_ || !viewer_->advanceToNextFrame()) return false;
+    if (!viewer_) return false;
+    using seconds = std::chrono::duration<double>;
+    auto t0 = vsg::clock::now();
+    timing_.app = frameEnd_.time_since_epoch().count() ? seconds(t0 - frameEnd_).count() : 0.0;
+
+    if (!viewer_->advanceToNextFrame()) return false;
+    auto t1 = vsg::clock::now();
+    timing_.advance = seconds(t1 - t0).count();
 
     viewer_->handleEvents();
+    auto t2 = vsg::clock::now();
+    timing_.events = seconds(t2 - t1).count();
     viewer_->update();
+    auto t3 = vsg::clock::now();
+    timing_.update = seconds(t3 - t2).count();
     viewer_->recordAndSubmit();
+    auto t4 = vsg::clock::now();
+    timing_.record = seconds(t4 - t3).count();
     viewer_->present();
+    auto t5 = vsg::clock::now();
+    timing_.present = seconds(t5 - t4).count();
 
-    // Frame cap: sleep the remainder (a viewer beside a training process must
-    // not burn a core spinning at the monitor's refresh rate x N).
+    // Optional frame cap (a bare sleep_for() would be rounded up to the 15.6 ms
+    // scheduler period and turn "60 fps" into 40; see platform::sleepUntil).
+    // Only meaningful with a non-blocking present mode: with FIFO the cap and
+    // the vsync beat against each other.
     if (settings_.maxFps > 0.0) {
-        const auto minFrame = std::chrono::duration<double>(1.0 / settings_.maxFps);
-        const auto elapsed = std::chrono::duration<double>(vsg::clock::now() - lastFrame_);
-        if (elapsed < minFrame) std::this_thread::sleep_for(minFrame - elapsed);
+        const auto target = lastFrame_ + std::chrono::duration_cast<vsg::clock::duration>(seconds(1.0 / settings_.maxFps));
+        platform::sleepUntil(target);
     }
+    const auto t6 = vsg::clock::now();
+    timing_.sleep = seconds(t6 - t5).count();
+    frameEnd_ = t6;
 
-    const auto now = vsg::clock::now();
+    const auto now = t6;
     frameSeconds_ = std::chrono::duration<double>(now - lastFrame_).count();
     lastFrame_ = now;
     fpsAccumulator_ += frameSeconds_;

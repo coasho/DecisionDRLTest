@@ -35,4 +35,7 @@ void requestHighResolutionTimer() noexcept;
 /// Display scale factor of the primary monitor (1.0 = 96 dpi, 1.5 = 150 %).
 double systemDpiScale() noexcept;
 
+/// CPU time (user + kernel, all threads) consumed by this process, seconds.
+double processCpuSeconds() noexcept;
+
 } // namespace fsim::platform

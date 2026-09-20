@@ -2,6 +2,7 @@
 #include "platform/Paths.h"
 #include "platform/Threads.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <string>
 #include <thread>
@@ -66,6 +67,51 @@ bool pinCurrentThreadToCore(unsigned logicalCore) noexcept {
 #else
     (void)logicalCore;
     return false;
+#endif
+}
+
+void sleepUntil(Clock::time_point deadline) noexcept {
+    using namespace std::chrono;
+#ifdef _WIN32
+    // One high-resolution waitable timer per thread (Windows 10 1803+; falls
+    // back to an ordinary timer, then to a plain sleep, on older systems).
+    thread_local HANDLE timer = [] {
+        HANDLE h = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        if (!h) h = CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS);
+        return h;
+    }();
+    constexpr auto spinMargin = microseconds(150);
+    if (timer) {
+        const auto remaining = deadline - Clock::now();
+        if (remaining > spinMargin) {
+            LARGE_INTEGER due;
+            due.QuadPart = -static_cast<LONGLONG>(duration_cast<nanoseconds>(remaining - spinMargin).count() / 100); // relative, 100 ns units
+            if (SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) WaitForSingleObject(timer, INFINITE);
+        }
+    } else {
+        const auto remaining = deadline - Clock::now();
+        if (remaining > milliseconds(2)) std::this_thread::sleep_for(remaining - milliseconds(2));
+    }
+#else
+    const auto remaining = deadline - Clock::now();
+    if (remaining > microseconds(200)) std::this_thread::sleep_for(remaining - microseconds(200));
+#endif
+    while (Clock::now() < deadline) std::this_thread::yield();
+}
+
+double processCpuSeconds() noexcept {
+#ifdef _WIN32
+    FILETIME creation, exit, kernel, user;
+    if (!GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user)) return 0.0;
+    auto toSeconds = [](const FILETIME& ft) {
+        ULARGE_INTEGER v;
+        v.LowPart = ft.dwLowDateTime;
+        v.HighPart = ft.dwHighDateTime;
+        return static_cast<double>(v.QuadPart) * 1e-7;
+    };
+    return toSeconds(kernel) + toSeconds(user);
+#else
+    return static_cast<double>(std::clock()) / CLOCKS_PER_SEC;
 #endif
 }
 

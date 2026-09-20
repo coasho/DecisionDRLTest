@@ -1,5 +1,6 @@
 #include "world/Interpolator.h"
 
+#include "platform/Clock.h"
 #include "sim/Attitude.h"
 
 #include <algorithm>
@@ -29,7 +30,7 @@ void Interpolator::push(const sim::SnapshotBatch& batch) {
         const double spacing = batch.simTime - ring_.back().simTime;
         if (spacing > 1e-6 && spacing < 1.0) stepSeconds_ = 0.9 * stepSeconds_ + 0.1 * spacing;
     }
-    ring_.push_back(Sample{batch.simTime, batch.states});
+    ring_.push_back(Sample{batch.simTime, batch.wallNs, batch.states});
     while (ring_.size() > kRing) ring_.pop_front();
     if (!clockStarted_) {
         renderTime_ = batch.simTime - delaySteps_ * stepSeconds_;
@@ -44,13 +45,28 @@ bool Interpolator::update(double frameSeconds, double timeFactor, bool paused) {
         return false;
     }
 
-    // Advance the render clock and keep it `delaySteps_` behind the newest snapshot.
-    const double newest = ring_.back().simTime;
-    if (!paused) renderTime_ += frameSeconds * timeFactor;
-    const double target = newest - delaySteps_ * stepSeconds_;
+    // Advance the render clock and keep it `delaySteps_` behind the simulation.
+    // The simulation clock is estimated continuously from the newest snapshot's
+    // wall-clock stamp (sim time + wall time since it was published x factor),
+    // not from the snapshot's sim time alone: that would make the target a
+    // saw-tooth at the snapshot rate and modulate the apparent speed.
+    // Frames are displayed on the monitor's cadence; the CPU-side frame time
+    // jitters by +-5% around it (wake-up after present). Advancing the clock by
+    // a filtered period keeps per-frame motion even on screen.
+    if (frameSeconds_ <= 0.0 || std::abs(frameSeconds - frameSeconds_) > 0.5 * frameSeconds_) frameSeconds_ = frameSeconds; // start / mode change
+    else frameSeconds_ += 0.05 * (frameSeconds - frameSeconds_);
+    const Sample& last = ring_.back();
+    if (!paused) renderTime_ += frameSeconds_ * timeFactor;
+    double estimate = last.simTime;
+    if (last.wallNs != 0 && !paused) {
+        const double sincePublish = static_cast<double>(platform::Clock::nanoseconds() - last.wallNs) * 1e-9;
+        estimate += std::clamp(sincePublish, 0.0, 4.0 * stepSeconds_) * timeFactor;
+    }
+    const double target = estimate - delaySteps_ * stepSeconds_;
     const double err = target - renderTime_;
     if (std::abs(err) > 4.0 * stepSeconds_) renderTime_ = target; // far off (stall, time-factor jump): snap
-    else renderTime_ += err * 0.05;                                 // else pull gently: no visible speed change
+    else renderTime_ += std::clamp(err * 0.05, -0.02 * frameSeconds_, 0.02 * frameSeconds_); // drift correction: at most 2% speed change
+    const double newest = last.simTime;
 
     // Find the bracketing pair.
     if (renderTime_ <= ring_.front().simTime) {

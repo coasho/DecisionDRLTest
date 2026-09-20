@@ -48,8 +48,8 @@ whenever its generation counter changes.
 
 Measured on an 8-core desktop with 64 vehicles: 760k vehicle-steps/s alone,
 within a few percent with a viewer attached (the difference is the viewer's
-own rendering competing for CPU, not the publishing; the viewer caps itself at
-60 fps and uses ~4% of one core).
+own rendering competing for CPU, not the publishing; the viewer is paced by
+vsync and uses ~3% of one core while mirroring 64 vehicles).
 
 ## Options that matter to a trainer
 

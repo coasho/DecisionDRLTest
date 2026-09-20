@@ -38,6 +38,7 @@ public:
 private:
     struct Sample {
         double simTime = 0.0;
+        std::int64_t wallNs = 0;
         std::vector<sim::VehicleState> states;
     };
     static void blend(const sim::VehicleState& a, const sim::VehicleState& b, double t, sim::VehicleState& out);
@@ -50,6 +51,7 @@ private:
     double stepSeconds_ = 1.0 / 60.0;  ///< measured from snapshot spacing
     double renderTime_ = 0.0;
     double delaySteps_ = 1.5;
+    double frameSeconds_ = 0.0;        ///< filtered frame period (the display cadence, without CPU-side jitter)
     bool clockStarted_ = false;
 };
 

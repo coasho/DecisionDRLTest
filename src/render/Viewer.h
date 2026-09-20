@@ -16,7 +16,7 @@ struct ViewerSettings {
     VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_4_BIT;
     double fieldOfViewDeg = 30.0;
     bool headlight = true;     ///< off when the scene brings its own lights (sun)
-    double maxFps = 60.0;      ///< frame-rate cap (0 = uncapped); keeps a mirror viewer from competing with the trainer for CPU
+    double maxFps = 0.0;       ///< optional frame-rate cap (0 = none: vsync paces the loop, which already costs ~3% of a core)
 };
 
 /// One window, one vsg::Viewer, one camera, one command graph: scene first,
@@ -56,6 +56,18 @@ public:
     double frameSeconds() const { return frameSeconds_; }
     double fps() const { return fps_; }
 
+    /// Where the last frame's time went (seconds), for --stats and the debug panel.
+    struct FrameTiming {
+        double app = 0.0;      ///< caller's work between frames (poll, interpolate, labels)
+        double advance = 0.0;  ///< advanceToNextFrame: waits for the previous frame's fences / swapchain image
+        double events = 0.0;
+        double update = 0.0;   ///< scene update (pager merges, animations)
+        double record = 0.0;   ///< command recording + submit
+        double present = 0.0;
+        double sleep = 0.0;    ///< frame cap
+    };
+    const FrameTiming& timing() const { return timing_; }
+
 private:
     ViewerSettings settings_;
     vsg::ref_ptr<vsg::Options> options_;
@@ -66,6 +78,8 @@ private:
     vsg::ref_ptr<vsg::Group> root_;
 
     double frameSeconds_ = 0.0;
+    FrameTiming timing_;
+    vsg::clock::time_point frameEnd_{};
     double fps_ = 0.0;
     double fpsAccumulator_ = 0.0;
     int fpsFrames_ = 0;

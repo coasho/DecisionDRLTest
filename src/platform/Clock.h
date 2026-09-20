@@ -25,6 +25,12 @@ public:
     }
 };
 
+/// Sleep until `deadline` with sub-millisecond precision: a high-resolution
+/// waitable timer on Windows (immune to the 15.6 ms scheduler period and to
+/// background timer coalescing), then a short spin for the last ~100 us.
+/// Use this instead of std::this_thread::sleep_until for pacing loops.
+void sleepUntil(Clock::time_point deadline) noexcept;
+
 /// Scoped stopwatch: `Stopwatch sw; ... sw.elapsedSeconds()`.
 class Stopwatch {
 public:

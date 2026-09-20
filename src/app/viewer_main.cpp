@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -84,6 +85,7 @@ struct ViewerOptions {
     double chaseDistance = 40.0;
     double chaseAzimuth = 180.0, chaseElevation = 14.0;
     bool probe = false;
+    double stats = 0.0;   // --stats <seconds>: print per-second frame statistics, exit after this long
     int trace = -1;
     bool interpolate = true;
     bool help = false;
@@ -109,6 +111,7 @@ void usage(const char* prog) {
         "  --on-ground              spawn parked on the terrain (brakes on)\n"
         "  --terrain-zoom <z>       tile level used for physics ground height (12)\n"
         "  --probe                  print motion smoothness statistics after ~5 s and exit\n"
+        "  --stats <seconds>        print per-second frame statistics (fps, frame-time breakdown, CPU) and exit\n"
         "  --trace <i>              print vehicle i's state once per second\n"
         "  --no-interpolate         draw raw snapshots (sample-and-hold) instead of interpolating\n"
         "Scene:\n"
@@ -120,7 +123,7 @@ void usage(const char* prog) {
         "  --max-level <n>          custom pyramid max level (17)\n"
         "  --model <file>           glTF/OBJ vehicle model (placeholder if omitted)\n"
         "  --model-scale <x>        model scale (1.0)\n"
-        "  --width <px> --height <px> --fullscreen --msaa <1|2|4|8> --fov <deg>\n"
+        "  --width <px> --height <px> --fullscreen --msaa <1|2|4|8> --fov <deg> --max-fps <n> (0 = vsync only)\n"
         "  --debug-layer            Vulkan validation layer\n"
         "  --camera chase|orbit|overview   initial camera (chase)\n"
         "  --log-level <lvl>\n"
@@ -193,6 +196,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
                 const std::string v = next();
                 o.cameraMode = v == "orbit" ? 1 : v == "overview" ? 2 : 0;
             } else if (a == "--probe") o.probe = true;
+            else if (a == "--stats") o.stats = std::stod(next());
             else if (a == "--trace") o.trace = std::stoi(next());
             else if (a == "--no-interpolate") o.interpolate = false;
             else if (a == "--log-level") {
@@ -419,6 +423,11 @@ int main(int argc, char** argv) {
 
     // --- Frame loop ------------------------------------------------------------------
     double wallSeconds = 0.0;
+    struct Stats {
+        double window = 0.0, cpu0 = platform::processCpuSeconds(), maxFrame = 0.0;
+        int frames = 0;
+        render::Viewer::FrameTiming sum;
+    } stats;
     while (viewer.active() && !controls->quit.load(std::memory_order_relaxed)) {
         wallSeconds += viewer.frameSeconds();
         bool paused = false;
@@ -597,6 +606,28 @@ int main(int argc, char** argv) {
 
         if (!viewer.frame()) break;
 
+        if (opt.stats > 0.0) {
+            const auto& t = viewer.timing();
+            stats.window += viewer.frameSeconds();
+            stats.maxFrame = std::max(stats.maxFrame, viewer.frameSeconds());
+            ++stats.frames;
+            stats.sum.app += t.app; stats.sum.advance += t.advance; stats.sum.events += t.events; stats.sum.update += t.update;
+            stats.sum.record += t.record; stats.sum.present += t.present; stats.sum.sleep += t.sleep;
+            if (stats.window >= 1.0) {
+                const double cpu = platform::processCpuSeconds();
+                const double n = static_cast<double>(stats.frames);
+                std::printf("stats t=%5.1f  %5.1f fps  frame avg %5.2f max %5.2f ms | app %4.2f advance %5.2f events %4.2f update %4.2f record %4.2f present %5.2f sleep %5.2f ms | cpu %5.1f%% | vehicles %zu\n",
+                            wallSeconds, n / stats.window, stats.window / n * 1e3, stats.maxFrame * 1e3, stats.sum.app / n * 1e3, stats.sum.advance / n * 1e3,
+                            stats.sum.events / n * 1e3, stats.sum.update / n * 1e3, stats.sum.record / n * 1e3, stats.sum.present / n * 1e3,
+                            stats.sum.sleep / n * 1e3, (cpu - stats.cpu0) / stats.window * 100.0,
+                            static_cast<std::size_t>(std::count(alive.begin(), alive.end(), 1)));
+                std::fflush(stdout);
+                stats = Stats{};
+                stats.cpu0 = cpu;
+            }
+            if (wallSeconds >= opt.stats) break;
+        }
+
         if (opt.probe && batch && runner) {
             static std::vector<double> speeds, distances;
             static vsg::dvec3 lastPos;
@@ -606,21 +637,25 @@ int main(int argc, char** argv) {
             const auto& st = (opt.interpolate ? interpolator.states() : batch->states)[static_cast<std::size_t>(selected)];
             const vsg::dvec3 pos(st.positionEcef[0], st.positionEcef[1], st.positionEcef[2]);
             if (havePos && viewer.frameSeconds() > 0.0) {
-                speeds.push_back(vsg::length(pos - lastPos) / viewer.frameSeconds());
+                // Per displayed frame (the monitor's cadence), not per CPU-measured frame time.
+                speeds.push_back(vsg::length(pos - lastPos) * viewer.fps());
                 distances.push_back(vsg::length(viewer.lookAt()->eye - pos));
+                if (std::getenv("FSIM_PROBE_TRACE") && speeds.size() <= 60)
+                    std::printf("frame %3zu dt %6.3f ms  speed %6.2f  renderTime %.4f  simTime %.4f\n", speeds.size(), viewer.frameSeconds() * 1e3,
+                                speeds.back(), interpolator.renderSimTime(), batch->simTime);
             }
             lastPos = pos;
             havePos = true;
             if (speeds.size() >= 600) {
-                auto stats = [](const std::vector<double>& v) {
+                auto summarise = [](const std::vector<double>& v) {
                     double mean = 0, m2 = 0, lo = 1e300, hi = -1e300;
                     for (double x : v) { mean += x; lo = std::min(lo, x); hi = std::max(hi, x); }
                     mean /= static_cast<double>(v.size());
                     for (double x : v) m2 += (x - mean) * (x - mean);
                     return std::tuple{mean, std::sqrt(m2 / static_cast<double>(v.size())), lo, hi};
                 };
-                const auto [sm, ss, slo, shi] = stats(speeds);
-                const auto [dm, ds, dlo, dhi] = stats(distances);
+                const auto [sm, ss, slo, shi] = summarise(speeds);
+                const auto [dm, ds, dlo, dhi] = summarise(distances);
                 std::printf("probe (%s, %zu frames): apparent speed mean %.2f m/s sd %.2f min %.2f max %.2f | "
                             "eye-target mean %.2f m sd %.4f min %.2f max %.2f | sim %.0f veh-steps/s simTime %.2f tas %.1f fps %.0f\n",
                             opt.interpolate ? "interpolated" : "sample-and-hold", speeds.size(), sm, ss, slo, shi, dm, ds, dlo, dhi,
