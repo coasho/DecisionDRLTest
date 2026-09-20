@@ -10,17 +10,18 @@ namespace fsim::world {
 namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDeg = kPi / 180.0;
-constexpr double kMinDistance = 6.0;
+constexpr double kMinDistance = 6.0;          // following a vehicle
+constexpr double kMinDistanceDetached = 25.0; // orbiting a ground point: stay clear of the drawn mesh
 constexpr double kMaxDistance = 5.0e7;        // 50,000 km: the whole Earth with room around it
 constexpr double kMinElevation = -60.0 * kDeg; // well below the focus (terrain collision takes over)
 constexpr double kMaxElevation = 89.0 * kDeg;
-constexpr double kRotateRadPerNdc = 1.25;     // osgGA trackball (size 0.8): ~72 deg per half window
+constexpr double kRotateRadPerNdc = 1.0;      // osgGA rotateYawPitch: 1 rad per normalised unit (57 deg per half window)
 constexpr double kPanPerNdc = 0.3;            // osgGA panModel scale
 constexpr double kZoomPerNotch = 0.88;        // 12 % per wheel notch
 constexpr double kZoomTimeConstant = 0.12;    // s, wheel/drag zoom smoothing
-constexpr double kEyeClearanceM = 2.0;        // eye height above the sampled terrain at close range ...
-constexpr double kEyeClearanceRatio = 0.02;   // ... plus 2 % of the distance (the drawn LOD gets coarser with range) ...
-constexpr double kEyeClearanceMaxM = 60.0;    // ... up to this
+constexpr double kEyeClearanceM = 4.0;        // eye height above the sampled terrain at close range ...
+constexpr double kEyeClearanceRatio = 0.03;   // ... plus 3 % of the distance (the drawn LOD gets coarser with range) ...
+constexpr double kEyeClearanceMaxM = 80.0;    // ... up to this
 constexpr double kGlobeRampStartM = 1.0e6;    // beyond this distance the view tilts towards straight down ...
 constexpr double kGlobeRampEndM = 1.5e7;      // ... and is fully top-down here (the whole Earth in view)
 
@@ -102,9 +103,12 @@ void CameraController::moveFocus(double dxNdc, double dyNdc) {
     // 0.5 x distance per normalised unit is close to "the ground sticks to the cursor" at 30 deg fov.
     const double scale = 0.5 * distance_;
     vsg::dvec3 moved = focus_ - right * (dxNdc * scale) - ahead * (dyNdc * scale);
-    // Back onto the globe: keep latitude/longitude, replace the altitude.
+    // Back onto the globe: keep latitude/longitude; the altitude follows the
+    // terrain when known and otherwise stays what it was (update() corrects it
+    // as soon as the tile arrives) - never 0, which would sink the focus
+    // under high ground.
     vsg::dvec3 lla = ellipsoid_->convertECEFToLatLongAltitude(moved);
-    double altitude = 0.0;
+    double altitude = ellipsoid_->convertECEFToLatLongAltitude(focus_).z;
     if (ground_)
         if (auto h = ground_(lla.x * kDeg, lla.y * kDeg)) altitude = *h;
     lla.z = altitude;
@@ -147,9 +151,13 @@ void CameraController::apply(vsg::MoveEvent& e) {
         rotate(dx, dy);
         e.handled = true;
     } else if (middleDown_ && (e.mask & vsg::BUTTON_MASK_2)) {
-        // Pan: the scene follows the mouse (osgGA panModel with scale 0.3 x distance).
-        panRight_ -= dx * kPanPerNdc * distance_;
-        panUp_ -= dy * kPanPerNdc * distance_;
+        if (detached()) {
+            moveFocus(dx, dy); // osgGA TerrainManipulator: the middle button pans over the terrain
+        } else {
+            // Following a vehicle: offset the look-at point in the screen plane (osgGA panModel, 0.3 x distance).
+            panRight_ -= dx * kPanPerNdc * distance_;
+            panUp_ -= dy * kPanPerNdc * distance_;
+        }
         e.handled = true;
     } else if (rightDown_ && (e.mask & vsg::BUTTON_MASK_3)) {
         if (detached()) moveFocus(dx, dy); // rotate the globe under the camera
@@ -160,7 +168,8 @@ void CameraController::apply(vsg::MoveEvent& e) {
 
 void CameraController::apply(vsg::ScrollWheelEvent& e) {
     if (e.handled) return;
-    targetDistance_ = std::clamp(targetDistance_ * std::pow(kZoomPerNotch, static_cast<double>(e.delta.y)), kMinDistance, kMaxDistance);
+    targetDistance_ = std::clamp(targetDistance_ * std::pow(kZoomPerNotch, static_cast<double>(e.delta.y)),
+                                 detached() ? kMinDistanceDetached : kMinDistance, kMaxDistance);
     e.handled = true;
 }
 
@@ -230,7 +239,21 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
     if (distance_ > kGlobeRampStartM) {
         const double t = std::clamp((distance_ - kGlobeRampStartM) / (kGlobeRampEndM - kGlobeRampStartM), 0.0, 1.0);
         const double s = t * t * (3.0 - 2.0 * t);
-        elevation = elevation + (kMaxElevation - elevation) * s;
+        elevation = std::max(elevation, elevation + (kMaxElevation - elevation) * s);
+    }
+    // Beyond the terrain-collision range the eye must stay above the focus'
+    // horizontal plane, or a negative elevation would put it under the globe.
+    if (distance_ >= 2.0e5) elevation = std::max(elevation, 0.0);
+
+    // The pan offset moves the eye too: probe the terrain from where the eye really orbits.
+    vsg::dvec3 orbitCentre = pos;
+    if (panRight_ != 0.0 || panUp_ != 0.0) {
+        const vsg::dvec3 dir0 = horizontal * std::cos(elevation) + up * std::sin(elevation);
+        vsg::dvec3 right0 = vsg::cross(-dir0, up);
+        if (vsg::length(right0) < 1e-6) right0 = east;
+        right0 = vsg::normalize(right0);
+        const vsg::dvec3 screenUp0 = vsg::normalize(vsg::cross(right0, -dir0));
+        orbitCentre = pos + right0 * panRight_ + screenUp0 * panUp_;
     }
 
     // Terrain collision: keep the eye (and the line of sight down to the focus)
@@ -239,12 +262,13 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
     // it. The ground is sampled at several points between focus and eye so a
     // ridge in between is respected too.
     if (ground_ && distance_ < 2.0e5) {
-        const double focusAltitude = ellipsoid_->convertECEFToLatLongAltitude(pos).z;
+        const double focusAltitude = ellipsoid_->convertECEFToLatLongAltitude(orbitCentre).z;
         const double clearance = std::min(kEyeClearanceMaxM, kEyeClearanceM + kEyeClearanceRatio * distance_);
-        double minElevation = std::asin(std::clamp(clearance / distance_, -1.0, 1.0)); // never below the focus' own ground
-        for (double t : {0.25, 0.5, 0.75, 1.0}) {
+        // Detached, the focus is on the ground: never look up at it from below.
+        double minElevation = followVehicle ? -kPi / 2.0 : std::asin(std::clamp(clearance / distance_, -1.0, 1.0));
+        for (double t : {0.15, 0.3, 0.5, 0.75, 1.0}) {
             const vsg::dvec3 probeDir = horizontal * std::cos(elevation) + up * std::sin(elevation);
-            const vsg::dvec3 lla = ellipsoid_->convertECEFToLatLongAltitude(pos + probeDir * (distance_ * t));
+            const vsg::dvec3 lla = ellipsoid_->convertECEFToLatLongAltitude(orbitCentre + probeDir * (distance_ * t));
             if (auto h = ground_(lla.x * kDeg, lla.y * kDeg)) {
                 const double needed = (*h + clearance) - focusAltitude; // height to gain over the focus by that point
                 minElevation = std::max(minElevation, std::asin(std::clamp(needed / (distance_ * t), -1.0, 1.0)));
@@ -252,6 +276,9 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
         }
         if (elevation < minElevation) elevation = std::min(minElevation, kMaxElevation);
     }
+    // What is shown is what the next drag starts from: no dead zone after the
+    // terrain or the globe view pushed the elevation up.
+    elevation_ = elevation;
 
     const vsg::dvec3 dir = horizontal * std::cos(elevation) + up * std::sin(elevation);
     // Pan offset in the eye's screen plane (right = forward x up, screen up = right x forward).

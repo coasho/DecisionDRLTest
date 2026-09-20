@@ -27,7 +27,7 @@ next one. Restarting the trainer re-attaches automatically.
 
 ## What the viewer shows
 
-- Every live vehicle, as a 3D model over full-Earth satellite imagery and terrain, with a label, a trail and a chase/orbit/overview camera (`tab` cycles vehicles; the mouse works like OpenSceneGraph's manipulators: left drag rotates, middle drag pans, wheel zooms from 6 m to the whole Earth, right drag zooms or - detached / before any vehicle exists - drags the globe; the camera never enters the terrain).
+- Every live vehicle, as a 3D model over full-Earth satellite imagery and terrain, with a label, a trail and a chase/orbit/overview camera (`tab` cycles vehicles; the mouse works like OpenSceneGraph's manipulators: left drag rotates, middle drag pans, wheel zooms from 6 m to the whole Earth, right drag zooms while following a vehicle; detached (camera mode "free", or before any vehicle exists) the middle and right buttons drag the globe like osgGA's TerrainManipulator; the camera never enters the terrain).
 - Vehicle creation, reset (new "generation") and removal, as they happen.
 - The world's clock (sun position and sky), wind, atmosphere and weather.
 - The trainer's throughput (vehicle-steps/s), simulation time and the age of the last update.

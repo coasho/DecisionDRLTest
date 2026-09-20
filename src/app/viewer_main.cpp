@@ -82,7 +82,7 @@ struct ViewerOptions {
     double modelScaleOverride = 0.0;
 
     render::ViewerSettings window;
-    int cameraMode = 0;
+    int cameraMode = 1; // orbit
     double chaseDistance = 40.0;
     double chaseAzimuth = 180.0, chaseElevation = 14.0;
     bool probe = false;
@@ -126,7 +126,7 @@ void usage(const char* prog) {
         "  --model-scale <x>        model scale (1.0)\n"
         "  --width <px> --height <px> --fullscreen --msaa <1|2|4|8> --fov <deg> --max-fps <n> (0 = vsync only)\n"
         "  --debug-layer            Vulkan validation layer\n"
-        "  --camera chase|orbit|overview|free   initial camera (chase)\n"
+        "  --camera chase|orbit|overview|free   initial camera (orbit)\n"
         "  --log-level <lvl>\n"
         "Keys: space pause (demo), . step (demo), tab next vehicle, c camera, -/= zoom, r reset view, [ ] time factor (demo),\n"
         "      l list, m monitor, n labels, t trails, esc quit\n"
@@ -340,7 +340,10 @@ int main(int argc, char** argv) {
         sunLight = world::createSunLight(day, hours);
         scene->addChild(sunLight);
     }
-    if (auto earth = world::createEarth(opt.earth, viewer.options(), ellipsoid)) scene->addChild(earth);
+    if (auto earth = world::createEarth(opt.earth, viewer.options(), ellipsoid)) {
+        scene->addChild(earth);
+        if (auto caps = world::createPolarCaps(ellipsoid, viewer.options())) scene->addChild(caps); // Mercator tiles end at 85 deg
+    }
 
     world::VehicleVisuals::Settings visualSettings;
     if (opt.modelPath.empty()) {
@@ -388,9 +391,12 @@ int main(int argc, char** argv) {
 
     auto camera = world::CameraController::create(viewer.camera(), viewer.lookAt(), ellipsoid);
     camera->setChaseOffset(opt.chaseDistance, opt.chaseElevation, opt.chaseAzimuth);
-    if (terrain) {
-        std::shared_ptr<world::TileGroundProvider> tiles = terrain;
-        camera->setGroundQuery([tiles](double lat, double lon) { return tiles->cachedHeightAboveEllipsoidM(lat, lon); });
+    // Camera collision samples finer tiles than the physics (z14, ~10 m/px):
+    // on steep slopes a 38 m/px sample can be tens of metres off the drawn mesh.
+    std::shared_ptr<world::TileGroundProvider> cameraGround;
+    if (!opt.earth.elevationUrl.empty()) {
+        cameraGround = std::make_shared<world::TileGroundProvider>(opt.earth.elevationUrl, opt.earth.elevationEncoding, 14u, viewer.options(), 64);
+        camera->setGroundQuery([cameraGround](double lat, double lon) { return cameraGround->cachedHeightAboveEllipsoidM(lat, lon); });
     }
     // Detached camera focus: the demo spawn area / default location, on the ground.
     camera->setFocus(ellipsoid->convertLatLongAltitudeToECEF(vsg::dvec3(opt.latitudeDeg, opt.longitudeDeg, 0.0)));

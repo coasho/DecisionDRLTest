@@ -35,4 +35,9 @@ struct EarthSettings {
 vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& settings, vsg::ref_ptr<vsg::Options> options,
                                     vsg::ref_ptr<vsg::EllipsoidModel> ellipsoid);
 
+/// Web-Mercator tile pyramids stop at +-85.05 deg latitude, which leaves both
+/// poles as holes in the globe. Two flat-coloured caps (ice) close them.
+vsg::ref_ptr<vsg::Node> createPolarCaps(vsg::ref_ptr<vsg::EllipsoidModel> ellipsoid, vsg::ref_ptr<const vsg::Options> options,
+                                        double fromLatitudeDeg = 84.9);
+
 } // namespace fsim::world
