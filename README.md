@@ -22,7 +22,8 @@ Milestone **M0 (skeleton) done; viewer (visualisation-first re-plan) in progress
   ambient lighting from the current UTC time, N vehicles driven from a paced simulation thread through a
   lock-free snapshot buffer with render-side interpolation, chase/orbit/overview cameras, an eye-centred
   gradient sky dome with sun glow and night side, fading flight trails, on-screen vehicle labels, Dear ImGui
-  monitor and vehicle list.
+  monitor and vehicle list. Vehicles use a real glTF aircraft (the Apache-2.0 "Cesium Air" sample,
+  downloaded at configure time) oriented by a per-model `.manifest`; any glTF/OBJ works via `--model`.
 - **Terrain physics**: JSBSim's ground callback samples the *same* elevation tiles the renderer shows
   (`world::TileGroundProvider`, LRU + background prefetch); `--on-ground` spawns vehicles parked on the
   terrain via JSBSim's ground trim. Diverged vehicles are reset automatically.
@@ -36,7 +37,7 @@ Measured on a 16-thread desktop (Release, 64 × c172x, frame-skip 4):
 |       8 |           800,000 |
 |      16 |         1,138,000 |
 
-Not yet: RL environment layer (`env`), `fsim` SDK / C ABI, glTF vehicle manifests, vision observations, offline tile pyramids (`tools/tile_builder`).
+Not yet: RL environment layer (`env`), `fsim` SDK / C ABI, animated control surfaces, vision observations, offline tile pyramids (`tools/tile_builder`).
 
 Imagery and elevation come from Esri World Imagery and AWS Terrain Tiles under their respective terms (attribution required); tiles are cached under `%LOCALAPPDATA%lightsim	ilecache`.
 

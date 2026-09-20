@@ -1,0 +1,6 @@
+# Vehicle model manifest (design 8.2 "Aircraft models"): key value per line.
+# Cesium Air - sample aircraft from the CesiumGS/cesium repository (Apache-2.0).
+# The .glb itself is downloaded at configure time (see cmake/Assets.cmake).
+forward -y
+up +z
+scale 0.4

@@ -19,11 +19,17 @@ public:
     struct Settings {
         std::string modelPath;           ///< glTF/OBJ path; empty = placeholder
         double modelScale = 1.0;
+        vsg::dvec3 modelForward{0.0, 0.0, -1.0}; ///< model-space nose direction (glTF default -Z)
+        vsg::dvec3 modelUp{0.0, 1.0, 0.0};       ///< model-space up (glTF default +Y)
         double placeholderLengthM = 8.3; ///< c172-ish
         double placeholderSpanM = 11.0;
     };
 
     VehicleVisuals(std::size_t count, const Settings& settings, vsg::ref_ptr<vsg::Options> options);
+
+    /// Apply `<modelPath>.manifest` (key value lines: forward, up, scale) to
+    /// `settings` if the file exists. Returns true when a manifest was read.
+    static bool applyManifest(Settings& settings);
 
     vsg::ref_ptr<vsg::Node> node() const { return root_; }
 

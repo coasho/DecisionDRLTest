@@ -3,6 +3,9 @@
 #include "core/Log.h"
 #include "world/Frames.h"
 
+#include <fstream>
+#include <sstream>
+
 namespace fsim::world {
 
 namespace {
@@ -24,10 +27,14 @@ vsg::ref_ptr<vsg::Node> box(vsg::Builder& builder, const vsg::vec3& centre, cons
 VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg::ref_ptr<vsg::Options> options) {
     root_ = vsg::Group::create();
 
-    vsg::ref_ptr<vsg::Node> model;
+    vsg::ref_ptr<vsg::Node> model, highlightModel;
     if (!settings.modelPath.empty()) model = loadModel(settings, options);
-    if (!model) model = buildPlaceholder(settings, vsg::vec4(0.85f, 0.85f, 0.9f, 1.0f));
-    auto highlightModel = buildPlaceholder(settings, vsg::vec4(1.0f, 0.55f, 0.1f, 1.0f));
+    if (model) {
+        highlightModel = model; // a loaded model keeps its look; the label marks the selection
+    } else {
+        model = buildPlaceholder(settings, vsg::vec4(0.85f, 0.85f, 0.9f, 1.0f));
+        highlightModel = buildPlaceholder(settings, vsg::vec4(1.0f, 0.55f, 0.1f, 1.0f));
+    }
 
     transforms_.reserve(count);
     highlight_.reserve(count);
@@ -44,19 +51,49 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
     }
 }
 
+bool VehicleVisuals::applyManifest(Settings& settings) {
+    if (settings.modelPath.empty()) return false;
+    std::ifstream in(settings.modelPath + ".manifest");
+    if (!in) return false;
+    auto axis = [](const std::string& a, vsg::dvec3& out) {
+        if (a.size() != 2) return;
+        const double sgn = a[0] == '-' ? -1.0 : 1.0;
+        if (a[1] == 'x') out = vsg::dvec3(sgn, 0.0, 0.0);
+        else if (a[1] == 'y') out = vsg::dvec3(0.0, sgn, 0.0);
+        else if (a[1] == 'z') out = vsg::dvec3(0.0, 0.0, sgn);
+    };
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        std::string key, value;
+        if (!(ls >> key >> value) || key.empty() || key[0] == '#') continue;
+        if (key == "forward") axis(value, settings.modelForward);
+        else if (key == "up") axis(value, settings.modelUp);
+        else if (key == "scale") settings.modelScale = std::stod(value);
+        else LOG_WARN("world") << "manifest: unknown key '" << key << "' in " << settings.modelPath << ".manifest";
+    }
+    LOG_INFO("world") << "model manifest: " << settings.modelPath << ".manifest";
+    return true;
+}
+
 vsg::ref_ptr<vsg::Node> VehicleVisuals::loadModel(const Settings& s, vsg::ref_ptr<vsg::Options> options) const {
     auto node = vsg::read_cast<vsg::Node>(s.modelPath, options);
     if (!node) {
         LOG_WARN("world") << "could not load vehicle model '" << s.modelPath << "', using placeholder";
         return {};
     }
-    // glTF convention (+Y up, -Z forward, +X right) -> body (x fwd, y right, z down).
-    // Rows of the matrix express body axes in model coordinates.
-    vsg::dmat4 modelToBody(0.0, 0.0, -1.0, 0.0,   // model +X -> body +Y (right)
-                           0.0, -1.0, 0.0, 0.0,   // model +Y (up) -> body -Z
-                           -1.0, 0.0, 0.0, 0.0,   // model +Z (back) -> body -X
+    // Model axes -> body axes (x fwd, y right, z down). Body x maps to the model's
+    // forward vector, body z to minus its up vector, body y = down x forward
+    // completes a right-handed frame. Columns of bodyToModel are those vectors.
+    const vsg::dvec3 f = vsg::normalize(s.modelForward);
+    const vsg::dvec3 d = -vsg::normalize(s.modelUp);
+    const vsg::dvec3 r = vsg::normalize(vsg::cross(d, f));
+    vsg::dmat4 bodyToModel(f.x, f.y, f.z, 0.0,   // column 0: body x in model space
+                           r.x, r.y, r.z, 0.0,   // column 1: body y
+                           d.x, d.y, d.z, 0.0,   // column 2: body z
                            0.0, 0.0, 0.0, 1.0);
-    auto xf = vsg::MatrixTransform::create(vsg::scale(s.modelScale, s.modelScale, s.modelScale) * modelToBody);
+    const vsg::dmat4 modelToBody = vsg::inverse(bodyToModel);
+    auto xf = vsg::MatrixTransform::create(modelToBody * vsg::scale(s.modelScale, s.modelScale, s.modelScale));
     xf->addChild(node);
     LOG_INFO("world") << "vehicle model: " << s.modelPath;
     return xf;

@@ -63,10 +63,13 @@ struct ViewerOptions {
     bool onGround = false;       // spawn parked on the terrain instead of airborne
     std::string modelPath;
     double modelScale = 1.0;
+    std::string modelForward, modelUp; // empty = from the manifest / glTF default
+    double modelScaleOverride = 0.0;    // >0 overrides the manifest
 
     render::ViewerSettings window;
     int cameraMode = 0; // 0 chase, 1 orbit, 2 overview
     double chaseDistance = 40.0; // chase camera distance behind the vehicle (m)
+    double chaseAzimuth = 180.0, chaseElevation = 14.0; // initial view offset (deg)
     bool probe = false;       // print motion-smoothness statistics and exit after ~5 s
     int trace = -1;           // --trace <i>: print vehicle i's state once per second
     bool interpolate = true;  // --no-interpolate reproduces sample-and-hold for comparison
@@ -146,7 +149,9 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--bing-key") o.earth.bingKey = next();
             else if (a == "--max-level") o.earth.maxLevel = static_cast<unsigned>(std::stoul(next()));
             else if (a == "--model") o.modelPath = next();
-            else if (a == "--model-scale") o.modelScale = std::stod(next());
+            else if (a == "--model-scale") o.modelScaleOverride = std::stod(next());
+            else if (a == "--model-forward") o.modelForward = next();
+            else if (a == "--model-up") o.modelUp = next();
             else if (a == "--width") o.window.width = static_cast<std::uint32_t>(std::stoul(next()));
             else if (a == "--height") o.window.height = static_cast<std::uint32_t>(std::stoul(next()));
             else if (a == "--fullscreen") o.window.fullscreen = true;
@@ -156,6 +161,8 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
                 o.window.samples = s >= 8 ? VK_SAMPLE_COUNT_8_BIT : s >= 4 ? VK_SAMPLE_COUNT_4_BIT : s >= 2 ? VK_SAMPLE_COUNT_2_BIT : VK_SAMPLE_COUNT_1_BIT;
             } else if (a == "--debug-layer") o.window.debugLayer = true;
             else if (a == "--chase-distance") o.chaseDistance = std::stod(next());
+            else if (a == "--chase-azimuth") o.chaseAzimuth = std::stod(next());
+            else if (a == "--chase-elevation") o.chaseElevation = std::stod(next());
             else if (a == "--camera") {
                 const std::string v = next();
                 o.cameraMode = v == "orbit" ? 1 : v == "overview" ? 2 : 0;
@@ -279,8 +286,27 @@ int main(int argc, char** argv) {
     if (auto earth = world::createEarth(opt.earth, viewer.options(), ellipsoid)) scene->addChild(earth);
 
     world::VehicleVisuals::Settings visualSettings;
+    // Model: --model, else the sample aircraft from the asset tree, else the placeholder.
+    if (opt.modelPath.empty()) {
+        if (auto sample = assets.find("models/Cesium_Air.glb")) opt.modelPath = sample->string();
+    } else if (opt.modelPath == "none") {
+        opt.modelPath.clear();
+    }
     visualSettings.modelPath = opt.modelPath;
-    visualSettings.modelScale = opt.modelScale;
+    world::VehicleVisuals::applyManifest(visualSettings); // forward/up/scale from <model>.manifest
+    if (opt.modelScaleOverride > 0.0) visualSettings.modelScale = opt.modelScaleOverride;
+    auto axis = [](const std::string& a, const vsg::dvec3& fallback) {
+        if (a.size() != 2) return fallback;
+        const double sgn = a[0] == '-' ? -1.0 : 1.0;
+        switch (a[1]) {
+        case 'x': return vsg::dvec3(sgn, 0.0, 0.0);
+        case 'y': return vsg::dvec3(0.0, sgn, 0.0);
+        case 'z': return vsg::dvec3(0.0, 0.0, sgn);
+        default: return fallback;
+        }
+    };
+    visualSettings.modelForward = axis(opt.modelForward, visualSettings.modelForward);
+    visualSettings.modelUp = axis(opt.modelUp, visualSettings.modelUp);
     world::VehicleVisuals visuals(opt.vehicles, visualSettings, viewer.options());
     scene->addChild(visuals.node());
     world::Trails trails(opt.vehicles, 900, 0.25, viewer.options()); // ~3.75 min of path per vehicle
@@ -303,7 +329,7 @@ int main(int argc, char** argv) {
     if (!viewer.setScene(scene, ellipsoid, imgui)) return 1;
 
     auto camera = world::CameraController::create(viewer.camera(), viewer.lookAt(), ellipsoid);
-    camera->setChaseOffset(opt.chaseDistance);
+    camera->setChaseOffset(opt.chaseDistance, opt.chaseElevation, opt.chaseAzimuth);
     viewer.addEventHandler(camera); // mouse orbit / distance; after ImGui so panels keep the pointer
 
     // Place the first snapshot so the camera has a target before the sim thread runs.

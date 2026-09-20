@@ -50,6 +50,7 @@ endif()
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(Warnings)
 include(Dependencies)
+include(Assets)
 
 # Location of the JSBSim data tree (aircraft/, engine/, systems/) used by default
 # when no --jsbsim-root is given. Points at the submodule in development builds
