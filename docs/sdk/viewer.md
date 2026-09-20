@@ -23,7 +23,7 @@ next one. Restarting the trainer re-attaches automatically.
 
 ## What the viewer shows
 
-- Every live vehicle, as a 3D model over full-Earth satellite imagery and terrain, with a label, a trail and a chase/orbit/overview camera (`tab` cycles vehicles, mouse orbits/zooms).
+- Every live vehicle, as a 3D model over full-Earth satellite imagery and terrain, with a label, a trail and a chase/orbit/overview camera (`tab` cycles vehicles; the mouse works like OpenSceneGraph's trackball: left drag rotates and can be thrown, middle drag pans, right drag / wheel zoom).
 - Vehicle creation, reset (new "generation") and removal, as they happen.
 - The world's clock (sun position and sky), wind, atmosphere and weather.
 - The trainer's throughput (vehicle-steps/s), simulation time and the age of the last update.

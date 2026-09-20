@@ -100,7 +100,7 @@ void MonitorGui::drawMonitor() const {
     if (ImGui::Button("zoom +  [=]")) controls_->cameraZoom.store(0.8, std::memory_order_relaxed);
     ImGui::SameLine();
     if (ImGui::Button("reset view  [r]")) controls_->cameraReset.store(true, std::memory_order_relaxed);
-    ImGui::TextDisabled("mouse: left drag orbit, wheel / right drag distance");
+    ImGui::TextDisabled("mouse: left drag rotate (throw), middle drag pan, right drag / wheel zoom");
 
     bool list = controls_->showVehicleList.load(std::memory_order_relaxed);
     if (ImGui::Checkbox("vehicle list  [l]", &list)) controls_->showVehicleList.store(list, std::memory_order_relaxed);

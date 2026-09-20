@@ -129,7 +129,7 @@ void usage(const char* prog) {
         "  --log-level <lvl>\n"
         "Keys: space pause (demo), . step (demo), tab next vehicle, c camera, -/= zoom, r reset view, [ ] time factor (demo),\n"
         "      l list, m monitor, n labels, t trails, esc quit\n"
-        "Mouse: left drag orbits around the vehicle, wheel / right drag changes distance, middle click resets the view\n",
+        "Mouse (OSG trackball feel): left drag rotates (release while moving to throw), middle drag pans, right drag zooms (down = closer), wheel zooms\n",
         prog);
 }
 
@@ -384,6 +384,7 @@ int main(int argc, char** argv) {
     auto gui = ui::MonitorGui::create(controls, opt.aircraft);
     auto imgui = vsgImGui::RenderImGui::create(viewer.window(), gui);
     ImGui::GetIO().IniFilename = nullptr;
+    ImGui::GetIO().ConfigWindowsMoveFromTitleBarOnly = true; // a drag that starts inside a panel is never a panel move
     if (const double dpi = platform::systemDpiScale(); dpi > 1.01) {
         ImGui::GetIO().FontGlobalScale = static_cast<float>(dpi);
         ImGui::GetStyle().ScaleAllSizes(static_cast<float>(dpi));

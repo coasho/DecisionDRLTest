@@ -138,8 +138,9 @@ build/ucrt64-release/bin/flightsim.exe --vehicles 64 --steps 300 --benchmark
 
 Viewer keys: `tab` next vehicle, `c` camera (chase / orbit / overview), `-`/`=` zoom, `r` reset view,
 `l` vehicle list, `m` monitor, `n` labels, `t` trails, `esc` quit; in demo mode also `space` pause, `.` step,
-`[`/`]` time factor. Mouse: **left drag orbits** around the selected vehicle (drag down looks from above),
-**wheel / right drag** changes distance, middle click resets.
+`[`/`]` time factor. Mouse, with OpenSceneGraph's trackball feel: **left drag rotates** around the selected
+vehicle (release while moving to throw), **middle drag pans**, **right drag zooms** (down = closer), **wheel** zooms;
+`r` resets the view.
 
 ## Using the SDK
 
