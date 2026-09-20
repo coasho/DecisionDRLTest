@@ -17,6 +17,9 @@ if(FSIM_WITH_RENDER)
         viewer_main.cpp
         DemoAutopilot.h)
     target_link_libraries(flightsim-viewer PRIVATE fsim::ui fsim::world fsim::render fsim::ipc fsim::control fsim::sim fsim::io fsim::core fsim::platform)
+    # A GUI application: no console window when double-clicked. When started
+    # from a terminal it attaches to that console (platform::attachParentConsole).
+    set_target_properties(flightsim-viewer PROPERTIES WIN32_EXECUTABLE TRUE)
     fsim_set_warnings(flightsim-viewer)
     fsim_relax_third_party_warnings(flightsim-viewer)
     add_custom_command(TARGET flightsim-viewer POST_BUILD

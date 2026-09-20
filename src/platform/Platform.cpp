@@ -3,7 +3,9 @@
 #include "platform/Threads.h"
 
 #include <chrono>
+#include <cstdio>
 #include <cstdlib>
+#include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -97,6 +99,27 @@ void sleepUntil(Clock::time_point deadline) noexcept {
     if (remaining > microseconds(200)) std::this_thread::sleep_for(remaining - microseconds(200));
 #endif
     while (Clock::now() < deadline) std::this_thread::yield();
+}
+
+bool attachParentConsole() noexcept {
+#ifdef _WIN32
+    // Streams the parent redirected (pipes, files) already have valid handles
+    // and must be left alone; only unconnected ones go to the console.
+    auto valid = [](DWORD id) {
+        HANDLE h = GetStdHandle(id);
+        return h != nullptr && h != INVALID_HANDLE_VALUE;
+    };
+    const bool outRedirected = valid(STD_OUTPUT_HANDLE), errRedirected = valid(STD_ERROR_HANDLE), inRedirected = valid(STD_INPUT_HANDLE);
+    if (!AttachConsole(ATTACH_PARENT_PROCESS)) return outRedirected || errRedirected;
+    FILE* f = nullptr;
+    if (!outRedirected) freopen_s(&f, "CONOUT$", "w", stdout);
+    if (!errRedirected) freopen_s(&f, "CONOUT$", "w", stderr);
+    if (!inRedirected) freopen_s(&f, "CONIN$", "r", stdin);
+    std::ios::sync_with_stdio();
+    return true;
+#else
+    return true;
+#endif
 }
 
 double processCpuSeconds() noexcept {

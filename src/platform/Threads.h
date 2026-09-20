@@ -38,4 +38,9 @@ double systemDpiScale() noexcept;
 /// CPU time (user + kernel, all threads) consumed by this process, seconds.
 double processCpuSeconds() noexcept;
 
+/// For GUI-subsystem executables: attach stdout/stderr to the console the
+/// process was started from, if any. Returns false when there is none
+/// (launched from Explorer), in which case the caller may log to a file.
+bool attachParentConsole() noexcept;
+
 } // namespace fsim::platform

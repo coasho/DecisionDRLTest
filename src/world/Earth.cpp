@@ -1,6 +1,7 @@
 #include "world/Earth.h"
 
 #include "core/Log.h"
+#include "world/ElevatedTile.h"
 
 #include <algorithm>
 
@@ -66,7 +67,8 @@ vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& settings, vsg::ref_ptr<
 
     auto earth = vsg::TileDatabase::create();
     earth->settings = tiles;
-    if (!earth->readDatabase(options)) {
+    // Our reader: identical tiles, but culling bounds that include the relief.
+    if (!readElevatedDatabase(*earth, options)) {
         LOG_ERROR("world") << "TileDatabase::readDatabase failed for " << tiles->imageLayer.string()
                            << " (network down or reader missing?)";
         return {};

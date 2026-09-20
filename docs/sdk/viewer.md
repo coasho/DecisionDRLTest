@@ -16,6 +16,10 @@ build/ucrt64-release/bin/flightsim-viewer.exe --world my-experiment
 build/ucrt64-release/bin/flightsim-viewer.exe --list       # print live worlds
 ```
 
+The viewer is a GUI application: no console window appears when it is
+started from Explorer (its log then goes to `%LOCALAPPDATA%lightsimiewer.log`);
+started from a terminal it prints there (`--list`, `--help`, `--stats`).
+
 Until a world exists the window says "waiting for a training application";
 when your program starts, the vehicles appear with their names, types and
 active control levels; when it exits, the viewer says so and waits for the

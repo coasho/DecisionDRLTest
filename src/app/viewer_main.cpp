@@ -16,6 +16,7 @@
 #include "ipc/WorldMirror.h"
 #include "ipc/WorldRegistry.h"
 #include "platform/Clock.h"
+#include "platform/Paths.h"
 #include "platform/Threads.h"
 #include "render/Viewer.h"
 #include "sim/GroundProvider.h"
@@ -246,6 +247,12 @@ std::string describe(const sim::EnvironmentState& e, double simTime) {
 } // namespace
 
 int main(int argc, char** argv) {
+    // GUI subsystem: print to the terminal we were started from, else keep a log file.
+    if (!platform::attachParentConsole()) {
+        const auto logPath = platform::configDir() / "viewer.log";
+        FILE* f = nullptr;
+        if (freopen_s(&f, logPath.string().c_str(), "w", stderr) == 0) freopen_s(&f, logPath.string().c_str(), "a", stdout);
+    }
     ViewerOptions opt;
     if (!parse(argc, argv, opt)) {
         usage(argv[0]);

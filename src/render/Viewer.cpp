@@ -61,10 +61,12 @@ bool Viewer::setScene(vsg::ref_ptr<vsg::Node> scene, vsg::ref_ptr<vsg::Ellipsoid
     vsg::ref_ptr<vsg::ProjectionMatrix> projection;
     if (ellipsoid) {
         // Far = distance to the horizon (+ mountains) from the eye's height above
-        // the ellipsoid; near = far * ratio. At 1.5 km altitude far is ~250 km, so
-        // a 1e-5 ratio puts near at ~2.5 m, which the D32 depth buffer handles and
-        // which keeps a chase camera 40 m behind the aircraft outside the near plane.
-        projection = vsg::EllipsoidPerspective::create(lookAt_, ellipsoid, settings_.fieldOfViewDeg, aspect, 1.0e-5, 2000.0);
+        // the ellipsoid; near = far * ratio. VSG renders reverse depth into a
+        // 32-bit float buffer, so the ratio can be tiny: at 1e-5 the near plane
+        // sat 3-4 km in front of a 10 km-high eye and clipped the nearby
+        // terrain into flat grey slabs; 1e-6 keeps it under 1 m at any height
+        // that shows the ground while the aircraft (>= 6 m away) is never cut.
+        projection = vsg::EllipsoidPerspective::create(lookAt_, ellipsoid, settings_.fieldOfViewDeg, aspect, 1.0e-6, 9000.0);
     } else {
         projection = vsg::Perspective::create(settings_.fieldOfViewDeg, aspect, 1.0, 1.0e6);
     }
