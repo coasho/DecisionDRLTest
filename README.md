@@ -8,49 +8,78 @@ vision observations, and a C++ SDK with a stable C ABI as the primary interface.
 The architecture, requirements, technology evaluation and roadmap are in
 [docs/FlightSim_System_Architecture_and_Design.md](docs/FlightSim_System_Architecture_and_Design.md).
 
+## How it is used
+
+1. **Write a training application against the SDK** ([docs/sdk](docs/sdk/README.md)): create a
+   `fsim::World`, create vehicles by name, type and initial state, command them at any level of the
+   control stack (actuators, attitude, acceleration, velocity, position, behaviours), control the
+   environment in real time, attach effects (sensor noise, gusts, forces, GNSS loss) and let vehicles
+   talk over a modelled network. Step the world from your learner's loop.
+2. **Start the prebuilt viewer whenever you like.** `flightsim-viewer.exe` discovers the world through
+   shared memory and mirrors it - creations, resets, state, control levels, environment - without the
+   trainer knowing it exists and without slowing it down (wait-free, rate-limited publish; measured within
+   a few percent at 64 vehicles).
+3. For vectorised RL, `fsim::VecEnv` gives the same world a gym-style batch interface with actions at
+   the control level of your choice.
+
+```cpp
+#include <fsim/World.h>
+
+fsim::World world({.name = "dogfight-01"});
+world.environment().setWind({.directionDeg = 270, .speedMs = 8, .turbulence = 0.3});
+
+fsim::VehicleSpec spec; spec.name = "red-1"; spec.type = "jsbsim:c172x";
+spec.initial.altitudeMslM = 1500; spec.initial.headingDeg = 90; spec.initial.airspeedTrueMs = 60;
+fsim::Vehicle red = world.createVehicle(spec);
+spec.name = "blue-1"; spec.initial.longitudeDeg -= 0.03;
+fsim::Vehicle blue = world.createVehicle(spec);
+
+red.command(fsim::control::AttitudeCommand{.rollRad = 0.4, .pitchRad = 0.05, .airspeedMs = 60});
+blue.command(fsim::control::BehaviorCommand{.id = "pursuit", .target = red.id(), .params = {{"range_m", 200}}});
+for (int k = 0; k < 3000; ++k) {
+    world.step();                           // all vehicles, lockstep, 30 Hz world steps by default
+    red.command(policy(red.sensed()));      // any level, any time
+}
+```
+
 ## Status
 
-Milestones **M0 (skeleton), viewer, and M2 (RL environment + SDK) done**:
+Milestones **M0 (skeleton), viewer, M2 (RL environment + SDK) and M2b (vehicle SDK + transparent
+viewer) done**:
 
-- `platform`, `core`, `io`, `sim` modules; JSBSim 1.3.1 adapter (`sim::JsbsimModel`) with a
-  terrain `GroundProvider` hooked into JSBSim's ground callback.
-- `sim::VehiclePool` steps N vehicles in lockstep on a worker pool; trajectories are bit-identical
-  for any worker count (tested).
-- `flightsim.exe` headless runner / benchmark.
-- **Viewer** (`flightsim-viewer.exe`): full-Earth `vsg::TileDatabase` with Esri World Imagery (or
-  OSM/Bing/custom XYZ) draped over **real relief** from the free AWS Terrarium elevation tiles, sun +
-  ambient lighting from the current UTC time, N vehicles driven from a paced simulation thread through a
-  lock-free snapshot buffer with render-side interpolation, chase/orbit/overview cameras, an eye-centred
-  gradient sky dome with sun glow and night side, fading flight trails, on-screen vehicle labels, Dear ImGui
-  monitor and vehicle list. Vehicles use a real glTF aircraft (the Apache-2.0 "Cesium Air" sample,
-  downloaded at configure time) oriented by a per-model `.manifest`; any glTF/OBJ works via `--model`.
-- **Terrain physics**: JSBSim's ground callback samples the *same* elevation tiles the renderer shows
-  (`world::TileGroundProvider`, LRU + background prefetch); `--on-ground` spawns vehicles parked on the
-  terrain via JSBSim's ground trim. Diverged vehicles are reset automatically.
+- **Vehicle SDK** (`include/fsim/World.h`, `libfsim.dll`): `World` / `Vehicle` object model over a
+  lockstep worker pool; vehicles by name and type; per-vehicle random streams; determinism for any
+  worker count (tested).
+- **Multi-level control stack** (`fsim/Control.h`): six strictly ordered levels, one command variant,
+  controllers that cascade to any lower level, built-in PID loops (attitude, acceleration, velocity,
+  position) and behaviours (hold, waypoints, loiter, pursuit, evade, formation, aerobatics), a registry to
+  replace any of them, tunable gains, introspection of the derived commands.
+- **Real-time environment** (time, atmosphere, wind and turbulence, weather) applied to every JSBSim
+  instance per step and published to the viewer.
+- **Effects** (`fsim/Effects.h`): a context with wind, force/moment (generic external reaction injected
+  into every stock aircraft), property and sensed-state channels; built-in sensor noise, latency,
+  constant force, gusts, GNSS degradation.
+- **Communication** (`fsim/Comm.h`): nodes, messages, raw/JSON codecs, ideal medium and range/latency/loss
+  link model, beacon protocol; all interfaces.
+- **Transparent viewer**: `flightsim-viewer.exe` attaches to any published world (`--list`,
+  `--world`), waits for one, follows vehicle creation/reset/removal, interpolates in wall time, lights the
+  scene from the world's clock, shows names/types/control levels/environment/throughput; `--demo` keeps
+  the built-in scenario. Full-Earth satellite imagery over real relief, glTF aircraft, chase/orbit/overview
+  mouse cameras, sky, trails, labels, Dear ImGui panels.
+- **`fsim::VecEnv`** on the object model: Gymnasium-style batch semantics, actions as `surfaces`,
+  `attitude`, `acceleration` or `velocity` commands, visible in the viewer.
+- **C ABI** (`fsim/fsim_c.h`): the whole object model and the batch layer, tested from C99.
+- `sim::VehiclePool` (one worker per physical core), JSBSim 1.3.1 adapter with terrain ground callback,
+  `flightsim.exe` headless benchmark.
 
-Measured on a 16-thread desktop (Release, 64 × c172x, frame-skip 4):
+Measured on an 8-core desktop (Release): 64 c172x with control cascades, effects and beacons ~760k
+vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-steps/s (~6000x real time).
 
-| workers | vehicle-steps / s |
-| ------: | ----------------: |
-|       1 |           148,000 |
-|       4 |           554,000 |
-|       8 |           800,000 |
-|      16 |         1,138,000 |
+Not yet: per-type vehicle models in the viewer, a terrain `GroundProvider` inside the SDK (the viewer's
+tiles for physics), animated control surfaces, vision observations, transport bridges for the comm layer,
+offline tile pyramids (`tools/tile_builder`).
 
-- **RL environment layer** (`env`): `env::VecEnv` runs M environments × K vehicles in lockstep with
-  Gymnasium-style vectorised semantics (next-step auto-reset, `terminated`/`truncated`, final observations),
-  seeded per (episode, env, vehicle) so trajectories are reproducible for any worker count (tested). Built-in
-  tasks `altitude_heading_hold` and `level_flight`, the 20-channel `state` observation and the 4-channel
-  `surfaces` action; new tasks/observations/actions plug in through small interfaces.
-- **`fsim` SDK** (`libfsim.dll`): the public interface for trainers - `include/fsim/VecEnv.h` (C++) over
-  `include/fsim/fsim_c.h` (versioned C ABI: opaque handle, `struct_size`-versioned option/buffer structs,
-  library-owned buffers, error codes + `fsim_last_error()`). The C ABI is tested from a plain C99 file.
-- `examples/minimal_trainer`: a complete training-loop skeleton (PD baseline / random policy) against the
-  SDK, ~170k agent-steps/s on 32 envs (~5700× real time).
-
-Not yet: animated control surfaces, vision observations (offscreen sensor cameras), shared-memory env server, offline tile pyramids (`tools/tile_builder`).
-
-Imagery and elevation come from Esri World Imagery and AWS Terrain Tiles under their respective terms (attribution required); tiles are cached under `%LOCALAPPDATA%lightsim	ilecache`.
+Imagery and elevation come from Esri World Imagery and AWS Terrain Tiles under their respective terms (attribution required); tiles are cached under `%LOCALAPPDATA%\flightsim\tilecache`.
 
 ## Build (Windows x64, MSYS2 UCRT64 / GCC)
 
@@ -88,49 +117,37 @@ After `deploy`, `build/ucrt64-release/bin` runs standalone (no `ucrt64/bin` on `
 ## Run
 
 ```bash
-# Full-Earth viewer: 8 c172x over San Francisco, satellite imagery + terrain relief
-build/ucrt64-release/bin/flightsim-viewer.exe --vehicles 8
-# Yosemite, 6 vehicles at 3200 m
-build/ucrt64-release/bin/flightsim-viewer.exe --vehicles 6 --lat 37.72 --lon -119.55 --alt 3200 --spread 0.02
-# parked at KSFO
-build/ucrt64-release/bin/flightsim-viewer.exe --vehicles 3 --spread 0.004 --on-ground
-build/ucrt64-release/bin/flightsim-viewer.exe --vehicles 32 --imagery none --time-factor 4
+# 1. a training application (this one: five c172x at different control levels, wind, gusts, beacons)
+build/ucrt64-release/bin/multi_level_control.exe --realtime --seconds 600
+# 2. the viewer, in another terminal, whenever you like
+build/ucrt64-release/bin/flightsim-viewer.exe
+build/ucrt64-release/bin/flightsim-viewer.exe --list
+
+# vectorised RL trainer skeleton (32 envs, PD baseline; --random for a random policy); world "vecenv"
+build/ucrt64-release/bin/minimal_trainer.exe --envs 32 --steps 3000
+
+# built-in demo scenario on the viewer's own simulation thread
+build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 8
+build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 6 --lat 37.72 --lon -119.55 --alt 3200 --spread 0.02
+build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 3 --spread 0.004 --on-ground
 build/ucrt64-release/bin/flightsim-viewer.exe --help
 
-# Headless benchmark
+# headless benchmark
 build/ucrt64-release/bin/flightsim.exe --vehicles 64 --steps 300 --benchmark
-
-# Example trainer over the SDK (32 envs, PD baseline; --random for a random policy)
-build/ucrt64-release/bin/minimal_trainer.exe --envs 32 --steps 3000
 ```
+
+Viewer keys: `tab` next vehicle, `c` camera (chase / orbit / overview), `-`/`=` zoom, `r` reset view,
+`l` vehicle list, `m` monitor, `n` labels, `t` trails, `esc` quit; in demo mode also `space` pause, `.` step,
+`[`/`]` time factor. Mouse: **left drag orbits** around the selected vehicle (drag down looks from above),
+**wheel / right drag** changes distance, middle click resets.
 
 ## Using the SDK
 
-```cpp
-#include <fsim/VecEnv.h>
-
-fsim::VecEnvOptions opt;
-opt.numEnvs = 64;                 // M environments (x vehiclesPerEnv vehicles each)
-opt.task = "altitude_heading_hold";
-fsim::VecEnv env(opt);            // loads JSBSim aircraft, spins up the worker pool
-
-fsim::StepResult r = env.reset(seed);
-std::vector<float> actions(env.numVehicles() * env.actionSize());
-for (;;) {
-    policy(r.observations, actions); // [M*K][20] -> [M*K][4], all in [-1, 1]
-    r = env.step(actions);           // rewards, terminated, truncated, finalObservations
-}
-```
-
+See [docs/sdk](docs/sdk/README.md): [world and vehicles](docs/sdk/world.md), [multi-level
+control](docs/sdk/control.md), [environment, effects, communication](docs/sdk/environment.md),
+[transparent visualisation](docs/sdk/viewer.md), [VecEnv](docs/sdk/vecenv.md), [C ABI](docs/sdk/c_abi.md).
 Link against `fsim` (`libfsim.dll` + `libJSBSim.dll` at runtime); JSBSim's aircraft data is found
-automatically next to the executable (`share/jsbsim`) or in the source tree. The same environment is
-reachable from C - or any language with a C FFI - through `fsim_c.h`: `fsim_options_init`,
-`fsim_vecenv_create`, `fsim_vecenv_step`, `fsim_vecenv_buffers`.
-
-Viewer keys: `space` pause, `.` step, `tab` next vehicle, `c` camera (chase / orbit / overview),
-`-`/`=` zoom, `r` reset view, `[`/`]` time factor, `l` vehicle list, `m` monitor, `n` labels, `t` trails, `esc` quit.
-Mouse: **left drag orbits** around the selected vehicle, **wheel / right drag** changes distance, middle click resets.
-Camera modes: *chase* keeps the view relative to the aircraft's heading, *orbit* keeps it north-referenced, *overview* looks straight down.
+automatically next to the executable (`share/jsbsim`) or in the source tree.
 
 ## Layout
 
@@ -140,11 +157,17 @@ docs/             design document
 src/platform/     OS isolation (the only module with Win32 includes)
 src/core/         logging, registries, module lifecycle, RNG, profiler
 src/io/           asset resolution (config, tile cache and recordings later)
-src/sim/          FlightModel, JsbsimModel, VehiclePool, GroundProvider
-src/env/          Scenario, Task, Observation/Action spaces, VecEnv
-src/sdk/          libfsim.dll: C ABI + C++ SDK (public headers in include/fsim)
-include/fsim/     public SDK headers (fsim_c.h, VecEnv.h)
-examples/         minimal_trainer
+src/sim/          FlightModel, JsbsimModel (JSBSim adapter), VehiclePool, GroundProvider
+src/control/      multi-level control stack, built-in loops and behaviours, registry
+src/effects/      effect pipeline and built-in effects
+src/comm/         communication: network, media, codecs, protocols
+src/ipc/          shared-memory world segment: publisher, mirror, registry
+src/session/      World implementation (vehicles, stepping, environment, publisher)
+src/env/          Scenario, Task, Observation/Action spaces, VecEnv (batch layer)
+src/sdk/          libfsim.dll: C++ SDK (World, VecEnv) + C ABI
+include/fsim/     public SDK headers
+examples/         multi_level_control, minimal_trainer
+docs/sdk/         SDK guide
 src/render/       VSG window, viewer, render graph (viewer builds)
 src/world/        Earth tiles (vsg::TileDatabase), vehicle visuals, cameras
 src/ui/           Dear ImGui monitor / vehicle list, key bindings
