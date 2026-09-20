@@ -28,6 +28,7 @@ std::size_t VehiclePool::add(std::unique_ptr<FlightModel> model) {
     assert(model);
     models_.push_back(std::move(model));
     states_.emplace_back();
+    active_.push_back(1);
     return models_.size() - 1;
 }
 
@@ -42,9 +43,17 @@ void VehiclePool::rangeFor(unsigned worker, std::size_t& begin, std::size_t& end
 void VehiclePool::runRange(std::size_t begin, std::size_t end, const Job& job) {
     for (std::size_t i = begin; i < end; ++i) {
         FlightModel& m = *models_[i];
-        if (!job.refreshOnly) {
-            const ControlInputs& in = job.inputs[i];
-            for (int k = 0; k < job.frameSkip; ++k) m.step(in);
+        if (!job.refreshOnly && active_[i]) {
+            if (preStep_) {
+                ControlInputs in = job.inputs[i];
+                for (int k = 0; k < job.frameSkip; ++k) {
+                    preStep_(i, k, m, in);
+                    m.step(in);
+                }
+            } else {
+                const ControlInputs& in = job.inputs[i];
+                for (int k = 0; k < job.frameSkip; ++k) m.step(in);
+            }
         }
         m.state(states_[i]);
     }

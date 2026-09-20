@@ -3,6 +3,8 @@ add_library(fsim_platform STATIC
     Clock.h
     Paths.h
     Threads.h
+    SharedMemory.h
+    SharedMemory.cpp
     Platform.cpp)
 add_library(fsim::platform ALIAS fsim_platform)
 

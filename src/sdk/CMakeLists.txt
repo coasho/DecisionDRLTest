@@ -1,12 +1,17 @@
 # fsim.dll: the public SDK (C++ pimpl class + versioned C ABI). Internal
 # static libraries are linked in; only fsim/*.h symbols are exported.
-add_library(fsim SHARED fsim.cpp)
+add_library(fsim SHARED fsim.cpp World.cpp)
 add_library(fsim::sdk ALIAS fsim)
 
 target_include_directories(fsim
     PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>
     PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(fsim PRIVATE fsim::env fsim::sim fsim::io fsim::core fsim::platform)
+# Whole-archive: built-in controllers/effects are reached only through the
+# registry or by trainer code, so nothing in the DLL would otherwise pull
+# their objects in and export them.
+target_link_libraries(fsim PRIVATE
+    "$<LINK_LIBRARY:WHOLE_ARCHIVE,fsim::env,fsim::session,fsim::control,fsim::effects,fsim::comm,fsim::ipc>"
+    fsim::sim fsim::io fsim::core fsim::platform)
 target_compile_definitions(fsim PRIVATE FSIM_BUILDING FSIM_VERSION_STRING="${PROJECT_VERSION}")
 set_target_properties(fsim PROPERTIES
     CXX_VISIBILITY_PRESET hidden

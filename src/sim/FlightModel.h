@@ -1,14 +1,15 @@
 #pragma once
 
-#include "sim/ControlInputs.h"
-#include "sim/VehicleState.h"
+#include "fsim/ControlInputs.h"
+#include "fsim/InitialConditions.h"
+#include "fsim/Property.h"
+#include "fsim/VehicleState.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <string_view>
-
-class SGPropertyNode; // JSBSim property node; opaque outside JsbsimModel.cpp
 
 namespace fsim::sim {
 
@@ -20,33 +21,7 @@ struct AircraftSpec {
     std::filesystem::path jsbsimRoot; ///< directory containing aircraft/, engine/, systems/
 };
 
-/// Where and how to start. Geodetic, SI. Sampled per vehicle by the
-/// environment from the scenario's distributions.
-struct InitialConditions {
-    double latitudeDeg = 37.6188;   ///< default: KSFO area
-    double longitudeDeg = -122.375;
-    double altitudeMslM = 1500.0;
-    double headingDeg = 0.0;
-    double pitchDeg = 0.0;
-    double rollDeg = 0.0;
-    double airspeedTrueMs = 60.0;
-    bool onGround = false;          ///< if true, altitude is taken from terrain
-};
 
-/// Cached, O(1) read/write access to one property after a one-time lookup
-/// (design 7.1). Null-safe: get() on an invalid handle returns 0.
-class PropertyHandle {
-public:
-    PropertyHandle() = default;
-    explicit PropertyHandle(SGPropertyNode* node) noexcept : node_(node) {}
-
-    bool valid() const noexcept { return node_ != nullptr; }
-    double get() const noexcept;
-    void set(double value) noexcept;
-
-private:
-    SGPropertyNode* node_ = nullptr;
-};
 
 /// Flight-dynamics interface hiding JSBSim (design 7.1, ADR-10).
 class FlightModel {
@@ -72,6 +47,21 @@ public:
 
     virtual double dt() const noexcept = 0;
     virtual bool loaded() const noexcept = 0;
+
+    // --- Environment and disturbances (design 9.4, 9.5). Defaults are no-ops
+    // so a model that cannot honour a channel simply ignores it.
+
+    /// Steady wind at the vehicle, NED m/s (the direction the air moves).
+    virtual void setWindNed(double north, double east, double down) { (void)north; (void)east; (void)down; }
+    /// Turbulence intensity 0 (off) .. 1 (severe) with the reference wind speed at 20 ft AGL.
+    virtual void setTurbulence(double intensity, double windSpeed20ftMs) { (void)intensity; (void)windSpeed20ftMs; }
+    /// Sea-level temperature (K) and pressure (Pa) of the standard atmosphere.
+    virtual void setAtmosphere(double temperatureSeaLevelK, double pressureSeaLevelPa) { (void)temperatureSeaLevelK; (void)pressureSeaLevelPa; }
+    /// External force (N) and moment (N m) in the body frame, applied at the
+    /// centre of gravity, held until changed.
+    virtual void setExternalForceBody(const double forceN[3], const double momentNm[3]) { (void)forceN; (void)momentNm; }
+    /// Seed the model's own random processes (turbulence, dispersions).
+    virtual void seed(std::uint64_t value) { (void)value; }
 };
 
 } // namespace fsim::sim

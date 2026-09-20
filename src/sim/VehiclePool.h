@@ -9,6 +9,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -33,10 +34,21 @@ public:
     /// with respect to step().
     std::size_t add(std::unique_ptr<FlightModel> model);
 
-    /// Step every vehicle `frameSkip` times with its inputs, in parallel, then
-    /// refresh the state snapshots. Blocks until all vehicles are done.
-    /// `inputs.size()` must equal size().
+    /// Step every active vehicle `frameSkip` times with its inputs, in
+    /// parallel, then refresh the state snapshots. Blocks until all vehicles
+    /// are done. `inputs.size()` must equal size().
     void step(Span<const ControlInputs> inputs, int frameSkip = 1);
+
+    /// Per-FDM-step hook run by the worker that owns the vehicle, before each
+    /// `FlightModel::step`, with a private copy of the vehicle's inputs it may
+    /// rewrite (control cascades, effects). Must not touch other vehicles'
+    /// models; may read `states()` (the previous step's snapshots).
+    using PreStep = std::function<void(std::size_t vehicle, int subStep, FlightModel& model, ControlInputs& inputs)>;
+    void setPreStep(PreStep hook) { preStep_ = std::move(hook); }
+
+    /// Inactive vehicles are skipped by step() (removed vehicles keep their slot).
+    void setActive(std::size_t i, bool active) noexcept { active_[i] = active ? 1 : 0; }
+    bool active(std::size_t i) const noexcept { return active_[i] != 0; }
 
     /// Snapshots from the last step() (or from refreshStates()).
     Span<const VehicleState> states() const noexcept { return Span<const VehicleState>(states_.data(), states_.size()); }
@@ -68,6 +80,8 @@ private:
 
     std::vector<std::unique_ptr<FlightModel>> models_;
     std::vector<VehicleState> states_;
+    std::vector<unsigned char> active_;
+    PreStep preStep_;
 
     unsigned workerCount_;
     bool pinWorkers_;

@@ -10,12 +10,16 @@
 #include <initialization/FGTrim.h>
 #include <input_output/FGGroundCallback.h>
 #include <input_output/FGPropertyManager.h>
+#include <input_output/FGXMLElement.h>
 #include <math/FGColumnVector3.h>
 #include <math/FGLocation.h>
 #include <math/FGMatrix33.h>
 #include <math/FGQuaternion.h>
 #include <models/FGAccelerations.h>
+#include <models/FGAtmosphere.h>
 #include <models/FGAuxiliary.h>
+#include <models/FGExternalReactions.h>
+#include <models/atmosphere/FGWinds.h>
 #include <models/FGFCS.h>
 #include <models/FGGroundReactions.h>
 #include <models/FGInertial.h>
@@ -128,6 +132,7 @@ bool JsbsimModel::load(const AircraftSpec& aircraft, const InitialConditions& ic
     }
 
     silenceOutputs();
+    installExternalReaction();
     cacheCommandNodes();
 
     try {
@@ -136,6 +141,7 @@ bool JsbsimModel::load(const AircraftSpec& aircraft, const InitialConditions& ic
             LOG_ERROR("sim") << "JSBSim RunIC failed for '" << aircraft.name << "'";
             return false;
         }
+        startEngines();
         settleOnGround(ic);
     } catch (const std::exception& e) {
         LOG_ERROR("sim") << "JSBSim exception in initial conditions: " << e.what();
@@ -161,6 +167,7 @@ bool JsbsimModel::reset(const InitialConditions& ic) {
         fdm_->GetOutput()->SetStartNewOutput();
         // Mode 0: reinitialise models and run the IC pass (design 7.2).
         fdm_->ResetToInitialConditions(0);
+        startEngines();
         settleOnGround(ic);
     } catch (const std::exception& e) {
         LOG_ERROR("sim") << "JSBSim exception on reset: " << e.what();
@@ -177,6 +184,115 @@ void JsbsimModel::silenceOutputs() {
     auto output = fdm_->GetOutput();
     for (unsigned i = 0; !output->GetOutputName(i).empty(); ++i) output->SetOutputName(i, kNullDevice);
     fdm_->DisableOutput();
+}
+
+// A generic body-frame force and moment at the CG, defined in memory so that
+// effects can push on any stock aircraft without editing its XML (design 9.5).
+void JsbsimModel::installExternalReaction() {
+    auto leaf = [](const char* name, const char* value) {
+        auto* e = new JSBSim::Element(name);
+        e->AddData(value);
+        return e;
+    };
+    auto triplet = [&](const char* name, const char* x, const char* y, const char* z) {
+        auto* e = new JSBSim::Element(name);
+        e->AddChildElement(leaf("x", x));
+        e->AddChildElement(leaf("y", y));
+        e->AddChildElement(leaf("z", z));
+        return e;
+    };
+    // Elements are reference counted (SGSharedPtr): JSBSim's loader takes and
+    // drops references while parsing, so hold the root ourselves.
+    JSBSim::Element_ptr reactions = new JSBSim::Element("external_reactions");
+    auto* force = new JSBSim::Element("force");
+    force->AddAttribute("name", "fsim");
+    force->AddAttribute("frame", "BODY");
+    auto* location = triplet("location", "0", "0", "0");
+    location->AddAttribute("unit", "IN");
+    force->AddChildElement(location);
+    force->AddChildElement(triplet("direction", "1", "0", "0"));
+    reactions->AddChildElement(force);
+    auto* moment = new JSBSim::Element("moment");
+    moment->AddAttribute("name", "fsim");
+    moment->AddAttribute("frame", "BODY");
+    moment->AddChildElement(triplet("direction", "1", "0", "0"));
+    reactions->AddChildElement(moment);
+    try {
+        fdm_->GetExternalReactions()->Load(reactions);
+    } catch (const std::exception& e) {
+        LOG_WARN("sim") << "external reaction not installed: " << e.what();
+    }
+    extForceMag_ = property("external_reactions/fsim/magnitude");
+    extForceX_ = property("external_reactions/fsim/x");
+    extForceY_ = property("external_reactions/fsim/y");
+    extForceZ_ = property("external_reactions/fsim/z");
+    extMomentMag_ = property("external_reactions/fsim/magnitude-lbsft");
+    extMomentL_ = property("external_reactions/fsim/l");
+    extMomentM_ = property("external_reactions/fsim/m");
+    extMomentN_ = property("external_reactions/fsim/n");
+    extForceMag_.set(0.0);
+    extMomentMag_.set(0.0);
+}
+
+// Engines running with full mixture from the first step (an airborne start
+// with a dead engine is never what a scenario means); the throttle is the
+// caller's from the next step on.
+void JsbsimModel::startEngines() {
+    auto propulsion = fdm_->GetPropulsion();
+    if (propulsion->GetNumEngines() == 0) return;
+    try {
+        propulsion->InitRunning(-1);
+    } catch (const std::exception& e) {
+        LOG_WARN("sim") << "engine start: " << e.what();
+    }
+}
+
+void JsbsimModel::setWindNed(double north, double east, double down) {
+    if (!loaded_) return;
+    fdm_->GetWinds()->SetWindNED(units::metresToFeet(north), units::metresToFeet(east), units::metresToFeet(down));
+}
+
+void JsbsimModel::setTurbulence(double intensity, double windSpeed20ftMs) {
+    if (!loaded_) return;
+    auto winds = fdm_->GetWinds();
+    if (intensity <= 0.0) {
+        winds->SetTurbType(JSBSim::FGWinds::ttNone);
+        return;
+    }
+    // Milspec (Dryden) turbulence: severity index 0..7 (3 light, 4 moderate, 6 severe).
+    winds->SetTurbType(JSBSim::FGWinds::ttMilspec);
+    winds->SetProbabilityOfExceedence(std::clamp(static_cast<int>(std::lround(1.0 + intensity * 6.0)), 1, 7));
+    winds->SetWindspeed20ft(units::metresToFeet(std::max(windSpeed20ftMs, 1.0)));
+}
+
+void JsbsimModel::setAtmosphere(double temperatureSeaLevelK, double pressureSeaLevelPa) {
+    if (!loaded_) return;
+    auto atmosphere = fdm_->GetAtmosphere();
+    atmosphere->SetTemperatureSL(temperatureSeaLevelK, JSBSim::FGAtmosphere::eKelvin);
+    atmosphere->SetPressureSL(JSBSim::FGAtmosphere::ePascals, pressureSeaLevelPa);
+}
+
+void JsbsimModel::setExternalForceBody(const double forceN[3], const double momentNm[3]) {
+    if (!loaded_ || !extForceMag_.valid()) return;
+    const double f = std::sqrt(forceN[0] * forceN[0] + forceN[1] * forceN[1] + forceN[2] * forceN[2]);
+    if (f > 1e-9) {
+        extForceX_.set(forceN[0] / f);
+        extForceY_.set(forceN[1] / f);
+        extForceZ_.set(forceN[2] / f);
+    }
+    extForceMag_.set(f * units::kNewtonsToPoundsForce);
+    const double m = std::sqrt(momentNm[0] * momentNm[0] + momentNm[1] * momentNm[1] + momentNm[2] * momentNm[2]);
+    if (m > 1e-9) {
+        extMomentL_.set(momentNm[0] / m);
+        extMomentM_.set(momentNm[1] / m);
+        extMomentN_.set(momentNm[2] / m);
+    }
+    constexpr double kNewtonMetresToPoundFeet = units::kNewtonsToPoundsForce * units::kMetresToFeet;
+    extMomentMag_.set(m * kNewtonMetresToPoundFeet);
+}
+
+void JsbsimModel::seed(std::uint64_t value) {
+    fdm_->GetRandomGenerator()->seed(static_cast<unsigned int>(value ^ (value >> 32)));
 }
 
 void JsbsimModel::applyInitialConditions(const InitialConditions& ic) {

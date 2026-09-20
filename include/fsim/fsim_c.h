@@ -10,15 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#if defined(_WIN32)
-#  if defined(FSIM_BUILDING)
-#    define FSIM_API __declspec(dllexport)
-#  else
-#    define FSIM_API __declspec(dllimport)
-#  endif
-#else
-#  define FSIM_API __attribute__((visibility("default")))
-#endif
+#include "fsim/Export.h"
 
 #ifdef __cplusplus
 extern "C" {

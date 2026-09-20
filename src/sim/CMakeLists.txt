@@ -4,6 +4,7 @@
 add_library(fsim_sim STATIC
     Attitude.h
     ControlInputs.h
+    EnvironmentState.h
     FlightModel.h
     FlightModel.cpp
     GroundProvider.h

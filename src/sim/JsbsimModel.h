@@ -36,11 +36,19 @@ public:
     double dt() const noexcept override { return dt_; }
     bool loaded() const noexcept override { return loaded_; }
 
+    void setWindNed(double north, double east, double down) override;
+    void setTurbulence(double intensity, double windSpeed20ftMs) override;
+    void setAtmosphere(double temperatureSeaLevelK, double pressureSeaLevelPa) override;
+    void setExternalForceBody(const double forceN[3], const double momentNm[3]) override;
+    void seed(std::uint64_t value) override;
+
     /// Direct access for tests and tooling only.
     JSBSim::FGFDMExec& exec() noexcept { return *fdm_; }
 
 private:
     void silenceOutputs();
+    void installExternalReaction();
+    void startEngines();
     void applyInitialConditions(const InitialConditions& ic);
     void settleOnGround(const InitialConditions& ic);
     void cacheCommandNodes();
@@ -60,6 +68,8 @@ private:
     // Cached command nodes (design 12.2: no string lookups in step()).
     PropertyHandle aileronCmd_, elevatorCmd_, rudderCmd_, flapCmd_, gearCmd_, leftBrakeCmd_, rightBrakeCmd_;
     std::vector<PropertyHandle> throttleCmd_;
+    // External reaction injected at load (design 9.5): magnitude + unit direction properties.
+    PropertyHandle extForceMag_, extForceX_, extForceY_, extForceZ_, extMomentMag_, extMomentL_, extMomentM_, extMomentN_;
 };
 
 } // namespace fsim::sim

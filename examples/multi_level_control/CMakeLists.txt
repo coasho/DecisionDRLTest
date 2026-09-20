@@ -1,0 +1,4 @@
+add_executable(multi_level_control main.cpp)
+target_link_libraries(multi_level_control PRIVATE fsim::sdk)
+target_compile_features(multi_level_control PRIVATE cxx_std_17)
+fsim_set_warnings(multi_level_control)
