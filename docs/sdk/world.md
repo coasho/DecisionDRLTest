@@ -30,7 +30,7 @@ struct WorldOptions {
 With `terrain = true` the ground under every vehicle is the same relief the
 viewer renders (AWS Terrarium tiles, sea clamped to 0 m): gear contact, AGL
 and `onGround` spawns use it. Tiles are downloaded on first use into
-`%LOCALAPPDATA%lightsim	ilecache` (shared with the viewer), prefetched
+`%LOCALAPPDATA%\flightsim\tilecache` (shared with the viewer), prefetched
 around each new vehicle (blocking, a few km) and kept warm around moving
 vehicles by background loaders, so training steps rarely wait. Without
 network access and an empty cache the ground is flat at 0 m (a warning is
