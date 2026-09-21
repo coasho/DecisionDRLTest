@@ -311,3 +311,45 @@ TEST_CASE("zooming out and back leaves the view where it was", "[camera]") {
     REQUIRE_THAT(rig.camera->elevationDeg(), Catch::Matchers::WithinAbs(elevationBefore, 1.0));
     REQUIRE(turn < 1.0);
 }
+
+TEST_CASE("the camera does not cut through terrain", "[camera]") {
+    // A ridge between the eye and what it is looking at. The eye is meant to
+    // be lifted over it, and so is the line of sight: the view tilts down
+    // across the terrain instead of passing through it.
+    //
+    // The ridge is swept along the line of sight rather than placed once,
+    // because the clearance is worked out from a handful of samples and a
+    // ridge that falls between two of them is a ridge nobody looked at.
+    constexpr double kDegPerRad = 57.29577951308232;
+    const double ridgeHeightM = 1500.0, ridgeWidthDeg = 0.004;
+    double worstOverall = 0.0, worstRidgeLon = 0.0;
+
+    for (int step = 0; step <= 40; ++step) {
+        const double ridgeLonDeg = 8.02 + 0.07 * step / 40.0; // across the whole line of sight
+        const auto groundAt = [=](double latDeg, double lonDeg) {
+            (void)latDeg;
+            const double d = (lonDeg - ridgeLonDeg) / ridgeWidthDeg;
+            return ridgeHeightM * std::exp(-d * d);
+        };
+        Rig rig;
+        rig.camera->setGroundQuery([=](double latRad, double lonRad) -> std::optional<double> {
+            return groundAt(latRad * kDegPerRad, lonRad * kDegPerRad);
+        });
+        // Focus east of the ridge at sea level, eye 12 km west and low.
+        rig.camera->setFreeView(46.0, 8.10, 0.0, 12000.0, 270.0, 2.0);
+        for (int k = 0; k < 300; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+
+        for (int i = 0; i <= 400; ++i) {
+            const double t = static_cast<double>(i) / 400.0;
+            const vsg::dvec3 p = rig.lookAt->center + (rig.lookAt->eye - rig.lookAt->center) * t;
+            const vsg::dvec3 lla = rig.ellipsoid->convertECEFToLatLongAltitude(p);
+            const double below = groundAt(lla.x, lla.y) - lla.z;
+            if (below > worstOverall) {
+                worstOverall = below;
+                worstRidgeLon = ridgeLonDeg;
+            }
+        }
+    }
+    INFO("worst dip below ground " << worstOverall << " m, with the ridge at longitude " << worstRidgeLon);
+    REQUIRE(worstOverall < 1.0);
+}

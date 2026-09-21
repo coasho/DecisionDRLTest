@@ -19,6 +19,7 @@ constexpr double kRotateRadPerNdc = 1.0;      // osgGA rotateYawPitch: 1 rad per
 constexpr double kPanPerNdc = 0.3;            // osgGA panModel scale
 constexpr double kZoomPerNotch = 0.88;        // 12 % per wheel notch
 constexpr double kZoomTimeConstant = 0.12;    // s, wheel/drag zoom smoothing
+constexpr double kProbeSpacingM = 150.0;      // ground spacing between terrain-clearance samples
 constexpr double kEyeClearanceM = 4.0;        // eye height above the sampled terrain at close range ...
 constexpr double kEyeClearanceRatio = 0.03;   // ... plus 3 % of the distance (the drawn LOD gets coarser with range) ...
 constexpr double kEyeClearanceMaxM = 80.0;    // ... up to this
@@ -383,12 +384,26 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
         const double clearance = std::min(kEyeClearanceMaxM, kEyeClearanceM + kEyeClearanceRatio * distance_);
         // Detached, the focus is on the ground: never look up at it from below.
         double minElevation = followVehicle ? -kPi / 2.0 : std::asin(std::clamp(clearance / distance_, -1.0, 1.0));
-        for (double t : {0.15, 0.3, 0.5, 0.75, 1.0}) {
-            const vsg::dvec3 probeDir = horizontal * std::cos(elevation) + up * std::sin(elevation);
-            const vsg::dvec3 lla = ellipsoid_->convertECEFToLatLongAltitude(orbitCentre + probeDir * (distance_ * t));
-            if (auto h = ground_(lla.x * kDeg, lla.y * kDeg)) {
-                const double needed = (*h + clearance) - focusAltitude; // height to gain over the focus by that point
-                minElevation = std::max(minElevation, std::asin(std::clamp(needed / (distance_ * t), -1.0, 1.0)));
+
+        // Sample the whole line of sight at a fixed spacing on the ground, not
+        // at a few fractions of it. Fractions leave the gap that matters
+        // unwatched: the first was at 15 % of the way out, so anything nearer
+        // than that - which is most of what a low camera is about to hit -
+        // was never looked at. A ridge 800 m from the focus of a 12 km view
+        // went straight through the line of sight, 1463 m of it.
+        const int probes = static_cast<int>(std::clamp(distance_ / kProbeSpacingM, 16.0, 96.0));
+        // Twice: lifting the view swings the line of sight onto ground it was
+        // not crossing before, which may be higher still.
+        for (int pass = 0; pass < 2; ++pass) {
+            const double probeElevation = std::max(elevation, minElevation);
+            const vsg::dvec3 probeDir = horizontal * std::cos(probeElevation) + up * std::sin(probeElevation);
+            for (int i = 1; i <= probes; ++i) {
+                const double t = static_cast<double>(i) / probes;
+                const vsg::dvec3 lla = ellipsoid_->convertECEFToLatLongAltitude(orbitCentre + probeDir * (distance_ * t));
+                if (auto h = ground_(lla.x * kDeg, lla.y * kDeg)) {
+                    const double needed = (*h + clearance) - focusAltitude; // height to gain over the focus by that point
+                    minElevation = std::max(minElevation, std::asin(std::clamp(needed / (distance_ * t), -1.0, 1.0)));
+                }
             }
         }
         if (elevation < minElevation) elevation = std::min(minElevation, kMaxElevation);
