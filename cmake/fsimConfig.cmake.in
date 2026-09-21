@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+# fsim: the flight-simulation SDK for RL training (design 9.2).
+#   find_package(fsim CONFIG REQUIRED)
+#   target_link_libraries(my_trainer PRIVATE fsim::sdk)        # World, VecEnv, scenarios, C ABI
+#   target_link_libraries(my_trainer PRIVATE fsim::vision)     # cameras (packages built with the viewer stack)
+# The runtime DLLs (fsim, fsim_vision, JSBSim, the MinGW runtime) are in the
+# package's bin/ directory; the JSBSim data tree and the models in share/flightsim.
+include("${CMAKE_CURRENT_LIST_DIR}/fsimTargets.cmake")
+set_and_check(fsim_BIN_DIR "@PACKAGE_CMAKE_INSTALL_BINDIR@")
+set_and_check(fsim_DATA_DIR "@PACKAGE_CMAKE_INSTALL_DATADIR@/flightsim")
+check_required_components(fsim)

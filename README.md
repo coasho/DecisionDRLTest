@@ -194,7 +194,28 @@ control](docs/sdk/control.md), [environment, effects, communication](docs/sdk/en
 [transparent visualisation](docs/sdk/viewer.md), [scenario files](docs/sdk/scenarios.md), [vision](docs/sdk/vision.md),
 [VecEnv](docs/sdk/vecenv.md), [C ABI](docs/sdk/c_abi.md).
 Link against `fsim` (`libfsim.dll` + `libJSBSim.dll` at runtime); JSBSim's aircraft data is found
-automatically next to the executable (`share/jsbsim`) or in the source tree.
+automatically next to the executable (`share/flightsim/jsbsim`) or in the source tree.
+
+### Install and package
+
+```bash
+cmake --build --preset ucrt64-release --target deploy      # runtime DLLs next to the executables
+cmake --install build/ucrt64-release --prefix dist/flightsim
+cd build/ucrt64-release && cpack                           # package/flightsim-<version>-win64.zip (~27 MB)
+```
+
+The tree is `bin/` (executables, `libfsim.dll`, `libfsim_vision.dll`, `libJSBSim.dll`, the MinGW
+runtime), `include/fsim/`, `lib/` (import libraries, `cmake/fsim`), `share/flightsim/` (models,
+`jsbsim/` data, `scenarios/`) and `share/doc/flightsim/`. A trainer outside this repository uses the
+CMake package:
+
+```cmake
+find_package(fsim CONFIG REQUIRED)            # -Dfsim_DIR=<prefix>/lib/cmake/fsim
+target_link_libraries(my_trainer PRIVATE fsim::sdk)     # and fsim::vision for cameras
+```
+
+`tests/package_consumer` is such a project; run it from the package's `bin/` (or put that
+directory on `PATH`) so the DLLs and `share/` are found.
 
 ## Layout
 

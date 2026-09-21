@@ -52,7 +52,7 @@ int main() {
 - Headers: `include/fsim/*.h` (C++17). Only these are stable; anything under `src/` may change.
 - Library: `libfsim.dll` (+ import library) and `libJSBSim.dll` next to your executable.
 - Data: the JSBSim aircraft tree is found automatically next to the executable (`share/jsbsim`) or in the source tree; override with `WorldOptions::jsbsimRoot`.
-- CMake in this repository: `target_link_libraries(my_trainer PRIVATE fsim::sdk)` (see `examples/`).
+- CMake in this repository: `target_link_libraries(my_trainer PRIVATE fsim::sdk)` (see `examples/`); from an installed package: `find_package(fsim CONFIG)` gives `fsim::sdk` and `fsim::vision` (`tests/package_consumer`). `cmake --install` and `cpack` produce the package (README "Install and package").
 
 ## Conventions
 

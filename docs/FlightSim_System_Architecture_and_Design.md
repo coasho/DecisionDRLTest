@@ -557,7 +557,7 @@ Headless `fsim.dll`: \~5 MB. Viewer executable: \~9–12 MB. Total install well 
 | --- | --- |
 | Toolchain | MSYS2 UCRT64: GCC 16.2, CMake ≥ 3.25, Ninja, MSYS2 pacman packages (vulkan-headers, vulkan-loader, glslang, spirv-tools, assimp, curl); toolchain file cmake/toolchains/ucrt64.cmake; LTO off (GCC LTO collides with dllexport vtables in JSBSim.dll) |
 | CRT | dynamic UCRT, `/MD`; the C ABI carries no CRT types so trainers built with other compilers or runtimes can link `fsim.dll` |
-| Distribution | zip with `bin/` (`fsim.dll`, `JSBSim.dll`, `flightsim.exe`, `flightsim-viewer.exe`), `include/fsim/`, `lib/fsim.lib`, `share/` (assets, scenarios), CMake package config for `find_package(fsim)` |
+| Distribution | zip with `bin/` (`fsim.dll`, `fsim_vision.dll`, `JSBSim.dll`, `flightsim.exe`, `flightsim-viewer.exe`, tools, the MinGW runtime), `include/fsim/`, `lib/` (import libraries), `share/flightsim/` (models, JSBSim data, scenarios), `share/doc/`, CMake package config for `find_package(fsim)` -> `fsim::sdk`, `fsim::vision`. Implemented in `cmake/Install.cmake` (`cmake --install`, `cpack` ZIP, ~27 MB); `tests/package_consumer` builds against it |
 | GPU matrix | NVIDIA (RTX), AMD (RDNA), Intel Arc drivers tested in the viewer/vision CI job |
 | Future Linux | no Win32 outside `platform/` (shared memory and semaphores get a POSIX implementation); every dependency supports Linux, so a port is a CI job plus `platform/linux` |
 
