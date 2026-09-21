@@ -126,6 +126,7 @@ Reading the diagram: the `fsim` SDK (object model in `sim`/`control`/`comm`, bat
 | `control` | Multi-level control stack: command types per level, `Controller`/`Behavior` interfaces, cascade, built-in PID loops and behaviours, controller registry | `sim`, `core` | — |
 | `comm` | Communication abstractions: nodes, messages, codecs, protocols, delivery media | `core` | — |
 | `ipc` | Shared-memory world segment: publisher (in `fsim.dll`) and read-only mirror (viewer), registry of live worlds | `sim`, `platform` | Win32 file mapping |
+| `vision` | `fsim_vision.dll`: vehicle cameras rendered offscreen (headless `vsg::Viewer`, one framebuffer per camera, RGB + depth readback, own-vehicle masking) over the public `World`; C ABI `fsim_vision_c.h` | `world`, `render`, `io`, `sdk` | VSG, Vulkan |
 | `app` | `flightsim.exe` (headless runs, benchmark, record, `--serve`) and `flightsim-viewer.exe`; command line, configuration, module wiring | all | — |
 | `env` | `VecEnv` batching M environments over the object model; observation and action builders (actions are commands at a chosen control level); task/reward/termination interface; seeding; episode bookkeeping | `control`, `sim`, `core` | — |
 | `session` | `World` implementation: vehicle registry by name/type over the pool, per-step environment application, effects pipeline and control cascades on the owning worker, message fabric, shared-memory publisher | `control`, `effects`, `comm`, `ipc`, `sim` | — |
@@ -525,7 +526,7 @@ flightsim/
 ├─ vcpkg.json              manifest + baseline
 ├─ cmake/                  toolchain, warnings, LTO, dependency checks, install/export
 ├─ include/fsim/           public C++ SDK headers + fsim_c.h (section 10.3)
-├─ src/{app,core,env,sim,world,render,ui,io,platform}/
+├─ src/{app,core,env,sim,world,render,ui,io,platform,session,control,effects,comm,ipc,sdk,vision}/
 ├─ ext/{env_server,recorder,web_dashboard,...}/
 ├─ shaders/                GLSL -> SPIR-V at build time
 ├─ assets/                 placeholder models, fonts, ui; JSBSim data tree as a submodule
