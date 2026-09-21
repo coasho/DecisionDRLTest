@@ -5,6 +5,8 @@ A pure C++ flight-simulation platform for AI and reinforcement-learning training
 [VulkanSceneGraph](https://github.com/vsg-dev/VulkanSceneGraph) for full-Earth visualisation and
 vision observations, and a C++ SDK with a stable C ABI as the primary interface.
 
+![flightsim-viewer over Yosemite: six c172s from the built-in demo, chase camera, ImGui monitor](docs/images/viewer-yosemite.jpg)
+
 The architecture, requirements, technology evaluation and roadmap are in
 [docs/FlightSim_System_Architecture_and_Design.md](docs/FlightSim_System_Architecture_and_Design.md).
 
