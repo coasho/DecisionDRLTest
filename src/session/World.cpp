@@ -260,8 +260,10 @@ const sim::ControlInputs* World::inputs(std::uint32_t id) const noexcept {
 bool World::command(std::uint32_t id, const control::Command& command) {
     Entry* e = entry(id);
     if (!e) return false;
+    const auto before = e->stack.activeLevel();
     e->stack.command(command);
     if (publisher_) publisher_->setControlLevel(static_cast<std::uint32_t>(e->slot), static_cast<std::uint8_t>(e->stack.activeLevel()));
+    if (e->stack.activeLevel() != before) recordVehicle(*e); // the level shows in replays too
     return true;
 }
 

@@ -512,6 +512,7 @@ int main(int argc, char** argv) {
                 interpolator = world::Interpolator(slots);
                 std::fill(alive.begin(), alive.end(), 0);
                 meta.assign(slots, ui::MonitorGui::VehicleMeta{});
+                for (auto& m : meta) m.alive = false;
                 for (std::size_t i = 0; i < slots; ++i) { visuals.setVisible(i, false); trails.setEnabled(i, false); }
             }
             if (replayTime > frames.back().simTime) {
@@ -524,7 +525,10 @@ int main(int argc, char** argv) {
             if (target != replayFrame) {
                 // Apply every frame we skipped (table changes must not be lost) but only build the last one.
                 const std::size_t from = replayFrame == static_cast<std::size_t>(-1) ? 0 : replayFrame + 1;
-                if (meta.size() != slots) meta.assign(slots, ui::MonitorGui::VehicleMeta{});
+                if (meta.size() != slots) {
+                    meta.assign(slots, ui::MonitorGui::VehicleMeta{});
+                    for (auto& m : meta) m.alive = false; // only recorded rows are vehicles
+                }
                 for (std::size_t f = from; f <= target; ++f)
                     for (const auto& [slot, row] : frames[f].tableChanges) {
                         if (slot >= slots) continue;
