@@ -35,6 +35,8 @@ fsim_world_destroy(world);
 | Group | Functions |
 | --- | --- |
 | Lifecycle | `fsim_world_create/destroy/step/time/step_seconds/vehicle_steps/published` |
+| VecEnv world | `fsim_vecenv_world(env)`: the batch's world as a world handle (owned by the environment; vehicles `env<e>/<v>`) |
+| Vision | `fsim_vision_c.h` (`fsim_vision.dll`): `fsim_vision_create(world, options, &v)` / `destroy`, `fsim_vision_add_camera(v, vehicle_id, spec, &cam)`, `fsim_vision_render`, `fsim_vision_image` / `fsim_vision_depth` (library-owned buffers, valid until the next render), `fsim_vision_save_png`; `fsim_camera_spec` and `fsim_vision_options` mirror [vision.md](vision.md) |
 | Scenarios | `fsim_scenario_load/parse/destroy`, `fsim_scenario_world_options` (fills an `fsim_world_options`; strings live with the scenario), `fsim_scenario_vehicle_count`, `fsim_scenario_apply(world, scenario, ids, capacity, &count)` ([scenarios.md](scenarios.md)) |
 | Vehicles | `fsim_world_create_vehicle/remove_vehicle/reset_vehicle/find_vehicle/vehicle_count/vehicle_ids`, `fsim_vehicle_name/type` |
 | State | `fsim_vehicle_state_ptr`, `fsim_vehicle_sensed_ptr` (`fsim_vehicle_state`, layout-checked against the C++ struct), `fsim_vehicle_get_property/set_property` |

@@ -58,6 +58,14 @@ for (;;) {
 }
 ```
 
+## From C
+
+`fsim_vision_c.h` mirrors the API for other languages: `fsim_vision_create`
+on any world handle (including `fsim_vecenv_world(env)`),
+`fsim_vision_add_camera(vision, vehicle_id, &spec, &cam)`,
+`fsim_vision_render`, `fsim_vision_image` / `fsim_vision_depth` returning
+library-owned buffers ([c_abi.md](c_abi.md)).
+
 ## Performance
 
 One `render()` records all cameras into one command buffer, submits once,

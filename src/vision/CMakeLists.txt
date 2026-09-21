@@ -1,7 +1,7 @@
 # fsim_vision.dll: vehicle cameras rendered offscreen (design 8.4). Separate
 # from fsim.dll because it needs Vulkan; links the public SDK for the world
 # and the viewer's scene builders for the Earth, sky and vehicle models.
-add_library(fsim_vision SHARED Vision.cpp Offscreen.h Offscreen.cpp)
+add_library(fsim_vision SHARED Vision.cpp Offscreen.h Offscreen.cpp fsim_vision_c.cpp)
 add_library(fsim::vision ALIAS fsim_vision)
 target_include_directories(fsim_vision
     PUBLIC  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>

@@ -6,6 +6,7 @@
 #include "fsim/fsim_c.h"
 
 #include "core/Log.h"
+#include "sdk/Handles.h"
 #include "sdk/LastError.h"
 #include "session/Scenario.h"
 #include "session/World.h"
@@ -26,11 +27,6 @@ static_assert(offsetof(fsim_vehicle_state, rotation_body_to_ecef) == offsetof(fs
 static_assert(offsetof(fsim_vehicle_state, engine_count) == offsetof(fsim::sim::VehicleState, engineCount), "layout");
 static_assert(offsetof(fsim_vehicle_state, on_ground) == offsetof(fsim::sim::VehicleState, onGround), "layout");
 static_assert(sizeof(bool) == 1, "bool must be one byte for the C mirror of VehicleState");
-
-struct fsim_world {
-    fsim::session::World world;
-    explicit fsim_world(const fsim::session::WorldOptions& o) : world(o) {}
-};
 
 namespace {
 
@@ -165,7 +161,22 @@ FSIM_API int fsim_world_create(const fsim_world_options* options, fsim_world** o
     });
 }
 
-FSIM_API void fsim_world_destroy(fsim_world* world) { delete world; }
+FSIM_API void fsim_world_destroy(fsim_world* world) {
+    if (world && !world->owned) return; // a borrowed handle (fsim_vecenv_world) belongs to its owner
+    delete world;
+}
+
+FSIM_API void fsim_set_last_error(const char* message) { fsim::sdk::lastError() = message ? message : ""; }
+
+} // extern "C"
+
+fsim::World* fsim_world_object(fsim_world* world) {
+    if (!world) return nullptr;
+    if (!world->object) world->object.reset(fsim::World::borrowed(world->world));
+    return world->object.get();
+}
+
+extern "C" {
 
 FSIM_API int fsim_world_step(fsim_world* world, uint32_t steps) {
     if (!world) return FSIM_INVALID_ARGUMENT;

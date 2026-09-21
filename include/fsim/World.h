@@ -197,13 +197,14 @@ public:
 
     /// Internal object (for the platform's own tools; not part of the stable API).
     session::World& impl() noexcept { return *impl_; }
+    /// Internal: a view of a world owned elsewhere (VecEnv::world, the C ABI); not part of the stable API.
+    static World* borrowed(session::World& w) { return new World(Borrow{}, w); }
 
 private:
     friend class Vehicle;
     friend class Environment;
-    friend class VecEnv;
     struct Borrow {};
-    World(Borrow, session::World& borrowed); ///< a view of a world owned elsewhere (VecEnv::world)
+    World(Borrow, session::World& borrowed);
     std::shared_ptr<session::World> impl_;
     Environment environment_;
 };

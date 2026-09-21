@@ -70,6 +70,7 @@ typedef struct fsim_buffers {
 FSIM_API uint32_t fsim_abi_version(void);
 FSIM_API const char* fsim_version(void);      /* library version string */
 FSIM_API const char* fsim_last_error(void);   /* thread-local, empty if none */
+FSIM_API void fsim_set_last_error(const char* message); /* for libraries layered on this ABI (fsim_vision) */
 
 FSIM_API void fsim_options_init(fsim_options* options);
 
@@ -78,6 +79,9 @@ FSIM_API void fsim_vecenv_destroy(fsim_vecenv* env);
 
 /* seed 0 keeps the current seed. */
 FSIM_API int fsim_vecenv_reset(fsim_vecenv* env, uint64_t seed);
+/* The batch's world as a world handle (vehicles "env<e>/<v>"): owned by the environment, do not destroy. */
+struct fsim_world;
+FSIM_API struct fsim_world* fsim_vecenv_world(fsim_vecenv* env);
 /* actions: M*K*action_size floats. */
 FSIM_API int fsim_vecenv_step(fsim_vecenv* env, const float* actions, size_t count);
 FSIM_API int fsim_vecenv_buffers(const fsim_vecenv* env, fsim_buffers* out);
@@ -260,6 +264,10 @@ FSIM_API int fsim_scenario_apply(fsim_world* world, const fsim_scenario* scenari
 
 #ifdef __cplusplus
 }
+
+/* C++ interop: the object-model view of a C world handle (owned by the handle). */
+namespace fsim { class World; }
+FSIM_API fsim::World* fsim_world_object(fsim_world* world);
 #endif
 
 #endif /* FSIM_C_H */

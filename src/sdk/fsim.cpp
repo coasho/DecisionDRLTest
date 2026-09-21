@@ -5,6 +5,7 @@
 #include "fsim/fsim_c.h"
 
 #include "core/Log.h"
+#include "sdk/Handles.h"
 #include "sdk/LastError.h"
 #include "env/VecEnv.h"
 
@@ -24,6 +25,7 @@
 struct fsim_vecenv {
     fsim::env::VecEnv env;
     fsim::env::VecEnv::StepResult last{};
+    std::unique_ptr<fsim_world> world; ///< borrowed handle for fsim_vecenv_world(), made on demand
     explicit fsim_vecenv(const fsim::env::Scenario& s, const fsim::env::VecEnv::Options& o) : env(s, o) {}
 };
 
@@ -235,11 +237,7 @@ namespace fsim {
 
 struct VecEnv::Impl {
     fsim_vecenv* handle = nullptr;
-    std::unique_ptr<World> world; ///< borrowed view, created on first use
-    ~Impl() {
-        world.reset();
-        fsim_vecenv_destroy(handle);
-    }
+    ~Impl() { fsim_vecenv_destroy(handle); }
 };
 
 VecEnv::VecEnv(const VecEnvOptions& options) : impl_(std::make_unique<Impl>()) {
@@ -270,9 +268,12 @@ double VecEnv::agentStepSeconds() const noexcept { return impl_->handle->env.age
 std::uint64_t VecEnv::vehicleSteps() const noexcept { return impl_->handle->env.vehicleSteps(); }
 fsim_vecenv* VecEnv::handle() noexcept { return impl_->handle; }
 
-World& VecEnv::world() {
-    if (!impl_->world) impl_->world.reset(new World(World::Borrow{}, impl_->handle->env.world()));
-    return *impl_->world;
+World& VecEnv::world() { return *fsim_world_object(fsim_vecenv_world(impl_->handle)); }
+
+extern "C" FSIM_API fsim_world* fsim_vecenv_world(fsim_vecenv* env) {
+    if (!env) return nullptr;
+    if (!env->world) env->world = std::make_unique<fsim_world>(env->env.world());
+    return env->world.get();
 }
 
 const char* version() noexcept { return FSIM_VERSION_STRING; }
