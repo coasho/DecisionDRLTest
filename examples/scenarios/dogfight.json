@@ -1,0 +1,32 @@
+// Dogfight over the Sierra: F-16s on the built-in behaviours - a pursuer on a
+// target that evades, a wingman in formation on the pursuer, and an aircraft
+// flying loops for the camera. scenario_runner examples/scenarios/dogfight.json --realtime
+{
+  "world": { "name": "dogfight", "seed": 11, "capacity": 16 },
+  "environment": {
+    "utc": "2026-06-21T18:00:00Z",
+    "wind": { "direction_deg": 250, "speed_ms": 8, "turbulence": 0.1 }
+  },
+  "vehicles": [
+    {
+      "name": "blue", "type": "jsbsim:f16",
+      "initial": { "lat_deg": 37.75, "lon_deg": -119.60, "alt_msl_m": 5000, "heading_deg": 90, "airspeed_ms": 200 },
+      "command": { "level": "behavior", "id": "evade", "target": "red", "params": { "altitude_delta_m": -400, "airspeed_ms": 220 } }
+    },
+    {
+      "name": "red", "type": "jsbsim:f16",
+      "initial": { "lat_deg": 37.72, "lon_deg": -119.66, "alt_msl_m": 5200, "heading_deg": 60, "airspeed_ms": 210 },
+      "command": { "level": "behavior", "id": "pursuit", "target": "blue", "params": { "range_m": 400, "lead_s": 2.5, "max_airspeed_ms": 260 } }
+    },
+    {
+      "name": "red-2", "type": "jsbsim:f16",
+      "initial": { "lat_deg": 37.719, "lon_deg": -119.662, "alt_msl_m": 5200, "heading_deg": 60, "airspeed_ms": 210 },
+      "command": { "level": "behavior", "id": "formation", "target": "red", "params": { "ahead_m": -120, "right_m": 80, "below_m": 20 } }
+    },
+    {
+      "name": "show", "type": "jsbsim:f16",
+      "initial": { "lat_deg": 37.70, "lon_deg": -119.55, "alt_msl_m": 4500, "heading_deg": 180, "airspeed_ms": 220 },
+      "command": { "level": "behavior", "id": "aerobatics", "params": { "manoeuvre": 1, "load_factor_g": 4.0 } }
+    }
+  ]
+}

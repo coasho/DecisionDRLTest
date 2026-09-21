@@ -161,6 +161,7 @@ build/ucrt64-release/bin/flightsim-viewer.exe --help
 
 # run a scenario file (world, environment, vehicles, commands, effects as data)
 build/ucrt64-release/bin/scenario_runner.exe examples/scenarios/formation_and_pursuit.json --realtime
+build/ucrt64-release/bin/scenario_runner.exe examples/scenarios/dogfight.json --realtime   # F-16s: pursuit vs evade, formation, loops
 
 # an external process as a node of the world's network (two terminals)
 build/ucrt64-release/bin/udp_peer.exe --listen 47001 --send 47000
