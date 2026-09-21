@@ -6,6 +6,11 @@ on:
     tags: ['v*']
   pull_request:
 
+# One run per branch: a newer push cancels the one still building.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-ucrt64:
     name: Windows x64 - MSYS2 UCRT64 (GCC)
