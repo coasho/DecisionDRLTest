@@ -42,7 +42,7 @@ public:
     void setScene(vsg::ref_ptr<vsg::Node> scene, vsg::ref_ptr<vsg::EllipsoidModel> ellipsoid);
 
     /// A framebuffer + view + readback for one camera; returns its index.
-    unsigned addCamera(unsigned width, unsigned height, double fovDeg, vsg::Mask viewMask = vsg::MASK_ALL);
+    unsigned addCamera(unsigned width, unsigned height, double fovDeg, vsg::Mask viewMask = vsg::MASK_ALL, bool depth = false);
 
     /// Build the command graph and compile; call after the cameras exist.
     /// Cameras added later require another compile() (not supported yet).
@@ -57,6 +57,8 @@ public:
     void advance();
 
     const std::vector<std::uint8_t>& rgb(unsigned camera) const { return cameras_[camera].rgb; }
+    /// Depth in metres along the view axis (empty unless the camera was added with depth).
+    const std::vector<float>& depth(unsigned camera) const { return cameras_[camera].depthM; }
     unsigned width(unsigned camera) const { return cameras_[camera].width; }
     unsigned height(unsigned camera) const { return cameras_[camera].height; }
     std::size_t cameraCount() const { return cameras_.size(); }
@@ -74,9 +76,12 @@ private:
         double fovDeg = 60.0;
         vsg::ref_ptr<vsg::LookAt> lookAt;
         vsg::ref_ptr<vsg::Camera> camera;
-        vsg::ref_ptr<vsg::Image> colour, capture;
+        vsg::ref_ptr<vsg::Image> colour, capture, depth;
+        vsg::ref_ptr<vsg::Buffer> depthBuffer; ///< host-visible copy of the depth attachment (when requested)
         vsg::ref_ptr<vsg::RenderGraph> renderGraph;
         std::vector<std::uint8_t> rgb;
+        std::vector<float> depthM;
+        vsg::dmat4 projection;                 ///< used by the last frame, to linearise depth
         std::vector<std::uint8_t> staging; ///< RGBA rows copied out of the mapped image
     };
     void readback(Camera& c);

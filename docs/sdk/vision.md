@@ -27,10 +27,12 @@ for (;;) {
 
 | Element | Meaning |
 | --- | --- |
-| `CameraSpec` | `width`, `height`, `fovDeg`, mount `offsetBodyM[3]` and attitude `yawDeg` (right), `pitchDeg` (up), `rollDeg` (right) relative to the body; `hideOwnVehicle` (default true) keeps the carrier's own model out of its cameras |
+| `CameraSpec` | `width`, `height`, `fovDeg`, mount `offsetBodyM[3]` and attitude `yawDeg` (right), `pitchDeg` (up), `rollDeg` (right) relative to the body; `hideOwnVehicle` (default true) keeps the carrier's own model out of its cameras; `depth` also delivers metres per pixel |
 | `Options` | `earth` / `imagery` / `elevation` (and URL templates, `maxLevel`), `sky` (dome + sun from the world's clock), `maxVehicles` drawn, `assetDir` for `models/<type>.glb`, `debugLayer` |
 | `render()` | draws every camera from the world's current state; explicit, so a trainer pays for images only when it wants them (e.g. every agent step, not every FDM step) |
 | `image(i)` | the last frame of camera `i`, valid until the next `render()` |
+| `depth(i)` | `DepthImage`: float metres along the view axis per pixel (cameras with `depth`); the sky reads as the far plane (hundreds of km) |
+| `saveDepthPng(i, path, farM)` | log-scaled 8-bit depth for a look |
 | `savePng(i, path)` | debugging and datasets |
 | `timing()` | where the last render went: bookkeeping, tile merges, recording, GPU, host copy |
 | `settle(n)` | run `n` frames without reading back, to let tiles stream in after a jump to a new region |
@@ -77,7 +79,7 @@ build/ucrt64-release/bin/vision_capture.exe --seconds 20 --every 2 --out capture
 
 ## Limits
 
-- RGB only (depth and segmentation follow the same path and are next).
+- RGB and depth; segmentation (per-vehicle ids) is next.
 - Cameras are added before the first `render()`; the scene is compiled once.
 - Whether the vehicle's own model occludes the view depends on the mount: a
   camera 2 m ahead of the origin sits inside the c172's cowling, which is why

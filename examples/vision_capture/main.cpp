@@ -73,6 +73,7 @@ int main(int argc, char** argv) {
         vision::CameraSpec nose;
         nose.width = width; nose.height = height; nose.fovDeg = 70.0;
         nose.offsetBodyM[0] = 2.0; nose.offsetBodyM[2] = -0.3;
+        nose.depth = true; // metres per pixel as well
         const unsigned camNose = sensors.addCamera(lead, nose);
         vision::CameraSpec chase = nose;
         chase.offsetBodyM[0] = -25.0; chase.offsetBodyM[2] = -6.0; chase.pitchDeg = -10.0;
@@ -112,6 +113,14 @@ int main(int argc, char** argv) {
             for (auto [cam, tag] : {std::pair{camNose, "nose"}, std::pair{camChase, "chase"}, std::pair{camDown, "down"}, std::pair{camSide, "side"}}) {
                 std::snprintf(name, sizeof name, "%s/%s_%03d.png", out.c_str(), tag, shot);
                 sensors.savePng(cam, name);
+            }
+            std::snprintf(name, sizeof name, "%s/nose_depth_%03d.png", out.c_str(), shot);
+            sensors.saveDepthPng(camNose, name);
+            if (!quiet) {
+                const auto d = sensors.depth(camNose);
+                const auto at = [&](unsigned x, unsigned y) { return static_cast<double>(d.metres[y * d.width + x]); };
+                std::printf("   depth: top %.1f  centre %.1f  bottom %.1f m" "\n", at(d.width / 2, 2), at(d.width / 2, d.height / 2),
+                            at(d.width / 2, d.height - 3));
             }
             if (!quiet) {
                 const auto& s = lead.state();

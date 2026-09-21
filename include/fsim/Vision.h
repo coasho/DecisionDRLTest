@@ -38,6 +38,7 @@ struct CameraSpec {
     double offsetBodyM[3] = {0.0, 0.0, 0.0}; ///< mount position relative to the body origin
     double yawDeg = 0.0, pitchDeg = 0.0, rollDeg = 0.0; ///< mount attitude relative to the body (yaw right, pitch up, roll right)
     bool hideOwnVehicle = true;              ///< do not draw the aircraft the camera is mounted on (up to 31 such vehicles)
+    bool depth = false;                      ///< also deliver depth (metres along the view axis) through Sensors::depth()
 };
 
 struct Options {
@@ -60,6 +61,14 @@ struct Image {
     std::size_t size() const noexcept { return static_cast<std::size_t>(width) * height * 3; }
 };
 
+/// Depth in metres along the view axis per pixel, top row first; the sky
+/// (nothing drawn) reads as the far plane, i.e. very large.
+struct DepthImage {
+    const float* metres = nullptr;
+    unsigned width = 0, height = 0;
+    std::size_t size() const noexcept { return static_cast<std::size_t>(width) * height; }
+};
+
 class FSIM_VISION_API Sensors {
 public:
     /// Opens a Vulkan device and builds the scene. Throws fsim::Error when no
@@ -79,9 +88,13 @@ public:
     void render();
     /// The last rendered image of a camera (valid until the next render()).
     Image image(unsigned camera) const noexcept;
+    /// The last depth image of a camera added with `CameraSpec::depth` (empty otherwise).
+    DepthImage depth(unsigned camera) const noexcept;
 
     /// Write the last image of a camera as PNG (debugging, datasets).
     bool savePng(unsigned camera, const std::string& path) const;
+    /// Write the last depth image as an 8-bit PNG: near = white, `farM` and beyond = black (log scale).
+    bool saveDepthPng(unsigned camera, const std::string& path, double farM = 5000.0) const;
 
     double lastRenderMs() const noexcept;  ///< wall time of the last render()
     /// Where the last render() went (milliseconds): frame bookkeeping, tile

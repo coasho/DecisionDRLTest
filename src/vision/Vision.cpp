@@ -214,7 +214,7 @@ unsigned Sensors::addCamera(const Vehicle& vehicle, const CameraSpec& spec) {
             it = impl_->ownBit.emplace(vehicle.id(), vsg::Mask(1u << (impl_->ownBit.size() + 1))).first;
         if (it != impl_->ownBit.end()) viewMask = vsg::MASK_ALL & ~it->second;
     }
-    return impl_->offscreen.addCamera(std::max(1u, spec.width), std::max(1u, spec.height), spec.fovDeg, viewMask);
+    return impl_->offscreen.addCamera(std::max(1u, spec.width), std::max(1u, spec.height), spec.fovDeg, viewMask, spec.depth);
 }
 
 std::size_t Sensors::cameraCount() const noexcept { return impl_->mounts.size(); }
@@ -256,6 +256,33 @@ Image Sensors::image(unsigned camera) const noexcept {
     img.width = impl_->offscreen.width(camera);
     img.height = impl_->offscreen.height(camera);
     return img;
+}
+
+DepthImage Sensors::depth(unsigned camera) const noexcept {
+    DepthImage img;
+    if (camera >= impl_->offscreen.cameraCount() || impl_->offscreen.depth(camera).empty()) return img;
+    img.metres = impl_->offscreen.depth(camera).data();
+    img.width = impl_->offscreen.width(camera);
+    img.height = impl_->offscreen.height(camera);
+    return img;
+}
+
+bool Sensors::saveDepthPng(unsigned camera, const std::string& path, double farM) const {
+    const DepthImage d = depth(camera);
+    if (!d.metres) return false;
+    std::vector<std::uint8_t> grey(d.size());
+    const double lf = std::log(std::max(2.0, farM));
+    for (std::size_t i = 0; i < d.size(); ++i) {
+        const double m = std::max(1.0, static_cast<double>(d.metres[i]));
+        const double v = 1.0 - std::min(1.0, std::log(m) / lf);
+        grey[i] = static_cast<std::uint8_t>(v * 255.0 + 0.5);
+    }
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    const int ok = stbi_write_png_to_func([](void* ctx, void* data, int size) { std::fwrite(data, 1, static_cast<std::size_t>(size), static_cast<std::FILE*>(ctx)); }, f,
+                                          static_cast<int>(d.width), static_cast<int>(d.height), 1, grey.data(), static_cast<int>(d.width));
+    std::fclose(f);
+    return ok != 0;
 }
 
 bool Sensors::savePng(unsigned camera, const std::string& path) const {

@@ -4,6 +4,7 @@
 #include <fsim/Vision.h>
 #include <fsim/World.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -51,12 +52,14 @@ int main(int argc, char** argv) {
     nose.height = 64;
     nose.fovDeg = 60.0;
     nose.offsetBodyM[0] = 2.0;
+    nose.depth = true;
     const unsigned camNose = sensors.addCamera(v, nose);   // sees the target ahead, not itself
     vision::CameraSpec chase = nose;
     chase.offsetBodyM[0] = -20.0;
     chase.offsetBodyM[2] = -3.0;
     chase.pitchDeg = -8.0;
     chase.hideOwnVehicle = false;
+    chase.depth = false;
     const unsigned camChase = sensors.addCamera(v, chase); // sees its own aircraft
     vision::CameraSpec noseSelf = nose;
     noseSelf.hideOwnVehicle = false;
@@ -108,6 +111,15 @@ int main(int argc, char** argv) {
     CHECK(anyNonSky > 0);
     CHECK(bottomUniform(img));
     CHECK(!bottomUniform(sensors.image(camNoseSelf)));
+    // Depth: the sky dome is tens of km away, the target aircraft ahead is within 200 m of the nose camera,
+    // and the nearest pixel of the frame belongs to it.
+    const auto dimg = sensors.depth(camNose);
+    CHECK(dimg.metres != nullptr && dimg.size() == img.width * img.height);
+    CHECK(sensors.depth(camChase).metres == nullptr); // not requested
+    float nearest = 1e30f;
+    for (std::size_t i = 0; i < dimg.size(); ++i) nearest = std::min(nearest, dimg.metres[i]);
+    CHECK(nearest > 5.0f && nearest < 200.0f);
+    CHECK(dimg.metres[2 * dimg.width + dimg.width / 2] > 10000.0f);
     // A VecEnv exposes its world: one camera per batch vehicle.
     {
         VecEnvOptions vo2;

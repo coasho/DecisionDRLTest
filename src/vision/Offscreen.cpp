@@ -30,11 +30,16 @@ vsg::ref_ptr<vsg::Image> makeImage(VkFormat format, unsigned w, unsigned h, VkIm
     return image;
 }
 
-/// Colour attachment left in TRANSFER_SRC_OPTIMAL for the readback copy.
-vsg::ref_ptr<vsg::RenderPass> makeRenderPass(vsg::Device* device) {
+/// Colour attachment left in TRANSFER_SRC_OPTIMAL for the readback copy; depth
+/// stored (and left in TRANSFER_SRC_OPTIMAL) when it is read back too.
+vsg::ref_ptr<vsg::RenderPass> makeRenderPass(vsg::Device* device, bool readDepth) {
     auto colour = vsg::defaultColorAttachment(kColourFormat);
     colour.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     auto depth = vsg::defaultDepthAttachment(kDepthFormat);
+    if (readDepth) {
+        depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        depth.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    }
     vsg::RenderPass::Attachments attachments{colour, depth};
 
     vsg::AttachmentReference colourRef{};
@@ -59,9 +64,9 @@ vsg::ref_ptr<vsg::RenderPass> makeRenderPass(vsg::Device* device) {
     vsg::SubpassDependency out{};
     out.srcSubpass = 0;
     out.dstSubpass = VK_SUBPASS_EXTERNAL;
-    out.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    out.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     out.dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    out.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    out.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     out.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     out.dependencyFlags = 0;
     return vsg::RenderPass::create(device, attachments, vsg::RenderPass::Subpasses{subpass}, vsg::RenderPass::Dependencies{in, out});
@@ -123,7 +128,7 @@ void Offscreen::setScene(vsg::ref_ptr<vsg::Node> scene, vsg::ref_ptr<vsg::Ellips
     ellipsoid_ = ellipsoid;
 }
 
-unsigned Offscreen::addCamera(unsigned width, unsigned height, double fovDeg, vsg::Mask viewMask) {
+unsigned Offscreen::addCamera(unsigned width, unsigned height, double fovDeg, vsg::Mask viewMask, bool wantDepth) {
     Camera c;
     c.width = width;
     c.height = height;
@@ -137,17 +142,22 @@ unsigned Offscreen::addCamera(unsigned width, unsigned height, double fovDeg, vs
 
     // Attachments: colour (copied out after the pass) and depth.
     c.colour = makeImage(kColourFormat, width, height, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_IMAGE_TILING_OPTIMAL);
-    auto depth = makeImage(kDepthFormat, width, height, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_TILING_OPTIMAL);
+    c.depth = makeImage(kDepthFormat, width, height, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | (wantDepth ? VkImageUsageFlags(VK_IMAGE_USAGE_TRANSFER_SRC_BIT) : VkImageUsageFlags(0)),
+                        VK_IMAGE_TILING_OPTIMAL);
     auto colourView = vsg::createImageView(device_, c.colour, VK_IMAGE_ASPECT_COLOR_BIT);
-    auto depthView = vsg::createImageView(device_, depth, VK_IMAGE_ASPECT_DEPTH_BIT);
-    auto renderPass = makeRenderPass(device_);
+    auto depthView = vsg::createImageView(device_, c.depth, VK_IMAGE_ASPECT_DEPTH_BIT);
+    auto renderPass = makeRenderPass(device_, wantDepth);
     auto framebuffer = vsg::Framebuffer::create(renderPass, vsg::ImageViews{colourView, depthView}, width, height, 1);
 
     c.renderGraph = vsg::RenderGraph::create();
     c.renderGraph->framebuffer = framebuffer;
     c.renderGraph->renderArea.offset = VkOffset2D{0, 0};
     c.renderGraph->renderArea.extent = VkExtent2D{width, height};
-    c.renderGraph->setClearValues(VkClearColorValue{{0.55f, 0.70f, 0.90f, 1.0f}}, VkClearDepthStencilValue{0.0f, 0}); // reverse depth
+    // Clear values by attachment index: setClearValues() tells depth from colour by the final layout, which is
+    // TRANSFER_SRC for both here, so set them explicitly. Reverse depth: far = 0.
+    c.renderGraph->clearValues.resize(2);
+    c.renderGraph->clearValues[0].color = VkClearColorValue{{0.55f, 0.70f, 0.90f, 1.0f}};
+    c.renderGraph->clearValues[1].depthStencil = VkClearDepthStencilValue{0.0f, 0};
     auto view = vsg::View::create(c.camera, scene_);
     view->mask = viewMask;
     c.renderGraph->addChild(view);
@@ -160,6 +170,15 @@ unsigned Offscreen::addCamera(unsigned width, unsigned height, double fovDeg, vs
     if (c.capture->allocateAndBindMemory(device_, cached) != VK_SUCCESS)
         c.capture->allocateAndBindMemory(device_, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     c.rgb.assign(static_cast<std::size_t>(width) * height * 3, 0);
+    if (wantDepth) {
+        const VkDeviceSize bytes = static_cast<VkDeviceSize>(width) * height * sizeof(float);
+        c.depthBuffer = vsg::createBufferAndMemory(device_, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE,
+                                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+        if (!c.depthBuffer)
+            c.depthBuffer = vsg::createBufferAndMemory(device_, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_SHARING_MODE_EXCLUSIVE,
+                                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        c.depthM.assign(static_cast<std::size_t>(width) * height, 0.0f);
+    }
 
     cameras_.push_back(std::move(c));
     return static_cast<unsigned>(cameras_.size() - 1);
@@ -196,6 +215,25 @@ bool Offscreen::compile(std::string* error) {
         auto toHost = vsg::ImageMemoryBarrier::create(VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                                       VK_IMAGE_LAYOUT_GENERAL, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, c.capture, range);
         commands->addChild(vsg::PipelineBarrier::create(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, toHost));
+
+        if (c.depthBuffer) {
+            // Depth attachment (left in TRANSFER_SRC by the pass) -> host buffer of floats.
+            auto copyDepth = vsg::CopyImageToBuffer::create();
+            copyDepth->srcImage = c.depth;
+            copyDepth->srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            copyDepth->dstBuffer = c.depthBuffer;
+            VkBufferImageCopy dregion{};
+            dregion.bufferOffset = 0;
+            dregion.bufferRowLength = 0;
+            dregion.bufferImageHeight = 0;
+            dregion.imageSubresource = VkImageSubresourceLayers{VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1};
+            dregion.imageExtent = VkExtent3D{c.width, c.height, 1};
+            copyDepth->regions.push_back(dregion);
+            commands->addChild(copyDepth);
+            auto bufferToHost = vsg::BufferMemoryBarrier::create(VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT, VK_QUEUE_FAMILY_IGNORED,
+                                                                 VK_QUEUE_FAMILY_IGNORED, c.depthBuffer, 0, VK_WHOLE_SIZE);
+            commands->addChild(vsg::PipelineBarrier::create(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, bufferToHost));
+        }
         commandGraph_->addChild(commands);
     }
     viewer_->assignRecordAndSubmitTaskAndPresentation({commandGraph_});
@@ -252,6 +290,24 @@ void Offscreen::render() {
 }
 
 void Offscreen::readback(Camera& c) {
+    if (c.depthBuffer) {
+        // Linearise the stored depth with the projection of this frame: clip = P * eye, d = clip.z / clip.w.
+        c.projection = c.camera->projectionMatrix->transform();
+        const vsg::dmat4& P = c.projection;
+        auto* dm = c.depthBuffer->getDeviceMemory(device_->deviceID);
+        void* dp = nullptr;
+        if (dm && dm->map(c.depthBuffer->getMemoryOffset(device_->deviceID), c.depthM.size() * sizeof(float), 0, &dp) == VK_SUCCESS && dp) {
+            std::memcpy(c.depthM.data(), dp, c.depthM.size() * sizeof(float));
+            dm->unmap();
+            const double a = P(2, 2), b = P(3, 2), cc = P(2, 3), dd = P(3, 3);
+            for (float& z : c.depthM) {
+                const double d = z;
+                const double denom = d * cc - a;
+                const double eye = denom != 0.0 ? (b - d * dd) / denom : 0.0; // eye-space z (camera looks down -z)
+                z = static_cast<float>(-eye);
+            }
+        }
+    }
     auto* memory = c.capture->getDeviceMemory(device_->deviceID);
     if (!memory) return;
     VkImageSubresource sub{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0};
