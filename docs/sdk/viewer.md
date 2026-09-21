@@ -71,7 +71,7 @@ vsync and uses ~3% of one core while mirroring 64 vehicles).
 ## If it crashes
 
 `flightsim-viewer.exe` and `flightsim.exe` install a crash handler: an
-unhandled exception writes a minidump to `%LOCALAPPDATA%lightsim\crash\`
+unhandled exception writes a minidump to `%LOCALAPPDATA%/flightsim/crash/`
 (`<exe>-<date>-<time>.dmp`, openable in Visual Studio or WinDbg) and one line
 to stderr / `viewer.log`. Libraries never install one - a trainer owns its own
 process.
