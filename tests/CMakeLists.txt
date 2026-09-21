@@ -26,3 +26,11 @@ add_executable(fsim_c_abi_test test_c_abi.c)
 target_link_libraries(fsim_c_abi_test PRIVATE fsim::sdk)
 set_target_properties(fsim_c_abi_test PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
 add_test(NAME c_abi COMMAND fsim_c_abi_test "${FSIM_JSBSIM_DATA_DIR}")
+
+# Offscreen cameras through fsim_vision.dll (needs a Vulkan device).
+if(FSIM_WITH_RENDER)
+    add_executable(fsim_vision_test test_vision.cpp)
+    target_link_libraries(fsim_vision_test PRIVATE fsim::sdk fsim::vision)
+    fsim_set_warnings(fsim_vision_test)
+    add_test(NAME vision COMMAND fsim_vision_test "${FSIM_JSBSIM_DATA_DIR}")
+endif()

@@ -93,8 +93,11 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
   node of the world's network (fixed "FSMG" wire format); `examples/udp_peer` + `multi_level_control --bridge`.
 - **Offline tiles**: `tools/tile_prefetch` fills the shared tile cache (elevation + imagery pyramid) for a region,
   for training machines and viewers without network access.
+- **Vision observations (M4)**: `fsim::vision::Sensors` mounts cameras on vehicles and renders them offscreen
+  (`fsim_vision.dll`, Vulkan without a window) over the same imagery, relief, sky and models the viewer draws;
+  64 cameras in ~8 ms per step; `examples/vision_capture` writes PNGs.
 
-Not yet: animated control surfaces, vision observations.
+Not yet: animated control surfaces, depth/segmentation cameras.
 
 Imagery and elevation come from Esri World Imagery and AWS Terrain Tiles under their respective terms (attribution required); tiles are cached under `%LOCALAPPDATA%\flightsim\tilecache`.
 
@@ -160,6 +163,9 @@ build/ucrt64-release/bin/scenario_runner.exe examples/scenarios/formation_and_pu
 build/ucrt64-release/bin/udp_peer.exe --listen 47001 --send 47000
 build/ucrt64-release/bin/multi_level_control.exe --realtime --bridge 47000:47001
 
+# cameras on a vehicle over Yosemite, written as PNGs (no window needed)
+build/ucrt64-release/bin/vision_capture.exe --seconds 20 --every 2 --out captures
+
 # fill the tile cache for a region once (terrain physics + viewer imagery offline afterwards)
 build/ucrt64-release/bin/tile_prefetch.exe --lat 37.72 --lon -119.55 --radius-km 30
 
@@ -183,8 +189,8 @@ TerrainManipulator; the eye never goes below the terrain; `r` resets the view. C
 
 See [docs/sdk](docs/sdk/README.md): [world and vehicles](docs/sdk/world.md), [multi-level
 control](docs/sdk/control.md), [environment, effects, communication](docs/sdk/environment.md),
-[transparent visualisation](docs/sdk/viewer.md), [scenario files](docs/sdk/scenarios.md), [VecEnv](docs/sdk/vecenv.md),
-[C ABI](docs/sdk/c_abi.md).
+[transparent visualisation](docs/sdk/viewer.md), [scenario files](docs/sdk/scenarios.md), [vision](docs/sdk/vision.md),
+[VecEnv](docs/sdk/vecenv.md), [C ABI](docs/sdk/c_abi.md).
 Link against `fsim` (`libfsim.dll` + `libJSBSim.dll` at runtime); JSBSim's aircraft data is found
 automatically next to the executable (`share/jsbsim`) or in the source tree.
 
@@ -204,6 +210,7 @@ src/ipc/          shared-memory world segment: publisher, mirror, registry
 src/session/      World implementation (vehicles, stepping, environment, publisher)
 src/env/          Scenario, Task, Observation/Action spaces, VecEnv (batch layer)
 src/sdk/          libfsim.dll: C++ SDK (World, VecEnv) + C ABI
+src/vision/       libfsim_vision.dll: offscreen vehicle cameras (needs Vulkan)
 tools/            tile_prefetch: offline tile cache for a region
 include/fsim/     public SDK headers
 examples/         multi_level_control, minimal_trainer, ppo_trainer

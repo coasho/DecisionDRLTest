@@ -40,6 +40,7 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
     transforms_.reserve(count);
     highlight_.reserve(count);
     visible_.assign(count, 1);
+    onMask_.assign(count, vsg::MASK_ALL);
     slotModel_.assign(count, std::string());
     for (std::size_t i = 0; i < count; ++i) {
         auto transform = vsg::MatrixTransform::create();
@@ -184,8 +185,14 @@ void VehicleVisuals::update(Span<const sim::VehicleState> states) {
 
 void VehicleVisuals::applySwitch(std::size_t index) {
     auto& sw = highlight_[index];
-    sw->setAllChildren(false);
-    if (visible_[index]) sw->setSingleChildOn(static_cast<int>(index) == selected_ ? 1 : 0);
+    const std::size_t on = static_cast<int>(index) == selected_ ? 1 : 0;
+    for (std::size_t i = 0; i < sw->children.size(); ++i) sw->children[i].mask = (visible_[index] && i == on) ? onMask_[index] : vsg::MASK_OFF;
+}
+
+void VehicleVisuals::setMask(std::size_t index, vsg::Mask mask) {
+    if (index >= onMask_.size() || onMask_[index] == mask) return;
+    onMask_[index] = mask;
+    applySwitch(index);
 }
 
 void VehicleVisuals::setSelected(int index) {

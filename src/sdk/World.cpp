@@ -92,6 +92,11 @@ std::string Vehicle::type() const {
     return i ? i->type : std::string();
 }
 
+std::string Vehicle::model() const {
+    const auto* i = world_ ? world_->impl_->info(id_) : nullptr;
+    return i ? i->model : std::string();
+}
+
 const VehicleState& Vehicle::state() const {
     const auto* s = world_ ? world_->impl_->vehicleState(id_) : nullptr;
     return s ? *s : emptyState();

@@ -122,6 +122,7 @@ public:
     std::uint32_t id() const noexcept { return id_; }
     std::string name() const;
     std::string type() const;
+    std::string model() const;  ///< the VehicleSpec::model override (empty = the type's model)
 
     // State (references are valid until the vehicle is removed)
     const VehicleState& state() const;            ///< truth

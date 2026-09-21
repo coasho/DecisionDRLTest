@@ -62,6 +62,10 @@ public:
 
     /// Show or hide one vehicle (mirror mode: slots without a live vehicle).
     void setVisible(std::size_t index, bool visible);
+
+    /// Traversal mask of a visible vehicle (default MASK_ALL): a vsg::View whose
+    /// mask does not overlap it skips the vehicle (a camera hiding its own aircraft).
+    void setMask(std::size_t index, vsg::Mask mask);
     bool visible(std::size_t index) const noexcept { return index < visible_.size() && visible_[index]; }
     int selected() const noexcept { return selected_; }
 
@@ -91,6 +95,7 @@ private:
     std::vector<vsg::ref_ptr<vsg::Switch>> highlight_;
     int selected_ = -1;
     std::vector<unsigned char> visible_;
+    std::vector<vsg::Mask> onMask_;
     vsg::Animations animations_;
     void applySwitch(std::size_t index);
 };
