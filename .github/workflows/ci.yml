@@ -62,3 +62,15 @@ jobs:
 
       - name: Throughput benchmark
         run: build/ucrt64-release/bin/flightsim.exe --vehicles 32 --steps 150 --benchmark
+
+      - name: Package
+        run: |
+          cmake --install build/ucrt64-release --prefix dist/flightsim
+          cd build/ucrt64-release && cpack
+          dist/flightsim/bin/flightsim.exe --vehicles 2 --steps 10 --benchmark || ../../dist/flightsim/bin/flightsim.exe --vehicles 2 --steps 10 --benchmark
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flightsim-win64
+          path: build/ucrt64-release/package/*.zip
+          if-no-files-found: error
