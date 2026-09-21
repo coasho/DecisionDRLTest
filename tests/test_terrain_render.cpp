@@ -200,6 +200,7 @@ TEST_CASE("the wheel zooms towards the point under the cursor", "[camera]") {
     // over keeps its place on screen, so zooming goes where you are looking.
     Rig rig;
     const auto zoom = [&rig](int cursorX, float notches) {
+        rig.camera->setZoomToCursor(true);
         rig.camera->setFreeView(45.0, 8.0, 0.0, 2.0e5);
         rig.camera->update(nullptr, 1.0 / 60.0);
         const vsg::dvec3 before = rig.camera->focus();
@@ -226,48 +227,84 @@ TEST_CASE("the wheel zooms towards the point under the cursor", "[camera]") {
     REQUIRE(vsg::length(zoom(400, 1.0f)) < vsg::length(in) * 0.2);
 }
 
-TEST_CASE("zooming holds the point under the cursor in place", "[camera]") {
-    // What zoomToMouse actually promises: whatever the pointer is over stays
-    // where it is on screen as the view closes in. Checking only that the
-    // focus shifts the right way would miss getting the magnitude wrong,
-    // which on a globe means missing the curvature.
+TEST_CASE("by default the wheel moves nothing but the distance", "[camera]") {
+    // The complaint this guards: scrolling turned the Earth, and the farther
+    // out the camera was the more it turned. Zooming towards the pointer is
+    // what did it - holding a point under the cursor means sliding the globe
+    // beneath it, degrees of longitude a notch at a whole-Earth view - so it
+    // is off unless asked for, and off means the focus does not move at all.
     Rig rig;
-    rig.camera->setFreeView(45.0, 8.0, 0.0, 3.0e5);
-    rig.camera->update(nullptr, 1.0 / 60.0);
+    rig.camera->setFreeView(20.0, 10.0, 0.0, 1.2e7, 180.0, 25.0);
+    const auto settle = [&rig] {
+        for (int k = 0; k < 150; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+    };
+    settle();
+    const vsg::dvec3 focusBefore = rig.camera->focus();
+    const vsg::dvec3 viewBefore = vsg::normalize(rig.lookAt->eye - rig.lookAt->center);
+    const double azimuthBefore = rig.camera->azimuthDeg();
 
-    const int cursorX = 620, cursorY = 200;
+    // Pointer well off centre, where zoom-to-cursor would have the most to do.
     auto move = vsg::MoveEvent::create();
-    move->x = cursorX;
-    move->y = cursorY;
+    move->x = 700;
+    move->y = 180;
     rig.camera->apply(*move);
 
+    for (int i = 0; i < 8; ++i) {
+        auto scroll = vsg::ScrollWheelEvent::create();
+        scroll->delta = vsg::vec3(0.0f, 1.0f, 0.0f);
+        rig.camera->apply(*scroll);
+        settle();
+    }
+
+    REQUIRE(rig.camera->distance() < 6.0e6); // it did zoom
+    const vsg::dvec3 viewAfter = vsg::normalize(rig.lookAt->eye - rig.lookAt->center);
+    const double turn = std::acos(std::clamp(vsg::dot(viewBefore, viewAfter), -1.0, 1.0)) * 57.29577951308232;
+    INFO("focus moved " << vsg::length(rig.camera->focus() - focusBefore) << " m, view turned " << turn
+                        << " deg, azimuth " << azimuthBefore << " -> " << rig.camera->azimuthDeg());
+    REQUIRE(vsg::length(rig.camera->focus() - focusBefore) < 1.0);
+    // Nothing measurable: the tilt floor is not reached at these distances,
+    // so the wheel changes distance and only distance.
+    REQUIRE(turn < 0.01);
+}
+
+TEST_CASE("zoom to cursor goes where it is pointed without swinging the bearing", "[camera]") {
+    // Asked for, it behaves as osgEarth's does: the centre slides towards
+    // what the pointer is over and the orientation relative to the ground is
+    // left alone. That trade is deliberate. Holding the point exactly still
+    // instead means re-aiming the camera as the focus slides, and over a
+    // whole-Earth zoom that swung the compass bearing ten degrees, which is
+    // the more disorienting of the two. The point drifts some; the horizon
+    // does not roll.
+    Rig rig;
+    rig.camera->setZoomToCursor(true);
+    rig.camera->setFreeView(45.0, 8.0, 0.0, 3.0e5);
+    const auto settle = [&rig] {
+        for (int k = 0; k < 120; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+    };
+    settle();
+    const double elevationBefore = rig.camera->elevationDeg();
+
+    auto move = vsg::MoveEvent::create();
+    move->x = 620;
+    move->y = 200;
+    rig.camera->apply(*move);
     const auto target = rig.camera->groundUnderCursor();
     REQUIRE(target.has_value());
+    const double reachBefore = vsg::length(*target - rig.camera->focus());
 
-    // The projection has to agree with where the cursor is, or the rest of
-    // this measures nothing.
-    const vsg::dvec2 before = rig.toScreen(*target);
-    REQUIRE_THAT(before.x, Catch::Matchers::WithinAbs(static_cast<double>(cursorX), 2.0));
-    REQUIRE_THAT(before.y, Catch::Matchers::WithinAbs(static_cast<double>(cursorY), 2.0));
-
-    // Fourteen notches in - a six-fold zoom - letting the smoothed distance
-    // settle between each.
     for (int i = 0; i < 14; ++i) {
         auto scroll = vsg::ScrollWheelEvent::create();
         scroll->delta = vsg::vec3(0.0f, 1.0f, 0.0f);
         rig.camera->apply(*scroll);
-        for (int k = 0; k < 120; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+        settle();
     }
 
-    // Measured drift over that zoom is about 2 px across and 4 px down, from
-    // 17 px when the camera was still being rotated by its own focus moving.
-    // What is left is the view's up vector following the focus, and the
-    // target being re-picked from a cursor ray each notch; osgEarth re-picks
-    // per scroll event too.
-    const vsg::dvec2 after = rig.toScreen(*target);
-    INFO("drifted from (" << cursorX << ", " << cursorY << ") to (" << after.x << ", " << after.y << ")");
-    REQUIRE_THAT(after.x, Catch::Matchers::WithinAbs(static_cast<double>(cursorX), 6.0));
-    REQUIRE_THAT(after.y, Catch::Matchers::WithinAbs(static_cast<double>(cursorY), 6.0));
+    // It closed on what the pointer was over ...
+    const double reachAfter = vsg::length(*target - rig.camera->focus());
+    INFO("distance from focus to the pointed-at ground: " << reachBefore << " -> " << reachAfter);
+    REQUIRE(reachAfter < reachBefore * 0.4);
+    // ... without tilting on the way.
+    REQUIRE_THAT(rig.camera->elevationDeg(), Catch::Matchers::WithinAbs(elevationBefore, 0.01));
 }
 
 TEST_CASE("zooming out and back leaves the view where it was", "[camera]") {

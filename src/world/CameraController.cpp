@@ -23,8 +23,7 @@ constexpr double kProbeSpacingM = 150.0;      // ground spacing between terrain-
 constexpr double kEyeClearanceM = 4.0;        // eye height above the sampled terrain at close range ...
 constexpr double kEyeClearanceRatio = 0.03;   // ... plus 3 % of the distance (the drawn LOD gets coarser with range) ...
 constexpr double kEyeClearanceMaxM = 80.0;    // ... up to this
-constexpr double kGlobeRampStartM = 1.0e6;    // beyond this distance the view tilts towards straight down ...
-constexpr double kGlobeRampEndM = 1.5e7;      // ... and is fully top-down here (the whole Earth in view)
+constexpr double kMaxFocusOffset = 45.0 * kDeg; // how far from overhead the focus may sit before the eye climbs
 
 double wrapAngle(double a) {
     while (a > kPi) a -= 2.0 * kPi;
@@ -265,7 +264,7 @@ std::optional<vsg::dvec3> CameraController::groundUnderCursor() const {
 void CameraController::zoomTowardsCursor(double fromDistance, double toDistance) {
     // Only meaningful when the focus is ours to move; following a vehicle the
     // camera belongs to the vehicle.
-    if (!detached() || fromDistance <= 0.0) return;
+    if (!zoomToCursor_ || !detached() || fromDistance <= 0.0) return;
     const auto ground = groundUnderCursor();
     if (!ground) return;
 
@@ -290,7 +289,10 @@ void CameraController::zoomTowardsCursor(double fromDistance, double toDistance)
     // unchanged. That is why this is a straight line to the target and not a
     // path over the globe: the line is what makes the scaling exact, and
     // between two nearby points it dips below the surface by centimetres.
-    moveFocusTo(focus_ + (*ground - focus_) * t, Carry::InWorld);
+    // osgEarth moves its centre and leaves the orientation alone, and so does
+    // this: holding the view fixed in world terms instead swung the compass
+    // bearing as the focus slid, which is the more disorienting of the two.
+    moveFocusTo(focus_ + (*ground - focus_) * t, Carry::WithGround);
 }
 
 void CameraController::apply(vsg::ScrollWheelEvent& e) {
@@ -408,18 +410,23 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
         }
         if (elevation < minElevation) elevation = std::min(minElevation, kMaxElevation);
     }
-    // Far out, tilt towards straight down so the globe is seen from above its
-    // focus rather than from an angle that puts the eye past the horizon.
-    //
-    // This is worked out fresh from the distance every frame and deliberately
-    // not stored. Folding it back into elevation_ made it compound: each frame
-    // tilted the view a fraction further towards vertical, and coming back in
-    // could not undo it, so the wheel turned the Earth - measured at 64
-    // degrees for a trip out to ten times the distance and back.
-    if (distance_ > kGlobeRampStartM) {
-        const double t = std::clamp((distance_ - kGlobeRampStartM) / (kGlobeRampEndM - kGlobeRampStartM), 0.0, 1.0);
-        const double s = t * t * (3.0 - 2.0 * t);
-        elevation = std::max(elevation, elevation_ + (kMaxElevation - elevation_) * s);
+    // Far out the focus drifts towards the limb unless the eye climbs, and
+    // the view ends up grazing the globe edge-on instead of looking at it.
+    // What is needed is that the eye stay roughly overhead, so that is what
+    // is asked for: keep the focus within kMaxFocusOffset of the point the
+    // eye is directly above, and raise the elevation by the least that does
+    // it. Solving the triangle rather than fading towards vertical matters,
+    // because whatever this does, zooming does - the tilt is a function of
+    // distance, so every notch of the wheel turns the view by the difference.
+    // The old smoothstep ran to 89 degrees and turned it 47 degrees over
+    // eight notches from a whole-Earth view; this turns it about 8, and
+    // leaves it alone entirely closer in than half an Earth radius, which is
+    // every distance anyone flies at.
+    const double focusRadius = vsg::length(pos);
+    if (focusRadius > 1.0 && distance_ > 0.5 * focusRadius) {
+        const double sinOffset = std::sin(kMaxFocusOffset);
+        const double overhead = std::acos(std::clamp((focusRadius / distance_) * sinOffset, -1.0, 1.0));
+        elevation = std::max(elevation, std::min(overhead - kMaxFocusOffset, kMaxElevation));
     }
     // Beyond the terrain-collision range the eye must stay above the focus'
     // horizontal plane, or a negative elevation would put it under the globe.

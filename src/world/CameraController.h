@@ -56,6 +56,14 @@ public:
     Mode mode() const noexcept { return mode_; }
     void setGroundQuery(GroundQuery query) { ground_ = std::move(query); }
 
+    /// Zoom towards whatever the pointer is over (osgEarth's zoomToMouse)
+    /// rather than straight in. osgEarth has this on; here it is off, because
+    /// holding a point under the cursor means sliding the globe beneath it,
+    /// and at a whole-Earth view that is degrees of longitude a notch - which
+    /// reads as the wheel spinning the planet.
+    void setZoomToCursor(bool on) noexcept { zoomToCursor_ = on; }
+    bool zoomToCursor() const noexcept { return zoomToCursor_; }
+
     /// Initial/default distance behind and above; also the "reset" state.
     void setChaseOffset(double distanceM, double elevationDeg = 14.0, double azimuthDeg = 180.0);
     /// Detach and look at a geodetic point from a given distance and angles (scripted views, screenshots).
@@ -136,6 +144,7 @@ private:
 
     // Mouse state (window pixels; converted to normalised coordinates per event)
     bool leftDown_ = false, middleDown_ = false;
+    bool zoomToCursor_ = false;
     int lastX_ = 0, lastY_ = 0;
     // Last frame's view vectors, for screen-plane operations.
     vsg::dvec3 viewRight_{1.0, 0.0, 0.0}, viewForward_{0.0, 1.0, 0.0}, viewUp_{0.0, 0.0, 1.0};

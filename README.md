@@ -207,9 +207,10 @@ Viewer keys: `tab` next vehicle, `c` camera (chase / orbit / overview), `-`/`=` 
 `l` vehicle list, `m` monitor, `n` labels, `t` trails, `esc` quit; in demo mode also `space` pause, `.` step,
 `[`/`]` time factor. Mouse, following osgEarth's EarthManipulator: **left drag pans** - detached (free camera,
 or before any vehicle exists) it drags the globe so the ground follows the cursor, including across the poles;
-**middle drag rotates** around the focus; **the wheel zooms towards the point under the cursor** (osgEarth's
-`zoomToMouse`, on by default there too), smoothed, from 6 m up to the whole Earth. osgEarth also puts zoom on
-the right button; here the right button is left alone. The eye never goes below the terrain; `r` resets the view.
+**middle drag rotates** around the focus; **the wheel zooms**, smoothed, from 6 m up to the whole Earth, and
+changes nothing but the distance. osgEarth also zooms towards the pointer (`zoomToMouse`) and puts zoom on the
+right button; here the right button is left alone, and zooming towards the pointer is `--zoom-to-cursor`,
+because holding a point under the cursor means sliding the globe beneath it. The eye never goes below the terrain; `r` resets the view.
 `--no-gui` hides the panels, labels and trails, leaving only the rendered scene - what you want when judging the graphics rather than the instruments. Camera modes (`c`): orbit
 (default, north-referenced), chase (turns with the aircraft), overview, free.
 

@@ -87,6 +87,7 @@ struct ViewerOptions {
     world::EarthSettings earth;
     unsigned terrainZoom = 12;
     bool gui = true;   ///< panels, labels and trails; --no-gui leaves only the rendered scene
+    bool zoomToCursor = false; ///< wheel zooms towards the pointer rather than straight in
     bool sun = true;
     double sunUtcHours = -1.0;
     std::string modelPath;
@@ -137,6 +138,8 @@ void usage(const char* prog) {
         "Scene:\n"
         "  --imagery satellite|osm|bing|none|<url template with {z}/{x}/{y}>   (satellite = Esri World Imagery)\n"
         "  --elevation terrarium|none|<url template>   relief from Terrarium-encoded tiles (default terrarium)\n"
+        "  --zoom-to-cursor         the wheel zooms towards the pointer (osgEarth zoomToMouse); off by "
+        "default because it slides the globe\n"
         "  --no-gui                 no panels, labels or trails: just the rendered scene "
         "(for looking at the graphics)\n"
         "  --no-sun                 headlight instead of sun + ambient lighting\n"
@@ -196,6 +199,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
                 else if (v == "none") o.earth.elevationUrl.clear();
                 else o.earth.elevationUrl = v;
             } else if (a == "--terrain-zoom") o.terrainZoom = static_cast<unsigned>(std::stoul(next()));
+            else if (a == "--zoom-to-cursor") o.zoomToCursor = true;
             else if (a == "--no-gui") o.gui = false;
             else if (a == "--no-sun") o.sun = false;
             else if (a == "--sun-utc") o.sunUtcHours = std::stod(next());
@@ -462,6 +466,7 @@ int main(int argc, char** argv) {
 
     auto camera = world::CameraController::create(viewer.camera(), viewer.lookAt(), ellipsoid);
     camera->setChaseOffset(opt.chaseDistance, opt.chaseElevation, opt.chaseAzimuth);
+    camera->setZoomToCursor(opt.zoomToCursor);
     // Camera collision samples finer tiles than the physics (z14, ~10 m/px):
     // on steep slopes a 38 m/px sample can be tens of metres off the drawn mesh.
     std::shared_ptr<io::TerrainTiles> cameraGround;
