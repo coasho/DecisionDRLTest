@@ -86,6 +86,7 @@ struct ViewerOptions {
     // Scene
     world::EarthSettings earth;
     unsigned terrainZoom = 12;
+    bool gui = true;   ///< panels, labels and trails; --no-gui leaves only the rendered scene
     bool sun = true;
     double sunUtcHours = -1.0;
     std::string modelPath;
@@ -136,6 +137,8 @@ void usage(const char* prog) {
         "Scene:\n"
         "  --imagery satellite|osm|bing|none|<url template with {z}/{x}/{y}>   (satellite = Esri World Imagery)\n"
         "  --elevation terrarium|none|<url template>   relief from Terrarium-encoded tiles (default terrarium)\n"
+        "  --no-gui                 no panels, labels or trails: just the rendered scene "
+        "(for looking at the graphics)\n"
         "  --no-sun                 headlight instead of sun + ambient lighting\n"
         "  --sun-utc <hours>        sun position for this UTC hour (default: the world's time)\n"
         "  --bing-key <key>         Bing Maps key for --imagery bing\n"
@@ -193,6 +196,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
                 else if (v == "none") o.earth.elevationUrl.clear();
                 else o.earth.elevationUrl = v;
             } else if (a == "--terrain-zoom") o.terrainZoom = static_cast<unsigned>(std::stoul(next()));
+            else if (a == "--no-gui") o.gui = false;
             else if (a == "--no-sun") o.sun = false;
             else if (a == "--sun-utc") o.sunUtcHours = std::stod(next());
             else if (a == "--on-ground") o.onGround = true;
@@ -429,6 +433,15 @@ int main(int argc, char** argv) {
         for (std::size_t i = 0; i < slots; ++i) { visuals.setVisible(i, false); trails.setEnabled(i, false); }
 
     auto controls = std::make_shared<ui::ViewerControls>();
+    if (!opt.gui) {
+        // Looking at the graphics, not at the instruments: nothing drawn over
+        // the scene, and nothing drawn in it that is not the world itself.
+        controls->showMonitor.store(false);
+        controls->showVehicleList.store(false);
+        controls->showCameras.store(false);
+        controls->showLabels.store(false);
+        controls->showTrails.store(false);
+    }
     controls->timeFactor.store(opt.timeFactor);
     controls->cameraMode.store(opt.cameraMode);
     auto gui = ui::MonitorGui::create(controls, replay ? "replay " + opt.replayPath : opt.aircraft);

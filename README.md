@@ -208,7 +208,8 @@ Viewer keys: `tab` next vehicle, `c` camera (chase / orbit / overview), `-`/`=` 
 `[`/`]` time factor. Mouse, with OpenSceneGraph's feel: **left drag rotates** around the selected vehicle,
 **middle drag pans**, **wheel zooms** (smoothed, up to the whole Earth); detached (free camera, or before any
 vehicle exists) middle drag moves **the globe** like osgGA's TerrainManipulator, including across the poles;
-the right button is not a camera control; the eye never goes below the terrain; `r` resets the view. Camera modes (`c`): orbit
+the right button is not a camera control; the eye never goes below the terrain; `r` resets the view.
+`--no-gui` hides the panels, labels and trails, leaving only the rendered scene - what you want when judging the graphics rather than the instruments. Camera modes (`c`): orbit
 (default, north-referenced), chase (turns with the aircraft), overview, free.
 
 ## Using the SDK
