@@ -5,10 +5,11 @@
 // minutes. Replace the network with LibTorch (or anything) and keep the loop.
 //
 //   ppo_trainer [--envs 64] [--horizon 64] [--iterations 300] [--action attitude|surfaces|velocity]
-//               [--lr 3e-4] [--seed 1] [--save policy.bin] [--load policy.bin] [--eval]
+//               [--lr 3e-4] [--seed 1] [--save policy.bin] [--load policy.bin] [--eval] [--scenario file.json]
 //
 // While it runs, flightsim-viewer.exe shows the batch (world "ppo").
 
+#include <fsim/Scenario.h>
 #include <fsim/VecEnv.h>
 
 #include <algorithm>
@@ -28,7 +29,7 @@ namespace {
 struct Args {
     unsigned envs = 64, horizon = 64, iterations = 300, epochs = 4, minibatch = 512, hidden = 64, seed = 1;
     double lr = 3e-4, gamma = 0.99, lambda = 0.95, clip = 0.2, valueCoef = 0.5, entropyCoef = 0.0, maxGradNorm = 0.5;
-    std::string action = "attitude", save, load;
+    std::string action = "attitude", save, load, scenario;
     bool eval = false;
 };
 
@@ -52,6 +53,7 @@ Args parse(int argc, char** argv) {
         else if (k == "--save") a.save = next();
         else if (k == "--load") a.load = next();
         else if (k == "--eval") a.eval = true;
+        else if (k == "--scenario") a.scenario = next();
     }
     return a;
 }
@@ -217,11 +219,17 @@ int main(int argc, char** argv) {
     const Args args = parse(argc, argv);
 
     fsim::VecEnvOptions opt;
+    if (!args.scenario.empty()) {
+        // The scenario file sets the world, the environment (wind, time, ...), effects and the
+        // episode template; the command line still picks the batch size, seed and action level.
+        opt = fsim::vecEnvOptions(fsim::loadScenario(args.scenario));
+    } else {
+        opt.maxEpisodeSteps = 600; // 20 s episodes at 30 Hz
+        opt.worldName = "ppo";
+    }
     opt.numEnvs = args.envs;
     opt.seed = args.seed;
     opt.action = args.action;
-    opt.maxEpisodeSteps = 600; // 20 s episodes at 30 Hz
-    opt.worldName = "ppo";
     fsim::VecEnv env(opt);
     const std::size_t N = env.numVehicles(), O = env.observationSize(), A = env.actionSize();
     std::printf("fsim %s PPO: %zu envs, obs %zu, act %zu (%s), horizon %u -> %zu samples/iteration\n", fsim::version(), N, O, A, args.action.c_str(),

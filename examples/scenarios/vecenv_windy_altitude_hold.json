@@ -1,0 +1,21 @@
+// A VecEnv scenario: ppo_trainer --scenario examples/scenarios/vecenv_windy_altitude_hold.json
+// The batch layer takes the world, this environment (a gusty afternoon), the world-wide
+// effects and the first vehicle as the episode template; "vecenv" sets the task and sampling.
+{
+  "world": { "name": "ppo-windy", "seed": 1 },
+  "environment": {
+    "utc": "2026-06-21T15:00:00Z",
+    "wind": { "direction_deg": 240, "speed_ms": 9, "gust_ms": 4, "turbulence": 0.3 }
+  },
+  "effects": [ { "id": "wind_gusts", "mean_interval_s": 15, "peak_ms": 6, "duration_s": 4 } ],
+  "vecenv": {
+    "task": "altitude_heading_hold", "observation": "state", "action": "attitude",
+    "max_episode_steps": 600,
+    "jitter": { "lat_deg": 0.02, "lon_deg": 0.02, "alt_m": 150, "heading_deg": 180, "airspeed_ms": 5 },
+    "target_altitude_delta_m": 300, "target_heading_delta_deg": 60
+  },
+  "vehicles": [
+    { "name": "template", "type": "jsbsim:c172x",
+      "initial": { "lat_deg": 37.6188, "lon_deg": -122.375, "alt_msl_m": 1500, "heading_deg": 0, "airspeed_ms": 60 } }
+  ]
+}

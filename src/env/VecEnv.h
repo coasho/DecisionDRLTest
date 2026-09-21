@@ -9,6 +9,7 @@
 #include "sim/GroundProvider.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <vector>
 
@@ -34,6 +35,7 @@ public:
         std::shared_ptr<sim::GroundProvider> ground; ///< null = flat at 0 m
         bool publish = true;               ///< visible to flightsim-viewer.exe
         bool terrain = false;              ///< physics ground from public elevation tiles
+        std::filesystem::path scenarioPath; ///< optional: its environment and world-wide effects are applied to the world
     };
 
     struct StepResult {

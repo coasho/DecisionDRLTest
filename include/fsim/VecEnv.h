@@ -42,6 +42,7 @@ struct VecEnvOptions {
     double latitudeJitterDeg = 0.02, longitudeJitterDeg = 0.02, altitudeJitterM = 150.0, headingJitterDeg = 180.0, airspeedJitterMs = 5.0;
     double targetAltitudeDeltaM = 300.0, targetHeadingDeltaDeg = 60.0;
     std::string worldName = "vecenv"; ///< viewers attach by this name
+    std::string scenarioPath;         ///< optional scenario file whose environment and world-wide effects apply to the batch
     bool publish = true;
     bool terrain = false;             ///< physics ground from public elevation tiles
 };

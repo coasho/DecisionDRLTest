@@ -42,6 +42,12 @@ comments (`//`, `/* */`) and trailing commas are accepted.
   "effects": [                     // every vehicle, present and future (World::addEffectToAll)
     { "id": "gaussian_sensor_noise", "position_sigma_m": 2, "altitude_sigma_m": 1 }
   ],
+  "vecenv": {                      // optional: the batch layer's settings (see below)
+    "num_envs": 64, "vehicles_per_env": 1, "task": "altitude_heading_hold", "observation": "state", "action": "attitude",
+    "max_episode_steps": 600,
+    "jitter": { "lat_deg": 0.02, "lon_deg": 0.02, "alt_m": 150, "heading_deg": 180, "airspeed_ms": 5 },
+    "target_altitude_delta_m": 300, "target_heading_delta_deg": 60
+  },
   "vehicles": [
     {
       "name": "echelon",           // required; with "count" > 1 the instances are "echelon-1", "echelon-2", ...
@@ -99,6 +105,24 @@ The C ABI mirrors it: `fsim_scenario_load/parse/destroy`,
 `fsim_scenario_world_options`, `fsim_scenario_vehicle_count`,
 `fsim_scenario_apply` ([c_abi.md](c_abi.md)).
 
+## VecEnv from a scenario
+
+`fsim::vecEnvOptions(scenario)` builds `VecEnvOptions` from the `world` and
+`vecenv` sections, taking the **first vehicle** as the episode template (its
+type is the aircraft, its `initial` the centre the jitter is applied around).
+When the scenario came from a file, `VecEnvOptions::scenarioPath` is set and
+the `VecEnv` also applies the file's `environment` and world-wide `effects`
+to its world (the vehicles themselves are the batch's own). The command line
+can still override the batch size, seed or action level afterwards:
+
+```cpp
+fsim::VecEnvOptions opt = fsim::vecEnvOptions(fsim::loadScenario("windy.json"));
+opt.numEnvs = 128;
+fsim::VecEnv env(opt);
+```
+
+`ppo_trainer --scenario examples/scenarios/vecenv_windy_altitude_hold.json`
+trains in a gusty afternoon wind defined entirely by the file. In C,
+`fsim_options.scenario_path` does the same for `fsim_vecenv_create`.
+
 Scenarios describe the **start**; what happens next is the trainer's program.
-`VecEnv` keeps its own compact per-environment scenario (`env::Scenario`) for
-batched episodes with sampled initial conditions.

@@ -15,4 +15,7 @@ class World;
 /// See fsim::applyScenario; returns the created vehicle ids.
 std::vector<std::uint32_t> applyScenario(World& world, const Scenario& scenario);
 
+/// Only the environment and the world-wide effects (what a VecEnv takes from a scenario).
+void applyScenarioWorld(World& world, const Scenario& scenario);
+
 } // namespace fsim::session

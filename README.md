@@ -145,6 +145,7 @@ build/ucrt64-release/bin/minimal_trainer.exe --envs 32 --steps 3000
 # PPO (dependency-free MLP + Adam) learning altitude/heading hold at the attitude level; world "ppo"
 build/ucrt64-release/bin/ppo_trainer.exe --envs 64 --iterations 1000 --save policy.bin
 build/ucrt64-release/bin/ppo_trainer.exe --load policy.bin --eval --envs 16
+build/ucrt64-release/bin/ppo_trainer.exe --scenario examples/scenarios/vecenv_windy_altitude_hold.json   # world, wind, effects from a file
 
 # built-in demo scenario on the viewer's own simulation thread
 build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 8

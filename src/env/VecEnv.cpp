@@ -1,6 +1,7 @@
 #include "env/VecEnv.h"
 
 #include "core/Log.h"
+#include "session/Scenario.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -27,6 +28,7 @@ VecEnv::VecEnv(const Scenario& scenario, const Options& options)
     wo.terrain = options.terrain;
     wo.capacity = std::max<std::uint32_t>(16, static_cast<std::uint32_t>(numVehicles()));
     world_ = std::make_unique<session::World>(wo);
+    if (!options.scenarioPath.empty()) session::applyScenarioWorld(*world_, loadScenario(options.scenarioPath));
 
     const std::size_t n = numVehicles();
     taskStates_.resize(n);

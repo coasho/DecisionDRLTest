@@ -108,6 +108,7 @@ fsim_options toOptions(const fsim::VecEnvOptions& o) {
     c.world_name = o.worldName.c_str();
     c.publish = o.publish ? 1 : 0;
     c.terrain = o.terrain ? 1 : 0;
+    c.scenario_path = o.scenarioPath.empty() ? nullptr : o.scenarioPath.c_str();
     return c;
 }
 
@@ -177,6 +178,7 @@ FSIM_API int fsim_vecenv_create(const fsim_options* options, fsim_vecenv** out) 
         o.workers = options->workers;
         o.publish = options->publish != 0;
         o.terrain = options->terrain != 0;
+        if (options->scenario_path) o.scenarioPath = options->scenario_path;
         auto* h = new fsim_vecenv(toScenario(*options), o);
         h->last = h->env.reset();
         *out = h;

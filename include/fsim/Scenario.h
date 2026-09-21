@@ -19,6 +19,9 @@
 //                    "atmosphere": { "temperature_sea_level_k", "pressure_sea_level_pa", "humidity" },
 //                    "weather": { "visibility_m", "cloud_base_m", "cloud_cover", "precipitation" } },
 //   "effects": [ { "id": "gaussian_sensor_noise", "position_sigma_m": 5 }, ... ],   // every vehicle
+//   "vecenv": { "num_envs", "vehicles_per_env", "task", "observation", "action", "max_episode_steps",
+//               "jitter": { "lat_deg", "lon_deg", "alt_m", "heading_deg", "airspeed_ms" },
+//               "target_altitude_delta_m", "target_heading_delta_deg" },          // batch layer (vecEnvOptions)
 //   "vehicles": [ {
 //       "name" (required), "type": "jsbsim:c172x", "model", "control_divider",
 //       "count": 1, "spacing_m": 200,                 // count > 1: "<name>-1".. abreast, to the right of the heading
@@ -37,6 +40,7 @@
 //                 points [ { lat_deg, lon_deg, alt_msl_m, airspeed_ms, capture_radius_m } ]
 
 #include "fsim/Export.h"
+#include "fsim/VecEnv.h"
 #include "fsim/World.h"
 
 #include <filesystem>
@@ -63,13 +67,25 @@ struct ScenarioVehicle {
     std::vector<EffectSpec> effects;
 };
 
+/// The batch layer's section: how VecEnv samples episodes (see vecenv.md).
+struct ScenarioVecEnv {
+    bool present = false;
+    unsigned numEnvs = 1, vehiclesPerEnv = 1;
+    std::string task = "altitude_heading_hold", observation = "state", action = "surfaces";
+    unsigned maxEpisodeSteps = 2000;
+    double latitudeJitterDeg = 0.02, longitudeJitterDeg = 0.02, altitudeJitterM = 150.0, headingJitterDeg = 180.0, airspeedJitterMs = 5.0;
+    double targetAltitudeDeltaM = 300.0, targetHeadingDeltaDeg = 60.0;
+};
+
 struct Scenario {
     std::string source;          ///< file name, for messages
+    std::filesystem::path path;  ///< the file it was loaded from (empty when parsed from memory)
     WorldOptions world;
     bool hasEnvironment = false;
     EnvironmentState environment; ///< applied when `hasEnvironment` (epochUtcSeconds 0 = leave the clock alone)
     std::vector<EffectSpec> effects; ///< for every vehicle, present and future
     std::vector<ScenarioVehicle> vehicles;
+    ScenarioVecEnv vecenv;
 };
 
 /// Read and parse a scenario file. Throws fsim::Error with "<file>:<line>:<col>: ..." on a bad document.
@@ -83,8 +99,14 @@ FSIM_API Scenario parseScenario(std::string_view json, std::string_view source =
 /// target is unknown (vehicles created so far remain).
 FSIM_API std::vector<Vehicle> applyScenario(World& world, const Scenario& scenario);
 
-/// The world options of a scenario as a JSON document (the inverse of the
-/// "world" section), for tools that echo or edit scenarios.
+/// The scenario back as a compact JSON document (a Scenario can be built or
+/// edited in code and written out).
 FSIM_API std::string dumpScenario(const Scenario& scenario);
+
+/// VecEnv options from a scenario: the "world" section, the "vecenv" section
+/// and the first vehicle's type and initial state as the episode template.
+/// `scenarioPath` is set when the scenario came from a file, so the VecEnv
+/// also applies its environment and world-wide effects.
+FSIM_API VecEnvOptions vecEnvOptions(const Scenario& scenario);
 
 } // namespace fsim

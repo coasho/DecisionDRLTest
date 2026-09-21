@@ -274,6 +274,28 @@ Scenario parseScenario(std::string_view json, std::string_view source) {
 
         parseEffects(doc.child("effects"), sc.effects, "effects");
 
+        const Json& ve = doc.child("vecenv");
+        if (!ve.isNull()) {
+            if (!ve.isObject()) throw Error("'vecenv' must be an object");
+            auto& v = sc.vecenv;
+            v.present = true;
+            v.numEnvs = static_cast<unsigned>(ve.number("num_envs", v.numEnvs));
+            v.vehiclesPerEnv = static_cast<unsigned>(ve.number("vehicles_per_env", v.vehiclesPerEnv));
+            v.task = ve.string("task", v.task);
+            v.observation = ve.string("observation", v.observation);
+            v.action = ve.string("action", v.action);
+            v.maxEpisodeSteps = static_cast<unsigned>(ve.number("max_episode_steps", v.maxEpisodeSteps));
+            const Json& jitter = ve.child("jitter");
+            v.latitudeJitterDeg = jitter.number("lat_deg", v.latitudeJitterDeg);
+            v.longitudeJitterDeg = jitter.number("lon_deg", v.longitudeJitterDeg);
+            v.altitudeJitterM = jitter.number("alt_m", v.altitudeJitterM);
+            v.headingJitterDeg = jitter.number("heading_deg", v.headingJitterDeg);
+            v.airspeedJitterMs = jitter.number("airspeed_ms", v.airspeedJitterMs);
+            v.targetAltitudeDeltaM = ve.number("target_altitude_delta_m", v.targetAltitudeDeltaM);
+            v.targetHeadingDeltaDeg = ve.number("target_heading_delta_deg", v.targetHeadingDeltaDeg);
+            if (v.numEnvs == 0 || v.vehiclesPerEnv == 0) throw Error("'vecenv.num_envs' and 'vecenv.vehicles_per_env' must be at least 1");
+        }
+
         const Json& vehicles = doc.child("vehicles");
         if (!vehicles.isNull()) {
             if (!vehicles.isArray()) throw Error("'vehicles' must be an array");
@@ -320,6 +342,7 @@ Scenario loadScenario(const std::filesystem::path& path) {
     std::stringstream ss;
     ss << in.rdbuf();
     Scenario sc = parseScenario(ss.str(), path.filename().string());
+    sc.path = std::filesystem::absolute(path);
     // Relative paths in the file are relative to the file.
     const auto dir = path.parent_path();
     auto relativeTo = [&](std::string& p) {
@@ -362,6 +385,17 @@ std::string dumpScenario(const Scenario& sc) {
         doc.set("environment", std::move(env));
     }
     if (!sc.effects.empty()) doc.set("effects", dumpEffects(sc.effects));
+    if (sc.vecenv.present) {
+        const auto& v = sc.vecenv;
+        Json ve;
+        ve.set("num_envs", static_cast<double>(v.numEnvs)).set("vehicles_per_env", static_cast<double>(v.vehiclesPerEnv));
+        ve.set("task", v.task).set("observation", v.observation).set("action", v.action);
+        ve.set("max_episode_steps", static_cast<double>(v.maxEpisodeSteps));
+        ve.set("jitter", Json().set("lat_deg", v.latitudeJitterDeg).set("lon_deg", v.longitudeJitterDeg).set("alt_m", v.altitudeJitterM)
+                                 .set("heading_deg", v.headingJitterDeg).set("airspeed_ms", v.airspeedJitterMs));
+        ve.set("target_altitude_delta_m", v.targetAltitudeDeltaM).set("target_heading_delta_deg", v.targetHeadingDeltaDeg);
+        doc.set("vecenv", std::move(ve));
+    }
     Json vehicles;
     for (const auto& sv : sc.vehicles) {
         Json v;
@@ -385,9 +419,49 @@ std::string dumpScenario(const Scenario& sc) {
     return doc.dump();
 }
 
+VecEnvOptions vecEnvOptions(const Scenario& sc) {
+    VecEnvOptions o;
+    const auto& w = sc.world;
+    o.workers = w.workers;
+    o.seed = w.seed;
+    o.jsbsimRoot = w.jsbsimRoot;
+    o.dt = w.dt;
+    o.frameSkip = w.frameSkip;
+    o.worldName = w.name;
+    o.publish = w.publish;
+    o.terrain = w.terrain;
+    const auto& v = sc.vecenv;
+    o.numEnvs = v.numEnvs;
+    o.vehiclesPerEnv = v.vehiclesPerEnv;
+    o.task = v.task;
+    o.observation = v.observation;
+    o.action = v.action;
+    o.maxEpisodeSteps = v.maxEpisodeSteps;
+    o.latitudeJitterDeg = v.latitudeJitterDeg;
+    o.longitudeJitterDeg = v.longitudeJitterDeg;
+    o.altitudeJitterM = v.altitudeJitterM;
+    o.headingJitterDeg = v.headingJitterDeg;
+    o.airspeedJitterMs = v.airspeedJitterMs;
+    o.targetAltitudeDeltaM = v.targetAltitudeDeltaM;
+    o.targetHeadingDeltaDeg = v.targetHeadingDeltaDeg;
+    if (!sc.vehicles.empty()) {
+        // The first vehicle is the episode template: its aircraft and initial state.
+        const auto& t = sc.vehicles.front().spec;
+        const auto colon = t.type.find(':');
+        o.aircraft = colon == std::string::npos ? t.type : t.type.substr(colon + 1);
+        o.latitudeDeg = t.initial.latitudeDeg;
+        o.longitudeDeg = t.initial.longitudeDeg;
+        o.altitudeM = t.initial.altitudeMslM;
+        o.headingDeg = t.initial.headingDeg;
+        o.airspeedMs = t.initial.airspeedTrueMs;
+    }
+    o.scenarioPath = sc.path.string();
+    return o;
+}
+
 namespace session {
 
-std::vector<std::uint32_t> applyScenario(session::World& world, const Scenario& sc) {
+void applyScenarioWorld(session::World& world, const Scenario& sc) {
     if (sc.hasEnvironment) {
         auto e = sc.environment;
         if (e.epochUtcSeconds <= 0.0) e.epochUtcSeconds = world.environment().epochUtcSeconds; // keep the clock
@@ -399,6 +473,10 @@ std::vector<std::uint32_t> applyScenario(session::World& world, const Scenario& 
         if (!effects::createBuiltinEffect(spec.id, spec.params)) throw Error(sc.source + ": unknown effect '" + spec.id + "'");
         world.addEffectToAll([spec] { return effects::createBuiltinEffect(spec.id, spec.params); });
     }
+}
+
+std::vector<std::uint32_t> applyScenario(session::World& world, const Scenario& sc) {
+    applyScenarioWorld(world, sc);
 
     struct Pending {
         std::uint32_t id;

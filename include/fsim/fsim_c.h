@@ -51,6 +51,7 @@ typedef struct fsim_options {
     const char* world_name;     /* published world name for viewers ("vecenv") */
     int32_t publish;            /* 0 = invisible to viewers */
     int32_t terrain;            /* 1 = physics ground from public elevation tiles */
+    const char* scenario_path;  /* NULL, or a scenario file whose environment and world-wide effects apply to the batch */
 } fsim_options;
 
 /* Library-owned buffers, vehicle-major: index = env * K + vehicle. */

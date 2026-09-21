@@ -3,6 +3,7 @@
 #include "session/Scenario.h"
 
 #include "core/Json.h"
+#include "env/VecEnv.h"
 #include "session/World.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -10,6 +11,8 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <string>
 
 using namespace fsim;
@@ -130,4 +133,57 @@ TEST_CASE("scenario: applied to a world", "[scenario][world]") {
     Scenario bad = parseScenario(R"({ "vehicles": [ { "name": "x", "command": { "level": "behavior", "id": "pursuit", "target": "nobody" } } ] })", "bad.json");
     REQUIRE_THROWS_WITH(session::applyScenario(w, bad), ContainsSubstring("unknown target 'nobody'"));
     REQUIRE(w.vehicleCount() == 5);
+}
+
+TEST_CASE("scenario: vecenv section and VecEnv options", "[scenario][env]") {
+    const char* text = R"({
+      "world": { "name": "batch", "seed": 9, "publish": false, "terrain": false },
+      "environment": { "wind": { "direction_deg": 240, "speed_ms": 9 } },
+      "effects": [ { "id": "wind_gusts", "peak_ms": 3 } ],
+      "vecenv": { "num_envs": 4, "vehicles_per_env": 2, "task": "level_flight", "action": "attitude", "max_episode_steps": 50,
+                  "jitter": { "alt_m": 10, "heading_deg": 5 }, "target_altitude_delta_m": 100 },
+      "vehicles": [ { "name": "t", "type": "jsbsim:c172x", "initial": { "lat_deg": 40, "lon_deg": -100, "alt_msl_m": 2000, "heading_deg": 180, "airspeed_ms": 55 } } ]
+    })";
+    const auto dir = std::filesystem::temp_directory_path() / "fsim-test-vecenv-scenario.json";
+    { std::ofstream(dir) << text; }
+
+    Scenario sc = loadScenario(dir);
+    REQUIRE(sc.vecenv.present);
+    REQUIRE(sc.path == std::filesystem::absolute(dir));
+    VecEnvOptions o = vecEnvOptions(sc);
+    REQUIRE(o.numEnvs == 4);
+    REQUIRE(o.vehiclesPerEnv == 2);
+    REQUIRE(o.task == "level_flight");
+    REQUIRE(o.action == "attitude");
+    REQUIRE(o.maxEpisodeSteps == 50);
+    REQUIRE(o.altitudeJitterM == 10.0);
+    REQUIRE(o.headingJitterDeg == 5.0);
+    REQUIRE(o.latitudeJitterDeg == 0.02); // untouched default
+    REQUIRE(o.targetAltitudeDeltaM == 100.0);
+    REQUIRE(o.aircraft == "c172x");
+    REQUIRE(o.latitudeDeg == 40.0);
+    REQUIRE(o.altitudeM == 2000.0);
+    REQUIRE(o.headingDeg == 180.0);
+    REQUIRE(o.worldName == "batch");
+    REQUIRE(o.seed == 9);
+    REQUIRE_FALSE(o.publish);
+    REQUIRE(o.scenarioPath == sc.path.string());
+    REQUIRE(parseScenario(dumpScenario(sc), "d").vecenv.maxEpisodeSteps == 50);
+
+    // The batch layer takes the environment and the world-wide effects from the file.
+    env::Scenario es;
+    es.jsbsimRoot = FSIM_TEST_JSBSIM_ROOT;
+    es.worldName = "batch-test";
+    es.maxEpisodeSteps = 20;
+    env::VecEnv::Options eo;
+    eo.numEnvs = 1;
+    eo.workers = 1;
+    eo.publish = false;
+    eo.scenarioPath = dir;
+    env::VecEnv env(es, eo);
+    REQUIRE(env.world().environment().windSpeedMs == 9.0);
+    REQUIRE(env.world().environment().windDirectionDeg == 240.0);
+    env.reset();
+    env.step(std::vector<float>(env.numVehicles() * env.actionSize(), 0.0f));
+    std::filesystem::remove(dir);
 }
