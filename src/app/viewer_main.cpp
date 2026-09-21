@@ -467,14 +467,23 @@ int main(int argc, char** argv) {
     auto camera = world::CameraController::create(viewer.camera(), viewer.lookAt(), ellipsoid);
     camera->setChaseOffset(opt.chaseDistance, opt.chaseElevation, opt.chaseAzimuth);
     camera->setZoomToCursor(opt.zoomToCursor);
-    // Camera collision samples finer tiles than the physics (z14, ~10 m/px):
-    // on steep slopes a 38 m/px sample can be tens of metres off the drawn mesh.
+    // The camera must be told the same ground the vertex shader displaces the
+    // mesh with, or it clears a hill that is not the one on screen. VSG applies
+    // elevation as a displacement map, so there is no CPU geometry to intersect
+    // the way osgEarth does - the only way for the two to agree is to read the
+    // same tiles at the same level. Asking one level coarser than the renderer
+    // (z14 against z15) smoothed the peaks away: measured over the Sierra the
+    // camera under-read the drawn ground by 14 m, and the line of sight passed
+    // 2-4 m under the surface at Yosemite, Everest and the Bernese Alps while
+    // believing itself clear. Hence elevationMaxLevel here, not a number.
     std::shared_ptr<io::TerrainTiles> cameraGround;
     if (terrain) {
         io::TerrainTiles::Options to;
         to.urlTemplate = opt.earth.elevationUrl;
-        to.zoom = 14;
-        to.cacheTiles = 64;
+        to.zoom = opt.earth.elevationMaxLevel;
+        // A level-15 tile covers a quarter of a level-14 one, so the working set
+        // needs the room: 128 tiles is ~33 MB and a few hundred km of sight line.
+        to.cacheTiles = 128;
         cameraGround = std::make_shared<io::TerrainTiles>(to);
         camera->setGroundQuery([cameraGround](double lat, double lon) { return cameraGround->cachedHeightAboveEllipsoidM(lat, lon); });
     }
