@@ -81,6 +81,7 @@ int main(int argc, char** argv) {
         const unsigned camNose = sensors.addCamera(lead, nose);
         vision::CameraSpec chase = nose;
         chase.offsetBodyM[0] = -25.0; chase.offsetBodyM[2] = -6.0; chase.pitchDeg = -10.0;
+        chase.hideOwnVehicle = false; // a chase view wants the aircraft in frame
         const unsigned camChase = sensors.addCamera(lead, chase);
         vision::CameraSpec down = nose;
         down.pitchDeg = -90.0; down.fovDeg = 60.0;
