@@ -9,4 +9,7 @@ license = "MIT"
 name = "rust_trainer"
 path = "src/main.rs"
 
+[features]
+vision = []   # link fsim_vision.dll: `cargo run --release --features vision -- camera`
+
 [dependencies]

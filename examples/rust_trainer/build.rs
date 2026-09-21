@@ -11,6 +11,10 @@ fn main() {
     let bin = env::var("FSIM_BIN_DIR").map(PathBuf::from).unwrap_or_else(|_| build.join("bin"));
     println!("cargo:rustc-link-search=native={}", lib.display());
     println!("cargo:rustc-link-lib=dylib=fsim");
+    let vision = env::var("CARGO_FEATURE_VISION").is_ok();
+    if vision {
+        println!("cargo:rustc-link-lib=dylib=fsim_vision");
+    }
     println!("cargo:rerun-if-env-changed=FSIM_BUILD_DIR");
     println!("cargo:rerun-if-env-changed=FSIM_LIB_DIR");
     println!("cargo:rerun-if-env-changed=FSIM_BIN_DIR");
@@ -18,12 +22,24 @@ fn main() {
     // target/<profile>/ is three levels up from OUT_DIR.
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());
     let target_dir = out.ancestors().nth(3).map(PathBuf::from).unwrap_or(out.clone());
-    for dll in ["libfsim.dll", "libJSBSim.dll"] {
-        let src = bin.join(dll);
-        if src.exists() {
-            let _ = fs::copy(&src, target_dir.join(dll));
-        } else {
+    let mut dlls = vec!["libfsim.dll", "libJSBSim.dll"];
+    if vision {
+        dlls.push("libfsim_vision.dll");
+    }
+    for dll in &dlls {
+        println!("cargo:rerun-if-changed={}", bin.join(dll).display()); // re-copy after a CMake rebuild
+        if !bin.join(dll).exists() {
             println!("cargo:warning={} not found in {}; set FSIM_BIN_DIR or add it to PATH", dll, bin.display());
+        }
+    }
+    // Every DLL in the fsim bin directory: fsim, JSBSim, fsim_vision and, after
+    // `cmake --build --target deploy`, all their MSYS2 dependencies.
+    if let Ok(entries) = fs::read_dir(&bin) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().map(|x| x.eq_ignore_ascii_case("dll")).unwrap_or(false) {
+                let _ = fs::copy(&p, target_dir.join(p.file_name().unwrap()));
+            }
         }
     }
     // The DLLs are built with MSYS2 UCRT64 GCC and need its runtime; Rust's own MinGW does not ship it.

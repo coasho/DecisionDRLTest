@@ -61,6 +61,8 @@ FSIM_VISION_API const uint8_t* fsim_vision_image(const fsim_vision* vision, uint
 /* height x width floats, metres along the view axis; NULL unless the camera was added with depth. */
 FSIM_VISION_API const float* fsim_vision_depth(const fsim_vision* vision, uint32_t camera, uint32_t* width, uint32_t* height);
 FSIM_VISION_API int fsim_vision_save_png(const fsim_vision* vision, uint32_t camera, const char* path);
+/* Run `frames` frames without reading back so terrain tiles stream in (after a jump to a new region). */
+FSIM_VISION_API int fsim_vision_settle(fsim_vision* vision, uint32_t frames);
 FSIM_VISION_API double fsim_vision_last_render_ms(const fsim_vision* vision);
 
 #ifdef __cplusplus

@@ -142,6 +142,14 @@ FSIM_VISION_API int fsim_vision_save_png(const fsim_vision* vision, uint32_t cam
     return vision->sensors->savePng(camera, path) ? FSIM_OK : fail(FSIM_ERROR, std::string("fsim_vision_save_png: cannot write ") + path);
 }
 
+FSIM_VISION_API int fsim_vision_settle(fsim_vision* vision, uint32_t frames) {
+    if (!vision) return FSIM_INVALID_ARGUMENT;
+    return guard("fsim_vision_settle", [&] {
+        vision->sensors->settle(frames);
+        return static_cast<int>(FSIM_OK);
+    });
+}
+
 FSIM_VISION_API double fsim_vision_last_render_ms(const fsim_vision* vision) { return vision ? vision->sensors->lastRenderMs() : 0.0; }
 
 } // extern "C"

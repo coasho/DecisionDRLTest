@@ -6,6 +6,8 @@
 //!                            Start flightsim-viewer.exe at any time to watch.
 //!   `rust_trainer vecenv`  - the batch layer: 32 environments stepped with the
 //!                            same PD baseline as examples/minimal_trainer.
+//!   `rust_trainer camera`  - (feature `vision`) a nose camera with depth on a
+//!                            vehicle over Yosemite, images saved as PNG.
 //!
 //! Build: `cargo run --release -- world` from this directory after the CMake
 //! build (fsim.dll and JSBSim.dll are copied next to the executable; set
@@ -13,6 +15,8 @@
 //! work with the `stable-x86_64-pc-windows-gnu` target.
 
 mod ffi;
+#[cfg(feature = "vision")]
+mod vision_ffi;
 
 use std::ffi::{CStr, CString};
 use std::mem::MaybeUninit;
@@ -70,6 +74,16 @@ impl World {
 
     fn state(&self, id: u32) -> Option<&ffi::fsim_vehicle_state> {
         unsafe { ffi::fsim_vehicle_state_ptr(self.0, id).as_ref() }
+    }
+
+    fn set_time_utc(&mut self, unix_seconds: f64) {
+        unsafe {
+            let mut e = MaybeUninit::<ffi::fsim_environment>::zeroed().assume_init();
+            e.struct_size = std::mem::size_of::<ffi::fsim_environment>() as u32;
+            ffi::fsim_world_get_environment(self.0, &mut e);
+            e.epoch_utc_seconds = unix_seconds - self.time();
+            ffi::fsim_world_set_environment(self.0, &e);
+        }
     }
 
     fn set_wind(&mut self, from_deg: f64, speed_ms: f64) {
@@ -227,13 +241,78 @@ fn demo_vecenv(steps: usize) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(feature = "vision")]
+fn demo_camera(shots: u32) -> Result<(), String> {
+    use std::ffi::CString;
+    let mut world = World::new("rust-camera")?;
+    world.set_time_utc(1782063000.0); // 2026-06-21T17:30:00Z: afternoon sun over Yosemite
+    let lead = world.create_vehicle("lead", 37.72, -119.55, 3200.0, 90.0, 55.0)?;
+    let hold = unsafe { ffi::fsim_hold() };
+    let att = ffi::fsim_attitude_command { roll_rad: 0.0, pitch_rad: 0.03, heading_rad: hold, max_bank_rad: 0.8, throttle: hold, airspeed_ms: hold };
+    unsafe {
+        ffi::fsim_vehicle_command_attitude(world.0, lead, &att);
+        let mut o = MaybeUninit::<vision_ffi::fsim_vision_options>::uninit();
+        vision_ffi::fsim_vision_options_init(o.as_mut_ptr());
+        let o = o.assume_init();
+        let mut vision = std::ptr::null_mut();
+        if vision_ffi::fsim_vision_create(world.0, &o, &mut vision) != ffi::FSIM_OK {
+            return Err(ffi::last_error());
+        }
+        let mut c = MaybeUninit::<vision_ffi::fsim_camera_spec>::uninit();
+        vision_ffi::fsim_camera_spec_init(c.as_mut_ptr());
+        let mut c = c.assume_init();
+        c.width = 320;
+        c.height = 240;
+        c.fov_deg = 70.0;
+        c.offset_body_m[0] = 2.0;
+        c.depth = 1;
+        let mut cam = 0u32;
+        if vision_ffi::fsim_vision_add_camera(vision, lead, &c, &mut cam) != ffi::FSIM_OK {
+            return Err(ffi::last_error());
+        }
+        let step_s = ffi::fsim_world_step_seconds(world.0);
+        let steps_per_shot = (2.0 / step_s) as u32;
+        std::fs::create_dir_all("captures").map_err(|e| e.to_string())?;
+        // Let the terrain tiles around the start stream in before the first image.
+        vision_ffi::fsim_vision_render(vision);
+        vision_ffi::fsim_vision_settle(vision, 60);
+        for shot in 0..shots {
+            world.step(steps_per_shot);
+            if vision_ffi::fsim_vision_render(vision) != ffi::FSIM_OK {
+                return Err(ffi::last_error());
+            }
+            let (mut w, mut h) = (0u32, 0u32);
+            let rgb = vision_ffi::fsim_vision_image(vision, cam, &mut w, &mut h);
+            let pixels = std::slice::from_raw_parts(rgb, (w * h * 3) as usize);
+            let depth = vision_ffi::fsim_vision_depth(vision, cam, &mut w, &mut h);
+            let centre_depth = *depth.add((h / 2 * w + w / 2) as usize);
+            let mean: f64 = pixels.iter().map(|&p| p as f64).sum::<f64>() / pixels.len() as f64;
+            let path = CString::new(format!("captures/rust_nose_{shot:03}.png")).unwrap();
+            vision_ffi::fsim_vision_save_png(vision, cam, path.as_ptr());
+            println!(
+                "t={:5.1} s  {}x{}  mean intensity {:5.1}  depth at centre {:8.1} m  render {:.1} ms",
+                world.time(),
+                w,
+                h,
+                mean,
+                centre_depth,
+                vision_ffi::fsim_vision_last_render_ms(vision)
+            );
+        }
+        vision_ffi::fsim_vision_destroy(vision);
+    }
+    Ok(())
+}
+
 fn main() {
     let mode = std::env::args().nth(1).unwrap_or_else(|| "world".to_string());
     println!("fsim {} (C ABI {}) from Rust", version(), unsafe { ffi::fsim_abi_version() });
     let result = match mode.as_str() {
         "world" => demo_world(30.0),
         "vecenv" => demo_vecenv(3000),
-        other => Err(format!("unknown mode '{other}' (world | vecenv)")),
+        #[cfg(feature = "vision")]
+        "camera" => demo_camera(5),
+        other => Err(format!("unknown mode '{other}' (world | vecenv | camera)")),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");

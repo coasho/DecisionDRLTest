@@ -10,6 +10,7 @@ the same throughput.
 cd examples/rust_trainer
 cargo run --release -- world     # two aircraft at the attitude and velocity levels; start flightsim-viewer.exe to watch
 cargo run --release -- vecenv    # 32 environments, PD policy, ~0.7M vehicle-steps/s
+cargo run --release --features vision -- camera   # a nose camera with depth over Yosemite -> captures/*.png
 ```
 
 `build.rs` links `libfsim.dll.a` from `build/ucrt64-release/lib` and copies
@@ -18,4 +19,5 @@ cargo run --release -- vecenv    # 32 environments, PD policy, ~0.7M vehicle-ste
 the locations). Use the `stable-x86_64-pc-windows-gnu` toolchain: the DLLs
 are MinGW builds and the import library is a GNU archive.
 
-Cameras work the same way through `fsim_vision_c.h` (link `fsim_vision`).
+Cameras (`src/vision_ffi.rs`, feature `vision`) link `fsim_vision.dll` the same way; run
+`cmake --build --preset ucrt64-release --target deploy` first so its dependencies are in `bin/`.
