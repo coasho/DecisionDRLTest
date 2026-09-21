@@ -245,6 +245,48 @@ FSIM_API int fsim_comm_attach_protocol(fsim_world* world, uint32_t node, const c
 FSIM_API int fsim_comm_attach_udp_bridge(fsim_world* world, uint32_t node, uint16_t local_port, const char* remote_host, uint16_t remote_port);
 
 /* ---------------------------------------------------------------------------
+ * Recordings (design 9.5): an .fsrec file written by fsim_world_options.record_path,
+ * read back as frames of samples (one per live vehicle) and vehicle events.
+ * All pointers are owned by the recording handle.
+ * ------------------------------------------------------------------------- */
+
+typedef struct fsim_recording fsim_recording;
+
+/* Same layout as fsim::ControlInputs (checked at build time). */
+typedef struct fsim_control_inputs {
+    double aileron, elevator, rudder;
+    double throttle[FSIM_MAX_ENGINES];
+    double flaps, gear_down, brake_left, brake_right;
+} fsim_control_inputs;
+
+typedef struct fsim_recorded_sample {
+    uint32_t slot;
+    fsim_vehicle_state state;
+    fsim_control_inputs inputs;
+} fsim_recorded_sample;
+
+typedef struct fsim_recorded_event {
+    uint32_t slot, id;
+    uint64_t generation;
+    int32_t alive;
+    int32_t control_level;
+    const char* name;
+    const char* type;
+    const char* model;
+    double initial_latitude_deg, initial_longitude_deg, initial_altitude_msl_m, initial_heading_deg;
+} fsim_recorded_event;
+
+FSIM_API int fsim_recording_load(const char* path, fsim_recording** out);
+FSIM_API void fsim_recording_destroy(fsim_recording* recording);
+FSIM_API uint32_t fsim_recording_frame_count(const fsim_recording* recording);
+FSIM_API double fsim_recording_frame_time(const fsim_recording* recording, uint32_t frame);
+FSIM_API const fsim_recorded_sample* fsim_recording_samples(const fsim_recording* recording, uint32_t frame, uint32_t* count);
+FSIM_API const fsim_recorded_event* fsim_recording_events(const fsim_recording* recording, uint32_t frame, uint32_t* count);
+FSIM_API const char* fsim_recording_world_name(const fsim_recording* recording);
+FSIM_API double fsim_recording_dt(const fsim_recording* recording);
+FSIM_API int32_t fsim_recording_frame_skip(const fsim_recording* recording);
+
+/* ---------------------------------------------------------------------------
  * Scenario files (design 9.13): a JSON document describing the world, the
  * environment and the vehicles with their initial commands and effects
  * (format: include/fsim/Scenario.h). Strings returned through

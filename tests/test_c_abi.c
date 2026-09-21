@@ -219,6 +219,47 @@ int main(int argc, char** argv) {
         fsim_scenario_destroy(NULL);
         fsim_world_destroy(world);
     }
+    /* Recordings: write one through a world, read it back. */
+    {
+        fsim_world_options wo;
+        fsim_world* world = NULL;
+        fsim_vehicle_spec spec;
+        uint32_t id = 0, n = 0;
+        fsim_recording* rec = NULL;
+        const fsim_recorded_sample* samples;
+        const fsim_recorded_event* events;
+        fsim_world_options_init(&wo);
+        wo.name = "c-record";
+        wo.publish = 0;
+        wo.workers = 1;
+        wo.pin_workers = 0;
+        wo.jsbsim_root = argc > 1 ? argv[1] : NULL;
+        wo.record_path = "c-abi-test.fsrec";
+        CHECK(fsim_world_create(&wo, &world) == FSIM_OK);
+        fsim_vehicle_spec_init(&spec);
+        spec.name = "rec";
+        spec.altitude_msl_m = 1200.0;
+        spec.airspeed_ms = 60.0;
+        CHECK(fsim_world_create_vehicle(world, &spec, &id) == FSIM_OK);
+        CHECK(fsim_world_step(world, 12) == FSIM_OK);
+        fsim_world_destroy(world);
+        CHECK(fsim_recording_load("no-such.fsrec", &rec) != FSIM_OK);
+        CHECK(fsim_recording_load("c-abi-test.fsrec", &rec) == FSIM_OK);
+        CHECK(fsim_recording_frame_count(rec) == 12);
+        CHECK(strcmp(fsim_recording_world_name(rec), "c-record") == 0);
+        CHECK(fsim_recording_frame_skip(rec) == 4);
+        CHECK(fsim_recording_frame_time(rec, 11) > fsim_recording_frame_time(rec, 0));
+        samples = fsim_recording_samples(rec, 5, &n);
+        CHECK(samples != NULL && n == 1);
+        CHECK(samples[0].slot == 0 && fabs(samples[0].state.altitude_msl_m - 1200.0) < 50.0);
+        CHECK(samples[0].inputs.gear_down >= 0.0);
+        events = fsim_recording_events(rec, 0, &n);
+        CHECK(events != NULL && n == 1 && strcmp(events[0].name, "rec") == 0 && events[0].alive == 1);
+        CHECK(fsim_recording_samples(rec, 99, &n) == NULL && n == 0);
+        fsim_recording_destroy(rec);
+        fsim_recording_destroy(NULL);
+        remove("c-abi-test.fsrec");
+    }
     printf("c abi ok\n");
     return 0;
 }
