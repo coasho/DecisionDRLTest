@@ -102,7 +102,7 @@ struct Sensors::Impl {
                 m.lastBodyToEcef = world::bodyToEcef(v.state());
                 m.posed = true;
             }
-            if (!m.posed) continue;
+            if (!m.posed || !offscreen.active(static_cast<unsigned>(i))) continue;
             const vsg::dmat4 cam = m.lastBodyToEcef * m.mount;
             const vsg::dvec3 eye = cam * vsg::dvec3(0.0, 0.0, 0.0);
             const vsg::dvec3 forward = cam * vsg::dvec3(1.0, 0.0, 0.0);
@@ -196,7 +196,6 @@ Sensors::Sensors(World& world, const Options& options) : impl_(std::make_unique<
 Sensors::~Sensors() = default;
 
 unsigned Sensors::addCamera(const Vehicle& vehicle, const CameraSpec& spec) {
-    if (impl_->compiled) throw Error("vision: cameras must be added before the first render()");
     Impl::Mount m;
     m.vehicleId = vehicle.id();
     m.spec = spec;
@@ -219,18 +218,16 @@ unsigned Sensors::addCamera(const Vehicle& vehicle, const CameraSpec& spec) {
 
 std::size_t Sensors::cameraCount() const noexcept { return impl_->mounts.size(); }
 
+void Sensors::removeCamera(unsigned camera) { impl_->offscreen.removeCamera(camera); }
+
 void Sensors::render() {
     const auto t0 = std::chrono::steady_clock::now();
     try {
-        if (!impl_->compiled) {
-            if (impl_->mounts.empty()) throw Error("vision: no cameras");
-            std::string error;
-            if (!impl_->offscreen.compile(&error)) throw Error("vision: " + error);
-            impl_->compiled = true;
-        }
+        if (impl_->offscreen.activeCameraCount() == 0) throw Error("vision: no cameras");
         impl_->syncVehicles();
         impl_->aim();
-        impl_->offscreen.render();
+        impl_->offscreen.render(); // compiles first when cameras were added or removed
+        impl_->compiled = true;
     } catch (const vsg::Exception& e) {
         rethrow("render", e);
     }
@@ -251,7 +248,7 @@ void Sensors::settle(unsigned frames) {
 
 Image Sensors::image(unsigned camera) const noexcept {
     Image img;
-    if (camera >= impl_->offscreen.cameraCount()) return img;
+    if (!impl_->offscreen.active(camera)) return img;
     img.rgb = impl_->offscreen.rgb(camera).data();
     img.width = impl_->offscreen.width(camera);
     img.height = impl_->offscreen.height(camera);
@@ -260,7 +257,7 @@ Image Sensors::image(unsigned camera) const noexcept {
 
 DepthImage Sensors::depth(unsigned camera) const noexcept {
     DepthImage img;
-    if (camera >= impl_->offscreen.cameraCount() || impl_->offscreen.depth(camera).empty()) return img;
+    if (!impl_->offscreen.active(camera) || impl_->offscreen.depth(camera).empty()) return img;
     img.metres = impl_->offscreen.depth(camera).data();
     img.width = impl_->offscreen.width(camera);
     img.height = impl_->offscreen.height(camera);

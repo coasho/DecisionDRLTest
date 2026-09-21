@@ -107,6 +107,10 @@ FSIM_VISION_API int fsim_vision_add_camera(fsim_vision* vision, uint32_t vehicle
     });
 }
 
+FSIM_VISION_API void fsim_vision_remove_camera(fsim_vision* vision, uint32_t camera) {
+    if (vision) vision->sensors->removeCamera(camera);
+}
+
 FSIM_VISION_API uint32_t fsim_vision_camera_count(const fsim_vision* vision) { return vision ? static_cast<uint32_t>(vision->sensors->cameraCount()) : 0u; }
 
 FSIM_VISION_API int fsim_vision_render(fsim_vision* vision) {

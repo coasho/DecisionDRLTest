@@ -78,10 +78,13 @@ public:
     Sensors(const Sensors&) = delete;
     Sensors& operator=(const Sensors&) = delete;
 
-    /// Mount a camera; returns its index. Cameras of a removed vehicle keep
-    /// rendering from its last known pose.
+    /// Mount a camera; returns its index. Cameras can be added at any time
+    /// (the scene is recompiled at the next render); those of a removed
+    /// vehicle keep rendering from its last known pose.
     unsigned addCamera(const Vehicle& vehicle, const CameraSpec& spec);
-    std::size_t cameraCount() const noexcept;
+    /// Stop rendering a camera; its index stays valid but image() is empty.
+    void removeCamera(unsigned camera);
+    std::size_t cameraCount() const noexcept; ///< cameras mounted so far (including removed ones)
 
     /// Draw every camera from the world's current state and read the images
     /// back. Blocks until they are ready (a few ms for a handful of small cameras).

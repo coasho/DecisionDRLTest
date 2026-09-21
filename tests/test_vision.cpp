@@ -128,6 +128,26 @@ int main(int argc, char** argv) {
     for (std::size_t i = 0; i < dimg.size(); ++i) nearest = std::min(nearest, dimg.metres[i]);
     CHECK(nearest > 5.0f && nearest < 200.0f);
     CHECK(dimg.metres[2 * dimg.width + dimg.width / 2] > 10000.0f);
+    // Cameras added after rendering and removed later: the scene recompiles on the next render.
+    {
+        vision::CameraSpec late = up;
+        late.width = 32;
+        late.height = 32;
+        const unsigned camLate = sensors.addCamera(v, late);
+        CHECK(camLate == 4);
+        CHECK(sensors.image(camLate).width == 32); // buffer exists (zeros) before the first render
+        sensors.render();
+        const auto lateImg = sensors.image(camLate);
+        CHECK(lateImg.rgb != nullptr && lateImg.width == 32 && lateImg.height == 32);
+        CHECK(skyish(lateImg.rgb + 3 * (16 * 32 + 16)));
+        CHECK(sensors.image(camNose).width == 96); // the others still render
+        sensors.removeCamera(camLate);
+        sensors.render();
+        CHECK(sensors.image(camLate).rgb == nullptr);
+        CHECK(sensors.image(camNose).rgb != nullptr);
+        CHECK(sensors.cameraCount() == 5);
+    }
+
     // A VecEnv exposes its world: one camera per batch vehicle.
     {
         VecEnvOptions vo2;

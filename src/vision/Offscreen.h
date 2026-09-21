@@ -44,9 +44,14 @@ public:
     /// A framebuffer + view + readback for one camera; returns its index.
     unsigned addCamera(unsigned width, unsigned height, double fovDeg, vsg::Mask viewMask = vsg::MASK_ALL, bool depth = false);
 
-    /// Build the command graph and compile; call after the cameras exist.
-    /// Cameras added later require another compile() (not supported yet).
+    /// Build the command graph over the active cameras and compile. Called
+    /// again (by render/advance) whenever cameras were added or removed.
     bool compile(std::string* error);
+
+    /// Drop a camera: its index stays valid but it is no longer drawn.
+    void removeCamera(unsigned camera);
+    bool active(unsigned camera) const { return camera < cameras_.size() && cameras_[camera].active; }
+    std::size_t activeCameraCount() const;
 
     /// Aim a camera (ECEF).
     void setView(unsigned camera, const vsg::dvec3& eye, const vsg::dvec3& centre, const vsg::dvec3& up);
@@ -72,6 +77,7 @@ public:
 
 private:
     struct Camera {
+        bool active = true;
         unsigned width = 0, height = 0;
         double fovDeg = 60.0;
         vsg::ref_ptr<vsg::LookAt> lookAt;
@@ -96,6 +102,7 @@ private:
     vsg::ref_ptr<vsg::CommandGraph> commandGraph_;
     std::vector<Camera> cameras_;
     bool compiled_ = false;
+    bool dirty_ = true; ///< cameras changed since the last compile()
     std::uint64_t frames_ = 0;
     Timing timing_;
 };

@@ -181,16 +181,31 @@ unsigned Offscreen::addCamera(unsigned width, unsigned height, double fovDeg, vs
     }
 
     cameras_.push_back(std::move(c));
+    dirty_ = true;
     return static_cast<unsigned>(cameras_.size() - 1);
 }
 
+std::size_t Offscreen::activeCameraCount() const {
+    std::size_t n = 0;
+    for (const auto& c : cameras_) n += c.active ? 1 : 0;
+    return n;
+}
+
+void Offscreen::removeCamera(unsigned camera) {
+    if (camera >= cameras_.size() || !cameras_[camera].active) return;
+    cameras_[camera].active = false;
+    dirty_ = true;
+}
+
 bool Offscreen::compile(std::string* error) {
-    if (compiled_ || cameras_.empty()) {
-        if (error) *error = compiled_ ? "already compiled" : "no cameras";
+    if (activeCameraCount() == 0) {
+        if (error) *error = "no cameras";
         return false;
     }
+    if (compiled_) vkDeviceWaitIdle(*device_); // the previous command graph may still be executing
     commandGraph_ = vsg::CommandGraph::create(device_, queueFamily_);
     for (auto& c : cameras_) {
+        if (!c.active) continue;
         commandGraph_->addChild(c.renderGraph);
 
         // Readback: capture image -> TRANSFER_DST, copy, -> GENERAL for the host.
@@ -243,6 +258,7 @@ bool Offscreen::compile(std::string* error) {
         return false;
     }
     compiled_ = true;
+    dirty_ = false;
     return true;
 }
 
@@ -255,6 +271,7 @@ void Offscreen::setView(unsigned camera, const vsg::dvec3& eye, const vsg::dvec3
 }
 
 void Offscreen::advance() {
+    if (dirty_ && !compile(nullptr)) return;
     if (!compiled_) return;
     if (!viewer_->advanceToNextFrame()) return;
     viewer_->handleEvents();
@@ -265,6 +282,10 @@ void Offscreen::advance() {
 }
 
 void Offscreen::render() {
+    if (dirty_) {
+        std::string error;
+        if (!compile(&error)) throw vsg::Exception{error, 0};
+    }
     if (!compiled_) return;
     using clock = std::chrono::steady_clock;
     const auto t0 = clock::now();
@@ -279,7 +300,8 @@ void Offscreen::render() {
     const auto t3 = clock::now();
     vkDeviceWaitIdle(*device_); // one submission per render(); the images are ready when it retires
     const auto t4 = clock::now();
-    for (auto& c : cameras_) readback(c);
+    for (auto& c : cameras_)
+        if (c.active) readback(c);
     const auto t5 = clock::now();
     using ms = std::chrono::duration<double, std::milli>;
     timing_.advance = ms(t1 - t0).count();

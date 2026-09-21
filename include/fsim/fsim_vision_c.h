@@ -49,8 +49,9 @@ FSIM_VISION_API void fsim_camera_spec_init(fsim_camera_spec* spec);
 FSIM_VISION_API int fsim_vision_create(fsim_world* world, const fsim_vision_options* options, fsim_vision** out);
 FSIM_VISION_API void fsim_vision_destroy(fsim_vision* vision);
 
-/* Mount a camera on a vehicle; before the first render. */
+/* Mount a camera on a vehicle (at any time); remove one (its index stays valid, images become NULL). */
 FSIM_VISION_API int fsim_vision_add_camera(fsim_vision* vision, uint32_t vehicle_id, const fsim_camera_spec* spec, uint32_t* out_camera);
+FSIM_VISION_API void fsim_vision_remove_camera(fsim_vision* vision, uint32_t camera);
 FSIM_VISION_API uint32_t fsim_vision_camera_count(const fsim_vision* vision);
 
 /* Draw every camera from the world's current state; blocks until the images are ready. */
