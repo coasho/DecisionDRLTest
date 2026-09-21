@@ -9,6 +9,8 @@ add_library(fsim_platform STATIC
     Http.cpp
     Udp.h
     Udp.cpp
+    CrashHandler.h
+    CrashHandler.cpp
     Platform.cpp)
 add_library(fsim::platform ALIAS fsim_platform)
 

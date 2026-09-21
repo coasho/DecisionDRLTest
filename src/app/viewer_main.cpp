@@ -19,6 +19,7 @@
 #include "ipc/WorldRegistry.h"
 #include "platform/Clock.h"
 #include "platform/Paths.h"
+#include "platform/CrashHandler.h"
 #include "platform/Threads.h"
 #include "render/Viewer.h"
 #include "sim/GroundProvider.h"
@@ -240,6 +241,7 @@ std::string describe(const sim::EnvironmentState& e, double simTime) {
 } // namespace
 
 int main(int argc, char** argv) {
+    platform::installCrashHandler(); // minidump under the config directory (crash/) on a crash
     // GUI subsystem: print to the terminal we were started from, else keep a log file.
     if (!platform::attachParentConsole()) {
         const auto logPath = platform::configDir() / "viewer.log";

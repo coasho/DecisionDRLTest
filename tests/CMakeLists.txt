@@ -27,6 +27,12 @@ target_link_libraries(fsim_c_abi_test PRIVATE fsim::sdk)
 set_target_properties(fsim_c_abi_test PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
 add_test(NAME c_abi COMMAND fsim_c_abi_test "${FSIM_JSBSIM_DATA_DIR}")
 
+# The crash handler writes a minidump (the crasher is expected to die).
+add_executable(fsim_crash_test test_crash.cpp)
+target_link_libraries(fsim_crash_test PRIVATE fsim::platform)
+fsim_set_warnings(fsim_crash_test)
+add_test(NAME crash_handler COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:fsim_crash_test> -DDIR=${CMAKE_BINARY_DIR}/crash-test -P ${CMAKE_SOURCE_DIR}/tests/crash_check.cmake)
+
 # The Rust example against the C ABI (when cargo is installed): builds and steps a batch.
 find_program(FSIM_CARGO cargo)
 find_program(FSIM_RUSTC rustc)

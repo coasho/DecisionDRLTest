@@ -137,7 +137,7 @@ Reading the diagram: the `fsim` SDK (object model in `sim`/`control`/`comm`, bat
 | `ui` | ImGui layers: monitor (throughput, episode stats), telemetry plots, property browser, camera and vehicle selection, scenario controls | `render`, `core` | vsgImGui |
 | `io` | Asset resolver, config, JSBSim aircraft path management, tile pyramid access and disk cache (shared by physics and rendering), recording files | `platform` | vsgXchange (curl, image readers) |
 | `core` | Module registry and lifecycle, event bus, property store, deterministic RNG streams, job system, logging, profiler | `io`, `platform` | VSG core |
-| `platform` | Win32 specifics: paths, high-resolution clock, thread naming/affinity, shared memory, crash handler | — | Win32 |
+| `platform` | Win32 specifics: paths, high-resolution clock, thread naming/affinity, shared memory, HTTP, UDP, crash handler (minidump via dbghelp, installed by the executables only) | — | Win32 |
 | `ext/*` | Optional modules: `env_server` (shared memory), `recorder`, `web_dashboard`, extra sensors, scripted traffic | `core` + what they need | per module |
 
 Dependency rules, enforced by CMake target visibility and a CI check:

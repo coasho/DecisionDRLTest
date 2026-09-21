@@ -68,6 +68,14 @@ vsync and uses ~3% of one core while mirroring 64 vehicles).
 | `VehicleSpec::model` | optional glTF path shown instead of the type's model (`models/<type>.glb`) or the default aircraft |
 | `recordPath` | also write the run to a `.fsrec` file; `flightsim-viewer.exe --replay <file>` plays it back (space pauses, `.` steps one frame, `[` `]` change the time factor, the timeline slider seeks, `home` restarts, loops at the end) |
 
+## If it crashes
+
+`flightsim-viewer.exe` and `flightsim.exe` install a crash handler: an
+unhandled exception writes a minidump to `%LOCALAPPDATA%lightsim\crash\`
+(`<exe>-<date>-<time>.dmp`, openable in Visual Studio or WinDbg) and one line
+to stderr / `viewer.log`. Libraries never install one - a trainer owns its own
+process.
+
 ## Limits (current)
 
 - One machine: the segment is local shared memory (a network relay is a planned `ext/` module).

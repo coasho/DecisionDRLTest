@@ -11,6 +11,7 @@
 #include "core/Units.h"
 #include "io/AssetResolver.h"
 #include "platform/Clock.h"
+#include "platform/CrashHandler.h"
 #include "platform/Threads.h"
 #include "sim/GroundProvider.h"
 #include "sim/JsbsimModel.h"
@@ -46,6 +47,7 @@ void printState(std::size_t index, const sim::VehicleState& s) {
 } // namespace
 
 int main(int argc, char** argv) {
+    fsim::platform::installCrashHandler();
     const auto parsed = app::parseOptions(argc, argv);
     if (!parsed) {
         app::printUsage(argv[0]);
