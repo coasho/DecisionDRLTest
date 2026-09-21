@@ -29,6 +29,7 @@ next one. Restarting the trainer re-attaches automatically.
 
 - Every live vehicle, as a 3D model over full-Earth satellite imagery and terrain, with a label, a trail and a chase/orbit/overview camera (`tab` cycles vehicles; the mouse works like OpenSceneGraph's manipulators: left drag rotates, middle drag pans, wheel zooms from 6 m to the whole Earth, right drag zooms while following a vehicle; detached (camera mode "free", or before any vehicle exists) the middle and right buttons drag the globe like osgGA's TerrainManipulator; the camera never enters the terrain).
 - Vehicle creation, reset (new "generation") and removal, as they happen.
+- Per-type models: a vehicle of type `jsbsim:f16` is drawn with `models/f16.glb` (or `.gltf`) if such a file exists in an asset directory (`<exe>/../share/flightsim/models`, the source tree's `assets/models`, or a `--assets` path), else with the platform's default aircraft; `VehicleSpec::model` names a file explicitly. Files are loaded once, on first use, and shared by every vehicle of that type; a `<file>.manifest` (`forward`, `up`, `scale`) fixes axes and size.
 - The world's clock (sun position and sky), wind, atmosphere and weather.
 - The trainer's throughput (vehicle-steps/s), simulation time and the age of the last update.
 - Per vehicle: state summary and the active control level.
@@ -63,11 +64,11 @@ vsync and uses ~3% of one core while mirroring 64 vehicles).
 | `publish = false` | no segment at all (e.g. headless sweeps on a cluster) |
 | `publishIntervalSeconds` | the copy rate limit; raise it to reduce the copy further, lower it for smoother motion at real-time pace |
 | `capacity` | vehicle slots in the segment (256 by default); vehicles beyond it simulate but are not shown |
-| `VehicleSpec::model` | optional glTF path shown instead of the default aircraft model |
+| `VehicleSpec::model` | optional glTF path shown instead of the type's model (`models/<type>.glb`) or the default aircraft |
 | `recordPath` | also write the run to a `.fsrec` file; `flightsim-viewer.exe --replay <file>` plays it back (space pauses, `.` steps one frame, `[` `]` change the time factor, loops at the end) |
 
 ## Limits (current)
 
 - One machine: the segment is local shared memory (a network relay is a planned `ext/` module).
-- The viewer uses one aircraft model for every vehicle unless a `model` override is given (per-type models are next).
+- Only one sample aircraft model ships (Cesium Air); drop `models/<type>.glb` files next to it for your own types.
 - The trainer's physics ground is flat unless `WorldOptions::terrain` is on (then it is the same relief the viewer draws); with it off a low-flying vehicle can appear below hills.

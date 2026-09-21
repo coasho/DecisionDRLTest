@@ -46,6 +46,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -66,6 +67,7 @@ struct ViewerOptions {
     // Demo scenario
     std::string aircraft = "c172x";
     std::filesystem::path jsbsimRoot;
+    std::vector<std::string> assetDirs; // --assets, highest priority first
     unsigned vehicles = 8;
     unsigned workers = 0;
     double dt = 1.0 / 120.0;
@@ -108,6 +110,7 @@ void usage(const char* prog) {
         "  --demo                   enable demo mode\n"
         "  --aircraft <name>        JSBSim aircraft (c172x)\n"
         "  --jsbsim-root <dir>      JSBSim data tree (auto)\n"
+        "  --assets <dir>           extra asset directory (models/<type>.glb per vehicle type), searched first\n"
         "  --vehicles <n>           number of vehicles (8)\n"
         "  --workers <n>            sim workers (auto)\n"
         "  --time-factor <x>        simulation speed (1.0)\n"
@@ -156,6 +159,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--capacity") o.capacity = static_cast<unsigned>(std::stoul(next()));
             else if (a == "--aircraft") o.aircraft = next();
             else if (a == "--jsbsim-root") o.jsbsimRoot = next();
+            else if (a == "--assets") o.assetDirs.push_back(next());
             else if (a == "--vehicles") o.vehicles = static_cast<unsigned>(std::stoul(next()));
             else if (a == "--workers") o.workers = static_cast<unsigned>(std::stoul(next()));
             else if (a == "--time-factor") o.timeFactor = std::stod(next());
@@ -269,6 +273,7 @@ int main(int argc, char** argv) {
     if (!viewer.create(opt.window)) return 1;
 
     io::AssetResolver assets;
+    for (auto it = opt.assetDirs.rbegin(); it != opt.assetDirs.rend(); ++it) assets.addSearchPath(*it);
     auto ellipsoid = vsg::EllipsoidModel::create(); // WGS-84
 
     // Elevation tiles on the CPU: camera terrain collision in every mode, physics in demo mode.
@@ -393,7 +398,10 @@ int main(int argc, char** argv) {
     };
     visualSettings.modelForward = axis(opt.modelForward, visualSettings.modelForward);
     visualSettings.modelUp = axis(opt.modelUp, visualSettings.modelUp);
+    for (const auto& dir : assets.searchPaths()) // <assets>/models/<type>.glb per vehicle type
+        if (std::filesystem::is_directory(dir / "models")) visualSettings.modelDirs.push_back(dir / "models");
     world::VehicleVisuals visuals(slots, visualSettings, viewer.options());
+    visuals.setCompiler([&viewer](vsg::ref_ptr<vsg::Node> node) { return viewer.compile(node); });
     scene->addChild(visuals.node());
     world::Trails trails(slots, 900, 0.25, viewer.options());
     scene->addChild(trails.node());
@@ -508,6 +516,7 @@ int main(int argc, char** argv) {
                         meta[slot].name.assign(row.name, ::strnlen(row.name, ipc::kNameLength));
                         meta[slot].type.assign(row.type, ::strnlen(row.type, ipc::kTypeLength));
                         meta[slot].level = control::levelName(static_cast<control::Level>(row.controlLevel));
+                        if (row.alive) visuals.setModel(slot, std::string(row.model, ::strnlen(row.model, ipc::kPathLength)), meta[slot].type);
                         visuals.setVisible(slot, row.alive != 0);
                         trails.setEnabled(slot, row.alive != 0);
                     }
@@ -559,6 +568,7 @@ int main(int argc, char** argv) {
                         meta[i].type = v.type;
                         meta[i].alive = v.alive;
                         meta[i].level = control::levelName(static_cast<control::Level>(v.controlLevel));
+                        if (v.alive) visuals.setModel(i, v.model, v.type);
                         visuals.setVisible(i, v.alive);
                         trails.setEnabled(i, v.alive);
                     }

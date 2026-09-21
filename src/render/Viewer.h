@@ -34,6 +34,10 @@ public:
     bool setScene(vsg::ref_ptr<vsg::Node> scene, vsg::ref_ptr<vsg::EllipsoidModel> ellipsoid,
                   vsg::ref_ptr<vsg::Node> imguiOverlay = {});
 
+    /// Compile a subgraph added to the scene after setScene() (a vehicle model
+    /// loaded when a new type appears). Returns false when nothing was compiled.
+    bool compile(vsg::ref_ptr<vsg::Node> node);
+
     /// Add an event handler (key handler, trackball, ImGui event forwarder).
     /// ImGui's forwarder must be added before any other handler so it can
     /// consume events first (design 9.6).

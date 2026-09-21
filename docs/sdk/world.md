@@ -69,7 +69,7 @@ struct VehicleSpec {
     std::string name;                      // unique in the world; empty = "<aircraft>-<id>"
     std::string type = "jsbsim:c172x";     // "<flight model>:<aircraft>" - any aircraft in the JSBSim tree
     InitialConditions initial;             // latitudeDeg, longitudeDeg, altitudeMslM, headingDeg, pitchDeg, rollDeg, airspeedTrueMs, onGround
-    std::string model;                     // optional glTF for the viewer (default: the platform's aircraft model)
+    std::string model;                     // optional glTF for the viewer (default: models/<type>.glb, else the platform's aircraft)
     unsigned controlDivider = 1;           // run the control stack every N FDM steps
 };
 ```

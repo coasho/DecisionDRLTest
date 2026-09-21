@@ -5,15 +5,21 @@
 
 #include <vsg/all.h>
 
+#include <filesystem>
+#include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
 namespace fsim::world {
 
-/// One shared model, N vsg::MatrixTransforms (design 8.2 "Many vehicles").
-/// The model is a glTF file when given, else a procedural placeholder built in
-/// the JSBSim body frame (x forward, y right, z down) so no axis conversion is
-/// needed for the placeholder; glTF models get a fixed model->body rotation.
+/// Shared models, N vsg::MatrixTransforms (design 8.2 "Many vehicles").
+/// The default model is a glTF file when given, else a procedural placeholder
+/// built in the JSBSim body frame (x forward, y right, z down) so no axis
+/// conversion is needed for the placeholder; glTF models get a fixed
+/// model->body rotation. Per vehicle, setModel() picks a different file: the
+/// vehicle's own `model` override or `<modelDir>/<type>.glb` for its type;
+/// each file is loaded and compiled once and shared by every vehicle using it.
 class VehicleVisuals {
 public:
     struct Settings {
@@ -23,7 +29,11 @@ public:
         vsg::dvec3 modelUp{0.0, 1.0, 0.0};       ///< model-space up (glTF default +Y)
         double placeholderLengthM = 8.3; ///< c172-ish
         double placeholderSpanM = 11.0;
+        std::vector<std::filesystem::path> modelDirs; ///< searched for `<type>.glb` / `.gltf` (type without its "jsbsim:" prefix)
     };
+
+    /// Compiles a subgraph loaded after the scene was compiled (render::Viewer::compile).
+    using Compiler = std::function<bool(vsg::ref_ptr<vsg::Node>)>;
 
     VehicleVisuals(std::size_t count, const Settings& settings, vsg::ref_ptr<vsg::Options> options);
 
@@ -35,6 +45,17 @@ public:
 
     /// Write the latest snapshot into the transforms (render thread, per frame).
     void update(Span<const sim::VehicleState> states);
+
+    void setCompiler(Compiler compiler) { compiler_ = std::move(compiler); }
+
+    /// Choose the model drawn for one vehicle: `modelPath` (its VehicleSpec
+    /// override) when it loads, else `<modelDir>/<type>.glb`, else the default.
+    /// Cheap when the choice is unchanged; a file that fails to load falls back
+    /// to the default and is not retried.
+    void setModel(std::size_t index, const std::string& modelPath, const std::string& type);
+
+    /// The file drawn for a vehicle (empty for the default model).
+    const std::string& modelOf(std::size_t index) const;
 
     /// Highlight one vehicle (or none with -1).
     void setSelected(int index);
@@ -50,8 +71,20 @@ public:
     const vsg::Animations& animations() const { return animations_; }
 
 private:
+    struct Model {
+        vsg::ref_ptr<vsg::Node> normal, highlighted;
+    };
     vsg::ref_ptr<vsg::Node> buildPlaceholder(const Settings& s, const vsg::vec4& color) const;
     vsg::ref_ptr<vsg::Node> loadModel(const Settings& s, vsg::ref_ptr<vsg::Options> options) const;
+    std::string resolveModel(const std::string& modelPath, const std::string& type) const;
+    const Model& modelFor(const std::string& key);
+
+    Settings settings_;
+    vsg::ref_ptr<vsg::Options> options_;
+    Compiler compiler_;
+    Model default_;
+    std::map<std::string, Model> library_; ///< by resolved path; an empty Model = failed to load
+    std::vector<std::string> slotModel_;
 
     vsg::ref_ptr<vsg::Group> root_;
     std::vector<vsg::ref_ptr<vsg::MatrixTransform>> transforms_;

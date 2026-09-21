@@ -85,8 +85,11 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
   segment carries to a `.fsrec` file; `flightsim-viewer.exe --replay run.fsrec` plays it back with the
   demo's pause/step/time-factor controls.
 
-Not yet: per-type vehicle models in the viewer, animated control surfaces, vision observations, transport
-bridges for the comm layer, offline tile pyramids (`tools/tile_builder`).
+- **Per-type vehicle models**: the viewer draws `models/<type>.glb` for each vehicle type it sees
+  (loaded and compiled once, on first use), `VehicleSpec::model` for an explicit file, else the sample aircraft.
+
+Not yet: animated control surfaces, vision observations, transport bridges for the comm layer, offline tile
+pyramids (`tools/tile_builder`).
 
 Imagery and elevation come from Esri World Imagery and AWS Terrain Tiles under their respective terms (attribution required); tiles are cached under `%LOCALAPPDATA%\flightsim\tilecache`.
 

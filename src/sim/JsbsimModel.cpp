@@ -218,6 +218,13 @@ void JsbsimModel::installExternalReaction() {
     moment->AddChildElement(triplet("direction", "1", "0", "0"));
     reactions->AddChildElement(moment);
     try {
+        // An aircraft with its own <external_reactions> (f16: pushback, hook) has
+        // already tied the summary properties; Load() ties them again and logs an
+        // error for each, so untie first (the same object re-ties them).
+        auto pm = fdm_->GetPropertyManager();
+        for (const char* tied : {"moments/l-external-lbsft", "moments/m-external-lbsft", "moments/n-external-lbsft",
+                                 "forces/fbx-external-lbs", "forces/fby-external-lbs", "forces/fbz-external-lbs"})
+            if (pm->HasNode(tied)) pm->Untie(tied);
         fdm_->GetExternalReactions()->Load(reactions);
     } catch (const std::exception& e) {
         LOG_WARN("sim") << "external reaction not installed: " << e.what();

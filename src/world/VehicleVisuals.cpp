@@ -3,6 +3,7 @@
 #include "core/Log.h"
 #include "world/Frames.h"
 
+#include <cctype>
 #include <fstream>
 #include <sstream>
 
@@ -24,27 +25,28 @@ vsg::ref_ptr<vsg::Node> box(vsg::Builder& builder, const vsg::vec3& centre, cons
 
 } // namespace
 
-VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg::ref_ptr<vsg::Options> options) {
+VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg::ref_ptr<vsg::Options> options)
+    : settings_(settings), options_(options) {
     root_ = vsg::Group::create();
 
-    vsg::ref_ptr<vsg::Node> model, highlightModel;
-    if (!settings.modelPath.empty()) model = loadModel(settings, options);
-    if (model) {
-        highlightModel = model; // a loaded model keeps its look; the label marks the selection
+    if (!settings.modelPath.empty()) default_.normal = loadModel(settings, options);
+    if (default_.normal) {
+        default_.highlighted = default_.normal; // a loaded model keeps its look; the label marks the selection
     } else {
-        model = buildPlaceholder(settings, vsg::vec4(0.85f, 0.85f, 0.9f, 1.0f));
-        highlightModel = buildPlaceholder(settings, vsg::vec4(1.0f, 0.55f, 0.1f, 1.0f));
+        default_.normal = buildPlaceholder(settings, vsg::vec4(0.85f, 0.85f, 0.9f, 1.0f));
+        default_.highlighted = buildPlaceholder(settings, vsg::vec4(1.0f, 0.55f, 0.1f, 1.0f));
     }
 
     transforms_.reserve(count);
     highlight_.reserve(count);
     visible_.assign(count, 1);
+    slotModel_.assign(count, std::string());
     for (std::size_t i = 0; i < count; ++i) {
         auto transform = vsg::MatrixTransform::create();
         // Shared subgraph under N transforms: one copy of the geometry on the GPU.
         auto sw = vsg::Switch::create();
-        sw->addChild(true, model);
-        sw->addChild(false, highlightModel);
+        sw->addChild(true, default_.normal);
+        sw->addChild(false, default_.highlighted);
         transform->addChild(sw);
         root_->addChild(transform);
         transforms_.push_back(transform);
@@ -119,6 +121,60 @@ vsg::ref_ptr<vsg::Node> VehicleVisuals::buildPlaceholder(const Settings& s, cons
     group->addChild(box(builder, vsg::vec3(-L * 0.42f, 0.0f, -L * 0.12f), vsg::vec3(L * 0.12f, L * 0.015f, L * 0.18f), dark)); // fin (up = -z)
     group->addChild(box(builder, vsg::vec3(L * 0.5f, 0.0f, 0.0f), vsg::vec3(L * 0.06f, L * 0.06f, L * 0.06f), dark));  // nose
     return group;
+}
+
+std::string VehicleVisuals::resolveModel(const std::string& modelPath, const std::string& type) const {
+    namespace fs = std::filesystem;
+    if (!modelPath.empty()) {
+        if (fs::exists(modelPath)) return modelPath;
+        for (const auto& dir : settings_.modelDirs)
+            if (fs::exists(dir / modelPath)) return (dir / modelPath).string();
+        return modelPath; // let the loader report it once
+    }
+    // "jsbsim:f16" -> f16; only characters safe in a file name.
+    const auto colon = type.find(':');
+    std::string name = type.substr(colon == std::string::npos ? 0 : colon + 1);
+    for (char& c : name)
+        if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.')) c = '_';
+    if (name.empty()) return {};
+    for (const auto& dir : settings_.modelDirs)
+        for (const char* ext : {".glb", ".gltf"})
+            if (fs::exists(dir / (name + ext))) return (dir / (name + ext)).string();
+    return {};
+}
+
+const VehicleVisuals::Model& VehicleVisuals::modelFor(const std::string& key) {
+    if (key.empty() || key == settings_.modelPath) return default_;
+    auto it = library_.find(key);
+    if (it == library_.end()) {
+        Settings s; // glTF conventions, then the file's manifest
+        s.modelPath = key;
+        applyManifest(s);
+        Model m;
+        m.normal = loadModel(s, options_);
+        if (m.normal) {
+            m.highlighted = m.normal;
+            if (compiler_ && !compiler_(m.normal)) LOG_WARN("world") << "could not compile vehicle model " << key;
+        }
+        it = library_.emplace(key, std::move(m)).first;
+    }
+    return it->second.normal ? it->second : default_;
+}
+
+void VehicleVisuals::setModel(std::size_t index, const std::string& modelPath, const std::string& type) {
+    if (index >= transforms_.size()) return;
+    const std::string key = resolveModel(modelPath, type);
+    if (slotModel_[index] == key) return;
+    slotModel_[index] = key;
+    const Model& m = modelFor(key);
+    auto& children = highlight_[index]->children;
+    children[0].node = m.normal;
+    children[1].node = m.highlighted;
+}
+
+const std::string& VehicleVisuals::modelOf(std::size_t index) const {
+    static const std::string none;
+    return index < slotModel_.size() ? slotModel_[index] : none;
 }
 
 void VehicleVisuals::update(Span<const sim::VehicleState> states) {
