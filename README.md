@@ -249,4 +249,5 @@ third_party/      JSBSim (LGPL-2.1, DLL), VSG, vsgXchange, vsgImGui submodules
 
 ## License
 
-MIT — see [LICENSE](LICENSE). JSBSim is LGPL-2.1 and is linked as a shared library.
+MIT — see [LICENSE](LICENSE). JSBSim is LGPL-2.1 and is linked as a shared library; every bundled
+component and data service is listed with its licence in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

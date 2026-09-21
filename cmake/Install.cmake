@@ -41,7 +41,9 @@ install(DIRECTORY ${CMAKE_BINARY_DIR}/share/flightsim/ DESTINATION share/flights
 install(DIRECTORY ${FSIM_JSBSIM_DATA_DIR}/aircraft ${FSIM_JSBSIM_DATA_DIR}/engine ${FSIM_JSBSIM_DATA_DIR}/systems
         DESTINATION share/flightsim/jsbsim)
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/examples/scenarios DESTINATION share/flightsim)
-install(FILES ${CMAKE_SOURCE_DIR}/README.md ${CMAKE_SOURCE_DIR}/LICENSE DESTINATION share/doc/flightsim OPTIONAL)
+install(FILES ${CMAKE_SOURCE_DIR}/README.md ${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md
+        ${CMAKE_SOURCE_DIR}/third_party/jsbsim/COPYING DESTINATION share/doc/flightsim OPTIONAL)
+install(FILES ${CMAKE_SOURCE_DIR}/third_party/jsbsim/COPYING DESTINATION share/doc/flightsim RENAME LICENSE-JSBSim.txt OPTIONAL)
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/docs/sdk DESTINATION share/doc/flightsim)
 
 # CMake package.
