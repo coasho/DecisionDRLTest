@@ -7,6 +7,22 @@ vision observations, and a C++ SDK with a stable C ABI as the primary interface.
 
 ![flightsim-viewer over Yosemite: six c172s from the built-in demo, chase camera, ImGui monitor](docs/images/viewer-yosemite.jpg)
 
+## Quick start
+
+From the repository root:
+
+```bat
+fsim demo
+```
+
+Six aircraft flying over San Francisco on real satellite imagery and terrain. Left-drag to look
+around, wheel to zoom out as far as the whole planet, `c` cycles the camera, `tab` picks another
+aircraft, `esc` quits.
+
+Nothing built yet? `fsim build` first (a few minutes, once). `fsim` on its own lists everything
+you can run - train a policy, replay a recording, render an aircraft's camera views - and prints
+the full command each time, so you can run the executables directly once you know what you want.
+
 The architecture, requirements, technology evaluation and roadmap are in
 [docs/FlightSim_System_Architecture_and_Design.md](docs/FlightSim_System_Architecture_and_Design.md).
 

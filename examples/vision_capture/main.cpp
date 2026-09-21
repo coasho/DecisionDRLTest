@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
         const double stepS = world.stepSeconds();
         const int steps = static_cast<int>(seconds / stepS);
         const int everySteps = std::max(1, static_cast<int>(every / stepS));
-        int shot = 0;
+        int shot = 0, unwritten = 0;
         double renderMs = 0.0;
         const auto t0 = std::chrono::steady_clock::now();
         for (int k = 1; k <= steps; ++k) {
@@ -121,18 +121,19 @@ int main(int argc, char** argv) {
             if (k % everySteps != 0) continue;
             sensors.render();
             renderMs += sensors.lastRenderMs();
-            char name[128];
+            // std::string, not a fixed buffer: a long --out path used to be
+            // truncated into a directory that does not exist, and every save
+            // then failed without saying so.
+            const auto shotPath = [&out, shot](const char* tag) {
+                char suffix[64];
+                std::snprintf(suffix, sizeof suffix, "/%s_%03d.png", tag, shot);
+                return (std::filesystem::path(out) / (suffix + 1)).string();
+            };
             if (save) {
-                for (auto [cam, tag] : {std::pair{camNose, "nose"}, std::pair{camChase, "chase"}, std::pair{camDown, "down"}, std::pair{camSide, "side"}}) {
-                    std::snprintf(name, sizeof name, "%s/%s_%03d.png", out.c_str(), tag, shot);
-                    sensors.savePng(cam, name);
-                }
-                std::snprintf(name, sizeof name, "%s/nose_depth_%03d.png", out.c_str(), shot);
-                sensors.saveDepthPng(camNose, name);
-                if (segmentation) {
-                    std::snprintf(name, sizeof name, "%s/chase_segmentation_%03d.png", out.c_str(), shot);
-                    sensors.saveSegmentationPng(camChase, name);
-                }
+                for (auto [cam, tag] : {std::pair{camNose, "nose"}, std::pair{camChase, "chase"}, std::pair{camDown, "down"}, std::pair{camSide, "side"}})
+                    if (!sensors.savePng(cam, shotPath(tag))) ++unwritten;
+                if (!sensors.saveDepthPng(camNose, shotPath("nose_depth"))) ++unwritten;
+                if (segmentation && !sensors.saveSegmentationPng(camChase, shotPath("chase_segmentation"))) ++unwritten;
             }
             if (!quiet) {
                 const auto d = sensors.depth(camNose);
@@ -149,7 +150,14 @@ int main(int argc, char** argv) {
             }
             ++shot;
         }
-        std::printf("%d shots x %zu cameras in %s, %.1f ms per render\n", shot, sensors.cameraCount(), out.c_str(), shot ? renderMs / shot : 0.0);
+        // An absolute path, so it can be pasted straight into a file manager.
+        std::printf("%d shots x %zu cameras -> %s, %.1f ms per render\n", shot, sensors.cameraCount(),
+                    std::filesystem::absolute(out).string().c_str(), shot ? renderMs / shot : 0.0);
+        if (unwritten > 0) {
+            std::fprintf(stderr, "warning: %d image(s) could not be written to %s\n", unwritten,
+                         std::filesystem::absolute(out).string().c_str());
+            return 1;
+        }
         return 0;
     } catch (const Error& e) {
         std::fprintf(stderr, "error: %s\n", e.what());

@@ -25,3 +25,7 @@ __pycache__/
 
 # Dear ImGui layout files
 imgui.ini
+
+# Output written by the examples (vision_capture --out, recordings)
+/captures/
+*.fsrec

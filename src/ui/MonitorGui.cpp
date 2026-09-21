@@ -6,9 +6,39 @@
 #include <vsgImGui/imgui.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cstdio>
 
 namespace fsim::ui {
+
+namespace {
+
+/// Panels are laid out against the window that exists now, not against fixed
+/// pixels: the vehicle list used to be pinned 440 px down and 320 px tall,
+/// which falls off the bottom of any window shorter than 760 px.
+struct Layout {
+    float scale;  ///< DPI scale the app applied to the font and style
+    float margin; ///< gap to the window edge and between panels
+    ImVec2 display;
+    float panelWidth;  ///< monitor width: wide enough to read, never half the screen
+    float listWidth, listHeight, listTop; ///< the vehicle list, anchored to the bottom
+    float monitorMaxHeight;               ///< so the monitor stops above the list rather than under it
+};
+
+Layout layout(bool listShown) {
+    Layout l;
+    l.scale = ImGui::GetIO().FontGlobalScale;
+    l.margin = 12.0f * l.scale;
+    l.display = ImGui::GetIO().DisplaySize;
+    l.panelWidth = std::min(300.0f * l.scale, std::max(220.0f, l.display.x * 0.30f));
+    l.listWidth = std::min(460.0f * l.scale, std::max(280.0f, l.display.x * 0.46f));
+    l.listHeight = std::min(240.0f * l.scale, std::max(110.0f, l.display.y * 0.30f));
+    l.listTop = std::max(l.margin, l.display.y - l.listHeight - l.margin);
+    l.monitorMaxHeight = (listShown ? l.listTop : l.display.y) - 2.0f * l.margin;
+    return l;
+}
+
+} // namespace
 
 MonitorGui::MonitorGui(std::shared_ptr<ViewerControls> controls, std::string aircraft)
     : controls_(std::move(controls)), aircraft_(std::move(aircraft)) {}
@@ -34,10 +64,14 @@ void MonitorGui::drawLabels() const {
 }
 
 void MonitorGui::drawMonitor() const {
-    const float k = ImGui::GetIO().FontGlobalScale; // DPI scale applied by the app
-    ImGui::SetNextWindowPos(ImVec2(12.0f * k, 12.0f * k), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(400.0f * k, 0.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("flightsim monitor", nullptr, ImGuiWindowFlags_NoCollapse)) {
+    const Layout l = layout(controls_->showVehicleList.load(std::memory_order_relaxed));
+    ImGui::SetNextWindowPos(ImVec2(l.margin, l.margin), ImGuiCond_FirstUseEver);
+    // Height 0: ImGui fits it to the content, so nothing is ever cut off. The
+    // constraint stops that fit where the vehicle list begins; past it the
+    // panel scrolls instead of growing under the list.
+    ImGui::SetNextWindowSize(ImVec2(l.panelWidth, 0.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(l.panelWidth * 0.6f, 0.0f), ImVec2(FLT_MAX, l.monitorMaxHeight));
+    if (!ImGui::Begin("flightsim", nullptr, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
     }
@@ -89,18 +123,18 @@ void MonitorGui::drawMonitor() const {
             else ImGui::TextDisabled("live, last update %.0f ms ago", source_.ageSeconds * 1e3);
         }
         ImGui::Separator();
-        ImGui::Text("render   %6.1f fps   %6.2f ms/frame", fps, frameMs);
-        ImGui::Text("trainer  %9.0f vehicle-steps/s", source_.vehicleStepsPerSecond);
-        ImGui::Text("sim time %9.2f s", source_.simTime);
+        ImGui::Text("render    %.0f fps  %.1f ms", fps, frameMs);
+        ImGui::Text("trainer   %.0f steps/s", source_.vehicleStepsPerSecond);
+        ImGui::Text("sim time  %.1f s", source_.simTime);
         if (!source_.environment.empty()) ImGui::TextWrapped("%s", source_.environment.c_str());
         ImGui::Separator();
         ImGui::TextDisabled("the training application sets the pace");
     } else {
         ImGui::Text("%s  x %zu", aircraft_.c_str(), live);
         ImGui::Separator();
-        ImGui::Text("render   %6.1f fps   %6.2f ms/frame", fps, frameMs);
-        ImGui::Text("sim      %9.0f vehicle-steps/s", sps);
-        ImGui::Text("sim time %9.2f s", simTime);
+        ImGui::Text("render    %.0f fps  %.1f ms", fps, frameMs);
+        ImGui::Text("sim       %.0f steps/s", sps);
+        ImGui::Text("sim time  %.1f s", simTime);
 
         ImGui::Separator();
         bool paused = controls_->paused.load(std::memory_order_relaxed);
@@ -109,7 +143,8 @@ void MonitorGui::drawMonitor() const {
         if (ImGui::Button("step  [.]")) controls_->singleStep.store(true, std::memory_order_relaxed);
 
         float factor = static_cast<float>(controls_->timeFactor.load(std::memory_order_relaxed));
-        if (ImGui::SliderFloat("time factor", &factor, 0.1f, 32.0f, "%.2fx", ImGuiSliderFlags_Logarithmic))
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::SliderFloat("##timefactor", &factor, 0.1f, 32.0f, "time x%.2f", ImGuiSliderFlags_Logarithmic))
             controls_->timeFactor.store(static_cast<double>(factor), std::memory_order_relaxed);
 
         const double start = controls_->replayStart.load(std::memory_order_relaxed);
@@ -124,24 +159,26 @@ void MonitorGui::drawMonitor() const {
         }
     }
 
+    ImGui::Separator();
     int mode = controls_->cameraMode.load(std::memory_order_relaxed);
-    const char* modes[] = {"chase (follows heading)", "orbit (north-up)", "overview", "free (detached)"};
-    if (ImGui::Combo("camera  [c]", &mode, modes, 4)) controls_->cameraMode.store(mode, std::memory_order_relaxed);
-    ImGui::Text("eye  lat %9.5f  lon %10.5f  alt %8.0f m  dist %8.0f m", controls_->eyeLatDeg.load(std::memory_order_relaxed),
-                controls_->eyeLonDeg.load(std::memory_order_relaxed), controls_->eyeAltM.load(std::memory_order_relaxed),
+    const char* modes[] = {"chase", "orbit (north-up)", "overview", "free"};
+    ImGui::SetNextItemWidth(-1.0f);
+    if (ImGui::Combo("##camera", &mode, modes, 4)) controls_->cameraMode.store(mode, std::memory_order_relaxed);
+    if (ImGui::Button("-")) controls_->cameraZoom.store(1.25, std::memory_order_relaxed);
+    ImGui::SameLine();
+    if (ImGui::Button("+")) controls_->cameraZoom.store(0.8, std::memory_order_relaxed);
+    ImGui::SameLine();
+    if (ImGui::Button("reset view")) controls_->cameraReset.store(true, std::memory_order_relaxed);
+    ImGui::Text("eye  %.4f %.4f  %.0f m", controls_->eyeLatDeg.load(std::memory_order_relaxed),
+                controls_->eyeLonDeg.load(std::memory_order_relaxed),
                 controls_->eyeDistanceM.load(std::memory_order_relaxed));
-    if (ImGui::Button("zoom -  [-]")) controls_->cameraZoom.store(1.25, std::memory_order_relaxed);
-    ImGui::SameLine();
-    if (ImGui::Button("zoom +  [=]")) controls_->cameraZoom.store(0.8, std::memory_order_relaxed);
-    ImGui::SameLine();
-    if (ImGui::Button("reset view  [r]")) controls_->cameraReset.store(true, std::memory_order_relaxed);
-    ImGui::TextDisabled("mouse: left drag rotate, middle drag pan, wheel zoom, right drag zoom / drag the globe (free)");
 
+    ImGui::Separator();
     bool list = controls_->showVehicleList.load(std::memory_order_relaxed);
-    if (ImGui::Checkbox("vehicle list  [l]", &list)) controls_->showVehicleList.store(list, std::memory_order_relaxed);
+    if (ImGui::Checkbox("list [l]", &list)) controls_->showVehicleList.store(list, std::memory_order_relaxed);
     ImGui::SameLine();
     bool cams = controls_->showCameras.load(std::memory_order_relaxed);
-    if (ImGui::Checkbox("cameras  [v]", &cams)) controls_->showCameras.store(cams, std::memory_order_relaxed);
+    if (ImGui::Checkbox("cameras [v]", &cams)) controls_->showCameras.store(cams, std::memory_order_relaxed);
 
     if (batch_ && !batch_->states.empty()) {
         const int sel = std::clamp(controls_->selectedVehicle.load(std::memory_order_relaxed), 0,
@@ -149,41 +186,42 @@ void MonitorGui::drawMonitor() const {
         const auto& s = batch_->states[static_cast<std::size_t>(sel)];
         ImGui::Separator();
         const auto* meta = static_cast<std::size_t>(sel) < vehicles_.size() ? &vehicles_[static_cast<std::size_t>(sel)] : nullptr;
-        if (meta && meta->alive) ImGui::Text("%s  (%s, %s)  [tab / shift+tab]", meta->name.c_str(), meta->type.c_str(), meta->level);
-        else ImGui::Text("vehicle %d  [tab / shift+tab]", sel);
-        ImGui::Text("alt %7.1f m   agl %7.1f m   tas %5.1f m/s (%4.0f kt)", s.altitudeMslM, s.altitudeAglM,
-                    s.airspeedTrueMs, units::metresPerSecondToKnots(s.airspeedTrueMs));
-        ImGui::Text("roll %6.1f  pitch %6.1f  hdg %6.1f  alpha %5.2f  n %4.2f", units::radiansToDegrees(s.eulerRad[0]),
-                    units::radiansToDegrees(s.eulerRad[1]), units::radiansToDegrees(s.eulerRad[2]),
-                    units::radiansToDegrees(s.alphaRad), s.loadFactor);
-        ImGui::Text("lat %9.5f  lon %10.5f%s%s", units::radiansToDegrees(s.latitudeRad),
-                    units::radiansToDegrees(s.longitudeRad), s.onGround ? "  [ground]" : "", s.diverged ? "  [DIVERGED]" : "");
+        if (meta && meta->alive) ImGui::Text("%s  [tab]%s", meta->name.c_str(), s.diverged ? "  DIVERGED" : "");
+        else ImGui::Text("vehicle %d  [tab]%s", sel, s.diverged ? "  DIVERGED" : "");
+        ImGui::Text("alt %.0f m  agl %.0f m", s.altitudeMslM, s.altitudeAglM);
+        ImGui::Text("tas %.0f m/s (%.0f kt)  aoa %.1f", s.airspeedTrueMs,
+                    units::metresPerSecondToKnots(s.airspeedTrueMs), units::radiansToDegrees(s.alphaRad));
+        ImGui::Text("roll %.0f  pitch %.0f  hdg %.0f", units::radiansToDegrees(s.eulerRad[0]),
+                    units::radiansToDegrees(s.eulerRad[1]), units::radiansToDegrees(s.eulerRad[2]));
     }
     ImGui::End();
 }
 
 void MonitorGui::drawVehicleList() const {
     if (!batch_) return;
-    const float k = ImGui::GetIO().FontGlobalScale;
-    ImGui::SetNextWindowPos(ImVec2(12.0f * k, 440.0f * k), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(520.0f * k, 320.0f * k), ImGuiCond_FirstUseEver);
+    const Layout l = layout(true);
+    // Anchored to the bottom-left of the window that exists, and never taller
+    // than a third of it, so the whole table is always on screen.
+    ImGui::SetNextWindowPos(ImVec2(l.margin, l.listTop), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(l.listWidth, l.listHeight), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("vehicles", nullptr)) {
         ImGui::End();
         return;
     }
     const int selected = controls_->selectedVehicle.load(std::memory_order_relaxed);
+    // Stretch rather than fixed-fit: fixed columns overflow a narrow panel and
+    // ImGui hides the overflow behind "...", which loses the right-hand values.
     const ImGuiTableFlags flags = ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollY |
-                                  ImGuiTableFlags_SizingFixedFit;
-    if (ImGui::BeginTable("vehicles", 8, flags)) {
+                                  ImGuiTableFlags_SizingStretchProp;
+    if (ImGui::BeginTable("vehicles", 7, flags)) {
         ImGui::TableSetupScrollFreeze(0, 1);
-        ImGui::TableSetupColumn("name");
-        ImGui::TableSetupColumn("control");
-        ImGui::TableSetupColumn("alt m");
-        ImGui::TableSetupColumn("agl m");
-        ImGui::TableSetupColumn("tas m/s");
-        ImGui::TableSetupColumn("hdg");
-        ImGui::TableSetupColumn("roll");
-        ImGui::TableSetupColumn("state");
+        ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 1.5f);
+        ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthStretch, 1.3f);
+        ImGui::TableSetupColumn("alt m", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("agl m", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("tas", ImGuiTableColumnFlags_WidthStretch, 0.9f);
+        ImGui::TableSetupColumn("hdg", ImGuiTableColumnFlags_WidthStretch, 0.8f);
+        ImGui::TableSetupColumn("state", ImGuiTableColumnFlags_WidthStretch, 1.5f);
         ImGui::TableHeadersRow();
         for (std::size_t i = 0; i < batch_->states.size(); ++i) {
             const auto* meta = i < vehicles_.size() ? &vehicles_[i] : nullptr;
@@ -198,17 +236,16 @@ void MonitorGui::drawVehicleList() const {
                 controls_->selectedVehicle.store(static_cast<int>(i), std::memory_order_relaxed);
             ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(meta ? meta->level : "");
             if (s.diverged) {
-                for (int c = 2; c <= 6; ++c) { ImGui::TableSetColumnIndex(c); ImGui::TextUnformatted("-"); }
-                ImGui::TableSetColumnIndex(7);
+                for (int c = 2; c <= 5; ++c) { ImGui::TableSetColumnIndex(c); ImGui::TextUnformatted("-"); }
+                ImGui::TableSetColumnIndex(6);
                 ImGui::TextUnformatted("DIVERGED");
                 continue;
             }
-            ImGui::TableSetColumnIndex(2); ImGui::Text("%7.0f", s.altitudeMslM);
-            ImGui::TableSetColumnIndex(3); ImGui::Text("%7.0f", s.altitudeAglM);
-            ImGui::TableSetColumnIndex(4); ImGui::Text("%5.1f", s.airspeedTrueMs);
-            ImGui::TableSetColumnIndex(5); ImGui::Text("%5.0f", units::radiansToDegrees(s.eulerRad[2]));
-            ImGui::TableSetColumnIndex(6); ImGui::Text("%5.0f", units::radiansToDegrees(s.eulerRad[0]));
-            ImGui::TableSetColumnIndex(7);
+            ImGui::TableSetColumnIndex(2); ImGui::Text("%.0f", s.altitudeMslM);
+            ImGui::TableSetColumnIndex(3); ImGui::Text("%.0f", s.altitudeAglM);
+            ImGui::TableSetColumnIndex(4); ImGui::Text("%.0f", s.airspeedTrueMs);
+            ImGui::TableSetColumnIndex(5); ImGui::Text("%.0f", units::radiansToDegrees(s.eulerRad[2]));
+            ImGui::TableSetColumnIndex(6);
             ImGui::TextUnformatted(s.onGround ? "ground" : "airborne");
         }
         ImGui::EndTable();

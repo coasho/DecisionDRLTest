@@ -1,5 +1,9 @@
 # fsim SDK guide
 
+> **New here?** Run `fsim demo` from the repository root to see what the platform does, then read
+> the ten-line tour below. The pages in the table are reference material - reach for the one that
+> matches what you are building, rather than reading them in order.
+
 The `fsim` SDK is how a training application drives the platform. You write a
 C++ program (or any language with a C FFI, through `fsim_c.h`), link
 `libfsim.dll`, create a **World**, create **vehicles** by name, type and initial
