@@ -262,37 +262,48 @@ std::optional<vsg::dvec3> CameraController::groundUnderCursor() const {
 }
 
 void CameraController::zoomTowardsCursor(double fromDistance, double toDistance) {
-    // Only meaningful when the focus is ours to move; following a vehicle the
-    // camera belongs to the vehicle.
-    if (!zoomToCursor_ || !detached() || fromDistance <= 0.0) return;
+    zoomShare_ = 0.0;
+    if (!zoomToCursor_ || !detached() || fromDistance <= 0.0 || toDistance <= 0.0) return;
     const auto ground = groundUnderCursor();
     if (!ground) return;
 
-    // Closing to a fraction k of the distance leaves what the cursor is over
-    // in place if the focus comes the same fraction of the way to it: the
-    // offset of that point from the focus then shrinks exactly as fast as the
-    // distance does, so its angle at the eye is unchanged.
-    const double t = std::clamp(1.0 - toDistance / fromDistance, -1.0, 1.0);
+    // Two things have to be said about a point picked off the globe at range.
+    //
+    // Near the silhouette the ray only grazes the surface, and a pixel of
+    // cursor movement slides the hit point hundreds of kilometres. Zooming
+    // towards a point that unstable throws the globe about, so it is refused.
+    const vsg::dvec3 surfaceNormal = vsg::normalize(*ground);
+    const vsg::dvec3 rayDirection = vsg::normalize(*ground - lookAt_->eye);
+    if (-vsg::dot(rayDirection, surfaceNormal) < 0.05) return; // within ~3 deg of the silhouette
 
-    // Straight at it, not round the curve. With the view held still, moving
-    // the focus along the straight line to the target by exactly this
-    // fraction is not an approximation: the whole offset from eye to target
-    // scales by the same k the distance does, so its direction - and so its
-    // place on screen - is unchanged. Going round the great circle instead
-    // overshoots, and did so by 21 pixels over a six-fold zoom. The line
-    // between two nearby points on the globe dips below it by centimetres,
-    // and update() puts the focus back on the ground in any case.
-    // Zooming: the camera must not rotate, or the point it is closing on
-    // slides across the screen. With the view held still in world terms, the
-    // whole offset from eye to target scales by the same fraction the
-    // distance does, so its direction - and its place on screen - is exactly
-    // unchanged. That is why this is a straight line to the target and not a
-    // path over the globe: the line is what makes the scaling exact, and
-    // between two nearby points it dips below the surface by centimetres.
-    // osgEarth moves its centre and leaves the orientation alone, and so does
-    // this: holding the view fixed in world terms instead swung the compass
-    // bearing as the focus slid, which is the more disorienting of the two.
-    moveFocusTo(focus_ + (*ground - focus_) * t, Carry::WithGround);
+    // And holding a far-off point exactly under the cursor means swinging the
+    // whole planet under it: from a whole-Earth view a point near the edge is
+    // tens of degrees away, and a notch of the wheel would turn the globe by
+    // several of them. The pull falls away with the angle, so zooming into
+    // what you are looking at works and zooming into the edge of the world
+    // does not heave it across the screen.
+    const double cosSeparation = std::clamp(vsg::dot(vsg::normalize(focus_), surfaceNormal), -1.0, 1.0);
+    if (cosSeparation <= 0.0) return;
+    zoomTarget_ = *ground;
+    zoomShare_ = cosSeparation * cosSeparation * cosSeparation;
+}
+
+void CameraController::followZoomTarget(double fromDistance, double toDistance) {
+    if (zoomShare_ <= 0.0 || fromDistance <= 0.0) return;
+
+    // Keeping a point T fixed on screen while the distance goes from d to d'
+    // is one step: the focus F scales towards T by the ratio the distance
+    // did, F' = T + (F - T) * d'/d. It is exact, it composes - doing it every
+    // frame with that frame's ratio lands where doing it once with the whole
+    // ratio would - and it is its own inverse, so scrolling out undoes what
+    // scrolling in did instead of ratcheting the globe one way.
+    //
+    // The share damps it towards no movement for targets far off the middle
+    // of the view; the clamp is only there so a huge single step cannot fling
+    // the focus past the target and out the other side.
+    const double t = std::clamp((1.0 - toDistance / fromDistance) * zoomShare_, -1.0, 1.0);
+    if (t == 0.0) return;
+    moveFocusTo(focus_ + (zoomTarget_ - focus_) * t, Carry::WithGround);
 }
 
 void CameraController::apply(vsg::ScrollWheelEvent& e) {
@@ -321,8 +332,13 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
     // Smooth zoom towards the wheel/drag target.
     if (distance_ != targetDistance_) {
         const double a = dtSeconds > 0.0 ? 1.0 - std::exp(-dtSeconds / kZoomTimeConstant) : 1.0;
+        const double before = distance_;
         distance_ += (targetDistance_ - distance_) * a;
         if (std::abs(distance_ - targetDistance_) < 1e-3 * targetDistance_) distance_ = targetDistance_;
+        followZoomTarget(before, distance_);
+        if (distance_ == targetDistance_) zoomShare_ = 0.0;
+    } else {
+        zoomShare_ = 0.0;
     }
 
     vsg::dvec3 east, north, up;

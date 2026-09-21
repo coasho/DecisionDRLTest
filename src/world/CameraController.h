@@ -114,6 +114,8 @@ private:
     /// Slide the focus so the point under the cursor keeps its place on screen
     /// as the distance changes (osgEarth's zoomToMouse).
     void zoomTowardsCursor(double fromDistance, double toDistance);
+    /// Carry the focus a frame's worth of the way towards the wheel's target.
+    void followZoomTarget(double fromDistance, double toDistance);
     void localFrame(const vsg::dvec3& pos, vsg::dvec3& east, vsg::dvec3& north, vsg::dvec3& up) const;
 
     vsg::ref_ptr<vsg::Camera> camera_;
@@ -145,6 +147,12 @@ private:
     // Mouse state (window pixels; converted to normalised coordinates per event)
     bool leftDown_ = false, middleDown_ = false;
     bool zoomToCursor_ = false;
+    // Where the wheel is taking the focus, and how much of the way to let it
+    // go. Held across frames so the focus travels in step with the distance
+    // rather than jumping the whole way the moment the wheel turns.
+    vsg::dvec3 zoomTarget_{0.0, 0.0, 0.0};
+    double zoomShare_ = 0.0; ///< 0 = no target
+
     int lastX_ = 0, lastY_ = 0;
     // Last frame's view vectors, for screen-plane operations.
     vsg::dvec3 viewRight_{1.0, 0.0, 0.0}, viewForward_{0.0, 1.0, 0.0}, viewUp_{0.0, 0.0, 1.0};
