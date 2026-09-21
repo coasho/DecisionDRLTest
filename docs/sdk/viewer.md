@@ -64,6 +64,7 @@ vsync and uses ~3% of one core while mirroring 64 vehicles).
 | `publishIntervalSeconds` | the copy rate limit; raise it to reduce the copy further, lower it for smoother motion at real-time pace |
 | `capacity` | vehicle slots in the segment (256 by default); vehicles beyond it simulate but are not shown |
 | `VehicleSpec::model` | optional glTF path shown instead of the default aircraft model |
+| `recordPath` | also write the run to a `.fsrec` file; `flightsim-viewer.exe --replay <file>` plays it back (space pauses, `.` steps one frame, `[` `]` change the time factor, loops at the end) |
 
 ## Limits (current)
 

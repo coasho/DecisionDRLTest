@@ -12,6 +12,7 @@
 #include "fsim/InitialConditions.h"
 #include "fsim/Rng.h"
 #include "io/TerrainTiles.h"
+#include "ipc/Recording.h"
 #include "ipc/WorldPublisher.h"
 #include "sim/GroundProvider.h"
 #include "sim/VehiclePool.h"
@@ -42,6 +43,8 @@ struct WorldOptions {
     std::string terrainUrl;             ///< tile template; empty = AWS Terrarium
     unsigned terrainZoom = 12;          ///< ~38 m/px
     double terrainPrefetchRadiusM = 4000.0; ///< tiles loaded (blocking) around each new vehicle's position
+    std::filesystem::path recordPath;   ///< non-empty: write every vehicle's state to this file for replay in the viewer
+    double recordIntervalSeconds = 0.0; ///< simulation time between recorded frames; 0 = every world step
 };
 
 struct VehicleSpec {
@@ -156,6 +159,10 @@ private:
     std::uint64_t appliedEnvironment_ = ~0ull;
     comm::Network network_;
     std::unique_ptr<ipc::WorldPublisher> publisher_;
+    ipc::RecordWriter recorder_;
+    double lastRecordedTime_ = -1.0;
+    void recordVehicle(const Entry& e);
+    void recordFrame();
     Rng rng_;
     std::uint32_t nextId_ = 1;
     std::size_t liveCount_ = 0;

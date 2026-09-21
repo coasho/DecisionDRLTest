@@ -54,6 +54,8 @@ struct WorldOptions {
     std::string terrainUrl;           ///< XYZ template with {z}/{x}/{y}; empty = AWS Terrarium
     unsigned terrainZoom = 12;        ///< 12: ~38 m/px, 14: ~10 m/px (4x the tiles)
     std::shared_ptr<GroundProvider> ground; ///< your own ground model instead (overrides `terrain`)
+    std::string recordPath;           ///< non-empty: record every vehicle's state for `flightsim-viewer --replay`
+    double recordIntervalSeconds = 0.0; ///< simulation time between frames; 0 = every world step
 };
 
 struct VehicleSpec {

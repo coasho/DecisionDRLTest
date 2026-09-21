@@ -3,7 +3,7 @@
 // plus wind, effects and a beacon protocol. Start flightsim-viewer.exe in
 // another window at any time to watch it.
 //
-//   multi_level_control [--seconds S] [--realtime] [--aircraft c172x] [--name demo] [--extra N] [--quiet] [--terrain]
+//   multi_level_control [--seconds S] [--realtime] [--aircraft c172x] [--name demo] [--extra N] [--quiet] [--terrain] [--record file.fsrec]
 
 #include <fsim/BuiltinEffects.h>
 #include <fsim/World.h>
@@ -30,6 +30,7 @@ struct Args {
     int extra = 0; ///< additional vehicles on the "hold" behaviour (throughput tests)
     bool quiet = false;
     bool terrain = false;
+    std::string record;
 };
 
 Args parse(int argc, char** argv) {
@@ -44,6 +45,7 @@ Args parse(int argc, char** argv) {
         else if (k == "--extra") a.extra = std::atoi(next());
         else if (k == "--quiet") a.quiet = true;
         else if (k == "--terrain") a.terrain = true;
+        else if (k == "--record") a.record = next();
     }
     return a;
 }
@@ -64,6 +66,7 @@ int main(int argc, char** argv) {
     wo.name = args.name;
     wo.frameSkip = 4; // 30 Hz world steps
     wo.terrain = args.terrain; // real relief under the vehicles (downloads tiles on first use)
+    wo.recordPath = args.record; // replay later with flightsim-viewer --replay <file>
     World world(wo);
     std::printf("fsim %s: world '%s' %s\n", version(), world.name().c_str(), world.published() ? "(published for viewers)" : "(not published)");
 

@@ -24,6 +24,8 @@ struct WorldOptions {
     std::string terrainUrl;                // XYZ template; empty = AWS Terrarium
     unsigned terrainZoom = 12;             // ~38 m/px (14: ~10 m/px, 4x the tiles)
     std::shared_ptr<GroundProvider> ground;// or your own height model (overrides `terrain`)
+    std::string recordPath;                // non-empty: record the run for flightsim-viewer --replay
+    double recordIntervalSeconds = 0;      // simulation time between frames; 0 = every world step
 };
 ```
 
@@ -36,6 +38,14 @@ vehicles by background loaders, so training steps rarely wait. Without
 network access and an empty cache the ground is flat at 0 m (a warning is
 logged per missing tile). Implement `fsim::GroundProvider` for a custom
 height model (a single virtual, thread-safe call).
+
+With `recordPath` set the world appends every vehicle's state (and each
+creation, reset and removal) to a `.fsrec` file as it steps, independent of
+whether a viewer is attached: `flightsim-viewer.exe --replay run.fsrec` plays
+it back later with pause, single-step and time-factor controls. Recording
+is a sequential write of ~150 bytes per vehicle per frame (a 60 s run of
+5 vehicles at 30 Hz is ~5 MB); raise `recordIntervalSeconds` for long
+trainings.
 
 | Call | Meaning |
 | --- | --- |

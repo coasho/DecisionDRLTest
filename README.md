@@ -81,6 +81,9 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
 - **Terrain physics in the SDK** (`WorldOptions::terrain`): the same public elevation tiles the viewer
   draws, fetched headless (WinHTTP + stb_image, no VSG), cached on disk alongside the viewer's downloads,
   prefetched around spawns and kept warm around moving vehicles.
+- **Recording and replay** (`WorldOptions::recordPath`): the trainer writes the same rows and samples the
+  segment carries to a `.fsrec` file; `flightsim-viewer.exe --replay run.fsrec` plays it back with the
+  demo's pause/step/time-factor controls.
 
 Not yet: per-type vehicle models in the viewer, animated control surfaces, vision observations, transport
 bridges for the comm layer, offline tile pyramids (`tools/tile_builder`).
@@ -140,6 +143,10 @@ build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 8
 build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 6 --lat 37.72 --lon -119.55 --alt 3200 --spread 0.02
 build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 3 --spread 0.004 --on-ground
 build/ucrt64-release/bin/flightsim-viewer.exe --help
+
+# record a run without a viewer, replay it later
+build/ucrt64-release/bin/multi_level_control.exe --seconds 60 --quiet --record run.fsrec
+build/ucrt64-release/bin/flightsim-viewer.exe --replay run.fsrec
 
 # headless benchmark
 build/ucrt64-release/bin/flightsim.exe --vehicles 64 --steps 300 --benchmark

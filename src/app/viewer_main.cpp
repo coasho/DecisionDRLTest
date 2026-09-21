@@ -14,6 +14,7 @@
 #include "fsim/Control.h"
 #include "io/AssetResolver.h"
 #include "io/TerrainTiles.h"
+#include "ipc/Recording.h"
 #include "ipc/WorldMirror.h"
 #include "ipc/WorldRegistry.h"
 #include "platform/Clock.h"
@@ -44,6 +45,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -58,6 +60,7 @@ struct ViewerOptions {
     bool demo = false;
     bool list = false;
     std::string worldName;       // --world: attach to this world (default: the newest)
+    std::string replayPath;      // --replay: play a recording instead of a live world
     unsigned capacity = 256;     // slots to prepare before a world is attached
 
     // Demo scenario
@@ -100,6 +103,7 @@ void usage(const char* prog) {
         "  --world <name>           attach to this world (default: the newest published one)\n"
         "  --list                   list live worlds and exit\n"
         "  --capacity <n>           vehicle slots to prepare (256)\n"
+        "  --replay <file.fsrec>    play back a recording made with WorldOptions::recordPath (space pause, . step, [ ] speed)\n"
         "Demo mode: run the built-in scenario on an internal simulation thread.\n"
         "  --demo                   enable demo mode\n"
         "  --aircraft <name>        JSBSim aircraft (c172x)\n"
@@ -148,6 +152,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--demo") o.demo = true;
             else if (a == "--list") o.list = true;
             else if (a == "--world") o.worldName = next();
+            else if (a == "--replay") o.replayPath = next();
             else if (a == "--capacity") o.capacity = static_cast<unsigned>(std::stoul(next()));
             else if (a == "--aircraft") o.aircraft = next();
             else if (a == "--jsbsim-root") o.jsbsimRoot = next();
@@ -255,7 +260,9 @@ int main(int argc, char** argv) {
 
     // --- Rendering (window first: the terrain ground provider uses VSG's readers) ---
     render::Viewer viewer;
-    opt.window.title = opt.demo ? "flightsim - demo " + opt.aircraft : "flightsim - waiting for a training application";
+    opt.window.title = opt.demo ? "flightsim - demo " + opt.aircraft
+                      : !opt.replayPath.empty() ? "flightsim - replay " + opt.replayPath
+                                                : "flightsim - waiting for a training application";
     if (opt.earth.elevationUrl.empty()) opt.earth.elevationUrl = world::kAwsTerrariumUrl;
     if (opt.earth.source == world::EarthSettings::Source::None) opt.earth.elevationUrl.clear();
     opt.window.headlight = !opt.sun;
@@ -277,6 +284,20 @@ int main(int argc, char** argv) {
     // --- Demo simulation (only with --demo) --------------------------------------
     std::unique_ptr<sim::SimRunner> runner;
     std::size_t slots = opt.capacity;
+
+    // --- Recording playback (--replay) ------------------------------------------------
+    ipc::Recording recording;
+    if (!opt.replayPath.empty()) {
+        std::string error;
+        if (!recording.load(opt.replayPath, &error)) {
+            LOG_ERROR("app") << error;
+            return 1;
+        }
+        slots = std::max<std::size_t>(1, recording.header().capacity);
+    }
+    const bool replay = !recording.frames().empty();
+    std::size_t replayFrame = static_cast<std::size_t>(-1);
+    double replayTime = replay ? recording.frames().front().simTime : 0.0;
     if (opt.demo) {
         const auto root = assets.jsbsimRoot(opt.jsbsimRoot);
         if (!root) {
@@ -382,7 +403,7 @@ int main(int argc, char** argv) {
     auto controls = std::make_shared<ui::ViewerControls>();
     controls->timeFactor.store(opt.timeFactor);
     controls->cameraMode.store(opt.cameraMode);
-    auto gui = ui::MonitorGui::create(controls, opt.aircraft);
+    auto gui = ui::MonitorGui::create(controls, replay ? "replay " + opt.replayPath : opt.aircraft);
     auto imgui = vsgImGui::RenderImGui::create(viewer.window(), gui);
     ImGui::GetIO().IniFilename = nullptr;
     ImGui::GetIO().ConfigWindowsMoveFromTitleBarOnly = true; // a drag that starts inside a panel is never a panel move
@@ -460,6 +481,50 @@ int main(int argc, char** argv) {
             }
             controls->simThroughput.store(runner->throughput(), std::memory_order_relaxed);
             if (batch) controls->simTime.store(batch->simTime, std::memory_order_relaxed);
+        } else if (replay) {
+            // Playback clock in simulation time, paced by the demo controls; loops at the end.
+            paused = controls->paused.load(std::memory_order_relaxed);
+            timeFactor = controls->timeFactor.load(std::memory_order_relaxed);
+            const auto& frames = recording.frames();
+            const bool step = controls->singleStep.exchange(false);
+            if (!paused) replayTime += viewer.frameSeconds() * timeFactor;
+            if (step && replayFrame + 1 < frames.size()) replayTime = frames[replayFrame + 1].simTime;
+            if (replayTime > frames.back().simTime) {
+                replayTime = frames.front().simTime; // loop
+                replayFrame = static_cast<std::size_t>(-1);
+                interpolator = world::Interpolator(slots);
+            }
+            std::size_t target = replayFrame == static_cast<std::size_t>(-1) ? 0 : replayFrame;
+            while (target + 1 < frames.size() && frames[target + 1].simTime <= replayTime) ++target;
+            if (target != replayFrame) {
+                // Apply every frame we skipped (table changes must not be lost) but only build the last one.
+                const std::size_t from = replayFrame == static_cast<std::size_t>(-1) ? 0 : replayFrame + 1;
+                if (meta.size() != slots) meta.assign(slots, ui::MonitorGui::VehicleMeta{});
+                for (std::size_t f = from; f <= target; ++f)
+                    for (const auto& [slot, row] : frames[f].tableChanges) {
+                        if (slot >= slots) continue;
+                        alive[slot] = row.alive;
+                        meta[slot].alive = row.alive != 0;
+                        meta[slot].name.assign(row.name, ::strnlen(row.name, ipc::kNameLength));
+                        meta[slot].type.assign(row.type, ::strnlen(row.type, ipc::kTypeLength));
+                        meta[slot].level = control::levelName(static_cast<control::Level>(row.controlLevel));
+                        visuals.setVisible(slot, row.alive != 0);
+                        trails.setEnabled(slot, row.alive != 0);
+                    }
+                gui->setVehicles(meta);
+                replayFrame = target;
+                const auto& frame = frames[target];
+                if (mirrored.states.size() != slots) mirrored.states.resize(slots);
+                for (const auto& [slot, sample] : frame.samples)
+                    if (slot < slots) mirrored.states[slot] = sample.state;
+                mirrored.simTime = frame.simTime;
+                mirrored.wallNs = 0; // interpolate in simulation time, paced by the time factor
+                ++mirrored.sequence;
+                batch = &mirrored;
+                interpolator.push(mirrored);
+            }
+            controls->simTime.store(replayTime, std::memory_order_relaxed);
+            controls->simThroughput.store(0.0, std::memory_order_relaxed);
         } else {
             // Discovery: attach to the requested (or newest) world; re-attach after a restart.
             if (!mirror.valid() && wallSeconds - lastDiscovery > 0.5) {
@@ -569,7 +634,7 @@ int main(int argc, char** argv) {
             visuals.setSelected(selected);
             trails.setSelected(selected);
             trails.setVisible(controls->showTrails.load(std::memory_order_relaxed));
-            trails.update(Span<const sim::VehicleState>(batch->states), runner ? batch->simTime : static_cast<double>(batch->wallNs) * 1e-9);
+            trails.update(Span<const sim::VehicleState>(batch->states), (runner || replay) ? batch->simTime : static_cast<double>(batch->wallNs) * 1e-9);
 
             gui->setShowLabels(controls->showLabels.load(std::memory_order_relaxed));
             std::vector<ui::MonitorGui::Label> labels;

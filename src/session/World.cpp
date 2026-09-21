@@ -55,6 +55,14 @@ World::World(const WorldOptions& options) : options_(options), rng_(options.seed
         publisher_ = std::make_unique<ipc::WorldPublisher>(po);
         publisher_->setEnvironment(environment_);
     }
+    if (!options_.recordPath.empty()) {
+        ipc::RecordingHeader rh;
+        rh.capacity = options_.capacity;
+        rh.dt = options_.dt;
+        rh.frameSkip = options_.frameSkip;
+        copyName(rh.name, ipc::kNameLength, options_.name);
+        recorder_.open(options_.recordPath, rh);
+    }
     LOG_INFO("session") << "world '" << options_.name << "': dt " << options_.dt << " s, frame skip " << options_.frameSkip << ", "
                         << workers << " worker(s)" << (published() ? ", published" : "");
 }
@@ -161,6 +169,13 @@ bool World::removeVehicle(std::uint32_t id) {
     pool_->setActive(slot, false);
     network_.removeNode(id);
     if (publisher_) publisher_->clearVehicle(static_cast<std::uint32_t>(slot));
+    if (recorder_.isOpen()) {
+        ipc::RecordedVehicle r;
+        r.id = id;
+        r.generation = e->info.generation + 1;
+        r.alive = 0;
+        recorder_.writeVehicle(static_cast<std::uint32_t>(slot), r);
+    }
     idToSlot_.erase(id);
     entries_[slot].reset();
     freeSlots_.push_back(slot);
@@ -356,6 +371,7 @@ void World::step(unsigned n) {
         vehicleSteps_ += liveCount_ * static_cast<std::uint64_t>(options_.frameSkip);
         ++worldSteps_;
         network_.step(simTime_, options_.dt * options_.frameSkip, this, rng_);
+        recordFrame();
         if (publisher_) {
             for (std::size_t s = 0; s < entries_.size(); ++s)
                 if (entries_[s]) poolInputs_[s] = entries_[s]->inputs;
@@ -372,7 +388,42 @@ void World::publishNow() {
     publisher_->publish(simTime_, pool_->states(), Span<const sim::ControlInputs>(poolInputs_), true);
 }
 
+void World::recordVehicle(const Entry& e) {
+    if (!recorder_.isOpen()) return;
+    ipc::RecordedVehicle r;
+    r.id = e.info.id;
+    r.generation = e.info.generation;
+    r.alive = e.info.alive ? 1 : 0;
+    r.controlLevel = static_cast<std::uint8_t>(e.stack.activeLevel());
+    copyName(r.name, ipc::kNameLength, e.info.name);
+    copyName(r.type, ipc::kTypeLength, e.info.type);
+    copyName(r.model, ipc::kPathLength, e.info.model);
+    r.initialLatitudeDeg = e.info.initial.latitudeDeg;
+    r.initialLongitudeDeg = e.info.initial.longitudeDeg;
+    r.initialAltitudeMslM = e.info.initial.altitudeMslM;
+    r.initialHeadingDeg = e.info.initial.headingDeg;
+    recorder_.writeVehicle(static_cast<std::uint32_t>(e.slot), r);
+}
+
+void World::recordFrame() {
+    if (!recorder_.isOpen()) return;
+    if (lastRecordedTime_ >= 0.0 && simTime_ - lastRecordedTime_ < options_.recordIntervalSeconds - 1e-9) return;
+    lastRecordedTime_ = simTime_;
+    const auto states = pool_->states();
+    std::vector<std::pair<std::uint32_t, ipc::VehicleSample>> samples;
+    samples.reserve(liveCount_);
+    for (std::size_t s = 0; s < entries_.size(); ++s) {
+        if (!entries_[s]) continue;
+        ipc::VehicleSample v;
+        v.state = states[s];
+        v.inputs = entries_[s]->inputs;
+        samples.emplace_back(static_cast<std::uint32_t>(s), v);
+    }
+    recorder_.writeSnapshot(simTime_, samples);
+}
+
 void World::publishVehicle(const Entry& e) {
+    recordVehicle(e);
     if (!publisher_) return;
     ipc::VehicleRecord r;
     r.id = e.info.id;

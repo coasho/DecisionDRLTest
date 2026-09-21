@@ -110,6 +110,8 @@ typedef struct fsim_world_options {
     int32_t terrain;             /* 1 = physics ground from public elevation tiles (network or warm cache) */
     const char* terrain_url;     /* NULL = AWS Terrarium */
     uint32_t terrain_zoom;       /* 12 */
+    const char* record_path;     /* NULL = no recording; else a file for flightsim-viewer --replay */
+    double record_interval_s;    /* simulation time between frames; 0 = every world step */
 } fsim_world_options;
 
 typedef struct fsim_vehicle_spec {

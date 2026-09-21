@@ -14,6 +14,7 @@ within a major ABI version (`fsim_abi_version()`).
 ```c
 fsim_world_options wo; fsim_world_options_init(&wo);
 wo.name = "rust-trainer";
+wo.terrain = 1;                       /* optional: real relief; wo.record_path = "run.fsrec" records for --replay */
 fsim_world* world; if (fsim_world_create(&wo, &world) != FSIM_OK) { puts(fsim_last_error()); return 1; }
 
 fsim_vehicle_spec spec; fsim_vehicle_spec_init(&spec);

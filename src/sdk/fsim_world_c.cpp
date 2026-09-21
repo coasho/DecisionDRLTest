@@ -157,6 +157,8 @@ FSIM_API int fsim_world_create(const fsim_world_options* options, fsim_world** o
         o.terrain = options->terrain != 0;
         if (options->terrain_url) o.terrainUrl = options->terrain_url;
         o.terrainZoom = options->terrain_zoom ? options->terrain_zoom : 12u;
+        if (options->record_path) o.recordPath = options->record_path;
+        o.recordIntervalSeconds = options->record_interval_s;
         *out = new fsim_world(o);
         return FSIM_OK;
     });

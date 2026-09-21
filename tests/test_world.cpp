@@ -6,6 +6,7 @@
 #include "core/Geodesy.h"
 #include "core/Units.h"
 #include "fsim/BuiltinEffects.h"
+#include "ipc/Recording.h"
 #include "ipc/WorldMirror.h"
 #include "ipc/WorldRegistry.h"
 
@@ -13,6 +14,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
+#include <filesystem>
 #include <string>
 
 using namespace fsim;
@@ -298,4 +300,39 @@ TEST_CASE("a published world is discoverable and mirrored", "[world][ipc]") {
     w.removeVehicle(a);
     REQUIRE(mirror.pollTable());
     REQUIRE_FALSE(mirror.vehicles()[0].alive);
+}
+
+TEST_CASE("a world can be recorded and the recording read back", "[world][ipc]") {
+    const auto path = std::filesystem::temp_directory_path() / "fsim-test-record.fsrec";
+    {
+        auto o = options("test-record");
+        o.recordPath = path;
+        session::World w(o);
+        const auto a = w.createVehicle(spec("rec-a"));
+        w.step(10);
+        auto b = spec("rec-b");
+        b.initial.longitudeDeg += 0.01;
+        w.createVehicle(b);
+        w.step(5);
+        w.removeVehicle(a);
+        w.step(5);
+    }
+    ipc::Recording rec;
+    std::string error;
+    REQUIRE(rec.load(path, &error));
+    REQUIRE(rec.header().capacity == 256);
+    REQUIRE(rec.frames().size() == 20);
+    REQUIRE_THAT(rec.duration(), Catch::Matchers::WithinAbs(19.0 * 4.0 / 120.0, 1e-9));
+    // First frame: vehicle a created (table change before it), one sample.
+    REQUIRE(rec.frames()[0].tableChanges.size() == 1);
+    REQUIRE(std::string(rec.frames()[0].tableChanges[0].second.name) == "rec-a");
+    REQUIRE(rec.frames()[0].samples.size() == 1);
+    // Frame 10: b appears; frame 15: a removed.
+    REQUIRE(rec.frames()[10].tableChanges.size() == 1);
+    REQUIRE(rec.frames()[10].samples.size() == 2);
+    REQUIRE(rec.frames()[15].tableChanges.size() == 1);
+    REQUIRE(rec.frames()[15].tableChanges[0].second.alive == 0);
+    REQUIRE(rec.frames()[15].samples.size() == 1);
+    REQUIRE_THAT(rec.frames()[19].samples[0].second.state.altitudeMslM, Catch::Matchers::WithinAbs(1500.0, 20.0));
+    std::filesystem::remove(path);
 }

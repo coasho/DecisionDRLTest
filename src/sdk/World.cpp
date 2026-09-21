@@ -162,6 +162,8 @@ World::World(const WorldOptions& options) : environment_(*this) {
     o.terrainUrl = options.terrainUrl;
     o.terrainZoom = options.terrainZoom;
     o.ground = options.ground;
+    o.recordPath = options.recordPath;
+    o.recordIntervalSeconds = options.recordIntervalSeconds;
     impl_ = std::make_unique<session::World>(o);
     // Default epoch: now, so the viewer's sun matches the wall clock unless told otherwise.
     auto s = impl_->environment();
