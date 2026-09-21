@@ -29,7 +29,15 @@ add_test(NAME c_abi COMMAND fsim_c_abi_test "${FSIM_JSBSIM_DATA_DIR}")
 
 # The Rust example against the C ABI (when cargo is installed): builds and steps a batch.
 find_program(FSIM_CARGO cargo)
-if(FSIM_CARGO)
+find_program(FSIM_RUSTC rustc)
+set(FSIM_RUST_GNU OFF)
+if(FSIM_CARGO AND FSIM_RUSTC)
+    execute_process(COMMAND ${FSIM_RUSTC} -vV OUTPUT_VARIABLE _rustc_info ERROR_QUIET)
+    if(_rustc_info MATCHES "host: x86_64-pc-windows-gnu")
+        set(FSIM_RUST_GNU ON) # the DLLs are MinGW builds; the MSVC toolchain cannot link their import library
+    endif()
+endif()
+if(FSIM_RUST_GNU)
     add_test(NAME rust_example
              COMMAND ${FSIM_CARGO} run --release --quiet -- vecenv
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/examples/rust_trainer)
@@ -42,8 +50,10 @@ if(FSIM_WITH_RENDER)
     target_link_libraries(fsim_vision_test PRIVATE fsim::sdk fsim::vision)
     fsim_set_warnings(fsim_vision_test)
     add_test(NAME vision COMMAND fsim_vision_test "${FSIM_JSBSIM_DATA_DIR}")
+    set_tests_properties(vision PROPERTIES SKIP_RETURN_CODE 77) # no Vulkan device (CI runners)
     add_executable(fsim_vision_c_abi_test test_vision_c_abi.c)
     target_link_libraries(fsim_vision_c_abi_test PRIVATE fsim::sdk fsim::vision)
     set_target_properties(fsim_vision_c_abi_test PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
     add_test(NAME vision_c_abi COMMAND fsim_vision_c_abi_test "${FSIM_JSBSIM_DATA_DIR}")
+    set_tests_properties(vision_c_abi PROPERTIES SKIP_RETURN_CODE 77)
 endif()

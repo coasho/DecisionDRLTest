@@ -41,7 +41,11 @@ int main(int argc, char** argv) {
     fsim_vision_options_init(&vo);
     CHECK(vo.struct_size == sizeof(fsim_vision_options));
     vo.earth = 0; /* sky and vehicles only: no tiles */
-    CHECK(fsim_vision_create(world, &vo, &vision) == FSIM_OK);
+    if (fsim_vision_create(world, &vo, &vision) != FSIM_OK) {
+        fprintf(stderr, "skipping: %s" "\n", fsim_last_error());
+        fsim_world_destroy(world);
+        return 77; /* no Vulkan device here (CI runners) */
+    }
     fsim_camera_spec_init(&cs);
     cs.width = 64;
     cs.height = 48;

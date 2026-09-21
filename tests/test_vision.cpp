@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <memory>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -46,7 +47,14 @@ int main(int argc, char** argv) {
 
     vision::Options vo;
     vo.earth = false;
-    vision::Sensors sensors(world, vo);
+    std::unique_ptr<vision::Sensors> sensorsPtr;
+    try {
+        sensorsPtr = std::make_unique<vision::Sensors>(world, vo);
+    } catch (const Error& e) {
+        std::fprintf(stderr, "skipping: %s" "\n", e.what());
+        return 77; // no Vulkan device here (CI runners); ctest treats 77 as skipped
+    }
+    vision::Sensors& sensors = *sensorsPtr;
     vision::CameraSpec nose;
     nose.width = 96;
     nose.height = 64;
