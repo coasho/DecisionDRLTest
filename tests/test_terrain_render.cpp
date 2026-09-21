@@ -101,11 +101,24 @@ struct Rig {
     vsg::ref_ptr<vsg::EllipsoidModel> ellipsoid = vsg::EllipsoidModel::create();
     vsg::ref_ptr<vsg::LookAt> lookAt = vsg::LookAt::create();
     vsg::ref_ptr<fsim::world::CameraController> camera;
+    vsg::ref_ptr<vsg::Camera> view;
+    static constexpr double kWidth = 800.0, kHeight = 600.0;
 
     Rig() {
-        auto projection = vsg::Perspective::create(30.0, 4.0 / 3.0, 1.0, 1.0e7);
-        auto view = vsg::Camera::create(projection, lookAt, vsg::ViewportState::create(VkExtent2D{800, 600}));
+        auto projection = vsg::Perspective::create(30.0, kWidth / kHeight, 1.0, 1.0e7);
+        view = vsg::Camera::create(projection, lookAt,
+                                   vsg::ViewportState::create(VkExtent2D{static_cast<uint32_t>(kWidth),
+                                                                        static_cast<uint32_t>(kHeight)}));
         camera = fsim::world::CameraController::create(view, lookAt, ellipsoid);
+    }
+
+    /// Where a world point lands in window pixels, by the same mapping the
+    /// controller uses for the cursor.
+    vsg::dvec2 toScreen(const vsg::dvec3& world) const {
+        const vsg::dmat4 viewProjection = view->projectionMatrix->transform() * view->viewMatrix->transform();
+        const vsg::dvec4 clip = viewProjection * vsg::dvec4(world.x, world.y, world.z, 1.0);
+        const double w = std::abs(clip.w) > 1e-12 ? clip.w : 1e-12;
+        return vsg::dvec2((clip.x / w + 1.0) * kWidth * 0.5, (1.0 - clip.y / w) * kHeight * 0.5);
     }
 
     /// Hold the left button - osgEarth's pan - and drag `steps` times by
@@ -143,11 +156,11 @@ struct Rig {
 
 TEST_CASE("dragging the globe over a pole does not spin the view", "[camera]") {
     // Dragging down the screen walks the focus north (the eye starts south of
-    // it): 5 px a step over 800 steps is ~2000 km, which carries it from 80 N
-    // across the pole and well down the far side.
+    // it). At osgEarth's pan scale, 5 px a step over 1400 steps is ~2100 km,
+    // which carries it from 80 N across the pole and well down the far side.
     Rig rig;
     rig.camera->setFreeView(80.0, 0.0, 0.0, 3.0e5);
-    const double worst = rig.drag(800, 5);
+    const double worst = rig.drag(1400, 5);
     INFO("largest single-step turn of the view direction: " << worst << " deg");
     REQUIRE(worst < 5.0);
 
@@ -211,4 +224,48 @@ TEST_CASE("the wheel zooms towards the point under the cursor", "[camera]") {
 
     // Cursor at the centre is already looking at the focus, so it stays put.
     REQUIRE(vsg::length(zoom(400, 1.0f)) < vsg::length(in) * 0.2);
+}
+
+TEST_CASE("zooming holds the point under the cursor in place", "[camera]") {
+    // What zoomToMouse actually promises: whatever the pointer is over stays
+    // where it is on screen as the view closes in. Checking only that the
+    // focus shifts the right way would miss getting the magnitude wrong,
+    // which on a globe means missing the curvature.
+    Rig rig;
+    rig.camera->setFreeView(45.0, 8.0, 0.0, 3.0e5);
+    rig.camera->update(nullptr, 1.0 / 60.0);
+
+    const int cursorX = 620, cursorY = 200;
+    auto move = vsg::MoveEvent::create();
+    move->x = cursorX;
+    move->y = cursorY;
+    rig.camera->apply(*move);
+
+    const auto target = rig.camera->groundUnderCursor();
+    REQUIRE(target.has_value());
+
+    // The projection has to agree with where the cursor is, or the rest of
+    // this measures nothing.
+    const vsg::dvec2 before = rig.toScreen(*target);
+    REQUIRE_THAT(before.x, Catch::Matchers::WithinAbs(static_cast<double>(cursorX), 2.0));
+    REQUIRE_THAT(before.y, Catch::Matchers::WithinAbs(static_cast<double>(cursorY), 2.0));
+
+    // Fourteen notches in - a six-fold zoom - letting the smoothed distance
+    // settle between each.
+    for (int i = 0; i < 14; ++i) {
+        auto scroll = vsg::ScrollWheelEvent::create();
+        scroll->delta = vsg::vec3(0.0f, 1.0f, 0.0f);
+        rig.camera->apply(*scroll);
+        for (int k = 0; k < 120; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+    }
+
+    // Measured drift over that zoom is about 2 px across and 4 px down, from
+    // 17 px when the camera was still being rotated by its own focus moving.
+    // What is left is the view's up vector following the focus, and the
+    // target being re-picked from a cursor ray each notch; osgEarth re-picks
+    // per scroll event too.
+    const vsg::dvec2 after = rig.toScreen(*target);
+    INFO("drifted from (" << cursorX << ", " << cursorY << ") to (" << after.x << ", " << after.y << ")");
+    REQUIRE_THAT(after.x, Catch::Matchers::WithinAbs(static_cast<double>(cursorX), 6.0));
+    REQUIRE_THAT(after.y, Catch::Matchers::WithinAbs(static_cast<double>(cursorY), 6.0));
 }

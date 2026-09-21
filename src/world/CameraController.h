@@ -85,12 +85,24 @@ public:
     /// Free-style input is active (Free mode, or no vehicle to follow).
     bool detached() const noexcept { return mode_ == Mode::Free || !hasTarget_; }
 
+    /// Where the ray through the cursor meets the ellipsoid, or nothing when
+    /// it misses the globe.
+    std::optional<vsg::dvec3> groundUnderCursor() const;
+
 private:
     void normalised(int x, int y, double& nx, double& ny) const;
     void rotate(double dxNdc, double dyNdc);
     void moveFocus(double dxNdc, double dyNdc);
-    /// Where the cursor's ray meets the ellipsoid, or nothing when it misses.
-    std::optional<vsg::dvec3> groundUnderCursor() const;
+    /// How the view is meant to behave when the focus moves. Azimuth and
+    /// elevation are measured against the focus' own east/north/up, and that
+    /// frame is rebuilt from the Earth's axis at every position - near a pole
+    /// it swings hard - so moving the focus without saying what should happen
+    /// to the view leaves it at the mercy of the frame.
+    enum class Carry {
+        WithGround, ///< the view turns with the focus: dragging the globe keeps the same view of the ground
+        InWorld     ///< the view direction is held fixed in world terms: zooming must not rotate the camera
+    };
+    void moveFocusTo(const vsg::dvec3& newFocus, Carry carry);
     /// Slide the focus so the point under the cursor keeps its place on screen
     /// as the distance changes (osgEarth's zoomToMouse).
     void zoomTowardsCursor(double fromDistance, double toDistance);

@@ -97,6 +97,37 @@ void CameraController::rotate(double dxNdc, double dyNdc) {
     elevation_ = std::clamp(elevation_ - dyNdc * kRotateRadPerNdc, kMinElevation, kMaxElevation);
 }
 
+void CameraController::moveFocusTo(const vsg::dvec3& newFocus, Carry carry) {
+    if (vsg::length(newFocus) < 1.0) return;
+    vsg::dvec3 east, north, up;
+    localFrame(focus_, east, north, up);
+    // The direction from the focus out to the eye, in world terms.
+    const vsg::dvec3 horizontal = north * std::cos(azimuth_) + east * std::sin(azimuth_);
+    const vsg::dvec3 toEye = horizontal * std::cos(elevation_) + up * std::sin(elevation_);
+
+    vsg::dvec3 wanted = toEye;
+    if (carry == Carry::WithGround) {
+        // Turn the view by the same angle the focus travelled over the globe.
+        // The local frame is rebuilt from the Earth's axis rather than carried
+        // along, so the two are not the same thing: near a pole the frame
+        // swings through half a turn while the ground does not, and it is that
+        // difference this removes.
+        const vsg::dvec3 a = vsg::normalize(focus_), b = vsg::normalize(newFocus);
+        const double cosTurn = std::clamp(vsg::dot(a, b), -1.0, 1.0);
+        if (cosTurn < 1.0 - 1e-15) {
+            const vsg::dvec3 axis = vsg::cross(a, b);
+            if (vsg::length(axis) > 1e-12) wanted = vsg::rotate(std::acos(cosTurn), vsg::normalize(axis)) * toEye;
+        }
+    }
+
+    // Re-measure whichever direction that is against the frame the focus has now.
+    focus_ = newFocus;
+    localFrame(focus_, east, north, up);
+    elevation_ = std::clamp(std::asin(std::clamp(vsg::dot(wanted, up), -1.0, 1.0)), kMinElevation, kMaxElevation);
+    const vsg::dvec3 flat = wanted - up * vsg::dot(wanted, up);
+    if (vsg::length(flat) > 1e-9) azimuth_ = wrapAngle(std::atan2(vsg::dot(flat, east), vsg::dot(flat, north)));
+}
+
 // Free camera: drag the ground with the middle button, so the terrain under
 // the cursor follows the mouse.
 //
@@ -120,24 +151,17 @@ void CameraController::moveFocus(double dxNdc, double dyNdc) {
     if (vsg::length(ahead) < 1e-6) ahead = north;
     right = vsg::normalize(right);
     ahead = vsg::normalize(ahead);
-    // Screen units to metres: half a window at the focus spans ~ distance * tan(fov/2) * aspect;
-    // 0.5 x distance per normalised unit is close to "the ground sticks to the cursor" at 30 deg fov.
-    const double scale = 0.5 * distance_;
+    // osgEarth's ACTION_PAN scale, so dragging the globe moves it the same
+    // distance per pixel as it does there.
+    const double scale = kPanPerNdc * distance_;
     const vsg::dvec3 step = -right * (dxNdc * scale) - ahead * (dyNdc * scale);
     const double arc = vsg::length(step);
     const double radius = vsg::length(focus_);
     if (arc < 1e-9 || radius < 1.0) return;
 
     const vsg::dvec3 axis = vsg::normalize(vsg::cross(focus_, step));
-    const vsg::dmat4 turn = vsg::rotate(arc / radius, axis); // arc length -> angle at the centre
-    // Carry the heading with the drag: the horizontal view direction is turned
-    // by the same rotation and azimuth_ re-measured against the new frame.
-    const vsg::dvec3 look = north * std::cos(azimuth_) + east * std::sin(azimuth_);
-    focus_ = turn * focus_;
-    const vsg::dvec3 turned = turn * look;
-    localFrame(focus_, east, north, up);
-    const vsg::dvec3 flat = turned - up * vsg::dot(turned, up);
-    if (vsg::length(flat) > 1e-9) azimuth_ = wrapAngle(std::atan2(vsg::dot(flat, east), vsg::dot(flat, north)));
+    // Dragging: the view goes with the ground under the cursor.
+    moveFocusTo(vsg::rotate(arc / radius, axis) * focus_, Carry::WithGround); // arc length -> angle at the centre
 
     // Back onto the surface: the altitude follows the terrain when known and
     // otherwise stays what it was (update() corrects it as soon as the tile
@@ -176,13 +200,17 @@ void CameraController::apply(vsg::ButtonReleaseEvent& e) {
 }
 
 void CameraController::apply(vsg::MoveEvent& e) {
-    if (e.handled) return;
     double x0, y0, x1, y1;
     normalised(lastX_, lastY_, x0, y0);
     normalised(e.x, e.y, x1, y1);
     const double dx = x1 - x0, dy = y1 - y0; // y up, as in osgGA
+    // Track the cursor even when a panel took the event. ScrollWheelEvent
+    // carries no position, so this is the only record of where the pointer
+    // is, and zooming towards a position last seen before the mouse crossed
+    // a panel sends the view somewhere nobody asked for.
     lastX_ = e.x;
     lastY_ = e.y;
+    if (e.handled) return;
     if (leftDown_ && (e.mask & vsg::BUTTON_MASK_1)) {
         // osgEarth binds the left button to pan.
         if (detached()) {
@@ -236,11 +264,29 @@ void CameraController::zoomTowardsCursor(double fromDistance, double toDistance)
     if (!detached() || fromDistance <= 0.0) return;
     const auto ground = groundUnderCursor();
     if (!ground) return;
-    // Closing to a fraction k of the distance brings the focus the same
-    // fraction of the way to what the cursor is over, so that point keeps its
-    // place on screen and zooming goes where you are looking.
+
+    // Closing to a fraction k of the distance leaves what the cursor is over
+    // in place if the focus comes the same fraction of the way to it: the
+    // offset of that point from the focus then shrinks exactly as fast as the
+    // distance does, so its angle at the eye is unchanged.
     const double t = std::clamp(1.0 - toDistance / fromDistance, -1.0, 1.0);
-    focus_ = focus_ + (*ground - focus_) * t;
+
+    // Straight at it, not round the curve. With the view held still, moving
+    // the focus along the straight line to the target by exactly this
+    // fraction is not an approximation: the whole offset from eye to target
+    // scales by the same k the distance does, so its direction - and so its
+    // place on screen - is unchanged. Going round the great circle instead
+    // overshoots, and did so by 21 pixels over a six-fold zoom. The line
+    // between two nearby points on the globe dips below it by centimetres,
+    // and update() puts the focus back on the ground in any case.
+    // Zooming: the camera must not rotate, or the point it is closing on
+    // slides across the screen. With the view held still in world terms, the
+    // whole offset from eye to target scales by the same fraction the
+    // distance does, so its direction - and its place on screen - is exactly
+    // unchanged. That is why this is a straight line to the target and not a
+    // path over the globe: the line is what makes the scaling exact, and
+    // between two nearby points it dips below the surface by centimetres.
+    moveFocusTo(focus_ + (*ground - focus_) * t, Carry::InWorld);
 }
 
 void CameraController::apply(vsg::ScrollWheelEvent& e) {
