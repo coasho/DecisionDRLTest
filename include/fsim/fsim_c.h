@@ -235,6 +235,9 @@ FSIM_API int fsim_comm_set_medium(fsim_world* world, const char* medium_id, cons
 /* protocol: "beacon" (params: period_s, channel) */
 FSIM_API int fsim_comm_attach_protocol(fsim_world* world, uint32_t node, const char* protocol_id, const char* const* param_names,
                                        const double* param_values, uint32_t param_count);
+/* Bridge a node over UDP: messages delivered to `node` go to remote_host:remote_port as "FSMG" datagrams (format in
+ * fsim/Comm.h), datagrams arriving on local_port (0 = any) become messages from `node`. */
+FSIM_API int fsim_comm_attach_udp_bridge(fsim_world* world, uint32_t node, uint16_t local_port, const char* remote_host, uint16_t remote_port);
 
 /* ---------------------------------------------------------------------------
  * Scenario files (design 9.13): a JSON document describing the world, the

@@ -3,7 +3,12 @@
 // plus wind, effects and a beacon protocol. Start flightsim-viewer.exe in
 // another window at any time to watch it.
 //
-//   multi_level_control [--seconds S] [--realtime] [--aircraft c172x] [--name demo] [--extra N] [--quiet] [--terrain] [--record file.fsrec]
+//   multi_level_control [--seconds S] [--realtime] [--aircraft c172x] [--name demo] [--extra N] [--quiet] [--terrain]
+//                       [--record file.fsrec] [--bridge <local_port>:<peer_port>]
+//
+// --bridge adds an external node (address 1000) whose traffic goes over UDP:
+// every beacon reaches the peer as an "FSMG" datagram and whatever the peer
+// sends arrives in the vehicles' inboxes (see examples/udp_peer).
 
 #include <fsim/BuiltinEffects.h>
 #include <fsim/World.h>
@@ -31,6 +36,7 @@ struct Args {
     bool quiet = false;
     bool terrain = false;
     std::string record;
+    std::string bridge; ///< "<local_port>:<peer_port>"
 };
 
 Args parse(int argc, char** argv) {
@@ -46,6 +52,7 @@ Args parse(int argc, char** argv) {
         else if (k == "--quiet") a.quiet = true;
         else if (k == "--terrain") a.terrain = true;
         else if (k == "--record") a.record = next();
+        else if (k == "--bridge") a.bridge = next();
     }
     return a;
 }
@@ -137,6 +144,20 @@ int main(int argc, char** argv) {
     chaser.addEffect<effects::GaussianSensorNoise>();
     world.addEffectToAll<effects::WindGusts>();
     for (auto& v : world.vehicles()) world.network().attach(v.id(), std::make_unique<comm::BeaconProtocol>(2.0));
+    if (!args.bridge.empty()) {
+        const auto colon = args.bridge.find(':');
+        const auto local = static_cast<std::uint16_t>(std::atoi(args.bridge.substr(0, colon).c_str()));
+        const auto peer = static_cast<std::uint16_t>(colon == std::string::npos ? local + 1 : std::atoi(args.bridge.substr(colon + 1).c_str()));
+        std::string error;
+        auto transport = comm::createUdpTransport(local, "127.0.0.1", peer, &error);
+        if (!transport) {
+            std::fprintf(stderr, "bridge: %s\n", error.c_str());
+            return 1;
+        }
+        world.network().createNode(1000);
+        world.network().attach(1000, std::make_unique<comm::BridgeProtocol>(std::move(transport)));
+        std::printf("bridge: node 1000 on udp port %u -> 127.0.0.1:%u\n", unsigned(local), unsigned(peer));
+    }
 
     const double stepS = world.stepSeconds();
     const int steps = static_cast<int>(args.seconds / stepS);

@@ -87,8 +87,9 @@ a small built-in implementation:
 | `Node` | one per vehicle (address = vehicle id); `network.createNode(address)` for ground stations or the trainer | - |
 | `Message` | `from`, `to` (address or `kBroadcast`), `channel`, `timeSent`, `timeDelivered`, `Payload{format, bytes}` | - |
 | Codecs | `encodeRaw<T>` / `decodeRaw<T>` (trivially copyable structs), `JsonCodec` for named numeric `Fields` | `comm::Codec` with your own format id (>= `kUserFormat`) |
-| `Medium` | `IdealMedium` (instant, lossless), `LinkModel` (`rangeM`, `latencyS`, `jitterS`, `lossProbability`) | subclass `Medium::route()`; bridges to real transports fit here |
-| `Protocol` | `BeaconProtocol(periodS, channel)`: periodic JSON state reports | subclass `Protocol` (`onStep`, `onReceive`) |
+| `Medium` | `IdealMedium` (instant, lossless), `LinkModel` (`rangeM`, `latencyS`, `jitterS`, `lossProbability`) | subclass `Medium::route()` |
+| `Protocol` | `BeaconProtocol(periodS, channel)`: periodic JSON state reports; `BridgeProtocol(transport)`: the node's traffic over a real link | subclass `Protocol` (`onStep`, `onReceive`) |
+| `Transport` | `createUdpTransport(localPort, remoteHost, remotePort)`: non-blocking UDP | subclass `Transport` (`send`, `receive`) for serial, shared memory, a message queue |
 
 ```cpp
 auto& net = world.network();
@@ -106,6 +107,32 @@ for (const auto& msg : red.node()->inbox()) {                      // delivered 
     if (fsim::comm::JsonCodec::decode(msg.payload, f)) /* ... */;
 }
 ```
+
+### Bridges: external processes and hardware as nodes
+
+A `BridgeProtocol` on an external node carries that node's traffic over a
+`Transport`: every message delivered to the node (addressed to it or
+broadcast) leaves as one datagram, and every datagram that arrives comes in
+as a message *from* the node, with the `to`, `channel` and payload the peer
+wrote. The peer - another program, a ground-station tool, a flight computer
+on the bench - is thereby a node of the world, subject to the same medium as
+everyone else.
+
+```cpp
+auto& net = world.network();
+net.createNode(1000);                                                  // the peer's presence in the world
+std::string error;
+auto udp = fsim::comm::createUdpTransport(47000, "127.0.0.1", 47001, &error); // listen 47000, send to 47001
+net.attach(1000, std::make_unique<fsim::comm::BridgeProtocol>(std::move(udp)));
+```
+
+The wire format is fixed and small, so any language can speak it
+(little-endian, 36-byte header): `"FSMG"`, `u8 version = 1`, `u8[3]`,
+`u32 from`, `u32 to`, `u32 channel`, `u32 format`, `f64 timeSent`,
+`u32 length`, then the payload bytes. `encodeWire` / `decodeWire` implement
+it; `examples/udp_peer` is a complete external peer (plain Winsock) that
+receives every beacon from `multi_level_control --bridge 47000:47001` and
+answers each vehicle. The C ABI has `fsim_comm_attach_udp_bridge`.
 
 Messages sent during a step are routed by the medium at the next
 `network.step()` (inside `world.step()`), delivered when due, and stay in the

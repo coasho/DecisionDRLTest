@@ -152,6 +152,50 @@ private:
     std::uint32_t channel_;
 };
 
+/// Byte transport under a BridgeProtocol: one datagram out, one datagram in.
+/// Implement it for your own link (serial, shared memory, a message queue);
+/// createUdpTransport is built in. receive() must not block.
+class Transport {
+public:
+    virtual ~Transport() = default;
+    virtual const char* id() const noexcept = 0;
+    virtual bool send(const std::uint8_t* bytes, std::size_t length) = 0;
+    /// Next waiting datagram; false when none.
+    virtual bool receive(std::vector<std::uint8_t>& out) = 0;
+};
+
+/// Non-blocking UDP: bound to `localPort` (0 = any free port), sending to
+/// `remoteHost:remotePort`. Null (with `error`) when the port is taken.
+FSIM_API std::unique_ptr<Transport> createUdpTransport(std::uint16_t localPort, const std::string& remoteHost, std::uint16_t remotePort,
+                                                       std::string* error = nullptr);
+
+/// Wire format of a bridged message (little-endian, 36-byte header):
+///   "FSMG" | u8 version = 1 | u8 reserved[3] | u32 from | u32 to | u32 channel | u32 format | f64 timeSent | u32 length | bytes
+/// Any process that speaks this over UDP takes part in the world's network.
+FSIM_API std::vector<std::uint8_t> encodeWire(const Message& message);
+FSIM_API bool decodeWire(const std::uint8_t* bytes, std::size_t length, Message& out) noexcept;
+
+/// Carries a node's traffic over a Transport, so an external process (or
+/// hardware) is a node of the world: every message delivered to the node goes
+/// out as one datagram; every datagram received comes in as a message from
+/// the node, with the wire's `to`, `channel` and payload.
+class FSIM_API BridgeProtocol final : public Protocol {
+public:
+    explicit BridgeProtocol(std::unique_ptr<Transport> transport) : transport_(std::move(transport)) {}
+    const char* id() const noexcept override { return "bridge"; }
+    void onStep(Node& node, Network& network, const control::WorldView* world, double simTime, double dt) override;
+    void onReceive(Node& node, const Message& message) override;
+    std::uint64_t datagramsOut() const noexcept { return out_; }
+    std::uint64_t datagramsIn() const noexcept { return in_; }
+    std::uint64_t rejected() const noexcept { return rejected_; } ///< datagrams that were not wire messages
+    Transport& transport() noexcept { return *transport_; }
+
+private:
+    std::unique_ptr<Transport> transport_;
+    std::vector<std::uint8_t> buffer_;
+    std::uint64_t out_ = 0, in_ = 0, rejected_ = 0;
+};
+
 /// The world's message fabric, stepped with the simulation.
 class FSIM_API Network {
 public:

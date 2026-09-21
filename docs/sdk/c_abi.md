@@ -41,7 +41,7 @@ fsim_world_destroy(world);
 | Control | `fsim_vehicle_command_actuator/attitude/acceleration/velocity/position/behavior`, `fsim_vehicle_active_level`, `fsim_vehicle_behavior_finished`, `fsim_vehicle_use_controller`, `fsim_vehicle_set_controller_parameter`; `fsim_hold()` for optional fields |
 | Environment | `fsim_world_get_environment/set_environment` (`fsim_environment`) |
 | Effects | `fsim_vehicle_add_effect(world, id or 0 for all, "gaussian_sensor_noise" ..., names, values, n)`, `fsim_vehicle_clear_effects` |
-| Communication | `fsim_comm_create_node/send/inbox_count/inbox_get/set_medium/attach_protocol` |
+| Communication | `fsim_comm_create_node/send/inbox_count/inbox_get/set_medium/attach_protocol`, `fsim_comm_attach_udp_bridge(world, node, local_port, remote_host, remote_port)` |
 | Batch layer | `fsim_options_init`, `fsim_vecenv_create/destroy/reset/step/buffers`, `fsim_vecenv_observation_name/action_name/vehicle_steps` |
 
 Behaviour parameters and effect parameters are passed as parallel name/value

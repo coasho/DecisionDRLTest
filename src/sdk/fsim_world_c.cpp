@@ -443,6 +443,17 @@ FSIM_API int fsim_comm_attach_protocol(fsim_world* world, uint32_t node, const c
     return fail(FSIM_INVALID_ARGUMENT, "unknown protocol " + id);
 }
 
+FSIM_API int fsim_comm_attach_udp_bridge(fsim_world* world, uint32_t node, uint16_t local_port, const char* remote_host, uint16_t remote_port) {
+    if (!world || !world->world.network().node(node)) return FSIM_INVALID_ARGUMENT;
+    return guard("fsim_comm_attach_udp_bridge", [&] {
+        std::string error;
+        auto transport = fsim::comm::createUdpTransport(local_port, remote_host ? remote_host : "", remote_port, &error);
+        if (!transport) return fail(FSIM_ERROR, "fsim_comm_attach_udp_bridge: " + error);
+        world->world.network().attach(node, std::make_unique<fsim::comm::BridgeProtocol>(std::move(transport)));
+        return static_cast<int>(FSIM_OK);
+    });
+}
+
 } // extern "C"
 
 // --- Scenarios -------------------------------------------------------------------------

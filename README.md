@@ -89,9 +89,10 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
   (loaded and compiled once, on first use), `VehicleSpec::model` for an explicit file, else the sample aircraft.
 - **Scenario files** (`fsim::loadScenario` / `applyScenario`, `fsim_scenario_*`): world, environment, vehicles,
   initial commands and effects as one JSON document; `examples/scenario_runner` runs one.
+- **Comm bridges**: `comm::BridgeProtocol` over a `Transport` (UDP built in) makes an external process or device a
+  node of the world's network (fixed "FSMG" wire format); `examples/udp_peer` + `multi_level_control --bridge`.
 
-Not yet: animated control surfaces, vision observations, transport bridges for the comm layer, offline tile
-pyramids (`tools/tile_builder`).
+Not yet: animated control surfaces, vision observations, offline tile pyramids (`tools/tile_builder`).
 
 Imagery and elevation come from Esri World Imagery and AWS Terrain Tiles under their respective terms (attribution required); tiles are cached under `%LOCALAPPDATA%\flightsim\tilecache`.
 
@@ -151,6 +152,10 @@ build/ucrt64-release/bin/flightsim-viewer.exe --help
 
 # run a scenario file (world, environment, vehicles, commands, effects as data)
 build/ucrt64-release/bin/scenario_runner.exe examples/scenarios/formation_and_pursuit.json --realtime
+
+# an external process as a node of the world's network (two terminals)
+build/ucrt64-release/bin/udp_peer.exe --listen 47001 --send 47000
+build/ucrt64-release/bin/multi_level_control.exe --realtime --bridge 47000:47001
 
 # record a run without a viewer, replay it later
 build/ucrt64-release/bin/multi_level_control.exe --seconds 60 --quiet --record run.fsrec

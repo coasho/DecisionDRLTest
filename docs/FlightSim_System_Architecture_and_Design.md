@@ -430,9 +430,10 @@ Built-in effects (v1): `GaussianSensorNoise`, `SensorLatency`, `ConstantForce`, 
 | `Message` | `from`, `to` (address or broadcast/group), `channel`, `timeSent`, `timeDelivered`, `Payload` (bytes + format id) |
 | `Codec` | Encode/decode a typed struct to `Payload` under a format id (`raw`, `json`, `msgpack`, user formats); vehicles exchange typed state reports, commands, or arbitrary bytes |
 | `Protocol` | Application-level rules on top of nodes (request/response, periodic beacons, group membership, ack/retry); registered by id; users add MAVLink-like or custom protocols |
-| `Medium` | Delivery model for the whole world, stepped with the simulation: `IdealMedium` (instant, lossless), `LinkModel` (range, line-of-sight, latency, jitter, loss, bandwidth), later `Bridge` implementations to real transports (UDP/TCP/serial) so simulated vehicles can talk to external software |
+| `Medium` | Delivery model for the whole world, stepped with the simulation: `IdealMedium` (instant, lossless), `LinkModel` (range, line-of-sight, latency, jitter, loss, bandwidth) |
+| `Transport` / `BridgeProtocol` | A byte transport (`createUdpTransport`; users add serial, shared memory, queues) under a protocol that carries one node's traffic to an external process or device in a fixed little-endian wire format (`"FSMG"` header + payload), so external software is a node of the world behind the same medium |
 
-Every part is a registry-backed interface; the v1 implementation ships `IdealMedium`, `LinkModel`, the `raw` and `json` codecs and a `beacon` protocol (periodic state reports) that `pursuit`/`formation` behaviours use to find their targets.
+Every part is a registry-backed interface; the v1 implementation ships `IdealMedium`, `LinkModel`, the `raw` and `json` codecs, a `beacon` protocol (periodic state reports) that `pursuit`/`formation` behaviours use to find their targets, and the UDP bridge (`examples/udp_peer` is a peer in plain sockets).
 
 ### 9.7 Transparent visualisation through shared memory
 

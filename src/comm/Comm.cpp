@@ -1,12 +1,15 @@
 #include "comm/Comm.h"
 
 #include "core/Geodesy.h"
+#include "core/Log.h"
 #include "core/Units.h"
+#include "platform/Udp.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 namespace fsim::comm {
 
@@ -183,6 +186,86 @@ void Network::step(double simTime, double dt, const control::WorldView* world, R
             }
     }
     inflight_.erase(inflight_.begin(), inflight_.begin() + static_cast<std::ptrdiff_t>(delivered));
+}
+
+// --- Bridges: a node's traffic over a byte transport ---------------------------------
+
+namespace {
+
+class UdpTransport final : public Transport {
+public:
+    const char* id() const noexcept override { return "udp"; }
+    bool send(const std::uint8_t* bytes, std::size_t length) override { return socket.send(bytes, length); }
+    bool receive(std::vector<std::uint8_t>& out) override { return socket.receive(out); }
+    platform::UdpSocket socket;
+};
+
+constexpr std::size_t kWireHeader = 36;
+
+void put32(std::uint8_t* p, std::uint32_t v) {
+    for (int i = 0; i < 4; ++i) p[i] = static_cast<std::uint8_t>(v >> (8 * i));
+}
+std::uint32_t get32(const std::uint8_t* p) {
+    std::uint32_t v = 0;
+    for (int i = 0; i < 4; ++i) v |= static_cast<std::uint32_t>(p[i]) << (8 * i);
+    return v;
+}
+
+} // namespace
+
+std::unique_ptr<Transport> createUdpTransport(std::uint16_t localPort, const std::string& remoteHost, std::uint16_t remotePort, std::string* error) {
+    auto t = std::make_unique<UdpTransport>();
+    if (!t->socket.open(localPort, remoteHost, remotePort, error)) return nullptr;
+    LOG_INFO("comm") << "udp bridge: port " << t->socket.localPort() << " -> " << (remoteHost.empty() ? "127.0.0.1" : remoteHost) << ":" << remotePort;
+    return t;
+}
+
+std::vector<std::uint8_t> encodeWire(const Message& m) {
+    std::vector<std::uint8_t> w(kWireHeader + m.payload.bytes.size());
+    std::memcpy(w.data(), "FSMG", 4);
+    w[4] = 1;
+    put32(&w[8], m.from);
+    put32(&w[12], m.to);
+    put32(&w[16], m.channel);
+    put32(&w[20], m.payload.format);
+    static_assert(sizeof(double) == 8, "wire format assumes 8-byte doubles");
+    std::memcpy(&w[24], &m.timeSent, 8); // host order: little-endian on every platform this builds on
+    put32(&w[32], static_cast<std::uint32_t>(m.payload.bytes.size()));
+    if (!m.payload.bytes.empty()) std::memcpy(&w[kWireHeader], m.payload.bytes.data(), m.payload.bytes.size());
+    return w;
+}
+
+bool decodeWire(const std::uint8_t* bytes, std::size_t length, Message& out) noexcept {
+    if (!bytes || length < kWireHeader || std::memcmp(bytes, "FSMG", 4) != 0 || bytes[4] != 1) return false;
+    const std::uint32_t n = get32(&bytes[32]);
+    if (length < kWireHeader + n) return false;
+    out.from = get32(&bytes[8]);
+    out.to = get32(&bytes[12]);
+    out.channel = get32(&bytes[16]);
+    out.payload.format = get32(&bytes[20]);
+    std::memcpy(&out.timeSent, &bytes[24], 8);
+    out.timeDelivered = 0.0;
+    out.payload.bytes.assign(bytes + kWireHeader, bytes + kWireHeader + n);
+    return true;
+}
+
+void BridgeProtocol::onStep(Node& node, Network& network, const control::WorldView*, double, double) {
+    // Everything the peer sent since the last step becomes a message from this node.
+    while (transport_->receive(buffer_)) {
+        Message m;
+        if (!decodeWire(buffer_.data(), buffer_.size(), m)) {
+            ++rejected_;
+            continue;
+        }
+        m.from = node.address();
+        network.send(std::move(m));
+        ++in_;
+    }
+}
+
+void BridgeProtocol::onReceive(Node&, const Message& message) {
+    const auto wire = encodeWire(message);
+    if (transport_->send(wire.data(), wire.size())) ++out_;
 }
 
 } // namespace fsim::comm
