@@ -59,10 +59,31 @@ void MonitorGui::drawMonitor() const {
             ImGui::TextDisabled("start any program that creates an fsim::World");
             if (!source_.available.empty()) {
                 ImGui::Text("worlds in the registry:");
-                for (const auto& w : source_.available) ImGui::BulletText("%s", w.c_str());
+                for (std::size_t i = 0; i < source_.available.size(); ++i) {
+                    ImGui::PushID(static_cast<int>(i));
+                    if (ImGui::SmallButton("attach")) controls_->attachWorld.store(static_cast<int>(i), std::memory_order_relaxed);
+                    ImGui::PopID();
+                    ImGui::SameLine();
+                    ImGui::Text("%s", source_.available[i].c_str());
+                }
             }
         } else {
             ImGui::Text("world '%s'  x %zu vehicle(s)", source_.world.c_str(), live);
+            if (source_.available.size() > 1) {
+                // Several training applications are live: switch between them here.
+                int current = -1;
+                for (std::size_t i = 0; i < source_.available.size(); ++i)
+                    if (source_.available[i] == source_.world) current = static_cast<int>(i);
+                ImGui::SetNextItemWidth(220.0f);
+                if (ImGui::BeginCombo("switch world", current >= 0 ? source_.available[static_cast<std::size_t>(current)].c_str() : source_.world.c_str())) {
+                    for (std::size_t i = 0; i < source_.available.size(); ++i) {
+                        const bool selected = static_cast<int>(i) == current;
+                        if (ImGui::Selectable(source_.available[i].c_str(), selected) && !selected)
+                            controls_->attachWorld.store(static_cast<int>(i), std::memory_order_relaxed);
+                    }
+                    ImGui::EndCombo();
+                }
+            }
             if (!source_.publisherAlive) ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.3f, 1.0f), "training application has exited");
             else if (source_.ageSeconds > 2.0) ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "not updating (%.0f s)", source_.ageSeconds);
             else ImGui::TextDisabled("live, last update %.0f ms ago", source_.ageSeconds * 1e3);

@@ -29,6 +29,7 @@ next one. Restarting the trainer re-attaches automatically.
 
 - Every live vehicle, as a 3D model over full-Earth satellite imagery and terrain, with a label, a trail and a chase/orbit/overview camera (`tab` cycles vehicles; the mouse works like OpenSceneGraph's manipulators: left drag rotates, middle drag pans, wheel zooms from 6 m to the whole Earth, right drag zooms while following a vehicle; detached (camera mode "free", or before any vehicle exists) the middle and right buttons drag the globe like osgGA's TerrainManipulator; the camera never enters the terrain).
 - Vehicle creation, reset (new "generation") and removal, as they happen.
+- Several training applications at once: the monitor lists every live world and switches between them (`--world <name>` picks one at start).
 - Per-type models: a vehicle of type `jsbsim:f16` is drawn with `models/f16.glb` (or `.gltf`) if such a file exists in an asset directory (`<exe>/../share/flightsim/models`, the source tree's `assets/models`, or a `--assets` path), else with the platform's default aircraft; `VehicleSpec::model` names a file explicitly. Files are loaded once, on first use, and shared by every vehicle of that type; a `<file>.manifest` (`forward`, `up`, `scale`) fixes axes and size.
 - The world's clock (sun position and sky), wind, atmosphere and weather.
 - The trainer's throughput (vehicle-steps/s), simulation time and the age of the last update.

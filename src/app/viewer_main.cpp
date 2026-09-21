@@ -547,7 +547,28 @@ int main(int argc, char** argv) {
             controls->replayStart.store(frames.front().simTime, std::memory_order_relaxed);
             controls->replayEnd.store(frames.back().simTime, std::memory_order_relaxed);
         } else {
+            // The GUI asked for another world: drop this one; discovery below attaches to it.
+            const int attachIndex = controls->attachWorld.exchange(-1);
+            if (attachIndex >= 0 && static_cast<std::size_t>(attachIndex) < available.size() && available[static_cast<std::size_t>(attachIndex)] != mirror.name()) {
+                opt.worldName = available[static_cast<std::size_t>(attachIndex)];
+                if (mirror.valid()) {
+                    LOG_INFO("app") << "leaving world '" << mirror.name() << "' for '" << opt.worldName << "'";
+                    mirror.close();
+                    batch = nullptr;
+                    std::fill(alive.begin(), alive.end(), 0);
+                    for (std::size_t i = 0; i < slots; ++i) { visuals.setVisible(i, false); trails.setEnabled(i, false); }
+                    meta.clear();
+                    gui->setVehicles(meta);
+                }
+                lastDiscovery = -1.0;
+            }
             // Discovery: attach to the requested (or newest) world; re-attach after a restart.
+            // While attached the registry is still polled (every 2 s) so the GUI can offer the other worlds.
+            if (mirror.valid() && wallSeconds - lastDiscovery > 2.0) {
+                lastDiscovery = wallSeconds;
+                available.clear();
+                for (const auto& w : ipc::WorldRegistry::list()) available.push_back(w.name);
+            }
             if (!mirror.valid() && wallSeconds - lastDiscovery > 0.5) {
                 lastDiscovery = wallSeconds;
                 const auto worlds = ipc::WorldRegistry::list();
