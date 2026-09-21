@@ -27,6 +27,15 @@ target_link_libraries(fsim_c_abi_test PRIVATE fsim::sdk)
 set_target_properties(fsim_c_abi_test PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
 add_test(NAME c_abi COMMAND fsim_c_abi_test "${FSIM_JSBSIM_DATA_DIR}")
 
+# The Rust example against the C ABI (when cargo is installed): builds and steps a batch.
+find_program(FSIM_CARGO cargo)
+if(FSIM_CARGO)
+    add_test(NAME rust_example
+             COMMAND ${FSIM_CARGO} run --release --quiet -- vecenv
+             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/examples/rust_trainer)
+    set_tests_properties(rust_example PROPERTIES ENVIRONMENT "FSIM_BUILD_DIR=${CMAKE_BINARY_DIR}" TIMEOUT 600)
+endif()
+
 # Offscreen cameras through fsim_vision.dll (needs a Vulkan device).
 if(FSIM_WITH_RENDER)
     add_executable(fsim_vision_test test_vision.cpp)

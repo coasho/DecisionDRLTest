@@ -1,0 +1,12 @@
+[package]
+name = "fsim-rust-trainer"
+version = "0.1.0"
+edition = "2021"
+description = "fsim from Rust through the C ABI (fsim_c.h): the object model and the VecEnv batch layer, no bindgen"
+license = "MIT"
+
+[[bin]]
+name = "rust_trainer"
+path = "src/main.rs"
+
+[dependencies]

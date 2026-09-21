@@ -93,6 +93,8 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
   node of the world's network (fixed "FSMG" wire format); `examples/udp_peer` + `multi_level_control --bridge`.
 - **Offline tiles**: `tools/tile_prefetch` fills the shared tile cache (elevation + imagery pyramid) for a region,
   for training machines and viewers without network access.
+- **Rust example** (`examples/rust_trainer`): the C ABI from Rust with hand-written `extern "C"` declarations,
+  object model and VecEnv at full throughput; `cargo run --release -- world | vecenv`.
 - **Vision observations (M4)**: `fsim::vision::Sensors` mounts cameras on vehicles and renders them offscreen
   (`fsim_vision.dll`, Vulkan without a window) over the same imagery, relief, sky and models the viewer draws;
   64 cameras in ~8 ms per step, RGB and depth; `examples/vision_capture` writes PNGs.

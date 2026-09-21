@@ -9,6 +9,8 @@ library, integer return codes (`FSIM_OK` = 0, negative = error, text in
 `fsim_last_error()`), no exceptions, no C++ types. Struct layouts only grow
 within a major ABI version (`fsim_abi_version()`).
 
+`examples/rust_trainer` is a complete Rust client (no bindgen): `src/ffi.rs` mirrors the structs, `src/main.rs` runs the object model and a VecEnv batch.
+
 ## World and vehicles
 
 ```c
