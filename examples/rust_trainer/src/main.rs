@@ -76,6 +76,7 @@ impl World {
         unsafe { ffi::fsim_vehicle_state_ptr(self.0, id).as_ref() }
     }
 
+    #[allow(dead_code)] // used by the `vision` feature
     fn set_time_utc(&mut self, unix_seconds: f64) {
         unsafe {
             let mut e = MaybeUninit::<ffi::fsim_environment>::zeroed().assume_init();
