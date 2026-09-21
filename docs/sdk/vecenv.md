@@ -34,6 +34,71 @@ for (;;) {
 | Observation `"state"` | `alt_msl_km, agl_km, tas_100ms, alpha, beta, roll, pitch, hdg_sin, hdg_cos, p, q, r, vz_down_100ms, ax_g, ay_g, az_g, alt_err_km, hdg_err_sin, hdg_err_cos, throttle` |
 | Tasks | `altitude_heading_hold` (targets sampled per episode within `targetAltitudeDeltaM` / `targetHeadingDeltaDeg` of the initial state; shaped reward, -10 on crash), `level_flight` |
 
+## Your own task, observation or action
+
+`#include <fsim/VecEnvPlugins.h>`
+
+The three things that make a batch an *experiment* - what it is rewarded for,
+what the agent sees and what an action means - are small interfaces. Implement
+one in your own code, register it under an id, and name that id in the
+options: no platform rebuild, and the built-ins are implemented against
+exactly the same interfaces.
+
+| Interface | Implements | Registered with |
+| --- | --- | --- |
+| `fsim::Task` | `reset()` picks the episode's targets, `evaluate()` returns reward and termination for one vehicle | `registerTask(id, [](const TaskParams&) { ... })` |
+| `fsim::ObservationBuilder` | `size()`, `names()`, `build()` - the vector the agent sees, roughly normalised to [-1, 1] | `registerObservation(id, [] { ... })` |
+| `fsim::ActionMapper` | `size()`, `names()`, `level()`, `map()` - an action vector (each element in [-1, 1]) as a command at one control level | `registerAction(id, [] { ... })` |
+
+```cpp
+class Climb final : public fsim::Task {
+public:
+    explicit Climb(const fsim::TaskParams& p) : ceiling_(p.targetAltitudeDeltaM) {}
+    std::string_view name() const noexcept override { return "climb"; }
+
+    void reset(std::size_t, const fsim::VehicleState& initial, fsim::Rng& rng, fsim::TaskState& t) override {
+        t.targetAltitudeM = initial.altitudeMslM + rng.uniform(100.0, ceiling_);
+        t.custom[0] = initial.altitudeMslM;              // yours to use
+    }
+    void evaluate(std::size_t, const fsim::VehicleState& s, fsim::TaskState& t, double& reward, bool& terminated) override {
+        reward = (s.altitudeMslM - t.custom[0]) / 100.0;
+        terminated = s.diverged || s.altitudeAglM < 30.0;
+        if (terminated && !s.diverged) reward -= 10.0;
+        t.lastReward = reward;
+    }
+private:
+    double ceiling_;
+};
+
+fsim::registerTask("climb", [](const fsim::TaskParams& p) { return std::make_unique<Climb>(p); });
+
+fsim::VecEnvOptions opt;
+opt.task = "climb";                                      // and opt.observation / opt.action likewise
+fsim::VecEnv env(opt);
+```
+
+- `TaskState` is the per-vehicle scratch the task keeps across an episode: the
+  targets, `lastReward`, and `custom[8]` for anything else. It is **cleared
+  before every `reset()`**, so episodes are independent, and the observation
+  builder is handed the same struct - which is how the agent gets to see what
+  it is being asked to do.
+- `TaskParams` is what the scenario fixed for the batch:
+  `targetAltitudeDeltaM`, `targetHeadingDeltaDeg`, `maxEpisodeSteps`,
+  `aircraft` and `agentStepSeconds` (`dt * frameSkip`).
+- An `ActionMapper` returns a `control::Command` at the `level()` it declares,
+  so anything above the actuators is flown by the built-in loops
+  ([control.md](control.md)); registering one is how a batch gets an action
+  space the four built-ins do not cover.
+- `taskIds()`, `observationIds()` and `actionIds()` list what is registered,
+  built-ins included. Registration is process-wide, takes effect for
+  environments created afterwards, and registering an existing id replaces it
+  - so you can substitute your own `"state"` observation. An id nobody
+  registered makes the `VecEnv` constructor throw, naming the ids that exist.
+- The environment calls these on the caller's thread, once per vehicle per
+  step, in vehicle order.
+
+`tests/test_sdk.cpp` registers all three and drives a batch with them.
+
 A scenario file can define the batch instead of code: `fsim::vecEnvOptions(fsim::loadScenario(path))` ([scenarios.md](scenarios.md#vecenv-from-a-scenario)); its environment and world-wide effects then apply to the batch's world (`VecEnvOptions::scenarioPath`).
 
 The C ABI mirrors it as `fsim_vecenv_*` ([c_abi.md](c_abi.md)). `examples/minimal_trainer` is a complete loop with a PD baseline; `examples/ppo_trainer` is a full PPO (GAE, clipped objective, running observation normalisation, truncation bootstrapping) with a dependency-free MLP that learns the `altitude_heading_hold` task at the attitude level in about two minutes and beats the PD baseline - the loop to copy when plugging in LibTorch or any other learner.

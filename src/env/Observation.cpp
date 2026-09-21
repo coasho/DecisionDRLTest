@@ -2,6 +2,7 @@
 
 #include "core/Log.h"
 #include "core/Units.h"
+#include "env/Registry.h"
 
 #include <algorithm>
 #include <cmath>
@@ -143,19 +144,30 @@ private:
 
 } // namespace
 
+void registerBuiltinObservations(PluginRegistry& registry) {
+    registry.addObservation("state", []() -> std::unique_ptr<ObservationBuilder> {
+        return std::make_unique<StateObservation>();
+    });
+}
+
+void registerBuiltinActions(PluginRegistry& registry) {
+    registry.addAction("surfaces", []() -> std::unique_ptr<ActionMapper> { return std::make_unique<SurfacesAction>(); });
+    registry.addAction("attitude", []() -> std::unique_ptr<ActionMapper> { return std::make_unique<AttitudeAction>(); });
+    registry.addAction("acceleration",
+                       []() -> std::unique_ptr<ActionMapper> { return std::make_unique<AccelerationAction>(); });
+    registry.addAction("velocity", []() -> std::unique_ptr<ActionMapper> { return std::make_unique<VelocityAction>(); });
+}
+
 std::unique_ptr<ObservationBuilder> createObservationBuilder(const std::string& id) {
-    if (id == "state") return std::make_unique<StateObservation>();
-    LOG_ERROR("env") << "unknown observation '" << id << "'";
-    return nullptr;
+    auto builder = PluginRegistry::instance().createObservation(id);
+    if (!builder) LOG_ERROR("env") << "unknown observation '" << id << "'";
+    return builder;
 }
 
 std::unique_ptr<ActionMapper> createActionMapper(const std::string& id) {
-    if (id == "surfaces") return std::make_unique<SurfacesAction>();
-    if (id == "attitude") return std::make_unique<AttitudeAction>();
-    if (id == "acceleration") return std::make_unique<AccelerationAction>();
-    if (id == "velocity") return std::make_unique<VelocityAction>();
-    LOG_ERROR("env") << "unknown action mapper '" << id << "'";
-    return nullptr;
+    auto mapper = PluginRegistry::instance().createAction(id);
+    if (!mapper) LOG_ERROR("env") << "unknown action mapper '" << id << "'";
+    return mapper;
 }
 
 } // namespace fsim::env

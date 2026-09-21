@@ -2,6 +2,7 @@
 
 #include "core/Log.h"
 #include "core/Units.h"
+#include "env/Registry.h"
 #include "env/Scenario.h"
 
 #include <algorithm>
@@ -24,7 +25,8 @@ double wrapPi(double a) {
 /// bank, sideslip and pitch rate; terminate on crash-like states.
 class AltitudeHeadingHold final : public Task {
 public:
-    explicit AltitudeHeadingHold(const Scenario& s) : altDelta_(s.targetAltitudeDeltaM), hdgDelta_(units::degreesToRadians(s.targetHeadingDeltaDeg)) {}
+    explicit AltitudeHeadingHold(const TaskParams& p)
+        : altDelta_(p.targetAltitudeDeltaM), hdgDelta_(units::degreesToRadians(p.targetHeadingDeltaDeg)) {}
 
     std::string_view name() const noexcept override { return "altitude_heading_hold"; }
 
@@ -75,11 +77,29 @@ public:
 
 } // namespace
 
+void registerBuiltinTasks(PluginRegistry& registry) {
+    registry.addTask("altitude_heading_hold", [](const TaskParams& p) -> std::unique_ptr<Task> {
+        return std::make_unique<AltitudeHeadingHold>(p);
+    });
+    registry.addTask("level_flight", [](const TaskParams&) -> std::unique_ptr<Task> {
+        return std::make_unique<LevelFlight>();
+    });
+}
+
+TaskParams taskParams(const Scenario& s) {
+    TaskParams p;
+    p.targetAltitudeDeltaM = s.targetAltitudeDeltaM;
+    p.targetHeadingDeltaDeg = s.targetHeadingDeltaDeg;
+    p.maxEpisodeSteps = s.maxEpisodeSteps;
+    p.aircraft = s.aircraft;
+    p.agentStepSeconds = s.dt * s.frameSkip;
+    return p;
+}
+
 std::unique_ptr<Task> createTask(const std::string& id, const Scenario& scenario) {
-    if (id == "altitude_heading_hold") return std::make_unique<AltitudeHeadingHold>(scenario);
-    if (id == "level_flight") return std::make_unique<LevelFlight>();
-    LOG_ERROR("env") << "unknown task '" << id << "'";
-    return nullptr;
+    auto task = PluginRegistry::instance().createTask(id, taskParams(scenario));
+    if (!task) LOG_ERROR("env") << "unknown task '" << id << "'";
+    return task;
 }
 
 } // namespace fsim::env

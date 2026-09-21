@@ -16,7 +16,7 @@ memory without your program noticing (see [viewer.md](viewer.md)).
 | [viewer.md](viewer.md) | transparent visualisation: how the prebuilt viewer discovers and mirrors a world |
 | [scenarios.md](scenarios.md) | scenario files: the world, environment, vehicles, commands and effects as a JSON document |
 | [vision.md](vision.md) | cameras on vehicles: offscreen RGB images of the same Earth the viewer draws (`fsim_vision.dll`) |
-| [vecenv.md](vecenv.md) | the batch (gym-style) layer for vectorised RL, built on the same object model |
+| [vecenv.md](vecenv.md) | the batch (gym-style) layer for vectorised RL, built on the same object model; registering your own task, observation space and action space |
 | [c_abi.md](c_abi.md) | the C ABI for other languages |
 
 ## Ten-line tour

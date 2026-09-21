@@ -200,7 +200,7 @@ TerrainManipulator; the eye never goes below the terrain; `r` resets the view. C
 See [docs/sdk](docs/sdk/README.md): [world and vehicles](docs/sdk/world.md), [multi-level
 control](docs/sdk/control.md), [environment, effects, communication](docs/sdk/environment.md),
 [transparent visualisation](docs/sdk/viewer.md), [scenario files](docs/sdk/scenarios.md), [vision](docs/sdk/vision.md),
-[VecEnv](docs/sdk/vecenv.md), [C ABI](docs/sdk/c_abi.md).
+[VecEnv](docs/sdk/vecenv.md) and [your own task / observation / action](docs/sdk/vecenv.md#your-own-task-observation-or-action), [C ABI](docs/sdk/c_abi.md).
 Link against `fsim` (`libfsim.dll` + `libJSBSim.dll` at runtime); JSBSim's aircraft data is found
 automatically next to the executable (`share/flightsim/jsbsim`) or in the source tree.
 
@@ -239,7 +239,7 @@ src/effects/      effect pipeline and built-in effects
 src/comm/         communication: network, media, codecs, protocols
 src/ipc/          shared-memory world segment: publisher, mirror, registry
 src/session/      World implementation (vehicles, stepping, environment, publisher)
-src/env/          Scenario, Task, Observation/Action spaces, VecEnv (batch layer)
+src/env/          Scenario, Task, Observation/Action spaces and their registry, VecEnv (batch layer)
 src/sdk/          libfsim.dll: C++ SDK (World, VecEnv) + C ABI
 src/vision/       libfsim_vision.dll: offscreen vehicle cameras (needs Vulkan)
 tools/            tile_prefetch: offline tile cache for a region

@@ -1,12 +1,29 @@
 #include "env/VecEnv.h"
 
 #include "core/Log.h"
+#include "env/Registry.h"
 #include "session/Scenario.h"
 
 #include <algorithm>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace fsim::env {
+
+namespace {
+
+/// "a, b, c" - the registered ids, for the "unknown id" message.
+std::string joined(const std::vector<std::string>& ids) {
+    std::string out;
+    for (const auto& id : ids) {
+        if (!out.empty()) out += ", ";
+        out += id;
+    }
+    return out;
+}
+
+} // namespace
 
 VecEnv::VecEnv(const Scenario& scenario, const Options& options)
     : scenario_(scenario), numEnvs_(std::max(1u, options.numEnvs)), vehiclesPerEnv_(std::max(1u, scenario.vehiclesPerEnv)),
@@ -14,7 +31,15 @@ VecEnv::VecEnv(const Scenario& scenario, const Options& options)
     task_ = createTask(scenario_.task, scenario_);
     obsBuilder_ = createObservationBuilder(scenario_.observation);
     actionMapper_ = createActionMapper(scenario_.action);
-    if (!task_ || !obsBuilder_ || !actionMapper_) throw std::runtime_error("VecEnv: unknown task/observation/action id");
+    const PluginRegistry& registry = PluginRegistry::instance();
+    if (!task_)
+        throw std::runtime_error("VecEnv: unknown task '" + scenario_.task + "'; registered: " + joined(registry.taskIds()));
+    if (!obsBuilder_)
+        throw std::runtime_error("VecEnv: unknown observation '" + scenario_.observation + "'; registered: " +
+                                 joined(registry.observationIds()));
+    if (!actionMapper_)
+        throw std::runtime_error("VecEnv: unknown action '" + scenario_.action + "'; registered: " +
+                                 joined(registry.actionIds()));
 
     session::WorldOptions wo;
     wo.name = scenario_.worldName;
@@ -77,6 +102,9 @@ void VecEnv::resetEnv(unsigned env, bool) {
         neutral.throttle = 0.6;
         neutral.gearDown = 0.0;
         world_->command(ids_[i], neutral);
+        // Cleared first so episodes are independent even when a task keeps
+        // its own values in TaskState::custom.
+        taskStates_[i] = TaskState{};
         task_->reset(v, *world_->vehicleState(ids_[i]), rng, taskStates_[i]);
     }
     episodeSteps_[env] = 0;

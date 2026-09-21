@@ -3,6 +3,8 @@
 add_library(fsim_env STATIC
     Observation.h
     Observation.cpp
+    Registry.h
+    Registry.cpp
     Scenario.h
     Task.h
     Task.cpp
