@@ -36,7 +36,9 @@ and `onGround` spawns use it. Tiles are downloaded on first use into
 around each new vehicle (blocking, a few km) and kept warm around moving
 vehicles by background loaders, so training steps rarely wait. Without
 network access and an empty cache the ground is flat at 0 m (a warning is
-logged per missing tile). Implement `fsim::GroundProvider` for a custom
+logged per missing tile) - fill the cache beforehand with
+`tile_prefetch --lat .. --lon .. --radius-km ..` (elevation and imagery for
+the whole level pyramid; the directory can be copied to an offline machine). Implement `fsim::GroundProvider` for a custom
 height model (a single virtual, thread-safe call).
 
 With `recordPath` set the world appends every vehicle's state (and each

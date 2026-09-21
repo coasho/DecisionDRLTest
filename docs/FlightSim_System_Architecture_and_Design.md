@@ -295,7 +295,7 @@ Each frame the render thread pumps events (VSG visitors, then ImGui), acquires t
 
 ### 8.4 Vision observations
 
-When a scenario declares a camera observation (`rgb`, `depth`, `segmentation`; resolution, field of view, mount pose), `render` creates an offscreen `vsg::View` per sensor rendering into a shared image array; all sensors for a `step()` are recorded into one command buffer, submitted once, and read back with a single copy into a host-visible buffer exposed as an `(M×K×H×W×C)` `uint8`/`float16` span. Terrain tiles for sensor views are requested by the pager from each sensor camera, so agents see the same Earth the viewer does; for training on a fixed region the pyramid is prefetched by `tools/tile_builder --prefetch` so no I/O happens during episodes. Budget: 64 cameras at 128×128 RGB in under 30 ms per step on an RTX-class GPU; a GPU-resident path (no host readback) is a post-v1 optimisation.
+When a scenario declares a camera observation (`rgb`, `depth`, `segmentation`; resolution, field of view, mount pose), `render` creates an offscreen `vsg::View` per sensor rendering into a shared image array; all sensors for a `step()` are recorded into one command buffer, submitted once, and read back with a single copy into a host-visible buffer exposed as an `(M×K×H×W×C)` `uint8`/`float16` span. Terrain tiles for sensor views are requested by the pager from each sensor camera, so agents see the same Earth the viewer does; for training on a fixed region the pyramid is prefetched by `tools/tile_builder --prefetch` so no I/O happens during episodes (today: `tools/tile_prefetch` fills the shared cache for a region from the public servers). Budget: 64 cameras at 128×128 RGB in under 30 ms per step on an RTX-class GPU; a GPU-resident path (no host readback) is a post-v1 optimisation.
 
 ### 8.5 Assets and cache
 
@@ -532,7 +532,7 @@ flightsim/
 ├─ scenarios/              example scenarios and tasks (.vsgt)
 ├─ examples/               minimal_trainer (C++), torch_ppo (optional, LibTorch), rust_ffi (C ABI)
 ├─ tests/                  Catch2 unit + integration, golden trajectories, benchmarks, ABI tests
-└─ tools/                  tile_builder (GDAL, offline), scenario validator, asset packer
+└─ tools/                  tile_prefetch (offline tile cache for a region); planned: tile_builder (GDAL), scenario validator, asset packer
 ```
 
 ### 11.2 Dependency budget

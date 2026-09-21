@@ -11,7 +11,7 @@ project(flightsim
 option(FSIM_WITH_RENDER  "Build the viewer (render/world/ui; requires Vulkan SDK + VSG)" OFF)
 option(FSIM_BUILD_TESTS  "Build unit and integration tests"                            ON)
 option(FSIM_BUILD_EXAMPLES "Build example trainers (examples/)"                         ON)
-option(FSIM_BUILD_TOOLS  "Build offline tools (tile_builder, ...)"                     OFF)
+option(FSIM_BUILD_TOOLS  "Build command-line tools (tools/tile_prefetch)"               ON)
 option(FSIM_WARNINGS_AS_ERRORS "Treat compiler warnings as errors in platform code"    ON)
 
 # ---------------------------------------------------------------------------
@@ -61,6 +61,10 @@ set(FSIM_JSBSIM_DATA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/jsbsim)
 add_subdirectory(src)
 if(FSIM_BUILD_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(FSIM_BUILD_TOOLS)
+    add_subdirectory(tools)
 endif()
 
 if(FSIM_BUILD_TESTS)

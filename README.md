@@ -91,8 +91,10 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
   initial commands and effects as one JSON document; `examples/scenario_runner` runs one.
 - **Comm bridges**: `comm::BridgeProtocol` over a `Transport` (UDP built in) makes an external process or device a
   node of the world's network (fixed "FSMG" wire format); `examples/udp_peer` + `multi_level_control --bridge`.
+- **Offline tiles**: `tools/tile_prefetch` fills the shared tile cache (elevation + imagery pyramid) for a region,
+  for training machines and viewers without network access.
 
-Not yet: animated control surfaces, vision observations, offline tile pyramids (`tools/tile_builder`).
+Not yet: animated control surfaces, vision observations.
 
 Imagery and elevation come from Esri World Imagery and AWS Terrain Tiles under their respective terms (attribution required); tiles are cached under `%LOCALAPPDATA%\flightsim\tilecache`.
 
@@ -157,6 +159,9 @@ build/ucrt64-release/bin/scenario_runner.exe examples/scenarios/formation_and_pu
 build/ucrt64-release/bin/udp_peer.exe --listen 47001 --send 47000
 build/ucrt64-release/bin/multi_level_control.exe --realtime --bridge 47000:47001
 
+# fill the tile cache for a region once (terrain physics + viewer imagery offline afterwards)
+build/ucrt64-release/bin/tile_prefetch.exe --lat 37.72 --lon -119.55 --radius-km 30
+
 # record a run without a viewer, replay it later
 build/ucrt64-release/bin/multi_level_control.exe --seconds 60 --quiet --record run.fsrec
 build/ucrt64-release/bin/flightsim-viewer.exe --replay run.fsrec
@@ -198,6 +203,7 @@ src/ipc/          shared-memory world segment: publisher, mirror, registry
 src/session/      World implementation (vehicles, stepping, environment, publisher)
 src/env/          Scenario, Task, Observation/Action spaces, VecEnv (batch layer)
 src/sdk/          libfsim.dll: C++ SDK (World, VecEnv) + C ABI
+tools/            tile_prefetch: offline tile cache for a region
 include/fsim/     public SDK headers
 examples/         multi_level_control, minimal_trainer, ppo_trainer
 docs/sdk/         SDK guide
