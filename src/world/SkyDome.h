@@ -25,7 +25,7 @@ public:
     }
 
 private:
-    void colour(const vsg::dvec3& upEcef);
+    void colour(const vsg::dvec3& upEcef, float space);
 
     vsg::ref_ptr<vsg::MatrixTransform> transform_;
     vsg::ref_ptr<vsg::vec3Array> vertices_; ///< unit sphere, local frame (z up)
@@ -33,6 +33,7 @@ private:
     vsg::dvec3 sun_;
     double radius_;
     vsg::dvec3 lastUp_;
+    float lastSpace_ = -1.0f; ///< 0 = inside the atmosphere, 1 = black sky from orbit
     bool coloured_ = false;
 };
 

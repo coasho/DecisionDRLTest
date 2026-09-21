@@ -91,6 +91,7 @@ struct ViewerOptions {
 
     render::ViewerSettings window;
     int cameraMode = 1; // orbit
+    std::string view;   // --view lat,lon,alt_m,distance_m[,azimuth_deg,elevation_deg]: start detached, looking at that point
     double chaseDistance = 40.0;
     double chaseAzimuth = 180.0, chaseElevation = 14.0;
     bool probe = false;
@@ -126,6 +127,7 @@ void usage(const char* prog) {
         "  --probe                  print motion smoothness statistics after ~5 s and exit\n"
         "  --stats <seconds>        print per-second frame statistics (fps, frame-time breakdown, CPU) and exit\n"
         "  --screenshot <file.png>  save the window after --screenshot-after seconds (3) and exit\n"
+        "  --view lat,lon,alt,dist[,az,el]  start with the free camera looking at that point from dist metres (az deg from north, el deg up)\n"
         "  --trace <i>              print vehicle i's state once per second\n"
         "  --no-interpolate         draw raw snapshots (sample-and-hold) instead of interpolating\n"
         "Scene:\n"
@@ -209,6 +211,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--chase-distance") o.chaseDistance = std::stod(next());
             else if (a == "--chase-azimuth") o.chaseAzimuth = std::stod(next());
             else if (a == "--chase-elevation") o.chaseElevation = std::stod(next());
+            else if (a == "--view") { o.view = next(); o.cameraMode = 3; }
             else if (a == "--camera") {
                 const std::string v = next();
                 o.cameraMode = v == "orbit" ? 1 : v == "overview" ? 2 : v == "free" ? 3 : 0;
@@ -451,6 +454,17 @@ int main(int argc, char** argv) {
     // Detached camera focus: the demo spawn area / default location, on the ground.
     camera->setFocus(ellipsoid->convertLatLongAltitudeToECEF(vsg::dvec3(opt.latitudeDeg, opt.longitudeDeg, 0.0)));
     if (!opt.demo) camera->zoom(300.0); // no vehicle yet: start with a regional view
+    if (!opt.view.empty()) {
+        double v[6] = {0.0, 0.0, 0.0, 1000.0, 180.0, 14.0};
+        std::size_t start = 0;
+        for (int i = 0; i < 6 && start <= opt.view.size(); ++i) {
+            const auto comma = opt.view.find(',', start);
+            v[i] = std::atof(opt.view.substr(start, comma == std::string::npos ? std::string::npos : comma - start).c_str());
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+        }
+        camera->setFreeView(v[0], v[1], v[2], v[3], v[4], v[5]);
+    }
     viewer.addEventHandler(camera);
 
     // --- Source state shared by both modes -----------------------------------------

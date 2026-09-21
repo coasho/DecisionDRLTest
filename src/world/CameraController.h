@@ -47,6 +47,8 @@ public:
 
     /// Initial/default distance behind and above; also the "reset" state.
     void setChaseOffset(double distanceM, double elevationDeg = 14.0, double azimuthDeg = 180.0);
+    /// Detach and look at a geodetic point from a given distance and angles (scripted views, screenshots).
+    void setFreeView(double latitudeDeg, double longitudeDeg, double altitudeM, double distanceM, double azimuthDeg = 180.0, double elevationDeg = 14.0);
     void zoom(double factor) noexcept;
     void resetView() noexcept;
 

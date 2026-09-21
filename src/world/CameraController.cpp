@@ -56,6 +56,16 @@ void CameraController::setMode(Mode mode) {
     mode_ = mode;
 }
 
+void CameraController::setFreeView(double latitudeDeg, double longitudeDeg, double altitudeM, double distanceM, double azimuthDeg, double elevationDeg) {
+    mode_ = Mode::Free;
+    focus_ = ellipsoid_->convertLatLongAltitudeToECEF(vsg::dvec3(latitudeDeg, longitudeDeg, altitudeM));
+    lastTargetPos_ = focus_;
+    distance_ = targetDistance_ = std::clamp(distanceM, kMinDistance, kMaxDistance);
+    azimuth_ = wrapAngle(azimuthDeg * kDeg);
+    elevation_ = std::clamp(elevationDeg * kDeg, kMinElevation, kMaxElevation);
+    panRight_ = panUp_ = 0.0;
+}
+
 void CameraController::setChaseOffset(double distanceM, double elevationDeg, double azimuthDeg) {
     defaultDistance_ = distance_ = targetDistance_ = std::clamp(distanceM, kMinDistance, kMaxDistance);
     defaultElevation_ = elevation_ = std::clamp(elevationDeg * kDeg, kMinElevation, kMaxElevation);

@@ -50,7 +50,7 @@ SkyDome::SkyDome(vsg::ref_ptr<const vsg::Options> options, const vsg::dvec3& sun
     }
 }
 
-void SkyDome::colour(const vsg::dvec3& upEcef) {
+void SkyDome::colour(const vsg::dvec3& upEcef, float space) {
     // Sun elevation above the local horizon drives day/night; azimuth-relative
     // glow is computed per vertex in the local frame.
     const double sunElevation = vsg::dot(sun_, upEcef); // sin(elevation)
@@ -80,6 +80,7 @@ void SkyDome::colour(const vsg::dvec3& upEcef) {
         } else {
             c = mix(below * 0.15f, below, day);
         }
+        c = c * (1.0f - space); // the atmosphere thins out into black space with altitude
         colors_->set(i, vsg::vec4(c.x, c.y, c.z, 1.0f));
     }
     colors_->dirty();
@@ -99,9 +100,13 @@ void SkyDome::update(const vsg::dvec3& eyeEcef) {
                  eyeEcef.x, eyeEcef.y, eyeEcef.z, 1.0);
     transform_->matrix = m;
 
-    if (!coloured_ || vsg::length(up - lastUp_) > 0.01) { // ~60 km of travel
-        colour(up);
+    // Black sky above the atmosphere: fade between 30 km and 200 km of altitude.
+    const double altitude = vsg::length(eyeEcef) - 6371000.0;
+    const float space = static_cast<float>(std::clamp((altitude - 30000.0) / 170000.0, 0.0, 1.0));
+    if (!coloured_ || vsg::length(up - lastUp_) > 0.01 || std::abs(space - lastSpace_) > 0.05) { // ~60 km of travel
+        colour(up, space);
         lastUp_ = up;
+        lastSpace_ = space;
         coloured_ = true;
     }
 }

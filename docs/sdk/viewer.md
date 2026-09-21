@@ -74,7 +74,10 @@ vsync and uses ~3% of one core while mirroring 64 vehicles).
 `flightsim-viewer.exe --screenshot shot.png [--screenshot-after 5]` saves the
 window as PNG after the given number of seconds and exits (any mode: mirror,
 `--demo`, `--replay`); the copy is taken from the swapchain, so it works on a
-locked desktop and in scripts.
+locked desktop and in scripts. `--view lat,lon,alt,dist[,az,el]` starts with
+the free camera looking at a point from `dist` metres (whole-Earth views:
+`--view 20,-30,0,30000000,180,80`); above the atmosphere the sky fades to
+black.
 
 ## If it crashes
 
