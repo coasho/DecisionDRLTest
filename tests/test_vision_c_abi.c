@@ -100,6 +100,27 @@ int main(int argc, char** argv) {
         CHECK(fsim_vision_render(vision) == FSIM_OK);
         CHECK(fsim_vision_image(vision, cam, &w, &h) != NULL && w == 128);
         fsim_vision_destroy(vision);
+        /* The batch API: tensors over every environment. */
+        {
+            fsim_vision_batch* batch = NULL;
+            size_t n = 0;
+            const uint8_t* t;
+            const float* d;
+            fsim_camera_spec_init(&cs);
+            cs.width = 16;
+            cs.height = 8;
+            cs.pitch_deg = 60.0;
+            cs.depth = 1;
+            CHECK(fsim_vision_batch_create(env, &cs, &vo, &batch) == FSIM_OK);
+            CHECK(fsim_vision_batch_count(batch) == 2);
+            CHECK(fsim_vision_batch_render(batch) == FSIM_OK);
+            t = fsim_vision_batch_rgb(batch, &n);
+            CHECK(t != NULL && n == 2 * 16 * 8 * 3);
+            d = fsim_vision_batch_depth(batch, &n);
+            CHECK(d != NULL && n == 2 * 16 * 8 && d[0] > 1000.0f);
+            CHECK(fsim_vision_camera_count(fsim_vision_batch_sensors(batch)) == 2);
+            fsim_vision_batch_destroy(batch);
+        }
         fsim_world_destroy(ew); /* borrowed: a no-op */
         fsim_vecenv_destroy(env);
     }

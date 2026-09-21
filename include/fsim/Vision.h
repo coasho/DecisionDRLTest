@@ -22,6 +22,7 @@
 // episodes.
 
 #include "fsim/Export.h"
+#include "fsim/VecEnv.h"
 #include "fsim/World.h"
 
 #include <cstddef>
@@ -110,6 +111,32 @@ public:
     /// Advance tile streaming without rendering (call between episodes to let
     /// the pager settle after a jump to a new region); returns loaded tiles pending.
     void settle(unsigned frames = 30);
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+/// One camera per batch vehicle of a VecEnv (batch order, index = env * K +
+/// vehicle) with the images packed into tensors: `rgb()` is [N][H][W][3]
+/// bytes, `depth()` [N][H][W] floats when the spec asks for depth. The
+/// pixel observation that goes next to StepResult::observations.
+class FSIM_VISION_API BatchCameras {
+public:
+    BatchCameras(VecEnv& env, const CameraSpec& spec, const Options& options = {});
+    ~BatchCameras();
+    BatchCameras(const BatchCameras&) = delete;
+    BatchCameras& operator=(const BatchCameras&) = delete;
+
+    /// Render every vehicle's camera and pack the tensors (call after step()).
+    void render();
+    ConstSpan<std::uint8_t> rgb() const noexcept;   ///< N*H*W*3
+    ConstSpan<float> depth() const noexcept;        ///< N*H*W, empty without CameraSpec::depth
+    std::size_t count() const noexcept;             ///< N
+    unsigned width() const noexcept;
+    unsigned height() const noexcept;
+    Sensors& sensors() noexcept;                    ///< the underlying cameras (savePng, timing, extra cameras)
+    unsigned camera(std::size_t vehicle) const noexcept; ///< camera index of a batch vehicle
 
 private:
     struct Impl;

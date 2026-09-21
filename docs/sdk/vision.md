@@ -44,20 +44,25 @@ one process share one Vulkan device.
 
 ## With VecEnv
 
-`VecEnv::world()` is the batch's world through the object model, so cameras
-go on batch vehicles the same way; images are read after `step()`:
+`BatchCameras` mounts one camera per batch vehicle (batch order, index =
+`env * K + vehicle`) and packs the images as tensors - the pixel observation
+next to `StepResult::observations`:
 
 ```cpp
 fsim::VecEnv env(opt);
-fsim::vision::Sensors sensors(env.world());
-std::vector<unsigned> cams;
-for (fsim::Vehicle v : env.world().vehicles()) cams.push_back(sensors.addCamera(v, nose)); // "env<e>/<v>", batch order
+fsim::vision::BatchCameras cams(env, nose);          // nose.depth = true for a depth tensor too
 for (;;) {
     auto r = env.step(actions);
-    sensors.render();
-    for (unsigned c : cams) learner.see(sensors.image(c)); // alongside r.observations
+    cams.render();
+    learner.see(cams.rgb(), cams.depth());           // [N][H][W][3] bytes, [N][H][W] metres
 }
 ```
+
+`VecEnv::world()` is the same world through the object model, so cameras
+can also be placed by hand (`Sensors`, `env.world().vehicles()`, vehicles
+named `env<e>/<v>`); `cams.sensors()` is the underlying `Sensors` for
+`savePng`, timing or extra cameras. In C: `fsim_vision_batch_create(env, &spec,
+&options, &batch)`, `fsim_vision_batch_render`, `fsim_vision_batch_rgb/depth`.
 
 ## From C
 

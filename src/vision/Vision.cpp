@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <unordered_map>
 
@@ -299,5 +300,57 @@ Sensors::Timing Sensors::timing() const noexcept {
     return Timing{t.advance, t.update, t.record, t.wait, t.readback};
 }
 std::uint64_t Sensors::frames() const noexcept { return impl_->offscreen.frames(); }
+
+// --- BatchCameras -----------------------------------------------------------------------
+
+struct BatchCameras::Impl {
+    std::unique_ptr<Sensors> sensors;
+    std::vector<unsigned> cameras; ///< per batch vehicle
+    std::vector<std::uint8_t> rgb;
+    std::vector<float> depth;
+    unsigned width = 0, height = 0;
+    bool wantDepth = false;
+};
+
+BatchCameras::BatchCameras(VecEnv& env, const CameraSpec& spec, const Options& options) : impl_(std::make_unique<Impl>()) {
+    impl_->sensors = std::make_unique<Sensors>(env.world(), options);
+    impl_->width = std::max(1u, spec.width);
+    impl_->height = std::max(1u, spec.height);
+    impl_->wantDepth = spec.depth;
+    // Vehicles are named "env<e>/<v>" in batch order; mount in that order.
+    const unsigned K = env.vehiclesPerEnv();
+    for (unsigned e = 0; e < env.numEnvs(); ++e)
+        for (unsigned k = 0; k < K; ++k) {
+            const Vehicle v = env.world().vehicle("env" + std::to_string(e) + "/" + std::to_string(k));
+            if (!v.valid()) throw Error("vision: batch vehicle env" + std::to_string(e) + "/" + std::to_string(k) + " not found");
+            impl_->cameras.push_back(impl_->sensors->addCamera(v, spec));
+        }
+    const std::size_t pixels = static_cast<std::size_t>(impl_->width) * impl_->height;
+    impl_->rgb.assign(impl_->cameras.size() * pixels * 3, 0);
+    if (impl_->wantDepth) impl_->depth.assign(impl_->cameras.size() * pixels, 0.0f);
+}
+
+BatchCameras::~BatchCameras() = default;
+
+void BatchCameras::render() {
+    impl_->sensors->render();
+    const std::size_t pixels = static_cast<std::size_t>(impl_->width) * impl_->height;
+    for (std::size_t i = 0; i < impl_->cameras.size(); ++i) {
+        const Image img = impl_->sensors->image(impl_->cameras[i]);
+        if (img.rgb) std::memcpy(impl_->rgb.data() + i * pixels * 3, img.rgb, pixels * 3);
+        if (impl_->wantDepth) {
+            const DepthImage d = impl_->sensors->depth(impl_->cameras[i]);
+            if (d.metres) std::memcpy(impl_->depth.data() + i * pixels, d.metres, pixels * sizeof(float));
+        }
+    }
+}
+
+ConstSpan<std::uint8_t> BatchCameras::rgb() const noexcept { return ConstSpan<std::uint8_t>{impl_->rgb.data(), impl_->rgb.size()}; }
+ConstSpan<float> BatchCameras::depth() const noexcept { return ConstSpan<float>{impl_->depth.data(), impl_->depth.size()}; }
+std::size_t BatchCameras::count() const noexcept { return impl_->cameras.size(); }
+unsigned BatchCameras::width() const noexcept { return impl_->width; }
+unsigned BatchCameras::height() const noexcept { return impl_->height; }
+Sensors& BatchCameras::sensors() noexcept { return *impl_->sensors; }
+unsigned BatchCameras::camera(std::size_t vehicle) const noexcept { return vehicle < impl_->cameras.size() ? impl_->cameras[vehicle] : 0u; }
 
 } // namespace fsim::vision

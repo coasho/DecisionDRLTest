@@ -168,6 +168,23 @@ int main(int argc, char** argv) {
         batchSensors.render();
         for (unsigned c : cams) CHECK(batchSensors.image(c).rgb != nullptr);
         CHECK(batchSensors.image(cams[0]).width == 96);
+
+        // BatchCameras packs the same images as tensors in batch order.
+        vision::CameraSpec bspec = up;
+        bspec.width = 24;
+        bspec.height = 16;
+        bspec.depth = true;
+        vision::BatchCameras batch(env, bspec, vo);
+        CHECK(batch.count() == 2 && batch.width() == 24 && batch.height() == 16);
+        batch.render();
+        CHECK(batch.rgb().size == 2 * 24 * 16 * 3);
+        CHECK(batch.depth().size == 2 * 24 * 16);
+        const auto one = batch.sensors().image(batch.camera(1));
+        CHECK(one.rgb != nullptr);
+        std::size_t same = 0;
+        for (std::size_t i = 0; i < one.size(); ++i) same += batch.rgb()[24 * 16 * 3 + i] == one.rgb[i] ? 1u : 0u;
+        CHECK(same == one.size());
+        CHECK(batch.depth()[0] > 1000.0f); // sky
     }
     std::printf("vision ok (%.1f ms per render)\n", sensors.lastRenderMs());
     return 0;

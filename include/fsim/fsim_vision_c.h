@@ -65,6 +65,18 @@ FSIM_VISION_API int fsim_vision_save_png(const fsim_vision* vision, uint32_t cam
 FSIM_VISION_API int fsim_vision_settle(fsim_vision* vision, uint32_t frames);
 FSIM_VISION_API double fsim_vision_last_render_ms(const fsim_vision* vision);
 
+/* One camera per batch vehicle of a VecEnv (batch order), images packed as tensors:
+ * rgb [N][H][W][3] bytes, depth [N][H][W] floats (when spec->depth). */
+typedef struct fsim_vision_batch fsim_vision_batch;
+FSIM_VISION_API int fsim_vision_batch_create(fsim_vecenv* env, const fsim_camera_spec* spec, const fsim_vision_options* options, fsim_vision_batch** out);
+FSIM_VISION_API void fsim_vision_batch_destroy(fsim_vision_batch* batch);
+FSIM_VISION_API int fsim_vision_batch_render(fsim_vision_batch* batch);
+FSIM_VISION_API const uint8_t* fsim_vision_batch_rgb(const fsim_vision_batch* batch, size_t* length);
+FSIM_VISION_API const float* fsim_vision_batch_depth(const fsim_vision_batch* batch, size_t* length);
+FSIM_VISION_API uint32_t fsim_vision_batch_count(const fsim_vision_batch* batch);
+/* The per-camera handle underneath (save_png, extra cameras); owned by the batch. */
+FSIM_VISION_API fsim_vision* fsim_vision_batch_sensors(fsim_vision_batch* batch);
+
 #ifdef __cplusplus
 }
 #endif
