@@ -200,7 +200,6 @@ TEST_CASE("the wheel zooms towards the point under the cursor", "[camera]") {
     // over keeps its place on screen, so zooming goes where you are looking.
     Rig rig;
     const auto zoom = [&rig](int cursorX, float notches) {
-        rig.camera->setZoomToCursor(true);
         rig.camera->setFreeView(45.0, 8.0, 0.0, 2.0e5);
         rig.camera->update(nullptr, 1.0 / 60.0);
         const vsg::dvec3 before = rig.camera->focus();
@@ -227,44 +226,70 @@ TEST_CASE("the wheel zooms towards the point under the cursor", "[camera]") {
     REQUIRE(vsg::length(zoom(400, 1.0f)) < vsg::length(in) * 0.2);
 }
 
-TEST_CASE("by default the wheel moves nothing but the distance", "[camera]") {
+TEST_CASE("the wheel never changes the view angle", "[camera]") {
     // The complaint this guards: scrolling turned the Earth, and the farther
-    // out the camera was the more it turned. Zooming towards the pointer is
-    // what did it - holding a point under the cursor means sliding the globe
-    // beneath it, degrees of longitude a notch at a whole-Earth view - so it
-    // is off unless asked for, and off means the focus does not move at all.
+    // out the camera was the more it turned. What did it was a floor that
+    // tilted the view towards vertical as a function of distance - so every
+    // notch of the wheel rotated the view by the difference, whether or not
+    // anything was under the cursor. Distance and angle are independent now:
+    // the wheel moves the eye in and out and leaves the bearing and the tilt
+    // exactly where they were.
     Rig rig;
     rig.camera->setFreeView(20.0, 10.0, 0.0, 1.2e7, 180.0, 25.0);
     const auto settle = [&rig] {
-        for (int k = 0; k < 150; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+        for (int k = 0; k < 200; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
     };
     settle();
-    const vsg::dvec3 focusBefore = rig.camera->focus();
-    const vsg::dvec3 viewBefore = vsg::normalize(rig.lookAt->eye - rig.lookAt->center);
-    const double azimuthBefore = rig.camera->azimuthDeg();
+    const double azimuth = rig.camera->azimuthDeg();
+    const double elevation = rig.camera->shownElevationDeg();
 
-    // Pointer well off centre, where zoom-to-cursor would have the most to do.
+    // Pointer dead centre, so there is nothing to zoom towards but the focus
+    // itself and any turn that appears is the wheel's own doing.
     auto move = vsg::MoveEvent::create();
-    move->x = 700;
-    move->y = 180;
+    move->x = 400;
+    move->y = 300;
     rig.camera->apply(*move);
 
-    for (int i = 0; i < 8; ++i) {
-        auto scroll = vsg::ScrollWheelEvent::create();
-        scroll->delta = vsg::vec3(0.0f, 1.0f, 0.0f);
-        rig.camera->apply(*scroll);
-        settle();
-    }
+    const auto wheel = [&](float notches, int times) {
+        for (int i = 0; i < times; ++i) {
+            auto scroll = vsg::ScrollWheelEvent::create();
+            scroll->delta = vsg::vec3(0.0f, notches, 0.0f);
+            rig.camera->apply(*scroll);
+            settle();
+        }
+    };
 
+    wheel(1.0f, 8);
     REQUIRE(rig.camera->distance() < 6.0e6); // it did zoom
-    const vsg::dvec3 viewAfter = vsg::normalize(rig.lookAt->eye - rig.lookAt->center);
-    const double turn = std::acos(std::clamp(vsg::dot(viewBefore, viewAfter), -1.0, 1.0)) * 57.29577951308232;
-    INFO("focus moved " << vsg::length(rig.camera->focus() - focusBefore) << " m, view turned " << turn
-                        << " deg, azimuth " << azimuthBefore << " -> " << rig.camera->azimuthDeg());
-    REQUIRE(vsg::length(rig.camera->focus() - focusBefore) < 1.0);
-    // Nothing measurable: the tilt floor is not reached at these distances,
-    // so the wheel changes distance and only distance.
-    REQUIRE(turn < 0.01);
+    INFO("after zooming in: azimuth " << azimuth << " -> " << rig.camera->azimuthDeg()
+         << ", tilt " << elevation << " -> " << rig.camera->shownElevationDeg());
+    REQUIRE_THAT(rig.camera->azimuthDeg(), Catch::Matchers::WithinAbs(azimuth, 0.01));
+    REQUIRE_THAT(rig.camera->shownElevationDeg(), Catch::Matchers::WithinAbs(elevation, 0.01));
+
+    wheel(-1.0f, 8);
+    INFO("and back out: azimuth " << rig.camera->azimuthDeg() << ", tilt " << rig.camera->shownElevationDeg());
+    REQUIRE_THAT(rig.camera->azimuthDeg(), Catch::Matchers::WithinAbs(azimuth, 0.01));
+    REQUIRE_THAT(rig.camera->shownElevationDeg(), Catch::Matchers::WithinAbs(elevation, 0.01));
+}
+
+TEST_CASE("over flat ground the camera looks where it is pointed", "[camera]") {
+    // The complaint this guards: terrain clearance pinned the view about
+    // thirty degrees above level whatever the ground was doing, so a level
+    // horizontal view was unreachable even high in the air. The margin was
+    // demanded in full at every sample along the line of sight, including the
+    // ones a probe spacing from a focus that sits on the terrain by
+    // definition - asin(80 m / 150 m) is 32 degrees, and that is a property
+    // of how often the line is sampled, not of the landscape. Over ground
+    // this flat nothing should lift the view at all.
+    Rig rig;
+    rig.camera->setGroundQuery([](double, double) { return std::optional<double>(0.0); });
+    for (const double distance : {2.0e3, 4.0e3, 1.0e4, 5.0e4, 1.5e5}) {
+        rig.camera->setFreeView(20.0, 10.0, 0.0, distance, 180.0, 2.0);
+        for (int k = 0; k < 250; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+        INFO("at " << distance << " m: asked for 2 deg of tilt, drawn "
+                   << rig.camera->shownElevationDeg() << " deg");
+        REQUIRE(rig.camera->shownElevationDeg() < 3.0);
+    }
 }
 
 TEST_CASE("zoom to cursor goes where it is pointed without swinging the bearing", "[camera]") {
@@ -276,7 +301,7 @@ TEST_CASE("zoom to cursor goes where it is pointed without swinging the bearing"
     // the more disorienting of the two. The point drifts some; the horizon
     // does not roll.
     Rig rig;
-    rig.camera->setZoomToCursor(true);
+    REQUIRE(rig.camera->zoomToCursor()); // on, as osgEarth has it
     rig.camera->setFreeView(45.0, 8.0, 0.0, 3.0e5);
     const auto settle = [&rig] {
         for (int k = 0; k < 120; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
@@ -349,17 +374,15 @@ TEST_CASE("zooming out and back leaves the view where it was", "[camera]") {
     REQUIRE(turn < 1.0);
 }
 
-TEST_CASE("the camera does not cut through terrain", "[camera]") {
-    // A ridge between the eye and what it is looking at. The eye is meant to
-    // be lifted over it, and so is the line of sight: the view tilts down
-    // across the terrain instead of passing through it.
-    //
-    // The ridge is swept along the line of sight rather than placed once,
-    // because the clearance is worked out from a handful of samples and a
-    // ridge that falls between two of them is a ridge nobody looked at.
+TEST_CASE("the eye never goes below the terrain", "[camera]") {
+    // osgEarth's rule, and the one kept here: whatever is in the way, the eye
+    // itself stays in clear air. The ridge is swept along the line of sight
+    // rather than placed once, because a ridge that falls between two samples
+    // is a ridge nobody looked at.
     constexpr double kDegPerRad = 57.29577951308232;
     const double ridgeHeightM = 1500.0, ridgeWidthDeg = 0.004;
-    double worstOverall = 0.0, worstRidgeLon = 0.0;
+    double worstClearance = 1e9;
+    double worstRidgeLon = 0.0;
 
     for (int step = 0; step <= 40; ++step) {
         const double ridgeLonDeg = 8.02 + 0.07 * step / 40.0; // across the whole line of sight
@@ -376,17 +399,37 @@ TEST_CASE("the camera does not cut through terrain", "[camera]") {
         rig.camera->setFreeView(46.0, 8.10, 0.0, 12000.0, 270.0, 2.0);
         for (int k = 0; k < 300; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
 
-        for (int i = 0; i <= 400; ++i) {
-            const double t = static_cast<double>(i) / 400.0;
-            const vsg::dvec3 p = rig.lookAt->center + (rig.lookAt->eye - rig.lookAt->center) * t;
-            const vsg::dvec3 lla = rig.ellipsoid->convertECEFToLatLongAltitude(p);
-            const double below = groundAt(lla.x, lla.y) - lla.z;
-            if (below > worstOverall) {
-                worstOverall = below;
-                worstRidgeLon = ridgeLonDeg;
-            }
+        const vsg::dvec3 lla = rig.ellipsoid->convertECEFToLatLongAltitude(rig.lookAt->eye);
+        const double clear = lla.z - groundAt(lla.x, lla.y);
+        if (clear < worstClearance) {
+            worstClearance = clear;
+            worstRidgeLon = ridgeLonDeg;
         }
     }
-    INFO("worst dip below ground " << worstOverall << " m, with the ridge at longitude " << worstRidgeLon);
-    REQUIRE(worstOverall < 1.0);
+    INFO("least clearance under the eye " << worstClearance << " m, with the ridge at longitude " << worstRidgeLon);
+    REQUIRE(worstClearance > 0.0);
+}
+
+TEST_CASE("terrain between the eye and the focus does not tilt the view", "[camera]") {
+    // The complaint this guards: a level view was unreachable even with the
+    // camera high in the air. Measured in the viewer, 60 km across the
+    // Bernese Alps with the eye at 18 km - above every summit in Europe -
+    // peaks between the focus and the eye still forced 14 degrees of tilt,
+    // because the clearance swept the whole line of sight and lifted the view
+    // until nothing crossed it. osgEarth makes no such promise and neither
+    // does this any more: a hill in the way is not a reason to move a camera
+    // that is nowhere near it. The hill hides the view, as hills do.
+    constexpr double kDegPerRad = 57.29577951308232;
+    const double ridgeLonDeg = 8.02, ridgeWidthDeg = 0.02, ridgeHeightM = 4000.0;
+    Rig rig;
+    rig.camera->setGroundQuery([=](double, double lonRad) -> std::optional<double> {
+        const double d = (lonRad * kDegPerRad - ridgeLonDeg) / ridgeWidthDeg;
+        return ridgeHeightM * std::exp(-d * d);
+    });
+    // Focus well east of the ridge, eye 60 km west of it, asked to look level.
+    rig.camera->setFreeView(46.0, 8.20, 0.0, 6.0e4, 270.0, 0.0);
+    for (int k = 0; k < 400; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+
+    INFO("asked for 0 deg of tilt across a 4 km ridge, drawn " << rig.camera->shownElevationDeg() << " deg");
+    REQUIRE(rig.camera->shownElevationDeg() < 1.0);
 }

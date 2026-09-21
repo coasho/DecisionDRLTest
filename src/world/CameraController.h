@@ -56,11 +56,11 @@ public:
     Mode mode() const noexcept { return mode_; }
     void setGroundQuery(GroundQuery query) { ground_ = std::move(query); }
 
-    /// Zoom towards whatever the pointer is over (osgEarth's zoomToMouse)
-    /// rather than straight in. osgEarth has this on; here it is off, because
-    /// holding a point under the cursor means sliding the globe beneath it,
-    /// and at a whole-Earth view that is degrees of longitude a notch - which
-    /// reads as the wheel spinning the planet.
+    /// Zoom towards whatever the pointer is over (osgEarth's zoomToMouse).
+    /// On, as osgEarth has it. Sliding the globe to hold a point under the
+    /// cursor is the whole point of the feature; what used to read as the
+    /// wheel spinning the planet was the focus being thrown the whole way
+    /// there in one frame, which it no longer is.
     void setZoomToCursor(bool on) noexcept { zoomToCursor_ = on; }
     bool zoomToCursor() const noexcept { return zoomToCursor_; }
 
@@ -90,6 +90,10 @@ public:
     double distance() const noexcept { return distance_; }
     double azimuthDeg() const noexcept { return azimuth_ * 57.29577951308232; }
     double elevationDeg() const noexcept { return elevation_ * 57.29577951308232; }
+    /// What was actually drawn last frame, after terrain clearance had its
+    /// say. elevationDeg() is only what was asked for; when the two differ it
+    /// is this one that is on screen.
+    double shownElevationDeg() const noexcept { return shownElevation_ * 57.29577951308232; }
     /// Free-style input is active (Free mode, or no vehicle to follow).
     bool detached() const noexcept { return mode_ == Mode::Free || !hasTarget_; }
 
@@ -146,7 +150,7 @@ private:
 
     // Mouse state (window pixels; converted to normalised coordinates per event)
     bool leftDown_ = false, middleDown_ = false;
-    bool zoomToCursor_ = false;
+    bool zoomToCursor_ = true;
     // Where the wheel is taking the focus, and how much of the way to let it
     // go. Held across frames so the focus travels in step with the distance
     // rather than jumping the whole way the moment the wheel turns.

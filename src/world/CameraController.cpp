@@ -19,11 +19,9 @@ constexpr double kRotateRadPerNdc = 1.0;      // osgGA rotateYawPitch: 1 rad per
 constexpr double kPanPerNdc = 0.3;            // osgGA panModel scale
 constexpr double kZoomPerNotch = 0.88;        // 12 % per wheel notch
 constexpr double kZoomTimeConstant = 0.12;    // s, wheel/drag zoom smoothing
-constexpr double kProbeSpacingM = 150.0;      // ground spacing between terrain-clearance samples
 constexpr double kEyeClearanceM = 4.0;        // eye height above the sampled terrain at close range ...
 constexpr double kEyeClearanceRatio = 0.03;   // ... plus 3 % of the distance (the drawn LOD gets coarser with range) ...
 constexpr double kEyeClearanceMaxM = 80.0;    // ... up to this
-constexpr double kMaxFocusOffset = 45.0 * kDeg; // how far from overhead the focus may sit before the eye climbs
 
 double wrapAngle(double a) {
     while (a > kPi) a -= 2.0 * kPi;
@@ -392,58 +390,47 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
         orbitCentre = pos + right0 * panRight_ + screenUp0 * panUp_;
     }
 
-    // Terrain collision: keep the eye (and the line of sight down to the focus)
-    // above the ground by raising the elevation angle; the orbit stays
-    // consistent and the view tilts down over the terrain instead of entering
-    // it. The ground is sampled at several points between focus and eye so a
-    // ridge in between is respected too.
+    // Terrain collision, on osgEarth's rule: keep the *eye* out of the ground
+    // and nothing more. EarthManipulator::collisionDetect drops a vertical
+    // line through the eye, and if the eye is under the terrain by more than
+    // the avoidance distance it lifts it straight out. A hill between the eye
+    // and what it is looking at is not its business - the hill simply hides
+    // the view, as hills do.
+    //
+    // This used to sweep the whole line of sight and raise the elevation until
+    // nothing crossed it. That is a stronger promise than osgEarth makes, and
+    // it is why the camera could not be levelled: 60 km across the Bernese
+    // Alps with the eye at 18 km - above every summit in Europe - the peaks
+    // between focus and eye still forced 14 degrees of tilt. Whatever is in
+    // the way, if the eye is in clear air the angle asked for is the angle
+    // drawn.
     if (ground_ && distance_ < 2.0e5) {
         const double focusAltitude = ellipsoid_->convertECEFToLatLongAltitude(orbitCentre).z;
         const double clearance = std::min(kEyeClearanceMaxM, kEyeClearanceM + kEyeClearanceRatio * distance_);
         // Detached, the focus is on the ground: never look up at it from below.
         double minElevation = followVehicle ? -kPi / 2.0 : std::asin(std::clamp(clearance / distance_, -1.0, 1.0));
 
-        // Sample the whole line of sight at a fixed spacing on the ground, not
-        // at a few fractions of it. Fractions leave the gap that matters
-        // unwatched: the first was at 15 % of the way out, so anything nearer
-        // than that - which is most of what a low camera is about to hit -
-        // was never looked at. A ridge 800 m from the focus of a 12 km view
-        // went straight through the line of sight, 1463 m of it.
-        const int probes = static_cast<int>(std::clamp(distance_ / kProbeSpacingM, 16.0, 96.0));
-        // Twice: lifting the view swings the line of sight onto ground it was
-        // not crossing before, which may be higher still.
+        // Twice: lifting the eye moves it over different ground, which may be
+        // higher than the ground it was over before.
         for (int pass = 0; pass < 2; ++pass) {
             const double probeElevation = std::max(elevation, minElevation);
             const vsg::dvec3 probeDir = horizontal * std::cos(probeElevation) + up * std::sin(probeElevation);
-            for (int i = 1; i <= probes; ++i) {
-                const double t = static_cast<double>(i) / probes;
-                const vsg::dvec3 lla = ellipsoid_->convertECEFToLatLongAltitude(orbitCentre + probeDir * (distance_ * t));
-                if (auto h = ground_(lla.x * kDeg, lla.y * kDeg)) {
-                    const double needed = (*h + clearance) - focusAltitude; // height to gain over the focus by that point
-                    minElevation = std::max(minElevation, std::asin(std::clamp(needed / (distance_ * t), -1.0, 1.0)));
-                }
+            const vsg::dvec3 lla = ellipsoid_->convertECEFToLatLongAltitude(orbitCentre + probeDir * distance_);
+            if (auto h = ground_(lla.x * kDeg, lla.y * kDeg)) {
+                const double needed = (*h + clearance) - focusAltitude; // height the eye must gain over the focus
+                minElevation = std::max(minElevation, std::asin(std::clamp(needed / distance_, -1.0, 1.0)));
             }
         }
         if (elevation < minElevation) elevation = std::min(minElevation, kMaxElevation);
     }
-    // Far out the focus drifts towards the limb unless the eye climbs, and
-    // the view ends up grazing the globe edge-on instead of looking at it.
-    // What is needed is that the eye stay roughly overhead, so that is what
-    // is asked for: keep the focus within kMaxFocusOffset of the point the
-    // eye is directly above, and raise the elevation by the least that does
-    // it. Solving the triangle rather than fading towards vertical matters,
-    // because whatever this does, zooming does - the tilt is a function of
-    // distance, so every notch of the wheel turns the view by the difference.
-    // The old smoothstep ran to 89 degrees and turned it 47 degrees over
-    // eight notches from a whole-Earth view; this turns it about 8, and
-    // leaves it alone entirely closer in than half an Earth radius, which is
-    // every distance anyone flies at.
-    const double focusRadius = vsg::length(pos);
-    if (focusRadius > 1.0 && distance_ > 0.5 * focusRadius) {
-        const double sinOffset = std::sin(kMaxFocusOffset);
-        const double overhead = std::acos(std::clamp((focusRadius / distance_) * sinOffset, -1.0, 1.0));
-        elevation = std::max(elevation, std::min(overhead - kMaxFocusOffset, kMaxElevation));
-    }
+    // Nothing here tilts the view as a function of distance. There used to
+    // be a floor that kept the eye near enough overhead to stop the focus
+    // drifting towards the limb, and whatever such a rule does, zooming does:
+    // the tilt was a function of the distance, so every notch of the wheel
+    // turned the view by the difference. That is the complaint it was meant
+    // to fix. The eye is kept out of the globe by the elevation >= 0 rule
+    // below, which is all that was ever needed for safety; where the user
+    // points the camera beyond that is the user's business, as in osgEarth.
     // Beyond the terrain-collision range the eye must stay above the focus'
     // horizontal plane, or a negative elevation would put it under the globe.
     if (distance_ >= 2.0e5) elevation = std::max(elevation, 0.0);
