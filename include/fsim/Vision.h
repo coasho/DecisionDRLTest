@@ -110,7 +110,7 @@ public:
     Timing timing() const noexcept;
     std::uint64_t frames() const noexcept; ///< render() calls so far
     /// Advance tile streaming without rendering (call between episodes to let
-    /// the pager settle after a jump to a new region); returns loaded tiles pending.
+    /// the pager settle after a jump to a new region).
     void settle(unsigned frames = 30);
 
 private:
