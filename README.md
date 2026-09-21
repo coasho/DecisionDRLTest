@@ -78,6 +78,9 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
 - **`examples/ppo_trainer`**: clipped PPO with GAE, a hand-written MLP and Adam (no ML library) over
   `fsim::VecEnv`; on 64 environments it takes altitude/heading hold from 0.20 to 0.73 reward/step in ~2 minutes,
   beating the hand-tuned PD baseline (0.57); `--eval` replays the saved policy in the viewer.
+- **Sharp ground at low altitude**: imagery streams to level 19 over relief synthesised from the deepest
+  elevation level (bilinear, seam-consistent); elevation is resampled onto the mesh's vertex grid with edge
+  extrapolation so tile seams and LOD transitions no longer open cracks on cliffs.
 - **Terrain physics in the SDK** (`WorldOptions::terrain`): the same public elevation tiles the viewer
   draws, fetched headless (WinHTTP + stb_image, no VSG), cached on disk alongside the viewer's downloads,
   prefetched around spawns and kept warm around moving vehicles.

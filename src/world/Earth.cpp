@@ -2,6 +2,7 @@
 
 #include "core/Log.h"
 #include "world/ElevatedTile.h"
+#include "world/ElevationUpsampler.h"
 #include "world/FlatGeometry.h"
 
 #include <cmath>
@@ -53,6 +54,7 @@ vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& settings, vsg::ref_ptr<
     tiles->ellipsoidModel = ellipsoid;
     tiles->lodTransitionScreenHeightRatio = settings.lodTransitionScreenHeightRatio;
 
+    std::vector<vsg::ref_ptr<vsg::ReaderWriter>> extraReaders;
     if (!settings.elevationUrl.empty()) {
         // Relief: VSG displaces each tile's mesh with the elevation texture (one
         // vertex per texel), so the decoder also downsamples to a sane mesh size.
@@ -64,14 +66,18 @@ vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& settings, vsg::ref_ptr<
         };
         tiles->lighting = true; // relief needs shading to be visible
         // Tiles below the elevation pyramid's deepest level would come back flat
-        // and pop; cap the whole pyramid there.
-        tiles->maxLevel = std::min(tiles->maxLevel, settings.elevationMaxLevel);
+        // and pop: either synthesise them from the deepest level or cap the
+        // whole pyramid there.
+        if (settings.upsampleElevation && tiles->maxLevel > settings.elevationMaxLevel)
+            extraReaders.push_back(ElevationUpsampler::create(settings.elevationUrl, settings.elevationMaxLevel, encoding));
+        else
+            tiles->maxLevel = std::min(tiles->maxLevel, settings.elevationMaxLevel);
     }
 
     auto earth = vsg::TileDatabase::create();
     earth->settings = tiles;
     // Our reader: identical tiles, but culling bounds that include the relief.
-    if (!readElevatedDatabase(*earth, options)) {
+    if (!readElevatedDatabase(*earth, options, extraReaders)) {
         LOG_ERROR("world") << "TileDatabase::readDatabase failed for " << tiles->imageLayer.string()
                            << " (network down or reader missing?)";
         return {};

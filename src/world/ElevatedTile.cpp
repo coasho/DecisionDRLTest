@@ -90,12 +90,17 @@ void ElevatedTile::fixBounds(vsg::Object* node) {
     node->accept(fix);
 }
 
-bool readElevatedDatabase(vsg::TileDatabase& database, vsg::ref_ptr<const vsg::Options> options) {
+bool readElevatedDatabase(vsg::TileDatabase& database, vsg::ref_ptr<const vsg::Options> options,
+                          const std::vector<vsg::ref_ptr<vsg::ReaderWriter>>& extraReaders) {
     if (!database.settings || database.child) return false;
     if (database.settings->ellipsoidModel) database.setObject("EllipsoidModel", database.settings->ellipsoidModel);
 
-    auto reader = ElevatedTile::create(database.settings, options);
+    // The tile reader needs options that carry the extra readers too: the
+    // subtiles it loads go through vsg::read(paths, options) with the options
+    // it was created with.
     auto local = options ? vsg::clone(options) : vsg::Options::create();
+    for (auto it = extraReaders.rbegin(); it != extraReaders.rend(); ++it) local->readerWriters.insert(local->readerWriters.begin(), *it);
+    auto reader = ElevatedTile::create(database.settings, local);
     local->readerWriters.insert(local->readerWriters.begin(), reader);
 
     auto result = vsg::read("root.tile", local);

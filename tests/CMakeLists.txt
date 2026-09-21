@@ -50,6 +50,15 @@ if(FSIM_RUST_GNU)
     set_tests_properties(rust_example PROPERTIES ENVIRONMENT "FSIM_BUILD_DIR=${CMAKE_BINARY_DIR}" TIMEOUT 600)
 endif()
 
+# Viewer-side terrain decoding (VSG data types; no Vulkan device needed).
+if(FSIM_WITH_RENDER)
+    add_executable(fsim_render_tests test_terrain_render.cpp)
+    target_link_libraries(fsim_render_tests PRIVATE fsim::world fsim::core Catch2::Catch2WithMain)
+    fsim_set_warnings(fsim_render_tests)
+    fsim_relax_third_party_warnings(fsim_render_tests)
+    catch_discover_tests(fsim_render_tests)
+endif()
+
 # Offscreen cameras through fsim_vision.dll (needs a Vulkan device).
 if(FSIM_WITH_RENDER)
     add_executable(fsim_vision_test test_vision.cpp)

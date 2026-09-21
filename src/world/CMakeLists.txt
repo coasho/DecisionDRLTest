@@ -4,6 +4,8 @@ add_library(fsim_world STATIC
     Earth.cpp
     ElevatedTile.h
     ElevatedTile.cpp
+    ElevationUpsampler.h
+    ElevationUpsampler.cpp
     VehicleVisuals.h
     VehicleVisuals.cpp
     CameraController.h

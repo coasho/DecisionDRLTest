@@ -26,7 +26,9 @@ public:
     static void fixBounds(vsg::Object* node);
 };
 
-/// vsg::TileDatabase::readDatabase() with ElevatedTile as the tile reader.
-bool readElevatedDatabase(vsg::TileDatabase& database, vsg::ref_ptr<const vsg::Options> options);
+/// vsg::TileDatabase::readDatabase() with ElevatedTile as the tile reader and
+/// `extraReaders` (e.g. ElevationUpsampler) tried before the stock ones.
+bool readElevatedDatabase(vsg::TileDatabase& database, vsg::ref_ptr<const vsg::Options> options,
+                          const std::vector<vsg::ref_ptr<vsg::ReaderWriter>>& extraReaders = {});
 
 } // namespace fsim::world

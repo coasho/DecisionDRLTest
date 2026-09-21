@@ -24,7 +24,8 @@ struct EarthSettings {
     std::string elevationUrl;
     ElevationEncoding elevationEncoding = ElevationEncoding::Terrarium;
     unsigned elevationMeshDimension = 64; ///< mesh vertices per tile edge (elevation texels are downsampled to this)
-    unsigned elevationMaxLevel = 15;      ///< deepest level the elevation pyramid has (AWS Terrarium: 15); imagery is capped to it
+    unsigned elevationMaxLevel = 15;      ///< deepest level the elevation pyramid has (AWS Terrarium: 15)
+    bool upsampleElevation = true;        ///< below it, synthesise relief from the deepest level so imagery keeps refining (else cap the pyramid there)
     bool originTopLeft = true;           ///< XYZ (true) vs TMS (false) row order
     std::string projection = "EPSG:3857";
     double lodTransitionScreenHeightRatio = 0.25;
