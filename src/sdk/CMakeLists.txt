@@ -1,6 +1,6 @@
 # fsim.dll: the public SDK (C++ pimpl class + versioned C ABI). Internal
 # static libraries are linked in; only fsim/*.h symbols are exported.
-add_library(fsim SHARED fsim.cpp World.cpp fsim_world_c.cpp Scenario.cpp LastError.h)
+add_library(fsim SHARED fsim.cpp World.cpp fsim_world_c.cpp Scenario.cpp Recording.cpp LastError.h)
 add_library(fsim::sdk ALIAS fsim)
 
 target_include_directories(fsim

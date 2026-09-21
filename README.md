@@ -88,7 +88,7 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
   prefetched around spawns and kept warm around moving vehicles.
 - **Recording and replay** (`WorldOptions::recordPath`): the trainer writes the same rows and samples the
   segment carries to a `.fsrec` file; `flightsim-viewer.exe --replay run.fsrec` plays it back with the
-  demo's pause/step/time-factor controls.
+  demo's pause/step/time-factor controls and a timeline; `fsim::Recording::load` reads it back as data.
 
 - **Per-type vehicle models**: the viewer draws `models/<type>.glb` for each vehicle type it sees
   (loaded and compiled once, on first use), `VehicleSpec::model` for an explicit file, else the sample aircraft.

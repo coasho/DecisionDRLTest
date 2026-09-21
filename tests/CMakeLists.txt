@@ -21,6 +21,13 @@ add_custom_command(TARGET fsim_tests POST_BUILD
 
 catch_discover_tests(fsim_tests)
 
+# The public C++ SDK against fsim.dll (what a trainer links).
+add_executable(fsim_sdk_tests test_sdk.cpp)
+target_link_libraries(fsim_sdk_tests PRIVATE fsim::sdk Catch2::Catch2WithMain)
+target_compile_definitions(fsim_sdk_tests PRIVATE FSIM_TEST_JSBSIM_ROOT="${FSIM_JSBSIM_DATA_DIR}")
+fsim_set_warnings(fsim_sdk_tests)
+catch_discover_tests(fsim_sdk_tests)
+
 # The public C ABI, consumed from a plain C translation unit against fsim.dll.
 add_executable(fsim_c_abi_test test_c_abi.c)
 target_link_libraries(fsim_c_abi_test PRIVATE fsim::sdk)

@@ -49,6 +49,14 @@ is a sequential write of ~150 bytes per vehicle per frame (a 60 s run of
 5 vehicles at 30 Hz is ~5 MB); raise `recordIntervalSeconds` for long
 trainings.
 
+A recording is also data (`#include <fsim/Recording.h>`):
+`fsim::Recording::load(path)` returns the frames - per frame the simulation
+time, one `Sample{slot, state, inputs}` per live vehicle and the vehicle
+events (creation, reset, control-level change, removal) - and
+`rec.track(slot)` collects one vehicle's states and actuator inputs over
+time: trajectories of the built-in behaviours for imitation learning,
+evaluation logs, regression baselines.
+
 | Call | Meaning |
 | --- | --- |
 | `Vehicle createVehicle(const VehicleSpec&)` | Load a vehicle; throws `fsim::Error` if the type is unknown, the aircraft fails to load or the name exists |
