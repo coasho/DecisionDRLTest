@@ -32,7 +32,9 @@ v.command(BehaviorCommand{.id = "pursuit", .target = other.id(), .params = {{"ra
 v.activeLevel();          // Level::Behavior
 ```
 
-Commands are plain structs. A field set to `kHold` (NaN) means "keep the
+(Designated initialisers are C++20; in a C++17 trainer set the fields one by
+one - the structs are plain aggregates with defaults.) Commands are plain
+structs. A field set to `kHold` (NaN) means "keep the
 current value / let the controller decide": `AttitudeCommand{.rollRad = 0.2}`
 holds the current pitch, `VelocityCommand{.headingRad = kHold}` flies wings
 level, a `throttle` of `kHold` keeps the last throttle. The last command
