@@ -105,7 +105,7 @@ void usage(const char* prog) {
         "  --world <name>           attach to this world (default: the newest published one)\n"
         "  --list                   list live worlds and exit\n"
         "  --capacity <n>           vehicle slots to prepare (256)\n"
-        "  --replay <file.fsrec>    play back a recording made with WorldOptions::recordPath (space pause, . step, [ ] speed)\n"
+        "  --replay <file.fsrec>    play back a recording made with WorldOptions::recordPath (space pause, . step, [ ] speed, timeline seek, home)\n"
         "Demo mode: run the built-in scenario on an internal simulation thread.\n"
         "  --demo                   enable demo mode\n"
         "  --aircraft <name>        JSBSim aircraft (c172x)\n"
@@ -497,6 +497,16 @@ int main(int argc, char** argv) {
             const bool step = controls->singleStep.exchange(false);
             if (!paused) replayTime += viewer.frameSeconds() * timeFactor;
             if (step && replayFrame + 1 < frames.size()) replayTime = frames[replayFrame + 1].simTime;
+            const double seek = controls->seekTo.exchange(-1.0);
+            if (seek >= 0.0) {
+                // Seeking: rebuild the table from the first frame so creations/removals stay consistent.
+                replayTime = std::clamp(seek, frames.front().simTime, frames.back().simTime);
+                replayFrame = static_cast<std::size_t>(-1);
+                interpolator = world::Interpolator(slots);
+                std::fill(alive.begin(), alive.end(), 0);
+                meta.assign(slots, ui::MonitorGui::VehicleMeta{});
+                for (std::size_t i = 0; i < slots; ++i) { visuals.setVisible(i, false); trails.setEnabled(i, false); }
+            }
             if (replayTime > frames.back().simTime) {
                 replayTime = frames.front().simTime; // loop
                 replayFrame = static_cast<std::size_t>(-1);
@@ -534,6 +544,8 @@ int main(int argc, char** argv) {
             }
             controls->simTime.store(replayTime, std::memory_order_relaxed);
             controls->simThroughput.store(0.0, std::memory_order_relaxed);
+            controls->replayStart.store(frames.front().simTime, std::memory_order_relaxed);
+            controls->replayEnd.store(frames.back().simTime, std::memory_order_relaxed);
         } else {
             // Discovery: attach to the requested (or newest) world; re-attach after a restart.
             if (!mirror.valid() && wallSeconds - lastDiscovery > 0.5) {

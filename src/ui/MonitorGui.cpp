@@ -90,6 +90,17 @@ void MonitorGui::drawMonitor() const {
         float factor = static_cast<float>(controls_->timeFactor.load(std::memory_order_relaxed));
         if (ImGui::SliderFloat("time factor", &factor, 0.1f, 32.0f, "%.2fx", ImGuiSliderFlags_Logarithmic))
             controls_->timeFactor.store(static_cast<double>(factor), std::memory_order_relaxed);
+
+        const double start = controls_->replayStart.load(std::memory_order_relaxed);
+        const double end = controls_->replayEnd.load(std::memory_order_relaxed);
+        if (end > start) {
+            // Replay timeline: dragging seeks; the loop keeps the slider in step otherwise.
+            float at = static_cast<float>(simTime);
+            ImGui::SetNextItemWidth(-1.0f);
+            if (ImGui::SliderFloat("##timeline", &at, static_cast<float>(start), static_cast<float>(end), "%.1f s"))
+                controls_->seekTo.store(static_cast<double>(at), std::memory_order_relaxed);
+            ImGui::TextDisabled("timeline: drag to seek  [home: start]  loops at the end");
+        }
     }
 
     int mode = controls_->cameraMode.load(std::memory_order_relaxed);

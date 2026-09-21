@@ -12,6 +12,9 @@ struct ViewerControls {
     std::atomic<bool> paused{false};
     std::atomic<bool> singleStep{false};
     std::atomic<double> timeFactor{1.0};
+    std::atomic<double> seekTo{-1.0};   ///< replay: jump to this simulation time (< 0 = none), consumed by the loop
+    // Replay extent written by the loop for the GUI (both 0 when not replaying).
+    std::atomic<double> replayStart{0.0}, replayEnd{0.0};
     std::atomic<int> selectedVehicle{0};
     std::atomic<int> selectStep{0};      ///< +1 / -1: move the selection to the next / previous live vehicle
     std::atomic<int> cameraMode{0};      ///< world::CameraController::Mode
