@@ -205,10 +205,11 @@ build/ucrt64-release/bin/flightsim.exe --vehicles 64 --steps 300 --benchmark
 
 Viewer keys: `tab` next vehicle, `c` camera (chase / orbit / overview), `-`/`=` zoom, `r` reset view,
 `l` vehicle list, `m` monitor, `n` labels, `t` trails, `esc` quit; in demo mode also `space` pause, `.` step,
-`[`/`]` time factor. Mouse, with OpenSceneGraph's feel: **left drag rotates** around the selected vehicle,
-**middle drag pans**, **wheel zooms** (smoothed, up to the whole Earth); detached (free camera, or before any
-vehicle exists) middle drag moves **the globe** like osgGA's TerrainManipulator, including across the poles;
-the right button is not a camera control; the eye never goes below the terrain; `r` resets the view.
+`[`/`]` time factor. Mouse, following osgEarth's EarthManipulator: **left drag pans** - detached (free camera,
+or before any vehicle exists) it drags the globe so the ground follows the cursor, including across the poles;
+**middle drag rotates** around the focus; **the wheel zooms towards the point under the cursor** (osgEarth's
+`zoomToMouse`, on by default there too), smoothed, from 6 m up to the whole Earth. osgEarth also puts zoom on
+the right button; here the right button is left alone. The eye never goes below the terrain; `r` resets the view.
 `--no-gui` hides the panels, labels and trails, leaving only the rendered scene - what you want when judging the graphics rather than the instruments. Camera modes (`c`): orbit
 (default, north-referenced), chase (turns with the aircraft), overview, free.
 

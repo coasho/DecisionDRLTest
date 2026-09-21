@@ -4,6 +4,7 @@
 #include "world/ElevatedTile.h"
 #include "world/ElevationUpsampler.h"
 #include "world/FlatGeometry.h"
+#include "world/Scattering.h"
 
 #include <cmath>
 
@@ -24,7 +25,7 @@ namespace {
 // sees to that - so it can be recognised exactly rather than by a heuristic
 // that might catch snow or cloud, and repainted in the colour Esri's own deep
 // water has (measured across its low-zoom ocean tiles).
-constexpr int kOceanR = 8, kOceanG = 57, kOceanB = 74;
+constexpr float kOceanR = 8.0f, kOceanG = 57.0f, kOceanB = 74.0f;
 
 /// True when every sampled pixel is neutral grey around the placeholder's own
 /// brightness; `set` then paints the whole tile.
@@ -48,101 +49,13 @@ bool repaintPlaceholder(Array& image, Set set) {
     return true;
 }
 
-/// Aerial perspective on the terrain: the air between the eye and the ground
-/// scatters sunlight, so distance drains contrast out of the ground and
-/// replaces it with sky. Without it every ridge to the horizon is as crisp
-/// and dark as the one underfoot, which is the single thing that most makes
-/// a rendered landscape look like a model.
-///
-/// The model is the standard one for real-time aerial perspective - Rayleigh
-/// and Mie extinction with their phase functions, as described by Hoffman and
-/// Preetham ("Rendering Outdoor Light Scattering in Real Time") and by
-/// O'Neil in GPU Gems 2, which is also what osgEarth's sky is built on:
-///
-///     L = L0 * Fex + Lin
-///     Fex = exp(-(bR + bM) * s)
-///     Lin = (bR * phaseR + bM * phaseM) / (bR + bM) * Esun * (1 - Fex)
-///
-/// bR goes as 1/lambda^4, which is why the distance is blue and why looking
-/// into the sun the Mie term makes it white and bright instead.
-///
-/// Two things it does not need, and so does not have: a uniform of its own,
-/// and the eye's altitude. The sun's direction and colour are already in
-/// VSG's light data, which is bound per view and refreshed every frame. And
-/// the air is treated as a slab of one scale height, whose path length is
-/// H/cos(zenith) bounded by the distance actually travelled - so looking
-/// straight down from orbit crosses 8 km of air and the ground stays clear,
-/// while along the limb it crosses hundreds and goes to sky.
-void addAerialPerspective(vsg::ShaderSet& shaderSet) {
-    const std::string anchor = "outColor.rgb = (color * ambientOcclusion) + emissiveColor.rgb;";
-    const std::string scattering = R"(// Aerial perspective (fsim); see addAerialPerspective().
-    const vec3 fsimBetaR = vec3(5.8e-6, 13.5e-6, 33.1e-6); // Rayleigh, per metre at sea level
-    const float fsimBetaM = 4.0e-6;                        // Mie, grey: clear air, little dust
-    const float fsimScaleHeight = 8000.0;                  // the air as a slab this thick
-    const float fsimG = 0.76;                              // Mie asymmetry: strongly forward
-    // Single scattering alone leaves the horizon away from the sun almost
-    // black, because the light that gets there has bounced more than once.
-    // The usual stand-in is a constant added to the Rayleigh phase.
-    const float fsimMulti = 0.9;
-
-    // The sun, straight out of the light data VSG binds for this view: skip
-    // the ambient lights, then take the first directional one. Colour times
-    // intensity is Esun, and the direction is already in view space.
-    vec3 fsimSun = vec3(0.0);
-    vec3 fsimEsun = vec3(0.0);
-    if (int(lightData.values[0][1]) > 0)
-    {
-        int fsimAt = 1 + int(lightData.values[0][0]);
-        vec4 fsimLightColor = lightData.values[fsimAt];
-        fsimEsun = fsimLightColor.rgb * fsimLightColor.a;
-        fsimSun = -lightData.values[fsimAt + 1].xyz;
-    }
-
-    vec3 fsimView = normalize(eyePos);                       // eye -> ground
-    float fsimCosZenith = max(abs(dot(fsimView, nd)), 0.02); // how squarely the ray meets the ground
-    float fsimPath = min(length(eyePos), fsimScaleHeight / fsimCosZenith);
-
-    vec3 fsimBetaT = fsimBetaR + vec3(fsimBetaM);
-    vec3 fsimFex = exp(-fsimBetaT * fsimPath);
-
-    float fsimCosTheta = dot(fsimView, fsimSun);
-    float fsimPhaseR = 0.0596831 * (1.0 + fsimCosTheta * fsimCosTheta);
-    float fsimGG = fsimG * fsimG;
-    float fsimDenom = max(1.0 + fsimGG - 2.0 * fsimG * fsimCosTheta, 1e-4);
-    float fsimPhaseM = 0.1193662 * (1.0 - fsimGG) / (fsimDenom * sqrt(fsimDenom));
-
-    vec3 fsimIn = (fsimBetaR * (fsimPhaseR + fsimMulti) + vec3(fsimBetaM * fsimPhaseM)) / fsimBetaT * fsimEsun * (1.0 - fsimFex);
-    outColor.rgb = (color * ambientOcclusion) * fsimFex + fsimIn;)";
-
-    // Anything already compiled was compiled from the shader we are about to
-    // replace, and getShaderStages() would hand those back instead of ours.
-    shaderSet.variants.clear();
-    for (auto& stage : shaderSet.stages) {
-        if (!stage || stage->stage != VK_SHADER_STAGE_FRAGMENT_BIT || !stage->module) continue;
-        std::string source = stage->module->source;
-        const auto at = source.find(anchor);
-        if (at == std::string::npos) {
-            LOG_WARN("world") << "tile shader has moved on; drawing without aerial perspective";
-            continue;
-        }
-        source.replace(at, anchor.size(), scattering);
-        // A fresh stage carrying only source: VSG then compiles it for whatever
-        // defines a tile needs. Editing the existing module in place instead
-        // leaves its prebuilt SPIR-V in the way, and VSG quietly falls back to
-        // it - the shader runs unchanged and without the imagery sampler.
-        auto fresh = vsg::ShaderStage::create(stage->stage, stage->entryPointName, source, stage->module->hints);
-        fresh->specializationConstants = stage->specializationConstants;
-        stage = fresh;
-    }
-}
-
 vsg::ref_ptr<vsg::Data> replaceMissingImagery(vsg::ref_ptr<vsg::Data> data) {
     if (!data) return data;
     // A touch of deterministic variation, so the repainted water is not a dead
     // flat plane next to real tiles that vary by a few levels.
-    const auto shade = [](std::size_t i, int base) {
+    const auto shade = [](std::size_t i, float base) {
         const std::size_t h = (i * 2654435761u) >> 13;
-        return static_cast<std::uint8_t>(std::clamp(base + static_cast<int>(h % 7u) - 3, 0, 255));
+        return static_cast<std::uint8_t>(std::clamp(static_cast<int>(base) + static_cast<int>(h % 7u) - 3, 0, 255));
     };
     if (auto rgba = data.cast<vsg::ubvec4Array2D>()) {
         repaintPlaceholder(*rgba, [&](vsg::ubvec4& p, std::size_t i) {
@@ -260,7 +173,9 @@ vsg::ref_ptr<vsg::Node> createPolarCaps(vsg::ref_ptr<vsg::EllipsoidModel> ellips
                                         double fromLatitudeDeg) {
     FlatGeometrySettings settings;
     settings.cullBackFaces = false;
-    settings.lit = true; // shade with the sun, like the terrain it continues
+    settings.lit = true;                // shade with the sun, like the terrain it continues
+    settings.aerialPerspective = true;  // ... and haze with it, or the cap stands out as the one clear thing
+    settings.ambient = vsg::vec4(0.45f, 0.45f, 0.45f, 1.0f); // the same as the tiles, or it glows against them
     auto state = createFlatStateGroup(settings, options);
     if (!state) return {};
 
@@ -271,11 +186,27 @@ vsg::ref_ptr<vsg::Node> createPolarCaps(vsg::ref_ptr<vsg::EllipsoidModel> ellips
     // A flat white disc reads as a hole in the globe. Instead each cap starts
     // at the colour the imagery ends on and grades inwards: the Arctic from
     // open water to sea ice, the Antarctic from ice shelf to snow.
+    // The edge colours are not invented: they are the mean of Esri's own
+    // imagery in the last band it serves, 82.6-85 deg, measured off the tiles
+    // - open water in the Arctic, ice shelf in the Antarctic. Matching the
+    // colour the imagery ends on is what stops the cap reading as a disc
+    // pasted over the globe. Inland it grades to sea ice and to snow.
     const auto capColour = [fromLatitudeDeg](double latDeg, double sign) {
         const double t = std::clamp((std::abs(latDeg) - fromLatitudeDeg) / (90.0 - fromLatitudeDeg), 0.0, 1.0);
         const float s = static_cast<float>(t * t * (3.0 - 2.0 * t)); // smoothstep: no banding at the seam
-        const vsg::vec3 edge = sign > 0.0 ? vsg::vec3(0.16f, 0.27f, 0.34f) : vsg::vec3(0.72f, 0.76f, 0.79f);
-        const vsg::vec3 inner = sign > 0.0 ? vsg::vec3(0.70f, 0.75f, 0.79f) : vsg::vec3(0.92f, 0.94f, 0.96f);
+        // North: deep water, and specifically the same deep water the missing
+        // ocean tiles are repainted with, because at the zooms where the cap
+        // is on screen that is what borders it. Anything else and the two
+        // blues meet in a visible circle. It lifts only slightly towards the
+        // pole, for sea ice.
+        const vsg::vec3 ocean(kOceanR / 255.0f, kOceanG / 255.0f, kOceanB / 255.0f);
+        // Flat, not graded. A gradient across the disc reads as a dome and
+        // gives the circle away even when the colours match at the rim; the
+        // ocean it continues has no such shading either. The 1.03 is measured:
+        // the cap came out about that much darker than its neighbours.
+        const vsg::vec3 edge = sign > 0.0 ? ocean * 1.03f
+                                          : vsg::vec3(0.957f, 0.969f, 1.000f); // measured off Esri: (244, 247, 255)
+        const vsg::vec3 inner = edge;
         const vsg::vec3 c = edge + (inner - edge) * s;
         return vsg::vec4(c.r, c.g, c.b, 1.0f);
     };
@@ -297,10 +228,11 @@ vsg::ref_ptr<vsg::Node> createPolarCaps(vsg::ref_ptr<vsg::EllipsoidModel> ellips
         };
         std::uint32_t i = 0;
         for (int r = 0; r < rings; ++r) {
-            // Squared spacing: fine rings by the imagery seam, coarse at the pole.
+            // Even spacing. Bunching the rings towards the seam was for a
+            // gradient the cap no longer has, and uneven triangles showed as
+            // faint concentric banding across a flat colour.
             const auto band = [&](int k) {
-                const double f = static_cast<double>(k) / rings;
-                return fromLatitudeDeg + (90.0 - fromLatitudeDeg) * f * f;
+                return fromLatitudeDeg + (90.0 - fromLatitudeDeg) * static_cast<double>(k) / rings;
             };
             const double lat0 = band(r), lat1 = band(r + 1);
             for (int sg = 0; sg < segments; ++sg) {

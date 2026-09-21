@@ -184,24 +184,71 @@ void CameraController::apply(vsg::MoveEvent& e) {
     lastX_ = e.x;
     lastY_ = e.y;
     if (leftDown_ && (e.mask & vsg::BUTTON_MASK_1)) {
-        rotate(dx, dy);
-        e.handled = true;
-    } else if (middleDown_ && (e.mask & vsg::BUTTON_MASK_2)) {
+        // osgEarth binds the left button to pan.
         if (detached()) {
-            moveFocus(dx, dy); // osgGA TerrainManipulator: the middle button pans over the terrain
+            moveFocus(dx, dy); // drag the globe: the ground follows the cursor
         } else {
             // Following a vehicle: offset the look-at point in the screen plane (osgGA panModel, 0.3 x distance).
             panRight_ -= dx * kPanPerNdc * distance_;
             panUp_ -= dy * kPanPerNdc * distance_;
         }
         e.handled = true;
+    } else if (middleDown_ && (e.mask & vsg::BUTTON_MASK_2)) {
+        rotate(dx, dy); // osgEarth binds the middle button to rotate
+        e.handled = true;
     }
+}
+
+std::optional<vsg::dvec3> CameraController::groundUnderCursor() const {
+    if (!camera_ || !camera_->projectionMatrix || !ellipsoid_) return std::nullopt;
+    double nx = 0.0, ny = 0.0;
+    normalised(lastX_, lastY_, nx, ny);
+
+    // Unproject the cursor to a ray. The eye is the origin; the near-plane
+    // point gives the direction, which avoids the far plane, where an
+    // ellipsoid-fitted projection is ill-conditioned.
+    const vsg::dmat4 inverseViewProj =
+        vsg::inverse(camera_->projectionMatrix->transform() * camera_->viewMatrix->transform());
+    const vsg::dvec4 nearPoint = inverseViewProj * vsg::dvec4(nx, ny, 0.0, 1.0);
+    if (std::abs(nearPoint.w) < 1e-12) return std::nullopt;
+    const vsg::dvec3 onNearPlane(nearPoint.x / nearPoint.w, nearPoint.y / nearPoint.w, nearPoint.z / nearPoint.w);
+    const vsg::dvec3 eye = lookAt_->eye;
+    const vsg::dvec3 ray = onNearPlane - eye;
+    if (vsg::length(ray) < 1e-9) return std::nullopt;
+    const vsg::dvec3 direction = vsg::normalize(ray);
+
+    // Ellipsoid intersection, done in the space where it is the unit sphere.
+    const double a = ellipsoid_->radiusEquator(), b = ellipsoid_->radiusPolar();
+    if (a <= 0.0 || b <= 0.0) return std::nullopt;
+    const vsg::dvec3 o(eye.x / a, eye.y / a, eye.z / b);
+    const vsg::dvec3 d(direction.x / a, direction.y / a, direction.z / b);
+    const double qa = vsg::dot(d, d), qb = 2.0 * vsg::dot(o, d), qc = vsg::dot(o, o) - 1.0;
+    const double discriminant = qb * qb - 4.0 * qa * qc;
+    if (discriminant < 0.0 || qa < 1e-300) return std::nullopt; // the cursor is off the globe
+    const double t = (-qb - std::sqrt(discriminant)) / (2.0 * qa);
+    if (t <= 0.0) return std::nullopt;
+    return eye + direction * t;
+}
+
+void CameraController::zoomTowardsCursor(double fromDistance, double toDistance) {
+    // Only meaningful when the focus is ours to move; following a vehicle the
+    // camera belongs to the vehicle.
+    if (!detached() || fromDistance <= 0.0) return;
+    const auto ground = groundUnderCursor();
+    if (!ground) return;
+    // Closing to a fraction k of the distance brings the focus the same
+    // fraction of the way to what the cursor is over, so that point keeps its
+    // place on screen and zooming goes where you are looking.
+    const double t = std::clamp(1.0 - toDistance / fromDistance, -1.0, 1.0);
+    focus_ = focus_ + (*ground - focus_) * t;
 }
 
 void CameraController::apply(vsg::ScrollWheelEvent& e) {
     if (e.handled) return;
+    const double from = targetDistance_;
     targetDistance_ = std::clamp(targetDistance_ * std::pow(kZoomPerNotch, static_cast<double>(e.delta.y)),
                                  detached() ? kMinDistanceDetached : kMinDistance, kMaxDistance);
+    zoomTowardsCursor(from, targetDistance_);
     e.handled = true;
 }
 

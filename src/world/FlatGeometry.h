@@ -20,11 +20,19 @@ struct FlatGeometrySettings {
     /// An unlit surface among lit terrain reads as a hole cut in the world,
     /// which is what the polar caps used to look like.
     bool lit = false;
+    /// Haze with distance like the terrain does (needs `lit`); see
+    /// world/Scattering.h. Anything large and far that skips this reads as
+    /// unnaturally clear next to ground that has it.
+    bool aerialPerspective = false;
     /// Material colour; the default is VSG's. The flat shader writes
     /// `vsg_Color * diffuse`, so this is the whole output where the vertex
     /// colours are white - which is how the segmentation pass paints a
     /// vehicle its id colour.
     vsg::vec4 diffuse{0.9f, 0.9f, 0.9f, 1.0f};
+    /// Ambient response, for the lit path. VSG's default is 1.0; the terrain
+    /// tiles use 0.45, so anything meant to sit alongside them has to use the
+    /// same or it glows where the sun is low - which at the poles is always.
+    vsg::vec4 ambient{1.0f, 1.0f, 1.0f, 1.0f};
 };
 
 /// StateGroup binding a pipeline for `vsg_Vertex` (vec3), `vsg_Normal` (vec3),

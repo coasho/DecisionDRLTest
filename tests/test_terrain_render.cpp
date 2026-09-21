@@ -108,13 +108,14 @@ struct Rig {
         camera = fsim::world::CameraController::create(view, lookAt, ellipsoid);
     }
 
-    /// Hold the middle button and drag `steps` times by `dyPixels` (negative = up the screen).
-    /// Returns the largest frame-to-frame turn of the view direction, in degrees.
+    /// Hold the left button - osgEarth's pan - and drag `steps` times by
+    /// `dyPixels` (negative = up the screen). Returns the largest
+    /// frame-to-frame turn of the view direction, in degrees.
     double drag(int steps, int dyPixels) {
         auto press = vsg::ButtonPressEvent::create();
         press->x = 400;
         press->y = 300;
-        press->button = 2;
+        press->button = 1;
         camera->apply(*press);
         camera->update(nullptr, 1.0 / 60.0);
 
@@ -126,7 +127,7 @@ struct Rig {
             auto move = vsg::MoveEvent::create();
             move->x = 400;
             move->y = y;
-            move->mask = vsg::BUTTON_MASK_2;
+            move->mask = vsg::BUTTON_MASK_1;
             camera->apply(*move);
             camera->update(nullptr, 1.0 / 60.0);
             const vsg::dvec3 now = vsg::normalize(lookAt->eye - lookAt->center);
@@ -179,4 +180,35 @@ TEST_CASE("the right mouse button is not a camera control", "[camera]") {
 
     REQUIRE(vsg::length(rig.camera->focus() - before) < 1.0);
     REQUIRE_THAT(rig.camera->distance(), Catch::Matchers::WithinRel(distance, 1e-9));
+}
+
+TEST_CASE("the wheel zooms towards the point under the cursor", "[camera]") {
+    // osgEarth's zoomToMouse, which it has on by default: what the pointer is
+    // over keeps its place on screen, so zooming goes where you are looking.
+    Rig rig;
+    const auto zoom = [&rig](int cursorX, float notches) {
+        rig.camera->setFreeView(45.0, 8.0, 0.0, 2.0e5);
+        rig.camera->update(nullptr, 1.0 / 60.0);
+        const vsg::dvec3 before = rig.camera->focus();
+        auto move = vsg::MoveEvent::create();
+        move->x = cursorX;
+        move->y = 300;
+        rig.camera->apply(*move);
+        auto scroll = vsg::ScrollWheelEvent::create();
+        scroll->delta = vsg::vec3(0.0f, notches, 0.0f);
+        rig.camera->apply(*scroll);
+        rig.camera->update(nullptr, 1.0 / 60.0);
+        return rig.camera->focus() - before;
+    };
+
+    // Cursor well right of centre: zooming in and out move the focus along the
+    // same line, in opposite directions.
+    const vsg::dvec3 in = zoom(700, 1.0f);
+    const vsg::dvec3 out = zoom(700, -1.0f);
+    REQUIRE(vsg::length(in) > 1.0);
+    REQUIRE(vsg::length(out) > 1.0);
+    REQUIRE(vsg::dot(vsg::normalize(in), vsg::normalize(out)) < -0.9);
+
+    // Cursor at the centre is already looking at the focus, so it stays put.
+    REQUIRE(vsg::length(zoom(400, 1.0f)) < vsg::length(in) * 0.2);
 }

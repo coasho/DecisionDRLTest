@@ -15,13 +15,18 @@ namespace fsim::world {
 /// mode and while no vehicle exists, a point on the globe. Mouse deltas are
 /// window-normalised, so the response is the same at any window size or DPI.
 ///
-///   left drag      rotate the view around the focus (~72 deg per half window)
-///   middle drag    following a vehicle: pan the focus in the screen plane
-///                  free / no vehicle:   drag the globe (the ground follows the mouse)
-///   wheel          zoom 12 % per notch, smoothed; from 6 m up to the whole Earth
+/// The bindings follow osgEarth's EarthManipulator, which is what people who
+/// fly globes are used to:
+///
+///   left drag      pan: the ground follows the cursor (osgEarth ACTION_PAN)
+///                  following a vehicle, pans the look-at in the screen plane
+///   middle drag    rotate the view around the focus (osgEarth ACTION_ROTATE)
+///   wheel          zoom 12 % per notch, smoothed, towards the point under the
+///                  cursor (osgEarth's zoomToMouse, on by default there too)
 ///   r / GUI        reset the view offset
 ///
-/// The right button is deliberately not a camera control.
+/// osgEarth puts zoom on the right button as well; here the right button is
+/// deliberately left alone and the wheel does the zooming.
 ///
 /// Dragging the globe rotates the focus about the centre of the Earth rather
 /// than displacing it and reprojecting through latitude/longitude, and turns
@@ -34,7 +39,7 @@ namespace fsim::world {
 ///  - Chase:    azimuth relative to the vehicle's heading (view turns with the aircraft)
 ///  - Orbit:    azimuth relative to north (view stays put while the aircraft turns)
 ///  - Overview: straight down from `distance x 10`, north up
-///  - Free:     detached: orbit a point on the globe that the middle button moves
+///  - Free:     detached: orbit a point on the globe that the left button moves
 class CameraController : public vsg::Inherit<vsg::Visitor, CameraController> {
 public:
     enum class Mode { Chase, Orbit, Overview, Free };
@@ -84,6 +89,11 @@ private:
     void normalised(int x, int y, double& nx, double& ny) const;
     void rotate(double dxNdc, double dyNdc);
     void moveFocus(double dxNdc, double dyNdc);
+    /// Where the cursor's ray meets the ellipsoid, or nothing when it misses.
+    std::optional<vsg::dvec3> groundUnderCursor() const;
+    /// Slide the focus so the point under the cursor keeps its place on screen
+    /// as the distance changes (osgEarth's zoomToMouse).
+    void zoomTowardsCursor(double fromDistance, double toDistance);
     void localFrame(const vsg::dvec3& pos, vsg::dvec3& east, vsg::dvec3& north, vsg::dvec3& up) const;
 
     vsg::ref_ptr<vsg::Camera> camera_;

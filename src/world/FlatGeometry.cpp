@@ -1,6 +1,7 @@
 #include "world/FlatGeometry.h"
 
 #include "core/Log.h"
+#include "world/Scattering.h"
 
 namespace fsim::world {
 
@@ -10,11 +11,17 @@ vsg::ref_ptr<vsg::StateGroup> createFlatStateGroup(const FlatGeometrySettings& s
         LOG_ERROR("world") << (settings.lit ? "phong" : "flat shaded") << " ShaderSet unavailable";
         return {};
     }
+    // Only the lit path goes through VSG's Phong shader, which is what the
+    // scattering is written against.
+    if (settings.lit && settings.aerialPerspective) addAerialPerspective(*shaderSet);
     auto config = vsg::GraphicsPipelineConfigurator::create(shaderSet);
 
     auto material = vsg::PhongMaterialValue::create();
     material->value().diffuse = settings.diffuse;
-    if (settings.lit) material->value().specular = vsg::vec4(0.0f, 0.0f, 0.0f, 1.0f); // matte: snow and ice, not plastic
+    if (settings.lit) {
+        material->value().specular = vsg::vec4(0.0f, 0.0f, 0.0f, 1.0f); // matte: snow and ice, not plastic
+        material->value().ambient = settings.ambient;
+    }
     config->assignDescriptor("material", material);
     config->enableArray("vsg_Vertex", VK_VERTEX_INPUT_RATE_VERTEX, 12);
     config->enableArray("vsg_Normal", VK_VERTEX_INPUT_RATE_VERTEX, 12);

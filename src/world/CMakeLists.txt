@@ -12,6 +12,8 @@ add_library(fsim_world STATIC
     Atmosphere.h
     Atmosphere.cpp
     CameraController.cpp
+    Scattering.h
+    Scattering.cpp
     Frames.h
     Interpolator.h
     Interpolator.cpp
