@@ -162,12 +162,14 @@ World::World(const WorldOptions& options) : environment_(*this) {
     o.ground = options.ground;
     o.recordPath = options.recordPath;
     o.recordIntervalSeconds = options.recordIntervalSeconds;
-    impl_ = std::make_unique<session::World>(o);
+    impl_ = std::make_shared<session::World>(o);
     // Default epoch: now, so the viewer's sun matches the wall clock unless told otherwise.
     auto s = impl_->environment();
     s.epochUtcSeconds = static_cast<double>(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count());
     impl_->setEnvironment(s);
 }
+
+World::World(Borrow, session::World& borrowed) : impl_(&borrowed, [](session::World*) {}), environment_(*this) {}
 
 World::~World() = default;
 

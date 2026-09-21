@@ -1,11 +1,13 @@
 // fsim_vision.dll through the public SDK: offscreen cameras on a vehicle
 // (needs a Vulkan device; sky and vehicles only, so no tiles are fetched).
+#include <fsim/VecEnv.h>
 #include <fsim/Vision.h>
 #include <fsim/World.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #define CHECK(cond)                                                                  \
     do {                                                                             \
@@ -106,6 +108,27 @@ int main(int argc, char** argv) {
     CHECK(anyNonSky > 0);
     CHECK(bottomUniform(img));
     CHECK(!bottomUniform(sensors.image(camNoseSelf)));
+    // A VecEnv exposes its world: one camera per batch vehicle.
+    {
+        VecEnvOptions vo2;
+        vo2.numEnvs = 2;
+        vo2.workers = 1;
+        vo2.publish = false;
+        vo2.worldName = "vision-batch";
+        vo2.jsbsimRoot = wo.jsbsimRoot;
+        VecEnv env(vo2);
+        World& bw = env.world();
+        CHECK(bw.vehicleCount() == 2);
+        CHECK(bw.vehicle("env1/0").valid());
+        vision::Sensors batchSensors(bw, vo);
+        std::vector<unsigned> cams;
+        for (Vehicle bv : bw.vehicles()) cams.push_back(batchSensors.addCamera(bv, nose));
+        env.reset(3);
+        env.step(std::vector<float>(env.numVehicles() * env.actionSize(), 0.0f));
+        batchSensors.render();
+        for (unsigned c : cams) CHECK(batchSensors.image(c).rgb != nullptr);
+        CHECK(batchSensors.image(cams[0]).width == 96);
+    }
     std::printf("vision ok (%.1f ms per render)\n", sensors.lastRenderMs());
     return 0;
 }

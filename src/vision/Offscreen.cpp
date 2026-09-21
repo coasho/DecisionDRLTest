@@ -69,33 +69,49 @@ vsg::ref_ptr<vsg::RenderPass> makeRenderPass(vsg::Device* device) {
 
 } // namespace
 
-bool Offscreen::create(const Settings& settings, std::string* error) {
+std::shared_ptr<VulkanContext> VulkanContext::acquire(bool debugLayer, std::string* error) {
+    static std::weak_ptr<VulkanContext> live;
+    if (auto existing = live.lock()) return existing;
+    auto ctx = std::make_shared<VulkanContext>();
     vsg::Names instanceExtensions, layers;
-    if (settings.debugLayer) {
+    if (debugLayer) {
         instanceExtensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         layers.push_back("VK_LAYER_KHRONOS_validation");
     }
     try {
-        instance_ = vsg::Instance::create(instanceExtensions, layers, VK_API_VERSION_1_1);
-        auto [physicalDevice, queueFamily] = instance_->getPhysicalDeviceAndQueueFamily(VK_QUEUE_GRAPHICS_BIT);
+        ctx->instance = vsg::Instance::create(instanceExtensions, layers, VK_API_VERSION_1_1);
+        auto [physicalDevice, queueFamily] = ctx->instance->getPhysicalDeviceAndQueueFamily(VK_QUEUE_GRAPHICS_BIT);
         if (!physicalDevice || queueFamily < 0) {
             if (error) *error = "no Vulkan device with a graphics queue";
-            return false;
+            return nullptr;
         }
-        queueFamily_ = queueFamily;
+        ctx->queueFamily = queueFamily;
         vsg::QueueSettings queueSettings{vsg::QueueSetting{queueFamily, {1.0}}};
         auto features = vsg::DeviceFeatures::create();
         features->get().samplerAnisotropy = VK_TRUE;
-        device_ = vsg::Device::create(physicalDevice, queueSettings, layers, vsg::Names{}, features);
+        ctx->device = vsg::Device::create(physicalDevice, queueSettings, layers, vsg::Names{}, features);
         LOG_INFO("vision") << "Vulkan device: " << physicalDevice->getProperties().deviceName << " (offscreen)";
+    } catch (const vsg::Exception& e) {
+        if (error) *error = "Vulkan initialisation failed: " + e.message + " (" + std::to_string(e.result) + ")";
+        return nullptr;
     } catch (const std::exception& e) {
         if (error) *error = std::string("Vulkan initialisation failed: ") + e.what();
-        return false;
+        return nullptr;
     }
-    options_ = vsg::Options::create();
-    options_->add(vsgXchange::all::create());
-    options_->fileCache = vsg::Path((platform::configDir() / "tilecache").string());
-    options_->sharedObjects = vsg::SharedObjects::create();
+    ctx->options = vsg::Options::create();
+    ctx->options->add(vsgXchange::all::create());
+    ctx->options->fileCache = vsg::Path((platform::configDir() / "tilecache").string());
+    ctx->options->sharedObjects = vsg::SharedObjects::create();
+    live = ctx;
+    return ctx;
+}
+
+bool Offscreen::create(const Settings& settings, std::string* error) {
+    context_ = VulkanContext::acquire(settings.debugLayer, error);
+    if (!context_) return false;
+    device_ = context_->device;
+    queueFamily_ = context_->queueFamily;
+    options_ = context_->options;
     viewer_ = vsg::Viewer::create();
     scene_ = vsg::Group::create();
     return true;

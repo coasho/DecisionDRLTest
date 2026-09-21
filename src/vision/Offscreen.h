@@ -9,10 +9,22 @@
 #include <vsg/all.h>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace fsim::vision {
+
+/// The process's Vulkan instance and device, shared by every Offscreen (VSG
+/// allows one vsg::Device per process by default).
+struct VulkanContext {
+    vsg::ref_ptr<vsg::Instance> instance;
+    vsg::ref_ptr<vsg::Device> device;
+    int queueFamily = -1;
+    vsg::ref_ptr<vsg::Options> options;
+    /// The live context, or a new one; null (with `error`) when there is no device.
+    static std::shared_ptr<VulkanContext> acquire(bool debugLayer, std::string* error);
+};
 
 class Offscreen {
 public:
@@ -69,7 +81,7 @@ private:
     };
     void readback(Camera& c);
 
-    vsg::ref_ptr<vsg::Instance> instance_;
+    std::shared_ptr<VulkanContext> context_;
     vsg::ref_ptr<vsg::Device> device_;
     int queueFamily_ = -1;
     vsg::ref_ptr<vsg::Options> options_;

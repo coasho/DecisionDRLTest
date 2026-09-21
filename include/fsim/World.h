@@ -201,7 +201,10 @@ public:
 private:
     friend class Vehicle;
     friend class Environment;
-    std::unique_ptr<session::World> impl_;
+    friend class VecEnv;
+    struct Borrow {};
+    World(Borrow, session::World& borrowed); ///< a view of a world owned elsewhere (VecEnv::world)
+    std::shared_ptr<session::World> impl_;
     Environment environment_;
 };
 

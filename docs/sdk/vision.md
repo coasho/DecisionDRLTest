@@ -36,7 +36,25 @@ for (;;) {
 | `settle(n)` | run `n` frames without reading back, to let tiles stream in after a jump to a new region |
 
 Cameras of a removed vehicle keep rendering from its last pose; up to 31
-vehicles can hide themselves from their own cameras.
+vehicles can hide themselves from their own cameras. Several `Sensors` in
+one process share one Vulkan device.
+
+## With VecEnv
+
+`VecEnv::world()` is the batch's world through the object model, so cameras
+go on batch vehicles the same way; images are read after `step()`:
+
+```cpp
+fsim::VecEnv env(opt);
+fsim::vision::Sensors sensors(env.world());
+std::vector<unsigned> cams;
+for (fsim::Vehicle v : env.world().vehicles()) cams.push_back(sensors.addCamera(v, nose)); // "env<e>/<v>", batch order
+for (;;) {
+    auto r = env.step(actions);
+    sensors.render();
+    for (unsigned c : cams) learner.see(sensors.image(c)); // alongside r.observations
+}
+```
 
 ## Performance
 

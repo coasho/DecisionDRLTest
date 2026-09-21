@@ -39,5 +39,7 @@ A scenario file can define the batch instead of code: `fsim::vecEnvOptions(fsim:
 The C ABI mirrors it as `fsim_vecenv_*` ([c_abi.md](c_abi.md)). `examples/minimal_trainer` is a complete loop with a PD baseline; `examples/ppo_trainer` is a full PPO (GAE, clipped objective, running observation normalisation, truncation bootstrapping) with a dependency-free MLP that learns the `altitude_heading_hold` task at the attitude level in about two minutes and beats the PD baseline - the loop to copy when plugging in LibTorch or any other learner.
 
 Because the environments live in a `World`, everything in the object model
-applies: `env.world()` (C++ internal API) lets you attach effects, set the
-environment or inspect vehicles, and `flightsim-viewer.exe` shows the batch.
+applies: `env.world()` returns it as a `fsim::World&` (vehicles named
+`env<e>/<v>` in batch order) so you can attach effects, set the environment,
+inspect vehicles or mount cameras ([vision.md](vision.md)), and
+`flightsim-viewer.exe` shows the batch.

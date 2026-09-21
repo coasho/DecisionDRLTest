@@ -126,7 +126,14 @@ struct Sensors::Impl {
     }
 };
 
+namespace {
+[[noreturn]] void rethrow(const char* where, const vsg::Exception& e) {
+    throw Error(std::string("vision: ") + where + ": " + e.message + " (" + std::to_string(e.result) + ")");
+}
+} // namespace
+
 Sensors::Sensors(World& world, const Options& options) : impl_(std::make_unique<Impl>()) {
+  try {
     impl_->world = &world;
     impl_->options = options;
     Offscreen::Settings s;
@@ -181,6 +188,9 @@ Sensors::Sensors(World& world, const Options& options) : impl_(std::make_unique<
     impl_->states.assign(options.maxVehicles, sim::VehicleState{});
 
     impl_->offscreen.setScene(scene, impl_->ellipsoid);
+  } catch (const vsg::Exception& e) {
+    rethrow("scene", e);
+  }
 }
 
 Sensors::~Sensors() = default;
@@ -211,15 +221,19 @@ std::size_t Sensors::cameraCount() const noexcept { return impl_->mounts.size();
 
 void Sensors::render() {
     const auto t0 = std::chrono::steady_clock::now();
-    if (!impl_->compiled) {
-        if (impl_->mounts.empty()) throw Error("vision: no cameras");
-        std::string error;
-        if (!impl_->offscreen.compile(&error)) throw Error("vision: " + error);
-        impl_->compiled = true;
+    try {
+        if (!impl_->compiled) {
+            if (impl_->mounts.empty()) throw Error("vision: no cameras");
+            std::string error;
+            if (!impl_->offscreen.compile(&error)) throw Error("vision: " + error);
+            impl_->compiled = true;
+        }
+        impl_->syncVehicles();
+        impl_->aim();
+        impl_->offscreen.render();
+    } catch (const vsg::Exception& e) {
+        rethrow("render", e);
     }
-    impl_->syncVehicles();
-    impl_->aim();
-    impl_->offscreen.render();
     impl_->lastRenderMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 
 }

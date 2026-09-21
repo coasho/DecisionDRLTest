@@ -1,6 +1,7 @@
 // fsim.dll: C ABI + C++ SDK over env::VecEnv (design 4.4, 9.1, 9.2).
 
 #include "fsim/VecEnv.h"
+#include "fsim/World.h"
 #include "fsim/fsim_c.h"
 
 #include "core/Log.h"
@@ -234,7 +235,11 @@ namespace fsim {
 
 struct VecEnv::Impl {
     fsim_vecenv* handle = nullptr;
-    ~Impl() { fsim_vecenv_destroy(handle); }
+    std::unique_ptr<World> world; ///< borrowed view, created on first use
+    ~Impl() {
+        world.reset();
+        fsim_vecenv_destroy(handle);
+    }
 };
 
 VecEnv::VecEnv(const VecEnvOptions& options) : impl_(std::make_unique<Impl>()) {
@@ -264,6 +269,11 @@ const std::vector<std::string>& VecEnv::actionNames() const noexcept { return im
 double VecEnv::agentStepSeconds() const noexcept { return impl_->handle->env.agentStepSeconds(); }
 std::uint64_t VecEnv::vehicleSteps() const noexcept { return impl_->handle->env.vehicleSteps(); }
 fsim_vecenv* VecEnv::handle() noexcept { return impl_->handle; }
+
+World& VecEnv::world() {
+    if (!impl_->world) impl_->world.reset(new World(World::Borrow{}, impl_->handle->env.world()));
+    return *impl_->world;
+}
 
 const char* version() noexcept { return FSIM_VERSION_STRING; }
 

@@ -14,6 +14,8 @@
 
 namespace fsim {
 
+class World;
+
 /// Non-owning read-only view (mirrors std::span<const T> for C++17).
 template <typename T>
 struct ConstSpan {
@@ -79,6 +81,11 @@ public:
 
     /// The C handle for the same environment (for mixed-language use).
     fsim_vecenv* handle() noexcept;
+
+    /// The batch's world through the object model: vehicles (named
+    /// "env<e>/<v>"), environment, effects, network - and cameras
+    /// (fsim::vision::Sensors takes a World&). Owned by the environment.
+    World& world();
 
 private:
     struct Impl;
