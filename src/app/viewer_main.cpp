@@ -13,6 +13,7 @@
 #include "core/Units.h"
 #include "fsim/Control.h"
 #include "io/AssetResolver.h"
+#include "io/TerrainTiles.h"
 #include "ipc/WorldMirror.h"
 #include "ipc/WorldRegistry.h"
 #include "platform/Clock.h"
@@ -264,9 +265,14 @@ int main(int argc, char** argv) {
     auto ellipsoid = vsg::EllipsoidModel::create(); // WGS-84
 
     // Elevation tiles on the CPU: camera terrain collision in every mode, physics in demo mode.
-    std::shared_ptr<world::TileGroundProvider> terrain;
-    if (!opt.earth.elevationUrl.empty())
-        terrain = std::make_shared<world::TileGroundProvider>(opt.earth.elevationUrl, opt.earth.elevationEncoding, opt.terrainZoom, viewer.options());
+    // (The same headless io::TerrainTiles the SDK uses; the download cache is shared with the renderer's.)
+    std::shared_ptr<io::TerrainTiles> terrain;
+    if (!opt.earth.elevationUrl.empty() && opt.earth.elevationEncoding == world::ElevationEncoding::Terrarium) {
+        io::TerrainTiles::Options to;
+        to.urlTemplate = opt.earth.elevationUrl;
+        to.zoom = opt.terrainZoom;
+        terrain = std::make_shared<io::TerrainTiles>(to);
+    }
 
     // --- Demo simulation (only with --demo) --------------------------------------
     std::unique_ptr<sim::SimRunner> runner;
@@ -393,9 +399,13 @@ int main(int argc, char** argv) {
     camera->setChaseOffset(opt.chaseDistance, opt.chaseElevation, opt.chaseAzimuth);
     // Camera collision samples finer tiles than the physics (z14, ~10 m/px):
     // on steep slopes a 38 m/px sample can be tens of metres off the drawn mesh.
-    std::shared_ptr<world::TileGroundProvider> cameraGround;
-    if (!opt.earth.elevationUrl.empty()) {
-        cameraGround = std::make_shared<world::TileGroundProvider>(opt.earth.elevationUrl, opt.earth.elevationEncoding, 14u, viewer.options(), 64);
+    std::shared_ptr<io::TerrainTiles> cameraGround;
+    if (terrain) {
+        io::TerrainTiles::Options to;
+        to.urlTemplate = opt.earth.elevationUrl;
+        to.zoom = 14;
+        to.cacheTiles = 64;
+        cameraGround = std::make_shared<io::TerrainTiles>(to);
         camera->setGroundQuery([cameraGround](double lat, double lon) { return cameraGround->cachedHeightAboveEllipsoidM(lat, lon); });
     }
     // Detached camera focus: the demo spawn area / default location, on the ground.

@@ -657,7 +657,7 @@ Each major choice, its alternatives and the driver that decided it; status "acce
 | ADR-4 | Viewer = VSG native window + Dear ImGui (vsgImGui), optional module | Qt, SDL/GLFW window, RmlUi, web view | lightweight, single render pass | accepted |
 | ADR-5 | No flight-stick input, HUD, instruments or cockpit view in v1 | SDL3 input module | owner decision | accepted |
 | ADR-6 | Full-Earth rendering via VSG's own `vsg::TileDatabase` (imagery + elevation layers) from a self-hosted tile pyramid | vsgCs / Cesium 3D Tiles, own PagedLOD engine | owner decision (VSG mandatory, no Cesium), lightweight | accepted |
-| ADR-7 | Physics ground from the same elevation tiles, sampled on the CPU by `io::TilePyramid` | separate DEM source; height from rendered mesh | consistency, headless, determinism | proposed |
+| ADR-7 | Physics ground from the same elevation tiles, sampled on the CPU by `io::TerrainTiles` (headless: WinHTTP + stb_image, disk cache shared with the renderer) | separate DEM source; height from rendered mesh | consistency, headless, determinism | accepted |
 | ADR-8 | Vision observations via offscreen VSG views, batched, host readback | per-sensor windows, separate render process | performance | proposed |
 | ADR-9 | VSG object model and serialisation (`.vsgt`) in `world`, `render`, `ui` and for scenarios/manifests; `core`, `sim` and `env` are plain C++ so the headless build has no VSG/Vulkan dependency (revised at M0) | own model, JSON everywhere | one model, VSG mandatory | proposed |
 | ADR-10 | `FlightModel` interface hides JSBSim; SI + ECEF metres at the boundary | JSBSim types used directly | extensibility, testability | proposed |

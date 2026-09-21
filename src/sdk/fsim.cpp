@@ -101,6 +101,7 @@ fsim_options toOptions(const fsim::VecEnvOptions& o) {
     c.target_altitude_delta_m = o.targetAltitudeDeltaM; c.target_heading_delta_deg = o.targetHeadingDeltaDeg;
     c.world_name = o.worldName.c_str();
     c.publish = o.publish ? 1 : 0;
+    c.terrain = o.terrain ? 1 : 0;
     return c;
 }
 
@@ -169,6 +170,7 @@ FSIM_API int fsim_vecenv_create(const fsim_options* options, fsim_vecenv** out) 
         o.seed = options->seed;
         o.workers = options->workers;
         o.publish = options->publish != 0;
+        o.terrain = options->terrain != 0;
         auto* h = new fsim_vecenv(toScenario(*options), o);
         h->last = h->env.reset();
         *out = h;

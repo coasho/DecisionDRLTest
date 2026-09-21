@@ -1,0 +1,262 @@
+#include "io/TerrainTiles.h"
+
+#include "core/Log.h"
+#include "platform/Http.h"
+#include "platform/Paths.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#define STBI_NO_STDIO
+#include <stb_image.h>
+
+#include <algorithm>
+#include <cmath>
+#include <fstream>
+
+namespace fsim::io {
+
+namespace {
+constexpr double kPi = 3.14159265358979323846;
+}
+
+void mercatorTile(double latRad, double lonRad, unsigned zoom, double& tx, double& ty) noexcept {
+    const double n = static_cast<double>(1u << zoom);
+    const double lat = std::clamp(latRad, -1.4844222297453322, 1.4844222297453322); // +-85.0511 deg
+    tx = (lonRad / kPi + 1.0) * 0.5 * n;
+    ty = (1.0 - std::log(std::tan(lat) + 1.0 / std::cos(lat)) / kPi) * 0.5 * n;
+    if (tx < 0.0) tx += n;
+    if (tx >= n) tx -= n;
+}
+
+ElevationTile decodeTerrariumPng(const std::vector<std::uint8_t>& png) {
+    ElevationTile tile;
+    int w = 0, h = 0, channels = 0;
+    unsigned char* pixels = stbi_load_from_memory(png.data(), static_cast<int>(png.size()), &w, &h, &channels, 3);
+    if (!pixels || w < 2 || w != h) {
+        if (pixels) stbi_image_free(pixels);
+        return tile;
+    }
+    tile.size = static_cast<std::uint32_t>(w);
+    tile.heights.resize(static_cast<std::size_t>(w) * static_cast<std::size_t>(h));
+    for (std::size_t i = 0; i < tile.heights.size(); ++i) {
+        const unsigned char* p = pixels + i * 3;
+        // Sea floor clamped to 0: no water surface is drawn, and the viewer does the same.
+        tile.heights[i] = std::max(0.0f, static_cast<float>(p[0]) * 256.0f + static_cast<float>(p[1]) + static_cast<float>(p[2]) / 256.0f - 32768.0f);
+    }
+    stbi_image_free(pixels);
+    return tile;
+}
+
+TerrainTiles::TerrainTiles(Options options, Fetch fetch) : options_(std::move(options)), fetch_(std::move(fetch)) {
+    options_.zoom = std::min(options_.zoom, 22u);
+    options_.cacheTiles = std::max<std::size_t>(options_.cacheTiles, 8);
+    if (options_.cacheDir.empty()) options_.cacheDir = platform::configDir() / "tilecache";
+}
+
+TerrainTiles::~TerrainTiles() {
+    stopLoaders_.store(true);
+    queueCv_.notify_all();
+    for (auto& t : loaders_) t.join();
+}
+
+std::string TerrainTiles::url(unsigned x, unsigned y) const {
+    std::string s = options_.urlTemplate;
+    auto sub = [&](const char* key, unsigned v) {
+        for (auto pos = s.find(key); pos != std::string::npos; pos = s.find(key)) s.replace(pos, 3, std::to_string(v));
+    };
+    sub("{z}", options_.zoom);
+    sub("{x}", x);
+    sub("{y}", y);
+    return s;
+}
+
+std::filesystem::path TerrainTiles::cachePath(unsigned x, unsigned y) const {
+    // Same layout as vsgXchange's file cache (<cache>/<host>/<path>) so the
+    // viewer and a training application share downloads.
+    std::string u = url(x, y);
+    const auto scheme = u.find("://");
+    if (scheme != std::string::npos) u = u.substr(scheme + 3);
+    return options_.cacheDir / std::filesystem::path(u);
+}
+
+TerrainTiles::Tile TerrainTiles::load(unsigned x, unsigned y) const {
+    std::vector<std::uint8_t> png;
+    const auto path = cachePath(x, y);
+    bool fromDisk = false;
+    if (!fetch_) {
+        std::ifstream in(path, std::ios::binary);
+        if (in) {
+            png.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+            fromDisk = !png.empty();
+        }
+    }
+    if (!fromDisk) {
+        bool ok = false;
+        if (fetch_) {
+            ok = fetch_(options_.zoom, x, y, png);
+        } else {
+            std::string error;
+            for (int attempt = 0; attempt < 3 && !ok; ++attempt) ok = platform::httpGet(url(x, y), png, &error);
+            if (!ok) LOG_WARN("io") << "elevation tile " << url(x, y) << ": " << error;
+        }
+        if (!ok) {
+            failures_.fetch_add(1);
+            return nullptr;
+        }
+    }
+    auto decoded = std::make_shared<ElevationTile>(decodeTerrariumPng(png));
+    if (!decoded->valid()) {
+        LOG_WARN("io") << "elevation tile " << url(x, y) << ": not a decodable PNG";
+        failures_.fetch_add(1);
+        return nullptr;
+    }
+    if (!fromDisk && !fetch_) {
+        std::error_code ec;
+        std::filesystem::create_directories(path.parent_path(), ec);
+        std::ofstream out(path, std::ios::binary);
+        if (out) out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+    }
+    return decoded;
+}
+
+TerrainTiles::Tile TerrainTiles::tile(unsigned x, unsigned y) const {
+    const Key key{x, y};
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (auto it = cache_.find(key); it != cache_.end()) {
+            lru_.splice(lru_.begin(), lru_, it->second.second);
+            return it->second.first;
+        }
+    }
+    Tile t = load(x, y); // outside the lock: other workers keep sampling cached tiles
+    std::lock_guard<std::mutex> lock(mutex_);
+    misses_.fetch_add(1);
+    if (auto it = cache_.find(key); it != cache_.end()) return it->second.first; // another worker won the race
+    lru_.push_front(key);
+    cache_.emplace(key, std::make_pair(t, lru_.begin()));
+    while (cache_.size() > options_.cacheTiles) {
+        cache_.erase(lru_.back());
+        lru_.pop_back();
+    }
+    return t;
+}
+
+double TerrainTiles::sample(const ElevationTile& t, double tx, double ty) noexcept {
+    const double fx = (tx - std::floor(tx)) * static_cast<double>(t.size - 1);
+    const double fy = (ty - std::floor(ty)) * static_cast<double>(t.size - 1);
+    const std::uint32_t x0 = static_cast<std::uint32_t>(fx), y0 = static_cast<std::uint32_t>(fy);
+    const std::uint32_t x1 = std::min(x0 + 1, t.size - 1), y1 = std::min(y0 + 1, t.size - 1);
+    const double ax = fx - x0, ay = fy - y0;
+    auto at = [&](std::uint32_t x, std::uint32_t y) { return static_cast<double>(t.heights[static_cast<std::size_t>(y) * t.size + x]); };
+    return (at(x0, y0) * (1 - ax) + at(x1, y0) * ax) * (1 - ay) + (at(x0, y1) * (1 - ax) + at(x1, y1) * ax) * ay;
+}
+
+double TerrainTiles::heightAboveEllipsoidM(double latitudeRad, double longitudeRad) const {
+    double tx, ty;
+    mercatorTile(latitudeRad, longitudeRad, options_.zoom, tx, ty);
+    const double n = static_cast<double>(1u << options_.zoom);
+    const Tile t = tile(static_cast<unsigned>(std::floor(tx)), static_cast<unsigned>(std::clamp(std::floor(ty), 0.0, n - 1.0)));
+    if (!t || !t->valid()) return 0.0;
+    return sample(*t, tx, ty);
+}
+
+std::optional<double> TerrainTiles::cachedHeightAboveEllipsoidM(double latitudeRad, double longitudeRad) {
+    double tx, ty;
+    mercatorTile(latitudeRad, longitudeRad, options_.zoom, tx, ty);
+    const double n = static_cast<double>(1u << options_.zoom);
+    const Key key{static_cast<unsigned>(std::floor(tx)), static_cast<unsigned>(std::clamp(std::floor(ty), 0.0, n - 1.0))};
+    Tile t;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (auto it = cache_.find(key); it != cache_.end()) {
+            lru_.splice(lru_.begin(), lru_, it->second.second);
+            t = it->second.first;
+        }
+    }
+    if (!t) {
+        requestAround(latitudeRad, longitudeRad);
+        return std::nullopt;
+    }
+    if (!t->valid()) return 0.0;
+    return sample(*t, tx, ty);
+}
+
+void TerrainTiles::prefetch(double latitudeRad, double longitudeRad, double radiusM, unsigned threads) {
+    double tx, ty;
+    mercatorTile(latitudeRad, longitudeRad, options_.zoom, tx, ty);
+    const int n = static_cast<int>(1u << options_.zoom);
+    const double metresPerTile = 2.0 * kPi * 6378137.0 * std::cos(latitudeRad) / n;
+    const int r = static_cast<int>(std::ceil(radiusM / metresPerTile));
+    const int cx = static_cast<int>(tx), cy = static_cast<int>(ty);
+    std::vector<Key> keys;
+    for (int dy = -r; dy <= r; ++dy)
+        for (int dx = -r; dx <= r; ++dx) {
+            const int y = cy + dy;
+            if (y < 0 || y >= n) continue;
+            keys.push_back(Key{static_cast<unsigned>(((cx + dx) % n + n) % n), static_cast<unsigned>(y)});
+        }
+    std::atomic<std::size_t> next{0};
+    auto worker = [&] {
+        for (std::size_t i = next.fetch_add(1); i < keys.size(); i = next.fetch_add(1)) tile(keys[i].x, keys[i].y);
+    };
+    std::vector<std::thread> pool;
+    for (unsigned t = 0; t < std::max(1u, std::min<unsigned>(threads, static_cast<unsigned>(keys.size()))); ++t) pool.emplace_back(worker);
+    for (auto& t : pool) t.join();
+    LOG_DEBUG("io") << "prefetched " << keys.size() << " elevation tiles at zoom " << options_.zoom << " (" << failures_.load() << " failures)";
+}
+
+void TerrainTiles::requestAround(double latitudeRad, double longitudeRad) {
+    double tx, ty;
+    mercatorTile(latitudeRad, longitudeRad, options_.zoom, tx, ty);
+    const int n = static_cast<int>(1u << options_.zoom);
+    const int cx = static_cast<int>(tx), cy = static_cast<int>(ty);
+    bool any = false;
+    {
+        std::lock_guard<std::mutex> cacheLock(mutex_);
+        std::lock_guard<std::mutex> queueLock(queueMutex_);
+        for (int dy = -1; dy <= 1; ++dy)
+            for (int dx = -1; dx <= 1; ++dx) {
+                const int y = cy + dy;
+                if (y < 0 || y >= n) continue;
+                const Key k{static_cast<unsigned>(((cx + dx) % n + n) % n), static_cast<unsigned>(y)};
+                const std::uint64_t id = (static_cast<std::uint64_t>(k.x) << 32) | k.y;
+                if (cache_.count(k) || queued_.count(id)) continue;
+                queued_.insert(id);
+                queue_.push_back(k);
+                any = true;
+            }
+    }
+    if (any) {
+        ensureLoaders();
+        queueCv_.notify_all();
+    }
+}
+
+void TerrainTiles::ensureLoaders() {
+    std::lock_guard<std::mutex> lock(queueMutex_);
+    if (!loaders_.empty()) return;
+    for (unsigned i = 0; i < std::max(1u, options_.loaderThreads); ++i) loaders_.emplace_back([this] { loaderLoop(); });
+}
+
+void TerrainTiles::loaderLoop() {
+    for (;;) {
+        Key k;
+        {
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            queueCv_.wait(lock, [&] { return stopLoaders_.load() || !queue_.empty(); });
+            if (stopLoaders_.load()) return;
+            k = queue_.front();
+            queue_.pop_front();
+        }
+        tile(k.x, k.y);
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        queued_.erase((static_cast<std::uint64_t>(k.x) << 32) | k.y);
+    }
+}
+
+std::size_t TerrainTiles::cachedTiles() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return cache_.size();
+}
+
+} // namespace fsim::io

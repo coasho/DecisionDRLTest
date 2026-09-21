@@ -33,6 +33,7 @@ public:
         unsigned workers = 0;              ///< 0 = physical cores - 2
         std::shared_ptr<sim::GroundProvider> ground; ///< null = flat at 0 m
         bool publish = true;               ///< visible to flightsim-viewer.exe
+        bool terrain = false;              ///< physics ground from public elevation tiles
     };
 
     struct StepResult {

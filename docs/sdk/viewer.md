@@ -69,4 +69,4 @@ vsync and uses ~3% of one core while mirroring 64 vehicles).
 
 - One machine: the segment is local shared memory (a network relay is a planned `ext/` module).
 - The viewer uses one aircraft model for every vehicle unless a `model` override is given (per-type models are next).
-- The trainer's physics ground is flat unless it configures a `GroundProvider`; the viewer draws real terrain, so a low-flying vehicle can appear below hills. A terrain provider in the SDK (same tiles as the viewer) is on the roadmap.
+- The trainer's physics ground is flat unless `WorldOptions::terrain` is on (then it is the same relief the viewer draws); with it off a low-flying vehicle can appear below hills.

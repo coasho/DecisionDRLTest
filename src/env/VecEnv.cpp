@@ -24,6 +24,7 @@ VecEnv::VecEnv(const Scenario& scenario, const Options& options)
     wo.publish = options.publish;
     wo.jsbsimRoot = scenario_.jsbsimRoot;
     wo.ground = options.ground;
+    wo.terrain = options.terrain;
     wo.capacity = std::max<std::uint32_t>(16, static_cast<std::uint32_t>(numVehicles()));
     world_ = std::make_unique<session::World>(wo);
 

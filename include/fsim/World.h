@@ -13,6 +13,7 @@
 #include "fsim/Effects.h"
 #include "fsim/EnvironmentState.h"
 #include "fsim/Export.h"
+#include "fsim/GroundProvider.h"
 #include "fsim/InitialConditions.h"
 #include "fsim/Property.h"
 #include "fsim/VehicleState.h"
@@ -49,6 +50,10 @@ struct WorldOptions {
     bool publish = true;              ///< false = never visible to viewers
     double publishIntervalSeconds = 1.0 / 60.0;
     std::string jsbsimRoot;           ///< empty = auto-detect
+    bool terrain = false;             ///< physics ground from public elevation tiles (the ones the viewer draws); needs network or a warm cache
+    std::string terrainUrl;           ///< XYZ template with {z}/{x}/{y}; empty = AWS Terrarium
+    unsigned terrainZoom = 12;        ///< 12: ~38 m/px, 14: ~10 m/px (4x the tiles)
+    std::shared_ptr<GroundProvider> ground; ///< your own ground model instead (overrides `terrain`)
 };
 
 struct VehicleSpec {

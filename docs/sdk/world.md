@@ -20,8 +20,22 @@ struct WorldOptions {
     bool publish = true;                   // false: never visible to viewers
     double publishIntervalSeconds = 1/60.; // wall-clock rate limit of the viewer feed
     std::string jsbsimRoot;                // empty = auto-detect
+    bool terrain = false;                  // physics ground from the public elevation tiles the viewer draws
+    std::string terrainUrl;                // XYZ template; empty = AWS Terrarium
+    unsigned terrainZoom = 12;             // ~38 m/px (14: ~10 m/px, 4x the tiles)
+    std::shared_ptr<GroundProvider> ground;// or your own height model (overrides `terrain`)
 };
 ```
+
+With `terrain = true` the ground under every vehicle is the same relief the
+viewer renders (AWS Terrarium tiles, sea clamped to 0 m): gear contact, AGL
+and `onGround` spawns use it. Tiles are downloaded on first use into
+`%LOCALAPPDATA%lightsim	ilecache` (shared with the viewer), prefetched
+around each new vehicle (blocking, a few km) and kept warm around moving
+vehicles by background loaders, so training steps rarely wait. Without
+network access and an empty cache the ground is flat at 0 m (a warning is
+logged per missing tile). Implement `fsim::GroundProvider` for a custom
+height model (a single virtual, thread-safe call).
 
 | Call | Meaning |
 | --- | --- |

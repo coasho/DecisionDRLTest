@@ -75,9 +75,12 @@ viewer) done**:
 Measured on an 8-core desktop (Release): 64 c172x with control cascades, effects and beacons ~760k
 vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-steps/s (~6000x real time).
 
-Not yet: per-type vehicle models in the viewer, a terrain `GroundProvider` inside the SDK (the viewer's
-tiles for physics), animated control surfaces, vision observations, transport bridges for the comm layer,
-offline tile pyramids (`tools/tile_builder`).
+- **Terrain physics in the SDK** (`WorldOptions::terrain`): the same public elevation tiles the viewer
+  draws, fetched headless (WinHTTP + stb_image, no VSG), cached on disk alongside the viewer's downloads,
+  prefetched around spawns and kept warm around moving vehicles.
+
+Not yet: per-type vehicle models in the viewer, animated control surfaces, vision observations, transport
+bridges for the comm layer, offline tile pyramids (`tools/tile_builder`).
 
 Imagery and elevation come from Esri World Imagery and AWS Terrain Tiles under their respective terms (attribution required); tiles are cached under `%LOCALAPPDATA%\flightsim\tilecache`.
 
@@ -118,7 +121,7 @@ After `deploy`, `build/ucrt64-release/bin` runs standalone (no `ucrt64/bin` on `
 
 ```bash
 # 1. a training application (this one: five c172x at different control levels, wind, gusts, beacons)
-build/ucrt64-release/bin/multi_level_control.exe --realtime --seconds 600
+build/ucrt64-release/bin/multi_level_control.exe --realtime --seconds 600 --terrain
 # 2. the viewer, in another terminal, whenever you like
 build/ucrt64-release/bin/flightsim-viewer.exe
 build/ucrt64-release/bin/flightsim-viewer.exe --list

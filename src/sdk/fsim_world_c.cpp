@@ -103,6 +103,7 @@ FSIM_API void fsim_world_options_init(fsim_world_options* o) {
     o->capacity = 256;
     o->publish = 1;
     o->publish_interval_s = 1.0 / 60.0;
+    o->terrain_zoom = 12;
 }
 
 FSIM_API void fsim_vehicle_spec_init(fsim_vehicle_spec* s) {
@@ -153,6 +154,9 @@ FSIM_API int fsim_world_create(const fsim_world_options* options, fsim_world** o
         o.publish = options->publish != 0;
         o.publishIntervalSeconds = options->publish_interval_s;
         if (options->jsbsim_root) o.jsbsimRoot = options->jsbsim_root;
+        o.terrain = options->terrain != 0;
+        if (options->terrain_url) o.terrainUrl = options->terrain_url;
+        o.terrainZoom = options->terrain_zoom ? options->terrain_zoom : 12u;
         *out = new fsim_world(o);
         return FSIM_OK;
     });

@@ -50,6 +50,7 @@ typedef struct fsim_options {
     /* appended in ABI 1.1 */
     const char* world_name;     /* published world name for viewers ("vecenv") */
     int32_t publish;            /* 0 = invisible to viewers */
+    int32_t terrain;            /* 1 = physics ground from public elevation tiles */
 } fsim_options;
 
 /* Library-owned buffers, vehicle-major: index = env * K + vehicle. */
@@ -106,6 +107,9 @@ typedef struct fsim_world_options {
     int32_t publish;             /* 0 = invisible to viewers */
     double publish_interval_s;
     const char* jsbsim_root;     /* NULL = auto-detect */
+    int32_t terrain;             /* 1 = physics ground from public elevation tiles (network or warm cache) */
+    const char* terrain_url;     /* NULL = AWS Terrarium */
+    uint32_t terrain_zoom;       /* 12 */
 } fsim_world_options;
 
 typedef struct fsim_vehicle_spec {

@@ -11,6 +11,7 @@
 #include "fsim/EnvironmentState.h"
 #include "fsim/InitialConditions.h"
 #include "fsim/Rng.h"
+#include "io/TerrainTiles.h"
 #include "ipc/WorldPublisher.h"
 #include "sim/GroundProvider.h"
 #include "sim/VehiclePool.h"
@@ -36,7 +37,11 @@ struct WorldOptions {
     bool publish = true;                ///< false = invisible to viewers
     double publishIntervalSeconds = 1.0 / 60.0;
     std::filesystem::path jsbsimRoot;   ///< empty = auto-detect
-    std::shared_ptr<sim::GroundProvider> ground; ///< null = flat at 0 m
+    std::shared_ptr<sim::GroundProvider> ground; ///< custom ground; null = `terrain` below or flat at 0 m
+    bool terrain = false;               ///< physics ground from the public elevation tiles the viewer draws
+    std::string terrainUrl;             ///< tile template; empty = AWS Terrarium
+    unsigned terrainZoom = 12;          ///< ~38 m/px
+    double terrainPrefetchRadiusM = 4000.0; ///< tiles loaded (blocking) around each new vehicle's position
 };
 
 struct VehicleSpec {
@@ -103,6 +108,8 @@ public:
     Rng& rng() noexcept { return rng_; }
     const std::string& name() const noexcept { return options_.name; }
     bool published() const noexcept { return publisher_ && publisher_->active(); }
+    /// The elevation tiles used for physics when `terrain` is on (null otherwise).
+    io::TerrainTiles* terrain() noexcept { return terrain_.get(); }
 
     // --- Stepping ------------------------------------------------------------
     /// Advance every vehicle by `n` world steps (frameSkip FDM steps each).
@@ -137,6 +144,7 @@ private:
     WorldOptions options_;
     std::filesystem::path jsbsimRoot_;
     std::shared_ptr<sim::GroundProvider> ground_;
+    std::shared_ptr<io::TerrainTiles> terrain_;              ///< set when options.terrain (ground_ aliases it)
     std::unique_ptr<sim::VehiclePool> pool_;
     std::vector<std::unique_ptr<Entry>> entries_;               ///< by slot (null when never used)
     std::unordered_map<std::uint32_t, std::size_t> idToSlot_;

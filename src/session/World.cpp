@@ -26,7 +26,17 @@ World::World(const WorldOptions& options) : options_(options), rng_(options.seed
     io::AssetResolver assets;
     if (auto root = assets.jsbsimRoot(options_.jsbsimRoot)) jsbsimRoot_ = *root;
     else LOG_WARN("session") << "JSBSim data root not found; vehicles of type jsbsim:* will fail to load";
-    ground_ = options_.ground ? options_.ground : std::make_shared<sim::FlatGround>(0.0);
+    if (options_.ground) {
+        ground_ = options_.ground;
+    } else if (options_.terrain) {
+        io::TerrainTiles::Options to;
+        if (!options_.terrainUrl.empty()) to.urlTemplate = options_.terrainUrl;
+        to.zoom = options_.terrainZoom;
+        terrain_ = std::make_shared<io::TerrainTiles>(to);
+        ground_ = terrain_;
+    } else {
+        ground_ = std::make_shared<sim::FlatGround>(0.0);
+    }
 
     const unsigned physical = platform::physicalCoreCount();
     const unsigned workers = options_.workers ? options_.workers : std::max(1u, physical > 2 ? physical - 2 : 1u);
@@ -86,6 +96,11 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
             freeSlots_.erase(it);
             break;
         }
+    // Terrain under and around the spawn point must be known before JSBSim
+    // trims (on-ground spawns) or the first steps sample it.
+    if (terrain_)
+        terrain_->prefetch(units::degreesToRadians(spec.initial.latitudeDeg), units::degreesToRadians(spec.initial.longitudeDeg),
+                           options_.terrainPrefetchRadiusM);
     if (slot == static_cast<std::size_t>(-1)) {
         auto model = std::make_unique<sim::JsbsimModel>(options_.dt, ground_);
         if (!model->load(sim::AircraftSpec{aircraft, jsbsimRoot_}, spec.initial)) {
@@ -157,6 +172,8 @@ bool World::resetVehicle(std::uint32_t id, const sim::InitialConditions* ic) {
     Entry* e = entry(id);
     if (!e) return false;
     if (ic) e->info.initial = *ic;
+    if (terrain_ && ic)
+        terrain_->prefetch(units::degreesToRadians(ic->latitudeDeg), units::degreesToRadians(ic->longitudeDeg), options_.terrainPrefetchRadiusM);
     sim::FlightModel& model = pool_->vehicle(e->slot);
     if (!model.reset(e->info.initial)) return false;
     e->inputs = sim::ControlInputs{};
@@ -329,6 +346,13 @@ void World::step(unsigned n) {
         }
         pool_->step(Span<const sim::ControlInputs>(poolInputs_), options_.frameSkip);
         simTime_ += options_.dt * options_.frameSkip;
+        // Keep the tiles around every vehicle warm (background loaders) so the
+        // workers seldom block on a download.
+        if (terrain_ && worldSteps_ % 30 == 0) {
+            const auto states = pool_->states();
+            for (std::size_t s = 0; s < entries_.size(); ++s)
+                if (entries_[s]) terrain_->requestAround(states[s].latitudeRad, states[s].longitudeRad);
+        }
         vehicleSteps_ += liveCount_ * static_cast<std::uint64_t>(options_.frameSkip);
         ++worldSteps_;
         network_.step(simTime_, options_.dt * options_.frameSkip, this, rng_);

@@ -43,6 +43,7 @@ struct VecEnvOptions {
     double targetAltitudeDeltaM = 300.0, targetHeadingDeltaDeg = 60.0;
     std::string worldName = "vecenv"; ///< viewers attach by this name
     bool publish = true;
+    bool terrain = false;             ///< physics ground from public elevation tiles
 };
 
 struct StepResult {

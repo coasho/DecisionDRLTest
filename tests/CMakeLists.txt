@@ -7,7 +7,8 @@ add_executable(fsim_tests
     test_vehicle_pool.cpp
     test_vecenv.cpp
     test_control.cpp
-    test_world.cpp)
+    test_world.cpp
+    test_terrain.cpp)
 
 target_link_libraries(fsim_tests PRIVATE fsim::env fsim::session fsim::control fsim::effects fsim::comm fsim::ipc fsim::sim fsim::io fsim::core Catch2::Catch2WithMain)
 target_compile_definitions(fsim_tests PRIVATE FSIM_TEST_JSBSIM_ROOT="${FSIM_JSBSIM_DATA_DIR}")
