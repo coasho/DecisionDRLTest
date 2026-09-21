@@ -40,7 +40,18 @@ jobs:
           cmake --version | head -1
           ninja --version
 
+      - name: VSG stack cache key
+        id: vsgkey
+        run: echo "key=vsg-$(git submodule status third_party/vsg third_party/vsgXchange third_party/vsgImGui | sha256sum | cut -c1-16)-$(sha256sum deps/CMakeLists.txt | cut -c1-8)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        id: vsgcache
+        with:
+          path: build/deps-ucrt64/install
+          key: ${{ runner.os }}-${{ steps.vsgkey.outputs.key }}
+
       - name: Build VSG stack
+        if: steps.vsgcache.outputs.cache-hit != 'true'
         run: |
           cmake -S deps --preset deps-ucrt64
           cd deps && cmake --build --preset deps-ucrt64
