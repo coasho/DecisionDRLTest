@@ -9,6 +9,8 @@ add_library(fsim_world STATIC
     VehicleVisuals.h
     VehicleVisuals.cpp
     CameraController.h
+    Atmosphere.h
+    Atmosphere.cpp
     CameraController.cpp
     Frames.h
     Interpolator.h

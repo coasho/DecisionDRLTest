@@ -24,6 +24,7 @@
 #include "platform/CrashHandler.h"
 #include "platform/Threads.h"
 #include "render/Viewer.h"
+#include "world/Atmosphere.h"
 #include "sim/GroundProvider.h"
 #include "sim/JsbsimModel.h"
 #include "sim/SimRunner.h"
@@ -387,9 +388,13 @@ int main(int argc, char** argv) {
         sunLight = world::createSunLight(day, hours);
         scene->addChild(sunLight);
     }
+    std::unique_ptr<world::Atmosphere> atmosphere;
     if (auto earth = world::createEarth(opt.earth, viewer.options(), ellipsoid)) {
         scene->addChild(earth);
         if (auto caps = world::createPolarCaps(ellipsoid, viewer.options())) scene->addChild(caps); // Mercator tiles end at 85 deg
+        // After the globe, so the air is blended over it rather than hidden by it.
+        atmosphere = std::make_unique<world::Atmosphere>(viewer.options(), ellipsoid, sunDir);
+        scene->addChild(atmosphere->node());
     }
 
     world::VehicleVisuals::Settings visualSettings;
@@ -662,6 +667,7 @@ int main(int argc, char** argv) {
                     world::utcOf(env.epochUtcSeconds + batch->simTime, day, hours);
                     sunDir = world::sunDirectionEcef(day, hours);
                     sky.setSun(sunDir);
+                    if (atmosphere) atmosphere->setSun(sunDir);
                     if (sunLight) world::setSunDirection(sunLight, sunDir);
                 }
                 if (!mirror.publisherAlive() && mirror.ageSeconds() > 5.0) {
@@ -742,6 +748,7 @@ int main(int argc, char** argv) {
             ? &(opt.interpolate ? interpolator.states() : batch->states)[static_cast<std::size_t>(selected)] : nullptr;
         camera->update(target, viewer.frameSeconds());
         sky.update(viewer.lookAt()->eye);
+        if (atmosphere) atmosphere->update(viewer.lookAt()->eye);
         {
             const vsg::dvec3 lla = ellipsoid->convertECEFToLatLongAltitude(viewer.lookAt()->eye);
             controls->eyeLatDeg.store(lla.x, std::memory_order_relaxed);
