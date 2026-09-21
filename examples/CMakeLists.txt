@@ -1,2 +1,3 @@
 add_subdirectory(minimal_trainer)
 add_subdirectory(multi_level_control)
+add_subdirectory(ppo_trainer)

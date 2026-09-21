@@ -75,6 +75,9 @@ viewer) done**:
 Measured on an 8-core desktop (Release): 64 c172x with control cascades, effects and beacons ~760k
 vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-steps/s (~6000x real time).
 
+- **`examples/ppo_trainer`**: clipped PPO with GAE, a hand-written MLP and Adam (no ML library) over
+  `fsim::VecEnv`; on 64 environments it takes altitude/heading hold from 0.20 to 0.73 reward/step in ~2 minutes,
+  beating the hand-tuned PD baseline (0.57); `--eval` replays the saved policy in the viewer.
 - **Terrain physics in the SDK** (`WorldOptions::terrain`): the same public elevation tiles the viewer
   draws, fetched headless (WinHTTP + stb_image, no VSG), cached on disk alongside the viewer's downloads,
   prefetched around spawns and kept warm around moving vehicles.
@@ -128,6 +131,9 @@ build/ucrt64-release/bin/flightsim-viewer.exe --list
 
 # vectorised RL trainer skeleton (32 envs, PD baseline; --random for a random policy); world "vecenv"
 build/ucrt64-release/bin/minimal_trainer.exe --envs 32 --steps 3000
+# PPO (dependency-free MLP + Adam) learning altitude/heading hold at the attitude level; world "ppo"
+build/ucrt64-release/bin/ppo_trainer.exe --envs 64 --iterations 1000 --save policy.bin
+build/ucrt64-release/bin/ppo_trainer.exe --load policy.bin --eval --envs 16
 
 # built-in demo scenario on the viewer's own simulation thread
 build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 8
@@ -172,7 +178,7 @@ src/session/      World implementation (vehicles, stepping, environment, publish
 src/env/          Scenario, Task, Observation/Action spaces, VecEnv (batch layer)
 src/sdk/          libfsim.dll: C++ SDK (World, VecEnv) + C ABI
 include/fsim/     public SDK headers
-examples/         multi_level_control, minimal_trainer
+examples/         multi_level_control, minimal_trainer, ppo_trainer
 docs/sdk/         SDK guide
 src/render/       VSG window, viewer, render graph (viewer builds)
 src/world/        Earth tiles (vsg::TileDatabase), vehicle visuals, cameras

@@ -34,7 +34,7 @@ for (;;) {
 | Observation `"state"` | `alt_msl_km, agl_km, tas_100ms, alpha, beta, roll, pitch, hdg_sin, hdg_cos, p, q, r, vz_down_100ms, ax_g, ay_g, az_g, alt_err_km, hdg_err_sin, hdg_err_cos, throttle` |
 | Tasks | `altitude_heading_hold` (targets sampled per episode within `targetAltitudeDeltaM` / `targetHeadingDeltaDeg` of the initial state; shaped reward, -10 on crash), `level_flight` |
 
-The C ABI mirrors it as `fsim_vecenv_*` ([c_abi.md](c_abi.md)). `examples/minimal_trainer` is a complete loop with a PD baseline.
+The C ABI mirrors it as `fsim_vecenv_*` ([c_abi.md](c_abi.md)). `examples/minimal_trainer` is a complete loop with a PD baseline; `examples/ppo_trainer` is a full PPO (GAE, clipped objective, running observation normalisation, truncation bootstrapping) with a dependency-free MLP that learns the `altitude_heading_hold` task at the attitude level in about two minutes and beats the PD baseline - the loop to copy when plugging in LibTorch or any other learner.
 
 Because the environments live in a `World`, everything in the object model
 applies: `env.world()` (C++ internal API) lets you attach effects, set the
