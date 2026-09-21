@@ -38,6 +38,9 @@ public:
     /// loaded when a new type appears). Returns false when nothing was compiled.
     bool compile(vsg::ref_ptr<vsg::Node> node);
 
+    /// Save the frame presented last as PNG (blocks until the GPU is idle).
+    bool screenshot(const std::string& path);
+
     /// Add an event handler (key handler, trackball, ImGui event forwarder).
     /// ImGui's forwarder must be added before any other handler so it can
     /// consume events first (design 9.6).

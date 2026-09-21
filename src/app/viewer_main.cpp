@@ -94,6 +94,8 @@ struct ViewerOptions {
     double chaseAzimuth = 180.0, chaseElevation = 14.0;
     bool probe = false;
     double stats = 0.0;   // --stats <seconds>: print per-second frame statistics, exit after this long
+    std::string screenshot;      // --screenshot <file.png>: save the frame after --screenshot-after seconds, then exit
+    double screenshotAfter = 3.0;
     int trace = -1;
     bool interpolate = true;
     bool help = false;
@@ -122,6 +124,7 @@ void usage(const char* prog) {
         "  --terrain-zoom <z>       tile level used for physics ground height (12)\n"
         "  --probe                  print motion smoothness statistics after ~5 s and exit\n"
         "  --stats <seconds>        print per-second frame statistics (fps, frame-time breakdown, CPU) and exit\n"
+        "  --screenshot <file.png>  save the window after --screenshot-after seconds (3) and exit\n"
         "  --trace <i>              print vehicle i's state once per second\n"
         "  --no-interpolate         draw raw snapshots (sample-and-hold) instead of interpolating\n"
         "Scene:\n"
@@ -210,6 +213,8 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
                 o.cameraMode = v == "orbit" ? 1 : v == "overview" ? 2 : v == "free" ? 3 : 0;
             } else if (a == "--probe") o.probe = true;
             else if (a == "--stats") o.stats = std::stod(next());
+            else if (a == "--screenshot") o.screenshot = next();
+            else if (a == "--screenshot-after") o.screenshotAfter = std::stod(next());
             else if (a == "--trace") o.trace = std::stoi(next());
             else if (a == "--no-interpolate") o.interpolate = false;
             else if (a == "--log-level") {
@@ -737,6 +742,10 @@ int main(int argc, char** argv) {
         controls->frameMs.store(viewer.frameSeconds() * 1e3, std::memory_order_relaxed);
 
         if (!viewer.frame()) break;
+        if (!opt.screenshot.empty() && wallSeconds >= opt.screenshotAfter) {
+            viewer.screenshot(opt.screenshot);
+            break;
+        }
 
         if (opt.stats > 0.0) {
             const auto& t = viewer.timing();

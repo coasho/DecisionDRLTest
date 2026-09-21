@@ -68,6 +68,13 @@ vsync and uses ~3% of one core while mirroring 64 vehicles).
 | `VehicleSpec::model` | optional glTF path shown instead of the type's model (`models/<type>.glb`) or the default aircraft |
 | `recordPath` | also write the run to a `.fsrec` file; `flightsim-viewer.exe --replay <file>` plays it back (space pauses, `.` steps one frame, `[` `]` change the time factor, the timeline slider seeks, `home` restarts, loops at the end) |
 
+## Screenshots
+
+`flightsim-viewer.exe --screenshot shot.png [--screenshot-after 5]` saves the
+window as PNG after the given number of seconds and exits (any mode: mirror,
+`--demo`, `--replay`); the copy is taken from the swapchain, so it works on a
+locked desktop and in scripts.
+
 ## If it crashes
 
 `flightsim-viewer.exe` and `flightsim.exe` install a crash handler: an
