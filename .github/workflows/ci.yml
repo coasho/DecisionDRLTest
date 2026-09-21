@@ -21,7 +21,6 @@ jobs:
         with:
           msystem: UCRT64
           update: true
-          location: D:\ENV\DevLanguages\Cpp\msys2
           install: >-
             git
             mingw-w64-ucrt-x86_64-gcc
@@ -33,6 +32,13 @@ jobs:
             mingw-w64-ucrt-x86_64-spirv-tools
             mingw-w64-ucrt-x86_64-assimp
             mingw-w64-ucrt-x86_64-curl
+
+      - name: Toolchain
+        run: |
+          echo "MSYSTEM_PREFIX=$MSYSTEM_PREFIX ($(cygpath -m "$MSYSTEM_PREFIX"))"
+          gcc --version | head -1
+          cmake --version | head -1
+          ninja --version
 
       - name: Build VSG stack
         run: |

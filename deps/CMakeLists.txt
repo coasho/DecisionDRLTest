@@ -29,6 +29,9 @@ set(_common_args
 if(CMAKE_TOOLCHAIN_FILE)
     list(APPEND _common_args -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE})
 endif()
+if(FSIM_UCRT64_ROOT)
+    list(APPEND _common_args -DFSIM_UCRT64_ROOT=${FSIM_UCRT64_ROOT}) # the sub-builds re-read the toolchain file
+endif()
 if(CMAKE_MAKE_PROGRAM)
     list(APPEND _common_args -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM})
 endif()

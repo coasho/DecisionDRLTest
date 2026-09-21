@@ -1,6 +1,14 @@
 # MSYS2 UCRT64 (GCC, mingw-w64, UCRT) toolchain - the project's mandated toolchain.
-# Override FSIM_UCRT64_ROOT if MSYS2 lives elsewhere.
-set(FSIM_UCRT64_ROOT "D:/ENV/DevLanguages/Cpp/msys2/ucrt64" CACHE PATH "MSYS2 UCRT64 root")
+# FSIM_UCRT64_ROOT: the ucrt64 prefix. Defaults to the developer machine's
+# install; when that is absent and CMake runs inside an MSYS2 UCRT64 shell
+# (MSYSTEM_PREFIX set, as in CI), the shell's prefix is used instead.
+if(NOT DEFINED FSIM_UCRT64_ROOT)
+    set(_fsim_root "D:/ENV/DevLanguages/Cpp/msys2/ucrt64")
+    if(NOT EXISTS "${_fsim_root}/bin/gcc.exe" AND DEFINED ENV{MSYSTEM_PREFIX})
+        execute_process(COMMAND cygpath -m "$ENV{MSYSTEM_PREFIX}" OUTPUT_VARIABLE _fsim_root OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    endif()
+    set(FSIM_UCRT64_ROOT "${_fsim_root}" CACHE PATH "MSYS2 UCRT64 root")
+endif()
 
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_C_COMPILER   "${FSIM_UCRT64_ROOT}/bin/gcc.exe"   CACHE FILEPATH "")
