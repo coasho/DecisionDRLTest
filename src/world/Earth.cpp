@@ -24,7 +24,7 @@ vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& settings, vsg::ref_ptr<
         // Public satellite/aerial imagery (Esri, Maxar et al.); attribution required.
         tiles = vsg::createOpenStreetMapSettings(options); // same XYZ / EPSG:3857 layout
         tiles->imageLayer = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}.jpg"; // .jpg suffix is accepted and lets VSG pick the reader
-        tiles->maxLevel = 19;
+        tiles->maxLevel = std::min(19u, settings.maxLevel); // Esri serves 19 levels
         break;
     case EarthSettings::Source::Bing:
         if (settings.bingKey.empty()) {
@@ -53,6 +53,7 @@ vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& settings, vsg::ref_ptr<
 
     tiles->ellipsoidModel = ellipsoid;
     tiles->lodTransitionScreenHeightRatio = settings.lodTransitionScreenHeightRatio;
+    tiles->skirtRatio = settings.skirtRatio;
 
     std::vector<vsg::ref_ptr<vsg::ReaderWriter>> extraReaders;
     if (!settings.elevationUrl.empty()) {

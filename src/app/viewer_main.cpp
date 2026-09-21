@@ -196,6 +196,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--bing-key") o.earth.bingKey = next();
             else if (a == "--max-level") o.earth.maxLevel = static_cast<unsigned>(std::stoul(next()));
             else if (a == "--no-elevation-upsample") o.earth.upsampleElevation = false;
+            else if (a == "--skirt") o.earth.skirtRatio = std::stod(next());
             else if (a == "--model") o.modelPath = next();
             else if (a == "--model-scale") o.modelScaleOverride = std::stod(next());
             else if (a == "--model-forward") o.modelForward = next();

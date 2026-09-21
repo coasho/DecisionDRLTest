@@ -26,11 +26,46 @@ float terrarium(const vsg::ubvec3& p) noexcept {
 // neighbouring tiles then stood 3 pixels apart, 15 m at level 15 - tall fins
 // on a 60-degree wall.)
 template <typename Array, typename Fn>
-vsg::ref_ptr<vsg::floatArray2D> convert(const Array& src, std::uint32_t maxDim, Fn fn) {
-    const std::uint32_t w = src.width(), h = src.height();
+vsg::ref_ptr<vsg::floatArray2D> convert(const Array& srcArray, std::uint32_t maxDim, Fn fn) {
+    const std::uint32_t w = srcArray.width(), h = srcArray.height();
     const std::uint32_t ow = (maxDim > 0 && w > maxDim) ? maxDim : w, oh = (maxDim > 0 && h > maxDim) ? maxDim : h;
     auto out = vsg::floatArray2D::create(ow, oh, vsg::Data::Properties{VK_FORMAT_R32_SFLOAT});
-    out->properties.origin = src.properties.origin;
+    out->properties.origin = srcArray.properties.origin;
+
+    // Decode, then box-filter to the vertex spacing when reducing: a vertex
+    // stands for its cell, not for one raster sample. Point-sampling a 4.8 m
+    // raster of a vertical cliff every 4 px turns the crest into a sawtooth of
+    // fins; averaging over the cell keeps the cliff and drops the aliasing.
+    const std::uint32_t radius = ow < w ? std::max(1u, (w / ow) / 2) : 0; // 2 for 256 -> 64
+    std::vector<float> decoded(static_cast<std::size_t>(w) * h), src(decoded.size());
+    for (std::uint32_t y = 0; y < h; ++y)
+        for (std::uint32_t x = 0; x < w; ++x) decoded[y * w + x] = fn(srcArray.at(x, y));
+    if (radius == 0) {
+        src = decoded;
+    } else {
+        // Past the tile's edge the window continues the edge slope (not the edge
+        // value), so the filter is exact on a ramp and both sides of a seam agree.
+        auto extended = [](const std::vector<float>& v, int i, int n, std::size_t base, std::size_t stride) {
+            if (i < 0) return v[base] + static_cast<float>(i) * (v[base + stride] - v[base]);
+            if (i >= n) return v[base + static_cast<std::size_t>(n - 1) * stride] + static_cast<float>(i - (n - 1)) * (v[base + static_cast<std::size_t>(n - 1) * stride] - v[base + static_cast<std::size_t>(n - 2) * stride]);
+            return v[base + static_cast<std::size_t>(i) * stride];
+        };
+        const int r = static_cast<int>(radius);
+        std::vector<float> rows(decoded.size());
+        for (std::uint32_t y = 0; y < h; ++y)
+            for (std::uint32_t x = 0; x < w; ++x) {
+                float sum = 0.0f;
+                for (int d = -r; d <= r; ++d) sum += extended(decoded, static_cast<int>(x) + d, static_cast<int>(w), y * w, 1);
+                rows[y * w + x] = sum / static_cast<float>(2 * r + 1);
+            }
+        for (std::uint32_t y = 0; y < h; ++y)
+            for (std::uint32_t x = 0; x < w; ++x) {
+                float sum = 0.0f;
+                for (int d = -r; d <= r; ++d) sum += extended(rows, static_cast<int>(y) + d, static_cast<int>(h), x, w);
+                src[y * w + x] = sum / static_cast<float>(2 * r + 1);
+            }
+    }
+    auto at = [&](std::uint32_t x, std::uint32_t y) { return src[y * w + x]; };
     // Beyond the outermost pixel centres (the first and last vertex sit half a
     // pixel outside them) extrapolate linearly: the neighbouring tile does the
     // same from its side, so both estimate the edge height from the same
@@ -53,8 +88,8 @@ vsg::ref_ptr<vsg::floatArray2D> convert(const Array& src, std::uint32_t maxDim, 
             std::uint32_t x0, x1;
             float tx;
             sampleAxis(x, ow, w, x0, x1, tx);
-            const float top = fn(src.at(x0, y0)) * (1.0f - tx) + fn(src.at(x1, y0)) * tx;
-            const float bottom = fn(src.at(x0, y1)) * (1.0f - tx) + fn(src.at(x1, y1)) * tx;
+            const float top = at(x0, y0) * (1.0f - tx) + at(x1, y0) * tx;
+            const float bottom = at(x0, y1) * (1.0f - tx) + at(x1, y1) * tx;
             out->set(x, y, top * (1.0f - ty) + bottom * ty);
         }
     }

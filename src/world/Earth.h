@@ -18,7 +18,7 @@ struct EarthSettings {
 
     // Source::Custom: XYZ template with {z}/{x}/{y}, file:// or http(s)://
     std::string imageryUrl;
-    unsigned maxLevel = 17;
+    unsigned maxLevel = 19;
 
     // Elevation (any imagery source): XYZ template + encoding. Empty = smooth ellipsoid.
     std::string elevationUrl;
@@ -29,6 +29,7 @@ struct EarthSettings {
     bool originTopLeft = true;           ///< XYZ (true) vs TMS (false) row order
     std::string projection = "EPSG:3857";
     double lodTransitionScreenHeightRatio = 0.25;
+    double skirtRatio = 0.02;             ///< skirt hanging from every tile edge, as a fraction of the tile size (hides cracks between real elevation levels)
 };
 
 /// Builds the vsg::TileDatabase Earth (imagery + optional elevation) streamed
