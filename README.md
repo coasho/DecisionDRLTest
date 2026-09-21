@@ -151,6 +151,7 @@ build/ucrt64-release/bin/minimal_trainer.exe --envs 32 --steps 3000
 build/ucrt64-release/bin/ppo_trainer.exe --envs 64 --iterations 1000 --save policy.bin
 build/ucrt64-release/bin/ppo_trainer.exe --load policy.bin --eval --envs 16
 build/ucrt64-release/bin/ppo_trainer.exe --scenario examples/scenarios/vecenv_windy_altitude_hold.json   # world, wind, effects from a file
+build/ucrt64-release/bin/ppo_trainer.exe --depth 8x6      # + a forward depth camera per vehicle in the observation (fsim_vision)
 
 # built-in demo scenario on the viewer's own simulation thread
 build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 8

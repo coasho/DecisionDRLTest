@@ -58,6 +58,9 @@ for (;;) {
 }
 ```
 
+`ppo_trainer --depth 8x6` is this loop: the state observation plus 48
+log-depth pixels from a forward camera per vehicle, through the same PPO.
+
 `VecEnv::world()` is the same world through the object model, so cameras
 can also be placed by hand (`Sensors`, `env.world().vehicles()`, vehicles
 named `env<e>/<v>`); `cams.sensors()` is the underlying `Sensors` for

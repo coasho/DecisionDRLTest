@@ -6,11 +6,19 @@
 //
 //   ppo_trainer [--envs 64] [--horizon 64] [--iterations 300] [--action attitude|surfaces|velocity]
 //               [--lr 3e-4] [--seed 1] [--save policy.bin] [--load policy.bin] [--eval] [--scenario file.json]
+//               [--depth WxH]
+//
+// --depth adds a forward depth camera per vehicle (fsim_vision) whose WxH
+// log-depth pixels are appended to the state observation: the pipeline for
+// learning from what the aircraft sees, on the same loop.
 //
 // While it runs, flightsim-viewer.exe shows the batch (world "ppo").
 
 #include <fsim/Scenario.h>
 #include <fsim/VecEnv.h>
+#ifdef HAVE_FSIM_VISION
+#include <fsim/Vision.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -19,6 +27,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <string>
@@ -29,7 +38,7 @@ namespace {
 struct Args {
     unsigned envs = 64, horizon = 64, iterations = 300, epochs = 4, minibatch = 512, hidden = 64, seed = 1;
     double lr = 3e-4, gamma = 0.99, lambda = 0.95, clip = 0.2, valueCoef = 0.5, entropyCoef = 0.0, maxGradNorm = 0.5;
-    std::string action = "attitude", save, load, scenario;
+    std::string action = "attitude", save, load, scenario, depth;
     bool eval = false;
 };
 
@@ -54,6 +63,7 @@ Args parse(int argc, char** argv) {
         else if (k == "--load") a.load = next();
         else if (k == "--eval") a.eval = true;
         else if (k == "--scenario") a.scenario = next();
+        else if (k == "--depth") a.depth = next();
     }
     return a;
 }
@@ -231,7 +241,54 @@ int main(int argc, char** argv) {
     opt.seed = args.seed;
     opt.action = args.action;
     fsim::VecEnv env(opt);
-    const std::size_t N = env.numVehicles(), O = env.observationSize(), A = env.actionSize();
+    const std::size_t N = env.numVehicles(), Ostate = env.observationSize(), A = env.actionSize();
+
+    // Optional depth camera per vehicle: WxH log-depth values appended to the state observation.
+    std::size_t depthPixels = 0;
+#ifdef HAVE_FSIM_VISION
+    std::unique_ptr<fsim::vision::BatchCameras> cameras;
+    if (!args.depth.empty()) {
+        fsim::vision::CameraSpec spec;
+        spec.width = static_cast<unsigned>(std::atoi(args.depth.c_str()));
+        const auto x = args.depth.find('x');
+        spec.height = x == std::string::npos ? spec.width : static_cast<unsigned>(std::atoi(args.depth.c_str() + x + 1));
+        spec.fovDeg = 70.0;
+        spec.offsetBodyM[0] = 2.0;
+        spec.pitchDeg = -10.0; // a little down: the ground ahead
+        spec.depth = true;
+        cameras = std::make_unique<fsim::vision::BatchCameras>(env, spec);
+        depthPixels = static_cast<std::size_t>(spec.width) * spec.height;
+        std::printf("depth camera %ux%u per vehicle (%zu pixels appended to the observation)\n", spec.width, spec.height, depthPixels);
+    }
+#else
+    if (!args.depth.empty()) {
+        std::fprintf(stderr, "--depth needs the vision library (build with the viewer stack)\n");
+        return 1;
+    }
+#endif
+    const std::size_t O = Ostate + depthPixels;
+    // The observation the network sees: state channels, then log-depth in [0, 1] (near = 1).
+    std::vector<float> obsAug(N * O), finalAug(O);
+    auto augment = [&](const float* state, std::size_t i, float* out) {
+        std::copy_n(state, Ostate, out);
+#ifdef HAVE_FSIM_VISION
+        if (cameras) {
+            const float* d = cameras->depth().data + i * depthPixels;
+            for (std::size_t p = 0; p < depthPixels; ++p) out[Ostate + p] = 1.0f - std::min(1.0f, std::log(std::max(1.0f, d[p])) / std::log(5000.0f));
+        }
+#else
+        (void)i;
+#endif
+    };
+    auto renderCameras = [&] {
+#ifdef HAVE_FSIM_VISION
+        if (cameras) cameras->render();
+#endif
+    };
+    auto augmentAll = [&](const float* states) {
+        renderCameras();
+        for (std::size_t i = 0; i < N; ++i) augment(states + i * Ostate, i, obsAug.data() + i * O);
+    };
     std::printf("fsim %s PPO: %zu envs, obs %zu, act %zu (%s), horizon %u -> %zu samples/iteration\n", fsim::version(), N, O, A, args.action.c_str(),
                 args.horizon, N * args.horizon);
 
@@ -262,6 +319,7 @@ int main(int argc, char** argv) {
     std::vector<unsigned> episodeLength(N, 0), finishedLengths;
 
     fsim::StepResult r = env.reset(args.seed);
+    augmentAll(r.observations.data);
     std::normal_distribution<float> gauss(0.0f, 1.0f);
     const auto t0 = std::chrono::steady_clock::now();
 
@@ -270,8 +328,8 @@ int main(int argc, char** argv) {
         finishedLengths.clear();
         // --- collect -----------------------------------------------------------------
         for (std::size_t t = 0; t < T; ++t) {
-            if (!args.eval) norm.update(r.observations.data, N);
-            norm.apply(r.observations.data, N, obsNorm);
+            if (!args.eval) norm.update(obsAug.data(), N);
+            norm.apply(obsAug.data(), N, obsNorm);
             policy.forward(obsNorm.data(), N, pc);
             value.forward(obsNorm.data(), N, vc);
             for (std::size_t i = 0; i < N; ++i) {
@@ -290,6 +348,7 @@ int main(int argc, char** argv) {
                 val[s] = vc.y[i];
             }
             r = env.step(actions);
+            augmentAll(r.observations.data);
             // Time-limit truncation is not a terminal state: bootstrap the cut-off
             // return with the value of the final observation (the one before the
             // auto-reset), folded into the reward so GAE can treat it as done.
@@ -299,7 +358,8 @@ int main(int argc, char** argv) {
                 const std::size_t s = t * N + i;
                 rew[s] = r.rewards[i];
                 if (r.truncated[i] && !r.terminated[i]) {
-                    norm.apply(r.finalObservations.data + i * O, 1, finalNorm);
+                    augment(r.finalObservations.data + i * Ostate, i, finalAug.data()); // depth: this step's frame (the reset happened after it)
+                    norm.apply(finalAug.data(), 1, finalNorm);
                     value.forward(finalNorm.data(), 1, fc);
                     rew[s] += static_cast<float>(args.gamma) * fc.y[0];
                 }
@@ -315,7 +375,7 @@ int main(int argc, char** argv) {
             }
         }
         // Bootstrap value of the observation after the last step.
-        norm.apply(r.observations.data, N, lastObsNorm);
+        norm.apply(obsAug.data(), N, lastObsNorm);
         value.forward(lastObsNorm.data(), N, vc);
         // --- GAE ---------------------------------------------------------------------
         for (std::size_t i = 0; i < N; ++i) {
