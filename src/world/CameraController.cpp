@@ -97,9 +97,20 @@ void CameraController::rotate(double dxNdc, double dyNdc) {
     elevation_ = std::clamp(elevation_ - dyNdc * kRotateRadPerNdc, kMinElevation, kMaxElevation);
 }
 
-// Free camera: drag the ground with the right button. The focus moves in the
-// horizontal plane so that the terrain under the cursor follows the mouse,
-// and is kept on the ellipsoid surface (at terrain height when known).
+// Free camera: drag the ground with the middle button, so the terrain under
+// the cursor follows the mouse.
+//
+// This is a rotation of the focus about the centre of the Earth, not a
+// displacement reprojected through latitude/longitude. The difference only
+// shows at the poles, and there it is the whole story: a metre of easting at
+// 89.5 deg is a hundred times more longitude than at the equator, so a
+// reprojected drag swung the focus' longitude wildly, which swung the local
+// east/north frame the view direction is built from, which changed what the
+// next drag meant - the globe spun out of control. A rotation has no such
+// singularity.
+//
+// The same rotation is applied to the view direction, so the camera keeps
+// looking the way it was: dragging past a pole no longer spins the world.
 void CameraController::moveFocus(double dxNdc, double dyNdc) {
     vsg::dvec3 east, north, up;
     localFrame(focus_, east, north, up);
@@ -112,12 +123,26 @@ void CameraController::moveFocus(double dxNdc, double dyNdc) {
     // Screen units to metres: half a window at the focus spans ~ distance * tan(fov/2) * aspect;
     // 0.5 x distance per normalised unit is close to "the ground sticks to the cursor" at 30 deg fov.
     const double scale = 0.5 * distance_;
-    vsg::dvec3 moved = focus_ - right * (dxNdc * scale) - ahead * (dyNdc * scale);
-    // Back onto the globe: keep latitude/longitude; the altitude follows the
-    // terrain when known and otherwise stays what it was (update() corrects it
-    // as soon as the tile arrives) - never 0, which would sink the focus
-    // under high ground.
-    vsg::dvec3 lla = ellipsoid_->convertECEFToLatLongAltitude(moved);
+    const vsg::dvec3 step = -right * (dxNdc * scale) - ahead * (dyNdc * scale);
+    const double arc = vsg::length(step);
+    const double radius = vsg::length(focus_);
+    if (arc < 1e-9 || radius < 1.0) return;
+
+    const vsg::dvec3 axis = vsg::normalize(vsg::cross(focus_, step));
+    const vsg::dmat4 turn = vsg::rotate(arc / radius, axis); // arc length -> angle at the centre
+    // Carry the heading with the drag: the horizontal view direction is turned
+    // by the same rotation and azimuth_ re-measured against the new frame.
+    const vsg::dvec3 look = north * std::cos(azimuth_) + east * std::sin(azimuth_);
+    focus_ = turn * focus_;
+    const vsg::dvec3 turned = turn * look;
+    localFrame(focus_, east, north, up);
+    const vsg::dvec3 flat = turned - up * vsg::dot(turned, up);
+    if (vsg::length(flat) > 1e-9) azimuth_ = wrapAngle(std::atan2(vsg::dot(flat, east), vsg::dot(flat, north)));
+
+    // Back onto the surface: the altitude follows the terrain when known and
+    // otherwise stays what it was (update() corrects it as soon as the tile
+    // arrives) - never 0, which would sink the focus under high ground.
+    vsg::dvec3 lla = ellipsoid_->convertECEFToLatLongAltitude(focus_);
     double altitude = ellipsoid_->convertECEFToLatLongAltitude(focus_).z;
     if (ground_)
         if (auto h = ground_(lla.x * kDeg, lla.y * kDeg)) altitude = *h;
@@ -137,16 +162,17 @@ void CameraController::apply(vsg::ButtonPressEvent& e) {
     if (e.handled) return; // ImGui has the mouse
     lastX_ = e.x;
     lastY_ = e.y;
+    // Only the left (rotate) and middle (pan / drag the globe) buttons are
+    // used; the right button is left to the window manager.
     if (e.button == 1) leftDown_ = true;
     else if (e.button == 2) middleDown_ = true;
-    else if (e.button == 3) rightDown_ = true;
+    else return;
     e.handled = true;
 }
 
 void CameraController::apply(vsg::ButtonReleaseEvent& e) {
     if (e.button == 1) leftDown_ = false;
     else if (e.button == 2) middleDown_ = false;
-    else if (e.button == 3) rightDown_ = false;
 }
 
 void CameraController::apply(vsg::MoveEvent& e) {
@@ -168,10 +194,6 @@ void CameraController::apply(vsg::MoveEvent& e) {
             panRight_ -= dx * kPanPerNdc * distance_;
             panUp_ -= dy * kPanPerNdc * distance_;
         }
-        e.handled = true;
-    } else if (rightDown_ && (e.mask & vsg::BUTTON_MASK_3)) {
-        if (detached()) moveFocus(dx, dy); // rotate the globe under the camera
-        else targetDistance_ = std::clamp(targetDistance_ * std::max(0.2, 1.0 + dy), kMinDistance, kMaxDistance); // osgGA zoomModel: drag down = closer
         e.handled = true;
     }
 }

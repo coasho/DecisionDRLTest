@@ -1,6 +1,7 @@
 // Terrain decoding for the viewer's tiles (VSG data types, no Vulkan):
 // vertex-grid resampling that keeps tile seams closed, and elevation tiles
 // synthesised below the pyramid's deepest level.
+#include "world/CameraController.h"
 #include "world/ElevationUpsampler.h"
 #include "world/Terrain.h"
 
@@ -88,4 +89,94 @@ TEST_CASE("elevation upsampler synthesises deeper tiles from the deepest real le
     auto child = world::decodeElevation(up.read("https://tiles/16/10/14.png", options).cast<vsg::Data>(), world::ElevationEncoding::Float, 64); // top-left quadrant
     REQUIRE_THAT(child->at(0, 0), WithinAbs(parent->at(0, 0), 0.05));
     REQUIRE_THAT(child->at(63, 63), WithinAbs(1000.0 * 0.5 + 100.0 * 0.5, 0.05)); // the parent's centre
+}
+
+// The globe drag used to be a displacement reprojected through
+// latitude/longitude, which is singular at the poles: dragging a pole through
+// the centre of the screen swung the focus' longitude, and with it the local
+// frame the view direction is built from, so the Earth span out of control.
+namespace {
+
+struct Rig {
+    vsg::ref_ptr<vsg::EllipsoidModel> ellipsoid = vsg::EllipsoidModel::create();
+    vsg::ref_ptr<vsg::LookAt> lookAt = vsg::LookAt::create();
+    vsg::ref_ptr<fsim::world::CameraController> camera;
+
+    Rig() {
+        auto projection = vsg::Perspective::create(30.0, 4.0 / 3.0, 1.0, 1.0e7);
+        auto view = vsg::Camera::create(projection, lookAt, vsg::ViewportState::create(VkExtent2D{800, 600}));
+        camera = fsim::world::CameraController::create(view, lookAt, ellipsoid);
+    }
+
+    /// Hold the middle button and drag `steps` times by `dyPixels` (negative = up the screen).
+    /// Returns the largest frame-to-frame turn of the view direction, in degrees.
+    double drag(int steps, int dyPixels) {
+        auto press = vsg::ButtonPressEvent::create();
+        press->x = 400;
+        press->y = 300;
+        press->button = 2;
+        camera->apply(*press);
+        camera->update(nullptr, 1.0 / 60.0);
+
+        vsg::dvec3 previous = vsg::normalize(lookAt->eye - lookAt->center);
+        double worst = 0.0;
+        int y = 300;
+        for (int i = 0; i < steps; ++i) {
+            y += dyPixels;
+            auto move = vsg::MoveEvent::create();
+            move->x = 400;
+            move->y = y;
+            move->mask = vsg::BUTTON_MASK_2;
+            camera->apply(*move);
+            camera->update(nullptr, 1.0 / 60.0);
+            const vsg::dvec3 now = vsg::normalize(lookAt->eye - lookAt->center);
+            const double turn = std::acos(std::clamp(vsg::dot(previous, now), -1.0, 1.0)) * 57.29577951308232;
+            worst = std::max(worst, turn);
+            previous = now;
+        }
+        return worst;
+    }
+};
+
+} // namespace
+
+TEST_CASE("dragging the globe over a pole does not spin the view", "[camera]") {
+    // Dragging down the screen walks the focus north (the eye starts south of
+    // it): 5 px a step over 800 steps is ~2000 km, which carries it from 80 N
+    // across the pole and well down the far side.
+    Rig rig;
+    rig.camera->setFreeView(80.0, 0.0, 0.0, 3.0e5);
+    const double worst = rig.drag(800, 5);
+    INFO("largest single-step turn of the view direction: " << worst << " deg");
+    REQUIRE(worst < 5.0);
+
+    // The focus really did cross the pole rather than stalling short of it.
+    const vsg::dvec3 lla = rig.ellipsoid->convertECEFToLatLongAltitude(rig.camera->focus());
+    REQUIRE(std::abs(lla.y) > 90.0);  // longitude flipped to the far side
+    REQUIRE(lla.x < 89.0);            // and came back down from the pole
+}
+
+TEST_CASE("the right mouse button is not a camera control", "[camera]") {
+    Rig rig;
+    rig.camera->setFreeView(45.0, 8.0, 0.0, 2.0e4);
+    rig.camera->update(nullptr, 1.0 / 60.0);
+    const vsg::dvec3 before = rig.camera->focus();
+    const double distance = rig.camera->distance();
+
+    auto press = vsg::ButtonPressEvent::create();
+    press->x = 400;
+    press->y = 300;
+    press->button = 3;
+    rig.camera->apply(*press);
+    REQUIRE_FALSE(press->handled); // left for the window manager
+
+    auto move = vsg::MoveEvent::create();
+    move->x = 500;
+    move->y = 400;
+    move->mask = vsg::BUTTON_MASK_3;
+    rig.camera->apply(*move);
+    rig.camera->update(nullptr, 1.0 / 60.0);
+
+    REQUIRE(vsg::length(rig.camera->focus() - before) < 1.0);
+    REQUIRE_THAT(rig.camera->distance(), Catch::Matchers::WithinRel(distance, 1e-9));
 }

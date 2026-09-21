@@ -16,11 +16,17 @@ namespace fsim::world {
 /// window-normalised, so the response is the same at any window size or DPI.
 ///
 ///   left drag      rotate the view around the focus (~72 deg per half window)
-///   middle drag    pan the focus in the screen plane
-///   right drag     following a vehicle: zoom (drag down = closer)
-///                  free / no vehicle:   rotate the globe (the ground follows the mouse)
+///   middle drag    following a vehicle: pan the focus in the screen plane
+///                  free / no vehicle:   drag the globe (the ground follows the mouse)
 ///   wheel          zoom 12 % per notch, smoothed; from 6 m up to the whole Earth
 ///   r / GUI        reset the view offset
+///
+/// The right button is deliberately not a camera control.
+///
+/// Dragging the globe rotates the focus about the centre of the Earth rather
+/// than displacing it and reprojecting through latitude/longitude, and turns
+/// the view by the same rotation: longitude is singular at the poles, and the
+/// old scheme let a drag there spin the world.
 ///
 /// The eye never goes below the terrain when a ground query is installed.
 ///
@@ -28,7 +34,7 @@ namespace fsim::world {
 ///  - Chase:    azimuth relative to the vehicle's heading (view turns with the aircraft)
 ///  - Orbit:    azimuth relative to north (view stays put while the aircraft turns)
 ///  - Overview: straight down from `distance x 10`, north up
-///  - Free:     detached: orbit a point on the globe that the right button moves
+///  - Free:     detached: orbit a point on the globe that the middle button moves
 class CameraController : public vsg::Inherit<vsg::Visitor, CameraController> {
 public:
     enum class Mode { Chase, Orbit, Overview, Free };
@@ -101,7 +107,7 @@ private:
     bool haveHeading_ = false;
 
     // Mouse state (window pixels; converted to normalised coordinates per event)
-    bool leftDown_ = false, middleDown_ = false, rightDown_ = false;
+    bool leftDown_ = false, middleDown_ = false;
     int lastX_ = 0, lastY_ = 0;
     // Last frame's view vectors, for screen-plane operations.
     vsg::dvec3 viewRight_{1.0, 0.0, 0.0}, viewForward_{0.0, 1.0, 0.0}, viewUp_{0.0, 0.0, 1.0};

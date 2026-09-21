@@ -5,15 +5,16 @@
 namespace fsim::world {
 
 vsg::ref_ptr<vsg::StateGroup> createFlatStateGroup(const FlatGeometrySettings& settings, vsg::ref_ptr<const vsg::Options> options) {
-    auto shaderSet = vsg::createFlatShadedShaderSet(options);
+    auto shaderSet = settings.lit ? vsg::createPhongShaderSet(options) : vsg::createFlatShadedShaderSet(options);
     if (!shaderSet) {
-        LOG_ERROR("world") << "flat shaded ShaderSet unavailable";
+        LOG_ERROR("world") << (settings.lit ? "phong" : "flat shaded") << " ShaderSet unavailable";
         return {};
     }
     auto config = vsg::GraphicsPipelineConfigurator::create(shaderSet);
 
     auto material = vsg::PhongMaterialValue::create();
     material->value().diffuse = settings.diffuse;
+    if (settings.lit) material->value().specular = vsg::vec4(0.0f, 0.0f, 0.0f, 1.0f); // matte: snow and ice, not plastic
     config->assignDescriptor("material", material);
     config->enableArray("vsg_Vertex", VK_VERTEX_INPUT_RATE_VERTEX, 12);
     config->enableArray("vsg_Normal", VK_VERTEX_INPUT_RATE_VERTEX, 12);
@@ -51,9 +52,9 @@ vsg::ref_ptr<vsg::StateGroup> createFlatStateGroup(const FlatGeometrySettings& s
 }
 
 vsg::ref_ptr<vsg::VertexDraw> createFlatDraw(vsg::ref_ptr<vsg::vec3Array> vertices, vsg::ref_ptr<vsg::vec4Array> colors,
-                                             bool dynamic) {
+                                             bool dynamic, vsg::ref_ptr<vsg::vec3Array> normals) {
     const std::uint32_t n = static_cast<std::uint32_t>(vertices->size());
-    auto normals = vsg::vec3Array::create(n, vsg::vec3(0.0f, 0.0f, 1.0f));
+    if (!normals) normals = vsg::vec3Array::create(n, vsg::vec3(0.0f, 0.0f, 1.0f));
     auto texcoords = vsg::vec2Array::create(n, vsg::vec2(0.0f, 0.0f));
     if (dynamic) {
         vertices->properties.dataVariance = vsg::DYNAMIC_DATA;

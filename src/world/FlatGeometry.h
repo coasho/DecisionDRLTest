@@ -16,6 +16,10 @@ struct FlatGeometrySettings {
     VkCompareOp depthCompare = VK_COMPARE_OP_GREATER;
     bool blending = false;   ///< alpha blending (vertex colour alpha)
     bool cullBackFaces = true;
+    /// Shade with the scene's lights instead of drawing at full brightness.
+    /// An unlit surface among lit terrain reads as a hole cut in the world,
+    /// which is what the polar caps used to look like.
+    bool lit = false;
     /// Material colour; the default is VSG's. The flat shader writes
     /// `vsg_Color * diffuse`, so this is the whole output where the vertex
     /// colours are white - which is how the segmentation pass paints a
@@ -31,6 +35,6 @@ vsg::ref_ptr<vsg::StateGroup> createFlatStateGroup(const FlatGeometrySettings& s
 /// placeholders when not supplied. `dynamic` marks vertices and colours as
 /// DYNAMIC_DATA so later edits (+ dirty()) reach the GPU.
 vsg::ref_ptr<vsg::VertexDraw> createFlatDraw(vsg::ref_ptr<vsg::vec3Array> vertices, vsg::ref_ptr<vsg::vec4Array> colors,
-                                             bool dynamic);
+                                             bool dynamic, vsg::ref_ptr<vsg::vec3Array> normals = {});
 
 } // namespace fsim::world

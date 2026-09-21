@@ -30,8 +30,10 @@ Layout layout(bool listShown) {
     l.scale = ImGui::GetIO().FontGlobalScale;
     l.margin = 12.0f * l.scale;
     l.display = ImGui::GetIO().DisplaySize;
-    l.panelWidth = std::min(300.0f * l.scale, std::max(220.0f, l.display.x * 0.30f));
-    l.listWidth = std::min(460.0f * l.scale, std::max(280.0f, l.display.x * 0.46f));
+    // The text is sized by the DPI scale, so that is what the panel has to fit;
+    // the window fraction is only a ceiling for windows too narrow to give it.
+    l.panelWidth = std::min(300.0f * l.scale, std::max(260.0f, l.display.x * 0.50f));
+    l.listWidth = std::min(460.0f * l.scale, std::max(280.0f, l.display.x * 0.55f));
     l.listHeight = std::min(240.0f * l.scale, std::max(110.0f, l.display.y * 0.30f));
     l.listTop = std::max(l.margin, l.display.y - l.listHeight - l.margin);
     l.monitorMaxHeight = (listShown ? l.listTop : l.display.y) - 2.0f * l.margin;

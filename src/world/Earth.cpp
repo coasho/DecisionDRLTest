@@ -11,6 +11,69 @@
 
 namespace fsim::world {
 
+namespace {
+
+// Esri serves one fixed "Map data not yet available" tile wherever its imagery
+// does not reach, which over open water is most of the deep ocean past about
+// zoom 13. Among real tiles it is a light grey patch in a dark blue sea: the
+// mismatched neighbours you see when flying over water.
+//
+// That tile is byte-identical everywhere it appears and perfectly neutral -
+// R == G == B in every pixel, which a photograph never is, JPEG chroma alone
+// sees to that - so it can be recognised exactly rather than by a heuristic
+// that might catch snow or cloud, and repainted in the colour Esri's own deep
+// water has (measured across its low-zoom ocean tiles).
+constexpr int kOceanR = 8, kOceanG = 57, kOceanB = 74;
+
+/// True when every sampled pixel is neutral grey around the placeholder's own
+/// brightness; `set` then paints the whole tile.
+template <typename Array, typename Set>
+bool repaintPlaceholder(Array& image, Set set) {
+    const std::size_t count = image.valueCount();
+    if (count < 256) return false;
+    const std::size_t stride = std::max<std::size_t>(1, count / 512);
+    std::size_t sampled = 0;
+    double sum = 0.0;
+    for (std::size_t i = 0; i < count; i += stride) {
+        const auto& p = image.at(i);
+        if (p.r != p.g || p.g != p.b) return false; // any colour at all: real imagery
+        sum += p.r;
+        ++sampled;
+    }
+    if (sampled == 0) return false;
+    const double mean = sum / static_cast<double>(sampled);
+    if (mean < 195.0 || mean > 215.0) return false; // grey, but not this grey
+    for (std::size_t i = 0; i < count; ++i) set(image.at(i), i);
+    return true;
+}
+
+vsg::ref_ptr<vsg::Data> replaceMissingImagery(vsg::ref_ptr<vsg::Data> data) {
+    if (!data) return data;
+    // A touch of deterministic variation, so the repainted water is not a dead
+    // flat plane next to real tiles that vary by a few levels.
+    const auto shade = [](std::size_t i, int base) {
+        const std::size_t h = (i * 2654435761u) >> 13;
+        return static_cast<std::uint8_t>(std::clamp(base + static_cast<int>(h % 7u) - 3, 0, 255));
+    };
+    if (auto rgba = data.cast<vsg::ubvec4Array2D>()) {
+        repaintPlaceholder(*rgba, [&](vsg::ubvec4& p, std::size_t i) {
+            p.r = shade(i, kOceanR);
+            p.g = shade(i, kOceanG);
+            p.b = shade(i, kOceanB);
+            p.a = 255;
+        });
+    } else if (auto rgb = data.cast<vsg::ubvec3Array2D>()) {
+        repaintPlaceholder(*rgb, [&](vsg::ubvec3& p, std::size_t i) {
+            p.r = shade(i, kOceanR);
+            p.g = shade(i, kOceanG);
+            p.b = shade(i, kOceanB);
+        });
+    }
+    return data;
+}
+
+} // namespace
+
 vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& settings, vsg::ref_ptr<vsg::Options> options,
                                     vsg::ref_ptr<vsg::EllipsoidModel> ellipsoid) {
     vsg::ref_ptr<vsg::TileDatabaseSettings> tiles;
@@ -55,6 +118,20 @@ vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& settings, vsg::ref_ptr<
     tiles->lodTransitionScreenHeightRatio = settings.lodTransitionScreenHeightRatio;
     tiles->skirtRatio = settings.skirtRatio;
 
+    tiles->imageLayerCallback = replaceMissingImagery;
+
+    // VSG's tile shaders default to a Phong material with a specular lobe, which
+    // puts a wet sheen on ground that is already lit in the satellite image.
+    // Terrain is matte: keep the diffuse shading that makes relief readable and
+    // drop the highlight.
+    if (auto shaderSet = vsg::createPhongShaderSet(options)) {
+        auto matte = vsg::PhongMaterialValue::create();
+        matte->value().specular = vsg::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        matte->value().ambient = vsg::vec4(0.45f, 0.45f, 0.45f, 1.0f); // shadowed slopes stay legible
+        shaderSet->getDescriptorBinding("material").data = matte;
+        tiles->shaderSet = shaderSet;
+    }
+
     std::vector<vsg::ref_ptr<vsg::ReaderWriter>> extraReaders;
     if (!settings.elevationUrl.empty()) {
         // Relief: VSG displaces each tile's mesh with the elevation texture (one
@@ -93,33 +170,63 @@ vsg::ref_ptr<vsg::Node> createPolarCaps(vsg::ref_ptr<vsg::EllipsoidModel> ellips
                                         double fromLatitudeDeg) {
     FlatGeometrySettings settings;
     settings.cullBackFaces = false;
+    settings.lit = true; // shade with the sun, like the terrain it continues
     auto state = createFlatStateGroup(settings, options);
     if (!state) return {};
 
     // Concentric rings from the cap edge to the pole, a few metres above the
-    // ellipsoid so the flat tiles at 85 deg do not z-fight with the ring.
-    const int rings = 6, segments = 96;
-    const vsg::vec4 ice(0.93f, 0.95f, 0.97f, 1.0f);
+    // ellipsoid so the flat tiles at 85 deg do not z-fight with the ring. The
+    // rings bunch towards the edge, where the colour has to do its work.
+    const int rings = 16, segments = 128;
+    // A flat white disc reads as a hole in the globe. Instead each cap starts
+    // at the colour the imagery ends on and grades inwards: the Arctic from
+    // open water to sea ice, the Antarctic from ice shelf to snow.
+    const auto capColour = [fromLatitudeDeg](double latDeg, double sign) {
+        const double t = std::clamp((std::abs(latDeg) - fromLatitudeDeg) / (90.0 - fromLatitudeDeg), 0.0, 1.0);
+        const float s = static_cast<float>(t * t * (3.0 - 2.0 * t)); // smoothstep: no banding at the seam
+        const vsg::vec3 edge = sign > 0.0 ? vsg::vec3(0.16f, 0.27f, 0.34f) : vsg::vec3(0.72f, 0.76f, 0.79f);
+        const vsg::vec3 inner = sign > 0.0 ? vsg::vec3(0.70f, 0.75f, 0.79f) : vsg::vec3(0.92f, 0.94f, 0.96f);
+        const vsg::vec3 c = edge + (inner - edge) * s;
+        return vsg::vec4(c.r, c.g, c.b, 1.0f);
+    };
     for (double sign : {1.0, -1.0}) {
         const std::uint32_t count = static_cast<std::uint32_t>(rings * segments * 6);
         auto vertices = vsg::vec3Array::create(count);
-        auto colors = vsg::vec4Array::create(count, ice);
+        auto normals = vsg::vec3Array::create(count);
+        auto colors = vsg::vec4Array::create(count);
+        // Under the imagery, not above it. The cap overlaps the last Mercator
+        // tiles by a fraction of a degree, and a cap that sits above them
+        // shows through in patches - a dotted ring around the edge. Sunk
+        // below, the tiles win wherever they exist and the cap is seen only
+        // past 85 deg, where there is no imagery at all. The southern cap
+        // sits at the height of the polar plateau rather than at sea level.
+        const double capAltitude = sign > 0.0 ? -30.0 : 2700.0;
         auto at = [&](double latDeg, double lonDeg) {
-            const vsg::dvec3 p = ellipsoid->convertLatLongAltitudeToECEF(vsg::dvec3(latDeg, lonDeg, 5.0));
+            const vsg::dvec3 p = ellipsoid->convertLatLongAltitudeToECEF(vsg::dvec3(latDeg, lonDeg, capAltitude));
             return vsg::vec3(static_cast<float>(p.x), static_cast<float>(p.y), static_cast<float>(p.z));
         };
         std::uint32_t i = 0;
         for (int r = 0; r < rings; ++r) {
-            const double lat0 = fromLatitudeDeg + (90.0 - fromLatitudeDeg) * r / rings;
-            const double lat1 = fromLatitudeDeg + (90.0 - fromLatitudeDeg) * (r + 1) / rings;
-            for (int s = 0; s < segments; ++s) {
-                const double lon0 = 360.0 * s / segments, lon1 = 360.0 * (s + 1) / segments;
+            // Squared spacing: fine rings by the imagery seam, coarse at the pole.
+            const auto band = [&](int k) {
+                const double f = static_cast<double>(k) / rings;
+                return fromLatitudeDeg + (90.0 - fromLatitudeDeg) * f * f;
+            };
+            const double lat0 = band(r), lat1 = band(r + 1);
+            for (int sg = 0; sg < segments; ++sg) {
+                const double lon0 = 360.0 * sg / segments, lon1 = 360.0 * (sg + 1) / segments;
                 // Two triangles per quad (the innermost ring degenerates to a fan at the pole; harmless).
                 const std::pair<double, double> corners[6] = {{lat0, lon0}, {lat0, lon1}, {lat1, lon1}, {lat0, lon0}, {lat1, lon1}, {lat1, lon0}};
-                for (const auto& [la, lo] : corners) vertices->set(i++, at(sign * la, lo));
+                for (const auto& [la, lo] : corners) {
+                    const vsg::vec3 p = at(sign * la, lo);
+                    vertices->set(i, p);
+                    normals->set(i, vsg::normalize(p)); // the ellipsoid normal is close enough for a cap
+                    colors->set(i, capColour(la, sign));
+                    ++i;
+                }
             }
         }
-        state->addChild(createFlatDraw(vertices, colors, false));
+        state->addChild(createFlatDraw(vertices, colors, false, normals));
     }
     // Float vertices at ECEF magnitude 6.4e6 keep ~0.5 m precision: fine for a flat ice sheet.
     return state;
