@@ -117,6 +117,12 @@ private:
 
     // View offset in the local frame of the focus.
     double azimuth_ = 3.14159265358979323846; ///< 0 = looking from ahead, pi = from behind
+    /// What the last frame actually drew, after the distance tilt and terrain
+    /// clearance had their say. Those are functions of where the camera is,
+    /// not things the user asked for, so they are never folded back into
+    /// elevation_ - that turned the view a degree at a time and never turned
+    /// it back. A drag starts from this instead, so there is no dead zone.
+    double shownElevation_ = 0.0;
     double elevation_ = 0.244;                ///< radians above the horizontal (14 deg)
     double distance_ = 40.0, targetDistance_ = 40.0;
     double defaultAzimuth_ = 3.14159265358979323846, defaultElevation_ = 0.244, defaultDistance_ = 40.0;

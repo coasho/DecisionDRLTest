@@ -93,8 +93,11 @@ void CameraController::normalised(int x, int y, double& nx, double& ny) const {
 void CameraController::rotate(double dxNdc, double dyNdc) {
     // osgGA trackball: drag right -> the scene turns right (the eye goes left,
     // azimuth grows clockwise); drag up -> the near side rolls up (the eye sinks).
+    // Starting from what was drawn rather than from elevation_ keeps the first
+    // part of a drag from doing nothing whenever the distance tilt or the
+    // terrain has raised the view above what was last asked for.
     azimuth_ = wrapAngle(azimuth_ + dxNdc * kRotateRadPerNdc);
-    elevation_ = std::clamp(elevation_ - dyNdc * kRotateRadPerNdc, kMinElevation, kMaxElevation);
+    elevation_ = std::clamp(shownElevation_ - dyNdc * kRotateRadPerNdc, kMinElevation, kMaxElevation);
 }
 
 void CameraController::moveFocusTo(const vsg::dvec3& newFocus, Carry carry) {
@@ -359,17 +362,6 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
 
     double elevation = elevation_;
 
-    // Far out, tilt towards straight down so the globe is seen from above its
-    // focus rather than from an angle that puts the eye past the horizon.
-    if (distance_ > kGlobeRampStartM) {
-        const double t = std::clamp((distance_ - kGlobeRampStartM) / (kGlobeRampEndM - kGlobeRampStartM), 0.0, 1.0);
-        const double s = t * t * (3.0 - 2.0 * t);
-        elevation = std::max(elevation, elevation + (kMaxElevation - elevation) * s);
-    }
-    // Beyond the terrain-collision range the eye must stay above the focus'
-    // horizontal plane, or a negative elevation would put it under the globe.
-    if (distance_ >= 2.0e5) elevation = std::max(elevation, 0.0);
-
     // The pan offset moves the eye too: probe the terrain from where the eye really orbits.
     vsg::dvec3 orbitCentre = pos;
     if (panRight_ != 0.0 || panUp_ != 0.0) {
@@ -401,9 +393,26 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
         }
         if (elevation < minElevation) elevation = std::min(minElevation, kMaxElevation);
     }
-    // What is shown is what the next drag starts from: no dead zone after the
-    // terrain or the globe view pushed the elevation up.
-    elevation_ = elevation;
+    // Far out, tilt towards straight down so the globe is seen from above its
+    // focus rather than from an angle that puts the eye past the horizon.
+    //
+    // This is worked out fresh from the distance every frame and deliberately
+    // not stored. Folding it back into elevation_ made it compound: each frame
+    // tilted the view a fraction further towards vertical, and coming back in
+    // could not undo it, so the wheel turned the Earth - measured at 64
+    // degrees for a trip out to ten times the distance and back.
+    if (distance_ > kGlobeRampStartM) {
+        const double t = std::clamp((distance_ - kGlobeRampStartM) / (kGlobeRampEndM - kGlobeRampStartM), 0.0, 1.0);
+        const double s = t * t * (3.0 - 2.0 * t);
+        elevation = std::max(elevation, elevation_ + (kMaxElevation - elevation_) * s);
+    }
+    // Beyond the terrain-collision range the eye must stay above the focus'
+    // horizontal plane, or a negative elevation would put it under the globe.
+    if (distance_ >= 2.0e5) elevation = std::max(elevation, 0.0);
+
+    // What was drawn is where the next drag starts from, so raising the view
+    // for the terrain or the distance leaves no dead zone at the top of it.
+    shownElevation_ = elevation;
 
     const vsg::dvec3 dir = horizontal * std::cos(elevation) + up * std::sin(elevation);
     // Pan offset in the eye's screen plane (right = forward x up, screen up = right x forward).

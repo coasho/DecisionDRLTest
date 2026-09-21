@@ -269,3 +269,45 @@ TEST_CASE("zooming holds the point under the cursor in place", "[camera]") {
     REQUIRE_THAT(after.x, Catch::Matchers::WithinAbs(static_cast<double>(cursorX), 6.0));
     REQUIRE_THAT(after.y, Catch::Matchers::WithinAbs(static_cast<double>(cursorY), 6.0));
 }
+
+TEST_CASE("zooming out and back leaves the view where it was", "[camera]") {
+    // Far out the view is tilted towards straight down on purpose, so the
+    // globe is seen from above its focus rather than at an angle that puts the
+    // eye past the horizon. That tilt is a function of distance, so coming
+    // back in has to undo it. If it does not, the wheel rotates the Earth -
+    // and the farther out it went, the more it rotates.
+    Rig rig;
+    rig.camera->setFreeView(20.0, 10.0, 0.0, 3.0e5, 180.0, 25.0);
+    const auto settle = [&rig] {
+        for (int k = 0; k < 120; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+    };
+    settle();
+    const vsg::dvec3 before = vsg::normalize(rig.lookAt->eye - rig.lookAt->center);
+    const double elevationBefore = rig.camera->elevationDeg();
+    const double distanceBefore = rig.camera->distance();
+
+    // Cursor at the centre, so zoom-to-cursor has nothing to move.
+    auto move = vsg::MoveEvent::create();
+    move->x = 400;
+    move->y = 300;
+    rig.camera->apply(*move);
+
+    const auto notch = [&rig, &settle](float delta) {
+        auto scroll = vsg::ScrollWheelEvent::create();
+        scroll->delta = vsg::vec3(0.0f, delta, 0.0f);
+        rig.camera->apply(*scroll);
+        settle();
+    };
+    // Out to ten times the distance, well into the tilt, and back again.
+    for (int i = 0; i < 20; ++i) notch(-1.0f);
+    REQUIRE(rig.camera->distance() > 2.0e6);
+    for (int i = 0; i < 20; ++i) notch(1.0f);
+
+    REQUIRE_THAT(rig.camera->distance(), Catch::Matchers::WithinRel(distanceBefore, 1e-6));
+    const vsg::dvec3 after = vsg::normalize(rig.lookAt->eye - rig.lookAt->center);
+    const double turn = std::acos(std::clamp(vsg::dot(before, after), -1.0, 1.0)) * 57.29577951308232;
+    INFO("out and back turned the view " << turn << " deg; elevation " << elevationBefore << " -> "
+                                         << rig.camera->elevationDeg());
+    REQUIRE_THAT(rig.camera->elevationDeg(), Catch::Matchers::WithinAbs(elevationBefore, 1.0));
+    REQUIRE(turn < 1.0);
+}
