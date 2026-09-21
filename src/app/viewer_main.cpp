@@ -8,6 +8,8 @@
 // thread instead (development, screenshots).
 
 #include "app/DemoAutopilot.h"
+
+#include <cstdlib>
 #include "core/Log.h"
 #include "core/Rng.h"
 #include "core/Units.h"
@@ -835,5 +837,19 @@ int main(int argc, char** argv) {
     }
 
     if (runner) runner->stop();
-    return 0;
+
+    // Leave without unwinding. Freeing a deep tile pyramid takes seconds -
+    // thousands of tiles, each with image and elevation arrays, GPU buffers
+    // and descriptor sets, released one at a time - and the window has
+    // stopped drawing by then, so it reads as a hang: closing the viewer used
+    // to sit there for about six seconds before the process went away.
+    //
+    // Nothing here owns state that has to outlive the process. The viewer
+    // only ever reads the world registry, it publishes nothing, the sim
+    // runner has already been stopped and joined, and quiesce() has waited
+    // for the tile cache writes. The operating system reclaims the memory,
+    // the GPU resources and the handles.
+    viewer.quiesce();
+    std::fflush(nullptr); // the log and any --probe/--stats output go to stdio
+    std::_Exit(0);
 }

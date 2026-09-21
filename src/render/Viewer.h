@@ -53,6 +53,11 @@ public:
     bool active() const { return viewer_ && viewer_->active(); }
     void close() { if (viewer_) viewer_->close(); }
 
+    /// Close the window, stop the tile pager taking new work, and pause long
+    /// enough for a cache write already under way to finish. Call before
+    /// leaving without unwinding the scene graph.
+    void quiesce(double graceSeconds = 0.15);
+
     vsg::ref_ptr<vsg::Viewer> viewer() const { return viewer_; }
     vsg::ref_ptr<vsg::Window> window() const { return window_; }
     vsg::ref_ptr<vsg::Camera> camera() const { return camera_; }

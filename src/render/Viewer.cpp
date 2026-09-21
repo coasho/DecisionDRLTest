@@ -1,5 +1,9 @@
 #include "render/Viewer.h"
 
+#include <algorithm>
+#include <chrono>
+#include <thread>
+
 #include <chrono>
 #include <thread>
 
@@ -11,6 +15,28 @@
 #include <vsgXchange/all.h>
 
 namespace fsim::render {
+
+void Viewer::quiesce(double graceSeconds) {
+    if (!viewer_) return;
+    viewer_->close(); // the window goes now, not after the scene has been freed
+
+    // Tell the pager's read threads to stop taking work. numActiveRequests
+    // counts queued requests rather than reads in flight, so it does not fall
+    // to zero here - while the camera moves the queue refills as fast as it
+    // drains, and after cancelling it simply stays where it was. It is not a
+    // signal to wait on.
+    for (const auto& task : viewer_->recordAndSubmitTasks)
+        if (task && task->databasePager && task->databasePager->status) task->databasePager->status->set(false);
+
+    // A short grace instead. A tile is written into the on-disk cache as it
+    // arrives, and leaving mid-write would leave a truncated file that every
+    // later run fails to decode. That write is one pass over a buffer that has
+    // already been downloaded - microseconds - so a brief pause covers it.
+    // What can take seconds is a read still waiting on the network, and a
+    // thread blocked there has not started writing anything, so abandoning it
+    // costs nothing.
+    std::this_thread::sleep_for(std::chrono::duration<double>(std::max(0.0, graceSeconds)));
+}
 
 bool Viewer::create(const ViewerSettings& settings) {
     settings_ = settings;
