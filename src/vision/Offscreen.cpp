@@ -32,14 +32,16 @@ vsg::ref_ptr<vsg::Image> makeImage(VkFormat format, unsigned w, unsigned h, VkIm
 
 /// Colour attachment left in TRANSFER_SRC_OPTIMAL for the readback copy; depth
 /// stored (and left in TRANSFER_SRC_OPTIMAL) when it is read back too.
-vsg::ref_ptr<vsg::RenderPass> makeRenderPass(vsg::Device* device, bool readDepth) {
+/// `keepDepth` (a segmentation camera) leaves the depth attachment stored and
+/// in DEPTH_STENCIL_ATTACHMENT_OPTIMAL for the second pass to load, which then
+/// hands it to the readback copy instead.
+vsg::ref_ptr<vsg::RenderPass> makeRenderPass(vsg::Device* device, bool readDepth, bool keepDepth) {
     auto colour = vsg::defaultColorAttachment(kColourFormat);
     colour.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     auto depth = vsg::defaultDepthAttachment(kDepthFormat);
-    if (readDepth) {
-        depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        depth.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    }
+    if (readDepth || keepDepth) depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    if (keepDepth) depth.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    else if (readDepth) depth.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     vsg::RenderPass::Attachments attachments{colour, depth};
 
     vsg::AttachmentReference colourRef{};
@@ -70,6 +72,61 @@ vsg::ref_ptr<vsg::RenderPass> makeRenderPass(vsg::Device* device, bool readDepth
     out.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     out.dependencyFlags = 0;
     return vsg::RenderPass::create(device, attachments, vsg::RenderPass::Subpasses{subpass}, vsg::RenderPass::Dependencies{in, out});
+}
+
+/// The segmentation pass: its own colour attachment, and the main pass's depth
+/// loaded rather than cleared, so only fragments that survived the first pass
+/// can write an id (the terrain occludes without appearing here).
+vsg::ref_ptr<vsg::RenderPass> makeSegmentationRenderPass(vsg::Device* device, bool readDepth) {
+    auto colour = vsg::defaultColorAttachment(kColourFormat);
+    colour.finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    auto depth = vsg::defaultDepthAttachment(kDepthFormat);
+    depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    depth.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depth.storeOp = readDepth ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.finalLayout = readDepth ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    vsg::RenderPass::Attachments attachments{colour, depth};
+
+    vsg::AttachmentReference colourRef{};
+    colourRef.attachment = 0;
+    colourRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    vsg::AttachmentReference depthRef{};
+    depthRef.attachment = 1;
+    depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    vsg::SubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachments.push_back(colourRef);
+    subpass.depthStencilAttachments.push_back(depthRef);
+
+    // Wait for the main pass's depth writes before testing against them.
+    vsg::SubpassDependency in{};
+    in.srcSubpass = VK_SUBPASS_EXTERNAL;
+    in.dstSubpass = 0;
+    in.srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    in.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    in.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    in.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    in.dependencyFlags = 0;
+    vsg::SubpassDependency out{};
+    out.srcSubpass = 0;
+    out.dstSubpass = VK_SUBPASS_EXTERNAL;
+    out.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    out.dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    out.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    out.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    out.dependencyFlags = 0;
+    return vsg::RenderPass::create(device, attachments, vsg::RenderPass::Subpasses{subpass}, vsg::RenderPass::Dependencies{in, out});
+}
+
+/// Host-readable linear copy of a colour attachment.
+vsg::ref_ptr<vsg::Image> makeCaptureImage(vsg::Device* device, unsigned w, unsigned h) {
+    auto capture = makeImage(kColourFormat, w, h, VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_TILING_LINEAR);
+    capture->compile(device);
+    // Cached host memory: reading uncached (write-combined) memory back is ~100x slower.
+    const VkMemoryPropertyFlags cached = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+    if (capture->allocateAndBindMemory(device, cached) != VK_SUCCESS)
+        capture->allocateAndBindMemory(device, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    return capture;
 }
 
 } // namespace
@@ -128,7 +185,13 @@ void Offscreen::setScene(vsg::ref_ptr<vsg::Node> scene, vsg::ref_ptr<vsg::Ellips
     ellipsoid_ = ellipsoid;
 }
 
-unsigned Offscreen::addCamera(unsigned width, unsigned height, double fovDeg, vsg::Mask viewMask, bool wantDepth) {
+void Offscreen::setSegmentationScene(vsg::ref_ptr<vsg::Node> scene) { segScene_ = scene; }
+
+unsigned Offscreen::addCamera(unsigned width, unsigned height, double fovDeg, vsg::Mask viewMask, bool wantDepth, bool wantSegmentation) {
+    if (wantSegmentation && !segScene_) {
+        LOG_WARN("vision") << "segmentation asked for with no segmentation scene; ignoring";
+        wantSegmentation = false;
+    }
     Camera c;
     c.width = width;
     c.height = height;
@@ -146,7 +209,7 @@ unsigned Offscreen::addCamera(unsigned width, unsigned height, double fovDeg, vs
                         VK_IMAGE_TILING_OPTIMAL);
     auto colourView = vsg::createImageView(device_, c.colour, VK_IMAGE_ASPECT_COLOR_BIT);
     auto depthView = vsg::createImageView(device_, c.depth, VK_IMAGE_ASPECT_DEPTH_BIT);
-    auto renderPass = makeRenderPass(device_, wantDepth);
+    auto renderPass = makeRenderPass(device_, wantDepth, wantSegmentation);
     auto framebuffer = vsg::Framebuffer::create(renderPass, vsg::ImageViews{colourView, depthView}, width, height, 1);
 
     c.renderGraph = vsg::RenderGraph::create();
@@ -162,13 +225,30 @@ unsigned Offscreen::addCamera(unsigned width, unsigned height, double fovDeg, vs
     view->mask = viewMask;
     c.renderGraph->addChild(view);
 
+    if (wantSegmentation) {
+        // Same camera, same mask (so a camera still hides its own aircraft),
+        // the id-coloured scene, and the depth this camera just wrote.
+        c.segColour = makeImage(kColourFormat, width, height, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                VK_IMAGE_TILING_OPTIMAL);
+        auto segColourView = vsg::createImageView(device_, c.segColour, VK_IMAGE_ASPECT_COLOR_BIT);
+        auto segFramebuffer = vsg::Framebuffer::create(makeSegmentationRenderPass(device_, wantDepth),
+                                                       vsg::ImageViews{segColourView, depthView}, width, height, 1);
+        c.segGraph = vsg::RenderGraph::create();
+        c.segGraph->framebuffer = segFramebuffer;
+        c.segGraph->renderArea.offset = VkOffset2D{0, 0};
+        c.segGraph->renderArea.extent = VkExtent2D{width, height};
+        c.segGraph->clearValues.resize(2);
+        c.segGraph->clearValues[0].color = VkClearColorValue{{0.0f, 0.0f, 0.0f, 1.0f}}; // id 0: no vehicle
+        c.segGraph->clearValues[1].depthStencil = VkClearDepthStencilValue{0.0f, 0};    // unused: depth is loaded
+        auto segView = vsg::View::create(c.camera, segScene_);
+        segView->mask = viewMask;
+        c.segGraph->addChild(segView);
+        c.segCapture = makeCaptureImage(device_, width, height);
+        c.ids.assign(static_cast<std::size_t>(width) * height, 0);
+    }
+
     // Host-readable copy: linear tiling, host-visible memory.
-    c.capture = makeImage(kColourFormat, width, height, VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_TILING_LINEAR);
-    c.capture->compile(device_);
-    // Cached host memory: reading uncached (write-combined) memory back is ~100x slower.
-    const VkMemoryPropertyFlags cached = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
-    if (c.capture->allocateAndBindMemory(device_, cached) != VK_SUCCESS)
-        c.capture->allocateAndBindMemory(device_, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    c.capture = makeCaptureImage(device_, width, height);
     c.rgb.assign(static_cast<std::size_t>(width) * height * 3, 0);
     if (wantDepth) {
         const VkDeviceSize bytes = static_cast<VkDeviceSize>(width) * height * sizeof(float);
@@ -207,29 +287,34 @@ bool Offscreen::compile(std::string* error) {
     for (auto& c : cameras_) {
         if (!c.active) continue;
         commandGraph_->addChild(c.renderGraph);
+        if (c.segGraph) commandGraph_->addChild(c.segGraph); // second pass over the depth the first just wrote
 
         // Readback: capture image -> TRANSFER_DST, copy, -> GENERAL for the host.
         auto commands = vsg::Commands::create();
         const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        auto toDst = vsg::ImageMemoryBarrier::create(0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                                     VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, c.capture, range);
-        commands->addChild(vsg::PipelineBarrier::create(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, toDst));
+        const auto copyToCapture = [&](const vsg::ref_ptr<vsg::Image>& from, const vsg::ref_ptr<vsg::Image>& to) {
+            auto toDst = vsg::ImageMemoryBarrier::create(0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                                         VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, to, range);
+            commands->addChild(vsg::PipelineBarrier::create(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, toDst));
 
-        auto copy = vsg::CopyImage::create();
-        copy->srcImage = c.colour;
-        copy->srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        copy->dstImage = c.capture;
-        copy->dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        VkImageCopy region{};
-        region.srcSubresource = VkImageSubresourceLayers{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        region.dstSubresource = region.srcSubresource;
-        region.extent = VkExtent3D{c.width, c.height, 1};
-        copy->regions.push_back(region);
-        commands->addChild(copy);
+            auto copy = vsg::CopyImage::create();
+            copy->srcImage = from;
+            copy->srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            copy->dstImage = to;
+            copy->dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            VkImageCopy region{};
+            region.srcSubresource = VkImageSubresourceLayers{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            region.dstSubresource = region.srcSubresource;
+            region.extent = VkExtent3D{c.width, c.height, 1};
+            copy->regions.push_back(region);
+            commands->addChild(copy);
 
-        auto toHost = vsg::ImageMemoryBarrier::create(VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                                      VK_IMAGE_LAYOUT_GENERAL, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, c.capture, range);
-        commands->addChild(vsg::PipelineBarrier::create(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, toHost));
+            auto toHost = vsg::ImageMemoryBarrier::create(VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                                          VK_IMAGE_LAYOUT_GENERAL, VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, to, range);
+            commands->addChild(vsg::PipelineBarrier::create(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, toHost));
+        };
+        copyToCapture(c.colour, c.capture);
+        if (c.segCapture) copyToCapture(c.segColour, c.segCapture);
 
         if (c.depthBuffer) {
             // Depth attachment (left in TRANSFER_SRC by the pass) -> host buffer of floats.
@@ -330,25 +415,39 @@ void Offscreen::readback(Camera& c) {
             }
         }
     }
-    auto* memory = c.capture->getDeviceMemory(device_->deviceID);
-    if (!memory) return;
-    VkImageSubresource sub{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0};
-    VkSubresourceLayout layout{};
-    vkGetImageSubresourceLayout(*device_, c.capture->vk(device_->deviceID), &sub, &layout);
-    void* data = nullptr;
-    if (memory->map(layout.offset, layout.size, 0, &data) != VK_SUCCESS || !data) return;
-    // Bulk-copy each row out of the mapped memory first (wide loads), then drop the alpha channel locally.
-    const auto* src = static_cast<const std::uint8_t*>(data);
+    // Bulk-copy each row out of the mapped image first (wide loads), then
+    // unpack locally; `staging` is reused by both captures.
     const std::size_t rowBytes = static_cast<std::size_t>(c.width) * 4;
-    if (c.staging.size() < rowBytes * c.height) c.staging.resize(rowBytes * c.height);
-    for (unsigned y = 0; y < c.height; ++y) std::memcpy(c.staging.data() + y * rowBytes, src + y * layout.rowPitch, rowBytes);
-    memory->unmap();
-    std::uint8_t* dst = c.rgb.data();
-    const std::uint8_t* rgba = c.staging.data();
-    for (std::size_t i = 0, n = static_cast<std::size_t>(c.width) * c.height; i < n; ++i, rgba += 4, dst += 3) {
-        dst[0] = rgba[0];
-        dst[1] = rgba[1];
-        dst[2] = rgba[2];
+    const auto mapRows = [&](const vsg::ref_ptr<vsg::Image>& capture) {
+        auto* memory = capture->getDeviceMemory(device_->deviceID);
+        if (!memory) return false;
+        VkImageSubresource sub{VK_IMAGE_ASPECT_COLOR_BIT, 0, 0};
+        VkSubresourceLayout layout{};
+        vkGetImageSubresourceLayout(*device_, capture->vk(device_->deviceID), &sub, &layout);
+        void* data = nullptr;
+        if (memory->map(layout.offset, layout.size, 0, &data) != VK_SUCCESS || !data) return false;
+        const auto* src = static_cast<const std::uint8_t*>(data);
+        if (c.staging.size() < rowBytes * c.height) c.staging.resize(rowBytes * c.height);
+        for (unsigned y = 0; y < c.height; ++y) std::memcpy(c.staging.data() + y * rowBytes, src + y * layout.rowPitch, rowBytes);
+        memory->unmap();
+        return true;
+    };
+
+    if (mapRows(c.capture)) {
+        std::uint8_t* dst = c.rgb.data();
+        const std::uint8_t* rgba = c.staging.data();
+        for (std::size_t i = 0, n = static_cast<std::size_t>(c.width) * c.height; i < n; ++i, rgba += 4, dst += 3) {
+            dst[0] = rgba[0];
+            dst[1] = rgba[1];
+            dst[2] = rgba[2];
+        }
+    }
+
+    // Ids were painted as red + green * 256 (see VehicleVisuals::segmentationColour).
+    if (c.segCapture && mapRows(c.segCapture)) {
+        const std::uint8_t* rgba = c.staging.data();
+        for (std::size_t i = 0, n = c.ids.size(); i < n; ++i, rgba += 4)
+            c.ids[i] = static_cast<std::uint16_t>(static_cast<unsigned>(rgba[0]) | (static_cast<unsigned>(rgba[1]) << 8));
     }
 }
 

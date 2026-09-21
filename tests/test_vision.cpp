@@ -43,10 +43,11 @@ int main(int argc, char** argv) {
     VehicleSpec other = spec;
     other.name = "target";
     other.initial.longitudeDeg += 0.0006; // ~50 m ahead, same track
-    world.createVehicle(other);
+    Vehicle target = world.createVehicle(other);
 
     vision::Options vo;
     vo.earth = false;
+    vo.segmentation = true;
     std::unique_ptr<vision::Sensors> sensorsPtr;
     try {
         sensorsPtr = std::make_unique<vision::Sensors>(world, vo);
@@ -61,6 +62,7 @@ int main(int argc, char** argv) {
     nose.fovDeg = 60.0;
     nose.offsetBodyM[0] = 2.0;
     nose.depth = true;
+    nose.segmentation = true;
     const unsigned camNose = sensors.addCamera(v, nose);   // sees the target ahead, not itself
     vision::CameraSpec chase = nose;
     chase.offsetBodyM[0] = -20.0;
@@ -68,12 +70,14 @@ int main(int argc, char** argv) {
     chase.pitchDeg = -8.0;
     chase.hideOwnVehicle = false;
     chase.depth = false;
+    chase.segmentation = true;
     const unsigned camChase = sensors.addCamera(v, chase); // sees its own aircraft
     vision::CameraSpec noseSelf = nose;
     noseSelf.hideOwnVehicle = false;
     const unsigned camNoseSelf = sensors.addCamera(v, noseSelf);
     vision::CameraSpec up = nose;
     up.pitchDeg = 60.0;                                     // sky only
+    up.segmentation = false;
     const unsigned camUp = sensors.addCamera(v, up);
     CHECK(sensors.cameraCount() == 4);
 
@@ -87,6 +91,8 @@ int main(int argc, char** argv) {
         sensors.savePng(camNose, std::string(argv[2]) + "/vision_nose.png");
         sensors.savePng(camNoseSelf, std::string(argv[2]) + "/vision_nose_self.png");
         sensors.savePng(camChase, std::string(argv[2]) + "/vision_chase.png");
+        sensors.saveSegmentationPng(camNose, std::string(argv[2]) + "/vision_nose_seg.png");
+        sensors.saveSegmentationPng(camChase, std::string(argv[2]) + "/vision_chase_seg.png");
     }
     const auto img = sensors.image(camNose);
     CHECK(img.rgb != nullptr && img.width == 96 && img.height == 64);
@@ -128,6 +134,31 @@ int main(int argc, char** argv) {
     for (std::size_t i = 0; i < dimg.size(); ++i) nearest = std::min(nearest, dimg.metres[i]);
     CHECK(nearest > 5.0f && nearest < 200.0f);
     CHECK(dimg.metres[2 * dimg.width + dimg.width / 2] > 10000.0f);
+    // Segmentation: ids name the vehicle a pixel belongs to, 0 elsewhere.
+    const unsigned idSelf = sensors.segmentationId(v), idTarget = sensors.segmentationId(target);
+    CHECK(idSelf != 0 && idTarget != 0 && idSelf != idTarget);
+    const auto segNose = sensors.segmentation(camNose);
+    CHECK(segNose.ids != nullptr && segNose.size() == img.width * img.height);
+    CHECK(sensors.segmentation(camUp).ids == nullptr); // not requested
+    // The nose camera hides its own aircraft, so every labelled pixel is the target.
+    std::size_t targetPixels = 0, foreignPixels = 0;
+    for (std::size_t i = 0; i < segNose.size(); ++i) {
+        if (segNose.ids[i] == idTarget) ++targetPixels;
+        else if (segNose.ids[i] != 0) ++foreignPixels;
+    }
+    CHECK(targetPixels > 0);
+    CHECK(foreignPixels == 0);
+    // Those are exactly the pixels the depth image finds near, and the sky is unlabelled.
+    for (std::size_t i = 0; i < segNose.size(); ++i)
+        CHECK((segNose.ids[i] == idTarget) == (dimg.metres[i] < 1000.0f));
+    // The chase camera draws its own aircraft, so the centre of its frame is that vehicle.
+    const auto segChase = sensors.segmentation(camChase);
+    std::size_t selfCentre = 0;
+    for (unsigned y = segChase.height / 3; y < 2 * segChase.height / 3; ++y)
+        for (unsigned x = segChase.width / 3; x < 2 * segChase.width / 3; ++x)
+            selfCentre += segChase.ids[y * segChase.width + x] == idSelf ? 1u : 0u;
+    CHECK(selfCentre > 20);
+
     // Cameras added after rendering and removed later: the scene recompiles on the next render.
     {
         vision::CameraSpec late = up;

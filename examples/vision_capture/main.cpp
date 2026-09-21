@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
     double lat = 37.72, lon = -119.55, alt = 3200.0, seconds = 20.0, every = 2.0;
     unsigned width = 320, height = 240;
     std::string out = "captures";
-    bool terrain = false, quiet = false, realtime = false, save = true;
+    bool terrain = false, quiet = false, realtime = false, save = true, segmentation = false;
     unsigned fleet = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string k = argv[i];
@@ -44,6 +44,7 @@ int main(int argc, char** argv) {
         else if (k == "--fleet") fleet = static_cast<unsigned>(std::atoi(next()));
         else if (k == "--realtime") realtime = true;
         else if (k == "--no-save") save = false;
+        else if (k == "--segmentation") segmentation = true;
     }
     try {
         WorldOptions wo;
@@ -73,15 +74,18 @@ int main(int argc, char** argv) {
         }
 
         vision::Options vo;
+        vo.segmentation = segmentation;
         vision::Sensors sensors(world, vo);
         vision::CameraSpec nose;
         nose.width = width; nose.height = height; nose.fovDeg = 70.0;
         nose.offsetBodyM[0] = 2.0; nose.offsetBodyM[2] = -0.3;
         nose.depth = true; // metres per pixel as well
+        nose.segmentation = segmentation; // and which vehicle each pixel is
         const unsigned camNose = sensors.addCamera(lead, nose);
         vision::CameraSpec chase = nose;
         chase.offsetBodyM[0] = -25.0; chase.offsetBodyM[2] = -6.0; chase.pitchDeg = -10.0;
         chase.hideOwnVehicle = false; // a chase view wants the aircraft in frame
+        chase.segmentation = segmentation;
         const unsigned camChase = sensors.addCamera(lead, chase);
         vision::CameraSpec down = nose;
         down.pitchDeg = -90.0; down.fovDeg = 60.0;
@@ -96,6 +100,7 @@ int main(int argc, char** argv) {
             v.command(hold);
             vision::CameraSpec small;
             small.offsetBodyM[0] = 2.0;
+            small.segmentation = segmentation;
             sensors.addCamera(v, small);
         }
 
@@ -124,6 +129,10 @@ int main(int argc, char** argv) {
                 }
                 std::snprintf(name, sizeof name, "%s/nose_depth_%03d.png", out.c_str(), shot);
                 sensors.saveDepthPng(camNose, name);
+                if (segmentation) {
+                    std::snprintf(name, sizeof name, "%s/chase_segmentation_%03d.png", out.c_str(), shot);
+                    sensors.saveSegmentationPng(camChase, name);
+                }
             }
             if (!quiet) {
                 const auto d = sensors.depth(camNose);

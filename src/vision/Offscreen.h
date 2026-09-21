@@ -41,8 +41,15 @@ public:
     /// The scene every camera draws. Call once, before addCamera()/compile().
     void setScene(vsg::ref_ptr<vsg::Node> scene, vsg::ref_ptr<vsg::EllipsoidModel> ellipsoid);
 
+    /// The id-coloured copy of the vehicles (world::VehicleVisuals::
+    /// segmentationNode()). Segmentation cameras draw it in a second pass over
+    /// the main pass's depth, so the terrain occludes without being in it.
+    /// Call before addCamera() for any camera that wants segmentation.
+    void setSegmentationScene(vsg::ref_ptr<vsg::Node> scene);
+
     /// A framebuffer + view + readback for one camera; returns its index.
-    unsigned addCamera(unsigned width, unsigned height, double fovDeg, vsg::Mask viewMask = vsg::MASK_ALL, bool depth = false);
+    unsigned addCamera(unsigned width, unsigned height, double fovDeg, vsg::Mask viewMask = vsg::MASK_ALL, bool depth = false,
+                       bool segmentation = false);
 
     /// Build the command graph over the active cameras and compile. Called
     /// again (by render/advance) whenever cameras were added or removed.
@@ -64,6 +71,9 @@ public:
     const std::vector<std::uint8_t>& rgb(unsigned camera) const { return cameras_[camera].rgb; }
     /// Depth in metres along the view axis (empty unless the camera was added with depth).
     const std::vector<float>& depth(unsigned camera) const { return cameras_[camera].depthM; }
+    /// Vehicle id per pixel, 0 where no vehicle (empty unless the camera was
+    /// added with segmentation).
+    const std::vector<std::uint16_t>& segmentation(unsigned camera) const { return cameras_[camera].ids; }
     unsigned width(unsigned camera) const { return cameras_[camera].width; }
     unsigned height(unsigned camera) const { return cameras_[camera].height; }
     std::size_t cameraCount() const { return cameras_.size(); }
@@ -84,9 +94,11 @@ private:
         vsg::ref_ptr<vsg::Camera> camera;
         vsg::ref_ptr<vsg::Image> colour, capture, depth;
         vsg::ref_ptr<vsg::Buffer> depthBuffer; ///< host-visible copy of the depth attachment (when requested)
-        vsg::ref_ptr<vsg::RenderGraph> renderGraph;
+        vsg::ref_ptr<vsg::Image> segColour, segCapture; ///< second pass's attachment and its host-readable copy
+        vsg::ref_ptr<vsg::RenderGraph> renderGraph, segGraph;
         std::vector<std::uint8_t> rgb;
         std::vector<float> depthM;
+        std::vector<std::uint16_t> ids;
         vsg::dmat4 projection;                 ///< used by the last frame, to linearise depth
         std::vector<std::uint8_t> staging; ///< RGBA rows copied out of the mapped image
     };
@@ -98,6 +110,7 @@ private:
     vsg::ref_ptr<vsg::Options> options_;
     vsg::ref_ptr<vsg::Viewer> viewer_;
     vsg::ref_ptr<vsg::Group> scene_;
+    vsg::ref_ptr<vsg::Node> segScene_;
     vsg::ref_ptr<vsg::EllipsoidModel> ellipsoid_;
     vsg::ref_ptr<vsg::CommandGraph> commandGraph_;
     std::vector<Camera> cameras_;

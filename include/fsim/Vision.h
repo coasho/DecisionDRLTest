@@ -40,6 +40,7 @@ struct CameraSpec {
     double yawDeg = 0.0, pitchDeg = 0.0, rollDeg = 0.0; ///< mount attitude relative to the body (yaw right, pitch up, roll right)
     bool hideOwnVehicle = true;              ///< do not draw the aircraft the camera is mounted on (up to 31 such vehicles)
     bool depth = false;                      ///< also deliver depth (metres along the view axis) through Sensors::depth()
+    bool segmentation = false;               ///< also deliver per-pixel vehicle ids through Sensors::segmentation() (needs Options::segmentation)
 };
 
 struct Options {
@@ -51,6 +52,7 @@ struct Options {
     unsigned maxLevel = 15;           ///< deepest tile level
     bool sky = true;                  ///< sky dome and sun light from the world's clock
     unsigned maxVehicles = 64;        ///< vehicles drawn (others are invisible to cameras)
+    bool segmentation = false;        ///< build the id-coloured copy of the vehicles, so cameras may ask for segmentation
     std::string assetDir;             ///< extra asset directory (models/<type>.glb); empty = the platform's
     bool debugLayer = false;          ///< Vulkan validation
     bool publish = true;              ///< share the images with viewers of a published world (shared memory; a copy per render)
@@ -67,6 +69,16 @@ struct Image {
 /// (nothing drawn) reads as the far plane, i.e. very large.
 struct DepthImage {
     const float* metres = nullptr;
+    unsigned width = 0, height = 0;
+    std::size_t size() const noexcept { return static_cast<std::size_t>(width) * height; }
+};
+
+/// Which vehicle each pixel belongs to, top row first: `Sensors::
+/// segmentationId(vehicle)` for a vehicle, 0 for terrain, sky or anything
+/// else. Vehicles hidden behind terrain are occluded exactly as in the RGB
+/// image, because the pass reuses its depth.
+struct SegmentationImage {
+    const std::uint16_t* ids = nullptr;
     unsigned width = 0, height = 0;
     std::size_t size() const noexcept { return static_cast<std::size_t>(width) * height; }
 };
@@ -95,11 +107,19 @@ public:
     Image image(unsigned camera) const noexcept;
     /// The last depth image of a camera added with `CameraSpec::depth` (empty otherwise).
     DepthImage depth(unsigned camera) const noexcept;
+    /// The last id image of a camera added with `CameraSpec::segmentation` (empty otherwise).
+    SegmentationImage segmentation(unsigned camera) const noexcept;
+    /// The id a vehicle is painted with in segmentation images; 0 if it is not
+    /// drawn (beyond `Options::maxVehicles`). Stable while the vehicle lives.
+    unsigned segmentationId(const Vehicle& vehicle) const noexcept;
 
     /// Write the last image of a camera as PNG (debugging, datasets).
     bool savePng(unsigned camera, const std::string& path) const;
     /// Write the last depth image as an 8-bit PNG: near = white, `farM` and beyond = black (log scale).
     bool saveDepthPng(unsigned camera, const std::string& path, double farM = 5000.0) const;
+    /// Write the last id image as a PNG that a human can read: a distinct
+    /// colour per id, black where there is no vehicle.
+    bool saveSegmentationPng(unsigned camera, const std::string& path) const;
 
     double lastRenderMs() const noexcept;  ///< wall time of the last render()
     /// Where the last render() went (milliseconds): frame bookkeeping, tile
@@ -133,6 +153,7 @@ public:
     void render();
     ConstSpan<std::uint8_t> rgb() const noexcept;   ///< N*H*W*3
     ConstSpan<float> depth() const noexcept;        ///< N*H*W, empty without CameraSpec::depth
+    ConstSpan<std::uint16_t> segmentation() const noexcept; ///< N*H*W, empty without CameraSpec::segmentation
     std::size_t count() const noexcept;             ///< N
     unsigned width() const noexcept;
     unsigned height() const noexcept;

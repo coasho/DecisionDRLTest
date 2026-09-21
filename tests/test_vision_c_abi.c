@@ -23,7 +23,8 @@ int main(int argc, char** argv) {
     fsim_vision* vision = NULL;
     const uint8_t* rgb;
     const float* depth;
-    size_t i, sky;
+    const uint16_t* ids;
+    size_t i, sky, labelled;
 
     fsim_world_options_init(&wo);
     wo.name = "vision-c";
@@ -41,6 +42,7 @@ int main(int argc, char** argv) {
     fsim_vision_options_init(&vo);
     CHECK(vo.struct_size == sizeof(fsim_vision_options));
     vo.earth = 0; /* sky and vehicles only: no tiles */
+    vo.segmentation = 1;
     if (fsim_vision_create(world, &vo, &vision) != FSIM_OK) {
         fprintf(stderr, "skipping: %s" "\n", fsim_last_error());
         fsim_world_destroy(world);
@@ -59,6 +61,7 @@ int main(int argc, char** argv) {
     cs.offset_body_m[2] = -3.0;
     cs.hide_own_vehicle = 0;
     cs.depth = 0;
+    cs.segmentation = 1; /* the chase camera labels the aircraft it is looking at */
     CHECK(fsim_vision_add_camera(vision, id, &cs, &cam2) == FSIM_OK);
     CHECK(fsim_vision_camera_count(vision) == 2);
     CHECK(fsim_world_step(world, 1) == FSIM_OK);
@@ -71,6 +74,18 @@ int main(int argc, char** argv) {
     depth = fsim_vision_depth(vision, cam, &w, &h);
     CHECK(depth != NULL && depth[0] > 1000.0f);
     CHECK(fsim_vision_depth(vision, cam2, &w, &h) == NULL);
+    /* Segmentation: the chase camera's own aircraft carries id 1, the sky camera has no ids at all. */
+    CHECK(fsim_vision_segmentation_id(vision, id) == 1);
+    CHECK(fsim_vision_segmentation_id(vision, 999) == 0);
+    ids = fsim_vision_segmentation(vision, cam2, &w, &h);
+    CHECK(ids != NULL && w == 64 && h == 48);
+    labelled = 0;
+    for (i = 0; i < (size_t)w * h; ++i) {
+        CHECK(ids[i] == 0 || ids[i] == 1);
+        labelled += ids[i] == 1 ? 1u : 0u;
+    }
+    CHECK(labelled > 0);
+    CHECK(fsim_vision_segmentation(vision, cam, &w, &h) == NULL);
     CHECK(fsim_vision_image(vision, 7, &w, &h) == NULL);
     CHECK(fsim_vision_last_render_ms(vision) > 0.0);
     fsim_vision_destroy(vision);

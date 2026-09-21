@@ -83,13 +83,51 @@ on any world handle (including `fsim_vecenv_world(env)`),
 `fsim_vision_render`, `fsim_vision_image` / `fsim_vision_depth` returning
 library-owned buffers ([c_abi.md](c_abi.md)).
 
+## Segmentation: which vehicle a pixel is
+
+`CameraSpec::segmentation` (with `Options::segmentation`, which builds the
+id-coloured copy of the vehicles) adds a per-pixel `uint16` vehicle id next to
+the RGB image: `Sensors::segmentationId(vehicle)` where that vehicle was
+drawn, 0 for terrain, sky and everything else.
+
+```cpp
+fsim::vision::Options vo;
+vo.segmentation = true;                     // build the id-coloured copy
+fsim::vision::Sensors sensors(world, vo);
+fsim::vision::CameraSpec cam;
+cam.segmentation = true;
+const unsigned eye = sensors.addCamera(fighter, cam);
+
+sensors.render();
+const auto seg = sensors.segmentation(eye); // seg.ids: height x width, top row first
+const unsigned bandit = sensors.segmentationId(target);
+std::size_t pixels = 0;
+for (std::size_t i = 0; i < seg.size(); ++i) pixels += seg.ids[i] == bandit ? 1 : 0;
+sensors.saveSegmentationPng(eye, "seg.png"); // a colour per id, for looking at
+```
+
+- Ids are 1-based and stable while a vehicle lives; a slot freed by a removed
+  vehicle is reused, so read them from `segmentationId()` rather than assuming.
+  `Options::maxVehicles` vehicles can be labelled.
+- Occlusion is exact: the pass reuses the depth the colour pass just wrote, so
+  a vehicle behind a ridge is missing from the ids exactly as it is missing
+  from the image, and a nearer aircraft covers a farther one.
+- `hideOwnVehicle` applies here too - a camera that does not draw its own
+  aircraft does not label it either.
+- The vehicles are drawn from the same models, so the silhouettes match the
+  RGB image pixel for pixel, with one exception: the id copy does not run the
+  model's animations, so a spinning propeller is labelled in its rest pose.
+- `BatchCameras::segmentation()` is the batched tensor, `[N][H][W]` `uint16`.
+
 ## Performance
 
 One `render()` records all cameras into one command buffer, submits once,
 waits, and copies the images back through cached host memory. Measured on an
 RTX 5070 Ti (`examples/vision_capture --fleet 60`): 64 cameras (60 x 128x128
 + 4 x 320x240) in ~8 ms per step, ~1 ms for four 320x240 cameras - the design
-budget (8.4) is met. The first frames at a new place show coarse tiles while
+budget (8.4) is met. Segmentation is a second pass over the same cameras and
+costs about what its geometry costs: the same 64 cameras measured 13.2 ms
+without it and 18.7 ms with it (RGB + depth + ids), still inside the budget. The first frames at a new place show coarse tiles while
 the pager streams the pyramid; run `tile_prefetch` for the training region
 so nothing downloads during episodes and the cache is warm.
 
@@ -100,11 +138,13 @@ chase, downward and side cameras on the lead and writes PNGs:
 
 ```bash
 build/ucrt64-release/bin/vision_capture.exe --seconds 20 --every 2 --out captures
+build/ucrt64-release/bin/vision_capture.exe --segmentation --out captures   # also chase_segmentation_*.png
 ```
 
 ## Limits
 
-- RGB and depth; segmentation (per-vehicle ids) is next.
+- RGB, depth and per-vehicle segmentation ids; semantic classes (terrain,
+  sky, water) are not separated - everything that is not a vehicle is 0.
 - Whether the vehicle's own model occludes the view depends on the mount: a
   camera 2 m ahead of the origin sits inside the c172's cowling, which is why
   `hideOwnVehicle` defaults to on.

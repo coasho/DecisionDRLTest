@@ -30,6 +30,7 @@ public:
         double placeholderLengthM = 8.3; ///< c172-ish
         double placeholderSpanM = 11.0;
         std::vector<std::filesystem::path> modelDirs; ///< searched for `<type>.glb` / `.gltf` (type without its "jsbsim:" prefix)
+        bool segmentation = false;       ///< also build the id-coloured copy (segmentation cameras)
     };
 
     /// Compiles a subgraph loaded after the scene was compiled (render::Viewer::compile).
@@ -42,6 +43,20 @@ public:
     static bool applyManifest(Settings& settings);
 
     vsg::ref_ptr<vsg::Node> node() const { return root_; }
+
+    /// Root of the id-coloured copy of every vehicle, or null unless
+    /// `Settings::segmentation`. A view over this scene paints each vehicle
+    /// one flat colour encoding its slot, so the pixels it covers name it.
+    /// It follows the same transforms, visibility and masks as `node()`, so a
+    /// camera that hides its own aircraft hides it here too.
+    vsg::ref_ptr<vsg::Node> segmentationNode() const { return segRoot_; }
+
+    /// Slot -> the colour its segmentation copy is painted, and back. Ids are
+    /// 1-based over the low two bytes; 0 (black) means "no vehicle".
+    static vsg::vec4 segmentationColour(std::size_t index);
+    static unsigned segmentationId(std::uint8_t r, std::uint8_t g) noexcept {
+        return static_cast<unsigned>(r) | (static_cast<unsigned>(g) << 8);
+    }
 
     /// Write the latest snapshot into the transforms (render thread, per frame).
     void update(Span<const sim::VehicleState> states);
@@ -77,8 +92,13 @@ public:
 private:
     struct Model {
         vsg::ref_ptr<vsg::Node> normal, highlighted;
+        vsg::ref_ptr<vsg::Node> geometry; ///< state-free, white-vertex-colour copy for the segmentation pass
     };
     vsg::ref_ptr<vsg::Node> buildPlaceholder(const Settings& s, const vsg::vec4& color) const;
+    /// Flatten a model to transform + draw pairs with white vertex colours,
+    /// dropping its own pipelines, textures and materials so one flat
+    /// pipeline can paint it a single id colour.
+    static vsg::ref_ptr<vsg::Node> stripState(const vsg::ref_ptr<vsg::Node>& model);
     vsg::ref_ptr<vsg::Node> loadModel(const Settings& s, vsg::ref_ptr<vsg::Options> options) const;
     std::string resolveModel(const std::string& modelPath, const std::string& type) const;
     const Model& modelFor(const std::string& key);
@@ -98,6 +118,13 @@ private:
     std::vector<vsg::Mask> onMask_;
     vsg::Animations animations_;
     void applySwitch(std::size_t index);
+
+    // Segmentation copy: one transform per slot mirroring transforms_, each
+    // holding a Switch over a StateGroup that paints the slot's id colour.
+    vsg::ref_ptr<vsg::Group> segRoot_;
+    std::vector<vsg::ref_ptr<vsg::MatrixTransform>> segTransforms_;
+    std::vector<vsg::ref_ptr<vsg::Switch>> segSwitch_;
+    std::vector<vsg::ref_ptr<vsg::StateGroup>> segState_;
 };
 
 } // namespace fsim::world

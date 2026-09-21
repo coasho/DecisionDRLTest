@@ -12,9 +12,9 @@ vsg::ref_ptr<vsg::StateGroup> createFlatStateGroup(const FlatGeometrySettings& s
     }
     auto config = vsg::GraphicsPipelineConfigurator::create(shaderSet);
 
-    if (const auto& materialBinding = shaderSet->getDescriptorBinding("material")) {
-        config->assignDescriptor("material", materialBinding.data);
-    }
+    auto material = vsg::PhongMaterialValue::create();
+    material->value().diffuse = settings.diffuse;
+    config->assignDescriptor("material", material);
     config->enableArray("vsg_Vertex", VK_VERTEX_INPUT_RATE_VERTEX, 12);
     config->enableArray("vsg_Normal", VK_VERTEX_INPUT_RATE_VERTEX, 12);
     config->enableArray("vsg_TexCoord0", VK_VERTEX_INPUT_RATE_VERTEX, 8);
@@ -31,6 +31,7 @@ vsg::ref_ptr<vsg::StateGroup> createFlatStateGroup(const FlatGeometrySettings& s
         void apply(vsg::DepthStencilState& ds) override {
             ds.depthTestEnable = s.depthTest ? VK_TRUE : VK_FALSE;
             ds.depthWriteEnable = s.depthWrite ? VK_TRUE : VK_FALSE;
+            ds.depthCompareOp = s.depthCompare;
         }
         void apply(vsg::ColorBlendState& cbs) override { cbs.configureAttachments(s.blending); }
     } apply(settings);

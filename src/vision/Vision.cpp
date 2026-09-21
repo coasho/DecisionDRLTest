@@ -224,6 +224,7 @@ Sensors::Sensors(World& world, const Options& options) : impl_(std::make_unique<
     world::VehicleVisuals::applyManifest(vs);
     for (const auto& dir : assets.searchPaths())
         if (std::filesystem::is_directory(dir / "models")) vs.modelDirs.push_back(dir / "models");
+    vs.segmentation = options.segmentation;
     impl_->visuals = std::make_unique<world::VehicleVisuals>(options.maxVehicles, vs, vsgOptions);
     for (unsigned i = 0; i < options.maxVehicles; ++i) impl_->visuals->setVisible(i, false);
     scene->addChild(impl_->visuals->node());
@@ -231,6 +232,7 @@ Sensors::Sensors(World& world, const Options& options) : impl_(std::make_unique<
     impl_->states.assign(options.maxVehicles, sim::VehicleState{});
 
     impl_->offscreen.setScene(scene, impl_->ellipsoid);
+    if (options.segmentation) impl_->offscreen.setSegmentationScene(impl_->visuals->segmentationNode());
   } catch (const vsg::Exception& e) {
     rethrow("scene", e);
   }
@@ -257,7 +259,10 @@ unsigned Sensors::addCamera(const Vehicle& vehicle, const CameraSpec& spec) {
             it = impl_->ownBit.emplace(vehicle.id(), vsg::Mask(1u << (impl_->ownBit.size() + 1))).first;
         if (it != impl_->ownBit.end()) viewMask = vsg::MASK_ALL & ~it->second;
     }
-    return impl_->offscreen.addCamera(std::max(1u, spec.width), std::max(1u, spec.height), spec.fovDeg, viewMask, spec.depth);
+    if (spec.segmentation && !impl_->options.segmentation)
+        LOG_WARN("vision") << "CameraSpec::segmentation needs Options::segmentation; this camera has no ids";
+    return impl_->offscreen.addCamera(std::max(1u, spec.width), std::max(1u, spec.height), spec.fovDeg, viewMask, spec.depth,
+                                      spec.segmentation);
 }
 
 std::size_t Sensors::cameraCount() const noexcept { return impl_->mounts.size(); }
@@ -312,6 +317,53 @@ DepthImage Sensors::depth(unsigned camera) const noexcept {
     return img;
 }
 
+SegmentationImage Sensors::segmentation(unsigned camera) const noexcept {
+    SegmentationImage img;
+    if (!impl_->offscreen.active(camera) || impl_->offscreen.segmentation(camera).empty()) return img;
+    img.ids = impl_->offscreen.segmentation(camera).data();
+    img.width = impl_->offscreen.width(camera);
+    img.height = impl_->offscreen.height(camera);
+    return img;
+}
+
+unsigned Sensors::segmentationId(const Vehicle& vehicle) const noexcept {
+    const auto it = impl_->vehicleSlot.find(vehicle.id());
+    return it == impl_->vehicleSlot.end() ? 0u : static_cast<unsigned>(it->second) + 1u;
+}
+
+bool Sensors::saveSegmentationPng(unsigned camera, const std::string& path) const {
+    const SegmentationImage seg = segmentation(camera);
+    if (!seg.ids) return false;
+    // A readable palette rather than the raw id: golden-ratio hues, black for 0.
+    std::vector<std::uint8_t> rgb(seg.size() * 3, 0);
+    for (std::size_t i = 0; i < seg.size(); ++i) {
+        const unsigned id = seg.ids[i];
+        if (id == 0) continue;
+        const double h = std::fmod(static_cast<double>(id) * 0.61803398875, 1.0) * 6.0;
+        const int sector = static_cast<int>(h);
+        const double f = h - sector;
+        const double v = 1.0, p = 0.25, q = 1.0 - 0.75 * f, t = 0.25 + 0.75 * f;
+        double r = v, g = v, b = v;
+        switch (sector) {
+        case 0: r = v; g = t; b = p; break;
+        case 1: r = q; g = v; b = p; break;
+        case 2: r = p; g = v; b = t; break;
+        case 3: r = p; g = q; b = v; break;
+        case 4: r = t; g = p; b = v; break;
+        default: r = v; g = p; b = q; break;
+        }
+        rgb[i * 3 + 0] = static_cast<std::uint8_t>(r * 255.0 + 0.5);
+        rgb[i * 3 + 1] = static_cast<std::uint8_t>(g * 255.0 + 0.5);
+        rgb[i * 3 + 2] = static_cast<std::uint8_t>(b * 255.0 + 0.5);
+    }
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+    const int ok = stbi_write_png_to_func([](void* ctx, void* data, int size) { std::fwrite(data, 1, static_cast<std::size_t>(size), static_cast<std::FILE*>(ctx)); }, f,
+                                          static_cast<int>(seg.width), static_cast<int>(seg.height), 3, rgb.data(), static_cast<int>(seg.width) * 3);
+    std::fclose(f);
+    return ok != 0;
+}
+
 bool Sensors::saveDepthPng(unsigned camera, const std::string& path, double farM) const {
     const DepthImage d = depth(camera);
     if (!d.metres) return false;
@@ -355,8 +407,9 @@ struct BatchCameras::Impl {
     std::vector<unsigned> cameras; ///< per batch vehicle
     std::vector<std::uint8_t> rgb;
     std::vector<float> depth;
+    std::vector<std::uint16_t> ids;
     unsigned width = 0, height = 0;
-    bool wantDepth = false;
+    bool wantDepth = false, wantSegmentation = false;
 };
 
 BatchCameras::BatchCameras(VecEnv& env, const CameraSpec& spec, const Options& options) : impl_(std::make_unique<Impl>()) {
@@ -364,6 +417,7 @@ BatchCameras::BatchCameras(VecEnv& env, const CameraSpec& spec, const Options& o
     impl_->width = std::max(1u, spec.width);
     impl_->height = std::max(1u, spec.height);
     impl_->wantDepth = spec.depth;
+    impl_->wantSegmentation = spec.segmentation && options.segmentation;
     // Vehicles are named "env<e>/<v>" in batch order; mount in that order.
     const unsigned K = env.vehiclesPerEnv();
     for (unsigned e = 0; e < env.numEnvs(); ++e)
@@ -375,6 +429,7 @@ BatchCameras::BatchCameras(VecEnv& env, const CameraSpec& spec, const Options& o
     const std::size_t pixels = static_cast<std::size_t>(impl_->width) * impl_->height;
     impl_->rgb.assign(impl_->cameras.size() * pixels * 3, 0);
     if (impl_->wantDepth) impl_->depth.assign(impl_->cameras.size() * pixels, 0.0f);
+    if (impl_->wantSegmentation) impl_->ids.assign(impl_->cameras.size() * pixels, 0);
 }
 
 BatchCameras::~BatchCameras() = default;
@@ -389,11 +444,16 @@ void BatchCameras::render() {
             const DepthImage d = impl_->sensors->depth(impl_->cameras[i]);
             if (d.metres) std::memcpy(impl_->depth.data() + i * pixels, d.metres, pixels * sizeof(float));
         }
+        if (impl_->wantSegmentation) {
+            const SegmentationImage seg = impl_->sensors->segmentation(impl_->cameras[i]);
+            if (seg.ids) std::memcpy(impl_->ids.data() + i * pixels, seg.ids, pixels * sizeof(std::uint16_t));
+        }
     }
 }
 
 ConstSpan<std::uint8_t> BatchCameras::rgb() const noexcept { return ConstSpan<std::uint8_t>{impl_->rgb.data(), impl_->rgb.size()}; }
 ConstSpan<float> BatchCameras::depth() const noexcept { return ConstSpan<float>{impl_->depth.data(), impl_->depth.size()}; }
+ConstSpan<std::uint16_t> BatchCameras::segmentation() const noexcept { return ConstSpan<std::uint16_t>{impl_->ids.data(), impl_->ids.size()}; }
 std::size_t BatchCameras::count() const noexcept { return impl_->cameras.size(); }
 unsigned BatchCameras::width() const noexcept { return impl_->width; }
 unsigned BatchCameras::height() const noexcept { return impl_->height; }

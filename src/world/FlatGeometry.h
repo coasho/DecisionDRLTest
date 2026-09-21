@@ -10,8 +10,17 @@ struct FlatGeometrySettings {
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     bool depthTest = true;
     bool depthWrite = true;
+    /// Reverse depth throughout (far = 0), so VSG's GREATER is the default. A
+    /// pass that re-draws geometry an earlier pass already depth-wrote needs
+    /// GREATER_OR_EQUAL, or every fragment fails against its own depth.
+    VkCompareOp depthCompare = VK_COMPARE_OP_GREATER;
     bool blending = false;   ///< alpha blending (vertex colour alpha)
     bool cullBackFaces = true;
+    /// Material colour; the default is VSG's. The flat shader writes
+    /// `vsg_Color * diffuse`, so this is the whole output where the vertex
+    /// colours are white - which is how the segmentation pass paints a
+    /// vehicle its id colour.
+    vsg::vec4 diffuse{0.9f, 0.9f, 0.9f, 1.0f};
 };
 
 /// StateGroup binding a pipeline for `vsg_Vertex` (vec3), `vsg_Normal` (vec3),

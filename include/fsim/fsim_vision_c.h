@@ -31,6 +31,7 @@ typedef struct fsim_vision_options {
     const char* asset_dir;       /* NULL, or an extra asset directory (models/<type>.glb) */
     int32_t debug_layer;         /* 1: Vulkan validation */
     int32_t publish;             /* 1 (default): viewers of a published world see the camera images */
+    int32_t segmentation;        /* 1: build the id-coloured copy of the vehicles, so cameras may ask for segmentation */
 } fsim_vision_options;
 
 typedef struct fsim_camera_spec {
@@ -41,6 +42,7 @@ typedef struct fsim_camera_spec {
     double yaw_deg, pitch_deg, roll_deg; /* mount attitude relative to the body (yaw right, pitch up, roll right) */
     int32_t hide_own_vehicle;    /* 1 (default): the carrier's own model is not drawn in this camera */
     int32_t depth;               /* 1: also deliver depth (metres) through fsim_vision_depth */
+    int32_t segmentation;        /* 1: also deliver vehicle ids through fsim_vision_segmentation (needs options->segmentation) */
 } fsim_camera_spec;
 
 FSIM_VISION_API void fsim_vision_options_init(fsim_vision_options* options);
@@ -61,19 +63,27 @@ FSIM_VISION_API int fsim_vision_render(fsim_vision* vision);
 FSIM_VISION_API const uint8_t* fsim_vision_image(const fsim_vision* vision, uint32_t camera, uint32_t* width, uint32_t* height);
 /* height x width floats, metres along the view axis; NULL unless the camera was added with depth. */
 FSIM_VISION_API const float* fsim_vision_depth(const fsim_vision* vision, uint32_t camera, uint32_t* width, uint32_t* height);
+/* height x width uint16 vehicle ids, 0 where no vehicle; NULL unless the camera was added with segmentation. */
+FSIM_VISION_API const uint16_t* fsim_vision_segmentation(const fsim_vision* vision, uint32_t camera, uint32_t* width, uint32_t* height);
+/* The id a vehicle is painted with in segmentation images, or 0 if it is not drawn. */
+FSIM_VISION_API uint32_t fsim_vision_segmentation_id(const fsim_vision* vision, uint32_t vehicle_id);
 FSIM_VISION_API int fsim_vision_save_png(const fsim_vision* vision, uint32_t camera, const char* path);
+/* The ids as a PNG a human can read: a distinct colour per id, black for none. */
+FSIM_VISION_API int fsim_vision_save_segmentation_png(const fsim_vision* vision, uint32_t camera, const char* path);
 /* Run `frames` frames without reading back so terrain tiles stream in (after a jump to a new region). */
 FSIM_VISION_API int fsim_vision_settle(fsim_vision* vision, uint32_t frames);
 FSIM_VISION_API double fsim_vision_last_render_ms(const fsim_vision* vision);
 
 /* One camera per batch vehicle of a VecEnv (batch order), images packed as tensors:
- * rgb [N][H][W][3] bytes, depth [N][H][W] floats (when spec->depth). */
+ * rgb [N][H][W][3] bytes, depth [N][H][W] floats (when spec->depth),
+ * segmentation [N][H][W] uint16 (when spec->segmentation). */
 typedef struct fsim_vision_batch fsim_vision_batch;
 FSIM_VISION_API int fsim_vision_batch_create(fsim_vecenv* env, const fsim_camera_spec* spec, const fsim_vision_options* options, fsim_vision_batch** out);
 FSIM_VISION_API void fsim_vision_batch_destroy(fsim_vision_batch* batch);
 FSIM_VISION_API int fsim_vision_batch_render(fsim_vision_batch* batch);
 FSIM_VISION_API const uint8_t* fsim_vision_batch_rgb(const fsim_vision_batch* batch, size_t* length);
 FSIM_VISION_API const float* fsim_vision_batch_depth(const fsim_vision_batch* batch, size_t* length);
+FSIM_VISION_API const uint16_t* fsim_vision_batch_segmentation(const fsim_vision_batch* batch, size_t* length);
 FSIM_VISION_API uint32_t fsim_vision_batch_count(const fsim_vision_batch* batch);
 /* The per-camera handle underneath (save_png, extra cameras); owned by the batch. */
 FSIM_VISION_API fsim_vision* fsim_vision_batch_sensors(fsim_vision_batch* batch);

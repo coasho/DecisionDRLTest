@@ -22,8 +22,9 @@ struct fsim_vision_batch {
     std::vector<unsigned> cameraIds;
     std::vector<uint8_t> rgb;
     std::vector<float> depth;
+    std::vector<uint16_t> ids;
     unsigned width = 0, height = 0;
-    bool wantDepth = false;
+    bool wantDepth = false, wantSegmentation = false;
 };
 
 namespace {
@@ -85,6 +86,7 @@ fsim::vision::CameraSpec toSpec(const fsim_camera_spec* spec) {
     c.rollDeg = spec->roll_deg;
     c.hideOwnVehicle = spec->hide_own_vehicle != 0;
     c.depth = spec->depth != 0;
+    c.segmentation = spec->segmentation != 0;
     return c;
 }
 
@@ -101,6 +103,7 @@ fsim::vision::Options toOptions(const fsim_vision_options* options) {
     if (options->asset_dir) o.assetDir = options->asset_dir;
     o.debugLayer = options->debug_layer != 0;
     o.publish = options->publish != 0;
+    o.segmentation = options->segmentation != 0;
     return o;
 }
 
@@ -164,9 +167,29 @@ FSIM_VISION_API const float* fsim_vision_depth(const fsim_vision* vision, uint32
     return img.metres;
 }
 
+FSIM_VISION_API const uint16_t* fsim_vision_segmentation(const fsim_vision* vision, uint32_t camera, uint32_t* width, uint32_t* height) {
+    if (!vision) return nullptr;
+    const auto img = vision->sensors->segmentation(camera);
+    if (width) *width = img.width;
+    if (height) *height = img.height;
+    return img.ids;
+}
+
+FSIM_VISION_API uint32_t fsim_vision_segmentation_id(const fsim_vision* vision, uint32_t vehicle_id) {
+    if (!vision || !vision->world) return 0;
+    return vision->sensors->segmentationId(vision->world->vehicle(vehicle_id));
+}
+
 FSIM_VISION_API int fsim_vision_save_png(const fsim_vision* vision, uint32_t camera, const char* path) {
     if (!vision || !path) return FSIM_INVALID_ARGUMENT;
     return vision->sensors->savePng(camera, path) ? FSIM_OK : fail(FSIM_ERROR, std::string("fsim_vision_save_png: cannot write ") + path);
+}
+
+FSIM_VISION_API int fsim_vision_save_segmentation_png(const fsim_vision* vision, uint32_t camera, const char* path) {
+    if (!vision || !path) return FSIM_INVALID_ARGUMENT;
+    return vision->sensors->saveSegmentationPng(camera, path)
+               ? FSIM_OK
+               : fail(FSIM_ERROR, std::string("fsim_vision_save_segmentation_png: cannot write ") + path);
 }
 
 FSIM_VISION_API int fsim_vision_settle(fsim_vision* vision, uint32_t frames) {
@@ -197,9 +220,11 @@ FSIM_VISION_API int fsim_vision_batch_create(fsim_vecenv* env, const fsim_camera
         b->width = std::max(1u, cs.width);
         b->height = std::max(1u, cs.height);
         b->wantDepth = cs.depth;
+        b->wantSegmentation = cs.segmentation && options->segmentation != 0;
         const std::size_t pixels = static_cast<std::size_t>(b->width) * b->height;
         b->rgb.assign(b->cameraIds.size() * pixels * 3, 0);
         if (b->wantDepth) b->depth.assign(b->cameraIds.size() * pixels, 0.0f);
+        if (b->wantSegmentation) b->ids.assign(b->cameraIds.size() * pixels, 0);
         *out = b;
         return static_cast<int>(FSIM_OK);
     });
@@ -219,6 +244,10 @@ FSIM_VISION_API int fsim_vision_batch_render(fsim_vision_batch* b) {
                 const auto d = b->view.sensors->depth(b->cameraIds[i]);
                 if (d.metres) std::memcpy(b->depth.data() + i * pixels, d.metres, pixels * sizeof(float));
             }
+            if (b->wantSegmentation) {
+                const auto seg = b->view.sensors->segmentation(b->cameraIds[i]);
+                if (seg.ids) std::memcpy(b->ids.data() + i * pixels, seg.ids, pixels * sizeof(uint16_t));
+            }
         }
         return static_cast<int>(FSIM_OK);
     });
@@ -232,6 +261,11 @@ FSIM_VISION_API const uint8_t* fsim_vision_batch_rgb(const fsim_vision_batch* b,
 FSIM_VISION_API const float* fsim_vision_batch_depth(const fsim_vision_batch* b, size_t* length) {
     if (length) *length = b ? b->depth.size() : 0;
     return b && !b->depth.empty() ? b->depth.data() : nullptr;
+}
+
+FSIM_VISION_API const uint16_t* fsim_vision_batch_segmentation(const fsim_vision_batch* b, size_t* length) {
+    if (length) *length = b ? b->ids.size() : 0;
+    return b && !b->ids.empty() ? b->ids.data() : nullptr;
 }
 
 FSIM_VISION_API uint32_t fsim_vision_batch_count(const fsim_vision_batch* b) { return b ? static_cast<uint32_t>(b->cameraIds.size()) : 0u; }

@@ -1,6 +1,7 @@
 #include "world/VehicleVisuals.h"
 
 #include "core/Log.h"
+#include "world/FlatGeometry.h"
 #include "world/Frames.h"
 
 #include <cctype>
@@ -23,6 +24,90 @@ vsg::ref_ptr<vsg::Node> box(vsg::Builder& builder, const vsg::vec3& centre, cons
     return builder.createBox(geom, state);
 }
 
+/// Flattens a loaded model to transform + draw pairs with white vertex
+/// colours. The segmentation pass paints a whole vehicle one colour, so the
+/// model's own state (pipelines, textures, materials) has to go, and so do
+/// its vertex colours - the flat shader writes `vsg_Color * material`, and
+/// anything but white would corrupt the id.
+class StripState : public vsg::ConstVisitor {
+public:
+    vsg::ref_ptr<vsg::Group> result = vsg::Group::create();
+    std::size_t skipped = 0; ///< draws whose arrays the flat pipeline cannot bind
+
+    void apply(const vsg::Object& o) override { o.traverse(*this); }
+
+    void apply(const vsg::Transform& t) override {
+        const vsg::dmat4 outer = matrix_;
+        matrix_ = t.transform(matrix_);
+        t.traverse(*this);
+        matrix_ = outer;
+    }
+
+    void apply(const vsg::VertexIndexDraw& d) override {
+        vsg::DataList arrays;
+        if (!whiteArrays(d.arrays, arrays)) {
+            ++skipped;
+            return;
+        }
+        auto draw = vsg::VertexIndexDraw::create();
+        draw->assignArrays(arrays);
+        if (d.indices && d.indices->data) draw->assignIndices(d.indices->data);
+        draw->indexCount = d.indexCount;
+        draw->instanceCount = d.instanceCount;
+        draw->firstIndex = d.firstIndex;
+        draw->vertexOffset = d.vertexOffset;
+        draw->firstInstance = d.firstInstance;
+        add(draw);
+    }
+
+    void apply(const vsg::VertexDraw& d) override {
+        vsg::DataList arrays;
+        if (!whiteArrays(d.arrays, arrays)) {
+            ++skipped;
+            return;
+        }
+        auto draw = vsg::VertexDraw::create();
+        draw->assignArrays(arrays);
+        draw->vertexCount = d.vertexCount;
+        draw->instanceCount = d.instanceCount;
+        draw->firstVertex = d.firstVertex;
+        draw->firstInstance = d.firstInstance;
+        add(draw);
+    }
+
+private:
+    /// The flat pipeline binds vsg_Vertex (vec3), vsg_Normal (vec3),
+    /// vsg_TexCoord0 (vec2) and vsg_Color (vec4), in that order. A draw that
+    /// supplies anything else is left out rather than drawn with a wrong id.
+    ///
+    /// The colours are replaced by one white entry per *vertex*: a glTF model
+    /// with no COLOR_0 carries a single-element colour array bound per
+    /// instance, and reading that per vertex would feed the shader whatever
+    /// lies past its end.
+    static bool whiteArrays(const vsg::BufferInfoList& in, vsg::DataList& out) {
+        if (in.size() != 4) return false;
+        for (const auto& a : in) {
+            if (!a || !a->data) return false;
+            out.push_back(a->data);
+        }
+        auto vertices = out[0].cast<vsg::vec3Array>();
+        if (!vertices || !out[1].cast<vsg::vec3Array>() || !out[2].cast<vsg::vec2Array>() || !out[3].cast<vsg::vec4Array>()) {
+            out.clear();
+            return false;
+        }
+        out[3] = vsg::vec4Array::create(vertices->size(), vsg::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        return true;
+    }
+
+    void add(const vsg::ref_ptr<vsg::Node>& draw) {
+        auto xf = vsg::MatrixTransform::create(matrix_);
+        xf->addChild(draw);
+        result->addChild(xf);
+    }
+
+    vsg::dmat4 matrix_;
+};
+
 } // namespace
 
 VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg::ref_ptr<vsg::Options> options)
@@ -35,6 +120,14 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
     } else {
         default_.normal = buildPlaceholder(settings, vsg::vec4(0.85f, 0.85f, 0.9f, 1.0f));
         default_.highlighted = buildPlaceholder(settings, vsg::vec4(1.0f, 0.55f, 0.1f, 1.0f));
+    }
+
+    if (settings.segmentation) {
+        default_.geometry = stripState(default_.normal);
+        segRoot_ = vsg::Group::create();
+        segTransforms_.reserve(count);
+        segSwitch_.reserve(count);
+        segState_.reserve(count);
     }
 
     transforms_.reserve(count);
@@ -52,7 +145,51 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
         root_->addChild(transform);
         transforms_.push_back(transform);
         highlight_.push_back(sw);
+
+        if (!segRoot_) continue;
+        // The id colour is per slot, so the StateGroup is too; the stripped
+        // geometry under it is shared with every other vehicle on that model.
+        FlatGeometrySettings flat;
+        flat.diffuse = segmentationColour(i);
+        flat.depthWrite = false;                            // the main pass already wrote it
+        flat.depthCompare = VK_COMPARE_OP_GREATER_OR_EQUAL; // ... including these very fragments
+        auto state = createFlatStateGroup(flat, options_);
+        if (!state) { // no flat pipeline: no segmentation rather than a broken scene
+            segRoot_.reset();
+            segTransforms_.clear();
+            segSwitch_.clear();
+            segState_.clear();
+            continue;
+        }
+        if (default_.geometry) state->addChild(default_.geometry);
+        auto segSw = vsg::Switch::create();
+        segSw->addChild(true, state);
+        auto segTransform = vsg::MatrixTransform::create();
+        segTransform->addChild(segSw);
+        segRoot_->addChild(segTransform);
+        segTransforms_.push_back(segTransform);
+        segSwitch_.push_back(segSw);
+        segState_.push_back(state);
     }
+}
+
+vsg::vec4 VehicleVisuals::segmentationColour(std::size_t index) {
+    // id = slot + 1, little end in red, high end in green: an 8-bit UNORM
+    // attachment stores k/255 exactly, so the readback is lossless.
+    const unsigned id = static_cast<unsigned>(index) + 1;
+    return vsg::vec4(static_cast<float>(id & 0xFFu) / 255.0f, static_cast<float>((id >> 8) & 0xFFu) / 255.0f, 0.0f, 1.0f);
+}
+
+vsg::ref_ptr<vsg::Node> VehicleVisuals::stripState(const vsg::ref_ptr<vsg::Node>& model) {
+    if (!model) return {};
+    auto strip = vsg::visit<StripState>(model);
+    if (strip.skipped > 0)
+        LOG_WARN("world") << strip.skipped << " model draw(s) left out of the segmentation copy (unexpected vertex arrays)";
+    if (strip.result->children.empty()) {
+        LOG_WARN("world") << "no geometry could be stripped for segmentation";
+        return {};
+    }
+    return strip.result;
 }
 
 bool VehicleVisuals::applyManifest(Settings& settings) {
@@ -156,6 +293,11 @@ const VehicleVisuals::Model& VehicleVisuals::modelFor(const std::string& key) {
         if (m.normal) {
             m.highlighted = m.normal;
             if (compiler_ && !compiler_(m.normal)) LOG_WARN("world") << "could not compile vehicle model " << key;
+            if (segRoot_) {
+                m.geometry = stripState(m.normal);
+                if (m.geometry && compiler_ && !compiler_(m.geometry))
+                    LOG_WARN("world") << "could not compile the segmentation copy of " << key;
+            }
         }
         it = library_.emplace(key, std::move(m)).first;
     }
@@ -171,6 +313,11 @@ void VehicleVisuals::setModel(std::size_t index, const std::string& modelPath, c
     auto& children = highlight_[index]->children;
     children[0].node = m.normal;
     children[1].node = m.highlighted;
+    if (index < segState_.size()) {
+        auto geometry = m.geometry ? m.geometry : default_.geometry;
+        segState_[index]->children.clear();
+        if (geometry) segState_[index]->addChild(geometry);
+    }
 }
 
 const std::string& VehicleVisuals::modelOf(std::size_t index) const {
@@ -180,13 +327,19 @@ const std::string& VehicleVisuals::modelOf(std::size_t index) const {
 
 void VehicleVisuals::update(Span<const sim::VehicleState> states) {
     const std::size_t n = std::min(states.size(), transforms_.size());
-    for (std::size_t i = 0; i < n; ++i) transforms_[i]->matrix = bodyToEcef(states[i]);
+    for (std::size_t i = 0; i < n; ++i) {
+        const vsg::dmat4 m = bodyToEcef(states[i]);
+        transforms_[i]->matrix = m;
+        if (i < segTransforms_.size()) segTransforms_[i]->matrix = m;
+    }
 }
 
 void VehicleVisuals::applySwitch(std::size_t index) {
     auto& sw = highlight_[index];
     const std::size_t on = static_cast<int>(index) == selected_ ? 1 : 0;
     for (std::size_t i = 0; i < sw->children.size(); ++i) sw->children[i].mask = (visible_[index] && i == on) ? onMask_[index] : vsg::MASK_OFF;
+    // The segmentation copy is never highlighted, but it hides and masks alike.
+    if (index < segSwitch_.size()) segSwitch_[index]->children[0].mask = visible_[index] ? onMask_[index] : vsg::MASK_OFF;
 }
 
 void VehicleVisuals::setMask(std::size_t index, vsg::Mask mask) {
