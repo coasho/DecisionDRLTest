@@ -5,6 +5,7 @@
 
 #include "core/Log.h"
 #include "io/AssetResolver.h"
+#include "ipc/VisionSegment.h"
 #include "vision/Offscreen.h"
 #include "world/Earth.h"
 #include "world/Frames.h"
@@ -58,6 +59,47 @@ struct Sensors::Impl {
     std::unordered_map<std::uint32_t, vsg::Mask> ownBit; ///< vehicles that hide themselves from their own cameras
     double lastRenderMs = 0.0;
     bool compiled = false;
+
+    // Sharing with viewers: the segment follows the active camera set.
+    ipc::VisionPublisher publisher;
+    std::vector<unsigned> publishedCameras; ///< active camera index per segment slot
+    std::size_t publishedActive = 0;        ///< active-camera signature the table was built for
+    std::uint64_t publishedTableVersion = 0;
+    std::uint64_t cameraTableVersion = 0;   ///< bumped on add/remove
+
+    void publish() {
+        if (!options.publish || !world->published() || mounts.empty()) return;
+        if (!publisher.valid() && !publisher.create(world->name())) {
+            options.publish = false; // once
+            return;
+        }
+        if (publishedTableVersion != cameraTableVersion) {
+            std::vector<ipc::VisionCameraDesc> table;
+            publishedCameras.clear();
+            std::unordered_map<std::uint32_t, unsigned> perVehicle;
+            for (std::size_t i = 0; i < mounts.size(); ++i) {
+                if (!offscreen.active(static_cast<unsigned>(i))) continue;
+                ipc::VisionCameraDesc d;
+                d.vehicleId = mounts[i].vehicleId;
+                d.width = offscreen.width(static_cast<unsigned>(i));
+                d.height = offscreen.height(static_cast<unsigned>(i));
+                const Vehicle v = world->vehicle(mounts[i].vehicleId);
+                d.label = v.valid() ? v.name() : "vehicle " + std::to_string(mounts[i].vehicleId);
+                const unsigned n = perVehicle[mounts[i].vehicleId]++;
+                if (n > 0) d.label += " #" + std::to_string(n + 1);
+                table.push_back(std::move(d));
+                publishedCameras.push_back(static_cast<unsigned>(i));
+            }
+            const unsigned kept = publisher.setCameras(table);
+            publishedCameras.resize(kept);
+            publishedTableVersion = cameraTableVersion;
+        }
+        for (unsigned slot = 0; slot < publishedCameras.size(); ++slot) {
+            const auto& rgb = offscreen.rgb(publishedCameras[slot]);
+            publisher.write(slot, rgb.data(), rgb.size());
+        }
+        publisher.endFrame();
+    }
 
     std::size_t slotFor(const Vehicle& v) {
         const auto it = vehicleSlot.find(v.id());
@@ -206,6 +248,7 @@ unsigned Sensors::addCamera(const Vehicle& vehicle, const CameraSpec& spec) {
               vsg::rotate(spec.pitchDeg * kDeg, vsg::dvec3(0.0, 1.0, 0.0)) *
               vsg::rotate(spec.rollDeg * kDeg, vsg::dvec3(1.0, 0.0, 0.0));
     impl_->mounts.push_back(m);
+    ++impl_->cameraTableVersion;
     // Own-vehicle hiding: the vehicle's visuals carry one mask bit, its cameras' views clear that bit.
     vsg::Mask viewMask = vsg::MASK_ALL;
     if (spec.hideOwnVehicle) {
@@ -219,7 +262,10 @@ unsigned Sensors::addCamera(const Vehicle& vehicle, const CameraSpec& spec) {
 
 std::size_t Sensors::cameraCount() const noexcept { return impl_->mounts.size(); }
 
-void Sensors::removeCamera(unsigned camera) { impl_->offscreen.removeCamera(camera); }
+void Sensors::removeCamera(unsigned camera) {
+    impl_->offscreen.removeCamera(camera);
+    ++impl_->cameraTableVersion;
+}
 
 void Sensors::render() {
     const auto t0 = std::chrono::steady_clock::now();
@@ -229,6 +275,7 @@ void Sensors::render() {
         impl_->aim();
         impl_->offscreen.render(); // compiles first when cameras were added or removed
         impl_->compiled = true;
+        impl_->publish();
     } catch (const vsg::Exception& e) {
         rethrow("render", e);
     }

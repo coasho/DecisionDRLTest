@@ -4,7 +4,7 @@
 // Vulkan device.
 //
 //   vision_capture [--lat 37.72 --lon -119.55 --alt 3200] [--seconds 20] [--every 2] [--width 320 --height 240]
-//                  [--out captures] [--terrain] [--quiet] [--fleet N]
+//                  [--out captures] [--terrain] [--quiet] [--fleet N] [--realtime] [--no-save]
 //
 // --fleet N adds N more aircraft, each with a 128x128 nose camera that is
 // rendered but not saved: the throughput case (64 cameras per step).
@@ -13,10 +13,12 @@
 #include <fsim/World.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <thread>
 
 using namespace fsim;
 
@@ -24,7 +26,7 @@ int main(int argc, char** argv) {
     double lat = 37.72, lon = -119.55, alt = 3200.0, seconds = 20.0, every = 2.0;
     unsigned width = 320, height = 240;
     std::string out = "captures";
-    bool terrain = false, quiet = false;
+    bool terrain = false, quiet = false, realtime = false, save = true;
     unsigned fleet = 0;
     for (int i = 1; i < argc; ++i) {
         const std::string k = argv[i];
@@ -40,6 +42,8 @@ int main(int argc, char** argv) {
         else if (k == "--terrain") terrain = true;
         else if (k == "--quiet") quiet = true;
         else if (k == "--fleet") fleet = static_cast<unsigned>(std::atoi(next()));
+        else if (k == "--realtime") realtime = true;
+        else if (k == "--no-save") save = false;
     }
     try {
         WorldOptions wo;
@@ -104,18 +108,22 @@ int main(int argc, char** argv) {
         const int everySteps = std::max(1, static_cast<int>(every / stepS));
         int shot = 0;
         double renderMs = 0.0;
+        const auto t0 = std::chrono::steady_clock::now();
         for (int k = 1; k <= steps; ++k) {
             world.step();
+            if (realtime) std::this_thread::sleep_until(t0 + std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(k * stepS)));
             if (k % everySteps != 0) continue;
             sensors.render();
             renderMs += sensors.lastRenderMs();
             char name[128];
-            for (auto [cam, tag] : {std::pair{camNose, "nose"}, std::pair{camChase, "chase"}, std::pair{camDown, "down"}, std::pair{camSide, "side"}}) {
-                std::snprintf(name, sizeof name, "%s/%s_%03d.png", out.c_str(), tag, shot);
-                sensors.savePng(cam, name);
+            if (save) {
+                for (auto [cam, tag] : {std::pair{camNose, "nose"}, std::pair{camChase, "chase"}, std::pair{camDown, "down"}, std::pair{camSide, "side"}}) {
+                    std::snprintf(name, sizeof name, "%s/%s_%03d.png", out.c_str(), tag, shot);
+                    sensors.savePng(cam, name);
+                }
+                std::snprintf(name, sizeof name, "%s/nose_depth_%03d.png", out.c_str(), shot);
+                sensors.saveDepthPng(camNose, name);
             }
-            std::snprintf(name, sizeof name, "%s/nose_depth_%03d.png", out.c_str(), shot);
-            sensors.saveDepthPng(camNose, name);
             if (!quiet) {
                 const auto d = sensors.depth(camNose);
                 const auto at = [&](unsigned x, unsigned y) { return static_cast<double>(d.metres[y * d.width + x]); };

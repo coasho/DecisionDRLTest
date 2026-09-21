@@ -24,6 +24,7 @@ struct ViewerControls {
     // Camera telemetry written by the loop for the GUI.
     std::atomic<double> eyeLatDeg{0.0}, eyeLonDeg{0.0}, eyeAltM{0.0}, eyeDistanceM{0.0};
     std::atomic<bool> showVehicleList{true};
+    std::atomic<bool> showCameras{true};   ///< the "cameras" window (trainer camera images), when a world publishes any
     std::atomic<bool> showMonitor{true};
     std::atomic<bool> showLabels{true};
     std::atomic<bool> showTrails{true};

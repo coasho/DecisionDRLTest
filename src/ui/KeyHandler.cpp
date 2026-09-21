@@ -13,6 +13,10 @@ void KeyHandler::apply(vsg::KeyPressEvent& e) {
     case vsg::KEY_Space:
         c.paused.store(!c.paused.load(std::memory_order_relaxed), std::memory_order_relaxed);
         break;
+    case vsg::KEY_v:
+    case vsg::KEY_V:
+        c.showCameras.store(!c.showCameras.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        break;
     case vsg::KEY_Home:
         c.seekTo.store(0.0, std::memory_order_relaxed);
         break;

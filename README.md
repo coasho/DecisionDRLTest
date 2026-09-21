@@ -97,7 +97,8 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
   object model and VecEnv at full throughput; `cargo run --release -- world | vecenv`.
 - **Vision observations (M4)**: `fsim::vision::Sensors` mounts cameras on vehicles and renders them offscreen
   (`fsim_vision.dll`, Vulkan without a window) over the same imagery, relief, sky and models the viewer draws;
-  64 cameras in ~8 ms per step, RGB and depth; `examples/vision_capture` writes PNGs.
+  64 cameras in ~8 ms per step, RGB and depth; `examples/vision_capture` writes PNGs; the viewer shows the
+  trainer's camera images live through shared memory.
 
 Not yet: animated control surfaces, segmentation cameras.
 

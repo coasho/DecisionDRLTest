@@ -34,6 +34,7 @@ next one. Restarting the trainer re-attaches automatically.
 - The world's clock (sun position and sky), wind, atmosphere and weather.
 - The trainer's throughput (vehicle-steps/s), simulation time and the age of the last update.
 - Per vehicle: state summary and the active control level.
+- The trainer's cameras (`fsim_vision`, [vision.md](vision.md)): a "cameras" window with every image the training application rendered last, live (`v` toggles it).
 
 ## How it works (design 9.7)
 

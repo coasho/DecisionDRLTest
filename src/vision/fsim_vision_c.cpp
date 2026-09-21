@@ -59,6 +59,7 @@ FSIM_VISION_API void fsim_vision_options_init(fsim_vision_options* o) {
     o->max_level = 15;
     o->sky = 1;
     o->max_vehicles = 64;
+    o->publish = 1;
 }
 
 FSIM_VISION_API void fsim_camera_spec_init(fsim_camera_spec* s) {
@@ -99,6 +100,7 @@ fsim::vision::Options toOptions(const fsim_vision_options* options) {
     o.maxVehicles = options->max_vehicles ? options->max_vehicles : 64u;
     if (options->asset_dir) o.assetDir = options->asset_dir;
     o.debugLayer = options->debug_layer != 0;
+    o.publish = options->publish != 0;
     return o;
 }
 

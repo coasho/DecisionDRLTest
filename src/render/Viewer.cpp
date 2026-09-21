@@ -93,9 +93,9 @@ bool Viewer::setScene(vsg::ref_ptr<vsg::Node> scene, vsg::ref_ptr<vsg::Ellipsoid
     return true;
 }
 
-bool Viewer::compile(vsg::ref_ptr<vsg::Node> node) {
-    if (!viewer_ || !viewer_->compileManager || !node) return false;
-    auto result = viewer_->compileManager->compile(node);
+bool Viewer::compile(vsg::ref_ptr<vsg::Object> object) {
+    if (!viewer_ || !viewer_->compileManager || !object) return false;
+    auto result = viewer_->compileManager->compile(object);
     if (result) vsg::updateViewer(*viewer_, result);
     return static_cast<bool>(result);
 }

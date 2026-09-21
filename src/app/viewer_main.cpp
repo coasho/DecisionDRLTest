@@ -27,6 +27,7 @@
 #include "sim/SimRunner.h"
 #include "sim/VehiclePool.h"
 #include "ui/KeyHandler.h"
+#include "ui/CameraPreview.h"
 #include "ui/MonitorGui.h"
 #include "ui/ViewerControls.h"
 #include "world/CameraController.h"
@@ -420,6 +421,9 @@ int main(int argc, char** argv) {
     controls->cameraMode.store(opt.cameraMode);
     auto gui = ui::MonitorGui::create(controls, replay ? "replay " + opt.replayPath : opt.aircraft);
     auto imgui = vsgImGui::RenderImGui::create(viewer.window(), gui);
+    auto cameraPreview = ui::CameraPreview::create(controls, [&viewer](vsg::ref_ptr<vsg::Object> o) { return viewer.compile(o); },
+                                                   viewer.window()->getOrCreateDevice()->deviceID);
+    imgui->addChild(cameraPreview);
     ImGui::GetIO().IniFilename = nullptr;
     ImGui::GetIO().ConfigWindowsMoveFromTitleBarOnly = true; // a drag that starts inside a panel is never a panel move
     if (const double dpi = platform::systemDpiScale(); dpi > 1.01) {
@@ -565,6 +569,7 @@ int main(int argc, char** argv) {
                 if (mirror.valid()) {
                     LOG_INFO("app") << "leaving world '" << mirror.name() << "' for '" << opt.worldName << "'";
                     mirror.close();
+                    cameraPreview->detach();
                     batch = nullptr;
                     std::fill(alive.begin(), alive.end(), 0);
                     for (std::size_t i = 0; i < slots; ++i) { visuals.setVisible(i, false); trails.setEnabled(i, false); }
@@ -595,6 +600,7 @@ int main(int argc, char** argv) {
                     if (mirror.capacity() != slots) LOG_WARN("app") << "world capacity " << mirror.capacity() << " differs from --capacity " << slots
                                                                      << "; only the first " << std::min<std::size_t>(slots, mirror.capacity()) << " slots are shown";
                     LOG_INFO("app") << "attached to world '" << pick << "'";
+                    cameraPreview->attach(pick);
                     interpolator = world::Interpolator(slots);
                     for (std::size_t i = 0; i < slots; ++i) trails.setEnabled(i, false);
                     lastVehicleSteps = mirror.vehicleSteps();
@@ -643,6 +649,7 @@ int main(int argc, char** argv) {
                 if (!mirror.publisherAlive() && mirror.ageSeconds() > 5.0) {
                     LOG_INFO("app") << "world '" << mirror.name() << "' has gone; waiting for another";
                     mirror.close();
+                    cameraPreview->detach();
                     batch = nullptr;
                     std::fill(alive.begin(), alive.end(), 0);
                     for (std::size_t i = 0; i < slots; ++i) { visuals.setVisible(i, false); trails.setEnabled(i, false); }
@@ -742,6 +749,7 @@ int main(int argc, char** argv) {
         if (terrain && batch && ++tileTick % 60 == 0)
             for (const auto& st : batch->states) terrain->requestAround(st.latitudeRad, st.longitudeRad);
         gui->setBatch(batch);
+        cameraPreview->update();
         controls->fps.store(viewer.fps(), std::memory_order_relaxed);
         controls->frameMs.store(viewer.frameSeconds() * 1e3, std::memory_order_relaxed);
 

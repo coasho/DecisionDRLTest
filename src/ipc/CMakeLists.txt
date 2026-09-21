@@ -8,7 +8,9 @@ add_library(fsim_ipc STATIC
     WorldRegistry.h
     WorldRegistry.cpp
     Recording.h
-    Recording.cpp)
+    Recording.cpp
+    VisionSegment.h
+    VisionSegment.cpp)
 add_library(fsim::ipc ALIAS fsim_ipc)
 
 target_include_directories(fsim_ipc PUBLIC ${CMAKE_SOURCE_DIR}/src)

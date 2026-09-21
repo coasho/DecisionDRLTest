@@ -139,6 +139,9 @@ void MonitorGui::drawMonitor() const {
 
     bool list = controls_->showVehicleList.load(std::memory_order_relaxed);
     if (ImGui::Checkbox("vehicle list  [l]", &list)) controls_->showVehicleList.store(list, std::memory_order_relaxed);
+    ImGui::SameLine();
+    bool cams = controls_->showCameras.load(std::memory_order_relaxed);
+    if (ImGui::Checkbox("cameras  [v]", &cams)) controls_->showCameras.store(cams, std::memory_order_relaxed);
 
     if (batch_ && !batch_->states.empty()) {
         const int sel = std::clamp(controls_->selectedVehicle.load(std::memory_order_relaxed), 0,

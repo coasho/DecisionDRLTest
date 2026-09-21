@@ -36,7 +36,7 @@ public:
 
     /// Compile a subgraph added to the scene after setScene() (a vehicle model
     /// loaded when a new type appears). Returns false when nothing was compiled.
-    bool compile(vsg::ref_ptr<vsg::Node> node);
+    bool compile(vsg::ref_ptr<vsg::Object> object);
 
     /// Save the frame presented last as PNG (blocks until the GPU is idle).
     bool screenshot(const std::string& path);

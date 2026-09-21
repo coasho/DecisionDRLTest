@@ -53,6 +53,7 @@ struct Options {
     unsigned maxVehicles = 64;        ///< vehicles drawn (others are invisible to cameras)
     std::string assetDir;             ///< extra asset directory (models/<type>.glb); empty = the platform's
     bool debugLayer = false;          ///< Vulkan validation
+    bool publish = true;              ///< share the images with viewers of a published world (shared memory; a copy per render)
 };
 
 /// One RGB image, tightly packed, top row first.

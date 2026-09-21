@@ -67,6 +67,14 @@ named `env<e>/<v>`); `cams.sensors()` is the underlying `Sensors` for
 `savePng`, timing or extra cameras. In C: `fsim_vision_batch_create(env, &spec,
 &options, &batch)`, `fsim_vision_batch_render`, `fsim_vision_batch_rgb/depth`.
 
+## In the viewer
+
+When the world is published, `Sensors` also copies every camera's image into
+shared memory (`fsim.vision.<world>`, `Options::publish`, one memcpy per
+render) and `flightsim-viewer.exe` shows them live in its "cameras" window
+(`v` toggles it) - what the agents see, next to the world they fly in, without
+the trainer knowing a viewer exists.
+
 ## From C
 
 `fsim_vision_c.h` mirrors the API for other languages: `fsim_vision_create`

@@ -7,6 +7,7 @@
 #include "core/Units.h"
 #include "fsim/BuiltinEffects.h"
 #include "ipc/Recording.h"
+#include "ipc/VisionSegment.h"
 #include "ipc/WorldMirror.h"
 #include "ipc/WorldRegistry.h"
 
@@ -335,4 +336,48 @@ TEST_CASE("a world can be recorded and the recording read back", "[world][ipc]")
     REQUIRE(rec.frames()[15].samples.size() == 1);
     REQUIRE_THAT(rec.frames()[19].samples[0].second.state.altitudeMslM, Catch::Matchers::WithinAbs(1500.0, 20.0));
     std::filesystem::remove(path);
+}
+
+TEST_CASE("camera images round-trip through the vision segment", "[ipc][vision]") {
+    ipc::VisionPublisher pub;
+    REQUIRE(pub.create("test-vision", 1u << 20));
+    std::vector<ipc::VisionCameraDesc> cams(2);
+    cams[0] = {7, 4, 3, "nose"};
+    cams[1] = {9, 2, 2, "chase"};
+    REQUIRE(pub.setCameras(cams) == 2);
+    std::vector<std::uint8_t> a(4 * 3 * 3), b(2 * 2 * 3);
+    for (std::size_t i = 0; i < a.size(); ++i) a[i] = static_cast<std::uint8_t>(i);
+    for (std::size_t i = 0; i < b.size(); ++i) b[i] = static_cast<std::uint8_t>(200 + i);
+    pub.write(0, a.data(), a.size());
+    pub.write(1, b.data(), b.size());
+    pub.endFrame();
+
+    ipc::VisionMirror mirror;
+    REQUIRE(mirror.open("test-vision"));
+    REQUIRE(mirror.cameras().size() == 2);
+    REQUIRE(mirror.cameras()[0].label == "nose");
+    REQUIRE(mirror.cameras()[0].width == 4);
+    REQUIRE(mirror.cameras()[1].vehicleId == 9);
+    REQUIRE(mirror.frame() == 1);
+    REQUIRE(mirror.publisherAlive());
+    std::vector<std::uint8_t> got;
+    REQUIRE(mirror.read(0, got));
+    REQUIRE(got == a);
+    REQUIRE(mirror.read(1, got));
+    REQUIRE(got == b);
+    REQUIRE_FALSE(mirror.pollTable()); // unchanged
+
+    // A new camera set: the mirror sees the new table under a new generation.
+    cams.resize(1);
+    cams[0] = {11, 8, 8, "wide"};
+    REQUIRE(pub.setCameras(cams) == 1);
+    REQUIRE(mirror.pollTable());
+    REQUIRE(mirror.cameras().size() == 1);
+    REQUIRE(mirror.cameras()[0].label == "wide");
+    // Too many bytes for the segment: dropped, not written.
+    cams.assign(1, ipc::VisionCameraDesc{1, 1024, 1024, "huge"});
+    REQUIRE(pub.setCameras(cams) == 0);
+    pub.close();
+    REQUIRE(mirror.pollTable());
+    REQUIRE(mirror.cameras().empty());
 }

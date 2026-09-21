@@ -30,6 +30,7 @@ typedef struct fsim_vision_options {
     uint32_t max_vehicles;       /* vehicles drawn (64) */
     const char* asset_dir;       /* NULL, or an extra asset directory (models/<type>.glb) */
     int32_t debug_layer;         /* 1: Vulkan validation */
+    int32_t publish;             /* 1 (default): viewers of a published world see the camera images */
 } fsim_vision_options;
 
 typedef struct fsim_camera_spec {
