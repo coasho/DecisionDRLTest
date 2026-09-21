@@ -236,6 +236,24 @@ FSIM_API int fsim_comm_set_medium(fsim_world* world, const char* medium_id, cons
 FSIM_API int fsim_comm_attach_protocol(fsim_world* world, uint32_t node, const char* protocol_id, const char* const* param_names,
                                        const double* param_values, uint32_t param_count);
 
+/* ---------------------------------------------------------------------------
+ * Scenario files (design 9.13): a JSON document describing the world, the
+ * environment and the vehicles with their initial commands and effects
+ * (format: include/fsim/Scenario.h). Strings returned through
+ * fsim_scenario_world_options stay valid while the scenario lives.
+ * ------------------------------------------------------------------------- */
+
+typedef struct fsim_scenario fsim_scenario;
+
+FSIM_API int fsim_scenario_load(const char* path, fsim_scenario** out);
+FSIM_API int fsim_scenario_parse(const char* json, const char* source_name, fsim_scenario** out);
+FSIM_API void fsim_scenario_destroy(fsim_scenario* scenario);
+/* Fill `out` (fsim_world_options_init first) with the scenario's "world" section. */
+FSIM_API int fsim_scenario_world_options(const fsim_scenario* scenario, fsim_world_options* out);
+FSIM_API uint32_t fsim_scenario_vehicle_count(const fsim_scenario* scenario); /* instances, counting "count" */
+/* Apply the environment, effects and vehicles to a world; `ids` receives up to `capacity` vehicle ids, `count` how many were created. */
+FSIM_API int fsim_scenario_apply(fsim_world* world, const fsim_scenario* scenario, uint32_t* ids, size_t capacity, size_t* count);
+
 #ifdef __cplusplus
 }
 #endif

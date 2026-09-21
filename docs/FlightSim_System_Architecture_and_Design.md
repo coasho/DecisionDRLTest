@@ -475,6 +475,10 @@ Guarantees: the writer is wait-free (a bounded `memcpy` behind a sequence counte
 
 Keyboard and mouse only, delivered by VSG to a `ui::EventDispatcher` that offers events to ImGui first and then to the camera controller and key-binding table. One ImGui style, DPI scaling from the window's content scale, a single embedded font.
 
+### 9.13 Scenario files
+
+A scenario is a JSON document (`include/fsim/Scenario.h`) holding the `WorldOptions`, an optional environment (UTC time, wind, atmosphere, weather), world-wide effects, and the vehicles to create - each with its `VehicleSpec`, an optional instance `count` (placed abreast), an initial command at any level (behaviour targets by vehicle name, resolved after all vehicles exist) and its own effects. `fsim::loadScenario` parses it (errors carry `file:line:col`), `fsim::applyScenario(world, scenario)` performs the setup in order (environment, world effects, vehicles and their effects, commands) and `dumpScenario` writes one back. The parser is the platform's own `core::Json` (no dependency); the C ABI mirrors the calls (`fsim_scenario_*`). Scenarios describe the start of an experiment; the trainer's program is what happens next. `VecEnv` keeps its compact per-environment `env::Scenario` with sampled initial conditions.
+
 ## 10. Extensibility
 
 Extension happens at four levels — data, SDK registration, built-in modules and (later) dynamic plugins — and every level reaches the same small set of core interfaces, so a task can start in the trainer's own code, be promoted to a built-in module, and be split into a plugin without changing the core.

@@ -3,6 +3,7 @@
 #include "fsim/World.h"
 
 #include "core/Log.h"
+#include "core/Time.h"
 #include "session/World.h"
 
 #include <chrono>
@@ -28,15 +29,7 @@ const ControlInputs& emptyInputs() {
 } // namespace
 
 double utcToUnixSeconds(const Utc& utc) noexcept {
-    // Days from civil (Howard Hinnant's algorithm); no timezone, no DST.
-    int y = utc.year, m = utc.month, d = utc.day;
-    y -= m <= 2;
-    const int era = (y >= 0 ? y : y - 399) / 400;
-    const unsigned yoe = static_cast<unsigned>(y - era * 400);
-    const unsigned doy = (153u * static_cast<unsigned>(m + (m > 2 ? -3 : 9)) + 2u) / 5u + static_cast<unsigned>(d) - 1u;
-    const unsigned doe = yoe * 365u + yoe / 4u - yoe / 100u + doy;
-    const long long days = static_cast<long long>(era) * 146097LL + static_cast<long long>(doe) - 719468LL;
-    return static_cast<double>(days) * 86400.0 + utc.hour * 3600.0 + utc.minute * 60.0 + utc.second;
+    return core::unixSecondsFromCivil(utc.year, utc.month, utc.day, utc.hour, utc.minute, utc.second);
 }
 
 // --- Environment --------------------------------------------------------------------

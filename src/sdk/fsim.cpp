@@ -4,6 +4,7 @@
 #include "fsim/fsim_c.h"
 
 #include "core/Log.h"
+#include "sdk/LastError.h"
 #include "env/VecEnv.h"
 
 #include <cstring>
@@ -25,19 +26,24 @@ struct fsim_vecenv {
     explicit fsim_vecenv(const fsim::env::Scenario& s, const fsim::env::VecEnv::Options& o) : env(s, o) {}
 };
 
+namespace fsim::sdk {
+std::string& lastError() noexcept {
+    thread_local std::string t_lastError;
+    return t_lastError;
+}
+} // namespace fsim::sdk
+
 namespace {
 
-thread_local std::string t_lastError;
-
 void setError(const std::string& message) {
-    t_lastError = message;
+    fsim::sdk::lastError() = message;
     LOG_ERROR("sdk") << message;
 }
 
 int guard(const char* what, const std::function<void()>& fn) noexcept {
     try {
         fn();
-        t_lastError.clear();
+        fsim::sdk::lastError().clear();
         return FSIM_OK;
     } catch (const std::invalid_argument& e) {
         setError(std::string(what) + ": " + e.what());
@@ -128,7 +134,7 @@ extern "C" {
 
 FSIM_API uint32_t fsim_abi_version(void) { return FSIM_ABI_VERSION; }
 FSIM_API const char* fsim_version(void) { return FSIM_VERSION_STRING; }
-FSIM_API const char* fsim_last_error(void) { return t_lastError.c_str(); }
+FSIM_API const char* fsim_last_error(void) { return fsim::sdk::lastError().c_str(); }
 
 FSIM_API void fsim_options_init(fsim_options* o) {
     if (!o) return;

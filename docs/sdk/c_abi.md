@@ -35,6 +35,7 @@ fsim_world_destroy(world);
 | Group | Functions |
 | --- | --- |
 | Lifecycle | `fsim_world_create/destroy/step/time/step_seconds/vehicle_steps/published` |
+| Scenarios | `fsim_scenario_load/parse/destroy`, `fsim_scenario_world_options` (fills an `fsim_world_options`; strings live with the scenario), `fsim_scenario_vehicle_count`, `fsim_scenario_apply(world, scenario, ids, capacity, &count)` ([scenarios.md](scenarios.md)) |
 | Vehicles | `fsim_world_create_vehicle/remove_vehicle/reset_vehicle/find_vehicle/vehicle_count/vehicle_ids`, `fsim_vehicle_name/type` |
 | State | `fsim_vehicle_state_ptr`, `fsim_vehicle_sensed_ptr` (`fsim_vehicle_state`, layout-checked against the C++ struct), `fsim_vehicle_get_property/set_property` |
 | Control | `fsim_vehicle_command_actuator/attitude/acceleration/velocity/position/behavior`, `fsim_vehicle_active_level`, `fsim_vehicle_behavior_finished`, `fsim_vehicle_use_controller`, `fsim_vehicle_set_controller_parameter`; `fsim_hold()` for optional fields |

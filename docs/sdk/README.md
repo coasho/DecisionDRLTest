@@ -14,6 +14,7 @@ memory without your program noticing (see [viewer.md](viewer.md)).
 | [control.md](control.md) | the multi-level control stack: levels, commands, built-in loops and behaviours, writing your own |
 | [environment.md](environment.md) | real-time environment control, effects (disturbances, sensor models), communication |
 | [viewer.md](viewer.md) | transparent visualisation: how the prebuilt viewer discovers and mirrors a world |
+| [scenarios.md](scenarios.md) | scenario files: the world, environment, vehicles, commands and effects as a JSON document |
 | [vecenv.md](vecenv.md) | the batch (gym-style) layer for vectorised RL, built on the same object model |
 | [c_abi.md](c_abi.md) | the C ABI for other languages |
 

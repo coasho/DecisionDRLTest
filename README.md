@@ -87,6 +87,8 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
 
 - **Per-type vehicle models**: the viewer draws `models/<type>.glb` for each vehicle type it sees
   (loaded and compiled once, on first use), `VehicleSpec::model` for an explicit file, else the sample aircraft.
+- **Scenario files** (`fsim::loadScenario` / `applyScenario`, `fsim_scenario_*`): world, environment, vehicles,
+  initial commands and effects as one JSON document; `examples/scenario_runner` runs one.
 
 Not yet: animated control surfaces, vision observations, transport bridges for the comm layer, offline tile
 pyramids (`tools/tile_builder`).
@@ -147,6 +149,9 @@ build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 6 --lat 37.72 --
 build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 3 --spread 0.004 --on-ground
 build/ucrt64-release/bin/flightsim-viewer.exe --help
 
+# run a scenario file (world, environment, vehicles, commands, effects as data)
+build/ucrt64-release/bin/scenario_runner.exe examples/scenarios/formation_and_pursuit.json --realtime
+
 # record a run without a viewer, replay it later
 build/ucrt64-release/bin/multi_level_control.exe --seconds 60 --quiet --record run.fsrec
 build/ucrt64-release/bin/flightsim-viewer.exe --replay run.fsrec
@@ -167,7 +172,8 @@ TerrainManipulator; the eye never goes below the terrain; `r` resets the view. C
 
 See [docs/sdk](docs/sdk/README.md): [world and vehicles](docs/sdk/world.md), [multi-level
 control](docs/sdk/control.md), [environment, effects, communication](docs/sdk/environment.md),
-[transparent visualisation](docs/sdk/viewer.md), [VecEnv](docs/sdk/vecenv.md), [C ABI](docs/sdk/c_abi.md).
+[transparent visualisation](docs/sdk/viewer.md), [scenario files](docs/sdk/scenarios.md), [VecEnv](docs/sdk/vecenv.md),
+[C ABI](docs/sdk/c_abi.md).
 Link against `fsim` (`libfsim.dll` + `libJSBSim.dll` at runtime); JSBSim's aircraft data is found
 automatically next to the executable (`share/jsbsim`) or in the source tree.
 

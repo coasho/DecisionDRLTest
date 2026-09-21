@@ -2,6 +2,9 @@
 add_library(fsim_core STATIC
     Context.h
     Geodesy.h
+    Json.h
+    Json.cpp
+    Time.h
     Log.h
     Log.cpp
     Module.h

@@ -1,0 +1,42 @@
+// A scenario for scenario_runner / fsim::loadScenario (format: include/fsim/Scenario.h).
+// Four c172s abreast at the attitude level, a waypoint route, a pursuer and a loiter,
+// in a summer-morning north-westerly with sensor noise on every vehicle.
+{
+  "world": { "name": "scenario", "seed": 7, "capacity": 64 },
+  "environment": {
+    "utc": "2026-06-21T09:30:00Z",
+    "wind": { "direction_deg": 300, "speed_ms": 6, "turbulence": 0.15 },
+    "weather": { "visibility_m": 30000, "cloud_cover": 0.3 }
+  },
+  "effects": [ { "id": "gaussian_sensor_noise", "position_sigma_m": 2, "altitude_sigma_m": 1 } ],
+  "vehicles": [
+    {
+      "name": "echelon", "type": "jsbsim:c172x", "count": 4, "spacing_m": 60,
+      "initial": { "lat_deg": 37.62, "lon_deg": -122.40, "alt_msl_m": 1500, "heading_deg": 90, "airspeed_ms": 60 },
+      "command": { "level": "attitude", "roll_deg": 0, "pitch_deg": 2, "airspeed_ms": 60 }
+    },
+    {
+      "name": "route", "type": "jsbsim:c172x",
+      "initial": { "lat_deg": 37.64, "lon_deg": -122.40, "alt_msl_m": 1500, "heading_deg": 90, "airspeed_ms": 60 },
+      "command": {
+        "level": "behavior", "id": "waypoints", "params": { "loop": 1 },
+        "points": [
+          { "lat_deg": 37.66, "lon_deg": -122.36, "alt_msl_m": 1600, "airspeed_ms": 60 },
+          { "lat_deg": 37.62, "lon_deg": -122.34, "alt_msl_m": 1400, "airspeed_ms": 60 },
+          { "lat_deg": 37.62, "lon_deg": -122.42, "alt_msl_m": 1500, "airspeed_ms": 60 }
+        ]
+      }
+    },
+    {
+      "name": "chaser", "type": "jsbsim:c172x",
+      "initial": { "lat_deg": 37.64, "lon_deg": -122.43, "alt_msl_m": 1500, "heading_deg": 90, "airspeed_ms": 65 },
+      "command": { "level": "behavior", "id": "pursuit", "target": "route", "params": { "range_m": 200, "max_airspeed_ms": 70 } },
+      "effects": [ { "id": "sensor_latency", "delay_steps": 12 } ]
+    },
+    {
+      "name": "orbit", "type": "jsbsim:c172x",
+      "initial": { "lat_deg": 37.60, "lon_deg": -122.38, "alt_msl_m": 1350, "heading_deg": 0, "airspeed_ms": 55 },
+      "command": { "level": "behavior", "id": "loiter", "params": { "radius_m": 1200, "altitude_m": 1350 } }
+    }
+  ]
+}

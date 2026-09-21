@@ -185,6 +185,40 @@ int main(int argc, char** argv) {
         fsim_world_destroy(world);
         fsim_world_destroy(NULL);
     }
+    /* Scenario files. */
+    {
+        fsim_scenario* sc = NULL;
+        fsim_world_options wo;
+        fsim_world* world = NULL;
+        uint32_t ids[8];
+        size_t count = 0;
+        const char* json =
+            "{ \"world\": { \"name\": \"c-scenario\", \"publish\": false, \"workers\": 1, \"pin_workers\": false },"
+            "  \"environment\": { \"wind\": { \"direction_deg\": 180, \"speed_ms\": 5 } },"
+            "  \"vehicles\": [ { \"name\": \"v\", \"count\": 2, \"initial\": { \"alt_msl_m\": 1200, \"heading_deg\": 45, \"airspeed_ms\": 60 },"
+            "                   \"command\": { \"level\": \"attitude\", \"pitch_deg\": 3 } } ] }";
+        CHECK(fsim_scenario_parse("{ \"vehicles\": [ { } ] }", "bad.json", &sc) != FSIM_OK);
+        CHECK(sc == NULL);
+        CHECK(strstr(fsim_last_error(), "bad.json") != NULL);
+        CHECK(fsim_scenario_load("no/such/file.json", &sc) != FSIM_OK);
+        CHECK(fsim_scenario_parse(json, "inline.json", &sc) == FSIM_OK);
+        CHECK(fsim_scenario_vehicle_count(sc) == 2);
+        fsim_world_options_init(&wo);
+        CHECK(fsim_scenario_world_options(sc, &wo) == FSIM_OK);
+        CHECK(strcmp(wo.name, "c-scenario") == 0);
+        CHECK(wo.publish == 0);
+        wo.jsbsim_root = argc > 1 ? argv[1] : NULL;
+        CHECK(fsim_world_create(&wo, &world) == FSIM_OK);
+        CHECK(fsim_scenario_apply(world, sc, ids, 8, &count) == FSIM_OK);
+        CHECK(count == 2);
+        CHECK(fsim_world_find_vehicle(world, "v-2") == ids[1]);
+        CHECK(fsim_world_step(world, 10) == FSIM_OK);
+        CHECK(fsim_vehicle_state_ptr(world, ids[0]) != NULL);
+        CHECK(fabs(fsim_vehicle_state_ptr(world, ids[0])->altitude_msl_m - 1200.0) < 30.0);
+        fsim_scenario_destroy(sc);
+        fsim_scenario_destroy(NULL);
+        fsim_world_destroy(world);
+    }
     printf("c abi ok\n");
     return 0;
 }
