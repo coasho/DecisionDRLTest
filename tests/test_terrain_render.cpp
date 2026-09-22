@@ -306,6 +306,76 @@ TEST_CASE("the wheel zooms towards the point under the cursor", "[camera]") {
     REQUIRE(vsg::length(zoom(400, 1.0f)) < vsg::length(in) * 0.2);
 }
 
+TEST_CASE("turning the view does not zoom it", "[camera]") {
+    // The complaint this guards: "rotating the camera with the middle mouse
+    // button causes slight, unintended zooming." Framing the planet by sliding
+    // only the aim left the eye off the axis it was looking along, so the
+    // distance from the eye to whatever was centred depended on the bearing,
+    // and every drag changed it. What is drawn has to keep the distance the
+    // wheel set, whichever way the camera is pointing.
+    Rig rig;
+    for (const double distance : {8.0e3, 1.0e6, 1.2e7}) {
+        rig.camera->setFreeView(20.0, 10.0, 0.0, distance, 180.0, 35.0);
+        for (int k = 0; k < 200; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+        const double reach = vsg::length(rig.lookAt->eye - rig.lookAt->center);
+
+        double worst = 0.0;
+        auto press = vsg::ButtonPressEvent::create();
+        press->x = 400;
+        press->y = 300;
+        press->button = 2; // middle: osgEarth binds it to rotate
+        rig.camera->apply(*press);
+        int x = 400, y = 300;
+        for (int i = 0; i < 60; ++i) {
+            x += 4;
+            y += 3;
+            auto move = vsg::MoveEvent::create();
+            move->x = x;
+            move->y = y;
+            move->mask = vsg::BUTTON_MASK_2;
+            rig.camera->apply(*move);
+            for (int k = 0; k < 4; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+            worst = std::max(worst, std::abs(vsg::length(rig.lookAt->eye - rig.lookAt->center) - reach) / reach);
+        }
+        INFO("at " << distance << " m, turning changed the drawn distance by up to "
+                   << worst * 100.0 << " % of it");
+        REQUIRE(worst < 1e-9);
+    }
+}
+
+TEST_CASE("zooming does not turn the view", "[camera]") {
+    // The other half of the same complaint: "when zooming in, the view shifts
+    // towards the upper part of the Earth and becomes increasingly horizontal,
+    // looking towards the horizon." Anything that frames the planet as a
+    // function of distance must move the camera, never re-point it - the wheel
+    // sets how far away the eye is and nothing else.
+    Rig rig;
+    rig.camera->setFreeView(20.0, 10.0, 0.0, 2.4e7, 180.0, 20.0);
+    const auto settle = [&rig] {
+        for (int k = 0; k < 200; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+    };
+    settle();
+    auto move = vsg::MoveEvent::create();
+    move->x = 400;
+    move->y = 300;
+    rig.camera->apply(*move);
+
+    const vsg::dvec3 first = vsg::normalize(rig.lookAt->center - rig.lookAt->eye);
+    double worst = 0.0;
+    for (int i = 0; i < 24; ++i) {
+        auto scroll = vsg::ScrollWheelEvent::create();
+        scroll->delta = vsg::vec3(0.0f, 1.0f, 0.0f);
+        rig.camera->apply(*scroll);
+        settle();
+        const vsg::dvec3 now = vsg::normalize(rig.lookAt->center - rig.lookAt->eye);
+        worst = std::max(worst, std::acos(std::clamp(vsg::dot(first, now), -1.0, 1.0)) * 57.29577951308232);
+    }
+    REQUIRE(rig.camera->distance() < 1.5e6); // out the near side of the framing ramp (a quarter of an Earth radius)
+    INFO("zooming from 24000 km to " << rig.camera->distance() / 1000.0
+                                     << " km turned the view " << worst << " deg");
+    REQUIRE(worst < 0.01);
+}
+
 TEST_CASE("zoomed out, the globe is in the middle of the screen", "[camera]") {
     // The complaint this guards: "the Earth is no longer centered, it appears
     // too low on the screen, almost completely outside the visible area."

@@ -476,43 +476,41 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
     right = vsg::normalize(right);
     const vsg::dvec3 screenUp = vsg::normalize(vsg::cross(right, forward));
     const vsg::dvec3 centre = pos + right * panRight_ + screenUp * panUp_;
-    const vsg::dvec3 eye = centre + dir * distance_;
 
-    // Far enough out, the subject is the planet rather than the spot on it.
-    // The focus is a point on the *surface*, so aiming at it leaves the globe
-    // hanging below the middle of the screen: measured from a whole-Earth view,
-    // its centre sat 27.5 % of the frame height low, which puts most of the
-    // planet off the bottom edge. The aim therefore slides from the focus
-    // towards the Earth's centre as the globe comes to fill the view.
+    // Far enough out, the subject is the planet rather than the spot on it, so
+    // that is what the camera orbits. The focus is a point on the *surface*,
+    // and orbiting a surface point leaves the globe hanging below the middle
+    // of the screen - measured from a whole-Earth view, its centre 27.5 % of
+    // the frame height low, with most of the planet off the bottom edge. The
+    // orbit centre therefore slides from the focus to the Earth's centre as
+    // the globe comes to fill the view, and the globe is centred because the
+    // camera is looking straight at the middle of it.
     //
-    // The eye does not move. Distance, bearing, tilt and terrain clearance are
-    // all worked out exactly as before and none of them can see this; only
-    // what the camera points at changes. That matters, because the last thing
-    // to depend on distance was a tilt, and every notch of the wheel then
-    // turned the view by the difference. This does the opposite - it holds the
-    // globe still in the frame while it grows - and below a quarter of an
-    // Earth radius, which is every altitude anyone flies at, it does nothing.
+    // It has to be the orbit centre and not merely the aim. Sliding the aim
+    // alone leaves the eye off the axis it is looking along, and then two
+    // things go wrong that were both reported: the distance from the eye to
+    // what is centred changes as the view turns, so a middle-button drag
+    // zooms slightly, and it changes with distance too, so zooming pitches
+    // the view up towards the limb until it is looking at the horizon. Moving
+    // the whole orbit keeps |eye - centre| equal to the distance whatever the
+    // bearing, and keeps the view direction exactly -dir whatever the
+    // distance: turning cannot zoom, and zooming cannot turn.
+    //
+    // Below a quarter of an Earth radius - every altitude anyone flies at -
+    // none of this happens and the camera orbits the ground it was given.
     double aim = 0.0;
     if (const double radius = vsg::length(pos); radius > 1.0) {
         const double s = std::clamp((distance_ / radius - kFrameFromRadii) / (kFrameToRadii - kFrameFromRadii), 0.0, 1.0);
         aim = s * s * (3.0 - 2.0 * s);
     }
-    const vsg::dvec3 aimPoint = centre * (1.0 - aim); // the Earth's centre is the origin
+    const vsg::dvec3 orbit = centre * (1.0 - aim); // the Earth's centre is the origin
 
-    lookAt_->eye = eye;
-    lookAt_->center = aimPoint;
+    lookAt_->eye = orbit + dir * distance_;
+    lookAt_->center = orbit;
     lookAt_->up = up;
-
-    // The stored screen axes follow what is drawn, not the orbit direction, so
-    // panning and cursor work stay square with the image once the aim has
-    // shifted.
-    const vsg::dvec3 trueForward = vsg::normalize(aimPoint - eye);
-    vsg::dvec3 trueRight = vsg::cross(trueForward, up);
-    if (vsg::length(trueRight) < 1e-6) trueRight = east;
-    trueRight = vsg::normalize(trueRight);
-    viewRight_ = trueRight;
-    viewForward_ = trueForward;
-    viewUp_ = vsg::normalize(vsg::cross(trueRight, trueForward));
+    viewRight_ = right;
+    viewForward_ = forward;
+    viewUp_ = screenUp;
 }
 
 } // namespace fsim::world
