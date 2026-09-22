@@ -29,3 +29,6 @@ imgui.ini
 # Output written by the examples (vision_capture --out, recordings)
 /captures/
 *.fsrec
+
+# Offline map tiles fetched by tile_prefetch (gigabytes; not source)
+/maps/
