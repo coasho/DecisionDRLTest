@@ -19,14 +19,35 @@ Point the viewer here instead when you want the package to be portable:
 Everything downloaded then stays inside this package rather than in the
 per-user cache, so copying the package to another machine takes the terrain
 with it. It fills itself as you fly — anything already here is used without
-touching the network, and anything missing is fetched once. Fill a region
-ahead of time and the package works with no network at all:
+touching the network, and anything missing is fetched once. Fill it ahead of
+time and the package works with no network at all.
 
-    bin\tile_prefetch --lat 37.62 --lon -122.4 --radius-km 30 --cache ..\maps
+## Choosing what to download
 
-`--min-level` / `--max-level` bound the pyramid (the viewer draws imagery to
-level 17 and elevation to level 15 by default), and `--elevation-only` or
-`--imagery-only` fetch just one layer.
+`bin/tile_prefetch` takes a region and a range of levels per layer. A region
+is a disc, a lat/lon box, a corridor along a route, or the whole globe:
+
+    bin\tile_prefetch --lat 37.62 --lon -122.4 --radius-km 30 --levels 0-14
+    bin\tile_prefetch --bbox 45.8,6.0,47.2,10.5 --elevation-levels 8-11
+    bin\tile_prefetch --route 37.62,-122.4;34.05,-118.24 --width-km 40 --levels 7-10
+    bin\tile_prefetch --global --levels 0-6
+
+`--imagery-levels` and `--elevation-levels` set the two layers separately, and
+a layer with no range is not fetched at all. That is the main lever: a city is
+flat and wants imagery, a mountain range wants elevation, and the ocean wants
+neither beyond the global base.
+
+`--dry-run` counts and prices the tiles without downloading any, so a plan can
+be checked against a budget first. Overlapping regions are counted once.
+
+For a whole offline set, put the regions in a file and pass `--plan`:
+
+    bin\tile_prefetch --plan config/offline-map-plan.json --cache ..\maps --dry-run
+
+`config/offline-map-plan.json` in this package is a worked example: a global
+base, eight mountain ranges at elevation only, thirty airports at imagery
+level 14, and three route corridors — 66,425 tiles, about 1.95 GB, sized to
+leave a 2 GB package with room for the application.
 
 ## How much disk
 

@@ -89,6 +89,7 @@ if(TARGET flightsim-viewer)
     # Configuration, read from <exe>/../config/viewer.json in both the build
     # tree and the package, so the two layouts behave identically.
     install(FILES ${CMAKE_SOURCE_DIR}/config/viewer.json DESTINATION config COMPONENT viewer)
+    install(FILES ${CMAKE_SOURCE_DIR}/config/offline-map-plan.json DESTINATION config COMPONENT viewer)
     install(FILES ${CMAKE_SOURCE_DIR}/config/maps.README.md DESTINATION maps RENAME README.md COMPONENT viewer)
     install(FILES ${CMAKE_SOURCE_DIR}/config/run-viewer.cmd DESTINATION . COMPONENT viewer)
     install(FILES ${CMAKE_SOURCE_DIR}/README.md ${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md

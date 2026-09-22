@@ -143,6 +143,7 @@ void usage(const char* prog) {
         "  --imagery satellite|osm|bing|none|<url template with {z}/{x}/{y}>   (satellite = Esri World Imagery)\n"
         "  --elevation terrarium|none|<url template>   relief from Terrarium-encoded tiles (default terrarium)\n"
         "  --config <file>          settings file (default: <exe>/../config/viewer.json; flags win)\n"
+        "  --tile-cache <dir>       where map tiles are read and written (overrides map.tileCache)\n"
         "  --no-zoom-to-cursor      the wheel zooms straight in rather than towards the pointer "
         "(osgEarth zoomToMouse is on by default)\n"
         "  --no-gui                 no panels, labels or trails: just the rendered scene "
@@ -284,6 +285,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
                 else o.earth.elevationUrl = v;
             } else if (a == "--terrain-zoom") o.terrainZoom = static_cast<unsigned>(std::stoul(next()));
             else if (a == "--config") next(); // already read, before the command line
+            else if (a == "--tile-cache") o.tileCache = next();
             else if (a == "--no-zoom-to-cursor") o.zoomToCursor = false;
             else if (a == "--no-gui") o.gui = false;
             else if (a == "--no-sun") o.sun = false;
