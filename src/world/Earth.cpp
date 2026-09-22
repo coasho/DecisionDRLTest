@@ -76,8 +76,22 @@ vsg::ref_ptr<vsg::Data> replaceMissingImagery(vsg::ref_ptr<vsg::Data> data) {
 
 } // namespace
 
-vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& settings, vsg::ref_ptr<vsg::Options> options,
+vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& requested, vsg::ref_ptr<vsg::Options> options,
                                     vsg::ref_ptr<vsg::EllipsoidModel> ellipsoid) {
+    EarthSettings settings = requested;
+
+    // Offline: turn every layer URL into the path the tile already has on
+    // disk. Stripping the scheme and prefixing the root is exactly how the
+    // cache is laid out, so a directory filled by tile_prefetch is read
+    // directly and nothing in the stack below ever sees an address it could
+    // fetch from.
+    const auto localise = [&settings](std::string url) {
+        if (url.empty() || settings.offlineRoot.empty()) return url;
+        if (const auto scheme = url.find("://"); scheme != std::string::npos) url = url.substr(scheme + 3);
+        return (settings.offlineRoot / url).string();
+    };
+    if (!settings.offlineRoot.empty()) settings.elevationUrl = localise(settings.elevationUrl);
+
     vsg::ref_ptr<vsg::TileDatabaseSettings> tiles;
 
     switch (settings.source) {
@@ -119,6 +133,8 @@ vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& settings, vsg::ref_ptr<
     tiles->ellipsoidModel = ellipsoid;
     tiles->lodTransitionScreenHeightRatio = settings.lodTransitionScreenHeightRatio;
     tiles->skirtRatio = settings.skirtRatio;
+
+    if (!settings.offlineRoot.empty()) tiles->imageLayer = localise(tiles->imageLayer.string());
 
     tiles->imageLayerCallback = replaceMissingImagery;
 

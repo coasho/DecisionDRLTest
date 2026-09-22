@@ -4,6 +4,7 @@
 
 #include <vsg/all.h>
 
+#include <filesystem>
 #include <string>
 
 namespace fsim::world {
@@ -22,6 +23,12 @@ struct EarthSettings {
 
     // Elevation (any imagery source): XYZ template + encoding. Empty = smooth ellipsoid.
     std::string elevationUrl;
+
+    /// Read tiles from this directory instead of the network. The layer URLs
+    /// are rewritten to <offlineRoot>/<host>/<path>, which is the layout the
+    /// tile cache and tile_prefetch already write, so a directory fetched
+    /// ahead of time is drawn straight off the disk and no socket is opened.
+    std::filesystem::path offlineRoot;
     ElevationEncoding elevationEncoding = ElevationEncoding::Terrarium;
     unsigned elevationMeshDimension = 64; ///< mesh vertices per tile edge (elevation texels are downsampled to this)
     unsigned elevationMaxLevel = 15;      ///< deepest level the elevation pyramid has (AWS Terrarium: 15)

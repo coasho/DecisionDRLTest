@@ -26,5 +26,5 @@ if(FSIM_WITH_RENDER)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:libJSBSim> $<TARGET_FILE_DIR:flightsim-viewer>)
     # The build tree mirrors a package: bin/ beside config/, so <exe>/../config
     # finds the same file either way and there is nothing to keep in step.
-    configure_file(${CMAKE_SOURCE_DIR}/config/viewer.json ${CMAKE_BINARY_DIR}/config/viewer.json COPYONLY)
+    configure_file(${CMAKE_SOURCE_DIR}/assets/config/viewer.json ${CMAKE_BINARY_DIR}/config/viewer.json COPYONLY)
 endif()

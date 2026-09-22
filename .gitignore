@@ -30,5 +30,5 @@ imgui.ini
 /captures/
 *.fsrec
 
-# Offline map tiles fetched by tile_prefetch (gigabytes; not source)
-/maps/
+# Offline map tiles fetched by fetch-maps.cmd (gigabytes; not source)
+/assets/maps/

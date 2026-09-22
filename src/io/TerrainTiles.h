@@ -56,6 +56,10 @@ public:
         /// camera wants the drawn surface, because flying into scenery it can
         /// see is the thing anyone notices.
         std::uint32_t meshDimension = 0;
+        /// Read only what is already in cacheDir; never fetch. What a
+        /// distributed package does: everything it can draw was put there
+        /// before it shipped, and a missing tile is a missing tile.
+        bool offline = false;
         unsigned loaderThreads = 2;
     };
     /// Test hook: replaces the HTTP fetch (bytes of the tile at z/x/y).

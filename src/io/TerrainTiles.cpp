@@ -91,6 +91,10 @@ TerrainTiles::Tile TerrainTiles::load(unsigned x, unsigned y) const {
             fromDisk = !png.empty();
         }
     }
+    if (!fromDisk && options_.offline) {
+        failures_.fetch_add(1);
+        return nullptr;
+    }
     if (!fromDisk) {
         bool ok = false;
         if (fetch_) {

@@ -105,6 +105,7 @@ echo   WORK ON IT
 echo     fsim build             compile everything
 echo     fsim test              run the test suite
 echo     fsim dist              package the viewer, SDK, tools and examples into dist\
+echo     fetch-maps             download the map assets into assets\maps
 echo     fsim where             print the directories things are built into
 echo.
 echo   Any extra arguments are passed straight through, e.g.

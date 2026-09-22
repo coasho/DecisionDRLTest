@@ -25,12 +25,16 @@
       "the first time you start. Set it to \"../maps\" to keep the tiles inside",
       "this package instead: fill that with bin/tile_prefetch and the package",
       "carries its own terrain and flies with no network, at the cost of",
-      "downloading a region again. See maps/README.md."
+      "downloading a region again. See maps/README.md.",
+      "offline: draw only what is in tileCache and never fetch a tile.",
+      "The packaged copy of this file is generated with offline true and",
+      "tileCache ../maps, so a distributed viewer opens no sockets at all."
     ],
     "imagery": "satellite",
     "elevation": "terrarium",
     "maxLevel": 17,
     "elevationMaxLevel": 15,
+    "offline": false,
     "tileCache": ""
   },
 

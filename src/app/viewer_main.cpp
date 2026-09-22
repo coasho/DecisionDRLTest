@@ -88,8 +88,11 @@ struct ViewerOptions {
     // Scene
     world::EarthSettings earth;
     unsigned terrainZoom = 12;
-    /// Where downloaded map assets live. Empty = the shared per-user cache.
+    /// Where map assets live. Empty = the shared per-user cache.
     std::filesystem::path tileCache;
+    /// Draw only what is already in tileCache and never fetch a tile. What a
+    /// distributed package does.
+    bool offline = false;
     bool gui = true;   ///< panels, labels and trails; --no-gui leaves only the rendered scene
     bool zoomToCursor = true; ///< wheel zooms towards the pointer rather than straight in
     bool sun = true;
@@ -110,9 +113,46 @@ struct ViewerOptions {
     int trace = -1;
     bool interpolate = true;
     bool help = false;
+    bool helpAll = false; ///< --help-all: the diagnostic and scripting options too
 };
 
+/// What someone running the viewer needs, which is not the same as what it
+/// can do. Forty options in one list is not a interface, it is an inventory;
+/// the rest are for scripting and for working on the viewer, and --help-all
+/// still prints them.
 void usage(const char* prog) {
+    std::printf(
+        "Usage: %s [options]\n"
+        "\n"
+        "  --demo                   fly the built-in scenario instead of attaching to a trainer\n"
+        "  --replay <file.fsrec>    play back a recording\n"
+        "  --list                   list live worlds and exit\n"
+        "\n"
+        "  --view lat,lon,alt,dist[,az,el]   start looking at that place\n"
+        "  --camera chase|orbit|overview|free\n"
+        "  --aircraft <name>        JSBSim aircraft for --demo (c172x)\n"
+        "  --vehicles <n>           how many (8)\n"
+        "\n"
+        "  --fullscreen  --width <px>  --height <px>\n"
+        "  --no-gui                 just the rendered scene, no panels or labels\n"
+        "  --screenshot <file.png>  save a frame and exit\n"
+        "\n"
+        "  --config <file>          settings file (default: <exe>/../config/viewer.json)\n"
+        "  --offline                draw only the tiles already present; never fetch one\n"
+        "\n"
+        "  --help-all               every option, including the diagnostic ones\n"
+        "\n"
+        "Most of what the flags reach is in config/viewer.json - window size, map\n"
+        "sources, where the tiles live - and a flag overrides the file for one run.\n"
+        "\n"
+        "Keys: space pause, . step, tab next vehicle, c camera, -/= zoom, r reset view,\n"
+        "      [ ] time factor, l list, m monitor, n labels, t trails, esc quit\n"
+        "Mouse: left drag rotates, middle drag pans, wheel zooms towards the pointer\n",
+        prog);
+}
+
+/// Everything, for scripting and for working on the viewer itself.
+void usageAll(const char* prog) {
     std::printf(
         "Usage: %s [options]\n"
         "Mirror mode (default): attach to a training application's world through shared memory.\n"
@@ -144,6 +184,7 @@ void usage(const char* prog) {
         "  --elevation terrarium|none|<url template>   relief from Terrarium-encoded tiles (default terrarium)\n"
         "  --config <file>          settings file (default: <exe>/../config/viewer.json; flags win)\n"
         "  --tile-cache <dir>       where map tiles are read and written (overrides map.tileCache)\n"
+        "  --offline                draw only tiles already present; never fetch one\n"
         "  --no-zoom-to-cursor      the wheel zooms straight in rather than towards the pointer "
         "(osgEarth zoomToMouse is on by default)\n"
         "  --no-gui                 no panels, labels or trails: just the rendered scene "
@@ -241,6 +282,7 @@ bool applyConfig(ViewerOptions& o, const std::filesystem::path& file) {
         }
     }
 
+    o.offline = map.boolean("offline", o.offline);
     o.zoomToCursor = doc.child("camera").boolean("zoomToCursor", o.zoomToCursor);
     o.gui = doc.boolean("gui", o.gui);
     return true;
@@ -255,6 +297,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
         };
         try {
             if (a == "-h" || a == "--help") o.help = true;
+            else if (a == "--help-all") o.helpAll = o.help = true;
             else if (a == "--demo") o.demo = true;
             else if (a == "--list") o.list = true;
             else if (a == "--world") o.worldName = next();
@@ -288,6 +331,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             } else if (a == "--terrain-zoom") o.terrainZoom = static_cast<unsigned>(std::stoul(next()));
             else if (a == "--config") next(); // already read, before the command line
             else if (a == "--tile-cache") o.tileCache = next();
+            else if (a == "--offline") o.offline = true;
             else if (a == "--no-zoom-to-cursor") o.zoomToCursor = false;
             else if (a == "--no-gui") o.gui = false;
             else if (a == "--no-sun") o.sun = false;
@@ -369,7 +413,8 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (opt.help) {
-        usage(argv[0]);
+        if (opt.helpAll) usageAll(argv[0]);
+        else usage(argv[0]);
         return 0;
     }
     if (opt.list) {
@@ -388,6 +433,14 @@ int main(int argc, char** argv) {
     if (opt.earth.source == world::EarthSettings::Source::None) opt.earth.elevationUrl.clear();
     opt.window.headlight = !opt.sun;
     opt.window.tileCacheDir = opt.tileCache; // the renderer and the CPU tiles share one cache
+    if (opt.offline) {
+        if (opt.tileCache.empty()) {
+            LOG_ERROR("app") << "--offline needs somewhere to read tiles from: set map.tileCache or --tile-cache";
+            return 1;
+        }
+        opt.earth.offlineRoot = opt.tileCache; // layer URLs become file paths
+        LOG_INFO("app") << "offline: tiles read from " << opt.tileCache.string() << ", nothing is fetched";
+    }
     if (!viewer.create(opt.window)) return 1;
 
     io::AssetResolver assets;
@@ -402,6 +455,7 @@ int main(int argc, char** argv) {
         to.urlTemplate = opt.earth.elevationUrl;
         to.zoom = opt.terrainZoom;
         to.cacheDir = opt.tileCache;
+        to.offline = opt.offline;
         terrain = std::make_shared<io::TerrainTiles>(to);
     }
 
@@ -581,6 +635,7 @@ int main(int argc, char** argv) {
         // before, and covers a few hundred km of ground.
         to.cacheTiles = 512;
         to.cacheDir = opt.tileCache;
+        to.offline = opt.offline;
         // Sample the surface as the mesh is built, not the raw raster.
         to.meshDimension = opt.earth.elevationMeshDimension;
         cameraGround = std::make_shared<io::TerrainTiles>(to);

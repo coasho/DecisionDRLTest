@@ -175,17 +175,35 @@ writes four self-contained trees:
 
 | package | contents |
 | --- | --- |
-| `dist/viewer` | the visualisation application: executable, every DLL, `config/viewer.json`, the JSBSim data and models, and `maps/` for its map assets. Start it with `run-viewer.cmd`; it needs nothing installed. |
+| `dist/viewer` | the visualisation application: executable, every DLL, `config/viewer.json`, the JSBSim data and models, and a complete copy of `assets/maps`. Start it with `run-viewer.cmd`; it needs nothing installed and never touches the network. |
 | `dist/sdk` | `fsim.dll`, `fsim_vision.dll`, headers, import libraries and the `find_package(fsim CONFIG)` package |
 | `dist/tools` | the headless `flightsim` command-line application |
 | `dist/examples` | the demo trainers |
 
-The viewer package reads `config/viewer.json` for its window, map sources and
-tile cache; command-line flags override it. By default the tile cache is the
-shared per-user one, so a new package draws the Earth immediately. Setting
-`"tileCache": "../maps"` keeps the tiles inside the package instead, and
-`bin/tile_prefetch` fills a region ahead of time so it flies with no network
-at all - see `maps/README.md` in the package.
+The viewer reads `config/viewer.json` for its window, map sources and tiles;
+command-line flags override it for one run. The packaged copy is generated
+from the development one (`cmake/PackageConfig.cmake`) with three values
+changed: `offline` true, `tileCache` `../maps`, and the level ceilings capped
+to what the map plan actually contains. A distributed viewer therefore reads
+every tile from the `maps/` directory beside it and opens no sockets at all -
+its layer URLs are file paths, not addresses.
+
+### Map assets
+
+The tiles are gigabytes, so they are not in git. Fetch them before building a
+package:
+
+```
+fetch-maps              download what the plan asks for (about 1.9 GB)
+fetch-maps --dry-run    count and price it first
+```
+
+They land in `assets/maps`, and `fsim dist` copies them whole into the
+package. What gets downloaded is `assets/config/offline-map-plan.json`: a
+global base, mountain ranges at elevation only, airports at imagery level 14,
+and route corridors. `bin/tile_prefetch` takes regions as discs, boxes, route
+corridors or the whole globe, with a level range per layer; see
+`assets/config/maps.README.md`.
 
 `cpack` in the build directory still produces one zip of everything.
 

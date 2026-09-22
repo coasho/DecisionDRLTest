@@ -88,10 +88,27 @@ if(TARGET flightsim-viewer)
 
     # Configuration, read from <exe>/../config/viewer.json in both the build
     # tree and the package, so the two layouts behave identically.
-    install(FILES ${CMAKE_SOURCE_DIR}/config/viewer.json DESTINATION config COMPONENT viewer)
-    install(FILES ${CMAKE_SOURCE_DIR}/config/offline-map-plan.json DESTINATION config COMPONENT viewer)
-    install(FILES ${CMAKE_SOURCE_DIR}/config/maps.README.md DESTINATION maps RENAME README.md COMPONENT viewer)
-    install(FILES ${CMAKE_SOURCE_DIR}/config/run-viewer.cmd DESTINATION . COMPONENT viewer)
+    # Generated, not copied: the packaged settings differ from the development
+    # ones in three values and nothing else (see cmake/PackageConfig.cmake).
+    install(CODE "include(\"${CMAKE_SOURCE_DIR}/cmake/PackageConfig.cmake\")
+        file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/config\")
+        fsim_write_packaged_config(\"${CMAKE_SOURCE_DIR}/assets/config/viewer.json\"
+                                   \"\${CMAKE_INSTALL_PREFIX}/config/viewer.json\")"
+        COMPONENT viewer)
+    install(FILES ${CMAKE_SOURCE_DIR}/assets/config/offline-map-plan.json DESTINATION config COMPONENT viewer)
+    install(FILES ${CMAKE_SOURCE_DIR}/assets/config/maps.README.md DESTINATION maps RENAME README.md COMPONENT viewer)
+    install(FILES ${CMAKE_SOURCE_DIR}/assets/config/run-viewer.cmd DESTINATION . COMPONENT viewer)
+
+    # The map assets themselves. A distributed viewer never downloads a tile,
+    # so whatever it is going to draw has to be in the package: assets/maps is
+    # copied in whole. It is gigabytes, and it is the reason `dist` does not
+    # wipe the viewer's maps/ before installing - see the dist target below.
+    if(EXISTS ${CMAKE_SOURCE_DIR}/assets/maps)
+        install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets/maps/ DESTINATION maps COMPONENT viewer)
+    else()
+        install(CODE "message(WARNING \"assets/maps is empty - run fetch-maps.cmd, or the package has no terrain\")"
+                COMPONENT viewer)
+    endif()
     install(FILES ${CMAKE_SOURCE_DIR}/README.md ${CMAKE_SOURCE_DIR}/LICENSE ${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md
             DESTINATION share/doc/flightsim COMPONENT viewer OPTIONAL)
     install(FILES ${CMAKE_SOURCE_DIR}/third_party/jsbsim/COPYING
@@ -139,8 +156,14 @@ if(TARGET flightsim-viewer)
 endif()
 set(_fsim_package_commands "")
 foreach(_c ${_fsim_components})
+    # Clear what the install rewrites, but leave maps/ alone: it is gigabytes
+    # of tiles that install() will skip if they are already identical, and
+    # deleting it first would turn every package build into a full re-copy.
+    foreach(_sub bin share config)
+        list(APPEND _fsim_package_commands
+            COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/${_c}/${_sub})
+    endforeach()
     list(APPEND _fsim_package_commands
-        COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/${_c}
         COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR}
                 --component ${_c} --prefix ${CMAKE_BINARY_DIR}/dist/${_c})
 endforeach()
