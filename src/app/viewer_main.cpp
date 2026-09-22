@@ -481,9 +481,12 @@ int main(int argc, char** argv) {
         io::TerrainTiles::Options to;
         to.urlTemplate = opt.earth.elevationUrl;
         to.zoom = opt.earth.elevationMaxLevel;
-        // A level-15 tile covers a quarter of a level-14 one, so the working set
-        // needs the room: 128 tiles is ~33 MB and a few hundred km of sight line.
-        to.cacheTiles = 128;
+        // Resampled to 64 a tile is 16 KB rather than 256, so the working set
+        // is cheap: 512 of them is ~8 MB, less than the 64 raw tiles cost
+        // before, and covers a few hundred km of ground.
+        to.cacheTiles = 512;
+        // Sample the surface as the mesh is built, not the raw raster.
+        to.meshDimension = opt.earth.elevationMeshDimension;
         cameraGround = std::make_shared<io::TerrainTiles>(to);
         camera->setGroundQuery([cameraGround](double lat, double lon) { return cameraGround->cachedHeightAboveEllipsoidM(lat, lon); });
     }

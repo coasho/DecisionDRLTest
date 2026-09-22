@@ -1,6 +1,7 @@
 // Terrain decoding for the viewer's tiles (VSG data types, no Vulkan):
 // vertex-grid resampling that keeps tile seams closed, and elevation tiles
 // synthesised below the pyramid's deepest level.
+#include "core/HeightGrid.h"
 #include "world/CameraController.h"
 #include "world/ElevationUpsampler.h"
 #include "world/Terrain.h"
@@ -58,6 +59,56 @@ TEST_CASE("elevation resampling places texel k at vertex k, extrapolating at the
     // Full resolution is passed through untouched.
     auto same = world::decodeElevation(src, world::ElevationEncoding::Terrarium, 0);
     REQUIRE(same.get() == src.get());
+}
+
+TEST_CASE("the camera and the mesh are built from one surface", "[terrain][render]") {
+    // The mesh the vertex shader displaces and the heights the camera is told
+    // have to be the same surface. They were not: world box-filtered and
+    // resampled its raster to 64 vertices while io::TerrainTiles sampled the
+    // raw 256, and a box filter lowers peaks and raises valley floors. Over 40
+    // cached tiles of real relief the drawn mesh sat up to 11.3 m above what
+    // the camera believed - more than the clearance it keeps at close range,
+    // so the eye finished up inside the hillside. Both now call
+    // core::resampleHeightGrid; this is the guard that they still do.
+    //
+    // A notched ramp, because the notch is exactly what filtering fills in.
+    constexpr std::uint32_t kSize = 256, kMesh = 64;
+    auto src = vsg::floatArray2D::create(kSize, kSize, vsg::Data::Properties{VK_FORMAT_R32_SFLOAT});
+    std::vector<float> raw(static_cast<std::size_t>(kSize) * kSize);
+    for (std::uint32_t y = 0; y < kSize; ++y)
+        for (std::uint32_t x = 0; x < kSize; ++x) {
+            const double along = 1000.0 * x / (kSize - 1.0);
+            const bool inNotch = x > 120 && x < 130;
+            const float h = static_cast<float>(inNotch ? along - 400.0 : along);
+            raw[static_cast<std::size_t>(y) * kSize + x] = h;
+            src->set(x, y, h);
+        }
+
+    auto mesh = world::decodeElevation(src, world::ElevationEncoding::Float, kMesh);
+    REQUIRE(mesh);
+    REQUIRE(mesh->width() == kMesh);
+    const auto camera = core::resampleHeightGrid(raw.data(), kSize, kMesh);
+    REQUIRE(camera.size() == static_cast<std::size_t>(kMesh) * kMesh);
+
+    double worst = 0.0;
+    for (std::uint32_t y = 0; y < kMesh; ++y)
+        for (std::uint32_t x = 0; x < kMesh; ++x)
+            worst = std::max(worst, std::abs(static_cast<double>(mesh->at(x, y))
+                                             - camera[static_cast<std::size_t>(y) * kMesh + x]));
+    INFO("largest disagreement between the drawn mesh and the camera's surface: " << worst << " m");
+    REQUIRE(worst == 0.0);
+
+    // And the filtering is doing something worth agreeing about: over the
+    // notch the resampled surface stands well above the raster it came from.
+    double lift = 0.0;
+    for (std::uint32_t x = 0; x < kMesh; ++x) {
+        const double fraction = static_cast<double>(x) / (kMesh - 1.0);
+        const auto texel = static_cast<std::uint32_t>(std::lround(fraction * (kSize - 1)));
+        lift = std::max(lift, static_cast<double>(camera[static_cast<std::size_t>(10) * kMesh + x])
+                                  - static_cast<double>(raw[static_cast<std::size_t>(10) * kSize + texel]));
+    }
+    INFO("the filtered surface rises " << lift << " m above the raw raster over the notch");
+    REQUIRE(lift > 50.0);
 }
 
 TEST_CASE("elevation upsampler synthesises deeper tiles from the deepest real level", "[terrain][render]") {
@@ -118,7 +169,8 @@ struct Rig {
         const vsg::dmat4 viewProjection = view->projectionMatrix->transform() * view->viewMatrix->transform();
         const vsg::dvec4 clip = viewProjection * vsg::dvec4(world.x, world.y, world.z, 1.0);
         const double w = std::abs(clip.w) > 1e-12 ? clip.w : 1e-12;
-        return vsg::dvec2((clip.x / w + 1.0) * kWidth * 0.5, (1.0 - clip.y / w) * kHeight * 0.5);
+        // Vulkan NDC: y down, so +1 is the bottom of the window.
+        return vsg::dvec2((clip.x / w + 1.0) * kWidth * 0.5, (clip.y / w + 1.0) * kHeight * 0.5);
     }
 
     /// Hold the left button - osgEarth's pan - and drag `steps` times by
@@ -193,6 +245,34 @@ TEST_CASE("the right mouse button is not a camera control", "[camera]") {
 
     REQUIRE(vsg::length(rig.camera->focus() - before) < 1.0);
     REQUIRE_THAT(rig.camera->distance(), Catch::Matchers::WithinRel(distance, 1e-9));
+}
+
+TEST_CASE("the cursor's height on screen aims the ray", "[camera]") {
+    // Vulkan's NDC has y pointing down, and VSG's perspective matrix carries
+    // the flip - the -f in its second row. Reading the cursor with the OpenGL
+    // sign aims the ray at the mirror image of where the pointer is, so
+    // zooming towards the cursor worked left to right and did nothing useful
+    // up and down. The rig's own toScreen() shared the mistake, which is why
+    // the round-trip tests could not see it; this one asks about nothing but
+    // geometry. A camera looking down at the ground sees farther ground
+    // higher up the screen, whatever anyone's sign convention.
+    Rig rig;
+    rig.camera->setFreeView(20.0, 10.0, 0.0, 2.0e4, 0.0, 20.0);
+    rig.camera->update(nullptr, 1.0 / 60.0);
+
+    const auto rangeAt = [&](int y) {
+        auto move = vsg::MoveEvent::create();
+        move->x = 400;
+        move->y = y;
+        rig.camera->apply(*move);
+        const auto hit = rig.camera->groundUnderCursor();
+        REQUIRE(hit.has_value());
+        return vsg::length(*hit - rig.lookAt->eye);
+    };
+    const double high = rangeAt(150), middle = rangeAt(300), low = rangeAt(450);
+    INFO("range to the ground at screen y = 150 / 300 / 450: " << high << " / " << middle << " / " << low);
+    REQUIRE(high > middle);
+    REQUIRE(middle > low);
 }
 
 TEST_CASE("the wheel zooms towards the point under the cursor", "[camera]") {

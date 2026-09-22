@@ -2,6 +2,8 @@
 add_library(fsim_core STATIC
     Context.h
     Geodesy.h
+    HeightGrid.h
+    HeightGrid.cpp
     Json.h
     Json.cpp
     Time.h

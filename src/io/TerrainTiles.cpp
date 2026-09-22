@@ -1,3 +1,4 @@
+#include "core/HeightGrid.h"
 #include "io/TerrainTiles.h"
 
 #include "core/Log.h"
@@ -109,6 +110,18 @@ TerrainTiles::Tile TerrainTiles::load(unsigned x, unsigned y) const {
         LOG_WARN("io") << "elevation tile " << url(x, y) << ": not a decodable PNG";
         failures_.fetch_add(1);
         return nullptr;
+    }
+    // Serve the surface the renderer draws, when asked. The mesh is built from
+    // a box-filtered, resampled copy of this raster, and a box filter lowers
+    // peaks and raises valley floors: over 40 tiles of real relief the drawn
+    // mesh sat up to 11.3 m above the raw raster, more than the clearance the
+    // camera keeps at close range, so the eye finished up inside the hillside.
+    if (options_.meshDimension > 0 && decoded->size > options_.meshDimension) {
+        auto resampled = core::resampleHeightGrid(decoded->heights.data(), decoded->size, options_.meshDimension);
+        if (!resampled.empty()) {
+            decoded->heights = std::move(resampled);
+            decoded->size = options_.meshDimension;
+        }
     }
     if (!fromDisk && !fetch_) {
         std::error_code ec;

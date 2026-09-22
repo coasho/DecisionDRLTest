@@ -81,6 +81,10 @@ void CameraController::resetView() noexcept {
 
 // Window pixels -> normalised device coordinates in [-1, 1] (x right, y up),
 // as osgGA does, so the response is independent of window size and DPI.
+/// Cursor in normalised coordinates with **y up**, the osgGA convention the
+/// drag handlers are written against (drag up -> positive dy). This is not
+/// Vulkan's NDC, whose y points down; anything unprojecting through the
+/// projection matrix has to negate ny first.
 void CameraController::normalised(int x, int y, double& nx, double& ny) const {
     const VkViewport vp = camera_ ? camera_->getViewport() : VkViewport{};
     const double w = vp.width > 1.0f ? vp.width : 1.0, h = vp.height > 1.0f ? vp.height : 1.0;
@@ -236,9 +240,17 @@ std::optional<vsg::dvec3> CameraController::groundUnderCursor() const {
     // Unproject the cursor to a ray. The eye is the origin; the near-plane
     // point gives the direction, which avoids the far plane, where an
     // ellipsoid-fitted projection is ill-conditioned.
+    //
+    // ny arrives y-up for the benefit of the drag handlers, and Vulkan's NDC
+    // has y down - VSG's perspective matrix carries the flip, the -f in its
+    // second row. Feeding it y-up aimed the ray at the mirror image of where
+    // the pointer was: measured on level ground from 20 km up, the top of the
+    // screen picked ground 14.8 km away and the bottom picked 31.9 km, the
+    // wrong way round. Zoom-to-cursor worked left to right and fought itself
+    // up and down, half of it refused outright by the grazing test.
     const vsg::dmat4 inverseViewProj =
         vsg::inverse(camera_->projectionMatrix->transform() * camera_->viewMatrix->transform());
-    const vsg::dvec4 nearPoint = inverseViewProj * vsg::dvec4(nx, ny, 0.0, 1.0);
+    const vsg::dvec4 nearPoint = inverseViewProj * vsg::dvec4(nx, -ny, 0.0, 1.0);
     if (std::abs(nearPoint.w) < 1e-12) return std::nullopt;
     const vsg::dvec3 onNearPlane(nearPoint.x / nearPoint.w, nearPoint.y / nearPoint.w, nearPoint.z / nearPoint.w);
     const vsg::dvec3 eye = lookAt_->eye;

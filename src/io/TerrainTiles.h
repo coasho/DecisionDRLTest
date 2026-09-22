@@ -49,6 +49,13 @@ public:
         unsigned zoom = 12;                     ///< ~38 m/px at mid latitudes (30 m source data)
         std::filesystem::path cacheDir;         ///< empty = <config>/tilecache
         std::size_t cacheTiles = 512;           ///< decoded tiles kept in memory (~260 KB each)
+        /// Resample each tile to this many samples per edge, as the renderer
+        /// resamples its mesh (world::EarthSettings::elevationMeshDimension).
+        /// 0 keeps the raster at full resolution, which is what the physics
+        /// wants: it asks where the ground *is*, not where it is drawn. The
+        /// camera wants the drawn surface, because flying into scenery it can
+        /// see is the thing anyone notices.
+        std::uint32_t meshDimension = 0;
         unsigned loaderThreads = 2;
     };
     /// Test hook: replaces the HTTP fetch (bytes of the tile at z/x/y).
