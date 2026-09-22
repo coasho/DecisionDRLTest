@@ -15,6 +15,10 @@ constexpr double kMinDistanceDetached = 25.0; // orbiting a ground point: stay c
 constexpr double kMaxDistance = 5.0e7;        // 50,000 km: the whole Earth with room around it
 constexpr double kMinElevation = -60.0 * kDeg; // well below the focus (terrain collision takes over)
 constexpr double kMaxElevation = 89.0 * kDeg;
+// Beyond this many Earth radii of distance the camera frames the planet rather
+// than the spot on it (see the end of update()), and the wheel stops zooming
+// towards the pointer.
+constexpr double kFrameFromRadii = 0.25, kFrameToRadii = 1.5;
 constexpr double kRotateRadPerNdc = 1.0;      // osgGA rotateYawPitch: 1 rad per normalised unit (57 deg per half window)
 constexpr double kPanPerNdc = 0.3;            // osgGA panModel scale
 constexpr double kZoomPerNotch = 0.88;        // 12 % per wheel notch
@@ -274,6 +278,18 @@ std::optional<vsg::dvec3> CameraController::groundUnderCursor() const {
 void CameraController::zoomTowardsCursor(double fromDistance, double toDistance) {
     zoomShare_ = 0.0;
     if (!zoomToCursor_ || !detached() || fromDistance <= 0.0 || toDistance <= 0.0) return;
+
+    // Out where the view is framed on the planet, the wheel only changes the
+    // distance. The middle of the screen is no longer the focus once the aim
+    // has slid towards the Earth's centre, so a pointer resting there is over
+    // ground tens of kilometres away and every notch drags the focus towards
+    // it: measured at 127 km of walk, and a degree of turn, over a trip out to
+    // ten times the distance and back. Zooming towards the pointer is for
+    // looking at places, and by this range there is no place on screen - only
+    // the globe.
+    const double focusRadius = vsg::length(focus_);
+    if (focusRadius > 1.0 && fromDistance > kFrameFromRadii * focusRadius) return;
+
     const auto ground = groundUnderCursor();
     if (!ground) return;
 
@@ -294,6 +310,7 @@ void CameraController::zoomTowardsCursor(double fromDistance, double toDistance)
     // does not heave it across the screen.
     const double cosSeparation = std::clamp(vsg::dot(vsg::normalize(focus_), surfaceNormal), -1.0, 1.0);
     if (cosSeparation <= 0.0) return;
+
     zoomTarget_ = *ground;
     zoomShare_ = cosSeparation * cosSeparation * cosSeparation;
 }
@@ -459,12 +476,43 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
     right = vsg::normalize(right);
     const vsg::dvec3 screenUp = vsg::normalize(vsg::cross(right, forward));
     const vsg::dvec3 centre = pos + right * panRight_ + screenUp * panUp_;
-    lookAt_->eye = centre + dir * distance_;
-    lookAt_->center = centre;
+    const vsg::dvec3 eye = centre + dir * distance_;
+
+    // Far enough out, the subject is the planet rather than the spot on it.
+    // The focus is a point on the *surface*, so aiming at it leaves the globe
+    // hanging below the middle of the screen: measured from a whole-Earth view,
+    // its centre sat 27.5 % of the frame height low, which puts most of the
+    // planet off the bottom edge. The aim therefore slides from the focus
+    // towards the Earth's centre as the globe comes to fill the view.
+    //
+    // The eye does not move. Distance, bearing, tilt and terrain clearance are
+    // all worked out exactly as before and none of them can see this; only
+    // what the camera points at changes. That matters, because the last thing
+    // to depend on distance was a tilt, and every notch of the wheel then
+    // turned the view by the difference. This does the opposite - it holds the
+    // globe still in the frame while it grows - and below a quarter of an
+    // Earth radius, which is every altitude anyone flies at, it does nothing.
+    double aim = 0.0;
+    if (const double radius = vsg::length(pos); radius > 1.0) {
+        const double s = std::clamp((distance_ / radius - kFrameFromRadii) / (kFrameToRadii - kFrameFromRadii), 0.0, 1.0);
+        aim = s * s * (3.0 - 2.0 * s);
+    }
+    const vsg::dvec3 aimPoint = centre * (1.0 - aim); // the Earth's centre is the origin
+
+    lookAt_->eye = eye;
+    lookAt_->center = aimPoint;
     lookAt_->up = up;
-    viewRight_ = right;
-    viewForward_ = forward;
-    viewUp_ = screenUp;
+
+    // The stored screen axes follow what is drawn, not the orbit direction, so
+    // panning and cursor work stay square with the image once the aim has
+    // shifted.
+    const vsg::dvec3 trueForward = vsg::normalize(aimPoint - eye);
+    vsg::dvec3 trueRight = vsg::cross(trueForward, up);
+    if (vsg::length(trueRight) < 1e-6) trueRight = east;
+    trueRight = vsg::normalize(trueRight);
+    viewRight_ = trueRight;
+    viewForward_ = trueForward;
+    viewUp_ = vsg::normalize(vsg::cross(trueRight, trueForward));
 }
 
 } // namespace fsim::world

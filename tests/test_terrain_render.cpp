@@ -306,6 +306,43 @@ TEST_CASE("the wheel zooms towards the point under the cursor", "[camera]") {
     REQUIRE(vsg::length(zoom(400, 1.0f)) < vsg::length(in) * 0.2);
 }
 
+TEST_CASE("zoomed out, the globe is in the middle of the screen", "[camera]") {
+    // The complaint this guards: "the Earth is no longer centered, it appears
+    // too low on the screen, almost completely outside the visible area."
+    // The focus is a point on the *surface*, and aiming at it puts that point
+    // in the middle and leaves the planet hanging below - measured off a
+    // rendered frame, the globe's centre sat 27.5 % of the frame height low,
+    // with most of it past the bottom edge. Far enough out the subject is the
+    // planet, so that is what the camera points at.
+    Rig rig;
+    for (const double distance : {3.0e7, 1.2e7, 9.0e6}) {
+        rig.camera->setFreeView(0.0, 0.0, 0.0, distance, 180.0, 14.0);
+        for (int k = 0; k < 200; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+        const vsg::dvec2 centreOfEarth = rig.toScreen(vsg::dvec3(0.0, 0.0, 0.0));
+        const double dx = (centreOfEarth.x - Rig::kWidth * 0.5) / Rig::kWidth;
+        const double dy = (centreOfEarth.y - Rig::kHeight * 0.5) / Rig::kHeight;
+        INFO("at " << distance << " m the Earth's centre lands at " << centreOfEarth.x << ", "
+                   << centreOfEarth.y << " (offset " << dx << ", " << dy << " of the frame)");
+        REQUIRE(std::abs(dx) < 0.02);
+        REQUIRE(std::abs(dy) < 0.02);
+    }
+}
+
+TEST_CASE("close in, the camera still looks at the ground it was given", "[camera]") {
+    // The other half of the bargain: framing the planet must not disturb the
+    // view at any altitude anyone flies at. Below a quarter of an Earth radius
+    // the aim is the focus and nothing else.
+    Rig rig;
+    for (const double distance : {5.0e3, 1.0e5, 1.0e6}) {
+        rig.camera->setFreeView(46.0, 8.0, 0.0, distance, 180.0, 14.0);
+        for (int k = 0; k < 200; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
+        const vsg::dvec2 focusOnScreen = rig.toScreen(rig.camera->focus());
+        INFO("at " << distance << " m the focus lands at " << focusOnScreen.x << ", " << focusOnScreen.y);
+        REQUIRE_THAT(focusOnScreen.x, Catch::Matchers::WithinAbs(Rig::kWidth * 0.5, 1.0));
+        REQUIRE_THAT(focusOnScreen.y, Catch::Matchers::WithinAbs(Rig::kHeight * 0.5, 1.0));
+    }
+}
+
 TEST_CASE("the wheel never changes the view angle", "[camera]") {
     // The complaint this guards: scrolling turned the Earth, and the farther
     // out the camera was the more it turned. What did it was a floor that
@@ -413,11 +450,11 @@ TEST_CASE("zoom to cursor goes where it is pointed without swinging the bearing"
 }
 
 TEST_CASE("zooming out and back leaves the view where it was", "[camera]") {
-    // Far out the view is tilted towards straight down on purpose, so the
-    // globe is seen from above its focus rather than at an angle that puts the
-    // eye past the horizon. That tilt is a function of distance, so coming
-    // back in has to undo it. If it does not, the wheel rotates the Earth -
-    // and the farther out it went, the more it rotates.
+    // Nothing about the view may depend on the distance in a way that does not
+    // undo itself. A tilt that grew with distance used to, and the wheel
+    // rotated the Earth by the difference; the framing aim that replaced it is
+    // a pure function of the distance, so going out and coming back has to
+    // land on the same view it left.
     Rig rig;
     rig.camera->setFreeView(20.0, 10.0, 0.0, 3.0e5, 180.0, 25.0);
     const auto settle = [&rig] {
@@ -427,6 +464,9 @@ TEST_CASE("zooming out and back leaves the view where it was", "[camera]") {
     const vsg::dvec3 before = vsg::normalize(rig.lookAt->eye - rig.lookAt->center);
     const double elevationBefore = rig.camera->elevationDeg();
     const double distanceBefore = rig.camera->distance();
+    const vsg::dvec3 focusBefore = rig.camera->focus();
+    const double azimuthBefore = rig.camera->azimuthDeg();
+    const double shownBefore = rig.camera->shownElevationDeg();
 
     // Cursor at the centre, so zoom-to-cursor has nothing to move.
     auto move = vsg::MoveEvent::create();
@@ -449,7 +489,10 @@ TEST_CASE("zooming out and back leaves the view where it was", "[camera]") {
     const vsg::dvec3 after = vsg::normalize(rig.lookAt->eye - rig.lookAt->center);
     const double turn = std::acos(std::clamp(vsg::dot(before, after), -1.0, 1.0)) * 57.29577951308232;
     INFO("out and back turned the view " << turn << " deg; elevation " << elevationBefore << " -> "
-                                         << rig.camera->elevationDeg());
+                                         << rig.camera->elevationDeg()
+         << "; focus moved " << vsg::length(rig.camera->focus() - focusBefore)
+         << " m; azimuth " << azimuthBefore << " -> " << rig.camera->azimuthDeg()
+         << "; shown tilt " << shownBefore << " -> " << rig.camera->shownElevationDeg());
     REQUIRE_THAT(rig.camera->elevationDeg(), Catch::Matchers::WithinAbs(elevationBefore, 1.0));
     REQUIRE(turn < 1.0);
 }
