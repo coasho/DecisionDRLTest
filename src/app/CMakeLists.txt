@@ -24,20 +24,7 @@ if(FSIM_WITH_RENDER)
     fsim_relax_third_party_warnings(flightsim-viewer)
     add_custom_command(TARGET flightsim-viewer POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:libJSBSim> $<TARGET_FILE_DIR:flightsim-viewer>)
+    # The build tree mirrors a package: bin/ beside config/, so <exe>/../config
+    # finds the same file either way and there is nothing to keep in step.
+    configure_file(${CMAKE_SOURCE_DIR}/config/viewer.json ${CMAKE_BINARY_DIR}/config/viewer.json COPYONLY)
 endif()
-
-# `cmake --build <dir> --target deploy`: copy the MinGW/MSYS2 runtime DLLs
-# (libstdc++, assimp, curl, glslang, ...) next to the executables.
-set(_fsim_deploy_exes "$<TARGET_FILE:flightsim>")
-if(TARGET flightsim-viewer)
-    set(_fsim_deploy_exes "${_fsim_deploy_exes};$<TARGET_FILE:flightsim-viewer>")
-endif()
-add_custom_target(deploy
-    COMMAND ${CMAKE_COMMAND}
-        "-DEXES=${_fsim_deploy_exes}"
-        "-DSEARCH=${FSIM_UCRT64_ROOT}/bin"
-        "-DOBJDUMP=${FSIM_UCRT64_ROOT}/bin/objdump.exe"
-        -P ${CMAKE_SOURCE_DIR}/cmake/DeployRuntime.cmake
-    DEPENDS flightsim $<$<TARGET_EXISTS:flightsim-viewer>:flightsim-viewer>
-    COMMENT "Deploying runtime DLLs next to the executables"
-    VERBATIM)

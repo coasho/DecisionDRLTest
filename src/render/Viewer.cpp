@@ -45,7 +45,9 @@ bool Viewer::create(const ViewerSettings& settings) {
 
     options_ = vsg::Options::create();
     options_->add(vsgXchange::all::create()); // glTF/KTX/PNG/JPEG readers + http tile fetching
-    options_->fileCache = vsg::Path((platform::configDir() / "tilecache").string());
+    const std::filesystem::path tileCache =
+        settings_.tileCacheDir.empty() ? platform::configDir() / "tilecache" : settings_.tileCacheDir;
+    options_->fileCache = vsg::Path(tileCache.string());
     options_->sharedObjects = vsg::SharedObjects::create();
 
     auto traits = vsg::WindowTraits::create();

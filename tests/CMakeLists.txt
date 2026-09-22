@@ -1,5 +1,15 @@
 include(Catch)
 
+# Test executables are not part of any shipped package, so they are kept out of
+# bin/ (which holds the applications) and out of the dist/ trees entirely. The
+# runtime DLLs they need are staged beside them by the `deploy` target.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+# Enumerate cases at test time rather than at build time: the executables are
+# linked before `deploy` has staged the DLLs beside them, so running them to
+# list their tests during the build would fail.
+set(FSIM_CATCH_DISCOVERY DISCOVERY_MODE PRE_TEST)
+
 add_executable(fsim_tests
     test_units.cpp
     test_rng.cpp
@@ -19,14 +29,17 @@ fsim_set_warnings(fsim_tests)
 add_custom_command(TARGET fsim_tests POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:libJSBSim> $<TARGET_FILE_DIR:fsim_tests>)
 
-catch_discover_tests(fsim_tests)
+catch_discover_tests(fsim_tests ${FSIM_CATCH_DISCOVERY})
 
 # The public C++ SDK against fsim.dll (what a trainer links).
 add_executable(fsim_sdk_tests test_sdk.cpp)
 target_link_libraries(fsim_sdk_tests PRIVATE fsim::sdk Catch2::Catch2WithMain)
+add_custom_command(TARGET fsim_sdk_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:fsim> $<TARGET_FILE_DIR:fsim_sdk_tests>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:libJSBSim> $<TARGET_FILE_DIR:fsim_sdk_tests>)
 target_compile_definitions(fsim_sdk_tests PRIVATE FSIM_TEST_JSBSIM_ROOT="${FSIM_JSBSIM_DATA_DIR}")
 fsim_set_warnings(fsim_sdk_tests)
-catch_discover_tests(fsim_sdk_tests)
+catch_discover_tests(fsim_sdk_tests ${FSIM_CATCH_DISCOVERY})
 
 # The public C ABI, consumed from a plain C translation unit against fsim.dll.
 add_executable(fsim_c_abi_test test_c_abi.c)
@@ -54,6 +67,7 @@ if(FSIM_RUST_GNU)
     add_test(NAME rust_example
              COMMAND ${FSIM_CARGO} run --release --quiet -- vecenv
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/examples/rust_trainer)
+    # FSIM_BUILD_DIR gives build.rs bin/ (the DLLs) and lib/ (the import library).
     set_tests_properties(rust_example PROPERTIES ENVIRONMENT "FSIM_BUILD_DIR=${CMAKE_BINARY_DIR}" TIMEOUT 600)
 endif()
 
@@ -63,13 +77,15 @@ if(FSIM_WITH_RENDER)
     target_link_libraries(fsim_render_tests PRIVATE fsim::world fsim::core Catch2::Catch2WithMain)
     fsim_set_warnings(fsim_render_tests)
     fsim_relax_third_party_warnings(fsim_render_tests)
-    catch_discover_tests(fsim_render_tests)
+    catch_discover_tests(fsim_render_tests ${FSIM_CATCH_DISCOVERY})
 endif()
 
 # Offscreen cameras through fsim_vision.dll (needs a Vulkan device).
 if(FSIM_WITH_RENDER)
     add_executable(fsim_vision_test test_vision.cpp)
     target_link_libraries(fsim_vision_test PRIVATE fsim::sdk fsim::vision)
+    add_custom_command(TARGET fsim_vision_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:fsim_vision> $<TARGET_FILE_DIR:fsim_vision_test>)
     fsim_set_warnings(fsim_vision_test)
     add_test(NAME vision COMMAND fsim_vision_test "${FSIM_JSBSIM_DATA_DIR}")
     set_tests_properties(vision PROPERTIES SKIP_RETURN_CODE 77) # no Vulkan device (CI runners)

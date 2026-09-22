@@ -72,4 +72,57 @@ if(FSIM_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+# Staging the build tree (design 11.3 "Distribution"). Every directory that
+# something is run from gets the DLLs it needs, so bin/ and tests/ both work
+# without ucrt64/bin on PATH. Part of ALL because a build that produces
+# executables which cannot start is not a finished build.
+set(_fsim_app_exes "$<TARGET_FILE:flightsim>")
+foreach(_t flightsim-viewer tile_prefetch)
+    if(TARGET ${_t})
+        set(_fsim_app_exes "${_fsim_app_exes};$<TARGET_FILE:${_t}>")
+    endif()
+endforeach()
+add_custom_target(deploy ALL
+    COMMAND ${CMAKE_COMMAND}
+        "-DEXES=${_fsim_app_exes};$<TARGET_FILE:fsim>"
+        "-DSEARCH=${FSIM_UCRT64_ROOT}/bin;${CMAKE_BINARY_DIR}/bin"
+        "-DOBJDUMP=${FSIM_UCRT64_ROOT}/bin/objdump.exe"
+        "-DDEST=${CMAKE_BINARY_DIR}/bin"
+        "-DLABEL=deploy bin"
+        -P ${CMAKE_SOURCE_DIR}/cmake/DeployRuntime.cmake
+    COMMENT "Staging runtime DLLs in bin/"
+    VERBATIM)
+add_dependencies(deploy flightsim fsim)
+foreach(_t flightsim-viewer tile_prefetch)
+    if(TARGET ${_t})
+        add_dependencies(deploy ${_t})
+    endif()
+endforeach()
+
+if(FSIM_BUILD_TESTS)
+    set(_fsim_test_exes "")
+    foreach(_t fsim_tests fsim_sdk_tests fsim_c_abi_test fsim_crash_test
+               fsim_render_tests fsim_vision_test fsim_vision_c_abi_test)
+        if(TARGET ${_t})
+            set(_fsim_test_exes "${_fsim_test_exes};$<TARGET_FILE:${_t}>")
+        endif()
+    endforeach()
+    add_custom_target(deploy-tests ALL
+        COMMAND ${CMAKE_COMMAND}
+            "-DEXES=${_fsim_test_exes}"
+            "-DSEARCH=${FSIM_UCRT64_ROOT}/bin;${CMAKE_BINARY_DIR}/bin"
+            "-DOBJDUMP=${FSIM_UCRT64_ROOT}/bin/objdump.exe"
+            "-DDEST=${CMAKE_BINARY_DIR}/tests"
+            "-DLABEL=deploy tests"
+            -P ${CMAKE_SOURCE_DIR}/cmake/DeployRuntime.cmake
+        COMMENT "Staging runtime DLLs in tests/"
+        VERBATIM)
+    foreach(_t fsim_tests fsim_sdk_tests fsim_c_abi_test fsim_crash_test
+               fsim_render_tests fsim_vision_test fsim_vision_c_abi_test)
+        if(TARGET ${_t})
+            add_dependencies(deploy-tests ${_t})
+        endif()
+    endforeach()
+endif()
+
 include(cmake/Install.cmake)

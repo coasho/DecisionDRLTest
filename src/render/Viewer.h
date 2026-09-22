@@ -3,6 +3,7 @@
 #include <vsg/all.h>
 
 #include <cstdint>
+#include <filesystem>
 #include <string>
 
 namespace fsim::render {
@@ -17,6 +18,9 @@ struct ViewerSettings {
     double fieldOfViewDeg = 30.0;
     bool headlight = true;     ///< off when the scene brings its own lights (sun)
     double maxFps = 0.0;       ///< optional frame-rate cap (0 = none: vsync paces the loop, which already costs ~3% of a core)
+    /// Where downloaded map tiles are kept. Empty = the shared per-user cache.
+    /// A package sets this so the tiles it ships travel with it.
+    std::filesystem::path tileCacheDir;
 };
 
 /// One window, one vsg::Viewer, one camera, one command graph: scene first,

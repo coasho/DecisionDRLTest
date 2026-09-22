@@ -152,28 +152,57 @@ ctest --preset ucrt64-release
 
 `ucrt64-headless` builds without Vulkan or the VSG stack.
 
+Staging runs as part of the build, so every directory something is run from
+has the DLLs it needs and works without `ucrt64/bin` on `PATH`.
+
+### Where things are built
+
+Four kinds of output, four directories - the viewer is never mixed with the
+SDK, and neither is mixed with the tests:
+
+| directory | what |
+| --- | --- |
+| `build/ucrt64-release/bin` | the applications: `flightsim-viewer`, `flightsim`, `tile_prefetch` |
+| `build/ucrt64-release/examples` | demo trainers written against the SDK |
+| `build/ucrt64-release/tests` | test executables - shipped in nothing |
+| `build/ucrt64-release/dist` | the packages below |
+
 ```bash
-cmake --build --preset ucrt64-release --target deploy   # copy the 27 runtime DLLs next to the executables
+cmake --build --preset ucrt64-release --target dist    # or: fsim dist
 ```
 
-After `deploy`, `build/ucrt64-release/bin` runs standalone (no `ucrt64/bin` on `PATH` needed).
+writes four self-contained trees:
+
+| package | contents |
+| --- | --- |
+| `dist/viewer` | the visualisation application: executable, every DLL, `config/viewer.json`, the JSBSim data and models, and `maps/` for its map assets. Start it with `run-viewer.cmd`; it needs nothing installed. |
+| `dist/sdk` | `fsim.dll`, `fsim_vision.dll`, headers, import libraries and the `find_package(fsim CONFIG)` package |
+| `dist/tools` | the headless `flightsim` command-line application |
+| `dist/examples` | the demo trainers |
+
+The viewer package reads `config/viewer.json` for its window, map sources and
+tile cache; command-line flags override it. `maps/` is that cache - it fills
+itself as you fly, and `bin/tile_prefetch` fills a region ahead of time so the
+package runs with no network at all. See `maps/README.md` in the package.
+
+`cpack` in the build directory still produces one zip of everything.
 
 ## Run
 
 ```bash
 # 1. a training application (this one: five c172x at different control levels, wind, gusts, beacons)
-build/ucrt64-release/bin/multi_level_control.exe --realtime --seconds 600 --terrain
+build/ucrt64-release/examples/multi_level_control.exe --realtime --seconds 600 --terrain
 # 2. the viewer, in another terminal, whenever you like
 build/ucrt64-release/bin/flightsim-viewer.exe
 build/ucrt64-release/bin/flightsim-viewer.exe --list
 
 # vectorised RL trainer skeleton (32 envs, PD baseline; --random for a random policy); world "vecenv"
-build/ucrt64-release/bin/minimal_trainer.exe --envs 32 --steps 3000
+build/ucrt64-release/examples/minimal_trainer.exe --envs 32 --steps 3000
 # PPO (dependency-free MLP + Adam) learning altitude/heading hold at the attitude level; world "ppo"
-build/ucrt64-release/bin/ppo_trainer.exe --envs 64 --iterations 1000 --save policy.bin
-build/ucrt64-release/bin/ppo_trainer.exe --load policy.bin --eval --envs 16
-build/ucrt64-release/bin/ppo_trainer.exe --scenario examples/scenarios/vecenv_windy_altitude_hold.json   # world, wind, effects from a file
-build/ucrt64-release/bin/ppo_trainer.exe --depth 8x6      # + a forward depth camera per vehicle in the observation (fsim_vision)
+build/ucrt64-release/examples/ppo_trainer.exe --envs 64 --iterations 1000 --save policy.bin
+build/ucrt64-release/examples/ppo_trainer.exe --load policy.bin --eval --envs 16
+build/ucrt64-release/examples/ppo_trainer.exe --scenario examples/scenarios/vecenv_windy_altitude_hold.json   # world, wind, effects from a file
+build/ucrt64-release/examples/ppo_trainer.exe --depth 8x6      # + a forward depth camera per vehicle in the observation (fsim_vision)
 
 # built-in demo scenario on the viewer's own simulation thread
 build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 8
@@ -182,21 +211,21 @@ build/ucrt64-release/bin/flightsim-viewer.exe --demo --vehicles 3 --spread 0.004
 build/ucrt64-release/bin/flightsim-viewer.exe --help
 
 # run a scenario file (world, environment, vehicles, commands, effects as data)
-build/ucrt64-release/bin/scenario_runner.exe examples/scenarios/formation_and_pursuit.json --realtime
-build/ucrt64-release/bin/scenario_runner.exe examples/scenarios/dogfight.json --realtime   # F-16s: pursuit vs evade, formation, loops
+build/ucrt64-release/examples/scenario_runner.exe examples/scenarios/formation_and_pursuit.json --realtime
+build/ucrt64-release/examples/scenario_runner.exe examples/scenarios/dogfight.json --realtime   # F-16s: pursuit vs evade, formation, loops
 
 # an external process as a node of the world's network (two terminals)
-build/ucrt64-release/bin/udp_peer.exe --listen 47001 --send 47000
-build/ucrt64-release/bin/multi_level_control.exe --realtime --bridge 47000:47001
+build/ucrt64-release/examples/udp_peer.exe --listen 47001 --send 47000
+build/ucrt64-release/examples/multi_level_control.exe --realtime --bridge 47000:47001
 
 # cameras on a vehicle over Yosemite, written as PNGs (no window needed)
-build/ucrt64-release/bin/vision_capture.exe --seconds 20 --every 2 --out captures
+build/ucrt64-release/examples/vision_capture.exe --seconds 20 --every 2 --out captures
 
 # fill the tile cache for a region once (terrain physics + viewer imagery offline afterwards)
 build/ucrt64-release/bin/tile_prefetch.exe --lat 37.72 --lon -119.55 --radius-km 30
 
 # record a run without a viewer, replay it later
-build/ucrt64-release/bin/multi_level_control.exe --seconds 60 --quiet --record run.fsrec
+build/ucrt64-release/examples/multi_level_control.exe --seconds 60 --quiet --record run.fsrec
 build/ucrt64-release/bin/flightsim-viewer.exe --replay run.fsrec
 
 # headless benchmark

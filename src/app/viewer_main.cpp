@@ -9,6 +9,7 @@
 
 #include "app/DemoAutopilot.h"
 
+#include <fstream>
 #include <cstdlib>
 #include "core/Log.h"
 #include "core/Rng.h"
@@ -19,6 +20,7 @@
 #include "ipc/Recording.h"
 #include "ipc/WorldMirror.h"
 #include "ipc/WorldRegistry.h"
+#include "core/Json.h"
 #include "platform/Clock.h"
 #include "platform/Paths.h"
 #include "platform/CrashHandler.h"
@@ -86,6 +88,8 @@ struct ViewerOptions {
     // Scene
     world::EarthSettings earth;
     unsigned terrainZoom = 12;
+    /// Where downloaded map assets live. Empty = the shared per-user cache.
+    std::filesystem::path tileCache;
     bool gui = true;   ///< panels, labels and trails; --no-gui leaves only the rendered scene
     bool zoomToCursor = true; ///< wheel zooms towards the pointer rather than straight in
     bool sun = true;
@@ -138,6 +142,7 @@ void usage(const char* prog) {
         "Scene:\n"
         "  --imagery satellite|osm|bing|none|<url template with {z}/{x}/{y}>   (satellite = Esri World Imagery)\n"
         "  --elevation terrarium|none|<url template>   relief from Terrarium-encoded tiles (default terrarium)\n"
+        "  --config <file>          settings file (default: <exe>/../config/viewer.json; flags win)\n"
         "  --no-zoom-to-cursor      the wheel zooms straight in rather than towards the pointer "
         "(osgEarth zoomToMouse is on by default)\n"
         "  --no-gui                 no panels, labels or trails: just the rendered scene "
@@ -157,6 +162,85 @@ void usage(const char* prog) {
         "Mouse (OSG feel): left drag rotates, middle drag pans, wheel zooms (6 m .. whole Earth); right drag zooms while following a vehicle\n"
         "      and drags the globe in free mode / while no vehicle exists; the eye never goes below the terrain\n",
         prog);
+}
+
+/// The configuration file: --config <path>, else <exe>/../config/viewer.json.
+/// That one relative path is the package layout and the build tree alike -
+/// bin/ next to config/ - so there is nothing to keep in step between them.
+std::filesystem::path configPath(int argc, char** argv) {
+    for (int i = 1; i + 1 < argc; ++i)
+        if (std::string(argv[i]) == "--config") return argv[i + 1];
+    std::error_code ec;
+    const auto beside = platform::executableDir() / ".." / "config" / "viewer.json";
+    if (std::filesystem::exists(beside, ec)) return std::filesystem::weakly_canonical(beside, ec);
+    return {};
+}
+
+/// Defaults from the configuration file. Applied before the command line is
+/// read, so a flag always wins over the file and the file always wins over the
+/// built-in default. Anything absent, misspelt or of the wrong shape leaves
+/// the default alone: a viewer that will not start because one line of JSON is
+/// wrong is worse than one that starts with a 1600x900 window.
+bool applyConfig(ViewerOptions& o, const std::filesystem::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    if (!in) return false;
+    const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    core::Json doc;
+    try {
+        doc = core::Json::parse(text, file.string());
+    } catch (const std::exception& e) {
+        LOG_WARN("app") << "ignoring " << file.string() << ": " << e.what();
+        return false;
+    }
+
+    const auto& window = doc.child("window");
+    o.window.width = static_cast<std::uint32_t>(window.number("width", o.window.width));
+    o.window.height = static_cast<std::uint32_t>(window.number("height", o.window.height));
+    o.window.fullscreen = window.boolean("fullscreen", o.window.fullscreen);
+    o.window.fieldOfViewDeg = window.number("fovDeg", o.window.fieldOfViewDeg);
+    o.window.maxFps = window.number("maxFps", o.window.maxFps);
+    if (window.has("msaa")) {
+        switch (static_cast<int>(window.number("msaa", 4))) {
+        case 1: o.window.samples = VK_SAMPLE_COUNT_1_BIT; break;
+        case 2: o.window.samples = VK_SAMPLE_COUNT_2_BIT; break;
+        case 4: o.window.samples = VK_SAMPLE_COUNT_4_BIT; break;
+        case 8: o.window.samples = VK_SAMPLE_COUNT_8_BIT; break;
+        default: LOG_WARN("app") << "window.msaa must be 1, 2, 4 or 8; keeping the default"; break;
+        }
+    }
+
+    const auto& map = doc.child("map");
+    if (map.has("imagery")) {
+        const std::string v = map.string("imagery", "satellite");
+        using S = world::EarthSettings::Source;
+        if (v == "osm") o.earth.source = S::OpenStreetMap;
+        else if (v == "esri" || v == "satellite") o.earth.source = S::EsriWorldImagery;
+        else if (v == "bing") o.earth.source = S::Bing;
+        else if (v == "none") o.earth.source = S::None;
+        else { o.earth.source = S::Custom; o.earth.imageryUrl = v; }
+    }
+    if (map.has("elevation")) {
+        const std::string v = map.string("elevation", "terrarium");
+        if (v == "terrarium") o.earth.elevationUrl = world::kAwsTerrariumUrl;
+        else if (v == "none") o.earth.elevationUrl.clear();
+        else o.earth.elevationUrl = v;
+    }
+    o.earth.maxLevel = static_cast<unsigned>(map.number("maxLevel", o.earth.maxLevel));
+    o.earth.elevationMaxLevel = static_cast<unsigned>(map.number("elevationMaxLevel", o.earth.elevationMaxLevel));
+    if (map.has("tileCache")) {
+        const std::string v = map.string("tileCache", "");
+        if (!v.empty()) {
+            std::error_code ec;
+            const std::filesystem::path p(v);
+            // Relative to the configuration file, so a package that is moved
+            // or copied still finds the tiles it brought with it.
+            o.tileCache = p.is_absolute() ? p : std::filesystem::weakly_canonical(file.parent_path() / p, ec);
+        }
+    }
+
+    o.zoomToCursor = doc.child("camera").boolean("zoomToCursor", o.zoomToCursor);
+    o.gui = doc.boolean("gui", o.gui);
+    return true;
 }
 
 bool parse(int argc, char** argv, ViewerOptions& o) {
@@ -199,6 +283,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
                 else if (v == "none") o.earth.elevationUrl.clear();
                 else o.earth.elevationUrl = v;
             } else if (a == "--terrain-zoom") o.terrainZoom = static_cast<unsigned>(std::stoul(next()));
+            else if (a == "--config") next(); // already read, before the command line
             else if (a == "--no-zoom-to-cursor") o.zoomToCursor = false;
             else if (a == "--no-gui") o.gui = false;
             else if (a == "--no-sun") o.sun = false;
@@ -271,6 +356,9 @@ int main(int argc, char** argv) {
         if (freopen_s(&f, logPath.string().c_str(), "w", stderr) == 0) freopen_s(&f, logPath.string().c_str(), "a", stdout);
     }
     ViewerOptions opt;
+    if (const auto cfg = configPath(argc, argv); !cfg.empty()) {
+        if (applyConfig(opt, cfg)) LOG_INFO("app") << "settings: " << cfg.string();
+    }
     if (!parse(argc, argv, opt)) {
         usage(argv[0]);
         return 2;
@@ -294,6 +382,7 @@ int main(int argc, char** argv) {
     if (opt.earth.elevationUrl.empty()) opt.earth.elevationUrl = world::kAwsTerrariumUrl;
     if (opt.earth.source == world::EarthSettings::Source::None) opt.earth.elevationUrl.clear();
     opt.window.headlight = !opt.sun;
+    opt.window.tileCacheDir = opt.tileCache; // the renderer and the CPU tiles share one cache
     if (!viewer.create(opt.window)) return 1;
 
     io::AssetResolver assets;
@@ -307,6 +396,7 @@ int main(int argc, char** argv) {
         io::TerrainTiles::Options to;
         to.urlTemplate = opt.earth.elevationUrl;
         to.zoom = opt.terrainZoom;
+        to.cacheDir = opt.tileCache;
         terrain = std::make_shared<io::TerrainTiles>(to);
     }
 
@@ -485,6 +575,7 @@ int main(int argc, char** argv) {
         // is cheap: 512 of them is ~8 MB, less than the 64 raw tiles cost
         // before, and covers a few hundred km of ground.
         to.cacheTiles = 512;
+        to.cacheDir = opt.tileCache;
         // Sample the surface as the mesh is built, not the raw raster.
         to.meshDimension = opt.earth.elevationMeshDimension;
         cameraGround = std::make_shared<io::TerrainTiles>(to);

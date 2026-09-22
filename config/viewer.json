@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "Defaults for flightsim-viewer. Read from <exe>/../config/viewer.json, which",
+    "is this file in both the build tree and an installed package. Command-line",
+    "flags override anything set here; anything omitted here keeps the built-in",
+    "default. Run the viewer with --help to see the flags."
+  ],
+
+  "window": {
+    "width": 1600,
+    "height": 900,
+    "fullscreen": false,
+    "msaa": 4,
+    "fovDeg": 30,
+    "maxFps": 0
+  },
+
+  "map": {
+    "_comment": [
+      "imagery: satellite | osm | bing | none | a {z}/{x}/{y} URL template.",
+      "elevation: terrarium | none | a {z}/{x}/{y} URL template.",
+      "tileCache: where downloaded map assets are kept. A relative path is",
+      "resolved against this file's directory, so the default keeps them inside",
+      "the package - fill it with bin/tile_prefetch and the package carries its",
+      "own terrain and flies with no network. Set it to \"\" to use the shared",
+      "per-user cache in %LOCALAPPDATA%\\flightsim\\tilecache instead."
+    ],
+    "imagery": "satellite",
+    "elevation": "terrarium",
+    "maxLevel": 17,
+    "elevationMaxLevel": 15,
+    "tileCache": "../maps"
+  },
+
+  "camera": {
+    "_comment": "zoomToCursor is osgEarth's zoomToMouse: the wheel zooms towards the pointer.",
+    "zoomToCursor": true
+  },
+
+  "gui": true
+}
