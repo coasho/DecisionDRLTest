@@ -15,7 +15,14 @@ void addAerialPerspective(vsg::ShaderSet& shaderSet) {
     const float fsimG = 0.76;                              // Mie asymmetry: strongly forward
     // Single scattering alone leaves the horizon away from the sun almost
     // black, because the light that gets there has bounced more than once.
-    // The usual stand-in is a constant added to the Rayleigh phase.
+    // The usual stand-in is a constant added to the Rayleigh phase - but it is
+    // some ten times the Rayleigh phase itself, so applying it to every ray
+    // pours that much extra light into views that have hardly any air in them.
+    // Looking down from 140 km over the Sahara it lifted the ground from a
+    // mean of 144 to 197 and flattened what contrast the sand had from 17.5 to
+    // 5.7: a white-out. The bounced light it stands for comes from the air
+    // along the ray, so it is weighted by how much of the ray is air - full
+    // for a horizon ray, nothing for one looking straight down.
     const float fsimMulti = 0.9;
 
     // The sun, straight out of the light data VSG binds for this view: skip
@@ -44,7 +51,8 @@ void addAerialPerspective(vsg::ShaderSet& shaderSet) {
     float fsimDenom = max(1.0 + fsimGG - 2.0 * fsimG * fsimCosTheta, 1e-4);
     float fsimPhaseM = 0.1193662 * (1.0 - fsimGG) / (fsimDenom * sqrt(fsimDenom));
 
-    vec3 fsimIn = (fsimBetaR * (fsimPhaseR + fsimMulti) + vec3(fsimBetaM * fsimPhaseM)) / fsimBetaT * fsimEsun * (1.0 - fsimFex);
+    float fsimMultiHere = fsimMulti * (1.0 - fsimCosZenith);
+    vec3 fsimIn = (fsimBetaR * (fsimPhaseR + fsimMultiHere) + vec3(fsimBetaM * fsimPhaseM)) / fsimBetaT * fsimEsun * (1.0 - fsimFex);
     outColor.rgb = (color * ambientOcclusion) * fsimFex + fsimIn;)";
 
     // Anything already compiled was compiled from the shader we are about to
