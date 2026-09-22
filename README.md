@@ -181,9 +181,11 @@ writes four self-contained trees:
 | `dist/examples` | the demo trainers |
 
 The viewer package reads `config/viewer.json` for its window, map sources and
-tile cache; command-line flags override it. `maps/` is that cache - it fills
-itself as you fly, and `bin/tile_prefetch` fills a region ahead of time so the
-package runs with no network at all. See `maps/README.md` in the package.
+tile cache; command-line flags override it. By default the tile cache is the
+shared per-user one, so a new package draws the Earth immediately. Setting
+`"tileCache": "../maps"` keeps the tiles inside the package instead, and
+`bin/tile_prefetch` fills a region ahead of time so it flies with no network
+at all - see `maps/README.md` in the package.
 
 `cpack` in the build directory still produces one zip of everything.
 

@@ -19,17 +19,19 @@
     "_comment": [
       "imagery: satellite | osm | bing | none | a {z}/{x}/{y} URL template.",
       "elevation: terrarium | none | a {z}/{x}/{y} URL template.",
-      "tileCache: where downloaded map assets are kept. A relative path is",
-      "resolved against this file's directory, so the default keeps them inside",
-      "the package - fill it with bin/tile_prefetch and the package carries its",
-      "own terrain and flies with no network. Set it to \"\" to use the shared",
-      "per-user cache in %LOCALAPPDATA%\\flightsim\\tilecache instead."
+      "tileCache: where downloaded map assets are kept. Empty means the shared",
+      "per-user cache in %LOCALAPPDATA%\\flightsim\\tilecache, which every build",
+      "and every package on the machine share - so the Earth is already there",
+      "the first time you start. Set it to \"../maps\" to keep the tiles inside",
+      "this package instead: fill that with bin/tile_prefetch and the package",
+      "carries its own terrain and flies with no network, at the cost of",
+      "downloading a region again. See maps/README.md."
     ],
     "imagery": "satellite",
     "elevation": "terrarium",
     "maxLevel": 17,
     "elevationMaxLevel": 15,
-    "tileCache": "../maps"
+    "tileCache": ""
   },
 
   "camera": {
