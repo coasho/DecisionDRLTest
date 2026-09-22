@@ -3,6 +3,7 @@
 #include "core/Log.h"
 #include "world/ElevatedTile.h"
 #include "world/ElevationUpsampler.h"
+#include "world/OfflineTiles.h"
 #include "world/FlatGeometry.h"
 #include "world/Scattering.h"
 
@@ -88,7 +89,7 @@ vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& requested, vsg::ref_ptr
     const auto localise = [&settings](std::string url) {
         if (url.empty() || settings.offlineRoot.empty()) return url;
         if (const auto scheme = url.find("://"); scheme != std::string::npos) url = url.substr(scheme + 3);
-        return (settings.offlineRoot / url).string();
+        return (settings.offlineRoot / url).generic_string();
     };
     if (!settings.offlineRoot.empty()) settings.elevationUrl = localise(settings.elevationUrl);
 
@@ -164,12 +165,27 @@ vsg::ref_ptr<vsg::Node> createEarth(const EarthSettings& requested, vsg::ref_ptr
         tiles->lighting = true; // relief needs shading to be visible
         // Tiles below the elevation pyramid's deepest level would come back flat
         // and pop: either synthesise them from the deepest level or cap the
-        // whole pyramid there.
-        if (settings.upsampleElevation && tiles->maxLevel > settings.elevationMaxLevel)
+        // whole pyramid there. Offline, OfflineTiles below does both jobs for
+        // every hole at every level, and the upsampler must stay out of its
+        // way - it synthesises everything below one fixed level whether or not
+        // the real tile is on disk, and would throw away an airport's detail.
+        if (!settings.offlineRoot.empty()) {
+            // nothing here: see below
+        } else if (settings.upsampleElevation && tiles->maxLevel > settings.elevationMaxLevel) {
             extraReaders.push_back(ElevationUpsampler::create(settings.elevationUrl, settings.elevationMaxLevel, encoding));
-        else
+        } else {
             tiles->maxLevel = std::min(tiles->maxLevel, settings.elevationMaxLevel);
+        }
     }
+
+    // A partial pyramid read from disk: fill each layer's holes from the
+    // nearest real ancestor, and stop refining exactly where the data stops.
+    // Without it VSG draws imagery-only tiles at sea level and never draws
+    // elevation-only ones (see OfflineTiles.h).
+    if (!settings.offlineRoot.empty())
+        extraReaders.insert(extraReaders.begin(),
+                            OfflineTiles::create(tiles->imageLayer.string(), settings.elevationUrl,
+                                                 settings.elevationEncoding));
 
     auto earth = vsg::TileDatabase::create();
     earth->settings = tiles;

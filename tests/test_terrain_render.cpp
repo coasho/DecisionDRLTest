@@ -4,12 +4,14 @@
 #include "core/HeightGrid.h"
 #include "world/CameraController.h"
 #include "world/ElevationUpsampler.h"
+#include "world/OfflineTiles.h"
 #include "world/Terrain.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
+#include <filesystem>
 
 using namespace fsim;
 using Catch::Matchers::WithinAbs;
@@ -109,6 +111,83 @@ TEST_CASE("the camera and the mesh are built from one surface", "[terrain][rende
     }
     INFO("the filtered surface rises " << lift << " m above the raw raster over the notch");
     REQUIRE(lift > 50.0);
+}
+
+TEST_CASE("an offline pyramid's holes are filled from the nearest real ancestor", "[terrain][render]") {
+    // VSG draws a tile only with both layers present: elevation without
+    // imagery is not drawn at all, imagery without elevation is drawn at sea
+    // level, and one failed sibling stops all four refining. A map fetched to
+    // a budget is full of such holes - the whole planet at level 7 was flat -
+    // so the offline reader must make each missing tile from its nearest real
+    // ancestor wherever anything real exists at that level, and decline where
+    // nothing does. Built here from VSG's own file format, so no image codec
+    // is involved in what is being tested.
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "fsim_offline_tiles_test";
+    fs::remove_all(dir);
+    const std::string img = (dir / "img/{z}/{y}/{x}.vsgt").generic_string(); // Esri's order: y before x
+    const std::string elev = (dir / "elev/{z}/{x}/{y}.vsgt").generic_string();
+    auto at = [](std::string t, unsigned z, unsigned x, unsigned y) {
+        auto sub = [&](const char* k, unsigned v) {
+            for (auto p = t.find(k); p != std::string::npos; p = t.find(k)) t.replace(p, 3, std::to_string(v));
+        };
+        sub("{z}", z);
+        sub("{x}", x);
+        sub("{y}", y);
+        return t;
+    };
+    auto io = vsg::Options::create();
+    io->readerWriters = {vsg::VSG::create()};
+    auto put = [&](const std::string& p, const vsg::ref_ptr<vsg::Object>& o) {
+        fs::create_directories(fs::path(p).parent_path());
+        REQUIRE(vsg::write(o, p, io));
+    };
+
+    // The root: imagery in four solid quadrants, elevation a ramp west to east.
+    constexpr std::uint32_t N = 16;
+    const vsg::ubvec4 nw(200, 0, 0, 255), ne(0, 200, 0, 255), sw(0, 0, 200, 255), se(200, 200, 0, 255);
+    auto root = vsg::ubvec4Array2D::create(N, N, vsg::Data::Properties{VK_FORMAT_R8G8B8A8_UNORM});
+    auto ramp = vsg::floatArray2D::create(N, N, vsg::Data::Properties{VK_FORMAT_R32_SFLOAT});
+    for (std::uint32_t y = 0; y < N; ++y)
+        for (std::uint32_t x = 0; x < N; ++x) {
+            const bool east = x >= N / 2, south = y >= N / 2;
+            root->set(x, y, south ? (east ? se : sw) : (east ? ne : nw));
+            ramp->set(x, y, 100.0f * static_cast<float>(x));
+        }
+    put(at(img, 0, 0, 0), root);
+    put(at(elev, 0, 0, 0), ramp);
+    // Level 1 has one real imagery tile and no elevation at all: the shape of
+    // the global base that drew every level-7 tile on Earth at sea level.
+    put(at(img, 1, 1, 0), root);
+
+    auto reader = world::OfflineTiles::create(img, elev, world::ElevationEncoding::Float);
+    auto options = vsg::Options::create();
+    options->readerWriters = {reader, vsg::VSG::create()};
+
+    // A tile that is really there is left to the ordinary readers.
+    REQUIRE_FALSE(reader->read(at(img, 0, 0, 0), options));
+
+    // Missing elevation, north-east quarter of the root: the eastern half of
+    // the ramp - not the flat fallback that sat the planet at 0 m.
+    auto heights = vsg::read_cast<vsg::floatArray2D>(at(elev, 1, 1, 0), options);
+    REQUIRE(heights);
+    INFO("west edge " << heights->at(0, N / 2) << " m, east edge " << heights->at(N - 1, N / 2) << " m");
+    REQUIRE_THAT(heights->at(0, N / 2), Catch::Matchers::WithinAbs(775.0, 1.0));
+    REQUIRE_THAT(heights->at(N - 1, N / 2), Catch::Matchers::WithinAbs(1500.0, 1.0));
+
+    // Missing imagery, south-west quarter: that quarter's colour.
+    auto picture = vsg::read_cast<vsg::ubvec4Array2D>(at(img, 1, 0, 1), options);
+    REQUIRE(picture);
+    const vsg::ubvec4 mid = picture->at(N / 2, N / 2);
+    REQUIRE(mid.r == sw.r);
+    REQUIRE(mid.g == sw.g);
+    REQUIRE(mid.b == sw.b);
+
+    // Level 2 has nothing real in any quad: declined, so the read of the four
+    // children fails and the parent stays - refinement stops with the data.
+    REQUIRE_FALSE(reader->read(at(elev, 2, 0, 0), options));
+    REQUIRE_FALSE(reader->read(at(img, 2, 3, 3), options));
+    fs::remove_all(dir);
 }
 
 TEST_CASE("elevation upsampler synthesises deeper tiles from the deepest real level", "[terrain][render]") {

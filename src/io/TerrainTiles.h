@@ -96,8 +96,13 @@ private:
 
     Tile tile(unsigned x, unsigned y) const;
     Tile load(unsigned x, unsigned y) const;
+    /// Offline, with this level missing: the nearest ancestor on disk,
+    /// restricted to this tile (see load()).
+    Tile fromAncestor(unsigned x, unsigned y) const;
     std::string url(unsigned x, unsigned y) const;
+    std::string urlAt(unsigned z, unsigned x, unsigned y) const;
     std::filesystem::path cachePath(unsigned x, unsigned y) const;
+    std::filesystem::path cachePathAt(unsigned z, unsigned x, unsigned y) const;
     static double sample(const ElevationTile& t, double tx, double ty) noexcept;
     void ensureLoaders();
     void loaderLoop();

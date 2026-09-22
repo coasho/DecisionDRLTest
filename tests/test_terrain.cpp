@@ -11,6 +11,8 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <fstream>
+#include <filesystem>
 #include <cmath>
 #include <cstdint>
 #include <thread>
@@ -138,6 +140,52 @@ TEST_CASE("TerrainTiles samples, caches and prefetches synthetic tiles", "[terra
     REQUIRE(fetches >= 9);
     REQUIRE(terrain.cachedTiles() <= 8);
     REQUIRE(terrain.failures() == 0);
+}
+
+TEST_CASE("offline, a missing level is answered from the nearest ancestor on disk", "[terrain]") {
+    // The camera asks for level 12 and the Alps have elevation to 11: answering
+    // "no ground" left the focus at 0 m inside the mountains and the eye with
+    // no clearance. The nearest tile that is on disk has to answer instead.
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "fsim_offline_ancestor_test";
+    fs::remove_all(dir);
+    const double lat = 0.30, lon = 0.40; // radians
+    double tx, ty;
+    io::mercatorTile(lat, lon, 2, tx, ty);
+    const auto x2 = static_cast<unsigned>(std::floor(tx)), y2 = static_cast<unsigned>(std::floor(ty));
+    const fs::path file = dir / "example.test" / "t" / "2" / std::to_string(x2) / (std::to_string(y2) + ".png");
+    fs::create_directories(file.parent_path());
+    {
+        // A ramp west to east across the level-2 tile, 1000 m to 2020 m.
+        const auto png = terrariumPng(256, [](std::uint32_t x, std::uint32_t) { return 1000.0 + 4.0 * x; });
+        std::ofstream(file, std::ios::binary).write(reinterpret_cast<const char*>(png.data()),
+                                                    static_cast<std::streamsize>(png.size()));
+    }
+    const double fraction = tx - std::floor(tx);
+    const double expected = 1000.0 + 4.0 * (fraction * 256.0 - 0.5);
+
+    for (const std::uint32_t mesh : {0u, 64u}) {
+        io::TerrainTiles::Options o;
+        o.urlTemplate = "https://example.test/t/{z}/{x}/{y}.png";
+        o.cacheDir = dir;
+        o.zoom = 5;             // three levels below anything on disk
+        o.offline = true;
+        o.meshDimension = mesh; // 0 = physics' raw ground, 64 = the camera's drawn surface
+        io::TerrainTiles terrain(o);
+        const double h = terrain.heightAboveEllipsoidM(lat, lon);
+        INFO("mesh " << mesh << ": " << h << " m where the ancestor says " << expected << " m");
+        REQUIRE_THAT(h, Catch::Matchers::WithinAbs(expected, 12.0));
+    }
+
+    // And with nothing on disk at any level it is still "no ground".
+    io::TerrainTiles::Options o;
+    o.urlTemplate = "https://example.test/nothing/{z}/{x}/{y}.png";
+    o.cacheDir = dir;
+    o.zoom = 5;
+    o.offline = true;
+    io::TerrainTiles empty(o);
+    REQUIRE(empty.heightAboveEllipsoidM(lat, lon) == 0.0);
+    fs::remove_all(dir);
 }
 
 TEST_CASE("TerrainTiles reports failures as sea level", "[terrain]") {

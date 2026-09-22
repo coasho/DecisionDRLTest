@@ -60,24 +60,102 @@ TerrainTiles::~TerrainTiles() {
     for (auto& t : loaders_) t.join();
 }
 
-std::string TerrainTiles::url(unsigned x, unsigned y) const {
+std::string TerrainTiles::url(unsigned x, unsigned y) const { return urlAt(options_.zoom, x, y); }
+
+std::string TerrainTiles::urlAt(unsigned z, unsigned x, unsigned y) const {
     std::string s = options_.urlTemplate;
     auto sub = [&](const char* key, unsigned v) {
         for (auto pos = s.find(key); pos != std::string::npos; pos = s.find(key)) s.replace(pos, 3, std::to_string(v));
     };
-    sub("{z}", options_.zoom);
+    sub("{z}", z);
     sub("{x}", x);
     sub("{y}", y);
     return s;
 }
 
-std::filesystem::path TerrainTiles::cachePath(unsigned x, unsigned y) const {
+std::filesystem::path TerrainTiles::cachePath(unsigned x, unsigned y) const { return cachePathAt(options_.zoom, x, y); }
+
+std::filesystem::path TerrainTiles::cachePathAt(unsigned z, unsigned x, unsigned y) const {
     // Same layout as vsgXchange's file cache (<cache>/<host>/<path>) so the
     // viewer and a training application share downloads.
-    std::string u = url(x, y);
+    std::string u = urlAt(z, x, y);
     const auto scheme = u.find("://");
     if (scheme != std::string::npos) u = u.substr(scheme + 3);
     return options_.cacheDir / std::filesystem::path(u);
+}
+
+TerrainTiles::Tile TerrainTiles::fromAncestor(unsigned x, unsigned y) const {
+    for (unsigned d = 1; d <= options_.zoom; ++d) {
+        const unsigned az = options_.zoom - d, ax = x >> d, ay = y >> d;
+        std::ifstream in(cachePathAt(az, ax, ay), std::ios::binary);
+        if (!in) continue;
+        const std::vector<std::uint8_t> png{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+        const ElevationTile raw = decodeTerrariumPng(png);
+        if (!raw.valid()) return nullptr;
+        const unsigned mask = (1u << d) - 1u, qx = x & mask, qy = y & mask;
+        const double share = 1.0 / static_cast<double>(1u << d);
+        auto tile = std::make_shared<ElevationTile>();
+
+        if (options_.meshDimension > 0 && raw.size > options_.meshDimension) {
+            // The camera: the ancestor's *drawn* surface, restricted to this
+            // tile. Where there is nothing deeper, the renderer stops refining
+            // at the ancestor's level and draws exactly its vertex grid, so
+            // interpolating between those vertices is what is on screen - not
+            // the raster resampled afresh at this tile's size, which filters
+            // over a smaller window and puts valley floors metres lower than
+            // they are drawn.
+            const std::uint32_t g = options_.meshDimension;
+            const auto grid = core::resampleHeightGrid(raw.heights.data(), raw.size, g);
+            tile->size = g;
+            tile->heights.resize(static_cast<std::size_t>(g) * g);
+            const double last = static_cast<double>(g - 1);
+            for (std::uint32_t j = 0; j < g; ++j) {
+                const double fy = std::clamp((static_cast<double>(qy) + static_cast<double>(j) / last) * share * last, 0.0, last);
+                const auto y0 = static_cast<std::uint32_t>(std::min(std::floor(fy), last - 1.0));
+                const double ty = fy - static_cast<double>(y0);
+                for (std::uint32_t i = 0; i < g; ++i) {
+                    const double fx = std::clamp((static_cast<double>(qx) + static_cast<double>(i) / last) * share * last, 0.0, last);
+                    const auto x0 = static_cast<std::uint32_t>(std::min(std::floor(fx), last - 1.0));
+                    const double tx = fx - static_cast<double>(x0);
+                    auto at = [&](std::uint32_t a, std::uint32_t b) {
+                        return static_cast<double>(grid[static_cast<std::size_t>(b) * g + a]);
+                    };
+                    const double h = (at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx) * (1 - ty) +
+                                     (at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx) * ty;
+                    tile->heights[static_cast<std::size_t>(j) * g + i] = static_cast<float>(h);
+                }
+            }
+        } else {
+            // Physics: the ground where it is, at the ancestor's resolution -
+            // this tile's share of its raster, texel centres as a real tile has.
+            const std::uint32_t n = raw.size;
+            tile->size = n;
+            tile->heights.resize(static_cast<std::size_t>(n) * n);
+            const double hi = static_cast<double>(n - 1);
+            auto axis = [&](double s, std::uint32_t& a, double& t) {
+                a = static_cast<std::uint32_t>(std::min(std::floor(std::clamp(s, 0.0, hi)), hi - 1.0));
+                t = std::clamp(s - static_cast<double>(a), 0.0, 1.0);
+            };
+            for (std::uint32_t j = 0; j < n; ++j) {
+                std::uint32_t y0;
+                double ty;
+                axis((static_cast<double>(qy) + (static_cast<double>(j) + 0.5) / n) * share * n - 0.5, y0, ty);
+                for (std::uint32_t i = 0; i < n; ++i) {
+                    std::uint32_t x0;
+                    double tx;
+                    axis((static_cast<double>(qx) + (static_cast<double>(i) + 0.5) / n) * share * n - 0.5, x0, tx);
+                    auto at = [&](std::uint32_t a, std::uint32_t b) {
+                        return static_cast<double>(raw.heights[static_cast<std::size_t>(b) * n + a]);
+                    };
+                    const double h = (at(x0, y0) * (1 - tx) + at(x0 + 1, y0) * tx) * (1 - ty) +
+                                     (at(x0, y0 + 1) * (1 - tx) + at(x0 + 1, y0 + 1) * tx) * ty;
+                    tile->heights[static_cast<std::size_t>(j) * n + i] = static_cast<float>(h);
+                }
+            }
+        }
+        return tile;
+    }
+    return nullptr;
 }
 
 TerrainTiles::Tile TerrainTiles::load(unsigned x, unsigned y) const {
@@ -92,6 +170,11 @@ TerrainTiles::Tile TerrainTiles::load(unsigned x, unsigned y) const {
         }
     }
     if (!fromDisk && options_.offline) {
+        // An offline set is partial: this level may be missing where a coarser
+        // one is not. Answering "no ground" there left the camera with no
+        // clearance and the focus at 0 m inside the Alps, whose elevation stops
+        // at level 11 while the camera asks for 12.
+        if (auto ancestor = fromAncestor(x, y)) return ancestor;
         failures_.fetch_add(1);
         return nullptr;
     }
