@@ -76,9 +76,14 @@ void CameraController::setChaseOffset(double distanceM, double elevationDeg, dou
 
 void CameraController::zoom(double factor) noexcept { targetDistance_ = std::clamp(targetDistance_ * factor, kMinDistance, kMaxDistance); }
 
+void CameraController::setDetachedElevation(double elevationDeg) noexcept {
+    detachedElevation_ = std::clamp(elevationDeg * kDeg, kMinElevation, kMaxElevation);
+    if (detached()) elevation_ = detachedElevation_;
+}
+
 void CameraController::resetView() noexcept {
     azimuth_ = defaultAzimuth_;
-    elevation_ = defaultElevation_;
+    elevation_ = detached() ? detachedElevation_ : defaultElevation_;
     distance_ = targetDistance_ = defaultDistance_;
     panRight_ = panUp_ = 0.0;
 }
@@ -464,6 +469,28 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
     // horizontal plane, or a negative elevation would put it under the globe.
     if (distance_ >= 2.0e5) elevation = std::max(elevation, 0.0);
 
+    // Auto-level: the view eases towards straight down as the camera pulls
+    // back, so that by the time the whole planet is in frame the eye is over
+    // its focus and the globe is in the middle of the screen. Orbiting a point
+    // on the *surface* at a shallow tilt leaves the globe hanging below the
+    // middle - measured at 27.5 % of the frame height low, most of it past the
+    // bottom edge - and the only ways to fix that either move the camera or
+    // turn it. Turning it is the one to choose: the horizon stays level, and
+    // what changes is a tilt the user can see and undo.
+    //
+    // This is a floor on what is *drawn*, computed fresh from the distance
+    // every frame and never folded back into elevation_. That distinction is
+    // the whole of it: an earlier version accumulated into the stored angle,
+    // so each frame tilted a fraction further and coming back in could not
+    // undo it - 64 degrees of drift over a trip out and back. As a pure
+    // function of distance it undoes itself exactly, and below a quarter of an
+    // Earth radius it does nothing at all, so no altitude anyone flies at can
+    // see it.
+    if (const double radius = vsg::length(pos); radius > 1.0) {
+        const double s = std::clamp((distance_ / radius - kFrameFromRadii) / (kFrameToRadii - kFrameFromRadii), 0.0, 1.0);
+        elevation = std::max(elevation, s * s * (3.0 - 2.0 * s) * kMaxElevation);
+    }
+
     // What was drawn is where the next drag starts from, so raising the view
     // for the terrain or the distance leaves no dead zone at the top of it.
     shownElevation_ = elevation;
@@ -477,36 +504,15 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
     const vsg::dvec3 screenUp = vsg::normalize(vsg::cross(right, forward));
     const vsg::dvec3 centre = pos + right * panRight_ + screenUp * panUp_;
 
-    // Far enough out, the subject is the planet rather than the spot on it, so
-    // that is what the camera orbits. The focus is a point on the *surface*,
-    // and orbiting a surface point leaves the globe hanging below the middle
-    // of the screen - measured from a whole-Earth view, its centre 27.5 % of
-    // the frame height low, with most of the planet off the bottom edge. The
-    // orbit centre therefore slides from the focus to the Earth's centre as
-    // the globe comes to fill the view, and the globe is centred because the
-    // camera is looking straight at the middle of it.
-    //
-    // It has to be the orbit centre and not merely the aim. Sliding the aim
-    // alone leaves the eye off the axis it is looking along, and then two
-    // things go wrong that were both reported: the distance from the eye to
-    // what is centred changes as the view turns, so a middle-button drag
-    // zooms slightly, and it changes with distance too, so zooming pitches
-    // the view up towards the limb until it is looking at the horizon. Moving
-    // the whole orbit keeps |eye - centre| equal to the distance whatever the
-    // bearing, and keeps the view direction exactly -dir whatever the
-    // distance: turning cannot zoom, and zooming cannot turn.
-    //
-    // Below a quarter of an Earth radius - every altitude anyone flies at -
-    // none of this happens and the camera orbits the ground it was given.
-    double aim = 0.0;
-    if (const double radius = vsg::length(pos); radius > 1.0) {
-        const double s = std::clamp((distance_ / radius - kFrameFromRadii) / (kFrameToRadii - kFrameFromRadii), 0.0, 1.0);
-        aim = s * s * (3.0 - 2.0 * s);
-    }
-    const vsg::dvec3 orbit = centre * (1.0 - aim); // the Earth's centre is the origin
-
-    lookAt_->eye = orbit + dir * distance_;
-    lookAt_->center = orbit;
+    // The camera orbits the ground it was given, at the distance the wheel
+    // set, and nothing here knows how far away that is. Framing the planet by
+    // moving the orbit out to the Earth's centre was tried and is worse than
+    // what it fixed: the eye finishes directly above what it is looking at, so
+    // the apparent pitch slides from straight-down to oblique as you come back
+    // in, and the range the wheel set stops meaning the range to the ground.
+    // The tilt does the framing instead - see the auto-level above.
+    lookAt_->eye = centre + dir * distance_;
+    lookAt_->center = centre;
     lookAt_->up = up;
     viewRight_ = right;
     viewForward_ = forward;

@@ -311,13 +311,14 @@ TEST_CASE("turning the view does not zoom it", "[camera]") {
     // button causes slight, unintended zooming." Framing the planet by sliding
     // only the aim left the eye off the axis it was looking along, so the
     // distance from the eye to whatever was centred depended on the bearing,
-    // and every drag changed it. What is drawn has to keep the distance the
-    // wheel set, whichever way the camera is pointing.
+    // and every drag changed it. The range the wheel set - from the eye to the
+    // ground it is looking at - has to survive a turn, whichever way the
+    // camera ends up pointing.
     Rig rig;
     for (const double distance : {8.0e3, 1.0e6, 1.2e7}) {
         rig.camera->setFreeView(20.0, 10.0, 0.0, distance, 180.0, 35.0);
         for (int k = 0; k < 200; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
-        const double reach = vsg::length(rig.lookAt->eye - rig.lookAt->center);
+        const double reach = vsg::length(rig.lookAt->eye - rig.camera->focus());
 
         double worst = 0.0;
         auto press = vsg::ButtonPressEvent::create();
@@ -335,7 +336,7 @@ TEST_CASE("turning the view does not zoom it", "[camera]") {
             move->mask = vsg::BUTTON_MASK_2;
             rig.camera->apply(*move);
             for (int k = 0; k < 4; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
-            worst = std::max(worst, std::abs(vsg::length(rig.lookAt->eye - rig.lookAt->center) - reach) / reach);
+            worst = std::max(worst, std::abs(vsg::length(rig.lookAt->eye - rig.camera->focus()) - reach) / reach);
         }
         INFO("at " << distance << " m, turning changed the drawn distance by up to "
                    << worst * 100.0 << " % of it");
@@ -343,14 +344,15 @@ TEST_CASE("turning the view does not zoom it", "[camera]") {
     }
 }
 
-TEST_CASE("zooming does not turn the view", "[camera]") {
-    // The other half of the same complaint: "when zooming in, the view shifts
-    // towards the upper part of the Earth and becomes increasingly horizontal,
-    // looking towards the horizon." Anything that frames the planet as a
-    // function of distance must move the camera, never re-point it - the wheel
-    // sets how far away the eye is and nothing else.
+TEST_CASE("under the auto-level range zooming does not turn the view", "[camera]") {
+    // Framing the planet by moving the orbit out to the Earth's centre put the
+    // eye directly above what it was looking at, so the apparent pitch slid
+    // from straight-down to oblique on the way in - "the view becomes
+    // increasingly horizontal, looking towards the horizon". The tilt does the
+    // framing now, which is visible and undoes itself, and under the range
+    // where it applies the wheel turns the view by nothing whatsoever.
     Rig rig;
-    rig.camera->setFreeView(20.0, 10.0, 0.0, 2.4e7, 180.0, 20.0);
+    rig.camera->setFreeView(20.0, 10.0, 0.0, 1.4e6, 180.0, 20.0); // under the auto-level range
     const auto settle = [&rig] {
         for (int k = 0; k < 200; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
     };
@@ -370,9 +372,9 @@ TEST_CASE("zooming does not turn the view", "[camera]") {
         const vsg::dvec3 now = vsg::normalize(rig.lookAt->center - rig.lookAt->eye);
         worst = std::max(worst, std::acos(std::clamp(vsg::dot(first, now), -1.0, 1.0)) * 57.29577951308232);
     }
-    REQUIRE(rig.camera->distance() < 1.5e6); // out the near side of the framing ramp (a quarter of an Earth radius)
-    INFO("zooming from 24000 km to " << rig.camera->distance() / 1000.0
-                                     << " km turned the view " << worst << " deg");
+    REQUIRE(rig.camera->distance() < 2.0e5); // it really did come in
+    INFO("zooming from 1400 km to " << rig.camera->distance() / 1000.0
+                                    << " km turned the view " << worst << " deg");
     REQUIRE(worst < 0.01);
 }
 
@@ -385,7 +387,7 @@ TEST_CASE("zoomed out, the globe is in the middle of the screen", "[camera]") {
     // with most of it past the bottom edge. Far enough out the subject is the
     // planet, so that is what the camera points at.
     Rig rig;
-    for (const double distance : {3.0e7, 1.2e7, 9.0e6}) {
+    for (const double distance : {3.0e7, 1.5e7, 9.6e6}) { // past 1.5 Earth radii: framing fully engaged
         rig.camera->setFreeView(0.0, 0.0, 0.0, distance, 180.0, 14.0);
         for (int k = 0; k < 200; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
         const vsg::dvec2 centreOfEarth = rig.toScreen(vsg::dvec3(0.0, 0.0, 0.0));
@@ -413,16 +415,15 @@ TEST_CASE("close in, the camera still looks at the ground it was given", "[camer
     }
 }
 
-TEST_CASE("the wheel never changes the view angle", "[camera]") {
-    // The complaint this guards: scrolling turned the Earth, and the farther
-    // out the camera was the more it turned. What did it was a floor that
-    // tilted the view towards vertical as a function of distance - so every
-    // notch of the wheel rotated the view by the difference, whether or not
-    // anything was under the cursor. Distance and angle are independent now:
-    // the wheel moves the eye in and out and leaves the bearing and the tilt
-    // exactly where they were.
+TEST_CASE("under the auto-level range the wheel only changes the distance", "[camera]") {
+    // Scrolling used to turn the Earth at every distance, because the tilt
+    // was a function of the distance everywhere. It is now confined to the
+    // auto-level range - beyond a quarter of an Earth radius, where the
+    // subject is the planet - and below that the wheel moves the eye in and
+    // out and leaves the bearing and the tilt exactly where they were. Every
+    // altitude anyone flies at is below it.
     Rig rig;
-    rig.camera->setFreeView(20.0, 10.0, 0.0, 1.2e7, 180.0, 25.0);
+    rig.camera->setFreeView(20.0, 10.0, 0.0, 1.0e6, 180.0, 25.0); // well under a quarter of an Earth radius
     const auto settle = [&rig] {
         for (int k = 0; k < 200; ++k) rig.camera->update(nullptr, 1.0 / 60.0);
     };
@@ -447,7 +448,7 @@ TEST_CASE("the wheel never changes the view angle", "[camera]") {
     };
 
     wheel(1.0f, 8);
-    REQUIRE(rig.camera->distance() < 6.0e6); // it did zoom
+    REQUIRE(rig.camera->distance() < 5.0e5); // it did zoom
     INFO("after zooming in: azimuth " << azimuth << " -> " << rig.camera->azimuthDeg()
          << ", tilt " << elevation << " -> " << rig.camera->shownElevationDeg());
     REQUIRE_THAT(rig.camera->azimuthDeg(), Catch::Matchers::WithinAbs(azimuth, 0.01));
@@ -550,10 +551,12 @@ TEST_CASE("zooming out and back leaves the view where it was", "[camera]") {
         rig.camera->apply(*scroll);
         settle();
     };
-    // Out to ten times the distance, well into the tilt, and back again.
-    for (int i = 0; i < 20; ++i) notch(-1.0f);
-    REQUIRE(rig.camera->distance() > 2.0e6);
-    for (int i = 0; i < 20; ++i) notch(1.0f);
+    // Out through the whole auto-level range, to where the view is levelled
+    // right off, and back again.
+    for (int i = 0; i < 40; ++i) notch(-1.0f);
+    REQUIRE(rig.camera->distance() > 1.0e7);
+    REQUIRE(rig.camera->shownElevationDeg() > 80.0); // it really did level out
+    for (int i = 0; i < 40; ++i) notch(1.0f);
 
     REQUIRE_THAT(rig.camera->distance(), Catch::Matchers::WithinRel(distanceBefore, 1e-6));
     const vsg::dvec3 after = vsg::normalize(rig.lookAt->eye - rig.lookAt->center);

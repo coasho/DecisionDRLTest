@@ -136,7 +136,7 @@ void usage(const char* prog) {
         "  --probe                  print motion smoothness statistics after ~5 s and exit\n"
         "  --stats <seconds>        print per-second frame statistics (fps, frame-time breakdown, CPU) and exit\n"
         "  --screenshot <file.png>  save the window after --screenshot-after seconds (3) and exit\n"
-        "  --view lat,lon,alt,dist[,az,el]  start with the free camera looking at that point from dist metres (az deg from north, el deg up)\n"
+        "  --view lat,lon,alt,dist[,az,el]  start with the free camera looking at that point from dist metres (az deg from north, el deg up; default 180, 45)\n"
         "  --trace <i>              print vehicle i's state once per second\n"
         "  --no-interpolate         draw raw snapshots (sample-and-hold) instead of interpolating\n"
         "Scene:\n"
@@ -583,9 +583,10 @@ int main(int argc, char** argv) {
     }
     // Detached camera focus: the demo spawn area / default location, on the ground.
     camera->setFocus(ellipsoid->convertLatLongAltitudeToECEF(vsg::dvec3(opt.latitudeDeg, opt.longitudeDeg, 0.0)));
+    camera->setDetachedElevation(45.0); // looking down at the ground, not across it
     if (!opt.demo) camera->zoom(300.0); // no vehicle yet: start with a regional view
     if (!opt.view.empty()) {
-        double v[6] = {0.0, 0.0, 0.0, 1000.0, 180.0, 14.0};
+        double v[6] = {0.0, 0.0, 0.0, 1000.0, 180.0, 45.0};
         std::size_t start = 0;
         for (int i = 0; i < 6 && start <= opt.view.size(); ++i) {
             const auto comma = opt.view.find(',', start);

@@ -66,8 +66,20 @@ public:
 
     /// Initial/default distance behind and above; also the "reset" state.
     void setChaseOffset(double distanceM, double elevationDeg = 14.0, double azimuthDeg = 180.0);
+
+    /// The angle the detached camera looks down at the ground from, in degrees
+    /// above the focus' horizon, and what resetView() returns to while nothing
+    /// is being followed.
+    ///
+    /// It is not the chase offset's angle. Sitting 14 degrees above an
+    /// aircraft is a good way to watch an aircraft; pointing a camera at the
+    /// ground from 14 degrees is a good way to look at the horizon. Sharing
+    /// one default between them meant that zooming back in from orbit - where
+    /// the view is levelled off over its focus - ended with the camera aimed
+    /// at the horizon rather than at the ground it had been sent to.
+    void setDetachedElevation(double elevationDeg) noexcept;
     /// Detach and look at a geodetic point from a given distance and angles (scripted views, screenshots).
-    void setFreeView(double latitudeDeg, double longitudeDeg, double altitudeM, double distanceM, double azimuthDeg = 180.0, double elevationDeg = 14.0);
+    void setFreeView(double latitudeDeg, double longitudeDeg, double altitudeM, double distanceM, double azimuthDeg = 180.0, double elevationDeg = 45.0);
     void zoom(double factor) noexcept;
     void resetView() noexcept;
 
@@ -140,6 +152,7 @@ private:
     double elevation_ = 0.244;                ///< radians above the horizontal (14 deg)
     double distance_ = 40.0, targetDistance_ = 40.0;
     double defaultAzimuth_ = 3.14159265358979323846, defaultElevation_ = 0.244, defaultDistance_ = 40.0;
+    double detachedElevation_ = 0.785; ///< 45 deg: looking down at the ground, not across it
     double panRight_ = 0.0, panUp_ = 0.0;     ///< look-at offset in the eye's screen plane, metres
     vsg::dvec3 focus_{6378137.0, 0.0, 0.0};   ///< ECEF focus for the detached camera
     vsg::dvec3 lastTargetPos_{};              ///< where the followed vehicle was (Free mode starts there)
