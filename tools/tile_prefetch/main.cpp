@@ -83,6 +83,12 @@ struct Region {
     double minLat = 0.0, minLon = 0.0, maxLat = 0.0, maxLon = 0.0;
     std::vector<std::pair<double, double>> points;
     double widthKm = 0.0;
+    // How much wider than its nominal extent the region is fetched. `margin`
+    // widens every level by a fraction of its size; `feather` adds a skirt
+    // measured in *tiles at that level*, so detail tapers off instead of
+    // ending at a wall.
+    double margin = 0.15;
+    double feather = 2.0;
     Levels imagery, elevation;
 };
 
@@ -175,10 +181,47 @@ void enumerate(const Region& r, Layer layer, std::unordered_set<std::uint64_t>& 
     if (!lv.wanted()) return;
     for (int z = lv.lo; z <= lv.hi; ++z) {
         const auto uz = static_cast<unsigned>(z);
+        // The deepest level covers the region plus a margin; every level above
+        // it covers more ground still. Fetching the same extent at every level
+        // puts the whole pyramid inside one outline, and the viewer draws that
+        // outline: a rectangle of detail sitting in coarse terrain, with a
+        // visible step along its edge. Tapering spreads the step over a skirt
+        // several levels wide, where each one is four times cheaper than the
+        // last, so most of the fix costs almost nothing.
+        //
+        // The margin is what the frustum needs. A camera looking at the middle
+        // of a disc still has its far edge over ground outside it: eight
+        // places tested pulled 410 tiles from beyond their regions.
+        //
+        // The skirt is measured in tiles, not as a fraction of the region. A
+        // fraction multiplies area, and at four levels up that is seven times
+        // the ground - the plan went from 1.95 GB to 2.64 GB for a cosmetic
+        // fix. A skirt two tiles wide costs a ring around the perimeter
+        // instead, and because a tile at a coarse level covers far more
+        // ground, the same two tiles make a far wider skirt exactly where it
+        // is cheap to do so.
+        // Capped at the region's own size, or a long thin one runs away with
+        // it: two tiles at level 8 is 218 km, which would turn a 40 km flight
+        // corridor into a 482 km one for twenty thousand kilometres.
+        const double tileKm = 2.0 * kPi * kEarthR * std::cos(r.lat * kDeg) / (1 << z) / 1000.0;
         switch (r.kind) {
-        case Region::Kind::Circle: addDisc(out, r.lat, r.lon, r.radiusKm, uz); break;
-        case Region::Kind::Box: addBox(out, r.minLat, r.minLon, r.maxLat, r.maxLon, uz); break;
-        case Region::Kind::Route: addRoute(out, r.points, r.widthKm, uz); break;
+        case Region::Kind::Circle:
+            addDisc(out, r.lat, r.lon,
+                    r.radiusKm * (1.0 + r.margin) + std::min(r.feather * tileKm, r.radiusKm), uz);
+            break;
+        case Region::Kind::Box: {
+            const double midLat = (r.minLat + r.maxLat) * 0.5;
+            const double kmPerLat = 111.32, kmPerLon = 111.32 * std::max(0.05, std::cos(midLat * kDeg));
+            const double boxTileKm = 2.0 * kPi * kEarthR * std::cos(midLat * kDeg) / (1 << z) / 1000.0;
+            const double boxSkirt = std::min(r.feather * boxTileKm, (r.maxLat - r.minLat) * 111.32);
+            const double dLat = (r.maxLat - r.minLat) * r.margin * 0.5 + boxSkirt / kmPerLat;
+            const double dLon = (r.maxLon - r.minLon) * r.margin * 0.5 + boxSkirt / kmPerLon;
+            addBox(out, r.minLat - dLat, r.minLon - dLon, r.maxLat + dLat, r.maxLon + dLon, uz);
+            break;
+        }
+        case Region::Kind::Route:
+            addRoute(out, r.points, r.widthKm * (1.0 + r.margin) + 2.0 * std::min(r.feather * tileKm, r.widthKm), uz);
+            break;
         case Region::Kind::Global: addGlobal(out, uz); break;
         }
     }
@@ -259,6 +302,8 @@ bool loadPlan(const std::filesystem::path& file, std::vector<Region>& regions) {
         r.lon = node.number("lon", 0.0);
         r.radiusKm = node.number("radiusKm", 0.0);
         r.widthKm = node.number("widthKm", 0.0);
+        r.margin = node.number("margin", r.margin);
+        r.feather = node.number("feather", r.feather);
         if (const core::Json& bbox = node.child("bbox"); bbox.isArray() && bbox.asArray().size() == 4) {
             r.minLat = bbox.asArray()[0].asNumber();
             r.minLon = bbox.asArray()[1].asNumber();
@@ -299,6 +344,11 @@ void usage() {
         "    --plan <file.json>           many regions at once; see the header comment\n"
         "  other:\n"
         "    --dry-run                    count and price the tiles, download nothing\n"
+        "    --prune                      delete cached tiles the plan does not ask for,\n"
+        "                                 so a package carries only what it needs\n"
+        "    --margin <f>                 widen every level by this fraction (0.15)\n"
+        "    --feather <tiles>            skirt of this many tiles at every level (2), so\n"
+        "                                 detail tapers instead of ending at a wall\n"
         "    --cache <dir> --threads <n> --imagery-url <tmpl> --elevation-url <tmpl>\n");
 }
 
@@ -308,7 +358,7 @@ int main(int argc, char** argv) {
     std::vector<Region> regions;
     Region cli;
     cli.name = "region";
-    bool haveCli = false, dryRun = false;
+    bool haveCli = false, dryRun = false, prune = false;
     Levels bothLevels;
     unsigned threads = 8;
     std::filesystem::path cache, planFile;
@@ -343,10 +393,13 @@ int main(int argc, char** argv) {
         else if (k == "--max-level") { if (bothLevels.lo < 0) bothLevels.lo = 0; bothLevels.hi = std::atoi(next()); }
         else if (k == "--elevation-only") { cli.imagery = Levels{}; }
         else if (k == "--imagery-only") { cli.elevation = Levels{}; }
+        else if (k == "--margin") cli.margin = std::atof(next());
+        else if (k == "--feather") cli.feather = std::atof(next());
         else if (k == "--threads") threads = static_cast<unsigned>(std::max(1, std::atoi(next())));
         else if (k == "--cache") cache = next();
         else if (k == "--plan") planFile = next();
         else if (k == "--dry-run") dryRun = true;
+        else if (k == "--prune") prune = true;
         else if (k == "--elevation-url") elevationUrl = next();
         else if (k == "--imagery-url") imageryUrl = next();
         else {
@@ -419,6 +472,7 @@ int main(int argc, char** argv) {
 
     // Turn the sets into work, skipping what is already on disk.
     std::vector<Job> jobs;
+    std::unordered_set<std::string> wanted;
     std::size_t present = 0;
     for (const auto* pair : {&elevSet, &imgSet}) {
         const bool isImagery = pair == &imgSet;
@@ -428,10 +482,46 @@ int main(int argc, char** argv) {
             const unsigned y = static_cast<unsigned>(k & 0x1FFFFFFFu);
             Job j{expand(isImagery ? imageryUrl : elevationUrl, z, x, y), {}};
             j.path = cachePathOf(cache, j.url);
+            wanted.insert(j.path.lexically_normal().string());
             if (std::filesystem::exists(j.path)) ++present;
             else jobs.push_back(std::move(j));
         }
     }
+
+    // Tiles from an earlier, wider plan are still on disk and still cost their
+    // bytes. A package built to a budget should carry what the plan asks for
+    // and nothing else, so --prune sweeps the rest - only inside the cache
+    // directory it was given, and only files, never directories.
+    if (prune) {
+        std::size_t removed = 0, freed = 0;
+        std::error_code ec;
+        if (std::filesystem::is_directory(cache, ec)) {
+            std::vector<std::filesystem::path> doomed;
+            for (std::filesystem::recursive_directory_iterator it(cache, ec), end; it != end; it.increment(ec)) {
+                if (ec || !it->is_regular_file(ec)) continue;
+                if (wanted.count(it->path().lexically_normal().string())) continue;
+                doomed.push_back(it->path());
+            }
+            for (const auto& f : doomed) {
+                const auto size = std::filesystem::file_size(f, ec);
+                if (std::filesystem::remove(f, ec)) {
+                    ++removed;
+                    freed += ec ? 0 : size;
+                }
+            }
+        }
+        std::printf("  pruned %zu tile(s) the plan does not want (%.1f MB)\n", removed,
+                    static_cast<double>(freed) / 1e6);
+    }
+    // A viewer that asks for detail the package does not have spends its time
+    // on requests that cannot be answered, and offline it just waits for them
+    // to fail. Tell the operator what ceilings match this plan.
+    int deepestImg = -1, deepestElev = -1;
+    for (const std::uint64_t k : imgSet) deepestImg = std::max(deepestImg, static_cast<int>(k >> 58));
+    for (const std::uint64_t k : elevSet) deepestElev = std::max(deepestElev, static_cast<int>(k >> 58));
+    if (deepestImg >= 0 || deepestElev >= 0)
+        std::printf("for an offline package set viewer.json  \"maxLevel\": %d,  \"elevationMaxLevel\": %d\n",
+                    deepestImg, deepestElev);
     std::printf("cache %s\n  %zu already there, %zu to download\n", cache.string().c_str(), present, jobs.size());
     if (dryRun) {
         std::printf("dry run: nothing downloaded\n");

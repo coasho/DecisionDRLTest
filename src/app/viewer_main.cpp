@@ -152,6 +152,8 @@ void usage(const char* prog) {
         "  --sun-utc <hours>        sun position for this UTC hour (default: the world's time)\n"
         "  --bing-key <key>         Bing Maps key for --imagery bing\n"
         "  --max-level <n>          custom pyramid max level (17)\n"
+        "  --elevation-max-level <n>  deepest elevation level to ask for (15); match an\n"
+        "offline package to what tile_prefetch put in it\n"
         "  --model <file>           glTF/OBJ vehicle model (placeholder if omitted)\n"
         "  --model-scale <x>        model scale (1.0)\n"
         "  --width <px> --height <px> --fullscreen --msaa <1|2|4|8> --fov <deg> --max-fps <n> (0 = vsync only)\n"
@@ -293,6 +295,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--on-ground") o.onGround = true;
             else if (a == "--bing-key") o.earth.bingKey = next();
             else if (a == "--max-level") o.earth.maxLevel = static_cast<unsigned>(std::stoul(next()));
+            else if (a == "--elevation-max-level") o.earth.elevationMaxLevel = static_cast<unsigned>(std::stoul(next()));
             else if (a == "--no-elevation-upsample") o.earth.upsampleElevation = false;
             else if (a == "--skirt") o.earth.skirtRatio = std::stod(next());
             else if (a == "--model") o.modelPath = next();

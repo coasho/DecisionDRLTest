@@ -21,51 +21,51 @@
       "elevation": [0, 6]
     },
 
-    { "name": "Alps",        "type": "circle", "lat": 46.5,  "lon": 8.0,    "radiusKm": 150, "elevation": [8, 11] },
-    { "name": "Himalaya",    "type": "circle", "lat": 28.0,  "lon": 86.9,   "radiusKm": 150, "elevation": [8, 11] },
-    { "name": "Sierra",      "type": "circle", "lat": 37.7,  "lon": -119.5, "radiusKm": 150, "elevation": [8, 11] },
-    { "name": "Andes",       "type": "circle", "lat": -32.7, "lon": -70.0,  "radiusKm": 150, "elevation": [8, 11] },
-    { "name": "Rockies",     "type": "circle", "lat": 39.6,  "lon": -106.0, "radiusKm": 150, "elevation": [8, 11] },
-    { "name": "Caucasus",    "type": "circle", "lat": 43.3,  "lon": 42.5,   "radiusKm": 150, "elevation": [8, 11] },
-    { "name": "SouthernAlps","type": "circle", "lat": -43.6, "lon": 170.2,  "radiusKm": 150, "elevation": [8, 11] },
-    { "name": "Norway",      "type": "circle", "lat": 61.6,  "lon": 6.9,    "radiusKm": 150, "elevation": [8, 11] },
+    { "name": "Alps",        "type": "circle", "lat": 46.5,  "lon": 8.0,    "radiusKm": 100, "feather": 2, "elevation": [8, 11] },
+    { "name": "Himalaya",    "type": "circle", "lat": 28.0,  "lon": 86.9,   "radiusKm": 100, "feather": 2, "elevation": [8, 11] },
+    { "name": "Sierra",      "type": "circle", "lat": 37.7,  "lon": -119.5, "radiusKm": 100, "feather": 2, "elevation": [8, 11] },
+    { "name": "Andes",       "type": "circle", "lat": -32.7, "lon": -70.0,  "radiusKm": 100, "feather": 2, "elevation": [8, 11] },
+    { "name": "Rockies",     "type": "circle", "lat": 39.6,  "lon": -106.0, "radiusKm": 100, "feather": 2, "elevation": [8, 11] },
+    { "name": "Caucasus",    "type": "circle", "lat": 43.3,  "lon": 42.5,   "radiusKm": 100, "feather": 2, "elevation": [8, 11] },
+    { "name": "SouthernAlps","type": "circle", "lat": -43.6, "lon": 170.2,  "radiusKm": 100, "feather": 2, "elevation": [8, 11] },
+    { "name": "Norway",      "type": "circle", "lat": 61.6,  "lon": 6.9,    "radiusKm": 100, "feather": 2, "elevation": [8, 11] },
 
-    { "name": "KSFO", "type": "circle", "lat": 37.619, "lon": -122.375, "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "KLAX", "type": "circle", "lat": 33.942, "lon": -118.408, "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "KJFK", "type": "circle", "lat": 40.640, "lon": -73.779,  "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "KSEA", "type": "circle", "lat": 47.449, "lon": -122.309, "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "KDEN", "type": "circle", "lat": 39.862, "lon": -104.673, "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "EGLL", "type": "circle", "lat": 51.470, "lon": -0.454,   "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "LFPG", "type": "circle", "lat": 49.010, "lon": 2.548,    "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "EDDF", "type": "circle", "lat": 50.038, "lon": 8.562,    "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "LSZH", "type": "circle", "lat": 47.458, "lon": 8.548,    "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "LOWI", "type": "circle", "lat": 47.260, "lon": 11.344,   "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "RJTT", "type": "circle", "lat": 35.553, "lon": 139.781,  "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "VHHH", "type": "circle", "lat": 22.308, "lon": 113.915,  "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "WSSS", "type": "circle", "lat": 1.359,  "lon": 103.989,  "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "YSSY", "type": "circle", "lat": -33.946,"lon": 151.177,  "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "NZQN", "type": "circle", "lat": -45.021,"lon": 168.739,  "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "SAEZ", "type": "circle", "lat": -34.822,"lon": -58.536,  "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "SBGR", "type": "circle", "lat": -23.435,"lon": -46.473,  "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "FAOR", "type": "circle", "lat": -26.139,"lon": 28.246,   "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "OMDB", "type": "circle", "lat": 25.253, "lon": 55.365,   "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "VIDP", "type": "circle", "lat": 28.556, "lon": 77.100,   "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
-    { "name": "BIKF", "type": "circle", "lat": 63.985, "lon": -22.606,  "radiusKm": 25, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "KSFO", "type": "circle", "lat": 37.619, "lon": -122.375, "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "KLAX", "type": "circle", "lat": 33.942, "lon": -118.408, "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "KJFK", "type": "circle", "lat": 40.640, "lon": -73.779,  "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "KSEA", "type": "circle", "lat": 47.449, "lon": -122.309, "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "KDEN", "type": "circle", "lat": 39.862, "lon": -104.673, "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "EGLL", "type": "circle", "lat": 51.470, "lon": -0.454,   "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "LFPG", "type": "circle", "lat": 49.010, "lon": 2.548,    "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "EDDF", "type": "circle", "lat": 50.038, "lon": 8.562,    "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "LSZH", "type": "circle", "lat": 47.458, "lon": 8.548,    "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "LOWI", "type": "circle", "lat": 47.260, "lon": 11.344,   "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "RJTT", "type": "circle", "lat": 35.553, "lon": 139.781,  "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "VHHH", "type": "circle", "lat": 22.308, "lon": 113.915,  "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "WSSS", "type": "circle", "lat": 1.359,  "lon": 103.989,  "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "YSSY", "type": "circle", "lat": -33.946,"lon": 151.177,  "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "NZQN", "type": "circle", "lat": -45.021,"lon": 168.739,  "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "SAEZ", "type": "circle", "lat": -34.822,"lon": -58.536,  "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "SBGR", "type": "circle", "lat": -23.435,"lon": -46.473,  "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "FAOR", "type": "circle", "lat": -26.139,"lon": 28.246,   "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "OMDB", "type": "circle", "lat": 25.253, "lon": 55.365,   "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "VIDP", "type": "circle", "lat": 28.556, "lon": 77.100,   "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
+    { "name": "BIKF", "type": "circle", "lat": 63.985, "lon": -22.606,  "radiusKm": 20, "feather": 2, "imagery": [8, 14], "elevation": [7, 12] },
 
     {
-      "name": "route-west-us", "type": "route", "widthKm": 40,
+      "name": "route-west-us", "type": "route", "widthKm": 40, "feather": 0,
       "points": [[47.449, -122.309], [37.619, -122.375], [33.942, -118.408], [39.862, -104.673]],
-      "imagery": [8, 11], "elevation": [7, 10]
+      "imagery": [8, 11], "elevation": [7, 9]
     },
     {
-      "name": "route-europe", "type": "route", "widthKm": 40,
+      "name": "route-europe", "type": "route", "widthKm": 40, "feather": 0,
       "points": [[51.470, -0.454], [49.010, 2.548], [50.038, 8.562], [47.458, 8.548], [47.260, 11.344]],
-      "imagery": [8, 11], "elevation": [7, 10]
+      "imagery": [8, 11], "elevation": [7, 9]
     },
     {
-      "name": "route-transatlantic", "type": "route", "widthKm": 40,
+      "name": "route-transatlantic", "type": "route", "widthKm": 40, "feather": 0,
       "points": [[40.640, -73.779], [63.985, -22.606], [51.470, -0.454]],
-      "imagery": [8, 11], "elevation": [7, 10]
+      "imagery": [8, 11], "elevation": [7, 9]
     }
   ]
 }

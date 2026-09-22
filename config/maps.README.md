@@ -37,17 +37,42 @@ a layer with no range is not fetched at all. That is the main lever: a city is
 flat and wants imagery, a mountain range wants elevation, and the ocean wants
 neither beyond the global base.
 
+Every region is fetched a little wider than it is asked for, because a camera
+looking at the middle of one still has the far edge of its view outside it:
+`--margin` (0.15) widens every level by a fraction, and `--feather` (2) adds a
+skirt measured in *tiles at that level*, so detail tapers off over a few
+levels instead of ending at a wall. Tiles, not a fraction: a fraction
+multiplies area, and four levels up that is seven times the ground.
+
 `--dry-run` counts and prices the tiles without downloading any, so a plan can
-be checked against a budget first. Overlapping regions are counted once.
+be checked against a budget first. Overlapping regions are counted once. It
+also prints the two ceilings a package built from the plan should use:
+
+    for an offline package set viewer.json  "maxLevel": 14,  "elevationMaxLevel": 12
+
+Set those, or the viewer spends its time asking for detail the package does
+not contain — 90 requests for level-15 elevation in one eight-stop test.
+`--elevation-max-level` and `--max-level` set the same two from the command
+line.
+
+`--prune` deletes cached tiles the plan does not ask for, so a package built
+to a budget carries only what it needs after the plan has been tightened.
 
 For a whole offline set, put the regions in a file and pass `--plan`:
 
     bin\tile_prefetch --plan config/offline-map-plan.json --cache ..\maps --dry-run
 
 `config/offline-map-plan.json` in this package is a worked example: a global
-base, eight mountain ranges at elevation only, thirty airports at imagery
-level 14, and three route corridors — 66,425 tiles, about 1.95 GB, sized to
-leave a 2 GB package with room for the application.
+base, eight mountain ranges at elevation only, twenty-one airports at imagery
+level 14, and three route corridors. Downloaded and measured: **72,276 tiles,
+1.90 GB**, which leaves a 2 GB package room for the 22 MB application. The
+dry-run estimate for it is 2.08 GB — about 9 % high, because it charges land
+rates for elevation tiles that turn out to be ocean.
+
+One thing no plan can fix: the satellite imagery is a mosaic of different
+captures, and the joins between them show as hard-edged rectangles of
+slightly different colour. They are in the imagery itself, at every level,
+online and offline alike.
 
 ## How much disk
 
