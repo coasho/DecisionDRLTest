@@ -26,8 +26,30 @@ ahead of time and the package works with no network at all:
 
 `--min-level` / `--max-level` bound the pyramid (the viewer draws imagery to
 level 17 and elevation to level 15 by default), and `--elevation-only` or
-`--imagery-only` fetch just one layer. A 30 km radius to full detail is a few
-hundred megabytes; the whole Earth is not a realistic target.
+`--imagery-only` fetch just one layer.
+
+## How much disk
+
+Measured from a real cache: an imagery tile averages 14.5 KiB and a Terrarium
+elevation tile about 70 KiB. At the shipped levels, around 45 degrees latitude:
+
+| region | imagery | elevation | total |
+| --- | --- | --- | --- |
+| 10 km radius | 0.1 GB | 0.04 GB | **0.2 GB** |
+| 30 km radius | 1.1 GB | 0.3 GB | **1.5 GB** |
+| 100 km radius | 12.4 GB | 3.7 GB | **16 GB** |
+| Switzerland | 16.3 GB | 4.9 GB | **21 GB** |
+| France | 218 GB | 66 GB | **283 GB** |
+
+Cost goes with area, so doubling the radius quadruples the download.
+
+The imagery level is the lever worth pulling. Each level down divides the
+imagery by four, and two levels down (`--max-level 15`, about 1.2 m per pixel
+at the equator) turns a 30 km radius into 0.4 GB and Switzerland into 5.9 GB.
+Elevation is unaffected - it has nothing below level 15 to fetch.
+
+The whole Earth is not a realistic target: every tile to the shipped levels is
+about 400 TiB, and roughly 140 TiB if the oceans are skipped.
 
 Tiles are served by their respective providers under their own terms; see
 `share/doc/flightsim/THIRD_PARTY_NOTICES.md`.
