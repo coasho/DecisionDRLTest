@@ -23,11 +23,21 @@ namespace fsim::env {
 ///   observations: [M*K][O] float32     rewards: [M*K]      terminated/truncated: [M*K] (uint8)
 ///   actions:      [M*K][A] float32 (caller supplies)
 ///
-/// Auto-reset: an environment whose episode ended is reset before the next
-/// step; its final observation is kept in `finalObservations()` and its flags
-/// stay set in the returned batch (Gymnasium VectorEnv semantics).
+/// Auto-reset, in one of two conventions (AutoReset). Either way the final
+/// observation of an episode that just ended is kept in `finalObservations()`
+/// and its flags are set in the batch returned by the step that ended it.
 class VecEnv {
 public:
+    /// When an environment whose episode ended starts the next one.
+    enum class AutoReset {
+        /// On the following step, whose action it ignores, returning the new
+        /// episode's first observation with zero reward (Gymnasium's default).
+        NextStep,
+        /// At once: the step that ended the episode returns the next one's
+        /// first observation (Stable-Baselines3, Gymnasium's SAME_STEP).
+        SameStep,
+    };
+
     struct Options {
         unsigned numEnvs = 1;
         std::uint64_t seed = 0;
@@ -36,6 +46,7 @@ public:
         bool publish = true;               ///< visible to flightsim-viewer.exe
         bool terrain = false;              ///< physics ground from public elevation tiles
         std::filesystem::path scenarioPath; ///< optional: its environment and world-wide effects are applied to the world
+        AutoReset autoReset = AutoReset::NextStep;
     };
 
     struct StepResult {
@@ -81,6 +92,12 @@ public:
     /// Total FDM vehicle-steps executed so far.
     std::uint64_t vehicleSteps() const noexcept { return vehicleSteps_; }
 
+    AutoReset autoReset() const noexcept { return autoReset_; }
+    /// Takes effect from the next step.
+    void setAutoReset(AutoReset mode) noexcept { autoReset_ = mode; }
+    /// World vehicle id of batch index i (env * K + vehicle).
+    std::uint32_t vehicleId(std::size_t i) const noexcept { return ids_[i]; }
+
 private:
     void resetEnv(unsigned env, bool initialLoad);
     void buildObservations();
@@ -105,6 +122,7 @@ private:
     std::vector<std::uint32_t> episodeSteps_;
     std::vector<std::uint8_t> needsReset_; ///< per env
     std::uint64_t vehicleSteps_ = 0;
+    AutoReset autoReset_ = AutoReset::NextStep;
 };
 
 } // namespace fsim::env

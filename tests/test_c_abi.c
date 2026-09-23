@@ -88,6 +88,47 @@ int main(int argc, char** argv) {
     free(actions);
     free(first);
 
+    /* Same-step auto-reset (Stable-Baselines3): the step that ends an episode
+     * already returns the next one's first observation, and the step after it
+     * is an ordinary one rather than an ignored reset. */
+    {
+        uint32_t ids[4];
+        const char* id0;
+        CHECK(fsim_vecenv_create(&opt, &env) == FSIM_OK);
+        CHECK(fsim_vecenv_autoreset(env) == FSIM_AUTORESET_NEXT_STEP);
+        CHECK(fsim_vecenv_set_autoreset(env, 7) == FSIM_INVALID_ARGUMENT);
+        CHECK(fsim_vecenv_set_autoreset(env, FSIM_AUTORESET_SAME_STEP) == FSIM_OK);
+        CHECK(fsim_vecenv_autoreset(env) == FSIM_AUTORESET_SAME_STEP);
+        CHECK(fsim_vecenv_buffers(env, &buf) == FSIM_OK);
+        n = (size_t)buf.num_envs * buf.vehicles_per_env;
+        actions = (float*)calloc(n * buf.action_size, sizeof(float));
+        for (k = 0; k < 6; ++k) CHECK(fsim_vecenv_step(env, actions, n * buf.action_size) == FSIM_OK);
+        CHECK(fsim_vecenv_buffers(env, &buf) == FSIM_OK);
+        for (i = 0; i < n; ++i) CHECK(buf.truncated[i] == 1);   /* flags of the step that ended it */
+        CHECK(buf.episode_steps[0] == 0);                       /* ... and already a new episode */
+        {
+            double diff = 0.0;
+            for (i = 0; i < buf.observation_size; ++i) diff += fabs((double)buf.observations[i] - (double)buf.final_observations[i]);
+            CHECK(diff > 1e-3); /* the first observation of the new episode, not the last of the old */
+        }
+        CHECK(fsim_vecenv_step(env, actions, n * buf.action_size) == FSIM_OK);
+        CHECK(fsim_vecenv_buffers(env, &buf) == FSIM_OK);
+        CHECK(buf.episode_steps[0] == 1); /* no step swallowed by a reset */
+        CHECK(buf.truncated[0] == 0 && buf.rewards[0] != 0.0f);
+        /* Batch order as world ids, for the world calls on the batch's world. */
+        CHECK(fsim_vecenv_vehicle_ids(env, ids, 4) == 4);
+        CHECK(fsim_vecenv_vehicle_ids(env, NULL, 0) == 4);
+        CHECK(strcmp(fsim_vehicle_name(fsim_vecenv_world(env), ids[3]), "env1/1") == 0);
+        fsim_vecenv_destroy(env);
+        free(actions);
+        /* What can be named in fsim_options. */
+        id0 = fsim_registered_id(FSIM_REGISTRY_TASK, 0);
+        CHECK(strlen(id0) > 0);
+        CHECK(strlen(fsim_registered_id(FSIM_REGISTRY_ACTION, 0)) > 0);
+        CHECK(strcmp(fsim_registered_id(FSIM_REGISTRY_OBSERVATION, 9999), "") == 0);
+        CHECK(strcmp(fsim_registered_id(42, 0), "") == 0);
+    }
+
     /* --- World / vehicle API ------------------------------------------------ */
     {
         fsim_world_options wo;
@@ -194,6 +235,40 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_state_ptr(world, a) == held);
             CHECK(fsim_world_step(world, 1) == FSIM_OK);
             CHECK(held->sim_time > before);
+        }
+
+        /* Batched calls: one call for many vehicles. */
+        {
+            fsim_vehicle_state gathered[3];
+            uint32_t some[3];
+            double rows[2 * 7]; /* two attitude commands, 7 doubles apart */
+            some[0] = a; some[1] = b; some[2] = fsim_world_find_vehicle(world, "extra-3");
+            CHECK(fsim_world_gather_states(world, some, 3, 0, gathered) == FSIM_OK);
+            CHECK(memcmp(&gathered[0], fsim_vehicle_state_ptr(world, a), sizeof(fsim_vehicle_state)) == 0);
+            CHECK(memcmp(&gathered[2], fsim_vehicle_state_ptr(world, some[2]), sizeof(fsim_vehicle_state)) == 0);
+            CHECK(fsim_world_gather_states(world, some, 3, 1, gathered) == FSIM_OK);
+            CHECK(memcmp(&gathered[1], fsim_vehicle_sensed_ptr(world, b), sizeof(fsim_vehicle_state)) == 0);
+            some[1] = 99999;
+            CHECK(fsim_world_gather_states(world, some, 3, 0, gathered) == FSIM_INVALID_ARGUMENT);
+            CHECK(gathered[1].sim_time == 0.0 && gathered[2].sim_time > 0.0); /* the rest are still filled */
+
+            CHECK(fsim_command_field_count(FSIM_LEVEL_ACTUATOR) == 8);
+            CHECK(fsim_command_field_count(FSIM_LEVEL_POSITION) == 5);
+            CHECK(fsim_command_field_count(FSIM_LEVEL_BEHAVIOR) == 0);
+            for (i = 0; i < 2; ++i) {
+                double* r = rows + i * 7;
+                r[0] = -0.2; r[1] = 0.02; r[2] = fsim_hold(); r[3] = 0.6; r[4] = fsim_hold(); r[5] = 55.0; r[6] = 12345.0;
+            }
+            some[1] = b;
+            CHECK(fsim_world_command_batch(world, FSIM_LEVEL_ATTITUDE, some + 1, 2, rows, 7) == FSIM_OK);
+            CHECK(fsim_vehicle_active_level(world, b) == FSIM_LEVEL_ATTITUDE);
+            CHECK(fsim_vehicle_active_level(world, some[2]) == FSIM_LEVEL_ATTITUDE);
+            CHECK(fsim_world_command_batch(world, FSIM_LEVEL_ATTITUDE, some, 2, rows, 3) == FSIM_INVALID_ARGUMENT); /* stride too short */
+            CHECK(fsim_world_command_batch(world, FSIM_LEVEL_BEHAVIOR, some, 2, rows, 0) == FSIM_INVALID_ARGUMENT);
+            some[0] = 99999;
+            CHECK(fsim_world_command_batch(world, FSIM_LEVEL_ATTITUDE, some, 2, rows, 7) == FSIM_INVALID_ARGUMENT);
+            CHECK(fsim_world_step(world, 30) == FSIM_OK); /* 1 s */
+            CHECK(fsim_vehicle_state_ptr(world, some[2])->euler_rad[0] < -0.05); /* banking left as commanded */
         }
 
         CHECK(fsim_world_reset_vehicle(world, a, NULL) == FSIM_OK);

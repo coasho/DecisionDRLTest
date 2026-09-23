@@ -7,6 +7,7 @@
 #include "core/Log.h"
 #include "sdk/Handles.h"
 #include "sdk/LastError.h"
+#include "env/Registry.h"
 #include "env/VecEnv.h"
 
 #include <cstring>
@@ -228,6 +229,43 @@ FSIM_API const char* fsim_vecenv_action_name(const fsim_vecenv* env, uint32_t i)
 
 FSIM_API uint64_t fsim_vecenv_vehicle_steps(const fsim_vecenv* env) { return env ? env->env.vehicleSteps() : 0; }
 
+FSIM_API int fsim_vecenv_set_autoreset(fsim_vecenv* env, int mode) {
+    if (!env || (mode != FSIM_AUTORESET_NEXT_STEP && mode != FSIM_AUTORESET_SAME_STEP)) {
+        setError("fsim_vecenv_set_autoreset: mode must be FSIM_AUTORESET_NEXT_STEP or FSIM_AUTORESET_SAME_STEP");
+        return FSIM_INVALID_ARGUMENT;
+    }
+    env->env.setAutoReset(mode == FSIM_AUTORESET_SAME_STEP ? fsim::env::VecEnv::AutoReset::SameStep
+                                                           : fsim::env::VecEnv::AutoReset::NextStep);
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_vecenv_autoreset(const fsim_vecenv* env) {
+    return env && env->env.autoReset() == fsim::env::VecEnv::AutoReset::SameStep ? FSIM_AUTORESET_SAME_STEP
+                                                                                 : FSIM_AUTORESET_NEXT_STEP;
+}
+
+FSIM_API uint32_t fsim_vecenv_vehicle_ids(const fsim_vecenv* env, uint32_t* ids, uint32_t capacity) {
+    if (!env) return 0;
+    const std::size_t n = env->env.numVehicles();
+    if (ids)
+        for (std::size_t i = 0; i < n && i < capacity; ++i) ids[i] = env->env.vehicleId(i);
+    return static_cast<uint32_t>(n);
+}
+
+FSIM_API const char* fsim_registered_id(int registry, uint32_t index) {
+    // Registration is process-wide and may change between calls; the list is
+    // taken fresh each time and kept per thread so the pointer outlives it.
+    thread_local std::vector<std::string> ids;
+    const auto& r = fsim::env::PluginRegistry::instance();
+    switch (registry) {
+    case FSIM_REGISTRY_TASK: ids = r.taskIds(); break;
+    case FSIM_REGISTRY_OBSERVATION: ids = r.observationIds(); break;
+    case FSIM_REGISTRY_ACTION: ids = r.actionIds(); break;
+    default: return "";
+    }
+    return index < ids.size() ? ids[index].c_str() : "";
+}
+
 } // extern "C"
 
 // ---------------------------------------------------------------------------
@@ -243,6 +281,8 @@ struct VecEnv::Impl {
 VecEnv::VecEnv(const VecEnvOptions& options) : impl_(std::make_unique<Impl>()) {
     const fsim_options c = toOptions(options);
     if (fsim_vecenv_create(&c, &impl_->handle) != FSIM_OK) throw std::runtime_error(fsim_last_error());
+    fsim_vecenv_set_autoreset(impl_->handle, options.autoReset == AutoReset::SameStep ? FSIM_AUTORESET_SAME_STEP
+                                                                                       : FSIM_AUTORESET_NEXT_STEP);
 }
 
 VecEnv::~VecEnv() = default;

@@ -44,10 +44,11 @@ fsim_world_destroy(world);
 | Vehicles | `fsim_world_create_vehicle/remove_vehicle/reset_vehicle/find_vehicle/vehicle_count/vehicle_ids`, `fsim_vehicle_name/type` |
 | State | `fsim_vehicle_state_ptr`, `fsim_vehicle_sensed_ptr` (`fsim_vehicle_state`, layout-checked against the C++ struct), `fsim_vehicle_get_property/set_property` |
 | Control | `fsim_vehicle_command_actuator/attitude/acceleration/velocity/position/behavior`, `fsim_vehicle_active_level`, `fsim_vehicle_behavior_finished`, `fsim_vehicle_use_controller`, `fsim_vehicle_set_controller_parameter`; `fsim_hold()` for optional fields |
+| Batched (1.2) | `fsim_world_gather_states(world, ids, n, sensed, out)` copies n states in one call; `fsim_world_command_batch(world, level, ids, n, values, stride)` commands n vehicles at one level from rows of doubles in the field order of the level's `fsim_*_command` (`fsim_command_field_count(level)`: 8, 6, 4, 4, 5). For bindings, whose cost is per call: a step then costs the same number of calls however many vehicles fly |
 | Environment | `fsim_world_get_environment/set_environment` (`fsim_environment`) |
 | Effects | `fsim_vehicle_add_effect(world, id or 0 for all, "gaussian_sensor_noise" ..., names, values, n)`, `fsim_vehicle_clear_effects` |
 | Communication | `fsim_comm_create_node/send/inbox_count/inbox_get/set_medium/attach_protocol`, `fsim_comm_attach_udp_bridge(world, node, local_port, remote_host, remote_port)` |
-| Batch layer | `fsim_options_init`, `fsim_vecenv_create/destroy/reset/step/buffers`, `fsim_vecenv_observation_name/action_name/vehicle_steps` |
+| Batch layer | `fsim_options_init`, `fsim_vecenv_create/destroy/reset/step/buffers`, `fsim_vecenv_observation_name/action_name/vehicle_steps`; `fsim_vecenv_set_autoreset(env, FSIM_AUTORESET_NEXT_STEP` (Gymnasium) `| FSIM_AUTORESET_SAME_STEP` (Stable-Baselines3)`)`; `fsim_vecenv_vehicle_ids` (world ids in batch order); `fsim_registered_id(FSIM_REGISTRY_TASK/OBSERVATION/ACTION, i)` |
 
 Behaviour parameters and effect parameters are passed as parallel name/value
 arrays (`const char* const* names, const double* values, uint32_t count`),

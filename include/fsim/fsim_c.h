@@ -90,6 +90,26 @@ FSIM_API const char* fsim_vecenv_observation_name(const fsim_vecenv* env, uint32
 FSIM_API const char* fsim_vecenv_action_name(const fsim_vecenv* env, uint32_t index);
 FSIM_API uint64_t fsim_vecenv_vehicle_steps(const fsim_vecenv* env);
 
+/* When an environment whose episode ended starts the next one. Either way the
+ * episode's last observation is in final_observations and its flags are set
+ * in the step that ended it. (ABI 1.2) */
+enum fsim_autoreset {
+    FSIM_AUTORESET_NEXT_STEP = 0, /* the following step, ignoring its action, returns the new episode's first
+                                     observation with zero reward (Gymnasium's default; the default here) */
+    FSIM_AUTORESET_SAME_STEP = 1  /* the step that ended the episode already returns the next one's first
+                                     observation (Stable-Baselines3, Gymnasium's SAME_STEP) */
+};
+/* Takes effect from the next step. */
+FSIM_API int fsim_vecenv_set_autoreset(fsim_vecenv* env, int mode);
+FSIM_API int fsim_vecenv_autoreset(const fsim_vecenv* env);
+/* World vehicle ids in batch order (index env * K + vehicle), for fsim_world_* calls on fsim_vecenv_world(env).
+ * Fills up to `capacity`; returns M*K. */
+FSIM_API uint32_t fsim_vecenv_vehicle_ids(const fsim_vecenv* env, uint32_t* ids, uint32_t capacity);
+
+/* Registered task, observation and action ids (built-ins included), by index; "" past the end. (ABI 1.2) */
+enum fsim_registry { FSIM_REGISTRY_TASK = 0, FSIM_REGISTRY_OBSERVATION = 1, FSIM_REGISTRY_ACTION = 2 };
+FSIM_API const char* fsim_registered_id(int registry, uint32_t index);
+
 /* ---------------------------------------------------------------------------
  * World / vehicle API (design 9.2, 9.8): the object model for any language
  * with a C FFI. Ids are world-unique and never reused within a world.
@@ -216,6 +236,25 @@ FSIM_API int fsim_vehicle_command_velocity(fsim_world* world, uint32_t id, const
 FSIM_API int fsim_vehicle_command_position(fsim_world* world, uint32_t id, const fsim_position_command* command);
 FSIM_API int fsim_vehicle_command_behavior(fsim_world* world, uint32_t id, const fsim_behavior_command* command);
 FSIM_API int fsim_vehicle_active_level(const fsim_world* world, uint32_t id);
+
+/* Batched calls (ABI 1.2): one call for many vehicles, so a binding pays its
+ * per-call cost once per step rather than once per vehicle.
+ *
+ * fsim_world_gather_states copies the states of `count` vehicles, in the order
+ * of `ids`, into `out` (`count` structs); `sensed` 1 reads them through the
+ * sensor effects. An unknown id leaves its struct zeroed, and the call then
+ * returns FSIM_INVALID_ARGUMENT once the others are filled.
+ *
+ * fsim_world_command_batch commands `count` vehicles at one level. `values`
+ * holds a row of doubles per vehicle, `stride` doubles apart (0 = packed): the
+ * fields of the level's fsim_*_command struct in order - actuator 8, attitude
+ * 6, acceleration 4, velocity 4, position 5 (fsim_command_field_count).
+ * fsim_hold() in a field works as it does in the single-vehicle calls.
+ * Behaviours carry strings and routes and are not batched. Unknown ids are
+ * skipped, and the call then returns FSIM_INVALID_ARGUMENT. */
+FSIM_API int fsim_world_gather_states(const fsim_world* world, const uint32_t* ids, uint32_t count, int sensed, fsim_vehicle_state* out);
+FSIM_API int fsim_world_command_batch(fsim_world* world, int level, const uint32_t* ids, uint32_t count, const double* values, uint32_t stride);
+FSIM_API uint32_t fsim_command_field_count(int level); /* 0 for FSIM_LEVEL_BEHAVIOR and unknown levels */
 /* 1 if the running behaviour reports itself finished. */
 FSIM_API int fsim_vehicle_behavior_finished(const fsim_world* world, uint32_t id);
 FSIM_API int fsim_vehicle_use_controller(fsim_world* world, uint32_t id, int level, const char* controller_id);

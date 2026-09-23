@@ -27,7 +27,7 @@ std::string joined(const std::vector<std::string>& ids) {
 
 VecEnv::VecEnv(const Scenario& scenario, const Options& options)
     : scenario_(scenario), numEnvs_(std::max(1u, options.numEnvs)), vehiclesPerEnv_(std::max(1u, scenario.vehiclesPerEnv)),
-      seed_(options.seed) {
+      seed_(options.seed), autoReset_(options.autoReset) {
     task_ = createTask(scenario_.task, scenario_);
     obsBuilder_ = createObservationBuilder(scenario_.observation);
     actionMapper_ = createActionMapper(scenario_.action);
@@ -174,12 +174,21 @@ VecEnv::StepResult VecEnv::step(Span<const float> actions) {
     buildObservations();
     // Keep the terminal observations of environments that just finished.
     const std::size_t o = obsBuilder_->size();
-    for (unsigned e = 0; e < numEnvs_; ++e)
-        if (needsReset_[e])
-            for (unsigned v = 0; v < vehiclesPerEnv_; ++v) {
-                const std::size_t i = static_cast<std::size_t>(e) * vehiclesPerEnv_ + v;
-                std::copy_n(observations_.data() + i * o, o, finalObs_.data() + i * o);
-            }
+    for (unsigned e = 0; e < numEnvs_; ++e) {
+        if (!needsReset_[e]) continue;
+        for (unsigned v = 0; v < vehiclesPerEnv_; ++v) {
+            const std::size_t i = static_cast<std::size_t>(e) * vehiclesPerEnv_ + v;
+            std::copy_n(observations_.data() + i * o, o, finalObs_.data() + i * o);
+        }
+        if (autoReset_ != AutoReset::SameStep) continue;
+        // Start the next episode now and hand back its first observation; the
+        // reward and flags stay those of the step that ended the last one.
+        resetEnv(e, false);
+        for (unsigned v = 0; v < vehiclesPerEnv_; ++v) {
+            const std::size_t i = static_cast<std::size_t>(e) * vehiclesPerEnv_ + v;
+            obsBuilder_->build(state(i), taskStates_[i], observations_.data() + i * o);
+        }
+    }
     return result();
 }
 

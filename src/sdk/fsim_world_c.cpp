@@ -30,6 +30,12 @@ static_assert(offsetof(fsim_vehicle_state, on_ground) == offsetof(fsim::sim::Veh
 static_assert(sizeof(bool) == 1, "bool must be one byte for the C mirror of VehicleState");
 static_assert(sizeof(fsim_control_inputs) == sizeof(fsim::ControlInputs), "fsim_control_inputs layout differs from ControlInputs");
 static_assert(offsetof(fsim_control_inputs, brake_right) == offsetof(fsim::ControlInputs, brakeRight), "layout");
+// fsim_world_command_batch reads a row of doubles as the level's command struct.
+static_assert(sizeof(fsim_actuator_command) == 8 * sizeof(double), "fsim_actuator_command must be 8 doubles");
+static_assert(sizeof(fsim_attitude_command) == 6 * sizeof(double), "fsim_attitude_command must be 6 doubles");
+static_assert(sizeof(fsim_acceleration_command) == 4 * sizeof(double), "fsim_acceleration_command must be 4 doubles");
+static_assert(sizeof(fsim_velocity_command) == 4 * sizeof(double), "fsim_velocity_command must be 4 doubles");
+static_assert(sizeof(fsim_position_command) == 5 * sizeof(double), "fsim_position_command must be 5 doubles");
 
 namespace {
 
@@ -351,6 +357,64 @@ FSIM_API int fsim_vehicle_set_controller_parameter(fsim_world* world, uint32_t i
     if (!c || level < 0 || level >= static_cast<int>(fsim::control::Level::Behavior)) return FSIM_INVALID_ARGUMENT;
     auto* ctl = c->controller(static_cast<fsim::control::Level>(level));
     if (!ctl || !ctl->setParameter(name, value)) return fail(FSIM_INVALID_ARGUMENT, std::string("unknown controller parameter ") + name);
+    return FSIM_OK;
+}
+
+FSIM_API uint32_t fsim_command_field_count(int level) {
+    switch (level) {
+    case FSIM_LEVEL_ACTUATOR: return 8;
+    case FSIM_LEVEL_ATTITUDE: return 6;
+    case FSIM_LEVEL_ACCELERATION: return 4;
+    case FSIM_LEVEL_VELOCITY: return 4;
+    case FSIM_LEVEL_POSITION: return 5;
+    default: return 0;
+    }
+}
+
+FSIM_API int fsim_world_gather_states(const fsim_world* world, const uint32_t* ids, uint32_t count, int sensed, fsim_vehicle_state* out) {
+    if (!world || (count && (!ids || !out))) return fail(FSIM_INVALID_ARGUMENT, "fsim_world_gather_states: bad arguments");
+    uint32_t unknown = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const fsim::sim::VehicleState* s = nullptr;
+        if (sensed) {
+            const auto* z = world->world.sensedState(ids[i]);
+            s = z ? &z->state : nullptr;
+        } else {
+            s = world->world.vehicleState(ids[i]);
+        }
+        if (s) {
+            std::memcpy(&out[i], s, sizeof(fsim_vehicle_state));
+        } else {
+            std::memset(&out[i], 0, sizeof(fsim_vehicle_state));
+            if (!unknown) unknown = ids[i] ? ids[i] : ~0u;
+        }
+    }
+    if (unknown) return fail(FSIM_INVALID_ARGUMENT, "fsim_world_gather_states: no vehicle with id " + std::to_string(unknown));
+    fsim::sdk::lastError().clear();
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_world_command_batch(fsim_world* world, int level, const uint32_t* ids, uint32_t count, const double* values, uint32_t stride) {
+    const uint32_t fields = fsim_command_field_count(level);
+    if (!world || !fields || (count && (!ids || !values)) || (stride && stride < fields))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_world_command_batch: bad arguments (level " + std::to_string(level) + ")");
+    const std::size_t step = stride ? stride : fields;
+    int result = FSIM_OK;
+    for (uint32_t i = 0; i < count; ++i) {
+        const double* row = values + i * step;
+        int r = FSIM_INVALID_ARGUMENT;
+        switch (level) {
+        case FSIM_LEVEL_ACTUATOR: r = fsim_vehicle_command_actuator(world, ids[i], reinterpret_cast<const fsim_actuator_command*>(row)); break;
+        case FSIM_LEVEL_ATTITUDE: r = fsim_vehicle_command_attitude(world, ids[i], reinterpret_cast<const fsim_attitude_command*>(row)); break;
+        case FSIM_LEVEL_ACCELERATION: r = fsim_vehicle_command_acceleration(world, ids[i], reinterpret_cast<const fsim_acceleration_command*>(row)); break;
+        case FSIM_LEVEL_VELOCITY: r = fsim_vehicle_command_velocity(world, ids[i], reinterpret_cast<const fsim_velocity_command*>(row)); break;
+        case FSIM_LEVEL_POSITION: r = fsim_vehicle_command_position(world, ids[i], reinterpret_cast<const fsim_position_command*>(row)); break;
+        default: break;
+        }
+        if (r != FSIM_OK && result == FSIM_OK) result = r;
+    }
+    if (result != FSIM_OK) return fail(result, "fsim_world_command_batch: " + fsim::sdk::lastError());
+    fsim::sdk::lastError().clear();
     return FSIM_OK;
 }
 

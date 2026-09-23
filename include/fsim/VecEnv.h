@@ -26,6 +26,12 @@ struct ConstSpan {
     const T* end() const noexcept { return data + size; }
 };
 
+/// When an environment whose episode ended starts the next one (fsim_autoreset).
+enum class AutoReset {
+    NextStep, ///< the following step, ignoring its action, returns the new episode's first observation (Gymnasium)
+    SameStep, ///< the step that ended the episode already returns the next one's first observation (Stable-Baselines3)
+};
+
 /// Same fields as fsim_options, with C++ defaults.
 struct VecEnvOptions {
     unsigned numEnvs = 1;
@@ -47,6 +53,7 @@ struct VecEnvOptions {
     std::string scenarioPath;         ///< optional scenario file whose environment and world-wide effects apply to the batch
     bool publish = true;
     bool terrain = false;             ///< physics ground from public elevation tiles
+    AutoReset autoReset = AutoReset::NextStep; ///< either way finalObservations holds the last observation
 };
 
 struct StepResult {

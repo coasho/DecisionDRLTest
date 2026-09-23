@@ -28,7 +28,7 @@ for (;;) {
 | Element | Meaning |
 | --- | --- |
 | Layout | vehicle-major: index `env * K + vehicle`; buffers are owned by the environment and returned as spans |
-| Auto-reset | Gymnasium "next-step" semantics: after a terminal step the environment resets on the following `step()`, that action is ignored, reward is 0, flags are clear, the terminal observation is in `finalObservations()` |
+| Auto-reset | `opt.autoReset`. `NextStep` (default, Gymnasium's): after a terminal step the environment resets on the following `step()`, that action is ignored, reward is 0, flags are clear. `SameStep` (Stable-Baselines3's): the terminal step itself already returns the new episode's first observation, with that step's reward and flags. Either way the terminal observation is in `finalObservations()` |
 | Seeding | `Rng::forVehicle(seed ^ episode, env, vehicle)`: reproducible per episode; `reset(seed)` restarts the episode counter |
 | Actions | `"surfaces"`: aileron, elevator, rudder, throttle. `"attitude"`: roll (+-60 deg), pitch (+-25 deg), throttle. `"acceleration"`: load factor (-1..5 g), roll rate (+-3 rad/s), throttle. `"velocity"`: airspeed (20..120 m/s), vertical speed (+-10 m/s), turn rate (+-0.2 rad/s) |
 | Observation `"state"` | `alt_msl_km, agl_km, tas_100ms, alpha, beta, roll, pitch, hdg_sin, hdg_cos, p, q, r, vz_down_100ms, ax_g, ay_g, az_g, alt_err_km, hdg_err_sin, hdg_err_cos, throttle` |
