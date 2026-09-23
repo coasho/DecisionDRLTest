@@ -110,16 +110,17 @@ built from, in three tiers:
 
 - **globe** - every tile on Earth to level 6, both layers
 - **land** - every tile with land in it, imagery and relief to 9, tapered
-- **detail** - 21 mountain ranges with relief to 11, 31 airports with imagery
-  to 14 and relief to 12, and two flight corridors with imagery to 11
+- **detail** - 21 mountain ranges with relief to 11 and imagery to 10 over
+  95 km, and imagery to 11 within 50 km of each one's heart; 31 airports with
+  imagery to 14 and relief to 12; and two flight corridors with imagery to 11
 
 Every tier starts at or below level 7, so the pyramid is contiguous: the
 viewer never meets a level it must stop at while something deeper exists.
 
 ## What a 2.5 GB package can and cannot show
 
-This package measures 2.33 GB (2.17 GiB): 1.27 GB of imagery, 0.99 GB of
-elevation and 0.07 GB of application.
+This package measures 2.41 GB as files (2.24 GiB) - 1.35 GB of imagery,
+0.99 GB of elevation and 0.07 GB of application - and 2.38 GB zipped.
 
 Outside the detail regions the land is the land tier: 306 m per pixel at the
 equator, and between 150 and 306 m everywhere else. In the viewer's
@@ -134,11 +135,11 @@ distances, and with the globe and detail tiers fixed, costs this much:
 
 | land tier, tapered | land imagery at the equator | package |
 | --- | --- | --- |
-| imagery 8, relief 8 | 611 m/px | ~1.2 GB |
-| **imagery 9, relief 9 (this package)** | **306 m/px** | **2.33 GB, measured** |
-| imagery 10, relief 10 | 153 m/px | ~6.2 GB |
+| imagery 8, relief 8 | 611 m/px | ~1.3 GB |
+| **imagery 9, relief 9 (this package)** | **306 m/px** | **2.41 GB, measured** |
+| imagery 10, relief 10 | 153 m/px | ~6.3 GB |
 | imagery 11, relief 10 | 76 m/px | ~14 GB |
-| imagery 12, relief 11 | 38 m/px | ~50 GB |
+| imagery 12, relief 11 | 38 m/px | ~51 GB |
 
 The estimates are `tile_prefetch --dry-run` with only the land tier changed.
 

@@ -194,17 +194,18 @@ The tiles are gigabytes, so they are not in git. Fetch them before building a
 package:
 
 ```
-fetch-maps              download what the plan asks for (about 2.3 GB)
+fetch-maps              download what the plan asks for (about 2.4 GB)
 fetch-maps --dry-run    count and price it first
 ```
 
 They land in `assets/maps`, and `fsim dist` copies them whole into the
 package. What gets downloaded is `assets/config/offline-map-plan.json`: a
 global base, every continent to level 9 (306 m per pixel at the equator, no
-coarser anywhere), mountain ranges with relief to level 11, airports with
-imagery to level 14, and route corridors. `bin/tile_prefetch` takes regions as
-discs, boxes, route corridors, the whole globe or all of its land, with a
-level range per layer; see `assets/config/maps.README.md`.
+coarser anywhere), mountain ranges with relief to level 11 and imagery to 10
+or 11, airports with imagery to level 14, and route corridors.
+`bin/tile_prefetch` takes regions as discs, boxes, route corridors, the whole
+globe or all of its land, with a level range per layer; see
+`assets/config/maps.README.md`.
 
 `cpack` in the build directory still produces one zip of everything.
 

@@ -6,14 +6,14 @@ rem This fetches them into assets\maps, which is where the build copies them
 rem from into a distributed package. Re-running is safe and cheap: tiles
 rem already present are skipped, so an interrupted download resumes.
 rem
-rem   fetch-maps              download what the plan asks for (about 2.3 GB)
+rem   fetch-maps              download what the plan asks for (about 2.4 GB)
 rem   fetch-maps --dry-run    count and price it first, download nothing
 rem   fetch-maps --prune      also delete tiles the plan no longer wants
 rem
 rem What gets downloaded is assets\config\offline-map-plan.json: a global base,
-rem every continent to level 9, mountain ranges with relief to level 11,
-rem airports with imagery to level 14, and route corridors. Edit that file to
-rem change where and how much.
+rem every continent to level 9, mountain ranges with relief to level 11 and
+rem imagery to 10 or 11, airports with imagery to level 14, and route
+rem corridors. Edit that file to change where and how much.
 
 setlocal
 set "ROOT=%~dp0"

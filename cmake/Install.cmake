@@ -166,7 +166,7 @@ foreach(_c ${_fsim_components})
         # Mirror, not accumulate: drop tiles the map plan no longer has.
         list(APPEND _fsim_package_commands
             COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}/assets/maps
-                    -DDEST=${CMAKE_BINARY_DIR}/dist/viewer/maps
+                    -DDEST=${CMAKE_BINARY_DIR}/dist/viewer/maps -DKEEP=README.md
                     -P ${CMAKE_SOURCE_DIR}/cmake/MirrorPrune.cmake)
     endif()
     list(APPEND _fsim_package_commands
