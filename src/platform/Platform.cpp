@@ -1,4 +1,5 @@
 #include "platform/Clock.h"
+#include "platform/Memory.h"
 #include "platform/Paths.h"
 #include "platform/Threads.h"
 
@@ -14,6 +15,9 @@
 #    include <windows.h>
 #    include <shlobj.h>
 #    include <timeapi.h>
+#else
+#    include <sys/mman.h>
+#    include <unistd.h>
 #endif
 
 namespace fsim::platform {
@@ -214,6 +218,66 @@ std::filesystem::path executableDir() {
     return std::filesystem::path(buffer).parent_path();
 #else
     return std::filesystem::current_path();
+#endif
+}
+
+std::filesystem::path moduleDir() {
+#ifdef _WIN32
+    // The module that holds this very function: libfsim.dll inside a foreign
+    // host, the executable itself otherwise.
+    HMODULE self = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCWSTR>(reinterpret_cast<void*>(&moduleDir)), &self))
+        return executableDir();
+    std::wstring buffer(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD n = GetModuleFileNameW(self, buffer.data(), static_cast<DWORD>(buffer.size()));
+        if (n == 0) return executableDir();
+        if (n < buffer.size()) {
+            buffer.resize(n);
+            return std::filesystem::path(buffer).parent_path();
+        }
+        buffer.resize(buffer.size() * 2); // truncated: a long path
+    }
+#else
+    return executableDir();
+#endif
+}
+
+void* reserveAddressSpace(std::size_t bytes) noexcept {
+#ifdef _WIN32
+    return VirtualAlloc(nullptr, bytes, MEM_RESERVE, PAGE_NOACCESS);
+#else
+    void* p = mmap(nullptr, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    return p == MAP_FAILED ? nullptr : p;
+#endif
+}
+
+bool commitMemory(void* address, std::size_t bytes) noexcept {
+#ifdef _WIN32
+    return VirtualAlloc(address, bytes, MEM_COMMIT, PAGE_READWRITE) != nullptr;
+#else
+    return mprotect(address, bytes, PROT_READ | PROT_WRITE) == 0;
+#endif
+}
+
+void releaseAddressSpace(void* address, std::size_t bytes) noexcept {
+    if (!address) return;
+#ifdef _WIN32
+    (void)bytes;
+    VirtualFree(address, 0, MEM_RELEASE);
+#else
+    munmap(address, bytes);
+#endif
+}
+
+std::size_t pageSize() noexcept {
+#ifdef _WIN32
+    SYSTEM_INFO info;
+    GetSystemInfo(&info);
+    return info.dwPageSize;
+#else
+    return static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
 #endif
 }
 

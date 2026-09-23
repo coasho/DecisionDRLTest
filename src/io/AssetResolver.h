@@ -8,7 +8,10 @@ namespace fsim::io {
 
 /// Resolves asset paths through an ordered search-path list (design 8.5).
 /// Default search order: explicit paths added by the caller, then
-/// <exe>/../share/flightsim, then the source tree (development builds).
+/// <module>/../share/flightsim - the module being libfsim.dll, or the
+/// executable it is linked into - then <exe>/../share/flightsim when the
+/// executable is a host elsewhere (python.exe), then the source tree
+/// (development builds).
 class AssetResolver {
 public:
     AssetResolver();

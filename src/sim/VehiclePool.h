@@ -2,6 +2,7 @@
 
 #include "core/Profiler.h"
 #include "core/Span.h"
+#include "core/StableArray.h"
 #include "sim/ControlInputs.h"
 #include "sim/FlightModel.h"
 #include "sim/VehicleState.h"
@@ -22,6 +23,11 @@ namespace fsim::sim {
 /// order and share nothing, so results are identical for any worker count.
 class VehiclePool {
 public:
+    /// Most vehicles one pool can hold (slots of removed vehicles are reused):
+    /// far beyond what fits in memory as flight models, and costing only
+    /// address space - about 60 MB of it - until used.
+    static constexpr std::size_t kMaxVehicles = std::size_t{1} << 17;
+
     /// @param workers number of worker threads; 0 or 1 = step on the calling thread
     /// @param pinWorkers pin worker i to physical core 1 + i (design 12.2)
     explicit VehiclePool(unsigned workers, bool pinWorkers = false);
@@ -79,7 +85,11 @@ private:
     void rangeFor(unsigned worker, std::size_t& begin, std::size_t& end) const noexcept;
 
     std::vector<std::unique_ptr<FlightModel>> models_;
-    std::vector<VehicleState> states_;
+    // Never moves: the SDK hands out pointers into it (fsim_vehicle_state_ptr,
+    // Vehicle::state(), the Python SDK's zero-copy views) and promises they
+    // hold until the vehicle is removed. A vector would reallocate as
+    // vehicles are added and leave every one of them dangling.
+    core::StableArray<VehicleState> states_{kMaxVehicles};
     std::vector<unsigned char> active_;
     PreStep preStep_;
 

@@ -1,6 +1,7 @@
 # platform: the only module allowed to include OS headers (design rule 5.2).
 add_library(fsim_platform STATIC
     Clock.h
+    Memory.h
     Paths.h
     Threads.h
     SharedMemory.h

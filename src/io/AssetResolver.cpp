@@ -8,9 +8,17 @@ namespace fsim::io {
 namespace fs = std::filesystem;
 
 AssetResolver::AssetResolver() {
-    const fs::path exe = platform::executableDir();
-    paths_.push_back(exe / ".." / "share" / "flightsim");
-    paths_.push_back(exe / "share");
+    // Beside the module first: inside Python, Rust or C# the executable is
+    // the host's (python.exe), and the platform's files are wherever
+    // libfsim.dll was installed. For our own programs the two are the same.
+    const fs::path module = platform::moduleDir(), exe = platform::executableDir();
+    paths_.push_back(module / ".." / "share" / "flightsim");
+    paths_.push_back(module / "share");
+    std::error_code ec;
+    if (!fs::equivalent(module, exe, ec)) {
+        paths_.push_back(exe / ".." / "share" / "flightsim");
+        paths_.push_back(exe / "share");
+    }
 #ifdef FSIM_JSBSIM_DATA_DIR
     paths_.push_back(fs::path(FSIM_JSBSIM_DATA_DIR).parent_path()); // third_party/
 #endif

@@ -15,6 +15,7 @@ add_library(fsim_core STATIC
     Registry.h
     Rng.h
     Span.h
+    StableArray.h
     Units.h)
 add_library(fsim::core ALIAS fsim_core)
 

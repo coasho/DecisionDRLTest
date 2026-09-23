@@ -178,10 +178,28 @@ int main(int argc, char** argv) {
         CHECK(fsim_vehicle_get_property(world, a, "no/such/property", &prop) != FSIM_OK);
         CHECK(fsim_comm_inbox_get(world, a, 999, &msg) != FSIM_OK);
 
+        /* A state pointer holds while its vehicle lives, however many vehicles
+         * are created after it: bindings keep views on it (the Python SDK's
+         * are zero-copy), and a growing store used to move it at 3, 5, 9, 17. */
+        {
+            char extra[32];
+            const fsim_vehicle_state* held = fsim_vehicle_state_ptr(world, a);
+            const double before = held->sim_time;
+            uint32_t e = 0;
+            for (k = 0; k < 20; ++k) {
+                snprintf(extra, sizeof extra, "extra-%u", (unsigned)k);
+                spec.name = extra;
+                CHECK(fsim_world_create_vehicle(world, &spec, &e) == FSIM_OK);
+            }
+            CHECK(fsim_vehicle_state_ptr(world, a) == held);
+            CHECK(fsim_world_step(world, 1) == FSIM_OK);
+            CHECK(held->sim_time > before);
+        }
+
         CHECK(fsim_world_reset_vehicle(world, a, NULL) == FSIM_OK);
         CHECK(fsim_world_remove_vehicle(world, b) == FSIM_OK);
         CHECK(fsim_world_remove_vehicle(world, b) != FSIM_OK);
-        CHECK(fsim_world_vehicle_count(world) == 1);
+        CHECK(fsim_world_vehicle_count(world) == 21);
         fsim_world_destroy(world);
         fsim_world_destroy(NULL);
     }

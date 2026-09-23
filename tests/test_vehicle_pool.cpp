@@ -4,6 +4,7 @@
 
 #include "core/Log.h"
 #include "core/Rng.h"
+#include "core/StableArray.h"
 #include "sim/Attitude.h"
 #include "sim/GroundProvider.h"
 #include "sim/JsbsimModel.h"
@@ -220,4 +221,18 @@ TEST_CASE("quaternion helper reproduces JSBSim's body-to-ECEF matrix", "[sim][js
     double q[4];
     attitude::slerp(s.attitudeEcefToBody, s.attitudeEcefToBody, 0.5, q);
     for (int i = 0; i < 4; ++i) CHECK(std::abs(q[i] - s.attitudeEcefToBody[i]) < 1e-12);
+}
+
+TEST_CASE("state snapshots never move as the store grows", "[sim][stable]") {
+    // The SDK hands out pointers to these and promises they hold while the
+    // vehicle lives; a vector would have moved them at every doubling.
+    core::StableArray<sim::VehicleState> states(3000);
+    const sim::VehicleState* first = &states.emplace_back();
+    for (int i = 1; i < 3000; ++i) states.emplace_back().stepCount = static_cast<std::uint32_t>(i);
+    CHECK(&states[0] == first);
+    CHECK(states.data() == first);
+    CHECK(&states[2999] == first + 2999); // still one contiguous block
+    CHECK(states[2999].stepCount == 2999u);
+    CHECK(states.size() == 3000u);
+    CHECK_THROWS_AS(states.emplace_back(), std::length_error);
 }
