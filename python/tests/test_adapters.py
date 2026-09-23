@@ -71,9 +71,22 @@ class StableBaselines3Test(unittest.TestCase):
 
         import fsim.sb3
 
+        import torch
+        from stable_baselines3.common.callbacks import BaseCallback
+
+        seen = set()
+
+        class Probe(BaseCallback):
+            def _on_step(self):
+                seen.add(torch.get_num_threads())
+                return True
+
+        before = torch.get_num_threads()
         env = fsim.sb3.FsimVecEnv(4, publish=False, workers=1, seed=1)
         model = PPO("MlpPolicy", env, n_steps=32, batch_size=64, n_epochs=1, seed=1, device="cpu", verbose=0)
-        model.learn(total_timesteps=256)
+        model.learn(total_timesteps=256, callback=[fsim.sb3.RolloutThreads(), Probe()])
+        self.assertEqual(seen, {1})  # every rollout step on one torch thread
+        self.assertEqual(torch.get_num_threads(), before)  # training on torch's own
         action, _ = model.predict(env.reset(), deterministic=True)
         self.assertEqual(action.shape, (4, 4))
 

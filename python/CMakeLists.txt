@@ -130,9 +130,11 @@ if(FSIM_BUILD_TESTS)
     target_link_libraries(fsim_python_baseline PRIVATE fsim::sdk)
     set_target_properties(fsim_python_baseline PROPERTIES C_STANDARD 11)
     add_test(NAME python_sdk COMMAND "${FSIM_PYTHON}" -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR}/tests -t ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-    set_tests_properties(python_sdk PROPERTIES
-        ENVIRONMENT "PYTHONPATH=${FSIM_PY_STAGE};FSIM_TEST_OUTPUT=${CMAKE_BINARY_DIR}/python-test"
-        TIMEOUT 900)
+    set(_fsim_py_test_env "PYTHONPATH=${FSIM_PY_STAGE}" "FSIM_TEST_OUTPUT=${CMAKE_BINARY_DIR}/python-test")
+    if(TARGET climb_task)  # the C++ plugin example: test_plugin.py trains nothing, but loads and checks it
+        list(APPEND _fsim_py_test_env "FSIM_TEST_PLUGIN=$<TARGET_FILE:climb_task>")
+    endif()
+    set_tests_properties(python_sdk PROPERTIES ENVIRONMENT "${_fsim_py_test_env}" TIMEOUT 900)
 endif()
 
 # Installed as its own component: dist/python/fsim, and a wheel beside it

@@ -15,6 +15,29 @@ def make(num_envs=4, **options):
     return fsim.VecEnv(num_envs, **options)
 
 
+class OnDevice:
+    """A tensor as VecEnv.step sees one on a GPU: no buffer, and no numpy()
+    until it has been brought to the CPU - how torch treats a CUDA tensor."""
+
+    def __init__(self, t):
+        self._t = t
+
+    def detach(self):
+        return OnDevice(self._t.detach())
+
+    def float(self):
+        return OnDevice(self._t.float())
+
+    def double(self):
+        return OnDevice(self._t.double())
+
+    def cpu(self):
+        return self._t
+
+    def numpy(self):
+        raise TypeError("can't convert cuda:0 device type tensor to numpy. Use Tensor.cpu() first.")
+
+
 class VecEnvTest(unittest.TestCase):
     def test_results_are_views_rewritten_in_place(self):
         env = make()
@@ -48,6 +71,52 @@ class VecEnvTest(unittest.TestCase):
         env.step(np.zeros((4, env.action_size), np.int32))  # converted
         with self.assertRaises(ValueError):
             env.step(np.zeros(3, np.float32))
+
+    def test_torch_tensors_as_actions(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch is not installed")
+        ref, env = make(), make()
+        ref.reset(seed=11)
+        env.reset(seed=11)
+        a = np.zeros((4, env.action_size), np.float32)
+        a[:, 1] = -0.125  # exact in half precision: every form below is the same action
+        a[:, 3] = 0.75
+        t = torch.from_numpy(a.copy())
+        forms = {
+            "float32": t,
+            "requires_grad": t.clone().requires_grad_(),  # a policy's output as it comes
+            "float64": t.double(),
+            "float16": t.half(),
+            "bfloat16": t.bfloat16(),
+            "strided": t.t().contiguous().t(),
+            "on a device": OnDevice(t),
+        }
+        if torch.cuda.is_available():
+            forms["cuda"] = t.cuda()
+        for name, form in forms.items():
+            with self.subTest(name):
+                ref.step(a)
+                env.step(form)
+                np.testing.assert_array_equal(env.observations, ref.observations)
+        flown = env.observations.copy()
+        self.assertGreater(np.abs(flown - env.reset(seed=11)).max(), 0.0)  # they did fly
+
+    def test_torch_threads(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch is not installed")
+        from fsim._threads import intel_openmp
+
+        before = torch.get_num_threads()
+        with fsim.torch_threads(1):
+            self.assertEqual(torch.get_num_threads(), 1)
+            omp = intel_openmp()
+            if omp is not None:  # the OpenMP torch ships on Windows
+                self.assertEqual(omp.kmp_get_blocktime(), 1)
+        self.assertEqual(torch.get_num_threads(), before)
 
     def test_next_step_autoreset(self):
         env = make(max_episode_steps=5)

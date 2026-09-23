@@ -10,13 +10,44 @@ Python environment per vehicle.
     import fsim.sb3
     from stable_baselines3 import PPO
     env = fsim.sb3.FsimVecEnv(num_envs=64, task="altitude_heading_hold", seed=1)
-    PPO("MlpPolicy", env).learn(1_000_000)
+    PPO("MlpPolicy", env).learn(1_000_000, callback=fsim.sb3.RolloutThreads())
+
+``RolloutThreads`` gives torch one thread while SB3 collects rollouts, so
+torch's threads do not take the cores the platform steps on, and its own
+thread count while it trains: 17% more steps/s for PPO end to end.
 """
 import gymnasium
 import numpy as np
+import torch
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv as _Sb3VecEnv
 
+from ._threads import short_openmp_spin
 from .vecenv import VecEnv
+
+
+class RolloutThreads(BaseCallback):
+    """torch's CPU threads for SB3's two phases: ``threads`` (1) while it
+    collects rollouts - a forward pass over one observation per vehicle, next
+    to the platform's workers stepping every vehicle - and torch's own count
+    while it trains on the whole buffer. The numbers: docs/sdk/python.md,
+    "torch's threads"."""
+
+    def __init__(self, threads=1, verbose=0):
+        super().__init__(verbose)
+        self.threads = threads
+        self._training_threads = None
+
+    def _on_rollout_start(self):
+        short_openmp_spin()
+        self._training_threads = torch.get_num_threads()
+        torch.set_num_threads(self.threads)
+
+    def _on_rollout_end(self):
+        torch.set_num_threads(self._training_threads)
+
+    def _on_step(self):
+        return True
 
 
 class FsimVecEnv(_Sb3VecEnv):

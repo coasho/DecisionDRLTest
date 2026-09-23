@@ -67,6 +67,7 @@ from ._state import (  # noqa: E402
 from .world import COMMAND_DEFAULTS, COMMAND_FIELDS, Level, Message, Scenario, Vehicle, World  # noqa: E402
 from .vecenv import VecEnv  # noqa: E402
 from .recording import Recording  # noqa: E402
+from ._threads import torch_threads  # noqa: E402
 
 __version__, abi_version = _native.version()
 
@@ -84,6 +85,28 @@ def observations():
 def actions():
     """Action ids a VecEnv can be given."""
     return _native.registered_ids(_native.REGISTRY_ACTION)
+
+
+_plugins = []  # loaded for good: the registries hold their code
+
+
+def load_plugin(path):
+    """Load a C++ plugin: a DLL that links the SDK and registers tasks,
+    observations, actions or controllers from its static initialisers
+    (examples/python/plugin). They land in the registries of the libfsim.dll
+    this package runs, so a VecEnv created afterwards can name them. Build it
+    with the platform's toolchain (MSYS2 UCRT64 GCC) against this version of
+    the SDK: the plugin interface is C++.
+
+    Returns the ids the plugin added, as a dict of "tasks", "observations"
+    and "actions" (an id it replaced is not new, and loading the same DLL
+    again adds nothing). The plugin stays loaded until the process ends."""
+    import ctypes
+
+    before = tasks(), observations(), actions()
+    _plugins.append(ctypes.CDLL(_os.path.abspath(_os.fspath(path))))
+    after = tasks(), observations(), actions()
+    return {kind: sorted(set(a) - set(b)) for kind, b, a in zip(("tasks", "observations", "actions"), before, after)}
 
 
 __all__ = [
@@ -104,9 +127,11 @@ __all__ = [
     "abi_version",
     "actions",
     "control_inputs_dtype",
+    "load_plugin",
     "observations",
     "recorded_sample_dtype",
     "set_log_level",
     "tasks",
+    "torch_threads",
     "vehicle_state_dtype",
 ]

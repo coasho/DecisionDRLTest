@@ -93,7 +93,10 @@ viewer) done**:
   platform's memory, many-vehicle calls are one call, the GIL is released while it simulates. Measured against
   the same loops in C: a 64-aircraft VecEnv step 375.3 us from C, 375.4 us from Python. Gymnasium and
   Stable-Baselines3 vector environments (`fsim.gym`, `fsim.sb3`); one wheel for CPython 3.11+;
-  `fsim python examples\python\train_sb3.py`.
+  `fsim python examples\python\train_sb3.py`. Actions can be torch tensors on any device; tasks,
+  observations, actions and controllers written in C++ load as plugin DLLs (`fsim.load_plugin`,
+  `fsim python examples\python\train_plugin.py`); `fsim.sb3.RolloutThreads` keeps torch's threads off the
+  platform's cores while it collects, 17% faster PPO end to end.
 - `sim::VehiclePool` (one worker per physical core), JSBSim 1.3.1 adapter with terrain ground callback,
   `flightsim.exe` headless benchmark.
 

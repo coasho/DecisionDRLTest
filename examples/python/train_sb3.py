@@ -23,7 +23,7 @@ print("%d aircraft; observations %s; actions %s" % (env.num_envs, env.env.observ
 model = PPO("MlpPolicy", env, n_steps=256, batch_size=4096, learning_rate=3e-4, verbose=1, seed=1, device="cpu")
 
 t0 = time.perf_counter()
-model.learn(total_timesteps=args.steps)
+model.learn(total_timesteps=args.steps, callback=fsim.sb3.RolloutThreads())  # torch: 1 thread collecting, all training
 wall = time.perf_counter() - t0
 steps = model.num_timesteps  # whole rollouts: at least --steps
 print("%d steps in %.1f s: %.0f steps/s (policy and training included), %.0f FDM vehicle-steps/s"

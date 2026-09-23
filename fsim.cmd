@@ -123,6 +123,7 @@ echo.
 echo   PYTHON
 echo     fsim python examples\python\world_tour.py   the object model from Python
 echo     fsim python examples\python\train_sb3.py    PPO ^(Stable-Baselines3^) on a 64-aircraft batch
+echo     fsim python examples\python\train_plugin.py PPO on a task written in C++, loaded as a plugin DLL
 echo     fsim python examples\python\speed.py        what the Python SDK costs, measured
 echo     fsim python ^<script.py^>                     any script, with the fsim package on its path
 echo.

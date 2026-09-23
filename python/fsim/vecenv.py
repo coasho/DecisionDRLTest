@@ -10,6 +10,7 @@ APIs expect.
 import numpy as np
 
 from . import _native
+from ._convert import as_array
 from .world import World
 
 _AUTORESET = {"next_step": _native.AUTORESET_NEXT_STEP, "same_step": _native.AUTORESET_SAME_STEP}
@@ -82,12 +83,14 @@ class VecEnv:
         """One agent step for the whole batch: ``actions`` is (M*K, A), each
         element in [-1, 1]. Returns (observations, rewards, terminated,
         truncated) - views, rewritten by the next step. A C-contiguous float32
-        array is read in place; float64 is narrowed natively; anything else
-        (lists, torch CPU tensors, strided arrays) is converted first."""
+        array is read in place; float64 is narrowed natively; anything else is
+        converted first - lists, strided arrays, and torch tensors on any
+        device (a CUDA tensor is brought to the CPU, where the platform
+        steps)."""
         try:
             self._step(actions)
         except (TypeError, BufferError):
-            self._step(np.ascontiguousarray(actions, dtype=np.float32))
+            self._step(as_array(actions, np.float32))
         return self._result
 
     @property

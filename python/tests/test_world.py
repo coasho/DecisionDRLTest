@@ -105,6 +105,19 @@ class WorldTest(unittest.TestCase):
         with self.assertRaises(fsim.Error):
             world.command(Level.ATTITUDE, np.array([99999], np.uint32), rows[:1])
 
+    def test_torch_tensors_as_command_values(self):
+        try:
+            import torch
+        except ImportError:
+            self.skipTest("torch is not installed")
+        world = make_world()
+        vehicles = [fly(world, "v%d" % i, longitude_deg=-122.38 + 0.01 * i) for i in range(3)]
+        rows = torch.tensor([[-0.2, 0.02, HOLD, 0.6, HOLD, 55.0]] * 3, requires_grad=True)  # float32, HOLD kept
+        world.command(Level.ATTITUDE, vehicles, rows)
+        self.assertTrue(all(v.active_level == Level.ATTITUDE for v in vehicles))
+        world.step(30)
+        self.assertTrue((world.states(vehicles)["euler_rad"][:, 0] < -0.05).all())  # every one banking left
+
     def test_environment_effects_properties_comm(self):
         world = make_world()
         a = fly(world, "a")

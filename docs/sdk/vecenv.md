@@ -99,6 +99,12 @@ fsim::VecEnv env(opt);
 
 `tests/test_sdk.cpp` registers all three and drives a batch with them.
 
+For a Python trainer, the same classes go into a DLL that registers them from
+a static initialiser; `fsim.load_plugin` loads it, and the ids are named as
+here. [examples/python/plugin/climb_task.cpp](../../examples/python/plugin/climb_task.cpp)
+is one, trained with PPO by `examples/python/train_plugin.py`
+([python.md](python.md#your-own-task-in-c-trained-from-python)).
+
 A scenario file can define the batch instead of code: `fsim::vecEnvOptions(fsim::loadScenario(path))` ([scenarios.md](scenarios.md#vecenv-from-a-scenario)); its environment and world-wide effects then apply to the batch's world (`VecEnvOptions::scenarioPath`).
 
 The C ABI mirrors it as `fsim_vecenv_*` ([c_abi.md](c_abi.md)). `examples/minimal_trainer` is a complete loop with a PD baseline; `examples/ppo_trainer` is a full PPO (GAE, clipped objective, running observation normalisation, truncation bootstrapping) with a dependency-free MLP that learns the `altitude_heading_hold` task at the attitude level in about two minutes and beats the PD baseline - the loop to copy when plugging in LibTorch or any other learner.

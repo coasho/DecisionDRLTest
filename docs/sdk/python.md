@@ -26,6 +26,7 @@ built for with the package on its path:
 ```
 fsim python examples\python\world_tour.py    the object model, per vehicle and batched
 fsim python examples\python\train_sb3.py     PPO (Stable-Baselines3) on a 64-aircraft batch
+fsim python examples\python\train_plugin.py  PPO on a task written in C++, loaded as a plugin DLL
 fsim python examples\python\cameras.py       nose and chase cameras, images as numpy arrays
 fsim python examples\python\speed.py         what the SDK costs, measured against C
 ```
@@ -107,10 +108,17 @@ plus `autoreset="next_step"` (Gymnasium) or `"same_step"`
 **The results are views of the environment's own buffers**, made once when
 it is created: `env.step` returns the same four arrays every time, rewritten
 in place, and `env.final_observations` / `env.episode_steps` are views too.
-Copy what you keep past the next step. Actions are read in place when they
-are a C-contiguous float32 array, narrowed natively from float64, and
-converted from anything else - a torch CPU tensor included (`.cpu()` a CUDA
-one first).
+Copy what you keep past the next step.
+
+Actions are read in place when they are a C-contiguous float32 array, and
+narrowed natively from float64. Anything else is converted first: lists,
+strided arrays, and torch tensors as a policy returns them - on the GPU, in
+half precision, with a gradient attached - with no `.detach().cpu()` of your
+own. A CPU float32 tensor is read without a copy, for 2.4 us more per step
+than a numpy array (the conversion); a CUDA tensor is copied to the host once, which the
+platform needs whatever the API, since it simulates on the CPU.
+`World.command` takes tensors the same way. torch is not imported for this:
+it stays optional.
 
 `env.world` is the batch's world (vehicles `env<e>/<v>`), and `env.states()`
 reads every batch vehicle's full state in one call - for rewards or
@@ -126,7 +134,8 @@ obs, rewards, terminations, truncations, info = envs.step(envs.action_space.samp
 
 import fsim.sb3                                  # needs stable-baselines3 >= 2.0
 from stable_baselines3 import PPO
-PPO("MlpPolicy", fsim.sb3.FsimVecEnv(64, task="altitude_heading_hold", seed=1)).learn(1_000_000)
+model = PPO("MlpPolicy", fsim.sb3.FsimVecEnv(64, task="altitude_heading_hold", seed=1))
+model.learn(1_000_000, callback=fsim.sb3.RolloutThreads())   # 17% faster: see "torch's threads"
 ```
 
 Each is a vector environment whose sub-environments are the batch's
@@ -193,7 +202,45 @@ processes, best of five, on a Ryzen 7 9700X with Python 3.13:
 Python adds a fraction of a microsecond per native call; the rest of any
 difference is the Python in your own loop.
 
-## Threads
+## torch's threads
+
+A VecEnv steps its aircraft on worker threads, one per core. torch runs its
+CPU ops on an OpenMP team as large as the machine, and the OpenMP it ships
+on Windows (Intel's) keeps that team spinning for 200 ms after every op. So
+while experience is collected - one small forward pass per step - torch's
+idle threads spin on the cores the aircraft are stepped on. Training on a
+whole buffer is the other way round: there the threads pay. PPO as
+`train_sb3.py` runs it (64 aircraft, 213k steps, an 8-core Ryzen 7 9700X;
+fresh processes, best of three):
+
+| torch threads | collecting | training | end to end |
+| --- | --- | --- | --- |
+| torch's default (8) | 83.6k steps/s | 1.64 s | 50.9k steps/s |
+| 1 | 109.6k steps/s | 3.09 s | 42.3k steps/s |
+| 2 | 104.4k steps/s | 2.06 s | 51.9k steps/s |
+| 1 collecting, 8 training: `fsim.sb3.RolloutThreads()` | 110.6k steps/s | 1.64 s | **59.7k steps/s** |
+
+`fsim.sb3.RolloutThreads(threads=1)` is the SB3 callback of the last row:
+`threads` torch threads from the start of each rollout to its end, torch's
+own count while it trains. It also shortens the OpenMP spin to 1 ms -
+without that, the team that trained spins on through most of the next
+rollout and the switch gains nothing (training measured no slower for it).
+In a loop of your own, `fsim.torch_threads` does the same around a block:
+
+```python
+for update in range(updates):
+    with fsim.torch_threads(1):                               # collecting
+        for t in range(n_steps):
+            with torch.no_grad():
+                actions = policy(torch.tensor(obs))           # a copy: obs is rewritten by the next step
+            obs, rewards, terminated, truncated = env.step(actions)
+    train(policy, buffer)                                     # torch's own thread count
+```
+
+`KMP_BLOCKTIME=1` in the environment, set before torch is imported, is the
+same 1 ms spin for every thread.
+
+## Python threads
 
 Calls that simulate or render release the GIL, so different objects can be
 driven from different threads in parallel. One object serves one call at a
@@ -206,6 +253,35 @@ A call that fails raises `fsim.Error` with the platform's message. The
 platform's own log goes to stderr at "warning" and above; `fsim.set_log_level`
 (or `FSIM_LOG_LEVEL`) changes that for every loaded library.
 
+## Your own task, in C++, trained from Python
+
+Tasks, observations, actions and controllers of your own are C++ - the
+interfaces of [vecenv.md](vecenv.md#your-own-task-observation-or-action)
+and [control.md](control.md) - in a DLL that registers them when it is
+loaded; no platform rebuild. `fsim.load_plugin` loads one into Python, and
+its ids are then named like the built-ins:
+
+```python
+fsim.load_plugin(r"build\ucrt64-release\examples\climb_task.dll")   # {"tasks": ["climb"], ...}
+env = fsim.sb3.FsimVecEnv(64, task="climb", action="attitude", seed=1)
+```
+
+[examples/python/plugin/climb_task.cpp](../../examples/python/plugin/climb_task.cpp)
+is one: a task that has each aircraft climb 0.5 to 2 times
+`target_altitude_delta_m` and hold it, registered by a static initialiser
+(`fsim::registerTask`). `fsim python examples\python\train_plugin.py`
+trains PPO on it - on unseen aircraft, 400k steps (7 s) take the mean
+reward from 0.52 to 0.83 per step and the distance to the target after 50 s
+from 187 m to 39 m.
+
+The plugin runs where the built-in tasks run - inside the step, in C++ - and
+costs what they cost. Build it with the platform's toolchain (MSYS2 UCRT64
+GCC) against the SDK of the same version (in-tree like the example, or
+`find_package(fsim CONFIG)` of `dist/sdk`): the interface is C++, and the DLL
+binds to the libfsim.dll the Python package has already loaded. Effects are
+the exception - a C++ program attaches them as objects, there is no registry
+to name one in - so they are not offered to Python this way.
+
 ## Building
 
 `FSIM_BUILD_PYTHON` (on by default) builds `fsim._native` - and `fsim._vision`
@@ -215,8 +291,3 @@ launcher's default is used. Not MSYS2's Python: the libraries RL is done with
 are not built for it. One build serves every CPython from 3.11 on. The
 package is staged in `build/<preset>/python`, tested by `ctest`
 (`python_sdk`), and installed as the `python` component.
-
-What is not in Python: tasks, observations, actions, controllers and effects
-implemented as plugins (C++ interfaces, [vecenv.md](vecenv.md),
-[control.md](control.md)). From Python, compute rewards and observations
-with numpy over `states()`, and command at whichever level suits.

@@ -16,6 +16,7 @@ import weakref
 import numpy as np
 
 from . import _native
+from ._convert import as_array
 from ._state import VehicleState, vehicle_state_dtype
 
 HOLD = _native.HOLD
@@ -352,11 +353,12 @@ class World:
         per vehicle and a column per field of the level (fsim.COMMAND_FIELDS),
         float64; HOLD (NaN) in a field works as in the per-vehicle commands.
         A C-contiguous float64 array and a uint32 id array (World.ids) pass
-        straight through."""
+        straight through; anything else is converted first, torch tensors on
+        any device included."""
         try:  # a uint32 id array and a float64 array: nothing to do but the call
             self._h.command_batch(level, vehicles, values)
         except TypeError:
-            self._h.command_batch(int(level), self.ids(vehicles), np.ascontiguousarray(values, dtype=np.float64))
+            self._h.command_batch(int(level), self.ids(vehicles), as_array(values, np.float64))
 
     # --- environment ---------------------------------------------------------------------
     @property
