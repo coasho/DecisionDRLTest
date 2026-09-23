@@ -24,7 +24,10 @@ namespace fsim::world {
 /// It needs no uniform of its own and no camera altitude: the sun comes out
 /// of the light data VSG binds per view, and the air is treated as a slab of
 /// one scale height whose path is H/cos(zenith), bounded by the distance
-/// actually travelled.
+/// actually travelled. The zenith is the ray's angle to the ellipsoid's up,
+/// which the vertex stage hands on as `fsimUp` beside the normal it bends
+/// with the relief; measured against the relief instead, every slope seen
+/// edge-on hazes like a horizon, and ridges shine as if wet.
 ///
 /// Patches VSG's Phong fragment shader, so it applies to anything drawn with
 /// `vsg::createPhongShaderSet` - the terrain tiles and the polar caps alike,

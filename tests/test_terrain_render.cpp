@@ -5,6 +5,7 @@
 #include "world/CameraController.h"
 #include "world/ElevationUpsampler.h"
 #include "world/OfflineTiles.h"
+#include "world/Scattering.h"
 #include "world/Terrain.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -188,6 +189,40 @@ TEST_CASE("an offline pyramid's holes are filled from the nearest real ancestor"
     REQUIRE_FALSE(reader->read(at(elev, 2, 0, 0), options));
     REQUIRE_FALSE(reader->read(at(img, 2, 3, 3), options));
     fs::remove_all(dir);
+}
+
+TEST_CASE("aerial perspective takes the ray's zenith from the ellipsoid, not the relief", "[terrain][render]") {
+    // How much haze a ray gathers depends on how steeply it crosses the air.
+    // Taken from the relief's normal instead, every slope seen edge-on hazed
+    // like a horizon and every ridge shone as if wet.
+    auto options = vsg::Options::create();
+    auto shaderSet = vsg::createPhongShaderSet(options);
+    REQUIRE(shaderSet);
+    world::addAerialPerspective(*shaderSet);
+
+    vsg::ref_ptr<vsg::ShaderStage> vertex, fragment;
+    for (auto& stage : shaderSet->stages) {
+        if (stage->stage == VK_SHADER_STAGE_VERTEX_BIT) vertex = stage;
+        if (stage->stage == VK_SHADER_STAGE_FRAGMENT_BIT) fragment = stage;
+    }
+    REQUIRE((vertex && fragment));
+    const std::string& vs = vertex->module->source;
+    const std::string& fs = fragment->module->source;
+    // The up leaves the vertex stage before the relief bends the normal...
+    CHECK(vs.find("out vec3 fsimUp;") != std::string::npos);
+    CHECK(vs.find("fsimUp = (mv * vec4(vsg_Normal, 0.0)).xyz;") != std::string::npos);
+    // ... and the fragment stage measures the ray against it, not the slope.
+    CHECK(fs.find("in vec3 fsimUp;") != std::string::npos);
+    CHECK(fs.find("dot(fsimView, normalize(fsimUp))") != std::string::npos);
+    CHECK(fs.find("dot(fsimView, nd)") == std::string::npos);
+
+    // Both stages compile for the defines a relief tile is drawn with. The
+    // patched stages carry source only, so the viewer compiles them at run
+    // time too: without glslang the terrain would not draw at all.
+    auto compiler = vsg::ShaderCompiler::create();
+    REQUIRE(compiler->supported());
+    vsg::ShaderStages stages{vertex, fragment};
+    CHECK(compiler->compile(stages, {"VSG_TEXTURECOORD_0", "VSG_DIFFUSE_MAP", "VSG_DISPLACEMENT_MAP"}, options));
 }
 
 TEST_CASE("elevation upsampler synthesises deeper tiles from the deepest real level", "[terrain][render]") {

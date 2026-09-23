@@ -7,6 +7,15 @@
 namespace fsim::world {
 
 void addAerialPerspective(vsg::ShaderSet& shaderSet) {
+    // The vertex stage hands on the ellipsoid's up alongside the normal it
+    // bends with the relief: how much air a ray crosses depends on how steeply
+    // it crosses the air, not on which way the slope it lands on faces.
+    const std::string mainAnchor = "\nvoid main()";
+    const std::string vertexDeclare = "\nlayout(location = 8) out vec3 fsimUp; // fsim: the ellipsoid's up, in view space\n";
+    const std::string vertexAnchor = "normalDir = (mv * normal).xyz;";
+    const std::string vertexUp = "normalDir = (mv * normal).xyz;\n    fsimUp = (mv * vec4(vsg_Normal, 0.0)).xyz; // before the relief bends it";
+    const std::string fragmentDeclare = "\nlayout(location = 8) in vec3 fsimUp; // fsim: the ellipsoid's up, in view space\n";
+
     const std::string anchor = "outColor.rgb = (color * ambientOcclusion) + emissiveColor.rgb;";
     const std::string scattering = R"(// Aerial perspective (fsim); see addAerialPerspective().
     const vec3 fsimBetaR = vec3(5.8e-6, 13.5e-6, 33.1e-6); // Rayleigh, per metre at sea level
@@ -38,8 +47,14 @@ void addAerialPerspective(vsg::ShaderSet& shaderSet) {
         fsimSun = -lightData.values[fsimAt + 1].xyz;
     }
 
-    vec3 fsimView = normalize(eyePos);                       // eye -> ground
-    float fsimCosZenith = max(abs(dot(fsimView, nd)), 0.02); // how squarely the ray meets the ground
+    // How steeply the ray crosses the air: against the ellipsoid's up, never
+    // the relief's normal. Measured against the slope, every face seen edge-on
+    // counted as a horizon ray - the whole slab of air and the full
+    // multiple-scattering term - and glowed a bluish white, while the faces
+    // turned to the eye stayed clear: a wet sheen on every ridge that made
+    // mountains look like waves.
+    vec3 fsimView = normalize(eyePos);                                   // eye -> ground
+    float fsimCosZenith = max(abs(dot(fsimView, normalize(fsimUp))), 0.02);
     float fsimPath = min(length(eyePos), fsimScaleHeight / fsimCosZenith);
 
     vec3 fsimBetaT = fsimBetaR + vec3(fsimBetaM);
@@ -55,26 +70,42 @@ void addAerialPerspective(vsg::ShaderSet& shaderSet) {
     vec3 fsimIn = (fsimBetaR * (fsimPhaseR + fsimMultiHere) + vec3(fsimBetaM * fsimPhaseM)) / fsimBetaT * fsimEsun * (1.0 - fsimFex);
     outColor.rgb = (color * ambientOcclusion) * fsimFex + fsimIn;)";
 
-    // Anything already compiled was compiled from the shader we are about to
+    // Both stages or neither: a fragment input no vertex output feeds is
+    // undefined, so if either anchor has moved the shaders stay VSG's own.
+    vsg::ref_ptr<vsg::ShaderStage>* vertex = nullptr;
+    vsg::ref_ptr<vsg::ShaderStage>* fragment = nullptr;
+    for (auto& stage : shaderSet.stages) {
+        if (!stage || !stage->module) continue;
+        if (stage->stage == VK_SHADER_STAGE_VERTEX_BIT) vertex = &stage;
+        if (stage->stage == VK_SHADER_STAGE_FRAGMENT_BIT) fragment = &stage;
+    }
+    std::string vertexSource = vertex ? (*vertex)->module->source : std::string();
+    std::string fragmentSource = fragment ? (*fragment)->module->source : std::string();
+    const auto vMain = vertexSource.find(mainAnchor), vAt = vertexSource.find(vertexAnchor);
+    const auto fMain = fragmentSource.find(mainAnchor), fAt = fragmentSource.find(anchor);
+    if (vMain == std::string::npos || vAt == std::string::npos || fMain == std::string::npos || fAt == std::string::npos) {
+        LOG_WARN("world") << "tile shader has moved on; drawing without aerial perspective";
+        return;
+    }
+    vertexSource.replace(vAt, vertexAnchor.size(), vertexUp);
+    vertexSource.insert(vMain, vertexDeclare);
+    fragmentSource.replace(fAt, anchor.size(), scattering);
+    fragmentSource.insert(fMain, fragmentDeclare);
+
+    // Anything already compiled was compiled from the shaders we are about to
     // replace, and getShaderStages() would hand those back instead of ours.
     shaderSet.variants.clear();
-    for (auto& stage : shaderSet.stages) {
-        if (!stage || stage->stage != VK_SHADER_STAGE_FRAGMENT_BIT || !stage->module) continue;
-        std::string source = stage->module->source;
-        const auto at = source.find(anchor);
-        if (at == std::string::npos) {
-            LOG_WARN("world") << "tile shader has moved on; drawing without aerial perspective";
-            continue;
-        }
-        source.replace(at, anchor.size(), scattering);
-        // A fresh stage carrying only source: VSG then compiles it for whatever
-        // defines a tile needs. Editing the existing module in place instead
-        // leaves its prebuilt SPIR-V in the way, and VSG quietly falls back to
-        // it - the shader runs unchanged and without the imagery sampler.
-        auto fresh = vsg::ShaderStage::create(stage->stage, stage->entryPointName, source, stage->module->hints);
-        fresh->specializationConstants = stage->specializationConstants;
-        stage = fresh;
-    }
+    // Fresh stages carrying only source: VSG then compiles them for whatever
+    // defines a tile needs. Editing the existing modules in place instead
+    // leaves their prebuilt SPIR-V in the way, and VSG quietly falls back to
+    // it - the shader runs unchanged and without the imagery sampler.
+    auto fresh = [](const vsg::ShaderStage& stage, const std::string& source) {
+        auto s = vsg::ShaderStage::create(stage.stage, stage.entryPointName, source, stage.module->hints);
+        s->specializationConstants = stage.specializationConstants;
+        return s;
+    };
+    *vertex = fresh(**vertex, vertexSource);
+    *fragment = fresh(**fragment, fragmentSource);
 }
 
 } // namespace fsim::world
