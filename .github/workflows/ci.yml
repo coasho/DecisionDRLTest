@@ -38,6 +38,7 @@ jobs:
             mingw-w64-ucrt-x86_64-spirv-tools
             mingw-w64-ucrt-x86_64-assimp
             mingw-w64-ucrt-x86_64-curl
+            mingw-w64-ucrt-x86_64-zlib
 
       - name: Toolchain
         run: |

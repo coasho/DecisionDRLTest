@@ -156,13 +156,19 @@ if(TARGET flightsim-viewer)
 endif()
 set(_fsim_package_commands "")
 foreach(_c ${_fsim_components})
-    # Clear what the install rewrites, but leave maps/ alone: it is gigabytes
-    # of tiles that install() will skip if they are already identical, and
-    # deleting it first would turn every package build into a full re-copy.
-    foreach(_sub bin share config)
+    # Clear everything but maps/: it is gigabytes of tiles that install() will
+    # skip if they are already identical, and deleting it first would turn
+    # every package build into a full re-copy.
+    list(APPEND _fsim_package_commands
+        COMMAND ${CMAKE_COMMAND} -DDIR=${CMAKE_BINARY_DIR}/dist/${_c} -DKEEP=maps
+                -P ${CMAKE_SOURCE_DIR}/cmake/CleanDist.cmake)
+    if(_c STREQUAL "viewer")
+        # Mirror, not accumulate: drop tiles the map plan no longer has.
         list(APPEND _fsim_package_commands
-            COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/dist/${_c}/${_sub})
-    endforeach()
+            COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}/assets/maps
+                    -DDEST=${CMAKE_BINARY_DIR}/dist/viewer/maps
+                    -P ${CMAKE_SOURCE_DIR}/cmake/MirrorPrune.cmake)
+    endif()
     list(APPEND _fsim_package_commands
         COMMAND ${CMAKE_COMMAND} --install ${CMAKE_BINARY_DIR}
                 --component ${_c} --prefix ${CMAKE_BINARY_DIR}/dist/${_c})
