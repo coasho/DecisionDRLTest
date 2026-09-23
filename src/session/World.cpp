@@ -111,7 +111,8 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
                            options_.terrainPrefetchRadiusM);
     if (slot == static_cast<std::size_t>(-1)) {
         auto model = std::make_unique<sim::JsbsimModel>(options_.dt, ground_);
-        if (!model->load(sim::AircraftSpec{aircraft, jsbsimRoot_}, spec.initial)) {
+        if (!model->load(sim::AircraftSpec{aircraft, jsbsimRoot_, io::AssetResolver{}.findAircraft(aircraft, jsbsimRoot_)},
+                         spec.initial)) {
             LOG_ERROR("session") << "failed to load aircraft '" << aircraft << "'";
             return 0;
         }

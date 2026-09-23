@@ -492,7 +492,7 @@ int main(int argc, char** argv) {
         const unsigned physical = platform::physicalCoreCount();
         const unsigned workers = std::min<unsigned>(opt.workers ? opt.workers : std::max(1u, physical > 3 ? physical - 3 : 1u), opt.vehicles);
         auto pool = std::make_unique<sim::VehiclePool>(workers);
-        const sim::AircraftSpec aircraft{opt.aircraft, *root};
+        const sim::AircraftSpec aircraft{opt.aircraft, *root, assets.findAircraft(opt.aircraft, *root)};
         auto initialConditions = std::make_shared<std::vector<sim::InitialConditions>>();
         for (unsigned i = 0; i < opt.vehicles; ++i) {
             Rng rng = Rng::forVehicle(opt.seed, 0, i);
@@ -577,6 +577,8 @@ int main(int argc, char** argv) {
     visualSettings.modelUp = axis(opt.modelUp, visualSettings.modelUp);
     for (const auto& dir : assets.searchPaths()) // <assets>/models/<type>.glb per vehicle type
         if (std::filesystem::is_directory(dir / "models")) visualSettings.modelDirs.push_back(dir / "models");
+    for (const auto& dir : assets.aircraftDirs()) // aircraft of our own carry their model: <dir>/<type>/<type>.glb
+        visualSettings.modelDirs.push_back(dir);
     world::VehicleVisuals visuals(slots, visualSettings, viewer.options());
     visuals.setCompiler([&viewer](vsg::ref_ptr<vsg::Node> node) { return viewer.compile(node); });
     scene->addChild(visuals.node());
@@ -611,6 +613,8 @@ int main(int argc, char** argv) {
     viewer.addEventHandler(vsgImGui::SendEventsToImGui::create());
     viewer.addEventHandler(ui::KeyHandler::create(controls));
     if (!viewer.setScene(scene, ellipsoid, imgui)) return 1;
+    if (opt.demo) // the demo's vehicles are all of one type: draw that type's model if it has one (after the scene compile)
+        for (unsigned i = 0; i < opt.vehicles && i < slots; ++i) visuals.setModel(i, {}, "jsbsim:" + opt.aircraft);
     for (auto& anim : visuals.animations()) viewer.viewer()->animationManager->play(anim);
 
     auto camera = world::CameraController::create(viewer.camera(), viewer.lookAt(), ellipsoid);

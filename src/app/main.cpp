@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
     auto ground = std::make_shared<sim::FlatGround>(0.0);
     sim::VehiclePool pool(effectiveWorkers, opt.pinWorkers);
 
-    const sim::AircraftSpec aircraft{opt.aircraft, *root};
+    const sim::AircraftSpec aircraft{opt.aircraft, *root, assets.findAircraft(opt.aircraft, *root)};
     platform::Stopwatch loadTimer;
     for (unsigned i = 0; i < opt.vehicles; ++i) {
         // Per-vehicle deterministic initial-condition jitter (design 6.4).

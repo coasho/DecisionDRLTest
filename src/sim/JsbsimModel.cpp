@@ -114,13 +114,14 @@ bool JsbsimModel::load(const AircraftSpec& aircraft, const InitialConditions& ic
 
     const SGPath root(aircraft.jsbsimRoot.string());
     fdm_->SetRootDir(root);
-    fdm_->SetAircraftPath(SGPath("aircraft"));
+    fdm_->SetAircraftPath(aircraft.aircraftDir.empty() ? SGPath("aircraft") : SGPath(aircraft.aircraftDir.string()));
     fdm_->SetEnginePath(SGPath("engine"));
     fdm_->SetSystemsPath(SGPath("systems"));
 
     try {
         if (!fdm_->LoadModel(aircraft.name)) {
-            LOG_ERROR("sim") << "JSBSim failed to load aircraft '" << aircraft.name << "' from " << aircraft.jsbsimRoot.string();
+            LOG_ERROR("sim") << "JSBSim failed to load aircraft '" << aircraft.name << "' from "
+                             << (aircraft.aircraftDir.empty() ? aircraft.jsbsimRoot / "aircraft" : aircraft.aircraftDir).string();
             return false;
         }
     } catch (const std::exception& e) {

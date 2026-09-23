@@ -2,6 +2,8 @@
 
 #include "fsim/Export.h"
 
+#include <string>
+
 class SGPropertyNode; // JSBSim property node; opaque outside the flight model
 
 namespace fsim::sim {
@@ -15,7 +17,12 @@ public:
 
     bool valid() const noexcept { return node_ != nullptr; }
     double get() const noexcept;
+    /// Writes the property. A write can run model code (JSBSim's
+    /// simulation/do_simple_trim trims the aircraft); if that fails, the error
+    /// is logged and the write has no other effect.
     void set(double value) noexcept;
+    /// The same, reporting failure: false, with the reason in `error`.
+    bool trySet(double value, std::string& error) noexcept;
 
 private:
     SGPropertyNode* node_ = nullptr;

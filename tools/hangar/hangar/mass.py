@@ -1,0 +1,206 @@
+"""Mass properties: empty mass, centre of gravity and inertia tensor.
+
+Each component's mass is either given in the spec or estimated with Raymer's
+general-aviation weight equations ("Aircraft Design: A Conceptual Approach",
+15.3.3); the systems and equipment make up the rest of a given empty mass.
+Masses are spread over the geometry that carries them - a wing's over its
+skin, a fuselage's over its skin, an engine at its mounting - so the inertia
+comes from the shape, not from a radius-of-gyration guess. When the spec
+gives the empty centre of gravity (from a weight-and-balance report), the
+systems mass is placed to meet it.
+
+JSBSim takes the empty aircraft's CG and inertia (about the CG, the
+structural frame's products); the payload and fuel are its own point masses
+and tanks.
+"""
+import numpy as np
+
+LB, FT, IN = 0.45359237, 0.3048, 0.0254
+G0 = 9.80665
+
+
+def _tri_area_centroid(v, t):
+    a = 0.5 * np.linalg.norm(np.cross(v[t[:, 1]] - v[t[:, 0]], v[t[:, 2]] - v[t[:, 0]]), axis=1)
+    return a, v[t].mean(axis=1)
+
+
+def _raymer(aircraft, mtow_kg, q_cruise, n_ult=5.7, fuel_kg=0.0):
+    """Raymer's general-aviation structural weights (kg) - wing, tails,
+    fuselage, landing gear - from the design's own geometry."""
+    a = aircraft
+    W = mtow_kg / LB
+    NzW = n_ult * W
+    q = q_cruise * 0.020885  # Pa -> lb/ft2
+    out = {}
+    for s in a.surfaces:
+        S = s.area / FT**2
+        lam = max(s.taper, 0.05)
+        tc = s.thickness_ratio
+        cosL = np.cos(np.radians(s.sweep_deg(0.25)))
+        A = s.aspect_ratio if s.mirror else s.aspect_ratio
+        if s.kind in ("wing",):
+            Wfw = max(fuel_kg / LB, 1.0)
+            out[s.name] = 0.036 * S**0.758 * Wfw**0.0035 * (A / cosL**2) ** 0.6 * q**0.006 * lam**0.04 \
+                * (100 * tc / cosL) ** -0.3 * NzW**0.49
+        elif s.kind in ("htail", "canard"):
+            out[s.name] = 0.016 * NzW**0.414 * q**0.168 * S**0.896 * (100 * tc / cosL) ** -0.12 \
+                * (A / cosL**2) ** 0.043 * lam**-0.02
+        else:  # fins
+            out[s.name] = 0.073 * NzW**0.376 * q**0.122 * S**0.873 * (100 * tc / cosL) ** -0.49 \
+                * (A / cosL**2) ** 0.357 * lam**0.039
+    tails = [s for s in a.surfaces if s.kind in ("htail", "fin", "vtail")]
+    for b in a.bodies:
+        wet = 0.0
+        v, t, _ = b.skin(40, 24)
+        wet = _tri_area_centroid(v, t)[0].sum() / FT**2 / len(b.copies())
+        if b.kind == "fuselage":
+            lt = (np.mean([s.mac[1][0] for s in tails]) - a.aero_point[0]) / FT if tails else b.length / FT * 0.5
+            ld = b.length / max(b.max_height, 0.1)
+            out[b.name] = (0.052 * wet**1.086 * NzW**0.177 * max(lt, 1.0) ** -0.051 * ld**-0.072 * q**0.241) * len(b.copies())
+        else:  # nacelles, booms, pods: a light fairing
+            out[b.name] = 0.25 * wet * len(b.copies())  # ~1.2 kg/m2 of skin
+    nl = 4.5  # ultimate landing load factor
+    for g in a.gear:
+        n = 2 if g.mirror else 1
+        length = (g.attach[2] - g.position[2]) / IN if g.attach is not None else 24.0
+        if g.steerable or abs(g.position[1]) < 0.05:
+            out[g.name] = 0.125 * (nl * W) ** 0.566 * (length / 12) ** 0.845
+        else:
+            out[g.name] = 0.095 * (nl * W) ** 0.768 * (length / 12) ** 0.409 * (n / 2.0)
+        if g.retractable:
+            out[g.name] *= 1.2
+    return {k: v * LB for k, v in out.items()}
+
+
+class MassModel:
+    def __init__(self, aircraft):
+        self.aircraft = a = aircraft
+        spec = a.spec.get("mass", {})
+        self.spec = spec
+        self.payload = [dict(p) for p in spec.get("payload", [])]
+        self.tanks = [dict(t) for t in spec.get("tank", [])]
+        fuel = sum(t.get("capacity", 0.0) for t in self.tanks)
+        self.empty_target = spec.get("empty")
+        self.mtow = float(spec.get("mtow", (self.empty_target or 0) + sum(p["mass"] for p in self.payload) + fuel))
+        if not self.mtow:
+            raise ValueError("[mass]: give 'empty' (kg) or 'mtow'")
+        q = 0.5 * 1.0 * float(spec.get("cruise_speed", a.spec.get("analysis", {}).get("speed", 50.0))) ** 2
+        est = _raymer(a, self.mtow, q, fuel_kg=fuel)
+        given = spec.get("component", {})
+        self.items = []   # (name, kg, points (N, 3), weights (N,))
+        for s in a.surfaces:
+            v, t, g = s.skin(24, 12)
+            area, cen = _tri_area_centroid(v, t)
+            keep = g >= 0
+            self._add(s.name, given.get(s.name, est.get(s.name, 0.0)), cen[keep], area[keep], "structure")
+        for b in a.bodies:
+            v, t, _ = b.skin(40, 24)
+            area, cen = _tri_area_centroid(v, t)
+            self._add(b.name, given.get(b.name, est.get(b.name, 0.0)), cen, area, "structure")
+        for g in a.gear:
+            pts = np.array([p for _, p in g.positions()]) + np.array([0.0, 0.0, 0.5 * g.wheel_diameter])
+            m = given.get(g.name, est.get(g.name, 0.0))
+            self._add(g.name, m, pts, np.ones(len(pts)), "gear")
+        for e in a.engines:
+            m = float(e.mass) if e.mass is not None else self._engine_mass(e)
+            for name, pos, prop, _ in e.copies():
+                # engine block around its mounting point, the propeller at its hub
+                pts = pos + np.array([[dx, dy, dz] for dx in (-0.25, 0.25) for dy in (-0.2, 0.2) for dz in (-0.15, 0.15)])
+                self._add(name, 0.9 * m, pts, np.ones(len(pts)), "engine")
+                self._add(name + " propeller", 0.1 * m, prop[None, :], np.ones(1), "engine")
+        for item in spec.get("item", []):   # anything else, placed by hand
+            self._add(item["name"], float(item["mass"]), np.asarray([item["position"]], float), np.ones(1), "item")
+        # systems and equipment: the rest of the empty mass, in the cabin (or where
+        # it puts the empty CG on the given one)
+        structure = sum(m for _, m, _, _, _ in self.items)
+        self.systems = 0.0
+        if self.empty_target is not None:
+            self.systems = float(self.empty_target) - structure
+            if self.systems < 0:
+                # the estimates overshoot: scale the estimated structure down to fit
+                est_names = {n for n in est if n not in given}
+                scale = (float(self.empty_target) - (structure - sum(m for n, m, *_ in self.items if n in est_names))) \
+                    / max(sum(m for n, m, *_ in self.items if n in est_names), 1e-9)
+                scale = max(scale, 0.3)
+                self.items = [(n, m * scale if n in est_names else m, p, w, k) for n, m, p, w, k in self.items]
+                self.systems = float(self.empty_target) - sum(m for _, m, _, _, _ in self.items)
+            self.systems = max(self.systems, 0.0)
+        if self.systems > 0:
+            pos = self._systems_position()
+            self._add("systems", self.systems, pos[None, :], np.ones(1), "systems")
+
+    def _add(self, name, mass, pts, weights, kind):
+        if mass <= 0:
+            return
+        w = np.asarray(weights, float)
+        self.items.append((name, float(mass), np.asarray(pts, float), w / w.sum(), kind))
+
+    def _engine_mass(self, e):
+        """Installed piston engine (Raymer 15.3.3: 2.575 W_en^0.922, W_en
+        ~1.4 lb/hp dry) or an electric motor with controller (~5 kW/kg)."""
+        hp = e.power_kw / 0.7457
+        if e.type == "electric":
+            return e.power_kw / 5.0 * 1.3
+        dry = 1.4 * hp
+        return 2.575 * dry**0.922 * LB * 0.75
+
+    def _systems_position(self):
+        """Where the systems mass goes: at the given empty CG's position
+        solved for, or 30 % down the fuselage."""
+        target = self.spec.get("empty_cg")
+        m0 = sum(m for _, m, _, _, _ in self.items)
+        c0 = sum(m * (w[:, None] * p).sum(axis=0) for _, m, p, w, _ in self.items) / max(m0, 1e-9)
+        if target is not None:
+            target = np.asarray(target, float)
+            return (target * (m0 + self.systems) - c0 * m0) / self.systems
+        fus = [b for b in self.aircraft.bodies if b.kind == "fuselage"]
+        if fus:
+            b = fus[0]
+            x = b.x[0] + 0.3 * b.length
+            w, top, bot, yc, _ = b.section(x)
+            return np.array([x, 0.0, 0.5 * (top + bot)])
+        return self.aircraft.aero_point.copy()
+
+    # -- results --------------------------------------------------------------------------------
+    def empty(self):
+        """Mass, CG and inertia (about the CG; the structural frame's
+        moments and plain products of inertia) of the empty aircraft."""
+        m = sum(mi for _, mi, _, _, _ in self.items)
+        cg = sum(mi * (w[:, None] * p).sum(axis=0) for _, mi, p, w, _ in self.items) / m
+        J = np.zeros((3, 3))
+        for _, mi, p, w, _ in self.items:
+            r = p - cg
+            dm = mi * w
+            J += np.einsum("n,ni,nj->ij", dm, r, r)
+        # moments of inertia and the products the structural frame gives
+        ixx = J[1, 1] + J[2, 2]
+        iyy = J[0, 0] + J[2, 2]
+        izz = J[0, 0] + J[1, 1]
+        return {"mass": m, "cg": cg, "ixx": ixx, "iyy": iyy, "izz": izz,
+                "ixy": J[0, 1], "ixz": J[0, 2], "iyz": J[1, 2]}
+
+    def loaded(self, fuel_fraction=1.0, payload=True):
+        """Mass and CG with payload and fuel (for checks and the flight tests)."""
+        e = self.empty()
+        m, mc = e["mass"], e["mass"] * e["cg"]
+        for p in (self.payload if payload else []):
+            m += p["mass"]
+            mc = mc + p["mass"] * np.asarray(p["position"], float)
+        for t in self.tanks:
+            f = t.get("capacity", 0.0) * fuel_fraction
+            m += f
+            mc = mc + f * np.asarray(t["position"], float)
+        return m, mc / m
+
+    def breakdown(self):
+        return [(n, m, k) for n, m, _, _, k in self.items]
+
+    def gyration(self):
+        """Non-dimensional radii of gyration (Roskam's R_x, R_y, R_z) of the
+        empty aircraft, to compare with the statistics of its class."""
+        e = self.empty()
+        a = self.aircraft
+        length = max((b.length for b in a.bodies), default=a.c * 5)
+        m = e["mass"]
+        return {"Rx": 2 * np.sqrt(e["ixx"] / m) / a.b, "Ry": 2 * np.sqrt(e["iyy"] / m) / length,
+                "Rz": 2 * np.sqrt(e["izz"] / m) / (0.5 * (a.b + length))}

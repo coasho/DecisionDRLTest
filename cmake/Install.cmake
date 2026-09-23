@@ -69,6 +69,14 @@ if(TARGET fsim_vision)
 endif()
 fsim_install_runtime_deps(sdk ${_fsim_sdk_runtime})
 
+# Aircraft designed with tools/hangar (aircraft/<name>/): their JSBSim files
+# and model, to share/flightsim/aircraft/<name> (cmake/StageDesigns.cmake).
+function(fsim_install_designs component)
+    install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" -DSRC=${CMAKE_SOURCE_DIR}/aircraft
+                                  \"-DDEST=\${CMAKE_INSTALL_PREFIX}/share/flightsim/aircraft\"
+                                  -P ${CMAKE_SOURCE_DIR}/cmake/StageDesigns.cmake)" COMPONENT ${component})
+endfunction()
+
 # ---------------------------------------------------------------- viewer
 if(TARGET flightsim-viewer)
     set(_fsim_viewer_targets flightsim-viewer)
@@ -86,6 +94,7 @@ if(TARGET flightsim-viewer)
     install(DIRECTORY ${CMAKE_BINARY_DIR}/share/flightsim/ DESTINATION share/flightsim COMPONENT viewer)
     install(DIRECTORY ${FSIM_JSBSIM_DATA_DIR}/aircraft ${FSIM_JSBSIM_DATA_DIR}/engine ${FSIM_JSBSIM_DATA_DIR}/systems
             DESTINATION share/flightsim/jsbsim COMPONENT viewer)
+    fsim_install_designs(viewer)
     install(DIRECTORY ${CMAKE_SOURCE_DIR}/examples/scenarios DESTINATION share/flightsim COMPONENT viewer)
 
     # Configuration, read from <exe>/../config/viewer.json in both the build
@@ -121,6 +130,7 @@ endif()
 install(TARGETS flightsim RUNTIME DESTINATION bin COMPONENT tools)
 install(DIRECTORY ${FSIM_JSBSIM_DATA_DIR}/aircraft ${FSIM_JSBSIM_DATA_DIR}/engine ${FSIM_JSBSIM_DATA_DIR}/systems
         DESTINATION share/flightsim/jsbsim COMPONENT tools)
+fsim_install_designs(tools)
 fsim_install_runtime_deps(tools "flightsim.exe")
 
 # ---------------------------------------------------------------- examples

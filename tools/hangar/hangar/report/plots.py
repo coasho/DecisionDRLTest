@@ -1,0 +1,241 @@
+"""Plots of every stage's numbers, made to be looked at: curves with the
+values a check compares against marked on them."""
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+
+
+def polars(polars, path, deltas=None, title="section polars"):
+    """cl, cd, cm of named SectionPolars over the whole circle and zoomed
+    into the attached range. deltas: flap deflections (deg) to add for the
+    first polar that has a flap."""
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8.5), dpi=100)
+    full = np.radians(np.linspace(-180, 180, 1441))
+    near = np.radians(np.linspace(-25, 30, 551))
+    for name, p in polars.items():
+        for row, a in enumerate((full, near)):
+            cl, cd, cm = p.evaluate(a)
+            deg = np.degrees(a)
+            line, = axes[row, 0].plot(deg, cl, label=name)
+            axes[row, 1].plot(deg, cd, color=line.get_color())
+            axes[row, 2].plot(deg, cm, color=line.get_color())
+            if deltas and p.flap_chord:
+                for d in deltas:
+                    cl, cd, cm = p.evaluate(a, np.radians(d))
+                    kw = dict(color=line.get_color(), ls="--", lw=0.8)
+                    axes[row, 0].plot(deg, cl, **kw)
+                    axes[row, 1].plot(deg, cd, **kw)
+                    axes[row, 2].plot(deg, cm, **kw)
+    for row in range(2):
+        for col, lab in enumerate(("cl", "cd", "cm (c/4)")):
+            ax = axes[row, col]
+            ax.set_xlabel("alpha (deg)")
+            ax.set_ylabel(lab)
+            ax.grid(True, lw=0.3)
+            ax.axhline(0, color="k", lw=0.5)
+            ax.axvline(0, color="k", lw=0.5)
+    axes[0, 0].legend(fontsize=8)
+    axes[1, 1].set_ylim(0, 0.12)
+    fig.suptitle(title + (" (dashed: flap %s deg)" % ", ".join("%g" % d for d in deltas) if deltas else ""))
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def histories(runs, path, title, channels=("alt", "tas", "alpha", "theta", "de", "thr", "vs", "rpm")):
+    """Time histories of several runs overlaid (name -> history dict)."""
+    labels = {"alt": "altitude (m)", "tas": "true airspeed (m/s)", "kcas": "KCAS", "alpha": "alpha (deg)",
+              "beta": "beta (deg)", "theta": "pitch (deg)", "phi": "bank (deg)", "p": "p (deg/s)", "q": "q (deg/s)",
+              "r": "r (deg/s)", "de": "elevator (deg)", "da": "aileron (deg)", "dr": "rudder (deg)", "thr": "throttle",
+              "vs": "vertical speed (m/s)", "rpm": "propeller rpm", "cl": "CL (from load factor)", "nz": "load factor"}
+    n = len(channels)
+    cols = 2
+    rows = (n + 1) // 2
+    fig, axes = plt.subplots(rows, cols, figsize=(14, 2.6 * rows), dpi=100, sharex=True)
+    for ax, ch in zip(axes.flat, channels):
+        for name, h in runs.items():
+            if ch in h:
+                ax.plot(h["t"], h[ch], lw=1.0, label=name)
+        ax.set_ylabel(labels.get(ch, ch), fontsize=8)
+        ax.grid(True, lw=0.3)
+        ax.tick_params(labelsize=7)
+    axes.flat[0].legend(fontsize=8)
+    for ax in axes[-1]:
+        ax.set_xlabel("time (s)", fontsize=8)
+    fig.suptitle(title)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def coefficients(tabs, path, name):
+    """The six base coefficients over the whole alpha circle (beta 0 and a
+    few sideslips), with a zoom on the flight range and the control
+    increments."""
+    a, b = tabs["alpha"], tabs["beta"]
+    base = tabs["base"]
+    fig, axes = plt.subplots(3, 4, figsize=(18, 11), dpi=95)
+    betas = [0.0, 10.0, 30.0, 70.0]
+    for col, (k, lab) in enumerate((("CL", "CL"), ("CD", "CD"), ("Cm", "Cm (about ARP)"))):
+        ax = axes[0, col]
+        for bb in betas:
+            j = int(np.argmin(np.abs(b - bb)))
+            ax.plot(a, base[k][:, j], lw=1.0, label="beta %g" % b[j])
+        ax.set_title(lab + ", whole circle", fontsize=9)
+        ax.grid(True, lw=0.3)
+        ax.set_xlim(-180, 180)
+        ax.axhline(0, color="k", lw=0.5)
+        ax = axes[1, col]
+        j0 = int(np.argmin(np.abs(b)))
+        k2 = (a >= -25) & (a <= 35)
+        ax.plot(a[k2], base[k][k2, j0], "k", lw=1.4, label="clean")
+        for ch, t in tabs["controls"].items():
+            if k in t:
+                d = t["deflection"]
+                for jd in (0, len(d) - 1):
+                    if abs(d[jd]) < 1e-9:
+                        continue
+                    ax.plot(a[k2], base[k][k2, j0] + t[k][k2, jd], lw=0.8, ls="--", label="%s %+g" % (ch, d[jd]))
+        ax.set_title(lab + ", flight range, beta 0, with controls", fontsize=9)
+        ax.grid(True, lw=0.3)
+        ax.axhline(0, color="k", lw=0.5)
+        ax.legend(fontsize=6)
+    axes[0, 0].legend(fontsize=7)
+    # lift-drag polar
+    ax = axes[0, 3]
+    j0 = int(np.argmin(np.abs(b)))
+    k2 = (a >= -10) & (a <= 25)
+    ax.plot(base["CD"][k2, j0], base["CL"][k2, j0], "k")
+    ld = base["CL"][k2, j0] / np.maximum(base["CD"][k2, j0], 1e-6)
+    i = int(np.argmax(ld))
+    ax.plot(base["CD"][k2, j0][i], base["CL"][k2, j0][i], "ro")
+    ax.set_title("drag polar (L/D max %.1f at CL %.2f)" % (ld[i], base["CL"][k2, j0][i]), fontsize=9)
+    ax.set_xlabel("CD")
+    ax.set_ylabel("CL")
+    ax.grid(True, lw=0.3)
+    # lateral coefficients vs beta at a few alphas
+    for col, k in enumerate(("CY", "Cl", "Cn")):
+        ax = axes[2, col]
+        for aa in (0.0, 10.0, 20.0, 40.0):
+            i = int(np.argmin(np.abs(a - aa)))
+            ax.plot(b, base[k][i, :], lw=1.0, label="alpha %g" % a[i])
+        ax.set_title("%s over beta" % k, fontsize=9)
+        ax.set_xlabel("beta (deg)")
+        ax.grid(True, lw=0.3)
+        ax.axhline(0, color="k", lw=0.5)
+        ax.legend(fontsize=7)
+    ax = axes[2, 3]
+    ge = tabs["ground_effect"]
+    ax.plot(ge["h_b"], ge["lift"], label="lift factor")
+    ax.plot(ge["h_b"], ge["drag"], label="induced drag factor")
+    ax.set_title("ground effect (h/b)", fontsize=9)
+    ax.grid(True, lw=0.3)
+    ax.legend(fontsize=7)
+    axes[1, 3].axis("off")
+    axes[1, 3].text(0.0, 1.0, _derivative_text(tabs), va="top", family="monospace", fontsize=8)
+    fig.suptitle("%s: aerodynamic tables" % name)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def _derivative_text(tabs):
+    from ..aero.tables import derivatives
+    d = derivatives(tabs)
+    rows = ["stability derivatives (per rad, alpha 2 deg)", ""]
+    keys = [("CLa", "CL_alpha"), ("Cma", "Cm_alpha"), ("CYb", "CY_beta"), ("Clb", "Cl_beta"), ("Cnb", "Cn_beta"),
+            ("Clp", "Cl_p"), ("Cnp", "Cn_p"), ("Clr", "Cl_r"), ("Cnr", "Cn_r"), ("CLq", "CL_q"), ("Cmq", "Cm_q"),
+            ("Cmad", "Cm_alphadot"), ("Cm_elevator", "Cm_de"), ("CL_elevator", "CL_de"), ("Cl_aileron", "Cl_da"),
+            ("Cn_aileron", "Cn_da"), ("Cn_rudder", "Cn_dr"), ("CY_rudder", "CY_dr"), ("CL_flap", "CL_df")]
+    for k, lab in keys:
+        if k in d:
+            rows.append("%-12s %9.4f" % (lab, d[k]))
+    return chr(10).join(rows)
+
+
+def derivatives_vs_alpha(tabs, path, name):
+    """Damping and control derivatives over alpha: where they change sign
+    (roll damping turning into autorotation past the stall) is where the
+    aircraft departs."""
+    a = tabs["alpha"]
+    k = (a >= -30) & (a <= 60)
+    fig, axes = plt.subplots(2, 3, figsize=(16, 8), dpi=95)
+    r = tabs["rates"]
+    panels = [("Cl", "p", "roll damping Cl_p"), ("Cn", "r", "yaw damping Cn_r"), ("Cm", "q", "pitch damping Cm_q")]
+    for ax, (c, rate, lab) in zip(axes[0], panels):
+        ax.plot(a[k], r[rate][c][k], "k")
+        ax.set_title(lab, fontsize=9)
+        ax.axhline(0, color="r", lw=0.6)
+        ax.grid(True, lw=0.3)
+    ctl = tabs["controls"]
+    for ax, (ch, c, lab) in zip(axes[1], (("elevator", "Cm", "Cm from elevator"), ("aileron", "Cl", "Cl from aileron"),
+                                           ("rudder", "Cn", "Cn from rudder"))):
+        if ch in ctl:
+            t = ctl[ch]
+            for jd, d in enumerate(t["deflection"]):
+                if abs(d) > 1e-9:
+                    ax.plot(a[k], t[c][k, jd], lw=0.8, label="%+g deg" % d)
+            ax.legend(fontsize=6, ncol=2)
+        ax.set_title(lab, fontsize=9)
+        ax.axhline(0, color="k", lw=0.5)
+        ax.grid(True, lw=0.3)
+        ax.set_xlabel("alpha (deg)")
+    fig.suptitle("%s: rate and control derivatives over alpha" % name)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def propeller(tabs, path):
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.2), dpi=95)
+    for name, t in tabs.items():
+        J, ct, cp = t["J"], t["CT"], t["CP"]
+        eff = np.where(cp > 1e-6, J * ct / np.maximum(cp, 1e-9), np.nan)
+        axes[0].plot(J, ct, label=name)
+        axes[1].plot(J, cp, label=name)
+        axes[2].plot(J, np.clip(eff, 0, 1), label=name)
+    for ax, lab in zip(axes, ("thrust coefficient CT", "power coefficient CP", "efficiency")):
+        ax.set_xlabel("advance ratio J")
+        ax.set_title(lab, fontsize=9)
+        ax.grid(True, lw=0.3)
+        ax.axhline(0, color="k", lw=0.5)
+    axes[0].legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def trim_sweep(runs, path):
+    fig, axes = plt.subplots(1, 4, figsize=(18, 4.2), dpi=95)
+    for name, rows in runs.items():
+        ok = [r for r in rows if r["ok"]]
+        v = np.array([r["kcas"] for r in ok])
+        for ax, key in zip(axes, ("alpha_deg", "elevator_deg", "throttle", "pitch_deg")):
+            ax.plot(v, [r[key] for r in ok], "o-", ms=3, label=name)
+    for ax, lab in zip(axes, ("trim alpha (deg)", "trim elevator (deg)", "trim throttle", "trim pitch (deg)")):
+        ax.set_xlabel("KCAS")
+        ax.set_title(lab, fontsize=9)
+        ax.grid(True, lw=0.3)
+    axes[0].legend(fontsize=8)
+    fig.suptitle("trimmed level flight at sea level")
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def climb(runs, path):
+    fig, ax = plt.subplots(1, 1, figsize=(7, 4.5), dpi=95)
+    for name, c in runs.items():
+        rows = [r for r in c["rows"] if r and r.get("rate_ms") is not None and np.isfinite(r["rate_ms"])]
+        ax.plot([r["rate_ms"] / 0.3048 * 60 for r in rows], [r["altitude_m"] / 0.3048 for r in rows], "o-", label=name)
+    ax.axvline(100, color="k", lw=0.6, ls="--")
+    ax.set_xlabel("best rate of climb (ft/min)")
+    ax.set_ylabel("altitude (ft)")
+    ax.set_title("climb at full throttle (service ceiling at 100 ft/min)", fontsize=9)
+    ax.grid(True, lw=0.3)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)

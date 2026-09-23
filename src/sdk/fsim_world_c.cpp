@@ -278,7 +278,8 @@ FSIM_API int fsim_vehicle_set_property(fsim_world* world, uint32_t id, const cha
     if (!m) return FSIM_INVALID_ARGUMENT;
     auto h = m->property(path);
     if (!h.valid()) return fail(FSIM_INVALID_ARGUMENT, std::string("unknown property ") + path);
-    h.set(value);
+    std::string error;
+    if (!h.trySet(value, error)) return fail(FSIM_ERROR, std::string("set ") + path + ": " + error);
     return FSIM_OK;
 }
 

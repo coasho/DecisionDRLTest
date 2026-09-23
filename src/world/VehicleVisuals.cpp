@@ -276,8 +276,10 @@ std::string VehicleVisuals::resolveModel(const std::string& modelPath, const std
         if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.')) c = '_';
     if (name.empty()) return {};
     for (const auto& dir : settings_.modelDirs)
-        for (const char* ext : {".glb", ".gltf"})
+        for (const char* ext : {".glb", ".gltf"}) {
             if (fs::exists(dir / (name + ext))) return (dir / (name + ext)).string();
+            if (fs::exists(dir / name / (name + ext))) return (dir / name / (name + ext)).string(); // an aircraft folder
+        }
     return {};
 }
 

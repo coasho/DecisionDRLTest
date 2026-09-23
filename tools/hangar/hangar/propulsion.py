@@ -1,0 +1,218 @@
+"""Propellers and engines.
+
+A fixed-pitch propeller's thrust and power coefficients over advance ratio
+come from blade-element momentum theory (Glauert; with Prandtl's tip and
+hub losses), solved for the induced velocities directly so it holds from the
+static case (J = 0) through zero thrust into windmilling. The blade sections
+use the same full-circle section polars as the wings (section.py), so a
+blade stalled at low advance ratio behaves like one.
+
+Blade geometry, when the spec gives only diameter, blade count and pitch: a
+constant-pitch helix at the given geometric pitch, a typical general-aviation
+chord distribution (activity factor ~85) and a NACA 4412 section (close to
+the Clark Y most metal propellers use).
+
+JSBSim's propeller wants C_THRUST(J) and C_POWER(J) with CT = T/(rho n^2 D^4),
+CP = P/(rho n^3 D^5), n in rev/s; its piston engine a handful of numbers.
+"""
+import math
+
+import numpy as np
+
+from .aero.section import SectionPolar
+from .geometry import airfoil as af
+
+RHO0, NU0 = 1.225, 1.46e-5
+HP = 745.7
+
+
+class Propeller:
+    def __init__(self, engine, n_elements=30):
+        spec = engine.prop_spec
+        self.D = engine.prop_diameter
+        self.R = 0.5 * self.D
+        self.B = engine.prop_blades
+        pitch = engine.prop_pitch
+        if pitch is None:
+            pitch = 0.75 * self.D  # a cruise-ish default
+        self.pitch = float(pitch)
+        self.rpm = engine.rpm * float(spec.get("gear_ratio", 1.0))
+        self.hub = float(spec.get("hub_fraction", 0.15))
+        x = np.linspace(self.hub, 1.0, n_elements + 1)
+        self.x = 0.5 * (x[1:] + x[:-1])       # element centres, r/R
+        self.dx = np.diff(x)
+        chord = spec.get("chord")              # [[r/R, c/R], ...] optional
+        if chord:
+            c = np.asarray(chord, float)
+            self.c_R = np.interp(self.x, c[:, 0], c[:, 1])
+        else:
+            self.c_R = 0.16 - 0.08 * self.x**2
+        twist = spec.get("twist")              # [[r/R, deg], ...] optional, else a constant-pitch helix
+        if twist:
+            t = np.asarray(twist, float)
+            self.beta = np.radians(np.interp(self.x, t[:, 0], t[:, 1]))
+        else:
+            self.beta = np.arctan(self.pitch / (2 * math.pi * self.x * self.R))
+        foil = af.get(spec.get("airfoil", "naca4412"))
+        vtip = 2 * math.pi * self.rpm / 60 * self.R
+        ar = 1.0 / np.mean(self.c_R)
+        self.polars = [SectionPolar(foil, re=max(vtip * xi * ci * self.R / NU0, 1e5), aspect_ratio=ar)
+                       for xi, ci in zip(self.x, self.c_R)]
+        self.activity_factor = float(100000.0 / 16.0 * np.sum(0.5 * self.c_R * self.x**3 * self.dx))
+        self.ixx = float(spec.get("ixx", 0.0)) or None
+
+    def element_forces(self, J):
+        """Thrust and power coefficients at advance ratio J (BEMT)."""
+        n = self.rpm / 60.0
+        omega = 2 * math.pi * n
+        V = J * n * self.D
+        r = self.x * self.R
+        c = self.c_R * self.R
+        dr = self.dx * self.R
+        vi = np.full_like(r, 0.05 * omega * self.R)   # axial induced velocity
+        vt = np.zeros_like(r)                         # swirl
+        for _ in range(200):
+            va = V + vi
+            ut = omega * r - vt
+            W = np.hypot(va, ut)
+            phi = np.arctan2(va, ut)
+            alpha = self.beta - phi
+            cl = np.empty_like(r)
+            cd = np.empty_like(r)
+            for k, p in enumerate(self.polars):
+                cl[k], cd[k], _ = p.evaluate(alpha[k])
+            cn = cl * np.cos(phi) - cd * np.sin(phi)
+            ct = cl * np.sin(phi) + cd * np.cos(phi)
+            # Prandtl tip and hub losses
+            sphi = np.maximum(np.abs(np.sin(phi)), 0.05)
+            f_tip = self.B / 2.0 * (self.R - r) / (r * sphi)
+            f_hub = self.B / 2.0 * (r - self.hub * self.R) / (self.hub * self.R * sphi)
+            F = (2 / math.pi) ** 2 * np.arccos(np.exp(-np.clip(f_tip, 0, 50))) * np.arccos(np.exp(-np.clip(f_hub, 0, 50)))
+            F = np.maximum(F, 0.05)
+            # momentum balance per annulus: element thrust = 4 pi r rho (V + vi) vi F dr
+            dT_be = 0.5 * RHO0 * W**2 * self.B * c * cn
+            dQ_be = 0.5 * RHO0 * W**2 * self.B * c * ct * r
+            # solve 4 pi r F (V + vi) vi = dT_be / dr for vi (the root with the flow's sign)
+            k = dT_be / (4 * math.pi * r * RHO0 * F)
+            disc = V * V + 4 * k
+            vi_new = np.where(disc >= 0, 0.5 * (-V + np.sqrt(np.maximum(disc, 0.0))), -0.5 * V)
+            vt_new = dQ_be / (4 * math.pi * r**3 * RHO0 * F * np.maximum(np.abs(va), 1e-3)) * r
+            vt_new = np.clip(vt_new, -0.5 * omega * r, 0.5 * omega * r)
+            dv = np.max(np.abs(vi_new - vi)) + np.max(np.abs(vt_new - vt))
+            vi = 0.6 * vi + 0.4 * vi_new
+            vt = 0.6 * vt + 0.4 * vt_new
+            if dv < 1e-6 * omega * self.R:
+                break
+        T = float(np.sum(dT_be * dr))
+        Q = float(np.sum(dQ_be * dr))
+        P = Q * omega
+        return T / (RHO0 * n**2 * self.D**4), P / (RHO0 * n**3 * self.D**5)
+
+    def tables(self, j_max=2.4, dj=0.1):
+        J = np.round(np.arange(0.0, j_max + 1e-9, dj), 3)
+        ct, cp = zip(*[self.element_forces(j) for j in J])
+        return {"J": J, "CT": np.array(ct), "CP": np.array(cp)}
+
+    def inertia(self, mass):
+        """Spin inertia (kg m^2) of the blades: a blade is roughly a slender
+        rod, (1/3) m R^2 over the blades' share of the propeller mass."""
+        return self.ixx or (0.7 * mass) * self.R**2 / 3.0
+
+
+def static_numbers(tab, D, rpm, power_w):
+    """Static thrust and the peak efficiency, for checks."""
+    n = rpm / 60.0
+    eff = np.where(tab["CP"] > 1e-6, tab["J"] * tab["CT"] / tab["CP"], 0.0)
+    i = int(np.argmax(eff))
+    zero = float(np.interp(0.0, -tab["CT"], tab["J"])) if np.any(tab["CT"] < 0) else float("nan")
+    # static thrust at the power the engine gives: find n where CP rho n^3 D^5 = P
+    n_static = (power_w / (tab["CP"][0] * RHO0 * D**5)) ** (1 / 3)
+    return {"static_thrust_n": float(tab["CT"][0] * RHO0 * min(n, n_static) ** 2 * D**4),
+            "peak_efficiency": float(eff[i]), "peak_efficiency_J": float(tab["J"][i]), "zero_thrust_J": float(zero)}
+
+
+def piston_xml(engine):
+    """A JSBSim piston engine scaled from the given power and rpm."""
+    hp = engine.power_kw * 1000.0 / HP
+    disp = float(engine.prop_spec.get("displacement_in3", 0.0)) or 2.0 * hp
+    return """<?xml version="1.0"?>
+<!-- Generated by hangar: a piston engine scaled from %.0f hp at %.0f rpm. -->
+<piston_engine name="%s">
+  <minmp unit="INHG">        10.0 </minmp>
+  <maxmp unit="INHG">        28.5 </maxmp>
+  <displacement unit="IN3"> %.1f </displacement>
+  <maxhp>                   %.1f </maxhp>
+  <bsfc>                     0.45 </bsfc>
+  <cycles>                    4.0 </cycles>
+  <idlerpm>                 %.0f </idlerpm>
+  <maxrpm>                  %.0f </maxrpm>
+  <maxthrottle>               1.0 </maxthrottle>
+  <minthrottle>               0.1 </minthrottle>
+  <sparkfaildrop>             0.1 </sparkfaildrop>
+</piston_engine>
+""" % (hp, engine.rpm, engine.name, disp, hp, 0.22 * engine.rpm, engine.rpm)
+
+
+def electric_xml(engine):
+    """A JSBSim brushless DC motor (Drela's first-order motor model: current
+    (V - rpm/Kv)/R, torque from the current above the no-load current) sized
+    for the given power at the given rpm: the battery voltage steps with power,
+    Kv puts the rated rpm at 85 % of the no-load speed, and the coil resistance
+    gives the rated power there. Its torque is finite at standstill, so it
+    spins a propeller up stably - JSBSim's plain "electric" engine divides
+    power by rpm and does not."""
+    P = engine.power_kw * 1000.0
+    V = float(engine.prop_spec.get("battery_volts", 0.0)) or (11.1 if P < 600 else 22.2 if P < 2500 else 44.4 if P < 8000 else 88.8)
+    kv = engine.rpm / (0.85 * V)
+    R = 0.1275 * V * V / P
+    i0 = max(0.3, 0.012 * 0.15 * V / R)
+    return """<?xml version="1.0"?>
+<!-- Generated by hangar: a brushless DC motor for %.2f kW at %.0f rpm on %.1f V. -->
+<brushless_dc_motor name="%s">
+  <velocityconstant> %.2f </velocityconstant>
+  <coilresistance unit="OHMS"> %.5f </coilresistance>
+  <noloadcurrent unit="AMPERES"> %.3f </noloadcurrent>
+  <maxvolts unit="VOLTS"> %.2f </maxvolts>
+</brushless_dc_motor>
+""" % (engine.power_kw, engine.rpm, V, engine.name, kv, R, i0, V)
+
+
+def propeller_xml(prop, tab, mass, name):
+    rows = "\n".join("      %5.2f  %9.5f" % (j, v) for j, v in zip(tab["J"], tab["CT"]))
+    rowp = "\n".join("      %5.2f  %9.5f" % (j, v) for j, v in zip(tab["J"], tab["CP"]))
+    ixx = prop.inertia(mass) * 0.73756  # kg m2 -> slug ft2
+    return """<?xml version="1.0"?>
+<!-- Generated by hangar: blade-element momentum theory for a %d-blade fixed-pitch
+     propeller, %.3f m diameter, %.3f m geometric pitch (activity factor %.0f). -->
+<propeller name="%s">
+  <ixx> %.3f </ixx>
+  <diameter unit="M"> %.4f </diameter>
+  <numblades> %d </numblades>
+  <table name="C_THRUST" type="internal">
+    <tableData>
+%s
+      5.00  %9.5f
+    </tableData>
+  </table>
+  <table name="C_POWER" type="internal">
+    <tableData>
+%s
+      5.00  %9.5f
+    </tableData>
+  </table>
+  <table name="CT_MACH" type="internal">
+    <tableData>
+      0.85   1.0
+      1.05   0.8
+    </tableData>
+  </table>
+  <table name="CP_MACH" type="internal">
+    <tableData>
+      0.85   1.0
+      1.05   1.8
+      2.00   1.4
+    </tableData>
+  </table>
+</propeller>
+""" % (prop.B, prop.D, prop.pitch, prop.activity_factor, name, ixx, prop.D, prop.B, rows, tab["CT"][-1], rowp,
+       tab["CP"][-1])

@@ -19,6 +19,10 @@ class GroundProvider;
 struct AircraftSpec {
     std::string name;                 ///< JSBSim aircraft name, e.g. "c172x", "f16"
     std::filesystem::path jsbsimRoot; ///< directory containing aircraft/, engine/, systems/
+    /// Directory holding <name>/<name>.xml when it is not <jsbsimRoot>/aircraft
+    /// (aircraft of our own: io::AssetResolver::findAircraft). The aircraft's
+    /// Engines/ folder is searched before <jsbsimRoot>/engine, as JSBSim does.
+    std::filesystem::path aircraftDir = {};
 };
 
 

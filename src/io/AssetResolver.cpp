@@ -3,6 +3,9 @@
 #include "core/Log.h"
 #include "platform/Paths.h"
 
+#include <cstdlib>
+#include <string>
+
 namespace fsim::io {
 
 namespace fs = std::filesystem;
@@ -39,6 +42,50 @@ bool AssetResolver::looksLikeJsbsimRoot(const fs::path& dir) {
     std::error_code ec;
     return fs::is_directory(dir / "aircraft", ec) && fs::is_directory(dir / "engine", ec) &&
            fs::is_directory(dir / "systems", ec);
+}
+
+namespace {
+
+// FSIM_AIRCRAFT_PATH: directories of aircraft folders, ';'-separated.
+std::vector<fs::path> environmentAircraftDirs() {
+    std::vector<fs::path> out;
+    const char* env = std::getenv("FSIM_AIRCRAFT_PATH");
+    if (!env) return out;
+    const std::string list(env);
+    std::size_t start = 0;
+    for (;;) {
+        const std::size_t end = list.find(';', start);
+        const std::string item = list.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (!item.empty()) out.emplace_back(item);
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return out;
+}
+
+} // namespace
+
+std::vector<fs::path> AssetResolver::aircraftDirs() const {
+    std::vector<fs::path> out = environmentAircraftDirs();
+    std::error_code ec;
+    for (const auto& base : paths_)
+        if (fs::is_directory(base / "aircraft", ec)) out.push_back(base / "aircraft");
+#ifdef FSIM_AIRCRAFT_DIR
+    if (fs::is_directory(FSIM_AIRCRAFT_DIR, ec)) out.emplace_back(FSIM_AIRCRAFT_DIR);
+#endif
+    return out;
+}
+
+fs::path AssetResolver::findAircraft(const std::string& name, const fs::path& jsbsimRoot) const {
+    std::error_code ec;
+    auto has = [&](const fs::path& dir) { return fs::is_regular_file(dir / name / (name + ".xml"), ec); };
+    // an explicit FSIM_AIRCRAFT_PATH may shadow a stock aircraft; the rest may not
+    for (const auto& dir : environmentAircraftDirs())
+        if (has(dir)) return fs::weakly_canonical(dir, ec);
+    if (!jsbsimRoot.empty() && has(jsbsimRoot / "aircraft")) return {};
+    for (const auto& dir : aircraftDirs())
+        if (has(dir)) return fs::weakly_canonical(dir, ec);
+    return {};
 }
 
 std::optional<fs::path> AssetResolver::jsbsimRoot(const fs::path& explicitRoot) const {

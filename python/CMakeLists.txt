@@ -109,6 +109,9 @@ if(TARGET fsim_vision AND EXISTS ${CMAKE_BINARY_DIR}/share/flightsim/models)
     list(APPEND _fsim_py_stage_commands
         COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_BINARY_DIR}/share/flightsim/models ${_fsim_py_share}/models)
 endif()
+list(APPEND _fsim_py_stage_commands
+    COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR}/aircraft -DDEST=${_fsim_py_share}/aircraft
+            -P ${CMAKE_SOURCE_DIR}/cmake/StageDesigns.cmake)
 add_custom_target(python_package ALL
     ${_fsim_py_stage_commands}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${FSIM_PY_PACKAGE}/bin
@@ -135,6 +138,12 @@ if(FSIM_BUILD_TESTS)
         list(APPEND _fsim_py_test_env "FSIM_TEST_PLUGIN=$<TARGET_FILE:climb_task>")
     endif()
     set_tests_properties(python_sdk PROPERTIES ENVIRONMENT "${_fsim_py_test_env}" TIMEOUT 900)
+    # hangar, the aircraft design tool: its methods against theory and
+    # published data, and every stage end to end through this package
+    add_test(NAME hangar COMMAND "${FSIM_PYTHON}" -m unittest discover
+             -s ${CMAKE_SOURCE_DIR}/tools/hangar/tests -t ${CMAKE_SOURCE_DIR}/tools/hangar)
+    set_tests_properties(hangar PROPERTIES TIMEOUT 900
+        ENVIRONMENT "PYTHONPATH=${FSIM_PY_STAGE};FSIM_TEST_OUTPUT=${CMAKE_BINARY_DIR}/hangar-test")
 endif()
 
 # Installed as its own component: dist/python/fsim, and a wheel beside it

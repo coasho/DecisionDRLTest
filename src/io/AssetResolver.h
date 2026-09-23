@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace fsim::io {
@@ -27,6 +28,18 @@ public:
     /// a `jsbsim/aircraft` or `aircraft` directory, else the build-time
     /// submodule location.
     std::optional<std::filesystem::path> jsbsimRoot(const std::filesystem::path& explicitRoot = {}) const;
+
+    /// Directories of aircraft folders (<dir>/<name>/<name>.xml) beyond a
+    /// JSBSim root's aircraft/: each entry of FSIM_AIRCRAFT_PATH, then
+    /// <searchPath>/aircraft (packages: share/flightsim/aircraft), then the
+    /// source tree's aircraft/ (designs made with tools/hangar).
+    std::vector<std::filesystem::path> aircraftDirs() const;
+
+    /// Where the aircraft `name` lives if not in `jsbsimRoot`/aircraft: the
+    /// first aircraftDirs() entry with <name>/<name>.xml (FSIM_AIRCRAFT_PATH
+    /// comes before the JSBSim root, so it can override one). Empty: use the
+    /// root's own aircraft/ (or nothing has it, and loading reports that).
+    std::filesystem::path findAircraft(const std::string& name, const std::filesystem::path& jsbsimRoot) const;
 
     const std::vector<std::filesystem::path>& searchPaths() const noexcept { return paths_; }
 

@@ -43,6 +43,7 @@ if /i "%CMD%"=="cameras"  call :run "%EXAMPLES%\vision_capture.exe" --segmentati
 if /i "%CMD%"=="headless" call :run "%BIN%\flightsim.exe" !ARGS! & exit /b !errorlevel!
 if /i "%CMD%"=="tiles"    call :run "%BIN%\tile_prefetch.exe" !ARGS! & exit /b !errorlevel!
 if /i "%CMD%"=="python"   goto :python
+if /i "%CMD%"=="hangar"   goto :hangar
 if /i "%CMD%"=="where"    goto :where
 if /i "%CMD%"=="dist"     goto :dist
 
@@ -83,6 +84,20 @@ echo.
 call "%PYSTAGE%\fsim-python.cmd" !ARGS!
 exit /b !errorlevel!
 
+:hangar
+rem The aircraft design tool runs on the Python the SDK was built for.
+for %%I in ("%BIN%\..\python") do set "PYSTAGE=%%~fI"
+if not exist "%PYSTAGE%\fsim-python.cmd" (
+    echo hangar needs the Python SDK, which is not built: it needs a CPython 3.11 or later
+    echo from python.org or conda, with numpy and matplotlib.
+    exit /b 1
+)
+set "PYTHONPATH=%ROOT%tools\hangar;%PYTHONPATH%"
+echo ^> "%PYSTAGE%\fsim-python.cmd" -m hangar !ARGS!
+echo.
+call "%PYSTAGE%\fsim-python.cmd" -m hangar !ARGS!
+exit /b !errorlevel!
+
 :where
 echo applications  %BIN%
 echo examples      %EXAMPLES%
@@ -119,6 +134,14 @@ echo     fsim fly               a hand-written controller, no learning
 echo     fsim control           the six control levels, one after another
 echo     fsim scenario ^<file^>   run a scenario file ^(examples\scenarios\*.json^)
 echo     fsim replay ^<file^>     play back a recording ^(.fsrec^)
+echo.
+echo   AIRCRAFT OF YOUR OWN ^(tools\hangar, docs\hangar.md^)
+echo     fsim hangar list                     the designs in aircraft\
+echo     fsim hangar c172                     build and flight-test one: aircraft\c172\out\report.html
+echo     fsim hangar c172 geometry            one stage ^(geometry aero mass propulsion build verify fly calibrate report^)
+echo     fsim hangar skua --quick             every stage, coarse: a first look in half a minute
+echo     fsim hangar new mine --like c172     start a design from another
+echo     fsim demo --aircraft c172            watch it fly
 echo.
 echo   PYTHON
 echo     fsim python examples\python\world_tour.py   the object model from Python

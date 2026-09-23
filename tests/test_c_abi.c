@@ -219,6 +219,19 @@ int main(int argc, char** argv) {
         CHECK(fsim_vehicle_get_property(world, a, "no/such/property", &prop) != FSIM_OK);
         CHECK(fsim_comm_inbox_get(world, a, 999, &msg) != FSIM_OK);
 
+        /* A write that runs model code which fails - JSBSim asked to trim an
+         * aircraft at 3 m/s throws - is reported, and the process lives on. */
+        {
+            uint32_t slow = 0;
+            spec.name = "too-slow";
+            spec.airspeed_ms = 3.0;
+            CHECK(fsim_world_create_vehicle(world, &spec, &slow) == FSIM_OK);
+            CHECK(fsim_vehicle_set_property(world, slow, "simulation/do_simple_trim", 1.0) == FSIM_ERROR);
+            CHECK(strstr(fsim_last_error(), "do_simple_trim") != NULL);
+            CHECK(fsim_world_remove_vehicle(world, slow) == FSIM_OK);
+            spec.airspeed_ms = 60.0;
+        }
+
         /* A state pointer holds while its vehicle lives, however many vehicles
          * are created after it: bindings keep views on it (the Python SDK's
          * are zero-copy), and a growing store used to move it at 3, 5, 9, 17. */

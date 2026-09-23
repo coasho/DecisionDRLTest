@@ -97,6 +97,13 @@ viewer) done**:
   observations, actions and controllers written in C++ load as plugin DLLs (`fsim.load_plugin`,
   `fsim python examples\python\train_plugin.py`); `fsim.sb3.RolloutThreads` keeps torch's threads off the
   platform's cores while it collects, 17% faster PPO end to end.
+- **hangar, aircraft of your own** ([docs/hangar.md](docs/hangar.md)): an aircraft that exists only on paper,
+  described in one TOML file (surfaces, bodies, engine, gear, masses), becomes a JSBSim aircraft with a 3D model
+  and a validation report. hangar computes the aerodynamic tables over the whole attitude range, the mass
+  properties and the propeller. It then flies the result in the platform's JSBSim: trim, stall, climb, ceiling,
+  dynamic modes against MIL-F-8785C, and random-state robustness. `fsim hangar skua`. A Cessna 172P rebuilt
+  from public dimensions, with two numbers fitted to its top speed and climb rate, predicts its handbook's
+  stall speed and ceiling within 4 %.
 - `sim::VehiclePool` (one worker per physical core), JSBSim 1.3.1 adapter with terrain ground callback,
   `flightsim.exe` headless benchmark.
 
@@ -325,7 +332,8 @@ src/env/          Scenario, Task, Observation/Action spaces and their registry, 
 src/sdk/          libfsim.dll: C++ SDK (World, VecEnv) + C ABI
 src/vision/       libfsim_vision.dll: offscreen vehicle cameras (needs Vulkan)
 python/           the Python SDK: fsim._native / fsim._vision (C, stable ABI), the fsim package, tests, benchmark
-tools/            tile_prefetch: offline tile cache for a region
+tools/            tile_prefetch: offline tile cache for a region; hangar: the aircraft design tool (Python)
+aircraft/         designs made with hangar: <name>.toml, and the JSBSim aircraft and model it builds
 include/fsim/     public SDK headers
 examples/         multi_level_control, minimal_trainer, ppo_trainer; python/ for the Python SDK
 docs/sdk/         SDK guide
