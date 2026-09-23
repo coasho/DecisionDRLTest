@@ -141,6 +141,14 @@ FSIM_API uint32_t fsim_abi_version(void) { return FSIM_ABI_VERSION; }
 FSIM_API const char* fsim_version(void) { return FSIM_VERSION_STRING; }
 FSIM_API const char* fsim_last_error(void) { return fsim::sdk::lastError().c_str(); }
 
+FSIM_API void fsim_set_log_level(int level) {
+    if (level < FSIM_LOG_TRACE) level = FSIM_LOG_TRACE;
+    if (level > FSIM_LOG_OFF) level = FSIM_LOG_OFF;
+    fsim::log::setLevel(static_cast<fsim::log::Level>(level));
+}
+
+FSIM_API int fsim_log_level(void) { return static_cast<int>(fsim::log::level()); }
+
 FSIM_API void fsim_options_init(fsim_options* o) {
     if (!o) return;
     std::memset(o, 0, sizeof(*o));

@@ -42,6 +42,7 @@ if /i "%CMD%"=="scenario" call :run "%EXAMPLES%\scenario_runner.exe" !ARGS! & ex
 if /i "%CMD%"=="cameras"  call :run "%EXAMPLES%\vision_capture.exe" --segmentation !ARGS! & exit /b !errorlevel!
 if /i "%CMD%"=="headless" call :run "%BIN%\flightsim.exe" !ARGS! & exit /b !errorlevel!
 if /i "%CMD%"=="tiles"    call :run "%BIN%\tile_prefetch.exe" !ARGS! & exit /b !errorlevel!
+if /i "%CMD%"=="python"   goto :python
 if /i "%CMD%"=="where"    goto :where
 if /i "%CMD%"=="dist"     goto :dist
 
@@ -66,10 +67,27 @@ echo.
 %*
 exit /b %errorlevel%
 
+:python
+for %%I in ("%BIN%\..\python") do set "PYSTAGE=%%~fI"
+if not exist "%PYSTAGE%\fsim-python.cmd" (
+    echo The Python SDK is not built: it needs a CPython 3.11 or later from python.org or conda.
+    echo Point the build at one and rebuild:
+    echo.
+    echo     cmake --preset ucrt64-release -DFSIM_PYTHON_EXECUTABLE=C:/path/to/python.exe
+    echo     fsim build
+    exit /b 1
+)
+rem `call`, not :run - a batch file run without it never returns here.
+echo ^> "%PYSTAGE%\fsim-python.cmd" !ARGS!
+echo.
+call "%PYSTAGE%\fsim-python.cmd" !ARGS!
+exit /b !errorlevel!
+
 :where
 echo applications  %BIN%
 echo examples      %EXAMPLES%
 echo tests         %TESTS%
+for %%I in ("%BIN%\..\python") do echo python        %%~fI
 echo packages      %ROOT%build\ucrt64-release\dist
 exit /b 0
 
@@ -81,6 +99,7 @@ echo.
 echo Packaged into build\ucrt64-release\dist:
 echo     viewer\     the visualisation application - run viewer\run-viewer.cmd
 echo     sdk\        fsim.dll, headers and the CMake package
+echo     python\     the Python SDK: the fsim package, and a wheel to pip install
 echo     tools\      the headless command-line application
 echo     examples\   demo trainers against the SDK
 exit /b 0
@@ -101,10 +120,16 @@ echo     fsim control           the six control levels, one after another
 echo     fsim scenario ^<file^>   run a scenario file ^(examples\scenarios\*.json^)
 echo     fsim replay ^<file^>     play back a recording ^(.fsrec^)
 echo.
+echo   PYTHON
+echo     fsim python examples\python\world_tour.py   the object model from Python
+echo     fsim python examples\python\train_sb3.py    PPO ^(Stable-Baselines3^) on a 64-aircraft batch
+echo     fsim python examples\python\speed.py        what the Python SDK costs, measured
+echo     fsim python ^<script.py^>                     any script, with the fsim package on its path
+echo.
 echo   WORK ON IT
 echo     fsim build             compile everything
 echo     fsim test              run the test suite
-echo     fsim dist              package the viewer, SDK, tools and examples into dist\
+echo     fsim dist              package the viewer, SDKs, tools and examples into dist\
 echo     fetch-maps             download the map assets into assets\maps
 echo     fsim where             print the directories things are built into
 echo.

@@ -1,16 +1,18 @@
-# Distribution (design 11.3). Four things are built here and none of them
+# Distribution (design 11.3). Five things are built here and none of them
 # belongs in the same directory as another:
 #
 #   viewer    the visualisation application, standalone - executable, every
 #             DLL it needs, its configuration and its map assets
 #   sdk       fsim.dll, the headers and the CMake package a trainer links
+#   python    the Python SDK: the fsim package, and a wheel of it
+#             (python/CMakeLists.txt)
 #   tools     the headless command-line application
 #   examples  demo programs written against the SDK
 #
 # Each is an install component, so one set of rules produces separate trees:
 #
 #   cmake --build --preset ucrt64-release --target dist
-#       -> dist/viewer, dist/sdk, dist/tools, dist/examples
+#       -> dist/viewer, dist/sdk, dist/python, dist/tools, dist/examples
 #
 #   cmake --install build/ucrt64-release --component viewer --prefix <dir>
 #   cd build/ucrt64-release && cpack       # flightsim-<version>-win64.zip (all of it)
@@ -154,6 +156,9 @@ set(_fsim_components sdk tools examples)
 if(TARGET flightsim-viewer)
     list(APPEND _fsim_components viewer)
 endif()
+if(TARGET fsim_python)
+    list(APPEND _fsim_components python)
+endif()
 set(_fsim_package_commands "")
 foreach(_c ${_fsim_components})
     # Clear everything but maps/: it is gigabytes of tiles that install() will
@@ -179,6 +184,9 @@ add_custom_target(dist
     COMMENT "Packaging into dist/: ${_fsim_components}"
     VERBATIM)
 add_dependencies(dist deploy)
+if(TARGET python_package)
+    add_dependencies(dist python_package)
+endif()
 
 # ---------------------------------------------------------------- zip
 set(CPACK_GENERATOR ZIP)

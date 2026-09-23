@@ -12,6 +12,7 @@ option(FSIM_WITH_RENDER  "Build the viewer (render/world/ui; requires Vulkan SDK
 option(FSIM_BUILD_TESTS  "Build unit and integration tests"                            ON)
 option(FSIM_BUILD_EXAMPLES "Build example trainers (examples/)"                         ON)
 option(FSIM_BUILD_TOOLS  "Build command-line tools (tools/tile_prefetch)"               ON)
+option(FSIM_BUILD_PYTHON "Build the Python SDK (needs a CPython >= 3.11 from python.org or conda)" ON)
 option(FSIM_WARNINGS_AS_ERRORS "Treat compiler warnings as errors in platform code"    ON)
 
 # ---------------------------------------------------------------------------
@@ -70,6 +71,10 @@ endif()
 if(FSIM_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(FSIM_BUILD_PYTHON)
+    add_subdirectory(python)
 endif()
 
 # Staging the build tree (design 11.3 "Distribution"). Every directory that

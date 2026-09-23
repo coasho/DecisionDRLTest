@@ -5,8 +5,8 @@
 > matches what you are building, rather than reading them in order.
 
 The `fsim` SDK is how a training application drives the platform. You write a
-C++ program (or any language with a C FFI, through `fsim_c.h`), link
-`libfsim.dll`, create a **World**, create **vehicles** by name, type and initial
+C++ program (or a Python one, `import fsim`, or any language with a C FFI,
+through `fsim_c.h`), link `libfsim.dll`, create a **World**, create **vehicles** by name, type and initial
 state, command them at whichever **control level** your experiment needs, and
 step the world. Visualisation is somebody else's job: start
 `flightsim-viewer.exe` at any time and it mirrors your world through shared
@@ -22,6 +22,7 @@ memory without your program noticing (see [viewer.md](viewer.md)).
 | [vision.md](vision.md) | cameras on vehicles: offscreen RGB images of the same Earth the viewer draws (`fsim_vision.dll`) |
 | [vecenv.md](vecenv.md) | the batch (gym-style) layer for vectorised RL, built on the same object model; registering your own task, observation space and action space |
 | [c_abi.md](c_abi.md) | the C ABI for other languages |
+| [python.md](python.md) | the Python SDK: the same object model, batch layer and cameras as numpy arrays, Gymnasium and Stable-Baselines3 adapters, and what it costs |
 
 ## Ten-line tour
 

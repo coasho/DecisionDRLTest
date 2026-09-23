@@ -72,6 +72,11 @@ FSIM_API const char* fsim_version(void);      /* library version string */
 FSIM_API const char* fsim_last_error(void);   /* thread-local, empty if none */
 FSIM_API void fsim_set_last_error(const char* message); /* for libraries layered on this ABI (fsim_vision) */
 
+/* The platform's log (written to stderr): records below `level` are dropped. (ABI 1.2) */
+enum fsim_log_level { FSIM_LOG_TRACE = 0, FSIM_LOG_DEBUG, FSIM_LOG_INFO, FSIM_LOG_WARN, FSIM_LOG_ERROR, FSIM_LOG_OFF };
+FSIM_API void fsim_set_log_level(int level);
+FSIM_API int fsim_log_level(void);
+
 FSIM_API void fsim_options_init(fsim_options* options);
 
 FSIM_API int fsim_vecenv_create(const fsim_options* options, fsim_vecenv** out);

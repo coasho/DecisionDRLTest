@@ -1,7 +1,8 @@
 # C ABI
 
 `#include <fsim/fsim_c.h>` - the binding surface for any language with a C
-FFI (Rust `bindgen`, C#, Julia, Go, ...). The platform ships no bindings.
+FFI (Rust `bindgen`, C#, Julia, Go, ...). The platform's own Python SDK
+([python.md](python.md)) is built on it.
 
 Rules: opaque handles, plain structs with a leading `struct_size` (call the
 `*_init` function, then override fields), buffers and strings owned by the

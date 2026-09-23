@@ -4,6 +4,10 @@
 
 #include "fsim/Vision.h"
 
+#include "core/Log.h"
+
+#include <vsg/io/Logger.h>
+
 #include <algorithm>
 #include <cstring>
 #include <exception>
@@ -49,6 +53,15 @@ int guard(const char* what, const std::function<int()>& fn) noexcept {
 } // namespace
 
 extern "C" {
+
+FSIM_VISION_API void fsim_vision_set_log_level(int level) {
+    if (level < FSIM_LOG_TRACE) level = FSIM_LOG_TRACE;
+    if (level > FSIM_LOG_OFF) level = FSIM_LOG_OFF;
+    fsim::log::setLevel(static_cast<fsim::log::Level>(level));
+    static const vsg::Logger::Level vsgLevels[] = {vsg::Logger::LOGGER_DEBUG, vsg::Logger::LOGGER_DEBUG, vsg::Logger::LOGGER_INFO,
+                                                   vsg::Logger::LOGGER_WARN,  vsg::Logger::LOGGER_ERROR, vsg::Logger::LOGGER_OFF};
+    vsg::Logger::instance()->level = vsgLevels[level];
+}
 
 FSIM_VISION_API void fsim_vision_options_init(fsim_vision_options* o) {
     if (!o) return;

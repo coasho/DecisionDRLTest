@@ -3,7 +3,8 @@
 A pure C++ flight-simulation platform for AI and reinforcement-learning training:
 [JSBSim](https://github.com/JSBSim-Team/jsbsim) flight dynamics for many vehicles at once,
 [VulkanSceneGraph](https://github.com/vsg-dev/VulkanSceneGraph) for full-Earth visualisation and
-vision observations, and a C++ SDK with a stable C ABI as the primary interface.
+vision observations, and a C++ SDK with a stable C ABI as the primary interface - and a Python SDK
+over the same ABI (`import fsim`), with Gymnasium and Stable-Baselines3 adapters, at C's speed.
 
 ![flightsim-viewer over Yosemite: six c172s from the built-in demo, chase camera, ImGui monitor](docs/images/viewer-yosemite.jpg)
 
@@ -87,6 +88,12 @@ viewer) done**:
 - **`fsim::VecEnv`** on the object model: Gymnasium-style batch semantics, actions as `surfaces`,
   `attitude`, `acceleration` or `velocity` commands, visible in the viewer.
 - **C ABI** (`fsim/fsim_c.h`): the whole object model and the batch layer, tested from C99.
+- **Python SDK** (`import fsim`, [docs/sdk/python.md](docs/sdk/python.md)): the object model, the batch layer,
+  cameras, recordings and scenarios through a C extension over the C ABI - results are numpy views of the
+  platform's memory, many-vehicle calls are one call, the GIL is released while it simulates. Measured against
+  the same loops in C: a 64-aircraft VecEnv step 375.3 us from C, 375.4 us from Python. Gymnasium and
+  Stable-Baselines3 vector environments (`fsim.gym`, `fsim.sb3`); one wheel for CPython 3.11+;
+  `fsim python examples\python\train_sb3.py`.
 - `sim::VehiclePool` (one worker per physical core), JSBSim 1.3.1 adapter with terrain ground callback,
   `flightsim.exe` headless benchmark.
 
@@ -177,6 +184,7 @@ writes four self-contained trees:
 | --- | --- |
 | `dist/viewer` | the visualisation application: executable, every DLL, `config/viewer.json`, the JSBSim data and models, and a complete copy of `assets/maps`. Start it with `run-viewer.cmd`; it needs nothing installed and never touches the network. |
 | `dist/sdk` | `fsim.dll`, `fsim_vision.dll`, headers, import libraries and the `find_package(fsim CONFIG)` package |
+| `dist/python` | the Python SDK: the `fsim` package and `fsim-<version>-cp311-abi3-win_amd64.whl` (`pip install` it into any CPython 3.11+) |
 | `dist/tools` | the headless `flightsim` command-line application |
 | `dist/examples` | the demo trainers |
 
@@ -270,7 +278,8 @@ because holding a point under the cursor means sliding the globe beneath it. The
 See [docs/sdk](docs/sdk/README.md): [world and vehicles](docs/sdk/world.md), [multi-level
 control](docs/sdk/control.md), [environment, effects, communication](docs/sdk/environment.md),
 [transparent visualisation](docs/sdk/viewer.md), [scenario files](docs/sdk/scenarios.md), [vision](docs/sdk/vision.md),
-[VecEnv](docs/sdk/vecenv.md) and [your own task / observation / action](docs/sdk/vecenv.md#your-own-task-observation-or-action), [C ABI](docs/sdk/c_abi.md).
+[VecEnv](docs/sdk/vecenv.md) and [your own task / observation / action](docs/sdk/vecenv.md#your-own-task-observation-or-action), [C ABI](docs/sdk/c_abi.md),
+[Python](docs/sdk/python.md).
 Link against `fsim` (`libfsim.dll` + `libJSBSim.dll` at runtime); JSBSim's aircraft data is found
 automatically next to the executable (`share/flightsim/jsbsim`) or in the source tree.
 
@@ -312,9 +321,10 @@ src/session/      World implementation (vehicles, stepping, environment, publish
 src/env/          Scenario, Task, Observation/Action spaces and their registry, VecEnv (batch layer)
 src/sdk/          libfsim.dll: C++ SDK (World, VecEnv) + C ABI
 src/vision/       libfsim_vision.dll: offscreen vehicle cameras (needs Vulkan)
+python/           the Python SDK: fsim._native / fsim._vision (C, stable ABI), the fsim package, tests, benchmark
 tools/            tile_prefetch: offline tile cache for a region
 include/fsim/     public SDK headers
-examples/         multi_level_control, minimal_trainer, ppo_trainer
+examples/         multi_level_control, minimal_trainer, ppo_trainer; python/ for the Python SDK
 docs/sdk/         SDK guide
 src/render/       VSG window, viewer, render graph (viewer builds)
 src/world/        Earth tiles (vsg::TileDatabase), vehicle visuals, cameras

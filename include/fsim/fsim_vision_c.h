@@ -46,6 +46,10 @@ typedef struct fsim_camera_spec {
 } fsim_camera_spec;
 
 FSIM_VISION_API void fsim_vision_options_init(fsim_vision_options* options);
+
+/* This library's log and the scene graph's, as fsim_set_log_level sets fsim.dll's
+ * (each DLL keeps its own): FSIM_LOG_TRACE .. FSIM_LOG_OFF. */
+FSIM_VISION_API void fsim_vision_set_log_level(int level);
 FSIM_VISION_API void fsim_camera_spec_init(fsim_camera_spec* spec);
 
 /* Opens the process's Vulkan device (no window). */

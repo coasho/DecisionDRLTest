@@ -23,6 +23,19 @@ jobs:
         with:
           submodules: recursive
 
+      # The Python SDK is built for a python.org CPython (the one PyTorch and
+      # Gymnasium run on), not MSYS2's; its tests need numpy, and exercise the
+      # Gymnasium adapter when it is there. (Stable-Baselines3 would pull in
+      # PyTorch: its tests skip.)
+      - uses: actions/setup-python@v5
+        id: py
+        with:
+          python-version: '3.12'
+
+      - name: Python test dependencies
+        shell: pwsh
+        run: '& "${{ steps.py.outputs.python-path }}" -m pip install numpy gymnasium'
+
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -64,7 +77,7 @@ jobs:
           cd deps && cmake --build --preset deps-ucrt64
 
       - name: Configure (viewer + headless)
-        run: cmake --preset ucrt64-release
+        run: cmake --preset ucrt64-release -DFSIM_PYTHON_EXECUTABLE="$(cygpath -m '${{ steps.py.outputs.python-path }}')"
 
       - name: Build
         run: cmake --build --preset ucrt64-release --parallel
