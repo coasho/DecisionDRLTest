@@ -371,7 +371,9 @@ class Model3D(unittest.TestCase):
                 self.assertLess(p["protrusion"], 0.03)
                 self.assertEqual(len(p["doors"]), 2)
                 for d in p["doors"]:
-                    x0, y0, x1, y1 = d["scene"]["root"]["children"][1]["rect"]
+                    box = d["scene"]["root"]["a"]["children"][1]  # the skin within it, a shell
+                    (cx, cy, _), (hx, hy, _) = box["centre"], box["half"]
+                    x0, y0, x1, y1 = cx - hx, cy - hy, cx + hx, cy + hy
                     # the hinge along x, on one of the door's long edges
                     self.assertEqual(abs(d["axis"][0]), 1.0)
                     self.assertLess(min(abs(d["hinge"][1] - y0), abs(d["hinge"][1] - y1)), 0.05)
