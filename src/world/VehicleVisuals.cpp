@@ -4,6 +4,7 @@
 #include "world/FlatGeometry.h"
 #include "world/Frames.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -286,8 +287,25 @@ bool parseTerm(std::string term, VehicleVisuals::Joint::Channel& channel, double
 
 bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
     if (!isJointName(name)) return false;
-    const std::string terms = name.substr(5);
+    std::string terms = name.substr(5);
     joint.mix.clear();
+    joint.lo = -std::numeric_limits<double>::infinity();
+    joint.hi = std::numeric_limits<double>::infinity();
+    if (const auto at = terms.find('@'); at != std::string::npos) {
+        // @<lo>,<hi>: the part's stops, degrees
+        const std::string stops = terms.substr(at + 1);
+        terms.resize(at);
+        const char* p = stops.c_str();
+        char* end = nullptr;
+        const double lo = std::strtod(p, &end);
+        if (end == p || *end != ',') return false;
+        p = end + 1;
+        const double hi = std::strtod(p, &end);
+        if (end == p || *end != '\0' || !std::isfinite(lo) || !std::isfinite(hi) || !(lo < hi)) return false;
+        constexpr double kRad = 3.14159265358979323846 / 180.0;
+        joint.lo = lo * kRad;
+        joint.hi = hi * kRad;
+    }
     std::size_t begin = 0;
     for (bool first = true;; first = false) {
         const auto plus = terms.find('+', begin);
@@ -319,6 +337,7 @@ vsg::dmat4 VehicleVisuals::Joint::matrix(const sim::VehicleState& s) const {
     };
     double angle = gain * of(channel);
     for (const auto& [c, g] : mix) angle += g * of(c);
+    angle = std::clamp(angle, lo, hi);
     return rest * vsg::rotate(angle, vsg::dvec3(1.0, 0.0, 0.0));
 }
 
@@ -328,7 +347,7 @@ VehicleVisuals::Rig VehicleVisuals::Rig::find(const vsg::ref_ptr<vsg::Node>& gra
     auto finder = vsg::visit<FindJoints>(graph);
     for (const auto& name : finder.malformed)
         LOG_WARN("world") << "model node '" << name
-                          << "' is not a control surface (fsim:aileron|elevator|rudder|flaps[:gain][+...]); left fixed";
+                          << "' is not a control surface (fsim:aileron|elevator|rudder|flaps[:gain][+...][@lo,hi]); left fixed";
     rig.joints = std::move(finder.joints);
     rig.spine.assign(finder.spine.begin(), finder.spine.end());
     return rig;

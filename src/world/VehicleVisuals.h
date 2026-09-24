@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -26,8 +27,10 @@ namespace fsim::world {
 /// gain times the vehicle's deflection of that channel (VehicleState, radians;
 /// aileron is the left one). A part several channels move - a stabilator
 /// that also rolls, a flaperon - is named `fsim:<channel>[:<gain>]+<channel>
-/// [:<gain>]...` and turns by the sum. Each vehicle gets its own copy of
-/// those nodes and of the nodes above them; the geometry stays shared.
+/// [:<gain>]...` and turns by the sum. A trailing `@<lo>,<hi>` (degrees) holds
+/// the turn within the part's own stops: a canard that travels further than
+/// the elevons on its channel. Each vehicle gets its own copy of those nodes
+/// and of the nodes above them; the geometry stays shared.
 class VehicleVisuals {
 public:
     struct Settings {
@@ -105,6 +108,8 @@ public:
         Channel channel = Aileron;                 ///< the first channel in the name
         double gain = 1.0;
         std::vector<std::pair<Channel, double>> mix; ///< the channels after it
+        double lo = -std::numeric_limits<double>::infinity(); ///< its stops (rad), from `@<lo>,<hi>` (degrees)
+        double hi = std::numeric_limits<double>::infinity();
         /// Parses a node name; false when it is not a joint (or malformed).
         static bool parse(const std::string& name, Joint& joint);
         /// The node's matrix at the vehicle's deflection of this channel.

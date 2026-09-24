@@ -81,6 +81,7 @@ struct ViewerOptions {
     int frameSkip = 2; // 60 Hz agent rate for smooth motion
     std::uint64_t seed = 1;
     double throttle = 0.65;
+    double speedMs = 0.0; // 0: from the aircraft's wing loading
     double timeFactor = 1.0;
     double latitudeDeg = 37.6188, longitudeDeg = -122.375, altitudeM = 1500.0, spreadDeg = 0.03;
     bool onGround = false;
@@ -171,6 +172,7 @@ void usageAll(const char* prog) {
         "  --time-factor <x>        simulation speed (1.0)\n"
         "  --lat <deg> --lon <deg>  spawn centre (KSFO)\n"
         "  --alt <m>                spawn altitude MSL (1500)\n"
+        "  --speed <m/s>            spawn airspeed (auto: its weight carried at CL 0.5, at least 58)\n"
         "  --spread <deg>           spawn scatter (0.03)\n"
         "  --on-ground              spawn parked on the terrain (brakes on)\n"
         "  --terrain-zoom <z>       tile level used for physics ground height (12)\n"
@@ -319,6 +321,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--spread") o.spreadDeg = std::stod(next());
             else if (a == "--seed") o.seed = std::stoull(next());
             else if (a == "--throttle") o.throttle = std::stod(next());
+            else if (a == "--speed") o.speedMs = std::stod(next());
             else if (a == "--imagery") {
                 const std::string v = next();
                 using S = world::EarthSettings::Source;
@@ -510,12 +513,26 @@ int main(int argc, char** argv) {
             } else {
                 const double terrainM = ground->heightAboveEllipsoidM(units::degreesToRadians(ic.latitudeDeg), units::degreesToRadians(ic.longitudeDeg));
                 ic.altitudeMslM = std::max(opt.altitudeM + rng.uniform(-150.0, 150.0), terrainM + 300.0);
-                ic.airspeedTrueMs = 58.0 + rng.uniform(-4.0, 4.0);
+                ic.airspeedTrueMs = opt.speedMs > 0.0 ? opt.speedMs : 58.0 + rng.uniform(-4.0, 4.0);
             }
             auto model = std::make_unique<sim::JsbsimModel>(opt.dt, ground);
             if (!model->load(aircraft, ic)) {
                 LOG_ERROR("app") << "vehicle " << i << " failed to load";
                 return 1;
+            }
+            if (!opt.onGround && opt.speedMs <= 0.0) {
+                // a fighter would start below its stall at 58 m/s: fly off where
+                // the aircraft is comfortable, its weight carried at CL 0.5
+                const double weightLbf = model->property("inertia/weight-lbs").get();
+                const double areaFt2 = model->property("metrics/Sw-sqft").get();
+                const double rhoSlugFt3 = model->property("atmosphere/rho-slugs_ft3").get();
+                if (weightLbf > 0.0 && areaFt2 > 0.0 && rhoSlugFt3 > 0.0) {
+                    const double v = 0.3048 * std::sqrt(2.0 * weightLbf / (areaFt2 * rhoSlugFt3 * 0.5));
+                    if (v > ic.airspeedTrueMs) {
+                        ic.airspeedTrueMs = v * (1.0 + rng.uniform(-0.05, 0.05));
+                        model->reset(ic);
+                    }
+                }
             }
             pool->add(std::move(model));
             initialConditions->push_back(ic);

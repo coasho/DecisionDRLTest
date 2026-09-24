@@ -138,9 +138,26 @@ TEST_CASE("control surface names parse, and anything else is left alone", "[rend
     j.rest = vsg::dmat4();
     const vsg::dmat4 m = j.matrix(s); // turned by 0.1 - 0.3 about x
     REQUIRE(std::abs(std::atan2(m[1][2], m[1][1]) - (-0.2)) < 1e-12);
+    // stops: a canard that travels further than the elevons on its channel,
+    // an elevon held at its own when pitch and roll add up
+    REQUIRE(Joint::parse("fsim:elevator:-1@-50,20", j));
+    REQUIRE(j.gain == -1.0);
+    s = sim::VehicleState();
+    s.elevatorRad = 0.8; // 46 deg nose down: the canard turns -46, within its -50
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - (-0.8)) < 1e-12);
+    REQUIRE(Joint::parse("fsim:elevator+aileron:-1@-25,25", j));
+    s.elevatorRad = 0.3;
+    s.aileronRad = -0.3; // 0.6 rad asked, held at 25 deg
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 25.0 * 3.14159265358979323846 / 180.0) < 1e-12);
+    REQUIRE(Joint::parse("fsim:elevator", j)); // no stops: turns as far as asked
+    s.elevatorRad = 0.9;
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 0.9) < 1e-12);
     REQUIRE_FALSE(Joint::parse("fsim:canopy", j));
     REQUIRE_FALSE(Joint::parse("fsim:rudder:x", j));
     REQUIRE_FALSE(Joint::parse("fsim:elevator+", j));
     REQUIRE_FALSE(Joint::parse("fsim:elevator+canopy", j));
+    REQUIRE_FALSE(Joint::parse("fsim:elevator@20,-50", j));
+    REQUIRE_FALSE(Joint::parse("fsim:elevator@-50", j));
+    REQUIRE_FALSE(Joint::parse("fsim:elevator@-50,20x", j));
     REQUIRE_FALSE(Joint::parse("elevator", j));
 }

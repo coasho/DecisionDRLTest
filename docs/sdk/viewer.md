@@ -84,7 +84,11 @@ channel. The channel is one of:
 The node turns about its own x axis, by the deflection in radians. JSBSim's
 sign conventions apply: elevator and flaps trailing edge down, aileron left
 trailing edge down, rudder trailing edge left. An optional gain scales the
-deflection: `fsim:aileron:-1`, `fsim:elevator:0.5`.
+deflection: `fsim:aileron:-1`, `fsim:elevator:0.5`. A part that several
+channels move adds them: `fsim:elevator+aileron:-1` (an elevon). A trailing
+`@<lo>,<hi>` holds the turn within the part's own stops, in degrees:
+`fsim:elevator@-20,50` for a canard that travels further than the elevons
+sharing its channel.
 
 To make a model's surface move:
 
