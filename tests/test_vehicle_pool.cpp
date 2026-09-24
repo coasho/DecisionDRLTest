@@ -144,6 +144,38 @@ TEST_CASE("reset returns the vehicle to initial conditions", "[sim][jsbsim]") {
     CHECK(std::abs(after.simTime) < 1e-9);
 }
 
+TEST_CASE("the first step after a reset starts from the new state, however violent the last one was", "[sim][jsbsim]") {
+    // The integrators remember past accelerations, and JSBSim's reset seeded
+    // that memory from the last step before it: after a violent step - here a
+    // 1.3 MN shove on hangar's 23 kg Skua, as a crash gives - the first step
+    // after the reset replayed it (25 m/s became 1700 m/s).
+    log::setLevel(log::Level::Warn);
+    auto ground = std::make_shared<FlatGround>(0.0);
+    JsbsimModel model(kDt, ground);
+    InitialConditions ic;
+    ic.altitudeMslM = 3000.0;
+    ic.airspeedTrueMs = 25.0;
+    ic.headingDeg = 0.0;
+    REQUIRE(model.load(AircraftSpec{"skua", kRoot, FSIM_TEST_AIRCRAFT_DIR}, ic));
+    ControlInputs in;
+    for (int i = 0; i < 20; ++i) model.step(in);
+    const double shove[3] = {-1.3e6, 0.0, 0.0}; // newtons, body axes
+    const double none[3] = {0.0, 0.0, 0.0};
+    model.setExternalForceBody(shove, none);
+    for (int i = 0; i < 6; ++i) model.step(in);
+    model.setExternalForceBody(none, none);
+
+    REQUIRE(model.reset(ic));
+    VehicleState before;
+    model.state(before);
+    model.step(in);
+    VehicleState after;
+    model.state(after);
+    CHECK_FALSE(after.diverged);
+    CHECK(std::abs(after.airspeedTrueMs - before.airspeedTrueMs) < 1.0);
+    CHECK(std::abs(after.velocityNedMs[2] - before.velocityNedMs[2]) < 1.0);
+}
+
 TEST_CASE("ground provider drives AGL and gear contact", "[sim][jsbsim]") {
     log::setLevel(log::Level::Warn);
     auto ground = std::make_shared<FlatGround>(500.0); // terrain at 500 m

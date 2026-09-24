@@ -53,7 +53,7 @@ code that computes them, changes.
 | propulsion | propeller thrust and power tables, engine | peak efficiency, static thrust / weight |
 | build | `<name>.xml`, `Engines/`, `<name>.glb` with hinged control surfaces | |
 | verify | JSBSim's forces and moments at 150 random states, compared with the tables | largest error below 0.002 in any coefficient |
-| fly | trim across the speed range; stall; climb and ceiling; top speed; dynamic modes; 40 runs from random states | `[targets]`, MIL-F-8785C level 1, no diverged run |
+| fly | trim across the speed range; stall; climb and ceiling; top speed; dynamic modes; 40 runs from random states; six crashes into the ground | `[targets]`, MIL-F-8785C level 1, no diverged run; crashes that stop without blowing up |
 | calibrate | `calibration.toml` | `[targets]` |
 | report | `out/report.html` | |
 
@@ -131,6 +131,13 @@ stage end to end through the platform (`ctest -R hangar`).
 - **Mass.** Component weights come from Raymer's general-aviation equations
   (ch. 15) or are given directly. Each component is spread over its own skin
   to give the inertia. Systems mass is placed to meet the empty CG.
+- **Ground contacts.** Besides the wheels, the airframe gets contact
+  points wherever a crash can meet the ground first: the extreme points of
+  its convex hull in every direction, plus points along keels and surface
+  edges. Each point's spring is sized from the mass it moves (small at a
+  wingtip, where the aircraft rolls easily), so JSBSim's 120 Hz step
+  integrates it stably. Points close together share that budget. The fly
+  stage checks the result by crashing the aircraft six ways.
 - **Propeller.** Blade-element momentum theory with Prandtl's tip and hub
   losses.
 - **Engines.** Piston engines use JSBSim's piston engine; hangar's control
@@ -189,6 +196,11 @@ runs from random attitudes and rates diverged.
   one cruise speed (`[analysis] speed`), whatever the altitude. Laminar separation bubbles below
   Re ≈ 2×10⁵ are not modelled.
 - **Engines.** Piston and electric only; no turbines yet.
+- **Wheels on their side.** JSBSim divides a wheel's force by the angle of
+  its strut to the ground. When a wheel touches down sideways, as in a
+  cartwheel, that force grows without limit, and the aircraft can gain
+  speed or blow up. The stock c172x does the same. The crash tests flag it
+  as a warning. A blown-up vehicle resets cleanly.
 
 ## For Claude
 

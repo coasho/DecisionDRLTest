@@ -30,9 +30,10 @@ public:
     std::optional<std::filesystem::path> jsbsimRoot(const std::filesystem::path& explicitRoot = {}) const;
 
     /// Directories of aircraft folders (<dir>/<name>/<name>.xml) beyond a
-    /// JSBSim root's aircraft/: each entry of FSIM_AIRCRAFT_PATH, then
-    /// <searchPath>/aircraft (packages: share/flightsim/aircraft), then the
-    /// source tree's aircraft/ (designs made with tools/hangar).
+    /// JSBSim root's aircraft/: each entry of FSIM_AIRCRAFT_PATH, then the
+    /// source tree's aircraft/ (designs made with tools/hangar; absent on a
+    /// machine without the source), then <searchPath>/aircraft (packages:
+    /// share/flightsim/aircraft).
     std::vector<std::filesystem::path> aircraftDirs() const;
 
     /// Where the aircraft `name` lives if not in `jsbsimRoot`/aircraft: the

@@ -181,6 +181,41 @@ class Writer(unittest.TestCase):
         self.assertEqual(len(root.findall("ground_reactions/contact[@type='BOGEY']")), 3)
 
 
+class Contacts(unittest.TestCase):
+    def test_apparent_mass(self):
+        # at the centre of gravity a push meets the whole mass; on the roll
+        # axis at r, 1 / (1/m + r^2 / Ixx) (Ixx = 4, r = 2: 1 / (1/10 + 1) = 0.909)
+        from hangar.jsbsim import apparent_mass
+        J = np.diag([4.0, 6.0, 9.0])
+        self.assertAlmostEqual(apparent_mass(np.zeros(3), 10.0, J), 10.0, places=9)
+        self.assertAlmostEqual(apparent_mass(np.array([0.0, 2.0, 0.0]), 10.0, J), 1.0 / (0.1 + 4.0 / 4.0), places=9)
+
+    def test_structure_contacts_cover_the_airframe(self):
+        # the points a crash meets first, symmetric, and every one soft enough
+        # for the step: its own mode at most STRUCTURE_OMEGA
+        from hangar import jsbsim
+        from hangar.mass import MassModel
+        for name, expected in (("c172", [(7.25, 0.0, 2.25), (7.1, 1.73, 0.96), (1.88, 5.49, 1.69), (-0.96, 0.0, -0.28)]),
+                               ("skua", [(2.3, 0.55, 0.45), (2.36, 0.55, 0.15), (0.82, 2.0, 0.23), (0.0, 0.0, 0.0)])):
+            a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
+            mm = MassModel(a)
+            contacts = jsbsim.structure_contacts(a, mm)
+            pts = np.array([p for _, p, _, _ in contacts])
+            with self.subTest(design=name):
+                self.assertGreaterEqual(len(contacts), 6)
+                for q in expected:  # fin top, tail or boom end, wing tip, nose or propeller
+                    self.assertLess(np.min(np.linalg.norm(pts - np.array(q), axis=1)), 0.05, q)
+                mirrored = pts * np.array([1.0, -1.0, 1.0])
+                for q in mirrored:
+                    self.assertLess(np.min(np.linalg.norm(pts - q, axis=1)), 1e-6)
+                e = mm.empty()
+                J = np.array([[e["ixx"], -e["ixy"], -e["ixz"]], [-e["ixy"], e["iyy"], -e["iyz"]], [-e["ixz"], -e["iyz"], e["izz"]]])
+                for _, p, k, c in contacts:
+                    m_eff = jsbsim.apparent_mass(p - e["cg"], e["mass"], J)
+                    self.assertLessEqual(math.sqrt(k / m_eff), jsbsim.STRUCTURE_OMEGA + 1e-9)
+                    self.assertLessEqual(c / m_eff * (1.0 / 120.0), 0.3)  # damping well inside the step's limit
+
+
 class Model3D(unittest.TestCase):
     def test_control_surfaces_hinge_the_way_jsbsim_deflects(self):
         # every piece, turned by +0.25 rad about its hinge axis, moves its

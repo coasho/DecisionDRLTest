@@ -109,29 +109,67 @@
         <brake_group> RIGHT </brake_group>
         <retractable> 0 </retractable>
       </contact>
-      <contact type="STRUCTURE" name="LEFT WING TIP">
+      <contact type="STRUCTURE" name="booms left rear">
         <location unit="M">
-          <x> 0.7000 </x>
-          <y> -2.0000 </y>
-          <z> 0.2250 </z>
+          <x> 2.3600 </x>
+          <y> -0.5500 </y>
+          <z> 0.1500 </z>
         </location>
         <static_friction> 0.8 </static_friction>
         <dynamic_friction> 0.6 </dynamic_friction>
-        <spring_coeff unit="N/M"> 45111 </spring_coeff>
-        <damping_coeff unit="N/M/SEC"> 1426 </damping_coeff>
+        <spring_coeff unit="N/M"> 653 </spring_coeff>
+        <damping_coeff unit="N/M/SEC"> 22 </damping_coeff>
+        <damping_coeff_rebound unit="N/M/SEC"> 22 </damping_coeff_rebound>
       </contact>
-      <contact type="STRUCTURE" name="RIGHT WING TIP">
+      <contact type="STRUCTURE" name="booms right rear">
         <location unit="M">
-          <x> 0.7000 </x>
-          <y> 2.0000 </y>
-          <z> 0.2250 </z>
+          <x> 2.3600 </x>
+          <y> 0.5500 </y>
+          <z> 0.1500 </z>
         </location>
         <static_friction> 0.8 </static_friction>
         <dynamic_friction> 0.6 </dynamic_friction>
-        <spring_coeff unit="N/M"> 45111 </spring_coeff>
-        <damping_coeff unit="N/M/SEC"> 1426 </damping_coeff>
+        <spring_coeff unit="N/M"> 653 </spring_coeff>
+        <damping_coeff unit="N/M/SEC"> 22 </damping_coeff>
+        <damping_coeff_rebound unit="N/M/SEC"> 22 </damping_coeff_rebound>
       </contact>
-      <contact type="STRUCTURE" name="NOSE">
+      <contact type="STRUCTURE" name="fin left rear">
+        <location unit="M">
+          <x> 2.3000 </x>
+          <y> -0.5500 </y>
+          <z> 0.4500 </z>
+        </location>
+        <static_friction> 0.8 </static_friction>
+        <dynamic_friction> 0.6 </dynamic_friction>
+        <spring_coeff unit="N/M"> 658 </spring_coeff>
+        <damping_coeff unit="N/M/SEC"> 22 </damping_coeff>
+        <damping_coeff_rebound unit="N/M/SEC"> 22 </damping_coeff_rebound>
+      </contact>
+      <contact type="STRUCTURE" name="fin right rear">
+        <location unit="M">
+          <x> 2.3000 </x>
+          <y> 0.5500 </y>
+          <z> 0.4500 </z>
+        </location>
+        <static_friction> 0.8 </static_friction>
+        <dynamic_friction> 0.6 </dynamic_friction>
+        <spring_coeff unit="N/M"> 658 </spring_coeff>
+        <damping_coeff unit="N/M/SEC"> 22 </damping_coeff>
+        <damping_coeff_rebound unit="N/M/SEC"> 22 </damping_coeff_rebound>
+      </contact>
+      <contact type="STRUCTURE" name="motor propeller rear">
+        <location unit="M">
+          <x> 1.5600 </x>
+          <y> -0.0000 </y>
+          <z> -0.2800 </z>
+        </location>
+        <static_friction> 0.8 </static_friction>
+        <dynamic_friction> 0.6 </dynamic_friction>
+        <spring_coeff unit="N/M"> 4120 </spring_coeff>
+        <damping_coeff unit="N/M/SEC"> 137 </damping_coeff>
+        <damping_coeff_rebound unit="N/M/SEC"> 137 </damping_coeff_rebound>
+      </contact>
+      <contact type="STRUCTURE" name="pod front">
         <location unit="M">
           <x> 0.0000 </x>
           <y> 0.0000 </y>
@@ -139,41 +177,69 @@
         </location>
         <static_friction> 0.8 </static_friction>
         <dynamic_friction> 0.6 </dynamic_friction>
-        <spring_coeff unit="N/M"> 45111 </spring_coeff>
-        <damping_coeff unit="N/M/SEC"> 1426 </damping_coeff>
+        <spring_coeff unit="N/M"> 1933 </spring_coeff>
+        <damping_coeff unit="N/M/SEC"> 64 </damping_coeff>
+        <damping_coeff_rebound unit="N/M/SEC"> 64 </damping_coeff_rebound>
       </contact>
-      <contact type="STRUCTURE" name="TAIL">
+      <contact type="STRUCTURE" name="pod front 2">
         <location unit="M">
-          <x> 1.5000 </x>
-          <y> 0.0000 </y>
-          <z> -0.0300 </z>
+          <x> 0.1702 </x>
+          <y> -0.0000 </y>
+          <z> -0.1262 </z>
         </location>
         <static_friction> 0.8 </static_friction>
         <dynamic_friction> 0.6 </dynamic_friction>
-        <spring_coeff unit="N/M"> 45111 </spring_coeff>
-        <damping_coeff unit="N/M/SEC"> 1426 </damping_coeff>
+        <spring_coeff unit="N/M"> 2617 </spring_coeff>
+        <damping_coeff unit="N/M/SEC"> 87 </damping_coeff>
+        <damping_coeff_rebound unit="N/M/SEC"> 87 </damping_coeff_rebound>
       </contact>
-      <contact type="STRUCTURE" name="BELLY">
+      <contact type="STRUCTURE" name="wing left front">
         <location unit="M">
-          <x> 0.7000 </x>
-          <y> 0.0000 </y>
-          <z> -0.1400 </z>
+          <x> 0.5800 </x>
+          <y> -2.0000 </y>
+          <z> 0.2250 </z>
         </location>
         <static_friction> 0.8 </static_friction>
         <dynamic_friction> 0.6 </dynamic_friction>
-        <spring_coeff unit="N/M"> 45111 </spring_coeff>
-        <damping_coeff unit="N/M/SEC"> 1426 </damping_coeff>
+        <spring_coeff unit="N/M"> 484 </spring_coeff>
+        <damping_coeff unit="N/M/SEC"> 16 </damping_coeff>
+        <damping_coeff_rebound unit="N/M/SEC"> 16 </damping_coeff_rebound>
       </contact>
-      <contact type="STRUCTURE" name="MOTOR PROP TIP">
+      <contact type="STRUCTURE" name="wing left front 2">
         <location unit="M">
-          <x> 1.5600 </x>
-          <y> 0.0000 </y>
-          <z> -0.2800 </z>
+          <x> 0.8200 </x>
+          <y> -2.0000 </y>
+          <z> 0.2250 </z>
         </location>
         <static_friction> 0.8 </static_friction>
         <dynamic_friction> 0.6 </dynamic_friction>
-        <spring_coeff unit="N/M"> 45111 </spring_coeff>
-        <damping_coeff unit="N/M/SEC"> 1426 </damping_coeff>
+        <spring_coeff unit="N/M"> 484 </spring_coeff>
+        <damping_coeff unit="N/M/SEC"> 16 </damping_coeff>
+        <damping_coeff_rebound unit="N/M/SEC"> 16 </damping_coeff_rebound>
+      </contact>
+      <contact type="STRUCTURE" name="wing right front">
+        <location unit="M">
+          <x> 0.5800 </x>
+          <y> 2.0000 </y>
+          <z> 0.2250 </z>
+        </location>
+        <static_friction> 0.8 </static_friction>
+        <dynamic_friction> 0.6 </dynamic_friction>
+        <spring_coeff unit="N/M"> 484 </spring_coeff>
+        <damping_coeff unit="N/M/SEC"> 16 </damping_coeff>
+        <damping_coeff_rebound unit="N/M/SEC"> 16 </damping_coeff_rebound>
+      </contact>
+      <contact type="STRUCTURE" name="wing right front 2">
+        <location unit="M">
+          <x> 0.8200 </x>
+          <y> 2.0000 </y>
+          <z> 0.2250 </z>
+        </location>
+        <static_friction> 0.8 </static_friction>
+        <dynamic_friction> 0.6 </dynamic_friction>
+        <spring_coeff unit="N/M"> 484 </spring_coeff>
+        <damping_coeff unit="N/M/SEC"> 16 </damping_coeff>
+        <damping_coeff_rebound unit="N/M/SEC"> 16 </damping_coeff_rebound>
       </contact>
     </ground_reactions>
     <propulsion>

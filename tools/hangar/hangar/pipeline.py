@@ -352,8 +352,8 @@ class Design:
         glb = os.path.join(self.dir, a.name + ".glb")
         model3d.write_glb(a, glb, origin=e["cg"])
         # the platform finds it where it is (io::AssetResolver: the source tree's
-        # aircraft/ in a development build, share/flightsim/aircraft in a package,
-        # or FSIM_AIRCRAFT_PATH): jsbsim:<name> in any trainer, the viewer, Python
+        # aircraft/ in a development build (before any staged copy), share/flightsim/aircraft
+        # in a package, or FSIM_AIRCRAFT_PATH): jsbsim:<name> in any trainer, the viewer, Python
         checks = [info("JSBSim aircraft", shown(xml_path), note="type jsbsim:%s" % a.name),
                   info("3D model", shown(glb), note="fsim demo --aircraft %s" % a.name)]
         return self.save("build", {"xml": xml_path, "glb": glb, "checks": checks})
@@ -424,6 +424,13 @@ class Design:
         return self.save("fly", {"results": results, "checks": checks,
                                  "images": ["fly_trim.png", "fly_climb.png", "fly_stall.png", "fly_longitudinal.png", "fly_lateral.png"]})
 
+    def _aircraft_file(self, kind):
+        """The JSBSim file of the design, or of a reference aircraft."""
+        name = kind.split(":", 1)[-1]
+        if name == self.aircraft.name:
+            return os.path.join(self.dir, name + ".xml")
+        return os.path.join(repo_root(), "third_party", "jsbsim", "aircraft", name, name + ".xml")
+
     def _stall_estimate(self):
         """The stall speed the tables predict (sea level, loaded, trimmed CL
         about 85 % of the clean maximum): the scale every test flies at."""
@@ -458,6 +465,7 @@ class Design:
             r["modes_linear"] = linear.modes(lin)
             r["linear_trim"] = {k: lin[k] for k in ("alpha_trim_deg", "CL", "speed_ms", "altitude_m", "Cma_cg", "Cnb_cg", "Clb_cg")}
         r["robustness"] = F.robustness(f, n=12 if self.quick else 40)
+        r["crashes"] = F.crash_tests(f, vs, F.contact_points(self._aircraft_file(f.type)))
         r["seconds"] = time.time() - t0
         return r, {"stall": h_stall, "long": m["hist_long"], "lat": m["hist_lat"]}
 
@@ -512,7 +520,31 @@ class Design:
                          note="MIL-F-8785C level 1: > 12 (infinite: spirally stable)"),
                    check("random-state runs that diverged", d["robustness"]["diverged"], None, 0,
                          note="of %d: attitudes, rates, speeds and controls at random" % d["robustness"]["runs"])]
+        checks += self._crash_checks(d, ref)
         return checks
+
+    def _crash_checks(self, d, ref):
+        """The crash tests: blown up, energy gained on impact, how deep."""
+        crashes = d.get("crashes")
+        if not crashes:
+            return []
+
+        def blown(r):
+            return sorted(k for k, c in r["crashes"].items() if c["blew_up"]) if r and r.get("crashes") else []
+
+        def gain(c):
+            return c["fastest_after_ms"] / c["impact_ms"] if np.isfinite(c["impact_ms"]) and c["impact_ms"] > 1.0 else 1.0
+        cases = ", ".join(crashes)
+        mine = blown(d)
+        note = "; ".join(filter(None, [", ".join(mine), ("reference: %s" % (", ".join(blown(ref)) or "none")) if ref else ""]))
+        worst = max(crashes, key=lambda k: gain(crashes[k]) if not crashes[k]["blew_up"] else 0.0)
+        deep = max(crashes, key=lambda k: crashes[k]["deepest_m"])
+        return [check("crash tests that blew up", len(mine), None, 0, level="warn",
+                      note=(note + "; " if note else "") + "into the ground at idle: " + cases),
+                check("crash tests: speed gained on impact", gain(crashes[worst]), None, 1.3, "x", level="warn",
+                      note="largest ratio of speed after impact to speed at it (%s); above 1 the contacts add energy, "
+                           "as JSBSim's wheels do when one lands sideways" % worst),
+                info("crash tests: deepest point below ground", crashes[deep]["deepest_m"], "m", note=deep)]
 
 
 def _calibrate(d):

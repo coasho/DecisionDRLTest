@@ -158,10 +158,8 @@ def ground_reactions_xml(aircraft, mass_model):
         <brake_group> %s </brake_group>
         <retractable> %d </retractable>
       </contact>""" % (name, _loc(pos, 10), k, c, 2 * c, g.max_steer_deg if g.steerable else 0.0, brake, int(g.retractable)))
-    # structure: the points that touch first in a crash
-    k_s = 20 * m * G0 / 0.1
-    c_s = 2 * 0.7 * math.sqrt(k_s * m)
-    for name, p in structure_points(aircraft):
+    # structure: the points that touch first in a crash, whatever the attitude
+    for name, p, k_s, c_s in structure_contacts(aircraft, mass_model):
         parts.append("""      <contact type="STRUCTURE" name="%s">
         <location unit="M">
 %s
@@ -170,35 +168,139 @@ def ground_reactions_xml(aircraft, mass_model):
         <dynamic_friction> 0.6 </dynamic_friction>
         <spring_coeff unit="N/M"> %.0f </spring_coeff>
         <damping_coeff unit="N/M/SEC"> %.0f </damping_coeff>
-      </contact>""" % (name, _loc(p, 10), k_s, c_s))
+        <damping_coeff_rebound unit="N/M/SEC"> %.0f </damping_coeff_rebound>
+      </contact>""" % (name, _loc(p, 10), k_s, c_s, c_s))
     parts.append("    </ground_reactions>")
     return "\n".join(parts)
 
 
-def structure_points(aircraft):
-    pts = []
-    w = aircraft.wing
-    tip = w.sections[-1]
-    for side, s in (("LEFT", -1), ("RIGHT", 1)):
-        if w.mirror:
-            p = tip.le.copy()
-            p[1] *= s
-            pts.append(("%s WING TIP" % side, p + np.array([0.5 * tip.chord, 0.0, 0.0])))
-    for b in aircraft.bodies:
-        if b.kind != "fuselage":
-            continue
-        pts.append(("NOSE", np.array([b.x[0], 0.0, float(b.bottom[0])])))
-        pts.append(("TAIL", np.array([b.x[-1], 0.0, float(b.bottom[-1])])))
-        i = int(np.argmin(b.bottom))
-        pts.append(("BELLY", np.array([b.x[i], 0.0, float(b.bottom[i])])))
-    for s in aircraft.surfaces:
-        if s.kind in ("fin", "vtail") and not s.mirror:
-            t = s.sections[-1]
-            pts.append(("%s TOP" % s.name.upper(), t.le + np.array([0.5 * t.chord, 0.0, 0.0])))
+# Structure contacts: stiff enough to hold the aircraft up, soft enough for
+# the step to integrate. JSBSim integrates body rates with forward Euler at
+# the platform's 120 Hz, and a contact far from the centre of gravity turns
+# the aircraft about it: on a light airframe a stiff wing-tip spring makes a
+# mode far faster than the step (the energy it gains throws the aircraft
+# back into the air). So each contact's own mode is held to STRUCTURE_OMEGA
+# rad/s (omega dt = 0.25 at 120 Hz), with the stiffness sized from the
+# apparent mass at the point, and contacts close together (the nose, a gear
+# leg and the spinner) share that budget: on one mode their springs and
+# dampers add up.
+STRUCTURE_OMEGA = 30.0
+STRUCTURE_ZETA = 0.5
+STRUCTURE_SHARE = 0.10  # contacts closer than this times the aircraft's size share
+
+
+def structure_points(aircraft, directions=1500, depth=0.02):
+    """The points that touch the ground first, whatever the attitude.
+
+    For directions spread over the sphere, the airframe's farthest point in
+    that direction is a support point of its convex hull; a flat ground
+    meets the hull there first. A point is kept unless one already kept is
+    within `depth` (times the aircraft's largest dimension) of being as far
+    out in every direction it serves: a fin top 0.3 m above the boom end
+    stays, the corners of a thin wing tip merge. Points along the keel and
+    top of every body and the edges of every surface are added where they
+    lie on the hull (flat or straight there, so few directions find them).
+    A symmetric aircraft is done for its right half and mirrored. Wheels are
+    the gear's contacts; a propeller counts as its disc.
+    Returns [(name, point)]."""
+    verts, labels = [], []
+    for name, _, v, _, _ in aircraft.mesh(fine=False):
+        verts.append(v)
+        labels += [name] * len(v)
     for e in aircraft.engines:
+        _, pitch, yaw = e.prop_orient
+        axis = np.array([np.cos(pitch) * np.cos(yaw), np.cos(pitch) * np.sin(yaw), -np.sin(pitch)])
+        a = np.cross(axis, [0.0, 0.0, 1.0])
+        a /= np.linalg.norm(a)
+        b = np.cross(axis, a)
+        th = np.linspace(0.0, 2 * np.pi, 4, endpoint=False)
         for name, _, prop, _ in e.copies():
-            pts.append(("%s PROP TIP" % name.upper(), prop - np.array([0.0, 0.0, 0.5 * e.prop_diameter])))
-    return pts
+            disc = prop + 0.5 * e.prop_diameter * (np.cos(th)[:, None] * a + np.sin(th)[:, None] * b)
+            verts.append(disc)
+            labels += ["%s propeller" % name] * len(disc)
+    V = np.vstack(verts)
+    size = float(np.ptp(V, axis=0).max())
+    tol = depth * size
+    k = np.arange(directions) + 0.5
+    polar = np.arccos(1.0 - 2.0 * k / directions)
+    azimuth = np.pi * (1.0 + 5.0 ** 0.5) * k
+    D = np.stack([np.cos(azimuth) * np.sin(polar), np.sin(azimuth) * np.sin(polar), np.cos(polar)], axis=1)
+    support = V @ D.T
+    reach = support.max(axis=0)  # the hull's extent in each direction
+    symmetric = (all(s.mirror or abs(s.sections[0].le[1]) < 1e-6 for s in aircraft.surfaces)
+                 and all(b.mirror or abs(float(np.max(np.abs(b.y)))) < 1e-6 for b in aircraft.bodies)
+                 and all(e.mirror or abs(e.prop_position[1]) < 1e-6 for e in aircraft.engines))
+    serve = D[:, 1] >= -1e-9 if symmetric else np.ones(len(D), bool)  # the right half's directions
+    best = np.argmax(support, axis=0)
+    chosen, counts = np.unique(best[serve], return_counts=True)
+    kept = []
+    for i in chosen[np.argsort(-counts, kind="stable")]:  # the most-used first
+        i = int(i)
+        mine = serve & (best == i)
+        if all(float(np.max(support[i, mine] - support[j, mine])) > tol for j in kept):
+            kept.append(i)
+    pts = [(labels[i], V[i]) for i in kept]
+    extra = []
+    for body in aircraft.bodies:
+        for side in body.copies()[:1]:
+            for x in np.linspace(body.x[0], body.x[-1], 7)[1:-1]:
+                w, top, bottom, yc, _ = body.section(x)
+                y = side * abs(yc) if body.mirror else yc
+                extra += [("%s bottom" % body.name, np.array([x, y, bottom])), ("%s top" % body.name, np.array([x, y, top]))]
+    for surf in aircraft.surfaces:
+        for eta in (0.35, 0.7):
+            le, chord, _, _ = surf.station(eta)
+            c, _ = surf.frame(eta)
+            extra += [(surf.name, le), (surf.name, le + chord * c)]
+    for label, q in extra:
+        gain = D @ q - reach  # how far short of the hull, per direction
+        best_dir = int(np.argmax(gain))
+        if gain[best_dir] < -0.005 * size:
+            continue  # inside the hull: never touches first
+        if all(float(D[best_dir] @ (q - r)) > tol for _, r in pts):
+            pts.append((label, q))
+    if symmetric:
+        flip = np.array([1.0, -1.0, 1.0])
+        pts = [(label, q * np.array([1.0, 0.0, 1.0]) if abs(q[1]) < tol else q) for label, q in pts]
+        pts += [(label, q * flip) for label, q in pts if q[1] > 0.0]
+    centre = 0.5 * (V.min(axis=0) + V.max(axis=0))
+    named, seen = [], {}
+    for label, q in sorted(pts, key=lambda lp: (lp[0], lp[1][1], lp[1][0], lp[1][2])):
+        d = q - centre
+        words = [label]
+        if abs(q[1]) > 0.02 * size:
+            words.append("left" if q[1] < 0 else "right")
+        words.append(("front" if d[0] < 0 else "rear") if abs(d[0]) >= abs(d[2]) else ("top" if d[2] > 0 else "bottom"))
+        name = " ".join(words)
+        seen[name] = seen.get(name, 0) + 1
+        named.append((name if seen[name] == 1 else "%s %d" % (name, seen[name]), q))
+    return named
+
+
+def apparent_mass(r, mass, inertia):
+    """The smallest mass a force at r (from the centre of gravity) meets, over
+    all directions: 1 / the largest eigenvalue of I/m - [r]x J^-1 [r]x."""
+    R = np.array([[0.0, -r[2], r[1]], [r[2], 0.0, -r[0]], [-r[1], r[0], 0.0]])
+    A = np.eye(3) / mass - R @ np.linalg.solve(inertia, R)
+    return 1.0 / float(np.linalg.eigvalsh(0.5 * (A + A.T)).max())
+
+
+def structure_contacts(aircraft, mass_model):
+    """[(name, point, spring N/m, damping N s/m)], sized on the empty
+    aircraft (the lightest, so the fastest)."""
+    e = mass_model.empty()
+    J = np.array([[e["ixx"], -e["ixy"], -e["ixz"]], [-e["ixy"], e["iyy"], -e["iyz"]], [-e["ixz"], -e["iyz"], e["izz"]]])
+    points = structure_points(aircraft)
+    wheels = [pos for g in aircraft.gear for _, pos in g.positions()]
+    lo, hi = aircraft.extent()
+    near = STRUCTURE_SHARE * float(np.max(hi - lo))
+    everything = np.array([p for _, p in points] + wheels)
+    out = []
+    for name, p in points:
+        m_eff = apparent_mass(p - e["cg"], e["mass"], J)
+        share = int(np.sum(np.linalg.norm(everything - p, axis=1) < near))  # itself included
+        out.append((name, p, m_eff * STRUCTURE_OMEGA ** 2 / share, 2.0 * STRUCTURE_ZETA * m_eff * STRUCTURE_OMEGA / share))
+    return out
 
 
 def flight_control_xml(aircraft):

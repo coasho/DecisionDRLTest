@@ -27,6 +27,7 @@
 #include <models/FGPropagate.h>
 #include <models/FGPropulsion.h>
 #include <models/propulsion/FGEngine.h>
+#include <models/propulsion/FGThruster.h>
 #include <simgear/misc/sg_path.hxx>
 
 #include <algorithm>
@@ -44,23 +45,50 @@ public:
     ProviderGroundCallback(std::shared_ptr<const GroundProvider> provider, double semiMajorFt, double semiMinorFt)
         : provider_(std::move(provider)), a_(semiMajorFt), b_(semiMinorFt) {}
 
-    double GetAGLevel(double, const JSBSim::FGLocation& loc, JSBSim::FGLocation& contact,
+    // JSBSim asks once per contact point per step. The geodetic conversion
+    // (iterative) is done for the first point of a step only; the others -
+    // metres away, on the same aircraft - are placed in its local east-north-up
+    // frame, which is exact to d^2 / 2R (under 0.1 mm within kLocalFt). The
+    // terrain is still sampled under every point.
+    double GetAGLevel(double t, const JSBSim::FGLocation& loc, JSBSim::FGLocation& contact,
                       JSBSim::FGColumnVector3& normal, JSBSim::FGColumnVector3& vel,
                       JSBSim::FGColumnVector3& angularVel) const override {
         vel.InitMatrix();
         angularVel.InitMatrix();
 
-        JSBSim::FGLocation l = loc;
-        l.SetEllipse(a_, b_);
-        const double lat = l.GetGeodLatitudeRad();
-        const double lon = l.GetLongitude();
+        const double x = loc(1), y = loc(2), z = loc(3);
+        double lat, lon, alt;
+        const double dx = x - x0_, dy = y - y0_, dz = z - z0_;
+        if (t == t0_ && dx * dx + dy * dy + dz * dz < kLocalFt * kLocalFt) {
+            const double e = -sinLon0_ * dx + cosLon0_ * dy;
+            const double n = -sinLat0_ * cosLon0_ * dx - sinLat0_ * sinLon0_ * dy + cosLat0_ * dz;
+            const double u = cosLat0_ * cosLon0_ * dx + cosLat0_ * sinLon0_ * dy + sinLat0_ * dz;
+            lat = lat0_ + n / feetPerRadLat_;
+            lon = lon0_ + e / feetPerRadLon_;
+            alt = alt0_ + u;
+        } else {
+            JSBSim::FGLocation l = loc;
+            l.SetEllipse(a_, b_);
+            lat = l.GetGeodLatitudeRad();
+            lon = l.GetLongitude();
+            alt = l.GetGeodAltitude();
+            t0_ = t;
+            x0_ = x, y0_ = y, z0_ = z;
+            lat0_ = lat, lon0_ = lon, alt0_ = alt;
+            sinLat0_ = std::sin(lat), cosLat0_ = std::cos(lat), sinLon0_ = std::sin(lon), cosLon0_ = std::cos(lon);
+            // radii of curvature (feet): meridian M and prime vertical N, at the point's height
+            const double e2 = 1.0 - (b_ * b_) / (a_ * a_);
+            const double w = std::sqrt(1.0 - e2 * sinLat0_ * sinLat0_);
+            feetPerRadLat_ = a_ * (1.0 - e2) / (w * w * w) + alt;
+            feetPerRadLon_ = (a_ / w + alt) * cosLat0_;
+        }
         const double cosLat = std::cos(lat);
         normal = JSBSim::FGColumnVector3(cosLat * std::cos(lon), cosLat * std::sin(lon), std::sin(lat));
 
         const double terrainFt = units::metresToFeet(provider_->heightAboveEllipsoidM(lat, lon));
         contact.SetEllipse(a_, b_);
         contact.SetPositionGeodetic(lon, lat, terrainFt);
-        return l.GetGeodAltitude() - terrainFt;
+        return alt - terrainFt;
     }
 
     // JSBSim may try to move the terrain (IC files, scripts); the provider is
@@ -72,8 +100,16 @@ public:
     }
 
 private:
+    static constexpr double kLocalFt = 100.0; // points this close to a step's first share its frame
+
     std::shared_ptr<const GroundProvider> provider_;
     double a_, b_;
+    // The step's first point (ECEF feet) and its local frame; one vehicle's
+    // callback is only ever called from the thread stepping that vehicle.
+    mutable double t0_ = -1.0, x0_ = 0.0, y0_ = 0.0, z0_ = 0.0;
+    mutable double lat0_ = 0.0, lon0_ = 0.0, alt0_ = 0.0;
+    mutable double sinLat0_ = 0.0, cosLat0_ = 1.0, sinLon0_ = 0.0, cosLon0_ = 1.0;
+    mutable double feetPerRadLat_ = 1.0, feetPerRadLon_ = 1.0;
 };
 
 bool finite(double v) noexcept { return std::isfinite(v); }
@@ -166,15 +202,40 @@ bool JsbsimModel::reset(const InitialConditions& ic) {
         // or the reopen fails and is logged on every reset.
         silenceOutputs();
         fdm_->GetOutput()->SetStartNewOutput();
+        // JSBSim's reset keeps a propeller's RPM (FGPropeller::ResetToIC
+        // clears only the induced velocity): after a blow-up the reset pass
+        // would compute thrust from it. Start the propellers as a load does.
+        auto propulsion = fdm_->GetPropulsion();
+        for (unsigned i = 0; i < propulsion->GetNumEngines(); ++i)
+            if (auto* thruster = propulsion->GetEngine(i)->GetThruster()) thruster->SetRPM(0.0);
         // Mode 0: reinitialise models and run the IC pass (design 7.2).
         fdm_->ResetToInitialConditions(0);
         startEngines();
         settleOnGround(ic);
+        seedIntegrators();
     } catch (const std::exception& e) {
         LOG_ERROR("sim") << "JSBSim exception on reset: " << e.what();
         return false;
     }
     return true;
+}
+
+// The integrators (Adams-Bashforth) remember past accelerations. RunIC()
+// seeds that memory from what Propagate read at the start of its pass: the
+// last step's accelerations before a reset, since Accelerations runs after
+// Propagate. After a violent step or a blow-up, the first step after the
+// reset replayed them - and blew up again. Evaluate the models once at the
+// new state, without integrating, and seed it from that (as JSBSim's own
+// SetHoldDown() does).
+void JsbsimModel::seedIntegrators() {
+    fdm_->SuspendIntegration();
+    fdm_->Run();
+    fdm_->ResumeIntegration();
+    auto propagate = fdm_->GetPropagate();
+    const auto accelerations = fdm_->GetAccelerations();
+    propagate->in.vPQRidot = accelerations->GetPQRidot();
+    propagate->in.vUVWidot = accelerations->GetUVWidot();
+    propagate->InitializeDerivatives();
 }
 
 // Aircraft files may declare their own <output> (CSV/socket). The platform

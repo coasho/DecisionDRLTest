@@ -51,6 +51,7 @@ private:
     void startEngines();
     void applyInitialConditions(const InitialConditions& ic);
     void settleOnGround(const InitialConditions& ic);
+    void seedIntegrators();
     void cacheCommandNodes();
     bool checkDivergence();
 

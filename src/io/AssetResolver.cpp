@@ -68,11 +68,15 @@ std::vector<fs::path> environmentAircraftDirs() {
 std::vector<fs::path> AssetResolver::aircraftDirs() const {
     std::vector<fs::path> out = environmentAircraftDirs();
     std::error_code ec;
-    for (const auto& base : paths_)
-        if (fs::is_directory(base / "aircraft", ec)) out.push_back(base / "aircraft");
 #ifdef FSIM_AIRCRAFT_DIR
+    // The source tree before any packaged copy: a development build stages
+    // the designs into its Python package, and a design rebuilt with hangar
+    // since would otherwise be shadowed by that stale copy. On a machine
+    // without the source tree the directory does not exist.
     if (fs::is_directory(FSIM_AIRCRAFT_DIR, ec)) out.emplace_back(FSIM_AIRCRAFT_DIR);
 #endif
+    for (const auto& base : paths_)
+        if (fs::is_directory(base / "aircraft", ec)) out.push_back(base / "aircraft");
     return out;
 }
 

@@ -23,7 +23,8 @@ add_executable(fsim_tests
     test_comm.cpp)
 
 target_link_libraries(fsim_tests PRIVATE fsim::env fsim::session fsim::control fsim::effects fsim::comm fsim::ipc fsim::sim fsim::io fsim::core Catch2::Catch2WithMain)
-target_compile_definitions(fsim_tests PRIVATE FSIM_TEST_JSBSIM_ROOT="${FSIM_JSBSIM_DATA_DIR}")
+target_compile_definitions(fsim_tests PRIVATE FSIM_TEST_JSBSIM_ROOT="${FSIM_JSBSIM_DATA_DIR}"
+                                                FSIM_TEST_AIRCRAFT_DIR="${CMAKE_SOURCE_DIR}/aircraft")
 fsim_set_warnings(fsim_tests)
 
 add_custom_command(TARGET fsim_tests POST_BUILD

@@ -437,6 +437,74 @@ def modes(f, altitude_m=1500.0, speed_ms=55.0):
     return out
 
 
+# name: height m, speed (times the stall speed), pitch deg, roll deg
+CRASHES = {
+    "flat drop": (4.0, 1.2, 0.0, 0.0),
+    "nose dive": (6.0, 1.5, -60.0, 0.0),
+    "wing tip": (8.0, 1.5, -15.0, 70.0),
+    "tail strike": (4.0, 0.8, 35.0, 0.0),
+    "inverted": (6.0, 1.5, -10.0, 180.0),
+    "cartwheel": (8.0, 1.6, -30.0, 100.0),
+}
+
+
+def contact_points(path):
+    """The contact points of a JSBSim aircraft file (structural frame, metres)."""
+    import xml.etree.ElementTree as ET
+    scale = {"M": 1.0, "IN": 0.0254, "FT": 0.3048}
+    pts = []
+    for c in ET.parse(path).getroot().find("ground_reactions").findall("contact"):
+        loc = c.find("location")
+        pts.append([float(loc.find(k).text) * scale[loc.get("unit", "IN").upper()] for k in "xyz"])
+    return np.array(pts)
+
+
+def lowest_contact(f, v, points):
+    """Height of the lowest contact point above the ground (negative: below),
+    from the points, the centre of gravity and the attitude."""
+    cg = np.array([f.prop(v, "inertia/cg-%s-in" % a) for a in "xyz"]) * 0.0254
+    r = points - cg
+    rb = np.stack([-r[:, 0], r[:, 1], -r[:, 2]], axis=1)  # structural (x aft, z up) -> body (x forward, z down)
+    s = v.state
+    phi, theta = s.euler_rad[0], s.euler_rad[1]
+    down = (-math.sin(theta) * rb[:, 0] + math.sin(phi) * math.cos(theta) * rb[:, 1]
+            + math.cos(phi) * math.cos(theta) * rb[:, 2])
+    return float(np.min(s.altitude_agl_m - down))
+
+
+def crash_tests(f, stall_tas, points, seconds=8.0):
+    """Into flat ground in six attitudes, at idle and hands off: does the
+    aircraft stop, or bounce, sink through or blow up? A model fit for
+    training survives the crashes an agent will make - the episode ends,
+    but the numbers must stay sane, and the vehicle must reset cleanly."""
+    out = {}
+    for name, (height, k, pitch, roll) in CRASHES.items():
+        v = f.spawn(height, k * stall_tas, heading_deg=90.0, pitch_deg=pitch, roll_deg=roll)
+        touch, impact, fastest, rate, bounce, deepest, blown = None, float("nan"), 0.0, 0.0, 0.0, 0.0, False
+        for i in range(int(seconds / f.dt)):
+            v.command_actuator(throttle=0.0, aileron=0.0, elevator=0.0, rudder=0.0)
+            f.world.step()
+            s = v.state
+            speed = float(np.linalg.norm(s.velocity_ned_ms))
+            if s.diverged or not np.isfinite(speed):
+                blown = True
+                break
+            low = lowest_contact(f, v, points)
+            deepest = max(deepest, -low)
+            if touch is None and low < 0.0:
+                touch, impact = s.altitude_agl_m, speed
+            if touch is not None:
+                bounce = max(bounce, s.altitude_agl_m - touch)
+                fastest = max(fastest, speed)
+                rate = max(rate, float(np.max(np.abs(s.angular_rate_body_rad_s))))
+        s = v.state
+        out[name] = {"blew_up": blown, "impact_ms": impact, "fastest_after_ms": fastest, "max_rate_deg_s": math.degrees(rate),
+                     "bounce_m": bounce, "deepest_m": deepest,
+                     "final_speed_ms": float(np.linalg.norm(s.velocity_ned_ms)) if not blown else float("nan")}
+        v.remove()
+    return out
+
+
 def robustness(f, n=60, seconds=6.0, seed=1):
     """Random attitudes, rates, speeds and control inputs - the states a
     learning agent reaches. Counts the runs that diverge (a NaN or an
