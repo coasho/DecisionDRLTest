@@ -20,6 +20,12 @@ namespace fsim::world {
 /// model->body rotation. Per vehicle, setModel() picks a different file: the
 /// vehicle's own `model` override or `<modelDir>/<type>.glb` for its type;
 /// each file is loaded and compiled once and shared by every vehicle using it.
+///
+/// Moving control surfaces: a model node named `fsim:<channel>[:<gain>]`
+/// (channel aileron, elevator, rudder or flaps) turns about its own x axis by
+/// gain times the vehicle's deflection of that channel (VehicleState, radians;
+/// aileron is the left one). Each vehicle gets its own copy of those nodes and
+/// of the nodes above them; the geometry stays shared.
 class VehicleVisuals {
 public:
     struct Settings {
@@ -89,11 +95,49 @@ public:
     /// Animations found in the loaded model (e.g. propellers), empty for the placeholder.
     const vsg::Animations& animations() const { return animations_; }
 
+    /// A moving part of a model: a node named fsim:<channel>[:<gain>].
+    struct Joint {
+        enum Channel { Aileron, Elevator, Rudder, Flaps };
+        const vsg::MatrixTransform* node = nullptr; ///< in the shared model
+        vsg::dmat4 rest;                           ///< its matrix at zero deflection
+        Channel channel = Aileron;
+        double gain = 1.0;
+        /// Parses a node name; false when it is not a joint (or malformed).
+        static bool parse(const std::string& name, Joint& joint);
+        /// The node's matrix at the vehicle's deflection of this channel.
+        vsg::dmat4 matrix(const sim::VehicleState& state) const;
+    };
+
+    /// The joints of one slot's model and their transforms in that slot's own
+    /// copy (empty for a model without joints).
+    struct Pose {
+        vsg::ref_ptr<vsg::Node> normal, geometry; ///< the slot's copies (null: the shared graph)
+        std::vector<Joint> joints;                ///< one per transform, both copies
+        std::vector<vsg::ref_ptr<vsg::MatrixTransform>> transforms;
+    };
+    const Pose& pose(std::size_t index) const { return poses_.at(index); }
+
 private:
+    /// Every joint in a graph and the nodes on the paths down to them: the
+    /// nodes a vehicle needs its own copy of.
+    struct Rig {
+        std::vector<Joint> joints;
+        std::vector<const vsg::Object*> spine;
+        static Rig find(const vsg::ref_ptr<vsg::Node>& graph);
+        /// A copy of `graph` with the spine duplicated and the rest shared;
+        /// `transforms` receives each joint's copy, in joint order.
+        vsg::ref_ptr<vsg::Node> copy(const vsg::ref_ptr<vsg::Node>& graph,
+                                     std::vector<vsg::ref_ptr<vsg::MatrixTransform>>& transforms) const;
+    };
     struct Model {
         vsg::ref_ptr<vsg::Node> normal, highlighted;
         vsg::ref_ptr<vsg::Node> geometry; ///< state-free, white-vertex-colour copy for the segmentation pass
+        Rig rig, geometryRig;
     };
+    /// Points slot `index` at model `m`: the shared graph, or the slot's own
+    /// copy when the model has joints.
+    void assign(std::size_t index, const Model& m);
+    std::vector<Pose> poses_;
     vsg::ref_ptr<vsg::Node> buildPlaceholder(const Settings& s, const vsg::vec4& color) const;
     /// Flatten a model to transform + draw pairs with white vertex colours,
     /// dropping its own pipelines, textures and materials so one flat

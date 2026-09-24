@@ -5,7 +5,10 @@
 #include "world/Frames.h"
 
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 namespace fsim::world {
@@ -24,6 +27,44 @@ vsg::ref_ptr<vsg::Node> box(vsg::Builder& builder, const vsg::vec3& centre, cons
     return builder.createBox(geom, state);
 }
 
+bool isJointName(const std::string& name) { return name.rfind("fsim:", 0) == 0; }
+
+/// Every node named fsim:<channel>[:<gain>], and the nodes on the paths down
+/// to them (the "spine" a vehicle needs its own copy of).
+class FindJoints : public vsg::Visitor {
+public:
+    std::vector<VehicleVisuals::Joint> joints;
+    std::set<const vsg::Object*> spine;
+    std::vector<std::string> malformed;
+
+    void apply(vsg::Object& o) override { descend(o); }
+
+    void apply(vsg::MatrixTransform& t) override {
+        std::string name;
+        if (t.getValue("name", name) && isJointName(name)) {
+            VehicleVisuals::Joint joint;
+            if (VehicleVisuals::Joint::parse(name, joint)) {
+                joint.node = &t;
+                joint.rest = t.matrix;
+                joints.push_back(joint);
+                spine.insert(path_.begin(), path_.end());
+                spine.insert(&t);
+            } else {
+                malformed.push_back(name);
+            }
+        }
+        descend(t);
+    }
+
+private:
+    void descend(vsg::Object& o) {
+        path_.push_back(&o);
+        o.traverse(*this);
+        path_.pop_back();
+    }
+    std::vector<const vsg::Object*> path_;
+};
+
 /// Flattens a loaded model to transform + draw pairs with white vertex
 /// colours. The segmentation pass paints a whole vehicle one colour, so the
 /// model's own state (pipelines, textures, materials) has to go, and so do
@@ -40,6 +81,26 @@ public:
         const vsg::dmat4 outer = matrix_;
         matrix_ = t.transform(matrix_);
         t.traverse(*this);
+        matrix_ = outer;
+    }
+
+    /// A moving part stays a transform of its own, named as in the model and
+    /// holding everything above it, so each vehicle's copy can still turn it.
+    void apply(const vsg::MatrixTransform& t) override {
+        std::string name;
+        if (!t.getValue("name", name) || !isJointName(name)) {
+            apply(static_cast<const vsg::Transform&>(t));
+            return;
+        }
+        auto joint = vsg::MatrixTransform::create(t.transform(matrix_));
+        joint->setValue("name", name);
+        result->addChild(joint);
+        const vsg::dmat4 outer = matrix_;
+        const auto outerResult = result;
+        matrix_ = vsg::dmat4();
+        result = joint;
+        t.traverse(*this);
+        result = outerResult;
         matrix_ = outer;
     }
 
@@ -83,7 +144,9 @@ private:
     /// The colours are replaced by one white entry per *vertex*: a glTF model
     /// with no COLOR_0 carries a single-element colour array bound per
     /// instance, and reading that per vertex would feed the shader whatever
-    /// lies past its end.
+    /// lies past its end. Normals and texture coordinates a model leaves out
+    /// come the same way (one vec3Value / vec2Value per instance, from
+    /// vsgXchange's glTF reader) and get one default entry per vertex too.
     static bool whiteArrays(const vsg::BufferInfoList& in, vsg::DataList& out) {
         if (in.size() != 4) return false;
         for (const auto& a : in) {
@@ -91,11 +154,22 @@ private:
             out.push_back(a->data);
         }
         auto vertices = out[0].cast<vsg::vec3Array>();
-        if (!vertices || !out[1].cast<vsg::vec3Array>() || !out[2].cast<vsg::vec2Array>() || !out[3].cast<vsg::vec4Array>()) {
+        if (!vertices) {
             out.clear();
             return false;
         }
-        out[3] = vsg::vec4Array::create(vertices->size(), vsg::vec4(1.0f, 1.0f, 1.0f, 1.0f));
+        const std::size_t n = vertices->size();
+        auto normals = out[1].cast<vsg::vec3Array>();
+        auto texcoords = out[2].cast<vsg::vec2Array>();
+        const bool known = (normals || out[1].cast<vsg::vec3Value>()) && (texcoords || out[2].cast<vsg::vec2Value>()) &&
+                           (out[3].cast<vsg::vec4Array>() || out[3].cast<vsg::vec4Value>());
+        if (!known) {
+            out.clear();
+            return false;
+        }
+        if (!normals || normals->size() != n) out[1] = vsg::vec3Array::create(n, vsg::vec3(0.0f, 0.0f, 1.0f));
+        if (!texcoords || texcoords->size() != n) out[2] = vsg::vec2Array::create(n, vsg::vec2(0.0f, 0.0f));
+        out[3] = vsg::vec4Array::create(n, vsg::vec4(1.0f, 1.0f, 1.0f, 1.0f));
         return true;
     }
 
@@ -122,8 +196,10 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
         default_.highlighted = buildPlaceholder(settings, vsg::vec4(1.0f, 0.55f, 0.1f, 1.0f));
     }
 
+    default_.rig = Rig::find(default_.normal);
     if (settings.segmentation) {
         default_.geometry = stripState(default_.normal);
+        default_.geometryRig = Rig::find(default_.geometry);
         segRoot_ = vsg::Group::create();
         segTransforms_.reserve(count);
         segSwitch_.reserve(count);
@@ -132,6 +208,7 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
 
     transforms_.reserve(count);
     highlight_.reserve(count);
+    poses_.resize(count);
     visible_.assign(count, 1);
     onMask_.assign(count, vsg::MASK_ALL);
     slotModel_.assign(count, std::string());
@@ -171,6 +248,8 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
         segSwitch_.push_back(segSw);
         segState_.push_back(state);
     }
+    if (!default_.rig.joints.empty())
+        for (std::size_t i = 0; i < count; ++i) assign(i, default_);
 }
 
 vsg::vec4 VehicleVisuals::segmentationColour(std::size_t index) {
@@ -178,6 +257,68 @@ vsg::vec4 VehicleVisuals::segmentationColour(std::size_t index) {
     // attachment stores k/255 exactly, so the readback is lossless.
     const unsigned id = static_cast<unsigned>(index) + 1;
     return vsg::vec4(static_cast<float>(id & 0xFFu) / 255.0f, static_cast<float>((id >> 8) & 0xFFu) / 255.0f, 0.0f, 1.0f);
+}
+
+bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
+    if (!isJointName(name)) return false;
+    std::string channel = name.substr(5), gain;
+    if (const auto colon = channel.find(':'); colon != std::string::npos) {
+        gain = channel.substr(colon + 1);
+        channel.resize(colon);
+    }
+    if (channel == "aileron") joint.channel = Aileron;
+    else if (channel == "elevator") joint.channel = Elevator;
+    else if (channel == "rudder") joint.channel = Rudder;
+    else if (channel == "flaps" || channel == "flap") joint.channel = Flaps;
+    else return false;
+    joint.gain = 1.0;
+    if (!gain.empty()) {
+        char* end = nullptr;
+        const double g = std::strtod(gain.c_str(), &end);
+        if (end == gain.c_str() || *end != '\0' || !std::isfinite(g)) return false;
+        joint.gain = g;
+    }
+    return true;
+}
+
+vsg::dmat4 VehicleVisuals::Joint::matrix(const sim::VehicleState& s) const {
+    double deflection = 0.0;
+    switch (channel) {
+    case Aileron: deflection = s.aileronRad; break;
+    case Elevator: deflection = s.elevatorRad; break;
+    case Rudder: deflection = s.rudderRad; break;
+    case Flaps: deflection = s.flapsRad; break;
+    }
+    if (!std::isfinite(deflection)) deflection = 0.0;
+    return rest * vsg::rotate(gain * deflection, vsg::dvec3(1.0, 0.0, 0.0));
+}
+
+VehicleVisuals::Rig VehicleVisuals::Rig::find(const vsg::ref_ptr<vsg::Node>& graph) {
+    Rig rig;
+    if (!graph) return rig;
+    auto finder = vsg::visit<FindJoints>(graph);
+    for (const auto& name : finder.malformed)
+        LOG_WARN("world") << "model node '" << name << "' is not a control surface (fsim:aileron|elevator|rudder|flaps[:gain]); left fixed";
+    rig.joints = std::move(finder.joints);
+    rig.spine.assign(finder.spine.begin(), finder.spine.end());
+    return rig;
+}
+
+vsg::ref_ptr<vsg::Node> VehicleVisuals::Rig::copy(const vsg::ref_ptr<vsg::Node>& graph,
+                                                  std::vector<vsg::ref_ptr<vsg::MatrixTransform>>& transforms) const {
+    vsg::CopyOp copyop;
+    copyop.duplicate = new vsg::Duplicate; // Duplicate has no create() of its own
+    for (const auto* node : spine) copyop.duplicate->insert(node);
+    auto out = copyop(graph);
+    std::vector<vsg::ref_ptr<vsg::MatrixTransform>> copies;
+    for (const auto& joint : joints) {
+        const auto it = copyop.duplicate->find(joint.node);
+        auto t = it != copyop.duplicate->end() ? it->second.cast<vsg::MatrixTransform>() : vsg::ref_ptr<vsg::MatrixTransform>();
+        if (!t || t.get() == joint.node) return {}; // a node on the way down does not copy: no moving parts
+        copies.push_back(t);
+    }
+    transforms.insert(transforms.end(), copies.begin(), copies.end());
+    return out;
 }
 
 vsg::ref_ptr<vsg::Node> VehicleVisuals::stripState(const vsg::ref_ptr<vsg::Node>& model) {
@@ -294,9 +435,12 @@ const VehicleVisuals::Model& VehicleVisuals::modelFor(const std::string& key) {
         m.normal = loadModel(s, options_);
         if (m.normal) {
             m.highlighted = m.normal;
+            m.rig = Rig::find(m.normal);
+            if (!m.rig.joints.empty()) LOG_INFO("world") << "vehicle model: " << key << ": " << m.rig.joints.size() << " moving control surface(s)";
             if (compiler_ && !compiler_(m.normal)) LOG_WARN("world") << "could not compile vehicle model " << key;
             if (segRoot_) {
                 m.geometry = stripState(m.normal);
+                m.geometryRig = Rig::find(m.geometry);
                 if (m.geometry && compiler_ && !compiler_(m.geometry))
                     LOG_WARN("world") << "could not compile the segmentation copy of " << key;
             }
@@ -311,12 +455,32 @@ void VehicleVisuals::setModel(std::size_t index, const std::string& modelPath, c
     const std::string key = resolveModel(modelPath, type);
     if (slotModel_[index] == key) return;
     slotModel_[index] = key;
-    const Model& m = modelFor(key);
+    assign(index, modelFor(key));
+}
+
+void VehicleVisuals::assign(std::size_t index, const Model& m) {
+    Pose& pose = poses_[index];
+    pose = Pose{};
+    vsg::ref_ptr<vsg::Node> normal = m.normal;
+    if (!m.rig.joints.empty()) {
+        if (auto copy = m.rig.copy(m.normal, pose.transforms)) {
+            pose.normal = normal = copy;
+            pose.joints = m.rig.joints;
+        } else {
+            LOG_WARN("world") << "vehicle model: its control surfaces could not be copied per vehicle; drawn fixed";
+        }
+    }
     auto& children = highlight_[index]->children;
-    children[0].node = m.normal;
-    children[1].node = m.highlighted;
+    children[0].node = normal;
+    children[1].node = m.highlighted == m.normal ? normal : m.highlighted;
     if (index < segState_.size()) {
-        auto geometry = m.geometry ? m.geometry : default_.geometry;
+        vsg::ref_ptr<vsg::Node> geometry = m.geometry ? m.geometry : default_.geometry;
+        if (m.geometry && !m.geometryRig.joints.empty()) {
+            if (auto copy = m.geometryRig.copy(m.geometry, pose.transforms)) {
+                pose.geometry = geometry = copy;
+                pose.joints.insert(pose.joints.end(), m.geometryRig.joints.begin(), m.geometryRig.joints.end());
+            }
+        }
         segState_[index]->children.clear();
         if (geometry) segState_[index]->addChild(geometry);
     }
@@ -333,6 +497,8 @@ void VehicleVisuals::update(Span<const sim::VehicleState> states) {
         const vsg::dmat4 m = bodyToEcef(states[i]);
         transforms_[i]->matrix = m;
         if (i < segTransforms_.size()) segTransforms_[i]->matrix = m;
+        const Pose& pose = poses_[i];
+        for (std::size_t j = 0; j < pose.transforms.size(); ++j) pose.transforms[j]->matrix = pose.joints[j].matrix(states[i]);
     }
 }
 

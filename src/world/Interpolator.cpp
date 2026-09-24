@@ -105,6 +105,7 @@ void Interpolator::blend(const sim::VehicleState& a, const sim::VehicleState& b,
     out.aileronRad = lerp(a.aileronRad, b.aileronRad, t);
     out.elevatorRad = lerp(a.elevatorRad, b.elevatorRad, t);
     out.rudderRad = lerp(a.rudderRad, b.rudderRad, t);
+    out.flapsRad = lerp(a.flapsRad, b.flapsRad, t);
     slerp(a.attitudeEcefToBody, b.attitudeEcefToBody, t, out.attitudeEcefToBody);
     bodyToEcefFromQuaternion(out.attitudeEcefToBody, out.rotationBodyToEcef);
 }

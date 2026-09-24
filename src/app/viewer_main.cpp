@@ -105,6 +105,7 @@ struct ViewerOptions {
     int cameraMode = 1; // orbit
     std::string view;   // --view lat,lon,alt_m,distance_m[,azimuth_deg,elevation_deg]: start detached, looking at that point
     double chaseDistance = 40.0;
+    bool chaseDistanceSet = false; // --chase-distance given: start there, even attached to a world
     double chaseAzimuth = 180.0, chaseElevation = 14.0;
     bool probe = false;
     double stats = 0.0;   // --stats <seconds>: print per-second frame statistics, exit after this long
@@ -200,6 +201,9 @@ void usageAll(const char* prog) {
         "  --width <px> --height <px> --fullscreen --msaa <1|2|4|8> --fov <deg> --max-fps <n> (0 = vsync only)\n"
         "  --debug-layer            Vulkan validation layer\n"
         "  --camera chase|orbit|overview|free   initial camera (orbit)\n"
+        "  --chase-distance <m>     start this far from the vehicle (40; attached to a world the view\n"
+        "                           starts regional unless this is given)\n"
+        "  --chase-azimuth <deg>  --chase-elevation <deg>   where the camera sits (180 = behind, 14 up)\n"
         "  --log-level <lvl>\n"
         "Keys: space pause (demo), . step (demo), tab next vehicle, c camera, -/= zoom, r reset view, [ ] time factor (demo),\n"
         "      l list, m monitor, n labels, t trails, esc quit\n"
@@ -355,7 +359,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
                 const int s = std::stoi(next());
                 o.window.samples = s >= 8 ? VK_SAMPLE_COUNT_8_BIT : s >= 4 ? VK_SAMPLE_COUNT_4_BIT : s >= 2 ? VK_SAMPLE_COUNT_2_BIT : VK_SAMPLE_COUNT_1_BIT;
             } else if (a == "--debug-layer") o.window.debugLayer = true;
-            else if (a == "--chase-distance") o.chaseDistance = std::stod(next());
+            else if (a == "--chase-distance") { o.chaseDistance = std::stod(next()); o.chaseDistanceSet = true; }
             else if (a == "--chase-azimuth") o.chaseAzimuth = std::stod(next());
             else if (a == "--chase-elevation") o.chaseElevation = std::stod(next());
             else if (a == "--view") { o.view = next(); o.cameraMode = 3; }
@@ -648,7 +652,7 @@ int main(int argc, char** argv) {
     // Detached camera focus: the demo spawn area / default location, on the ground.
     camera->setFocus(ellipsoid->convertLatLongAltitudeToECEF(vsg::dvec3(opt.latitudeDeg, opt.longitudeDeg, 0.0)));
     camera->setDetachedElevation(45.0); // looking down at the ground, not across it
-    if (!opt.demo) camera->zoom(300.0); // no vehicle yet: start with a regional view
+    if (!opt.demo && !opt.chaseDistanceSet) camera->zoom(300.0); // no vehicle yet: start with a regional view
     if (!opt.view.empty()) {
         double v[6] = {0.0, 0.0, 0.0, 1000.0, 180.0, 45.0};
         std::size_t start = 0;

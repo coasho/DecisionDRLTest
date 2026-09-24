@@ -138,7 +138,9 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
   64 cameras in ~8 ms per step, RGB, depth and per-vehicle segmentation ids; `examples/vision_capture` writes
   PNGs; the viewer shows the trainer's camera images live through shared memory.
 
-Not yet: animated control surfaces.
+- **Moving control surfaces**: glTF nodes named `fsim:aileron`, `fsim:elevator`, `fsim:rudder` or `fsim:flaps` turn about
+  their hinge with each vehicle's own deflections in the viewer and the vision cameras; the geometry stays shared.
+  hangar writes its models this way ([docs/sdk/viewer.md](docs/sdk/viewer.md#moving-control-surfaces)).
 
 Imagery and elevation come from Esri World Imagery and AWS Terrain Tiles under their respective terms (attribution required); tiles are cached under `%LOCALAPPDATA%\flightsim\tilecache`.
 

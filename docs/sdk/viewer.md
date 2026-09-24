@@ -30,7 +30,8 @@ next one. Restarting the trainer re-attaches automatically.
 - Every live vehicle, as a 3D model over full-Earth satellite imagery (to level 19, ~0.3 m/px) and terrain (30 m data to level 15, smoothly refined below it so the imagery keeps sharpening at low altitude), with a label, a trail and a chase/orbit/overview camera (`tab` cycles vehicles; the mouse works like OpenSceneGraph's manipulators: the bindings follow osgEarth's EarthManipulator - left drag pans, middle drag rotates, the wheel zooms from 6 m to the whole Earth and changes nothing but the distance (`--zoom-to-cursor` for osgEarth's zoomToMouse); detached (camera mode "free", or before any vehicle exists) left drag moves the globe, including across the poles; the right button is not a camera control; the camera never enters the terrain).
 - Vehicle creation, reset (new "generation") and removal, as they happen.
 - Several training applications at once: the monitor lists every live world and switches between them (`--world <name>` picks one at start).
-- Per-type models: a vehicle of type `jsbsim:f16` is drawn with `models/f16.glb` (or `.gltf`) if such a file exists in an asset directory (`<exe>/../share/flightsim/models`, the source tree's `assets/models`, or a `--assets` path), else with the platform's default aircraft; `VehicleSpec::model` names a file explicitly. Files are loaded once, on first use, and shared by every vehicle of that type; a `<file>.manifest` (`forward`, `up`, `scale`) fixes axes and size.
+- Per-type models: a vehicle of type `jsbsim:f16` is drawn with `models/f16.glb` (or `.gltf`) if such a file exists in an asset directory (`<exe>/../share/flightsim/models`, the source tree's `assets/models`, or a `--assets` path), else with the platform's default aircraft; `VehicleSpec::model` names a file explicitly. Files are loaded once, on first use, and shared by every vehicle of that type; a `<file>.manifest` (`forward`, `up`, `scale`) fixes axes and size. Aircraft made with [hangar](../hangar.md) carry their own model (`aircraft/<name>/<name>.glb`), found the same way.
+- Moving control surfaces, for models that mark them (see below): ailerons, elevator, rudder and flaps follow each vehicle's deflections, from the trainer or the replay.
 - The world's clock (sun position and sky), wind, atmosphere and weather.
 - The trainer's throughput (vehicle-steps/s), simulation time and the age of the last update.
 - Per vehicle: state summary and the active control level.
@@ -69,6 +70,33 @@ vsync and uses ~3% of one core while mirroring 64 vehicles).
 | `VehicleSpec::model` | optional glTF path shown instead of the type's model (`models/<type>.glb`) or the default aircraft |
 | `recordPath` | also write the run to a `.fsrec` file; `flightsim-viewer.exe --replay <file>` plays it back (space pauses, `.` steps one frame, `[` `]` change the time factor, the timeline slider seeks, `home` restarts, loops at the end) |
 
+## Moving control surfaces
+
+A glTF node named `fsim:<channel>` turns with the vehicle's deflection of that
+channel. The channel is one of:
+
+- `aileron` - the left aileron's position; give the right one a gain of `-1`,
+  or turn its axis the other way;
+- `elevator`;
+- `rudder`;
+- `flaps` (`flap` works too).
+
+The node turns about its own x axis, by the deflection in radians. JSBSim's
+sign conventions apply: elevator and flaps trailing edge down, aileron left
+trailing edge down, rudder trailing edge left. An optional gain scales the
+deflection: `fsim:aileron:-1`, `fsim:elevator:0.5`.
+
+To make a model's surface move:
+
+1. Put the node's origin on the hinge line.
+2. Turn the node so its x axis runs along the hinge, pointing the way that
+   makes a positive rotation the positive deflection.
+3. Put the surface's mesh under the node.
+
+Every vehicle turns its own copy of these nodes; the geometry under them is
+shared. Models written by hangar are built this way. The vision cameras and
+their segmentation images show the same deflections.
+
 ## Screenshots
 
 `flightsim-viewer.exe --screenshot shot.png [--screenshot-after 5]` saves the
@@ -77,7 +105,10 @@ window as PNG after the given number of seconds and exits (any mode: mirror,
 locked desktop and in scripts. `--view lat,lon,alt,dist[,az,el]` starts with
 the free camera looking at a point from `dist` metres (whole-Earth views:
 `--view 20,-30,0,30000000,180,80`); above the atmosphere the sky fades to
-black.
+black. `--camera chase --chase-distance 15` starts right behind the selected
+vehicle, also when attached to a trainer's world (which otherwise starts with
+a regional view); `--chase-azimuth` and `--chase-elevation` move the camera
+around it.
 
 ## If it crashes
 
@@ -90,5 +121,5 @@ process.
 ## Limits (current)
 
 - One machine: the segment is local shared memory (a network relay is a planned `ext/` module).
-- Only one sample aircraft model ships (Cesium Air); drop `models/<type>.glb` files next to it for your own types.
+- One sample aircraft model ships (Cesium Air, fixed surfaces) besides the hangar designs; drop `models/<type>.glb` files next to it for your own types.
 - The trainer's physics ground is flat unless `WorldOptions::terrain` is on (then it is the same relief the viewer draws); with it off a low-flying vehicle can appear below hills.

@@ -85,7 +85,11 @@ move on while a check fails or a picture looks wrong.
   ```
 
   The log line "vehicle model: …<name>.glb" confirms the viewer used the
-  design's own model.
+  design's own model, and "N moving control surface(s)" that its hinges
+  were found. `ctest -R "control surface"` checks the hinge directions.
+  To look at deflections, publish a world where the aircraft holds its
+  controls, stop stepping it, then attach
+  `--world <name> --camera chase --chase-distance 12`.
 
 ## 3. Usual fixes
 

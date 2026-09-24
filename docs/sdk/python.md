@@ -28,6 +28,7 @@ fsim python examples\python\world_tour.py    the object model, per vehicle and b
 fsim python examples\python\train_sb3.py     PPO (Stable-Baselines3) on a 64-aircraft batch
 fsim python examples\python\train_plugin.py  PPO on a task written in C++, loaded as a plugin DLL
 fsim python examples\python\cameras.py       nose and chase cameras, images as numpy arrays
+fsim python examples\python\control_surfaces.py   two hangar designs flying a slalom, for the viewer
 fsim python examples\python\speed.py         what the SDK costs, measured against C
 ```
 

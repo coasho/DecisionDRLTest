@@ -142,6 +142,8 @@ echo     fsim hangar c172 geometry            one stage ^(geometry aero mass pro
 echo     fsim hangar skua --quick             every stage, coarse: a first look in half a minute
 echo     fsim hangar new mine --like c172     start a design from another
 echo     fsim demo --aircraft c172            watch it fly
+echo     fsim python examples\python\control_surfaces.py   both designs flying a slalom; watch with
+echo                                          fsim viewer --camera chase --chase-distance 20
 echo.
 echo   PYTHON
 echo     fsim python examples\python\world_tour.py   the object model from Python

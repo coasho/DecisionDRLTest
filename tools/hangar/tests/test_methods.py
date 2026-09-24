@@ -181,5 +181,59 @@ class Writer(unittest.TestCase):
         self.assertEqual(len(root.findall("ground_reactions/contact[@type='BOGEY']")), 3)
 
 
+class Model3D(unittest.TestCase):
+    def test_control_surfaces_hinge_the_way_jsbsim_deflects(self):
+        # every piece, turned by +0.25 rad about its hinge axis, moves its
+        # trailing edge the way a positive channel value means (design frame:
+        # x aft, y right, z up): elevator and flaps down, the left aileron
+        # down and the right one up, the rudder left - also for twin fins
+        from hangar import model3d
+        for name, expect in (("c172", 7), ("skua", 8)):
+            a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
+            seen = 0
+            for s in a.surfaces:
+                _, _, pieces = model3d.display_skin(s)
+                for piece in pieces:
+                    p0, axis, g = model3d.hinge(s, piece)
+                    ctrl = s.controls[piece["control"] - 1]
+                    r = piece["te"] - p0
+                    th = 0.25 * g
+                    # Rodrigues: r turned about axis by th
+                    moved = (r * math.cos(th) + np.cross(axis, r) * math.sin(th)
+                             + axis * np.dot(axis, r) * (1 - math.cos(th))) - r
+                    left = piece["centre"][1] < 0
+                    with self.subTest(design=name, surface=s.name, control=ctrl.name, left=left):
+                        self.assertGreater(g, 0.0)
+                        if ctrl.channel in ("elevator", "flap"):
+                            self.assertLess(moved[2], 0.0)
+                        elif ctrl.channel == "aileron":
+                            self.assertLess(moved[2] if left else -moved[2], 0.0)
+                        else:
+                            self.assertLess(moved[1], 0.0)
+                    seen += 1
+            self.assertEqual(seen, expect)
+
+    def test_glb_names_the_moving_parts(self):
+        import json
+        import os
+        import struct
+        import tempfile
+        from hangar import model3d
+        a = Aircraft.load(repo("aircraft/skua/skua.toml"))
+        with tempfile.TemporaryDirectory() as d:
+            path = model3d.write_glb(a, os.path.join(d, "skua.glb"), origin=np.zeros(3))
+            with open(path, "rb") as f:
+                magic, version, total = struct.unpack("<III", f.read(12))
+                length, kind = struct.unpack("<II", f.read(8))
+                doc = json.loads(f.read(length))
+        self.assertEqual((magic, version, kind), (0x46546C67, 2, 0x4E4F534A))
+        names = [n["name"] for n in doc["nodes"] if n["name"].startswith("fsim:")]
+        self.assertEqual(sorted(names), ["fsim:aileron"] * 2 + ["fsim:elevator"] * 2 + ["fsim:flaps"] * 2 + ["fsim:rudder"] * 2)
+        for n in doc["nodes"]:
+            if n["name"].startswith("fsim:"):
+                self.assertEqual(len(n["translation"]), 3)
+                self.assertAlmostEqual(float(np.linalg.norm(n["rotation"])), 1.0, places=6)
+
+
 if __name__ == "__main__":
     unittest.main()

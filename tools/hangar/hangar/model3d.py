@@ -4,9 +4,15 @@ Written with the numbers the viewer's manifest describes (forward -y, up +z
 after its Y-up to Z-up import, like the Cesium model): glTF x = -y (left),
 y = z (up), z = -x (forward), a proper rotation of the design frame, with the
 origin at the centre of gravity - the point the simulation reports. Each
-component is its own node and every control surface its own primitive
-(coloured as in the drawings); propellers spin with a glTF animation, which
-the viewer plays.
+component is its own node; propellers spin with a glTF animation, which the
+viewer plays.
+
+Every control surface is a node of its own that the viewer turns with the
+vehicle's deflection (docs/sdk/viewer.md, "Moving control surfaces"): named
+fsim:<channel>[:<gain>] - aileron, elevator, rudder or flaps - with its
+origin on the hinge line and its local x axis along the hinge, turned so
+that a positive rotation about x is the deflection JSBSim's channel means by
+a positive value (aileron: the left one trailing edge down).
 """
 import json
 import math
@@ -14,7 +20,11 @@ import struct
 
 import numpy as np
 
+from .aero.vlm import channel_gain
+from .geometry import airfoil as af
 from .report.render import COLOURS, CONTROL_COLOURS
+
+CHANNEL_NODE = {"aileron": "aileron", "elevator": "elevator", "rudder": "rudder", "flap": "flaps"}
 
 
 def _to_gltf(p, origin):
@@ -126,31 +136,254 @@ class _Builder:
         self.meshes.append({"name": name, "primitives": prims})
         return len(self.meshes) - 1
 
-    def node(self, name, mesh=None, translation=None, children=None):
+    def node(self, name, mesh=None, translation=None, children=None, rotation=None):
         n = {"name": name}
         if mesh is not None:
             n["mesh"] = mesh
         if translation is not None:
             n["translation"] = [float(x) for x in translation]
+        if rotation is not None:
+            n["rotation"] = [float(x) for x in rotation]
         if children:
             n["children"] = children
         self.nodes.append(n)
         return len(self.nodes) - 1
 
 
+def _gltf_direction(d):
+    d = np.asarray(d, float)
+    return np.array([-d[1], d[2], -d[0]])
+
+
+def _quat_from_x(a):
+    """The shortest rotation taking +x to the unit vector a, as glTF's
+    (x, y, z, w)."""
+    d = float(a[0])
+    if d < -0.999999:
+        return np.array([0.0, 0.0, 1.0, 0.0])
+    q = np.array([0.0, -a[2], a[1], 1.0 + d])  # (x cross a, 1 + x.a)
+    return q / np.linalg.norm(q)
+
+
+def _quat_matrix(q):
+    x, y, z, w = q
+    return np.array([[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                     [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                     [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
+
+
+def display_skin(surface, n_span=48, n_chord=28):
+    """The skin for drawing with moving control surfaces: the fixed part,
+    cut away behind every hinge, and each control surface as a closed
+    piece of its own, both halves of a mirrored surface.
+
+    Every ring that carries a hinge has its chordwise stations stretched
+    so one of them lies on the hinge, so the cut is exact. The fixed part
+    and the piece both get a face along the hinge line and a wall at each
+    end of the cut, so a deflected surface shows no hollow wing.
+
+    Returns (vertices, triangles) of the fixed part and a list of pieces:
+    dicts with the control index (1-based), side (+1 the defined half, -1
+    its mirror), vertices, triangles, the hinge line (two points, root to
+    tip, on the camber line), a trailing-edge point, the centre and the
+    upper-surface normal u."""
+    xs0 = af.cosine_spacing(n_chord + 1)
+    n = len(xs0)
+    m = 2 * n - 1
+    # each control's hinge lands on one chordwise station, the same in every ring
+    station = [int(np.argmin(np.abs(xs0[1:-1] - (1 - 0.5 * (c.cf0 + c.cf1))))) + 1 for c in surface.controls]
+    etas = np.unique(np.concatenate([np.linspace(0, 1, n_span + 1), surface.breakpoints()]))
+    rings = []  # (eta, k): k the control whose hinge the ring carries, 0 none
+    for i, e in enumerate(etas):
+        inside = [k for k, c in enumerate(surface.controls, 1) if c.eta0 + 1e-9 < e < c.eta1 - 1e-9]
+        if inside:
+            rings.append((e, inside[0]))
+            continue
+        ends = [k for k, c in enumerate(surface.controls, 1) if abs(c.eta1 - e) <= 1e-9]
+        starts = [k for k, c in enumerate(surface.controls, 1) if abs(c.eta0 - e) <= 1e-9]
+        seq = [ends[0] if ends else 0, starts[0] if starts else 0]
+        if i == 0:
+            seq = seq[1:]
+        elif i == len(etas) - 1 or seq[0] == seq[1]:
+            seq = seq[:1]
+        rings += [(e, k) for k in seq]
+
+    def contour(e, k):
+        le, ch, tw, foil = surface.station(e)
+        c, u = surface.frame(e)
+        x = xs0
+        if k:
+            j = station[k - 1]
+            h = 1 - surface.controls[k - 1].chord_fraction(e)
+            x = np.where(xs0 <= xs0[j], xs0 * h / xs0[j], h + (xs0 - xs0[j]) * (1 - h) / (1 - xs0[j]))
+        xx = np.concatenate([x[::-1], x[1:]])
+        yy = np.concatenate([foil.upper(x)[::-1], foil.lower(x)[1:]])
+        return le + np.outer(xx * ch, c) + np.outer(yy * ch, u)
+
+    pts = [contour(e, k) for e, k in rings]
+
+    def hinge_index(k):
+        j = station[k - 1]
+        return n - 1 - j, n - 1 + j  # upper, lower contour index
+
+    fixed = _MeshBuilder()
+    pieces = {}
+    for r in range(len(rings) - 1):
+        (e0, k0), (e1, k1) = rings[r], rings[r + 1]
+        if e1 - e0 < 1e-12:
+            continue
+        a, b = pts[r], pts[r + 1]
+        if k0 and k0 == k1:
+            iu, il = hinge_index(k0)
+            piece = pieces.setdefault(k0, {"mesh": _MeshBuilder(), "rings": []})
+            if not piece["rings"]:
+                piece["rings"].append(r)
+            piece["rings"].append(r + 1)
+            fixed.band(r, a, r + 1, b, range(iu, il))
+            piece["mesh"].band(r, a, r + 1, b, list(range(0, iu)) + list(range(il, m - 1)))
+            for mesh in (fixed, piece["mesh"]):
+                mesh.quad(a[iu], b[iu], b[il], a[il])
+        else:
+            fixed.band(r, a, r + 1, b, range(m - 1))
+    # caps and walls
+    for k, piece in pieces.items():
+        iu, il = hinge_index(k)
+        aft = list(range(0, iu + 1)) + list(range(il, m))
+        for r in (piece["rings"][0], piece["rings"][-1]):
+            piece["mesh"].fan(pts[r][aft])
+            e = rings[r][0]
+            if 1e-9 < e < 1 - 1e-9:  # a wall where the cut ends inside the span
+                fixed.fan(pts[r][aft])
+    for r in ([0] if not surface.mirror else []) + [len(rings) - 1]:  # a mirrored root is inside
+        k = rings[r][1]
+        if k:
+            iu, il = hinge_index(k)
+            fixed.fan(pts[r][iu:il + 1])
+        else:
+            fixed.fan(pts[r])
+    out = []
+    for k, piece in pieces.items():
+        v, t = piece["mesh"].arrays()
+        first, last = pts[piece["rings"][0]], pts[piece["rings"][-1]]
+        mid = pts[piece["rings"][len(piece["rings"]) // 2]]
+        iu, il = hinge_index(k)
+        e_mid = rings[piece["rings"][len(piece["rings"]) // 2]][0]
+        p = {"control": k, "side": 1, "vertices": v, "triangles": t,
+             "hinge": (0.5 * (first[iu] + first[il]), 0.5 * (last[iu] + last[il])),
+             "te": 0.5 * (mid[0] + mid[m - 1]), "centre": v.mean(axis=0), "u": surface.frame(e_mid)[1]}
+        out.append(p)
+        if surface.mirror:
+            flip = np.array([1.0, -1.0, 1.0])
+            out.append({"control": k, "side": -1, "vertices": v * flip, "triangles": t[:, ::-1],
+                        "hinge": (p["hinge"][0] * flip, p["hinge"][1] * flip), "te": p["te"] * flip,
+                        "centre": p["centre"] * flip, "u": p["u"] * flip})
+    v, t = fixed.arrays()
+    if surface.mirror:
+        v, t = np.vstack([v, v * np.array([1.0, -1.0, 1.0])]), np.vstack([t, t[:, ::-1] + len(v)])
+    return v, t, out
+
+
+class _MeshBuilder:
+    """Triangles with shared vertices along the skin (smooth shading across
+    the span) and vertices of their own for flat faces (caps, hinge faces)."""
+
+    def __init__(self):
+        self.v, self.t, self.n = [], [], 0
+        self._rings = {}
+
+    def _add(self, verts, tris):
+        verts = np.asarray(verts, float)
+        self.v.append(verts)
+        self.t.append(np.asarray(tris, int).reshape(-1, 3) + self.n)
+        self.n += len(verts)
+
+    def _ring(self, key, points):
+        if key not in self._rings:
+            self._rings[key] = self.n
+            self.v.append(np.asarray(points, float))
+            self.n += len(points)
+        return self._rings[key]
+
+    def band(self, ka, a, kb, b, segments):
+        """Two triangles per contour segment j -> j+1 between rings a and b
+        (keyed ka, kb: a ring's points are added once)."""
+        segments = list(segments)
+        if not segments:
+            return
+        i, k = self._ring(ka, a), self._ring(kb, b)
+        tris = []
+        for j in segments:
+            tris += [(i + j, k + j, i + j + 1), (i + j + 1, k + j, k + j + 1)]
+        self.t.append(np.array(tris, int))
+
+    def quad(self, p0, p1, p2, p3):
+        self._add([p0, p1, p2, p3], [(0, 1, 2), (0, 2, 3)])
+
+    def fan(self, polygon):
+        """A closed polygon as a fan around its centroid."""
+        polygon = np.asarray(polygon, float)
+        k = len(polygon)
+        self._add(np.vstack([polygon, polygon.mean(axis=0)]), [(k, j, (j + 1) % k) for j in range(k)])
+
+    def arrays(self):
+        if not self.v:
+            return np.zeros((0, 3)), np.zeros((0, 3), int)
+        return np.vstack(self.v), np.vstack(self.t)
+
+
+def hinge(surface, piece):
+    """A control piece's hinge in the design frame: (point, unit axis, gain)
+    such that turning the piece by gain * delta about the axis (right hand)
+    is what JSBSim's channel means by +delta - the convention the
+    aerodynamic model uses (aero.vlm.channel_gain) - with gain >= 0."""
+    ctrl = surface.controls[piece["control"] - 1]
+    p0, p1 = piece["hinge"]
+    axis = (p1 - p0) / np.linalg.norm(p1 - p0)
+    # the trailing edge's motion for a positive turn about the axis: towards -u
+    # is a positive local deflection
+    if np.dot(np.cross(axis, piece["te"] - p0), -piece["u"]) < 0:
+        axis = -axis
+    g = channel_gain(ctrl.channel, ctrl, piece["u"], piece["centre"])
+    if g < 0:
+        axis, g = -axis, -g
+    return p0, axis, float(g)
+
+
+def control_nodes(aircraft, origin):
+    """Every control piece as the node the glb carries: name, the glTF
+    translation and rotation, and its vertices in the node's own frame."""
+    out = []
+    for s in aircraft.surfaces:
+        _, _, pieces = display_skin(s)
+        for piece in pieces:
+            ctrl = s.controls[piece["control"] - 1]
+            p0, axis, g = hinge(s, piece)
+            q = _quat_from_x(_gltf_direction(axis))
+            pivot = _to_gltf(p0, origin)
+            name = "fsim:" + CHANNEL_NODE[ctrl.channel] + ("" if abs(g - 1.0) < 1e-9 else ":%.6g" % g)
+            y = piece["centre"][1]
+            side = "" if abs(y) < 1e-6 else (" right" if y > 0 else " left")
+            out.append({"name": name, "label": "%s %s%s" % (s.name, ctrl.name, side),
+                        "channel": ctrl.channel, "translation": pivot, "rotation": q,
+                        "vertices": (_to_gltf(piece["vertices"], origin) - pivot) @ _quat_matrix(q),
+                        "triangles": piece["triangles"], "design_axis": axis, "gain": g})
+    return out
+
+
 def write_glb(aircraft, path, origin):
     origin = np.asarray(origin, float)
     B = _Builder()
     top = []
-    for name, kind, v, t, g in aircraft.mesh(fine=True):
-        vg = _to_gltf(v, origin)
-        base = B.material(kind, COLOURS.get(kind, (0.85, 0.85, 0.88)))
-        parts = [(vg, t[g <= 0], base)]
-        surf = next((s for s in aircraft.surfaces if s.name == name), None)
-        if surf is not None:
-            for k, ctrl in enumerate(surf.controls, start=1):
-                parts.append((vg, t[g == k], B.material("control_" + ctrl.channel, CONTROL_COLOURS.get(ctrl.channel, (0.9, 0.7, 0.2)))))
-        top.append(B.node(name, B.mesh(name, parts)))
+    for s in aircraft.surfaces:
+        v, t, _ = display_skin(s)
+        top.append(B.node(s.name, B.mesh(s.name, [(_to_gltf(v, origin), t, B.material(s.kind, COLOURS.get(s.kind, (0.85, 0.85, 0.88))))])))
+    for c in control_nodes(aircraft, origin):
+        mat = B.material("control_" + c["channel"], CONTROL_COLOURS.get(c["channel"], (0.9, 0.7, 0.2)))
+        top.append(B.node(c["name"], B.mesh(c["label"], [(c["vertices"], c["triangles"], mat)]),
+                          translation=c["translation"], rotation=c["rotation"]))
+    for b in aircraft.bodies:
+        v, t, _ = b.skin(72, 40)
+        top.append(B.node(b.name, B.mesh(b.name, [(_to_gltf(v, origin), t, B.material(b.kind, COLOURS.get(b.kind, (0.85, 0.85, 0.88))))])))
     # landing gear: wheels and struts
     dark = B.material("tyre", (0.08, 0.08, 0.09), 0.0, 0.9)
     strut_m = B.material("strut", (0.55, 0.56, 0.60), 0.6, 0.4)

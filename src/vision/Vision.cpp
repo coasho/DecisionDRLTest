@@ -224,6 +224,8 @@ Sensors::Sensors(World& world, const Options& options) : impl_(std::make_unique<
     world::VehicleVisuals::applyManifest(vs);
     for (const auto& dir : assets.searchPaths())
         if (std::filesystem::is_directory(dir / "models")) vs.modelDirs.push_back(dir / "models");
+    for (const auto& dir : assets.aircraftDirs()) // aircraft of our own carry their model: <dir>/<type>/<type>.glb
+        vs.modelDirs.push_back(dir);
     vs.segmentation = options.segmentation;
     impl_->visuals = std::make_unique<world::VehicleVisuals>(options.maxVehicles, vs, vsgOptions);
     for (unsigned i = 0; i < options.maxVehicles; ++i) impl_->visuals->setVisible(i, false);

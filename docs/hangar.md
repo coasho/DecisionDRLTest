@@ -11,7 +11,8 @@ and masses. hangar then:
   targets and handling-quality criteria.
 
 The finished aircraft is `jsbsim:<name>` everywhere on the platform: in the
-viewer, the C++ and Python SDKs, and scenario files.
+viewer, the C++ and Python SDKs, and scenario files. In the viewer, its
+ailerons, elevator, rudder and flaps move with the simulation.
 
 ![Skua, a hypothetical UAV designed with hangar, in the viewer](images/hangar-skua.jpg)
 
@@ -26,6 +27,10 @@ fsim hangar mine                      every stage, full tables (a few minutes)
 fsim hangar mine calibrate            fit two corrections to published performance
 fsim demo --aircraft mine             watch it fly
 ```
+
+`fsim python examples\python\control_surfaces.py` flies both included
+designs through a slalom. Watch it with
+`fsim viewer --camera chase --chase-distance 20`; `tab` switches aircraft.
 
 `aircraft\mine\out\report.html` collects everything on one page.
 
@@ -46,7 +51,7 @@ code that computes them, changes.
 | aero | coefficient tables over α ±180° and β ±90°; section polars; derivative plots | signs and sizes of the stability derivatives, CL max, smoothness |
 | mass | component weights, CG, inertia, static margin | target empty mass; Roskam's radii of gyration; margin 5–40 % MAC |
 | propulsion | propeller thrust and power tables, engine | peak efficiency, static thrust / weight |
-| build | `<name>.xml`, `Engines/`, `<name>.glb` | |
+| build | `<name>.xml`, `Engines/`, `<name>.glb` with hinged control surfaces | |
 | verify | JSBSim's forces and moments at 150 random states, compared with the tables | largest error below 0.002 in any coefficient |
 | fly | trim across the speed range; stall; climb and ceiling; top speed; dynamic modes; 40 runs from random states | `[targets]`, MIL-F-8785C level 1, no diverged run |
 | calibrate | `calibration.toml` | `[targets]` |
