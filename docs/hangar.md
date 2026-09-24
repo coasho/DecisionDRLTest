@@ -14,7 +14,14 @@ The finished aircraft is `jsbsim:<name>` everywhere on the platform: in the
 viewer, the C++ and Python SDKs, and scenario files. In the viewer, its
 ailerons, elevator, rudder and flaps move with the simulation.
 
+It builds light aircraft and fighters. For a fighter it adds afterburning
+turbofans, vortex lift, supersonic drag and a fly-by-wire flight control
+system, so the aircraft flies like the real one: the stick asks for load
+factor and roll rate, and the angle of attack stays within its limit.
+
 ![Skua, a hypothetical UAV designed with hangar, in the viewer](images/hangar-skua.jpg)
+
+![The F-16C, built by hangar from public data](images/hangar-f16c.jpg)
 
 ## Use
 
@@ -24,8 +31,9 @@ fsim hangar new mine --like skua      start a design from another
 fsim hangar mine geometry             one stage: look at aircraft\mine\out\threeview.png
 fsim hangar mine --quick              every stage, coarse: a first look in half a minute
 fsim hangar mine                      every stage, full tables (a few minutes)
-fsim hangar mine calibrate            fit two corrections to published performance
+fsim hangar mine calibrate            fit corrections to published performance
 fsim demo --aircraft mine             watch it fly
+fsim hangar f16c                      a fighter: NASA's wind-tunnel data as reference
 ```
 
 `fsim python examples\python\control_surfaces.py` flies both included
@@ -48,13 +56,13 @@ code that computes them, changes.
 | stage | produces | checked against |
 |---|---|---|
 | geometry | three-view and 3D views; areas, MAC, aspect ratio, tail volumes | usual ranges for the category |
-| aero | coefficient tables over α ±180° and β ±90°; section polars; derivative plots | signs and sizes of the stability derivatives, CL max, smoothness |
+| aero | coefficient tables over α ±180° and β ±90°, and factors on them over Mach; section polars; derivative plots; the reference aircraft's coefficients beside the design's | signs and sizes of the stability derivatives, CL max, smoothness; the reference's lift, drag and pitching moment |
 | mass | component weights, CG, inertia, static margin | target empty mass; Roskam's radii of gyration; margin 5–40 % MAC |
 | propulsion | propeller thrust and power tables, engine | peak efficiency, static thrust / weight |
-| build | `<name>.xml`, `Engines/`, `<name>.glb` with hinged control surfaces | |
+| build | `<name>.xml`, `Engines/`, `<name>.glb` with hinged control surfaces; the fly-by-wire's gains | the fly-by-wire's short period, MIL-F-8785C |
 | verify | JSBSim's forces and moments at 150 random states, compared with the tables | largest error below 0.002 in any coefficient |
-| fly | trim across the speed range; stall; climb and ceiling; top speed; dynamic modes; 40 runs from random states; six crashes into the ground | `[targets]`, MIL-F-8785C level 1, no diverged run; crashes that stop without blowing up |
-| calibrate | `calibration.toml` | `[targets]` |
+| fly | trim across the speed range; stall; climb and ceiling; top speed; dynamic modes; 40 runs from random states; six crashes into the ground. A fighter instead: top speed at sea level and 36,000 ft, excess power, ceiling, sustained turn, the angle-of-attack limiter, a 3 g step, a full-stick roll | `[targets]`, MIL-F-8785C level 1, no diverged run; crashes that stop without blowing up |
+| calibrate | `calibration.toml`: extra drag and propeller pitch; for a jet, the wave drag | `[targets]` |
 | report | `out/report.html` | |
 
 The fly stage flies the same tests on a reference aircraft (`reference =
@@ -97,11 +105,43 @@ empty = 21.0                     # kg; components by name, or Raymer's statistic
 stall_speed_kcas = 27            # also max_speed_ktas, climb_rate_fpm, service_ceiling_ft
 ```
 
-Two complete designs are included:
+A fighter adds strakes, all-moving tails, surfaces that several channels
+move, a turbofan and fly-by-wire. From `aircraft/f16c/f16c.toml`:
+
+```toml
+[[surface]]
+name = "strake"
+kind = "strake"                  # a sharp leading-edge extension: vortex lift
+airfoil = "plate"                # also NACA 6A ("naca64a204"), "biconvex5"
+
+controls = [                     # chord_fraction 1: the whole panel turns (pivot at 30 % chord);
+                                 # mix: other channels it follows - here it rolls the aircraft too
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.25 }, span = [0.27, 1.0], chord_fraction = 1.0, pivot = 0.30, limits = [-25, 25] },
+]
+
+[[engine]]
+type = "turbofan"                # afterburner above 80 % throttle
+thrust_dry_kn = 79.2
+thrust_wet_kn = 129.4
+bypass_ratio = 0.36
+
+[flight_control]
+type = "fbw"                     # load factor, roll rate and sideslip commands
+n_max = 9.0
+alpha_max_deg = 25.0
+
+[targets]
+max_mach = 2.05                  # at max_mach_altitude_ft: calibrates the wave drag
+max_mach_altitude_ft = 40000
+```
+
+Three complete designs are included:
 
 - `aircraft/c172`: a Cessna 172P built from published dimensions, used to
   validate the methods.
 - `aircraft/skua`: a hypothetical twin-boom pusher UAV.
+- `aircraft/f16c`: an F-16C Block 52, checked against NASA's wind-tunnel
+  data.
 
 ## Methods
 
@@ -150,6 +190,39 @@ stage end to end through the platform (`ctest -R hangar`).
   3-2-1-1 flight tests identify the same modes from JSBSim's own response as
   a cross-check.
 
+For fighters:
+
+- **Vortex lift.** A thin swept section does not stall like a light
+  aircraft's. Past its attached-flow limit the leading edge keeps the suction
+  it can hold (Carlson's attainable thrust, NASA TP-1500). What it loses turns
+  into vortex lift where the edge is sharp (Polhamus' suction analogy, NASA
+  TN D-3767). The vortex bursts at an angle that rises with the sweep
+  (Earnshaw & Lawford, ARC R&M 3424), and a wing behind a strake shares the
+  strake's vortex. The circulation's force uses the local velocity, so the
+  potential lift goes as Polhamus' sin α cos² α.
+- **Wake.** The lattice's wake leaves the trailing edge along the free
+  stream. It is solved at wake angles 2° apart and interpolated, so a tail
+  in the wing's plane sees the wake rise above it.
+- **Sideslip.** Simple sweep theory: the windward half of a swept wing
+  lifts more, the dihedral effect that grows with lift.
+- **Mach number.** Prandtl–Glauert on the lattice to Mach 0.9. From 1.2,
+  linear theory per surface: Ackeret, and Stewart's slope for subsonic
+  leading edges. Transonic values are faired between. The results are
+  factors on the tables: lift, the neutral point's move, control power.
+  Drag adds skin friction falling with Mach, and wave drag from the area
+  distribution (Sears–Haack times Raymer's E_WD, from Korn's
+  drag-divergence Mach). Once the leading edge is supersonic, the edge's
+  suction is lost.
+- **Turbofans.** JSBSim's turbine, with thrust lapse from Mattingly, Heiser
+  & Pratt (*Aircraft Engine Design*, eq. 2.54), weight and size from Raymer.
+- **Fly-by-wire.** Gains are placed from the linear model at each dynamic
+  pressure and Mach number (`hangar/fcs.py`):
+  - Pitch: angle-of-attack and pitch-rate feedback give the short period
+    CAP 1 and damping 0.8. A load-factor command follows a model response,
+    limited by the angle of attack left.
+  - Roll: a roll-rate command with bank hold.
+  - Yaw: a yaw damper, and sideslip from the pedals.
+
 ## Validation: the Cessna 172P
 
 The C172P was built from public dimensions, not from JSBSim's c172x tables.
@@ -165,29 +238,68 @@ speed, the ceiling and the dynamics are predictions.
 
 | sea level, 2400 lb | hangar c172 | POH | JSBSim c172x (stock) |
 |---|---|---|---|
-| stall, clean | 49.0 KCAS | 51 | 41.6 |
-| maximum level speed | 126.7 KTAS | 123 | 144 |
-| best rate of climb | 699 ft/min | 700 | 870 |
-| service ceiling | 12,780 ft | 13,000 | 25,100 |
+| stall, clean | 49.6 KCAS | 51 | 41.6 |
+| maximum level speed | 126.1 KTAS | 123 | 144 |
+| best rate of climb | 690 ft/min | 700 | 870 |
+| service ceiling | 12,710 ft | 13,000 | 25,100 |
 
 The dynamic modes at 1500 m and 1.9 times the stall speed, first as the
 linear model predicts them and then as identified from JSBSim's response:
 
 | mode | predicted | JSBSim response |
 |---|---|---|
-| short period ζ | 0.71 | 0.63 |
-| phugoid period | 25.7 s | 25.9 s |
-| dutch roll ω, ζ | 1.74 rad/s, 0.17 | 1.80 rad/s, 0.18 |
-| roll time constant | 0.21 s | 0.23 s |
+| short period ζ | 0.67 | 0.60 |
+| phugoid period | 25.5 s | 25.9 s |
+| dutch roll ω, ζ | 1.74 rad/s, 0.17 | 1.79 rad/s, 0.19 |
+| roll time constant | 0.21 s | 0.22 s |
 
 All modes are MIL-F-8785C level 1, and the spiral mode is stable. JSBSim
 reproduces the tables to within 4×10⁻⁴ in every coefficient. None of the 40
 runs from random attitudes and rates diverged.
 
+## Validation: the F-16C
+
+The F-16C was built from public dimensions. JSBSim's own `f16` carries NASA
+TP-1538's wind-tunnel data (Nguyen et al., 1979), a reference measured from
+−20° to 90° angle of attack. It is in black, hangar's F-16C in blue:
+
+![hangar's F-16C against NASA TP-1538](images/hangar-f16c-nasa.jpg)
+
+Lift, drag and pitching moment agree to 40° angle of attack. The mean lift
+error is 5 %, drag 7 %, and Cm is within 0.045. The neutral point is at
+35.1 % of the MAC (NASA: 34.5 %). The dihedral effect, the weathercock
+stability to 25°, and the damping in pitch and yaw at low α also agree.
+
+hangar's F-16C differs in these:
+
+- At high angle of attack it keeps more directional stability than NASA's.
+- Its all-moving tail is about 1.8 times as powerful.
+- Its side force in sideslip is about half of NASA's.
+
+JSBSim's `f16` applies Stevens & Lewis's aileron and rudder tables per
+radian, although they are given per 20° and 30°. The comparison scales them
+back (`reference_control_scale`).
+
+Flown through its fly-by-wire:
+
+| F-16C, clean | hangar | published |
+|---|---|---|
+| top speed, 40,000 ft | Mach 2.05 (calibrated: E_WD 1.2) | Mach 2.05 |
+| sustained turn, Mach 0.9, 15,000 ft | 13.5 deg/s | about 13.5 deg/s |
+| full aft stick, 350 kt | 8.0 g, α held at 25.9° | 9 g, α limit 25° |
+| full-stick roll, 350 kt | 300 deg/s | 308 deg/s (limit) |
+| top speed, sea level | 906 kt | 795 kt |
+| best rate of climb | 65,700 ft/min | 50,000 ft/min |
+
+The top speed at 40,000 ft is the calibration's one target. The rest are
+predictions. At sea level the model has too much thrust: Mattingly's lapse
+gives the F100 22 % more thrust at Mach 0.9 than on the stand.
+
 ## Limits
 
-- **Speed range.** Subsonic only: compressibility is limited to the
-  Prandtl–Glauert correction.
+- **Speed range.** Subsonic tables, with Mach factors to about Mach 2.6.
+  The factors come from linear theory, not from a transonic or supersonic
+  solution of the flow.
 - **Propeller wash.** The propeller's slipstream over the wing and tail is
   not modelled.
 - **Stall and spin.** Past the stall the numbers are estimates. They come
@@ -197,7 +309,11 @@ runs from random attitudes and rates diverged.
 - **Reynolds number.** The tables use one Reynolds number per strip, at
   one cruise speed (`[analysis] speed`), whatever the altitude. Laminar separation bubbles below
   Re ≈ 2×10⁵ are not modelled.
-- **Engines.** Piston and electric only; no turbines yet.
+- **Engines.** Piston, electric, and afterburning turbofans. Thrust
+  lapse comes from one published model, not from each engine's own data.
+- **High angle of attack.** Forebody vortices, and the fin's shielding by
+  the wing, are not modelled. Past about 30° a fighter keeps more
+  directional stability than the real one.
 
 ## For Claude
 

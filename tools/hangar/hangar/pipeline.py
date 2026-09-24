@@ -206,7 +206,7 @@ class Design:
             with open(cache, "rb") as f:
                 saved = pickle.load(f)
             if saved.get("_key") == key:
-                return saved
+                return self._with_wave_drag(saved)
         m = self.aero_model()
         t0 = time.time()
         last = [0.0]
@@ -220,6 +220,14 @@ class Design:
         with open(cache, "wb") as f:
             pickle.dump(tabs, f)
         self.log("  aero: tables built in %.0f s" % (time.time() - t0))
+        return self._with_wave_drag(tabs)
+
+    def _with_wave_drag(self, tabs):
+        """The zero-lift drag over Mach with the calibration's wave-drag
+        efficiency (cheap; the calibration is not part of the tables' key)."""
+        if tabs.get("mach") is not None and "E_WD" in tabs["mach"]:
+            from .aero.mach import _drag
+            tabs["mach"].update(_drag(self.aircraft, tabs, tabs["mach"]))
         return tabs
 
     def aero(self, force=False):
@@ -234,7 +242,7 @@ class Design:
         base = tabs["base"]
         j0 = int(np.argmin(np.abs(tabs["beta"])))
         al = tabs["alpha"]
-        band = (al > -5) & (al < 30)
+        band = (al > -5) & (al < 50)
         clmax = float(np.max(base["CL"][band, j0]))
         a_clmax = float(al[band][np.argmax(base["CL"][band, j0])])
         polars = {}
@@ -244,10 +252,13 @@ class Design:
         plots.coefficients(tabs, self.img("coefficients.png"), a.name)
         plots.derivatives_vs_alpha(tabs, self.img("derivatives.png"), a.name)
         smooth = _roughness(tabs)
+        images = ["coefficients.png", "derivatives.png", "polars.png"]
+        fighter = a.spec.get("aircraft", {}).get("category") == "fighter"
         checks = [
             check("lift-curve slope CL_alpha", d["CLa"], 3.5, 6.8, "/rad"),
             check("CL max (untrimmed, clean)", clmax, 1.1, 2.1, note="at %.0f deg" % a_clmax),
-            check("pitch stiffness Cm_alpha (about ARP)", d["Cma"], None, -0.1, "/rad", note="negative: stable"),
+            check("pitch stiffness Cm_alpha (about ARP)", d["Cma"], None, -0.1, "/rad", level="warn" if fighter else "fail",
+                  note="negative: stable" + ("; a fighter's flight controls make up for relaxed stability" if fighter else "")),
             check("weathercock Cn_beta", d["Cnb"], 0.01, None, "/rad", note="positive: stable"),
             check("dihedral effect Cl_beta", d["Clb"], None, -0.005, "/rad", note="negative: stable"),
             check("roll damping Cl_p", d["Clp"], None, -0.1, "/rad"),
@@ -265,10 +276,49 @@ class Design:
             checks.append(info("tables", "quick", note="coarse grids: a first look; run without --quick for the product"))
         checks.append(info("CD at zero lift (CD0 estimate)", float(np.min(base["CD"][band, j0]))))
         checks.append(info("neutral point", (np_x - a.mac_le[0]) / a.c * 100, "% MAC"))
+        mt = tabs.get("mach")
+        if mt is not None:
+            plots.mach_effects(mt, self.img("mach.png"), a.name)
+            images.append("mach.png")
+            i2 = int(np.argmin(np.abs(mt["mach"] - 2.0)))
+            checks.append(info("zero-lift drag at Mach %.1f" % mt["mach"][i2], float(mt["CD0"] + mt["dCD0"][i2]),
+                               note="drag divergence at Mach %.2f; wave drag from A_max %.2f m2 over %.1f m"
+                               % (mt["M_dd"], mt["A_max_m2"], mt["length_m"])))
+            checks.append(info("neutral point move to Mach %.1f" % mt["mach"][-1], (mt["x_np"][-1] - mt["x_np"][0]) / a.c * 100,
+                               "% MAC"))
+        checks += self._reference_aero(tabs, images)
         return self.save("aero", {"derivatives": d, "cl_max": clmax, "alpha_cl_max_deg": a_clmax,
                                   "neutral_point_m": [np_x, 0.0, a.aero_point[2]], "drag_area_m2": m.drag_area,
-                                  "lattice": m.lat.summary(), "checks": checks,
-                                  "images": ["coefficients.png", "derivatives.png", "polars.png"]})
+                                  "lattice": m.lat.summary(), "checks": checks, "images": images})
+
+    def _reference_aero(self, tabs, images):
+        """The design's coefficients against its reference aircraft's (a
+        JSBSim model from wind-tunnel data), plotted over alpha."""
+        from .reference import compare
+        from .report import plots
+        ref = self.targets.get("reference")
+        if not ref or not ref.startswith("jsbsim:"):
+            return []
+        path = self._aircraft_file(ref)
+        if not os.path.isfile(path):
+            return [info("reference aerodynamics", "missing", note=shown(path))]
+        cmp = compare(tabs, self.aircraft, path, scale=self.targets.get("reference_control_scale"))
+        plots.reference_comparison(cmp, self.img("reference.png"), self.aircraft.name)
+        images.append("reference.png")
+        R, D, al = cmp["reference"], cmp["design"], cmp["alpha"]
+        out = []
+        for lo, hi in ((0.0, 15.0), (15.0, 40.0)):
+            k = (al >= lo) & (al <= hi)
+            # the attached range is checked; past it, references are often guesses
+            level = "warn" if hi <= 15.0 else "info"
+            for key, label in (("CL", "lift"), ("CD", "drag")):
+                err = float(np.mean(np.abs(D[key][k] - R[key][k]) / np.maximum(np.abs(R[key][k]), 0.05))) * 100
+                name = "%s against %s, alpha %.0f-%.0f deg (mean error)" % (label, ref, lo, hi)
+                out.append(check(name, err, None, 15.0, "%", level="warn", fmt="%.1f") if level == "warn" else info(name, err, "%"))
+            dcm = float(np.max(np.abs(D["Cm"][k] - R["Cm"][k])))
+            name = "pitching moment against %s, alpha %.0f-%.0f deg (largest difference)" % (ref, lo, hi)
+            out.append(check(name, dcm, None, 0.08, level="warn", fmt="%.3f") if level == "warn" else info(name, dcm))
+        return out
 
     # -- mass -----------------------------------------------------------------------------------
     def mass(self):
@@ -308,6 +358,21 @@ class Design:
         mass = self.load("mass") or self.mass()
         W = mass["loaded_mass_kg"] * 9.80665
         tabs = {}
+        jets = [e for e in a.engines if e.type == "turbofan"]
+        if jets:
+            from .propulsion import turbofan_tables
+            thrust = 0.0
+            for e in jets:
+                length, diameter = e.jet_size()
+                out.append({"engine": e.name, "type": "turbofan", "thrust_dry_kn": e.thrust_dry_kn,
+                            "thrust_wet_kn": e.thrust_wet_kn, "bypass_ratio": e.bypass_ratio,
+                            "throttle_ratio": e.throttle_ratio, "length_m": length, "diameter_m": diameter,
+                            "tables": turbofan_tables(e)})
+                thrust += (e.thrust_wet_kn or e.thrust_dry_kn) * 1000.0 * len(e.copies())
+            checks.append(check("thrust / weight (maximum thrust, loaded)", thrust / W, 0.3, 1.6, level="warn",
+                                note="fighters 0.9-1.3"))
+            plots.turbofan({e.name: o["tables"] for e, o in zip(jets, out)}, self.img("propulsion.png"))
+            return self.save("propulsion", {"engines": out, "checks": checks, "images": ["propulsion.png"]})
         for e in a.engines:
             p = Propeller(e)
             t = p.tables()
@@ -326,17 +391,28 @@ class Design:
 
     # -- build ----------------------------------------------------------------------------------
     def build(self):
+        return self.build_with(self.tables())
+
+    def build_with(self, tables):
         from . import jsbsim, model3d
         from .mass import MassModel
-        from .propulsion import Propeller, electric_xml, piston_xml, propeller_xml
+        from .propulsion import Propeller, electric_xml, nozzle_xml, piston_xml, propeller_xml, turbofan_xml
         a = self.aircraft
-        tabs = self.calibrated(self.tables())
+        tabs = self.calibrated(tables)
         mm = MassModel(a)
         eng_dir = os.path.join(self.dir, "Engines")
         os.makedirs(eng_dir, exist_ok=True)
         files = []
         for i, e in enumerate(a.engines):
             ename = "%s_engine%d" % (a.name, i)
+            if e.type == "turbofan":
+                pname = "%s_nozzle%d" % (a.name, i)
+                with open(os.path.join(eng_dir, ename + ".xml"), "w", encoding="utf-8") as f:
+                    f.write(turbofan_xml(e))
+                with open(os.path.join(eng_dir, pname + ".xml"), "w", encoding="utf-8") as f:
+                    f.write(nozzle_xml(e.name))
+                files.append((ename, pname))
+                continue
             pname = "%s_prop%d" % (a.name, i)
             with open(os.path.join(eng_dir, ename + ".xml"), "w", encoding="utf-8") as f:
                 f.write(piston_xml(e) if e.type == "piston" else electric_xml(e))
@@ -345,9 +421,11 @@ class Design:
             with open(os.path.join(eng_dir, pname + ".xml"), "w", encoding="utf-8") as f:
                 f.write(propeller_xml(p, p.tables(), 0.1 * mass_e, "%s propeller %d" % (a.name, i)))
             files.append((ename, pname))
+        from . import fcs
+        fbw = fcs.design(tabs, a, mm)
         xml_path = os.path.join(self.dir, a.name + ".xml")
         with open(xml_path, "w", encoding="utf-8") as f:
-            f.write(jsbsim.aircraft_xml(a, tabs, mm, files))
+            f.write(jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw))
         e = mm.empty()
         glb = os.path.join(self.dir, a.name + ".glb")
         model3d.write_glb(a, glb, origin=e["cg"])
@@ -356,7 +434,35 @@ class Design:
         # in a package, or FSIM_AIRCRAFT_PATH): jsbsim:<name> in any trainer, the viewer, Python
         checks = [info("JSBSim aircraft", shown(xml_path), note="type jsbsim:%s" % a.name),
                   info("3D model", shown(glb), note="fsim demo --aircraft %s" % a.name)]
-        return self.save("build", {"xml": xml_path, "glb": glb, "checks": checks})
+        out = {"xml": xml_path, "glb": glb, "checks": checks}
+        if fbw is not None:
+            checks += self._fbw_checks(fbw)
+            from .report import plots
+            plots.fbw_gains(fbw, self.img("fbw.png"), a.name)
+            out["images"] = ["fbw.png"]
+            out["fbw"] = {"options": fbw["options"], "qbar_psf": fbw["qbar_psf"], "mach": fbw["mach"],
+                          "gains": fbw["gains"]}
+        return self.save("build", out)
+
+    def _fbw_checks(self, fbw):
+        """The fly-by-wire's short period where the airframe can fly (1 g
+        trim below the angle-of-attack limit): damping and frequency."""
+        zetas, omegas, unstable = [], [], 0
+        for row in fbw["points"]:
+            for p in row:
+                if p["alpha_deg"] > fbw["options"]["alpha_max_deg"] - 2.0:
+                    continue
+                e = np.array(p["eig_sp"])
+                w = np.abs(e)
+                z = -e.real / np.maximum(w, 1e-9)
+                zetas.append(float(z.min()))
+                omegas.append(float(w.min()))
+                unstable += int(p["open_loop_Ma"] > 0)
+        return [check("fly-by-wire short period damping (worst design point)", min(zetas), 0.35, 1.3,
+                      note="MIL-F-8785C level 1, category A"),
+                info("fly-by-wire short period frequency", "%.1f-%.1f" % (min(omegas), max(omegas)), "rad/s"),
+                info("design points where the airframe alone is unstable in pitch", unstable,
+                     note="of %d" % len(zetas))]
 
     def calibrated(self, tabs):
         """The tables with the calibration's extra drag area (drag along the
@@ -401,15 +507,24 @@ class Design:
         reference = reference or self.targets.get("reference")
         results = {}
         hists = {}
+        opts = self.fbw_options()
         for label, kind in [("design", a.name)] + ([("reference", reference)] if reference else []):
             self.log("  fly: %s (%s)" % (label, kind))
             f = F.Flight(kind, name="hangar-fly-%s-%s" % (a.name, label))
             try:
+                if opts is not None:
+                    results[label] = self._fly_fighter(F, f, opts)
+                    continue
                 r, h = self._fly_one(F, f, design=label == "design")
             finally:
                 f.close()
             results[label] = r
             hists[label] = h
+        if opts is not None:
+            tags = {lab: "%s (%s)" % (lab, results[lab]["type"]) for lab in results}
+            plots.fighter({tags[k]: v["fighter"] for k, v in results.items()}, self.img("fly_fighter.png"), a.name)
+            checks = self._fighter_checks(results)
+            return self.save("fly", {"results": results, "checks": checks, "images": ["fly_fighter.png"]})
         # plots: design vs reference
         tags = {lab: "%s (%s)" % (lab, results[lab]["type"]) for lab in results}
         plots.trim_sweep({tags[k]: v["trim_sweep"] for k, v in results.items()}, self.img("fly_trim.png"))
@@ -439,6 +554,59 @@ class Design:
             return 26.0
         W = mass["loaded_mass_kg"] * 9.80665
         return float(np.sqrt(2 * W / (1.225 * self.aircraft.S * 0.85 * aero["cl_max"])))
+
+    def _fly_fighter(self, F, f, opts):
+        """The fighter tests (flight.fighter_tests) and the crash and random
+        state runs every design flies."""
+        t0 = time.time()
+        r = {"type": f.type, "fighter": F.fighter_tests(f, opts, quick=self.quick)}
+        r["robustness"] = F.robustness(f, n=12 if self.quick else 40)
+        vs = 70.0
+        r["crashes"] = F.crash_tests(f, vs, F.contact_points(self._aircraft_file(f.type)))
+        r["seconds"] = time.time() - t0
+        return r
+
+    def _fighter_checks(self, results):
+        t = self.targets
+        d = results["design"]["fighter"]
+        ref = results.get("reference", {}).get("fighter")
+        checks = []
+
+        def vs(label, value, key, tol, unit, fmt="%.3g", refv=None):
+            note = ("reference %s" % (fmt % refv)) if refv is not None and np.isfinite(refv) else ""
+            if key in t:
+                checks.append(check(label, value, t[key] * (1 - tol), t[key] * (1 + tol), unit, level="warn",
+                                    note=("target %g" % t[key]) + ("; " + note if note else ""), fmt=fmt))
+            else:
+                checks.append(info(label, value, unit, note))
+        g = lambda k, r=ref: r.get(k) if r else None  # noqa: E731
+        vs("maximum Mach number at 36,000 ft (full afterburner)", d["max_mach_36k"], "max_mach", 0.05, "", refv=g("max_mach_36k"))
+        vs("maximum level speed at sea level", d["max_mach_sl"] * 661.47, "max_speed_ktas", 0.08, "KTAS", "%.0f",
+           refv=g("max_mach_sl") * 661.47 if ref else None)
+        vs("best rate of climb at sea level (peak excess power)", d["climb_rate_ms"] / 0.3048 * 60, "climb_rate_fpm", 0.25, "ft/min",
+           "%.0f", refv=g("climb_rate_ms") / 0.3048 * 60 if ref else None)
+        vs("service ceiling", d["service_ceiling_m"] / 0.3048, "service_ceiling_ft", 0.15, "ft", "%.0f",
+           refv=g("service_ceiling_m") / 0.3048 if ref else None)
+        vs("sustained turn rate, Mach 0.9 at 15,000 ft", d["turn"]["rate_deg_s"], "sustained_turn_deg_s", 0.15, "deg/s",
+           refv=ref["turn"]["rate_deg_s"] if ref else None)
+        h = d["handling"]
+        o = self.fbw_options()
+        checks += [check("full aft stick at 350 kt: angle of attack reached", h["pull"]["alpha_max"], None, o["alpha_max_deg"] + 4.0,
+                         "deg", note="the limiter holds %g deg" % o["alpha_max_deg"]),
+                   info("full aft stick at 350 kt: load factor and turn rate", "%.1f g, %.1f deg/s" % (h["pull"]["n_max"],
+                                                                                                     h["pull"]["rate_deg_s"])),
+                   check("3 g step: overshoot", h["step"]["overshoot"] * 100, None, 40.0, "%", level="warn",
+                         note="rise to 90 %% in %.2f s" % h["step"]["rise_s"]),
+                   info("full-stick roll at 350 kt", "%.0f deg/s, 90 deg in %.2f s" % (h["roll"]["p_max"], h["roll"]["time_to_90_s"]),
+                        note="sideslip up to %.1f deg" % h["roll"]["beta_max"]),
+                   check("random-state runs that diverged", results["design"]["robustness"]["diverged"], None, 0,
+                         note="of %d: attitudes, rates, speeds and controls at random" % results["design"]["robustness"]["runs"])]
+        checks += self._crash_checks(results["design"], results.get("reference"))
+        return checks
+
+    def fbw_options(self):
+        from .fcs import options
+        return options(self.aircraft)
 
     def _fly_one(self, F, f, design=True):
         t0 = time.time()
@@ -546,6 +714,65 @@ class Design:
                 info("crash tests: deepest point below ground", crashes[deep]["deepest_m"], "m", note=deep)]
 
 
+def _calibrate_fighter(d):
+    """A fighter's supersonic drag to its published top speed: the wave-drag
+    efficiency E_WD (Raymer 12.46; how far the area distribution is from
+    Sears-Haack's) that makes the maximum level Mach number at the target
+    altitude the published one - bisection, each step the tables' wave drag
+    recomputed, the aircraft rebuilt and accelerated at full afterburner."""
+    from . import flight as F
+    from .aero.mach import _drag
+    from .fcs import options
+    t = d.targets
+    a = d.aircraft
+    if "max_mach" not in t:
+        return d.save("calibrate", {"checks": [info("nothing to calibrate", "needs a max_mach target")]})
+    alt = float(t.get("max_mach_altitude_ft", 36000.0)) * 0.3048
+    target = float(t["max_mach"])
+    opts = options(a)
+    history = []
+
+    def measure(ewd):
+        _write_calibration(d, {"wave_drag_efficiency": float(ewd)})
+        d.aircraft = Aircraft.load(d.path)
+        tabs = d.tables()
+        tabs["mach"].update(_drag(d.aircraft, tabs, tabs["mach"]))
+        d.build_with(tabs)
+        f = F.Flight(a.name, name="hangar-cal-" + a.name)
+        try:
+            m, _ = F.max_level_mach(f, F.FighterPilot(f.dt, opts["n_max"], opts["n_min"]) if opts else F.FighterPilot(f.dt),
+                                    alt, start_mach=0.9, seconds=360.0)
+        finally:
+            f.close()
+        history.append({"wave_drag_efficiency": float(ewd), "max_mach": float(m)})
+        d.log("  calibrate: E_WD %.3f -> Mach %.3f at %.0f ft" % (ewd, m, alt / 0.3048))
+        return m
+
+    lo, hi = 0.8, 4.0
+    m_lo, m_hi = measure(lo), measure(hi)
+    x, m = (lo, m_lo) if abs(m_lo - target) < abs(m_hi - target) else (hi, m_hi)
+    if (m_lo - target) * (m_hi - target) < 0:
+        for _ in range(8):
+            x = 0.5 * (lo + hi)
+            m = measure(x)
+            if abs(m - target) < 0.01:
+                break
+            if (m - target) * (m_lo - target) > 0:
+                lo, m_lo = x, m
+            else:
+                hi, m_hi = x, m
+    _write_calibration(d, {"wave_drag_efficiency": float(x)},
+                       note="fitted: maximum Mach %.3f at %.0f ft (target %g)" % (m, alt / 0.3048, target))
+    d.aircraft = Aircraft.load(d.path)
+    tabs = d.tables()
+    tabs["mach"].update(_drag(d.aircraft, tabs, tabs["mach"]))
+    d.build_with(tabs)
+    checks = [check("maximum Mach number after calibration", m, target - 0.03, target + 0.03, note="at %.0f ft" % (alt / 0.3048)),
+              check("wave-drag efficiency E_WD", x, 1.0, 3.5, level="warn",
+                    note="Raymer: 1.2 a smooth area distribution, 2-3 typical")]
+    return d.save("calibrate", {"calibration": {"wave_drag_efficiency": x}, "history": history, "checks": checks})
+
+
 def _calibrate(d):
     """Fit what the physics cannot know to published performance: an extra
     drag area (struts, cooling, gear legs, antennas, gaps) to the maximum level
@@ -556,6 +783,8 @@ def _calibrate(d):
     from . import flight as F
     t = d.targets
     a = d.aircraft
+    if any(e.type == "turbofan" for e in a.engines):
+        return _calibrate_fighter(d)
     if not a.engines or not ("max_speed_ktas" in t and "climb_rate_fpm" in t):
         return d.save("calibrate", {"checks": [info("nothing to calibrate", "needs max_speed_ktas and climb_rate_fpm targets")]})
     fly = d.load("fly")
@@ -630,9 +859,14 @@ def _write_calibration(d, cal, note=""):
     lines = ["# Written by hangar calibrate (%s) to meet the [targets] of %s:" % (time.strftime("%Y-%m-%d %H:%M"),
                                                                               os.path.basename(d.path)),
              "# corrections for what the physics estimate does not see. Delete this file to",
-             "# go back to the pure estimate.", "[calibration]",
-             "extra_drag_area_m2 = %.4f   # drag along the flow, added to the estimate (m2)" % cal["extra_drag_area_m2"],
-             "propeller_pitch_m = [%s]   # geometric pitch at 75 %% radius, per engine" % ", ".join("%.4f" % p for p in cal["propeller_pitch_m"])]
+             "# go back to the pure estimate.", "[calibration]"]
+    if "extra_drag_area_m2" in cal:
+        lines.append("extra_drag_area_m2 = %.4f   # drag along the flow, added to the estimate (m2)" % cal["extra_drag_area_m2"])
+    if "propeller_pitch_m" in cal:
+        lines.append("propeller_pitch_m = [%s]   # geometric pitch at 75 %% radius, per engine"
+                     % ", ".join("%.4f" % p for p in cal["propeller_pitch_m"]))
+    if "wave_drag_efficiency" in cal:
+        lines.append("wave_drag_efficiency = %.4f   # Raymer's E_WD: the wave drag over Sears-Haack's" % cal["wave_drag_efficiency"])
     if note:
         lines.append("# " + note)
     with open(os.path.join(d.dir, "calibration.toml"), "w", encoding="utf-8") as f:

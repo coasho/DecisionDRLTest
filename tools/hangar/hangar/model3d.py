@@ -12,7 +12,10 @@ vehicle's deflection (docs/sdk/viewer.md, "Moving control surfaces"): named
 fsim:<channel>[:<gain>] - aileron, elevator, rudder or flaps - with its
 origin on the hinge line and its local x axis along the hinge, turned so
 that a positive rotation about x is the deflection JSBSim's channel means by
-a positive value (aileron: the left one trailing edge down).
+a positive value (aileron: the left one trailing edge down). A surface that
+several channels move - a stabilator that also rolls, a flaperon - is
+fsim:<channel>[:<gain>]+<channel>[:<gain>]..., turned by the sum; an
+all-moving surface turns about its spindle.
 """
 import json
 import math
@@ -190,8 +193,10 @@ def display_skin(surface, n_span=48, n_chord=28):
     xs0 = af.cosine_spacing(n_chord + 1)
     n = len(xs0)
     m = 2 * n - 1
-    # each control's hinge lands on one chordwise station, the same in every ring
-    station = [int(np.argmin(np.abs(xs0[1:-1] - (1 - 0.5 * (c.cf0 + c.cf1))))) + 1 for c in surface.controls]
+    # each control's hinge lands on one chordwise station, the same in every
+    # ring; an all-moving control's "hinge" is the leading edge (station 0)
+    station = [0 if c.all_moving else int(np.argmin(np.abs(xs0[1:-1] - (1 - 0.5 * (c.cf0 + c.cf1))))) + 1
+               for c in surface.controls]
     etas = np.unique(np.concatenate([np.linspace(0, 1, n_span + 1), surface.breakpoints()]))
     rings = []  # (eta, k): k the control whose hinge the ring carries, 0 none
     for i, e in enumerate(etas):
@@ -212,7 +217,7 @@ def display_skin(surface, n_span=48, n_chord=28):
         le, ch, tw, foil = surface.station(e)
         c, u = surface.frame(e)
         x = xs0
-        if k:
+        if k and station[k - 1] > 0:
             j = station[k - 1]
             h = 1 - surface.controls[k - 1].chord_fraction(e)
             x = np.where(xs0 <= xs0[j], xs0 * h / xs0[j], h + (xs0 - xs0[j]) * (1 - h) / (1 - xs0[j]))
@@ -239,6 +244,9 @@ def display_skin(surface, n_span=48, n_chord=28):
             if not piece["rings"]:
                 piece["rings"].append(r)
             piece["rings"].append(r + 1)
+            if iu == il:   # all-moving: the whole section turns
+                piece["mesh"].band(r, a, r + 1, b, range(m - 1))
+                continue
             fixed.band(r, a, r + 1, b, range(iu, il))
             piece["mesh"].band(r, a, r + 1, b, list(range(0, iu)) + list(range(il, m - 1)))
             for mesh in (fixed, piece["mesh"]):
@@ -258,7 +266,8 @@ def display_skin(surface, n_span=48, n_chord=28):
         k = rings[r][1]
         if k:
             iu, il = hinge_index(k)
-            fixed.fan(pts[r][iu:il + 1])
+            if il > iu:
+                fixed.fan(pts[r][iu:il + 1])
         else:
             fixed.fan(pts[r])
     out = []
@@ -268,8 +277,19 @@ def display_skin(surface, n_span=48, n_chord=28):
         mid = pts[piece["rings"][len(piece["rings"]) // 2]]
         iu, il = hinge_index(k)
         e_mid = rings[piece["rings"][len(piece["rings"]) // 2]][0]
+        ctrl = surface.controls[k - 1]
+        if ctrl.all_moving:
+            # the spindle: the pivot chord fraction of the first and last rings
+            ends = []
+            for r in (piece["rings"][0], piece["rings"][-1]):
+                le, ch, _, _ = surface.station(rings[r][0])
+                c, _ = surface.frame(rings[r][0])
+                ends.append(le + ctrl.pivot * ch * c)
+            hinge_line = (ends[0], ends[1])
+        else:
+            hinge_line = (0.5 * (first[iu] + first[il]), 0.5 * (last[iu] + last[il]))
         p = {"control": k, "side": 1, "vertices": v, "triangles": t,
-             "hinge": (0.5 * (first[iu] + first[il]), 0.5 * (last[iu] + last[il])),
+             "hinge": hinge_line,
              "te": 0.5 * (mid[0] + mid[m - 1]), "centre": v.mean(axis=0), "u": surface.frame(e_mid)[1]}
         out.append(p)
         if surface.mirror:
@@ -344,9 +364,11 @@ def hinge(surface, piece):
     if np.dot(np.cross(axis, piece["te"] - p0), -piece["u"]) < 0:
         axis = -axis
     g = channel_gain(ctrl.channel, ctrl, piece["u"], piece["centre"])
+    sign = -1.0 if g < 0 else 1.0
     if g < 0:
         axis, g = -axis, -g
-    return p0, axis, float(g)
+    mixed = {ch: sign * channel_gain(ch, ctrl, piece["u"], piece["centre"]) for ch in ctrl.mix}
+    return p0, axis, float(g), mixed
 
 
 def control_nodes(aircraft, origin):
@@ -357,10 +379,11 @@ def control_nodes(aircraft, origin):
         _, _, pieces = display_skin(s)
         for piece in pieces:
             ctrl = s.controls[piece["control"] - 1]
-            p0, axis, g = hinge(s, piece)
+            p0, axis, g, mixed = hinge(s, piece)
             q = _quat_from_x(_gltf_direction(axis))
             pivot = _to_gltf(p0, origin)
             name = "fsim:" + CHANNEL_NODE[ctrl.channel] + ("" if abs(g - 1.0) < 1e-9 else ":%.6g" % g)
+            name += "".join("+%s:%.6g" % (CHANNEL_NODE[ch], gm) for ch, gm in sorted(mixed.items()) if abs(gm) > 1e-9)
             y = piece["centre"][1]
             side = "" if abs(y) < 1e-6 else (" right" if y > 0 else " left")
             out.append({"name": name, "label": "%s %s%s" % (s.name, ctrl.name, side),
@@ -405,6 +428,8 @@ def write_glb(aircraft, path, origin):
     spin_m = B.material("spinner", (0.85, 0.2, 0.15), 0.4, 0.4)
     anims = []
     for e in aircraft.engines:
+        if not e.has_propeller:
+            continue
         for name, _, prop, _ in e.copies():
             R = 0.5 * e.prop_diameter
             parts = []

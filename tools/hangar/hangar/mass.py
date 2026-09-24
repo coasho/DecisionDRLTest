@@ -104,6 +104,14 @@ class MassModel:
         for e in a.engines:
             m = float(e.mass) if e.mass is not None else self._engine_mass(e)
             for name, pos, prop, _ in e.copies():
+                if e.type == "turbofan":
+                    # a jet engine is long: its mass along a cylinder centred on its position
+                    length, diameter = e.jet_size()
+                    xs = np.linspace(-0.5, 0.5, 7) * length
+                    ring = [(0.3 * diameter * np.cos(t), 0.3 * diameter * np.sin(t)) for t in np.linspace(0, 2 * np.pi, 6, endpoint=False)]
+                    pts = pos + np.array([[x, yy, zz] for x in xs for yy, zz in ring])
+                    self._add(name, m, pts, np.ones(len(pts)), "engine")
+                    continue
                 # engine block around its mounting point, the propeller at its hub
                 pts = pos + np.array([[dx, dy, dz] for dx in (-0.25, 0.25) for dy in (-0.2, 0.2) for dz in (-0.15, 0.15)])
                 self._add(name, 0.9 * m, pts, np.ones(len(pts)), "engine")
@@ -138,6 +146,10 @@ class MassModel:
     def _engine_mass(self, e):
         """Installed piston engine (Raymer 15.3.3: 2.575 W_en^0.922, W_en
         ~1.4 lb/hp dry) or an electric motor with controller (~5 kW/kg)."""
+        if e.type == "turbofan":
+            # Raymer 10.4, afterburning turbofan: W = 0.063 T^1.1 M^0.25 exp(-0.81 BPR) lb
+            t = (e.thrust_wet_kn or e.thrust_dry_kn) * 1000.0 / 4.448222
+            return 0.063 * t ** 1.1 * e.design_mach ** 0.25 * np.exp(-0.81 * e.bypass_ratio) * LB
         hp = e.power_kw / 0.7457
         if e.type == "electric":
             return e.power_kw / 5.0 * 1.3

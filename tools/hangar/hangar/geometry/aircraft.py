@@ -39,18 +39,48 @@ class Gear:
 
 
 class Engine:
+    """A piston engine or electric motor with its propeller, or a turbofan
+    (with or without afterburner) and its nozzle. For a turbofan the
+    "propeller" fields describe the nozzle: where the thrust acts and which
+    way it points, and there is no disc."""
+
     def __init__(self, spec):
         self.name = spec.get("name", "engine")
         self.type = spec.get("type", "piston")
-        if self.type not in ("piston", "electric"):
-            raise ValueError("engine %r: type must be piston or electric (turbines are not built in yet)" % self.name)
+        if self.type not in ("piston", "electric", "turbofan"):
+            raise ValueError("engine %r: type must be piston, electric or turbofan" % self.name)
+        self.position = np.asarray(spec.get("position", [0.0, 0.0, 0.0]), float)
+        self.mass = spec.get("mass")
+        self.mirror = bool(spec.get("mirror", False))
+        if self.type == "turbofan":
+            if "thrust_dry_kn" not in spec:
+                raise ValueError("engine %r: a turbofan needs thrust_dry_kn (sea-level static, military power)" % self.name)
+            self.thrust_dry_kn = float(spec["thrust_dry_kn"])
+            self.thrust_wet_kn = float(spec["thrust_wet_kn"]) if "thrust_wet_kn" in spec else None  # afterburner
+            if self.thrust_wet_kn is not None and self.thrust_wet_kn <= self.thrust_dry_kn:
+                raise ValueError("engine %r: thrust_wet_kn must exceed thrust_dry_kn" % self.name)
+            self.bypass_ratio = float(spec.get("bypass_ratio", 0.5))
+            self.tsfc_dry = float(spec.get("tsfc_dry", 0.8))    # kg/(kgf h) = lb/(lbf h)
+            self.tsfc_wet = float(spec.get("tsfc_wet", 2.0))
+            self.throttle_ratio = float(spec.get("throttle_ratio", 1.05))  # Mattingly's TR: where the lapse turns
+            self.design_mach = float(spec.get("design_mach", 2.0))
+            self.inlet_x = float(spec["inlet_x"]) if "inlet_x" in spec else None  # where the intake captures its air
+            self.power_kw = 0.0
+            self.rpm = 0.0
+            nozzle = spec.get("nozzle", {})
+            self.prop_position = np.asarray(nozzle.get("position", self.position), float)
+            self.prop_diameter = 0.0
+            self.prop_blades = 0
+            self.prop_pitch = None
+            self.prop_sense = "cw"
+            self.prop_orient = np.radians(np.asarray(nozzle.get("orient", [0.0, 0.0, 0.0]), float))
+            self.prop_spec = nozzle
+            return
+        self.inlet_x = None
         if "power_kw" not in spec:
             raise ValueError("engine %r: power_kw is required" % self.name)
         self.power_kw = float(spec["power_kw"])
         self.rpm = float(spec.get("rpm", 2700.0))
-        self.position = np.asarray(spec.get("position", [0.0, 0.0, 0.0]), float)
-        self.mass = spec.get("mass")
-        self.mirror = bool(spec.get("mirror", False))
         prop = spec.get("propeller", {})
         self.prop_position = np.asarray(prop.get("position", self.position), float)
         self.prop_diameter = float(prop.get("diameter", 1.8))
@@ -59,6 +89,18 @@ class Engine:
         self.prop_sense = prop.get("rotation", "cw")  # seen from behind: cw = JSBSim sense 1
         self.prop_orient = np.radians(np.asarray(prop.get("orient", [0.0, 0.0, 0.0]), float))  # roll, pitch, yaw
         self.prop_spec = prop
+
+    @property
+    def has_propeller(self):
+        return self.type != "turbofan"
+
+    def jet_size(self):
+        """Length and diameter (m) of an afterburning turbofan from its
+        thrust (Raymer 10.1-10.2, scaled: L = 0.255 T^0.4 M^0.2 ft, D = 0.024
+        T^0.5 e^(0.04 BPR) ft, T in lbf)."""
+        t = (self.thrust_wet_kn or self.thrust_dry_kn) * 1000.0 / 4.448222
+        return (0.255 * t ** 0.4 * self.design_mach ** 0.2 * 0.3048,
+                0.024 * t ** 0.5 * np.exp(0.04 * self.bypass_ratio) * 0.3048)
 
     def copies(self):
         if self.mirror:
@@ -121,7 +163,15 @@ class Aircraft:
         return [(s, c) for s in self.surfaces for c in s.controls]
 
     def channels(self):
-        return sorted({c.channel for _, c in self.controls()})
+        return sorted({ch for _, c in self.controls() for ch in c.channels})
+
+    def channel_limits(self, channel):
+        """(min, max) deflection (deg) of a channel: those of the controls it
+        drives first, else those of the controls that mix it in."""
+        own = [c for _, c in self.controls() if c.channel == channel]
+        mixed = [c for _, c in self.controls() if channel in c.mix]
+        cs = own or mixed
+        return min(c.min_deg for c in cs), max(c.max_deg for c in cs)
 
     def summary(self):
         """The geometric numbers a designer checks first."""

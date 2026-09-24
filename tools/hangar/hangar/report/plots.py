@@ -207,6 +207,28 @@ def propeller(tabs, path):
     plt.close(fig)
 
 
+def turbofan(tables, path):
+    """Thrust lapse of each turbofan: military and maximum thrust over Mach
+    at a few altitudes, as fractions of sea-level-static thrust."""
+    from ..propulsion import _ALT_FT, _MACH
+    fig, axes = plt.subplots(1, len(tables), figsize=(6.2 * len(tables), 4.2), squeeze=False)
+    for ax, (name, tab) in zip(axes[0], tables.items()):
+        for j, h in enumerate(_ALT_FT):
+            if h < 0 or h > 50000:
+                continue
+            c = plt.cm.viridis(j / len(_ALT_FT))
+            ax.plot(_MACH, [row[j] for row in tab["MilThrust"]], "--", color=c)
+            ax.plot(_MACH, [row[j] for row in tab["AugThrust"]], "-", color=c, label="%.0f ft" % h)
+        ax.set_title("%s: thrust lapse (solid: afterburner, dashed: military)" % name, fontsize=10)
+        ax.set_xlabel("Mach")
+        ax.set_ylabel("thrust / sea-level static")
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
+
+
 def trim_sweep(runs, path):
     fig, axes = plt.subplots(1, 4, figsize=(18, 4.2), dpi=95)
     for name, rows in runs.items():
@@ -236,6 +258,127 @@ def climb(runs, path):
     ax.set_title("climb at full throttle (service ceiling at 100 ft/min)", fontsize=9)
     ax.grid(True, lw=0.3)
     ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def reference_comparison(cmp, path, name):
+    """The design's coefficients over alpha against its reference aircraft
+    (a JSBSim model built from wind-tunnel data)."""
+    a = cmp["alpha"]
+    R, D = cmp["reference"], cmp["design"]
+    panels = [("CL", "lift CL"), ("CD", "drag CD"), ("Cm", "pitching moment Cm (about the ARP)"), (None, "drag polar"),
+              ("CYb", "side force CY_beta (/rad)"), ("Clb", "dihedral effect Cl_beta (/rad)"),
+              ("Cnb", "weathercock Cn_beta (/rad)"), ("Cm_elevator", "elevator power Cm_de (/rad)"),
+              ("Clp", "roll damping Cl_p"), ("Cnr", "yaw damping Cn_r"), ("Cmq", "pitch damping Cm_q"),
+              ("Cl_aileron", "aileron power Cl_da (/rad); rudder Cn_dr")]
+    fig, axes = plt.subplots(3, 4, figsize=(18, 11), dpi=95)
+    for ax, (k, title) in zip(axes.flat, panels):
+        if k is None:
+            ax.plot(R["CD"], R["CL"], "k-", lw=1.4, label="reference")
+            ax.plot(D["CD"], D["CL"], "C0-", lw=1.4, label="hangar")
+            ax.set_xlabel("CD")
+            ax.set_ylabel("CL")
+        else:
+            if k in R:
+                ax.plot(a, R[k], "k-", lw=1.4, label="reference")
+            if k in D:
+                ax.plot(a, D[k], "C0-", lw=1.4, label="hangar")
+            if k == "Cl_aileron":
+                if "Cn_rudder" in R:
+                    ax.plot(a, R["Cn_rudder"], "k--", lw=1.0, label="reference Cn_dr")
+                if "Cn_rudder" in D:
+                    ax.plot(a, D["Cn_rudder"], "C0--", lw=1.0, label="hangar Cn_dr")
+            ax.set_xlabel("alpha (deg)")
+            ax.axhline(0, color="k", lw=0.5)
+        ax.set_title(title, fontsize=9)
+        ax.grid(True, lw=0.3)
+    axes[0, 0].legend(fontsize=8)
+    axes[2, 3].legend(fontsize=7)
+    fig.suptitle("%s against %s (reference: black)" % (name, cmp["name"]))
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def mach_effects(mt, path, name):
+    """The compressibility factors over Mach (aero/mach.py)."""
+    m = mt["mach"]
+    fig, axes = plt.subplots(1, 4, figsize=(19, 4.3), dpi=95)
+    ax = axes[0]
+    ax.plot(m, mt["K_L"], "k-o", ms=3, label="lift K_L")
+    ax.plot(m, mt["K_Y"], "C1-o", ms=3, label="lateral K_Y")
+    for ch in ("elevator", "aileron", "rudder", "flap"):
+        if "K_" + ch in mt:
+            ax.plot(m, mt["K_" + ch], "--", lw=1.0, label=ch)
+    ax.set_title("factors on the low-speed values", fontsize=9)
+    ax.legend(fontsize=7)
+    ax = axes[1]
+    ax.plot(m, mt["x_np"], "k-o", ms=3)
+    ax.set_title("neutral point x (m)", fontsize=9)
+    ax = axes[2]
+    ax.plot(m, mt["CD0"] + mt["dCD0"], "k-o", ms=3)
+    ax.axvline(mt["M_cr"], color="C1", lw=0.8, ls=":")
+    ax.axvline(mt["M_dd"], color="C3", lw=0.8, ls=":")
+    ax.set_title("zero-lift drag (critical %.2f, divergence %.2f; A_max %.2f m2, l %.1f m, E_WD %.1f)"
+                 % (mt["M_cr"], mt["M_dd"], mt["A_max_m2"], mt["length_m"], mt["E_WD"]), fontsize=8)
+    ax = axes[3]
+    ax.plot(m, mt["K0"] + mt["dK"] * 0 + (mt["dK"] + mt["K0"] / mt["K_L"] ** 2), "k-o", ms=3)
+    ax.set_title("induced-drag factor K (CD_i = K CL^2)", fontsize=9)
+    for ax in axes:
+        ax.set_xlabel("Mach")
+        ax.grid(True, lw=0.3)
+    fig.suptitle("%s: compressibility" % name)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def fbw_gains(fbw, path, name):
+    """The fly-by-wire's gain tables over dynamic pressure, one line per Mach
+    number."""
+    keys = [("k_alpha", "alpha feedback (rad/rad)"), ("k_q", "pitch-rate feedback (rad/(rad/s))"),
+            ("k_ff", "load-factor feedforward (rad/g)"), ("k_roll", "roll-rate feedback (rad/(rad/s))"),
+            ("p_max", "roll rate commanded at full stick (rad/s)"), ("k_yaw_r", "yaw damper (rad/(rad/s))")]
+    fig, axes = plt.subplots(2, 3, figsize=(16, 8), dpi=95)
+    q = fbw["qbar_psf"]
+    for ax, (k, title) in zip(axes.flat, keys):
+        for j, m in enumerate(fbw["mach"]):
+            ax.semilogx(q, fbw["gains"][k][:, j], "-o", ms=3, label="Mach %.2f" % m)
+        ax.set_title(title, fontsize=9)
+        ax.set_xlabel("dynamic pressure (psf)")
+        ax.grid(True, lw=0.3)
+    axes[0, 0].legend(fontsize=7)
+    fig.suptitle("%s: fly-by-wire gains (hangar/fcs.py)" % name)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
+def fighter(runs, path, name):
+    """A fighter's performance flown: specific excess power over Mach at sea
+    level and 36,000 ft (where it crosses zero: the top speed), the sustained
+    turn (speed change over load factor), the ceiling."""
+    fig, axes = plt.subplots(1, 4, figsize=(19, 4.3), dpi=95)
+    for label, r in runs.items():
+        l, = axes[0].plot(r["ps_sl"]["mach"], r["ps_sl"]["ps"], lw=1.2, label=label)
+        axes[1].plot(r["ps_36k"]["mach"], r["ps_36k"]["ps"], lw=1.2, color=l.get_color())
+        rows = r["turn"]["rows"]
+        axes[2].plot([x["n"] for x in rows], [x["dvdt"] for x in rows], "-o", ms=3, color=l.get_color())
+        c = r["ceiling_rows"]
+        axes[3].plot([x["ps_max"] for x in c], [x["altitude_m"] / 0.3048 for x in c], "-o", ms=3, color=l.get_color())
+    axes[0].set_title("excess power at sea level, full afterburner", fontsize=9)
+    axes[1].set_title("excess power at 36,000 ft", fontsize=9)
+    axes[2].set_title("level turns at Mach 0.9, 15,000 ft", fontsize=9)
+    axes[3].set_title("best excess power over height", fontsize=9)
+    for ax, xl, yl in zip(axes, ("Mach", "Mach", "load factor", "P_s (m/s)"), ("P_s (m/s)", "P_s (m/s)", "dV/dt (m/s2)", "ft")):
+        ax.set_xlabel(xl)
+        ax.set_ylabel(yl)
+        ax.grid(True, lw=0.3)
+        ax.axhline(0, color="k", lw=0.5) if ax is not axes[3] else ax.axvline(0.508, color="k", lw=0.5)
+    axes[0].legend(fontsize=7)
+    fig.suptitle("%s: fighter performance, flown" % name)
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)

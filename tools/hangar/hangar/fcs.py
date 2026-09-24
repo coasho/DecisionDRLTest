@@ -1,0 +1,519 @@
+"""Fly-by-wire: the control laws a fighter flies with, and their gains from
+the aircraft's own linear model.
+
+A modern fighter is not flown by its surfaces but by its flight control
+computers, and many are unstable without them. With [flight_control]
+type = "fbw" in the design, the JSBSim aircraft gets these laws in place of
+the direct stick-to-surface channels; the command properties stay the same
+(fcs/elevator-cmd-norm, fcs/aileron-cmd-norm, fcs/rudder-cmd-norm), so an
+agent or a pilot flies it like any other aircraft:
+
+- pitch: a load factor command. Neutral stick holds the flight path (the
+  load factor that balances gravity, cos(theta) cos(phi)); full aft stick
+  commands n_max, full forward n_min - no more than the lift at the angle
+  of attack limits gives, through a 0.2 s prefilter. An inner loop feeds back angle of
+  attack and pitch rate to place the short period - frequency from the
+  Control Anticipation Parameter (CAP 1, the middle of MIL-F-8785C's level 1
+  for category A), damping 0.8 - which makes an unstable airframe fly like a
+  stable one; a feedforward gives the command, an integrator on the error
+  from the response it should give (a 0.4 s lag of the command) trims. Approaching alpha_max the error is limited by the
+  angle of attack left (counting the pitch rate's next quarter second as
+  spent), so the aircraft cannot be pulled past it;
+- roll: a roll-rate command about the flight path (stability axes), the
+  roll mode's time constant placed at 0.2 s, the rate limited by the
+  rolling moment available; an integrator holds the bank angle at neutral
+  stick;
+- yaw: a yaw damper on the washed-out stability-axis yaw rate (which also
+  coordinates rolls at angle of attack) and sideslip feedback where the
+  airframe's own weathercock stability is short of a dutch roll of 1.5 rad/s
+  at damping 0.5; the pedals command sideslip.
+
+Gains are tables over dynamic pressure and Mach number, from pole placement
+on the linear model (linear.py's derivatives with the compressibility
+factors, as the JSBSim file applies them) at 1 g trim at each of those
+conditions.
+"""
+import math
+
+import numpy as np
+
+from .aero import tables as T
+from .linear import G0, loaded_inertia
+
+PSF = 47.880259
+QBAR_PSF = (10.0, 20.0, 40.0, 80.0, 150.0, 300.0, 600.0, 1200.0, 2400.0)
+MACH = (0.15, 0.4, 0.7, 0.9, 1.1, 1.4, 2.0)
+A_SOUND = 320.0          # m/s: the speed of sound at mid altitudes, to turn Mach into speed
+
+DEFAULTS = {"n_max": 9.0, "n_min": -3.0, "alpha_max_deg": 25.0, "alpha_min_deg": -10.0, "roll_rate_deg_s": 300.0,
+            "sideslip_deg": 10.0, "cap": 1.0, "short_period_zeta": 0.8, "roll_time_constant_s": 0.2,
+            "dutch_roll_omega": 1.5, "dutch_roll_zeta": 0.5, "pitch_integral_s": 1.0, "bank_hold_s": 1.5}
+
+
+def options(aircraft):
+    """The design's [flight_control] settings over the defaults, or None for
+    an aircraft without fly-by-wire."""
+    spec = aircraft.spec.get("flight_control", {})
+    if spec.get("type", "direct") != "fbw":
+        return None
+    out = dict(DEFAULTS)
+    for k in DEFAULTS:
+        if k in spec:
+            out[k] = float(spec[k])
+    return out
+
+
+def _mach_factor(mt, key, mach):
+    if mt is None:
+        return 1.0 if key.startswith("K") else 0.0
+    return float(np.interp(mach, mt["mach"], mt[key]))
+
+
+def derivatives_at(tabs, alpha_deg, mach):
+    """Stability and control derivatives (per rad) at an angle of attack and
+    a Mach number: the low-speed tables' with the compressibility factors, as
+    the JSBSim file applies them (lift, damping and the lateral coefficients
+    scaled, the neutral point's move as Cm per unit lift)."""
+    d = T.derivatives(tabs, alpha_deg)
+    mt = tabs.get("mach")
+    KL, KY = _mach_factor(mt, "K_L", mach), _mach_factor(mt, "K_Y", mach)
+    out = dict(d)
+    out["CLa"] = d["CLa"] * KL
+    out["Cma"] = d["Cma"] + d["CLa"] * _mach_factor(mt, "dCm_dCL", mach)
+    for k in ("CLq", "Cmq", "CLad", "Cmad", "Clp", "Cnp", "CYp", "Clr", "Cnr", "CYr"):
+        if k in d:
+            out[k] = d[k] * KL
+    for k in ("CYb", "Clb", "Cnb"):
+        out[k] = d[k] * KY
+    for ch in tabs["controls"]:
+        K = _mach_factor(mt, "K_" + ch, mach)
+        for key in d:
+            if key.endswith("_" + ch):
+                out[key] = d[key] * K
+    return out
+
+
+def _trim_alpha(tabs, CL, mach):
+    """Angle of attack (deg) for a lift coefficient at a Mach number, capped
+    at the lift's maximum."""
+    mt = tabs.get("mach")
+    CLb = CL / _mach_factor(mt, "K_L", mach)
+    a = tabs["alpha"]
+    j0 = int(np.argmin(np.abs(tabs["beta"])))
+    k = (a > -10) & (a < 45)
+    cl = tabs["base"]["CL"][k, j0]
+    i = int(np.argmax(cl))
+    return float(np.interp(min(CLb, cl[i]), cl[: i + 1], a[k][: i + 1]))
+
+
+def design_point(tabs, aircraft, inertia, qbar_pa, mach, opt):
+    """The gains at one flight condition (dynamic pressure, Mach number),
+    and the closed loop's modes there."""
+    m, cg, Ixx, Iyy, Izz, _ = inertia
+    a = aircraft
+    S, b, c = a.S, a.b, a.c
+    V = max(mach * A_SOUND, 30.0)
+    Q = qbar_pa
+    CL = m * G0 / (Q * S)
+    # 1 g trim - or, too slow for 1 g, the angle-of-attack limit it flies at
+    alpha = min(_trim_alpha(tabs, CL, mach), opt["alpha_max_deg"])
+    d = derivatives_at(tabs, alpha, mach)
+    ar = math.radians(alpha)
+    # moments about the centre of gravity
+    dx = cg[0] - a.aero_point[0]
+    Cma = d["Cma"] + d["CLa"] * dx / c
+    Cmq = d["Cmq"] + d.get("Cmad", 0.0) + d["CLq"] * dx / c
+    Cmde = d.get("Cm_elevator", 0.0) + d.get("CL_elevator", 0.0) * dx / c
+    CLde = d.get("CL_elevator", 0.0)
+    j0 = int(np.argmin(np.abs(tabs["beta"])))
+    CD = float(np.interp(alpha, tabs["alpha"], tabs["base"]["CD"][:, j0]))
+    # -- pitch: short period, alpha and pitch rate feedback --------------------------------------
+    Za = -Q * S * (d["CLa"] + CD) / (m * V)
+    Zd = -Q * S * CLde / (m * V)
+    Ma = Q * S * c * Cma / Iyy
+    Mq = Q * S * c * c * Cmq / (2 * Iyy * V)
+    Md = Q * S * c * Cmde / Iyy
+    n_alpha = max(Q * S * d["CLa"] / (m * G0), 1.0)             # g per rad (lift still rising)
+    omega = float(np.clip(math.sqrt(max(opt["cap"] * n_alpha, 0.0)), 1.5, 6.0))
+    zeta = opt["short_period_zeta"]
+    # characteristic polynomial of A - B K, K = [ka, kq], is linear in the gains:
+    # trace = Za + Mq - ka Zd - kq Md, det = (Za Mq - Ma) + ka (Md - Zd Mq) + kq (Zd Ma - Za Md)
+    M2 = np.array([[-Zd, -Md], [Md - Zd * Mq, Zd * Ma - Za * Md]])
+    rhs = np.array([-2 * zeta * omega - (Za + Mq), omega * omega - (Za * Mq - Ma)])
+    try:
+        ka, kq = np.linalg.solve(M2, rhs)
+    except np.linalg.LinAlgError:
+        ka, kq = 0.0, 0.0
+    A = np.array([[Za, 1.0], [Ma, Mq]])
+    B = np.array([Zd, Md])
+    Acl = A - np.outer(B, [ka, kq])
+    try:
+        xss = -np.linalg.solve(Acl, B)                      # alpha, q per unit v
+        dn_per_v = V * xss[1] / G0
+    except np.linalg.LinAlgError:
+        dn_per_v = float("nan")
+    k_ff = 1.0 / dn_per_v if np.isfinite(dn_per_v) and abs(dn_per_v) > 1e-6 else 0.0
+    k_i = k_ff / opt["pitch_integral_s"]
+    eig_sp = np.linalg.eigvals(Acl)
+    # -- roll: rate command, feedforward and feedback --------------------------------------------
+    Lp = Q * S * b * b * d["Clp"] / (2 * Ixx * V)
+    Lda = Q * S * b * d.get("Cl_aileron", 0.0) / Ixx
+    tau = opt["roll_time_constant_s"]
+    if abs(Lda) > 1e-9:
+        kp = max((1.0 / tau + Lp) / Lda, 0.0)
+        kff = -Lp / Lda
+    else:
+        kp = kff = 0.0
+    da_max = math.radians(max(abs(x) for x in aircraft.channel_limits("aileron"))) if "aileron" in aircraft.channels() else 0.0
+    p_avail = Lda * da_max / max(-Lp, 1e-6) if Lda > 0 else 0.0
+    p_max = float(min(math.radians(opt["roll_rate_deg_s"]), 0.8 * p_avail))
+    # the bank hold: an integrator on the roll-rate error (the bank angle's),
+    # stiff enough to hold the bank against the airframe in bank_hold_s
+    kip = 1.0 / (Lda * opt["bank_hold_s"] ** 2) if Lda > 1e-9 else 0.0
+    # -- yaw: dutch roll damping and stiffness ---------------------------------------------------
+    Yb = Q * S * d["CYb"] / m
+    Nb = Q * S * b * d["Cnb"] / Izz
+    Lb = Q * S * b * d["Clb"] / Ixx
+    Nr = Q * S * b * b * d["Cnr"] / (2 * Izz * V)
+    Ndr = Q * S * b * d.get("Cn_rudder", 0.0) / Izz
+    Nb_s = Nb * math.cos(ar) - Lb * math.sin(ar)       # dynamic directional stability (stability axes)
+    w_dr = max(opt["dutch_roll_omega"], math.sqrt(max(Nb_s, 0.0)))
+    kb = (Nb_s - w_dr * w_dr) / Ndr if abs(Ndr) > 1e-9 and Nb_s < w_dr * w_dr else 0.0
+    kr = (2 * opt["dutch_roll_zeta"] * w_dr + Yb / V + Nr) / Ndr if abs(Ndr) > 1e-9 else 0.0
+    if kr * Ndr <= 0:       # the airframe damps enough by itself
+        kr = 0.0
+    beta_max = math.radians(opt["sideslip_deg"])
+    dr_max = math.radians(max(abs(x) for x in aircraft.channel_limits("rudder"))) if "rudder" in aircraft.channels() else 0.0
+    kped = float(np.clip(-(Nb * beta_max) / Ndr if abs(Ndr) > 1e-9 else 0.0, 0.0, dr_max)) if Ndr < 0 else 0.0
+    return {"qbar_psf": Q / PSF, "mach": mach, "speed_ms": V, "alpha_deg": alpha, "n_alpha": n_alpha,
+            "k_alpha": float(ka), "k_q": float(kq), "k_ff": float(k_ff), "k_i": float(k_i),
+            "omega_sp": omega, "eig_sp": [complex(e) for e in eig_sp], "open_loop_Ma": Ma,
+            "k_roll": float(kp), "k_roll_ff": float(kff), "k_roll_i": float(kip), "p_max": p_max,
+            "k_yaw_r": float(kr), "k_yaw_beta": float(kb), "k_pedal": kped}
+
+
+GAINS = ("k_alpha", "k_q", "k_ff", "k_i", "n_alpha", "k_roll", "k_roll_ff", "k_roll_i", "p_max", "k_yaw_r", "k_yaw_beta",
+         "k_pedal")
+LIMITS = {"k_alpha": 6.0, "k_q": 3.0, "k_ff": 0.3, "k_i": 0.6, "k_roll": 1.5, "k_roll_ff": 1.5, "k_roll_i": 1.0,
+          "k_yaw_r": 3.0, "k_yaw_beta": 3.0}
+
+
+def design(tabs, aircraft, mass_model):
+    """The gain tables (dynamic pressure x Mach number) and the options, or
+    None for an aircraft without fly-by-wire."""
+    opt = options(aircraft)
+    if opt is None:
+        return None
+    inertia = loaded_inertia(mass_model)
+    top = float(tabs["mach"]["mach"][-1]) if tabs.get("mach") is not None else 0.9
+    machs = [m for m in MACH if m <= top + 1e-9]
+    points = [[design_point(tabs, aircraft, inertia, q * PSF, m, opt) for m in machs] for q in QBAR_PSF]
+    tables = {k: np.array([[p[k] for p in row] for row in points]) for k in GAINS}
+    for k, lim in LIMITS.items():
+        tables[k] = np.clip(tables[k], -lim, lim)
+    return {"qbar_psf": np.array(QBAR_PSF), "mach": np.array(machs), "gains": tables, "options": opt, "points": points}
+
+
+# -- the JSBSim channels -------------------------------------------------------------------------
+def _gain_table(name, fbw, key, indent=8):
+    pad = " " * indent
+    g = fbw["gains"][key]
+    head = pad + "          " + "".join("%10.3f" % m for m in fbw["mach"])
+    body = "\n".join(pad + "%10.1f" % q + "".join("%10.5f" % v for v in g[i]) for i, q in enumerate(fbw["qbar_psf"]))
+    return """%s<fcs_function name="fcs/fbw/%s">
+%s  <function>
+%s    <table>
+%s      <independentVar lookup="row">aero/qbar-psf</independentVar>
+%s      <independentVar lookup="column">velocities/mach</independentVar>
+%s      <tableData>
+%s
+%s
+%s      </tableData>
+%s    </table>
+%s  </function>
+%s</fcs_function>""" % (pad, name, pad, pad, pad, pad, pad, head, body, pad, pad, pad, pad)
+
+
+def channels_xml(aircraft, fbw):
+    """The fly-by-wire Pitch, Roll and Yaw channels (JSBSim <channel>s) with
+    their gain tables, writing the same surface positions the direct
+    channels do."""
+    o = fbw["options"]
+    rad = math.radians
+    de_lo, de_hi = (rad(x) for x in aircraft.channel_limits("elevator"))
+    parts = []
+    hold = """        <!-- the integrators are reset below 60 kt (on the ground, taking off) -->
+        <switch name="fcs/fbw/reset">
+          <default value="0"/>
+          <test value="-1">
+            velocities/vc-kts lt 60
+          </test>
+        </switch>"""
+    parts.append("""      <channel name="Pitch (fly-by-wire)">
+        <!-- hangar: load factor command, alpha and pitch-rate inner loop (hangar/fcs.py) -->
+        <summer name="fcs/pitch-trim-sum">
+          <input>fcs/elevator-cmd-norm</input>
+          <input>fcs/pitch-trim-cmd-norm</input>
+          <clipto> <min>-1</min> <max>1</max> </clipto>
+        </summer>
+%s
+%s
+%s
+%s
+%s
+%s
+        <!-- stick to load factor beyond the gravity reference, aft (negative) to n_max,
+             no more than the lift at the angle-of-attack limits gives, through a
+             0.15 s prefilter -->
+        <fcs_function name="fcs/fbw/dn-stick">
+          <function>
+            <max>
+              <min>
+                <table>
+                  <independentVar lookup="row">fcs/pitch-trim-sum</independentVar>
+                  <tableData>
+                    -1.0  %.3f
+                     0.0  0.0
+                     1.0  %.3f
+                  </tableData>
+                </table>
+                <difference><product><property>fcs/fbw/n-alpha</property><value>%.5f</value></product><value>1.0</value></difference>
+              </min>
+              <difference><product><property>fcs/fbw/n-alpha</property><value>%.5f</value></product><value>1.0</value></difference>
+            </max>
+          </function>
+        </fcs_function>
+        <lag_filter name="fcs/fbw/dn-cmd">
+          <input>fcs/fbw/dn-stick</input>
+          <c1>5.0</c1>
+        </lag_filter>
+        <!-- the response the command should produce (the short period's rise): the
+             integrator trims away what differs from it, not the rise itself -->
+        <lag_filter name="fcs/fbw/dn-model">
+          <input>fcs/fbw/dn-cmd</input>
+          <c1>2.5</c1>
+        </lag_filter>
+        <fcs_function name="fcs/fbw/dn">
+          <function>
+            <difference>
+              <property>accelerations/Nz</property>
+              <product>
+                <cos><property>attitude/theta-rad</property></cos>
+                <cos><property>attitude/phi-rad</property></cos>
+              </product>
+            </difference>
+          </function>
+        </fcs_function>
+        <!-- the load factor error, limited by the angle of attack left - with the
+             pitch rate's next 0.25 s counted as spent, so the limit is not overshot -->
+        <fcs_function name="fcs/fbw/alpha-ahead">
+          <function>
+            <sum>
+              <property>aero/alpha-rad</property>
+              <product><value>0.25</value><property>velocities/q-rad_sec</property></product>
+            </sum>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/pitch-error">
+          <function>
+            <max>
+              <min>
+                <difference><property>fcs/fbw/dn-model</property><property>fcs/fbw/dn</property></difference>
+                <product><property>fcs/fbw/n-alpha</property>
+                  <difference><value>%.5f</value><property>fcs/fbw/alpha-ahead</property></difference></product>
+              </min>
+              <product><property>fcs/fbw/n-alpha</property>
+                <difference><value>%.5f</value><property>fcs/fbw/alpha-ahead</property></difference></product>
+            </max>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/pitch-error-rate">
+          <function><product><property>fcs/fbw/k-i</property><property>fcs/fbw/pitch-error</property></product></function>
+        </fcs_function>
+        <!-- the integrator: reset below 60 kt, held while the elevator is at a stop
+             it would push further into (anti-windup) -->
+        <switch name="fcs/fbw/pitch-hold">
+          <default value="0"/>
+          <test value="-1">
+            velocities/vc-kts lt 60
+          </test>
+          <test logic="AND" value="1">
+            fcs/fbw/elevator-raw gt %.5f
+            fcs/fbw/pitch-error-rate gt 0
+          </test>
+          <test logic="AND" value="1">
+            fcs/fbw/elevator-raw lt %.5f
+            fcs/fbw/pitch-error-rate lt 0
+          </test>
+        </switch>
+        <integrator name="fcs/fbw/pitch-integral">
+          <input>fcs/fbw/pitch-error-rate</input>
+          <c1>1.0</c1>
+          <trigger>fcs/fbw/pitch-hold</trigger>
+          <clipto> <min>-0.5</min> <max>0.5</max> </clipto>
+        </integrator>
+        <!-- the feedforward (of the limited command) fades out past alpha_max -->
+        <fcs_function name="fcs/fbw/elevator-raw">
+          <function>
+            <sum>
+              <product><value>-1</value><property>fcs/fbw/k-alpha</property><property>aero/alpha-rad</property></product>
+              <product><value>-1</value><property>fcs/fbw/k-q</property><property>velocities/q-rad_sec</property></product>
+              <product><property>fcs/fbw/k-ff</property><property>fcs/fbw/dn-cmd</property>
+                <table>
+                  <independentVar lookup="row">aero/alpha-rad</independentVar>
+                  <tableData>
+                    %.5f 0.0
+                    %.5f 1.0
+                    %.5f 1.0
+                    %.5f 0.0
+                  </tableData>
+                </table>
+              </product>
+              <property>fcs/fbw/pitch-integral</property>
+            </sum>
+          </function>
+        </fcs_function>
+        <pure_gain name="fcs/fbw/elevator">
+          <input>fcs/fbw/elevator-raw</input>
+          <gain>1.0</gain>
+          <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
+        </pure_gain>
+        <actuator name="fcs/elevator-actuator">
+          <input>fcs/fbw/elevator</input>
+          <lag>40</lag>
+          <rate_limit>1.05</rate_limit>
+          <output>fcs/elevator-pos-rad</output>
+        </actuator>
+      </channel>""" % (hold, _gain_table("k-alpha", fbw, "k_alpha"), _gain_table("k-q", fbw, "k_q"),
+                       _gain_table("k-ff", fbw, "k_ff"), _gain_table("k-i", fbw, "k_i"),
+                       _gain_table("n-alpha", fbw, "n_alpha"),
+                       o["n_max"] - 1.0, o["n_min"] - 1.0, rad(o["alpha_max_deg"]), rad(o["alpha_min_deg"]),
+                       rad(o["alpha_max_deg"]), rad(o["alpha_min_deg"]), de_hi, de_lo,
+                       rad(o["alpha_min_deg"] - 5.0), rad(o["alpha_min_deg"]), rad(o["alpha_max_deg"]),
+                       rad(o["alpha_max_deg"] + 5.0), de_lo, de_hi))
+    if "aileron" in aircraft.channels():
+        da = rad(max(abs(x) for x in aircraft.channel_limits("aileron")))
+        parts.append("""      <channel name="Roll (fly-by-wire)">
+        <!-- hangar: roll-rate command about the flight path, bank hold at neutral stick -->
+        <summer name="fcs/roll-trim-sum">
+          <input>fcs/aileron-cmd-norm</input>
+          <input>fcs/roll-trim-cmd-norm</input>
+          <clipto> <min>-1</min> <max>1</max> </clipto>
+        </summer>
+%s
+%s
+%s
+%s
+        <!-- the commanded rate halves towards alpha_max -->
+        <fcs_function name="fcs/fbw/p-cmd">
+          <function>
+            <product>
+              <property>fcs/roll-trim-sum</property>
+              <property>fcs/fbw/p-max</property>
+              <table>
+                <independentVar lookup="row">aero/alpha-rad</independentVar>
+                <tableData>
+                  %.5f 1.0
+                  %.5f 0.5
+                </tableData>
+              </table>
+            </product>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/p-stability">
+          <function>
+            <sum>
+              <product><property>velocities/p-rad_sec</property><cos><property>aero/alpha-rad</property></cos></product>
+              <product><property>velocities/r-rad_sec</property><sin><property>aero/alpha-rad</property></sin></product>
+            </sum>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/roll-error-rate">
+          <function>
+            <product><property>fcs/fbw/k-roll-i</property>
+              <difference><property>fcs/fbw/p-cmd</property><property>fcs/fbw/p-stability</property></difference></product>
+          </function>
+        </fcs_function>
+        <integrator name="fcs/fbw/roll-integral">
+          <input>fcs/fbw/roll-error-rate</input>
+          <c1>1.0</c1>
+          <trigger>fcs/fbw/reset</trigger>
+          <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
+        </integrator>
+        <fcs_function name="fcs/fbw/aileron">
+          <function>
+            <sum>
+              <product><property>fcs/fbw/k-roll-ff</property><property>fcs/fbw/p-cmd</property></product>
+              <product><property>fcs/fbw/k-roll</property>
+                <difference><property>fcs/fbw/p-cmd</property><property>fcs/fbw/p-stability</property></difference></product>
+              <property>fcs/fbw/roll-integral</property>
+            </sum>
+          </function>
+          <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
+        </fcs_function>
+        <actuator name="fcs/left-aileron-actuator">
+          <input>fcs/fbw/aileron</input>
+          <lag>40</lag>
+          <rate_limit>1.4</rate_limit>
+          <output>fcs/left-aileron-pos-rad</output>
+        </actuator>
+        <pure_gain name="fcs/right-aileron">
+          <input>fcs/left-aileron-pos-rad</input>
+          <gain>-1</gain>
+          <output>fcs/right-aileron-pos-rad</output>
+        </pure_gain>
+      </channel>""" % (_gain_table("k-roll", fbw, "k_roll"), _gain_table("k-roll-ff", fbw, "k_roll_ff"),
+                       _gain_table("k-roll-i", fbw, "k_roll_i"), _gain_table("p-max", fbw, "p_max"),
+                       rad(o["alpha_max_deg"] * 0.4), rad(o["alpha_max_deg"]), -0.5 * da, 0.5 * da, -da, da))
+    if "rudder" in aircraft.channels():
+        dr = rad(max(abs(x) for x in aircraft.channel_limits("rudder")))
+        parts.append("""      <channel name="Yaw (fly-by-wire)">
+        <!-- hangar: yaw damper, sideslip feedback, pedals command sideslip -->
+        <summer name="fcs/yaw-trim-sum">
+          <input>fcs/rudder-cmd-norm</input>
+          <input>fcs/yaw-trim-cmd-norm</input>
+          <clipto> <min>-1</min> <max>1</max> </clipto>
+        </summer>
+%s
+%s
+%s
+        <fcs_function name="fcs/fbw/r-stability">
+          <function>
+            <difference>
+              <product><property>velocities/r-rad_sec</property><cos><property>aero/alpha-rad</property></cos></product>
+              <product><property>velocities/p-rad_sec</property><sin><property>aero/alpha-rad</property></sin></product>
+            </difference>
+          </function>
+        </fcs_function>
+        <washout_filter name="fcs/fbw/r-washout">
+          <input>fcs/fbw/r-stability</input>
+          <c1>1.0</c1>
+        </washout_filter>
+        <fcs_function name="fcs/fbw/rudder">
+          <function>
+            <sum>
+              <product><property>fcs/fbw/k-pedal</property><property>fcs/yaw-trim-sum</property></product>
+              <product><value>-1</value><property>fcs/fbw/k-yaw-beta</property>
+                <difference><property>aero/beta-rad</property>
+                  <product><value>%.5f</value><property>fcs/yaw-trim-sum</property></product></difference></product>
+              <product><value>-1</value><property>fcs/fbw/k-yaw-r</property><property>fcs/fbw/r-washout</property></product>
+            </sum>
+          </function>
+          <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
+        </fcs_function>
+        <actuator name="fcs/rudder-actuator">
+          <input>fcs/fbw/rudder</input>
+          <lag>40</lag>
+          <rate_limit>1.4</rate_limit>
+          <output>fcs/rudder-pos-rad</output>
+        </actuator>
+        <!-- the nose wheel steers with the pedals (JSBSim steers from fcs/steer-cmd-norm,
+             positive right; the rudder command is positive left) -->
+        <pure_gain name="fcs/steer-from-rudder">
+          <input>fcs/yaw-trim-sum</input>
+          <gain>-1</gain>
+          <output>fcs/steer-cmd-norm</output>
+        </pure_gain>
+      </channel>""" % (_gain_table("k-yaw-r", fbw, "k_yaw_r"), _gain_table("k-yaw-beta", fbw, "k_yaw_beta"),
+                       _gain_table("k-pedal", fbw, "k_pedal"), rad(o["sideslip_deg"]), -dr, dr))
+    return parts

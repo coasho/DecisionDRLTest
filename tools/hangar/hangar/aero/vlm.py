@@ -2,8 +2,13 @@
 
 Horseshoe vortices (Katz & Plotkin, "Low-Speed Aerodynamics", 12.3): each
 panel carries a bound vortex on its quarter-chord line and two trailing legs
-running aft along +x (a body-fixed wake, as in AVL); flow tangency holds at
-the three-quarter-chord control points, whose normals carry the camber slope.
+that run along the chord to the trailing edge and leave it with the free
+stream; flow tangency holds at the three-quarter-chord control points, whose
+normals carry the camber slope. The wake's direction matters where one
+surface flies in another's wake - a fighter's tail sits in the wing's plane,
+and the wing's wake rises above it with the angle of attack - so the lattice
+is solved for wakes at a set of angles and a flight condition interpolates
+between the two nearest (select()).
 Forces are Kutta-Joukowski on the bound vortices with the local velocity
 (free stream, rotation and every induced velocity), so induced drag and the
 interference between surfaces - the wing's downwash on the tail - come out of
@@ -43,17 +48,32 @@ def _segments(x, p1, p2, rc2):
     return cr * (dot / (FOUR_PI * np.sqrt(cr2 * cr2 + (rc2 * (l0 * l0)[None, :]) ** 2)))[..., None]
 
 
-def _legs(x, p, rc2, width2):
-    """Velocity at x induced by unit semi-infinite vortices from p to +x
-    infinity. Returns (M, N, 3)."""
+def _segments_core(x, p1, p2, core2):
+    """Velocity at points x (M, 3) induced by unit vortex segments p1->p2
+    (N, 3) with a Vatistas core of squared radius core2 (M, N)."""
+    r1 = x[:, None, :] - p1[None, :, :]
+    r2 = x[:, None, :] - p2[None, :, :]
+    r0 = p2 - p1
+    cr = np.cross(r1, r2)
+    cr2 = np.einsum("mnk,mnk->mn", cr, cr)
+    l0 = np.einsum("nk,nk->n", r0, r0)
+    n1 = np.sqrt(np.einsum("mnk,mnk->mn", r1, r1))
+    n2 = np.sqrt(np.einsum("mnk,mnk->mn", r2, r2))
+    dot = np.einsum("nk,mnk->mn", r0, r1 / np.maximum(n1, 1e-12)[..., None] - r2 / np.maximum(n2, 1e-12)[..., None])
+    den = np.sqrt(cr2 * cr2 + (core2 * l0[None, :]) ** 2)
+    return cr * (dot / (FOUR_PI * np.maximum(den, 1e-300)))[..., None]
+
+
+def _legs(x, p, core2, d):
+    """Velocity at x induced by unit semi-infinite vortices from p to
+    infinity along the unit direction d, core of squared radius core2 (M, N).
+    Returns (M, N, 3)."""
     r = x[:, None, :] - p[None, :, :]
-    h2 = r[..., 1] ** 2 + r[..., 2] ** 2
-    nr = np.sqrt(h2 + r[..., 0] ** 2)
-    coef = (1.0 + r[..., 0] / np.maximum(nr, 1e-12)) / (FOUR_PI * np.sqrt(h2 * h2 + (rc2 * width2[None, :]) ** 2))
-    out = np.zeros(r.shape)
-    out[..., 1] = -r[..., 2] * coef   # d x r with d = +x: (0, -rz, ry)
-    out[..., 2] = r[..., 1] * coef
-    return out
+    rd = r @ d
+    nr2 = np.einsum("mnk,mnk->mn", r, r)
+    h2 = np.maximum(nr2 - rd * rd, 0.0)
+    coef = (1.0 + rd / np.maximum(np.sqrt(nr2), 1e-12)) / (FOUR_PI * np.sqrt(h2 * h2 + core2 * core2))
+    return np.cross(d, r) * coef[..., None]
 
 
 def reflect(points, z0):
@@ -62,20 +82,24 @@ def reflect(points, z0):
     return out
 
 
-def horseshoe_velocity(x, a, b, same, chunk=256):
-    """Velocity at points x (M, 3) induced by unit horseshoes a->b with
-    legs to +x (N). `same` (M, N) bool: the point lies on the horseshoe's own
-    surface (a thin core) or on another - there the core is as wide as the
-    horseshoe, so the trailing legs act as the continuous vortex sheet they
-    stand for (whose normal velocity is smooth through the sheet: a tail in
-    the wing's wake plane sees downwash, not the spikes of discrete lines).
-    Returns (M, N, 3)."""
+def horseshoe_velocity(x, a, b, ta, tb, d, same, chunk=256):
+    """Velocity at points x (M, 3) induced by unit horseshoes (N): the bound
+    vortex a->b, its legs along the chord to the trailing edge (ta, tb) and
+    from there to infinity along the unit direction d. `same` (M, N) bool:
+    the point lies on the horseshoe's own surface (a thin core) or on another
+    - there the core is as wide as the horseshoe, so the trailing legs act as
+    the continuous vortex sheet they stand for (whose normal velocity is
+    smooth through the sheet: a tail in the wing's wake sees downwash, not
+    the spikes of discrete lines). Returns (M, N, 3)."""
     width2 = np.einsum("nk,nk->n", b - a, b - a)
     out = np.empty((len(x), len(a), 3))
     for s in range(0, len(x), chunk):
         sl = slice(s, s + chunk)
         rc2 = np.where(same[sl], 0.02**2, 1.0)
-        out[sl] = _segments(x[sl], a, b, rc2) + _legs(x[sl], b, rc2, width2) - _legs(x[sl], a, rc2, width2)
+        core2 = rc2 * width2[None, :]
+        out[sl] = (_segments(x[sl], a, b, rc2)
+                   + _segments_core(x[sl], b, tb, core2) + _legs(x[sl], tb, core2, d)
+                   - _segments_core(x[sl], a, ta, core2) - _legs(x[sl], ta, core2, d))
     return out
 
 
@@ -114,6 +138,8 @@ class Lattice:
         # panels
         self.pa = np.concatenate([d["p_a"].reshape(-1, 3) for _, _, d in rows])
         self.pb = np.concatenate([d["p_b"].reshape(-1, 3) for _, _, d in rows])
+        self.ta = np.concatenate([d["t_a"].reshape(-1, 3) for _, _, d in rows])
+        self.tb = np.concatenate([d["t_b"].reshape(-1, 3) for _, _, d in rows])
         self.cp = np.concatenate([d["cp"].reshape(-1, 3) for _, _, d in rows])
         self.normal = np.concatenate([d["n"].reshape(-1, 3) for _, _, d in rows])
         self.xc = np.concatenate([d["xc"].reshape(-1) for _, _, d in rows])
@@ -158,9 +184,9 @@ def channel_gain(channel, ctrl, u, where):
     aileron positive = left aileron trailing edge down (right roll); rudder
     positive = trailing edge left. A local deflection is positive when the
     trailing edge moves towards -u."""
-    if ctrl is None or ctrl.channel != channel:
+    if ctrl is None or channel not in ctrl.channels:
         return 0.0
-    g = ctrl.gain
+    g = ctrl.channels[channel]
     if channel in ("elevator", "flap"):
         return g * np.sign(u[2]) if abs(u[2]) > 1e-6 else 0.0
     if channel == "aileron":
@@ -171,58 +197,91 @@ def channel_gain(channel, ctrl, u, where):
     return 0.0
 
 
-class VLM:
-    """The lattice solved for unit inputs at one Mach number."""
+# wake angles solved for: 2 deg apart where the wake of a wing crosses a tail
+# near its plane (the tail's load changes fastest there), wider beyond
+WAKE_DEG = (-40.0, -30.0, -20.0, -15.0) + tuple(float(a) for a in range(-10, 21, 2)) + (24.0, 28.0, 32.0, 40.0, 50.0)
 
-    def __init__(self, lattice, mach=0.0):
+
+class VLM:
+    """The lattice solved for unit inputs at one Mach number, for wakes at
+    the angles WAKE_DEG (in the plane of symmetry, from the x axis)."""
+
+    def __init__(self, lattice, mach=0.0, wake_deg=WAKE_DEG):
         L = self.lattice = lattice
         self.mach = mach
         beta = self.beta = np.sqrt(max(1.0 - mach * mach, 0.05))
-        stretch = np.array([1.0 / beta, 1.0, 1.0])
+        self._stretch = np.array([1.0 / beta, 1.0, 1.0])
         ref = L.ref
-        pa = self._pa = (L.pa - ref) * stretch + ref
-        pb = self._pb = (L.pb - ref) * stretch + ref
-        cp = (L.cp - ref) * stretch + ref
-        mid = 0.5 * (pa + pb)
-        same_cp = L.panel_surface[:, None] == L.panel_surface[None, :]
-        vcp = self._velocity(cp, same_cp)
-        self.A = np.einsum("mnk,mk->mn", vcp, L.normal)
-        del vcp
-        self.Ainv = np.linalg.inv(self.A)
-        # induced velocity at every bound-vortex midpoint (forces)
-        self.W = self._velocity(mid, same_cp)
-        self.bound = pb - pa               # stretched bound-vortex vectors
+        st = lambda p: (p - ref) * self._stretch + ref  # noqa: E731
+        self._pa, self._pb, self._ta, self._tb = st(L.pa), st(L.pb), st(L.ta), st(L.tb)
+        self._cp = st(L.cp)
+        self._same_cp = L.panel_surface[:, None] == L.panel_surface[None, :]
+        self.bound = self._pb - self._pa   # stretched bound-vortex vectors
         self.mid = 0.5 * (L.pa + L.pb)     # physical application points
         self.r_mid = self.mid - ref
         self.r_cp = L.cp - ref
-        N = L.normal
-        # unit solutions: free stream (m = x, y, z) and rotation (omega components)
-        self.g_v = self.Ainv @ (-N)                            # (n_p, 3)
-        self.g_w = self.Ainv @ np.cross(self.r_cp, N)          # (n_p, 3)
         # rotating a panel's normal nose-up by d changes it by d (e x n)
-        E = np.cross(L.e[L.strip], N)
-        self.E = E
-        # controls, per channel: the moving panels' normals rotated by the channel's gain
-        self.g_ctrl = {}
+        self.E = np.cross(L.e[L.strip], L.normal)
+        self.wake = np.radians(np.asarray(wake_deg, float))
+        self._sets = [self._solve(aw) for aw in self.wake]
+        self._body_pts = None
+        self._current = None
+        self.select(0.0)
+        # induced velocity at every bound-vortex midpoint (forces), wake along x
+        self.W = self._velocity(st(self.mid), self._same_cp, 0.0)
+
+    def _direction(self, aw):
+        d = np.array([np.cos(aw) / self.beta, 0.0, np.sin(aw)])
+        return d / np.linalg.norm(d)
+
+    def _solve(self, aw):
+        """Every unit solution for a wake at angle aw (rad)."""
+        L = self.lattice
+        vcp = self._velocity(self._cp, self._same_cp, aw)
+        A = np.einsum("mnk,mk->mn", vcp, L.normal)
+        del vcp
+        Ainv = np.linalg.inv(A)
+        N = L.normal
+        out = {"g_v": Ainv @ (-N), "g_w": Ainv @ np.cross(self.r_cp, N), "g_ctrl": {}}
+        E = self.E
         for ch, gain in L.gain.items():
             if not np.any(gain):
                 continue
             D = E * (gain[L.strip] * L.moving)[:, None]
-            self.g_ctrl[ch] = (self.Ainv @ (-D), self.Ainv @ np.cross(self.r_cp, D))
+            out["g_ctrl"][ch] = (Ainv @ (-D), Ainv @ np.cross(self.r_cp, D))
         # decambering: strip k's panels rotated nose-down by Delta_k
         n_s, n_p = L.n_strips, L.n_panels
-        self.dec_v = np.empty((3, n_p, n_s))
-        self.dec_w = np.empty((3, n_p, n_s))
+        dec_v = np.empty((3, n_p, n_s))
+        dec_w = np.empty((3, n_p, n_s))
         rxE = np.cross(self.r_cp, E)
         for m in range(3):
             Bv = np.zeros((n_p, n_s))
             Bw = np.zeros((n_p, n_s))
             Bv[np.arange(n_p), L.strip] = E[:, m]
             Bw[np.arange(n_p), L.strip] = -rxE[:, m]
-            self.dec_v[m] = self.Ainv @ Bv
-            self.dec_w[m] = self.Ainv @ Bw
-        self.S_dec_v = np.einsum("sp,mpk->msk", L.S, self.dec_v)
-        self.S_dec_w = np.einsum("sp,mpk->msk", L.S, self.dec_w)
+            dec_v[m] = Ainv @ Bv
+            dec_w[m] = Ainv @ Bw
+        out["dec_v"], out["dec_w"] = dec_v, dec_w
+        out["S_dec_v"] = np.einsum("sp,mpk->msk", L.S, dec_v)
+        out["S_dec_w"] = np.einsum("sp,mpk->msk", L.S, dec_w)
+        out["W_strip"] = self._strip_influence(aw)
+        return out
+
+    def select(self, alpha_w):
+        """Make the operators those of a wake at alpha_w (rad; clipped to the
+        solved range), interpolated between the two nearest solved angles."""
+        aw = float(np.clip(alpha_w, self.wake[0], self.wake[-1]))
+        if self._current is not None and abs(aw - self._current) < 1e-9:
+            return
+        i = int(np.clip(np.searchsorted(self.wake, aw) - 1, 0, len(self.wake) - 2))
+        t = (aw - self.wake[i]) / (self.wake[i + 1] - self.wake[i])
+        a, b = self._sets[i], self._sets[i + 1]
+        mix = lambda k: a[k] if t <= 0.0 else (b[k] if t >= 1.0 else (1.0 - t) * a[k] + t * b[k])  # noqa: E731
+        for k in ("g_v", "g_w", "dec_v", "dec_w", "S_dec_v", "S_dec_w", "W_strip"):
+            setattr(self, k, mix(k))
+        self.g_ctrl = {ch: tuple((1.0 - t) * a["g_ctrl"][ch][j] + t * b["g_ctrl"][ch][j] for j in range(2)) for ch in a["g_ctrl"]}
+        self.body_W = mix("body_W") if "body_W" in a else None
+        self._current = aw
 
     # -- a condition ----------------------------------------------------------------------------
     def circulation(self, v, w, deflections=None, decamber=None):
@@ -252,45 +311,61 @@ class VLM:
 
     def forces(self, gamma, v, w, rho=1.0):
         """Kutta-Joukowski force on every bound vortex (n_p, 3) and the total
-        force and moment about the reference point."""
+        force and moment about the reference point (wake along x)."""
         vel = self.air_velocity(self.mid, v, w) + np.einsum("mnk,n->mk", self.W, gamma)
         f = rho * gamma[:, None] * np.cross(vel, self.bound)
         return f, f.sum(axis=0), np.cross(self.r_mid, f).sum(axis=0)
 
-    def _velocity(self, pts, same):
+    def _velocity(self, pts, same, aw):
         """Influence of every horseshoe (and the images of reflected fins) at
-        stretched points."""
+        stretched points, the wake at angle aw."""
         L = self.lattice
-        out = horseshoe_velocity(pts, self._pa, self._pb, same)
+        d = self._direction(aw)
+        out = horseshoe_velocity(pts, self._pa, self._pb, self._ta, self._tb, d, same)
+        di = d * np.array([1.0, 1.0, -1.0])
         for si, refl in L.reflect.items():
             if refl is None:
                 continue
             z0, k = refl
             idx = np.flatnonzero(L.panel_surface == si)
             # the image of horseshoe a->b is b'->a': its legs turn the other way
-            img = horseshoe_velocity(pts, reflect(self._pb[idx], z0), reflect(self._pa[idx], z0), same[:, idx])
+            img = horseshoe_velocity(pts, reflect(self._pb[idx], z0), reflect(self._pa[idx], z0),
+                                     reflect(self._tb[idx], z0), reflect(self._ta[idx], z0), di, same[:, idx])
             out[:, idx] += k * img
         return out
 
-    def strip_influence(self):
+    def _strip_influence(self, aw):
         """Velocity at every strip's quarter-chord point per unit circulation of
         every horseshoe, (n_s, n_p, 3) - without the strip's own bound
         vortices, whose effect is the two-dimensional one its section polar
         already carries. What is left is the strip's induced (3D) flow."""
         L = self.lattice
-        stretch = np.array([1.0 / self.beta, 1.0, 1.0])
-        pts = (L.c4 - L.ref) * stretch + L.ref
+        pts = (L.c4 - L.ref) * self._stretch + L.ref
         same = L.surface_index[:, None] == L.panel_surface[None, :]
-        W = self._velocity(pts, same)
+        W = self._velocity(pts, same, aw)
         for k in range(L.n_strips):
             idx = np.flatnonzero(L.strip == k)
             W[k, idx] -= _segments(pts[k : k + 1], self._pa[idx], self._pb[idx], np.full((1, len(idx)), 0.02**2))[0]
         return W
 
+    def strip_influence(self):
+        return self.W_strip
+
+    def set_body_points(self, points):
+        """Points off the lattice (bodies) whose induced velocity select()
+        interpolates as well (body_W, (M, n_p, 3), wide cores)."""
+        L = self.lattice
+        pts = (points - L.ref) * self._stretch + L.ref
+        same = np.zeros((len(points), L.n_panels), bool)
+        for s_, aw in zip(self._sets, self.wake):
+            s_["body_W"] = self._velocity(pts, same, aw)
+        self._current = None
+        self.select(0.0)
+
     def influence(self, points):
         """Velocity at points per unit circulation of every horseshoe,
-        (M, n_p, 3) - for points off the lattice (bodies), wide cores."""
+        (M, n_p, 3) - for points off the lattice (bodies), wide cores, wake
+        along x."""
         L = self.lattice
-        stretch = np.array([1.0 / self.beta, 1.0, 1.0])
-        pts = (points - L.ref) * stretch + L.ref
-        return self._velocity(pts, np.zeros((len(points), L.n_panels), bool))
+        pts = (points - L.ref) * self._stretch + L.ref
+        return self._velocity(pts, np.zeros((len(points), L.n_panels), bool), 0.0)

@@ -1,0 +1,228 @@
+# General Dynamics F-16C Block 52, built by hangar from public data - the
+# fighter reference: NASA TP-1538 (Nguyen et al., 1979) measured its
+# aerodynamics in the wind tunnel from -20 to 90 degrees angle of attack, and
+# JSBSim's own f16 is built on those tables, so every coefficient here can be
+# checked against measurement.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: NASA TP-1538 (reference geometry: S = 300 ft2, b = 30 ft,
+# c = 11.32 ft, moments about 0.35 c; inertia at 20,500 lb), Jane's All the
+# World's Aircraft (dimensions, weights, performance), Stevens & Lewis,
+# "Aircraft Control and Simulation" (the NASA model), Pratt & Whitney
+# (F100-PW-229).
+
+[aircraft]
+name = "f16c"
+description = "General Dynamics F-16C Block 52 Fighting Falcon (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 250.0                # m/s: the Reynolds numbers (cruise, 3 000 m)
+
+# The reference wing of NASA TP-1538: a trapezoid to the centre line, 40 deg
+# leading edge, unswept trailing edge, taper 0.2275 - root 16.29 ft, tip
+# 3.71 ft at 15 ft: its MAC is the report's 11.32 ft. Placed with 0.35 MAC
+# (the moment reference) at 8.03 m, JSBSim's f16 layout.
+[[surface]]
+name = "wing"
+kind = "wing"
+airfoil = "naca64a204"
+sections = [
+  { le = [5.300, 0.000, 0.000], chord = 4.965 },
+  { le = [9.136, 4.572, 0.000], chord = 1.131 },
+]
+controls = [
+  # flaperons: ailerons that also drop 20 deg as flaps
+  { name = "flaperon", channel = "aileron", mix = { flap = 1.0 }, span = [0.17, 0.62], chord_fraction = 0.22, limits = [-21.5, 21.5] },
+]
+
+# Leading-edge extensions (strakes): sharp, 77 deg of sweep, from beside the
+# canopy (x 2.8 m, at the fuselage side) out to the wing's leading edge. The
+# part inside the fuselage carries the strakes' lift across, as the wing's
+# does.
+[[surface]]
+name = "strake"
+kind = "strake"
+airfoil = "plate"
+sections = [
+  { le = [2.800, 0.000, 0.000], chord = 2.500 },
+  { le = [2.800, 0.450, 0.000], chord = 2.878 },
+  { le = [6.369, 1.274, 0.000], chord = 0.050 },
+]
+
+# All-moving stabilator, 10 deg anhedral: 63.7 ft2 exposed (the part inside
+# the fuselage carries its lift across); the tail arm puts 0.25 of its MAC
+# 16.46 ft behind the moment reference, as in the report.
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a006"
+sections = [
+  { le = [11.320, 0.000, 0.082], chord = 2.751 },
+  { le = [13.661, 2.790, -0.410], chord = 0.700 },
+]
+controls = [
+  # the exposed panels turn whole about a spindle; they also roll the
+  # aircraft, differentially (the F-16's roll mixer: 5.4 deg at full aileron)
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.25 }, span = [0.27, 1.0], chord_fraction = 1.0, pivot = 0.30, limits = [-25, 25] },
+]
+
+# Fin: 54.75 ft2, 47.5 deg leading edge; its tip sets the 5.09 m overall height
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a008"
+sections = [
+  { le = [10.850, 0.000, 0.550], chord = 2.650 },
+  { le = [13.905, 0.000, 3.350], chord = 1.150 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.08, 0.72], chord_fraction = 0.30, limits = [-30, 30] },
+]
+
+# Ventral fins under the engine bay, canted outboard
+[[surface]]
+name = "ventral"
+kind = "fin"
+mirror = true
+airfoil = "plate"
+sections = [
+  { le = [11.400, 0.450, -0.600], chord = 1.100 },
+  { le = [11.800, 0.620, -1.020], chord = 0.550 },
+]
+
+# Fuselage with the ventral intake: a deeper section from the intake lip
+# (4.4 m) back to the engine face.
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = 0.020, bottom = 0.020 },
+  { x = 0.50, w = 0.42, top = 0.220, bottom = -0.180, n = 2.0 },
+  { x = 1.50, w = 0.80, top = 0.400, bottom = -0.340, n = 2.0 },
+  { x = 2.60, w = 0.90, top = 0.520, bottom = -0.460, n = 2.2 },
+  { x = 3.60, w = 0.94, top = 0.580, bottom = -0.520, n = 2.3 },
+  { x = 4.30, w = 1.02, top = 0.600, bottom = -0.620, n = 2.4 },
+  { x = 4.70, w = 1.10, top = 0.620, bottom = -1.000, n = 2.5 },
+  { x = 6.00, w = 1.24, top = 0.620, bottom = -1.060, n = 2.6 },
+  { x = 8.00, w = 1.32, top = 0.620, bottom = -1.040, n = 2.6 },
+  { x = 9.50, w = 1.32, top = 0.610, bottom = -0.900, n = 2.5 },
+  { x = 11.00, w = 1.24, top = 0.580, bottom = -0.620, n = 2.4 },
+  { x = 12.50, w = 1.12, top = 0.540, bottom = -0.520, n = 2.2 },
+  { x = 14.00, w = 1.02, top = 0.500, bottom = -0.480, n = 2.0 },
+  { x = 15.03, w = 0.86, top = 0.430, bottom = -0.430, n = 2.0 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 2.90, w = 0.00, top = 0.560, bottom = 0.540 },
+  { x = 3.30, w = 0.52, top = 0.950, bottom = 0.500, n = 2.0 },
+  { x = 4.20, w = 0.66, top = 1.080, bottom = 0.520, n = 2.0 },
+  { x = 5.20, w = 0.60, top = 1.000, bottom = 0.550, n = 2.0 },
+  { x = 6.20, w = 0.30, top = 0.680, bottom = 0.580, n = 2.0 },
+]
+
+[[engine]]
+name = "F100-PW-229"
+type = "turbofan"
+thrust_dry_kn = 79.2          # 17,800 lbf military
+thrust_wet_kn = 129.4         # 29,100 lbf afterburner
+bypass_ratio = 0.36
+tsfc_dry = 0.74
+tsfc_wet = 2.05
+throttle_ratio = 1.07
+design_mach = 2.0
+position = [11.300, 0.0, -0.050]
+mass = 1740                   # 3,836 lb dry
+[engine.nozzle]
+position = [15.030, 0.0, -0.020]
+
+[[gear]]
+name = "Nose Gear"
+position = [4.850, 0.0, -1.740]
+steerable = true
+max_steer = 32
+wheel_diameter = 0.46
+wheel_width = 0.15
+retractable = true
+static_deflection = 0.12
+attach = [4.850, 0.0, -1.000]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [8.850, 1.180, -1.740]
+wheel_diameter = 0.70
+wheel_width = 0.20
+retractable = true
+static_deflection = 0.14
+attach = [8.700, 0.600, -0.900]
+
+[reference]
+aero_point = [8.030, 0.0, 0.0]     # 0.35 MAC: NASA TP-1538's moment reference
+
+# The F-16's flight control system: +9 / -3 g, the angle of attack held to
+# 25 deg (its real limiter varies 20-26 deg with load factor), roll rate to
+# 308 deg/s
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.0
+alpha_max_deg = 25.0
+roll_rate_deg_s = 308.0
+
+[mass]
+empty = 8670                  # 19,100 lb, F-16C Block 52
+empty_cg = [8.000, 0.0, 0.000]
+[mass.component]              # kg, from published weight statements (rounded)
+wing = 1000
+strake = 60
+htail = 280
+fin = 170
+ventral = 30
+fuselage = 2400
+canopy = 150
+"Nose Gear" = 110
+"Main Gear" = 520
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [4.300, 0.0, 0.550]
+[[mass.payload]]
+name = "gun ammunition"
+mass = 150
+position = [6.500, -0.600, 0.200]
+[[mass.tank]]
+name = "forward fuselage"
+position = [6.500, 0.0, 0.100]
+capacity = 1000
+[[mass.tank]]
+name = "aft fuselage"
+position = [9.300, 0.0, 0.100]
+capacity = 1335
+[[mass.tank]]
+name = "left wing"
+position = [8.200, -2.000, 0.000]
+capacity = 420
+[[mass.tank]]
+name = "right wing"
+position = [8.200, 2.000, 0.000]
+capacity = 420
+
+[targets]
+# F-16C Block 50/52, clean, published (USAF fact sheet; Jane's; Lockheed Martin)
+max_mach = 2.05               # at altitude, full afterburner (calibrates the wave drag)
+max_mach_altitude_ft = 40000
+max_speed_ktas = 795          # Mach 1.2 at sea level
+climb_rate_fpm = 50000
+service_ceiling_ft = 50000
+sustained_turn_deg_s = 13.5   # Mach 0.9 at 15,000 ft (energy-maneuverability charts, about 7 g)
+# JSBSim's own f16 (NASA TP-1538 aerodynamics, JSBSim's F100-PW-229 deck) flies
+# the same tests alongside
+reference = "jsbsim:f16"
+# JSBSim's f16 multiplies Stevens & Lewis's aileron and rudder tables - given
+# per 20 and 30 deg of deflection - by the deflection in radians: its roll and
+# yaw control power are 1/2.865 and 1/1.910 of NASA's
+reference_control_scale = { aileron = 2.865, rudder = 1.910 }

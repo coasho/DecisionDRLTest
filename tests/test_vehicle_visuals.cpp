@@ -122,7 +122,25 @@ TEST_CASE("control surface names parse, and anything else is left alone", "[rend
     REQUIRE(j.gain == -0.5);
     REQUIRE(Joint::parse("fsim:flap", j));
     REQUIRE(j.channel == Joint::Flaps);
+    REQUIRE(j.mix.empty());
+    // a stabilator that rolls too, a flaperon
+    REQUIRE(Joint::parse("fsim:elevator+aileron:-0.25", j));
+    REQUIRE(j.channel == Joint::Elevator);
+    REQUIRE(j.gain == 1.0);
+    REQUIRE(j.mix.size() == 1);
+    REQUIRE(j.mix[0].first == Joint::Aileron);
+    REQUIRE(j.mix[0].second == -0.25);
+    REQUIRE(Joint::parse("fsim:aileron+flaps:-1", j));
+    REQUIRE(j.mix.size() == 1);
+    sim::VehicleState s;
+    s.aileronRad = 0.1;
+    s.flapsRad = 0.3;
+    j.rest = vsg::dmat4();
+    const vsg::dmat4 m = j.matrix(s); // turned by 0.1 - 0.3 about x
+    REQUIRE(std::abs(std::atan2(m[1][2], m[1][1]) - (-0.2)) < 1e-12);
     REQUIRE_FALSE(Joint::parse("fsim:canopy", j));
     REQUIRE_FALSE(Joint::parse("fsim:rudder:x", j));
+    REQUIRE_FALSE(Joint::parse("fsim:elevator+", j));
+    REQUIRE_FALSE(Joint::parse("fsim:elevator+canopy", j));
     REQUIRE_FALSE(Joint::parse("elevator", j));
 }

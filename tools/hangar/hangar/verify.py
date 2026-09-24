@@ -38,24 +38,34 @@ class TableModel:
     def __init__(self, tables):
         self.t = tables
 
-    def evaluate(self, alpha_deg, beta_deg, p=0.0, q=0.0, r=0.0, adot=0.0, controls_deg=None):
-        """p, q, r, adot non-dimensional (p b/2V, ...); controls in degrees."""
+    def evaluate(self, alpha_deg, beta_deg, p=0.0, q=0.0, r=0.0, adot=0.0, controls_deg=None, mach=0.0, cl2=None):
+        """p, q, r, adot non-dimensional (p b/2V, ...); controls in degrees;
+        cl2: the lift coefficient squared the induced-drag terms use (JSBSim:
+        the last step's; default: this state's)."""
         t = self.t
         a, b = t["alpha"], t["beta"]
+        mt = t.get("mach")
+        K = (lambda key: float(np.interp(mach, mt["mach"], mt[key]))) if mt is not None else (lambda key: 1.0 if key[0] == "K" else 0.0)
         out = {k: _interp2(a, b, t["base"][k], alpha_deg, beta_deg) for k in COEFFS}
+        cl_base = out["CL"]
+        out["CL"] *= K("K_L")
+        for k in ("CY", "Cl", "Cn"):
+            out[k] *= K("K_Y")
+        out["Cm"] += cl_base * K("dCm_dCL")
         for ch, d in (controls_deg or {}).items():
             if ch not in t["controls"]:
                 continue
             tab = t["controls"][ch]
             for k in tab:
                 if k != "deflection":
-                    out[k] += _interp2(a, tab["deflection"], tab[k], alpha_deg, d)
+                    out[k] += _interp2(a, tab["deflection"], tab[k], alpha_deg, d) * K("K_" + ch)
         for rate, val in (("p", p), ("r", r), ("q", q)):
             for k, data in t["rates"][rate].items():
                 if k != "CD":
-                    out[k] += float(np.interp(alpha_deg, a, data)) * val
-        out["CL"] += t["alphadot"]["CL"] * adot
-        out["Cm"] += t["alphadot"]["Cm"] * adot
+                    out[k] += float(np.interp(alpha_deg, a, data)) * val * K("K_L")
+        out["CL"] += t["alphadot"]["CL"] * adot * K("K_L")
+        out["Cm"] += t["alphadot"]["Cm"] * adot * K("K_L")
+        out["CD"] += K("dCD0") + (out["CL"] ** 2 if cl2 is None else cl2) * K("dK")
         return out
 
 
@@ -85,7 +95,8 @@ def sample_states(f, n=120, seed=3, seconds=0.6):
             "p": g("velocities/p-aero-rad_sec"), "q": g("velocities/q-aero-rad_sec"), "r": g("velocities/r-aero-rad_sec"),
             "adot": g("aero/alphadot-rad_sec"), "qbar": g("aero/qbar-psf") * PSF,
             "de": g("fcs/elevator-pos-deg"), "da": g("fcs/left-aileron-pos-deg"), "dr": g("fcs/rudder-pos-deg"),
-            "df": g("fcs/flap-pos-deg"), "hb": g("aero/h_b-mac-ft"),
+            "df": g("fcs/flap-pos-deg"), "hb": g("aero/h_b-mac-ft"), "mach": g("velocities/mach"),
+            "cl2": g("aero/cl-squared"),
             "F": np.array([g("forces/fbx-aero-lbs"), g("forces/fby-aero-lbs"), g("forces/fbz-aero-lbs")]) * LBF,
             "M": np.array([g("moments/l-aero-lbsft"), g("moments/m-aero-lbsft"), g("moments/n-aero-lbsft")]) * LBF * FT,
             "cg": np.array([g("inertia/cg-x-in"), g("inertia/cg-y-in"), g("inertia/cg-z-in")]) * 0.0254,
@@ -107,7 +118,7 @@ def compare(rows, tables, aircraft, model=None):
         V = max(s["vt"], 1.0)
         nd = dict(p=s["p"] * b / (2 * V), q=s["q"] * c / (2 * V), r=s["r"] * b / (2 * V), adot=s["adot"] * c / (2 * V))
         ctl = {"elevator": s["de"], "aileron": s["da"], "rudder": s["dr"], "flap": s["df"]}
-        coef = tm.evaluate(math.degrees(s["alpha"]), math.degrees(s["beta"]), controls_deg=ctl, **nd)
+        coef = tm.evaluate(math.degrees(s["alpha"]), math.degrees(s["beta"]), controls_deg=ctl, mach=s["mach"], cl2=s["cl2"], **nd)
         F, M = body_forces(coef, s["alpha"], s["beta"], s["qbar"], S, b, c)
         # JSBSim's moments are about the CG: move ours from the aero reference point
         d = arp - s["cg"]

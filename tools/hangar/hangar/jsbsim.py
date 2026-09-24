@@ -51,6 +51,28 @@ def _function(name, description, factors, table, indent=6):
             % (pad, name, pad, description, pad, props, table, pad, pad))
 
 
+MACH_LIFT, MACH_SIDE, MACH_DCM = "aero/function/mach-lift", "aero/function/mach-side", "aero/function/mach-dCm-dCL"
+MACH_CD0, MACH_DK = "aero/function/mach-dCD0", "aero/function/mach-dK"
+CL_COEFFICIENT = "aero/function/CL-base"
+
+
+def _mach_function(name, description, mach, values):
+    rows = "\n".join("            %8.3f %12.6f" % (m, v) for m, v in zip(mach, values))
+    return """      <function name="%s">
+        <description>%s</description>
+        <table>
+          <independentVar lookup="row">velocities/mach</independentVar>
+          <tableData>
+%s
+          </tableData>
+        </table>
+      </function>""" % (name, description, rows)
+
+
+def mach_channel(ch):
+    return "aero/function/mach-" + ch
+
+
 def aerodynamics_xml(tables, aircraft, ge_e=0.85):
     """The <aerodynamics> element from the tables (tables.build)."""
     a = tables["alpha"]
@@ -59,19 +81,51 @@ def aerodynamics_xml(tables, aircraft, ge_e=0.85):
     qs = ["aero/qbar-psf", "metrics/Sw-sqft"]
     ge = tables["ground_effect"]
     ge_lift = _table1(ge["h_b"], ge["lift"], "aero/h_b-mac-ft", 8)
+    mt = tables.get("mach")
+    pre = []
+    if mt is not None:
+        m = mt["mach"]
+        pre.append(_mach_function(MACH_LIFT, "lift, and damping, over its low-speed value (hangar: aero/mach.py)", m, mt["K_L"]))
+        pre.append(_mach_function(MACH_SIDE, "side force, rolling and yawing moment over their low-speed values", m, mt["K_Y"]))
+        pre.append(_mach_function(MACH_DCM, "pitching moment per unit low-speed lift: the neutral point's move", m, mt["dCm_dCL"]))
+        pre.append(_mach_function(MACH_CD0, "zero-lift drag's change: friction and wave drag", m, mt["dCD0"]))
+        pre.append(_mach_function(MACH_DK, "induced-drag factor's change (per CL^2)", m, mt["dK"]))
+        for ch in tables["controls"]:
+            pre.append(_mach_function(mach_channel(ch), "%s power over its low-speed value" % ch, m, mt["K_" + ch]))
+        pad = " " * 6
+        pre.append("%s<function name=\"%s\">\n%s  <description>CL over alpha and beta at low speed</description>\n%s\n%s</function>"
+                   % (pad, CL_COEFFICIENT, pad, _table2(a, b, tables["base"]["CL"], "aero/alpha-deg", "aero/beta-deg", 8), pad))
+    lift_k = [MACH_LIFT] if mt is not None else []
+    side_k = [MACH_SIDE] if mt is not None else []
     for k, axis in AXES.items():
         factors = qs + ([REF_LENGTH[k]] if k in REF_LENGTH else [])
+        if k == "CL" and mt is not None:
+            out[axis].append(_function("CL_base", "CL over alpha and beta, ground effect, compressibility (hangar)",
+                                       factors + [CL_COEFFICIENT, MACH_LIFT], ge_lift))
+            continue
         tab = _table2(a, b, tables["base"][k], "aero/alpha-deg", "aero/beta-deg", 8)
         if k == "CL":
             tab = tab + "\n" + ge_lift
         out[axis].append(_function("%s_base" % k, "%s over alpha and beta%s (hangar)" % (k, ", ground effect" if k == "CL" else ""),
-                                   factors, tab))
+                                   factors + (side_k if k in ("CY", "Cl", "Cn") else []), tab))
+    if mt is not None:
+        pad = " " * 6
+        props = "\n".join("%s    <property>%s</property>" % (pad, f)
+                           for f in qs + [REF_LENGTH["Cm"], CL_COEFFICIENT, MACH_DCM])
+        out["PITCH"].append("%s<function name=\"aero/coefficient/Cm_mach\">\n%s  <description>Cm from the neutral point's move with Mach"
+                            "</description>\n%s  <product>\n%s\n%s  </product>\n%s</function>" % (pad, pad, pad, props, pad, pad))
+        for name, desc, fs in (("CD_mach", "zero-lift drag's change with Mach: friction, wave drag", qs + [MACH_CD0]),
+                               ("CD_induced_mach", "induced drag's change with Mach (leading-edge suction lost)",
+                                qs + ["aero/cl-squared", MACH_DK])):
+            props = "\n".join("%s    <property>%s</property>" % (pad, f) for f in fs)
+            out["DRAG"].append("%s<function name=\"aero/coefficient/%s\">\n%s  <description>%s</description>\n"
+                               "%s  <product>\n%s\n%s  </product>\n%s</function>" % (pad, name, pad, desc, pad, props, pad, pad))
     for ch, t in tables["controls"].items():
         prop = CHANNEL_PROPERTY[ch]
         for k in t:
             if k == "deflection":
                 continue
-            factors = qs + ([REF_LENGTH[k]] if k in REF_LENGTH else [])
+            factors = qs + ([REF_LENGTH[k]] if k in REF_LENGTH else []) + ([mach_channel(ch)] if mt is not None else [])
             tab = _table2(a, t["deflection"], t[k], "aero/alpha-deg", prop, 8)
             if k == "CL" and ch == "flap":
                 tab = tab + "\n" + ge_lift
@@ -82,12 +136,12 @@ def aerodynamics_xml(tables, aircraft, ge_e=0.85):
         for k, data in ks.items():
             if k == "CD":
                 continue
-            factors = qs + ([REF_LENGTH[k]] if k in REF_LENGTH else []) + list(rate_prop[rate])
+            factors = qs + ([REF_LENGTH[k]] if k in REF_LENGTH else []) + list(rate_prop[rate]) + lift_k
             out[AXES[k]].append(_function("%s%s" % (k, rate), "%s per %s (non-dimensional), over alpha" % (k, rate), factors,
                                           _table1(a, data, "aero/alpha-deg", 8)))
     ad = tables["alphadot"]
     for k in ("CL", "Cm"):
-        factors = qs + ([REF_LENGTH[k]] if k in REF_LENGTH else []) + ["aero/ci2vel", "aero/alphadot-rad_sec", "value:%.5f" % ad[k]]
+        factors = qs + ([REF_LENGTH[k]] if k in REF_LENGTH else []) + ["aero/ci2vel", "aero/alphadot-rad_sec", "value:%.5f" % ad[k]] + lift_k
         pad = " " * 6
         props = "\n".join("%s    <property>%s</property>" % (pad, f) if not f.startswith("value:") else "%s    <value>%s</value>" % (pad, f[6:])
                           for f in factors)
@@ -102,7 +156,7 @@ def aerodynamics_xml(tables, aircraft, ge_e=0.85):
                        "%s    <property>aero/cl-squared</property>\n%s    <value>%.5f</value>\n%s\n%s  </product>\n%s</function>"
                        % (pad, pad, pad, pad, pad, pad, pad, 1.0 / (math.pi * A * ge_e),
                           _table1(ge["h_b"], ge_drag, "aero/h_b-mac-ft", 8), pad, pad))
-    parts = ["    <aerodynamics>"]
+    parts = ["    <aerodynamics>"] + ["\n".join("  " + line for line in f.split("\n")) for f in pre]
     for axis in ("DRAG", "SIDE", "LIFT", "ROLL", "PITCH", "YAW"):
         parts.append("      <axis name=\"%s\">" % axis)
         parts.extend("\n".join("  " + line for line in f.split("\n")) for f in out[axis])
@@ -208,6 +262,8 @@ def structure_points(aircraft, directions=1500, depth=0.02):
         verts.append(v)
         labels += [name] * len(v)
     for e in aircraft.engines:
+        if not e.has_propeller:
+            continue
         _, pitch, yaw = e.prop_orient
         axis = np.array([np.cos(pitch) * np.cos(yaw), np.cos(pitch) * np.sin(yaw), -np.sin(pitch)])
         a = np.cross(axis, [0.0, 0.0, 1.0])
@@ -303,11 +359,14 @@ def structure_contacts(aircraft, mass_model):
     return out
 
 
-def flight_control_xml(aircraft):
-    ch = {c.channel: c for _, c in aircraft.controls()}
-    lim = {k: (min(c.min_deg for _, c in aircraft.controls() if c.channel == k),
-               max(c.max_deg for _, c in aircraft.controls() if c.channel == k)) for k in ch}
+def flight_control_xml(aircraft, fbw=None):
+    ch = set(aircraft.channels())
+    lim = {k: aircraft.channel_limits(k) for k in ch}
     parts = ["    <flight_control name=\"%s\">" % aircraft.name]
+    if fbw is not None:
+        from .fcs import channels_xml
+        parts.extend(channels_xml(aircraft, fbw))
+        ch = ch - {"elevator", "aileron", "rudder"}
     if "elevator" in ch:
         lo, hi = lim["elevator"]
         parts.append("""      <channel name="Pitch">
@@ -391,6 +450,26 @@ def flight_control_xml(aircraft):
           <output>fcs/flap-pos-deg</output>
         </kinematic>
       </channel>""" % settings)
+    # the throttle lever of an afterburning turbofan: military power at the
+    # detent (80 %), the afterburner above it - JSBSim's turbine (augmethod 2)
+    # takes positions 1..2 for that
+    for i, (e, _) in enumerate(_engine_units(aircraft)):
+        if e.type == "turbofan" and e.thrust_wet_kn:
+            parts.append("""      <channel name="Throttle %d">
+        <fcs_function name="fcs/throttle-lever-%d">
+          <function>
+            <table>
+              <independentVar lookup="row">fcs/throttle-cmd-norm[%d]</independentVar>
+              <tableData>
+                0.0  0.0
+                0.8  1.0
+                1.0  2.0
+              </tableData>
+            </table>
+          </function>
+          <output>fcs/throttle-pos-norm[%d]</output>
+        </fcs_function>
+      </channel>""" % (i, i, i, i))
     pistons = sum(len(e.copies()) for e in aircraft.engines if e.type == "piston")
     if pistons:
         # JSBSim's piston engine dies of a rich mixture at altitude: lean it with
@@ -425,12 +504,17 @@ def flight_control_xml(aircraft):
     return "\n".join(parts)
 
 
+def _engine_units(aircraft):
+    """Every engine JSBSim sees, in its order: (engine, copy name)."""
+    return [(e, name) for e in aircraft.engines for name, _, _, _ in e.copies()]
+
+
 def propulsion_xml(aircraft, mass_model, engine_files):
     parts = ["    <propulsion>"]
     n_tanks = len(mass_model.tanks)
     for e, (eng_file, prop_file) in zip(aircraft.engines, engine_files):
         for name, pos, prop, sense in e.copies():
-            feeds = "\n".join("        <feed>%d</feed>" % i for i in range(n_tanks)) if e.type == "piston" else ""
+            feeds = "\n".join("        <feed>%d</feed>" % i for i in range(n_tanks)) if e.type in ("piston", "turbofan") else ""
             orient = np.degrees(e.prop_orient)
             parts.append("""      <engine file="%s">
         <location unit="M">
@@ -442,10 +526,10 @@ def propulsion_xml(aircraft, mass_model, engine_files):
 %s
           </location>
           <orient unit="DEG"> <roll>%.2f</roll> <pitch>%.2f</pitch> <yaw>%.2f</yaw> </orient>
-          <sense>%d</sense>
+%s
         </thruster>
       </engine>""" % (eng_file, _loc(pos, 10), feeds, prop_file, _loc(prop, 12), orient[0], orient[1], orient[2],
-                      -1 if sense == "cw" else 1))
+                      "" if e.type == "turbofan" else "          <sense>%d</sense>" % (-1 if sense == "cw" else 1)))
     for t in mass_model.tanks:
         cap = float(t.get("capacity", 0.0))
         parts.append("""      <tank type="FUEL">
@@ -459,7 +543,7 @@ def propulsion_xml(aircraft, mass_model, engine_files):
     return "\n".join(parts)
 
 
-def aircraft_xml(aircraft, tables, mass_model, engine_files, notes=""):
+def aircraft_xml(aircraft, tables, mass_model, engine_files, notes="", fbw=None):
     e = mass_model.empty()
     a = aircraft
     htail = [s for s in a.surfaces if s.kind == "htail"]
@@ -526,5 +610,5 @@ def aircraft_xml(aircraft, tables, mass_model, engine_files, notes=""):
     </mass_balance>
 """ % (e["ixx"], e["iyy"], e["izz"], e["ixy"], e["ixz"], e["iyz"], e["mass"], _loc(e["cg"], 8), points)
     return "".join([header, metrics, mass, ground_reactions_xml(a, mass_model), "\n",
-                    propulsion_xml(a, mass_model, engine_files), "\n", flight_control_xml(a), "\n",
+                    propulsion_xml(a, mass_model, engine_files), "\n", flight_control_xml(a, fbw), "\n",
                     aerodynamics_xml(tables, a), "\n</fdm_config>\n"])

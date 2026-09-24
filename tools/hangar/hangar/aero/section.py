@@ -23,6 +23,17 @@ attached regime hands over to the plate; its sharpness follows the stall type
 Trailing-edge flaps enter as thin-airfoil increments (Glauert's flap
 effectiveness tau) reduced at large deflections (DATCOM's K' trend), with the
 drag increment of Raymer 12.61 and a matching change of maximum lift.
+
+Swept thin sections (fighters' wings, strakes, canards) do not stall that
+way: past the attached-flow limit the flow leaves the leading edge and rolls
+up into a vortex over the surface. Those sections have a vortex regime in
+place of the stall (Polhamus' leading-edge suction analogy, NASA TN D-3767,
+1966): the circulation keeps its potential value a0 sin(alpha); the suction
+it would carry at the leading edge, cl sin(alpha), is lost as the edge
+separates - and reappears as normal force, the vortex lift, in the
+proportion the aerodynamic model passes in (it depends on the sweep, and on
+whether the vortex has burst: model.py). Past about 45 deg the regime hands
+over to the flat plate.
 """
 import math
 
@@ -94,9 +105,13 @@ class SectionPolar:
     and Mach number, for any angle of attack and flap deflection."""
 
     def __init__(self, foil, re=5e6, mach=0.0, aspect_ratio=8.0, laminar=0.0, overrides=None,
-                 flap_chord=None, flap_kind="plain"):
+                 flap_chord=None, flap_kind="plain", vortex=False):
         o = overrides or {}
         self.foil = foil
+        self.vortex = 0.0                      # set below: the clip levels are the attached polar's
+        # the suction a leading edge can hold, as a fraction of what it carries at
+        # the attached-flow limit: none for a sharp edge, all for a round one
+        self.suction_k = float(np.clip((foil.leading_edge_sharpness - 0.4) / 0.8, 0.0, 1.0))
         t = foil.thickness_ratio
         self.re = re
         self.alpha0, self.cm0_thin = thin_airfoil(foil)
@@ -153,11 +168,13 @@ class SectionPolar:
         for _ in range(4):
             self._clmax_int += self.clmax - self.evaluate(hi)[0].max()
             self._clmin_int += self.clmin - self.evaluate(lo)[0].min()
+        self.vortex = 1.0 if vortex else 0.0   # the vortex regime replaces the stall
 
-    def evaluate(self, alpha, delta=None):
+    def evaluate(self, alpha, delta=None, vortex=None):
         """cl, cd, cm at angles of attack alpha (rad, any range) and flap
-        deflection delta (rad, TE down positive; scalar or matching alpha)."""
-        return evaluate(self, alpha, delta)
+        deflection delta (rad, TE down positive; scalar or matching alpha).
+        vortex: (gain, degradation) of the vortex regime (see evaluate)."""
+        return evaluate(self, alpha, delta, vortex)[:3]
 
     def cl_slope(self, alpha, delta=None, h=1e-4):
         return (self.evaluate(alpha + h, delta)[0] - self.evaluate(alpha - h, delta)[0]) / (2 * h)
@@ -171,7 +188,8 @@ class SectionPolar:
 
 # every parameter evaluate() reads: a PolarSet stacks them into arrays
 _PARAMS = ("alpha0", "a0", "cm0", "_clmax_int", "_clmin_int", "stall_width", "retention", "cd0", "cl_dmin", "k_drag", "cd_max",
-           "a0_rev", "clmax_rev", "flap_chord", "tau", "cm_flap", "eff_a", "eff_b", "eff_c", "ext_k", "cd_flap_k")
+           "a0_rev", "clmax_rev", "flap_chord", "tau", "cm_flap", "eff_a", "eff_b", "eff_c", "ext_k", "cd_flap_k", "vortex",
+           "suction_k")
 
 
 class PolarSet:
@@ -187,15 +205,34 @@ class PolarSet:
     def __len__(self):
         return len(self.polars)
 
-    def evaluate(self, alpha, delta=None):
-        return evaluate(self, alpha, delta)
+    def evaluate(self, alpha, delta=None, vortex=None):
+        return evaluate(self, alpha, delta, vortex)
 
 
-def evaluate(p, alpha, delta=None):
+# the vortex regime: where the vortex force acts (chord fraction), and the
+# leading-edge angles over which it hands over to the flat plate
+VORTEX_X = 0.10
+VORTEX_END = (math.radians(40.0), math.radians(55.0))
+
+
+def evaluate(p, alpha, delta=None, vortex=None):
     """The polar of a SectionPolar or PolarSet `p` (attributes scalar or
-    arrays broadcasting against alpha)."""
-    a = wrap(np.asarray(alpha, float))
+    arrays broadcasting against alpha): cl, cd, cm and the circulation's
+    lift - cl without vortex lift, what washes the flow down behind.
+
+    vortex = (gain, degradation), broadcasting against alpha, for sections
+    with the vortex regime: the vortex normal force is gain times the lost
+    leading-edge suction (Polhamus: 1/cos of the leading-edge sweep, times
+    the part realised, times what is left after vortex breakdown), and the
+    circulation is scaled by the degradation once the edge has separated
+    (the burst vortex's separated flow). None: no vortex lift."""
+    a = np.asarray(alpha, float)
     d = np.zeros_like(a) if delta is None else np.broadcast_to(np.asarray(delta, float), a.shape)
+    # an all-moving surface (flap chord 1) turns the whole section: its
+    # deflection is angle of attack, with no flap increments
+    whole = p.flap_chord >= 0.999
+    a = wrap(a + np.where(whole, d, 0.0))
+    d = np.where(whole, 0.0, d)
     # flap increments (all zero where there is no flap: tau = cm_flap = flap_chord = 0)
     ddeg = np.abs(np.degrees(d))
     eff = p.eff_a + p.eff_b / (1.0 + (ddeg / p.eff_c) ** 2.5)
@@ -251,7 +288,38 @@ def evaluate(p, alpha, delta=None):
     cl = w_f * cl_f + w_r * cl_r + w_p * cl_p
     cd = w_f * cd_f + w_r * cd_r + w_p * cd_p
     cm = w_f * cm_f + w_r * cm_r + w_p * cm_p
-    return cl, cd, cm
+    if not np.any(p.vortex):
+        return cl, cd, cm, cl
+    # the vortex regime: the potential circulation (degraded behind a burst
+    # vortex); the leading edge holds the suction it can - at most what it
+    # carries at the attached-flow limit (Carlson's attainable thrust, NASA
+    # TP-1500) - and the rest is lost, part of it to the vortex as normal force
+    g, dg = (0.0, 1.0) if vortex is None else vortex
+    an = a - a_l0
+    lim = np.where(an >= 0.0, clmax, -clmin)
+    held = p.suction_k * lim * lim / p.a0                 # the attainable suction
+    beyond = smoothstep((np.abs(an) - lim / p.a0 + w) / (2 * w))
+    circ = p.a0 * np.sin(an) * (1.0 - beyond * (1.0 - dg))
+    suction = circ * sa                                  # the suction the circulation would carry
+    T = held * np.tanh(suction / np.maximum(held, 1e-6))
+    n_v = g * np.abs(suction - T) * np.sign(circ)        # the vortex lift, normal to the chord
+    N = circ * ca + n_v
+    cl_v = N * ca + T * sa
+    cd_v = N * sa - T * ca + p.cd0 + p.k_drag * (np.clip(circ, clmin, clmax) - p.cl_dmin) ** 2 + dcd
+    cm_v = p.cm0 + dcm + n_v * (0.25 - VORTEX_X)
+    lo, hi = VORTEX_END
+    w_v = np.where(ca > 0.0, smoothstep((hi - np.abs(a)) / (hi - lo)), 0.0) * (1.0 - w_r)
+    rest = 1.0 - w_v
+    w_pr = np.clip(1.0 - w_r, 0.0, 1.0)
+    cl_c = w_r * cl_r + w_pr * cl_p
+    cd_c = w_r * cd_r + w_pr * cd_p
+    cm_c = w_r * cm_r + w_pr * cm_p
+    on = p.vortex > 0.0
+    cl2 = np.where(on, w_v * cl_v + rest * cl_c, cl)
+    cd2 = np.where(on, w_v * cd_v + rest * cd_c, cd)
+    cm2 = np.where(on, w_v * cm_v + rest * cm_c, cm)
+    circ2 = np.where(on, w_v * circ + rest * cl_c, cl)
+    return cl2, cd2, cm2, circ2
 
 
 def linear_part(p, delta=None):
@@ -261,4 +329,5 @@ def linear_part(p, delta=None):
     ddeg = np.abs(np.degrees(d))
     eff = p.eff_a + p.eff_b / (1.0 + (ddeg / p.eff_c) ** 2.5)
     ext = 1.0 + p.ext_k * p.flap_chord * np.clip(ddeg / 40.0, 0.0, 1.0)
-    return p.a0, p.alpha0 - p.tau * eff * d * ext
+    whole = np.asarray(p.flap_chord) >= 0.999
+    return p.a0, p.alpha0 - np.where(whole, d, p.tau * eff * d * ext)

@@ -84,8 +84,7 @@ def build(model, alpha=None, beta=None, progress=None):
     a_ctl = a_deg
     ctrl = {}
     for ch in model.aircraft.channels():
-        lims = [(c.min_deg, c.max_deg) for _, c in model.aircraft.controls() if c.channel == ch]
-        lo, hi = min(l[0] for l in lims), max(l[1] for l in lims)
+        lo, hi = model.aircraft.channel_limits(ch)
         d_deg = control_grid(lo, hi, (12.0 if quick else 5.0) if hi - lo > 12 else 2.5)
         tab = {k: np.zeros((len(a_ctl), len(d_deg))) for k in CHANNEL_COEFFS[ch]}
         for jd, d in enumerate(d_deg):
@@ -115,6 +114,12 @@ def build(model, alpha=None, beta=None, progress=None):
     out["rates"] = rates
     out["alphadot"] = alphadot(model)
     out["ground_effect"] = ground_effect(model)
+    from .mach import mach_effects
+    from .model import AeroModel
+    ac = model.aircraft
+    out["mach"] = mach_effects(ac, lambda m: model if m == model.mach else
+                               AeroModel(ac, model.speed, m, wake_deg=(-6.0, -4.0, -2.0, 0.0, 2.0, 4.0, 6.0, 8.0)),
+                               out, progress=progress)
     return out
 
 
@@ -157,9 +162,10 @@ def _induced_by(model, alpha, surface_index):
     xw, _, _ = wind_axes(alpha, 0.0)
     v = np.array([xw[0], -xw[1], xw[2]])
     w = np.zeros(3)
+    V.select(math.atan2(v[2], max(v[0], 1e-6)))
     g = V.circulation(v, w, {})
     mask = (L.panel_surface == surface_index).astype(float)
-    wk = np.einsum("snk,n->sk", model.W_strip, g * mask)
+    wk = np.einsum("snk,n->sk", V.W_strip, g * mask)
     U = v[None, :] - np.cross(w[None, :], L.c4 - model.ref)
     return np.einsum("sk,sk->s", wk, L.u) / np.linalg.norm(U, axis=1)
 
@@ -197,11 +203,13 @@ def derivatives(tables, alpha_deg=2.0):
     def at(tab, x):
         return float(np.interp(x, a, tab))
 
-    da = 1.0
     out = {}
+    # slopes fitted over -4..+4 deg about the reference: a lattice whose wake
+    # crosses a tail has small ripples a two-point difference would magnify
+    fit = np.linspace(alpha_deg - 4.0, alpha_deg + 4.0, 9)
     for k in ("CL", "CD", "Cm"):
         out[k + "0"] = at(base[k][:, j0], 0.0)
-        out[k + "a"] = (at(base[k][:, j0], alpha_deg + da) - at(base[k][:, j0], alpha_deg - da)) / math.radians(2 * da)
+        out[k + "a"] = float(np.polyfit(np.radians(fit), [at(base[k][:, j0], x) for x in fit], 1)[0])
     jp = int(np.argmin(np.abs(b - 3.0)))
     jm = int(np.argmin(np.abs(b + 3.0)))
     for k in ("CY", "Cl", "Cn"):

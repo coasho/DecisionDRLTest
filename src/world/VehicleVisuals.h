@@ -24,8 +24,10 @@ namespace fsim::world {
 /// Moving control surfaces: a model node named `fsim:<channel>[:<gain>]`
 /// (channel aileron, elevator, rudder or flaps) turns about its own x axis by
 /// gain times the vehicle's deflection of that channel (VehicleState, radians;
-/// aileron is the left one). Each vehicle gets its own copy of those nodes and
-/// of the nodes above them; the geometry stays shared.
+/// aileron is the left one). A part several channels move - a stabilator
+/// that also rolls, a flaperon - is named `fsim:<channel>[:<gain>]+<channel>
+/// [:<gain>]...` and turns by the sum. Each vehicle gets its own copy of
+/// those nodes and of the nodes above them; the geometry stays shared.
 class VehicleVisuals {
 public:
     struct Settings {
@@ -95,13 +97,14 @@ public:
     /// Animations found in the loaded model (e.g. propellers), empty for the placeholder.
     const vsg::Animations& animations() const { return animations_; }
 
-    /// A moving part of a model: a node named fsim:<channel>[:<gain>].
+    /// A moving part of a model: a node named fsim:<channel>[:<gain>][+...].
     struct Joint {
         enum Channel { Aileron, Elevator, Rudder, Flaps };
         const vsg::MatrixTransform* node = nullptr; ///< in the shared model
         vsg::dmat4 rest;                           ///< its matrix at zero deflection
-        Channel channel = Aileron;
+        Channel channel = Aileron;                 ///< the first channel in the name
         double gain = 1.0;
+        std::vector<std::pair<Channel, double>> mix; ///< the channels after it
         /// Parses a node name; false when it is not a joint (or malformed).
         static bool parse(const std::string& name, Joint& joint);
         /// The node's matrix at the vehicle's deflection of this channel.

@@ -1,6 +1,6 @@
 ---
 name: aircraft-design
-description: Design, analyse and validate a new aircraft for JSBSim with hangar (tools/hangar), from a description, drawing or photo to a flight-tested jsbsim:<name>. Use when asked to model an aircraft that has no JSBSim model or wind-tunnel data, to change a design's geometry, mass or engine, or to explain how a design flies.
+description: Design, analyse and validate a new aircraft for JSBSim with hangar (tools/hangar), from a description, drawing or photo to a flight-tested jsbsim:<name> - light aircraft, UAVs and jet fighters with fly-by-wire. Use when asked to model an aircraft that has no JSBSim model or wind-tunnel data, to change a design's geometry, mass or engine, or to explain how a design flies.
 ---
 
 # Aircraft design with hangar
@@ -106,7 +106,49 @@ move on while a check fails or a picture looks wrong.
 | trims in `fly.json` say `"method": "flown"` | nothing: JSBSim's own trim failed (common for small electric aircraft), so hangar flew the aircraft to trim |
 | piston engine quits at altitude | the generated `fcs/auto-mixture` leans it with altitude; check that it drives `fcs/mixture-cmd-norm` |
 
-## 4. Finish
+## 4. Fighters
+
+`aircraft/f16c/f16c.toml` is the worked example; copy its layout.
+
+- **Names.** Don't reuse a JSBSim aircraft's name (f15, f16, f22): the design
+  would shadow it, and it could no longer be the reference. Use f16c, f15c,
+  and so on.
+- **Surfaces.**
+  - Strakes and LEX are `kind = "strake"`, `airfoil = "plate"`. Start the
+    root at the fuselage centre line, as the wing does.
+  - All-moving tails and canards take `chord_fraction = 1.0` and a `pivot`.
+  - Surfaces that several channels move take `mix`: a stabilator that rolls
+    `mix = { aileron = 0.25 }`, a flaperon `mix = { flap = 1.0 }`, an elevon
+    `channel = "elevator", mix = { aileron = 1.0 }`, a canard a negative
+    `gain`.
+- **Airfoils.** `naca64aXYZ` (NACA 6A), `biconvexN`, or `plate`. The
+  leading edge's sharpness decides the vortex lift: sharp edges make it,
+  round ones hold their suction.
+- **Engine.** `type = "turbofan"` with `thrust_dry_kn`, `thrust_wet_kn`,
+  `bypass_ratio`, TSFCs, a `[engine.nozzle]` position and an `inlet_x`.
+  Mass and size come from Raymer if not given.
+- **Flight controls.** `[flight_control] type = "fbw"` with `n_max`,
+  `n_min`, `alpha_max_deg` and `roll_rate_deg_s` from the real aircraft.
+  - Build checks the short period at every design point.
+  - Fly checks the limiter (full aft stick), a 3 g step and the roll.
+- **Targets.** Give `max_mach` and `max_mach_altitude_ft`: calibrate fits
+  the wave drag to them. `max_speed_ktas` (sea level), `climb_rate_fpm`,
+  `service_ceiling_ft` and `sustained_turn_deg_s` stay checks. Published
+  climb rates are loose, so don't fit to them.
+- **Reference.** `reference = "jsbsim:<name>"` plots that aircraft's
+  coefficients against the design's (`reference.png`). It is worth doing
+  only when the JSBSim model comes from wind-tunnel data (f16, f15). Check
+  its control tables' units first: see the f16c's `reference_control_scale`.
+- **Read after aero:**
+  - `reference.png`, if there is a reference.
+  - `mach.png`: K_L should peak near Mach 0.9-1.0. The neutral point
+    should move aft 15-30 % MAC supersonic.
+  - `coefficients.png`: CL max 1.5-2.0 at 30-40° is normal for vortex-lift
+    fighters.
+- **Read after fly:** `fly_fighter.png`, for the excess power at sea level
+  and 36,000 ft and the turn.
+
+## 5. Finish
 
 - Run `ctest --test-dir build/ucrt64-release -R hangar`.
 - Show the user three things: the three-view, a viewer screenshot, and the

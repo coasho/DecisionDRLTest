@@ -25,7 +25,12 @@ CHANNELS = ("aileron", "elevator", "rudder", "flap")
 
 
 class Control:
-    """A trailing-edge control surface on part of a lifting surface."""
+    """A control surface on part of a lifting surface: a trailing-edge flap
+    (chord_fraction < 1) or the whole section turning about a spindle
+    (chord_fraction = 1: an all-moving tail or canard; pivot = the spindle's
+    chord fraction, for drawing). It follows its channel times gain, plus
+    any channels in mix = {channel = gain}: a stabilator that also rolls
+    (mix = { aileron = 0.3 }), a flaperon (mix = { flap = 1 }), an elevon."""
 
     def __init__(self, spec, surface_name):
         where = "surface %r control %r" % (surface_name, spec.get("name", "?"))
@@ -42,11 +47,21 @@ class Control:
         lim = spec.get("limits", [-25.0, 25.0])
         self.min_deg, self.max_deg = float(lim[0]), float(lim[1])
         self.gain = float(spec.get("gain", 1.0))
+        self.mix = {str(k): float(v) for k, v in spec.get("mix", {}).items()}
+        for k in self.mix:
+            if k not in CHANNELS:
+                raise ValueError("%s: mix channel %r must be one of %s" % (where, k, ", ".join(CHANNELS)))
+        self.channels = dict(self.mix)
+        self.channels[self.channel] = self.gain
+        self.pivot = float(spec.get("pivot", 0.35))
         self.kind = spec.get("kind", "plain")  # plain | slotted | fowler (flaps)
         if self.kind not in ("plain", "slotted", "fowler"):
             raise ValueError("%s: kind must be plain, slotted or fowler" % where)
-        if not (0.0 <= self.eta0 < self.eta1 <= 1.0) or not (0.0 < self.cf0 < 1.0 and 0.0 < self.cf1 < 1.0):
-            raise ValueError("%s: span within [0, 1] and chord_fraction within (0, 1)" % where)
+        if not (0.0 <= self.eta0 < self.eta1 <= 1.0) or not (0.0 < self.cf0 <= 1.0 and 0.0 < self.cf1 <= 1.0):
+            raise ValueError("%s: span within [0, 1] and chord_fraction within (0, 1]" % where)
+        self.all_moving = self.cf0 >= 0.999 and self.cf1 >= 0.999
+        if (self.cf0 >= 0.999) != (self.cf1 >= 0.999):
+            raise ValueError("%s: an all-moving surface has chord_fraction 1 all along" % where)
 
     def chord_fraction(self, eta):
         t = (eta - self.eta0) / (self.eta1 - self.eta0)
@@ -66,6 +81,7 @@ class Section:
 
 class Surface:
     def __init__(self, spec, base_dir=None):
+        self.spec = spec
         self.name = spec.get("name", "surface")
         self.kind = spec.get("kind", "wing")
         self.mirror = bool(spec.get("mirror", self.kind not in ("fin", "vtail")))
@@ -105,6 +121,19 @@ class Surface:
         a, b = self.sections[i], self.sections[i + 1]
         le = (1 - w) * a.le + w * b.le
         return le, (1 - w) * a.chord + w * b.chord, (1 - w) * a.twist + w * b.twist, a.airfoil.blend(b.airfoil, w)
+
+    def sweep_at(self, eta):
+        """Leading-edge and quarter-chord sweep (rad) of the section chain at
+        eta, measured in the surface's plane."""
+        i, _ = self._locate(eta)
+        a, b = self.sections[i], self.sections[i + 1]
+        d = b.le - a.le
+        run = float(np.hypot(d[1], d[2]))
+        return (float(np.arctan2(d[0], run)), float(np.arctan2(d[0] + 0.25 * (b.chord - a.chord), run)))
+
+    @property
+    def sweep_le_deg_max(self):
+        return max(float(np.degrees(self.sweep_at(e)[0])) for e in 0.5 * (self.eta_sections[1:] + self.eta_sections[:-1]))
 
     def span_direction(self, eta):
         """Unit spanwise direction (root to tip) of the leading-edge line in
@@ -231,6 +260,7 @@ class Surface:
                 m[k] = out[k] * flip
             # keep the bound vortex along e = u x c: on the mirror it runs tip to root
             m["p_a"], m["p_b"] = out["p_b"] * flip, out["p_a"] * flip
+            m["t_a"], m["t_b"] = out["t_b"] * flip, out["t_a"] * flip
             m["n"] = out["n"] * flip
             m["side"] = -np.ones(len(rows))
             m["airfoil"] = list(out["airfoil"])
@@ -275,6 +305,9 @@ class Surface:
             "c": c, "u": u,
             "twist": twm,
             "p_a": p_a, "p_b": p_b, "cp": cp, "n": n,
+            # the trailing edge behind each end of the bound vortices (where the wake starts)
+            "t_a": np.repeat(in_pts[-1][None, :], len(p_a), axis=0),
+            "t_b": np.repeat(out_pts[-1][None, :], len(p_b), axis=0),
             "xc": f_c,                 # chordwise position of each control point (fraction)
             "hinge": (1 - cf) if cf is not None else 2.0,
             "airfoil": foil,

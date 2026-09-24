@@ -218,33 +218,36 @@ class Contacts(unittest.TestCase):
 
 class Model3D(unittest.TestCase):
     def test_control_surfaces_hinge_the_way_jsbsim_deflects(self):
-        # every piece, turned by +0.25 rad about its hinge axis, moves its
-        # trailing edge the way a positive channel value means (design frame:
-        # x aft, y right, z up): elevator and flaps down, the left aileron
-        # down and the right one up, the rudder left - also for twin fins
+        # every piece, turned about its hinge axis by what +0.25 rad of each of
+        # its channels means for it, moves its trailing edge the way JSBSim's
+        # positive value means (design frame: x aft, y right, z up): elevator
+        # and flaps down, the left aileron down and the right one up, the
+        # rudder left - also for twin fins, all-moving tails that roll too,
+        # and flaperons
         from hangar import model3d
-        for name, expect in (("c172", 7), ("skua", 8)):
+        for name, expect in (("c172", 7), ("skua", 8), ("f16c", 5)):
             a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
             seen = 0
             for s in a.surfaces:
                 _, _, pieces = model3d.display_skin(s)
                 for piece in pieces:
-                    p0, axis, g = model3d.hinge(s, piece)
+                    p0, axis, g, mixed = model3d.hinge(s, piece)
                     ctrl = s.controls[piece["control"] - 1]
                     r = piece["te"] - p0
-                    th = 0.25 * g
-                    # Rodrigues: r turned about axis by th
-                    moved = (r * math.cos(th) + np.cross(axis, r) * math.sin(th)
-                             + axis * np.dot(axis, r) * (1 - math.cos(th))) - r
                     left = piece["centre"][1] < 0
-                    with self.subTest(design=name, surface=s.name, control=ctrl.name, left=left):
-                        self.assertGreater(g, 0.0)
-                        if ctrl.channel in ("elevator", "flap"):
-                            self.assertLess(moved[2], 0.0)
-                        elif ctrl.channel == "aileron":
-                            self.assertLess(moved[2] if left else -moved[2], 0.0)
-                        else:
-                            self.assertLess(moved[1], 0.0)
+                    for ch in ctrl.channels:
+                        th = 0.25 * (g if ch == ctrl.channel else mixed[ch])
+                        # Rodrigues: r turned about axis by th
+                        moved = (r * math.cos(th) + np.cross(axis, r) * math.sin(th)
+                                 + axis * np.dot(axis, r) * (1 - math.cos(th))) - r
+                        with self.subTest(design=name, surface=s.name, control=ctrl.name, channel=ch, left=left):
+                            self.assertGreater(g, 0.0)
+                            if ch in ("elevator", "flap"):
+                                self.assertLess(moved[2], 0.0)
+                            elif ch == "aileron":
+                                self.assertLess(moved[2] if left else -moved[2], 0.0)
+                            else:
+                                self.assertLess(moved[1], 0.0)
                     seen += 1
             self.assertEqual(seen, expect)
 

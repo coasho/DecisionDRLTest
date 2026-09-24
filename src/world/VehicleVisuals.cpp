@@ -259,38 +259,67 @@ vsg::vec4 VehicleVisuals::segmentationColour(std::size_t index) {
     return vsg::vec4(static_cast<float>(id & 0xFFu) / 255.0f, static_cast<float>((id >> 8) & 0xFFu) / 255.0f, 0.0f, 1.0f);
 }
 
-bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
-    if (!isJointName(name)) return false;
-    std::string channel = name.substr(5), gain;
-    if (const auto colon = channel.find(':'); colon != std::string::npos) {
-        gain = channel.substr(colon + 1);
-        channel.resize(colon);
+namespace {
+/// One `<channel>[:<gain>]` term of a joint's name.
+bool parseTerm(std::string term, VehicleVisuals::Joint::Channel& channel, double& gain) {
+    using J = VehicleVisuals::Joint;
+    std::string value;
+    if (const auto colon = term.find(':'); colon != std::string::npos) {
+        value = term.substr(colon + 1);
+        term.resize(colon);
     }
-    if (channel == "aileron") joint.channel = Aileron;
-    else if (channel == "elevator") joint.channel = Elevator;
-    else if (channel == "rudder") joint.channel = Rudder;
-    else if (channel == "flaps" || channel == "flap") joint.channel = Flaps;
+    if (term == "aileron") channel = J::Aileron;
+    else if (term == "elevator") channel = J::Elevator;
+    else if (term == "rudder") channel = J::Rudder;
+    else if (term == "flaps" || term == "flap") channel = J::Flaps;
     else return false;
-    joint.gain = 1.0;
-    if (!gain.empty()) {
+    gain = 1.0;
+    if (!value.empty()) {
         char* end = nullptr;
-        const double g = std::strtod(gain.c_str(), &end);
-        if (end == gain.c_str() || *end != '\0' || !std::isfinite(g)) return false;
-        joint.gain = g;
+        const double g = std::strtod(value.c_str(), &end);
+        if (end == value.c_str() || *end != '\0' || !std::isfinite(g)) return false;
+        gain = g;
     }
     return true;
 }
+} // namespace
+
+bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
+    if (!isJointName(name)) return false;
+    const std::string terms = name.substr(5);
+    joint.mix.clear();
+    std::size_t begin = 0;
+    for (bool first = true;; first = false) {
+        const auto plus = terms.find('+', begin);
+        Channel channel = Aileron;
+        double gain = 1.0;
+        if (!parseTerm(terms.substr(begin, plus == std::string::npos ? std::string::npos : plus - begin), channel, gain))
+            return false;
+        if (first) {
+            joint.channel = channel;
+            joint.gain = gain;
+        } else {
+            joint.mix.emplace_back(channel, gain);
+        }
+        if (plus == std::string::npos) return true;
+        begin = plus + 1;
+    }
+}
 
 vsg::dmat4 VehicleVisuals::Joint::matrix(const sim::VehicleState& s) const {
-    double deflection = 0.0;
-    switch (channel) {
-    case Aileron: deflection = s.aileronRad; break;
-    case Elevator: deflection = s.elevatorRad; break;
-    case Rudder: deflection = s.rudderRad; break;
-    case Flaps: deflection = s.flapsRad; break;
-    }
-    if (!std::isfinite(deflection)) deflection = 0.0;
-    return rest * vsg::rotate(gain * deflection, vsg::dvec3(1.0, 0.0, 0.0));
+    const auto of = [&s](Channel c) {
+        double d = 0.0;
+        switch (c) {
+        case Aileron: d = s.aileronRad; break;
+        case Elevator: d = s.elevatorRad; break;
+        case Rudder: d = s.rudderRad; break;
+        case Flaps: d = s.flapsRad; break;
+        }
+        return std::isfinite(d) ? d : 0.0;
+    };
+    double angle = gain * of(channel);
+    for (const auto& [c, g] : mix) angle += g * of(c);
+    return rest * vsg::rotate(angle, vsg::dvec3(1.0, 0.0, 0.0));
 }
 
 VehicleVisuals::Rig VehicleVisuals::Rig::find(const vsg::ref_ptr<vsg::Node>& graph) {
@@ -298,7 +327,8 @@ VehicleVisuals::Rig VehicleVisuals::Rig::find(const vsg::ref_ptr<vsg::Node>& gra
     if (!graph) return rig;
     auto finder = vsg::visit<FindJoints>(graph);
     for (const auto& name : finder.malformed)
-        LOG_WARN("world") << "model node '" << name << "' is not a control surface (fsim:aileron|elevator|rudder|flaps[:gain]); left fixed";
+        LOG_WARN("world") << "model node '" << name
+                          << "' is not a control surface (fsim:aileron|elevator|rudder|flaps[:gain][+...]); left fixed";
     rig.joints = std::move(finder.joints);
     rig.spine.assign(finder.spine.begin(), finder.spine.end());
     return rig;
