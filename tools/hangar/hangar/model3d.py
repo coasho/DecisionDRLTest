@@ -509,33 +509,117 @@ def _hinged(B, name, label, m, mats, point, axis, origin, inner=None):
     return B.node(name, translation=pivot, rotation=q, children=[B.node(inner[0], mesh, rotation=qi)])
 
 
+def _tree(B, mats, origin, joint, parent=None):
+    """A chain of nodes from design-frame joints: joint = {"name", "point",
+    "axis", "mesh": (label, meshkit mesh) or None, "children": [joints]} - each
+    node's origin at its point, its x along its axis, placed in its parent's
+    frame, its mesh in its own."""
+    q = _quat_from_x(_gltf_direction(joint["axis"]))
+    R, t = _quat_matrix(q), _to_gltf(joint["point"], origin)
+    Rp, tp = parent if parent is not None else (np.eye(3), np.zeros(3))
+    kids = [_tree(B, mats, origin, c, (R, t)) for c in joint.get("children", [])]
+    mesh = None
+    if joint.get("mesh") is not None:
+        label, m = joint["mesh"]
+        v = (_to_gltf(m["positions"], origin) - t) @ R
+        n = _to_gltf(m["normals"], np.zeros(3)) @ R
+        mesh = B.mesh(label, [(v, m["triangles"][m["materials"] == k], mats[int(k)], n) for k in np.unique(m["materials"])])
+    return B.node(joint["name"], mesh, translation=Rp.T @ (t - tp), rotation=_quat_from_matrix(Rp.T @ R), children=kids)
+
+
 def _gear_parts(aircraft, B, top, origin, report, plan, mats):
-    """Each landing gear leg as a solid; a retractable one turns about its
-    hinge with the gear position (fsim:gear:<deg>:1:<f>, from down at 1 to
-    stowed at f) and its doors open before it moves (fsim:gear:<deg>:0:<f>)."""
+    """Each landing gear leg as solids that move as the simulation has them:
+    a retractable one turns about its hinge with the gear position
+    (fsim:gear:<deg>:1:<f>, from down at 1 to stowed at f) and its doors open
+    before it moves (fsim:gear:<deg>:0:<f>); on every leg the oleo slides up
+    the strut as the unit compresses (fsim:oleo:<wheel>:<gain>), a steerable
+    one turns with the steering (fsim:steer:<wheel>) and the wheels roll
+    (fsim:wheel:<wheel>:<radius>) - <wheel> the leg's place among the
+    aircraft's wheeled units, as the JSBSim file lists them."""
     from .shape import gear as sg
     from .shape import meshkit
     doors = {p["leg"].name: p for p in plan}
     report["gear"] = []
-    for leg in sg.legs(aircraft):
+    moving, panels = [], []
+    for k, leg in enumerate(sg.legs(aircraft)):
         leg = doors[leg.name]["leg"] if leg.name in doors else leg  # fitted to its bay
-        m = meshkit.build(sg.leg_scene(leg))
-        entry = dict(_stats(m), label=leg.name)
+        pieces = {part: meshkit.build(sg.leg_scene(leg, part)) for part in ("strut", "oleo", "wheel")}
+        for part, m in pieces.items():
+            report["gear"].append(dict(_stats(m), label="%s %s" % (leg.name, part)))
+        slide, gain = leg.slide()
+        wheel = {"name": "fsim:wheel:%d:%.6g" % (k, leg.r), "point": leg.axle, "axis": [0.0, -1.0, 0.0],
+                 "mesh": ("%s wheel" % leg.name, pieces["wheel"])}
+        lower = [wheel]
+        if leg.steerable:  # about the strut, pointing down: a positive turn steers right
+            lower = [{"name": "fsim:steer:%d" % k, "point": leg.axle, "axis": -leg.strut,
+                      "mesh": ("%s oleo" % leg.name, pieces["oleo"]), "children": lower}]
+            oleo = {"name": "fsim:oleo:%d:%.6g" % (k, gain), "point": leg.foot(), "axis": slide, "children": lower}
+        else:
+            oleo = {"name": "fsim:oleo:%d:%.6g" % (k, gain), "point": leg.foot(), "axis": slide,
+                    "mesh": ("%s oleo" % leg.name, pieces["oleo"]), "children": lower}
+        strut = ("%s strut" % leg.name, pieces["strut"])
         if leg.retractable:
-            name = "fsim:gear:%.6g:1:%.6g" % (leg.swing_deg, sg.DOORS)
-            twist = ("fsim:gear:%.6g:1:%.6g" % (leg.twist_deg, sg.DOORS), leg.strut) if abs(leg.twist_deg) > 1e-6 else None
-            top.append(_hinged(B, name, leg.name, m, mats, leg.hinge, leg.swing_axis, origin, inner=twist))
-            entry["protrusion"] = doors[leg.name]["protrusion"]
+            chain = {"name": "fsim:gear:%.6g:1:%.6g" % (leg.twist_deg, sg.DOORS), "point": leg.hinge, "axis": leg.strut,
+                     "mesh": strut, "children": [oleo]}
+            top.append(_tree(B, mats, origin, {"name": "fsim:gear:%.6g:1:%.6g" % (leg.swing_deg, sg.DOORS),
+                                               "point": leg.hinge, "axis": leg.swing_axis, "children": [chain]}))
+            report["gear"][-3]["protrusion"] = doors[leg.name]["protrusion"]
+            moving.append(leg)
             for d in doors[leg.name]["doors"]:
                 dm = meshkit.build(d["scene"])
                 top.append(_hinged(B, "fsim:gear:%.6g:0:%.6g" % (d["deg"], sg.DOORS), d["label"], dm, mats,
                                    d["hinge"], d["axis"], origin))
                 report["gear"].append(dict(_stats(dm), label=d["label"]))
+                panels.append((d, dm))
         else:
-            v, n = _to_gltf(m["positions"], origin), _to_gltf(m["normals"], np.zeros(3))
-            top.append(B.node(leg.name, B.mesh(leg.name, [(v, m["triangles"][m["materials"] == k], mats[int(k)], n)
-                                                         for k in np.unique(m["materials"])])))
-        report["gear"].append(entry)
+            top.append(_tree(B, mats, origin, {"name": leg.name, "point": leg.hinge, "axis": leg.strut, "mesh": strut,
+                                               "children": [oleo]}))
+    report["door_clearance"] = door_clearance(moving, panels)
+
+
+def _surface_samples(m, step=0.012):
+    """Points all over a mesh's triangles, about step apart."""
+    v, t = m["positions"], m["triangles"]
+    out = [v]
+    for tri in v[t]:
+        n = int(np.ceil(max(np.linalg.norm(tri[1] - tri[0]), np.linalg.norm(tri[2] - tri[0]),
+                            np.linalg.norm(tri[2] - tri[1])) / step))
+        if n < 2:
+            out.append(tri.mean(axis=0)[None])
+            continue
+        i, j = np.meshgrid(np.arange(n + 1), np.arange(n + 1))
+        keep = i + j <= n
+        a, b = i[keep] / n, j[keep] / n
+        out.append(tri[0] + np.outer(a, tri[1] - tri[0]) + np.outer(b, tri[2] - tri[0]))
+    return np.vstack(out)
+
+
+def door_clearance(legs, panels, steps=30):
+    """How far each landing gear door stays from each leg (m; negative: into
+    it): open, all the way as the leg swings from down to stowed; closed,
+    from the stowed leg."""
+    from .shape import gear as sg
+    from .shape import meshkit
+    out = []
+    samples = []
+    for d, dm in panels:
+        pts = _surface_samples(dm)
+        R = sg._rotation(d["axis"], d["deg"])
+        samples.append((d["label"], d["hinge"] + (pts - d["hinge"]) @ R.T, pts))
+    for leg in legs:
+        with meshkit.Probe({"root": leg.parts()}) as probe:
+            for label, opened, closed in samples:
+                worst, at = np.inf, 0.0
+                for f in np.linspace(0.0, 1.0, steps + 1):
+                    # the door in the frame of the leg as built (down)
+                    Rl = sg._rotation(leg.swing_axis, f * leg.swing_deg) @ sg._rotation(leg.strut, f * leg.twist_deg)
+                    dist, _ = probe(leg.hinge + (opened - leg.hinge) @ Rl)
+                    if dist.min() < worst:
+                        worst, at = float(dist.min()), float(f)
+                Rl = sg._rotation(leg.swing_axis, leg.swing_deg) @ sg._rotation(leg.strut, leg.twist_deg)
+                shut, _ = probe(leg.hinge + (closed - leg.hinge) @ Rl)
+                out.append({"door": label, "leg": leg.name, "open_m": worst, "at": at, "closed_m": float(shut.min())})
+    return out
 
 
 def _primitive_parts(aircraft, B, top, origin):
@@ -752,6 +836,11 @@ def write_glb(aircraft, path, origin, report=None, solid=None):
                           "samplers": [{"input": B.accessor(times, "scalar"), "output": B.accessor(quats, "vec4"), "interpolation": "LINEAR"}],
                           "channels": [{"sampler": 0, "target": {"node": idx, "path": "rotation"}}]})
     root = B.node(aircraft.name, children=top)
+    # the binary chunk and the buffer it holds both end on a 4-byte boundary:
+    # a loader may insist the two lengths agree (vsgXchange loads no geometry
+    # at all when they do not)
+    while len(B.bin) % 4:
+        B.bin.append(0)
     doc = {"asset": {"version": "2.0", "generator": "hangar"}, "scene": 0, "scenes": [{"nodes": [root]}],
            "nodes": B.nodes, "meshes": B.meshes, "materials": B.materials, "accessors": B.accessors,
            "bufferViews": B.views, "buffers": [{"byteLength": len(B.bin)}]}
@@ -759,8 +848,6 @@ def write_glb(aircraft, path, origin, report=None, solid=None):
         doc["animations"] = anims
     js = json.dumps(doc, separators=(",", ":")).encode()
     js += b" " * ((4 - len(js) % 4) % 4)
-    while len(B.bin) % 4:
-        B.bin.append(0)
     total = 12 + 8 + len(js) + 8 + len(B.bin)
     with open(path, "wb") as f:
         f.write(struct.pack("<III", 0x46546C67, 2, total))

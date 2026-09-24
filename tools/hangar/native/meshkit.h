@@ -24,6 +24,8 @@
 //   {"prim": "capsule", "a", "b", "r"}  {"prim": "cylinder", "a", "b", "r", "round"}
 //   {"prim": "box", "centre", "axes", "half", "round"}
 //   {"prim": "ellipsoid", "centre", "axes", "radii"}  {"prim": "torus", "centre", "axis", "R", "r"}
+//   {"prim": "slab", "origin": [x0, y0], "step": [dx, dy], "size": [nx, ny], "z": [...], "lo", "hi",
+//    "rect": [x0, y0, x1, y1], "round"}    the layer lo..hi (along the normal) over a height field
 
 #include <cstdint>
 

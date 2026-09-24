@@ -6,7 +6,9 @@ retracts the viewer swings it up about its trunnion and, at once, twists it
 about the strut (two nested fsim:gear nodes), as real legs fold. A
 retractable leg folds into a bay cut into the airframe, and doors - the skin
 cut out over the bay - open before it comes down and close after it has gone
-up.
+up. The opening is as wide as the leg needs to pass: its two doors, hinged
+along the edges either side of the leg's swing, hang clear of it all the way
+(model3d measures that).
 
 Per gear in the design ([[gear]]):
     retract = "aft"         the way the leg swings up: forward, aft, inward or outward
@@ -15,8 +17,11 @@ Per gear in the design ([[gear]]):
     wheel_turn = 0          degrees the wheel twists about the strut on the way up
                             ("flat": lying flat); without both, hangar fits them - and
                             cants the hinge up to 40 deg, as real trunnions are - to
-                            stow the leg inside the airframe, as near a plain 90 deg
-                            swing as it can
+                            stow the leg inside the airframe through as small an
+                            opening as it can, as near a plain 90 deg swing as it can
+    retract_axis = [x, y, z] the trunnion's axis, when it is known (the leg at the
+                            gear's own position; its mirror image turns about the
+                            mirror image): a positive turn about it folds the leg
     wheels = 1              side by side on one axle
     door_deg = 90           how far the doors open
     fairing = true          (fixed gear) a spat over the wheel
@@ -26,6 +31,8 @@ import numpy as np
 from .airframe import GAP, METAL, SKIN, STRUT, TYRE, union
 
 DOORS = 0.2  # the doors move while the gear position runs 0..0.2, the legs 0.2..1
+DOOR = 0.02  # a door's thickness (m)
+CLEAR = 0.04  # the open doors' clearance from the moving leg, and the stowed leg's from the closed doors (m)
 
 
 def _rotation(axis, deg):
@@ -66,6 +73,7 @@ class Leg:
         spec = gear.spec
         self.name, self.side = name, side
         self.retractable = gear.retractable
+        self.steerable = gear.steerable
         self.fairing = gear.fairing
         self.direction = spec.get("retract", "aft" if gear.steerable else "forward")
         if self.direction not in ("forward", "aft", "inward", "outward"):
@@ -85,6 +93,12 @@ class Leg:
         # the strut, together
         self.strut = (self.hinge - self.axle) / np.linalg.norm(self.hinge - self.axle)
         axis = _swing(self.direction, side)
+        if "retract_axis" in spec:
+            axis = np.asarray(spec["retract_axis"], float)
+            if axis.shape != (3,) or np.linalg.norm(axis) < 1e-9:
+                raise ValueError("gear %r: retract_axis = [x, y, z], not zero" % gear.name)
+            if side < 0 < gear.position[1] or side > 0 > gear.position[1]:
+                axis = -np.diag([1.0, -1.0, 1.0]) @ axis  # the mirror image's
         angle = float(spec.get("retract_deg", 90.0))
         turn = spec.get("wheel_turn", 0.0)
         if turn == "flat":
@@ -105,10 +119,11 @@ class Leg:
     def fit(self, probe):
         """Fits the stowing turn to the airframe (a meshkit.Probe): the swing's
         angle, its hinge axis canted - leaned about z, tilted towards z - and
-        the wheel's twist: the one that leaves the stowed leg furthest inside,
-        the plainest where several do. A main leg stays on its own side of
-        the centre line. Returns how far the stowed leg stands out of the
-        skin (m)."""
+        the wheel's twist: one that stows the leg inside, clear of the closed
+        doors, and of those the one that needs the smallest opening on its
+        way, as plain as it can. A main leg stays on its own side of the
+        centre line all the way. Returns how far the stowed leg stands out of
+        the skin (m)."""
         pts = self.points()
         if "retract_deg" in self.spec and "wheel_turn" in self.spec:
             return float(max(probe(self.turned(pts))[0].max(), 0.0))
@@ -127,11 +142,27 @@ class Leg:
                                       (axis, angle, twist * sign)))
         stowed = np.array([self.hinge + (pts - self.hinge) @ R.T for R, _, _ in cands])
         d, _ = probe(stowed.reshape(-1, 3))
-        out = np.maximum(d.reshape(len(cands), -1).max(axis=1), 0.0)
+        # inside, clear of the closed doors
+        out = np.maximum(d.reshape(len(cands), -1).max(axis=1) + DOOR + 0.5 * CLEAR, 0.0)
+        # on its way: a quarter, half and three quarters up
+        mids = np.array([[self.hinge + (pts - self.hinge) @ (_rotation(a, f * g) @ _rotation(self.strut, f * t)).T
+                          for f in (0.25, 0.5, 0.75)] for _, _, (a, g, t) in cands]).reshape(len(cands), -1, 3)
+        dm, _ = probe(mids.reshape(-1, 3))
+        dm = dm.reshape(len(cands), -1)
         if self.side != 0:  # not across the centre line, into the other leg's bay
-            out += np.maximum(0.05 - self.side * stowed[:, :, 1], 0.0).max(axis=1)
-        # inside (to a centimetre) first, then the plainest turn
-        score = 100.0 * np.maximum(out - 0.01, 0.0) + np.array([p for _, p, _ in cands])
+            y = np.concatenate([stowed[:, :, 1], mids[:, :, 1]], axis=1)
+            out += np.maximum(0.05 - self.side * y, 0.0).max(axis=1)
+        # the opening it needs: the leg's extent where it passes the skin or
+        # hangs below it, near it (m2)
+        z_skin = skin_below(probe, self.hinge[0], self.hinge[1], self.hinge[2] + 0.3)
+        z_skin = self.axle[2] + self.r if z_skin is None else z_skin
+        near = (dm > -0.05) & (mids[:, :, 2] > z_skin - 0.4)
+        big = 1e9
+        ext = [np.where(near, mids[:, :, i], -big).max(axis=1) - np.where(near, mids[:, :, i], big).min(axis=1)
+               for i in (0, 1)]
+        area = np.where(near.any(axis=1), np.clip(ext[0], 0.0, None) * np.clip(ext[1], 0.0, None), 0.0)
+        # inside (to a centimetre) first, then the smallest opening and the plainest turn
+        score = 100.0 * np.maximum(out - 0.01, 0.0) + area / 0.25 + np.array([p for _, p, _ in cands])
         k = int(np.argmin(score))
         self.set_stow(*cands[k][2])
         self.fitted = True
@@ -150,36 +181,58 @@ class Leg:
         return [self.axle + np.array([0.0, -0.5 * span + 0.5 * w + k * (w + 0.04), 0.0]) for k in range(n)], span
 
     def parts(self):
-        """The leg's solids: tyre(s) and hub(s) on the axle, the strut down
-        from the hinge, the oleo, and a fork (a nose wheel, a pair) or a stub
-        axle (a single main wheel, from inboard)."""
+        """The leg's solids, all in one (part_groups)."""
+        return union([n for g in self.part_groups().values() for n in (g["children"] if g.get("op") == "union" else [g])])
+
+    def part_groups(self):
+        """The leg's solids in the three pieces that move apart: the strut
+        (the cylinder, down from the hinge), the oleo (its piston, and a fork
+        - a nose wheel, a pair - or a stub axle - a single main wheel, from
+        inboard - with a fixed gear's spat), which slides up the strut as it
+        compresses and turns with the steering, and the wheel(s) on their
+        axle, which roll."""
         r, w, rs = self.r, self.w, self.strut_r
         y = np.array([0.0, 1.0, 0.0])
         centres, span = self.wheel_centres()
-        nodes = []
+        wheel, oleo = [], []
         for c in centres:
-            nodes.append({"prim": "cylinder", "material": TYRE, "a": c - 0.5 * w * y, "b": c + 0.5 * w * y, "r": r,
+            wheel.append({"prim": "cylinder", "material": TYRE, "a": c - 0.5 * w * y, "b": c + 0.5 * w * y, "r": r,
                           "round": min(0.45 * w, 0.3 * r)})
-            nodes.append({"prim": "cylinder", "material": METAL, "a": c - (0.5 * w + 0.01) * y,
+            wheel.append({"prim": "cylinder", "material": METAL, "a": c - (0.5 * w + 0.01) * y,
                           "b": c + (0.5 * w + 0.01) * y, "r": 0.55 * r, "round": 0.008})
+        foot = self.foot()
         if self.side == 0 or self.wheels > 1:
             half = 0.5 * span + 0.7 * rs
-            foot = self.axle + np.array([0.0, 0.0, r + 0.08 + 0.6 * rs])
             for s in (-1.0, 1.0):
-                nodes.append({"prim": "capsule", "material": STRUT, "a": foot + s * half * y, "b": self.axle + s * half * y,
-                              "r": 0.45 * rs})
-            nodes.append({"prim": "capsule", "material": STRUT, "a": foot - half * y, "b": foot + half * y, "r": 0.5 * rs})
-            nodes.append({"prim": "cylinder", "material": METAL, "a": self.axle - half * y, "b": self.axle + half * y,
+                oleo.append({"prim": "capsule", "material": STRUT, "a": foot + s * half * y, "b": self.axle + s * half * y,
+                             "r": 0.45 * rs})
+            oleo.append({"prim": "capsule", "material": STRUT, "a": foot - half * y, "b": foot + half * y, "r": 0.5 * rs})
+            # the axle through the fork, turning with the wheels it joins
+            wheel.append({"prim": "cylinder", "material": METAL, "a": self.axle - half * y, "b": self.axle + half * y,
                           "r": 0.3 * rs, "round": 0.004})
         else:
-            foot = self.axle - np.sign(self.side) * (0.5 * span + 1.3 * rs) * y
-            nodes.append({"prim": "cylinder", "material": METAL, "a": self.axle, "b": foot, "r": 0.4 * rs, "round": 0.004})
+            oleo.append({"prim": "cylinder", "material": METAL, "a": self.axle, "b": foot, "r": 0.4 * rs, "round": 0.004})
         mid = foot + 0.45 * (self.hinge - foot)
-        nodes.append({"prim": "capsule", "material": STRUT, "a": mid, "b": self.hinge, "r": rs})     # the cylinder
-        nodes.append({"prim": "capsule", "material": METAL, "a": foot, "b": mid, "r": 0.72 * rs})  # the oleo
+        oleo.append({"prim": "capsule", "material": METAL, "a": foot, "b": mid, "r": 0.72 * rs})  # the piston
         if self.fairing and not self.retractable:
-            nodes.append(self._spat(span))
-        return union(nodes)
+            oleo.append(self._spat(span))
+        return {"strut": union([{"prim": "capsule", "material": STRUT, "a": mid, "b": self.hinge, "r": rs}]),
+                "oleo": union(oleo), "wheel": union(wheel)}
+
+    def foot(self):
+        """The bottom of the oleo: above a fork, or inboard of a single wheel."""
+        rs, y = self.strut_r, np.array([0.0, 1.0, 0.0])
+        if self.side == 0 or self.wheels > 1:
+            return self.axle + np.array([0.0, 0.0, self.r + 0.08 + 0.6 * rs])
+        _, span = self.wheel_centres()
+        return self.axle - np.sign(self.side) * (0.5 * span + 1.3 * rs) * y
+
+    def slide(self):
+        """The way the oleo slides as it compresses (up the strut), and how far
+        along it per metre JSBSim compresses the unit (vertically)."""
+        k = self.hinge - self.foot()
+        k = k / np.linalg.norm(k)
+        return k, 1.0 / max(abs(float(k[2])), 0.2)
 
     def _spat(self, span):
         """A wheel spat: a streamlined shell over the wheel, open underneath."""
@@ -199,10 +252,41 @@ class Leg:
         pts.append(np.array([self.hinge + t * (self.axle - self.hinge) for t in np.linspace(0.0, 1.0, 12)]))
         return np.vstack(pts)
 
+    def surface(self, step=0.03):
+        """Points all over the leg's skin (its parts' surfaces, about step
+        apart): what must stay clear of the doors."""
+        return _surface_points(self.parts(), step)
+
     def turned(self, p, frac=1.0):
         """Points p with the leg turned frac of the way up."""
         R = _rotation(self.swing_axis, frac * self.swing_deg) @ _rotation(self.strut, frac * self.twist_deg)
         return self.hinge + (np.asarray(p, float) - self.hinge) @ R.T
+
+
+def _surface_points(node, step):
+    """Points on the surfaces of a union of capsules and cylinders (a leg's
+    parts), about step apart; other shapes are left out."""
+    if node.get("op") == "union":
+        return np.vstack([_surface_points(c, step) for c in node["children"]] or [np.zeros((0, 3))])
+    if node.get("prim") not in ("capsule", "cylinder"):
+        return np.zeros((0, 3))
+    a, b, r = np.asarray(node["a"], float), np.asarray(node["b"], float), float(node["r"])
+    k = b - a
+    L = float(np.linalg.norm(k))
+    k = k / L if L > 1e-9 else np.array([0.0, 0.0, 1.0])
+    e1 = np.cross(k, [1.0, 0.0, 0.0] if abs(k[0]) < 0.9 else [0.0, 1.0, 0.0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(k, e1)
+    th = np.linspace(0.0, 2.0 * np.pi, max(8, int(np.ceil(2.0 * np.pi * r / step))), endpoint=False)
+    ring = np.outer(np.cos(th), e1) + np.outer(np.sin(th), e2)
+    pts = [a + t * k + r * ring for t in np.linspace(0.0, L, max(2, int(np.ceil(L / step)) + 1))]
+    for end, s in ((a, -1.0), (b, 1.0)):  # the ends: a cap, or a flat face
+        for f in np.linspace(0.0, 1.0, max(2, int(np.ceil(r / step)) + 1))[:-1]:
+            if node["prim"] == "capsule":
+                pts.append(end + s * r * np.sqrt(1.0 - f * f) * k + r * f * ring)
+            else:
+                pts.append(end + r * f * ring)
+    return np.vstack(pts)
 
 
 def legs(aircraft):
@@ -214,38 +298,56 @@ def legs(aircraft):
     return out
 
 
-def leg_scene(leg):
+def leg_scene(leg, part=None):
+    """The mesher's scene of the leg, or of one of its part_groups."""
     cell = float(np.clip(leg.r / 40.0, 0.002, 0.01))
-    return {"cell": cell, "error": 0.1 * cell, "safety": 2.0, "sharp_deg": 45.0, "max_triangles": 4000,
-            "root": leg.parts()}
+    return {"cell": cell, "error": 0.1 * cell, "safety": 2.0, "sharp_deg": 45.0, "max_triangles": 4000 if part is None else 2000,
+            "root": leg.parts() if part is None else leg.part_groups()[part]}
 
 
 def skin_below(probe, x, y, z_top, depth=4.0):
     """The height where a vertical line down through (x, y) from z_top last
     leaves the solid (a meshkit.Probe) - the lowest skin there - or None when
     it misses."""
-    zs = np.linspace(z_top, z_top - depth, 800)
-    d, _ = probe(np.stack([np.full_like(zs, x), np.full_like(zs, y), zs], axis=1))
-    inside = d < 0.0
-    idx = np.flatnonzero(inside[:-1] & ~inside[1:])
-    if len(idx) == 0:
-        return None
-    i = idx[-1]
-    return float(zs[i] + (zs[i + 1] - zs[i]) * d[i] / (d[i] - d[i + 1]))
+    h = skin_heights(probe, [x], [y], z_top, depth)[0, 0]
+    return None if np.isnan(h) else float(h)
 
 
-def _door(solid, foils, lo, hi, z_lo, z_hi, hinge, axis, deg, label):
-    """A door: the skin inside the box (lo..hi in x-y, z_lo..z_hi), shrunk by
-    half the gap, as a shell 2 cm thick."""
-    c = np.array([0.5 * (lo[0] + hi[0]), 0.5 * (lo[1] + hi[1]), 0.5 * (z_lo + z_hi)])
-    half = np.array([0.5 * (hi[0] - lo[0]) - 0.5 * GAP, 0.5 * (hi[1] - lo[1]) - 0.5 * GAP, 0.5 * (z_hi - z_lo)])
-    box = {"prim": "box", "material": SKIN, "centre": c, "half": half, "round": 0.03}
-    shell = {"op": "subtract", "k": 0.0, "cut_material": SKIN,
-             "a": {"op": "intersect", "k": 0.0, "children": [solid, box]},
-             "b": {"op": "offset", "r": -0.02, "child": solid}}
-    return {"scene": {"cell": 0.005, "error": 0.002, "safety": 3.0, "sharp_deg": 40.0, "max_triangles": 1500,
-                      "foils": foils, "root": shell},
-            "hinge": np.asarray(hinge, float), "axis": np.asarray(axis, float), "deg": deg, "label": label}
+def skin_heights(probe, xs, ys, z_top, depth=4.0, step=0.01):
+    """The lowest skin's height over the grid xs x ys ([iy, ix]; nan where a
+    vertical line down from z_top misses the solid)."""
+    zs = np.arange(z_top, z_top - depth, -step)
+    X, Y = np.meshgrid(np.asarray(xs, float), np.asarray(ys, float))
+    n = X.size
+    d, _ = probe(np.stack([np.repeat(X.ravel(), len(zs)), np.repeat(Y.ravel(), len(zs)), np.tile(zs, n)], axis=1))
+    d = d.reshape(n, len(zs))
+    leave = (d[:, :-1] < 0.0) & (d[:, 1:] >= 0.0)  # out of the solid, going down
+    out = np.full(n, np.nan)
+    for k in np.flatnonzero(leave.any(axis=1)):
+        i = np.flatnonzero(leave[k])[-1]
+        out[k] = zs[i] + (zs[i + 1] - zs[i]) * d[k, i] / (d[k, i] - d[k, i + 1])
+    return out.reshape(X.shape)
+
+
+def _slab(xs, ys, H, rect, lo, hi, material=SKIN, round_=0.0):
+    """The layer lo..hi over the lowest skin H (skin_heights on xs x ys)
+    within rect = [x0, y0, x1, y1]; the gaps in H (no skin below) filled
+    from their nearest neighbours."""
+    H = np.array(H, float)
+    if np.isnan(H).all():
+        raise ValueError("no skin under the bay")
+    iy, ix = np.nonzero(~np.isnan(H))
+    for jy, jx in zip(*np.nonzero(np.isnan(H))):
+        k = int(np.argmin((iy - jy) ** 2 + (ix - jx) ** 2))
+        H[jy, jx] = H[iy[k], ix[k]]
+    return {"prim": "slab", "material": material, "origin": [float(xs[0]), float(ys[0])],
+            "step": [float(xs[1] - xs[0]), float(ys[1] - ys[0])], "size": [len(xs), len(ys)], "z": H.ravel().tolist(),
+            "lo": lo, "hi": hi, "rect": [float(v) for v in rect], "round": round_}
+
+
+def swept(leg, pts, steps=30):
+    """Points pts of the leg at every step of its swing, down to stowed."""
+    return np.vstack([leg.turned(pts, f) for f in np.linspace(0.0, 1.0, steps + 1)])
 
 
 def bays(aircraft, solid, foils):
@@ -270,64 +372,113 @@ def bays(aircraft, solid, foils):
 
 def _bay(leg, probe, solid, foils):
     """One leg's bay, doors and protrusion (bays)."""
-    pts = leg.points()
+    from . import meshkit
+    pts = leg.surface()
     stowed = leg.turned(pts)
     d, _ = probe(stowed)
     protrusion = float(max(d.max(), 0.0))
-    c = stowed.mean(axis=0)
-    z0 = skin_below(probe, c[0], c[1], stowed[:, 2].max() + 0.5)
-    if z0 is None:
-        z0 = float(stowed[:, 2].min())
-    # the opening: under the stowed leg, and where the leg passes the skin
-    near = [q for f in (0.0, 0.25, 0.5, 0.75) for q in leg.turned(pts, f) if q[2] > z0 - 0.15]
-    xy = np.vstack([stowed] + ([np.array(near)] if near else []))[:, :2]
-    lo, hi = xy.min(axis=0) - 0.04, xy.max(axis=0) + 0.04
-    # the skin's heights over it: the doors' depth
-    gx, gy = np.linspace(lo[0], hi[0], 9), np.linspace(lo[1], hi[1], 9)
-    samples = [(x, y, skin_below(probe, x, y, stowed[:, 2].max() + 0.5)) for x in gx for y in gy]
-    zs = [z for _, _, z in samples if z is not None] or [z0]
-    # doors in the skin near the bay's own height: where the skin over the
-    # footprint climbs further (onto a wing), the bay stays closed inside
-    z_lo, z_hi = min(zs) - 0.05, min(max(zs) + 0.06, z0 + 0.25)
-    cut_xy = np.array([(x, y) for x, y, z in samples if z is not None and z <= z_hi - 0.03])
-    if len(cut_xy):
-        step = np.array([gx[1] - gx[0], gy[1] - gy[0]])
-        dlo, dhi = np.maximum(cut_xy.min(axis=0) - 0.5 * step, lo), np.minimum(cut_xy.max(axis=0) + 0.5 * step, hi)
-    else:
-        dlo, dhi = lo, hi
-    top = max(stowed[:, 2].max() + 0.06, z_hi + 0.05)
-    # the bay: the opening through the lower skin, and above it the space
-    # the stowed leg needs - hollowed only where the airframe is at least
-    # 3 cm thick, so it never breaks through another skin
-    centre = [0.5 * (lo[0] + hi[0]), 0.5 * (lo[1] + hi[1])]
-    half = [0.5 * (hi[0] - lo[0]) + 0.5 * GAP, 0.5 * (hi[1] - lo[1]) + 0.5 * GAP]
-    opening = {"prim": "box", "material": SKIN, "centre": [0.5 * (dlo[0] + dhi[0]), 0.5 * (dlo[1] + dhi[1]),
-                                                             0.5 * (z_lo - 0.1 + z_hi + 0.03)],
-               "half": [0.5 * (dhi[0] - dlo[0]) + 0.5 * GAP, 0.5 * (dhi[1] - dlo[1]) + 0.5 * GAP,
-                        0.5 * (z_hi + 0.03 - z_lo + 0.1)], "round": 0.03 + 0.5 * GAP}
+    # the leg on its way down: where it is inside the airframe (the bay's
+    # space) and where it passes through the skin (the opening)
+    moving = swept(leg, pts)
+    dm, _ = probe(moving)
+    inside = moving[dm < 0.0] if (dm < 0.0).any() else stowed
+    through = moving[np.abs(dm) < 0.05] if (np.abs(dm) < 0.05).any() else stowed
+    # across the swing (u) and along it (v): a leg swinging fore and aft
+    # passes between doors hinged along x, one swinging sideways between
+    # doors hinged along y
+    base = _swing(leg.direction, leg.side)
+    iu, iv = (1, 0) if abs(base[1]) >= abs(base[0]) else (0, 1)
+    lo, hi = through[:, :2].min(axis=0) - CLEAR, through[:, :2].max(axis=0) + CLEAR
+    # the lowest skin around it, 2.5 cm apart, with room for the doors to move out
+    reach = np.array([0.1, 0.1])
+    reach[iu] = 0.8
+    z_top = float(inside[:, 2].max()) + 0.3
+    xs = np.arange(lo[0] - reach[0], hi[0] + reach[0] + 1e-9, 0.025)
+    ys = np.arange(lo[1] - reach[1], hi[1] + reach[1] + 1e-9, 0.025)
+    H = skin_heights(probe, xs, ys, z_top)
+    X, Y = np.meshgrid(xs, ys)
+    # the doors: a pair either side of the middle of the leg's swing, each
+    # hinged on its outer edge and opening outwards, down; each edge moves
+    # out until its open door clears the leg all the way
+    um = 0.5 * (lo[iu] + hi[iu])
+    UV = [X, Y]
+    edges = [lo[iu], hi[iu]]
+    limit = reach[iu] + 0.5 * (hi[iu] - lo[iu])
+    doors_at = []
+    with meshkit.Probe({"root": leg.parts()}) as legp:
+        for k, sgn in ((0, -1.0), (1, 1.0)):
+            while True:
+                door = _door_frame(H, UV, iu, iv, lo, hi, um, edges[k], sgn)
+                if door is None or _door_clear(leg, legp, door) >= CLEAR or abs(edges[k] - um) > limit:
+                    break
+                edges[k] += sgn * 0.025
+            doors_at.append(door)
+    lo[iu], hi[iu] = edges
+    within = (X >= lo[0]) & (X <= hi[0]) & (Y >= lo[1]) & (Y <= hi[1]) & ~np.isnan(H)
+    z_lo = float(H[within].min()) if within.any() else float(through[:, 2].min())
+    top = float(inside[:, 2].max()) + 0.06
+    # the bay: the opening through the lowest skin, and above it the space
+    # the leg passes through and stows in - hollowed only where the airframe
+    # is at least 3 cm thick, so it never breaks through another skin
+    ilo = np.minimum(inside[:, :2].min(axis=0) - CLEAR, lo)
+    ihi = np.maximum(inside[:, :2].max(axis=0) + CLEAR, hi)
+    opening = _slab(xs, ys, H, [lo[0] - 0.5 * GAP, lo[1] - 0.5 * GAP, hi[0] + 0.5 * GAP, hi[1] + 0.5 * GAP],
+                    -0.1, 0.06, round_=0.03)
     space = {"op": "intersect", "k": 0.0, "children": [
-        {"prim": "box", "material": SKIN, "centre": centre + [0.5 * (z_lo - 0.1 + top)],
-         "half": half + [0.5 * (top - z_lo + 0.1)], "round": 0.03 + 0.5 * GAP},
+        {"prim": "box", "material": SKIN, "centre": [0.5 * (ilo[0] + ihi[0]), 0.5 * (ilo[1] + ihi[1]), 0.5 * (z_lo - 0.1 + top)],
+         "half": [0.5 * (ihi[0] - ilo[0]) + 0.5 * GAP, 0.5 * (ihi[1] - ilo[1]) + 0.5 * GAP, 0.5 * (top - z_lo + 0.1)],
+         "round": 0.03 + 0.5 * GAP},
         {"op": "offset", "r": -0.03, "child": solid}]}
     cut = {"op": "union", "k": 0.0, "children": [opening, space]}
-    # the doors: a pair split along a nose leg's centre line, else one;
-    # hinged along the outer edge, or for a leg swinging sideways the edge
-    # it stows against
-    lo, hi = dlo, dhi
-    if leg.side == 0:
-        ym = 0.5 * (lo[1] + hi[1])
-        panes = [(lo, np.array([hi[0], ym]), lo[1]), (np.array([lo[0], ym]), hi, hi[1])]
-    elif leg.direction in ("inward", "outward"):
-        far = lo[1] if abs(stowed[:, 1].mean() - lo[1]) < abs(stowed[:, 1].mean() - hi[1]) else hi[1]
-        panes = [(lo, hi, far)]
-    else:
-        panes = [(lo, hi, hi[1] if leg.side > 0 else lo[1])]
     doors = []
-    for k, (a, b, ye) in enumerate(panes):
-        yc = 0.5 * (a[1] + b[1])
-        xm = 0.5 * (a[0] + b[0])
-        ze = skin_below(probe, xm, ye - np.sign(ye - yc) * 0.02, z_hi + 0.5) or z0
-        axis = np.array([np.sign(ye - yc) or 1.0, 0.0, 0.0])
-        doors.append(_door(solid, foils, a, b, z_lo, z_hi, [xm, ye, ze], axis, leg.door_deg,
-                           "%s door%s" % (leg.name, "" if len(panes) == 1 else " %d" % (k + 1))))
+    for k, door in enumerate(doors_at):
+        if door is None:
+            continue
+        rect = door["rect"]
+        shell = {"op": "intersect", "k": 0.0, "children": [
+            solid, _slab(xs, ys, H, [rect[0] + 0.5 * GAP, rect[1] + 0.5 * GAP, rect[2] - 0.5 * GAP, rect[3] - 0.5 * GAP],
+                         -0.05, DOOR, round_=0.02)]}
+        doors.append({"scene": {"cell": 0.005, "error": 0.002, "safety": 3.0, "sharp_deg": 40.0, "max_triangles": 1500,
+                                "foils": foils, "root": shell},
+                      "hinge": door["hinge"], "axis": door["axis"], "deg": leg.door_deg,
+                      "label": "%s door %d" % (leg.name, k + 1)})
     return {"leg": leg, "cut": cut, "doors": doors, "protrusion": protrusion}
+
+
+def _door_frame(H, UV, iu, iv, lo, hi, um, edge, sgn):
+    """A door from um out to edge (sgn: the side, -1 towards lower u): its
+    rect, hinge (on the skin at the edge's middle), axis and points on it -
+    or None where there is no skin."""
+    U, V = UV[iu], UV[iv]
+    a, b = (edge, um) if sgn < 0 else (um, edge)
+    inpane = (U >= a) & (U <= b) & (V >= lo[iv]) & (V <= hi[iv]) & ~np.isnan(H)
+    if not inpane.any():
+        return None
+    rect = np.zeros(4)
+    rect[iu], rect[2 + iu], rect[iv], rect[2 + iv] = a, b, lo[iv], hi[iv]
+    # the hinge: on the skin, at the outermost skin across the middle of the door
+    vm = 0.5 * (lo[iv] + hi[iv])
+    vs = np.unique(V[inpane])
+    row = inpane & (V == vs[np.argmin(np.abs(vs - vm))])
+    cand = np.flatnonzero(row.ravel())
+    k = cand[np.argmax(sgn * U.ravel()[cand])]
+    hinge = np.zeros(3)
+    hinge[iu], hinge[iv], hinge[2] = U.ravel()[k], vm, H.ravel()[k]
+    # the turn that takes the door's free edge (towards um) down
+    axis = np.zeros(3)
+    axis[iv] = sgn if iu == 1 else -sgn
+    P = np.stack([UV[0][inpane], UV[1][inpane], H[inpane]], axis=1)
+    P = np.vstack([P, P + [0.0, 0.0, DOOR]])
+    return {"rect": rect, "hinge": hinge, "axis": axis, "points": P}
+
+
+def _door_clear(leg, legp, door, steps=24):
+    """How far the door, open, stays from the leg as it swings (m)."""
+    R = _rotation(door["axis"], leg.door_deg)
+    opened = door["hinge"] + (door["points"] - door["hinge"]) @ R.T
+    frames = []
+    for f in np.linspace(0.0, 1.0, steps + 1):
+        Rl = _rotation(leg.swing_axis, f * leg.swing_deg) @ _rotation(leg.strut, f * leg.twist_deg)
+        frames.append(leg.hinge + (opened - leg.hinge) @ Rl)
+    d, _ = legp(np.vstack(frames))
+    return float(d.min())

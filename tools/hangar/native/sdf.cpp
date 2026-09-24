@@ -447,6 +447,69 @@ private:
     int mat_;
 };
 
+/// A layer over a skin: the points from lo to hi above a height field z =
+/// h(x, y) - measured along its normal - within a rectangle. h is sampled
+/// on a grid (x fastest), bilinear between samples and held beyond them. A
+/// landing gear door is the airframe within one: the lowest skin under a
+/// bay, however it curves, and nothing above it.
+class Slab final : public Node {
+public:
+    explicit Slab(const Json& j) : lo_(j.number("lo", 0.0)), hi_(j.number("hi", 0.0)), round_(j.number("round", 0.0)),
+                                   mat_(materialOf(j)) {
+        const auto o = list(j, "origin"), st = list(j, "step"), n = list(j, "size"), r = list(j, "rect");
+        z_ = list(j, "z");
+        if (o.size() != 2 || st.size() != 2 || n.size() != 2 || r.size() != 4) fail("a slab needs origin, step, size [2] and rect [4]");
+        x0_ = o[0], y0_ = o[1], dx_ = st[0], dy_ = st[1];
+        nx_ = static_cast<int>(n[0]), ny_ = static_cast<int>(n[1]);
+        if (nx_ < 2 || ny_ < 2 || dx_ <= 0.0 || dy_ <= 0.0 || z_.size() != static_cast<std::size_t>(nx_) * static_cast<std::size_t>(ny_))
+            fail("a slab's grid needs size [nx >= 2, ny >= 2], positive steps and nx * ny heights");
+        if (!(lo_ < hi_)) fail("a slab needs lo < hi");
+        cx_ = 0.5 * (r[0] + r[2]), cy_ = 0.5 * (r[1] + r[3]);
+        hx_ = 0.5 * (r[2] - r[0]), hy_ = 0.5 * (r[3] - r[1]);
+        if (hx_ <= 0.0 || hy_ <= 0.0) fail("a slab's rect is [x0, y0, x1, y1] with x0 < x1 and y0 < y1");
+        double zmin = z_[0], zmax = z_[0], g = 0.0;
+        for (double v : z_) zmin = std::min(zmin, v), zmax = std::max(zmax, v);
+        for (int jy = 0; jy + 1 < ny_; ++jy)
+            for (int ix = 0; ix + 1 < nx_; ++ix) {
+                const double gx = (at(ix + 1, jy) - at(ix, jy)) / dx_, gy = (at(ix, jy + 1) - at(ix, jy)) / dy_;
+                g = std::max(g, std::sqrt(1.0 + std::min(gx * gx + gy * gy, kSteep)));
+            }
+        // the layer lies within lo..hi times the steepest slope's secant of the field
+        const double pad = std::max(std::fabs(lo_), std::fabs(hi_)) * g;
+        box.add({r[0], r[1], zmin - pad});
+        box.add({r[2], r[3], zmax + pad});
+    }
+    Sample eval(V3 p) const override {
+        // the field, its slope, where p stands
+        const double fx = clamp((p.x - x0_) / dx_, 0.0, nx_ - 1.0), fy = clamp((p.y - y0_) / dy_, 0.0, ny_ - 1.0);
+        const int ix = std::min(static_cast<int>(fx), nx_ - 2), iy = std::min(static_cast<int>(fy), ny_ - 2);
+        const double a = fx - ix, b = fy - iy;
+        const double h00 = at(ix, iy), h10 = at(ix + 1, iy), h01 = at(ix, iy + 1), h11 = at(ix + 1, iy + 1);
+        const double h = (1 - a) * (1 - b) * h00 + a * (1 - b) * h10 + (1 - a) * b * h01 + a * b * h11;
+        const double gx = ((1 - b) * (h10 - h00) + b * (h11 - h01)) / dx_, gy = ((1 - a) * (h01 - h00) + a * (h11 - h10)) / dy_;
+        // along the normal, up to a steep slope: where the skin steps (a
+        // fuselage's side, a wing root) the layer thins rather than stand tall
+        const double t = (p.z - h) / std::sqrt(1.0 + std::min(gx * gx + gy * gy, kSteep));
+        const double layer = std::max(lo_ - t, t - hi_);
+        // the rectangle, its corners rounded
+        const double qx = std::fabs(p.x - cx_) - (hx_ - round_), qy = std::fabs(p.y - cy_) - (hy_ - round_);
+        const double rect = std::sqrt(std::max(qx, 0.0) * std::max(qx, 0.0) + std::max(qy, 0.0) * std::max(qy, 0.0)) +
+                            std::min(std::max(qx, qy), 0.0) - round_;
+        const double out = std::sqrt(std::max(rect, 0.0) * std::max(rect, 0.0) + std::max(layer, 0.0) * std::max(layer, 0.0));
+        return {out + std::min(std::max(rect, layer), 0.0), mat_};
+    }
+
+private:
+    static constexpr double kSteep = 4.0; ///< the steepest slope measured along the normal, squared (63 deg)
+    double at(int ix, int iy) const { return z_[static_cast<std::size_t>(iy * nx_ + ix)]; }
+    std::vector<double> z_;
+    double x0_ = 0.0, y0_ = 0.0, dx_ = 1.0, dy_ = 1.0;
+    int nx_ = 0, ny_ = 0;
+    double lo_, hi_, round_;
+    double cx_ = 0.0, cy_ = 0.0, hx_ = 0.0, hy_ = 0.0;
+    int mat_;
+};
+
 class Ellipsoid final : public Node {
 public:
     explicit Ellipsoid(const Json& j)
@@ -687,6 +750,7 @@ NodePtr build(const Json& j, const Scene& scene) {
     if (p == "cylinder") return std::make_unique<Cylinder>(j);
     if (p == "box") return std::make_unique<BoxPrim>(j);
     if (p == "ellipsoid") return std::make_unique<Ellipsoid>(j);
+    if (p == "slab") return std::make_unique<Slab>(j);
     if (p == "torus") return std::make_unique<Torus>(j);
     fail("unknown primitive '" + p + "'");
 }

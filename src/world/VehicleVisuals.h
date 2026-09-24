@@ -106,12 +106,13 @@ public:
 
     /// A moving part of a model: a node named fsim:<channel>[:<gain>][+...],
     /// fsim:gear:<deg>[:<g0>:<g1>], fsim:afterburner[:<engine>],
-    /// fsim:lef[:<gain>][@<lo>,<hi>], fsim:propeller:<engine> or
-    /// fsim:nozzle:<engine>:<deg> - each moved by what the simulation reports
-    /// (VehicleState), never by a guess of its own.
+    /// fsim:lef[:<gain>][@<lo>,<hi>], fsim:propeller:<engine>,
+    /// fsim:nozzle:<engine>:<deg>, fsim:oleo:<wheel>[:<gain>],
+    /// fsim:steer:<wheel> or fsim:wheel:<wheel>:<radius> - each moved by what
+    /// the simulation reports (VehicleState), never by a guess of its own.
     struct Joint {
         enum Channel { Aileron, Elevator, Rudder, Flaps };
-        enum Kind { Surface, Gear, Afterburner, LeadingEdge, Propeller, Nozzle };
+        enum Kind { Surface, Gear, Afterburner, LeadingEdge, Propeller, Nozzle, Oleo, Steer, Wheel };
         Kind kind = Surface;
         const vsg::MatrixTransform* node = nullptr; ///< in the shared model
         vsg::dmat4 rest;                           ///< its matrix at zero deflection
@@ -128,11 +129,18 @@ public:
         double phaseTime = std::numeric_limits<double>::quiet_NaN();
         /// nozzle petal: turned this far (rad) wide open (VehicleState::nozzlePosition 1)
         double nozzleRad = 0.0;
+        /// oleo, steer, wheel: the wheeled gear unit (VehicleState::wheel*), and a
+        /// wheel's radius (m), which turns its rolling speed into its spin
+        int wheel = 0;
+        double wheelRadius = 0.0;
         /// Parses a node name; false when it is not a joint (or malformed).
         static bool parse(const std::string& name, Joint& joint);
-        /// The node's matrix for the vehicle's state (a propeller also advances
-        /// its turn).
+        /// The node's matrix for the vehicle's state (a propeller or a wheel
+        /// also advances its turn).
         vsg::dmat4 matrix(const sim::VehicleState& state);
+        /// Advances the turn (0..1) at this many turns a second over the sim
+        /// time since the last call; held while the clock stops or jumps.
+        double turn(double perSecond, double simTime);
     };
 
     /// The joints of one slot's model and their transforms in that slot's own

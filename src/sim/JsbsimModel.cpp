@@ -547,6 +547,19 @@ void JsbsimModel::state(VehicleState& out) const {
         }
     }
     out.leadingEdgeFlapRad = lefPosDeg_.valid() ? lefPosDeg_.get() * 3.14159265358979323846 / 180.0 : 0.0;
+    // the wheels: each strut's compression, its steering, the wheel's roll
+    const auto& ground = fdm_->GetGroundReactions();
+    out.wheelCount = 0;
+    for (int i = 0; i < ground->GetNumGearUnits() && out.wheelCount < VehicleState::kMaxWheels; ++i) {
+        const auto unit = ground->GetGearUnit(i);
+        if (!unit->IsBogey()) continue;
+        const int k = out.wheelCount++;
+        out.wheelCompressionM[k] = feetToMetres(unit->GetCompLen());
+        out.wheelSteerRad[k] = unit->GetSteerAngleDeg() * 3.14159265358979323846 / 180.0;
+        out.wheelSpeedMs[k] = feetToMetres(unit->GetWheelRollVel());
+    }
+    for (int k = out.wheelCount; k < VehicleState::kMaxWheels; ++k)
+        out.wheelCompressionM[k] = out.wheelSteerRad[k] = out.wheelSpeedMs[k] = 0.0;
     out.fuelKg = propulsion->GetTanksWeight() * 0.45359237; // tank contents, lbs -> kg
 
     out.onGround = fdm_->GetGroundReactions()->GetWOW();

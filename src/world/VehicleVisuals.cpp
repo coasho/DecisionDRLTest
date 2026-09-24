@@ -341,6 +341,32 @@ bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
         joint.gain = v.empty() ? 1.0 : v[0];
         return true;
     }
+    // a wheeled gear unit's parts, by its index among the aircraft's wheels
+    // (VehicleState::wheel*): fsim:oleo:<wheel>[:<gain>] slides along its x
+    // axis by the strut's compression (times the gain), fsim:steer:<wheel>
+    // turns about it by the steering angle, fsim:wheel:<wheel>:<radius> rolls
+    // about it at the wheel's speed
+    if (terms.rfind("oleo:", 0) == 0 || terms.rfind("steer:", 0) == 0 || terms.rfind("wheel:", 0) == 0) {
+        const auto colon = terms.find(':');
+        const std::string what = terms.substr(0, colon);
+        std::vector<double> v;
+        if (!parseNumbers(terms.substr(colon + 1), v) || v.empty()) return false;
+        if (v[0] < 0.0 || v[0] >= sim::VehicleState::kMaxWheels || v[0] != std::floor(v[0])) return false;
+        joint.wheel = static_cast<int>(v[0]);
+        if (what == "oleo") {
+            if (v.size() > 2) return false;
+            joint.kind = Oleo;
+            joint.gain = v.size() == 2 ? v[1] : 1.0;
+        } else if (what == "steer") {
+            if (v.size() != 1) return false;
+            joint.kind = Steer;
+        } else {
+            if (v.size() != 2 || !(v[1] > 0.0)) return false;
+            joint.kind = Wheel;
+            joint.wheelRadius = v[1];
+        }
+        return true;
+    }
     // a nozzle petal: fsim:nozzle:<engine>:<deg wide open>
     if (terms.rfind("nozzle:", 0) == 0) {
         std::vector<double> v;
@@ -405,6 +431,18 @@ bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
     }
 }
 
+double VehicleVisuals::Joint::turn(double perSecond, double simTime) {
+    // over the sim's time since the last frame; held still when the clock
+    // stops or jumps (pause, a reset, a replay's seek)
+    if (std::isfinite(simTime)) {
+        const double dt = std::isfinite(phaseTime) ? simTime - phaseTime : 0.0;
+        if (dt > 0.0 && dt < 1.0 && std::isfinite(perSecond)) phase += perSecond * dt;
+        phase -= std::floor(phase);
+        phaseTime = simTime;
+    }
+    return phase;
+}
+
 vsg::dmat4 VehicleVisuals::Joint::matrix(const sim::VehicleState& s) {
     if (kind == Gear) {
         const double g = std::isfinite(s.gearPosition) ? s.gearPosition : 1.0;
@@ -417,17 +455,22 @@ vsg::dmat4 VehicleVisuals::Joint::matrix(const sim::VehicleState& s) {
     }
     const bool engineOk = engine < s.engineCount;
     if (kind == Propeller) {
-        // turned on by the engine's rpm over the sim's time since the last
-        // frame; held still when the clock stops or jumps (pause, a reset, a
-        // replay's seek)
         const double rpm = engineOk && std::isfinite(s.engineRpm[engine]) ? std::abs(s.engineRpm[engine]) : 0.0;
-        if (std::isfinite(s.simTime)) {
-            const double dt = std::isfinite(phaseTime) ? s.simTime - phaseTime : 0.0;
-            if (dt > 0.0 && dt < 1.0) phase += rpm / 60.0 * dt;
-            phase -= std::floor(phase);
-            phaseTime = s.simTime;
-        }
-        return rest * vsg::rotate(2.0 * 3.14159265358979323846 * phase, vsg::dvec3(1.0, 0.0, 0.0));
+        return rest * vsg::rotate(2.0 * 3.14159265358979323846 * turn(rpm / 60.0, s.simTime), vsg::dvec3(1.0, 0.0, 0.0));
+    }
+    const bool wheelOk = wheel < s.wheelCount;
+    if (kind == Oleo) {
+        const double c = wheelOk && std::isfinite(s.wheelCompressionM[wheel]) ? std::max(s.wheelCompressionM[wheel], 0.0) : 0.0;
+        return rest * vsg::translate(gain * c, 0.0, 0.0);
+    }
+    if (kind == Steer) {
+        const double a = wheelOk && std::isfinite(s.wheelSteerRad[wheel]) ? s.wheelSteerRad[wheel] : 0.0;
+        return rest * vsg::rotate(a, vsg::dvec3(1.0, 0.0, 0.0));
+    }
+    if (kind == Wheel) {
+        const double v = wheelOk && std::isfinite(s.wheelSpeedMs[wheel]) ? s.wheelSpeedMs[wheel] : 0.0;
+        const double perSecond = v / (2.0 * 3.14159265358979323846 * wheelRadius);
+        return rest * vsg::rotate(2.0 * 3.14159265358979323846 * turn(perSecond, s.simTime), vsg::dvec3(1.0, 0.0, 0.0));
     }
     if (kind == Nozzle) {
         // the nozzle as the engine model has it: shut at military power, open
@@ -464,7 +507,8 @@ VehicleVisuals::Rig VehicleVisuals::Rig::find(const vsg::ref_ptr<vsg::Node>& gra
         LOG_WARN("world") << "model node '" << name
                           << "' is not a moving part (fsim:aileron|elevator|rudder|flaps[:gain][+...][@lo,hi], "
                              "fsim:gear:<deg>[:<g0>:<g1>], fsim:afterburner[:<engine>], fsim:lef[:<gain>][@lo,hi], "
-                             "fsim:propeller:<engine>, fsim:nozzle:<engine>:<deg>); left fixed";
+                             "fsim:propeller:<engine>, fsim:nozzle:<engine>:<deg>, fsim:oleo:<wheel>[:<gain>], "
+                             "fsim:steer:<wheel>, fsim:wheel:<wheel>:<radius>); left fixed";
     rig.joints = std::move(finder.joints);
     rig.spine.assign(finder.spine.begin(), finder.spine.end());
     return rig;

@@ -76,8 +76,18 @@ TEST_CASE("control surfaces turn with each vehicle's own deflections", "[render]
     REQUIRE(a.normal);
     REQUIRE(a.normal != b.normal);
     for (std::size_t j = 0; j < a.transforms.size(); ++j) {
-        REQUIRE(a.transforms[j] != b.transforms[j]);            // each vehicle turns its own
-        REQUIRE(a.transforms[j]->children == b.transforms[j]->children); // and draws the same geometry
+        REQUIRE(a.transforms[j] != b.transforms[j]); // each vehicle turns its own
+        const auto& ka = a.transforms[j]->children;
+        const auto& kb = b.transforms[j]->children;
+        REQUIRE(ka.size() == kb.size());
+        for (std::size_t k = 0; k < ka.size(); ++k) {
+            // a joint nested in it (a wheel in its oleo) is the vehicle's own too;
+            // everything else, the geometry, is shared
+            const auto nested = std::find_if(a.transforms.begin(), a.transforms.end(),
+                                             [&](const auto& t) { return t.get() == ka[k].get(); });
+            if (nested == a.transforms.end()) REQUIRE(ka[k] == kb[k]);
+            else REQUIRE(kb[k].get() == b.transforms[static_cast<std::size_t>(nested - a.transforms.begin())].get());
+        }
     }
 
     // At rest, then vehicle 0 with every channel positive; vehicle 1 stays at rest.
@@ -238,6 +248,32 @@ TEST_CASE("control surface names parse, and anything else is left alone", "[rend
     REQUIRE_FALSE(Joint::parse("fsim:propeller:7", j));
     REQUIRE_FALSE(Joint::parse("fsim:lef:1:2", j));
     REQUIRE_FALSE(Joint::parse("fsim:lef@25,-2", j));
+    // a wheel unit's parts: the oleo slides by the strut's compression, the
+    // steering turns by its angle, the wheel rolls at its speed
+    REQUIRE(Joint::parse("fsim:oleo:2:1.1", j));
+    REQUIRE(j.kind == Joint::Oleo);
+    REQUIRE(j.wheel == 2);
+    s = sim::VehicleState();
+    s.wheelCount = 3;
+    s.wheelCompressionM[2] = 0.1;
+    REQUIRE(std::abs(j.matrix(s)[3][0] - 0.11) < 1e-12);
+    s.wheelCount = 2; // no such wheel: at rest
+    REQUIRE(j.matrix(s)[3][0] == 0.0);
+    REQUIRE(Joint::parse("fsim:steer:0", j));
+    REQUIRE(j.kind == Joint::Steer);
+    s.wheelSteerRad[0] = 0.3;
+    REQUIRE(std::abs(turn(j.matrix(s)) - 0.3) < 1e-12);
+    REQUIRE(Joint::parse("fsim:wheel:1:0.25", j));
+    REQUIRE(j.kind == Joint::Wheel);
+    s.wheelSpeedMs[1] = 0.5 * 3.14159265358979323846; // a turn a second
+    s.simTime = 2.0;
+    REQUIRE(std::abs(turn(j.matrix(s))) < 1e-12);
+    s.simTime = 2.25;
+    REQUIRE(std::abs(turn(j.matrix(s)) - 0.5 * 3.14159265358979323846) < 1e-9);
+    REQUIRE_FALSE(Joint::parse("fsim:oleo:8", j));
+    REQUIRE_FALSE(Joint::parse("fsim:steer:0:1", j));
+    REQUIRE_FALSE(Joint::parse("fsim:wheel:0", j));
+    REQUIRE_FALSE(Joint::parse("fsim:wheel:0:0", j));
     REQUIRE_FALSE(Joint::parse("fsim:gear", j));
     REQUIRE_FALSE(Joint::parse("fsim:gear:x", j));
     REQUIRE_FALSE(Joint::parse("fsim:gear:90:0.5:0.5", j));

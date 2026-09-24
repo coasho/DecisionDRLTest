@@ -156,6 +156,7 @@ typedef struct fsim_vehicle_spec {
 
 /* Same layout as fsim::VehicleState (checked at build time). */
 #define FSIM_MAX_ENGINES 4
+#define FSIM_MAX_WHEELS 8
 typedef struct fsim_vehicle_state {
     double sim_time;
     double position_ecef[3];
@@ -175,6 +176,11 @@ typedef struct fsim_vehicle_state {
     double afterburner[FSIM_MAX_ENGINES];     /* 0 off .. 1 full */
     double nozzle_position[FSIM_MAX_ENGINES]; /* 0 shut .. 1 wide open */
     double leading_edge_flap_rad;             /* + leading edge down */
+    /* the wheeled gear units (JSBSim BOGEY contacts, in the aircraft file's order) */
+    int32_t wheel_count;
+    double wheel_compression_m[FSIM_MAX_WHEELS]; /* strut and tyre compression */
+    double wheel_steer_rad[FSIM_MAX_WHEELS];     /* + right */
+    double wheel_speed_ms[FSIM_MAX_WHEELS];      /* rolling speed at the rim */
 } fsim_vehicle_state;
 
 typedef struct fsim_environment {

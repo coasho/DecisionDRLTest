@@ -11,6 +11,7 @@ namespace fsim::sim {
 /// Compatibility rule (design 10.3): fields may only be appended.
 struct VehicleState {
     static constexpr int kMaxEngines = 4;
+    static constexpr int kMaxWheels = 8;
 
     double simTime = 0.0; ///< seconds since reset
 
@@ -65,6 +66,12 @@ struct VehicleState {
     double afterburner[kMaxEngines] = {0, 0, 0, 0};    ///< a turbine's afterburner, 0 off .. 1 full
     double nozzlePosition[kMaxEngines] = {0, 0, 0, 0}; ///< a turbine's nozzle, 0 shut .. 1 wide open
     double leadingEdgeFlapRad = 0.0;                   ///< leading-edge flaps, + leading edge down (fcs/lef-pos-deg)
+    /// The wheeled gear units (JSBSim's BOGEY contacts, in the aircraft
+    /// file's order: a nose wheel, then the left and right mains, for most):
+    int wheelCount = 0;
+    double wheelCompressionM[kMaxWheels] = {0, 0, 0, 0, 0, 0, 0, 0}; ///< each one's strut and tyre compression (m)
+    double wheelSteerRad[kMaxWheels] = {0, 0, 0, 0, 0, 0, 0, 0};     ///< each one's steering angle (rad, + right)
+    double wheelSpeedMs[kMaxWheels] = {0, 0, 0, 0, 0, 0, 0, 0};      ///< its rolling speed at the rim (m/s; spins down in the air)
 };
 
 } // namespace fsim::sim

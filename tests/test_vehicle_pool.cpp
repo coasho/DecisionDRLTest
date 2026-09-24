@@ -252,6 +252,42 @@ TEST_CASE("a wheel that lands on its side does not blow the aircraft up", "[sim]
     log::setLevel(log::Level::Warn);
 }
 
+TEST_CASE("the wheels report their struts, steering and roll", "[sim][jsbsim]") {
+    // what the viewer's gear follows: parked, each strut is compressed by
+    // the weight on it; taxiing, the wheels roll at the ground speed and the
+    // nose wheel steers with the pedals (hangar's C172 links them)
+    log::setLevel(log::Level::Warn);
+    auto ground = std::make_shared<FlatGround>(0.0);
+    JsbsimModel model(kDt, ground);
+    InitialConditions ic;
+    ic.onGround = true;
+    ic.airspeedTrueMs = 0.0;
+    REQUIRE(model.load(AircraftSpec{"c172", kRoot, FSIM_TEST_AIRCRAFT_DIR}, ic));
+    ControlInputs in;
+    in.setThrottleAll(0.0);
+    in.brakeLeft = in.brakeRight = 1.0;
+    for (int i = 0; i < 3 * 120; ++i) model.step(in);
+    VehicleState s;
+    model.state(s);
+    REQUIRE(s.wheelCount == 3); // the nose wheel, then the left and right mains
+    for (int k = 0; k < 3; ++k) {
+        CHECK(s.wheelCompressionM[k] > 0.005);
+        CHECK(s.wheelCompressionM[k] < 0.5);
+        CHECK(std::abs(s.wheelSpeedMs[k]) < 0.05);
+    }
+    CHECK(s.wheelCompressionM[3] == 0.0);
+    in.brakeLeft = in.brakeRight = 0.0;
+    in.setThrottleAll(0.6);
+    in.rudder = 0.5;
+    for (int i = 0; i < 6 * 120; ++i) model.step(in);
+    model.state(s);
+    const double ground_speed = std::sqrt(s.velocityNedMs[0] * s.velocityNedMs[0] + s.velocityNedMs[1] * s.velocityNedMs[1]);
+    CHECK(ground_speed > 1.0);
+    CHECK(std::abs(s.wheelSpeedMs[1] - ground_speed) < 0.2 * ground_speed);
+    CHECK(s.wheelSteerRad[0] < -0.05); // left pedal: the rudder and the nose wheel both turn left
+    CHECK(s.wheelSteerRad[1] == 0.0); // the mains do not steer
+}
+
 TEST_CASE("ground provider drives AGL and gear contact", "[sim][jsbsim]") {
     log::setLevel(log::Level::Warn);
     auto ground = std::make_shared<FlatGround>(500.0); // terrain at 500 m

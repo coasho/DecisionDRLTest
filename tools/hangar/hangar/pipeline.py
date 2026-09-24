@@ -524,12 +524,24 @@ class Design:
             bad = [g["label"] for g in gear
                    if g["boundary_edges"] + g["nonmanifold_edges"] + g["misoriented_edges"] or g["components"] != 1]
             checks.append(check("3D model: landing gear parts not closed and whole", len(bad), None, 0,
-                                note=", ".join(bad) or "%d legs and doors, each one closed solid" % len(gear)))
+                                note=", ".join(bad) or "%d struts, oleos, wheels and doors, each one closed solid" % len(gear)))
             legs = [g for g in gear if "protrusion" in g]
             if legs:
                 worst = max(legs, key=lambda g: g["protrusion"])
                 checks.append(check("3D model: stowed gear outside the skin", 100.0 * worst["protrusion"], None, 3.0, "cm",
                                     level="warn", note="%s; the leg must fold into the airframe" % worst["label"]))
+            pairs = report.get("door_clearance", [])
+            if pairs:
+                # a door never touches a leg: open while the leg swings, closed
+                # over it stowed
+                w_open = min(pairs, key=lambda p: p["open_m"])
+                w_shut = min(pairs, key=lambda p: p["closed_m"])
+                checks.append(check("3D model: open gear doors' clearance from the legs", 1000.0 * w_open["open_m"], 0.0,
+                                    None, "mm", note="%s and %s, %.0f %% of the way up" % (
+                                        w_open["door"], w_open["leg"], 100.0 * w_open["at"])))
+                checks.append(check("3D model: closed gear doors' clearance from the stowed legs",
+                                    1000.0 * w_shut["closed_m"], 0.0, None, "mm",
+                                    note="%s and %s" % (w_shut["door"], w_shut["leg"])))
         tris = af["triangles"] + sum(p["triangles"] for p in report["pieces"] + gear)
         degen = af["degenerate_triangles"] + sum(p["degenerate_triangles"] for p in report["pieces"] + gear)
         checks.append(check("3D model: degenerate triangles", 100.0 * degen / max(tris, 1), None, 0.2, "%",

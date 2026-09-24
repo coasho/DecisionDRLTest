@@ -30,6 +30,10 @@ static_assert(offsetof(fsim_vehicle_state, on_ground) == offsetof(fsim::sim::Veh
 static_assert(offsetof(fsim_vehicle_state, engine_rpm) == offsetof(fsim::sim::VehicleState, engineRpm), "layout");
 static_assert(offsetof(fsim_vehicle_state, nozzle_position) == offsetof(fsim::sim::VehicleState, nozzlePosition), "layout");
 static_assert(offsetof(fsim_vehicle_state, leading_edge_flap_rad) == offsetof(fsim::sim::VehicleState, leadingEdgeFlapRad), "layout");
+static_assert(offsetof(fsim_vehicle_state, wheel_count) == offsetof(fsim::sim::VehicleState, wheelCount), "layout");
+static_assert(offsetof(fsim_vehicle_state, wheel_compression_m) == offsetof(fsim::sim::VehicleState, wheelCompressionM), "layout");
+static_assert(offsetof(fsim_vehicle_state, wheel_speed_ms) == offsetof(fsim::sim::VehicleState, wheelSpeedMs), "layout");
+static_assert(FSIM_MAX_WHEELS == fsim::sim::VehicleState::kMaxWheels, "layout");
 static_assert(sizeof(bool) == 1, "bool must be one byte for the C mirror of VehicleState");
 static_assert(sizeof(fsim_control_inputs) == sizeof(fsim::ControlInputs), "fsim_control_inputs layout differs from ControlInputs");
 static_assert(offsetof(fsim_control_inputs, brake_right) == offsetof(fsim::ControlInputs, brakeRight), "layout");

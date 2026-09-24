@@ -16,6 +16,7 @@ from . import _native
 
 _d = ctypes.c_double
 _MAX_ENGINES = 4
+_MAX_WHEELS = 8
 
 
 class VehicleState(ctypes.Structure):
@@ -62,6 +63,11 @@ class VehicleState(ctypes.Structure):
         ("afterburner", _d * _MAX_ENGINES),  # 0 off .. 1 full
         ("nozzle_position", _d * _MAX_ENGINES),  # 0 shut .. 1 wide open
         ("leading_edge_flap_rad", _d),  # + leading edge down
+        # the wheeled gear units (JSBSim BOGEY contacts, in the aircraft file's order)
+        ("wheel_count", ctypes.c_int32),
+        ("wheel_compression_m", _d * _MAX_WHEELS),  # strut and tyre compression
+        ("wheel_steer_rad", _d * _MAX_WHEELS),  # + right
+        ("wheel_speed_ms", _d * _MAX_WHEELS),  # rolling speed at the rim
     ]
 
     @property
