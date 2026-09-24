@@ -28,6 +28,7 @@
 #include <models/FGPropulsion.h>
 #include <models/propulsion/FGEngine.h>
 #include <models/propulsion/FGThruster.h>
+#include <models/propulsion/FGTurbine.h>
 #include <simgear/misc/sg_path.hxx>
 
 #include <algorithm>
@@ -419,6 +420,9 @@ void JsbsimModel::cacheCommandNodes() {
     leftBrakeCmd_ = node("fcs/left-brake-cmd-norm");
     rightBrakeCmd_ = node("fcs/right-brake-cmd-norm");
 
+    // read-only: an aircraft whose FCS has no leading-edge flaps reports none
+    lefPosDeg_ = PropertyHandle(pm->GetNode("fcs/lef-pos-deg", false));
+
     throttleCmd_.clear();
     const auto engines = std::min<std::size_t>(fdm_->GetPropulsion()->GetNumEngines(), ControlInputs::kMaxEngines);
     for (std::size_t i = 0; i < engines; ++i) {
@@ -528,8 +532,21 @@ void JsbsimModel::state(VehicleState& out) const {
     out.engineCount = static_cast<int>(engines);
     for (std::size_t i = 0; i < engines; ++i) {
         out.throttlePosition[i] = fcs->GetThrottlePos(static_cast<int>(i));
-        out.thrustN[i] = poundsForceToNewtons(propulsion->GetEngine(static_cast<unsigned>(i))->GetThrust());
+        const auto engine = propulsion->GetEngine(static_cast<unsigned>(i));
+        out.thrustN[i] = poundsForceToNewtons(engine->GetThrust());
+        out.engineRpm[i] = engine->GetThruster() ? engine->GetThruster()->GetRPM() : 0.0;
+        out.engineN2[i] = out.afterburner[i] = out.nozzlePosition[i] = 0.0;
+        if (engine->GetType() == JSBSim::FGEngine::etTurbine) {
+            const auto* turbine = static_cast<const JSBSim::FGTurbine*>(engine.get());
+            out.engineN2[i] = turbine->GetN2();
+            out.nozzlePosition[i] = turbine->GetNozzle();
+            // lit: in full (a throttle-gated afterburner), or by how far the
+            // lever runs past 1 (a staged one, JSBSim's augmethod 2)
+            if (turbine->GetAugmentation())
+                out.afterburner[i] = out.throttlePosition[i] > 1.0 ? std::min(out.throttlePosition[i] - 1.0, 1.0) : 1.0;
+        }
     }
+    out.leadingEdgeFlapRad = lefPosDeg_.valid() ? lefPosDeg_.get() * 3.14159265358979323846 / 180.0 : 0.0;
     out.fuelKg = propulsion->GetTanksWeight() * 0.45359237; // tank contents, lbs -> kg
 
     out.onGround = fdm_->GetGroundReactions()->GetWOW();

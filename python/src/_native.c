@@ -1207,12 +1207,13 @@ static PyObject* mod_layout(PyObject* m, PyObject* const* args, Py_ssize_t n) {
     (void)args;
     if (!check_args(n, 0, 0, "layout")) return NULL;
     PyObject* state = Py_BuildValue(
-        "{s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K}", "size", (unsigned long long)sizeof(fsim_vehicle_state),
+        "{s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K,s:K}", "size", (unsigned long long)sizeof(fsim_vehicle_state),
         OFS(fsim_vehicle_state, position_ecef), OFS(fsim_vehicle_state, latitude_rad), OFS(fsim_vehicle_state, euler_rad),
         OFS(fsim_vehicle_state, velocity_ned_ms), OFS(fsim_vehicle_state, airspeed_true_ms), OFS(fsim_vehicle_state, load_factor),
         OFS(fsim_vehicle_state, gear_position), OFS(fsim_vehicle_state, engine_count), OFS(fsim_vehicle_state, throttle_position),
         OFS(fsim_vehicle_state, fuel_kg), OFS(fsim_vehicle_state, step_count), OFS(fsim_vehicle_state, on_ground),
-        OFS(fsim_vehicle_state, rotation_body_to_ecef));
+        OFS(fsim_vehicle_state, rotation_body_to_ecef), OFS(fsim_vehicle_state, engine_rpm),
+        OFS(fsim_vehicle_state, afterburner), OFS(fsim_vehicle_state, leading_edge_flap_rad));
     PyObject* inputs = Py_BuildValue("{s:K,s:K,s:K}", "size", (unsigned long long)sizeof(fsim_control_inputs),
                                      OFS(fsim_control_inputs, throttle), OFS(fsim_control_inputs, brake_right));
     PyObject* sample = Py_BuildValue("{s:K,s:K,s:K}", "size", (unsigned long long)sizeof(fsim_recorded_sample),

@@ -102,6 +102,50 @@ TEST_CASE("c172x loads and flies with sane state", "[sim][jsbsim]") {
     CHECK_FALSE(s.diverged);
     CHECK(s.airspeedTrueMs > 40.0);
     CHECK(s.altitudeMslM > 900.0);
+    // the propeller turns at the engine's rpm; a piston has no turbine's state
+    CHECK(s.engineRpm[0] > 1500.0);
+    CHECK(s.engineRpm[0] < 3000.0);
+    CHECK(s.engineN2[0] == 0.0);
+    CHECK(s.afterburner[0] == 0.0);
+    CHECK(s.leadingEdgeFlapRad == 0.0);
+}
+
+TEST_CASE("a fighter reports its engine and its leading-edge flaps", "[sim][jsbsim]") {
+    // what user code reads and the viewer's models show: the core's speed, the
+    // nozzle, the afterburner, and the flaps as the aircraft's own flight
+    // controls move them (the stock F-16's fcs/lef-pos-deg)
+    log::setLevel(log::Level::Warn);
+    auto ground = std::make_shared<FlatGround>(0.0);
+    JsbsimModel model(kDt, ground);
+    InitialConditions ic;
+    ic.altitudeMslM = 3000.0;
+    ic.airspeedTrueMs = 120.0;
+    REQUIRE(model.load(AircraftSpec{"f16", kRoot}, ic));
+    ControlInputs in;
+    in.gearDown = 0.0;
+    in.setThrottleAll(0.3);
+    for (int i = 0; i < 5 * 120; ++i) model.step(in);
+    VehicleState s;
+    model.state(s);
+    CHECK(s.engineCount == 1);
+    CHECK(s.engineRpm[0] == 0.0); // a jet: no propeller
+    CHECK(s.engineN2[0] > 60.0);
+    CHECK(s.engineN2[0] < 95.0);
+    CHECK(s.nozzlePosition[0] > 0.1); // part power: the nozzle part open
+    CHECK(s.afterburner[0] == 0.0);
+    const double cruiseLef = s.leadingEdgeFlapRad;
+    // full throttle and a pull: the core at its rating, the afterburner lit,
+    // the flaps down with the angle of attack
+    in.setThrottleAll(1.0);
+    in.elevator = -0.6;
+    for (int i = 0; i < 5 * 120; ++i) model.step(in);
+    model.state(s);
+    CHECK(s.engineN2[0] > 95.0);
+    CHECK(s.afterburner[0] > 0.0);
+    CHECK(s.afterburner[0] <= 1.0);
+    CHECK(s.nozzlePosition[0] > 0.5);
+    CHECK(s.alphaRad > 0.1);
+    CHECK(s.leadingEdgeFlapRad > cruiseLef + 0.1);
 }
 
 TEST_CASE("property handles read live JSBSim values", "[sim][jsbsim]") {

@@ -75,9 +75,11 @@ class LeadingEdge:
     """A leading-edge flap or slat on part of a lifting surface (leading =
     [...] on the surface): its front chord_fraction turns down about a hinge
     behind it, on the fighter's schedule - schedule = [a, m, b]: a alpha(deg)
-    - m qbar/p + b degrees (qbar/p = 0.7 M^2; the F-16's 1.38, 9.05, 1.45) -
-    held within limits. It moves in the 3D model (fsim:lef); the aerodynamic
-    model does not see it (its tables stand for the scheduled wing)."""
+    - m qbar/p + b degrees (the F-16's 1.38, 9.05, 1.45, NASA TP-1538) - held
+    within limits. The flight controls move it (fcs/lef-pos-deg, which the
+    simulation reports and the 3D model's fsim:lef node follows); the
+    aerodynamic model does not see it (its tables stand for the scheduled
+    wing)."""
 
     channel = "lef"
     all_moving = False

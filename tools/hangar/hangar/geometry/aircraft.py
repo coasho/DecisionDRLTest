@@ -129,6 +129,10 @@ class Aircraft:
         self.engines = [Engine(e) for e in spec.get("engine", [])]
         if not self.surfaces:
             raise ValueError("%s: no [[surface]] defined" % self.name)
+        schedules = sorted({tuple(d.schedule) for _, d in self.leading_devices()})
+        if len(schedules) > 1:
+            raise ValueError("%s: the leading-edge devices follow one schedule (the flight controls' "
+                             "fcs/lef-pos-deg), not %s" % (self.name, " and ".join(map(str, schedules))))
         wings = [s for s in self.surfaces if s.kind == "wing"]
         self.wing = wings[0] if wings else self.surfaces[0]
         ref = spec.get("reference", {})
@@ -166,6 +170,10 @@ class Aircraft:
     def controls(self):
         """(surface, control) pairs of every control surface."""
         return [(s, c) for s in self.surfaces for c in s.controls]
+
+    def leading_devices(self):
+        """(surface, device) pairs of every leading-edge flap or slat."""
+        return [(s, d) for s in self.surfaces for d in s.leading]
 
     @property
     def span_overall(self):

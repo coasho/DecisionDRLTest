@@ -481,7 +481,7 @@ def _solid_parts(aircraft, B, top, origin, report):
         label = "%s %s%s" % (surf.name, ctrl.name, {1: " right", -1: " left"}.get(side, ""))
         pv = (_to_gltf(pm["positions"], origin) - pivot) @ R
         pn = _to_gltf(pm["normals"], np.zeros(3)) @ R
-        name = ("fsim:lef:%.6g:%.6g:%.6g@%.6g,%.6g" % (*ctrl.schedule, ctrl.min_deg, ctrl.max_deg)
+        name = ("fsim:lef@%.6g,%.6g" % (ctrl.min_deg, ctrl.max_deg)
                 if piece["leading"] else node_name(aircraft, surf, ctrl, piece))
         top.append(B.node(name, B.mesh(label, [(pv, pm["triangles"], mats[sh.CONTROL], pn)]), translation=pivot, rotation=q))
         report["pieces"].append(dict(_stats(pm), label=label, bounds=[pm["positions"].min(axis=0).tolist(),
@@ -575,8 +575,8 @@ def _revolve_mesh(s, r, n=32):
 
 def _propellers(aircraft, B, top, origin):
     """Each propeller as a solid - spinner and twisted-in-pitch blades - on a
-    node the viewer spins with its engine's throttle (fsim:propeller:<engine>:
-    <rev/s at full throttle>), its x axis the way it turns (cw seen from
+    node the viewer turns at its engine's rpm as the simulation reports it
+    (fsim:propeller:<engine>), its x axis the way it turns (cw seen from
     behind: forward)."""
     from .jsbsim import _engine_units
     from .shape import airframe as sh
@@ -605,15 +605,15 @@ def _propellers(aircraft, B, top, origin):
             cell = float(np.clip(R / 90.0, 0.001, 0.01))
             m = meshkit.build({"cell": cell, "error": 0.1 * cell, "safety": 3.0, "sharp_deg": 50.0,
                                "max_triangles": 3000, "root": {"op": "union", "k": 0.02 * R, "children": nodes}})
-            rev = e.rpm / 60.0
-            top.append(_hinged(B, "fsim:propeller:%d:%.6g" % (units.index(name), rev), name + " propeller", m, mats,
+            top.append(_hinged(B, "fsim:propeller:%d" % units.index(name), name + " propeller", m, mats,
                                hub, axis, origin))
 
 
 def _nozzle_petals(aircraft, B, top, origin):
-    """Each round nozzle's petals, each on a node that opens it with the
-    afterburner (fsim:nozzle:<engine>:<deg>) under one that sets it round the
-    nozzle; one mesh shared by them all."""
+    """Each round nozzle's petals, each on a node that opens it as far as
+    the engine's nozzle is open (fsim:nozzle:<engine>:<deg wide open>; shut
+    at military power, open at idle and with the afterburner lit) under one
+    that sets it round the nozzle; one mesh shared by them all."""
     from .jsbsim import _engine_units
     from .shape import airframe as sh
     from .shape import meshkit
@@ -666,8 +666,8 @@ def _quat_from_matrix(R):
 
 def _plumes(aircraft, B, top, origin):
     """An afterburner flame behind each augmented jet: a glowing outer plume
-    and a brighter core, on a node the viewer stretches with the throttle
-    (fsim:afterburner:<engine>)."""
+    and a brighter core, on a node the viewer stretches with the engine's
+    afterburner as the simulation reports it (fsim:afterburner:<engine>)."""
     from .jsbsim import _engine_units
     from .shape.airframe import nozzle_size
     outer = B.material("afterburner", (1.0, 0.55, 0.2), 0.0, 1.0, emissive=(1.0, 0.45, 0.12), alpha=0.35)

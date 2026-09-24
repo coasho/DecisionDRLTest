@@ -179,57 +179,63 @@ TEST_CASE("control surface names parse, and anything else is left alone", "[rend
     REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) + 40.0 * 3.14159265358979323846 / 180.0) < 1e-9);
     s.gearPosition = 1.0;
     REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) + 80.0 * 3.14159265358979323846 / 180.0) < 1e-9);
-    // an afterburner plume: hidden at military power, full length at full
-    // afterburner (throttle position 2)
+    // everything else moves with what the simulation reports, not with a
+    // formula of the viewer's: an afterburner plume by the engine's afterburner
+    // (hidden when it is out), full length when it is full
+    const auto turn = [](const vsg::dmat4& mat) { return std::atan2(mat[1][2], mat[1][1]); };
+    constexpr double kRad = 3.14159265358979323846 / 180.0;
     REQUIRE(Joint::parse("fsim:afterburner:1", j));
     REQUIRE(j.kind == Joint::Afterburner);
     REQUIRE(j.engine == 1);
     s = sim::VehicleState();
     s.engineCount = 2;
-    s.throttlePosition[1] = 1.0;
+    s.throttlePosition[1] = 2.0; // the lever alone lights nothing
     REQUIRE(j.matrix(s)[0][0] == 0.0);
-    s.throttlePosition[1] = 2.0;
+    s.afterburner[1] = 1.0;
     REQUIRE(std::abs(j.matrix(s)[0][0] - 1.0) < 1e-12);
     REQUIRE(Joint::parse("fsim:afterburner", j));
     REQUIRE(j.engine == 0);
-    // a leading-edge flap on the F-16's schedule: 1.38 alpha - 9.05 qbar/p + 1.45
-    // deg, qbar/p = 0.7 M^2, held within its stops
+    // a leading-edge flap as the flight controls move it, held within its stops
     REQUIRE(Joint::parse("fsim:lef@-2,25", j));
     REQUIRE(j.kind == Joint::LeadingEdge);
     s = sim::VehicleState();
-    s.alphaRad = 10.0 * 3.14159265358979323846 / 180.0;
-    s.mach = 0.5;
-    const double lef = (1.38 * 10.0 - 9.05 * 0.7 * 0.25 + 1.45) * 3.14159265358979323846 / 180.0;
-    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - lef) < 1e-9);
-    s.alphaRad = 40.0 * 3.14159265358979323846 / 180.0;
-    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 25.0 * 3.14159265358979323846 / 180.0) < 1e-9);
-    REQUIRE(Joint::parse("fsim:lef:1:0:0", j));
-    s.alphaRad = 0.1;
-    s.mach = 2.0;
-    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 0.1) < 1e-9);
-    // a propeller: 10 rev/s at full throttle, 30 % of that at idle
-    REQUIRE(Joint::parse("fsim:propeller:0:10", j));
+    s.alphaRad = 0.5; // not a guess from the angle of attack
+    REQUIRE(std::abs(turn(j.matrix(s))) < 1e-12);
+    s.leadingEdgeFlapRad = 10.0 * kRad;
+    REQUIRE(std::abs(turn(j.matrix(s)) - 10.0 * kRad) < 1e-9);
+    s.leadingEdgeFlapRad = 40.0 * kRad;
+    REQUIRE(std::abs(turn(j.matrix(s)) - 25.0 * kRad) < 1e-9);
+    REQUIRE(Joint::parse("fsim:lef:-1", j));
+    REQUIRE(std::abs(turn(j.matrix(s)) + 40.0 * kRad) < 1e-9);
+    // a propeller at its engine's rpm: 600 rpm is a quarter turn in 0.025 s;
+    // the turn holds while the clock stops, and does not jump when it jumps
+    REQUIRE(Joint::parse("fsim:propeller:0", j));
     REQUIRE(j.kind == Joint::Propeller);
     s = sim::VehicleState();
     s.engineCount = 1;
-    s.throttlePosition[0] = 1.0;
-    s.simTime = 0.025; // a quarter turn at 10 rev/s
-    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 0.5 * 3.14159265358979323846) < 1e-9);
-    s.throttlePosition[0] = 0.0;
-    s.simTime = 0.25 / 3.0; // a quarter turn at 3 rev/s
-    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 0.5 * 3.14159265358979323846) < 1e-9);
-    // a nozzle petal: shut at military power, 8 deg open at full afterburner
+    s.engineRpm[0] = 600.0;
+    s.simTime = 1.0;
+    REQUIRE(std::abs(turn(j.matrix(s))) < 1e-12);
+    s.simTime = 1.025;
+    REQUIRE(std::abs(turn(j.matrix(s)) - 0.5 * 3.14159265358979323846) < 1e-9);
+    REQUIRE(std::abs(turn(j.matrix(s)) - 0.5 * 3.14159265358979323846) < 1e-9);
+    s.simTime = 50.0;
+    REQUIRE(std::abs(turn(j.matrix(s)) - 0.5 * 3.14159265358979323846) < 1e-9);
+    s.engineRpm[0] = 0.0; // a stopped engine: a stopped propeller
+    s.simTime = 50.5;
+    REQUIRE(std::abs(turn(j.matrix(s)) - 0.5 * 3.14159265358979323846) < 1e-9);
+    // a nozzle petal by the engine's nozzle: shut, half open
     REQUIRE(Joint::parse("fsim:nozzle:1:8", j));
     REQUIRE(j.kind == Joint::Nozzle);
     s = sim::VehicleState();
     s.engineCount = 2;
-    s.throttlePosition[1] = 1.0;
-    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1])) < 1e-12);
-    s.throttlePosition[1] = 1.5;
-    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 4.0 * 3.14159265358979323846 / 180.0) < 1e-9);
+    s.throttlePosition[1] = 2.0;
+    REQUIRE(std::abs(turn(j.matrix(s))) < 1e-12);
+    s.nozzlePosition[1] = 0.5;
+    REQUIRE(std::abs(turn(j.matrix(s)) - 4.0 * kRad) < 1e-9);
     REQUIRE_FALSE(Joint::parse("fsim:nozzle:0", j));
-    REQUIRE_FALSE(Joint::parse("fsim:propeller:0", j));
-    REQUIRE_FALSE(Joint::parse("fsim:propeller:7:10", j));
+    REQUIRE_FALSE(Joint::parse("fsim:propeller:0:10", j));
+    REQUIRE_FALSE(Joint::parse("fsim:propeller:7", j));
     REQUIRE_FALSE(Joint::parse("fsim:lef:1:2", j));
     REQUIRE_FALSE(Joint::parse("fsim:lef@25,-2", j));
     REQUIRE_FALSE(Joint::parse("fsim:gear", j));

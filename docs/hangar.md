@@ -458,9 +458,11 @@ estimates):
   aircraft come out stable where the real ones are close to neutral.
 - **Balance.** Real fighters' CGs are rarely published. The canard deltas'
   are placed 5-10 % of the MAC behind the neutral point the model finds.
-- **Leading-edge devices.** They move in the 3D model on the F-16's
-  published schedule, standing in for each type's own. The aerodynamic tables
-  do not model them; they stand for the wing as its schedule flies it.
+- **Leading-edge devices.** The flight controls move them on the F-16's
+  published schedule (NASA TP-1538), standing in for each type's own; the
+  simulation reports where they are (`leadingEdgeFlapRad`) and the 3D model
+  follows. The aerodynamic tables do not model them; they stand for the wing
+  as its schedule flies it.
 - **Gear kinematics.** Each leg folds the way the real one does where that
   is well documented (the F/A-18's main gear aft, the Typhoon's and the
   Mirage 2000's inward), and otherwise by hangar's default: a nose gear aft,

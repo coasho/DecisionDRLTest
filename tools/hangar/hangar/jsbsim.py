@@ -450,6 +450,34 @@ def flight_control_xml(aircraft, fbw=None):
           <output>fcs/flap-pos-deg</output>
         </kinematic>
       </channel>""" % settings)
+    devices = [d for _, d in aircraft.leading_devices()]
+    if devices:
+        # the leading-edge flaps on their schedule, a alpha - m qbar/p + b deg,
+        # through an actuator as fast as the F-16's (a 0.136 s lag, 25 deg/s;
+        # NASA TP-1538) - fcs/lef-pos-deg, which the simulation reports and the
+        # 3D model's flaps follow (each within its own stops)
+        a, m, b = devices[0].schedule
+        lo, hi = min(d.min_deg for d in devices), max(d.max_deg for d in devices)
+        parts.append("""      <channel name="Leading-Edge Flaps">
+        <fcs_function name="fcs/lef-schedule">
+          <function>
+            <sum>
+              <product> <value>%.6g</value> <property>aero/alpha-deg</property> </product>
+              <product> <value>%.6g</value>
+                <quotient> <property>aero/qbar-psf</property> <property>atmosphere/P-psf</property> </quotient>
+              </product>
+              <value>%.6g</value>
+            </sum>
+          </function>
+          <clipto> <min>%.6g</min> <max>%.6g</max> </clipto>
+        </fcs_function>
+        <actuator name="fcs/lef-actuator">
+          <input>fcs/lef-schedule</input>
+          <lag>7.35</lag>
+          <rate_limit>25</rate_limit>
+          <output>fcs/lef-pos-deg</output>
+        </actuator>
+      </channel>""" % (a, -m, b, lo, hi))
     # the throttle lever of an afterburning turbofan: military power at the
     # detent (80 %), the afterburner above it - JSBSim's turbine (augmethod 2)
     # takes positions 1..2 for that

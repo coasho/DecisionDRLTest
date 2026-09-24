@@ -8,7 +8,25 @@ namespace fsim::ipc {
 
 namespace {
 constexpr char kRecMagic[5] = {'F', 'S', 'R', 'E', 'C'};
-constexpr std::uint8_t kVersion = 1;
+// 2: VehicleState grew by the engines' and moving parts' state; a version 1
+// file still reads, its samples' state the prefix the fields were appended to
+constexpr std::uint8_t kVersion = 2;
+constexpr std::size_t kStateV1 = offsetof(sim::VehicleState, engineRpm);
+static_assert(offsetof(VehicleSample, state) == 0, "a sample starts with its state");
+
+/// A version 1 sample: the old state, then the rest of the sample as it is.
+bool readSampleV1(std::FILE* f, VehicleSample& sample) {
+    sample = VehicleSample{};
+    constexpr std::size_t rest = sizeof(VehicleSample) - offsetof(VehicleSample, inputs);
+    constexpr std::size_t oldInputs = (kStateV1 + alignof(sim::ControlInputs) - 1) / alignof(sim::ControlInputs) *
+                                      alignof(sim::ControlInputs);
+    unsigned char buffer[sizeof(VehicleSample)];
+    const std::size_t size = oldInputs + rest;
+    if (std::fread(buffer, 1, size, f) != size) return false;
+    std::memcpy(static_cast<void*>(&sample.state), buffer, kStateV1); // the fields appended since keep their defaults
+    std::memcpy(reinterpret_cast<unsigned char*>(&sample) + offsetof(VehicleSample, inputs), buffer + oldInputs, rest);
+    return true;
+}
 
 struct SnapshotHead {
     double simTime;
@@ -77,7 +95,8 @@ bool Recording::load(const std::filesystem::path& path, std::string* error) {
     }
     char magic[5];
     std::uint8_t version = 0;
-    if (std::fread(magic, 1, 5, f) != 5 || std::memcmp(magic, kRecMagic, 5) != 0 || std::fread(&version, 1, 1, f) != 1 || version != kVersion ||
+    if (std::fread(magic, 1, 5, f) != 5 || std::memcmp(magic, kRecMagic, 5) != 0 || std::fread(&version, 1, 1, f) != 1 ||
+        version < 1 || version > kVersion ||
         std::fread(&header_, sizeof(header_), 1, f) != 1) {
         std::fclose(f);
         if (error) *error = "not an fsim recording: " + path.string();
@@ -100,8 +119,11 @@ bool Recording::load(const std::filesystem::path& path, std::string* error) {
             frame.tableChanges.swap(pending.tableChanges);
             frame.samples.resize(head.count);
             bool ok = true;
-            for (auto& [slot, sample] : frame.samples)
-                if (std::fread(&slot, sizeof(slot), 1, f) != 1 || std::fread(&sample, sizeof(sample), 1, f) != 1) { ok = false; break; }
+            for (auto& [slot, sample] : frame.samples) {
+                const bool read = std::fread(&slot, sizeof(slot), 1, f) == 1 &&
+                                  (version == 1 ? readSampleV1(f, sample) : std::fread(&sample, sizeof(sample), 1, f) == 1);
+                if (!read) { ok = false; break; }
+            }
             if (!ok) break;
             frames_.push_back(std::move(frame));
         } else {

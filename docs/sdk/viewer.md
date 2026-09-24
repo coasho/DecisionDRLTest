@@ -90,22 +90,24 @@ channels move adds them: `fsim:elevator+aileron:-1` (an elevon). A trailing
 `fsim:elevator@-20,50` for a canard that travels further than the elevons
 sharing its channel.
 
-Other moving parts:
+Other moving parts follow the vehicle's state too - the same numbers your
+code reads from `state()`, so what you see is what the simulation did:
 
 - `fsim:gear:<deg>[:<g0>:<g1>]` turns by `deg` as the gear position (1 down,
   0 up) goes from `g0` to `g1` (default 1 to 0): a leg, or a door
   (`fsim:gear:90:0:0.2` opens in the first fifth of the way down). Nest two
   for a leg that swings and twists at once.
-- `fsim:lef[:<a>:<m>:<b>][@<lo>,<hi>]` is a leading-edge flap on a fighter's
-  schedule: `a` α(deg) − `m` q̄/p + `b` degrees, q̄/p = 0.7 M², held within
-  its stops. The default is the F-16's 1.38, 9.05, 1.45.
+- `fsim:lef[:<gain>][@<lo>,<hi>]` is a leading-edge flap, turned by
+  `leadingEdgeFlapRad` (where the aircraft's flight controls put them,
+  `fcs/lef-pos-deg`; 0 for an aircraft without) times the gain, held within
+  its stops.
+- `fsim:propeller:<engine>` turns about its x axis at that engine's
+  `engineRpm`; it stops with the engine and holds still while the clock does.
+- `fsim:nozzle:<engine>:<deg>` turns a nozzle petal open by `deg` times the
+  engine's `nozzlePosition` (JSBSim's turbine: shut at military power, open at
+  idle and with the afterburner lit).
 - `fsim:afterburner[:<engine>]` stretches an exhaust flame along its x axis
-  with that engine's afterburner (throttle position past 1), and hides it
-  without.
-- `fsim:propeller:<engine>:<rev/s>` spins about its x axis at `rev/s` at full
-  throttle, 30 % of that at idle.
-- `fsim:nozzle:<engine>:<deg>` turns a nozzle petal open by `deg` at full
-  afterburner, in step with it; shut without.
+  with the engine's `afterburner` (0 out .. 1 full), and hides it when out.
 
 To make a model's surface move:
 

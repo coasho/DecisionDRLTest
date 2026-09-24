@@ -57,6 +57,11 @@ class VehicleState(ctypes.Structure):
         ("on_ground", ctypes.c_uint8),
         ("diverged", ctypes.c_uint8),
         ("rotation_body_to_ecef", _d * 9),
+        ("engine_rpm", _d * _MAX_ENGINES),  # propeller rpm; 0 for a jet
+        ("engine_n2", _d * _MAX_ENGINES),  # turbine core speed, %; 0 otherwise
+        ("afterburner", _d * _MAX_ENGINES),  # 0 off .. 1 full
+        ("nozzle_position", _d * _MAX_ENGINES),  # 0 shut .. 1 wide open
+        ("leading_edge_flap_rad", _d),  # + leading edge down
     ]
 
     @property

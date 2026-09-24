@@ -95,7 +95,7 @@ A copyable handle (id + world). It stays valid until `remove()`.
 | Call | Meaning |
 | --- | --- |
 | `id()`, `name()`, `type()`, `valid()` | Identity |
-| `const VehicleState& state()` | Truth after the last step: ECEF position, quaternion + body->ECEF rotation, geodetic position, altitudes (MSL and AGL), Euler angles, body/NED velocities, rates, accelerations, air data (TAS, CAS, Mach, alpha, beta, load factor), control surface positions, engines, fuel, `onGround`, `diverged` |
+| `const VehicleState& state()` | Truth after the last step: ECEF position, quaternion + body->ECEF rotation, geodetic position, altitudes (MSL and AGL), Euler angles, body/NED velocities, rates, accelerations, air data (TAS, CAS, Mach, alpha, beta, load factor), control surface positions, leading-edge flaps, engines (throttle, thrust, propeller rpm, a turbine's N2, nozzle and afterburner), fuel, `onGround`, `diverged` |
 | `const effects::SensedState& sensed()` | What the vehicle's sensors report: `state` after the sensor effects, plus `gnssValid`, `airDataValid`, `positionErrorM` |
 | `const ControlInputs& inputs()` | The actuator inputs the control cascade produced last step |
 | `command(cmd)` | Command at any level; the level of the command becomes the active level ([control.md](control.md)) |

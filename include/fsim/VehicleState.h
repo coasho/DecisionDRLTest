@@ -57,6 +57,14 @@ struct VehicleState {
     // axes (x forward, y right, z down) expressed in ECEF; equals the transpose
     // of JSBSim's Tec2b. Redundant with the quaternion but unambiguous.
     double rotationBodyToEcef[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+
+    // Appended: the engines' and the airframe's moving parts as the simulation
+    // has them - what user code reads, and what the viewer's models show.
+    double engineRpm[kMaxEngines] = {0, 0, 0, 0};      ///< the propeller's (or rotor's) rpm; 0 for a jet
+    double engineN2[kMaxEngines] = {0, 0, 0, 0};       ///< a turbine's core speed, % of its rating; 0 otherwise
+    double afterburner[kMaxEngines] = {0, 0, 0, 0};    ///< a turbine's afterburner, 0 off .. 1 full
+    double nozzlePosition[kMaxEngines] = {0, 0, 0, 0}; ///< a turbine's nozzle, 0 shut .. 1 wide open
+    double leadingEdgeFlapRad = 0.0;                   ///< leading-edge flaps, + leading edge down (fcs/lef-pos-deg)
 };
 
 } // namespace fsim::sim

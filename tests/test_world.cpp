@@ -15,8 +15,13 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
+#include <cstddef>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
+#include <vector>
 
 using namespace fsim;
 
@@ -336,6 +341,82 @@ TEST_CASE("a world can be recorded and the recording read back", "[world][ipc]")
     REQUIRE(rec.frames()[15].samples.size() == 1);
     REQUIRE_THAT(rec.frames()[19].samples[0].second.state.altitudeMslM, Catch::Matchers::WithinAbs(1500.0, 20.0));
     std::filesystem::remove(path);
+}
+
+TEST_CASE("a recording made before the vehicle state grew still reads", "[world][ipc]") {
+    // version 1 wrote each sample's state up to rotationBodyToEcef; version 2
+    // appended the engines' and moving parts' state. Rewrite a new recording
+    // the way version 1 wrote it: it reads back the same, the appended fields
+    // at their defaults.
+    const auto v2 = std::filesystem::temp_directory_path() / "fsim-test-record-v2.fsrec";
+    const auto v1 = std::filesystem::temp_directory_path() / "fsim-test-record-v1.fsrec";
+    {
+        auto o = options("test-record-v1");
+        o.recordPath = v2;
+        session::World w(o);
+        w.createVehicle(spec("rec-a"));
+        w.step(5);
+    }
+    std::vector<char> in;
+    {
+        std::ifstream f(v2, std::ios::binary);
+        in.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    }
+    constexpr std::size_t kState = offsetof(sim::VehicleState, engineRpm);
+    constexpr std::size_t kInputs = offsetof(ipc::VehicleSample, inputs);
+    constexpr std::size_t kInputsV1 =
+        (kState + alignof(sim::ControlInputs) - 1) / alignof(sim::ControlInputs) * alignof(sim::ControlInputs);
+    struct SnapshotHead {
+        double simTime;
+        std::uint32_t count;
+    };
+    std::size_t p = 6 + sizeof(ipc::RecordingHeader);
+    REQUIRE(in.size() > p);
+    std::vector<char> out(in.begin(), in.begin() + static_cast<std::ptrdiff_t>(p));
+    out[5] = 1;
+    const auto copy = [&](std::size_t from, std::size_t n) {
+        out.insert(out.end(), in.begin() + static_cast<std::ptrdiff_t>(from), in.begin() + static_cast<std::ptrdiff_t>(from + n));
+    };
+    while (p < in.size()) {
+        if (in[p] == 'T') {
+            copy(p, 1 + sizeof(std::uint32_t) + sizeof(ipc::RecordedVehicle));
+            p += 1 + sizeof(std::uint32_t) + sizeof(ipc::RecordedVehicle);
+            continue;
+        }
+        REQUIRE(in[p] == 'S');
+        SnapshotHead head{};
+        std::memcpy(&head, &in[p + 1], sizeof(head));
+        copy(p, 1 + sizeof(head));
+        p += 1 + sizeof(head);
+        for (std::uint32_t i = 0; i < head.count; ++i, p += sizeof(std::uint32_t) + sizeof(ipc::VehicleSample)) {
+            copy(p, sizeof(std::uint32_t) + kState); // the slot, the old state
+            out.resize(out.size() + (kInputsV1 - kState), 0);
+            copy(p + sizeof(std::uint32_t) + kInputs, sizeof(ipc::VehicleSample) - kInputs);
+        }
+    }
+    {
+        std::ofstream f(v1, std::ios::binary);
+        f.write(out.data(), static_cast<std::streamsize>(out.size()));
+    }
+    ipc::Recording now, old;
+    std::string error;
+    REQUIRE(now.load(v2, &error));
+    REQUIRE(old.load(v1, &error));
+    REQUIRE(now.frames().size() == 5);
+    REQUIRE(old.frames().size() == now.frames().size());
+    for (std::size_t i = 0; i < now.frames().size(); ++i) {
+        REQUIRE(old.frames()[i].samples.size() == 1);
+        const auto& a = now.frames()[i].samples[0].second;
+        const auto& b = old.frames()[i].samples[0].second;
+        REQUIRE(std::memcmp(&a.state, &b.state, kState) == 0);
+        REQUIRE(std::memcmp(&a.inputs, &b.inputs, sizeof(a.inputs)) == 0);
+        REQUIRE(std::memcmp(a.derived, b.derived, sizeof(a.derived)) == 0);
+        REQUIRE(a.state.engineRpm[0] > 0.0);
+        REQUIRE(b.state.engineRpm[0] == 0.0);
+        REQUIRE(b.state.leadingEdgeFlapRad == 0.0);
+    }
+    std::filesystem::remove(v1);
+    std::filesystem::remove(v2);
 }
 
 TEST_CASE("camera images round-trip through the vision segment", "[ipc][vision]") {

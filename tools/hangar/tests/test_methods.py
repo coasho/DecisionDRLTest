@@ -315,8 +315,8 @@ class Model3D(unittest.TestCase):
         a = Aircraft.load(repo("aircraft/skua/skua.toml"))
         surfaces = ["fsim:aileron"] * 2 + ["fsim:elevator"] * 2 + ["fsim:flaps"] * 2 + ["fsim:rudder"] * 2
         # the primitive model, and the solid one when the mesher is built: that
-        # also spins its propeller with the engine (6000 rpm at full throttle)
-        for solid, expect in ((False, surfaces), (True, sorted(surfaces + ["fsim:propeller:0:100"]))):
+        # also has its propeller, which the viewer turns at the engine's rpm
+        for solid, expect in ((False, surfaces), (True, sorted(surfaces + ["fsim:propeller:0"]))):
             if solid and meshkit.library() is None:
                 continue
             report = {}
@@ -382,6 +382,31 @@ class Model3D(unittest.TestCase):
             moved = r * math.cos(th) + np.cross(axis, r) * math.sin(th) + axis * np.dot(axis, r) * (1 - math.cos(th)) - r
             with self.subTest(side=side):
                 self.assertLess(moved[2], 0.0)
+
+    def test_leading_edge_flaps_follow_the_flight_controls(self):
+        # the flight controls move the flaps on their schedule (fcs/lef-pos-deg,
+        # which the simulation reports), within the widest stops; each flap's
+        # node follows that within its own
+        from hangar import jsbsim
+        a = Aircraft.load(repo("aircraft/su57/su57.toml"))
+        root = ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a))
+        ch = root.find("flight_control/channel[@name='Leading-Edge Flaps']")
+        self.assertIsNotNone(ch)
+        self.assertEqual(ch.find("actuator/output").text, "fcs/lef-pos-deg")
+        clip = ch.find("fcs_function/clipto")
+        self.assertEqual((float(clip.find("min").text), float(clip.find("max").text)), (-5.0, 30.0))
+        values = [float(v.text) for v in ch.iter("value")]
+        self.assertEqual(values, [1.38, -9.05, 1.45])
+        # no flaps, no channel; two schedules on one aircraft are refused
+        c172 = Aircraft.load(repo("aircraft/c172/c172.toml"))
+        self.assertNotIn("fcs/lef-pos-deg", jsbsim.flight_control_xml(c172))
+        import tomllib
+        with open(repo("aircraft/rafale/rafale.toml"), "rb") as f:
+            spec = tomllib.load(f)
+        wing = next(s for s in spec["surface"] if s.get("leading"))
+        wing["leading"][1]["schedule"] = [1.0, 5.0, 0.0]
+        with self.assertRaisesRegex(ValueError, "one schedule"):
+            Aircraft(spec, repo("aircraft/rafale/rafale.toml"))
 
 
 if __name__ == "__main__":

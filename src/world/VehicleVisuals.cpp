@@ -309,6 +309,8 @@ bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
     std::string terms = name.substr(5);
     joint.mix.clear();
     joint.kind = Surface;
+    joint.phase = 0.0;
+    joint.phaseTime = std::numeric_limits<double>::quiet_NaN();
     // a landing gear's leg or door: fsim:gear:<deg>[:<g0>:<g1>]
     if (terms.rfind("gear:", 0) == 0) {
         std::vector<double> v;
@@ -319,7 +321,8 @@ bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
         joint.g1 = v.size() == 3 ? v[2] : 0.0;
         return joint.g0 != joint.g1;
     }
-    // a leading-edge flap on its schedule: fsim:lef[:<a>:<m>:<b>][@<lo>,<hi>]
+    // a leading-edge flap: fsim:lef[:<gain>][@<lo>,<hi>], as the aircraft's
+    // flight controls move it (VehicleState::leadingEdgeFlapRad)
     if (terms == "lef" || terms.rfind("lef:", 0) == 0 || terms.rfind("lef@", 0) == 0) {
         joint.lo = -std::numeric_limits<double>::infinity();
         joint.hi = std::numeric_limits<double>::infinity();
@@ -333,17 +336,12 @@ bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
             terms.resize(at);
         }
         std::vector<double> v;
-        if (!parseNumbers(terms.size() > 3 ? terms.substr(4) : std::string(), v) || (!v.empty() && v.size() != 3))
-            return false;
+        if (!parseNumbers(terms.size() > 3 ? terms.substr(4) : std::string(), v) || v.size() > 1) return false;
         joint.kind = LeadingEdge;
-        if (v.size() == 3) {
-            joint.lefA = v[0];
-            joint.lefM = v[1];
-            joint.lefB = v[2];
-        }
+        joint.gain = v.empty() ? 1.0 : v[0];
         return true;
     }
-    // a nozzle petal: fsim:nozzle:<engine>:<deg at full afterburner>
+    // a nozzle petal: fsim:nozzle:<engine>:<deg wide open>
     if (terms.rfind("nozzle:", 0) == 0) {
         std::vector<double> v;
         if (!parseNumbers(terms.substr(7), v) || v.size() != 2) return false;
@@ -353,14 +351,13 @@ bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
         joint.nozzleRad = v[1] * 3.14159265358979323846 / 180.0;
         return true;
     }
-    // a propeller: fsim:propeller:<engine>:<rev/s at full throttle>
+    // a propeller: fsim:propeller:<engine>, at that engine's rpm
     if (terms.rfind("propeller:", 0) == 0) {
         std::vector<double> v;
-        if (!parseNumbers(terms.substr(10), v) || v.size() != 2) return false;
+        if (!parseNumbers(terms.substr(10), v) || v.size() != 1) return false;
         if (v[0] < 0.0 || v[0] >= sim::VehicleState::kMaxEngines || v[0] != std::floor(v[0])) return false;
         joint.kind = Propeller;
         joint.engine = static_cast<int>(v[0]);
-        joint.revPerSecond = v[1];
         return true;
     }
     // an exhaust plume: fsim:afterburner[:<engine>]
@@ -408,40 +405,38 @@ bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
     }
 }
 
-vsg::dmat4 VehicleVisuals::Joint::matrix(const sim::VehicleState& s) const {
+vsg::dmat4 VehicleVisuals::Joint::matrix(const sim::VehicleState& s) {
     if (kind == Gear) {
         const double g = std::isfinite(s.gearPosition) ? s.gearPosition : 1.0;
         const double t = std::clamp((g - g0) / (g1 - g0), 0.0, 1.0);
         return rest * vsg::rotate(gearRad * t, vsg::dvec3(1.0, 0.0, 0.0));
     }
     if (kind == LeadingEdge) {
-        constexpr double kDeg = 180.0 / 3.14159265358979323846;
-        const double alpha = std::isfinite(s.alphaRad) ? s.alphaRad * kDeg : 0.0;
-        const double mach = std::isfinite(s.mach) ? s.mach : 0.0;
-        const double deg = lefA * alpha - lefM * 0.7 * mach * mach + lefB;
-        return rest * vsg::rotate(std::clamp(deg / kDeg, lo, hi), vsg::dvec3(1.0, 0.0, 0.0));
+        const double d = std::isfinite(s.leadingEdgeFlapRad) ? s.leadingEdgeFlapRad : 0.0;
+        return rest * vsg::rotate(std::clamp(gain * d, lo, hi), vsg::dvec3(1.0, 0.0, 0.0));
     }
+    const bool engineOk = engine < s.engineCount;
     if (kind == Propeller) {
-        // the phase from the sim's clock at the throttle's rate: a real
-        // propeller's speed lags the lever, but at tens of turns a second the
-        // eye sees the same blur
-        const double p = engine < s.engineCount && std::isfinite(s.throttlePosition[engine])
-                             ? std::clamp(s.throttlePosition[engine], 0.0, 1.0)
-                             : 0.0;
-        const double turns = revPerSecond * (0.3 + 0.7 * p) * (std::isfinite(s.simTime) ? s.simTime : 0.0);
-        return rest * vsg::rotate(2.0 * 3.14159265358979323846 * (turns - std::floor(turns)), vsg::dvec3(1.0, 0.0, 0.0));
+        // turned on by the engine's rpm over the sim's time since the last
+        // frame; held still when the clock stops or jumps (pause, a reset, a
+        // replay's seek)
+        const double rpm = engineOk && std::isfinite(s.engineRpm[engine]) ? std::abs(s.engineRpm[engine]) : 0.0;
+        if (std::isfinite(s.simTime)) {
+            const double dt = std::isfinite(phaseTime) ? s.simTime - phaseTime : 0.0;
+            if (dt > 0.0 && dt < 1.0) phase += rpm / 60.0 * dt;
+            phase -= std::floor(phase);
+            phaseTime = s.simTime;
+        }
+        return rest * vsg::rotate(2.0 * 3.14159265358979323846 * phase, vsg::dvec3(1.0, 0.0, 0.0));
     }
     if (kind == Nozzle) {
-        // the petals open with the afterburner: hangar's throttle lever runs
-        // to 2, the afterburner past 1
-        const double p = engine < s.engineCount ? s.throttlePosition[engine] : 0.0;
-        const double a = std::isfinite(p) ? std::clamp(p - 1.0, 0.0, 1.0) : 0.0;
-        return rest * vsg::rotate(nozzleRad * a, vsg::dvec3(1.0, 0.0, 0.0));
+        // the nozzle as the engine model has it: shut at military power, open
+        // at idle and with the afterburner lit
+        const double n = engineOk && std::isfinite(s.nozzlePosition[engine]) ? std::clamp(s.nozzlePosition[engine], 0.0, 1.0) : 0.0;
+        return rest * vsg::rotate(nozzleRad * n, vsg::dvec3(1.0, 0.0, 0.0));
     }
     if (kind == Afterburner) {
-        // hangar's turbofans: the throttle lever runs to 2, the afterburner past 1
-        const double p = engine < s.engineCount ? s.throttlePosition[engine] : 0.0;
-        const double a = std::isfinite(p) ? std::clamp(p - 1.0, 0.0, 1.0) : 0.0;
+        const double a = engineOk && std::isfinite(s.afterburner[engine]) ? std::clamp(s.afterburner[engine], 0.0, 1.0) : 0.0;
         if (a <= 0.0) return rest * vsg::scale(0.0, 0.0, 0.0);
         return rest * vsg::scale(0.35 + 0.65 * a, 0.6 + 0.4 * a, 0.6 + 0.4 * a);
     }
@@ -468,8 +463,8 @@ VehicleVisuals::Rig VehicleVisuals::Rig::find(const vsg::ref_ptr<vsg::Node>& gra
     for (const auto& name : finder.malformed)
         LOG_WARN("world") << "model node '" << name
                           << "' is not a moving part (fsim:aileron|elevator|rudder|flaps[:gain][+...][@lo,hi], "
-                             "fsim:gear:<deg>[:<g0>:<g1>], fsim:afterburner[:<engine>], fsim:lef[:<a>:<m>:<b>][@lo,hi], "
-                             "fsim:propeller:<engine>:<rev/s>, fsim:nozzle:<engine>:<deg>); left fixed";
+                             "fsim:gear:<deg>[:<g0>:<g1>], fsim:afterburner[:<engine>], fsim:lef[:<gain>][@lo,hi], "
+                             "fsim:propeller:<engine>, fsim:nozzle:<engine>:<deg>); left fixed";
     rig.joints = std::move(finder.joints);
     rig.spine.assign(finder.spine.begin(), finder.spine.end());
     return rig;
@@ -668,7 +663,7 @@ void VehicleVisuals::update(Span<const sim::VehicleState> states) {
         const vsg::dmat4 m = bodyToEcef(states[i]);
         transforms_[i]->matrix = m;
         if (i < segTransforms_.size()) segTransforms_[i]->matrix = m;
-        const Pose& pose = poses_[i];
+        Pose& pose = poses_[i];
         for (std::size_t j = 0; j < pose.transforms.size(); ++j) pose.transforms[j]->matrix = pose.joints[j].matrix(states[i]);
     }
 }

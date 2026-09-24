@@ -16,7 +16,7 @@
 namespace fsim::ipc {
 
 constexpr std::uint32_t kMagic = 0x4D495346u; // "FSIM"
-constexpr std::uint32_t kLayoutVersion = 1;
+constexpr std::uint32_t kLayoutVersion = 2; // 2: VehicleState grew (engines' and moving parts' state)
 constexpr std::uint32_t kNameLength = 64;
 constexpr std::uint32_t kTypeLength = 64;
 constexpr std::uint32_t kPathLength = 256;

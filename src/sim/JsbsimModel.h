@@ -72,6 +72,7 @@ private:
     // External reaction injected at load (design 9.5): magnitude + unit direction properties.
     PropertyHandle extForceMag_, extForceX_, extForceY_, extForceZ_, extMomentMag_, extMomentL_, extMomentM_, extMomentN_;
     PropertyHandle extLocX_, extLocY_, extLocZ_, cgX_, cgY_, cgZ_;
+    PropertyHandle lefPosDeg_; ///< leading-edge flaps, where the aircraft's FCS has them (fcs/lef-pos-deg)
 };
 
 } // namespace fsim::sim
