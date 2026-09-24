@@ -1,9 +1,12 @@
 # Eurofighter EF-2000 Typhoon (Tranche 2), built by hangar from public data.
 # A canard delta, unstable in pitch at subsonic speeds by design.
 #
-# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
-# plane. Sources: Eurofighter GmbH and Jane's (dimensions, weights,
-# performance); Eurojet (EJ200).
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's
+# root chord plane. Sources: Eurofighter GmbH and Jane's (dimensions,
+# weights, performance); Eurojet (EJ200). The shape is measured off a
+# three-view scaled between the published length and span (1 % from each);
+# the gear where it draws the wheels, standing the fin's tip the published
+# 5.28 m up.
 
 [aircraft]
 name = "typhoon"
@@ -13,15 +16,16 @@ category = "fighter"
 [analysis]
 speed = 250.0
 
-# The wing: 51.2 m2, span 10.95 m, 53 deg leading edge, a cropped delta
-# (root 8.15 m, tip 1.20 m to the centre line, MAC 5.54 m). The CG sits at
-# 30 % of the MAC, 0.5 m ahead of the main wheels.
+# The wing as drawn: 51.3 m2 to the centre line (51.2 m2 published), a
+# cropped delta, 52 deg leading edge, its trailing edge swept 3 deg
+# forward, no dihedral. The balance is not published: the CG sits where
+# the flight tests need it (below).
 [[surface]]
 name = "wing"
 kind = "wing"
 sections = [
-  { le = [5.900, 0.000, 0.000], chord = 8.150, airfoil = "naca64a004" },
-  { le = [13.165, 5.475, -0.100], chord = 1.200, airfoil = "naca64a003" },
+  { le = [4.620, 0.000, 0.000], chord = 8.390, airfoil = "naca64a004" },
+  { le = [11.500, 5.330, 0.000], chord = 1.240, airfoil = "naca64a003" },
 ]
 controls = [
   # elevons: pitch and roll together
@@ -35,79 +39,124 @@ leading = [
   { name = "outer slat", span = [0.55, 0.97], chord_fraction = 0.11, limits = [-2, 25] },
 ]
 
-# All-moving canards, close-coupled ahead of the wing, 2.8 m2 exposed: a nose-
-# down command turns their trailing edges up (gain -1)
+# All-moving canards beside the cockpit, 2.6 m2 exposed, 46 deg leading
+# edge, 14 deg anhedral: a nose-down command turns their trailing edges up
+# (gain -1); the surface runs on inside the fuselage to the centre line, as
+# the body carries their lift across
 [[surface]]
 name = "canard"
 kind = "canard"
 airfoil = "naca64a004"
 sections = [
-  { le = [3.980, 0.000, 0.150], chord = 1.600 },
-  { le = [4.200, 0.550, 0.150], chord = 1.300 },
-  { le = [6.390, 2.200, 0.150], chord = 0.400 },
+  { le = [1.850, 0.000, 0.500], chord = 1.905 },
+  { le = [2.480, 0.610, 0.500], chord = 1.460 },
+  { le = [3.870, 1.940, 0.160], chord = 0.470 },
 ]
 controls = [
-  { name = "canard", channel = "elevator", gain = -1.0, span = [0.25, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-50, 20] },
+  { name = "canard", channel = "elevator", gain = -1.0, span = [0.31, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-50, 20] },
 ]
 
-# One fin, 5.6 m2, 45 deg
+# One fin, 6.1 m2, 54 deg leading edge
 [[surface]]
 name = "fin"
 kind = "fin"
 airfoil = "naca64a004"
 sections = [
-  { le = [11.800, 0.000, 0.550], chord = 3.200 },
-  { le = [14.400, 0.000, 3.150], chord = 1.100 },
+  { le = [11.080, 0.000, 1.100], chord = 3.450 },
+  { le = [14.930, 0.000, 3.930], chord = 0.930 },
 ]
 controls = [
-  { name = "rudder", channel = "rudder", span = [0.08, 0.75], chord_fraction = 0.28, limits = [-30, 30] },
+  { name = "rudder", channel = "rudder", span = [0.06, 0.80], chord_fraction = 0.28, limits = [-30, 30] },
 ]
 
-# Fuselage with the chin intake from 5 m
+# The fuselage: the radome and the cockpit high over the chin intake, the
+# spine falling to the fin, the two engines close together
 [[body]]
 name = "fuselage"
 kind = "fuselage"
 stations = [
-  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
-  { x = 1.50, w = 0.75, top = 0.300, bottom = -0.350, n = 2.0 },
-  { x = 3.00, w = 1.00, top = 0.450, bottom = -0.500, n = 2.0 },
-  { x = 4.20, w = 1.10, top = 0.500, bottom = -0.650, n = 2.2 },
-  { x = 5.00, w = 1.25, top = 0.500, bottom = -0.700, n_top = 2.4, n_bottom = 2.8 },
-  { x = 7.50, w = 1.45, top = 0.450, bottom = -0.950, n_top = 2.6, n_bottom = 3.4 },
-  { x = 10.00, w = 1.50, top = 0.400, bottom = -0.950, n = 2.8 },
-  { x = 12.50, w = 1.45, top = 0.350, bottom = -0.750, n = 2.6 },
-  { x = 14.50, w = 1.30, top = 0.300, bottom = -0.600, n = 2.4 },
-  { x = 15.96, w = 1.20, top = 0.250, bottom = -0.500, n = 2.2 },
+  { x = 0.00, w = 0.00, top = 0.410, bottom = 0.390 },
+  { x = 0.25, w = 0.22, top = 0.520, bottom = 0.310, n = 2.0 },
+  { x = 0.50, w = 0.40, top = 0.630, bottom = 0.250, n = 2.0 },
+  { x = 1.00, w = 0.66, top = 0.820, bottom = 0.170, n = 2.0 },
+  { x = 1.50, w = 0.86, top = 0.970, bottom = 0.120, n = 2.0 },
+  { x = 2.00, w = 1.02, top = 1.080, bottom = 0.110, n = 2.1 },
+  { x = 2.50, w = 1.16, top = 1.140, bottom = 0.120, n = 2.2 },
+  { x = 3.00, w = 1.26, top = 1.180, bottom = 0.120, n = 2.2 },
+  { x = 4.00, w = 1.44, top = 1.200, bottom = 0.100, n = 2.3 },
+  { x = 4.60, w = 1.60, top = 1.200, bottom = 0.000, chine = 0.450, n_top = 2.2, n_bottom = 2.4 },
+  { x = 5.00, w = 1.84, top = 1.160, bottom = 0.000, chine = 0.450, n_top = 2.2, n_bottom = 2.4 },
+  { x = 6.00, w = 2.10, top = 1.100, bottom = -0.050, chine = 0.450, n_top = 2.2, n_bottom = 2.6 },
+  { x = 8.00, w = 2.20, top = 1.100, bottom = -0.100, chine = 0.450, n_top = 2.2, n_bottom = 2.8 },
+  { x = 11.00, w = 2.20, top = 1.100, bottom = -0.100, chine = 0.450, n_top = 2.2, n_bottom = 2.8 },
+  { x = 13.00, w = 2.10, top = 1.050, bottom = -0.100, chine = 0.450, n_top = 2.2, n_bottom = 2.8 },
+  { x = 14.00, w = 1.96, top = 1.000, bottom = -0.050, chine = 0.450, n_top = 2.2, n_bottom = 2.6 },
+  { x = 14.30, w = 1.84, top = 0.950, bottom = 0.000, chine = 0.450, n_top = 2.2, n_bottom = 2.4 },
 ]
 
-# The chin intake: a wide rectangular mouth under the cockpit with the
-# lower lip (the variable cowl) square to the flow, split in two inside
+# The chin intake: a wide mouth under the radome, its lower lip (the
+# variable cowl) square to the flow, the duct's fairing widening aft into
+# the lower fuselage
 [[intake]]
 name = "intake"
 lip = 0.035
-rake = 4
-duct = 1.6
+rake = 0
+duct = 1.2
 duct_rise = 0.35
-duct_taper = 0.9
+duct_taper = 0.85
 stations = [
-  { x = 4.60, w = 1.020, top = -0.600, bottom = -1.140, chine = -0.880, n_top = 5.0, n_bottom = 3.6 },
-  { x = 6.20, w = 1.060, top = -0.600, bottom = -1.160, chine = -0.890, n_top = 5.0, n_bottom = 3.6 },
-  { x = 8.80, w = 1.000, top = -0.600, bottom = -1.100, n_top = 5.0, n_bottom = 3.4 },
-  { x = 11.20, w = 0.700, top = -0.600, bottom = -0.900, n = 3.0 },
+  { x = 4.650, w = 1.800, top = 0.100, bottom = -0.600, n_top = 4.0, n_bottom = 2.6 },
+  { x = 6.000, w = 2.100, top = 0.100, bottom = -0.580, n_top = 4.0, n_bottom = 3.0 },
+  { x = 9.000, w = 2.400, top = 0.100, bottom = -0.520, n_top = 4.0, n_bottom = 3.2 },
+  { x = 12.00, w = 2.200, top = 0.100, bottom = -0.410, n = 3.0 },
+  { x = 13.50, w = 1.800, top = 0.100, bottom = -0.320, n = 2.8 },
+  { x = 14.20, w = 1.600, top = 0.100, bottom = -0.200, n = 2.6 },
 ]
 
-# The framed windscreen and the canopy behind it
+# The spine from the canopy to the fin
+[[body]]
+name = "spine"
+kind = "pod"
+aero = false
+stations = [
+  { x = 5.200, w = 0.70, top = 1.700, bottom = 0.900, n = 2.2 },
+  { x = 6.000, w = 0.90, top = 1.640, bottom = 0.900, n = 2.2 },
+  { x = 7.000, w = 0.92, top = 1.480, bottom = 0.900, n = 2.2 },
+  { x = 8.000, w = 0.90, top = 1.380, bottom = 0.900, n = 2.2 },
+  { x = 9.000, w = 0.84, top = 1.300, bottom = 0.900, n = 2.2 },
+  { x = 10.00, w = 0.70, top = 1.240, bottom = 0.900, n = 2.2 },
+  { x = 11.00, w = 0.50, top = 1.160, bottom = 0.900, n = 2.2 },
+  { x = 11.60, w = 0.00, top = 1.300, bottom = 1.000 },
+]
+
+# The pods on the wing tips (the defensive aids' antennas)
+[[body]]
+name = "tip pod"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 11.100, y = 5.400, w = 0.000, top = 0.050, bottom = 0.030 },
+  { x = 11.500, y = 5.400, w = 0.240, top = 0.200, bottom = -0.120, n = 2.2 },
+  { x = 12.900, y = 5.400, w = 0.260, top = 0.220, bottom = -0.130, n = 2.2 },
+  { x = 13.200, y = 5.400, w = 0.100, top = 0.100, bottom = -0.020, n = 2.2 },
+]
+
+# The framed windscreen and the bubble canopy behind it
 [[body]]
 name = "canopy"
 kind = "pod"
-frames = [3.30]
+frames = [2.95]
 frame_width = 0.07
 stations = [
-  { x = 2.600, w = 0.00, top = 0.520, bottom = 0.500 },
-  { x = 3.200, w = 0.66, top = 0.960, bottom = 0.480, n = 2.0 },
-  { x = 4.300, w = 0.80, top = 1.100, bottom = 0.480, n = 2.0 },
-  { x = 5.300, w = 0.66, top = 0.980, bottom = 0.490, n = 2.0 },
-  { x = 6.200, w = 0.28, top = 0.660, bottom = 0.480, n = 2.0 },
+  { x = 2.150, w = 0.00, top = 1.110, bottom = 1.080 },
+  { x = 2.500, w = 0.64, top = 1.270, bottom = 1.050, n = 2.0 },
+  { x = 3.000, w = 0.86, top = 1.520, bottom = 1.050, n = 2.0 },
+  { x = 3.500, w = 0.96, top = 1.740, bottom = 1.050, n = 2.0 },
+  { x = 4.250, w = 1.00, top = 1.880, bottom = 1.060, n = 2.0 },
+  { x = 5.000, w = 0.96, top = 1.850, bottom = 1.080, n = 2.0 },
+  { x = 5.800, w = 0.80, top = 1.680, bottom = 1.100, n = 2.0 },
+  { x = 6.400, w = 0.00, top = 1.560, bottom = 1.480 },
 ]
 
 [[engine]]
@@ -120,37 +169,42 @@ bypass_ratio = 0.40
 tsfc_dry = 0.79
 tsfc_wet = 1.73
 design_mach = 2.0
-position = [12.600, 0.350, -0.350]
+position = [12.600, 0.490, 0.450]
 mass = 989
-inlet_x = 5.0
+inlet_x = 4.65
 [engine.nozzle]
-position = [15.900, 0.350, -0.350]
+position = [14.720, 0.490, 0.450]
+diameter = 0.88               # m, as drawn
+length = 0.65
 
+# The gear where the three-view draws its wheels (the axles 5.37 and 9.50 m
+# behind the nose tip): a single nose wheel folding aft under the split
+# intake, the mains on a 3.83 m track folding inward under the wing roots.
 [[gear]]
 name = "Nose Gear"
-position = [4.300, 0.0, -1.900]
+position = [5.370, 0.0, -1.490]
 steerable = true
 max_steer = 60
-wheel_diameter = 0.55
-wheel_width = 0.16
+wheel_diameter = 0.47
+wheel_width = 0.18
 retractable = true
+retract = "aft"
 static_deflection = 0.14
-attach = [4.300, 0.000, -0.450]
-retract = "forward"
+attach = [5.370, 0.000, -0.250]
 
 [[gear]]
 name = "Main Gear"
 mirror = true
-position = [10.800, 1.300, -1.900]
-wheel_diameter = 0.78
-wheel_width = 0.26
+position = [9.500, 1.914, -1.520]
+wheel_diameter = 0.72
+wheel_width = 0.27
 retractable = true
-static_deflection = 0.17
-attach = [10.600, 0.620, -0.500]
 retract = "inward"
+static_deflection = 0.17
+attach = [9.400, 1.150, -0.050]
 
 [reference]
-aero_point = [10.290, 0.0, 0.0]    # 0.30 MAC
+aero_point = [8.400, 0.0, 0.0]     # at the CG
 
 [flight_control]
 type = "fbw"
@@ -161,32 +215,33 @@ roll_rate_deg_s = 250.0
 
 [mass]
 empty = 11000                 # Tranche 2 (Eurofighter)
-empty_cg = [10.300, 0.0, -0.300]
+# loaded: 6 % of the MAC behind the neutral point hangar finds
+empty_cg = [8.257, 0.0, 0.300]
 # no published inertia: radii of gyration of the class
 gyration = [0.250, 0.400, 0.510]
 [[mass.payload]]
 name = "pilot"
 mass = 100
-position = [4.300, 0.0, 0.600]
+position = [3.900, 0.0, 1.400]
 [[mass.payload]]
 name = "gun ammunition"       # Mauser BK-27, 150 rounds
 mass = 80
-position = [9.000, 1.000, 0.000]
+position = [8.000, 1.000, 0.000]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 4,996 kg
-position = [8.000, 0.0, -0.200]
+position = [7.500, 0.0, 0.500]
 capacity = 1800
 [[mass.tank]]
 name = "fuselage 2"
-position = [10.200, 0.0, -0.200]
+position = [9.300, 0.0, 0.500]
 capacity = 1596
 [[mass.tank]]
 name = "left wing"
-position = [10.500, -2.600, 0.000]
+position = [9.800, -2.500, 0.000]
 capacity = 800
 [[mass.tank]]
 name = "right wing"
-position = [10.500, 2.600, 0.000]
+position = [9.800, 2.500, 0.000]
 capacity = 800
 
 [dimensions]                  # published, overall, gear down (Eurofighter):

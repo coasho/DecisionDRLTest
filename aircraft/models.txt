@@ -2,4 +2,9 @@
 # <stock type> <design> <forward> <right> <down>: the viewer draws jsbsim:<stock type> with
 # aircraft/<design>/<design>.glb, moved that far (m, the aircraft's body axes) so the model's
 # main wheels stand where the stock aircraft's do.
+c172x c172 0.114 0.000 -0.027
+c172p c172 0.028 0.000 -0.044
+c172r c172 0.040 0.000 0.003
+f15 f15c -0.533 0.000 0.056
 f16 f16c -0.066 0.000 -0.272
+f22 f22a 0.536 0.000 -0.021

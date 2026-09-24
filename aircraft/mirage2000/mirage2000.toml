@@ -1,9 +1,11 @@
 # Dassault Mirage 2000C, built by hangar from public data. A tailless delta,
 # the first to be unstable in pitch by design and flown by wire.
 #
-# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
-# plane. Sources: Dassault Aviation and Jane's (dimensions, weights,
-# performance); Safran (M53-P2).
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's
+# root chord plane. Sources: Dassault Aviation and Jane's (dimensions,
+# weights, performance); Safran (M53-P2). The shape is measured off a
+# three-view scaled to the published length (its span then 2 % over, its
+# height 2 % under); the gear where it draws the wheels.
 
 [aircraft]
 name = "mirage2000"
@@ -13,15 +15,16 @@ category = "fighter"
 [analysis]
 speed = 250.0
 
-# The wing: 41 m2, span 9.13 m, 58 deg leading edge, straight trailing edge
-# (root 8.14 m, tip 0.84 m to the centre line, MAC 5.48 m). The CG at 33 %
-# of the MAC, 0.6 m ahead of the main wheels.
+# The wing as drawn: 41.6 m2 to the centre line (41 m2 published), 58 deg
+# leading edge, the trailing edge nearly straight, 1.5 deg anhedral. The
+# balance is not published: the CG sits 3 % of the MAC behind the neutral
+# point hangar finds (relaxed stability, flown by wire).
 [[surface]]
 name = "wing"
 kind = "wing"
 sections = [
-  { le = [4.600, 0.000, 0.000], chord = 8.143, airfoil = "naca64a005" },
-  { le = [11.905, 4.565, -0.100], chord = 0.838, airfoil = "naca64a003" },
+  { le = [3.930, 0.000, 0.000], chord = 8.350, airfoil = "naca64a005" },
+  { le = [11.430, 4.670, -0.120], chord = 0.560, airfoil = "naca64a003" },
 ]
 controls = [
   { name = "inner elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.14, 0.55], chord_fraction = 0.18, limits = [-25, 25] },
@@ -34,32 +37,43 @@ leading = [
   { name = "outer slat", span = [0.55, 0.97], chord_fraction = 0.10, limits = [-2, 25] },
 ]
 
+# The fin, 53 deg leading edge, rising from the spine
 [[surface]]
 name = "fin"
 kind = "fin"
 airfoil = "naca64a004"
 sections = [
-  { le = [9.600, 0.000, 0.500], chord = 3.600 },
-  { le = [12.400, 0.000, 3.600], chord = 1.100 },
+  { le = [9.910, 0.000, 1.150], chord = 3.580 },
+  { le = [13.220, 0.000, 3.600], chord = 0.760 },
 ]
 controls = [
-  { name = "rudder", channel = "rudder", span = [0.08, 0.72], chord_fraction = 0.26, limits = [-25, 25] },
+  { name = "rudder", channel = "rudder", span = [0.08, 0.80], chord_fraction = 0.28, limits = [-25, 25] },
 ]
 
-# Fuselage with the side intakes from 5.6 m, one engine
+# The fuselage: a long pointed nose, the cockpit, the spine over the intakes
+# falling to the fin, one engine
 [[body]]
 name = "fuselage"
 kind = "fuselage"
 stations = [
-  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
-  { x = 1.30, w = 0.62, top = 0.250, bottom = -0.350, n = 2.0 },
-  { x = 3.00, w = 0.95, top = 0.450, bottom = -0.500, n = 2.0 },
-  { x = 4.60, w = 1.10, top = 0.550, bottom = -0.600, n = 2.2 },
-  { x = 5.60, w = 1.30, top = 0.500, bottom = -0.700, n_top = 2.4, n_bottom = 2.6 },
-  { x = 8.00, w = 2.20, top = 0.450, bottom = -0.750, n_top = 2.8, n_bottom = 3.0 },
-  { x = 10.50, w = 1.70, top = 0.400, bottom = -0.620, n = 2.8 },
-  { x = 13.00, w = 1.25, top = 0.320, bottom = -0.500, n = 2.4 },
-  { x = 14.36, w = 1.10, top = 0.280, bottom = -0.450, n = 2.2 },
+  { x = 0.00, w = 0.00, top = 0.090, bottom = 0.060 },
+  { x = 0.25, w = 0.16, top = 0.170, bottom = 0.010, n = 2.0 },
+  { x = 0.50, w = 0.28, top = 0.240, bottom = -0.040, n = 2.0 },
+  { x = 1.00, w = 0.50, top = 0.390, bottom = -0.140, n = 2.0 },
+  { x = 1.50, w = 0.68, top = 0.530, bottom = -0.180, n = 2.0 },
+  { x = 2.00, w = 0.84, top = 0.620, bottom = -0.210, n = 2.1 },
+  { x = 2.50, w = 0.90, top = 0.700, bottom = -0.230, n = 2.2 },
+  { x = 3.00, w = 0.90, top = 0.760, bottom = -0.220, n = 2.2 },
+  { x = 4.00, w = 0.92, top = 0.800, bottom = -0.210, n = 2.2 },
+  { x = 5.00, w = 1.00, top = 1.300, bottom = -0.230, chine = 0.350, n_top = 2.0, n_bottom = 2.6 },
+  { x = 6.00, w = 1.20, top = 1.290, bottom = -0.230, chine = 0.350, n_top = 2.0, n_bottom = 2.6 },
+  { x = 8.00, w = 1.30, top = 1.190, bottom = -0.250, chine = 0.350, n_top = 2.0, n_bottom = 2.8 },
+  { x = 9.50, w = 1.40, top = 1.190, bottom = -0.250, chine = 0.400, n_top = 2.0, n_bottom = 2.8 },
+  { x = 11.00, w = 1.50, top = 1.200, bottom = -0.230, chine = 0.450, n_top = 2.0, n_bottom = 2.8 },
+  { x = 12.25, w = 1.78, top = 1.200, bottom = -0.140, chine = 0.500, n_top = 2.2, n_bottom = 2.6 },
+  { x = 13.00, w = 1.22, top = 1.150, bottom = -0.070, chine = 0.550, n_top = 2.2, n_bottom = 2.4 },
+  { x = 13.75, w = 1.10, top = 1.120, bottom = 0.030, chine = 0.600, n = 2.2 },
+  { x = 14.30, w = 0.96, top = 1.100, bottom = 0.140, chine = 0.620, n = 2.1 },
 ]
 
 # Half-round intakes either side of the cockpit, flat against the
@@ -72,24 +86,38 @@ duct = 1.4
 duct_rise = 0.1
 duct_taper = 0.85
 stations = [
-  { x = 4.80, y = 0.720, w = 0.520, top = 0.200, bottom = -0.620, chine = -0.210, n_top = 2.0, n_bottom = 2.0 },
-  { x = 6.20, y = 0.780, w = 0.560, top = 0.200, bottom = -0.660, chine = -0.230, n_top = 2.2, n_bottom = 2.2 },
-  { x = 8.00, y = 0.760, w = 0.520, top = 0.150, bottom = -0.680, n = 2.4 },
-  { x = 9.60, y = 0.620, w = 0.380, top = 0.050, bottom = -0.620, n = 2.4 },
+  { x = 4.750, y = 0.700, w = 0.600, top = 0.850, bottom = -0.100, n = 2.0 },
+  { x = 6.000, y = 0.740, w = 0.640, top = 0.820, bottom = -0.150, n = 2.2 },
+  { x = 8.000, y = 0.700, w = 0.560, top = 0.750, bottom = -0.150, n = 2.4 },
+  { x = 9.600, y = 0.600, w = 0.400, top = 0.650, bottom = -0.100, n = 2.4 },
+]
+
+# The drag chute's housing at the fin's root
+[[body]]
+name = "chute housing"
+kind = "pod"
+aero = false
+stations = [
+  { x = 12.300, w = 0.00, top = 1.160, bottom = 1.140 },
+  { x = 12.800, w = 0.24, top = 1.380, bottom = 1.050, n = 2.4 },
+  { x = 13.950, w = 0.24, top = 1.380, bottom = 1.050, n = 2.4 },
+  { x = 14.150, w = 0.00, top = 1.230, bottom = 1.210 },
 ]
 
 # The framed windscreen and the canopy behind it
 [[body]]
 name = "canopy"
 kind = "pod"
-frames = [3.48]
+frames = [3.45]
 frame_width = 0.07
 stations = [
-  { x = 2.900, w = 0.00, top = 0.560, bottom = 0.540 },
-  { x = 3.500, w = 0.64, top = 0.980, bottom = 0.520, n = 2.0 },
-  { x = 4.500, w = 0.78, top = 1.100, bottom = 0.520, n = 2.0 },
-  { x = 5.400, w = 0.64, top = 0.980, bottom = 0.530, n = 2.0 },
-  { x = 6.200, w = 0.26, top = 0.660, bottom = 0.520, n = 2.0 },
+  { x = 2.300, w = 0.00, top = 0.660, bottom = 0.640 },
+  { x = 2.700, w = 0.60, top = 0.860, bottom = 0.620, n = 2.0 },
+  { x = 3.300, w = 0.80, top = 1.160, bottom = 0.640, n = 2.0 },
+  { x = 4.000, w = 0.84, top = 1.340, bottom = 0.680, n = 2.0 },
+  { x = 4.700, w = 0.82, top = 1.360, bottom = 0.720, n = 2.0 },
+  { x = 5.300, w = 0.70, top = 1.320, bottom = 0.800, n = 2.0 },
+  { x = 5.900, w = 0.00, top = 1.300, bottom = 1.200 },
 ]
 
 [[engine]]
@@ -101,37 +129,47 @@ bypass_ratio = 0.36
 tsfc_dry = 0.90
 tsfc_wet = 2.10
 design_mach = 2.2
-position = [11.000, 0.0, -0.150]
+position = [11.200, 0.0, 0.620]
 mass = 1500
-inlet_x = 5.6
+inlet_x = 4.75
 [engine.nozzle]
-position = [14.300, 0.0, -0.150]
+position = [14.360, 0.0, 0.620]
+diameter = 0.85               # m, as drawn
+length = 0.35
 
+# The gear where the three-view draws its wheels (the axles 3.91 and 8.96 m
+# behind the nose tip): twin 360 mm nose wheels folding aft, 750 mm mains
+# on the published 3.40 m track folding inward; standing on it the fin's
+# tip is 5.1 m up (5.2 m published).
 [[gear]]
 name = "Nose Gear"
-position = [4.300, 0.0, -1.600]
+position = [3.905, 0.0, -1.570]
 steerable = true
 max_steer = 45
-wheel_diameter = 0.46
-wheel_width = 0.15
-retractable = true
-static_deflection = 0.14
-attach = [4.300, 0.000, -0.400]
+wheel_diameter = 0.36
+wheel_width = 0.13
 wheels = 2
+retractable = true
+retract = "aft"
+static_deflection = 0.12
+attach = [3.905, 0.000, -0.100]
 
 [[gear]]
 name = "Main Gear"
 mirror = true
-position = [9.700, 1.700, -1.600]
+position = [8.960, 1.700, -1.610]
 wheel_diameter = 0.75
 wheel_width = 0.22
 retractable = true
-static_deflection = 0.17
-attach = [9.500, 1.400, -0.100]
 retract = "inward"
+static_deflection = 0.16
+attach = [8.900, 1.700, -0.040]
+retract_axis = [-1.0, 0.0, 0.0]
+retract_deg = 89
+wheel_turn = "flat"
 
 [reference]
-aero_point = [9.070, 0.0, 0.0]     # 0.33 MAC
+aero_point = [8.300, 0.0, 0.0]     # at the CG
 
 [flight_control]
 type = "fbw"
@@ -142,32 +180,32 @@ roll_rate_deg_s = 270.0
 
 [mass]
 empty = 7500                  # Mirage 2000C (Dassault)
-empty_cg = [9.100, 0.0, -0.200]
+empty_cg = [8.391, 0.0, 0.300]
 # no published inertia: radii of gyration of the class
 gyration = [0.240, 0.400, 0.500]
 [[mass.payload]]
 name = "pilot"
 mass = 100
-position = [4.400, 0.0, 0.600]
+position = [4.200, 0.0, 0.900]
 [[mass.payload]]
 name = "gun ammunition"       # 2 DEFA 554, 250 rounds
 mass = 125
-position = [7.200, 0.0, -0.500]
+position = [6.800, 0.0, -0.100]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 3,160 kg
-position = [7.000, 0.0, -0.150]
+position = [7.000, 0.0, 0.300]
 capacity = 1100
 [[mass.tank]]
 name = "fuselage 2"
-position = [9.300, 0.0, -0.150]
+position = [8.900, 0.0, 0.300]
 capacity = 1000
 [[mass.tank]]
 name = "left wing"
-position = [9.500, -2.000, 0.000]
+position = [9.000, -2.000, 0.000]
 capacity = 530
 [[mass.tank]]
 name = "right wing"
-position = [9.500, 2.000, 0.000]
+position = [9.000, 2.000, 0.000]
 capacity = 530
 
 [dimensions]                  # published, overall, gear down (Dassault):

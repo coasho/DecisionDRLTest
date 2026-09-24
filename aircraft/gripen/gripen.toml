@@ -1,9 +1,12 @@
 # Saab JAS 39C Gripen, built by hangar from public data. A close-coupled
 # canard delta, unstable in pitch at subsonic speeds.
 #
-# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
-# plane. Sources: Saab and Jane's (dimensions, weights, performance); Volvo
-# Aero (RM12).
+# Frame: metres, x aft from the radome tip, y right, z up from the wing's
+# chord plane. Sources: Saab and Jane's (dimensions, weights, performance);
+# Volvo Aero (RM12). The shape is measured off a three-view whose span and
+# length agree with the published ones (14.1 m with the 0.58 m nose probe);
+# the gear where it draws the wheels, standing the fin's tip the published
+# 4.5 m up.
 
 [aircraft]
 name = "gripen"
@@ -13,17 +16,18 @@ category = "fighter"
 [analysis]
 speed = 240.0
 
-# The wing: 25.5 m2, span 8.40 m, 50 deg leading edge (the real one is a
-# cranked delta), trailing edge about straight (root 5.58 m, tip 0.50 m to
-# the centre line, MAC 3.75 m). The CG at 12 % of the MAC, 10 % of it behind
-# the neutral point hangar finds: a canard delta's relaxed stability (the
-# real balance is not published).
+# The wing as drawn: a cranked delta, 52 deg leading edge inboard, 48 deg
+# outboard, the trailing edge straight (29 m2 to the centre line; Saab's
+# reference area 25.5 m2). The CG sits 10 % of the MAC behind the neutral
+# point hangar finds: a canard delta's relaxed stability (the real balance
+# is not published).
 [[surface]]
 name = "wing"
 kind = "wing"
 sections = [
-  { le = [6.600, 0.000, 0.000], chord = 5.580, airfoil = "naca64a005" },
-  { le = [11.605, 4.200, -0.080], chord = 0.500, airfoil = "naca64a003" },
+  { le = [5.100, 0.000, 0.000], chord = 6.180, airfoil = "naca64a005" },
+  { le = [7.860, 2.250, -0.040], chord = 3.280, airfoil = "naca64a004" },
+  { le = [9.960, 4.120, -0.080], chord = 1.070, airfoil = "naca64a003" },
 ]
 controls = [
   { name = "inner elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.18, 0.55], chord_fraction = 0.22, limits = [-25, 25] },
@@ -35,18 +39,19 @@ leading = [
   { name = "leading-edge flap", span = [0.30, 0.97], chord_fraction = 0.12, limits = [-3, 25] },
 ]
 
-# All-moving canards over the intakes, 2.1 m2 exposed
+# All-moving canards over the intakes, 3.5 m2 exposed; the surface runs on
+# inside the fuselage to the centre line
 [[surface]]
 name = "canard"
 kind = "canard"
 airfoil = "naca64a004"
 sections = [
-  { le = [4.700, 0.000, 0.200], chord = 1.600 },
-  { le = [4.900, 0.550, 0.200], chord = 1.500 },
-  { le = [6.250, 1.900, 0.200], chord = 0.550 },
+  { le = [3.600, 0.000, 0.200], chord = 2.100 },
+  { le = [3.830, 0.800, 0.200], chord = 1.930 },
+  { le = [6.170, 2.300, 0.300], chord = 0.420 },
 ]
 controls = [
-  { name = "canard", channel = "elevator", gain = -1.0, span = [0.29, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-50, 20] },
+  { name = "canard", channel = "elevator", gain = -1.0, span = [0.35, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-50, 20] },
 ]
 
 [[surface]]
@@ -54,27 +59,35 @@ name = "fin"
 kind = "fin"
 airfoil = "naca64a004"
 sections = [
-  { le = [10.400, 0.000, 0.450], chord = 3.000 },
-  { le = [12.500, 0.000, 2.900], chord = 1.000 },
+  { le = [9.490, 0.000, 0.800], chord = 3.100 },
+  { le = [11.870, 0.000, 2.730], chord = 0.600 },
 ]
 controls = [
   { name = "rudder", channel = "rudder", span = [0.08, 0.75], chord_fraction = 0.28, limits = [-30, 30] },
 ]
 
-# Fuselage with the side intakes from 5 m, one engine
+# Fuselage with the side intakes from 3.8 m, one engine
 [[body]]
 name = "fuselage"
 kind = "fuselage"
 stations = [
-  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
-  { x = 1.20, w = 0.62, top = 0.280, bottom = -0.300, n = 2.0 },
-  { x = 2.80, w = 0.90, top = 0.450, bottom = -0.450, n = 2.0 },
-  { x = 4.20, w = 1.00, top = 0.500, bottom = -0.550, n = 2.2 },
-  { x = 5.00, w = 1.25, top = 0.450, bottom = -0.680, n_top = 2.4, n_bottom = 2.8 },
-  { x = 7.50, w = 2.00, top = 0.400, bottom = -0.750, n_top = 3.0, n_bottom = 3.4 },
-  { x = 10.00, w = 1.60, top = 0.350, bottom = -0.600, n = 2.8 },
-  { x = 12.50, w = 1.10, top = 0.300, bottom = -0.450, n = 2.4 },
-  { x = 14.10, w = 0.90, top = 0.250, bottom = -0.400, n = 2.2 },
+  { x = 0.00, w = 0.00, top = -0.270, bottom = -0.330 },
+  { x = 0.50, w = 0.48, top = -0.070, bottom = -0.430, n = 2.0 },
+  { x = 1.00, w = 0.72, top = 0.100, bottom = -0.500, n = 2.0 },
+  { x = 1.50, w = 0.88, top = 0.230, bottom = -0.530, n = 2.1 },
+  { x = 2.00, w = 0.94, top = 0.350, bottom = -0.580, n = 2.2 },
+  { x = 2.50, w = 0.94, top = 0.440, bottom = -0.570, n = 2.2 },
+  { x = 3.50, w = 0.98, top = 0.520, bottom = -0.560, n = 2.3 },
+  { x = 4.00, w = 1.00, top = 0.580, bottom = -0.600, n = 2.4 },
+  { x = 5.00, w = 1.30, top = 0.650, bottom = -0.700, n_top = 2.4, n_bottom = 2.8 },
+  { x = 6.00, w = 1.50, top = 0.720, bottom = -0.740, n_top = 2.6, n_bottom = 3.0 },
+  { x = 7.00, w = 1.70, top = 0.770, bottom = -0.780, n_top = 2.8, n_bottom = 3.2 },
+  { x = 8.50, w = 1.80, top = 0.750, bottom = -0.780, n_top = 2.8, n_bottom = 3.2 },
+  { x = 9.50, w = 1.60, top = 0.720, bottom = -0.580, n = 2.8 },
+  { x = 10.50, w = 1.40, top = 0.650, bottom = -0.530, n = 2.6 },
+  { x = 11.50, w = 1.30, top = 0.600, bottom = -0.470, n = 2.5 },
+  { x = 12.50, w = 1.18, top = 0.550, bottom = -0.350, n = 2.4 },
+  { x = 13.00, w = 0.86, top = 0.500, bottom = -0.270, n = 2.2 },
 ]
 
 # D-shaped intakes either side under the canards, flat against the fuselage
@@ -82,29 +95,56 @@ stations = [
 name = "intake"
 mirror = true
 lip = 0.03
-rake = -6
+rake = 0
 duct = 1.4
 duct_rise = 0.1
 duct_taper = 0.85
 stations = [
-  { x = 4.40, y = 0.700, w = 0.500, top = 0.140, bottom = -0.620, chine = -0.240, n_top = 2.4, n_bottom = 2.2 },
-  { x = 5.60, y = 0.740, w = 0.540, top = 0.140, bottom = -0.660, chine = -0.260, n_top = 2.6, n_bottom = 2.4 },
-  { x = 7.20, y = 0.700, w = 0.500, top = 0.100, bottom = -0.660, n = 2.6 },
-  { x = 8.60, y = 0.560, w = 0.360, top = 0.000, bottom = -0.600, n = 2.4 },
+  { x = 3.80, y = 0.720, w = 0.460, top = 0.200, bottom = -0.620, chine = -0.240, n_top = 2.4, n_bottom = 2.2 },
+  { x = 5.00, y = 0.780, w = 0.520, top = 0.200, bottom = -0.700, chine = -0.260, n_top = 2.6, n_bottom = 2.4 },
+  { x = 7.00, y = 0.720, w = 0.500, top = 0.150, bottom = -0.720, n = 2.6 },
+  { x = 8.60, y = 0.560, w = 0.360, top = 0.000, bottom = -0.650, n = 2.4 },
 ]
 
-# The framed windscreen and the canopy behind it
+# The launch rails on the wing tips
+[[body]]
+name = "tip rail"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 8.40, y = 4.140, w = 0.000, top = 0.000, bottom = -0.080 },
+  { x = 8.70, y = 4.140, w = 0.120, top = 0.060, bottom = -0.140, n = 2.4 },
+  { x = 11.30, y = 4.140, w = 0.120, top = 0.060, bottom = -0.140, n = 2.4 },
+  { x = 11.55, y = 4.140, w = 0.000, top = 0.000, bottom = -0.080 },
+]
+
+# The pitot probe: 14.1 m overall with it
+[[body]]
+name = "probe"
+kind = "pod"
+aero = false
+stations = [
+  { x = -0.580, w = 0.000, top = -0.290, bottom = -0.310 },
+  { x = -0.550, w = 0.035, top = -0.285, bottom = -0.315 },
+  { x = -0.100, w = 0.050, top = -0.275, bottom = -0.325 },
+  { x = 0.150, w = 0.180, top = -0.220, bottom = -0.380 },
+]
+
+# The framed windscreen and the long canopy behind it
 [[body]]
 name = "canopy"
 kind = "pod"
-frames = [3.22]
+frames = [2.85]
 frame_width = 0.07
 stations = [
-  { x = 2.600, w = 0.00, top = 0.520, bottom = 0.500 },
-  { x = 3.200, w = 0.62, top = 0.920, bottom = 0.480, n = 2.0 },
-  { x = 4.200, w = 0.74, top = 1.050, bottom = 0.480, n = 2.0 },
-  { x = 5.200, w = 0.60, top = 0.930, bottom = 0.490, n = 2.0 },
-  { x = 6.000, w = 0.26, top = 0.640, bottom = 0.480, n = 2.0 },
+  { x = 2.300, w = 0.00, top = 0.470, bottom = 0.440 },
+  { x = 2.800, w = 0.60, top = 0.750, bottom = 0.440, n = 2.0 },
+  { x = 3.400, w = 0.74, top = 0.980, bottom = 0.460, n = 2.0 },
+  { x = 4.200, w = 0.74, top = 0.940, bottom = 0.500, n = 2.0 },
+  { x = 5.000, w = 0.62, top = 0.860, bottom = 0.550, n = 2.0 },
+  { x = 5.700, w = 0.36, top = 0.800, bottom = 0.620, n = 2.0 },
+  { x = 6.100, w = 0.00, top = 0.770, bottom = 0.700 },
 ]
 
 [[engine]]
@@ -116,37 +156,42 @@ bypass_ratio = 0.28
 tsfc_dry = 0.84
 tsfc_wet = 1.78
 design_mach = 2.0
-position = [11.000, 0.0, -0.150]
+position = [10.800, 0.0, 0.100]
 mass = 1055
-inlet_x = 5.0
+inlet_x = 3.8
 [engine.nozzle]
-position = [14.000, 0.0, -0.150]
+position = [13.500, 0.0, 0.120]
+diameter = 0.72               # m, as drawn
 
+# The gear where the three-view draws its wheels (the axles 3.39 and 8.44 m
+# behind the radome tip; twin 0.38 m nose tyres, 0.66 m mains), the 2.4 m
+# track; standing on it the fin's tip is the published 4.5 m up.
 [[gear]]
 name = "Nose Gear"
-position = [4.000, 0.0, -1.700]
+position = [3.390, 0.0, -1.910]
 steerable = true
 max_steer = 55
-wheel_diameter = 0.45
-wheel_width = 0.14
+wheel_diameter = 0.38
+wheel_width = 0.12
 retractable = true
+retract = "forward"
 static_deflection = 0.13
-attach = [4.000, 0.000, -0.350]
+attach = [3.390, 0.000, -0.350]
 wheels = 2
 
 [[gear]]
 name = "Main Gear"
 mirror = true
-position = [10.000, 1.200, -1.700]
+position = [8.440, 1.200, -1.940]
 wheel_diameter = 0.66
 wheel_width = 0.22
 retractable = true
 static_deflection = 0.16
-attach = [9.850, 0.550, -0.350]
+attach = [8.300, 0.600, -0.400]
 retract = "forward"
 
 [reference]
-aero_point = [8.996, 0.0, 0.0]     # 0.16 MAC
+aero_point = [7.525, 0.0, 0.0]     # at the CG
 
 [flight_control]
 type = "fbw"
@@ -157,32 +202,32 @@ roll_rate_deg_s = 280.0
 
 [mass]
 empty = 6800                  # JAS 39C (Saab)
-empty_cg = [9.016, 0.0, -0.200]
+empty_cg = [7.704, 0.0, -0.200]
 # no published inertia: radii of gyration of the class
 gyration = [0.250, 0.400, 0.510]
 [[mass.payload]]
 name = "pilot"
 mass = 100
-position = [4.200, 0.0, 0.550]
+position = [3.600, 0.0, 0.500]
 [[mass.payload]]
 name = "gun ammunition"       # Mauser BK-27, 120 rounds
 mass = 60
-position = [7.500, -0.800, 0.000]
+position = [6.188, -0.800, 0.000]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 2,400 kg
-position = [7.466, 0.0, -0.150]
+position = [6.154, 0.0, -0.150]
 capacity = 1000
 [[mass.tank]]
 name = "fuselage 2"
-position = [9.266, 0.0, -0.150]
+position = [7.954, 0.0, -0.150]
 capacity = 900
 [[mass.tank]]
 name = "left wing"
-position = [9.466, -1.800, 0.000]
+position = [8.154, -1.800, 0.000]
 capacity = 250
 [[mass.tank]]
 name = "right wing"
-position = [9.466, 1.800, 0.000]
+position = [8.154, 1.800, 0.000]
 capacity = 250
 
 [dimensions]                  # published, overall, gear down (Saab):

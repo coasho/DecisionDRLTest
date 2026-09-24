@@ -271,7 +271,8 @@ class Design:
                   note="at %.0f deg" % a_clmax + ("; leading-edge extensions take a fighter's past 2" if fighter else "")),
             check("pitch stiffness Cm_alpha (about ARP)", d["Cma"], None, -0.1, "/rad", level="warn" if fighter else "fail",
                   note="negative: stable" + ("; a fighter's flight controls make up for relaxed stability" if fighter else "")),
-            check("weathercock Cn_beta", d["Cnb"], 0.01, None, "/rad", note="positive: stable"),
+            check("weathercock Cn_beta", d["Cnb"], 0.01, None, "/rad", level="warn" if fighter and d["Cnb"] > 0.0 else "fail",
+                  note="positive: stable" + ("; small fins lean on the flight controls" if fighter else "")),
             check("dihedral effect Cl_beta", d["Clb"], None, -0.005, "/rad", note="negative: stable"),
             check("roll damping Cl_p", d["Clp"], None, -0.1, "/rad"),
             check("pitch damping Cm_q", d["Cmq"], None, -0.05 if tailless else (-0.5 if fighter else -1.0), "/rad",
@@ -852,10 +853,11 @@ def _calibrate_fighter(d):
     First the engines' throttle ratio TR (where the turbine reaches its
     temperature limit: how much thrust is left at high Mach), between 1.0
     and 1.5; if even 1.5 falls short, then the wave drag's E_WD (Raymer
-    12.46), from the area distribution's 2 down to 1.2, a smooth one's.
-    Each is a bisection on the maximum level Mach number at the target
-    altitude, the aircraft rebuilt and accelerated at full afterburner every
-    step."""
+    12.46), from the area distribution's 2 down to 1.2, a smooth one's -
+    and if the top speed jumps past the target there (through the transonic
+    drag rise or not), E_WD 1.2 and TR again. Each is a bisection on the
+    maximum level Mach number at the target altitude, the aircraft rebuilt
+    and accelerated at full afterburner every step."""
     from . import flight as F
     from .fcs import options
     t = d.targets
@@ -906,6 +908,14 @@ def _calibrate_fighter(d):
         tr = tr_hi
         m_e = measure(tr, 1.2)
         ewd, m = bisect(lambda x: measure(tr, x), 1.2, ewd0, m_e, m_hi)
+        if abs(m - target) > 0.03 and m_e > target:
+            # the top speed jumps across the target: the transonic drag rise
+            # holds the aircraft, or with a little less of it, it breaks
+            # through and runs on well past. The smooth area distribution's
+            # wave drag then, to break through, and a lower throttle ratio to
+            # stop it at the target
+            ewd = 1.2
+            tr, m = bisect(lambda x: measure(x, ewd), tr_lo, tr_hi, measure(tr_lo, ewd), m_e)
     _write_calibration(d, {"throttle_ratio": float(tr), "wave_drag_efficiency": float(ewd)},
                        note="fitted: maximum Mach %.3f at %.0f ft (target %g)" % (m, alt / 0.3048, target))
     d.aircraft = Aircraft.load(d.path)
@@ -952,7 +962,9 @@ def _calibrate(d):
         f = F.Flight(a.name, name="hangar-cal-" + a.name)
         try:
             v0 = target[0] * KT
-            rows = F.trim_sweep(f, v0 * np.array([0.8, 0.9, 0.97, 1.03, 1.1]), altitude_m=100.0)
+            # close samples round the target: past the top speed the trims
+            # fail, and the throttle curve is extrapolated only a little way
+            rows = F.trim_sweep(f, v0 * np.array([0.8, 0.88, 0.94, 0.97, 1.0, 1.03, 1.06, 1.1]), altitude_m=100.0)
             vmax = F.max_level_speed(rows) / KT
             c, _ = F.climb(f, 30.0, vy)
             climb = c["rate_ms"] / 0.3048 * 60

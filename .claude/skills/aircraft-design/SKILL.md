@@ -148,12 +148,15 @@ move on while a check fails or a picture looks wrong.
   - Build checks the short period at every design point.
   - Fly checks the limiter (full aft stick), a 3 g step and the roll.
 - **Balance.** Real CGs are rarely published. Place the CG from the neutral
-  point the aero stage finds, not from a guessed % MAC: canard deltas about
-  10 % MAC unstable, relaxed-stability fighters 0-5 %. Move `empty_cg`, the
-  tanks and `aero_point` together. Then check the nose-down margin: with the
-  pitch channel at its nose-down end, Cm about the loaded CG must stay
-  negative a few degrees past `alpha_max_deg`. If it does not, the limiter
-  test departs; move the CG forward or lower `alpha_max_deg`.
+  point the aero stage finds, not from a guessed % MAC: canard deltas 3-10 %
+  MAC unstable, relaxed-stability fighters 0-5 %. The main wheels bound it:
+  at least 15 deg tip-back (the CG's height against its distance ahead of
+  the main wheels), 8-20 % of the weight on the nose wheel. Move
+  `empty_cg`, the tanks and `aero_point` (at the CG) together. Then check
+  the nose-down margin: with the pitch channel at its nose-down end, Cm
+  about the loaded CG must stay negative a few degrees past
+  `alpha_max_deg`. If it does not, the limiter test departs; move the CG
+  forward or lower `alpha_max_deg`.
 - **Targets.** Give `max_mach` and `max_mach_altitude_ft`: calibrate fits
   the engine's throttle ratio to them, then the wave drag if the engine
   alone cannot. `max_speed_ktas` (sea level), `climb_rate_fpm`,
@@ -174,10 +177,16 @@ move on while a check fails or a picture looks wrong.
   and 36,000 ft and the turn.
 - **The model's shape.** Build it from the real aircraft's drawings, not
   from a template: its own intakes (a chin intake, D-shaped side intakes,
-  carets, nacelle mouths), its canopy's frames, its tail booms. Check the
-  control layout against the type: a tailless canard delta has elevons along
-  its whole trailing edge, not flaps; most fighters carry leading-edge flaps
-  or slats. Read the four-view screenshots against photos of the real one.
+  carets, nacelle mouths), its canopy's frames, its tail booms. Measure a
+  public three-view: scale it by the published length (with the probe when
+  the length includes one) and check its span and height against the
+  published ones; read heights from its ground line or the published
+  height, with the wing root's chord plane as z = 0; put the wheels where
+  it draws them, then compare the model's silhouettes with the drawing's.
+  Check the control layout against the type: a tailless canard delta has
+  elevons along its whole trailing edge, not flaps; most fighters carry
+  leading-edge flaps or slats. Read the four-view screenshots against
+  photos of the real one.
 - **Known model limits.** Tails on booms beside the engines (Su-27, MiG-29)
   come out too stable: the lattice carries the tail across the gap between
   them. High-thrust engines fitted to Mach 2.5 at altitude are too fast at

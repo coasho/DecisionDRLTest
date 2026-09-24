@@ -72,7 +72,10 @@ int main(int argc, char** argv) {
     chase.depth = false;
     chase.segmentation = true;
     const unsigned camChase = sensors.addCamera(v, chase); // sees its own aircraft
-    vision::CameraSpec noseSelf = nose;
+    vision::CameraSpec noseSelf = nose;                     // above the cabin, looking down at its own nose:
+    noseSelf.offsetBodyM[0] = 0.0;                          // every model's fuselage fills its bottom rows
+    noseSelf.offsetBodyM[2] = -1.5;
+    noseSelf.pitchDeg = -45.0;
     noseSelf.hideOwnVehicle = false;
     const unsigned camNoseSelf = sensors.addCamera(v, noseSelf);
     vision::CameraSpec up = nose;
@@ -108,8 +111,8 @@ int main(int argc, char** argv) {
         for (unsigned x = chaseImg.width / 3; x < 2 * chaseImg.width / 3; ++x)
             nonSkyCentre += skyish(chaseImg.rgb + 3 * (y * chaseImg.width + x)) ? 0u : 1u;
     CHECK(nonSkyCentre > 20);
-    // Nose camera with the own vehicle hidden: the bottom rows (where the fuselage would be) are the
-    // flat below-horizon colour of the sky dome; with the vehicle drawn they are not.
+    // Nose camera with the own vehicle hidden: the bottom rows are the flat below-horizon colour of
+    // the sky dome; a camera looking down at its own drawn nose sees the fuselage there instead.
     auto bottomUniform = [](const vision::Image& im) {
         const std::uint8_t* ref = im.rgb + 3 * ((im.height - 1) * im.width);
         for (unsigned y = im.height - 6; y < im.height; ++y)

@@ -175,6 +175,12 @@ retract = "forward"              # forward, aft, inward, outward; hangar fits th
 wheels = 2                       # trunnion's cant and the wheel's twist that stow the leg inside
 wheel_turn = "flat"              # or retract_deg, retract_axis: what is known of the real leg;
                                  # hangar fits only the rest
+fairing = true                   # fixed gear: a spat over the wheel
+
+[[strut]]                        # a high wing's lift strut, drawn only (its drag is in the
+from = [0.99, 0.50, 0.15]        # extra drag area): its ends, mirrored unless mirror = false
+to = [1.21, 2.50, 1.54]
+chord = 0.16                     # m; thickness 0.35 of it unless given
 
 [dimensions]                     # published: the model is checked against them
 length = 15.06
@@ -340,10 +346,11 @@ The viewer's names for the moving nodes are in
 
 ## Validation: the Cessna 172P
 
-The C172P was built from public dimensions, not from JSBSim's c172x tables.
-Calibration fitted two numbers:
+The C172P was built from public dimensions, not from JSBSim's c172x tables;
+its tail stands where c172x's tail arm and a three-view put it, and its lift
+struts and wheel spats are drawn. Calibration fitted two numbers:
 
-- **Extra drag area, 0.25 m².** This stands for the struts, cooling and gaps
+- **Extra drag area, 0.27 m².** This stands for the struts, cooling and gaps
   the estimate does not see.
 - **Propeller pitch, 1.452 m.** The real McCauley propeller has a 57 in
   (1.448 m) pitch.
@@ -353,19 +360,19 @@ speed, the ceiling and the dynamics are predictions.
 
 | sea level, 2400 lb | hangar c172 | POH | JSBSim c172x (stock) |
 |---|---|---|---|
-| stall, clean | 49.6 KCAS | 51 | 41.6 |
-| maximum level speed | 126.1 KTAS | 123 | 144 |
-| best rate of climb | 690 ft/min | 700 | 870 |
-| service ceiling | 12,710 ft | 13,000 | 25,100 |
+| stall, clean | 49.5 KCAS | 51 | 41.6 |
+| maximum level speed | 125.8 KTAS | 123 | 144 |
+| best rate of climb | 689 ft/min | 700 | 870 |
+| service ceiling | 12,690 ft | 13,000 | 25,100 |
 
 The dynamic modes at 1500 m and 1.9 times the stall speed, first as the
 linear model predicts them and then as identified from JSBSim's response:
 
 | mode | predicted | JSBSim response |
 |---|---|---|
-| short period ζ | 0.67 | 0.60 |
-| phugoid period | 25.5 s | 25.9 s |
-| dutch roll ω, ζ | 1.74 rad/s, 0.17 | 1.79 rad/s, 0.19 |
+| short period ζ | 0.64 | 0.57 |
+| phugoid period | 25.3 s | 25.7 s |
+| dutch roll ω, ζ | 1.66 rad/s, 0.16 | 1.72 rad/s, 0.19 |
 | roll time constant | 0.21 s | 0.22 s |
 
 All modes are MIL-F-8785C level 1, and the spiral mode is stable. JSBSim
@@ -421,33 +428,39 @@ surfaces, in the SDKs and in scenario files.
 
 ![The fourteen fighters in the viewer, each flying its fly-by-wire](images/hangar-fighters.jpg)
 
+Each airframe is measured off a public three-view drawing and checked
+against it silhouette by silhouette: side and top views overlap it 89-99 %,
+front views 68-89 % (the drawings' pylons and stores count against them).
+The landing gear stands where the drawings put the wheels, and folds the way
+the real gear does.
+
 Flown, beside the published figures (the J-20A's and the Su-57's are
 estimates):
 
 | aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft | α held (limit) |
 |---|---|---|---|---|---|
 | F-16C Block 52 | `f16c` | 2.06 (2.05) | 63,000 (50,000) | 59,200 (50,000) | 24.7° (25°) |
-| F-15C | `f15c` | 2.44 (2.5) | 66,000 (50,000) | 60,600 (65,000) | 30.3° (30°) |
-| F/A-18C | `fa18c` | 1.80 (1.8) | 48,300 (45,000) | 59,300 (50,000) | 35.3° (35°) |
-| F-22A | `f22a` | 2.27 (2.25) | 60,700 | 58,800 (65,000) | 40.2° (40°) |
-| F-35A | `f35a` | 1.62 (1.6) | 41,700 | 55,100 (50,000) | 19.7° (20°) |
-| Su-27S | `su27s` | 2.34 (2.35) | 62,800 (59,000) | 60,900 (60,700) | 26.3° (26°) |
-| Su-57 | `su57` | 2.01 (2.0) | 58,000 | 57,700 (65,600) | 31.1° (30°) |
-| MiG-29A | `mig29a` | 2.25 (2.25) | 62,400 (65,000) | 60,200 (59,000) | 26.2° (26°) |
-| Typhoon | `typhoon` | 2.01 (2.0) | 50,600 (62,000) | 59,000 (55,000) | 31.6° (30°) |
-| Rafale C | `rafale` | 1.79 (1.8) | 42,600 (60,000) | 59,100 (50,000) | 33.5° (32°) |
-| JAS 39C Gripen | `gripen` | 2.01 (2.0) | 51,700 | 56,700 (50,000) | 29.3° (28°) |
-| Mirage 2000C | `mirage2000` | 2.20 (2.2) | 54,400 (56,000) | 56,600 (56,000) | 31.1° (29°) |
-| J-10A | `j10a` | 2.20 (2.2) | 51,600 | 54,700 (59,000) | 31.4° (30°) |
-| J-20A | `j20a` | 2.00 (2.0) | 46,700 | 55,400 (66,000) | 30.4° (30°) |
+| F-15C | `f15c` | 2.44 (2.5) | 63,200 (50,000) | 60,700 (65,000) | 30.3° (30°) |
+| F/A-18C | `fa18c` | 1.82 (1.8) | 50,900 (45,000) | 58,900 (50,000) | 35.5° (35°) |
+| F-22A | `f22a` | 2.27 (2.25) | 62,100 | 58,900 (65,000) | 40.2° (40°) |
+| F-35A | `f35a` | 1.70 (1.6) | 44,700 | 55,000 (50,000) | 19.9° (20°) |
+| Su-27S | `su27s` | 2.34 (2.35) | 64,300 (59,000) | 61,200 (60,700) | 26.2° (26°) |
+| Su-57 | `su57` | 1.99 (2.0) | 56,300 | 56,100 (65,600) | 29.3° (26°) |
+| MiG-29A | `mig29a` | 2.24 (2.25) | 63,800 (65,000) | 60,000 (59,000) | 27.6° (26°) |
+| Typhoon | `typhoon` | 2.00 (2.0) | 72,400 (62,000) | 58,800 (55,000) | 30.8° (30°) |
+| Rafale C | `rafale` | 1.81 (1.8) | 60,200 (60,000) | 59,200 (50,000) | 33.3° (32°) |
+| JAS 39C Gripen | `gripen` | 1.99 (2.0) | 49,500 | 56,800 (50,000) | 28.8° (28°) |
+| Mirage 2000C | `mirage2000` | 2.19 (2.2) | 54,600 (56,000) | 56,800 (56,000) | 31.4° (29°) |
+| J-10A | `j10a` | 2.20 (2.2) | 50,600 | 55,000 (59,000) | 31.7° (30°) |
+| J-20A | `j20a` | 2.00 (2.0) | 51,000 | 55,800 (66,000) | 29.5° (30°) |
 
 - The top speed at altitude is each design's one calibration target. Every
-  other number is a prediction.
+  other number is a prediction. The table flies it at 36,000 ft; the
+  F-16C's and F-35A's are published at 40,000 ft, where the calibration
+  meets them.
 - Published ceilings of 50,000 ft are operational limits. The model's
   ceiling is where the excess power at Mach 0.9 runs out, some 6-9,000 ft
   higher.
-- The Typhoon and Rafale climb 20-30 % slower than published: fitted to
-  their top speed, their engines keep less thrust at sea level.
 - Engines fitted to Mach 2.3-2.5 keep too much thrust at sea level (see
   [Limits](#limits)).
 
@@ -479,8 +492,12 @@ estimates):
 - **Tails on booms.** The lattice carries a horizontal tail across the gap
   between two booms (Su-27, MiG-29) as if it were one surface, so those
   aircraft come out stable where the real ones are close to neutral.
-- **Balance.** Real fighters' CGs are rarely published. The canard deltas'
-  are placed 5-10 % of the MAC behind the neutral point the model finds.
+- **Balance.** Real fighters' CGs are rarely published. The deltas' are
+  placed 3-10 % of the MAC behind the neutral point the model finds, as far
+  aft as their angle-of-attack limiters hold and their main wheels allow.
+  For the Rafale and the Typhoon that leaves over a fifth of the weight on
+  the nose wheel, more than the real ones carry: the model's neutral point
+  lies ahead of theirs.
 - **Leading-edge devices.** The flight controls move them on the F-16's
   published schedule (NASA TP-1538), standing in for each type's own; the
   simulation reports where they are (`leadingEdgeFlapRad`) and the 3D model
@@ -488,9 +505,9 @@ estimates):
   as its schedule flies it.
 - **Gear kinematics.** Each leg folds the way the real one does where that
   is well documented (the F/A-18's main gear aft, the Typhoon's and the
-  Mirage 2000's inward), and otherwise by hangar's default: a nose gear aft,
-  a main gear forward. The swing itself is fitted to the airframe, not taken
-  from drawings.
+  Mirage 2000's mains inward, every Rafale leg forward), and otherwise by
+  hangar's default: a nose gear aft, a main gear forward. The swing itself
+  is fitted to the airframe, not taken from drawings.
 - **Layouts.** Swing wings and thrust-vectoring nozzles do not move. There
   is no flying wing in the library yet.
 

@@ -6,12 +6,15 @@
 # datum - the same origin JSBSim's c172x uses, so positions compare directly.
 # Sources: Cessna 172P Pilot's Operating Handbook (dimensions, weights,
 # control travel), Jane's All the World's Aircraft, JSBSim c172x (mass
-# properties, gear and tank locations).
+# properties, gear and tank locations, the tail's arm). The tail's shape is
+# measured off a three-view; its tailplane stands under the fin's leading
+# edge, 15.7 ft behind the wing's aerodynamic centre, as c172x has it.
 
 [aircraft]
 name = "c172"
 description = "Cessna 172P Skyhawk (hangar rebuild)"
 category = "light_ga"
+stands_in_for = ["c172x", "c172p", "c172r"]
 
 [[surface]]
 name = "wing"
@@ -34,8 +37,8 @@ name = "htail"
 kind = "htail"
 airfoil = "naca0010"
 sections = [
-  { le = [5.950, 0.000, 0.920], chord = 1.200, twist = -3.0 },
-  { le = [6.300, 1.725, 0.920], chord = 0.800, twist = -3.0 },
+  { le = [5.500, 0.000, 0.920], chord = 1.270, twist = -3.0 },
+  { le = [5.720, 1.725, 0.920], chord = 0.820, twist = -3.0 },
 ]
 controls = [
   { name = "elevator", channel = "elevator", span = [0.10, 1.0], chord_fraction = 0.45, limits = [-28, 23] },
@@ -46,8 +49,8 @@ name = "fin"
 kind = "fin"
 airfoil = "naca0010"
 sections = [
-  { le = [5.550, 0.000, 1.000], chord = 1.700 },
-  { le = [6.450, 0.000, 2.250], chord = 0.800 },
+  { le = [5.400, 0.000, 1.000], chord = 1.600 },
+  { le = [6.450, 0.000, 2.250], chord = 0.730 },
 ]
 controls = [
   { name = "rudder", channel = "rudder", span = [0.05, 1.0], chord_fraction = 0.40, limits = [-16, 16] },
@@ -72,6 +75,26 @@ stations = [
   { x = 7.200, w = 0.04, top = 0.975, bottom = 0.900, n = 2.0 },
 ]
 
+# The dorsal fin running forward from the fin along the spine
+[[body]]
+name = "dorsal fin"
+kind = "pod"
+aero = false
+stations = [
+  { x = 4.100, w = 0.000, top = 1.170, bottom = 1.120 },
+  { x = 4.600, w = 0.060, top = 1.200, bottom = 1.000, n = 2.0 },
+  { x = 5.300, w = 0.060, top = 1.270, bottom = 0.980, n = 2.0 },
+  { x = 5.650, w = 0.000, top = 1.260, bottom = 1.000 },
+]
+
+# The wing's lift struts, from the cabin's floor to the spar
+[[strut]]
+name = "wing strut"
+from = [0.950, 0.400, 0.180]
+to = [1.150, 2.500, 1.530]
+chord = 0.16
+thickness = 0.05
+
 [[engine]]
 name = "O-320"
 type = "piston"
@@ -93,6 +116,7 @@ steerable = true
 max_steer = 10
 wheel_diameter = 0.36
 static_deflection = 0.08
+fairing = true
 attach = [-0.200, 0.0, 0.200]
 
 [[gear]]
@@ -101,6 +125,7 @@ mirror = true
 position = [1.478, 1.276, -0.469]
 wheel_diameter = 0.43
 static_deflection = 0.05
+fairing = true
 attach = [1.300, 0.500, 0.100]
 
 [mass]

@@ -13,6 +13,24 @@ from .body import Body, Intake
 from .surface import Surface
 
 
+class Strut:
+    """A bracing strut ([[strut]]): a streamlined bar from one point to
+    another, a high wing's lift strut. Drawn only: its drag is part of the
+    design's extra drag area."""
+
+    def __init__(self, spec):
+        self.name = spec.get("name", "strut")
+        if "from" not in spec or "to" not in spec:
+            raise ValueError("strut %r: 'from' and 'to' (its ends) are required" % self.name)
+        self.a = np.asarray(spec["from"], float)
+        self.b = np.asarray(spec["to"], float)
+        self.chord = float(spec.get("chord", 0.15))
+        self.thickness = float(spec.get("thickness", 0.35 * self.chord))
+        self.mirror = bool(spec.get("mirror", True))
+        if np.linalg.norm(self.b - self.a) < 1e-6 or not 0.0 < self.thickness <= self.chord:
+            raise ValueError("strut %r: its ends must differ, its thickness lie in (0, chord]" % self.name)
+
+
 class Gear:
     def __init__(self, spec):
         self.spec = spec
@@ -127,6 +145,7 @@ class Aircraft:
         self.bodies = [Body(b) for b in spec.get("body", [])] + [Intake(i) for i in spec.get("intake", [])]
         self.gear = [Gear(g) for g in spec.get("gear", [])]
         self.engines = [Engine(e) for e in spec.get("engine", [])]
+        self.struts = [Strut(s) for s in spec.get("strut", [])]
         if not self.surfaces:
             raise ValueError("%s: no [[surface]] defined" % self.name)
         schedules = sorted({tuple(d.schedule) for _, d in self.leading_devices()})

@@ -221,6 +221,22 @@ def petals(engine):
     return scene, np.array([s0, 1.045 * r - 0.5 * wall, 0.0]), np.array([0.0, 0.0, 1.0])
 
 
+def strut(st):
+    """A bracing strut as a bar of streamlined section between its ends: its
+    chord along x as nearly as the strut's own direction allows, its edges
+    rounded."""
+    d = st.b - st.a
+    length = float(np.linalg.norm(d))
+    a = d / length
+    c = np.array([1.0, 0.0, 0.0]) - a * a[0]
+    if np.linalg.norm(c) < 1e-3:  # a strut along x: its chord across, level
+        c = np.array([0.0, 1.0, 0.0]) - a * a[1]
+    c /= np.linalg.norm(c)
+    return {"prim": "box", "material": SKIN, "mirror": st.mirror, "centre": 0.5 * (st.a + st.b),
+            "axes": [a, c, np.cross(a, c)], "half": [0.5 * length, 0.5 * st.chord, 0.5 * st.thickness],
+            "round": 0.45 * st.thickness}
+
+
 def fillet(surface, bodies):
     """Fillet radius where a surface meets the fuselage: half its root's
     thickness, for a fin a third; none for a surface that meets no body."""
@@ -264,13 +280,15 @@ def _extended(node, ahead):
 
 def _behind(point, normal, length, mirror):
     """A box whose front face is the plane through point with the given
-    forward normal, reaching length behind it."""
+    forward normal, reaching length behind it - and as far across, so a
+    steeply raked plane's box still holds a long cowl's far end."""
     a = -np.asarray(normal, float)
     u = np.cross(a, [0.0, 0.0, 1.0])
     u /= np.linalg.norm(u)
     v = np.cross(a, u)
+    across = max(6.0, length)
     return {"prim": "box", "material": SKIN, "mirror": mirror, "centre": np.asarray(point, float) + a * 0.5 * length,
-            "axes": [a, u, v], "half": [0.5 * length, 6.0, 6.0]}
+            "axes": [a, u, v], "half": [0.5 * length, across, across]}
 
 
 def intake(body):
@@ -326,6 +344,8 @@ def airframe(aircraft, cell=None, error=None, gear=None):
         node = union(segments(s, foils, inflate=inflate, sections=rooted(s, bodies)))
         own[id(s)] = node
         solid = node if solid is None else union([solid, node], fillet(s, structure))
+    for st in aircraft.struts:
+        solid = union([solid, strut(st)], 0.03)
     jets, cavities = nozzles(aircraft)
     cavities += [duct for _, duct in intakes]
     if jets:

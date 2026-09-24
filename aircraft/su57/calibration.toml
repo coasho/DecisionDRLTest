@@ -1,7 +1,7 @@
-# Written by hangar calibrate (2026-09-24 02:45) to meet the [targets] of su57.toml:
+# Written by hangar calibrate (2026-09-24 11:40) to meet the [targets] of su57.toml:
 # corrections for what the physics estimate does not see. Delete this file to
 # go back to the pure estimate.
 [calibration]
 wave_drag_efficiency = 2.0000   # Raymer's E_WD: the wave drag over Sears-Haack's
-throttle_ratio = 1.2188   # the engines' TR: the compressor-face temperature ratio at the turbine's limit
-# fitted: maximum Mach 2.006 at 36000 ft (target 2)
+throttle_ratio = 1.3281   # the engines' TR: the compressor-face temperature ratio at the turbine's limit
+# fitted: maximum Mach 2.005 at 36000 ft (target 2)

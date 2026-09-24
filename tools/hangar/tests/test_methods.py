@@ -249,7 +249,7 @@ class Contacts(unittest.TestCase):
         # for the step: its own mode at most STRUCTURE_OMEGA
         from hangar import jsbsim
         from hangar.mass import MassModel
-        for name, expected in (("c172", [(7.25, 0.0, 2.25), (7.1, 1.73, 0.96), (1.88, 5.49, 1.69), (-0.96, 0.0, -0.28)]),
+        for name, expected in (("c172", [(7.18, 0.0, 2.25), (6.54, 1.73, 0.96), (1.88, 5.49, 1.69), (-0.96, 0.0, -0.28)]),
                                ("skua", [(2.3, 0.55, 0.45), (2.36, 0.55, 0.15), (0.82, 2.0, 0.23), (0.0, 0.0, 0.0)])):
             a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
             mm = MassModel(a)
@@ -458,6 +458,39 @@ class Model3D(unittest.TestCase):
         dd, _ = meshkit.evaluate({"root": duct}, np.array([p - 0.02 * n, p + 0.10 * n]))
         self.assertLess(dd[0], 0.0)
         self.assertGreater(dd[1], 0.0)
+
+    def test_struts_brace_the_wing(self):
+        # a strut is a streamlined bar from end to end: its chord along x,
+        # its thickness across, mirrored to the left
+        from hangar.geometry.aircraft import Strut
+        from hangar.shape import airframe as sh
+        from hangar.shape import meshkit
+        if meshkit.library() is None:
+            self.skipTest("hangar_meshkit is not built")
+        st = Strut({"from": [1.0, 0.5, 0.15], "to": [1.2, 2.5, 1.55], "chord": 0.16, "thickness": 0.05})
+        node = sh.strut(st)
+        mid = 0.5 * (st.a + st.b)
+        a = (st.b - st.a) / np.linalg.norm(st.b - st.a)
+        t = np.cross(a, np.array(node["axes"][1]))
+        pts = np.array([mid, mid * [1, -1, 1], mid + [0.07, 0.0, 0.0], mid + 0.04 * t, st.a - 0.02 * a])
+        d, _ = meshkit.evaluate({"root": node}, pts)
+        self.assertTrue(np.all(d[:3] < 0.0), d)   # on its axis, the mirror's, within its chord
+        self.assertTrue(np.all(d[3:] > 0.0), d)   # beyond its thickness, past its end
+        with self.assertRaises(ValueError):
+            Strut({"from": [0.0, 0.0, 0.0], "to": [0.0, 1.0, 0.0], "chord": 0.1, "thickness": 0.2})
+
+    def test_raked_intake_keeps_its_far_end(self):
+        # the lip plane cuts a steeply raked intake's cowl, not its far end:
+        # a long chin intake raked 55 deg keeps its belly 10 m behind the lip
+        from hangar.geometry.body import Intake
+        from hangar.shape import airframe as sh
+        from hangar.shape import meshkit
+        if meshkit.library() is None:
+            self.skipTest("hangar_meshkit is not built")
+        rows = [{"x": x, "w": 1.3, "top": 0.3, "bottom": -0.35, "n": 4.0} for x in (3.5, 8.0, 13.5)]
+        cowl, _ = sh.intake(Intake({"name": "chin", "lip": 0.04, "rake": 55, "stations": rows}))
+        d, _ = meshkit.evaluate({"root": cowl}, np.array([[13.0, 0.0, -0.3], [8.0, 0.5, -0.25]]))
+        self.assertTrue(np.all(d < 0.0), d)
 
     def test_leading_edge_flaps_turn_down(self):
         # a positive turn of a leading-edge device's node moves its leading

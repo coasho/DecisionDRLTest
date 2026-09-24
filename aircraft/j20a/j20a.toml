@@ -3,8 +3,10 @@
 # below are the commonly cited estimates, marked as such). A long canard
 # delta with all-moving twin fins.
 #
-# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
-# plane.
+# Frame: metres, x aft from the radome tip, y right, z up from the wing's
+# root chord plane. The shape is measured off a three-view scaled to the
+# 21.2 m overall with its 1.55 m nose probe (its span then 13.14 m: 1 % over
+# the 13.01 m published); the wheels where it draws them.
 
 [aircraft]
 name = "j20a"
@@ -14,17 +16,18 @@ category = "fighter"
 [analysis]
 speed = 260.0
 
-# The wing: 73 m2 (estimate), span 12.88 m, 48 deg leading edge (root 9.84 m,
-# tip 1.50 m to the centre line, MAC 6.69 m). The CG at 16 % of the MAC, 5 %
-# of it behind the neutral point hangar finds (the real balance is not
-# published): at 10 %, like the close-coupled canard deltas, its controls
-# could not bring the nose down from 30 deg - the long forebody lifts ahead.
+# The wing: 72.5 m2 (73 m2 estimated), span 13.01 m, 46 deg leading edge,
+# its trailing edge swept forward 11 deg, 3.3 deg anhedral (root 9.57 m,
+# tip 1.57 m to the centre line). The balance is not published: the CG sits
+# 5 % of the MAC behind the neutral point hangar finds (at 10 %, like the
+# close-coupled canard deltas, its controls could not bring the nose down
+# from 30 deg - the long forebody lifts ahead).
 [[surface]]
 name = "wing"
 kind = "wing"
 sections = [
-  { le = [7.760, 0.000, 0.000], chord = 9.840, airfoil = "naca64a005" },
-  { le = [14.912, 6.440, -0.120], chord = 1.500, airfoil = "naca64a003" },
+  { le = [8.750, 0.000, 0.000], chord = 9.570, airfoil = "naca64a005" },
+  { le = [15.450, 6.505, -0.375], chord = 1.570, airfoil = "naca64a003" },
 ]
 controls = [
   { name = "flaperon", channel = "aileron", mix = { flap = 1.0 }, span = [0.26, 0.60], chord_fraction = 0.20, limits = [-25, 25] },
@@ -35,100 +38,140 @@ leading = [
   { name = "leading-edge flap", span = [0.32, 0.97], chord_fraction = 0.12, limits = [-3, 25] },
 ]
 
-# Leading-edge root extensions: from behind the canards along the intakes'
-# tops out to the wing's leading edge, their edges sharp
+# Leading-edge root extensions: a narrow strake from behind the canards along
+# the fuselage's side out to the wing's leading edge, its edge sharp
 [[surface]]
 name = "lerx"
 kind = "strake"
 airfoil = "plate"
 sections = [
-  { le = [8.400, 0.000, 0.050], chord = 1.000 },
-  { le = [8.400, 1.400, 0.050], chord = 0.950 },
-  { le = [9.950, 2.000, 0.000], chord = 0.050 },
+  { le = [9.100, 1.600, 0.000], chord = 2.800 },
+  { le = [9.150, 2.000, 0.000], chord = 2.300 },
+  { le = [11.100, 2.400, -0.020], chord = 0.100 },
 ]
 
-# All-moving canards over the intakes, 6.1 m2 exposed
+# All-moving canards beside the cockpit, 7 m2 exposed, 46 deg, 10 deg
+# dihedral outboard of the fuselage; the surface runs on inside it to the
+# centre line, as the body carries their lift across
 [[surface]]
 name = "canard"
 kind = "canard"
 airfoil = "naca64a004"
 sections = [
-  { le = [6.600, 0.000, 0.400], chord = 2.400 },
-  { le = [6.900, 0.900, 0.400], chord = 2.200 },
-  { le = [9.230, 3.000, 0.400], chord = 0.700 },
+  { le = [4.480, 0.000, -0.030], chord = 4.200 },
+  { le = [6.160, 1.600, -0.030], chord = 2.600 },
+  { le = [8.470, 3.800, 0.360], chord = 0.600 },
 ]
 controls = [
-  { name = "canard", channel = "elevator", gain = -1.0, span = [0.30, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-50, 20] },
+  { name = "canard", channel = "elevator", gain = -1.0, span = [0.40, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-50, 20] },
 ]
 
-# Twin all-moving vertical tails, canted 20 deg outboard
+# Twin all-moving vertical tails on the booms, canted 31 deg outboard, 2 x
+# 3.5 m2, their trailing edges swept back
 [[surface]]
 name = "fin"
 kind = "fin"
 mirror = true
 airfoil = "naca64a004"
 sections = [
-  { le = [16.000, 1.400, 0.500], chord = 3.200 },
-  { le = [17.600, 2.220, 2.760], chord = 1.200 },
+  { le = [16.500, 2.220, 0.300], chord = 2.340 },
+  { le = [18.540, 3.220, 1.950], chord = 1.190 },
 ]
 controls = [
   { name = "fin", channel = "rudder", span = [0.0, 1.0], chord_fraction = 1.0, pivot = 0.40, limits = [-20, 20] },
 ]
 
+# The ventral fins under the booms
 [[surface]]
 name = "ventral"
 kind = "fin"
 mirror = true
 airfoil = "plate"
 sections = [
-  { le = [16.600, 1.000, -0.650], chord = 1.500 },
-  { le = [17.200, 1.300, -1.200], chord = 0.800 },
+  { le = [16.700, 2.300, -0.300], chord = 2.300 },
+  { le = [17.200, 2.420, -1.250], chord = 1.600 },
 ]
 
-# A long fuselage with the diverterless intakes from 6 m and the weapons
-# bays
+# A long fuselage with the diverterless intakes from 5 m, the weapons bays
+# under a flat belly and the two engines side by side
 [[body]]
 name = "fuselage"
 kind = "fuselage"
 stations = [
-  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
-  { x = 1.80, w = 0.90, top = 0.300, bottom = -0.450, n = 2.4 },
-  { x = 4.00, w = 1.30, top = 0.550, bottom = -0.600, n = 2.6 },
-  { x = 6.00, w = 1.70, top = 0.600, bottom = -0.800, chine = -0.050, n_top = 2.2, n_bottom = 2.4 },
-  { x = 7.00, w = 1.90, top = 0.550, bottom = -0.950, chine = -0.080, n_top = 2.4, n_bottom = 2.8 },
-  { x = 10.00, w = 3.00, top = 0.500, bottom = -1.050, chine = -0.150, n_top = 3.4, n_bottom = 4.0 },
-  { x = 14.00, w = 2.80, top = 0.450, bottom = -0.950, n = 3.4 },
-  { x = 18.00, w = 2.40, top = 0.350, bottom = -0.700, n = 3.0 },
-  { x = 20.40, w = 2.00, top = 0.250, bottom = -0.550, n = 2.6 },
+  { x = 0.00, w = 0.00, top = -0.030, bottom = -0.070 },
+  { x = 0.50, w = 0.44, top = 0.000, bottom = -0.500, chine = -0.250, n_top = 1.9, n_bottom = 1.9 },
+  { x = 1.00, w = 0.84, top = 0.020, bottom = -0.650, chine = -0.280, n_top = 1.9, n_bottom = 1.9 },
+  { x = 1.50, w = 1.10, top = 0.100, bottom = -0.770, chine = -0.300, n_top = 2.0, n_bottom = 2.0 },
+  { x = 2.00, w = 1.26, top = 0.250, bottom = -0.870, chine = -0.300, n_top = 2.0, n_bottom = 2.1 },
+  { x = 2.50, w = 1.44, top = 0.360, bottom = -0.940, chine = -0.300, n_top = 2.1, n_bottom = 2.2 },
+  { x = 3.00, w = 1.54, top = 0.450, bottom = -1.020, chine = -0.300, n_top = 2.1, n_bottom = 2.4 },
+  { x = 4.00, w = 1.74, top = 0.550, bottom = -1.120, chine = -0.300, n_top = 2.2, n_bottom = 2.8 },
+  { x = 5.00, w = 2.00, top = 0.600, bottom = -1.170, chine = -0.300, n_top = 2.3, n_bottom = 3.2 },
+  { x = 6.00, w = 2.20, top = 0.620, bottom = -1.220, chine = -0.300, n_top = 2.4, n_bottom = 3.5 },
+  { x = 7.00, w = 2.40, top = 0.550, bottom = -1.250, chine = -0.300, n_top = 2.6, n_bottom = 3.8 },
+  { x = 8.00, w = 2.60, top = 0.510, bottom = -1.290, chine = -0.250, n_top = 2.8, n_bottom = 4.0 },
+  { x = 10.00, w = 3.00, top = 0.460, bottom = -1.350, chine = -0.200, n_top = 3.0, n_bottom = 4.0 },
+  { x = 12.00, w = 3.20, top = 0.430, bottom = -1.350, chine = -0.200, n_top = 3.0, n_bottom = 4.0 },
+  { x = 14.00, w = 3.00, top = 0.380, bottom = -1.330, chine = -0.200, n_top = 3.0, n_bottom = 3.8 },
+  { x = 16.00, w = 2.60, top = 0.320, bottom = -1.300, chine = -0.250, n_top = 2.8, n_bottom = 3.4 },
+  { x = 17.50, w = 2.20, top = 0.280, bottom = -1.200, chine = -0.300, n = 3.0 },
+  { x = 18.30, w = 1.60, top = 0.200, bottom = -0.900, chine = -0.350, n = 2.6 },
 ]
 
-# Diverterless side intakes under the canards: caret-shaped, their lips
-# swept back and leaning back from the bottom lip
+# Diverterless side intakes under the canards: their walls leaning in at
+# the bottom, the lips swept back and raked back from the top
 [[intake]]
 name = "intake"
 mirror = true
 lip = 0.035
-rake = -20
-sweep = 22
+rake = 20
+sweep = 40
 duct = 1.8
 duct_rise = 0.15
 duct_taper = 0.85
 stations = [
-  { x = 6.40, y = 1.080, w = 0.640, top = 0.080, bottom = -0.950, n = 3.0 },
-  { x = 8.00, y = 1.160, w = 0.700, top = 0.080, bottom = -1.000, n = 3.2 },
-  { x = 10.00, y = 1.160, w = 0.660, top = 0.050, bottom = -1.020, n = 3.4 },
-  { x = 11.80, y = 1.050, w = 0.500, top = -0.050, bottom = -0.950, n = 3.2 },
+  { x = 5.40, y = 1.150, w = 0.800, top = 0.100, bottom = -1.000, n = 4.0, lean = 25 },
+  { x = 7.00, y = 1.200, w = 0.850, top = 0.050, bottom = -1.200, n = 4.0, lean = 25 },
+  { x = 10.00, y = 1.100, w = 0.800, top = 0.000, bottom = -1.300, n = 4.0, lean = 20 },
+  { x = 12.00, y = 0.950, w = 0.600, top = -0.100, bottom = -1.250, n = 3.6 },
+]
+
+# The tail booms outboard of the engines: they carry the fins and the
+# ventral fins
+[[body]]
+name = "boom"
+kind = "boom"
+mirror = true
+stations = [
+  { x = 14.50, y = 2.100, w = 0.200, top = 0.100, bottom = -0.150, n = 2.6 },
+  { x = 16.00, y = 2.100, w = 0.440, top = 0.350, bottom = -0.400, n = 2.6 },
+  { x = 18.80, y = 2.100, w = 0.440, top = 0.300, bottom = -0.400, n = 2.6 },
+  { x = 19.50, y = 2.100, w = 0.000, top = 0.100, bottom = -0.200 },
+]
+
+# The nose probe: 21.2 m overall with it
+[[body]]
+name = "probe"
+kind = "pod"
+aero = false
+stations = [
+  { x = -1.550, w = 0.000, top = -0.040, bottom = -0.060 },
+  { x = -1.500, w = 0.040, top = -0.030, bottom = -0.070 },
+  { x = -0.100, w = 0.060, top = -0.020, bottom = -0.080 },
+  { x = 0.200, w = 0.200, top = 0.000, bottom = -0.150 },
 ]
 
 [[body]]
 name = "canopy"
 kind = "pod"
 stations = [
-  { x = 3.800, w = 0.00, top = 0.620, bottom = 0.600 },
-  { x = 4.500, w = 0.74, top = 1.100, bottom = 0.580, n = 2.0 },
-  { x = 5.700, w = 0.88, top = 1.250, bottom = 0.580, n = 2.0 },
-  { x = 6.900, w = 0.74, top = 1.120, bottom = 0.590, n = 2.0 },
-  { x = 8.000, w = 0.30, top = 0.760, bottom = 0.580, n = 2.0 },
+  { x = 2.700, w = 0.00, top = 0.470, bottom = 0.440 },
+  { x = 3.200, w = 0.66, top = 0.730, bottom = 0.420, n = 2.0 },
+  { x = 3.800, w = 0.86, top = 0.970, bottom = 0.440, n = 2.0 },
+  { x = 4.400, w = 0.88, top = 1.000, bottom = 0.480, n = 2.0 },
+  { x = 5.200, w = 0.80, top = 0.850, bottom = 0.520, n = 2.0 },
+  { x = 6.000, w = 0.56, top = 0.660, bottom = 0.550, n = 2.0 },
+  { x = 6.600, w = 0.00, top = 0.570, bottom = 0.550 },
 ]
 
 [[engine]]
@@ -141,36 +184,42 @@ bypass_ratio = 0.55
 tsfc_dry = 0.76
 tsfc_wet = 1.95
 design_mach = 2.0
-position = [16.500, 0.600, -0.400]
+position = [15.800, 0.750, -0.350]
 mass = 1600
-inlet_x = 6.0
+inlet_x = 5.4
 [engine.nozzle]
-position = [20.200, 0.600, -0.400]
+position = [18.900, 0.750, -0.350]
+diameter = 0.95               # m, as drawn
 
+# The gear where the three-view draws its wheels (the axles 6.04 and 12.52 m
+# behind the radome tip; 0.52 and 0.87 m tyres), the track estimated;
+# standing on it the fins' tips are the published 4.69 m up.
 [[gear]]
 name = "Nose Gear"
-position = [7.200, 0.0, -2.100]
+position = [6.040, 0.0, -2.880]
 steerable = true
 max_steer = 60
-wheel_diameter = 0.60
-wheel_width = 0.18
+wheel_diameter = 0.52
+wheel_width = 0.16
 retractable = true
+retract = "forward"
 static_deflection = 0.14
-attach = [7.200, 0.000, -0.650]
+attach = [6.040, 0.000, -0.750]
 
 [[gear]]
 name = "Main Gear"
 mirror = true
-position = [13.350, 1.600, -2.100]
-wheel_diameter = 0.94
+position = [12.520, 1.600, -2.920]
+wheel_diameter = 0.87
 wheel_width = 0.30
 retractable = true
-static_deflection = 0.18
-attach = [13.150, 1.150, -0.750]
 retract = "forward"
+wheel_turn = "flat"
+static_deflection = 0.18
+attach = [12.300, 1.150, -0.800]
 
 [reference]
-aero_point = [11.580, 0.0, 0.0]    # 0.17 MAC
+aero_point = [11.280, 0.0, 0.0]    # at the CG
 
 [flight_control]
 type = "fbw"
@@ -181,42 +230,42 @@ roll_rate_deg_s = 250.0
 
 [mass]
 empty = 19400                 # estimate
-empty_cg = [11.630, 0.0, -0.350]
+empty_cg = [11.310, 0.0, -0.350]
 # no published inertia: radii of gyration of the class
 gyration = [0.260, 0.430, 0.540]
 [[mass.payload]]
 name = "pilot"
 mass = 100
-position = [6.000, 0.0, 0.600]
+position = [4.300, 0.0, 0.550]
 [[mass.payload]]
 name = "internal missiles"    # 4 PL-15, 2 PL-10
 mass = 1020
-position = [12.000, 0.0, -0.800]
+position = [11.680, 0.0, -0.800]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 10,500 kg (estimate)
-position = [9.280, 0.0, -0.200]
+position = [8.960, 0.0, -0.200]
 capacity = 3200
 [[mass.tank]]
 name = "fuselage 2"
-position = [11.780, 0.0, -0.200]
+position = [11.460, 0.0, -0.200]
 capacity = 3300
 [[mass.tank]]
 name = "fuselage 3"
-position = [13.980, 0.0, -0.250]
+position = [13.660, 0.0, -0.250]
 capacity = 1800
 [[mass.tank]]
 name = "left wing"
-position = [12.580, -3.200, 0.000]
+position = [12.260, -3.200, -0.180]
 capacity = 1100
 [[mass.tank]]
 name = "right wing"
-position = [12.580, 3.200, 0.000]
+position = [12.260, 3.200, -0.180]
 capacity = 1100
 
-[dimensions]                  # published, overall, gear down (public estimates):
-length = 20.40                 # m
-span = 12.88
-height = 4.45
+[dimensions]                  # overall with the nose probe, gear down (Tsinghua University and
+length = 21.20                 # m    Xinhua, 2021: no official figures)
+span = 13.01
+height = 4.69
 
 [targets]
 # J-20A, public estimates
