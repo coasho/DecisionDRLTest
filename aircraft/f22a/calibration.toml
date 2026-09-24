@@ -1,7 +1,7 @@
-# Written by hangar calibrate (2026-09-24 02:44) to meet the [targets] of f22a.toml:
+# Written by hangar calibrate (2026-09-24 09:59) to meet the [targets] of f22a.toml:
 # corrections for what the physics estimate does not see. Delete this file to
 # go back to the pure estimate.
 [calibration]
 wave_drag_efficiency = 2.0000   # Raymer's E_WD: the wave drag over Sears-Haack's
-throttle_ratio = 1.4844   # the engines' TR: the compressor-face temperature ratio at the turbine's limit
-# fitted: maximum Mach 2.250 at 40000 ft (target 2.25)
+throttle_ratio = 1.4531   # the engines' TR: the compressor-face temperature ratio at the turbine's limit
+# fitted: maximum Mach 2.249 at 40000 ft (target 2.25)

@@ -4,7 +4,9 @@
 # plane. Sources: Jane's All the World's Aircraft, Sukhoi and KnAAPO data
 # (dimensions, weights, performance), Lyulka-Saturn (AL-31F). The centre
 # fuselage is a lifting body between widely spaced engine nacelles; here the
-# fuselage and two nacelles.
+# fuselage and two nacelles. The shape is measured off two three-views that
+# agree to 0.3 m: a Su-30's (heights, wheels: its wheelbase and tyres are
+# the published ones) and a single-seat Su-27's (the canopy).
 
 [aircraft]
 name = "su27s"
@@ -14,16 +16,16 @@ category = "fighter"
 [analysis]
 speed = 250.0
 
-# The wing: 62 m2 reference, span 14.70 m, 42 deg leading edge, taper 0.25
-# (root 6.75 m, tip 1.69 m to the centre line, MAC 4.73 m). Its 30 % MAC
-# point, the CG (the Su-27 is slightly unstable at subsonic speeds), sits
-# 0.55 m ahead of the main wheels (wheelbase 5.88 m).
+# The wing: 62 m2 reference, span 14.70 m over the tip rails, 42 deg leading
+# edge, its trailing edge swept 16 deg (root 6.60 m, tip 2.10 m). The CG
+# sits at 30 % of the MAC, 0.9 m ahead of the main wheels: near neutral in
+# hangar's aerodynamics (the real Su-27 is flown slightly unstable).
 [[surface]]
 name = "wing"
 kind = "wing"
 sections = [
-  { le = [7.540, 0.000, 0.000], chord = 6.750, airfoil = "naca64a005" },
-  { le = [14.157, 7.349, -0.150], chord = 1.688, airfoil = "naca64a004" },
+  { le = [8.690, 0.000, 0.000], chord = 6.600, airfoil = "naca64a005" },
+  { le = [15.250, 7.200, -0.100], chord = 2.100, airfoil = "naca64a004" },
 ]
 controls = [
   # flaperons, the flap function up to 30 deg
@@ -35,42 +37,48 @@ leading = [
   { name = "leading-edge flap", span = [0.29, 0.97], chord_fraction = 0.13, limits = [-2, 30] },
 ]
 
-# The leading-edge root extensions: sharp, 72 deg, from beside the cockpit
-# to the wing's leading edge
+# The leading-edge root extensions: sharp, curving from beside the cockpit
+# (80 deg) into the wing's leading edge
 [[surface]]
 name = "lerx"
 kind = "strake"
 airfoil = "plate"
 sections = [
-  { le = [5.000, 0.000, 0.050], chord = 2.540 },
-  { le = [5.000, 0.650, 0.050], chord = 3.125 },
-  { le = [9.430, 2.100, 0.000], chord = 0.050 },
+  { le = [6.700, 1.000, 0.030], chord = 4.200 },
+  { le = [8.000, 1.270, 0.030], chord = 2.900 },
+  { le = [9.000, 1.555, 0.030], chord = 1.900 },
+  { le = [10.000, 1.925, 0.020], chord = 0.950 },
+  { le = [10.990, 2.530, 0.000], chord = 0.050 },
 ]
 
-# All-moving horizontal tails on the tail booms, 12.2 m2 exposed, 45 deg;
-# they roll the aircraft too
+# All-moving horizontal tails on the tail booms, 0.65 m below the wing's
+# plane, 45 deg leading edge; they roll the aircraft too. The surface runs
+# on inside the nacelles and the centre body to the centre line, as the body
+# carries the tail's lift across.
 [[surface]]
 name = "htail"
 kind = "htail"
 airfoil = "naca64a004"
 sections = [
-  { le = [16.400, 0.000, -0.300], chord = 4.200 },
-  { le = [17.500, 2.100, -0.300], chord = 3.300 },
-  { le = [20.340, 4.940, -0.300], chord = 1.200 },
+  { le = [14.480, 0.000, -0.350], chord = 5.500 },
+  { le = [15.080, 0.600, -0.600], chord = 5.120 },
+  { le = [15.280, 0.800, -0.645], chord = 4.970 },
+  { le = [16.680, 2.200, -0.645], chord = 3.520 },
+  { le = [19.280, 4.800, -0.645], chord = 0.600 },
 ]
 controls = [
-  { name = "stabilator", channel = "elevator", mix = { aileron = 0.4 }, span = [0.43, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-20, 15] },
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.4 }, span = [0.49, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-20, 15] },
 ]
 
-# Twin vertical tails on the booms, 2 x 7.6 m2, 40 deg leading edge
+# Twin vertical tails on the booms, 2 x 7.4 m2, 39 deg leading edge
 [[surface]]
 name = "fin"
 kind = "fin"
 mirror = true
 airfoil = "naca64a004"
 sections = [
-  { le = [16.800, 2.150, 0.550], chord = 3.400 },
-  { le = [19.570, 2.150, 3.850], chord = 1.200 },
+  { le = [14.650, 2.200, 0.350], chord = 3.420 },
+  { le = [17.520, 2.200, 3.845], chord = 0.900 },
 ]
 controls = [
   { name = "rudder", channel = "rudder", span = [0.10, 0.70], chord_fraction = 0.28, limits = [-25, 25] },
@@ -82,71 +90,118 @@ kind = "fin"
 mirror = true
 airfoil = "plate"
 sections = [
-  { le = [16.600, 1.750, -1.050], chord = 2.000 },
-  { le = [17.400, 1.900, -1.950], chord = 0.900 },
+  { le = [15.900, 2.200, -0.700], chord = 2.200 },
+  { le = [16.500, 2.300, -1.500], chord = 0.800 },
 ]
 
-# The fuselage: the long nose, the cockpit, the flat centre body and the
-# tail sting between the engines
+# The fuselage: the long drooped nose, the cockpit, the flat centre body
+# and the tail sting reaching 1.8 m past the nozzles
 [[body]]
 name = "fuselage"
 kind = "fuselage"
 stations = [
-  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
-  { x = 1.50, w = 0.80, top = 0.330, bottom = -0.450, n = 2.0 },
-  { x = 3.50, w = 1.20, top = 0.550, bottom = -0.600, n = 2.0 },
-  { x = 5.50, w = 1.40, top = 0.650, bottom = -0.700, n = 2.2 },
-  { x = 8.00, w = 1.80, top = 0.600, bottom = -0.600, n = 2.6 },
-  { x = 12.00, w = 2.00, top = 0.550, bottom = -0.300, n = 3.0 },
-  { x = 16.00, w = 1.60, top = 0.450, bottom = -0.100, n = 2.8 },
-  { x = 20.00, w = 1.00, top = 0.350, bottom = 0.000, n = 2.4 },
-  { x = 21.935, w = 0.40, top = 0.250, bottom = 0.100, n = 2.0 },
+  { x = 0.00, w = 0.00, top = -0.550, bottom = -0.600 },
+  { x = 0.50, w = 0.46, top = -0.305, bottom = -0.785, n = 2.0 },
+  { x = 1.00, w = 0.84, top = -0.065, bottom = -0.865, n = 2.0 },
+  { x = 1.50, w = 1.04, top = 0.115, bottom = -0.915, n = 2.0 },
+  { x = 2.00, w = 1.18, top = 0.245, bottom = -0.915, n = 2.0 },
+  { x = 2.50, w = 1.28, top = 0.365, bottom = -0.905, n = 2.1 },
+  { x = 3.00, w = 1.30, top = 0.465, bottom = -0.855, n = 2.1 },
+  { x = 4.00, w = 1.40, top = 0.620, bottom = -0.755, n = 2.2 },
+  { x = 5.00, w = 1.58, top = 0.720, bottom = -0.665, n = 2.3 },
+  { x = 6.00, w = 1.84, top = 0.800, bottom = -0.585, n = 2.4 },
+  { x = 7.00, w = 2.00, top = 0.850, bottom = -0.505, n = 2.5 },
+  { x = 8.00, w = 2.10, top = 0.880, bottom = -0.450, chine = 0.000, n_top = 2.4, n_bottom = 2.8 },
+  { x = 9.00, w = 2.40, top = 0.750, bottom = -0.450, chine = 0.000, n_top = 2.2, n_bottom = 3.0 },
+  { x = 10.00, w = 2.60, top = 0.560, bottom = -0.450, chine = 0.000, n_top = 2.2, n_bottom = 3.0 },
+  { x = 12.00, w = 2.60, top = 0.460, bottom = -0.450, chine = 0.000, n_top = 2.2, n_bottom = 3.0 },
+  { x = 14.00, w = 2.30, top = 0.320, bottom = -0.450, chine = 0.000, n_top = 2.2, n_bottom = 3.0 },
+  { x = 16.00, w = 1.60, top = 0.220, bottom = -0.500, n = 2.8 },
+  { x = 18.00, w = 1.54, top = 0.200, bottom = -0.520, n = 2.8 },
+  { x = 19.80, w = 1.50, top = 0.190, bottom = -0.520, n = 2.8 },
+  { x = 20.20, w = 0.96, top = 0.180, bottom = -0.510, n = 2.3 },
+  { x = 21.00, w = 0.84, top = 0.095, bottom = -0.455, n = 2.2 },
+  { x = 21.50, w = 0.76, top = -0.005, bottom = -0.365, n = 2.2 },
+  { x = 21.935, w = 0.00, top = -0.170, bottom = -0.210 },
 ]
 
-# The engine nacelles with the rectangular intakes under the wing roots
+# The hump behind the canopy, falling to the tail
+[[body]]
+name = "spine"
+kind = "pod"
+aero = false                  # part of the fuselage's top: the tables leave it out
+stations = [
+  { x = 8.200, w = 0.000, top = 1.000, bottom = 0.850 },
+  { x = 9.000, w = 0.800, top = 1.120, bottom = 0.400, n = 2.2 },
+  { x = 10.000, w = 0.800, top = 1.020, bottom = 0.350, n = 2.2 },
+  { x = 11.000, w = 0.760, top = 0.880, bottom = 0.300, n = 2.2 },
+  { x = 12.000, w = 0.700, top = 0.720, bottom = 0.250, n = 2.2 },
+  { x = 13.000, w = 0.600, top = 0.530, bottom = 0.200, n = 2.2 },
+  { x = 14.000, w = 0.500, top = 0.360, bottom = 0.150, n = 2.2 },
+  { x = 15.000, w = 0.000, top = 0.240, bottom = 0.180 },
+]
+
 # The engine nacelles under the blended centre section, their intakes square
-# boxes whose mouths lean back from the bottom lip
+# boxes whose mouths are raked back from the top lip
 [[intake]]
 name = "nacelle"
 mirror = true
 lip = 0.04
-rake = -18
+rake = 44
 duct = 2.0
 duct_rise = 0.25
 duct_taper = 0.85
 stations = [
-  { x = 7.80, y = 1.350, w = 1.20, top = -0.100, bottom = -1.350, n = 4.0 },
-  { x = 12.00, y = 1.350, w = 1.30, top = -0.050, bottom = -1.400, n = 3.5 },
-  { x = 17.00, y = 1.350, w = 1.30, top = 0.050, bottom = -1.100, n = 3.0 },
-  { x = 20.50, y = 1.350, w = 1.15, top = 0.000, bottom = -1.050, n = 2.4 },
-  { x = 21.30, y = 1.350, w = 1.10, top = -0.050, bottom = -1.000, n = 2.0 },
+  { x = 9.90, y = 1.150, w = 1.060, top = -0.120, bottom = -1.360, n = 4.5 },
+  { x = 12.00, y = 1.150, w = 1.120, top = -0.050, bottom = -1.390, n = 3.8 },
+  { x = 15.00, y = 1.150, w = 1.120, top = 0.050, bottom = -1.220, n = 3.4 },
+  { x = 17.50, y = 1.150, w = 1.080, top = 0.100, bottom = -1.130, n = 3.0 },
+  { x = 19.30, y = 1.150, w = 0.980, top = 0.050, bottom = -1.020, n = 2.5 },
+  { x = 19.90, y = 1.150, w = 0.940, top = 0.000, bottom = -0.980, n = 2.3 },
 ]
 
-# The tail booms outboard of the engines: they carry the fins and the
-# stabilators' spindles
+# The tail booms outboard of the engines: they carry the fins, the ventral
+# fins and the stabilators' spindles
 [[body]]
 name = "boom"
 kind = "boom"
 mirror = true
 stations = [
-  { x = 13.60, y = 2.150, w = 0.140, top = 0.240, bottom = 0.000, n = 2.6 },
-  { x = 14.80, y = 2.150, w = 0.420, top = 0.620, bottom = -0.380, n = 2.6 },
-  { x = 20.20, y = 2.150, w = 0.420, top = 0.620, bottom = -0.380, n = 2.6 },
-  { x = 21.10, y = 2.150, w = 0.210, top = 0.420, bottom = -0.180, n = 2.6 },
+  { x = 13.60, y = 2.200, w = 0.300, top = 0.200, bottom = -0.400, n = 2.6 },
+  { x = 15.00, y = 2.200, w = 0.500, top = 0.400, bottom = -0.750, n = 2.6 },
+  { x = 18.30, y = 2.200, w = 0.500, top = 0.400, bottom = -0.750, n = 2.6 },
+  { x = 19.20, y = 2.200, w = 0.400, top = 0.200, bottom = -0.700, n = 2.6 },
+  { x = 19.65, y = 2.200, w = 0.000, top = 0.050, bottom = -0.450 },
 ]
 
-# The framed windscreen and the big canopy behind it
+# The launch rails on the wing tips
+[[body]]
+name = "tip rail"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 13.70, y = 7.280, w = 0.000, top = -0.100, bottom = -0.200 },
+  { x = 14.10, y = 7.280, w = 0.120, top = 0.020, bottom = -0.300, n = 2.4 },
+  { x = 17.00, y = 7.280, w = 0.120, top = 0.020, bottom = -0.300, n = 2.4 },
+  { x = 17.30, y = 7.280, w = 0.000, top = -0.080, bottom = -0.200 },
+]
+
+# The framed windscreen and the big bubble canopy behind it
 [[body]]
 name = "canopy"
 kind = "pod"
-frames = [5.72]
+frames = [4.40]
 frame_width = 0.08
 stations = [
-  { x = 5.000, w = 0.00, top = 0.700, bottom = 0.680 },
-  { x = 5.700, w = 0.72, top = 1.180, bottom = 0.660, n = 2.0 },
-  { x = 6.800, w = 0.86, top = 1.350, bottom = 0.660, n = 2.0 },
-  { x = 7.900, w = 0.70, top = 1.200, bottom = 0.670, n = 2.0 },
-  { x = 8.800, w = 0.30, top = 0.800, bottom = 0.660, n = 2.0 },
+  { x = 3.300, w = 0.00, top = 0.620, bottom = 0.580 },
+  { x = 3.800, w = 0.70, top = 0.860, bottom = 0.550, n = 2.0 },
+  { x = 4.400, w = 0.86, top = 1.200, bottom = 0.580, n = 2.0 },
+  { x = 5.200, w = 0.92, top = 1.460, bottom = 0.620, n = 2.0 },
+  { x = 6.000, w = 0.92, top = 1.540, bottom = 0.660, n = 2.0 },
+  { x = 7.000, w = 0.84, top = 1.450, bottom = 0.720, n = 2.0 },
+  { x = 8.000, w = 0.62, top = 1.220, bottom = 0.800, n = 2.0 },
+  { x = 8.800, w = 0.00, top = 1.120, bottom = 0.900 },
 ]
 
 [[engine]]
@@ -159,37 +214,43 @@ bypass_ratio = 0.59
 tsfc_dry = 0.75
 tsfc_wet = 1.92
 design_mach = 2.35
-position = [17.000, 1.350, -0.700]
+position = [17.300, 1.150, -0.500]
 mass = 1520
-inlet_x = 7.8
+inlet_x = 9.9
 [engine.nozzle]
-position = [21.300, 1.350, -0.700]
+position = [20.100, 1.150, -0.500]
 
+# The gear where the Su-30's three-view draws its wheels (the axles 7.90 and
+# 13.77 m behind the radome tip: the published 5.88 m wheelbase), the 4.34 m
+# track and the tyres (680x260, 1030x350); standing on it the fins' tips are
+# the published 5.93 m up. The legs fold forward, the mains turning their
+# wheels flat into the nacelles' sides.
 [[gear]]
 name = "Nose Gear"
-position = [6.300, 0.0, -2.250]
+position = [7.900, 0.0, -2.237]
 steerable = true
 max_steer = 45
 wheel_diameter = 0.68
-wheel_width = 0.20
+wheel_width = 0.26
 retractable = true
 retract = "forward"
 static_deflection = 0.15
-attach = [6.300, 0.0, -0.500]
+attach = [7.800, 0.0, -0.250]
 
 [[gear]]
 name = "Main Gear"
 mirror = true
-position = [12.180, 2.170, -2.250]
+position = [13.770, 2.170, -2.267]
 wheel_diameter = 1.03
-wheel_width = 0.32
+wheel_width = 0.35
 retractable = true
-static_deflection = 0.18
-attach = [12.000, 1.550, -0.850]
 retract = "forward"
+wheel_turn = "flat"
+static_deflection = 0.18
+attach = [13.400, 1.500, -0.450]
 
 [reference]
-aero_point = [11.600, 0.0, 0.0]    # 0.30 MAC
+aero_point = [12.830, 0.0, 0.0]    # 0.30 MAC
 
 [flight_control]
 type = "fbw"
@@ -200,29 +261,29 @@ roll_rate_deg_s = 270.0
 
 [mass]
 empty = 16380                 # Su-27S (Jane's)
-empty_cg = [11.650, 0.0, -0.450]
+empty_cg = [12.840, 0.0, -0.450]
 # no published inertia: radii of gyration like the F-15's (the same class,
 # layout and size)
 gyration = [0.265, 0.430, 0.550]
 [[mass.payload]]
 name = "pilot"
 mass = 100
-position = [6.700, 0.0, 0.700]
+position = [6.300, 0.0, 0.750]
 [[mass.payload]]
 name = "gun ammunition"       # GSh-30-1, 150 rounds
 mass = 70
-position = [9.000, 1.000, 0.000]
+position = [10.190, 1.000, 0.000]
 [[mass.tank]]
 name = "fuselage forward"     # the normal fuel load: 5,270 kg of 9,400
-position = [9.500, 0.0, -0.200]
+position = [10.690, 0.0, -0.200]
 capacity = 2000
 [[mass.tank]]
 name = "fuselage centre"
-position = [12.000, 0.0, -0.150]
+position = [13.190, 0.0, -0.150]
 capacity = 2200
 [[mass.tank]]
 name = "fuselage aft"
-position = [14.500, 0.0, -0.100]
+position = [15.690, 0.0, -0.100]
 capacity = 1070
 
 [dimensions]                  # published, overall, gear down (Sukhoi):

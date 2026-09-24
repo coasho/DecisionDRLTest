@@ -155,7 +155,9 @@ sweep = 0                        # deg: its outboard edge behind its inboard one
 duct = 1.6                       # m seen into; duct_rise and duct_taper bend it towards the engine
 stations = [ { x = 4.40, w = 0.96, top = -0.56, bottom = -1.16, chine = -0.82, n_top = 4.0, n_bottom = 2.4 }, ... ]
                                  # any body: chine is the widest line's height, n_top and n_bottom
-                                 # the exponents above and below it (a flat belly, a chined nose)
+                                 # the exponents above and below it (a flat belly, a chined nose);
+                                 # lean = 40 (deg) tips a section's top outboard, its walls sloping
+                                 # (a stealth fighter's caret intakes)
 [[body]]
 name = "canopy"                  # a pod named canopy... is glass
 frames = [5.45]                  # a frame round it at each x

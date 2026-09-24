@@ -16,7 +16,8 @@
 //   {"op": "mirror", "child": n}   {"op": "paint", "material": m, "child": n}
 //   {"op": "offset", "r": r, "child": n}                   grown by r (shrunk if negative)
 //   {"op": "reflect", "child": n}                          reflected to y < 0 (the left of a pair)
-//   {"prim": "loft", "x", "yc", "zc", "hw", "hu", "hl", "nu", "nl"}    lists per station
+//   {"prim": "loft", "x", "yc", "zc", "hw", "hu", "hl", "nu", "nl", "lean"}    lists per station
+//                                                          (lean optional: dy/dz of the section's centre)
 //   {"prim": "wing", "le": [a, b], "chord": [..], "twist": [rad, rad], "span": s,
 //    "foils": [i, j], "inflate": m}
 //   {"prim": "wingregion", same frame, "t": [t0, t1], "front": [..], "back": [..]}

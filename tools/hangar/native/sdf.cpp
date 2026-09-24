@@ -61,21 +61,25 @@ double interp(const std::vector<double>& x, const std::vector<double>& y, double
 /// A body lofted along x through superelliptic sections: at each station the
 /// widest line's centre (yc, zc), its half width hw, the height above it hu
 /// and the depth below it hl, and an exponent for each half (2 an ellipse,
-/// larger boxier, towards 1 a diamond: chines).
+/// larger boxier, towards 1 a diamond: chines). An optional lean sheers the
+/// section: its centre moves lean metres towards +y for each metre up (an
+/// intake whose walls slope, wider at the top).
 class Loft final : public Node {
 public:
     explicit Loft(const Json& j)
         : x_(list(j, "x")), yc_(list(j, "yc")), zc_(list(j, "zc")), hw_(list(j, "hw")), hu_(list(j, "hu")),
-          hl_(list(j, "hl")), nu_(list(j, "nu")), nl_(list(j, "nl")), mirror_(j.boolean("mirror", false)),
-          mat_(materialOf(j)) {
+          hl_(list(j, "hl")), nu_(list(j, "nu")), nl_(list(j, "nl")),
+          k_(j.find("lean") != nullptr ? list(j, "lean") : std::vector<double>(x_.size(), 0.0)),
+          mirror_(j.boolean("mirror", false)), mat_(materialOf(j)) {
         const std::size_t n = x_.size();
         if (n < 2) fail("a loft needs two stations");
-        for (const auto* v : {&yc_, &zc_, &hw_, &hu_, &hl_, &nu_, &nl_})
+        for (const auto* v : {&yc_, &zc_, &hw_, &hu_, &hl_, &nu_, &nl_, &k_})
             if (v->size() != n) fail("a loft's lists differ in length");
         for (std::size_t i = 1; i < n; ++i)
             if (x_[i] <= x_[i - 1]) fail("a loft's stations must increase in x");
         for (std::size_t i = 0; i < n; ++i) {
-            const double y0 = yc_[i] - hw_[i], y1 = yc_[i] + hw_[i];
+            const double reach = std::fabs(k_[i]) * std::max(hu_[i], hl_[i]);
+            const double y0 = yc_[i] - hw_[i] - reach, y1 = yc_[i] + hw_[i] + reach;
             box.add({x_[i], y0, zc_[i] - hl_[i]});
             box.add({x_[i], y1, zc_[i] + hu_[i]});
             if (mirror_) box.add({x_[i], -y1, zc_[i]});
@@ -101,7 +105,7 @@ public:
 
 private:
     struct Sec {
-        double yc, zc, hw, hu, hl, nu, nl;
+        double yc, zc, hw, hu, hl, nu, nl, k;
     };
 
     Sec at(double x) const {
@@ -111,14 +115,17 @@ private:
         const double t = clamp((x - x_[i]) / (x_[i + 1] - x_[i]), 0.0, 1.0);
         return {lerp(yc_[i], yc_[i + 1], t), lerp(zc_[i], zc_[i + 1], t), lerp(hw_[i], hw_[i + 1], t),
                 lerp(hu_[i], hu_[i + 1], t), lerp(hl_[i], hl_[i + 1], t), lerp(nu_[i], nu_[i + 1], t),
-                lerp(nl_[i], nl_[i + 1], t)};
+                lerp(nl_[i], nl_[i + 1], t), lerp(k_[i], k_[i + 1], t)};
     }
 
     /// First-order distance to a superellipse half: (f - 1) / |grad f| with
     /// f = (|u|^n + |v|^n)^(1/n) - exact for circles, close near any surface.
+    /// A leaning section is the upright one sheered along y: u measures from
+    /// the centre moved k (z - zc), and the gradient carries the shear.
     static double dist(const Sec& s, double y, double z) {
-        const double dy = std::fabs(y - s.yc);
         const double rz = z - s.zc;
+        const double ry = y - s.yc - s.k * rz;
+        const double dy = std::fabs(ry);
         const bool up = rz >= 0.0;
         const double dz = std::fabs(rz);
         const double a = std::max(s.hw, 1e-4), b = std::max(up ? s.hu : s.hl, 1e-4);
@@ -127,12 +134,14 @@ private:
         if (u < 1e-12 && v < 1e-12) return -std::min(a, b);
         const double f = std::pow(std::pow(u, n) + std::pow(v, n), 1.0 / n);
         const double fp = std::pow(f, 1.0 - n);
-        const double gy = u > 0.0 ? fp * std::pow(u, n - 1.0) / a : 0.0;
-        const double gz = v > 0.0 ? fp * std::pow(v, n - 1.0) / b : 0.0;
+        const double fu = u > 0.0 ? fp * std::pow(u, n - 1.0) / a : 0.0;  // df/d|ry|
+        const double fv = v > 0.0 ? fp * std::pow(v, n - 1.0) / b : 0.0;  // df/d|rz|
+        const double gy = ry >= 0.0 ? fu : -fu;
+        const double gz = (up ? fv : -fv) - s.k * gy;
         return (f - 1.0) / std::max(std::hypot(gy, gz), 1e-12);
     }
 
-    std::vector<double> x_, yc_, zc_, hw_, hu_, hl_, nu_, nl_;
+    std::vector<double> x_, yc_, zc_, hw_, hu_, hl_, nu_, nl_, k_;
     bool mirror_;
     int mat_;
 };

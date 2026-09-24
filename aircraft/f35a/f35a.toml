@@ -5,7 +5,10 @@
 #
 # Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
 # plane. Sources: USAF fact sheet, Lockheed Martin and Jane's (dimensions,
-# weights, performance); Pratt & Whitney (F135-PW-100).
+# weights, performance); Pratt & Whitney (F135-PW-100). The shape is measured
+# off the JSF program office's side, top and front views (www.jsf.mil, public
+# domain, one scale: 178 px/m); the wheelbase and track off Virginia Tech's
+# planform analysis of the F-35A (19.75 ft, 14.24 ft).
 
 [aircraft]
 name = "f35a"
@@ -15,16 +18,16 @@ category = "fighter"
 [analysis]
 speed = 240.0
 
-# The wing: 42.7 m2 (460 ft2), span 10.70 m, 33 deg leading edge, -14 deg
-# trailing edge (root 6.38 m, tip 1.60 m to the centre line, MAC 4.47 m). The
-# CG sits 2 % of the MAC behind the neutral point hangar finds: near neutral,
-# as the F-35's relaxed stability is described.
+# The wing: 42.7 m2 (460 ft2), span 10.70 m, 34 deg leading edge, -14 deg
+# trailing edge (root 6.48 m, tip 1.54 m to the centre line), no dihedral.
+# The CG sits 2 % of the MAC behind the neutral point hangar finds: near
+# neutral, as the F-35's relaxed stability is described.
 [[surface]]
 name = "wing"
 kind = "wing"
 sections = [
-  { le = [5.870, 0.000, 0.000], chord = 6.380, airfoil = "naca64a205" },
-  { le = [9.344, 5.350, -0.150], chord = 1.600, airfoil = "naca64a204" },
+  { le = [6.460, 0.000, 0.000], chord = 6.480, airfoil = "naca64a205" },
+  { le = [10.060, 5.350, 0.000], chord = 1.540, airfoil = "naca64a204" },
 ]
 controls = [
   { name = "flaperon", channel = "aileron", mix = { flap = 1.0 }, span = [0.28, 0.78], chord_fraction = 0.24, limits = [-30, 30] },
@@ -42,90 +45,173 @@ name = "lex"
 kind = "strake"
 airfoil = "plate"
 sections = [
-  { le = [5.000, 0.000, 0.050], chord = 1.300 },
-  { le = [5.000, 0.950, 0.050], chord = 1.900 },
-  { le = [6.880, 1.450, 0.000], chord = 0.050 },
+  { le = [5.960, 1.200, 0.050], chord = 2.300 },
+  { le = [8.000, 2.340, 0.000], chord = 0.050 },
 ]
 
-# All-moving horizontal tails, 10.4 m2 exposed, 33 deg
+# All-moving stabilators, 11 m2 exposed, their edges parallel to the wing's
+# (34 deg, -14 deg), reaching aft past the nozzle beside it; the surface runs
+# on inside the fuselage to the centre line, as the body carries the tail's
+# lift across
 [[surface]]
 name = "htail"
 kind = "htail"
 airfoil = "naca64a004"
 sections = [
-  { le = [11.550, 0.000, -0.200], chord = 3.400 },
-  { le = [12.400, 1.300, -0.200], chord = 2.900 },
-  { le = [14.090, 3.900, -0.200], chord = 1.100 },
+  { le = [11.700, 0.000, -0.030], chord = 2.300 },
+  { le = [12.170, 0.700, -0.030], chord = 1.830 },
+  { le = [12.380, 1.000, -0.020], chord = 3.330 },
+  { le = [14.180, 3.650, 0.120], chord = 0.850 },
 ]
 controls = [
-  { name = "stabilator", channel = "elevator", mix = { aileron = 0.3 }, span = [0.33, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-30, 30] },
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.3 }, span = [0.19, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-30, 30] },
 ]
 
-# Twin vertical tails canted 20 deg outboard, 2 x 5.0 m2
+# Twin vertical tails canted 20 deg outboard, 2 x 3.6 m2, their trailing
+# edges swept too
 [[surface]]
 name = "fin"
 kind = "fin"
 mirror = true
 airfoil = "naca64a004"
 sections = [
-  { le = [11.000, 1.150, 0.450], chord = 3.000 },
-  { le = [12.560, 1.970, 2.710], chord = 1.200 },
+  { le = [11.680, 1.490, 0.300], chord = 2.100 },
+  { le = [13.340, 2.250, 2.360], chord = 1.440 },
 ]
 controls = [
   { name = "rudder", channel = "rudder", span = [0.05, 0.65], chord_fraction = 0.30, limits = [-30, 30] },
 ]
 
-# Fuselage: the chined nose, the diverterless inlets from 5.6 m, the
+# Fuselage: the chined nose, the diverterless inlets from 4.3 m, the
 # weapons bays, one engine
 [[body]]
 name = "fuselage"
 kind = "fuselage"
 # Chined forward fuselage; behind the intakes a deep, wide body over the one
-# engine and its ducts, closing to the round nozzle.
+# engine and its ducts, a ridged spine on top, closing to the round nozzle.
 stations = [
-  { x = 0.00, w = 0.00, top = -0.100, bottom = -0.200 },
-  { x = 1.20, w = 0.90, top = 0.200, bottom = -0.450, chine = -0.130, n_top = 1.8, n_bottom = 1.9 },
-  { x = 3.00, w = 1.32, top = 0.450, bottom = -0.650, chine = -0.080, n_top = 1.9, n_bottom = 2.1 },
-  { x = 4.60, w = 1.72, top = 0.550, bottom = -0.850, chine = -0.050, n_top = 2.1, n_bottom = 2.4 },
-  { x = 5.60, w = 2.00, top = 0.550, bottom = -0.950, chine = -0.050, n_top = 2.4, n_bottom = 2.8 },
-  { x = 8.00, w = 2.90, top = 0.550, bottom = -1.100, chine = -0.100, n_top = 3.2, n_bottom = 3.8 },
-  { x = 10.50, w = 2.80, top = 0.500, bottom = -1.000, chine = -0.100, n_top = 3.2, n_bottom = 3.6 },
-  { x = 13.00, w = 2.20, top = 0.400, bottom = -0.800, n = 3.0 },
-  { x = 15.00, w = 1.40, top = 0.300, bottom = -0.550, n = 2.4 },
-  { x = 15.67, w = 1.20, top = 0.250, bottom = -0.500, n = 2.2 },
+  { x = 0.00, w = 0.00, top = -0.240, bottom = -0.280 },
+  { x = 0.50, w = 0.52, top = -0.030, bottom = -0.490, chine = -0.290, n_top = 1.9, n_bottom = 1.9 },
+  { x = 1.00, w = 0.90, top = 0.160, bottom = -0.660, chine = -0.280, n_top = 1.9, n_bottom = 1.9 },
+  { x = 1.50, w = 1.06, top = 0.250, bottom = -0.840, chine = -0.270, n_top = 2.0, n_bottom = 2.0 },
+  { x = 2.00, w = 1.18, top = 0.400, bottom = -0.830, chine = -0.250, n_top = 2.0, n_bottom = 2.1 },
+  { x = 3.00, w = 1.42, top = 0.520, bottom = -0.840, chine = -0.200, n_top = 2.0, n_bottom = 2.2 },
+  { x = 4.00, w = 1.68, top = 0.640, bottom = -0.890, chine = -0.120, n_top = 2.0, n_bottom = 2.4 },
+  { x = 4.60, w = 2.00, top = 0.720, bottom = -0.920, chine = -0.050, n_top = 1.7, n_bottom = 2.6 },
+  { x = 5.25, w = 2.80, top = 0.640, bottom = -0.940, chine = 0.050, n_top = 1.5, n_bottom = 3.0 },
+  { x = 6.00, w = 3.40, top = 0.610, bottom = -1.000, chine = 0.100, n_top = 1.4, n_bottom = 3.0 },
+  { x = 6.60, w = 3.52, top = 0.600, bottom = -1.030, chine = 0.080, n_top = 1.4, n_bottom = 3.0 },
+  { x = 8.50, w = 3.40, top = 0.570, bottom = -1.080, chine = -0.100, n_top = 1.4, n_bottom = 3.0 },
+  { x = 10.00, w = 3.30, top = 0.560, bottom = -1.100, chine = -0.100, n_top = 1.5, n_bottom = 3.0 },
+  { x = 11.50, w = 3.10, top = 0.560, bottom = -1.050, chine = -0.100, n_top = 1.6, n_bottom = 3.0 },
+  { x = 12.50, w = 2.80, top = 0.550, bottom = -0.950, chine = -0.050, n_top = 1.8, n_bottom = 2.6 },
+  { x = 13.20, w = 2.20, top = 0.500, bottom = -0.780, chine = -0.050, n = 2.4 },
+  { x = 13.70, w = 1.20, top = 0.320, bottom = -0.560, chine = -0.100, n = 2.2 },
 ]
 
-# The intakes either side behind the cockpit: caret-shaped, their lips swept
-# back and leaning back from the bottom lip (diverterless: a bump ahead of
-# each, not drawn).
+# The spine: a ridge from behind the canopy to the tail, over the shoulders
+# that slope down to the chines
+[[body]]
+name = "spine"
+kind = "pod"
+aero = false                  # part of the fuselage's top: the tables leave it out
+stations = [
+  { x = 4.300, w = 0.000, top = 0.760, bottom = 0.560 },
+  { x = 4.800, w = 1.100, top = 1.000, bottom = 0.300, chine = 0.450, n_top = 2.0, n_bottom = 2.0 },
+  { x = 6.000, w = 1.200, top = 0.950, bottom = 0.300, chine = 0.450, n_top = 2.0, n_bottom = 2.0 },
+  { x = 6.600, w = 1.100, top = 0.870, bottom = 0.300, chine = 0.450, n_top = 2.0, n_bottom = 2.0 },
+  { x = 8.500, w = 1.000, top = 0.840, bottom = 0.300, chine = 0.420, n_top = 2.0, n_bottom = 2.0 },
+  { x = 10.000, w = 0.900, top = 0.790, bottom = 0.300, chine = 0.420, n_top = 2.0, n_bottom = 2.0 },
+  { x = 11.500, w = 0.800, top = 0.750, bottom = 0.300, chine = 0.420, n_top = 2.0, n_bottom = 2.0 },
+  { x = 12.500, w = 0.600, top = 0.700, bottom = 0.300, chine = 0.420, n_top = 2.0, n_bottom = 2.0 },
+  { x = 13.300, w = 0.000, top = 0.560, bottom = 0.350 },
+]
+
+# The belly, flat under the weapons bays
+[[body]]
+name = "belly"
+kind = "pod"
+aero = false                  # part of the fuselage: the tables leave it out
+stations = [
+  { x = 5.60, w = 1.80, top = -0.400, bottom = -0.950, n_top = 2.0, n_bottom = 4.0 },
+  { x = 6.50, w = 2.60, top = -0.400, bottom = -1.100, n_top = 2.0, n_bottom = 5.0 },
+  { x = 10.50, w = 2.60, top = -0.400, bottom = -1.120, n_top = 2.0, n_bottom = 5.0 },
+  { x = 12.00, w = 2.20, top = -0.400, bottom = -1.100, n_top = 2.0, n_bottom = 4.0 },
+  { x = 13.00, w = 1.40, top = -0.400, bottom = -0.880, n_top = 2.0, n_bottom = 3.0 },
+]
+
+# The keel between the weapons bays' aft ends
+[[body]]
+name = "keel"
+kind = "pod"
+aero = false
+stations = [
+  { x = 10.40, w = 0.00, top = -0.950, bottom = -1.050 },
+  { x = 11.30, w = 0.40, top = -0.950, bottom = -1.270, n = 2.5 },
+  { x = 11.80, w = 0.36, top = -0.950, bottom = -1.220, n = 2.5 },
+  { x = 12.40, w = 0.00, top = -0.950, bottom = -1.080 },
+]
+
+# The fairings under the wing roots, over the main wheels' bays
+[[body]]
+name = "cheek"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 7.50, y = 1.900, w = 0.000, top = -0.150, bottom = -0.250 },
+  { x = 8.30, y = 1.900, w = 0.740, top = -0.050, bottom = -0.480, n_top = 2.0, n_bottom = 2.5 },
+  { x = 10.80, y = 1.900, w = 0.760, top = -0.050, bottom = -0.480, n_top = 2.0, n_bottom = 2.5 },
+  { x = 11.80, y = 1.900, w = 0.000, top = -0.100, bottom = -0.300 },
+]
+
+# The aft fuselage's shoulders either side of the engine, carrying the fins
+[[body]]
+name = "boom"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 11.00, y = 1.300, w = 0.600, top = 0.450, bottom = -0.350, n = 2.5 },
+  { x = 13.00, y = 1.300, w = 0.600, top = 0.400, bottom = -0.300, n = 2.5 },
+  { x = 13.90, y = 1.200, w = 0.500, top = 0.320, bottom = -0.260, n = 2.5 },
+  { x = 14.50, y = 1.000, w = 0.380, top = 0.150, bottom = -0.300, n = 2.5 },
+  { x = 15.10, y = 0.950, w = 0.260, top = 0.100, bottom = -0.180, n = 2.5 },
+  { x = 15.55, y = 0.950, w = 0.000, top = 0.020, bottom = -0.080 },
+]
+
+# The diverterless intakes either side behind the cockpit: their walls leaning
+# in at the bottom, the lip's outer top corner furthest forward (swept
+# forward in plan, raked back below it); a bump ahead of each, not drawn.
 [[intake]]
 name = "intake"
 mirror = true
 lip = 0.035
-rake = -22
-sweep = 25
+rake = 40
+sweep = -35
 duct = 1.6
 duct_rise = 0.15
 duct_taper = 0.85
 stations = [
-  { x = 5.10, y = 1.020, w = 0.640, top = 0.050, bottom = -0.900, n = 3.0 },
-  { x = 6.50, y = 1.100, w = 0.700, top = 0.080, bottom = -0.980, n = 3.2 },
-  { x = 8.20, y = 1.100, w = 0.660, top = 0.050, bottom = -1.000, n = 3.4 },
-  { x = 9.50, y = 1.000, w = 0.500, top = -0.050, bottom = -0.950, n = 3.4 },
+  { x = 4.93, y = 1.120, w = 0.700, top = 0.100, bottom = -0.780, n = 4.5, lean = 17 },
+  { x = 5.25, y = 1.220, w = 0.860, top = 0.140, bottom = -0.820, n = 4.0, lean = 14 },
+  { x = 6.50, y = 1.220, w = 0.860, top = 0.140, bottom = -0.900, n = 4.0, lean = 12 },
+  { x = 8.20, y = 1.150, w = 0.760, top = 0.080, bottom = -0.950, n = 4.0, lean = 12 },
+  { x = 9.50, y = 1.050, w = 0.500, top = -0.050, bottom = -0.900, n = 3.4 },
 ]
 
-# One piece, with a bow a third of the way back
+# One piece, frameless
 [[body]]
 name = "canopy"
 kind = "pod"
-frames = [4.05]
-frame_width = 0.07
 stations = [
-  { x = 2.800, w = 0.00, top = 0.560, bottom = 0.540 },
-  { x = 3.500, w = 0.76, top = 1.050, bottom = 0.520, n = 2.0 },
-  { x = 4.600, w = 0.90, top = 1.200, bottom = 0.520, n = 2.0 },
-  { x = 5.600, w = 0.76, top = 1.080, bottom = 0.530, n = 2.0 },
-  { x = 6.500, w = 0.30, top = 0.700, bottom = 0.520, n = 2.0 },
+  { x = 1.950, w = 0.00, top = 0.420, bottom = 0.380 },
+  { x = 2.400, w = 0.72, top = 0.720, bottom = 0.360, n = 2.0 },
+  { x = 2.900, w = 0.94, top = 1.010, bottom = 0.360, n = 2.0 },
+  { x = 3.500, w = 1.00, top = 1.110, bottom = 0.420, n = 2.0 },
+  { x = 4.100, w = 0.94, top = 1.080, bottom = 0.560, n = 2.0 },
+  { x = 4.550, w = 0.76, top = 1.020, bottom = 0.740, n = 2.0 },
+  { x = 4.750, w = 0.00, top = 0.980, bottom = 0.840 },
 ]
 
 [[engine]]
@@ -137,35 +223,43 @@ bypass_ratio = 0.57
 tsfc_dry = 0.72
 tsfc_wet = 1.90
 design_mach = 1.6
-position = [12.200, 0.0, -0.250]
+position = [11.400, 0.0, -0.100]
 mass = 1701
 inlet_x = 5.6
 [engine.nozzle]
-position = [15.670, 0.0, -0.250]
+position = [14.100, 0.0, -0.100]
+diameter = 0.80               # m, the exit in the JSF views
 
+# The gear: Virginia Tech's 6.02 m wheelbase and 4.34 m track, the mains
+# 1.2 m behind the CG; standing on it the fins' tips are Lockheed Martin's
+# 4.38 m up. Both legs fold forward, the mains turning their wheels flat
+# into the fairings under the wing roots (assumed: not published).
 [[gear]]
 name = "Nose Gear"
-position = [3.900, 0.0, -1.950]
+position = [4.080, 0.0, -2.160]
 steerable = true
 max_steer = 60
 wheel_diameter = 0.56
 wheel_width = 0.17
 retractable = true
+retract = "forward"
 static_deflection = 0.14
-attach = [3.900, 0.0, -0.550]
+attach = [4.230, 0.0, -0.700]
 
 [[gear]]
 name = "Main Gear"
 mirror = true
-position = [9.150, 1.700, -1.950]
+position = [10.100, 2.170, -2.190]
 wheel_diameter = 0.84
 wheel_width = 0.27
 retractable = true
+retract = "forward"
+wheel_turn = "flat"
 static_deflection = 0.17
-attach = [9.000, 1.250, -0.750]
+attach = [9.880, 1.800, -0.300]
 
 [reference]
-aero_point = [8.452, 0.0, 0.0]     # 0.27 MAC
+aero_point = [9.070, 0.0, 0.0]     # 0.27 MAC
 
 [flight_control]
 type = "fbw"
@@ -176,40 +270,40 @@ roll_rate_deg_s = 240.0
 
 [mass]
 empty = 13290                 # 29,300 lb (USAF)
-empty_cg = [8.502, 0.0, -0.300]
+empty_cg = [8.771, 0.0, -0.300]
 # no published inertia: radii of gyration of the class
 gyration = [0.260, 0.400, 0.520]
 [[mass.payload]]
 name = "pilot"
 mass = 100
-position = [4.600, 0.0, 0.600]
+position = [3.700, 0.0, 0.450]
 [[mass.payload]]
 name = "internal missiles"    # 4 AIM-120 in the bays
 mass = 608
-position = [8.500, 0.0, -0.800]
+position = [8.771, 0.0, -0.800]
 [[mass.payload]]
 name = "gun ammunition"       # GAU-22/A, 180 rounds
 mass = 90
-position = [7.000, -1.100, 0.200]
+position = [7.271, -1.100, 0.200]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 8,278 kg
-position = [7.352, 0.0, -0.200]
+position = [7.621, 0.0, -0.200]
 capacity = 2800
 [[mass.tank]]
 name = "fuselage 2"
-position = [9.352, 0.0, -0.200]
+position = [9.621, 0.0, -0.200]
 capacity = 2700
 [[mass.tank]]
 name = "fuselage 3"
-position = [11.152, 0.0, -0.250]
+position = [11.171, 0.0, -0.250]
 capacity = 1400
 [[mass.tank]]
 name = "left wing"
-position = [8.852, -2.500, 0.000]
+position = [9.121, -2.500, 0.000]
 capacity = 690
 [[mass.tank]]
 name = "right wing"
-position = [8.852, 2.500, 0.000]
+position = [9.121, 2.500, 0.000]
 capacity = 690
 
 [dimensions]                  # published, overall, gear down (Lockheed Martin):

@@ -425,6 +425,40 @@ class Model3D(unittest.TestCase):
                 self.assertGreater(c["open_m"], 0.0)
                 self.assertGreater(c["closed_m"], 0.0)
 
+    def test_leaning_sections(self):
+        # a leaning section is the upright one sheered: its centre moves
+        # outboard tan(lean) per metre up, the same in the mesher's distance
+        # field and the body's own skin; an intake's duct follows its cowl and
+        # stops just ahead of the lip, never carving the body it hugs
+        from hangar.geometry.body import Body, Intake
+        from hangar.shape import airframe as sh
+        from hangar.shape import meshkit
+        if meshkit.library() is None:
+            self.skipTest("hangar_meshkit is not built")
+        rows = [{"x": x, "y": 1.2, "w": 0.8, "top": 0.0, "bottom": -1.0, "lean": 40} for x in (5.0, 7.0)]
+        b = Body({"name": "wall", "mirror": True, "stations": rows})
+        k = float(b.slant(6.0))
+        self.assertAlmostEqual(k, np.tan(np.radians(40.0)))
+        # the widest line at mid-height, 0.4 m out; 0.3 m above it the section
+        # has moved 0.3 k outboard: points on the leaned ellipse lie on the skin
+        z = np.array([-0.5, -0.2, -0.8])
+        v = (z + 0.5) / 0.5
+        y = 1.2 + k * (z + 0.5) + 0.4 * np.sqrt(1.0 - v * v)
+        d, _ = meshkit.evaluate({"root": sh.loft(b)}, np.column_stack([np.full(3, 6.0), y, z]))
+        self.assertTrue(np.all(np.abs(d) < 0.01), d)
+        verts, _, _ = b.skin(16, 32)
+        mid = np.abs(verts[:, 0] - 6.0) < 0.2
+        top = verts[mid & (verts[:, 1] > 0)][:, 2].argmax()
+        self.assertGreater(verts[mid & (verts[:, 1] > 0)][top, 1], 1.2 + 0.4 * k)  # the top leans out
+        # the duct: open through the lip plane, gone 10 cm ahead of it
+        inl = Intake({"name": "in", "mirror": True, "lip": 0.03, "rake": 30, "duct": 1.0,
+                      "stations": [dict(r, lean=40) for r in rows]})
+        _, duct = sh.intake(inl)
+        p, n = inl.lip_plane()
+        dd, _ = meshkit.evaluate({"root": duct}, np.array([p - 0.02 * n, p + 0.10 * n]))
+        self.assertLess(dd[0], 0.0)
+        self.assertGreater(dd[1], 0.0)
+
     def test_leading_edge_flaps_turn_down(self):
         # a positive turn of a leading-edge device's node moves its leading
         # edge down on both sides

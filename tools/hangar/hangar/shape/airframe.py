@@ -49,6 +49,9 @@ def loft(body, material=SKIN, samples_per_m=60):
     zc, nu, nl = body.halves(xs)
     node = {"prim": "loft", "material": material, "mirror": bool(body.mirror), "x": xs, "yc": yc, "zc": zc,
             "hw": 0.5 * w, "hu": top - zc, "hl": zc - bot, "nu": nu, "nl": nl}
+    k = body.slant(xs)
+    if np.any(k != 0.0):
+        node["lean"] = k
     return node
 
 
@@ -120,6 +123,13 @@ def control_regions(surface, ctrl, mirror=None, grow=0.0):
         d = b.le - a.le
         span = np.array([0.0, d[1], d[2]])
         t = [(e0 - etas[i]) / (etas[i + 1] - etas[i]), (e1 - etas[i]) / (etas[i + 1] - etas[i])]
+        # across a section inside the control, into the next segment's region by
+        # 2 cm: regions that only touch would leave the piece in two
+        over = 0.02 / max(float(np.linalg.norm(span)), 1e-6)
+        if e0 > ctrl.eta0 + 1e-9:
+            t[0] -= over
+        if e1 < ctrl.eta1 - 1e-9:
+            t[1] += over
         back = [1.2, 1.2]
         if ctrl.channel == "lef":  # a leading-edge device: ahead of its hinge
             front, back = [-0.2, -0.2], [ctrl.chord_fraction(e0), ctrl.chord_fraction(e1)]
@@ -245,8 +255,9 @@ def frames(body):
 def _extended(node, ahead):
     """A loft with its first section carried ahead by ahead (m)."""
     out = dict(node)
-    for k in ("yc", "zc", "hw", "hu", "hl", "nu", "nl"):
-        out[k] = np.concatenate([[node[k][0]], node[k]])
+    for k in ("yc", "zc", "hw", "hu", "hl", "nu", "nl", "lean"):
+        if k in node:
+            out[k] = np.concatenate([[node[k][0]], node[k]])
     out["x"] = np.concatenate([[node["x"][0] - ahead], node["x"]])
     return out
 
@@ -266,22 +277,29 @@ def intake(body):
     """An intake's cowl, cut off at its lip plane, and its duct: (cowl, duct)."""
     p, n = body.lip_plane()
     # how far ahead of its centre the lip plane reaches, at the opening's edge
-    ahead = 0.05 + abs(np.tan(np.radians(body.rake))) * (body.top[0] - body.bottom[0])         + abs(np.tan(np.radians(body.sweep))) * body.w[0]
+    height = body.top[0] - body.bottom[0]
+    ahead = (0.05 + abs(np.tan(np.radians(body.rake))) * height
+             + abs(np.tan(np.radians(body.sweep))) * (body.w[0] + abs(float(body.slant(body.x[0]))) * height))
     cowl = {"op": "intersect", "k": 0.0,
             "children": [_extended(loft(body), ahead + 0.05), _behind(p, n, body.length + ahead + 0.1, bool(body.mirror))]}
     # the duct: the opening less the lip, open ahead of the lip plane, then
-    # climbing and narrowing towards the engine
+    # climbing and narrowing towards the engine - along the cowl, as the cowl
+    # moves sideways or leans
     f = np.linspace(0.0, 1.0, 24)
     xs = body.x[0] + body.duct * f
-    w, top, bot, yc, _ = body.section(body.x[0])
+    w, top, bot, _, _ = body.section(body.x[0])
     zc, nu, nl = body.halves(body.x[0])
     t = body.lip
     k = 1.0 + (body.duct_taper - 1.0) * f
-    duct = {"prim": "loft", "material": DARK, "mirror": bool(body.mirror), "x": xs, "yc": np.full_like(f, yc),
+    duct = {"prim": "loft", "material": DARK, "mirror": bool(body.mirror), "x": xs, "yc": body.section(xs)[3],
             "zc": zc + body.duct_rise * f, "hw": np.maximum(0.5 * w - t, 0.01) * k,
             "hu": np.maximum(top - zc - t, 0.01) * k, "hl": np.maximum(zc - bot - t, 0.01) * k,
-            "nu": np.full_like(f, nu), "nl": np.full_like(f, nl)}
-    return cowl, _extended(duct, ahead)
+            "nu": np.full_like(f, nu), "nl": np.full_like(f, nl), "lean": body.slant(xs)}
+    # open through the lip plane and no further: ahead of it may stand the
+    # fuselage the intake hugs
+    duct = {"op": "intersect", "k": 0.0,
+            "children": [_extended(duct, ahead), _behind(p + 0.05 * n, n, body.duct + ahead + 0.2, bool(body.mirror))]}
+    return cowl, duct
 
 
 def airframe(aircraft, cell=None, error=None, gear=None):

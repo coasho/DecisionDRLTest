@@ -491,13 +491,16 @@ class Design:
         key = self.model_key()
         old = self.load("model")
         if not force and old and old.get("key") == key and os.path.isfile(glb):
+            # the model as it was; its checks as they are now
             self.log("  model: unchanged (%s)" % shown(glb))
-            return old
+            old["checks"] = self._model_checks(old["report"], glb, old.get("seconds", 0.0))
+            return self.save("model", old)
         report = {}
         t0 = time.time()
         model3d.write_glb(a, glb, origin=MassModel(a).empty()["cg"], report=report)
-        checks = self._model_checks(report, glb, time.time() - t0)
-        return self.save("model", {"glb": glb, "key": key, "report": report, "checks": checks})
+        seconds = time.time() - t0
+        checks = self._model_checks(report, glb, seconds)
+        return self.save("model", {"glb": glb, "key": key, "report": report, "checks": checks, "seconds": seconds})
 
     def _model_checks(self, report, glb, seconds):
         a = self.aircraft
@@ -553,16 +556,18 @@ class Design:
         return checks
 
     def _dimension_checks(self, af, pieces=()):
-        """The model's overall length, span and height (gear down, on its
-        wheels, its control surfaces - an all-moving fin - at rest) against
-        the published ones in [dimensions]: within 3 %."""
+        """The model's overall length, span and height (gear down, parked:
+        on its wheels, each strut compressed by its static deflection, its
+        control surfaces - an all-moving fin - at rest) against the published
+        ones in [dimensions]: within 3 %."""
         dims = self.aircraft.spec.get("dimensions", {})
         if not dims or "bounds" not in af:
             return []
         boxes = [af["bounds"]] + [p["bounds"] for p in pieces if "bounds" in p]
         lo = np.min([b[0] for b in boxes], axis=0)
         hi = np.max([b[1] for b in boxes], axis=0)
-        ground = min((float(p[2]) for g in self.aircraft.gear for _, p in g.positions()), default=float(lo[2]))
+        ground = min((float(p[2]) + g.static_deflection for g in self.aircraft.gear for _, p in g.positions()),
+                     default=float(lo[2]))
         got = {"length": hi[0] - lo[0], "span": hi[1] - lo[1], "height": hi[2] - ground}
         out = []
         for key in ("length", "span", "height"):

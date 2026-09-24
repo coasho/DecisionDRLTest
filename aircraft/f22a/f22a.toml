@@ -5,27 +5,30 @@
 # Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
 # plane. Sources: USAF fact sheet and Jane's (dimensions, weights,
 # performance); Pratt & Whitney (F119-PW-100); the wing: 42 deg leading
-# edge, -17 deg trailing edge, NACA 64A section 5.92 % at the root, 4.29 %
-# at the tip.
+# edge, -17 deg trailing edge, taper 0.169, NACA 64A section 5.92 % at the
+# root, 4.29 % at the tip. The shape and the gear are measured off two
+# three-views that agree to 0.1-0.15 m: the USAF's (gear down) and Zaku's.
 
 [aircraft]
 name = "f22a"
 description = "Lockheed Martin F-22A Raptor (hangar build)"
 category = "fighter"
+stands_in_for = ["f22"]         # the viewer draws JSBSim's own f22 with this model (fsim hangar register)
 
 [analysis]
 speed = 260.0
 
 # The wing: 78.04 m2 (840 ft2), span 13.56 m, a clipped diamond: 42 deg
-# leading edge, -18 deg trailing edge (root 9.91 m, tip 1.60 m to the centre
-# line, MAC 6.76 m; JSBSim's f22 uses 23.07 ft). Its 35 % MAC point, the CG
-# (relaxed stability), sits 0.55 m ahead of the main wheels.
+# leading edge, -17 deg trailing edge (root 9.85 m, taper 0.169), the tip's
+# corner cut back along the aileron's end. Its 35 % MAC point, the CG
+# (relaxed stability), sits 0.7 m ahead of the main wheels.
 [[surface]]
 name = "wing"
 kind = "wing"
 sections = [
-  { le = [6.060, 0.000, 0.000], chord = 9.910, airfoil = "naca64a206" },
-  { le = [12.165, 6.780, -0.200], chord = 1.600, airfoil = "naca64a204" },
+  { le = [6.460, 0.000, 0.000], chord = 9.850, airfoil = "naca64a206" },
+  { le = [11.754, 5.880, -0.180], chord = 2.758, airfoil = "naca64a204" },
+  { le = [12.565, 6.780, -0.300], chord = 1.250, airfoil = "naca64a204" },
 ]
 controls = [
   { name = "aileron", channel = "aileron", span = [0.72, 0.97], chord_fraction = 0.28, limits = [-25, 25] },
@@ -37,36 +40,43 @@ leading = [
   { name = "leading-edge flap", span = [0.26, 0.97], chord_fraction = 0.13, limits = [-3, 30] },
 ]
 
-# All-moving horizontal tails right behind the wing, 13.2 m2 exposed, 42 deg
+# All-moving stabilators on the tail booms, 12.8 m2 exposed: their leading
+# edges parallel to the wing's, the outer trailing edges to its trailing
+# edge, the inner ones cut back parallel to the leading edge, running on
+# into the booms' ends. The surface runs on inside the fuselage to the
+# centre line, as the body carries the tail's lift across.
 [[surface]]
 name = "htail"
 kind = "htail"
 airfoil = "naca64a004"
 sections = [
-  { le = [13.940, 0.000, -0.250], chord = 3.900 },
-  { le = [15.200, 1.400, -0.250], chord = 3.200 },
-  { le = [17.900, 4.400, -0.250], chord = 1.200 },
+  { le = [13.050, 0.000, 0.000], chord = 3.500 },
+  { le = [14.050, 1.100, 0.000], chord = 2.600 },
+  { le = [14.230, 1.270, 0.000], chord = 3.300 },
+  { le = [14.860, 1.960, 0.000], chord = 3.140 },
+  { le = [15.660, 2.820, 0.010], chord = 3.260 },
+  { le = [17.150, 4.430, 0.030], chord = 1.250 },
 ]
 controls = [
-  { name = "stabilator", channel = "elevator", mix = { aileron = 0.3 }, span = [0.32, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-25, 25] },
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.3 }, span = [0.44, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-25, 25] },
 ]
 
-# Twin vertical tails canted 28 deg outboard, 2 x 8.3 m2
+# Twin vertical tails canted 27 deg outboard on the booms, 2 x 8.2 m2
 [[surface]]
 name = "fin"
 kind = "fin"
 mirror = true
 airfoil = "naca64a004"
 sections = [
-  { le = [13.200, 1.600, 0.400], chord = 4.300 },
-  { le = [14.380, 2.910, 2.870], chord = 1.700 },
+  { le = [13.210, 1.590, 0.300], chord = 4.080 },
+  { le = [14.540, 2.970, 3.000], chord = 1.280 },
 ]
 controls = [
   { name = "rudder", channel = "rudder", span = [0.05, 0.60], chord_fraction = 0.30, limits = [-30, 30] },
 ]
 
-# Fuselage: the chined nose, the caret inlets from 5.8 m, the weapons bays
-# and the two engines side by side
+# Fuselage: the chined nose, the caret inlets from 4.8 m, the weapons bays
+# and the two engines side by side between the tail booms
 [[body]]
 name = "fuselage"
 kind = "fuselage"
@@ -74,34 +84,86 @@ kind = "fuselage"
 # the nose along the intakes into the wing's leading edge; behind the intakes
 # the body is wide and flat over the ducts and the side-by-side engines.
 stations = [
-  { x = 0.00, w = 0.00, top = -0.100, bottom = -0.200 },
-  { x = 1.50, w = 1.00, top = 0.200, bottom = -0.450, chine = -0.150, n_top = 1.7, n_bottom = 1.8 },
-  { x = 3.50, w = 1.55, top = 0.450, bottom = -0.650, chine = -0.080, n_top = 1.8, n_bottom = 1.9 },
-  { x = 5.50, w = 1.95, top = 0.550, bottom = -0.850, chine = -0.050, n_top = 2.0, n_bottom = 2.2 },
-  { x = 7.00, w = 2.30, top = 0.500, bottom = -0.950, chine = -0.050, n_top = 2.4, n_bottom = 2.8 },
-  { x = 10.00, w = 3.60, top = 0.450, bottom = -1.050, chine = -0.100, n_top = 3.4, n_bottom = 4.2 },
-  { x = 13.00, w = 3.40, top = 0.400, bottom = -0.950, chine = -0.100, n_top = 3.4, n_bottom = 4.0 },
-  { x = 16.00, w = 3.00, top = 0.300, bottom = -0.750, n = 3.2 },
-  { x = 18.30, w = 2.60, top = 0.200, bottom = -0.550, n = 3.0 },
+  { x = 0.00, w = 0.00, top = -0.300, bottom = -0.340 },
+  { x = 0.50, w = 0.50, top = -0.060, bottom = -0.550, chine = -0.320, n_top = 1.8, n_bottom = 1.8 },
+  { x = 1.00, w = 0.90, top = 0.060, bottom = -0.670, chine = -0.300, n_top = 1.8, n_bottom = 1.8 },
+  { x = 1.50, w = 1.18, top = 0.190, bottom = -0.780, chine = -0.280, n_top = 1.8, n_bottom = 1.9 },
+  { x = 2.00, w = 1.40, top = 0.320, bottom = -0.830, chine = -0.250, n_top = 1.8, n_bottom = 1.9 },
+  { x = 2.50, w = 1.52, top = 0.470, bottom = -0.880, chine = -0.220, n_top = 1.9, n_bottom = 2.0 },
+  { x = 3.00, w = 1.66, top = 0.570, bottom = -0.920, chine = -0.200, n_top = 1.9, n_bottom = 2.0 },
+  { x = 4.00, w = 1.80, top = 0.640, bottom = -0.950, chine = -0.150, n_top = 2.0, n_bottom = 2.1 },
+  { x = 5.00, w = 1.96, top = 0.690, bottom = -0.940, chine = -0.100, n_top = 2.1, n_bottom = 2.2 },
+  { x = 6.00, w = 2.20, top = 0.720, bottom = -0.940, chine = -0.050, n_top = 1.8, n_bottom = 2.6 },
+  { x = 7.00, w = 2.70, top = 0.730, bottom = -1.000, chine = -0.050, n_top = 1.7, n_bottom = 2.6 },
+  { x = 8.20, w = 3.50, top = 0.680, bottom = -1.040, chine = -0.080, n_top = 1.7, n_bottom = 2.2 },
+  { x = 10.00, w = 4.00, top = 0.640, bottom = -1.030, chine = -0.100, n_top = 1.8, n_bottom = 2.0 },
+  { x = 13.00, w = 3.90, top = 0.620, bottom = -0.950, chine = -0.100, n_top = 1.8, n_bottom = 2.0 },
+  { x = 15.00, w = 3.40, top = 0.520, bottom = -0.760, chine = -0.150, n_top = 1.9, n_bottom = 2.4 },
+  { x = 16.00, w = 2.90, top = 0.400, bottom = -0.610, chine = -0.200, n = 3.4 },
+  { x = 16.70, w = 2.50, top = 0.250, bottom = -0.500, chine = -0.200, n = 3.6 },
 ]
 
-# Caret intakes either side below the chine: their lips swept back in plan
-# and leaning back from the bottom lip, the ducts curving in towards the
-# engines.
+# The belly between the intakes, flat under the weapons bays
+[[body]]
+name = "belly"
+kind = "pod"
+aero = false                  # part of the fuselage: the tables leave it out
+stations = [
+  { x = 5.60, w = 1.40, top = -0.300, bottom = -0.950, n_top = 2.0, n_bottom = 4.0 },
+  { x = 7.00, w = 2.30, top = -0.300, bottom = -1.040, n_top = 2.0, n_bottom = 5.0 },
+  { x = 8.50, w = 2.50, top = -0.300, bottom = -1.060, n_top = 2.0, n_bottom = 5.0 },
+  { x = 10.00, w = 2.50, top = -0.300, bottom = -1.050, n_top = 2.0, n_bottom = 5.0 },
+  { x = 11.00, w = 2.50, top = -0.300, bottom = -0.990, n_top = 2.0, n_bottom = 5.0 },
+  { x = 12.50, w = 2.50, top = -0.300, bottom = -0.960, n_top = 2.0, n_bottom = 5.0 },
+  { x = 14.50, w = 2.20, top = -0.300, bottom = -0.830, n_top = 2.0, n_bottom = 4.0 },
+  { x = 15.50, w = 1.60, top = -0.300, bottom = -0.690, n_top = 2.0, n_bottom = 3.0 },
+]
+
+# The tail booms either side of the nozzles, carrying the fins and the
+# stabilators' spindles and reaching past the nozzles
+[[body]]
+name = "boom"
+kind = "pod"
+mirror = true
+aero = false                  # part of the fuselage: the tables leave it out
+stations = [
+  { x = 13.00, y = 1.620, w = 0.700, top = 0.520, bottom = -0.600, n = 3.0 },
+  { x = 16.00, y = 1.620, w = 0.700, top = 0.450, bottom = -0.500, n = 3.0 },
+  { x = 17.00, y = 1.620, w = 0.660, top = 0.220, bottom = -0.400, n = 3.0 },
+  { x = 17.60, y = 1.620, w = 0.500, top = 0.080, bottom = -0.240, n = 2.6 },
+  { x = 17.90, y = 1.620, w = 0.000, top = 0.000, bottom = -0.150 },
+]
+
+# The stinger between the nozzles
+[[body]]
+name = "stinger"
+kind = "pod"
+aero = false
+stations = [
+  { x = 15.80, w = 0.300, top = 0.050, bottom = -0.450, n = 2.4 },
+  { x = 16.70, w = 0.260, top = 0.000, bottom = -0.380, n = 2.4 },
+  { x = 17.40, w = 0.160, top = -0.080, bottom = -0.260, n = 2.2 },
+  { x = 17.75, w = 0.000, top = -0.150, bottom = -0.190 },
+]
+
+# Caret intakes either side below the chine, their walls leaning in at the
+# bottom; the lip's plane swept and raked 42 deg like every other edge, the
+# ducts curving in towards the engines
 [[intake]]
 name = "intake"
 mirror = true
 lip = 0.035
-rake = -28
-sweep = 30
+rake = 42
+sweep = 42
 duct = 1.8
 duct_rise = 0.10
 duct_taper = 0.85
 stations = [
-  { x = 5.70, y = 1.180, w = 0.820, top = -0.050, bottom = -1.020, n = 3.0 },
-  { x = 7.20, y = 1.250, w = 0.880, top = -0.030, bottom = -1.060, n = 3.2 },
-  { x = 9.00, y = 1.250, w = 0.860, top = -0.060, bottom = -1.060, n = 3.4 },
-  { x = 10.50, y = 1.150, w = 0.700, top = -0.150, bottom = -1.000, n = 3.4 },
+  { x = 5.35, y = 1.143, w = 1.000, top = 0.000, bottom = -0.950, n = 5.0, lean = 40 },
+  { x = 6.50, y = 1.153, w = 0.920, top = 0.000, bottom = -1.060, n = 5.0, lean = 46 },
+  { x = 8.00, y = 1.262, w = 0.880, top = -0.020, bottom = -1.070, n = 6.0, lean = 49 },
+  { x = 10.00, y = 1.150, w = 0.840, top = -0.080, bottom = -1.000, n = 6.0, lean = 49 },
+  { x = 11.50, y = 1.000, w = 0.700, top = -0.200, bottom = -0.950, n = 5.0, lean = 49 },
 ]
 
 # One piece, frameless
@@ -109,11 +171,14 @@ stations = [
 name = "canopy"
 kind = "pod"
 stations = [
-  { x = 3.600, w = 0.00, top = 0.560, bottom = 0.540 },
-  { x = 4.300, w = 0.78, top = 1.050, bottom = 0.520, n = 2.0 },
-  { x = 5.600, w = 0.92, top = 1.250, bottom = 0.520, n = 2.0 },
-  { x = 6.900, w = 0.78, top = 1.100, bottom = 0.530, n = 2.0 },
-  { x = 7.900, w = 0.30, top = 0.720, bottom = 0.520, n = 2.0 },
+  { x = 2.800, w = 0.00, top = 0.600, bottom = 0.580 },
+  { x = 3.300, w = 0.70, top = 0.880, bottom = 0.550, n = 2.0 },
+  { x = 4.000, w = 0.88, top = 1.210, bottom = 0.550, n = 2.0 },
+  { x = 4.500, w = 0.92, top = 1.260, bottom = 0.560, n = 2.0 },
+  { x = 5.500, w = 0.88, top = 1.030, bottom = 0.580, n = 2.0 },
+  { x = 6.500, w = 0.74, top = 0.920, bottom = 0.600, n = 2.0 },
+  { x = 7.300, w = 0.40, top = 0.740, bottom = 0.620, n = 2.0 },
+  { x = 7.800, w = 0.00, top = 0.690, bottom = 0.640 },
 ]
 
 [[engine]]
@@ -126,36 +191,43 @@ bypass_ratio = 0.30
 tsfc_dry = 0.61
 tsfc_wet = 1.80
 design_mach = 2.25
-position = [15.300, 0.700, -0.400]
+position = [14.700, 0.700, -0.250]
 mass = 1770
 inlet_x = 5.8
 [engine.nozzle]
-position = [18.300, 0.700, -0.400]
+position = [16.700, 0.700, -0.200]
 shape = "2d"                  # two-dimensional, vectoring in pitch
 
+# The gear where the USAF three-view has its wheels (the axles 5.71 and 11.83 m
+# behind the nose), the 3.2 m track of its front view and Michelin's tyres
+# (23.5x7.5R10, 37x11.5R18); standing on its ground line the fins' tips are
+# 5.0 m up. The nose gear folds forward, the main legs outward (GlobalSecurity),
+# their wheels coming to lie flat in the lower fuselage's sides.
 [[gear]]
 name = "Nose Gear"
-position = [5.100, 0.0, -2.100]
+position = [5.710, 0.0, -2.130]
 steerable = true
 max_steer = 60
-wheel_diameter = 0.60
-wheel_width = 0.18
+wheel_diameter = 0.617
+wheel_width = 0.200
 retractable = true
+retract = "forward"
 static_deflection = 0.14
-attach = [5.100, 0.0, -0.600]
+attach = [5.900, 0.0, -0.600]
 
 [[gear]]
 name = "Main Gear"
 mirror = true
-position = [11.300, 1.650, -2.100]
-wheel_diameter = 0.94
-wheel_width = 0.30
+position = [11.830, 1.600, -2.170]
+wheel_diameter = 0.965
+wheel_width = 0.304
 retractable = true
+retract = "outward"
 static_deflection = 0.18
-attach = [11.100, 1.200, -0.750]
+attach = [11.250, 1.150, -0.750]
 
 [reference]
-aero_point = [10.750, 0.0, 0.0]    # 0.35 MAC
+aero_point = [11.140, 0.0, 0.0]    # 0.35 MAC
 
 [flight_control]
 type = "fbw"
@@ -166,40 +238,40 @@ roll_rate_deg_s = 240.0
 
 [mass]
 empty = 19700                 # 43,340 lb (USAF)
-empty_cg = [10.450, 0.0, -0.350]  # loaded, 2 % of the MAC behind the neutral point hangar finds
+empty_cg = [10.685, 0.0, -0.350]  # loaded, 2 % of the MAC behind the neutral point hangar finds
 # no published inertia: radii of gyration like the F-15's
 gyration = [0.270, 0.430, 0.550]
 [[mass.payload]]
 name = "pilot"
 mass = 100
-position = [5.800, 0.0, 0.600]
+position = [4.900, 0.0, 0.550]
 [[mass.payload]]
 name = "internal missiles"    # 6 AIM-120, 2 AIM-9 in the bays
 mass = 1084
-position = [10.300, 0.0, -0.700]
+position = [10.535, 0.0, -0.700]
 [[mass.payload]]
 name = "gun ammunition"       # M61A2, 480 rounds
 mass = 150
-position = [9.500, 1.600, 0.000]
+position = [9.735, 1.600, 0.000]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 8,200 kg
-position = [8.500, 0.0, -0.200]
+position = [8.735, 0.0, -0.200]
 capacity = 2400
 [[mass.tank]]
 name = "fuselage 2"
-position = [11.000, 0.0, -0.200]
+position = [11.235, 0.0, -0.200]
 capacity = 2600
 [[mass.tank]]
 name = "fuselage 3"
-position = [13.200, 0.0, -0.250]
+position = [13.435, 0.0, -0.250]
 capacity = 1400
 [[mass.tank]]
 name = "left wing"
-position = [11.500, -3.200, 0.000]
+position = [12.125, -3.200, 0.000]
 capacity = 900
 [[mass.tank]]
 name = "right wing"
-position = [11.500, 3.200, 0.000]
+position = [12.125, 3.200, 0.000]
 capacity = 900
 
 [dimensions]                  # published, overall, gear down (USAF fact sheet):

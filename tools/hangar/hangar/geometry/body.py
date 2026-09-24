@@ -12,7 +12,10 @@ y > 0 side and copied.
 A section's two halves can differ: chine is the height of its widest line
 (default half way), and n_top, n_bottom the exponents above and below it -
 a flat belly under a round back (n_bottom = 5, n_top = 2), or a chined nose
-(n = 1.6, the chine a sharp edge along the side).
+(n = 1.6, the chine a sharp edge along the side). lean (deg) tips a section
+outboard at its top, its walls sloping: the caret intakes of stealthy
+fighters, narrower at the bottom than at the top (a mirrored body's copies
+lean both ways).
 
 A canopy (a pod named "canopy...") is glass; frames = [x, ...] puts a frame
 round it at each x (frame_width wide, default 6 cm): a windscreen's arch, the
@@ -64,6 +67,9 @@ class Body:
         self.frame_width = float(spec.get("frame_width", 0.06))
         self.n_top = np.array([r.get("n_top", r.get("n", 2.0)) for r in rows], float)
         self.n_bottom = np.array([r.get("n_bottom", r.get("n", 2.0)) for r in rows], float)
+        self.lean = np.array([r.get("lean", 0.0) for r in rows], float)
+        if np.any(np.abs(self.lean) >= 60.0):
+            raise ValueError("body %r: lean must be under 60 deg" % self.name)
         # the widest line, as a fraction of the height from the bottom
         span = np.maximum(self.top - self.bottom, 1e-9)
         self.chine = np.array([np.clip((r["chine"] + origin[2] - b) / h, 0.0, 1.0) if "chine" in r else 0.5
@@ -94,6 +100,12 @@ class Body:
         _, top, bot, _, _ = self.section(xq)
         zc = bot + np.interp(xq, self.x, self.chine) * (top - bot)
         return zc, np.interp(xq, self.x, self.n_top), np.interp(xq, self.x, self.n_bottom)
+
+    def slant(self, xq):
+        """How far the section's centre moves outboard (+y) per metre up at x:
+        the tangent of its lean (arrays ok)."""
+        xq = np.clip(xq, self.x[0], self.x[-1])
+        return np.tan(np.radians(np.interp(xq, self.x, self.lean)))
 
     @property
     def length(self):
@@ -154,13 +166,14 @@ class Body:
         xs = np.unique(np.concatenate([xs, self.x]))
         w, t, b, yc, _ = self.section(xs)
         zc, nt, nb = self.halves(xs)
+        k = self.slant(xs)
         th = np.linspace(0.0, 2 * np.pi, n_around, endpoint=False)
         c, s = np.cos(th), np.sin(th)
         rings = []
         for i in range(len(xs)):
             e = np.where(s >= 0.0, 2.0 / nt[i], 2.0 / nb[i])
-            yy = yc[i] + (w[i] / 2) * np.sign(c) * np.abs(c) ** e
             zz = zc[i] + np.where(s >= 0.0, t[i] - zc[i], zc[i] - b[i]) * np.sign(s) * np.abs(s) ** e
+            yy = yc[i] + (w[i] / 2) * np.sign(c) * np.abs(c) ** e + k[i] * (zz - zc[i])
             rings.append(np.column_stack([np.full(n_around, xs[i]), yy, zz]))
         rings = np.array(rings)
         verts = rings.reshape(-1, 3)
