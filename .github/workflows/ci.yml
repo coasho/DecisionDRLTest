@@ -26,7 +26,8 @@ jobs:
       # The Python SDK is built for a python.org CPython (the one PyTorch and
       # Gymnasium run on), not MSYS2's; its tests need numpy, and exercise the
       # Gymnasium adapter when it is there. (Stable-Baselines3 would pull in
-      # PyTorch: its tests skip.)
+      # PyTorch: its tests skip.) hangar's report and liveries need
+      # matplotlib and Pillow.
       - uses: actions/setup-python@v5
         id: py
         with:
@@ -34,7 +35,7 @@ jobs:
 
       - name: Python test dependencies
         shell: pwsh
-        run: '& "${{ steps.py.outputs.python-path }}" -m pip install numpy gymnasium'
+        run: '& "${{ steps.py.outputs.python-path }}" -m pip install numpy gymnasium matplotlib pillow'
 
       - uses: msys2/setup-msys2@v2
         with:
