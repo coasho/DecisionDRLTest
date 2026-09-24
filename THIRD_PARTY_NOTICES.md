@@ -5,7 +5,7 @@ with the following components; each keeps its own licence.
 
 | Component | Use | Licence | Shipped as |
 | --- | --- | --- | --- |
-| [JSBSim](https://github.com/JSBSim-Team/jsbsim) | flight dynamics (`src/sim`) and the aircraft data tree (`share/flightsim/jsbsim`) | LGPL-2.1 | `libJSBSim.dll` (shared library, unmodified; source in `third_party/jsbsim`) |
+| [JSBSim](https://github.com/JSBSim-Team/jsbsim) | flight dynamics (`src/sim`) and the aircraft data tree (`share/flightsim/jsbsim`) | LGPL-2.1 | `libJSBSim.dll` (shared library, source in `third_party/jsbsim`), built with one fix of flightsim's - see below |
 | [VulkanSceneGraph](https://github.com/vsg-dev/VulkanSceneGraph) | viewer and vision rendering | MIT (c) 2018 Robert Osfield | statically linked into `flightsim-viewer.exe` and `libfsim_vision.dll` |
 | [vsgXchange](https://github.com/vsg-dev/vsgXchange) | model/image loading, tile fetching | MIT (c) 2019 Robert Osfield | statically linked |
 | [vsgImGui](https://github.com/vsg-dev/vsgImGui), [Dear ImGui](https://github.com/ocornut/imgui), [ImPlot](https://github.com/epezent/implot) | viewer UI | MIT | statically linked into `flightsim-viewer.exe` |
@@ -31,3 +31,13 @@ them locally; using them is subject to the providers' terms:
   GMTED2010, ETOPO1 and others - see the AWS Open Data registry entry.
 - **OpenStreetMap** tiles (optional `--imagery osm`): (c) OpenStreetMap
   contributors, ODbL; the tile usage policy applies.
+
+## Changes to JSBSim
+
+flightsim builds JSBSim 1.3.1 from the unmodified submodule in `third_party/jsbsim`, with
+one change: in `src/models/FGLGear.cpp`, the projection of a wheel's strut on the ground
+normal is bounded at 45 degrees. Upstream divides the wheel's compression and ground force
+by that projection, so a wheel meeting the ground sideways, as in a cartwheel, got an
+unbounded force. `cmake/JsbsimPatches.cmake` makes the change: it writes the changed file into
+the build tree, with each edit marked "flightsim patch". Packages carry the changed file and
+that script in `share/doc/flightsim/jsbsim-changes/`.

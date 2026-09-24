@@ -74,8 +74,8 @@ move on while a check fails or a picture looks wrong.
   - Compare the linear model's modes with "JSBSim response" in the checks.
     A big difference is worth explaining.
   - The crash checks put the aircraft into the ground six ways. A speed gain
-    in a cartwheel is JSBSim's wheel model (docs/hangar.md, "Limits"); in
-    any other case, look at the ground contacts in `<name>.xml`.
+    or a blow-up there means the ground contacts add energy: look at them in
+    `<name>.xml`.
 - **calibrate.** Run it only against real published performance. It fits an
   extra drag area and the propeller pitch; say what it fitted. A GA aircraft
   should need well under 1 m², and the pitch should land near the real

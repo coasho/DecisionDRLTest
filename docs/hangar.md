@@ -137,7 +137,9 @@ stage end to end through the platform (`ctest -R hangar`).
   edges. Each point's spring is sized from the mass it moves (small at a
   wingtip, where the aircraft rolls easily), so JSBSim's 120 Hz step
   integrates it stably. Points close together share that budget. The fly
-  stage checks the result by crashing the aircraft six ways.
+  stage checks the result by crashing the aircraft six ways. The wheels
+  stay JSBSim's; flightsim's build of JSBSim fixes their force when one
+  lands on its side (THIRD_PARTY_NOTICES.md, "Changes to JSBSim").
 - **Propeller.** Blade-element momentum theory with Prandtl's tip and hub
   losses.
 - **Engines.** Piston engines use JSBSim's piston engine; hangar's control
@@ -196,11 +198,6 @@ runs from random attitudes and rates diverged.
   one cruise speed (`[analysis] speed`), whatever the altitude. Laminar separation bubbles below
   Re ≈ 2×10⁵ are not modelled.
 - **Engines.** Piston and electric only; no turbines yet.
-- **Wheels on their side.** JSBSim divides a wheel's force by the angle of
-  its strut to the ground. When a wheel touches down sideways, as in a
-  cartwheel, that force grows without limit, and the aircraft can gain
-  speed or blow up. The stock c172x does the same. The crash tests flag it
-  as a warning. A blown-up vehicle resets cleanly.
 
 ## For Claude
 

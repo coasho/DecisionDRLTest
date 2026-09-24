@@ -542,8 +542,7 @@ class Design:
         return [check("crash tests that blew up", len(mine), None, 0, level="warn",
                       note=(note + "; " if note else "") + "into the ground at idle: " + cases),
                 check("crash tests: speed gained on impact", gain(crashes[worst]), None, 1.3, "x", level="warn",
-                      note="largest ratio of speed after impact to speed at it (%s); above 1 the contacts add energy, "
-                           "as JSBSim's wheels do when one lands sideways" % worst),
+                      note="largest ratio of speed after impact to speed at it (%s); above 1 the contacts add energy" % worst),
                 info("crash tests: deepest point below ground", crashes[deep]["deepest_m"], "m", note=deep)]
 
 

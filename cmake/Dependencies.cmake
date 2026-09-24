@@ -27,6 +27,7 @@ set(_fsim_saved_shared ${BUILD_SHARED_LIBS})
 set(BUILD_SHARED_LIBS ON)                 # JSBSim as DLL (LGPL relinking, design 3)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_subdirectory(${FSIM_JSBSIM_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/third_party/jsbsim EXCLUDE_FROM_ALL)
+include(${CMAKE_CURRENT_LIST_DIR}/JsbsimPatches.cmake) # the fixes flightsim carries
 set(BUILD_SHARED_LIBS ${_fsim_saved_shared})
 set(PROJECT_VERSION ${_fsim_saved_project_version})
 

@@ -12,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
@@ -174,6 +175,37 @@ TEST_CASE("the first step after a reset starts from the new state, however viole
     CHECK_FALSE(after.diverged);
     CHECK(std::abs(after.airspeedTrueMs - before.airspeedTrueMs) < 1.0);
     CHECK(std::abs(after.velocityNedMs[2] - before.velocityNedMs[2]) < 1.0);
+}
+
+TEST_CASE("a wheel that lands on its side does not blow the aircraft up", "[sim][jsbsim]") {
+    // JSBSim divides a wheel's force by the cosine of its strut's angle to the
+    // ground normal, twice: a wheel meeting the ground sideways - a cartwheel -
+    // made that force grow without bound and the stock c172x blew up (to
+    // 5000 m/s). flightsim builds JSBSim with the projection bounded
+    // (cmake/JsbsimPatches.cmake).
+    log::setLevel(log::Level::Error);
+    auto ground = std::make_shared<FlatGround>(0.0);
+    JsbsimModel model(kDt, ground);
+    InitialConditions ic;
+    ic.altitudeMslM = 8.0;
+    ic.airspeedTrueMs = 35.0;
+    ic.headingDeg = 90.0;
+    ic.pitchDeg = -30.0;
+    ic.rollDeg = 100.0;
+    REQUIRE(model.load(AircraftSpec{"c172x", kRoot}, ic));
+    ControlInputs in; // idle, hands off
+    in.setThrottleAll(0.0);
+    double fastest = 0.0;
+    VehicleState s;
+    for (int i = 0; i < 1200 && !s.diverged; ++i) { // 10 s
+        model.step(in);
+        model.state(s);
+        fastest = std::max(fastest, std::sqrt(s.velocityNedMs[0] * s.velocityNedMs[0] + s.velocityNedMs[1] * s.velocityNedMs[1] +
+                                              s.velocityNedMs[2] * s.velocityNedMs[2]));
+    }
+    CHECK_FALSE(s.diverged);
+    CHECK(fastest < 1.3 * ic.airspeedTrueMs); // the crash takes energy out, never puts it in
+    log::setLevel(log::Level::Warn);
 }
 
 TEST_CASE("ground provider drives AGL and gear contact", "[sim][jsbsim]") {
