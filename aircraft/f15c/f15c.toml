@@ -1,0 +1,185 @@
+# McDonnell Douglas F-15C Eagle, built by hangar from public data. (JSBSim's
+# own f15 is no reference: its header says it rests on textbooks and
+# guesses, fitted to fly right.)
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane (a shoulder wing: the fuselage hangs below it). Sources: Jane's All
+# the World's Aircraft (dimensions, weights, performance), USAF fact sheet,
+# NASA TM-72861 and TN D-7678 (F-15 wing: NACA 64A006.6 root, 64A203 tip,
+# 45 deg leading edge), Pratt & Whitney (F100-PW-220).
+
+[aircraft]
+name = "f15c"
+description = "McDonnell Douglas F-15C Eagle (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 250.0                # m/s: the Reynolds numbers (cruise, 3 000 m)
+
+# The wing: 56.5 m2 (608 ft2), span 13.05 m, 45 deg leading edge, taper 0.25,
+# as a trapezoid to the centre line (root 6.93 m, tip 1.73 m, MAC 4.85 m,
+# JSBSim's f15 uses 15.95 ft), 1 deg anhedral. Placed with its MAC quarter
+# chord at 10.30 m: the CG, 0.65 m ahead of the main wheels (wheelbase
+# 5.42 m) and 4.1 m behind the pilot's eye (JSBSim's f15).
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [6.480, 0.000, 0.000], chord = 6.930, airfoil = "naca64a006" },
+  { le = [13.005, 6.525, -0.110], chord = 1.733, airfoil = "naca64a203" },
+]
+controls = [
+  { name = "aileron", channel = "aileron", span = [0.56, 0.94], chord_fraction = 0.24, limits = [-20, 20] },
+  { name = "flap", channel = "flap", span = [0.20, 0.52], chord_fraction = 0.24, limits = [0, 30] },
+]
+
+# All-moving stabilators on the booms beside the engines: 11.6 m2 exposed,
+# 8.61 m span; they roll the aircraft too (differentially, up to 10 deg)
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a005"
+sections = [
+  { le = [14.450, 0.000, -0.250], chord = 3.600 },
+  { le = [15.300, 1.350, -0.250], chord = 3.050 },
+  { le = [18.050, 4.305, -0.250], chord = 1.150 },
+]
+controls = [
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.5 }, span = [0.31, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-25, 15] },
+]
+
+# Twin vertical tails on the booms: 2 x 5.7 m2, 36 deg leading edge
+[[surface]]
+name = "fin"
+kind = "fin"
+mirror = true
+airfoil = "naca64a005"
+sections = [
+  { le = [15.000, 1.550, 0.450], chord = 3.150 },
+  { le = [16.950, 1.550, 3.150], chord = 1.100 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.05, 0.55], chord_fraction = 0.30, limits = [-30, 30] },
+]
+
+# Fuselage with the side intakes: 3.2 m wide from the inlets (6 m) aft, the
+# two engines side by side; the wing sits on its top
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.250, bottom = -0.350 },
+  { x = 1.00, w = 0.60, top = 0.000, bottom = -0.620, n = 2.0 },
+  { x = 2.50, w = 1.00, top = 0.150, bottom = -0.850, n = 2.0 },
+  { x = 4.00, w = 1.20, top = 0.280, bottom = -0.980, n = 2.2 },
+  { x = 5.80, w = 1.35, top = 0.350, bottom = -1.050, n = 2.4 },
+  { x = 7.00, w = 2.70, top = 0.350, bottom = -1.250, n = 3.2 },
+  { x = 8.50, w = 3.10, top = 0.320, bottom = -1.330, n = 3.6 },
+  { x = 11.00, w = 3.20, top = 0.300, bottom = -1.300, n = 3.6 },
+  { x = 13.50, w = 3.05, top = 0.280, bottom = -1.150, n = 3.4 },
+  { x = 16.00, w = 2.75, top = 0.200, bottom = -1.000, n = 3.0 },
+  { x = 18.50, w = 2.45, top = 0.050, bottom = -0.900, n = 2.6 },
+  { x = 19.43, w = 2.30, top = 0.000, bottom = -0.850, n = 2.5 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 4.600, w = 0.00, top = 0.380, bottom = 0.360 },
+  { x = 5.200, w = 0.70, top = 0.900, bottom = 0.330, n = 2.0 },
+  { x = 6.400, w = 0.86, top = 1.080, bottom = 0.340, n = 2.0 },
+  { x = 7.600, w = 0.80, top = 0.980, bottom = 0.350, n = 2.0 },
+  { x = 8.800, w = 0.30, top = 0.560, bottom = 0.340, n = 2.0 },
+]
+
+[[engine]]
+name = "F100-PW-220"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 64.9          # 14,590 lbf military
+thrust_wet_kn = 105.7         # 23,770 lbf afterburner
+bypass_ratio = 0.63
+tsfc_dry = 0.73
+tsfc_wet = 2.17
+throttle_ratio = 1.07
+design_mach = 2.5
+position = [15.600, 0.650, -0.500]
+mass = 1467                   # 3,234 lb dry
+inlet_x = 7.0
+[engine.nozzle]
+position = [19.300, 0.650, -0.500]
+
+[[gear]]
+name = "Nose Gear"
+position = [5.530, 0.0, -2.200]
+steerable = true
+max_steer = 30
+wheel_diameter = 0.56
+wheel_width = 0.18
+retractable = true
+static_deflection = 0.14
+attach = [5.530, 0.0, -1.050]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [10.950, 1.375, -2.200]
+wheel_diameter = 0.86
+wheel_width = 0.26
+retractable = true
+static_deflection = 0.16
+attach = [10.700, 1.100, -1.250]
+
+[reference]
+aero_point = [10.300, 0.0, 0.0]    # 0.25 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.0
+alpha_max_deg = 30.0
+roll_rate_deg_s = 270.0
+
+[mass]
+empty = 12700                 # 28,000 lb (JSBSim's f15 and Jane's)
+empty_cg = [10.350, 0.0, -0.350]
+# radii of gyration from the inertia of JSBSim's f15 (NASA's F-15 simulation):
+# Ixx 28,700, Iyy 165,100, Izz 187,900 slug ft2 at 28,000 lb
+gyration = [0.268, 0.432, 0.551]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [6.200, 0.0, 0.550]
+[[mass.payload]]
+name = "gun ammunition"       # M61A1, 940 rounds
+mass = 250
+position = [10.200, 0.0, -0.600]
+[[mass.tank]]
+name = "fuselage 1"
+position = [8.800, 0.0, -0.300]
+capacity = 2200
+[[mass.tank]]
+name = "fuselage 2"
+position = [10.900, 0.0, -0.300]
+capacity = 2000
+[[mass.tank]]
+name = "fuselage 3"
+position = [12.600, 0.0, -0.350]
+capacity = 700
+[[mass.tank]]
+name = "left wing"
+position = [11.600, -3.000, 0.000]
+capacity = 600
+[[mass.tank]]
+name = "right wing"
+position = [11.600, 3.000, 0.000]
+capacity = 600
+
+[targets]
+# F-15C, clean, published (USAF fact sheet; Jane's)
+max_mach = 2.5                # at altitude, full afterburner (calibrates the wave drag)
+max_mach_altitude_ft = 40000
+max_speed_ktas = 800          # Mach 1.2 at sea level
+climb_rate_fpm = 50000
+service_ceiling_ft = 65000

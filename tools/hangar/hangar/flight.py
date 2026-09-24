@@ -120,6 +120,8 @@ class Flight:
                                              "vs", "nz", "de", "da", "dr", "thr", "rpm", "cl")}
         W = self.prop(v, "inertia/weight-lbs") * LBF
         S = self.prop(v, "metrics/Sw-sqft") * FT * FT
+        # a jet has no propeller: asked once, not every step
+        has_prop = v.state.engine_count > 0 and np.isfinite(self.prop(v, "propulsion/engine/propeller-rpm"))
         for i in range(n + 1):
             s = v.state
             t = i * self.dt
@@ -141,7 +143,7 @@ class Flight:
             hist["da"][i] = math.degrees(s.aileron_rad)
             hist["dr"][i] = math.degrees(s.rudder_rad)
             hist["thr"][i] = s.throttle_position[0] if s.engine_count else 0.0
-            hist["rpm"][i] = self.prop(v, "propulsion/engine/propeller-rpm", 0.0) if s.engine_count else 0.0
+            hist["rpm"][i] = self.prop(v, "propulsion/engine/propeller-rpm", 0.0) if has_prop else 0.0
             qbar = 0.5 * 1.225 * (s.airspeed_calibrated_ms) ** 2
             hist["cl"][i] = s.load_factor * W / max(qbar * S, 1e-6)
             if s.diverged:
@@ -709,7 +711,8 @@ def fighter_tests(f, opts, quick=False):
     peak is the best rate of climb), the service ceiling (where the best
     excess power falls to 0.5 m/s), the sustained turn at 15,000 ft, and the
     handling at 5,000 ft: the load reached with the stick full aft, a 3 g
-    step, a full-stick roll."""
+    step, a full-stick roll. The ceiling is the subsonic one, from the
+    excess power at Mach 0.9, as service ceilings are published."""
     pilot = FighterPilot(f.dt, opts["n_max"], opts["n_min"])
     out = {}
     m_sl, run_sl = max_level_mach(f, pilot, 100.0, start_mach=0.4, seconds=150.0 if quick else 240.0)
@@ -722,12 +725,13 @@ def fighter_tests(f, opts, quick=False):
     m_36, run_36 = max_level_mach(f, pilot, 10973.0, start_mach=0.9, seconds=200.0 if quick else 360.0)
     out["max_mach_36k"] = m_36
     out["ps_36k"] = {"mach": run_36["mach"][np.isfinite(run_36["ps"])], "ps": run_36["ps"][np.isfinite(run_36["ps"])]}
-    # the ceiling: the best excess power at a few heights from Mach 0.9 up
+    # the service ceiling (subsonic, as published): the excess power at
+    # Mach 0.9 at a few heights, where it falls to 0.5 m/s
     rows = []
     for h in ((12000.0, 14500.0) if quick else (12000.0, 13500.0, 15000.0, 16500.0)):
-        r = level_acceleration(f, pilot, h, 0.9 * _speed_of_sound(h), 1.0, 90.0 if quick else 150.0)
-        ps = r["ps"][np.isfinite(r["ps"])]
-        rows.append({"altitude_m": h, "ps_max": float(np.max(ps)) if len(ps) else float("nan")})
+        r = level_acceleration(f, pilot, h, 0.88 * _speed_of_sound(h), 1.0, 25.0, stop_below=0.0)
+        k = np.isfinite(r["ps"]) & (r["mach"] >= 0.86) & (r["mach"] <= 0.95)
+        rows.append({"altitude_m": h, "ps_max": float(np.median(r["ps"][k])) if np.any(k) else float("nan")})
     good = [r for r in rows if np.isfinite(r["ps_max"])]
     ceiling = float("nan")
     if len(good) >= 2:

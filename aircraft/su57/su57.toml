@@ -1,0 +1,194 @@
+# Sukhoi Su-57 (T-50), built by hangar from published dimensions and public
+# estimates. The thrust-vectoring nozzles are not modelled yet: its angle of
+# attack is held to the 30 deg its aerodynamic controls can hold. Its
+# leading-edge vortex controllers (LEVCONs) are fixed strakes here.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: United Aircraft Corporation and public reference works
+# (dimensions, weights, performance); Saturn (AL-41F1).
+
+[aircraft]
+name = "su57"
+description = "Sukhoi Su-57 (hangar build, from public data and estimates)"
+category = "fighter"
+
+[analysis]
+speed = 260.0
+
+# The wing: 78.8 m2, span 14.10 m, 48 deg leading edge (root 9.88 m, tip
+# 1.30 m to the centre line, MAC 6.69 m). The CG at 35 % of the MAC.
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [6.950, 0.000, 0.000], chord = 9.880, airfoil = "naca64a005" },
+  { le = [14.780, 7.050, -0.150], chord = 1.300, airfoil = "naca64a003" },
+]
+controls = [
+  { name = "aileron", channel = "aileron", span = [0.70, 0.95], chord_fraction = 0.26, limits = [-25, 25] },
+  { name = "flaperon", channel = "aileron", mix = { flap = 1.0 }, span = [0.30, 0.70], chord_fraction = 0.20, limits = [-25, 25] },
+]
+
+# The LEVCONs, as fixed strakes, 71 deg
+[[surface]]
+name = "levcon"
+kind = "strake"
+airfoil = "plate"
+sections = [
+  { le = [6.000, 0.000, 0.050], chord = 0.950 },
+  { le = [6.000, 0.900, 0.050], chord = 1.950 },
+  { le = [9.170, 2.000, 0.000], chord = 0.050 },
+]
+
+# All-moving horizontal tails on the tail booms, 45 deg
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a004"
+sections = [
+  { le = [15.400, 0.000, -0.300], chord = 4.200 },
+  { le = [16.500, 2.000, -0.300], chord = 3.300 },
+  { le = [19.500, 5.000, -0.300], chord = 1.100 },
+]
+controls = [
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.3 }, span = [0.40, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-25, 25] },
+]
+
+# Twin all-moving vertical tails canted 26 deg outboard
+[[surface]]
+name = "fin"
+kind = "fin"
+mirror = true
+airfoil = "naca64a004"
+sections = [
+  { le = [15.600, 2.000, 0.500], chord = 3.000 },
+  { le = [17.250, 3.140, 2.840], chord = 1.100 },
+]
+controls = [
+  { name = "fin", channel = "rudder", span = [0.0, 1.0], chord_fraction = 1.0, pivot = 0.40, limits = [-20, 20] },
+]
+
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
+  { x = 1.60, w = 0.85, top = 0.300, bottom = -0.450, n = 2.4 },
+  { x = 3.60, w = 1.25, top = 0.550, bottom = -0.600, n = 2.6 },
+  { x = 5.60, w = 1.45, top = 0.650, bottom = -0.650, n = 2.8 },
+  { x = 8.50, w = 1.90, top = 0.600, bottom = -0.550, n = 3.0 },
+  { x = 12.00, w = 2.10, top = 0.550, bottom = -0.300, n = 3.2 },
+  { x = 16.00, w = 1.70, top = 0.450, bottom = -0.100, n = 3.0 },
+  { x = 19.00, w = 1.10, top = 0.350, bottom = 0.000, n = 2.6 },
+  { x = 20.10, w = 0.50, top = 0.250, bottom = 0.100, n = 2.0 },
+]
+
+[[body]]
+name = "nacelle"
+kind = "nacelle"
+mirror = true
+stations = [
+  { x = 6.50, y = 1.500, w = 1.20, top = -0.100, bottom = -1.300, n = 4.0 },
+  { x = 11.00, y = 1.500, w = 1.30, top = -0.050, bottom = -1.350, n = 3.5 },
+  { x = 16.00, y = 1.500, w = 1.30, top = 0.050, bottom = -1.100, n = 3.0 },
+  { x = 19.30, y = 1.500, w = 1.15, top = 0.000, bottom = -1.050, n = 2.4 },
+  { x = 19.80, y = 1.500, w = 1.10, top = -0.050, bottom = -1.000, n = 2.0 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 3.800, w = 0.00, top = 0.720, bottom = 0.700 },
+  { x = 4.500, w = 0.74, top = 1.180, bottom = 0.680, n = 2.0 },
+  { x = 5.600, w = 0.88, top = 1.330, bottom = 0.680, n = 2.0 },
+  { x = 6.700, w = 0.74, top = 1.200, bottom = 0.690, n = 2.0 },
+  { x = 7.600, w = 0.30, top = 0.840, bottom = 0.680, n = 2.0 },
+]
+
+[[engine]]
+name = "AL-41F1"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 88.3          # 9,000 kgf military
+thrust_wet_kn = 142.2         # 14,500 kgf afterburner
+bypass_ratio = 0.60
+tsfc_dry = 0.72
+tsfc_wet = 1.90
+design_mach = 2.0
+position = [16.000, 1.500, -0.600]
+mass = 1604
+inlet_x = 6.5
+[engine.nozzle]
+position = [19.800, 1.500, -0.600]
+
+[[gear]]
+name = "Nose Gear"
+position = [6.400, 0.0, -2.100]
+steerable = true
+max_steer = 50
+wheel_diameter = 0.66
+wheel_width = 0.20
+retractable = true
+static_deflection = 0.15
+attach = [6.400, 0.0, -0.850]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [12.750, 2.000, -2.100]
+wheel_diameter = 1.03
+wheel_width = 0.32
+retractable = true
+static_deflection = 0.18
+attach = [12.550, 1.600, -1.200]
+
+[reference]
+aero_point = [12.200, 0.0, 0.0]    # 0.35 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.0
+alpha_max_deg = 30.0
+roll_rate_deg_s = 270.0
+
+[mass]
+empty = 18000                 # estimate
+empty_cg = [12.250, 0.0, -0.400]
+# no published inertia: radii of gyration like the Su-27's
+gyration = [0.265, 0.430, 0.550]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [5.400, 0.0, 0.700]
+[[mass.payload]]
+name = "internal missiles"    # 4 R-77M, 2 R-74M
+mass = 972
+position = [11.500, 0.0, -0.700]
+[[mass.tank]]
+name = "fuselage 1"           # internal fuel, 10,300 kg
+position = [9.500, 0.0, -0.200]
+capacity = 3000
+[[mass.tank]]
+name = "fuselage 2"
+position = [12.000, 0.0, -0.150]
+capacity = 3300
+[[mass.tank]]
+name = "fuselage 3"
+position = [14.500, 0.0, -0.100]
+capacity = 2000
+[[mass.tank]]
+name = "left wing"
+position = [12.800, -3.500, 0.000]
+capacity = 1000
+[[mass.tank]]
+name = "right wing"
+position = [12.800, 3.500, 0.000]
+capacity = 1000
+
+[targets]
+# Su-57, published
+max_mach = 2.0                # at altitude, full afterburner
+max_mach_altitude_ft = 36000
+service_ceiling_ft = 65600

@@ -1,8 +1,9 @@
 """Mass properties: empty mass, centre of gravity and inertia tensor.
 
 Each component's mass is either given in the spec or estimated with Raymer's
-general-aviation weight equations ("Aircraft Design: A Conceptual Approach",
-15.3.3); the systems and equipment make up the rest of a given empty mass.
+weight equations ("Aircraft Design: A Conceptual Approach": general aviation,
+15.3.3; fighter/attack, 15.3.1, for a jet); the systems and equipment make up
+the rest of a given empty mass, spread through the fuselage.
 Masses are spread over the geometry that carries them - a wing's over its
 skin, a fuselage's over its skin, an engine at its mounting - so the inertia
 comes from the shape, not from a radius-of-gyration guess. When the spec
@@ -72,6 +73,73 @@ def _raymer(aircraft, mtow_kg, q_cruise, n_ult=5.7, fuel_kg=0.0):
     return {k: v * LB for k, v in out.items()}
 
 
+def _raymer_fighter(aircraft, dg_kg, fuel_kg=0.0, n_limit=9.0, max_mach=2.0):
+    """Raymer's fighter/attack structural weights (kg; 15.3.1, eqs. 15.1-15.5,
+    15.8-15.9) - wing, tails, fuselage, landing gear - from the geometry."""
+    a = aircraft
+    W = dg_kg / LB
+    Nz = 1.5 * n_limit
+    out = {}
+    tails = [s for s in a.surfaces if s.kind in ("htail", "canard")]
+    fins = [s for s in a.surfaces if s.kind in ("fin", "vtail")]
+    fus = [b for b in a.bodies if b.kind == "fuselage"]
+    delta = not any(s.kind == "htail" for s in a.surfaces)
+    wing = a.wing
+    for s in a.surfaces:
+        S = s.area / FT**2
+        lam = max(s.taper, 0.05)
+        cosL = np.cos(np.radians(s.sweep_deg(0.25)))
+        tc = s.sections[0].airfoil.thickness_ratio
+        if s is wing or s.kind == "strake":
+            ref = wing
+            Sw = ref.area / FT**2
+            Scs = sum(c_area(ref, c) for c in ref.controls) / FT**2
+            w = 0.0103 * (0.768 if delta else 1.0) * (W * Nz) ** 0.5 * Sw**0.622 * ref.aspect_ratio**0.785 \
+                * max(ref.sections[0].airfoil.thickness_ratio, 0.02) ** -0.4 * (1 + max(ref.taper, 0.05)) ** 0.05 \
+                / np.cos(np.radians(ref.sweep_deg(0.25))) * max(Scs, 1.0) ** 0.04
+            out[s.name] = w * (S / Sw)          # a strake: the wing's weight per area
+        elif s.kind in ("htail", "canard"):
+            fw = 0.0
+            if fus:
+                x = s.sections[0].le[0] + 0.5 * s.sections[0].chord
+                fw = float(fus[0].section(x)[0]) / FT
+            bh = s.span / FT
+            out[s.name] = 3.316 * (1 + fw / max(bh, 1e-3)) ** -2.0 * (W * Nz / 1000.0) ** 0.260 * S**0.806
+        else:
+            n = 2 if s.mirror else 1
+            Sv = S / n
+            arm = max((s.mac[1][0] + 0.25 * s.mac[0] - a.aero_point[0]) / FT, 3.0)
+            Sr = sum(c_area(s, c) for c in s.controls) / FT**2 / n
+            A = (s.half_arc / FT) ** 2 / Sv
+            out[s.name] = n * 0.452 * (W * Nz) ** 0.488 * Sv**0.718 * max_mach**0.341 / arm * (1 + Sr / Sv) ** 0.348 \
+                * A**0.223 * (1 + lam) ** 0.25 * cosL**-0.323
+    for b in a.bodies:
+        if b.kind == "fuselage":
+            out[b.name] = 0.499 * (0.774 if delta else 1.0) * W**0.35 * Nz**0.25 * (b.length / FT) ** 0.5 \
+                * (b.max_height / FT) ** 0.849 * (b.max_width / FT) ** 0.685
+        else:
+            v, t, _ = b.skin(40, 24)
+            out[b.name] = 0.25 * _tri_area_centroid(v, t)[0].sum() / FT**2 / len(b.copies())  # a light fairing, ~1.2 kg/m2
+    Nl = 1.5 * 4.0
+    Wl = W - 0.5 * fuel_kg / LB
+    for g in a.gear:
+        length = (g.attach[2] - g.position[2]) / IN if g.attach is not None else 40.0
+        if g.steerable or abs(g.position[1]) < 0.05:
+            out[g.name] = (Wl * Nl) ** 0.290 * length**0.5 * 1.0
+        else:
+            out[g.name] = (Wl * Nl) ** 0.25 * length**0.973 * (2 if g.mirror else 1) / 2.0
+    return {k: v * LB for k, v in out.items()}
+
+
+def c_area(surface, ctrl, n=40):
+    """Planform area of a control surface (m2, both halves of a mirrored surface)."""
+    e = np.linspace(ctrl.eta0, ctrl.eta1, n + 1)
+    mid = 0.5 * (e[1:] + e[:-1])
+    ds = np.diff(e) * surface.half_arc
+    area = sum(surface.station(x)[1] * ctrl.chord_fraction(x) * d for x, d in zip(mid, ds))
+    return area * (2 if surface.mirror else 1)
+
+
 class MassModel:
     def __init__(self, aircraft):
         self.aircraft = a = aircraft
@@ -85,7 +153,14 @@ class MassModel:
         if not self.mtow:
             raise ValueError("[mass]: give 'empty' (kg) or 'mtow'")
         q = 0.5 * 1.0 * float(spec.get("cruise_speed", a.spec.get("analysis", {}).get("speed", 50.0))) ** 2
-        est = _raymer(a, self.mtow, q, fuel_kg=fuel)
+        self.jet = any(e.type == "turbofan" for e in a.engines)
+        if self.jet:
+            fc = a.spec.get("flight_control", {})
+            est = _raymer_fighter(a, self.mtow, fuel_kg=fuel, n_limit=float(fc.get("n_max", 9.0)),
+                                  max_mach=float(a.spec.get("targets", {}).get("max_mach", 2.0)))
+        else:
+            est = _raymer(a, self.mtow, q, fuel_kg=fuel)
+        self.estimates = est
         given = spec.get("component", {})
         self.items = []   # (name, kg, points (N, 3), weights (N,))
         for s in a.surfaces:
@@ -134,8 +209,12 @@ class MassModel:
                 self.systems = float(self.empty_target) - sum(m for _, m, _, _, _ in self.items)
             self.systems = max(self.systems, 0.0)
         if self.systems > 0:
-            pos = self._systems_position()
-            self._add("systems", self.systems, pos[None, :], np.ones(1), "systems")
+            spread = self._systems_spread() if self.jet else None
+            if spread is not None:
+                self._add("systems", self.systems, spread[0], spread[1], "systems")
+            else:
+                pos = self._systems_position()
+                self._add("systems", self.systems, pos[None, :], np.ones(1), "systems")
 
     def _add(self, name, mass, pts, weights, kind):
         if mass <= 0:
@@ -173,6 +252,49 @@ class MassModel:
             return np.array([x, 0.0, 0.5 * (top + bot)])
         return self.aircraft.aero_point.copy()
 
+    def _systems_spread(self):
+        """A fighter's systems (avionics, fuel system, hydraulics, ECS, ...)
+        fill its fuselage: points along its axis from 5 to 90 % of its length,
+        weighted by the section area, tilted fore or aft to put the empty CG
+        where the spec gives it. None if no tilt reaches it: then they go to
+        the one point that does (spreading part of them further out would
+        only add inertia)."""
+        fus = [b for b in self.aircraft.bodies if b.kind == "fuselage"]
+        if not fus:
+            return None
+        b = fus[0]
+        xs = b.x[0] + b.length * np.linspace(0.05, 0.9, 40)
+        w, top, bot, yc, _ = b.section(xs)
+        pts = np.column_stack([xs, yc, 0.5 * (top + bot)])
+        area = np.maximum(b.area_at(xs), 1e-6)
+        target = self.spec.get("empty_cg")
+        if target is None:
+            return pts, area
+        x_s = self._systems_position()[0]
+        xm = float(np.average(xs, weights=area))
+        span = xs[-1] - xs[0]
+
+        def centroid(t):
+            wt = area * np.maximum(1.0 + t * (xs - xm) / span, 0.0)
+            return float(np.average(xs, weights=wt)), wt
+        lo, hi = -2.0, 2.0
+        c_lo, _ = centroid(lo)
+        c_hi, _ = centroid(hi)
+        if not (min(c_lo, c_hi) <= x_s <= max(c_lo, c_hi)):
+            return None
+        for _ in range(60):
+            mid = 0.5 * (lo + hi)
+            c, _ = centroid(mid)
+            if (c - x_s) * (c_hi - x_s) > 0:
+                hi, c_hi = mid, c
+            else:
+                lo = mid
+        _, wt = centroid(0.5 * (lo + hi))
+        # the vertical position as the spec's CG asks, by a common offset
+        z_s = self._systems_position()[2]
+        pts[:, 2] += z_s - float(np.average(pts[:, 2], weights=wt))
+        return pts, wt
+
     # -- results --------------------------------------------------------------------------------
     def empty(self):
         """Mass, CG and inertia (about the CG; the structural frame's
@@ -188,8 +310,22 @@ class MassModel:
         ixx = J[1, 1] + J[2, 2]
         iyy = J[0, 0] + J[2, 2]
         izz = J[0, 0] + J[1, 1]
+        ixz = J[0, 2]
+        g = self.spec.get("gyration")
+        if g is not None:
+            # published (or class-typical) radii of gyration, Roskam's
+            # non-dimensional ones, over the build-up's: a fighter's weight
+            # statement rarely says where its equipment sits
+            a = self.aircraft
+            b = a.span_overall
+            length = a.length_overall
+            k = izz
+            ixx = m * (float(g[0]) * b / 2.0) ** 2
+            iyy = m * (float(g[1]) * length / 2.0) ** 2
+            izz = m * (float(g[2]) * (b + length) / 4.0) ** 2
+            ixz *= izz / max(k, 1e-9)
         return {"mass": m, "cg": cg, "ixx": ixx, "iyy": iyy, "izz": izz,
-                "ixy": J[0, 1], "ixz": J[0, 2], "iyz": J[1, 2]}
+                "ixy": J[0, 1], "ixz": ixz, "iyz": J[1, 2]}
 
     def loaded(self, fuel_fraction=1.0, payload=True):
         """Mass and CG with payload and fuel (for checks and the flight tests)."""
@@ -212,7 +348,7 @@ class MassModel:
         empty aircraft, to compare with the statistics of its class."""
         e = self.empty()
         a = self.aircraft
-        length = max((b.length for b in a.bodies), default=a.c * 5)
+        b, length = a.span_overall, a.length_overall
         m = e["mass"]
-        return {"Rx": 2 * np.sqrt(e["ixx"] / m) / a.b, "Ry": 2 * np.sqrt(e["iyy"] / m) / length,
-                "Rz": 2 * np.sqrt(e["izz"] / m) / (0.5 * (a.b + length))}
+        return {"Rx": 2 * np.sqrt(e["ixx"] / m) / b, "Ry": 2 * np.sqrt(e["iyy"] / m) / length,
+                "Rz": 2 * np.sqrt(e["izz"] / m) / (0.5 * (b + length))}

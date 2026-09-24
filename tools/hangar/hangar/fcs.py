@@ -304,13 +304,15 @@ def channels_xml(aircraft, fbw):
             </difference>
           </function>
         </fcs_function>
-        <!-- the load factor error, limited by the angle of attack left - with the
-             pitch rate's next 0.25 s counted as spent, so the limit is not overshot -->
+        <!-- the load factor error, limited by the angle of attack left - with its
+             rise over the next 0.35 s counted as spent, so the limit is not
+             overshot (the rise, not the pitch rate: in a steady pull the nose
+             turns with the flight path and the angle of attack holds) -->
         <fcs_function name="fcs/fbw/alpha-ahead">
           <function>
             <sum>
               <property>aero/alpha-rad</property>
-              <product><value>0.25</value><property>velocities/q-rad_sec</property></product>
+              <product><value>0.35</value><property>aero/alphadot-rad_sec</property></product>
             </sum>
           </function>
         </fcs_function>
@@ -352,7 +354,9 @@ def channels_xml(aircraft, fbw):
           <trigger>fcs/fbw/pitch-hold</trigger>
           <clipto> <min>-0.5</min> <max>0.5</max> </clipto>
         </integrator>
-        <!-- the feedforward (of the limited command) fades out past alpha_max -->
+        <!-- the feedforward (of the limited command) fades out past alpha_max, with
+             the angle of attack's next 0.35 s counted: an unstable airframe
+             pitching up fast needs its nose-down control before it gets there -->
         <fcs_function name="fcs/fbw/elevator-raw">
           <function>
             <sum>
@@ -360,7 +364,7 @@ def channels_xml(aircraft, fbw):
               <product><value>-1</value><property>fcs/fbw/k-q</property><property>velocities/q-rad_sec</property></product>
               <product><property>fcs/fbw/k-ff</property><property>fcs/fbw/dn-cmd</property>
                 <table>
-                  <independentVar lookup="row">aero/alpha-rad</independentVar>
+                  <independentVar lookup="row">fcs/fbw/alpha-ahead</independentVar>
                   <tableData>
                     %.5f 0.0
                     %.5f 1.0
@@ -378,10 +382,12 @@ def channels_xml(aircraft, fbw):
           <gain>1.0</gain>
           <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
         </pure_gain>
+        <!-- full travel in 0.83 s: 60 deg/s for a +-25 deg tail, faster for a
+             canard's longer throw -->
         <actuator name="fcs/elevator-actuator">
           <input>fcs/fbw/elevator</input>
           <lag>40</lag>
-          <rate_limit>1.05</rate_limit>
+          <rate_limit>%.3f</rate_limit>
           <output>fcs/elevator-pos-rad</output>
         </actuator>
       </channel>""" % (hold, _gain_table("k-alpha", fbw, "k_alpha"), _gain_table("k-q", fbw, "k_q"),
@@ -390,7 +396,7 @@ def channels_xml(aircraft, fbw):
                        o["n_max"] - 1.0, o["n_min"] - 1.0, rad(o["alpha_max_deg"]), rad(o["alpha_min_deg"]),
                        rad(o["alpha_max_deg"]), rad(o["alpha_min_deg"]), de_hi, de_lo,
                        rad(o["alpha_min_deg"] - 5.0), rad(o["alpha_min_deg"]), rad(o["alpha_max_deg"]),
-                       rad(o["alpha_max_deg"] + 5.0), de_lo, de_hi))
+                       rad(o["alpha_max_deg"] + 5.0), de_lo, de_hi, max(1.05, (de_hi - de_lo) / 0.83)))
     if "aileron" in aircraft.channels():
         da = rad(max(abs(x) for x in aircraft.channel_limits("aileron")))
         parts.append("""      <channel name="Roll (fly-by-wire)">

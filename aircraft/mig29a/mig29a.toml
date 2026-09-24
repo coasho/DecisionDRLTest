@@ -1,0 +1,188 @@
+# Mikoyan MiG-29A (9.12, Fulcrum-A), built by hangar from public data.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: Jane's All the World's Aircraft, Mikoyan data (dimensions,
+# weights, performance), Klimov (RD-33). Like the Su-27: a lifting centre
+# body between two engine nacelles.
+
+[aircraft]
+name = "mig29a"
+description = "Mikoyan MiG-29A Fulcrum-A (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 250.0
+
+# The wing: 38 m2 reference, span 11.36 m, 42 deg leading edge, taper 0.26
+# (root 5.31 m, tip 1.38 m to the centre line, MAC 3.73 m). Its 30 % MAC
+# point, the CG, sits 0.45 m ahead of the main wheels (a short wheelbase:
+# 3.645 m, the nose wheel behind the cockpit).
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [6.270, 0.000, 0.000], chord = 5.310, airfoil = "naca64a005" },
+  { le = [11.384, 5.680, -0.130], chord = 1.380, airfoil = "naca64a004" },
+]
+controls = [
+  { name = "aileron", channel = "aileron", span = [0.64, 0.95], chord_fraction = 0.24, limits = [-20, 20] },
+  { name = "flap", channel = "flap", span = [0.30, 0.62], chord_fraction = 0.24, limits = [0, 25] },
+]
+
+# The leading-edge root extensions, 70 deg, from beside the cockpit
+[[surface]]
+name = "lerx"
+kind = "strake"
+airfoil = "plate"
+sections = [
+  { le = [4.400, 0.000, 0.050], chord = 1.870 },
+  { le = [4.400, 0.600, 0.050], chord = 2.410 },
+  { le = [7.980, 1.900, 0.000], chord = 0.050 },
+]
+
+# All-moving horizontal tails on the booms, 7.1 m2 exposed, 50 deg
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a004"
+sections = [
+  { le = [13.600, 0.000, -0.250], chord = 3.100 },
+  { le = [14.500, 1.800, -0.250], chord = 2.400 },
+  { le = [17.240, 4.100, -0.250], chord = 0.800 },
+]
+controls = [
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.4 }, span = [0.44, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-35, 15] },
+]
+
+# Twin vertical tails canted 6 deg outboard, 2 x 5.1 m2, 47 deg
+[[surface]]
+name = "fin"
+kind = "fin"
+mirror = true
+airfoil = "naca64a004"
+sections = [
+  { le = [12.900, 1.600, 0.500], chord = 3.200 },
+  { le = [15.470, 1.850, 2.890], chord = 1.100 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.10, 0.75], chord_fraction = 0.28, limits = [-25, 25] },
+]
+
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
+  { x = 1.20, w = 0.70, top = 0.300, bottom = -0.400, n = 2.0 },
+  { x = 2.80, w = 1.05, top = 0.480, bottom = -0.550, n = 2.0 },
+  { x = 4.40, w = 1.20, top = 0.560, bottom = -0.600, n = 2.2 },
+  { x = 6.50, w = 1.55, top = 0.520, bottom = -0.500, n = 2.6 },
+  { x = 9.50, w = 1.70, top = 0.480, bottom = -0.250, n = 3.0 },
+  { x = 13.00, w = 1.30, top = 0.400, bottom = -0.100, n = 2.8 },
+  { x = 16.00, w = 0.80, top = 0.300, bottom = 0.000, n = 2.4 },
+  { x = 17.32, w = 0.40, top = 0.220, bottom = 0.080, n = 2.0 },
+]
+
+[[body]]
+name = "nacelle"
+kind = "nacelle"
+mirror = true
+stations = [
+  { x = 6.80, y = 1.000, w = 0.95, top = -0.100, bottom = -1.100, n = 4.0 },
+  { x = 10.00, y = 1.000, w = 1.05, top = -0.050, bottom = -1.150, n = 3.5 },
+  { x = 14.00, y = 1.000, w = 1.05, top = 0.000, bottom = -0.950, n = 3.0 },
+  { x = 16.40, y = 1.000, w = 0.95, top = -0.050, bottom = -0.900, n = 2.4 },
+  { x = 16.90, y = 1.000, w = 0.92, top = -0.080, bottom = -0.880, n = 2.0 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 3.600, w = 0.00, top = 0.600, bottom = 0.580 },
+  { x = 4.200, w = 0.66, top = 1.050, bottom = 0.560, n = 2.0 },
+  { x = 5.200, w = 0.78, top = 1.180, bottom = 0.560, n = 2.0 },
+  { x = 6.200, w = 0.60, top = 1.050, bottom = 0.570, n = 2.0 },
+  { x = 7.000, w = 0.25, top = 0.720, bottom = 0.560, n = 2.0 },
+]
+
+[[engine]]
+name = "RD-33"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 49.4          # 5,040 kgf military
+thrust_wet_kn = 81.4          # 8,300 kgf afterburner
+bypass_ratio = 0.49
+tsfc_dry = 0.77
+tsfc_wet = 2.05
+design_mach = 2.25
+position = [13.500, 1.000, -0.550]
+mass = 1055
+inlet_x = 6.8
+[engine.nozzle]
+position = [16.900, 1.000, -0.550]
+
+[[gear]]
+name = "Nose Gear"
+position = [6.250, 0.0, -1.950]
+steerable = true
+max_steer = 30
+wheel_diameter = 0.57
+wheel_width = 0.14
+retractable = true
+static_deflection = 0.14
+attach = [6.250, 0.0, -0.700]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [9.900, 1.545, -1.950]
+wheel_diameter = 0.84
+wheel_width = 0.29
+retractable = true
+static_deflection = 0.16
+attach = [9.800, 1.100, -1.050]
+
+[reference]
+aero_point = [9.450, 0.0, 0.0]     # 0.30 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.0
+alpha_max_deg = 26.0
+roll_rate_deg_s = 240.0
+
+[mass]
+empty = 11000                 # MiG-29A (Jane's)
+empty_cg = [9.500, 0.0, -0.350]
+# no published inertia: radii of gyration of the class (F-16 and F-15)
+gyration = [0.255, 0.405, 0.520]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [5.000, 0.0, 0.650]
+[[mass.payload]]
+name = "gun ammunition"       # GSh-30-1, 150 rounds
+mass = 70
+position = [7.000, -1.200, 0.000]
+[[mass.tank]]
+name = "fuselage 1"           # internal fuel, 3,500 kg
+position = [7.800, 0.0, -0.100]
+capacity = 1200
+[[mass.tank]]
+name = "fuselage 2"
+position = [9.800, 0.0, -0.100]
+capacity = 1400
+[[mass.tank]]
+name = "fuselage 3"
+position = [11.800, 0.0, -0.050]
+capacity = 900
+
+[targets]
+# MiG-29A, published
+max_mach = 2.25               # at 11 km, full afterburner
+max_mach_altitude_ft = 36000
+max_speed_ktas = 810          # 1,500 km/h at sea level
+climb_rate_fpm = 65000        # 330 m/s
+service_ceiling_ft = 59000    # 18 km

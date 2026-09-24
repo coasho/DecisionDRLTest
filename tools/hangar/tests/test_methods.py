@@ -141,6 +141,60 @@ class Lattice_(unittest.TestCase):
         self.assertLess(abs(side), 1e-10)
 
 
+class Fighters(unittest.TestCase):
+    def test_polhamus_delta(self):
+        # a sharp 60 deg delta (aspect ratio 2.31): Polhamus' suction analogy,
+        # K_p sin a cos^2 a + K_v sin^2 a cos a with K_p 2.45 and K_v 3.25,
+        # which wind-tunnel data follow until the vortex bursts (about 20 deg)
+        spec = {"aircraft": {"name": "delta"}, "analysis": {"speed": 60.0},
+                "surface": [{"name": "wing", "kind": "wing", "airfoil": "plate", "spanwise_panels": 24, "chordwise_panels": 10,
+                             "sections": [{"le": [0.0, 0.0, 0.0], "chord": 1.0}, {"le": [0.999, 0.57677, 0.0], "chord": 0.001}]}],
+                "reference": {"aero_point": [0.6667, 0.0, 0.0]}}
+        m = AeroModel(Aircraft(spec))
+        for deg in (10.0, 20.0):
+            a = math.radians(deg)
+            polhamus = 2.45 * math.sin(a) * math.cos(a) ** 2 + 3.25 * math.sin(a) ** 2 * math.cos(a)
+            self.assertAlmostEqual(m.evaluate(a)["CL"] / polhamus, 1.0, delta=0.12, msg="alpha %g" % deg)
+
+    def test_each_control_stops_at_its_own_limits(self):
+        # a canard delta: elevons +-25 deg, the canard (gain -1) 50 deg leading
+        # edge down; the pitch channel runs as far as the canard follows it
+        a = Aircraft.load(repo("aircraft/typhoon/typhoon.toml"))
+        self.assertEqual(a.channel_limits("elevator"), (-25.0, 50.0))
+        L = Lattice(a)
+        own = np.degrees(L.deflections({"elevator": math.radians(50.0)}))
+        for p, d in zip(L.pieces, own):
+            self.assertAlmostEqual(d, -50.0 if p["control"].name == "canard" else 25.0 if p["control"].channel == "elevator" else 0.0)
+
+    def test_all_moving_surface_turns_its_whole_section(self):
+        # an all-moving wing turned 30 deg leading edge down at 30 deg flies as
+        # an unturned one at 0 (the lattice's linear deflection would leave it
+        # some 7 deg of incidence)
+        spec = {"aircraft": {"name": "slab"}, "analysis": {"speed": 60.0},
+                "surface": [{"name": "wing", "kind": "wing", "airfoil": "naca0006",
+                             "sections": [{"le": [0.0, 0.0, 0.0], "chord": 1.0}, {"le": [0.0, 2.5, 0.0], "chord": 1.0}],
+                             "controls": [{"name": "slab", "channel": "elevator", "span": [0.0, 1.0], "chord_fraction": 1.0,
+                                           "limits": [-40, 40]}]}],
+                "reference": {"aero_point": [0.25, 0.0, 0.0]}}
+        m = AeroModel(Aircraft(spec))
+        turned = m.evaluate(math.radians(30.0), controls={"elevator": math.radians(-30.0)})["CL"]
+        self.assertLess(abs(turned), 0.05)
+
+    def test_turbofan_lapse_in_the_stratosphere(self):
+        # above 11 km the temperature holds: at a fixed Mach number thrust
+        # goes as the density, continuous at the tropopause
+        from hangar.propulsion import _isa, turbofan_lapse
+
+        def thrust(h):
+            return turbofan_lapse(0.9, h, 1.1, wet=True)
+
+        def density(h):
+            t, p = _isa(h)
+            return p / t
+        self.assertAlmostEqual(thrust(10999.0) / thrust(11001.0), 1.0, delta=0.001)
+        self.assertAlmostEqual(thrust(18000.0) / thrust(13000.0), density(18000.0) / density(13000.0), delta=1e-6)
+
+
 class Aircraft_(unittest.TestCase):
     def test_c172_derivative_signs_and_sizes(self):
         a = Aircraft.load(repo("aircraft/c172/c172.toml"))

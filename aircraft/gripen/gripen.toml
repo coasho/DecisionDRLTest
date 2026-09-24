@@ -1,0 +1,166 @@
+# Saab JAS 39C Gripen, built by hangar from public data. A close-coupled
+# canard delta, unstable in pitch at subsonic speeds.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: Saab and Jane's (dimensions, weights, performance); Volvo
+# Aero (RM12).
+
+[aircraft]
+name = "gripen"
+description = "Saab JAS 39C Gripen (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 240.0
+
+# The wing: 25.5 m2, span 8.40 m, 50 deg leading edge (the real one is a
+# cranked delta), trailing edge about straight (root 5.58 m, tip 0.50 m to
+# the centre line, MAC 3.75 m). The CG at 12 % of the MAC, 10 % of it behind
+# the neutral point hangar finds: a canard delta's relaxed stability (the
+# real balance is not published).
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [6.600, 0.000, 0.000], chord = 5.580, airfoil = "naca64a005" },
+  { le = [11.605, 4.200, -0.080], chord = 0.500, airfoil = "naca64a003" },
+]
+controls = [
+  { name = "inner elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.18, 0.55], chord_fraction = 0.22, limits = [-25, 25] },
+  { name = "outer elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.55, 0.92], chord_fraction = 0.25, limits = [-25, 25] },
+]
+
+# All-moving canards over the intakes, 2.1 m2 exposed
+[[surface]]
+name = "canard"
+kind = "canard"
+airfoil = "naca64a004"
+sections = [
+  { le = [4.700, 0.000, 0.200], chord = 1.600 },
+  { le = [4.900, 0.550, 0.200], chord = 1.500 },
+  { le = [6.250, 1.900, 0.200], chord = 0.550 },
+]
+controls = [
+  { name = "canard", channel = "elevator", gain = -1.0, span = [0.29, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-50, 20] },
+]
+
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a004"
+sections = [
+  { le = [10.400, 0.000, 0.450], chord = 3.000 },
+  { le = [12.500, 0.000, 2.900], chord = 1.000 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.08, 0.75], chord_fraction = 0.28, limits = [-30, 30] },
+]
+
+# Fuselage with the side intakes from 5 m, one engine
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
+  { x = 1.20, w = 0.62, top = 0.280, bottom = -0.300, n = 2.0 },
+  { x = 2.80, w = 0.90, top = 0.450, bottom = -0.450, n = 2.0 },
+  { x = 4.20, w = 1.00, top = 0.500, bottom = -0.550, n = 2.2 },
+  { x = 5.00, w = 1.90, top = 0.450, bottom = -0.700, n = 3.0 },
+  { x = 7.50, w = 2.00, top = 0.400, bottom = -0.750, n = 3.2 },
+  { x = 10.00, w = 1.60, top = 0.350, bottom = -0.600, n = 2.8 },
+  { x = 12.50, w = 1.10, top = 0.300, bottom = -0.450, n = 2.4 },
+  { x = 14.10, w = 0.90, top = 0.250, bottom = -0.400, n = 2.2 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 2.600, w = 0.00, top = 0.520, bottom = 0.500 },
+  { x = 3.200, w = 0.62, top = 0.920, bottom = 0.480, n = 2.0 },
+  { x = 4.200, w = 0.74, top = 1.050, bottom = 0.480, n = 2.0 },
+  { x = 5.200, w = 0.60, top = 0.930, bottom = 0.490, n = 2.0 },
+  { x = 6.000, w = 0.26, top = 0.640, bottom = 0.480, n = 2.0 },
+]
+
+[[engine]]
+name = "RM12"
+type = "turbofan"
+thrust_dry_kn = 54.0          # 12,150 lbf military
+thrust_wet_kn = 80.5          # 18,100 lbf afterburner
+bypass_ratio = 0.28
+tsfc_dry = 0.84
+tsfc_wet = 1.78
+design_mach = 2.0
+position = [11.000, 0.0, -0.150]
+mass = 1055
+inlet_x = 5.0
+[engine.nozzle]
+position = [14.000, 0.0, -0.150]
+
+[[gear]]
+name = "Nose Gear"
+position = [4.000, 0.0, -1.700]
+steerable = true
+max_steer = 55
+wheel_diameter = 0.45
+wheel_width = 0.14
+retractable = true
+static_deflection = 0.13
+attach = [4.000, 0.0, -0.700]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [10.000, 1.200, -1.700]
+wheel_diameter = 0.66
+wheel_width = 0.22
+retractable = true
+static_deflection = 0.16
+attach = [9.850, 0.850, -0.800]
+
+[reference]
+aero_point = [8.996, 0.0, 0.0]     # 0.16 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.0
+alpha_max_deg = 28.0
+roll_rate_deg_s = 280.0
+
+[mass]
+empty = 6800                  # JAS 39C (Saab)
+empty_cg = [9.016, 0.0, -0.200]
+# no published inertia: radii of gyration of the class
+gyration = [0.250, 0.400, 0.510]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [4.200, 0.0, 0.550]
+[[mass.payload]]
+name = "gun ammunition"       # Mauser BK-27, 120 rounds
+mass = 60
+position = [7.500, -0.800, 0.000]
+[[mass.tank]]
+name = "fuselage 1"           # internal fuel, 2,400 kg
+position = [7.466, 0.0, -0.150]
+capacity = 1000
+[[mass.tank]]
+name = "fuselage 2"
+position = [9.266, 0.0, -0.150]
+capacity = 900
+[[mass.tank]]
+name = "left wing"
+position = [9.466, -1.800, 0.000]
+capacity = 250
+[[mass.tank]]
+name = "right wing"
+position = [9.466, 1.800, 0.000]
+capacity = 250
+
+[targets]
+# JAS 39C, published
+max_mach = 2.0                # at altitude, full afterburner
+max_mach_altitude_ft = 36000
+service_ceiling_ft = 50000

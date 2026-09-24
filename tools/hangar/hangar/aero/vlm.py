@@ -24,6 +24,8 @@ Frame: the design frame (x aft, y right, z up), moments about the aerodynamic
 reference point. The "air velocity" is the air's velocity relative to the
 aircraft: (V, 0, 0) is level flight at zero incidence.
 """
+import math
+
 import numpy as np
 
 from .section import flap_tau, thin_airfoil
@@ -158,6 +160,61 @@ class Lattice:
         # deflection, by the sign conventions JSBSim uses (see channel_gain)
         self.gain = {ch: np.array([channel_gain(ch, ctrl, self.u[k], self.c4[k]) for k, ctrl in enumerate(self.controls)])
                      for ch in ("aileron", "elevator", "rudder", "flap")}
+        # control pieces (a control on one side): each turns as a whole and stops
+        # at its own limits, so a canard can travel further than the elevons on
+        # its channel. orient: the local deflection per unit of the piece's own
+        # (trailing edge down, or left for a rudder); own: that per unit channel
+        self.piece = np.full(n_s, -1)
+        self.orient = np.zeros(n_s)
+        self.pieces = []
+        index = {}
+        for k, ctrl in enumerate(self.controls):
+            if ctrl is None:
+                continue
+            key = (id(ctrl), int(self.surface_index[k]), float(np.sign(round(float(self.c4[k][1]), 6))))
+            axis = 1 if ctrl.channel == "rudder" else 2
+            self.orient[k] = np.sign(self.u[k][axis]) or 1.0
+            if key not in index:
+                index[key] = len(self.pieces)
+                self.pieces.append({"control": ctrl, "lo": math.radians(ctrl.min_deg), "hi": math.radians(ctrl.max_deg),
+                                    "own": {ch: float(self.gain[ch][k] * self.orient[k]) for ch in ctrl.channels}})
+            self.piece[k] = index[key]
+
+    def deflections(self, channels):
+        """Each piece's own deflection (rad) for channel deflections {channel:
+        rad}, held within its limits."""
+        own = np.zeros(len(self.pieces))
+        for i, p in enumerate(self.pieces):
+            d = sum(g * channels.get(ch, 0.0) for ch, g in p["own"].items())
+            own[i] = min(max(d, p["lo"]), p["hi"])
+        return own
+
+    def strip_deflections(self, own):
+        """Local strip deflections (rad, trailing edge towards -u positive)."""
+        out = np.zeros(self.n_strips)
+        k = self.piece >= 0
+        out[k] = self.orient[k] * own[self.piece[k]]
+        return out
+
+    def lattice_deflections(self, own, a_geo):
+        """The deflections to give the lattice for the pieces' own (rad) at the
+        strips' geometric angles a_geo. A turned panel's normal wash is linear
+        in the lattice, sin a + d cos a; an all-moving piece turns its whole
+        section, whose wash is sin(a + d), so it gets the d that makes the two
+        equal and flies as an unturned surface at a + d would - a canard turned
+        50 deg leading edge down at 50 deg alpha carries nothing."""
+        if own is None:
+            return None
+        out = np.array(own, float)
+        for i, p in enumerate(self.pieces):
+            if not own[i] or not p["control"].all_moving:
+                continue
+            k = self.piece == i
+            a = float(np.clip(np.average(a_geo[k], weights=self.area[k]), -1.3, 1.3))
+            s = float(self.orient[k][0])
+            d = s * own[i]
+            out[i] = s * (math.tan(a) * (math.cos(d) - 1.0) + math.sin(d))
+        return out
 
     def summary(self):
         return {"strips": self.n_strips, "panels": self.n_panels}
@@ -242,13 +299,11 @@ class VLM:
         del vcp
         Ainv = np.linalg.inv(A)
         N = L.normal
-        out = {"g_v": Ainv @ (-N), "g_w": Ainv @ np.cross(self.r_cp, N), "g_ctrl": {}}
+        out = {"g_v": Ainv @ (-N), "g_w": Ainv @ np.cross(self.r_cp, N), "g_ctrl": []}
         E = self.E
-        for ch, gain in L.gain.items():
-            if not np.any(gain):
-                continue
-            D = E * (gain[L.strip] * L.moving)[:, None]
-            out["g_ctrl"][ch] = (Ainv @ (-D), Ainv @ np.cross(self.r_cp, D))
+        for i in range(len(L.pieces)):
+            D = E * ((L.piece[L.strip] == i) * L.orient[L.strip] * L.moving)[:, None]
+            out["g_ctrl"].append((Ainv @ (-D), Ainv @ np.cross(self.r_cp, D)))
         # decambering: strip k's panels rotated nose-down by Delta_k
         n_s, n_p = L.n_strips, L.n_panels
         dec_v = np.empty((3, n_p, n_s))
@@ -279,19 +334,18 @@ class VLM:
         mix = lambda k: a[k] if t <= 0.0 else (b[k] if t >= 1.0 else (1.0 - t) * a[k] + t * b[k])  # noqa: E731
         for k in ("g_v", "g_w", "dec_v", "dec_w", "S_dec_v", "S_dec_w", "W_strip"):
             setattr(self, k, mix(k))
-        self.g_ctrl = {ch: tuple((1.0 - t) * a["g_ctrl"][ch][j] + t * b["g_ctrl"][ch][j] for j in range(2)) for ch in a["g_ctrl"]}
+        self.g_ctrl = [tuple((1.0 - t) * pa[j] + t * pb[j] for j in range(2)) for pa, pb in zip(a["g_ctrl"], b["g_ctrl"])]
         self.body_W = mix("body_W") if "body_W" in a else None
         self._current = aw
 
     # -- a condition ----------------------------------------------------------------------------
     def circulation(self, v, w, deflections=None, decamber=None):
         """Panel circulations for air velocity v (3,), rotation w (3,, rad/s,
-        design frame), channel deflections {channel: rad} and strip decambering
-        angles (n_s,)."""
+        design frame), the control pieces' deflections (rad, Lattice.deflections)
+        and strip decambering angles (n_s,)."""
         g = self.g_v @ v + self.g_w @ w
-        for ch, d in (deflections or {}).items():
-            if d and ch in self.g_ctrl:
-                gv, gw = self.g_ctrl[ch]
+        for d, (gv, gw) in zip(deflections if deflections is not None else (), self.g_ctrl):
+            if d:
                 g = g + d * (gv @ v + gw @ w)
         if decamber is not None:
             G = np.tensordot(v, self.dec_v, 1) + np.tensordot(w, self.dec_w, 1)

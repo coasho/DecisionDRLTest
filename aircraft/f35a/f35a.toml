@@ -1,0 +1,190 @@
+# Lockheed Martin F-35A Lightning II, built by hangar from public data. The
+# real one flies to 50 deg angle of attack; past about 21 deg this model finds
+# its stalled stabilators too weak to bring the nose down, so its limiter
+# holds 20 deg.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: USAF fact sheet, Lockheed Martin and Jane's (dimensions,
+# weights, performance); Pratt & Whitney (F135-PW-100).
+
+[aircraft]
+name = "f35a"
+description = "Lockheed Martin F-35A Lightning II (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 240.0
+
+# The wing: 42.7 m2 (460 ft2), span 10.70 m, 33 deg leading edge, -14 deg
+# trailing edge (root 6.38 m, tip 1.60 m to the centre line, MAC 4.47 m). The
+# CG sits 2 % of the MAC behind the neutral point hangar finds: near neutral,
+# as the F-35's relaxed stability is described.
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [5.870, 0.000, 0.000], chord = 6.380, airfoil = "naca64a205" },
+  { le = [9.344, 5.350, -0.150], chord = 1.600, airfoil = "naca64a204" },
+]
+controls = [
+  { name = "flaperon", channel = "aileron", mix = { flap = 1.0 }, span = [0.28, 0.78], chord_fraction = 0.24, limits = [-30, 30] },
+]
+
+# The chined forebody runs into a sharp leading-edge extension ahead of the
+# wing root: its vortex carries the F-35's high angles of attack
+[[surface]]
+name = "lex"
+kind = "strake"
+airfoil = "plate"
+sections = [
+  { le = [5.000, 0.000, 0.050], chord = 1.300 },
+  { le = [5.000, 0.950, 0.050], chord = 1.900 },
+  { le = [6.880, 1.450, 0.000], chord = 0.050 },
+]
+
+# All-moving horizontal tails, 10.4 m2 exposed, 33 deg
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a004"
+sections = [
+  { le = [11.550, 0.000, -0.200], chord = 3.400 },
+  { le = [12.400, 1.300, -0.200], chord = 2.900 },
+  { le = [14.090, 3.900, -0.200], chord = 1.100 },
+]
+controls = [
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.3 }, span = [0.33, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-30, 30] },
+]
+
+# Twin vertical tails canted 20 deg outboard, 2 x 5.0 m2
+[[surface]]
+name = "fin"
+kind = "fin"
+mirror = true
+airfoil = "naca64a004"
+sections = [
+  { le = [11.000, 1.150, 0.450], chord = 3.000 },
+  { le = [12.560, 1.970, 2.710], chord = 1.200 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.05, 0.65], chord_fraction = 0.30, limits = [-30, 30] },
+]
+
+# Fuselage: the chined nose, the diverterless inlets from 5.6 m, the
+# weapons bays, one engine
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.100, bottom = -0.200 },
+  { x = 1.20, w = 0.90, top = 0.200, bottom = -0.450, n = 2.4 },
+  { x = 3.00, w = 1.30, top = 0.450, bottom = -0.650, n = 2.6 },
+  { x = 4.60, w = 1.70, top = 0.550, bottom = -0.850, n = 2.8 },
+  { x = 5.60, w = 2.60, top = 0.550, bottom = -1.000, n = 3.2 },
+  { x = 8.00, w = 2.90, top = 0.550, bottom = -1.100, n = 3.5 },
+  { x = 10.50, w = 2.80, top = 0.500, bottom = -1.000, n = 3.4 },
+  { x = 13.00, w = 2.20, top = 0.400, bottom = -0.800, n = 3.0 },
+  { x = 15.00, w = 1.40, top = 0.300, bottom = -0.550, n = 2.4 },
+  { x = 15.67, w = 1.20, top = 0.250, bottom = -0.500, n = 2.2 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 2.800, w = 0.00, top = 0.560, bottom = 0.540 },
+  { x = 3.500, w = 0.76, top = 1.050, bottom = 0.520, n = 2.0 },
+  { x = 4.600, w = 0.90, top = 1.200, bottom = 0.520, n = 2.0 },
+  { x = 5.600, w = 0.76, top = 1.080, bottom = 0.530, n = 2.0 },
+  { x = 6.500, w = 0.30, top = 0.700, bottom = 0.520, n = 2.0 },
+]
+
+[[engine]]
+name = "F135-PW-100"
+type = "turbofan"
+thrust_dry_kn = 125.0         # 28,000 lbf military
+thrust_wet_kn = 191.0         # 43,000 lbf afterburner
+bypass_ratio = 0.57
+tsfc_dry = 0.72
+tsfc_wet = 1.90
+design_mach = 1.6
+position = [12.200, 0.0, -0.250]
+mass = 1701
+inlet_x = 5.6
+[engine.nozzle]
+position = [15.670, 0.0, -0.250]
+
+[[gear]]
+name = "Nose Gear"
+position = [3.900, 0.0, -1.950]
+steerable = true
+max_steer = 60
+wheel_diameter = 0.56
+wheel_width = 0.17
+retractable = true
+static_deflection = 0.14
+attach = [3.900, 0.0, -0.800]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [9.150, 1.700, -1.950]
+wheel_diameter = 0.84
+wheel_width = 0.27
+retractable = true
+static_deflection = 0.17
+attach = [9.000, 1.300, -1.050]
+
+[reference]
+aero_point = [8.452, 0.0, 0.0]     # 0.27 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.0
+alpha_max_deg = 20.0
+roll_rate_deg_s = 240.0
+
+[mass]
+empty = 13290                 # 29,300 lb (USAF)
+empty_cg = [8.502, 0.0, -0.300]
+# no published inertia: radii of gyration of the class
+gyration = [0.260, 0.400, 0.520]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [4.600, 0.0, 0.600]
+[[mass.payload]]
+name = "internal missiles"    # 4 AIM-120 in the bays
+mass = 608
+position = [8.500, 0.0, -0.800]
+[[mass.payload]]
+name = "gun ammunition"       # GAU-22/A, 180 rounds
+mass = 90
+position = [7.000, -1.100, 0.200]
+[[mass.tank]]
+name = "fuselage 1"           # internal fuel, 8,278 kg
+position = [7.352, 0.0, -0.200]
+capacity = 2800
+[[mass.tank]]
+name = "fuselage 2"
+position = [9.352, 0.0, -0.200]
+capacity = 2700
+[[mass.tank]]
+name = "fuselage 3"
+position = [11.152, 0.0, -0.250]
+capacity = 1400
+[[mass.tank]]
+name = "left wing"
+position = [8.852, -2.500, 0.000]
+capacity = 690
+[[mass.tank]]
+name = "right wing"
+position = [8.852, 2.500, 0.000]
+capacity = 690
+
+[targets]
+# F-35A, published
+max_mach = 1.6                # at altitude, full afterburner
+max_mach_altitude_ft = 40000
+service_ceiling_ft = 50000

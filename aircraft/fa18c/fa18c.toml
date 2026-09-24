@@ -1,0 +1,192 @@
+# McDonnell Douglas F/A-18C Hornet, built by hangar from public data.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: Jane's All the World's Aircraft and the US Navy fact sheet
+# (dimensions, weights, performance); NASA TM-4433 and the F/A-18 High Alpha
+# Research Vehicle reports (wing: NACA 65A005 root, 65A003.5 tip, 20 deg
+# quarter-chord sweep; inertia); General Electric (F404-GE-402).
+
+[aircraft]
+name = "fa18c"
+description = "McDonnell Douglas F/A-18C Hornet (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 230.0                # m/s: the Reynolds numbers
+
+# The reference wing: 37.16 m2 (400 ft2), span 11.43 m without the wingtip
+# missiles, 26.7 deg leading edge, taper 0.35 (root 4.82 m, tip 1.69 m, MAC
+# 3.50 m). The MAC's 22 % point, the CG, sits 0.65 m ahead of the main wheels
+# (wheelbase 5.42 m).
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [7.190, 0.000, 0.000], chord = 4.816, airfoil = "naca65a005" },
+  { le = [10.066, 5.715, -0.100], chord = 1.686, airfoil = "naca65a004" },
+]
+controls = [
+  { name = "aileron", channel = "aileron", span = [0.60, 0.95], chord_fraction = 0.26, limits = [-25, 25] },
+  { name = "flap", channel = "flap", span = [0.14, 0.58], chord_fraction = 0.28, limits = [0, 45] },
+]
+
+# The leading-edge extensions: sharp, 77.6 deg of sweep, from beside the
+# windscreen to the wing's leading edge, 3.5 m2 exposed - the vortices that
+# let the Hornet fly past 35 deg angle of attack
+[[surface]]
+name = "lex"
+kind = "strake"
+airfoil = "plate"
+sections = [
+  { le = [3.600, 0.000, 0.050], chord = 3.590 },
+  { le = [3.600, 0.500, 0.050], chord = 3.842 },
+  { le = [7.920, 1.450, 0.000], chord = 0.050 },
+]
+
+# All-moving stabilators, 8.2 m2 exposed, 2 deg anhedral; differential for roll
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca65a004"
+sections = [
+  { le = [13.100, 0.000, -0.150], chord = 3.100 },
+  { le = [14.000, 1.100, -0.150], chord = 2.600 },
+  { le = [16.000, 3.300, -0.230], chord = 1.000 },
+]
+controls = [
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.4 }, span = [0.33, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-24, 10.5] },
+]
+
+# Twin vertical tails canted 20 deg outboard, 2 x 5.3 m2, 35 deg leading
+# edge, well forward over the engines
+[[surface]]
+name = "fin"
+kind = "fin"
+mirror = true
+airfoil = "naca65a004"
+sections = [
+  { le = [11.000, 1.100, 0.350], chord = 3.000 },
+  { le = [12.820, 1.990, 2.790], chord = 1.100 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.08, 0.60], chord_fraction = 0.30, limits = [-30, 30] },
+]
+
+# Fuselage with the intakes under the LEX from 6.6 m
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.100, bottom = -0.200 },
+  { x = 1.00, w = 0.62, top = 0.180, bottom = -0.460, n = 2.0 },
+  { x = 2.50, w = 0.95, top = 0.350, bottom = -0.620, n = 2.0 },
+  { x = 4.00, w = 1.10, top = 0.450, bottom = -0.720, n = 2.2 },
+  { x = 5.50, w = 1.25, top = 0.450, bottom = -0.850, n = 2.4 },
+  { x = 6.60, w = 2.10, top = 0.450, bottom = -1.000, n = 3.0 },
+  { x = 8.00, w = 2.40, top = 0.400, bottom = -1.050, n = 3.2 },
+  { x = 10.50, w = 2.40, top = 0.400, bottom = -1.000, n = 3.2 },
+  { x = 13.00, w = 2.20, top = 0.400, bottom = -0.850, n = 3.0 },
+  { x = 15.50, w = 1.90, top = 0.300, bottom = -0.650, n = 2.6 },
+  { x = 17.07, w = 1.60, top = 0.200, bottom = -0.500, n = 2.3 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 3.200, w = 0.00, top = 0.480, bottom = 0.460 },
+  { x = 3.800, w = 0.66, top = 0.980, bottom = 0.440, n = 2.0 },
+  { x = 4.900, w = 0.80, top = 1.120, bottom = 0.440, n = 2.0 },
+  { x = 6.000, w = 0.70, top = 1.000, bottom = 0.450, n = 2.0 },
+  { x = 6.900, w = 0.30, top = 0.620, bottom = 0.440, n = 2.0 },
+]
+
+[[engine]]
+name = "F404-GE-402"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 48.9          # 11,000 lbf military
+thrust_wet_kn = 79.2          # 17,800 lbf afterburner
+bypass_ratio = 0.34
+tsfc_dry = 0.81
+tsfc_wet = 1.74
+throttle_ratio = 1.07
+design_mach = 1.8
+position = [13.500, 0.500, -0.300]
+mass = 1035                   # 2,282 lb dry
+inlet_x = 6.6
+[engine.nozzle]
+position = [16.950, 0.500, -0.300]
+
+[[gear]]
+name = "Nose Gear"
+position = [4.400, 0.0, -1.950]
+steerable = true
+max_steer = 75
+wheel_diameter = 0.56
+wheel_width = 0.17
+retractable = true
+static_deflection = 0.14
+attach = [4.400, 0.0, -0.800]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [9.820, 1.555, -1.950]
+wheel_diameter = 0.76
+wheel_width = 0.25
+retractable = true
+static_deflection = 0.18
+attach = [9.700, 1.100, -1.000]
+
+[reference]
+aero_point = [9.170, 0.0, 0.0]     # 0.22 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 7.5
+n_min = -3.0
+alpha_max_deg = 35.0
+roll_rate_deg_s = 220.0
+
+[mass]
+empty = 10810                 # 23,832 lb, F/A-18C
+empty_cg = [9.200, 0.0, -0.250]
+# radii of gyration from the F/A-18 HARV's inertia (NASA: Ixx 22,789,
+# Iyy 176,809, Izz 191,744 slug ft2 at 33,310 lb)
+gyration = [0.250, 0.450, 0.560]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [5.000, 0.0, 0.550]
+[[mass.payload]]
+name = "gun ammunition"       # M61A1 in the nose, 578 rounds
+mass = 180
+position = [2.800, 0.0, 0.000]
+[[mass.tank]]
+name = "fuselage 1"
+position = [8.000, 0.0, -0.200]
+capacity = 1400
+[[mass.tank]]
+name = "fuselage 2"
+position = [9.500, 0.0, -0.200]
+capacity = 1300
+[[mass.tank]]
+name = "fuselage 3"
+position = [11.000, 0.0, -0.250]
+capacity = 1100
+[[mass.tank]]
+name = "left wing"
+position = [9.800, -2.300, 0.000]
+capacity = 550
+[[mass.tank]]
+name = "right wing"
+position = [9.800, 2.300, 0.000]
+capacity = 550
+
+[targets]
+# F/A-18C, clean, published (US Navy fact sheet; Jane's)
+max_mach = 1.8                # at altitude, full afterburner (calibrates the wave drag)
+max_mach_altitude_ft = 40000
+climb_rate_fpm = 45000
+service_ceiling_ft = 50000

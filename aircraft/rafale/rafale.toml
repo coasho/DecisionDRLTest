@@ -1,0 +1,169 @@
+# Dassault Rafale C, built by hangar from public data. A close-coupled
+# canard delta, unstable in pitch at subsonic speeds.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: Dassault Aviation and Jane's (dimensions, weights,
+# performance); Safran (M88-2).
+
+[aircraft]
+name = "rafale"
+description = "Dassault Rafale C (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 250.0
+
+# The wing: 45.7 m2, span 10.90 m, 48 deg leading edge, the trailing edge a
+# little forward (root 7.49 m, tip 0.90 m to the centre line, MAC 5.06 m).
+# The CG at 19 % of the MAC, 5 % of it behind the neutral point hangar finds
+# (the real balance is not published): at 10 %, its controls could not bring
+# the nose down from its 32 deg limit.
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [6.300, 0.000, 0.000], chord = 7.485, airfoil = "naca64a005" },
+  { le = [12.353, 5.450, -0.100], chord = 0.900, airfoil = "naca64a003" },
+]
+controls = [
+  { name = "inner elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.16, 0.52], chord_fraction = 0.20, limits = [-25, 25] },
+  { name = "outer elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.52, 0.94], chord_fraction = 0.24, limits = [-25, 25] },
+]
+
+# All-moving canards, close-coupled over the intakes, 2.9 m2 exposed
+[[surface]]
+name = "canard"
+kind = "canard"
+airfoil = "naca64a004"
+sections = [
+  { le = [5.100, 0.000, 0.300], chord = 1.700 },
+  { le = [5.400, 0.600, 0.300], chord = 1.500 },
+  { le = [7.070, 2.000, 0.300], chord = 0.550 },
+]
+controls = [
+  { name = "canard", channel = "elevator", gain = -1.0, span = [0.30, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-50, 20] },
+]
+
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a004"
+sections = [
+  { le = [11.000, 0.000, 0.550], chord = 3.500 },
+  { le = [13.900, 0.000, 3.250], chord = 1.200 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.08, 0.72], chord_fraction = 0.28, limits = [-30, 30] },
+]
+
+# Fuselage with the side intakes under the canards from 5.5 m
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
+  { x = 1.30, w = 0.70, top = 0.300, bottom = -0.350, n = 2.0 },
+  { x = 3.00, w = 1.00, top = 0.500, bottom = -0.500, n = 2.0 },
+  { x = 4.50, w = 1.15, top = 0.550, bottom = -0.600, n = 2.2 },
+  { x = 5.50, w = 2.20, top = 0.500, bottom = -0.850, n = 3.0 },
+  { x = 8.00, w = 2.40, top = 0.450, bottom = -0.900, n = 3.2 },
+  { x = 10.50, w = 2.20, top = 0.400, bottom = -0.800, n = 3.0 },
+  { x = 13.00, w = 1.90, top = 0.350, bottom = -0.650, n = 2.8 },
+  { x = 15.27, w = 1.50, top = 0.250, bottom = -0.500, n = 2.4 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 2.800, w = 0.00, top = 0.560, bottom = 0.540 },
+  { x = 3.400, w = 0.66, top = 0.980, bottom = 0.520, n = 2.0 },
+  { x = 4.500, w = 0.80, top = 1.120, bottom = 0.520, n = 2.0 },
+  { x = 5.500, w = 0.66, top = 1.000, bottom = 0.530, n = 2.0 },
+  { x = 6.300, w = 0.28, top = 0.680, bottom = 0.520, n = 2.0 },
+]
+
+[[engine]]
+name = "M88-2"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 50.0          # 11,250 lbf military
+thrust_wet_kn = 75.0          # 16,900 lbf afterburner
+bypass_ratio = 0.30
+tsfc_dry = 0.80
+tsfc_wet = 1.72
+design_mach = 1.8
+position = [12.400, 0.450, -0.300]
+mass = 897
+inlet_x = 5.5
+[engine.nozzle]
+position = [15.200, 0.450, -0.300]
+
+[[gear]]
+name = "Nose Gear"
+position = [4.300, 0.0, -1.900]
+steerable = true
+max_steer = 60
+wheel_diameter = 0.52
+wheel_width = 0.16
+retractable = true
+static_deflection = 0.14
+attach = [4.300, 0.0, -0.800]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [10.450, 1.350, -1.900]
+wheel_diameter = 0.76
+wheel_width = 0.24
+retractable = true
+static_deflection = 0.17
+attach = [10.300, 1.000, -0.900]
+
+[reference]
+aero_point = [9.713, 0.0, 0.0]     # 0.23 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.6
+alpha_max_deg = 32.0
+roll_rate_deg_s = 270.0
+
+[mass]
+empty = 9850                  # Rafale C (Dassault)
+empty_cg = [9.713, 0.0, -0.250]
+# no published inertia: radii of gyration of the class
+gyration = [0.250, 0.400, 0.510]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [4.500, 0.0, 0.600]
+[[mass.payload]]
+name = "gun ammunition"       # GIAT 30M791, 125 rounds
+mass = 60
+position = [8.500, 1.000, 0.000]
+[[mass.tank]]
+name = "fuselage 1"           # internal fuel, 4,700 kg
+position = [7.763, 0.0, -0.200]
+capacity = 1600
+[[mass.tank]]
+name = "fuselage 2"
+position = [9.763, 0.0, -0.200]
+capacity = 1500
+[[mass.tank]]
+name = "left wing"
+position = [10.063, -2.300, 0.000]
+capacity = 800
+[[mass.tank]]
+name = "right wing"
+position = [10.063, 2.300, 0.000]
+capacity = 800
+
+[targets]
+# Rafale C, published
+max_mach = 1.8                # at altitude, full afterburner
+max_mach_altitude_ft = 36000
+max_speed_ktas = 750          # sea level
+climb_rate_fpm = 60000        # 305 m/s
+service_ceiling_ft = 50000

@@ -1,0 +1,170 @@
+# Eurofighter EF-2000 Typhoon (Tranche 2), built by hangar from public data.
+# A canard delta, unstable in pitch at subsonic speeds by design.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: Eurofighter GmbH and Jane's (dimensions, weights,
+# performance); Eurojet (EJ200).
+
+[aircraft]
+name = "typhoon"
+description = "Eurofighter Typhoon (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 250.0
+
+# The wing: 51.2 m2, span 10.95 m, 53 deg leading edge, a cropped delta
+# (root 8.15 m, tip 1.20 m to the centre line, MAC 5.54 m). The CG sits at
+# 30 % of the MAC, 0.5 m ahead of the main wheels.
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [5.900, 0.000, 0.000], chord = 8.150, airfoil = "naca64a004" },
+  { le = [13.165, 5.475, -0.100], chord = 1.200, airfoil = "naca64a003" },
+]
+controls = [
+  # elevons: pitch and roll together
+  { name = "inner elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.16, 0.50], chord_fraction = 0.20, limits = [-25, 25] },
+  { name = "outer elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.50, 0.94], chord_fraction = 0.22, limits = [-25, 25] },
+]
+
+# All-moving canards, close-coupled ahead of the wing, 2.8 m2 exposed: a nose-
+# down command turns their trailing edges up (gain -1)
+[[surface]]
+name = "canard"
+kind = "canard"
+airfoil = "naca64a004"
+sections = [
+  { le = [3.980, 0.000, 0.150], chord = 1.600 },
+  { le = [4.200, 0.550, 0.150], chord = 1.300 },
+  { le = [6.390, 2.200, 0.150], chord = 0.400 },
+]
+controls = [
+  { name = "canard", channel = "elevator", gain = -1.0, span = [0.25, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-50, 20] },
+]
+
+# One fin, 5.6 m2, 45 deg
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a004"
+sections = [
+  { le = [11.800, 0.000, 0.550], chord = 3.200 },
+  { le = [14.400, 0.000, 3.150], chord = 1.100 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.08, 0.75], chord_fraction = 0.28, limits = [-30, 30] },
+]
+
+# Fuselage with the chin intake from 5 m
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
+  { x = 1.50, w = 0.75, top = 0.300, bottom = -0.350, n = 2.0 },
+  { x = 3.00, w = 1.00, top = 0.450, bottom = -0.500, n = 2.0 },
+  { x = 4.20, w = 1.10, top = 0.500, bottom = -0.650, n = 2.2 },
+  { x = 5.00, w = 1.25, top = 0.500, bottom = -1.000, n = 2.6 },
+  { x = 7.50, w = 1.40, top = 0.450, bottom = -1.050, n = 2.8 },
+  { x = 10.00, w = 1.50, top = 0.400, bottom = -0.950, n = 2.8 },
+  { x = 12.50, w = 1.45, top = 0.350, bottom = -0.750, n = 2.6 },
+  { x = 14.50, w = 1.30, top = 0.300, bottom = -0.600, n = 2.4 },
+  { x = 15.96, w = 1.20, top = 0.250, bottom = -0.500, n = 2.2 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 2.600, w = 0.00, top = 0.520, bottom = 0.500 },
+  { x = 3.200, w = 0.66, top = 0.960, bottom = 0.480, n = 2.0 },
+  { x = 4.300, w = 0.80, top = 1.100, bottom = 0.480, n = 2.0 },
+  { x = 5.300, w = 0.66, top = 0.980, bottom = 0.490, n = 2.0 },
+  { x = 6.200, w = 0.28, top = 0.660, bottom = 0.480, n = 2.0 },
+]
+
+[[engine]]
+name = "EJ200"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 60.0          # 13,500 lbf military
+thrust_wet_kn = 90.0          # 20,250 lbf afterburner
+bypass_ratio = 0.40
+tsfc_dry = 0.79
+tsfc_wet = 1.73
+design_mach = 2.0
+position = [12.600, 0.350, -0.350]
+mass = 989
+inlet_x = 5.0
+[engine.nozzle]
+position = [15.900, 0.350, -0.350]
+
+[[gear]]
+name = "Nose Gear"
+position = [4.300, 0.0, -1.900]
+steerable = true
+max_steer = 60
+wheel_diameter = 0.55
+wheel_width = 0.16
+retractable = true
+static_deflection = 0.14
+attach = [4.300, 0.0, -0.850]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [10.800, 1.300, -1.900]
+wheel_diameter = 0.78
+wheel_width = 0.26
+retractable = true
+static_deflection = 0.17
+attach = [10.600, 0.850, -0.950]
+
+[reference]
+aero_point = [10.290, 0.0, 0.0]    # 0.30 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.0
+alpha_max_deg = 30.0
+roll_rate_deg_s = 250.0
+
+[mass]
+empty = 11000                 # Tranche 2 (Eurofighter)
+empty_cg = [10.300, 0.0, -0.300]
+# no published inertia: radii of gyration of the class
+gyration = [0.250, 0.400, 0.510]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [4.300, 0.0, 0.600]
+[[mass.payload]]
+name = "gun ammunition"       # Mauser BK-27, 150 rounds
+mass = 80
+position = [9.000, 1.000, 0.000]
+[[mass.tank]]
+name = "fuselage 1"           # internal fuel, 4,996 kg
+position = [8.000, 0.0, -0.200]
+capacity = 1800
+[[mass.tank]]
+name = "fuselage 2"
+position = [10.200, 0.0, -0.200]
+capacity = 1596
+[[mass.tank]]
+name = "left wing"
+position = [10.500, -2.600, 0.000]
+capacity = 800
+[[mass.tank]]
+name = "right wing"
+position = [10.500, 2.600, 0.000]
+capacity = 800
+
+[targets]
+# Typhoon, published
+max_mach = 2.0                # at altitude, full afterburner
+max_mach_altitude_ft = 36000
+climb_rate_fpm = 62000        # 315 m/s
+service_ceiling_ft = 55000

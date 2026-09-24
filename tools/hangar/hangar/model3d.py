@@ -15,7 +15,10 @@ that a positive rotation about x is the deflection JSBSim's channel means by
 a positive value (aileron: the left one trailing edge down). A surface that
 several channels move - a stabilator that also rolls, a flaperon - is
 fsim:<channel>[:<gain>]+<channel>[:<gain>]..., turned by the sum; an
-all-moving surface turns about its spindle.
+all-moving surface turns about its spindle. A piece its channels can drive
+past its own limits - a canard that travels further than the elevons on its
+channel, an elevon asked for pitch and roll at once - ends in @<lo>,<hi>, its
+stops in degrees.
 """
 import json
 import math
@@ -371,6 +374,22 @@ def hinge(surface, piece):
     return p0, axis, float(g), mixed
 
 
+def stops(aircraft, ctrl, piece):
+    """"@lo,hi" (degrees, the node's sense) when the piece's channels can drive
+    it past its own limits, else "". The node turns sign * orient times the
+    control's own deflection (trailing edge down, or left for a rudder)."""
+    lo, hi = aircraft.channel_limits(ctrl.channel)
+    g = ctrl.channels[ctrl.channel]
+    reach = sorted((g * lo, g * hi))
+    if not ctrl.mix and reach[0] >= ctrl.min_deg - 1e-6 and reach[1] <= ctrl.max_deg + 1e-6:
+        return ""
+    sign = -1.0 if channel_gain(ctrl.channel, ctrl, piece["u"], piece["centre"]) < 0 else 1.0
+    orient = np.sign(piece["u"][1 if ctrl.channel == "rudder" else 2]) or 1.0
+    if sign * orient > 0:
+        return "@%.6g,%.6g" % (ctrl.min_deg, ctrl.max_deg)
+    return "@%.6g,%.6g" % (-ctrl.max_deg, -ctrl.min_deg)
+
+
 def control_nodes(aircraft, origin):
     """Every control piece as the node the glb carries: name, the glTF
     translation and rotation, and its vertices in the node's own frame."""
@@ -384,6 +403,7 @@ def control_nodes(aircraft, origin):
             pivot = _to_gltf(p0, origin)
             name = "fsim:" + CHANNEL_NODE[ctrl.channel] + ("" if abs(g - 1.0) < 1e-9 else ":%.6g" % g)
             name += "".join("+%s:%.6g" % (CHANNEL_NODE[ch], gm) for ch, gm in sorted(mixed.items()) if abs(gm) > 1e-9)
+            name += stops(aircraft, ctrl, piece)
             y = piece["centre"][1]
             side = "" if abs(y) < 1e-6 else (" right" if y > 0 else " left")
             out.append({"name": name, "label": "%s %s%s" % (s.name, ctrl.name, side),

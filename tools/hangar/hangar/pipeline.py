@@ -160,11 +160,16 @@ class Design:
             if key in t:
                 checks.append(check(label, value, 0.97 * t[key], 1.03 * t[key], "m2" if "area" in key else "m",
                                     note="target %.3g" % t[key]))
-        checks.append(check("wing aspect ratio", a.b**2 / a.S, 3.0, 30.0, level="warn"))
+        fighter = a.spec.get("aircraft", {}).get("category") == "fighter"
+        checks.append(check("wing aspect ratio", a.b**2 / a.S, 1.5 if fighter else 3.0, 30.0, level="warn",
+                            note="fighters 2-3.5, deltas 2-2.5" if fighter else ""))
         for name, d in s["surfaces"].items():
-            if d["kind"] in ("htail", "canard") and "volume_coefficient" in d:
-                checks.append(check("%s volume coefficient" % name, abs(d["volume_coefficient"]), 0.35, 1.1, level="warn",
-                                    note="typical 0.5-0.9 (Raymer 6.4)"))
+            if d["kind"] == "htail" and "volume_coefficient" in d:
+                checks.append(check("%s volume coefficient" % name, abs(d["volume_coefficient"]), 0.2 if fighter else 0.35, 1.1,
+                                    level="warn", note="typical 0.5-0.9 (Raymer 6.4); fighters with fly-by-wire less"))
+            if d["kind"] == "canard" and "volume_coefficient" in d:
+                checks.append(check("%s volume coefficient" % name, abs(d["volume_coefficient"]), 0.05, 0.4, level="warn",
+                                    note="close-coupled canards 0.05-0.2"))
             if d["kind"] in ("fin", "vtail") and "volume_coefficient" in d:
                 checks.append(check("%s volume coefficient" % name, d["volume_coefficient"], 0.02, 0.1, level="warn",
                                     note="typical 0.03-0.08"))
@@ -254,15 +259,23 @@ class Design:
         smooth = _roughness(tabs)
         images = ["coefficients.png", "derivatives.png", "polars.png"]
         fighter = a.spec.get("aircraft", {}).get("category") == "fighter"
+        tailless = not any(s.kind in ("htail", "canard", "vtail") for s in a.surfaces)
+        # DATCOM 4.1.3.2: C_L_alpha = 2 pi A / (2 + sqrt(A^2 (1 + tan^2 sweep_c/2) + 4))
+        sweep_c2 = a.wing.sweep_deg(0.5)
+        cla_est = 2 * math.pi * a.wing.aspect_ratio / (2 + math.sqrt(a.wing.aspect_ratio**2 * (1 + math.tan(math.radians(sweep_c2))**2) + 4))
         checks = [
-            check("lift-curve slope CL_alpha", d["CLa"], 3.5, 6.8, "/rad"),
-            check("CL max (untrimmed, clean)", clmax, 1.1, 2.1, note="at %.0f deg" % a_clmax),
+            check("lift-curve slope CL_alpha", d["CLa"], 0.7 * cla_est, 1.45 * cla_est, "/rad",
+                  note="the wing alone by DATCOM's formula (aspect ratio %.1f, half-chord sweep %.0f deg): %.2f"
+                  % (a.wing.aspect_ratio, sweep_c2, cla_est)),
+            check("CL max (untrimmed, clean)", clmax, 1.1, 2.3 if fighter else 2.1,
+                  note="at %.0f deg" % a_clmax + ("; leading-edge extensions take a fighter's past 2" if fighter else "")),
             check("pitch stiffness Cm_alpha (about ARP)", d["Cma"], None, -0.1, "/rad", level="warn" if fighter else "fail",
                   note="negative: stable" + ("; a fighter's flight controls make up for relaxed stability" if fighter else "")),
             check("weathercock Cn_beta", d["Cnb"], 0.01, None, "/rad", note="positive: stable"),
             check("dihedral effect Cl_beta", d["Clb"], None, -0.005, "/rad", note="negative: stable"),
             check("roll damping Cl_p", d["Clp"], None, -0.1, "/rad"),
-            check("pitch damping Cm_q", d["Cmq"], None, -1.0, "/rad"),
+            check("pitch damping Cm_q", d["Cmq"], None, -0.05 if tailless else (-0.5 if fighter else -1.0), "/rad",
+                  note="a tailless wing's own" if tailless else ""),
             check("yaw damping Cn_r", d["Cnr"], None, -0.01, "/rad"),
             check("table smoothness (largest jump between neighbouring entries)", smooth["worst"], None, 0.35,
                   level="warn", note=smooth["where"]),
@@ -336,14 +349,21 @@ class Design:
         if aero:
             np_x = aero["neutral_point_m"][0]
             sm = (np_x - cg[0]) / a.c
-            checks.append(check("static margin (loaded)", sm * 100, 5.0, 40.0, "% MAC",
-                                note="neutral point %.3f m, CG %.3f m" % (np_x, cg[0])))
+            fbw = self.fbw_options() is not None
+            checks.append(check("static margin (loaded)", sm * 100, -15.0 if fbw else 5.0, 40.0, "% MAC",
+                                level="warn" if fbw else "fail",
+                                note="neutral point %.3f m, CG %.3f m%s" % (np_x, cg[0], "; fly-by-wire: relaxed stability allowed"
+                                                                            if fbw else "")))
             m_e, cg_e = mm.loaded(fuel_fraction=0.0, payload=False)
             checks.append(check("static margin (empty)", (np_x - cg_e[0]) / a.c * 100, 0.0, 45.0, "% MAC", level="warn"))
-        checks += [check("roll gyration radius R_x", g["Rx"], 0.15, 0.45, level="warn", note="Roskam: GA 0.2-0.35"),
-                   check("pitch gyration radius R_y", g["Ry"], 0.2, 0.5, level="warn", note="Roskam: GA 0.3-0.45"),
-                   check("yaw gyration radius R_z", g["Rz"], 0.25, 0.6, level="warn", note="Roskam: GA 0.35-0.5"),
-                   info("loaded mass", m, "kg")]
+        if mm.spec.get("gyration") is not None:
+            checks += [info("radii of gyration R_x, R_y, R_z", "%.3f, %.3f, %.3f" % (g["Rx"], g["Ry"], g["Rz"]),
+                            note="given in [mass] gyration")]
+        else:
+            checks += [check("roll gyration radius R_x", g["Rx"], 0.15, 0.45, level="warn", note="Roskam: GA 0.2-0.35, fighters ~0.25"),
+                       check("pitch gyration radius R_y", g["Ry"], 0.2, 0.5, level="warn", note="Roskam: GA 0.3-0.45, fighters ~0.38"),
+                       check("yaw gyration radius R_z", g["Rz"], 0.25, 0.6, level="warn", note="Roskam: GA 0.35-0.5, fighters ~0.5")]
+        checks.append(info("loaded mass", m, "kg"))
         breakdown = [{"name": n, "mass_kg": mk, "kind": k} for n, mk, k in mm.breakdown()]
         return self.save("mass", {"empty": e, "loaded_mass_kg": m, "loaded_cg_m": cg, "gyration": g,
                                   "static_margin": sm, "breakdown": breakdown, "checks": checks})
@@ -715,13 +735,15 @@ class Design:
 
 
 def _calibrate_fighter(d):
-    """A fighter's supersonic drag to its published top speed: the wave-drag
-    efficiency E_WD (Raymer 12.46; how far the area distribution is from
-    Sears-Haack's) that makes the maximum level Mach number at the target
-    altitude the published one - bisection, each step the tables' wave drag
-    recomputed, the aircraft rebuilt and accelerated at full afterburner."""
+    """A fighter's engine and supersonic drag to its published top speed.
+    First the engines' throttle ratio TR (where the turbine reaches its
+    temperature limit: how much thrust is left at high Mach), between 1.0
+    and 1.5; if even 1.5 falls short, then the wave drag's E_WD (Raymer
+    12.46), from the area distribution's 2 down to 1.2, a smooth one's.
+    Each is a bisection on the maximum level Mach number at the target
+    altitude, the aircraft rebuilt and accelerated at full afterburner every
+    step."""
     from . import flight as F
-    from .aero.mach import _drag
     from .fcs import options
     t = d.targets
     a = d.aircraft
@@ -731,46 +753,59 @@ def _calibrate_fighter(d):
     target = float(t["max_mach"])
     opts = options(a)
     history = []
+    ewd0 = float(a.spec.get("analysis", {}).get("wave_drag_efficiency", 2.0))
 
-    def measure(ewd):
-        _write_calibration(d, {"wave_drag_efficiency": float(ewd)})
+    def measure(tr, ewd):
+        _write_calibration(d, {"throttle_ratio": float(tr), "wave_drag_efficiency": float(ewd)})
         d.aircraft = Aircraft.load(d.path)
-        tabs = d.tables()
-        tabs["mach"].update(_drag(d.aircraft, tabs, tabs["mach"]))
-        d.build_with(tabs)
+        d.build()
         f = F.Flight(a.name, name="hangar-cal-" + a.name)
         try:
-            m, _ = F.max_level_mach(f, F.FighterPilot(f.dt, opts["n_max"], opts["n_min"]) if opts else F.FighterPilot(f.dt),
-                                    alt, start_mach=0.9, seconds=360.0)
+            pilot = F.FighterPilot(f.dt, opts["n_max"], opts["n_min"]) if opts else F.FighterPilot(f.dt)
+            m, _ = F.max_level_mach(f, pilot, alt, start_mach=0.9, seconds=420.0)
         finally:
             f.close()
-        history.append({"wave_drag_efficiency": float(ewd), "max_mach": float(m)})
-        d.log("  calibrate: E_WD %.3f -> Mach %.3f at %.0f ft" % (ewd, m, alt / 0.3048))
+        history.append({"throttle_ratio": float(tr), "wave_drag_efficiency": float(ewd), "max_mach": float(m)})
+        d.log("  calibrate: TR %.3f, E_WD %.2f -> Mach %.3f at %.0f ft" % (tr, ewd, m, alt / 0.3048))
         return m
 
-    lo, hi = 0.8, 4.0
-    m_lo, m_hi = measure(lo), measure(hi)
-    x, m = (lo, m_lo) if abs(m_lo - target) < abs(m_hi - target) else (hi, m_hi)
-    if (m_lo - target) * (m_hi - target) < 0:
+    def bisect(f_of, lo, hi, m_lo, m_hi):
+        x, m = (lo, m_lo) if abs(m_lo - target) < abs(m_hi - target) else (hi, m_hi)
+        if (m_lo - target) * (m_hi - target) >= 0:
+            return x, m
         for _ in range(8):
             x = 0.5 * (lo + hi)
-            m = measure(x)
+            m = f_of(x)
             if abs(m - target) < 0.01:
                 break
             if (m - target) * (m_lo - target) > 0:
                 lo, m_lo = x, m
             else:
                 hi, m_hi = x, m
-    _write_calibration(d, {"wave_drag_efficiency": float(x)},
+        return x, m
+
+    tr_lo, tr_hi = 1.0, 1.5
+    m_lo, m_hi = measure(tr_lo, ewd0), measure(tr_hi, ewd0)
+    tr, m = bisect(lambda x: measure(x, ewd0), tr_lo, tr_hi, m_lo, m_hi)
+    ewd = ewd0
+    if m_hi < target - 0.01:
+        # the engine alone cannot: less wave drag, down to a smooth area distribution's
+        tr = tr_hi
+        m_e = measure(tr, 1.2)
+        ewd, m = bisect(lambda x: measure(tr, x), 1.2, ewd0, m_e, m_hi)
+    _write_calibration(d, {"throttle_ratio": float(tr), "wave_drag_efficiency": float(ewd)},
                        note="fitted: maximum Mach %.3f at %.0f ft (target %g)" % (m, alt / 0.3048, target))
     d.aircraft = Aircraft.load(d.path)
-    tabs = d.tables()
-    tabs["mach"].update(_drag(d.aircraft, tabs, tabs["mach"]))
-    d.build_with(tabs)
-    checks = [check("maximum Mach number after calibration", m, target - 0.03, target + 0.03, note="at %.0f ft" % (alt / 0.3048)),
-              check("wave-drag efficiency E_WD", x, 1.0, 3.5, level="warn",
-                    note="Raymer: 1.2 a smooth area distribution, 2-3 typical")]
-    return d.save("calibrate", {"calibration": {"wave_drag_efficiency": x}, "history": history, "checks": checks})
+    d.build()
+    # a miss is a warning: both corrections at their bounds is an engine or a
+    # drag estimate that falls short, which the fly stage's checks then show
+    checks = [check("maximum Mach number after calibration", m, target - 0.03, target + 0.03, level="warn",
+                    note="at %.0f ft" % (alt / 0.3048)),
+              check("engine throttle ratio TR", tr, 1.0, 1.5, level="warn",
+                    note="theta0 where the turbine reaches its limit: Mach %.2f at 36,000 ft" % math.sqrt(max((tr / 0.7519 - 1.0) / 0.2, 0.0))),
+              check("wave-drag efficiency E_WD", ewd, 1.2, 3.5, level="warn", note="Raymer: 1.2 a smooth area distribution, 2-3 typical")]
+    return d.save("calibrate", {"calibration": {"throttle_ratio": tr, "wave_drag_efficiency": ewd}, "history": history,
+                                "checks": checks})
 
 
 def _calibrate(d):
@@ -867,6 +902,9 @@ def _write_calibration(d, cal, note=""):
                      % ", ".join("%.4f" % p for p in cal["propeller_pitch_m"]))
     if "wave_drag_efficiency" in cal:
         lines.append("wave_drag_efficiency = %.4f   # Raymer's E_WD: the wave drag over Sears-Haack's" % cal["wave_drag_efficiency"])
+    if "throttle_ratio" in cal:
+        lines.append("throttle_ratio = %.4f   # the engines' TR: the compressor-face temperature ratio at the turbine's limit"
+                     % cal["throttle_ratio"])
     if note:
         lines.append("# " + note)
     with open(os.path.join(d.dir, "calibration.toml"), "w", encoding="utf-8") as f:

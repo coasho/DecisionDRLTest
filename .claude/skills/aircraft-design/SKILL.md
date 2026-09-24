@@ -121,6 +121,10 @@ move on while a check fails or a picture looks wrong.
     `mix = { aileron = 0.25 }`, a flaperon `mix = { flap = 1.0 }`, an elevon
     `channel = "elevator", mix = { aileron = 1.0 }`, a canard a negative
     `gain`.
+  - Every control stops at its own `limits`; the channel runs as far as its
+    furthest control. Give a canard its leading-edge-down travel,
+    `gain = -1.0, limits = [-50, 20]`: at high angle of attack it is the
+    nose-down control.
 - **Airfoils.** `naca64aXYZ` (NACA 6A), `biconvexN`, or `plate`. The
   leading edge's sharpness decides the vortex lift: sharp edges make it,
   round ones hold their suction.
@@ -131,13 +135,22 @@ move on while a check fails or a picture looks wrong.
   `n_min`, `alpha_max_deg` and `roll_rate_deg_s` from the real aircraft.
   - Build checks the short period at every design point.
   - Fly checks the limiter (full aft stick), a 3 g step and the roll.
+- **Balance.** Real CGs are rarely published. Place the CG from the neutral
+  point the aero stage finds, not from a guessed % MAC: canard deltas about
+  10 % MAC unstable, relaxed-stability fighters 0-5 %. Move `empty_cg`, the
+  tanks and `aero_point` together. Then check the nose-down margin: with the
+  pitch channel at its nose-down end, Cm about the loaded CG must stay
+  negative a few degrees past `alpha_max_deg`. If it does not, the limiter
+  test departs; move the CG forward or lower `alpha_max_deg`.
 - **Targets.** Give `max_mach` and `max_mach_altitude_ft`: calibrate fits
-  the wave drag to them. `max_speed_ktas` (sea level), `climb_rate_fpm`,
+  the engine's throttle ratio to them, then the wave drag if the engine
+  alone cannot. `max_speed_ktas` (sea level), `climb_rate_fpm`,
   `service_ceiling_ft` and `sustained_turn_deg_s` stay checks. Published
   climb rates are loose, so don't fit to them.
 - **Reference.** `reference = "jsbsim:<name>"` plots that aircraft's
   coefficients against the design's (`reference.png`). It is worth doing
-  only when the JSBSim model comes from wind-tunnel data (f16, f15). Check
+  only when the JSBSim model comes from wind-tunnel data: of those shipped,
+  only `f16` does (the f15's and f22's headers say performance data). Check
   its control tables' units first: see the f16c's `reference_control_scale`.
 - **Read after aero:**
   - `reference.png`, if there is a reference.
@@ -147,6 +160,10 @@ move on while a check fails or a picture looks wrong.
     fighters.
 - **Read after fly:** `fly_fighter.png`, for the excess power at sea level
   and 36,000 ft and the turn.
+- **Known model limits.** Tails on booms beside the engines (Su-27, MiG-29)
+  come out too stable: the lattice carries the tail across the gap between
+  them. High-thrust engines fitted to Mach 2.5 at altitude are too fast at
+  sea level. Thrust vectoring is not modelled.
 
 ## 5. Finish
 

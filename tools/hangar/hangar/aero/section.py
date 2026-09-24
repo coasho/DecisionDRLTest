@@ -205,8 +205,8 @@ class PolarSet:
     def __len__(self):
         return len(self.polars)
 
-    def evaluate(self, alpha, delta=None, vortex=None):
-        return evaluate(self, alpha, delta, vortex)
+    def evaluate(self, alpha, delta=None, vortex=None, alpha_suction=None):
+        return evaluate(self, alpha, delta, vortex, alpha_suction)
 
 
 # the vortex regime: where the vortex force acts (chord fraction), and the
@@ -215,7 +215,7 @@ VORTEX_X = 0.10
 VORTEX_END = (math.radians(40.0), math.radians(55.0))
 
 
-def evaluate(p, alpha, delta=None, vortex=None):
+def evaluate(p, alpha, delta=None, vortex=None, alpha_suction=None):
     """The polar of a SectionPolar or PolarSet `p` (attributes scalar or
     arrays broadcasting against alpha): cl, cd, cm and the circulation's
     lift - cl without vortex lift, what washes the flow down behind.
@@ -225,12 +225,18 @@ def evaluate(p, alpha, delta=None, vortex=None):
     leading-edge suction (Polhamus: 1/cos of the leading-edge sweep, times
     the part realised, times what is left after vortex breakdown), and the
     circulation is scaled by the degradation once the edge has separated
-    (the burst vortex's separated flow). None: no vortex lift."""
+    (the burst vortex's separated flow). None: no vortex lift.
+
+    alpha_suction: the angle the leading-edge suction sees, where it differs
+    from alpha's (a wing's: its angle less the downwash of the trailing
+    vortices - the local cl times it is the 3D suction, CL (alpha - alpha_i),
+    which a low-aspect-ratio wing's strip angle, set by its lift, understates)."""
     a = np.asarray(alpha, float)
     d = np.zeros_like(a) if delta is None else np.broadcast_to(np.asarray(delta, float), a.shape)
     # an all-moving surface (flap chord 1) turns the whole section: its
     # deflection is angle of attack, with no flap increments
     whole = p.flap_chord >= 0.999
+    a_s = None if alpha_suction is None else wrap(np.asarray(alpha_suction, float) + np.where(whole, d, 0.0))
     a = wrap(a + np.where(whole, d, 0.0))
     d = np.where(whole, 0.0, d)
     # flap increments (all zero where there is no flap: tau = cm_flap = flap_chord = 0)
@@ -302,7 +308,11 @@ def evaluate(p, alpha, delta=None, vortex=None):
     circ = p.a0 * np.sin(an) * (1.0 - beyond * (1.0 - dg))
     suction = circ * sa                                  # the suction the circulation would carry
     T = held * np.tanh(suction / np.maximum(held, 1e-6))
-    n_v = g * np.abs(suction - T) * np.sign(circ)        # the vortex lift, normal to the chord
+    # what the edge loses goes to the vortex as the planform loses it
+    # (Polhamus); the section's own balance keeps its own suction
+    s3 = suction if a_s is None else circ * np.sin(a_s)
+    T3 = T if a_s is None else held * np.tanh(s3 / np.maximum(held, 1e-6))
+    n_v = g * np.abs(s3 - T3) * np.sign(circ)            # the vortex lift, normal to the chord
     N = circ * ca + n_v
     cl_v = N * ca + T * sa
     cd_v = N * sa - T * ca + p.cd0 + p.k_drag * (np.clip(circ, clmin, clmax) - p.cl_dmin) ** 2 + dcd

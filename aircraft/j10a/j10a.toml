@@ -1,0 +1,180 @@
+# Chengdu J-10A, built by hangar from public data (published dimensions and
+# estimates). A close-coupled canard delta with a chin intake, unstable in
+# pitch at subsonic speeds.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: Jane's and public reference works (dimensions, weights,
+# performance); Saturn (AL-31FN).
+
+[aircraft]
+name = "j10a"
+description = "Chengdu J-10A (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 250.0
+
+# The wing: 33.1 m2, span 9.75 m, 50 deg leading edge (root 5.89 m, tip
+# 0.90 m to the centre line, MAC 4.01 m). The CG at 16 % of the MAC, 10 % of
+# it behind the neutral point hangar finds: a canard delta's relaxed
+# stability (the real balance is not published).
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [7.000, 0.000, 0.000], chord = 5.890, airfoil = "naca64a005" },
+  { le = [12.810, 4.875, -0.100], chord = 0.900, airfoil = "naca64a003" },
+]
+controls = [
+  { name = "flap", channel = "flap", span = [0.14, 0.36], chord_fraction = 0.20, limits = [0, 25] },
+  { name = "elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.36, 0.92], chord_fraction = 0.22, limits = [-25, 25] },
+]
+
+# All-moving canards, 3.4 m2 exposed
+[[surface]]
+name = "canard"
+kind = "canard"
+airfoil = "naca64a004"
+sections = [
+  { le = [4.700, 0.000, 0.350], chord = 1.800 },
+  { le = [5.000, 0.600, 0.350], chord = 1.600 },
+  { le = [6.900, 2.200, 0.350], chord = 0.500 },
+]
+controls = [
+  { name = "canard", channel = "elevator", gain = -1.0, span = [0.27, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-50, 20] },
+]
+
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a004"
+sections = [
+  { le = [12.600, 0.000, 0.600], chord = 3.800 },
+  { le = [15.100, 0.000, 3.600], chord = 1.200 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.08, 0.72], chord_fraction = 0.28, limits = [-30, 30] },
+]
+
+[[surface]]
+name = "ventral"
+kind = "fin"
+mirror = true
+airfoil = "plate"
+sections = [
+  { le = [12.700, 0.450, -0.550], chord = 1.300 },
+  { le = [13.200, 0.650, -1.000], chord = 0.650 },
+]
+
+# Fuselage with the chin intake from 5 m
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
+  { x = 1.30, w = 0.70, top = 0.250, bottom = -0.350, n = 2.0 },
+  { x = 3.00, w = 1.00, top = 0.450, bottom = -0.500, n = 2.0 },
+  { x = 4.40, w = 1.10, top = 0.550, bottom = -0.600, n = 2.2 },
+  { x = 5.00, w = 1.20, top = 0.550, bottom = -1.100, n = 2.6 },
+  { x = 8.00, w = 1.35, top = 0.550, bottom = -1.150, n = 2.6 },
+  { x = 11.00, w = 1.35, top = 0.500, bottom = -0.900, n = 2.5 },
+  { x = 14.00, w = 1.15, top = 0.450, bottom = -0.600, n = 2.2 },
+  { x = 16.43, w = 0.95, top = 0.400, bottom = -0.450, n = 2.0 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 2.900, w = 0.00, top = 0.560, bottom = 0.540 },
+  { x = 3.500, w = 0.66, top = 1.000, bottom = 0.520, n = 2.0 },
+  { x = 4.600, w = 0.80, top = 1.130, bottom = 0.520, n = 2.0 },
+  { x = 5.600, w = 0.66, top = 1.000, bottom = 0.530, n = 2.0 },
+  { x = 6.400, w = 0.28, top = 0.680, bottom = 0.520, n = 2.0 },
+]
+
+[[engine]]
+name = "AL-31FN"
+type = "turbofan"
+thrust_dry_kn = 79.4          # 8,100 kgf military
+thrust_wet_kn = 122.6         # 12,500 kgf afterburner
+bypass_ratio = 0.57
+tsfc_dry = 0.75
+tsfc_wet = 1.92
+design_mach = 2.2
+position = [12.500, 0.0, -0.100]
+mass = 1538
+inlet_x = 5.0
+[engine.nozzle]
+position = [16.430, 0.0, -0.100]
+
+[[gear]]
+name = "Nose Gear"
+position = [5.400, 0.0, -2.000]
+steerable = true
+max_steer = 50
+wheel_diameter = 0.52
+wheel_width = 0.16
+retractable = true
+static_deflection = 0.14
+attach = [5.400, 0.0, -1.100]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [10.900, 1.400, -2.000]
+wheel_diameter = 0.78
+wheel_width = 0.25
+retractable = true
+static_deflection = 0.17
+attach = [10.700, 0.900, -1.000]
+
+[reference]
+aero_point = [9.934, 0.0, 0.0]    # 0.19 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.0
+alpha_max_deg = 30.0
+roll_rate_deg_s = 270.0
+
+[mass]
+empty = 9750                  # J-10A (estimates)
+empty_cg = [9.984, 0.0, -0.250]
+# no published inertia: radii of gyration of the class
+gyration = [0.250, 0.400, 0.510]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [4.600, 0.0, 0.600]
+[[mass.payload]]
+name = "gun ammunition"       # GSh-23, 200 rounds
+mass = 60
+position = [7.000, 0.0, -0.800]
+[[mass.tank]]
+name = "fuselage 1"           # internal fuel, 4,950 kg
+position = [8.034, 0.0, -0.200]
+capacity = 1800
+[[mass.tank]]
+name = "fuselage 2"
+position = [10.134, 0.0, -0.200]
+capacity = 1700
+[[mass.tank]]
+name = "fuselage 3"
+position = [11.734, 0.0, -0.200]
+capacity = 650
+[[mass.tank]]
+name = "left wing"
+position = [10.534, -2.200, 0.000]
+capacity = 400
+[[mass.tank]]
+name = "right wing"
+position = [10.534, 2.200, 0.000]
+capacity = 400
+
+[targets]
+# J-10A, published (estimates)
+max_mach = 2.2                # at altitude, full afterburner
+max_mach_altitude_ft = 36000
+service_ceiling_ft = 59000

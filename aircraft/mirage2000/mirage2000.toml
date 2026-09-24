@@ -1,0 +1,151 @@
+# Dassault Mirage 2000C, built by hangar from public data. A tailless delta,
+# the first to be unstable in pitch by design and flown by wire.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: Dassault Aviation and Jane's (dimensions, weights,
+# performance); Safran (M53-P2).
+
+[aircraft]
+name = "mirage2000"
+description = "Dassault Mirage 2000C (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 250.0
+
+# The wing: 41 m2, span 9.13 m, 58 deg leading edge, straight trailing edge
+# (root 8.14 m, tip 0.84 m to the centre line, MAC 5.48 m). The CG at 33 %
+# of the MAC, 0.6 m ahead of the main wheels.
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [4.600, 0.000, 0.000], chord = 8.143, airfoil = "naca64a005" },
+  { le = [11.905, 4.565, -0.100], chord = 0.838, airfoil = "naca64a003" },
+]
+controls = [
+  { name = "inner elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.14, 0.55], chord_fraction = 0.18, limits = [-25, 25] },
+  { name = "outer elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.55, 0.92], chord_fraction = 0.22, limits = [-25, 25] },
+]
+
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a004"
+sections = [
+  { le = [9.600, 0.000, 0.500], chord = 3.600 },
+  { le = [12.400, 0.000, 3.600], chord = 1.100 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.08, 0.72], chord_fraction = 0.26, limits = [-25, 25] },
+]
+
+# Fuselage with the side intakes from 5.6 m, one engine
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
+  { x = 1.30, w = 0.62, top = 0.250, bottom = -0.350, n = 2.0 },
+  { x = 3.00, w = 0.95, top = 0.450, bottom = -0.500, n = 2.0 },
+  { x = 4.60, w = 1.10, top = 0.550, bottom = -0.600, n = 2.2 },
+  { x = 5.60, w = 2.20, top = 0.500, bottom = -0.750, n = 3.0 },
+  { x = 8.00, w = 2.20, top = 0.450, bottom = -0.750, n = 3.0 },
+  { x = 10.50, w = 1.70, top = 0.400, bottom = -0.620, n = 2.8 },
+  { x = 13.00, w = 1.25, top = 0.320, bottom = -0.500, n = 2.4 },
+  { x = 14.36, w = 1.10, top = 0.280, bottom = -0.450, n = 2.2 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 2.900, w = 0.00, top = 0.560, bottom = 0.540 },
+  { x = 3.500, w = 0.64, top = 0.980, bottom = 0.520, n = 2.0 },
+  { x = 4.500, w = 0.78, top = 1.100, bottom = 0.520, n = 2.0 },
+  { x = 5.400, w = 0.64, top = 0.980, bottom = 0.530, n = 2.0 },
+  { x = 6.200, w = 0.26, top = 0.660, bottom = 0.520, n = 2.0 },
+]
+
+[[engine]]
+name = "M53-P2"
+type = "turbofan"
+thrust_dry_kn = 64.3          # 14,460 lbf military
+thrust_wet_kn = 95.1          # 21,380 lbf afterburner
+bypass_ratio = 0.36
+tsfc_dry = 0.90
+tsfc_wet = 2.10
+design_mach = 2.2
+position = [11.000, 0.0, -0.150]
+mass = 1500
+inlet_x = 5.6
+[engine.nozzle]
+position = [14.300, 0.0, -0.150]
+
+[[gear]]
+name = "Nose Gear"
+position = [4.300, 0.0, -2.000]
+steerable = true
+max_steer = 45
+wheel_diameter = 0.46
+wheel_width = 0.15
+retractable = true
+static_deflection = 0.14
+attach = [4.300, 0.0, -0.800]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [9.700, 1.700, -2.000]
+wheel_diameter = 0.75
+wheel_width = 0.22
+retractable = true
+static_deflection = 0.17
+attach = [9.500, 1.200, -0.900]
+
+[reference]
+aero_point = [9.070, 0.0, 0.0]     # 0.33 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.2
+alpha_max_deg = 29.0
+roll_rate_deg_s = 270.0
+
+[mass]
+empty = 7500                  # Mirage 2000C (Dassault)
+empty_cg = [9.100, 0.0, -0.200]
+# no published inertia: radii of gyration of the class
+gyration = [0.240, 0.400, 0.500]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [4.400, 0.0, 0.600]
+[[mass.payload]]
+name = "gun ammunition"       # 2 DEFA 554, 250 rounds
+mass = 125
+position = [7.200, 0.0, -0.500]
+[[mass.tank]]
+name = "fuselage 1"           # internal fuel, 3,160 kg
+position = [7.000, 0.0, -0.150]
+capacity = 1100
+[[mass.tank]]
+name = "fuselage 2"
+position = [9.300, 0.0, -0.150]
+capacity = 1000
+[[mass.tank]]
+name = "left wing"
+position = [9.500, -2.000, 0.000]
+capacity = 530
+[[mass.tank]]
+name = "right wing"
+position = [9.500, 2.000, 0.000]
+capacity = 530
+
+[targets]
+# Mirage 2000C, published
+max_mach = 2.2                # at 11 km, full afterburner
+max_mach_altitude_ft = 36000
+climb_rate_fpm = 56000        # 285 m/s
+service_ceiling_ft = 56000

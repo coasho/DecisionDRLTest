@@ -1,0 +1,180 @@
+# Lockheed Martin F-22A Raptor, built by hangar from public data. The
+# thrust-vectoring nozzles are not modelled yet: the stabilators alone pitch
+# it, so its angle of attack is held to 40 deg rather than the real 60.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: USAF fact sheet and Jane's (dimensions, weights,
+# performance); Pratt & Whitney (F119-PW-100); the wing: 42 deg leading
+# edge, -17 deg trailing edge, NACA 64A section 5.92 % at the root, 4.29 %
+# at the tip.
+
+[aircraft]
+name = "f22a"
+description = "Lockheed Martin F-22A Raptor (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 260.0
+
+# The wing: 78.04 m2 (840 ft2), span 13.56 m, a clipped diamond: 42 deg
+# leading edge, -18 deg trailing edge (root 9.91 m, tip 1.60 m to the centre
+# line, MAC 6.76 m; JSBSim's f22 uses 23.07 ft). Its 35 % MAC point, the CG
+# (relaxed stability), sits 0.55 m ahead of the main wheels.
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [6.060, 0.000, 0.000], chord = 9.910, airfoil = "naca64a206" },
+  { le = [12.165, 6.780, -0.200], chord = 1.600, airfoil = "naca64a204" },
+]
+controls = [
+  { name = "aileron", channel = "aileron", span = [0.72, 0.97], chord_fraction = 0.28, limits = [-25, 25] },
+  { name = "flaperon", channel = "aileron", mix = { flap = 1.0 }, span = [0.26, 0.70], chord_fraction = 0.22, limits = [-30, 30] },
+]
+
+# All-moving horizontal tails right behind the wing, 13.2 m2 exposed, 42 deg
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a004"
+sections = [
+  { le = [13.940, 0.000, -0.250], chord = 3.900 },
+  { le = [15.200, 1.400, -0.250], chord = 3.200 },
+  { le = [17.900, 4.400, -0.250], chord = 1.200 },
+]
+controls = [
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.3 }, span = [0.32, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-25, 25] },
+]
+
+# Twin vertical tails canted 28 deg outboard, 2 x 8.3 m2
+[[surface]]
+name = "fin"
+kind = "fin"
+mirror = true
+airfoil = "naca64a004"
+sections = [
+  { le = [13.200, 1.600, 0.400], chord = 4.300 },
+  { le = [14.380, 2.910, 2.870], chord = 1.700 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.05, 0.60], chord_fraction = 0.30, limits = [-30, 30] },
+]
+
+# Fuselage: the chined nose, the caret inlets from 5.8 m, the weapons bays
+# and the two engines side by side
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.100, bottom = -0.200 },
+  { x = 1.50, w = 1.00, top = 0.200, bottom = -0.450, n = 2.4 },
+  { x = 3.50, w = 1.50, top = 0.450, bottom = -0.650, n = 2.6 },
+  { x = 5.50, w = 1.90, top = 0.550, bottom = -0.850, n = 2.8 },
+  { x = 7.00, w = 3.30, top = 0.500, bottom = -1.000, n = 3.5 },
+  { x = 10.00, w = 3.60, top = 0.450, bottom = -1.050, n = 3.8 },
+  { x = 13.00, w = 3.40, top = 0.400, bottom = -0.950, n = 3.6 },
+  { x = 16.00, w = 3.00, top = 0.300, bottom = -0.750, n = 3.2 },
+  { x = 18.30, w = 2.60, top = 0.200, bottom = -0.550, n = 3.0 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 3.600, w = 0.00, top = 0.560, bottom = 0.540 },
+  { x = 4.300, w = 0.78, top = 1.050, bottom = 0.520, n = 2.0 },
+  { x = 5.600, w = 0.92, top = 1.250, bottom = 0.520, n = 2.0 },
+  { x = 6.900, w = 0.78, top = 1.100, bottom = 0.530, n = 2.0 },
+  { x = 7.900, w = 0.30, top = 0.720, bottom = 0.520, n = 2.0 },
+]
+
+[[engine]]
+name = "F119-PW-100"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 116.0         # 26,000 lbf military
+thrust_wet_kn = 156.0         # 35,000 lbf afterburner
+bypass_ratio = 0.30
+tsfc_dry = 0.61
+tsfc_wet = 1.80
+design_mach = 2.25
+position = [15.300, 0.700, -0.400]
+mass = 1770
+inlet_x = 5.8
+[engine.nozzle]
+position = [18.300, 0.700, -0.400]
+
+[[gear]]
+name = "Nose Gear"
+position = [5.100, 0.0, -2.100]
+steerable = true
+max_steer = 60
+wheel_diameter = 0.60
+wheel_width = 0.18
+retractable = true
+static_deflection = 0.14
+attach = [5.100, 0.0, -0.900]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [11.300, 1.650, -2.100]
+wheel_diameter = 0.94
+wheel_width = 0.30
+retractable = true
+static_deflection = 0.18
+attach = [11.100, 1.300, -1.100]
+
+[reference]
+aero_point = [10.750, 0.0, 0.0]    # 0.35 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.0
+alpha_max_deg = 40.0
+roll_rate_deg_s = 240.0
+
+[mass]
+empty = 19700                 # 43,340 lb (USAF)
+empty_cg = [10.800, 0.0, -0.350]
+# no published inertia: radii of gyration like the F-15's
+gyration = [0.270, 0.430, 0.550]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [5.800, 0.0, 0.600]
+[[mass.payload]]
+name = "internal missiles"    # 6 AIM-120, 2 AIM-9 in the bays
+mass = 1084
+position = [10.300, 0.0, -0.700]
+[[mass.payload]]
+name = "gun ammunition"       # M61A2, 480 rounds
+mass = 150
+position = [9.500, 1.600, 0.000]
+[[mass.tank]]
+name = "fuselage 1"           # internal fuel, 8,200 kg
+position = [8.500, 0.0, -0.200]
+capacity = 2400
+[[mass.tank]]
+name = "fuselage 2"
+position = [11.000, 0.0, -0.200]
+capacity = 2600
+[[mass.tank]]
+name = "fuselage 3"
+position = [13.200, 0.0, -0.250]
+capacity = 1400
+[[mass.tank]]
+name = "left wing"
+position = [11.500, -3.200, 0.000]
+capacity = 900
+[[mass.tank]]
+name = "right wing"
+position = [11.500, 3.200, 0.000]
+capacity = 900
+
+[targets]
+# F-22A, published
+max_mach = 2.25               # at altitude, full afterburner
+max_mach_altitude_ft = 40000
+service_ceiling_ft = 65000

@@ -62,7 +62,7 @@ class Engine:
             self.bypass_ratio = float(spec.get("bypass_ratio", 0.5))
             self.tsfc_dry = float(spec.get("tsfc_dry", 0.8))    # kg/(kgf h) = lb/(lbf h)
             self.tsfc_wet = float(spec.get("tsfc_wet", 2.0))
-            self.throttle_ratio = float(spec.get("throttle_ratio", 1.05))  # Mattingly's TR: where the lapse turns
+            self.throttle_ratio = float(spec.get("throttle_ratio", 1.2))   # Mattingly's TR: where the lapse turns
             self.design_mach = float(spec.get("design_mach", 2.0))
             self.inlet_x = float(spec["inlet_x"]) if "inlet_x" in spec else None  # where the intake captures its air
             self.power_kw = 0.0
@@ -152,6 +152,10 @@ class Aircraft:
                 a.calibration = tomllib.load(f).get("calibration", {})
             for e, pitch in zip(a.engines, a.calibration.get("propeller_pitch_m", [])):
                 e.prop_pitch = float(pitch)
+            if "throttle_ratio" in a.calibration:
+                for e in a.engines:
+                    if e.type == "turbofan":
+                        e.throttle_ratio = float(a.calibration["throttle_ratio"])
         return a
 
     # -- components -----------------------------------------------------------------------------
@@ -162,16 +166,31 @@ class Aircraft:
         """(surface, control) pairs of every control surface."""
         return [(s, c) for s in self.surfaces for c in s.controls]
 
+    @property
+    def span_overall(self):
+        """Tip-to-tip span of the widest mirrored surface (m)."""
+        return max([s.span for s in self.surfaces if s.mirror] or [self.b])
+
+    @property
+    def length_overall(self):
+        """Nose to tail, over the bodies and surfaces (m)."""
+        xs = [b.x[0] for b in self.bodies] + [b.x[-1] for b in self.bodies]
+        for s in self.surfaces:
+            xs += [sec.le[0] for sec in s.sections] + [sec.le[0] + sec.chord for sec in s.sections]
+        return float(max(xs) - min(xs)) if xs else 5.0 * self.c
+
     def channels(self):
         return sorted({ch for _, c in self.controls() for ch in c.channels})
 
     def channel_limits(self, channel):
-        """(min, max) deflection (deg) of a channel: those of the controls it
-        drives first, else those of the controls that mix it in."""
+        """(min, max) deflection (deg) of a channel: as far as the controls it
+        drives first follow it (one with gain g, to its limits / g; each stops
+        at its own limits), else as far as those that mix it in."""
         own = [c for _, c in self.controls() if c.channel == channel]
         mixed = [c for _, c in self.controls() if channel in c.mix]
-        cs = own or mixed
-        return min(c.min_deg for c in cs), max(c.max_deg for c in cs)
+        spans = [sorted((c.min_deg / c.channels[channel], c.max_deg / c.channels[channel]))
+                 for c in own or mixed if abs(c.channels[channel]) > 1e-9]
+        return min(s[0] for s in spans), max(s[1] for s in spans)
 
     def summary(self):
         """The geometric numbers a designer checks first."""

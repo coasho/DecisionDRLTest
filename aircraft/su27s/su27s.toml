@@ -1,0 +1,205 @@
+# Sukhoi Su-27S (Flanker-B), built by hangar from public data.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
+# plane. Sources: Jane's All the World's Aircraft, Sukhoi and KnAAPO data
+# (dimensions, weights, performance), Lyulka-Saturn (AL-31F). The centre
+# fuselage is a lifting body between widely spaced engine nacelles; here the
+# fuselage and two nacelles.
+
+[aircraft]
+name = "su27s"
+description = "Sukhoi Su-27S Flanker-B (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 250.0
+
+# The wing: 62 m2 reference, span 14.70 m, 42 deg leading edge, taper 0.25
+# (root 6.75 m, tip 1.69 m to the centre line, MAC 4.73 m). Its 30 % MAC
+# point, the CG (the Su-27 is slightly unstable at subsonic speeds), sits
+# 0.55 m ahead of the main wheels (wheelbase 5.88 m).
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [7.540, 0.000, 0.000], chord = 6.750, airfoil = "naca64a005" },
+  { le = [14.157, 7.349, -0.150], chord = 1.688, airfoil = "naca64a004" },
+]
+controls = [
+  # flaperons, the flap function up to 30 deg
+  { name = "flaperon", channel = "aileron", mix = { flap = 1.0 }, span = [0.28, 0.72], chord_fraction = 0.22, limits = [-20, 20] },
+]
+
+# The leading-edge root extensions: sharp, 72 deg, from beside the cockpit
+# to the wing's leading edge
+[[surface]]
+name = "lerx"
+kind = "strake"
+airfoil = "plate"
+sections = [
+  { le = [5.000, 0.000, 0.050], chord = 2.540 },
+  { le = [5.000, 0.650, 0.050], chord = 3.125 },
+  { le = [9.430, 2.100, 0.000], chord = 0.050 },
+]
+
+# All-moving horizontal tails on the tail booms, 12.2 m2 exposed, 45 deg;
+# they roll the aircraft too
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a004"
+sections = [
+  { le = [16.400, 0.000, -0.300], chord = 4.200 },
+  { le = [17.500, 2.100, -0.300], chord = 3.300 },
+  { le = [20.340, 4.940, -0.300], chord = 1.200 },
+]
+controls = [
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.4 }, span = [0.43, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-20, 15] },
+]
+
+# Twin vertical tails on the booms, 2 x 7.6 m2, 40 deg leading edge
+[[surface]]
+name = "fin"
+kind = "fin"
+mirror = true
+airfoil = "naca64a004"
+sections = [
+  { le = [16.800, 2.150, 0.550], chord = 3.400 },
+  { le = [19.570, 2.150, 3.850], chord = 1.200 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.10, 0.70], chord_fraction = 0.28, limits = [-25, 25] },
+]
+
+[[surface]]
+name = "ventral"
+kind = "fin"
+mirror = true
+airfoil = "plate"
+sections = [
+  { le = [16.600, 1.750, -1.050], chord = 2.000 },
+  { le = [17.400, 1.900, -1.950], chord = 0.900 },
+]
+
+# The fuselage: the long nose, the cockpit, the flat centre body and the
+# tail sting between the engines
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
+  { x = 1.50, w = 0.80, top = 0.330, bottom = -0.450, n = 2.0 },
+  { x = 3.50, w = 1.20, top = 0.550, bottom = -0.600, n = 2.0 },
+  { x = 5.50, w = 1.40, top = 0.650, bottom = -0.700, n = 2.2 },
+  { x = 8.00, w = 1.80, top = 0.600, bottom = -0.600, n = 2.6 },
+  { x = 12.00, w = 2.00, top = 0.550, bottom = -0.300, n = 3.0 },
+  { x = 16.00, w = 1.60, top = 0.450, bottom = -0.100, n = 2.8 },
+  { x = 20.00, w = 1.00, top = 0.350, bottom = 0.000, n = 2.4 },
+  { x = 21.935, w = 0.40, top = 0.250, bottom = 0.100, n = 2.0 },
+]
+
+# The engine nacelles with the rectangular intakes under the wing roots
+[[body]]
+name = "nacelle"
+kind = "nacelle"
+mirror = true
+stations = [
+  { x = 7.80, y = 1.350, w = 1.20, top = -0.100, bottom = -1.350, n = 4.0 },
+  { x = 12.00, y = 1.350, w = 1.30, top = -0.050, bottom = -1.400, n = 3.5 },
+  { x = 17.00, y = 1.350, w = 1.30, top = 0.050, bottom = -1.100, n = 3.0 },
+  { x = 20.50, y = 1.350, w = 1.15, top = 0.000, bottom = -1.050, n = 2.4 },
+  { x = 21.30, y = 1.350, w = 1.10, top = -0.050, bottom = -1.000, n = 2.0 },
+]
+
+[[body]]
+name = "canopy"
+kind = "pod"
+stations = [
+  { x = 5.000, w = 0.00, top = 0.700, bottom = 0.680 },
+  { x = 5.700, w = 0.72, top = 1.180, bottom = 0.660, n = 2.0 },
+  { x = 6.800, w = 0.86, top = 1.350, bottom = 0.660, n = 2.0 },
+  { x = 7.900, w = 0.70, top = 1.200, bottom = 0.670, n = 2.0 },
+  { x = 8.800, w = 0.30, top = 0.800, bottom = 0.660, n = 2.0 },
+]
+
+[[engine]]
+name = "AL-31F"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 74.5          # 7,600 kgf military
+thrust_wet_kn = 122.6         # 12,500 kgf afterburner
+bypass_ratio = 0.59
+tsfc_dry = 0.75
+tsfc_wet = 1.92
+design_mach = 2.35
+position = [17.000, 1.350, -0.700]
+mass = 1520
+inlet_x = 7.8
+[engine.nozzle]
+position = [21.300, 1.350, -0.700]
+
+[[gear]]
+name = "Nose Gear"
+position = [6.300, 0.0, -2.250]
+steerable = true
+max_steer = 45
+wheel_diameter = 0.68
+wheel_width = 0.20
+retractable = true
+static_deflection = 0.15
+attach = [6.300, 0.0, -0.900]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [12.180, 2.170, -2.250]
+wheel_diameter = 1.03
+wheel_width = 0.32
+retractable = true
+static_deflection = 0.18
+attach = [12.000, 1.700, -1.300]
+
+[reference]
+aero_point = [11.600, 0.0, 0.0]    # 0.30 MAC
+
+[flight_control]
+type = "fbw"
+n_max = 9.0
+n_min = -3.0
+alpha_max_deg = 26.0
+roll_rate_deg_s = 270.0
+
+[mass]
+empty = 16380                 # Su-27S (Jane's)
+empty_cg = [11.650, 0.0, -0.450]
+# no published inertia: radii of gyration like the F-15's (the same class,
+# layout and size)
+gyration = [0.265, 0.430, 0.550]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [6.700, 0.0, 0.700]
+[[mass.payload]]
+name = "gun ammunition"       # GSh-30-1, 150 rounds
+mass = 70
+position = [9.000, 1.000, 0.000]
+[[mass.tank]]
+name = "fuselage forward"     # the normal fuel load: 5,270 kg of 9,400
+position = [9.500, 0.0, -0.200]
+capacity = 2000
+[[mass.tank]]
+name = "fuselage centre"
+position = [12.000, 0.0, -0.150]
+capacity = 2200
+[[mass.tank]]
+name = "fuselage aft"
+position = [14.500, 0.0, -0.100]
+capacity = 1070
+
+[targets]
+# Su-27S, normal take-off weight, published
+max_mach = 2.35               # at 11 km, full afterburner
+max_mach_altitude_ft = 36000
+max_speed_ktas = 756          # 1,400 km/h at sea level
+climb_rate_fpm = 59000        # 300 m/s
+service_ceiling_ft = 60700    # 18.5 km

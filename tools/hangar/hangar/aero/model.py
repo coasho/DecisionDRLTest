@@ -59,10 +59,14 @@ from .vlm import VLM, Lattice
 RHO0, NU0 = 1.225, 1.46e-5
 
 VORTEX_MIN_SWEEP = math.radians(35.0)   # leading-edge sweep from which a thin section's edge vortex holds
-BURST_WIDTH = math.radians(10.0)        # the burst moves from the trailing edge to the apex over this
+BURST_WIDTH = math.radians(18.0)        # the burst moves from the trailing edge to the apex over this
 BURST_LOSS = 0.15                       # circulation lost behind a burst vortex
+BURST_KEEP = 0.4                        # of its lift a burst vortex keeps: a 60 deg delta's lift rises
+                                        # 15 deg past the burst reaching the trailing edge (Wentz & Kohlman)
 FED_BURST_EARLIER = 4.0                 # deg of strake sweep: a strake-fed wing's vortex bursts earlier
 BURST_SIDESLIP = 0.5                    # of the sideslip that moves the breakdown (NASA's F-16 keeps its dihedral effect)
+CANARD_BURST_LATER = 8.0                # deg of angle of attack a close-coupled canard delays the wing's vortex burst
+BLUNT_VORTEX_SWEEP = (math.radians(45.0), math.radians(60.0))  # a blunt edge's vortex forms from, and fully by, these sweeps
 
 
 def burst_alpha(sweep):
@@ -72,14 +76,19 @@ def burst_alpha(sweep):
     return np.radians(np.clip(8.0 + 1.2 * (np.degrees(sweep) - 50.0), 2.0, 50.0))
 
 
-def realised_vortex(sharpness):
+def realised_vortex(sharpness, sweep=0.0):
     """The part of the lost leading-edge suction that a vortex realises, from
-    the edge's sharpness (DATCOM's Delta-y, % chord): all of it for a sharp
-    edge (Polhamus), none for a round one - whose edge holds its attainable
-    suction and loses the rest to a diffuse separated flow. Calibrated on
-    NASA TP-1538's F-16: its 4 %-thick cambered wing (Delta-y 1.2) makes no
-    vortex lift of its own; its sharp strakes do."""
-    return np.clip((1.0 - np.asarray(sharpness, float)) / 0.45, 0.0, 1.0)
+    the edge's sharpness (DATCOM's Delta-y, % chord) and sweep (rad): all of
+    it for a sharp edge (Polhamus), none for a round one of moderate sweep -
+    whose edge holds its attainable suction and loses the rest to a diffuse
+    separated flow. Calibrated on NASA TP-1538's F-16: its 4 %-thick cambered
+    wing (Delta-y 1.2, 40 deg) makes no vortex lift of its own; its sharp
+    strakes do. Past 45 deg of sweep a blunt edge's separation rolls up into a
+    vortex too, fully by 60 deg, as on the blunt-edged 65 deg delta of the
+    second vortex flow experiment (VFE-2; Luckring, Aerosp. Sci. Tech. 2013)."""
+    sharp = np.clip((1.0 - np.asarray(sharpness, float)) / 0.45, 0.0, 1.0)
+    swept = np.clip((np.asarray(sweep, float) - BLUNT_VORTEX_SWEEP[0]) / (BLUNT_VORTEX_SWEEP[1] - BLUNT_VORTEX_SWEEP[0]), 0.0, 1.0)
+    return np.maximum(sharp, swept)
 
 
 def wind_axes(alpha, beta):
@@ -132,6 +141,12 @@ class AeroModel:
                 names.append(surf.name + (" " + part if part else ""))
         self.group, self.group_names = group, names
         self.n_groups = len(names)
+        self.group_surface = np.array([L.surface_index[np.flatnonzero(group == g)[0]] for g in range(len(names))])
+        self.surf_area = np.array([s.area for s in L.surfaces])
+        self.surf_ar = np.array([s.aspect_ratio for s in L.surfaces])
+        # a strake is part of its wing's planform, not one of its own: its
+        # vortex keeps the strips' suction (the F-16's strakes calibrate it)
+        self.planform_suction = np.array([L.surfaces[i].kind != "strake" for i in L.surface_index])
         self.panel_group = group[L.strip]
         self.bodies = BodyAero(a, self.speed, NU0, mach)
         self._body_pts = self.bodies.points()
@@ -157,13 +172,25 @@ class AeroModel:
         # a wing behind a strake shares its vortex system, which bursts a little
         # before the strake's alone would (the wing's pressure rise downstream)
         feed_bd = max(feed - FED_BURST_EARLIER, 0.0)
+        # a close-coupled canard (its trailing edge within a wing MAC of the
+        # wing's root leading edge) washes the wing's inboard flow down and
+        # steadies its vortex: the vortex bursts later (the Rafale's, the
+        # Typhoon's, the J-10's lift keeps rising past 30 deg)
+        wing = self.aircraft.wing
+        w_le = wing.sections[0].le[0]
+        canard_delay = 0.0
+        for c in self.aircraft.surfaces:
+            if c.kind == "canard":
+                te = max(sec.le[0] + sec.chord for sec in c.sections)
+                if w_le - te < wing.mac[0]:
+                    canard_delay = CANARD_BURST_LATER
         for si, surf in enumerate(L.surfaces):
             idx = np.flatnonzero(L.surface_index == si)
             spec = surf.spec
             if surf.kind in ("fin", "vtail") or spec.get("vortex", True) is False:
                 continue
             sharp = np.array([L.airfoils[k].leading_edge_sharpness for k in idx])
-            rr = realised_vortex(sharp) if surf.kind != "strake" else np.ones(len(idx))
+            rr = realised_vortex(sharp, self.geo["sweep_le"][idx]) if surf.kind != "strake" else np.ones(len(idx))
             if "vortex_realised" in spec:
                 rr = np.full(len(idx), float(spec["vortex_realised"]))
             fed = surf.kind == "wing" and feed > 0.0
@@ -172,6 +199,8 @@ class AeroModel:
             r[idx] = np.where(on[idx], rr, 0.0)
             if fed:
                 bd[idx] = np.maximum(bd[idx], math.radians(feed_bd))
+            if surf.kind == "wing" and canard_delay:
+                bd[idx] = bd[idx] + math.radians(canard_delay / 1.2)   # as that much more sweep (burst_alpha: 1.2 deg/deg)
         return {"on": on, "r": r, "sweep_bd": bd}
 
     def _wing_body_dihedral(self):
@@ -226,12 +255,11 @@ class AeroModel:
         self._theta = theta
         # the wakes leave along the free stream, seen in the plane of symmetry
         self.vlm.select(math.atan2(v[2], max(v[0], 1e-6)))
-        delta = np.zeros(L.n_strips)
-        for ch, d in controls.items():
-            if ch in L.gain:
-                delta = delta + L.gain[ch] * d
-        F, M, info = self._surfaces(v, w, delta, controls, w_ind)
+        own = L.deflections(controls) if controls else None
+        delta = L.strip_deflections(own) if controls else np.zeros(L.n_strips)
+        F, M, info = self._surfaces(v, w, delta, own, w_ind)
         Fb, Mb = self.bodies.forces(v, w, self.ref, info["body_induced"])
+        info["body_moment"] = Mb
         F = F + Fb
         M = M + Mb
         F = F + 0.5 * self.drag_area * v   # excrescences, along the flow
@@ -250,7 +278,7 @@ class AeroModel:
             out["detail"] = info
         return out
 
-    def _surfaces(self, v, w, delta, controls, w_ind):
+    def _surfaces(self, v, w, delta, own, w_ind):
         L, P, V = self.lat, self.polars, self.vlm
         two_pi = 2.0 * math.pi
         # strip velocities (free stream and rotation) in their section planes
@@ -273,11 +301,11 @@ class AeroModel:
         VX = self.vx
         sweep_v = np.clip(G["sweep_le"], 0.0, math.radians(85.0))
         B = 1.0 - smoothstep((np.abs(a_geo) - burst_alpha(VX["sweep_bd"] - BURST_SIDESLIP * beta_k)) / BURST_WIDTH)
-        vortex = (VX["r"] / np.cos(sweep_v) * B, 1.0 - BURST_LOSS * (1.0 - B))
+        vortex = (VX["r"] / np.cos(sweep_v) * (BURST_KEEP + (1.0 - BURST_KEEP) * B), 1.0 - BURST_LOSS * (1.0 - B))
         # the induced flow of vortex-lifting strips holds to higher angles
         w_ind = np.where(VX["on"], 1.0 - float(smoothstep((self._theta - 45.0) / 25.0)), w_ind)
         # 1. the lattice, decambered onto the sections' attached-flow lines (linear)
-        g0 = V.circulation(v, w, controls)
+        g0 = V.circulation(v, w, L.lattice_deflections(own, a_geo))
         gs0 = L.S @ g0
         H = V.decamber_response(v, w)
         qfac = 2.0 / (un * L.chord)
@@ -331,7 +359,17 @@ class AeroModel:
                 step *= 0.3 / m
             s = np.clip(s + step, -0.5, 2.0)
         _, a_eff = lift_ratio(s)
-        cl, cd, cm, _ = P.evaluate(a_eff, delta, vortex)
+        # the leading edge's suction sees the angle less the surface's own
+        # downwash as Polhamus's analogy takes it - CL / (pi A) of its planform:
+        # the 3D suction CL (alpha - alpha_i), which a low-aspect-ratio wing's
+        # strip angles (set by their lift) understate - and the other surfaces'
+        # induced flow
+        cl_circ = P.evaluate(a_eff, delta, vortex)[3]
+        lift = np.bincount(L.surface_index, cl_circ * L.area * un**2, len(L.surfaces)) / self.surf_area
+        own = self.group_surface[None, :] == L.surface_index[:, None]
+        other = np.where(own, 0.0, ind * s[None, :]).sum(axis=1)
+        a_s = a_geo + w_ind * (other - lift[L.surface_index] / (math.pi * self.surf_ar[L.surface_index]))
+        cl, cd, cm, _ = P.evaluate(a_eff, delta, vortex, np.where(self.planform_suction, a_s, a_eff))
         # forces: lift normal to the effective flow, drag along it
         fe = np.cos(a_eff)[:, None] * L.c + np.sin(a_eff)[:, None] * L.u
         lift_dir = np.cross(fe, L.e)
@@ -351,7 +389,9 @@ class AeroModel:
             body_ind = np.einsum("mnk,n->mk", self.vlm.body_W, scaled)
         info = {"alpha_eff": a_eff, "alpha_geo": a_geo, "cl": cl, "cl_lin": cl_lin, "scale": dict(zip(self.group_names, s)),
                 "burst": B, "beta_local": beta_k,
-                "residual": float(np.max(np.abs(res))), "body_induced": body_ind}
+                "residual": float(np.max(np.abs(res))), "body_induced": body_ind, "strip_moment": Mk,
+                "eps": eps, "induced": ind * s[None, :], "w_ind": w_ind * np.ones(L.n_strips),
+                "a_lin": a_lin, "dec": dec, "a0_thin": a0_thin}
         return Fk.sum(axis=0), Mk.sum(axis=0), info
 
 

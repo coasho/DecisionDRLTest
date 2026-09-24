@@ -18,6 +18,8 @@ It builds light aircraft and fighters. For a fighter it adds afterburning
 turbofans, vortex lift, supersonic drag and a fly-by-wire flight control
 system, so the aircraft flies like the real one: the stick asks for load
 factor and roll rate, and the angle of attack stays within its limit.
+Fourteen of the best-known fourth- and fifth-generation fighters are
+included, built from public data (see [the fighter library](#the-fighter-library)).
 
 ![Skua, a hypothetical UAV designed with hangar, in the viewer](images/hangar-skua.jpg)
 
@@ -36,9 +38,12 @@ fsim demo --aircraft mine             watch it fly
 fsim hangar f16c                      a fighter: NASA's wind-tunnel data as reference
 ```
 
-`fsim python examples\python\control_surfaces.py` flies both included
-designs through a slalom. Watch it with
+`fsim python examples\python\control_surfaces.py` flies the C172 and the
+Skua through a slalom. Watch it with
 `fsim viewer --camera chase --chase-distance 20`; `tab` switches aircraft.
+`fsim python examples\python\fighters.py` flies the fourteen fighters
+together (`--chase-distance 60`). `fsim demo --aircraft typhoon` starts
+eight of one type at a speed that suits it.
 
 `aircraft\mine\out\report.html` collects everything on one page.
 
@@ -135,13 +140,14 @@ max_mach = 2.05                  # at max_mach_altitude_ft: calibrates the wave 
 max_mach_altitude_ft = 40000
 ```
 
-Three complete designs are included:
+Included designs:
 
 - `aircraft/c172`: a Cessna 172P built from published dimensions, used to
   validate the methods.
 - `aircraft/skua`: a hypothetical twin-boom pusher UAV.
 - `aircraft/f16c`: an F-16C Block 52, checked against NASA's wind-tunnel
   data.
+- Thirteen more fighters: [the fighter library](#the-fighter-library).
 
 ## Methods
 
@@ -196,10 +202,22 @@ For fighters:
   aircraft's. Past its attached-flow limit the leading edge keeps the suction
   it can hold (Carlson's attainable thrust, NASA TP-1500). What it loses turns
   into vortex lift where the edge is sharp (Polhamus' suction analogy, NASA
-  TN D-3767). The vortex bursts at an angle that rises with the sweep
-  (Earnshaw & Lawford, ARC R&M 3424), and a wing behind a strake shares the
-  strake's vortex. The circulation's force uses the local velocity, so the
-  potential lift goes as Polhamus' sin α cos² α.
+  TN D-3767), and past 45° of sweep where it is blunt too (the blunt-edged
+  65° delta of the VFE-2 experiment). The suction a wing loses to its vortex
+  is Polhamus' own: its lift times the angle less its planform's downwash,
+  CL/πA. A sharp 60° delta
+  gets within 7 % of Polhamus' lift up to 20°. The vortex bursts at an angle
+  that rises with the sweep (Earnshaw & Lawford, ARC R&M 3424) and takes 18°
+  more to reach the apex; a burst vortex keeps 40 % of its lift, so a 60°
+  delta's lift peaks at 1.27 near 30° (Wentz & Kohlman measured about 1.3 at
+  35°). A wing behind a strake shares the strake's vortex; a close-coupled
+  canard delays the wing's burst. The
+  circulation's force uses the local velocity, so the potential lift goes as
+  Polhamus' sin α cos² α.
+- **Controls.** Each control turns as a whole and stops at its own limits,
+  so a canard can travel further than the elevons on its channel. An
+  all-moving surface turns its whole section: the lattice gets the deflection
+  that gives it sin(α + δ), not the linear sin α + δ cos α.
 - **Wake.** The lattice's wake leaves the trailing edge along the free
   stream. It is solved at wake angles 2° apart and interpolated, so a tail
   in the wing's plane sees the wake rise above it.
@@ -213,13 +231,22 @@ For fighters:
   distribution (Sears–Haack times Raymer's E_WD, from Korn's
   drag-divergence Mach). Once the leading edge is supersonic, the edge's
   suction is lost.
-- **Turbofans.** JSBSim's turbine, with thrust lapse from Mattingly, Heiser
-  & Pratt (*Aircraft Engine Design*, eq. 2.54), weight and size from Raymer.
+- **Turbofans.** JSBSim's turbine. Thrust goes as the density to the 0.7
+  (afterburner) or 1 (dry) up to 11 km, and as the density above it, where
+  the temperature holds. It rises with the ram, 1 + 0.2 M², and is cut back
+  once the compressor's inlet temperature passes the throttle ratio TR
+  (Mattingly, Heiser & Pratt, *Aircraft Engine Design*, sec. 2.3). Weight
+  and size come from Raymer. Calibration fits TR to the published top speed,
+  and then the wave drag if TR alone cannot.
+- **Fighter mass.** Raymer's fighter/attack weight equations. Radii of
+  gyration are given per design (NASA's for the F-16).
 - **Fly-by-wire.** Gains are placed from the linear model at each dynamic
   pressure and Mach number (`hangar/fcs.py`):
   - Pitch: angle-of-attack and pitch-rate feedback give the short period
     CAP 1 and damping 0.8. A load-factor command follows a model response,
-    limited by the angle of attack left.
+    limited by the angle of attack left, counting the pitch rate's next
+    0.25 s, so an unstable canard delta pitching up fast is caught before it
+    gets to the limit.
   - Roll: a roll-rate command with bank hold.
   - Yaw: a yaw damper, and sideslip from the pedals.
 
@@ -266,9 +293,10 @@ TP-1538's wind-tunnel data (Nguyen et al., 1979), a reference measured from
 ![hangar's F-16C against NASA TP-1538](images/hangar-f16c-nasa.jpg)
 
 Lift, drag and pitching moment agree to 40° angle of attack. The mean lift
-error is 5 %, drag 7 %, and Cm is within 0.045. The neutral point is at
-35.1 % of the MAC (NASA: 34.5 %). The dihedral effect, the weathercock
-stability to 25°, and the damping in pitch and yaw at low α also agree.
+error is 5 % and drag 7 %; Cm is within 0.025 to 15° and 0.06 to 40°. The
+neutral point is at 35.1 % of the MAC (NASA: 34.5 %). The dihedral effect,
+the weathercock stability to 25°, and the damping in pitch and yaw at low α
+also agree.
 
 hangar's F-16C differs in these:
 
@@ -284,16 +312,56 @@ Flown through its fly-by-wire:
 
 | F-16C, clean | hangar | published |
 |---|---|---|
-| top speed, 40,000 ft | Mach 2.05 (calibrated: E_WD 1.2) | Mach 2.05 |
-| sustained turn, Mach 0.9, 15,000 ft | 13.5 deg/s | about 13.5 deg/s |
-| full aft stick, 350 kt | 8.0 g, α held at 25.9° | 9 g, α limit 25° |
-| full-stick roll, 350 kt | 300 deg/s | 308 deg/s (limit) |
-| top speed, sea level | 906 kt | 795 kt |
-| best rate of climb | 65,700 ft/min | 50,000 ft/min |
+| top speed, 40,000 ft | Mach 2.05 (calibrated: TR 1.14) | Mach 2.05 |
+| sustained turn, Mach 0.9, 15,000 ft | 12.7 deg/s | about 13.5 deg/s |
+| full aft stick, 350 kt | 7.2 g, α held at 24.8° | α limit 25° |
+| full-stick roll, 350 kt | 302 deg/s | 308 deg/s (limit) |
+| top speed, sea level | 893 kt | 795 kt |
+| best rate of climb | 57,500 ft/min | 50,000 ft/min |
+| service ceiling | 59,200 ft | 50,000+ ft |
 
 The top speed at 40,000 ft is the calibration's one target. The rest are
-predictions. At sea level the model has too much thrust: Mattingly's lapse
-gives the F100 22 % more thrust at Mach 0.9 than on the stand.
+predictions. The published sea-level speed is the airframe's limit, not
+where thrust and drag meet.
+
+## The fighter library
+
+Fourteen fighters, each built the F-16C's way from public dimensions,
+weights and engine data, and flown through its own fly-by-wire. Each is
+`jsbsim:<name>` on the platform: in the viewer with moving control
+surfaces, in the SDKs and in scenario files.
+
+![The fourteen fighters in the viewer, each flying its fly-by-wire](images/hangar-fighters.jpg)
+
+Flown, beside the published figures (the J-20A's and the Su-57's are
+estimates):
+
+| aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft | α held (limit) |
+|---|---|---|---|---|---|
+| F-16C Block 52 | `f16c` | 2.07 (2.05) | 57,500 (50,000) | 59,200 (50,000) | 24.8° (25°) |
+| F-15C | `f15c` | 2.46 (2.5) | 67,000 (50,000) | 60,600 (65,000) | 30.4° (30°) |
+| F/A-18C | `fa18c` | 1.80 (1.8) | 46,300 (45,000) | 59,200 (50,000) | 35.3° (35°) |
+| F-22A | `f22a` | 2.27 (2.25) | 60,900 | 59,000 (65,000) | 40.3° (40°) |
+| F-35A | `f35a` | 1.62 (1.6) | 41,400 | 55,100 (50,000) | 19.7° (20°) |
+| Su-27S | `su27s` | 2.36 (2.35) | 63,900 (59,000) | 61,000 (60,700) | 26.4° (26°) |
+| Su-57 | `su57` | 2.00 (2.0) | 59,000 | 57,800 (65,600) | 30.9° (30°) |
+| MiG-29A | `mig29a` | 2.26 (2.25) | 63,400 (65,000) | 60,200 (59,000) | 26.3° (26°) |
+| Typhoon | `typhoon` | 2.01 (2.0) | 48,200 (62,000) | 59,000 (55,000) | 31.5° (30°) |
+| Rafale C | `rafale` | 1.80 (1.8) | 50,400 (60,000) | 59,100 (50,000) | 33.6° (32°) |
+| JAS 39C Gripen | `gripen` | 2.00 (2.0) | 51,700 | 56,800 (50,000) | 29.3° (28°) |
+| Mirage 2000C | `mirage2000` | 2.20 (2.2) | 54,300 (56,000) | 56,500 (56,000) | 30.9° (29°) |
+| J-10A | `j10a` | 2.20 (2.2) | 52,400 | 54,800 (59,000) | 31.7° (30°) |
+| J-20A | `j20a` | 2.00 (2.0) | 45,800 | 55,700 (66,000) | 32.5° (30°) |
+
+- The top speed at altitude is each design's one calibration target. Every
+  other number is a prediction.
+- Published ceilings of 50,000 ft are operational limits. The model's
+  ceiling is where the excess power at Mach 0.9 runs out, some 6-9,000 ft
+  higher.
+- The Typhoon and Rafale climb about 20 % slower than published: fitted to
+  their top speed, their engines keep less thrust at sea level.
+- Engines fitted to Mach 2.3-2.5 keep too much thrust at sea level (see
+  [Limits](#limits)).
 
 ## Limits
 
@@ -310,10 +378,21 @@ gives the F100 22 % more thrust at Mach 0.9 than on the stand.
   one cruise speed (`[analysis] speed`), whatever the altitude. Laminar separation bubbles below
   Re ≈ 2×10⁵ are not modelled.
 - **Engines.** Piston, electric, and afterburning turbofans. Thrust
-  lapse comes from one published model, not from each engine's own data.
+  lapse comes from one published model, not from each engine's own data. An
+  engine fitted to Mach 2.3-2.5 at altitude keeps too much thrust at sea
+  level: the F-15C, Su-27S and MiG-29A reach 950-1,090 kt there, where the
+  real ones are held near 800 kt.
 - **High angle of attack.** Forebody vortices, and the fin's shielding by
   the wing, are not modelled. Past about 30° a fighter keeps more
-  directional stability than the real one.
+  directional stability than the real one. Thrust vectoring is not modelled
+  either: the Su-57's limiter holds the 30° its aerodynamic controls can.
+  The F-35A's holds 20°: past about 21° its stabilators, stalled, cannot
+  bring the nose down in this model (the real one flies to 50°).
+- **Tails on booms.** The lattice carries a horizontal tail across the gap
+  between two booms (Su-27, MiG-29) as if it were one surface, so those
+  aircraft come out stable where the real ones are close to neutral.
+- **Balance.** Real fighters' CGs are rarely published. The canard deltas'
+  are placed 5-10 % of the MAC behind the neutral point the model finds.
 
 ## For Claude
 

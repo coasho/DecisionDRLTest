@@ -176,6 +176,9 @@ roll_rate_deg_s = 308.0
 [mass]
 empty = 8670                  # 19,100 lb, F-16C Block 52
 empty_cg = [8.000, 0.0, 0.000]
+# radii of gyration from NASA TP-1538's inertia (Ixx 9,496, Iyy 55,814,
+# Izz 63,100 slug ft2 at 20,500 lb)
+gyration = [0.249, 0.380, 0.496]
 [mass.component]              # kg, from published weight statements (rounded)
 wing = 1000
 strake = 60
