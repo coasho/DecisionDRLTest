@@ -1,0 +1,10 @@
+# The J-10A's light grey
+[paint]
+scheme = "single"
+colours = ["#a3abb1"]
+radome = "#959da3"
+radome_x = 1.8
+canopy = "gold"
+panel_lines = 0.09
+wear = 0.05
+gloss = 0.3

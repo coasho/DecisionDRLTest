@@ -67,7 +67,7 @@ vsync and uses ~3% of one core while mirroring 64 vehicles).
 | `publish = false` | no segment at all (e.g. headless sweeps on a cluster) |
 | `publishIntervalSeconds` | the copy rate limit; raise it to reduce the copy further, lower it for smoother motion at real-time pace |
 | `capacity` | vehicle slots in the segment (256 by default); vehicles beyond it simulate but are not shown |
-| `VehicleSpec::model` | optional glTF path shown instead of the type's model (`models/<type>.glb`) or the default aircraft |
+| `VehicleSpec::model` | optional glTF path shown instead of the type's model (`models/<type>.glb`, a design's `aircraft/<type>/<type>.glb`, or the design registered to stand in for a stock aircraft in `aircraft/models.txt`) or the default aircraft |
 | `recordPath` | also write the run to a `.fsrec` file; `flightsim-viewer.exe --replay <file>` plays it back (space pauses, `.` steps one frame, `[` `]` change the time factor, the timeline slider seeks, `home` restarts, loops at the end) |
 
 ## Moving control surfaces
@@ -108,6 +108,16 @@ code reads from `state()`, so what you see is what the simulation did:
   idle and with the afterburner lit).
 - `fsim:afterburner[:<engine>]` stretches an exhaust flame along its x axis
   with the engine's `afterburner` (0 out .. 1 full), and hides it when out.
+- `fsim:oleo:<wheel>[:<gain>]` slides along its x axis by the unit's
+  `wheelCompressionM` (times the gain): a strut's piston, so a parked
+  aircraft stands on its wheels.
+- `fsim:steer:<wheel>` turns about its x axis by `wheelSteerRad`.
+- `fsim:wheel:<wheel>:<radius>` rolls about its x axis at `wheelSpeedMs`
+  over the radius, and spins down in the air.
+
+`<wheel>` is the unit's place among the aircraft's wheeled gear (JSBSim's
+BOGEY contacts, in the aircraft file's order - the nose wheel, then the left
+and right mains, for most).
 
 To make a model's surface move:
 

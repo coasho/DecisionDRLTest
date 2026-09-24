@@ -4,17 +4,20 @@
 # JSBSim's own f16 is built on those tables, so every coefficient here can be
 # checked against measurement.
 #
-# Frame: metres, x aft from the nose tip, y right, z up from the wing's chord
-# plane. Sources: NASA TP-1538 (reference geometry: S = 300 ft2, b = 30 ft,
-# c = 11.32 ft, moments about 0.35 c; inertia at 20,500 lb), Jane's All the
+# Frame: metres, x aft from the radome tip, y right, z up from the wing's
+# chord plane. Sources: NASA TP-1538 (reference geometry: S = 300 ft2, b = 30
+# ft, c = 11.32 ft, moments about 0.35 c; inertia at 20,500 lb), Jane's All the
 # World's Aircraft (dimensions, weights, performance), Stevens & Lewis,
 # "Aircraft Control and Simulation" (the NASA model), Pratt & Whitney
-# (F100-PW-229).
+# (F100-PW-229). The shape - nose, strakes, tail, gear - is measured off two
+# three-views that agree to 0.1-0.2 m: Marek Cel's (Wikimedia Commons, CC0)
+# and the USAF's recognition drawing (public domain).
 
 [aircraft]
 name = "f16c"
 description = "General Dynamics F-16C Block 52 Fighting Falcon (hangar build)"
 category = "fighter"
+stands_in_for = ["f16"]         # the viewer draws JSBSim's own f16 with this model (fsim hangar register)
 
 [analysis]
 speed = 250.0                # m/s: the Reynolds numbers (cruise, 3 000 m)
@@ -41,45 +44,48 @@ leading = [
   { name = "leading-edge flap", span = [0.28, 0.97], chord_fraction = 0.17, limits = [-2, 25], schedule = [1.38, 9.05, 1.45] },
 ]
 
-# Leading-edge extensions (strakes): sharp, 77 deg of sweep, from beside the
-# canopy (x 2.8 m, at the fuselage side) out to the wing's leading edge. The
-# part inside the fuselage carries the strakes' lift across, as the wing's
-# does.
+# Leading-edge extensions (strakes): sharp, an ogee from beside the radome
+# (x 1.6 m, at the fuselage side) swept 81 then 78 deg out to the wing's
+# leading edge. The part inside the fuselage carries the strakes' lift
+# across, as the wing's does.
 [[surface]]
 name = "strake"
 kind = "strake"
 airfoil = "plate"
 sections = [
-  { le = [2.800, 0.000, 0.000], chord = 2.500 },
-  { le = [2.800, 0.450, 0.000], chord = 2.878 },
-  { le = [6.369, 1.274, 0.000], chord = 0.050 },
+  { le = [1.600, 0.000, 0.000], chord = 3.700 },
+  { le = [1.600, 0.450, 0.000], chord = 4.078 },
+  { le = [3.520, 0.750, 0.000], chord = 2.409 },
+  { le = [6.446, 1.366, 0.000], chord = 0.050 },
 ]
 
-# All-moving stabilator, 10 deg anhedral: 63.7 ft2 exposed (the part inside
-# the fuselage carries its lift across); the tail arm puts 0.25 of its MAC
-# 16.46 ft behind the moment reference, as in the report.
+# All-moving stabilator, 10 deg anhedral, its trailing edge straight across:
+# 5.6 m2 exposed outboard of the tail shelves (the part inside carries its
+# lift across). Where the three-views put it - its quarter chord 4.5 m behind
+# the wing's, the 16.46 ft of the report being another measure.
 [[surface]]
 name = "htail"
 kind = "htail"
 airfoil = "naca64a006"
 sections = [
-  { le = [11.320, 0.000, 0.082], chord = 2.751 },
-  { le = [13.661, 2.790, -0.410], chord = 0.700 },
+  { le = [10.510, 0.000, 0.082], chord = 3.390 },
+  { le = [13.040, 2.790, -0.410], chord = 0.860 },
 ]
 controls = [
   # the exposed panels turn whole about a spindle; they also roll the
   # aircraft, differentially (the F-16's roll mixer: 5.4 deg at full aileron)
-  { name = "stabilator", channel = "elevator", mix = { aileron = 0.25 }, span = [0.27, 1.0], chord_fraction = 1.0, pivot = 0.30, limits = [-25, 25] },
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.25 }, span = [0.38, 1.0], chord_fraction = 1.0, pivot = 0.30, limits = [-25, 25] },
 ]
 
-# Fin: 54.75 ft2, 47.5 deg leading edge; its tip sets the 5.09 m overall height
+# Fin: 54.75 ft2 with its root fillet, 48 deg leading edge; its tip 5.1 m
+# above the ground, parked
 [[surface]]
 name = "fin"
 kind = "fin"
 airfoil = "naca64a008"
 sections = [
-  { le = [10.850, 0.000, 0.550], chord = 2.650 },
-  { le = [13.905, 0.000, 3.350], chord = 1.150 },
+  { le = [10.300, 0.000, 0.550], chord = 2.820 },
+  { le = [13.260, 0.000, 3.180], chord = 1.350 },
 ]
 controls = [
   { name = "rudder", channel = "rudder", span = [0.08, 0.72], chord_fraction = 0.30, limits = [-30, 30] },
@@ -92,32 +98,76 @@ kind = "fin"
 mirror = true
 airfoil = "plate"
 sections = [
-  { le = [11.400, 0.450, -0.600], chord = 1.100 },
-  { le = [11.800, 0.620, -1.020], chord = 0.550 },
+  { le = [9.930, 0.450, -0.700], chord = 1.450 },
+  { le = [10.250, 0.640, -1.400], chord = 1.060 },
 ]
 
-# Fuselage: a round nose, then the wide, flat-bellied centre body the
-# strakes and wing blend into (its widest line at the wing's plane), over the
-# intake duct and the main gear bays either side of it; round again at the
-# engine.
+# Fuselage: the radome drooping to its tip, then the wide, flat-bellied
+# centre body the strakes and wing blend into (its widest line at the wing's
+# plane), over the intake duct and the main gear bays either side of it; the
+# canopy's fairing running back into the top; deep again at the engine bay,
+# round at the nozzle.
 [[body]]
 name = "fuselage"
 kind = "fuselage"
 stations = [
-  { x = 0.00, w = 0.00, top = 0.020, bottom = 0.020 },
-  { x = 0.50, w = 0.40, top = 0.210, bottom = -0.170, n = 2.0 },
-  { x = 1.50, w = 0.78, top = 0.390, bottom = -0.330, n = 2.0 },
-  { x = 2.60, w = 0.92, top = 0.510, bottom = -0.440, chine = -0.020, n_top = 2.0, n_bottom = 2.2 },
-  { x = 3.60, w = 1.00, top = 0.570, bottom = -0.520, chine = -0.020, n_top = 2.1, n_bottom = 2.4 },
-  { x = 4.40, w = 1.08, top = 0.600, bottom = -0.600, chine = -0.010, n_top = 2.2, n_bottom = 2.6 },
+  { x = 0.00, w = 0.00, top = -0.330, bottom = -0.370 },
+  { x = 0.50, w = 0.46, top = -0.140, bottom = -0.480, n = 2.0 },
+  { x = 1.00, w = 0.76, top = 0.030, bottom = -0.520, n = 2.0 },
+  { x = 1.50, w = 0.92, top = 0.180, bottom = -0.530, n = 2.0 },
+  { x = 2.00, w = 1.06, top = 0.310, bottom = -0.520, chine = -0.150, n_top = 2.0, n_bottom = 2.2 },
+  { x = 2.60, w = 1.10, top = 0.460, bottom = -0.500, chine = -0.080, n_top = 2.0, n_bottom = 2.3 },
+  { x = 3.60, w = 1.04, top = 0.570, bottom = -0.470, chine = -0.030, n_top = 2.1, n_bottom = 2.4 },
+  { x = 4.40, w = 1.08, top = 0.600, bottom = -0.560, chine = -0.010, n_top = 2.2, n_bottom = 2.6 },
   { x = 5.50, w = 1.30, top = 0.620, bottom = -0.700, chine = 0.000, n_top = 2.3, n_bottom = 3.0 },
-  { x = 7.00, w = 1.60, top = 0.620, bottom = -0.900, chine = 0.000, n_top = 2.3, n_bottom = 3.6 },
-  { x = 8.50, w = 1.62, top = 0.620, bottom = -1.000, chine = 0.000, n_top = 2.3, n_bottom = 3.6 },
-  { x = 9.80, w = 1.50, top = 0.610, bottom = -0.880, chine = 0.000, n_top = 2.3, n_bottom = 3.2 },
-  { x = 11.00, w = 1.30, top = 0.580, bottom = -0.650, n = 2.5 },
-  { x = 12.50, w = 1.12, top = 0.540, bottom = -0.520, n = 2.2 },
-  { x = 14.00, w = 1.02, top = 0.500, bottom = -0.480, n = 2.0 },
-  { x = 15.03, w = 0.86, top = 0.430, bottom = -0.430, n = 2.0 },
+  { x = 6.50, w = 1.52, top = 0.690, bottom = -0.850, chine = 0.000, n_top = 2.2, n_bottom = 3.4 },
+  { x = 7.50, w = 1.62, top = 0.640, bottom = -0.960, chine = 0.000, n_top = 2.3, n_bottom = 3.6 },
+  { x = 8.50, w = 1.62, top = 0.630, bottom = -0.980, chine = 0.000, n_top = 2.3, n_bottom = 3.6 },
+  { x = 9.80, w = 1.50, top = 0.620, bottom = -0.960, chine = 0.000, n_top = 2.3, n_bottom = 3.2 },
+  { x = 11.00, w = 1.36, top = 0.620, bottom = -0.900, n_top = 2.4, n_bottom = 2.6 },
+  { x = 12.50, w = 1.20, top = 0.560, bottom = -0.800, n = 2.3 },
+  { x = 13.35, w = 1.10, top = 0.500, bottom = -0.650, n = 2.1 },
+  { x = 14.00, w = 0.98, top = 0.440, bottom = -0.540, n = 2.0 },
+]
+
+# The pitot boom on the radome's tip, 22.2 in long
+[[body]]
+name = "pitot"
+kind = "pod"
+aero = false
+stations = [
+  { x = -0.564, w = 0.000, top = -0.340, bottom = -0.360 },
+  { x = -0.544, w = 0.030, top = -0.335, bottom = -0.365, n = 2.0 },
+  { x = 0.000, w = 0.050, top = -0.325, bottom = -0.375, n = 2.0 },
+  { x = 0.150, w = 0.090, top = -0.305, bottom = -0.395, n = 2.0 },
+]
+
+# The fin's root fillet, rising along the spine from behind the wing
+[[body]]
+name = "dorsal fillet"
+kind = "pod"
+aero = false                  # the fin's area counts it
+stations = [
+  { x = 8.300, w = 0.000, top = 0.600, bottom = 0.400 },
+  { x = 9.200, w = 0.320, top = 0.680, bottom = 0.300, n = 2.2 },
+  { x = 10.200, w = 0.360, top = 0.900, bottom = 0.300, n = 2.4 },
+  { x = 11.000, w = 0.340, top = 1.070, bottom = 0.300, n = 2.4 },
+  { x = 11.600, w = 0.300, top = 1.200, bottom = 0.300, n = 2.4 },
+]
+
+# The tail shelves beside the engine bay, from the wing's trailing edge back
+# to the speed brakes: the stabilators turn on their outer edges
+[[body]]
+name = "tail shelf"
+kind = "pod"
+mirror = true
+aero = false                  # part of the fuselage's side: the tables leave it out
+stations = [
+  { x = 10.000, y = 0.700, w = 0.000, top = 0.080, bottom = -0.040 },
+  { x = 10.600, y = 0.760, w = 0.600, top = 0.120, bottom = -0.100, n = 3.0 },
+  { x = 13.000, y = 0.740, w = 0.640, top = 0.120, bottom = -0.100, n = 3.0 },
+  { x = 13.600, y = 0.720, w = 0.680, top = 0.100, bottom = -0.080, n = 3.0 },
+  { x = 13.650, y = 0.720, w = 0.000, top = 0.060, bottom = -0.040 },
 ]
 
 # The chin intake: a fixed normal-shock inlet under the cockpit, its lip
@@ -130,11 +180,11 @@ duct = 1.6
 duct_rise = 0.35
 duct_taper = 0.9
 stations = [
-  { x = 4.40, w = 0.96, top = -0.560, bottom = -1.160, chine = -0.820, n_top = 4.0, n_bottom = 2.4 },
-  { x = 5.40, w = 1.00, top = -0.560, bottom = -1.180, chine = -0.840, n_top = 4.0, n_bottom = 2.6 },
-  { x = 7.00, w = 0.98, top = -0.560, bottom = -1.120, chine = -0.820, n_top = 4.0, n_bottom = 2.8 },
-  { x = 8.60, w = 0.80, top = -0.560, bottom = -1.020, n_top = 4.0, n_bottom = 2.8 },
-  { x = 9.80, w = 0.40, top = -0.560, bottom = -0.800, n = 2.5 },
+  { x = 4.40, w = 0.96, top = -0.500, bottom = -1.040, chine = -0.760, n_top = 4.0, n_bottom = 2.4 },
+  { x = 5.40, w = 1.00, top = -0.500, bottom = -1.070, chine = -0.780, n_top = 4.0, n_bottom = 2.6 },
+  { x = 7.00, w = 0.98, top = -0.520, bottom = -1.030, chine = -0.760, n_top = 4.0, n_bottom = 2.8 },
+  { x = 8.60, w = 0.80, top = -0.540, bottom = -0.990, n_top = 4.0, n_bottom = 2.8 },
+  { x = 9.80, w = 0.40, top = -0.540, bottom = -0.850, n = 2.5 },
 ]
 
 # The wingtip launcher rails every F-16 carries (LAU-129): they set its
@@ -145,10 +195,10 @@ kind = "pod"
 mirror = true
 aero = false                  # part of the wing tip: the tables leave it out
 stations = [
-  { x = 8.10, y = 4.635, w = 0.000, top = 0.000, bottom = -0.040 },
-  { x = 8.50, y = 4.635, w = 0.150, top = 0.070, bottom = -0.110, n = 3.0 },
-  { x = 10.60, y = 4.635, w = 0.150, top = 0.070, bottom = -0.110, n = 3.0 },
-  { x = 10.90, y = 4.635, w = 0.060, top = 0.030, bottom = -0.060, n = 2.5 },
+  { x = 7.950, y = 4.635, w = 0.000, top = 0.000, bottom = -0.040 },
+  { x = 8.350, y = 4.635, w = 0.150, top = 0.070, bottom = -0.110, n = 3.0 },
+  { x = 10.450, y = 4.635, w = 0.150, top = 0.070, bottom = -0.110, n = 3.0 },
+  { x = 10.750, y = 4.635, w = 0.060, top = 0.030, bottom = -0.060, n = 2.5 },
 ]
 
 # The one-piece bubble; its only frame the bow behind the seat
@@ -158,11 +208,13 @@ kind = "pod"
 frames = [5.45]
 frame_width = 0.09
 stations = [
-  { x = 2.90, w = 0.00, top = 0.560, bottom = 0.540 },
-  { x = 3.30, w = 0.52, top = 0.950, bottom = 0.500, n = 2.0 },
-  { x = 4.20, w = 0.66, top = 1.080, bottom = 0.520, n = 2.0 },
-  { x = 5.20, w = 0.60, top = 1.000, bottom = 0.550, n = 2.0 },
-  { x = 6.20, w = 0.30, top = 0.680, bottom = 0.580, n = 2.0 },
+  { x = 2.40, w = 0.00, top = 0.440, bottom = 0.420 },
+  { x = 2.80, w = 0.46, top = 0.830, bottom = 0.400, n = 2.0 },
+  { x = 3.35, w = 0.62, top = 1.010, bottom = 0.450, n = 2.0 },
+  { x = 4.05, w = 0.66, top = 1.070, bottom = 0.490, n = 2.0 },
+  { x = 4.75, w = 0.62, top = 1.000, bottom = 0.520, n = 2.0 },
+  { x = 5.45, w = 0.48, top = 0.860, bottom = 0.550, n = 2.0 },
+  { x = 6.30, w = 0.24, top = 0.720, bottom = 0.600, n = 2.0 },
 ]
 
 [[engine]]
@@ -178,32 +230,37 @@ design_mach = 2.0
 position = [11.300, 0.0, -0.050]
 mass = 1740                   # 3,836 lb dry
 [engine.nozzle]
-position = [15.030, 0.0, -0.020]
+position = [14.000, 0.0, -0.050]
 
-# The nose gear stands on the intake and folds aft under the duct, its
-# wheel turned flat; the main gear folds forward into the belly beside it.
+# The gear as the flight manual has it (T.O. 1F-16CJ-1): a 158 in wheelbase,
+# a 93 in track, the axles about 189 and 347 in behind the radome's tip; the
+# nose gear stands on the intake and folds aft under the duct, the main gear
+# forward into the belly beside it, each wheel twisting to lie flat. Tyres
+# 17.9x6.7R8 and 27.75x8.75-14.5.
 [[gear]]
 name = "Nose Gear"
-position = [4.950, 0.0, -1.740]
+position = [4.770, 0.0, -2.000]
 steerable = true
 max_steer = 32
-wheel_diameter = 0.46
-wheel_width = 0.15
+wheel_diameter = 0.455
+wheel_width = 0.170
 retractable = true
 retract = "aft"
+wheel_turn = "flat"
 static_deflection = 0.12
-attach = [4.950, 0.0, -1.060]
+attach = [4.770, 0.0, -0.800]
 
 [[gear]]
 name = "Main Gear"
 mirror = true
-position = [8.850, 1.180, -1.740]
-wheel_diameter = 0.70
-wheel_width = 0.20
+position = [8.780, 1.181, -2.000]
+wheel_diameter = 0.705
+wheel_width = 0.222
 retractable = true
-static_deflection = 0.14
-attach = [8.550, 0.600, -0.700]
 retract = "forward"
+wheel_turn = "flat"
+static_deflection = 0.14
+attach = [8.470, 0.600, -0.700]
 
 [reference]
 aero_point = [8.030, 0.0, 0.0]     # 0.35 MAC: NASA TP-1538's moment reference
@@ -230,7 +287,8 @@ strake = 60
 htail = 280
 fin = 170
 ventral = 30
-fuselage = 2280
+fuselage = 2230
+"tail shelf" = 50
 intake = 120
 canopy = 150
 "Nose Gear" = 110
@@ -260,7 +318,7 @@ name = "right wing"
 position = [8.200, 2.000, 0.000]
 capacity = 420
 
-[dimensions]                  # published, overall, gear down (Jane's: 49 ft 5 in long; 31 ft span without the tip launchers; 16 ft 8.5 in high):
+[dimensions]                  # published, overall, gear down (Jane's: 49 ft 5 in long with the pitot; 31 ft span without the tip launchers; 16 ft 8.5 in high):
 length = 15.06                 # m
 span = 9.45
 height = 5.09

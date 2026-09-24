@@ -46,7 +46,20 @@ public:
         double placeholderSpanM = 11.0;
         std::vector<std::filesystem::path> modelDirs; ///< searched for `<type>.glb` / `.gltf` (type without its "jsbsim:" prefix)
         bool segmentation = false;       ///< also build the id-coloured copy (segmentation cameras)
+        vsg::dvec3 modelOffset{0.0, 0.0, 0.0}; ///< where the model sits in the body frame (m: forward, right, down)
     };
+
+    /// A stock aircraft drawn with a model designed here: the design whose
+    /// model stands in for it, and where that model sits (body axes, m) so its
+    /// wheels stand where the stock aircraft's do.
+    struct StandIn {
+        std::string design;
+        vsg::dvec3 offset{0.0, 0.0, 0.0};
+    };
+    /// Reads a register of stand-ins (`models.txt` in a model directory, as
+    /// `fsim hangar register` writes it): lines `<type> <design> <forward>
+    /// <right> <down>`, # comments. Entries already in `out` are kept.
+    static bool readStandIns(const std::filesystem::path& file, std::map<std::string, StandIn>& out);
 
     /// Compiles a subgraph loaded after the scene was compiled (render::Viewer::compile).
     using Compiler = std::function<bool(vsg::ref_ptr<vsg::Node>)>;
@@ -187,6 +200,7 @@ private:
     Compiler compiler_;
     Model default_;
     std::map<std::string, Model> library_; ///< by resolved path; an empty Model = failed to load
+    std::map<std::string, StandIn> standIns_; ///< stock types drawn with a design's model (models.txt)
     std::vector<std::string> slotModel_;
 
     vsg::ref_ptr<vsg::Group> root_;

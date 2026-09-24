@@ -1,0 +1,10 @@
+# The F-22A's two greys (FS 36170 and FS 36320) in broad patches, with the
+# sheen of its coatings, the gold-tinted canopy
+[paint]
+scheme = "camo"
+colours = ["#727b82", "#575f65"]
+scale = 5.0
+canopy = "gold"
+panel_lines = 0.05
+wear = 0.03
+gloss = 0.45

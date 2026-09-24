@@ -4,6 +4,7 @@
     python -m hangar <design> --quick          the same, coarse and short: a first look
     python -m hangar new <name> [--like c172]  start a design from another
     python -m hangar list                      the designs in aircraft/
+    python -m hangar register                  the viewer's stand-ins for stock aircraft (aircraft/models.txt)
 
 <design> is a name (aircraft/<name>/<name>.toml) or a path to a .toml.
 Stages: geometry aero mass propulsion build verify fly report (in that order;
@@ -29,6 +30,12 @@ def main(argv=None):
             if os.path.isfile(toml):
                 built = os.path.isfile(os.path.join(root, name, name + ".xml"))
                 print("%-16s %s" % (name, "built" if built else "not built"))
+        return 0
+    if argv and argv[0] == "register":
+        from . import register
+        root = os.path.join(pipeline.repo_root(), "aircraft")
+        rows = register.register(root)
+        print("%s: %d stand-in(s)" % (os.path.join(root, "models.txt"), len(rows)))
         return 0
     if argv and argv[0] == "new":
         p = argparse.ArgumentParser(prog="hangar new")

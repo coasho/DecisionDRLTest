@@ -1,0 +1,10 @@
+# The F-15C's "Mod Eagle" greys: FS 36176 patches over FS 36251, wrapped all
+# round
+[paint]
+scheme = "camo"
+colours = ["#8a959c", "#5e6970"]
+scale = 3.5
+canopy = "clear"
+panel_lines = 0.09
+wear = 0.05
+gloss = 0.25

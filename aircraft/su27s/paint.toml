@@ -1,0 +1,14 @@
+# The Su-27S's air-superiority blues: darker blue-grey patches over a light
+# blue-grey, pale blue below, the off-white radome
+[paint]
+scheme = "camo"
+colours = ["#9fb0bb", "#62798b"]
+underside = "#bccad3"
+boundary = -0.35
+scale = 3.0
+radome = "#dfe2dc"
+radome_x = 2.0
+canopy = "clear"
+panel_lines = 0.10
+wear = 0.06
+gloss = 0.3

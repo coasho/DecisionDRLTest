@@ -165,9 +165,14 @@ leading = [                      # leading-edge flaps or slats, on the angle-of-
   { name = "lef", span = [0.28, 0.97], chord_fraction = 0.17, limits = [-2, 25], schedule = [1.38, 9.05, 1.45] },
 ]
 
+[aircraft]
+stands_in_for = ["f16"]          # a stock JSBSim aircraft drawn with this model (fsim hangar register)
+
 [[gear]]
 retract = "forward"              # forward, aft, inward, outward; hangar fits the angle, the
 wheels = 2                       # trunnion's cant and the wheel's twist that stow the leg inside
+wheel_turn = "flat"              # or retract_deg, retract_axis: what is known of the real leg;
+                                 # hangar fits only the rest
 
 [dimensions]                     # published: the model is checked against them
 length = 15.06
@@ -301,16 +306,32 @@ The model stage writes `<name>.glb` from the same design:
 - **Control surfaces.** Each one, and each leading-edge flap, is cut from its
   surface with a 12 mm gap and turns on its own hinge.
 - **Landing gear.** Each leg swings about its trunnion and twists about its
-  strut into a bay cut into the airframe. Doors cut from the skin open first
-  and close behind it. hangar fits the swing to the airframe; the design gives
-  the direction.
-- **Propulsion.** An afterburner flame behind each augmented jet, lit past
-  military power and growing to full afterburner. A propeller spins with its
-  engine's throttle.
+  strut into a bay cut into the airframe. The bay opens where the leg passes
+  through the skin; its two doors hinge on the edges either side of the leg's
+  swing, open first and close behind it. hangar fits the swing to the
+  airframe - through as small an opening as it can - from what the design
+  gives (the direction, and any of the angle, the trunnion's axis and the
+  wheel's twist). On every leg the oleo slides up the strut as the unit
+  compresses, a steerable wheel turns with the steering, and the wheels roll.
+- **Propulsion.** An afterburner flame behind each augmented jet, as the
+  engine lights it; nozzle petals open as the engine opens them. A propeller
+  turns at its engine's rpm.
+- **Paint.** `paint.toml` beside the design gives its colours: a scheme
+  (single, two-tone, camouflage or a cheat line), the radome, an anti-glare
+  panel, the canopy's tint. hangar draws it as a texture, with panel joints
+  where the airframe has them - frames round the fuselage, spars and ribs on
+  the wings and fins - and a little wear.
 
 The checks: no open, pinched or misturned edge in any mesh; the airframe in
 one piece; every moving part a closed solid; the stowed gear inside the skin;
-length, span and height within 3 % of `[dimensions]`.
+no gear door ever touching a leg, open or closed; length, span and height
+within 3 % of `[dimensions]`.
+
+A design that stands in for a stock JSBSim aircraft (`stands_in_for`) is
+drawn for it too: `fsim hangar register` parks each stock aircraft, finds
+where its main wheels touch, and writes `aircraft/models.txt` - which model
+the viewer uses for each, moved so its wheels stand where the stock
+aircraft's do.
 
 The viewer's names for the moving nodes are in
 [docs/sdk/viewer.md](sdk/viewer.md#moving-control-surfaces).

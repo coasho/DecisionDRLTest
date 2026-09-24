@@ -463,11 +463,14 @@ class Design:
     # -- the 3D model ---------------------------------------------------------------------------
     def model_key(self):
         """What the model is made from: the design's geometry and mass (the CG
-        is its origin), the code that shapes and meshes it."""
+        is its origin), its paint (paint.toml), the code that shapes, meshes
+        and paints it."""
         from .shape import meshkit
         blob = self.spec_hash("surface", "body", "intake", "gear", "engine", "mass", "reference", "aircraft", "dimensions")
         here = os.path.dirname(os.path.abspath(__file__))
-        for f in sorted(glob.glob(os.path.join(here, "shape", "*.py"))) + [os.path.join(here, "model3d.py")]:
+        paint = os.path.join(self.aircraft.dir, "paint.toml")
+        for f in (sorted(glob.glob(os.path.join(here, "shape", "*.py"))) + [os.path.join(here, "model3d.py"),
+                  os.path.join(here, "livery.py")] + ([paint] if os.path.isfile(paint) else [])):
             with open(f, "rb") as fh:
                 blob += hashlib.sha1(fh.read()).hexdigest()
         lib = meshkit.library()

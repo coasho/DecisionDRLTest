@@ -87,7 +87,25 @@ class _Builder:
     def __init__(self):
         self.bin = bytearray()
         self.accessors, self.views, self.meshes, self.nodes, self.materials = [], [], [], [], []
+        self.images, self.textures = [], []
         self._mat = {}
+        self.livery = None  # the paint (livery.Livery) a skin part's texture coordinates refer to
+
+    def texture(self, jpeg):
+        """An image (JPEG bytes) for materials to use; its index."""
+        self.images.append({"bufferView": self._view(jpeg), "mimeType": "image/jpeg"})
+        self.textures.append({"sampler": 0, "source": len(self.images) - 1})
+        return len(self.textures) - 1
+
+    def painted(self, name, texture, metallic=0.2, rough=0.6):
+        """A material coloured by a texture."""
+        if name not in self._mat:
+            self._mat[name] = len(self.materials)
+            self.materials.append({"name": name, "doubleSided": True,
+                                   "pbrMetallicRoughness": {"baseColorTexture": {"index": texture},
+                                                            "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+                                                            "metallicFactor": metallic, "roughnessFactor": rough}})
+        return self._mat[name]
 
     def material(self, name, rgb, metallic=0.1, rough=0.6, emissive=None, alpha=1.0):
         if name not in self._mat:
@@ -125,6 +143,9 @@ class _Builder:
             a = arr.astype(np.float32)
             acc = {"bufferView": self._view(a.tobytes(), 34962), "componentType": 5126, "count": int(len(a)), "type": "VEC3",
                    "min": a.min(axis=0).tolist(), "max": a.max(axis=0).tolist()}
+        elif kind == "vec2":
+            a = arr.astype(np.float32)
+            acc = {"bufferView": self._view(a.tobytes(), 34962), "componentType": 5126, "count": int(len(a)), "type": "VEC2"}
         elif kind == "vec4":
             a = arr.astype(np.float32)
             acc = {"bufferView": self._view(a.tobytes()), "componentType": 5126, "count": int(len(a)), "type": "VEC4"}
@@ -136,7 +157,7 @@ class _Builder:
         return len(self.accessors) - 1
 
     def mesh(self, name, parts):
-        """parts: [(vertices (gltf frame), triangles, material index[, normals])]."""
+        """parts: [(vertices (gltf frame), triangles, material index[, normals[, texture coordinates]])]."""
         prims = []
         for part in parts:
             v, t, mat = part[:3]
@@ -146,9 +167,11 @@ class _Builder:
             remap = np.full(len(v), -1)
             remap[used] = np.arange(len(used))
             vv, tt = v[used], remap[t]
-            nn = part[3][used] if len(part) > 3 else _normals(vv, tt)
-            prims.append({"attributes": {"POSITION": self.accessor(vv, "vec3"), "NORMAL": self.accessor(nn, "vec3")},
-                          "indices": self.accessor(tt.reshape(-1), "index"), "material": mat})
+            nn = part[3][used] if len(part) > 3 and part[3] is not None else _normals(vv, tt)
+            attrs = {"POSITION": self.accessor(vv, "vec3"), "NORMAL": self.accessor(nn, "vec3")}
+            if len(part) > 4 and part[4] is not None:
+                attrs["TEXCOORD_0"] = self.accessor(part[4][used], "vec2")
+            prims.append({"attributes": attrs, "indices": self.accessor(tt.reshape(-1), "index"), "material": mat})
         self.meshes.append({"name": name, "primitives": prims})
         return len(self.meshes) - 1
 
@@ -461,18 +484,19 @@ def _solid_parts(aircraft, B, top, origin, report):
     its own on its hinge (shape/airframe.py, native/meshkit)."""
     from .shape import airframe as sh
     from .shape import meshkit
-    mats = {i: B.material(n, *PAINT[n]) for i, n in enumerate(sh.MATERIALS)}
     plan = []
     m = meshkit.build(sh.airframe(aircraft, gear=plan))
     report["airframe"] = _stats(m)
     report["airframe"]["bounds"] = [m["positions"].min(axis=0).tolist(), m["positions"].max(axis=0).tolist()]
+    mats = _materials(aircraft, B, report["airframe"]["bounds"])
+    m = _painted(B, m)
     v, n = _to_gltf(m["positions"], origin), _to_gltf(m["normals"], np.zeros(3))
-    parts = [(v, m["triangles"][m["materials"] == k], mats.get(int(k), mats[sh.SKIN]), n)
+    parts = [(v, m["triangles"][m["materials"] == k], mats.get(int(k), mats[sh.SKIN]), n, m.get("uv"))
              for k in np.unique(m["materials"])]
     top.append(B.node("airframe", B.mesh("airframe", parts)))
     report["pieces"] = []
     for surf, ctrl, side, scene in sh.control_pieces(aircraft):
-        pm = meshkit.build(scene)
+        pm = _painted(B, meshkit.build(scene))
         piece = sh.hinge_piece(surf, ctrl, side)
         p0, axis, _, _ = leading_hinge(piece) if piece["leading"] else hinge(surf, piece)
         q = _quat_from_x(_gltf_direction(axis))
@@ -483,10 +507,44 @@ def _solid_parts(aircraft, B, top, origin, report):
         pn = _to_gltf(pm["normals"], np.zeros(3)) @ R
         name = ("fsim:lef@%.6g,%.6g" % (ctrl.min_deg, ctrl.max_deg)
                 if piece["leading"] else node_name(aircraft, surf, ctrl, piece))
-        top.append(B.node(name, B.mesh(label, [(pv, pm["triangles"], mats[sh.CONTROL], pn)]), translation=pivot, rotation=q))
+        top.append(B.node(name, B.mesh(label, [(pv, pm["triangles"], mats[sh.CONTROL], pn, pm.get("uv"))]),
+                          translation=pivot, rotation=q))
         report["pieces"].append(dict(_stats(pm), label=label, bounds=[pm["positions"].min(axis=0).tolist(),
                                                                       pm["positions"].max(axis=0).tolist()]))
     _gear_parts(aircraft, B, top, origin, report, plan, mats)
+
+
+def _materials(aircraft, B, bounds):
+    """The solid model's materials by hangar's material index: the skin and
+    the control surfaces painted with the design's livery (paint.toml) when
+    PIL is there to draw it, flat grey otherwise; the glass tinted."""
+    from . import livery
+    from .shape import airframe as sh
+    mats = {i: B.material(n, *PAINT[n]) for i, n in enumerate(sh.MATERIALS)}
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        return mats
+    B.livery = livery.Livery(aircraft, bounds)
+    tex = B.texture(B.livery.image())
+    rough = 1.0 - 0.6 * B.livery.gloss
+    mats[sh.SKIN] = B.painted("paint", tex, 0.15, rough)
+    mats[sh.CONTROL] = B.painted("paint", tex, 0.15, rough)
+    mats[sh.GLASS] = B.material("canopy", *B.livery.canopy())
+    return mats
+
+
+def _painted(B, m):
+    """The mesh m (a meshkit mesh, design frame) with texture coordinates on
+    the livery (m["uv"]; its vertices split where its faces look different
+    ways), or m as it is without a livery."""
+    if B.livery is None or len(m["triangles"]) == 0:
+        return m
+    t = m["triangles"]
+    v, n, t2, uv = B.livery.split(m["positions"], m["normals"], t)
+    out = dict(m)
+    out.update(positions=v, normals=n, triangles=t2, uv=uv)
+    return out
 
 
 def _hinged(B, name, label, m, mats, point, axis, origin, inner=None):
@@ -503,7 +561,8 @@ def _hinged(B, name, label, m, mats, point, axis, origin, inner=None):
         R = R @ _quat_matrix(qi)
     v = (_to_gltf(m["positions"], origin) - pivot) @ R
     n = _to_gltf(m["normals"], np.zeros(3)) @ R
-    mesh = B.mesh(label, [(v, m["triangles"][m["materials"] == k], mats[int(k)], n) for k in np.unique(m["materials"])])
+    mesh = B.mesh(label, [(v, m["triangles"][m["materials"] == k], mats[int(k)], n, m.get("uv"))
+                          for k in np.unique(m["materials"])])
     if inner is None:
         return B.node(name, mesh, translation=pivot, rotation=q)
     return B.node(name, translation=pivot, rotation=q, children=[B.node(inner[0], mesh, rotation=qi)])
@@ -566,7 +625,7 @@ def _gear_parts(aircraft, B, top, origin, report, plan, mats):
             report["gear"][-3]["protrusion"] = doors[leg.name]["protrusion"]
             moving.append(leg)
             for d in doors[leg.name]["doors"]:
-                dm = meshkit.build(d["scene"])
+                dm = _painted(B, meshkit.build(d["scene"]))
                 top.append(_hinged(B, "fsim:gear:%.6g:0:%.6g" % (d["deg"], sg.DOORS), d["label"], dm, mats,
                                    d["hinge"], d["axis"], origin))
                 report["gear"].append(dict(_stats(dm), label=d["label"]))
@@ -844,6 +903,9 @@ def write_glb(aircraft, path, origin, report=None, solid=None):
     doc = {"asset": {"version": "2.0", "generator": "hangar"}, "scene": 0, "scenes": [{"nodes": [root]}],
            "nodes": B.nodes, "meshes": B.meshes, "materials": B.materials, "accessors": B.accessors,
            "bufferViews": B.views, "buffers": [{"byteLength": len(B.bin)}]}
+    if B.textures:
+        doc.update(images=B.images, textures=B.textures,
+                   samplers=[{"magFilter": 9729, "minFilter": 9987, "wrapS": 33071, "wrapT": 33071}])
     if anims:
         doc["animations"] = anims
     js = json.dumps(doc, separators=(",", ":")).encode()

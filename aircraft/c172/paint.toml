@@ -1,0 +1,9 @@
+# The Skyhawk's gloss white with a blue cheat line along the cabin
+[paint]
+scheme = "stripes"
+colours = ["#f1f1ee", "#23508c"]
+boundary = -0.25
+canopy = "clear"
+panel_lines = 0.06
+wear = 0.02
+gloss = 0.6

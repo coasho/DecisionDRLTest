@@ -1,7 +1,8 @@
 # cmake -DSRC=<repo>/aircraft -DDEST=<share/flightsim/aircraft> -P StageDesigns.cmake
 #
 # Copies what tools/hangar builds for each design - aircraft/<name>/<name>.xml,
-# its Engines/ and the <name>.glb model with its manifest - to DEST/<name>,
+# its Engines/ and the <name>.glb model with its manifest - to DEST/<name>
+# (and models.txt, the viewer's stand-ins for stock aircraft, to DEST),
 # where io::AssetResolver::findAircraft finds it in a package. The design's
 # own files (the .toml, out/) stay behind. Run at build or install time, so a
 # new design needs no reconfigure.
@@ -28,4 +29,8 @@ foreach(_d IN LISTS _designs)
     endforeach()
     math(EXPR _n "${_n} + 1")
 endforeach()
+# the viewer's stand-ins for stock aircraft (fsim hangar register)
+if(EXISTS "${SRC}/models.txt")
+    file(COPY "${SRC}/models.txt" DESTINATION "${DEST}")
+endif()
 message(STATUS "designed aircraft: ${_n} staged in ${DEST}")

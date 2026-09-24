@@ -1,0 +1,8 @@
+# The F-35A's dark grey (about FS 36170), the gold-tinted canopy
+[paint]
+scheme = "single"
+colours = ["#5d646a"]
+canopy = "gold"
+panel_lines = 0.05
+wear = 0.03
+gloss = 0.35

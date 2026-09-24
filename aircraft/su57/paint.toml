@@ -1,0 +1,12 @@
+# The Su-57's splinter blues: small dark patches over a mid blue-grey, a
+# pale belly
+[paint]
+scheme = "camo"
+colours = ["#7f8e9d", "#4f5e6d"]
+underside = "#b4c1cc"
+boundary = -0.3
+scale = 1.6
+canopy = "gold"
+panel_lines = 0.06
+wear = 0.04
+gloss = 0.35

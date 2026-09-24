@@ -1,0 +1,8 @@
+# The Rafale C's dark blue-grey
+[paint]
+scheme = "single"
+colours = ["#6e7880"]
+canopy = "gold"
+panel_lines = 0.08
+wear = 0.04
+gloss = 0.35

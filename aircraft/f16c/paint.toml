@@ -1,0 +1,15 @@
+# The F-16C's two greys (FS 36270 above, FS 36375 on the sides and belly), a
+# darker radome, the anti-glare panel ahead of the gold-tinted canopy
+[paint]
+scheme = "two-tone"
+colours = ["#848d95", "#a9b0b6"]
+underside = "#a9b0b6"
+boundary = 0.05
+radome = "#6f777e"
+radome_x = 1.55
+anti_glare = "#4a4e52"
+anti_glare_x = [1.55, 2.55]
+canopy = "gold"
+panel_lines = 0.10
+wear = 0.05
+gloss = 0.25

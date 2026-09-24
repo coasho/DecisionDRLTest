@@ -1,0 +1,13 @@
+# The MiG-29A's two greys, the lighter one below, the pale radome
+[paint]
+scheme = "camo"
+colours = ["#a3abab", "#727f7e"]
+underside = "#b9c4c9"
+boundary = -0.3
+scale = 2.8
+radome = "#d9dcd4"
+radome_x = 1.6
+canopy = "clear"
+panel_lines = 0.10
+wear = 0.06
+gloss = 0.3

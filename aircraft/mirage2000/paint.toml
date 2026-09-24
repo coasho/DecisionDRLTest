@@ -1,0 +1,13 @@
+# The Mirage 2000C's air-defence blues: two blue-greys above, light grey below
+[paint]
+scheme = "camo"
+colours = ["#8796a4", "#5d7182"]
+underside = "#b6c1ca"
+boundary = -0.3
+scale = 3.2
+radome = "#8796a4"
+radome_x = 1.6
+canopy = "clear"
+panel_lines = 0.09
+wear = 0.05
+gloss = 0.3

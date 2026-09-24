@@ -1,0 +1,10 @@
+# The Gripen C's medium grey, the radome a shade darker
+[paint]
+scheme = "single"
+colours = ["#8b949b"]
+radome = "#7a838a"
+radome_x = 1.5
+canopy = "clear"
+panel_lines = 0.09
+wear = 0.05
+gloss = 0.3

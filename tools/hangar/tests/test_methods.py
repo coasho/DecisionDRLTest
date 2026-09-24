@@ -348,6 +348,43 @@ class Model3D(unittest.TestCase):
                     self.assertEqual((af["boundary_edges"], af["nonmanifold_edges"], af["components"]), (0, 0, 1))
                     for p in report["pieces"] + report["gear"]:
                         self.assertEqual((p["boundary_edges"], p["components"]), (0, 1), p["label"])
+                    # the skin painted: one JPEG texture, the airframe's skin and
+                    # the control surfaces coloured by it through their own coordinates
+                    self.assertEqual([i["mimeType"] for i in doc["images"]], ["image/jpeg"])
+                    paint = [k for k, m in enumerate(doc["materials"])
+                             if "baseColorTexture" in m["pbrMetallicRoughness"]]
+                    self.assertEqual(len(paint), 1)
+                    airframe = next(m for m in doc["meshes"] if m["name"] == "airframe")
+                    skin = [q for q in airframe["primitives"] if q["material"] == paint[0]]
+                    self.assertTrue(skin)
+                    self.assertTrue(all("TEXCOORD_0" in q["attributes"] for q in skin))
+
+    def test_livery_faces_and_seams(self):
+        # each face is painted from the view it faces, its vertices split where
+        # neighbouring faces face different ways, its coordinates in the atlas
+        from hangar import livery
+        a = Aircraft.load(repo("aircraft/skua/skua.toml"))
+        L = livery.Livery(a, [[0.0, -2.0, -0.5], [2.0, 2.0, 0.5]])
+        n = np.array([[0.0, 0.0, 1.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.3, -0.9, 0.3]])
+        self.assertEqual(L.regions(n).tolist(), [livery.TOP, livery.BOTTOM, livery.SIDE, livery.FRONT, livery.SIDE])
+        # two triangles sharing an edge, one facing down and one sideways
+        v = np.array([[0.5, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.5, 0.0, -0.5]])
+        t = np.array([[0, 2, 1], [0, 1, 3]])
+        v2, n2, t2, uv = L.split(v, np.zeros_like(v), t)
+        self.assertEqual(len(v2), 6)  # the shared edge's two vertices, once per view
+        self.assertTrue(((uv >= 0.0) & (uv <= 1.0)).all())
+        self.assertEqual(L.image()[:2], bytes([0xFF, 0xD8]))  # a JPEG
+
+    def test_stand_in_wheels(self):
+        # a stand-in's main wheels, relative to its model's origin (its empty
+        # CG), in body axes: behind and below it
+        from hangar import register
+        a = Aircraft.load(repo("aircraft/f16c/f16c.toml"))
+        forward, right, down = register.design_mains(a)
+        self.assertLess(forward, -0.3)
+        self.assertEqual(right, 0.0)
+        self.assertGreater(down, 1.5)
+        self.assertIn("f16", dict((d.name, s) for d, s in register.stand_ins(repo("aircraft")))["f16c"])
 
     def test_gear_folds_into_its_bay(self):
         # the F-16's legs stow inside the airframe (its intake, belly and wing

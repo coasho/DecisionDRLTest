@@ -1,0 +1,8 @@
+# The J-20A's dark silver-grey coating
+[paint]
+scheme = "single"
+colours = ["#6d767d"]
+canopy = "gold"
+panel_lines = 0.05
+wear = 0.03
+gloss = 0.5

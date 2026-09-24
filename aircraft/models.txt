@@ -1,0 +1,5 @@
+# The viewer's models for stock JSBSim aircraft - written by: fsim hangar register
+# <stock type> <design> <forward> <right> <down>: the viewer draws jsbsim:<stock type> with
+# aircraft/<design>/<design>.glb, moved that far (m, the aircraft's body axes) so the model's
+# main wheels stand where the stock aircraft's do.
+f16 f16c -0.066 0.000 -0.272

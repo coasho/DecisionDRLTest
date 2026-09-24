@@ -188,6 +188,7 @@ private:
 VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg::ref_ptr<vsg::Options> options)
     : settings_(settings), options_(options) {
     root_ = vsg::Group::create();
+    for (const auto& dir : settings.modelDirs) readStandIns(dir / "models.txt", standIns_); // the first directory wins
 
     if (!settings.modelPath.empty()) default_.normal = loadModel(settings, options);
     if (default_.normal) {
@@ -585,7 +586,8 @@ vsg::ref_ptr<vsg::Node> VehicleVisuals::loadModel(const Settings& s, vsg::ref_pt
                            d.x, d.y, d.z, 0.0,   // column 2: body z
                            0.0, 0.0, 0.0, 1.0);
     const vsg::dmat4 modelToBody = vsg::inverse(bodyToModel);
-    auto xf = vsg::MatrixTransform::create(modelToBody * vsg::scale(s.modelScale, s.modelScale, s.modelScale));
+    auto xf = vsg::MatrixTransform::create(vsg::translate(s.modelOffset) * modelToBody *
+                                           vsg::scale(s.modelScale, s.modelScale, s.modelScale));
     xf->addChild(node);
 
     // Animated parts (propellers, ...): collected so the viewer can play them.
@@ -612,6 +614,26 @@ vsg::ref_ptr<vsg::Node> VehicleVisuals::buildPlaceholder(const Settings& s, cons
     return group;
 }
 
+bool VehicleVisuals::readStandIns(const std::filesystem::path& file, std::map<std::string, StandIn>& out) {
+    std::ifstream in(file);
+    if (!in) return false;
+    std::string line;
+    int n = 0;
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        std::string type;
+        StandIn s;
+        if (!(ls >> type) || type[0] == '#') continue;
+        if (!(ls >> s.design >> s.offset.x >> s.offset.y >> s.offset.z)) {
+            LOG_WARN("world") << file.string() << ": '" << line << "' is not <type> <design> <forward> <right> <down>";
+            continue;
+        }
+        if (out.emplace(type, s).second) ++n;
+    }
+    if (n) LOG_INFO("world") << "model stand-ins: " << n << " from " << file.string();
+    return true;
+}
+
 std::string VehicleVisuals::resolveModel(const std::string& modelPath, const std::string& type) const {
     namespace fs = std::filesystem;
     if (!modelPath.empty()) {
@@ -626,6 +648,19 @@ std::string VehicleVisuals::resolveModel(const std::string& modelPath, const std
     for (char& c : name)
         if (!(std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.')) c = '_';
     if (name.empty()) return {};
+    // a stock aircraft with a stand-in: that design's model, moved (the key
+    // carries the offset: "<path>|<forward>,<right>,<down>")
+    if (const auto it = standIns_.find(name); it != standIns_.end()) {
+        const auto& s = it->second;
+        for (const auto& dir : settings_.modelDirs)
+            for (const char* ext : {".glb", ".gltf"}) {
+                const auto path = dir / s.design / (s.design + ext);
+                if (!fs::exists(path)) continue;
+                std::ostringstream key;
+                key << path.string() << '|' << s.offset.x << ',' << s.offset.y << ',' << s.offset.z;
+                return key.str();
+            }
+    }
     for (const auto& dir : settings_.modelDirs)
         for (const char* ext : {".glb", ".gltf"}) {
             if (fs::exists(dir / (name + ext))) return (dir / (name + ext)).string();
@@ -640,13 +675,19 @@ const VehicleVisuals::Model& VehicleVisuals::modelFor(const std::string& key) {
     if (it == library_.end()) {
         Settings s; // glTF conventions, then the file's manifest
         s.modelPath = key;
+        if (const auto bar = key.rfind('|'); bar != std::string::npos) { // a stand-in, moved
+            s.modelPath = key.substr(0, bar);
+            std::string offset = key.substr(bar + 1);
+            std::replace(offset.begin(), offset.end(), ',', ' ');
+            std::istringstream(offset) >> s.modelOffset.x >> s.modelOffset.y >> s.modelOffset.z;
+        }
         applyManifest(s);
         Model m;
         m.normal = loadModel(s, options_);
         if (m.normal) {
             m.highlighted = m.normal;
             m.rig = Rig::find(m.normal);
-            if (!m.rig.joints.empty()) LOG_INFO("world") << "vehicle model: " << key << ": " << m.rig.joints.size() << " moving control surface(s)";
+            if (!m.rig.joints.empty()) LOG_INFO("world") << "vehicle model: " << key << ": " << m.rig.joints.size() << " moving part(s)";
             if (compiler_ && !compiler_(m.normal)) LOG_WARN("world") << "could not compile vehicle model " << key;
             if (segRoot_) {
                 m.geometry = stripState(m.normal);

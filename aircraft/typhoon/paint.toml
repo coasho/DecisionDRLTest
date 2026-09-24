@@ -1,0 +1,10 @@
+# The Typhoon's light grey
+[paint]
+scheme = "single"
+colours = ["#9da5aa"]
+radome = "#8f979c"
+radome_x = 1.6
+canopy = "clear"
+panel_lines = 0.09
+wear = 0.05
+gloss = 0.3

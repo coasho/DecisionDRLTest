@@ -8,7 +8,9 @@
 
 #include <vsgXchange/all.h>
 
+#include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <vector>
 
@@ -129,6 +131,34 @@ TEST_CASE("control surfaces turn with each vehicle's own deflections", "[render]
     }
     REQUIRE(left == 1);
     REQUIRE(right == 1);
+}
+
+TEST_CASE("a stock aircraft is drawn with the model registered to stand in for it", "[render][visuals]") {
+    // models.txt (fsim hangar register): jsbsim:<type> drawn with a design's
+    // model, moved so its wheels stand where the stock aircraft's do
+    const std::filesystem::path dir = FSIM_TEST_AIRCRAFT_DIR;
+    const auto reg = std::filesystem::temp_directory_path() / "fsim-test-standins";
+    std::filesystem::create_directories(reg);
+    {
+        std::ofstream f(reg / "models.txt");
+        f << "# test register\nstocktype c172 0.5 0 -0.25\nbroken line\n";
+    }
+    world::VehicleVisuals::Settings settings;
+    settings.modelDirs = {reg, dir};
+    world::VehicleVisuals visuals(2, settings, vsg::Options::create(vsgXchange::all::create()));
+    visuals.setModel(0, {}, "jsbsim:stocktype");
+    visuals.setModel(1, {}, "jsbsim:c172");
+    const std::string key = visuals.modelOf(0);
+    REQUIRE(key.find("c172.glb") != std::string::npos);
+    REQUIRE(key.find('|') != std::string::npos);
+    REQUIRE(visuals.modelOf(1).find('|') == std::string::npos); // the design itself: as built
+    // the model's own root carries the offset (body axes: forward, right, down)
+    auto root = visuals.pose(0).normal.cast<vsg::MatrixTransform>();
+    REQUIRE(root);
+    REQUIRE(std::abs(root->matrix[3][0] - 0.5) < 1e-9);
+    REQUIRE(std::abs(root->matrix[3][2] + 0.25) < 1e-9);
+    REQUIRE(visuals.pose(0).joints.size() == visuals.pose(1).joints.size());
+    std::filesystem::remove_all(reg);
 }
 
 TEST_CASE("control surface names parse, and anything else is left alone", "[render][visuals]") {

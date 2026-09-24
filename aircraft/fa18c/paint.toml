@@ -1,0 +1,12 @@
+# The F/A-18C's tactical greys: FS 36320 above, FS 36375 on the sides and belly
+[paint]
+scheme = "two-tone"
+colours = ["#7f8990", "#a8b0b6"]
+underside = "#a8b0b6"
+boundary = 0.0
+radome = "#8b949b"
+radome_x = 1.9
+canopy = "clear"
+panel_lines = 0.10
+wear = 0.05
+gloss = 0.25
