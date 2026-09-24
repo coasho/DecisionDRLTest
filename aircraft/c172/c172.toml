@@ -135,6 +135,11 @@ name = "right tank"
 position = [1.219, 2.845, 1.509]
 capacity = 59.0
 
+[dimensions]                  # published, overall, gear down (Cessna 172P POH):
+length = 8.28                 # m
+span = 11.00
+height = 2.72
+
 [targets]
 # Cessna 172P POH, 2400 lb, sea level standard day
 stall_speed_kcas = 51       # flaps up

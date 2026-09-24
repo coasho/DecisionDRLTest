@@ -31,6 +31,11 @@ controls = [
   { name = "aileron", channel = "aileron", span = [0.72, 0.97], chord_fraction = 0.28, limits = [-25, 25] },
   { name = "flaperon", channel = "aileron", mix = { flap = 1.0 }, span = [0.26, 0.70], chord_fraction = 0.22, limits = [-30, 30] },
 ]
+# full-span leading-edge flaps on the angle-of-attack schedule (the F-16's
+# law stands in: the F-22's is not published)
+leading = [
+  { name = "leading-edge flap", span = [0.26, 0.97], chord_fraction = 0.13, limits = [-3, 30] },
+]
 
 # All-moving horizontal tails right behind the wing, 13.2 m2 exposed, 42 deg
 [[surface]]
@@ -65,18 +70,41 @@ controls = [
 [[body]]
 name = "fuselage"
 kind = "fuselage"
+# Chined: the forward fuselage's sides meet in a sharp edge that runs from
+# the nose along the intakes into the wing's leading edge; behind the intakes
+# the body is wide and flat over the ducts and the side-by-side engines.
 stations = [
   { x = 0.00, w = 0.00, top = -0.100, bottom = -0.200 },
-  { x = 1.50, w = 1.00, top = 0.200, bottom = -0.450, n = 2.4 },
-  { x = 3.50, w = 1.50, top = 0.450, bottom = -0.650, n = 2.6 },
-  { x = 5.50, w = 1.90, top = 0.550, bottom = -0.850, n = 2.8 },
-  { x = 7.00, w = 3.30, top = 0.500, bottom = -1.000, n = 3.5 },
-  { x = 10.00, w = 3.60, top = 0.450, bottom = -1.050, n = 3.8 },
-  { x = 13.00, w = 3.40, top = 0.400, bottom = -0.950, n = 3.6 },
+  { x = 1.50, w = 1.00, top = 0.200, bottom = -0.450, chine = -0.150, n_top = 1.7, n_bottom = 1.8 },
+  { x = 3.50, w = 1.55, top = 0.450, bottom = -0.650, chine = -0.080, n_top = 1.8, n_bottom = 1.9 },
+  { x = 5.50, w = 1.95, top = 0.550, bottom = -0.850, chine = -0.050, n_top = 2.0, n_bottom = 2.2 },
+  { x = 7.00, w = 2.30, top = 0.500, bottom = -0.950, chine = -0.050, n_top = 2.4, n_bottom = 2.8 },
+  { x = 10.00, w = 3.60, top = 0.450, bottom = -1.050, chine = -0.100, n_top = 3.4, n_bottom = 4.2 },
+  { x = 13.00, w = 3.40, top = 0.400, bottom = -0.950, chine = -0.100, n_top = 3.4, n_bottom = 4.0 },
   { x = 16.00, w = 3.00, top = 0.300, bottom = -0.750, n = 3.2 },
   { x = 18.30, w = 2.60, top = 0.200, bottom = -0.550, n = 3.0 },
 ]
 
+# Caret intakes either side below the chine: their lips swept back in plan
+# and leaning back from the bottom lip, the ducts curving in towards the
+# engines.
+[[intake]]
+name = "intake"
+mirror = true
+lip = 0.035
+rake = -28
+sweep = 30
+duct = 1.8
+duct_rise = 0.10
+duct_taper = 0.85
+stations = [
+  { x = 5.70, y = 1.180, w = 0.820, top = -0.050, bottom = -1.020, n = 3.0 },
+  { x = 7.20, y = 1.250, w = 0.880, top = -0.030, bottom = -1.060, n = 3.2 },
+  { x = 9.00, y = 1.250, w = 0.860, top = -0.060, bottom = -1.060, n = 3.4 },
+  { x = 10.50, y = 1.150, w = 0.700, top = -0.150, bottom = -1.000, n = 3.4 },
+]
+
+# One piece, frameless
 [[body]]
 name = "canopy"
 kind = "pod"
@@ -103,6 +131,7 @@ mass = 1770
 inlet_x = 5.8
 [engine.nozzle]
 position = [18.300, 0.700, -0.400]
+shape = "2d"                  # two-dimensional, vectoring in pitch
 
 [[gear]]
 name = "Nose Gear"
@@ -113,7 +142,7 @@ wheel_diameter = 0.60
 wheel_width = 0.18
 retractable = true
 static_deflection = 0.14
-attach = [5.100, 0.0, -0.900]
+attach = [5.100, 0.0, -0.600]
 
 [[gear]]
 name = "Main Gear"
@@ -123,7 +152,7 @@ wheel_diameter = 0.94
 wheel_width = 0.30
 retractable = true
 static_deflection = 0.18
-attach = [11.100, 1.300, -1.100]
+attach = [11.100, 1.200, -0.750]
 
 [reference]
 aero_point = [10.750, 0.0, 0.0]    # 0.35 MAC
@@ -137,7 +166,7 @@ roll_rate_deg_s = 240.0
 
 [mass]
 empty = 19700                 # 43,340 lb (USAF)
-empty_cg = [10.800, 0.0, -0.350]
+empty_cg = [10.450, 0.0, -0.350]  # loaded, 2 % of the MAC behind the neutral point hangar finds
 # no published inertia: radii of gyration like the F-15's
 gyration = [0.270, 0.430, 0.550]
 [[mass.payload]]
@@ -172,6 +201,11 @@ capacity = 900
 name = "right wing"
 position = [11.500, 3.200, 0.000]
 capacity = 900
+
+[dimensions]                  # published, overall, gear down (USAF fact sheet):
+length = 18.92                 # m
+span = 13.56
+height = 5.08
 
 [targets]
 # F-22A, published

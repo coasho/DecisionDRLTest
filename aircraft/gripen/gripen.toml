@@ -29,6 +29,11 @@ controls = [
   { name = "inner elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.18, 0.55], chord_fraction = 0.22, limits = [-25, 25] },
   { name = "outer elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.55, 0.92], chord_fraction = 0.25, limits = [-25, 25] },
 ]
+# leading-edge flaps on the outer wing, outboard of the dog-tooth, on the
+# angle-of-attack schedule (the F-16's law stands in)
+leading = [
+  { name = "leading-edge flap", span = [0.30, 0.97], chord_fraction = 0.12, limits = [-3, 25] },
+]
 
 # All-moving canards over the intakes, 2.1 m2 exposed
 [[surface]]
@@ -65,16 +70,35 @@ stations = [
   { x = 1.20, w = 0.62, top = 0.280, bottom = -0.300, n = 2.0 },
   { x = 2.80, w = 0.90, top = 0.450, bottom = -0.450, n = 2.0 },
   { x = 4.20, w = 1.00, top = 0.500, bottom = -0.550, n = 2.2 },
-  { x = 5.00, w = 1.90, top = 0.450, bottom = -0.700, n = 3.0 },
-  { x = 7.50, w = 2.00, top = 0.400, bottom = -0.750, n = 3.2 },
+  { x = 5.00, w = 1.25, top = 0.450, bottom = -0.680, n_top = 2.4, n_bottom = 2.8 },
+  { x = 7.50, w = 2.00, top = 0.400, bottom = -0.750, n_top = 3.0, n_bottom = 3.4 },
   { x = 10.00, w = 1.60, top = 0.350, bottom = -0.600, n = 2.8 },
   { x = 12.50, w = 1.10, top = 0.300, bottom = -0.450, n = 2.4 },
   { x = 14.10, w = 0.90, top = 0.250, bottom = -0.400, n = 2.2 },
 ]
 
+# D-shaped intakes either side under the canards, flat against the fuselage
+[[intake]]
+name = "intake"
+mirror = true
+lip = 0.03
+rake = -6
+duct = 1.4
+duct_rise = 0.1
+duct_taper = 0.85
+stations = [
+  { x = 4.40, y = 0.700, w = 0.500, top = 0.140, bottom = -0.620, chine = -0.240, n_top = 2.4, n_bottom = 2.2 },
+  { x = 5.60, y = 0.740, w = 0.540, top = 0.140, bottom = -0.660, chine = -0.260, n_top = 2.6, n_bottom = 2.4 },
+  { x = 7.20, y = 0.700, w = 0.500, top = 0.100, bottom = -0.660, n = 2.6 },
+  { x = 8.60, y = 0.560, w = 0.360, top = 0.000, bottom = -0.600, n = 2.4 },
+]
+
+# The framed windscreen and the canopy behind it
 [[body]]
 name = "canopy"
 kind = "pod"
+frames = [3.22]
+frame_width = 0.07
 stations = [
   { x = 2.600, w = 0.00, top = 0.520, bottom = 0.500 },
   { x = 3.200, w = 0.62, top = 0.920, bottom = 0.480, n = 2.0 },
@@ -107,7 +131,8 @@ wheel_diameter = 0.45
 wheel_width = 0.14
 retractable = true
 static_deflection = 0.13
-attach = [4.000, 0.0, -0.700]
+attach = [4.000, 0.000, -0.350]
+wheels = 2
 
 [[gear]]
 name = "Main Gear"
@@ -117,7 +142,8 @@ wheel_diameter = 0.66
 wheel_width = 0.22
 retractable = true
 static_deflection = 0.16
-attach = [9.850, 0.850, -0.800]
+attach = [9.850, 0.550, -0.350]
+retract = "forward"
 
 [reference]
 aero_point = [8.996, 0.0, 0.0]     # 0.16 MAC
@@ -158,6 +184,11 @@ capacity = 250
 name = "right wing"
 position = [9.466, 1.800, 0.000]
 capacity = 250
+
+[dimensions]                  # published, overall, gear down (Saab):
+length = 14.10                 # m
+span = 8.40
+height = 4.50
 
 [targets]
 # JAS 39C, published

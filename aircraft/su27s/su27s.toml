@@ -29,6 +29,11 @@ controls = [
   # flaperons, the flap function up to 30 deg
   { name = "flaperon", channel = "aileron", mix = { flap = 1.0 }, span = [0.28, 0.72], chord_fraction = 0.22, limits = [-20, 20] },
 ]
+# leading-edge flaps outboard of the root extension, scheduled with angle
+# of attack (the F-16's law stands in)
+leading = [
+  { name = "leading-edge flap", span = [0.29, 0.97], chord_fraction = 0.13, limits = [-2, 30] },
+]
 
 # The leading-edge root extensions: sharp, 72 deg, from beside the cockpit
 # to the wing's leading edge
@@ -99,10 +104,16 @@ stations = [
 ]
 
 # The engine nacelles with the rectangular intakes under the wing roots
-[[body]]
+# The engine nacelles under the blended centre section, their intakes square
+# boxes whose mouths lean back from the bottom lip
+[[intake]]
 name = "nacelle"
-kind = "nacelle"
 mirror = true
+lip = 0.04
+rake = -18
+duct = 2.0
+duct_rise = 0.25
+duct_taper = 0.85
 stations = [
   { x = 7.80, y = 1.350, w = 1.20, top = -0.100, bottom = -1.350, n = 4.0 },
   { x = 12.00, y = 1.350, w = 1.30, top = -0.050, bottom = -1.400, n = 3.5 },
@@ -111,9 +122,25 @@ stations = [
   { x = 21.30, y = 1.350, w = 1.10, top = -0.050, bottom = -1.000, n = 2.0 },
 ]
 
+# The tail booms outboard of the engines: they carry the fins and the
+# stabilators' spindles
+[[body]]
+name = "boom"
+kind = "boom"
+mirror = true
+stations = [
+  { x = 13.60, y = 2.150, w = 0.140, top = 0.240, bottom = 0.000, n = 2.6 },
+  { x = 14.80, y = 2.150, w = 0.420, top = 0.620, bottom = -0.380, n = 2.6 },
+  { x = 20.20, y = 2.150, w = 0.420, top = 0.620, bottom = -0.380, n = 2.6 },
+  { x = 21.10, y = 2.150, w = 0.210, top = 0.420, bottom = -0.180, n = 2.6 },
+]
+
+# The framed windscreen and the big canopy behind it
 [[body]]
 name = "canopy"
 kind = "pod"
+frames = [5.72]
+frame_width = 0.08
 stations = [
   { x = 5.000, w = 0.00, top = 0.700, bottom = 0.680 },
   { x = 5.700, w = 0.72, top = 1.180, bottom = 0.660, n = 2.0 },
@@ -146,8 +173,9 @@ max_steer = 45
 wheel_diameter = 0.68
 wheel_width = 0.20
 retractable = true
+retract = "forward"
 static_deflection = 0.15
-attach = [6.300, 0.0, -0.900]
+attach = [6.300, 0.0, -0.500]
 
 [[gear]]
 name = "Main Gear"
@@ -157,7 +185,8 @@ wheel_diameter = 1.03
 wheel_width = 0.32
 retractable = true
 static_deflection = 0.18
-attach = [12.000, 1.700, -1.300]
+attach = [12.000, 1.550, -0.850]
+retract = "forward"
 
 [reference]
 aero_point = [11.600, 0.0, 0.0]    # 0.30 MAC
@@ -195,6 +224,11 @@ capacity = 2200
 name = "fuselage aft"
 position = [14.500, 0.0, -0.100]
 capacity = 1070
+
+[dimensions]                  # published, overall, gear down (Sukhoi):
+length = 21.94                 # m
+span = 14.70
+height = 5.93
 
 [targets]
 # Su-27S, normal take-off weight, published

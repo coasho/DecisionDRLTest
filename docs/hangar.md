@@ -11,8 +11,9 @@ and masses. hangar then:
   targets and handling-quality criteria.
 
 The finished aircraft is `jsbsim:<name>` everywhere on the platform: in the
-viewer, the C++ and Python SDKs, and scenario files. In the viewer, its
-ailerons, elevator, rudder and flaps move with the simulation.
+viewer, the C++ and Python SDKs, and scenario files. In the viewer its
+control surfaces move with the simulation, its gear folds away, its
+afterburner lights and its propeller turns (see [the 3D model](#the-3d-model)).
 
 It builds light aircraft and fighters. For a fighter it adds afterburning
 turbofans, vortex lift, supersonic drag and a fly-by-wire flight control
@@ -24,6 +25,8 @@ included, built from public data (see [the fighter library](#the-fighter-library
 ![Skua, a hypothetical UAV designed with hangar, in the viewer](images/hangar-skua.jpg)
 
 ![The F-16C, built by hangar from public data](images/hangar-f16c.jpg)
+
+![Its gear down: the legs out of their bays, the doors open](images/hangar-f16c-gear.jpg)
 
 ## Use
 
@@ -64,7 +67,8 @@ code that computes them, changes.
 | aero | coefficient tables over α ±180° and β ±90°, and factors on them over Mach; section polars; derivative plots; the reference aircraft's coefficients beside the design's | signs and sizes of the stability derivatives, CL max, smoothness; the reference's lift, drag and pitching moment |
 | mass | component weights, CG, inertia, static margin | target empty mass; Roskam's radii of gyration; margin 5–40 % MAC |
 | propulsion | propeller thrust and power tables, engine | peak efficiency, static thrust / weight |
-| build | `<name>.xml`, `Engines/`, `<name>.glb` with hinged control surfaces; the fly-by-wire's gains | the fly-by-wire's short period, MIL-F-8785C |
+| build | `<name>.xml`, `Engines/`; the fly-by-wire's gains | the fly-by-wire's short period, MIL-F-8785C |
+| model | `<name>.glb`: the airframe as one closed solid, its moving parts on their hinges | no crack, pinch or loose piece; gear stowed inside; length, span and height against `[dimensions]` |
 | verify | JSBSim's forces and moments at 150 random states, compared with the tables | largest error below 0.002 in any coefficient |
 | fly | trim across the speed range; stall; climb and ceiling; top speed; dynamic modes; 40 runs from random states; six crashes into the ground. A fighter instead: top speed at sea level and 36,000 ft, excess power, ceiling, sustained turn, the angle-of-attack limiter, a 3 g step, a full-stick roll | `[targets]`, MIL-F-8785C level 1, no diverged run; crashes that stop without blowing up |
 | calibrate | `calibration.toml`: extra drag and propeller pitch; for a jet, the wave drag | `[targets]` |
@@ -140,6 +144,37 @@ max_mach = 2.05                  # at max_mach_altitude_ft: calibrates the wave 
 max_mach_altitude_ft = 40000
 ```
 
+The 3D model has its own keys (all optional):
+
+```toml
+[[intake]]                       # a body whose first station is the lip, open onto a dark duct
+name = "intake"
+lip = 0.035                      # m
+rake = 12                        # deg: the lip's top ahead of its bottom (negative: behind)
+sweep = 0                        # deg: its outboard edge behind its inboard one
+duct = 1.6                       # m seen into; duct_rise and duct_taper bend it towards the engine
+stations = [ { x = 4.40, w = 0.96, top = -0.56, bottom = -1.16, chine = -0.82, n_top = 4.0, n_bottom = 2.4 }, ... ]
+                                 # any body: chine is the widest line's height, n_top and n_bottom
+                                 # the exponents above and below it (a flat belly, a chined nose)
+[[body]]
+name = "canopy"                  # a pod named canopy... is glass
+frames = [5.45]                  # a frame round it at each x
+
+[[surface]]
+leading = [                      # leading-edge flaps or slats, on the angle-of-attack schedule
+  { name = "lef", span = [0.28, 0.97], chord_fraction = 0.17, limits = [-2, 25], schedule = [1.38, 9.05, 1.45] },
+]
+
+[[gear]]
+retract = "forward"              # forward, aft, inward, outward; hangar fits the angle, the
+wheels = 2                       # trunnion's cant and the wheel's twist that stow the leg inside
+
+[dimensions]                     # published: the model is checked against them
+length = 15.06
+span = 9.45
+height = 5.09
+```
+
 Included designs:
 
 - `aircraft/c172`: a Cessna 172P built from published dimensions, used to
@@ -169,7 +204,11 @@ stage end to end through the platform (`ctest -R hangar`).
   plain strip theory.
 - **Bodies.** Slender-body theory as far as the flow stays attached (DATCOM
   4.2.1.1), then Allen and Perkins' crossflow drag (NACA TR 1048), plus skin
-  friction. The wing–body dihedral effect comes from DATCOM.
+  friction. The wing–body dihedral effect comes from DATCOM. A fuselage and
+  the intakes, nacelles and booms against it are one body to the air, their
+  sections' union at each station; an intake's mouth swallows its air rather
+  than pushing it aside, and turns it into the duct: the inlet's normal force
+  at the lip. The area rule counts overlapping bodies once.
 - **Derivatives.** Rate derivatives are central differences of the full
   nonlinear model, so they change through the stall. The α̇ terms come from
   the lag of the downwash at the tail (Nelson, *Flight Stability and
@@ -250,6 +289,32 @@ For fighters:
   - Roll: a roll-rate command with bank hold.
   - Yaw: a yaw damper, and sideslip from the pedals.
 
+## The 3D model
+
+The model stage writes `<name>.glb` from the same design:
+
+- **Airframe.** One closed solid: every body and surface as a signed
+  distance field, joined with fillets where a wing, fin or intake meets the
+  fuselage, and meshed by hangar's native mesher (`tools/hangar/native`).
+  Intakes open onto dark ducts, nozzles onto their turbine faces; canopies are
+  glass in their frames.
+- **Control surfaces.** Each one, and each leading-edge flap, is cut from its
+  surface with a 12 mm gap and turns on its own hinge.
+- **Landing gear.** Each leg swings about its trunnion and twists about its
+  strut into a bay cut into the airframe. Doors cut from the skin open first
+  and close behind it. hangar fits the swing to the airframe; the design gives
+  the direction.
+- **Propulsion.** An afterburner flame behind each augmented jet, lit past
+  military power and growing to full afterburner. A propeller spins with its
+  engine's throttle.
+
+The checks: no open, pinched or misturned edge in any mesh; the airframe in
+one piece; every moving part a closed solid; the stowed gear inside the skin;
+length, span and height within 3 % of `[dimensions]`.
+
+The viewer's names for the moving nodes are in
+[docs/sdk/viewer.md](sdk/viewer.md#moving-control-surfaces).
+
 ## Validation: the Cessna 172P
 
 The C172P was built from public dimensions, not from JSBSim's c172x tables.
@@ -294,7 +359,7 @@ TP-1538's wind-tunnel data (Nguyen et al., 1979), a reference measured from
 
 Lift, drag and pitching moment agree to 40° angle of attack. The mean lift
 error is 5 % and drag 7 %; Cm is within 0.025 to 15° and 0.06 to 40°. The
-neutral point is at 35.1 % of the MAC (NASA: 34.5 %). The dihedral effect,
+neutral point is at 34.4 % of the MAC (NASA: 34.5 %). The dihedral effect,
 the weathercock stability to 25°, and the damping in pitch and yaw at low α
 also agree.
 
@@ -312,12 +377,12 @@ Flown through its fly-by-wire:
 
 | F-16C, clean | hangar | published |
 |---|---|---|
-| top speed, 40,000 ft | Mach 2.05 (calibrated: TR 1.14) | Mach 2.05 |
+| top speed, 40,000 ft | Mach 2.05 (calibrated: TR 1.22) | Mach 2.05 |
 | sustained turn, Mach 0.9, 15,000 ft | 12.7 deg/s | about 13.5 deg/s |
-| full aft stick, 350 kt | 7.2 g, α held at 24.8° | α limit 25° |
-| full-stick roll, 350 kt | 302 deg/s | 308 deg/s (limit) |
-| top speed, sea level | 893 kt | 795 kt |
-| best rate of climb | 57,500 ft/min | 50,000 ft/min |
+| full aft stick, 350 kt | 7.3 g, α held at 24.7° | α limit 25° |
+| full-stick roll, 350 kt | 301 deg/s | 308 deg/s (limit) |
+| top speed, sea level | 877 kt | 795 kt |
+| best rate of climb | 63,000 ft/min | 50,000 ft/min |
 | service ceiling | 59,200 ft | 50,000+ ft |
 
 The top speed at 40,000 ft is the calibration's one target. The rest are
@@ -338,27 +403,27 @@ estimates):
 
 | aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft | α held (limit) |
 |---|---|---|---|---|---|
-| F-16C Block 52 | `f16c` | 2.07 (2.05) | 57,500 (50,000) | 59,200 (50,000) | 24.8° (25°) |
-| F-15C | `f15c` | 2.46 (2.5) | 67,000 (50,000) | 60,600 (65,000) | 30.4° (30°) |
-| F/A-18C | `fa18c` | 1.80 (1.8) | 46,300 (45,000) | 59,200 (50,000) | 35.3° (35°) |
-| F-22A | `f22a` | 2.27 (2.25) | 60,900 | 59,000 (65,000) | 40.3° (40°) |
-| F-35A | `f35a` | 1.62 (1.6) | 41,400 | 55,100 (50,000) | 19.7° (20°) |
-| Su-27S | `su27s` | 2.36 (2.35) | 63,900 (59,000) | 61,000 (60,700) | 26.4° (26°) |
-| Su-57 | `su57` | 2.00 (2.0) | 59,000 | 57,800 (65,600) | 30.9° (30°) |
-| MiG-29A | `mig29a` | 2.26 (2.25) | 63,400 (65,000) | 60,200 (59,000) | 26.3° (26°) |
-| Typhoon | `typhoon` | 2.01 (2.0) | 48,200 (62,000) | 59,000 (55,000) | 31.5° (30°) |
-| Rafale C | `rafale` | 1.80 (1.8) | 50,400 (60,000) | 59,100 (50,000) | 33.6° (32°) |
-| JAS 39C Gripen | `gripen` | 2.00 (2.0) | 51,700 | 56,800 (50,000) | 29.3° (28°) |
-| Mirage 2000C | `mirage2000` | 2.20 (2.2) | 54,300 (56,000) | 56,500 (56,000) | 30.9° (29°) |
-| J-10A | `j10a` | 2.20 (2.2) | 52,400 | 54,800 (59,000) | 31.7° (30°) |
-| J-20A | `j20a` | 2.00 (2.0) | 45,800 | 55,700 (66,000) | 32.5° (30°) |
+| F-16C Block 52 | `f16c` | 2.06 (2.05) | 63,000 (50,000) | 59,200 (50,000) | 24.7° (25°) |
+| F-15C | `f15c` | 2.44 (2.5) | 66,000 (50,000) | 60,600 (65,000) | 30.3° (30°) |
+| F/A-18C | `fa18c` | 1.80 (1.8) | 48,300 (45,000) | 59,300 (50,000) | 35.3° (35°) |
+| F-22A | `f22a` | 2.27 (2.25) | 60,700 | 58,800 (65,000) | 40.2° (40°) |
+| F-35A | `f35a` | 1.62 (1.6) | 41,700 | 55,100 (50,000) | 19.7° (20°) |
+| Su-27S | `su27s` | 2.34 (2.35) | 62,800 (59,000) | 60,900 (60,700) | 26.3° (26°) |
+| Su-57 | `su57` | 2.01 (2.0) | 58,000 | 57,700 (65,600) | 31.1° (30°) |
+| MiG-29A | `mig29a` | 2.25 (2.25) | 62,400 (65,000) | 60,200 (59,000) | 26.2° (26°) |
+| Typhoon | `typhoon` | 2.01 (2.0) | 50,600 (62,000) | 59,000 (55,000) | 31.6° (30°) |
+| Rafale C | `rafale` | 1.79 (1.8) | 42,600 (60,000) | 59,100 (50,000) | 33.5° (32°) |
+| JAS 39C Gripen | `gripen` | 2.01 (2.0) | 51,700 | 56,700 (50,000) | 29.3° (28°) |
+| Mirage 2000C | `mirage2000` | 2.20 (2.2) | 54,400 (56,000) | 56,600 (56,000) | 31.1° (29°) |
+| J-10A | `j10a` | 2.20 (2.2) | 51,600 | 54,700 (59,000) | 31.4° (30°) |
+| J-20A | `j20a` | 2.00 (2.0) | 46,700 | 55,400 (66,000) | 30.4° (30°) |
 
 - The top speed at altitude is each design's one calibration target. Every
   other number is a prediction.
 - Published ceilings of 50,000 ft are operational limits. The model's
   ceiling is where the excess power at Mach 0.9 runs out, some 6-9,000 ft
   higher.
-- The Typhoon and Rafale climb about 20 % slower than published: fitted to
+- The Typhoon and Rafale climb 20-30 % slower than published: fitted to
   their top speed, their engines keep less thrust at sea level.
 - Engines fitted to Mach 2.3-2.5 keep too much thrust at sea level (see
   [Limits](#limits)).
@@ -393,6 +458,16 @@ estimates):
   aircraft come out stable where the real ones are close to neutral.
 - **Balance.** Real fighters' CGs are rarely published. The canard deltas'
   are placed 5-10 % of the MAC behind the neutral point the model finds.
+- **Leading-edge devices.** They move in the 3D model on the F-16's
+  published schedule, standing in for each type's own. The aerodynamic tables
+  do not model them; they stand for the wing as its schedule flies it.
+- **Gear kinematics.** Each leg folds the way the real one does where that
+  is well documented (the F/A-18's main gear aft, the Typhoon's and the
+  Mirage 2000's inward), and otherwise by hangar's default: a nose gear aft,
+  a main gear forward. The swing itself is fitted to the airframe, not taken
+  from drawings.
+- **Layouts.** Swing wings and thrust-vectoring nozzles do not move. There
+  is no flying wing in the library yet.
 
 ## For Claude
 

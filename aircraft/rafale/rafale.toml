@@ -29,6 +29,12 @@ controls = [
   { name = "inner elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.16, 0.52], chord_fraction = 0.20, limits = [-25, 25] },
   { name = "outer elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.52, 0.94], chord_fraction = 0.24, limits = [-25, 25] },
 ]
+# leading-edge slats, inboard and outboard, drawn as flaps turning down,
+# on the angle-of-attack schedule (the F-16's law stands in)
+leading = [
+  { name = "inner slat", span = [0.22, 0.58], chord_fraction = 0.11, limits = [-2, 25] },
+  { name = "outer slat", span = [0.58, 0.97], chord_fraction = 0.11, limits = [-2, 25] },
+]
 
 # All-moving canards, close-coupled over the intakes, 2.9 m2 exposed
 [[surface]]
@@ -65,16 +71,36 @@ stations = [
   { x = 1.30, w = 0.70, top = 0.300, bottom = -0.350, n = 2.0 },
   { x = 3.00, w = 1.00, top = 0.500, bottom = -0.500, n = 2.0 },
   { x = 4.50, w = 1.15, top = 0.550, bottom = -0.600, n = 2.2 },
-  { x = 5.50, w = 2.20, top = 0.500, bottom = -0.850, n = 3.0 },
-  { x = 8.00, w = 2.40, top = 0.450, bottom = -0.900, n = 3.2 },
+  { x = 5.50, w = 1.35, top = 0.500, bottom = -0.800, n_top = 2.4, n_bottom = 2.8 },
+  { x = 8.00, w = 2.40, top = 0.450, bottom = -0.900, n_top = 3.0, n_bottom = 3.4 },
   { x = 10.50, w = 2.20, top = 0.400, bottom = -0.800, n = 3.0 },
   { x = 13.00, w = 1.90, top = 0.350, bottom = -0.650, n = 2.8 },
   { x = 15.27, w = 1.50, top = 0.250, bottom = -0.500, n = 2.4 },
 ]
 
+# Half-round intakes either side under the canard roots, a small
+# splitter between each and the fuselage
+[[intake]]
+name = "intake"
+mirror = true
+lip = 0.03
+rake = -5
+duct = 1.4
+duct_rise = 0.1
+duct_taper = 0.85
+stations = [
+  { x = 5.00, y = 0.820, w = 0.560, top = 0.080, bottom = -0.760, chine = -0.300, n_top = 2.6, n_bottom = 2.0 },
+  { x = 6.40, y = 0.860, w = 0.600, top = 0.080, bottom = -0.800, chine = -0.320, n_top = 2.6, n_bottom = 2.2 },
+  { x = 8.20, y = 0.840, w = 0.560, top = 0.050, bottom = -0.800, n = 2.6 },
+  { x = 9.80, y = 0.700, w = 0.400, top = -0.050, bottom = -0.720, n = 2.4 },
+]
+
+# The framed windscreen and the canopy behind it
 [[body]]
 name = "canopy"
 kind = "pod"
+frames = [3.42]
+frame_width = 0.07
 stations = [
   { x = 2.800, w = 0.00, top = 0.560, bottom = 0.540 },
   { x = 3.400, w = 0.66, top = 0.980, bottom = 0.520, n = 2.0 },
@@ -108,7 +134,8 @@ wheel_diameter = 0.52
 wheel_width = 0.16
 retractable = true
 static_deflection = 0.14
-attach = [4.300, 0.0, -0.800]
+attach = [4.300, 0.000, -0.400]
+wheels = 2
 
 [[gear]]
 name = "Main Gear"
@@ -118,7 +145,8 @@ wheel_diameter = 0.76
 wheel_width = 0.24
 retractable = true
 static_deflection = 0.17
-attach = [10.300, 1.000, -0.900]
+attach = [10.300, 0.700, -0.450]
+retract = "forward"
 
 [reference]
 aero_point = [9.713, 0.0, 0.0]     # 0.23 MAC
@@ -159,6 +187,11 @@ capacity = 800
 name = "right wing"
 position = [10.063, 2.300, 0.000]
 capacity = 800
+
+[dimensions]                  # published, overall, gear down (Dassault):
+length = 15.27                 # m
+span = 10.90
+height = 5.34
 
 [targets]
 # Rafale C, published

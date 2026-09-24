@@ -66,7 +66,11 @@ class Stages(unittest.TestCase):
         self.assertEqual(self.failed(self.stage(d, "mass")), [])
         self.assertEqual(self.failed(self.stage(d, "propulsion")), [])
         build = self.stage(d, "build")
-        self.assertTrue(os.path.isfile(build["xml"]) and os.path.isfile(build["glb"]))
+        self.assertTrue(os.path.isfile(build["xml"]))
+        # the 3D model: one closed solid when the mesher is built, else primitives
+        model = self.stage(d, "model")
+        self.assertTrue(os.path.isfile(model["glb"]))
+        self.assertEqual(self.failed(model), [])
         self.assertTrue(os.path.isfile(os.path.join(d.dir, "Engines", self.name + "_engine0.xml")))
         # JSBSim flies exactly the tables
         self.assertEqual(self.failed(self.stage(d, "verify")), [])

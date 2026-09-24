@@ -263,6 +263,42 @@ def base_cla(base):
     return float((np.interp(3.0, al, CL) - np.interp(-1.0, al, CL)) / math.radians(4.0))
 
 
+def bodies_area(bodies, xs, cells=192):
+    """The area (m^2) of the union of the bodies' sections at each x: where
+    an intake stands against the fuselage or a boom on a nacelle, the
+    overlap counts once. Each section is laid on a y-z grid."""
+    area = np.zeros(len(xs))
+    parts = [(b, side) for b in bodies for side in b.copies()]
+    for i, x in enumerate(xs):
+        secs = []
+        for b, side in parts:
+            if not b.x[0] <= x <= b.x[-1]:
+                continue
+            w, top, bot, yc, _ = b.section(x)
+            zc, nt, nb = b.halves(x)
+            if w <= 0.0 or top <= bot:
+                continue
+            secs.append((float(yc) * side, 0.5 * float(w), float(zc), float(top), float(bot), float(nt), float(nb)))
+        if not secs:
+            continue
+        y0 = min(s[0] - s[1] for s in secs)
+        y1 = max(s[0] + s[1] for s in secs)
+        z0 = min(s[4] for s in secs)
+        z1 = max(s[3] for s in secs)
+        h = max(y1 - y0, z1 - z0) / cells
+        ys = np.arange(y0 + 0.5 * h, y1, h)
+        zs = np.arange(z0 + 0.5 * h, z1, h)
+        Y, Z = np.meshgrid(ys, zs)
+        covered = np.zeros(Y.shape, bool)
+        for yc, a, zc, top, bot, nt, nb in secs:
+            up = Z >= zc
+            b_ = np.where(up, max(top - zc, 1e-9), max(zc - bot, 1e-9))
+            n_ = np.where(up, nt, nb)
+            covered |= np.abs((Y - yc) / a) ** n_ + np.abs((Z - zc) / b_) ** n_ <= 1.0
+        area[i] = covered.sum() * h * h
+    return area
+
+
 def area_distribution(aircraft, n=160):
     """Cross-sectional area (m^2) of the whole aircraft over x, and its
     length (m): the bodies' sections, plus the surfaces' thickness where they
@@ -271,11 +307,8 @@ def area_distribution(aircraft, n=160):
     lo = min([b.x[0] for b in aircraft.bodies] + [min(sec.le[0] for sec in s.sections) for s in aircraft.surfaces])
     hi = max([b.x[-1] for b in aircraft.bodies] + [max(sec.le[0] + sec.chord for sec in s.sections) for s in aircraft.surfaces])
     xs = np.linspace(lo, hi, n + 2)[1:-1]
-    area = np.zeros(n)
+    area = bodies_area(aircraft.bodies, xs)
     fuselage = [b for b in aircraft.bodies if b.kind == "fuselage"]
-    for b in aircraft.bodies:
-        inside = (xs >= b.x[0]) & (xs <= b.x[-1])
-        area[inside] += b.area_at(xs[inside]) * len(b.copies())
     for surf in aircraft.surfaces:
         etas = np.linspace(0.0, 1.0, 201)
         mids = 0.5 * (etas[1:] + etas[:-1])

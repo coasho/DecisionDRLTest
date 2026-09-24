@@ -30,6 +30,7 @@ class Flight:
         self.lat, self.lon = lat, lon
         self.dt = self.world.step_seconds
         self._n = 0
+        self._has_prop = None
 
     def close(self):
         self.world.close()
@@ -120,8 +121,10 @@ class Flight:
                                              "vs", "nz", "de", "da", "dr", "thr", "rpm", "cl")}
         W = self.prop(v, "inertia/weight-lbs") * LBF
         S = self.prop(v, "metrics/Sw-sqft") * FT * FT
-        # a jet has no propeller: asked once, not every step
-        has_prop = v.state.engine_count > 0 and np.isfinite(self.prop(v, "propulsion/engine/propeller-rpm"))
+        # a jet has no propeller: asked once per flight (one type), not every run
+        if self._has_prop is None:
+            self._has_prop = v.state.engine_count > 0 and np.isfinite(self.prop(v, "propulsion/engine/propeller-rpm"))
+        has_prop = self._has_prop
         for i in range(n + 1):
             s = v.state
             t = i * self.dt

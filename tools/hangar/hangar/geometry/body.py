@@ -8,6 +8,15 @@ y > 0 side and copied.
 
     stations = [ { x = 0.0, w = 0.0, top = 1.0, bottom = 1.0 },
                  { x = 0.4, w = 0.9, top = 1.35, bottom = 0.65, n = 2.5 }, ... ]
+
+A section's two halves can differ: chine is the height of its widest line
+(default half way), and n_top, n_bottom the exponents above and below it -
+a flat belly under a round back (n_bottom = 5, n_top = 2), or a chined nose
+(n = 1.6, the chine a sharp edge along the side).
+
+A canopy (a pod named "canopy...") is glass; frames = [x, ...] puts a frame
+round it at each x (frame_width wide, default 6 cm): a windscreen's arch, the
+bow between a canopy's panes.
 """
 import numpy as np
 
@@ -48,6 +57,19 @@ class Body:
             raise ValueError("body %r: every station needs x, w, top and bottom (missing %s)" % (self.name, e))
         self.y = np.array([r.get("y", 0.0) for r in rows], float) + origin[1]
         self.n = np.array([r.get("n", 2.0) for r in rows], float)
+        self.frames = [float(x) + origin[0] for x in spec.get("frames", [])]
+        # aero = false: drawn and weighed, left out of the aerodynamic tables
+        # (a launcher rail on a wing tip is part of the tip, not a slender body)
+        self.aero = bool(spec.get("aero", True))
+        self.frame_width = float(spec.get("frame_width", 0.06))
+        self.n_top = np.array([r.get("n_top", r.get("n", 2.0)) for r in rows], float)
+        self.n_bottom = np.array([r.get("n_bottom", r.get("n", 2.0)) for r in rows], float)
+        # the widest line, as a fraction of the height from the bottom
+        span = np.maximum(self.top - self.bottom, 1e-9)
+        self.chine = np.array([np.clip((r["chine"] + origin[2] - b) / h, 0.0, 1.0) if "chine" in r else 0.5
+                               for r, b, h in zip(rows, self.bottom, span)], float)
+        if np.any(self.n_top < 1.0) or np.any(self.n_bottom < 1.0) or np.any(self.n < 1.0):
+            raise ValueError("body %r: the section exponents must be 1 or more" % self.name)
         if np.any(np.diff(self.x) <= 0):
             raise ValueError("body %r: stations must be in increasing x" % self.name)
         if np.any(self.top < self.bottom - 1e-9) or np.any(self.w < 0):
@@ -55,13 +77,23 @@ class Body:
 
     # -- sections along x -----------------------------------------------------------------------
     def section(self, xq):
-        """Width, top, bottom, lateral centre and exponent at x (arrays ok)."""
+        """Width, top, bottom, lateral centre and (mean) exponent at x (arrays
+        ok)."""
         xq = np.clip(xq, self.x[0], self.x[-1])
         w = np.maximum(_pchip(self.x, self.w, xq), 0.0)
         top = _pchip(self.x, self.top, xq)
         bot = _pchip(self.x, self.bottom, xq)
         top = np.maximum(top, bot)
-        return w, top, bot, np.interp(xq, self.x, self.y), np.interp(xq, self.x, self.n)
+        n = 0.5 * (np.interp(xq, self.x, self.n_top) + np.interp(xq, self.x, self.n_bottom))
+        return w, top, bot, np.interp(xq, self.x, self.y), n
+
+    def halves(self, xq):
+        """The height of the widest line and the exponents above and below it
+        at x (arrays ok)."""
+        xq = np.clip(xq, self.x[0], self.x[-1])
+        _, top, bot, _, _ = self.section(xq)
+        zc = bot + np.interp(xq, self.x, self.chine) * (top - bot)
+        return zc, np.interp(xq, self.x, self.n_top), np.interp(xq, self.x, self.n_bottom)
 
     @property
     def length(self):
@@ -82,11 +114,14 @@ class Body:
 
     def area_at(self, xq):
         """Cross-section area: a superellipse of semi-axes a, b and exponent n
-        has area 4ab G(1+1/n)^2 / G(1+2/n)."""
-        w, t, b, _, n = self.section(xq)
+        has area 4ab G(1+1/n)^2 / G(1+2/n); each half its half."""
+        w, t, b, _, _ = self.section(xq)
+        zc, nt, nb = self.halves(xq)
         from math import gamma
-        k = np.array([4 * gamma(1 + 1 / ni) ** 2 / gamma(1 + 2 / ni) for ni in np.atleast_1d(n)])
-        return k.reshape(np.shape(w)) * (w / 2) * ((t - b) / 2)
+
+        def k(n):
+            return np.array([2 * gamma(1 + 1 / ni) ** 2 / gamma(1 + 2 / ni) for ni in np.atleast_1d(n)]).reshape(np.shape(w))
+        return (w / 2) * ((t - zc) * k(nt) + (zc - b) * k(nb))
 
     @property
     def volume(self):
@@ -117,14 +152,15 @@ class Body:
         # stations: cluster at the ends where the shape turns fastest
         xs = self.x[0] + self.length * 0.5 * (1 - np.cos(np.pi * np.linspace(0, 1, n_x + 1)))
         xs = np.unique(np.concatenate([xs, self.x]))
-        w, t, b, yc, n = self.section(xs)
+        w, t, b, yc, _ = self.section(xs)
+        zc, nt, nb = self.halves(xs)
         th = np.linspace(0.0, 2 * np.pi, n_around, endpoint=False)
         c, s = np.cos(th), np.sin(th)
         rings = []
         for i in range(len(xs)):
-            e = 2.0 / n[i]
+            e = np.where(s >= 0.0, 2.0 / nt[i], 2.0 / nb[i])
             yy = yc[i] + (w[i] / 2) * np.sign(c) * np.abs(c) ** e
-            zz = 0.5 * (t[i] + b[i]) + ((t[i] - b[i]) / 2) * np.sign(s) * np.abs(s) ** e
+            zz = zc[i] + np.where(s >= 0.0, t[i] - zc[i], zc[i] - b[i]) * np.sign(s) * np.abs(s) ** e
             rings.append(np.column_stack([np.full(n_around, xs[i]), yy, zz]))
         rings = np.array(rings)
         verts = rings.reshape(-1, 3)
@@ -158,3 +194,39 @@ class Body:
     def copies(self):
         """Lateral offsets of the body's copies (one, or +/- for mirrored)."""
         return [1.0, -1.0] if self.mirror else [1.0]
+
+
+class Intake(Body):
+    """An air intake ([[intake]]): its cowl as a body whose first station is
+    the lip, open there onto a duct that runs dark into the airframe.
+
+        lip = 0.03       the lip's thickness (m)
+        rake = 0         deg: the lip plane leaned so its top is ahead of its bottom
+        sweep = 0        deg: leaned so its outboard edge is behind its inboard one
+        duct = 1.5       m: how far the duct is seen into, behind the lip
+        duct_rise = 0    m: how far its centre climbs over that (towards the engine)
+        duct_taper = 1   its size at the end over its size at the lip
+    """
+
+    def __init__(self, spec):
+        spec = dict(spec)
+        spec.setdefault("kind", "intake")
+        super().__init__(spec)
+        if self.w[0] <= 0.0 or self.top[0] <= self.bottom[0]:
+            raise ValueError("intake %r: its first station is the lip, and must be open (w > 0, top > bottom)" % self.name)
+        self.lip = float(spec.get("lip", 0.03))
+        self.rake = float(spec.get("rake", 0.0))
+        self.sweep = float(spec.get("sweep", 0.0))
+        self.duct = float(spec.get("duct", 1.5))
+        self.duct_rise = float(spec.get("duct_rise", 0.0))
+        self.duct_taper = float(spec.get("duct_taper", 1.0))
+        if not 0.0 < self.lip < 0.25 * min(self.w[0], self.top[0] - self.bottom[0]):
+            raise ValueError("intake %r: lip must be positive and under a quarter of the opening" % self.name)
+
+    def lip_plane(self):
+        """A point on the lip plane (the opening's centre) and its unit normal,
+        forward out of the cowl."""
+        zc, _, _ = self.halves(self.x[0])
+        p = np.array([self.x[0], self.y[0], float(zc)])
+        n = np.array([-1.0, np.tan(np.radians(self.sweep)), -np.tan(np.radians(self.rake))])
+        return p, n / np.linalg.norm(n)

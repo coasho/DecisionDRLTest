@@ -311,20 +311,77 @@ class Model3D(unittest.TestCase):
         import struct
         import tempfile
         from hangar import model3d
+        from hangar.shape import meshkit
         a = Aircraft.load(repo("aircraft/skua/skua.toml"))
-        with tempfile.TemporaryDirectory() as d:
-            path = model3d.write_glb(a, os.path.join(d, "skua.glb"), origin=np.zeros(3))
-            with open(path, "rb") as f:
-                magic, version, total = struct.unpack("<III", f.read(12))
-                length, kind = struct.unpack("<II", f.read(8))
-                doc = json.loads(f.read(length))
-        self.assertEqual((magic, version, kind), (0x46546C67, 2, 0x4E4F534A))
-        names = [n["name"] for n in doc["nodes"] if n["name"].startswith("fsim:")]
-        self.assertEqual(sorted(names), ["fsim:aileron"] * 2 + ["fsim:elevator"] * 2 + ["fsim:flaps"] * 2 + ["fsim:rudder"] * 2)
-        for n in doc["nodes"]:
-            if n["name"].startswith("fsim:"):
-                self.assertEqual(len(n["translation"]), 3)
-                self.assertAlmostEqual(float(np.linalg.norm(n["rotation"])), 1.0, places=6)
+        surfaces = ["fsim:aileron"] * 2 + ["fsim:elevator"] * 2 + ["fsim:flaps"] * 2 + ["fsim:rudder"] * 2
+        # the primitive model, and the solid one when the mesher is built: that
+        # also spins its propeller with the engine (6000 rpm at full throttle)
+        for solid, expect in ((False, surfaces), (True, sorted(surfaces + ["fsim:propeller:0:100"]))):
+            if solid and meshkit.library() is None:
+                continue
+            report = {}
+            with tempfile.TemporaryDirectory() as d:
+                path = model3d.write_glb(a, os.path.join(d, "skua.glb"), origin=np.zeros(3), report=report, solid=solid)
+                with open(path, "rb") as f:
+                    magic, version, total = struct.unpack("<III", f.read(12))
+                    length, kind = struct.unpack("<II", f.read(8))
+                    doc = json.loads(f.read(length))
+            with self.subTest(solid=solid):
+                self.assertEqual((magic, version, kind), (0x46546C67, 2, 0x4E4F534A))
+                names = [n["name"] for n in doc["nodes"] if n["name"].startswith("fsim:")]
+                self.assertEqual(sorted(names), expect)
+                for n in doc["nodes"]:
+                    if n["name"].startswith("fsim:"):
+                        self.assertEqual(len(n["translation"]), 3)
+                        self.assertAlmostEqual(float(np.linalg.norm(n["rotation"])), 1.0, places=6)
+                if solid:  # one closed solid, and every moving part one too
+                    af = report["airframe"]
+                    self.assertEqual((af["boundary_edges"], af["nonmanifold_edges"], af["components"]), (0, 0, 1))
+                    for p in report["pieces"] + report["gear"]:
+                        self.assertEqual((p["boundary_edges"], p["components"]), (0, 1), p["label"])
+
+    def test_gear_folds_into_its_bay(self):
+        # the F-16's legs stow inside the airframe (its intake, belly and wing
+        # roots) and every door hinges on its own outer edge
+        from hangar.shape import airframe as sh
+        from hangar.shape import gear as sg
+        from hangar.shape import meshkit
+        if meshkit.library() is None:
+            self.skipTest("hangar_meshkit is not built")
+        a = Aircraft.load(repo("aircraft/f16c/f16c.toml"))
+        plan = []
+        sh.airframe(a, gear=plan)
+        self.assertEqual(sorted(p["leg"].name for p in plan), ["Left Main Gear", "Nose Gear", "Right Main Gear"])
+        for p in plan:
+            with self.subTest(leg=p["leg"].name):
+                self.assertLess(p["protrusion"], 0.03)
+                for d in p["doors"]:
+                    box = d["scene"]["root"]["a"]["children"][1]
+                    c, h = np.asarray(box["centre"]), np.asarray(box["half"])
+                    # the hinge on one of the box's long edges, its axis along x
+                    self.assertAlmostEqual(abs(d["hinge"][1] - c[1]), h[1] + 0.5 * sg.GAP, delta=0.02)
+                    self.assertEqual(abs(d["axis"][0]), 1.0)
+                    # opening turns the door down, away from the bay
+                    far = np.array([c[0], c[1] - np.sign(d["hinge"][1] - c[1]) * h[1], d["hinge"][2]])
+                    moved = d["hinge"] + sg._rotation(d["axis"], d["deg"]) @ (far - d["hinge"])
+                    self.assertLess(moved[2], d["hinge"][2] - 0.5 * h[1])
+
+    def test_leading_edge_flaps_turn_down(self):
+        # a positive turn of a leading-edge device's node moves its leading
+        # edge down on both sides
+        from hangar import model3d
+        from hangar.shape import airframe as sh
+        a = Aircraft.load(repo("aircraft/f16c/f16c.toml"))
+        wing = next(s for s in a.surfaces if s.name == "wing")
+        self.assertEqual(len(wing.leading), 1)
+        for side in (1, -1):
+            piece = sh.hinge_piece(wing, wing.leading[0], side)
+            p0, axis, _, _ = model3d.leading_hinge(piece)
+            r = piece["te"] - p0  # the leading edge, ahead of the hinge
+            th = 0.25
+            moved = r * math.cos(th) + np.cross(axis, r) * math.sin(th) + axis * np.dot(axis, r) * (1 - math.cos(th)) - r
+            with self.subTest(side=side):
+                self.assertLess(moved[2], 0.0)
 
 
 if __name__ == "__main__":

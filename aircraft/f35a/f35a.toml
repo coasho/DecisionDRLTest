@@ -29,6 +29,11 @@ sections = [
 controls = [
   { name = "flaperon", channel = "aileron", mix = { flap = 1.0 }, span = [0.28, 0.78], chord_fraction = 0.24, limits = [-30, 30] },
 ]
+# leading-edge flaps over the whole exposed span, on the angle-of-attack
+# schedule (the F-16's law stands in)
+leading = [
+  { name = "leading-edge flap", span = [0.27, 0.97], chord_fraction = 0.14, limits = [-3, 30] },
+]
 
 # The chined forebody runs into a sharp leading-edge extension ahead of the
 # wing root: its vortex carries the F-35's high angles of attack
@@ -75,22 +80,46 @@ controls = [
 [[body]]
 name = "fuselage"
 kind = "fuselage"
+# Chined forward fuselage; behind the intakes a deep, wide body over the one
+# engine and its ducts, closing to the round nozzle.
 stations = [
   { x = 0.00, w = 0.00, top = -0.100, bottom = -0.200 },
-  { x = 1.20, w = 0.90, top = 0.200, bottom = -0.450, n = 2.4 },
-  { x = 3.00, w = 1.30, top = 0.450, bottom = -0.650, n = 2.6 },
-  { x = 4.60, w = 1.70, top = 0.550, bottom = -0.850, n = 2.8 },
-  { x = 5.60, w = 2.60, top = 0.550, bottom = -1.000, n = 3.2 },
-  { x = 8.00, w = 2.90, top = 0.550, bottom = -1.100, n = 3.5 },
-  { x = 10.50, w = 2.80, top = 0.500, bottom = -1.000, n = 3.4 },
+  { x = 1.20, w = 0.90, top = 0.200, bottom = -0.450, chine = -0.130, n_top = 1.8, n_bottom = 1.9 },
+  { x = 3.00, w = 1.32, top = 0.450, bottom = -0.650, chine = -0.080, n_top = 1.9, n_bottom = 2.1 },
+  { x = 4.60, w = 1.72, top = 0.550, bottom = -0.850, chine = -0.050, n_top = 2.1, n_bottom = 2.4 },
+  { x = 5.60, w = 2.00, top = 0.550, bottom = -0.950, chine = -0.050, n_top = 2.4, n_bottom = 2.8 },
+  { x = 8.00, w = 2.90, top = 0.550, bottom = -1.100, chine = -0.100, n_top = 3.2, n_bottom = 3.8 },
+  { x = 10.50, w = 2.80, top = 0.500, bottom = -1.000, chine = -0.100, n_top = 3.2, n_bottom = 3.6 },
   { x = 13.00, w = 2.20, top = 0.400, bottom = -0.800, n = 3.0 },
   { x = 15.00, w = 1.40, top = 0.300, bottom = -0.550, n = 2.4 },
   { x = 15.67, w = 1.20, top = 0.250, bottom = -0.500, n = 2.2 },
 ]
 
+# The intakes either side behind the cockpit: caret-shaped, their lips swept
+# back and leaning back from the bottom lip (diverterless: a bump ahead of
+# each, not drawn).
+[[intake]]
+name = "intake"
+mirror = true
+lip = 0.035
+rake = -22
+sweep = 25
+duct = 1.6
+duct_rise = 0.15
+duct_taper = 0.85
+stations = [
+  { x = 5.10, y = 1.020, w = 0.640, top = 0.050, bottom = -0.900, n = 3.0 },
+  { x = 6.50, y = 1.100, w = 0.700, top = 0.080, bottom = -0.980, n = 3.2 },
+  { x = 8.20, y = 1.100, w = 0.660, top = 0.050, bottom = -1.000, n = 3.4 },
+  { x = 9.50, y = 1.000, w = 0.500, top = -0.050, bottom = -0.950, n = 3.4 },
+]
+
+# One piece, with a bow a third of the way back
 [[body]]
 name = "canopy"
 kind = "pod"
+frames = [4.05]
+frame_width = 0.07
 stations = [
   { x = 2.800, w = 0.00, top = 0.560, bottom = 0.540 },
   { x = 3.500, w = 0.76, top = 1.050, bottom = 0.520, n = 2.0 },
@@ -123,7 +152,7 @@ wheel_diameter = 0.56
 wheel_width = 0.17
 retractable = true
 static_deflection = 0.14
-attach = [3.900, 0.0, -0.800]
+attach = [3.900, 0.0, -0.550]
 
 [[gear]]
 name = "Main Gear"
@@ -133,7 +162,7 @@ wheel_diameter = 0.84
 wheel_width = 0.27
 retractable = true
 static_deflection = 0.17
-attach = [9.000, 1.300, -1.050]
+attach = [9.000, 1.250, -0.750]
 
 [reference]
 aero_point = [8.452, 0.0, 0.0]     # 0.27 MAC
@@ -182,6 +211,11 @@ capacity = 690
 name = "right wing"
 position = [8.852, 2.500, 0.000]
 capacity = 690
+
+[dimensions]                  # published, overall, gear down (Lockheed Martin):
+length = 15.67                 # m
+span = 10.70
+height = 4.38
 
 [targets]
 # F-35A, published

@@ -71,6 +71,45 @@ class Control:
         return self.eta0 - 1e-9 <= eta <= self.eta1 + 1e-9
 
 
+class LeadingEdge:
+    """A leading-edge flap or slat on part of a lifting surface (leading =
+    [...] on the surface): its front chord_fraction turns down about a hinge
+    behind it, on the fighter's schedule - schedule = [a, m, b]: a alpha(deg)
+    - m qbar/p + b degrees (qbar/p = 0.7 M^2; the F-16's 1.38, 9.05, 1.45) -
+    held within limits. It moves in the 3D model (fsim:lef); the aerodynamic
+    model does not see it (its tables stand for the scheduled wing)."""
+
+    channel = "lef"
+    all_moving = False
+    mix = {}
+
+    def __init__(self, spec, surface_name):
+        where = "surface %r leading-edge device %r" % (surface_name, spec.get("name", "?"))
+        self.name = spec.get("name", "leading-edge flap")
+        span = spec.get("span")
+        if not span or len(span) != 2:
+            raise ValueError("%s: span = [eta_start, eta_end] (0 root .. 1 tip) is required" % where)
+        self.eta0, self.eta1 = float(span[0]), float(span[1])
+        cf = spec.get("chord_fraction", 0.15)
+        self.cf0, self.cf1 = (float(cf), float(cf)) if np.isscalar(cf) else (float(cf[0]), float(cf[1]))
+        lim = spec.get("limits", [-2.0, 25.0])
+        self.min_deg, self.max_deg = float(lim[0]), float(lim[1])
+        self.schedule = [float(v) for v in spec.get("schedule", [1.38, 9.05, 1.45])]
+        if not (0.0 <= self.eta0 < self.eta1 <= 1.0) or not (0.0 < self.cf0 <= 1.0 and 0.0 < self.cf1 <= 1.0):
+            raise ValueError("%s: span within [0, 1] and chord_fraction within (0, 1] (1: the whole section, hinged "
+                             "at its trailing edge - a vortex controller)" % where)
+        if len(self.schedule) != 3 or not self.min_deg < self.max_deg:
+            raise ValueError("%s: schedule = [a, m, b] and limits = [lo, hi] with lo < hi" % where)
+        self.channels = {"lef": 1.0}
+
+    def chord_fraction(self, eta):
+        t = (eta - self.eta0) / (self.eta1 - self.eta0)
+        return (1 - t) * self.cf0 + t * self.cf1
+
+    def covers(self, eta):
+        return self.eta0 - 1e-9 <= eta <= self.eta1 + 1e-9
+
+
 class Section:
     def __init__(self, le, chord, twist_deg, foil):
         self.le = np.asarray(le, float)
@@ -97,6 +136,7 @@ class Surface:
             foil = af.get(r.get("airfoil", default_foil), base_dir)
             self.sections.append(Section(origin + np.asarray(r["le"], float), r["chord"], r.get("twist", 0.0), foil))
         self.controls = [Control(c, self.name) for c in spec.get("controls", [])]
+        self.leading = [LeadingEdge(c, self.name) for c in spec.get("leading", [])]
         # spanwise coordinate: arc length of the leading edge in the y-z plane
         yz = np.array([[s.le[1], s.le[2]] for s in self.sections])
         seg = np.hypot(*np.diff(yz, axis=0).T)

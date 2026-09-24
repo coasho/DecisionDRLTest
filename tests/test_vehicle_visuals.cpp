@@ -3,6 +3,7 @@
 // JSBSim means them, and the geometry under them stays shared.
 #include "world/VehicleVisuals.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 
 #include <vsgXchange/all.h>
@@ -65,9 +66,13 @@ TEST_CASE("control surfaces turn with each vehicle's own deflections", "[render]
     const auto& a = visuals.pose(0);
     const auto& b = visuals.pose(1);
 
-    // flaps, ailerons and elevator both sides, one rudder
-    REQUIRE(a.joints.size() == 7);
-    REQUIRE(b.joints.size() == 7);
+    // flaps, ailerons and elevator both sides, one rudder - and the propeller
+    const auto count = [](const auto& joints, Joint::Kind kind) {
+        return std::count_if(joints.begin(), joints.end(), [kind](const Joint& j) { return j.kind == kind; });
+    };
+    REQUIRE(count(a.joints, Joint::Surface) == 7);
+    REQUIRE(count(a.joints, Joint::Propeller) == 1);
+    REQUIRE(b.joints.size() == a.joints.size());
     REQUIRE(a.normal);
     REQUIRE(a.normal != b.normal);
     for (std::size_t j = 0; j < a.transforms.size(); ++j) {
@@ -87,6 +92,10 @@ TEST_CASE("control surfaces turn with each vehicle's own deflections", "[render]
     for (std::size_t j = 0; j < a.transforms.size(); ++j) {
         const vsg::dmat4 before = rest[j];
         const vsg::dmat4 after = matrixTo(a.normal, a.transforms[j].get());
+        if (a.joints[j].kind != Joint::Surface) { // the propeller turns with the clock, not the controls
+            REQUIRE(after == before);
+            continue;
+        }
         // A point on the surface behind the hinge (body axes: x forward, y right,
         // z down): the local direction that points aft at rest, off the hinge axis.
         const vsg::dmat4 inv = vsg::inverse(before);
@@ -156,6 +165,77 @@ TEST_CASE("control surface names parse, and anything else is left alone", "[rend
     REQUIRE_FALSE(Joint::parse("fsim:rudder:x", j));
     REQUIRE_FALSE(Joint::parse("fsim:elevator+", j));
     REQUIRE_FALSE(Joint::parse("fsim:elevator+canopy", j));
+    // landing gear: a leg that turns 95 deg as the gear goes up (1 -> 0), a
+    // door that opens in the first fifth of the way down
+    REQUIRE(Joint::parse("fsim:gear:95", j));
+    REQUIRE(j.kind == Joint::Gear);
+    s = sim::VehicleState();
+    s.gearPosition = 1.0;
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1])) < 1e-12);
+    s.gearPosition = 0.5;
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 47.5 * 3.14159265358979323846 / 180.0) < 1e-9);
+    REQUIRE(Joint::parse("fsim:gear:-80:0:0.2", j));
+    s.gearPosition = 0.1;
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) + 40.0 * 3.14159265358979323846 / 180.0) < 1e-9);
+    s.gearPosition = 1.0;
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) + 80.0 * 3.14159265358979323846 / 180.0) < 1e-9);
+    // an afterburner plume: hidden at military power, full length at full
+    // afterburner (throttle position 2)
+    REQUIRE(Joint::parse("fsim:afterburner:1", j));
+    REQUIRE(j.kind == Joint::Afterburner);
+    REQUIRE(j.engine == 1);
+    s = sim::VehicleState();
+    s.engineCount = 2;
+    s.throttlePosition[1] = 1.0;
+    REQUIRE(j.matrix(s)[0][0] == 0.0);
+    s.throttlePosition[1] = 2.0;
+    REQUIRE(std::abs(j.matrix(s)[0][0] - 1.0) < 1e-12);
+    REQUIRE(Joint::parse("fsim:afterburner", j));
+    REQUIRE(j.engine == 0);
+    // a leading-edge flap on the F-16's schedule: 1.38 alpha - 9.05 qbar/p + 1.45
+    // deg, qbar/p = 0.7 M^2, held within its stops
+    REQUIRE(Joint::parse("fsim:lef@-2,25", j));
+    REQUIRE(j.kind == Joint::LeadingEdge);
+    s = sim::VehicleState();
+    s.alphaRad = 10.0 * 3.14159265358979323846 / 180.0;
+    s.mach = 0.5;
+    const double lef = (1.38 * 10.0 - 9.05 * 0.7 * 0.25 + 1.45) * 3.14159265358979323846 / 180.0;
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - lef) < 1e-9);
+    s.alphaRad = 40.0 * 3.14159265358979323846 / 180.0;
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 25.0 * 3.14159265358979323846 / 180.0) < 1e-9);
+    REQUIRE(Joint::parse("fsim:lef:1:0:0", j));
+    s.alphaRad = 0.1;
+    s.mach = 2.0;
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 0.1) < 1e-9);
+    // a propeller: 10 rev/s at full throttle, 30 % of that at idle
+    REQUIRE(Joint::parse("fsim:propeller:0:10", j));
+    REQUIRE(j.kind == Joint::Propeller);
+    s = sim::VehicleState();
+    s.engineCount = 1;
+    s.throttlePosition[0] = 1.0;
+    s.simTime = 0.025; // a quarter turn at 10 rev/s
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 0.5 * 3.14159265358979323846) < 1e-9);
+    s.throttlePosition[0] = 0.0;
+    s.simTime = 0.25 / 3.0; // a quarter turn at 3 rev/s
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 0.5 * 3.14159265358979323846) < 1e-9);
+    // a nozzle petal: shut at military power, 8 deg open at full afterburner
+    REQUIRE(Joint::parse("fsim:nozzle:1:8", j));
+    REQUIRE(j.kind == Joint::Nozzle);
+    s = sim::VehicleState();
+    s.engineCount = 2;
+    s.throttlePosition[1] = 1.0;
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1])) < 1e-12);
+    s.throttlePosition[1] = 1.5;
+    REQUIRE(std::abs(std::atan2(j.matrix(s)[1][2], j.matrix(s)[1][1]) - 4.0 * 3.14159265358979323846 / 180.0) < 1e-9);
+    REQUIRE_FALSE(Joint::parse("fsim:nozzle:0", j));
+    REQUIRE_FALSE(Joint::parse("fsim:propeller:0", j));
+    REQUIRE_FALSE(Joint::parse("fsim:propeller:7:10", j));
+    REQUIRE_FALSE(Joint::parse("fsim:lef:1:2", j));
+    REQUIRE_FALSE(Joint::parse("fsim:lef@25,-2", j));
+    REQUIRE_FALSE(Joint::parse("fsim:gear", j));
+    REQUIRE_FALSE(Joint::parse("fsim:gear:x", j));
+    REQUIRE_FALSE(Joint::parse("fsim:gear:90:0.5:0.5", j));
+    REQUIRE_FALSE(Joint::parse("fsim:afterburner:9", j));
     REQUIRE_FALSE(Joint::parse("fsim:elevator@20,-50", j));
     REQUIRE_FALSE(Joint::parse("fsim:elevator@-50", j));
     REQUIRE_FALSE(Joint::parse("fsim:elevator@-50,20x", j));

@@ -9,12 +9,13 @@ import tomllib
 
 import numpy as np
 
-from .body import Body
+from .body import Body, Intake
 from .surface import Surface
 
 
 class Gear:
     def __init__(self, spec):
+        self.spec = spec
         self.name = spec.get("name", "gear")
         if "position" not in spec:
             raise ValueError("gear %r: 'position' (the wheel's ground contact point) is required" % self.name)
@@ -123,7 +124,7 @@ class Aircraft:
         self.description = a.get("description", "")
         self.category = a.get("category", "light_ga")
         self.surfaces = [Surface(s, self.dir) for s in spec.get("surface", [])]
-        self.bodies = [Body(b) for b in spec.get("body", [])]
+        self.bodies = [Body(b) for b in spec.get("body", [])] + [Intake(i) for i in spec.get("intake", [])]
         self.gear = [Gear(g) for g in spec.get("gear", [])]
         self.engines = [Engine(e) for e in spec.get("engine", [])]
         if not self.surfaces:

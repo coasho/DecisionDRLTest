@@ -285,10 +285,94 @@ bool parseTerm(std::string term, VehicleVisuals::Joint::Channel& channel, double
 }
 } // namespace
 
+namespace {
+/// The numbers of `<a>[:<b>...]`, all finite, or false.
+bool parseNumbers(const std::string& text, std::vector<double>& out) {
+    out.clear();
+    if (text.empty()) return true;
+    std::size_t begin = 0;
+    for (;;) {
+        const auto colon = text.find(':', begin);
+        const std::string item = text.substr(begin, colon == std::string::npos ? std::string::npos : colon - begin);
+        char* end = nullptr;
+        const double v = std::strtod(item.c_str(), &end);
+        if (item.empty() || end == item.c_str() || *end != '\0' || !std::isfinite(v)) return false;
+        out.push_back(v);
+        if (colon == std::string::npos) return true;
+        begin = colon + 1;
+    }
+}
+} // namespace
+
 bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
     if (!isJointName(name)) return false;
     std::string terms = name.substr(5);
     joint.mix.clear();
+    joint.kind = Surface;
+    // a landing gear's leg or door: fsim:gear:<deg>[:<g0>:<g1>]
+    if (terms.rfind("gear:", 0) == 0) {
+        std::vector<double> v;
+        if (!parseNumbers(terms.substr(5), v) || (v.size() != 1 && v.size() != 3)) return false;
+        joint.kind = Gear;
+        joint.gearRad = v[0] * 3.14159265358979323846 / 180.0;
+        joint.g0 = v.size() == 3 ? v[1] : 1.0;
+        joint.g1 = v.size() == 3 ? v[2] : 0.0;
+        return joint.g0 != joint.g1;
+    }
+    // a leading-edge flap on its schedule: fsim:lef[:<a>:<m>:<b>][@<lo>,<hi>]
+    if (terms == "lef" || terms.rfind("lef:", 0) == 0 || terms.rfind("lef@", 0) == 0) {
+        joint.lo = -std::numeric_limits<double>::infinity();
+        joint.hi = std::numeric_limits<double>::infinity();
+        if (const auto at = terms.find('@'); at != std::string::npos) {
+            std::vector<double> stops;
+            std::string s = terms.substr(at + 1);
+            std::replace(s.begin(), s.end(), ',', ':');
+            if (!parseNumbers(s, stops) || stops.size() != 2 || !(stops[0] < stops[1])) return false;
+            joint.lo = stops[0] * 3.14159265358979323846 / 180.0;
+            joint.hi = stops[1] * 3.14159265358979323846 / 180.0;
+            terms.resize(at);
+        }
+        std::vector<double> v;
+        if (!parseNumbers(terms.size() > 3 ? terms.substr(4) : std::string(), v) || (!v.empty() && v.size() != 3))
+            return false;
+        joint.kind = LeadingEdge;
+        if (v.size() == 3) {
+            joint.lefA = v[0];
+            joint.lefM = v[1];
+            joint.lefB = v[2];
+        }
+        return true;
+    }
+    // a nozzle petal: fsim:nozzle:<engine>:<deg at full afterburner>
+    if (terms.rfind("nozzle:", 0) == 0) {
+        std::vector<double> v;
+        if (!parseNumbers(terms.substr(7), v) || v.size() != 2) return false;
+        if (v[0] < 0.0 || v[0] >= sim::VehicleState::kMaxEngines || v[0] != std::floor(v[0])) return false;
+        joint.kind = Nozzle;
+        joint.engine = static_cast<int>(v[0]);
+        joint.nozzleRad = v[1] * 3.14159265358979323846 / 180.0;
+        return true;
+    }
+    // a propeller: fsim:propeller:<engine>:<rev/s at full throttle>
+    if (terms.rfind("propeller:", 0) == 0) {
+        std::vector<double> v;
+        if (!parseNumbers(terms.substr(10), v) || v.size() != 2) return false;
+        if (v[0] < 0.0 || v[0] >= sim::VehicleState::kMaxEngines || v[0] != std::floor(v[0])) return false;
+        joint.kind = Propeller;
+        joint.engine = static_cast<int>(v[0]);
+        joint.revPerSecond = v[1];
+        return true;
+    }
+    // an exhaust plume: fsim:afterburner[:<engine>]
+    if (terms == "afterburner" || terms.rfind("afterburner:", 0) == 0) {
+        std::vector<double> v;
+        if (!parseNumbers(terms.size() > 11 ? terms.substr(12) : std::string(), v) || v.size() > 1) return false;
+        const double e = v.empty() ? 0.0 : v[0];
+        if (e < 0.0 || e >= sim::VehicleState::kMaxEngines || e != std::floor(e)) return false;
+        joint.kind = Afterburner;
+        joint.engine = static_cast<int>(e);
+        return true;
+    }
     joint.lo = -std::numeric_limits<double>::infinity();
     joint.hi = std::numeric_limits<double>::infinity();
     if (const auto at = terms.find('@'); at != std::string::npos) {
@@ -325,6 +409,42 @@ bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
 }
 
 vsg::dmat4 VehicleVisuals::Joint::matrix(const sim::VehicleState& s) const {
+    if (kind == Gear) {
+        const double g = std::isfinite(s.gearPosition) ? s.gearPosition : 1.0;
+        const double t = std::clamp((g - g0) / (g1 - g0), 0.0, 1.0);
+        return rest * vsg::rotate(gearRad * t, vsg::dvec3(1.0, 0.0, 0.0));
+    }
+    if (kind == LeadingEdge) {
+        constexpr double kDeg = 180.0 / 3.14159265358979323846;
+        const double alpha = std::isfinite(s.alphaRad) ? s.alphaRad * kDeg : 0.0;
+        const double mach = std::isfinite(s.mach) ? s.mach : 0.0;
+        const double deg = lefA * alpha - lefM * 0.7 * mach * mach + lefB;
+        return rest * vsg::rotate(std::clamp(deg / kDeg, lo, hi), vsg::dvec3(1.0, 0.0, 0.0));
+    }
+    if (kind == Propeller) {
+        // the phase from the sim's clock at the throttle's rate: a real
+        // propeller's speed lags the lever, but at tens of turns a second the
+        // eye sees the same blur
+        const double p = engine < s.engineCount && std::isfinite(s.throttlePosition[engine])
+                             ? std::clamp(s.throttlePosition[engine], 0.0, 1.0)
+                             : 0.0;
+        const double turns = revPerSecond * (0.3 + 0.7 * p) * (std::isfinite(s.simTime) ? s.simTime : 0.0);
+        return rest * vsg::rotate(2.0 * 3.14159265358979323846 * (turns - std::floor(turns)), vsg::dvec3(1.0, 0.0, 0.0));
+    }
+    if (kind == Nozzle) {
+        // the petals open with the afterburner: hangar's throttle lever runs
+        // to 2, the afterburner past 1
+        const double p = engine < s.engineCount ? s.throttlePosition[engine] : 0.0;
+        const double a = std::isfinite(p) ? std::clamp(p - 1.0, 0.0, 1.0) : 0.0;
+        return rest * vsg::rotate(nozzleRad * a, vsg::dvec3(1.0, 0.0, 0.0));
+    }
+    if (kind == Afterburner) {
+        // hangar's turbofans: the throttle lever runs to 2, the afterburner past 1
+        const double p = engine < s.engineCount ? s.throttlePosition[engine] : 0.0;
+        const double a = std::isfinite(p) ? std::clamp(p - 1.0, 0.0, 1.0) : 0.0;
+        if (a <= 0.0) return rest * vsg::scale(0.0, 0.0, 0.0);
+        return rest * vsg::scale(0.35 + 0.65 * a, 0.6 + 0.4 * a, 0.6 + 0.4 * a);
+    }
     const auto of = [&s](Channel c) {
         double d = 0.0;
         switch (c) {
@@ -347,7 +467,9 @@ VehicleVisuals::Rig VehicleVisuals::Rig::find(const vsg::ref_ptr<vsg::Node>& gra
     auto finder = vsg::visit<FindJoints>(graph);
     for (const auto& name : finder.malformed)
         LOG_WARN("world") << "model node '" << name
-                          << "' is not a control surface (fsim:aileron|elevator|rudder|flaps[:gain][+...][@lo,hi]); left fixed";
+                          << "' is not a moving part (fsim:aileron|elevator|rudder|flaps[:gain][+...][@lo,hi], "
+                             "fsim:gear:<deg>[:<g0>:<g1>], fsim:afterburner[:<engine>], fsim:lef[:<a>:<m>:<b>][@lo,hi], "
+                             "fsim:propeller:<engine>:<rev/s>, fsim:nozzle:<engine>:<deg>); left fixed";
     rig.joints = std::move(finder.joints);
     rig.spine.assign(finder.spine.begin(), finder.spine.end());
     return rig;

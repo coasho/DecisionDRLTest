@@ -81,6 +81,18 @@ move on while a check fails or a picture looks wrong.
   should need well under 1 m², and the pitch should land near the real
   propeller's. A large correction means the geometry is wrong. Fix that
   instead.
+- **model.** The `.glb`. Its checks must pass: no open, pinched or
+  misturned edge, the airframe in one piece, every moving part closed, the
+  stowed gear inside the skin (under 3 cm), length, span and height within
+  3 % of `[dimensions]`.
+  - A loose piece is usually a fin or boom standing off its body. Give the
+    surface a body under it (a tail boom), or move it onto one.
+  - Gear outside the skin: move the `attach` (the trunnion) up inside the
+    structure, where the real one is; a leg hinged below the skin cannot fold
+    in. Give `retract` from the real aircraft.
+  - Shape: intakes are `[[intake]]` bodies (lip, rake, sweep, duct). Bellies
+    and chines come from `chine`, `n_top`, `n_bottom`. Canopies take `frames`.
+    Leading-edge flaps and slats go in the surface's `leading` list.
 - **In the viewer.** Take a screenshot, then Read the PNG:
 
   ```bash
@@ -160,10 +172,17 @@ move on while a check fails or a picture looks wrong.
     fighters.
 - **Read after fly:** `fly_fighter.png`, for the excess power at sea level
   and 36,000 ft and the turn.
+- **The model's shape.** Build it from the real aircraft's drawings, not
+  from a template: its own intakes (a chin intake, D-shaped side intakes,
+  carets, nacelle mouths), its canopy's frames, its tail booms. Check the
+  control layout against the type: a tailless canard delta has elevons along
+  its whole trailing edge, not flaps; most fighters carry leading-edge flaps
+  or slats. Read the four-view screenshots against photos of the real one.
 - **Known model limits.** Tails on booms beside the engines (Su-27, MiG-29)
   come out too stable: the lattice carries the tail across the gap between
   them. High-thrust engines fitted to Mach 2.5 at altitude are too fast at
-  sea level. Thrust vectoring is not modelled.
+  sea level. Thrust vectoring is not modelled. Leading-edge devices move in
+  the 3D model only; the tables do not model them.
 
 ## 5. Finish
 

@@ -29,8 +29,12 @@ namespace fsim::world {
 /// that also rolls, a flaperon - is named `fsim:<channel>[:<gain>]+<channel>
 /// [:<gain>]...` and turns by the sum. A trailing `@<lo>,<hi>` (degrees) holds
 /// the turn within the part's own stops: a canard that travels further than
-/// the elevons on its channel. Each vehicle gets its own copy of those nodes
-/// and of the nodes above them; the geometry stays shared.
+/// the elevons on its channel. `fsim:gear:<deg>[:<g0>:<g1>]` turns a landing
+/// gear leg or door by deg as the gear position (0 up, 1 down) goes from g0 to
+/// g1; `fsim:afterburner[:<engine>]` stretches an exhaust plume along its x
+/// axis with that engine's afterburner (throttle position past 1, JSBSim's
+/// augmented turbine), and hides it without. Each vehicle gets its own copy of
+/// those nodes and of the nodes above them; the geometry stays shared.
 class VehicleVisuals {
 public:
     struct Settings {
@@ -100,9 +104,14 @@ public:
     /// Animations found in the loaded model (e.g. propellers), empty for the placeholder.
     const vsg::Animations& animations() const { return animations_; }
 
-    /// A moving part of a model: a node named fsim:<channel>[:<gain>][+...].
+    /// A moving part of a model: a node named fsim:<channel>[:<gain>][+...],
+    /// fsim:gear:<deg>[:<g0>:<g1>], fsim:afterburner[:<engine>],
+    /// fsim:lef[:<a>:<m>:<b>][@<lo>,<hi>], fsim:propeller:<engine>:<rev/s> or
+    /// fsim:nozzle:<engine>:<deg>.
     struct Joint {
         enum Channel { Aileron, Elevator, Rudder, Flaps };
+        enum Kind { Surface, Gear, Afterburner, LeadingEdge, Propeller, Nozzle };
+        Kind kind = Surface;
         const vsg::MatrixTransform* node = nullptr; ///< in the shared model
         vsg::dmat4 rest;                           ///< its matrix at zero deflection
         Channel channel = Aileron;                 ///< the first channel in the name
@@ -110,6 +119,16 @@ public:
         std::vector<std::pair<Channel, double>> mix; ///< the channels after it
         double lo = -std::numeric_limits<double>::infinity(); ///< its stops (rad), from `@<lo>,<hi>` (degrees)
         double hi = std::numeric_limits<double>::infinity();
+        double gearRad = 0.0, g0 = 1.0, g1 = 0.0; ///< gear: turned gearRad as the position goes g0 -> g1
+        int engine = 0;                            ///< afterburner: the engine whose plume it is
+        /// leading-edge flap: a * alpha(deg) - m * qbar/p + b degrees, qbar/p = 0.7 M^2
+        /// (a fighter's schedule; 1.38, 9.05, 1.45 the F-16's)
+        double lefA = 1.38, lefM = 9.05, lefB = 1.45;
+        /// propeller: turns per second at full throttle (negative: the other way),
+        /// 30 % of it at idle; a positive turn is about the node's x axis
+        double revPerSecond = 0.0;
+        /// nozzle petal: turned this far (rad) at full afterburner, none without
+        double nozzleRad = 0.0;
         /// Parses a node name; false when it is not a joint (or malformed).
         static bool parse(const std::string& name, Joint& joint);
         /// The node's matrix at the vehicle's deflection of this channel.

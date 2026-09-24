@@ -28,6 +28,12 @@ controls = [
   { name = "inner elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.16, 0.50], chord_fraction = 0.20, limits = [-25, 25] },
   { name = "outer elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.50, 0.94], chord_fraction = 0.22, limits = [-25, 25] },
 ]
+# leading-edge slats, inboard and outboard, drawn as flaps turning down,
+# on the angle-of-attack schedule (the F-16's law stands in)
+leading = [
+  { name = "inner slat", span = [0.20, 0.55], chord_fraction = 0.11, limits = [-2, 25] },
+  { name = "outer slat", span = [0.55, 0.97], chord_fraction = 0.11, limits = [-2, 25] },
+]
 
 # All-moving canards, close-coupled ahead of the wing, 2.8 m2 exposed: a nose-
 # down command turns their trailing edges up (gain -1)
@@ -66,17 +72,36 @@ stations = [
   { x = 1.50, w = 0.75, top = 0.300, bottom = -0.350, n = 2.0 },
   { x = 3.00, w = 1.00, top = 0.450, bottom = -0.500, n = 2.0 },
   { x = 4.20, w = 1.10, top = 0.500, bottom = -0.650, n = 2.2 },
-  { x = 5.00, w = 1.25, top = 0.500, bottom = -1.000, n = 2.6 },
-  { x = 7.50, w = 1.40, top = 0.450, bottom = -1.050, n = 2.8 },
+  { x = 5.00, w = 1.25, top = 0.500, bottom = -0.700, n_top = 2.4, n_bottom = 2.8 },
+  { x = 7.50, w = 1.45, top = 0.450, bottom = -0.950, n_top = 2.6, n_bottom = 3.4 },
   { x = 10.00, w = 1.50, top = 0.400, bottom = -0.950, n = 2.8 },
   { x = 12.50, w = 1.45, top = 0.350, bottom = -0.750, n = 2.6 },
   { x = 14.50, w = 1.30, top = 0.300, bottom = -0.600, n = 2.4 },
   { x = 15.96, w = 1.20, top = 0.250, bottom = -0.500, n = 2.2 },
 ]
 
+# The chin intake: a wide rectangular mouth under the cockpit with the
+# lower lip (the variable cowl) square to the flow, split in two inside
+[[intake]]
+name = "intake"
+lip = 0.035
+rake = 4
+duct = 1.6
+duct_rise = 0.35
+duct_taper = 0.9
+stations = [
+  { x = 4.60, w = 1.020, top = -0.600, bottom = -1.140, chine = -0.880, n_top = 5.0, n_bottom = 3.6 },
+  { x = 6.20, w = 1.060, top = -0.600, bottom = -1.160, chine = -0.890, n_top = 5.0, n_bottom = 3.6 },
+  { x = 8.80, w = 1.000, top = -0.600, bottom = -1.100, n_top = 5.0, n_bottom = 3.4 },
+  { x = 11.20, w = 0.700, top = -0.600, bottom = -0.900, n = 3.0 },
+]
+
+# The framed windscreen and the canopy behind it
 [[body]]
 name = "canopy"
 kind = "pod"
+frames = [3.30]
+frame_width = 0.07
 stations = [
   { x = 2.600, w = 0.00, top = 0.520, bottom = 0.500 },
   { x = 3.200, w = 0.66, top = 0.960, bottom = 0.480, n = 2.0 },
@@ -110,7 +135,8 @@ wheel_diameter = 0.55
 wheel_width = 0.16
 retractable = true
 static_deflection = 0.14
-attach = [4.300, 0.0, -0.850]
+attach = [4.300, 0.000, -0.450]
+retract = "forward"
 
 [[gear]]
 name = "Main Gear"
@@ -120,7 +146,8 @@ wheel_diameter = 0.78
 wheel_width = 0.26
 retractable = true
 static_deflection = 0.17
-attach = [10.600, 0.850, -0.950]
+attach = [10.600, 0.620, -0.500]
+retract = "inward"
 
 [reference]
 aero_point = [10.290, 0.0, 0.0]    # 0.30 MAC
@@ -161,6 +188,11 @@ capacity = 800
 name = "right wing"
 position = [10.500, 2.600, 0.000]
 capacity = 800
+
+[dimensions]                  # published, overall, gear down (Eurofighter):
+length = 15.96                 # m
+span = 10.95
+height = 5.28
 
 [targets]
 # Typhoon, published

@@ -55,8 +55,8 @@ kind = "fin"
 mirror = true
 airfoil = "naca64a005"
 sections = [
-  { le = [15.000, 1.550, 0.450], chord = 3.150 },
-  { le = [16.950, 1.550, 3.150], chord = 1.100 },
+  { le = [15.000, 1.550, 0.620], chord = 3.150 },
+  { le = [16.950, 1.550, 3.320], chord = 1.100 },
 ]
 controls = [
   { name = "rudder", channel = "rudder", span = [0.05, 0.55], chord_fraction = 0.30, limits = [-30, 30] },
@@ -67,24 +67,62 @@ controls = [
 [[body]]
 name = "fuselage"
 kind = "fuselage"
+# The forward fuselage (radome, cockpit) is round; from the intakes back the
+# body is wide and flat - the two inlet ducts either side of the centre
+# body, the wing on top of them, the engines side by side at the tail.
 stations = [
   { x = 0.00, w = 0.00, top = -0.250, bottom = -0.350 },
   { x = 1.00, w = 0.60, top = 0.000, bottom = -0.620, n = 2.0 },
   { x = 2.50, w = 1.00, top = 0.150, bottom = -0.850, n = 2.0 },
   { x = 4.00, w = 1.20, top = 0.280, bottom = -0.980, n = 2.2 },
   { x = 5.80, w = 1.35, top = 0.350, bottom = -1.050, n = 2.4 },
-  { x = 7.00, w = 2.70, top = 0.350, bottom = -1.250, n = 3.2 },
-  { x = 8.50, w = 3.10, top = 0.320, bottom = -1.330, n = 3.6 },
-  { x = 11.00, w = 3.20, top = 0.300, bottom = -1.300, n = 3.6 },
-  { x = 13.50, w = 3.05, top = 0.280, bottom = -1.150, n = 3.4 },
+  { x = 7.00, w = 1.55, top = 0.350, bottom = -1.100, chine = -0.300, n_top = 2.4, n_bottom = 3.0 },
+  { x = 8.50, w = 2.70, top = 0.330, bottom = -1.280, chine = -0.450, n_top = 3.2, n_bottom = 4.0 },
+  { x = 10.00, w = 3.15, top = 0.310, bottom = -1.320, chine = -0.450, n_top = 3.6, n_bottom = 4.5 },
+  { x = 11.00, w = 3.20, top = 0.300, bottom = -1.300, chine = -0.450, n_top = 3.6, n_bottom = 4.5 },
+  { x = 13.50, w = 3.05, top = 0.280, bottom = -1.150, chine = -0.420, n_top = 3.4, n_bottom = 4.0 },
   { x = 16.00, w = 2.75, top = 0.200, bottom = -1.000, n = 3.0 },
   { x = 18.50, w = 2.45, top = 0.050, bottom = -0.900, n = 2.6 },
   { x = 19.43, w = 2.30, top = 0.000, bottom = -0.850, n = 2.5 },
 ]
 
+# The intakes: two-dimensional external-compression inlets on the fuselage
+# sides under the wing roots, square-cut, the top lip (the ramp) raked
+# forward over the bottom one; they run back into the wide duct fuselage.
+[[intake]]
+name = "intake"
+mirror = true
+lip = 0.04
+rake = 22
+duct = 1.8
+duct_rise = 0.15
+duct_taper = 0.9
+stations = [
+  { x = 6.60, y = 1.050, w = 0.960, top = 0.020, bottom = -1.220, n = 5.0 },
+  { x = 8.00, y = 1.080, w = 1.000, top = 0.040, bottom = -1.260, n = 5.0 },
+  { x = 9.60, y = 1.080, w = 0.960, top = 0.020, bottom = -1.200, n = 4.5 },
+  { x = 11.00, y = 1.000, w = 0.700, top = -0.100, bottom = -1.050, n = 4.0 },
+]
+
+# The tail booms beside the engines: they carry the fins and the
+# stabilators' spindles
+[[body]]
+name = "boom"
+kind = "boom"
+mirror = true
+stations = [
+  { x = 13.20, y = 1.550, w = 0.120, top = 0.300, bottom = 0.060, n = 2.6 },
+  { x = 14.40, y = 1.550, w = 0.340, top = 0.660, bottom = -0.300, n = 2.6 },
+  { x = 18.20, y = 1.550, w = 0.340, top = 0.660, bottom = -0.300, n = 2.6 },
+  { x = 19.10, y = 1.550, w = 0.170, top = 0.400, bottom = -0.080, n = 2.6 },
+]
+
+# The frameless bubble behind a one-piece windscreen: one frame between them
 [[body]]
 name = "canopy"
 kind = "pod"
+frames = [5.45]
+frame_width = 0.07
 stations = [
   { x = 4.600, w = 0.00, top = 0.380, bottom = 0.360 },
   { x = 5.200, w = 0.70, top = 0.900, bottom = 0.330, n = 2.0 },
@@ -118,8 +156,9 @@ max_steer = 30
 wheel_diameter = 0.56
 wheel_width = 0.18
 retractable = true
+retract = "forward"
 static_deflection = 0.14
-attach = [5.530, 0.0, -1.050]
+attach = [5.530, 0.0, -0.800]
 
 [[gear]]
 name = "Main Gear"
@@ -128,8 +167,9 @@ position = [10.950, 1.375, -2.200]
 wheel_diameter = 0.86
 wheel_width = 0.26
 retractable = true
+retract = "forward"
 static_deflection = 0.16
-attach = [10.700, 1.100, -1.250]
+attach = [10.700, 1.000, -0.900]
 
 [reference]
 aero_point = [10.300, 0.0, 0.0]    # 0.25 MAC
@@ -175,6 +215,11 @@ capacity = 600
 name = "right wing"
 position = [11.600, 3.000, 0.000]
 capacity = 600
+
+[dimensions]                  # published, overall, gear down (USAF fact sheet):
+length = 19.43                 # m
+span = 13.05
+height = 5.63
 
 [targets]
 # F-15C, clean, published (USAF fact sheet; Jane's)

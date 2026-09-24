@@ -27,8 +27,8 @@ import numpy as np
 from . import __version__
 from .geometry import Aircraft
 
-STAGES = ("geometry", "aero", "mass", "propulsion", "build", "verify", "fly", "calibrate", "report")
-DEFAULT = ("geometry", "aero", "mass", "propulsion", "build", "verify", "fly", "report")
+STAGES = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "calibrate", "report")
+DEFAULT = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "report")
 KT = 0.514444
 
 
@@ -205,7 +205,7 @@ class Design:
 
     def tables(self, force=False):
         from .aero import tables as T
-        key = self.spec_hash("surface", "body", "reference", "analysis", "gear", "engine")
+        key = self.spec_hash("surface", "body", "intake", "reference", "analysis", "gear", "engine")
         cache = os.path.join(self.out, "tables_quick.pkl" if self.quick else "tables.pkl")
         if not force and os.path.isfile(cache):
             with open(cache, "rb") as f:
@@ -414,7 +414,7 @@ class Design:
         return self.build_with(self.tables())
 
     def build_with(self, tables):
-        from . import jsbsim, model3d
+        from . import jsbsim
         from .mass import MassModel
         from .propulsion import Propeller, electric_xml, nozzle_xml, piston_xml, propeller_xml, turbofan_xml
         a = self.aircraft
@@ -446,15 +446,11 @@ class Design:
         xml_path = os.path.join(self.dir, a.name + ".xml")
         with open(xml_path, "w", encoding="utf-8") as f:
             f.write(jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw))
-        e = mm.empty()
-        glb = os.path.join(self.dir, a.name + ".glb")
-        model3d.write_glb(a, glb, origin=e["cg"])
         # the platform finds it where it is (io::AssetResolver: the source tree's
         # aircraft/ in a development build (before any staged copy), share/flightsim/aircraft
         # in a package, or FSIM_AIRCRAFT_PATH): jsbsim:<name> in any trainer, the viewer, Python
-        checks = [info("JSBSim aircraft", shown(xml_path), note="type jsbsim:%s" % a.name),
-                  info("3D model", shown(glb), note="fsim demo --aircraft %s" % a.name)]
-        out = {"xml": xml_path, "glb": glb, "checks": checks}
+        checks = [info("JSBSim aircraft", shown(xml_path), note="type jsbsim:%s" % a.name)]
+        out = {"xml": xml_path, "checks": checks}
         if fbw is not None:
             checks += self._fbw_checks(fbw)
             from .report import plots
@@ -463,6 +459,103 @@ class Design:
             out["fbw"] = {"options": fbw["options"], "qbar_psf": fbw["qbar_psf"], "mach": fbw["mach"],
                           "gains": fbw["gains"]}
         return self.save("build", out)
+
+    # -- the 3D model ---------------------------------------------------------------------------
+    def model_key(self):
+        """What the model is made from: the design's geometry and mass (the CG
+        is its origin), the code that shapes and meshes it."""
+        from .shape import meshkit
+        blob = self.spec_hash("surface", "body", "intake", "gear", "engine", "mass", "reference", "aircraft", "dimensions")
+        here = os.path.dirname(os.path.abspath(__file__))
+        for f in sorted(glob.glob(os.path.join(here, "shape", "*.py"))) + [os.path.join(here, "model3d.py")]:
+            with open(f, "rb") as fh:
+                blob += hashlib.sha1(fh.read()).hexdigest()
+        lib = meshkit.library()
+        if lib is not None:
+            with open(lib._name, "rb") as fh:
+                blob += hashlib.sha1(fh.read()).hexdigest()
+        return hashlib.sha1(blob.encode()).hexdigest()[:16]
+
+    def model(self, force=False):
+        """The design as the viewer's .glb. With hangar's mesher built, the
+        airframe is one closed solid, filleted where its parts meet, and each
+        control surface a closed solid on its hinge; the checks see that no
+        mesh has a crack, a pinch or a loose piece (shape/, native/meshkit)."""
+        from . import model3d
+        from .mass import MassModel
+        a = self.aircraft
+        glb = os.path.join(self.dir, a.name + ".glb")
+        key = self.model_key()
+        old = self.load("model")
+        if not force and old and old.get("key") == key and os.path.isfile(glb):
+            self.log("  model: unchanged (%s)" % shown(glb))
+            return old
+        report = {}
+        t0 = time.time()
+        model3d.write_glb(a, glb, origin=MassModel(a).empty()["cg"], report=report)
+        checks = self._model_checks(report, glb, time.time() - t0)
+        return self.save("model", {"glb": glb, "key": key, "report": report, "checks": checks})
+
+    def _model_checks(self, report, glb, seconds):
+        a = self.aircraft
+        checks = [info("3D model", shown(glb), note="fsim demo --aircraft %s" % a.name)]
+        if "airframe" not in report:
+            checks.append(info("3D model: parts drawn as separate primitives", "-",
+                               note="hangar_meshkit is not built: cmake --build --preset ucrt64-release"))
+            return checks
+        af = report["airframe"]
+        defects = af["boundary_edges"] + af["nonmanifold_edges"] + af["misoriented_edges"]
+        checks.append(check("3D model: airframe defects (open, pinched or misturned edges)", defects, None, 0,
+                            note="%d open, %d pinched, %d misturned" % (af["boundary_edges"], af["nonmanifold_edges"],
+                                                                        af["misoriented_edges"])))
+        checks.append(check("3D model: airframe pieces", af["components"], 1, 1,
+                            note="one closed solid: no loose part, no part floating off the body"))
+        checks += self._dimension_checks(af, report["pieces"])
+        specks = af.get("fragments_removed", 0) + sum(p.get("fragments_removed", 0) for p in report["pieces"])
+        if specks:
+            checks.append(info("3D model: specks dropped", specks,
+                               note="pieces a few mesh cells across, where two cuts almost meet"))
+        bad = [p["label"] for p in report["pieces"]
+               if p["boundary_edges"] + p["nonmanifold_edges"] + p["misoriented_edges"] or p["components"] != 1]
+        checks.append(check("3D model: control surfaces not closed and whole", len(bad), None, 0,
+                            note=", ".join(bad) or "%d, each one closed solid" % len(report["pieces"])))
+        gear = report.get("gear", [])
+        if gear:
+            bad = [g["label"] for g in gear
+                   if g["boundary_edges"] + g["nonmanifold_edges"] + g["misoriented_edges"] or g["components"] != 1]
+            checks.append(check("3D model: landing gear parts not closed and whole", len(bad), None, 0,
+                                note=", ".join(bad) or "%d legs and doors, each one closed solid" % len(gear)))
+            legs = [g for g in gear if "protrusion" in g]
+            if legs:
+                worst = max(legs, key=lambda g: g["protrusion"])
+                checks.append(check("3D model: stowed gear outside the skin", 100.0 * worst["protrusion"], None, 3.0, "cm",
+                                    level="warn", note="%s; the leg must fold into the airframe" % worst["label"]))
+        tris = af["triangles"] + sum(p["triangles"] for p in report["pieces"] + gear)
+        degen = af["degenerate_triangles"] + sum(p["degenerate_triangles"] for p in report["pieces"] + gear)
+        checks.append(check("3D model: degenerate triangles", 100.0 * degen / max(tris, 1), None, 0.2, "%",
+                            level="warn", note="%d of %d" % (degen, tris)))
+        checks.append(info("3D model: triangles", tris, note="%.1f MB, meshed in %.0f s" % (os.path.getsize(glb) / 1e6, seconds)))
+        return checks
+
+    def _dimension_checks(self, af, pieces=()):
+        """The model's overall length, span and height (gear down, on its
+        wheels, its control surfaces - an all-moving fin - at rest) against
+        the published ones in [dimensions]: within 3 %."""
+        dims = self.aircraft.spec.get("dimensions", {})
+        if not dims or "bounds" not in af:
+            return []
+        boxes = [af["bounds"]] + [p["bounds"] for p in pieces if "bounds" in p]
+        lo = np.min([b[0] for b in boxes], axis=0)
+        hi = np.max([b[1] for b in boxes], axis=0)
+        ground = min((float(p[2]) for g in self.aircraft.gear for _, p in g.positions()), default=float(lo[2]))
+        got = {"length": hi[0] - lo[0], "span": hi[1] - lo[1], "height": hi[2] - ground}
+        out = []
+        for key in ("length", "span", "height"):
+            if key in dims:
+                want = float(dims[key])
+                out.append(check("3D model: overall %s" % key, got[key], 0.97 * want, 1.03 * want, "m", level="warn",
+                                 note="published %.2f m (%+.1f %%)" % (want, 100.0 * (got[key] / want - 1.0)), fmt="%.2f"))
+        return out
 
     def _fbw_checks(self, fbw):
         """The fly-by-wire's short period where the airframe can fly (1 g

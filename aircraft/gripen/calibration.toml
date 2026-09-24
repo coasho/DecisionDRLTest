@@ -1,7 +1,7 @@
-# Written by hangar calibrate (2026-09-23 22:53) to meet the [targets] of gripen.toml:
+# Written by hangar calibrate (2026-09-24 03:02) to meet the [targets] of gripen.toml:
 # corrections for what the physics estimate does not see. Delete this file to
 # go back to the pure estimate.
 [calibration]
 wave_drag_efficiency = 2.0000   # Raymer's E_WD: the wave drag over Sears-Haack's
-throttle_ratio = 1.3438   # the engines' TR: the compressor-face temperature ratio at the turbine's limit
-# fitted: maximum Mach 2.005 at 36000 ft (target 2)
+throttle_ratio = 1.2969   # the engines' TR: the compressor-face temperature ratio at the turbine's limit
+# fitted: maximum Mach 2.009 at 36000 ft (target 2)

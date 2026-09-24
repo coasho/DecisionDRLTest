@@ -25,9 +25,15 @@ sections = [
   { le = [7.000, 0.000, 0.000], chord = 5.890, airfoil = "naca64a005" },
   { le = [12.810, 4.875, -0.100], chord = 0.900, airfoil = "naca64a003" },
 ]
+# Elevons along the whole trailing edge, as on every tailless canard delta:
+# the inner ones also droop as flaps for take-off and landing
 controls = [
-  { name = "flap", channel = "flap", span = [0.14, 0.36], chord_fraction = 0.20, limits = [0, 25] },
-  { name = "elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.36, 0.92], chord_fraction = 0.22, limits = [-25, 25] },
+  { name = "inner elevon", channel = "elevator", mix = { aileron = 1.0, flap = 1.0 }, span = [0.14, 0.36], chord_fraction = 0.20, limits = [-25, 25] },
+  { name = "outer elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.36, 0.92], chord_fraction = 0.22, limits = [-25, 25] },
+]
+# leading-edge flaps on the angle-of-attack schedule (the F-16's law stands in)
+leading = [
+  { name = "leading-edge flap", span = [0.30, 0.97], chord_fraction = 0.12, limits = [-3, 25] },
 ]
 
 # All-moving canards, 3.4 m2 exposed
@@ -75,16 +81,35 @@ stations = [
   { x = 1.30, w = 0.70, top = 0.250, bottom = -0.350, n = 2.0 },
   { x = 3.00, w = 1.00, top = 0.450, bottom = -0.500, n = 2.0 },
   { x = 4.40, w = 1.10, top = 0.550, bottom = -0.600, n = 2.2 },
-  { x = 5.00, w = 1.20, top = 0.550, bottom = -1.100, n = 2.6 },
-  { x = 8.00, w = 1.35, top = 0.550, bottom = -1.150, n = 2.6 },
+  { x = 5.00, w = 1.20, top = 0.550, bottom = -0.650, n_top = 2.4, n_bottom = 2.8 },
+  { x = 8.00, w = 1.40, top = 0.550, bottom = -0.950, n_top = 2.6, n_bottom = 3.2 },
   { x = 11.00, w = 1.35, top = 0.500, bottom = -0.900, n = 2.5 },
   { x = 14.00, w = 1.15, top = 0.450, bottom = -0.600, n = 2.2 },
   { x = 16.43, w = 0.95, top = 0.400, bottom = -0.450, n = 2.0 },
 ]
 
+# The chin intake: rectangular, a splitter plate between it and the
+# fuselage, its mouth leaning back from the bottom lip
+[[intake]]
+name = "intake"
+lip = 0.035
+rake = -12
+duct = 1.6
+duct_rise = 0.35
+duct_taper = 0.9
+stations = [
+  { x = 4.90, w = 1.000, top = -0.560, bottom = -1.160, chine = -0.860, n_top = 5.0, n_bottom = 3.2 },
+  { x = 6.50, w = 1.040, top = -0.560, bottom = -1.180, chine = -0.870, n_top = 5.0, n_bottom = 3.4 },
+  { x = 9.00, w = 0.960, top = -0.560, bottom = -1.100, n_top = 5.0, n_bottom = 3.4 },
+  { x = 11.50, w = 0.600, top = -0.550, bottom = -0.880, n = 3.0 },
+]
+
+# The framed windscreen and the canopy behind it
 [[body]]
 name = "canopy"
 kind = "pod"
+frames = [3.55]
+frame_width = 0.07
 stations = [
   { x = 2.900, w = 0.00, top = 0.560, bottom = 0.540 },
   { x = 3.500, w = 0.66, top = 1.000, bottom = 0.520, n = 2.0 },
@@ -117,7 +142,8 @@ wheel_diameter = 0.52
 wheel_width = 0.16
 retractable = true
 static_deflection = 0.14
-attach = [5.400, 0.0, -1.100]
+attach = [5.400, 0.000, -1.000]
+retract = "aft"
 
 [[gear]]
 name = "Main Gear"
@@ -127,7 +153,8 @@ wheel_diameter = 0.78
 wheel_width = 0.25
 retractable = true
 static_deflection = 0.17
-attach = [10.700, 0.900, -1.000]
+attach = [10.900, 0.550, -0.600]
+retract = "forward"
 
 [reference]
 aero_point = [9.934, 0.0, 0.0]    # 0.19 MAC
@@ -172,6 +199,11 @@ capacity = 400
 name = "right wing"
 position = [10.534, 2.200, 0.000]
 capacity = 400
+
+[dimensions]                  # published, overall, gear down (public estimates, with the nose probe):
+length = 16.43                 # m
+span = 9.75
+height = 5.43
 
 [targets]
 # J-10A, published (estimates)

@@ -89,12 +89,17 @@ class _Builder:
         self.accessors, self.views, self.meshes, self.nodes, self.materials = [], [], [], [], []
         self._mat = {}
 
-    def material(self, name, rgb, metallic=0.1, rough=0.6):
+    def material(self, name, rgb, metallic=0.1, rough=0.6, emissive=None, alpha=1.0):
         if name not in self._mat:
             self._mat[name] = len(self.materials)
-            self.materials.append({"name": name, "doubleSided": True,
-                                   "pbrMetallicRoughness": {"baseColorFactor": [float(c) for c in rgb] + [1.0],
-                                                            "metallicFactor": metallic, "roughnessFactor": rough}})
+            m = {"name": name, "doubleSided": True,
+                 "pbrMetallicRoughness": {"baseColorFactor": [float(c) for c in rgb] + [float(alpha)],
+                                          "metallicFactor": metallic, "roughnessFactor": rough}}
+            if emissive is not None:
+                m["emissiveFactor"] = [float(c) for c in emissive]
+            if alpha < 1.0:
+                m["alphaMode"] = "BLEND"
+            self.materials.append(m)
         return self._mat[name]
 
     def _view(self, data, target=None):
@@ -111,8 +116,11 @@ class _Builder:
     def accessor(self, arr, kind):
         arr = np.ascontiguousarray(arr)
         if kind == "index":
-            data = arr.astype(np.uint32).tobytes()
-            acc = {"bufferView": self._view(data, 34963), "componentType": 5125, "count": int(arr.size), "type": "SCALAR"}
+            # 16-bit where the vertices allow: half the index data
+            small = arr.size == 0 or int(arr.max()) < 65535
+            data = arr.astype(np.uint16 if small else np.uint32).tobytes()
+            acc = {"bufferView": self._view(data, 34963), "componentType": 5123 if small else 5125,
+                   "count": int(arr.size), "type": "SCALAR"}
         elif kind == "vec3":
             a = arr.astype(np.float32)
             acc = {"bufferView": self._view(a.tobytes(), 34962), "componentType": 5126, "count": int(len(a)), "type": "VEC3",
@@ -128,16 +136,18 @@ class _Builder:
         return len(self.accessors) - 1
 
     def mesh(self, name, parts):
-        """parts: [(vertices (gltf frame), triangles, material index)]."""
+        """parts: [(vertices (gltf frame), triangles, material index[, normals])]."""
         prims = []
-        for v, t, mat in parts:
+        for part in parts:
+            v, t, mat = part[:3]
             if len(t) == 0:
                 continue
             used = np.unique(t)
             remap = np.full(len(v), -1)
             remap[used] = np.arange(len(used))
             vv, tt = v[used], remap[t]
-            prims.append({"attributes": {"POSITION": self.accessor(vv, "vec3"), "NORMAL": self.accessor(_normals(vv, tt), "vec3")},
+            nn = part[3][used] if len(part) > 3 else _normals(vv, tt)
+            prims.append({"attributes": {"POSITION": self.accessor(vv, "vec3"), "NORMAL": self.accessor(nn, "vec3")},
                           "indices": self.accessor(tt.reshape(-1), "index"), "material": mat})
         self.meshes.append({"name": name, "primitives": prims})
         return len(self.meshes) - 1
@@ -374,6 +384,17 @@ def hinge(surface, piece):
     return p0, axis, float(g), mixed
 
 
+def leading_hinge(piece):
+    """A leading-edge device's hinge: (point, unit axis, 1, {}), the axis
+    turned so that a positive turn moves its leading edge down (towards -u)
+    on either side."""
+    p0, p1 = piece["hinge"]
+    axis = (p1 - p0) / np.linalg.norm(p1 - p0)
+    if np.dot(np.cross(axis, piece["te"] - p0), -piece["u"]) < 0:
+        axis = -axis
+    return p0, axis, 1.0, {}
+
+
 def stops(aircraft, ctrl, piece):
     """"@lo,hi" (degrees, the node's sense) when the piece's channels can drive
     it past its own limits, else "". The node turns sign * orient times the
@@ -413,10 +434,113 @@ def control_nodes(aircraft, origin):
     return out
 
 
-def write_glb(aircraft, path, origin):
-    origin = np.asarray(origin, float)
-    B = _Builder()
-    top = []
+def node_name(aircraft, surface, ctrl, piece):
+    """The glb name of a control piece: its channels and gains, and its stops."""
+    _, _, g, mixed = hinge(surface, piece)
+    name = "fsim:" + CHANNEL_NODE[ctrl.channel] + ("" if abs(g - 1.0) < 1e-9 else ":%.6g" % g)
+    name += "".join("+%s:%.6g" % (CHANNEL_NODE[ch], gm) for ch, gm in sorted(mixed.items()) if abs(gm) > 1e-9)
+    return name + stops(aircraft, ctrl, piece)
+
+
+# the solid model's paint: air-superiority greys, a dark glossy canopy
+PAINT = {"skin": ((0.60, 0.62, 0.65), 0.25, 0.55), "control": ((0.55, 0.57, 0.60), 0.25, 0.55),
+         "glass": ((0.07, 0.08, 0.10), 0.9, 0.08), "dark": ((0.04, 0.04, 0.05), 0.0, 0.9),
+         "metal": ((0.38, 0.37, 0.36), 0.8, 0.35), "tyre": ((0.08, 0.08, 0.09), 0.0, 0.9),
+         "strut": ((0.55, 0.56, 0.60), 0.6, 0.4)}
+
+
+def _stats(m):
+    return {k: m[k] for k in ("boundary_edges", "nonmanifold_edges", "misoriented_edges", "components",
+                              "degenerate_triangles", "raw_triangles", "fragments_removed", "volume", "area",
+                              "seconds")} | \
+        {"triangles": int(len(m["triangles"]))}
+
+
+def _solid_parts(aircraft, B, top, origin, report):
+    """The airframe as one closed solid and every control piece as a solid of
+    its own on its hinge (shape/airframe.py, native/meshkit)."""
+    from .shape import airframe as sh
+    from .shape import meshkit
+    mats = {i: B.material(n, *PAINT[n]) for i, n in enumerate(sh.MATERIALS)}
+    plan = []
+    m = meshkit.build(sh.airframe(aircraft, gear=plan))
+    report["airframe"] = _stats(m)
+    report["airframe"]["bounds"] = [m["positions"].min(axis=0).tolist(), m["positions"].max(axis=0).tolist()]
+    v, n = _to_gltf(m["positions"], origin), _to_gltf(m["normals"], np.zeros(3))
+    parts = [(v, m["triangles"][m["materials"] == k], mats.get(int(k), mats[sh.SKIN]), n)
+             for k in np.unique(m["materials"])]
+    top.append(B.node("airframe", B.mesh("airframe", parts)))
+    report["pieces"] = []
+    for surf, ctrl, side, scene in sh.control_pieces(aircraft):
+        pm = meshkit.build(scene)
+        piece = sh.hinge_piece(surf, ctrl, side)
+        p0, axis, _, _ = leading_hinge(piece) if piece["leading"] else hinge(surf, piece)
+        q = _quat_from_x(_gltf_direction(axis))
+        pivot = _to_gltf(p0, origin)
+        R = _quat_matrix(q)
+        label = "%s %s%s" % (surf.name, ctrl.name, {1: " right", -1: " left"}.get(side, ""))
+        pv = (_to_gltf(pm["positions"], origin) - pivot) @ R
+        pn = _to_gltf(pm["normals"], np.zeros(3)) @ R
+        name = ("fsim:lef:%.6g:%.6g:%.6g@%.6g,%.6g" % (*ctrl.schedule, ctrl.min_deg, ctrl.max_deg)
+                if piece["leading"] else node_name(aircraft, surf, ctrl, piece))
+        top.append(B.node(name, B.mesh(label, [(pv, pm["triangles"], mats[sh.CONTROL], pn)]), translation=pivot, rotation=q))
+        report["pieces"].append(dict(_stats(pm), label=label, bounds=[pm["positions"].min(axis=0).tolist(),
+                                                                      pm["positions"].max(axis=0).tolist()]))
+    _gear_parts(aircraft, B, top, origin, report, plan, mats)
+
+
+def _hinged(B, name, label, m, mats, point, axis, origin, inner=None):
+    """A node turning about the design-frame axis through point: its origin
+    there, its local x along the axis, the mesh in its own frame. inner:
+    (name, axis) of a second joint through the same point, nested in it
+    (a leg's twist inside its swing)."""
+    pivot = _to_gltf(point, origin)
+    q = _quat_from_x(_gltf_direction(axis))
+    R = _quat_matrix(q)
+    if inner is not None:
+        local = R.T @ _gltf_direction(inner[1])
+        qi = _quat_from_x(local / np.linalg.norm(local))
+        R = R @ _quat_matrix(qi)
+    v = (_to_gltf(m["positions"], origin) - pivot) @ R
+    n = _to_gltf(m["normals"], np.zeros(3)) @ R
+    mesh = B.mesh(label, [(v, m["triangles"][m["materials"] == k], mats[int(k)], n) for k in np.unique(m["materials"])])
+    if inner is None:
+        return B.node(name, mesh, translation=pivot, rotation=q)
+    return B.node(name, translation=pivot, rotation=q, children=[B.node(inner[0], mesh, rotation=qi)])
+
+
+def _gear_parts(aircraft, B, top, origin, report, plan, mats):
+    """Each landing gear leg as a solid; a retractable one turns about its
+    hinge with the gear position (fsim:gear:<deg>:1:<f>, from down at 1 to
+    stowed at f) and its doors open before it moves (fsim:gear:<deg>:0:<f>)."""
+    from .shape import gear as sg
+    from .shape import meshkit
+    doors = {p["leg"].name: p for p in plan}
+    report["gear"] = []
+    for leg in sg.legs(aircraft):
+        leg = doors[leg.name]["leg"] if leg.name in doors else leg  # fitted to its bay
+        m = meshkit.build(sg.leg_scene(leg))
+        entry = dict(_stats(m), label=leg.name)
+        if leg.retractable:
+            name = "fsim:gear:%.6g:1:%.6g" % (leg.swing_deg, sg.DOORS)
+            twist = ("fsim:gear:%.6g:1:%.6g" % (leg.twist_deg, sg.DOORS), leg.strut) if abs(leg.twist_deg) > 1e-6 else None
+            top.append(_hinged(B, name, leg.name, m, mats, leg.hinge, leg.swing_axis, origin, inner=twist))
+            entry["protrusion"] = doors[leg.name]["protrusion"]
+            for d in doors[leg.name]["doors"]:
+                dm = meshkit.build(d["scene"])
+                top.append(_hinged(B, "fsim:gear:%.6g:0:%.6g" % (d["deg"], sg.DOORS), d["label"], dm, mats,
+                                   d["hinge"], d["axis"], origin))
+                report["gear"].append(dict(_stats(dm), label=d["label"]))
+        else:
+            v, n = _to_gltf(m["positions"], origin), _to_gltf(m["normals"], np.zeros(3))
+            top.append(B.node(leg.name, B.mesh(leg.name, [(v, m["triangles"][m["materials"] == k], mats[int(k)], n)
+                                                         for k in np.unique(m["materials"])])))
+        report["gear"].append(entry)
+
+
+def _primitive_parts(aircraft, B, top, origin):
+    """The primitive model: each surface and body a closed skin of its own
+    (when the mesher is not built)."""
     for s in aircraft.surfaces:
         v, t, _ = display_skin(s)
         top.append(B.node(s.name, B.mesh(s.name, [(_to_gltf(v, origin), t, B.material(s.kind, COLOURS.get(s.kind, (0.85, 0.85, 0.88))))])))
@@ -427,10 +551,167 @@ def write_glb(aircraft, path, origin):
     for b in aircraft.bodies:
         v, t, _ = b.skin(72, 40)
         top.append(B.node(b.name, B.mesh(b.name, [(_to_gltf(v, origin), t, B.material(b.kind, COLOURS.get(b.kind, (0.85, 0.85, 0.88))))])))
-    # landing gear: wheels and struts
+
+
+def _revolve_mesh(s, r, n=32):
+    """A solid of revolution about the local x axis: profile radii r at
+    stations s, closed on the axis where r is 0."""
+    th = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
+    rings = [np.stack([np.full(n, si), ri * np.cos(th), ri * np.sin(th)], axis=1) for si, ri in zip(s, r)]
+    v = np.vstack(rings + [[[s[0], 0.0, 0.0]], [[s[-1], 0.0, 0.0]]])
+    t = []
+    for k in range(len(s) - 1):
+        for i in range(n):
+            j = (i + 1) % n
+            a, b, c, d = k * n + i, k * n + j, (k + 1) * n + i, (k + 1) * n + j
+            t += [(a, c, b), (b, c, d)]
+    c0, c1 = len(s) * n, len(s) * n + 1
+    last = (len(s) - 1) * n
+    for i in range(n):
+        j = (i + 1) % n
+        t += [(c0, i, j), (c1, last + j, last + i)]
+    return v, np.array(t)
+
+
+def _propellers(aircraft, B, top, origin):
+    """Each propeller as a solid - spinner and twisted-in-pitch blades - on a
+    node the viewer spins with its engine's throttle (fsim:propeller:<engine>:
+    <rev/s at full throttle>), its x axis the way it turns (cw seen from
+    behind: forward)."""
+    from .jsbsim import _engine_units
+    from .shape import airframe as sh
+    from .shape import meshkit
+    mats = {i: B.material(n, *PAINT[n]) for i, n in enumerate(sh.MATERIALS)}
+    units = [name for _, name in _engine_units(aircraft)]
+    for e in aircraft.engines:
+        if not e.has_propeller:
+            continue
+        R = 0.5 * e.prop_diameter
+        for name, _, prop, sense in e.copies():
+            hub = np.asarray(prop, float)
+            nodes = [{"prim": "revolve", "material": sh.METAL, "origin": hub, "axis": [-1.0, 0.0, 0.0],
+                      "s": [-0.06 * R, 0.0, 0.12 * R, 0.24 * R, 0.32 * R],
+                      "r": [0.11 * R, 0.12 * R, 0.10 * R, 0.06 * R, 0.0]}]
+            # it turns about the forward axis (cw seen from behind) or the aft one;
+            # each blade's chord leans from the way it moves towards the thrust
+            axis = np.array([-1.0, 0.0, 0.0]) if sense == "cw" else np.array([1.0, 0.0, 0.0])
+            pitch = np.radians(22.0)
+            for k in range(e.prop_blades):
+                th = 2.0 * np.pi * k / e.prop_blades
+                span = np.array([0.0, np.cos(th), np.sin(th)])
+                chord = np.cos(pitch) * np.cross(axis, span) + np.sin(pitch) * np.array([-1.0, 0.0, 0.0])
+                nodes.append({"prim": "ellipsoid", "material": sh.TYRE, "centre": hub + span * 0.55 * R,
+                              "axes": [span, chord, np.cross(span, chord)], "radii": [0.46 * R, 0.075 * R, 0.013 * R]})
+            cell = float(np.clip(R / 90.0, 0.001, 0.01))
+            m = meshkit.build({"cell": cell, "error": 0.1 * cell, "safety": 3.0, "sharp_deg": 50.0,
+                               "max_triangles": 3000, "root": {"op": "union", "k": 0.02 * R, "children": nodes}})
+            rev = e.rpm / 60.0
+            top.append(_hinged(B, "fsim:propeller:%d:%.6g" % (units.index(name), rev), name + " propeller", m, mats,
+                               hub, axis, origin))
+
+
+def _nozzle_petals(aircraft, B, top, origin):
+    """Each round nozzle's petals, each on a node that opens it with the
+    afterburner (fsim:nozzle:<engine>:<deg>) under one that sets it round the
+    nozzle; one mesh shared by them all."""
+    from .jsbsim import _engine_units
+    from .shape import airframe as sh
+    from .shape import meshkit
+    mats = {i: B.material(n, *PAINT[n]) for i, n in enumerate(sh.MATERIALS)}
+    M = np.array([[0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]])  # the design frame to glTF
+    meshes = {}
+    for i, (e, name) in enumerate(_engine_units(aircraft)):
+        if e.type != "turbofan":
+            continue
+        made = sh.petals(e)
+        if made is None:
+            continue
+        scene, hinge_pt, hinge_axis = made
+        if id(e) not in meshes:
+            d, _ = sh.nozzle_size(e)
+            cell = float(np.clip(d / 150.0, 0.002, 0.01))
+            m = meshkit.build({"cell": cell, "error": 0.1 * cell, "safety": 3.0, "sharp_deg": 45.0,
+                               "max_triangles": 1000, "root": scene})
+            # the petal in its hinge's frame (x along the hinge axis)
+            qc = _quat_from_x(hinge_axis)
+            Rc = _quat_matrix(qc)
+            v = (m["positions"] - hinge_pt) @ Rc
+            n = m["normals"] @ Rc
+            parts = [(v, m["triangles"][m["materials"] == k], mats[int(k)], n) for k in np.unique(m["materials"])]
+            meshes[id(e)] = (B.mesh(e.name + " nozzle petal", parts), qc)
+        mesh, qc = meshes[id(e)]
+        exit_ = np.asarray(e.prop_position, float)
+        if e.mirror and name.endswith(" L"):
+            exit_ = exit_ * np.array([1.0, -1.0, 1.0])
+        opening = float((e.prop_spec or {}).get("petal_open_deg", 12.0))
+        for k in range(sh.PETALS):
+            phi = 2.0 * np.pi * k / sh.PETALS
+            c, s = np.cos(phi), np.sin(phi)
+            Rx = np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])
+            q = _quat_from_matrix(M @ Rx)
+            petal = B.node("fsim:nozzle:%d:%.6g" % (i, opening), mesh, translation=hinge_pt, rotation=qc)
+            top.append(B.node("%s petal %d" % (name, k + 1), translation=_to_gltf(exit_, origin), rotation=q,
+                              children=[petal]))
+
+
+def _quat_from_matrix(R):
+    """glTF's (x, y, z, w) of a rotation matrix."""
+    w = np.sqrt(max(0.0, 1.0 + R[0, 0] + R[1, 1] + R[2, 2])) / 2.0
+    x = np.copysign(np.sqrt(max(0.0, 1.0 + R[0, 0] - R[1, 1] - R[2, 2])) / 2.0, R[2, 1] - R[1, 2])
+    y = np.copysign(np.sqrt(max(0.0, 1.0 - R[0, 0] + R[1, 1] - R[2, 2])) / 2.0, R[0, 2] - R[2, 0])
+    z = np.copysign(np.sqrt(max(0.0, 1.0 - R[0, 0] - R[1, 1] + R[2, 2])) / 2.0, R[1, 0] - R[0, 1])
+    q = np.array([x, y, z, w])
+    return q / np.linalg.norm(q)
+
+
+def _plumes(aircraft, B, top, origin):
+    """An afterburner flame behind each augmented jet: a glowing outer plume
+    and a brighter core, on a node the viewer stretches with the throttle
+    (fsim:afterburner:<engine>)."""
+    from .jsbsim import _engine_units
+    from .shape.airframe import nozzle_size
+    outer = B.material("afterburner", (1.0, 0.55, 0.2), 0.0, 1.0, emissive=(1.0, 0.45, 0.12), alpha=0.35)
+    core = B.material("afterburner core", (1.0, 0.85, 0.6), 0.0, 1.0, emissive=(1.0, 0.8, 0.5), alpha=0.7)
+    q = _quat_from_x(_gltf_direction([1.0, 0.0, 0.0]))  # the jet runs aft
+    R = _quat_matrix(q)
+    for i, (e, name) in enumerate(_engine_units(aircraft)):
+        if e.type != "turbofan" or not e.thrust_wet_kn:
+            continue
+        d, _ = nozzle_size(e)
+        r, L = 0.5 * d, 4.0 * d
+        exit_ = np.asarray(e.prop_position, float)
+        if e.mirror and name.endswith(" L"):
+            exit_ = exit_ * np.array([1.0, -1.0, 1.0])
+        v1, t1 = _revolve_mesh([0.0, 0.15 * L, 0.5 * L, 0.85 * L, L], [0.9 * r, 1.0 * r, 0.8 * r, 0.35 * r, 0.02 * r])
+        v2, t2 = _revolve_mesh([0.0, 0.1 * L, 0.3 * L, 0.55 * L], [0.7 * r, 0.72 * r, 0.45 * r, 0.02 * r])
+        # the mesh is built along +x; the node turns +x onto the jet's direction
+        top.append(B.node("fsim:afterburner:%d" % i, B.mesh(name + " afterburner", [(v1 @ np.eye(3), t1, outer), (v2, t2, core)]),
+                          translation=_to_gltf(exit_, origin), rotation=q))
+    del R
+
+
+def write_glb(aircraft, path, origin, report=None, solid=None):
+    """The design as a .glb. solid: the airframe as one closed, filleted solid
+    (the default when hangar's mesher is built) or each part a primitive
+    skin; report, a dict, gets the meshes' numbers the checks read."""
+    from .shape import meshkit
+    origin = np.asarray(origin, float)
+    B = _Builder()
+    top = []
+    if solid is None:
+        solid = meshkit.library() is not None
+    if solid:
+        _solid_parts(aircraft, B, top, origin, report if report is not None else {})
+    else:
+        _primitive_parts(aircraft, B, top, origin)
+    if solid:
+        _plumes(aircraft, B, top, origin)
+        _nozzle_petals(aircraft, B, top, origin)
+        _propellers(aircraft, B, top, origin)
+    # landing gear: wheels and struts (the solid model has its own)
     dark = B.material("tyre", (0.08, 0.08, 0.09), 0.0, 0.9)
     strut_m = B.material("strut", (0.55, 0.56, 0.60), 0.6, 0.4)
-    for gear in aircraft.gear:
+    for gear in ([] if solid else aircraft.gear):
         for name, pos in gear.positions():
             r = 0.5 * gear.wheel_diameter
             centre = pos + np.array([0.0, 0.0, r])
@@ -447,7 +728,7 @@ def write_glb(aircraft, path, origin):
     blade_m = B.material("propeller", (0.12, 0.12, 0.13), 0.3, 0.5)
     spin_m = B.material("spinner", (0.85, 0.2, 0.15), 0.4, 0.4)
     anims = []
-    for e in aircraft.engines:
+    for e in ([] if solid else aircraft.engines):
         if not e.has_propeller:
             continue
         for name, _, prop, _ in e.copies():

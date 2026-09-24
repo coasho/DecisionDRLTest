@@ -27,6 +27,12 @@ controls = [
   { name = "inner elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.14, 0.55], chord_fraction = 0.18, limits = [-25, 25] },
   { name = "outer elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.55, 0.92], chord_fraction = 0.22, limits = [-25, 25] },
 ]
+# full-span leading-edge slats, drawn as flaps turning down, on the
+# angle-of-attack schedule (the F-16's law stands in)
+leading = [
+  { name = "inner slat", span = [0.18, 0.55], chord_fraction = 0.10, limits = [-2, 25] },
+  { name = "outer slat", span = [0.55, 0.97], chord_fraction = 0.10, limits = [-2, 25] },
+]
 
 [[surface]]
 name = "fin"
@@ -49,16 +55,35 @@ stations = [
   { x = 1.30, w = 0.62, top = 0.250, bottom = -0.350, n = 2.0 },
   { x = 3.00, w = 0.95, top = 0.450, bottom = -0.500, n = 2.0 },
   { x = 4.60, w = 1.10, top = 0.550, bottom = -0.600, n = 2.2 },
-  { x = 5.60, w = 2.20, top = 0.500, bottom = -0.750, n = 3.0 },
-  { x = 8.00, w = 2.20, top = 0.450, bottom = -0.750, n = 3.0 },
+  { x = 5.60, w = 1.30, top = 0.500, bottom = -0.700, n_top = 2.4, n_bottom = 2.6 },
+  { x = 8.00, w = 2.20, top = 0.450, bottom = -0.750, n_top = 2.8, n_bottom = 3.0 },
   { x = 10.50, w = 1.70, top = 0.400, bottom = -0.620, n = 2.8 },
   { x = 13.00, w = 1.25, top = 0.320, bottom = -0.500, n = 2.4 },
   { x = 14.36, w = 1.10, top = 0.280, bottom = -0.450, n = 2.2 },
 ]
 
+# Half-round intakes either side of the cockpit, flat against the
+# fuselage (each with its shock half-cone, not drawn)
+[[intake]]
+name = "intake"
+mirror = true
+lip = 0.03
+duct = 1.4
+duct_rise = 0.1
+duct_taper = 0.85
+stations = [
+  { x = 4.80, y = 0.720, w = 0.520, top = 0.200, bottom = -0.620, chine = -0.210, n_top = 2.0, n_bottom = 2.0 },
+  { x = 6.20, y = 0.780, w = 0.560, top = 0.200, bottom = -0.660, chine = -0.230, n_top = 2.2, n_bottom = 2.2 },
+  { x = 8.00, y = 0.760, w = 0.520, top = 0.150, bottom = -0.680, n = 2.4 },
+  { x = 9.60, y = 0.620, w = 0.380, top = 0.050, bottom = -0.620, n = 2.4 },
+]
+
+# The framed windscreen and the canopy behind it
 [[body]]
 name = "canopy"
 kind = "pod"
+frames = [3.48]
+frame_width = 0.07
 stations = [
   { x = 2.900, w = 0.00, top = 0.560, bottom = 0.540 },
   { x = 3.500, w = 0.64, top = 0.980, bottom = 0.520, n = 2.0 },
@@ -84,24 +109,26 @@ position = [14.300, 0.0, -0.150]
 
 [[gear]]
 name = "Nose Gear"
-position = [4.300, 0.0, -2.000]
+position = [4.300, 0.0, -1.600]
 steerable = true
 max_steer = 45
 wheel_diameter = 0.46
 wheel_width = 0.15
 retractable = true
 static_deflection = 0.14
-attach = [4.300, 0.0, -0.800]
+attach = [4.300, 0.000, -0.400]
+wheels = 2
 
 [[gear]]
 name = "Main Gear"
 mirror = true
-position = [9.700, 1.700, -2.000]
+position = [9.700, 1.700, -1.600]
 wheel_diameter = 0.75
 wheel_width = 0.22
 retractable = true
 static_deflection = 0.17
-attach = [9.500, 1.200, -0.900]
+attach = [9.500, 1.400, -0.100]
+retract = "inward"
 
 [reference]
 aero_point = [9.070, 0.0, 0.0]     # 0.33 MAC
@@ -142,6 +169,11 @@ capacity = 530
 name = "right wing"
 position = [9.500, 2.000, 0.000]
 capacity = 530
+
+[dimensions]                  # published, overall, gear down (Dassault):
+length = 14.36                 # m
+span = 9.13
+height = 5.20
 
 [targets]
 # Mirage 2000C, published

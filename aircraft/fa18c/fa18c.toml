@@ -29,6 +29,11 @@ controls = [
   { name = "aileron", channel = "aileron", span = [0.60, 0.95], chord_fraction = 0.26, limits = [-25, 25] },
   { name = "flap", channel = "flap", span = [0.14, 0.58], chord_fraction = 0.28, limits = [0, 45] },
 ]
+# leading-edge flaps from the extension to the tip, scheduled with angle of
+# attack (the F-16's law stands in)
+leading = [
+  { name = "leading-edge flap", span = [0.26, 0.97], chord_fraction = 0.15, limits = [-3, 34] },
+]
 
 # The leading-edge extensions: sharp, 77.6 deg of sweep, from beside the
 # windscreen to the wing's leading edge, 3.5 m2 exposed - the vortices that
@@ -82,17 +87,37 @@ stations = [
   { x = 2.50, w = 0.95, top = 0.350, bottom = -0.620, n = 2.0 },
   { x = 4.00, w = 1.10, top = 0.450, bottom = -0.720, n = 2.2 },
   { x = 5.50, w = 1.25, top = 0.450, bottom = -0.850, n = 2.4 },
-  { x = 6.60, w = 2.10, top = 0.450, bottom = -1.000, n = 3.0 },
-  { x = 8.00, w = 2.40, top = 0.400, bottom = -1.050, n = 3.2 },
-  { x = 10.50, w = 2.40, top = 0.400, bottom = -1.000, n = 3.2 },
+  { x = 6.60, w = 1.45, top = 0.450, bottom = -0.950, n_top = 2.6, n_bottom = 2.8 },
+  { x = 8.00, w = 2.30, top = 0.400, bottom = -1.050, chine = -0.300, n_top = 3.0, n_bottom = 3.6 },
+  { x = 10.50, w = 2.40, top = 0.400, bottom = -1.000, chine = -0.300, n_top = 3.2, n_bottom = 3.6 },
   { x = 13.00, w = 2.20, top = 0.400, bottom = -0.850, n = 3.0 },
   { x = 15.50, w = 1.90, top = 0.300, bottom = -0.650, n = 2.6 },
   { x = 17.07, w = 1.60, top = 0.200, bottom = -0.500, n = 2.3 },
 ]
 
+# D-shaped intakes under the leading-edge extensions, flat against the
+# fuselage (a splitter plate between), their lips square to the flow
+[[intake]]
+name = "intake"
+mirror = true
+lip = 0.03
+rake = -8
+duct = 1.5
+duct_rise = 0.2
+duct_taper = 0.85
+stations = [
+  { x = 6.90, y = 0.980, w = 0.560, top = -0.120, bottom = -0.960, chine = -0.520, n_top = 3.0, n_bottom = 2.4 },
+  { x = 8.30, y = 1.000, w = 0.600, top = -0.120, bottom = -1.000, chine = -0.540, n_top = 3.0, n_bottom = 2.6 },
+  { x = 10.00, y = 0.950, w = 0.560, top = -0.150, bottom = -0.980, n_top = 3.0, n_bottom = 2.8 },
+  { x = 11.50, y = 0.800, w = 0.400, top = -0.200, bottom = -0.850, n = 2.6 },
+]
+
+# A framed windscreen ahead of the bubble
 [[body]]
 name = "canopy"
 kind = "pod"
+frames = [4.02]
+frame_width = 0.07
 stations = [
   { x = 3.200, w = 0.00, top = 0.480, bottom = 0.460 },
   { x = 3.800, w = 0.66, top = 0.980, bottom = 0.440, n = 2.0 },
@@ -126,8 +151,10 @@ max_steer = 75
 wheel_diameter = 0.56
 wheel_width = 0.17
 retractable = true
+retract = "forward"
+wheels = 2
 static_deflection = 0.14
-attach = [4.400, 0.0, -0.800]
+attach = [4.400, 0.0, -0.550]
 
 [[gear]]
 name = "Main Gear"
@@ -137,7 +164,8 @@ wheel_diameter = 0.76
 wheel_width = 0.25
 retractable = true
 static_deflection = 0.18
-attach = [9.700, 1.100, -1.000]
+attach = [9.700, 1.000, -0.600]
+retract = "aft"
 
 [reference]
 aero_point = [9.170, 0.0, 0.0]     # 0.22 MAC
@@ -183,6 +211,11 @@ capacity = 550
 name = "right wing"
 position = [9.800, 2.300, 0.000]
 capacity = 550
+
+[dimensions]                  # published, overall, gear down (US Navy fact sheet; span without the tip missiles):
+length = 17.07                 # m
+span = 11.43
+height = 4.66
 
 [targets]
 # F/A-18C, clean, published (US Navy fact sheet; Jane's)

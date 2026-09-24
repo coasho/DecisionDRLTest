@@ -30,6 +30,22 @@ controls = [
   { name = "flaperon", channel = "aileron", mix = { flap = 1.0 }, span = [0.26, 0.60], chord_fraction = 0.20, limits = [-25, 25] },
   { name = "elevon", channel = "elevator", mix = { aileron = 1.0 }, span = [0.60, 0.94], chord_fraction = 0.24, limits = [-25, 25] },
 ]
+# leading-edge flaps on the angle-of-attack schedule (the F-16's law stands in)
+leading = [
+  { name = "leading-edge flap", span = [0.32, 0.97], chord_fraction = 0.12, limits = [-3, 25] },
+]
+
+# Leading-edge root extensions: from behind the canards along the intakes'
+# tops out to the wing's leading edge, their edges sharp
+[[surface]]
+name = "lerx"
+kind = "strake"
+airfoil = "plate"
+sections = [
+  { le = [8.400, 0.000, 0.050], chord = 1.000 },
+  { le = [8.400, 1.400, 0.050], chord = 0.950 },
+  { le = [9.950, 2.000, 0.000], chord = 0.050 },
+]
 
 # All-moving canards over the intakes, 6.1 m2 exposed
 [[surface]]
@@ -78,12 +94,30 @@ stations = [
   { x = 0.00, w = 0.00, top = -0.050, bottom = -0.150 },
   { x = 1.80, w = 0.90, top = 0.300, bottom = -0.450, n = 2.4 },
   { x = 4.00, w = 1.30, top = 0.550, bottom = -0.600, n = 2.6 },
-  { x = 6.00, w = 2.00, top = 0.600, bottom = -0.800, n = 3.0 },
-  { x = 7.00, w = 2.80, top = 0.550, bottom = -1.000, n = 3.4 },
-  { x = 10.00, w = 3.00, top = 0.500, bottom = -1.050, n = 3.6 },
+  { x = 6.00, w = 1.70, top = 0.600, bottom = -0.800, chine = -0.050, n_top = 2.2, n_bottom = 2.4 },
+  { x = 7.00, w = 1.90, top = 0.550, bottom = -0.950, chine = -0.080, n_top = 2.4, n_bottom = 2.8 },
+  { x = 10.00, w = 3.00, top = 0.500, bottom = -1.050, chine = -0.150, n_top = 3.4, n_bottom = 4.0 },
   { x = 14.00, w = 2.80, top = 0.450, bottom = -0.950, n = 3.4 },
   { x = 18.00, w = 2.40, top = 0.350, bottom = -0.700, n = 3.0 },
   { x = 20.40, w = 2.00, top = 0.250, bottom = -0.550, n = 2.6 },
+]
+
+# Diverterless side intakes under the canards: caret-shaped, their lips
+# swept back and leaning back from the bottom lip
+[[intake]]
+name = "intake"
+mirror = true
+lip = 0.035
+rake = -20
+sweep = 22
+duct = 1.8
+duct_rise = 0.15
+duct_taper = 0.85
+stations = [
+  { x = 6.40, y = 1.080, w = 0.640, top = 0.080, bottom = -0.950, n = 3.0 },
+  { x = 8.00, y = 1.160, w = 0.700, top = 0.080, bottom = -1.000, n = 3.2 },
+  { x = 10.00, y = 1.160, w = 0.660, top = 0.050, bottom = -1.020, n = 3.4 },
+  { x = 11.80, y = 1.050, w = 0.500, top = -0.050, bottom = -0.950, n = 3.2 },
 ]
 
 [[body]]
@@ -122,7 +156,7 @@ wheel_diameter = 0.60
 wheel_width = 0.18
 retractable = true
 static_deflection = 0.14
-attach = [7.200, 0.0, -1.000]
+attach = [7.200, 0.000, -0.650]
 
 [[gear]]
 name = "Main Gear"
@@ -132,7 +166,8 @@ wheel_diameter = 0.94
 wheel_width = 0.30
 retractable = true
 static_deflection = 0.18
-attach = [13.150, 1.200, -1.100]
+attach = [13.150, 1.150, -0.750]
+retract = "forward"
 
 [reference]
 aero_point = [11.580, 0.0, 0.0]    # 0.17 MAC
@@ -177,6 +212,11 @@ capacity = 1100
 name = "right wing"
 position = [12.580, 3.200, 0.000]
 capacity = 1100
+
+[dimensions]                  # published, overall, gear down (public estimates):
+length = 20.40                 # m
+span = 12.88
+height = 4.45
 
 [targets]
 # J-20A, public estimates
