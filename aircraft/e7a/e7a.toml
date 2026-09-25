@@ -1,0 +1,352 @@
+# Boeing E-7A Wedgetail, built by hangar from public data: the Boeing
+# 737-700 airframe with Northrop Grumman's MESA radar - the "top hat", a
+# fixed plank of electronically scanned arrays on its back - the ventral
+# fins that balance it, and electronic support pods on the wing tips.
+#
+# Frame: metres, x aft from the nose's tip, y right, z up from the cabin's
+# centre line 8.9 m behind the nose; the ground is 3.14 m below that. As the
+# drawing has it, the fuselage sits 1.6 deg nose down on its wheels, so its
+# axis rises 0.028 m a metre aft.
+#
+# Sources:
+# - RAAF (via the bombers-and-AEW&C research notes): span 34.31 m - the
+#   737-700's wing without winglets, ESM pods on its tips - length 33.63 m,
+#   height 12.57 m, maximum take-off 77,565 kg, 853 km/h (460 kt).
+# - Wikipedia, E-7 Wedgetail: empty 46,606 kg, 2 x CFM56-7B27A of 121 kN
+#   (27,300 lbf), ceiling 41,000 ft, a crew of 2 and up to 19 mission crew,
+#   the "top hat" on its back, the ventral fins, the refuelling receptacle.
+# - Wikipedia, MESA: the antenna assembly 10.8 m long and 3.4 m high.
+# - Jenkinson, "Civil Jet Aircraft Design": the 737-700's wing, 124.6 m2,
+#   25 deg of sweep; 6 deg of dihedral, 7 deg on the stabilizer (Boeing).
+# - The shape: Julien Scavini's Boeing 737-700 four-view (Wikimedia Commons,
+#   CC BY-SA 3.0), scaled by its 35.8 m span over the winglets (0.0349
+#   m/px): its fuselage then measures the -700's 33.6 m and its fin 12.5 m
+#   above the ground, as published (its length label, 31.20 m, is the
+#   -600's). Its fuselage is drawn 3-4 % fat: the published 3.76 m width and
+#   4.01 m depth are used. The MESA, the ventral fins and the ESM pods are
+#   shaped from photographs of RAAF E-7As (estimates).
+
+[aircraft]
+name = "e7a"
+description = "Boeing E-7A Wedgetail (hangar build)"
+category = "aew"
+
+[analysis]
+speed = 150.0                 # m/s: the Reynolds numbers (climb and cruise)
+max_mach = 1.2                # the tables' Mach range: through the transonic drag rise
+induced_drag = "trefftz"      # a swept transport wing's induced drag from its loading (docs/hangar.md)
+
+[reference]
+area = 124.6                  # m2: the 737-700's (Jenkinson)
+
+# The wing, off the plan view: a root glove, its leading edge swept 41 deg,
+# out to a break 4.85 m out; then 25.6 deg to the tip, 17.16 m out (no
+# winglets: the E-7A's pods take their place); the trailing edge straight
+# across inboard of the engines, 12.6 deg outboard of 5.75 m. Low on the
+# fuselage (the section view), 6 deg of dihedral. Incidence 2 deg at the
+# root, washed out to -1 deg at the tip; NACA 64A sections from 15 % to 10
+# % (estimate: Boeing's own are not published).
+[[surface]]
+name = "wing"
+kind = "wing"
+vortex = false
+sections = [
+  { le = [9.830, 0.000, -1.150], chord = 8.960, twist = 2.0, airfoil = "naca64a215" },
+  { le = [13.990, 4.850, -0.640], chord = 4.800, twist = 1.2, airfoil = "naca64a212" },
+  { le = [14.420, 5.750, -0.546], chord = 4.370, twist = 1.0, airfoil = "naca64a212" },
+  { le = [19.880, 17.160, 0.653], chord = 1.610, twist = -1.0, airfoil = "naca64a210" },
+]
+# Flaps from the body to 70 % of the half span, the ailerons outboard (the
+# plan view); the leading-edge slats and the spoilers are not modelled
+controls = [
+  { name = "flap", channel = "flap", kind = "fowler", span = [0.11, 0.70], chord_fraction = 0.28, limits = [0, 40] },
+  { name = "aileron", channel = "aileron", span = [0.72, 0.95], chord_fraction = 0.22, limits = [-20, 20] },
+]
+
+# The stabilizer: 14.36 m across, its leading edge swept 29 deg, root chord
+# 3.85 m at the centre line, tip 1.36 m, 7 deg of dihedral; its tips reach
+# 1.5 m past the tail cone (the plan view). Set at -2 deg, the elevator
+# trimming (estimate: the real one trims by its incidence).
+[[surface]]
+name = "htail"
+kind = "htail"
+vortex = false
+airfoil = "naca64a010"
+sections = [
+  { le = [29.750, 0.000, 1.670], chord = 3.850, twist = -2.0 },
+  { le = [33.730, 7.180, 2.552], chord = 1.360, twist = -2.0 },
+]
+controls = [
+  { name = "elevator", channel = "elevator", span = [0.10, 0.95], chord_fraction = 0.30, limits = [-25, 20] },
+]
+
+# The fin: its leading edge swept 39 deg, the trailing edge 13.5 deg, root
+# chord 6.1 m in the fuselage, tip 2.0 m at 9.45 m (the side view: 12.6 m
+# above the ground); the rudder over most of it
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a010"
+sections = [
+  { le = [26.970, 0.000, 2.300], chord = 6.130 },
+  { le = [32.790, 0.000, 9.450], chord = 2.030 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.03, 0.95], chord_fraction = 0.33, limits = [-25, 25] },
+]
+
+# The MESA antenna: a plank 10.8 m long and 0.65 m thick over the wing, its
+# arrays facing either side, 3.1 m up from the fuselage's crown to the top
+# hat above it (the assembly 3.4 m high: Wikipedia). A surface: its side
+# force counts, as the real one's does, which the ventral fins balance.
+[[surface]]
+name = "MESA"
+kind = "fin"
+airfoil = "naca0006"
+sections = [
+  { le = [12.000, 0.000, 2.000], chord = 10.800 },
+  { le = [12.200, 0.000, 5.150], chord = 10.400 },
+]
+
+# The ventral fins under the tail cone, canted 45 deg outboard (photographs:
+# estimate)
+[[surface]]
+name = "ventral fin"
+kind = "fin"
+mirror = true
+airfoil = "naca0010"
+sections = [
+  { le = [26.300, 0.550, -0.750], chord = 2.800 },
+  { le = [27.800, 1.250, -1.450], chord = 1.400 },
+]
+
+# The fuselage: the 737's blunt radome and cockpit, the constant section
+# 3.76 m wide and 4.01 m deep, the tail cone swept up to the APU's exhaust
+# (the side and plan views, the section at its published size)
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.000, w = 0.000, top = -0.720, bottom = -0.745 },
+  { x = 0.070, w = 0.800, top = -0.480, bottom = -0.952, n = 2.0 },
+  { x = 0.240, w = 0.970, top = -0.311, bottom = -1.085, n = 2.0 },
+  { x = 0.490, w = 1.200, top = -0.176, bottom = -1.220, n = 2.0 },
+  { x = 0.840, w = 1.470, top = 0.027, bottom = -1.389, n = 2.0 },
+  { x = 1.190, w = 1.700, top = 0.162, bottom = -1.524, n = 2.0 },
+  { x = 1.540, w = 1.940, top = 0.331, bottom = -1.623, n = 2.0 },
+  { x = 1.890, w = 2.100, top = 0.672, bottom = -1.720, n = 2.0 },
+  { x = 2.410, w = 2.370, top = 1.014, bottom = -1.816, n = 2.0 },
+  { x = 2.930, w = 2.640, top = 1.218, bottom = -1.882, n = 2.0 },
+  { x = 3.630, w = 2.910, top = 1.458, bottom = -1.946, n = 2.0 },
+  { x = 4.510, w = 3.210, top = 1.661, bottom = -2.045, n = 2.0 },
+  { x = 5.380, w = 3.410, top = 1.798, bottom = -2.078, n = 2.0 },
+  { x = 7.130, w = 3.680, top = 1.970, bottom = -2.040, n = 2.0 },
+  { x = 8.870, w = 3.760, top = 2.005, bottom = -2.005, n = 2.0 },
+  { x = 18.000, w = 3.760, top = 2.260, bottom = -1.750, n = 2.0 },
+  { x = 20.500, w = 3.760, top = 2.330, bottom = -1.680, n = 2.0 },
+  { x = 22.840, w = 3.700, top = 2.460, bottom = -1.590, n = 2.0 },
+  { x = 24.940, w = 3.640, top = 2.500, bottom = -1.230, n = 2.0 },
+  { x = 26.330, w = 3.340, top = 2.520, bottom = -0.960, n = 2.0 },
+  { x = 28.080, w = 2.710, top = 2.550, bottom = -0.590, n = 2.0 },
+  { x = 29.130, w = 2.270, top = 2.560, bottom = -0.290, n = 2.0 },
+  { x = 30.180, w = 1.840, top = 2.560, bottom = 0.020, n = 2.0 },
+  { x = 31.220, w = 1.400, top = 2.540, bottom = 0.350, n = 2.0 },
+  { x = 31.920, w = 1.100, top = 2.500, bottom = 0.590, n = 2.0 },
+  { x = 32.620, w = 0.940, top = 2.400, bottom = 0.830, n = 2.0 },
+  { x = 33.320, w = 0.550, top = 2.050, bottom = 1.100, n = 2.0 },
+  { x = 33.630, w = 0.250, top = 1.720, bottom = 1.360, n = 2.0 },
+]
+
+# The wing-to-body fairing, flat underneath, round the main wheels' wells
+[[body]]
+name = "wing fairing"
+kind = "pod"
+aero = false                  # part of the fuselage's belly: the tables leave it out
+stations = [
+  { x = 10.800, w = 2.800, top = -0.600, bottom = -1.900, n_top = 2.0, n_bottom = 3.0 },
+  { x = 12.500, w = 4.000, top = -0.500, bottom = -2.050, n_top = 2.0, n_bottom = 4.0 },
+  { x = 15.000, w = 4.300, top = -0.400, bottom = -2.080, n_top = 2.0, n_bottom = 4.0 },
+  { x = 18.500, w = 4.300, top = -0.300, bottom = -2.000, n_top = 2.0, n_bottom = 4.0 },
+  { x = 20.500, w = 3.600, top = -0.250, bottom = -1.880, n_top = 2.0, n_bottom = 3.5 },
+  { x = 22.200, w = 2.400, top = -0.200, bottom = -1.650, n_top = 2.0, n_bottom = 3.0 },
+]
+
+# The fin's dorsal fillet, up from the crown into its leading edge
+[[body]]
+name = "dorsal fillet"
+kind = "pod"
+aero = false                  # the fin's area counts it
+stations = [
+  { x = 24.000, w = 0.120, top = 2.560, bottom = 2.440, n = 2.0 },
+  { x = 25.000, w = 0.300, top = 2.950, bottom = 2.300, n = 2.2 },
+  { x = 26.300, w = 0.400, top = 3.370, bottom = 2.300, n = 2.4 },
+  { x = 27.500, w = 0.400, top = 3.780, bottom = 2.300, n = 2.4 },
+  { x = 28.400, w = 0.260, top = 3.980, bottom = 2.300, n = 2.2 },
+]
+
+# The MESA's top hat: the end-fire arrays along the plank's top edge,
+# 1.9 m across (photographs; estimate)
+[[body]]
+name = "top hat"
+kind = "pod"
+aero = false                  # its drag is in the calibration's
+stations = [
+  { x = 12.100, w = 0.300, top = 5.420, bottom = 5.180, n = 2.0 },
+  { x = 12.900, w = 1.600, top = 5.580, bottom = 5.050, n = 2.2 },
+  { x = 21.700, w = 1.600, top = 5.580, bottom = 5.050, n = 2.2 },
+  { x = 22.500, w = 0.300, top = 5.420, bottom = 5.180, n = 2.0 },
+]
+
+# The electronic support measures pods in place of the winglets
+[[body]]
+name = "ESM pod"
+kind = "pod"
+mirror = true
+aero = false                  # their drag is in the calibration's
+stations = [
+  { x = 19.300, y = 17.000, w = 0.120, top = 0.700, bottom = 0.580, n = 2.0 },
+  { x = 19.700, y = 17.000, w = 0.440, top = 0.860, bottom = 0.420, n = 2.0 },
+  { x = 21.600, y = 17.000, w = 0.440, top = 0.860, bottom = 0.420, n = 2.0 },
+  { x = 22.300, y = 17.000, w = 0.120, top = 0.700, bottom = 0.580, n = 2.0 },
+]
+
+# The CFM56-7B nacelles, flattened underneath for their ground clearance,
+# 4.85 m out, the lip 5.4 m ahead of the wing's leading edge there (the
+# plan and side views)
+[[intake]]
+name = "nacelle"
+mirror = true
+lip = 0.090
+duct = 1.20
+duct_taper = 0.92
+stations = [
+  { x = 10.600, y = 4.850, w = 1.900, top = -0.950, bottom = -2.600, n = 2.2 },
+  { x = 10.950, y = 4.850, w = 2.150, top = -0.850, bottom = -2.720, n = 2.3 },
+  { x = 11.800, y = 4.850, w = 2.230, top = -0.820, bottom = -2.740, n = 2.4 },
+  { x = 13.400, y = 4.850, w = 2.180, top = -0.850, bottom = -2.700, n = 2.4 },
+  { x = 14.100, y = 4.850, w = 1.950, top = -0.980, bottom = -2.580, n = 2.2 },
+  { x = 14.200, y = 4.850, w = 1.400, top = -1.200, bottom = -2.360, n = 2.0 },
+  { x = 15.300, y = 4.850, w = 1.050, top = -1.360, bottom = -2.200, n = 2.0 },
+  { x = 15.700, y = 4.850, w = 0.800, top = -1.480, bottom = -2.080, n = 2.0 },
+]
+
+# The pylons: blades from the nacelles' crowns up into the wing
+[[strut]]
+name = "pylon"
+from = [14.300, 4.850, -0.950]
+to = [14.900, 4.850, -0.380]
+chord = 3.200
+thickness = 0.350
+
+# Two CFM56-7B27A: 121.4 kN (27,300 lbf), bypass ratio 5.1
+[[engine]]
+name = "CFM56-7B27A"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 121.4
+bypass_ratio = 5.1
+tsfc_dry = 0.37               # lb/(lbf h), static (estimate)
+throttle_ratio = 1.05         # Mattingly's TR for a transport's turbofan (estimate)
+design_mach = 0.8
+position = [13.200, 4.850, -1.780]
+mass = 2600                   # installed: the 2,370 kg engine and its accessories (estimate)
+inlet_x = 10.6
+[engine.nozzle]
+position = [15.700, 4.850, -1.780]  # the core nozzle at the nacelle's end
+diameter = 0.72
+length = 0.40
+petal_open_deg = 0.0          # a fixed nozzle
+
+# The gear, off the side view: the nose wheels 4.08 m behind the nose,
+# folding forward; the main wheels 12.82 m behind them, 5.72 m apart (the
+# 737-700's track), folding inward, their wheels stacked in the belly and
+# open to it, as the 737's are (no doors over them). Tyres: 27x7.75 nose,
+# 44.5x16.5 main (the 737 NG's).
+[[gear]]
+name = "Nose Gear"
+position = [4.080, 0.0, -3.140]
+steerable = true
+max_steer = 60
+wheels = 2
+wheel_diameter = 0.690
+wheel_width = 0.200
+retractable = true
+retract = "forward"
+static_deflection = 0.10
+attach = [4.080, 0.0, -1.200]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [16.900, 2.860, -3.140]
+wheels = 2
+wheel_diameter = 1.130
+wheel_width = 0.420
+retractable = true
+retract = "inward"
+doors = false                 # the 737's wheels close its wells themselves
+static_deflection = 0.12
+attach = [16.900, 2.550, -1.100]
+
+[flight_control]
+type = "direct"               # the 737's hydraulic controls
+yaw_damper = true             # the 737's own yaw damper
+
+[mass]
+empty = 46606                 # kg (Wikipedia)
+mtow = 77565                  # RAAF
+# Estimate: 7 % of the loaded weight on the nose wheel, as a 737 carries
+# it; hangar's neutral point, 65 % of the MAC, leaves a 32 % margin there
+# (likely too far aft, as it put the KC-46A's)
+empty_cg = [16.000, 0.0, 0.200]
+[mass.component]              # kg, estimates: a 737-700's weight fractions, the MESA's own
+wing = 5800
+htail = 650
+fin = 450
+fuselage = 7500
+MESA = 2500
+"top hat" = 400
+"ventral fin" = 120
+"wing fairing" = 400
+nacelle = 900                 # both sides
+"ESM pod" = 150
+"Nose Gear" = 350
+"Main Gear" = 2200
+[[mass.payload]]
+name = "flight crew"
+mass = 200
+position = [3.000, 0.0, 0.600]
+[[mass.payload]]
+name = "mission crew"
+mass = 1000                   # ten at the consoles
+position = [15.000, 0.0, 0.300]
+# The 737-700's 26,020 l of fuel (20.9 t): the centre tank under the cabin
+# floor, the main tanks in the wings (the split and where each sits,
+# estimates). Flown 60 % full: 60.5 t.
+[[mass.tank]]
+name = "centre"
+position = [15.500, 0.0, -1.250]
+capacity = 10360
+fill = 0.6
+[[mass.tank]]
+name = "left main"
+position = [16.500, -7.000, -0.400]
+capacity = 5267
+fill = 0.6
+[[mass.tank]]
+name = "right main"
+position = [16.500, 7.000, -0.400]
+capacity = 5267
+fill = 0.6
+
+[dimensions]                  # published, overall (RAAF)
+length = 33.63                # the fuselage's: the stabilizer's tips reach 1.5 m past it (the drawing)
+span = 34.31
+height = 12.57
+
+[targets]
+# The published 460 kt (853 km/h) has no altitude: flown at 35,000 ft,
+# Mach 0.80 (estimate), under the 737's limit Mach 0.82
+max_mach = 0.80
+max_mach_altitude_ft = 35000
+operational_ceiling_ft = 41000  # Wikipedia

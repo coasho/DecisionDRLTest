@@ -861,6 +861,15 @@ class LargeAircraft(unittest.TestCase):
         self.assertAlmostEqual(A[0, 3], G0 * ca / 100.0)
         self.assertAlmostEqual(A[3, 2], sa / ca)
 
+    def test_the_tail_fin_is_the_aftmost_standing_up(self):
+        # the fin volume's range is for the tail's fin: the aftmost fin or
+        # V-tail standing up from the body - not the E-3G's rotodome struts or
+        # the E-7A's radar plank ahead of it, nor a ventral fin hung below
+        from hangar.pipeline import tail_fin
+        for name, fin in (("e3g", "fin"), ("e7a", "fin"), ("rq4b", "vtail"), ("f15c", "fin")):
+            with self.subTest(design=name):
+                self.assertEqual(tail_fin(Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))), fin)
+
     def test_small_fins_warn_where_the_flight_controls_work_the_rudder(self):
         # Cn_beta under 0.01 fails; on an aircraft whose flight controls work
         # the rudder (a fighter's, fly-by-wire, a yaw damper) it only warns

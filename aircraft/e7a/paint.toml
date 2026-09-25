@@ -1,0 +1,15 @@
+# The RAAF's grey all over, the radome a shade darker, the flight deck's
+# windows painted (photographs; estimate)
+[paint]
+scheme = "single"
+colours = ["#8a9296"]
+radome = "#6f777b"
+radome_x = 1.7
+windows = "#1b2127"
+windows_x = [2.35, 3.35]
+windows_z = [0.55, 1.25]
+windscreen_x = [1.65, 2.40]
+windscreen_y = 0.95
+panel_lines = 0.07
+wear = 0.05
+gloss = 0.3

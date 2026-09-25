@@ -687,6 +687,7 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 | KC-135R | `kc135r` | 0.88 at 30,000 ft (0.86) | 7,100 | 40,900 (50,000 certified) |
 | RC-135W | `rc135w` | 0.88 at 30,000 ft (0.86) | 6,400 | 38,700 (50,000 certified) |
 | E-3G | `e3g` | 0.78 at 29,000 ft (0.78) | 3,700 | 34,200 (above 29,000) |
+| E-7A | `e7a` | 0.81 at 35,000 ft (0.80) | 6,700 | 39,600 (41,000 certified) |
 | A-10C | `a10c` | 0.57 at sea level (0.576) | 4,700 | 29,800 (45,000) |
 | Su-25 | `su25` | 0.82 at sea level (0.796) | 17,000 | 52,400 (23,000 unpressurised) |
 | C-130J | `c130j` | 361 kt at 22,000 ft (362) | 2,800 | 32,400 (28,000 at 70 t) |
@@ -732,6 +733,20 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   diverges from Mach 0.62, and calibration adds 2.4 m² of drag (CD
   +0.008: the rotodome's pressure drag, the antennas) for its published
   top speed. Its yaw damper takes the dutch roll from 0.07 to 0.26.
+- The E-7A is a 737-700, measured off a four-view whose length label,
+  31.20 m, is the -600's (scaled by its span, it measures the -700's 33.6
+  m), with the MESA radar's plank and top hat on its back, the ventral fins
+  and ESM pods on the wing tips. It flies at 60.3 t, 60 % of its fuel. The
+  plank is a surface: its side force counts, and the ventral fins balance
+  it, Cn_beta 0.09 and the dutch roll damped 0.21 by the airframe alone.
+  Its main wheels fold inward and stack in the belly, open to it, as a
+  737's do. Uncalibrated it flies Mach 0.813 at 35,000 ft against the
+  published 460 kt (Mach 0.80 there): calibration would take the wave drag
+  to its limit for 1.6 %. As with the KC-46A, hangar puts its neutral point
+  far aft, at 65 % of the MAC: its CG is where 7 % of its weight rests on
+  the nose wheel, 32 % of the MAC ahead of it. Its overall length, 35.1 m,
+  runs past the published 33.63 m, the fuselage's: the stabilizer's tips
+  reach 1.5 m past the tail cone.
 - The A-10C flies at 17.2 t, full of fuel and ammunition. Its eleven
   pylons, the gun and the half-exposed main wheels need 1.2 m² of extra
   drag (CD +0.026) for its published 381 kt at sea level. Its high-bypass

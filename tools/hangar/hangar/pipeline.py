@@ -41,6 +41,14 @@ def check(name, value, lo=None, hi=None, unit="", level="fail", note="", fmt="%.
             "expected": rng.strip(), "status": "pass" if ok else level, "note": note}
 
 
+def tail_fin(aircraft):
+    """The name of the tail's fin: the aftmost fin (or V-tail) standing up
+    from the body - one ahead of it (a rotodome's struts, a radar's plank)
+    is no tail fin - or None."""
+    above = [x for x in aircraft.surfaces if x.kind in ("fin", "vtail") and x.sections[-1].le[2] >= x.sections[0].le[2]]
+    return max(above, key=lambda x: x.sections[0].le[0]).name if above else None
+
+
 def weathercock(cnb, controls):
     """The weathercock stability check: Cn_beta at least 0.01 /rad. Small
     fins on an aircraft whose flight controls work the rudder (a fighter's,
@@ -190,6 +198,7 @@ class Design:
         fighter = a.spec.get("aircraft", {}).get("category") == "fighter"
         checks.append(check("wing aspect ratio", a.b**2 / a.S, 1.5 if fighter else 3.0, 30.0, level="warn",
                             note="fighters 2-3.5, deltas 2-2.5" if fighter else ""))
+        tail = tail_fin(a)
         for name, d in s["surfaces"].items():
             if d["kind"] == "htail" and "volume_coefficient" in d:
                 checks.append(check("%s volume coefficient" % name, abs(d["volume_coefficient"]), 0.2 if fighter else 0.35, 1.1,
@@ -202,6 +211,9 @@ class Design:
                 if surf is not None and surf.sections[-1].le[2] < surf.sections[0].le[2]:
                     # hung below the fuselage: it adds to the fin above, which the range is for
                     checks.append(info("%s volume coefficient" % name, d["volume_coefficient"], note="a ventral fin"))
+                elif name != tail:
+                    checks.append(info("%s volume coefficient" % name, d["volume_coefficient"],
+                                       note="ahead of the tail's fin: no tail fin"))
                 else:
                     checks.append(check("%s volume coefficient" % name, d["volume_coefficient"], 0.02, 0.1, level="warn",
                                         note="typical 0.03-0.08"))

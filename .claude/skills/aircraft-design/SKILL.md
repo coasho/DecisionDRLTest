@@ -263,6 +263,10 @@ move on while a check fails or a picture looks wrong.
   is far too short, so its fillet with a nearby surface grows phantom
   material and breaks the mesh. Plates thinner than about 0.1 m (a boom's
   ruddevators) are `[[strut]]`s, drawn only.
+- **Dorsal surfaces.** A radar's plank (the E-7A's MESA) or a rotodome's
+  struts are `kind = "fin"` surfaces, so their side force counts; ventral
+  fins are fins whose tips hang below their roots (`mirror = true` for a
+  canted pair). Only the aftmost upright fin is checked as the tail's.
 - **Windows.** A transport has no canopy body: paint its cockpit windows
   (`windows`, `windows_x`, `windows_z`, `windscreen_x` in paint.toml).
 - **Targets.** `max_mach` at `max_mach_altitude_ft` below 1: calibrate fits
