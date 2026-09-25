@@ -318,12 +318,23 @@ For fighters:
 - **Fly-by-wire.** Gains are placed from the linear model at each dynamic
   pressure and Mach number (`hangar/fcs.py`):
   - Pitch: angle-of-attack and pitch-rate feedback give the short period
-    CAP 1 and damping 0.8. A load-factor command follows a model response,
-    limited by the angle of attack left, counting its rise over the next
-    0.35 s. Past the limit a push back gives all the nose-down travel 4°
-    beyond it, so an unstable canard delta pitching up fast is caught. The
-    command rises at most 12 g/s: a full pull at once would pitch an agile
-    airframe (the MiG-29A) faster than its nose-down control can stop.
+    CAP 1 and damping 0.8. A load-factor command follows a model response.
+  - Angle-of-attack limits: near a limit the command is cut to the load
+    factor the aircraft pulls plus what the angle of attack left gives,
+    counting its rise over the next 0.35 s. At the limit the integrator,
+    five times as fast there, trims the elevator that holds it: a steady
+    pull on a stable airframe such as the MiG-29A, a push on an unstable
+    delta. (A feedforward faded out past the limit instead took about 10°
+    of elevator per degree of angle of attack, on one side of the limit
+    only; against its stabilator's rate limit the MiG-29A cycled between
+    24° and 29° at its 26° limit.)
+    Full aft stick asks for the lift at the limit beyond the gravity
+    reference of the moment, so the limit stays in reach in a steep climb
+    or inverted. Past the limit a push back gives all the nose-down travel
+    4° beyond it, so an unstable canard delta pitching up fast is caught.
+    The command rises at most 12 g/s: a full pull at once would pitch an
+    agile airframe (the MiG-29A) faster than its nose-down control can
+    stop.
   - Pitching moment: the elevator cancels the moment's departures from a
     straight line through the angle-of-attack envelope (a table over α and
     Mach), and the gains are designed on that line. A band of local
@@ -468,10 +479,10 @@ Flown through its fly-by-wire:
 |---|---|---|
 | top speed, 40,000 ft | Mach 2.04 (calibrated: TR 1.20) | Mach 2.05 |
 | sustained turn, Mach 0.9, 15,000 ft | 12.5 deg/s | about 13.5 deg/s |
-| full aft stick, 350 kt | 6.9 g, α held at 25.1° | α limit 25° |
+| full aft stick, 350 kt | 6.7 g, α held at 25.4° | α limit 25° |
 | full-stick roll, 350 kt | 266 deg/s | 308 deg/s (limit) |
 | top speed, sea level | 868 kt | 795 kt |
-| best rate of climb | 62,700 ft/min | 50,000 ft/min |
+| best rate of climb | 62,800 ft/min | 50,000 ft/min |
 | service ceiling | 62,300 ft | 50,000+ ft |
 
 The top speed at 40,000 ft is the calibration's one target. The rest are
@@ -498,20 +509,20 @@ estimates):
 
 | aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft | α held (limit) |
 |---|---|---|---|---|---|
-| F-16C Block 52 | `f16c` | 2.04 (2.05) | 62,700 (50,000) | 62,300 (50,000+) | 25.1° (25°) |
-| F-15C | `f15c` | 2.44 (2.5) | 63,100 (50,000) | 64,400 (65,000) | 30.4° (30°) |
-| F/A-18C | `fa18c` | 1.81 (1.8) | 50,800 (45,000) | 60,000 (50,000+) | 35.2° (35°) |
-| F-22A | `f22a` | 2.24 (2.25) | 62,000 | 61,500 (65,000) | 40.4° (40°) |
-| F-35A | `f35a` | 1.58 (1.6) | 44,700 | 57,300 (50,000+) | 19.9° (20°) |
-| Su-27S | `su27s` | 2.35 (2.35) | 64,300 (59,000) | 65,600 (60,700) | 26.4° (26°) |
-| Su-57 | `su57` | 2.01 (2.0) | 56,400 | 58,000 (65,600) | 26.4° (26°) |
-| MiG-29A | `mig29a` | 2.25 (2.25) | 64,000 (65,000) | 62,800 (59,000) | 28.6° (26°) |
-| Typhoon | `typhoon` | 2.02 (2.0) | 72,500 (62,000) | 62,200 (55,000+) | 30.2° (30°) |
-| Rafale C | `rafale` | 1.80 (1.8) | 60,400 (60,000) | 62,000 (50,000+) | 29.4° (29°) |
-| JAS 39C Gripen | `gripen` | 2.00 (2.0) | 49,800 | 59,900 (50,000+) | 27.9° (28°) |
-| Mirage 2000C | `mirage2000` | 2.20 (2.2) | 53,900 (56,000) | 59,200 (56,000) | 29.0° (29°) |
-| J-10A | `j10a` | 2.21 (2.2) | 50,700 | 59,300 (59,000) | 30.1° (30°) |
-| J-20A | `j20a` | 2.01 (2.0) | 51,000 | 58,700 (66,000) | 30.2° (30°) |
+| F-16C Block 52 | `f16c` | 2.04 (2.05) | 62,800 (50,000) | 62,300 (50,000+) | 25.4° (25°) |
+| F-15C | `f15c` | 2.44 (2.5) | 63,200 (50,000) | 64,500 (65,000) | 30.2° (30°) |
+| F/A-18C | `fa18c` | 1.81 (1.8) | 50,800 (45,000) | 60,000 (50,000+) | 35.0° (35°) |
+| F-22A | `f22a` | 2.24 (2.25) | 62,000 | 61,500 (65,000) | 40.2° (40°) |
+| F-35A | `f35a` | 1.58 (1.6) | 44,800 | 57,100 (50,000+) | 20.1° (20°) |
+| Su-27S | `su27s` | 2.35 (2.35) | 64,300 (59,000) | 65,600 (60,700) | 26.3° (26°) |
+| Su-57 | `su57` | 2.01 (2.0) | 56,400 | 58,000 (65,600) | 26.3° (26°) |
+| MiG-29A | `mig29a` | 2.25 (2.25) | 64,000 (65,000) | 62,700 (59,000) | 26.4° (26°) |
+| Typhoon | `typhoon` | 2.02 (2.0) | 72,500 (62,000) | 62,200 (55,000+) | 30.4° (30°) |
+| Rafale C | `rafale` | 1.80 (1.8) | 60,400 (60,000) | 62,000 (50,000+) | 29.5° (29°) |
+| JAS 39C Gripen | `gripen` | 2.00 (2.0) | 49,800 | 59,900 (50,000+) | 28.1° (28°) |
+| Mirage 2000C | `mirage2000` | 2.20 (2.2) | 54,000 (56,000) | 59,200 (56,000) | 29.3° (29°) |
+| J-10A | `j10a` | 2.21 (2.2) | 50,700 | 59,300 (59,000) | 30.2° (30°) |
+| J-20A | `j20a` | 2.01 (2.0) | 51,100 | 58,700 (66,000) | 30.4° (30°) |
 
 - The top speed at altitude is each design's one calibration target,
   flown where it is published: 40,000 ft for the five American designs,
@@ -521,10 +532,9 @@ estimates):
   the Typhoon's 55,000) is a clearance, not where the climb runs out: the
   model must reach it (shown with a +).
 - Handling at 350 kt, from trim: a 3 g step overshoots 5-24 % and reaches
-  90 % in 0.6-0.9 s; full aft stick holds each limit within 0.4°, but for
-  the MiG-29A. Its limiter cycles between 24° and 29° at the 26° limit: the
-  airframe, 7 % of the MAC stable in this model, needs a steady pull there,
-  and the limiter's law gives none.
+  90 % in 0.6-0.9 s; full aft stick holds each limit within 0.5°. In full
+  pulls from sea level to 39,000 ft at 210-500 kt (true airspeed) every
+  limit holds within 0.8°.
 - Engines fitted to Mach 2.3-2.5 keep too much thrust at sea level (see
   [Limits](#limits)).
 

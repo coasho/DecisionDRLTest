@@ -346,17 +346,23 @@ class FlyByWire(unittest.TestCase):
                 self.assertAlmostEqual(np.polyfit(r, flown, 1)[0], line["slope"], places=9)
                 self.assertEqual(float(np.max(np.abs(comp))) > 1e-3, kink > 0)
 
-    def test_pitch_channel_sums_the_compensation_and_the_push(self):
-        # the pitch channel carries the compensation over angle of attack
-        # and Mach number, and the elevator sums it with the push back past
-        # the angle-of-attack limits
+    @staticmethod
+    def pitch_channel(name):
+        """A design's flight control XML with made-up gains and compensation,
+        parsed, and the fly-by-wire tables it was written from."""
         from hangar import fcs, jsbsim
-        a = Aircraft.load(repo("aircraft/gripen/gripen.toml"))
+        a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
         line = {"alpha_deg": np.array([-10.0, 0.0, 10.0, 20.0]), "slope": 0.3, "departure": np.zeros(4)}
         fbw = {"qbar_psf": np.array(fcs.QBAR_PSF), "mach": np.array([0.4, 0.9]), "options": fcs.options(a),
                "gains": {k: np.full((len(fcs.QBAR_PSF), 2), 0.1) for k in fcs.GAINS},
                "moment": dict(line, elevator=np.array([[0.01, 0.02], [0.0, 0.0], [-0.03, -0.04], [0.05, 0.06]]))}
-        root = ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a, fbw))
+        return ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a, fbw)), fbw
+
+    def test_pitch_channel_sums_the_compensation_and_the_push(self):
+        # the pitch channel carries the compensation over angle of attack
+        # and Mach number, and the elevator sums it with the push back past
+        # the angle-of-attack limits
+        root, fbw = self.pitch_channel("gripen")
         comp = root.find(".//fcs_function[@name='fcs/fbw/moment-comp']")
         self.assertEqual([v.text for v in comp.iter("independentVar")], ["aero/alpha-rad", "velocities/mach"])
         rows = [[float(x) for x in line.split()] for line in comp.find(".//tableData").text.strip().splitlines()]
@@ -368,6 +374,43 @@ class FlyByWire(unittest.TestCase):
         self.assertIn("fcs/fbw/alpha-push", summed)
         self.assertIn("fcs/fbw/moment-comp", summed)
         self.assertIsNotNone(root.find(".//fcs_function[@name='fcs/fbw/alpha-push']"))
+
+    def test_limiter_limits_the_command(self):
+        # at an angle-of-attack limit the feedforward acts on the command
+        # limited to the load factor the aircraft pulls plus what the angle of
+        # attack left gives - not on the command, faded out past the limit:
+        # one-sided, about 10 deg of elevator per deg of alpha, that cycled
+        # the MiG-29A 24-29 deg against its 26 deg limit. The integrator trims
+        # the angle of attack left LIMIT_INTEGRAL times as fast as the load
+        # factor, and full aft stick asks for the lift at the limit beyond the
+        # gravity reference of the moment, not beyond 1 g
+        from hangar import fcs
+        root, fbw = self.pitch_channel("mig29a")
+        o = fbw["options"]
+
+        def fn(name):
+            return root.find(".//fcs_function[@name='fcs/fbw/%s']/function" % name)
+
+        def props(el):
+            return [p.text for p in el.iter("property")]
+        raw = fn("elevator-raw").find("sum")
+        ff = [p for p in raw.findall("product") if "fcs/fbw/k-ff" in props(p)]
+        self.assertEqual([props(p) for p in ff], [["fcs/fbw/k-ff", "fcs/fbw/dn-limited"]])
+        self.assertIsNone(raw.find(".//table"))
+        lim = fn("dn-limited").find("max")
+        self.assertEqual(props(lim.find("min")), ["fcs/fbw/dn-cmd", "fcs/fbw/dn", "fcs/fbw/dn-room-up"])
+        self.assertEqual(props(lim.find("sum")), ["fcs/fbw/dn", "fcs/fbw/dn-room-down"])
+        for side, limit in (("up", o["alpha_max_deg"]), ("down", o["alpha_min_deg"])):
+            room = fn("dn-room-" + side)
+            with self.subTest(side=side):
+                self.assertEqual(props(room), ["fcs/fbw/n-alpha", "fcs/fbw/alpha-ahead"])
+                self.assertAlmostEqual(float(room.find(".//value").text), math.radians(limit), places=5)
+        err = fn("pitch-error").find("max")
+        self.assertEqual(props(err.find("min")), ["fcs/fbw/dn-model", "fcs/fbw/dn", "fcs/fbw/dn-room-up"])
+        self.assertEqual([float(v.text) for v in err.iter("value")], [fcs.LIMIT_INTEGRAL] * 2)
+        caps = fn("dn-stick").find("max").iter("difference")
+        self.assertEqual([props(d) for d in caps], [["fcs/fbw/n-alpha", "fcs/fbw/g-ref"]] * 2)
+        self.assertEqual(props(fn("dn")), ["accelerations/Nz", "fcs/fbw/g-ref"])
 
 
 class Aircraft_(unittest.TestCase):

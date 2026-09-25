@@ -11,23 +11,28 @@ agent or a pilot flies it like any other aircraft:
 - pitch: a load factor command. Neutral stick holds the flight path (the
   load factor that balances gravity, cos(theta) cos(phi)); full aft stick
   commands n_max, full forward n_min - no more than the lift at the angle
-  of attack limits gives, through a 0.2 s prefilter and a 12 g/s onset
-  limit. An inner loop feeds back angle of
+  of attack limits gives beyond that reference, through a 0.2 s prefilter
+  and a 12 g/s onset limit. An inner loop feeds back angle of
   attack and pitch rate to place the short period - frequency from the
   Control Anticipation Parameter (CAP 1, the middle of MIL-F-8785C's level 1
   for category A), damping 0.8 - which makes an unstable airframe fly like a
   stable one; a feedforward gives the command, an integrator on the error
   from the response it should give (a 0.4 s lag of the command) trims.
-  Approaching alpha_max the error is limited by the angle of attack left
-  (counting its rise over the next 0.35 s as spent), so the aircraft cannot
-  be pulled past it; past it a push back in proportion gives all the
-  nose-down travel 4 deg beyond, so an unstable airframe pitching up fast
-  is caught at once. The pitching moment's departures from a straight line
-  through the angle-of-attack envelope (a tail in the wing's wake, vortex
-  lift, a break) are cancelled by the elevator from a table over angle of
-  attack and Mach number, and the gains are designed on the line: an
-  airframe unstable in one band of angle of attack and stable in the next
-  flies as the design expects through both;
+  Approaching alpha_max the command is limited to the load factor the
+  aircraft pulls plus what the angle of attack left gives (counting its
+  rise over the next 0.35 s as spent), so the aircraft cannot be pulled
+  past it: at the limit the feedforward asks for what the airframe gives
+  there, and the integrator, five times as fast on the angle of attack
+  left, trims the elevator that holds it - a steady pull on a stable
+  airframe, a push on an unstable one. Past the limit a push back in
+  proportion gives all the nose-down travel 4 deg beyond, so an unstable
+  airframe pitching up fast is caught at once. The pitching moment's
+  departures from a straight line through the angle-of-attack envelope (a
+  tail in the wing's wake, vortex lift, a break) are cancelled by the
+  elevator from a table over angle of attack and Mach number, and the
+  gains are designed on the line: an airframe unstable in one band of
+  angle of attack and stable in the next flies as the design expects
+  through both;
 - roll: a roll-rate command about the flight path (stability axes), the
   roll mode's time constant placed at 0.2 s, the rate limited by the
   rolling moment available; an integrator holds the bank angle at neutral
@@ -53,6 +58,7 @@ PSF = 47.880259
 QBAR_PSF = (10.0, 20.0, 40.0, 80.0, 150.0, 300.0, 600.0, 1200.0, 2400.0)
 MACH = (0.15, 0.4, 0.7, 0.9, 1.1, 1.4, 2.0)
 A_SOUND = 320.0          # m/s: the speed of sound at mid altitudes, to turn Mach into speed
+LIMIT_INTEGRAL = 5.0     # how much faster the pitch integrator trims the angle of attack left at a limit
 
 DEFAULTS = {"n_max": 9.0, "n_min": -3.0, "alpha_max_deg": 25.0, "alpha_min_deg": -10.0, "roll_rate_deg_s": 300.0,
             "sideslip_deg": 10.0, "cap": 1.0, "short_period_zeta": 0.8, "roll_time_constant_s": 0.2,
@@ -376,11 +382,22 @@ def channels_xml(aircraft, fbw):
 %s
 %s
 %s
+        <!-- the gravity reference: the load factor that holds the flight path -->
+        <fcs_function name="fcs/fbw/g-ref">
+          <function>
+            <product>
+              <cos><property>attitude/theta-rad</property></cos>
+              <cos><property>attitude/phi-rad</property></cos>
+            </product>
+          </function>
+        </fcs_function>
         <!-- stick to load factor beyond the gravity reference, aft (negative) to n_max,
-             no more than the lift at the angle-of-attack limits gives, through a
-             0.2 s prefilter and a 12 g/s onset limit (a full pull at once pitches
-             an agile airframe faster than its nose-down control can stop at
-             the angle-of-attack limit) -->
+             no more than the lift at the angle-of-attack limits gives - beyond the
+             gravity reference of the moment, so that full aft stick still reaches
+             the limit in a steep climb or inverted - through a 0.2 s prefilter and
+             a 12 g/s onset limit (a full pull at once pitches an agile airframe
+             faster than its nose-down control can stop at the angle-of-attack
+             limit) -->
         <fcs_function name="fcs/fbw/dn-stick">
           <function>
             <max>
@@ -393,9 +410,9 @@ def channels_xml(aircraft, fbw):
                      1.0  %.3f
                   </tableData>
                 </table>
-                <difference><product><property>fcs/fbw/n-alpha</property><value>%.5f</value></product><value>1.0</value></difference>
+                <difference><product><property>fcs/fbw/n-alpha</property><value>%.5f</value></product><property>fcs/fbw/g-ref</property></difference>
               </min>
-              <difference><product><property>fcs/fbw/n-alpha</property><value>%.5f</value></product><value>1.0</value></difference>
+              <difference><product><property>fcs/fbw/n-alpha</property><value>%.5f</value></product><property>fcs/fbw/g-ref</property></difference>
             </max>
           </function>
         </fcs_function>
@@ -415,19 +432,13 @@ def channels_xml(aircraft, fbw):
         </lag_filter>
         <fcs_function name="fcs/fbw/dn">
           <function>
-            <difference>
-              <property>accelerations/Nz</property>
-              <product>
-                <cos><property>attitude/theta-rad</property></cos>
-                <cos><property>attitude/phi-rad</property></cos>
-              </product>
-            </difference>
+            <difference><property>accelerations/Nz</property><property>fcs/fbw/g-ref</property></difference>
           </function>
         </fcs_function>
-        <!-- the load factor error, limited by the angle of attack left - with its
-             rise over the next 0.35 s counted as spent, so the limit is not
-             overshot (the rise, not the pitch rate: in a steady pull the nose
-             turns with the flight path and the angle of attack holds) -->
+        <!-- the angle of attack with its rise over the next 0.35 s counted as spent
+             (the rise, not the pitch rate: in a steady pull the nose turns with the
+             flight path and the angle of attack holds), and the load factor the
+             angle of attack left to each limit gives -->
         <fcs_function name="fcs/fbw/alpha-ahead">
           <function>
             <sum>
@@ -436,16 +447,49 @@ def channels_xml(aircraft, fbw):
             </sum>
           </function>
         </fcs_function>
+        <fcs_function name="fcs/fbw/dn-room-up">
+          <function>
+            <product><property>fcs/fbw/n-alpha</property>
+              <difference><value>%.5f</value><property>fcs/fbw/alpha-ahead</property></difference></product>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/dn-room-down">
+          <function>
+            <product><property>fcs/fbw/n-alpha</property>
+              <difference><value>%.5f</value><property>fcs/fbw/alpha-ahead</property></difference></product>
+          </function>
+        </fcs_function>
+        <!-- the command limited to the load factor the aircraft pulls now plus what
+             the angle of attack left gives: at a limit the feedforward asks for the
+             load factor the airframe gives there, whatever elevator holds it - a
+             steady pull on a stable airframe, a push on an unstable one (a
+             feedforward faded out past the limit instead took about 10 deg of
+             elevator per deg of alpha, on one side of it only: the actuator's rate
+             limit could not follow, and the MiG-29A cycled between 24 and 29 deg) -->
+        <fcs_function name="fcs/fbw/dn-limited">
+          <function>
+            <max>
+              <min>
+                <property>fcs/fbw/dn-cmd</property>
+                <sum><property>fcs/fbw/dn</property><property>fcs/fbw/dn-room-up</property></sum>
+              </min>
+              <sum><property>fcs/fbw/dn</property><property>fcs/fbw/dn-room-down</property></sum>
+            </max>
+          </function>
+        </fcs_function>
+        <!-- the integrator's error: the load factor's departure from the model
+             response, and at a limit the angle of attack left, counted five times -
+             it trims what the airframe needs there beyond the linear design (vortex
+             lift, the tail's power at high alpha) in a fraction of a second, not
+             over the pull -->
         <fcs_function name="fcs/fbw/pitch-error">
           <function>
             <max>
               <min>
                 <difference><property>fcs/fbw/dn-model</property><property>fcs/fbw/dn</property></difference>
-                <product><property>fcs/fbw/n-alpha</property>
-                  <difference><value>%.5f</value><property>fcs/fbw/alpha-ahead</property></difference></product>
+                <product><value>%.1f</value><property>fcs/fbw/dn-room-up</property></product>
               </min>
-              <product><property>fcs/fbw/n-alpha</property>
-                <difference><value>%.5f</value><property>fcs/fbw/alpha-ahead</property></difference></product>
+              <product><value>%.1f</value><property>fcs/fbw/dn-room-down</property></product>
             </max>
           </function>
         </fcs_function>
@@ -487,9 +531,9 @@ def channels_xml(aircraft, fbw):
             </difference>
           </function>
         </fcs_function>
-        <!-- the feedforward (of the limited command) fades out past alpha_max, with
-             the angle of attack's next 0.35 s counted: an unstable airframe
-             pitching up fast needs its nose-down control before it gets there -->
+        <!-- the elevator: the push, the moment compensation, angle-of-attack and
+             pitch-rate feedback, the feedforward of the limited command, the
+             integrator -->
         <fcs_function name="fcs/fbw/elevator-raw">
           <function>
             <sum>
@@ -497,17 +541,7 @@ def channels_xml(aircraft, fbw):
               <property>fcs/fbw/moment-comp</property>
               <product><value>-1</value><property>fcs/fbw/k-alpha</property><property>aero/alpha-rad</property></product>
               <product><value>-1</value><property>fcs/fbw/k-q</property><property>velocities/q-rad_sec</property></product>
-              <product><property>fcs/fbw/k-ff</property><property>fcs/fbw/dn-cmd</property>
-                <table>
-                  <independentVar lookup="row">fcs/fbw/alpha-ahead</independentVar>
-                  <tableData>
-                    %.5f 0.0
-                    %.5f 1.0
-                    %.5f 1.0
-                    %.5f 0.0
-                  </tableData>
-                </table>
-              </product>
+              <product><property>fcs/fbw/k-ff</property><property>fcs/fbw/dn-limited</property></product>
               <property>fcs/fbw/pitch-integral</property>
             </sum>
           </function>
@@ -529,10 +563,9 @@ def channels_xml(aircraft, fbw):
                        _gain_table("k-ff", fbw, "k_ff"), _gain_table("k-i", fbw, "k_i"),
                        _gain_table("n-alpha", fbw, "n_alpha"), _moment_table(fbw),
                        o["n_max"] - 1.0, o["n_min"] - 1.0, rad(o["alpha_max_deg"]), rad(o["alpha_min_deg"]),
-                       rad(o["alpha_max_deg"]), rad(o["alpha_min_deg"]), de_hi, de_lo,
+                       rad(o["alpha_max_deg"]), rad(o["alpha_min_deg"]), LIMIT_INTEGRAL, LIMIT_INTEGRAL, de_hi, de_lo,
                        de_hi / rad(4.0), rad(o["alpha_max_deg"]), -de_lo / rad(4.0), rad(o["alpha_min_deg"]),
-                       rad(o["alpha_min_deg"] - 5.0), rad(o["alpha_min_deg"]), rad(o["alpha_max_deg"]),
-                       rad(o["alpha_max_deg"] + 5.0), de_lo, de_hi, max(1.05, (de_hi - de_lo) / 0.83)))
+                       de_lo, de_hi, max(1.05, (de_hi - de_lo) / 0.83)))
     if "aileron" in aircraft.channels():
         da = rad(max(abs(x) for x in aircraft.channel_limits("aileron")))
         parts.append("""      <channel name="Roll (fly-by-wire)">
