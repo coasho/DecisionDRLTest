@@ -218,5 +218,10 @@ move on while a check fails or a picture looks wrong.
 - Show the user three things: the three-view, a viewer screenshot, and the
   failed or warned checks with what they mean.
 - Link `aircraft/<name>/out/report.html`.
+- Check `git status`. A generated file shown as modified has changed: the
+  build writes its `.xml` files as git keeps them (LF), a rebuild that
+  changes nothing keeps the aircraft's date, and the mesher gives the same
+  `.glb` every time. One that should not have changed is a bug to chase,
+  not a file to check out. (calibrate dates `calibration.toml` every run.)
 - The aircraft is `jsbsim:<name>` everywhere on the platform, with no copying:
   in the viewer, the C++ and Python SDKs, and scenario files.

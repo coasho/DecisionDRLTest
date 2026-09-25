@@ -50,7 +50,7 @@ def main(argv=None):
         os.makedirs(dst_dir)
         with open(src, encoding="utf-8") as f:
             text = f.read().replace('name = "%s"' % a.like, 'name = "%s"' % a.name, 1)
-        with open(os.path.join(dst_dir, a.name + ".toml"), "w", encoding="utf-8") as f:
+        with open(os.path.join(dst_dir, a.name + ".toml"), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         print("aircraft/%s/%s.toml (from %s): edit it, then python -m hangar %s geometry" % (a.name, a.name, a.like, a.name))
         return 0

@@ -20,7 +20,7 @@ import json
 import math
 import os
 import pickle
-
+import re
 import time
 
 import numpy as np
@@ -90,6 +90,21 @@ def shown(path):
     except ValueError:          # another drive
         return path
     return path if rel.startswith("..") else rel
+
+
+def _keep_date(path, text):
+    """The JSBSim aircraft `text`, dated as the file at `path` it replaces when
+    nothing else in it has changed: a rebuild that changes nothing leaves the
+    file as git keeps it, not a day newer."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            old = f.read()
+    except (OSError, UnicodeDecodeError):
+        return text
+    was, now = (re.search(r"<filecreationdate>(.*)</filecreationdate>", t) for t in (old, text))
+    if was and now and text.replace(now.group(1), was.group(1)) == old:
+        return old
+    return text
 
 
 class Design:
@@ -442,29 +457,32 @@ class Design:
         eng_dir = os.path.join(self.dir, "Engines")
         os.makedirs(eng_dir, exist_ok=True)
         files = []
+        # git keeps these files with LF line ends: a CRLF copy (text mode on
+        # Windows) differs in size, and git status reports it modified
         for i, e in enumerate(a.engines):
             ename = "%s_engine%d" % (a.name, i)
             if e.type == "turbofan":
                 pname = "%s_nozzle%d" % (a.name, i)
-                with open(os.path.join(eng_dir, ename + ".xml"), "w", encoding="utf-8") as f:
+                with open(os.path.join(eng_dir, ename + ".xml"), "w", encoding="utf-8", newline="\n") as f:
                     f.write(turbofan_xml(e))
-                with open(os.path.join(eng_dir, pname + ".xml"), "w", encoding="utf-8") as f:
+                with open(os.path.join(eng_dir, pname + ".xml"), "w", encoding="utf-8", newline="\n") as f:
                     f.write(nozzle_xml(e.name))
                 files.append((ename, pname))
                 continue
             pname = "%s_prop%d" % (a.name, i)
-            with open(os.path.join(eng_dir, ename + ".xml"), "w", encoding="utf-8") as f:
+            with open(os.path.join(eng_dir, ename + ".xml"), "w", encoding="utf-8", newline="\n") as f:
                 f.write(piston_xml(e) if e.type == "piston" else electric_xml(e))
             p = Propeller(e)
             mass_e = float(e.mass) if e.mass is not None else 30.0
-            with open(os.path.join(eng_dir, pname + ".xml"), "w", encoding="utf-8") as f:
+            with open(os.path.join(eng_dir, pname + ".xml"), "w", encoding="utf-8", newline="\n") as f:
                 f.write(propeller_xml(p, p.tables(), 0.1 * mass_e, "%s propeller %d" % (a.name, i)))
             files.append((ename, pname))
         from . import fcs
         fbw = fcs.design(tabs, a, mm)
         xml_path = os.path.join(self.dir, a.name + ".xml")
-        with open(xml_path, "w", encoding="utf-8") as f:
-            f.write(jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw))
+        text = _keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw))
+        with open(xml_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
         # the platform finds it where it is (io::AssetResolver: the source tree's
         # aircraft/ in a development build (before any staged copy), share/flightsim/aircraft
         # in a package, or FSIM_AIRCRAFT_PATH): jsbsim:<name> in any trainer, the viewer, Python

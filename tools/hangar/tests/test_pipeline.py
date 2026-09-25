@@ -3,7 +3,9 @@ JSBSim: the tool works end to end. Quick mode (coarse tables, short flight
 tests), so the numbers are a first look; what is asserted is that each stage
 produces its outputs and that the aircraft it builds flies. Needs the fsim
 package on the path; skipped without it."""
+import glob
 import os
+import re
 import shutil
 import tempfile
 import unittest
@@ -67,6 +69,28 @@ class Stages(unittest.TestCase):
         self.assertEqual(self.failed(self.stage(d, "propulsion")), [])
         build = self.stage(d, "build")
         self.assertTrue(os.path.isfile(build["xml"]))
+        # the files git keeps, with LF line ends as it keeps them
+        for p in [build["xml"]] + glob.glob(os.path.join(d.dir, "Engines", "*.xml")):
+            with open(p, "rb") as f:
+                self.assertEqual(f.read().count(b"\r"), 0, p)
+        # a rebuild that changes nothing leaves the aircraft as it was, date and all
+        with open(build["xml"], encoding="utf-8", newline="") as f:
+            built = f.read()
+        today = re.search(r"<filecreationdate>(.*)</filecreationdate>", built).group(1)
+        old = built.replace(today, "2000-01-01")
+        with open(build["xml"], "w", encoding="utf-8", newline="\n") as f:
+            f.write(old)
+        self.stage(d, "build")
+        with open(build["xml"], encoding="utf-8", newline="") as f:
+            self.assertEqual(f.read(), old)
+        # one that changes anything else writes it anew, dated today
+        with open(build["xml"], "w", encoding="utf-8", newline="\n") as f:
+            f.write(old.replace("</fdm_config>", "<!-- edited -->\n</fdm_config>"))
+        self.stage(d, "build")
+        with open(build["xml"], encoding="utf-8", newline="") as f:
+            rebuilt = f.read()
+        self.assertNotIn("<!-- edited -->", rebuilt)
+        self.assertNotIn("2000-01-01", rebuilt)
         # the 3D model: one closed solid when the mesher is built, else primitives
         model = self.stage(d, "model")
         self.assertTrue(os.path.isfile(model["glb"]))

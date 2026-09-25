@@ -77,6 +77,11 @@ code that computes them, changes.
 The fly stage flies the same tests on a reference aircraft (`reference =
 "jsbsim:c172x"` in `[targets]`) and prints its numbers beside the design's.
 
+A rebuild that changes nothing leaves the aircraft's files as they were:
+the build writes them with LF line ends, as git keeps them, and
+`<name>.xml` keeps the date in its header until something else in it
+changes. An `.xml` that git shows as modified has really changed.
+
 ## The design file
 
 Positions are in metres, in JSBSim's structural frame: x aft, y right, z up.
