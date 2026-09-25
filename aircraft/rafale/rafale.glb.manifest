@@ -2,3 +2,6 @@
 forward -y
 up +z
 scale 1.0
+# lifting surfaces, right half, root to tip: <kind> then per section its leading edge (body axes from the origin, m) and chord
+wing 2.9760 -0.0001 0.0000 7.2000 -2.3440 5.2499 0.3000 1.4800
+canard 4.7460 -0.0001 -0.3700 2.0900 3.5360 1.3999 -0.3700 1.2900 2.4460 2.6499 -0.5400 0.5600

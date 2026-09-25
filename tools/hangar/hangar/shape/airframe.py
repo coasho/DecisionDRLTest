@@ -311,7 +311,9 @@ def nozzle_paint(aircraft):
         r = 0.5 * d
         ring = {"material": METAL, "mirror": bool(e.mirror), "origin": exit_, "axis": [1.0, 0.0, 0.0]}
         out.append((SKIN, dict(ring, prim="revolve", s=[-length - 0.45, -length], r=[1.1 * r + 0.015] * 2)))
-        out.append((NOZZLE, dict(ring, prim="revolve", s=[-length, hinge + 0.02], r=[1.5 * r] * 2)))
+        # (as far out as a nacelle hugging the case stands; a wider band painted
+        # squares of metal on flat skin between twin nozzles)
+        out.append((NOZZLE, dict(ring, prim="revolve", s=[-length, hinge + 0.02], r=[1.25 * r] * 2)))
     return out
 
 
