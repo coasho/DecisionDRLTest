@@ -13,8 +13,8 @@ import numpy as np
 from ..geometry import airfoil as af
 
 # materials: what the glTF writer paints each triangle with
-MATERIALS = ("skin", "control", "glass", "dark", "metal", "tyre", "strut")
-SKIN, CONTROL, GLASS, DARK, METAL, TYRE, STRUT = range(len(MATERIALS))
+MATERIALS = ("skin", "control", "glass", "dark", "metal", "tyre", "strut", "nozzle")
+SKIN, CONTROL, GLASS, DARK, METAL, TYRE, STRUT, NOZZLE = range(len(MATERIALS))
 
 GAP = 0.012  # m: between a control surface and what it is cut from
 
@@ -155,6 +155,15 @@ def nozzle_size(engine):
 
 PETALS = 12        # a round nozzle's divergent petals
 PETAL_FRONT = 0.4  # of the nozzle's visible length ahead of the exit: where they hinge
+PETAL_OPEN_DEG = 12.0  # how far a petal opens when the design does not say (petal_open_deg)
+
+
+def _round(engine):
+    """A round nozzle's numbers: exit (the defined engine's), diameter,
+    visible length, wall thickness and the petals' hinge station (m, ahead
+    of the exit: negative)."""
+    d, length = nozzle_size(engine)
+    return np.asarray(engine.prop_position, float), d, length, max(0.02, 0.03 * d), -PETAL_FRONT * length
 
 
 def nozzles(aircraft):
@@ -197,6 +206,61 @@ def nozzles(aircraft):
     return solids, cavities
 
 
+def petal_clearances(aircraft):
+    """The space each round nozzle's petals sweep, from just ahead of their
+    hinges aft and as wide as they open, as solids to cut out of the
+    airframe. A fuselage or nacelle that runs on past the hinges at about the
+    nozzle's own size puts its skin where the petals are - two surfaces a
+    millimetre apart that flicker through each other, and petals that open
+    through the skin; the petals alone are the nozzle there."""
+    out = []
+    for e in aircraft.engines:
+        if e.type != "turbofan" or (e.prop_spec or {}).get("shape", "round") != "round":
+            continue
+        exit_, d, length, wall, hinge = _round(e)
+        r = 0.5 * d
+        opening = np.radians(float((e.prop_spec or {}).get("petal_open_deg", PETAL_OPEN_DEG)))
+        # the petals' tips wide open, their thickness and a gap
+        reach = r + abs(hinge) * np.sin(opening) + 1.5 * wall + 0.01
+        out.append({"prim": "revolve", "material": METAL, "mirror": bool(e.mirror), "origin": exit_,
+                    "axis": [1.0, 0.0, 0.0], "s": [hinge - 0.01, 1.0], "r": [reach, reach]})
+    return out
+
+
+def nozzle_paint(aircraft):
+    """How the airframe is painted round each round nozzle, as (material,
+    region) pairs: the nozzle's burnt metal over its visible length - the
+    case and whatever skin is near it, from its length ahead of the exit
+    back to the petals - and ahead of that the buried front of the case in
+    the skin's paint. The case stands proud of a fuselage or nacelle by a
+    centimetre or two, or runs along inside it, and where the two surfaces
+    were that close each point took the paint of whichever was a hair nearer:
+    metal and skin in ragged patches, which reads as parts cutting through
+    each other. Painted by where it is, the line between them is a ring
+    round the nozzle."""
+    out = []
+    for e in aircraft.engines:
+        if e.type != "turbofan" or (e.prop_spec or {}).get("shape", "round") != "round":
+            continue
+        exit_, d, length, _, hinge = _round(e)
+        r = 0.5 * d
+        ring = {"material": METAL, "mirror": bool(e.mirror), "origin": exit_, "axis": [1.0, 0.0, 0.0]}
+        out.append((SKIN, dict(ring, prim="revolve", s=[-length - 0.45, -length], r=[1.1 * r + 0.015] * 2)))
+        out.append((NOZZLE, dict(ring, prim="revolve", s=[-length, hinge + 0.02], r=[1.5 * r] * 2)))
+    return out
+
+
+def painted(solid, regions):
+    """solid with its surface inside each region painted that region's
+    material, its distance unchanged: the solid without the regions, and
+    each part inside one painted - reaching 2 mm further, so the parts
+    overlap and leave no face between them. regions: (material, node)."""
+    rest = {"op": "subtract", "k": 0.0, "a": solid, "b": union([node for _, node in regions])}
+    parts = [{"op": "paint", "material": m, "child": {"op": "intersect", "k": 0.0, "children": [
+        solid, {"op": "offset", "r": 0.002, "child": node}]}} for m, node in regions]
+    return {"op": "union", "k": 0.0, "children": [rest] + parts}
+
+
 def petals(engine):
     """A round nozzle's petal - one of PETALS around its exit, the one on +y
     - as a scene in the nozzle's frame (origin at the exit, x aft), with its
@@ -204,21 +268,47 @@ def petals(engine):
     turn opens it. None for a two-dimensional nozzle."""
     if (engine.prop_spec or {}).get("shape", "round") != "round":
         return None
-    d, length = nozzle_size(engine)
-    r, wall = 0.5 * d, max(0.02, 0.03 * d)
-    s0 = -PETAL_FRONT * length
-    outer = {"prim": "revolve", "material": METAL, "origin": [0.0, 0.0, 0.0], "axis": [1.0, 0.0, 0.0],
-             "s": [s0 - 0.02, -0.04, 0.0], "r": [1.045 * r, 1.0 * r, 0.99 * r]}
-    inner = {"prim": "revolve", "material": DARK, "origin": [0.0, 0.0, 0.0], "axis": [1.0, 0.0, 0.0],
-             "s": [s0 - 0.1, 0.0, 0.1], "r": [1.045 * r - wall, r - wall, r - wall]}
+    _, d, length, wall, s0 = _round(engine)
+    r = 0.5 * d
+
+    def shell(r_out, r_in, material):
+        """A shell of revolution from just ahead of the hinge to the exit,
+        between two profiles (radii at the front, a little behind it and
+        at the exit)."""
+        s = [s0 - 0.02, -0.04, 0.0]
+        return {"op": "subtract", "k": 0.0, "cut_material": DARK,
+                "a": {"prim": "revolve", "material": material, "origin": [0.0, 0.0, 0.0], "axis": [1.0, 0.0, 0.0],
+                      "s": s, "r": r_out},
+                "b": {"prim": "revolve", "material": DARK, "origin": [0.0, 0.0, 0.0], "axis": [1.0, 0.0, 0.0],
+                      "s": [s0 - 0.1] + s[1:] + [0.1], "r": [r_in[0]] + list(r_in[1:]) + [r_in[-1]]}}
+
+    def slab(z0, z1):
+        """Its sector's slice across the nozzle (z, the way round)."""
+        return {"prim": "box", "material": NOZZLE, "centre": [0.5 * s0, r, 0.5 * (z0 + z1)],
+                "half": [0.5 * abs(s0) + 0.05, 0.5 * r, 0.5 * (z1 - z0)]}
+
+    # the petal: a plate that tucks in under the case's trailing edge (the
+    # case ends at 1.05 r a centimetre ahead of the hinge, so the petal's
+    # front, which dips as it opens, stays inside it), converging a little
+    outer = np.array([1.0, 0.99, 0.98]) * r
+    inner = outer - wall
     width = 2.0 * r * np.sin(np.pi / PETALS) * 0.97  # a thin gap between petals
-    sector = {"prim": "box", "material": METAL, "centre": [0.5 * s0, r, 0.0],
-              "half": [0.5 * abs(s0) + 0.05, 0.5 * r, 0.5 * width]}
-    scene = {"op": "intersect", "k": 0.0, "children": [
-        {"op": "subtract", "k": 0.0, "a": outer, "b": inner, "cut_material": DARK}, sector]}
+    plate = {"op": "intersect", "k": 0.0, "children": [shell(outer, inner, NOZZLE), slab(-0.5 * width, 0.5 * width)]}
+    # and a seal on its inside that reaches under the next petal round (+z),
+    # joined to it by a step: without it the gaps the open petals leave
+    # showed the sky through the nozzle. It clears the next petal's inside by
+    # a few millimetres, closed or open (the next one swings out further).
+    opening = np.radians(float((engine.prop_spec or {}).get("petal_open_deg", PETAL_OPEN_DEG)))
+    gap = 2.0 * np.sin(np.pi / PETALS) * (r + abs(s0) * np.sin(opening)) - width + 0.01  # at the exit, wide open
+    t = 0.5 * wall
+    seal = {"op": "intersect", "k": 0.0, "children": [shell(inner - 0.004, inner - 0.004 - t, DARK),
+                                                         slab(0.5 * width - 0.3 * gap, 0.5 * width + gap)]}
+    step = {"op": "intersect", "k": 0.0, "children": [shell(inner + 0.5 * wall, inner - 0.004 - t, DARK),
+                                                         slab(0.5 * width - 0.3 * gap, 0.5 * width)]}
+    scene = {"op": "union", "k": 0.0, "children": [plate, seal, step]}
     # hinged across its front edge; a positive turn about +z swings its aft
     # end out (+y)
-    return scene, np.array([s0, 1.045 * r - 0.5 * wall, 0.0]), np.array([0.0, 0.0, 1.0])
+    return scene, np.array([s0, outer[0] - 0.5 * wall, 0.0]), np.array([0.0, 0.0, 1.0])
 
 
 def strut(st):
@@ -350,6 +440,12 @@ def airframe(aircraft, cell=None, error=None, gear=None):
     cavities += [duct for _, duct in intakes]
     if jets:
         solid = union([solid] + jets, 0.06)
+    clear = petal_clearances(aircraft)
+    if clear:  # nothing of the airframe where the petals are, or where they open to
+        solid = {"op": "subtract", "k": 0.0, "a": solid, "b": union(clear), "cut_material": DARK}
+    paint = nozzle_paint(aircraft)
+    if paint:
+        solid = painted(solid, paint)
     if canopies:
         solid = union([solid] + [loft(b, GLASS) for b in canopies] + [f for b in canopies for f in frames(b)], 0.0)
     from .gear import bays

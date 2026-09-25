@@ -754,6 +754,50 @@ class Model3D(unittest.TestCase):
             for k in ("positions", "normals", "triangles", "materials"):
                 self.assertTrue(np.array_equal(m[k], one[k]), k)
 
+    def test_petals_have_the_nozzle_to_themselves(self):
+        # nothing of the airframe where a round nozzle's petals are or open to
+        # (the F-16's fuselage ran on past their hinges, its skin a hair from
+        # theirs); the nozzle's metal painted by where it is, not by which
+        # surface is a hair nearer; each petal one closed piece, sealed
+        from hangar.shape import airframe as sh
+        from hangar.shape import meshkit
+        if meshkit.library() is None:
+            self.skipTest("hangar_meshkit is not built")
+        a = Aircraft.load(repo("aircraft/f16c/f16c.toml"))
+        scene = sh.airframe(a)
+        e = next(e for e in a.engines if e.type == "turbofan")
+        exit_, d, length, wall, hinge = sh._round(e)
+        r = 0.5 * d
+        th = np.linspace(0.0, 2.0 * np.pi, 16, endpoint=False)
+        pts = np.array([exit_ + [s, q * np.cos(t), q * np.sin(t)]
+                        for s in (hinge + 0.03, 0.5 * hinge, -0.02) for q in (0.95 * r, r, 1.1 * r) for t in th])
+        dist, _ = meshkit.evaluate(scene, pts)
+        self.assertGreater(dist.min(), 0.0)
+        # a millimetre off the case, underneath, ahead of the petals: the nozzle's paint
+        s = 0.5 * (hinge - length)
+        q = float(np.interp(s, [-length - 0.4, -length, hinge], [1.08 * r, 1.1 * r, 1.05 * r])) + 0.001
+        _, material = meshkit.evaluate(scene, np.array([exit_ + [s, 0.0, -q]]))
+        self.assertEqual(int(material[0]), sh.NOZZLE)
+        scene, _, _ = sh.petals(e)
+        m = meshkit.build({"cell": d / 260.0, "error": d / 2600.0, "safety": 3.0, "sharp_deg": 45.0,
+                           "max_triangles": 3000, "root": scene})
+        self.assertEqual((m["boundary_edges"], m["nonmanifold_edges"], m["components"]), (0, 0, 1))
+
+    def test_manifest_names_the_lifting_surfaces(self):
+        # the viewer's airflow effects hang on the wing, the strakes and the
+        # canards: their right halves' sections, leading edge (body axes from
+        # the model's origin) and chord; not the tails
+        from hangar import model3d
+        a = Aircraft.load(repo("aircraft/f16c/f16c.toml"))
+        lines = [line for line in model3d.surface_lines(a, np.array([8.0, 0.0, 0.0])) if not line.startswith("#")]
+        wing = [float(v) for v in next(line for line in lines if line.startswith("wing ")).split()[1:]]
+        self.assertEqual(len(wing), 8)
+        self.assertAlmostEqual(wing[0], 2.7)    # the root's leading edge 2.7 m ahead of the origin
+        self.assertAlmostEqual(wing[5], 4.572)  # the tip 4.572 m out to the right
+        self.assertAlmostEqual(wing[7], 1.131)
+        self.assertTrue(any(line.startswith("strake ") for line in lines))
+        self.assertEqual(sorted({line.split()[0] for line in lines}), ["strake", "wing"])
+
     def test_model_cache_follows_the_shape_not_the_aerodynamics(self):
         # the model is re-made when what shapes it changes, and only then: an
         # edit to the aerodynamics leaves the model's key as it is (and changes
