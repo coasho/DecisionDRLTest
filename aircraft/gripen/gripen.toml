@@ -191,7 +191,7 @@ attach = [8.300, 0.600, -0.400]
 retract = "forward"
 
 [reference]
-aero_point = [7.525, 0.0, 0.0]     # at the CG
+aero_point = [7.664, 0.0, 0.0]     # at the CG
 
 [flight_control]
 type = "fbw"
@@ -202,7 +202,7 @@ roll_rate_deg_s = 280.0
 
 [mass]
 empty = 6800                  # JAS 39C (Saab)
-empty_cg = [7.704, 0.0, -0.200]
+empty_cg = [7.844, 0.0, -0.200]
 # no published inertia: radii of gyration of the class
 gyration = [0.250, 0.400, 0.510]
 [[mass.payload]]
@@ -212,14 +212,14 @@ position = [3.600, 0.0, 0.500]
 [[mass.payload]]
 name = "gun ammunition"       # Mauser BK-27, 120 rounds
 mass = 60
-position = [6.188, -0.800, 0.000]
+position = [6.328, -0.800, 0.000]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 2,400 kg
-position = [6.154, 0.0, -0.150]
+position = [6.294, 0.0, -0.150]
 capacity = 1000
 [[mass.tank]]
 name = "fuselage 2"
-position = [7.954, 0.0, -0.150]
+position = [8.094, 0.0, -0.150]
 capacity = 900
 [[mass.tank]]
 name = "left wing"

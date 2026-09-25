@@ -215,7 +215,7 @@ roll_rate_deg_s = 250.0
 
 [mass]
 empty = 11000                 # Tranche 2 (Eurofighter)
-# loaded: 12.7 % of the MAC behind the neutral point hangar finds, 17 % of
+# loaded: 9.6 % of the MAC behind the neutral point hangar finds, 17 % of
 # the weight on the nose wheel
 empty_cg = [8.845, 0.0, 0.300]
 # no published inertia: radii of gyration of the class

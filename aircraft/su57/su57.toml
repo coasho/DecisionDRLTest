@@ -213,7 +213,7 @@ static_deflection = 0.18
 attach = [12.400, 1.600, -0.500]
 
 [reference]
-aero_point = [11.670, 0.0, 0.0]    # 0.26 MAC, at the CG
+aero_point = [11.426, 0.0, 0.0]    # 0.23 MAC, at the CG
 
 [flight_control]
 type = "fbw"
@@ -224,7 +224,7 @@ roll_rate_deg_s = 270.0
 
 [mass]
 empty = 18000                 # estimate
-empty_cg = [11.720, 0.0, -0.400]  # loaded, 5 % of the MAC ahead of the neutral point hangar finds
+empty_cg = [11.459, 0.0, -0.400]  # loaded, 5 % of the MAC ahead of the neutral point hangar finds
 # no published inertia: radii of gyration like the Su-27's
 gyration = [0.265, 0.430, 0.550]
 [[mass.payload]]
@@ -234,18 +234,18 @@ position = [4.600, 0.0, 0.700]
 [[mass.payload]]
 name = "internal missiles"    # 4 R-77M, 2 R-74M
 mass = 972
-position = [11.270, 0.0, -0.700]
+position = [11.009, 0.0, -0.700]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 10,300 kg
-position = [9.270, 0.0, -0.200]
+position = [9.009, 0.0, -0.200]
 capacity = 3000
 [[mass.tank]]
 name = "fuselage 2"
-position = [11.770, 0.0, -0.150]
+position = [11.509, 0.0, -0.150]
 capacity = 3300
 [[mass.tank]]
 name = "fuselage 3"
-position = [14.270, 0.0, -0.100]
+position = [14.009, 0.0, -0.100]
 capacity = 2000
 [[mass.tank]]
 name = "left wing"

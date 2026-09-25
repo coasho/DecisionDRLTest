@@ -242,7 +242,7 @@ roll_rate_deg_s = 270.0
 [mass]
 empty = 9750                  # J-10A (estimates)
 # empty: as far aft as a 15 deg tip-back over the main wheels allows;
-# loaded, 9 % of the MAC behind the neutral point hangar finds
+# loaded, 6 % of the MAC behind the neutral point hangar finds
 empty_cg = [8.880, 0.0, 0.250]
 # no published inertia: radii of gyration of the class
 gyration = [0.250, 0.400, 0.510]

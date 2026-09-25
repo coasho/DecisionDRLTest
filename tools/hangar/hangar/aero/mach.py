@@ -12,8 +12,9 @@ factors and increments on the low-speed tables, per Mach number:
   edge is supersonic, Stewart's delta-wing slope 2 pi cot(sweep)/E(k) where
   it is subsonic - each surface's lift acting at its area centroid (Ackeret:
   mid-chord), a trailing-edge flap as effective as its chord fraction (not
-  Glauert's more); taken relative to the same estimate at Mach 0.9 and
-  applied to the model's own values there, so the two ends meet;
+  Glauert's more); taken relative to the same estimate at Mach 0.9 - each
+  surface's lift where the model's lattice puts it there - and applied to
+  the model's own values there, so the two ends meet;
 - transonic: faired between them;
 - drag: skin friction falling with Mach (Raymer 12.27), the wave drag of the
   area distribution - Sears-Haack's D/q = 9 pi A_max^2 / (2 l^2) times
@@ -79,14 +80,34 @@ def lift_slope(num, mach):
 
 def _combine(nums, mach, downwash):
     """The aircraft's lift slope (per rad, on the reference area) and its
-    neutral point's x from its horizontal surfaces by linear theory."""
+    neutral point's x from its horizontal surfaces by linear theory: each
+    surface's lift at its area centroid supersonic, and subsonic where the
+    model's lattice puts it (x_lattice; else the quarter chord of its MAC)."""
     cla = xs = 0.0
     for n, eps in zip(nums, downwash):
         a = lift_slope(n, mach) * n["share"] * (1.0 - eps)
-        x = n["x_quarter"] if mach < 1.0 else n["x_centroid"]
+        x = n.get("x_lattice", n["x_quarter"]) if mach < 1.0 else n["x_centroid"]
         cla += a
         xs += a * x
     return cla, xs / cla
+
+
+def lattice_centres(model, alpha_deg=2.0):
+    """Where each lifting surface's lift from angle of attack acts in a
+    model's lattice, x in the design frame: the centroid of its panels'
+    loading in an upward flow. At Mach 0.9 it is well behind a low aspect
+    ratio surface's quarter chord already (its Prandtl-Glauert image is more
+    slender), so the supersonic move is taken from there."""
+    L, V = model.lat, model.vlm
+    V.select(math.radians(alpha_deg))
+    f = V.g_v[:, 2] * np.hypot(*(L.pb - L.pa)[:, 1:].T)
+    x = 0.5 * (L.pa[:, 0] + L.pb[:, 0])
+    out = {}
+    for si, s in enumerate(L.surfaces):
+        k = L.panel_surface == si
+        if abs(f[k].sum()) > 1e-9:
+            out[id(s)] = float((f[k] * x[k]).sum() / f[k].sum())
+    return out
 
 
 def _fair(xs, ys, x):
@@ -139,8 +160,12 @@ def mach_effects(aircraft, build_model, base, progress=None):
     sub = [m for m in MACH_SUB if m <= max(top, 0.3) + 1e-9]
     # subsonic: the model at each Mach number
     lin = {}
+    centres = {}
     for m in sub:
-        lin[m] = linear_numbers(build_model(m))
+        model = build_model(m)
+        lin[m] = linear_numbers(model)
+        if m == 0.9:
+            centres = lattice_centres(model)
         if progress:
             progress("mach %.2f" % m, len(lin), len(sub))
     ref = lin[0.0]
@@ -156,6 +181,9 @@ def mach_effects(aircraft, build_model, base, progress=None):
     if top > 1.0 and 0.9 in rows:
         horiz = [s for s in a.surfaces if s.kind not in ("fin", "vtail")]
         nums = [dict(_surface_numbers(s), share=s.area / a.S) for s in horiz]
+        for n, s in zip(nums, horiz):
+            if id(s) in centres:
+                n["x_lattice"] = centres[id(s)]
         eps0 = [_tail_downwash(a, s) for s in horiz]
         wing = next(i for i, s in enumerate(horiz) if s is a.wing)
         fins = [_surface_numbers(s) for s in a.surfaces if s.kind in ("fin", "vtail")]

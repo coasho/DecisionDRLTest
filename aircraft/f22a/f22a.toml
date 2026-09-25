@@ -20,8 +20,9 @@ speed = 260.0
 
 # The wing: 78.04 m2 (840 ft2), span 13.56 m, a clipped diamond: 42 deg
 # leading edge, -17 deg trailing edge (root 9.85 m, taper 0.169), the tip's
-# corner cut back along the aileron's end. Its 35 % MAC point, the CG
-# (relaxed stability), sits 0.7 m ahead of the main wheels.
+# corner cut back along the aileron's end. Its 35 % MAC point is the
+# aerodynamic reference; the CG (relaxed stability, below) sits 1.2 m ahead
+# of the main wheels.
 [[surface]]
 name = "wing"
 kind = "wing"
@@ -238,7 +239,7 @@ roll_rate_deg_s = 240.0
 
 [mass]
 empty = 19700                 # 43,340 lb (USAF)
-empty_cg = [10.685, 0.0, -0.350]  # loaded, 2 % of the MAC behind the neutral point hangar finds
+empty_cg = [10.566, 0.0, -0.350]  # loaded, 2 % of the MAC behind the neutral point hangar finds
 # no published inertia: radii of gyration like the F-15's
 gyration = [0.270, 0.430, 0.550]
 [[mass.payload]]
@@ -248,22 +249,22 @@ position = [4.900, 0.0, 0.550]
 [[mass.payload]]
 name = "internal missiles"    # 6 AIM-120, 2 AIM-9 in the bays
 mass = 1084
-position = [10.535, 0.0, -0.700]
+position = [10.416, 0.0, -0.700]
 [[mass.payload]]
 name = "gun ammunition"       # M61A2, 480 rounds
 mass = 150
-position = [9.735, 1.600, 0.000]
+position = [9.616, 1.600, 0.000]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 8,200 kg
-position = [8.735, 0.0, -0.200]
+position = [8.616, 0.0, -0.200]
 capacity = 2400
 [[mass.tank]]
 name = "fuselage 2"
-position = [11.235, 0.0, -0.200]
+position = [11.116, 0.0, -0.200]
 capacity = 2600
 [[mass.tank]]
 name = "fuselage 3"
-position = [13.435, 0.0, -0.250]
+position = [13.316, 0.0, -0.250]
 capacity = 1400
 [[mass.tank]]
 name = "left wing"

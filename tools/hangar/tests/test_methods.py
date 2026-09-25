@@ -140,6 +140,24 @@ class Lattice_(unittest.TestCase):
         self.assertLess(abs(roll), 1e-10)
         self.assertLess(abs(side), 1e-10)
 
+    def test_centres_of_pressure(self):
+        # where on its chord a strip's lift acts: at the quarter chord on a
+        # straight wing of aspect ratio 20 (but at its tips); on a swept one
+        # aft of it at the root and ahead of it at the tip, Kuchemann's
+        # centre and tip effects
+        for ar, taper, sweep, root, tip in ((20.0, 1.0, 0.0, (-0.01, 0.01), (-0.1, -0.02)),
+                                            (4.0, 0.4, 45.0, (0.05, 0.12), (-0.2, -0.1))):
+            vlm = VLM(Lattice(wing(ar, taper=taper, sweep_deg=sweep)))
+            vlm.select(math.radians(4.0))
+            y = vlm.lattice.c4[:, 1]
+            right = np.flatnonzero(y > 0.0)
+            right = right[np.argsort(y[right])]
+            with self.subTest(sweep=sweep):
+                self.assertTrue(root[0] < vlm.x_ac[right[0]] < root[1], vlm.x_ac[right[0]])
+                self.assertTrue(tip[0] < vlm.x_ac[right[-1]] < tip[1], vlm.x_ac[right[-1]])
+                if not sweep:
+                    self.assertLess(abs(vlm.x_ac[right[len(right) // 2]]), 0.01)
+
 
 class Fighters(unittest.TestCase):
     def test_polhamus_delta(self):
@@ -155,6 +173,76 @@ class Fighters(unittest.TestCase):
             a = math.radians(deg)
             polhamus = 2.45 * math.sin(a) * math.cos(a) ** 2 + 3.25 * math.sin(a) ** 2 * math.cos(a)
             self.assertAlmostEqual(m.evaluate(a)["CL"] / polhamus, 1.0, delta=0.12, msg="alpha %g" % deg)
+
+    def test_strips_carry_the_lattices_moment(self):
+        # a 75 deg strake ahead of a 45 deg wing: the strake's downwash moves
+        # the wing root's load aft. The strips give the lattice's moment as
+        # well as its lift - the neutral point within 0.5 % of the MAC of the
+        # lattice's own (Kutta-Joukowski on every bound vortex); with each
+        # strip's lift at its quarter chord it was 2.9 % ahead
+        spec = {"aircraft": {"name": "double delta"}, "analysis": {"speed": 60.0},
+                "surface": [{"name": "wing", "kind": "wing", "airfoil": "plate",
+                             "sections": [{"le": [3.0, 0.0, 0.0], "chord": 4.0}, {"le": [7.0, 4.0, 0.0], "chord": 1.0}]},
+                            {"name": "strake", "kind": "strake", "airfoil": "plate",
+                             "sections": [{"le": [0.0, 0.0, 0.0], "chord": 3.0}, {"le": [3.0, 0.8, 0.0], "chord": 0.05}]}],
+                "reference": {"aero_point": [5.0, 0.0, 0.0]}}
+        a = Aircraft(spec)
+        m = AeroModel(a)
+        fit = np.radians(np.linspace(-2.0, 6.0, 9))
+        model, lattice = [], []
+        for al in fit:
+            c = m.evaluate(al)
+            model.append((c["CL"], c["Cm"]))
+            v = np.array([math.cos(al), 0.0, math.sin(al)])
+            m.vlm.select(al)
+            _, F, M = m.vlm.forces(m.vlm.circulation(v, np.zeros(3)), v, np.zeros(3))
+            lattice.append((F @ np.array([-math.sin(al), 0.0, math.cos(al)]), M[1] / a.c))
+        points = [a.aero_point[0] - np.polyfit(fit, np.array(r)[:, 1], 1)[0] / np.polyfit(fit, np.array(r)[:, 0], 1)[0] * a.c
+                  for r in (model, lattice)]
+        self.assertLess(abs(points[0] - points[1]) / a.c, 0.005, points)
+
+    def test_an_edge_beside_a_body_loses_its_suction(self):
+        # Bryson's slender wing-body: an edge d from the axis of a body a
+        # wide (at the edge's height) keeps 1 - (a/d)^4 of its suction, and so
+        # of its vortex; none inside the body or at its side
+        from hangar.aero.model import edge_shielding
+        spec = {"aircraft": {"name": "tube"},
+                "surface": [{"name": "wing", "kind": "wing", "sections": [{"le": [4.0, 0.0, 0.0], "chord": 2.0},
+                                                                         {"le": [4.0, 4.0, 0.0], "chord": 2.0}]}],
+                "body": [{"name": "tube", "kind": "fuselage", "stations": [{"x": 0.0, "w": 1.0, "top": 0.5, "bottom": -0.5},
+                                                                          {"x": 10.0, "w": 1.0, "top": 0.5, "bottom": -0.5}]}]}
+        f = edge_shielding(Aircraft(spec), np.array([[5.0, 0.3, 0.0], [5.0, 0.5, 0.0], [5.0, 1.0, 0.0], [5.0, -2.0, 0.0],
+                                                     [5.0, 0.8, 0.3], [5.0, 3.0, 1.0], [11.0, 0.6, 0.0]]))
+        np.testing.assert_allclose(f, [0.0, 0.0, 1.0 - 0.5**4, 1.0 - 0.25**4, 1.0 - 0.5**4, 1.0, 1.0], atol=1e-9)
+
+    def test_f16c_pitch_follows_nasa(self):
+        # the F-16C as its three-views shape it against NASA TP-1538 (JSBSim's
+        # f16), both about NASA's moment reference: the neutral point within
+        # 1.5 % of the MAC from the same -2..6 deg slope, the pitching moment
+        # within 0.03 to 30 deg and 0.07 at 40. With every strip's lift at its
+        # quarter chord and the strakes' vortex lift unshielded by the
+        # fuselage, the neutral point was 2.8 % ahead and Cm 0.23 above at 40
+        import os
+        from hangar.reference import JSBSimAero
+        path = repo("third_party/jsbsim/aircraft/f16/f16.xml")
+        if not os.path.isfile(path):
+            self.skipTest("JSBSim's aircraft are not checked out")
+        a = Aircraft.load(repo("aircraft/f16c/f16c.toml"))
+        m = AeroModel(a)
+        ref = JSBSimAero(path)
+        kf, km = ref.S / a.S, ref.S * ref.c / (a.S * a.c)
+
+        def both(deg):
+            c, r = m.evaluate(math.radians(deg)), ref.coefficients(deg, 0.0, 0.2)
+            return c["CL"], c["Cm"], kf * r["CL"], km * r["Cm"]
+        fit = np.linspace(-2.0, 6.0, 9)
+        rows = np.array([both(x) for x in fit])
+        points = [(a.aero_point[0] - np.polyfit(np.radians(fit), rows[:, i + 1], 1)[0]
+                   / np.polyfit(np.radians(fit), rows[:, i], 1)[0] * a.c - a.mac_le[0]) / a.c for i in (0, 2)]
+        self.assertLess(abs(points[0] - points[1]), 0.015, points)
+        for deg, tol in ((0.0, 0.03), (10.0, 0.03), (20.0, 0.03), (30.0, 0.03), (40.0, 0.07)):
+            cl, cm, cl_ref, cm_ref = both(deg)
+            self.assertLess(abs(cm - cm_ref), tol, msg="alpha %g: Cm %.3f, NASA %.3f" % (deg, cm, cm_ref))
 
     def test_post_stall_solution_is_unique(self):
         # past the stall a vortex-lifting wing's induced flow had two

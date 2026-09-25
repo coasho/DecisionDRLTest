@@ -215,7 +215,12 @@ stage end to end through the platform (`ctest -R hangar`).
   decambered onto the viscous section polars (after Mukherjee &
   Gopalarathnam, J. Aircraft 43(3), 2006). Each strip then reads its full
   polar at its own induced angle. Past 30–60° of flow angle this becomes
-  plain strip theory.
+  plain strip theory. The lift a strip's angle of attack makes acts where
+  the lattice's loading puts it on the chord, not at the quarter chord a
+  section alone has: aft on a wing root behind a strake or a canard, whose
+  trailing vortices wash the front of the root down, and forward towards a
+  swept wing's tips (Küchemann's centre and tip effects). So in the linear
+  range the strips give the lattice's pitching moment as well as its lift.
 - **Bodies.** Slender-body theory as far as the flow stays attached (DATCOM
   4.2.1.1), then Allen and Perkins' crossflow drag (NACA TR 1048), plus skin
   friction. The wing–body dihedral effect comes from DATCOM. A fuselage and
@@ -258,7 +263,10 @@ For fighters:
   TN D-3767), and past 45° of sweep where it is blunt too (the blunt-edged
   65° delta of the VFE-2 experiment). The suction a wing loses to its vortex
   is Polhamus' own: its lift times the angle less its planform's downwash,
-  CL/πA. A sharp 60° delta
+  CL/πA. An edge beside the fuselage has less suction to lose: 1 − (a/d)⁴
+  of it, at a distance d from the axis of a body a wide (Bryson's slender
+  wing–body theory), and none inside the body. So a strake makes little
+  vortex lift where it grows out of the fuselage's side. A sharp 60° delta
   gets within 7 % of Polhamus' lift up to 20°. The vortex bursts at an angle
   that rises with the sweep (Earnshaw & Lawford, ARC R&M 3424) and takes 18°
   more to reach the apex; a burst vortex keeps 40 % of its lift, so a 60°
@@ -291,6 +299,9 @@ For fighters:
   linear theory per surface: Ackeret, and Stewart's slope for subsonic
   leading edges. Transonic values are faired between. The results are
   factors on the tables: lift, the neutral point's move, control power.
+  The neutral point's supersonic move starts from where the lattice puts
+  each surface's lift at Mach 0.9, already well behind a low aspect ratio
+  surface's quarter chord.
   Drag adds skin friction falling with Mach, and wave drag from the area
   distribution (Sears–Haack times Raymer's E_WD, from Korn's
   drag-divergence Mach). Once the leading edge is supersonic, the edge's
@@ -400,35 +411,46 @@ runs from random attitudes and rates diverged.
 
 ## Validation: the F-16C
 
-The F-16C was built from public dimensions. JSBSim's own `f16` carries NASA
-TP-1538's wind-tunnel data (Nguyen et al., 1979), a reference measured from
-−20° to 90° angle of attack. It is in black, hangar's F-16C in blue:
+The F-16C was built from public dimensions and shaped to two three-views.
+JSBSim's own `f16` carries NASA TP-1538's wind-tunnel data (Nguyen et al.,
+1979), a reference measured from −20° to 90° angle of attack. It is in
+black, hangar's F-16C in blue:
 
 ![hangar's F-16C against NASA TP-1538](images/hangar-f16c-nasa.jpg)
 
 Lift and drag follow NASA's to 40° angle of attack. The mean error to 15°
-is 7.2 % in lift and 7.5 % in drag, and from 15° to 40° it is 8.6 % and
-10.9 %. The dihedral effect, the weathercock stability to 25°, and the
+is 7.1 % in lift and 7.4 % in drag, and from 15° to 40° it is 7.3 % and
+9.2 %. The dihedral effect, the weathercock stability to 25°, and the
 damping in pitch and yaw at low α also agree.
 
-The pitching moment agrees only at low α. Both moments are taken about
-NASA's moment reference, 35 % of the MAC, which is also the design's
-reference point. NASA's Cm stays within 0.015 of zero from 0° to 40°.
-hangar's rises with α: it is 0.037 above NASA's at 15° and 0.23 above at
-40°. The neutral point is at 30.7 % of the MAC, and NASA's at 33.5 % (both
-from the slope between −2° and 6°).
+So does the pitching moment. Both moments are taken about NASA's moment
+reference, 35 % of the MAC, which is also the design's reference point.
+NASA's Cm stays within 0.015 of zero from 0° to 40°. hangar's stays within
+0.015 of NASA's to 15° and within 0.05 to 40°. The neutral point is at
+34.8 % of the MAC; NASA's is at 33.5 % from the same slope between −2° and
+6°, and at 34.5 % between 0° and 10°.
 
-This is a regression. It came when the F-16C was reshaped to its
-three-views. Today's methods, run on the earlier shape, give Cm within 0.02
-of NASA's to 15° and 0.07 to 40°, a mean lift error of 5.4 %, and the
-neutral point at 34.4 %. The three-views gave the F-16C ogee strakes that
-start 1.2 m further forward, a wider forebody, and a stabilator 0.6 m
-further forward. Each of these adds nose-up moment. Put back one at a time,
-the earlier strakes move the neutral point 1.1 % of the MAC aft, the
-earlier fuselage and intake 0.85 %, and the earlier stabilator 0.6 %. The
-new shape is the more faithful one, so the error is in the model, not in
-the comparison. The strakes' vortex lift was calibrated on NASA's data
-while the F-16C still had its earlier, shorter strakes.
+It used to pitch up: Cm 0.037 above NASA's at 15° and 0.23 above at 40°,
+the neutral point at 30.7 %. That showed once the F-16C was reshaped to its
+three-views, whose ogee strakes start 1.2 m further forward. Two terms of
+the model put the strakes' lift too far forward:
+
+- **Where each strip's lift acts.** Each strip carried its lift at its
+  quarter chord, as a section alone does. But the strakes' trailing
+  vortices wash the front of the wing root down, and the lattice puts the
+  root's load up to a quarter of its chord further aft. The strips kept the
+  strakes' own lift ahead of the reference point, but not the load the
+  strakes move aft on the wing. Each strip's lift now acts where the
+  lattice's loading puts it (see Methods). This moves the neutral point
+  4.1 % of the MAC aft, and takes Cm at 40° from 0.22 to 0.11.
+- **The strakes' vortex lift beside the fuselage.** It counted the whole
+  leading edge, also where the strake grows out of the fuselage's side.
+  There the fuselage's cross flow takes the edge's suction, and with it the
+  vortex. Only 1 − (a/d)⁴ of the suction remains (Bryson's slender
+  wing–body theory). This takes Cm at 40° from 0.11 to 0.04.
+
+The earlier, shorter strakes hid both errors. Today's model puts that
+shape's neutral point at 37.8 %, 4.3 % behind NASA's.
 
 hangar's F-16C also differs in these:
 
@@ -444,13 +466,13 @@ Flown through its fly-by-wire:
 
 | F-16C, clean | hangar | published |
 |---|---|---|
-| top speed, 40,000 ft | Mach 2.04 (calibrated: TR 1.22) | Mach 2.05 |
+| top speed, 40,000 ft | Mach 2.04 (calibrated: TR 1.20) | Mach 2.05 |
 | sustained turn, Mach 0.9, 15,000 ft | 12.5 deg/s | about 13.5 deg/s |
-| full aft stick, 350 kt | 7.1 g, α held at 25.0° | α limit 25° |
-| full-stick roll, 350 kt | 264 deg/s | 308 deg/s (limit) |
-| top speed, sea level | 874 kt | 795 kt |
-| best rate of climb | 62,600 ft/min | 50,000 ft/min |
-| service ceiling | 61,800 ft | 50,000+ ft |
+| full aft stick, 350 kt | 6.9 g, α held at 25.1° | α limit 25° |
+| full-stick roll, 350 kt | 266 deg/s | 308 deg/s (limit) |
+| top speed, sea level | 868 kt | 795 kt |
+| best rate of climb | 62,700 ft/min | 50,000 ft/min |
+| service ceiling | 62,300 ft | 50,000+ ft |
 
 The top speed at 40,000 ft is the calibration's one target. The rest are
 predictions. The published sea-level speed is the airframe's limit, not
@@ -476,20 +498,20 @@ estimates):
 
 | aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft | α held (limit) |
 |---|---|---|---|---|---|
-| F-16C Block 52 | `f16c` | 2.04 (2.05) | 62,600 (50,000) | 61,800 (50,000+) | 25.0° (25°) |
-| F-15C | `f15c` | 2.43 (2.5) | 63,200 (50,000) | 64,700 (65,000) | 30.2° (30°) |
-| F/A-18C | `fa18c` | 1.81 (1.8) | 50,800 (45,000) | 60,100 (50,000+) | 35.0° (35°) |
-| F-22A | `f22a` | 2.25 (2.25) | 62,100 | 61,600 (65,000) | 40.5° (40°) |
-| F-35A | `f35a` | 1.59 (1.6) | 44,900 | 57,000 (50,000+) | 19.8° (20°) |
-| Su-27S | `su27s` | 2.34 (2.35) | 64,300 (59,000) | 65,100 (60,700) | 26.3° (26°) |
-| Su-57 | `su57` | 1.99 (2.0) | 56,300 | 57,500 (65,600) | 26.4° (26°) |
-| MiG-29A | `mig29a` | 2.24 (2.25) | 64,000 (65,000) | 63,000 (59,000) | 26.6° (26°) |
-| Typhoon | `typhoon` | 2.01 (2.0) | 72,500 (62,000) | 61,500 (55,000+) | 32.0° (30°) |
-| Rafale C | `rafale` | 1.82 (1.8) | 60,100 (60,000) | 61,500 (50,000+) | 29.7° (29°) |
-| JAS 39C Gripen | `gripen` | 1.99 (2.0) | 49,400 | 59,700 (50,000+) | 28.0° (28°) |
-| Mirage 2000C | `mirage2000` | 2.19 (2.2) | 54,900 (56,000) | 57,900 (56,000) | 29.0° (29°) |
-| J-10A | `j10a` | 2.20 (2.2) | 50,500 | 57,600 (59,000) | 30.2° (30°) |
-| J-20A | `j20a` | 2.00 (2.0) | 50,900 | 57,800 (66,000) | 30.2° (30°) |
+| F-16C Block 52 | `f16c` | 2.04 (2.05) | 62,700 (50,000) | 62,300 (50,000+) | 25.1° (25°) |
+| F-15C | `f15c` | 2.44 (2.5) | 63,100 (50,000) | 64,400 (65,000) | 30.4° (30°) |
+| F/A-18C | `fa18c` | 1.81 (1.8) | 50,800 (45,000) | 60,000 (50,000+) | 35.2° (35°) |
+| F-22A | `f22a` | 2.24 (2.25) | 62,000 | 61,500 (65,000) | 40.4° (40°) |
+| F-35A | `f35a` | 1.58 (1.6) | 44,700 | 57,300 (50,000+) | 19.9° (20°) |
+| Su-27S | `su27s` | 2.35 (2.35) | 64,300 (59,000) | 65,600 (60,700) | 26.4° (26°) |
+| Su-57 | `su57` | 2.01 (2.0) | 56,400 | 58,000 (65,600) | 26.4° (26°) |
+| MiG-29A | `mig29a` | 2.25 (2.25) | 64,000 (65,000) | 62,800 (59,000) | 28.6° (26°) |
+| Typhoon | `typhoon` | 2.02 (2.0) | 72,500 (62,000) | 62,200 (55,000+) | 30.2° (30°) |
+| Rafale C | `rafale` | 1.80 (1.8) | 60,400 (60,000) | 62,000 (50,000+) | 29.4° (29°) |
+| JAS 39C Gripen | `gripen` | 2.00 (2.0) | 49,800 | 59,900 (50,000+) | 27.9° (28°) |
+| Mirage 2000C | `mirage2000` | 2.20 (2.2) | 53,900 (56,000) | 59,200 (56,000) | 29.0° (29°) |
+| J-10A | `j10a` | 2.21 (2.2) | 50,700 | 59,300 (59,000) | 30.1° (30°) |
+| J-20A | `j20a` | 2.01 (2.0) | 51,000 | 58,700 (66,000) | 30.2° (30°) |
 
 - The top speed at altitude is each design's one calibration target,
   flown where it is published: 40,000 ft for the five American designs,
@@ -498,8 +520,11 @@ estimates):
   hold level flight at, falls to 100 ft/min. A published 50,000 ft (and
   the Typhoon's 55,000) is a clearance, not where the climb runs out: the
   model must reach it (shown with a +).
-- Handling at 350 kt, from trim: a 3 g step overshoots 3-25 % and reaches
-  90 % in 0.6-1.0 s; full aft stick holds each limit within 2°.
+- Handling at 350 kt, from trim: a 3 g step overshoots 5-24 % and reaches
+  90 % in 0.6-0.9 s; full aft stick holds each limit within 0.4°, but for
+  the MiG-29A. Its limiter cycles between 24° and 29° at the 26° limit: the
+  airframe, 7 % of the MAC stable in this model, needs a steady pull there,
+  and the limiter's law gives none.
 - Engines fitted to Mach 2.3-2.5 keep too much thrust at sea level (see
   [Limits](#limits)).
 
@@ -525,17 +550,19 @@ estimates):
 - **High angle of attack.** Forebody vortices, and the fin's shielding by
   the wing, are not modelled. Past about 30° a fighter keeps more
   directional stability than the real one. Thrust vectoring is not modelled
-  either: the Su-57's limiter holds the 30° its aerodynamic controls can.
-  The F-35A's holds 20°: past about 23° its stabilators, stalled, can no
-  longer bring the nose down in this model (the real one flies to 50°).
+  either: the Su-57 flies to a 26° limit. The F-35A's limiter holds 20°:
+  past about 27° its stabilators, stalled, can no longer bring the nose
+  down in this model (the real one flies to 50°).
 - **Tails on booms.** The lattice carries a horizontal tail across the gap
   between two booms (Su-27, MiG-29) as if it were one surface, so those
   aircraft come out stable where the real ones are close to neutral.
 - **Balance.** Real fighters' CGs are rarely published. The deltas' are
-  placed 3-13 % of the MAC behind the neutral point the model finds, where
-  their main wheels put them: a fifth or less of the weight on the nose
-  wheel. Full nose-down control still reaches a few degrees past each
-  angle-of-attack limit there (the build stage checks it).
+  placed 3-11 % of the MAC behind the neutral point the model finds, where
+  their main wheels put them: a sixth or less of the weight on the nose
+  wheel. Full nose-down control still reaches 8-20° past each delta's
+  angle-of-attack limit there (the build stage checks it). A design placed
+  from the neutral point says so in its file; when the model's neutral
+  point moves, its CG moves with it.
 - **Post-stall tables.** From 45° to 70° of angle of attack a fighter's
   tables blend two estimates, the vortex flow and the separated flow (see
   Methods): smoothly, and alike in sideslip either way. The vortex flow

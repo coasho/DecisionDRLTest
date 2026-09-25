@@ -21,7 +21,7 @@ speed = 250.0
 # cropped delta, 45 deg leading edge, its trailing edge swept 4 deg
 # forward, its chord plane 3.3 deg down to the tips. The balance is not
 # published: the CG sits 10.6 % of the MAC behind the neutral point hangar
-# finds, a fifth of the weight on the nose wheel; further aft full nose-down
+# finds, a sixth of the weight on the nose wheel; further aft full nose-down
 # control would not reach far past its 29 deg limit.
 [[surface]]
 name = "wing"
@@ -258,7 +258,7 @@ static_deflection = 0.16
 attach = [9.500, 1.050, -0.250]
 
 [reference]
-aero_point = [8.700, 0.0, 0.0]     # at the CG
+aero_point = [8.816, 0.0, 0.0]     # at the CG
 
 [flight_control]
 type = "fbw"
@@ -269,7 +269,7 @@ roll_rate_deg_s = 270.0
 
 [mass]
 empty = 9850                  # Rafale C (Dassault)
-empty_cg = [8.704, 0.0, 0.000]
+empty_cg = [8.836, 0.0, 0.000]
 # no published inertia: radii of gyration of the class
 gyration = [0.250, 0.400, 0.510]
 [[mass.payload]]
@@ -279,14 +279,14 @@ position = [4.400, 0.0, 0.750]
 [[mass.payload]]
 name = "gun ammunition"       # GIAT 30M791, 125 rounds
 mass = 60
-position = [8.300, 1.000, -0.100]
+position = [8.432, 1.000, -0.100]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 4,700 kg
-position = [7.600, 0.0, 0.100]
+position = [7.732, 0.0, 0.100]
 capacity = 1600
 [[mass.tank]]
 name = "fuselage 2"
-position = [9.400, 0.0, 0.100]
+position = [9.532, 0.0, 0.100]
 capacity = 1500
 [[mass.tank]]
 name = "left wing"

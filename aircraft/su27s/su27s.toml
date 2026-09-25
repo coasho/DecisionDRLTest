@@ -18,8 +18,9 @@ speed = 250.0
 
 # The wing: 62 m2 reference, span 14.70 m over the tip rails, 42 deg leading
 # edge, its trailing edge swept 16 deg (root 6.60 m, tip 2.10 m). The CG
-# sits at 30 % of the MAC, 0.9 m ahead of the main wheels: near neutral in
-# hangar's aerodynamics (the real Su-27 is flown slightly unstable).
+# sits at 30 % of the MAC, 0.9 m ahead of the main wheels: 4 % of the MAC
+# stable in hangar's aerodynamics (the real Su-27 is flown slightly
+# unstable).
 [[surface]]
 name = "wing"
 kind = "wing"

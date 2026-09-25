@@ -1,7 +1,7 @@
-# Written by hangar calibrate (2026-09-24 18:57) to meet the [targets] of mirage2000.toml:
+# Written by hangar calibrate (2026-09-24 23:30) to meet the [targets] of mirage2000.toml:
 # corrections for what the physics estimate does not see. Delete this file to
 # go back to the pure estimate.
 [calibration]
-wave_drag_efficiency = 1.2000   # Raymer's E_WD: the wave drag over Sears-Haack's
-throttle_ratio = 1.4219   # the engines' TR: the compressor-face temperature ratio at the turbine's limit
-# fitted: maximum Mach 2.203 at 36000 ft (target 2.2)
+wave_drag_efficiency = 1.7000   # Raymer's E_WD: the wave drag over Sears-Haack's
+throttle_ratio = 1.5000   # the engines' TR: the compressor-face temperature ratio at the turbine's limit
+# fitted: maximum Mach 2.201 at 36000 ft (target 2.2)

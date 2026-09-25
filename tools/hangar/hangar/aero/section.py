@@ -205,8 +205,8 @@ class PolarSet:
     def __len__(self):
         return len(self.polars)
 
-    def evaluate(self, alpha, delta=None, vortex=None, alpha_suction=None):
-        return evaluate(self, alpha, delta, vortex, alpha_suction)
+    def evaluate(self, alpha, delta=None, vortex=None, alpha_suction=None, x_ac=None):
+        return evaluate(self, alpha, delta, vortex, alpha_suction, x_ac)
 
 
 # the vortex regime: where the vortex force acts (chord fraction), and the
@@ -222,10 +222,15 @@ def vortex_held(alpha):
     return smoothstep((hi - np.abs(alpha)) / (hi - lo))
 
 
-def evaluate(p, alpha, delta=None, vortex=None, alpha_suction=None):
+def evaluate(p, alpha, delta=None, vortex=None, alpha_suction=None, x_ac=None):
     """The polar of a SectionPolar or PolarSet `p` (attributes scalar or
     arrays broadcasting against alpha): cl, cd, cm and the circulation's
     lift - cl without vortex lift, what washes the flow down behind.
+
+    x_ac: where the lift that the angle of attack makes acts, as a chord
+    fraction aft of the quarter chord (default 0, a section alone). On a
+    wing its neighbours move it (the model's lattice gives it); the lift of
+    the camber and the flaps keeps its two-dimensional place.
 
     vortex = (gain, degradation), broadcasting against alpha, for sections
     with the vortex regime: the vortex normal force is gain times the lost
@@ -267,7 +272,8 @@ def evaluate(p, alpha, delta=None, vortex=None, alpha_suction=None):
     cl_f = -np.logaddexp(-k * lin, -k * clmax) / k           # smooth min(lin, clmax)
     cl_f = np.logaddexp(k * cl_f, k * clmin) / k              # smooth max(., clmin)
     cd_f = p.cd0 + p.k_drag * (cl_f - p.cl_dmin - 0.5 * dcl0) ** 2 + dcd
-    cm_f = p.cm0 + dcm + np.zeros_like(a)
+    xa = 0.0 if x_ac is None else np.asarray(x_ac, float)
+    cm_f = p.cm0 + dcm - xa * (cl_f + p.a0 * a_l0) * np.cos(a)
     # separated: Viterna & Corrigan - a flat plate (A1 = CD_max / 2) plus the
     # A2 term that starts from the stall point and dies away by 90 deg, so the
     # lift left after stall depends on how the section stalls
@@ -326,7 +332,7 @@ def evaluate(p, alpha, delta=None, vortex=None, alpha_suction=None):
     N = circ * ca + n_v
     cl_v = N * ca + T * sa
     cd_v = N * sa - T * ca + p.cd0 + p.k_drag * (np.clip(circ, clmin, clmax) - p.cl_dmin) ** 2 + dcd
-    cm_v = p.cm0 + dcm + n_v * (0.25 - VORTEX_X)
+    cm_v = p.cm0 + dcm + n_v * (0.25 - VORTEX_X) - xa * p.a0 * (np.sin(an) - np.sin(-a_l0)) * (1.0 - beyond * (1.0 - dg)) * ca
     keep = vortex_held(a) if vortex is None or len(vortex) < 3 else vortex[2]
     w_v = np.where(ca > 0.0, keep, 0.0) * (1.0 - w_r)
     rest = 1.0 - w_v

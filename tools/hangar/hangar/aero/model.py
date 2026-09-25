@@ -37,7 +37,16 @@ Lifting surfaces, in two steps.
    between 50 and 60 deg.
 
 Forces per strip: lift normal to the effective flow (so induced drag is the
-lift's tilt), section drag along it, section moment about the span axis.
+lift's tilt), section drag along it, section moment about the span axis. The
+lift a strip's angle of attack makes acts where the lattice's own loading
+puts it on the chord (vlm.py), not at the section's quarter chord: the other
+strips' loading moves it - aft over a wing root behind a strake or a canard,
+whose trailing vortices wash the front of the root down, forward towards a
+swept wing's tips. So in the linear range the strips give the lattice's
+moment as well as its lift. At their quarter chords, the F-16C's strakes
+kept their own lift ahead of the reference point but not the load they move
+aft on the wing root: its neutral point came out 2.8 % of the MAC ahead of
+NASA's.
 
 Swept surfaces - the strips on them:
 
@@ -47,7 +56,11 @@ Swept surfaces - the strips on them:
 - thin swept sections (leading edge swept 35 deg or more, strakes always)
   have the vortex regime (section.py): past the attached-flow limit the lost
   leading-edge suction turns into vortex lift, 1/cos(sweep) times the part of
-  it realised - all of it for a sharp edge, less for a round one. The vortex
+  it realised - all of it for a sharp edge, less for a round one. An edge
+  beside a body has less suction to lose: 1 - (a/d)^4 of it, d from the axis
+  of a body a wide (Bryson's slender wing-body), none inside the body - a
+  strake makes little vortex lift where it grows out of the fuselage's side,
+  and the part of a surface inside the fuselage none. The vortex
   bursts at an angle of attack that rises with the sweep (Earnshaw & Lawford,
   ARC R&M 3424, 1964: at the trailing edge by about 8 deg at 50 deg of sweep,
   40 deg at 76), windward first in sideslip; the flow behind a burst vortex
@@ -105,6 +118,32 @@ def realised_vortex(sharpness, sweep=0.0):
     sharp = np.clip((1.0 - np.asarray(sharpness, float)) / 0.45, 0.0, 1.0)
     swept = np.clip((np.asarray(sweep, float) - BLUNT_VORTEX_SWEEP[0]) / (BLUNT_VORTEX_SWEEP[1] - BLUNT_VORTEX_SWEEP[0]), 0.0, 1.0)
     return np.maximum(sharp, swept)
+
+
+def edge_shielding(aircraft, points):
+    """How much of its leading-edge suction the bodies leave an edge at each
+    of points (n, 3): 1 - (a/d)^4 for an edge d from a body's axis, a the
+    body's half-width at the edge's height, none inside it - the edge's
+    singularity in the slender theory of a wing on a body (Bryson, J. Aero.
+    Sci. 21(6), 1954): the cross flow round the body takes it out of an edge
+    at the body's side, and with it the edge's vortex."""
+    f = np.ones(len(points))
+    for b in aircraft.bodies:
+        if not b.aero:
+            continue
+        for side in b.copies():
+            for k, (x, y, z) in enumerate(points):
+                if not b.x[0] <= x <= b.x[-1]:
+                    continue
+                w, top, bot, yc, _ = (float(v) for v in b.section(x))
+                zc, nt, nb = (float(v) for v in b.halves(x))
+                h, n = (top - zc, nt) if z >= zc else (zc - bot, nb)
+                if w <= 0.0 or h <= 0.0 or abs(z - zc) >= h:
+                    continue
+                a = 0.5 * w * (1.0 - (abs(z - zc) / h) ** n) ** (1.0 / n)
+                d = abs(y - yc * side)
+                f[k] *= 0.0 if d <= a else 1.0 - (a / d) ** 4
+    return f
 
 
 def wind_axes(alpha, beta):
@@ -202,6 +241,8 @@ class AeroModel:
                 te = max(sec.le[0] + sec.chord for sec in c.sections)
                 if w_le - te < wing.mac[0]:
                     canard_delay = CANARD_BURST_LATER
+        # an edge beside a body loses its suction, and its vortex, to the body
+        shield = edge_shielding(self.aircraft, L.c4 - 0.25 * L.chord[:, None] * L.c)
         for si, surf in enumerate(L.surfaces):
             idx = np.flatnonzero(L.surface_index == si)
             spec = surf.spec
@@ -214,7 +255,7 @@ class AeroModel:
             fed = surf.kind == "wing" and feed > 0.0
             swept = (self.geo["sweep_le"][idx] >= VORTEX_MIN_SWEEP) | (surf.kind == "strake") | fed
             on[idx] = swept
-            r[idx] = np.where(on[idx], rr, 0.0)
+            r[idx] = np.where(on[idx], rr * shield[idx], 0.0)
             if fed:
                 bd[idx] = np.maximum(bd[idx], math.radians(feed_bd))
             if surf.kind == "wing" and canard_delay:
@@ -487,7 +528,7 @@ class AeroModel:
         own = self.group_surface[None, :] == L.surface_index[:, None]
         other = np.where(own, 0.0, ind * s[None, :]).sum(axis=1)
         a_s = a_geo + wc * (other - lift[L.surface_index] / (math.pi * self.surf_ar[L.surface_index]))
-        cl, cd, cm, _ = P.evaluate(a_eff, delta, vortex, np.where(self.planform_suction, a_s, a_eff))
+        cl, cd, cm, _ = P.evaluate(a_eff, delta, vortex, np.where(self.planform_suction, a_s, a_eff), self.vlm.x_ac)
         # forces: lift normal to the effective flow, drag along it
         fe = np.cos(a_eff)[:, None] * L.c + np.sin(a_eff)[:, None] * L.u
         lift_dir = np.cross(fe, L.e)

@@ -261,7 +261,9 @@ WAKE_DEG = (-40.0, -30.0, -20.0, -15.0) + tuple(float(a) for a in range(-10, 21,
 
 class VLM:
     """The lattice solved for unit inputs at one Mach number, for wakes at
-    the angles WAKE_DEG (in the plane of symmetry, from the x axis)."""
+    the angles WAKE_DEG (in the plane of symmetry, from the x axis). Each
+    wake's solution also gives where on its chord each strip's lift acts
+    (x_ac: _centres)."""
 
     def __init__(self, lattice, mach=0.0, wake_deg=WAKE_DEG):
         L = self.lattice = lattice
@@ -320,7 +322,28 @@ class VLM:
         out["S_dec_v"] = np.einsum("sp,mpk->msk", L.S, dec_v)
         out["S_dec_w"] = np.einsum("sp,mpk->msk", L.S, dec_w)
         out["W_strip"] = self._strip_influence(aw)
+        out["x_ac"] = self._centres(out["g_v"])
         return out
+
+    def _centres(self, g_v):
+        """Where on its chord each strip's lift from its angle of attack acts,
+        as a chord fraction aft of its quarter chord: the centroid of its
+        panels' loading in a flow normal to the strip. A section alone
+        carries it at its quarter chord; on a wing the loading of the other
+        strips moves it - aft behind a strake or a canard, forward towards a
+        swept wing's tips (Kuchemann's centre and tip effects). A strip whose
+        lift the others' induced flow nearly cancels (a tail's in the wing's
+        wake) has no centre to speak of: its moment is taken against at least
+        a tenth of the lift a section alone would carry."""
+        L = self.lattice
+        span = np.hypot(*(L.pb - L.pa)[:, 1:].T)            # a bound vortex's lift: its extent across the flow
+        f = np.einsum("pk,pk->p", g_v, L.u[L.strip]) * span
+        arm = np.einsum("pk,pk->p", self.mid - L.c4[L.strip], L.c[L.strip])
+        num = np.bincount(L.strip, f * arm, L.n_strips)
+        den = np.bincount(L.strip, f, L.n_strips)
+        alone = np.pi * L.chord * np.bincount(L.strip, span, L.n_strips) / np.bincount(L.strip, None, L.n_strips)
+        den = np.where(den < 0.0, -1.0, 1.0) * np.maximum(np.abs(den), 0.1 * alone)
+        return np.clip(num / den / L.chord, -0.25, 0.5)
 
     def select(self, alpha_w):
         """Make the operators those of a wake at alpha_w (rad; clipped to the
@@ -332,7 +355,7 @@ class VLM:
         t = (aw - self.wake[i]) / (self.wake[i + 1] - self.wake[i])
         a, b = self._sets[i], self._sets[i + 1]
         mix = lambda k: a[k] if t <= 0.0 else (b[k] if t >= 1.0 else (1.0 - t) * a[k] + t * b[k])  # noqa: E731
-        for k in ("g_v", "g_w", "dec_v", "dec_w", "S_dec_v", "S_dec_w", "W_strip"):
+        for k in ("g_v", "g_w", "dec_v", "dec_w", "S_dec_v", "S_dec_w", "W_strip", "x_ac"):
             setattr(self, k, mix(k))
         self.g_ctrl = [tuple((1.0 - t) * pa[j] + t * pb[j] for j in range(2)) for pa, pb in zip(a["g_ctrl"], b["g_ctrl"])]
         self.body_W = mix("body_W") if "body_W" in a else None

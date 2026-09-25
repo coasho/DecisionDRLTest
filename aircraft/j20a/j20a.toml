@@ -219,7 +219,7 @@ static_deflection = 0.18
 attach = [12.300, 1.150, -0.800]
 
 [reference]
-aero_point = [11.280, 0.0, 0.0]    # at the CG
+aero_point = [11.457, 0.0, 0.0]    # at the CG
 
 [flight_control]
 type = "fbw"
@@ -230,7 +230,7 @@ roll_rate_deg_s = 250.0
 
 [mass]
 empty = 19400                 # estimate
-empty_cg = [11.310, 0.0, -0.350]
+empty_cg = [11.505, 0.0, -0.350]
 # no published inertia: radii of gyration of the class
 gyration = [0.260, 0.430, 0.540]
 [[mass.payload]]
@@ -240,18 +240,18 @@ position = [4.300, 0.0, 0.550]
 [[mass.payload]]
 name = "internal missiles"    # 4 PL-15, 2 PL-10
 mass = 1020
-position = [11.680, 0.0, -0.800]
+position = [11.875, 0.0, -0.800]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 10,500 kg (estimate)
-position = [8.960, 0.0, -0.200]
+position = [9.155, 0.0, -0.200]
 capacity = 3200
 [[mass.tank]]
 name = "fuselage 2"
-position = [11.460, 0.0, -0.200]
+position = [11.655, 0.0, -0.200]
 capacity = 3300
 [[mass.tank]]
 name = "fuselage 3"
-position = [13.660, 0.0, -0.250]
+position = [13.855, 0.0, -0.250]
 capacity = 1800
 [[mass.tank]]
 name = "left wing"
