@@ -234,28 +234,13 @@ class Autopilot:
         veh.command_actuator(aileron=a, rudder=r, elevator=self.elevator, throttle=self.throttle, flaps=self.flaps)
 
 
-def stall(f, altitude_m=1500.0, start_ms=None, flaps=0.0, max_s=90.0):
-    """The 1-g stall: the autopilot holds the height at idle power, so the
-    speed bleeds off at about 1 kt/s and the angle of attack rises. The stall
-    is the break: the angle of attack stops rising and falls back, or the
-    nose drops, or the sink rate passes 4 m/s, or the elevator runs out. The
-    stall speed is the lowest calibrated speed up to the break; CL max the
-    highest CL (from the load factor) up to just after it."""
-    v = f.spawn(altitude_m, start_ms or 40.0)
-    tr = f.trim(v, flaps=flaps)
-    ap = Autopilot(f.dt, tr["pitch_deg"], throttle=0.0, flaps=flaps)
-    ap.i_outer = tr["pitch_deg"]
-
-    def control(t, s, veh):
-        ap.command(veh, s, ap.altitude(s, altitude_m))
-
-    h = f.run(v, max_s, control)
-    v.remove()
-    t, a, th, vs, de = h["t"], h["alpha"], h["theta"], h["vs"], h["de"]
+def _stall_break(h, dt):
+    """Where a stall run breaks (stall()): the index and why, or the last
+    index and None."""
+    t, a, vs, de = h["t"], h["alpha"], h["vs"], h["de"]
     lo_de = np.min(de)
-    brk = len(t) - 1
     peak_a = -1e9
-    for i in range(int(3.0 / f.dt), len(t)):
+    for i in range(int(3.0 / dt), len(t)):
         peak_a = max(peak_a, a[i])
         why = None
         if a[i] < peak_a - 2.0:
@@ -265,8 +250,37 @@ def stall(f, altitude_m=1500.0, start_ms=None, flaps=0.0, max_s=90.0):
         elif de[i] <= lo_de + 0.05 and i > 0 and de[i - 1] <= lo_de + 0.05 and np.min(de[: i + 1]) < -15:
             why = "elevator limit"
         if why:
-            brk = i
-            break
+            return i, why
+    return len(t) - 1, None
+
+
+def stall(f, altitude_m=1500.0, start_ms=None, flaps=0.0, max_s=90.0, until_s=480.0):
+    """The 1-g stall: the autopilot holds the height at idle power, so the
+    speed bleeds off at about 1 kt/s and the angle of attack rises. The stall
+    is the break: the angle of attack stops rising and falls back, or the
+    nose drops, or the sink rate passes 4 m/s, or the elevator runs out. The
+    stall speed is the lowest calibrated speed up to the break; CL max the
+    highest CL (from the load factor) up to just after it. A heavy jet at
+    idle bleeds its speed off far more slowly (a B-52 at half a knot a
+    second): with no break in max_s the run goes on, 30 s at a time, until
+    it breaks, up to until_s."""
+    v = f.spawn(altitude_m, start_ms or 40.0)
+    tr = f.trim(v, flaps=flaps)
+    ap = Autopilot(f.dt, tr["pitch_deg"], throttle=0.0, flaps=flaps)
+    ap.i_outer = tr["pitch_deg"]
+
+    def control(t, s, veh):
+        ap.command(veh, s, ap.altitude(s, altitude_m))
+
+    h = f.run(v, max_s, control)
+    brk, why = _stall_break(h, f.dt)
+    while brk >= len(h["t"]) - 1 and h["t"][-1] < until_s - 1e-6 and not v.state.diverged:
+        more = f.run(v, 30.0, control)        # its first sample is the last one's state
+        t0 = h["t"][-1]
+        h = {k: np.concatenate([h[k], more[k][1:] + t0 if k == "t" else more[k][1:]]) for k in h}
+        brk, why = _stall_break(h, f.dt)
+    v.remove()
+    t, a = h["t"], h["alpha"]
     i_min = int(np.argmin(h["kcas"][: brk + 1]))
     j = min(brk + int(1.0 / f.dt), len(t) - 1)
     return {"stall_kcas": float(h["kcas"][i_min]), "stall_tas_ms": float(h["tas"][i_min]),
@@ -292,14 +306,20 @@ def climb(f, altitude_m, speed_ms, seconds=45.0):
     return {"altitude_m": altitude_m, "speed_ms": speed_ms, "rate_ms": float(np.mean(h["vs"][k])) if ok else float("nan")}, h
 
 
-def climb_performance(f, stall_tas_sl, altitudes=(0.0, 1500.0, 3000.0, 4500.0)):
+CLIMB_FACTORS = (1.25, 1.4, 1.6)                  # of the stall speed: where a propeller climbs best
+JET_CLIMB_FACTORS = CLIMB_FACTORS + (1.9, 2.3, 2.8)  # a jet climbs best faster, near its best lift-to-drag speed and past it
+
+
+def climb_performance(f, stall_tas_sl, altitudes=(0.0, 1500.0, 3000.0, 4500.0), factors=CLIMB_FACTORS):
     """Best rate of climb over speed at several altitudes, and the service
     ceiling (0.5 m/s, 100 ft/min). A ceiling above the altitudes flown is
     flown to: up to two more climbs just below the estimate, so the ceiling
-    comes from climbs near it rather than a long extrapolation."""
+    comes from climbs near it rather than a long extrapolation. The climbs
+    are flown at `factors` times the stall speed (true airspeed, for the
+    density): a jet's best climb is at twice it or more."""
     def best_at(alt):
         best = None
-        for k in (1.25, 1.4, 1.6):
+        for k in factors:
             sigma = (1 - 2.25577e-5 * min(alt, 11000.0)) ** 4.2559 * math.exp(-max(alt - 11000.0, 0.0) / 6341.6)
             vref = k * stall_tas_sl / math.sqrt(sigma)
             r, _ = climb(f, max(alt, 30.0), vref)
@@ -348,6 +368,14 @@ def max_level_speed_flown(f, altitude_m, start_ms, seconds=180.0):
         return float(np.mean(tas[t > t[-1] - 10.0]))
     slope, icpt = np.polyfit(tas[ok], dv[ok], 1)
     return float(-icpt / slope) if slope < 0 else float(tas[-1])
+
+
+def max_level_mach_flown(f, altitude_m, start_mach, seconds=300.0):
+    """The Mach number where full throttle meets the drag in level flight at
+    a height, for an aircraft on direct controls: trimmed at start_mach,
+    then held level by the test autopilot (max_level_speed_flown)."""
+    a = _speed_of_sound(altitude_m)
+    return max_level_speed_flown(f, altitude_m, start_mach * a, seconds) / a
 
 
 def max_level_speed(rows):
@@ -502,14 +530,25 @@ def lowest_contact(f, v, points):
     return float(np.min(s.altitude_agl_m - down))
 
 
+CRASH_CLEAR = 0.5  # m: the least height of an aircraft's lowest point as a crash test starts
+
+
 def crash_tests(f, stall_tas, points, seconds=8.0):
     """Into flat ground in six attitudes, at idle and hands off: does the
     aircraft stop, or bounce, sink through or blow up? A model fit for
     training survives the crashes an agent will make - the episode ends,
-    but the numbers must stay sane, and the vehicle must reset cleanly."""
+    but the numbers must stay sane, and the vehicle must reset cleanly.
+    Each starts with the aircraft's lowest point at least CRASH_CLEAR above
+    the ground: a long aircraft steeply pitched or banked reaches further
+    below its centre of gravity than the crash's height (a B-52's nose, 60
+    deg down, 18 m), and would start buried, its contacts' springs wound up."""
     out = {}
     for name, (height, k, pitch, roll) in CRASHES.items():
         v = f.spawn(height, k * stall_tas, heading_deg=90.0, pitch_deg=pitch, roll_deg=roll)
+        low = lowest_contact(f, v, points)
+        if low < CRASH_CLEAR:
+            v.remove()
+            v = f.spawn(height + CRASH_CLEAR - low, k * stall_tas, heading_deg=90.0, pitch_deg=pitch, roll_deg=roll)
         touch, impact, fastest, rate, bounce, deepest, blown = None, float("nan"), 0.0, 0.0, 0.0, 0.0, False
         for i in range(int(seconds / f.dt)):
             v.command_actuator(throttle=0.0, aileron=0.0, elevator=0.0, rudder=0.0)
@@ -698,15 +737,16 @@ def turn_performance(f, pilot, altitude_m, mach, throttle=1.0, loads=(3.0, 5.0, 
     return {"altitude_m": altitude_m, "mach": mach, "rows": rows, "n_sustained": n_sus, "rate_deg_s": rate}
 
 
-def pull_and_roll(f, pilot, altitude_m, speed_ms, throttle=1.0, settle=5.0):
+def pull_and_roll(f, pilot, altitude_m, speed_ms, throttle=1.0, settle=5.0, roll_seconds=3.0):
     """Handling at a speed, each from a settled start (the spawn is at zero
     angle of attack; the fly-by-wire trims with the stick at neutral for
     `settle` s, the throttle holding the speed): full aft stick for 4 s (the
     load and angle of attack reached, the instantaneous turn rate); a 3 g
     command's response, in the load factor beyond the gravity reference -
     what the stick commands (the load factor itself falls as the climb
-    steepens, cos(theta)); full stick roll from wings level (roll rate, time
-    to 90 deg of bank). Each test itself flies at `throttle`."""
+    steepens, cos(theta)); full stick roll from wings level for
+    `roll_seconds` (roll rate, time to 90 deg of bank). Each test itself
+    flies at `throttle`."""
     out = {}
     t0 = settle
 
@@ -747,7 +787,7 @@ def pull_and_roll(f, pilot, altitude_m, speed_ms, throttle=1.0, settle=5.0):
                    "rise_s": float(rise)}
     v = f.spawn(altitude_m, speed_ms)
     thr = settled()
-    h = f.run(v, t0 + 3.0, lambda t, s, veh: veh.command_actuator(elevator=pilot.stick(pilot.height(s, altitude_m)),
+    h = f.run(v, t0 + roll_seconds, lambda t, s, veh: veh.command_actuator(elevator=pilot.stick(pilot.height(s, altitude_m)),
                                                                     aileron=1.0 if t >= t0 else 0.0, rudder=0.0,
                                                                     throttle=thr(t, s)))
     v.remove()
@@ -767,8 +807,12 @@ def service_ceiling(f, pilot, top_mach, quick=False, seconds=20.0):
     1 g (above its lift or its pitch control's reach an aircraft falls
     nearly weightless, and gains energy for want of induced drag); the
     heights rise until the best is below, and the ceiling is interpolated
-    between the last two."""
+    between the last two. A subsonic aircraft (top_mach under 1: a
+    transport) climbs best slower, so its runs start at Mach 0.6; its
+    ceiling below 12 km is closed in to 750 m before the interpolation."""
     machs = (0.9, 1.2, 1.6, 2.0, 2.4) if quick else (0.8, 0.9, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4)
+    if top_mach < 1.0:
+        machs = (0.6, 0.7) + machs
     step = 3000.0 if quick else 1500.0
 
     def best_at(h):
@@ -789,6 +833,7 @@ def service_ceiling(f, pilot, top_mach, quick=False, seconds=20.0):
         return row["ps_max"] >= 0.508
 
     rows = [best_at(12000.0)]
+    low = not climbs(rows[0])
     while not climbs(rows[0]) and rows[0]["altitude_m"] > 3000.0:    # a low ceiling: down first
         rows.insert(0, best_at(rows[0]["altitude_m"] - 3000.0))
     while climbs(rows[-1]) and rows[-1]["altitude_m"] < 26000.0:
@@ -798,10 +843,12 @@ def service_ceiling(f, pilot, top_mach, quick=False, seconds=20.0):
         return next((i for i in range(len(rows) - 1) if climbs(rows[i]) and not climbs(rows[i + 1])), None)
 
     # a height it cannot hold level at bounds the ceiling only from above:
-    # close in on it before interpolating
+    # close in on it before interpolating; so does a low ceiling's 3 km step
     for _ in range(3):
         i = bracket()
-        if i is None or np.isfinite(rows[i + 1]["ps_max"]) or rows[i + 1]["altitude_m"] - rows[i]["altitude_m"] < 400.0:
+        if i is None or rows[i + 1]["altitude_m"] - rows[i]["altitude_m"] < (750.0 if low else 400.0):
+            break
+        if not low and np.isfinite(rows[i + 1]["ps_max"]):
             break
         rows.insert(i + 1, best_at(0.5 * (rows[i]["altitude_m"] + rows[i + 1]["altitude_m"])))
     ceiling = float("nan")
@@ -813,6 +860,20 @@ def service_ceiling(f, pilot, top_mach, quick=False, seconds=20.0):
     return ceiling, rows
 
 
+def transport_plan(opts, top_mach, quick=False):
+    """What the fighter tests ask of an aircraft flown through fly-by-wire:
+    a fighter's sustained turn at Mach 0.9 and 15,000 ft at loads up to 9 g,
+    its full-stick roll over 3 s. A subsonic aircraft (a transport, its top
+    Mach under 1) turns at Mach 0.6 there, and one whose limit is under 3 g
+    at loads up to its limit; a slow-rolling one rolls long enough to pass
+    90 deg (twice that at its commanded rate)."""
+    loads = (4.0, 6.0, 8.0) if quick else (3.0, 5.0, 6.0, 7.0, 8.0, 9.0)
+    if not any(n <= opts["n_max"] + 1e-9 for n in loads):
+        loads = tuple(float(n) for n in np.round(np.linspace(1.5, opts["n_max"], 3), 3))
+    return {"turn_mach": 0.9 if top_mach >= 1.0 else 0.6, "loads": loads,
+            "roll_seconds": max(3.0, 180.0 / max(opts["roll_rate_deg_s"], 1.0))}
+
+
 def fighter_tests(f, opts, quick=False, top_altitude_m=10973.0):
     """A fighter's performance and handling, flown through its fly-by-wire
     (opts: the [flight_control] options): the fastest level speeds at sea
@@ -820,7 +881,8 @@ def fighter_tests(f, opts, quick=False, top_altitude_m=10973.0):
     published), the specific excess power at sea level (its peak is the best
     rate of climb), the service ceiling at the best climb speed, the
     sustained turn at 15,000 ft, and the handling at 5,000 ft: the load
-    reached with the stick full aft, a 3 g step, a full-stick roll."""
+    reached with the stick full aft, a 3 g step, a full-stick roll. A
+    transport flies them as transport_plan() adapts them."""
     pilot = FighterPilot(f.dt, opts["n_max"], opts["n_min"])
     out = {}
     m_sl, run_sl = max_level_mach(f, pilot, 100.0, start_mach=0.4, seconds=150.0 if quick else 240.0)
@@ -835,6 +897,7 @@ def fighter_tests(f, opts, quick=False, top_altitude_m=10973.0):
     out["max_mach_top"] = m_top
     out["ps_top"] = {"mach": run_top["mach"][np.isfinite(run_top["ps"])], "ps": run_top["ps"][np.isfinite(run_top["ps"])]}
     out["service_ceiling_m"], out["ceiling_rows"] = service_ceiling(f, pilot, m_top, quick=quick)
-    out["turn"] = turn_performance(f, pilot, 4572.0, 0.9, loads=(4.0, 6.0, 8.0) if quick else (3.0, 5.0, 6.0, 7.0, 8.0, 9.0))
-    out["handling"] = pull_and_roll(f, pilot, 1524.0, 180.0)
+    plan = transport_plan(opts, m_top, quick=quick)
+    out["turn"] = turn_performance(f, pilot, 4572.0, plan["turn_mach"], loads=plan["loads"])
+    out["handling"] = pull_and_roll(f, pilot, 1524.0, 180.0, roll_seconds=plan["roll_seconds"])
     return out

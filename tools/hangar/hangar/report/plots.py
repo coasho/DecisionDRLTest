@@ -369,10 +369,12 @@ def fighter(runs, path, name):
         axes[2].plot([x["n"] for x in rows], [x["dvdt"] for x in rows], "-o", ms=3, color=l.get_color())
         c = r["ceiling_rows"]
         axes[3].plot([x["ps_max"] for x in c], [x["altitude_m"] / 0.3048 for x in c], "-o", ms=3, color=l.get_color())
-    axes[0].set_title("excess power at sea level, full afterburner", fontsize=9)
-    top = next(iter(runs.values()))["top_altitude_m"] / 0.3048
+    first = next(iter(runs.values()))
+    axes[0].set_title("excess power at sea level, %s" % ("full afterburner" if first.get("augmented", True) else "full thrust"),
+                      fontsize=9)
+    top = first["top_altitude_m"] / 0.3048
     axes[1].set_title("excess power at {:,.0f} ft".format(top), fontsize=9)
-    axes[2].set_title("level turns at Mach 0.9, 15,000 ft", fontsize=9)
+    axes[2].set_title("level turns at Mach %.1f, 15,000 ft" % first["turn"].get("mach", 0.9), fontsize=9)
     axes[3].set_title("best excess power over height", fontsize=9)
     for ax, xl, yl in zip(axes, ("Mach", "Mach", "load factor", "P_s (m/s)"), ("P_s (m/s)", "P_s (m/s)", "dV/dt (m/s2)", "ft")):
         ax.set_xlabel(xl)

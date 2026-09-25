@@ -147,6 +147,9 @@ class MassModel:
         self.spec = spec
         self.payload = [dict(p) for p in spec.get("payload", [])]
         self.tanks = [dict(t) for t in spec.get("tank", [])]
+        for t in self.tanks:
+            if not 0.0 <= float(t.get("fill", 1.0)) <= 1.0:
+                raise ValueError("[[mass.tank]] %r: fill is the part of its capacity it holds, 0 to 1" % t.get("name"))
         fuel = sum(t.get("capacity", 0.0) for t in self.tanks)
         self.empty_target = spec.get("empty")
         self.mtow = float(spec.get("mtow", (self.empty_target or 0) + sum(p["mass"] for p in self.payload) + fuel))
@@ -327,15 +330,24 @@ class MassModel:
         return {"mass": m, "cg": cg, "ixx": ixx, "iyy": iyy, "izz": izz,
                 "ixy": J[0, 1], "ixz": ixz, "iyz": J[1, 2]}
 
-    def loaded(self, fuel_fraction=1.0, payload=True):
-        """Mass and CG with payload and fuel (for checks and the flight tests)."""
+    @staticmethod
+    def fuel(tank, fuel_fraction=None):
+        """The fuel in a tank (kg): its capacity times its fill ([[mass.tank]]
+        fill, full unless given - what the JSBSim file starts it with), or
+        times fuel_fraction when that is given."""
+        f = float(tank.get("fill", 1.0)) if fuel_fraction is None else float(fuel_fraction)
+        return float(tank.get("capacity", 0.0)) * f
+
+    def loaded(self, fuel_fraction=None, payload=True):
+        """Mass and CG with payload and fuel (for checks and the flight tests):
+        each tank as filled, or all at fuel_fraction."""
         e = self.empty()
         m, mc = e["mass"], e["mass"] * e["cg"]
         for p in (self.payload if payload else []):
             m += p["mass"]
             mc = mc + p["mass"] * np.asarray(p["position"], float)
         for t in self.tanks:
-            f = t.get("capacity", 0.0) * fuel_fraction
+            f = self.fuel(t, fuel_fraction)
             m += f
             mc = mc + f * np.asarray(t["position"], float)
         return m, mc / m

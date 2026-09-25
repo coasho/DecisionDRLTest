@@ -2,8 +2,9 @@
 tables, and its modes (Etkin & Reid, "Dynamics of Flight", ch. 4 and 5;
 Nelson, "Flight Stability and Automatic Control", ch. 4 and 5).
 
-Longitudinal states (u, alpha, q, theta), lateral (beta, p, r, phi), in
-stability axes. Derivatives come from the tables at the trim angle of attack
+Longitudinal states (u, alpha, q, theta), lateral (beta, p, r, phi) in body
+axes, with the trim angle of attack's kinematic terms (lateral_matrix).
+Derivatives come from the tables at the trim angle of attack
 and are moved from the aerodynamic reference point to the centre of gravity;
 the propeller's thrust varies with speed at constant power. This is the
 prediction the handling-qualities checks use; the flight tests identify the
@@ -31,7 +32,7 @@ def loaded_inertia(mass_model):
     m, cg = mass_model.loaded()
     J = np.zeros((3, 3))
     items = [(e["mass"], e["cg"])] + [(p["mass"], np.asarray(p["position"], float)) for p in mass_model.payload] + \
-        [(t.get("capacity", 0.0), np.asarray(t["position"], float)) for t in mass_model.tanks]
+        [(mass_model.fuel(t), np.asarray(t["position"], float)) for t in mass_model.tanks]
     for mi, p in items:
         r = p - cg
         J += mi * np.outer(r, r)
@@ -92,22 +93,40 @@ def model(tabs, aircraft, mass_model, speed, altitude=1500.0):
         [ad_u, ad_a, ad_q, 0.0],
         [Mad * ad_u, Ma + Mad * ad_a, Mq + Mad * ad_q, 0.0],
         [0.0, 0.0, 1.0, 0.0]])
-    # lateral, with the inertia product through primed derivatives
-    Yb = d["CYb"] * Q * S / m
-    Yp = d["CYp"] * Q * S * b / (2 * m * U)
-    Yr = d["CYr"] * Q * S * b / (2 * m * U)
-    Lb, Lp, Lr = (Clb * Q * S * b / Ixx, Clp * Q * S * b * b / (2 * Ixx * U), Clr * Q * S * b * b / (2 * Ixx * U))
-    Nb, Np, Nr = (Cnb * Q * S * b / Izz, Cnp * Q * S * b * b / (2 * Izz * U), Cnr * Q * S * b * b / (2 * Izz * U))
+    der = {"CYb": d["CYb"], "CYp": d["CYp"], "CYr": d["CYr"], "Clb": Clb, "Clp": Clp, "Clr": Clr,
+           "Cnb": Cnb, "Cnp": Cnp, "Cnr": Cnr}
+    A_lat = lateral_matrix(der, Q * S, b, m, U, (Ixx, Izz, Ixz), math.radians(a0))
+    return {"A_lon": A_lon, "A_lat": A_lat, "alpha_trim_deg": a0, "CL": CL0, "speed_ms": speed, "altitude_m": altitude,
+            "Cma_cg": Cma, "Cnb_cg": Cnb, "Clb_cg": Clb, "inertia": [Ixx, Iyy, Izz, Ixz], "mass": m}
+
+
+def lateral_matrix(d, QS, b, m, U, inertia, alpha0):
+    """The lateral small-perturbation matrix, states (beta, p, r, phi), in
+    body axes - the tables' derivatives and the inertia are body-axis ones -
+    about level flight at angle of attack alpha0 (rad): the trim velocity
+    has a component along the body's z axis, so a roll rate turns it into
+    sideslip (sin alpha0 p in beta's rate, Etkin & Reid 4.9) and a yaw rate
+    tilts the bank (phi' = p + tan theta0 r). Where a swept wing's large
+    dihedral effect rolls the aircraft through its dutch roll these terms
+    matter: at 4.5 deg they take a transport's predicted damping from a third
+    of what JSBSim's own response shows to what it shows. The inertia product
+    enters through primed derivatives. d: CYb, CYp, CYr, Clb, Clp, Clr, Cnb,
+    Cnp, Cnr (per rad, rates as p b / 2U); inertia: Ixx, Izz, Ixz."""
+    Ixx, Izz, Ixz = inertia
+    Yb = d["CYb"] * QS / m
+    Yp = d["CYp"] * QS * b / (2 * m * U)
+    Yr = d["CYr"] * QS * b / (2 * m * U)
+    Lb, Lp, Lr = (d["Clb"] * QS * b / Ixx, d["Clp"] * QS * b * b / (2 * Ixx * U), d["Clr"] * QS * b * b / (2 * Ixx * U))
+    Nb, Np, Nr = (d["Cnb"] * QS * b / Izz, d["Cnp"] * QS * b * b / (2 * Izz * U), d["Cnr"] * QS * b * b / (2 * Izz * U))
     den = 1.0 - Ixz * Ixz / (Ixx * Izz)
     Lb_, Lp_, Lr_ = ((Lb + Ixz / Ixx * Nb) / den, (Lp + Ixz / Ixx * Np) / den, (Lr + Ixz / Ixx * Nr) / den)
     Nb_, Np_, Nr_ = ((Nb + Ixz / Izz * Lb) / den, (Np + Ixz / Izz * Lp) / den, (Nr + Ixz / Izz * Lr) / den)
-    A_lat = np.array([
-        [Yb / U, Yp / U, Yr / U - 1.0, G0 / U],
+    sa, ca = math.sin(alpha0), math.cos(alpha0)   # level flight: theta0 = alpha0
+    return np.array([
+        [Yb / U, Yp / U + sa, Yr / U - ca, G0 * ca / U],
         [Lb_, Lp_, Lr_, 0.0],
         [Nb_, Np_, Nr_, 0.0],
-        [0.0, 1.0, 0.0, 0.0]])
-    return {"A_lon": A_lon, "A_lat": A_lat, "alpha_trim_deg": a0, "CL": CL0, "speed_ms": speed, "altitude_m": altitude,
-            "Cma_cg": Cma, "Cnb_cg": Cnb, "Clb_cg": Clb, "inertia": [Ixx, Iyy, Izz, Ixz], "mass": m}
+        [0.0, 1.0, sa / ca, 0.0]])
 
 
 def modes(lin):

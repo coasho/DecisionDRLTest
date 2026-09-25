@@ -70,8 +70,8 @@ code that computes them, changes.
 | build | `<name>.xml`, `Engines/`; the fly-by-wire's gains | the fly-by-wire's short period, MIL-F-8785C; full nose-down control reaching 2° past the angle-of-attack limit |
 | model | `<name>.glb`: the airframe as one closed solid, its moving parts on their hinges | no crack, pinch or loose piece; gear stowed inside; length, span and height against `[dimensions]` |
 | verify | JSBSim's forces and moments at 150 random states, compared with the tables | largest error below 0.002 in any coefficient |
-| fly | trim across the speed range; stall; climb and ceiling; top speed; dynamic modes; 40 runs from random states; six crashes into the ground. A fighter instead: top speed at sea level and at the published height, excess power, the ceiling at the best climb speed, sustained turn, the angle-of-attack limiter, a 3 g step from trim, a full-stick roll | `[targets]`, MIL-F-8785C level 1, no diverged run; crashes that stop without blowing up |
-| calibrate | `calibration.toml`: extra drag, and the propeller pitch unless the design gives the real one; for a jet, the throttle ratio and the wave drag | `[targets]` |
+| fly | trim across the speed range; stall; climb and ceiling; top speed (a jet's also at its published height); dynamic modes; 40 runs from random states; six crashes into the ground. A fly-by-wire aircraft instead: top speed at sea level and at the published height, excess power, the ceiling at the best climb speed, sustained turn, the angle-of-attack limiter, a 3 g step from trim, a full-stick roll | `[targets]`, MIL-F-8785C level 1, no diverged run; crashes that stop without blowing up |
+| calibrate | `calibration.toml`: extra drag, and the propeller pitch unless the design gives the real one; for a supersonic jet, the throttle ratio and the wave drag; for a subsonic one, where its wing's drag diverges | `[targets]` |
 | report | `out/report.html` | |
 
 The fly stage flies the same tests on a reference aircraft (`reference =
@@ -236,6 +236,16 @@ stage end to end through the platform (`ctest -R hangar`).
   trailing vortices wash the front of the root down, and forward towards a
   swept wing's tips (Küchemann's centre and tip effects). So in the linear
   range the strips give the lattice's pitching moment as well as its lift.
+- **Induced drag.** By default each strip's lift is tilted by its own
+  induced angle. That overstates the induced drag of the lattice's loading:
+  by about 15 % on a plain wing of aspect ratio 6-10, and by a factor of 1.5
+  to 2 on a swept or cambered transport wing, whose lift-to-drag ratio then
+  comes out a quarter low (a B-52's 15 against 21.5). `[analysis]
+  induced_drag = "trefftz"` takes it from the Trefftz plane instead: the far
+  wake of every surface's trailing vortices, from the spanwise loading
+  alone, as potential flow has it (a rectangle's span efficiency 0.95, an
+  elliptic loading's drag within 1 %). The support aircraft use it; the
+  fighters and the light aircraft still use the strips' tilt.
 - **Bodies.** Slender-body theory as far as the flow stays attached (DATCOM
   4.2.1.1), then Allen and Perkins' crossflow drag (NACA TR 1048), plus skin
   friction. The wing–body dihedral effect comes from DATCOM. A fuselage and
@@ -265,9 +275,12 @@ stage end to end through the platform (`ctest -R hangar`).
   system adds mixture that follows the altitude. Electric motors use JSBSim's
   brushless DC motor.
 - **Linear model.** Etkin & Reid's small-perturbation equations, built from
-  the tables at the trim condition. The handling-quality checks use it. The
-  3-2-1-1 flight tests identify the same modes from JSBSim's own response as
-  a cross-check.
+  the tables at the trim condition, the lateral ones in body axes with the
+  trim angle of attack's kinematic terms (a roll rate turns the trim
+  velocity into sideslip): without them a swept-wing transport's predicted
+  dutch roll damping was a third of what JSBSim shows. The handling-quality
+  checks use it. The 3-2-1-1 flight tests identify the same modes from
+  JSBSim's own response as a cross-check.
 
 For fighters:
 
@@ -333,8 +346,23 @@ For fighters:
   engine of bypass ratio above 1 moves towards Mattingly's high-bypass
   lapse, δ₀(1 − 0.49√M), all of it from a bypass ratio of 3: a fifth of
   the static thrust at Mach 0.8 and 35,000 ft. Weight and size come from
-  Raymer. Calibration fits TR to the published top speed,
-  and then the wave drag if TR alone cannot.
+  Raymer. Calibration fits TR to a fighter's published top speed,
+  and then the wave drag if TR alone cannot. A subsonic jet's engines run
+  far below their TR at its top speed, which its wing's transonic drag rise
+  sets: calibration fits Korn's airfoil technology factor κ_A in the
+  drag-divergence Mach number (Raymer 12.5.10), from conventional sections'
+  0.87 to supercritical ones' 0.95, and more wave drag when even
+  conventional sections leave it too fast. On direct controls the test
+  autopilot flies that top speed: trimmed, the height held, full thrust
+  until the speed settles.
+- **Large aircraft.** A jet climbs best well above a propeller aircraft's
+  speeds, at up to 2.8 times its stall speed. A heavy jet's stall run goes
+  on until the stall breaks, and every crash test starts with the lowest
+  point of the aircraft clear of the ground. The platform commands four
+  throttles, so engines past the fourth (a B-52's) follow one of them. A
+  tank's `fill` is the fuel it carries everywhere: the JSBSim file, the
+  mass and CG, the inertia. A fly-by-wire transport turns at Mach 0.6
+  within its load limit and rolls long enough to pass 90°.
 - **Fighter mass.** Raymer's fighter/attack weight equations. Radii of
   gyration are given per design (NASA's for the F-16).
 - **Fly-by-wire.** Gains are placed from the linear model at each dynamic
@@ -458,7 +486,7 @@ settles.
 
 | sea level, 2400 lb | hangar c172 | POH | JSBSim c172x (stock) |
 |---|---|---|---|
-| stall, clean | 49.5 KCAS | 51 | 41.6 |
+| stall, clean | 49.4 KCAS | 51 | 41.6 |
 | maximum level speed | 122.7 KTAS | 123 | 131 |
 | best rate of climb | 715 ft/min | 700 | 870 |
 | service ceiling | 12,970 ft | 13,000 | 25,100 |
@@ -470,7 +498,7 @@ linear model predicts them and then as identified from JSBSim's response:
 |---|---|---|
 | short period ζ | 0.64 | 0.57 |
 | phugoid period | 25.3 s | 25.7 s |
-| dutch roll ω, ζ | 1.66 rad/s, 0.16 | 1.72 rad/s, 0.19 |
+| dutch roll ω, ζ | 1.67 rad/s, 0.19 | 1.71 rad/s, 0.19 |
 | roll time constant | 0.21 s | 0.22 s |
 
 All modes are MIL-F-8785C level 1, and the spiral mode is stable. JSBSim

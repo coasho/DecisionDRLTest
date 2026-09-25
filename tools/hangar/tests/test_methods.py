@@ -159,6 +159,54 @@ class Lattice_(unittest.TestCase):
                     self.assertLess(abs(vlm.x_ac[right[len(right) // 2]]), 0.01)
 
 
+class InducedDrag(unittest.TestCase):
+    """[analysis] induced_drag = "trefftz": the strips' induced drag from the
+    Trefftz plane, not from the tilt of each strip's lift."""
+
+    @staticmethod
+    def model(mode, airfoil="naca0006", ar=10.0, taper=1.0):
+        a = wing(ar, taper=taper, airfoil=airfoil, ns=24, nc=6)
+        a.spec["analysis"] = {"speed": 50.0, "induced_drag": mode,
+                              "airfoil": {"wing": {"cd0": 0.0, "k_drag": 0.0}}}   # the induced drag alone
+        return AeroModel(Aircraft(a.spec))
+
+    def test_trefftz_plane_drag_of_an_elliptic_loading(self):
+        # an elliptic loading laid on a rectangle's strips: pi Gamma0^2 / 8
+        from hangar.aero.model import trefftz_correction
+        m = self.model("trefftz")
+        L = m.lat
+        y = L.c4[:, 1]
+        g = np.sqrt(np.clip(1.0 - (2.0 * y / 10.0) ** 2, 0.0, 1.0))
+        n = L.n_strips
+        dF = trefftz_correction(L, m.group, np.tile([1.0, 0.0, 0.0], (n, 1)), np.array([1.0, 0.0, 0.0]), np.ones(n),
+                                g * L.width, np.tile([0.0, 0.0, 1.0], (n, 1)), np.ones(n))
+        self.assertAlmostEqual(dF[:, 0].sum() / (math.pi / 8.0), 1.0, delta=0.01)
+
+    def test_strips_drag_follows_the_trefftz_plane(self):
+        # a rectangle of aspect ratio 10: lifting-line theory's e is 0.93-0.95;
+        # the strips' own tilt gives 0.78, the Trefftz plane's loading 0.95.
+        # The lift and its moment stay the strips' own.
+        e = {}
+        for mode in ("strips", "trefftz"):
+            m = self.model(mode)
+            c = m.evaluate(math.radians(4.0))
+            e[mode] = c["CL"] ** 2 / (math.pi * 10.0 * c["CD"])
+            e[mode + " CL"] = c["CL"]
+        self.assertTrue(0.92 < e["trefftz"] < 0.97, e)
+        self.assertLess(e["strips"], 0.82)
+        self.assertAlmostEqual(e["trefftz CL"], e["strips CL"], delta=1e-12)
+
+    def test_a_cambered_line_adds_no_induced_drag_of_its_own(self):
+        # a 6A section's uniform-load mean line, which the lattice's few
+        # chordwise panels resolve poorly: from the tilt it adds drag in
+        # proportion to the lift (0.006 CL on this planform); the Trefftz
+        # plane's drag follows the loading alone, CL^2 / (pi A e)
+        m = self.model("trefftz", airfoil="naca63a409", ar=10.6, taper=0.23)
+        for deg in (0.0, 2.0, 4.0):
+            c = m.evaluate(math.radians(deg))
+            self.assertAlmostEqual(c["CL"] ** 2 / (math.pi * 10.6 * c["CD"]), 0.975, delta=0.03)
+
+
 class Fighters(unittest.TestCase):
     def test_polhamus_delta(self):
         # a sharp 60 deg delta (aspect ratio 2.31): Polhamus' suction analogy,
@@ -344,6 +392,57 @@ class Fighters(unittest.TestCase):
             self.assertEqual(turbofan_lapse(m, h, 1.08, bypass=6.0), high_bypass_lapse(m, h, 1.08))
             self.assertLess(turbofan_lapse(m, h, 1.08, bypass=2.0), low)
             self.assertGreater(turbofan_lapse(m, h, 1.08, bypass=2.0), high_bypass_lapse(m, h, 1.08))
+
+
+class Transports(unittest.TestCase):
+    def test_korn_kappa_moves_the_drag_divergence(self):
+        # Korn (Raymer 12.5.10): M_dd = kappa / cos L - t / cos^2 L - CL / (10
+        # cos^3 L); supercritical sections' kappa (0.95) diverge 0.08 / cos L
+        # later than conventional ones' (0.87), the default; a subsonic jet's
+        # calibration fits it (calibration.toml), a design may give it
+        from hangar.aero import mach
+        a = wing(8.0, taper=0.3, sweep_deg=30.0, airfoil="naca64a412")
+        al = np.arange(-10.0, 21.0, 1.0)
+        cl = 5.0 * np.radians(al)[:, None]
+        base = {"alpha": al, "beta": np.array([0.0]), "base": {"CL": cl, "CD": 0.02 + 0.05 * cl**2}}
+        table = {"mach": np.array([0.0, 0.5, 0.8, 0.9]), "K_L": np.ones(4)}
+        conventional = mach._drag(a, base, table)
+        self.assertEqual(conventional["korn_kappa"], mach.KORN_KAPPA)
+        a.spec["analysis"] = {"korn_kappa": 0.91}
+        self.assertEqual(mach.korn_kappa(a), 0.91)
+        a.calibration = {"korn_kappa": mach.KORN_SUPERCRITICAL}
+        supercritical = mach._drag(a, base, table)
+        lam = math.radians(a.wing.sweep_deg(0.25))
+        self.assertAlmostEqual(supercritical["M_dd"] - conventional["M_dd"], 0.08 / math.cos(lam), places=9)
+        # no wave drag below the critical Mach number, more of it at 0.9 the earlier the divergence
+        self.assertLess(supercritical["dCD0"][3], conventional["dCD0"][3])
+
+    def test_calibration_fits_kappa_to_the_top_speed(self):
+        # a subsonic jet's top speed rises with its drag divergence: the fit
+        # bisects kappa to the target, or keeps the nearer end out of reach
+        from hangar.pipeline import fit_kappa
+        top = lambda k: 0.60 + 3.0 * (k - 0.87)  # noqa: E731 - Mach 0.60 conventional, 0.84 supercritical
+        kappa, m = fit_kappa(top, 0.78)
+        self.assertAlmostEqual(m, 0.78, delta=0.005)
+        self.assertAlmostEqual(kappa, 0.87 + 0.18 / 3.0, delta=0.002)
+        self.assertEqual(fit_kappa(top, 0.90), (0.95, top(0.95)))
+        self.assertEqual(fit_kappa(top, 0.50), (0.87, top(0.87)))
+
+    def test_fighter_tests_fit_a_transport(self):
+        # a fighter keeps its tests; a transport flown through fly-by-wire
+        # turns at Mach 0.6 within its load limit and rolls long enough to
+        # pass 90 deg; a jet on direct controls climbs faster than a propeller
+        from hangar import flight
+        for opts in ({"n_max": 9.0, "roll_rate_deg_s": 308.0}, {"n_max": 7.5, "roll_rate_deg_s": 220.0}):
+            self.assertEqual(flight.transport_plan(opts, 2.0),
+                             {"turn_mach": 0.9, "loads": (3.0, 5.0, 6.0, 7.0, 8.0, 9.0), "roll_seconds": 3.0})
+            self.assertEqual(flight.transport_plan(opts, 2.0, quick=True)["loads"], (4.0, 6.0, 8.0))
+        plan = flight.transport_plan({"n_max": 2.5, "roll_rate_deg_s": 35.0}, 0.82)
+        self.assertEqual(plan["turn_mach"], 0.6)
+        self.assertEqual(plan["loads"], (1.5, 2.0, 2.5))
+        self.assertGreater(plan["roll_seconds"] * 35.0, 90.0 * 1.5)
+        self.assertEqual(flight.JET_CLIMB_FACTORS[:len(flight.CLIMB_FACTORS)], flight.CLIMB_FACTORS)
+        self.assertGreater(max(flight.JET_CLIMB_FACTORS), 2.5)
 
 
 class FlyByWire(unittest.TestCase):
@@ -594,6 +693,61 @@ class ThrustVectoring(unittest.TestCase):
                     np.testing.assert_allclose(j["translation"], pivot, atol=1e-9)
                     kid = B.nodes[j["children"][0]]
                     np.testing.assert_allclose(R @ kid["translation"] + j["translation"], before[v["engine"]], atol=1e-9)
+
+
+class LargeAircraft(unittest.TestCase):
+    def test_engines_past_the_platforms_throttles_follow_one(self):
+        # the platform commands four throttles: an eighth engine follows the
+        # fourth's lever, the fifth the first's
+        from hangar import jsbsim
+        a = Aircraft.load(repo("aircraft/c172/c172.toml"))
+        e = a.spec["engine"][0]
+        a.spec["engine"] = [dict(e, name="engine %d" % k, position=[1.0 * k, 0.0, 0.0]) for k in range(8)]
+        a = Aircraft(a.spec)
+        root = ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a))
+        for i in range(jsbsim.PLATFORM_THROTTLES):
+            self.assertIsNone(root.find(".//pure_gain[@name='fcs/throttle-lever-%d']" % i))
+        for i in range(jsbsim.PLATFORM_THROTTLES, 8):
+            g = root.find(".//pure_gain[@name='fcs/throttle-lever-%d']" % i)
+            self.assertEqual(g.find("input").text, "fcs/throttle-cmd-norm[%d]" % (i % jsbsim.PLATFORM_THROTTLES))
+            self.assertEqual(g.find("output").text, "fcs/throttle-pos-norm[%d]" % i)
+
+    def test_a_tanks_fill_is_the_fuel_everywhere(self):
+        # a tank's fill: the fuel the JSBSim file starts it with, the loaded
+        # mass and CG, the inertia; fuel_fraction overrides it
+        from hangar.linear import loaded_inertia
+        from hangar.mass import MassModel
+        a = Aircraft.load(repo("aircraft/c172/c172.toml"))
+        full = MassModel(a)
+        for t in a.spec["mass"]["tank"]:
+            t["fill"] = 0.5
+        half = MassModel(Aircraft(a.spec))
+        fuel = sum(t["capacity"] for t in a.spec["mass"]["tank"])
+        self.assertAlmostEqual(full.loaded()[0] - half.loaded()[0], 0.5 * fuel, places=6)
+        self.assertAlmostEqual(half.loaded(fuel_fraction=1.0)[0], full.loaded()[0], places=6)
+        self.assertAlmostEqual(half.loaded(fuel_fraction=0.0)[0], full.loaded(fuel_fraction=0.0)[0], places=6)
+        self.assertNotAlmostEqual(loaded_inertia(half)[0], loaded_inertia(full)[0], places=3)
+        with self.assertRaises(ValueError):
+            a.spec["mass"]["tank"][0]["fill"] = 1.5
+            MassModel(Aircraft(a.spec))
+
+    def test_lateral_matrix_at_an_angle_of_attack(self):
+        # body axes about level flight at alpha0: a roll rate turns the trim
+        # velocity into sideslip, a yaw rate less of it, gravity's share of the
+        # bank goes as cos alpha0 and a yaw rate tilts the bank; at alpha0 = 0
+        # the stability-axis matrix
+        from hangar.linear import G0, lateral_matrix
+        d = {"CYb": -0.8, "CYp": 0.1, "CYr": 0.4, "Clb": -0.1, "Clp": -0.45, "Clr": 0.1, "Cnb": 0.12, "Cnp": -0.05,
+             "Cnr": -0.15}
+        args = (d, 0.5 * 1.225 * 100.0 ** 2 * 30.0, 12.0, 8000.0, 100.0, (3.0e4, 9.0e4, 1.0e3))
+        A0, A = lateral_matrix(*args, 0.0), lateral_matrix(*args, math.radians(8.0))
+        np.testing.assert_allclose(A0[3], [0.0, 1.0, 0.0, 0.0], atol=1e-12)
+        np.testing.assert_allclose(A[1:3], A0[1:3])
+        sa, ca = math.sin(math.radians(8.0)), math.cos(math.radians(8.0))
+        self.assertAlmostEqual(A[0, 1] - A0[0, 1], sa)
+        self.assertAlmostEqual(A[0, 2] - A0[0, 2], 1.0 - ca)
+        self.assertAlmostEqual(A[0, 3], G0 * ca / 100.0)
+        self.assertAlmostEqual(A[3, 2], sa / ca)
 
 
 class Aircraft_(unittest.TestCase):
