@@ -416,7 +416,9 @@ class Fighters(unittest.TestCase):
     def test_high_bypass_thrust_falls_with_speed(self):
         # a high-bypass fan's thrust falls fast with speed (Mattingly): a
         # fifth of it left at Mach 0.8 and 35,000 ft; a bypass ratio of 1 or
-        # less keeps the low-bypass law, between them the lapse moves across
+        # less keeps the low-bypass law, between them and 2 the lapse moves
+        # across - a TF33's (1.42, flat-rated) 0.27-0.29 of its static thrust
+        # at 35,000 ft and Mach 0.82, as the JT3D's cruise ratings give it
         from hangar.propulsion import high_bypass_lapse, turbofan_lapse
         self.assertAlmostEqual(high_bypass_lapse(0.0, 0.0, 1.08), 1.0)
         self.assertLess(high_bypass_lapse(0.4, 0.0, 1.08), 0.8)
@@ -425,8 +427,10 @@ class Fighters(unittest.TestCase):
             low = turbofan_lapse(m, h, 1.08, bypass=0.3)
             self.assertEqual(turbofan_lapse(m, h, 1.08, bypass=1.0), low)
             self.assertEqual(turbofan_lapse(m, h, 1.08, bypass=6.0), high_bypass_lapse(m, h, 1.08))
-            self.assertLess(turbofan_lapse(m, h, 1.08, bypass=2.0), low)
-            self.assertGreater(turbofan_lapse(m, h, 1.08, bypass=2.0), high_bypass_lapse(m, h, 1.08))
+            self.assertLess(turbofan_lapse(m, h, 1.08, bypass=1.5), low)
+            self.assertGreater(turbofan_lapse(m, h, 1.08, bypass=1.5), high_bypass_lapse(m, h, 1.08))
+            self.assertEqual(turbofan_lapse(m, h, 1.08, bypass=2.0), high_bypass_lapse(m, h, 1.08))
+        self.assertTrue(0.27 <= turbofan_lapse(0.82, 10668.0, 1.0, bypass=1.42) <= 0.295)
 
 
 class Transports(unittest.TestCase):
@@ -462,6 +466,61 @@ class Transports(unittest.TestCase):
         self.assertAlmostEqual(kappa, 0.87 + 0.18 / 3.0, delta=0.002)
         self.assertEqual(fit_kappa(top, 0.90), (0.95, top(0.95)))
         self.assertEqual(fit_kappa(top, 0.50), (0.87, top(0.87)))
+
+    def test_a_flat_pods_drag_diverges_early(self):
+        # a rotodome is a thick section of its own: the fastest air over an
+        # ellipsoid (Lamb's demagnetizing factor: a sphere's 1/3, a 5:1 disc's
+        # 0.125) sets the two-dimensional section of the same peak, whose
+        # drag diverges at Korn's 0.87 - t; none below its critical Mach
+        # number, Lock's 20 (M - M_cr)^4 above it, handed over by Mach 1.2. A
+        # slender pod or a canopy is no flat pod
+        from hangar.aero import mach
+        self.assertAlmostEqual(mach.ellipsoid_factor(1.0, 1.0, 1.0), 1.0 / 3.0, places=6)
+        self.assertAlmostEqual(mach.ellipsoid_factor(4.57, 4.57, 0.915), 0.1248, delta=0.002)
+        a = wing(8.0)
+        pod = {"name": "rotodome", "kind": "pod", "stations": [
+            {"x": 0.0, "w": 0.0, "top": 1.0, "bottom": 1.0},
+            {"x": 1.3, "w": 6.3, "top": 1.63, "bottom": 0.37, "n": 2.0},
+            {"x": 4.55, "w": 9.1, "top": 1.915, "bottom": 0.085, "n": 2.0},
+            {"x": 7.8, "w": 6.3, "top": 1.63, "bottom": 0.37, "n": 2.0},
+            {"x": 9.1, "w": 0.0, "top": 1.0, "bottom": 1.0}]}
+        a.spec["body"] = [pod, dict(pod, name="canopy"), dict(pod, name="slender", stations=[
+            dict(st, w=min(st["w"], 1.2)) for st in pod["stations"]])]
+        a = Aircraft(a.spec)
+        flat = mach.flat_bodies(a)
+        self.assertEqual([b["name"] for b in flat], ["rotodome"])
+        b = flat[0]
+        self.assertAlmostEqual(b["thickness"], 1.83 / 9.1, places=3)
+        self.assertAlmostEqual(b["thickness_2d"], 0.143, delta=0.003)  # the 5:1 disc's, less than its 0.2
+        m_dd = mach.KORN_KAPPA - b["thickness_2d"]
+        m_cr = m_dd - (0.1 / 80.0) ** (1.0 / 3.0)
+        self.assertEqual(mach.flat_body_rise(b, m_cr - 0.01), 0.0)
+        self.assertAlmostEqual(mach.flat_body_rise(b, m_dd), 20.0 * (m_dd - m_cr) ** 4, places=9)  # its slope 0.1 there
+        self.assertGreater(mach.flat_body_rise(b, 0.95), mach.flat_body_rise(b, m_dd))
+        self.assertEqual(mach.flat_body_rise(b, 1.25), 0.0)
+
+    def test_calibration_fits_a_drag_area_below_the_drag_rise(self):
+        # below its wing's drag rise a jet's top speed falls with its drag:
+        # the fit brackets the area from none and meets the target; a run
+        # that cannot hold its height (nan) counts as too slow; a jet already
+        # slow enough gets none
+        from hangar.aero import mach
+        from hangar.pipeline import fit_drag_area
+        top = lambda area: 0.85 - 0.02 * area  # noqa: E731
+        area, m = fit_drag_area(top, 0.78, 0.5)
+        self.assertAlmostEqual(m, 0.78, delta=0.004)
+        self.assertAlmostEqual(area, 3.5, delta=0.25)
+        stalls = lambda area: float("nan") if area > 2.0 else top(area)  # noqa: E731
+        area, m = fit_drag_area(stalls, 0.82, 1.0)
+        self.assertAlmostEqual(m, 0.82, delta=0.004)
+        self.assertEqual(fit_drag_area(top, 0.90, 0.5), (0.0, 0.85))
+        # the drag-rise Mach numbers are those the Mach tables use
+        a = wing(8.0, taper=0.3, sweep_deg=30.0, airfoil="naca64a412")
+        m_dd, m_cr = mach.drag_rise_mach(a)
+        lam = math.radians(a.wing.sweep_deg(0.25))
+        t = a.wing.thickness_ratio
+        self.assertAlmostEqual(m_dd, 0.87 / math.cos(lam) - t / math.cos(lam) ** 2 - 0.02 / math.cos(lam) ** 3, places=12)
+        self.assertAlmostEqual(m_dd - m_cr, (0.1 / 80.0) ** (1.0 / 3.0), places=12)
 
     def test_fighter_tests_fit_a_transport(self):
         # a fighter keeps its tests; a transport flown through fly-by-wire
@@ -904,6 +963,32 @@ class Writer(unittest.TestCase):
         self.assertEqual(axes, {"DRAG", "SIDE", "LIFT", "ROLL", "PITCH", "YAW"})
         self.assertIsNotNone(root.find("mass_balance/ixx"))
         self.assertEqual(len(root.findall("ground_reactions/contact[@type='BOGEY']")), 3)
+
+
+class NoseWheels(unittest.TestCase):
+    def test_a_nose_wheel_beside_the_centre_line_carries_the_nose_load(self):
+        # the A-10's and the Su-25's nose wheels stand off the centre line,
+        # clear of the gun: still the nose wheel, balancing the pitch with the
+        # pair behind it, not a third wheel taking a third of the weight
+        from hangar import jsbsim
+        spec = {"aircraft": {"name": "t"},
+                "surface": [{"name": "wing", "sections": [{"le": [0.0, 0.0, 0.0], "chord": 2.0},
+                                                          {"le": [0.0, 5.0, 0.0], "chord": 1.0}]}],
+                "gear": [{"name": "Nose Gear", "position": [-3.0, 0.0, -1.5], "steerable": True},
+                         {"name": "Main Gear", "position": [1.0, 2.0, -1.5], "mirror": True}]}
+        cg = np.array([0.5, 0.0, 0.0])
+        on = jsbsim.gear_loads(Aircraft(spec), 1000.0, cg)
+        spec["gear"][0]["position"] = [-3.0, 0.36, -1.5]
+        off = jsbsim.gear_loads(Aircraft(spec), 1000.0, cg)
+        self.assertAlmostEqual(on["Nose Gear"], 1000.0 * 9.80665 * 0.5 / 4.0)
+        for k in on:
+            self.assertAlmostEqual(off[k], on[k])
+
+    def test_a_sea_level_top_speed_is_flown_clear_of_the_ground(self):
+        from hangar.pipeline import SEA_LEVEL_FLOWN_M, top_speed_altitude
+        self.assertEqual(top_speed_altitude({"max_mach_altitude_ft": 0}), SEA_LEVEL_FLOWN_M)
+        self.assertAlmostEqual(top_speed_altitude({"max_mach_altitude_ft": 29000}), 29000 * 0.3048)
+        self.assertAlmostEqual(top_speed_altitude({}), 36000 * 0.3048)
 
 
 class Contacts(unittest.TestCase):

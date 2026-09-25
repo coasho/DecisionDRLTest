@@ -1,0 +1,13 @@
+# The KC-46A's grey all over (Air Mobility Command's, about FS 36173), its
+# cockpit windows painted
+[paint]
+scheme = "single"
+colours = ["#62696c"]
+windows = "#1b2127"
+windows_x = [2.50, 4.30]
+windows_z = [5.45, 6.05]
+windscreen_x = [2.00, 2.60]
+windscreen_y = 1.25
+panel_lines = 0.06
+wear = 0.04
+gloss = 0.35

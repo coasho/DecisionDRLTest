@@ -252,8 +252,13 @@ move on while a check fails or a picture looks wrong.
   (`windows`, `windows_x`, `windows_z`, `windscreen_x` in paint.toml).
 - **Targets.** `max_mach` at `max_mach_altitude_ft` below 1: calibrate fits
   Korn's kappa_A (0.87 conventional sections, 0.95 supercritical), more
-  wave drag if even 0.87 is too fast. A certified altitude is
-  `operational_ceiling_ft`, reached or not.
+  wave drag if even 0.87 is too fast. A top speed below the wing's drag
+  rise (the E-3's, the A-10's) is fitted with an extra drag area instead; a
+  sea-level one (`max_mach_altitude_ft = 0`) is flown at 100 m. A
+  certified altitude is `operational_ceiling_ft`, reached or not.
+- **Sections.** hangar's maximum-lift trend runs high for thick, highly
+  cambered sections: hold it with `[analysis.airfoil.<name>] clmax` where
+  the aircraft's CL max passes 2.1.
 
 ## 6. Finish
 

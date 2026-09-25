@@ -1,0 +1,13 @@
+# The C-17A's Air Mobility Command grey (FS 36173) all over, its cockpit
+# windows painted
+[paint]
+scheme = "single"
+colours = ["#5f6669"]
+windows = "#1b2127"
+windows_x = [2.20, 4.00]
+windows_z = [4.90, 5.70]
+windscreen_x = [1.60, 2.30]
+windscreen_y = 1.20
+panel_lines = 0.07
+wear = 0.05
+gloss = 0.3

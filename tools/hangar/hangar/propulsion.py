@@ -227,9 +227,11 @@ def turbofan_lapse(mach, h_m, tr=1.2, wet=False, bypass=0.0):
     fixed theta0); the afterburner's sigma^0.7 runs only up to 11 km.
 
     A dry engine of bypass ratio above 1 moves towards the high-bypass
-    lapse (high_bypass_lapse), all of it from a bypass ratio of 3: a
-    TF33's (1.4) a fifth of the way, a CFM56's or a TF34's all of it."""
-    w = 0.0 if wet else float(np.clip((bypass - 1.0) / 2.0, 0.0, 1.0))
+    lapse (high_bypass_lapse), all of it from a bypass ratio of 2: a
+    TF33's (1.42) two fifths of the way - 0.29 of its static thrust at
+    35,000 ft and Mach 0.82, as the JT3D's cruise ratings give it (0.27-0.29)
+    - a CFM56's or a TF34's all of it."""
+    w = 0.0 if wet else float(np.clip(bypass - 1.0, 0.0, 1.0))
     if w >= 1.0:
         return high_bypass_lapse(mach, h_m, tr)
     t, p = _isa(h_m)

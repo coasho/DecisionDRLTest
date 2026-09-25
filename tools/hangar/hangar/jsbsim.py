@@ -169,13 +169,15 @@ def aerodynamics_xml(tables, aircraft, ge_e=0.85):
 
 def gear_loads(aircraft, mass, cg):
     """Static load (N) on each wheel with the aircraft at rest: pitch balance
-    between the centre-line wheel(s) and the pairs."""
+    between the centre-line wheel(s) and the pairs. A single leg beside the
+    centre line (the A-10's nose wheel, clear of its gun) is a centre wheel."""
     wheels = [(g, name, pos) for g in aircraft.gear for name, pos in g.positions()]
     if not wheels:
         return {}
     W = mass * G0
-    centre = [w for w in wheels if abs(w[2][1]) < 0.1]
-    pairs = [w for w in wheels if abs(w[2][1]) >= 0.1]
+    single = [abs(w[2][1]) < 0.1 or not w[0].mirror for w in wheels]
+    centre = [w for w, s in zip(wheels, single) if s]
+    pairs = [w for w, s in zip(wheels, single) if not s]
     if not centre or not pairs:
         return {name: W / len(wheels) for _, name, _ in wheels}
     xc = np.mean([w[2][0] for w in centre])

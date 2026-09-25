@@ -51,6 +51,19 @@ def korn_kappa(aircraft):
     return float(cal.get("korn_kappa", aircraft.spec.get("analysis", {}).get("korn_kappa", KORN_KAPPA)))
 
 
+def drag_rise_mach(aircraft, kappa=None):
+    """The wing's drag-divergence and critical Mach numbers, (M_dd, M_cr):
+    Korn's relation at a lift coefficient of 0.2 (Raymer 12.5.10), the
+    critical Mach number 0.108 below it, (0.1/80)^(1/3); kappa the airfoil
+    technology factor (the design's, korn_kappa(), by default)."""
+    w = aircraft.wing
+    t = w.thickness_ratio
+    lam = math.radians(w.sweep_deg(0.25))
+    k = korn_kappa(aircraft) if kappa is None else kappa
+    m_dd = k / math.cos(lam) - t / math.cos(lam) ** 2 - 0.2 / (10 * math.cos(lam) ** 3)
+    return m_dd, m_dd - (0.1 / 80.0) ** (1.0 / 3.0)
+
+
 def ellipe(k):
     """Complete elliptic integral of the second kind E(k) (modulus k)."""
     x, w = np.polynomial.legendre.leggauss(32)
@@ -278,12 +291,8 @@ def _drag(a, base, table):
                                                      a.spec.get("analysis", {}).get("wave_drag_efficiency", E_WD)))
     le = a.wing.sweep_deg(0.0)
     sh = 4.5 * math.pi * (amax / length) ** 2 / a.S
-    w = a.wing
-    t = w.thickness_ratio
-    lam = math.radians(w.sweep_deg(0.25))
     kappa = korn_kappa(a)
-    m_dd = kappa / math.cos(lam) - t / math.cos(lam) ** 2 - 0.2 / (10 * math.cos(lam) ** 3)
-    m_cr = m_dd - (0.1 / 80.0) ** (1.0 / 3.0)
+    m_dd, m_cr = drag_rise_mach(a, kappa)
 
     def wave(m):
         if m >= 1.2:
@@ -295,6 +304,10 @@ def _drag(a, base, table):
         pts_v = [0.0, 0.002, peak, peak]
         return float(_fair(pts_m, pts_v, m))
     dcd0 = friction + np.array([wave(float(m)) for m in mach])
+    # a flat pod - a rotodome, a radar's slab - is a thick section of its own:
+    # its drag diverges well before the wing's
+    for b in flat_bodies(a):
+        dcd0 = dcd0 + np.array([flat_body_rise(b, float(m)) for m in mach]) * b["planform_m2"] / a.S
     # induced drag: the base carries K0 CL_base^2; at Mach M, with the lift K_L
     # times the base's, the suction the leading edge keeps goes as it turns
     # supersonic (M cos(sweep) = 1): K(M) from K0 to 1/CL_alpha(M)
@@ -306,6 +319,64 @@ def _drag(a, base, table):
     dK = K - K0 / table["K_L"] ** 2
     return {"dCD0": dcd0, "dK": dK, "K0": float(K0), "CD0": float(CD0), "M_dd": float(m_dd), "M_cr": float(m_cr),
             "A_max_m2": amax, "length_m": float(length), "E_WD": ewd, "korn_kappa": kappa}
+
+
+def ellipsoid_factor(a, b, c):
+    """The demagnetizing factor n of an ellipsoid of semi-axes a (along the
+    flow), b and c: in potential flow along a, the surface's fastest air
+    moves at V / (1 - n) (Lamb, "Hydrodynamics", sec. 114; a sphere's n is
+    1/3). n = b c integral_0^1 u^2 / sqrt((a^2 + (b^2 - a^2) u^2)
+    (a^2 + (c^2 - a^2) u^2)) du."""
+    x, w = np.polynomial.legendre.leggauss(64)
+    u = 0.5 * (x + 1.0)
+    f = u * u / np.sqrt((a * a + (b * b - a * a) * u * u) * (a * a + (c * c - a * a) * u * u))
+    return float(b * c * 0.5 * np.sum(w * f))
+
+
+def flat_bodies(aircraft):
+    """The pods (bodies of kind "pod" in the aerodynamics) at least twice as
+    wide as they are deep, or twice as deep as wide - a rotodome, a radar's
+    slab. The air passes them as a thick section, over and under (or round
+    the sides), not round a slender body: each is a section of its own, whose
+    drag diverges at its own Mach number (flat_body_rise). Per body: its
+    planform across its thin side (m2), its thickness ratio (thin side over
+    length) and the thickness of the two-dimensional section that has the
+    same fastest air - an ellipsoid of its length, width and depth (whose
+    three-dimensional flow relieves it: 0.143 for a 5:1 disc against a 0.2
+    ellipse's 0.2). A canopy is a blister on the fuselage, not one."""
+    out = []
+    for body in aircraft.bodies:
+        if body.kind != "pod" or not body.aero or "canopy" in body.name.lower():
+            continue
+        xs = np.linspace(body.x[0], body.x[-1], 401)
+        w, top, bot, _, _ = body.section(xs)
+        h = np.maximum(top - bot, 0.0)
+        W, H, L = float(w.max()), float(h.max()), body.length
+        if min(W, H) <= 0.0 or max(W, H) < 2.0 * min(W, H):
+            continue
+        n = ellipsoid_factor(0.5 * L, 0.5 * W, 0.5 * H)
+        for _ in body.copies():
+            out.append({"name": body.name, "planform_m2": float(np.trapezoid(w if W > H else h, xs)),
+                        "thickness": min(W, H) / L, "thickness_2d": n / (1.0 - n)})
+    return out
+
+
+def flat_body_rise(body, mach):
+    """A flat pod's own drag rise (per unit of its planform, flat_bodies):
+    Korn's drag-divergence Mach number for its (two-dimensional equivalent)
+    section, conventional, unswept and lifting nothing, M_dd = 0.87 - t
+    (Raymer 12.5.10), and Lock's fourth-power rise from M_cr = M_dd - 0.108
+    (Raymer's (0.1/80)^(1/3)): 20 (M - M_cr)^4, 0.002 at M_dd - held below
+    a biconvex section's supersonic wave drag, 8 t^2, and handed over by
+    Mach 1.2 to the whole aircraft's wave drag, whose area distribution
+    counts the pod already."""
+    m_dd = KORN_KAPPA - body["thickness_2d"]
+    m_cr = m_dd - (0.1 / 80.0) ** (1.0 / 3.0)
+    if mach <= m_cr:
+        return 0.0
+    rise = min(20.0 * (mach - m_cr) ** 4, 8.0 * body["thickness"] ** 2)
+    t = min(max((mach - 1.0) / 0.2, 0.0), 1.0)
+    return rise * (1.0 - t * t * (3.0 - 2.0 * t))
 
 
 def base_cla(base):

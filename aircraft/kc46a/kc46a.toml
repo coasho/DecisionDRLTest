@@ -1,0 +1,363 @@
+# Boeing KC-46A Pegasus, built by hangar from public data: the aerial-
+# refuelling tanker on the Boeing 767-2C (the 767-200ER's fuselage, the
+# 767-300F's wing and gear), two PW4062 turbofans in pods under the wing, the
+# fly-by-wire boom under the tail and a refuelling pod under each wing.
+#
+# Frame: metres, x aft from the radome's tip, y right, z up from the ground,
+# the aircraft parked on its gear. Sources:
+#   - Boeing, "767 Airplane Characteristics for Airport Planning" (D6-58328):
+#     767-200ER length 48.51 m, span 47.57 m, fuselage 5.03 m wide, wheelbase
+#     19.69 m, track 9.30 m, ground clearances (fuselage top 7.16-7.47 m,
+#     bottom 1.73-2.06 m, fin 15.60-16.13 m, nacelle 0.81-1.09 m, wing tip
+#     4.95-5.56 m, stabilizer tip 5.94-6.58 m).
+#   - Jenkinson, Simpkin and Rhodes, "Civil Jet Aircraft Design" (1999), data
+#     for the 767-200: wing 283.3 m2, aspect ratio 7.99, taper 0.207, 11.5 %
+#     average thickness; horizontal tail 77.69 m2, 18.62 m span, taper 0.20,
+#     32 deg quarter-chord sweep, 20.34 m tail arm; fin 46.14 m2, 9.01 m tall,
+#     taper 0.306, 39 deg; fuselage 47.24 m long.
+#   - 767 wing: 31.5 deg quarter-chord sweep, 4.25 deg incidence, 6 deg
+#     dihedral; MMO 0.86 (aircraftinvestigation.info, 767-200ER data).
+#   - The fuselage's side view and the engine's position: J. Scavini's 767
+#     drawing (Wikimedia Commons "Boeing 767 family v1.0.png", CC BY-SA),
+#     measured at its 48.50 m length; its profile heights agree with Boeing's
+#     clearances within 3 cm.
+#   - USAF and Boeing (KC-46A): length 165 ft 6 in with the boom, span 157 ft
+#     8 in, height 52 ft 1 in; empty 181,610 lb, maximum take-off 415,000 lb,
+#     fuel 212,299 lb; 2 x PW4062 at 62,000 lbf; service ceiling 40,100 ft.
+#     The USAF's plan-view silhouette (VIRIN 230816-F-IP635-1004): plain wing
+#     tips - the KC-46A has no winglets - and the refuelling pods 85 % of the
+#     half span out.
+# Estimates are marked "estimate".
+
+[aircraft]
+name = "kc46a"
+description = "Boeing KC-46A Pegasus (hangar build)"
+category = "transport"
+
+[analysis]
+speed = 120.0                # m/s: the Reynolds numbers of the cruise (240 m/s at 35,000 ft, its viscosity)
+max_mach = 1.2               # the tables' Mach range: through the transonic drag rise
+induced_drag = "trefftz"     # a swept transport wing's induced drag from its loading (docs/hangar.md)
+
+# The 767-300's wing: the reference trapezoid (283.3 m2, span 47.57 m,
+# taper 0.207: root 9.87 m at the centre line, tip 2.04 m; 34.8 deg leading
+# edge, 31.5 deg at the quarter chord) with its trailing edge unswept inboard
+# of the break at 7.9 m (the "yehudi" the main gear stands behind; the
+# drawing's break at a third of the half span), so its root chord is 12.76 m.
+# Dihedral 6 deg, incidence 4.25 deg at the root, washed out to 0.75 deg at
+# the tip (estimate). Aft-loaded sections, 15 % thick at the root, 12 % at the
+# break, 10 % at the tip (estimate: NACA 6A sections stand in).
+[[surface]]
+name = "wing"
+kind = "wing"
+vortex = false                # thick, round-nosed sections: they stall, no fighter's vortex regime
+sections = [
+  { le = [14.200, 0.000, 3.000], chord = 12.760, twist = 4.25, airfoil = "naca64a415" },
+  { le = [19.691, 7.900, 3.830], chord = 7.269, twist = 3.09, airfoil = "naca64a412" },
+  { le = [30.733, 23.785, 5.500], chord = 2.043, twist = 0.75, airfoil = "naca64a410" },
+]
+controls = [
+  # double-slotted inboard flap, from the fuselage to the break; the
+  # single-slotted outboard flap (the 767-400ER's flaps: 30 deg)
+  { name = "inboard flap", channel = "flap", kind = "slotted", span = [0.109, 0.320], chord_fraction = 0.30, limits = [0, 30] },
+  { name = "outboard flap", channel = "flap", kind = "slotted", span = [0.416, 0.736], chord_fraction = 0.28, limits = [0, 30] },
+  # the high-speed aileron between the flaps and the outboard aileron: both
+  # always work here (the real outboard ones lock out at speed)
+  { name = "inboard aileron", channel = "aileron", span = [0.332, 0.404], chord_fraction = 0.25, limits = [-20, 20] },
+  { name = "outboard aileron", channel = "aileron", span = [0.748, 0.963], chord_fraction = 0.24, limits = [-20, 20] },
+]
+
+# Horizontal tail: 77.69 m2 (Jenkinson) to the centre line, 18.62 m span,
+# taper 0.20 (root 6.95 m, tip 1.39 m), 32 deg quarter-chord sweep, placed at
+# its 20.34 m tail arm from the wing's quarter-chord point; 7 deg dihedral, its
+# tip 6.26 m off the ground (Boeing's stabilizer clearance). Elevators 23 % of
+# its area (17.8 m2 of 77.7), travel (estimate).
+[[surface]]
+name = "htail"
+kind = "htail"
+sections = [
+  { le = [38.700, 0.000, 5.120], chord = 6.954, airfoil = "naca64a010" },
+  { le = [45.909, 9.310, 6.263], chord = 1.391, airfoil = "naca64a009" },
+]
+controls = [
+  { name = "elevator", channel = "elevator", span = [0.17, 0.98], chord_fraction = 0.28, limits = [-25, 20] },
+]
+
+# Fin: 46.14 m2 (Jenkinson), 9.01 m to the top at 15.83 m (Boeing), 45 deg
+# leading edge and 22 deg trailing edge (the drawing): root 7.71 m, tip
+# 2.25 m. Rudder 35 % of the chord (16.0 of 46.2 m2), travel (estimate).
+[[surface]]
+name = "fin"
+kind = "fin"
+sections = [
+  { le = [37.134, 0.000, 6.820], chord = 7.706, airfoil = "naca64a012" },
+  { le = [46.282, 0.000, 15.830], chord = 2.248, airfoil = "naca64a010" },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.05, 0.95], chord_fraction = 0.35, limits = [-26, 26] },
+]
+
+# Fuselage: the 767-200ER's, 5.03 m wide and 5.40 m tall, its top 7.31 m and
+# bottom 1.91 m off the ground (Boeing's clearances), its widest line 4.8 m up
+# (the upper lobe a circle); the profile is the drawing's, the plan widths
+# the drawing's scaled to 5.03 m
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = 4.280, bottom = 4.280 },
+  { x = 0.20, w = 0.88, top = 4.750, bottom = 3.830, n = 2.0 },
+  { x = 0.50, w = 1.46, top = 5.000, bottom = 3.580, n = 2.0 },
+  { x = 1.00, w = 2.10, top = 5.310, bottom = 3.300, n = 2.0 },
+  { x = 1.50, w = 2.64, top = 5.740, bottom = 3.050, n = 2.0 },
+  { x = 2.00, w = 3.04, top = 6.140, bottom = 2.840, n = 2.0 },
+  { x = 2.50, w = 3.44, top = 6.450, bottom = 2.650, chine = 4.60, n = 2.0 },
+  { x = 3.00, w = 3.74, top = 6.630, bottom = 2.500, chine = 4.65, n = 2.0 },
+  { x = 3.50, w = 3.98, top = 6.820, bottom = 2.380, chine = 4.70, n = 2.0 },
+  { x = 4.00, w = 4.22, top = 6.940, bottom = 2.280, chine = 4.75, n = 2.0 },
+  { x = 5.00, w = 4.58, top = 7.130, bottom = 2.130, chine = 4.78, n = 2.0 },
+  { x = 6.00, w = 4.80, top = 7.250, bottom = 2.010, chine = 4.80, n = 2.0 },
+  { x = 7.00, w = 4.92, top = 7.310, bottom = 1.940, chine = 4.80, n = 2.0 },
+  { x = 8.00, w = 5.03, top = 7.310, bottom = 1.910, chine = 4.80, n = 2.0 },
+  { x = 31.00, w = 5.03, top = 7.310, bottom = 1.910, chine = 4.80, n = 2.0 },
+  { x = 33.00, w = 5.03, top = 7.310, bottom = 1.980, chine = 4.80, n = 2.0 },
+  { x = 35.00, w = 5.03, top = 7.310, bottom = 2.220, chine = 4.85, n = 2.0 },
+  { x = 36.00, w = 4.92, top = 7.310, bottom = 2.440, chine = 4.90, n = 2.0 },
+  { x = 37.00, w = 4.72, top = 7.300, bottom = 2.680, chine = 4.95, n = 2.0 },
+  { x = 38.00, w = 4.44, top = 7.250, bottom = 2.870, chine = 5.00, n = 2.0 },
+  { x = 39.00, w = 4.04, top = 7.130, bottom = 3.120, chine = 5.05, n = 2.0 },
+  { x = 40.00, w = 3.62, top = 7.000, bottom = 3.300, chine = 5.10, n = 2.0 },
+  { x = 41.00, w = 3.22, top = 6.820, bottom = 3.550, chine = 5.15, n = 2.0 },
+  { x = 42.00, w = 2.80, top = 6.690, bottom = 3.730, chine = 5.20, n = 2.0 },
+  { x = 43.00, w = 2.38, top = 6.540, bottom = 3.980, chine = 5.25, n = 2.0 },
+  { x = 44.00, w = 2.00, top = 6.420, bottom = 4.160, chine = 5.30, n = 2.0 },
+  { x = 45.00, w = 1.58, top = 6.230, bottom = 4.380, chine = 5.33, n = 2.0 },
+  { x = 46.00, w = 1.18, top = 6.100, bottom = 4.600, chine = 5.37, n = 2.0 },
+  { x = 47.00, w = 0.58, top = 5.890, bottom = 5.280, n = 2.0 },
+  { x = 47.60, w = 0.00, top = 5.600, bottom = 5.600 },
+]
+
+# The wing-to-body fairing round the wing's root and the main gear's wells
+[[body]]
+name = "belly fairing"
+kind = "pod"
+aero = false                  # round the wing's root: the tables leave it out
+stations = [
+  { x = 14.00, w = 0.20, top = 3.200, bottom = 3.000, n = 2.0 },
+  { x = 15.50, w = 4.20, top = 3.900, bottom = 1.900, n = 2.2 },
+  { x = 17.00, w = 5.30, top = 4.200, bottom = 1.760, chine = 2.80, n_top = 2.2, n_bottom = 3.0 },
+  { x = 22.00, w = 5.50, top = 4.200, bottom = 1.740, chine = 2.80, n_top = 2.2, n_bottom = 3.0 },
+  { x = 25.50, w = 5.10, top = 4.000, bottom = 1.780, chine = 2.80, n_top = 2.2, n_bottom = 3.0 },
+  { x = 27.50, w = 3.60, top = 3.600, bottom = 1.850, n = 2.4 },
+  { x = 29.00, w = 0.40, top = 2.900, bottom = 2.500, n = 2.0 },
+]
+
+# The PW4062 nacelles: the lip 15.65 m behind the nose and 7.9 m out, 2.62 m
+# across, 0.99 m off the ground (the drawing; Boeing's nacelle clearance); the
+# fan cowl to 19.5 m, then the core cowl to the core nozzle
+[[intake]]
+name = "nacelle"
+mirror = true
+lip = 0.090
+duct = 1.20
+duct_taper = 0.92
+stations = [
+  { x = 15.65, y = 7.90, w = 2.40, top = 3.500, bottom = 1.100, n = 2.0 },
+  { x = 16.00, y = 7.90, w = 2.58, top = 3.590, bottom = 1.010, n = 2.0 },
+  { x = 16.65, y = 7.90, w = 2.62, top = 3.610, bottom = 0.990, n = 2.0 },
+  { x = 18.45, y = 7.90, w = 2.56, top = 3.580, bottom = 1.020, n = 2.0 },
+  { x = 19.50, y = 7.90, w = 2.36, top = 3.480, bottom = 1.120, n = 2.0 },
+  { x = 19.65, y = 7.90, w = 1.70, top = 3.150, bottom = 1.450, n = 2.0 },
+  { x = 20.95, y = 7.90, w = 1.25, top = 2.925, bottom = 1.675, n = 2.0 },
+  { x = 21.35, y = 7.90, w = 1.12, top = 2.860, bottom = 1.740, n = 2.0 },
+]
+
+# The pylon: a blade from the nacelle's top up into the wing
+[[strut]]
+name = "pylon"
+from = [19.000, 7.900, 3.400]
+to = [19.000, 7.900, 4.250]
+chord = 3.800
+thickness = 0.450
+
+# The wing aerial refuelling pods (Cobham 905E): 85 % of the half span out
+# (the USAF silhouette), 4.9 m long, 0.76 m across (estimate), their noses
+# 1.3 m ahead of the leading edge on a short pylon
+[[body]]
+name = "refuelling pod"
+kind = "pod"
+mirror = true
+stations = [
+  { x = 26.90, y = 20.20, w = 0.00, top = 4.450, bottom = 4.450 },
+  { x = 27.20, y = 20.20, w = 0.46, top = 4.680, bottom = 4.220, n = 2.0 },
+  { x = 27.80, y = 20.20, w = 0.72, top = 4.810, bottom = 4.090, n = 2.0 },
+  { x = 30.60, y = 20.20, w = 0.76, top = 4.830, bottom = 4.070, n = 2.0 },
+  { x = 31.50, y = 20.20, w = 0.64, top = 4.770, bottom = 4.130, n = 2.0 },
+  { x = 31.80, y = 20.20, w = 0.56, top = 4.730, bottom = 4.170, n = 2.0 },
+]
+
+[[strut]]
+name = "pod pylon"
+from = [29.200, 20.200, 4.700]
+to = [29.200, 20.200, 5.250]
+chord = 2.400
+thickness = 0.180
+
+# The fly-by-wire boom, stowed under the tail: its hinge fairing under the
+# tail cone, the tube to the aircraft's 50.5 m length (165 ft 6 in with the
+# boom), its V of ruddevators near the aft end (the USAF silhouette); tube
+# 0.5 m across (estimate)
+[[body]]
+name = "boom"
+kind = "pod"
+aero = false                  # stowed in the fuselage's wake: the tables leave it out
+stations = [
+  { x = 39.40, w = 0.20, top = 3.550, bottom = 3.350, n = 2.0 },
+  { x = 40.20, w = 0.90, top = 3.720, bottom = 2.950, n = 2.4 },
+  { x = 41.60, w = 0.90, top = 3.740, bottom = 2.950, n = 2.4 },
+  { x = 42.60, w = 0.52, top = 3.560, bottom = 3.020, n = 2.0 },
+  { x = 49.90, w = 0.42, top = 3.870, bottom = 3.450, n = 2.0 },
+  { x = 50.50, w = 0.10, top = 3.700, bottom = 3.620 },
+]
+
+[[strut]]
+name = "ruddevator"
+from = [46.900, 0.120, 3.520]
+to = [47.300, 1.250, 2.800]
+chord = 0.950
+thickness = 0.090
+
+# Pratt & Whitney PW4062: 62,000 lbf (the USAF's KC-46A figure), bypass
+# ratio 4.8, 9,420 lb dry (the PW4000-94 family, Pratt & Whitney); take-off
+# fuel flow about 0.33 lb/lbf/h and throttle ratio 1.05 (estimate); its core
+# nozzle 0.95 m across (estimate)
+[[engine]]
+name = "PW4062"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 275.8
+bypass_ratio = 4.8
+tsfc_dry = 0.33
+throttle_ratio = 1.05
+design_mach = 0.85
+position = [18.150, 7.900, 2.300]
+inlet_x = 15.65
+mass = 4273
+[engine.nozzle]
+position = [22.100, 7.900, 2.300]
+diameter = 0.95
+length = 0.60
+petal_open_deg = 0.0
+
+# The gear (the 767-300F's): the nose gear 4.55 m behind the nose, the main
+# gear's bogies 19.69 m behind it and 9.30 m apart (Boeing); each main gear a
+# four-wheel bogie on 46x18 tyres, its axles 1.45 m apart (estimate); the
+# nose gear folds forward, the mains inward into the wing's root, into open
+# wells (hangar's doors for an inward swing split fore and aft, where a
+# bogie's ends pass)
+[[gear]]
+name = "Nose Gear"
+position = [4.550, 0.0, -0.150]
+steerable = true
+max_steer = 65
+wheels = 2
+wheel_diameter = 0.940
+wheel_width = 0.360
+retractable = true
+retract = "forward"
+door_reach = 1.2              # a long leg folding forward: its doors swing well clear
+door_deg = 120
+static_deflection = 0.15
+attach = [4.550, 0.0, 2.950]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [24.240, 4.650, -0.150]
+wheels = 2
+wheel_diameter = 1.170
+wheel_width = 0.460
+axles = 2
+axle_spacing = 1.45
+retractable = true
+retract = "inward"
+wheel_turn = "flat"
+doors = false
+static_deflection = 0.15
+attach = [24.240, 4.300, 3.250]
+
+# Fly-by-wire only for the boom: the 767's controls are hydraulically
+# boosted, with its yaw damper
+[flight_control]
+type = "direct"
+yaw_damper = true
+
+[reference]
+area = 283.3                  # m2: 3,050 ft2, published (the reference trapezoid)
+span = 47.57                  # m
+chord = 6.81                  # m: the reference trapezoid's mean aerodynamic chord
+aero_point = [22.20, 0.0, 4.10]   # at the loaded CG
+
+[mass]
+empty = 82377                 # kg: 181,610 lb (USAF, Boeing)
+empty_cg = [23.30, 0.0, 4.10] # estimate: placed from the neutral point the aero stage finds
+# radii of gyration (estimate): a twin-engined jet transport's (Roskam)
+gyration = [0.25, 0.37, 0.45]
+[mass.component]              # kg, estimates: jet-transport weight fractions of the take-off weight (Roskam)
+wing = 18800
+htail = 1900
+fin = 1300
+fuselage = 20700
+"belly fairing" = 500
+nacelle = 3200
+"refuelling pod" = 900
+boom = 1500
+"Nose Gear" = 900
+"Main Gear" = 6600
+[[mass.payload]]
+name = "pilots"
+mass = 200
+position = [4.000, 0.0, 6.000]
+[[mass.payload]]
+name = "boom operator"
+mass = 100
+position = [7.000, 0.800, 5.300]
+# 96,297 kg of fuel: the 767's wing and centre tanks (73,363 kg, Boeing) and
+# the tanker's body tanks in the lower lobe (the rest); the split and where
+# each tank's fuel sits are estimates
+[[mass.tank]]
+name = "centre wing"
+position = [19.300, 0.0, 2.900]
+capacity = 30000
+[[mass.tank]]
+name = "left main"
+position = [22.900, -8.500, 3.700]
+capacity = 21680
+[[mass.tank]]
+name = "right main"
+position = [22.900, 8.500, 3.700]
+capacity = 21680
+[[mass.tank]]
+name = "forward body"
+position = [12.000, 0.0, 2.800]
+capacity = 11500
+[[mass.tank]]
+name = "aft body"
+position = [30.000, 0.0, 2.800]
+capacity = 11437
+
+[dimensions]                  # published, overall, gear down (USAF)
+length = 50.50                # m: 165 ft 6 in with the boom
+span = 48.10                  # m: 157 ft 8 in
+height = 15.90                # m: 52 ft 1 in
+
+[targets]
+# Published: maximum Mach about 0.86 (the 767's MMO), service ceiling
+# 40,100 ft (USAF, Boeing). The top speed is flown where the 767's VMO, 360
+# KIAS, meets its MMO: about 26,000 ft (computed). At 179 t the model cannot
+# hold level flight at 35,000 ft (its ceiling is 30,600 ft; the neutral
+# point hangar finds, 67 % of the MAC, looks aft for a 767 and its trim drag
+# high up with it).
+max_mach = 0.86
+max_mach_altitude_ft = 26000
+operational_ceiling_ft = 40100  # USAF: a clearance

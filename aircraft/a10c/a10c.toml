@@ -1,0 +1,357 @@
+# Fairchild Republic A-10C Thunderbolt II, built by hangar from public data:
+# the USAF's close-air-support aircraft - a straight, thick wing, two
+# high-bypass turbofans in pods high on the aft fuselage, twin fins at the
+# tips of the tailplane, the main wheels in pods on the wing's leading edge
+# and the GAU-8/A cannon in the nose.
+#
+# Frame: metres, x aft from the gun's muzzle (the front of the published
+# length), y right, z up from the wing root's chord plane. Sources: USAF fact
+# sheet and Wikipedia's specification (Jenkins, "Fairchild-Republic A/OA-10
+# Warthog", 1998; T.O. 1A-10C-1): length 16.26 m, span 17.53 m, height
+# 4.47 m, wing area 47.0 m2, NACA 6716 root and 6713 tip sections, empty
+# 11,321 kg, internal fuel 4,990 kg, 381 kt at sea level clean, 6,000 ft/min;
+# GE Aviation's TF34-GE-100A data sheet. The shape and the gear are measured
+# off Kaboldy's three-view (Wikimedia Commons, CC BY-SA 3.0), scaled by the
+# published length and span; its height (4.50 m) and tailplane span (5.74 m,
+# the published 18 ft 10 in) agree. Numbers marked "estimate" are not
+# published.
+
+[aircraft]
+name = "a10c"
+description = "Fairchild Republic A-10C Thunderbolt II (hangar build)"
+category = "attack"
+
+[analysis]
+speed = 150.0                # m/s: the Reynolds numbers (a low-level cruise)
+max_mach = 0.9               # subsonic: Mach factors to 0.9 (its never-exceed speed is 450 kt)
+
+# The NACA 6716 and 6713's maximum lift: 1.8 at these Reynolds numbers
+# (estimate: NACA's 4-digit sections of 4-6 % camber reach 1.6-1.8 at 6
+# million, Abbott & von Doenhoff; hangar's trend gives these thick, highly
+# cambered sections 2.2, the aircraft 2.1)
+[analysis.airfoil.naca6716]
+clmax = 1.8
+[analysis.airfoil.naca6713]
+clmax = 1.8
+
+# The wing: a constant-chord centre section to the gear pods (3.06 m chord,
+# no dihedral), tapered outer panels with 7 deg of dihedral (estimate: the
+# three-view's front view gives 6.5 deg along the chord line), their leading
+# edge swept 6 deg and the trailing edge 4 deg forward (three-view), and the
+# drooped (Hoerner) tips, whose outer skin is the published 17.53 m span:
+# 46.8 m2 (published 47.0), MAC 2.71 m (published mean chord 8 ft 11.3 in,
+# 2.72 m). NACA 6716 at the root, 6713 at the tip - the four-digit sections
+# NASA tested for it (Bingham & Noonan, NASA TM X-2623, 1974): 6 % camber at
+# 70 % chord. Incidence and washout are estimates.
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [6.930, 0.000, 0.000], chord = 3.060, twist = 0.0, airfoil = "naca6716" },
+  { le = [7.020, 2.990, 0.000], chord = 2.970, twist = 0.0, airfoil = "naca6716" },
+  { le = [7.587, 8.500, 0.677], chord = 2.071, twist = -2.0, airfoil = "naca6713" },
+  { le = [7.930, 8.620, 0.500], chord = 1.660, twist = -2.0, airfoil = "naca6713" },
+]
+controls = [
+  # single-slotted flaps from the fuselage to the ailerons, behind the gear
+  # pods (three-view); 20 deg for landing (estimate)
+  { name = "flap", channel = "flap", kind = "slotted", span = [0.081, 0.566], chord_fraction = 0.30, limits = [0, 20] },
+  # the ailerons: "almost 50 percent of the wingspan" (Wikipedia), split into
+  # decelerons (the split, the speed brake, is not modelled); travel estimate
+  { name = "aileron", channel = "aileron", span = [0.571, 0.970], chord_fraction = 0.30, limits = [-25, 25] },
+]
+# the inboard leading-edge slats, between the fuselage and the gear pods:
+# they open at high angle of attack to keep the engines' air clean (moved in
+# the 3D model; the tables stand for the wing as it flies): out from 10 to 15
+# deg angle of attack (estimate)
+leading = [
+  { name = "slat", span = [0.091, 0.251], chord_fraction = 0.12, limits = [0, 20], schedule = [4.0, 0.0, -40.0] },
+]
+
+# The tailplane: a rectangle 2.01 m in chord and 5.74 m across (published
+# 18 ft 10 in), on the tail cone; the elevators along its whole trailing edge
+# outboard of the fuselage. The surface runs on inside the fuselage to the
+# centre line. Section and travel: estimates.
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca0012"
+sections = [
+  { le = [14.020, 0.000, 0.350], chord = 2.010 },
+  { le = [14.020, 2.870, 0.350], chord = 2.010 },
+]
+controls = [
+  { name = "elevator", channel = "elevator", span = [0.12, 1.0], chord_fraction = 0.33, limits = [-30, 20] },
+]
+
+# The twin fins at the tailplane's tips, 3.03 m tall from 0.8 m below it,
+# 2.10 m root chord, 0.97 m tip chord; the rudders along their trailing
+# edges (three-view). Section and travel: estimates.
+[[surface]]
+name = "fin"
+kind = "fin"
+mirror = true
+airfoil = "naca0010"
+sections = [
+  { le = [13.930, 2.870, -0.460], chord = 2.100 },
+  { le = [14.280, 2.870, 2.570], chord = 0.970 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.05, 0.95], chord_fraction = 0.35, limits = [-20, 20] },
+]
+
+# Fuselage: the blunt nose over the gun, the cockpit on its armoured tub,
+# slab-sided and flat-bellied, tapering to the tail cone behind the
+# tailplane (three-view: side and plan views).
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.20, w = 0.10, top = 0.160, bottom = 0.060, n = 2.0 },
+  { x = 0.30, w = 0.40, top = 0.360, bottom = -0.150, n = 2.0 },
+  { x = 0.45, w = 0.62, top = 0.500, bottom = -0.280, n = 2.0 },
+  { x = 0.70, w = 0.82, top = 0.660, bottom = -0.400, n = 2.2 },
+  { x = 1.10, w = 1.00, top = 0.840, bottom = -0.520, n_top = 2.4, n_bottom = 3.0 },
+  { x = 1.70, w = 1.16, top = 0.960, bottom = -0.600, n_top = 2.6, n_bottom = 3.6 },
+  { x = 2.60, w = 1.28, top = 1.120, bottom = -0.630, n_top = 2.8, n_bottom = 4.0 },
+  { x = 3.60, w = 1.32, top = 1.200, bottom = -0.630, n_top = 3.0, n_bottom = 4.0 },
+  { x = 5.00, w = 1.36, top = 1.240, bottom = -0.600, n_top = 3.0, n_bottom = 3.6 },
+  { x = 6.30, w = 1.38, top = 1.240, bottom = -0.540, n = 3.0 },
+  { x = 7.80, w = 1.36, top = 1.210, bottom = -0.400, n = 3.0 },
+  { x = 9.50, w = 1.18, top = 1.170, bottom = -0.200, n = 2.8 },
+  { x = 11.30, w = 1.00, top = 1.100, bottom = 0.000, n = 2.6 },
+  { x = 13.20, w = 0.80, top = 1.000, bottom = 0.160, n = 2.4 },
+  { x = 14.60, w = 0.62, top = 0.880, bottom = 0.260, n = 2.3 },
+  { x = 15.70, w = 0.38, top = 0.740, bottom = 0.320, n = 2.2 },
+  { x = 16.26, w = 0.10, top = 0.520, bottom = 0.440, n = 2.0 },
+]
+
+# The GAU-8/A's seven barrels, out of the nose's lower half a little to the
+# left: the firing barrel on the centre line (three-view)
+[[body]]
+name = "gun"
+kind = "pod"
+aero = false
+stations = [
+  { x = 0.00, y = -0.080, w = 0.300, top = -0.140, bottom = -0.440, n = 2.0 },
+  { x = 0.30, y = -0.080, w = 0.300, top = -0.140, bottom = -0.440, n = 2.0 },
+  { x = 0.40, y = -0.080, w = 0.380, top = -0.100, bottom = -0.470, n = 2.0 },
+  { x = 0.80, y = -0.060, w = 0.460, top = -0.080, bottom = -0.500, n = 2.2 },
+  { x = 1.40, y = -0.040, w = 0.400, top = -0.100, bottom = -0.520, n = 2.2 },
+]
+
+# The canopy: a bubble on a bulletproof windscreen, its frame the arch at the
+# windscreen's back (three-view)
+[[body]]
+name = "canopy"
+kind = "pod"
+frames = [2.45]
+frame_width = 0.08
+stations = [
+  { x = 1.550, w = 0.00, top = 0.930, bottom = 0.900 },
+  { x = 2.100, w = 0.84, top = 1.380, bottom = 0.920, n = 2.0 },
+  { x = 2.800, w = 0.96, top = 1.740, bottom = 1.000, n = 2.0 },
+  { x = 3.300, w = 0.98, top = 1.780, bottom = 1.050, n = 2.0 },
+  { x = 4.000, w = 0.90, top = 1.660, bottom = 1.120, n = 2.0 },
+  { x = 4.600, w = 0.70, top = 1.460, bottom = 1.160, n = 2.0 },
+  { x = 5.100, w = 0.30, top = 1.300, bottom = 1.200, n = 2.0 },
+  { x = 5.300, w = 0.00, top = 1.250, bottom = 1.220 },
+]
+
+# The engine nacelles, high on the aft fuselage above the wing's trailing
+# edge (three-view: the intakes 9.68 m behind the muzzle, 1.58 m out and
+# 1.16 m up; 1.45 m across the lip, 3.4 m long)
+[[intake]]
+name = "nacelle"
+mirror = true
+lip = 0.06
+duct = 0.55
+duct_taper = 0.95
+stations = [
+  { x = 9.680, y = 1.580, w = 1.400, top = 1.860, bottom = 0.460, n = 2.0 },
+  { x = 10.300, y = 1.580, w = 1.460, top = 1.890, bottom = 0.430, n = 2.0 },
+  { x = 11.500, y = 1.580, w = 1.440, top = 1.880, bottom = 0.440, n = 2.0 },
+  { x = 12.500, y = 1.580, w = 1.320, top = 1.820, bottom = 0.500, n = 2.0 },
+  { x = 13.050, y = 1.580, w = 1.160, top = 1.740, bottom = 0.580, n = 2.0 },
+]
+
+# The pylons that hold them off the fuselage's upper sides
+[[strut]]
+name = "engine pylon"
+from = [11.300, 0.400, 0.950]
+to = [11.300, 1.000, 1.100]
+chord = 2.300
+thickness = 0.300
+
+# The main gear pods under the wing's leading edge, where the wheels fold
+# forward, half out of them; they fair into the wing's underside ahead of
+# the flaps (three-view). Their ends are 0.1 m wide, not edges: a knife
+# edge's fillet with the wing grows a crease in the mesh.
+[[body]]
+name = "gear pod"
+kind = "pod"
+mirror = true
+stations = [
+  { x = 5.850, y = 2.650, w = 0.100, top = -0.300, bottom = -0.380, n = 2.0 },
+  { x = 6.150, y = 2.650, w = 0.500, top = -0.080, bottom = -0.620, n = 2.2 },
+  { x = 6.700, y = 2.650, w = 0.700, top = 0.020, bottom = -0.760, n = 2.4 },
+  { x = 7.800, y = 2.650, w = 0.720, top = 0.020, bottom = -0.760, n = 2.4 },
+  { x = 8.300, y = 2.650, w = 0.560, top = 0.040, bottom = -0.500, n = 2.3 },
+  { x = 8.650, y = 2.650, w = 0.300, top = 0.080, bottom = -0.180, n = 2.0 },
+  { x = 8.850, y = 2.650, w = 0.100, top = 0.100, bottom = 0.060, n = 2.0 },
+]
+
+# The pylons: eleven stores stations, always fitted - three under each outer
+# wing, one under the centre section inboard of each pod, two beside the
+# fuselage and one on its centre line (three-view). Drawn only: their drag
+# is part of the extra drag area calibrate fits.
+[[strut]]
+name = "outer pylon"
+from = [8.000, 5.890, 0.330]
+to = [8.000, 5.890, -0.030]
+chord = 1.400
+thickness = 0.120
+
+[[strut]]
+name = "middle pylon"
+from = [8.000, 4.780, 0.200]
+to = [8.000, 4.780, -0.190]
+chord = 1.400
+thickness = 0.120
+
+[[strut]]
+name = "inner pylon"
+from = [8.000, 3.610, 0.060]
+to = [8.000, 3.610, -0.340]
+chord = 1.400
+thickness = 0.120
+
+[[strut]]
+name = "centre-section pylon"
+from = [8.050, 1.600, -0.020]
+to = [8.050, 1.600, -0.400]
+chord = 1.600
+thickness = 0.120
+
+[[strut]]
+name = "fuselage pylon"
+from = [8.200, 0.890, -0.020]
+to = [8.200, 0.890, -0.400]
+chord = 1.600
+thickness = 0.120
+
+[[strut]]
+name = "centre-line pylon"
+mirror = false
+from = [7.600, 0.000, -0.300]
+to = [7.600, 0.000, -0.700]
+chord = 1.600
+thickness = 0.120
+
+[[engine]]
+name = "TF34-GE-100A"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 40.32         # 9,065 lbf (GE Aviation)
+bypass_ratio = 6.2            # the CF34-3's 6.2 (its civil derivative; estimate for the TF34)
+tsfc_dry = 0.371              # lb/(lbf h) (GE Aviation)
+throttle_ratio = 1.05         # estimate
+design_mach = 0.6
+position = [11.300, 1.580, 1.160]
+mass = 653                    # 1,440 lb dry (GE Aviation)
+inlet_x = 9.68
+[engine.nozzle]
+position = [13.050, 1.580, 1.160]
+diameter = 1.000              # the fan's exhaust (estimate: the three-view)
+length = 0.300
+
+# The gear where the three-view has its wheels: the main axles 8.28 m and the
+# nose axle 3.12 m behind the muzzle, the published 5.25 m track. The nose
+# wheel stands right of the centre line, where the gun's barrel is (Wikipedia):
+# 0.22 m here, the drawing's 0.36 m leaving the model no room for the bay's
+# right-hand door. Tyres
+# 36x11 and 24x7.7 (estimate). Every leg folds forward, the main wheels half
+# out of their pods, in open wells without doors (Wikipedia).
+[[gear]]
+name = "Nose Gear"
+position = [3.120, 0.220, -2.030]
+steerable = true
+max_steer = 60
+wheel_diameter = 0.610
+wheel_width = 0.195
+retractable = true
+retract = "forward"
+static_deflection = 0.09
+attach = [3.600, 0.220, -0.350]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [8.280, 2.625, -2.030]
+wheel_diameter = 0.914
+wheel_width = 0.280
+retractable = true
+retract = "forward"
+retract_axis = [0.0, 1.0, 0.0]
+retract_deg = 96
+wheel_turn = 0
+doors = false
+static_deflection = 0.09
+attach = [7.930, 2.625, -0.400]
+
+# Direct controls: the A-10 flies through hydraulic boosters, with a
+# mechanical manual reversion, and a stability augmentation system - its yaw
+# damper modelled, its pitch damper not. Its limit load factor, 7.33 g,
+# sizes the structure (Raymer's weights).
+[flight_control]
+type = "direct"
+n_max = 7.33
+yaw_damper = true
+
+[mass]
+empty = 11321                 # 24,959 lb (Wikipedia, A-10C)
+empty_cg = [8.090, 0.0, 0.250]  # estimate: placed from the neutral point (see the checks)
+[[mass.item]]
+name = "GAU-8/A and its drum"  # the gun 281 kg, its drum and feed (estimate: the 1,830 kg loaded system less its rounds)
+mass = 980
+position = [4.000, -0.050, -0.150]
+[[mass.item]]
+name = "titanium cockpit tub"  # 1,200 lb of armour
+mass = 544
+position = [2.900, 0.0, 0.300]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [2.900, 0.0, 0.600]
+[[mass.payload]]
+name = "gun ammunition"       # 1,174 rounds of 30 mm, 0.7 kg each (estimate)
+mass = 820
+position = [4.600, 0.0, -0.100]
+[[mass.tank]]
+name = "forward main"          # 11,000 lb internal (Wikipedia); the split is an estimate
+position = [6.300, 0.0, 0.450]
+capacity = 1700
+[[mass.tank]]
+name = "aft main"
+position = [8.600, 0.0, 0.550]
+capacity = 1700
+[[mass.tank]]
+name = "left wing"
+position = [7.900, -1.800, 0.050]
+capacity = 795
+[[mass.tank]]
+name = "right wing"
+position = [7.900, 1.800, 0.050]
+capacity = 795
+
+[dimensions]                  # published (USAF; Wikipedia): overall, gear down
+length = 16.26
+span = 17.53
+height = 4.47
+
+[targets]
+# A-10C, clean (Wikipedia: Jenkins 1998). The top speed is published at sea
+# level: calibrate fits the extra drag area to it (flown at 100 m)
+max_mach = 0.576              # 381 kt
+max_mach_altitude_ft = 0
+max_speed_ktas = 381          # at sea level, clean

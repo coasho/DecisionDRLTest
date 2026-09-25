@@ -1,0 +1,407 @@
+# Boeing (McDonnell Douglas) C-17A Globemaster III, built by hangar from
+# public data: the strategic airlifter, four F117 turbofans under a high,
+# swept supercritical wing with winglets, a T-tail over the upswept aft
+# fuselage and its ramp, the main gear in sponsons either side.
+#
+# Frame: metres, x aft from the radome's tip, y right, z up from the ground,
+# the aircraft parked on its gear. Sources:
+#   - USAF flight manual T.O. 1C-17A-1 (Change 14, 2001): its three-view
+#     (public domain, Wikimedia Commons "McDonnell Douglas C-17A Globemaster
+#     III 3-view line drawing.png") and the dimensions printed on it: length
+#     174 ft, span 169 ft 10 in over the winglets, height 55 ft 1 in, the
+#     engine inlets 34 ft 8 in and 47 ft 10 in behind the nose and 24 ft 10 in
+#     and 46 ft 8 in out, the nose gear 11 ft behind the nose and the main
+#     gear 65 ft 10 in behind it (its two axles 8 ft 1 in apart), the winglets
+#     2.7 m tall and canted 15 deg, the nacelles 7 ft 8 in and 8 ft 11 in off
+#     the ground. The drawing is measured at its 174 ft length; where it and a
+#     printed dimension differ (the engines by up to 0.9 m), the dimension is
+#     used.
+#   - USAF and Boeing fact sheets, Jane's: wing area 3,800 ft2, aspect ratio
+#     7.165, 25 deg quarter-chord sweep, supercritical sections; horizontal
+#     tail 845 ft2, 65 ft span, aspect ratio 5.0, 27 deg sweep; fuselage 22 ft
+#     6 in wide; empty 282,500 lb, maximum take-off 585,000 lb, 35,546 US gal
+#     of fuel (107,600 kg); 4 x 40,440 lbf, bypass ratio 5.9.
+#   - FAA Order 5300.7: the main gear is two triple-wheel struts in tandem
+#     each side ("2T"), the nose gear a twin.
+# Estimates are marked "estimate".
+
+[aircraft]
+name = "c17a"
+description = "Boeing C-17A Globemaster III (hangar build)"
+category = "transport"
+
+[analysis]
+speed = 130.0                # m/s: the Reynolds numbers of the cruise (230 m/s at 28,000 ft, its viscosity)
+max_mach = 1.2               # the tables' Mach range: through the transonic drag rise
+induced_drag = "trefftz"     # a swept transport wing's induced drag from its loading (docs/hangar.md)
+
+# The wing: straight leading and trailing edges from the root to the
+# winglet, 28.6 deg leading edge, 11.4 deg trailing edge (the flight manual's
+# drawing), so 25 deg at the quarter chord; a trapezoid of 350.8 m2 to the
+# centre line (the published 353 m2), span 50.29 m inside the winglets
+# (aspect ratio 7.165), root 11.28 m, tip 2.67 m. Anhedral 4.4 deg (the
+# drawing's front view: the tip 4.2 m off the ground, the published 13 ft 10
+# in dry). Supercritical sections, about 15 % thick at the root and 12 % at
+# the tip (estimate: NACA 6A sections of that thickness and a 0.4 design
+# lift stand in); incidence 2 deg at the root, washed out to -1.5 at the tip
+# (estimate). The winglets continue the chain: 2.7 m tall, canted 15 deg
+# outboard (the drawing), swept, their tip 0.85 m.
+[[surface]]
+name = "wing"
+kind = "wing"
+vortex = false                # thick, round-nosed sections: they stall, no fighter's vortex regime
+sections = [
+  { le = [12.430, 0.000, 6.330], chord = 11.280, twist = 2.0, airfoil = "naca64a415" },
+  { le = [26.120, 25.150, 4.380], chord = 2.670, twist = -1.5, airfoil = "naca64a412" },
+  { le = [28.420, 25.850, 6.990], chord = 0.850, twist = 0.0, airfoil = "naca64a010" },
+]
+controls = [
+  # externally blown, double-slotted flaps from the fuselage to 19 m out,
+  # 28 % of the chord (the drawing); 40 deg (estimate)
+  { name = "flap", channel = "flap", kind = "slotted", span = [0.126, 0.679], chord_fraction = 0.28, limits = [0, 40] },
+  # ailerons from 19.4 to 24.8 m out (the drawing), 26 % of the chord
+  { name = "aileron", channel = "aileron", span = [0.697, 0.891], chord_fraction = 0.26, limits = [-20, 20] },
+]
+
+# The T-tail's horizontal tail on the fin's top: 845 ft2 published, 65 ft
+# span, 27 deg quarter-chord sweep; 31.5 deg leading edge, root 5.95 m, tip
+# 2.05 m (the drawing, its chords 3 % less to the published area); 4 deg
+# anhedral (the front view). The stabilizer trims in the real aircraft; here
+# the elevators do. Elevators 35 % of the chord (the drawing); travel
+# (estimate).
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a010"
+sections = [
+  { le = [44.290, 0.000, 15.850], chord = 5.950 },
+  { le = [50.320, 9.905, 15.160], chord = 2.050 },
+]
+controls = [
+  { name = "elevator", channel = "elevator", span = [0.07, 1.0], chord_fraction = 0.35, limits = [-25, 20] },
+]
+
+# The fin: swept 41 deg, its chord a constant 8.25 m from the fuselage to
+# the tail's fairing (the drawing); its tip stops 0.35 m under the
+# horizontal tail's plane, inside the fairing that joins them. Two-piece
+# rudder, 30 % of the chord (estimate).
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a012"
+sections = [
+  { le = [36.830, 0.000, 7.550], chord = 8.240 },
+  { le = [43.520, 0.000, 15.500], chord = 8.260 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.05, 0.95], chord_fraction = 0.30, limits = [-25, 25] },
+]
+
+# Fuselage, 6.86 m (22 ft 6 in) wide: the round nose under the flight deck,
+# the constant section over the cargo hold (flat-bottomed, its widest line 4 m
+# up), then the upswept aft body over the ramp, wide and flat, to the tail
+# cone under the fin (the flight manual's drawing, side and top views).
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = 3.500, bottom = 3.500 },
+  { x = 0.20, w = 1.20, top = 4.120, bottom = 2.840, n = 2.0 },
+  { x = 0.50, w = 1.68, top = 4.440, bottom = 2.500, n = 2.0 },
+  { x = 1.00, w = 2.10, top = 4.800, bottom = 2.150, n = 2.0 },
+  { x = 1.50, w = 2.58, top = 5.200, bottom = 1.880, n = 2.0 },
+  { x = 2.00, w = 3.02, top = 5.600, bottom = 1.650, n = 2.0 },
+  { x = 3.00, w = 3.60, top = 6.120, bottom = 1.260, n = 2.0 },
+  { x = 4.00, w = 4.52, top = 6.480, bottom = 0.970, chine = 3.80, n_top = 2.0, n_bottom = 2.1 },
+  { x = 5.00, w = 5.26, top = 6.720, bottom = 0.760, chine = 3.85, n_top = 2.0, n_bottom = 2.2 },
+  { x = 6.00, w = 5.92, top = 6.870, bottom = 0.650, chine = 3.90, n_top = 2.0, n_bottom = 2.3 },
+  { x = 7.00, w = 6.46, top = 6.900, bottom = 0.610, chine = 3.95, n_top = 2.0, n_bottom = 2.4 },
+  { x = 8.00, w = 6.70, top = 6.920, bottom = 0.600, chine = 4.00, n_top = 2.0, n_bottom = 2.5 },
+  { x = 9.50, w = 6.86, top = 6.920, bottom = 0.600, chine = 4.00, n_top = 2.0, n_bottom = 2.5 },
+  { x = 26.00, w = 6.86, top = 6.950, bottom = 0.660, chine = 4.00, n_top = 2.0, n_bottom = 2.5 },
+  { x = 28.00, w = 6.86, top = 7.080, bottom = 0.960, chine = 4.10, n_top = 2.0, n_bottom = 2.5 },
+  { x = 30.00, w = 6.90, top = 7.220, bottom = 1.250, chine = 4.25, n_top = 2.0, n_bottom = 2.5 },
+  { x = 32.00, w = 6.90, top = 7.390, bottom = 1.640, chine = 4.45, n_top = 2.0, n_bottom = 2.5 },
+  { x = 34.00, w = 6.90, top = 7.510, bottom = 2.080, chine = 4.70, n_top = 2.0, n_bottom = 2.5 },
+  { x = 36.00, w = 6.84, top = 7.580, bottom = 2.570, chine = 5.00, n_top = 2.0, n_bottom = 2.5 },
+  { x = 38.00, w = 6.46, top = 7.600, bottom = 3.110, chine = 5.30, n_top = 2.1, n_bottom = 2.5 },
+  { x = 40.00, w = 5.78, top = 7.540, bottom = 3.720, chine = 5.65, n_top = 2.2, n_bottom = 2.5 },
+  { x = 42.00, w = 5.24, top = 7.410, bottom = 4.340, chine = 6.00, n_top = 2.3, n_bottom = 2.5 },
+  { x = 44.00, w = 3.88, top = 7.200, bottom = 4.860, chine = 6.20, n_top = 2.3, n_bottom = 2.4 },
+  { x = 45.00, w = 3.16, top = 7.020, bottom = 5.200, chine = 6.25, n_top = 2.3, n_bottom = 2.3 },
+  { x = 46.00, w = 2.40, top = 6.890, bottom = 5.550, chine = 6.30, n = 2.2 },
+  { x = 47.00, w = 1.60, top = 6.750, bottom = 5.850, chine = 6.30, n = 2.1 },
+  { x = 48.00, w = 0.70, top = 6.600, bottom = 6.100, n = 2.0 },
+  { x = 48.40, w = 0.00, top = 6.350, bottom = 6.350 },
+]
+
+# The main gear's sponsons, low on each side from 17 to 28.3 m, out to 5.3 m
+# and down to 0.37 m off the ground (the drawing): the fuselage and they are
+# one body to the air (kind nacelle: merged with the fuselage they stand on).
+# Their ends are as wide as they are tall: the mesher's fillet with the
+# fuselage (0.65 m) grows phantom material off a thin one.
+[[body]]
+name = "sponson"
+kind = "nacelle"
+mirror = true
+stations = [
+  { x = 16.80, y = 3.60, w = 0.20, top = 1.600, bottom = 1.400, n = 2.0 },
+  { x = 17.50, y = 3.90, w = 1.40, top = 2.600, bottom = 0.850, n = 2.2 },
+  { x = 18.50, y = 4.00, w = 2.40, top = 3.000, bottom = 0.500, chine = 1.30, n_top = 2.0, n_bottom = 2.8 },
+  { x = 19.50, y = 4.00, w = 2.60, top = 3.100, bottom = 0.370, chine = 1.20, n_top = 2.0, n_bottom = 3.0 },
+  { x = 25.80, y = 4.00, w = 2.60, top = 3.100, bottom = 0.370, chine = 1.20, n_top = 2.0, n_bottom = 3.0 },
+  { x = 27.00, y = 3.90, w = 2.00, top = 2.900, bottom = 0.750, chine = 1.40, n_top = 2.0, n_bottom = 2.6 },
+  { x = 28.30, y = 3.60, w = 0.40, top = 2.000, bottom = 1.600, n = 2.0 },
+]
+
+# The wing-root fairing over the fuselage: its hump over the wing's leading
+# edge is the aircraft's 24 ft 1 in "top of fuselage" (the flight manual)
+[[body]]
+name = "wing fairing"
+kind = "pod"
+aero = false                  # over the wing's root: the tables leave it out
+stations = [
+  { x = 11.80, w = 0.10, top = 6.880, bottom = 6.500, n = 2.0 },
+  { x = 12.80, w = 3.80, top = 7.150, bottom = 6.300, n = 2.4 },
+  { x = 14.00, w = 4.60, top = 7.340, bottom = 6.200, n = 2.6 },
+  { x = 16.00, w = 4.80, top = 7.280, bottom = 6.200, n = 2.6 },
+  { x = 20.00, w = 4.80, top = 7.120, bottom = 6.200, n = 2.6 },
+  { x = 24.00, w = 4.40, top = 7.050, bottom = 6.200, n = 2.6 },
+  { x = 27.50, w = 3.00, top = 7.100, bottom = 6.300, n = 2.4 },
+  { x = 29.50, w = 0.10, top = 7.200, bottom = 6.800, n = 2.0 },
+]
+
+# The fairing at the fin's top that carries the horizontal tail, to the
+# aircraft's 53.04 m length and 16.79 m height (the flight manual)
+[[body]]
+name = "tail fairing"
+kind = "pod"
+aero = false                  # the tails' junction: the tables leave it out
+stations = [
+  { x = 43.40, w = 0.10, top = 15.900, bottom = 15.700, n = 2.0 },
+  { x = 44.30, w = 0.80, top = 16.400, bottom = 15.250, n = 2.2 },
+  { x = 46.00, w = 1.10, top = 16.720, bottom = 15.150, n = 2.4 },
+  { x = 50.50, w = 1.10, top = 16.720, bottom = 15.150, n = 2.4 },
+  { x = 52.30, w = 0.80, top = 16.550, bottom = 15.500, n = 2.2 },
+  { x = 53.04, w = 0.10, top = 16.100, bottom = 16.000, n = 2.0 },
+]
+
+# The engine nacelles, 2.6 m across, their lips at the published 10.57 and
+# 14.58 m, centred 7.57 and 14.22 m out, 2.72 and 2.34 m off the ground at
+# the bottom (the flight manual); the fan cowl 4.7 m long, then the core
+# cowl to the core nozzle (the drawing)
+[[intake]]
+name = "inboard nacelle"
+mirror = true
+lip = 0.080
+duct = 1.10
+duct_taper = 0.92
+stations = [
+  { x = 10.57, y = 7.57, w = 2.16, top = 5.100, bottom = 2.940, n = 2.0 },
+  { x = 10.87, y = 7.57, w = 2.40, top = 5.220, bottom = 2.820, n = 2.0 },
+  { x = 11.47, y = 7.57, w = 2.58, top = 5.310, bottom = 2.730, n = 2.0 },
+  { x = 12.57, y = 7.57, w = 2.60, top = 5.320, bottom = 2.720, n = 2.0 },
+  { x = 14.37, y = 7.57, w = 2.52, top = 5.280, bottom = 2.760, n = 2.0 },
+  { x = 15.27, y = 7.57, w = 2.24, top = 5.140, bottom = 2.900, n = 2.0 },
+  { x = 15.42, y = 7.57, w = 1.55, top = 4.795, bottom = 3.245, n = 2.0 },
+  { x = 16.37, y = 7.57, w = 1.12, top = 4.580, bottom = 3.460, n = 2.0 },
+  { x = 16.57, y = 7.57, w = 1.05, top = 4.545, bottom = 3.495, n = 2.0 },
+]
+
+[[intake]]
+name = "outboard nacelle"
+mirror = true
+lip = 0.080
+duct = 1.10
+duct_taper = 0.92
+stations = [
+  { x = 14.58, y = 14.22, w = 2.16, top = 4.720, bottom = 2.560, n = 2.0 },
+  { x = 14.88, y = 14.22, w = 2.40, top = 4.840, bottom = 2.440, n = 2.0 },
+  { x = 15.48, y = 14.22, w = 2.58, top = 4.930, bottom = 2.350, n = 2.0 },
+  { x = 16.58, y = 14.22, w = 2.60, top = 4.940, bottom = 2.340, n = 2.0 },
+  { x = 18.38, y = 14.22, w = 2.52, top = 4.900, bottom = 2.380, n = 2.0 },
+  { x = 19.28, y = 14.22, w = 2.24, top = 4.760, bottom = 2.520, n = 2.0 },
+  { x = 19.43, y = 14.22, w = 1.55, top = 4.415, bottom = 2.865, n = 2.0 },
+  { x = 20.38, y = 14.22, w = 1.12, top = 4.200, bottom = 3.080, n = 2.0 },
+  { x = 20.58, y = 14.22, w = 1.05, top = 4.165, bottom = 3.115, n = 2.0 },
+]
+
+# The pylons: blades from each nacelle's top up into the wing
+[[strut]]
+name = "inboard pylon"
+from = [15.300, 7.570, 5.000]
+to = [15.300, 7.570, 6.150]
+chord = 3.600
+thickness = 0.420
+
+[[strut]]
+name = "outboard pylon"
+from = [19.200, 14.220, 4.620]
+to = [19.200, 14.220, 5.650]
+chord = 3.200
+thickness = 0.400
+
+# Pratt & Whitney F117-PW-100 (PW2040): 40,440 lbf, bypass ratio 5.9,
+# 7,100 lb dry, 146.8 in long (Pratt & Whitney; USAF). Take-off fuel flow
+# about 0.34 lb/lbf/h (estimate); flat rated, its throttle ratio 1.05
+# (estimate). Each engine's mass at its middle, its core nozzle 0.85 m
+# across at the nacelle's end (estimate).
+[[engine]]
+name = "F117 inboard"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 179.9
+bypass_ratio = 5.9
+tsfc_dry = 0.34
+throttle_ratio = 1.05
+design_mach = 0.85
+position = [13.100, 7.570, 4.020]
+inlet_x = 10.57
+mass = 3221
+[engine.nozzle]
+position = [17.320, 7.570, 4.020]
+diameter = 0.85
+length = 0.55
+petal_open_deg = 0.0
+
+[[engine]]
+name = "F117 outboard"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 179.9
+bypass_ratio = 5.9
+tsfc_dry = 0.34
+throttle_ratio = 1.05
+design_mach = 0.85
+position = [17.110, 14.220, 3.640]
+inlet_x = 14.58
+mass = 3221
+[engine.nozzle]
+position = [21.330, 14.220, 3.640]
+diameter = 0.85
+length = 0.55
+petal_open_deg = 0.0
+
+# The gear (the flight manual): the nose gear 11 ft behind the nose, a twin
+# on 40x16 tyres; each side two triple-wheel struts in tandem 8 ft 1 in
+# apart, the aft one 65 ft 10 in behind the nose gear, 50x21 tyres, the
+# outer tyres 33 ft 8 in apart, retracting into the sponsons (folding aft:
+# estimate)
+[[gear]]
+name = "Nose Gear"
+position = [3.350, 0.0, -0.150]
+steerable = true
+max_steer = 60
+wheels = 2
+wheel_diameter = 1.016
+wheel_width = 0.406
+retractable = true
+static_deflection = 0.15
+attach = [3.350, 0.0, 2.000]
+
+[[gear]]
+name = "Main Gear Fwd"
+mirror = true
+position = [20.960, 3.750, -0.150]
+wheels = 3
+wheel_diameter = 1.270
+wheel_width = 0.533
+retractable = true
+retract = "aft"
+door_reach = 1.2              # three wheels abreast: the doors swing well clear
+static_deflection = 0.15
+attach = [20.960, 3.900, 2.300]
+
+[[gear]]
+name = "Main Gear Aft"
+mirror = true
+position = [23.420, 3.750, -0.150]
+wheels = 3
+wheel_diameter = 1.270
+wheel_width = 0.533
+retractable = true
+retract = "aft"
+door_reach = 1.2              # three wheels abreast: the doors swing well clear
+static_deflection = 0.15
+attach = [23.420, 3.900, 2.300]
+
+# The C-17's quadruple fly-by-wire (USAF; Boeing): hangar's control laws with
+# a transport's limits (estimate): +2.5 / -1 g, the angle of attack held to
+# 14 deg (the stall is at 21), roll rate to 35 deg/s. Flown with direct
+# controls the tables give a dutch roll damped 0.06, under MIL-F-8785C's 0.08:
+# the real aircraft's yaw damper is part of its flight controls.
+[flight_control]
+type = "fbw"
+n_max = 2.5
+n_min = -1.0
+alpha_max_deg = 14.0
+roll_rate_deg_s = 35.0
+
+[reference]
+area = 353.0                  # m2: 3,800 ft2, published
+span = 50.29                  # m: the published aspect ratio's, inside the winglets
+chord = 7.86                  # m: the reference trapezoid's mean aerodynamic chord
+aero_point = [20.10, 0.0, 4.60]   # at the loaded CG
+
+[mass]
+empty = 128100                # kg: 282,500 lb operating empty
+empty_cg = [20.50, 0.0, 4.30] # estimate: placed from the neutral point the aero stage finds
+# radii of gyration (estimate): the Boeing 747's (Heffley and Jewell, NASA
+# CR-2144: Ixx 18.2, Iyy 33.1, Izz 49.7 million slug ft2 at 636,600 lb),
+# reduced for the fuel the empty aircraft does not carry
+gyration = [0.27, 0.36, 0.45]
+[mass.component]              # kg, estimates: jet-transport weight fractions of the take-off weight (Roskam)
+wing = 27000
+htail = 3000
+fin = 2800
+fuselage = 33000
+sponson = 2000
+"wing fairing" = 600
+"tail fairing" = 400
+"inboard nacelle" = 2000
+"outboard nacelle" = 2000
+"Nose Gear" = 1400
+"Main Gear Fwd" = 4800
+"Main Gear Aft" = 4800
+[[mass.payload]]
+name = "pilots"
+mass = 200
+position = [3.600, 0.0, 5.300]
+[[mass.payload]]
+name = "loadmaster"
+mass = 100
+position = [9.000, -1.500, 2.200]
+# 107,600 kg of fuel (35,546 US gal), in the wing (estimate: the split and
+# where each tank's fuel sits)
+[[mass.tank]]
+name = "centre wing"
+position = [16.900, 0.0, 6.600]
+capacity = 17600
+[[mass.tank]]
+name = "left inboard"
+position = [19.600, -6.500, 6.100]
+capacity = 23000
+[[mass.tank]]
+name = "right inboard"
+position = [19.600, 6.500, 6.100]
+capacity = 23000
+[[mass.tank]]
+name = "left outboard"
+position = [22.650, -14.000, 5.450]
+capacity = 22000
+[[mass.tank]]
+name = "right outboard"
+position = [22.650, 14.000, 5.450]
+capacity = 22000
+
+[dimensions]                  # published, overall, gear down (the flight manual)
+length = 53.04                # m: 174 ft
+span = 51.76                  # m: 169 ft 10 in over the winglets
+height = 16.79                # m: 55 ft 1 in
+
+[targets]
+# Published: cruise Mach 0.74-0.77 (450 kt at 28,000 ft), maximum Mach 0.875
+# at 28,000 ft, ceiling 45,000 ft (USAF; Boeing)
+max_mach = 0.875
+max_mach_altitude_ft = 28000
+operational_ceiling_ft = 45000  # FL450 (USAF): a clearance

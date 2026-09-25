@@ -842,7 +842,7 @@ class Design:
         r["climb"] = F.climb_performance(f, vs, altitudes=(0.0, 3000.0) if self.quick else (0.0, 1500.0, 3000.0, 4500.0),
                                          factors=F.JET_CLIMB_FACTORS if jet else F.CLIMB_FACTORS)
         if design and jet and "max_mach" in self.targets:
-            r["top_altitude_m"] = float(self.targets.get("max_mach_altitude_ft", 36000.0)) * 0.3048
+            r["top_altitude_m"] = top_speed_altitude(self.targets)
             r["max_mach_top"] = F.max_level_mach_flown(f, r["top_altitude_m"], 0.95 * float(self.targets["max_mach"]))
         m = F.modes(f, altitude_m=1500.0, speed_ms=1.9 * vs)
         r["modes"] = {k: v for k, v in m.items() if not k.startswith("hist")}
@@ -939,11 +939,13 @@ class Design:
                    info("short period frequency", sp["omega_n"], "rad/s", note=seen("short_period", "omega_n")),
                    check("phugoid damping", ph["zeta"], 0.04, None, level="warn", note="MIL-F-8785C level 1: > 0.04; " + seen("phugoid", "zeta")),
                    info("phugoid period", ph["period_s"], "s", note=seen("phugoid", "period_s")),
-                   check("dutch roll damping", dr["zeta"], 0.08, None, note="MIL-F-8785C level 1: > 0.08; " + seen("dutch_roll", "zeta")),
+                   (check("dutch roll damping", dr["zeta"], 0.08, None, note="MIL-F-8785C level 1: > 0.08; " + seen("dutch_roll", "zeta"))
+                    if "dutch_roll_damped" not in m else
+                    info("dutch roll damping, airframe alone", dr["zeta"], note=seen("dutch_roll", "zeta"))),
                    check("dutch roll frequency", dr["omega_n"], 0.4, None, "rad/s", note="MIL-F-8785C level 1: > 0.4; " + seen("dutch_roll", "omega_n")),
                    *([check("dutch roll damping, yaw damper on", m["dutch_roll_damped"]["zeta"], 0.08, None,
-                            note="the linear model with the damper (gain %.3f), which aims for %.2f" % (
-                                m["dutch_roll_damped"]["gain"], m["dutch_roll_damped"]["target"]))]
+                            note="MIL-F-8785C level 1: > 0.08; the linear model with the damper (gain %.3f), "
+                            "which aims for %.2f" % (m["dutch_roll_damped"]["gain"], m["dutch_roll_damped"]["target"]))]
                      if "dutch_roll_damped" in m else []),
                    check("roll mode time constant", m["roll"]["time_constant_s"], None, 1.4, "s",
                          note="MIL-F-8785C level 1: < 1.4; " + seen("roll", "time_constant_s")),
@@ -1104,6 +1106,73 @@ def fit_kappa(measure, target, steps=8, tol=0.005):
     return kappa, m
 
 
+def top_speed_altitude(targets):
+    """Where a jet's published top speed is flown (m): its height, a sea-level
+    one at 100 m, clear of the ground."""
+    return max(float(targets.get("max_mach_altitude_ft", 36000.0)) * 0.3048, SEA_LEVEL_FLOWN_M)
+
+
+SEA_LEVEL_FLOWN_M = 100.0
+BELOW_DRAG_RISE = 0.03  # a top speed within this of the wing's critical Mach number (or below) is not the wing's
+
+
+def fit_drag_area(measure, target, first, steps=10, tol=0.004):
+    """The extra drag area (m2) whose top Mach number, measure(area) - which
+    falls as the area grows; nan, a run that could not hold its height,
+    counts as too slow - meets the target: a bracket from none, doubling
+    from first, then false position. Returns (area, its Mach number)."""
+    def m_of(area):
+        m = measure(area)
+        return m if np.isfinite(m) else 0.0
+    a0, m0 = 0.0, m_of(0.0)
+    if m0 <= target:
+        return 0.0, m0
+    a1, m1 = first, m_of(first)
+    while m1 > target and a1 < 64.0 * first:
+        a0, m0, a1 = a1, m1, 2.0 * a1
+        m1 = m_of(a1)
+    a, m = (a1, m1)
+    for _ in range(steps):
+        a = a0 + (a1 - a0) * (m0 - target) / max(m0 - m1, 1e-9)
+        m = m_of(a)
+        if abs(m - target) < tol:
+            break
+        if m > target:
+            a0, m0 = a, m
+        else:
+            a1, m1 = a, m
+    return a, m
+
+
+def _calibrate_subsonic_drag(d, alt, target, m_cr):
+    """A subsonic jet whose top speed lies below its wing's drag rise: the
+    extra drag area (the wing's sections as the design has them) that holds
+    it to its published top speed at its height."""
+    history = []
+
+    def measure(area):
+        _write_calibration(d, {"extra_drag_area_m2": float(area)})
+        d.aircraft = Aircraft.load(d.path)
+        d.build()
+        m = _top_mach(d, alt, 0.95 * target)
+        history.append({"extra_drag_area_m2": float(area), "max_mach": float(m)})
+        d.log("  calibrate: extra drag area %.3f m2 -> Mach %.3f at %.0f ft" % (area, m, alt / 0.3048))
+        return m
+
+    area, m = fit_drag_area(measure, target, 0.002 * d.aircraft.S)
+    cal = {"extra_drag_area_m2": float(area)}
+    _write_calibration(d, cal, note="fitted: maximum Mach %.3f at %.0f ft (target %g), below the wing's drag rise (M_cr %.3f)"
+                       % (m, alt / 0.3048, target, m_cr))
+    d.aircraft = Aircraft.load(d.path)
+    d.build()
+    checks = [check("maximum Mach number after calibration", m, target - 0.03, target + 0.03, level="warn",
+                    note="at %.0f ft; below the wing's drag rise (critical Mach %.3f)" % (alt / 0.3048, m_cr)),
+              check("extra drag area", area, 0.0, 0.03 * d.aircraft.S, "m2", level="warn",
+                    note="CD %+.4f: what the estimate leaves out (antennas, radomes' pressure drag, gaps)"
+                    % (area / d.aircraft.S))]
+    return d.save("calibrate", {"calibration": cal, "history": history, "checks": checks})
+
+
 def _calibrate_subsonic(d):
     """A subsonic jet (a transport, a tanker) to its published top speed.
     Up there its high-bypass engines run well below their throttle ratio -
@@ -1116,12 +1185,18 @@ def _calibrate_subsonic(d):
     engines' throttle ratio stays the design's. A jet too fast even with
     conventional sections (an older, thicker wing than Korn's relation
     knows: the B-52's) gets more wave drag instead, E_WD from the design's
-    up to EWD_MAX."""
-    from .aero.mach import E_WD, KORN_KAPPA, KORN_SUPERCRITICAL
+    up to EWD_MAX. A top speed below the wing's drag rise (conventional
+    sections') - the E-3's, its rotodome's drag holding it - is none of the
+    wing's doing: there the fit is an extra drag area, as the light
+    aircraft's (fit_drag_area)."""
+    from .aero.mach import E_WD, KORN_KAPPA, KORN_SUPERCRITICAL, drag_rise_mach
     t = d.targets
-    alt = float(t.get("max_mach_altitude_ft", 36000.0)) * 0.3048
+    alt = top_speed_altitude(t)
     target = float(t["max_mach"])
     history = []
+    _, m_cr = drag_rise_mach(d.aircraft, KORN_KAPPA)
+    if target < m_cr + BELOW_DRAG_RISE:
+        return _calibrate_subsonic_drag(d, alt, target, m_cr)
 
     ewd0 = float(d.aircraft.spec.get("analysis", {}).get("wave_drag_efficiency", E_WD))
 

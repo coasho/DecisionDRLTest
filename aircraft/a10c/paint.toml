@@ -1,0 +1,10 @@
+# The A-10C's two greys in broad patches (FS 36118 gunship grey over FS
+# 36270), wrapped all round
+[paint]
+scheme = "camo"
+colours = ["#7d858b", "#5a5e62"]
+scale = 3.0
+canopy = "clear"
+panel_lines = 0.09
+wear = 0.07
+gloss = 0.2

@@ -1,0 +1,12 @@
+# The E-3G's light grey all over, its cockpit windows painted
+[paint]
+scheme = "single"
+colours = ["#b9bfc3"]
+windows = "#1b2127"
+windows_x = [3.50, 5.30]
+windows_z = [0.50, 0.98]
+windscreen_x = [3.30, 3.90]
+windscreen_y = 1.10
+panel_lines = 0.06
+wear = 0.04
+gloss = 0.35

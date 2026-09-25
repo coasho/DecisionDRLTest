@@ -341,22 +341,28 @@ For fighters:
   Drag adds skin friction falling with Mach, and wave drag from the area
   distribution (Sears–Haack times Raymer's E_WD, from Korn's
   drag-divergence Mach). Once the leading edge is supersonic, the edge's
-  suction is lost.
+  suction is lost. A flat pod - a rotodome - is a thick section of its own,
+  and its drag diverges long before the wing's: as the two-dimensional
+  section with its ellipsoid's fastest air (Lamb), at Korn's 0.87 − t.
 - **Turbofans.** JSBSim's turbine. Thrust goes as the density to the 0.7
   (afterburner) or 1 (dry) up to 11 km, and as the density above it, where
   the temperature holds. It rises with the ram, 1 + 0.2 M², and is cut back
   once the compressor's inlet temperature passes the throttle ratio TR
   (Mattingly, Heiser & Pratt, *Aircraft Engine Design*, sec. 2.3). A dry
   engine of bypass ratio above 1 moves towards Mattingly's high-bypass
-  lapse, δ₀(1 − 0.49√M), all of it from a bypass ratio of 3: a fifth of
-  the static thrust at Mach 0.8 and 35,000 ft. Weight and size come from
+  lapse, δ₀(1 − 0.49√M), all of it from a bypass ratio of 2: a fifth of
+  the static thrust at Mach 0.8 and 35,000 ft. A TF33 (1.42) goes two
+  fifths of the way, to 0.29 of its static thrust at Mach 0.82 and 35,000
+  ft, as the JT3D's cruise ratings give it. Weight and size come from
   Raymer. Calibration fits TR to a fighter's published top speed,
   and then the wave drag if TR alone cannot. A subsonic jet's engines run
   far below their TR at its top speed, which its wing's transonic drag rise
   sets: calibration fits Korn's airfoil technology factor κ_A in the
   drag-divergence Mach number (Raymer 12.5.10), from conventional sections'
   0.87 to supercritical ones' 0.95, and more wave drag when even
-  conventional sections leave it too fast. On direct controls the test
+  conventional sections leave it too fast. A top speed below the wing's
+  drag rise is none of the wing's doing (the E-3G's, its rotodome holding
+  it): there calibration fits an extra drag area. On direct controls the test
   autopilot flies that top speed: trimmed, the height held, full thrust
   until the speed settles.
 - **Large aircraft.** A jet climbs best well above a propeller aircraft's
@@ -642,17 +648,21 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 
 | aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft |
 |---|---|---|---|---|
-| B-52H | `b52h` | 0.91 at 20,700 ft (0.906) | 9,900 | 53,600 (50,000) |
+| B-52H | `b52h` | 0.91 at 20,700 ft (0.906) | 9,300 | 52,200 (50,000) |
 | KC-135R | `kc135r` | 0.88 at 30,000 ft (0.86) | 7,100 | 40,900 (50,000 certified) |
 | RC-135W | `rc135w` | 0.88 at 30,000 ft (0.86) | 6,400 | 38,700 (50,000 certified) |
+| E-3G | `e3g` | 0.78 at 29,000 ft (0.78) | 3,700 | 34,200 (above 29,000) |
+| A-10C | `a10c` | 0.57 at sea level (0.576) | 4,700 | 29,800 (45,000) |
+| C-17A | `c17a` | 0.87 at 28,000 ft (0.875) | 6,200 | 36,800 (45,000 certified) |
+| KC-46A | `kc46a` | 0.86 at 26,000 ft (0.86) | 5,200 | 29,500 (40,100 certified) |
 
 - The B-52H flies at 140 t, 40 % fuel, about its combat weight. Its wing
   droops to the tips as it does on the ground. Spoilers roll the real one;
   ailerons on the outer wing stand in for them. Its yaw damper takes the
   dutch roll's damping from 0.11 to 0.31. Even conventional sections'
-  drag rise leaves it too fast, so wave drag at its cap brings it down to
-  its top speed (a warning in its report). Its L/D peaks at 19.7 (21.5
-  published).
+  drag rise leaves it too fast, so it needs 5 times Sears-Haack's wave
+  drag, beyond the usual 2-3 (a warning in its report). Its L/D peaks at
+  19.7 (21.5 published).
 - The KC-135R flies at 100 t, half its fuel: a tanker mid-mission. It
   climbs to 40,900 ft there; 50,000 ft is its certified altitude. Its
   boom, the boom's ruddevators and the fin's HF probe are drawn. The main
@@ -665,6 +675,27 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   the drooping hog nose radome, the cheek fairings along the forward
   fuselage, no boom. It flies at 111 t, 24 t of it mission systems, half
   its fuel.
+- The E-3G is a 707-320B with four TF33s and the rotodome, 9.1 m across,
+  on two struts. It flies at 150 t, full of fuel. Its rotodome's drag
+  diverges from Mach 0.62, and calibration adds 2.4 m² of drag (CD
+  +0.008: the rotodome's pressure drag, the antennas) for its published
+  top speed. Its yaw damper takes the dutch roll from 0.07 to 0.26.
+- The A-10C flies at 17.2 t, full of fuel and ammunition. Its eleven
+  pylons, the gun and the half-exposed main wheels need 1.2 m² of extra
+  drag (CD +0.026) for its published 381 kt at sea level. Its high-bypass
+  TF34s keep too little thrust up high for the published 45,000 ft: it
+  climbs to 29,800 ft. Its thick, cambered sections' maximum lift is held
+  to 1.8. Its yaw damper takes the dutch roll from 0.10 to 0.32.
+- The C-17A flies through its own fly-by-wire, with a transport's limits
+  (+2.5/-1 g, 14 deg, 35 deg/s), at 236 t: full of fuel, no cargo. Its
+  supercritical wing's drag diverges late: calibration puts Korn's factor
+  at 0.93, near supercritical sections' 0.95.
+- The KC-46A is the 767-2C with the boom and two wing refuelling pods, and
+  no winglets (the real one has none), flown at 179 t, full of fuel. Its
+  top speed is flown where the 767's VMO meets its MMO, 26,000 ft: at this
+  weight the model cannot hold 35,000 ft. hangar puts its neutral point at
+  67 % of the MAC, likely too far aft for a 767, with the trim drag that
+  follows up high.
 
 ## Limits
 

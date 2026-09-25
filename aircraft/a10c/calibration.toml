@@ -1,0 +1,6 @@
+# Written by hangar calibrate (2026-09-25 13:20) to meet the [targets] of a10c.toml:
+# corrections for what the physics estimate does not see. Delete this file to
+# go back to the pure estimate.
+[calibration]
+extra_drag_area_m2 = 1.2361   # drag along the flow, added to the estimate (m2)
+# fitted: maximum Mach 0.573 at 328 ft (target 0.576), below the wing's drag rise (M_cr 0.599)

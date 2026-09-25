@@ -1,0 +1,6 @@
+# Written by hangar calibrate (2026-09-25 13:51) to meet the [targets] of kc46a.toml:
+# corrections for what the physics estimate does not see. Delete this file to
+# go back to the pure estimate.
+[calibration]
+korn_kappa = 0.8900   # Korn's airfoil technology factor: where the wing's drag diverges
+# fitted: maximum Mach 0.858 at 26000 ft (target 0.86)

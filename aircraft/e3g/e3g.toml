@@ -1,0 +1,405 @@
+# Boeing E-3G Sentry (AWACS), built by hangar from public data: the Boeing
+# 707-320B airframe with four TF33-PW-100A turbofans and the AN/APY-2 radar's
+# rotodome on two struts above the aft fuselage. Direct (conventional) flight
+# controls with a yaw damper, as the real one has them.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the axis of the
+# fuselage's constant section. Sources:
+#  - USAF E-3 fact sheet and Wikipedia's E-3 article (its specifications):
+#    span 44.42 m, length 46.61 m, height 12.60 m; empty 83,915 kg (185,000
+#    lb), maximum take-off 157,397 kg (347,000 lb); 21,000 US gal of fuel; the
+#    rotodome 9.1 m across, 1.8 m thick at the centre, held 3.35 m (11 ft)
+#    above the fuselage by 2 struts, tilted down at the front "to reduce its
+#    aerodynamic drag"; maximum speed 461 kt, service ceiling 29,000 ft
+#    minimum.
+#  - Jenkinson, Simpkin & Rhodes, "Civil Jet Aircraft Design" (1999), aircraft
+#    data file, Boeing 707-320C: wing 283.4 m2, aspect ratio 6.96, MAC 7.36 m,
+#    35 deg quarter-chord sweep, taper 0.259, 10 % mean thickness; horizontal
+#    tail 58.06 m2 (aspect ratio 3.35), vertical tail 30.47 m2 (aspect ratio
+#    1.70, 30 deg), tail arms 20.5 and 21.0 m; fuselage 3.76 m wide; wheelbase
+#    17.98 m, track 6.73 m.
+#  - Wikipedia, Boeing 707 (7 deg dihedral) and Pratt & Whitney TF33 (bypass
+#    ratio 1.42, 2,089 kg dry, 3.61 m long, 1.35 m across, 0.78 lb/(lbf h) at
+#    M 0.82, 35,000 ft); airforce-technology.com (21,000 lb thrust).
+#  - Layout (positions only, not areas): the Boeing 707-300 four-view by
+#    Julien Scavini (Wikimedia Commons, CC BY-SA 3.0, scaled by its 46.61 m
+#    length and 44.42 m span) - wing root, engines at 9.15 and 15.75 m from
+#    the centre line, fuselage depth 3.90 m and its nose and tail lines, the
+#    gear; the E-3 line drawing on Wikimedia Commons (T. Kouwenhoven) - the
+#    rotodome's centre 30.2 m behind the nose; photographs of E-3s (Wikimedia
+#    Commons) - the struts, the nacelles.
+
+[aircraft]
+name = "e3g"
+description = "Boeing E-3G Sentry AWACS (hangar build)"
+category = "transport"
+
+[analysis]
+speed = 110.0                # m/s: the Reynolds numbers - sea-level viscosity at this speed gives
+                             # the cruise Reynolds number at 29,000 ft (about 5e7 on the MAC)
+max_mach = 1.2               # the tables' Mach range: through the transonic drag rise
+induced_drag = "trefftz"     # a swept transport wing's induced drag from its loading (docs/hangar.md)
+
+# Boeing's reference wing (Jenkinson): the design's own planform, with its
+# inboard trailing-edge extension, has a little more area
+[reference]
+area = 283.4
+span = 44.42
+chord = 7.36
+aero_point = [21.40, 0.0, 0.0]    # at the loaded CG (see [mass])
+
+# The wing: a straight leading edge swept 38.5 deg (35 deg at the quarter
+# chord of the reference trapezoid, root 10.14 m, tip 2.63 m: Jenkinson's
+# taper 0.259), the trailing edge unswept inboard of 4.0 m and swept 24.6 deg
+# outboard (the 707-320's inboard extension; its span estimated from photos);
+# 7 deg dihedral. Sections: NACA 64A-series of 12 % at the root to 9 % at the
+# tip (estimate; Boeing's own sections are not published - mean about 10 %,
+# as Jenkinson gives). Twist 2 deg at the root to -1.5 at the tip (estimate).
+# The root's leading edge 13.8 m behind the nose at the fuselage side (the
+# four-view).
+[[surface]]
+name = "wing"
+kind = "wing"
+vortex = false                # thick, round-edged sections: they stall, no vortex regime (a fighter's thin swept wing's)
+sections = [
+  { le = [12.300, 0.000, -1.000], chord = 11.97, twist = 2.0, airfoil = "naca64a212" },
+  { le = [15.482, 4.000, -0.509], chord = 8.79, twist = 1.5, airfoil = "naca64a211" },
+  { le = [29.966, 22.210, 1.727], chord = 2.63, twist = -1.5, airfoil = "naca64a209" },
+]
+# double-slotted flaps inboard and outboard, the high-speed aileron between
+# them behind the inboard engine, the low-speed aileron outboard (707-320
+# layout; spans and chords estimated from the four-view). Spoilers are not
+# modelled.
+controls = [
+  { name = "inboard flap", channel = "flap", kind = "fowler", span = [0.085, 0.37], chord_fraction = 0.28, limits = [0, 50] },
+  { name = "inboard aileron", channel = "aileron", span = [0.37, 0.45], chord_fraction = 0.25, limits = [-20, 20] },
+  { name = "outboard flap", channel = "flap", kind = "fowler", span = [0.45, 0.72], chord_fraction = 0.28, limits = [0, 50] },
+  { name = "outboard aileron", channel = "aileron", span = [0.72, 0.96], chord_fraction = 0.24, limits = [-20, 20] },
+]
+
+# Horizontal tail: 58.06 m2, span 13.95 m (Jenkinson's area and aspect ratio),
+# 35 deg quarter-chord sweep, taper 0.4 and 7 deg dihedral (estimates); its
+# MAC's quarter chord 20.5 m behind the wing's (Jenkinson's tail arm). The
+# 707 trims with its stabilizer; here the elevator and its trim do both.
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca0010"
+vortex = false
+sections = [
+  { le = [38.030, 0.000, 0.600], chord = 5.95 },
+  { le = [43.806, 6.975, 1.456], chord = 2.38 },
+]
+controls = [
+  { name = "elevator", channel = "elevator", span = [0.14, 0.97], chord_fraction = 0.30, limits = [-25, 15] },
+]
+
+# Fin: 30.47 m2 (Jenkinson), 30 deg quarter-chord sweep, taper 0.35
+# (estimate), its MAC's quarter chord 21.0 m behind the wing's; its tip 12.60 m
+# above the ground (the E-3's height). The 707's HF probe on its tip.
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca0010"
+sections = [
+  { le = [38.800, 0.000, 1.900], chord = 6.10 },
+  { le = [44.120, 0.000, 9.300], chord = 2.14 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.05, 0.95], chord_fraction = 0.30, limits = [-25, 25] },
+]
+
+# The rotodome's two struts: streamlined, 2.5 m chord, 0.35 m thick
+# (estimates from photographs), side by side under the dome's centre, leaning
+# in a little towards it. Lifting surfaces, so that in sideslip they carry a
+# side force and their trailing vortices wash the fin - the dome's effect on
+# the fin. Each reaches from the fuselage's top into the dome.
+[[surface]]
+name = "rotodome strut"
+kind = "fin"
+mirror = true
+airfoil = "naca0014"
+sections = [
+  { le = [28.950, 1.000, 1.650], chord = 2.50 },
+  { le = [28.950, 0.850, 5.800], chord = 2.50 },
+]
+
+# Fuselage: 3.76 m wide, 3.90 m deep (the upper lobe's widest line 0.2 m
+# above the axis, the deeper lower lobe over the wing box), the nose and the
+# upswept tail cone as the four-view draws them.
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.670, bottom = -0.670 },
+  { x = 0.30, w = 1.00, top = -0.250, bottom = -1.050, n = 2.0 },
+  { x = 0.89, w = 1.98, top = 0.100, bottom = -1.350, n = 2.0 },
+  { x = 1.88, w = 2.96, top = 0.780, bottom = -1.720, n = 2.0 },
+  { x = 3.87, w = 3.54, top = 1.520, bottom = -1.950, chine = 0.10, n = 2.0 },
+  { x = 6.35, w = 3.70, top = 1.860, bottom = -1.990, chine = 0.18, n = 2.0 },
+  { x = 8.50, w = 3.76, top = 1.910, bottom = -1.990, chine = 0.20, n = 2.0 },
+  { x = 28.50, w = 3.76, top = 1.910, bottom = -1.990, chine = 0.20, n = 2.0 },
+  { x = 33.60, w = 3.74, top = 1.910, bottom = -1.310, chine = 0.30, n = 2.0 },
+  { x = 38.60, w = 3.60, top = 1.900, bottom = -0.420, chine = 0.60, n = 2.0 },
+  { x = 41.10, w = 2.46, top = 1.880, bottom = 0.100, n = 2.0 },
+  { x = 43.50, w = 1.48, top = 1.840, bottom = 0.570, n = 2.0 },
+  { x = 46.00, w = 0.49, top = 1.740, bottom = 1.170, n = 2.0 },
+  { x = 46.61, w = 0.10, top = 1.660, bottom = 1.600, n = 2.0 },
+]
+
+# The rotodome: 9.14 m across and 1.83 m thick at its centre (an oblate
+# spheroid), its centre 30.2 m behind the nose and its underside 3.35 m above
+# the fuselage's top; tilted 2.5 deg down at the front (the tilt's size is an
+# estimate: about the angle of attack of cruise, where it meets the air
+# edge-on).
+[[body]]
+name = "rotodome"
+kind = "pod"
+stations = [
+  { x = 25.630, w = 0.000, top = 5.980, bottom = 5.980 },
+  { x = 25.767, w = 2.222, top = 6.209, bottom = 5.764 },
+  { x = 26.087, w = 3.984, top = 6.399, bottom = 5.602 },
+  { x = 26.773, w = 6.046, top = 6.636, bottom = 5.425 },
+  { x = 27.915, w = 7.915, top = 6.873, bottom = 5.288 },
+  { x = 29.057, w = 8.850, top = 7.016, bottom = 5.244 },
+  { x = 30.200, w = 9.140, top = 7.095, bottom = 5.265 },
+  { x = 31.343, w = 8.850, top = 7.116, bottom = 5.344 },
+  { x = 32.485, w = 7.915, top = 7.072, bottom = 5.487 },
+  { x = 33.627, w = 6.046, top = 6.935, bottom = 5.724 },
+  { x = 34.313, w = 3.984, top = 6.758, bottom = 5.961 },
+  { x = 34.633, w = 2.222, top = 6.596, bottom = 6.151 },
+  { x = 34.770, w = 0.000, top = 6.380, bottom = 6.380 },
+]
+
+# The fin's dorsal fillet, along the spine into its leading edge
+[[body]]
+name = "dorsal fillet"
+kind = "pod"
+aero = false                  # the fin's area counts it
+stations = [
+  { x = 35.20, w = 0.100, top = 1.880, bottom = 1.800, n = 2.0 },
+  { x = 37.00, w = 0.300, top = 2.150, bottom = 1.600, n = 2.2 },
+  { x = 38.60, w = 0.420, top = 2.800, bottom = 1.600, n = 2.4 },
+  { x = 39.60, w = 0.400, top = 3.400, bottom = 1.600, n = 2.4 },
+]
+
+# The HF antenna probe ahead of the fin's tip: 18 cm across (a little thick,
+# for the mesher), its aft end in the fin
+[[body]]
+name = "fin probe"
+kind = "pod"
+aero = false
+stations = [
+  { x = 40.50, w = 0.000, top = 9.170, bottom = 9.170 },
+  { x = 40.60, w = 0.120, top = 9.230, bottom = 9.110, n = 2.0 },
+  { x = 40.80, w = 0.180, top = 9.260, bottom = 9.080, n = 2.0 },
+  { x = 45.00, w = 0.180, top = 9.260, bottom = 9.080, n = 2.0 },
+]
+
+# Nacelles: the TF33's short fan cowl (1.84 m across) with the fan's exhaust
+# at its end, the core cowl running on to the core nozzle; 5.2 m long, the
+# inlets 3.8 m ahead of the wing's leading edge (the four-view), the axes 1.25
+# m below it (estimate from photographs).
+[[intake]]
+name = "inboard nacelle"
+mirror = true
+lip = 0.06
+duct = 1.2
+duct_taper = 0.85
+stations = [
+  { x = 15.80, y = 9.150, w = 1.520, top = -0.370, bottom = -1.890 },
+  { x = 16.30, y = 9.150, w = 1.780, top = -0.240, bottom = -2.020 },
+  { x = 17.00, y = 9.150, w = 1.840, top = -0.210, bottom = -2.050 },
+  { x = 17.80, y = 9.150, w = 1.800, top = -0.230, bottom = -2.030 },
+  { x = 18.50, y = 9.150, w = 1.620, top = -0.320, bottom = -1.940 },
+  { x = 18.80, y = 9.150, w = 1.300, top = -0.480, bottom = -1.780 },
+  { x = 20.00, y = 9.150, w = 1.160, top = -0.550, bottom = -1.710 },
+  { x = 21.00, y = 9.150, w = 0.980, top = -0.640, bottom = -1.620 },
+]
+
+[[intake]]
+name = "outboard nacelle"
+mirror = true
+lip = 0.06
+duct = 1.2
+duct_taper = 0.85
+stations = [
+  { x = 20.88, y = 15.750, w = 1.520, top = 0.444, bottom = -1.076 },
+  { x = 21.38, y = 15.750, w = 1.780, top = 0.574, bottom = -1.206 },
+  { x = 22.08, y = 15.750, w = 1.840, top = 0.604, bottom = -1.236 },
+  { x = 22.88, y = 15.750, w = 1.800, top = 0.584, bottom = -1.216 },
+  { x = 23.58, y = 15.750, w = 1.620, top = 0.494, bottom = -1.126 },
+  { x = 23.88, y = 15.750, w = 1.300, top = 0.334, bottom = -0.966 },
+  { x = 25.08, y = 15.750, w = 1.160, top = 0.264, bottom = -0.896 },
+  { x = 26.08, y = 15.750, w = 0.980, top = 0.174, bottom = -0.806 },
+]
+
+# The pylons: from the nacelles' tops into the wing behind its leading edge
+[[strut]]
+name = "inboard pylon"
+from = [19.90, 9.150, -0.700]
+to = [20.10, 9.150, 0.050]
+chord = 3.2
+thickness = 0.32
+
+[[strut]]
+name = "outboard pylon"
+from = [25.10, 15.750, 0.080]
+to = [25.30, 15.750, 0.900]
+chord = 2.8
+thickness = 0.30
+
+[[engine]]
+name = "TF33-PW-100A inboard"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 93.4          # 21,000 lbf (USAF; Wikipedia gives 21,500)
+bypass_ratio = 1.42
+tsfc_dry = 0.78               # at M 0.82, 35,000 ft (Wikipedia, TF33)
+throttle_ratio = 1.0          # flat-rated to ISA (Wikipedia, TF33): its thrust falls from the start of the take-off run
+design_mach = 0.8             # Raymer's engine size: a subsonic engine
+position = [18.30, 9.150, -1.130]
+mass = 2490                   # installed with its thrust reverser: Raymer's 2.331 W^0.901 x 1.18 on the 2,089 kg dry engine
+inlet_x = 15.8
+[engine.nozzle]
+position = [21.00, 9.150, -1.130]
+diameter = 0.90               # the core nozzle
+length = 0.5
+petal_open_deg = 0            # a fixed nozzle
+
+[[engine]]
+name = "TF33-PW-100A outboard"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 93.4
+bypass_ratio = 1.42
+tsfc_dry = 0.78
+throttle_ratio = 1.0
+design_mach = 0.8
+position = [23.38, 15.750, -0.316]
+mass = 2490
+inlet_x = 20.88
+[engine.nozzle]
+position = [26.08, 15.750, -0.316]
+diameter = 0.90
+length = 0.5
+petal_open_deg = 0
+
+# Gear: twin nose wheels 5.1 m behind the nose (the four-view) folding forward;
+# four-wheel bogies 17.98 m behind them (Jenkinson's wheelbase), 6.73 m apart
+# (track), their axles 1.42 m apart (56 in), folding inward into the belly.
+# Tyres 39x13 and 46x16. The fuselage's belly 1.31 m above the ground,
+# parked.
+[[gear]]
+name = "Nose Gear"
+position = [5.100, 0.0, -3.550]
+steerable = true
+max_steer = 55
+wheel_diameter = 0.99
+wheel_width = 0.33
+wheels = 2
+retractable = true
+retract = "forward"
+static_deflection = 0.25
+attach = [5.300, 0.0, -1.400]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [23.080, 3.365, -3.550]
+wheel_diameter = 1.17
+wheel_width = 0.41
+wheels = 2
+axles = 2                     # the four-wheel bogie
+axle_spacing = 1.42
+retractable = true
+retract = "inward"
+wheel_turn = "flat"
+doors = false                 # open wells: hangar's doors for an inward swing split fore and aft,
+                              # where a four-wheel bogie's ends pass
+static_deflection = 0.25
+attach = [23.080, 3.200, -0.800]
+
+[flight_control]
+type = "direct"               # hydraulically boosted controls, as the 707's
+yaw_damper = true             # the 707's yaw damper
+
+[mass]
+empty = 83915                 # 185,000 lb (Wikipedia)
+mtow = 157397                 # 347,000 lb
+empty_cg = [21.30, 0.0, 0.20]  # estimate: 28 % of the MAC; the rotodome raises it
+# no published inertia: the Boeing 747's radii of gyration (Nelson, "Flight
+# Stability and Automatic Control", app. B: Ixx 18.3e6, Iyy 33.1e6, Izz 49.7e6
+# slug ft2 at 636,636 lb)
+gyration = [0.31, 0.35, 0.47]
+[mass.component]              # kg: Raymer's transport equations (15.25-15.31) for a 707-320B at 347,000 lb, rounded
+wing = 14000
+htail = 1800
+fin = 1100
+fuselage = 12500              # with the E-3's strengthening for the rotodome (estimate)
+rotodome = 6000               # the rotodome is quoted at 15,000 lb with its struts (secondary source)
+"rotodome strut" = 800
+"inboard nacelle" = 1110      # both nacelles of the pair
+"outboard nacelle" = 1110
+"Nose Gear" = 680
+"Main Gear" = 5200            # both bogies
+[[mass.payload]]
+name = "pilot"
+mass = 95
+position = [3.200, -0.550, 0.200]
+[[mass.payload]]
+name = "copilot"
+mass = 95
+position = [3.200, 0.550, 0.200]
+[[mass.payload]]
+name = "navigator and flight engineer"
+mass = 190
+position = [4.300, 0.0, 0.200]
+[[mass.payload]]
+name = "mission crew"         # up to 19 (USAF)
+mass = 1805
+position = [17.000, 0.0, 0.300]
+# 21,000 US gal (USAF) of JP-8 at 0.803 kg/l: 63,800 kg in the centre wing
+# tank, the inboard and outboard mains and the reserves (split estimated from
+# the 707's tank layout)
+[[mass.tank]]
+name = "centre wing"
+position = [18.200, 0.0, -1.300]
+capacity = 14000
+[[mass.tank]]
+name = "left inboard main"
+position = [21.040, -6.500, -0.200]
+capacity = 15700
+[[mass.tank]]
+name = "right inboard main"
+position = [21.040, 6.500, -0.200]
+capacity = 15700
+[[mass.tank]]
+name = "left outboard main"
+position = [25.230, -13.000, 0.600]
+capacity = 7500
+[[mass.tank]]
+name = "right outboard main"
+position = [25.230, 13.000, 0.600]
+capacity = 7500
+[[mass.tank]]
+name = "left reserve"
+position = [28.750, -18.500, 1.270]
+capacity = 1700
+[[mass.tank]]
+name = "right reserve"
+position = [28.750, 18.500, 1.270]
+capacity = 1700
+
+[dimensions]                  # published, overall, gear down (Wikipedia, E-3):
+length = 46.61                # m
+span = 44.42
+height = 12.60
+
+[targets]
+# E-3, published (Wikipedia; USAF): 461 kt maximum - Mach 0.78 at 29,000 ft,
+# the height its fact sheet gives as its ceiling (the speed's height is not
+# published: an estimate)
+max_mach = 0.78
+max_mach_altitude_ft = 29000
+operational_ceiling_ft = 29000  # USAF fact sheet: "above 29,000 feet"
