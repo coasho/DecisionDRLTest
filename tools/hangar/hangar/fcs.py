@@ -36,11 +36,22 @@ agent or a pilot flies it like any other aircraft:
 - roll: a roll-rate command about the flight path (stability axes), the
   roll mode's time constant placed at 0.2 s, the rate limited by the
   rolling moment available; an integrator holds the bank angle at neutral
-  stick;
-- yaw: a yaw damper on the washed-out stability-axis yaw rate (which also
-  coordinates rolls at angle of attack) and sideslip feedback where the
-  airframe's own weathercock stability is short of a dutch roll of 1.5 rad/s
-  at damping 0.5; the pedals command sideslip.
+  stick. A roll about the flight path at angle of attack is also a yaw
+  (r = p sin(alpha)), and the rudder has to give what the ailerons' own yaw
+  does not: the command is limited to what the rudder can coordinate - its
+  size to the rate whose yaw half the rudder's power holds while the
+  aircraft pitches under the roll (the pitch rate's inertia coupling, a
+  rising angle of attack, the yaw damping), and while it grows, its rate
+  of change to the roll acceleration whose yaw all of it gives (unless
+  even an uncoordinated roll could not leave 2 deg of sideslip). At low
+  speed and high angle of attack the rudder's yaw acceleration is a
+  twentieth to a fifth of the ailerons' roll acceleration, and a roll it
+  cannot follow turns the angle of attack into sideslip;
+- yaw: a yaw damper on the sideslip's rate (zero in a steady coordinated
+  turn, in a roll about the flight path and in a steady sideslip, so it
+  coordinates those without being washed out) and sideslip feedback where
+  the airframe's own weathercock stability is short of a dutch roll of
+  1.5 rad/s at damping 0.5; the pedals command sideslip.
 
 Gains are tables over dynamic pressure and Mach number, from pole placement
 on the linear model (linear.py's derivatives with the compressibility
@@ -73,6 +84,10 @@ A_SOUND = 320.0          # m/s: the speed of sound at mid altitudes, to turn Mac
 LIMIT_INTEGRAL = 5.0     # how much faster the pitch integrator trims the angle of attack left at a limit
 LBF = 4.4482216          # N per lbf: JSBSim reports thrust in lbf
 ROLL_SHARE = 0.5         # of a vectoring nozzle's travel the ailerons (and the rudder) use differentially
+PULL_YAW = 0.5           # of the rudder's yaw a roll's rate may spend while the aircraft pitches under it
+SHARE_FLOOR = 0.01       # the least rudder's share of a roll's yaw the roll acceleration is limited by
+ENTRY_SIDESLIP = math.radians(2.0)   # rad: the sideslip a change of roll rate may leave uncoordinated
+SHARE_ALPHA = tuple(range(-20, 55, 5))     # deg: where the rudder's share of a roll's yaw is tabulated
 
 DEFAULTS = {"n_max": 9.0, "n_min": -3.0, "alpha_max_deg": 25.0, "alpha_min_deg": -10.0, "roll_rate_deg_s": 300.0,
             "sideslip_deg": 10.0, "cap": 1.0, "short_period_zeta": 0.8, "roll_time_constant_s": 0.2,
@@ -247,6 +262,29 @@ def moment_compensation(tabs, line, machs, de_lo, de_hi):
     return np.clip(out, de_lo, de_hi)
 
 
+def roll_yaw_share(tabs, inertia, alphas=SHARE_ALPHA):
+    """The rudder's share of the yaw a roll about the flight path needs, per
+    unit of its roll acceleration, over angle of attack (deg). A stability-
+    axis roll acceleration a turns the body at a cos(alpha) about its x axis
+    and a sin(alpha) about its z axis: the moments Ixx pdot - Ixz rdot and
+    Izz rdot - Ixz pdot. The ailerons give the rolling moment, and with it
+    the yaw mu = Cn_da / Cl_da of it (the tables' slopes at neutral); the
+    rudder the rest of the yaw - per unit of a, as a yaw acceleration,
+    sin(alpha) - eta cos(alpha) - (Ixz / Izz)(cos(alpha) - mu sin(alpha)),
+    eta = mu Ixx / Izz. Almost none at a cruising angle of attack, where the
+    ailerons' yaw and a principal axis inclined to the flight path roll the
+    aircraft about the flight path by themselves; half and more past 30 deg."""
+    _, _, Ixx, _, Izz, Ixz = inertia
+    out = []
+    for al in alphas:
+        d = T.derivatives(tabs, al)
+        cl, cn = d.get("Cl_aileron", 0.0), d.get("Cn_aileron", 0.0)
+        mu = cn / cl if cl > 1e-3 else 0.0
+        r = math.radians(al)
+        out.append(math.sin(r) - mu * Ixx / Izz * math.cos(r) - Ixz / Izz * (math.cos(r) - mu * math.sin(r)))
+    return np.array(alphas, float), np.array(out)
+
+
 def design_point(tabs, aircraft, inertia, qbar_pa, mach, opt, cma_line=None):
     """The gains at one flight condition (dynamic pressure, Mach number),
     and the closed loop's modes there. With cma_line (the slope of
@@ -343,13 +381,16 @@ def design_point(tabs, aircraft, inertia, qbar_pa, mach, opt, cma_line=None):
            "k_alpha": float(ka), "k_q": float(kq), "k_ff": float(k_ff), "k_i": float(k_i),
            "omega_sp": omega, "eig_sp": [complex(e) for e in eig_sp], "open_loop_Ma": Ma,
            "k_roll": float(kp), "k_roll_ff": float(kff), "k_roll_i": float(kip), "p_max": p_max,
-           "k_yaw_r": float(kr), "k_yaw_beta": float(kb), "k_pedal": kped}
+           "k_yaw_r": float(kr), "k_yaw_beta": float(kb), "k_pedal": kped,
+           # what the rudder can coordinate a roll with: its yaw acceleration at full
+           # travel (1/s^2), and the yaw damping a roll's yaw rate meets (1/s)
+           "yaw_accel": float(abs(Ndr) * dr_max), "yaw_damping": float(max(-Nr, 0.0))}
     out.update(moments)
     return out
 
 
 GAINS = ("k_alpha", "k_q", "k_ff", "k_i", "n_alpha", "k_roll", "k_roll_ff", "k_roll_i", "p_max", "k_yaw_r", "k_yaw_beta",
-         "k_pedal")
+         "k_pedal", "yaw_accel", "yaw_damping")
 LIMITS = {"k_alpha": 6.0, "k_q": 3.0, "k_ff": 0.3, "k_i": 0.6, "k_roll": 1.5, "k_roll_ff": 1.5, "k_roll_i": 1.0,
           "k_yaw_r": 3.0, "k_yaw_beta": 3.0}
 # with thrust vectoring: each axis's gains as moments, and the surfaces' power they are divided by
@@ -372,7 +413,10 @@ def design(tabs, aircraft, mass_model):
     tables = {k: np.array([[p[k] for p in row] for row in points]) for k in GAINS}
     for k, lim in LIMITS.items():
         tables[k] = np.clip(tables[k], -lim, lim)
-    out = {"qbar_psf": np.array(QBAR_PSF), "mach": np.array(machs), "gains": tables, "options": opt, "points": points}
+    out = {"qbar_psf": np.array(QBAR_PSF), "mach": np.array(machs), "gains": tables, "options": opt, "points": points,
+           "roll_yaw_share": roll_yaw_share(tabs, inertia),
+           # the yaw acceleration per unit roll and pitch rate: (Iyy - Ixx) / Izz
+           "yaw_coupling": float((inertia[3] - inertia[2]) / inertia[4])}
     vec = vectoring(aircraft, inertia)
     if vec:
         out["vectoring"] = vec
@@ -500,6 +544,142 @@ def _integrator(name, rate, trigger, lim, power=None, sign=1.0, fmt="%.5f"):
         <fcs_function name="fcs/fbw/%s">
           <function><quotient><property>fcs/fbw/%s-moment</property><property>fcs/fbw/%s-total</property></quotient></function>
         </fcs_function>""" % (name, rate, power, name, sign * lim, power, name, name, trigger, name, name, name, name, power)
+
+
+def _roll_yaw_limit(aircraft, fbw, yaw_vectoring):
+    """fcs/fbw/p-cmd: the stick's roll rate (fcs/fbw/p-stick) limited to
+    what the rudder can coordinate. A roll about the flight path is also a
+    yaw, r = p sin(alpha); what the ailerons' own yaw does not give, the
+    rudder must. Its yaw acceleration at full travel Y (the design points',
+    with the vectoring nozzles' at the thrust there is now) bounds:
+
+    - the rate, to PULL_YAW of Y over the yaw each unit of roll rate needs
+      while the aircraft pitches under it: the pitch rate's inertia
+      coupling ((Iyy - Ixx) / Izz p q), the angle of attack rising
+      (p alphadot cos(alpha)) and the yaw damping the roll's yaw rate meets;
+    - the roll acceleration while the rate grows, to Y over the rudder's
+      share c of the roll's yaw (roll_yaw_share). An uncoordinated roll to
+      the rate p leaves at worst c^2 p^2 / (8 Y) of sideslip (rolled in at
+      twice that acceleration); one that cannot leave ENTRY_SIDESLIP needs
+      no limit - a small correction, or a fast roll at a low angle of
+      attack, where the ailerons' yaw and a principal axis inclined to the
+      flight path do most of it. A roll is stopped as fast as the ailerons
+      can: the yaw damper and the weathercock take the yaw rate out.
+
+    Without a rudder the stick's rate as it is."""
+    if "rudder" not in aircraft.channels():
+        return """        <pure_gain name="fcs/fbw/p-cmd">
+          <input>fcs/fbw/p-stick</input>
+          <gain>1</gain>
+        </pure_gain>"""
+    dr_max = math.radians(max(abs(x) for x in aircraft.channel_limits("rudder")))
+    if yaw_vectoring:
+        accel = """        <fcs_function name="fcs/fbw/yaw-accel">
+          <function><product><value>%.5f</value><property>fcs/fbw/ndr-total</property></product></function>
+        </fcs_function>""" % -dr_max
+    else:
+        accel = _gain_table("yaw-accel", fbw, "yaw_accel")
+    alphas, share = fbw["roll_yaw_share"]
+    rows = "\n".join("                  %9.5f %9.5f" % (math.radians(a), s) for a, s in zip(alphas, share))
+    return """        <!-- the rudder's yaw acceleration at full travel (1/s^2), and the yaw damping (1/s) -->
+%s
+%s
+        <!-- the rudder's share of the yaw a roll about the flight path needs, per unit of
+             its roll acceleration: sin(alpha), less the ailerons' own yaw and what a
+             principal axis inclined to the body axis gives -->
+        <fcs_function name="fcs/fbw/roll-yaw-share">
+          <function>
+            <table>
+              <independentVar lookup="row">aero/alpha-rad</independentVar>
+              <tableData>
+%s
+              </tableData>
+            </table>
+          </function>
+        </fcs_function>
+        <!-- the yaw acceleration each rad/s of roll rate needs while the aircraft pitches
+             under it: the pitch rate's inertia coupling, the angle of attack rising, and
+             the yaw damping the roll's yaw rate meets -->
+        <fcs_function name="fcs/fbw/p-yaw-need">
+          <function>
+            <abs>
+              <sum>
+                <product>
+                  <sum>
+                    <property>aero/alphadot-rad_sec</property>
+                    <product><value>%.5f</value><property>velocities/q-rad_sec</property></product>
+                  </sum>
+                  <cos><property>aero/alpha-rad</property></cos>
+                </product>
+                <product><property>fcs/fbw/yaw-damping</property><sin><property>aero/alpha-rad</property></sin></product>
+              </sum>
+            </abs>
+          </function>
+        </fcs_function>
+        <!-- no more roll rate than %g of the rudder's yaw holds: a roll the rudder cannot
+             follow turns the angle of attack into sideslip -->
+        <fcs_function name="fcs/fbw/p-yaw-max">
+          <function>
+            <quotient>
+              <product><value>%g</value><property>fcs/fbw/yaw-accel</property></product>
+              <max><value>0.001</value><property>fcs/fbw/p-yaw-need</property></max>
+            </quotient>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/p-limited">
+          <function>
+            <max>
+              <min><property>fcs/fbw/p-stick</property><property>fcs/fbw/p-yaw-max</property></min>
+              <product><value>-1</value><property>fcs/fbw/p-yaw-max</property></product>
+            </max>
+          </function>
+        </fcs_function>
+        <!-- and while the rate grows, no faster roll acceleration than all of it
+             coordinates, unless the roll asked for could not leave %.1f deg of sideslip
+             even uncoordinated: at worst c^2 p^2 / (8 Y), c the rudder's share, Y its yaw
+             acceleration, p the rate asked for -->
+        <fcs_function name="fcs/fbw/p-accel">
+          <function>
+            <product>
+              <quotient>
+                <property>fcs/fbw/yaw-accel</property>
+                <max><value>%g</value><abs><property>fcs/fbw/roll-yaw-share</property></abs></max>
+              </quotient>
+              <max>
+                <value>1</value>
+                <quotient>
+                  <product><value>%.5f</value><property>fcs/fbw/yaw-accel</property></product>
+                  <sum>
+                    <value>1e-9</value>
+                    <product>
+                      <property>fcs/fbw/roll-yaw-share</property><property>fcs/fbw/roll-yaw-share</property>
+                      <property>fcs/fbw/p-limited</property><property>fcs/fbw/p-limited</property>
+                    </product>
+                  </sum>
+                </quotient>
+              </max>
+            </product>
+          </function>
+        </fcs_function>
+        <!-- a roll is stopped as fast as the ailerons can -->
+        <fcs_function name="fcs/fbw/p-accel-up">
+          <function>
+            <sum><property>fcs/fbw/p-accel</property>
+              <product><value>1000</value><lt><property>fcs/fbw/p-cmd</property><value>0</value></lt></product></sum>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/p-accel-down">
+          <function>
+            <sum><property>fcs/fbw/p-accel</property>
+              <product><value>1000</value><gt><property>fcs/fbw/p-cmd</property><value>0</value></gt></product></sum>
+          </function>
+        </fcs_function>
+        <actuator name="fcs/fbw/p-cmd">
+          <input>fcs/fbw/p-limited</input>
+          <rate_limit sense="incr">fcs/fbw/p-accel-up</rate_limit>
+          <rate_limit sense="decr">fcs/fbw/p-accel-down</rate_limit>
+        </actuator>""" % (accel, _gain_table("yaw-damping", fbw, "yaw_damping"), rows, fbw["yaw_coupling"], PULL_YAW,
+                          PULL_YAW, math.degrees(ENTRY_SIDESLIP), SHARE_FLOOR, 8.0 * ENTRY_SIDESLIP)
 
 
 def vectoring_xml(aircraft):
@@ -801,7 +981,8 @@ def channels_xml(aircraft, fbw):
           </function>
         </fcs_function>""" % rad(o["roll_rate_deg_s"])
         parts.append("""      <channel name="Roll (fly-by-wire)">
-        <!-- hangar: roll-rate command about the flight path, bank hold at neutral stick -->
+        <!-- hangar: roll-rate command about the flight path, limited to what the rudder can
+             coordinate; bank hold at neutral stick -->
         <summer name="fcs/roll-trim-sum">
           <input>fcs/aileron-cmd-norm</input>
           <input>fcs/roll-trim-cmd-norm</input>
@@ -811,8 +992,8 @@ def channels_xml(aircraft, fbw):
 %s
 %s
 %s
-        <!-- the commanded rate halves towards alpha_max -->
-        <fcs_function name="fcs/fbw/p-cmd">
+        <!-- the stick's rate halves towards alpha_max -->
+        <fcs_function name="fcs/fbw/p-stick">
           <function>
             <product>
               <property>fcs/roll-trim-sum</property>
@@ -827,6 +1008,7 @@ def channels_xml(aircraft, fbw):
             </product>
           </function>
         </fcs_function>
+%s
         <fcs_function name="fcs/fbw/p-stability">
           <function>
             <sum>
@@ -866,6 +1048,7 @@ def channels_xml(aircraft, fbw):
         </pure_gain>
       </channel>""" % (gain("k-roll", "k_roll"), gain("k-roll-ff", "k_roll_ff"), gain("k-roll-i", "k_roll_i"),
                        p_max, rad(o["alpha_max_deg"] * 0.4), rad(o["alpha_max_deg"]),
+                       _roll_yaw_limit(aircraft, fbw, powered["yaw"]),
                        _integrator("roll-integral", "roll-error-rate", "fcs/fbw/reset", 0.5 * da,
                                    "lda" if powered["roll"] else None, POWER_SIGN["lda"]), -da, da))
     if "rudder" in aircraft.channels():
@@ -880,18 +1063,12 @@ def channels_xml(aircraft, fbw):
 %s
 %s
 %s
-        <fcs_function name="fcs/fbw/r-stability">
-          <function>
-            <difference>
-              <product><property>velocities/r-rad_sec</property><cos><property>aero/alpha-rad</property></cos></product>
-              <product><property>velocities/p-rad_sec</property><sin><property>aero/alpha-rad</property></sin></product>
-            </difference>
-          </function>
-        </fcs_function>
-        <washout_filter name="fcs/fbw/r-washout">
-          <input>fcs/fbw/r-stability</input>
-          <c1>1.0</c1>
-        </washout_filter>
+        <!-- the yaw damper damps the sideslip's rate, the stability-axis yaw rate less
+             the one that coordinates the bank and the side force: in the dutch roll the
+             yaw rate itself, and zero in a steady coordinated turn, in a roll about the
+             flight path and in a steady sideslip - it coordinates those as long as they
+             last (a damper on the washed-out yaw rate stopped coordinating a sustained
+             roll, and at low speed the roll turned the angle of attack into sideslip) -->
         <fcs_function name="fcs/fbw/rudder">
           <function>
             <sum>
@@ -899,7 +1076,7 @@ def channels_xml(aircraft, fbw):
               <product><value>-1</value><property>fcs/fbw/k-yaw-beta</property>
                 <difference><property>aero/beta-rad</property>
                   <product><value>%.5f</value><property>fcs/yaw-trim-sum</property></product></difference></product>
-              <product><value>-1</value><property>fcs/fbw/k-yaw-r</property><property>fcs/fbw/r-washout</property></product>
+              <product><property>fcs/fbw/k-yaw-r</property><property>aero/betadot-rad_sec</property></product>
             </sum>
           </function>
           <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>

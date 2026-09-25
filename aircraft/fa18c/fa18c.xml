@@ -690,7 +690,8 @@
         </actuator>
       </channel>
       <channel name="Roll (fly-by-wire)">
-        <!-- hangar: roll-rate command about the flight path, bank hold at neutral stick -->
+        <!-- hangar: roll-rate command about the flight path, limited to what the rudder can
+             coordinate; bank hold at neutral stick -->
         <summer name="fcs/roll-trim-sum">
           <input>fcs/aileron-cmd-norm</input>
           <input>fcs/roll-trim-cmd-norm</input>
@@ -776,8 +777,8 @@
             </table>
           </function>
         </fcs_function>
-        <!-- the commanded rate halves towards alpha_max -->
-        <fcs_function name="fcs/fbw/p-cmd">
+        <!-- the stick's rate halves towards alpha_max -->
+        <fcs_function name="fcs/fbw/p-stick">
           <function>
             <product>
               <property>fcs/roll-trim-sum</property>
@@ -792,6 +793,156 @@
             </product>
           </function>
         </fcs_function>
+        <!-- the rudder's yaw acceleration at full travel (1/s^2), and the yaw damping (1/s) -->
+        <fcs_function name="fcs/fbw/yaw-accel">
+          <function>
+            <table>
+              <independentVar lookup="row">aero/qbar-psf</independentVar>
+              <independentVar lookup="column">velocities/mach</independentVar>
+              <tableData>
+                       0.150     0.400     0.700     0.900     1.100     1.400     2.000
+              10.0   0.02343   0.02383   0.02506   0.02711   0.01529   0.01299   0.00832
+              20.0   0.04687   0.04765   0.05013   0.05421   0.03058   0.02598   0.01665
+              40.0   0.09374   0.09531   0.10106   0.11301   0.06411   0.05195   0.03330
+              80.0   0.23332   0.23835   0.25318   0.27622   0.15589   0.12922   0.07192
+             150.0   0.44652   0.45379   0.47679   0.51442   0.29011   0.24749   0.15914
+             300.0   0.88549   0.90018   0.94655   1.02302   0.57708   0.49078   0.31551
+             600.0   1.76441   1.79375   1.88641   2.03918   1.15032   0.97791   0.62802
+            1200.0   3.52135   3.58004   3.76536   4.07087   2.29647   1.95167   1.25209
+            2400.0   7.03330   7.15076   7.52162   8.13292   4.58804   3.89811   2.49983
+              </tableData>
+            </table>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/yaw-damping">
+          <function>
+            <table>
+              <independentVar lookup="row">aero/qbar-psf</independentVar>
+              <independentVar lookup="column">velocities/mach</independentVar>
+              <tableData>
+                       0.150     0.400     0.700     0.900     1.100     1.400     2.000
+              10.0   0.01116   0.00429   0.00264   0.00229   0.00191   0.00119   0.00056
+              20.0   0.02232   0.00858   0.00528   0.00459   0.00382   0.00238   0.00113
+              40.0   0.04464   0.01716   0.01214   0.01014   0.00846   0.00477   0.00226
+              80.0   0.11142   0.04313   0.02706   0.02414   0.02018   0.01188   0.00506
+             150.0   0.23567   0.09072   0.05606   0.04879   0.04063   0.02515   0.01121
+             300.0   0.47458   0.18242   0.11223   0.09733   0.08101   0.05067   0.02404
+             600.0   0.94476   0.36319   0.22355   0.19399   0.16147   0.10086   0.04787
+            1200.0   1.88677   0.72538   0.44658   0.38764   0.32267   0.20142   0.09545
+            2400.0   3.77332   1.45068   0.89311   0.77523   0.64530   0.40282   0.19076
+              </tableData>
+            </table>
+          </function>
+        </fcs_function>
+        <!-- the rudder's share of the yaw a roll about the flight path needs, per unit of
+             its roll acceleration: sin(alpha), less the ailerons' own yaw and what a
+             principal axis inclined to the body axis gives -->
+        <fcs_function name="fcs/fbw/roll-yaw-share">
+          <function>
+            <table>
+              <independentVar lookup="row">aero/alpha-rad</independentVar>
+              <tableData>
+                   -0.34907  -0.35886
+                   -0.26180  -0.27700
+                   -0.17453  -0.20034
+                   -0.08727  -0.11818
+                    0.00000  -0.02882
+                    0.08727   0.06094
+                    0.17453   0.14078
+                    0.26180   0.21341
+                    0.34907   0.29397
+                    0.43633   0.37706
+                    0.52360   0.45906
+                    0.61087   0.54081
+                    0.69813   0.61597
+                    0.78540   0.68225
+                    0.87266   0.73716
+              </tableData>
+            </table>
+          </function>
+        </fcs_function>
+        <!-- the yaw acceleration each rad/s of roll rate needs while the aircraft pitches
+             under it: the pitch rate's inertia coupling, the angle of attack rising, and
+             the yaw damping the roll's yaw rate meets -->
+        <fcs_function name="fcs/fbw/p-yaw-need">
+          <function>
+            <abs>
+              <sum>
+                <product>
+                  <sum>
+                    <property>aero/alphadot-rad_sec</property>
+                    <product><value>0.76911</value><property>velocities/q-rad_sec</property></product>
+                  </sum>
+                  <cos><property>aero/alpha-rad</property></cos>
+                </product>
+                <product><property>fcs/fbw/yaw-damping</property><sin><property>aero/alpha-rad</property></sin></product>
+              </sum>
+            </abs>
+          </function>
+        </fcs_function>
+        <!-- no more roll rate than 0.5 of the rudder's yaw holds: a roll the rudder cannot
+             follow turns the angle of attack into sideslip -->
+        <fcs_function name="fcs/fbw/p-yaw-max">
+          <function>
+            <quotient>
+              <product><value>0.5</value><property>fcs/fbw/yaw-accel</property></product>
+              <max><value>0.001</value><property>fcs/fbw/p-yaw-need</property></max>
+            </quotient>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/p-limited">
+          <function>
+            <max>
+              <min><property>fcs/fbw/p-stick</property><property>fcs/fbw/p-yaw-max</property></min>
+              <product><value>-1</value><property>fcs/fbw/p-yaw-max</property></product>
+            </max>
+          </function>
+        </fcs_function>
+        <!-- and while the rate grows, no faster roll acceleration than all of it
+             coordinates, unless the roll asked for could not leave 2.0 deg of sideslip
+             even uncoordinated: at worst c^2 p^2 / (8 Y), c the rudder's share, Y its yaw
+             acceleration, p the rate asked for -->
+        <fcs_function name="fcs/fbw/p-accel">
+          <function>
+            <product>
+              <quotient>
+                <property>fcs/fbw/yaw-accel</property>
+                <max><value>0.01</value><abs><property>fcs/fbw/roll-yaw-share</property></abs></max>
+              </quotient>
+              <max>
+                <value>1</value>
+                <quotient>
+                  <product><value>0.27925</value><property>fcs/fbw/yaw-accel</property></product>
+                  <sum>
+                    <value>1e-9</value>
+                    <product>
+                      <property>fcs/fbw/roll-yaw-share</property><property>fcs/fbw/roll-yaw-share</property>
+                      <property>fcs/fbw/p-limited</property><property>fcs/fbw/p-limited</property>
+                    </product>
+                  </sum>
+                </quotient>
+              </max>
+            </product>
+          </function>
+        </fcs_function>
+        <!-- a roll is stopped as fast as the ailerons can -->
+        <fcs_function name="fcs/fbw/p-accel-up">
+          <function>
+            <sum><property>fcs/fbw/p-accel</property>
+              <product><value>1000</value><lt><property>fcs/fbw/p-cmd</property><value>0</value></lt></product></sum>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/p-accel-down">
+          <function>
+            <sum><property>fcs/fbw/p-accel</property>
+              <product><value>1000</value><gt><property>fcs/fbw/p-cmd</property><value>0</value></gt></product></sum>
+          </function>
+        </fcs_function>
+        <actuator name="fcs/fbw/p-cmd">
+          <input>fcs/fbw/p-limited</input>
+          <rate_limit sense="incr">fcs/fbw/p-accel-up</rate_limit>
+          <rate_limit sense="decr">fcs/fbw/p-accel-down</rate_limit>
+        </actuator>
         <fcs_function name="fcs/fbw/p-stability">
           <function>
             <sum>
@@ -902,18 +1053,12 @@
             </table>
           </function>
         </fcs_function>
-        <fcs_function name="fcs/fbw/r-stability">
-          <function>
-            <difference>
-              <product><property>velocities/r-rad_sec</property><cos><property>aero/alpha-rad</property></cos></product>
-              <product><property>velocities/p-rad_sec</property><sin><property>aero/alpha-rad</property></sin></product>
-            </difference>
-          </function>
-        </fcs_function>
-        <washout_filter name="fcs/fbw/r-washout">
-          <input>fcs/fbw/r-stability</input>
-          <c1>1.0</c1>
-        </washout_filter>
+        <!-- the yaw damper damps the sideslip's rate, the stability-axis yaw rate less
+             the one that coordinates the bank and the side force: in the dutch roll the
+             yaw rate itself, and zero in a steady coordinated turn, in a roll about the
+             flight path and in a steady sideslip - it coordinates those as long as they
+             last (a damper on the washed-out yaw rate stopped coordinating a sustained
+             roll, and at low speed the roll turned the angle of attack into sideslip) -->
         <fcs_function name="fcs/fbw/rudder">
           <function>
             <sum>
@@ -921,7 +1066,7 @@
               <product><value>-1</value><property>fcs/fbw/k-yaw-beta</property>
                 <difference><property>aero/beta-rad</property>
                   <product><value>0.17453</value><property>fcs/yaw-trim-sum</property></product></difference></product>
-              <product><value>-1</value><property>fcs/fbw/k-yaw-r</property><property>fcs/fbw/r-washout</property></product>
+              <product><property>fcs/fbw/k-yaw-r</property><property>aero/betadot-rad_sec</property></product>
             </sum>
           </function>
           <clipto> <min>-0.52360</min> <max>0.52360</max> </clipto>
