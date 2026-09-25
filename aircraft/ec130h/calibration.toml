@@ -1,0 +1,6 @@
+# Written by hangar calibrate (2026-09-25 15:14) to meet the [targets] of ec130h.toml:
+# corrections for what the physics estimate does not see. Delete this file to
+# go back to the pure estimate.
+[calibration]
+extra_drag_area_m2 = 2.4477   # drag along the flow, added to the estimate (m2)
+# fitted: max speed 261.5 kt (target 261); climb 2287 ft/min predicted

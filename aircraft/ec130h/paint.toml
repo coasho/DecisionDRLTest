@@ -1,0 +1,13 @@
+# The EC-130H's grey all over (about FS 36118 gunship grey), its cockpit
+# windows painted
+[paint]
+scheme = "single"
+colours = ["#5d6265"]
+windows = "#1b2127"
+windows_x = [1.95, 3.60]
+windows_z = [3.15, 3.65]
+windscreen_x = [1.35, 1.95]
+windscreen_y = 1.10
+panel_lines = 0.07
+wear = 0.06
+gloss = 0.25

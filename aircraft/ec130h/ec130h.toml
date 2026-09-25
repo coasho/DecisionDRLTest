@@ -1,0 +1,335 @@
+# Lockheed EC-130H Compass Call, built by hangar from public data: the
+# C-130H airframe with four Allison T56-A-15 turboprops on Hamilton Standard
+# 54H60 four-blade propellers, carrying the Compass Call jamming system - the
+# "spur" antenna array under the tail, pods under the outer wings, the
+# blister fairings on the aft fuselage.
+#
+# Frame: the C-130J's (aircraft/c130j/c130j.toml): metres, x aft from the
+# radome's tip, y right, z up from the ground with the aircraft parked. The
+# wing, the tail, the fuselage, the sponsons, the nacelles' outline and the
+# gear are the C-130J's: the C-130H and J share the airframe.
+#
+# Sources: Wikipedia's EC-130H article (length 98 ft 9 in, height 38 ft 3
+# in, empty 101,000 lb, maximum take-off 155,000 lb, 4 x T56-A-15 of 4,591
+# shp, ceiling 25,000 ft, a crew of 13); Air & Space Forces Magazine's
+# EC-130H page ("300 mph at 20,000 ft"); the Purdue propulsion pages' T56-A-15
+# (4,591 shp, 0.54 lb/(shp h), 1,890 lb, pressure ratio 9.6); the C-130's
+# propellers turn 1,020 rpm through 13.54:1 (PPRuNe); photographs of
+# EC-130Hs (Wikimedia Commons, USAF) for the antennas' places (estimates).
+
+[aircraft]
+name = "ec130h"
+description = "Lockheed EC-130H Compass Call (hangar build)"
+category = "electronic warfare"
+
+[analysis]
+speed = 110.0                   # m/s: the Reynolds numbers (cruise, equivalent sea-level speed)
+induced_drag = "trefftz"      # a high-aspect-ratio wing's induced drag from its loading (docs/hangar.md)
+
+# The wing: 162.1 m2 (1,745 ft2), span 40.41 m, NACA 64A318 at the root to
+# 64A412 at the tip, on top of the fuselage. The centre section's constant
+# 4.90 m chord runs out to 5.65 m, just past the inboard engines; the outer
+# panels taper to 2.50 m at the tip (the drawing's 2.62 m gives 164.8 m2),
+# their leading edge swept 2.6 deg, their trailing edge forward, 2.5 deg of
+# dihedral (the three-view's front view). Twist: 3 deg at the root, 0.5 deg
+# at the tip (estimate: a transport's usual washout).
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [11.150, 0.000, 4.960], chord = 4.900, twist = 3.0, airfoil = "naca64a318" },
+  { le = [11.150, 5.650, 4.960], chord = 4.900, twist = 2.6, airfoil = "naca64a318" },
+  { le = [11.800, 20.205, 5.596], chord = 2.500, twist = 0.5, airfoil = "naca64a412" },
+]
+controls = [
+  # Lockheed-Fowler flaps from the fuselage to the ailerons (travel: estimate)
+  { name = "flap", channel = "flap", kind = "fowler", span = [0.10, 0.68], chord_fraction = 0.30, limits = [0, 35] },
+  { name = "aileron", channel = "aileron", span = [0.68, 0.97], chord_fraction = 0.26, limits = [-20, 20] },
+]
+
+# The tailplane: 16.05 m span (52.7 ft), its trailing edge straight across,
+# the leading edge swept; NACA 64A012 (estimate). Carried through the
+# fuselage to the centre line.
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a012"
+sections = [
+  { le = [23.640, 0.000, 4.600], chord = 3.920 },
+  { le = [25.870, 8.025, 4.600], chord = 1.690 },
+]
+controls = [
+  { name = "elevator", channel = "elevator", span = [0.12, 1.0], chord_fraction = 0.35, limits = [-25, 15] },
+]
+
+# The fin: 5.8 m root chord on the fuselage's top, 1.66 m tip, its leading
+# edge swept 23 deg; its tip at the published 11.84 m height (the drawing
+# puts it at 11.5 m)
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a012"
+sections = [
+  { le = [23.100, 0.000, 4.500], chord = 5.800 },
+  { le = [26.220, 0.000, 11.800], chord = 1.660 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.04, 1.0], chord_fraction = 0.35, limits = [-35, 35] },
+]
+
+# The fuselage: the radome, the flight deck, the constant section of the
+# cargo hold, and the upswept rear fuselage whose underside is the ramp and
+# the door above it, to the tail cone
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.000, w = 0.00, top = 2.280, bottom = 2.280 },
+  { x = 0.300, w = 0.95, top = 2.740, bottom = 1.780, n = 2.0 },
+  { x = 0.740, w = 1.50, top = 3.150, bottom = 1.490, n = 2.1 },
+  { x = 1.340, w = 2.20, top = 3.570, bottom = 1.250, n = 2.2 },
+  { x = 1.930, w = 2.75, top = 3.920, bottom = 1.100, n_top = 2.2, n_bottom = 2.6 },
+  { x = 2.820, w = 3.40, top = 4.310, bottom = 0.980, n_top = 2.3, n_bottom = 3.0 },
+  { x = 3.720, w = 3.75, top = 4.490, bottom = 0.890, n_top = 2.4, n_bottom = 3.2 },
+  { x = 5.000, w = 3.90, top = 4.520, bottom = 0.860, n_top = 2.4, n_bottom = 3.4 },
+  { x = 17.400, w = 3.90, top = 4.520, bottom = 0.860, n_top = 2.4, n_bottom = 3.4 },
+  { x = 18.900, w = 3.85, top = 4.520, bottom = 1.190, n_top = 2.4, n_bottom = 3.2 },
+  { x = 20.400, w = 3.70, top = 4.520, bottom = 1.720, n_top = 2.4, n_bottom = 3.0 },
+  { x = 21.900, w = 3.45, top = 4.550, bottom = 2.230, n_top = 2.4, n_bottom = 2.8 },
+  { x = 23.400, w = 3.05, top = 4.600, bottom = 2.760, n_top = 2.3, n_bottom = 2.6 },
+  { x = 24.900, w = 2.50, top = 4.650, bottom = 3.330, n = 2.3 },
+  { x = 26.400, w = 1.85, top = 4.620, bottom = 3.870, n = 2.2 },
+  { x = 27.900, w = 1.10, top = 4.550, bottom = 4.160, n = 2.1 },
+  { x = 29.000, w = 0.50, top = 4.500, bottom = 4.310, n = 2.0 },
+  { x = 29.790, w = 0.00, top = 4.410, bottom = 4.410 },
+]
+
+# The sponsons either side of the cargo hold's floor: the main gear's bays
+[[body]]
+name = "sponson"
+kind = "pod"
+mirror = true
+stations = [
+  { x = 9.200, y = 1.650, w = 0.50, top = 1.900, bottom = 1.400, n = 2.0 },
+  { x = 10.200, y = 1.700, w = 1.00, top = 2.550, bottom = 0.880, n = 2.4 },
+  { x = 16.000, y = 1.700, w = 1.10, top = 2.550, bottom = 0.880, n = 2.6 },
+  { x = 17.700, y = 1.650, w = 0.70, top = 2.100, bottom = 1.400, n = 2.0 },
+]
+
+# The nacelles: the spinner (the propeller's hub, 1 m across), the engine
+# under the wing, the exhaust fairing behind it
+[[body]]
+name = "inboard nacelle"
+kind = "nacelle"
+mirror = true
+stations = [
+  { x = 8.250, y = 5.080, w = 0.00, top = 3.950, bottom = 3.950 },
+  { x = 8.600, y = 5.080, w = 0.70, top = 4.300, bottom = 3.600, n = 2.0 },
+  { x = 9.200, y = 5.080, w = 1.00, top = 4.450, bottom = 3.450, n = 2.0 },
+  { x = 10.000, y = 5.080, w = 1.10, top = 4.700, bottom = 3.300, n = 2.4 },
+  { x = 13.000, y = 5.080, w = 1.10, top = 4.800, bottom = 3.350, n = 2.4 },
+  { x = 15.500, y = 5.080, w = 0.80, top = 4.800, bottom = 3.900, n = 2.2 },
+  { x = 16.800, y = 5.080, w = 0.30, top = 4.800, bottom = 4.500, n = 2.0 },
+]
+
+[[body]]
+name = "outboard nacelle"
+kind = "nacelle"
+mirror = true
+stations = [
+  { x = 8.300, y = 10.250, w = 0.00, top = 4.190, bottom = 4.190 },
+  { x = 8.650, y = 10.250, w = 0.70, top = 4.540, bottom = 3.840, n = 2.0 },
+  { x = 9.250, y = 10.250, w = 1.00, top = 4.690, bottom = 3.690, n = 2.0 },
+  { x = 10.050, y = 10.250, w = 1.10, top = 4.940, bottom = 3.540, n = 2.4 },
+  { x = 13.050, y = 10.250, w = 1.10, top = 5.040, bottom = 3.590, n = 2.4 },
+  { x = 15.550, y = 10.250, w = 0.80, top = 5.040, bottom = 4.140, n = 2.2 },
+  { x = 16.850, y = 10.250, w = 0.30, top = 5.040, bottom = 4.740, n = 2.0 },
+]
+
+# The Compass Call antennas (estimates from photographs): a pod under each
+# outer wing, outboard of the outboard engine; a blister either side of the
+# aft fuselage; the spur array's two struts, raked down and aft under the
+# tail, carrying its wires (not drawn). Their drag is in the calibration's.
+[[body]]
+name = "wing pod"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 11.600, y = 14.600, w = 0.20, top = 4.550, bottom = 4.350, n = 2.0 },
+  { x = 12.200, y = 14.600, w = 0.62, top = 4.760, bottom = 4.140, n = 2.0 },
+  { x = 14.600, y = 14.600, w = 0.62, top = 4.760, bottom = 4.140, n = 2.0 },
+  { x = 15.300, y = 14.600, w = 0.20, top = 4.550, bottom = 4.350, n = 2.0 },
+]
+
+[[strut]]
+name = "wing pod pylon"
+from = [13.400, 14.600, 4.700]
+to = [13.400, 14.600, 5.450]
+chord = 1.400
+thickness = 0.160
+
+[[body]]
+name = "aft blister"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 18.600, y = 1.700, w = 0.20, top = 3.600, bottom = 2.800, n = 2.0 },
+  { x = 19.300, y = 1.820, w = 0.60, top = 3.800, bottom = 2.600, n = 3.0 },
+  { x = 21.800, y = 1.720, w = 0.60, top = 3.800, bottom = 2.900, n = 3.0 },
+  { x = 22.500, y = 1.600, w = 0.20, top = 3.600, bottom = 3.100, n = 2.0 },
+]
+
+[[strut]]
+name = "spur strut"
+from = [24.600, 0.800, 3.500]
+to = [27.600, 2.400, 2.700]
+chord = 0.300
+thickness = 0.100
+
+[[engine]]
+name = "T56-A-15 inboard"
+type = "turboprop"
+power_kw = 3423                 # 4,591 shp (Purdue; Wikipedia)
+psfc = 0.328                    # kg/(kW h): 0.54 lb/(shp h) (Purdue)
+position = [10.600, 5.080, 3.950]
+mirror = true
+mass = 857                      # 1,890 lb dry (Purdue)
+[engine.propeller]
+position = [8.920, 5.080, 3.950]
+diameter = 4.115                # 13.5 ft (the 54H60)
+blades = 4
+rpm = 1020                      # the C-130's propellers turn 1,020 rpm
+gear_ratio = 13.54              # the T56's 13,820 rpm through 13.54:1 (PPRuNe)
+blade_angle = [15, 65]          # deg at 75 % radius, the governor's range (estimate)
+airfoil = "naca4412"            # estimate: the aluminium paddle blade
+tip_thickness = 0.08
+chord = [[0.20, 0.40], [0.50, 0.42], [0.80, 0.38], [1.00, 0.26]]   # c/R: wide paddle blades (estimate)
+hub_fraction = 0.20
+mass = 500                      # the propeller (estimate)
+ixx = 700                       # kg m2: the blades, the power turbine and gears (estimate)
+rotation = "cw"
+handed = false                  # all four turn the same way
+
+[[engine]]
+name = "T56-A-15 outboard"
+type = "turboprop"
+power_kw = 3423
+psfc = 0.328
+position = [10.650, 10.250, 4.190]
+mirror = true
+mass = 857
+[engine.propeller]
+position = [8.970, 10.250, 4.190]
+diameter = 4.115
+blades = 4
+rpm = 1020
+gear_ratio = 13.54
+blade_angle = [15, 65]
+airfoil = "naca4412"
+tip_thickness = 0.08
+chord = [[0.20, 0.40], [0.50, 0.42], [0.80, 0.38], [1.00, 0.26]]
+hub_fraction = 0.20
+mass = 500
+ixx = 700
+rotation = "cw"
+handed = false
+
+# The nose gear: twin wheels, steered, folding forward into the nose
+[[gear]]
+name = "Nose Gear"
+position = [3.420, 0.0, -0.150]
+steerable = true
+max_steer = 60
+wheels = 2
+wheel_diameter = 0.85
+wheel_width = 0.32
+retractable = true
+retract = "forward"
+static_deflection = 0.15
+attach = [3.600, 0.0, 1.300]
+
+# The main gear: two wheels in tandem each side, each on its own strut,
+# rising into the sponsons (wheel track 4.34 m), their wells drawn open
+# (hangar's doors, hinged either side of a leg's swing, meet the wheel as
+# it folds into the narrow sponson)
+[[gear]]
+name = "Main Gear Front"
+mirror = true
+position = [12.310, 2.170, -0.150]
+wheel_diameter = 1.08
+wheel_width = 0.50
+retractable = true
+retract = "forward"
+doors = false
+static_deflection = 0.15
+attach = [12.310, 2.000, 2.000]
+
+[[gear]]
+name = "Main Gear Rear"
+mirror = true
+position = [13.820, 2.170, -0.150]
+wheel_diameter = 1.08
+wheel_width = 0.50
+retractable = true
+retract = "aft"
+doors = false
+static_deflection = 0.15
+attach = [13.820, 2.000, 2.000]
+
+[mass]
+empty = 45813                   # 101,000 lb (Wikipedia): the Compass Call's equipment
+empty_cg = [12.300, 0.0, 3.300]  # estimate: about 22 % MAC
+[mass.component]                # kg (estimates: a transport's group weights)
+wing = 5300
+htail = 700
+fin = 600
+fuselage = 7000
+sponson = 600
+"inboard nacelle" = 500
+"outboard nacelle" = 500
+"Nose Gear" = 400
+"Main Gear Front" = 1000
+"Main Gear Rear" = 1000
+[[mass.payload]]
+name = "flight crew"
+mass = 400                      # pilots, navigator, flight engineer
+position = [3.300, 0.0, 3.300]
+[[mass.payload]]
+name = "mission crew"
+mass = 900                      # nine at the consoles in the hold
+position = [11.000, 0.0, 2.400]
+# The C-130H's wing tanks, flown 60 % full: 59.6 t, a mission weight
+[[mass.tank]]
+name = "left outer wing"
+position = [12.800, -12.000, 5.200]
+capacity = 5205
+fill = 0.6
+[[mass.tank]]
+name = "left inner wing"
+position = [12.800, -4.500, 4.960]
+capacity = 5205
+fill = 0.6
+[[mass.tank]]
+name = "right inner wing"
+position = [12.800, 4.500, 4.960]
+capacity = 5205
+fill = 0.6
+[[mass.tank]]
+name = "right outer wing"
+position = [12.800, 12.000, 5.200]
+capacity = 5205
+fill = 0.6
+
+[dimensions]                    # published, overall (Wikipedia, EC-130H)
+length = 30.10                  # 98 ft 9 in
+span = 40.41
+height = 11.66                  # 38 ft 3 in
+
+[targets]
+# EC-130H, published: 300 mph (261 kt) at 20,000 ft (Air & Space Forces
+# Magazine); ceiling 25,000 ft (Wikipedia; at a weight not given - compared
+# in docs/hangar.md, not checked)
+max_speed_ktas = 261            # at max_speed_altitude_ft: calibrates the extra drag
+max_speed_altitude_ft = 20000

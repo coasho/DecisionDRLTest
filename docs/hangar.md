@@ -683,6 +683,7 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 | A-10C | `a10c` | 0.57 at sea level (0.576) | 4,700 | 29,800 (45,000) |
 | Su-25 | `su25` | 0.82 at sea level (0.796) | 17,000 | 52,400 (23,000 unpressurised) |
 | C-130J | `c130j` | 361 kt at 22,000 ft (362) | 2,800 | 32,400 (28,000 at 70 t) |
+| EC-130H | `ec130h` | 262 kt at 20,000 ft (261) | 2,300 | 24,500 (25,000) |
 | C-17A | `c17a` | 0.87 at 28,000 ft (0.875) | 6,200 | 36,800 (45,000 certified) |
 | KC-46A | `kc46a` | 0.86 at 26,000 ft (0.86) | 5,200 | 29,500 (40,100 certified) |
 | EA-18G | `ea18g` | 1.80 at 40,000 ft (1.8) | 44,500 | 57,200 (50,000+) |
@@ -724,6 +725,12 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   payload): hangar flies every test at one weight. Its main wheels, in
   tandem, rise into open wells in the sponsons; its six-bladed propellers
   turn at the governed 1,020 rpm.
+- The EC-130H is the C-130H airframe the C-130J shares, on four T56s and
+  four-bladed 54H60 propellers, with the Compass Call antennas: pods under
+  the outer wings, blisters on the aft fuselage, the spur array's struts
+  under the tail. It flies at 59.6 t, 60 % of its fuel; its antennas and
+  the spur's wires take 2.4 m² of extra drag (CD +0.015) for its published
+  300 mph at 20,000 ft.
 - The Su-25 flies at 13.1 t, full of fuel. It stands 5 deg nose-high on its
   gear (its height is measured so), its main wheels fold into open wells in
   the nacelles. Its estimated zero-lift drag leaves out its ten pylons:
