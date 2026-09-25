@@ -1,0 +1,13 @@
+# The C-130J's grey all over (Air Mobility Command's, about FS 36173), its
+# cockpit windows painted
+[paint]
+scheme = "single"
+colours = ["#646b6e"]
+windows = "#1b2127"
+windows_x = [1.95, 3.60]
+windows_z = [3.15, 3.65]
+windscreen_x = [1.35, 1.95]
+windscreen_y = 1.10
+panel_lines = 0.07
+wear = 0.05
+gloss = 0.3

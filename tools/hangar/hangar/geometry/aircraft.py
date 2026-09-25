@@ -58,19 +58,22 @@ class Gear:
 
 
 class Engine:
-    """A piston engine or electric motor with its propeller, or a turbofan
-    (with or without afterburner) and its nozzle. For a turbofan the
-    "propeller" fields describe the nozzle: where the thrust acts and which
-    way it points, and there is no disc."""
+    """A piston engine or electric motor with its propeller, a turboprop with
+    its constant-speed propeller, or a turbofan (with or without afterburner)
+    and its nozzle. For a turbofan the "propeller" fields describe the
+    nozzle: where the thrust acts and which way it points, and there is no
+    disc."""
 
     def __init__(self, spec):
         self.name = spec.get("name", "engine")
         self.type = spec.get("type", "piston")
-        if self.type not in ("piston", "electric", "turbofan"):
-            raise ValueError("engine %r: type must be piston, electric or turbofan" % self.name)
+        if self.type not in ("piston", "electric", "turbofan", "turboprop"):
+            raise ValueError("engine %r: type must be piston, electric, turbofan or turboprop" % self.name)
         self.position = np.asarray(spec.get("position", [0.0, 0.0, 0.0]), float)
         self.mass = spec.get("mass")
         self.mirror = bool(spec.get("mirror", False))
+        self.handed = True
+        self.prop_mass = None
         if self.type == "turbofan":
             if "thrust_dry_kn" not in spec:
                 raise ValueError("engine %r: a turbofan needs thrust_dry_kn (sea-level static, military power)" % self.name)
@@ -110,15 +113,58 @@ class Engine:
         if "power_kw" not in spec:
             raise ValueError("engine %r: power_kw is required" % self.name)
         self.power_kw = float(spec["power_kw"])
-        self.rpm = float(spec.get("rpm", 2700.0))
         prop = spec.get("propeller", {})
+        # the reduction gearbox: the engine's rpm over the propeller's, as JSBSim takes it
+        self.gear_ratio = float(prop.get("gear_ratio", 1.0))
+        if self.gear_ratio <= 0.0:
+            raise ValueError("engine %r: gear_ratio must be positive" % self.name)
+        if self.type == "turboprop":
+            self._turboprop(spec, prop)
+        else:
+            self.rpm = float(spec.get("rpm", 2700.0))
+            self.prop_rpm = self.rpm / self.gear_ratio
         self.prop_position = np.asarray(prop.get("position", self.position), float)
         self.prop_diameter = float(prop.get("diameter", 1.8))
         self.prop_blades = int(prop.get("blades", 2))
         self.prop_pitch = prop.get("pitch")  # geometric pitch (m) at 75 % radius, fixed pitch
         self.prop_sense = prop.get("rotation", "cw")  # seen from behind: cw = JSBSim sense 1
+        # a mirrored engine's copy turns the other way (handed propellers) unless handed = false
+        self.handed = bool(prop.get("handed", True))
+        # the propeller's own mass (kg): at its hub, apart from the engine's, and its spin inertia
+        self.prop_mass = float(prop["mass"]) if "mass" in prop else None
         self.prop_orient = np.radians(np.asarray(prop.get("orient", [0.0, 0.0, 0.0]), float))  # roll, pitch, yaw
         self.prop_spec = prop
+
+    def _turboprop(self, spec, prop):
+        """A gas turbine driving a constant-speed propeller through a reduction
+        gearbox: its published shaft power (power_kw, the rating), its power
+        specific fuel consumption at that power (psfc, kg/(kW h)), and the
+        propeller's governed speed (rpm), gear ratio and blade-angle range
+        (blade_angle = [low, high], deg at 75 % radius: the governor turns the
+        blades between them). thermodynamic_power_kw: what the engine's core
+        makes at sea-level static when it is not held to its rating - a
+        flat-rated engine keeps its rating to a greater height - and
+        throttle_ratio, Mattingly's TR: where hot air starts to cut the power."""
+        if "rpm" not in prop:
+            raise ValueError("engine %r: a turboprop's [engine.propeller] needs rpm (its governed speed)" % self.name)
+        if "blade_angle" not in prop:
+            raise ValueError("engine %r: a turboprop's [engine.propeller] needs blade_angle = [low, high] "
+                             "(deg at 75 %% radius)" % self.name)
+        self.prop_rpm = float(prop["rpm"])
+        self.rpm = self.prop_rpm * self.gear_ratio      # the engine's output shaft
+        self.psfc = float(spec.get("psfc", 0.30))
+        self.thermo_power_kw = float(spec.get("thermodynamic_power_kw", self.power_kw))
+        self.throttle_ratio = float(spec.get("throttle_ratio", 1.0))
+        lo, hi = (float(v) for v in prop["blade_angle"])
+        self.blade_angle = (lo, hi)
+        if not (self.prop_rpm > 0.0 and self.power_kw > 0.0 and self.psfc > 0.0):
+            raise ValueError("engine %r: rpm, power_kw and psfc must be positive" % self.name)
+        if self.thermo_power_kw < self.power_kw:
+            raise ValueError("engine %r: thermodynamic_power_kw is at least power_kw (the rating)" % self.name)
+        if not -30.0 <= lo < hi <= 95.0:
+            raise ValueError("engine %r: blade_angle = [low, high], low below high, within -30..95 deg" % self.name)
+        if not 0.8 <= self.throttle_ratio <= 1.5:
+            raise ValueError("engine %r: throttle_ratio must be 0.8-1.5" % self.name)
 
     @property
     def has_propeller(self):
@@ -135,7 +181,8 @@ class Engine:
     def copies(self):
         if self.mirror:
             flip = np.array([1.0, -1.0, 1.0])
-            return [(self.name + " L", self.position * flip, self.prop_position * flip, "ccw" if self.prop_sense == "cw" else "cw"),
+            other = ("ccw" if self.prop_sense == "cw" else "cw") if self.handed else self.prop_sense
+            return [(self.name + " L", self.position * flip, self.prop_position * flip, other),
                     (self.name + " R", self.position, self.prop_position, self.prop_sense)]
         return [(self.name, self.position, self.prop_position, self.prop_sense)]
 

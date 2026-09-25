@@ -111,5 +111,74 @@ class Stages(unittest.TestCase):
         self.assertTrue(os.path.isfile(html.write(d)))
 
 
+@unittest.skipIf(fsim is None, "the fsim package is not importable")
+class TurbopropStart(unittest.TestCase):
+    """The platform starts every engine running (JsbsimModel: InitRunning),
+    and JSBSim then marches the engines to their steady state in half-second
+    steps - at a spawn, a reset and in its trim. A turboprop must come out
+    of each with its propeller at the governed speed and its engine at the
+    power it had, and fly on without a thrust transient."""
+
+    def setUp(self):
+        out = os.environ.get("FSIM_TEST_OUTPUT")
+        if out:
+            os.makedirs(out, exist_ok=True)
+        self.base = tempfile.mkdtemp(prefix="hangar-tp-", dir=out or None)
+        self.name = "hangartp"
+        folder = os.path.join(self.base, self.name)
+        os.makedirs(folder)
+        with open(os.path.join(ROOT, "aircraft", "c130j", "c130j.toml"), encoding="utf-8") as f:
+            text = f.read().replace('name = "c130j"', 'name = "%s"' % self.name, 1)
+        self.toml = os.path.join(folder, self.name + ".toml")
+        with open(self.toml, "w", encoding="utf-8") as f:
+            f.write(text)
+        self.old_path = os.environ.get("FSIM_AIRCRAFT_PATH")
+        os.environ["FSIM_AIRCRAFT_PATH"] = self.base
+
+    def tearDown(self):
+        if self.old_path is None:
+            os.environ.pop("FSIM_AIRCRAFT_PATH", None)
+        else:
+            os.environ["FSIM_AIRCRAFT_PATH"] = self.old_path
+        if not os.environ.get("FSIM_TEST_OUTPUT"):
+            shutil.rmtree(self.base, ignore_errors=True)
+
+    def test_runs_from_spawn_reset_and_trim(self):
+        d = pipeline.Design(self.toml, log=lambda *a: None)
+        d.aircraft.spec.setdefault("analysis", {})["quick"] = True
+        for stage in ("aero", "mass", "propulsion", "build"):
+            getattr(d, stage)()
+        e = d.aircraft.engines[0]
+        world = fsim.World("hangar-test-turboprop", publish=False, workers=1)
+        try:
+            v = world.create_vehicle("tp", type="jsbsim:" + self.name, latitude_deg=37.6, longitude_deg=-122.4,
+                                     altitude_msl_m=3000.0, heading_deg=0.0, airspeed_ms=130.0)
+            n = sum(len(x.copies()) for x in d.aircraft.engines)
+
+            def fly(label, throttle, seconds=2.0):
+                thrust, rpm = [], []
+                for _ in range(int(seconds / world.step_seconds)):
+                    v.command_actuator(throttle=throttle)
+                    world.step()
+                    thrust.append(sum(v.get_property("propulsion/engine[%d]/thrust-lbs" % i) for i in range(n)))
+                    rpm += [v.get_property("propulsion/engine[%d]/propeller-rpm" % i) for i in range(n)]
+                with self.subTest(label):
+                    # the propellers at their governed speed, within 1 %
+                    self.assertLess(max(abs(r / e.prop_rpm - 1.0) for r in rpm), 0.01, label)
+                    # the thrust steady: no step of more than 5 % of it (the engines
+                    # spool down to the throttle smoothly)
+                    steps = [abs(b - a) / max(abs(a), 1.0) for a, b in zip(thrust, thrust[1:])]
+                    self.assertLess(max(steps), 0.05, label)
+                    self.assertGreater(min(thrust), 0.0, label)
+                    self.assertGreater(v.get_property("propulsion/engine[0]/power-hp"), 100.0, label)
+            fly("spawn", 0.6)
+            v.reset()
+            fly("reset", 0.6)
+            v.set_property("simulation/do_simple_trim", 1)
+            fly("trim", v.get_property("fcs/throttle-cmd-norm"))
+        finally:
+            world.close()
+
+
 if __name__ == "__main__":
     unittest.main()

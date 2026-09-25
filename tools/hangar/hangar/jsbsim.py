@@ -584,6 +584,7 @@ def flight_control_xml(aircraft, fbw=None, yaw_damper=None):
           <output>fcs/throttle-pos-norm[%d]</output>
         </pure_gain>
       </channel>""" % (i, i, lever, i))
+    parts.extend(governor_xml(aircraft))
     pistons = sum(len(e.copies()) for e in aircraft.engines if e.type == "piston")
     if pistons:
         # JSBSim's piston engine dies of a rich mixture at altitude: lean it with
@@ -627,12 +628,192 @@ def _engine_units(aircraft):
     return [(e, name) for e in aircraft.engines for name, _, _, _ in e.copies()]
 
 
+# The propeller governor. JSBSim's constant-speed propeller turns its blades
+# 1 deg/s for every rpm it runs from the speed it aims at, minrpm + (maxrpm -
+# minrpm) x its advance command: an integral governor. On a heavy propeller
+# that alone rings - the blades' power against the propeller's inertia - so
+# the command aims GOVERNOR_LEAD_S times the speed's rate of change below the
+# governed speed: the proportional part that damps it. The rate is the power
+# the engine gives less the power the propeller takes, over its inertia.
+#
+# When time stands still, JSBSim finds the engines' steady state by marching
+# them in half-second steps (FGPropulsion::GetSteadyState: the start, every
+# reset, every trim), where the same governor overshoots from stop to stop
+# and leaves the propeller anywhere (a C-130J's at twice its speed, its
+# thrust reversed). So while the simulation's dt is 0 the propeller is held
+# at a blade angle, the one at which it takes the engine's power at its
+# governed speed there (propulsion.blade_angles_for_power): the steady state
+# is then the governed one, and the governor takes over as time runs.
+GOVERNOR_LEAD_S = 0.15
+
+
+def governor_xml(aircraft):
+    """The channels that hold each turboprop's propeller at its governed
+    speed, through JSBSim's fcs/advance-cmd-norm (propulsion.GOVERNOR_RANGE),
+    and set its blades while time stands still."""
+    from .propulsion import (GOVERNOR_CP, GOVERNOR_RANGE, HP, TP_IDLE_N1, TP_SPOOL_S, TP_SUSTAIN_N1, Propeller,
+                             blade_angles_for_power, blades_mass, power_lapse_xml)
+    lo, hi = GOVERNOR_RANGE
+    out = []
+    for i, (e, name) in enumerate(_engine_units(aircraft)):
+        if e.type != "turboprop":
+            continue
+        p = Propeller(e)
+        tab = p.pitch_tables()
+        angles = blade_angles_for_power(tab)
+        # spin inertia (slug ft2) x (2 pi / 60)^2: power over it and the rpm is rpm/s
+        inertia = p.inertia(blades_mass(e)) * 0.73756 * (2 * math.pi / 60.0) ** 2
+        n = p.rpm / 60.0
+        d_ft = p.D / 0.3048
+        s3 = (TP_SUSTAIN_N1 / 100.0) ** 3
+        head = "                " + "".join("%8.2f" % c for c in GOVERNOR_CP)
+        rows = "\n".join("            %6.2f " % j + "".join("%8.2f" % b for b in row) for j, row in zip(tab["J"], angles))
+        out.append("""      <channel name="Propeller Governor %(i)d">
+        <!-- %(name)s: the propeller governed at %(rpm).0f rpm. JSBSim's turboprop drops
+             its N1 to idle as time runs again after standing still (a reset, a trim; its
+             power reads 0 then): in that step the throttle puts N1 back where it was -->
+        <fcs_function name="fcs/propeller-throttle-%(i)d">
+          <function>
+            <ifthen>
+              <and>
+                <gt> <property>simulation/dt</property> <value>0</value> </gt>
+                <lt> <property>propulsion/engine[%(i)d]/power-hp</property> <value>0.5</value> </lt>
+              </and>
+              <quotient>
+                <difference> <property>propulsion/engine[%(i)d]/n1</property> <value>%(idle_n1).4f</value> </difference>
+                <product>
+                  <value>%(n1_span).4f</value>
+                  <difference>
+                    <value>1</value>
+                    <exp> <quotient> <property>simulation/dt</property> <value>%(neg_spool).4f</value> </quotient> </exp>
+                  </difference>
+                </product>
+              </quotient>
+              <property>fcs/throttle-cmd-norm[%(i)d]</property>
+            </ifthen>
+          </function>
+          <output>fcs/throttle-pos-norm[%(i)d]</output>
+        </fcs_function>
+        <!-- the speed's rate of change: the power the engine gives the propeller less the
+             power it takes, over its spin inertia (rpm/s); none read while the engine's
+             power reads 0 (time stood still) -->
+        <fcs_function name="fcs/propeller-rpm-rate-%(i)d">
+          <function>
+            <product>
+              <ge> <property>propulsion/engine[%(i)d]/power-hp</property> <value>0.5</value> </ge>
+              <quotient>
+                <difference>
+                  <product> <property>propulsion/engine[%(i)d]/power-hp</property> <value>550</value> </product>
+                  <property>propulsion/engine[%(i)d]/propeller-power-ftlbps</property>
+                </difference>
+                <max>
+                  <value>%(inertia_min).6g</value>
+                  <product> <value>%(inertia).6g</value> <property>propulsion/engine[%(i)d]/propeller-rpm</property> </product>
+                </max>
+              </quotient>
+            </product>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/propeller-advance-%(i)d">
+          <function>
+            <quotient>
+              <difference>
+                <value>%(a0).1f</value>
+                <product>
+                  <gt> <property>simulation/dt</property> <value>0</value> </gt>
+                  <value>%(lead).4f</value>
+                  <property>fcs/propeller-rpm-rate-%(i)d</property>
+                </product>
+              </difference>
+              <value>%(span).1f</value>
+            </quotient>
+          </function>
+          <clipto> <min>0</min> <max>1</max> </clipto>
+          <output>fcs/advance-cmd-norm[%(i)d]</output>
+        </fcs_function>
+        <!-- time standing still: the blades held where they take the engine's power -->
+        <fcs_function name="fcs/propeller-governing-%(i)d">
+          <function> <gt> <property>simulation/dt</property> <value>0</value> </gt> </function>
+          <output>propulsion/engine[%(i)d]/constant-speed-mode</output>
+        </fcs_function>
+        <fcs_function name="fcs/propeller-advance-ratio-%(i)d">
+          <function>
+            <max> <value>0</value> <quotient> <property>velocities/u-aero-fps</property> <value>%(nd).4f</value> </quotient> </max>
+          </function>
+        </fcs_function>
+        <!-- the engine's power coefficient at the governed speed: its core at the throttle's
+             N1 (the full one at a start: JSBSim starts engines at full throttle), the lapse -->
+        <fcs_function name="fcs/propeller-power-coefficient-%(i)d">
+          <function>
+            <quotient>
+              <min>
+                <value>%(rating).1f</value>
+                <product>
+                  <value>%(thermo).1f</value>
+                  <max>
+                    <value>0</value>
+                    <quotient>
+                      <difference>
+                        <pow>
+                          <sum>
+                            <value>%(idle).4f</value>
+                            <product>
+                              <value>%(span_n1).4f</value>
+                              <ifthen>
+                                <gt> <property>fcs/throttle-pos-norm[%(i)d]</property> <value>0.001</value> </gt>
+                                <property>fcs/throttle-pos-norm[%(i)d]</property>
+                                <value>1</value>
+                              </ifthen>
+                            </product>
+                          </sum>
+                          <value>3</value>
+                        </pow>
+                        <value>%(s3).6f</value>
+                      </difference>
+                      <value>%(s3c).6f</value>
+                    </quotient>
+                  </max>
+%(lapse)s
+                </product>
+              </min>
+              <product> <property>atmosphere/rho-slugs_ft3</property> <value>%(scale).6g</value> </product>
+            </quotient>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/propeller-blade-angle-%(i)d">
+          <function>
+            <ifthen>
+              <gt> <property>simulation/dt</property> <value>0</value> </gt>
+              <property>propulsion/engine[%(i)d]/blade-angle</property>
+              <table>
+                <independentVar lookup="row">fcs/propeller-advance-ratio-%(i)d</independentVar>
+                <independentVar lookup="column">fcs/propeller-power-coefficient-%(i)d</independentVar>
+                <tableData>
+%(head)s
+%(rows)s
+                </tableData>
+              </table>
+            </ifthen>
+          </function>
+          <output>propulsion/engine[%(i)d]/blade-angle</output>
+        </fcs_function>
+      </channel>""" % {
+            "i": i, "name": name, "rpm": e.prop_rpm, "lead": GOVERNOR_LEAD_S, "idle_n1": TP_IDLE_N1,
+            "n1_span": 100.0 - TP_IDLE_N1, "neg_spool": -TP_SPOOL_S,
+            "inertia": inertia, "inertia_min": inertia * 0.1 * e.prop_rpm,
+            "a0": (1.0 - lo) * e.prop_rpm, "span": (hi - lo) * e.prop_rpm,
+            "nd": n * d_ft, "rating": e.power_kw * 1000.0 / HP, "thermo": e.thermo_power_kw * 1000.0 / HP,
+            "idle": TP_IDLE_N1 / 100.0, "span_n1": 1.0 - TP_IDLE_N1 / 100.0, "s3": s3, "s3c": 1.0 - s3,
+            "lapse": power_lapse_xml(e, 18), "scale": n**3 * d_ft**5 / 550.0, "head": head, "rows": rows})
+    return out
+
+
 def propulsion_xml(aircraft, mass_model, engine_files):
     parts = ["    <propulsion>"]
     n_tanks = len(mass_model.tanks)
     for e, (eng_file, prop_file) in zip(aircraft.engines, engine_files):
         for name, pos, prop, sense in e.copies():
-            feeds = "\n".join("        <feed>%d</feed>" % i for i in range(n_tanks)) if e.type in ("piston", "turbofan") else ""
+            feeds = "\n".join("        <feed>%d</feed>" % i for i in range(n_tanks)) if e.type in ("piston", "turbofan", "turboprop") else ""
             orient = np.degrees(e.prop_orient)
             parts.append("""      <engine file="%s">
         <location unit="M">

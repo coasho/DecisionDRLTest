@@ -1,0 +1,298 @@
+# Lockheed Martin C-130J Super Hercules, built by hangar from public data:
+# the tactical transport, four Rolls-Royce AE 2100D3 turboprops on Dowty
+# R391 six-blade composite propellers.
+#
+# Frame: metres, x aft from the radome's tip, y right, z up from the ground
+# with the aircraft parked (gear down, struts at their static compression).
+# Sources: Lockheed Martin and USAF fact sheets and Wikipedia's C-130J
+# article (dimensions, weights, performance; the wing's NACA 64A318 and
+# 64A412 sections); GlobalSecurity's C-130J specifications (tailplane span
+# 52.7 ft, wheel track 14.25 ft, propeller 13.5 ft, internal fuel 45,900
+# lb); Wikipedia's AE 2100 article (3,458 kW, 0.460 lb/(hp h) = 0.280
+# kg/(kW h), 790 kg, gearbox about 14:1); the Smithsonian's R391 (13.5 ft,
+# six blades, 800 lb); Rolls-Royce (the AE 2100's 6,200 shp growth
+# potential). The shape is measured off Marek Cel's C-130J three-view
+# (Wikimedia Commons, CC0), scaled by the published 29.79 m length; it gives
+# the span 40.40 m (published 40.41).
+#
+# Shared with the EC-130H (aircraft/ec130h/ec130h.toml), whose C-130H
+# airframe is the same: the wing, the tail, the fuselage, the sponsons, the
+# nacelles' outline and the gear.
+
+[aircraft]
+name = "c130j"
+description = "Lockheed Martin C-130J Super Hercules (hangar build)"
+category = "transport"
+stands_in_for = ["C130"]        # the viewer draws JSBSim's own C130 with this model (fsim hangar register)
+
+[analysis]
+speed = 110.0                   # m/s: the Reynolds numbers (cruise, equivalent sea-level speed)
+induced_drag = "trefftz"      # a high-aspect-ratio wing's induced drag from its loading (docs/hangar.md)
+
+# The wing: 162.1 m2 (1,745 ft2), span 40.41 m, NACA 64A318 at the root to
+# 64A412 at the tip, on top of the fuselage. The centre section's constant
+# 4.90 m chord runs out to 5.65 m, just past the inboard engines; the outer
+# panels taper to 2.50 m at the tip (the drawing's 2.62 m gives 164.8 m2),
+# their leading edge swept 2.6 deg, their trailing edge forward, 2.5 deg of
+# dihedral (the three-view's front view). Twist: 3 deg at the root, 0.5 deg
+# at the tip (estimate: a transport's usual washout).
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [11.150, 0.000, 4.960], chord = 4.900, twist = 3.0, airfoil = "naca64a318" },
+  { le = [11.150, 5.650, 4.960], chord = 4.900, twist = 2.6, airfoil = "naca64a318" },
+  { le = [11.800, 20.205, 5.596], chord = 2.500, twist = 0.5, airfoil = "naca64a412" },
+]
+controls = [
+  # Lockheed-Fowler flaps from the fuselage to the ailerons (travel: estimate)
+  { name = "flap", channel = "flap", kind = "fowler", span = [0.10, 0.68], chord_fraction = 0.30, limits = [0, 35] },
+  { name = "aileron", channel = "aileron", span = [0.68, 0.97], chord_fraction = 0.26, limits = [-20, 20] },
+]
+
+# The tailplane: 16.05 m span (52.7 ft), its trailing edge straight across,
+# the leading edge swept; NACA 64A012 (estimate). Carried through the
+# fuselage to the centre line.
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a012"
+sections = [
+  { le = [23.640, 0.000, 4.600], chord = 3.920 },
+  { le = [25.870, 8.025, 4.600], chord = 1.690 },
+]
+controls = [
+  { name = "elevator", channel = "elevator", span = [0.12, 1.0], chord_fraction = 0.35, limits = [-25, 15] },
+]
+
+# The fin: 5.8 m root chord on the fuselage's top, 1.66 m tip, its leading
+# edge swept 23 deg; its tip at the published 11.84 m height (the drawing
+# puts it at 11.5 m)
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a012"
+sections = [
+  { le = [23.100, 0.000, 4.500], chord = 5.800 },
+  { le = [26.220, 0.000, 11.800], chord = 1.660 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.04, 1.0], chord_fraction = 0.35, limits = [-35, 35] },
+]
+
+# The fuselage: the radome, the flight deck, the constant section of the
+# cargo hold, and the upswept rear fuselage whose underside is the ramp and
+# the door above it, to the tail cone
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.000, w = 0.00, top = 2.280, bottom = 2.280 },
+  { x = 0.300, w = 0.95, top = 2.740, bottom = 1.780, n = 2.0 },
+  { x = 0.740, w = 1.50, top = 3.150, bottom = 1.490, n = 2.1 },
+  { x = 1.340, w = 2.20, top = 3.570, bottom = 1.250, n = 2.2 },
+  { x = 1.930, w = 2.75, top = 3.920, bottom = 1.100, n_top = 2.2, n_bottom = 2.6 },
+  { x = 2.820, w = 3.40, top = 4.310, bottom = 0.980, n_top = 2.3, n_bottom = 3.0 },
+  { x = 3.720, w = 3.75, top = 4.490, bottom = 0.890, n_top = 2.4, n_bottom = 3.2 },
+  { x = 5.000, w = 3.90, top = 4.520, bottom = 0.860, n_top = 2.4, n_bottom = 3.4 },
+  { x = 17.400, w = 3.90, top = 4.520, bottom = 0.860, n_top = 2.4, n_bottom = 3.4 },
+  { x = 18.900, w = 3.85, top = 4.520, bottom = 1.190, n_top = 2.4, n_bottom = 3.2 },
+  { x = 20.400, w = 3.70, top = 4.520, bottom = 1.720, n_top = 2.4, n_bottom = 3.0 },
+  { x = 21.900, w = 3.45, top = 4.550, bottom = 2.230, n_top = 2.4, n_bottom = 2.8 },
+  { x = 23.400, w = 3.05, top = 4.600, bottom = 2.760, n_top = 2.3, n_bottom = 2.6 },
+  { x = 24.900, w = 2.50, top = 4.650, bottom = 3.330, n = 2.3 },
+  { x = 26.400, w = 1.85, top = 4.620, bottom = 3.870, n = 2.2 },
+  { x = 27.900, w = 1.10, top = 4.550, bottom = 4.160, n = 2.1 },
+  { x = 29.000, w = 0.50, top = 4.500, bottom = 4.310, n = 2.0 },
+  { x = 29.790, w = 0.00, top = 4.410, bottom = 4.410 },
+]
+
+# The sponsons either side of the cargo hold's floor: the main gear's bays
+[[body]]
+name = "sponson"
+kind = "pod"
+mirror = true
+stations = [
+  { x = 9.200, y = 1.650, w = 0.50, top = 1.900, bottom = 1.400, n = 2.0 },
+  { x = 10.200, y = 1.700, w = 1.00, top = 2.550, bottom = 0.880, n = 2.4 },
+  { x = 16.000, y = 1.700, w = 1.10, top = 2.550, bottom = 0.880, n = 2.6 },
+  { x = 17.700, y = 1.650, w = 0.70, top = 2.100, bottom = 1.400, n = 2.0 },
+]
+
+# The nacelles: the spinner (the propeller's hub, 1 m across), the engine
+# under the wing, the exhaust fairing behind it
+[[body]]
+name = "inboard nacelle"
+kind = "nacelle"
+mirror = true
+stations = [
+  { x = 8.250, y = 5.080, w = 0.00, top = 3.950, bottom = 3.950 },
+  { x = 8.600, y = 5.080, w = 0.70, top = 4.300, bottom = 3.600, n = 2.0 },
+  { x = 9.200, y = 5.080, w = 1.00, top = 4.450, bottom = 3.450, n = 2.0 },
+  { x = 10.000, y = 5.080, w = 1.10, top = 4.700, bottom = 3.300, n = 2.4 },
+  { x = 13.000, y = 5.080, w = 1.10, top = 4.800, bottom = 3.350, n = 2.4 },
+  { x = 15.500, y = 5.080, w = 0.80, top = 4.800, bottom = 3.900, n = 2.2 },
+  { x = 16.800, y = 5.080, w = 0.30, top = 4.800, bottom = 4.500, n = 2.0 },
+]
+
+[[body]]
+name = "outboard nacelle"
+kind = "nacelle"
+mirror = true
+stations = [
+  { x = 8.300, y = 10.250, w = 0.00, top = 4.190, bottom = 4.190 },
+  { x = 8.650, y = 10.250, w = 0.70, top = 4.540, bottom = 3.840, n = 2.0 },
+  { x = 9.250, y = 10.250, w = 1.00, top = 4.690, bottom = 3.690, n = 2.0 },
+  { x = 10.050, y = 10.250, w = 1.10, top = 4.940, bottom = 3.540, n = 2.4 },
+  { x = 13.050, y = 10.250, w = 1.10, top = 5.040, bottom = 3.590, n = 2.4 },
+  { x = 15.550, y = 10.250, w = 0.80, top = 5.040, bottom = 4.140, n = 2.2 },
+  { x = 16.850, y = 10.250, w = 0.30, top = 5.040, bottom = 4.740, n = 2.0 },
+]
+
+[[engine]]
+name = "AE 2100D3 inboard"
+type = "turboprop"
+power_kw = 3458                 # 4,637 shp, takeoff (Wikipedia)
+psfc = 0.280                    # kg/(kW h): 0.460 lb/(hp h) at takeoff (Wikipedia)
+thermodynamic_power_kw = 4474   # 6,000 shp: flat-rated to 4,637 (estimate, below Rolls-Royce's 6,200 shp growth potential)
+position = [10.600, 5.080, 3.950]
+mirror = true
+mass = 790                      # 1,740 lb dry (Wikipedia)
+[engine.propeller]
+position = [8.920, 5.080, 3.950]
+diameter = 4.115                # 13.5 ft (Smithsonian)
+blades = 6
+rpm = 1020                      # 100 % (the C-130's propellers turn 1,020 rpm)
+gear_ratio = 14.0               # "about 14" (Wikipedia)
+blade_angle = [15, 65]          # deg at 75 % radius, the governor's range (estimate)
+airfoil = "naca4409"            # estimate: a thin cambered blade section
+tip_thickness = 0.06            # the thin composite tips (estimate)
+chord = [[0.20, 0.25], [0.50, 0.275], [0.80, 0.225], [1.00, 0.125]]   # c/R: activity factor 157 (estimate: absorbs the rating at a standstill)
+tip_sweep = 25                  # deg: the swept scimitar tips (estimate)
+hub_fraction = 0.20
+mass = 363                      # 800 lb (Smithsonian)
+ixx = 650                       # kg m2 about the shaft: the blades' 320 and the power turbine and gears seen through the gearbox (estimate)
+rotation = "cw"
+handed = false                  # all four turn the same way
+
+[[engine]]
+name = "AE 2100D3 outboard"
+type = "turboprop"
+power_kw = 3458
+psfc = 0.280
+thermodynamic_power_kw = 4474
+position = [10.650, 10.250, 4.190]
+mirror = true
+mass = 790
+[engine.propeller]
+position = [8.970, 10.250, 4.190]
+diameter = 4.115
+blades = 6
+rpm = 1020
+gear_ratio = 14.0
+blade_angle = [15, 65]
+airfoil = "naca4409"
+tip_thickness = 0.06
+chord = [[0.20, 0.25], [0.50, 0.275], [0.80, 0.225], [1.00, 0.125]]
+tip_sweep = 25
+hub_fraction = 0.20
+mass = 363
+ixx = 650
+rotation = "cw"
+handed = false
+
+# The nose gear: twin wheels, steered, folding forward into the nose
+[[gear]]
+name = "Nose Gear"
+position = [3.420, 0.0, -0.150]
+steerable = true
+max_steer = 60
+wheels = 2
+wheel_diameter = 0.85
+wheel_width = 0.32
+retractable = true
+retract = "forward"
+static_deflection = 0.15
+attach = [3.600, 0.0, 1.300]
+
+# The main gear: two wheels in tandem each side, each on its own strut,
+# rising into the sponsons (wheel track 4.34 m), their wells drawn open
+# (hangar's doors, hinged either side of a leg's swing, meet the wheel as
+# it folds into the narrow sponson)
+[[gear]]
+name = "Main Gear Front"
+mirror = true
+position = [12.310, 2.170, -0.150]
+wheel_diameter = 1.08
+wheel_width = 0.50
+retractable = true
+retract = "forward"
+doors = false
+static_deflection = 0.15
+attach = [12.310, 2.000, 2.000]
+
+[[gear]]
+name = "Main Gear Rear"
+mirror = true
+position = [13.820, 2.170, -0.150]
+wheel_diameter = 1.08
+wheel_width = 0.50
+retractable = true
+retract = "aft"
+doors = false
+static_deflection = 0.15
+attach = [13.820, 2.000, 2.000]
+
+[mass]
+empty = 34274                   # 75,562 lb (Lockheed Martin)
+empty_cg = [12.300, 0.0, 3.300]  # estimate: about 22 % MAC
+[mass.component]                # kg (estimates: a transport's group weights)
+wing = 5300
+htail = 700
+fin = 600
+fuselage = 7000
+sponson = 600
+"inboard nacelle" = 500
+"outboard nacelle" = 500
+"Nose Gear" = 400
+"Main Gear Front" = 1000
+"Main Gear Rear" = 1000
+[[mass.payload]]
+name = "flight crew"
+mass = 300                      # two pilots and a loadmaster
+position = [3.300, 0.0, 3.300]
+[[mass.payload]]
+name = "cargo"
+mass = 5000                     # 11,000 lb: with full internal fuel a mid-mission 133,000 lb (60.4 t) - the
+position = [12.300, 0.0, 1.800] # weight the flight tests fly at (the normal take-off weight is 155,000 lb)
+[[mass.tank]]
+name = "left outer wing"
+position = [12.800, -12.000, 5.200]
+capacity = 5205
+[[mass.tank]]
+name = "left inner wing"
+position = [12.800, -4.500, 4.960]
+capacity = 5205
+[[mass.tank]]
+name = "right inner wing"
+position = [12.800, 4.500, 4.960]
+capacity = 5205
+[[mass.tank]]
+name = "right outer wing"
+position = [12.800, 12.000, 5.200]
+capacity = 5205
+
+[dimensions]                    # published, overall (Lockheed Martin)
+length = 29.79
+span = 40.41
+height = 11.84
+
+[targets]
+# C-130J, published (Wikipedia; GlobalSecurity; Lockheed Martin). hangar
+# flies every test at one weight, here 60.4 t - the mid weight the top speed
+# needs. The climb, 2,100 ft/min at sea level, and the ceiling, 28,000 ft
+# with 42,000 lb of payload, are published at about 70 t: at 60.4 t the
+# model climbs 2,770 ft/min to 32,400 ft - compared in docs/hangar.md, not
+# checked here.
+max_speed_ktas = 362            # at max_speed_altitude_ft: calibrates the extra drag
+max_speed_altitude_ft = 22000

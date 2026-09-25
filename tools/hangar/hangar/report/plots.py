@@ -207,6 +207,42 @@ def propeller(tabs, path):
     plt.close(fig)
 
 
+def turboprop(maps, path):
+    """Each turboprop's constant-speed propeller - efficiency and power
+    coefficient over advance ratio at each blade angle, the efficiency's
+    envelope - and its engine's shaft power over Mach at a few heights."""
+    fig, axes = plt.subplots(len(maps), 3, figsize=(16, 4.4 * len(maps)), dpi=95, squeeze=False)
+    for row, (name, m) in zip(axes, maps.items()):
+        t = m["tables"]
+        J, angles, CT, CP = t["J"], t["blade_angle"], t["CT"], t["CP"]
+        eff = np.where(CP > 1e-4, J[:, None] * CT / np.maximum(CP, 1e-4), np.nan)
+        for k, b in enumerate(angles):
+            c = plt.cm.viridis(k / max(len(angles) - 1, 1))
+            ok = (CT[:, k] > 0) & (CP[:, k] > 0)
+            row[0].plot(J[ok], eff[ok, k], color=c, lw=0.9, label="%.0f deg" % b)
+            row[1].plot(J, CP[:, k], color=c, lw=0.9)
+        row[0].plot(J, np.nanmax(np.where(np.isfinite(eff), eff, 0.0), axis=1), "k--", lw=1.2, label="envelope")
+        row[0].set_ylim(0, 1)
+        row[0].set_title("%s: efficiency at each blade angle (75 %% radius)" % name, fontsize=9)
+        row[1].set_title("power coefficient CP", fontsize=9)
+        row[1].axhline(0, color="k", lw=0.5)
+        for ax in row[:2]:
+            ax.set_xlabel("advance ratio J")
+            ax.grid(True, lw=0.3)
+        row[0].legend(fontsize=7, ncol=2)
+        lp = m["lapse"]
+        for h, p in zip(lp["altitude_ft"], lp["power"]):
+            row[2].plot(lp["mach"], p, "o-", ms=3, label="%.0f ft" % h)
+        row[2].set_title("shaft power available / rating", fontsize=9)
+        row[2].set_xlabel("Mach")
+        row[2].set_ylim(0, 1.1)
+        row[2].grid(True, lw=0.3)
+        row[2].legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
 def turbofan(tables, path):
     """Thrust lapse of each turbofan: military and maximum thrust over Mach
     at a few altitudes, as fractions of sea-level-static thrust."""

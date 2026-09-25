@@ -923,6 +923,149 @@ class LargeAircraft(unittest.TestCase):
         self.assertAlmostEqual(float(damper.find("clipto/min").text), -half, places=5)
         summed = root.find(".//summer[@name='fcs/rudder-sum']")
         self.assertEqual([i.text for i in summed.findall("input")], ["fcs/rudder-control", "fcs/yaw-damper"])
+def turboprop_design():
+    """A small twin with turboprops: one [[engine]], mirrored, both
+    propellers turning the same way."""
+    spec = {"aircraft": {"name": "tp"},
+            "surface": [{"name": "wing", "kind": "wing", "airfoil": "naca2412",
+                         "sections": [{"le": [0.0, 0.0, 0.0], "chord": 2.0}, {"le": [0.2, 8.0, 0.3], "chord": 1.2}]}],
+            "engine": [{"name": "tp", "type": "turboprop", "power_kw": 1000.0, "psfc": 0.30, "thermodynamic_power_kw": 1200.0,
+                        "throttle_ratio": 1.05, "position": [-0.5, 3.0, 0.0], "mirror": True, "mass": 250.0,
+                        "propeller": {"position": [-1.5, 3.0, 0.0], "diameter": 2.8, "blades": 4, "rpm": 1200.0,
+                                      "gear_ratio": 12.5, "blade_angle": [15.0, 60.0], "airfoil": "naca4409",
+                                      "chord": [[0.2, 0.2], [0.5, 0.22], [0.8, 0.18], [1.0, 0.1]], "mass": 80.0,
+                                      "handed": False}}],
+            "mass": {"empty": 5000.0, "tank": [{"name": "t", "position": [0.8, 0.0, 0.0], "capacity": 500.0}]}}
+    return Aircraft(spec)
+
+
+class Turboprops(unittest.TestCase):
+    def test_power_lapse_is_mattinglys_without_the_propeller(self):
+        # below the throttle ratio the shaft power goes as the total pressure
+        # ratio delta0 (Mattingly's turboprop lapse at low speed, where the
+        # propeller's thrust per power is its static one); past it the power
+        # loses the fraction of the thrust Mattingly's lapse loses there -
+        # the rest of his lapse, 1 - 0.96 (M - 0.1)^0.25, is the propeller's
+        # thrust falling with speed at a given power, which JSBSim's
+        # propeller tables give
+        from hangar.propulsion import _isa, turboprop_power_lapse
+
+        def ratios(m, h):
+            t, p = _isa(h)
+            f = 1.0 + 0.2 * m * m
+            return p / 101325.0 * f ** 3.5, t / 288.15 * f
+        for m, h in ((0.0, 0.0), (0.05, 3000.0), (0.5, 6700.0), (0.6, 9000.0)):
+            self.assertAlmostEqual(turboprop_power_lapse(m, h, tr=1.1), ratios(m, h)[0], places=9)
+        for m in (0.2, 0.3, 0.5, 0.7):
+            delta0, theta0 = ratios(m, 0.0)
+            prop = 1.0 - 0.96 * (m - 0.1) ** 0.25
+            thrust = prop - 3.0 * (theta0 - 1.0) / (8.13 * (m - 0.1))
+            self.assertAlmostEqual(turboprop_power_lapse(m, 0.0, tr=1.0), delta0 * thrust / prop, places=9)
+        # none cut up to Mach 0.1, however hot (Mattingly: delta0 there)
+        self.assertAlmostEqual(turboprop_power_lapse(0.1, t_k=320.0, p_pa=101325.0, tr=1.0), 1.002 ** 3.5, places=6)
+        # the air's own temperature and pressure: a hot day loses power past TR
+        self.assertLess(turboprop_power_lapse(0.4, t_k=310.0, p_pa=101325.0, tr=1.0),
+                        turboprop_power_lapse(0.4, t_k=288.15, p_pa=101325.0, tr=1.0))
+
+    def test_engine_tables_follow_their_stated_physics(self):
+        from hangar import propulsion as P
+        e = turboprop_design().engines[0]
+        self.assertAlmostEqual(e.rpm, 15000.0)        # the output shaft: the propeller's 1,200 rpm x 12.5
+        t = P.turboprop_tables(e)
+        hp = e.thermo_power_kw * 1000.0 / P.HP
+        power, n1, x = t["EnginePowerRPM_N1"], list(t["n1"]), list(P.TP_RPM)
+        full, design = n1.index(100.0), x.index(1.0)
+        self.assertAlmostEqual(power[design, full], hp, places=6)
+        # the core: its turbine's power as N1 cubed, less the compressor's need,
+        # none at the self-sustaining speed
+        self.assertEqual(power[design, n1.index(P.TP_SUSTAIN_N1)], 0.0)
+        s3 = (P.TP_SUSTAIN_N1 / 100.0) ** 3
+        self.assertAlmostEqual(power[design, n1.index(80.0)] / hp, (0.8**3 - s3) / (1.0 - s3), places=9)
+        # the free turbine: its torque falls in a straight line from twice the
+        # design torque; at a standstill that torque over JSBSim's 1 rad/s
+        for k in (0.5, 0.8, 1.2):
+            self.assertAlmostEqual(power[x.index(k), full] / (k * hp), 2.0 - k, places=9)
+        omega = 2.0 * math.pi * e.prop_rpm / 60.0
+        self.assertAlmostEqual(power[0, full], 2.0 * hp / omega, places=6)
+        # the Willans line: fuel flow c + (1 - c) p of the full-power flow at a power fraction p
+        eff = t["CombustionEfficiency_N1"]
+        self.assertAlmostEqual(eff[full], 1.0)
+        p = float(P.core_power(70.0))
+        self.assertAlmostEqual(p / eff[n1.index(70.0)], P.TP_IDLE_FUEL + (1.0 - P.TP_IDLE_FUEL) * p, places=9)
+        self.assertTrue(np.all(eff > 0.0))         # JSBSim divides by it
+        self.assertTrue(np.all(np.diff(t["ITT_N1"]) >= 0.0))
+
+    def test_constant_speed_propeller(self):
+        from hangar import propulsion as P
+        e = turboprop_design().engines[0]
+        p = P.Propeller(e)
+        self.assertAlmostEqual(p.rpm, 1200.0)
+        tab = p.pitch_tables()
+        J, b, CT, CP = tab["J"], tab["blade_angle"], tab["CT"], tab["CP"]
+        self.assertEqual((b[0], b[-1]), (15.0, 60.0))
+        # at a climb's advance ratio more blade angle takes more power and gives more thrust
+        i = int(np.argmin(np.abs(J - 1.2)))
+        k = (b >= 25.0) & (b <= 40.0)
+        self.assertTrue(np.all(np.diff(CP[i, k]) > 0.0) and np.all(np.diff(CT[i, k]) > 0.0))
+        eff = np.where(CP > 1e-4, J[:, None] * CT / np.maximum(CP, 1e-4), 0.0)
+        self.assertTrue(0.75 < eff.max() < 0.92, eff.max())
+        # where the governor's blade angles leave the propeller, it takes the
+        # power coefficient asked for
+        angles = P.blade_angles_for_power(tab)
+        checked = 0
+        for i in (5, 12, 20, 30):
+            for k, cp in enumerate(P.GOVERNOR_CP):
+                if CP[i, 0] < cp < CP[i].max():
+                    self.assertAlmostEqual(float(np.interp(angles[i, k], b, CP[i])), cp, places=9)
+                    checked += 1
+        self.assertGreater(checked, 20)
+        # the tips: nothing lost to compressibility at a helical Mach number
+        # of 0.6, the power taken rising and the thrust falling past 0.9
+        m = p.mach_tables(tab)
+        self.assertAlmostEqual(float(np.interp(0.6, m["mach"], m["CT"])), 1.0, places=6)
+        self.assertAlmostEqual(float(np.interp(0.6, m["mach"], m["CP"])), 1.0, places=6)
+        self.assertLess(float(np.interp(1.0, m["mach"], m["CT"])), 0.99)
+        self.assertGreater(float(np.interp(1.0, m["mach"], m["CP"])), 1.01)
+
+    def test_jsbsim_files(self):
+        from hangar import jsbsim
+        from hangar import propulsion as P
+        from hangar.mass import MassModel
+        a = turboprop_design()
+        e = a.engines[0]
+        eng = ET.fromstring(P.turboprop_xml(e))
+        self.assertEqual(eng.tag, "turboprop_engine")
+        self.assertAlmostEqual(float(eng.find("maxpower").text), 1000e3 / P.HP, delta=0.1)
+        self.assertAlmostEqual(float(eng.find("psfc").text), 0.30 * 1.644, places=3)   # lb/(hp h)
+        self.assertEqual((float(eng.find("idlen1").text), float(eng.find("maxn1").text)), (P.TP_IDLE_N1, 100.0))
+        self.assertIsNotNone(eng.find("function[@name='EnginePowerVC']/product"))
+        self.assertEqual({t.get("name") for t in eng.findall("table")},
+                         {"EnginePowerRPM_N1", "ITT_N1", "CombustionEfficiency_N1"})
+        p = P.Propeller(e)
+        tab = p.pitch_tables()
+        prop = ET.fromstring(P.constant_speed_propeller_xml(p, tab, p.mach_tables(tab), 80.0, "tp"))
+        num = {k: float(prop.find(k).text) for k in ("minpitch", "maxpitch", "minrpm", "maxrpm", "gearratio", "numblades")}
+        self.assertEqual(num, {"minpitch": 15.0, "maxpitch": 60.0, "minrpm": 960.0, "maxrpm": 1320.0, "gearratio": 12.5,
+                               "numblades": 4.0})
+        rows = prop.find("table[@name='C_POWER']/tableData").text.strip().split("\n")
+        self.assertEqual(len(rows), len(tab["J"]) + 2)       # the blade angles, each advance ratio, one past the last
+        self.assertEqual(len(rows[0].split()), len(tab["blade_angle"]))
+        # the governor: at its speed, turning steadily, the advance command
+        # asks JSBSim's governor for the governed speed; the channel also
+        # sets the blades while time stands still and N1 back after it did
+        fcs = ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a))
+        for i in (0, 1):
+            ch = fcs.find(".//channel[@name='Propeller Governor %d']" % i)
+            outputs = {f.find("output").text for f in ch.findall("fcs_function") if f.find("output") is not None}
+            self.assertEqual(outputs, {"fcs/advance-cmd-norm[%d]" % i, "propulsion/engine[%d]/constant-speed-mode" % i,
+                                       "propulsion/engine[%d]/blade-angle" % i, "fcs/throttle-pos-norm[%d]" % i})
+            q = ch.find("fcs_function[@name='fcs/propeller-advance-%d']/function/quotient" % i)
+            a0, span = float(q.find("difference/value").text), float(q.find("value").text)
+            self.assertAlmostEqual(num["minrpm"] + (num["maxrpm"] - num["minrpm"]) * a0 / span, 1200.0, places=3)
+        # both engines draw fuel, and turn the same way (handed = false)
+        xml = ET.fromstring("<fdm>%s</fdm>" % jsbsim.propulsion_xml(a, MassModel(a), [("e", "p")]))
+        self.assertEqual([len(en.findall("feed")) for en in xml.findall("propulsion/engine")], [1, 1])
+        self.assertEqual([en.find("thruster/sense").text for en in xml.findall("propulsion/engine")], ["-1", "-1"])
 
 
 class Aircraft_(unittest.TestCase):

@@ -225,7 +225,10 @@ move on while a check fails or a picture looks wrong.
   swept: give its surfaces `vortex = false`, or a 35 deg wing will not stall
   (CL max above 2).
 - **Engines.** High-bypass turbofans: `type = "turbofan"`, no
-  `thrust_wet_kn`, the real `bypass_ratio`. Pods on pylons: a nacelle body
+  `thrust_wet_kn`, the real `bypass_ratio`. Turboprops: `type =
+  "turboprop"` with `power_kw`, `psfc`, and `[engine.propeller]` `rpm`,
+  `gear_ratio`, `blade_angle`; the spin inertia counts the power turbine
+  and gears (the C-130J's `ixx = 650`), or JSBSim's start march wanders. Pods on pylons: a nacelle body
   (or an `[[intake]]` with a lip) on `[[strut]]`s. More than four engines is
   fine; the platform's throttles 1-4 drive the rest.
 - **Mass.** Give `empty`, `empty_cg`, `gyration` and every tank (a tank's

@@ -427,6 +427,8 @@ class Design:
                                 note="fighters 0.9-1.3"))
             plots.turbofan({e.name: o["tables"] for e, o in zip(jets, out)}, self.img("propulsion.png"))
             return self.save("propulsion", {"engines": out, "checks": checks, "images": ["propulsion.png"]})
+        if any(e.type == "turboprop" for e in a.engines):
+            return self._turboprops(W)
         for e in a.engines:
             p = Propeller(e)
             t = p.tables()
@@ -443,6 +445,59 @@ class Design:
             plots.propeller(tabs, self.img("propeller.png"))
         return self.save("propulsion", {"engines": out, "checks": checks, "images": ["propeller.png"] if a.engines else []})
 
+    def _turboprops(self, W):
+        """Turboprops: each constant-speed propeller's map over advance ratio
+        and blade angle, where the governor sets its blades at a standstill
+        and what they give there, its best efficiency and its tips'
+        compressibility; each engine's power lapse."""
+        from .propulsion import RHO0, Propeller, turboprop_power_lapse
+        from .report import plots
+        a = self.aircraft
+        out, checks, maps = [], [], {}
+        static_total = 0.0
+        for e in a.engines:
+            if e.type != "turboprop":
+                raise ValueError("%s: turboprops fly with turboprops only" % a.name)
+            p = Propeller(e)
+            tab = p.pitch_tables()
+            mach = p.mach_tables(tab)
+            n = p.rpm / 60.0
+            J, angles, CT, CP = tab["J"], tab["blade_angle"], tab["CT"], tab["CP"]
+            eff = np.where(CP > 1e-4, J[:, None] * CT / np.maximum(CP, 1e-4), 0.0)
+            best = eff.max(axis=1)
+            # at a standstill, sea level: the smallest blade angle that takes the rated power
+            need = e.power_kw * 1000.0 / (RHO0 * n**3 * p.D**5)
+            k = int(np.argmax(CP[0] >= need)) if np.any(CP[0] >= need) else None
+            if k:
+                b0 = float(angles[k - 1] + (need - CP[0, k - 1]) / (CP[0, k] - CP[0, k - 1]) * (angles[k] - angles[k - 1]))
+            else:
+                b0 = float(angles[0]) if k == 0 else float("nan")
+            ct0 = float(np.interp(b0, angles, CT[0])) if np.isfinite(b0) else float("nan")
+            thrust0 = ct0 * RHO0 * n**2 * p.D**4
+            static_total += thrust0 * len(e.copies())
+            lapse = {"mach": [0.0, 0.2, 0.4, 0.6, 0.8], "altitude_ft": [0, 10000, 20000, 30000]}
+            lapse["power"] = [[float(min(turboprop_power_lapse(m, h * 0.3048, e.throttle_ratio) * e.thermo_power_kw,
+                                         e.power_kw) / e.power_kw) for m in lapse["mach"]] for h in lapse["altitude_ft"]]
+            maps[e.name] = {"tables": tab, "lapse": lapse}
+            out.append({"engine": e.name, "type": "turboprop", "power_kw": e.power_kw, "thermodynamic_power_kw": e.thermo_power_kw,
+                        "psfc_kg_kwh": e.psfc, "propeller_rpm": p.rpm, "gear_ratio": e.gear_ratio, "diameter_m": p.D,
+                        "blades": p.B, "activity_factor": p.activity_factor, "blade_angle_deg": list(e.blade_angle),
+                        "static_blade_angle_deg": b0, "static_thrust_n": thrust0, "peak_efficiency": float(best.max()),
+                        "peak_efficiency_J": float(J[int(np.argmax(best))]), "mach_factors": mach, "lapse": lapse,
+                        "tables": tab})
+            checks.append(check("%s peak propeller efficiency" % e.name, float(best.max()), 0.7, 0.92,
+                                note="at J %.2f" % J[int(np.argmax(best))]))
+            checks.append(check("%s blade angle taking the rated power at a standstill" % e.name, b0, angles[0], angles[-1],
+                                "deg", note="%.0f kW at %.0f rpm, sea level: CP %.3f" % (e.power_kw, p.rpm, need), fmt="%.1f"))
+            checks.append(check("%s static thrust per shaft power" % e.name, thrust0 / e.power_kw, 10.0, 22.0, "N/kW",
+                                level="warn", note="turboprops 12-20 (2-3.3 lbf/shp): blades stalled at a standstill give less"))
+            checks.append(info("%s propeller's tips at helical Mach 0.9" % e.name, "CT x %.3f, CP x %.3f" % (
+                float(np.interp(0.9, mach["mach"], mach["CT"])), float(np.interp(0.9, mach["mach"], mach["CP"]))),
+                note="compressibility at J %.2f, %.1f deg" % (mach["J"], mach["blade_angle"])))
+        checks.append(check("static thrust / weight", static_total / W, 0.15, 0.8, level="warn"))
+        plots.turboprop(maps, self.img("propeller.png"))
+        return self.save("propulsion", {"engines": out, "checks": checks, "images": ["propeller.png"]})
+
     # -- build ----------------------------------------------------------------------------------
     def build(self):
         return self.build_with(self.tables())
@@ -450,7 +505,8 @@ class Design:
     def build_with(self, tables):
         from . import jsbsim
         from .mass import MassModel
-        from .propulsion import Propeller, electric_xml, nozzle_xml, piston_xml, propeller_xml, turbofan_xml
+        from .propulsion import (Propeller, blades_mass, constant_speed_propeller_xml, electric_xml, nozzle_xml, piston_xml,
+                                 propeller_xml, turbofan_xml, turboprop_xml)
         a = self.aircraft
         tabs = self.calibrated(tables)
         mm = MassModel(a)
@@ -470,6 +526,17 @@ class Design:
                 files.append((ename, pname))
                 continue
             pname = "%s_prop%d" % (a.name, i)
+            if e.type == "turboprop":
+                # the gas turbine, and its constant-speed propeller over advance ratio and blade angle
+                p = Propeller(e)
+                tab = p.pitch_tables()
+                with open(os.path.join(eng_dir, ename + ".xml"), "w", encoding="utf-8", newline="\n") as f:
+                    f.write(turboprop_xml(e))
+                with open(os.path.join(eng_dir, pname + ".xml"), "w", encoding="utf-8", newline="\n") as f:
+                    f.write(constant_speed_propeller_xml(p, tab, p.mach_tables(tab), blades_mass(e),
+                                                         "%s propeller %d" % (a.name, i)))
+                files.append((ename, pname))
+                continue
             with open(os.path.join(eng_dir, ename + ".xml"), "w", encoding="utf-8", newline="\n") as f:
                 f.write(piston_xml(e) if e.type == "piston" else electric_xml(e))
             p = Propeller(e)
@@ -837,10 +904,15 @@ class Design:
         speeds = np.linspace(1.15 * vs, 3.6 * vs, 7 if self.quick else 13)
         r["trim_sweep"] = F.trim_sweep(f, speeds, altitude_m=100.0)
         # flown from the fastest trim (the sweep's throttle curve, extrapolated
-        # past it, can overshoot the top speed by 10 %)
+        # past it, can overshoot the top speed by 10 %); at the height the top
+        # speed is published for, from a little below it
         trimmed = [row["speed_ms"] for row in r["trim_sweep"] if row["ok"]]
-        r["max_speed_ms"] = F.max_level_speed_flown(f, 100.0, max(trimmed) if trimmed else 2.5 * vs)
-        if not np.isfinite(r["max_speed_ms"]):
+        top = self._max_speed_altitude()
+        if top > 100.0 and "max_speed_ktas" in self.targets:
+            r["max_speed_ms"] = F.max_level_speed_flown(f, top, 0.95 * float(self.targets["max_speed_ktas"]) * KT)
+        else:
+            r["max_speed_ms"] = F.max_level_speed_flown(f, top, max(trimmed) if trimmed else 2.5 * vs)
+        if not np.isfinite(r["max_speed_ms"]) and top <= 100.0:
             r["max_speed_ms"] = F.max_level_speed(r["trim_sweep"])
         r["stall"] = {k: v for k, v in stall_sl.items() if k != "trim"}
         r["stall_1500"] = {k: v for k, v in stall_hi.items() if k != "trim"}
@@ -892,6 +964,11 @@ class Design:
         k = float(np.interp(Q / fcs.PSF, yd["qbar_psf"], yd["k"]))
         return {"zeta": fcs.dutch_roll_zeta(fcs.yaw_damper_loop(A, B, k)), "gain": k, "target": yd["zeta"]}
 
+    def _max_speed_altitude(self):
+        """Where the top speed is flown (m): the height it is published for
+        ([targets] max_speed_altitude_ft), else just above sea level."""
+        return max(float(self.targets.get("max_speed_altitude_ft", 0.0)) * 0.3048, 100.0)
+
     def _flight_checks(self, results):
         t = self.targets
         d = results["design"]
@@ -915,7 +992,9 @@ class Design:
                     "service_ceiling_ft": r["climb"]["service_ceiling_m"] / 0.3048}.get(key)
 
         vs_target("stall speed, clean, sea level", d["stall"]["stall_kcas"], "stall_speed_kcas", 0.07, "KCAS")
-        vs_target("maximum level speed, sea level", d["max_speed_ms"] / KT, "max_speed_ktas", 0.06, "KTAS")
+        top = self._max_speed_altitude()
+        vs_target("maximum level speed, sea level" if top <= 100.0 else "maximum level speed at {:,.0f} ft".format(top / 0.3048),
+                  d["max_speed_ms"] / KT, "max_speed_ktas", 0.06, "KTAS")
         if "max_mach_top" in d:
             # a jet's top speed where it is published (the calibration's target)
             checks.append(check("maximum Mach number at {:,.0f} ft (full thrust)".format(d["top_altitude_m"] / 0.3048),
@@ -1270,14 +1349,18 @@ def _calibrate(d):
         if "max_mach" in t and float(t["max_mach"]) < 1.0:
             return _calibrate_subsonic(d)
         return _calibrate_fighter(d)
-    if not a.engines or not ("max_speed_ktas" in t and "climb_rate_fpm" in t):
-        return d.save("calibrate", {"checks": [info("nothing to calibrate", "needs max_speed_ktas and climb_rate_fpm targets")]})
+    # the real propeller's pitch, or a constant-speed propeller: none to fit,
+    # the drag alone to the top speed
+    fixed = all("pitch" in (e.prop_spec or {}) or e.type == "turboprop" for e in a.engines if e.has_propeller)
+    needs = ("max_speed_ktas",) if fixed else ("max_speed_ktas", "climb_rate_fpm")
+    if not a.engines or not all(k in t for k in needs):
+        return d.save("calibrate", {"checks": [info("nothing to calibrate", "needs %s targets" % " and ".join(needs))]})
     fly = d.load("fly")
     if not fly:
         raise SystemExit("calibrate needs a fly stage first (it takes the climb speed from it)")
     vy = fly["results"]["design"]["climb"]["rows"][0]["speed_ms"]
-    target = np.array([t["max_speed_ktas"], t["climb_rate_fpm"]])
-    if all("pitch" in (e.prop_spec or {}) for e in a.engines if e.has_propeller):
+    target = np.array([t["max_speed_ktas"], t.get("climb_rate_fpm", float("nan"))])
+    if fixed:
         return _calibrate_drag(d, target, vy)
     x = np.array([float(a.calibration.get("extra_drag_area_m2", 0.0)), float(a.engines[0].prop_pitch or 0.75 * a.engines[0].prop_diameter)])
     D = a.engines[0].prop_diameter
@@ -1339,7 +1422,7 @@ def _light_performance(d, v_kt, vy):
     d.build()
     f = F.Flight(d.aircraft.name, name="hangar-cal-" + d.aircraft.name)
     try:
-        vmax = F.max_level_speed_flown(f, 100.0, 0.95 * v_kt * KT) / KT
+        vmax = F.max_level_speed_flown(f, d._max_speed_altitude(), 0.95 * v_kt * KT) / KT
         c, _ = F.climb(f, 30.0, vy)
     finally:
         f.close()
@@ -1387,16 +1470,21 @@ def _calibrate_drag(d, target, vy):
     row = [h for h in history if h["extra_drag_area_m2"] == x][-1]
     v, climb = row["max_speed_kt"], row["climb_fpm"]
     _write_calibration(d, {"extra_drag_area_m2": x},
-                       note="fitted: max speed %.1f kt (target %g); climb %.0f ft/min predicted (published %g)"
-                       % (v, target[0], climb, target[1]))
+                       note="fitted: max speed %.1f kt (target %g); climb %.0f ft/min predicted%s"
+                       % (v, target[0], climb, " (published %g)" % target[1] if np.isfinite(target[1]) else ""))
     d.aircraft = Aircraft.load(d.path)
     d.build()
     e = d.aircraft.engines[0]
-    checks = [check("maximum level speed after calibration", v, 0.985 * target[0], 1.015 * target[0], "KTAS"),
-              check("rate of climb, predicted", climb, 0.95 * target[1], 1.05 * target[1], "ft/min",
-                    note="with the propeller's own pitch"),
-              info("extra drag area", x, "m2", note="CD %+.4f: what the build-up does not see" % (x / a.S)),
-              info("propeller pitch", e.prop_pitch, "m", note="the design's own, pitch/diameter %.2f" % (e.prop_pitch / e.prop_diameter))]
+    top = d._max_speed_altitude()
+    checks = [check("maximum level speed after calibration", v, 0.985 * target[0], 1.015 * target[0], "KTAS",
+                    note="" if top <= 100.0 else "at {:,.0f} ft".format(top / 0.3048)),
+              (check("rate of climb, predicted", climb, 0.95 * target[1], 1.05 * target[1], "ft/min",
+                     note="with the propeller's own pitch" if e.type != "turboprop" else "constant-speed propellers")
+               if np.isfinite(target[1]) else info("rate of climb, predicted", climb, "ft/min")),
+              info("extra drag area", x, "m2", note="CD %+.4f: what the build-up does not see" % (x / a.S))]
+    if e.type != "turboprop":
+        checks.append(info("propeller pitch", e.prop_pitch, "m",
+                           note="the design's own, pitch/diameter %.2f" % (e.prop_pitch / e.prop_diameter)))
     return d.save("calibrate", {"calibration": {"extra_drag_area_m2": x}, "history": history, "checks": checks})
 
 

@@ -192,6 +192,10 @@ class MassModel:
                     continue
                 # engine block around its mounting point, the propeller at its hub
                 pts = pos + np.array([[dx, dy, dz] for dx in (-0.25, 0.25) for dy in (-0.2, 0.2) for dz in (-0.15, 0.15)])
+                if e.prop_mass is not None:     # the propeller weighed apart from the engine
+                    self._add(name, m, pts, np.ones(len(pts)), "engine")
+                    self._add(name + " propeller", e.prop_mass, prop[None, :], np.ones(1), "engine")
+                    continue
                 self._add(name, 0.9 * m, pts, np.ones(len(pts)), "engine")
                 self._add(name + " propeller", 0.1 * m, prop[None, :], np.ones(1), "engine")
         for item in spec.get("item", []):   # anything else, placed by hand
@@ -235,6 +239,10 @@ class MassModel:
         hp = e.power_kw / 0.7457
         if e.type == "electric":
             return e.power_kw / 5.0 * 1.3
+        if e.type == "turboprop":
+            # a turboprop's dry weight: about 4 kW of rated power per kg (the
+            # AE 2100D3's 3,458 kW weigh 790 kg, the T56-A-14's 3,424 kW 857 kg)
+            return e.power_kw / 4.0
         dry = 1.4 * hp
         return 2.575 * dry**0.922 * LB * 0.75
 

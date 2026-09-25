@@ -150,6 +150,27 @@ max_mach = 2.05                  # at max_mach_altitude_ft: calibrates the wave 
 max_mach_altitude_ft = 40000
 ```
 
+A turboprop drives a constant-speed propeller through a gearbox. From
+`aircraft/c130j/c130j.toml`:
+
+```toml
+[[engine]]
+type = "turboprop"
+power_kw = 3458                  # the shaft power rating (4,637 shp)
+psfc = 0.280                     # kg/(kW h) at the rating
+thermodynamic_power_kw = 4474    # what the core makes unrated: flat-rated to a greater height
+[engine.propeller]
+diameter = 4.115
+blades = 6
+rpm = 1020                       # governed
+gear_ratio = 14.0                # the engine's rpm over the propeller's
+blade_angle = [15, 65]           # deg at 75 % radius: the governor's range
+
+[targets]
+max_speed_ktas = 362             # flown at max_speed_altitude_ft
+max_speed_altitude_ft = 22000
+```
+
 A thrust-vectoring nozzle gives its travel, and how far its plane leans
 outboard (0, pitch only, for the F-22A). From `aircraft/su57/su57.toml`:
 
@@ -365,6 +386,13 @@ For fighters:
   it): there calibration fits an extra drag area. On direct controls the test
   autopilot flies that top speed: trimmed, the height held, full thrust
   until the speed settles.
+- **Turboprops.** The propeller's blade-element tables at every blade
+  angle, with the tips' drag rise past Korn's divergence Mach number; the
+  engine's shaft power lapses as Mattingly's turboprop (delta0, cut past
+  its TR). The JSBSim file's governor turns the blades to hold the
+  propeller's speed, and starts the engine running at its trimmed power.
+  A propeller aircraft whose propellers leave nothing to fit (their pitch
+  given, or constant-speed) is calibrated on its top speed alone.
 - **Large aircraft.** A jet climbs best well above a propeller aircraft's
   speeds, at up to 2.8 times its stall speed. A heavy jet's stall run goes
   on until the stall breaks, and every crash test starts with the lowest
@@ -654,6 +682,7 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 | E-3G | `e3g` | 0.78 at 29,000 ft (0.78) | 3,700 | 34,200 (above 29,000) |
 | A-10C | `a10c` | 0.57 at sea level (0.576) | 4,700 | 29,800 (45,000) |
 | Su-25 | `su25` | 0.82 at sea level (0.796) | 17,000 | 52,400 (23,000 unpressurised) |
+| C-130J | `c130j` | 361 kt at 22,000 ft (362) | 2,800 | 32,400 (28,000 at 70 t) |
 | C-17A | `c17a` | 0.87 at 28,000 ft (0.875) | 6,200 | 36,800 (45,000 certified) |
 | KC-46A | `kc46a` | 0.86 at 26,000 ft (0.86) | 5,200 | 29,500 (40,100 certified) |
 | EA-18G | `ea18g` | 1.80 at 40,000 ft (1.8) | 44,500 | 57,200 (50,000+) |
@@ -689,6 +718,12 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   TF34s keep too little thrust up high for the published 45,000 ft: it
   climbs to 29,800 ft. Its thick, cambered sections' maximum lift is held
   to 1.8. Its yaw damper takes the dutch roll from 0.10 to 0.32.
+- The C-130J flies at 60.4 t, full of fuel with 5 t of cargo: the mid
+  weight its published top speed needs. Its published climb, 2,100
+  ft/min, and ceiling, 28,000 ft, are at about 70 t (42,000 lb of
+  payload): hangar flies every test at one weight. Its main wheels, in
+  tandem, rise into open wells in the sponsons; its six-bladed propellers
+  turn at the governed 1,020 rpm.
 - The Su-25 flies at 13.1 t, full of fuel. It stands 5 deg nose-high on its
   gear (its height is measured so), its main wheels fold into open wells in
   the nacelles. Its estimated zero-lift drag leaves out its ten pylons:
