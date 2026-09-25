@@ -19,8 +19,10 @@ factors and increments on the low-speed tables, per Mach number:
 - drag: skin friction falling with Mach (Raymer 12.27), the wave drag of the
   area distribution - Sears-Haack's D/q = 9 pi A_max^2 / (2 l^2) times
   Raymer's empirical E_WD (Raymer 12.46), from Korn's drag-divergence Mach
-  number (Raymer 12.5.10) - and the loss of leading-edge suction once the
-  leading edge is supersonic (induced drag CL^2 / CL_alpha).
+  number (Raymer 12.5.10; its airfoil technology factor 0.87 for
+  conventional sections, 0.95 for supercritical ones - the calibration's
+  korn_kappa for a subsonic jet) - and the loss of leading-edge suction once
+  the leading edge is supersonic (induced drag CL^2 / CL_alpha).
 
 The result, over Mach: K_L multiplies lift (and the damping), K_Y the
 lateral coefficients, K_<channel> each channel's control power; dCm_dCL is
@@ -36,7 +38,17 @@ from .section import flap_tau
 MACH_SUB = (0.0, 0.3, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9)
 MACH_SUP = (1.2, 1.4, 1.6, 1.8, 2.0, 2.3, 2.6)
 KORN_KAPPA = 0.87   # conventional (not supercritical) sections
+KORN_SUPERCRITICAL = 0.95   # supercritical ones (Raymer 12.5.10)
 E_WD = 2.0          # Raymer: 1.2 for a smooth Sears-Haack-like area distribution, 2-3 for poor ones
+
+
+def korn_kappa(aircraft):
+    """Korn's airfoil technology factor kappa_A in the drag-divergence Mach
+    number (Raymer 12.5.10): the calibration's fit for a subsonic jet
+    (calibration.toml korn_kappa), else the design's [analysis] korn_kappa,
+    else conventional sections' 0.87."""
+    cal = getattr(aircraft, "calibration", None) or {}
+    return float(cal.get("korn_kappa", aircraft.spec.get("analysis", {}).get("korn_kappa", KORN_KAPPA)))
 
 
 def ellipe(k):
@@ -258,7 +270,8 @@ def _drag(a, base, table):
     w = a.wing
     t = w.thickness_ratio
     lam = math.radians(w.sweep_deg(0.25))
-    m_dd = KORN_KAPPA / math.cos(lam) - t / math.cos(lam) ** 2 - 0.2 / (10 * math.cos(lam) ** 3)
+    kappa = korn_kappa(a)
+    m_dd = kappa / math.cos(lam) - t / math.cos(lam) ** 2 - 0.2 / (10 * math.cos(lam) ** 3)
     m_cr = m_dd - (0.1 / 80.0) ** (1.0 / 3.0)
 
     def wave(m):
@@ -281,7 +294,7 @@ def _drag(a, base, table):
     K = (1.0 - lost) * K0 + lost / cla
     dK = K - K0 / table["K_L"] ** 2
     return {"dCD0": dcd0, "dK": dK, "K0": float(K0), "CD0": float(CD0), "M_dd": float(m_dd), "M_cr": float(m_cr),
-            "A_max_m2": amax, "length_m": float(length), "E_WD": ewd}
+            "A_max_m2": amax, "length_m": float(length), "E_WD": ewd, "korn_kappa": kappa}
 
 
 def base_cla(base):

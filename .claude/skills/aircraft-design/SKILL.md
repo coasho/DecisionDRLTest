@@ -1,6 +1,6 @@
 ---
 name: aircraft-design
-description: Design, analyse and validate a new aircraft for JSBSim with hangar (tools/hangar), from a description, drawing or photo to a flight-tested jsbsim:<name> - light aircraft, UAVs and jet fighters with fly-by-wire. Use when asked to model an aircraft that has no JSBSim model or wind-tunnel data, to change a design's geometry, mass or engine, or to explain how a design flies.
+description: Design, analyse and validate a new aircraft for JSBSim with hangar (tools/hangar), from a description, drawing or photo to a flight-tested jsbsim:<name> - light aircraft, UAVs, jet fighters with fly-by-wire, and bombers, transports and other support aircraft. Use when asked to model an aircraft that has no JSBSim model or wind-tunnel data, to change a design's geometry, mass or engine, or to explain how a design flies.
 ---
 
 # Aircraft design with hangar
@@ -217,7 +217,29 @@ move on while a check fails or a picture looks wrong.
   the thrust (the F-22A, the Su-57). The angle-of-attack limit stays the
   aerodynamic one.
 
-## 5. Finish
+## 5. Large aircraft (bombers, transports, tankers, AEW&C)
+
+- **Induced drag.** Give `[analysis] induced_drag = "trefftz"`: the strips'
+  own tilt makes a swept transport wing's lift-to-drag ratio a quarter low.
+- **Wings.** A thick, round-nosed wing does not make vortex lift, however
+  swept: give its surfaces `vortex = false`, or a 35 deg wing will not stall
+  (CL max above 2).
+- **Engines.** High-bypass turbofans: `type = "turbofan"`, no
+  `thrust_wet_kn`, the real `bypass_ratio`. Pods on pylons: a nacelle body
+  (or an `[[intake]]` with a lip) on `[[strut]]`s. More than four engines is
+  fine; the platform's throttles 1-4 drive the rest.
+- **Mass.** Give `empty`, `empty_cg`, `gyration` and every tank (a tank's
+  `fill` is the fuel it starts with). hangar's structural estimates for jets
+  are fighter equations: give component masses where they matter.
+- **Controls.** Direct, unless the aircraft is fly-by-wire or its dutch
+  roll needs it; then `type = "fbw"` with its own limits (n_max 2.5-3,
+  alpha_max 12-15 deg, roll 30-60 deg/s).
+- **Targets.** `max_mach` at `max_mach_altitude_ft` below 1: calibrate fits
+  Korn's kappa_A (0.87 conventional sections, 0.95 supercritical), more
+  wave drag if even 0.87 is too fast. A certified altitude is
+  `operational_ceiling_ft`, reached or not.
+
+## 6. Finish
 
 - Run `ctest --test-dir build/ucrt64-release -R hangar`.
 - Show the user three things: the three-view, a viewer screenshot, and the

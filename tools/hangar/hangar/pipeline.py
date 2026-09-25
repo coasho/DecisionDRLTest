@@ -756,6 +756,8 @@ class Design:
         t0 = time.time()
         top = float(self.targets.get("max_mach_altitude_ft", 36000.0)) * 0.3048
         r = {"type": f.type, "fighter": F.fighter_tests(f, opts, quick=self.quick, top_altitude_m=top)}
+        # (the design's engines: an afterburner, or full thrust dry)
+        r["fighter"]["augmented"] = any(e.type == "turbofan" and e.thrust_wet_kn for e in self.aircraft.engines)
         r["robustness"] = F.robustness(f, n=12 if self.quick else 40)
         vs = 70.0
         r["crashes"] = F.crash_tests(f, vs, F.contact_points(self._aircraft_file(f.type)))
@@ -776,8 +778,9 @@ class Design:
             else:
                 checks.append(info(label, value, unit, note))
         g = lambda k, r=ref: r.get(k) if r else None  # noqa: E731
-        vs("maximum Mach number at {:,.0f} ft (full afterburner)".format(d["top_altitude_m"] / 0.3048), d["max_mach_top"],
-           "max_mach", 0.05, "", refv=g("max_mach_top"))
+        vs("maximum Mach number at {:,.0f} ft ({})".format(d["top_altitude_m"] / 0.3048, "full afterburner"
+                                                            if d.get("augmented", True) else "full thrust"),
+           d["max_mach_top"], "max_mach", 0.05, "", refv=g("max_mach_top"))
         vs("maximum level speed at sea level", d["max_mach_sl"] * 661.47, "max_speed_ktas", 0.08, "KTAS", "%.0f",
            refv=g("max_mach_sl") * 661.47 if ref else None)
         vs("best rate of climb at sea level (peak excess power)", d["climb_rate_ms"] / 0.3048 * 60, "climb_rate_fpm", 0.25, "ft/min",
@@ -790,8 +793,8 @@ class Design:
         else:
             vs("service ceiling", d["service_ceiling_m"] / 0.3048, "service_ceiling_ft", 0.15, "ft", "%.0f",
                refv=g("service_ceiling_m") / 0.3048 if ref else None)
-        vs("sustained turn rate, Mach 0.9 at 15,000 ft", d["turn"]["rate_deg_s"], "sustained_turn_deg_s", 0.15, "deg/s",
-           refv=ref["turn"]["rate_deg_s"] if ref else None)
+        vs("sustained turn rate, Mach %.1f at 15,000 ft" % d["turn"]["mach"], d["turn"]["rate_deg_s"], "sustained_turn_deg_s",
+           0.15, "deg/s", refv=ref["turn"]["rate_deg_s"] if ref else None)
         h = d["handling"]
         o = self.fbw_options()
         checks += [check("full aft stick at 350 kt: angle of attack reached", h["pull"]["alpha_max"], None, o["alpha_max_deg"] + 4.0,
@@ -828,7 +831,14 @@ class Design:
             r["max_speed_ms"] = F.max_level_speed(r["trim_sweep"])
         r["stall"] = {k: v for k, v in stall_sl.items() if k != "trim"}
         r["stall_1500"] = {k: v for k, v in stall_hi.items() if k != "trim"}
-        r["climb"] = F.climb_performance(f, vs, altitudes=(0.0, 3000.0) if self.quick else (0.0, 1500.0, 3000.0, 4500.0))
+        # a jet (direct controls: a transport) climbs best faster than a
+        # propeller does, and its top speed is published at altitude
+        jet = any(e.type == "turbofan" for e in self.aircraft.engines)
+        r["climb"] = F.climb_performance(f, vs, altitudes=(0.0, 3000.0) if self.quick else (0.0, 1500.0, 3000.0, 4500.0),
+                                         factors=F.JET_CLIMB_FACTORS if jet else F.CLIMB_FACTORS)
+        if design and jet and "max_mach" in self.targets:
+            r["top_altitude_m"] = float(self.targets.get("max_mach_altitude_ft", 36000.0)) * 0.3048
+            r["max_mach_top"] = F.max_level_mach_flown(f, r["top_altitude_m"], 0.95 * float(self.targets["max_mach"]))
         m = F.modes(f, altitude_m=1500.0, speed_ms=1.9 * vs)
         r["modes"] = {k: v for k, v in m.items() if not k.startswith("hist")}
         if design:
@@ -869,10 +879,22 @@ class Design:
 
         vs_target("stall speed, clean, sea level", d["stall"]["stall_kcas"], "stall_speed_kcas", 0.07, "KCAS")
         vs_target("maximum level speed, sea level", d["max_speed_ms"] / KT, "max_speed_ktas", 0.06, "KTAS")
+        if "max_mach_top" in d:
+            # a jet's top speed where it is published (the calibration's target)
+            checks.append(check("maximum Mach number at {:,.0f} ft (full thrust)".format(d["top_altitude_m"] / 0.3048),
+                                d["max_mach_top"], 0.95 * t["max_mach"], 1.05 * t["max_mach"], level="warn",
+                                note="target %g" % t["max_mach"]))
         rows = d["climb"]["rows"]
         vs_target("best rate of climb, sea level", rows[0]["rate_ms"] / 0.3048 * 60 if rows else float("nan"),
                   "climb_rate_fpm", 0.15, "ft/min")
-        vs_target("service ceiling", d["climb"]["service_ceiling_m"] / 0.3048, "service_ceiling_ft", 0.15, "ft")
+        if "operational_ceiling_ft" in t:
+            # a published clearance (a transport's certified altitude), not
+            # where the climb runs out: reached, or not
+            checks.append(check("service ceiling", d["climb"]["service_ceiling_m"] / 0.3048, t["operational_ceiling_ft"], None,
+                                "ft", level="warn", note="reaches the published operational ceiling, %g" % t["operational_ceiling_ft"],
+                                fmt="%.0f"))
+        else:
+            vs_target("service ceiling", d["climb"]["service_ceiling_m"] / 0.3048, "service_ceiling_ft", 0.15, "ft")
         top = d["climb"].get("highest_climb_m")
         if top is not None and checks[-1]["value"] is not None:
             checks[-1]["note"] = ("climbed at up to %.0f ft" % (top / 0.3048)) + ("; " + checks[-1]["note"] if checks[-1]["note"] else "")
@@ -920,6 +942,9 @@ class Design:
                 check("crash tests: speed gained on impact", gain(crashes[worst]), None, 1.3, "x", level="warn",
                       note="largest ratio of speed after impact to speed at it (%s); above 1 the contacts add energy" % worst),
                 info("crash tests: deepest point below ground", crashes[deep]["deepest_m"], "m", note=deep)]
+
+
+EWD_MAX = 6.0   # the most wave drag calibration gives a subsonic jet too fast with conventional sections
 
 
 def _calibrate_fighter(d):
@@ -1005,6 +1030,114 @@ def _calibrate_fighter(d):
                                 "checks": checks})
 
 
+def _top_mach(d, altitude_m, start_mach, seconds=420.0):
+    """The design's maximum level Mach number at a height, flown at full
+    throttle as it is built now: through its fly-by-wire (the fighter
+    pilot) or, on direct controls, trimmed and held level by the test
+    autopilot."""
+    from . import flight as F
+    opts = d.fbw_options()
+    f = F.Flight(d.aircraft.name, name="hangar-cal-" + d.aircraft.name)
+    try:
+        if opts is not None:
+            m, _ = F.max_level_mach(f, F.FighterPilot(f.dt, opts["n_max"], opts["n_min"]), altitude_m, start_mach=start_mach,
+                                    seconds=seconds)
+        else:
+            m = F.max_level_mach_flown(f, altitude_m, start_mach, seconds=seconds)
+    finally:
+        f.close()
+    return m
+
+
+def fit_kappa(measure, target, steps=8, tol=0.005):
+    """Korn's kappa_A between conventional sections' 0.87 and supercritical
+    ones' 0.95 whose top Mach number, measure(kappa), meets the target: a
+    bisection, or the nearer end where the two do not bracket it. Returns
+    (kappa, its Mach number)."""
+    from .aero.mach import KORN_KAPPA, KORN_SUPERCRITICAL
+    lo, hi = KORN_KAPPA, KORN_SUPERCRITICAL
+    m_lo, m_hi = measure(lo), measure(hi)
+    kappa, m = (lo, m_lo) if abs(m_lo - target) < abs(m_hi - target) else (hi, m_hi)
+    if (m_lo - target) * (m_hi - target) < 0.0:
+        for _ in range(steps):
+            kappa = 0.5 * (lo + hi)
+            m = measure(kappa)
+            if abs(m - target) < tol:
+                break
+            if (m - target) * (m_lo - target) > 0:
+                lo, m_lo = kappa, m
+            else:
+                hi, m_hi = kappa, m
+    return kappa, m
+
+
+def _calibrate_subsonic(d):
+    """A subsonic jet (a transport, a tanker) to its published top speed.
+    Up there its high-bypass engines run well below their throttle ratio -
+    their thrust is the same at any TR the fighters' fit ranges over - and
+    what holds it is its wing's transonic drag rise, from Korn's
+    drag-divergence Mach number (Raymer 12.5.10). So the fit is Korn's
+    airfoil technology factor kappa_A, from conventional sections' 0.87 to
+    supercritical ones' 0.95: a bisection on the maximum level Mach number
+    flown at the published height, the aircraft rebuilt every step. The
+    engines' throttle ratio stays the design's. A jet too fast even with
+    conventional sections (an older, thicker wing than Korn's relation
+    knows: the B-52's) gets more wave drag instead, E_WD from the design's
+    up to EWD_MAX."""
+    from .aero.mach import E_WD, KORN_KAPPA, KORN_SUPERCRITICAL
+    t = d.targets
+    alt = float(t.get("max_mach_altitude_ft", 36000.0)) * 0.3048
+    target = float(t["max_mach"])
+    history = []
+
+    ewd0 = float(d.aircraft.spec.get("analysis", {}).get("wave_drag_efficiency", E_WD))
+
+    def measure(kappa, ewd=None):
+        cal = {"korn_kappa": float(kappa)}
+        if ewd is not None:
+            cal["wave_drag_efficiency"] = float(ewd)
+        _write_calibration(d, cal)
+        d.aircraft = Aircraft.load(d.path)
+        d.build()
+        m = _top_mach(d, alt, 0.95 * target)
+        history.append(dict(cal, max_mach=float(m)))
+        d.log("  calibrate: kappa %.4f%s -> Mach %.3f at %.0f ft"
+              % (kappa, "" if ewd is None else ", E_WD %.2f" % ewd, m, alt / 0.3048))
+        return m
+
+    kappa, m = fit_kappa(measure, target)
+    cal = {"korn_kappa": float(kappa)}
+    if m > target + 0.01 and kappa <= KORN_KAPPA + 1e-9:
+        # too fast even with conventional sections: more wave drag
+        lo, hi = ewd0, EWD_MAX
+        m_lo, m_hi = m, measure(kappa, hi)
+        ewd, m = (hi, m_hi)
+        if m_hi < target:
+            for _ in range(8):
+                ewd = 0.5 * (lo + hi)
+                m = measure(kappa, ewd)
+                if abs(m - target) < 0.005:
+                    break
+                if m > target:
+                    lo, m_lo = ewd, m
+                else:
+                    hi, m_hi = ewd, m
+        cal["wave_drag_efficiency"] = float(ewd)
+    _write_calibration(d, cal, note="fitted: maximum Mach %.3f at %.0f ft (target %g)" % (m, alt / 0.3048, target))
+    d.aircraft = Aircraft.load(d.path)
+    d.build()
+    m_dd = d.tables()["mach"].get("M_dd", float("nan"))
+    checks = [check("maximum Mach number after calibration", m, target - 0.03, target + 0.03, level="warn",
+                    note="at %.0f ft" % (alt / 0.3048)),
+              check("Korn's airfoil technology factor kappa_A", kappa, KORN_KAPPA, KORN_SUPERCRITICAL, level="warn",
+                    note="Raymer 12.5.10: 0.87 conventional sections, 0.95 supercritical; drag divergence at Mach %.3f" % m_dd,
+                    fmt="%.3f")]
+    if "wave_drag_efficiency" in cal:
+        checks.append(check("wave-drag efficiency E_WD", cal["wave_drag_efficiency"], 1.2, 3.5, level="warn",
+                            note="Raymer: 1.2 a smooth area distribution, 2-3 typical; more stands for a thick wing's shock drag"))
+    return d.save("calibrate", {"calibration": cal, "history": history, "checks": checks})
+
+
 def _calibrate(d):
     """Fit what the physics cannot know to published performance: an extra
     drag area (struts, cooling, gear legs, antennas, gaps) to the maximum level
@@ -1018,6 +1151,8 @@ def _calibrate(d):
     t = d.targets
     a = d.aircraft
     if any(e.type == "turbofan" for e in a.engines):
+        if "max_mach" in t and float(t["max_mach"]) < 1.0:
+            return _calibrate_subsonic(d)
         return _calibrate_fighter(d)
     if not a.engines or not ("max_speed_ktas" in t and "climb_rate_fpm" in t):
         return d.save("calibrate", {"checks": [info("nothing to calibrate", "needs max_speed_ktas and climb_rate_fpm targets")]})
@@ -1164,6 +1299,8 @@ def _write_calibration(d, cal, note=""):
     if "throttle_ratio" in cal:
         lines.append("throttle_ratio = %.4f   # the engines' TR: the compressor-face temperature ratio at the turbine's limit"
                      % cal["throttle_ratio"])
+    if "korn_kappa" in cal:
+        lines.append("korn_kappa = %.4f   # Korn's airfoil technology factor: where the wing's drag diverges" % cal["korn_kappa"])
     if note:
         lines.append("# " + note)
     path = os.path.join(d.dir, "calibration.toml")

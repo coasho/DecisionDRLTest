@@ -19,6 +19,7 @@ from .mass import G0
 
 CHANNEL_PROPERTY = {"elevator": "fcs/elevator-pos-deg", "aileron": "fcs/left-aileron-pos-deg",
                     "rudder": "fcs/rudder-pos-deg", "flap": "fcs/flap-pos-deg"}
+PLATFORM_THROTTLES = 4   # the throttles the platform commands (ControlInputs::kMaxEngines)
 AXES = {"CD": "DRAG", "CY": "SIDE", "CL": "LIFT", "Cl": "ROLL", "Cm": "PITCH", "Cn": "YAW"}
 REF_LENGTH = {"Cl": "metrics/bw-ft", "Cm": "metrics/cbarw-ft", "Cn": "metrics/bw-ft"}
 
@@ -480,8 +481,12 @@ def flight_control_xml(aircraft, fbw=None):
       </channel>""" % (a, -m, b, lo, hi))
     # the throttle lever of an afterburning turbofan: military power at the
     # detent (80 %), the afterburner above it - JSBSim's turbine (augmethod 2)
-    # takes positions 1..2 for that
+    # takes positions 1..2 for that. The platform commands PLATFORM_THROTTLES
+    # engines: an engine past them (the B-52's fifth to eighth) follows the
+    # lever of the one that many before it - the same side's, as the engines
+    # are numbered left and right in turn
     for i, (e, _) in enumerate(_engine_units(aircraft)):
+        lever = i % PLATFORM_THROTTLES
         if e.type == "turbofan" and e.thrust_wet_kn:
             parts.append("""      <channel name="Throttle %d">
         <fcs_function name="fcs/throttle-lever-%d">
@@ -497,7 +502,15 @@ def flight_control_xml(aircraft, fbw=None):
           </function>
           <output>fcs/throttle-pos-norm[%d]</output>
         </fcs_function>
-      </channel>""" % (i, i, i, i))
+      </channel>""" % (i, i, lever, i))
+        elif i >= PLATFORM_THROTTLES:
+            parts.append("""      <channel name="Throttle %d">
+        <pure_gain name="fcs/throttle-lever-%d">
+          <input>fcs/throttle-cmd-norm[%d]</input>
+          <gain>1</gain>
+          <output>fcs/throttle-pos-norm[%d]</output>
+        </pure_gain>
+      </channel>""" % (i, i, lever, i))
     pistons = sum(len(e.copies()) for e in aircraft.engines if e.type == "piston")
     if pistons:
         # JSBSim's piston engine dies of a rich mixture at altitude: lean it with
@@ -570,7 +583,7 @@ def propulsion_xml(aircraft, mass_model, engine_files):
         </location>
         <capacity unit="KG"> %.2f </capacity>
         <contents unit="KG"> %.2f </contents>
-      </tank>""" % (_loc(np.asarray(t["position"], float), 10), cap, cap * float(t.get("fill", 1.0))))
+      </tank>""" % (_loc(np.asarray(t["position"], float), 10), cap, mass_model.fuel(t)))
     parts.append("    </propulsion>")
     return "\n".join(parts)
 

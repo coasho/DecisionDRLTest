@@ -37,7 +37,17 @@ Lifting surfaces, in two steps.
    between 50 and 60 deg.
 
 Forces per strip: lift normal to the effective flow (so induced drag is the
-lift's tilt), section drag along it, section moment about the span axis. The
+lift's tilt), section drag along it, section moment about the span axis.
+Each strip's effective angle comes from its lift through a thin section's
+2 pi slope and the neighbouring strips' chordwise vortices, so the tilt
+overstates the induced drag of the loading the lattice gives - by about
+15 % on plain wings of aspect ratio 6 to 10, and more where the lattice's few
+chordwise panels resolve a cambered line poorly (a 6A section's uniform-load
+line: 0.006 CL more drag). [analysis] induced_drag = "trefftz" takes it from
+the Trefftz plane instead (trefftz_correction): the far-field downwash of
+every surface's trailing vortices at each strip, half of it at the bound
+vortex, from the spanwise loading alone, as potential flow has it. The
+designs made before it keep the strips' own tilt. The
 lift a strip's angle of attack makes acts where the lattice's own loading
 puts it on the chord (vlm.py), not at the section's quarter chord: the other
 strips' loading moves it - aft over a wing root behind a strake or a canard,
@@ -99,6 +109,76 @@ CANARD_BURST_LATER = 8.0                # deg of angle of attack a close-coupled
 BLUNT_VORTEX_SWEEP = (math.radians(45.0), math.radians(60.0))  # a blunt edge's vortex forms from, and fully by, these sweeps
 VORTEX_FLOW = (45.0, 70.0)              # deg of angle of attack (and sideslip) over which the vortex flow gives way
 CL_FLOOR = 0.1                          # the least lift coefficient a lift ratio is measured against
+TREFFTZ_CORE = 0.02                     # of a piece's width: the core of its own surface's trailing vortices
+                                        # (another surface's are a strip wide, as the lattice's)
+TREFFTZ_SPLIT = 4                       # pieces per strip, the loading linear between the strips' centres
+
+
+def trefftz_correction(L, group, U, v, un, lift, lift_dir, wc):
+    """Per strip, the force (n_s, 3) that turns the induced drag of its
+    lift's tilt into the Trefftz plane's. Each strip's circulation (its lift
+    normal to the local flow and the span, over its speed and width) is laid
+    along its surface half, linear between the strips' centres and falling
+    to nothing at a free tip, in TREFFTZ_SPLIT pieces a strip; each piece
+    sheds a vortex at either end. In the plane normal to the free stream v
+    they induce a far-field normal wash at every piece, and half of it at
+    the bound vortex makes the piece's induced drag - summing to the whole
+    system's (Munk's stagger theorem), from the spanwise loading alone: an
+    elliptic loading's pi Gamma^2 / 8 within half a percent. U: the local air
+    velocity at the strips, un its speed in their section planes, lift the
+    circulation's force (signed, along lift_dir), group the surface half of
+    each strip, wc the lattice's coupling (the correction fades with it)."""
+    Uh = U / np.maximum(np.linalg.norm(U, axis=1), 1e-12)[:, None]
+    F = lift[:, None] * lift_dir
+    own = np.einsum("ij,ij->i", F, Uh)                   # the tilt's drag, along the local flow
+    n = np.cross(Uh, L.e)
+    n /= np.maximum(np.linalg.norm(n, axis=1), 1e-12)[:, None]
+    g = np.einsum("ij,ij->i", F, n) / np.maximum(un * L.width, 1e-12)   # circulation (rho = 1)
+    # the pieces: each strip cut along its span, its circulation interpolated
+    # along the surface half from root (eta 0) to tip, nothing at the tip
+    m = TREFFTZ_SPLIT
+    frac = (np.arange(m) + 0.5) / m
+    pc, pw, pg, pe, pn, owner = [], [], [], [], [], []
+    for gi in np.unique(group):
+        idx = np.flatnonzero(group == gi)
+        idx = idx[np.argsort(L.eta[idx])]
+        w = L.width[idx]
+        t0 = np.concatenate([[0.0], np.cumsum(w)[:-1]])
+        tc = t0 + 0.5 * w
+        ts = (t0[:, None] + frac[None, :] * w[:, None]).ravel()
+        gs = np.interp(ts, np.concatenate([tc, [t0[-1] + w[-1]]]), np.concatenate([g[idx], [0.0]]))
+        # the pieces' centres, along each strip's span line from its root side
+        s = 1.0 if len(idx) < 2 or float(L.e[idx[0]] @ (L.c4[idx[-1]] - L.c4[idx[0]])) >= 0.0 else -1.0
+        start = L.c4[idx] - (0.5 * s * w)[:, None] * L.e[idx]
+        pc.append((start[:, None, :] + (s * frac[None, :] * w[:, None])[:, :, None] * L.e[idx][:, None, :]).reshape(-1, 3))
+        pw.append(np.repeat(w / m, m))
+        pg.append(gs)
+        pe.append(np.repeat(L.e[idx], m, axis=0))
+        pn.append(np.repeat(n[idx], m, axis=0))
+        owner.append(np.repeat(idx, m))
+    pc, pw, pg, pe, pn, owner = (np.concatenate(x) for x in (pc, pw, pg, pe, pn, owner))
+    surf = L.surface_index[owner]
+    # each piece's ends, the bound vortex running along n x U for positive g
+    half = 0.5 * pw[:, None] * pe
+    flip = np.einsum("ij,ij->i", pe, np.cross(pn, Uh[owner])) < 0.0
+    a = np.where(flip[:, None], pc + half, pc - half)
+    b = np.where(flip[:, None], pc - half, pc + half)
+    # the Trefftz plane: p1, p2 normal to the free stream, p1 x p2 along it
+    vh = v / np.linalg.norm(v)
+    p1 = np.array([0.0, 1.0, 0.0]) - vh[1] * vh
+    p1 /= np.linalg.norm(p1)
+    p2 = np.cross(vh, p1)
+    P = lambda x: np.stack([x @ p1, x @ p2], axis=-1)  # noqa: E731
+    pos = np.concatenate([P(b), P(a)])                   # the trailing vortices, +g at b, -g at a
+    gam = np.concatenate([pg, -pg])
+    r = P(pc)[:, None, :] - pos[None, :, :]
+    same = surf[:, None] == np.concatenate([surf, surf])[None, :]
+    core = np.where(same, TREFFTZ_CORE * pw[:, None], L.width[owner][:, None])
+    k = gam[None, :] / (2.0 * math.pi * (np.einsum("ijk,ijk->ij", r, r) + core ** 2))
+    w = -(k * r[:, :, 1]).sum(axis=1) * (pn @ p1) + (k * r[:, :, 0]).sum(axis=1) * (pn @ p2)   # far-field normal wash
+    span = np.linalg.norm(P(b) - P(a), axis=1)
+    trefftz = np.bincount(owner, -0.5 * pg * w * span, L.n_strips)   # each strip's share of the induced drag
+    return (np.asarray(wc) * (trefftz - own))[:, None] * Uh
 
 
 def burst_alpha(sweep):
@@ -214,6 +294,10 @@ class AeroModel:
             self.vlm.set_body_points(self._body_pts)
         misc = an.get("drag_area", None)   # extra drag area, m^2 (gear, antennas, cooling...)
         self.drag_area = float(misc) if misc is not None else self._default_drag_area()
+        induced = str(an.get("induced_drag", "strips")).lower()
+        if induced not in ("strips", "trefftz"):
+            raise ValueError("[analysis] induced_drag must be \"strips\" or \"trefftz\", not %r" % induced)
+        self.trefftz = induced == "trefftz"
         self.S, self.b, self.c = a.S, a.b, a.c
         self.ref = L.ref
         self.clb_wing_body = self._wing_body_dihedral()
@@ -398,7 +482,7 @@ class AeroModel:
         # regime, as strip theory would. The lattice's induced flow fades out in
         # sideslip, as the flow leaves the plane of symmetry its wake is laid in.
         lin = {"a_geo": a_geo, "ind": ind, "eps": eps, "cl_lin": cl_lin, "gamma": gamma, "un": un, "delta": delta,
-               "f_sweep": f_sweep}
+               "f_sweep": f_sweep, "U": U, "v": v}
         turn = np.where(P.flap_chord >= 0.999, delta, 0.0)
         on = VX["on"]
         coupling = np.full(L.n_strips, w_ind)
@@ -546,6 +630,8 @@ class AeroModel:
         k_loc = np.clip(np.cos(a_i) - np.tan(np.clip(a_eff, -1.4, 1.4)) * np.sin(a_i), 0.5, 1.2)
         qa = 0.5 * un**2 * L.area * lin["f_sweep"] * k_loc
         Fk = (qa * cl)[:, None] * lift_dir + (qa * cd)[:, None] * fe
+        if self.trefftz:
+            Fk = Fk + trefftz_correction(L, self.group, lin["U"], lin["v"], un, qa * cl, lift_dir, wc)
         Mk = np.cross(L.c4 - self.ref, Fk) + (qa * L.chord * cm)[:, None] * L.e
         body_ind = None
         if self.vlm.body_W is not None:
