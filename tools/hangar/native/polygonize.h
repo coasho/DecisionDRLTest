@@ -23,7 +23,7 @@ struct Mesh {
 struct PolygonizeOptions {
     double cell = 0.01;    ///< leaf cell size, m
     double safety = 2.0;   ///< how far past its half-diagonal a cell is still refined
-    unsigned threads = 0;  ///< 0: all cores
+    unsigned threads = 0;  ///< 0: all cores; the mesh is the same on any number
 };
 
 Mesh polygonize(const Node& root, const Box& domain, const PolygonizeOptions& options);

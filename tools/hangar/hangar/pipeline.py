@@ -15,6 +15,7 @@ and checks; a check is pass / warn / fail against an expected range, or info.
 """
 import glob
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -126,12 +127,14 @@ class Design:
     def img(self, name):
         return os.path.join(self.out, name)
 
-    def spec_hash(self, *sections):
+    def spec_hash(self, *sections, code=("aero", "geometry")):
+        """The key of a result computed from these sections of the design and
+        its airfoil files by the code in hangar's packages named in `code`."""
         spec = self.aircraft.spec
         blob = json.dumps({k: spec.get(k) for k in sections}, sort_keys=True, default=str) + __version__
-        # and the code that computes them: a change to the methods is a change to the tables
+        # and the code that computes them: a change to the methods is a change to the result
         here = os.path.dirname(os.path.abspath(__file__))
-        for f in sorted(glob.glob(os.path.join(here, "aero", "*.py")) + glob.glob(os.path.join(here, "geometry", "*.py"))):
+        for f in sorted(p for d in code for p in glob.glob(os.path.join(here, d, "*.py"))):
             with open(f, "rb") as fh:
                 blob += hashlib.sha1(fh.read()).hexdigest()
         # airfoil files referenced by path change the result too
@@ -477,16 +480,28 @@ class Design:
         return self.save("build", out)
 
     # -- the 3D model ---------------------------------------------------------------------------
-    def model_key(self):
-        """What the model is made from: the design's geometry and mass (the CG
-        is its origin), its paint (paint.toml), the code that shapes, meshes
-        and paints it."""
+    def model_key(self, origin=None):
+        """What the model is made from: the design's geometry, mass and paint
+        (paint.toml); its origin, the empty CG, as mass.py places it; and the
+        code that shapes, meshes and paints it - geometry/, shape/,
+        model3d.py, livery.py and the mesher's DLL. Not the aerodynamics: the
+        model does not depend on them, and an edit there re-meshes nothing."""
+        from . import jsbsim, model3d
+        from .mass import MassModel
         from .shape import meshkit
-        blob = self.spec_hash("surface", "body", "intake", "gear", "engine", "mass", "reference", "aircraft", "dimensions")
+        if origin is None:
+            origin = MassModel(self.aircraft).empty()["cg"]
+        blob = self.spec_hash("aircraft", "surface", "body", "intake", "strut", "gear", "engine", "mass",
+                              code=("geometry", "shape"))
+        blob += "origin %.6f %.6f %.6f" % tuple(origin)
+        # what model3d borrows from elsewhere: the channels' sign conventions,
+        # the order JSBSim numbers the engines in, the drawings' colours
+        blob += inspect.getsource(model3d.channel_gain) + inspect.getsource(jsbsim._engine_units)
+        blob += repr((model3d.COLOURS, model3d.CONTROL_COLOURS))
         here = os.path.dirname(os.path.abspath(__file__))
+        files = [os.path.join(here, "model3d.py"), os.path.join(here, "livery.py")]
         paint = os.path.join(self.aircraft.dir, "paint.toml")
-        for f in (sorted(glob.glob(os.path.join(here, "shape", "*.py"))) + [os.path.join(here, "model3d.py"),
-                  os.path.join(here, "livery.py")] + ([paint] if os.path.isfile(paint) else [])):
+        for f in files + ([paint] if os.path.isfile(paint) else []):
             with open(f, "rb") as fh:
                 blob += hashlib.sha1(fh.read()).hexdigest()
         lib = meshkit.library()
@@ -504,7 +519,8 @@ class Design:
         from .mass import MassModel
         a = self.aircraft
         glb = os.path.join(self.dir, a.name + ".glb")
-        key = self.model_key()
+        origin = MassModel(a).empty()["cg"]
+        key = self.model_key(origin)
         old = self.load("model")
         if not force and old and old.get("key") == key and os.path.isfile(glb):
             # the model as it was; its checks as they are now
@@ -513,7 +529,7 @@ class Design:
             return self.save("model", old)
         report = {}
         t0 = time.time()
-        model3d.write_glb(a, glb, origin=MassModel(a).empty()["cg"], report=report)
+        model3d.write_glb(a, glb, origin=origin, report=report)
         seconds = time.time() - t0
         checks = self._model_checks(report, glb, seconds)
         return self.save("model", {"glb": glb, "key": key, "report": report, "checks": checks, "seconds": seconds})

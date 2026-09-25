@@ -22,6 +22,7 @@ struct DecimateOptions {
     double featureWeight = 400.0; ///< of the planes that hold features
     bool blocks = true;           ///< a parallel first pass on large meshes
     bool serial = true;           ///< the final pass over the whole mesh
+    unsigned threads = 0;         ///< for the first pass (0: all cores); the mesh is the same on any number
 };
 
 /// Simplifies m in place; material holds one entry per triangle and follows it.

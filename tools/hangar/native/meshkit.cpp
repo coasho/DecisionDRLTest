@@ -188,9 +188,10 @@ void shade(const Mesh& m, const std::vector<std::uint16_t>& mat, double sharpDeg
     for (std::size_t f = 0; f < nf; ++f) out->materials[f] = mat[f];
 }
 
+/// fn(i) for every i below n, on `threads` threads (0: all cores).
 template <typename F>
-void parallel(std::size_t n, F fn) {
-    const unsigned threads = std::min(32u, std::max(1u, std::thread::hardware_concurrency()));
+void parallel(std::size_t n, unsigned threads, F fn) {
+    threads = std::min(32u, threads ? threads : std::max(1u, std::thread::hardware_concurrency()));
     std::atomic<std::size_t> next{0};
     auto work = [&]() {
         for (;;) {
@@ -230,6 +231,7 @@ MK_API int mk_build(const char* scene_json, mk_mesh* out) {
         PolygonizeOptions po;
         po.cell = doc.number("cell", 0.01);
         po.safety = doc.number("safety", 1.5);
+        po.threads = static_cast<unsigned>(std::max(0.0, doc.number("threads", 0.0)));
         auto lap = std::chrono::steady_clock::now();
         Mesh m = polygonize(*scene.root, domain, po);
         out->seconds_polygonize = std::chrono::duration<double>(std::chrono::steady_clock::now() - lap).count();
@@ -238,7 +240,7 @@ MK_API int mk_build(const char* scene_json, mk_mesh* out) {
         out->fragments_removed = dropFragments(m, nullptr, doc.number("fragment", 5.0 * po.cell));
         // each triangle takes the material of the solid nearest its centre
         std::vector<std::uint16_t> mat(m.f.size());
-        parallel(m.f.size(), [&](std::size_t f) {
+        parallel(m.f.size(), po.threads, [&](std::size_t f) {
             const V3 c = (m.v[m.f[f][0]] + m.v[m.f[f][1]] + m.v[m.f[f][2]]) * (1.0 / 3.0);
             mat[f] = static_cast<std::uint16_t>(std::max(0, scene.root->eval(c).material));
         });
@@ -248,6 +250,7 @@ MK_API int mk_build(const char* scene_json, mk_mesh* out) {
         dop.sharpDeg = doc.number("sharp_deg", 50.0);
         dop.blocks = doc.boolean("blocks", true);
         dop.serial = doc.boolean("serial", true);
+        dop.threads = po.threads;
         lap = std::chrono::steady_clock::now();
         decimate(m, mat, dop);
         out->seconds_decimate = std::chrono::duration<double>(std::chrono::steady_clock::now() - lap).count();
@@ -288,7 +291,7 @@ struct mk_scene {
 
 namespace {
 void evalAll(const Scene& scene, const double* points, int n, double* distance, int* material) {
-    parallel(static_cast<std::size_t>(std::max(n, 0)), [&](std::size_t i) {
+    parallel(static_cast<std::size_t>(std::max(n, 0)), 0, [&](std::size_t i) {
         const Sample s = scene.root->eval({points[3 * i], points[3 * i + 1], points[3 * i + 2]});
         distance[i] = s.d;
         if (material != nullptr) material[i] = s.material;

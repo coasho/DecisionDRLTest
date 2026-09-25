@@ -167,22 +167,24 @@ Mesh polygonize(const Node& root, const Box& domain, const PolygonizeOptions& op
     const long long total = bx * by * bz;
     unsigned threads = options.threads ? options.threads : std::max(1u, std::thread::hardware_concurrency());
     threads = std::min(threads, 32u);
-    std::vector<BrickOut> outs(threads);
+    // each brick fills a slot of its own, and the slots are joined in brick
+    // order: the mesh is the same whichever thread made which brick
+    std::vector<BrickOut> outs(static_cast<std::size_t>(total));
     std::atomic<long long> next{0};
-    auto work = [&](unsigned t) {
+    auto work = [&]() {
         for (;;) {
             const long long b = next.fetch_add(1);
             if (b >= total) break;
-            brick(root, g, b % bx, (b / bx) % by, b / (bx * by), options.safety, outs[t]);
+            brick(root, g, b % bx, (b / bx) % by, b / (bx * by), options.safety, outs[static_cast<std::size_t>(b)]);
         }
     };
     std::vector<std::thread> pool;
-    for (unsigned t = 1; t < threads; ++t) pool.emplace_back(work, t);
-    work(0);
+    for (unsigned t = 1; t < threads; ++t) pool.emplace_back(work);
+    work();
     for (auto& t : pool) t.join();
 
     // weld: a vertex on a brick's face is made by both bricks, from the same
-    // grid edge and the same corner values
+    // grid edge and the same corner values; the first brick's copy stays
     struct Tag {
         EdgeKey key;
         std::uint32_t index;
@@ -199,7 +201,9 @@ Mesh polygonize(const Node& root, const Box& domain, const PolygonizeOptions& op
         for (const auto& f : o.f) faces.push_back({base + f[0], base + f[1], base + f[2]});
     }
     std::sort(tags.begin(), tags.end(), [](const Tag& a, const Tag& b) {
-        return a.key.a < b.key.a || (a.key.a == b.key.a && a.key.b < b.key.b);
+        if (a.key.a != b.key.a) return a.key.a < b.key.a;
+        if (a.key.b != b.key.b) return a.key.b < b.key.b;
+        return a.index < b.index;
     });
     std::vector<std::uint32_t> remap(all.size());
     Mesh m;

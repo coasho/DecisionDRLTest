@@ -5,8 +5,12 @@
 //
 //   {"cell": 0.012, "safety": 1.5, "error": 0.0008, "max_triangles": 0,
 //    "sharp_deg": 50, "domain": [[x0, y0, z0], [x1, y1, z1]], "fragment": 5 * cell,
+//    "threads": 0,
 //    "foils": [{"x": [...], "upper": [...], "lower": [...]}],
 //    "root": <node>}
+//
+// The same scene gives the same mesh, byte for byte, on any number of threads
+// ("threads": 0 is all cores).
 //
 // Nodes (distances in metres, negative inside; "material" an integer that
 // the triangles carry; "mirror": true copies a part to y < 0):

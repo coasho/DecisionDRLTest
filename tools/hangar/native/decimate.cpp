@@ -55,7 +55,12 @@ struct Quadric {
 struct Entry {
     double cost;
     std::uint32_t a, b;
-    bool operator>(const Entry& o) const { return cost > o.cost; }
+    // equal costs go by their vertices, so the collapses come in the same
+    // order however the queue was filled
+    bool operator>(const Entry& o) const {
+        if (cost != o.cost) return cost > o.cost;
+        return a != o.a ? a > o.a : b > o.b;
+    }
 };
 
 /// Quadric simplification of m in place. A locked vertex and its edges stay
@@ -101,7 +106,12 @@ void simplify(Mesh& m, std::vector<std::uint16_t>& material, const std::vector<c
             const std::uint32_t a = m.f[f][e], b = m.f[f][(e + 1) % 3];
             he.push_back({std::min(a, b), std::max(a, b), static_cast<std::uint32_t>(f)});
         }
-    std::sort(he.begin(), he.end(), [](const HalfEdge& x, const HalfEdge& y) { return x.lo < y.lo || (x.lo == y.lo && x.hi < y.hi); });
+    // by edge, then by face: an edge's two feature planes are added in one order
+    std::sort(he.begin(), he.end(), [](const HalfEdge& x, const HalfEdge& y) {
+        if (x.lo != y.lo) return x.lo < y.lo;
+        if (x.hi != y.hi) return x.hi < y.hi;
+        return x.face < y.face;
+    });
     const double sharpCos = std::cos(sharpDeg * 3.14159265358979323846 / 180.0);
     for (std::size_t i = 0; i < he.size();) {
         std::size_t j = i + 1;
@@ -320,7 +330,7 @@ void blocks(Mesh& m, std::vector<std::uint16_t>& material, const DecimateOptions
         }
     std::vector<std::uint32_t> order(nf);
     for (std::size_t f = 0; f < nf; ++f) order[f] = static_cast<std::uint32_t>(f);
-    std::sort(order.begin(), order.end(), [&](std::uint32_t x, std::uint32_t y) { return fcell[x] < fcell[y]; });
+    std::sort(order.begin(), order.end(), [&](std::uint32_t x, std::uint32_t y) { return fcell[x] != fcell[y] ? fcell[x] < fcell[y] : x < y; });
     std::vector<std::pair<std::size_t, std::size_t>> groups; // [begin, end) in order
     for (std::size_t i = 0; i < nf;) {
         std::size_t j = i + 1;
@@ -403,8 +413,11 @@ void blocks(Mesh& m, std::vector<std::uint16_t>& material, const DecimateOptions
 } // namespace
 
 void decimate(Mesh& m, std::vector<std::uint16_t>& material, const DecimateOptions& o) {
-    const unsigned threads = std::min(32u, std::max(1u, std::thread::hardware_concurrency()));
-    if (o.blocks && m.f.size() > 400000 && threads > 1) blocks(m, material, o, threads);
+    // the blocks are cut by space, not by thread: however many threads run
+    // them, the mesh is the same (one just runs them in turn)
+    unsigned threads = o.threads ? o.threads : std::max(1u, std::thread::hardware_concurrency());
+    threads = std::min(threads, 32u);
+    if (o.blocks && m.f.size() > 400000) blocks(m, material, o, threads);
     if (o.serial)
         simplify(m, material, std::vector<char>(m.v.size(), 0), o.maxError, o.targetFaces, o.sharpDeg, o.featureWeight);
 }

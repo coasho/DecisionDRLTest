@@ -85,6 +85,10 @@ move on while a check fails or a picture looks wrong.
   misturned edge, the airframe in one piece, every moving part closed, the
   stowed gear inside the skin (under 3 cm), length, span and height within
   3 % of `[dimensions]`.
+  - The stage re-meshes only when the geometry, the mass (the CG), the
+    paint or the code that shapes the model changes, never for an aero
+    edit. The mesher is deterministic: a `.glb` that git shows as modified
+    has changed, and one that should not have is a bug to chase.
   - A loose piece is usually a fin or boom standing off its body. Give the
     surface a body under it (a tail boom), or move it onto one.
   - Gear outside the skin: move the `attach` (the trunnion) up inside the

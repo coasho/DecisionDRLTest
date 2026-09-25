@@ -376,6 +376,13 @@ one piece; every moving part a closed solid; the stowed gear inside the skin;
 no gear door ever touching a leg, open or closed; length, span and height
 within 3 % of `[dimensions]`.
 
+The model is made again only when something that shapes it changes: the
+design's geometry, mass (its origin is the empty CG) or paint, or the code
+that shapes, meshes and paints it (`geometry/`, `shape/`, `model3d.py`,
+`livery.py` and the mesher). An edit to the aerodynamics re-meshes nothing.
+The mesher gives the same file, byte for byte, every time and on any number
+of cores, so a `.glb` that git shows as changed has really changed.
+
 A design that stands in for a stock JSBSim aircraft (`stands_in_for`) is
 drawn for it too: `fsim hangar register` parks each stock aircraft, finds
 where its main wheels touch, and writes `aircraft/models.txt` - which model

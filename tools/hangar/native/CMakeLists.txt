@@ -17,3 +17,9 @@ if(NOT MSVC)
     # a DLL that ctypes can load on its own: libstdc++, libgcc and winpthread linked in
     target_link_options(hangar_meshkit PRIVATE -static)
 endif()
+if(MINGW)
+    # no link time in the header: the same code links to the same bytes, and
+    # hangar's model stage, which keys its cache on them, does not re-mesh
+    # every design after a relink
+    target_link_options(hangar_meshkit PRIVATE -Wl,--no-insert-timestamp)
+endif()

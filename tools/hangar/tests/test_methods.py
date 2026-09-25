@@ -710,6 +710,69 @@ class Model3D(unittest.TestCase):
         d, _ = meshkit.evaluate({"root": cowl}, np.array([[13.0, 0.0, -0.3], [8.0, 0.5, -0.25]]))
         self.assertTrue(np.all(d < 0.0), d)
 
+    def test_mesh_is_the_same_every_time(self):
+        # a scene gives the same mesh, byte for byte, on one thread or on all
+        # of them, so a design's .glb changes only when the design does: the
+        # bricks are joined in their own order whichever thread made them,
+        # and the decimator breaks its ties by index
+        from hangar.shape import meshkit
+        if meshkit.library() is None:
+            self.skipTest("hangar_meshkit is not built")
+        scene = {"cell": 0.016, "root": {"op": "union", "k": 0.05, "children": [
+            {"prim": "ellipsoid", "centre": [0.0, 0.0, 0.0], "radii": [2.0, 0.5, 0.5]},
+            {"prim": "box", "centre": [0.2, 0.0, 0.0], "half": [0.5, 2.0, 0.05], "round": 0.02, "material": 1},
+            {"prim": "cylinder", "a": [1.6, 0.0, 0.2], "b": [1.9, 0.0, 0.9], "r": 0.1, "material": 2}]}}
+        one = meshkit.build(dict(scene, threads=1))
+        self.assertGreater(one["raw_triangles"], 400000)  # the decimator's parallel first pass runs too
+        for _ in range(2):
+            m = meshkit.build(scene)
+            for k in ("positions", "normals", "triangles", "materials"):
+                self.assertTrue(np.array_equal(m[k], one[k]), k)
+
+    def test_model_cache_follows_the_shape_not_the_aerodynamics(self):
+        # the model is re-made when what shapes it changes, and only then: an
+        # edit to the aerodynamics leaves the model's key as it is (and changes
+        # the tables'), an edit to the code that shapes the model changes it
+        import os
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+
+        import hangar
+        probe = ("import sys, hangar; from hangar.pipeline import Design; d = Design(sys.argv[1], log=None); "
+                 "print(d.model_key(), d.spec_hash('surface', 'body', 'intake', 'reference', 'analysis', 'gear', 'engine'), "
+                 "hangar.__file__)")
+        with tempfile.TemporaryDirectory() as tmp:
+            pkg = shutil.copytree(os.path.dirname(hangar.__file__), os.path.join(tmp, "hangar"),
+                                  ignore=shutil.ignore_patterns("__pycache__"))
+            design = shutil.copytree(repo("aircraft/skua"), os.path.join(tmp, "skua"), ignore=shutil.ignore_patterns("out"))
+
+            env = dict(os.environ, PYTHONPATH=os.pathsep.join([tmp, os.environ.get("PYTHONPATH", "")]))
+
+            def keys():
+                # run in tmp: its copy of hangar comes first on the path
+                run = subprocess.run([sys.executable, "-c", probe, os.path.join(design, "skua.toml")], cwd=tmp, env=env,
+                                     capture_output=True, text=True)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                model, tables, where = run.stdout.split(maxsplit=2)
+                self.assertTrue(os.path.samefile(os.path.dirname(where.strip()), pkg), where)
+                return model, tables
+
+            def edit(rel):
+                with open(os.path.join(pkg, rel), "a", encoding="utf-8") as f:
+                    f.write("\n# an edit\n")
+
+            model, tables = keys()
+            edit(os.path.join("aero", "vlm.py"))
+            model_a, tables_a = keys()
+            self.assertEqual(model_a, model)        # nothing to re-mesh
+            self.assertNotEqual(tables_a, tables)   # the tables are rebuilt
+            edit(os.path.join("shape", "airframe.py"))
+            model_s, tables_s = keys()
+            self.assertNotEqual(model_s, model)     # re-meshed
+            self.assertEqual(tables_s, tables_a)    # the tables stay
+
     def test_leading_edge_flaps_turn_down(self):
         # a positive turn of a leading-edge device's node moves its leading
         # edge down on both sides
