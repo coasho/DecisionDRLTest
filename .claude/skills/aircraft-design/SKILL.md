@@ -173,6 +173,9 @@ move on while a check fails or a picture looks wrong.
   only when the JSBSim model comes from wind-tunnel data: of those shipped,
   only `f16` does (the f15's and f22's headers say performance data). Check
   its control tables' units first: see the f16c's `reference_control_scale`.
+  The comparison takes the reference's moments about the design's
+  `aero_point`, so keep that at the reference's moment point (the f16c's:
+  NASA's 0.35 MAC), not at the CG.
 - **Read after aero:**
   - `reference.png`, if there is a reference.
   - `mach.png`: K_L should peak near Mach 0.9-1.0. The neutral point

@@ -406,16 +406,34 @@ TP-1538's wind-tunnel data (Nguyen et al., 1979), a reference measured from
 
 ![hangar's F-16C against NASA TP-1538](images/hangar-f16c-nasa.jpg)
 
-Lift, drag and pitching moment agree to 40° angle of attack. The mean lift
-error is 5 % and drag 7 %; Cm is within 0.025 to 15° and 0.06 to 40°. The
-neutral point is at 34.4 % of the MAC (NASA: 34.5 %). The dihedral effect,
-the weathercock stability to 25°, and the damping in pitch and yaw at low α
-also agree.
+Lift and drag follow NASA's to 40° angle of attack. The mean error to 15°
+is 7.2 % in lift and 7.5 % in drag, and from 15° to 40° it is 8.6 % and
+10.9 %. The dihedral effect, the weathercock stability to 25°, and the
+damping in pitch and yaw at low α also agree.
 
-hangar's F-16C differs in these:
+The pitching moment agrees only at low α. Both moments are taken about
+NASA's moment reference, 35 % of the MAC, which is also the design's
+reference point. NASA's Cm stays within 0.015 of zero from 0° to 40°.
+hangar's rises with α: it is 0.037 above NASA's at 15° and 0.23 above at
+40°. The neutral point is at 30.7 % of the MAC, and NASA's at 33.5 % (both
+from the slope between −2° and 6°).
+
+This is a regression. It came when the F-16C was reshaped to its
+three-views. Today's methods, run on the earlier shape, give Cm within 0.02
+of NASA's to 15° and 0.07 to 40°, a mean lift error of 5.4 %, and the
+neutral point at 34.4 %. The three-views gave the F-16C ogee strakes that
+start 1.2 m further forward, a wider forebody, and a stabilator 0.6 m
+further forward. Each of these adds nose-up moment. Put back one at a time,
+the earlier strakes move the neutral point 1.1 % of the MAC aft, the
+earlier fuselage and intake 0.85 %, and the earlier stabilator 0.6 %. The
+new shape is the more faithful one, so the error is in the model, not in
+the comparison. The strakes' vortex lift was calibrated on NASA's data
+while the F-16C still had its earlier, shorter strakes.
+
+hangar's F-16C also differs in these:
 
 - At high angle of attack it keeps more directional stability than NASA's.
-- Its all-moving tail is about 1.8 times as powerful.
+- Its all-moving tail is about 1.4 times as powerful below 20°.
 - Its side force in sideslip is about half of NASA's.
 
 JSBSim's `f16` applies Stevens & Lewis's aileron and rudder tables per
