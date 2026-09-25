@@ -81,6 +81,11 @@ class Engine:
             self.thrust_wet_kn = float(spec["thrust_wet_kn"]) if "thrust_wet_kn" in spec else None  # afterburner
             if self.thrust_wet_kn is not None and self.thrust_wet_kn <= self.thrust_dry_kn:
                 raise ValueError("engine %r: thrust_wet_kn must exceed thrust_dry_kn" % self.name)
+            # a flat-rated engine: what its core makes at sea-level static when
+            # not held to its rating (thrust_dry_kn), which it keeps higher up
+            self.thermo_thrust_kn = float(spec.get("thermodynamic_thrust_kn", self.thrust_dry_kn))
+            if self.thermo_thrust_kn < self.thrust_dry_kn:
+                raise ValueError("engine %r: thermodynamic_thrust_kn is at least thrust_dry_kn (the rating)" % self.name)
             self.bypass_ratio = float(spec.get("bypass_ratio", 0.5))
             self.tsfc_dry = float(spec.get("tsfc_dry", 0.8))    # kg/(kgf h) = lb/(lbf h)
             self.tsfc_wet = float(spec.get("tsfc_wet", 2.0))

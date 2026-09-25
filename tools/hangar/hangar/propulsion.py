@@ -365,9 +365,13 @@ def turbofan_tables(engine):
     """JSBSim's three thrust tables (fractions of the sea-level-static
     military and maximum thrust) over Mach and density altitude, from the
     lapse model; idle a few percent of military thrust, falling with the ram
-    drag of the airflow it swallows."""
+    drag of the airflow it swallows. A flat-rated engine (its core's
+    thermodynamic_thrust_kn above its rating) keeps its rating's thrust at
+    each Mach number until its core's, lapsing with height, falls below
+    it."""
     tr = engine.throttle_ratio
     bpr = engine.bypass_ratio
+    flat = engine.thermo_thrust_kn / engine.thrust_dry_kn
     mil0 = turbofan_lapse(0.0, 0.0, tr, bypass=bpr)
     wet0 = turbofan_lapse(0.0, 0.0, tr, wet=True)
     out = {"IdleThrust": [], "MilThrust": [], "AugThrust": []}
@@ -378,7 +382,10 @@ def turbofan_tables(engine):
             _, p = _isa(h)
             delta = p / 101325.0
             idle.append(max(delta * (0.05 - 0.08 * m), -0.12))
-            mil.append(max(turbofan_lapse(m, h, tr, bypass=bpr) / mil0, 0.0))
+            dry = turbofan_lapse(m, h, tr, bypass=bpr)
+            if flat > 1.0:  # never below the rated engine's own lapse (below sea level, past TR)
+                dry = max(dry, min(flat * dry, turbofan_lapse(m, 0.0, tr, bypass=bpr)))
+            mil.append(max(dry / mil0, 0.0))
             aug.append(max(turbofan_lapse(m, h, tr, wet=True) / wet0, 0.0))
         out["IdleThrust"].append(idle)
         out["MilThrust"].append(mil)

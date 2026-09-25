@@ -376,8 +376,11 @@ For fighters:
   lapse, δ₀(1 − 0.49√M), all of it from a bypass ratio of 2: a fifth of
   the static thrust at Mach 0.8 and 35,000 ft. A TF33 (1.42) goes two
   fifths of the way, to 0.29 of its static thrust at Mach 0.82 and 35,000
-  ft, as the JT3D's cruise ratings give it. Weight and size come from
-  Raymer. Calibration fits TR to a fighter's published top speed,
+  ft, as the JT3D's cruise ratings give it. A flat-rated engine
+  (`thermodynamic_thrust_kn`, its core's thrust above the rating, as the
+  AE3007H's 8,917 lbf rated 7,600) keeps its rating at each Mach number
+  until the core's, lapsing with height, falls below it. Weight and size
+  come from Raymer. Calibration fits TR to a fighter's published top speed,
   and then the wave drag if TR alone cannot. A subsonic jet's engines run
   far below their TR at its top speed, which its wing's transonic drag rise
   sets: calibration fits Korn's airfoil technology factor κ_A in the
@@ -692,6 +695,7 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 | KC-46A | `kc46a` | 0.86 at 26,000 ft (0.86) | 5,200 | 29,500 (40,100 certified) |
 | EA-18G | `ea18g` | 1.80 at 40,000 ft (1.8) | 44,500 | 57,200 (50,000+) |
 | U-2S | `u2s` | 0.82 at 60,000 ft (0.715) | 10,700 | 64,800 (70,000+) |
+| RQ-4B | `rq4b` | 359 kt at sea level (340, height not given) | 3,600 | 45,200 (60,000) |
 
 - The B-52H flies at 140 t, 40 % fuel, about its combat weight. Its wing
   droops to the tips as it does on the ground. Spoilers roll the real one;
@@ -776,6 +780,17 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   coffin corner. It is not calibrated. At half fuel it climbs to 64,800 ft,
   short of the 70,000 it reaches as the fuel burns: its estimated zero-lift
   drag, 0.014, is above the published 0.009.
+- The RQ-4B stretches the RQ-4A's drawing to the published 47.6 ft and
+  130.9 ft, on NASA's LRN 1015 section (a coordinate file beside the
+  design). It flies at 10.5 t, 30 % of its fuel, on direct controls with a
+  yaw damper (hangar's fly-by-wire tests are a fighter's). Its V-tail only
+  just outweighs the bulbous nose in yaw (Cn_beta 0.004, a warning), yet
+  its dutch roll is level 1, damped 0.17 by the airframe alone; set at -4
+  deg, the tail trims the cambered wing to its stall, CL 1.65 at 76 KCAS.
+  It climbs to 45,200 ft, not 60,000: the high-bypass lapse, flat-rated,
+  leaves its AE3007H about 470 lbf there, where it needs some 700 (the
+  real engine's thrust up there is not published). Its phugoid, at L/D
+  27, is barely damped (a warning).
 
 ## Limits
 

@@ -432,6 +432,24 @@ class Fighters(unittest.TestCase):
             self.assertEqual(turbofan_lapse(m, h, 1.08, bypass=2.0), high_bypass_lapse(m, h, 1.08))
         self.assertTrue(0.27 <= turbofan_lapse(0.82, 10668.0, 1.0, bypass=1.42) <= 0.295)
 
+    def test_a_flat_rated_turbofan_keeps_its_rating_higher_up(self):
+        # thermodynamic_thrust_kn: a flat-rated engine's core makes more than
+        # its rating at sea-level static; it holds the rating's thrust at each
+        # Mach number until the core's, lapsing with height, falls below it -
+        # the AE3007H's 8,917 lbf core, rated 7,600 lbf, keeps 17 % more at
+        # 60,000 ft. A rating above its core's is refused
+        from hangar.geometry.aircraft import Engine
+        from hangar.propulsion import _ALT_FT, turbofan_tables
+        spec = {"name": "fan", "type": "turbofan", "thrust_dry_kn": 33.8, "bypass_ratio": 4.8, "throttle_ratio": 1.05}
+        rated = np.array(turbofan_tables(Engine(spec))["MilThrust"])
+        flat = np.array(turbofan_tables(Engine(dict(spec, thermodynamic_thrust_kn=39.66)))["MilThrust"])
+        sea, high = _ALT_FT.index(0.0), _ALT_FT.index(60000.0)
+        np.testing.assert_allclose(flat[:, sea], rated[:, sea])
+        np.testing.assert_allclose(flat[:4, high] / rated[:4, high], 39.66 / 33.8)
+        self.assertTrue((flat >= rated).all())
+        with self.assertRaises(ValueError):
+            Engine(dict(spec, thermodynamic_thrust_kn=30.0))
+
 
 class Transports(unittest.TestCase):
     def test_korn_kappa_moves_the_drag_divergence(self):
@@ -842,6 +860,16 @@ class LargeAircraft(unittest.TestCase):
         self.assertAlmostEqual(A[0, 2] - A0[0, 2], 1.0 - ca)
         self.assertAlmostEqual(A[0, 3], G0 * ca / 100.0)
         self.assertAlmostEqual(A[3, 2], sa / ca)
+
+    def test_small_fins_warn_where_the_flight_controls_work_the_rudder(self):
+        # Cn_beta under 0.01 fails; on an aircraft whose flight controls work
+        # the rudder (a fighter's, fly-by-wire, a yaw damper) it only warns
+        # while positive - its dutch roll is the fly stage's to judge
+        from hangar.pipeline import weathercock
+        self.assertEqual(weathercock(0.02, False)["status"], "pass")
+        self.assertEqual(weathercock(0.004, False)["status"], "fail")
+        self.assertEqual(weathercock(0.004, True)["status"], "warn")
+        self.assertEqual(weathercock(-0.004, True)["status"], "fail")
 
     def test_yaw_damper_damps_the_dutch_roll(self):
         # a direct-control design asks for one. Its loop is the JSBSim file's:

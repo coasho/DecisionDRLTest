@@ -1,0 +1,244 @@
+# Northrop Grumman RQ-4B Global Hawk, built by hangar from public data: the
+# high-altitude, long-endurance unmanned reconnaissance aircraft - a
+# 130.9 ft wing of NASA's LRN 1015 section, a V-tail, and one Rolls-Royce
+# AE3007H (F137-RR-100) turbofan in a nacelle on its back.
+#
+# Frame: metres, x aft from the nose's tip, y right, z up from the
+# fuselage's centre line behind the nose (the ground is 1.54 m below it,
+# parked).
+#
+# Sources:
+# - Northrop Grumman and the USAF (via Wikipedia and GlobalSecurity): span
+#   130.9 ft, length 47.6 ft, height 15.3 ft, empty 14,950 lb, maximum
+#   take-off 32,250 lb, 17,300 lb of fuel, 3,000 lb of payload, the
+#   F137-RR-100 of 7,600 lbf, 340 kt maximum and 310 kt cruise, ceiling
+#   60,000 ft, 34+ h.
+# - Northrop Grumman, NDIA 2006 (USAF ASC 06-0380): the RQ-4B's wing, 685
+#   ft2, aspect ratio 25, 2 deg of dihedral; 50.2 ft2 of tail a side.
+# - The AE3007H: 8,917 lbf maximum net thrust at sea level, flat rated for
+#   take-off; bypass ratio 4.8, 1,581 lb dry, 43.5 in across (the ASME/IGTI
+#   student design competition's RFP 33208, after Jane's); a flight
+#   envelope to Mach 0.6 at 65,000 ft.
+# - NASA TM 102840: the LRN 1015 section (coordinates in lrn1015.dat, from
+#   the UIUC airfoil data site): 15 % thick, 5 % camber, for the low
+#   Reynolds numbers of high altitude.
+# - The shape: the RQ-4A's dimensioned drawing (DoD UAS Roadmap, Fig. A-1,
+#   public domain): 116.2 ft span, 44.4 ft long, 15.2 ft tall, the wing's 83
+#   in root and 28.3 in tip chords and 7 deg leading edge, a 230 in V-tail
+#   at 45-49 deg, a 14.8 ft wheelbase and 10.6 ft track. The RQ-4B stretches
+#   it: the fuselage by 1.072 to 47.6 ft, the wing by 1.1265 to 130.9 ft
+#   (685 ft2); the V-tail and the gear are the RQ-4A's (estimate).
+
+[aircraft]
+name = "rq4b"
+description = "Northrop Grumman RQ-4B Global Hawk (hangar build)"
+category = "reconnaissance"
+
+[analysis]
+# The Reynolds numbers of the cruise, Mach 0.58 at 60,000 ft (171 m/s TAS,
+# kinematic viscosity 1.22e-4 m2/s there): a sea-level speed of the same
+# Reynolds number per metre (2.5 million on the MAC)
+speed = 21.0
+max_mach = 0.9                # subsonic: the tables' Mach factors to 0.9
+induced_drag = "trefftz"      # a high-aspect-ratio wing's induced drag from its loading (docs/hangar.md)
+laminar_fraction = 0.35       # the LRN 1015 is a laminar-flow section (estimate)
+
+[reference]
+area = 63.64                  # m2: 685 ft2 (Northrop Grumman)
+aero_point = [7.825, 0.0, 0.100]  # at the loaded CG
+
+# The wing: a straight taper, 2.375 m at the centre line to 0.810 m at the
+# 19.95 m tip (the RQ-4A's 83 in and 28.3 in, scaled), its leading edge
+# swept 7 deg; set just below the fuselage's centre line with 2 deg of
+# dihedral (NDIA 2006). Incidence 3 deg at the root, washed out to 0 at the
+# tip (estimate: the fuselage near level at the cruise's CL 0.9).
+[[surface]]
+name = "wing"
+kind = "wing"
+vortex = false
+airfoil = "lrn1015.dat"
+sections = [
+  { le = [6.520, 0.000, -0.150], chord = 2.375, twist = 3.0 },
+  { le = [8.970, 19.950, 0.547], chord = 0.810, twist = 0.0 },
+]
+# Flaps inboard, ailerons outboard: the drawing's 204 in and 181 in, scaled
+# (travel an estimate)
+controls = [
+  { name = "flap", channel = "flap", span = [0.10, 0.39], chord_fraction = 0.25, limits = [0, 30] },
+  { name = "aileron", channel = "aileron", span = [0.64, 0.90], chord_fraction = 0.25, limits = [-20, 20] },
+]
+
+# The V-tail: 5.84 m across its tips (230 in), the panels 47 deg up from the
+# tail cone's sides (the front view), 4.83 m2 each (50.2 ft2 is published);
+# set at -4 deg, the ruddervators pitch together and yaw apart (incidence
+# and travel an estimate: the cambered wing's pitching moment needs the
+# tail's down-load to trim to its best lift). It
+# only just outweighs the bulbous nose in yaw: the flight controls' sideslip
+# feedback makes up the airframe's weathercock stability.
+[[surface]]
+name = "vtail"
+kind = "vtail"
+mirror = true
+airfoil = "naca0010"
+sections = [
+  { le = [12.000, 0.350, 0.300], chord = 1.650, twist = -4.0 },
+  { le = [13.380, 2.920, 3.080], chord = 0.900, twist = -4.0 },
+]
+controls = [
+  { name = "ruddervator", channel = "elevator", mix = { rudder = 1.0 }, span = [0.10, 0.95], chord_fraction = 0.30, limits = [-25, 25] },
+]
+
+# The fuselage: the bulbous nose round the 48 in satellite antenna, 2.2 m
+# deep, then a slender body 1.5 m wide tapering to the tail cone under the
+# V-tail (the drawing's side and plan views, scaled)
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.000, w = 0.000, top = 0.230, bottom = 0.190 },
+  { x = 0.100, w = 0.500, top = 0.630, bottom = -0.090, n = 2.0 },
+  { x = 0.230, w = 0.740, top = 0.750, bottom = -0.270, n = 2.0 },
+  { x = 0.490, w = 0.980, top = 0.930, bottom = -0.450, n = 2.0 },
+  { x = 1.020, w = 1.260, top = 1.230, bottom = -0.510, n = 2.0 },
+  { x = 1.800, w = 1.440, top = 1.470, bottom = -0.530, n = 2.0 },
+  { x = 2.600, w = 1.520, top = 1.570, bottom = -0.620, n = 2.0 },
+  { x = 3.300, w = 1.520, top = 1.510, bottom = -0.720, n = 2.0 },
+  { x = 4.300, w = 1.520, top = 1.290, bottom = -0.800, n = 2.0 },
+  { x = 5.300, w = 1.520, top = 1.020, bottom = -0.810, n = 2.0 },
+  { x = 6.300, w = 1.500, top = 0.870, bottom = -0.760, n = 2.0 },
+  { x = 7.300, w = 1.460, top = 0.810, bottom = -0.560, n = 2.0 },
+  { x = 8.300, w = 1.430, top = 0.805, bottom = -0.560, n = 2.0 },
+  { x = 9.550, w = 1.360, top = 0.800, bottom = -0.440, n = 2.0 },
+  { x = 11.500, w = 1.160, top = 0.760, bottom = -0.360, n = 2.0 },
+  { x = 12.800, w = 0.920, top = 0.720, bottom = -0.220, n = 2.0 },
+  { x = 13.800, w = 0.660, top = 0.660, bottom = 0.030, n = 2.0 },
+  { x = 14.300, w = 0.420, top = 0.600, bottom = 0.180, n = 2.0 },
+  { x = 14.510, w = 0.160, top = 0.520, bottom = 0.340, n = 2.0 },
+]
+
+# The engine's nacelle on the back: its intake 0.96 m wide and 0.97 m tall
+# at the lip (the side view), round the AE3007H's 1.1 m casing, ending at
+# the nozzle between the V-tail's roots
+[[intake]]
+name = "nacelle"
+lip = 0.06
+duct = 1.2
+duct_taper = 0.9
+stations = [
+  { x = 7.900, w = 0.960, top = 1.810, bottom = 0.800, n = 2.2 },
+  { x = 8.300, w = 1.060, top = 1.880, bottom = 0.700, n = 2.2 },
+  { x = 9.500, w = 1.180, top = 1.900, bottom = 0.640, n = 2.2 },
+  { x = 11.500, w = 1.180, top = 1.900, bottom = 0.600, n = 2.2 },
+  { x = 12.400, w = 1.060, top = 1.840, bottom = 0.640, n = 2.2 },
+  { x = 12.950, w = 0.860, top = 1.720, bottom = 0.880, n = 2.2 },
+]
+
+# One AE3007H (F137-RR-100): rated 7,600 lbf for take-off (33.8 kN), its
+# core good for 8,917 lbf (39.66 kN) unrated, which it keeps higher up
+[[engine]]
+name = "AE3007H"
+type = "turbofan"
+thrust_dry_kn = 33.8
+thermodynamic_thrust_kn = 39.66
+bypass_ratio = 4.8
+tsfc_dry = 0.39               # lb/(lbf h), static (estimate: the AE3007A's)
+throttle_ratio = 1.05         # Mattingly's TR for a transport's turbofan (estimate)
+design_mach = 0.6
+position = [10.400, 0.0, 1.300]
+mass = 800                    # installed: the 717 kg engine, its tail pipe and accessories (estimate)
+inlet_x = 7.9
+[engine.nozzle]
+position = [12.950, 0.0, 1.300]
+diameter = 0.72
+length = 0.35
+petal_open_deg = 0.0          # a fixed nozzle
+
+# The gear, off the drawing: the nose wheel 3.25 m behind the nose, folding
+# forward; the main wheels 5.05 m behind it, 3.23 m apart (the RQ-4A's 10.6
+# ft), folding forward to lie flat in the wing roots (estimate: inward, the
+# wheels would meet under the narrow belly). Wheels an estimate.
+[[gear]]
+name = "Nose Gear"
+position = [3.250, 0.0, -1.535]
+steerable = true
+max_steer = 45
+wheels = 1
+wheel_diameter = 0.500
+wheel_width = 0.160
+retractable = true
+retract = "forward"
+static_deflection = 0.06
+attach = [3.250, 0.0, -0.400]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [8.300, 1.615, -1.535]
+wheels = 1
+wheel_diameter = 0.560
+wheel_width = 0.160
+retractable = true
+retract = "forward"
+wheel_turn = "flat"
+doors = false                 # an open well: the flat wheel is as deep as the wing root
+static_deflection = 0.08
+attach = [8.300, 1.450, -0.060]    # the trunnion in the wing root
+
+# An autonomous aircraft on its own digital flight controls, flown here on
+# direct controls with a yaw damper (its tests are a transport's: hangar's
+# fly-by-wire tests are a fighter's)
+[flight_control]
+type = "direct"
+yaw_damper = true
+
+[mass]
+empty = 6781                  # 14,950 lb (Northrop Grumman)
+mtow = 14628                  # 32,250 lb
+# Estimate: 10 % of the MAC ahead of the neutral point, loaded and empty
+# (7 % with full tanks), 9 % of its weight on the nose wheel: further
+# forward, the ruddervators cannot trim the cambered wing to its best lift
+empty_cg = [7.840, 0.0, 0.100]
+[mass.component]              # kg, estimates: a composite wing and tail, an aluminium fuselage
+wing = 1300
+vtail = 120
+fuselage = 1100
+nacelle = 150
+"Nose Gear" = 60
+"Main Gear" = 200
+[[mass.payload]]
+name = "sensors"              # 3,000 lb: the radar, electro-optical, infrared and signals
+mass = 1361                   # sensors, their bays about the CG (estimate)
+position = [7.500, 0.0, -0.100]
+# 17,300 lb of fuel in the wing (the split and where each tank sits,
+# estimates). Flown 30 % full: late in a mission, when it climbs to its
+# ceiling.
+[[mass.tank]]
+name = "left inboard"
+position = [7.730, -4.000, -0.020]
+capacity = 2300
+fill = 0.3
+[[mass.tank]]
+name = "right inboard"
+position = [7.730, 4.000, -0.020]
+capacity = 2300
+fill = 0.3
+[[mass.tank]]
+name = "left outboard"
+position = [8.310, -10.000, 0.200]
+capacity = 1624
+fill = 0.3
+[[mass.tank]]
+name = "right outboard"
+position = [8.310, 10.000, 0.200]
+capacity = 1624
+fill = 0.3
+
+[dimensions]                  # published, overall (Northrop Grumman)
+length = 14.51                # 47.6 ft
+span = 39.90                  # 130.9 ft
+height = 4.66                 # 15.3 ft
+
+[targets]
+# The published 340 kt maximum has no altitude (Mach 0.59 anywhere above
+# 36,000 ft), and is flown to the envelope's Mach 0.6: not calibrated
+operational_ceiling_ft = 60000

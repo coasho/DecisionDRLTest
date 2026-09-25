@@ -225,7 +225,9 @@ move on while a check fails or a picture looks wrong.
   swept: give its surfaces `vortex = false`, or a 35 deg wing will not stall
   (CL max above 2).
 - **Engines.** High-bypass turbofans: `type = "turbofan"`, no
-  `thrust_wet_kn`, the real `bypass_ratio`. Turboprops: `type =
+  `thrust_wet_kn`, the real `bypass_ratio`; a flat-rated one's
+  `thermodynamic_thrust_kn` where its maximum is published above its
+  rating. Turboprops: `type =
   "turboprop"` with `power_kw`, `psfc`, and `[engine.propeller]` `rpm`,
   `gear_ratio`, `blade_angle`; the spin inertia counts the power turbine
   and gears (the C-130J's `ixx = 650`), or JSBSim's start march wanders. Pods on pylons: a nacelle body
@@ -237,7 +239,12 @@ move on while a check fails or a picture looks wrong.
 - **Controls.** Direct, unless the aircraft is fly-by-wire; then
   `type = "fbw"` with its own limits (n_max 2.5-3, alpha_max 12-15 deg,
   roll 30-60 deg/s). A direct-control jet whose dutch roll is damped below
-  0.08 gets `yaw_damper = true` (most swept jets have one).
+  0.08 gets `yaw_damper = true` (most swept jets have one). hangar's
+  fly-by-wire tests are a fighter's: a slow aircraft (a HALE UAV) flies
+  direct controls with a yaw damper, whatever its real flight controls.
+  A cambered wing behind a small tail can stall on the elevator's stop
+  (the fly stage says "elevator limit"): move the CG aft, or give the tail
+  a negative incidence (`twist`).
 - **Gear.** A four-wheel truck is one leg: `wheels = 2`, `axles = 2`,
   `axle_spacing`. Its bay needs room: `door_reach` (m) lets its doors move
   out further. Where the real gear has no doors, or hangar's doors cannot

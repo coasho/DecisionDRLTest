@@ -1,0 +1,7 @@
+# The Global Hawk's light grey all over (photographs; estimate): no windows
+[paint]
+scheme = "single"
+colours = ["#aeb3b6"]
+panel_lines = 0.05
+wear = 0.04
+gloss = 0.3

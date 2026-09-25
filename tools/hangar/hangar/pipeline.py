@@ -41,6 +41,15 @@ def check(name, value, lo=None, hi=None, unit="", level="fail", note="", fmt="%.
             "expected": rng.strip(), "status": "pass" if ok else level, "note": note}
 
 
+def weathercock(cnb, controls):
+    """The weathercock stability check: Cn_beta at least 0.01 /rad. Small
+    fins on an aircraft whose flight controls work the rudder (a fighter's,
+    fly-by-wire, a yaw damper: controls) only warn while it stays positive -
+    the fly stage's dutch roll decides."""
+    return check("weathercock Cn_beta", cnb, 0.01, None, "/rad", level="warn" if controls and cnb > 0.0 else "fail",
+                 note="positive: stable" + ("; small fins lean on the flight controls" if controls else ""))
+
+
 def info(name, value, unit="", note=""):
     return {"name": name, "value": value if isinstance(value, str) else (None if value is None else float(value)),
             "unit": unit, "expected": "", "status": "info", "note": note}
@@ -283,6 +292,7 @@ class Design:
         images = ["coefficients.png", "derivatives.png", "polars.png"]
         fighter = a.spec.get("aircraft", {}).get("category") == "fighter"
         fbw = self.fbw_options() is not None
+        damped = bool(a.spec.get("flight_control", {}).get("yaw_damper", False))
         tailless = not any(s.kind in ("htail", "canard", "vtail") for s in a.surfaces)
         # DATCOM 4.1.3.2: C_L_alpha = 2 pi A / (2 + sqrt(A^2 (1 + tan^2 sweep_c/2) + 4))
         sweep_c2 = a.wing.sweep_deg(0.5)
@@ -298,8 +308,7 @@ class Design:
                  "and its nose-down reach)") if fbw else
             check("pitch stiffness Cm_alpha (about ARP)", d["Cma"], None, -0.1, "/rad", level="warn" if fighter else "fail",
                   note="negative: stable" + ("; a fighter's flight controls make up for relaxed stability" if fighter else "")),
-            check("weathercock Cn_beta", d["Cnb"], 0.01, None, "/rad", level="warn" if fighter and d["Cnb"] > 0.0 else "fail",
-                  note="positive: stable" + ("; small fins lean on the flight controls" if fighter else "")),
+            weathercock(d["Cnb"], fighter or fbw or damped),
             check("dihedral effect Cl_beta", d["Clb"], None, -0.005, "/rad", note="negative: stable"),
             check("roll damping Cl_p", d["Clp"], None, -0.1, "/rad"),
             check("pitch damping Cm_q", d["Cmq"], None, -0.05 if tailless else (-0.5 if fighter else -1.0), "/rad",
