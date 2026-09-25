@@ -28,6 +28,7 @@ struct ViewerControls {
     std::atomic<bool> showMonitor{true};
     std::atomic<bool> showLabels{true};
     std::atomic<bool> showTrails{true};
+    std::atomic<bool> showEffects{true};   ///< exhaust, condensation, vapour and air streaks
     std::atomic<bool> quit{false};
 
     // Read-only telemetry written by the loop for the GUI.

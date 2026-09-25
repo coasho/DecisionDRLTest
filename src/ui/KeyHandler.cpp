@@ -63,6 +63,10 @@ void KeyHandler::apply(vsg::KeyPressEvent& e) {
     case vsg::KEY_T:
         c.showTrails.store(!c.showTrails.load(std::memory_order_relaxed), std::memory_order_relaxed);
         break;
+    case vsg::KEY_e:
+    case vsg::KEY_E:
+        c.showEffects.store(!c.showEffects.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        break;
     case vsg::KEY_Escape:
         c.quit.store(true, std::memory_order_relaxed);
         break;

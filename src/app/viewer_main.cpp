@@ -35,6 +35,7 @@
 #include "ui/CameraPreview.h"
 #include "ui/MonitorGui.h"
 #include "ui/ViewerControls.h"
+#include "world/Airflow.h"
 #include "world/CameraController.h"
 #include "world/Earth.h"
 #include "world/Interpolator.h"
@@ -95,6 +96,7 @@ struct ViewerOptions {
     /// distributed package does.
     bool offline = false;
     bool gui = true;   ///< panels, labels and trails; --no-gui leaves only the rendered scene
+    bool effects = true; ///< exhaust, condensation, vapour and air streaks (--no-effects, key e)
     bool zoomToCursor = true; ///< wheel zooms towards the pointer rather than straight in
     bool sun = true;
     double sunUtcHours = -1.0;
@@ -108,6 +110,7 @@ struct ViewerOptions {
     double chaseDistance = 40.0;
     bool chaseDistanceSet = false; // --chase-distance given: start there, even attached to a world
     double chaseAzimuth = 180.0, chaseElevation = 14.0;
+    bool chaseElevationSet = false; // --chase-elevation given: keep it, even attached to a world
     bool probe = false;
     double stats = 0.0;   // --stats <seconds>: print per-second frame statistics, exit after this long
     std::string screenshot;      // --screenshot <file.png>: save the frame after --screenshot-after seconds, then exit
@@ -137,6 +140,7 @@ void usage(const char* prog) {
         "\n"
         "  --fullscreen  --width <px>  --height <px>\n"
         "  --no-gui                 just the rendered scene, no panels or labels\n"
+        "  --no-effects             no exhaust, condensation, vapour or air streaks (key e)\n"
         "  --screenshot <file.png>  save a frame and exit\n"
         "\n"
         "  --config <file>          settings file (default: <exe>/../config/viewer.json)\n"
@@ -148,7 +152,7 @@ void usage(const char* prog) {
         "sources, where the tiles live - and a flag overrides the file for one run.\n"
         "\n"
         "Keys: space pause, . step, tab next vehicle, c camera, -/= zoom, r reset view,\n"
-        "      [ ] time factor, l list, m monitor, n labels, t trails, esc quit\n"
+        "      [ ] time factor, l list, m monitor, n labels, t trails, e effects, esc quit\n"
         "Mouse: left drag rotates, middle drag pans, wheel zooms towards the pointer\n",
         prog);
 }
@@ -192,6 +196,7 @@ void usageAll(const char* prog) {
         "(osgEarth zoomToMouse is on by default)\n"
         "  --no-gui                 no panels, labels or trails: just the rendered scene "
         "(for looking at the graphics)\n"
+        "  --no-effects             no exhaust flames, condensation, vapour or air streaks (config \"effects\"; key e)\n"
         "  --no-sun                 headlight instead of sun + ambient lighting\n"
         "  --sun-utc <hours>        sun position for this UTC hour (default: the world's time)\n"
         "  --bing-key <key>         Bing Maps key for --imagery bing\n"
@@ -208,7 +213,7 @@ void usageAll(const char* prog) {
         "  --chase-azimuth <deg>  --chase-elevation <deg>   where the camera sits (180 = behind, 14 up)\n"
         "  --log-level <lvl>\n"
         "Keys: space pause (demo), . step (demo), tab next vehicle, c camera, -/= zoom, r reset view, [ ] time factor (demo),\n"
-        "      l list, m monitor, n labels, t trails, esc quit\n"
+        "      l list, m monitor, n labels, t trails, e effects, esc quit\n"
         "Mouse (OSG feel): left drag rotates, middle drag pans, wheel zooms (6 m .. whole Earth); right drag zooms while following a vehicle\n"
         "      and drags the globe in free mode / while no vehicle exists; the eye never goes below the terrain\n",
         prog);
@@ -291,6 +296,7 @@ bool applyConfig(ViewerOptions& o, const std::filesystem::path& file) {
     o.offline = map.boolean("offline", o.offline);
     o.zoomToCursor = doc.child("camera").boolean("zoomToCursor", o.zoomToCursor);
     o.gui = doc.boolean("gui", o.gui);
+    o.effects = doc.boolean("effects", o.effects);
     return true;
 }
 
@@ -341,6 +347,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--offline") o.offline = true;
             else if (a == "--no-zoom-to-cursor") o.zoomToCursor = false;
             else if (a == "--no-gui") o.gui = false;
+            else if (a == "--no-effects") o.effects = false;
             else if (a == "--no-sun") o.sun = false;
             else if (a == "--sun-utc") o.sunUtcHours = std::stod(next());
             else if (a == "--on-ground") o.onGround = true;
@@ -364,7 +371,7 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             } else if (a == "--debug-layer") o.window.debugLayer = true;
             else if (a == "--chase-distance") { o.chaseDistance = std::stod(next()); o.chaseDistanceSet = true; }
             else if (a == "--chase-azimuth") o.chaseAzimuth = std::stod(next());
-            else if (a == "--chase-elevation") o.chaseElevation = std::stod(next());
+            else if (a == "--chase-elevation") { o.chaseElevation = std::stod(next()); o.chaseElevationSet = true; }
             else if (a == "--view") { o.view = next(); o.cameraMode = 3; }
             else if (a == "--camera") {
                 const std::string v = next();
@@ -605,6 +612,10 @@ int main(int argc, char** argv) {
     scene->addChild(visuals.node());
     world::Trails trails(slots, 900, 0.25, viewer.options());
     scene->addChild(trails.node());
+    // After the vehicles: vapour, contrails and air streaks blend over them.
+    world::Airflow airflow(slots, viewer.options());
+    airflow.setCompiler([&viewer](vsg::ref_ptr<vsg::Node> node) { return viewer.compile(node); });
+    scene->addChild(airflow.node());
     if (!opt.demo)
         for (std::size_t i = 0; i < slots; ++i) { visuals.setVisible(i, false); trails.setEnabled(i, false); }
 
@@ -618,6 +629,7 @@ int main(int argc, char** argv) {
         controls->showLabels.store(false);
         controls->showTrails.store(false);
     }
+    controls->showEffects.store(opt.effects);
     controls->timeFactor.store(opt.timeFactor);
     controls->cameraMode.store(opt.cameraMode);
     auto gui = ui::MonitorGui::create(controls, replay ? "replay " + opt.replayPath : opt.aircraft);
@@ -668,7 +680,10 @@ int main(int argc, char** argv) {
     }
     // Detached camera focus: the demo spawn area / default location, on the ground.
     camera->setFocus(ellipsoid->convertLatLongAltitudeToECEF(vsg::dvec3(opt.latitudeDeg, opt.longitudeDeg, 0.0)));
-    camera->setDetachedElevation(45.0); // looking down at the ground, not across it
+    // Looking down at the ground, not across it - unless the command line
+    // asked for an angle: the camera is detached until the first vehicle
+    // appears, and it keeps the elevation it had then.
+    camera->setDetachedElevation(opt.chaseElevationSet ? opt.chaseElevation : 45.0);
     if (!opt.demo && !opt.chaseDistanceSet) camera->zoom(300.0); // no vehicle yet: start with a regional view
     if (!opt.view.empty()) {
         double v[6] = {0.0, 0.0, 0.0, 1000.0, 180.0, 45.0};
@@ -869,6 +884,8 @@ int main(int argc, char** argv) {
                 }
                 // Sun from the world's clock (unless overridden on the command line).
                 const auto env = mirror.environment();
+                if (std::isfinite(env.temperatureSeaLevelK) && env.temperatureSeaLevelK > 150.0)
+                    airflow.setSeaLevelTemperature(env.temperatureSeaLevelK); // where contrails start
                 if (opt.sunUtcHours < 0.0 && env.epochUtcSeconds > 0.0 && wallSeconds - lastSunUpdate > 1.0 && batch) {
                     lastSunUpdate = wallSeconds;
                     world::utcOf(env.epochUtcSeconds + batch->simTime, day, hours);
@@ -922,6 +939,7 @@ int main(int argc, char** argv) {
         if (batch) {
             interpolator.update(viewer.frameSeconds(), timeFactor, paused);
             const auto& states = opt.interpolate ? interpolator.states() : batch->states;
+            visuals.setExhaust(controls->showEffects.load(std::memory_order_relaxed));
             visuals.update(Span<const sim::VehicleState>(states));
             visuals.setSelected(selected);
             trails.setSelected(selected);
@@ -956,6 +974,18 @@ int main(int argc, char** argv) {
         camera->update(target, viewer.frameSeconds());
         sky.update(viewer.lookAt()->eye);
         if (atmosphere) atmosphere->update(viewer.lookAt()->eye);
+        {
+            // How much day there is where the camera is (the sky dome's own
+            // measure): a flame is all light at night and part of the view by
+            // day, and vapour white in the sun and grey without it.
+            const double sunUp = vsg::dot(vsg::normalize(sunDir), vsg::normalize(viewer.lookAt()->eye));
+            const float light = static_cast<float>(std::clamp((sunUp + 0.10) / 0.25, 0.0, 1.0));
+            visuals.setDaylight(light);
+            airflow.setVisible(controls->showEffects.load(std::memory_order_relaxed));
+            if (batch)
+                airflow.update(Span<const sim::VehicleState>(opt.interpolate ? interpolator.states() : batch->states), alive, visuals,
+                               viewer.camera()->viewMatrix->transform(), viewer.lookAt()->eye, sunDir, light);
+        }
         {
             const vsg::dvec3 lla = ellipsoid->convertECEFToLatLongAltitude(viewer.lookAt()->eye);
             controls->eyeLatDeg.store(lla.x, std::memory_order_relaxed);
