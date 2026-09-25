@@ -135,6 +135,52 @@ def vectoring(aircraft, inertia=None):
     return out
 
 
+YAW_DAMPER_ZETA = 0.3      # the dutch roll damping a direct-control aircraft's yaw damper aims for
+YAW_DAMPER_WASHOUT_S = 2.0  # its washout: a steady turn's yaw rate left alone
+YAW_DAMPER_ALTITUDE = 3000.0  # m: where each dynamic pressure's Mach number is taken
+
+
+def yaw_damper(tabs, aircraft, mass_model):
+    """A direct-control aircraft's yaw damper ([flight_control] type =
+    "direct", yaw_damper = true), or None: the gain (rudder rad per rad/s of
+    the washed-out yaw rate) over dynamic pressure that brings the dutch
+    roll's damping to YAW_DAMPER_ZETA at 1 g trim - the fly-by-wire's yaw
+    damper design (design_point) at the airframe's own dutch roll frequency,
+    without its sideslip feedback. A large swept-wing jet's dutch roll is
+    lightly damped by nature (the B-52's 0.05, its real one has a damper)."""
+    spec = aircraft.spec.get("flight_control", {})
+    if spec.get("type", "direct") != "direct" or not spec.get("yaw_damper", False):
+        return None
+    if "rudder" not in aircraft.channels():
+        return None
+    m, _, Ixx, _, Izz, _ = loaded_inertia(mass_model)
+    S, b = aircraft.S, aircraft.b
+    zeta = float(spec.get("yaw_damper_zeta", YAW_DAMPER_ZETA))
+    rho = 1.225 * (1.0 - 2.25577e-5 * YAW_DAMPER_ALTITUDE) ** 4.2559
+    top = float(tabs["mach"]["mach"][-1]) if tabs.get("mach") is not None else 0.9
+    gains = []
+    for q_psf in QBAR_PSF:
+        Q = q_psf * PSF
+        V = math.sqrt(2.0 * Q / rho)
+        mach = min(V / (A_SOUND + 8.6), top)
+        CL = m * G0 / (Q * S)
+        alpha = min(_trim_alpha(tabs, CL, mach), 15.0)
+        d = derivatives_at(tabs, alpha, mach)
+        ar = math.radians(alpha)
+        Yb = Q * S * d["CYb"] / m
+        Nb = Q * S * b * d["Cnb"] / Izz
+        Lb = Q * S * b * d["Clb"] / Ixx
+        Nr = Q * S * b * b * d["Cnr"] / (2 * Izz * V)
+        Ndr = Q * S * b * d.get("Cn_rudder", 0.0) / Izz
+        Nb_s = Nb * math.cos(ar) - Lb * math.sin(ar)
+        w = math.sqrt(max(Nb_s, 0.0))
+        k = (2 * zeta * w + Yb / V + Nr) / Ndr if abs(Ndr) > 1e-9 else 0.0
+        if k * Ndr <= 0.0:          # damped enough by itself there
+            k = 0.0
+        gains.append(float(np.clip(k, -LIMITS["k_yaw_r"], LIMITS["k_yaw_r"])))
+    return {"qbar_psf": np.array(QBAR_PSF), "k": np.array(gains), "zeta": zeta}
+
+
 def _mach_factor(mt, key, mach):
     if mt is None:
         return 1.0 if key.startswith("K") else 0.0

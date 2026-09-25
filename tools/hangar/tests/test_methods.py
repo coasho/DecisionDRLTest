@@ -784,6 +784,77 @@ class LargeAircraft(unittest.TestCase):
         self.assertAlmostEqual(A[0, 3], G0 * ca / 100.0)
         self.assertAlmostEqual(A[3, 2], sa / ca)
 
+    def test_yaw_damper_damps_the_dutch_roll(self):
+        # a direct-control design asks for one; its gain over dynamic pressure
+        # puts the dutch roll's (beta, r) pair at the damping asked for - its
+        # yaw damping and the rudder's fed-back yaw rate together - and none
+        # where the airframe is damped enough by itself
+        from unittest import mock
+        from hangar import fcs
+        from hangar.linear import loaded_inertia
+        from hangar.mass import MassModel
+        a = Aircraft.load(repo("aircraft/c172/c172.toml"))
+        mm = MassModel(a)
+        self.assertIsNone(fcs.yaw_damper({}, a, mm))
+        a.spec.setdefault("flight_control", {})["yaw_damper"] = True
+        a = Aircraft(a.spec)
+        m, _, Ixx, _, Izz, _ = loaded_inertia(mm)
+        rho = 1.225 * (1.0 - 2.25577e-5 * fcs.YAW_DAMPER_ALTITUDE) ** 4.2559
+        for cnr, damped in ((-0.1, False), (-40.0, True)):
+            d = {"CYb": -0.5, "Clb": -0.08, "Cnb": 0.08, "Cnr": cnr, "Cn_rudder": -0.07}
+            with mock.patch.object(fcs, "derivatives_at", return_value=d), \
+                    mock.patch.object(fcs, "_trim_alpha", return_value=0.0):
+                yd = fcs.yaw_damper({}, a, mm)
+            with self.subTest(Cnr=cnr):
+                self.assertEqual(yd["zeta"], fcs.YAW_DAMPER_ZETA)
+                np.testing.assert_array_equal(yd["qbar_psf"], fcs.QBAR_PSF)
+                if damped:
+                    self.assertTrue((yd["k"] == 0.0).all())
+                    continue
+                for q_psf, k in zip(yd["qbar_psf"], yd["k"]):
+                    if abs(k) >= fcs.LIMITS["k_yaw_r"]:
+                        continue
+                    Q = q_psf * fcs.PSF
+                    V = math.sqrt(2.0 * Q / rho)
+                    Yb = Q * a.S * d["CYb"] / m
+                    Nr = Q * a.S * a.b ** 2 * d["Cnr"] / (2.0 * Izz * V)
+                    w2 = Q * a.S * a.b * d["Cnb"] / Izz
+                    Ndr = Q * a.S * a.b * d["Cn_rudder"] / Izz
+                    # the rudder: -k times the yaw rate
+                    trace = Yb / V + Nr - Ndr * k
+                    self.assertLess(trace, Yb / V + Nr)
+                    self.assertAlmostEqual(-trace / (2.0 * math.sqrt(w2)), fcs.YAW_DAMPER_ZETA, places=9)
+
+    def test_yaw_channel_carries_the_damper(self):
+        # the yaw damper in a direct-control Yaw channel: the body yaw rate
+        # washed out, times minus the gain over dynamic pressure, clipped to
+        # half the rudder, summed with the pedals into the rudder's actuator;
+        # without one the pedals drive it alone
+        from hangar import fcs, jsbsim
+        a = Aircraft.load(repo("aircraft/c172/c172.toml"))
+        lo, hi = a.channel_limits("rudder")
+        yd = {"qbar_psf": np.array(fcs.QBAR_PSF, float), "k": np.linspace(0.0, 0.8, len(fcs.QBAR_PSF)), "zeta": 0.3}
+        plain = ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a))
+        root = ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a, yaw_damper=yd))
+        self.assertEqual(plain.find(".//actuator[@name='fcs/rudder-actuator']/input").text, "fcs/rudder-control")
+        self.assertIsNone(plain.find(".//washout_filter"))
+        self.assertEqual(root.find(".//actuator[@name='fcs/rudder-actuator']/input").text, "fcs/rudder-sum")
+        wash = root.find(".//washout_filter[@name='fcs/yaw-damper-washout']")
+        self.assertEqual(wash.find("input").text, "velocities/r-rad_sec")
+        self.assertAlmostEqual(float(wash.find("c1").text), 1.0 / fcs.YAW_DAMPER_WASHOUT_S)
+        damper = root.find(".//fcs_function[@name='fcs/yaw-damper']")
+        product = damper.find("function/product")
+        self.assertEqual(float(product.find("value").text), -1.0)
+        self.assertEqual(product.find("property").text, "fcs/yaw-damper-washout")
+        self.assertEqual(product.find("table/independentVar").text, "aero/qbar-psf")
+        rows = np.array([[float(x) for x in r.split()] for r in product.find("table/tableData").text.strip().splitlines()])
+        np.testing.assert_allclose(rows, np.column_stack([yd["qbar_psf"], yd["k"]]), atol=1e-5)
+        half = 0.5 * max(abs(lo), abs(hi)) * 0.0174533
+        self.assertAlmostEqual(float(damper.find("clipto/max").text), half, places=5)
+        self.assertAlmostEqual(float(damper.find("clipto/min").text), -half, places=5)
+        summed = root.find(".//summer[@name='fcs/rudder-sum']")
+        self.assertEqual([i.text for i in summed.findall("input")], ["fcs/rudder-control", "fcs/yaw-damper"])
+
 
 class Aircraft_(unittest.TestCase):
     def test_c172_derivative_signs_and_sizes(self):
@@ -1014,6 +1085,64 @@ class Model3D(unittest.TestCase):
             with self.subTest(door=c["door"], leg=c["leg"]):
                 self.assertGreater(c["open_m"], 0.0)
                 self.assertGreater(c["closed_m"], 0.0)
+
+    def test_open_well_has_no_doors(self):
+        # doors = false: the leg folds into an open well - no doors, the skin
+        # cut where it passes, its stowed wheel allowed out up to its radius -
+        # and the other legs keep their doors
+        from hangar.shape import airframe as sh
+        from hangar.shape import meshkit
+        if meshkit.library() is None:
+            self.skipTest("hangar_meshkit is not built")
+        a = Aircraft.load(repo("aircraft/f16c/f16c.toml"))
+        for g in a.spec["gear"]:
+            if "Main" in g["name"]:
+                g["doors"] = False
+        plan = []
+        sh.airframe(Aircraft(a.spec), gear=plan)
+        for p in plan:
+            main = "Main" in p["leg"].name
+            with self.subTest(leg=p["leg"].name):
+                self.assertEqual(len(p["doors"]), 0 if main else 2)
+                self.assertEqual(p["allowed"], p["leg"].r if main else 0.0)
+                self.assertIsNotNone(p["cut"])
+
+    def test_a_single_leg_beside_the_centre_line_is_a_centre_leg(self):
+        # a leg not mirrored is a centre leg wherever it stands (the A-10's
+        # nose wheel, beside the gun); a mirrored pair has its two sides
+        from hangar.shape import gear as sg
+        a = Aircraft.load(repo("aircraft/f16c/f16c.toml"))
+        nose = next(g for g in a.spec["gear"] if "Nose" in g["name"])
+        nose["position"][1] += 0.3
+        nose["attach"][1] += 0.3
+        sides = {leg.name: leg.side for leg in sg.legs(Aircraft(a.spec))}
+        self.assertEqual(sides, {"Nose Gear": 0, "Left Main Gear": -1, "Right Main Gear": 1})
+
+    def test_every_models_joints_are_the_viewers(self):
+        # the engines and wheels each design's model names are among those
+        # the platform reports: engines past the fourth follow engine i % 4,
+        # as their throttles do, and a fixed nozzle's petals are no joint
+        import glob
+        import json
+        import os
+        import re
+        import struct
+        from hangar import jsbsim
+        for path in sorted(glob.glob(repo("aircraft/*/*.glb"))):
+            with open(path, "rb") as f:
+                f.read(12)
+                length, _ = struct.unpack("<II", f.read(8))
+                names = [n.get("name", "") for n in json.loads(f.read(length))["nodes"]]
+            with self.subTest(model=os.path.basename(path)):
+                for n in names:
+                    m = re.match(r"fsim:(nozzle|afterburner|propeller):(\d+)(?::(.*))?$", n)
+                    if m:
+                        self.assertLess(int(m.group(2)), jsbsim.PLATFORM_THROTTLES, n)
+                        if m.group(1) == "nozzle":
+                            self.assertNotEqual(float(m.group(3)), 0.0, n)
+                    m = re.match(r"fsim:(oleo|steer|wheel):(\d+)", n)
+                    if m:
+                        self.assertLess(int(m.group(2)), 8, n)  # VehicleState::kMaxWheels
 
     def test_leaning_sections(self):
         # a leaning section is the upright one sheered: its centre moves

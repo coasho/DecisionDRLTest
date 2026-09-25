@@ -25,7 +25,16 @@ Per gear in the design ([[gear]]):
                             mirror image): a positive turn about it folds the leg
     wheels = 1              side by side on one axle
     door_deg = 90           how far the doors open
+    door_reach = 0.8        how far out (m) a door's hinge may move to clear the leg: more
+                            for a wide multi-wheel truck (the B-52's)
+    doors = false           an open well, without doors: the stowed wheel may stand out
+                            of the skin up to its radius (the A-10's main wheels, half
+                            out of their pods; the B-52's outriggers in its thin wingtips)
     fairing = true          (fixed gear) a spat over the wheel
+
+A single leg (not mirrored) is a centre leg - a fork round its wheel, free to
+fold across the centre line - also where it stands beside it (the A-10's and
+the Su-25's nose wheels, clear of the gun).
 """
 import numpy as np
 
@@ -34,6 +43,7 @@ from .airframe import GAP, METAL, SKIN, STRUT, TYRE, union
 DOORS = 0.2  # the doors move while the gear position runs 0..0.2, the legs 0.2..1
 DOOR = 0.02  # a door's thickness (m)
 CLEAR = 0.04  # the open doors' clearance from the moving leg, and the stowed leg's from the closed doors (m)
+DOOR_REACH = 0.8  # how far out a door's hinge may move to clear the leg (m; door_reach for a wide truck)
 
 
 def _rotation(axis, deg):
@@ -82,6 +92,8 @@ class Leg:
         self.spec = spec
         self.wheels = int(spec.get("wheels", 1))
         self.door_deg = float(spec.get("door_deg", 90.0))
+        self.door_reach = float(spec.get("door_reach", DOOR_REACH))
+        self.doors = bool(spec.get("doors", True))
         self.r = 0.5 * gear.wheel_diameter
         self.w = gear.wheel_width
         self.axle = contact + np.array([0.0, 0.0, self.r])
@@ -307,7 +319,7 @@ def legs(aircraft):
     out = []
     for g in aircraft.gear:
         for name, pos in g.positions():
-            side = 0 if abs(pos[1]) < 1e-6 else (1 if pos[1] > 0 else -1)
+            side = 0 if abs(pos[1]) < 1e-6 or not g.mirror else (1 if pos[1] > 0 else -1)
             out.append(Leg(g, name, np.asarray(pos, float), side))
     return out
 
@@ -389,7 +401,7 @@ def _bay(leg, probe, solid, foils):
     lo, hi = through[:, :2].min(axis=0) - CLEAR, through[:, :2].max(axis=0) + CLEAR
     # the lowest skin around it, 2.5 cm apart, with room for the doors to move out
     reach = np.array([0.1, 0.1])
-    reach[iu] = 0.8
+    reach[iu] = leg.door_reach
     z_top = float(inside[:, 2].max()) + 0.3
     xs = np.arange(lo[0] - reach[0], hi[0] + reach[0] + 1e-9, 0.025)
     ys = np.arange(lo[1] - reach[1], hi[1] + reach[1] + 1e-9, 0.025)
@@ -404,7 +416,7 @@ def _bay(leg, probe, solid, foils):
     limit = reach[iu] + 0.5 * (hi[iu] - lo[iu])
     doors_at = []
     with meshkit.Probe({"root": leg.parts()}) as legp:
-        for k, sgn in ((0, -1.0), (1, 1.0)):
+        for k, sgn in ((0, -1.0), (1, 1.0)) if leg.doors else ():
             while True:
                 door = _door_frame(H, UV, iu, iv, lo, hi, um, edges[k], sgn)
                 if door is None or _door_clear(leg, legp, door) >= CLEAR or abs(edges[k] - um) > limit:
@@ -425,6 +437,11 @@ def _bay(leg, probe, solid, foils):
         cell = (X >= r[0]) & (X <= r[2]) & (Y >= r[1]) & (Y <= r[3]) & ~np.isnan(H)
         z_top = max(float(door["hinge"][2]), float(H[cell].max()) if cell.any() else z_lo) + 0.05
         panes.append((door, z_top))
+    if not leg.doors:
+        # an open well: the opening is just where the leg passes the skin
+        cell = within
+        panes.append(({"rect": np.array([lo[0], lo[1], hi[0], hi[1]])},
+                      (float(H[cell].max()) if cell.any() else z_lo) + 0.05))
     # the bay: the opening through the skin under the doors, and above it the
     # space the leg passes through and stows in - hollowed only where the
     # airframe is at least 3 cm thick, so it never breaks through another skin
@@ -442,8 +459,9 @@ def _bay(leg, probe, solid, foils):
         {"op": "offset", "r": -0.03, "child": solid}]}
     cut = {"op": "union", "k": 0.0, "children": [opening, space]}
     doors = [_door(solid, foils, d["rect"][:2], d["rect"][2:], z_lo - 0.1, zt, d["hinge"], d["axis"], leg.door_deg,
-                   "%s door %d" % (leg.name, k + 1)) for k, (d, zt) in enumerate(panes)]
-    return {"leg": leg, "cut": cut, "doors": doors, "protrusion": protrusion}
+                   "%s door %d" % (leg.name, k + 1)) for k, (d, zt) in enumerate(panes)] if leg.doors else []
+    # how far out the stowed leg may stand: an open well's wheel up to its radius
+    return {"leg": leg, "cut": cut, "doors": doors, "protrusion": protrusion, "allowed": 0.0 if leg.doors else leg.r}
 
 
 def _door(solid, foils, lo, hi, z_lo, z_hi, hinge, axis, deg, label):

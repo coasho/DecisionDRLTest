@@ -34,6 +34,7 @@ category = "bomber"
 
 [analysis]
 speed = 100.0                # m/s: the Reynolds numbers of cruise at 35,000 ft (sea-level viscosity)
+induced_drag = "trefftz"     # a swept transport wing's induced drag from its loading (docs/hangar.md)
 
 # The published wing area, 4,000 ft2, is the reference; the drawing's
 # planform, taken to the centre line, has 5 % more
@@ -341,6 +342,15 @@ steerable = true
 max_steer = 20
 retractable = true
 retract = "forward"
+# the trucks of a pair stow side by side in the fuselage's 2.95 m: each
+# swings in 18 deg as it folds, into its own half (fitted, estimate). Each
+# stowed truck is as wide as its half of the fuselage: hangar's doors, hinged
+# either side of one leg's swing, cannot clear two trucks side by side, so
+# the wells are drawn open (the real ones have doors)
+retract_axis = [-0.309, 0.951, 0.0]
+retract_deg = 95
+wheel_turn = 0
+doors = false
 static_deflection = 0.15
 attach = [12.040, 0.750, -2.300]
 
@@ -353,6 +363,10 @@ wheel_diameter = 1.422
 wheel_width = 0.406
 retractable = true
 retract = "aft"
+retract_axis = [-0.301, -0.954, 0.0]   # in 17.5 deg, into its own half of the narrower aft fuselage (fitted, estimate)
+doors = false                 # open wells, as the front pair's
+retract_deg = 95
+wheel_turn = 0
 static_deflection = 0.15
 attach = [24.290, 0.750, -2.300]
 
@@ -363,10 +377,19 @@ position = [30.330, 22.630, -4.608]
 wheel_diameter = 0.813
 wheel_width = 0.224
 retractable = true
-retract = "inward"
-wheel_turn = "flat"
+retract = "outward"
+# the wingtip is 0.3 m deep: the outrigger folds out into an open well, its
+# wheel standing out of the skin (fitted, estimate)
+retract_axis = [0.966, -0.259, 0.0]
+retract_deg = 90
+wheel_turn = 0
+doors = false
 static_deflection = 0.05
 attach = [30.330, 22.630, -1.350]
+
+[flight_control]
+type = "direct"               # hydraulic controls, as the B-52's are
+yaw_damper = true             # its own yaw damper: a swept wing's dutch roll without one is damped 0.05
 
 [mass]
 empty = 83250                 # 185,000 lb (USAF fact sheet)

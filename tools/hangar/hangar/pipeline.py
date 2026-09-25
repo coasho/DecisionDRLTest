@@ -479,8 +479,9 @@ class Design:
             files.append((ename, pname))
         from . import fcs
         fbw = fcs.design(tabs, a, mm)
+        yd = fcs.yaw_damper(tabs, a, mm)
         xml_path = os.path.join(self.dir, a.name + ".xml")
-        text = _keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw))
+        text = _keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw, yaw_damper=yd))
         with open(xml_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         # the platform finds it where it is (io::AssetResolver: the source tree's
@@ -583,9 +584,13 @@ class Design:
                                 note=", ".join(bad) or "%d struts, oleos, wheels and doors, each one closed solid" % len(gear)))
             legs = [g for g in gear if "protrusion" in g]
             if legs:
-                worst = max(legs, key=lambda g: g["protrusion"])
-                checks.append(check("3D model: stowed gear outside the skin", 100.0 * worst["protrusion"], None, 3.0, "cm",
-                                    level="warn", note="%s; the leg must fold into the airframe" % worst["label"]))
+                # an open well's wheel may stand out of the skin up to its radius (the A-10's)
+                worst = max(legs, key=lambda g: g["protrusion"] - g.get("allowed", 0.0))
+                allowed = worst.get("allowed", 0.0)
+                checks.append(check("3D model: stowed gear outside the skin", 100.0 * max(worst["protrusion"] - allowed, 0.0), None, 3.0,
+                                    "cm", level="warn", note="%s; the leg must fold into the airframe%s" % (
+                                        worst["label"], (", its wheel %.0f cm out of its open well (up to %.0f)"
+                                                         % (100.0 * worst["protrusion"], 100.0 * allowed)) if allowed else "")))
             pairs = report.get("door_clearance", [])
             if pairs:
                 # a door never touches a leg: open while the leg swings, closed

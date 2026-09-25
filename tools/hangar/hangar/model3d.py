@@ -634,6 +634,7 @@ def _gear_parts(aircraft, B, top, origin, report, plan, mats):
             top.append(_tree(B, mats, origin, {"name": "fsim:gear:%.6g:1:%.6g" % (leg.swing_deg, sg.DOORS),
                                                "point": leg.hinge, "axis": leg.swing_axis, "children": [chain]}))
             report["gear"][-3]["protrusion"] = doors[leg.name]["protrusion"]
+            report["gear"][-3]["allowed"] = doors[leg.name]["allowed"]
             moving.append(leg)
             for d in doors[leg.name]["doors"]:
                 dm = _painted(B, meshkit.build(d["scene"]))
@@ -727,6 +728,14 @@ def _revolve_mesh(s, r, n=32):
     return v, np.array(t)
 
 
+def _engine_joint(i):
+    """The engine a part's joint follows: the platform reports the first
+    PLATFORM_THROTTLES engines, and each one past them runs on throttle i % 4
+    (jsbsim.py), so it shows that engine's state."""
+    from .jsbsim import PLATFORM_THROTTLES
+    return i % PLATFORM_THROTTLES
+
+
 def _propellers(aircraft, B, top, origin):
     """Each propeller as a solid - spinner and twisted-in-pitch blades - on a
     node the viewer turns at its engine's rpm as the simulation reports it
@@ -759,7 +768,7 @@ def _propellers(aircraft, B, top, origin):
             cell = float(np.clip(R / 90.0, 0.001, 0.01))
             m = meshkit.build({"cell": cell, "error": 0.1 * cell, "safety": 3.0, "sharp_deg": 50.0,
                                "max_triangles": 3000, "root": {"op": "union", "k": 0.02 * R, "children": nodes}})
-            top.append(_hinged(B, "fsim:propeller:%d" % units.index(name), name + " propeller", m, mats,
+            top.append(_hinged(B, "fsim:propeller:%d" % _engine_joint(units.index(name)), name + " propeller", m, mats,
                                hub, axis, origin))
 
 
@@ -767,7 +776,8 @@ def _nozzle_petals(aircraft, B, top, origin):
     """Each round nozzle's petals, each on a node that opens it as far as
     the engine's nozzle is open (fsim:nozzle:<engine>:<deg wide open>; shut
     at military power, open at idle and with the afterburner lit) under one
-    that sets it round the nozzle; one mesh shared by them all."""
+    that sets it round the nozzle; one mesh shared by them all. A fixed
+    nozzle's (petal_open_deg 0) are plain nodes."""
     from .jsbsim import _engine_units
     from .shape import airframe as sh
     from .shape import meshkit
@@ -803,7 +813,8 @@ def _nozzle_petals(aircraft, B, top, origin):
             c, s = np.cos(phi), np.sin(phi)
             Rx = np.array([[1.0, 0.0, 0.0], [0.0, c, -s], [0.0, s, c]])
             q = _quat_from_matrix(M @ Rx)
-            petal = B.node("fsim:nozzle:%d:%.6g" % (i, opening), mesh, translation=hinge_pt, rotation=qc)
+            joint = "fsim:nozzle:%d:%.6g" % (_engine_joint(i), opening) if opening else "%s petal" % name
+            petal = B.node(joint, mesh, translation=hinge_pt, rotation=qc)
             top.append(B.node("%s petal %d" % (name, k + 1), translation=_to_gltf(exit_, origin), rotation=q,
                               children=[petal]))
 
@@ -839,7 +850,7 @@ def _plumes(aircraft, B, top, origin):
         v1, t1 = _revolve_mesh([0.0, 0.15 * L, 0.5 * L, 0.85 * L, L], [0.9 * r, 1.0 * r, 0.8 * r, 0.35 * r, 0.02 * r])
         v2, t2 = _revolve_mesh([0.0, 0.1 * L, 0.3 * L, 0.55 * L], [0.7 * r, 0.72 * r, 0.45 * r, 0.02 * r])
         # the mesh is built along +x; the node turns +x onto the jet's direction
-        top.append(B.node("fsim:afterburner:%d" % i, B.mesh(name + " afterburner", [(v1 @ np.eye(3), t1, outer), (v2, t2, core)]),
+        top.append(B.node("fsim:afterburner:%d" % _engine_joint(i), B.mesh(name + " afterburner", [(v1 @ np.eye(3), t1, outer), (v2, t2, core)]),
                           translation=_to_gltf(exit_, origin), rotation=q))
     del R
 
@@ -909,7 +920,7 @@ def _vectoring(aircraft, B, top, origin):
         joint = "fsim:" + "+".join("%s:%.6g" % (ch, g) for ch, g in mix) + "@%.6g,%.6g" % (-travel, travel)
         q = _quat_from_x(_gltf_direction(axis))
         R, p = _quat_matrix(q), _to_gltf(pivot, origin)
-        names = ["fsim:afterburner:%d" % v["engine"], "%s vectoring" % name] + \
+        names = ["fsim:afterburner:%d" % _engine_joint(v["engine"]), "%s vectoring" % name] + \
                 ["%s petal %d" % (name, k + 1) for k in range(sh.PETALS)]
         kids = []
         for n in names:

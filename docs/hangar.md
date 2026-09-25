@@ -191,6 +191,7 @@ retract = "forward"              # forward, aft, inward, outward; hangar fits th
 wheels = 2                       # trunnion's cant and the wheel's twist that stow the leg inside
 wheel_turn = "flat"              # or retract_deg, retract_axis: what is known of the real leg;
                                  # hangar fits only the rest
+doors = false                    # an open well: the stowed wheel may stand out up to its radius
 fairing = true                   # fixed gear: a spat over the wheel
 
 [[strut]]                        # a high wing's lift strut, drawn only (its drag is in the
@@ -212,6 +213,8 @@ Included designs:
 - `aircraft/f16c`: an F-16C Block 52, checked against NASA's wind-tunnel
   data.
 - Thirteen more fighters: [the fighter library](#the-fighter-library).
+- Bombers, tankers, transports and special-mission aircraft:
+  [support aircraft](#support-aircraft).
 
 ## Methods
 
@@ -359,10 +362,17 @@ For fighters:
   speeds, at up to 2.8 times its stall speed. A heavy jet's stall run goes
   on until the stall breaks, and every crash test starts with the lowest
   point of the aircraft clear of the ground. The platform commands four
-  throttles, so engines past the fourth (a B-52's) follow one of them. A
-  tank's `fill` is the fuel it carries everywhere: the JSBSim file, the
-  mass and CG, the inertia. A fly-by-wire transport turns at Mach 0.6
-  within its load limit and rolls long enough to pass 90°.
+  throttles, so engines past the fourth (a B-52's) follow one of them, and
+  the viewer shows each as the one it follows. A tank's `fill` is the fuel
+  it carries everywhere: the JSBSim file, the mass and CG, the inertia. A
+  fly-by-wire transport turns at Mach 0.6 within its load limit and rolls
+  long enough to pass 90°.
+- **Yaw damper.** A swept-wing jet on direct controls can have a lightly
+  damped dutch roll (the B-52H's 0.05). `yaw_damper = true` under
+  `[flight_control]` adds one: the yaw rate, washed out over 2 s so a
+  steady turn keeps its own, against itself through the rudder, with at
+  most half the rudder's travel. Its gain over dynamic pressure brings the
+  dutch roll's damping to 0.3 in the linear model.
 - **Fighter mass.** Raymer's fighter/attack weight equations. Radii of
   gyration are given per design (NASA's for the F-16).
 - **Fly-by-wire.** Gains are placed from the linear model at each dynamic
@@ -423,6 +433,9 @@ The model stage writes `<name>.glb` from the same design:
   gives (the direction, and any of the angle, the trunnion's axis and the
   wheel's twist). On every leg the oleo slides up the strut as the unit
   compresses, a steerable wheel turns with the steering, and the wheels roll.
+  A leg with `doors = false` folds into an open well, its wheel out of the
+  skin by up to its radius (the B-52H's outriggers, in its thin wingtips);
+  `door_reach` lets a wide truck's doors move further out.
 - **Propulsion.** An afterburner flame behind each augmented jet, as the
   engine lights it; nozzle petals open as the engine opens them. A propeller
   turns at its engine's rpm. A vectoring nozzle turns, flame and all, as the
@@ -611,6 +624,24 @@ estimates):
 - The F-22A and the Su-57 vector their thrust (see Methods, Fly-by-wire).
 - Engines fitted to Mach 2.3-2.5 keep too much thrust at sea level (see
   [Limits](#limits)).
+
+## Support aircraft
+
+Bombers, tankers, transports and special-mission aircraft, built the same
+way, on direct (hydraulic) controls or their own fly-by-wire. Each is
+`jsbsim:<name>` on the platform.
+
+| aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft |
+|---|---|---|---|---|
+| B-52H | `b52h` | 0.91 at 20,700 ft (0.906) | 9,900 | 53,600 (50,000) |
+
+- The B-52H flies at 140 t, 40 % fuel, about its combat weight. Its wing
+  droops to the tips as it does on the ground. Spoilers roll the real one;
+  ailerons on the outer wing stand in for them. Its yaw damper takes the
+  dutch roll's damping from 0.05 to 0.11. Even conventional sections'
+  drag rise leaves it too fast, so wave drag at its cap brings it down to
+  its top speed (a warning in its report). Its L/D peaks at 19.7 (21.5
+  published).
 
 ## Limits
 

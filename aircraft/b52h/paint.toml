@@ -1,0 +1,8 @@
+# The B-52H's gunship grey (FS 36118) all over, the dark cockpit glass
+[paint]
+scheme = "single"
+colours = ["#5a5e62"]
+canopy = "dark"
+panel_lines = 0.08
+wear = 0.06
+gloss = 0.25

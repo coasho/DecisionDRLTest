@@ -231,9 +231,15 @@ move on while a check fails or a picture looks wrong.
 - **Mass.** Give `empty`, `empty_cg`, `gyration` and every tank (a tank's
   `fill` is the fuel it starts with). hangar's structural estimates for jets
   are fighter equations: give component masses where they matter.
-- **Controls.** Direct, unless the aircraft is fly-by-wire or its dutch
-  roll needs it; then `type = "fbw"` with its own limits (n_max 2.5-3,
-  alpha_max 12-15 deg, roll 30-60 deg/s).
+- **Controls.** Direct, unless the aircraft is fly-by-wire; then
+  `type = "fbw"` with its own limits (n_max 2.5-3, alpha_max 12-15 deg,
+  roll 30-60 deg/s). A direct-control jet whose dutch roll is damped below
+  0.08 gets `yaw_damper = true` (most swept jets have one).
+- **Gear.** A multi-wheel truck's bay needs room: `door_reach` (m) lets its
+  doors move out further. Where the real gear has no doors, or the wheel
+  cannot fit (thin wingtips, the A-10's pods), `doors = false` gives an open
+  well. Give `retract_axis` and `retract_deg` when the drawing shows how the
+  leg folds; the fit then only turns the wheel.
 - **Targets.** `max_mach` at `max_mach_altitude_ft` below 1: calibrate fits
   Korn's kappa_A (0.87 conventional sections, 0.95 supercritical), more
   wave drag if even 0.87 is too fast. A certified altitude is

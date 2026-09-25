@@ -15,6 +15,7 @@ import os
 import numpy as np
 
 from . import __version__
+from .fcs import YAW_DAMPER_WASHOUT_S
 from .mass import G0
 
 CHANNEL_PROPERTY = {"elevator": "fcs/elevator-pos-deg", "aileron": "fcs/left-aileron-pos-deg",
@@ -360,7 +361,42 @@ def structure_contacts(aircraft, mass_model):
     return out
 
 
-def flight_control_xml(aircraft, fbw=None):
+def _yaw_damper_xml(yd, lo, hi):
+    """The yaw damper's part of the Yaw channel: the yaw rate washed out,
+    times the gain over dynamic pressure, against it; half the rudder's
+    travel at most, the pilot's command added to it."""
+    rows = "\n".join("              %8.1f  %9.5f" % (q, k) for q, k in zip(yd["qbar_psf"], yd["k"]))
+    half = 0.5 * max(abs(lo), abs(hi)) * 0.0174533
+    return """        <!-- the yaw damper (hangar/fcs.py yaw_damper): the yaw rate, washed out so a
+             steady turn's is left alone, against itself through the rudder - the
+             dutch roll damped to %.2f at 1 g across the speed range -->
+        <washout_filter name="fcs/yaw-damper-washout">
+          <input>velocities/r-rad_sec</input>
+          <c1>%.3f</c1>
+        </washout_filter>
+        <fcs_function name="fcs/yaw-damper">
+          <function>
+            <product>
+              <value>-1</value>
+              <table>
+                <independentVar lookup="row">aero/qbar-psf</independentVar>
+                <tableData>
+%s
+                </tableData>
+              </table>
+              <property>fcs/yaw-damper-washout</property>
+            </product>
+          </function>
+          <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
+        </fcs_function>
+        <summer name="fcs/rudder-sum">
+          <input>fcs/rudder-control</input>
+          <input>fcs/yaw-damper</input>
+          <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
+        </summer>""" % (yd["zeta"], 1.0 / YAW_DAMPER_WASHOUT_S, rows, -half, half, lo * 0.0174533, hi * 0.0174533)
+
+
+def flight_control_xml(aircraft, fbw=None, yaw_damper=None):
     ch = set(aircraft.channels())
     lim = {k: aircraft.channel_limits(k) for k in ch}
     parts = ["    <flight_control name=\"%s\">" % aircraft.name]
@@ -423,9 +459,9 @@ def flight_control_xml(aircraft, fbw=None):
           <input>fcs/yaw-trim-sum</input>
           <range> <min>%.2f</min> <max>%.2f</max> </range>
           <gain>0.0174533</gain>
-        </aerosurface_scale>
+        </aerosurface_scale>%s
         <actuator name="fcs/rudder-actuator">
-          <input>fcs/rudder-control</input>
+          <input>%s</input>
           <rate_limit>2.0</rate_limit>
           <output>fcs/rudder-pos-rad</output>
         </actuator>
@@ -436,7 +472,8 @@ def flight_control_xml(aircraft, fbw=None):
           <gain>-1</gain>
           <output>fcs/steer-cmd-norm</output>
         </pure_gain>
-      </channel>""" % (lo, hi))
+      </channel>""" % (lo, hi, "\n" + _yaw_damper_xml(yaw_damper, lo, hi) if yaw_damper is not None else "",
+                       "fcs/rudder-sum" if yaw_damper is not None else "fcs/rudder-control"))
     if "flap" in ch:
         lo, hi = lim["flap"]
         steps = [0.0, 0.25, 0.5, 0.75, 1.0]
@@ -588,7 +625,7 @@ def propulsion_xml(aircraft, mass_model, engine_files):
     return "\n".join(parts)
 
 
-def aircraft_xml(aircraft, tables, mass_model, engine_files, notes="", fbw=None):
+def aircraft_xml(aircraft, tables, mass_model, engine_files, notes="", fbw=None, yaw_damper=None):
     e = mass_model.empty()
     a = aircraft
     htail = [s for s in a.surfaces if s.kind == "htail"]
@@ -655,5 +692,5 @@ def aircraft_xml(aircraft, tables, mass_model, engine_files, notes="", fbw=None)
     </mass_balance>
 """ % (e["ixx"], e["iyy"], e["izz"], e["ixy"], e["ixz"], e["iyz"], e["mass"], _loc(e["cg"], 8), points)
     return "".join([header, metrics, mass, ground_reactions_xml(a, mass_model), "\n",
-                    propulsion_xml(a, mass_model, engine_files), "\n", flight_control_xml(a, fbw), "\n",
+                    propulsion_xml(a, mass_model, engine_files), "\n", flight_control_xml(a, fbw, yaw_damper), "\n",
                     aerodynamics_xml(tables, a), "\n</fdm_config>\n"])
