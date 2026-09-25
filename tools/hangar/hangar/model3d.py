@@ -475,11 +475,11 @@ PAINT = {"skin": ((0.60, 0.62, 0.65), 0.25, 0.55), "control": ((0.55, 0.57, 0.60
 
 def _paints(aircraft, B):
     """The paints by hangar's material index - the nozzle's only for an
-    aircraft with jets, so a model without one carries no paint it never
-    uses."""
+    aircraft with a round nozzle, so a model without one carries no paint it
+    never uses (a two-dimensional nozzle is the airframe's metal)."""
     from .shape import airframe as sh
-    jets = any(e.type == "turbofan" for e in aircraft.engines)
-    return {i: B.material(n, *PAINT[n]) for i, n in enumerate(sh.MATERIALS) if jets or n != "nozzle"}
+    rounds = any(e.type == "turbofan" and (e.prop_spec or {}).get("shape", "round") == "round" for e in aircraft.engines)
+    return {i: B.material(n, *PAINT[n]) for i, n in enumerate(sh.MATERIALS) if rounds or n != "nozzle"}
 
 
 def _stats(m):
@@ -773,6 +773,17 @@ def _propellers(aircraft, B, top, origin):
                                hub, axis, origin))
 
 
+def petal_mesher(d):
+    """The mesher's settings for a petal of a round nozzle of diameter d (m):
+    cells fine enough for its edges to come out straight and the seal on its
+    inside (half a wall thick) as a plate, not a row of teeth; its flat
+    faces then thinned out to some 2,000 triangles a petal. There are twelve
+    to a nozzle: at twice that they came to a quarter of a single-engined
+    fighter's triangles, two fifths of a twin's."""
+    cell = float(np.clip(d / 260.0, 0.002, 0.006))
+    return {"cell": cell, "error": cell, "safety": 3.0, "sharp_deg": 45.0, "max_triangles": 600}
+
+
 def _nozzle_petals(aircraft, B, top, origin):
     """Each round nozzle's petals, each on a node that opens it as far as
     the engine's nozzle is open (fsim:nozzle:<engine>:<deg wide open>; shut
@@ -793,11 +804,7 @@ def _nozzle_petals(aircraft, B, top, origin):
         scene, hinge_pt, hinge_axis = made
         if id(e) not in meshes:
             d, _ = sh.nozzle_size(e)
-            # fine enough for the seal on its inside (half a wall thick) to
-            # come out as a plate, not a row of teeth
-            cell = float(np.clip(d / 260.0, 0.002, 0.006))
-            m = meshkit.build({"cell": cell, "error": 0.1 * cell, "safety": 3.0, "sharp_deg": 45.0,
-                               "max_triangles": 3000, "root": scene})
+            m = meshkit.build(dict(petal_mesher(d), root=scene))
             # the petal in its hinge's frame (x along the hinge axis)
             qc = _quat_from_x(hinge_axis)
             Rc = _quat_matrix(qc)

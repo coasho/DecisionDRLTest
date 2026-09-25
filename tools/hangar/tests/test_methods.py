@@ -917,6 +917,7 @@ class Model3D(unittest.TestCase):
         # (the F-16's fuselage ran on past their hinges, its skin a hair from
         # theirs); the nozzle's metal painted by where it is, not by which
         # surface is a hair nearer; each petal one closed piece, sealed
+        from hangar import model3d
         from hangar.shape import airframe as sh
         from hangar.shape import meshkit
         if meshkit.library() is None:
@@ -937,9 +938,9 @@ class Model3D(unittest.TestCase):
         _, material = meshkit.evaluate(scene, np.array([exit_ + [s, 0.0, -q]]))
         self.assertEqual(int(material[0]), sh.NOZZLE)
         scene, _, _ = sh.petals(e)
-        m = meshkit.build({"cell": d / 260.0, "error": d / 2600.0, "safety": 3.0, "sharp_deg": 45.0,
-                           "max_triangles": 3000, "root": scene})
+        m = meshkit.build(dict(model3d.petal_mesher(d), root=scene))
         self.assertEqual((m["boundary_edges"], m["nonmanifold_edges"], m["components"]), (0, 0, 1))
+        self.assertLess(len(m["triangles"]), 3000)  # twelve to a nozzle
 
     def test_manifest_names_the_lifting_surfaces(self):
         # the viewer's airflow effects hang on the wing, the strakes and the
