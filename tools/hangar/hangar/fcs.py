@@ -46,6 +46,18 @@ Gains are tables over dynamic pressure and Mach number, from pole placement
 on the linear model (linear.py's derivatives with the compressibility
 factors, as the JSBSim file applies them) at 1 g trim at each of those
 conditions.
+
+Thrust vectoring ([engine.nozzle] vectoring, its plane canted
+vectoring_cant outboard from the vertical): the nozzles turn with the
+surfaces - through their travel as the elevator goes through its own,
+differentially half their travel with the ailerons, and with the rudder
+where the plane is canted (the Su-57's) - so they add their power to the
+surfaces'. That power grows with thrust, the surfaces' with dynamic
+pressure: the gains are designed as moments and divided at run time by the
+power the surfaces and the nozzles give together at the thrust the engines
+make, so the loops respond the same at idle and in full afterburner, and
+the nozzles add authority where the surfaces run out of it - at low speed
+and high angle of attack.
 """
 import math
 
@@ -59,6 +71,8 @@ QBAR_PSF = (10.0, 20.0, 40.0, 80.0, 150.0, 300.0, 600.0, 1200.0, 2400.0)
 MACH = (0.15, 0.4, 0.7, 0.9, 1.1, 1.4, 2.0)
 A_SOUND = 320.0          # m/s: the speed of sound at mid altitudes, to turn Mach into speed
 LIMIT_INTEGRAL = 5.0     # how much faster the pitch integrator trims the angle of attack left at a limit
+LBF = 4.4482216          # N per lbf: JSBSim reports thrust in lbf
+ROLL_SHARE = 0.5         # of a vectoring nozzle's travel the ailerons (and the rudder) use differentially
 
 DEFAULTS = {"n_max": 9.0, "n_min": -3.0, "alpha_max_deg": 25.0, "alpha_min_deg": -10.0, "roll_rate_deg_s": 300.0,
             "sideslip_deg": 10.0, "cap": 1.0, "short_period_zeta": 0.8, "roll_time_constant_s": 0.2,
@@ -75,6 +89,49 @@ def options(aircraft):
     for k in DEFAULTS:
         if k in spec:
             out[k] = float(spec[k])
+    return out
+
+
+def vectoring(aircraft, inertia=None):
+    """The thrust-vectoring nozzles, in JSBSim's engine order: each one's
+    deflection per unit of the surfaces' positions (rad per rad: the
+    elevator's through its whole travel, the aileron's and the rudder's -
+    canted only - differentially through ROLL_SHARE of it), its travel and
+    cant, its side (+1 left, -1 right: the left nozzle's deflection is the
+    one the aileron's position adds to) and base orientation. With inertia
+    (linear.loaded_inertia's) also the control power per lbf of its thrust
+    about each axis: 1/s^2 per rad of the surface, signed as the surface's
+    own (JSBSim's thruster: a positive pitch angle pushes the tail up, a
+    positive yaw angle pushes it right). [] without vectoring nozzles."""
+    ch = aircraft.channels()
+
+    def travel(k):
+        return math.radians(max(abs(x) for x in aircraft.channel_limits(k))) if k in ch else 0.0
+    de, da, dr = travel("elevator"), travel("aileron"), travel("rudder")
+    out = []
+    i = 0
+    for e in aircraft.engines:
+        for name, _, nozzle, _ in e.copies():
+            if e.vectoring > 0.0:
+                vec, cant = math.radians(e.vectoring), math.radians(e.vectoring_cant)
+                side = -float(np.sign(round(float(nozzle[1]), 6)))
+                v = {"engine": i, "name": name, "nozzle": [float(x) for x in nozzle], "travel": vec, "cant": cant,
+                     "side": side, "orient": [float(x) for x in e.prop_orient],
+                     "k_elevator": vec / de if de > 0 else 0.0,
+                     "k_aileron": ROLL_SHARE * vec / da if da > 0 and side else 0.0,
+                     "k_rudder": ROLL_SHARE * vec / dr if dr > 0 and side and cant > 0 else 0.0}
+                if inertia is not None:
+                    _, cg, Ixx, Iyy, Izz, _ = inertia
+                    lx = float(nozzle[0] - cg[0])            # behind the centre of gravity
+                    ly = abs(float(nozzle[1] - cg[1]))
+                    # the pitch deflection is the elevator's, nose down; the differential
+                    # one rolls right with the left nozzle's tail pushed up; the canted
+                    # yaw deflection is the rudder's, nose left
+                    v["md"] = -LBF * v["k_elevator"] * math.cos(cant) * lx / Iyy
+                    v["lda"] = LBF * v["k_aileron"] * math.cos(cant) * ly / Ixx
+                    v["ndr"] = -LBF * v["k_rudder"] * math.sin(cant) * lx / Izz
+                out.append(v)
+            i += 1
     return out
 
 
@@ -274,17 +331,30 @@ def design_point(tabs, aircraft, inertia, qbar_pa, mach, opt, cma_line=None):
     beta_max = math.radians(opt["sideslip_deg"])
     dr_max = math.radians(max(abs(x) for x in aircraft.channel_limits("rudder"))) if "rudder" in aircraft.channels() else 0.0
     kped = float(np.clip(-(Nb * beta_max) / Ndr if abs(Ndr) > 1e-9 else 0.0, 0.0, dr_max)) if Ndr < 0 else 0.0
-    return {"qbar_psf": Q / PSF, "mach": mach, "speed_ms": V, "alpha_deg": alpha, "n_alpha": n_alpha,
-            "k_alpha": float(ka), "k_q": float(kq), "k_ff": float(k_ff), "k_i": float(k_i),
-            "omega_sp": omega, "eig_sp": [complex(e) for e in eig_sp], "open_loop_Ma": Ma,
-            "k_roll": float(kp), "k_roll_ff": float(kff), "k_roll_i": float(kip), "p_max": p_max,
-            "k_yaw_r": float(kr), "k_yaw_beta": float(kb), "k_pedal": kped}
+    # the gains as moments - each gain times its surface's power, what the design
+    # asks of the airframe - for thrust vectoring, which adds power at run time
+    moments = {"k_alpha_m": float(ka * Md), "k_q_m": float(kq * Md), "k_ff_m": float(k_ff * Md),
+               "k_i_m": float(k_i * Md), "k_roll_m": max(1.0 / tau + Lp, 0.0), "k_roll_ff_m": -Lp,
+               "k_roll_i_m": 1.0 / opt["bank_hold_s"] ** 2, "p_per": 0.8 * da_max / max(-Lp, 1e-6),
+               "k_yaw_r_m": max(2 * opt["dutch_roll_zeta"] * w_dr + Yb / V + Nr, 0.0),
+               "k_yaw_beta_m": min(Nb_s - w_dr * w_dr, 0.0), "k_pedal_m": -Nb * beta_max,
+               "md": Md, "lda": Lda, "ndr": Ndr}
+    out = {"qbar_psf": Q / PSF, "mach": mach, "speed_ms": V, "alpha_deg": alpha, "n_alpha": n_alpha,
+           "k_alpha": float(ka), "k_q": float(kq), "k_ff": float(k_ff), "k_i": float(k_i),
+           "omega_sp": omega, "eig_sp": [complex(e) for e in eig_sp], "open_loop_Ma": Ma,
+           "k_roll": float(kp), "k_roll_ff": float(kff), "k_roll_i": float(kip), "p_max": p_max,
+           "k_yaw_r": float(kr), "k_yaw_beta": float(kb), "k_pedal": kped}
+    out.update(moments)
+    return out
 
 
 GAINS = ("k_alpha", "k_q", "k_ff", "k_i", "n_alpha", "k_roll", "k_roll_ff", "k_roll_i", "p_max", "k_yaw_r", "k_yaw_beta",
          "k_pedal")
 LIMITS = {"k_alpha": 6.0, "k_q": 3.0, "k_ff": 0.3, "k_i": 0.6, "k_roll": 1.5, "k_roll_ff": 1.5, "k_roll_i": 1.0,
           "k_yaw_r": 3.0, "k_yaw_beta": 3.0}
+# with thrust vectoring: each axis's gains as moments, and the surfaces' power they are divided by
+AXES = {"pitch": (("k_alpha", "k_q", "k_ff", "k_i"), "md"), "roll": (("k_roll", "k_roll_ff", "k_roll_i"), "lda"),
+        "yaw": (("k_yaw_r", "k_yaw_beta", "k_pedal"), "ndr")}
 
 
 def design(tabs, aircraft, mass_model):
@@ -303,6 +373,12 @@ def design(tabs, aircraft, mass_model):
     for k, lim in LIMITS.items():
         tables[k] = np.clip(tables[k], -lim, lim)
     out = {"qbar_psf": np.array(QBAR_PSF), "mach": np.array(machs), "gains": tables, "options": opt, "points": points}
+    vec = vectoring(aircraft, inertia)
+    if vec:
+        out["vectoring"] = vec
+        keys = [k + "_m" for gains, _ in AXES.values() for k in gains] + [p for _, p in AXES.values()] + ["p_per"]
+        for k in keys:
+            tables[k] = np.array([[p[k] for p in row] for row in points])
     if line is not None:
         de_lo, de_hi = (math.radians(x) for x in aircraft.channel_limits("elevator"))
         out["moment"] = {"alpha_deg": line["alpha_deg"], "slope": slope, "departure": line["departure"],
@@ -311,11 +387,11 @@ def design(tabs, aircraft, mass_model):
 
 
 # -- the JSBSim channels -------------------------------------------------------------------------
-def _gain_table(name, fbw, key, indent=8):
+def _gain_table(name, fbw, key, indent=8, fmt="%10.5f"):
     pad = " " * indent
     g = fbw["gains"][key]
     head = pad + "          " + "".join("%10.3f" % m for m in fbw["mach"])
-    body = "\n".join(pad + "%10.1f" % q + "".join("%10.5f" % v for v in g[i]) for i, q in enumerate(fbw["qbar_psf"]))
+    body = "\n".join(pad + "%10.1f" % q + "".join(fmt % v for v in g[i]) for i, q in enumerate(fbw["qbar_psf"]))
     return """%s<fcs_function name="fcs/fbw/%s">
 %s  <function>
 %s    <table>
@@ -330,7 +406,7 @@ def _gain_table(name, fbw, key, indent=8):
 %s</fcs_function>""" % (pad, name, pad, pad, pad, pad, pad, head, body, pad, pad, pad, pad)
 
 
-def _moment_table(fbw, indent=8):
+def _moment_table(fbw, indent=8, name="moment-comp"):
     pad = " " * indent
     mo = fbw["moment"]
     head = pad + "          " + "".join("%10.3f" % m for m in fbw["mach"])
@@ -339,7 +415,7 @@ def _moment_table(fbw, indent=8):
     return """%s<!-- the pitching moment's departures from a straight line through the
 %s     angle-of-attack envelope (%+.3f per rad about the CG), cancelled by the
 %s     elevator: the gains are designed on the line -->
-%s<fcs_function name="fcs/fbw/moment-comp">
+%s<fcs_function name="fcs/fbw/%s">
 %s  <function>
 %s    <table>
 %s      <independentVar lookup="row">aero/alpha-rad</independentVar>
@@ -350,7 +426,127 @@ def _moment_table(fbw, indent=8):
 %s      </tableData>
 %s    </table>
 %s  </function>
-%s</fcs_function>""" % (pad, pad, mo["slope"], pad, pad, pad, pad, pad, pad, pad, head, body, pad, pad, pad, pad)
+%s</fcs_function>""" % (pad, pad, mo["slope"], pad, pad, name, pad, pad, pad, pad, pad, head, body, pad, pad, pad, pad)
+
+
+POWER_NOTE = {"md": "pitch", "lda": "roll", "ndr": "yaw"}
+POWER_SIGN = {"md": -1.0, "lda": 1.0, "ndr": -1.0}     # a surface's power as it normally is
+
+
+def _thrust_power(fbw, key):
+    """fcs/fbw/<key>-aero, the surfaces' power about one axis (a table,
+    1/s^2 per rad), and fcs/fbw/<key>-total, with the vectoring nozzles' at
+    the thrust the engines make - never less than 0.01 the usual way round,
+    so that the gains divided by it stay finite."""
+    terms = "\n".join("                <product><value>%.6e</value><max><value>0</value>"
+                      "<property>propulsion/engine[%d]/thrust-lbs</property></max></product>" % (v[key], v["engine"])
+                      for v in fbw["vectoring"] if v[key] != 0.0)
+    s = POWER_SIGN[key]
+    return """        <!-- the %s power (1/s^2 per rad of the surface): the surfaces', and with the
+             vectoring nozzles' at the thrust the engines make -->
+%s
+        <fcs_function name="fcs/fbw/%s-total">
+          <function>
+            <%s>
+              <sum>
+                <property>fcs/fbw/%s-aero</property>
+%s
+              </sum>
+              <value>%.2f</value>
+            </%s>
+          </function>
+        </fcs_function>""" % (POWER_NOTE[key], _gain_table(key + "-aero", fbw, key, fmt=" %13.6e"), key,
+                              "max" if s > 0 else "min", key, terms, 0.01 * s, "max" if s > 0 else "min")
+
+
+def _moment_gain(name, fbw, key, power, lo, hi):
+    """A gain as its moment (a table) over the power about its axis now."""
+    return """%s
+        <fcs_function name="fcs/fbw/%s">
+          <function>
+            <quotient><property>fcs/fbw/%s-m</property><property>fcs/fbw/%s-total</property></quotient>
+          </function>
+          <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
+        </fcs_function>""" % (_gain_table(name + "-m", fbw, key + "_m", fmt=" %13.6e"), name, name, power, lo, hi)
+
+
+def _integrator(name, rate, trigger, lim, power=None, sign=1.0, fmt="%.5f"):
+    """An integrator of a surface rate (rad/s) clipped to +-lim rad - or,
+    with the power about its axis (fcs/fbw/<power>-total), of the moment
+    that rate gives, clipped to the moment of +-lim rad, and its output that
+    moment over the power: what it holds stays when the vectoring nozzles'
+    share changes with thrust. (JSBSim clips the output, not the state: the
+    anti-windup is the trigger's.)"""
+    if power is None:
+        return """        <integrator name="fcs/fbw/%s">
+          <input>fcs/fbw/%s</input>
+          <c1>1.0</c1>
+          <trigger>%s</trigger>
+          <clipto> <min>%s</min> <max>%s</max> </clipto>
+        </integrator>""" % (name, rate, trigger, fmt % -lim, fmt % lim)
+    return """        <!-- held as a moment: the nozzles' share changes with thrust, the trim does not -->
+        <fcs_function name="fcs/fbw/%s-moment-rate">
+          <function><product><property>fcs/fbw/%s</property><property>fcs/fbw/%s-total</property></product></function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/%s-limit">
+          <function><product><value>%.5f</value><property>fcs/fbw/%s-total</property></product></function>
+        </fcs_function>
+        <integrator name="fcs/fbw/%s-moment">
+          <input>fcs/fbw/%s-moment-rate</input>
+          <c1>1.0</c1>
+          <trigger>%s</trigger>
+          <clipto> <min>-fcs/fbw/%s-limit</min> <max>fcs/fbw/%s-limit</max> </clipto>
+        </integrator>
+        <fcs_function name="fcs/fbw/%s">
+          <function><quotient><property>fcs/fbw/%s-moment</property><property>fcs/fbw/%s-total</property></quotient></function>
+        </fcs_function>""" % (name, rate, power, name, sign * lim, power, name, name, trigger, name, name, name, name, power)
+
+
+def vectoring_xml(aircraft):
+    """The Thrust Vectoring channel: each vectoring nozzle's deflection from
+    the surfaces' positions (vectoring()), turning its engine's thrust
+    (JSBSim's propulsion/engine[i]/pitch-angle-rad and yaw-angle-rad) in its
+    plane. None without vectoring nozzles."""
+    vec = vectoring(aircraft)
+    if not vec:
+        return None
+    src = (("k_elevator", 1.0, "fcs/elevator-pos-rad"), ("k_aileron", 1.0, "fcs/left-aileron-pos-rad"),
+           ("k_rudder", -1.0, "fcs/rudder-pos-rad"))
+    parts = ["""      <channel name="Thrust Vectoring">
+        <!-- hangar: each nozzle turns with the surfaces (hangar/fcs.py): through its
+             travel as the elevator goes through its own (a positive deflection
+             pushes the tail up, nose down, as the elevator's does), differentially
+             through half of it with the ailerons (the left nozzle's tail up rolls
+             right) and, in a canted plane, with the rudder -->"""]
+    for v in vec:
+        i = v["engine"]
+        terms = "\n".join("              <product><value>%.6f</value><property>%s</property></product>"
+                          % (sign * (v["side"] if k != "k_elevator" else 1.0) * v[k], prop)
+                          for k, sign, prop in src if v[k] != 0.0)
+        parts.append("""        <fcs_function name="fcs/vectoring/nozzle-%d-rad">
+          <function>
+            <sum>
+%s
+            </sum>
+          </function>
+          <clipto> <min>%.6f</min> <max>%.6f</max> </clipto>
+        </fcs_function>
+        <fcs_function name="fcs/vectoring/pitch-%d-rad">
+          <function>
+            <sum><value>%.6f</value><product><value>%.6f</value><property>fcs/vectoring/nozzle-%d-rad</property></product></sum>
+          </function>
+          <output>propulsion/engine[%d]/pitch-angle-rad</output>
+        </fcs_function>""" % (i, terms, -v["travel"], v["travel"], i, v["orient"][1], math.cos(v["cant"]), i, i))
+        if v["cant"] > 0.0 and v["side"]:
+            # canted outboard: the left nozzle's tail pushed up also goes left
+            parts.append("""        <fcs_function name="fcs/vectoring/yaw-%d-rad">
+          <function>
+            <sum><value>%.6f</value><product><value>%.6f</value><property>fcs/vectoring/nozzle-%d-rad</property></product></sum>
+          </function>
+          <output>propulsion/engine[%d]/yaw-angle-rad</output>
+        </fcs_function>""" % (i, v["orient"][2], -v["side"] * math.sin(v["cant"]), i, i))
+    parts.append("      </channel>")
+    return "\n".join(parts)
 
 
 def channels_xml(aircraft, fbw):
@@ -360,6 +556,7 @@ def channels_xml(aircraft, fbw):
     o = fbw["options"]
     rad = math.radians
     de_lo, de_hi = (rad(x) for x in aircraft.channel_limits("elevator"))
+    dr_max = rad(max(abs(x) for x in aircraft.channel_limits("rudder"))) if "rudder" in aircraft.channels() else 0.0
     parts = []
     hold = """        <!-- the integrators are reset below 60 kt (on the ground, taking off) -->
         <switch name="fcs/fbw/reset">
@@ -368,6 +565,33 @@ def channels_xml(aircraft, fbw):
             velocities/vc-kts lt 60
           </test>
         </switch>"""
+    # thrust vectoring: the axes the nozzles add power about, their gains as moments
+    # over the power there is now
+    vec = fbw.get("vectoring") or []
+    need = {"pitch": "elevator", "roll": "aileron", "yaw": "rudder"}
+    powered = {axis: need[axis] in aircraft.channels() and any(v[p] != 0.0 for v in vec) for axis, (_, p) in AXES.items()}
+    limits = dict(LIMITS, k_pedal=(0.0, dr_max))
+    for axis, (_, p) in AXES.items():
+        if powered[axis]:
+            hold += "\n" + _thrust_power(fbw, p)
+
+    def gain(name, key):
+        axis = next(a for a, (keys, _) in AXES.items() if key in keys)
+        if not powered[axis]:
+            return _gain_table(name, fbw, key)
+        lim = limits[key]
+        lo, hi = lim if isinstance(lim, tuple) else (-lim, lim)
+        return _moment_gain(name, fbw, key, AXES[axis][1], lo, hi)
+    moment = _moment_table(fbw)
+    if powered["pitch"]:
+        # the elevator the departures ask for, with the nozzles turning with it
+        moment = _moment_table(fbw, name="moment-comp-aero") + """
+        <fcs_function name="fcs/fbw/moment-comp">
+          <function>
+            <product><property>fcs/fbw/moment-comp-aero</property>
+              <quotient><property>fcs/fbw/md-aero</property><property>fcs/fbw/md-total</property></quotient></product>
+          </function>
+        </fcs_function>"""
     parts.append("""      <channel name="Pitch (fly-by-wire)">
         <!-- hangar: load factor command, alpha and pitch-rate inner loop (hangar/fcs.py) -->
         <summer name="fcs/pitch-trim-sum">
@@ -512,12 +736,7 @@ def channels_xml(aircraft, fbw):
             fcs/fbw/pitch-error-rate lt 0
           </test>
         </switch>
-        <integrator name="fcs/fbw/pitch-integral">
-          <input>fcs/fbw/pitch-error-rate</input>
-          <c1>1.0</c1>
-          <trigger>fcs/fbw/pitch-hold</trigger>
-          <clipto> <min>-0.5</min> <max>0.5</max> </clipto>
-        </integrator>
+%s
         <!-- past an angle-of-attack limit (the next 0.35 s counted) a push back
              in proportion, all the travel 4 deg beyond: an unstable airframe
              pitching up fast needs it at once, not when an integrator winds -->
@@ -559,15 +778,28 @@ def channels_xml(aircraft, fbw):
           <rate_limit>%.3f</rate_limit>
           <output>fcs/elevator-pos-rad</output>
         </actuator>
-      </channel>""" % (hold, _gain_table("k-alpha", fbw, "k_alpha"), _gain_table("k-q", fbw, "k_q"),
-                       _gain_table("k-ff", fbw, "k_ff"), _gain_table("k-i", fbw, "k_i"),
-                       _gain_table("n-alpha", fbw, "n_alpha"), _moment_table(fbw),
+      </channel>""" % (hold, gain("k-alpha", "k_alpha"), gain("k-q", "k_q"), gain("k-ff", "k_ff"), gain("k-i", "k_i"),
+                       _gain_table("n-alpha", fbw, "n_alpha"), moment,
                        o["n_max"] - 1.0, o["n_min"] - 1.0, rad(o["alpha_max_deg"]), rad(o["alpha_min_deg"]),
                        rad(o["alpha_max_deg"]), rad(o["alpha_min_deg"]), LIMIT_INTEGRAL, LIMIT_INTEGRAL, de_hi, de_lo,
+                       _integrator("pitch-integral", "pitch-error-rate", "fcs/fbw/pitch-hold", 0.5,
+                                   "md" if powered["pitch"] else None, POWER_SIGN["md"], fmt="%g"),
                        de_hi / rad(4.0), rad(o["alpha_max_deg"]), -de_lo / rad(4.0), rad(o["alpha_min_deg"]),
                        de_lo, de_hi, max(1.05, (de_hi - de_lo) / 0.83)))
     if "aileron" in aircraft.channels():
         da = rad(max(abs(x) for x in aircraft.channel_limits("aileron")))
+        p_max = _gain_table("p-max", fbw, "p_max")
+        if powered["roll"]:
+            # the rate asked for, or what the rolling moment there is now gives
+            p_max = _gain_table("p-per", fbw, "p_per", fmt=" %13.6e") + """
+        <fcs_function name="fcs/fbw/p-max">
+          <function>
+            <min>
+              <value>%.5f</value>
+              <product><property>fcs/fbw/p-per</property><property>fcs/fbw/lda-total</property></product>
+            </min>
+          </function>
+        </fcs_function>""" % rad(o["roll_rate_deg_s"])
         parts.append("""      <channel name="Roll (fly-by-wire)">
         <!-- hangar: roll-rate command about the flight path, bank hold at neutral stick -->
         <summer name="fcs/roll-trim-sum">
@@ -609,12 +841,7 @@ def channels_xml(aircraft, fbw):
               <difference><property>fcs/fbw/p-cmd</property><property>fcs/fbw/p-stability</property></difference></product>
           </function>
         </fcs_function>
-        <integrator name="fcs/fbw/roll-integral">
-          <input>fcs/fbw/roll-error-rate</input>
-          <c1>1.0</c1>
-          <trigger>fcs/fbw/reset</trigger>
-          <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
-        </integrator>
+%s
         <fcs_function name="fcs/fbw/aileron">
           <function>
             <sum>
@@ -637,9 +864,10 @@ def channels_xml(aircraft, fbw):
           <gain>-1</gain>
           <output>fcs/right-aileron-pos-rad</output>
         </pure_gain>
-      </channel>""" % (_gain_table("k-roll", fbw, "k_roll"), _gain_table("k-roll-ff", fbw, "k_roll_ff"),
-                       _gain_table("k-roll-i", fbw, "k_roll_i"), _gain_table("p-max", fbw, "p_max"),
-                       rad(o["alpha_max_deg"] * 0.4), rad(o["alpha_max_deg"]), -0.5 * da, 0.5 * da, -da, da))
+      </channel>""" % (gain("k-roll", "k_roll"), gain("k-roll-ff", "k_roll_ff"), gain("k-roll-i", "k_roll_i"),
+                       p_max, rad(o["alpha_max_deg"] * 0.4), rad(o["alpha_max_deg"]),
+                       _integrator("roll-integral", "roll-error-rate", "fcs/fbw/reset", 0.5 * da,
+                                   "lda" if powered["roll"] else None, POWER_SIGN["lda"]), -da, da))
     if "rudder" in aircraft.channels():
         dr = rad(max(abs(x) for x in aircraft.channel_limits("rudder")))
         parts.append("""      <channel name="Yaw (fly-by-wire)">
@@ -689,6 +917,6 @@ def channels_xml(aircraft, fbw):
           <gain>-1</gain>
           <output>fcs/steer-cmd-norm</output>
         </pure_gain>
-      </channel>""" % (_gain_table("k-yaw-r", fbw, "k_yaw_r"), _gain_table("k-yaw-beta", fbw, "k_yaw_beta"),
-                       _gain_table("k-pedal", fbw, "k_pedal"), rad(o["sideslip_deg"]), -dr, dr))
+      </channel>""" % (gain("k-yaw-r", "k_yaw_r"), gain("k-yaw-beta", "k_yaw_beta"), gain("k-pedal", "k_pedal"),
+                       rad(o["sideslip_deg"]), -dr, dr))
     return parts

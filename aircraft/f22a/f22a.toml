@@ -198,6 +198,8 @@ inlet_x = 5.8
 [engine.nozzle]
 position = [16.700, 0.700, -0.200]
 shape = "2d"                  # two-dimensional, vectoring in pitch
+vectoring = 20.0              # deg up and down (Pratt & Whitney); used
+                              # differentially it rolls too
 
 # The gear where the USAF three-view has its wheels (the axles 5.71 and 11.83 m
 # behind the nose), the 3.2 m track of its front view and Michelin's tyres

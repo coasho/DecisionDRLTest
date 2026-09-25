@@ -156,6 +156,71 @@ def nozzle_size(engine):
 PETALS = 12        # a round nozzle's divergent petals
 PETAL_FRONT = 0.4  # of the nozzle's visible length ahead of the exit: where they hinge
 PETAL_OPEN_DEG = 12.0  # how far a petal opens when the design does not say (petal_open_deg)
+FLAP_FRONT = 0.5   # of a two-dimensional nozzle's length ahead of the exit: its flaps' hinge
+GIMBAL_MARGIN = 3.0  # deg a vectoring nozzle's seal reaches past its travel
+
+
+def vectoring_hinge(engine):
+    """Where a vectoring nozzle turns, in its frame (origin at the exit, x
+    aft): a round one about the ring its petals hinge on, a two-dimensional
+    one's flaps about their hinge. None for a nozzle that does not."""
+    if not engine.vectoring:
+        return None
+    _, length = nozzle_size(engine)
+    flat = (engine.prop_spec or {}).get("shape", "round") == "2d"
+    return np.array([-(FLAP_FRONT if flat else PETAL_FRONT) * length, 0.0, 0.0])
+
+
+def vectoring_parts(engine):
+    """A round vectoring nozzle's gimbal seal, as a scene in its frame
+    (origin at the exit, x aft): a ball about the gimbal from its travel
+    (and a margin) ahead of the petals' hinge to just inside the petals,
+    turning into itself, so no gap opens between the case and the petals at
+    any deflection. None for any other nozzle (a two-dimensional one's
+    flaps are cut from the airframe: flap_bays())."""
+    pivot = vectoring_hinge(engine)
+    if pivot is None or (engine.prop_spec or {}).get("shape", "round") != "round":
+        return None
+    d, _ = nozzle_size(engine)
+    r = 0.5 * d
+    R = 1.04 * r
+    ahead = R * np.sin(np.radians(engine.vectoring + GIMBAL_MARGIN))
+    behind = 0.15 * r
+    ball = {"prim": "ellipsoid", "material": NOZZLE, "centre": pivot, "radii": [R, R, R]}
+    slab = {"prim": "box", "material": DARK, "centre": pivot + [0.5 * (behind - ahead), 0.0, 0.0],
+            "half": [0.5 * (behind + ahead), R + 0.1, R + 0.1]}
+    bore = {"prim": "cylinder", "material": DARK, "a": pivot - [R + 0.1, 0.0, 0.0], "b": pivot + [R + 0.1, 0.0, 0.0],
+            "r": 0.82 * r, "round": 0.0}
+    return {"op": "subtract", "k": 0.0, "a": {"op": "intersect", "k": 0.0, "children": [ball, slab]}, "b": bore,
+            "cut_material": DARK}
+
+
+def flap_bays(aircraft, grow=0.0):
+    """Each vectoring two-dimensional nozzle's flaps, per engine copy: all
+    of the airframe behind their hinge across the nozzle's opening (its
+    sidewalls stay), with a round nose about the hinge that turns in the
+    socket it leaves - a region grown by grow, to cut from the airframe
+    (+) and to mesh from it (-): [(engine copy name, region, pivot)]. The
+    nose's radius, [engine.nozzle] flap_radius, reaches the skin above and
+    below the hinge (1.05 times the nozzle's radius unless given)."""
+    out = []
+    for e in aircraft.engines:
+        spec = e.prop_spec or {}
+        if e.type != "turbofan" or not e.vectoring or spec.get("shape", "round") != "2d":
+            continue
+        d, length = nozzle_size(e)
+        r = 0.5 * d
+        w = 0.8 * r                                     # the opening's half width at the hinge
+        R = float(spec.get("flap_radius", 1.05 * r))
+        aft = FLAP_FRONT * length + 0.3                  # to past the exit
+        for name, _, nozzle, _ in e.copies():
+            pivot = np.asarray(nozzle, float) + [-FLAP_FRONT * length, 0.0, 0.0]
+            box = {"prim": "box", "material": METAL, "centre": pivot + [0.5 * aft, 0.0, 0.0],
+                   "half": [0.5 * aft + grow, w + grow, R + 0.1 + grow]}
+            nose = {"prim": "cylinder", "material": METAL, "a": pivot - [0.0, w + grow, 0.0], "b": pivot + [0.0, w + grow, 0.0],
+                    "r": R + grow, "round": 0.0}
+            out.append((name, union([box, nose]), pivot))
+    return out
 
 
 def _round(engine):
@@ -410,9 +475,11 @@ def intake(body):
     return cowl, duct
 
 
-def airframe(aircraft, cell=None, error=None, gear=None):
+def airframe(aircraft, cell=None, error=None, gear=None, flaps=None):
     """The scene of the fixed airframe; gear, a list, gets the landing gear's
-    bays and doors (shape/gear.py) - cut into it here."""
+    bays and doors (shape/gear.py) - cut into it here; flaps, a list, gets
+    the vectoring two-dimensional nozzles' flaps (flap_bays()), each (engine
+    copy name, scene) - cut from it here."""
     h = cell or cell_size(aircraft)
     foils = Foils()
     structure = [b for b in aircraft.bodies if not is_canopy(b) and b.kind != "intake"]
@@ -465,6 +532,15 @@ def airframe(aircraft, cell=None, error=None, gear=None):
         cuts = [{"op": "subtract", "k": 0.0, "a": c, "b": body_solid} for c in cuts]
     if cuts:
         solid = {"op": "subtract", "k": 0.0, "a": solid, "b": union(cuts), "cut_material": SKIN}
+    bays = flap_bays(aircraft, grow=0.5 * GAP)
+    if bays:
+        if flaps is not None:
+            for name, region, _ in flap_bays(aircraft, grow=-0.5 * GAP):
+                flaps.append((name, {"cell": h, "error": error or 0.25 * h, "safety": 3.0, "sharp_deg": 48.0,
+                                     "max_triangles": 8000, "foils": foils.entries,
+                                     "root": {"op": "intersect", "k": 0.0, "children": [solid, region]}}))
+        solid = {"op": "subtract", "k": 0.0, "a": solid, "b": union([region for _, region, _ in bays]),
+                 "cut_material": METAL}
     return {"cell": h, "error": error or 0.25 * h, "safety": 3.0, "sharp_deg": 48.0, "max_triangles": 75000,
             "foils": foils.entries, "root": solid}
 
