@@ -351,6 +351,12 @@ Airflow::Airflow(std::size_t slots, vsg::ref_ptr<const vsg::Options> options) {
                                           VkVertexInputAttributeDescription{2, 2, VK_FORMAT_R32G32B32A32_SFLOAT, 0}};
     vapourState_ = {pipeline(layout, vapour, input), bindSet};
     vapourRoot_ = vsg::Group::create();
+    // the vapour's pipeline built with the scene, not mid-flight when the
+    // first vehicle pulls hard (see Exhaust::prototype()); nothing under it
+    // to draw
+    auto warm = vsg::StateGroup::create();
+    warm->stateCommands = vapourState_;
+    vapourRoot_->addChild(warm);
 
     // The vapour first, then the trails, then the streaks: they blend over
     // one another in that order, drawn after the scene they sit in.

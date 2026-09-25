@@ -34,6 +34,12 @@ public:
     /// False when the shaders did not build: models keep their own flames.
     bool valid() const noexcept { return static_cast<bool>(state_); }
 
+    /// The pipeline and its descriptors with nothing to draw: kept in the
+    /// scene (switched off), so they are built when the scene is compiled
+    /// rather than mid-flight, when the first jet joins the world (building
+    /// a pipeline the driver has not cached can take tens of ms).
+    vsg::ref_ptr<vsg::Node> prototype() const { return state_; }
+
     /// The drawing of engine `k` of slot `slot`, made on first use and kept
     /// (the same node every time), or null past the limits.
     vsg::ref_ptr<vsg::Node> node(std::size_t slot, std::size_t k);

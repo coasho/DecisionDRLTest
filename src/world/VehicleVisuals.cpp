@@ -270,6 +270,11 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
         exhaust_ = std::make_unique<Exhaust>(count, options);
         exhaustOn_ = exhaust_->valid();
         flameCompiled_.assign(count * Exhaust::kPerSlot, 0);
+        if (exhaustOn_) { // its pipeline built with the scene; never drawn from here
+            auto warm = vsg::Switch::create();
+            warm->addChild(false, exhaust_->prototype());
+            root_->addChild(warm);
+        }
     }
 
     bool loaded = false;
