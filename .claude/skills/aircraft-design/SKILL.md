@@ -164,6 +164,8 @@ move on while a check fails or a picture looks wrong.
   file that the CG comes from the neutral point: when a change to the
   aerodynamic model moves it, those CGs move with it, their `.glb` is made
   again (its origin is the CG) and `fsim hangar register` is run again.
+  The main wheels still bound them: check the tip-back angle and the nose
+  wheel's share again (the Mirage 2000's CG stops at 15 deg tip-back).
 - **Targets.** Give `max_mach` and `max_mach_altitude_ft`: calibrate fits
   the engine's throttle ratio to them, then the wave drag if the engine
   alone cannot. `max_speed_ktas` (sea level), `climb_rate_fpm`,

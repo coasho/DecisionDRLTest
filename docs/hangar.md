@@ -520,7 +520,7 @@ estimates):
 | Typhoon | `typhoon` | 2.02 (2.0) | 72,500 (62,000) | 62,200 (55,000+) | 30.4° (30°) |
 | Rafale C | `rafale` | 1.80 (1.8) | 60,400 (60,000) | 62,000 (50,000+) | 29.5° (29°) |
 | JAS 39C Gripen | `gripen` | 2.00 (2.0) | 49,800 | 59,900 (50,000+) | 28.1° (28°) |
-| Mirage 2000C | `mirage2000` | 2.20 (2.2) | 54,000 (56,000) | 59,200 (56,000) | 29.3° (29°) |
+| Mirage 2000C | `mirage2000` | 2.20 (2.2) | 53,900 (56,000) | 58,600 (56,000) | 29.3° (29°) |
 | J-10A | `j10a` | 2.21 (2.2) | 50,700 | 59,300 (59,000) | 30.2° (30°) |
 | J-20A | `j20a` | 2.01 (2.0) | 51,100 | 58,700 (66,000) | 30.4° (30°) |
 
@@ -567,12 +567,14 @@ estimates):
   between two booms (Su-27, MiG-29) as if it were one surface, so those
   aircraft come out stable where the real ones are close to neutral.
 - **Balance.** Real fighters' CGs are rarely published. The deltas' are
-  placed 3-11 % of the MAC behind the neutral point the model finds, where
-  their main wheels put them: a sixth or less of the weight on the nose
-  wheel. Full nose-down control still reaches 8-20° past each delta's
-  angle-of-attack limit there (the build stage checks it). A design placed
-  from the neutral point says so in its file; when the model's neutral
-  point moves, its CG moves with it.
+  placed up to 11 % of the MAC behind the neutral point the model finds,
+  as far aft as their main wheels allow: at least 15° of tip-back, a sixth
+  or less of the weight on the nose wheel. The Mirage 2000's wheels stop
+  it at 0.4 %. Full nose-down control still reaches 8-20° past each
+  delta's angle-of-attack limit there (the build stage checks it). A
+  design placed from the neutral point says so in its file; when the
+  model's neutral point moves, its CG moves with it, as far as its wheels
+  allow.
 - **Post-stall tables.** From 45° to 70° of angle of attack a fighter's
   tables blend two estimates, the vortex flow and the separated flow (see
   Methods): smoothly, and alike in sideslip either way. The vortex flow

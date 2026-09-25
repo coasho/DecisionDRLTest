@@ -17,8 +17,9 @@ speed = 250.0
 
 # The wing as drawn: 41.6 m2 to the centre line (41 m2 published), 58 deg
 # leading edge, the trailing edge nearly straight, 1.5 deg anhedral. The
-# balance is not published: the CG sits 3 % of the MAC behind the neutral
-# point hangar finds (relaxed stability, flown by wire).
+# balance is not published: the CG sits as far aft as the main wheels allow
+# (15 deg tip-back), 0.5 % of the MAC behind the neutral point hangar finds
+# (relaxed stability, flown by wire).
 [[surface]]
 name = "wing"
 kind = "wing"
@@ -169,7 +170,7 @@ retract_deg = 89
 wheel_turn = "flat"
 
 [reference]
-aero_point = [8.479, 0.0, 0.0]     # at the CG
+aero_point = [8.335, 0.0, 0.0]     # at the CG
 
 [flight_control]
 type = "fbw"
@@ -180,7 +181,7 @@ roll_rate_deg_s = 270.0
 
 [mass]
 empty = 7500                  # Mirage 2000C (Dassault)
-empty_cg = [8.591, 0.0, 0.300]
+empty_cg = [8.431, 0.0, 0.300]
 # no published inertia: radii of gyration of the class
 gyration = [0.240, 0.400, 0.500]
 [[mass.payload]]
@@ -190,14 +191,14 @@ position = [4.200, 0.0, 0.900]
 [[mass.payload]]
 name = "gun ammunition"       # 2 DEFA 554, 250 rounds
 mass = 125
-position = [7.000, 0.0, -0.100]
+position = [6.840, 0.0, -0.100]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 3,160 kg
-position = [7.200, 0.0, 0.300]
+position = [7.040, 0.0, 0.300]
 capacity = 1100
 [[mass.tank]]
 name = "fuselage 2"
-position = [9.100, 0.0, 0.300]
+position = [8.940, 0.0, 0.300]
 capacity = 1000
 [[mass.tank]]
 name = "left wing"
