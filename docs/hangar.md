@@ -329,8 +329,11 @@ For fighters:
   (afterburner) or 1 (dry) up to 11 km, and as the density above it, where
   the temperature holds. It rises with the ram, 1 + 0.2 M², and is cut back
   once the compressor's inlet temperature passes the throttle ratio TR
-  (Mattingly, Heiser & Pratt, *Aircraft Engine Design*, sec. 2.3). Weight
-  and size come from Raymer. Calibration fits TR to the published top speed,
+  (Mattingly, Heiser & Pratt, *Aircraft Engine Design*, sec. 2.3). A dry
+  engine of bypass ratio above 1 moves towards Mattingly's high-bypass
+  lapse, δ₀(1 − 0.49√M), all of it from a bypass ratio of 3: a fifth of
+  the static thrust at Mach 0.8 and 35,000 ft. Weight and size come from
+  Raymer. Calibration fits TR to the published top speed,
   and then the wave drag if TR alone cannot.
 - **Fighter mass.** Raymer's fighter/attack weight equations. Radii of
   gyration are given per design (NASA's for the F-16).
@@ -595,7 +598,8 @@ estimates):
 - **Reynolds number.** The tables use one Reynolds number per strip, at
   one cruise speed (`[analysis] speed`), whatever the altitude. Laminar separation bubbles below
   Re ≈ 2×10⁵ are not modelled.
-- **Engines.** Piston, electric, and afterburning turbofans. Thrust
+- **Engines.** Piston, electric, and turbofans with or without an
+  afterburner. Thrust
   lapse comes from one published model, not from each engine's own data. An
   engine fitted to Mach 2.3-2.5 at altitude keeps too much thrust at sea
   level: the F-15C and Su-27S reach 990-1,070 kt there, where the real ones

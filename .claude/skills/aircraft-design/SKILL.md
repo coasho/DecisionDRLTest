@@ -209,8 +209,13 @@ move on while a check fails or a picture looks wrong.
 - **Known model limits.** Tails on booms beside the engines (Su-27, MiG-29)
   come out too stable: the lattice carries the tail across the gap between
   them. High-thrust engines fitted to Mach 2.5 at altitude are too fast at
-  sea level. Thrust vectoring is not modelled. Leading-edge devices move in
-  the 3D model only; the tables do not model them.
+  sea level. Leading-edge devices move in the 3D model only; the tables do
+  not model them.
+- **Thrust vectoring.** `[engine.nozzle] vectoring` (deg each way) and
+  `vectoring_cant` (deg its plane leans outboard; 0 pitch only): the
+  nozzles turn with the surfaces and the fly-by-wire scales its gains with
+  the thrust (the F-22A, the Su-57). The angle-of-attack limit stays the
+  aerodynamic one.
 
 ## 5. Finish
 

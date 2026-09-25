@@ -330,6 +330,22 @@ class Fighters(unittest.TestCase):
         self.assertAlmostEqual(thrust(18000.0) / thrust(13000.0), density(18000.0) / density(13000.0), delta=1e-6)
 
 
+    def test_high_bypass_thrust_falls_with_speed(self):
+        # a high-bypass fan's thrust falls fast with speed (Mattingly): a
+        # fifth of it left at Mach 0.8 and 35,000 ft; a bypass ratio of 1 or
+        # less keeps the low-bypass law, between them the lapse moves across
+        from hangar.propulsion import high_bypass_lapse, turbofan_lapse
+        self.assertAlmostEqual(high_bypass_lapse(0.0, 0.0, 1.08), 1.0)
+        self.assertLess(high_bypass_lapse(0.4, 0.0, 1.08), 0.8)
+        self.assertAlmostEqual(high_bypass_lapse(0.8, 10668.0, 1.08), 0.2, delta=0.02)
+        for m, h in ((0.4, 0.0), (0.8, 10668.0)):
+            low = turbofan_lapse(m, h, 1.08, bypass=0.3)
+            self.assertEqual(turbofan_lapse(m, h, 1.08, bypass=1.0), low)
+            self.assertEqual(turbofan_lapse(m, h, 1.08, bypass=6.0), high_bypass_lapse(m, h, 1.08))
+            self.assertLess(turbofan_lapse(m, h, 1.08, bypass=2.0), low)
+            self.assertGreater(turbofan_lapse(m, h, 1.08, bypass=2.0), high_bypass_lapse(m, h, 1.08))
+
+
 class FlyByWire(unittest.TestCase):
     @staticmethod
     def tables(kink):

@@ -192,7 +192,24 @@ def _isa(h_m):
     return 216.65, p11 * np.exp(-(h_m - 11000.0) / 6341.6)
 
 
-def turbofan_lapse(mach, h_m, tr=1.2, wet=False):
+def high_bypass_lapse(mach, h_m, tr=1.2):
+    """Installed thrust over sea-level-static thrust of a high-bypass
+    turbofan (Mattingly, Heiser & Pratt, "Aircraft Engine Design", 2002,
+    sec. 2.3.2): delta0 (1 - 0.49 sqrt(M)), less 3 (theta0 - TR) / (1.5 + M)
+    once the total temperature at the fan face, theta0, passes the throttle
+    ratio TR - its fan's thrust falls fast with speed, a fifth of its static
+    thrust left at Mach 0.8 and 35,000 ft."""
+    t, p = _isa(h_m)
+    f = 1.0 + 0.2 * mach * mach
+    delta0 = p / 101325.0 * f ** 3.5
+    theta0 = t / 288.15 * f
+    lapse = 1.0 - 0.49 * math.sqrt(max(mach, 0.0))
+    if theta0 > tr:
+        lapse -= 3.0 * (theta0 - tr) / (1.5 + mach)
+    return max(delta0 * lapse, 0.0)
+
+
+def turbofan_lapse(mach, h_m, tr=1.2, wet=False, bypass=0.0):
     """Installed thrust over sea-level-static thrust (dry, or wet with the
     afterburner) of a low-bypass afterburning turbofan: the density lapse
     - sigma^0.7 with the afterburner lit, sigma^1 without - times a ram gain
@@ -207,7 +224,14 @@ def turbofan_lapse(mach, h_m, tr=1.2, wet=False):
     Above the tropopause the air's temperature holds, so at a given Mach
     number the engine runs at the same corrected point and its thrust goes
     as the pressure - as the density there (Mattingly: thrust ~ delta0 at a
-    fixed theta0); the afterburner's sigma^0.7 runs only up to 11 km."""
+    fixed theta0); the afterburner's sigma^0.7 runs only up to 11 km.
+
+    A dry engine of bypass ratio above 1 moves towards the high-bypass
+    lapse (high_bypass_lapse), all of it from a bypass ratio of 3: a
+    TF33's (1.4) a fifth of the way, a CFM56's or a TF34's all of it."""
+    w = 0.0 if wet else float(np.clip((bypass - 1.0) / 2.0, 0.0, 1.0))
+    if w >= 1.0:
+        return high_bypass_lapse(mach, h_m, tr)
     t, p = _isa(h_m)
     sigma = (p / 101325.0) / (t / 288.15)
     n = 0.7 if wet else 1.0
@@ -215,7 +239,8 @@ def turbofan_lapse(mach, h_m, tr=1.2, wet=False):
     f = 1.0 + 0.2 * mach * mach
     theta0 = t / 288.15 * f
     over = max(theta0 - tr, 0.0) / theta0
-    return density * f * max(1.0 - (2.5 if wet else 3.0) * over, 0.0)
+    low = density * f * max(1.0 - (2.5 if wet else 3.0) * over, 0.0)
+    return low if w <= 0.0 else (1.0 - w) * low + w * high_bypass_lapse(mach, h_m, tr)
 
 
 def turbofan_tables(engine):
@@ -224,7 +249,8 @@ def turbofan_tables(engine):
     lapse model; idle a few percent of military thrust, falling with the ram
     drag of the airflow it swallows."""
     tr = engine.throttle_ratio
-    mil0 = turbofan_lapse(0.0, 0.0, tr)
+    bpr = engine.bypass_ratio
+    mil0 = turbofan_lapse(0.0, 0.0, tr, bypass=bpr)
     wet0 = turbofan_lapse(0.0, 0.0, tr, wet=True)
     out = {"IdleThrust": [], "MilThrust": [], "AugThrust": []}
     for m in _MACH:
@@ -234,7 +260,7 @@ def turbofan_tables(engine):
             _, p = _isa(h)
             delta = p / 101325.0
             idle.append(max(delta * (0.05 - 0.08 * m), -0.12))
-            mil.append(max(turbofan_lapse(m, h, tr) / mil0, 0.0))
+            mil.append(max(turbofan_lapse(m, h, tr, bypass=bpr) / mil0, 0.0))
             aug.append(max(turbofan_lapse(m, h, tr, wet=True) / wet0, 0.0))
         out["IdleThrust"].append(idle)
         out["MilThrust"].append(mil)
