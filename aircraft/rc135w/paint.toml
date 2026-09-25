@@ -1,0 +1,17 @@
+# The RC-135W's white top over light grey sides and belly, the black hog
+# nose radome, its cockpit windows painted (photographs)
+[paint]
+scheme = "two-tone"
+colours = ["#e6e9ea", "#b4babd"]
+underside = "#b4babd"
+boundary = 1.95
+radome = "#1d2023"
+radome_x = 1.35
+windows = "#1b2127"
+windows_x = [2.45, 4.40]
+windows_z = [1.98, 2.36]
+windscreen_x = [2.20, 2.75]
+windscreen_y = 0.95
+panel_lines = 0.06
+wear = 0.04
+gloss = 0.35

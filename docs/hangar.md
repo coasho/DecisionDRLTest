@@ -644,6 +644,7 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 |---|---|---|---|---|
 | B-52H | `b52h` | 0.91 at 20,700 ft (0.906) | 9,900 | 53,600 (50,000) |
 | KC-135R | `kc135r` | 0.88 at 30,000 ft (0.86) | 7,100 | 40,900 (50,000 certified) |
+| RC-135W | `rc135w` | 0.88 at 30,000 ft (0.86) | 6,400 | 38,700 (50,000 certified) |
 
 - The B-52H flies at 140 t, 40 % fuel, about its combat weight. Its wing
   droops to the tips as it does on the ground. Spoilers roll the real one;
@@ -660,6 +661,10 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   takes the dutch roll's damping from 0.10 to 0.35. Like the B-52H, it
   needs the most wave drag calibration allows for its top speed, which is
   also its limit Mach number.
+- The RC-135W is the KC-135R's airframe with its signals-intelligence fit:
+  the drooping hog nose radome, the cheek fairings along the forward
+  fuselage, no boom. It flies at 111 t, 24 t of it mission systems, half
+  its fuel.
 
 ## Limits
 

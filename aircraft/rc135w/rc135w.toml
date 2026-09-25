@@ -1,0 +1,429 @@
+# Boeing RC-135W Rivet Joint, built by hangar from public data: the C-135
+# airframe the KC-135R shares (aircraft/kc135r: the same wing, tails,
+# fuselage, CFM F108 nacelles, pylons and gear, in the same frame) with its
+# signals-intelligence fit - the drooping "hog nose" radome, the cheek
+# fairings along the forward fuselage - and no refuelling boom.
+#
+# Frame: the KC-135R's (metres, x aft from its radome's tip, y right, z up
+# from the wing root's chord plane); the RC-135W's hog nose reaches 0.6 m
+# further forward, to x = -0.6.
+#
+# Sources:
+# - USAF RC-135V/W fact sheet: maximum take-off weight 297,000 lb, fuel
+#   131,000 lb, F108-CF-201 engines, ceiling 50,000 ft.
+# - Wikipedia's RC-135V/W specifications: length 135 ft 1 in, empty weight
+#   about 78.5 t, 504 kt at 30,000 ft (as the KC-135R's).
+# - The shape: photographs (Wikimedia Commons: RC-135W 62-4130 taking off,
+#   USAF). Against the nose wheel and the cockpit windows the hog nose is
+#   0.3-1.2 m longer than the KC-135R's nose; the published length, the
+#   C-135's own from the nose to the stabilizer's tips, leaves it none. Here
+#   0.6 m (estimate). The cheeks run from behind the crew door to the wing
+#   root, 1.8 m deep, standing out 0.2-0.5 m.
+
+[aircraft]
+name = "rc135w"
+description = "Boeing RC-135W Rivet Joint (hangar build)"
+category = "transport"
+
+[analysis]
+speed = 150.0                 # m/s: the Reynolds numbers (climb and cruise)
+max_mach = 1.2                # the tables' Mach range: through the transonic drag rise
+induced_drag = "trefftz"      # a swept transport wing's induced drag from its loading (docs/hangar.md)
+
+# The wing: 226.0 m2 (2,433 ft2), 39.88 m span, 35.3 deg quarter-chord sweep,
+# taper 0.325 (the reference trapezoid above). Dihedral 7 deg, the 367-80's
+# and every C-135's and 707's (This Day in Aviation; the drawings' ground
+# views show 4.5-5.5 deg, the tanks full and the wing drooping). Washout 3
+# deg, root +2 deg (estimate). Sections: Boeing's BAC
+# 310-313 are not published; NACA 64A sections of the thickness such
+# 1950s transport wings had stand in (12 % root, 9 % tip; estimate). Its
+# round-nosed sections stall as sections do: no fighter's vortex regime,
+# which hangar gives any wing swept 35 deg at the leading edge.
+[[surface]]
+name = "wing"
+kind = "wing"
+vortex = false
+sections = [
+  { le = [10.220, 0.000, 0.000], chord = 8.554, twist = 2.00, airfoil = "naca64a212" },
+  { le = [16.683, 8.280, 1.017], chord = 6.156, twist = 0.75, airfoil = "naca64a210" },
+  { le = [25.783, 19.940, 2.448], chord = 2.780, twist = -1.00, airfoil = "naca64a209" },
+]
+# Measured off the plan view: inboard flaps from the fuselage to the inboard
+# engine, the inboard (high-speed) ailerons behind it, the outboard flaps to
+# the outboard engine and the outboard ailerons to 18 m. Travel: flaps 50 deg,
+# ailerons 20 deg (estimate). The spoilers that help the ailerons are not
+# modelled.
+controls = [
+  { name = "inboard flap", channel = "flap", kind = "fowler", span = [0.092, 0.355], chord_fraction = 0.25, limits = [0, 50] },
+  { name = "inboard aileron", channel = "aileron", span = [0.365, 0.445], chord_fraction = 0.22, limits = [-20, 20] },
+  { name = "outboard flap", channel = "flap", kind = "fowler", span = [0.455, 0.655], chord_fraction = 0.25, limits = [0, 50] },
+  { name = "outboard aileron", channel = "aileron", span = [0.665, 0.900], chord_fraction = 0.20, limits = [-20, 20] },
+]
+
+# The horizontal stabilizer: 47.3 m2 to the centre line, 12.09 m (39 ft 8 in)
+# span, 39.4 deg leading edge, 7 deg dihedral (the 367-80's; the side and
+# front views give 6-8 deg). The real one trims by its incidence; here it is
+# fixed at -4 deg, mid-way through its trim range (estimate), and the elevator
+# trims: 30 deg up, 20 deg down (estimate).
+[[surface]]
+name = "htail"
+kind = "htail"
+vortex = false                # a 10 % section, round-nosed: it stalls
+airfoil = "naca64a010"
+sections = [
+  { le = [33.780, 0.000, 2.050], chord = 5.370, twist = -4.0 },
+  { le = [38.737, 6.045, 2.792], chord = 2.462, twist = -4.0 },
+]
+controls = [
+  { name = "elevator", channel = "elevator", span = [0.15, 0.95], chord_fraction = 0.30, limits = [-30, 20] },
+]
+
+# The tall fin every KC-135 carries now (41 ft 8 in over the ground, 40 in
+# taller than the KC-135A's): 35 deg leading edge, 10 deg trailing edge,
+# about 30 m2; the rudder to 79 % of its height, its chord growing from 30 %
+# to 55 % (the USAF drawing). Its root reaches into the fuselage.
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a010"
+sections = [
+  { le = [32.419, 0.000, 3.100], chord = 6.185 },
+  { le = [37.622, 0.000, 10.490], chord = 2.387 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.03, 0.79], chord_fraction = [0.30, 0.55], limits = [-25, 25] },
+]
+
+# The fuselage: the C-135's own double lobe, 12 ft wide and 13 ft 10 in deep
+# (a round upper lobe over a deeper, narrower lower one), the cockpit's
+# crown, and the tail cone swept up under the fin (the KC-135R's); the hog
+# nose ahead of the cockpit, its tip drooping to a third of the fuselage's
+# height (the photographs).
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = -0.60, w = 0.000, top = 0.330, bottom = 0.330 },
+  { x = -0.47, w = 0.580, top = 0.640, bottom = 0.020, n = 2.0 },
+  { x = -0.20, w = 0.960, top = 0.920, bottom = -0.140, n = 2.0 },
+  { x = 0.30, w = 1.380, top = 1.280, bottom = -0.250, n = 2.0 },
+  { x = 0.90, w = 1.700, top = 1.640, bottom = -0.280, n = 2.0 },
+  { x = 1.45, w = 1.890, top = 1.950, bottom = -0.280, n = 2.0 },
+  { x = 2.00, w = 1.960, top = 2.200, bottom = -0.250, chine = 1.140, n_top = 2.0, n_bottom = 2.2 },
+  { x = 2.50, w = 2.280, top = 2.520, bottom = -0.420, chine = 1.250, n_top = 2.0, n_bottom = 2.2 },
+  { x = 3.00, w = 2.490, top = 2.710, bottom = -0.550, chine = 1.300, n_top = 2.0, n_bottom = 2.3 },
+  { x = 4.00, w = 2.930, top = 3.030, bottom = -0.720, chine = 1.400, n_top = 2.0, n_bottom = 2.3 },
+  { x = 5.00, w = 3.300, top = 3.220, bottom = -0.820, chine = 1.460, n_top = 2.0, n_bottom = 2.4 },
+  { x = 6.00, w = 3.530, top = 3.330, bottom = -0.890, chine = 1.500, n_top = 2.0, n_bottom = 2.4 },
+  { x = 7.00, w = 3.658, top = 3.330, bottom = -0.890, chine = 1.500, n_top = 2.0, n_bottom = 2.4 },
+  { x = 24.00, w = 3.658, top = 3.330, bottom = -0.890, chine = 1.500, n_top = 2.0, n_bottom = 2.4 },
+  { x = 26.00, w = 3.640, top = 3.330, bottom = -0.700, chine = 1.520, n_top = 2.0, n_bottom = 2.4 },
+  { x = 28.00, w = 3.600, top = 3.330, bottom = -0.250, chine = 1.560, n_top = 2.0, n_bottom = 2.3 },
+  { x = 30.00, w = 3.470, top = 3.330, bottom = 0.190, chine = 1.620, n_top = 2.0, n_bottom = 2.2 },
+  { x = 32.00, w = 3.030, top = 3.300, bottom = 0.530, chine = 1.750, n_top = 2.0, n_bottom = 2.1 },
+  { x = 34.00, w = 2.280, top = 3.250, bottom = 0.830, chine = 1.950, n = 2.0 },
+  { x = 36.00, w = 1.600, top = 3.180, bottom = 1.160, chine = 2.200, n = 2.0 },
+  { x = 38.00, w = 0.900, top = 3.100, bottom = 1.650, chine = 2.450, n = 2.0 },
+  { x = 39.30, w = 0.450, top = 3.000, bottom = 1.930, chine = 2.480, n = 2.0 },
+  { x = 39.45, w = 0.100, top = 2.550, bottom = 2.400, n = 2.0 },
+]
+
+# The fin's dorsal fillet, running forward along the spine
+[[body]]
+name = "dorsal fillet"
+kind = "pod"
+aero = false                  # the fin's area counts it
+stations = [
+  { x = 30.900, w = 0.000, top = 3.340, bottom = 3.200 },
+  { x = 31.800, w = 0.300, top = 3.520, bottom = 3.050, n = 2.2 },
+  { x = 32.700, w = 0.380, top = 3.900, bottom = 3.050, n = 2.4 },
+  { x = 33.300, w = 0.360, top = 4.350, bottom = 3.050, n = 2.4 },
+]
+
+# The fin cap's HF antenna probe, pointing forward from the tip: 18 cm
+# across (a little thick, for the mesher), its aft end in the fin
+[[body]]
+name = "HF probe"
+kind = "pod"
+aero = false
+stations = [
+  { x = 35.600, w = 0.000, top = 10.350, bottom = 10.350 },
+  { x = 35.700, w = 0.120, top = 10.410, bottom = 10.290, n = 2.0 },
+  { x = 35.900, w = 0.180, top = 10.440, bottom = 10.260, n = 2.0 },
+  { x = 38.200, w = 0.180, top = 10.440, bottom = 10.260, n = 2.0 },
+]
+
+# The cheek fairings: flat-sided, 1.8 m deep, from behind the crew door to
+# the wing root, standing out of the lower lobe (photographs; estimate).
+# Their drag is in the calibration's.
+[[body]]
+name = "cheek"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 4.600, y = 1.450, w = 0.100, top = 1.300, bottom = 0.300, n = 2.0 },
+  { x = 5.300, y = 1.620, w = 0.800, top = 1.650, bottom = -0.150, n = 4.0 },
+  { x = 11.400, y = 1.620, w = 0.800, top = 1.650, bottom = -0.150, n = 4.0 },
+  { x = 12.200, y = 1.450, w = 0.100, top = 1.300, bottom = 0.300, n = 2.0 },
+]
+
+# The F108 nacelles: short fan cowls 2.0 m across (the 1.73 m fan inside),
+# each hung ahead of the wing's leading edge with its fan exit just ahead of
+# it, the core cowl under the wing (photographs, scaled by the fuselage's
+# 12 ft; estimate). The spanwise stations are the T.O. drawing's: 27 ft 2 in
+# and 46 ft 1 in.
+[[intake]]
+name = "inboard nacelle"
+mirror = true
+lip = 0.10
+duct = 0.9
+duct_taper = 0.9
+stations = [
+  { x = 13.700, y = 8.280, w = 1.760, top = 0.530, bottom = -1.230, n = 2.0 },
+  { x = 14.050, y = 8.280, w = 1.950, top = 0.625, bottom = -1.325, n = 2.0 },
+  { x = 14.600, y = 8.280, w = 2.000, top = 0.650, bottom = -1.350, n = 2.0 },
+  { x = 15.500, y = 8.280, w = 1.970, top = 0.635, bottom = -1.335, n = 2.0 },
+  { x = 16.200, y = 8.280, w = 1.860, top = 0.580, bottom = -1.280, n = 2.0 },
+  { x = 16.500, y = 8.280, w = 1.720, top = 0.510, bottom = -1.210, n = 2.0 },
+  { x = 16.700, y = 8.280, w = 1.300, top = 0.300, bottom = -1.000, n = 2.0 },
+  { x = 17.400, y = 8.280, w = 1.020, top = 0.160, bottom = -0.860, n = 2.0 },
+]
+
+[[intake]]
+name = "outboard nacelle"
+mirror = true
+lip = 0.10
+duct = 0.9
+duct_taper = 0.9
+stations = [
+  { x = 18.200, y = 14.050, w = 1.760, top = 1.080, bottom = -0.680, n = 2.0 },
+  { x = 18.550, y = 14.050, w = 1.950, top = 1.175, bottom = -0.775, n = 2.0 },
+  { x = 19.100, y = 14.050, w = 2.000, top = 1.200, bottom = -0.800, n = 2.0 },
+  { x = 20.000, y = 14.050, w = 1.970, top = 1.185, bottom = -0.785, n = 2.0 },
+  { x = 20.700, y = 14.050, w = 1.860, top = 1.130, bottom = -0.730, n = 2.0 },
+  { x = 21.000, y = 14.050, w = 1.720, top = 1.060, bottom = -0.660, n = 2.0 },
+  { x = 21.200, y = 14.050, w = 1.300, top = 0.850, bottom = -0.450, n = 2.0 },
+  { x = 21.900, y = 14.050, w = 1.020, top = 0.710, bottom = -0.310, n = 2.0 },
+]
+
+# The pylons: from the fan cowl's crown up into the wing ahead of its front
+# spar, then aft along its underside over the core; their ends inside the
+# nacelle and the wing, not edges (a pylon's knife edge breaks the mesh)
+[[body]]
+name = "inboard pylon"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 14.700, y = 8.280, w = 0.100, top = 0.550, bottom = 0.450, n = 2.0 },
+  { x = 14.900, y = 8.280, w = 0.340, top = 0.880, bottom = 0.450, n = 3.0 },
+  { x = 16.400, y = 8.280, w = 0.360, top = 1.000, bottom = 0.400, n = 3.0 },
+  { x = 17.600, y = 8.280, w = 0.320, top = 1.020, bottom = 0.100, n = 3.0 },
+  { x = 18.600, y = 8.280, w = 0.100, top = 1.050, bottom = 0.950, n = 2.0 },
+]
+
+[[body]]
+name = "outboard pylon"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 19.200, y = 14.050, w = 0.100, top = 1.100, bottom = 1.000, n = 2.0 },
+  { x = 19.400, y = 14.050, w = 0.320, top = 1.450, bottom = 1.000, n = 3.0 },
+  { x = 20.900, y = 14.050, w = 0.340, top = 1.700, bottom = 0.900, n = 3.0 },
+  { x = 22.100, y = 14.050, w = 0.300, top = 1.750, bottom = 0.650, n = 3.0 },
+  { x = 23.000, y = 14.050, w = 0.100, top = 1.850, bottom = 1.750, n = 2.0 },
+]
+
+# The wing-to-body fairing under the centre section, round the main gear's
+# wells: the bogies lie flat in it, their wheels stacked 1.1 m deep
+# (widths and depths an estimate from photographs)
+[[body]]
+name = "gear fairing"
+kind = "pod"
+aero = false                  # part of the fuselage's belly: the tables leave it out
+stations = [
+  { x = 13.500, w = 3.000, top = 0.300, bottom = -0.900, n_top = 2.0, n_bottom = 4.0 },
+  { x = 15.500, w = 4.300, top = 0.550, bottom = -0.960, n_top = 2.0, n_bottom = 4.0 },
+  { x = 18.000, w = 5.400, top = 0.850, bottom = -1.000, n_top = 2.0, n_bottom = 4.0 },
+  { x = 21.000, w = 5.400, top = 1.000, bottom = -1.000, n_top = 2.0, n_bottom = 4.0 },
+  { x = 22.200, w = 4.300, top = 0.800, bottom = -0.970, n_top = 2.0, n_bottom = 4.0 },
+  { x = 23.500, w = 3.000, top = 0.400, bottom = -0.900, n_top = 2.0, n_bottom = 4.0 },
+]
+
+# Four F108-CF-100 (CFM56-2B1): 96.2 kN (21,634 lbf), bypass ratio 6.0, no
+# afterburner and no thrust reversers
+[[engine]]
+name = "F108 inboard"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 96.2
+bypass_ratio = 6.0
+tsfc_dry = 0.37               # lb/(lbf h), static (0.65 in cruise)
+throttle_ratio = 1.05         # Mattingly's TR for a high-bypass engine (estimate)
+design_mach = 0.85
+position = [15.700, 8.280, -0.350]
+mass = 2137                   # installed: the 2,120 kg engine and its accessories (Raymer 15.3.2's W_ec)
+inlet_x = 13.7
+[engine.nozzle]
+position = [17.400, 8.280, -0.350]  # the core nozzle at the nacelle's end
+diameter = 0.95
+length = 0.45
+petal_open_deg = 0.0          # a fixed nozzle
+
+[[engine]]
+name = "F108 outboard"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 96.2
+bypass_ratio = 6.0
+tsfc_dry = 0.37
+throttle_ratio = 1.05
+design_mach = 0.85
+position = [20.200, 14.050, 0.200]
+mass = 2137
+inlet_x = 18.2
+[engine.nozzle]
+position = [21.900, 14.050, 0.200]
+diameter = 0.95
+length = 0.45
+petal_open_deg = 0.0
+
+# The gear where the T.O. drawing puts it: the nose wheels 5.48 m behind the
+# radome's tip, the main bogies' centres 45 ft 8 in behind them, 22 ft 1 in
+# apart, each bogie's two axles 1.51 m apart. The nose gear folds forward,
+# the main legs inward into the belly, as the C-135's do. The contacts stand
+# a static deflection below the parked ground line.
+[[gear]]
+name = "Nose Gear"
+position = [5.480, 0.0, -2.230]
+steerable = true
+max_steer = 60
+wheel_diameter = 0.965
+wheel_width = 0.280
+wheels = 2
+retractable = true
+retract = "forward"
+static_deflection = 0.12
+attach = [5.480, 0.0, -0.450]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [19.380, 3.366, -2.260]
+wheel_diameter = 1.245
+wheel_width = 0.430
+wheels = 2
+axles = 2                     # the four-wheel bogie
+axle_spacing = 1.51
+retractable = true
+retract = "inward"
+doors = false                 # open wells: hangar's doors for an inward swing split fore and aft,
+                              # where a four-wheel bogie's ends pass (the real ones close)
+wheel_turn = "flat"
+static_deflection = 0.15
+attach = [19.380, 2.950, 0.200]    # the trunnion inboard of the wheels: the leg splays out 13 deg
+
+[flight_control]
+type = "direct"               # hydraulically boosted controls
+yaw_damper = true             # the C-135's own yaw damper
+
+[mass]
+empty = 78500                 # about 173,000 lb (Wikipedia): the mission systems
+mtow = 134717                 # 297,000 lb (USAF fact sheet)
+# The empty CG: the KC-135R's (36 % of the MAC) without the boom at the
+# tail, with some 24 t of mission systems through the cabin and in the nose:
+# 28 % of the MAC, 0.9 m above the wing root's chord plane (estimate).
+empty_cg = [18.400, 0.0, 0.900]
+# Structure: the KC-135R's (Raymer's cargo/transport equations 15.25-15.31
+# at 322,500 lb and a 2.5 g limit, rounded); the systems (the mission
+# systems, their power and cooling, avionics ...) make up the rest of the
+# empty mass
+[mass.component]
+wing = 12750
+htail = 1300
+fin = 1080
+fuselage = 9900
+"Nose Gear" = 500
+"Main Gear" = 4180
+"inboard nacelle" = 660       # both sides
+"outboard nacelle" = 660
+"inboard pylon" = 310
+"outboard pylon" = 310
+cheek = 900                   # both, and their antennas (estimate)
+"gear fairing" = 300
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [2.900, -0.500, 1.700]
+[[mass.payload]]
+name = "co-pilot"
+mass = 100
+position = [2.900, 0.500, 1.700]
+[[mass.payload]]
+name = "navigator"
+mass = 100
+position = [3.600, 0.0, 1.700]
+[[mass.payload]]
+name = "mission crew"          # some two dozen at their consoles
+mass = 2400
+position = [15.000, 0.0, 1.500]
+# 131,000 lb of fuel (59.4 t, USAF fact sheet): the wing tanks (inboard,
+# outboard and reserve on each side, about 50,000 lb), the centre body tank
+# over the wing's centre section (49,000 lb) and the aft body tank (the rest;
+# the split an estimate - the forward body and upper deck tanks of the
+# tanker are not fitted). Flown half full: 111 t on a mission, not its
+# 135 t maximum.
+[[mass.tank]]
+name = "left inboard wing"
+position = [16.960, -5.000, 0.550]
+capacity = 5900
+fill = 0.5
+[[mass.tank]]
+name = "right inboard wing"
+position = [16.960, 5.000, 0.550]
+capacity = 5900
+fill = 0.5
+[[mass.tank]]
+name = "left outboard wing"
+position = [20.940, -11.000, 1.300]
+capacity = 4540
+fill = 0.5
+[[mass.tank]]
+name = "right outboard wing"
+position = [20.940, 11.000, 1.300]
+capacity = 4540
+fill = 0.5
+[[mass.tank]]
+name = "left reserve"
+position = [24.250, -16.000, 1.900]
+capacity = 900
+fill = 0.5
+[[mass.tank]]
+name = "right reserve"
+position = [24.250, 16.000, 1.900]
+capacity = 900
+fill = 0.5
+[[mass.tank]]
+name = "centre body"
+position = [14.500, 0.0, -0.250]
+capacity = 22226
+fill = 0.5
+[[mass.tank]]
+name = "aft body"
+position = [23.700, 0.0, -0.300]
+capacity = 14500
+fill = 0.5
+
+[dimensions]                  # published, overall, gear down (USAF fact sheet):
+length = 41.17                # m (135 ft 1 in: the C-135's, nose to stabilizer tips)
+span = 39.88                  # 130 ft 10 in
+height = 12.70                # 41 ft 8 in
+
+[targets]
+# Published top speed: 504 kt at 30,000 ft (Wikipedia's RC-135V/W figures,
+# as the KC-135R's: Mach 0.86)
+max_mach = 0.86
+max_mach_altitude_ft = 30000
+operational_ceiling_ft = 50000  # USAF fact sheet: a clearance
