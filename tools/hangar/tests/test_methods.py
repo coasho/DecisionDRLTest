@@ -1665,6 +1665,44 @@ class Model3D(unittest.TestCase):
         d, _ = meshkit.evaluate({"root": cowl}, np.array([[13.0, 0.0, -0.3], [8.0, 0.5, -0.25]]))
         self.assertTrue(np.all(d < 0.0), d)
 
+    def test_a_knife_edge_grows_no_material(self):
+        # a body that ends in a knife edge (w = 0 with height: a pylon's
+        # trailing edge, a tail cone's end) is as far from a point as the edge
+        # is, not the distance across the edge alone, so a surface filleted on
+        # near it grows nothing where nothing is: the KC-135R's knife-edged
+        # pylons once pushed spikes through its wing's upper skin
+        from hangar.geometry.body import Body
+        from hangar.shape import airframe as sh
+        from hangar.shape import meshkit
+        if meshkit.library() is None:
+            self.skipTest("hangar_meshkit is not built")
+        # a pylon's last 2.5 m, closing to an edge 1.3 m tall whose top 0.3 m
+        # stands inside a wing 0.6 m thick, filleted on as a thick wing's root is
+        pylon = Body({"name": "pylon", "stations": [{"x": 4.0, "w": 0.34, "top": 1.3, "bottom": 0.0, "n": 3.0},
+                                                    {"x": 6.5, "w": 0.0, "top": 1.3, "bottom": 0.0}]})
+        wing = {"prim": "box", "centre": [6.0, 0.0, 1.3], "half": [1.5, 1.5, 0.3], "material": 1}
+        # above the edge, off its top corner, above it further in, beyond it
+        with meshkit.Probe({"root": sh.loft(pylon)}) as probe:
+            d, _ = probe([[6.5, 0.0, 1.61], [6.5, 0.1, 2.0], [6.4, 0.05, 2.5], [7.0, 0.0, 1.8]])
+        np.testing.assert_allclose(d, [0.31, 0.5 ** 0.5, 1.2, 0.5 ** 0.5], rtol=0.01)
+        # over the wing's upper skin (z 1.6): the wing alone, but for the
+        # 2 mm its fillet with the pylon's top, 0.3 m below, adds
+        x, y, z = np.meshgrid(np.linspace(5.0, 7.4, 49), np.linspace(-0.6, 0.6, 25), np.linspace(1.61, 2.1, 50),
+                              indexing="ij")
+        above = np.column_stack([x.ravel(), y.ravel(), z.ravel()])
+        with meshkit.Probe({"root": sh.union([sh.loft(pylon), wing], 0.35)}) as probe:
+            d, _ = probe(above)
+        self.assertGreater(d.min(), 0.0)
+        self.assertLess(np.max(above[:, 2] - 1.6 - d), 0.005)
+        # a knife edge leaning 45 deg (a caret intake's wall): the box that
+        # holds it leans with it, so a point off its top end, one square to
+        # it and one beyond the body's end are as far as they are
+        wall = Body({"name": "wall", "stations": [{"x": at, "w": 0.0, "top": 0.5, "bottom": -0.5, "lean": 45}
+                                                  for at in (0.0, 2.0)]})
+        with meshkit.Probe({"root": sh.loft(wall)}) as probe:
+            d, _ = probe([[1.0, 0.8, 0.9], [1.0, -0.3, 0.7], [2.5, 0.8, 0.9]])
+        np.testing.assert_allclose(d, [0.5, 0.5 ** 0.5, 0.5 ** 0.5], rtol=0.01)
+
     def test_mesh_is_the_same_every_time(self):
         # a scene gives the same mesh, byte for byte, on one thread or on all
         # of them, so a design's .glb changes only when the design does: the

@@ -468,6 +468,11 @@ The model stage writes `<name>.glb` from the same design:
   fuselage, and meshed by hangar's native mesher (`tools/hangar/native`).
   Intakes open onto dark ducts, nozzles onto their turbine faces; canopies are
   glass in their frames.
+- **Thin parts.** A body may end in a knife edge, with no width but some
+  height (a pylon's leading or trailing edge, a tail cone's end), or in a
+  flat one. The mesher measures a section by the box that holds it as well
+  as by its own shape, so a fillet or a canopy frame near such an edge grows
+  nothing away from it.
 - **Control surfaces.** Each one, and each leading-edge flap, is cut from its
   surface with a 12 mm gap and turns on its own hinge.
 - **Landing gear.** Each leg swings about its trunnion and twists about its

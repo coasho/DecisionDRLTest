@@ -91,21 +91,34 @@ public:
         if (mirror_) p.y = std::fabs(p.y);
         const double x0 = x_.front(), x1 = x_.back();
         const double xc = clamp(p.x, x0, x1);
-        double d = dist(at(xc), p.y, p.z);
+        const Dist c = dist(at(xc), p.y, p.z);
+        double d = c.first, e = c.boxed;
         // the section's distance ignores the body's slope along x: divide by
-        // the gradient it leaves out
+        // the gradient it leaves out - each of the section's two distances by
+        // its own, and keep the larger outside. The boxed one follows the
+        // outline as it grows along x, so it can slope more steeply and, beside
+        // a body that grows fast (the KC-46A's belly fairing), read shorter
+        // than the first-order one
         const double h = 0.02;
         const double xa = std::max(x0, xc - h), xb = std::min(x1, xc + h);
         if (xb > xa) {
-            const double s = (dist(at(xb), p.y, p.z) - dist(at(xa), p.y, p.z)) / (xb - xa);
+            const Dist a = dist(at(xa), p.y, p.z), b = dist(at(xb), p.y, p.z);
+            const double s = (b.first - a.first) / (xb - xa), t = (b.boxed - a.boxed) / (xb - xa);
             d /= std::sqrt(1.0 + s * s);
+            e /= std::sqrt(1.0 + t * t);
         }
-        return {extrude(d, std::max(x0 - p.x, p.x - x1)), mat_};
+        return {extrude(d > 0.0 ? std::max(d, e) : d, std::max(x0 - p.x, p.x - x1)), mat_};
     }
 
 private:
     struct Sec {
         double yc, zc, hw, hu, hl, nu, nl, k;
+    };
+
+    /// A section's distance two ways, the same inside it: first-order, and
+    /// that raised to the distance to the box that holds the section.
+    struct Dist {
+        double first, boxed;
     };
 
     Sec at(double x) const {
@@ -118,27 +131,48 @@ private:
                 lerp(nl_[i], nl_[i + 1], t), lerp(k_[i], k_[i + 1], t)};
     }
 
-    /// First-order distance to a superellipse half: (f - 1) / |grad f| with
-    /// f = (|u|^n + |v|^n)^(1/n) - exact for circles, close near any surface.
-    /// A leaning section is the upright one sheered along y: u measures from
-    /// the centre moved k (z - zc), and the gradient carries the shear.
-    static double dist(const Sec& s, double y, double z) {
+    /// Distance to a section: the first-order distance to a superellipse
+    /// half, (f - 1) / |grad f| with f = (|u|^n + |v|^n)^(1/n) - exact for
+    /// circles, close near any surface - and, boxed, outside it never less
+    /// than the distance to the box that holds it. Away from a thin section
+    /// the first-order value falls short by the section's aspect ratio
+    /// (beside a knife edge it is the distance across the edge, however far
+    /// above it the point is), and a fillet or an offset near it would grow
+    /// material. A leaning section is the upright one sheered along y: u
+    /// measures from the centre moved k (z - zc), and the gradient carries
+    /// the shear.
+    static Dist dist(const Sec& s, double y, double z) {
         const double rz = z - s.zc;
         const double ry = y - s.yc - s.k * rz;
         const double dy = std::fabs(ry);
         const bool up = rz >= 0.0;
         const double dz = std::fabs(rz);
-        const double a = std::max(s.hw, 1e-4), b = std::max(up ? s.hu : s.hl, 1e-4);
+        const double a = std::max(s.hw, 1e-4), bu = std::max(s.hu, 1e-4), bl = std::max(s.hl, 1e-4);
+        const double b = up ? bu : bl;
         const double n = std::max(up ? s.nu : s.nl, 1.0);
         const double u = dy / a, v = dz / b;
-        if (u < 1e-12 && v < 1e-12) return -std::min(a, b);
+        if (u < 1e-12 && v < 1e-12) return {-std::min(a, b), -std::min(a, b)};
         const double f = std::pow(std::pow(u, n) + std::pow(v, n), 1.0 / n);
         const double fp = std::pow(f, 1.0 - n);
         const double fu = u > 0.0 ? fp * std::pow(u, n - 1.0) / a : 0.0;  // df/d|ry|
         const double fv = v > 0.0 ? fp * std::pow(v, n - 1.0) / b : 0.0;  // df/d|rz|
         const double gy = ry >= 0.0 ? fu : -fu;
         const double gz = (up ? fv : -fv) - s.k * gy;
-        return (f - 1.0) / std::max(std::hypot(gy, gz), 1e-12);
+        const double d = (f - 1.0) / std::max(std::hypot(gy, gz), 1e-12);
+        return {d, d > 0.0 ? std::max(d, bound(ry, rz, a, bu, bl, s.k)) : d};
+    }
+
+    /// Distance to the box |ry| <= a, -bl <= rz <= bu that holds a section (0
+    /// inside it): a lower bound of the distance to the section. Its sides
+    /// lean k, as the section's do, so it is a parallelogram, measured to its
+    /// four sides in the section's plane.
+    static double bound(double ry, double rz, double a, double bu, double bl, double k) {
+        if (std::fabs(ry) <= a && rz <= bu && rz >= -bl) return 0.0;
+        const double y = ry + k * rz; // from the centre, across
+        return std::sqrt(std::min({segment2(y, rz, k * bu - a, bu, k * bu + a, bu),
+                                   segment2(y, rz, -k * bl - a, -bl, -k * bl + a, -bl),
+                                   segment2(y, rz, a - k * bl, -bl, a + k * bu, bu),
+                                   segment2(y, rz, -a - k * bl, -bl, -a + k * bu, bu)}));
     }
 
     std::vector<double> x_, yc_, zc_, hw_, hu_, hl_, nu_, nl_, k_;

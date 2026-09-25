@@ -258,11 +258,12 @@ move on while a check fails or a picture looks wrong.
   degrees); a raked leg needs `retract_deg` to stow its strut level (the
   fit tries 10 deg steps). Doors on a tapering pod wrap its sides above
   their hinges and swing in against the leg: give the pod an open well.
-- **Thin parts.** End a pod, pylon or tail cone with a small width (0.1 m),
-  not a knife edge (w = 0 with height): the mesher's distance to a knife edge
-  is far too short, so its fillet with a nearby surface grows phantom
-  material and breaks the mesh. Plates thinner than about 0.1 m (a boom's
-  ruddevators) are `[[strut]]`s, drawn only.
+- **Thin parts.** A pod, pylon or tail cone may end in a knife edge (w = 0
+  with height). Until 2026-09-25 the mesher measured a knife edge by the
+  distance across it alone, so a fillet nearby grew phantom material and
+  broke the mesh; some designs from before then end theirs 0.1 m wide.
+  Plates thinner than about 0.1 m (a boom's ruddevators) are `[[strut]]`s,
+  drawn only.
 - **Windows.** A transport has no canopy body: paint its cockpit windows
   (`windows`, `windows_x`, `windows_z`, `windscreen_x` in paint.toml).
 - **Targets.** `max_mach` at `max_mach_altitude_ft` below 1: calibrate fits
