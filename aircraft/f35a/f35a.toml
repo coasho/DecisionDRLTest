@@ -20,8 +20,9 @@ speed = 240.0
 
 # The wing: 42.7 m2 (460 ft2), span 10.70 m, 34 deg leading edge, -14 deg
 # trailing edge (root 6.48 m, tip 1.54 m to the centre line), no dihedral.
-# The CG sits 2 % of the MAC behind the neutral point hangar finds: near
-# neutral, as the F-35's relaxed stability is described.
+# The CG sits where the drawn main wheels leave a fifth of the weight on the
+# nose wheel (19.5 % at most), 8.8 % of the MAC behind the neutral point
+# hangar finds: relaxed stability, flown by wire.
 [[surface]]
 name = "wing"
 kind = "wing"
@@ -231,9 +232,10 @@ position = [14.100, 0.0, -0.100]
 diameter = 0.80               # m, the exit in the JSF views
 
 # The gear: Virginia Tech's 6.02 m wheelbase and 4.34 m track, the mains
-# 1.2 m behind the CG; standing on it the fins' tips are Lockheed Martin's
-# 4.38 m up. Both legs fold forward, the mains turning their wheels flat
-# into the fairings under the wing roots (assumed: not published).
+# 1.2 m behind the CG (1.06-1.19 m here, full to dry tanks); standing on it
+# the fins' tips are Lockheed Martin's 4.38 m up. Both legs fold forward,
+# the mains turning their wheels flat into the fairings under the wing
+# roots (assumed: not published).
 [[gear]]
 name = "Nose Gear"
 position = [4.080, 0.0, -2.160]
@@ -270,7 +272,7 @@ roll_rate_deg_s = 240.0
 
 [mass]
 empty = 13290                 # 29,300 lb (USAF)
-empty_cg = [8.625, 0.0, -0.300]
+empty_cg = [8.955, 0.0, -0.300]
 # no published inertia: radii of gyration of the class
 gyration = [0.260, 0.400, 0.520]
 [[mass.payload]]
@@ -280,22 +282,22 @@ position = [3.700, 0.0, 0.450]
 [[mass.payload]]
 name = "internal missiles"    # 4 AIM-120 in the bays
 mass = 608
-position = [8.625, 0.0, -0.800]
+position = [8.955, 0.0, -0.800]
 [[mass.payload]]
 name = "gun ammunition"       # GAU-22/A, 180 rounds
 mass = 90
-position = [7.125, -1.100, 0.200]
+position = [7.455, -1.100, 0.200]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 8,278 kg
-position = [7.475, 0.0, -0.200]
+position = [7.805, 0.0, -0.200]
 capacity = 2800
 [[mass.tank]]
 name = "fuselage 2"
-position = [9.475, 0.0, -0.200]
+position = [9.805, 0.0, -0.200]
 capacity = 2700
 [[mass.tank]]
 name = "fuselage 3"
-position = [11.025, 0.0, -0.250]
+position = [11.355, 0.0, -0.250]
 capacity = 1400
 [[mass.tank]]
 name = "left wing"

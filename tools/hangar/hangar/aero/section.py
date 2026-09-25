@@ -168,7 +168,7 @@ class SectionPolar:
         for _ in range(4):
             self._clmax_int += self.clmax - self.evaluate(hi)[0].max()
             self._clmin_int += self.clmin - self.evaluate(lo)[0].min()
-        self.vortex = 1.0 if vortex else 0.0   # the vortex regime replaces the stall
+        self.vortex = float(np.clip(float(vortex), 0.0, 1.0))   # how much the vortex regime replaces the stall
 
     def evaluate(self, alpha, delta=None, vortex=None):
         """cl, cd, cm at angles of attack alpha (rad, any range) and flap
@@ -233,7 +233,8 @@ def evaluate(p, alpha, delta=None, vortex=None, alpha_suction=None, x_ac=None):
     the camber and the flaps keeps its two-dimensional place.
 
     vortex = (gain, degradation), broadcasting against alpha, for sections
-    with the vortex regime: the vortex normal force is gain times the lost
+    with the vortex regime (p.vortex, 0 to 1, is how much of it a section
+    has; the rest stalls as a section alone): the vortex normal force is gain times the lost
     leading-edge suction (Polhamus: 1/cos of the leading-edge sweep, times
     the part realised, times what is left after vortex breakdown), and the
     circulation is scaled by the degradation once the edge has separated
@@ -340,11 +341,11 @@ def evaluate(p, alpha, delta=None, vortex=None, alpha_suction=None, x_ac=None):
     cl_c = w_r * cl_r + w_pr * cl_p
     cd_c = w_r * cd_r + w_pr * cd_p
     cm_c = w_r * cm_r + w_pr * cm_p
-    on = p.vortex > 0.0
-    cl2 = np.where(on, w_v * cl_v + rest * cl_c, cl)
-    cd2 = np.where(on, w_v * cd_v + rest * cd_c, cd)
-    cm2 = np.where(on, w_v * cm_v + rest * cm_c, cm)
-    circ2 = np.where(on, w_v * circ + rest * cl_c, cl)
+    f = np.clip(p.vortex, 0.0, 1.0)
+    cl2 = f * (w_v * cl_v + rest * cl_c) + (1.0 - f) * cl
+    cd2 = f * (w_v * cd_v + rest * cd_c) + (1.0 - f) * cd
+    cm2 = f * (w_v * cm_v + rest * cm_c) + (1.0 - f) * cm
+    circ2 = f * (w_v * circ + rest * cl_c) + (1.0 - f) * cl
     return cl2, cd2, cm2, circ2
 
 

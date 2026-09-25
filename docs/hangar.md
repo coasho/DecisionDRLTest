@@ -262,7 +262,11 @@ stage end to end through the platform (`ctest -R hangar`).
 For fighters:
 
 - **Vortex lift.** A thin swept section does not stall like a light
-  aircraft's. Past its attached-flow limit the leading edge keeps the suction
+  aircraft's. The sweep brings this in: none of it at 25° of leading-edge
+  sweep, all of it from 35° (a strake, and a wing behind one, always). A
+  line drawn at 35° made the F-35A's 34° stabilators stall like
+  two-dimensional sections, so that turned fully nose-down they lifted less
+  than at neutral. Past its attached-flow limit the leading edge keeps the suction
   it can hold (Carlson's attainable thrust, NASA TP-1500). What it loses turns
   into vortex lift where the edge is sharp (Polhamus' suction analogy, NASA
   TN D-3767), and past 45° of sweep where it is blunt too (the blunt-edged
@@ -525,7 +529,7 @@ estimates):
 | F-15C | `f15c` | 2.44 (2.5) | 63,200 (50,000) | 64,500 (65,000) | 30.2° (30°) |
 | F/A-18C | `fa18c` | 1.81 (1.8) | 50,800 (45,000) | 60,000 (50,000+) | 35.0° (35°) |
 | F-22A | `f22a` | 2.24 (2.25) | 62,000 | 61,500 (65,000) | 40.2° (40°) |
-| F-35A | `f35a` | 1.58 (1.6) | 44,800 | 57,100 (50,000+) | 20.1° (20°) |
+| F-35A | `f35a` | 1.60 (1.6) | 44,900 | 57,500 (50,000+) | 19.5° (20°) |
 | Su-27S | `su27s` | 2.35 (2.35) | 64,300 (59,000) | 65,600 (60,700) | 26.3° (26°) |
 | Su-57 | `su57` | 2.01 (2.0) | 56,400 | 58,000 (65,600) | 26.3° (26°) |
 | MiG-29A | `mig29a` | 2.25 (2.25) | 64,000 (65,000) | 62,700 (59,000) | 26.4° (26°) |
@@ -572,9 +576,9 @@ estimates):
 - **High angle of attack.** Forebody vortices, and the fin's shielding by
   the wing, are not modelled. Past about 30° a fighter keeps more
   directional stability than the real one. Thrust vectoring is not modelled
-  either: the Su-57 flies to a 26° limit. The F-35A's limiter holds 20°:
-  past about 27° its stabilators, stalled, can no longer bring the nose
-  down in this model (the real one flies to 50°).
+  either: the Su-57 flies to a 26° limit. The F-35A's limiter holds 20°,
+  though full nose-down stabilator brings its nose down to 38° (the real
+  one flies to 50°).
 - **Tails on booms.** The lattice carries a horizontal tail across the gap
   between two booms (Su-27, MiG-29) as if it were one surface, so those
   aircraft come out stable where the real ones are close to neutral.
@@ -583,7 +587,9 @@ estimates):
   as far aft as their main wheels allow: at least 15° of tip-back, a sixth
   or less of the weight on the nose wheel. The Mirage 2000's wheels stop
   it at 0.4 %. Full nose-down control still reaches 8-20° past each
-  delta's angle-of-attack limit there (the build stage checks it). A
+  delta's angle-of-attack limit there (the build stage checks it). The
+  F-35A's CG sits where its main wheels leave a fifth of the weight on the
+  nose wheel, 8.8 % of the MAC behind its neutral point. A
   design placed from the neutral point says so in its file; when the
   model's neutral point moves, its CG moves with it, as far as its wheels
   allow.

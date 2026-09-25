@@ -266,6 +266,31 @@ class Fighters(unittest.TestCase):
             self.assertLess(np.max(np.abs(c[1.0][:, 3:] + c[-1.0][:, 3:])), 2e-3)
             self.assertLess(np.max(np.abs(np.diff(c[1.0], 2, axis=0))), 0.1)   # per 2 deg: 0.03; 0.69 before
 
+    def test_vortex_regime_comes_in_with_sweep(self):
+        # a thin swept section's vortex regime comes in between 25 and 35 deg
+        # of leading-edge sweep, not at a line drawn at 35: turned 30 deg
+        # nose-down at 20 deg, slabs swept 34 and 36 deg lift alike (the line
+        # made the first stall like a two-dimensional section - the F-35A's
+        # 34 deg stabilators lost their nose-down power past 20 deg), while
+        # one swept 20 deg does stall
+        def turned(sweep):
+            b, c = 5.0, 1.5
+            spec = {"aircraft": {"name": "slab"}, "analysis": {"speed": 60.0},
+                    "surface": [{"name": "wing", "kind": "wing", "airfoil": "naca64a004",
+                                 "sections": [{"le": [0.0, 0.0, 0.0], "chord": c},
+                                              {"le": [2.5 * math.tan(math.radians(sweep)), b / 2, 0.0], "chord": 0.5 * c}],
+                                 "controls": [{"name": "slab", "channel": "elevator", "span": [0.0, 1.0], "chord_fraction": 1.0,
+                                               "pivot": 0.35, "limits": [-30, 30]}]}],
+                    "reference": {"aero_point": [1.0, 0.0, 0.0]}}
+            m = AeroModel(Aircraft(spec))
+            return float(m.vx["on"].mean()), m.evaluate(math.radians(20.0), controls={"elevator": math.radians(30.0)})["CL"]
+        (w20, cl20), (w30, _), (w34, cl34), (w36, cl36) = (turned(s) for s in (20.0, 30.0, 34.0, 36.0))
+        self.assertEqual((w20, w36), (0.0, 1.0))
+        self.assertAlmostEqual(w30, 0.5, places=6)
+        self.assertGreater(w34, 0.95)
+        self.assertLess(abs(cl34 - cl36), 0.05 * cl36)
+        self.assertLess(cl20, 0.6 * cl36)
+
     def test_each_control_stops_at_its_own_limits(self):
         # a canard delta: elevons +-25 deg, the canard (gain -1) 50 deg leading
         # edge down; the pitch channel runs as far as the canard follows it

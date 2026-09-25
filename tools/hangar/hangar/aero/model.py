@@ -53,8 +53,11 @@ Swept surfaces - the strips on them:
 - in sideslip a swept wing's windward half is less swept than its leeward
   half and lifts more (simple sweep theory: lift ~ cos of the sweep the flow
   sees), the dihedral effect that grows with lift on fighters' wings;
-- thin swept sections (leading edge swept 35 deg or more, strakes always)
-  have the vortex regime (section.py): past the attached-flow limit the lost
+- thin swept sections have the vortex regime (section.py), coming in with
+  the leading edge's sweep - none of it at 25 deg, all of it from 35 (a
+  strake, and a wing behind one, always): a thin tail swept 34 deg does not
+  stall like a two-dimensional section while one swept 36 deg keeps its
+  lift, as a line drawn at 35 deg made them. Past the attached-flow limit the lost
   leading-edge suction turns into vortex lift, 1/cos(sweep) times the part of
   it realised - all of it for a sharp edge, less for a round one. An edge
   beside a body has less suction to lose: 1 - (a/d)^4 of it, d from the axis
@@ -85,7 +88,7 @@ from .vlm import VLM, Lattice
 
 RHO0, NU0 = 1.225, 1.46e-5
 
-VORTEX_MIN_SWEEP = math.radians(35.0)   # leading-edge sweep from which a thin section's edge vortex holds
+VORTEX_SWEEP = (math.radians(25.0), math.radians(35.0))  # leading-edge sweep over which a thin section's edge vortex comes to hold
 BURST_WIDTH = math.radians(18.0)        # the burst moves from the trailing edge to the apex over this
 BURST_LOSS = 0.15                       # circulation lost behind a burst vortex
 BURST_KEEP = 0.4                        # of its lift a burst vortex keeps: a 60 deg delta's lift rises
@@ -183,7 +186,7 @@ class AeroModel:
             o.update(overrides.get(surf.name, {}))
             polars.append(SectionPolar(foil, re=self.speed * L.chord[k] / NU0, mach=mach, aspect_ratio=ar[surf.name],
                                        laminar=laminar, overrides=o, flap_chord=cf, flap_kind=kind,
-                                       vortex=bool(self.vx["on"][k])))
+                                       vortex=float(self.vx["on"][k])))
         self.polars = PolarSet(polars)
         # groups: one per surface half; the induced field of each scales on its own
         group = np.zeros(L.n_strips, int)
@@ -216,12 +219,13 @@ class AeroModel:
         self.clb_wing_body = self._wing_body_dihedral()
 
     def _vortex_setup(self):
-        """Which strips have the vortex regime, the part of the suction their
-        vortex realises and the sweep that sets its breakdown. A surface's
-        spec may set vortex = false, or vortex_realised = 0..1."""
+        """How much of the vortex regime each strip has (0 to 1, with the
+        sweep), the part of the suction their vortex realises and the sweep
+        that sets its breakdown. A surface's spec may set vortex = false, or
+        vortex_realised = 0..1."""
         L = self.lat
         n = L.n_strips
-        on = np.zeros(n, bool)
+        on = np.zeros(n)
         r = np.zeros(n)
         bd = self.geo["sweep_le"].copy()
         strakes = [s for s in self.aircraft.surfaces if s.kind == "strake"]
@@ -253,9 +257,10 @@ class AeroModel:
             if "vortex_realised" in spec:
                 rr = np.full(len(idx), float(spec["vortex_realised"]))
             fed = surf.kind == "wing" and feed > 0.0
-            swept = (self.geo["sweep_le"][idx] >= VORTEX_MIN_SWEEP) | (surf.kind == "strake") | fed
-            on[idx] = swept
-            r[idx] = np.where(on[idx], rr * shield[idx], 0.0)
+            lo, hi = VORTEX_SWEEP
+            swept = smoothstep((self.geo["sweep_le"][idx] - lo) / (hi - lo))
+            on[idx] = 1.0 if surf.kind == "strake" or fed else swept
+            r[idx] = on[idx] * rr * shield[idx]
             if fed:
                 bd[idx] = np.maximum(bd[idx], math.radians(feed_bd))
             if surf.kind == "wing" and canard_delay:
@@ -408,7 +413,7 @@ class AeroModel:
             plate = np.where(self.wing_strip, 0.0, vortex_held(wrap(a_geo + turn)))
             flows = []
             if share.max() > 0.0:                        # the vortex flow
-                flows.append((share, mean, np.where(on, c_vx, coupling), vortex + (vortex_held(wrap(a_vx + turn)),)))
+                flows.append((share, mean, on * c_vx + (1.0 - on) * coupling, vortex + (vortex_held(wrap(a_vx + turn)),)))
             if share.min() < 1.0:                        # the separated flow
                 flows.append((1.0 - share, 1.0 - mean, coupling, vortex + (plate,)))
         else:
