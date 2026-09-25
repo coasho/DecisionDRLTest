@@ -1,0 +1,8 @@
+# The U-2S's near-black ("black velvet", about FS 37038) all over
+[paint]
+scheme = "single"
+colours = ["#2c2f33"]
+canopy = "clear"
+panel_lines = 0.12
+wear = 0.05
+gloss = 0.15

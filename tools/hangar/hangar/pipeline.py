@@ -624,12 +624,20 @@ class Design:
         ground = min((float(p[2]) + g.static_deflection for g in self.aircraft.gear for _, p in g.positions()),
                      default=float(lo[2]))
         got = {"length": hi[0] - lo[0], "span": hi[1] - lo[1], "height": hi[2] - ground}
+        pitch = float(af.get("parked_pitch_deg", 0.0))
+        if abs(pitch) > 0.5:
+            # it stands pitched on its wheels (a bicycle gear, nose-high): its
+            # height is published so
+            got["height"] = float(af["parked_height_m"])
         out = []
         for key in ("length", "span", "height"):
             if key in dims:
                 want = float(dims[key])
+                note = "published %.2f m (%+.1f %%)" % (want, 100.0 * (got[key] / want - 1.0))
+                if key == "height" and abs(pitch) > 0.5:
+                    note += "; parked %.1f deg nose %s" % (abs(pitch), "high" if pitch > 0 else "low")
                 out.append(check("3D model: overall %s" % key, got[key], 0.97 * want, 1.03 * want, "m", level="warn",
-                                 note="published %.2f m (%+.1f %%)" % (want, 100.0 * (got[key] / want - 1.0)), fmt="%.2f"))
+                                 note=note, fmt="%.2f"))
         return out
 
     def _fbw_checks(self, fbw, tabs, mm):

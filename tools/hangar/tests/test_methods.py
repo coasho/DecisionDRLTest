@@ -991,6 +991,52 @@ class NoseWheels(unittest.TestCase):
         self.assertAlmostEqual(top_speed_altitude({}), 36000 * 0.3048)
 
 
+class BicycleGear(unittest.TestCase):
+    @staticmethod
+    def u2(tail_z=-1.1):
+        return {"aircraft": {"name": "t"},
+                "surface": [{"name": "wing", "sections": [{"le": [0.0, 0.0, 0.0], "chord": 2.0},
+                                                          {"le": [0.0, 10.0, 0.0], "chord": 1.0}]}],
+                "gear": [{"name": "Main Gear", "position": [0.0, 0.0, -1.6], "brake": "center", "static_deflection": 0.1},
+                         {"name": "Tail Gear", "position": [6.0, 0.0, tail_z], "steerable": True,
+                          "static_deflection": 0.1}]}
+
+    def test_a_bicycle_gears_loads_by_the_lever_rule(self):
+        # the U-2's main and tail wheels share the weight as the lever rule
+        # has it, not half each
+        from hangar import jsbsim
+        loads = jsbsim.gear_loads(Aircraft(self.u2()), 1000.0, np.array([0.6, 0.0, 0.0]))
+        W = 1000.0 * 9.80665
+        self.assertAlmostEqual(loads["Main Gear"], 0.9 * W)
+        self.assertAlmostEqual(loads["Tail Gear"], 0.1 * W)
+
+    def test_a_centre_wheel_brakes_with_both_pedals(self):
+        # the platform brakes left and right: a centre wheel takes both
+        from hangar import jsbsim
+        root = ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(Aircraft(self.u2())))
+        f = root.find(".//fcs_function[@name='fcs/center-brake']")
+        self.assertEqual(f.find("output").text, "fcs/center-brake-cmd-norm")
+        self.assertEqual(sorted(p.text for p in f.iter("property")), ["fcs/left-brake-cmd-norm", "fcs/right-brake-cmd-norm"])
+        self.assertAlmostEqual(float(f.find(".//value").text), 0.5)
+        c172 = Aircraft.load(repo("aircraft/c172/c172.toml"))
+        self.assertIsNone(ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(c172)).find(".//fcs_function[@name='fcs/center-brake']"))
+
+    def test_parked_on_a_bicycle_gear_it_stands_nose_high(self):
+        # parked, it stands on its foremost and aftmost wheels: a tail wheel
+        # standing higher pitches it nose-high, and its height is taken
+        # square to the ground; level wheels, level
+        from hangar import model3d
+        a = Aircraft(self.u2(tail_z=-1.6 + 6.0 * math.tan(math.radians(4.0))))
+        top = np.array([[10.0, 0.0, 3.0]])
+        h, pitch = model3d.parked_height(a, [top])
+        self.assertAlmostEqual(pitch, 4.0, places=9)
+        ground = -1.5 + 10.0 * math.tan(math.radians(4.0))
+        self.assertAlmostEqual(h, (3.0 - ground) * math.cos(math.radians(4.0)), places=9)
+        h, pitch = model3d.parked_height(Aircraft(self.u2(tail_z=-1.6)), [top])
+        self.assertEqual(pitch, 0.0)
+        self.assertAlmostEqual(h, 4.5)
+
+
 class Contacts(unittest.TestCase):
     def test_apparent_mass(self):
         # at the centre of gravity a push meets the whole mass; on the roll

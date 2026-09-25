@@ -648,7 +648,7 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 
 | aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft |
 |---|---|---|---|---|
-| B-52H | `b52h` | 0.91 at 20,700 ft (0.906) | 9,300 | 52,200 (50,000) |
+| B-52H | `b52h` | 0.91 at 20,700 ft (0.906) | 9,300 | 53,000 (50,000) |
 | KC-135R | `kc135r` | 0.88 at 30,000 ft (0.86) | 7,100 | 40,900 (50,000 certified) |
 | RC-135W | `rc135w` | 0.88 at 30,000 ft (0.86) | 6,400 | 38,700 (50,000 certified) |
 | E-3G | `e3g` | 0.78 at 29,000 ft (0.78) | 3,700 | 34,200 (above 29,000) |
@@ -656,6 +656,7 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 | C-17A | `c17a` | 0.87 at 28,000 ft (0.875) | 6,200 | 36,800 (45,000 certified) |
 | KC-46A | `kc46a` | 0.86 at 26,000 ft (0.86) | 5,200 | 29,500 (40,100 certified) |
 | EA-18G | `ea18g` | 1.80 at 40,000 ft (1.8) | 44,500 | 57,200 (50,000+) |
+| U-2S | `u2s` | 0.82 at 60,000 ft (0.715) | 10,700 | 64,800 (70,000+) |
 
 - The B-52H flies at 140 t, 40 % fuel, about its combat weight. Its wing
   droops to the tips as it does on the ground. Spoilers roll the real one;
@@ -704,6 +705,14 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   throttle ratio to the top of its range to make up the pods' wave drag.
   The centre-line pod hangs 0.23 m lower than the drawing puts it, clear of
   the main gear's bays.
+- The U-2S flies at 12.6 t, half its fuel. On its bicycle gear the main and
+  tail wheels share the weight by the lever rule, both pedals brake the main
+  wheel, and parked it stands 4 deg nose-high (its height is measured so).
+  hangar has no buffet boundary: at 60,000 ft its F118 takes it to Mach
+  0.82, past the 0.715 where the real one's Mach buffet holds it - the
+  coffin corner. It is not calibrated. At half fuel it climbs to 64,800 ft,
+  short of the 70,000 it reaches as the fuel burns: its estimated zero-lift
+  drag, 0.014, is above the published 0.009.
 
 ## Limits
 

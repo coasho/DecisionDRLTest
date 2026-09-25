@@ -1,0 +1,286 @@
+# Lockheed U-2S, built by hangar from public data: the U-2R airframe (1967)
+# with the General Electric F118-GE-101 turbofan fitted in the 1990s.
+#
+# Frame: metres, x aft from the nose tip, y right, z up from the fuselage's
+# centre line at the wing. Sources:
+# - Jane's All the World's Aircraft 1989-90, the USAF fact sheet and
+#   Lockheed Martin (through Wikipedia's specification table): length 63 ft,
+#   span 103 ft, height 16 ft, wing area 1,000 ft2, empty weight 16,000 lb,
+#   maximum take-off weight 40,000 lb, 2,950 US gal of fuel, F118-101 of
+#   17,000 lbf.
+# - NASA, "Unlimited Horizons: Design and Development of the U-2" (P. W.
+#   Merlin, 2015): the U-2R's aspect ratio 10.667, its wing of 3 lb/ft2, the
+#   fuel tanks (1,169 gal inboard and 239 gal outboard a side, 99 gal in the
+#   sump), an all-moving tailplane, 410 kt (Mach 0.72), a 20 kt window
+#   between stall buffet and Mach buffet at cruising altitude.
+# - NASA ER-2 Airborne Laboratory Experimenter Handbook (2002) and NASA
+#   TM-2007-214615 (the ER-2 is the U-2R/S airframe): cruise at Mach 0.715
+#   (410 kt) from 60,000 ft, climbing to 70,000 ft as fuel burns, where "the
+#   airspeed cannot be adjusted from this design point"; parked 4 deg nose
+#   high; the fin tip 16 ft above the ground.
+# - D. Lednicer, The Incomplete Guide to Airfoil Usage (from Lockheed
+#   reports): NACA 63A409 at the root, 63A406 at the tip.
+# - The shape: measured off Marcin Zielinski's TR-1/U-2R three-view
+#   (Wikimedia Commons, CC BY-SA 3.0): its side and plan views scaled to the
+#   63 ft length, its span to 103 ft. With the fin tip it draws (3.94 m above
+#   the datum) and its main wheels (1.64 m below), the aircraft parked 4 deg
+#   nose high stands 16 ft tall, as NASA gives it.
+# - The superpods, the pogo outrigger wheels and the wing's roll and lift
+#   spoilers are left out: this is the clean aircraft in flight. The pogos
+#   drop away at take-off; standing still it leans on a wingtip skid, as the
+#   real one does once it has stopped (the structure contacts at the tips).
+
+[aircraft]
+name = "u2s"
+description = "Lockheed U-2S Dragon Lady (hangar build)"
+category = "reconnaissance"
+
+[analysis]
+# The Reynolds numbers of the cruise, Mach 0.715 at 65,000 ft (211 m/s TAS,
+# kinematic viscosity 1.57e-4 m2/s there): a sea-level speed of the same
+# Reynolds number per metre. The mission flies there; the stall near the
+# ground comes out a little early for it (Re 13e6 on the MAC, not 4.5e6).
+speed = 20.0
+max_mach = 0.9                # subsonic: the tables' Mach factors to 0.9
+induced_drag = "trefftz"      # a high-aspect-ratio wing's induced drag from its loading (docs/hangar.md)
+laminar_fraction = 0.3        # the smooth wing's laminar run (estimate; its CD0 is about 0.009, NASA)
+
+# The wing: a straight taper, 1,000 ft2 over 103 ft (aspect ratio 10.6), its
+# leading edge swept 7.8 deg, its trailing edge 5.6 deg forward (the
+# three-view's), 4.80 m at the centre line, 1.12 m at the tip. The in-flight
+# shape: the ER-2's pods at a third of the span rise 0.86 deg in flight, so the
+# tips flex about 0.4 m up (1.5 deg mean dihedral; the jig shape droops on the
+# ground). Incidence 3.5 deg at the root, washed out to 1 deg at the tip
+# (estimate: the cruise at Mach 0.715 flies with the fuselage level, per the
+# ER-2 handbook).
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [7.460, 0.000, 0.160], chord = 4.800, twist = 3.5, airfoil = "naca63a409" },
+  { le = [9.610, 15.695, 0.570], chord = 1.120, twist = 1.0, airfoil = "naca63a406" },
+]
+controls = [
+  # the three-view's flap and aileron, either side of the wing's break at 57 %
+  # of the half span; their travel is an estimate
+  { name = "flap", channel = "flap", span = [0.04, 0.56], chord_fraction = 0.30, limits = [0, 35] },
+  { name = "aileron", channel = "aileron", span = [0.58, 0.97], chord_fraction = 0.28, limits = [-20, 20] },
+]
+
+# The tailplane: 8.0 m across, 2.38 m at the centre line, 1.07 m at the tip,
+# its leading edge swept 11 deg (the three-view), on the tail cone above the
+# jet pipe. The real one trims by turning whole (NASA); here the elevator
+# carries the trim too.
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a010"        # estimate: a thin symmetric section
+sections = [
+  { le = [16.080, 0.000, 0.620], chord = 2.380 },
+  { le = [16.880, 4.006, 0.620], chord = 1.070 },
+]
+controls = [
+  { name = "elevator", channel = "elevator", span = [0.14, 0.98], chord_fraction = 0.35, limits = [-25, 15] },
+]
+
+# The fin: 3.1 m tall above the fuselage, its leading edge swept 27 deg, its
+# trailing edge upright (the three-view)
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a010"        # estimate
+sections = [
+  { le = [16.430, 0.000, 0.850], chord = 2.220 },
+  { le = [18.030, 0.000, 3.940], chord = 0.720 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.05, 0.95], chord_fraction = 0.30, limits = [-25, 25] },
+]
+
+# The fuselage: a long ogive nose ahead of the cockpit, 1.22 m wide there,
+# widening to the wing and the engine bay under it (the three-view's widths,
+# its profile), narrowing to the jet pipe's exit at the tail
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.100, bottom = -0.100 },
+  { x = 0.30, w = 0.40, top = 0.120, bottom = -0.330, n = 2.0 },
+  { x = 0.70, w = 0.68, top = 0.250, bottom = -0.440, n = 2.0 },
+  { x = 1.10, w = 0.84, top = 0.320, bottom = -0.480, n = 2.0 },
+  { x = 1.50, w = 0.96, top = 0.360, bottom = -0.520, n = 2.1 },
+  { x = 2.00, w = 1.08, top = 0.410, bottom = -0.560, n = 2.2 },
+  { x = 2.60, w = 1.19, top = 0.470, bottom = -0.590, n = 2.3 },
+  { x = 3.20, w = 1.22, top = 0.520, bottom = -0.620, n = 2.4 },
+  { x = 4.40, w = 1.22, top = 0.560, bottom = -0.640, n = 2.4 },
+  { x = 5.30, w = 1.24, top = 0.720, bottom = -0.660, n = 2.4 },
+  { x = 5.80, w = 1.28, top = 0.820, bottom = -0.680, n = 2.4 },
+  { x = 7.00, w = 1.50, top = 0.800, bottom = -0.710, n = 2.5 },
+  { x = 8.50, w = 1.66, top = 0.770, bottom = -0.730, n = 2.5 },
+  { x = 10.00, w = 1.66, top = 0.750, bottom = -0.780, n = 2.5 },
+  { x = 11.70, w = 1.62, top = 0.710, bottom = -0.830, n = 2.4 },
+  { x = 13.00, w = 1.55, top = 0.670, bottom = -0.860, n = 2.3 },
+  { x = 14.40, w = 1.48, top = 0.740, bottom = -0.850, n = 2.2 },
+  { x = 15.80, w = 1.36, top = 0.870, bottom = -0.770, n = 2.2 },
+  { x = 17.00, w = 1.18, top = 0.890, bottom = -0.690, n = 2.1 },
+  { x = 18.00, w = 1.04, top = 0.870, bottom = -0.580, n = 2.0 },
+  { x = 18.55, w = 0.98, top = 0.420, bottom = -0.560, n = 2.0 },
+]
+
+# The tail cone above the jet pipe, carrying the tailplane and the rudder's
+# foot past the exhaust
+[[body]]
+name = "tail cone"
+kind = "pod"
+aero = false                  # part of the fuselage: the tables leave it out
+stations = [
+  { x = 17.60, w = 1.00, top = 0.900, bottom = 0.300, n = 2.2 },
+  { x = 18.55, w = 0.80, top = 0.870, bottom = 0.420, n = 2.2 },
+  { x = 19.00, w = 0.44, top = 0.790, bottom = 0.520, n = 2.0 },
+  { x = 19.20, w = 0.00, top = 0.660, bottom = 0.660 },
+]
+
+# The side intakes behind the cockpit (the U-2R's "wide, flaring inlets",
+# NASA), running back as fairings into the wing root
+[[intake]]
+name = "intake"
+mirror = true
+lip = 0.030
+rake = 0
+duct = 1.2
+stations = [
+  { x = 5.78, y = 0.880, w = 0.540, top = 0.560, bottom = -0.280, n = 2.4 },
+  { x = 6.40, y = 0.920, w = 0.600, top = 0.560, bottom = -0.300, n = 2.4 },
+  { x = 7.40, y = 0.880, w = 0.540, top = 0.500, bottom = -0.260, n = 2.4 },
+  { x = 8.80, y = 0.780, w = 0.380, top = 0.400, bottom = -0.160, n = 2.2 },
+  { x = 10.60, y = 0.700, w = 0.160, top = 0.280, bottom = -0.040, n = 2.0 },
+]
+
+# A clamshell canopy, framed at the windscreen
+[[body]]
+name = "canopy"
+kind = "pod"
+frames = [3.45]
+frame_width = 0.06
+stations = [
+  { x = 3.150, w = 0.00, top = 0.530, bottom = 0.510 },
+  { x = 3.450, w = 0.62, top = 0.780, bottom = 0.470, n = 2.0 },
+  { x = 3.900, w = 0.82, top = 0.920, bottom = 0.470, n = 2.0 },
+  { x = 4.450, w = 0.86, top = 0.960, bottom = 0.480, n = 2.0 },
+  { x = 5.000, w = 0.82, top = 0.920, bottom = 0.500, n = 2.0 },
+  { x = 5.500, w = 0.62, top = 0.860, bottom = 0.550, n = 2.0 },
+  { x = 5.850, w = 0.00, top = 0.830, bottom = 0.800 },
+]
+
+[[engine]]
+name = "F118-GE-101"
+type = "turbofan"
+thrust_dry_kn = 75.6          # 17,000 lbf (Jane's; Lockheed Martin gives 18,300-19,000 lbf class)
+bypass_ratio = 0.76
+tsfc_dry = 0.67               # estimate: the F118-GE-100's static figure
+design_mach = 0.8
+position = [10.500, 0.0, -0.050]   # estimate: the engine bay under the wing's trailing edge
+mass = 1430                   # estimate: 3,150 lb, as the F118-GE-100
+inlet_x = 5.78
+[engine.nozzle]
+position = [18.550, 0.0, -0.070]   # the jet pipe's exit at the tail, 0.98 m across (the three-view)
+
+# Bicycle gear (NASA): twin main wheels behind the cockpit and a tail wheel
+# behind the engine, both folding forward into the fuselage (estimate). The
+# three-view's wheels, the tail wheel raised so the aircraft stands 4 deg nose
+# high (NASA). The tail wheel steers with the rudder; the main wheels brake
+# with both pedals. No pogos: see the notes at the top.
+[[gear]]
+name = "Main Gear"
+position = [8.380, 0.0, -1.640]
+wheels = 2
+wheel_diameter = 0.660        # estimate
+wheel_width = 0.180
+brake = "center"
+static_deflection = 0.10
+retractable = true
+retract = "forward"
+attach = [8.300, 0.0, -0.400]
+
+[[gear]]
+name = "Tail Gear"
+position = [15.120, 0.0, -1.120]
+wheels = 2
+wheel_diameter = 0.300        # estimate
+wheel_width = 0.100
+steerable = true
+max_steer = 15                # estimate
+static_deflection = 0.05
+retractable = true
+retract = "forward"
+attach = [15.000, 0.0, -0.500]
+
+[mass]
+empty = 7257                  # 16,000 lb (Jane's; USAF)
+empty_cg = [9.100, 0.0, 0.000]    # first guess: set from the neutral point below
+[mass.component]              # kg
+wing = 1361                   # 3 lb/ft2 over 1,000 ft2 (NASA, Unlimited Horizons)
+htail = 130                   # estimate
+fin = 110                     # estimate
+fuselage = 1500               # estimate
+intake = 60                   # estimate
+canopy = 80                   # estimate
+"Main Gear" = 180             # estimate
+"Tail Gear" = 50              # estimate
+[[mass.payload]]
+name = "pilot"                # in a full pressure suit
+mass = 110
+position = [4.400, 0.0, 0.350]
+[[mass.payload]]
+name = "nose sensors"         # 600 lb (ER-2 handbook: the nose bay)
+mass = 272
+position = [1.500, 0.0, 0.000]
+[[mass.payload]]
+name = "Q-bay sensors"        # 1,300 lb (ER-2 handbook: the Q-bay behind the cockpit)
+mass = 590
+position = [6.500, 0.0, 0.100]
+# 2,915 US gal of JP-TS at 0.79 kg/l (NASA): the main tanks inboard, the
+# auxiliaries outboard, the sump in the fuselage. Flown half full, mid-
+# mission: full, it starts its cruise at 60,000 ft, and climbs to 70,000 ft
+# as the fuel burns (ER-2 handbook).
+[[mass.tank]]
+name = "left main"
+position = [9.500, -3.500, 0.250]
+capacity = 3496
+fill = 0.5
+[[mass.tank]]
+name = "right main"
+position = [9.500, 3.500, 0.250]
+capacity = 3496
+fill = 0.5
+[[mass.tank]]
+name = "left auxiliary"
+position = [9.800, -9.500, 0.410]
+capacity = 715
+fill = 0.5
+[[mass.tank]]
+name = "right auxiliary"
+position = [9.800, 9.500, 0.410]
+capacity = 715
+fill = 0.5
+[[mass.tank]]
+name = "sump"
+position = [9.600, 0.0, -0.200]
+capacity = 296
+fill = 0.5
+
+[dimensions]                  # published, overall, gear down (Jane's; NASA: the fin 16 ft above the ground)
+length = 19.20
+span = 31.39
+height = 4.88
+
+[targets]
+# The cruise is the top speed up there: Mach 0.715 held from 60,000 ft
+# (ER-2 handbook), "up to 410 knots (Mach 0.72)" (NASA) - held by the Mach
+# buffet, 20 kt above the stall buffet (the coffin corner), not by the
+# engine: hangar has no buffet boundary, so the model, its F118 with thrust
+# to spare there, flies faster (a warning). Not calibrated: the drag rise
+# that would hold it to 0.715 is not the U-2's.
+max_mach = 0.715
+max_mach_altitude_ft = 60000
+service_ceiling_ft = 70000    # "above 70,000 ft" (USAF); at full weight it starts lower

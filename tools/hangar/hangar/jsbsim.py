@@ -178,6 +178,18 @@ def gear_loads(aircraft, mass, cg):
     single = [abs(w[2][1]) < 0.1 or not w[0].mirror for w in wheels]
     centre = [w for w, s in zip(wheels, single) if s]
     pairs = [w for w, s in zip(wheels, single) if not s]
+    if not pairs:
+        # a bicycle gear (the U-2's): the lever rule between the wheels ahead
+        # of the CG and those behind it
+        ahead = [w for w in centre if w[2][0] <= cg[0]]
+        behind = [w for w in centre if w[2][0] > cg[0]]
+        if ahead and behind:
+            xa = np.mean([w[2][0] for w in ahead])
+            xb = np.mean([w[2][0] for w in behind])
+            fa = W * (xb - cg[0]) / (xb - xa)
+            out = {name: fa / len(ahead) for _, name, _ in ahead}
+            out.update({name: (W - fa) / len(behind) for _, name, _ in behind})
+            return out
     if not centre or not pairs:
         return {name: W / len(wheels) for _, name, _ in wheels}
     xc = np.mean([w[2][0] for w in centre])
@@ -398,10 +410,32 @@ def _yaw_damper_xml(yd, lo, hi):
         </summer>""" % (yd["zeta"], 1.0 / YAW_DAMPER_WASHOUT_S, rows, -half, half, lo * 0.0174533, hi * 0.0174533)
 
 
+def _centre_brake_xml():
+    """The platform brakes left and right: a centre wheel (a bicycle gear's
+    main, brake = "center") takes both pedals."""
+    return """      <channel name="Brakes">
+        <!-- the platform brakes left and right: the centre wheel takes both -->
+        <fcs_function name="fcs/center-brake">
+          <function>
+            <product>
+              <value>0.5</value>
+              <sum>
+                <property>fcs/left-brake-cmd-norm</property>
+                <property>fcs/right-brake-cmd-norm</property>
+              </sum>
+            </product>
+          </function>
+          <output>fcs/center-brake-cmd-norm</output>
+        </fcs_function>
+      </channel>"""
+
+
 def flight_control_xml(aircraft, fbw=None, yaw_damper=None):
     ch = set(aircraft.channels())
     lim = {k: aircraft.channel_limits(k) for k in ch}
     parts = ["    <flight_control name=\"%s\">" % aircraft.name]
+    if any(g.brake == "center" for g in aircraft.gear):
+        parts.append(_centre_brake_xml())
     if fbw is not None:
         from .fcs import channels_xml
         parts.extend(channels_xml(aircraft, fbw))

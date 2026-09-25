@@ -479,6 +479,31 @@ def _stats(m):
         {"triangles": int(len(m["triangles"]))}
 
 
+def parked_ground(aircraft):
+    """The ground the aircraft stands on, parked, in the design frame's x-z
+    plane: the line through its foremost and aftmost wheels' ground points
+    (each contact a static deflection below it) - (x0, z0, slope), level for
+    a tricycle whose wheels stand level, nose-high for a bicycle gear whose
+    tail wheel stands higher (the U-2's). None without gear."""
+    pts = sorted((float(p[0]), float(p[2]) + g.static_deflection) for g in aircraft.gear for _, p in g.positions())
+    if not pts:
+        return None
+    (x0, z0), (x1, z1) = pts[0], pts[-1]
+    return x0, z0, (z1 - z0) / (x1 - x0) if x1 - x0 > 1e-6 else 0.0
+
+
+def parked_height(aircraft, positions):
+    """The height (m) of the points (design frame) over the parked ground, and
+    the parked attitude's pitch (deg, nose up); None without gear."""
+    ground = parked_ground(aircraft)
+    if ground is None:
+        return None
+    x0, z0, s = ground
+    c = 1.0 / np.sqrt(1.0 + s * s)
+    h = max(float(np.max((p[:, 2] - z0 - s * (p[:, 0] - x0)) * c)) for p in positions)
+    return h, float(np.degrees(np.arctan(s)))
+
+
 def _solid_parts(aircraft, B, top, origin, report):
     """The airframe as one closed solid and every control piece as a solid of
     its own on its hinge (shape/airframe.py, native/meshkit)."""
@@ -488,6 +513,7 @@ def _solid_parts(aircraft, B, top, origin, report):
     m = meshkit.build(sh.airframe(aircraft, gear=plan, flaps=flaps))
     report["airframe"] = _stats(m)
     report["airframe"]["bounds"] = [m["positions"].min(axis=0).tolist(), m["positions"].max(axis=0).tolist()]
+    tops = [m["positions"]]
     mats = _materials(aircraft, B, report["airframe"]["bounds"])
     m = _painted(B, m)
     v, n = _to_gltf(m["positions"], origin), _to_gltf(m["normals"], np.zeros(3))
@@ -511,6 +537,10 @@ def _solid_parts(aircraft, B, top, origin, report):
                           translation=pivot, rotation=q))
         report["pieces"].append(dict(_stats(pm), label=label, bounds=[pm["positions"].min(axis=0).tolist(),
                                                                       pm["positions"].max(axis=0).tolist()]))
+        tops.append(pm["positions"])
+    parked = parked_height(aircraft, tops)
+    if parked is not None:
+        report["airframe"]["parked_height_m"], report["airframe"]["parked_pitch_deg"] = parked
     # a vectoring two-dimensional nozzle's flaps, cut from the airframe: in the
     # airframe's frame here, gathered on their hinge by _vectoring()
     for name, scene in flaps:

@@ -224,9 +224,11 @@ class Autopilot:
         return float(np.clip(0.15 * err - 1.0 * vs + self.i_outer, -15, 25))
 
     def airspeed(self, s, v_ref):
-        err = s.airspeed_true_ms - v_ref        # too fast: nose up
-        self.i_outer = float(np.clip(self.i_outer + err * self.dt * 0.15, -15, 25))
-        return float(np.clip(1.2 * err + self.i_outer, -15, 25))
+        # too fast: nose up - up to 45 deg: a light jet's full-thrust climb
+        # at sea level is steep (the U-2's, at a thrust to weight of 0.6)
+        err = s.airspeed_true_ms - v_ref
+        self.i_outer = float(np.clip(self.i_outer + err * self.dt * 0.15, -15, 45))
+        return float(np.clip(1.2 * err + self.i_outer, -15, 45))
 
     def command(self, veh, s, theta_cmd):
         a, r = self.level(s)
@@ -310,6 +312,9 @@ CLIMB_FACTORS = (1.25, 1.4, 1.6)                  # of the stall speed: where a 
 JET_CLIMB_FACTORS = CLIMB_FACTORS + (1.9, 2.3, 2.8)  # a jet climbs best faster, near its best lift-to-drag speed and past it
 
 
+CLIMB_TOP_M = 25000.0  # the highest climb flown for a ceiling (a U-2's is 21 km)
+
+
 def climb_performance(f, stall_tas_sl, altitudes=(0.0, 1500.0, 3000.0, 4500.0), factors=CLIMB_FACTORS):
     """Best rate of climb over speed at several altitudes, and the service
     ceiling (0.5 m/s, 100 ft/min). A ceiling above the altitudes flown is
@@ -338,9 +343,9 @@ def climb_performance(f, stall_tas_sl, altitudes=(0.0, 1500.0, 3000.0, 4500.0), 
     ceiling = ceiling_of(rows)
     for _ in range(2):
         highest = max(r["altitude_m"] for r in rows)
-        if not np.isfinite(ceiling) or ceiling < highest + 600.0 or highest >= 15000.0:
+        if not np.isfinite(ceiling) or ceiling < highest + 600.0 or highest >= CLIMB_TOP_M:
             break
-        rows.append(best_at(min(max(highest + 1000.0, ceiling - 500.0), 15000.0)))
+        rows.append(best_at(min(max(highest + 1000.0, ceiling - 500.0), CLIMB_TOP_M)))
         ceiling = ceiling_of(rows)
     rows.sort(key=lambda r: r["altitude_m"])
     return {"rows": rows, "service_ceiling_m": ceiling, "highest_climb_m": max(r["altitude_m"] for r in rows)}
