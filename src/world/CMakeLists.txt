@@ -10,6 +10,10 @@ add_library(fsim_world STATIC
     OfflineTiles.cpp
     VehicleVisuals.h
     VehicleVisuals.cpp
+    Exhaust.h
+    Exhaust.cpp
+    Airflow.h
+    Airflow.cpp
     CameraController.h
     Atmosphere.h
     Atmosphere.cpp

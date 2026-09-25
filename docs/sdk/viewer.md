@@ -32,6 +32,7 @@ next one. Restarting the trainer re-attaches automatically.
 - Several training applications at once: the monitor lists every live world and switches between them (`--world <name>` picks one at start).
 - Per-type models: a vehicle of type `jsbsim:f16` is drawn with `models/f16.glb` (or `.gltf`) if such a file exists in an asset directory (`<exe>/../share/flightsim/models`, the source tree's `assets/models`, or a `--assets` path), else with the platform's default aircraft; `VehicleSpec::model` names a file explicitly. Files are loaded once, on first use, and shared by every vehicle of that type; a `<file>.manifest` (`forward`, `up`, `scale`) fixes axes and size. Aircraft made with [hangar](../hangar.md) carry their own model (`aircraft/<name>/<name>.glb`), found the same way.
 - Moving control surfaces, for models that mark them (see below): ailerons, elevator, rudder and flaps follow each vehicle's deflections, from the trainer or the replay.
+- What the engines and the air do (see [Effects](#effects)): afterburner flames, glowing nozzles and hot exhaust; wing tip vortices, vapour over the wings and the transonic vapour cone; contrails high up; streaks of air flowing past the airframe that show the speed.
 - The world's clock (sun position and sky), wind, atmosphere and weather.
 - The trainer's throughput (vehicle-steps/s), simulation time and the age of the last update.
 - Per vehicle: state summary and the active control level.
@@ -106,8 +107,13 @@ code reads from `state()`, so what you see is what the simulation did:
 - `fsim:nozzle:<engine>:<deg>` turns a nozzle petal open by `deg` times the
   engine's `nozzlePosition` (JSBSim's turbine: shut at military power, open at
   idle and with the afterburner lit).
-- `fsim:afterburner[:<engine>]` stretches an exhaust flame along its x axis
-  with the engine's `afterburner` (0 out .. 1 full), and hides it when out.
+- `fsim:afterburner[:<engine>]` marks where the engine's jet leaves the
+  nozzle: its origin at the exit, its x axis along the jet. The viewer draws
+  the exhaust there (see [Effects](#effects)), as big as the node's own
+  geometry is across its x axis, and turned with the node, so a nozzle that
+  vectors takes its flame with it. With the effects off, the node's own mesh
+  is the flame, stretched along x with the engine's `afterburner` (0 out ..
+  1 full) and hidden when it is out.
 - `fsim:oleo:<wheel>[:<gain>]` slides along its x axis by the unit's
   `wheelCompressionM` (times the gain): a strut's piston, so a parked
   aircraft stands on its wheels.
@@ -129,6 +135,50 @@ To make a model's surface move:
 Every vehicle turns its own copy of these nodes; the geometry under them is
 shared. Models written by hangar are built this way. The vision cameras and
 their segmentation images show the same deflections.
+
+## Effects
+
+Drawn from each vehicle's state as the simulation reports it - nothing is
+added to `VehicleState` for them - after the effects DCS World shows:
+
+| Effect | When | From |
+| --- | --- | --- |
+| Afterburner flame: a white-hot core with shock diamonds, an orange envelope, blue at the nozzle while barely lit, flickering | afterburner lit; longer the harder | `afterburner`, `nozzlePosition` |
+| Nozzle glow | dull red at military power by night; bright with the afterburner | `engineN2`, `afterburner` |
+| Heat haze behind the nozzle | military power | `engineN2` |
+| Wing tip vortices, left behind in the air | a hard pull: angle of attack at the tip (roll adds to it on the rising wing) and load factor; less in the drier air high up | `alphaRad`, `loadFactor`, `angularRateBodyRadS` |
+| Vapour over the wings and off the leading-edge extensions, flickering | a harder pull still | `alphaRad`, `loadFactor` |
+| Vapour cone round the airframe | Mach 0.94 - 1.03, below about 3 km | `mach`, `altitudeMslM` |
+| Contrails, starting a little behind the nozzles, spreading and fading over a minute | air colder than -40 C (the standard atmosphere from the world's sea-level temperature: about 8.5 km and up on a standard day) and the engine working | `altitudeMslM`, `engineN2` |
+| Air streaks flowing past the airframe | faster: longer and denser; a change of speed shows as a change in them | `airspeedTrueMs`, `alphaRad`, `betaRad` |
+
+`e` switches them off and on, `--no-effects` starts with them off, and
+`"effects": false` in `viewer.json` makes that the default. Off, the flames
+are the models' own meshes, as before.
+
+They cost little: the GPU shapes and animates everything from a few numbers
+per vehicle and the clock (the simulation's, so a paused or replayed world
+shows the same), one small mesh is shared by every engine, the trails are
+rings of samples the vertex shader turns into ribbons facing the camera, and
+vehicles far from the camera draw nothing. With the 14 fighters of
+`examples/python/fighters.py` in view, uncapped on an RTX 5070 Ti, a frame
+took 1.83 ms at 1600 x 900 with 4x MSAA, with the effects or without them,
+as it did before there were any; at 2560 x 1440 with 8x MSAA, where the GPU
+sets the pace, 2.46 ms against 2.44 ms. All 14 in afterburner pulling 6 g at
+10.5 km, every effect showing at once: 1.27 ms against 1.26 ms, and 1.90 ms
+against 1.77 ms at the larger size (1.86 ms with the effects off: the
+models' sealed nozzles). The viewer's own work grows by 0.01 - 0.03 ms a
+frame.
+
+The exhaust is part of the vehicle's model, so the vision cameras' colour
+images show it too; the rest is the viewer's alone. Segmentation images
+never include any of it: an id covers the vehicle itself.
+
+A model made by hangar also tells the viewer where its wings and strakes are
+(`wing`, `strake` and `canard` lines in its `.glb.manifest`: per section of
+the right half, its leading edge in body axes from the model's origin and
+its chord). A model without them gets the tip vortices from its widest point
+and no vapour over the wings.
 
 ## Screenshots
 

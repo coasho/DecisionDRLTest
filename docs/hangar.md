@@ -484,12 +484,26 @@ The model stage writes `<name>.glb` from the same design:
   (`axles = 2`) carries its wheels in pairs on a beam under the strut, each
   axle's pair rolling on its own; with `bogie_deg` the beam turns on its
   pivot as the leg folds (the H-6K's somersault into its gondolas).
-- **Propulsion.** An afterburner flame behind each augmented jet, as the
-  engine lights it; nozzle petals open as the engine opens them. A propeller
-  turns at its engine's rpm. A vectoring nozzle turns, flame and all, as the
-  flight controls turn it: a round one on a ball seal round its gimbal, a
-  two-dimensional one's flaps cut from the airframe with a rounded nose that
-  turns in the socket it leaves. Neither opens a gap at any deflection.
+- **Propulsion.** Behind each augmented jet a node (`fsim:afterburner`) the
+  viewer draws the exhaust at - flame, glowing nozzle, heat haze, contrail -
+  with a flame mesh of its own for anything that does not; nozzle petals
+  open as the engine opens them. A round nozzle's petals have their space
+  to themselves: whatever of a fuselage or nacelle runs on past their
+  hinges, at about their size, is cut away, so no skin lies a hair from
+  theirs or is opened through, and each petal carries a seal under the next,
+  so the open nozzle shows no sky between them. The nozzle's burnt metal is
+  painted by where it is - over its visible length, the case and any skin
+  near it - not by which of two nearly touching surfaces is nearer, which
+  left ragged patches of paint and metal that read as parts cutting through
+  each other. A propeller turns at its engine's rpm. A vectoring nozzle
+  turns, flame and all, as the flight controls turn it: a round one on a
+  ball seal round its gimbal, a two-dimensional one's flaps cut from the
+  airframe with a rounded nose that turns in the socket it leaves. Neither
+  opens a gap at any deflection.
+- **Surfaces for the viewer.** The model's manifest (`<name>.glb.manifest`)
+  also lists the wings, strakes and canards - each section of the right half,
+  its leading edge in body axes from the model's origin and its chord - for
+  the viewer's vapour and wing tip vortices.
 - **Paint.** `paint.toml` beside the design gives its colours: a scheme
   (single, two-tone, camouflage or a cheat line), the radome, an anti-glare
   panel, the canopy's tint, a transport's cockpit windows. hangar draws it

@@ -1,6 +1,7 @@
 #include "world/VehicleVisuals.h"
 
 #include "core/Log.h"
+#include "world/Exhaust.h"
 #include "world/FlatGeometry.h"
 #include "world/Frames.h"
 
@@ -30,6 +31,23 @@ vsg::ref_ptr<vsg::Node> box(vsg::Builder& builder, const vsg::vec3& centre, cons
 
 bool isJointName(const std::string& name) { return name.rfind("fsim:", 0) == 0; }
 
+bool isExhaustNode(const vsg::Node& node) {
+    std::string name;
+    VehicleVisuals::Joint joint;
+    return node.getValue("name", name) && VehicleVisuals::Joint::parse(name, joint) && joint.kind == VehicleVisuals::Joint::Afterburner;
+}
+
+/// The widest point of a node's children across its own x axis (their
+/// geometry in its frame): how big a jet an afterburner node's flame mesh is
+/// drawn for.
+double radiusAcrossX(const vsg::Group& node) {
+    vsg::ComputeBounds bounds;
+    for (const auto& child : node.children) child->accept(bounds);
+    if (!bounds.bounds.valid()) return 0.0;
+    const auto& b = bounds.bounds;
+    return std::max({std::abs(b.min.y), std::abs(b.max.y), std::abs(b.min.z), std::abs(b.max.z)});
+}
+
 /// Every node named fsim:<channel>[:<gain>], and the nodes on the paths down
 /// to them (the "spine" a vehicle needs its own copy of).
 class FindJoints : public vsg::Visitor {
@@ -41,12 +59,16 @@ public:
     void apply(vsg::Object& o) override { descend(o); }
 
     void apply(vsg::MatrixTransform& t) override {
+        const vsg::dmat4 outer = matrix_;
+        matrix_ = matrix_ * t.matrix;
         std::string name;
         if (t.getValue("name", name) && isJointName(name)) {
             VehicleVisuals::Joint joint;
             if (VehicleVisuals::Joint::parse(name, joint)) {
                 joint.node = &t;
                 joint.rest = t.matrix;
+                joint.inModel = matrix_;
+                if (joint.kind == VehicleVisuals::Joint::Afterburner) joint.radius = radiusAcrossX(t);
                 joints.push_back(joint);
                 spine.insert(path_.begin(), path_.end());
                 spine.insert(&t);
@@ -55,6 +77,7 @@ public:
             }
         }
         descend(t);
+        matrix_ = outer;
     }
 
 private:
@@ -64,6 +87,57 @@ private:
         path_.pop_back();
     }
     std::vector<const vsg::Object*> path_;
+    vsg::dmat4 matrix_;
+};
+
+/// A model's extent in its own frame, and its widest point to the right: the
+/// wing tip, for a model that does not say where its wing is. The exhaust
+/// flames' meshes are left out - they are not the airframe.
+class Extent : public vsg::ConstVisitor {
+public:
+    vsg::dbox box;
+
+    /// The tip: of the points furthest out to the right (within 3 cm), the
+    /// one furthest aft - where a trailing edge ends.
+    vsg::dvec3 widest() const {
+        vsg::dvec3 best(0.0, 0.0, 0.0);
+        bool found = false;
+        for (const auto& p : right_)
+            if (p.y > box.max.y - 0.03 && (!found || p.x < best.x)) {
+                best = p;
+                found = true;
+            }
+        return best;
+    }
+
+    void apply(const vsg::Object& o) override { o.traverse(*this); }
+    void apply(const vsg::Transform& t) override {
+        const vsg::dmat4 outer = matrix_;
+        matrix_ = t.transform(matrix_);
+        t.traverse(*this);
+        matrix_ = outer;
+    }
+    void apply(const vsg::MatrixTransform& t) override {
+        if (isExhaustNode(t)) return;
+        apply(static_cast<const vsg::Transform&>(t));
+    }
+    void apply(const vsg::VertexIndexDraw& d) override { points(d.arrays); }
+    void apply(const vsg::VertexDraw& d) override { points(d.arrays); }
+    void apply(const vsg::Geometry& g) override { points(g.arrays); }
+
+private:
+    void points(const vsg::BufferInfoList& arrays) {
+        if (arrays.empty() || !arrays[0]) return;
+        auto vertices = arrays[0]->data.cast<vsg::vec3Array>();
+        if (!vertices) return;
+        for (const auto& v : *vertices) {
+            const vsg::dvec3 p = matrix_ * vsg::dvec3(v.x, v.y, v.z);
+            box.add(p);
+            if (p.y > 0.0) right_.push_back(p);
+        }
+    }
+    vsg::dmat4 matrix_;
+    std::vector<vsg::dvec3> right_;
 };
 
 /// Flattens a loaded model to transform + draw pairs with white vertex
@@ -87,7 +161,10 @@ public:
 
     /// A moving part stays a transform of its own, named as in the model and
     /// holding everything above it, so each vehicle's copy can still turn it.
+    /// An exhaust's flame is left out: it is gas, not the vehicle, and a
+    /// vehicle's id covers what a camera would see of the vehicle itself.
     void apply(const vsg::MatrixTransform& t) override {
+        if (isExhaustNode(t)) return;
         std::string name;
         if (!t.getValue("name", name) || !isJointName(name)) {
             apply(static_cast<const vsg::Transform&>(t));
@@ -189,16 +266,30 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
     : settings_(settings), options_(options) {
     root_ = vsg::Group::create();
     for (const auto& dir : settings.modelDirs) readStandIns(dir / "models.txt", standIns_); // the first directory wins
+    if (settings.exhaust) {
+        exhaust_ = std::make_unique<Exhaust>(count, options);
+        exhaustOn_ = exhaust_->valid();
+        flameCompiled_.assign(count * Exhaust::kPerSlot, 0);
+        if (exhaustOn_) { // its pipeline built with the scene; never drawn from here
+            auto warm = vsg::Switch::create();
+            warm->addChild(false, exhaust_->prototype());
+            root_->addChild(warm);
+        }
+    }
 
+    bool loaded = false;
     if (!settings.modelPath.empty()) default_.normal = loadModel(settings, options);
     if (default_.normal) {
         default_.highlighted = default_.normal; // a loaded model keeps its look; the label marks the selection
+        loaded = true;
     } else {
         default_.normal = buildPlaceholder(settings, vsg::vec4(0.85f, 0.85f, 0.9f, 1.0f));
         default_.highlighted = buildPlaceholder(settings, vsg::vec4(1.0f, 0.55f, 0.1f, 1.0f));
     }
 
     default_.rig = Rig::find(default_.normal);
+    default_.shape = measure(default_.normal, default_.rig, settings);
+    default_.shape.valid = loaded;
     if (settings.segmentation) {
         default_.geometry = stripState(default_.normal);
         default_.geometryRig = Rig::find(default_.geometry);
@@ -214,6 +305,7 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
     visible_.assign(count, 1);
     onMask_.assign(count, vsg::MASK_ALL);
     slotModel_.assign(count, std::string());
+    slotModels_.assign(count, &default_);
     for (std::size_t i = 0; i < count; ++i) {
         auto transform = vsg::MatrixTransform::create();
         // Shared subgraph under N transforms: one copy of the geometry on the GPU.
@@ -253,6 +345,8 @@ VehicleVisuals::VehicleVisuals(std::size_t count, const Settings& settings, vsg:
     if (!default_.rig.joints.empty())
         for (std::size_t i = 0; i < count; ++i) assign(i, default_);
 }
+
+VehicleVisuals::~VehicleVisuals() = default;
 
 vsg::vec4 VehicleVisuals::segmentationColour(std::size_t index) {
     // id = slot + 1, little end in red, high end in green: an 8-bit UNORM
@@ -556,6 +650,7 @@ bool VehicleVisuals::applyManifest(Settings& settings) {
         else if (a[1] == 'z') out = vsg::dvec3(0.0, 0.0, sgn);
     };
     std::string line;
+    settings.surfaces.clear();
     while (std::getline(in, line)) {
         std::istringstream ls(line);
         std::string key, value;
@@ -563,7 +658,17 @@ bool VehicleVisuals::applyManifest(Settings& settings) {
         if (key == "forward") axis(value, settings.modelForward);
         else if (key == "up") axis(value, settings.modelUp);
         else if (key == "scale") settings.modelScale = std::stod(value);
-        else LOG_WARN("world") << "manifest: unknown key '" << key << "' in " << settings.modelPath << ".manifest";
+        else if (key == "wing" || key == "strake" || key == "canard") {
+            // <kind> then per section x y z (the leading edge, body axes) and the chord
+            std::istringstream values(line.substr(line.find(key) + key.size()));
+            std::vector<double> v;
+            for (double d; values >> d;) v.push_back(d);
+            Surface s;
+            s.kind = key;
+            for (std::size_t i = 0; i + 3 < v.size(); i += 4) s.sections.emplace_back(v[i], v[i + 1], v[i + 2], v[i + 3]);
+            if (s.sections.size() >= 2 && v.size() % 4 == 0) settings.surfaces.push_back(std::move(s));
+            else LOG_WARN("world") << "manifest: '" << key << "' needs sections of x y z chord, two or more, in " << settings.modelPath << ".manifest";
+        } else LOG_WARN("world") << "manifest: unknown key '" << key << "' in " << settings.modelPath << ".manifest";
     }
     LOG_INFO("world") << "model manifest: " << settings.modelPath << ".manifest";
     return true;
@@ -596,6 +701,50 @@ vsg::ref_ptr<vsg::Node> VehicleVisuals::loadModel(const Settings& s, vsg::ref_pt
     const_cast<VehicleVisuals*>(this)->animations_ = finder.animations;
     LOG_INFO("world") << "vehicle model: " << s.modelPath << " (" << finder.animations.size() << " animation(s))";
     return xf;
+}
+
+VehicleVisuals::Shape VehicleVisuals::measure(const vsg::ref_ptr<vsg::Node>& model, const Rig& rig, const Settings& s) {
+    Shape shape;
+    if (!model) return shape;
+    Extent extent;
+    model->accept(extent);
+    if (extent.box.valid()) {
+        shape.lo = extent.box.min;
+        shape.hi = extent.box.max;
+        shape.tip = extent.widest();
+    }
+    // the jets where the afterburner nodes stand at rest (the rig's matrices
+    // are in the model's own frame, which is the body's: loadModel turns it)
+    for (const auto& j : rig.joints) {
+        if (j.kind != Joint::Afterburner) continue;
+        Shape::Jet jet;
+        jet.exit = j.inModel * vsg::dvec3(0.0, 0.0, 0.0);
+        const vsg::dvec3 along = j.inModel * vsg::dvec3(1.0, 0.0, 0.0) - jet.exit;
+        const vsg::dvec3 across = j.inModel * vsg::dvec3(0.0, 1.0, 0.0) - jet.exit;
+        jet.direction = vsg::length(along) > 0.0 ? vsg::normalize(along) : vsg::dvec3(-1.0, 0.0, 0.0);
+        jet.radius = j.radius * vsg::length(across);
+        jet.engine = j.engine;
+        shape.jets.push_back(jet);
+    }
+    // the manifest's surfaces, moved and scaled as the model is
+    for (auto surface : s.surfaces) {
+        for (auto& sec : surface.sections) {
+            const vsg::dvec3 p = s.modelOffset + vsg::dvec3(sec.x, sec.y, sec.z) * s.modelScale;
+            sec = vsg::dvec4(p.x, p.y, p.z, sec.w * s.modelScale);
+        }
+        shape.surfaces.push_back(std::move(surface));
+    }
+    for (const auto& surface : shape.surfaces)
+        if (surface.kind == "wing") { // its tip's trailing edge
+            const auto& t = surface.sections.back();
+            shape.tip = vsg::dvec3(t.x - t.w, t.y, t.z);
+            break;
+        }
+    return shape;
+}
+
+const VehicleVisuals::Shape& VehicleVisuals::shape(std::size_t index) const {
+    return index < slotModels_.size() && slotModels_[index] ? slotModels_[index]->shape : default_.shape;
 }
 
 vsg::ref_ptr<vsg::Node> VehicleVisuals::buildPlaceholder(const Settings& s, const vsg::vec4& color) const {
@@ -687,6 +836,8 @@ const VehicleVisuals::Model& VehicleVisuals::modelFor(const std::string& key) {
         if (m.normal) {
             m.highlighted = m.normal;
             m.rig = Rig::find(m.normal);
+            m.shape = measure(m.normal, m.rig, s);
+            m.shape.valid = true;
             if (!m.rig.joints.empty()) LOG_INFO("world") << "vehicle model: " << key << ": " << m.rig.joints.size() << " moving part(s)";
             if (compiler_ && !compiler_(m.normal)) LOG_WARN("world") << "could not compile vehicle model " << key;
             if (segRoot_) {
@@ -712,6 +863,7 @@ void VehicleVisuals::setModel(std::size_t index, const std::string& modelPath, c
 void VehicleVisuals::assign(std::size_t index, const Model& m) {
     Pose& pose = poses_[index];
     pose = Pose{};
+    slotModels_[index] = &m;
     vsg::ref_ptr<vsg::Node> normal = m.normal;
     if (!m.rig.joints.empty()) {
         if (auto copy = m.rig.copy(m.normal, pose.transforms)) {
@@ -719,6 +871,34 @@ void VehicleVisuals::assign(std::size_t index, const Model& m) {
             pose.joints = m.rig.joints;
         } else {
             LOG_WARN("world") << "vehicle model: its control surfaces could not be copied per vehicle; drawn fixed";
+        }
+    }
+    // The exhaust hangs under this vehicle's own copy of each afterburner
+    // node, beside the model's flame mesh, a switch choosing between them.
+    pose.flames.assign(pose.transforms.size(), -1);
+    pose.flameSwitches.assign(pose.transforms.size(), {});
+    if (exhaust_ && exhaust_->valid()) {
+        std::size_t k = 0;
+        for (std::size_t j = 0; j < pose.joints.size() && k < Exhaust::kPerSlot; ++j) {
+            if (pose.joints[j].kind != Joint::Afterburner) continue;
+            auto flame = exhaust_->node(index, k);
+            if (!flame) break;
+            auto own = vsg::Group::create(); // the model's own flame, shown with the exhaust off
+            own->children = pose.transforms[j]->children;
+            auto sw = vsg::Switch::create();
+            sw->addChild(!exhaustOn_, own);
+            sw->addChild(false, flame); // update() shows it while it has something to draw
+            pose.transforms[j]->children = {sw};
+            // made after the scene was compiled: compiled now (once; without a
+            // compiler it is compiled with the scene it is part of)
+            const std::size_t f = index * Exhaust::kPerSlot + k;
+            if (compiler_ && f < flameCompiled_.size() && !flameCompiled_[f]) {
+                if (!compiler_(flame)) LOG_WARN("world") << "could not compile an engine's exhaust";
+                flameCompiled_[f] = 1;
+            }
+            pose.flames[j] = static_cast<int>(k);
+            pose.flameSwitches[j] = sw;
+            ++k;
         }
     }
     auto& children = highlight_[index]->children;
@@ -735,6 +915,8 @@ void VehicleVisuals::assign(std::size_t index, const Model& m) {
         segState_[index]->children.clear();
         if (geometry) segState_[index]->addChild(geometry);
     }
+    pose.flames.resize(pose.transforms.size(), -1); // the segmentation copy's joints carry none
+    pose.flameSwitches.resize(pose.transforms.size());
 }
 
 const std::string& VehicleVisuals::modelOf(std::size_t index) const {
@@ -744,13 +926,43 @@ const std::string& VehicleVisuals::modelOf(std::size_t index) const {
 
 void VehicleVisuals::update(Span<const sim::VehicleState> states) {
     const std::size_t n = std::min(states.size(), transforms_.size());
+    double clock = std::numeric_limits<double>::quiet_NaN();
     for (std::size_t i = 0; i < n; ++i) {
         const vsg::dmat4 m = bodyToEcef(states[i]);
         transforms_[i]->matrix = m;
         if (i < segTransforms_.size()) segTransforms_[i]->matrix = m;
         Pose& pose = poses_[i];
-        for (std::size_t j = 0; j < pose.transforms.size(); ++j) pose.transforms[j]->matrix = pose.joints[j].matrix(states[i]);
+        for (std::size_t j = 0; j < pose.transforms.size(); ++j) {
+            const int flame = j < pose.flames.size() ? pose.flames[j] : -1;
+            if (flame < 0 || !exhaustOn_) {
+                pose.transforms[j]->matrix = pose.joints[j].matrix(states[i]);
+                continue;
+            }
+            // the exhaust sizes itself: its node stays as the model placed it
+            // (or as whatever turns it)
+            const Joint& joint = pose.joints[j];
+            pose.transforms[j]->matrix = joint.rest;
+            const bool shows = visible_[i] && exhaust_->set(i, static_cast<std::size_t>(flame), joint.radius, states[i], joint.engine);
+            pose.flameSwitches[j]->children[1].mask = shows ? vsg::MASK_ALL : vsg::MASK_OFF;
+        }
+        if (visible_[i] && !std::isfinite(clock) && std::isfinite(states[i].simTime)) clock = states[i].simTime;
     }
+    if (exhaust_ && exhaustOn_) {
+        exhaust_->setFrame(std::isfinite(clock) ? clock : 0.0, daylight_);
+        exhaust_->commit();
+    }
+}
+
+void VehicleVisuals::setExhaust(bool on) {
+    on = on && exhaust_ && exhaust_->valid();
+    if (on == exhaustOn_) return;
+    exhaustOn_ = on;
+    for (auto& pose : poses_)
+        for (auto& sw : pose.flameSwitches)
+            if (sw) {
+                sw->children[0].mask = on ? vsg::MASK_OFF : vsg::MASK_ALL; // the model's own flame
+                if (!on) sw->children[1].mask = vsg::MASK_OFF;
+            }
 }
 
 void VehicleVisuals::applySwitch(std::size_t index) {

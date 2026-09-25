@@ -1,6 +1,10 @@
 // Moving control surfaces (VSG scene graph, no Vulkan): the nodes a model
 // names fsim:<channel> turn with each vehicle's own deflections, the way
-// JSBSim means them, and the geometry under them stays shared.
+// JSBSim means them, and the geometry under them stays shared. The engines'
+// exhaust hangs under the afterburner nodes, and the airflow effects follow
+// the flight state by rules of their own.
+#include "world/Airflow.h"
+#include "world/Exhaust.h"
 #include "world/VehicleVisuals.h"
 
 #include <algorithm>
@@ -312,4 +316,128 @@ TEST_CASE("control surface names parse, and anything else is left alone", "[rend
     REQUIRE_FALSE(Joint::parse("fsim:elevator@-50", j));
     REQUIRE_FALSE(Joint::parse("fsim:elevator@-50,20x", j));
     REQUIRE_FALSE(Joint::parse("elevator", j));
+}
+
+TEST_CASE("an engine's exhaust hangs under its afterburner node and follows its engine", "[render][visuals]") {
+    const std::filesystem::path dir = FSIM_TEST_AIRCRAFT_DIR;
+    REQUIRE(std::filesystem::exists(dir / "f16c" / "f16c.glb"));
+    world::VehicleVisuals::Settings settings;
+    settings.modelDirs.push_back(dir);
+    world::VehicleVisuals visuals(2, settings, vsg::Options::create(vsgXchange::all::create()));
+    visuals.setModel(0, {}, "jsbsim:f16c");
+    visuals.setModel(1, {}, "jsbsim:f16c");
+    REQUIRE(visuals.exhaust()); // the shaders build (no Vulkan device needed for that)
+
+    const auto& pose = visuals.pose(0);
+    std::size_t j = 0;
+    while (j < pose.joints.size() && pose.joints[j].kind != Joint::Afterburner) ++j;
+    REQUIRE(j < pose.joints.size());
+    REQUIRE(pose.flames[j] == 0);
+    // sized by the model's own flame: the F100's nozzle, 1.08 m across
+    REQUIRE(std::abs(pose.joints[j].radius - 0.538) < 0.03);
+    // the node holds a switch between the model's own flame and the exhaust,
+    // each vehicle its own
+    const auto& node = pose.transforms[j];
+    REQUIRE(node->children.size() == 1);
+    auto sw = node->children[0].cast<vsg::Switch>();
+    REQUIRE(sw);
+    REQUIRE(sw == pose.flameSwitches[j]);
+    REQUIRE(sw != visuals.pose(1).flameSwitches[j]);
+    REQUIRE(sw->children.size() == 2);
+    REQUIRE(sw->children[0].mask == vsg::MASK_OFF);
+
+    std::vector<sim::VehicleState> states(2);
+    for (auto& s : states) {
+        s.engineCount = 1;
+        s.engineN2[0] = 60.0; // idle: nothing to see
+    }
+    visuals.update(Span<const sim::VehicleState>(states));
+    REQUIRE(sw->children[1].mask == vsg::MASK_OFF);
+    REQUIRE(node->matrix == pose.joints[j].rest); // never scaled: the exhaust sizes itself
+    states[0].engineN2[0] = 100.0; // military power: the nozzle glows, the air shimmers
+    visuals.update(Span<const sim::VehicleState>(states));
+    REQUIRE(sw->children[1].mask != vsg::MASK_OFF);
+    REQUIRE(visuals.pose(1).flameSwitches[j]->children[1].mask == vsg::MASK_OFF); // vehicle 1 still idles
+    states[0].afterburner[0] = 1.0;
+    visuals.update(Span<const sim::VehicleState>(states));
+    REQUIRE(sw->children[1].mask != vsg::MASK_OFF);
+    REQUIRE(node->matrix == pose.joints[j].rest);
+
+    // switched off: the model's flame, stretched as before
+    visuals.setExhaust(false);
+    visuals.update(Span<const sim::VehicleState>(states));
+    REQUIRE(sw->children[0].mask != vsg::MASK_OFF);
+    REQUIRE(sw->children[1].mask == vsg::MASK_OFF);
+    Joint stretched = pose.joints[j];
+    REQUIRE(node->matrix == stretched.matrix(states[0]));
+    visuals.setExhaust(true);
+    REQUIRE(sw->children[0].mask == vsg::MASK_OFF);
+
+    // what the airflow effects hang on: the jet aft, pointing aft; the wing's
+    // tip from the manifest
+    const auto& shape = visuals.shape(0);
+    REQUIRE(shape.valid);
+    REQUIRE(shape.jets.size() == 1);
+    REQUIRE(std::abs(shape.jets[0].exit.x + 6.0) < 0.05);
+    REQUIRE(shape.jets[0].direction.x < -0.99);
+    REQUIRE(std::abs(shape.jets[0].radius - 0.538) < 0.03);
+    REQUIRE(std::abs(shape.tip.y - 4.572) < 1e-6);
+    REQUIRE(shape.tip.x < -2.0); // its trailing edge
+    REQUIRE(std::any_of(shape.surfaces.begin(), shape.surfaces.end(), [](const auto& s) { return s.kind == "strake"; }));
+    REQUIRE(shape.hi.y > 4.5);
+}
+
+TEST_CASE("a model's manifest names its lifting surfaces", "[render][visuals]") {
+    const auto dir = std::filesystem::temp_directory_path() / "fsim-test-manifest";
+    std::filesystem::create_directories(dir);
+    const auto model = dir / "m.glb";
+    {
+        std::ofstream f(model.string() + ".manifest");
+        f << "forward -y\nup +z\nscale 1.0\n# surfaces\n"
+             "wing 2.7 0 0 4.965 -1.136 4.572 0 1.131\n"
+             "strake 6.4 0.45 0 4.078 1.554 1.366 0 0.05\n"
+             "canard 1 2 3\n"; // not sections of four: left out
+    }
+    world::VehicleVisuals::Settings s;
+    s.modelPath = model.string();
+    REQUIRE(world::VehicleVisuals::applyManifest(s));
+    REQUIRE(s.surfaces.size() == 2);
+    REQUIRE(s.surfaces[0].kind == "wing");
+    REQUIRE(s.surfaces[0].sections.size() == 2);
+    REQUIRE(s.surfaces[0].sections[1].y == 4.572);
+    REQUIRE(s.surfaces[0].sections[1].w == 1.131);
+    REQUIRE(s.surfaces[1].kind == "strake");
+    std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("the airflow effects follow the flight state", "[render][visuals]") {
+    using world::Airflow;
+    constexpr double deg = 3.14159265358979323846 / 180.0;
+    // tip vortices: a hard pull at a high angle of attack, not cruising
+    REQUIRE(Airflow::vortexStrength(3.0 * deg, 1.0, 1000.0) == 0.0);
+    REQUIRE(Airflow::vortexStrength(20.0 * deg, 6.0, 1000.0) > 0.9);
+    REQUIRE(Airflow::vortexStrength(20.0 * deg, 6.0, 10000.0) < Airflow::vortexStrength(20.0 * deg, 6.0, 1000.0)); // drier air
+    // vapour over the wing takes a harder pull than the tip vortices
+    REQUIRE(Airflow::wingVapour(12.0 * deg, 4.0, 1000.0) < Airflow::vortexStrength(12.0 * deg, 4.0, 1000.0));
+    REQUIRE(Airflow::wingVapour(22.0 * deg, 8.0, 1000.0) > 0.9);
+    // the vapour cone: just under Mach 1, low down
+    REQUIRE(Airflow::vapourCone(0.85, 500.0) == 0.0);
+    REQUIRE(Airflow::vapourCone(0.98, 500.0) > 0.9);
+    REQUIRE(Airflow::vapourCone(1.1, 500.0) == 0.0);
+    REQUIRE(Airflow::vapourCone(0.98, 9000.0) == 0.0);
+    // contrails: in the standard atmosphere from about 8.5 km, not below 7
+    REQUIRE(Airflow::contrail(7000.0, 288.15, 1.0) == 0.0);
+    REQUIRE(Airflow::contrail(10500.0, 288.15, 1.0) > 0.9);
+    REQUIRE(Airflow::contrail(10500.0, 288.15, 0.0) < Airflow::contrail(10500.0, 288.15, 1.0)); // idling: fainter
+    REQUIRE(Airflow::contrail(10500.0, 318.15, 1.0) == 0.0); // a hot day: the air up there is too warm
+    // the air streaks: faster, stronger
+    REQUIRE(Airflow::streaks(40.0) == 0.0);
+    REQUIRE(Airflow::streaks(150.0) < Airflow::streaks(250.0));
+    REQUIRE(Airflow::streaks(400.0) == 1.0);
+    // the exhaust: dry power from the core's speed, the flame's length from the afterburner
+    REQUIRE(world::Exhaust::dryPower(60.0) == 0.0);
+    REQUIRE(world::Exhaust::dryPower(100.0) == 1.0);
+    REQUIRE(world::Exhaust::flameLength(0.5, 0.0) == 0.0);
+    REQUIRE(world::Exhaust::flameLength(0.5, 0.2) < world::Exhaust::flameLength(0.5, 1.0));
+    REQUIRE(std::abs(world::Exhaust::flameLength(0.5, 1.0) - 5.8) < 1e-9); // some six diameters
 }
