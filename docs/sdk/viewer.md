@@ -161,9 +161,14 @@ per vehicle and the clock (the simulation's, so a paused or replayed world
 shows the same), one small mesh is shared by every engine, the trails are
 rings of samples the vertex shader turns into ribbons facing the camera, and
 vehicles far from the camera draw nothing. With the 14 fighters of
-`examples/python/fighters.py` in view, uncapped, a frame took 1.1 ms without
-them and 1.2 ms with them; all 14 in afterburner pulling 6 g at 10.5 km,
-every effect showing at once, 1.4 ms (an RTX 5070 Ti).
+`examples/python/fighters.py` in view, uncapped on an RTX 5070 Ti, a frame
+took 1.83 ms at 1600 x 900 with 4x MSAA, with the effects or without them,
+as it did before there were any; at 2560 x 1440 with 8x MSAA, where the GPU
+sets the pace, 2.46 ms against 2.44 ms. All 14 in afterburner pulling 6 g at
+10.5 km, every effect showing at once: 1.27 ms against 1.26 ms, and 1.90 ms
+against 1.77 ms at the larger size (1.86 ms with the effects off: the
+models' sealed nozzles). The viewer's own work grows by 0.01 - 0.03 ms a
+frame.
 
 The exhaust is part of the vehicle's model, so the vision cameras' colour
 images show it too; the rest is the viewer's alone. Segmentation images
