@@ -19,7 +19,7 @@ speed = 250.0
 # The wing as drawn: 51.3 m2 to the centre line (51.2 m2 published), a
 # cropped delta, 52 deg leading edge, its trailing edge swept 3 deg
 # forward, no dihedral. The balance is not published: the CG sits where
-# the flight tests need it (below).
+# the drawn main wheels put a real one (below).
 [[surface]]
 name = "wing"
 kind = "wing"
@@ -204,7 +204,7 @@ static_deflection = 0.17
 attach = [9.400, 1.150, -0.050]
 
 [reference]
-aero_point = [8.400, 0.0, 0.0]     # at the CG
+aero_point = [8.800, 0.0, 0.0]     # at the CG
 
 [flight_control]
 type = "fbw"
@@ -215,8 +215,9 @@ roll_rate_deg_s = 250.0
 
 [mass]
 empty = 11000                 # Tranche 2 (Eurofighter)
-# loaded: 6 % of the MAC behind the neutral point hangar finds
-empty_cg = [8.257, 0.0, 0.300]
+# loaded: 12.7 % of the MAC behind the neutral point hangar finds, 17 % of
+# the weight on the nose wheel
+empty_cg = [8.845, 0.0, 0.300]
 # no published inertia: radii of gyration of the class
 gyration = [0.250, 0.400, 0.510]
 [[mass.payload]]
@@ -254,4 +255,4 @@ height = 5.28
 max_mach = 2.0                # at altitude, full afterburner
 max_mach_altitude_ft = 36000
 climb_rate_fpm = 62000        # 315 m/s
-service_ceiling_ft = 55000
+operational_ceiling_ft = 55000 # Eurofighter's figure, a clearance (65,000 ft is also quoted)

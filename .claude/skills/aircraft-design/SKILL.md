@@ -145,23 +145,29 @@ move on while a check fails or a picture looks wrong.
   Mass and size come from Raymer if not given.
 - **Flight controls.** `[flight_control] type = "fbw"` with `n_max`,
   `n_min`, `alpha_max_deg` and `roll_rate_deg_s` from the real aircraft.
-  - Build checks the short period at every design point.
-  - Fly checks the limiter (full aft stick), a 3 g step and the roll.
+  - Build checks the short period at every design point, and how far past
+    `alpha_max_deg` full nose-down control still brings the nose down.
+  - Fly checks the limiter (full aft stick), a 3 g step from trim and the
+    roll.
+  - A 3 g step that overshoots is a gain problem, not a balance one: the
+    control law already cancels the pitching moment's kinks (fcs.py).
 - **Balance.** Real CGs are rarely published. Place the CG from the neutral
   point the aero stage finds, not from a guessed % MAC: canard deltas 3-10 %
   MAC unstable, relaxed-stability fighters 0-5 %. The main wheels bound it:
   at least 15 deg tip-back (the CG's height against its distance ahead of
   the main wheels), 8-20 % of the weight on the nose wheel. Move
-  `empty_cg`, the tanks and `aero_point` (at the CG) together. Then check
-  the nose-down margin: with the pitch channel at its nose-down end, Cm
-  about the loaded CG must stay negative a few degrees past
-  `alpha_max_deg`. If it does not, the limiter test departs; move the CG
-  forward or lower `alpha_max_deg`.
+  `empty_cg`, the tanks and `aero_point` (at the CG) together. Build then
+  checks the nose-down reach: full nose-down control must bring the nose
+  down at least 2 deg past `alpha_max_deg`, or the limiter can let the
+  aircraft hang there. If it does not, move the CG forward or check
+  `alpha_max_deg` against the real aircraft's published limit.
 - **Targets.** Give `max_mach` and `max_mach_altitude_ft`: calibrate fits
   the engine's throttle ratio to them, then the wave drag if the engine
   alone cannot. `max_speed_ktas` (sea level), `climb_rate_fpm`,
   `service_ceiling_ft` and `sustained_turn_deg_s` stay checks. Published
-  climb rates are loose, so don't fit to them.
+  climb rates are loose, so don't fit to them. A published ceiling of
+  50,000 ft is usually a clearance, not where the climb runs out: give it
+  as `operational_ceiling_ft`, which the model must reach.
 - **Reference.** `reference = "jsbsim:<name>"` plots that aircraft's
   coefficients against the design's (`reference.png`). It is worth doing
   only when the JSBSim model comes from wind-tunnel data: of those shipped,
@@ -174,7 +180,8 @@ move on while a check fails or a picture looks wrong.
   - `coefficients.png`: CL max 1.5-2.0 at 30-40° is normal for vortex-lift
     fighters.
 - **Read after fly:** `fly_fighter.png`, for the excess power at sea level
-  and 36,000 ft and the turn.
+  and at the top speed's height, the turn, and the best excess power over
+  height (the ceiling).
 - **The model's shape.** Build it from the real aircraft's drawings, not
   from a template: its own intakes (a chin intake, D-shaped side intakes,
   carets, nacelle mouths), its canopy's frames, its tail booms. Measure a

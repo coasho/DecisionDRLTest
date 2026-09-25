@@ -5,8 +5,9 @@
 # root chord plane. Sources: Dassault Aviation and Jane's (dimensions,
 # weights, performance); Safran (M88-2, the landing gear). The shape is
 # measured off a three-view of the two-seat Rafale B whose length and span
-# are Dassault's (15.27 m, 10.90 m), its canopy cut to the single seat; the
-# gear where it draws the wheels.
+# are Dassault's (15.27 m, 10.90 m), the gear where it draws the wheels; the
+# canopy and the spine behind it off a profile of the single-seat Rafale C
+# (Wikimedia Commons, RafaleCprovence.jpg), scaled nose to fin tip.
 
 [aircraft]
 name = "rafale"
@@ -19,9 +20,9 @@ speed = 250.0
 # The wing as drawn: 45.4 m2 to the centre line (45.7 m2 published), a
 # cropped delta, 45 deg leading edge, its trailing edge swept 4 deg
 # forward, its chord plane 3.3 deg down to the tips. The balance is not
-# published: the CG sits 6.5 % of the MAC behind the neutral point hangar
-# finds, as far aft as the angle-of-attack limiter holds (at 10 %, full aft
-# stick carried it past 70 deg).
+# published: the CG sits 10.6 % of the MAC behind the neutral point hangar
+# finds, a fifth of the weight on the nose wheel; further aft full nose-down
+# control would not reach far past its 29 deg limit.
 [[surface]]
 name = "wing"
 kind = "wing"
@@ -113,17 +114,18 @@ stations = [
   { x = 11.50, y = 0.760, w = 0.800, top = -0.050, bottom = -0.640, n = 2.6 },
 ]
 
-# The spine from the canopy to the fin
+# The spine from the canopy to the fin, falling from the canopy's end to
+# the wing and rising into the fin's root
 [[body]]
 name = "spine"
 kind = "pod"
 aero = false
 stations = [
-  { x = 5.400, w = 0.60, top = 1.200, bottom = 0.560, n = 2.2 },
-  { x = 6.000, w = 0.80, top = 1.290, bottom = 0.560, n = 2.2 },
-  { x = 7.000, w = 0.84, top = 1.100, bottom = 0.560, n = 2.2 },
-  { x = 8.000, w = 0.80, top = 0.890, bottom = 0.560, n = 2.2 },
-  { x = 9.000, w = 0.70, top = 0.770, bottom = 0.560, n = 2.2 },
+  { x = 5.800, w = 0.70, top = 1.000, bottom = 0.600, n = 2.2 },
+  { x = 6.300, w = 0.80, top = 0.935, bottom = 0.600, n = 2.2 },
+  { x = 7.000, w = 0.84, top = 0.860, bottom = 0.580, n = 2.2 },
+  { x = 8.000, w = 0.80, top = 0.770, bottom = 0.560, n = 2.2 },
+  { x = 9.000, w = 0.70, top = 0.730, bottom = 0.560, n = 2.2 },
   { x = 10.00, w = 0.50, top = 0.810, bottom = 0.560, n = 2.2 },
   { x = 11.00, w = 0.30, top = 0.980, bottom = 0.600, n = 2.2 },
   { x = 11.40, w = 0.00, top = 1.200, bottom = 0.700 },
@@ -190,21 +192,23 @@ stations = [
   { x = 2.750, y = 0.400, w = 0.200, top = 0.580, bottom = 0.380 },
 ]
 
-# The framed windscreen and the single seat's canopy
+# The framed windscreen and the single seat's canopy: highest over the
+# pilot, its hoop behind the seat, the glazing faired into the spine
 [[body]]
 name = "canopy"
 kind = "pod"
-frames = [3.45]
+frames = [3.45, 4.86]
 frame_width = 0.07
 stations = [
   { x = 2.300, w = 0.00, top = 0.560, bottom = 0.530 },
-  { x = 2.700, w = 0.66, top = 0.800, bottom = 0.520, n = 2.0 },
-  { x = 3.200, w = 0.86, top = 1.080, bottom = 0.540, n = 2.0 },
-  { x = 3.800, w = 0.94, top = 1.290, bottom = 0.560, n = 2.0 },
-  { x = 4.500, w = 0.94, top = 1.360, bottom = 0.580, n = 2.0 },
-  { x = 5.200, w = 0.90, top = 1.340, bottom = 0.600, n = 2.0 },
-  { x = 5.800, w = 0.76, top = 1.280, bottom = 0.640, n = 2.0 },
-  { x = 6.400, w = 0.00, top = 1.180, bottom = 1.100 },
+  { x = 2.700, w = 0.66, top = 0.740, bottom = 0.520, n = 2.0 },
+  { x = 3.200, w = 0.86, top = 1.010, bottom = 0.540, n = 2.0 },
+  { x = 3.700, w = 0.94, top = 1.190, bottom = 0.560, n = 2.0 },
+  { x = 4.300, w = 0.94, top = 1.210, bottom = 0.580, n = 2.0 },
+  { x = 4.900, w = 0.90, top = 1.140, bottom = 0.600, n = 2.0 },
+  { x = 5.500, w = 0.82, top = 1.060, bottom = 0.620, n = 2.0 },
+  { x = 6.150, w = 0.70, top = 0.960, bottom = 0.640, n = 2.0 },
+  { x = 6.500, w = 0.00, top = 0.900, bottom = 0.860 },
 ]
 
 [[engine]]
@@ -254,18 +258,18 @@ static_deflection = 0.16
 attach = [9.500, 1.050, -0.250]
 
 [reference]
-aero_point = [8.500, 0.0, 0.0]     # at the CG
+aero_point = [8.700, 0.0, 0.0]     # at the CG
 
 [flight_control]
 type = "fbw"
 n_max = 9.0
 n_min = -3.6
-alpha_max_deg = 32.0
+alpha_max_deg = 29.0              # the flight controls' air-to-air limit (Flight International's flight test, 2009)
 roll_rate_deg_s = 270.0
 
 [mass]
 empty = 9850                  # Rafale C (Dassault)
-empty_cg = [8.499, 0.0, 0.000]
+empty_cg = [8.704, 0.0, 0.000]
 # no published inertia: radii of gyration of the class
 gyration = [0.250, 0.400, 0.510]
 [[mass.payload]]
@@ -278,19 +282,19 @@ mass = 60
 position = [8.300, 1.000, -0.100]
 [[mass.tank]]
 name = "fuselage 1"           # internal fuel, 4,700 kg
-position = [7.200, 0.0, 0.100]
+position = [7.600, 0.0, 0.100]
 capacity = 1600
 [[mass.tank]]
 name = "fuselage 2"
-position = [9.000, 0.0, 0.100]
+position = [9.400, 0.0, 0.100]
 capacity = 1500
 [[mass.tank]]
 name = "left wing"
-position = [9.600, -2.200, -0.050]
+position = [9.400, -2.200, -0.050]
 capacity = 800
 [[mass.tank]]
 name = "right wing"
-position = [9.600, 2.200, -0.050]
+position = [9.400, 2.200, -0.050]
 capacity = 800
 
 [dimensions]                  # published, overall, gear down (Dassault):
@@ -304,4 +308,4 @@ max_mach = 1.8                # at altitude, full afterburner
 max_mach_altitude_ft = 36000
 max_speed_ktas = 750          # sea level
 climb_rate_fpm = 60000        # 305 m/s
-service_ceiling_ft = 50000
+operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out

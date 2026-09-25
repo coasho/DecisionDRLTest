@@ -171,8 +171,13 @@ class Design:
                 checks.append(check("%s volume coefficient" % name, abs(d["volume_coefficient"]), 0.05, 0.4, level="warn",
                                     note="close-coupled canards 0.05-0.2"))
             if d["kind"] in ("fin", "vtail") and "volume_coefficient" in d:
-                checks.append(check("%s volume coefficient" % name, d["volume_coefficient"], 0.02, 0.1, level="warn",
-                                    note="typical 0.03-0.08"))
+                surf = next((x for x in a.surfaces if x.name == name), None)
+                if surf is not None and surf.sections[-1].le[2] < surf.sections[0].le[2]:
+                    # hung below the fuselage: it adds to the fin above, which the range is for
+                    checks.append(info("%s volume coefficient" % name, d["volume_coefficient"], note="a ventral fin"))
+                else:
+                    checks.append(check("%s volume coefficient" % name, d["volume_coefficient"], 0.02, 0.1, level="warn",
+                                        note="typical 0.03-0.08"))
         checks.append(info("mean aerodynamic chord", a.c, "m"))
         return self.save("geometry", {"summary": s, "checks": checks, "images": ["threeview.png", "views.png"]})
 
@@ -259,6 +264,7 @@ class Design:
         smooth = _roughness(tabs)
         images = ["coefficients.png", "derivatives.png", "polars.png"]
         fighter = a.spec.get("aircraft", {}).get("category") == "fighter"
+        fbw = self.fbw_options() is not None
         tailless = not any(s.kind in ("htail", "canard", "vtail") for s in a.surfaces)
         # DATCOM 4.1.3.2: C_L_alpha = 2 pi A / (2 + sqrt(A^2 (1 + tan^2 sweep_c/2) + 4))
         sweep_c2 = a.wing.sweep_deg(0.5)
@@ -269,6 +275,9 @@ class Design:
                   % (a.wing.aspect_ratio, sweep_c2, cla_est)),
             check("CL max (untrimmed, clean)", clmax, 1.1, 2.3 if fighter else 2.1,
                   note="at %.0f deg" % a_clmax + ("; leading-edge extensions take a fighter's past 2" if fighter else "")),
+            info("pitch stiffness Cm_alpha (about ARP)", d["Cma"], "/rad",
+                 note="negative: stable; relaxed stability is the fly-by-wire's to fly (build: its short period, "
+                 "and its nose-down reach)") if fbw else
             check("pitch stiffness Cm_alpha (about ARP)", d["Cma"], None, -0.1, "/rad", level="warn" if fighter else "fail",
                   note="negative: stable" + ("; a fighter's flight controls make up for relaxed stability" if fighter else "")),
             check("weathercock Cn_beta", d["Cnb"], 0.01, None, "/rad", level="warn" if fighter and d["Cnb"] > 0.0 else "fail",
@@ -355,8 +364,14 @@ class Design:
                                 level="warn" if fbw else "fail",
                                 note="neutral point %.3f m, CG %.3f m%s" % (np_x, cg[0], "; fly-by-wire: relaxed stability allowed"
                                                                             if fbw else "")))
-            m_e, cg_e = mm.loaded(fuel_fraction=0.0, payload=False)
-            checks.append(check("static margin (empty)", (np_x - cg_e[0]) / a.c * 100, 0.0, 45.0, "% MAC", level="warn"))
+            if fbw:
+                # the lightest a fly-by-wire aircraft flies: the tanks dry, the pilot aboard
+                m_e, cg_e = mm.loaded(fuel_fraction=0.0, payload=True)
+                checks.append(check("static margin (fuel out)", (np_x - cg_e[0]) / a.c * 100, -15.0, 40.0, "% MAC",
+                                    level="warn", note="CG %.3f m; fly-by-wire: relaxed stability allowed" % cg_e[0]))
+            else:
+                m_e, cg_e = mm.loaded(fuel_fraction=0.0, payload=False)
+                checks.append(check("static margin (empty)", (np_x - cg_e[0]) / a.c * 100, 0.0, 45.0, "% MAC", level="warn"))
         if mm.spec.get("gyration") is not None:
             checks += [info("radii of gyration R_x, R_y, R_z", "%.3f, %.3f, %.3f" % (g["Rx"], g["Ry"], g["Rz"]),
                             note="given in [mass] gyration")]
@@ -453,7 +468,7 @@ class Design:
         checks = [info("JSBSim aircraft", shown(xml_path), note="type jsbsim:%s" % a.name)]
         out = {"xml": xml_path, "checks": checks}
         if fbw is not None:
-            checks += self._fbw_checks(fbw)
+            checks += self._fbw_checks(fbw, tabs, mm)
             from .report import plots
             plots.fbw_gains(fbw, self.img("fbw.png"), a.name)
             out["images"] = ["fbw.png"]
@@ -578,9 +593,10 @@ class Design:
                                  note="published %.2f m (%+.1f %%)" % (want, 100.0 * (got[key] / want - 1.0)), fmt="%.2f"))
         return out
 
-    def _fbw_checks(self, fbw):
+    def _fbw_checks(self, fbw, tabs, mm):
         """The fly-by-wire's short period where the airframe can fly (1 g
-        trim below the angle-of-attack limit): damping and frequency."""
+        trim below the angle-of-attack limit): damping and frequency; how far
+        past the angle-of-attack limit full nose-down control reaches."""
         zetas, omegas, unstable = [], [], 0
         for row in fbw["points"]:
             for p in row:
@@ -592,11 +608,22 @@ class Design:
                 zetas.append(float(z.min()))
                 omegas.append(float(w.min()))
                 unstable += int(p["open_loop_Ma"] > 0)
-        return [check("fly-by-wire short period damping (worst design point)", min(zetas), 0.35, 1.3,
-                      note="MIL-F-8785C level 1, category A"),
-                info("fly-by-wire short period frequency", "%.1f-%.1f" % (min(omegas), max(omegas)), "rad/s"),
-                info("design points where the airframe alone is unstable in pitch", unstable,
-                     note="of %d" % len(zetas))]
+        from .fcs import nose_down_reach
+        o = fbw["options"]
+        out = [check("fly-by-wire short period damping (worst design point)", min(zetas), 0.35, 1.3,
+                     note="MIL-F-8785C level 1, category A"),
+               info("fly-by-wire short period frequency", "%.1f-%.1f" % (min(omegas), max(omegas)), "rad/s"),
+               info("design points where the airframe alone is unstable in pitch", unstable,
+                    note="of %d" % len(zetas))]
+        search = 20.0
+        reach = nose_down_reach(tabs, self.aircraft, mm.loaded()[1], o, search=search)
+        if reach is not None:
+            past = reach["alpha_deg"] - o["alpha_max_deg"] if reach["alpha_deg"] is not None else search
+            out.append(check("nose-down control past the angle-of-attack limit", past, 2.0, None, "deg", level="warn",
+                             note="full nose-down (%+g deg) brings the nose down up to %s deg, the limit %g; loaded CG"
+                             % (reach["deflection_deg"], "%.1f" % reach["alpha_deg"] if reach["alpha_deg"] is not None
+                                else "%g and beyond" % (o["alpha_max_deg"] + search), o["alpha_max_deg"])))
+        return out
 
     def calibrated(self, tabs):
         """The tables with the calibration's extra drag area (drag along the
@@ -693,7 +720,8 @@ class Design:
         """The fighter tests (flight.fighter_tests) and the crash and random
         state runs every design flies."""
         t0 = time.time()
-        r = {"type": f.type, "fighter": F.fighter_tests(f, opts, quick=self.quick)}
+        top = float(self.targets.get("max_mach_altitude_ft", 36000.0)) * 0.3048
+        r = {"type": f.type, "fighter": F.fighter_tests(f, opts, quick=self.quick, top_altitude_m=top)}
         r["robustness"] = F.robustness(f, n=12 if self.quick else 40)
         vs = 70.0
         r["crashes"] = F.crash_tests(f, vs, F.contact_points(self._aircraft_file(f.type)))
@@ -714,13 +742,20 @@ class Design:
             else:
                 checks.append(info(label, value, unit, note))
         g = lambda k, r=ref: r.get(k) if r else None  # noqa: E731
-        vs("maximum Mach number at 36,000 ft (full afterburner)", d["max_mach_36k"], "max_mach", 0.05, "", refv=g("max_mach_36k"))
+        vs("maximum Mach number at {:,.0f} ft (full afterburner)".format(d["top_altitude_m"] / 0.3048), d["max_mach_top"],
+           "max_mach", 0.05, "", refv=g("max_mach_top"))
         vs("maximum level speed at sea level", d["max_mach_sl"] * 661.47, "max_speed_ktas", 0.08, "KTAS", "%.0f",
            refv=g("max_mach_sl") * 661.47 if ref else None)
         vs("best rate of climb at sea level (peak excess power)", d["climb_rate_ms"] / 0.3048 * 60, "climb_rate_fpm", 0.25, "ft/min",
            "%.0f", refv=g("climb_rate_ms") / 0.3048 * 60 if ref else None)
-        vs("service ceiling", d["service_ceiling_m"] / 0.3048, "service_ceiling_ft", 0.15, "ft", "%.0f",
-           refv=g("service_ceiling_m") / 0.3048 if ref else None)
+        if "operational_ceiling_ft" in t:
+            # a published clearance (50,000 ft, say), not where the climb runs out: reached, or not
+            checks.append(check("service ceiling", d["service_ceiling_m"] / 0.3048, t["operational_ceiling_ft"], None, "ft",
+                                level="warn", note="reaches the published operational ceiling, %g" % t["operational_ceiling_ft"],
+                                fmt="%.0f"))
+        else:
+            vs("service ceiling", d["service_ceiling_m"] / 0.3048, "service_ceiling_ft", 0.15, "ft", "%.0f",
+               refv=g("service_ceiling_m") / 0.3048 if ref else None)
         vs("sustained turn rate, Mach 0.9 at 15,000 ft", d["turn"]["rate_deg_s"], "sustained_turn_deg_s", 0.15, "deg/s",
            refv=ref["turn"]["rate_deg_s"] if ref else None)
         h = d["handling"]
@@ -730,7 +765,7 @@ class Design:
                    info("full aft stick at 350 kt: load factor and turn rate", "%.1f g, %.1f deg/s" % (h["pull"]["n_max"],
                                                                                                      h["pull"]["rate_deg_s"])),
                    check("3 g step: overshoot", h["step"]["overshoot"] * 100, None, 40.0, "%", level="warn",
-                         note="rise to 90 %% in %.2f s" % h["step"]["rise_s"]),
+                         note="the load factor over the gravity reference, from trim; rise to 90 %% in %.2f s" % h["step"]["rise_s"]),
                    info("full-stick roll at 350 kt", "%.0f deg/s, 90 deg in %.2f s" % (h["roll"]["p_max"], h["roll"]["time_to_90_s"]),
                         note="sideslip up to %.1f deg" % h["roll"]["beta_max"]),
                    check("random-state runs that diverged", results["design"]["robustness"]["diverged"], None, 0,
@@ -751,7 +786,12 @@ class Design:
         vs = stall_sl["stall_tas_ms"] if np.isfinite(stall_sl["stall_tas_ms"]) else vs0
         speeds = np.linspace(1.15 * vs, 3.6 * vs, 7 if self.quick else 13)
         r["trim_sweep"] = F.trim_sweep(f, speeds, altitude_m=100.0)
-        r["max_speed_ms"] = F.max_level_speed(r["trim_sweep"])
+        # flown from the fastest trim (the sweep's throttle curve, extrapolated
+        # past it, can overshoot the top speed by 10 %)
+        trimmed = [row["speed_ms"] for row in r["trim_sweep"] if row["ok"]]
+        r["max_speed_ms"] = F.max_level_speed_flown(f, 100.0, max(trimmed) if trimmed else 2.5 * vs)
+        if not np.isfinite(r["max_speed_ms"]):
+            r["max_speed_ms"] = F.max_level_speed(r["trim_sweep"])
         r["stall"] = {k: v for k, v in stall_sl.items() if k != "trim"}
         r["stall_1500"] = {k: v for k, v in stall_hi.items() if k != "trim"}
         r["climb"] = F.climb_performance(f, vs, altitudes=(0.0, 3000.0) if self.quick else (0.0, 1500.0, 3000.0, 4500.0))
@@ -936,9 +976,11 @@ def _calibrate(d):
     drag area (struts, cooling, gear legs, antennas, gaps) to the maximum level
     speed and the propeller pitch to the best rate of climb. Damped Newton on
     the two, finite-difference sensitivities from quick flight tests of the
-    rebuilt aircraft. The result goes to calibration.toml beside the design -
-    reviewable, and deleted to return to the pure estimate."""
-    from . import flight as F
+    rebuilt aircraft. A design that gives its propeller's pitch
+    ([engine.propeller] pitch, the real one's) keeps it: the drag area alone
+    is fitted, to the top speed, and the climb is a prediction. The result
+    goes to calibration.toml beside the design - reviewable, and deleted to
+    return to the pure estimate."""
     t = d.targets
     a = d.aircraft
     if any(e.type == "turbofan" for e in a.engines):
@@ -950,6 +992,8 @@ def _calibrate(d):
         raise SystemExit("calibrate needs a fly stage first (it takes the climb speed from it)")
     vy = fly["results"]["design"]["climb"]["rows"][0]["speed_ms"]
     target = np.array([t["max_speed_ktas"], t["climb_rate_fpm"]])
+    if all("pitch" in (e.prop_spec or {}) for e in a.engines if e.has_propeller):
+        return _calibrate_drag(d, target, vy)
     x = np.array([float(a.calibration.get("extra_drag_area_m2", 0.0)), float(a.engines[0].prop_pitch or 0.75 * a.engines[0].prop_diameter)])
     D = a.engines[0].prop_diameter
     lo, hi = np.array([0.0, 0.45 * D]), np.array([0.25 * a.S, 1.3 * D])
@@ -957,22 +1001,9 @@ def _calibrate(d):
 
     def measure(x):
         _write_calibration(d, {"extra_drag_area_m2": float(x[0]), "propeller_pitch_m": [float(x[1])] * len(a.engines)})
-        d.aircraft = Aircraft.load(d.path)
-        d.build()
-        f = F.Flight(a.name, name="hangar-cal-" + a.name)
-        try:
-            v0 = target[0] * KT
-            # close samples round the target: past the top speed the trims
-            # fail, and the throttle curve is extrapolated only a little way
-            rows = F.trim_sweep(f, v0 * np.array([0.8, 0.88, 0.94, 0.97, 1.0, 1.03, 1.06, 1.1]), altitude_m=100.0)
-            vmax = F.max_level_speed(rows) / KT
-            c, _ = F.climb(f, 30.0, vy)
-            climb = c["rate_ms"] / 0.3048 * 60
-        finally:
-            f.close()
-        y = np.array([vmax, climb])
-        history.append({"extra_drag_area_m2": float(x[0]), "propeller_pitch_m": float(x[1]), "max_speed_kt": vmax, "climb_fpm": climb})
-        d.log("  calibrate: drag area %+.3f m2, pitch %.3f m -> %.1f kt, %.0f ft/min" % (x[0], x[1], vmax, climb))
+        y = np.array(_light_performance(d, target[0], vy))
+        history.append({"extra_drag_area_m2": float(x[0]), "propeller_pitch_m": float(x[1]), "max_speed_kt": y[0], "climb_fpm": y[1]})
+        d.log("  calibrate: drag area %+.3f m2, pitch %.3f m -> %.1f kt, %.0f ft/min" % (x[0], x[1], y[0], y[1]))
         return y
 
     y = measure(x)
@@ -1015,6 +1046,75 @@ def _calibrate(d):
                                 "checks": checks})
 
 
+def _light_performance(d, v_kt, vy):
+    """The aircraft rebuilt as calibration.toml now stands, and flown: its top
+    speed (kt) near v_kt and its climb rate (ft/min) at vy (m/s)."""
+    from . import flight as F
+    d.aircraft = Aircraft.load(d.path)
+    d.build()
+    f = F.Flight(d.aircraft.name, name="hangar-cal-" + d.aircraft.name)
+    try:
+        vmax = F.max_level_speed_flown(f, 100.0, 0.95 * v_kt * KT) / KT
+        c, _ = F.climb(f, 30.0, vy)
+    finally:
+        f.close()
+    return vmax, c["rate_ms"] / 0.3048 * 60
+
+
+def _calibrate_drag(d, target, vy):
+    """The extra drag area alone, to the top speed, for a design that gives
+    its propeller's real pitch: the target bracketed (more drag, slower),
+    then secants inside the bracket. The climb rate stays a prediction."""
+    a = d.aircraft
+    history = []
+
+    def measure(drag):
+        _write_calibration(d, {"extra_drag_area_m2": float(drag)})
+        v, climb = _light_performance(d, target[0], vy)
+        history.append({"extra_drag_area_m2": float(drag), "max_speed_kt": v, "climb_fpm": climb})
+        d.log("  calibrate: drag area %+.3f m2 -> %.1f kt, %.0f ft/min" % (drag, v, climb))
+        return v
+
+    top, tol = 0.25 * a.S, 0.003 * target[0]
+    x = float(a.calibration.get("extra_drag_area_m2", 0.0))
+    speed = {x: measure(x)}
+    step = max(0.02, 0.005 * a.S)
+    while abs(speed[x] - target[0]) > tol:
+        nx = float(np.clip(x + (step if speed[x] > target[0] else -step), 0.0, top))
+        if nx == x:
+            break
+        speed[nx] = measure(nx)
+        if (speed[nx] - target[0]) * (speed[x] - target[0]) <= 0:
+            break
+        x, step = nx, 2.0 * step
+    for _ in range(6):
+        best = min(speed, key=lambda k: abs(speed[k] - target[0]))
+        fast = [k for k in speed if speed[k] > target[0]]
+        slow = [k for k in speed if speed[k] < target[0]]
+        if abs(speed[best] - target[0]) <= tol or not fast or not slow:
+            break
+        x1, x2 = max(fast), min(slow)
+        nx = float(np.clip(x1 + (target[0] - speed[x1]) * (x2 - x1) / (speed[x2] - speed[x1]), 0.0, top))
+        if nx in speed:
+            break
+        speed[nx] = measure(nx)
+    x = min(speed, key=lambda k: abs(speed[k] - target[0]))
+    row = [h for h in history if h["extra_drag_area_m2"] == x][-1]
+    v, climb = row["max_speed_kt"], row["climb_fpm"]
+    _write_calibration(d, {"extra_drag_area_m2": x},
+                       note="fitted: max speed %.1f kt (target %g); climb %.0f ft/min predicted (published %g)"
+                       % (v, target[0], climb, target[1]))
+    d.aircraft = Aircraft.load(d.path)
+    d.build()
+    e = d.aircraft.engines[0]
+    checks = [check("maximum level speed after calibration", v, 0.985 * target[0], 1.015 * target[0], "KTAS"),
+              check("rate of climb, predicted", climb, 0.95 * target[1], 1.05 * target[1], "ft/min",
+                    note="with the propeller's own pitch"),
+              info("extra drag area", x, "m2", note="CD %+.4f: what the build-up does not see" % (x / a.S)),
+              info("propeller pitch", e.prop_pitch, "m", note="the design's own, pitch/diameter %.2f" % (e.prop_pitch / e.prop_diameter))]
+    return d.save("calibrate", {"calibration": {"extra_drag_area_m2": x}, "history": history, "checks": checks})
+
+
 def _write_calibration(d, cal, note=""):
     lines = ["# Written by hangar calibrate (%s) to meet the [targets] of %s:" % (time.strftime("%Y-%m-%d %H:%M"),
                                                                               os.path.basename(d.path)),
@@ -1032,8 +1132,18 @@ def _write_calibration(d, cal, note=""):
                      % cal["throttle_ratio"])
     if note:
         lines.append("# " + note)
-    with open(os.path.join(d.dir, "calibration.toml"), "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    path = os.path.join(d.dir, "calibration.toml")
+    # rewritten every step: on Windows a scanner that still has the last one
+    # mapped makes the truncation fail for a moment (EINVAL, EACCES)
+    for attempt in range(20):
+        try:
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write("\n".join(lines) + "\n")
+            return
+        except OSError:
+            if attempt == 19:
+                raise
+            time.sleep(0.25)
 
 
 def _roughness(tabs):

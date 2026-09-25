@@ -195,6 +195,71 @@ class Fighters(unittest.TestCase):
         self.assertAlmostEqual(thrust(18000.0) / thrust(13000.0), density(18000.0) / density(13000.0), delta=1e-6)
 
 
+class FlyByWire(unittest.TestCase):
+    @staticmethod
+    def tables(kink):
+        # a pitching moment unstable in one band of angle of attack (a tail
+        # passing through the wing's wake gives one), an elevator of
+        # constant power; no sideslip dependence
+        al = np.arange(-10.0, 31.0)
+        r = np.radians(al)
+        cl = 3.5 * r
+        cm = -0.2 * r + kink * np.clip((al - 2.0) / 4.0, 0.0, 1.0)
+        d = np.array([-20.0, 0.0, 20.0])
+        col = lambda v: np.repeat(v[:, None], 3, axis=1)  # noqa: E731
+        el = {"deflection": d, "Cm": np.outer(np.ones_like(r), -0.8 * np.radians(d)),
+              "CL": np.outer(np.ones_like(r), 0.3 * np.radians(d))}
+        return {"alpha": al, "beta": np.array([-4.0, 0.0, 4.0]),
+                "base": {"CL": col(cl), "CD": col(0.02 + 0.1 * cl ** 2), "Cm": col(cm)}, "controls": {"elevator": el}}
+
+    def test_moment_compensation_leaves_the_line(self):
+        # the elevator the control law adds cancels the moment's departure
+        # from its line: the airframe with it is straight in alpha about the
+        # CG - here 10 % of the chord ahead of the aero point, where the
+        # normal force's own curvature counts too - and one straight about
+        # the CG needs none
+        from types import SimpleNamespace
+        from hangar import fcs
+        a = SimpleNamespace(aero_point=[5.0, 0.0, 0.0], c=3.0)
+        opt = {"alpha_min_deg": -10.0, "alpha_max_deg": 25.0}
+        for kink, cg_x in ((0.0, 5.0), (0.03, 4.7)):
+            tabs = self.tables(kink)
+            line = fcs.moment_line(tabs, a, [cg_x, 0.0, 0.0], opt)
+            self.assertEqual((line["alpha_deg"][0], line["alpha_deg"][-1]), (-10.0, 25.0))
+            comp = fcs.moment_compensation(tabs, line, [0.4], math.radians(-25.0), math.radians(25.0))
+            r = np.radians(line["alpha_deg"])
+            k = np.isin(tabs["alpha"], line["alpha_deg"])
+            cn = tabs["base"]["CL"][k, 1] * np.cos(r) + tabs["base"]["CD"][k, 1] * np.sin(r)
+            flown = tabs["base"]["Cm"][k, 1] + cn * (cg_x - 5.0) / 3.0 + comp[:, 0] * line["cm_de"]
+            with self.subTest(kink=kink):
+                np.testing.assert_allclose(flown, np.polyval(np.polyfit(r, flown, 1), r), atol=1e-9)
+                self.assertAlmostEqual(np.polyfit(r, flown, 1)[0], line["slope"], places=9)
+                self.assertEqual(float(np.max(np.abs(comp))) > 1e-3, kink > 0)
+
+    def test_pitch_channel_sums_the_compensation_and_the_push(self):
+        # the pitch channel carries the compensation over angle of attack
+        # and Mach number, and the elevator sums it with the push back past
+        # the angle-of-attack limits
+        from hangar import fcs, jsbsim
+        a = Aircraft.load(repo("aircraft/gripen/gripen.toml"))
+        line = {"alpha_deg": np.array([-10.0, 0.0, 10.0, 20.0]), "slope": 0.3, "departure": np.zeros(4)}
+        fbw = {"qbar_psf": np.array(fcs.QBAR_PSF), "mach": np.array([0.4, 0.9]), "options": fcs.options(a),
+               "gains": {k: np.full((len(fcs.QBAR_PSF), 2), 0.1) for k in fcs.GAINS},
+               "moment": dict(line, elevator=np.array([[0.01, 0.02], [0.0, 0.0], [-0.03, -0.04], [0.05, 0.06]]))}
+        root = ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a, fbw))
+        comp = root.find(".//fcs_function[@name='fcs/fbw/moment-comp']")
+        self.assertEqual([v.text for v in comp.iter("independentVar")], ["aero/alpha-rad", "velocities/mach"])
+        rows = [[float(x) for x in line.split()] for line in comp.find(".//tableData").text.strip().splitlines()]
+        self.assertEqual(rows[0], [0.4, 0.9])
+        np.testing.assert_allclose([r[0] for r in rows[1:]], np.radians([-10.0, 0.0, 10.0, 20.0]), atol=1e-5)
+        np.testing.assert_allclose([r[1:] for r in rows[1:]], fbw["moment"]["elevator"], atol=1e-5)
+        raw = root.find(".//fcs_function[@name='fcs/fbw/elevator-raw']/function/sum")
+        summed = [p.text for p in raw.findall("property")]
+        self.assertIn("fcs/fbw/alpha-push", summed)
+        self.assertIn("fcs/fbw/moment-comp", summed)
+        self.assertIsNotNone(root.find(".//fcs_function[@name='fcs/fbw/alpha-push']"))
+
+
 class Aircraft_(unittest.TestCase):
     def test_c172_derivative_signs_and_sizes(self):
         a = Aircraft.load(repo("aircraft/c172/c172.toml"))

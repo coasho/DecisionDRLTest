@@ -239,4 +239,4 @@ height = 4.50
 # JAS 39C, published
 max_mach = 2.0                # at altitude, full afterburner
 max_mach_altitude_ft = 36000
-service_ceiling_ft = 50000
+operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out

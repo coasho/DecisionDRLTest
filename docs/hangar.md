@@ -65,13 +65,13 @@ code that computes them, changes.
 |---|---|---|
 | geometry | three-view and 3D views; areas, MAC, aspect ratio, tail volumes | usual ranges for the category |
 | aero | coefficient tables over α ±180° and β ±90°, and factors on them over Mach; section polars; derivative plots; the reference aircraft's coefficients beside the design's | signs and sizes of the stability derivatives, CL max, smoothness; the reference's lift, drag and pitching moment |
-| mass | component weights, CG, inertia, static margin | target empty mass; Roskam's radii of gyration; margin 5–40 % MAC |
+| mass | component weights, CG, inertia, static margin | target empty mass; Roskam's radii of gyration; margin 5–40 % MAC (fly-by-wire: from −15 %, full and with the tanks dry) |
 | propulsion | propeller thrust and power tables, engine | peak efficiency, static thrust / weight |
-| build | `<name>.xml`, `Engines/`; the fly-by-wire's gains | the fly-by-wire's short period, MIL-F-8785C |
+| build | `<name>.xml`, `Engines/`; the fly-by-wire's gains | the fly-by-wire's short period, MIL-F-8785C; full nose-down control reaching 2° past the angle-of-attack limit |
 | model | `<name>.glb`: the airframe as one closed solid, its moving parts on their hinges | no crack, pinch or loose piece; gear stowed inside; length, span and height against `[dimensions]` |
 | verify | JSBSim's forces and moments at 150 random states, compared with the tables | largest error below 0.002 in any coefficient |
-| fly | trim across the speed range; stall; climb and ceiling; top speed; dynamic modes; 40 runs from random states; six crashes into the ground. A fighter instead: top speed at sea level and 36,000 ft, excess power, ceiling, sustained turn, the angle-of-attack limiter, a 3 g step, a full-stick roll | `[targets]`, MIL-F-8785C level 1, no diverged run; crashes that stop without blowing up |
-| calibrate | `calibration.toml`: extra drag and propeller pitch; for a jet, the wave drag | `[targets]` |
+| fly | trim across the speed range; stall; climb and ceiling; top speed; dynamic modes; 40 runs from random states; six crashes into the ground. A fighter instead: top speed at sea level and at the published height, excess power, the ceiling at the best climb speed, sustained turn, the angle-of-attack limiter, a 3 g step from trim, a full-stick roll | `[targets]`, MIL-F-8785C level 1, no diverged run; crashes that stop without blowing up |
+| calibrate | `calibration.toml`: extra drag, and the propeller pitch unless the design gives the real one; for a jet, the throttle ratio and the wave drag | `[targets]` |
 | report | `out/report.html` | |
 
 The fly stage flies the same tests on a reference aircraft (`reference =
@@ -111,7 +111,8 @@ pitch = 0.30
 [mass]
 empty = 21.0                     # kg; components by name, or Raymer's statistics
 [targets]                        # optional: what fly checks against
-stall_speed_kcas = 27            # also max_speed_ktas, climb_rate_fpm, service_ceiling_ft
+stall_speed_kcas = 27            # also max_speed_ktas, climb_rate_fpm, service_ceiling_ft;
+                                 # operational_ceiling_ft for a published clearance (reached or not)
 ```
 
 A fighter adds strakes, all-moving tails, surfaces that several channels
@@ -296,9 +297,16 @@ For fighters:
   pressure and Mach number (`hangar/fcs.py`):
   - Pitch: angle-of-attack and pitch-rate feedback give the short period
     CAP 1 and damping 0.8. A load-factor command follows a model response,
-    limited by the angle of attack left, counting the pitch rate's next
-    0.25 s, so an unstable canard delta pitching up fast is caught before it
-    gets to the limit.
+    limited by the angle of attack left, counting its rise over the next
+    0.35 s. Past the limit a push back gives all the nose-down travel 4°
+    beyond it, so an unstable canard delta pitching up fast is caught. The
+    command rises at most 12 g/s: a full pull at once would pitch an agile
+    airframe (the MiG-29A) faster than its nose-down control can stop.
+  - Pitching moment: the elevator cancels the moment's departures from a
+    straight line through the angle-of-attack envelope (a table over α and
+    Mach), and the gains are designed on that line. A band of local
+    instability, such as the F-35A's tail passing through the wing's wake
+    at 2–5°, then no longer throws a 3 g step up to 70 % past its target.
   - Roll: a roll-rate command with bank hold.
   - Yaw: a yaw damper, and sideslip from the pedals.
 
@@ -348,22 +356,22 @@ The viewer's names for the moving nodes are in
 
 The C172P was built from public dimensions, not from JSBSim's c172x tables;
 its tail stands where c172x's tail arm and a three-view put it, and its lift
-struts and wheel spats are drawn. Calibration fitted two numbers:
+struts and wheel spats are drawn. Its propeller has the real McCauley's
+57 in (1.448 m) pitch, and calibration fits one number, to the top speed:
 
-- **Extra drag area, 0.27 m².** This stands for the struts, cooling and gaps
-  the estimate does not see.
-- **Propeller pitch, 1.452 m.** The real McCauley propeller has a 57 in
-  (1.448 m) pitch.
+- **Extra drag area, 0.235 m².** This stands for the struts, cooling and
+  gaps the estimate does not see.
 
-The top speed and the climb rate were the calibration's targets. The stall
-speed, the ceiling and the dynamics are predictions.
+The stall speed, the climb, the ceiling and the dynamics are predictions.
+Top speeds are flown: full throttle, the height held, until the speed
+settles.
 
 | sea level, 2400 lb | hangar c172 | POH | JSBSim c172x (stock) |
 |---|---|---|---|
 | stall, clean | 49.5 KCAS | 51 | 41.6 |
-| maximum level speed | 125.8 KTAS | 123 | 144 |
-| best rate of climb | 689 ft/min | 700 | 870 |
-| service ceiling | 12,690 ft | 13,000 | 25,100 |
+| maximum level speed | 122.7 KTAS | 123 | 131 |
+| best rate of climb | 715 ft/min | 700 | 870 |
+| service ceiling | 12,970 ft | 13,000 | 25,100 |
 
 The dynamic modes at 1500 m and 1.9 times the stall speed, first as the
 linear model predicts them and then as identified from JSBSim's response:
@@ -407,13 +415,13 @@ Flown through its fly-by-wire:
 
 | F-16C, clean | hangar | published |
 |---|---|---|
-| top speed, 40,000 ft | Mach 2.05 (calibrated: TR 1.22) | Mach 2.05 |
-| sustained turn, Mach 0.9, 15,000 ft | 12.7 deg/s | about 13.5 deg/s |
-| full aft stick, 350 kt | 7.3 g, α held at 24.7° | α limit 25° |
-| full-stick roll, 350 kt | 301 deg/s | 308 deg/s (limit) |
-| top speed, sea level | 877 kt | 795 kt |
-| best rate of climb | 63,000 ft/min | 50,000 ft/min |
-| service ceiling | 59,200 ft | 50,000+ ft |
+| top speed, 40,000 ft | Mach 2.04 (calibrated: TR 1.22) | Mach 2.05 |
+| sustained turn, Mach 0.9, 15,000 ft | 12.5 deg/s | about 13.5 deg/s |
+| full aft stick, 350 kt | 7.1 g, α held at 25.0° | α limit 25° |
+| full-stick roll, 350 kt | 264 deg/s | 308 deg/s (limit) |
+| top speed, sea level | 874 kt | 795 kt |
+| best rate of climb | 62,600 ft/min | 50,000 ft/min |
+| service ceiling | 61,800 ft | 50,000+ ft |
 
 The top speed at 40,000 ft is the calibration's one target. The rest are
 predictions. The published sea-level speed is the airframe's limit, not
@@ -439,28 +447,30 @@ estimates):
 
 | aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft | α held (limit) |
 |---|---|---|---|---|---|
-| F-16C Block 52 | `f16c` | 2.06 (2.05) | 63,000 (50,000) | 59,200 (50,000) | 24.7° (25°) |
-| F-15C | `f15c` | 2.44 (2.5) | 63,200 (50,000) | 60,700 (65,000) | 30.3° (30°) |
-| F/A-18C | `fa18c` | 1.82 (1.8) | 50,900 (45,000) | 58,900 (50,000) | 35.5° (35°) |
-| F-22A | `f22a` | 2.27 (2.25) | 62,100 | 58,900 (65,000) | 40.2° (40°) |
-| F-35A | `f35a` | 1.70 (1.6) | 44,700 | 55,000 (50,000) | 19.9° (20°) |
-| Su-27S | `su27s` | 2.34 (2.35) | 64,300 (59,000) | 61,200 (60,700) | 26.2° (26°) |
-| Su-57 | `su57` | 1.99 (2.0) | 56,300 | 56,100 (65,600) | 29.3° (26°) |
-| MiG-29A | `mig29a` | 2.24 (2.25) | 63,800 (65,000) | 60,000 (59,000) | 27.6° (26°) |
-| Typhoon | `typhoon` | 2.00 (2.0) | 72,400 (62,000) | 58,800 (55,000) | 30.8° (30°) |
-| Rafale C | `rafale` | 1.81 (1.8) | 60,200 (60,000) | 59,200 (50,000) | 33.3° (32°) |
-| JAS 39C Gripen | `gripen` | 1.99 (2.0) | 49,500 | 56,800 (50,000) | 28.8° (28°) |
-| Mirage 2000C | `mirage2000` | 2.19 (2.2) | 54,600 (56,000) | 56,800 (56,000) | 31.4° (29°) |
-| J-10A | `j10a` | 2.20 (2.2) | 50,600 | 55,000 (59,000) | 31.7° (30°) |
-| J-20A | `j20a` | 2.00 (2.0) | 51,000 | 55,800 (66,000) | 29.5° (30°) |
+| F-16C Block 52 | `f16c` | 2.04 (2.05) | 62,600 (50,000) | 61,800 (50,000+) | 25.0° (25°) |
+| F-15C | `f15c` | 2.43 (2.5) | 63,200 (50,000) | 64,700 (65,000) | 30.2° (30°) |
+| F/A-18C | `fa18c` | 1.81 (1.8) | 50,800 (45,000) | 60,100 (50,000+) | 35.0° (35°) |
+| F-22A | `f22a` | 2.25 (2.25) | 62,100 | 61,600 (65,000) | 40.5° (40°) |
+| F-35A | `f35a` | 1.59 (1.6) | 44,900 | 57,000 (50,000+) | 19.8° (20°) |
+| Su-27S | `su27s` | 2.34 (2.35) | 64,300 (59,000) | 65,100 (60,700) | 26.3° (26°) |
+| Su-57 | `su57` | 1.99 (2.0) | 56,300 | 57,500 (65,600) | 26.4° (26°) |
+| MiG-29A | `mig29a` | 2.24 (2.25) | 64,000 (65,000) | 63,000 (59,000) | 26.6° (26°) |
+| Typhoon | `typhoon` | 2.01 (2.0) | 72,500 (62,000) | 61,500 (55,000+) | 32.0° (30°) |
+| Rafale C | `rafale` | 1.82 (1.8) | 60,100 (60,000) | 61,500 (50,000+) | 29.7° (29°) |
+| JAS 39C Gripen | `gripen` | 1.99 (2.0) | 49,400 | 59,700 (50,000+) | 28.0° (28°) |
+| Mirage 2000C | `mirage2000` | 2.19 (2.2) | 54,900 (56,000) | 57,900 (56,000) | 29.0° (29°) |
+| J-10A | `j10a` | 2.20 (2.2) | 50,500 | 57,600 (59,000) | 30.2° (30°) |
+| J-20A | `j20a` | 2.00 (2.0) | 50,900 | 57,800 (66,000) | 30.2° (30°) |
 
-- The top speed at altitude is each design's one calibration target. Every
-  other number is a prediction. The table flies it at 36,000 ft; the
-  F-16C's and F-35A's are published at 40,000 ft, where the calibration
-  meets them.
-- Published ceilings of 50,000 ft are operational limits. The model's
-  ceiling is where the excess power at Mach 0.9 runs out, some 6-9,000 ft
-  higher.
+- The top speed at altitude is each design's one calibration target,
+  flown where it is published: 40,000 ft for the five American designs,
+  36,000 ft for the rest. Every other number is a prediction.
+- The ceiling is where the best climb, at any Mach number the aircraft can
+  hold level flight at, falls to 100 ft/min. A published 50,000 ft (and
+  the Typhoon's 55,000) is a clearance, not where the climb runs out: the
+  model must reach it (shown with a +).
+- Handling at 350 kt, from trim: a 3 g step overshoots 3-25 % and reaches
+  90 % in 0.6-1.0 s; full aft stick holds each limit within 2°.
 - Engines fitted to Mach 2.3-2.5 keep too much thrust at sea level (see
   [Limits](#limits)).
 
@@ -481,23 +491,26 @@ estimates):
 - **Engines.** Piston, electric, and afterburning turbofans. Thrust
   lapse comes from one published model, not from each engine's own data. An
   engine fitted to Mach 2.3-2.5 at altitude keeps too much thrust at sea
-  level: the F-15C, Su-27S and MiG-29A reach 950-1,090 kt there, where the
-  real ones are held near 800 kt.
+  level: the F-15C and Su-27S reach 990-1,070 kt there, where the real ones
+  are held near 800 kt.
 - **High angle of attack.** Forebody vortices, and the fin's shielding by
   the wing, are not modelled. Past about 30° a fighter keeps more
   directional stability than the real one. Thrust vectoring is not modelled
   either: the Su-57's limiter holds the 30° its aerodynamic controls can.
-  The F-35A's holds 20°: past about 21° its stabilators, stalled, cannot
-  bring the nose down in this model (the real one flies to 50°).
+  The F-35A's holds 20°: past about 23° its stabilators, stalled, can no
+  longer bring the nose down in this model (the real one flies to 50°).
 - **Tails on booms.** The lattice carries a horizontal tail across the gap
   between two booms (Su-27, MiG-29) as if it were one surface, so those
   aircraft come out stable where the real ones are close to neutral.
 - **Balance.** Real fighters' CGs are rarely published. The deltas' are
-  placed 3-10 % of the MAC behind the neutral point the model finds, as far
-  aft as their angle-of-attack limiters hold and their main wheels allow.
-  For the Rafale and the Typhoon that leaves over a fifth of the weight on
-  the nose wheel, more than the real ones carry: the model's neutral point
-  lies ahead of theirs.
+  placed 3-13 % of the MAC behind the neutral point the model finds, where
+  their main wheels put them: a fifth or less of the weight on the nose
+  wheel. Full nose-down control still reaches a few degrees past each
+  angle-of-attack limit there (the build stage checks it).
+- **Post-stall tables in sideslip.** Between about 50° and 60° of angle of
+  attack with 15-50° of sideslip, the strips' coupling can settle on either
+  of two solutions, and the tables jump there (the aero stage's smoothness
+  warning).
 - **Leading-edge devices.** The flight controls move them on the F-16's
   published schedule (NASA TP-1538), standing in for each type's own; the
   simulation reports where they are (`leadingEdgeFlapRad`) and the 3D model

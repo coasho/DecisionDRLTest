@@ -106,7 +106,7 @@ mass = 150.0              # installed: engine, accessories, propeller, cowling
 position = [-0.958, 0.0, 0.676]
 diameter = 1.905          # McCauley 1C160, 75 in
 blades = 2
-pitch = 1.65              # geometric pitch at 75 % radius (65 in; calibrated by top speed)
+pitch = 1.448             # geometric pitch at 75 % radius: the McCauley 1C160/DTM7557's 57 in
 rotation = "cw"
 
 [[gear]]

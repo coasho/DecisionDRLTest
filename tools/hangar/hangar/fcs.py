@@ -11,14 +11,23 @@ agent or a pilot flies it like any other aircraft:
 - pitch: a load factor command. Neutral stick holds the flight path (the
   load factor that balances gravity, cos(theta) cos(phi)); full aft stick
   commands n_max, full forward n_min - no more than the lift at the angle
-  of attack limits gives, through a 0.2 s prefilter. An inner loop feeds back angle of
+  of attack limits gives, through a 0.2 s prefilter and a 12 g/s onset
+  limit. An inner loop feeds back angle of
   attack and pitch rate to place the short period - frequency from the
   Control Anticipation Parameter (CAP 1, the middle of MIL-F-8785C's level 1
   for category A), damping 0.8 - which makes an unstable airframe fly like a
   stable one; a feedforward gives the command, an integrator on the error
-  from the response it should give (a 0.4 s lag of the command) trims. Approaching alpha_max the error is limited by the
-  angle of attack left (counting the pitch rate's next quarter second as
-  spent), so the aircraft cannot be pulled past it;
+  from the response it should give (a 0.4 s lag of the command) trims.
+  Approaching alpha_max the error is limited by the angle of attack left
+  (counting its rise over the next 0.35 s as spent), so the aircraft cannot
+  be pulled past it; past it a push back in proportion gives all the
+  nose-down travel 4 deg beyond, so an unstable airframe pitching up fast
+  is caught at once. The pitching moment's departures from a straight line
+  through the angle-of-attack envelope (a tail in the wing's wake, vortex
+  lift, a break) are cancelled by the elevator from a table over angle of
+  attack and Mach number, and the gains are designed on the line: an
+  airframe unstable in one band of angle of attack and stable in the next
+  flies as the design expects through both;
 - roll: a roll-rate command about the flight path (stability axes), the
   roll mode's time constant placed at 0.2 s, the rate limited by the
   rolling moment available; an integrator holds the bank angle at neutral
@@ -106,9 +115,80 @@ def _trim_alpha(tabs, CL, mach):
     return float(np.interp(min(CLb, cl[i]), cl[: i + 1], a[k][: i + 1]))
 
 
-def design_point(tabs, aircraft, inertia, qbar_pa, mach, opt):
+def moment_line(tabs, aircraft, cg, opt):
+    """The pitching moment about the centre of gravity over the angle-of-
+    attack envelope (low speed, no sideslip), the straight line fitted
+    through it, and the elevator power at each angle of attack: the control
+    law cancels the moment's departures from the line with the elevator and
+    is designed on the line. None without an elevator."""
+    t = tabs["controls"].get("elevator")
+    if t is None:
+        return None
+    a = aircraft
+    al = tabs["alpha"]
+    r = np.radians(al)
+    j0 = int(np.argmin(np.abs(tabs["beta"])))
+    base = tabs["base"]
+    dx = (cg[0] - a.aero_point[0]) / a.c
+    cn = base["CL"][:, j0] * np.cos(r) + base["CD"][:, j0] * np.sin(r)
+    cm = base["Cm"][:, j0] + cn * dx
+    k = (al >= opt["alpha_min_deg"] - 1e-9) & (al <= opt["alpha_max_deg"] + 1e-9)
+    slope, icpt = np.polyfit(r[k], cm[k], 1)
+    d = t["deflection"]
+    i0 = int(np.argmin(np.abs(d)))
+    ip, im = min(i0 + 1, len(d) - 1), max(i0 - 1, 0)
+    step = math.radians(d[ip] - d[im])
+    cm_de = (t["Cm"][:, ip] - t["Cm"][:, im]) / step
+    if "CL" in t:
+        cm_de = cm_de + (t["CL"][:, ip] - t["CL"][:, im]) / step * dx
+    return {"alpha_deg": al[k], "slope": float(slope), "departure": (cm - icpt - slope * r)[k], "cm_de": cm_de[k]}
+
+
+def nose_down_reach(tabs, aircraft, cg, opt, search=20.0):
+    """How far past alpha_max full nose-down control still brings the nose
+    down: the pitching moment about the centre of gravity with the pitch
+    channel at its nose-down stop (low speed, no sideslip), and the first
+    angle of attack past alpha_max where it is no longer negative - None if
+    it stays negative `search` deg past, or without an elevator. Past it an
+    aircraft the limiter lets through would hang there."""
+    t = tabs["controls"].get("elevator")
+    if t is None:
+        return None
+    a = aircraft
+    j0 = int(np.argmin(np.abs(tabs["beta"])))
+    base = tabs["base"]
+    i = int(np.argmax(t["deflection"]))     # nose-down elevator is positive
+    al = np.arange(opt["alpha_max_deg"], opt["alpha_max_deg"] + search + 1e-9, 0.25)
+    r = np.radians(al)
+
+    def at(tab):
+        return np.interp(al, tabs["alpha"], tab)
+    cl = at(base["CL"][:, j0]) + (at(t["CL"][:, i]) if "CL" in t else 0.0)
+    cd = at(base["CD"][:, j0]) + (at(t["CD"][:, i]) if "CD" in t else 0.0)
+    cm = at(base["Cm"][:, j0]) + at(t["Cm"][:, i]) + (cl * np.cos(r) + cd * np.sin(r)) * (cg[0] - a.aero_point[0]) / a.c
+    up = np.nonzero(cm >= 0.0)[0]
+    return {"alpha_deg": float(al[up[0]]) if len(up) else None, "cm_at_limit": float(cm[0]),
+            "deflection_deg": float(t["deflection"][i])}
+
+
+def moment_compensation(tabs, line, machs, de_lo, de_hi):
+    """The elevator (rad) that cancels the pitching moment's departure from
+    its line, over angle of attack (rows) and Mach number (columns): the
+    departure over the elevator's power there, which Mach scales."""
+    mt = tabs.get("mach")
+    out = np.zeros((len(line["alpha_deg"]), len(machs)))
+    for j, mach in enumerate(machs):
+        power = line["cm_de"] * _mach_factor(mt, "K_elevator", mach)
+        ok = power < -1e-3          # nose-down elevator is positive, its moment negative
+        out[ok, j] = -line["departure"][ok] / power[ok]
+    return np.clip(out, de_lo, de_hi)
+
+
+def design_point(tabs, aircraft, inertia, qbar_pa, mach, opt, cma_line=None):
     """The gains at one flight condition (dynamic pressure, Mach number),
-    and the closed loop's modes there."""
+    and the closed loop's modes there. With cma_line (the slope of
+    moment_line) the airframe's pitch stiffness is the line's, with Mach's
+    changes on it - the moment's departures from it are compensated."""
     m, cg, Ixx, Iyy, Izz, _ = inertia
     a = aircraft
     S, b, c = a.S, a.b, a.c
@@ -122,6 +202,9 @@ def design_point(tabs, aircraft, inertia, qbar_pa, mach, opt):
     # moments about the centre of gravity
     dx = cg[0] - a.aero_point[0]
     Cma = d["Cma"] + d["CLa"] * dx / c
+    if cma_line is not None:
+        low = T.derivatives(tabs, alpha)
+        Cma += cma_line - (low["Cma"] + low["CLa"] * dx / c)
     Cmq = d["Cmq"] + d.get("Cmad", 0.0) + d["CLq"] * dx / c
     Cmde = d.get("Cm_elevator", 0.0) + d.get("CL_elevator", 0.0) * dx / c
     CLde = d.get("CL_elevator", 0.0)
@@ -207,11 +290,18 @@ def design(tabs, aircraft, mass_model):
     inertia = loaded_inertia(mass_model)
     top = float(tabs["mach"]["mach"][-1]) if tabs.get("mach") is not None else 0.9
     machs = [m for m in MACH if m <= top + 1e-9]
-    points = [[design_point(tabs, aircraft, inertia, q * PSF, m, opt) for m in machs] for q in QBAR_PSF]
+    line = moment_line(tabs, aircraft, inertia[1], opt)
+    slope = line["slope"] if line is not None else None
+    points = [[design_point(tabs, aircraft, inertia, q * PSF, m, opt, slope) for m in machs] for q in QBAR_PSF]
     tables = {k: np.array([[p[k] for p in row] for row in points]) for k in GAINS}
     for k, lim in LIMITS.items():
         tables[k] = np.clip(tables[k], -lim, lim)
-    return {"qbar_psf": np.array(QBAR_PSF), "mach": np.array(machs), "gains": tables, "options": opt, "points": points}
+    out = {"qbar_psf": np.array(QBAR_PSF), "mach": np.array(machs), "gains": tables, "options": opt, "points": points}
+    if line is not None:
+        de_lo, de_hi = (math.radians(x) for x in aircraft.channel_limits("elevator"))
+        out["moment"] = {"alpha_deg": line["alpha_deg"], "slope": slope, "departure": line["departure"],
+                         "elevator": moment_compensation(tabs, line, machs, de_lo, de_hi)}
+    return out
 
 
 # -- the JSBSim channels -------------------------------------------------------------------------
@@ -232,6 +322,29 @@ def _gain_table(name, fbw, key, indent=8):
 %s    </table>
 %s  </function>
 %s</fcs_function>""" % (pad, name, pad, pad, pad, pad, pad, head, body, pad, pad, pad, pad)
+
+
+def _moment_table(fbw, indent=8):
+    pad = " " * indent
+    mo = fbw["moment"]
+    head = pad + "          " + "".join("%10.3f" % m for m in fbw["mach"])
+    body = "\n".join(pad + "%10.5f" % math.radians(al) + "".join("%10.5f" % v for v in mo["elevator"][i])
+                     for i, al in enumerate(mo["alpha_deg"]))
+    return """%s<!-- the pitching moment's departures from a straight line through the
+%s     angle-of-attack envelope (%+.3f per rad about the CG), cancelled by the
+%s     elevator: the gains are designed on the line -->
+%s<fcs_function name="fcs/fbw/moment-comp">
+%s  <function>
+%s    <table>
+%s      <independentVar lookup="row">aero/alpha-rad</independentVar>
+%s      <independentVar lookup="column">velocities/mach</independentVar>
+%s      <tableData>
+%s
+%s
+%s      </tableData>
+%s    </table>
+%s  </function>
+%s</fcs_function>""" % (pad, pad, mo["slope"], pad, pad, pad, pad, pad, pad, pad, head, body, pad, pad, pad, pad)
 
 
 def channels_xml(aircraft, fbw):
@@ -262,9 +375,12 @@ def channels_xml(aircraft, fbw):
 %s
 %s
 %s
+%s
         <!-- stick to load factor beyond the gravity reference, aft (negative) to n_max,
              no more than the lift at the angle-of-attack limits gives, through a
-             0.15 s prefilter -->
+             0.2 s prefilter and a 12 g/s onset limit (a full pull at once pitches
+             an agile airframe faster than its nose-down control can stop at
+             the angle-of-attack limit) -->
         <fcs_function name="fcs/fbw/dn-stick">
           <function>
             <max>
@@ -283,10 +399,14 @@ def channels_xml(aircraft, fbw):
             </max>
           </function>
         </fcs_function>
-        <lag_filter name="fcs/fbw/dn-cmd">
+        <lag_filter name="fcs/fbw/dn-lag">
           <input>fcs/fbw/dn-stick</input>
           <c1>5.0</c1>
         </lag_filter>
+        <actuator name="fcs/fbw/dn-cmd">
+          <input>fcs/fbw/dn-lag</input>
+          <rate_limit>12.0</rate_limit>
+        </actuator>
         <!-- the response the command should produce (the short period's rise): the
              integrator trims away what differs from it, not the rise itself -->
         <lag_filter name="fcs/fbw/dn-model">
@@ -354,12 +474,27 @@ def channels_xml(aircraft, fbw):
           <trigger>fcs/fbw/pitch-hold</trigger>
           <clipto> <min>-0.5</min> <max>0.5</max> </clipto>
         </integrator>
+        <!-- past an angle-of-attack limit (the next 0.35 s counted) a push back
+             in proportion, all the travel 4 deg beyond: an unstable airframe
+             pitching up fast needs it at once, not when an integrator winds -->
+        <fcs_function name="fcs/fbw/alpha-push">
+          <function>
+            <difference>
+              <product><value>%.5f</value>
+                <max><value>0</value><difference><property>fcs/fbw/alpha-ahead</property><value>%.5f</value></difference></max></product>
+              <product><value>%.5f</value>
+                <max><value>0</value><difference><value>%.5f</value><property>fcs/fbw/alpha-ahead</property></difference></max></product>
+            </difference>
+          </function>
+        </fcs_function>
         <!-- the feedforward (of the limited command) fades out past alpha_max, with
              the angle of attack's next 0.35 s counted: an unstable airframe
              pitching up fast needs its nose-down control before it gets there -->
         <fcs_function name="fcs/fbw/elevator-raw">
           <function>
             <sum>
+              <property>fcs/fbw/alpha-push</property>
+              <property>fcs/fbw/moment-comp</property>
               <product><value>-1</value><property>fcs/fbw/k-alpha</property><property>aero/alpha-rad</property></product>
               <product><value>-1</value><property>fcs/fbw/k-q</property><property>velocities/q-rad_sec</property></product>
               <product><property>fcs/fbw/k-ff</property><property>fcs/fbw/dn-cmd</property>
@@ -392,9 +527,10 @@ def channels_xml(aircraft, fbw):
         </actuator>
       </channel>""" % (hold, _gain_table("k-alpha", fbw, "k_alpha"), _gain_table("k-q", fbw, "k_q"),
                        _gain_table("k-ff", fbw, "k_ff"), _gain_table("k-i", fbw, "k_i"),
-                       _gain_table("n-alpha", fbw, "n_alpha"),
+                       _gain_table("n-alpha", fbw, "n_alpha"), _moment_table(fbw),
                        o["n_max"] - 1.0, o["n_min"] - 1.0, rad(o["alpha_max_deg"]), rad(o["alpha_min_deg"]),
                        rad(o["alpha_max_deg"]), rad(o["alpha_min_deg"]), de_hi, de_lo,
+                       de_hi / rad(4.0), rad(o["alpha_max_deg"]), -de_lo / rad(4.0), rad(o["alpha_min_deg"]),
                        rad(o["alpha_min_deg"] - 5.0), rad(o["alpha_min_deg"]), rad(o["alpha_max_deg"]),
                        rad(o["alpha_max_deg"] + 5.0), de_lo, de_hi, max(1.05, (de_hi - de_lo) / 0.83)))
     if "aileron" in aircraft.channels():

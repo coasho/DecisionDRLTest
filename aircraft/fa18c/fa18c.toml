@@ -249,4 +249,4 @@ height = 4.66
 max_mach = 1.8                # at altitude, full afterburner (calibrates the wave drag)
 max_mach_altitude_ft = 40000
 climb_rate_fpm = 45000
-service_ceiling_ft = 50000
+operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out

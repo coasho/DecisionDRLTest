@@ -174,32 +174,23 @@ void simplify(Mesh& m, std::vector<std::uint16_t>& material, const std::vector<c
         std::sort(out.begin(), out.end());
         out.erase(std::unique(out.begin(), out.end()), out.end());
     };
-    while (!heap.empty() && (targetFaces == 0 || faces > targetFaces)) {
-        const Entry e = heap.top();
-        heap.pop();
-        if (deadV[e.a] || deadV[e.b]) continue;
-        V3 target;
-        const double c = cost(e.a, e.b, target);
-        if (c > e.cost * (1.0 + 1e-9) + 1e-30) { // the quadrics grew since: requeue
-            if (c < 1e299) heap.push({c, e.a, e.b});
-            continue;
-        }
-        if (c > maxCost) break;
-        const std::uint32_t a = e.a, b = e.b;
+    // edge (a, b) collapsed to target - b merged into a - if the surface stays
+    // a manifold (the link condition) and no triangle folds over, collapses or
+    // turns into a needle; slivers (the pass below) leave other slivers be,
+    // their turn comes
+    auto collapse = [&](std::uint32_t a, std::uint32_t b, V3 target, bool sliver) -> bool {
         alive(a, fa);
         alive(b, fb);
         shared.clear();
         for (auto f : fb)
             if (m.f[f][0] == a || m.f[f][1] == a || m.f[f][2] == a) shared.push_back(f);
-        if (shared.size() != 2) continue; // gone, or not a manifold edge
+        if (shared.size() != 2) return false; // gone, or not a manifold edge
         // link condition: a and b share exactly the two vertices across the edge
         neighbours(a, fa, na);
         neighbours(b, fb, nb);
         common.clear();
         std::set_intersection(na.begin(), na.end(), nb.begin(), nb.end(), std::back_inserter(common));
-        if (common.size() != 2) continue;
-        // no triangle may fold over, collapse or turn into a needle
-        bool ok = true;
+        if (common.size() != 2) return false;
         for (const auto* fs : {&fa, &fb}) {
             for (auto f : *fs) {
                 if (f == shared[0] || f == shared[1]) continue;
@@ -211,22 +202,14 @@ void simplify(Mesh& m, std::vector<std::uint16_t>& material, const std::vector<c
                 }
                 const V3 n0 = cross(p[1] - p[0], p[2] - p[0]), n1 = cross(q[1] - q[0], q[2] - q[0]);
                 const double l0 = length(n0), l1 = length(n1);
-                if (l1 <= 1e-14 || dot(n0, n1) < 0.3 * l0 * l1) {
-                    ok = false;
-                    break;
-                }
+                if (sliver && l0 <= 1e-14) continue;
+                if (l1 <= 1e-14 || dot(n0, n1) < 0.3 * l0 * l1) return false;
                 const double e0 = dot(q[1] - q[0], q[1] - q[0]), e1 = dot(q[2] - q[1], q[2] - q[1]), e2 = dot(q[0] - q[2], q[0] - q[2]);
                 const double f0 = dot(p[1] - p[0], p[1] - p[0]), f1 = dot(p[2] - p[1], p[2] - p[1]), f2 = dot(p[0] - p[2], p[0] - p[2]);
                 const double qNew = l1 / std::max({e0, e1, e2}), qOld = l0 / std::max({f0, f1, f2, 1e-30});
-                if (qNew < 0.02 && qNew < 0.5 * qOld) {
-                    ok = false;
-                    break;
-                }
+                if (qNew < 0.02 && qNew < 0.5 * qOld) return false;
             }
-            if (!ok) break;
         }
-        if (!ok) continue;
-        // collapse b into a
         m.v[a] = target;
         Q[a] += Q[b];
         weight[a] += weight[b];
@@ -243,12 +226,50 @@ void simplify(Mesh& m, std::vector<std::uint16_t>& material, const std::vector<c
         vf[b].shrink_to_fit();
         alive(a, fa);
         vf[a] = fa;
-        neighbours(a, fa, na);
+        return true;
+    };
+    while (!heap.empty() && (targetFaces == 0 || faces > targetFaces)) {
+        const Entry e = heap.top();
+        heap.pop();
+        if (deadV[e.a] || deadV[e.b]) continue;
+        V3 target;
+        const double c = cost(e.a, e.b, target);
+        if (c > e.cost * (1.0 + 1e-9) + 1e-30) { // the quadrics grew since: requeue
+            if (c < 1e299) heap.push({c, e.a, e.b});
+            continue;
+        }
+        if (c > maxCost) break;
+        if (!collapse(e.a, e.b, target, false)) continue;
+        neighbours(e.a, fa, na);
         for (auto n : na) {
             V3 t;
-            const double cn = cost(a, n, t);
-            if (cn < 1e299) heap.push({cn, a, n});
+            const double cn = cost(e.a, n, t);
+            if (cn < 1e299) heap.push({cn, e.a, n});
         }
+    }
+    // slivers: an edge far shorter than any cell (a cut close to a grid point,
+    // a seam meeting a sharp edge) goes whatever its cost - its two ends are
+    // one point already - so no triangle is left without an area
+    constexpr double kSliver = 1e-4; // m
+    for (int pass = 0; pass < 3; ++pass) {
+        bool any = false;
+        for (std::size_t f = 0; f < nf; ++f) {
+            if (deadF[f]) continue;
+            std::uint32_t a = 0, b = 0;
+            double shortest = 1e300;
+            for (std::size_t k = 0; k < 3; ++k) {
+                const std::uint32_t u = m.f[f][k], w = m.f[f][(k + 1) % 3];
+                const V3 d = m.v[w] - m.v[u];
+                if (dot(d, d) < shortest) {
+                    shortest = dot(d, d);
+                    a = u;
+                    b = w;
+                }
+            }
+            if (shortest > kSliver * kSliver || locked[a] || locked[b]) continue;
+            any |= collapse(a, b, (m.v[a] + m.v[b]) * 0.5, true);
+        }
+        if (!any) break;
     }
     // compact
     std::vector<std::uint32_t> remap(nv, 0);

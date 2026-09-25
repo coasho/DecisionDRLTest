@@ -326,6 +326,30 @@ def climb_performance(f, stall_tas_sl, altitudes=(0.0, 1500.0, 3000.0, 4500.0)):
     return {"rows": rows, "service_ceiling_m": ceiling, "highest_climb_m": max(r["altitude_m"] for r in rows)}
 
 
+def max_level_speed_flown(f, altitude_m, start_ms, seconds=180.0):
+    """The speed where full throttle meets the drag in level flight, flown:
+    trimmed at start_ms, then full throttle with the height held until the
+    speed settles - or, if it has not, the acceleration over the last minute
+    against the speed, extrapolated to zero. (A trim sweep extrapolates the
+    throttle curve past the fastest speed it could trim, which can be far.)"""
+    v = f.spawn(altitude_m, start_ms)
+    tr = f.trim(v)
+    ap = Autopilot(f.dt, tr["pitch_deg"], throttle=1.0)
+    ap.i_outer = tr["pitch_deg"]
+    h = f.run(v, seconds, lambda t, s, veh: ap.command(veh, s, ap.altitude(s, altitude_m)))
+    v.remove()
+    t, tas = h["t"][::6], h["tas"][::6]
+    if len(t) < 40 or abs(h["alt"][-1] - altitude_m) > 30.0:
+        return float("nan")
+    k = t > t[-1] - 60.0
+    dv = _smooth_rate(t, tas, window=10.0)
+    ok = k & np.isfinite(dv)
+    if abs(float(np.mean(dv[ok]))) < 0.01:
+        return float(np.mean(tas[t > t[-1] - 10.0]))
+    slope, icpt = np.polyfit(tas[ok], dv[ok], 1)
+    return float(-icpt / slope) if slope < 0 else float(tas[-1])
+
+
 def max_level_speed(rows):
     """From a trim sweep: the speed at which level flight needs full throttle."""
     ok = [r for r in rows if r["ok"]]
@@ -581,7 +605,7 @@ def level_acceleration(f, pilot, altitude_m, speed_ms, throttle, seconds, stop_b
     wind-free, height held: the climb rate the aircraft could trade for).
     Stops early once the speed has settled."""
     v = f.spawn(altitude_m, speed_ms)
-    rec = {"t": [], "tas": [], "mach": [], "alt": []}
+    rec = {"t": [], "tas": [], "mach": [], "alt": [], "nz": []}
     steady = [0]
 
     def control(t, s, veh):
@@ -590,6 +614,7 @@ def level_acceleration(f, pilot, altitude_m, speed_ms, throttle, seconds, stop_b
         rec["tas"].append(s.airspeed_true_ms)
         rec["mach"].append(s.mach)
         rec["alt"].append(s.altitude_msl_m)
+        rec["nz"].append(s.load_factor)
 
     n = int(round(seconds / f.dt))
     chunk = int(round(5.0 / f.dt))
@@ -616,7 +641,7 @@ def level_acceleration(f, pilot, altitude_m, speed_ms, throttle, seconds, stop_b
     dv = _smooth_rate(t[::6], tas[::6])
     ps = tas[::6] * dv / G0
     return {"t": t[::6], "tas": tas[::6], "mach": np.array(rec["mach"])[::6], "alt": np.array(rec["alt"])[::6],
-            "ps": ps, "settled": bool(len(t) and t[-1] < seconds - 1.0)}
+            "nz": np.array(rec["nz"])[::6], "ps": ps, "settled": bool(len(t) and t[-1] < seconds - 1.0)}
 
 
 def max_level_mach(f, pilot, altitude_m, throttle=1.0, start_mach=0.85, seconds=300.0):
@@ -673,49 +698,129 @@ def turn_performance(f, pilot, altitude_m, mach, throttle=1.0, loads=(3.0, 5.0, 
     return {"altitude_m": altitude_m, "mach": mach, "rows": rows, "n_sustained": n_sus, "rate_deg_s": rate}
 
 
-def pull_and_roll(f, pilot, altitude_m, speed_ms, throttle=1.0):
-    """Handling at a speed: full aft stick for 4 s (the load and angle of
-    attack reached, the instantaneous turn rate); a 3 g command's response;
-    full stick roll from wings level (roll rate, time to 90 deg of bank)."""
+def pull_and_roll(f, pilot, altitude_m, speed_ms, throttle=1.0, settle=5.0):
+    """Handling at a speed, each from a settled start (the spawn is at zero
+    angle of attack; the fly-by-wire trims with the stick at neutral for
+    `settle` s, the throttle holding the speed): full aft stick for 4 s (the
+    load and angle of attack reached, the instantaneous turn rate); a 3 g
+    command's response, in the load factor beyond the gravity reference -
+    what the stick commands (the load factor itself falls as the climb
+    steepens, cos(theta)); full stick roll from wings level (roll rate, time
+    to 90 deg of bank). Each test itself flies at `throttle`."""
     out = {}
+    t0 = settle
+
+    def settled():
+        held = [0.4]
+
+        def thr(t, s):
+            if t >= t0:
+                return throttle
+            err = speed_ms - s.airspeed_true_ms
+            held[0] = float(np.clip(held[0] + 0.02 * err * f.dt, 0.0, 1.0))
+            return float(np.clip(held[0] + 0.1 * err, 0.0, 1.0))
+        return thr
+
     v = f.spawn(altitude_m, speed_ms)
-    h = f.run(v, 6.0, lambda t, s, veh: veh.command_actuator(elevator=-1.0 if 1.0 <= t < 5.0 else 0.0, aileron=0.0,
-                                                               rudder=0.0, throttle=throttle))
+    thr = settled()
+    h = f.run(v, t0 + 5.0, lambda t, s, veh: veh.command_actuator(elevator=-1.0 if t0 <= t < t0 + 4.0 else 0.0, aileron=0.0,
+                                                                    rudder=0.0, throttle=thr(t, s)))
     v.remove()
-    k = (h["t"] >= 1.0) & (h["t"] < 5.0)
+    k = (h["t"] >= t0) & (h["t"] < t0 + 4.0)
     i = int(np.argmax(np.where(k, h["nz"], -1e9)))
     out["pull"] = {"n_max": float(h["nz"][i]), "alpha_max": float(np.max(h["alpha"][k])),
                    "rate_deg_s": float(math.degrees(G0 * math.sqrt(max(h["nz"][i] ** 2 - 1.0, 0.0)) / h["tas"][i]))}
     v = f.spawn(altitude_m, speed_ms)
     dn3 = 3.0 - 1.0
-    h = f.run(v, 7.0, lambda t, s, veh: veh.command_actuator(elevator=pilot.stick(dn3) if t >= 1.0 else 0.0, aileron=0.0,
-                                                               rudder=0.0, throttle=throttle))
+    thr = settled()
+    h = f.run(v, t0 + 6.0, lambda t, s, veh: veh.command_actuator(elevator=pilot.stick(dn3) if t >= t0 else 0.0, aileron=0.0,
+                                                                    rudder=0.0, throttle=thr(t, s)))
     v.remove()
-    k = h["t"] >= 1.0
-    steady = float(np.mean(h["nz"][h["t"] > 5.0]))
-    peak = float(np.max(h["nz"][k]))
-    rise = h["t"][k][np.argmax(h["nz"][k] >= 1.0 + 0.9 * (steady - 1.0))] - 1.0 if np.any(h["nz"][k] >= 1.0 + 0.9 * (steady - 1.0)) else float("nan")
-    out["step"] = {"n_steady": steady, "overshoot": (peak - steady) / max(steady - 1.0, 1e-6), "rise_s": float(rise)}
+    dn = h["nz"] - np.cos(np.radians(h["theta"])) * np.cos(np.radians(h["phi"]))
+    k = h["t"] >= t0
+    before = float(np.mean(dn[(h["t"] >= t0 - 0.5) & ~k]))
+    steady = float(np.mean(dn[h["t"] > t0 + 4.0]))
+    peak = float(np.max(dn[k]))
+    up = dn[k] >= before + 0.9 * (steady - before)
+    rise = h["t"][k][np.argmax(up)] - t0 if np.any(up) else float("nan")
+    out["step"] = {"dn_steady": steady, "dn_before": before, "overshoot": (peak - steady) / max(steady - before, 1e-6),
+                   "rise_s": float(rise)}
     v = f.spawn(altitude_m, speed_ms)
-    h = f.run(v, 4.0, lambda t, s, veh: veh.command_actuator(elevator=pilot.stick(pilot.height(s, altitude_m)),
-                                                               aileron=1.0 if t >= 1.0 else 0.0, rudder=0.0, throttle=throttle))
+    thr = settled()
+    h = f.run(v, t0 + 3.0, lambda t, s, veh: veh.command_actuator(elevator=pilot.stick(pilot.height(s, altitude_m)),
+                                                                    aileron=1.0 if t >= t0 else 0.0, rudder=0.0,
+                                                                    throttle=thr(t, s)))
     v.remove()
-    k = h["t"] >= 1.0
+    k = h["t"] >= t0
     phi = np.unwrap(np.radians(h["phi"]))
-    t90 = h["t"][k][np.argmax(np.degrees(phi[k] - phi[k][0]) >= 90.0)] - 1.0 if np.any(np.degrees(phi[k] - phi[k][0]) >= 90.0) else float("nan")
+    t90 = h["t"][k][np.argmax(np.degrees(phi[k] - phi[k][0]) >= 90.0)] - t0 if np.any(np.degrees(phi[k] - phi[k][0]) >= 90.0) else float("nan")
     out["roll"] = {"p_max": float(np.max(h["p"][k])), "time_to_90_s": float(t90), "beta_max": float(np.max(np.abs(h["beta"][k])))}
     return out
 
 
-def fighter_tests(f, opts, quick=False):
+def service_ceiling(f, pilot, top_mach, quick=False, seconds=20.0):
+    """Where the best specific excess power at full afterburner falls to
+    0.508 m/s (100 ft/min): at each height, level runs at Mach numbers from
+    0.8 up to the top speed, subsonic and supersonic (a fighter's best climb
+    up high can be either), the excess power the energy height's rate over
+    each run's second half - a run counts only if it holds its height at
+    1 g (above its lift or its pitch control's reach an aircraft falls
+    nearly weightless, and gains energy for want of induced drag); the
+    heights rise until the best is below, and the ceiling is interpolated
+    between the last two."""
+    machs = (0.9, 1.2, 1.6, 2.0, 2.4) if quick else (0.8, 0.9, 1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4)
+    step = 3000.0 if quick else 1500.0
+
+    def best_at(h):
+        best = {"altitude_m": h, "ps_max": float("nan"), "mach": float("nan")}
+        for m in machs:
+            if m > max(top_mach, machs[0]) + 0.05:
+                break
+            r = level_acceleration(f, pilot, h, m * _speed_of_sound(h), 1.0, seconds, stop_below=0.0)
+            k = r["t"] >= seconds / 2
+            if np.sum(k) < 5 or abs(float(np.mean(r["nz"][k])) - 1.0) > 0.15 or np.ptp(r["alt"][k]) > 100.0:
+                continue
+            ps = float(np.polyfit(r["t"][k], r["alt"][k] + r["tas"][k] ** 2 / (2 * G0), 1)[0])
+            if not ps <= best["ps_max"]:
+                best.update(ps_max=ps, mach=float(np.mean(r["mach"][k])))
+        return best
+
+    def climbs(row):      # nothing held level there counts as no climb
+        return row["ps_max"] >= 0.508
+
+    rows = [best_at(12000.0)]
+    while not climbs(rows[0]) and rows[0]["altitude_m"] > 3000.0:    # a low ceiling: down first
+        rows.insert(0, best_at(rows[0]["altitude_m"] - 3000.0))
+    while climbs(rows[-1]) and rows[-1]["altitude_m"] < 26000.0:
+        rows.append(best_at(rows[-1]["altitude_m"] + step))
+
+    def bracket():
+        return next((i for i in range(len(rows) - 1) if climbs(rows[i]) and not climbs(rows[i + 1])), None)
+
+    # a height it cannot hold level at bounds the ceiling only from above:
+    # close in on it before interpolating
+    for _ in range(3):
+        i = bracket()
+        if i is None or np.isfinite(rows[i + 1]["ps_max"]) or rows[i + 1]["altitude_m"] - rows[i]["altitude_m"] < 400.0:
+            break
+        rows.insert(i + 1, best_at(0.5 * (rows[i]["altitude_m"] + rows[i + 1]["altitude_m"])))
+    ceiling = float("nan")
+    i = bracket()
+    if i is not None:
+        a, b = rows[i], rows[i + 1]
+        pb = b["ps_max"] if np.isfinite(b["ps_max"]) else 0.0
+        ceiling = a["altitude_m"] + (0.508 - a["ps_max"]) * (b["altitude_m"] - a["altitude_m"]) / (pb - a["ps_max"])
+    return ceiling, rows
+
+
+def fighter_tests(f, opts, quick=False, top_altitude_m=10973.0):
     """A fighter's performance and handling, flown through its fly-by-wire
     (opts: the [flight_control] options): the fastest level speeds at sea
-    level and at 36,000 ft, the specific excess power at sea level (its
-    peak is the best rate of climb), the service ceiling (where the best
-    excess power falls to 0.5 m/s), the sustained turn at 15,000 ft, and the
-    handling at 5,000 ft: the load reached with the stick full aft, a 3 g
-    step, a full-stick roll. The ceiling is the subsonic one, from the
-    excess power at Mach 0.9, as service ceilings are published."""
+    level and at top_altitude_m (36,000 ft, or where the top speed is
+    published), the specific excess power at sea level (its peak is the best
+    rate of climb), the service ceiling at the best climb speed, the
+    sustained turn at 15,000 ft, and the handling at 5,000 ft: the load
+    reached with the stick full aft, a 3 g step, a full-stick roll."""
     pilot = FighterPilot(f.dt, opts["n_max"], opts["n_min"])
     out = {}
     m_sl, run_sl = max_level_mach(f, pilot, 100.0, start_mach=0.4, seconds=150.0 if quick else 240.0)
@@ -725,24 +830,11 @@ def fighter_tests(f, opts, quick=False):
     out["ps_sl"] = {"mach": run_sl["mach"][ok], "ps": run_sl["ps"][ok]}
     out["climb_rate_ms"] = float(run_sl["ps"][i])
     out["climb_mach"] = float(run_sl["mach"][i])
-    m_36, run_36 = max_level_mach(f, pilot, 10973.0, start_mach=0.9, seconds=200.0 if quick else 360.0)
-    out["max_mach_36k"] = m_36
-    out["ps_36k"] = {"mach": run_36["mach"][np.isfinite(run_36["ps"])], "ps": run_36["ps"][np.isfinite(run_36["ps"])]}
-    # the service ceiling (subsonic, as published): the excess power at
-    # Mach 0.9 at a few heights, where it falls to 0.5 m/s
-    rows = []
-    for h in ((12000.0, 14500.0) if quick else (12000.0, 13500.0, 15000.0, 16500.0)):
-        r = level_acceleration(f, pilot, h, 0.88 * _speed_of_sound(h), 1.0, 25.0, stop_below=0.0)
-        k = np.isfinite(r["ps"]) & (r["mach"] >= 0.86) & (r["mach"] <= 0.95)
-        rows.append({"altitude_m": h, "ps_max": float(np.median(r["ps"][k])) if np.any(k) else float("nan")})
-    good = [r for r in rows if np.isfinite(r["ps_max"])]
-    ceiling = float("nan")
-    if len(good) >= 2:
-        slope, icpt = np.polyfit([r["altitude_m"] for r in good], [r["ps_max"] for r in good], 1)
-        if slope < 0:
-            ceiling = float((0.508 - icpt) / slope)
-    out["ceiling_rows"] = rows
-    out["service_ceiling_m"] = ceiling
+    m_top, run_top = max_level_mach(f, pilot, top_altitude_m, start_mach=0.9, seconds=200.0 if quick else 360.0)
+    out["top_altitude_m"] = top_altitude_m
+    out["max_mach_top"] = m_top
+    out["ps_top"] = {"mach": run_top["mach"][np.isfinite(run_top["ps"])], "ps": run_top["ps"][np.isfinite(run_top["ps"])]}
+    out["service_ceiling_m"], out["ceiling_rows"] = service_ceiling(f, pilot, m_top, quick=quick)
     out["turn"] = turn_performance(f, pilot, 4572.0, 0.9, loads=(4.0, 6.0, 8.0) if quick else (3.0, 5.0, 6.0, 7.0, 8.0, 9.0))
     out["handling"] = pull_and_roll(f, pilot, 1524.0, 180.0)
     return out

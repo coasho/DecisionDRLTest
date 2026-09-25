@@ -71,6 +71,11 @@ class Stages(unittest.TestCase):
         model = self.stage(d, "model")
         self.assertTrue(os.path.isfile(model["glb"]))
         self.assertEqual(self.failed(model), [])
+        # meshed: slivers within bounds (the decimator collapses edges shorter
+        # than 0.1 mm; before it, this airframe had 0.25 %)
+        degenerate = [c for c in model["checks"] if c["name"] == "3D model: degenerate triangles"]
+        for c in degenerate:
+            self.assertEqual(c["status"], "pass", "%.3f %% (%s)" % (c["value"], c["note"]))
         self.assertTrue(os.path.isfile(os.path.join(d.dir, "Engines", self.name + "_engine0.xml")))
         # JSBSim flies exactly the tables
         self.assertEqual(self.failed(self.stage(d, "verify")), [])

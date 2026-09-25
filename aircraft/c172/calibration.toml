@@ -1,8 +1,6 @@
-# Written by hangar calibrate (2026-09-24 03:16) to meet the [targets] of c172.toml:
+# Written by hangar calibrate (2026-09-24 18:52) to meet the [targets] of c172.toml:
 # corrections for what the physics estimate does not see. Delete this file to
 # go back to the pure estimate.
 [calibration]
-extra_drag_area_m2 = 0.2670   # drag along the flow, added to the estimate (m2)
-propeller_pitch_m = [1.4518]   # geometric pitch at 75 % radius, per engine
-# fitted: max speed 124.1 kt (target 123), climb 689 ft/min (target 700); the pitch is the
-# real McCauley propeller's (57 in), the drag area refitted with the tail moved forward
+extra_drag_area_m2 = 0.2348   # drag along the flow, added to the estimate (m2)
+# fitted: max speed 122.7 kt (target 123); climb 715 ft/min predicted (published 700)

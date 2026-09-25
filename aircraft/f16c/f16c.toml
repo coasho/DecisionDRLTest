@@ -329,7 +329,7 @@ max_mach = 2.05               # at altitude, full afterburner (calibrates the wa
 max_mach_altitude_ft = 40000
 max_speed_ktas = 795          # Mach 1.2 at sea level
 climb_rate_fpm = 50000
-service_ceiling_ft = 50000
+operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out
 sustained_turn_deg_s = 13.5   # Mach 0.9 at 15,000 ft (energy-maneuverability charts, about 7 g)
 # JSBSim's own f16 (NASA TP-1538 aerodynamics, JSBSim's F100-PW-229 deck) flies
 # the same tests alongside

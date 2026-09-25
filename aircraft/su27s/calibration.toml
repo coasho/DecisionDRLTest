@@ -1,4 +1,4 @@
-# Written by hangar calibrate (2026-09-24 10:43) to meet the [targets] of su27s.toml:
+# Written by hangar calibrate (2026-09-24 19:03) to meet the [targets] of su27s.toml:
 # corrections for what the physics estimate does not see. Delete this file to
 # go back to the pure estimate.
 [calibration]

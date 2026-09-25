@@ -358,18 +358,20 @@ def fbw_gains(fbw, path, name):
 
 def fighter(runs, path, name):
     """A fighter's performance flown: specific excess power over Mach at sea
-    level and 36,000 ft (where it crosses zero: the top speed), the sustained
-    turn (speed change over load factor), the ceiling."""
+    level and at altitude (where it crosses zero: the top speed), the
+    sustained turn (speed change over load factor), the ceiling (the best
+    excess power at each height, over Mach numbers)."""
     fig, axes = plt.subplots(1, 4, figsize=(19, 4.3), dpi=95)
     for label, r in runs.items():
         l, = axes[0].plot(r["ps_sl"]["mach"], r["ps_sl"]["ps"], lw=1.2, label=label)
-        axes[1].plot(r["ps_36k"]["mach"], r["ps_36k"]["ps"], lw=1.2, color=l.get_color())
+        axes[1].plot(r["ps_top"]["mach"], r["ps_top"]["ps"], lw=1.2, color=l.get_color())
         rows = r["turn"]["rows"]
         axes[2].plot([x["n"] for x in rows], [x["dvdt"] for x in rows], "-o", ms=3, color=l.get_color())
         c = r["ceiling_rows"]
         axes[3].plot([x["ps_max"] for x in c], [x["altitude_m"] / 0.3048 for x in c], "-o", ms=3, color=l.get_color())
     axes[0].set_title("excess power at sea level, full afterburner", fontsize=9)
-    axes[1].set_title("excess power at 36,000 ft", fontsize=9)
+    top = next(iter(runs.values()))["top_altitude_m"] / 0.3048
+    axes[1].set_title("excess power at {:,.0f} ft".format(top), fontsize=9)
     axes[2].set_title("level turns at Mach 0.9, 15,000 ft", fontsize=9)
     axes[3].set_title("best excess power over height", fontsize=9)
     for ax, xl, yl in zip(axes, ("Mach", "Mach", "load factor", "P_s (m/s)"), ("P_s (m/s)", "P_s (m/s)", "dV/dt (m/s2)", "ft")):

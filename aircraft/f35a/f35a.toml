@@ -315,4 +315,4 @@ height = 4.38
 # F-35A, published
 max_mach = 1.6                # at altitude, full afterburner
 max_mach_altitude_ft = 40000
-service_ceiling_ft = 50000
+operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out
