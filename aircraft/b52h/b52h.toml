@@ -1,0 +1,457 @@
+# Boeing B-52H Stratofortress, built by hangar from public data.
+#
+# Frame: metres, x aft from the nose tip, y right, z up; z = 0 is the wing
+# root's mid-thickness in the front view, the fuselage's top line 0.71 m
+# above it. Sources: USAF fact sheet (dimensions, weights, engines, speed,
+# ceiling); Wikipedia and its sources (Knaack 1988; NASA SP-468, Loftin,
+# "Quest for Performance", 1985: 35 deg quarter-chord sweep, aspect ratio
+# 8.56, sections 14 % thick at the root to 8 % at the tip); B. Schiff, AOPA
+# Pilot, May 2015 (the wing's 8 deg incidence, no ailerons on the H);
+# thisdayinaviation.com after the Standard Aircraft Characteristics (fin
+# 22 ft 11 in tall; 555 kt, Mach 0.906, at 20,700 ft); Pratt & Whitney
+# (TF33-P-3).
+#
+# The shape is measured off B. Matsuyama's B-52H three-view (Wikimedia
+# Commons, CC0), scaled in y and z by the published span (56.39 m: its
+# 15.88 m tailplane then matches the published 52 ft) and in x by the
+# published length without the tail gun's barrel (48.565 m). The drawing
+# runs 1.9 % long in x against its span; so scaled, its quarter-chord sweep
+# comes out at the published 35 deg. The main wheels' stations are measured
+# off the NB-52B three-view (NASA Dryden, public domain): the H keeps the
+# B's forward fuselage and gear.
+#
+# The wing is drawn and flown in its ground shape, drooping 1.66 m to the
+# tips with fuel aboard, as the front view has it; in flight it flexes up
+# (the tips move through 32 ft, 16 up and 16 down: AOPA), which the tables
+# do not model. The B-52H has no ailerons: seven spoilers on each wing roll
+# it. hangar has no spoilers, so ailerons on the outer wing stand in for
+# them (below).
+
+[aircraft]
+name = "b52h"
+description = "Boeing B-52H Stratofortress (hangar build)"
+category = "bomber"
+
+[analysis]
+speed = 100.0                # m/s: the Reynolds numbers of cruise at 35,000 ft (sea-level viscosity)
+
+# The published wing area, 4,000 ft2, is the reference; the drawing's
+# planform, taken to the centre line, has 5 % more
+[reference]
+area = 371.6
+
+# The wing: a straight taper to the centre line, measured off the drawing -
+# the leading edge swept 37.3 deg (35 deg at the quarter chord), root chord
+# 10.24 m, tip 3.62 m at the 28.19 m half span. Set on top of the fuselage at
+# 8 deg incidence (AOPA; its root's upper surface level with the fuselage's
+# top), washed out to 5 deg at the tip (estimate). NACA 6A sections from 14 %
+# at the root to 8 % at the tip (Loftin; the families from Lednicer's guide:
+# 63A2xx root, 65A2xx tip): thick and round-nosed, they stall as sections do
+# (vortex = false: no fighter's edge vortex). The droop: the front view's
+# wing midline, 0.36 m down at the inboard pods, 0.81 m at the outboard pods,
+# 1.66 m at the tip.
+[[surface]]
+name = "wing"
+kind = "wing"
+vortex = false
+sections = [
+  { le = [10.174, 0.000, 0.713], chord = 10.244, twist = 8.0, airfoil = "naca63a214" },
+  { le = [17.982, 10.270, 0.114], chord = 7.830, twist = 6.9, airfoil = "naca64a212" },
+  { le = [23.897, 18.050, -0.492], chord = 6.001, twist = 6.1, airfoil = "naca64a210" },
+  { le = [31.607, 28.190, -1.502], chord = 3.617, twist = 5.0, airfoil = "naca65a208" },
+]
+controls = [
+  # Fowler flaps from the side of the body to the outrigger (estimate: 30 %
+  # chord, 30 deg)
+  { name = "flap", channel = "flap", kind = "fowler", span = [0.06, 0.62], chord_fraction = 0.30, limits = [0, 30] },
+  # stand-in for the spoilers that roll the B-52H: hangar has no spoilers
+  # (estimate: 22 % chord, 20 deg)
+  { name = "aileron", channel = "aileron", span = [0.66, 0.95], chord_fraction = 0.22, limits = [-20, 20] },
+]
+
+# The horizontal tail: 15.85 m span (52 ft, B-52 Stratofortress
+# Association), leading edge swept 42 deg, root chord 8.36 m, tip 2.0 m, at
+# the fuselage's mid height. Its stabilizer trims through 13 deg (9 up, 4
+# down) and carries a narrow elevator (Wikipedia; Loftin): here it is one
+# all-moving surface, its travel the stabilizer's and the elevator's
+# together (estimate: 15 deg nose up, 10 down).
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca64a010"
+vortex = false
+sections = [
+  { le = [36.600, 0.000, -0.750], chord = 8.360 },
+  { le = [43.670, 7.920, -0.750], chord = 2.000 },
+]
+controls = [
+  { name = "stabilizer", channel = "elevator", span = [0.11, 1.0], chord_fraction = 1.0, pivot = 0.40, limits = [-15, 10] },
+]
+
+# The fin, 7.06 m above the fuselage's top (the published 22 ft 11 in):
+# leading edge swept 39 deg, root chord 7.8 m, tip 3.1 m; its narrow rudder
+# (10-15 % of the chord in the drawing; travel an estimate)
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a010"
+sections = [
+  { le = [36.755, 0.000, 0.400], chord = 7.840 },
+  { le = [42.680, 0.000, 7.645], chord = 3.140 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.05, 0.95], chord_fraction = 0.12, limits = [-25, 25] },
+]
+
+# The fuselage: a blunt nose under the flight deck's windows, then a deep,
+# slab-sided section 3.04 m wide and 4.05 m tall (its sides vertical from
+# 0.3 to 2.6 m below the wing, its bottom flat over the bomb bay) running
+# back to the tail, where it narrows to a tall blade under the fin
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.000, w = 0.00, top = -1.300, bottom = -1.500 },
+  { x = 0.400, w = 0.90, top = -0.920, bottom = -1.840, n = 2.0 },
+  { x = 0.806, w = 1.34, top = -0.630, bottom = -2.060, n = 2.1 },
+  { x = 1.552, w = 2.01, top = -0.290, bottom = -2.390, n = 2.2 },
+  { x = 2.298, w = 2.74, top = 0.280, bottom = -2.670, chine = -1.100, n_top = 2.2, n_bottom = 2.5 },
+  { x = 3.045, w = 2.92, top = 0.590, bottom = -2.880, chine = -1.250, n_top = 2.3, n_bottom = 2.8 },
+  { x = 3.791, w = 2.98, top = 0.710, bottom = -3.090, chine = -1.350, n_top = 2.4, n_bottom = 3.1 },
+  { x = 5.283, w = 3.04, top = 0.830, bottom = -3.220, chine = -1.450, n_top = 2.4, n_bottom = 3.4 },
+  { x = 9.761, w = 3.04, top = 0.830, bottom = -3.210, chine = -1.450, n_top = 2.4, n_bottom = 3.4 },
+  { x = 15.730, w = 3.04, top = 0.770, bottom = -3.270, chine = -1.450, n_top = 2.4, n_bottom = 3.4 },
+  { x = 21.700, w = 2.98, top = 0.710, bottom = -3.340, chine = -1.450, n_top = 2.4, n_bottom = 3.4 },
+  { x = 27.670, w = 2.92, top = 0.650, bottom = -3.430, chine = -1.450, n_top = 2.4, n_bottom = 3.3 },
+  { x = 30.655, w = 2.74, top = 0.620, bottom = -3.460, chine = -1.450, n_top = 2.4, n_bottom = 3.2 },
+  { x = 33.640, w = 2.49, top = 0.590, bottom = -3.270, chine = -1.350, n_top = 2.4, n_bottom = 3.0 },
+  { x = 36.625, w = 2.25, top = 0.590, bottom = -2.910, chine = -1.200, n_top = 2.3, n_bottom = 2.8 },
+  { x = 39.610, w = 1.89, top = 0.560, bottom = -2.480, chine = -1.000, n_top = 2.3, n_bottom = 2.6 },
+  { x = 42.595, w = 1.52, top = 0.560, bottom = -2.090, chine = -0.800, n_top = 2.2, n_bottom = 2.4 },
+  { x = 45.579, w = 1.09, top = 0.560, bottom = -1.810, chine = -0.650, n = 2.2 },
+  { x = 47.072, w = 0.79, top = 0.560, bottom = -1.750, chine = -0.600, n = 2.2 },
+  { x = 48.200, w = 0.45, top = 0.450, bottom = -1.620, n = 2.2 },
+  { x = 48.565, w = 0.10, top = 0.250, bottom = -1.400, n = 2.0 },
+]
+
+# The flight deck's windows round the top of the nose, their frames
+[[body]]
+name = "canopy"
+kind = "pod"
+frames = [2.75, 3.25, 3.75, 4.25]
+frame_width = 0.07
+stations = [
+  { x = 2.250, w = 0.00, top = 0.300, bottom = 0.260 },
+  { x = 2.600, w = 2.30, top = 0.480, bottom = 0.020, n = 2.4 },
+  { x = 3.300, w = 2.60, top = 0.690, bottom = 0.200, n = 2.6 },
+  { x = 4.000, w = 2.50, top = 0.790, bottom = 0.380, n = 2.6 },
+  { x = 4.600, w = 2.10, top = 0.840, bottom = 0.560, n = 2.4 },
+  { x = 4.900, w = 0.00, top = 0.845, bottom = 0.820 },
+]
+
+# The engine pods: four twin nacelles, each engine's nacelle an intake - a
+# TF33's short fan cowl, 1.45 m across, then its core cowl tapering to the
+# core nozzle. The pods' centres 10.27 and 18.05 m out, the engines 0.72 m
+# either side (the front view), the intakes 13.40 and 19.31 m behind the nose
+# and 1.53 and 1.86 m below the wing's root (plan and side views).
+[[intake]]
+name = "inboard pod, inner nacelle"
+mirror = true
+lip = 0.06
+duct = 0.9
+duct_taper = 0.9
+stations = [
+  { x = 13.40, y = 9.550, w = 1.30, top = -0.880, bottom = -2.180 },
+  { x = 13.90, y = 9.550, w = 1.44, top = -0.810, bottom = -2.250 },
+  { x = 15.50, y = 9.550, w = 1.44, top = -0.810, bottom = -2.250 },
+  { x = 15.85, y = 9.550, w = 1.36, top = -0.850, bottom = -2.210 },
+  { x = 16.00, y = 9.550, w = 1.06, top = -1.000, bottom = -2.060 },
+  { x = 17.20, y = 9.550, w = 0.92, top = -1.070, bottom = -1.990 },
+  { x = 17.70, y = 9.550, w = 0.76, top = -1.150, bottom = -1.910 },
+]
+
+[[intake]]
+name = "inboard pod, outer nacelle"
+mirror = true
+lip = 0.06
+duct = 0.9
+duct_taper = 0.9
+stations = [
+  { x = 13.40, y = 10.990, w = 1.30, top = -0.880, bottom = -2.180 },
+  { x = 13.90, y = 10.990, w = 1.44, top = -0.810, bottom = -2.250 },
+  { x = 15.50, y = 10.990, w = 1.44, top = -0.810, bottom = -2.250 },
+  { x = 15.85, y = 10.990, w = 1.36, top = -0.850, bottom = -2.210 },
+  { x = 16.00, y = 10.990, w = 1.06, top = -1.000, bottom = -2.060 },
+  { x = 17.20, y = 10.990, w = 0.92, top = -1.070, bottom = -1.990 },
+  { x = 17.70, y = 10.990, w = 0.76, top = -1.150, bottom = -1.910 },
+]
+
+[[intake]]
+name = "outboard pod, inner nacelle"
+mirror = true
+lip = 0.06
+duct = 0.9
+duct_taper = 0.9
+stations = [
+  { x = 19.31, y = 17.330, w = 1.30, top = -1.210, bottom = -2.510 },
+  { x = 19.81, y = 17.330, w = 1.44, top = -1.140, bottom = -2.580 },
+  { x = 21.41, y = 17.330, w = 1.44, top = -1.140, bottom = -2.580 },
+  { x = 21.76, y = 17.330, w = 1.36, top = -1.180, bottom = -2.540 },
+  { x = 21.91, y = 17.330, w = 1.06, top = -1.330, bottom = -2.390 },
+  { x = 23.11, y = 17.330, w = 0.92, top = -1.400, bottom = -2.320 },
+  { x = 23.61, y = 17.330, w = 0.76, top = -1.480, bottom = -2.240 },
+]
+
+[[intake]]
+name = "outboard pod, outer nacelle"
+mirror = true
+lip = 0.06
+duct = 0.9
+duct_taper = 0.9
+stations = [
+  { x = 19.31, y = 18.770, w = 1.30, top = -1.210, bottom = -2.510 },
+  { x = 19.81, y = 18.770, w = 1.44, top = -1.140, bottom = -2.580 },
+  { x = 21.41, y = 18.770, w = 1.44, top = -1.140, bottom = -2.580 },
+  { x = 21.76, y = 18.770, w = 1.36, top = -1.180, bottom = -2.540 },
+  { x = 21.91, y = 18.770, w = 1.06, top = -1.330, bottom = -2.390 },
+  { x = 23.11, y = 18.770, w = 0.92, top = -1.400, bottom = -2.320 },
+  { x = 23.61, y = 18.770, w = 0.76, top = -1.480, bottom = -2.240 },
+]
+
+# The pylons: blades swept forward from under the wing's leading edge down
+# to the pods' tops, between each pod's two nacelles; they end inside the
+# wing, a third of its chord back
+[[body]]
+name = "inboard pylon"
+kind = "pod"
+mirror = true
+aero = false                  # its drag is part of the pods' in the estimate
+stations = [
+  { x = 13.90, y = 10.270, w = 0.00, top = -0.860, bottom = -0.960 },
+  { x = 14.60, y = 10.270, w = 0.34, top = -0.720, bottom = -1.100, n = 2.6 },
+  { x = 17.00, y = 10.270, w = 0.36, top = -0.330, bottom = -1.250, n = 2.6 },
+  { x = 18.60, y = 10.270, w = 0.36, top = 0.000, bottom = -0.900, n = 2.6 },
+  { x = 20.00, y = 10.270, w = 0.30, top = -0.050, bottom = -0.450, n = 2.6 },
+  { x = 20.60, y = 10.270, w = 0.20, top = -0.100, bottom = -0.300, n = 2.6 },
+]
+
+[[body]]
+name = "outboard pylon"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 19.81, y = 18.050, w = 0.00, top = -1.190, bottom = -1.290 },
+  { x = 20.50, y = 18.050, w = 0.34, top = -1.050, bottom = -1.430, n = 2.6 },
+  { x = 22.90, y = 18.050, w = 0.36, top = -0.760, bottom = -1.580, n = 2.6 },
+  { x = 24.50, y = 18.050, w = 0.36, top = -0.480, bottom = -1.300, n = 2.6 },
+  { x = 25.60, y = 18.050, w = 0.30, top = -0.550, bottom = -0.950, n = 2.6 },
+  { x = 26.10, y = 18.050, w = 0.20, top = -0.600, bottom = -0.800, n = 2.6 },
+]
+
+# Eight Pratt & Whitney TF33-P-3/103 turbofans, 17,000 lbf (75.6 kN) each for
+# take-off, bypass ratio 1.42, 3,900 lb (1,769 kg) (Pratt & Whitney;
+# thisdayinaviation.com); take-off TSFC 0.52 lb/lbf/h (estimate from the
+# JT3D family). No afterburner: their nozzles are fixed (petal_open_deg 0).
+[[engine]]
+name = "TF33 1"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 75.6
+bypass_ratio = 1.42
+tsfc_dry = 0.52
+design_mach = 0.9
+mass = 1769
+position = [15.20, 9.550, -1.530]
+inlet_x = 13.40
+[engine.nozzle]
+position = [17.70, 9.550, -1.530]
+diameter = 0.72
+length = 0.40
+petal_open_deg = 0.0
+
+[[engine]]
+name = "TF33 2"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 75.6
+bypass_ratio = 1.42
+tsfc_dry = 0.52
+design_mach = 0.9
+mass = 1769
+position = [15.20, 10.990, -1.530]
+inlet_x = 13.40
+[engine.nozzle]
+position = [17.70, 10.990, -1.530]
+diameter = 0.72
+length = 0.40
+petal_open_deg = 0.0
+
+[[engine]]
+name = "TF33 3"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 75.6
+bypass_ratio = 1.42
+tsfc_dry = 0.52
+design_mach = 0.9
+mass = 1769
+position = [21.11, 17.330, -1.860]
+inlet_x = 19.31
+[engine.nozzle]
+position = [23.61, 17.330, -1.860]
+diameter = 0.72
+length = 0.40
+petal_open_deg = 0.0
+
+[[engine]]
+name = "TF33 4"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 75.6
+bypass_ratio = 1.42
+tsfc_dry = 0.52
+design_mach = 0.9
+mass = 1769
+position = [21.11, 18.770, -1.860]
+inlet_x = 19.31
+[engine.nozzle]
+position = [23.61, 18.770, -1.860]
+diameter = 0.72
+length = 0.40
+petal_open_deg = 0.0
+
+# The bicycle gear: four two-wheel trucks under the fuselage, the forward
+# pair steering (the B-52's crosswind crab, 20 deg either way, is not
+# modelled), on 56x16 tyres (IPMS/USA review); track 8 ft 3 in (2.51 m).
+# Their stations off the NB-52B three-view: 12.04 and 24.29 m behind the
+# nose; they fold forward and aft into the fuselage (the swing fitted by
+# hangar). Outriggers near the wing tips, 22.63 m out (the front view; 32 in
+# tyres, estimate), standing 6 cm clear of the ground with the wing drooped,
+# as drawn, their wheels folding flat into the wing. The ground line: 4.67 m
+# below z = 0 (the front view).
+[[gear]]
+name = "Forward Main Gear"
+mirror = true
+position = [12.040, 1.255, -4.819]
+wheels = 2
+wheel_diameter = 1.422
+wheel_width = 0.406
+steerable = true
+max_steer = 20
+retractable = true
+retract = "forward"
+static_deflection = 0.15
+attach = [12.040, 0.750, -2.300]
+
+[[gear]]
+name = "Aft Main Gear"
+mirror = true
+position = [24.290, 1.255, -4.819]
+wheels = 2
+wheel_diameter = 1.422
+wheel_width = 0.406
+retractable = true
+retract = "aft"
+static_deflection = 0.15
+attach = [24.290, 0.750, -2.300]
+
+[[gear]]
+name = "Outrigger"
+mirror = true
+position = [30.330, 22.630, -4.608]
+wheel_diameter = 0.813
+wheel_width = 0.224
+retractable = true
+retract = "inward"
+wheel_turn = "flat"
+static_deflection = 0.05
+attach = [30.330, 22.630, -1.350]
+
+[mass]
+empty = 83250                 # 185,000 lb (USAF fact sheet)
+mtow = 221353                 # 488,000 lb (USAF fact sheet)
+empty_cg = [21.300, 0.0, -0.800]   # estimate; see the static margin in mass.json
+[mass.component]              # kg: estimates (a jet bomber's weight fractions), the rest is systems
+wing = 18100
+htail = 2050
+fin = 1150
+fuselage = 15900
+"inboard pod, inner nacelle" = 700
+"inboard pod, outer nacelle" = 700
+"outboard pod, inner nacelle" = 700
+"outboard pod, outer nacelle" = 700
+"inboard pylon" = 300
+"outboard pylon" = 300
+"Forward Main Gear" = 4200
+"Aft Main Gear" = 4600
+Outrigger = 540
+[[mass.payload]]
+name = "pilot"                # the crew of five
+mass = 200
+position = [4.500, 0.0, 0.300]
+[[mass.payload]]
+name = "navigators and weapons officers"
+mass = 300
+position = [6.500, 0.0, -1.200]
+# 47,975 US gal, 312,197 lb (141,610 kg) internal (Wikipedia; USAF), spread
+# over the fuselage and wing tanks (their split an estimate). The tanks are
+# 40 % full: 140 t, about the B-52H's combat weight, at which its top speed
+# and ceiling are quoted (an estimate).
+[[mass.tank]]
+name = "forward body"
+position = [9.500, 0.0, -1.200]
+capacity = 11000
+fill = 0.4
+[[mass.tank]]
+name = "center wing"
+position = [16.500, 0.0, 0.000]
+capacity = 20000
+fill = 0.4
+[[mass.tank]]
+name = "mid body"
+position = [21.000, 0.0, -1.500]
+capacity = 18000
+fill = 0.4
+[[mass.tank]]
+name = "aft body"
+position = [28.000, 0.0, -1.200]
+capacity = 22000
+fill = 0.4
+[[mass.tank]]
+name = "left inboard wing"
+position = [18.900, -7.000, -0.100]
+capacity = 20000
+fill = 0.4
+[[mass.tank]]
+name = "right inboard wing"
+position = [18.900, 7.000, -0.100]
+capacity = 20000
+fill = 0.4
+[[mass.tank]]
+name = "left outboard wing"
+position = [24.600, -15.500, -0.600]
+capacity = 15305
+fill = 0.4
+[[mass.tank]]
+name = "right outboard wing"
+position = [24.600, 15.500, -0.600]
+capacity = 15305
+fill = 0.4
+
+[dimensions]                  # published (USAF fact sheet):
+length = 48.5                 # 159 ft 4 in
+span = 56.39                  # 185 ft
+height = 12.4                 # 40 ft 8 in
+
+[targets]
+# The top speed with its height: 555 kt, Mach 0.906, at 20,700 ft (the
+# Standard Aircraft Characteristics, as thisdayinaviation.com and
+# GlobalSecurity quote them: "639 mph at 20,700 feet, Mach 0.91"). The USAF
+# fact sheet's "650 mph (Mach 0.84)" - 0.86 in other editions - gives no
+# height, and does not square with itself: 650 mph is Mach 0.86 only near
+# sea level, where the B-52 is held to 390 KIAS, and Mach 0.98 at 36,000 ft.
+max_mach = 0.906
+max_mach_altitude_ft = 20700
+service_ceiling_ft = 50000    # USAF fact sheet; the SAC charts give 46,900-47,700 ft at combat weight
+# climb: 6,270 ft/min (Wikipedia) - at an unstated weight, so not a target

@@ -196,6 +196,41 @@ class InducedDrag(unittest.TestCase):
         self.assertLess(e["strips"], 0.82)
         self.assertAlmostEqual(e["trefftz CL"], e["strips CL"], delta=1e-12)
 
+    def test_a_swept_wing_keeps_its_span_efficiency(self):
+        # 35 deg of sweep: the strips' pieces lie on the quarter-chord line, so
+        # their trailing vortices meet in the Trefftz plane at any incidence
+        # (laid across the stream from each strip's centre, their stagger
+        # made a dipole at every boundary: e 0.57 at CL 0.15, 0.16 at 0.44)
+        a = wing(8.5, taper=0.35, sweep_deg=35.0, airfoil="naca0010", ns=24, nc=6)
+        a.spec["analysis"] = {"speed": 50.0, "induced_drag": "trefftz", "airfoil": {"wing": {"cd0": 0.0, "k_drag": 0.0}}}
+        m = AeroModel(Aircraft(a.spec))
+        for deg in (2.0, 4.0, 6.0):
+            c = m.evaluate(math.radians(deg))
+            self.assertTrue(0.94 < c["CL"] ** 2 / (math.pi * 8.5 * c["CD"]) < 0.99, deg)
+
+    def test_a_drooped_wing_at_incidence_meets_its_mirror(self):
+        # an elliptic loading on a drooped (anhedral) wing set at 8 deg: its
+        # two halves' root vortices meet on the plane of symmetry, and the
+        # drag is pi Gamma0^2 / 8 (twist turned the chords a little sideways,
+        # and the halves' roots crossed the plane by millimetres: 10 % low)
+        from hangar.aero.model import trefftz_correction
+        a = wing(10.0, dihedral_deg=-3.0, airfoil="naca0006", ns=24, nc=6)
+        for sec in a.spec["surface"][0]["sections"]:
+            sec["twist"] = 8.0
+        a.spec["analysis"] = {"speed": 50.0, "induced_drag": "trefftz"}
+        m = AeroModel(Aircraft(a.spec))
+        L = m.lat
+        n = L.n_strips
+        g = np.sqrt(np.clip(1.0 - (2.0 * L.c4[:, 1] / 10.0) ** 2, 0.0, 1.0))
+        for deg in (0.0, -8.0):
+            v = np.array([math.cos(math.radians(deg)), 0.0, math.sin(math.radians(deg))])
+            U = np.tile(v, (n, 1))
+            ld = np.cross(v[None, :], L.e)
+            ld /= np.linalg.norm(ld, axis=1)[:, None]
+            un = np.linalg.norm(U - np.einsum("ij,ij->i", U, L.e)[:, None] * L.e, axis=1)
+            dF = trefftz_correction(L, m.group, U, v, un, g * L.width * un, ld, np.ones(n))
+            self.assertAlmostEqual(float((dF @ v).sum()) / (math.pi / 8.0), 1.0, delta=0.01)
+
     def test_a_cambered_line_adds_no_induced_drag_of_its_own(self):
         # a 6A section's uniform-load mean line, which the lattice's few
         # chordwise panels resolve poorly: from the tilt it adds drag in

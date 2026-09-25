@@ -258,6 +258,17 @@ def _drag(a, base, table):
     k = (al >= -2.0) & (al <= 8.0)
     CL, CD = base["base"]["CL"][k, j0], base["base"]["CD"][k, j0]
     K0, CD0 = np.polyfit(CL ** 2, CD, 1)
+    # a polar that is no parabola there has no fit worth the name: a wing set
+    # at a large incidence on its fuselage (the B-52's 8 deg) puts the body's
+    # crossflow drag at the low angles and the wing's sections past their
+    # drag bucket at the high ones, and the fit's CD0 comes out negative, its
+    # K0 eight times the wing's induced drag - which the Mach correction below
+    # would then add at cruise. The wing's own induced-drag factor instead
+    # (Oswald's e 0.85), the zero-lift drag the polar's least. Every fighter's
+    # fit is 1.1-1.5 times that factor, the light aircraft's too.
+    k_wing = 1.0 / (math.pi * a.b ** 2 / a.S * 0.85)
+    if CD0 <= 0.0 or not 0.5 * k_wing < K0 < 2.5 * k_wing:
+        K0, CD0 = k_wing, float(np.min(CD))
     # friction falls with Mach (most of the zero-lift drag is friction)
     friction = 0.85 * CD0 * ((1.0 + 0.144 * mach ** 2) ** -0.65 - 1.0)
     # wave drag: Sears-Haack from the area distribution, Raymer's E_WD

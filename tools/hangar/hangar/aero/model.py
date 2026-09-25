@@ -135,7 +135,15 @@ def trefftz_correction(L, group, U, v, un, lift, lift_dir, wc):
     n /= np.maximum(np.linalg.norm(n, axis=1), 1e-12)[:, None]
     g = np.einsum("ij,ij->i", F, n) / np.maximum(un * L.width, 1e-12)   # circulation (rho = 1)
     # the pieces: each strip cut along its span, its circulation interpolated
-    # along the surface half from root (eta 0) to tip, nothing at the tip
+    # along the surface half from root (eta 0) to tip, nothing at the tip. They
+    # lie on the surface's own quarter-chord line, each strip from the point
+    # halfway to its inboard neighbour's quarter chord to the one halfway to
+    # its outboard one's, so that a swept surface's strips share their ends:
+    # laid across the stream from each strip's centre instead, a swept wing's
+    # strips stood off each other by their stagger, and in the Trefftz plane
+    # of an aircraft at incidence each boundary's two trailing vortices stood
+    # off by the stagger times sin(alpha) - a dipole that made its induced drag
+    # grow as CL^4 (a 35 deg wing's span efficiency 0.16 at CL 0.44)
     m = TREFFTZ_SPLIT
     frac = (np.arange(m) + 0.5) / m
     pc, pw, pg, pe, pn, owner = [], [], [], [], [], []
@@ -147,13 +155,33 @@ def trefftz_correction(L, group, U, v, un, lift, lift_dir, wc):
         tc = t0 + 0.5 * w
         ts = (t0[:, None] + frac[None, :] * w[:, None]).ravel()
         gs = np.interp(ts, np.concatenate([tc, [t0[-1] + w[-1]]]), np.concatenate([g[idx], [0.0]]))
-        # the pieces' centres, along each strip's span line from its root side
-        s = 1.0 if len(idx) < 2 or float(L.e[idx[0]] @ (L.c4[idx[-1]] - L.c4[idx[0]])) >= 0.0 else -1.0
-        start = L.c4[idx] - (0.5 * s * w)[:, None] * L.e[idx]
-        pc.append((start[:, None, :] + (s * frac[None, :] * w[:, None])[:, :, None] * L.e[idx][:, None, :]).reshape(-1, 3))
-        pw.append(np.repeat(w / m, m))
+        # the strips' ends on the quarter-chord line, root to tip
+        c4 = L.c4[idx]
+        if len(idx) < 2:
+            s = 1.0
+            ends = np.stack([c4[0] - 0.5 * w[0] * L.e[idx[0]], c4[0] + 0.5 * w[0] * L.e[idx[0]]])
+        else:
+            # each boundary half a strip's width from either centre: the line
+            # between two centres cut in proportion to their widths
+            f = (w[:-1] / (w[:-1] + w[1:]))[:, None]
+            mid = c4[:-1] + f * (c4[1:] - c4[:-1])
+            ends = np.concatenate([[2.0 * c4[0] - mid[0]], mid, [2.0 * c4[-1] - mid[-1]]])
+        if abs(abs(float(c4[0][1])) - 0.5 * float(w[0])) < 0.25 * float(w[0]):
+            # a half rooted on the plane of symmetry ends on it, where its
+            # mirror's root vortex cancels its own: twist turns a chord about
+            # an anhedral span line a little sideways, and a quarter chord
+            # laid off along it moved each half's root a few millimetres
+            # across the plane - a dipole of the root's whole circulation,
+            # its wash on the root's pieces cutting the drag by up to a
+            # quarter (the B-52's drooped wing at 8 deg incidence)
+            ends[0][1] = 0.0
+        seg = ends[1:] - ends[:-1]                                   # each strip's piece of the line
+        pts = ends[:-1, None, :] + frac[None, :, None] * seg[:, None, :]
+        pc.append(pts.reshape(-1, 3))
+        ln = np.linalg.norm(seg, axis=1)
+        pw.append(np.repeat(ln / m, m))
         pg.append(gs)
-        pe.append(np.repeat(L.e[idx], m, axis=0))
+        pe.append(np.repeat(seg / np.maximum(ln, 1e-12)[:, None], m, axis=0))
         pn.append(np.repeat(n[idx], m, axis=0))
         owner.append(np.repeat(idx, m))
     pc, pw, pg, pe, pn, owner = (np.concatenate(x) for x in (pc, pw, pg, pe, pn, owner))
