@@ -235,11 +235,21 @@ move on while a check fails or a picture looks wrong.
   `type = "fbw"` with its own limits (n_max 2.5-3, alpha_max 12-15 deg,
   roll 30-60 deg/s). A direct-control jet whose dutch roll is damped below
   0.08 gets `yaw_damper = true` (most swept jets have one).
-- **Gear.** A multi-wheel truck's bay needs room: `door_reach` (m) lets its
-  doors move out further. Where the real gear has no doors, or the wheel
-  cannot fit (thin wingtips, the A-10's pods), `doors = false` gives an open
-  well. Give `retract_axis` and `retract_deg` when the drawing shows how the
-  leg folds; the fit then only turns the wheel.
+- **Gear.** A four-wheel truck is one leg: `wheels = 2`, `axles = 2`,
+  `axle_spacing`. Its bay needs room: `door_reach` (m) lets its doors move
+  out further. Where the real gear has no doors, or hangar's doors cannot
+  clear it (thin wingtips, the A-10's pods, a bogie swinging inward),
+  `doors = false` gives an open well. Give `retract_axis` and `retract_deg`
+  when the drawing shows how the leg folds; the fit then only turns the
+  wheel. A leg that cannot fold inside needs its trunnion where the airframe
+  is deep enough: a few degrees of splay, or a fuller wing-body fairing.
+- **Thin parts.** End a pod, pylon or tail cone with a small width (0.1 m),
+  not a knife edge (w = 0 with height): the mesher's distance to a knife edge
+  is far too short, so its fillet with a nearby surface grows phantom
+  material and breaks the mesh. Plates thinner than about 0.1 m (a boom's
+  ruddevators) are `[[strut]]`s, drawn only.
+- **Windows.** A transport has no canopy body: paint its cockpit windows
+  (`windows`, `windows_x`, `windows_z`, `windscreen_x` in paint.toml).
 - **Targets.** `max_mach` at `max_mach_altitude_ft` below 1: calibrate fits
   Korn's kappa_A (0.87 conventional sections, 0.95 supercritical), more
   wave drag if even 0.87 is too fast. A certified altitude is

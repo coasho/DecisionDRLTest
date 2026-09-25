@@ -13,6 +13,11 @@ aircraft/<name>/paint.toml (optional; a plain light grey without it):
     radome_x = 1.6
     anti_glare = "#3d4249"     # the panel ahead of the windscreen, from/to (m)
     anti_glare_x = [1.6, 2.9]
+    windows = "#1b2127"        # painted cockpit windows (a transport's, no canopy):
+    windows_x = [2.4, 4.4]     # the side windows from/to x (m),
+    windows_z = [1.95, 2.35]   # between these heights (m),
+    windscreen_x = [2.3, 2.7]  # and the windscreen across the nose (seen from above
+    windscreen_y = 0.95        # and ahead: its half width, m)
     canopy = "gold"            # the glass: clear | gold | dark
     panel_lines = 0.12         # how much darker the panel lines are (0: none)
     wear = 0.04                # a slight unevenness of the paint (0: none)
@@ -134,6 +139,9 @@ class Livery:
         scale = float(spec.get("scale", 3.0))
         radome, radome_x = spec.get("radome"), float(spec.get("radome_x", 0.0))
         glare, glare_x = spec.get("anti_glare"), spec.get("anti_glare_x", [0.0, 0.0])
+        win = spec.get("windows")
+        win_x, win_z = spec.get("windows_x", [0.0, 0.0]), spec.get("windows_z", [0.0, 0.0])
+        screen_x, screen_y = spec.get("windscreen_x", [0.0, 0.0]), float(spec.get("windscreen_y", 0.95))
         lines = float(spec.get("panel_lines", 0.12))
         wear = float(spec.get("wear", 0.04))
         boundary = float(spec.get("boundary", 0.0))
@@ -178,6 +186,16 @@ class Livery:
             if glare is not None and X is not None and reg == TOP:
                 k = (X > glare_x[0]) & (X < glare_x[1]) & (np.abs(Y) < 0.35)
                 cell[k] = _rgb(glare)
+            if win is not None:
+                if reg == SIDE:
+                    k = (X > win_x[0]) & (X < win_x[1]) & (Z > win_z[0]) & (Z < win_z[1])
+                elif reg == TOP:
+                    k = (X > screen_x[0]) & (X < screen_x[1]) & (np.abs(Y) < screen_y)
+                elif reg == FRONT:
+                    k = (Z > win_z[0]) & (Z < win_z[1]) & (np.abs(Y) < screen_y)
+                else:
+                    k = np.zeros(cell.shape[:2], bool)
+                cell[k] = _rgb(win)
             if lines > 0.0 and reg != FRONT:
                 cell[self._joints(reg, X, Y, Z)] *= (1.0 - lines)
             if wear > 0.0:

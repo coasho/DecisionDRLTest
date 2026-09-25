@@ -189,6 +189,7 @@ stands_in_for = ["f16"]          # a stock JSBSim aircraft drawn with this model
 [[gear]]
 retract = "forward"              # forward, aft, inward, outward; hangar fits the angle, the
 wheels = 2                       # trunnion's cant and the wheel's twist that stow the leg inside
+axles = 2                        # a bogie: two axles one behind the other (axle_spacing, m)
 wheel_turn = "flat"              # or retract_deg, retract_axis: what is known of the real leg;
                                  # hangar fits only the rest
 doors = false                    # an open well: the stowed wheel may stand out up to its radius
@@ -367,12 +368,17 @@ For fighters:
   it carries everywhere: the JSBSim file, the mass and CG, the inertia. A
   fly-by-wire transport turns at Mach 0.6 within its load limit and rolls
   long enough to pass 90°.
-- **Yaw damper.** A swept-wing jet on direct controls can have a lightly
-  damped dutch roll (the B-52H's 0.05). `yaw_damper = true` under
-  `[flight_control]` adds one: the yaw rate, washed out over 2 s so a
-  steady turn keeps its own, against itself through the rudder, with at
-  most half the rudder's travel. Its gain over dynamic pressure brings the
-  dutch roll's damping to 0.3 in the linear model.
+- **Yaw damper.** A swept-wing jet on direct controls has a lightly damped
+  dutch roll, most of all when slow (the KC-135R's 0.03 near its approach
+  speed). `yaw_damper = true` under `[flight_control]` adds one: the yaw
+  rate, washed out over 2 s so a steady turn keeps its own, against itself
+  through the rudder, with at most half the rudder's travel. Its gain over
+  dynamic pressure brings the dutch roll's damping to 0.3 in the full
+  lateral model, washout and all. The flight tests identify the airframe's
+  own modes (they take the surfaces as they moved for inputs), so the
+  report adds the dutch roll with the damper on. Flown in JSBSim, the
+  KC-135R's sideslip after a rudder doublet decays at 0.31 with it, 0.11
+  without.
 - **Fighter mass.** Raymer's fighter/attack weight equations. Radii of
   gyration are given per design (NASA's for the F-16).
 - **Fly-by-wire.** Gains are placed from the linear model at each dynamic
@@ -435,7 +441,9 @@ The model stage writes `<name>.glb` from the same design:
   compresses, a steerable wheel turns with the steering, and the wheels roll.
   A leg with `doors = false` folds into an open well, its wheel out of the
   skin by up to its radius (the B-52H's outriggers, in its thin wingtips);
-  `door_reach` lets a wide truck's doors move further out.
+  `door_reach` lets a wide truck's doors move further out. A bogie
+  (`axles = 2`) carries its wheels in pairs on a beam under the strut, each
+  axle's pair rolling on its own.
 - **Propulsion.** An afterburner flame behind each augmented jet, as the
   engine lights it; nozzle petals open as the engine opens them. A propeller
   turns at its engine's rpm. A vectoring nozzle turns, flame and all, as the
@@ -444,7 +452,8 @@ The model stage writes `<name>.glb` from the same design:
   turns in the socket it leaves. Neither opens a gap at any deflection.
 - **Paint.** `paint.toml` beside the design gives its colours: a scheme
   (single, two-tone, camouflage or a cheat line), the radome, an anti-glare
-  panel, the canopy's tint. hangar draws it as a texture, with panel joints
+  panel, the canopy's tint, a transport's cockpit windows. hangar draws it
+  as a texture, with panel joints
   where the airframe has them - frames round the fuselage, spars and ribs on
   the wings and fins - and a little wear.
 
@@ -634,14 +643,23 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 | aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft |
 |---|---|---|---|---|
 | B-52H | `b52h` | 0.91 at 20,700 ft (0.906) | 9,900 | 53,600 (50,000) |
+| KC-135R | `kc135r` | 0.88 at 30,000 ft (0.86) | 7,100 | 40,900 (50,000 certified) |
 
 - The B-52H flies at 140 t, 40 % fuel, about its combat weight. Its wing
   droops to the tips as it does on the ground. Spoilers roll the real one;
   ailerons on the outer wing stand in for them. Its yaw damper takes the
-  dutch roll's damping from 0.05 to 0.11. Even conventional sections'
+  dutch roll's damping from 0.11 to 0.31. Even conventional sections'
   drag rise leaves it too fast, so wave drag at its cap brings it down to
   its top speed (a warning in its report). Its L/D peaks at 19.7 (21.5
   published).
+- The KC-135R flies at 100 t, half its fuel: a tanker mid-mission. It
+  climbs to 40,900 ft there; 50,000 ft is its certified altitude. Its
+  boom, the boom's ruddevators and the fin's HF probe are drawn. The main
+  bogies fold into open wells: hangar's doors for an inward swing split fore
+  and aft, where a bogie's ends pass (the real ones close). Its yaw damper
+  takes the dutch roll's damping from 0.10 to 0.35. Like the B-52H, it
+  needs the most wave drag calibration allows for its top speed, which is
+  also its limit Mach number.
 
 ## Limits
 

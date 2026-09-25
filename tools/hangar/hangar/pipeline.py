@@ -854,11 +854,35 @@ class Design:
             from .mass import MassModel
             lin = linear.model(self.calibrated(self.tables()), self.aircraft, MassModel(self.aircraft), 1.9 * vs, 1500.0)
             r["modes_linear"] = linear.modes(lin)
+            damped = self._damped_dutch_roll(lin)
+            if damped is not None:
+                r["modes_linear"]["dutch_roll_damped"] = damped
             r["linear_trim"] = {k: lin[k] for k in ("alpha_trim_deg", "CL", "speed_ms", "altitude_m", "Cma_cg", "Cnb_cg", "Clb_cg")}
         r["robustness"] = F.robustness(f, n=12 if self.quick else 40)
         r["crashes"] = F.crash_tests(f, vs, F.contact_points(self._aircraft_file(f.type)))
         r["seconds"] = time.time() - t0
         return r, {"stall": h_stall, "long": m["hist_long"], "lat": m["hist_lat"]}
+
+    def _damped_dutch_roll(self, lin):
+        """The dutch roll with a direct-control design's yaw damper on, at the
+        linear model's condition (None without one): the identification from
+        JSBSim's response takes the surfaces as they moved, damper and all,
+        for its inputs, so it finds the airframe's own modes."""
+        from . import fcs
+        from .linear import loaded_inertia
+        from .mass import MassModel
+        tabs = self.calibrated(self.tables())
+        mm = MassModel(self.aircraft)
+        yd = fcs.yaw_damper(tabs, self.aircraft, mm)
+        if yd is None:
+            return None
+        V, h = lin["speed_ms"], lin["altitude_m"]
+        rho = 1.225 * (1.0 - 2.25577e-5 * h) ** 4.2559
+        Q = 0.5 * rho * V * V
+        mach = V / math.sqrt(1.4 * 287.05 * (288.15 - 0.0065 * h))
+        A, B = fcs.yaw_plant(tabs, self.aircraft, loaded_inertia(mm), Q, V, mach, lin["alpha_trim_deg"])
+        k = float(np.interp(Q / fcs.PSF, yd["qbar_psf"], yd["k"]))
+        return {"zeta": fcs.dutch_roll_zeta(fcs.yaw_damper_loop(A, B, k)), "gain": k, "target": yd["zeta"]}
 
     def _flight_checks(self, results):
         t = self.targets
@@ -917,6 +941,10 @@ class Design:
                    info("phugoid period", ph["period_s"], "s", note=seen("phugoid", "period_s")),
                    check("dutch roll damping", dr["zeta"], 0.08, None, note="MIL-F-8785C level 1: > 0.08; " + seen("dutch_roll", "zeta")),
                    check("dutch roll frequency", dr["omega_n"], 0.4, None, "rad/s", note="MIL-F-8785C level 1: > 0.4; " + seen("dutch_roll", "omega_n")),
+                   *([check("dutch roll damping, yaw damper on", m["dutch_roll_damped"]["zeta"], 0.08, None,
+                            note="the linear model with the damper (gain %.3f), which aims for %.2f" % (
+                                m["dutch_roll_damped"]["gain"], m["dutch_roll_damped"]["target"]))]
+                     if "dutch_roll_damped" in m else []),
                    check("roll mode time constant", m["roll"]["time_constant_s"], None, 1.4, "s",
                          note="MIL-F-8785C level 1: < 1.4; " + seen("roll", "time_constant_s")),
                    check("spiral time to double", m["spiral"]["time_to_double_s"], 12.0, None, "s", level="warn",

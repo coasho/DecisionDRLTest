@@ -64,7 +64,7 @@ import math
 import numpy as np
 
 from .aero import tables as T
-from .linear import G0, loaded_inertia
+from .linear import G0, lateral_matrix, loaded_inertia
 
 PSF = 47.880259
 QBAR_PSF = (10.0, 20.0, 40.0, 80.0, 150.0, 300.0, 600.0, 1200.0, 2400.0)
@@ -140,21 +140,80 @@ YAW_DAMPER_WASHOUT_S = 2.0  # its washout: a steady turn's yaw rate left alone
 YAW_DAMPER_ALTITUDE = 3000.0  # m: where each dynamic pressure's Mach number is taken
 
 
+def yaw_plant(tabs, aircraft, inertia, Q, V, mach, alpha_deg):
+    """The lateral small-perturbation model (beta, p, r, phi) about the CG at
+    a trimmed condition (linear.lateral_matrix, the derivatives moved from
+    the aero point to the CG as linear.model moves them) and the rudder's
+    column (per rad): (A, B)."""
+    m, cg, Ixx, _, Izz, Ixz = inertia
+    S, b = aircraft.S, aircraft.b
+    d = derivatives_at(tabs, alpha_deg, mach)
+    dx, dz = cg[0] - aircraft.aero_point[0], aircraft.aero_point[2] - cg[2]
+    der = {"CYb": d["CYb"], "CYp": d["CYp"], "CYr": d["CYr"], "Clb": d["Clb"] + d["CYb"] * dz / b, "Clp": d["Clp"],
+           "Clr": d["Clr"], "Cnb": d["Cnb"] + d["CYb"] * dx / b, "Cnp": d["Cnp"], "Cnr": d["Cnr"] + d["CYr"] * dx / b}
+    A = lateral_matrix(der, Q * S, b, m, V, (Ixx, Izz, Ixz), math.radians(alpha_deg))
+    cy = d.get("CY_rudder", 0.0)
+    L = (d.get("Cl_rudder", 0.0) + cy * dz / b) * Q * S * b / Ixx
+    N = (d.get("Cn_rudder", 0.0) + cy * dx / b) * Q * S * b / Izz
+    den = 1.0 - Ixz * Ixz / (Ixx * Izz)
+    return A, np.array([cy * Q * S / (m * V), (L + Ixz / Ixx * N) / den, (N + Ixz / Izz * L) / den, 0.0])
+
+
+def yaw_damper_loop(A, B, k, tau=YAW_DAMPER_WASHOUT_S):
+    """The lateral model with the yaw damper on: the rudder at -k times the
+    yaw rate washed out over tau (r - z, z' = (r - z) / tau: a fifth
+    state), as the JSBSim file's washout_filter has it."""
+    n = len(A)
+    M = np.zeros((n + 1, n + 1))
+    M[:n, :n] = A - k * np.outer(B, np.eye(n)[2])
+    M[:n, n] = k * B
+    M[n, 2], M[n, n] = 1.0 / tau, -1.0 / tau
+    return M
+
+
+def dutch_roll_zeta(M):
+    """The damping of a lateral model's least damped oscillation, its dutch
+    roll (inf without one)."""
+    return min((-e.real / abs(e) for e in np.linalg.eigvals(M) if e.imag > 1e-6), default=float("inf"))
+
+
+def _damper_gain(A, B, zeta, limit):
+    """The smallest gain that damps the dutch roll to zeta (the gain has the
+    sign of the rudder's yaw power, so it opposes the yaw rate), or the one
+    that damps it most short of that; 0 where it is damped enough already."""
+    s = 1.0 if B[2] > 0.0 else -1.0
+    z = lambda k: dutch_roll_zeta(yaw_damper_loop(A, B, s * k))  # noqa: E731
+    if abs(B[2]) < 1e-9 or z(0.0) >= zeta:
+        return 0.0
+    ks = np.linspace(0.0, limit, 61)
+    zs = [z(k) for k in ks]
+    i = next((i for i, v in enumerate(zs) if v >= zeta), None)
+    if i is None:
+        return s * float(ks[int(np.argmax(zs))]) or 0.0  # no gain at all: +0, not -0
+    lo, hi = float(ks[i - 1]), float(ks[i])
+    for _ in range(40):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (lo, mid) if z(mid) >= zeta else (mid, hi)
+    return s * hi
+
+
 def yaw_damper(tabs, aircraft, mass_model):
     """A direct-control aircraft's yaw damper ([flight_control] type =
     "direct", yaw_damper = true), or None: the gain (rudder rad per rad/s of
     the washed-out yaw rate) over dynamic pressure that brings the dutch
-    roll's damping to YAW_DAMPER_ZETA at 1 g trim - the fly-by-wire's yaw
-    damper design (design_point) at the airframe's own dutch roll frequency,
-    without its sideslip feedback. A large swept-wing jet's dutch roll is
-    lightly damped by nature (the B-52's 0.05, its real one has a damper)."""
+    roll's damping to YAW_DAMPER_ZETA at 1 g trim, in the full lateral
+    model with the washout (yaw_damper_loop) - a swept wing's dihedral
+    effect rolls the aircraft through its dutch roll, which a model of
+    sideslip and yaw alone leaves out. A large swept-wing jet's dutch roll
+    is lightly damped by nature, most at height (the real B-52's and
+    KC-135's have dampers)."""
     spec = aircraft.spec.get("flight_control", {})
     if spec.get("type", "direct") != "direct" or not spec.get("yaw_damper", False):
         return None
     if "rudder" not in aircraft.channels():
         return None
-    m, _, Ixx, _, Izz, _ = loaded_inertia(mass_model)
-    S, b = aircraft.S, aircraft.b
+    inertia = loaded_inertia(mass_model)
+    m, S = inertia[0], aircraft.S
     zeta = float(spec.get("yaw_damper_zeta", YAW_DAMPER_ZETA))
     rho = 1.225 * (1.0 - 2.25577e-5 * YAW_DAMPER_ALTITUDE) ** 4.2559
     top = float(tabs["mach"]["mach"][-1]) if tabs.get("mach") is not None else 0.9
@@ -163,21 +222,9 @@ def yaw_damper(tabs, aircraft, mass_model):
         Q = q_psf * PSF
         V = math.sqrt(2.0 * Q / rho)
         mach = min(V / (A_SOUND + 8.6), top)
-        CL = m * G0 / (Q * S)
-        alpha = min(_trim_alpha(tabs, CL, mach), 15.0)
-        d = derivatives_at(tabs, alpha, mach)
-        ar = math.radians(alpha)
-        Yb = Q * S * d["CYb"] / m
-        Nb = Q * S * b * d["Cnb"] / Izz
-        Lb = Q * S * b * d["Clb"] / Ixx
-        Nr = Q * S * b * b * d["Cnr"] / (2 * Izz * V)
-        Ndr = Q * S * b * d.get("Cn_rudder", 0.0) / Izz
-        Nb_s = Nb * math.cos(ar) - Lb * math.sin(ar)
-        w = math.sqrt(max(Nb_s, 0.0))
-        k = (2 * zeta * w + Yb / V + Nr) / Ndr if abs(Ndr) > 1e-9 else 0.0
-        if k * Ndr <= 0.0:          # damped enough by itself there
-            k = 0.0
-        gains.append(float(np.clip(k, -LIMITS["k_yaw_r"], LIMITS["k_yaw_r"])))
+        alpha = min(_trim_alpha(tabs, m * G0 / (Q * S), mach), 15.0)
+        A, B = yaw_plant(tabs, aircraft, inertia, Q, V, mach, alpha)
+        gains.append(_damper_gain(A, B, zeta, LIMITS["k_yaw_r"]))
     return {"qbar_psf": np.array(QBAR_PSF), "k": np.array(gains), "zeta": zeta}
 
 

@@ -785,10 +785,13 @@ class LargeAircraft(unittest.TestCase):
         self.assertAlmostEqual(A[3, 2], sa / ca)
 
     def test_yaw_damper_damps_the_dutch_roll(self):
-        # a direct-control design asks for one; its gain over dynamic pressure
-        # puts the dutch roll's (beta, r) pair at the damping asked for - its
-        # yaw damping and the rudder's fed-back yaw rate together - and none
-        # where the airframe is damped enough by itself
+        # a direct-control design asks for one. Its loop is the JSBSim file's:
+        # the rudder at -k times the yaw rate less its washout state; with no
+        # gain the loop is the airframe and the washout's own pole. The gain
+        # over dynamic pressure brings the full lateral model's dutch roll -
+        # a swept wing's dihedral effect rolling it - to the damping asked
+        # for, opposing the yaw rate, and is none where the airframe is
+        # damped enough by itself
         from unittest import mock
         from hangar import fcs
         from hangar.linear import loaded_inertia
@@ -798,32 +801,39 @@ class LargeAircraft(unittest.TestCase):
         self.assertIsNone(fcs.yaw_damper({}, a, mm))
         a.spec.setdefault("flight_control", {})["yaw_damper"] = True
         a = Aircraft(a.spec)
-        m, _, Ixx, _, Izz, _ = loaded_inertia(mm)
+        A = np.array([[-0.1, 0.05, -1.0, 0.1], [-8.0, -2.0, 0.6, 0.0], [1.5, -0.1, -0.2, 0.0], [0.0, 1.0, 0.05, 0.0]])
+        B = np.array([0.02, 0.4, -1.2, 0.0])
+        e0 = np.sort_complex(np.linalg.eigvals(A))
+        np.testing.assert_allclose(np.sort_complex(np.linalg.eigvals(fcs.yaw_damper_loop(A, B, 0.0, tau=2.0))),
+                                   np.sort_complex(np.append(e0, -0.5)), atol=1e-9)
+        self.assertGreater(fcs.dutch_roll_zeta(fcs.yaw_damper_loop(A, B, -0.3)), fcs.dutch_roll_zeta(A))
         rho = 1.225 * (1.0 - 2.25577e-5 * fcs.YAW_DAMPER_ALTITUDE) ** 4.2559
-        for cnr, damped in ((-0.1, False), (-40.0, True)):
-            d = {"CYb": -0.5, "Clb": -0.08, "Cnb": 0.08, "Cnr": cnr, "Cn_rudder": -0.07}
+        for clb, cnr, damped in ((-0.25, -0.1, False), (-0.02, -8.0, True)):
+            d = {"CYb": -0.6, "CYp": 0.0, "CYr": 0.3, "Clb": clb, "Clp": -0.45, "Clr": 0.12, "Cnb": 0.08, "Cnp": -0.03,
+                 "Cnr": cnr, "CY_rudder": 0.15, "Cl_rudder": 0.01, "Cn_rudder": -0.07}
             with mock.patch.object(fcs, "derivatives_at", return_value=d), \
-                    mock.patch.object(fcs, "_trim_alpha", return_value=0.0):
+                    mock.patch.object(fcs, "_trim_alpha", return_value=4.0):
                 yd = fcs.yaw_damper({}, a, mm)
-            with self.subTest(Cnr=cnr):
-                self.assertEqual(yd["zeta"], fcs.YAW_DAMPER_ZETA)
-                np.testing.assert_array_equal(yd["qbar_psf"], fcs.QBAR_PSF)
-                if damped:
-                    self.assertTrue((yd["k"] == 0.0).all())
-                    continue
-                for q_psf, k in zip(yd["qbar_psf"], yd["k"]):
-                    if abs(k) >= fcs.LIMITS["k_yaw_r"]:
+                with self.subTest(Clb=clb, Cnr=cnr):
+                    self.assertEqual(yd["zeta"], fcs.YAW_DAMPER_ZETA)
+                    np.testing.assert_array_equal(yd["qbar_psf"], fcs.QBAR_PSF)
+                    if damped:
+                        self.assertTrue((yd["k"] == 0.0).all())
                         continue
-                    Q = q_psf * fcs.PSF
-                    V = math.sqrt(2.0 * Q / rho)
-                    Yb = Q * a.S * d["CYb"] / m
-                    Nr = Q * a.S * a.b ** 2 * d["Cnr"] / (2.0 * Izz * V)
-                    w2 = Q * a.S * a.b * d["Cnb"] / Izz
-                    Ndr = Q * a.S * a.b * d["Cn_rudder"] / Izz
-                    # the rudder: -k times the yaw rate
-                    trace = Yb / V + Nr - Ndr * k
-                    self.assertLess(trace, Yb / V + Nr)
-                    self.assertAlmostEqual(-trace / (2.0 * math.sqrt(w2)), fcs.YAW_DAMPER_ZETA, places=9)
+                    for q_psf, k in zip(yd["qbar_psf"], yd["k"]):
+                        Q = q_psf * fcs.PSF
+                        V = math.sqrt(2.0 * Q / rho)
+                        A, B = fcs.yaw_plant(None, a, loaded_inertia(mm), Q, V, 0.3, 4.0)
+                        self.assertLess(fcs.dutch_roll_zeta(A), fcs.YAW_DAMPER_ZETA)
+                        self.assertGreater(k * B[2], 0.0)  # it opposes the yaw rate
+                        z = fcs.dutch_roll_zeta(fcs.yaw_damper_loop(A, B, k))
+                        if z < fcs.YAW_DAMPER_ZETA - 1e-6:
+                            # out of reach: the most any gain up to the limit gives
+                            best = max(fcs.dutch_roll_zeta(fcs.yaw_damper_loop(A, B, g))
+                                       for g in np.sign(k) * np.linspace(0.0, fcs.LIMITS["k_yaw_r"], 121))
+                            self.assertGreater(z, best - 0.01)
+                        else:
+                            self.assertAlmostEqual(z, fcs.YAW_DAMPER_ZETA, places=6)
 
     def test_yaw_channel_carries_the_damper(self):
         # the yaw damper in a direct-control Yaw channel: the body yaw rate
@@ -1036,6 +1046,29 @@ class Model3D(unittest.TestCase):
         self.assertTrue(((uv >= 0.0) & (uv <= 1.0)).all())
         self.assertEqual(L.image()[:2], bytes([0xFF, 0xD8]))  # a JPEG
 
+    def test_livery_paints_windows(self):
+        # a transport's cockpit windows, painted: the side windows in the
+        # profile view within their box, the windscreen across the nose in the
+        # plan view, and nothing outside them
+        import io
+        from PIL import Image
+        from hangar import livery
+        a = Aircraft.load(repo("aircraft/skua/skua.toml"))
+        L = livery.Livery(a, [[0.0, -2.0, -0.5], [2.0, 2.0, 0.5]])
+        L.spec = dict(L.spec, windows="#000000", windows_x=[0.4, 0.8], windows_z=[0.1, 0.3],
+                      windscreen_x=[0.3, 0.4], windscreen_y=0.2, wear=0.0, panel_lines=0.0)
+        img = np.asarray(Image.open(io.BytesIO(L.image()))).astype(float) / 255.0
+
+        def colour(p, region):
+            u, v = L.uv(np.array([p], float), np.array([region]))[0]
+            return img[int(v * livery.SIZE), int(u * livery.SIZE)]
+        self.assertLess(colour([0.6, 0.0, 0.2], livery.SIDE).max(), 0.1)
+        self.assertLess(colour([0.35, 0.1, 0.0], livery.TOP).max(), 0.1)
+        self.assertLess(colour([0.0, 0.1, 0.2], livery.FRONT).max(), 0.1)
+        for p, region in (([1.2, 0.0, 0.2], livery.SIDE), ([0.6, 0.0, 0.4], livery.SIDE), ([0.35, 0.5, 0.0], livery.TOP),
+                          ([0.6, 0.1, 0.0], livery.TOP), ([0.0, 0.5, 0.2], livery.FRONT)):
+            self.assertGreater(colour(p, region).max(), 0.3, (p, region))
+
     def test_stand_in_wheels(self):
         # a stand-in's main wheels, relative to its model's origin (its empty
         # CG), in body axes: behind and below it
@@ -1117,6 +1150,40 @@ class Model3D(unittest.TestCase):
         nose["attach"][1] += 0.3
         sides = {leg.name: leg.side for leg in sg.legs(Aircraft(a.spec))}
         self.assertEqual(sides, {"Nose Gear": 0, "Left Main Gear": -1, "Right Main Gear": 1})
+
+    def test_a_bogie_carries_its_wheels_in_pairs(self):
+        # axles = 2: the wheels in pairs on two axles, one behind the other
+        # axle_spacing apart about the leg's own; each axle's wheels a part of
+        # their own (each rolls about its axle), the beam with the oleo; the
+        # strut comes down between each pair. A bogie of single wheels is
+        # refused
+        from hangar.shape import gear as sg
+        from hangar.shape import meshkit
+        a = Aircraft.load(repo("aircraft/f16c/f16c.toml"))
+        main = next(g for g in a.spec["gear"] if "Main" in g["name"])
+        main.update(wheels=2, axles=2, axle_spacing=1.0)
+        leg = next(l for l in sg.legs(Aircraft(a.spec)) if l.name == "Right Main Gear")
+        self.assertEqual(leg.wheel_parts(), ["wheel", "wheel 2"])
+        pts = leg.axle_points()
+        np.testing.assert_allclose(pts[1] - pts[0], [1.0, 0.0, 0.0])
+        np.testing.assert_allclose(0.5 * (pts[0] + pts[1]), leg.axle)
+        centres, span = leg.wheel_centres()
+        self.assertEqual(len(centres), 4)
+        for k, p in enumerate(pts):
+            on, _ = leg.wheel_centres(k)
+            np.testing.assert_allclose([c[0] for c in on], [p[0], p[0]])
+            # the gap between the pair clears the oleo's piston (0.72 of the strut's radius)
+            self.assertGreater(abs(on[1][1] - on[0][1]) - leg.w, 2.0 * 0.72 * leg.strut_r)
+        groups = leg.part_groups()
+        self.assertEqual(sorted(groups), ["oleo", "strut", "wheel", "wheel 2"])
+        if meshkit.library() is not None:
+            for part in groups:
+                with self.subTest(part=part):
+                    m = meshkit.build(sg.leg_scene(leg, part))
+                    self.assertEqual((m["boundary_edges"], m["components"]), (0, 1))
+        main.update(wheels=1)
+        with self.assertRaises(ValueError):
+            sg.legs(Aircraft(a.spec))
 
     def test_every_models_joints_are_the_viewers(self):
         # the engines and wheels each design's model names are among those

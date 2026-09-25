@@ -1,0 +1,15 @@
+# The KC-135R's Air Mobility Command grey (FS 36173) all over, its cockpit
+# windows painted
+[paint]
+scheme = "single"
+colours = ["#5f6669"]
+radome = "#575e61"
+radome_x = 1.0
+windows = "#1b2127"
+windows_x = [2.45, 4.40]
+windows_z = [1.98, 2.36]
+windscreen_x = [2.20, 2.75]
+windscreen_y = 0.95
+panel_lines = 0.07
+wear = 0.05
+gloss = 0.3

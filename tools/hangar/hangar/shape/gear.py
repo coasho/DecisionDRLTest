@@ -24,6 +24,10 @@ Per gear in the design ([[gear]]):
                             gear's own position; its mirror image turns about the
                             mirror image): a positive turn about it folds the leg
     wheels = 1              side by side on one axle
+    axles = 1               a bogie: axles one behind the other on a beam under the
+                            strut, axle_spacing (m) apart (a transport's four-wheel
+                            truck: wheels = 2, axles = 2); its wheels in pairs, the
+                            strut coming down between them
     door_deg = 90           how far the doors open
     door_reach = 0.8        how far out (m) a door's hinge may move to clear the leg: more
                             for a wide multi-wheel truck (the B-52's)
@@ -97,6 +101,11 @@ class Leg:
         self.r = 0.5 * gear.wheel_diameter
         self.w = gear.wheel_width
         self.axle = contact + np.array([0.0, 0.0, self.r])
+        self.axles = int(spec.get("axles", 1))
+        self.axle_spacing = float(spec.get("axle_spacing", 2.5 * self.r))
+        if self.axles < 1 or (self.axles > 1 and (self.wheels < 2 or self.axle_spacing < 2.0 * self.r + 0.05)):
+            raise ValueError("gear %r: a bogie (axles > 1) carries its wheels in pairs (wheels >= 2), "
+                             "its axles more than a wheel's diameter apart" % gear.name)
         top = gear.attach.copy() if gear.attach is not None else contact + np.array([0.0, 0.0, 2.0 * self.r + 0.8])
         if side < 0 < top[1] or side > 0 > top[1]:
             top[1] = -top[1]
@@ -201,10 +210,23 @@ class Leg:
         self.set_stow(-M @ other.swing_axis, other.swing_deg, -other.twist_deg)
         self.fitted = other.fitted
 
-    def wheel_centres(self):
+    def axle_points(self):
+        """The axles' centres: the leg's own, or a bogie's one behind the other."""
+        n = self.axles
+        return [self.axle + np.array([(k - 0.5 * (n - 1)) * self.axle_spacing, 0.0, 0.0]) for k in range(n)]
+
+    def wheel_centres(self, axle=None):
+        """The wheels' centres, on every axle or on one, and how wide they span."""
         n, w = self.wheels, self.w
-        span = n * w + (n - 1) * 0.04
-        return [self.axle + np.array([0.0, -0.5 * span + 0.5 * w + k * (w + 0.04), 0.0]) for k in range(n)], span
+        gap = 0.04 if self.axles == 1 else 1.6 * self.strut_r + 0.06  # a bogie's strut comes down between
+        span = n * w + (n - 1) * gap
+        on = self.axle_points() if axle is None else [self.axle_points()[axle]]
+        return [a + np.array([0.0, -0.5 * span + 0.5 * w + k * (w + gap), 0.0]) for a in on for k in range(n)], span
+
+    def wheel_parts(self):
+        """The names of the leg's wheel groups (part_groups): one per axle,
+        each rolling about its own."""
+        return ["wheel"] + ["wheel %d" % (k + 1) for k in range(1, self.axles)]
 
     def parts(self):
         """The leg's solids, all in one (part_groups)."""
@@ -219,6 +241,8 @@ class Leg:
         axle, which roll."""
         r, w, rs = self.r, self.w, self.strut_r
         y = np.array([0.0, 1.0, 0.0])
+        if self.axles > 1:
+            return self._bogie_groups()
         centres, span = self.wheel_centres()
         wheel, oleo = [], []
         for c in centres:
@@ -245,9 +269,41 @@ class Leg:
         return {"strut": union([{"prim": "capsule", "material": STRUT, "a": mid, "b": self.hinge, "r": rs}]),
                 "oleo": union(oleo), "wheel": union(wheel)}
 
+    def _bogie_groups(self):
+        """A bogie's solids: the strut; the oleo - its piston down between the
+        wheels to the beam, the beam along under it from the first axle to the
+        last; and each axle's wheels, with the axle through them."""
+        r, w, rs = self.r, self.w, self.strut_r
+        y = np.array([0.0, 1.0, 0.0])
+        foot = self.foot()
+        axles = self.axle_points()
+        lift = foot - self.axle
+        groups = {}
+        for name, (k, a) in zip(self.wheel_parts(), enumerate(axles)):
+            centres, span = self.wheel_centres(k)
+            parts = []
+            for c in centres:
+                parts.append({"prim": "cylinder", "material": TYRE, "a": c - 0.5 * w * y, "b": c + 0.5 * w * y, "r": r,
+                              "round": min(0.45 * w, 0.3 * r)})
+                parts.append({"prim": "cylinder", "material": METAL, "a": c - (0.5 * w + 0.01) * y,
+                              "b": c + (0.5 * w + 0.01) * y, "r": 0.55 * r, "round": 0.008})
+            parts.append({"prim": "cylinder", "material": METAL, "a": a - 0.5 * span * y, "b": a + 0.5 * span * y,
+                          "r": 0.3 * rs, "round": 0.004})
+            groups[name] = union(parts)
+        mid = foot + 0.45 * (self.hinge - foot)
+        oleo = [{"prim": "capsule", "material": STRUT, "a": axles[0] + lift, "b": axles[-1] + lift, "r": 0.55 * rs},
+                {"prim": "capsule", "material": METAL, "a": foot, "b": mid, "r": 0.72 * rs}]  # the beam, the piston
+        for a in axles:  # the beam's ends round the axles
+            oleo.append({"prim": "capsule", "material": STRUT, "a": a, "b": a + lift, "r": 0.5 * rs})
+        return dict({"strut": union([{"prim": "capsule", "material": STRUT, "a": mid, "b": self.hinge, "r": rs}]),
+                     "oleo": union(oleo)}, **groups)
+
     def foot(self):
-        """The bottom of the oleo: above a fork, or inboard of a single wheel."""
+        """The bottom of the oleo: above a fork, inboard of a single wheel,
+        or on a bogie's beam."""
         rs, y = self.strut_r, np.array([0.0, 1.0, 0.0])
+        if self.axles > 1:
+            return self.axle + np.array([0.0, 0.0, 0.6 * rs])
         if self.side == 0 or self.wheels > 1:
             return self.axle + np.array([0.0, 0.0, self.r + 0.08 + 0.6 * rs])
         _, span = self.wheel_centres()

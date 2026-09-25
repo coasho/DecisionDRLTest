@@ -613,13 +613,13 @@ def _gear_parts(aircraft, B, top, origin, report, plan, mats):
     moving, panels = [], []
     for k, leg in enumerate(sg.legs(aircraft)):
         leg = doors[leg.name]["leg"] if leg.name in doors else leg  # fitted to its bay
-        pieces = {part: meshkit.build(sg.leg_scene(leg, part)) for part in ("strut", "oleo", "wheel")}
+        pieces = {part: meshkit.build(sg.leg_scene(leg, part)) for part in ["strut", "oleo"] + leg.wheel_parts()}
         for part, m in pieces.items():
             report["gear"].append(dict(_stats(m), label="%s %s" % (leg.name, part)))
         slide, gain = leg.slide()
-        wheel = {"name": "fsim:wheel:%d:%.6g" % (k, leg.r), "point": leg.axle, "axis": [0.0, -1.0, 0.0],
-                 "mesh": ("%s wheel" % leg.name, pieces["wheel"])}
-        lower = [wheel]
+        # each axle's wheels roll about it (a bogie's several)
+        lower = [{"name": "fsim:wheel:%d:%.6g" % (k, leg.r), "point": p, "axis": [0.0, -1.0, 0.0],
+                  "mesh": ("%s %s" % (leg.name, part), pieces[part])} for part, p in zip(leg.wheel_parts(), leg.axle_points())]
         if leg.steerable:  # about the strut, pointing down: a positive turn steers right
             lower = [{"name": "fsim:steer:%d" % k, "point": leg.axle, "axis": -leg.strut,
                       "mesh": ("%s oleo" % leg.name, pieces["oleo"]), "children": lower}]
@@ -633,8 +633,8 @@ def _gear_parts(aircraft, B, top, origin, report, plan, mats):
                      "mesh": strut, "children": [oleo]}
             top.append(_tree(B, mats, origin, {"name": "fsim:gear:%.6g:1:%.6g" % (leg.swing_deg, sg.DOORS),
                                                "point": leg.hinge, "axis": leg.swing_axis, "children": [chain]}))
-            report["gear"][-3]["protrusion"] = doors[leg.name]["protrusion"]
-            report["gear"][-3]["allowed"] = doors[leg.name]["allowed"]
+            report["gear"][-len(pieces)]["protrusion"] = doors[leg.name]["protrusion"]  # on the strut's entry
+            report["gear"][-len(pieces)]["allowed"] = doors[leg.name]["allowed"]
             moving.append(leg)
             for d in doors[leg.name]["doors"]:
                 dm = _painted(B, meshkit.build(d["scene"]))
