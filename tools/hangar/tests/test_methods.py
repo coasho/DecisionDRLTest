@@ -1495,6 +1495,55 @@ class Model3D(unittest.TestCase):
         with self.assertRaises(ValueError):
             sg.legs(Aircraft(a.spec))
 
+    def test_a_bogie_turns_over_as_its_leg_folds(self):
+        # bogie_deg = "level": the bogie turns on its pivot as the leg swings,
+        # the smaller turn that leaves it level stowed - behind a leg folded
+        # aft through 100 deg, over on its back (80 deg more, nose down: the
+        # Tu-16's somersault), through 60 deg, back up; "over": on its back
+        # either way. Its beam is a part of its own, which the doors and the
+        # bay reckon with, turning about the axles' direction at the oleo's
+        # foot. A single axle has no bogie to turn
+        from hangar.shape import gear as sg
+        from hangar.shape import meshkit
+        a = Aircraft.load(repo("aircraft/f16c/f16c.toml"))
+        main = next(g for g in a.spec["gear"] if "Main" in g["name"])
+        main.update(wheels=2, axles=2, axle_spacing=1.0, retract="aft", retract_deg=100, wheel_turn=0, bogie_deg="level")
+        legs = {l.name: l for l in sg.legs(Aircraft(a.spec))}
+        for name in ("Left Main Gear", "Right Main Gear"):
+            leg = legs[name]
+            self.assertAlmostEqual(leg.bogie_deg, -80.0)
+            first, last = leg.turned(np.array(leg.axle_points()), bogie=np.array([True, True]))
+            self.assertAlmostEqual(first[2], last[2])
+            self.assertAlmostEqual(first[0] - last[0], 1.0)  # the first axle now the aftmost
+            # the leg as built, down, and the frame it turns in undone
+            np.testing.assert_allclose(leg.unturned(leg.turned(leg.axle_points(), 0.6, [True, True]), 0.6, True),
+                                       leg.axle_points(), atol=1e-12)
+        leg = legs["Right Main Gear"]
+        self.assertEqual(sorted(leg.part_groups()), ["bogie", "oleo", "strut", "wheel", "wheel 2"])
+        pts, on = leg.surface()
+        self.assertTrue(on.any() and not on.all())
+        if meshkit.library() is not None:
+            m = meshkit.build(sg.leg_scene(leg, "bogie"))
+            self.assertEqual((m["boundary_edges"], m["components"]), (0, 1))
+
+        def right(**kw):
+            main.update(kw)
+            return next(l for l in sg.legs(Aircraft(a.spec)) if l.name == "Right Main Gear")
+
+        def up(leg):  # the stowed bogie's top, up or down
+            return (leg.R @ leg.bogie_turn() @ [0.0, 0.0, 1.0])[2]
+
+        self.assertAlmostEqual(right(retract_deg=60).bogie_deg, 60.0)
+        self.assertAlmostEqual(up(right()), 1.0)
+        self.assertAlmostEqual(right(bogie_deg="over").bogie_deg, -120.0)
+        self.assertAlmostEqual(up(right()), -1.0)
+        self.assertAlmostEqual(right(retract_deg=100).bogie_deg, -80.0)
+        main.update(bogie_deg=30.0)
+        self.assertEqual(sg.legs(Aircraft(a.spec))[-1].bogie_deg, 30.0)
+        main.update(axles=1)
+        with self.assertRaises(ValueError):
+            sg.legs(Aircraft(a.spec))
+
     def test_every_models_joints_are_the_viewers(self):
         # the engines and wheels each design's model names are among those
         # the platform reports: engines past the fourth follow engine i % 4,

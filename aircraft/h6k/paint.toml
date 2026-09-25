@@ -1,0 +1,15 @@
+# The PLAAF's grey all over, the radome a shade darker, the flight deck's
+# windows painted (photographs; estimate)
+[paint]
+scheme = "single"
+colours = ["#8f989d"]
+radome = "#7c8488"
+radome_x = 2.9
+windows = "#1b2127"
+windows_x = [4.1, 5.5]
+windows_z = [1.02, 1.36]
+windscreen_x = [3.3, 4.05]
+windscreen_y = 0.8
+panel_lines = 0.07
+wear = 0.05
+gloss = 0.3

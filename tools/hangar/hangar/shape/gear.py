@@ -28,6 +28,10 @@ Per gear in the design ([[gear]]):
                             strut, axle_spacing (m) apart (a transport's four-wheel
                             truck: wheels = 2, axles = 2); its wheels in pairs, the
                             strut coming down between them
+    bogie_deg = 0           degrees a bogie turns on its pivot as the leg folds, nose
+                            up positive; "level": the smaller turn that leaves it lying
+                            level, stowed; "over": the one that leaves it level on its
+                            back (the Tu-16's somersault into a slim gondola)
     door_deg = 90           how far the doors open
     door_reach = 0.8        how far out (m) a door's hinge may move to clear the leg: more
                             for a wide multi-wheel truck (the B-52's)
@@ -40,6 +44,8 @@ A single leg (not mirrored) is a centre leg - a fork round its wheel, free to
 fold across the centre line - also where it stands beside it (the A-10's and
 the Su-25's nose wheels, clear of the gun).
 """
+import contextlib
+
 import numpy as np
 
 from .airframe import GAP, METAL, SKIN, STRUT, TYRE, union
@@ -68,6 +74,20 @@ def _axis_angle(R):
         return v[:, int(np.argmax(w))], float(np.degrees(th))
     k = np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]]) / (2.0 * np.sin(th))
     return k / np.linalg.norm(k), float(np.degrees(th))
+
+
+def _level(R, over=False):
+    """The turn (degrees, nose up positive) about a bogie's pivot that leaves
+    it lying level once the leg's turn R has stowed it: the smaller one
+    (within +-90), or the one that leaves it on its back."""
+    b = float(np.degrees(np.arctan2(R[2, 0], R[2, 2])))  # level and upright
+    if over:
+        return b - 180.0 if b > 0.0 else b + 180.0
+    return b - 180.0 if b > 90.0 else b + 180.0 if b <= -90.0 else b
+
+
+def _children(node):
+    return node["children"] if node.get("op") == "union" else [node]
 
 
 def _swing(direction, side):
@@ -106,6 +126,13 @@ class Leg:
         if self.axles < 1 or (self.axles > 1 and (self.wheels < 2 or self.axle_spacing < 2.0 * self.r + 0.05)):
             raise ValueError("gear %r: a bogie (axles > 1) carries its wheels in pairs (wheels >= 2), "
                              "its axles more than a wheel's diameter apart" % gear.name)
+        bogie = spec.get("bogie_deg", 0.0)
+        if isinstance(bogie, str) and bogie not in ("level", "over"):
+            raise ValueError("gear %r: bogie_deg is degrees, \"level\" or \"over\"" % gear.name)
+        if bogie != 0.0 and self.axles < 2:
+            raise ValueError("gear %r: bogie_deg turns a bogie (axles > 1)" % gear.name)
+        self.bogie_level = bogie if bogie in ("level", "over") else None
+        self.bogie_deg = 0.0 if self.bogie_level else float(bogie)
         top = gear.attach.copy() if gear.attach is not None else contact + np.array([0.0, 0.0, 2.0 * self.r + 0.8])
         if side < 0 < top[1] or side > 0 > top[1]:
             top[1] = -top[1]
@@ -137,6 +164,30 @@ class Leg:
         self.swing_axis = np.asarray(axis, float) / np.linalg.norm(axis)
         self.swing_deg, self.twist_deg = float(angle), float(twist)
         self.R = _rotation(self.swing_axis, self.swing_deg) @ _rotation(self.strut, self.twist_deg)
+        if self.bogie_level:
+            self.bogie_deg = _level(self.R, self.bogie_level == "over")
+
+    @property
+    def bogie_turns(self):
+        """Whether the bogie turns on its pivot as the leg folds."""
+        return self.bogie_level is not None or self.bogie_deg != 0.0
+
+    def bogie_turn(self, frac=1.0):
+        """The bogie's own turn frac of the way up, about the axles' direction
+        through its pivot (the foot)."""
+        return _rotation([0.0, 1.0, 0.0], frac * self.bogie_deg)
+
+    def _moved(self, pts, on, axis, angle, twist, frac):
+        """Points pts (on: those on a turning bogie) with the leg turned frac of
+        the way through the swing about axis and the twist (a candidate's)."""
+        q = pts
+        if self.bogie_turns:
+            beta = (_level(_rotation(axis, angle) @ _rotation(self.strut, twist), self.bogie_level == "over")
+                    if self.bogie_level else self.bogie_deg)
+            foot = self.foot()
+            q = pts.copy()
+            q[on] = foot + (pts[on] - foot) @ _rotation([0.0, 1.0, 0.0], frac * beta).T
+        return self.hinge + (q - self.hinge) @ (_rotation(axis, frac * angle) @ _rotation(self.strut, frac * twist)).T
 
     def fit(self, probe):
         """Fits the stowing turn to the airframe (a meshkit.Probe): the swing's
@@ -146,10 +197,10 @@ class Leg:
         way, as plain as it can. A main leg stays on its own side of the
         centre line all the way. Returns how far the stowed leg stands out of
         the skin (m)."""
-        pts = self.points()
+        pts, on = self.points()
         given = [k for k in ("retract_axis", "retract_deg", "wheel_turn") if k in self.spec]
         if len(given) == 3 or (len(given) == 2 and "retract_axis" not in given):
-            return float(max(probe(self.turned(pts))[0].max(), 0.0))
+            return float(max(probe(self.turned(pts, bogie=on))[0].max(), 0.0))
         base = self.swing_axis if "retract_axis" in self.spec else _swing(self.direction, self.side)
         sign = 1.0 if self.side >= 0 else -1.0
         tilt_axis = np.cross(base, [0.0, 0.0, 1.0])  # turns the hinge axis towards z
@@ -172,16 +223,15 @@ class Leg:
                     twists, signed = [0.0, 15.0, -15.0, 30.0, -30.0, 45.0, -45.0, 60.0, -60.0, 75.0, -75.0, 90.0, -90.0], False
                 for twist in twists:
                     t = twist if signed else twist * sign
-                    cands.append((swing @ _rotation(self.strut, t),
-                                  (abs(lean) + abs(tilt)) / 30.0 + abs(angle - 90.0) / 30.0 + abs(twist) / 90.0,
+                    cands.append(((abs(lean) + abs(tilt)) / 30.0 + abs(angle - 90.0) / 30.0 + abs(twist) / 90.0,
                                   (axis, angle, t)))
-        stowed = np.array([self.hinge + (pts - self.hinge) @ R.T for R, _, _ in cands])
+        stowed = np.array([self._moved(pts, on, a, g, t, 1.0) for _, (a, g, t) in cands])
         d, _ = probe(stowed.reshape(-1, 3))
         # inside, clear of the closed doors
         out = np.maximum(d.reshape(len(cands), -1).max(axis=1) + DOOR + 0.5 * CLEAR, 0.0)
         # on its way: a quarter, half and three quarters up
-        mids = np.array([[self.hinge + (pts - self.hinge) @ (_rotation(a, f * g) @ _rotation(self.strut, f * t)).T
-                          for f in (0.25, 0.5, 0.75)] for _, _, (a, g, t) in cands]).reshape(len(cands), -1, 3)
+        mids = np.array([[self._moved(pts, on, a, g, t, f) for f in (0.25, 0.5, 0.75)]
+                         for _, (a, g, t) in cands]).reshape(len(cands), -1, 3)
         dm, _ = probe(mids.reshape(-1, 3))
         dm = dm.reshape(len(cands), -1)
         if self.side != 0:  # not across the centre line, into the other leg's bay
@@ -197,9 +247,9 @@ class Leg:
                for i in (0, 1)]
         area = np.where(near.any(axis=1), np.clip(ext[0], 0.0, None) * np.clip(ext[1], 0.0, None), 0.0)
         # inside (to a centimetre) first, then the smallest opening and the plainest turn
-        score = 100.0 * np.maximum(out - 0.01, 0.0) + area / 0.25 + np.array([p for _, p, _ in cands])
+        score = 100.0 * np.maximum(out - 0.01, 0.0) + area / 0.25 + np.array([p for p, _ in cands])
         k = int(np.argmin(score))
-        self.set_stow(*cands[k][2])
+        self.set_stow(*cands[k][1])
         self.fitted = True
         return float(out[k])
 
@@ -230,7 +280,20 @@ class Leg:
 
     def parts(self):
         """The leg's solids, all in one (part_groups)."""
-        return union([n for g in self.part_groups().values() for n in (g["children"] if g.get("op") == "union" else [g])])
+        return union([n for g in self.part_groups().values() for n in _children(g)])
+
+    def fixed_parts(self):
+        """The solids that turn with the leg alone: all of them, or all but a
+        turning bogie's."""
+        if not self.bogie_turns:
+            return self.parts()
+        g = self.part_groups()
+        return union([n for k in ("strut", "oleo") for n in _children(g[k])])
+
+    def bogie_parts(self):
+        """A turning bogie's solids: its beam and wheels."""
+        g = self.part_groups()
+        return union([n for k in ["bogie"] + self.wheel_parts() for n in _children(g[k])])
 
     def part_groups(self):
         """The leg's solids in the three pieces that move apart: the strut
@@ -272,7 +335,8 @@ class Leg:
     def _bogie_groups(self):
         """A bogie's solids: the strut; the oleo - its piston down between the
         wheels to the beam, the beam along under it from the first axle to the
-        last; and each axle's wheels, with the axle through them."""
+        last (a part of its own, the bogie, where it turns on its pivot); and
+        each axle's wheels, with the axle through them."""
         r, w, rs = self.r, self.w, self.strut_r
         y = np.array([0.0, 1.0, 0.0])
         foot = self.foot()
@@ -291,12 +355,14 @@ class Leg:
                           "r": 0.3 * rs, "round": 0.004})
             groups[name] = union(parts)
         mid = foot + 0.45 * (self.hinge - foot)
-        oleo = [{"prim": "capsule", "material": STRUT, "a": axles[0] + lift, "b": axles[-1] + lift, "r": 0.55 * rs},
-                {"prim": "capsule", "material": METAL, "a": foot, "b": mid, "r": 0.72 * rs}]  # the beam, the piston
+        piston = {"prim": "capsule", "material": METAL, "a": foot, "b": mid, "r": 0.72 * rs}
+        beam = [{"prim": "capsule", "material": STRUT, "a": axles[0] + lift, "b": axles[-1] + lift, "r": 0.55 * rs}]
         for a in axles:  # the beam's ends round the axles
-            oleo.append({"prim": "capsule", "material": STRUT, "a": a, "b": a + lift, "r": 0.5 * rs})
-        return dict({"strut": union([{"prim": "capsule", "material": STRUT, "a": mid, "b": self.hinge, "r": rs}]),
-                     "oleo": union(oleo)}, **groups)
+            beam.append({"prim": "capsule", "material": STRUT, "a": a, "b": a + lift, "r": 0.5 * rs})
+        strut = union([{"prim": "capsule", "material": STRUT, "a": mid, "b": self.hinge, "r": rs}])
+        if self.bogie_turns:
+            return dict({"strut": strut, "oleo": union([piston]), "bogie": union(beam)}, **groups)
+        return dict({"strut": strut, "oleo": union([beam[0], piston] + beam[1:])}, **groups)
 
     def foot(self):
         """The bottom of the oleo: above a fork, inboard of a single wheel,
@@ -326,23 +392,63 @@ class Leg:
                       "half": [3.0 * r, 0.5 * span + 0.2, 0.6 * r]}}
 
     def points(self):
-        """Points on the leg as built: its tyres' rims and its strut."""
+        """Points on the leg as built - its tyres' rims and its strut - and
+        which of them turn with a bogie."""
         th = np.linspace(0.0, 2.0 * np.pi, 24, endpoint=False)
         ring = np.stack([np.cos(th), np.zeros_like(th), np.sin(th)], axis=1) * self.r
         centres, _ = self.wheel_centres()
         pts = [c + np.array([0.0, s * 0.5 * self.w, 0.0]) + ring for c in centres for s in (-1.0, 1.0)]
+        rims = sum(len(p) for p in pts)
         pts.append(np.array([self.hinge + t * (self.axle - self.hinge) for t in np.linspace(0.0, 1.0, 12)]))
-        return np.vstack(pts)
+        pts = np.vstack(pts)
+        return pts, (np.arange(len(pts)) < rims) & self.bogie_turns
 
     def surface(self, step=0.03):
         """Points all over the leg's skin (its parts' surfaces, about step
-        apart): what must stay clear of the doors."""
-        return _surface_points(self.parts(), step)
+        apart) - what must stay clear of the doors - and which of them turn
+        with a bogie."""
+        if not self.bogie_turns:
+            pts = _surface_points(self.parts(), step)
+            return pts, np.zeros(len(pts), bool)
+        fixed, bogie = _surface_points(self.fixed_parts(), step), _surface_points(self.bogie_parts(), step)
+        return np.vstack([fixed, bogie]), np.arange(len(fixed) + len(bogie)) >= len(fixed)
 
-    def turned(self, p, frac=1.0):
-        """Points p with the leg turned frac of the way up."""
+    def turned(self, p, frac=1.0, bogie=None):
+        """Points p with the leg turned frac of the way up (bogie: which of
+        them turn with a bogie, on its pivot as well)."""
+        p = np.asarray(p, float)
+        if bogie is not None and self.bogie_turns:
+            foot = self.foot()
+            p = p.copy()
+            p[bogie] = foot + (p[bogie] - foot) @ self.bogie_turn(frac).T
         R = _rotation(self.swing_axis, frac * self.swing_deg) @ _rotation(self.strut, frac * self.twist_deg)
-        return self.hinge + (np.asarray(p, float) - self.hinge) @ R.T
+        return self.hinge + (p - self.hinge) @ R.T
+
+    def unturned(self, q, frac, bogie=False):
+        """Points q in the frame of the leg as built, the leg frac of the way
+        up - in its turning bogie's, if bogie: what turned() undoes."""
+        R = _rotation(self.swing_axis, frac * self.swing_deg) @ _rotation(self.strut, frac * self.twist_deg)
+        p = self.hinge + (np.asarray(q, float) - self.hinge) @ R
+        if bogie:
+            foot = self.foot()
+            p = foot + (p - foot) @ self.bogie_turn(frac)
+        return p
+
+    @contextlib.contextmanager
+    def probes(self):
+        """Probes of the leg's solids as built, each with whether it is its
+        turning bogie's: [(probe, bogie)]."""
+        from . import meshkit
+        with contextlib.ExitStack() as stack:
+            out = [(stack.enter_context(meshkit.Probe({"root": self.fixed_parts()})), False)]
+            if self.bogie_turns:
+                out.append((stack.enter_context(meshkit.Probe({"root": self.bogie_parts()})), True))
+            yield out
+
+    def distance(self, probes, q, frac):
+        """How far points q (design frame) stay from the leg frac of the way
+        up (m; negative: inside it)."""
+        return np.min([p(self.unturned(q, frac, bogie))[0] for p, bogie in probes], axis=0)
 
 
 def _surface_points(node, step):
@@ -411,9 +517,10 @@ def skin_heights(probe, xs, ys, z_top, depth=4.0, step=0.01):
     return out.reshape(X.shape)
 
 
-def swept(leg, pts, steps=30):
-    """Points pts of the leg at every step of its swing, down to stowed."""
-    return np.vstack([leg.turned(pts, f) for f in np.linspace(0.0, 1.0, steps + 1)])
+def swept(leg, pts, steps=30, bogie=None):
+    """Points pts of the leg (bogie: those on a turning bogie) at every step
+    of its swing, down to stowed."""
+    return np.vstack([leg.turned(pts, f, bogie) for f in np.linspace(0.0, 1.0, steps + 1)])
 
 
 def bays(aircraft, solid, foils):
@@ -438,14 +545,13 @@ def bays(aircraft, solid, foils):
 
 def _bay(leg, probe, solid, foils):
     """One leg's bay, doors and protrusion (bays)."""
-    from . import meshkit
-    pts = leg.surface()
-    stowed = leg.turned(pts)
+    pts, on = leg.surface()
+    stowed = leg.turned(pts, bogie=on)
     d, _ = probe(stowed)
     protrusion = float(max(d.max(), 0.0))
     # the leg on its way down: where it is inside the airframe (the bay's
     # space) and where it passes through the skin (the opening)
-    moving = swept(leg, pts)
+    moving = swept(leg, pts, bogie=on)
     dm, _ = probe(moving)
     inside = moving[dm < 0.0] if (dm < 0.0).any() else stowed
     through = moving[np.abs(dm) < 0.05] if (np.abs(dm) < 0.05).any() else stowed
@@ -471,7 +577,7 @@ def _bay(leg, probe, solid, foils):
     edges = [lo[iu], hi[iu]]
     limit = reach[iu] + 0.5 * (hi[iu] - lo[iu])
     doors_at = []
-    with meshkit.Probe({"root": leg.parts()}) as legp:
+    with leg.probes() as legp:
         for k, sgn in ((0, -1.0), (1, 1.0)) if leg.doors else ():
             while True:
                 door = _door_frame(H, UV, iu, iv, lo, hi, um, edges[k], sgn)
@@ -561,13 +667,10 @@ def _door_frame(H, UV, iu, iv, lo, hi, um, edge, sgn):
     return {"rect": rect, "hinge": hinge, "axis": axis, "points": P}
 
 
-def _door_clear(leg, legp, door, steps=24):
-    """How far the door, open, stays from the leg as it swings (m)."""
+def _door_clear(leg, probes, door, steps=24):
+    """How far the door, open, stays from the leg as it swings (m; probes:
+    the leg's, Leg.probes)."""
     R = _rotation(door["axis"], leg.door_deg)
     opened = door["hinge"] + (door["points"] - door["hinge"]) @ R.T
-    frames = []
-    for f in np.linspace(0.0, 1.0, steps + 1):
-        Rl = _rotation(leg.swing_axis, f * leg.swing_deg) @ _rotation(leg.strut, f * leg.twist_deg)
-        frames.append(leg.hinge + (opened - leg.hinge) @ Rl)
-    d, _ = legp(np.vstack(frames))
-    return float(d.min())
+    fs = np.linspace(0.0, 1.0, steps + 1)
+    return float(min(p(np.vstack([leg.unturned(opened, f, bogie) for f in fs]))[0].min() for p, bogie in probes))

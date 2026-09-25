@@ -1,0 +1,377 @@
+# Xi'an H-6K, built by hangar from public data: China's licence-built Tupolev
+# Tu-16 airframe rebuilt as a missile carrier - a solid radar nose in place of
+# the navigator's glazing, a glass cockpit, enlarged intakes for two Soloviev
+# D-30KP-2 turbofans, six pylons under the wings, and an electronics cone in
+# place of the tail guns.
+#
+# Frame: metres, x aft from the radome's tip, y right, z up from the
+# fuselage's centre line (the ground is 3.51 m below it, parked).
+#
+# Sources:
+# - Wikipedia, Xi'an H-6 (the H-6K's specifications): length 34.8 m, span
+#   33 m, height 10.36 m, wing area 165 m2, empty 37,200 kg, maximum take-off
+#   95,000 kg, 2 x D-30KP-2 of 118 kN, 1,050 km/h, ceiling 12,800 m, a crew
+#   of 4; and its changes from the Tu-16.
+# - Wikipedia, Soloviev D-30: the D-30KP-2's 117.68 kN, bypass ratio 2.24,
+#   1,455 mm fan, 2,640 kg, 0.715 kg/(kgf h) in cruise.
+# - The Tu-16's: wing area 164.65 m2 (tu22.ru; airwar.ru), 36,000 kg of fuel
+#   (GlobalSecurity).
+# - The shape is measured off Kaboldy's Tu-16 three-view (Wikimedia Commons,
+#   CC BY-SA 3.0), scaled in x by the published length (0.025108 m/px) and
+#   in y and z by the span (0.025326 m/px). The H-6K's nose, cockpit,
+#   intakes, pylons and tail cone are shaped from photographs (estimates).
+
+[aircraft]
+name = "h6k"
+description = "Xi'an H-6K (hangar build)"
+category = "bomber"
+
+[analysis]
+speed = 150.0                 # m/s: the Reynolds numbers (climb and cruise)
+max_mach = 1.2                # the tables' Mach range: through the transonic drag rise
+induced_drag = "trefftz"      # a swept wing's induced drag from its loading (docs/hangar.md)
+
+# The published wing area is the reference; the drawing's planform, taken to
+# the centre line, has 1 % less
+[reference]
+area = 164.65
+
+# The wing, measured off the plan view: the leading edge swept 41 deg out to
+# a break 6.81 m out, then 35.8 deg to the tip; the trailing edge swept 21.6
+# deg inboard of the gear gondolas, 27.6 deg outboard. Root chord 7.92 m, tip
+# 3.0 m at the 16.44 m half span. Mid-set, its root 0.36 m above the
+# fuselage's centre line, with 3.5 deg of anhedral (the front view). Incidence
+# 2.5 deg at the root, washed out to -0.5 deg at the tip (estimate). The
+# sections: thick at the root, where the engines are buried in it, thinner
+# outboard - NACA 64A2xx from 16 % to 12 % (estimate). Round-nosed, they
+# stall as sections do: no fighter's edge vortex.
+[[surface]]
+name = "wing"
+kind = "wing"
+vortex = false
+sections = [
+  { le = [9.410, 0.000, 0.360], chord = 7.920, twist = 2.5, airfoil = "naca64a216" },
+  { le = [13.767, 5.000, 0.054], chord = 5.563, twist = 1.6, airfoil = "naca64a214" },
+  { le = [15.360, 6.810, -0.057], chord = 4.933, twist = 1.2, airfoil = "naca64a214" },
+  { le = [22.321, 16.440, -0.645], chord = 3.000, twist = -0.5, airfoil = "naca64a212" },
+]
+# Slotted flaps either side of the gear gondolas and the ailerons outboard
+# (the plan view; travel an estimate)
+controls = [
+  { name = "inboard flap", channel = "flap", kind = "slotted", span = [0.10, 0.25], chord_fraction = 0.25, limits = [0, 35] },
+  { name = "outboard flap", channel = "flap", kind = "slotted", span = [0.34, 0.60], chord_fraction = 0.25, limits = [0, 35] },
+  { name = "aileron", channel = "aileron", span = [0.62, 0.96], chord_fraction = 0.22, limits = [-20, 20] },
+]
+
+# The horizontal tail: 11.44 m span, leading edge swept 45.5 deg, trailing
+# edge 30.3 deg, root chord 4.27 m, tip 1.78 m, set on the fin 1.75 m above
+# the fuselage's centre line (the side and front views). Fixed at -1.5 deg
+# (estimate); the elevators trim it.
+[[surface]]
+name = "htail"
+kind = "htail"
+vortex = false
+airfoil = "naca64a010"
+sections = [
+  { le = [28.300, 0.000, 1.750], chord = 4.270, twist = -1.5 },
+  { le = [34.120, 5.720, 1.750], chord = 1.780, twist = -1.5 },
+]
+controls = [
+  { name = "elevator", channel = "elevator", span = [0.08, 0.97], chord_fraction = 0.30, limits = [-25, 15] },
+]
+
+# The fin: leading edge swept 46.8 deg, trailing edge 20.7 deg, its tip 6.85
+# m above the centre line (the side view), its root reaching into the
+# fuselage; the rudder over most of its height (travel an estimate)
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca64a010"
+sections = [
+  { le = [27.020, 0.000, 1.000], chord = 6.070 },
+  { le = [33.100, 0.000, 6.850], chord = 2.150 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.05, 0.95], chord_fraction = 0.30, limits = [-25, 25] },
+]
+
+# The fuselage: round, 2.41 m wide and 2.46 m deep, narrowing to 2.2 m where
+# the intakes lie against it. The H-6K's radome, blunter and larger than the
+# Tu-16's glazed nose, runs back to the cockpit's windscreen; the flight
+# deck's roof stands 0.24 m above the fuselage's top line (the Tu-16's
+# canopy's height). Aft, the underside sweeps up to the tail cone that holds
+# the H-6K's electronics where the Tu-16's gunner sat.
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.000, top = -0.080, bottom = -0.120 },
+  { x = 0.25, w = 0.720, top = 0.200, bottom = -0.420, n = 2.0 },
+  { x = 0.60, w = 1.180, top = 0.450, bottom = -0.660, n = 2.0 },
+  { x = 1.10, w = 1.620, top = 0.680, bottom = -0.880, n = 2.0 },
+  { x = 1.70, w = 1.960, top = 0.860, bottom = -1.030, n = 2.0 },
+  { x = 2.40, w = 2.220, top = 1.000, bottom = -1.140, n = 2.0 },
+  { x = 3.10, w = 2.360, top = 1.100, bottom = -1.200, n = 2.0 },
+  { x = 3.70, w = 2.400, top = 1.300, bottom = -1.220, n_top = 2.2, n_bottom = 2.0 },
+  { x = 4.30, w = 2.410, top = 1.450, bottom = -1.230, n_top = 2.4, n_bottom = 2.0 },
+  { x = 5.80, w = 2.410, top = 1.470, bottom = -1.230, n_top = 2.4, n_bottom = 2.0 },
+  { x = 6.80, w = 2.410, top = 1.330, bottom = -1.230, n_top = 2.2, n_bottom = 2.0 },
+  { x = 7.80, w = 2.400, top = 1.230, bottom = -1.230, n = 2.0 },
+  { x = 8.60, w = 2.320, top = 1.230, bottom = -1.230, n = 2.0 },
+  { x = 9.30, w = 2.220, top = 1.230, bottom = -1.230, n = 2.0 },
+  { x = 15.00, w = 2.260, top = 1.230, bottom = -1.230, n = 2.0 },
+  { x = 21.00, w = 2.300, top = 1.230, bottom = -1.230, n = 2.0 },
+  { x = 22.50, w = 2.250, top = 1.230, bottom = -1.230, n = 2.0 },
+  { x = 24.30, w = 2.020, top = 1.230, bottom = -1.230, n = 2.0 },
+  { x = 26.00, w = 1.860, top = 1.230, bottom = -1.150, n = 2.0 },
+  { x = 27.30, w = 1.740, top = 1.230, bottom = -0.950, n = 2.0 },
+  { x = 29.00, w = 1.600, top = 1.220, bottom = -0.780, n = 2.0 },
+  { x = 31.00, w = 1.450, top = 1.200, bottom = -0.600, n = 2.0 },
+  { x = 33.00, w = 1.260, top = 1.100, bottom = -0.400, n = 2.0 },
+  { x = 34.00, w = 1.050, top = 0.920, bottom = -0.280, n = 2.0 },
+  { x = 34.55, w = 0.680, top = 0.640, bottom = -0.120, n = 2.0 },
+  { x = 34.80, w = 0.200, top = 0.340, bottom = 0.140, n = 2.0 },
+]
+
+# The electro-optical turret under the nose, behind the radome (photographs)
+[[body]]
+name = "EO turret"
+kind = "pod"
+aero = false                  # its drag is in the calibration's
+stations = [
+  { x = 2.200, w = 0.140, top = -0.950, bottom = -1.090, n = 2.0 },
+  { x = 2.400, w = 0.440, top = -0.950, bottom = -1.400, n = 2.0 },
+  { x = 2.750, w = 0.480, top = -0.950, bottom = -1.450, n = 2.0 },
+  { x = 3.050, w = 0.300, top = -1.000, bottom = -1.360, n = 2.0 },
+  { x = 3.200, w = 0.120, top = -1.080, bottom = -1.200, n = 2.0 },
+]
+
+# The fin's dorsal fillet, curving up from the spine into its leading edge
+# (the side view)
+[[body]]
+name = "dorsal fillet"
+kind = "pod"
+aero = false                  # the fin's area counts it
+stations = [
+  { x = 25.000, w = 0.120, top = 1.290, bottom = 1.170, n = 2.0 },
+  { x = 25.600, w = 0.300, top = 1.520, bottom = 1.050, n = 2.2 },
+  { x = 26.400, w = 0.400, top = 1.720, bottom = 1.000, n = 2.4 },
+  { x = 27.200, w = 0.420, top = 1.900, bottom = 1.000, n = 2.4 },
+  { x = 28.000, w = 0.400, top = 2.130, bottom = 1.000, n = 2.4 },
+  { x = 28.600, w = 0.340, top = 2.400, bottom = 1.000, n = 2.3 },
+  { x = 29.200, w = 0.240, top = 2.550, bottom = 1.000, n = 2.2 },
+]
+
+# The engine nacelles in the wing roots, against the fuselage's sides: the
+# H-6K's enlarged intakes, 1.46 m wide and 1.8 m tall for the D-30KP-2's
+# 1.455 m fan, their lips 0.6 m ahead of the Tu-16's (photographs; estimate),
+# then the nacelle along the wing root to the jet pipe's nozzle at the
+# trailing edge, 21.0 m behind the nose (the plan view)
+[[intake]]
+name = "engine nacelle"
+mirror = true
+lip = 0.10
+duct = 0.9
+duct_taper = 0.9
+stations = [
+  { x = 9.000, y = 1.900, w = 1.460, top = 0.900, bottom = -0.900, n = 2.2 },
+  { x = 9.350, y = 1.900, w = 1.640, top = 1.000, bottom = -0.990, n = 2.2 },
+  { x = 10.500, y = 1.880, w = 1.720, top = 1.040, bottom = -1.020, n = 2.2 },
+  { x = 13.000, y = 1.860, w = 1.720, top = 1.040, bottom = -1.000, n = 2.2 },
+  { x = 15.500, y = 1.860, w = 1.640, top = 0.980, bottom = -0.950, n = 2.2 },
+  { x = 18.000, y = 1.930, w = 1.660, top = 0.900, bottom = -0.920, n = 2.2 },
+  { x = 19.800, y = 1.980, w = 1.460, top = 0.720, bottom = -0.780, n = 2.2 },
+  { x = 20.700, y = 1.980, w = 1.180, top = 0.580, bottom = -0.620, n = 2.0 },
+  { x = 21.000, y = 1.980, w = 1.100, top = 0.550, bottom = -0.570, n = 2.0 },
+]
+
+# The main gear's gondolas on the wing, 4.90 m out, reaching aft past its
+# trailing edge (the plan and side views)
+[[body]]
+name = "gear gondola"
+kind = "pod"
+mirror = true
+aero = false                  # its drag is in the calibration's
+stations = [
+  { x = 15.600, y = 4.900, w = 0.140, top = -0.300, bottom = -0.440, n = 2.0 },
+  { x = 16.000, y = 4.900, w = 0.620, top = -0.050, bottom = -0.780, n = 2.2 },
+  { x = 16.800, y = 4.900, w = 0.960, top = 0.180, bottom = -0.980, n = 2.4 },
+  { x = 17.800, y = 4.900, w = 1.080, top = 0.300, bottom = -1.050, n = 2.5 },
+  { x = 19.200, y = 4.900, w = 1.120, top = 0.400, bottom = -1.050, n = 3.0 },
+  { x = 20.300, y = 4.900, w = 1.040, top = 0.380, bottom = -1.000, n = 3.0 },
+  { x = 20.800, y = 4.900, w = 0.660, top = 0.140, bottom = -0.720, n = 2.2 },
+  { x = 21.050, y = 4.900, w = 0.140, top = -0.230, bottom = -0.370, n = 2.0 },
+]
+
+# The H-6K's six pylons, empty: one inboard of each gondola, two outboard
+# (photographs; estimate), their ends inside the wing
+[[body]]
+name = "inboard pylon"
+kind = "pod"
+mirror = true
+aero = false                  # their drag is in the calibration's
+stations = [
+  { x = 12.550, y = 3.300, w = 0.120, top = 0.050, bottom = -0.070, n = 2.0 },
+  { x = 12.900, y = 3.300, w = 0.280, top = 0.150, bottom = -0.800, n = 3.0 },
+  { x = 15.300, y = 3.300, w = 0.280, top = 0.150, bottom = -0.800, n = 3.0 },
+  { x = 15.700, y = 3.300, w = 0.120, top = -0.180, bottom = -0.300, n = 2.0 },
+]
+
+[[body]]
+name = "middle pylon"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 16.700, y = 8.200, w = 0.120, top = -0.200, bottom = -0.320, n = 2.0 },
+  { x = 17.000, y = 8.200, w = 0.260, top = -0.140, bottom = -0.980, n = 3.0 },
+  { x = 18.900, y = 8.200, w = 0.260, top = -0.140, bottom = -0.980, n = 3.0 },
+  { x = 19.200, y = 8.200, w = 0.120, top = -0.300, bottom = -0.420, n = 2.0 },
+]
+
+[[body]]
+name = "outboard pylon"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = 18.400, y = 10.600, w = 0.120, top = -0.330, bottom = -0.450, n = 2.0 },
+  { x = 18.700, y = 10.600, w = 0.240, top = -0.290, bottom = -1.080, n = 3.0 },
+  { x = 20.400, y = 10.600, w = 0.240, top = -0.290, bottom = -1.080, n = 3.0 },
+  { x = 20.700, y = 10.600, w = 0.120, top = -0.340, bottom = -0.460, n = 2.0 },
+]
+
+# Two D-30KP-2: 117.68 kN (12,000 kgf), bypass ratio 2.24, no afterburner
+[[engine]]
+name = "D-30KP-2"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 117.68
+bypass_ratio = 2.24
+tsfc_dry = 0.49               # lb/(lbf h), static (estimate; 0.715 in cruise, Wikipedia)
+throttle_ratio = 1.05         # Mattingly's TR for a transport's turbofan (estimate)
+design_mach = 0.8
+position = [15.000, 1.870, 0.000]
+mass = 2800                   # installed: the 2,640 kg engine and its accessories (estimate)
+inlet_x = 9.0
+[engine.nozzle]
+position = [21.000, 1.980, 0.000]  # the mixed nozzle at the nacelle's end
+diameter = 0.95
+length = 0.40
+petal_open_deg = 0.0          # a fixed nozzle
+
+# The gear, off the drawing: a twin nose wheel 6.73 m behind the nose,
+# folding aft into the fuselage; four-wheel bogies 10.77 m behind it, 9.80 m
+# apart, their axles 1.17 m apart, 1.05 m wheels. The main legs fold aft into
+# the gondolas, each bogie turning over on its pivot to lie on its back in
+# the gondola, as the Tu-16's do; raked 27 deg, a leg lies level after a 66
+# deg swing (estimate). The ground is where the published height puts
+# it: the fin's tip, 6.85 m above the centre line, 10.36 m above the ground
+# with the struts compressed.
+[[gear]]
+name = "Nose Gear"
+position = [6.730, 0.0, -3.630]
+steerable = true
+max_steer = 55
+wheels = 2
+wheel_diameter = 0.800
+wheel_width = 0.250
+retractable = true
+retract = "aft"
+static_deflection = 0.12
+attach = [6.300, 0.0, -0.800]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [17.500, 4.900, -3.660]
+wheels = 2
+axles = 2                     # the four-wheel bogie
+axle_spacing = 1.17
+wheel_diameter = 1.050
+wheel_width = 0.330
+retractable = true
+retract = "aft"
+retract_deg = 66
+bogie_deg = "over"            # the bogie somersaults as the leg folds, to lie on its back in the gondola
+doors = false                 # open wells: hangar's doors wrap the tapering gondola's sides above their
+                              # hinges, which swing in against the bogie (the real ones close)
+static_deflection = 0.15
+attach = [16.200, 4.900, -0.450]
+
+[flight_control]
+type = "direct"               # hydraulically boosted controls
+
+[mass]
+empty = 37200                 # kg (Wikipedia, H-6K; the Tu-16's)
+mtow = 95000
+# Estimate: placed from the neutral point the aero stage finds (44.6 % of
+# the MAC), for 27 % loaded: a swept bomber's
+empty_cg = [17.000, 0.0, 0.100]
+[mass.component]              # kg, estimates: a jet bomber's weight fractions
+wing = 8800
+htail = 800
+fin = 700
+fuselage = 7200
+"Nose Gear" = 450
+"Main Gear" = 2900
+"engine nacelle" = 1400       # both sides
+"gear gondola" = 400
+"inboard pylon" = 150
+"middle pylon" = 150
+"outboard pylon" = 150
+[[mass.payload]]
+name = "pilots"
+mass = 200
+position = [5.000, 0.0, 0.550]
+[[mass.payload]]
+name = "navigator and weapons officer"
+mass = 200
+position = [3.600, 0.0, -0.100]
+# The Tu-16's 36,000 kg of fuel: fuselage tanks ahead of and behind the bomb
+# bay, the wing's inboard and outboard tanks (the split and where each sits,
+# estimates). Flown 60 % full: 59 t, a mid-mission weight.
+[[mass.tank]]
+name = "forward fuselage"
+position = [9.500, 0.0, 0.200]
+capacity = 8000
+fill = 0.6
+[[mass.tank]]
+name = "aft fuselage"
+position = [21.000, 0.0, 0.200]
+capacity = 9000
+fill = 0.6
+[[mass.tank]]
+name = "left inboard wing"
+position = [14.800, -3.500, 0.150]
+capacity = 5500
+fill = 0.6
+[[mass.tank]]
+name = "right inboard wing"
+position = [14.800, 3.500, 0.150]
+capacity = 5500
+fill = 0.6
+[[mass.tank]]
+name = "left outboard wing"
+position = [18.700, -9.000, -0.190]
+capacity = 4000
+fill = 0.6
+[[mass.tank]]
+name = "right outboard wing"
+position = [18.700, 9.000, -0.190]
+capacity = 4000
+fill = 0.6
+
+[dimensions]                  # published, overall (Wikipedia, H-6K)
+length = 34.80                # the fuselage's (tu22.ru: "fuselage length"): the tailplane's tips reach
+                              # 1.1 m past the tail (the drawing), 35.9 m overall
+span = 33.00
+height = 10.36
+
+[targets]
+# Published 1,050 km/h (Wikipedia, H-6K; the Tu-16's too), at an altitude
+# not given: flown at 6,000 m (Mach 0.922; estimate - where a jet of its
+# thrust meets its wing's drag rise)
+max_mach = 0.922
+max_mach_altitude_ft = 19685
+operational_ceiling_ft = 42000  # 12,800 m (Wikipedia)

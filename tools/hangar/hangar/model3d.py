@@ -643,13 +643,17 @@ def _gear_parts(aircraft, B, top, origin, report, plan, mats):
     moving, panels = [], []
     for k, leg in enumerate(sg.legs(aircraft)):
         leg = doors[leg.name]["leg"] if leg.name in doors else leg  # fitted to its bay
-        pieces = {part: meshkit.build(sg.leg_scene(leg, part)) for part in ["strut", "oleo"] + leg.wheel_parts()}
+        pieces = {part: meshkit.build(sg.leg_scene(leg, part))
+                  for part in ["strut", "oleo"] + (["bogie"] if leg.bogie_turns else []) + leg.wheel_parts()}
         for part, m in pieces.items():
             report["gear"].append(dict(_stats(m), label="%s %s" % (leg.name, part)))
         slide, gain = leg.slide()
         # each axle's wheels roll about it (a bogie's several)
         lower = [{"name": "fsim:wheel:%d:%.6g" % (k, leg.r), "point": p, "axis": [0.0, -1.0, 0.0],
                   "mesh": ("%s %s" % (leg.name, part), pieces[part])} for part, p in zip(leg.wheel_parts(), leg.axle_points())]
+        if leg.bogie_turns:  # the bogie turns on its pivot, at the oleo's foot, as the leg swings
+            lower = [{"name": "fsim:gear:%.6g:1:%.6g" % (leg.bogie_deg, sg.DOORS), "point": leg.foot(),
+                      "axis": [0.0, 1.0, 0.0], "mesh": ("%s bogie" % leg.name, pieces["bogie"]), "children": lower}]
         if leg.steerable:  # about the strut, pointing down: a positive turn steers right
             lower = [{"name": "fsim:steer:%d" % k, "point": leg.axle, "axis": -leg.strut,
                       "mesh": ("%s oleo" % leg.name, pieces["oleo"]), "children": lower}]
@@ -700,7 +704,6 @@ def door_clearance(legs, panels, steps=30):
     it): open, all the way as the leg swings from down to stowed; closed,
     from the stowed leg."""
     from .shape import gear as sg
-    from .shape import meshkit
     out = []
     samples = []
     for d, dm in panels:
@@ -708,17 +711,14 @@ def door_clearance(legs, panels, steps=30):
         R = sg._rotation(d["axis"], d["deg"])
         samples.append((d["label"], d["hinge"] + (pts - d["hinge"]) @ R.T, pts))
     for leg in legs:
-        with meshkit.Probe({"root": leg.parts()}) as probe:
+        with leg.probes() as probes:
             for label, opened, closed in samples:
                 worst, at = np.inf, 0.0
                 for f in np.linspace(0.0, 1.0, steps + 1):
-                    # the door in the frame of the leg as built (down)
-                    Rl = sg._rotation(leg.swing_axis, f * leg.swing_deg) @ sg._rotation(leg.strut, f * leg.twist_deg)
-                    dist, _ = probe(leg.hinge + (opened - leg.hinge) @ Rl)
+                    dist = leg.distance(probes, opened, f)  # the door in the frame of the leg as built (down)
                     if dist.min() < worst:
                         worst, at = float(dist.min()), float(f)
-                Rl = sg._rotation(leg.swing_axis, leg.swing_deg) @ sg._rotation(leg.strut, leg.twist_deg)
-                shut, _ = probe(leg.hinge + (closed - leg.hinge) @ Rl)
+                shut = leg.distance(probes, closed, 1.0)
                 out.append({"door": label, "leg": leg.name, "open_m": worst, "at": at, "closed_m": float(shut.min())})
     return out
 

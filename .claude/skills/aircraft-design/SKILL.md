@@ -246,6 +246,11 @@ move on while a check fails or a picture looks wrong.
   when the drawing shows how the leg folds; the fit then only turns the
   wheel. A leg that cannot fold inside needs its trunnion where the airframe
   is deep enough: a few degrees of splay, or a fuller wing-body fairing.
+  A bogie that turns on its pivot as the leg folds (the Tu-16's, over onto
+  its back in a slim gondola): `bogie_deg = "over"` (or `"level"`, or
+  degrees); a raked leg needs `retract_deg` to stow its strut level (the
+  fit tries 10 deg steps). Doors on a tapering pod wrap its sides above
+  their hinges and swing in against the leg: give the pod an open well.
 - **Thin parts.** End a pod, pylon or tail cone with a small width (0.1 m),
   not a knife edge (w = 0 with height): the mesher's distance to a knife edge
   is far too short, so its fillet with a nearby surface grows phantom

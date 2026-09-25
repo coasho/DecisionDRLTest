@@ -211,6 +211,8 @@ stands_in_for = ["f16"]          # a stock JSBSim aircraft drawn with this model
 retract = "forward"              # forward, aft, inward, outward; hangar fits the angle, the
 wheels = 2                       # trunnion's cant and the wheel's twist that stow the leg inside
 axles = 2                        # a bogie: two axles one behind the other (axle_spacing, m)
+bogie_deg = "over"               # the bogie turns on its pivot as the leg folds: degrees (nose up),
+                                 # or "level" / "over": lying level stowed, upright or on its back
 wheel_turn = "flat"              # or retract_deg, retract_axis: what is known of the real leg;
                                  # hangar fits only the rest
 doors = false                    # an open well: the stowed wheel may stand out up to its radius
@@ -477,7 +479,8 @@ The model stage writes `<name>.glb` from the same design:
   skin by up to its radius (the B-52H's outriggers, in its thin wingtips);
   `door_reach` lets a wide truck's doors move further out. A bogie
   (`axles = 2`) carries its wheels in pairs on a beam under the strut, each
-  axle's pair rolling on its own.
+  axle's pair rolling on its own; with `bogie_deg` the beam turns on its
+  pivot as the leg folds (the H-6K's somersault into its gondolas).
 - **Propulsion.** An afterburner flame behind each augmented jet, as the
   engine lights it; nozzle petals open as the engine opens them. A propeller
   turns at its engine's rpm. A vectoring nozzle turns, flame and all, as the
@@ -677,6 +680,7 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 | aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft |
 |---|---|---|---|---|
 | B-52H | `b52h` | 0.91 at 20,700 ft (0.906) | 9,300 | 53,000 (50,000) |
+| H-6K | `h6k` | 0.92 at 19,700 ft (0.922) | 6,500 | 41,100 (42,000) |
 | KC-135R | `kc135r` | 0.88 at 30,000 ft (0.86) | 7,100 | 40,900 (50,000 certified) |
 | RC-135W | `rc135w` | 0.88 at 30,000 ft (0.86) | 6,400 | 38,700 (50,000 certified) |
 | E-3G | `e3g` | 0.78 at 29,000 ft (0.78) | 3,700 | 34,200 (above 29,000) |
@@ -696,6 +700,17 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   drag rise leaves it too fast, so it needs 5 times Sears-Haack's wave
   drag, beyond the usual 2-3 (a warning in its report). Its L/D peaks at
   19.7 (21.5 published).
+- The H-6K is the Tu-16's airframe, measured off a Tu-16 three-view, with
+  the H-6K's radar nose, its enlarged intakes for two D-30KP-2s, six empty
+  pylons and a tail cone where the guns were. It flies at 59 t, 60 % of
+  its fuel. Its main legs fold aft into the wing's gondolas, each bogie
+  turning over onto its back as the Tu-16's do, into open wells: hangar's
+  doors would wrap the tapering gondola's sides above their hinges, and
+  swing in against the bogie. The published 1,050 km/h has no altitude;
+  flown at 6,000 m (Mach 0.922), it needs Korn's factor at 0.94, nearly a
+  supercritical section's. Its overall length, 35.9 m, is 3 % over the
+  published 34.8 m, which is the fuselage's: the tailplane's tips reach
+  past the tail.
 - The KC-135R flies at 100 t, half its fuel: a tanker mid-mission. It
   climbs to 40,900 ft there; 50,000 ft is its certified altitude. Its
   boom, the boom's ruddevators and the fin's HF probe are drawn. The main
