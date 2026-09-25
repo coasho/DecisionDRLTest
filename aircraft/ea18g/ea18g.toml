@@ -1,0 +1,389 @@
+# Boeing EA-18G Growler, built by hangar from public data: the two-seat
+# F/A-18F Super Hornet airframe with the electronic-attack equipment - the
+# ALQ-218 receiver pods on the wing tips in place of the missile rails, and
+# the typical three-pod jamming load (two ALQ-99 pods on the mid-board wing
+# pylons, one on the centre line) carried on every flight: its drag, weight
+# and inertia are in every number below.
+#
+# Frame: metres, x aft from the radome tip, y right, z up from the wing's
+# chord plane. Sources: US Navy / USNA fact sheets and Wikipedia's EA-18G and
+# F/A-18E/F articles (dimensions, weights, fuel, engines, performance);
+# NASA's Abrupt Wing Stall papers (the 8 % F/A-18E model: wing area 500 ft2,
+# span 41.75 ft, MAC 13.1 ft); Flight International (the E/F against the C:
+# 34 in longer, a 25 % larger wing, a 36 % larger stabilator, 15 % larger
+# fins, a 34 % larger LEX); General Electric (F414-GE-400). The shape is
+# measured off a public F/A-18F four-view (the-blueprints.com) scaled by the
+# published 18.31 m length: its 4.9 m height and 7.1 m tail span agree with
+# the published ones, its wing's 29.4 deg leading edge with NASA's.
+
+[aircraft]
+name = "ea18g"
+description = "Boeing EA-18G Growler, three jamming pods (hangar build)"
+category = "fighter"
+
+[analysis]
+speed = 230.0                # m/s: the Reynolds numbers
+
+# The wing as drawn: 29.4 deg leading edge inboard of the fold, the snag
+# (dog-tooth) at the fold, 30.6 deg outboard; the trailing edge swept 3 deg
+# forward. Root chord 5.59 m at the centre line, 1.85 m at the tip: 46.2 m2
+# (published 46.45) and a 4.0 m MAC (NASA's 13.1 ft). NACA 65A sections,
+# thicker than the C's (6 % root, 4 % tip: estimate). 1.1 deg anhedral.
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [8.130, 0.000, 0.000], chord = 5.590, airfoil = "naca65a006" },
+  { le = [10.731, 4.620, -0.088], chord = 2.724, airfoil = "naca65a005" },
+  { le = [10.594, 4.720, -0.090], chord = 2.856, airfoil = "naca65a005" },
+  { le = [11.507, 6.270, -0.120], chord = 1.854, airfoil = "naca65a004" },
+]
+controls = [
+  # ailerons on the folding outer panel, +/-25 deg; single-slotted flaps
+  # inboard of the fold, 40 deg down (NATOPS figures via VRS)
+  { name = "aileron", channel = "aileron", span = [0.753, 0.970], chord_fraction = 0.30, limits = [-25, 25] },
+  { name = "flap", channel = "flap", span = [0.215, 0.737], chord_fraction = 0.30, limits = [0, 40] },
+]
+# leading-edge flaps either side of the snag, 34 deg down (the F-16's
+# schedule stands in for the Super Hornet's)
+leading = [
+  { name = "leading-edge flap", span = [0.297, 0.737], chord_fraction = 0.17, limits = [-5, 34] },
+  { name = "outer leading-edge flap", span = [0.753, 0.975], chord_fraction = 0.17, limits = [-5, 34] },
+]
+
+# The leading-edge extensions as drawn: sharp, an ogee edge from beside the
+# front cockpit (x 4.6 m) swept 64 deg at first and 82 deg where it meets the
+# wing's leading edge at 1.87 m. The part inside the fuselage carries the
+# LEX's lift across, as the wing's does.
+[[surface]]
+name = "lex"
+kind = "strake"
+airfoil = "plate"
+sections = [
+  { le = [4.600, 0.000, 0.060], chord = 3.530 },
+  { le = [4.600, 0.570, 0.060], chord = 3.851 },
+  { le = [5.490, 1.010, 0.050], chord = 3.209 },
+  { le = [6.590, 1.400, 0.040], chord = 2.328 },
+  { le = [7.690, 1.680, 0.020], chord = 1.386 },
+  { le = [9.100, 1.865, 0.000], chord = 0.080 },
+]
+
+# All-moving stabilators as drawn: 45.7 deg leading edge, the tip's aft corner
+# cut off, 7.12 m span (VRS/NATOPS: 23.3 ft), 10.9 m2 exposed (the C's 8.2 m2
+# and 36 % more). The surface runs on inside the fuselage to the centre line.
+# 24 deg trailing edge up, 20 down; differential for roll, as the C's.
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca65a004"
+sections = [
+  { le = [13.340, 0.000, -0.450], chord = 3.270 },
+  { le = [14.360, 1.000, -0.450], chord = 2.790 },
+  { le = [16.530, 3.120, -0.485], chord = 1.770 },
+  { le = [16.980, 3.560, -0.500], chord = 1.040 },
+]
+controls = [
+  { name = "stabilator", channel = "elevator", mix = { aileron = 0.4 }, span = [0.281, 1.0], chord_fraction = 1.0, pivot = 0.35, limits = [-24, 20] },
+]
+
+# Twin fins canted 21 deg outboard (the front view), 42 deg leading edge;
+# 5.2 m2 each as drawn (the C's and 15 % more); rudders 40 deg either way
+[[surface]]
+name = "fin"
+kind = "fin"
+mirror = true
+airfoil = "naca65a004"
+sections = [
+  { le = [12.900, 1.020, 0.300], chord = 3.050 },
+  { le = [15.000, 1.960, 2.540], chord = 1.220 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.06, 0.80], chord_fraction = 0.30, limits = [-40, 40] },
+]
+
+# Fuselage: the F/A-18F's forward fuselage (the C/D's, unchanged) with the
+# nose drooping to the radome's tip; wide and flat-topped under the LEX and
+# the wing root, over the intake ducts and the engine bays; the centre-line
+# belly between the ducts
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.000, top = -0.530, bottom = -0.530 },
+  { x = 0.30, w = 0.340, top = -0.350, bottom = -0.680, n = 2.0 },
+  { x = 0.60, w = 0.540, top = -0.230, bottom = -0.740, n = 2.0 },
+  { x = 1.00, w = 0.780, top = -0.100, bottom = -0.785, n = 2.0 },
+  { x = 1.50, w = 0.960, top = 0.035, bottom = -0.820, n = 2.1 },
+  { x = 2.00, w = 1.020, top = 0.150, bottom = -0.855, n = 2.2 },
+  { x = 2.60, w = 1.040, top = 0.300, bottom = -0.870, n = 2.3 },
+  { x = 3.30, w = 1.070, top = 0.420, bottom = -0.870, n = 2.4 },
+  { x = 4.50, w = 1.140, top = 0.470, bottom = -0.880, n_top = 2.5, n_bottom = 2.6 },
+  { x = 5.50, w = 1.240, top = 0.500, bottom = -0.900, n_top = 2.6, n_bottom = 2.8 },
+  { x = 6.60, w = 1.360, top = 0.520, bottom = -0.920, n_top = 2.8, n_bottom = 3.0 },
+  { x = 8.00, w = 1.900, top = 0.540, bottom = -0.950, chine = -0.150, n_top = 3.0, n_bottom = 2.4 },
+  { x = 10.00, w = 2.500, top = 0.520, bottom = -0.960, chine = -0.200, n_top = 3.2, n_bottom = 2.6 },
+  { x = 12.00, w = 2.550, top = 0.460, bottom = -0.980, chine = -0.250, n_top = 3.2, n_bottom = 2.8 },
+  { x = 13.50, w = 2.300, top = 0.380, bottom = -1.050, chine = -0.300, n = 3.0 },
+  { x = 15.00, w = 2.100, top = 0.250, bottom = -1.100, n = 2.8 },
+  { x = 16.30, w = 1.950, top = 0.120, bottom = -1.000, n = 2.5 },
+  { x = 17.00, w = 1.800, top = 0.020, bottom = -0.900, n = 2.3 },
+]
+
+# The Super Hornet's dorsal spine: from the canopy's aft end, falling towards
+# the fins
+[[body]]
+name = "spine"
+kind = "pod"
+aero = false                  # part of the fuselage's top: the tables leave it out
+stations = [
+  { x = 6.900, w = 0.400, top = 0.960, bottom = 0.460, n = 2.4 },
+  { x = 7.600, w = 0.960, top = 1.000, bottom = 0.420, n = 2.6 },
+  { x = 8.800, w = 1.100, top = 0.720, bottom = 0.380, n = 2.8 },
+  { x = 10.000, w = 1.100, top = 0.660, bottom = 0.360, n = 2.8 },
+  { x = 11.800, w = 1.000, top = 0.520, bottom = 0.320, n = 2.8 },
+  { x = 12.800, w = 0.860, top = 0.450, bottom = 0.300, n = 2.6 },
+  { x = 14.500, w = 0.500, top = 0.300, bottom = 0.200, n = 2.4 },
+  { x = 15.300, w = 0.100, top = 0.120, bottom = 0.020, n = 2.0 },   # its end inside the fuselage
+]
+
+# The fixed caret intakes under the LEX: the lip plane swept 30 deg (its
+# outboard edge behind its inboard one) and raked 48 deg (its top ahead of
+# its bottom), the outer wall leaning out 12 deg at the top; the ducts run
+# back along the belly to the engine bays
+[[intake]]
+name = "intake"
+mirror = true
+lip = 0.035
+rake = 48
+sweep = 30
+duct = 1.6
+duct_rise = 0.25
+duct_taper = 0.85
+stations = [
+  { x = 8.80, y = 1.000, w = 0.740, top = -0.100, bottom = -1.220, n_top = 4.0, n_bottom = 4.0, lean = 6 },
+  { x = 10.00, y = 0.960, w = 0.820, top = -0.120, bottom = -1.290, n_top = 4.0, n_bottom = 5.0, lean = 4 },
+  { x = 11.50, y = 0.900, w = 0.900, top = -0.160, bottom = -1.320, n_top = 3.6, n_bottom = 5.5 },
+  { x = 12.80, y = 0.860, w = 0.880, top = -0.220, bottom = -1.300, n_top = 3.2, n_bottom = 5.0 },
+  { x = 14.00, y = 0.780, w = 0.640, top = -0.280, bottom = -1.180, n = 3.0 },
+  { x = 15.20, y = 0.680, w = 0.300, top = -0.320, bottom = -1.050, n = 2.6 },
+]
+
+# The two-seat canopy: the windscreen, and one long bubble over both
+# cockpits; the rear seat raised
+[[body]]
+name = "canopy"
+kind = "pod"
+frames = [4.52, 6.18]
+frame_width = 0.07
+stations = [
+  { x = 3.300, w = 0.000, top = 0.470, bottom = 0.450 },
+  { x = 3.700, w = 0.620, top = 0.640, bottom = 0.430, n = 2.0 },
+  { x = 4.300, w = 0.820, top = 0.880, bottom = 0.440, n = 2.0 },
+  { x = 5.000, w = 0.880, top = 1.100, bottom = 0.460, n = 2.0 },
+  { x = 5.800, w = 0.890, top = 1.200, bottom = 0.480, n = 2.0 },
+  { x = 6.400, w = 0.870, top = 1.220, bottom = 0.500, n = 2.0 },
+  { x = 7.100, w = 0.760, top = 1.110, bottom = 0.520, n = 2.0 },
+  { x = 7.700, w = 0.480, top = 0.960, bottom = 0.550, n = 2.0 },
+  { x = 8.100, w = 0.000, top = 0.880, bottom = 0.600 },
+]
+
+# The ALQ-218(V)2 receiver pods on the wing tips, in place of the Super
+# Hornet's missile rails: a radome at each end (estimate: 3.7 m long, 0.42 m
+# across, from photographs against the wing's tip chord)
+[[body]]
+name = "ALQ-218 pod"
+kind = "pod"
+mirror = true
+stations = [
+  { x = 10.300, y = 6.430, w = 0.000, top = -0.120, bottom = -0.120 },
+  { x = 10.450, y = 6.430, w = 0.220, top = -0.010, bottom = -0.230, n = 2.0 },
+  { x = 10.800, y = 6.430, w = 0.360, top = 0.060, bottom = -0.300, n = 2.0 },
+  { x = 11.300, y = 6.430, w = 0.400, top = 0.080, bottom = -0.320, n = 2.0 },
+  { x = 13.400, y = 6.430, w = 0.420, top = 0.090, bottom = -0.330, n = 2.0 },
+  { x = 13.800, y = 6.430, w = 0.360, top = 0.060, bottom = -0.300, n = 2.0 },
+  { x = 14.000, y = 6.430, w = 0.000, top = -0.120, bottom = -0.120 },
+]
+
+# The jamming load: ALQ-99 tactical jamming pods (the NGJ-MB pods that
+# replace them are about the size: 14 ft, 1,200 lb) - 4.7 m long (against the
+# AGM-88 beside it in photographs: estimate), 0.62 m across, the ram-air
+# turbine's hub at the nose. Two on the mid-board wing pylons (stations 3
+# and 9, 3.6 m out), one on the centre line (station 6) - hung 0.23 m lower
+# than the drawing's pylon puts it (0.29 m off the ground), clear of the
+# main gear's bays, which hollow the airframe above it.
+[[body]]
+name = "ALQ-99 pod"
+kind = "pod"
+mirror = true
+stations = [
+  { x = 9.550, y = 3.600, w = 0.000, top = -0.850, bottom = -0.850 },
+  { x = 9.700, y = 3.600, w = 0.200, top = -0.750, bottom = -0.950, n = 2.0 },
+  { x = 10.100, y = 3.600, w = 0.500, top = -0.600, bottom = -1.100, n = 2.2 },
+  { x = 10.600, y = 3.600, w = 0.620, top = -0.530, bottom = -1.170, n = 2.4 },
+  { x = 13.200, y = 3.600, w = 0.620, top = -0.530, bottom = -1.170, n = 2.4 },
+  { x = 13.900, y = 3.600, w = 0.420, top = -0.620, bottom = -1.080, n = 2.2 },
+  { x = 14.250, y = 3.600, w = 0.000, top = -0.850, bottom = -0.850 },
+]
+
+[[body]]
+name = "centre-line ALQ-99 pod"
+kind = "pod"
+stations = [
+  { x = 8.200, w = 0.000, top = -1.730, bottom = -1.730 },
+  { x = 8.350, w = 0.200, top = -1.630, bottom = -1.830, n = 2.0 },
+  { x = 8.750, w = 0.500, top = -1.480, bottom = -1.980, n = 2.2 },
+  { x = 9.250, w = 0.620, top = -1.410, bottom = -2.050, n = 2.4 },
+  { x = 11.850, w = 0.620, top = -1.410, bottom = -2.050, n = 2.4 },
+  { x = 12.550, w = 0.420, top = -1.500, bottom = -1.960, n = 2.2 },
+  { x = 12.900, w = 0.000, top = -1.730, bottom = -1.730 },
+]
+
+# The pylons (drawn; their drag is in the pods'): the mid-board wing pylons
+# and the centre-line one
+[[strut]]
+name = "wing pylon"
+from = [11.800, 3.600, -0.040]
+to = [11.800, 3.600, -0.600]
+chord = 1.900
+thickness = 0.140
+
+[[strut]]
+name = "centre-line pylon"
+mirror = false
+from = [10.550, 0.000, -0.900]
+to = [10.550, 0.000, -1.480]
+chord = 1.700
+thickness = 0.140
+
+[[engine]]
+name = "F414-GE-400"
+type = "turbofan"
+mirror = true
+thrust_dry_kn = 62.3          # 14,000 lbf military (USNA fact sheet; Wikipedia)
+thrust_wet_kn = 97.9          # 22,000 lbf afterburner
+bypass_ratio = 0.25           # General Electric (Wikipedia)
+tsfc_dry = 0.84               # lb/(lbf h), military
+tsfc_wet = 1.85               # full afterburner
+throttle_ratio = 1.10         # calibrated below (calibration.toml)
+design_mach = 1.8
+position = [15.100, 0.530, -0.420]
+mass = 1110                   # 2,445 lb dry (GE)
+inlet_x = 8.8
+[engine.nozzle]
+position = [17.450, 0.530, -0.450]
+diameter = 0.840              # as drawn
+
+# The gear where the four-view draws its wheels (the axles 5.53 and 11.31 m
+# behind the nose), the 3.19 m track (VRS/NATOPS: 10.45 ft), standing on the
+# ground line that puts the fins' tips the published 4.88 m up. Tyres: twin
+# 22x6.6-10 on the nose, 32x11.5-15 on the mains. The nose gear folds
+# forward; the main legs fold aft into the fuselage, their wheels turning to
+# lie flat under the intake ducts, as the Hornet's do.
+[[gear]]
+name = "Nose Gear"
+position = [5.530, 0.0, -2.480]
+steerable = true
+max_steer = 75
+wheel_diameter = 0.559
+wheel_width = 0.168
+retractable = true
+retract = "forward"
+wheels = 2
+static_deflection = 0.14
+attach = [5.450, 0.0, -0.600]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [11.310, 1.593, -2.520]
+wheel_diameter = 0.813
+wheel_width = 0.292
+retractable = true
+retract = "aft"
+wheel_turn = "flat"
+static_deflection = 0.18
+attach = [10.950, 1.050, -0.750]
+
+[reference]
+aero_point = [10.660, 0.0, 0.0]    # at the CG
+
+# The Super Hornet's flight control system: 7.5 g (the published design load
+# factor), -3 g; the angle of attack held to 35 deg (published: 35-40 in
+# service with stores - the lower end with three pods; at 40 its relaxed
+# pitch stability took the limiter 6 deg past it at 350 kt); roll rate 180
+# deg/s (estimate: the E/F rolls slower than the C, and carries three pods)
+[flight_control]
+type = "fbw"
+n_max = 7.5
+n_min = -3.0
+alpha_max_deg = 35.0
+roll_rate_deg_s = 180.0
+
+[mass]
+empty = 15011                 # 33,094 lb, EA-18G (USNA; Wikipedia)
+empty_cg = [10.750, 0.0, -0.200]
+# no published inertia: the F/A-18 HARV's radii of gyration (NASA: Ixx
+# 22,789, Iyy 176,809, Izz 191,744 slug ft2 at 33,310 lb), the roll and yaw
+# ones raised for the receiver pods on the wing tips (estimate)
+gyration = [0.275, 0.450, 0.575]
+[mass.component]              # kg
+"ALQ-218 pod" = 180           # both wing-tip pods (estimate)
+"ALQ-99 pod" = 0              # the jamming pods are payload, below
+"centre-line ALQ-99 pod" = 0
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [4.800, 0.0, 0.600]
+[[mass.payload]]
+name = "electronic warfare officer"
+mass = 100
+position = [6.200, 0.0, 0.680]
+[[mass.payload]]
+name = "left ALQ-99 pod"      # about 960 lb each (estimate)
+mass = 435
+position = [11.900, -3.600, -0.850]
+[[mass.payload]]
+name = "right ALQ-99 pod"
+mass = 435
+position = [11.900, 3.600, -0.850]
+[[mass.payload]]
+name = "centre-line ALQ-99 pod"
+mass = 435
+position = [10.550, 0.0, -1.500]
+# internal fuel 13,940 lb (6,323 kg; Wikipedia): four fuselage tanks and the
+# wing tanks (the split is an estimate)
+[[mass.tank]]
+name = "fuselage 1"
+position = [7.900, 0.0, 0.100]
+capacity = 700
+[[mass.tank]]
+name = "fuselage 2"
+position = [9.200, 0.0, 0.050]
+capacity = 1300
+[[mass.tank]]
+name = "fuselage 3"
+position = [10.600, 0.0, 0.000]
+capacity = 1300
+[[mass.tank]]
+name = "fuselage 4"
+position = [12.100, 0.0, -0.050]
+capacity = 1100
+[[mass.tank]]
+name = "left wing"
+position = [11.200, -2.600, -0.030]
+capacity = 961.5
+[[mass.tank]]
+name = "right wing"
+position = [11.200, 2.600, -0.030]
+capacity = 961.5
+
+[dimensions]                  # published, overall, gear down (USNA; Wikipedia: span with the wing-tip pods):
+length = 18.31                 # m
+span = 13.62
+height = 4.88
+
+[targets]
+# EA-18G, published (US Navy; Wikipedia)
+max_mach = 1.8                # at 40,000 ft, full afterburner (calibrates the engine and the wave drag)
+max_mach_altitude_ft = 40000
+operational_ceiling_ft = 50000 # published "50,000+": the clearance, not where the climb runs out

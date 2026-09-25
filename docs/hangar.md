@@ -655,6 +655,7 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 | A-10C | `a10c` | 0.57 at sea level (0.576) | 4,700 | 29,800 (45,000) |
 | C-17A | `c17a` | 0.87 at 28,000 ft (0.875) | 6,200 | 36,800 (45,000 certified) |
 | KC-46A | `kc46a` | 0.86 at 26,000 ft (0.86) | 5,200 | 29,500 (40,100 certified) |
+| EA-18G | `ea18g` | 1.80 at 40,000 ft (1.8) | 44,500 | 57,200 (50,000+) |
 
 - The B-52H flies at 140 t, 40 % fuel, about its combat weight. Its wing
   droops to the tips as it does on the ground. Spoilers roll the real one;
@@ -696,6 +697,13 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   weight the model cannot hold 35,000 ft. hangar puts its neutral point at
   67 % of the MAC, likely too far aft for a 767, with the trim drag that
   follows up high.
+- The EA-18G carries its typical jamming load: three ALQ-99 pods, and the
+  ALQ-218 receivers on the wing tips. It flies through the F/A-18's
+  fly-by-wire (7.5 g, 35 deg: the lower end of the published 35-40 with
+  pods). For the published (clean) Mach 1.8, calibration takes its engines'
+  throttle ratio to the top of its range to make up the pods' wave drag.
+  The centre-line pod hangs 0.23 m lower than the drawing puts it, clear of
+  the main gear's bays.
 
 ## Limits
 
