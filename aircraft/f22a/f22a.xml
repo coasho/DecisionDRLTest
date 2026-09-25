@@ -386,85 +386,177 @@
             velocities/vc-kts lt 60
           </test>
         </switch>
-        <fcs_function name="fcs/fbw/k-alpha">
+        <!-- the pitch power (1/s^2 per rad of the surface): the surfaces', and with the
+             vectoring nozzles' at the thrust the engines make -->
+        <fcs_function name="fcs/fbw/md-aero">
           <function>
             <table>
               <independentVar lookup="row">aero/qbar-psf</independentVar>
               <independentVar lookup="column">velocities/mach</independentVar>
               <tableData>
                        0.150     0.400     0.700     0.900     1.100     1.400     2.000
-              10.0  -6.00000  -6.00000  -6.00000  -6.00000  -6.00000  -6.00000  -6.00000
-              20.0  -6.00000  -6.00000  -6.00000  -5.87207  -5.83387  -6.00000  -6.00000
-              40.0  -3.51621  -3.71111  -3.43075  -2.93359  -2.87330  -3.07784  -5.09874
-              80.0  -0.85163  -1.19042  -1.22985  -1.13407   0.17468   0.52517   0.23098
-             150.0  -0.78662  -1.21748  -1.28347  -1.16324   0.22887   0.60381   0.90232
-             300.0  -0.68672  -1.08276  -1.19741  -1.09564   0.27451   0.64723   0.95878
-             600.0  -0.82430  -0.91192  -1.07171  -0.99555   0.33354   0.69956   0.99476
-            1200.0  -1.90215  -0.47265  -0.51566  -0.40633   0.79966   1.28135   1.13259
-            2400.0  -6.00000  -0.42309  -0.16183  -0.06210   1.21724   1.74509   1.91434
+              10.0 -1.429964e-01 -1.476720e-01 -1.629929e-01 -1.914062e-01 -1.899853e-01 -1.761360e-01 -1.080034e-01
+              20.0 -2.859928e-01 -2.953441e-01 -3.259858e-01 -3.828124e-01 -3.799705e-01 -3.522719e-01 -2.160068e-01
+              40.0 -5.719856e-01 -5.906881e-01 -6.519716e-01 -7.656248e-01 -7.599410e-01 -7.045438e-01 -4.320136e-01
+              80.0 -1.926724e+00 -2.002864e+00 -2.236349e+00 -2.650462e+00 -2.595533e+00 -2.426695e+00 -1.285108e+00
+             150.0 -3.755648e+00 -3.879542e+00 -4.285480e+00 -5.036625e+00 -4.993572e+00 -4.633074e+00 -2.828399e+00
+             300.0 -7.556034e+00 -7.803919e+00 -8.616153e+00 -1.012075e+01 -1.004182e+01 -9.312209e+00 -5.697168e+00
+             600.0 -1.513527e+01 -1.563053e+01 -1.725337e+01 -2.026108e+01 -2.011005e+01 -1.864479e+01 -1.142685e+01
+            1200.0 -3.027194e+01 -3.126172e+01 -3.450519e+01 -4.052172e+01 -4.021920e+01 -3.728810e+01 -2.286457e+01
+            2400.0 -6.055637e+01 -6.253672e+01 -6.902580e+01 -8.106005e+01 -8.045635e+01 -7.459231e+01 -4.573379e+01
+              </tableData>
+            </table>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/md-total">
+          <function>
+            <min>
+              <sum>
+                <property>fcs/fbw/md-aero</property>
+                <product><value>-6.070054e-05</value><max><value>0</value><property>propulsion/engine[0]/thrust-lbs</property></max></product>
+                <product><value>-6.070054e-05</value><max><value>0</value><property>propulsion/engine[1]/thrust-lbs</property></max></product>
+              </sum>
+              <value>-0.01</value>
+            </min>
+          </function>
+        </fcs_function>
+        <!-- the roll power (1/s^2 per rad of the surface): the surfaces', and with the
+             vectoring nozzles' at the thrust the engines make -->
+        <fcs_function name="fcs/fbw/lda-aero">
+          <function>
+            <table>
+              <independentVar lookup="row">aero/qbar-psf</independentVar>
+              <independentVar lookup="column">velocities/mach</independentVar>
+              <tableData>
+                       0.150     0.400     0.700     0.900     1.100     1.400     2.000
+              10.0  6.437540e-01  6.594927e-01  7.106937e-01  8.048278e-01  4.375041e-01  3.306378e-01  2.093204e-01
+              20.0  1.287508e+00  1.318985e+00  1.421387e+00  1.609656e+00  8.750083e-01  6.612756e-01  4.186407e-01
+              40.0  2.575016e+00  2.637971e+00  2.842775e+00  3.219311e+00  1.750017e+00  1.322551e+00  8.372814e-01
+              80.0  8.499657e+00  8.790971e+00  9.447595e+00  1.028933e+01  5.830944e+00  4.332047e+00  2.158770e+00
+             150.0  1.468608e+01  1.505814e+01  1.626716e+01  1.847811e+01  1.000425e+01  7.578170e+00  4.748426e+00
+             300.0  2.990701e+01  3.064599e+01  3.304924e+01  3.745748e+01  2.033926e+01  1.538123e+01  9.676652e+00
+             600.0  6.009849e+01  6.157222e+01  6.636611e+01  7.516981e+01  4.085173e+01  3.087816e+01  1.951768e+01
+            1200.0  1.203381e+02  1.232826e+02  1.328622e+02  1.504761e+02  8.178795e+01  6.181442e+01  3.911506e+01
+            2400.0  2.408349e+02  2.467262e+02  2.658915e+02  3.011256e+02  1.636807e+02  1.237040e+02  7.829108e+01
+              </tableData>
+            </table>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/lda-total">
+          <function>
+            <max>
+              <sum>
+                <property>fcs/fbw/lda-aero</property>
+                <product><value>1.230285e-05</value><max><value>0</value><property>propulsion/engine[0]/thrust-lbs</property></max></product>
+                <product><value>1.201762e-05</value><max><value>0</value><property>propulsion/engine[1]/thrust-lbs</property></max></product>
+              </sum>
+              <value>0.01</value>
+            </max>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/k-alpha-m">
+          <function>
+            <table>
+              <independentVar lookup="row">aero/qbar-psf</independentVar>
+              <independentVar lookup="column">velocities/mach</independentVar>
+              <tableData>
+                       0.150     0.400     0.700     0.900     1.100     1.400     2.000
+              10.0  2.187123e+00  2.235103e+00  2.246551e+00  2.248922e+00  2.233332e+00  2.229586e+00  2.238167e+00
+              20.0  2.126373e+00  2.220488e+00  2.243193e+00  2.247900e+00  2.216699e+00  2.209194e+00  2.226344e+00
+              40.0  2.011220e+00  2.192106e+00  2.236755e+00  2.246027e+00  2.183539e+00  2.168474e+00  2.202726e+00
+              80.0  1.640854e+00  2.384259e+00  2.750367e+00  3.005817e+00 -4.533879e-01 -1.274430e+00 -2.968311e-01
+             150.0  2.954260e+00  4.723263e+00  5.500278e+00  5.858824e+00 -1.142894e+00 -2.797519e+00 -2.552126e+00
+             300.0  5.188917e+00  8.449810e+00  1.031708e+01  1.108871e+01 -2.756599e+00 -6.027101e+00 -5.462322e+00
+             600.0  1.247605e+01  1.425383e+01  1.849067e+01  2.017095e+01 -6.707494e+00 -1.304318e+01 -1.136703e+01
+            1200.0  5.758172e+01  1.477599e+01  1.779284e+01  1.646508e+01 -3.216156e+01 -4.777896e+01 -2.589627e+01
+            2400.0  4.396549e+02  2.645881e+01  1.117056e+01  5.033893e+00 -9.793479e+01 -1.301702e+02 -8.754989e+01
+              </tableData>
+            </table>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/k-alpha">
+          <function>
+            <quotient><property>fcs/fbw/k-alpha-m</property><property>fcs/fbw/md-total</property></quotient>
+          </function>
+          <clipto> <min>-6.00000</min> <max>6.00000</max> </clipto>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/k-q-m">
+          <function>
+            <table>
+              <independentVar lookup="row">aero/qbar-psf</independentVar>
+              <independentVar lookup="column">velocities/mach</independentVar>
+              <tableData>
+                       0.150     0.400     0.700     0.900     1.100     1.400     2.000
+              10.0  2.224424e+00  2.332988e+00  2.360591e+00  2.368062e+00  2.375253e+00  2.380044e+00  2.388164e+00
+              20.0  2.121756e+00  2.293338e+00  2.336820e+00  2.348286e+00  2.360458e+00  2.367906e+00  2.381802e+00
+              40.0  1.916214e+00  2.214029e+00  2.289274e+00  2.308733e+00  2.330866e+00  2.343630e+00  2.369077e+00
+              80.0  1.457873e+00  2.247787e+00  2.561316e+00  2.790012e+00  2.643496e+00  2.798808e+00  2.331796e+00
+             150.0  1.611671e+00  3.093225e+00  3.587433e+00  3.869596e+00  3.798888e+00  3.986926e+00  3.292300e+00
+             300.0  1.031034e+00  3.913348e+00  4.802189e+00  5.242915e+00  5.249073e+00  5.544264e+00  4.697402e+00
+             600.0 -1.316152e+00  4.537877e+00  6.174429e+00  6.888098e+00  7.092444e+00  7.573935e+00  6.543315e+00
+            1200.0 -1.084247e+01  2.627031e+00  5.349458e+00  6.018821e+00  7.306591e+00  7.765882e+00  8.715451e+00
+            2400.0 -4.798270e+01 -4.289039e+00  1.365712e+00  2.675018e+00  5.248080e+00  6.121867e+00  7.969875e+00
               </tableData>
             </table>
           </function>
         </fcs_function>
         <fcs_function name="fcs/fbw/k-q">
           <function>
+            <quotient><property>fcs/fbw/k-q-m</property><property>fcs/fbw/md-total</property></quotient>
+          </function>
+          <clipto> <min>-3.00000</min> <max>3.00000</max> </clipto>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/k-ff-m">
+          <function>
             <table>
               <independentVar lookup="row">aero/qbar-psf</independentVar>
               <independentVar lookup="column">velocities/mach</independentVar>
               <tableData>
                        0.150     0.400     0.700     0.900     1.100     1.400     2.000
-              10.0  -3.00000  -3.00000  -3.00000  -3.00000  -3.00000  -3.00000  -3.00000
-              20.0  -3.00000  -3.00000  -3.00000  -3.00000  -3.00000  -3.00000  -3.00000
-              40.0  -3.00000  -3.00000  -3.00000  -3.00000  -3.00000  -3.00000  -3.00000
-              80.0  -0.75666  -1.12229  -1.14531  -1.05265  -1.01848  -1.15334  -1.81447
-             150.0  -0.42913  -0.79732  -0.83711  -0.76829  -0.76076  -0.86054  -1.16402
-             300.0  -0.13645  -0.50146  -0.55735  -0.51804  -0.52272  -0.59538  -0.82452
-             600.0   0.08696  -0.29032  -0.35787  -0.33997  -0.35268  -0.40622  -0.57263
-            1200.0   0.35817  -0.08403  -0.15503  -0.14853  -0.18167  -0.20827  -0.38118
-            2400.0   0.79236   0.06858  -0.01979  -0.03300  -0.06523  -0.08207  -0.17427
+              10.0  1.483790e+01  1.480723e+01  1.471366e+01  1.457000e+01  1.505991e+01  1.504532e+01  1.560620e+01
+              20.0  7.418948e+00  7.403615e+00  7.356830e+00  7.285000e+00  7.529956e+00  7.522658e+00  7.803099e+00
+              40.0  3.709474e+00  3.701808e+00  3.678415e+00  3.642500e+00  3.764978e+00  3.761329e+00  3.901549e+00
+              80.0  9.233996e-01  9.306516e-01  9.504266e-01  9.765331e-01  1.248783e+00  1.374946e+00  1.489270e+00
+             150.0  9.744332e-01  9.781807e-01  9.891056e-01  1.005518e+00  1.344240e+00  1.471214e+00  1.501772e+00
+             300.0  9.856050e-01  9.887886e-01  9.981599e-01  1.012668e+00  1.364267e+00  1.491611e+00  1.585965e+00
+             600.0  9.882735e-01  9.913206e-01  1.000318e+00  1.014394e+00  1.369528e+00  1.497226e+00  1.604663e+00
+            1200.0  6.975426e-01  6.858042e-01  6.520958e-01  6.060342e-01  9.151706e-01  9.440239e-01  1.515242e+00
+            2400.0  3.487745e-01  3.429049e-01  3.260504e-01  3.030206e-01  4.577295e-01  4.721964e-01  7.582895e-01
               </tableData>
             </table>
           </function>
         </fcs_function>
         <fcs_function name="fcs/fbw/k-ff">
           <function>
-            <table>
-              <independentVar lookup="row">aero/qbar-psf</independentVar>
-              <independentVar lookup="column">velocities/mach</independentVar>
-              <tableData>
-                       0.150     0.400     0.700     0.900     1.100     1.400     2.000
-              10.0  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000
-              20.0  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000
-              40.0  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000
-              80.0  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000  -0.30000
-             150.0  -0.25946  -0.25214  -0.23080  -0.19964  -0.26919  -0.30000  -0.30000
-             300.0  -0.13044  -0.12670  -0.11585  -0.10006  -0.13586  -0.16018  -0.27838
-             600.0  -0.06530  -0.06342  -0.05798  -0.05007  -0.06810  -0.08030  -0.14043
-            1200.0  -0.02304  -0.02194  -0.01890  -0.01496  -0.02275  -0.02532  -0.06627
-            2400.0  -0.00576  -0.00548  -0.00472  -0.00374  -0.00569  -0.00633  -0.01658
-              </tableData>
-            </table>
+            <quotient><property>fcs/fbw/k-ff-m</property><property>fcs/fbw/md-total</property></quotient>
           </function>
+          <clipto> <min>-0.30000</min> <max>0.30000</max> </clipto>
         </fcs_function>
-        <fcs_function name="fcs/fbw/k-i">
+        <fcs_function name="fcs/fbw/k-i-m">
           <function>
             <table>
               <independentVar lookup="row">aero/qbar-psf</independentVar>
               <independentVar lookup="column">velocities/mach</independentVar>
               <tableData>
                        0.150     0.400     0.700     0.900     1.100     1.400     2.000
-              10.0  -0.60000  -0.60000  -0.60000  -0.60000  -0.60000  -0.60000  -0.60000
-              20.0  -0.60000  -0.60000  -0.60000  -0.60000  -0.60000  -0.60000  -0.60000
-              40.0  -0.60000  -0.60000  -0.60000  -0.60000  -0.60000  -0.60000  -0.60000
-              80.0  -0.47926  -0.46466  -0.42499  -0.36844  -0.48113  -0.56659  -0.60000
-             150.0  -0.25946  -0.25214  -0.23080  -0.19964  -0.26919  -0.31755  -0.53096
-             300.0  -0.13044  -0.12670  -0.11585  -0.10006  -0.13586  -0.16018  -0.27838
-             600.0  -0.06530  -0.06342  -0.05798  -0.05007  -0.06810  -0.08030  -0.14043
-            1200.0  -0.02304  -0.02194  -0.01890  -0.01496  -0.02275  -0.02532  -0.06627
-            2400.0  -0.00576  -0.00548  -0.00472  -0.00374  -0.00569  -0.00633  -0.01658
+              10.0  1.483790e+01  1.480723e+01  1.471366e+01  1.457000e+01  1.505991e+01  1.504532e+01  1.560620e+01
+              20.0  7.418948e+00  7.403615e+00  7.356830e+00  7.285000e+00  7.529956e+00  7.522658e+00  7.803099e+00
+              40.0  3.709474e+00  3.701808e+00  3.678415e+00  3.642500e+00  3.764978e+00  3.761329e+00  3.901549e+00
+              80.0  9.233996e-01  9.306516e-01  9.504266e-01  9.765331e-01  1.248783e+00  1.374946e+00  1.489270e+00
+             150.0  9.744332e-01  9.781807e-01  9.891056e-01  1.005518e+00  1.344240e+00  1.471214e+00  1.501772e+00
+             300.0  9.856050e-01  9.887886e-01  9.981599e-01  1.012668e+00  1.364267e+00  1.491611e+00  1.585965e+00
+             600.0  9.882735e-01  9.913206e-01  1.000318e+00  1.014394e+00  1.369528e+00  1.497226e+00  1.604663e+00
+            1200.0  6.975426e-01  6.858042e-01  6.520958e-01  6.060342e-01  9.151706e-01  9.440239e-01  1.515242e+00
+            2400.0  3.487745e-01  3.429049e-01  3.260504e-01  3.030206e-01  4.577295e-01  4.721964e-01  7.582895e-01
               </tableData>
             </table>
           </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/k-i">
+          <function>
+            <quotient><property>fcs/fbw/k-i-m</property><property>fcs/fbw/md-total</property></quotient>
+          </function>
+          <clipto> <min>-0.60000</min> <max>0.60000</max> </clipto>
         </fcs_function>
         <fcs_function name="fcs/fbw/n-alpha">
           <function>
@@ -489,7 +581,7 @@
         <!-- the pitching moment's departures from a straight line through the
              angle-of-attack envelope (+0.019 per rad about the CG), cancelled by the
              elevator: the gains are designed on the line -->
-        <fcs_function name="fcs/fbw/moment-comp">
+        <fcs_function name="fcs/fbw/moment-comp-aero">
           <function>
             <table>
               <independentVar lookup="row">aero/alpha-rad</independentVar>
@@ -542,6 +634,12 @@
            0.66323  -0.12285  -0.11896  -0.10778  -0.09178  -0.09246  -0.09973  -0.16265
               </tableData>
             </table>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/moment-comp">
+          <function>
+            <product><property>fcs/fbw/moment-comp-aero</property>
+              <quotient><property>fcs/fbw/md-aero</property><property>fcs/fbw/md-total</property></quotient></product>
           </function>
         </fcs_function>
         <!-- the gravity reference: the load factor that holds the flight path -->
@@ -674,12 +772,22 @@
             fcs/fbw/pitch-error-rate lt 0
           </test>
         </switch>
-        <integrator name="fcs/fbw/pitch-integral">
-          <input>fcs/fbw/pitch-error-rate</input>
+        <!-- held as a moment: the nozzles' share changes with thrust, the trim does not -->
+        <fcs_function name="fcs/fbw/pitch-integral-moment-rate">
+          <function><product><property>fcs/fbw/pitch-error-rate</property><property>fcs/fbw/md-total</property></product></function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/pitch-integral-limit">
+          <function><product><value>-0.50000</value><property>fcs/fbw/md-total</property></product></function>
+        </fcs_function>
+        <integrator name="fcs/fbw/pitch-integral-moment">
+          <input>fcs/fbw/pitch-integral-moment-rate</input>
           <c1>1.0</c1>
           <trigger>fcs/fbw/pitch-hold</trigger>
-          <clipto> <min>-0.5</min> <max>0.5</max> </clipto>
+          <clipto> <min>-fcs/fbw/pitch-integral-limit</min> <max>fcs/fbw/pitch-integral-limit</max> </clipto>
         </integrator>
+        <fcs_function name="fcs/fbw/pitch-integral">
+          <function><quotient><property>fcs/fbw/pitch-integral-moment</property><property>fcs/fbw/md-total</property></quotient></function>
+        </fcs_function>
         <!-- past an angle-of-attack limit (the next 0.35 s counted) a push back
              in proportion, all the travel 4 deg beyond: an unstable airframe
              pitching up fast needs it at once, not when an integrator winds -->
@@ -729,84 +837,110 @@
           <input>fcs/roll-trim-cmd-norm</input>
           <clipto> <min>-1</min> <max>1</max> </clipto>
         </summer>
-        <fcs_function name="fcs/fbw/k-roll">
+        <fcs_function name="fcs/fbw/k-roll-m">
           <function>
             <table>
               <independentVar lookup="row">aero/qbar-psf</independentVar>
               <independentVar lookup="column">velocities/mach</independentVar>
               <tableData>
                        0.150     0.400     0.700     0.900     1.100     1.400     2.000
-              10.0   1.50000   1.50000   1.50000   1.50000   1.50000   1.50000   1.50000
-              20.0   1.50000   1.50000   1.50000   1.50000   1.50000   1.50000   1.50000
-              40.0   1.50000   1.50000   1.50000   1.50000   1.50000   1.50000   1.50000
-              80.0   0.47300   0.52678   0.50362   0.46212   0.83262   1.12306   1.50000
-             150.0   0.14732   0.25995   0.26686   0.24029   0.45889   0.61478   1.01993
-             300.0   0.00000   0.09186   0.11120   0.10347   0.20537   0.28051   0.48356
-             600.0   0.00000   0.01031   0.03547   0.03665   0.08215   0.11760   0.22328
-            1200.0   0.00000   0.00000   0.00000   0.00343   0.02100   0.03667   0.09506
-            2400.0   0.00000   0.00000   0.00000   0.00000   0.00000   0.00000   0.03116
+              10.0  4.843103e+00  4.939975e+00  4.963604e+00  4.969115e+00  4.977391e+00  4.981173e+00  4.991178e+00
+              20.0  4.686206e+00  4.879949e+00  4.927208e+00  4.938230e+00  4.954783e+00  4.962346e+00  4.982356e+00
+              40.0  4.372412e+00  4.759899e+00  4.854416e+00  4.876461e+00  4.909565e+00  4.924692e+00  4.964713e+00
+              80.0  4.020345e+00  4.630879e+00  4.757973e+00  4.754938e+00  4.854956e+00  4.865165e+00  4.921561e+00
+             150.0  2.163570e+00  3.914432e+00  4.341055e+00  4.440083e+00  4.590851e+00  4.658939e+00  4.843043e+00
+             300.0  0.000000e+00  2.814993e+00  3.675066e+00  3.875709e+00  4.176988e+00  4.314630e+00  4.679289e+00
+             600.0  0.000000e+00  6.349687e-01  2.353705e+00  2.755012e+00  3.356058e+00  3.631265e+00  4.357838e+00
+            1200.0  0.000000e+00  0.000000e+00  0.000000e+00  5.168762e-01  1.717545e+00  2.266893e+00  3.718325e+00
+            2400.0  0.000000e+00  0.000000e+00  0.000000e+00  0.000000e+00  0.000000e+00  0.000000e+00  2.439889e+00
+              </tableData>
+            </table>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/k-roll">
+          <function>
+            <quotient><property>fcs/fbw/k-roll-m</property><property>fcs/fbw/lda-total</property></quotient>
+          </function>
+          <clipto> <min>-1.50000</min> <max>1.50000</max> </clipto>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/k-roll-ff-m">
+          <function>
+            <table>
+              <independentVar lookup="row">aero/qbar-psf</independentVar>
+              <independentVar lookup="column">velocities/mach</independentVar>
+              <tableData>
+                       0.150     0.400     0.700     0.900     1.100     1.400     2.000
+              10.0  1.568971e-01  6.002527e-02  3.639607e-02  3.088485e-02  2.260867e-02  1.882694e-02  8.821771e-03
+              20.0  3.137941e-01  1.200505e-01  7.279214e-02  6.176969e-02  4.521734e-02  3.765387e-02  1.764354e-02
+              40.0  6.275882e-01  2.401011e-01  1.455843e-01  1.235394e-01  9.043467e-02  7.530775e-02  3.528708e-02
+              80.0  9.796548e-01  3.691211e-01  2.420265e-01  2.450620e-01  1.450437e-01  1.348353e-01  7.843863e-02
+             150.0  2.836430e+00  1.085568e+00  6.589448e-01  5.599169e-01  4.091485e-01  3.410608e-01  1.569570e-01
+             300.0  5.711185e+00  2.185007e+00  1.324934e+00  1.124291e+00  8.230122e-01  6.853695e-01  3.207106e-01
+             600.0  1.141018e+01  4.365031e+00  2.646295e+00  2.244988e+00  1.643942e+00  1.368735e+00  6.421617e-01
+            1200.0  2.278138e+01  8.715334e+00  5.283958e+00  4.483124e+00  3.282455e+00  2.733107e+00  1.281675e+00
+            2400.0  4.551630e+01  1.741315e+01  1.055777e+01  8.958356e+00  6.558475e+00  5.461141e+00  2.560111e+00
               </tableData>
             </table>
           </function>
         </fcs_function>
         <fcs_function name="fcs/fbw/k-roll-ff">
           <function>
+            <quotient><property>fcs/fbw/k-roll-ff-m</property><property>fcs/fbw/lda-total</property></quotient>
+          </function>
+          <clipto> <min>-1.50000</min> <max>1.50000</max> </clipto>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/k-roll-i-m">
+          <function>
             <table>
               <independentVar lookup="row">aero/qbar-psf</independentVar>
               <independentVar lookup="column">velocities/mach</independentVar>
               <tableData>
                        0.150     0.400     0.700     0.900     1.100     1.400     2.000
-              10.0   0.24372   0.09102   0.05121   0.03837   0.05168   0.05694   0.04214
-              20.0   0.24372   0.09102   0.05121   0.03837   0.05168   0.05694   0.04214
-              40.0   0.24372   0.09102   0.05121   0.03837   0.05168   0.05694   0.04214
-              80.0   0.11526   0.04199   0.02562   0.02382   0.02487   0.03113   0.03633
-             150.0   0.19314   0.07209   0.04051   0.03030   0.04090   0.04501   0.03305
-             300.0   0.19096   0.07130   0.04009   0.03002   0.04046   0.04456   0.03314
-             600.0   0.18986   0.07089   0.03987   0.02987   0.04024   0.04433   0.03290
-            1200.0   0.18931   0.07069   0.03977   0.02979   0.04013   0.04421   0.03277
-            2400.0   0.18899   0.07058   0.03971   0.02975   0.04007   0.04415   0.03270
+              10.0  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01
+              20.0  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01
+              40.0  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01
+              80.0  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01
+             150.0  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01
+             300.0  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01
+             600.0  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01
+            1200.0  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01
+            2400.0  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01  4.444444e-01
               </tableData>
             </table>
           </function>
         </fcs_function>
         <fcs_function name="fcs/fbw/k-roll-i">
           <function>
-            <table>
-              <independentVar lookup="row">aero/qbar-psf</independentVar>
-              <independentVar lookup="column">velocities/mach</independentVar>
-              <tableData>
-                       0.150     0.400     0.700     0.900     1.100     1.400     2.000
-              10.0   0.69039   0.67392   0.62537   0.55222   1.00000   1.00000   1.00000
-              20.0   0.34520   0.33696   0.31268   0.27611   0.50793   0.67210   1.00000
-              40.0   0.17260   0.16848   0.15634   0.13806   0.25397   0.33605   0.53082
-              80.0   0.05229   0.05056   0.04704   0.04319   0.07622   0.10259   0.20588
-             150.0   0.03026   0.02952   0.02732   0.02405   0.04443   0.05865   0.09360
-             300.0   0.01486   0.01450   0.01345   0.01187   0.02185   0.02890   0.04593
-             600.0   0.00740   0.00722   0.00670   0.00591   0.01088   0.01439   0.02277
-            1200.0   0.00369   0.00361   0.00335   0.00295   0.00543   0.00719   0.01136
-            2400.0   0.00185   0.00180   0.00167   0.00148   0.00272   0.00359   0.00568
-              </tableData>
-            </table>
+            <quotient><property>fcs/fbw/k-roll-i-m</property><property>fcs/fbw/lda-total</property></quotient>
           </function>
+          <clipto> <min>-1.00000</min> <max>1.00000</max> </clipto>
         </fcs_function>
-        <fcs_function name="fcs/fbw/p-max">
+        <fcs_function name="fcs/fbw/p-per">
           <function>
             <table>
               <independentVar lookup="row">aero/qbar-psf</independentVar>
               <independentVar lookup="column">velocities/mach</independentVar>
               <tableData>
                        0.150     0.400     0.700     0.900     1.100     1.400     2.000
-              10.0   1.71868   4.18879   4.18879   4.18879   4.18879   4.18879   4.18879
-              20.0   1.71868   4.18879   4.18879   4.18879   4.18879   4.18879   4.18879
-              40.0   1.71868   4.18879   4.18879   4.18879   4.18879   4.18879   4.18879
-              80.0   3.63427   4.18879   4.18879   4.18879   4.18879   4.18879   4.18879
-             150.0   2.16881   4.18879   4.18879   4.18879   4.18879   4.18879   4.18879
-             300.0   2.19349   4.18879   4.18879   4.18879   4.18879   4.18879   4.18879
-             600.0   2.20628   4.18879   4.18879   4.18879   4.18879   4.18879   4.18879
-            1200.0   2.21264   4.18879   4.18879   4.18879   4.18879   4.18879   4.18879
-            2400.0   2.21636   4.18879   4.18879   4.18879   4.18879   4.18879   4.18879
+              10.0  2.669770e+00  6.978378e+00  1.150891e+01  1.356261e+01  1.852736e+01  2.224892e+01  4.748242e+01
+              20.0  1.334885e+00  3.489189e+00  5.754454e+00  6.781303e+00  9.263682e+00  1.112446e+01  2.374121e+01
+              40.0  6.674424e-01  1.744595e+00  2.877227e+00  3.390652e+00  4.631841e+00  5.562230e+00  1.187061e+01
+              80.0  4.275782e-01  1.134801e+00  1.730715e+00  1.709278e+00  2.887950e+00  3.106598e+00  5.340213e+00
+             150.0  1.476782e-01  3.858616e-01  6.356815e-01  7.481092e-01  1.023782e+00  1.228165e+00  2.668751e+00
+             300.0  7.334363e-02  1.917060e-01  3.161509e-01  3.725718e-01  5.089585e-01  6.111725e-01  1.306097e+00
+             600.0  3.671099e-02  9.596243e-02  1.582889e-01  1.865841e-01  2.548016e-01  3.060338e-01  6.522953e-01
+            1200.0  1.838690e-02  4.806230e-02  7.927372e-02  9.343463e-02  1.276115e-01  1.532611e-01  3.268216e-01
+            2400.0  9.202836e-03  2.405533e-02  3.967495e-02  4.675847e-02  6.386836e-02  7.670174e-02  1.636176e-01
               </tableData>
             </table>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/p-max">
+          <function>
+            <min>
+              <value>4.18879</value>
+              <product><property>fcs/fbw/p-per</property><property>fcs/fbw/lda-total</property></product>
+            </min>
           </function>
         </fcs_function>
         <!-- the commanded rate halves towards alpha_max -->
@@ -839,12 +973,22 @@
               <difference><property>fcs/fbw/p-cmd</property><property>fcs/fbw/p-stability</property></difference></product>
           </function>
         </fcs_function>
-        <integrator name="fcs/fbw/roll-integral">
-          <input>fcs/fbw/roll-error-rate</input>
+        <!-- held as a moment: the nozzles' share changes with thrust, the trim does not -->
+        <fcs_function name="fcs/fbw/roll-integral-moment-rate">
+          <function><product><property>fcs/fbw/roll-error-rate</property><property>fcs/fbw/lda-total</property></product></function>
+        </fcs_function>
+        <fcs_function name="fcs/fbw/roll-integral-limit">
+          <function><product><value>0.26180</value><property>fcs/fbw/lda-total</property></product></function>
+        </fcs_function>
+        <integrator name="fcs/fbw/roll-integral-moment">
+          <input>fcs/fbw/roll-integral-moment-rate</input>
           <c1>1.0</c1>
           <trigger>fcs/fbw/reset</trigger>
-          <clipto> <min>-0.26180</min> <max>0.26180</max> </clipto>
+          <clipto> <min>-fcs/fbw/roll-integral-limit</min> <max>fcs/fbw/roll-integral-limit</max> </clipto>
         </integrator>
+        <fcs_function name="fcs/fbw/roll-integral">
+          <function><quotient><property>fcs/fbw/roll-integral-moment</property><property>fcs/fbw/lda-total</property></quotient></function>
+        </fcs_function>
         <fcs_function name="fcs/fbw/aileron">
           <function>
             <sum>
@@ -1045,6 +1189,43 @@
           </traverse>
           <output>gear/gear-pos-norm</output>
         </kinematic>
+      </channel>
+      <channel name="Thrust Vectoring">
+        <!-- hangar: each nozzle turns with the surfaces (hangar/fcs.py): through its
+             travel as the elevator goes through its own (a positive deflection
+             pushes the tail up, nose down, as the elevator's does), differentially
+             through half of it with the ailerons (the left nozzle's tail up rolls
+             right) and, in a canted plane, with the rudder -->
+        <fcs_function name="fcs/vectoring/nozzle-0-rad">
+          <function>
+            <sum>
+              <product><value>0.800000</value><property>fcs/elevator-pos-rad</property></product>
+              <product><value>0.333333</value><property>fcs/left-aileron-pos-rad</property></product>
+            </sum>
+          </function>
+          <clipto> <min>-0.349066</min> <max>0.349066</max> </clipto>
+        </fcs_function>
+        <fcs_function name="fcs/vectoring/pitch-0-rad">
+          <function>
+            <sum><value>0.000000</value><product><value>1.000000</value><property>fcs/vectoring/nozzle-0-rad</property></product></sum>
+          </function>
+          <output>propulsion/engine[0]/pitch-angle-rad</output>
+        </fcs_function>
+        <fcs_function name="fcs/vectoring/nozzle-1-rad">
+          <function>
+            <sum>
+              <product><value>0.800000</value><property>fcs/elevator-pos-rad</property></product>
+              <product><value>-0.333333</value><property>fcs/left-aileron-pos-rad</property></product>
+            </sum>
+          </function>
+          <clipto> <min>-0.349066</min> <max>0.349066</max> </clipto>
+        </fcs_function>
+        <fcs_function name="fcs/vectoring/pitch-1-rad">
+          <function>
+            <sum><value>0.000000</value><product><value>1.000000</value><property>fcs/vectoring/nozzle-1-rad</property></product></sum>
+          </function>
+          <output>propulsion/engine[1]/pitch-angle-rad</output>
+        </fcs_function>
       </channel>
     </flight_control>
     <aerodynamics>

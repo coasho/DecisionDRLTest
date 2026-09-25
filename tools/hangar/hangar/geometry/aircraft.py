@@ -94,7 +94,18 @@ class Engine:
             self.prop_sense = "cw"
             self.prop_orient = np.radians(np.asarray(nozzle.get("orient", [0.0, 0.0, 0.0]), float))
             self.prop_spec = nozzle
+            # thrust vectoring: the nozzle turns up to `vectoring` deg each way in
+            # one plane, canted `vectoring_cant` deg outboard from the vertical
+            # (0: pitch only, the F-22's; the Su-57's 32 deg give yaw and roll too)
+            self.vectoring = float(nozzle.get("vectoring", 0.0))
+            self.vectoring_cant = float(nozzle.get("vectoring_cant", 0.0))
+            if not 0.0 <= self.vectoring <= 45.0:
+                raise ValueError("engine %r: nozzle vectoring must be 0-45 deg" % self.name)
+            if not 0.0 <= self.vectoring_cant < 90.0:
+                raise ValueError("engine %r: nozzle vectoring_cant must be 0-90 deg" % self.name)
             return
+        self.vectoring = 0.0
+        self.vectoring_cant = 0.0
         self.inlet_x = None
         if "power_kw" not in spec:
             raise ValueError("engine %r: power_kw is required" % self.name)

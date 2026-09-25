@@ -528,6 +528,10 @@ def flight_control_xml(aircraft, fbw=None):
           <output>gear/gear-pos-norm</output>
         </kinematic>
       </channel>""")
+    from .fcs import vectoring_xml
+    tvc = vectoring_xml(aircraft)   # after the surfaces: the nozzles turn with them
+    if tvc:
+        parts.append(tvc)
     parts.append("    </flight_control>")
     return "\n".join(parts)
 

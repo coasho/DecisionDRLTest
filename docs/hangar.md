@@ -150,6 +150,16 @@ max_mach = 2.05                  # at max_mach_altitude_ft: calibrates the wave 
 max_mach_altitude_ft = 40000
 ```
 
+A thrust-vectoring nozzle gives its travel, and how far its plane leans
+outboard (0, pitch only, for the F-22A). From `aircraft/su57/su57.toml`:
+
+```toml
+[engine.nozzle]
+position = [18.750, 1.250, -0.150]
+vectoring = 15.0                 # deg each way
+vectoring_cant = 32.0            # deg outboard: together they pitch, differentially they yaw and roll
+```
+
 The 3D model has its own keys (all optional):
 
 ```toml
@@ -351,6 +361,17 @@ For fighters:
     at 2–5°, then no longer throws a 3 g step up to 70 % past its target.
   - Roll: a roll-rate command with bank hold.
   - Yaw: a yaw damper, and sideslip from the pedals.
+  - Thrust vectoring: the nozzles turn with the surfaces - through their
+    travel as the elevator goes through its own, differentially through half
+    of it with the ailerons, and with the rudder when their plane leans
+    outboard. Their power grows with thrust, the surfaces' with dynamic
+    pressure, so each gain is a moment divided at run time by the power
+    both give at the thrust the engines make, and the integrators hold
+    moments: the loops respond alike at idle and in afterburner, and the
+    nozzles add authority where the surfaces run out. At 70 m/s the F-22A's
+    3 g step rises in 1.0 s instead of 1.8 s; the Su-57, whose canted nozzles
+    yaw it into the roll, rolls 90° in 1.7 s instead of 2.2 s, with half the
+    sideslip.
 
 ## The 3D model
 
@@ -373,7 +394,10 @@ The model stage writes `<name>.glb` from the same design:
   compresses, a steerable wheel turns with the steering, and the wheels roll.
 - **Propulsion.** An afterburner flame behind each augmented jet, as the
   engine lights it; nozzle petals open as the engine opens them. A propeller
-  turns at its engine's rpm.
+  turns at its engine's rpm. A vectoring nozzle turns, flame and all, as the
+  flight controls turn it: a round one on a ball seal round its gimbal, a
+  two-dimensional one's flaps cut from the airframe with a rounded nose that
+  turns in the socket it leaves. Neither opens a gap at any deflection.
 - **Paint.** `paint.toml` beside the design gives its colours: a scheme
   (single, two-tone, camouflage or a cheat line), the radome, an anti-glare
   panel, the canopy's tint. hangar draws it as a texture, with panel joints
@@ -528,10 +552,10 @@ estimates):
 | F-16C Block 52 | `f16c` | 2.04 (2.05) | 62,800 (50,000) | 62,300 (50,000+) | 25.4° (25°) |
 | F-15C | `f15c` | 2.44 (2.5) | 63,200 (50,000) | 64,500 (65,000) | 30.2° (30°) |
 | F/A-18C | `fa18c` | 1.81 (1.8) | 50,800 (45,000) | 60,000 (50,000+) | 35.0° (35°) |
-| F-22A | `f22a` | 2.24 (2.25) | 62,000 | 61,500 (65,000) | 40.2° (40°) |
+| F-22A | `f22a` | 2.25 (2.25) | 62,000 | 60,400 (65,000) | 40.7° (40°) |
 | F-35A | `f35a` | 1.60 (1.6) | 44,900 | 57,500 (50,000+) | 19.5° (20°) |
 | Su-27S | `su27s` | 2.35 (2.35) | 64,300 (59,000) | 65,600 (60,700) | 26.3° (26°) |
-| Su-57 | `su57` | 2.01 (2.0) | 56,400 | 58,000 (65,600) | 26.3° (26°) |
+| Su-57 | `su57` | 2.02 (2.0) | 56,200 | 58,100 (65,600) | 26.3° (26°) |
 | MiG-29A | `mig29a` | 2.25 (2.25) | 64,000 (65,000) | 62,700 (59,000) | 26.4° (26°) |
 | Typhoon | `typhoon` | 2.02 (2.0) | 72,500 (62,000) | 62,200 (55,000+) | 30.4° (30°) |
 | Rafale C | `rafale` | 1.80 (1.8) | 60,400 (60,000) | 62,000 (50,000+) | 29.5° (29°) |
@@ -548,9 +572,12 @@ estimates):
   the Typhoon's 55,000) is a clearance, not where the climb runs out: the
   model must reach it (shown with a +).
 - Handling at 350 kt, from trim: a 3 g step overshoots 5-24 % and reaches
-  90 % in 0.6-0.9 s; full aft stick holds each limit within 0.5°. In full
-  pulls from sea level to 39,000 ft at 210-500 kt (true airspeed) every
-  limit holds within 0.8°.
+  90 % in 0.6-0.9 s; full aft stick holds each limit within 0.5°, the
+  F-22A's within 0.7°. In full pulls from sea level to 39,000 ft at
+  210-500 kt (true airspeed) every limit holds within 0.8°, the F-22A's
+  within 1.2°: its nozzles reach 40° at 210 kt, where its tails alone
+  stopped short, and keep their power there, where the tails lose theirs.
+- The F-22A and the Su-57 vector their thrust (see Methods, Fly-by-wire).
 - Engines fitted to Mach 2.3-2.5 keep too much thrust at sea level (see
   [Limits](#limits)).
 
@@ -575,8 +602,14 @@ estimates):
   are held near 800 kt.
 - **High angle of attack.** Forebody vortices, and the fin's shielding by
   the wing, are not modelled. Past about 30° a fighter keeps more
-  directional stability than the real one. Thrust vectoring is not modelled
-  either: the Su-57 flies to a 26° limit. The F-35A's limiter holds 20°,
+  directional stability than the real one. Thrust vectoring adds control,
+  but the angle-of-attack limits stay the aerodynamic ones (the Su-57's
+  26°, the F-22A's 40°): no post-stall manoeuvres such as the cobra.
+  At 70 m/s, the edge of 1 g flight, a full-stick roll holding height
+  sideslips 20-35° in several fighters (the F-35A, Gripen, J-20A, Typhoon),
+  and 58° in the F-22A, whose nozzles let it pull to near its 40° limit
+  while rolling: the roll command is not limited by the yaw the rudder can
+  coordinate. From 90 m/s none passes 14°. The F-35A's limiter holds 20°,
   though full nose-down stabilator brings its nose down to 38° (the real
   one flies to 50°).
 - **Tails on booms.** The lattice carries a horizontal tail across the gap
@@ -611,8 +644,8 @@ estimates):
   Mirage 2000's mains inward, every Rafale leg forward), and otherwise by
   hangar's default: a nose gear aft, a main gear forward. The swing itself
   is fitted to the airframe, not taken from drawings.
-- **Layouts.** Swing wings and thrust-vectoring nozzles do not move. There
-  is no flying wing in the library yet.
+- **Layouts.** Swing wings do not move. There is no flying wing in the
+  library yet.
 
 ## For Claude
 

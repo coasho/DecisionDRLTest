@@ -182,6 +182,9 @@ inlet_x = 8.6
 [engine.nozzle]
 position = [18.750, 1.250, -0.150]
 diameter = 0.90               # m, as drawn
+vectoring = 15.0              # deg each way in one plane (the AL-41F1's, like
+vectoring_cant = 32.0         # the 117S's) canted 32 deg outboard: together
+                              # they pitch, differentially they yaw and roll
 
 # The gear: twin nose wheels folding aft under the cockpit floor, the mains
 # folding forward into the intakes' sides (the layout published, the

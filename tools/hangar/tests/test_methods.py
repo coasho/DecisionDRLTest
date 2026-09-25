@@ -438,6 +438,148 @@ class FlyByWire(unittest.TestCase):
         self.assertEqual(props(fn("dn")), ["accelerations/Nz", "fcs/fbw/g-ref"])
 
 
+class ThrustVectoring(unittest.TestCase):
+    def test_nozzles_turn_with_the_surfaces(self):
+        # the F-22A's nozzles turn in pitch only, 20 deg: all their travel
+        # with the elevator's, half of it differentially with the ailerons
+        # (the left one's tail up rolls right); the Su-57's in planes canted
+        # 32 deg outboard, so the rudder moves them too. Their power comes
+        # signed as the surfaces' own: a nose-down elevator, a right roll, a
+        # nose-left rudder (JSBSim: a positive pitch angle pushes the tail up,
+        # a positive yaw angle pushes it right)
+        from hangar import fcs
+        from hangar.linear import loaded_inertia
+        from hangar.mass import MassModel
+        for name, travel, cant in (("f22a", 20.0, 0.0), ("su57", 15.0, 32.0)):
+            a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
+            vec = fcs.vectoring(a, loaded_inertia(MassModel(a)))
+            de, da, dr = (math.radians(max(abs(x) for x in a.channel_limits(k))) for k in ("elevator", "aileron", "rudder"))
+            with self.subTest(name=name):
+                self.assertEqual([v["engine"] for v in vec], [0, 1])
+                self.assertEqual([v["side"] for v in vec], [1.0, -1.0])        # the left copy first
+                for v in vec:
+                    self.assertAlmostEqual(v["travel"], math.radians(travel))
+                    self.assertAlmostEqual(v["cant"], math.radians(cant))
+                    self.assertAlmostEqual(v["k_elevator"], math.radians(travel) / de)
+                    self.assertAlmostEqual(v["k_aileron"], fcs.ROLL_SHARE * math.radians(travel) / da)
+                    self.assertAlmostEqual(v["k_rudder"], fcs.ROLL_SHARE * math.radians(travel) / dr if cant else 0.0)
+                    self.assertLess(v["md"], 0.0)
+                    self.assertGreater(v["lda"], 0.0)
+                    self.assertTrue(v["ndr"] < 0.0 if cant else v["ndr"] == 0.0)
+        self.assertEqual(fcs.vectoring(Aircraft.load(repo("aircraft/f16c/f16c.toml"))), [])
+
+    def test_vectoring_channel_turns_the_thrust(self):
+        # each nozzle's deflection from the surfaces' positions, within its
+        # travel, turns its engine's thrust in its plane: the pitch angle the
+        # deflection's upward part, the yaw angle its outboard part
+        from hangar import fcs, jsbsim
+        for name in ("f22a", "su57"):
+            a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
+            root = ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a))
+            ch = root.find(".//channel[@name='Thrust Vectoring']")
+            for v in fcs.vectoring(a):
+                i, s, c = v["engine"], v["side"], v["cant"]
+                with self.subTest(name=name, engine=i):
+                    dfl = ch.find("fcs_function[@name='fcs/vectoring/nozzle-%d-rad']" % i)
+                    terms = {p.find("property").text: float(p.find("value").text) for p in dfl.iter("product")}
+                    want = {"fcs/elevator-pos-rad": v["k_elevator"], "fcs/left-aileron-pos-rad": s * v["k_aileron"]}
+                    if c:
+                        want["fcs/rudder-pos-rad"] = -s * v["k_rudder"]
+                    self.assertEqual(set(terms), set(want))
+                    for k, g in want.items():
+                        self.assertAlmostEqual(terms[k], g, places=5)
+                    self.assertAlmostEqual(float(dfl.find("clipto/max").text), v["travel"], places=5)
+                    pitch = ch.find("fcs_function[@name='fcs/vectoring/pitch-%d-rad']" % i)
+                    self.assertEqual(pitch.find("output").text, "propulsion/engine[%d]/pitch-angle-rad" % i)
+                    self.assertAlmostEqual(float(pitch.findall(".//value")[1].text), math.cos(c), places=5)
+                    yaw = ch.find("fcs_function[@name='fcs/vectoring/yaw-%d-rad']" % i)
+                    if not c:
+                        self.assertIsNone(yaw)
+                        continue
+                    self.assertEqual(yaw.find("output").text, "propulsion/engine[%d]/yaw-angle-rad" % i)
+                    self.assertAlmostEqual(float(yaw.findall(".//value")[1].text), -s * math.sin(c), places=5)
+        f16 = Aircraft.load(repo("aircraft/f16c/f16c.toml"))
+        self.assertIsNone(ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(f16)).find(
+            ".//channel[@name='Thrust Vectoring']"))
+
+    def test_gains_follow_the_power_thrust_adds(self):
+        # with vectoring nozzles each axis's gains are moments over the power
+        # there is now - the surfaces' (a table) and the nozzles' at each
+        # engine's thrust - within the gains' limits, and the integrators hold
+        # moments: what they trim stays as the throttle moves
+        from hangar import fcs
+        root, fbw = FlyByWire.pitch_channel("su57")
+        self.assertIsNotNone(root.find(".//fcs_function[@name='fcs/fbw/k-alpha']/function/table"))  # none: tables
+        a = Aircraft.load(repo("aircraft/su57/su57.toml"))
+        from hangar.linear import loaded_inertia
+        from hangar.mass import MassModel
+        fbw["vectoring"] = fcs.vectoring(a, loaded_inertia(MassModel(a)))
+        n = (len(fcs.QBAR_PSF), 2)
+        for gains, power in fcs.AXES.values():
+            fbw["gains"][power] = np.full(n, 5.0 * fcs.POWER_SIGN[power])
+            for k in gains:
+                fbw["gains"][k + "_m"] = np.full(n, 0.5)
+        fbw["gains"]["p_per"] = np.full(n, 0.1)
+        root = ET.fromstring("<fdm>%s</fdm>" % "\n".join(fcs.channels_xml(a, fbw)))
+
+        def fn(name):
+            return root.find(".//fcs_function[@name='fcs/fbw/%s']" % name)
+        for axis, (gains, power) in fcs.AXES.items():
+            total = fn(power + "-total").find("function")
+            engines = [p.text for p in total.iter("property") if p.text.startswith("propulsion/")]
+            with self.subTest(axis=axis):
+                self.assertEqual(engines, ["propulsion/engine[0]/thrust-lbs", "propulsion/engine[1]/thrust-lbs"])
+                self.assertEqual(total[0].tag, "max" if fcs.POWER_SIGN[power] > 0 else "min")
+                for k in gains:
+                    q = fn(k.replace("_", "-")).find("function/quotient")
+                    self.assertEqual([p.text for p in q.iter("property")],
+                                     ["fcs/fbw/%s-m" % k.replace("_", "-"), "fcs/fbw/%s-total" % power])
+        for name, power in (("pitch-integral", "md"), ("roll-integral", "lda")):
+            q = fn(name).find("function/quotient")
+            self.assertEqual([p.text for p in q.iter("property")], ["fcs/fbw/%s-moment" % name, "fcs/fbw/%s-total" % power])
+        comp = fn("moment-comp").find("function/product")
+        self.assertEqual([p.text for p in comp.iter("property")],
+                         ["fcs/fbw/moment-comp-aero", "fcs/fbw/md-aero", "fcs/fbw/md-total"])
+
+    def test_nozzles_joint_turns_the_jet_the_way_the_thrust_turns(self):
+        # the model's vectoring node: a channel mix over the nozzle's
+        # surfaces, stopped at its travel, its x axis the one a positive
+        # deflection turns the jet about - down, for the F-22A (the thrust
+        # pushes the tail up); canted outboard, the Su-57's - and what hangs
+        # on it stays where it was
+        from hangar import fcs, model3d
+        from hangar.shape import airframe as sh
+        for name in ("f22a", "su57"):
+            a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
+            B = model3d._Builder()
+            top = [B.node("fsim:afterburner:%d" % i, translation=[0.3 * i, 0.2, -1.0 - i], rotation=[0.0, 0.0, 0.0, 1.0])
+                   for i in range(2)]
+            before = [np.array(B.nodes[i]["translation"]) for i in top]
+            origin = np.array([10.0, 0.0, 0.0])
+            model3d._vectoring(a, B, top, origin)
+            joints = [B.nodes[i] for i in top]
+            for v, j in zip(fcs.vectoring(a), joints):
+                with self.subTest(name=name, engine=v["engine"]):
+                    mix = "fsim:elevator:%.6g+aileron:%.6g" % (v["k_elevator"], v["side"] * v["k_aileron"])
+                    if v["cant"]:
+                        mix += "+rudder:%.6g" % (-v["side"] * v["k_rudder"])
+                    t = math.degrees(v["travel"])
+                    self.assertEqual(j["name"], mix + "@%.6g,%.6g" % (-t, t))
+                    R = model3d._quat_matrix(j["rotation"])
+                    axis = np.array([-R[2, 0], -R[0, 0], R[1, 0]])       # its x, back in the design frame
+                    np.testing.assert_allclose(axis, [0.0, math.cos(v["cant"]), v["side"] * math.sin(v["cant"])], atol=1e-9)
+                    # turned by d about it, the jet (aft, +x) goes down and inboard: the
+                    # thrust pushes the tail up and outboard
+                    d = 0.2
+                    jet = np.cos(d) * np.array([1.0, 0.0, 0.0]) + np.sin(d) * np.cross(axis, [1.0, 0.0, 0.0])
+                    self.assertLess(jet[2], 0.0)
+                    self.assertTrue(v["side"] * jet[1] >= 0.0 if v["cant"] else abs(jet[1]) < 1e-12)
+                    pivot = model3d._to_gltf(np.array(v["nozzle"]) + sh.vectoring_hinge(a.engines[0]), origin)
+                    np.testing.assert_allclose(j["translation"], pivot, atol=1e-9)
+                    kid = B.nodes[j["children"][0]]
+                    np.testing.assert_allclose(R @ kid["translation"] + j["translation"], before[v["engine"]], atol=1e-9)
+
+
 class Aircraft_(unittest.TestCase):
     def test_c172_derivative_signs_and_sizes(self):
         a = Aircraft.load(repo("aircraft/c172/c172.toml"))

@@ -484,8 +484,8 @@ def _solid_parts(aircraft, B, top, origin, report):
     its own on its hinge (shape/airframe.py, native/meshkit)."""
     from .shape import airframe as sh
     from .shape import meshkit
-    plan = []
-    m = meshkit.build(sh.airframe(aircraft, gear=plan))
+    plan, flaps = [], []
+    m = meshkit.build(sh.airframe(aircraft, gear=plan, flaps=flaps))
     report["airframe"] = _stats(m)
     report["airframe"]["bounds"] = [m["positions"].min(axis=0).tolist(), m["positions"].max(axis=0).tolist()]
     mats = _materials(aircraft, B, report["airframe"]["bounds"])
@@ -509,6 +509,17 @@ def _solid_parts(aircraft, B, top, origin, report):
                 if piece["leading"] else node_name(aircraft, surf, ctrl, piece))
         top.append(B.node(name, B.mesh(label, [(pv, pm["triangles"], mats[sh.CONTROL], pn, pm.get("uv"))]),
                           translation=pivot, rotation=q))
+        report["pieces"].append(dict(_stats(pm), label=label, bounds=[pm["positions"].min(axis=0).tolist(),
+                                                                      pm["positions"].max(axis=0).tolist()]))
+    # a vectoring two-dimensional nozzle's flaps, cut from the airframe: in the
+    # airframe's frame here, gathered on their hinge by _vectoring()
+    for name, scene in flaps:
+        pm = _painted(B, meshkit.build(scene))
+        label = "%s nozzle flaps" % name
+        pv, pn = _to_gltf(pm["positions"], origin), _to_gltf(pm["normals"], np.zeros(3))
+        top.append(B.node("%s vectoring" % name, B.mesh(label, [(pv, pm["triangles"][pm["materials"] == k],
+                                                                  mats.get(int(k), mats[sh.SKIN]), pn, pm.get("uv"))
+                                                             for k in np.unique(pm["materials"])])))
         report["pieces"].append(dict(_stats(pm), label=label, bounds=[pm["positions"].min(axis=0).tolist(),
                                                                       pm["positions"].max(axis=0).tolist()]))
     _gear_parts(aircraft, B, top, origin, report, plan, mats)
@@ -833,6 +844,89 @@ def _plumes(aircraft, B, top, origin):
     del R
 
 
+def _vectoring_parts(aircraft, B, top, origin):
+    """The parts that turn with a vectoring nozzle besides its petals and
+    its flame (shape.airframe.vectoring_parts: a two-dimensional nozzle's
+    flaps, a round one's gimbal seal), one mesh per engine, a node per
+    nozzle named "<engine> vectoring"."""
+    from .jsbsim import _engine_units
+    from .shape import airframe as sh
+    from .shape import meshkit
+    mats = {i: B.material(n, *PAINT[n]) for i, n in enumerate(sh.MATERIALS)}
+    M = np.array([[0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]])  # the design frame to glTF
+    meshes = {}
+    for e, name in _engine_units(aircraft):
+        if e.type != "turbofan":
+            continue
+        if id(e) not in meshes:
+            scene = sh.vectoring_parts(e)
+            if scene is None:
+                meshes[id(e)] = None
+                continue
+            d, _ = sh.nozzle_size(e)
+            cell = float(np.clip(d / 150.0, 0.002, 0.01))
+            m = meshkit.build({"cell": cell, "error": 0.1 * cell, "safety": 3.0, "sharp_deg": 45.0,
+                               "max_triangles": 3000, "root": scene})
+            parts = [(m["positions"], m["triangles"][m["materials"] == k], mats[int(k)], m["normals"])
+                     for k in np.unique(m["materials"])]
+            meshes[id(e)] = B.mesh(e.name + " vectoring", parts)
+        if meshes[id(e)] is None:
+            continue
+        exit_ = np.asarray(e.prop_position, float)
+        if e.mirror and name.endswith(" L"):
+            exit_ = exit_ * np.array([1.0, -1.0, 1.0])
+        top.append(B.node("%s vectoring" % name, meshes[id(e)], translation=_to_gltf(exit_, origin),
+                          rotation=_quat_from_matrix(M)))
+
+
+def _vectoring(aircraft, B, top, origin):
+    """Each vectoring nozzle's moving parts - its petals, its flame and
+    what _vectoring_parts made - gathered on a node that turns them as the
+    flight control computers turn the nozzle: they turn it with the
+    surfaces (fcs.vectoring), so the node is a channel mix,
+    fsim:elevator:<g>[+aileron:<g>][+rudder:<g>]@<-travel>,<travel>, its
+    origin at the hinge and its x axis the one a positive deflection turns
+    the jet about (down for a nozzle vectoring in pitch: the thrust pushes
+    the tail up, nose down, as a positive elevator does)."""
+    from . import fcs
+    from .jsbsim import _engine_units
+    from .shape import airframe as sh
+    units = _engine_units(aircraft)
+    by_name = {B.nodes[i]["name"]: i for i in top}
+    for v in fcs.vectoring(aircraft):
+        e, name = units[v["engine"]]
+        exit_ = np.asarray(v["nozzle"], float)
+        pivot = exit_ + sh.vectoring_hinge(e)
+        # the plane the nozzle turns in: up, canted outboard; the jet turns about
+        # the axis across it
+        c, s = v["cant"], v["side"]
+        axis = np.array([0.0, math.cos(c), s * math.sin(c)])
+        mix = [(ch, g) for ch, g in (("elevator", v["k_elevator"]), ("aileron", s * v["k_aileron"]),
+                                     ("rudder", -s * v["k_rudder"])) if g != 0.0]
+        if not mix:
+            continue
+        travel = math.degrees(v["travel"])
+        joint = "fsim:" + "+".join("%s:%.6g" % (ch, g) for ch, g in mix) + "@%.6g,%.6g" % (-travel, travel)
+        q = _quat_from_x(_gltf_direction(axis))
+        R, p = _quat_matrix(q), _to_gltf(pivot, origin)
+        names = ["fsim:afterburner:%d" % v["engine"], "%s vectoring" % name] + \
+                ["%s petal %d" % (name, k + 1) for k in range(sh.PETALS)]
+        kids = []
+        for n in names:
+            i = by_name.get(n)
+            if i is None:
+                continue
+            node = B.nodes[i]
+            t = np.asarray(node.get("translation", [0.0, 0.0, 0.0]), float)
+            Rn = _quat_matrix(np.asarray(node.get("rotation", [0.0, 0.0, 0.0, 1.0]), float))
+            node["translation"] = [float(x) for x in R.T @ (t - p)]
+            node["rotation"] = [float(x) for x in _quat_from_matrix(R.T @ Rn)]
+            top.remove(i)
+            kids.append(i)
+        if kids:
+            top.append(B.node(joint, translation=p, rotation=q, children=kids))
+
+
 def write_glb(aircraft, path, origin, report=None, solid=None):
     """The design as a .glb. solid: the airframe as one closed, filleted solid
     (the default when hangar's mesher is built) or each part a primitive
@@ -850,6 +944,8 @@ def write_glb(aircraft, path, origin, report=None, solid=None):
     if solid:
         _plumes(aircraft, B, top, origin)
         _nozzle_petals(aircraft, B, top, origin)
+        _vectoring_parts(aircraft, B, top, origin)
+        _vectoring(aircraft, B, top, origin)
         _propellers(aircraft, B, top, origin)
     # landing gear: wheels and struts (the solid model has its own)
     dark = B.material("tyre", (0.08, 0.08, 0.09), 0.0, 0.9)
