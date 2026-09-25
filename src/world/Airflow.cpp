@@ -48,12 +48,15 @@ float noise(vec3 x) {
                f.z);
 }
 // Water droplets in the light: white by day, glowing towards the sun, grey
-// and dark by night. (Linear colour: the window is sRGB.)
+// by night. (Linear colour: the window is sRGB.)
 vec3 vapourLight(vec3 towards) {
     float day = frame[0].y;
     float glow = pow(max(dot(normalize(towards), frame[1].xyz), 0.0), 6.0);
     return mix(vec3(0.035, 0.04, 0.06), frame[2].rgb, day) * (1.0 + 0.9 * glow * day);
 }
+// Unlit vapour is not seen: without the sun it thins out rather than
+// turning into dark smoke.
+float vapourSeen() { return 0.25 + 0.75 * frame[0].y; }
 )";
 
 const char* kRibbonVertex = R"(
@@ -111,7 +114,7 @@ void main() {
     float profile = pow(max(1.0 - across * across, 0.0), contrail ? 1.0 : 2.0);
     float n = noise(vec3(v_data.y * (contrail ? 1.1 : 7.0), across * 1.7, contrail ? 7.0 : 0.0));
     float n2 = noise(vec3(v_data.y * (contrail ? 4.3 : 23.0), across * 4.1, 3.0));
-    float a = v_data.w * profile * (0.45 + 0.8 * n * (0.6 + 0.8 * n2)) * (contrail ? 0.95 : 0.7);
+    float a = v_data.w * profile * (0.45 + 0.8 * n * (0.6 + 0.8 * n2)) * (contrail ? 0.95 : 0.7) * vapourSeen();
     outColor = vec4(vapourLight(v_view) * a, a);
 }
 )";
@@ -183,6 +186,7 @@ void main() {
         float body = smoothstep(0.0, 0.05, s) * pow(1.0 - s, 2.2);
         a = strength * body * (0.45 + 0.3 * (1.0 - facing)) * smoothstep(0.15, 0.75, n * (0.6 + 0.6 * n2)) * 0.85;
     }
+    a *= vapourSeen();
     outColor = vec4(vapourLight(-toEye) * a, a);
 }
 )";
@@ -233,7 +237,7 @@ layout(location = 1) in vec3 v_view;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-    float a = v_data.z * pow(max(1.0 - v_data.x * v_data.x, 0.0), 1.5) * smoothstep(0.0, 0.6, v_data.y) * 0.18;
+    float a = v_data.z * pow(max(1.0 - v_data.x * v_data.x, 0.0), 1.5) * smoothstep(0.0, 0.6, v_data.y) * 0.18 * vapourSeen();
     outColor = vec4(vapourLight(v_view) * a, a);
 }
 )";
@@ -270,7 +274,8 @@ double Airflow::wingVapour(double alpha, double nz, double altitudeM) {
 }
 
 double Airflow::vapourCone(double mach, double altitudeM) {
-    return smoothstep(0.93, 0.975, mach) * (1.0 - smoothstep(0.995, 1.035, mach)) * (1.0 - smoothstep(1500.0, 7000.0, altitudeM));
+    // it takes the humid air down low
+    return smoothstep(0.94, 0.98, mach) * (1.0 - smoothstep(0.995, 1.035, mach)) * (1.0 - smoothstep(800.0, 3500.0, altitudeM));
 }
 
 double Airflow::contrail(double altitudeM, double seaLevelK, double power) {

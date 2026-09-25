@@ -66,7 +66,8 @@ public:
     /// Vapour over the wing and off its leading-edge extensions: a harder
     /// pull than the tip vortices need.
     static double wingVapour(double alphaRad, double loadFactor, double altitudeM);
-    /// The vapour cone: Mach 0.93 .. 1.03, strongest just under 1, low down.
+    /// The vapour cone: Mach 0.94 .. 1.03, strongest just under 1, in the
+    /// humid air below about 3 km.
     static double vapourCone(double mach, double altitudeM);
     /// A contrail: the air at the aircraft's height colder than -40 C
     /// (the standard atmosphere from the sea-level temperature), and the

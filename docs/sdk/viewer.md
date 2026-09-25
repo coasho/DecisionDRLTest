@@ -148,7 +148,7 @@ added to `VehicleState` for them - after the effects DCS World shows:
 | Heat haze behind the nozzle | military power | `engineN2` |
 | Wing tip vortices, left behind in the air | a hard pull: angle of attack at the tip (roll adds to it on the rising wing) and load factor; less in the drier air high up | `alphaRad`, `loadFactor`, `angularRateBodyRadS` |
 | Vapour over the wings and off the leading-edge extensions, flickering | a harder pull still | `alphaRad`, `loadFactor` |
-| Vapour cone round the airframe | Mach 0.93 - 1.03, low down | `mach`, `altitudeMslM` |
+| Vapour cone round the airframe | Mach 0.94 - 1.03, below about 3 km | `mach`, `altitudeMslM` |
 | Contrails, starting a little behind the nozzles, spreading and fading over a minute | air colder than -40 C (the standard atmosphere from the world's sea-level temperature: about 8.5 km and up on a standard day) and the engine working | `altitudeMslM`, `engineN2` |
 | Air streaks flowing past the airframe | faster: longer and denser; a change of speed shows as a change in them | `airspeedTrueMs`, `alphaRad`, `betaRad` |
 

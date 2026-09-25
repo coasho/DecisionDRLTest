@@ -52,7 +52,7 @@ vec2 shape(int shell, float u, float r, float ab, float dry, float flicker) {
     if (shell == 3) // the nozzle's hot inside: a cone down towards the turbine
         return vec2(mix(-1.1 * d, -0.02 * d, u), r * mix(0.25, 0.97, u));
     // hot gas carried on behind it, spreading
-    return vec2(u * d * (4.0 + 5.0 * dry), r * (0.95 + 1.3 * u) * sqrt(max(1.0 - u * u * u, 0.0)));
+    return vec2(u * d * (3.0 + 3.0 * dry), r * (0.95 + 1.1 * u) * sqrt(max(1.0 - u * u * u, 0.0)));
 }
 
 void main() {
@@ -151,11 +151,11 @@ void main() {
         vec3 hot = mix(vec3(1.0, 0.3, 0.05), vec3(1.0, 0.7, 0.4), 1.0 - u);
         vec3 col = mix(vec3(0.45, 0.03, 0.004), hot, clamp(ab * 1.5, 0.0, 1.0));
         c = col * glow * (0.55 + 0.45 * (1.0 - u)) * (0.9 + 0.2 * n);
-    } else { // hot gas: a faint, fast-moving shimmer
-        float s = (0.8 * dry + 0.4 * ab) * facing * pow(1.0 - u, 1.5) * smoothstep(0.0, 0.1, u);
+    } else { // hot gas: a faint, fast-moving shimmer - pale, so it reads as heat, not smoke
+        float s = (0.8 * dry + 0.4 * ab) * facing * pow(1.0 - u, 2.0) * smoothstep(0.0, 0.1, u);
         float grain = noise(vec3(xd * 5.0 - t * 22.0, ring * 3.0 + seed * 5.0));
-        a = s * 0.065 * (0.3 + 1.4 * grain);
-        c = vec3(0.3, 0.29, 0.27) * a * (0.3 + 0.7 * day);
+        a = s * 0.03 * (0.2 + 1.6 * grain);
+        c = vec3(0.62, 0.6, 0.56) * a * (0.3 + 0.7 * day);
     }
     outColor = vec4(c, a);
 }
@@ -299,8 +299,9 @@ bool Exhaust::set(std::size_t slot, std::size_t k, double radius, const sim::Veh
     }
     Flame& f = flames_[i];
     if (f.lod && f.radius != r) {
-        // Round everything it can draw: the haze runs furthest, 9 diameters.
-        const double reach = 2.0 * r * 9.0;
+        // Round everything it can draw: the flame at full stretch, some 6
+        // diameters and its flicker.
+        const double reach = 2.0 * r * 7.0;
         f.lod->bound = vsg::dsphere(0.5 * reach, 0.0, 0.0, 0.5 * reach + 3.0 * r);
         f.radius = r;
     }
