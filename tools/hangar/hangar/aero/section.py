@@ -215,6 +215,13 @@ VORTEX_X = 0.10
 VORTEX_END = (math.radians(40.0), math.radians(55.0))
 
 
+def vortex_held(alpha):
+    """How much of a section's flow the vortex regime still holds at a
+    leading-edge angle alpha (rad): all of it to 40 deg, none past 55."""
+    lo, hi = VORTEX_END
+    return smoothstep((hi - np.abs(alpha)) / (hi - lo))
+
+
 def evaluate(p, alpha, delta=None, vortex=None, alpha_suction=None):
     """The polar of a SectionPolar or PolarSet `p` (attributes scalar or
     arrays broadcasting against alpha): cl, cd, cm and the circulation's
@@ -225,7 +232,10 @@ def evaluate(p, alpha, delta=None, vortex=None, alpha_suction=None):
     leading-edge suction (Polhamus: 1/cos of the leading-edge sweep, times
     the part realised, times what is left after vortex breakdown), and the
     circulation is scaled by the degradation once the edge has separated
-    (the burst vortex's separated flow). None: no vortex lift.
+    (the burst vortex's separated flow). None: no vortex lift. A third
+    element, if given, is how much of the flow the vortex regime holds (0 to
+    1) in place of vortex_held of this angle: a wing's model decides it
+    before it solves for the angle.
 
     alpha_suction: the angle the leading-edge suction sees, where it differs
     from alpha's (a wing's: its angle less the downwash of the trailing
@@ -300,7 +310,7 @@ def evaluate(p, alpha, delta=None, vortex=None, alpha_suction=None):
     # vortex); the leading edge holds the suction it can - at most what it
     # carries at the attached-flow limit (Carlson's attainable thrust, NASA
     # TP-1500) - and the rest is lost, part of it to the vortex as normal force
-    g, dg = (0.0, 1.0) if vortex is None else vortex
+    g, dg = (0.0, 1.0) if vortex is None else vortex[:2]
     an = a - a_l0
     lim = np.where(an >= 0.0, clmax, -clmin)
     held = p.suction_k * lim * lim / p.a0                 # the attainable suction
@@ -317,8 +327,8 @@ def evaluate(p, alpha, delta=None, vortex=None, alpha_suction=None):
     cl_v = N * ca + T * sa
     cd_v = N * sa - T * ca + p.cd0 + p.k_drag * (np.clip(circ, clmin, clmax) - p.cl_dmin) ** 2 + dcd
     cm_v = p.cm0 + dcm + n_v * (0.25 - VORTEX_X)
-    lo, hi = VORTEX_END
-    w_v = np.where(ca > 0.0, smoothstep((hi - np.abs(a)) / (hi - lo)), 0.0) * (1.0 - w_r)
+    keep = vortex_held(a) if vortex is None or len(vortex) < 3 else vortex[2]
+    w_v = np.where(ca > 0.0, keep, 0.0) * (1.0 - w_r)
     rest = 1.0 - w_v
     w_pr = np.clip(1.0 - w_r, 0.0, 1.0)
     cl_c = w_r * cl_r + w_pr * cl_p

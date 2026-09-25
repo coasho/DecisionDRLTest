@@ -13,14 +13,28 @@ Lifting surfaces, in two steps.
    stall, post-stall, reversed flow, flaps) at its geometric angle plus the
    induced angles, each surface's contribution scaled by that surface's lift
    relative to its linear lift. Those few scale factors - one per surface
-   half - are the only unknowns, and each equation is monotone, so the
-   solution is unique where decambering every strip is not (post-stall
-   sections make that ill-posed). In the linear range the result is exactly
-   the lattice's; through stall the induced field collapses with the lift that
-   made it - the tail sees less downwash as the wing stalls, a stalled half
-   wing stops washing down the other. Past 30 deg of flow angle the induced
-   angles fade out (by 60 deg): strip theory on the section polars, which
-   cover the whole circle.
+   half - are the only unknowns, where decambering every strip is ill-posed
+   past the stall. In the linear range the result is exactly the lattice's;
+   through stall the induced field collapses with the lift that made it - the
+   tail sees less downwash as the wing stalls, a stalled half wing stops
+   washing down the other. Past 30 deg of flow angle the induced angles fade
+   out (by 60 deg): strip theory on the section polars, which cover the whole
+   circle.
+
+   An aircraft whose surfaces have the vortex regime (below) flies two flows
+   past the stall, each solved on its own: the vortex flow, a lifting surface
+   in the lattice's induced flow in full, and the separated flow, strip
+   theory on flat plates. A strip's forces are the two flows' in proportion
+   to its share of the vortex flow: a wing strip's falls from 1 at 45 deg of
+   its angle of attack to 0 at 70, and the tails, canards and bodies, in the
+   flow the wing makes, share the wing's. The lattice's induced flow fades
+   out over the same angles of sideslip. Each flow decides before it solves
+   where its sections leave the vortex regime - the vortex flow at the angles
+   its lattice gives them. Decided at the angle being solved for, as a lone
+   section decides it, the hand-over made the two flows two solutions of one
+   problem - a section washed far down and still in the vortex regime, or a
+   plate hardly washed down at all - and the tables jumped between them
+   between 50 and 60 deg.
 
 Forces per strip: lift normal to the effective flow (so induced drag is the
 lift's tilt), section drag along it, section moment about the span axis.
@@ -53,7 +67,7 @@ import math
 import numpy as np
 
 from .bodies import BodyAero
-from .section import PolarSet, SectionPolar, linear_part, smoothstep
+from .section import PolarSet, SectionPolar, linear_part, smoothstep, vortex_held, wrap
 from .vlm import VLM, Lattice
 
 RHO0, NU0 = 1.225, 1.46e-5
@@ -67,6 +81,8 @@ FED_BURST_EARLIER = 4.0                 # deg of strake sweep: a strake-fed wing
 BURST_SIDESLIP = 0.5                    # of the sideslip that moves the breakdown (NASA's F-16 keeps its dihedral effect)
 CANARD_BURST_LATER = 8.0                # deg of angle of attack a close-coupled canard delays the wing's vortex burst
 BLUNT_VORTEX_SWEEP = (math.radians(45.0), math.radians(60.0))  # a blunt edge's vortex forms from, and fully by, these sweeps
+VORTEX_FLOW = (45.0, 70.0)              # deg of angle of attack (and sideslip) over which the vortex flow gives way
+CL_FLOOR = 0.1                          # the least lift coefficient a lift ratio is measured against
 
 
 def burst_alpha(sweep):
@@ -147,6 +163,8 @@ class AeroModel:
         # a strake is part of its wing's planform, not one of its own: its
         # vortex keeps the strips' suction (the F-16's strakes calibrate it)
         self.planform_suction = np.array([L.surfaces[i].kind != "strake" for i in L.surface_index])
+        # the wing's planform, strakes and all
+        self.wing_strip = np.array([s is a.wing or s.kind == "strake" for s in L.surfaces])[L.surface_index]
         self.panel_group = group[L.strip]
         self.bodies = BodyAero(a, self.speed, NU0, mach)
         self._body_pts = self.bodies.points()
@@ -302,8 +320,6 @@ class AeroModel:
         sweep_v = np.clip(G["sweep_le"], 0.0, math.radians(85.0))
         B = 1.0 - smoothstep((np.abs(a_geo) - burst_alpha(VX["sweep_bd"] - BURST_SIDESLIP * beta_k)) / BURST_WIDTH)
         vortex = (VX["r"] / np.cos(sweep_v) * (BURST_KEEP + (1.0 - BURST_KEEP) * B), 1.0 - BURST_LOSS * (1.0 - B))
-        # the induced flow of vortex-lifting strips holds to higher angles
-        w_ind = np.where(VX["on"], 1.0 - float(smoothstep((self._theta - 45.0) / 25.0)), w_ind)
         # 1. the lattice, decambered onto the sections' attached-flow lines (linear)
         g0 = V.circulation(v, w, L.lattice_deflections(own, a_geo))
         gs0 = L.S @ g0
@@ -324,41 +340,143 @@ class AeroModel:
         wk = np.einsum("snk,ng->sgk", V.W_strip, gg)               # (n_s, groups, 3)
         ind = np.einsum("sgk,sk->sg", wk, L.u) / un[:, None]           # upwash angle per group
         eps = a_lin - (a_geo + ind.sum(axis=1))                        # what Biot-Savart does not account for
-        # 2. nonlinear strips: scale each group's induced angles by its lift ratio
+        # 2. nonlinear strips: each group's induced angles scaled by its lift
+        # over its linear lift (_scales), with the surfaces that have the
+        # vortex regime flying two flows (the module's docstring). The wing's
+        # strips (its strakes' too) have their share of the vortex flow from
+        # their own angle of attack; the other surfaces, and the bodies, fly in
+        # the flow the wing makes, and share the wing's. Within the vortex flow
+        # a tail or a canard leaves the vortex regime at the angle its lattice
+        # gives it (the wing's downwash, its turn); within the separated one the
+        # wing is a flat plate, and a turned canard or tail keeps its own
+        # regime, as strip theory would. The lattice's induced flow fades out in
+        # sideslip, as the flow leaves the plane of symmetry its wake is laid in.
+        lin = {"a_geo": a_geo, "ind": ind, "eps": eps, "cl_lin": cl_lin, "gamma": gamma, "un": un, "delta": delta,
+               "f_sweep": f_sweep}
+        turn = np.where(P.flap_chord >= 0.999, delta, 0.0)
+        on = VX["on"]
+        coupling = np.full(L.n_strips, w_ind)
+        if on.any():
+            lo, hi = (math.radians(x) for x in VORTEX_FLOW)
+            sideslip = abs(math.asin(max(-1.0, min(1.0, v[1]))))
+            c_vx = 1.0 - float(smoothstep((sideslip - lo) / (hi - lo)))
+            share = 1.0 - smoothstep((np.abs(wrap(a_geo + turn)) - lo) / (hi - lo))
+            mean = float(np.average(share[self.wing_strip], weights=L.area[self.wing_strip]))
+            share = np.where(self.wing_strip, share, mean)
+            a_vx = a_geo + c_vx * (a_lin - a_geo)        # the lattice's angle at that coupling
+            plate = np.where(self.wing_strip, 0.0, vortex_held(wrap(a_geo + turn)))
+            flows = []
+            if share.max() > 0.0:                        # the vortex flow
+                flows.append((share, mean, np.where(on, c_vx, coupling), vortex + (vortex_held(wrap(a_vx + turn)),)))
+            if share.min() < 1.0:                        # the separated flow
+                flows.append((1.0 - share, 1.0 - mean, coupling, vortex + (plate,)))
+        else:
+            mean = 1.0
+            flows = [(np.ones(L.n_strips), 1.0, coupling, vortex)]
+        Fk = Mk = 0.0
+        body_ind = None
+        parts = []
+        for part, part_bodies, wc, vx in flows:
+            s, a_eff, res = self._scales(lin, wc, vx)
+            f_k, m_k, b_k, info = self._strips(lin, s, a_eff, wc, vx)
+            Fk, Mk = Fk + part[:, None] * f_k, Mk + part[:, None] * m_k
+            if b_k is not None:
+                body_ind = part_bodies * b_k if body_ind is None else body_ind + part_bodies * b_k
+            info["residual"] = res
+            parts.append((part_bodies, info))
+        info = dict(max(parts, key=lambda x: x[0])[1])    # the larger flow's strips
+        info.update({"alpha_geo": a_geo, "cl_lin": cl_lin, "burst": B, "beta_local": beta_k, "eps": eps, "a_lin": a_lin,
+                     "dec": dec, "a0_thin": a0_thin, "vortex_share": mean, "body_induced": body_ind, "strip_moment": Mk,
+                     "residual": max(p[1]["residual"] for p in parts), "flows": [(p, i["scale"]) for p, i in parts]})
+        return Fk.sum(axis=0), Mk.sum(axis=0), info
+
+    def _scales(self, lin, wc, vortex):
+        """The groups' scale factors s = F(s): each group's lift over its
+        linear lift, its induced angles scaled so, at coupling wc. Newton on
+        the few unknowns (a numerical Jacobian) with each group's step held
+        short; a group on the rising side of a stall's corner steps towards its
+        F instead. Where that wanders, Newton again from its best point, each
+        step cut back until it brings the residual down."""
+        L, P = self.lat, self.polars
+        a_geo, eps, ind, delta, cl_lin = lin["a_geo"], lin["eps"], lin["ind"], lin["delta"], lin["cl_lin"]
         weight = L.chord**2 * L.width * cl_lin
-        lin_norm = np.bincount(self.group, weight * cl_lin, self.n_groups)
-        # groups whose linear lift is a trace of the largest (a fin at small
-        # sideslip) wash nothing down worth solving for: they keep s = 1
-        live = lin_norm > 1e-3 * max(lin_norm.max(), 1e-30)
-        s = np.ones(self.n_groups)
+        # the lift ratio is measured against a lift coefficient of at least
+        # CL_FLOOR: a group with less linear lift than that (a fin at small
+        # sideslip, a wing half at no incidence in a sideslip) washes too little
+        # down to solve for, and keeps its linear induced flow (s -> 1)
+        floor = CL_FLOOR**2 * np.bincount(self.group, L.chord**2 * L.width, self.n_groups)
+        lin_norm = np.bincount(self.group, weight * cl_lin, self.n_groups) + floor
+        # a group's own induced flow scales with its lift where it washes its
+        # strips down; where it washes them up (a loading of mixed sign - a
+        # tail in a large sideslip - its one part's upwash on the other) it
+        # keeps its linear value: scaled, it would feed the lift it came from
+        own = self.group[:, None] == np.arange(self.n_groups)[None, :]
+        up = own * np.clip(np.sign(ind) * cl_lin[:, None] / CL_FLOOR, 0.0, 1.0)
+        fixed = (up * ind).sum(axis=1)
+        ind = ind * (1.0 - up)
 
         def lift_ratio(s):
-            a_eff = a_geo + w_ind * (eps + ind @ s)
+            a_eff = a_geo + wc * (eps + fixed + ind @ s)
             cl = P.evaluate(a_eff, delta, vortex)[3]
-            num = np.bincount(self.group, weight * cl, self.n_groups)
-            return np.where(live, num / np.where(live, lin_norm, 1.0), 1.0), a_eff
+            return (np.bincount(self.group, weight * cl, self.n_groups) + floor) / lin_norm, a_eff
 
-        for it in range(40):
-            f_s, _ = lift_ratio(s)
-            res = f_s - s
-            if np.max(np.abs(res)) < 1e-7:
-                break
-            # Newton on the few scale factors (numerical Jacobian of a monotone map)
+        def newton_step(s, res):
             h = 1e-6
-            Jf = np.empty((self.n_groups, self.n_groups))
+            A = np.empty((self.n_groups, self.n_groups))
             for g in range(self.n_groups):
                 sp = s.copy()
                 sp[g] += h
-                Jf[:, g] = (lift_ratio(sp)[0] - f_s) / h
+                A[:, g] = (lift_ratio(sp)[0] - (res + s)) / h
+            A -= np.eye(self.n_groups)
+            # a group on the rising side of its stall's corner feeds itself
+            # (its F climbs faster than its s): Newton would lead it away from
+            # its root, so it steps towards its F instead
+            A[np.diag_indices(self.n_groups)] = np.minimum(np.diag(A), -0.25)
             try:
-                step = np.linalg.solve(Jf - np.eye(self.n_groups), -res)
+                return np.linalg.solve(A, -res)
             except np.linalg.LinAlgError:
-                step = 0.5 * res
-            m = np.max(np.abs(step))
-            if m > 0.3:
-                step *= 0.3 / m
-            s = np.clip(s + step, -0.5, 2.0)
-        _, a_eff = lift_ratio(s)
+                return res
+
+        # |F| is bounded (the floor): the lift ratio of a group with a small
+        # linear lift of one sign and a real one of the other is legitimately
+        # large and negative
+        lo, hi, tol = -30.0, 30.0, 1e-7
+        s = np.ones(self.n_groups)
+        res = lift_ratio(s)[0] - s
+        best = (np.linalg.norm(res), s, res)
+        # Newton, each group's step held short where its residual is (the
+        # stall's corners make the map rough) ...
+        for it in range(40):
+            if np.max(np.abs(best[2])) < tol:
+                break
+            limit = np.maximum(0.3, 0.5 * np.abs(res))
+            s = np.clip(s + np.clip(newton_step(s, res), -limit, limit), lo, hi)
+            res = lift_ratio(s)[0] - s
+            if np.linalg.norm(res) < best[0]:
+                best = (np.linalg.norm(res), s, res)
+        # ... and where that wanders, from the best point with each step cut
+        # back until it brings the residual down
+        _, s, res = best
+        for it in range(20):
+            if np.max(np.abs(res)) < tol:
+                break
+            step = np.clip(newton_step(s, res), -0.3, 0.3)
+            for cut in range(8):
+                s_new = np.clip(s + step, lo, hi)
+                res_new = lift_ratio(s_new)[0] - s_new
+                if np.linalg.norm(res_new) < np.linalg.norm(res):
+                    break
+                step *= 0.5
+            else:
+                break
+            s, res = s_new, res_new
+        return s, lift_ratio(s)[1], float(np.max(np.abs(res)))
+
+    def _strips(self, lin, s, a_eff, wc, vortex):
+        """Each strip's force and moment at its solved angle, and the flow
+        the lifting surfaces induce at the bodies."""
+        L, P = self.lat, self.polars
+        a_geo, ind, delta, un, gamma = lin["a_geo"], lin["ind"], lin["delta"], lin["un"], lin["gamma"]
         # the leading edge's suction sees the angle less the surface's own
         # downwash as Polhamus's analogy takes it - CL / (pi A) of its planform:
         # the 3D suction CL (alpha - alpha_i), which a low-aspect-ratio wing's
@@ -368,7 +486,7 @@ class AeroModel:
         lift = np.bincount(L.surface_index, cl_circ * L.area * un**2, len(L.surfaces)) / self.surf_area
         own = self.group_surface[None, :] == L.surface_index[:, None]
         other = np.where(own, 0.0, ind * s[None, :]).sum(axis=1)
-        a_s = a_geo + w_ind * (other - lift[L.surface_index] / (math.pi * self.surf_ar[L.surface_index]))
+        a_s = a_geo + wc * (other - lift[L.surface_index] / (math.pi * self.surf_ar[L.surface_index]))
         cl, cd, cm, _ = P.evaluate(a_eff, delta, vortex, np.where(self.planform_suction, a_s, a_eff))
         # forces: lift normal to the effective flow, drag along it
         fe = np.cos(a_eff)[:, None] * L.c + np.sin(a_eff)[:, None] * L.u
@@ -380,19 +498,16 @@ class AeroModel:
         # K_p sin(alpha) cos(alpha) of Polhamus; 1 at small angles)
         a_i = a_geo - a_eff
         k_loc = np.clip(np.cos(a_i) - np.tan(np.clip(a_eff, -1.4, 1.4)) * np.sin(a_i), 0.5, 1.2)
-        qa = 0.5 * un**2 * L.area * f_sweep * k_loc
+        qa = 0.5 * un**2 * L.area * lin["f_sweep"] * k_loc
         Fk = (qa * cl)[:, None] * lift_dir + (qa * cd)[:, None] * fe
         Mk = np.cross(L.c4 - self.ref, Fk) + (qa * L.chord * cm)[:, None] * L.e
         body_ind = None
         if self.vlm.body_W is not None:
-            scaled = gamma * (w_ind[L.strip] * s[self.panel_group])
+            scaled = gamma * (wc[L.strip] * s[self.panel_group])
             body_ind = np.einsum("mnk,n->mk", self.vlm.body_W, scaled)
-        info = {"alpha_eff": a_eff, "alpha_geo": a_geo, "cl": cl, "cl_lin": cl_lin, "scale": dict(zip(self.group_names, s)),
-                "burst": B, "beta_local": beta_k,
-                "residual": float(np.max(np.abs(res))), "body_induced": body_ind, "strip_moment": Mk,
-                "eps": eps, "induced": ind * s[None, :], "w_ind": w_ind * np.ones(L.n_strips),
-                "a_lin": a_lin, "dec": dec, "a0_thin": a0_thin}
-        return Fk.sum(axis=0), Mk.sum(axis=0), info
+        info = {"alpha_eff": a_eff, "cl": cl, "scale": dict(zip(self.group_names, s)), "induced": ind * s[None, :],
+                "w_ind": wc}
+        return Fk, Mk, body_ind, info
 
 
 def strip_geometry(aircraft, L):

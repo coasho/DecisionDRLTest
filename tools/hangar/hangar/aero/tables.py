@@ -27,7 +27,10 @@ CHANNEL_COEFFS = {
 
 
 def alpha_grid(fine=1.0):
-    coarse_neg = [-180, -165, -150, -135, -120, -105, -90, -75, -60, -50, -45, -40, -35, -30, -27, -24, -22]
+    # past the stall the two sides are spaced alike: an aircraft flies upside
+    # down through the same post-stall range the right way up
+    coarse_neg = [-180, -165, -150, -135, -120, -105, -90, -80, -70, -60, -55, -50, -46, -42, -38, -35, -32, -30, -27,
+                  -24, -22]
     coarse_pos = [32, 35, 38, 42, 46, 50, 55, 60, 70, 80, 90, 105, 120, 135, 150, 165, 180]
     mid = list(np.arange(-20.0, 30.0 + 1e-9, fine))
     return np.array(coarse_neg + mid + coarse_pos, float)

@@ -156,6 +156,28 @@ class Fighters(unittest.TestCase):
             polhamus = 2.45 * math.sin(a) * math.cos(a) ** 2 + 3.25 * math.sin(a) ** 2 * math.cos(a)
             self.assertAlmostEqual(m.evaluate(a)["CL"] / polhamus, 1.0, delta=0.12, msg="alpha %g" % deg)
 
+    def test_post_stall_solution_is_unique(self):
+        # past the stall a vortex-lifting wing's induced flow had two
+        # solutions - a section washed far down and still in the vortex
+        # regime, or a plate hardly washed down at all - and the Rafale's CD
+        # jumped by 0.5 between 55 and 60 deg in sideslip, each half on its
+        # own; now every solve converges, sideslip either way mirrors, and the
+        # coefficients change smoothly
+        m = AeroModel(Aircraft.load(repo("aircraft/rafale/rafale.toml")))
+        alphas = np.arange(40.0, 74.0, 2.0)
+        for beta in (0.0, 30.0):
+            c = {}
+            for sign in (1.0, -1.0):
+                rows = []
+                for deg in alphas:
+                    e = m.evaluate(math.radians(deg), math.radians(sign * beta), detail=True)
+                    self.assertLess(e["detail"]["residual"], 1e-6, msg="alpha %g beta %g" % (deg, sign * beta))
+                    rows.append([e[k] for k in ("CD", "CL", "Cm", "CY", "Cl", "Cn")])
+                c[sign] = np.array(rows)
+            self.assertLess(np.max(np.abs(c[1.0][:, :3] - c[-1.0][:, :3])), 2e-3)
+            self.assertLess(np.max(np.abs(c[1.0][:, 3:] + c[-1.0][:, 3:])), 2e-3)
+            self.assertLess(np.max(np.abs(np.diff(c[1.0], 2, axis=0))), 0.1)   # per 2 deg: 0.03; 0.69 before
+
     def test_each_control_stops_at_its_own_limits(self):
         # a canard delta: elevons +-25 deg, the canard (gain -1) 50 deg leading
         # edge down; the pitch channel runs as far as the canard follows it

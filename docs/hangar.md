@@ -267,6 +267,17 @@ For fighters:
   canard delays the wing's burst. The
   circulation's force uses the local velocity, so the potential lift goes as
   Polhamus' sin α cos² α.
+- **Past the stall.** A vortex-lifting aircraft flies two flows there, each
+  solved on its own: the vortex flow, a lifting surface in the lattice's
+  induced flow, and the separated flow, flat plates in strip theory. The
+  wing moves from the one to the other between 45° and 70° of its angle of
+  attack, and its tails and canards, in the flow it makes, with it. Each
+  flow decides before it solves where a section leaves the vortex regime,
+  so each has one solution. Decided while solving, as a lone section decides
+  it, a section washed far down and still in the vortex regime and a plate
+  hardly washed down at all were both solutions, and the tables jumped
+  between them (the Rafale's drag by 0.5 between 55° and 60° in a 30°
+  sideslip).
 - **Controls.** Each control turns as a whole and stops at its own limits,
   so a canard can travel further than the elevons on its channel. An
   all-moving surface turns its whole section: the lattice gets the deflection
@@ -507,10 +518,14 @@ estimates):
   their main wheels put them: a fifth or less of the weight on the nose
   wheel. Full nose-down control still reaches a few degrees past each
   angle-of-attack limit there (the build stage checks it).
-- **Post-stall tables in sideslip.** Between about 50° and 60° of angle of
-  attack with 15-50° of sideslip, the strips' coupling can settle on either
-  of two solutions, and the tables jump there (the aero stage's smoothness
-  warning).
+- **Post-stall tables.** From 45° to 70° of angle of attack a fighter's
+  tables blend two estimates, the vortex flow and the separated flow (see
+  Methods): smoothly, and alike in sideslip either way. The vortex flow
+  carries more normal force than the flat plates, so for most of the
+  fighters it falls by a sixth to a third from a peak near 46° to a low near
+  60-70°, and drag dips by up to 0.3 after a hump near 50° before it rises
+  towards 90°. A fin in a sideslip of about 25° can still stall two ways;
+  the tables average the two sideslips there.
 - **Leading-edge devices.** The flight controls move them on the F-16's
   published schedule (NASA TP-1538), standing in for each type's own; the
   simulation reports where they are (`leadingEdgeFlapRad`) and the 3D model
