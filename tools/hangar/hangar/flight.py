@@ -169,18 +169,27 @@ class PID:
         return float(np.clip(self.kp * err + self.ki * self.i + self.kd * d, self.lo, self.hi))
 
 
+LEVELLER_Q_PA = 30000.0  # above this dynamic pressure the wing leveller's gains fall as 1/q
+
+
 def wing_leveller(dt):
-    """Aileron on bank (with roll-rate damping) and rudder on sideslip."""
+    """Aileron on bank (with roll-rate damping) and rudder on sideslip. Its
+    gains fall as 1/q above LEVELLER_Q_PA: at a light jet's sea-level top
+    speed (the Su-25's, 55 kPa) a fixed sideslip gain, against the rudder's
+    lag, made the yaw cycle and grow over minutes to 60 deg of sideslip."""
     bank = PID(0.04, 0.005, 0.0)
     slip = PID(0.08, 0.0, 0.0)
 
     def act(s, target_bank_deg=0.0):
         phi = math.degrees(s.euler_rad[0])
         p = math.degrees(s.angular_rate_body_rad_s[0])
-        a = bank(target_bank_deg - phi, dt) - 0.015 * p
+        h = min(max(s.altitude_msl_m, 0.0), 11000.0)
+        q = 0.5 * 1.225 * (1.0 - 2.25577e-5 * h) ** 4.2559 * s.airspeed_true_ms ** 2
+        k = min(1.0, LEVELLER_Q_PA / max(q, 1.0))
+        a = k * (bank(target_bank_deg - phi, dt) - 0.015 * p)
         # wind from the right (beta > 0): yaw right, which in JSBSim's convention
         # (positive rudder = trailing edge left = nose left) is negative rudder
-        r = -slip(math.degrees(s.beta_rad), dt)
+        r = -k * slip(math.degrees(s.beta_rad), dt)
         return float(np.clip(a, -1, 1)), float(np.clip(r, -1, 1))
     return act
 
@@ -366,13 +375,30 @@ def max_level_speed_flown(f, altitude_m, start_ms, seconds=180.0):
     t, tas = h["t"][::6], h["tas"][::6]
     if len(t) < 40 or abs(h["alt"][-1] - altitude_m) > 30.0:
         return float("nan")
+    return settled_speed(t, tas)
+
+
+def settled_speed(t, tas):
+    """The speed a full-throttle run settles at, from its time history: the
+    last speeds, once settled; else the acceleration over the last minute
+    against the speed, extrapolated to zero."""
     k = t > t[-1] - 60.0
     dv = _smooth_rate(t, tas, window=10.0)
     ok = k & np.isfinite(dv)
-    if abs(float(np.mean(dv[ok]))) < 0.01:
-        return float(np.mean(tas[t > t[-1] - 10.0]))
+    last = float(np.mean(tas[t > t[-1] - 10.0]))
+    # settled - or so nearly that a line through the acceleration over a
+    # speed range this narrow extrapolates anywhere (the Su-25's 318 m/s,
+    # still creeping up, read 169)
+    if abs(float(np.mean(dv[ok]))) < 0.01 or float(np.ptp(tas[ok])) < 0.01 * last:
+        return last
     slope, icpt = np.polyfit(tas[ok], dv[ok], 1)
-    return float(-icpt / slope) if slope < 0 else float(tas[-1])
+    est = float(-icpt / slope) if slope < 0 else float(tas[-1])
+    # still speeding up, the top speed is above where it got to; slowing,
+    # below - and not far outside the speeds of the last minute: a speed
+    # that hunts (a steep drag rise) has no line to extrapolate
+    est = max(est, last) if float(np.mean(dv[ok])) > 0.0 else min(est, last)
+    lo, hi = float(np.min(tas[ok])), float(np.max(tas[ok]))
+    return est if 0.95 * lo <= est <= 1.2 * hi else float(np.mean(tas[ok]))
 
 
 def max_level_mach_flown(f, altitude_m, start_mach, seconds=300.0):

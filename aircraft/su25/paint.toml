@@ -1,0 +1,12 @@
+# The Su-25's camouflage: sand and green-brown patches above, light blue
+# below
+[paint]
+scheme = "camo"
+colours = ["#a89a6e", "#5e6446"]
+underside = "#9fb4c4"
+boundary = -0.55
+scale = 2.4
+canopy = "clear"
+panel_lines = 0.1
+wear = 0.08
+gloss = 0.2

@@ -653,6 +653,7 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 | RC-135W | `rc135w` | 0.88 at 30,000 ft (0.86) | 6,400 | 38,700 (50,000 certified) |
 | E-3G | `e3g` | 0.78 at 29,000 ft (0.78) | 3,700 | 34,200 (above 29,000) |
 | A-10C | `a10c` | 0.57 at sea level (0.576) | 4,700 | 29,800 (45,000) |
+| Su-25 | `su25` | 0.82 at sea level (0.796) | 17,000 | 52,400 (23,000 unpressurised) |
 | C-17A | `c17a` | 0.87 at 28,000 ft (0.875) | 6,200 | 36,800 (45,000 certified) |
 | KC-46A | `kc46a` | 0.86 at 26,000 ft (0.86) | 5,200 | 29,500 (40,100 certified) |
 | EA-18G | `ea18g` | 1.80 at 40,000 ft (1.8) | 44,500 | 57,200 (50,000+) |
@@ -688,6 +689,11 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   TF34s keep too little thrust up high for the published 45,000 ft: it
   climbs to 29,800 ft. Its thick, cambered sections' maximum lift is held
   to 1.8. Its yaw damper takes the dutch roll from 0.10 to 0.32.
+- The Su-25 flies at 13.1 t, full of fuel. It stands 5 deg nose-high on its
+  gear (its height is measured so), its main wheels fold into open wells in
+  the nacelles. Its estimated zero-lift drag leaves out its ten pylons:
+  calibration holds its sea-level top speed with the most wave drag it
+  allows, and it climbs 17,000 ft/min against the published 11,400.
 - The C-17A flies through its own fly-by-wire, with a transport's limits
   (+2.5/-1 g, 14 deg, 35 deg/s), at 236 t: full of fuel, no cargo. Its
   supercritical wing's drag diverges late: calibration puts Korn's factor

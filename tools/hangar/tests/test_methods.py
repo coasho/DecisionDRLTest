@@ -991,6 +991,42 @@ class NoseWheels(unittest.TestCase):
         self.assertAlmostEqual(top_speed_altitude({}), 36000 * 0.3048)
 
 
+class FlightTests(unittest.TestCase):
+    def test_a_top_speed_run_settles_or_extrapolates_near_what_it_flew(self):
+        # settled, or creeping up over a range a line through the acceleration
+        # cannot extrapolate from: the last speeds; still accelerating: the
+        # speed where the acceleration would end, above the last; hunting: the
+        # mean, not a line's wild extrapolation
+        from hangar.flight import settled_speed
+        t = np.arange(0.0, 300.0, 0.5)
+        flat = 300.0 + 0.0 * t
+        self.assertAlmostEqual(settled_speed(t, flat), 300.0)
+        creep = 300.0 + 0.02 * t               # 1.2 m/s over the last minute: under 1 %
+        self.assertAlmostEqual(settled_speed(t, creep), float(np.mean(creep[t > t[-1] - 10.0])), places=6)
+        rising = 330.0 - 100.0 * np.exp(-t / 150.0)   # dv = (330 - v) / 150: settles at 330
+        self.assertAlmostEqual(settled_speed(t, rising), 330.0, delta=1.0)
+        self.assertGreater(settled_speed(t, rising), rising[-1])
+        hunting = 300.0 + 8.0 * np.sin(2.0 * np.pi * t / 17.0) + 0.02 * (t - 150.0)
+        got = settled_speed(t, hunting)
+        k = t > t[-1] - 60.0
+        self.assertTrue(0.95 * hunting[k].min() <= got <= 1.2 * hunting[k].max())
+
+    def test_the_wing_levellers_gains_fall_at_high_dynamic_pressure(self):
+        # at 55 kPa (a light jet at sea level, Mach 0.9) the leveller's
+        # sideslip and bank gains are cut as 1/q above 30 kPa; below, as before
+        from types import SimpleNamespace
+        from hangar import flight as F
+        def state(tas):
+            return SimpleNamespace(euler_rad=[math.radians(5.0), 0.0, 0.0], angular_rate_body_rad_s=[0.0, 0.0, 0.0],
+                                   beta_rad=math.radians(2.0), altitude_msl_m=100.0, airspeed_true_ms=tas)
+        slow = F.wing_leveller(0.01)(state(100.0))
+        fast = F.wing_leveller(0.01)(state(300.0))
+        q = 0.5 * 1.225 * (1.0 - 2.25577e-5 * 100.0) ** 4.2559 * 300.0 ** 2
+        self.assertAlmostEqual(slow[1], -0.08 * 2.0)
+        for a, b in zip(fast, slow):
+            self.assertAlmostEqual(a, b * F.LEVELLER_Q_PA / q, places=9)
+
+
 class BicycleGear(unittest.TestCase):
     @staticmethod
     def u2(tail_z=-1.1):

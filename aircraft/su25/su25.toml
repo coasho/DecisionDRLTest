@@ -1,0 +1,285 @@
+# Sukhoi Su-25 "Frogfoot" (late production, R-195 engines), built by hangar
+# from public data: the Soviet close-air-support aircraft - a shoulder wing of
+# moderate sweep with the split airbrakes in its tip pods, two turbojets in
+# nacelles along the fuselage at the wing roots, an armoured cockpit.
+#
+# Frame: metres, x aft from the nose's tip (the pitot booms reach 1.14 m
+# ahead of it), y right, z up from the wing root's chord plane. Sources:
+# Wikipedia (Su-25/Su-25K late production: span 14.36 m, height 4.80 m,
+# empty 9,800 kg, normal take-off 14,600 kg, R-195 of 44.18 kN, 975 km/h at
+# sea level, +6.5 g); Russian Wikipedia (length 15.36 m with the pitots, wing
+# area 30.1 m2, 20 deg leading edge, -2.5 deg anhedral, 3,000 kg of fuel,
+# slats 12 deg and flaps 40 deg for landing, 3.57 m wheelbase and 2.51 m
+# track, the main legs folding forward); Russian Wikipedia's R-195 (860 kg,
+# 0.89 kg/kgf h). The shape and the gear are measured off Kaboldy's three-view
+# (Wikimedia Commons, CC BY-SA 3.0), scaled by its span and length (59.5
+# px/m: 15.29 m with the pitots, 14.36 m across the tip pods). It stands on
+# its gear 5 deg nose-up: the published height, 4.80 m, is its fin's top over
+# the ground so; level, the fin stands 5.2 m over the main wheels' ground
+# line. Numbers marked "estimate" are not published.
+
+[aircraft]
+name = "su25"
+description = "Sukhoi Su-25 Frogfoot, late production (hangar build)"
+category = "attack"
+
+[analysis]
+speed = 180.0                # m/s: the Reynolds numbers (a low-level cruise)
+max_mach = 0.9               # subsonic: Mach factors to 0.9 (its limit is Mach 0.82)
+
+# The wing: 29.9 m2 (published 30.1) to the tip pods' centre lines, a
+# trapezoid with a straight trailing edge, its leading edge swept 21 deg (the
+# three-view; published 19 deg 50 min), -2.5 deg anhedral (published). Root
+# 3.49 m, tip 0.84 m. Section, incidence and washout: estimates.
+[[surface]]
+name = "wing"
+kind = "wing"
+sections = [
+  { le = [5.400, 0.000, 0.000], chord = 3.490, twist = 0.5, airfoil = "naca64a212" },
+  { le = [8.052, 6.910, -0.302], chord = 0.838, twist = -1.5, airfoil = "naca64a210" },
+]
+controls = [
+  # double-slotted flaps in two sections, 40 deg for landing (published)
+  { name = "flap", channel = "flap", kind = "fowler", span = [0.19, 0.61], chord_fraction = 0.30, limits = [0, 40] },
+  # the ailerons outboard, +/- 23 deg (Russian Wikipedia)
+  { name = "aileron", channel = "aileron", span = [0.62, 0.94], chord_fraction = 0.28, limits = [-23, 23] },
+]
+# the five-section slats, out 12 deg for take-off and landing (published),
+# here on the angle of attack from 5 deg (estimate); moved in the 3D model
+leading = [
+  { name = "slat", span = [0.20, 0.94], chord_fraction = 0.14, limits = [0, 12], schedule = [1.2, 0.0, -6.0] },
+]
+
+# The tailplane on the tail cone below the fin: 4.54 m across, 22.8 deg
+# leading edge (three-view); dihedral, section and travel: estimates. The
+# surface runs on inside the fuselage to the centre line.
+[[surface]]
+name = "htail"
+kind = "htail"
+airfoil = "naca0010"
+sections = [
+  { le = [11.100, 0.000, 0.300], chord = 1.980 },
+  { le = [12.050, 2.270, 0.419], chord = 0.590 },
+]
+controls = [
+  { name = "elevator", channel = "elevator", span = [0.15, 1.0], chord_fraction = 0.35, limits = [-25, 15] },
+]
+
+# The fin: 2.40 m tall over the spine, 37.6 deg leading edge, 2.77 m root and
+# 0.50 m tip chord (three-view); its two-section rudder as one. Section and
+# travel: estimates.
+[[surface]]
+name = "fin"
+kind = "fin"
+airfoil = "naca0010"
+sections = [
+  { le = [10.120, 0.000, 0.300], chord = 2.770 },
+  { le = [11.970, 0.000, 2.700], chord = 0.500 },
+]
+controls = [
+  { name = "rudder", channel = "rudder", span = [0.08, 0.95], chord_fraction = 0.30, limits = [-25, 25] },
+]
+
+# Fuselage: the long pointed nose with the laser rangefinder's window, the
+# armoured cockpit, the deep centre body between the engine nacelles, and the
+# tail cone carrying the tailplane and fin (three-view).
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 0.00, w = 0.00, top = -0.940, bottom = -0.940 },
+  { x = 0.40, w = 0.40, top = -0.810, bottom = -1.150, n = 2.0 },
+  { x = 0.80, w = 0.58, top = -0.670, bottom = -1.230, n = 2.1 },
+  { x = 1.80, w = 0.80, top = -0.340, bottom = -1.430, n = 2.3 },
+  { x = 2.80, w = 0.84, top = -0.150, bottom = -1.450, n = 2.5 },
+  { x = 4.00, w = 0.86, top = 0.070, bottom = -1.450, n = 2.6 },
+  { x = 4.60, w = 0.90, top = 0.250, bottom = -1.450, n = 2.8 },
+  { x = 5.50, w = 0.92, top = 0.300, bottom = -1.450, n = 2.8 },
+  { x = 8.50, w = 0.90, top = 0.300, bottom = -1.420, n = 2.8 },
+  { x = 10.30, w = 0.80, top = 0.280, bottom = -1.080, n = 2.6 },
+  { x = 11.50, w = 0.62, top = 0.270, bottom = -0.660, n = 2.4 },
+  { x = 12.80, w = 0.50, top = 0.250, bottom = -0.400, n = 2.2 },
+  { x = 13.70, w = 0.36, top = 0.180, bottom = -0.170, n = 2.0 },
+  { x = 14.15, w = 0.00, top = 0.010, bottom = 0.010 },
+]
+
+# The fin's dorsal fillet along the spine
+[[body]]
+name = "dorsal fillet"
+kind = "pod"
+aero = false                  # the fin's area counts it
+stations = [
+  { x = 8.300, w = 0.100, top = 0.290, bottom = 0.190, n = 2.0 },
+  { x = 9.200, w = 0.240, top = 0.380, bottom = 0.150, n = 2.2 },
+  { x = 10.300, w = 0.260, top = 0.560, bottom = 0.150, n = 2.2 },
+  { x = 11.000, w = 0.220, top = 0.760, bottom = 0.150, n = 2.2 },
+]
+
+# The two pitot booms either side of the nose (6 cm across: a little thick,
+# for the mesher)
+[[body]]
+name = "pitot"
+kind = "pod"
+mirror = true
+aero = false
+stations = [
+  { x = -1.140, y = 0.270, w = 0.000, top = -0.850, bottom = -0.850 },
+  { x = -1.090, y = 0.270, w = 0.060, top = -0.820, bottom = -0.880, n = 2.0 },
+  { x = 0.500, y = 0.270, w = 0.060, top = -0.820, bottom = -0.880, n = 2.0 },
+  { x = 0.900, y = 0.240, w = 0.080, top = -0.810, bottom = -0.890, n = 2.0 },
+]
+
+# The canopy: a flat armoured windscreen and the hood, heavily framed, level
+# with the spine behind it (three-view)
+[[body]]
+name = "canopy"
+kind = "pod"
+frames = [2.80, 3.85]
+frame_width = 0.08
+stations = [
+  { x = 1.800, w = 0.00, top = -0.300, bottom = -0.340 },
+  { x = 2.100, w = 0.56, top = -0.060, bottom = -0.340, n = 2.0 },
+  { x = 2.800, w = 0.72, top = 0.220, bottom = -0.300, n = 2.0 },
+  { x = 3.400, w = 0.74, top = 0.280, bottom = -0.250, n = 2.0 },
+  { x = 3.900, w = 0.66, top = 0.250, bottom = -0.200, n = 2.0 },
+  { x = 4.200, w = 0.40, top = 0.140, bottom = -0.100, n = 2.0 },
+  { x = 4.350, w = 0.00, top = 0.060, bottom = 0.000 },
+]
+
+# The engine nacelles along the fuselage, under the wing roots: fixed oval
+# intakes behind the cockpit (0.84 m wide and tall, 0.81 m out and 0.70 m
+# below the wing's plane), down to the belly behind them, the nozzles below
+# the tail cone (three-view)
+[[intake]]
+name = "nacelle"
+mirror = true
+lip = 0.040
+duct = 1.500
+duct_rise = -0.050
+duct_taper = 0.85
+stations = [
+  { x = 4.520, y = 0.810, w = 0.840, top = -0.280, bottom = -1.120, n = 2.3 },
+  { x = 5.500, y = 0.810, w = 0.920, top = -0.200, bottom = -1.300, n = 2.5 },
+  { x = 7.000, y = 0.810, w = 0.950, top = -0.150, bottom = -1.420, n = 2.6 },
+  { x = 9.000, y = 0.810, w = 0.920, top = -0.200, bottom = -1.400, n = 2.6 },
+  { x = 10.360, y = 0.810, w = 0.720, top = -0.420, bottom = -1.140, n = 2.2 },
+]
+
+# The tip pods, the split airbrakes in their tails (three-view)
+[[body]]
+name = "tip pod"
+kind = "pod"
+mirror = true
+stations = [
+  { x = 7.350, y = 6.910, w = 0.000, top = -0.310, bottom = -0.310 },
+  { x = 7.700, y = 6.910, w = 0.400, top = -0.120, bottom = -0.480, n = 2.0 },
+  { x = 8.200, y = 6.910, w = 0.580, top = -0.040, bottom = -0.560, n = 2.2 },
+  { x = 9.000, y = 6.910, w = 0.580, top = -0.040, bottom = -0.560, n = 2.2 },
+  { x = 9.400, y = 6.910, w = 0.440, top = -0.120, bottom = -0.480, n = 2.0 },
+  { x = 9.530, y = 6.910, w = 0.200, top = -0.220, bottom = -0.380, n = 2.0 },
+]
+
+[[engine]]
+name = "R-195"
+type = "turbofan"             # a turbojet: no bypass
+mirror = true
+thrust_dry_kn = 44.18         # 4,500 kgf (Wikipedia)
+bypass_ratio = 0.0
+tsfc_dry = 0.89               # kg/(kgf h) (Russian Wikipedia)
+throttle_ratio = 1.07         # estimate
+design_mach = 0.8
+position = [8.900, 0.810, -0.780]
+mass = 860                    # dry (Russian Wikipedia)
+inlet_x = 4.52
+[engine.nozzle]
+position = [10.360, 0.810, -0.780]
+diameter = 0.620              # estimate (the engine is 0.805 m across)
+length = 0.300
+
+# The gear where the three-view has its wheels: the main axles 7.25 m and the
+# nose axle 3.76 m behind the nose's tip (published wheelbase 3.57 m), the
+# published 2.51 m track; the nose wheel stands lower, so the aircraft sits
+# 5 deg nose-up. The nose wheel is set right of the centre line, clear of the
+# gun (Russian sources; 0.15 m: estimate). Tyres 840x360 and 660x200. The
+# main legs fold forward into the nacelles, the wheels turning to lie flat
+# (published); the nose leg forward (estimate).
+[[gear]]
+name = "Nose Gear"
+position = [3.760, 0.150, -2.720]
+steerable = true
+max_steer = 60
+wheel_diameter = 0.660
+wheel_width = 0.200
+retractable = true
+retract = "forward"
+static_deflection = 0.10
+attach = [3.950, 0.150, -1.100]
+
+[[gear]]
+name = "Main Gear"
+mirror = true
+position = [7.250, 1.255, -2.420]
+wheel_diameter = 0.840
+wheel_width = 0.360
+retractable = true
+retract = "forward"
+wheel_turn = "flat"
+doors = false                 # open wells: a wheel turning flat in the narrow nacelle passes
+                              # the hinges of hangar's doors
+static_deflection = 0.12
+attach = [6.850, 0.950, -0.800]
+
+# Direct controls: the Su-25 flies through hydraulic boosters, the elevator
+# and rudder with a mechanical backup. Its limit load factor, 6.5 g
+# (published), sizes the structure (Raymer's weights).
+[flight_control]
+type = "direct"
+n_max = 6.5
+
+[mass]
+empty = 9800                  # Wikipedia (late production)
+empty_cg = [7.200, 0.0, -0.450]  # estimate: placed from the neutral point (see the checks)
+[[mass.item]]
+name = "titanium cockpit"      # welded 10-24 mm titanium armour (estimate of its mass)
+mass = 595
+position = [3.100, 0.0, -0.600]
+[[mass.payload]]
+name = "pilot"
+mass = 100
+position = [3.100, 0.0, -0.500]
+[[mass.payload]]
+name = "gun ammunition"       # 250 rounds of 30 mm (published), 0.85 kg each (estimate)
+mass = 210
+position = [3.600, -0.300, -1.100]
+[[mass.tank]]
+name = "fuselage 1"            # 3,000 kg internal (Russian Wikipedia): the fuselage's
+position = [4.900, 0.0, -0.500] # three tanks 2,386 l, the wings' two 1,274 l
+capacity = 650
+[[mass.tank]]
+name = "fuselage 2"
+position = [6.300, 0.0, -0.450]
+capacity = 700
+[[mass.tank]]
+name = "fuselage 3"
+position = [7.800, 0.0, -0.450]
+capacity = 605
+[[mass.tank]]
+name = "left wing"
+position = [7.200, -2.200, -0.050]
+capacity = 522
+[[mass.tank]]
+name = "right wing"
+position = [7.200, 2.200, -0.050]
+capacity = 522
+
+[dimensions]                  # published (Wikipedia; Russian Wikipedia): overall
+length = 15.36
+span = 14.36
+height = 4.80
+
+[targets]
+# Su-25, clean (Wikipedia): 975 km/h at sea level. Calibrate fits the extra
+# drag area to it (flown at 100 m)
+max_mach = 0.796              # 975 km/h, 526 kt
+max_mach_altitude_ft = 0
+max_speed_ktas = 526

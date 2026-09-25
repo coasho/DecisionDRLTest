@@ -1,0 +1,7 @@
+# Written by hangar calibrate (2026-09-25 14:34) to meet the [targets] of su25.toml:
+# corrections for what the physics estimate does not see. Delete this file to
+# go back to the pure estimate.
+[calibration]
+wave_drag_efficiency = 6.0000   # Raymer's E_WD: the wave drag over Sears-Haack's
+korn_kappa = 0.8700   # Korn's airfoil technology factor: where the wing's drag diverges
+# fitted: maximum Mach 0.818 at 328 ft (target 0.796)
