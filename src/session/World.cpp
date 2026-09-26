@@ -4,6 +4,7 @@
 #include "core/Units.h"
 #include "io/AssetResolver.h"
 #include "platform/Threads.h"
+#include "control/Laws.h"
 #include "control/Profile.h"
 #include "sim/JsbsimModel.h"
 
@@ -31,6 +32,8 @@ std::shared_ptr<const control::VehicleProfile> readAircraftProfile(const std::st
         control::readProfile(aircraft, [&model](std::string_view prefix) { return model.properties(prefix); }, warnings));
     for (const auto& w : warnings) LOG_WARN("session") << w;
     control::adapterFor(profile->identity.family).complete(*profile);
+    if (control::completeControl(*profile)) // no gains of its own: the laws designed from its plant
+        LOG_INFO("session") << "aircraft '" << aircraft << "': the loops designed from its identified plant";
     const auto& settings = profile->control.settings;
     if (!settings.empty()) {
         control::ControlStack probe;
@@ -177,6 +180,8 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
         auto own = std::make_shared<control::VehicleProfile>(control::mergeProfile(*e->profile, *spec.profile));
         const auto& adapter = control::adapterFor(own->identity.family);
         adapter.complete(*own);
+        if (own->control.header.provenance == control::Provenance::Derived) own->control = {}; // designed again, from its plant
+        control::completeControl(*own);
         e->catalog = std::make_shared<control::CapabilityCatalog>(*own, adapter);
         e->profile = std::move(own);
     }

@@ -39,12 +39,11 @@ def fly_results(directory):
         return json.load(f).get("results", {}).get("design", {})
 
 
-def sections(aircraft, fbw, settings, reference, identified, flown):
+def sections(aircraft, fbw, reference, identified, flown):
     """{section: {field: value}} for the JSBSim file.
 
     aircraft   the design (geometry.aircraft.Aircraft)
     fbw        fcs.design()'s result, or None for surfaces on the stick
-    settings   the autopilot's settings {controller: {parameter: value}}
     reference  autopilot.toml's [reference] (tas_ms, eas_ms, altitude_m), or {}
     identified autopilot.toml's [identified]: the responses measured there, or {}
     flown      the flight tests' results (fly_results), or {}
@@ -117,13 +116,14 @@ def sections(aircraft, fbw, settings, reference, identified, flown):
                 plant[axis + "/gain"] = float(r["gain"])
             if "lag_s" in r:
                 plant[axis + "/tau_s"] = float(r["lag_s"])
-        attitude = settings.get("pid_attitude", {})
-        if "pitch.trim" in attitude:
-            plant["elevator_trim"] = attitude["pitch.trim"]
-            plant["elevator_trim_lift"] = attitude.get("pitch.trim_lift", 0.0)
-        alpha0 = settings.get("pid_velocity", {}).get("vertical_speed.alpha_zero_lift")
-        if alpha0 is not None:
-            plant["alpha_zero_lift_deg"] = math.degrees(alpha0)
+        # the fits of level flight (autopilot.fits): the platform designs the loops from these
+        if "throttle_trim" in identified:
+            plant["throttle_trim"] = float(identified["throttle_trim"])
+        if "elevator_trim" in identified:
+            plant["elevator_trim"] = float(identified["elevator_trim"])
+            plant["elevator_trim_lift"] = float(identified.get("elevator_trim_lift", 0.0))
+        if "alpha_zero_lift_rad" in identified:
+            plant["alpha_zero_lift_deg"] = math.degrees(float(identified["alpha_zero_lift_rad"]))
         out["plant"] = plant
 
     # performance, as flown

@@ -12,6 +12,8 @@ add_library(fsim_control STATIC
     Profile.cpp
     Protection.h
     Protection.cpp
+    Laws.h
+    Laws.cpp
     Adapter.h
     Adapter.cpp
     Registry.h

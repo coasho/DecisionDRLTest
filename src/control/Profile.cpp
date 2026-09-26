@@ -92,6 +92,7 @@ const Field kFields[] = {
     {"plant", "elevator_trim", Kind::Real, -1, 1, 1, AT(plant.elevatorTrim)},
     {"plant", "elevator_trim_lift", Kind::Real, -1, 1, 1, AT(plant.elevatorTrimLift)},
     {"plant", "alpha_zero_lift_deg", Kind::Real, -30, 30, kDeg, AT(plant.alphaZeroLiftRad)},
+    {"plant", "throttle_trim", Kind::Real, 0, 1, 1, AT(plant.throttleTrim)},
 
     {"performance", "stall_cas_ms", Kind::Real, 0, 1000, 1, AT(performance.stallCasMs)},
     {"performance", "stall_flaps_cas_ms", Kind::Real, 0, 1000, 1, AT(performance.stallFlapsCasMs)},

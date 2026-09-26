@@ -363,9 +363,9 @@ struct VehicleProfile {
 | `effectors` | <ul><li>What each primary control means: pitch 0 surface, 1 load-factor demand, 2 pitch-rate demand; roll 0 surface, 1 roll-rate demand; yaw 0 surface, 1 sideslip demand</li><li>What neutral stick holds: 0 nothing (surface), 1 the flight path, 2 one g</li><li>Which support effectors exist: flaps, retractable gear, speedbrake, pitch trim, wheel brakes, and their transit times</li></ul> | hangar; the adapter derives flaps and gear for stock aircraft | the adapter (support capabilities, allocation), the catalog |
 | `envelope` | Limits per configuration, each for `clean` and `flaps` (with the threshold between them): <ul><li>`n_min`, `n_max`</li><li>`alpha_max_deg`, `bank_max_deg`, `pitch_min_deg`, `pitch_max_deg`</li><li>`roll_rate_max_deg_s`</li><li>`cas_min_ms`, `cas_max_ms`, `mach_max`</li></ul> Also `gear_cas_max_ms`, and which limits the aircraft's own law enforces: `law_load_factor`, `law_alpha`, `law_roll_rate` (flags; step 4) | hangar: design limits, flight-tested stall speeds, published placards | the protection stage, the catalog's ranges, VecEnv's ranges |
 | `propulsion` | <ul><li>Engine count and type: 0 piston, 1 turboprop, 2 turbofan, 3 turbojet, 4 electric</li><li>Afterburner, with the throttle where it begins</li><li>Reverse thrust</li><li>Spool time constant</li></ul> | hangar; derived from the flight model | the adapter (per-engine throttle), the catalog |
-| `plant` | <ul><li>The reference condition: altitude, true and equivalent airspeed, mass</li><li>Identified first-order responses (time constant and gain) for roll, pitch, yaw and speed</li><li>Trim elevator and its lift part</li><li>Zero-lift angle of attack</li></ul> | hangar's identification | the control laws (step 5), the trim feedforwards |
+| `plant` | <ul><li>The reference condition: altitude, true and equivalent airspeed, mass</li><li>Identified first-order responses (time constant and gain) for roll, pitch, yaw and speed</li><li>Trim elevator and its lift part</li><li>Zero-lift angle of attack</li><li>Level flight's throttle (`throttle_trim`, step 5a)</li></ul> | hangar's identification | the control laws (step 5), the trim feedforwards |
 | `performance` | Stall speeds (clean, flaps), maximum speed, ceiling, climb rate; informational | hangar's flight tests | tasks, curricula, scenario checks |
-| `control` | The gains per controller id, as today | hangar's autopilot stage | the `ControlStack` settings (unchanged) |
+| `control` | The gains per controller id, as today. Since step 5a an aircraft without them gets them designed from its plant (provenance derived) | the platform (`Laws.cpp`), or by hand | the `ControlStack` settings (unchanged) |
 
 The class codes are: 0 unknown, 1 light GA, 2 fighter, 3 attack, 4 bomber, 5 transport, 6 tanker, 7 AEW&C, 8 reconnaissance, 9 electronic warfare, 10 UAV and 11 trainer.
 
@@ -1045,6 +1045,13 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
   - `Report` costs +8 to +18 %. `Limit` costs +23 to +31 % inside a design's envelope, and up to +43 % with every limit given and engaging every update.
   - The cost is fixed work per update: the setpoint copied before it is limited, a division for the airspeed limits, ten comparisons for the exceedances. At the world level it disappears: the F-16C and B-52H, now protected, run at step 3's throughput.
   - The gate is left as written. Whether it should be a throughput gate for protected flight is the owner's call.
+
+**Step 5a (the loops designed from the plant).**
+- **What moved.** hangar's closed-form gain design (pole placement on the identified first-order responses, the schedules, the feedforwards) moved into the platform (`src/control/Laws.cpp`). An aircraft without gains of its own gets them designed from its plant section when it loads, as a control section with provenance derived. Explicit gains, the aircraft's or a trainer's, still win.
+- **Fewer numbers per aircraft.** hangar's autopilot stage now only identifies: `autopilot.toml` holds the reference condition and 15 measured numbers (the four responses, level flight's throttle, the trim law, the zero-lift angle) instead of 51 gains, and the 31 designs' files lost 1,698 lines of gains.
+- **The same gains.** For every design, each of the 51 parameters the platform designs matches the gain its file carried to within 7.2e-6 (the files store six significant figures).
+- **Digests:** the c172x flights are identical. The four hangar-design flights differ in the last digits of their gains, as C1 allows for aircraft that select the new laws.
+- **The manoeuvre suite:** the same 29 of 558 failures, item for item.
 
 **Allocations.**
 - Per update, none, except `loiter` (4, one per parameter's map node) and `waypoints` (2): the per-step `BehaviorCommand` copy, P6.

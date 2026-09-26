@@ -2034,12 +2034,12 @@ class Profile(unittest.TestCase):
 
     def test_a_fly_by_wire_fighter(self):
         from hangar.profile import sections
-        settings = {"pid_velocity": {"vertical_speed.alpha_zero_lift": math.radians(-1.5)}, "pid_attitude": {"pitch.trim": 0.0}}
         reference = {"tas_ms": 160.0, "eas_ms": 140.0, "altitude_m": 3000.0}
         identified = {"roll": {"gain": 3.7, "lag_s": 0.25}, "pitch": {"gain": 9.6, "lag_s": 0.76}, "yaw": {"gain": 0.17},
-                      "speed": {"gain": 6.5, "lag_s": 0.17}}
+                      "speed": {"gain": 6.5, "lag_s": 0.17}, "throttle_trim": 0.33, "elevator_trim": 0.0,
+                      "elevator_trim_lift": 0.0, "alpha_zero_lift_rad": math.radians(-1.5)}
         flown = {"fighter": {"max_mach_sl": 1.2, "service_ceiling_m": 18000.0, "climb_rate_ms": 250.0}}
-        p = sections(self.fighter(), {"options": {}}, settings, reference, identified, flown)
+        p = sections(self.fighter(), {"options": {}}, reference, identified, flown)
         self.assertEqual(p["identity"], {"family": 2, "class": 2})
         self.assertEqual((p["effectors"]["pitch"], p["effectors"]["roll"], p["effectors"]["neutral"]), (1, 1, 1))
         self.assertEqual(p["effectors"]["pitch_trim"], 0)  # the law trims itself
@@ -2052,6 +2052,7 @@ class Profile(unittest.TestCase):
         self.assertEqual(p["plant"]["pitch/gain"], 9.6)
         self.assertNotIn("yaw/tau_s", p["plant"])  # not identified: left out, not guessed
         self.assertAlmostEqual(p["plant"]["alpha_zero_lift_deg"], -1.5)
+        self.assertEqual(p["plant"]["throttle_trim"], 0.33)  # what the platform designs the loops from
         self.assertAlmostEqual(p["performance"]["max_tas_ms"], 1.2 * 340.294)
         self.assertNotIn("cas_min_ms", p["envelope"])  # a fighter's tests fly no stall
 
@@ -2061,7 +2062,7 @@ class Profile(unittest.TestCase):
         design = self.Design(spec, ["aileron", "elevator", "rudder"], [self.Gear(False)], [self.Engine("turboprop", 4)])
         flown = {"stall": {"stall_kcas": 100.0, "alpha_at_stall": 15.0}, "max_speed_ms": 170.0,
                  "climb": {"service_ceiling_m": 9000.0}}
-        p = sections(design, None, {}, {}, {}, flown)
+        p = sections(design, None, {}, {}, flown)
         self.assertEqual(p["identity"]["family"], 1)
         self.assertEqual(p["effectors"]["pitch_trim"], 1)
         self.assertEqual((p["effectors"]["flaps"], p["effectors"]["retractable_gear"]), (0, 0))
@@ -2073,7 +2074,7 @@ class Profile(unittest.TestCase):
 
     def test_the_sections_as_properties(self):
         from hangar.profile import properties_xml, sections
-        xml = properties_xml(sections(self.fighter(), {"options": {}}, {}, {}, {}, {}))
+        xml = properties_xml(sections(self.fighter(), {"options": {}}, {}, {}, {}))
         self.assertIn('<property value="1">fsim/identity/version</property>', xml)
         self.assertIn('<property value="1">fsim/envelope/provenance</property>', xml)
         self.assertIn('<property value="-3">fsim/envelope/clean/n_min</property>', xml)
@@ -2081,17 +2082,38 @@ class Profile(unittest.TestCase):
         self.assertEqual(properties_xml({}), "")
 
     def test_the_identification_round_trip(self):
+        import os
+        import tempfile
         import tomllib
-        from hangar.autopilot import identified_toml, load_settings
-        ident = {"roll": {"gain": 3.7, "lag_s": 0.25}, "yaw": {"gain": 0.17}}
-        text = "\n".join(["[reference]", "tas_ms = 100.0"] + identified_toml(ident) + ["", "[pid_attitude]", "roll.kp = 0.5"]) + "\n"
-        data = tomllib.loads(text)
-        self.assertEqual(data["identified"]["roll"], {"gain": 3.7, "lag_s": 0.25})
-        self.assertEqual(data["identified"]["yaw"], {"gain": 0.17})
-        with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "autopilot.toml")
+        import types
+        from hangar import autopilot
+        ident = {"tas_ms": 163.5412, "eas_ms": 143.0671, "altitude_m": 3000.0,
+                 "roll": {"gain": 3.7, "lag_s": 0.25}, "yaw": {"gain": 0.17}, "throttle_trim": 0.3275,
+                 "elevator_trim": -0.21, "elevator_trim_lift": 0.4, "alpha_zero_lift_rad": -0.023}
+        with tempfile.TemporaryDirectory() as folder:
+            d = types.SimpleNamespace(dir=folder, path=os.path.join(folder, "x.toml"))
+            path = autopilot.write_toml(d, ident, date="2026-09-26 00:37")
+            reference, identified = autopilot.load_identification(path)
+            with open(path, "rb") as f:
+                self.assertEqual(sorted(tomllib.load(f)), ["identified", "reference"])  # no gains: the platform designs them
+            self.assertEqual(autopilot.load_settings(path), {})
+            with open(path, encoding="utf-8") as f:
+                self.assertIn("(2026-09-26 00:37)", f.read())
+        self.assertEqual(reference["tas_ms"], 163.541)   # six significant figures, not two decimals
+        self.assertEqual(reference["eas_ms"], 143.067)
+        self.assertEqual(identified["roll"], {"gain": 3.7, "lag_s": 0.25})
+        self.assertEqual(identified["yaw"], {"gain": 0.17})
+        for key in ("throttle_trim", "elevator_trim", "elevator_trim_lift", "alpha_zero_lift_rad"):
+            self.assertEqual(identified[key], ident[key], key)
+
+    def test_gains_written_by_hand_still_go_into_the_aircraft(self):
+        import os
+        import tempfile
+        from hangar.autopilot import load_settings
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "autopilot.toml")
             with open(path, "w", encoding="utf-8") as f:
-                f.write(text)
+                f.write("[reference]\ntas_ms = 100.0\n\n[identified]\nroll = { gain = 3.7 }\n\n[pid_attitude]\nroll.kp = 0.5\n")
             self.assertEqual(load_settings(path), {"pid_attitude": {"roll.kp": 0.5}})
 
 
@@ -2100,27 +2122,9 @@ if __name__ == "__main__":
 
 
 class Autopilot(unittest.TestCase):
-    """The platform's loops tuned per aircraft (hangar/autopilot.py): the pole
-    placement, the step fit, the settings' round trip and the design's rules."""
-
-    def test_place_puts_the_poles_where_asked(self):
-        from hangar.autopilot import place
-        for g, tau, w in ((2.0, 0.5, 1.5), (0.25, 0.9, 1.0), (5.0, 0.2, 4.0)):
-            kp, kd = place(g, tau, w, zeta=0.8)
-            self.assertGreaterEqual(kd, 0.0)
-            # tau s^2 + (1 + g kd) s + g kp
-            roots = np.roots([tau, 1.0 + g * kd, g * kp])
-            wn = abs(roots[0])
-            self.assertAlmostEqual(wn, w, places=9)
-            self.assertAlmostEqual(-roots[0].real / wn, 0.8, places=9)
-
-    def test_place_never_asks_for_negative_rate_feedback(self):
-        from hangar.autopilot import place
-        # a plant damped enough on its own: the dominant pole at omega, no rate feedback
-        kp, kd = place(4.0, 0.1, 1.5)
-        self.assertEqual(kd, 0.0)
-        roots = sorted(np.roots([0.1, 1.0, 4.0 * kp]).real)
-        self.assertAlmostEqual(roots[-1], -1.5, places=9)
+    """The aircraft's plant identified (hangar/autopilot.py): the step fit and
+    the fits of level flight. The loops designed from it are the platform's
+    (src/control/Laws.cpp, tests/test_laws.cpp)."""
 
     def test_first_order_fits_a_step(self):
         from hangar.autopilot import first_order
@@ -2131,60 +2135,17 @@ class Autopilot(unittest.TestCase):
         self.assertAlmostEqual(tau, 0.4, delta=0.02)
         self.assertAlmostEqual(td, 0.1, delta=0.021)
 
-    def test_the_settings_go_round_the_file_and_into_the_aircraft_unchanged(self):
-        import os
-        import re
-        import tempfile
-        import types
+    def test_the_fits_of_level_flight(self):
         from hangar import autopilot
-        settings = {"pid_attitude": {"pitch.kp": 1.25, "roll.max_rate": 0.4, "schedule.tas_ms": 163.54, "pitch.trim": -0.0367},
-                    "pid_velocity": {"max_bank": 0.5236, "vertical_speed.kp": 0.00214, "vertical_speed.alpha_zero_lift": -0.0226}}
-        with tempfile.TemporaryDirectory() as folder:
-            d = types.SimpleNamespace(dir=folder, path=os.path.join(folder, "x.toml"))
-            autopilot.write_toml(d, settings, {"tas_ms": 163.54, "eas_ms": 143.1, "altitude_m": 3000.0})
-            back = autopilot.load_settings(os.path.join(folder, "autopilot.toml"))
-        for c in settings:
-            for k in settings[c]:
-                self.assertAlmostEqual(back[c][k], settings[c][k], places=12, msg=k)
-        root = ET.fromstring("<flight_control>%s</flight_control>" % autopilot.properties_xml(back))
-        props = {p.text: float(p.get("value")) for p in root.iter("property")}
-        self.assertEqual(len(props), 7)
-        for path in props:   # names the property tree takes
-            self.assertRegex(path, r"^fsim/control/[a-z_]+(/[a-z_0-9]+)+$")
-        self.assertEqual(props["fsim/control/pid_attitude/pitch/kp"], 1.25)
-        self.assertEqual(props["fsim/control/pid_velocity/vertical_speed/alpha_zero_lift"], -0.0226)
-
-    def test_the_design_schedules_and_trims_as_the_controls_answer(self):
-        import types
-        from hangar import autopilot
-        common = {"tas_ms": 150.0, "eas_ms": 130.0, "altitude_m": 3000.0, "throttle": 0.5,
-                  "roll": {"gain": 3.0, "lag_s": 0.25}, "pitch": {"gain": 8.0, "lag_s": 0.7},
-                  "yaw": {"gain": 0.4}, "speed": {"gain": 6.0, "lag_s": 0.3}}
+        common = {"tas_ms": 150.0, "eas_ms": 130.0, "altitude_m": 3000.0, "throttle": 0.5}
         # alpha = alpha0 + k (eas_ref / eas)^2, trim = 0.1 + 0.2 (eas_ref / eas)^2: both recovered exactly
         eas = (97.5, 130.0, 175.5)
         alphas = [(e, -0.03 + 0.06 * (130.0 / e) ** 2) for e in eas]
         trims = [(e, 0.1 + 0.2 * (130.0 / e) ** 2) for e in eas]
-        plane = types.SimpleNamespace(spec={"aircraft": {"name": "x", "category": "fighter"}})   # design() reads only the spec
-        fbw = autopilot.design(plane, dict(common, fbw=True, trim_sweep=[], alpha_sweep=alphas))
-        direct = autopilot.design(plane, dict(common, fbw=False, trim_sweep=trims, alpha_sweep=alphas))
-        att, acc, vel = fbw["pid_attitude"], fbw["pid_acceleration"], fbw["pid_velocity"]
-        # a law that commands the load factor: its pitch rate per stick falls as 1 / tas
-        self.assertEqual((att["pitch.eas_exponent"], att["pitch.tas_exponent"]), (0.0, -1.0))
-        self.assertEqual((att["roll.eas_exponent"], att["roll.tas_exponent"]), (0.0, 0.0))
-        self.assertEqual((att["pitch.trim"], att["rudder.beta_gain"], acc["load_factor.path_hold"]), (0.0, 0.0, 1.0))
-        self.assertAlmostEqual(vel["vertical_speed.alpha_zero_lift"], -0.03, places=9)
-        self.assertAlmostEqual(vel["max_bank"], math.radians(60.0), places=12)
-        # surfaces: the roll gains fall as (eas / tas)^2, the trim law is fed forward,
-        # the rudder takes half the sideslip out against its own step's sign
-        att, acc = direct["pid_attitude"], direct["pid_acceleration"]
-        self.assertEqual((att["roll.eas_exponent"], att["roll.tas_exponent"]), (-2.0, 2.0))
-        self.assertEqual((att["pitch.eas_exponent"], att["pitch.tas_exponent"]), (0.0, 0.0))
-        self.assertAlmostEqual(att["pitch.trim"], 0.3, places=9)
-        self.assertAlmostEqual(att["pitch.trim_lift"], 0.2, places=9)
-        self.assertAlmostEqual(att["rudder.beta_gain"], -0.5 / 0.4, places=12)
-        self.assertEqual((acc["load_factor.feedforward"], acc["load_factor.path_hold"]), (0.0, 0.0))
-        self.assertGreaterEqual(att["pitch.kd"], 0.25 * att["pitch.kp"] - 1e-12)
-        # the outer loops slower than the inner ones: the vertical speed's bandwidth
-        # (kp tas) below the pitch attitude's
-        self.assertLess(direct["pid_velocity"]["vertical_speed.kp"] * 150.0, 0.36)
-
+        fbw = autopilot.fits(dict(common, fbw=True, trim_sweep=[], alpha_sweep=alphas))
+        direct = autopilot.fits(dict(common, fbw=False, trim_sweep=trims, alpha_sweep=alphas))
+        self.assertEqual((fbw["elevator_trim"], fbw["elevator_trim_lift"]), (0.0, 0.0))   # a law trims itself
+        self.assertAlmostEqual(fbw["alpha_zero_lift_rad"], -0.03, places=9)
+        self.assertEqual(fbw["throttle_trim"], 0.5)
+        self.assertAlmostEqual(direct["elevator_trim"], 0.3, places=9)
+        self.assertAlmostEqual(direct["elevator_trim_lift"], 0.2, places=9)

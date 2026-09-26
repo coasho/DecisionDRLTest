@@ -1,17 +1,11 @@
-"""The platform's own control loops, tuned for this aircraft.
+"""The aircraft's responses to its controls, identified for the platform.
 
 Every vehicle on the platform can be commanded at five levels above its
 surfaces (docs/sdk/control.md): attitude, acceleration, velocity, position
-and behaviours, each flown by a built-in PID loop that commands the one
-below it. The loops' shared gains suit a light aircraft; a fighter that
-answers the stick with a load factor, or a bomber that needs a third of its
-elevator to trim, flies them badly. This stage gives the aircraft its own:
-the build writes them into the JSBSim aircraft as properties
-fsim/control/<controller>/<parameter> (the parameter's dots as slashes),
-and the platform sets them on every vehicle of the type. A trainer's own
-setting still wins.
-
-The method, as a flight-test engineer would:
+and behaviours, each flown by a built-in loop that commands the one below
+it. The platform designs those loops for each aircraft from what was
+measured on it - its plant (docs/control-architecture.md, section 7) - so
+this stage measures it:
 
 - identify: from level flight at a reference condition (3,000 m, the speed
   at which the wing carries the weight at CL 0.35, faster if that needs
@@ -22,26 +16,19 @@ The method, as a flight-test engineer would:
   lag) - plus level flight at three speeds for the elevator that trims it
   and the angle of attack it flies at. A fly-by-wire law is levelled at
   neutral stick, which holds its flight path; others by JSBSim's trim.
-- design: the inner loops' poles placed on those first-order models (the
-  bank on G_p / (s (tau_p s + 1)), the pitch attitude on the pitch rate the
-  load factor gives, g G_n / tas), a quarter of the proportional gain as
-  rate damping at least where the airframe's own short period and dutch
-  roll are not filtered by a law; the outer loops a fixed fraction of the
-  inner ones' speed.
-- schedule: the gains hold at the reference and follow the airspeed
-  elsewhere, as the aircraft's response to its controls does, keeping each
-  loop's damping - constant for a fly-by-wire law's roll and load factor,
-  the pitch gains growing as tas under a law that commands the load factor,
-  the roll gains as (eas / tas)^-2 on surfaces (their roll mode slows as
-  tas / eas^2 while their roll rate grows as tas).
-- feed forward what a loop can know: the elevator that trims a surface-
-  controlled aircraft (its trim law, growing with lift as n / eas^2), the
-  flight-path angle a vertical speed needs and the angle of attack the wing
-  flies at 1 g, the stick a load factor or roll rate needs.
+- fit: the trim law of a surface-controlled aircraft (the elevator of level
+  flight, growing with lift as 1 / eas^2), the zero-lift angle of attack,
+  the throttle of level flight.
 
-evaluate() then flies the aircraft as built - the platform applying the
-gains from the JSBSim file, as it will for a trainer - through standard
-manoeuvres at three speeds.
+The results go into autopilot.toml ([reference], [identified]) and from
+there into the JSBSim aircraft's plant section. The platform places the
+loops' poles on those first-order models, schedules the gains on the
+airspeed and feeds forward the trim (src/control/Laws.cpp). evaluate() then
+flies the aircraft as built - the platform designing its loops, as it will
+for a trainer - through standard manoeuvres at three speeds.
+
+Gains written by hand in autopilot.toml ([pid_attitude], ...) still go into
+the aircraft as fsim/control/<controller>/<parameter>, and win.
 """
 import math
 import os
@@ -79,19 +66,6 @@ def first_order(t, y, t_max):
             if e < best[0]:
                 best = (e, k, tau, td)
     return best[1], best[2], best[3]
-
-
-def place(gain, tau, omega, zeta=0.8):
-    """PD on a plant gain / (s (tau s + 1)): (kp, kd) that put the closed
-    loop's poles at omega with damping zeta - or, where that would take
-    negative rate feedback (a plant already that damped), kd = 0 and the
-    dominant real pole at omega."""
-    kd = (2.0 * zeta * omega * tau - 1.0) / gain
-    if kd >= 0.0:
-        return omega * omega * tau / gain, kd
-    if omega * tau < 0.5:
-        return omega * (1.0 - tau * omega) / gain, 0.0
-    return 1.0 / (4.0 * tau * gain), 0.0
 
 
 def _fbw(aircraft):
@@ -238,93 +212,37 @@ class Identify:
         return out
 
 
-# -- design ------------------------------------------------------------------------------------------
-def design(aircraft, ident):
-    """The loops' parameters by controller id, from the identification."""
-    fbw = ident["fbw"]
-    v, eas = ident["tas_ms"], ident["eas_ms"]
-    category = aircraft.spec.get("aircraft", {}).get("category", "")
-    # roll: bank on the roll rate the aileron gives
-    gp, tp = ident["roll"]["gain"], ident["roll"]["lag_s"]
-    w_phi = float(np.clip((0.7 if fbw else 0.6) / tp, 0.5, 2.5))
-    roll_kp, roll_kd = place(gp, tp, w_phi)
-    if not fbw:
-        roll_kd = max(roll_kd, 0.25 * roll_kp)   # the dutch roll a first-order fit cannot see
-    # pitch: attitude on the pitch rate the load factor gives
-    gn, tn = ident["pitch"]["gain"], ident["pitch"]["lag_s"]
-    w_th = float(np.clip((0.7 if fbw else 0.6) / tn, 0.5, 2.5))
-    pitch_kp, pitch_kd = place(G0 * gn / v, tn, w_th)
-    if not fbw:
-        pitch_kd = max(pitch_kd, 0.25 * pitch_kp)   # and the short period
-    pitch_ki = pitch_kp * w_th / (2.5 if fbw else 4.0)
-    # a law coordinates its turns; surfaces get half the sideslip taken out
-    # by the rudder, the sign from the rudder's own step
-    gb = ident["yaw"]["gain"]
-    beta = 0.0 if fbw or abs(gb) < 1e-3 else float(np.clip(-0.5 / gb, -3.0, 3.0))
-    # the trim law: stick = trim - lift + lift (eas_ref / eas)^2 at 1 g
-    trim = lift = 0.0
-    if not fbw and len(ident["trim_sweep"]) >= 2:
+# -- fits ----------------------------------------------------------------------------------------------
+def fits(ident):
+    """What the level-flight sweeps give, for the plant: the throttle of level
+    flight; a surface-controlled aircraft's trim law, stick = trim - lift +
+    lift (eas_ref / eas)^2 at 1 g (a law that trims itself has none); the
+    angle of attack of zero lift, level flight's alpha against 1 / eas^2."""
+    eas = ident["eas_ms"]
+    out = {"throttle_trim": float(ident["throttle"]), "elevator_trim": 0.0, "elevator_trim_lift": 0.0, "alpha_zero_lift_rad": 0.0}
+    if not ident["fbw"] and len(ident["trim_sweep"]) >= 2:
         x = [(eas / e) ** 2 for e, _ in ident["trim_sweep"]]
         lift, zero = np.polyfit(x, [st for _, st in ident["trim_sweep"]], 1)
-        trim, lift = float(zero + lift), float(lift)
-    # the zero-lift angle of attack: level flight's alpha against 1 / eas^2
-    alpha0 = 0.0
+        out["elevator_trim"], out["elevator_trim_lift"] = float(zero + lift), float(lift)
     if len(ident["alpha_sweep"]) >= 2:
         _, alpha0 = np.polyfit([(eas / e) ** 2 for e, _ in ident["alpha_sweep"]], [a for _, a in ident["alpha_sweep"]], 1)
-        alpha0 = float(np.clip(alpha0, -0.2, 0.2))
-    # speed: thrust per unit throttle over mass, and the engine's lag
-    gv, te = max(ident["speed"]["gain"], 1e-3), max(ident["speed"]["lag_s"], 0.2)
-    w_v = float(min(0.25, 0.3 / te))
-    # outer loops a fraction of the inner ones' speed
-    w_vz = min(0.35, w_th / 4.0)
-    w_psi = min(0.2, w_phi / 5.0)
-    w_n = float(np.clip(0.3 / tn, 0.3, 2.0))
-    w_p = float(np.clip(0.3 / tp, 0.3, 3.0))
-    w_a = float(np.clip(0.5 / te, 0.1, 1.0))
-    schedule = {"schedule.tas_ms": v, "schedule.eas_ms": eas}
-    return {
-        ATTITUDE: dict(schedule, **{
-            "roll.kp": roll_kp, "roll.kd": roll_kd, "roll.ki": 0.0, "roll.max_rate": float(np.clip(0.5 * gp, 0.05, 2.0)),
-            "pitch.kp": pitch_kp, "pitch.kd": pitch_kd, "pitch.ki": pitch_ki, "pitch.integral_limit": 0.3 if fbw else 0.5,
-            "pitch.trim": trim, "pitch.trim_lift": lift,
-            "heading.gain": w_psi * v / G0, "rudder.beta_gain": beta,
-            "airspeed.kp": 1.8 * w_v / gv, "airspeed.ki": w_v * w_v / gv, "throttle.feedforward": ident["throttle"],
-            "roll.eas_exponent": 0.0 if fbw else -2.0, "roll.tas_exponent": 0.0 if fbw else 2.0,
-            "pitch.eas_exponent": 0.0, "pitch.tas_exponent": -1.0 if fbw else 0.0}),
-        ACCELERATION: dict(schedule, **{
-            "load_factor.feedforward": 0.85 / gn if fbw else 0.0, "load_factor.path_hold": 1.0 if fbw else 0.0,
-            "load_factor.kp": 0.1 / gn, "load_factor.ki": w_n / gn, "load_factor.kd": 0.0 if fbw else pitch_kd,
-            "load_factor.integral_limit": 0.3, "pitch.trim": trim, "pitch.trim_lift": lift,
-            "roll_rate.feedforward": 0.8 / gp, "roll_rate.kp": 0.1 / gp, "roll_rate.ki": w_p / gp,
-            "rudder.beta_gain": beta, "longitudinal.kp": te * w_a / gv, "longitudinal.ki": w_a / gv,
-            "throttle.feedforward": ident["throttle"],
-            "load_factor.eas_exponent": 0.0, "load_factor.tas_exponent": 0.0 if fbw else 1.0,
-            "roll_rate.eas_exponent": 0.0 if fbw else -2.0, "roll_rate.tas_exponent": 0.0 if fbw else 2.0}),
-        VELOCITY: {"schedule.tas_ms": v, "vertical_speed.kp": w_vz / v, "vertical_speed.ki": w_vz * w_vz / (3.0 * v),
-                   "vertical_speed.feedforward": 1.0, "vertical_speed.command_lag": 1.0 / w_th,
-                   "vertical_speed.alpha_zero_lift": alpha0,
-                   "max_bank": math.radians(MAX_BANK_DEG.get(category, 30.0))},
-        POSITION: {"altitude.gain": w_vz / 3.0, "max_vertical_speed": float(np.clip(0.1 * v, 3.0, 25.0))},
-    }
+        out["alpha_zero_lift_rad"] = float(np.clip(alpha0, -0.2, 0.2))
+    return out
 
 
 # -- the settings file and the JSBSim properties -------------------------------------------------
-def write_toml(d, settings, ident):
-    """autopilot.toml beside the design: reviewable, and deleted to fly the
-    platform's shared defaults."""
-    lines = ["# Written by hangar autopilot (%s) for %s: the platform's built-in control" % (
-             time.strftime("%Y-%m-%d %H:%M"), os.path.basename(d.path)),
-             "# loops tuned for this aircraft (docs/hangar.md, The autopilot). The build writes",
-             "# them into the JSBSim aircraft as fsim/control/<controller>/<parameter>. Delete",
-             "# this file to fly the platform's shared defaults.",
-             "[reference]   # where they were designed (the gains follow the airspeed elsewhere)",
-             "tas_ms = %.2f" % ident["tas_ms"], "eas_ms = %.2f" % ident["eas_ms"], "altitude_m = %.0f" % ident["altitude_m"]]
+def write_toml(d, ident, date=None):
+    """autopilot.toml beside the design: the reference condition and what
+    was identified there - reviewable, and read into the aircraft's plant
+    section by the build."""
+    lines = ["# Written by hangar autopilot (%s) for %s: the aircraft's responses to its" % (
+             date or time.strftime("%Y-%m-%d %H:%M"), os.path.basename(d.path)),
+             "# controls, identified at a reference condition (docs/hangar.md, The autopilot). The",
+             "# build writes them into the JSBSim aircraft's plant section; the platform designs its",
+             "# control loops from them. Delete this file to fly the platform's shared defaults.",
+             "[reference]   # where they were measured",
+             "tas_ms = %s" % _num(ident["tas_ms"]), "eas_ms = %s" % _num(ident["eas_ms"]), "altitude_m = %.0f" % ident["altitude_m"]]
     lines += identified_toml(ident)
-    for controller, params in settings.items():
-        lines.append("")
-        lines.append("[%s]" % controller)
-        for k in sorted(params):
-            lines.append("%s = %s" % (k, _num(params[k])))
     path = os.path.join(d.dir, "autopilot.toml")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
@@ -336,12 +254,16 @@ def identified_toml(ident):
     [identified] table: the build writes them into the aircraft's profile
     (the plant section; hangar/profile.py)."""
     lines = ["", "[identified]   # the responses at the reference: per unit of aileron (roll rate, rad/s), elevator (load factor,",
-             "               # g), rudder (sideslip, rad) and throttle (acceleration, m/s2), each with its lag (s)"]
+             "               # g), rudder (sideslip, rad) and throttle (acceleration, m/s2), each with its lag (s); level",
+             "               # flight's throttle, a surface-controlled aircraft's trim law, the zero-lift angle of attack"]
     for axis in ("roll", "pitch", "yaw", "speed"):
         r = ident.get(axis) or {}
         fields = ", ".join("%s = %s" % (k, _num(r[k])) for k in ("gain", "lag_s") if k in r)
         if fields:
             lines.append("%s = { %s }" % (axis, fields))
+    for key in ("throttle_trim", "elevator_trim", "elevator_trim_lift", "alpha_zero_lift_rad"):
+        if key in ident:
+            lines.append("%s = %s" % (key, _num(ident[key])))
     return lines
 
 
@@ -403,9 +325,9 @@ def properties_xml(settings, indent="      "):
 
 # -- evaluation -------------------------------------------------------------------------------------
 class Evaluate:
-    """The aircraft as built - the platform setting its gains from the JSBSim
-    file - flown through standard manoeuvres, each from a fresh start and 40 s
-    of velocity hold."""
+    """The aircraft as built - the platform designing its loops from the plant
+    in the JSBSim file - flown through standard manoeuvres, each from a fresh
+    start and 40 s of velocity hold."""
 
     def __init__(self, d, ident):
         from .flight import Flight
@@ -516,8 +438,8 @@ def speeds(d, ident):
 
 # -- the stage ------------------------------------------------------------------------------------------
 def stage(d):
-    """Identify, design, write autopilot.toml, rebuild the JSBSim aircraft
-    with the gains, and fly it."""
+    """Identify, write autopilot.toml, rebuild the JSBSim aircraft with its
+    plant, and fly it as the platform designs its loops."""
     from .pipeline import check, info
     t0 = time.time()
     ident_run = Identify(d, d.log)
@@ -525,16 +447,16 @@ def stage(d):
         ident = ident_run.run()
     finally:
         ident_run.close()
-    settings = design(d.aircraft, ident)
-    write_toml(d, settings, ident)
-    d.build()   # reads autopilot.toml into the JSBSim aircraft
+    ident.update(fits(ident))
+    write_toml(d, ident)
+    d.build()   # reads autopilot.toml into the JSBSim aircraft's plant section
     ev = Evaluate(d, ident)
     try:
         flown = [ev.manoeuvres(s) for s in speeds(d, ident)]
     finally:
         ev.close()
     checks = [info("reference: level flight at %.0f m" % ident["altitude_m"], ident["tas_ms"], "m/s",
-                   note="%s; gains follow the airspeed elsewhere" % ("fly-by-wire" if ident["fbw"] else "surfaces")),
+                   note="%s; the platform designs the loops from what follows" % ("fly-by-wire" if ident["fbw"] else "surfaces")),
               info("roll rate per unit aileron (lag)", ident["roll"]["gain"], "rad/s", note="%.2f s" % ident["roll"]["lag_s"]),
               info("load factor per unit elevator (lag)", ident["pitch"]["gain"], "g", note="%.2f s" % ident["pitch"]["lag_s"])]
     checks += evaluation_checks(flown, check)
@@ -545,7 +467,7 @@ def stage(d):
         images.append("autopilot.png")
     except Exception as e:   # the plot is a convenience; the numbers are in autopilot.json
         d.log("  (no autopilot plot: %s)" % e)
-    return d.save("autopilot", {"identification": ident, "settings": settings, "flown": flown, "checks": checks,
+    return d.save("autopilot", {"identification": ident, "flown": flown, "checks": checks,
                                 "images": images, "seconds": time.time() - t0})
 
 

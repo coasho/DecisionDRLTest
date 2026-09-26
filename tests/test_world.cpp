@@ -513,7 +513,7 @@ TEST_CASE("camera images round-trip through the vision segment", "[ipc][vision]"
     REQUIRE(mirror.cameras().empty());
 }
 
-TEST_CASE("an aircraft designed with hangar flies the built-in loops with its own gains", "[world]") {
+TEST_CASE("an aircraft designed with hangar flies the built-in loops designed from its plant", "[world]") {
     session::World w(options("test-aircraft-gains"));
     auto s = spec("viper");
     s.type = "jsbsim:f16c";
@@ -521,12 +521,11 @@ TEST_CASE("an aircraft designed with hangar flies the built-in loops with its ow
     s.initial.airspeedTrueMs = 160.0;
     const auto viper = w.createVehicle(s);
     REQUIRE(viper != 0);
-    // what the JSBSim file declares under fsim/control is what its controllers fly with
-    const double tas = w.model(viper)->property("fsim/control/pid_attitude/schedule/tas_ms").get();
-    const double kp = w.model(viper)->property("fsim/control/pid_velocity/vertical_speed/kp").get();
+    // the JSBSim file declares its plant (fsim/plant); the platform designs the loops from it
+    const double tas = w.model(viper)->property("fsim/plant/tas_ms").get();
     REQUIRE(tas > 0.0);
     REQUIRE(*w.controls(viper)->controller(control::Level::Attitude)->parameter("schedule.tas_ms") == tas);
-    REQUIRE(*w.controls(viper)->controller(control::Level::Velocity)->parameter("vertical_speed.kp") == kp);
+    REQUIRE(w.profile(viper)->control.header.provenance == control::Provenance::Derived);
     // and holds its height on them
     REQUIRE(w.command(viper, control::VelocityCommand{160.0, 0.0, control::kHold, control::kHold}));
     w.step(600);

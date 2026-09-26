@@ -1,74 +1,20 @@
-# Written by hangar autopilot (2026-09-26 00:37) for ec130h.toml: the platform's built-in control
-# loops tuned for this aircraft (docs/hangar.md, The autopilot). The build writes
-# them into the JSBSim aircraft as fsim/control/<controller>/<parameter>. Delete
-# this file to fly the platform's shared defaults.
-[reference]   # where they were designed (the gains follow the airspeed elsewhere)
-tas_ms = 107.63
-eas_ms = 93.11
+# Written by hangar autopilot (2026-09-26 00:37) for ec130h.toml: the aircraft's responses to its
+# controls, identified at a reference condition (docs/hangar.md, The autopilot). The
+# build writes them into the JSBSim aircraft's plant section; the platform designs its
+# control loops from them. Delete this file to fly the platform's shared defaults.
+[reference]   # where they were measured
+tas_ms = 107.634
+eas_ms = 93.1071
 altitude_m = 3000
 
 [identified]   # the responses at the reference: per unit of aileron (roll rate, rad/s), elevator (load factor,
-               # g), rudder (sideslip, rad) and throttle (acceleration, m/s2), each with its lag (s)
+               # g), rudder (sideslip, rad) and throttle (acceleration, m/s2), each with its lag (s); level
+               # flight's throttle, a surface-controlled aircraft's trim law, the zero-lift angle of attack
 roll = { gain = 0.681552, lag_s = 0.364466 }
 pitch = { gain = 3.08917, lag_s = 0.409934 }
 yaw = { gain = 0.761855 }
 speed = { gain = 1.33153, lag_s = 0.892924 }
-
-[pid_attitude]
-airspeed.ki = 0.0469384
-airspeed.kp = 0.337957
-heading.gain = 2.19513
-pitch.eas_exponent = 0.0
-pitch.integral_limit = 0.5
-pitch.kd = 0.541693
-pitch.ki = 0.792849
-pitch.kp = 2.16677
-pitch.tas_exponent = 0.0
-pitch.trim = 0.000353596
-pitch.trim_lift = -0.342211
-roll.eas_exponent = -2
-roll.kd = 0.251608
-roll.ki = 0.0
-roll.kp = 1.00643
-roll.max_rate = 0.340776
-roll.tas_exponent = 2
-rudder.beta_gain = -0.656293
-schedule.eas_ms = 93.1071
-schedule.tas_ms = 107.634
-throttle.feedforward = 0.591718
-
-[pid_acceleration]
-load_factor.eas_exponent = 0.0
-load_factor.feedforward = 0.0
-load_factor.integral_limit = 0.3
-load_factor.kd = 0.541693
-load_factor.ki = 0.2369
-load_factor.kp = 0.0323711
-load_factor.path_hold = 0.0
-load_factor.tas_exponent = 1
-longitudinal.ki = 0.420537
-longitudinal.kp = 0.375508
-pitch.trim = 0.000353596
-pitch.trim_lift = -0.342211
-roll_rate.eas_exponent = -2
-roll_rate.feedforward = 1.17379
-roll_rate.ki = 1.20772
-roll_rate.kp = 0.146724
-roll_rate.tas_exponent = 2
-rudder.beta_gain = -0.656293
-schedule.eas_ms = 93.1071
-schedule.tas_ms = 107.634
-throttle.feedforward = 0.591718
-
-[pid_velocity]
-max_bank = 0.523599
-schedule.tas_ms = 107.634
-vertical_speed.alpha_zero_lift = -0.075786
-vertical_speed.command_lag = 0.683224
-vertical_speed.feedforward = 1
-vertical_speed.ki = 0.000379371
-vertical_speed.kp = 0.00325175
-
-[pid_position]
-altitude.gain = 0.116667
-max_vertical_speed = 10.7634
+throttle_trim = 0.591718
+elevator_trim = 0.000353596
+elevator_trim_lift = -0.342211
+alpha_zero_lift_rad = -0.075786

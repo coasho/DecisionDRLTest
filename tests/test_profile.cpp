@@ -177,8 +177,9 @@ TEST_CASE("every vehicle has its aircraft's profile; a spec's sections apply to 
     REQUIRE(viper != 0);
     const VehicleProfile* f = w.profile(viper);
     CHECK(f->control.header.version == 1);
+    CHECK(f->control.header.provenance == Provenance::Derived); // designed from its plant
     CHECK_FALSE(f->control.settings.empty());
-    CHECK(profileValue(*f, "control/pid_attitude/schedule/tas_ms") == w.model(viper)->property("fsim/control/pid_attitude/schedule/tas_ms").get());
+    CHECK(profileValue(*f, "control/pid_attitude/schedule/tas_ms") == w.model(viper)->property("fsim/plant/tas_ms").get());
     CHECK(w.profile(999) == nullptr);
 }
 

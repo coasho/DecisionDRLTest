@@ -122,6 +122,7 @@ struct PlantSection {
     FirstOrder roll, pitch, yaw, speed;
     double elevatorTrim = kUnknown, elevatorTrimLift = kUnknown;
     double alphaZeroLiftRad = kUnknown;
+    double throttleTrim = kUnknown; ///< the throttle of level flight at the reference condition
 };
 
 // --- performance ------------------------------------------------------------------------------

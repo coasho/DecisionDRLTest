@@ -863,8 +863,9 @@ Their shared gains suit the stock c172x. Flown with them, every fly-by-wire
 design sat in a standing pitch oscillation of 5-15° while only holding its
 height, a 1.5 g step overshot by up to 1,500 %, and the B-52H, which needs a
 third of its elevator to trim at cruise, climbed out of a height hold. The
-autopilot stage gives each design its own gains, as a flight-test engineer
-would:
+autopilot stage measures what the platform needs to design each one its
+own, as a flight-test engineer would; the platform does the design (steps 2
+to 4 below, `src/control/Laws.cpp`) whenever the aircraft loads:
 
 1. **Identify.** From level flight at a reference condition - 3,000 m, where
    the wing carries the weight at CL 0.35 (faster if that needs more than
@@ -896,10 +897,14 @@ would:
    wing flies at 1 g; the stick a load factor or a roll rate needs. On
    aircraft without a law the rudder takes out half the sideslip.
 
-The gains go to `autopilot.toml` beside the design (reviewable; delete it
-to fly the shared defaults) and, at every build, into `<name>.xml` as
-JSBSim properties `fsim/control/<controller>/<parameter>`. The platform sets
-them on every vehicle of the type ([control.md](sdk/control.md#per-aircraft-gains));
+What was measured goes to `autopilot.toml` beside the design - `[reference]`
+and `[identified]`: the four responses, level flight's throttle, a
+surface-controlled aircraft's trim law and the zero-lift angle; reviewable,
+and deleted to fly the shared defaults - and, at every build, into
+`<name>.xml` as its plant section. The platform designs the gains from it for
+every vehicle of the type ([control.md](sdk/control.md#per-aircraft-gains)).
+Gains written by hand in `autopilot.toml` (`[pid_attitude]` and so on) still
+go into the aircraft as `fsim/control/<controller>/<parameter>`, and win;
 a trainer's own setting still wins. The stage then flies the aircraft as
 built - the platform taking the gains from its file, as it will for a
 trainer - through standard manoeuvres at 0.7, 1 and 1.5 times the reference

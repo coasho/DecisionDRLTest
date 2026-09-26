@@ -22,6 +22,7 @@ add_executable(fsim_tests
     test_control_compat.cpp
     test_profile.cpp
     test_protection.cpp
+    test_laws.cpp
     test_support.cpp
     test_world.cpp
     test_terrain.cpp

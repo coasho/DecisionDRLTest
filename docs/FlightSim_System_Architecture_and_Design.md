@@ -658,7 +658,8 @@ speedbrake and pitch trim as capabilities of their own; step 3 let commands own 
 an autopilot's height and speed, merged by the runtime into one pass down the cascade), with residual holds after
 preemption, per-engine throttles and a vehicle default that can hold instead of idle; step 4 added envelope protection,
 which limits what an aircraft with an envelope is asked for and reports every exceedance with its size and duration,
-promising nothing about the state, on by default for every hangar design with the manoeuvre suite's failures unchanged.
+promising nothing about the state, on by default for every hangar design with the manoeuvre suite's failures unchanged;
+step 5a moved the loops' design from hangar into the platform, so an aircraft carries its measured plant, not its gains.
 M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |

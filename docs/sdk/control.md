@@ -286,25 +286,39 @@ What the others do:
 
 ## Per-aircraft gains
 
-An aircraft can carry its own gains for the built-in loops: JSBSim
-properties `fsim/control/<controller id>/<parameter>`, the parameter's dots
-written as slashes, declared in its flight control section:
+The built-in loops fly each aircraft with gains designed for it from its
+*plant*: its responses to each control, measured at a reference condition
+and carried in its profile ([the aircraft's profile](#the-aircrafts-profile),
+`fsim/plant/...`). The platform designs them when the aircraft loads
+(`src/control/Laws.cpp`):
+- It places each loop's poles on the response it flies on: the bank on the roll rate per unit aileron and its lag, the pitch attitude on the pitch rate the load factor gives.
+- The outer loops run at a fraction of the inner ones' speed.
+- The gains are scheduled on the airspeed from the reference.
+- The trim law and the flight path's angle of attack are fed forward.
+
+The aircraft designed with hangar all carry a plant ([hangar.md](../hangar.md#the-autopilot)): 15 measured numbers where
+they used to carry 51 derived gains. A stock JSBSim aircraft carries none and
+flies the shared defaults.
+
+An aircraft can also carry gains of its own, which then win over the design:
+JSBSim properties `fsim/control/<controller id>/<parameter>`, the parameter's
+dots written as slashes, in its flight control section.
 
 ```xml
-<flight_control name="f16c">
+<flight_control name="mine">
   <property value="1.11952">fsim/control/pid_attitude/pitch/kp</property>
-  <property value="163.54">fsim/control/pid_attitude/schedule/tas_ms</property>
   ...
 ```
 
-Every vehicle of that type gets them when it is created, and again whenever
-the stack creates the controller by id (`use(level, "pid_attitude")`); an
-instance you hand to `use()` is left as it is, and your own
-`setParameter` wins. The aircraft designed with hangar all carry a set,
-tuned for each by flight test ([hangar.md](../hangar.md#the-autopilot)); a
-stock JSBSim aircraft flies the shared defaults. A setting no built-in
-controller takes is logged once when the aircraft first loads, and kept for
-a controller registered under that id.
+A trainer's `VehicleSpec::profile` can bring a plant of its own, and that
+vehicle's loops are designed from it; a control section of its own wins
+outright.
+
+Every vehicle of the type gets the gains when it is created, and again
+whenever the stack creates the controller by id (`use(level, "pid_attitude")`).
+An instance you hand to `use()` is left as it is, and your own `setParameter`
+wins. A setting no built-in controller takes is logged once when the aircraft
+first loads, and kept for a controller registered under that id.
 
 ![The same velocity commands with the shared gains and with each aircraft's own](../images/control-gains-before-after.png)
 

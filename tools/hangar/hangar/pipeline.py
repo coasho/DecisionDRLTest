@@ -571,13 +571,14 @@ class Design:
         fbw = fcs.design(tabs, a, mm)
         yd = fcs.yaw_damper(tabs, a, mm)
         xml_path = os.path.join(self.dir, a.name + ".xml")
-        # the platform's loops tuned for it (autopilot.toml, hangar autopilot) go into the flight control section
+        # what the platform should know of it: its profile (docs/control-architecture.md, 7), with the
+        # plant hangar autopilot identified - the platform designs its loops from that. Gains written by
+        # hand in autopilot.toml go into the flight control section too, and win.
         from .autopilot import load_identification, load_settings
         from .profile import fly_results, sections
         autopilot = load_settings(os.path.join(self.dir, "autopilot.toml"))
-        # and what the platform should know of it: its profile (docs/control-architecture.md, 7)
         reference, identified = load_identification(os.path.join(self.dir, "autopilot.toml"))
-        profile = sections(a, fbw, autopilot, reference, identified, fly_results(self.dir))
+        profile = sections(a, fbw, reference, identified, fly_results(self.dir))
         text = _keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw, yaw_damper=yd, autopilot=autopilot, profile=profile))
         with open(xml_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
