@@ -43,6 +43,9 @@ struct VecEnvOptions {
     std::string task = "altitude_heading_hold";
     std::string observation = "state";
     std::string action = "surfaces";
+    /// "fixed": the action's own ranges; "aircraft": where the aircraft's
+    /// profile narrows a command's range (a fighter's load factor), that range.
+    std::string actionRanges = "fixed";
     double dt = 1.0 / 120.0;
     int frameSkip = 4;
     unsigned maxEpisodeSteps = 2000;

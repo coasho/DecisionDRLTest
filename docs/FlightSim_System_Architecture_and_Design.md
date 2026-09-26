@@ -656,8 +656,10 @@ Status (2026-09-25), since then: the viewer's package carries its own maps and o
 aircraft a profile of versioned sections (hangar writes its designs'), an adapter per family, and gear, flaps, brakes,
 speedbrake and pitch trim as capabilities of their own; step 3 let commands own the axes apart (a policy's bank beside
 an autopilot's height and speed, merged by the runtime into one pass down the cascade), with residual holds after
-preemption, per-engine throttles and a vehicle default that can hold instead of idle. M5's release is still to come:
-no `v*` tag yet.
+preemption, per-engine throttles and a vehicle default that can hold instead of idle; step 4 added envelope protection,
+which limits what an aircraft with an envelope is asked for and reports every exceedance with its size and duration,
+promising nothing about the state, on by default for every hangar design with the manoeuvre suite's failures unchanged.
+M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |
 | --- | --- | --- | --- | --- |

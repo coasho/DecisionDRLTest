@@ -19,7 +19,7 @@
 //                    "atmosphere": { "temperature_sea_level_k", "pressure_sea_level_pa", "humidity" },
 //                    "weather": { "visibility_m", "cloud_base_m", "cloud_cover", "precipitation" } },
 //   "effects": [ { "id": "gaussian_sensor_noise", "position_sigma_m": 5 }, ... ],   // every vehicle
-//   "vecenv": { "num_envs", "vehicles_per_env", "task", "observation", "action", "max_episode_steps",
+//   "vecenv": { "num_envs", "vehicles_per_env", "task", "observation", "action", "action_ranges", "max_episode_steps",
 //               "jitter": { "lat_deg", "lon_deg", "alt_m", "heading_deg", "airspeed_ms" },
 //               "target_altitude_delta_m", "target_heading_delta_deg" },          // batch layer (vecEnvOptions)
 //   "vehicles": [ {
@@ -72,6 +72,7 @@ struct ScenarioVecEnv {
     bool present = false;
     unsigned numEnvs = 1, vehiclesPerEnv = 1;
     std::string task = "altitude_heading_hold", observation = "state", action = "surfaces";
+    std::string actionRanges = "fixed"; ///< or "aircraft" (VecEnvOptions::actionRanges)
     unsigned maxEpisodeSteps = 2000;
     double latitudeJitterDeg = 0.02, longitudeJitterDeg = 0.02, altitudeJitterM = 150.0, headingJitterDeg = 180.0, airspeedJitterMs = 5.0;
     double targetAltitudeDeltaM = 300.0, targetHeadingDeltaDeg = 60.0;

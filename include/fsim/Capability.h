@@ -7,6 +7,7 @@
 
 #include "fsim/Export.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -159,6 +160,53 @@ struct ActivityRecord {
     double startTime = 0.0;            ///< simulation time
     double endTime = std::numeric_limits<double>::quiet_NaN(); ///< NaN while live
     bool live() const noexcept { return state == ActivityState::Pending || state == ActivityState::Active; }
+};
+
+// --- Envelope protection ------------------------------------------------------------
+
+/// What envelope protection does (docs/control-architecture.md, section 11).
+/// It limits what the control system demands; it does not keep the aircraft
+/// inside its envelope - a gust, inertia or a saturated surface can still take
+/// it past a limit, and that is reported, not prevented.
+enum class ProtectionMode : std::uint8_t {
+    Off,    ///< no limiting, no reports: the default for an aircraft without an envelope
+    Report, ///< the state's exceedances reported; the demand untouched
+    Limit,  ///< the demand limited to the envelope, and exceedances reported: the default with one
+};
+
+/// The limits of an envelope, by what they bound.
+enum class Limit : std::uint8_t { LoadFactorMax, LoadFactorMin, AlphaMax, Bank, PitchMax, PitchMin, RollRate, CasMin, CasMax, Mach, Count };
+inline constexpr std::size_t kLimitCount = static_cast<std::size_t>(Limit::Count);
+/// "load_factor_max", "load_factor_min", "alpha_max", "bank", "pitch_max",
+/// "pitch_min", "roll_rate", "cas_min", "cas_max", "mach".
+FSIM_API const char* limitName(Limit limit) noexcept;
+
+/// One configuration's limits (the profile's envelope section); NaN = no limit.
+struct EnvelopeLimits {
+    static constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    double loadFactorMin = kNone, loadFactorMax = kNone; ///< g
+    double alphaMaxRad = kNone;
+    double bankMaxRad = kNone, pitchMinRad = kNone, pitchMaxRad = kNone;
+    double rollRateMaxRadS = kNone;
+    double casMinMs = kNone, casMaxMs = kNone; ///< calibrated airspeed
+    double machMax = kNone;
+};
+
+/// One limit's record since the status was last read.
+struct LimitStatus {
+    std::uint32_t limitedUpdates = 0;  ///< control updates in which protection reduced the demand for it
+    std::uint32_t exceededUpdates = 0; ///< control updates in which the state was beyond it
+    double exceededS = 0.0;            ///< how long the state was beyond it, s
+    double worstExcess = 0.0;          ///< the most it was beyond: g, rad, rad/s, m/s (calibrated) or Mach
+};
+
+/// What envelope protection saw: the mode, and each limit's record since the
+/// status was last read. What to do about an exceedance - a reward term, the
+/// end of an episode - is the caller's; the platform only reports it.
+struct EnvelopeStatus {
+    ProtectionMode mode = ProtectionMode::Off;
+    std::array<LimitStatus, kLimitCount> limits{};
+    const LimitStatus& operator[](Limit l) const noexcept { return limits[static_cast<std::size_t>(l)]; }
 };
 
 // --- Capabilities -------------------------------------------------------------------

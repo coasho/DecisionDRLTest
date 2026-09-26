@@ -35,9 +35,11 @@ public:
     static constexpr std::size_t kEnginesSlot = kSlotCount + kSupportAxisCount;
     static constexpr std::size_t kActivities = kEnginesSlot + 1;
 
-    /// The vehicle this host serves, its runtime, catalog, adapter and profile (which outlive it).
+    /// The vehicle this host serves, its runtime, catalog, adapter and profile
+    /// (which outlive it), and how often its runtime updates: protection as
+    /// the profile gives it (docs/control-architecture.md, 11).
     void bind(std::uint32_t vehicle, ControlStack& runtime, const CapabilityCatalog& catalog, const VehicleAdapter& adapter,
-              const VehicleProfile& profile) noexcept;
+              const VehicleProfile& profile, double controlPeriodS = 1.0 / 120.0) noexcept;
 
     /// NEW. `state` is the vehicle's, for availability; `now` the simulation time.
     CommandResult submit(const Command& command, const CommandOptions& options, const sim::VehicleState& state, double now);
@@ -74,6 +76,13 @@ public:
     /// axes owned apart through a controller that is not axis-aware.
     Reason setVehicleDefault(VehicleDefault mode) noexcept;
     VehicleDefault vehicleDefault() const noexcept { return config_->vehicleDefault; }
+
+    /// Envelope protection's mode (fsim.envelope.protection); between steps.
+    void setProtection(ProtectionMode mode) noexcept;
+    ProtectionMode protection() const noexcept;
+    /// What protection saw since the last call: the limits it reduced the
+    /// demand for, the state's exceedances (how long, how far). Starts a new count.
+    EnvelopeStatus envelope() noexcept;
 
     /// After each world step: the runtime's report into the activities, then cleared.
     void afterStep(const sim::VehicleState& state, const EffectorPositions& positions, double now) noexcept;
@@ -125,6 +134,8 @@ private:
     CommandResult rejected(Reason reason, ActivityId activity = 0, ActivityId other = 0) const noexcept;
 
     std::uint32_t vehicle_ = 0;
+    double controlPeriodS_ = 1.0 / 120.0;
+    EnvelopeStatus envelope_{}; ///< since the last envelope()
     ControlStack* runtime_ = nullptr;
     RuntimeConfig* config_ = nullptr; ///< the runtime's, held for the fast path
     const CapabilityCatalog* catalog_ = nullptr;

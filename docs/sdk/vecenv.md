@@ -14,6 +14,7 @@ opt.numEnvs = 64; opt.vehiclesPerEnv = 1; opt.seed = 7;
 opt.task = "altitude_heading_hold";      // or "level_flight", or a task you register
 opt.observation = "state";               // 20 named channels
 opt.action = "surfaces";                 // "surfaces" | "attitude" | "acceleration" | "velocity"
+opt.actionRanges = "fixed";              // or "aircraft": the ranges the aircraft's profile narrows
 opt.worldName = "ppo-run-3";             // what the viewer lists
 fsim::VecEnv env(opt);
 
@@ -31,6 +32,7 @@ for (;;) {
 | Auto-reset | `opt.autoReset`. `NextStep` (default, Gymnasium's): after a terminal step the environment resets on the following `step()`, that action is ignored, reward is 0, flags are clear. `SameStep` (Stable-Baselines3's): the terminal step itself already returns the new episode's first observation, with that step's reward and flags. Either way the terminal observation is in `finalObservations()` |
 | Seeding | `Rng::forVehicle(seed ^ episode, env, vehicle)`: reproducible per episode; `reset(seed)` restarts the episode counter |
 | Actions | `"surfaces"`: aileron, elevator, rudder, throttle. `"attitude"`: roll (+-60 deg), pitch (+-25 deg), throttle. `"acceleration"`: load factor (-1..5 g), roll rate (+-3 rad/s), throttle. `"velocity"`: airspeed (20..120 m/s), vertical speed (+-10 m/s), turn rate (+-0.2 rad/s) |
+| Action ranges | `opt.actionRanges` (1.4). `"fixed"` (default) keeps the ranges above. `"aircraft"` maps an action onto the aircraft's own range wherever its profile narrows one: the F-16C's load factor to -3..9 g and its roll rate to 308 deg/s. Elsewhere the fixed ranges stay (the platform's own bounds - a 180-degree roll - make poor action scales). From C, `fsim_vecenv_set_action_ranges(env, "aircraft")`; from Python, `VecEnv(..., action_ranges="aircraft")`; in a scenario file, `"vecenv": {"action_ranges": "aircraft"}`. Either way the aircraft's envelope protection limits what the loops are asked for ([control.md](control.md#envelope-protection)) |
 | Observation `"state"` | `alt_msl_km, agl_km, tas_100ms, alpha, beta, roll, pitch, hdg_sin, hdg_cos, p, q, r, vz_down_100ms, ax_g, ay_g, az_g, alt_err_km, hdg_err_sin, hdg_err_cos, throttle` |
 | Tasks | `altitude_heading_hold` (targets sampled per episode within `targetAltitudeDeltaM` / `targetHeadingDeltaDeg` of the initial state; shaped reward, -10 on crash), `level_flight` |
 
@@ -48,7 +50,7 @@ exactly the same interfaces.
 | --- | --- | --- |
 | `fsim::Task` | `reset()` picks the episode's targets, `evaluate()` returns reward and termination for one vehicle | `registerTask(id, [](const TaskParams&) { ... })` |
 | `fsim::ObservationBuilder` | `size()`, `names()`, `build()` - the vector the agent sees, roughly normalised to [-1, 1] | `registerObservation(id, [] { ... })` |
-| `fsim::ActionMapper` | `size()`, `names()`, `level()`, `map()` - an action vector (each element in [-1, 1]) as a command at one control level | `registerAction(id, [] { ... })` |
+| `fsim::ActionMapper` | `size()`, `names()`, `level()`, `map()` - an action vector (each element in [-1, 1]) as a command at one control level; optionally `useRanges(capabilities)`, the aircraft's ranges for `"aircraft"` action ranges | `registerAction(id, [] { ... })` |
 
 ```cpp
 class Climb final : public fsim::Task {

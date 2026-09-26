@@ -111,6 +111,11 @@ FSIM_API int fsim_vecenv_autoreset(const fsim_vecenv* env);
  * Fills up to `capacity`; returns M*K. */
 FSIM_API uint32_t fsim_vecenv_vehicle_ids(const fsim_vecenv* env, uint32_t* ids, uint32_t capacity);
 
+/* The action's ranges: "fixed" (its own, the default) or "aircraft" - where the
+ * aircraft's profile narrows a command's range (a fighter's load factor to its
+ * n_min .. n_max), that range. From the next step. (ABI 1.4) */
+FSIM_API int fsim_vecenv_set_action_ranges(fsim_vecenv* env, const char* mode);
+
 /* Registered task, observation and action ids (built-ins included), by index; "" past the end. (ABI 1.2) */
 enum fsim_registry { FSIM_REGISTRY_TASK = 0, FSIM_REGISTRY_OBSERVATION = 1, FSIM_REGISTRY_ACTION = 2 };
 FSIM_API const char* fsim_registered_id(int registry, uint32_t index);
@@ -396,6 +401,28 @@ FSIM_API int fsim_activity_cancel(fsim_world* world, fsim_activity_id activity, 
 enum fsim_vehicle_default { FSIM_DEFAULT_NEUTRAL = 0, FSIM_DEFAULT_HOLD = 1 };
 FSIM_API int fsim_vehicle_set_default(fsim_world* world, uint32_t id, int mode, int32_t* reason);
 FSIM_API int fsim_vehicle_get_default(const fsim_world* world, uint32_t id, int32_t* mode);
+/* Envelope protection (docs/control-architecture.md, 11): LIMIT (the default for
+ * an aircraft whose profile has an envelope) limits what the control system
+ * demands to the envelope and reports the state's exceedances; REPORT only
+ * reports; OFF (the default without an envelope) does neither. It never keeps
+ * the aircraft inside: what crosses a limit is reported, not prevented.
+ * fsim_vehicle_envelope gives what it saw since the last call, per limit
+ * (fsim_limit_name(i): "load_factor_max", "alpha_max", "cas_min", ...), and
+ * starts a new count. Excesses are in g, rad, rad/s, m/s (calibrated) or Mach. */
+enum fsim_protection { FSIM_PROTECTION_OFF = 0, FSIM_PROTECTION_REPORT = 1, FSIM_PROTECTION_LIMIT = 2 };
+#define FSIM_LIMIT_COUNT 10
+typedef struct fsim_envelope_status {
+    int32_t mode;                                /* fsim_protection */
+    uint32_t reserved;
+    uint32_t limited_updates[FSIM_LIMIT_COUNT];  /* control updates in which the demand was limited for it */
+    uint32_t exceeded_updates[FSIM_LIMIT_COUNT]; /* control updates in which the state was beyond it */
+    double exceeded_s[FSIM_LIMIT_COUNT];         /* how long, s */
+    double worst_excess[FSIM_LIMIT_COUNT];       /* how far, at most */
+} fsim_envelope_status;
+FSIM_API int fsim_vehicle_set_protection(fsim_world* world, uint32_t id, int mode);
+FSIM_API int fsim_vehicle_get_protection(const fsim_world* world, uint32_t id, int32_t* mode);
+FSIM_API int fsim_vehicle_envelope(fsim_world* world, uint32_t id, fsim_envelope_status* out);
+FSIM_API const char* fsim_limit_name(int limit);
 /* A live or recently ended activity: FSIM_INVALID_ARGUMENT if the vehicle does not remember it. */
 FSIM_API int fsim_activity_get(const fsim_world* world, fsim_activity_id activity, fsim_activity_info* out);
 /* The vehicle's live activities, then the ended ones it remembers (newest first). */

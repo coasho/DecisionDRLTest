@@ -118,6 +118,12 @@ public:
     /// had when it was let go. Reason::None if set.
     control::Reason setVehicleDefault(std::uint32_t id, control::VehicleDefault mode);
     control::VehicleDefault vehicleDefault(std::uint32_t id) const noexcept;
+    /// Envelope protection (docs/control-architecture.md, 11): Limit by default
+    /// for an aircraft with an envelope, else Off. Reason::None if set.
+    control::Reason setProtection(std::uint32_t id, control::ProtectionMode mode);
+    control::ProtectionMode protection(std::uint32_t id) const noexcept;
+    /// What protection saw since the last call (each call starts a new count).
+    control::EnvelopeStatus envelope(std::uint32_t id);
     /// A live or recently ended activity; null if unknown.
     const control::ActivityRecord* activity(control::ActivityId activity) const noexcept;
     /// A vehicle's live activities, then the ended ones it remembers, newest first.

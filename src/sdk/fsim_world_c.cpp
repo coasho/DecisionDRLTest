@@ -658,6 +658,40 @@ FSIM_API int fsim_vehicle_get_default(const fsim_world* world, uint32_t id, int3
     return FSIM_OK;
 }
 
+static_assert(FSIM_LIMIT_COUNT == fsim::control::kLimitCount, "fsim_envelope_status has a row per limit");
+
+FSIM_API int fsim_vehicle_set_protection(fsim_world* world, uint32_t id, int mode) {
+    if (!world || mode < FSIM_PROTECTION_OFF || mode > FSIM_PROTECTION_LIMIT) return FSIM_INVALID_ARGUMENT;
+    if (world->world.setProtection(id, static_cast<fsim::control::ProtectionMode>(mode)) != fsim::control::Reason::None)
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_protection: no vehicle " + std::to_string(id));
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_vehicle_get_protection(const fsim_world* world, uint32_t id, int32_t* mode) {
+    if (!world || !mode || !world->world.vehicleState(id)) return FSIM_INVALID_ARGUMENT;
+    *mode = static_cast<int32_t>(world->world.protection(id));
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_vehicle_envelope(fsim_world* world, uint32_t id, fsim_envelope_status* out) {
+    if (!world || !out || !world->world.vehicleState(id)) return FSIM_INVALID_ARGUMENT;
+    const fsim::control::EnvelopeStatus s = world->world.envelope(id);
+    std::memset(out, 0, sizeof *out);
+    out->mode = static_cast<int32_t>(s.mode);
+    for (std::size_t l = 0; l < fsim::control::kLimitCount; ++l) {
+        out->limited_updates[l] = s.limits[l].limitedUpdates;
+        out->exceeded_updates[l] = s.limits[l].exceededUpdates;
+        out->exceeded_s[l] = s.limits[l].exceededS;
+        out->worst_excess[l] = s.limits[l].worstExcess;
+    }
+    return FSIM_OK;
+}
+
+FSIM_API const char* fsim_limit_name(int limit) {
+    if (limit < 0 || limit >= static_cast<int>(fsim::control::kLimitCount)) return "?";
+    return fsim::control::limitName(static_cast<fsim::control::Limit>(limit));
+}
+
 FSIM_API int fsim_activity_get(const fsim_world* world, fsim_activity_id activity, fsim_activity_info* out) {
     const auto* a = world && out ? world->world.activity(activity) : nullptr;
     if (!a) return FSIM_INVALID_ARGUMENT;

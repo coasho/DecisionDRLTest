@@ -1,5 +1,6 @@
 #include "control/CapabilityHost.h"
 
+#include "control/Protection.h"
 #include "control/Registry.h"
 #include "core/Log.h"
 
@@ -37,13 +38,30 @@ CommandResult accepted(ActivityId activity, std::uint16_t flags = 0) noexcept {
 } // namespace
 
 void CapabilityHost::bind(std::uint32_t vehicle, ControlStack& runtime, const CapabilityCatalog& catalog, const VehicleAdapter& adapter,
-                          const VehicleProfile& profile) noexcept {
+                          const VehicleProfile& profile, double controlPeriodS) noexcept {
     vehicle_ = vehicle;
     runtime_ = &runtime;
     config_ = &runtime.config();
     catalog_ = &catalog;
     adapter_ = &adapter;
     profile_ = &profile;
+    controlPeriodS_ = controlPeriodS;
+    config_->protection = protectionFor(profile); // Limit with an envelope section, else Off
+    ++config_->revision;
+}
+
+void CapabilityHost::setProtection(ProtectionMode mode) noexcept {
+    config_->protection.mode = mode;
+    ++config_->revision;
+}
+
+ProtectionMode CapabilityHost::protection() const noexcept { return config_->protection.mode; }
+
+EnvelopeStatus CapabilityHost::envelope() noexcept {
+    EnvelopeStatus status = envelope_;
+    status.mode = config_->protection.mode;
+    envelope_ = EnvelopeStatus{};
+    return status;
 }
 
 CommandResult CapabilityHost::rejected(Reason reason, ActivityId activity, ActivityId other) const noexcept {
@@ -432,6 +450,16 @@ void CapabilityHost::afterStep(const sim::VehicleState& state, const EffectorPos
             report.slots[s].events = 0;
             report.slots[s].failure = Reason::None;
         }
+    }
+    // the envelope: what was limited, how long and how far the state was beyond each limit
+    for (std::size_t l = 0; l < kLimitCount; ++l) {
+        const LimitReport& r = report.limits[l];
+        if (!r.limitedUpdates && !r.exceededUpdates) continue;
+        LimitStatus& status = envelope_.limits[l];
+        status.limitedUpdates += r.limitedUpdates;
+        status.exceededUpdates += r.exceededUpdates;
+        status.exceededS += r.exceededUpdates * controlPeriodS_;
+        status.worstExcess = std::max(status.worstExcess, static_cast<double>(r.worstExcess));
     }
     report.clearAccumulators();
 }

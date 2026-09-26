@@ -15,6 +15,7 @@
 // interfaces. Registration is process-wide and takes effect for environments
 // created afterwards; registering an existing id replaces it.
 
+#include "fsim/Capability.h"
 #include "fsim/Control.h"
 #include "fsim/Export.h"
 #include "fsim/Rng.h"
@@ -81,6 +82,12 @@ public:
     virtual const std::vector<std::string>& names() const noexcept = 0;
     virtual control::Level level() const noexcept = 0;
     virtual control::Command map(const float* action) const = 0;
+    /// The aircraft's capabilities, with their parameters' ranges for this
+    /// aircraft (VecEnv action_ranges "aircraft"); empty to go back to the
+    /// mapper's own ("fixed"). The built-in mappers then map onto a range the
+    /// aircraft's profile narrowed - a fighter's load factor to its n_min ..
+    /// n_max - and keep their own elsewhere. A mapper may ignore it.
+    virtual void useRanges(const std::vector<control::CapabilityDescriptor>& capabilities) { (void)capabilities; }
 };
 
 using TaskFactory = std::function<std::unique_ptr<Task>(const TaskParams&)>;

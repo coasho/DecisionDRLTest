@@ -25,14 +25,17 @@ class VecEnv:
     their jitters, target_altitude_delta_m, target_heading_delta_deg,
     world_name, publish, terrain, scenario_path, jsbsim_root) plus
     ``autoreset``: "next_step" (Gymnasium's default) or "same_step"
-    (Stable-Baselines3's). Batch index is env * K + vehicle.
+    (Stable-Baselines3's), and ``action_ranges``: "fixed" (the action's own)
+    or "aircraft" (where the aircraft's profile narrows a command's range - a
+    fighter's load factor to its n_min .. n_max - that range). Batch index is
+    env * K + vehicle.
 
         env = fsim.VecEnv(64, task="altitude_heading_hold", action="surfaces", seed=1)
         obs = env.reset()                                    # (64, 20) float32, a view
         obs, rewards, terminated, truncated = env.step(actions)   # actions (64, 4) in [-1, 1]
     """
 
-    def __init__(self, num_envs=1, vehicles_per_env=1, *, autoreset="next_step", **options):
+    def __init__(self, num_envs=1, vehicles_per_env=1, *, autoreset="next_step", action_ranges="fixed", **options):
         for key in list(options):
             if options[key] is None:
                 del options[key]
@@ -41,6 +44,9 @@ class VecEnv:
         options["num_envs"] = int(num_envs)
         options["vehicles_per_env"] = int(vehicles_per_env)
         self._h = h = _native.VecEnv(options)
+        if action_ranges != "fixed":
+            h.set_action_ranges(action_ranges)
+        self.action_ranges = action_ranges
         self.autoreset = autoreset
         b = h.buffers()
         self.num_envs = b["num_envs"]

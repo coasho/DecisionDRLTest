@@ -1,6 +1,7 @@
 #include "control/ControlStack.h"
 
 #include "control/Adapter.h"
+#include "control/Protection.h"
 #include "control/Registry.h"
 #include "control/Runtime.h"
 #include "core/Log.h"
@@ -10,7 +11,26 @@
 
 namespace fsim::control {
 
+#if defined(__GNUC__) || defined(__clang__)
+#define FSIM_ALWAYS_INLINE inline __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define FSIM_ALWAYS_INLINE __forceinline
+#else
+#define FSIM_ALWAYS_INLINE inline
+#endif
+
 namespace {
+
+/// The index of the lowest set bit of m (m != 0).
+inline unsigned lowestBit(unsigned m) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+    return static_cast<unsigned>(__builtin_ctz(m));
+#else
+    unsigned i = 0;
+    while (!(m & 1u)) m >>= 1, ++i;
+    return i;
+#endif
+}
 
 /// What every vehicle flies before its first command, and what flies an axis
 /// nobody owns: surfaces centred, throttle 0, flaps up, brakes off, gear held.
@@ -223,21 +243,47 @@ void ControlStack::fail(sim::ControlInputs& out) noexcept {
 }
 
 void ControlStack::update(const ControlContext& ctx, sim::ControlInputs& out) {
-    RuntimeReport& report = *report_;
-    ++report.updates;
+    ++report_->updates;
     derived_.fill(nullptr);
     const std::size_t s = wholeSlot();
-    if (s == kNoSlot) return topSlot() != kNoSlot || holdsDefault() ? flyMerged(ctx, out) : flyNeutral(out);
+    if (s == kNoSlot) return flyGeneral(ctx, out);
+    if (config_->protection.mode == ProtectionMode::Off) return cascade<false>(ctx, s, out);
+    const Level entry = config_->slots[s].level; // the acceleration loop's setpoints need nothing from the state; the actuators' limiter reads it itself
+    selectLimits(ctx, entry != Level::Acceleration && entry != Level::Actuator);
+    cascade<true>(ctx, s, out);
+}
 
-    // One slot owns every primary axis (the usual case): its cascade, as it always ran.
+template <bool Protected>
+FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::size_t s, sim::ControlInputs& out) {
+    RuntimeReport& report = *report_;
     const SetpointSlot& slot = config_->slots[s];
     SlotReport& flown = report.slots[s];
     flown.generation = slot.generation;
     flown.revision = slot.revision;
+    // Protection (docs/control-architecture.md, 11.3): each setpoint limited
+    // before its level flies it, as the loops see the state.
+    [[maybe_unused]] const Protection& protection = config_->protection;
+    [[maybe_unused]] const bool limiting = Protected && protection.mode == ProtectionMode::Limit;
+    [[maybe_unused]] LimitMask limited = 0;
+    [[maybe_unused]] const LimitState here{&ctx.sensed, tasPerCas_, tasPerMach_, bankCos_};
+    auto limit = [&](Command& setpoint) {
+        if constexpr (Protected)
+            if (limiting) limited = static_cast<LimitMask>(limited | limitSetpoint(setpoint, *active_, protection, here));
+    };
 
-    // The engaged command is read where the host keeps it, never copied.
+    // The engaged command is read where the host keeps it, never copied -
+    // unless protection limits it: then a copy, the host's own left as it was.
     const Command* current = &slot.command;
     Level level = slot.level;
+    if constexpr (Protected) {
+        if (limiting && level != Level::Behavior && level != Level::Actuator) {
+            Command& entry = merged_[static_cast<std::size_t>(level)];
+            if (entry.index() == current->index()) assignSetpoint(entry, *current); // a struct copy, no variant machinery
+            else entry = *current;
+            limit(entry);
+            current = &entry;
+        }
+    }
     derived_[static_cast<std::size_t>(level)] = current;
 
     // Behaviours own their lifecycle; the rest of the cascade is stateless per level.
@@ -262,6 +308,7 @@ void ControlStack::update(const ControlContext& ctx, sim::ControlInputs& out) {
         const auto n = static_cast<std::size_t>(nextLevel);
         auto& produced = outputs_[static_cast<std::size_t>(level)];
         produced = std::move(next);
+        if (nextLevel != Level::Actuator) limit(produced);
         derived_[n] = &produced;
         level = nextLevel;
         current = derived_[n];
@@ -283,16 +330,68 @@ void ControlStack::update(const ControlContext& ctx, sim::ControlInputs& out) {
         const auto n = static_cast<std::size_t>(nextLevel);
         auto& produced = outputs_[static_cast<std::size_t>(level)];
         produced = std::move(next);
+        if (nextLevel != Level::Actuator) limit(produced);
         derived_[n] = &produced;
         level = nextLevel;
         current = derived_[n];
     }
-    actuate(std::get<ActuatorCommand>(*current), out);
+    if constexpr (Protected) {
+        // An elevator commanded as such: the feedback limiter on a surface-controlled aircraft.
+        if (limiting && slot.level == Level::Actuator) {
+            Command& limitedCommand = merged_[static_cast<std::size_t>(Level::Actuator)];
+            if (limitedCommand.index() == current->index()) assignSetpoint(limitedCommand, *current);
+            else limitedCommand = *current;
+            auto& a = std::get<ActuatorCommand>(limitedCommand);
+            limited = static_cast<LimitMask>(limited | limitElevator(a.elevator, *active_, protection, ctx.sensed));
+            derived_[static_cast<std::size_t>(Level::Actuator)] = &limitedCommand;
+            actuate(a, out);
+        } else {
+            actuate(std::get<ActuatorCommand>(*current), out);
+        }
+        watch(ctx, limited);
+    } else {
+        actuate(std::get<ActuatorCommand>(*current), out);
+    }
 }
 
 void ControlStack::flyNeutral(sim::ControlInputs& out) {
     derived_[static_cast<std::size_t>(Level::Actuator)] = &kNeutral;
     actuate(std::get<ActuatorCommand>(kNeutral), out);
+}
+
+void ControlStack::flyGeneral(const ControlContext& ctx, sim::ControlInputs& out) {
+    const bool protecting = config_->protection.mode != ProtectionMode::Off;
+    if (protecting) selectLimits(ctx, true);
+    limited_ = 0;
+    if (topSlot() != kNoSlot || holdsDefault()) flyMerged(ctx, out); // the protection stage inside: limited_
+    else flyNeutral(out);                                            // the neutral command: nothing to limit
+    if (protecting) watch(ctx, limited_);
+}
+
+void ControlStack::selectLimits(const ControlContext& ctx, bool state) noexcept {
+    // the configuration the aircraft flew into this update with: the flaps it was given, its gear
+    active_ = &activeLimits(config_->protection, last_.flaps, ctx.state.gearPosition, geared_);
+    if (!state || config_->protection.mode != ProtectionMode::Limit) return;
+    const LimitState here = limitState(ctx.sensed, *active_, config_->protection); // as the loops see it
+    tasPerCas_ = here.tasPerCas, tasPerMach_ = here.tasPerMach, bankCos_ = here.bankCos;
+}
+
+void ControlStack::watch(const ControlContext& ctx, LimitMask limited) noexcept {
+    RuntimeReport& report = *report_;
+    for (unsigned m = limited; m; m &= m - 1) { // each set bit
+        const auto l = static_cast<std::size_t>(lowestBit(m));
+        ++report.limits[l].limitedUpdates;
+        report.axisFlags[static_cast<std::size_t>(limitAxis(static_cast<Limit>(l)))] |= kDemandLimited;
+    }
+    std::array<double, kLimitCount> excess;
+    const LimitMask beyond = exceeded(*active_, ctx.state, excess); // the aircraft's truth, not what its sensors say
+    for (unsigned m = beyond; m; m &= m - 1) {
+        const auto l = static_cast<std::size_t>(lowestBit(m));
+        LimitReport& r = report.limits[l];
+        ++r.exceededUpdates;
+        r.worstExcess = std::max(r.worstExcess, static_cast<float>(excess[l]));
+        report.axisFlags[static_cast<std::size_t>(limitAxis(static_cast<Limit>(l)))] |= kExceeded;
+    }
 }
 
 void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out) {
@@ -317,6 +416,13 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
             report.slots[s].generation = c.slots[s].generation;
             report.slots[s].revision = c.slots[s].revision;
         }
+
+    // Protection (docs/control-architecture.md, 11.3): each level's setpoint to
+    // the envelope before its loop flies it, as the loops see the state.
+    const Protection& protection = c.protection;
+    const bool limiting = protection.mode == ProtectionMode::Limit;
+    const LimitState here{&ctx.sensed, tasPerCas_, tasPerMach_, bankCos_};
+    LimitMask limited = 0;
 
     // The vehicle default's hold (VehicleDefault::Hold) enters at the velocity
     // level: the heading, true airspeed and height each group had when it was
@@ -390,6 +496,7 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
         merged = blankCommand(level);
         for (std::size_t a = 0; a < kPrimary; ++a)
             if (engaged & (1u << a)) copyAxisFields(merged, *from[a], static_cast<Axis>(a));
+        if (limiting) limited = static_cast<LimitMask>(limited | limitSetpoint(merged, *active_, protection, here));
         derived_[static_cast<std::size_t>(l)] = &merged;
         Controller* controller = controllers_[static_cast<std::size_t>(l)].get();
         if (!controller) {
@@ -431,10 +538,17 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
     if (const auto* x = chainOf(Axis::Flaps)) final.flaps = x->flaps;
     if (const auto* x = chainOf(Axis::Gear)) final.gearDown = x->gearDown;
     if (const auto* x = chainOf(Axis::Brakes)) final.brakeLeft = x->brakeLeft, final.brakeRight = x->brakeRight;
+    // An elevator commanded as such: the feedback limiter on a surface-controlled
+    // aircraft. (Through the loops, their setpoints were limited above: a second
+    // limiter after them would only fight their integrators.)
+    const std::uint8_t pitchOwner = c.owner[static_cast<std::size_t>(Axis::Pitch)];
+    if (limiting && pitchOwner < kSlotCount && c.slots[pitchOwner].level == Level::Actuator)
+        limited = static_cast<LimitMask>(limited | limitElevator(final.elevator, *active_, protection, ctx.sensed));
     Command& assembled = merged_[static_cast<std::size_t>(Level::Actuator)];
     assembled = final;
     derived_[static_cast<std::size_t>(Level::Actuator)] = &assembled;
     actuate(final, out);
+    limited_ = limited; // flyGeneral reports it, with the state's exceedances
 }
 
 void ControlStack::actuate(const ActuatorCommand& a, sim::ControlInputs& out) noexcept {

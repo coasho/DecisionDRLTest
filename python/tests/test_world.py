@@ -344,6 +344,24 @@ class CapabilityTest(unittest.TestCase):
             single.submit_support("engines", 0.5, HOLD, HOLD, HOLD)
         self.assertEqual(refused.exception.reason, "unknown_capability")
 
+    def test_protection(self):
+        world = make_world(name="py-protection")
+        stock = fly(world, "stock")
+        self.assertEqual(stock.protection, fsim.ProtectionMode.OFF)  # a stock aircraft has no envelope
+        viper = fly(world, "viper", type="jsbsim:f16c", altitude_msl_m=3000.0, airspeed_ms=160.0, longitude_deg=-122.3)
+        self.assertEqual(viper.protection, fsim.ProtectionMode.LIMIT)
+        self.assertIn("fsim.envelope.protection", [c.id for c in viper.capabilities()])
+        viper.set_protection("report")
+        self.assertEqual(viper.protection, fsim.ProtectionMode.REPORT)
+        world.step(10)
+        e = viper.envelope()
+        self.assertEqual(e.mode, fsim.ProtectionMode.REPORT)
+        self.assertEqual(sorted(e.limits), sorted(fsim.LIMITS))
+        self.assertEqual(fsim.LIMITS[:3], ("load_factor_max", "load_factor_min", "alpha_max"))
+        self.assertEqual(e.limits["alpha_max"], fsim.LimitStatus(0, 0, 0.0, 0.0))  # level flight: well inside
+        with self.assertRaises(ValueError):
+            viper.set_protection(7)
+
     def test_batched_updates(self):
         world = make_world(name="py-batch-updates")
         vs = [fly(world, "b%d" % i, longitude_deg=-122.38 + 0.01 * i) for i in range(3)]

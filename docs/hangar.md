@@ -970,7 +970,7 @@ and the platform treats it as unknown:
 | --- | --- |
 | `identity` | the design's category (fighter, transport, ...) and its law: fly-by-wire or surfaces |
 | `effectors` | the law again, for what the stick means: a load-factor and roll-rate demand, or the surfaces. Also the effectors the design has: flaps if it has a flap channel, retractable gear, wheel brakes, and pitch trim where the elevator channel sums one |
-| `envelope` | the `[flight_control]` limits the design states (g, angle of attack, roll rate), and, for an aircraft without a limiting law, the stall its flight tests flew (its speed and angle) |
+| `envelope` | the `[flight_control]` limits the design states (g, angle of attack, roll rate), and, for an aircraft without a limiting law, the stall its flight tests flew (its speed and angle). A fly-by-wire design's also says which of them its law enforces (`law_load_factor`, `law_alpha`, `law_roll_rate`): the platform's envelope protection clamps setpoints to those and adds no limiter of its own ([control.md](sdk/control.md#envelope-protection)) |
 | `propulsion` | the engines, their type, afterburning, and the thrust lag the autopilot identified |
 | `plant` | the autopilot's `[reference]` and `[identified]` tables in `autopilot.toml`: the responses to aileron, elevator, rudder and throttle there, each with its lag; and the trim law and zero-lift angle the gains use |
 | `performance` | the flight tests' stall speed, maximum speed, ceiling and climb (`out/fly.json`) |

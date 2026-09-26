@@ -1,5 +1,6 @@
 #include "env/Observation.h"
 
+#include "control/Catalog.h"
 #include "core/Log.h"
 #include "core/Units.h"
 #include "env/Registry.h"
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <string_view>
 
 namespace fsim::env {
 
@@ -65,6 +67,31 @@ private:
 double cl(float v) noexcept { return static_cast<double>(std::clamp(v, -1.0f, 1.0f)); }
 double unit(float v) noexcept { return (cl(v) + 1.0) * 0.5; } // [-1,1] -> [0,1]
 
+/// An action element's range: [-1, 1] onto [lo, hi].
+struct Range {
+    double lo, hi;
+    double operator()(float v) const noexcept { return lo + (cl(v) + 1.0) * 0.5 * (hi - lo); }
+};
+
+/// A parameter's range for this aircraft where its profile narrowed it (the
+/// platform's own catalog gives it wider): the fixed range otherwise.
+Range aircraftRange(const std::vector<control::CapabilityDescriptor>& capabilities, std::string_view capability,
+                    std::string_view parameter, Range fixed) {
+    static const control::CapabilityCatalog platform; // the loops' own bounds
+    auto find = [&](const std::vector<control::CapabilityDescriptor>& all) -> const control::ParameterInfo* {
+        for (const auto& d : all)
+            if (d.id == capability)
+                for (const auto& p : d.parameters)
+                    if (p.name == parameter) return &p;
+        return nullptr;
+    };
+    const control::ParameterInfo* own = find(capabilities);
+    const control::ParameterInfo* wide = find(platform.descriptors());
+    if (!own || !wide || !std::isfinite(own->min) || !std::isfinite(own->max) || own->max <= own->min) return fixed;
+    if (own->min == wide->min && own->max == wide->max) return fixed; // not the aircraft's: the platform's bounds
+    return Range{own->min, own->max};
+}
+
 class SurfacesAction final : public ActionMapper {
 public:
     SurfacesAction() : names_{"aileron", "elevator", "rudder", "throttle"} {}
@@ -86,6 +113,7 @@ private:
 };
 
 /// roll (+-60 deg), pitch (+-25 deg), throttle: the attitude loop holds them.
+/// With the aircraft's ranges, roll and pitch to its bank and pitch limits.
 class AttitudeAction final : public ActionMapper {
 public:
     AttitudeAction() : names_{"roll", "pitch", "throttle"} {}
@@ -94,17 +122,25 @@ public:
     control::Level level() const noexcept override { return control::Level::Attitude; }
     control::Command map(const float* a) const override {
         control::AttitudeCommand c;
-        c.rollRad = cl(a[0]) * units::degreesToRadians(60.0);
-        c.pitchRad = cl(a[1]) * units::degreesToRadians(25.0);
+        c.rollRad = roll_(a[0]);
+        c.pitchRad = pitch_(a[1]);
         c.throttle = unit(a[2]);
         return c;
     }
+    void useRanges(const std::vector<control::CapabilityDescriptor>& capabilities) override {
+        roll_ = aircraftRange(capabilities, "fsim.flight.attitude", "roll_rad", kRoll);
+        pitch_ = aircraftRange(capabilities, "fsim.flight.attitude", "pitch_rad", kPitch);
+    }
 
 private:
+    static constexpr Range kRoll{-60.0 * units::kDegreesToRadians, 60.0 * units::kDegreesToRadians};
+    static constexpr Range kPitch{-25.0 * units::kDegreesToRadians, 25.0 * units::kDegreesToRadians};
     std::vector<std::string> names_;
+    Range roll_ = kRoll, pitch_ = kPitch;
 };
 
-/// load factor (-1 .. 5 g), roll rate (+-3 rad/s), throttle.
+/// load factor (-1 .. 5 g), roll rate (+-3 rad/s), throttle. With the
+/// aircraft's ranges, its n_min .. n_max and its roll rate limit.
 class AccelerationAction final : public ActionMapper {
 public:
     AccelerationAction() : names_{"load_factor", "roll_rate", "throttle"} {}
@@ -113,14 +149,20 @@ public:
     control::Level level() const noexcept override { return control::Level::Acceleration; }
     control::Command map(const float* a) const override {
         control::AccelerationCommand c;
-        c.loadFactorG = 2.0 + 3.0 * cl(a[0]);
-        c.rollRateRadS = 3.0 * cl(a[1]);
+        c.loadFactorG = loadFactor_(a[0]);
+        c.rollRateRadS = rollRate_(a[1]);
         c.throttle = unit(a[2]);
         return c;
     }
+    void useRanges(const std::vector<control::CapabilityDescriptor>& capabilities) override {
+        loadFactor_ = aircraftRange(capabilities, "fsim.flight.acceleration", "load_factor_g", kLoadFactor);
+        rollRate_ = aircraftRange(capabilities, "fsim.flight.acceleration", "roll_rate_rad_s", kRollRate);
+    }
 
 private:
+    static constexpr Range kLoadFactor{-1.0, 5.0}, kRollRate{-3.0, 3.0};
     std::vector<std::string> names_;
+    Range loadFactor_ = kLoadFactor, rollRate_ = kRollRate;
 };
 
 /// airspeed (20 .. 120 m/s), vertical speed (+-10 m/s), turn rate (+-0.2 rad/s).

@@ -44,6 +44,7 @@ comments (`//`, `/* */`) and trailing commas are accepted.
   ],
   "vecenv": {                      // optional: the batch layer's settings (see below)
     "num_envs": 64, "vehicles_per_env": 1, "task": "altitude_heading_hold", "observation": "state", "action": "attitude",
+    "action_ranges": "fixed",      // or "aircraft": the ranges the aircraft's profile narrows (vecenv.md)
     "max_episode_steps": 600,
     "jitter": { "lat_deg": 0.02, "lon_deg": 0.02, "alt_m": 150, "heading_deg": 180, "airspeed_ms": 5 },
     "target_altitude_delta_m": 300, "target_heading_delta_deg": 60

@@ -78,22 +78,18 @@ struct EffectorsSection {
 
 // --- envelope -------------------------------------------------------------------------
 
-/// One configuration's limits (section 11); NaN = no limit.
-struct EnvelopeLimits {
-    double loadFactorMin = kUnknown, loadFactorMax = kUnknown; ///< g
-    double alphaMaxRad = kUnknown;
-    double bankMaxRad = kUnknown, pitchMinRad = kUnknown, pitchMaxRad = kUnknown;
-    double rollRateMaxRadS = kUnknown;
-    double casMinMs = kUnknown, casMaxMs = kUnknown; ///< calibrated airspeed
-    double machMax = kUnknown;
-};
-
 struct EnvelopeSection {
     static constexpr std::uint16_t kVersion = 1;
     SectionHeader header;
     EnvelopeLimits clean, flaps;   ///< flaps: beyond `flapsThreshold`
     double flapsThreshold = 0.05;  ///< normalised flap position
     double gearCasMaxMs = kUnknown;
+    // Limits the aircraft's own flight control law already enforces (a
+    // fly-by-wire law's g and alpha limiters): protection clamps setpoints to
+    // them but adds no feedback limiter of its own, so the two cannot fight.
+    bool lawLoadFactor = false; ///< n_min and n_max
+    bool lawAlpha = false;      ///< alpha_max
+    bool lawRollRate = false;   ///< roll_rate_max
 };
 
 // --- propulsion -------------------------------------------------------------------------

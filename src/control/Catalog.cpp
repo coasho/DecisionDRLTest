@@ -190,6 +190,18 @@ void CapabilityCatalog::addSupport(std::size_t alternative, int engines) {
     descriptors_.push_back(std::move(d));
 }
 
+void CapabilityCatalog::addProtection() {
+    if (find("fsim.envelope.protection") >= 0) return;
+    CapabilityDescriptor d;
+    d.id = "fsim.envelope.protection";
+    d.kind = CapabilityKind::Status;
+    d.interactions = kSettings | kStatus; // a mode to set, a status to read; nothing to command
+    d.level = Level::Actuator;
+    d.axes = 0;                           // it owns no axis: it limits what the owners demand
+    d.parameters = {parameter("mode", "", 2.0, 0.0, 2.0, false)}; // 0 off, 1 report, 2 limit
+    descriptors_.push_back(std::move(d));
+}
+
 void CapabilityCatalog::addBehaviors() {
     auto& registry = ControllerRegistry::instance();
     registryRevision_ = registry.revision();

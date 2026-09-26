@@ -2044,7 +2044,8 @@ class Profile(unittest.TestCase):
         self.assertEqual((p["effectors"]["pitch"], p["effectors"]["roll"], p["effectors"]["neutral"]), (1, 1, 1))
         self.assertEqual(p["effectors"]["pitch_trim"], 0)  # the law trims itself
         self.assertEqual(p["envelope"], {"clean/n_max": 9.0, "clean/n_min": -3.0, "clean/alpha_max_deg": 25.0,
-                                         "clean/roll_rate_max_deg_s": 308.0})
+                                         "clean/roll_rate_max_deg_s": 308.0,
+                                         "law_load_factor": 1, "law_alpha": 1, "law_roll_rate": 1})  # the law enforces them
         self.assertEqual(p["propulsion"]["afterburner"], 1)
         self.assertEqual(p["propulsion"]["spool_s"], 0.17)
         self.assertEqual(p["plant"]["roll/tau_s"], 0.25)

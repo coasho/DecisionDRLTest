@@ -215,9 +215,13 @@ enum class ProtectionMode : std::uint8_t { Off, Report, Limit };
 struct Protection {
     ProtectionMode mode = ProtectionMode::Off;
     std::uint16_t lawEnforces = 0;  ///< limits (bit per Limit) the aircraft's own law already enforces
-    EnvelopeLimits clean{}, flaps{};
+    EnvelopeLimits clean{}, flaps{};  ///< flaps: a limit the profile gives only for clean is clean's (step 4)
     double flapsThreshold = 0.05;   ///< flaps beyond this select `flaps`
     double gearCasMaxMs = std::numeric_limits<double>::quiet_NaN();  ///< with the gear down; NaN = no limit
+    // the feedback limiters' numbers, from the profile (step 4)
+    double alphaZeroLiftRad = 0.0;  ///< the plant's zero-lift angle of attack
+    bool pitchSurface = false;      ///< the elevator input moves a surface (effectors.pitch)
+    double elevatorGainG, elevatorGainCasMs;  ///< the plant's load factor per unit elevator, and where; NaN: no elevator limiter
 };
 
 enum class VehicleDefault : std::uint8_t { Neutral, Hold };  // public, fsim/Capability.h (step 3)
@@ -357,7 +361,7 @@ struct VehicleProfile {
 | --- | --- | --- | --- |
 | `identity` | <ul><li>Class (code)</li><li>Control family: 0 stock, 1 direct surfaces, 2 fly-by-wire</li><li>Build date (yyyymmdd)</li></ul> | hangar | the catalog (which adapter); tasks and VecEnv (class defaults) |
 | `effectors` | <ul><li>What each primary control means: pitch 0 surface, 1 load-factor demand, 2 pitch-rate demand; roll 0 surface, 1 roll-rate demand; yaw 0 surface, 1 sideslip demand</li><li>What neutral stick holds: 0 nothing (surface), 1 the flight path, 2 one g</li><li>Which support effectors exist: flaps, retractable gear, speedbrake, pitch trim, wheel brakes, and their transit times</li></ul> | hangar; the adapter derives flaps and gear for stock aircraft | the adapter (support capabilities, allocation), the catalog |
-| `envelope` | Limits per configuration, each for `clean` and `flaps` (with the threshold between them): <ul><li>`n_min`, `n_max`</li><li>`alpha_max_deg`, `bank_max_deg`, `pitch_min_deg`, `pitch_max_deg`</li><li>`roll_rate_max_deg_s`</li><li>`cas_min_ms`, `cas_max_ms`, `mach_max`</li></ul> Also `gear_cas_max_ms` | hangar: design limits, flight-tested stall speeds, published placards | the protection stage, the catalog's ranges, VecEnv's ranges |
+| `envelope` | Limits per configuration, each for `clean` and `flaps` (with the threshold between them): <ul><li>`n_min`, `n_max`</li><li>`alpha_max_deg`, `bank_max_deg`, `pitch_min_deg`, `pitch_max_deg`</li><li>`roll_rate_max_deg_s`</li><li>`cas_min_ms`, `cas_max_ms`, `mach_max`</li></ul> Also `gear_cas_max_ms`, and which limits the aircraft's own law enforces: `law_load_factor`, `law_alpha`, `law_roll_rate` (flags; step 4) | hangar: design limits, flight-tested stall speeds, published placards | the protection stage, the catalog's ranges, VecEnv's ranges |
 | `propulsion` | <ul><li>Engine count and type: 0 piston, 1 turboprop, 2 turbofan, 3 turbojet, 4 electric</li><li>Afterburner, with the throttle where it begins</li><li>Reverse thrust</li><li>Spool time constant</li></ul> | hangar; derived from the flight model | the adapter (per-engine throttle), the catalog |
 | `plant` | <ul><li>The reference condition: altitude, true and equivalent airspeed, mass</li><li>Identified first-order responses (time constant and gain) for roll, pitch, yaw and speed</li><li>Trim elevator and its lift part</li><li>Zero-lift angle of attack</li></ul> | hangar's identification | the control laws (step 5), the trim feedforwards |
 | `performance` | Stall speeds (clean, flaps), maximum speed, ceiling, climb rate; informational | hangar's flight tests | tasks, curricula, scenario checks |
@@ -461,7 +465,7 @@ A capability the aircraft does not have is simply absent from its catalog.
 | `fsim.support.wheel_brakes` | support | brakes | persistent | left, right 0..1 | 2 |
 | `fsim.support.speedbrake` | support | speedbrake | persistent | position 0..1; only where the aircraft has one | 2 |
 | `fsim.support.pitch_trim` | support | pitch trim | persistent | position −1..1; only where the flight model has a trim channel | 2 |
-| `fsim.envelope.protection` | status (settings, status) | none | none | mode: off, report or limit; status: the active limits, what was limited and what was exceeded | 4 |
+| `fsim.envelope.protection` | status (settings, status) | none | none | mode: off, report or limit (its one parameter; limit by default); status: `envelope()`, per limit what was limited and what was exceeded since the last read. The limits themselves are the profile's. Offered where the profile has an envelope section | 4 |
 
 **What guidance flies through.** Guidance capabilities list the flight capabilities their output goes through (`uses`), for example `fsim.guidance.hold` uses `fsim.flight.velocity`. Their availability follows the least available of those.
 
@@ -479,7 +483,7 @@ Discovery is a query, answered from the catalog and the host:
 | `capabilityStatus(vehicle, id)` | availability and reason |
 | `activities(vehicle)` | the live activities, then the recent ended ones |
 | `activity(id)` | one activity's record |
-| `envelope(vehicle)` | protection status (step 4) |
+| `envelope(vehicle)` | protection status since the last read: per limit, the updates limited, the updates and time beyond it, the worst excess (step 4) |
 
 The same queries are available in C++, the C ABI and Python. There are no heartbeats or subscriptions.
 
@@ -720,8 +724,8 @@ The platform does not take over, recover, reset the vehicle or end the episode b
 ### 11.2 Limits
 
 The limits are those in `EnvelopeLimits` (section 6.2), taken from the profile's envelope section.
-- **Configuration.** The runtime selects `flaps` when the flaps are beyond `flapsThreshold`, else `clean`, and applies `gearCasMaxMs` while the gear is down.
-- **Missing limits.** A limit the profile does not give is NaN: it is neither limited nor reported.
+- **Configuration.** The runtime selects `flaps` when the flaps commanded are beyond `flapsThreshold`, else `clean`, and applies `gearCasMaxMs` while the gear is down.
+- **Missing limits.** A limit the profile does not give is NaN: it is neither limited nor reported. A limit the flaps configuration does not give is the clean configuration's.
 
 ### 11.3 Where demand is limited
 
@@ -729,18 +733,28 @@ The limits are those in `EnvelopeLimits` (section 6.2), taken from the profile's
 | --- | --- |
 | Behaviour, position | the airspeed setpoint to [cas_min, cas_max], converted at the current condition |
 | Velocity | <ul><li>Turn rate: to the bank limit, \|ω\| ≤ g·tan(bank_max)/v</li><li>Vertical speed: to the flight path the pitch limits allow</li><li>Airspeed: as above</li></ul> |
-| Attitude | roll to ±bank_max; pitch to [pitch_min, pitch_max]; airspeed as above |
+| Attitude | roll to ±bank_max (the bank a heading is flown with, in heading mode); pitch to [pitch_min, pitch_max], and to the pitch attitude that puts the wing at α_max on the present flight path, θ + (α_max − α)·cos φ; airspeed as above |
 | Acceleration | <ul><li>Load factor: to [n_min, min(n_max, n_α)], where n_α = n·(α_max − α₀)/(α − α₀) is the load factor the wing gives at α_max here</li><li>Roll rate: to ±roll_rate_max</li></ul> |
 | Actuator (after the loops) | on the elevator of a directly controlled aircraft, a nose-down correction as α or n nears its limit. It only ever moves the demand away from the limit, and it is skipped for limits in `lawEnforces` |
 
 For a fly-by-wire design whose law already limits g and α (hangar writes this into the profile), the runtime still clamps setpoints but does not add its own feedback limiter, so the two cannot fight. It still reports exceedances.
+
+As built (step 4):
+- **The elevator limiter** acts on an elevator commanded at the actuator level. A pitch demand that came through the loops was limited at their levels (the pitch attitude and load factor from α above), and a second limiter after them would only fight their integrators.
+  - It begins a fifth of the way back from the limit: from 1 g for the load factor, from zero lift for α.
+  - Inside that band, it moves the elevator by twice what changes the load factor by as much here. That is the plant's identified gain, scaled by the dynamic pressure.
+  - Without an identified plant there is no elevator limiter; clamping and reporting still apply.
+- **The state.**
+  - Demand is limited against the state as the loops see it (`sensed`).
+  - Exceedances are judged on the truth, and only in flight: on the ground an airspeed below `cas_min` is not an exceedance.
+- **cos φ** is a polynomial, within 0.001 of the cosine, and bit for bit the same on every platform.
 
 ### 11.4 Reporting
 
 | When | What is reported |
 | --- | --- |
 | Every control update, with the mode `Report` or `Limit` | For each limit: whether the demand was limited, and whether the state was beyond it by any amount, with no hysteresis |
-| After each world step | <ul><li>The host sets the owning activity's `kActivityDemandLimited` and `kActivityExceeded` flags</li><li>It adds to the vehicle's `EnvelopeStatus`: per limit, the updates limited, the time beyond it and the worst excess, since the consumer last read it</li></ul> |
+| After each world step | <ul><li>The host sets the owning activity's `kActivityDemandLimited` and `kActivityExceeded` flags</li><li>It adds to the vehicle's `EnvelopeStatus`: per limit, the updates limited, the updates and time beyond it and the worst excess, since the consumer last read it. `World::envelope(id)`, `fsim_vehicle_envelope` and Python's `vehicle.envelope()` read it, and each read starts a new count</li></ul> |
 
 ### 11.5 Modes
 
@@ -950,6 +964,14 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 | 1c | 30–31 | 44–47 | 40 | 63–64 | 116–117 | 65–67 | 153–156 | 127–128 | – | – |
 | 2c | 31–33 | 46 | 41–43 | 64 | 118–119 | 66–67 | 152 | 128–130 | – | – |
 | 3 | 32 | 45–47 | 41 | 63 | 118 | 65–66 | 152–153 | 132–133 | 70 | 84 |
+| 4 (protection off) | 32 | 46 | 41–42 | 63–65 | 118–119 | 66–67 | 153–154 | 132–133 | 71 | 85 |
+
+| micro with protection (ns/update, step 4) | attitude | acceleration | velocity | actuator |
+| --- | --- | --- | --- | --- |
+| off | 46 | 42 | 65 | 32 |
+| report | 51 (+11 %) | 48 (+16 %) | 70 (+8 %) | 38 (+18 %) |
+| limit, a design's envelope, well inside it | 60 (+31 %) | – | 80 (+23 %) | 40 (+25 %) |
+| limit, every limit given and engaging | 62 (+35 %) | 54 (+29 %) | 89 (+37 %) | 46 (+43 %) |
 
 | command (ns/call, 64 vehicles) | same level | level switch | behaviour | update, checked |
 | --- | --- | --- | --- | --- |
@@ -958,6 +980,7 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 | 1c | 4.9–5.1 | 28–31 | 86–88 | 14–15 |
 | 2c | 4.9 | 36 | 91–94 | 18–19 |
 | 3 | 4.9–5.0 | 38 | 97–98 | 17–18 |
+| 4 | 4.9 | 38 | 95 | 18 |
 
 | world (vehicle-steps/s) | 64 c172x | 32 f16c (fly-by-wire) | 32 b52h (direct) |
 | --- | --- | --- | --- |
@@ -966,6 +989,7 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 | 1c | 802,000–823,000 | 551,000–556,000 | 568,000–581,000 |
 | 2c | 810,000–812,000 | 550,000–562,000 | 571,000–579,000 |
 | 3 | 817,000–819,000 | 551,000–557,000 | 574,000–578,000 |
+| 4 (the designs with protection Limit, their default) | 819,500 | 553,000 | 575,000 |
 
 **Step 1b.**
 - **Allocations:** none in any case. The `control_alloc` ctest now gates it.
@@ -1007,6 +1031,20 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 - **The new cases.** Axes owned apart cost 70 ns an update (one merged pass: velocity for pitch and thrust, attitude for all four), and the default's hold 84 ns.
 - **NEWs** check the axis groups and the controllers' axis awareness: 1–4 ns more. The per-step paths are unchanged.
 - **Throughput:** c172x at 99.4 % of the baseline.
+
+**Step 4 (envelope protection).**
+- **Digests:** every legacy flight identical to the baseline, with protection off (`digest FILE off`) and with the new defaults. The F-16C and B-52H flights of the digest set now fly with protection `Limit`, never come near a limit, and the protected pass flies them exactly as before.
+- **Allocations:** none, in eight new update cases (limit and report, at four levels) and in a world of eight designs whose demand is limited 3,440 times in 100 steps.
+- **Exit criteria.**
+  - The demand never exceeds the active limits: `tests/test_protection.cpp`, over 20,000 random setpoints and states per clamp. The elevator limiter only ever moves the elevator away from the limit it nears.
+  - Every exceedance is reported, with its size and duration: a nose-up moment no elevator can hold drives a c172 past α_max. The crossing is reported with its excess and duration, and nothing else happens: no recovery, no end of the activity, no reset. The protected demand was cut as α neared.
+  - No claim that the state stays within: the documentation says the opposite.
+  - The manoeuvre suite with protection `Limit` (the default for all 31 designs): the same 29 of 558 failures as step 3, item for item. Protection changed 13 of 651 results, all at the slowest speed near the stall, and removed the c172's 69 % heading overshoot at 35 m/s.
+- **The update gate (12.4: protection `Limit` within +25 %) is missed** for the fastest cascades, as the table shows.
+  - With protection `Off`, every case is within ±3 % of step 3 in an interleaved A/B.
+  - `Report` costs +8 to +18 %. `Limit` costs +23 to +31 % inside a design's envelope, and up to +43 % with every limit given and engaging every update.
+  - The cost is fixed work per update: the setpoint copied before it is limited, a division for the airspeed limits, ten comparisons for the exceedances. At the world level it disappears: the F-16C and B-52H, now protected, run at step 3's throughput.
+  - The gate is left as written. Whether it should be a throughput gate for protected flight is the owner's call.
 
 **Allocations.**
 - Per update, none, except `loiter` (4, one per parameter's map node) and `waypoints` (2): the per-step `BehaviorCommand` copy, P6.

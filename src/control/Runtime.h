@@ -54,14 +54,19 @@ struct SupportDemand {
 
 inline constexpr double kNoLimit = kUnknown;
 
-enum class ProtectionMode : std::uint8_t { Off, Report, Limit };
-
+/// The protection stage's configuration (section 11), from the profile: the
+/// host writes it when the vehicle is created and when its mode changes.
 struct Protection {
     ProtectionMode mode = ProtectionMode::Off;
-    std::uint16_t lawEnforces = 0; ///< limits (bit per Limit) the aircraft's own law already enforces
-    EnvelopeLimits clean{}, flaps{};
-    double flapsThreshold = 0.05;  ///< flaps beyond this select `flaps`
+    std::uint16_t lawEnforces = 0;   ///< limits (bit per Limit) the aircraft's own law enforces: no feedback limiter of ours on them
+    EnvelopeLimits clean{}, flaps{}; ///< flaps: each limit the profile gives only for clean is clean's
+    double flapsThreshold = 0.05;    ///< flaps commanded beyond this select `flaps`
     double gearCasMaxMs = kNoLimit;
+    // for the feedback limiters
+    double alphaZeroLiftRad = 0.0;   ///< the angle of attack of zero lift (the plant's, else 0)
+    bool pitchSurface = false;       ///< the elevator input moves a surface (not a law's demand)
+    double elevatorGainG = kNoLimit; ///< load factor per unit of elevator at elevatorGainCasMs (the plant's); NaN: no elevator limiter
+    double elevatorGainCasMs = kNoLimit;
 };
 
 struct RuntimeConfig {
@@ -83,9 +88,6 @@ struct RuntimeConfig {
     std::uint32_t revision = 0;                    ///< bumped whenever owner[] or a slot's axes change
     Protection protection{};
 };
-
-enum class Limit : std::uint8_t { LoadFactorMax, LoadFactorMin, AlphaMax, Bank, PitchMax, PitchMin, RollRate, CasMin, CasMax, Mach, Count };
-inline constexpr std::size_t kLimitCount = static_cast<std::size_t>(Limit::Count);
 
 enum AxisFlag : std::uint16_t {
     kSaturated = 1u << 0,     ///< an actuator output sat at its travel limit

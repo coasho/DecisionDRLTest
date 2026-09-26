@@ -34,6 +34,9 @@ struct Scenario {
     std::string task = "altitude_heading_hold";
     std::string observation = "state";
     std::string action = "surfaces";
+    /// "fixed": the action's own ranges; "aircraft": where the aircraft's
+    /// profile narrows a command's range (a fighter's load factor), that range.
+    std::string actionRanges = "fixed";
 
     // Task parameters (altitude_heading_hold): targets are sampled per episode
     // relative to the initial state within these ranges.

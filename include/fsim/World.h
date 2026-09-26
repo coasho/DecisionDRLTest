@@ -171,6 +171,13 @@ public:
     /// height each had when it was let go. Reason::None if set.
     control::Reason setVehicleDefault(control::VehicleDefault mode);
     control::VehicleDefault vehicleDefault() const;
+    /// Envelope protection (docs/sdk/control.md, "Envelope protection"): Limit
+    /// by default for an aircraft with an envelope, else Off. It limits the
+    /// demand; it does not keep the aircraft inside - what crosses a limit is
+    /// reported in envelope(), which starts a new count at each call.
+    control::Reason setProtection(control::ProtectionMode mode);
+    control::ProtectionMode protection() const;
+    control::EnvelopeStatus envelope();
     control::ControlStack& controls();
     control::Level activeLevel() const;
     bool use(control::Level level, std::string_view controllerId);

@@ -112,11 +112,25 @@ private:
     std::size_t topSlot() const noexcept;
     /// The vehicle default is a hold and some primary axis has no owner.
     bool holdsDefault() const noexcept;
+    /// One slot owns every primary axis (the usual case): its cascade, as it
+    /// always ran - and, Protected, with the envelope protection stage.
+    template <bool Protected>
+    void cascade(const ControlContext& ctx, std::size_t slot, sim::ControlInputs& out);
     /// The axes owned apart (docs/control-architecture.md, 9.5): one pass down
     /// the levels, each merging the demands that reached it into one command.
     void flyMerged(const ControlContext& ctx, sim::ControlInputs& out);
     /// Nothing flies a primary axis through the cascade: the neutral actuator command.
     void flyNeutral(sim::ControlInputs& out);
+    /// No slot owns every primary axis: the merged pass or the neutral
+    /// command, then the state checked against the envelope.
+    void flyGeneral(const ControlContext& ctx, sim::ControlInputs& out);
+    /// The limits in force this update (protection on): active_; and, if the
+    /// setpoints above the acceleration level are to be limited, what they
+    /// need from the state.
+    void selectLimits(const ControlContext& ctx, bool state) noexcept;
+    /// What the protection stage limited, and the state against the limits in
+    /// force, into the report (docs/control-architecture.md, 11.4).
+    void watch(const ControlContext& ctx, std::uint16_t limited) noexcept;
     void actuate(const ActuatorCommand& a, sim::ControlInputs& out) noexcept;
     void fail(sim::ControlInputs& out) noexcept;
 
@@ -131,6 +145,10 @@ private:
     std::array<const Command*, kLevels> derived_{};                ///< the last update's command per level (null: did not run)
     std::array<Command, kLevels> outputs_{};                       ///< each level's controller's output, by the level that produced it
     std::array<Command, kLevels> merged_{};                        ///< the commands merged from several demands, by level
+    const EnvelopeLimits* active_ = nullptr;                       ///< the limits in force this update (protection on)
+    double tasPerCas_ = 1.0, tasPerMach_ = 0.0, bankCos_ = 1.0;    ///< what they need from the state (Limit): a LimitState
+    EnvelopeLimits geared_{};                                      ///< they, with the gear's speed, when it is down
+    std::uint16_t limited_ = 0;                                    ///< what the merged pass's protection stage limited
     // The vehicle default's hold (VehicleDefault::Hold): what the axes nobody
     // owns fly, captured from the state as each was let go.
     Command hold_ = VelocityCommand{};

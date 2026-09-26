@@ -2,11 +2,13 @@
 // (docs/control-architecture.md, section 12).
 //
 //   fsim_control_bench micro          ControlStack::update, ns per update, per level and behaviour,
-//                                     with the axes owned apart, and the vehicle default's hold
+//                                     with the axes owned apart, the vehicle default's hold, and
+//                                     envelope protection limiting (", limit") or reporting (", report")
 //   fsim_control_bench command        World::command (the legacy path), ns per call
 //   fsim_control_bench world          vehicle-steps/s with every vehicle commanded every step
 //   fsim_control_bench alloc          heap allocations in the steady state (exit 1 if any)
-//   fsim_control_bench digest FILE    per-flight digests of every world step (compare across builds)
+//   fsim_control_bench digest FILE [off]   per-flight digests of every world step (compare across builds);
+//                                     off: every vehicle's envelope protection off
 //   fsim_control_bench checkpoints FILE   the stock c172x checkpoints (tests/data)
 //
 // Heap allocations are counted by redirecting the malloc, calloc and realloc
@@ -152,6 +154,33 @@ struct Case {
     std::function<void(RuntimeConfig&)> configure = nullptr;
 };
 
+/// Envelope protection with limits the synthetic flight (advance()) keeps
+/// running into: bank, pitch, alpha and the load factor all engage part of the time.
+void protect(RuntimeConfig& c, ProtectionMode mode) {
+    Protection& p = c.protection;
+    p.mode = mode;
+    EnvelopeLimits& e = p.clean;
+    e.bankMaxRad = 0.15, e.pitchMinRad = -0.2, e.pitchMaxRad = 0.04;
+    e.alphaMaxRad = 0.055, e.loadFactorMin = -1.0, e.loadFactorMax = 1.4;
+    e.rollRateMaxRadS = 0.15, e.casMinMs = 54.0, e.casMaxMs = 80.0, e.machMax = 0.5;
+    p.flaps = e;
+    p.alphaZeroLiftRad = -0.05;
+    p.pitchSurface = true;
+    p.elevatorGainG = 4.0, p.elevatorGainCasMs = 55.0;
+}
+
+/// A hangar direct design's envelope - alpha_max and its stall speed - that
+/// the synthetic flight stays well inside: protection's cost in ordinary flight.
+void protectDesign(RuntimeConfig& c) {
+    Protection& p = c.protection;
+    p.mode = ProtectionMode::Limit;
+    p.clean.alphaMaxRad = 0.3, p.clean.casMinMs = 30.0;
+    p.flaps = p.clean;
+    p.alphaZeroLiftRad = -0.05;
+    p.pitchSurface = true;
+    p.elevatorGainG = 4.0, p.elevatorGainCasMs = 55.0;
+}
+
 /// A slot given to an activity, as CapabilityHost::submit writes it.
 void assign(RuntimeConfig& c, std::size_t slot, const Command& command, AxisMask axes) {
     SetpointSlot& s = c.slots[slot];
@@ -208,6 +237,39 @@ std::vector<Case> cases() {
                    }});
     // nothing owned, the vehicle default a hold
     out.push_back({"default hold", nullptr, [](RuntimeConfig& c) { c.vehicleDefault = VehicleDefault::Hold; }});
+    // step 4: envelope protection on the whole-vehicle commands above - a design's envelope, well inside it
+    out.push_back({"attitude, design", nullptr, [](RuntimeConfig& c) {
+                       protectDesign(c);
+                       assign(c, 0, AttitudeCommand{0.2, 0.05, kHold, 0.785, kHold, 55.0}, kLegacyAxes);
+                   }});
+    out.push_back({"velocity, design", nullptr, [](RuntimeConfig& c) {
+                       protectDesign(c);
+                       assign(c, 0, VelocityCommand{60.0, 2.0, 0.5, kHold}, kLegacyAxes);
+                   }});
+    out.push_back({"actuator, design", nullptr, [](RuntimeConfig& c) {
+                       protectDesign(c);
+                       assign(c, 0, ActuatorCommand{0.1, -0.05, 0.0, 0.6}, kLegacyAxes);
+                   }});
+    // ...and every limit given, the flight running into them all the time: the worst case
+    for (const ProtectionMode mode : {ProtectionMode::Limit, ProtectionMode::Report}) {
+        const bool limit = mode == ProtectionMode::Limit;
+        out.push_back({limit ? "attitude, limit" : "attitude, report", nullptr, [mode](RuntimeConfig& c) {
+                           protect(c, mode);
+                           assign(c, 0, AttitudeCommand{0.2, 0.05, kHold, 0.785, kHold, 55.0}, kLegacyAxes);
+                       }});
+        out.push_back({limit ? "acceleration, limit" : "acceleration, report", nullptr, [mode](RuntimeConfig& c) {
+                           protect(c, mode);
+                           assign(c, 0, AccelerationCommand{1.5, 0.2, kHold, 0.6}, kLegacyAxes);
+                       }});
+        out.push_back({limit ? "velocity, limit" : "velocity, report", nullptr, [mode](RuntimeConfig& c) {
+                           protect(c, mode);
+                           assign(c, 0, VelocityCommand{60.0, 2.0, 0.5, kHold}, kLegacyAxes);
+                       }});
+        out.push_back({limit ? "actuator, limit" : "actuator, report", nullptr, [mode](RuntimeConfig& c) {
+                           protect(c, mode);
+                           assign(c, 0, ActuatorCommand{0.1, -0.05, 0.0, 0.6}, kLegacyAxes);
+                       }});
+    }
     return out;
 }
 
@@ -426,13 +488,41 @@ int alloc() {
         std::printf("world: %-19s %12llu   (JSBSim: %llu)\n", wc.name, static_cast<unsigned long long>(n), static_cast<unsigned long long>(fm));
         failures += n != 0;
     }
+    {
+        // envelope protection in the world: a design with an envelope, its demand limited every step
+        session::World pw(benchWorld("bench-alloc-protection", 4));
+        const auto designed = spawn(pw, "jsbsim:c172", 8, 1500.0, 45.0);
+        auto pull = [&](int k) {
+            for (auto id : designed) pw.command(id, AccelerationCommand{2.5 + 0.1 * std::sin(k * 0.1), 0.1, kHold, 0.8});
+        };
+        for (int k = 0; k < 50; ++k) pull(k), pw.step();
+        std::uint64_t n, fm;
+        std::uint32_t limited = 0;
+        {
+            Counting counting;
+            for (int k = 50; k < 150; ++k) pull(k), pw.step();
+            n = counting.count();
+            fm = counting.flightModel();
+        }
+        for (auto id : designed) limited += pw.envelope(id)[Limit::AlphaMax].limitedUpdates;
+        std::printf("world: %-19s %12llu   (JSBSim: %llu; %u limited)\n", "limit each step", static_cast<unsigned long long>(n),
+                    static_cast<unsigned long long>(fm), limited);
+        failures += n != 0;
+        if (designed.empty() || limited == 0) {
+            std::printf("FAIL: protection never limited (%zu vehicles)\n", designed.size());
+            ++failures;
+        }
+    }
     std::printf(failures ? "FAIL: %d case(s) allocate\n" : "no allocations\n", failures);
     return failures ? 1 : 0;
 }
 
-int digest(const char* path) {
+int digest(const char* path, bool protectionOff) {
     session::World w(flights::worldOptions("bench-digest", FSIM_TEST_JSBSIM_ROOT, 3));
     flights::Flights f(w, true);
+    // "off": every vehicle without envelope protection, as before step 4 (the hangar designs have an envelope)
+    if (protectionOff)
+        for (const auto& flight : f.flights()) w.setProtection(flight.id, ProtectionMode::Off);
     std::vector<flights::Digest> digests(f.flights().size());
     for (int k = 0; k < 900; ++k) {
         f.drive(k);
@@ -492,8 +582,8 @@ int main(int argc, char** argv) {
     if (mode == "command") return command();
     if (mode == "world") return world();
     if (mode == "alloc") return alloc();
-    if (mode == "digest" && argc > 2) return digest(argv[2]);
+    if (mode == "digest" && argc > 2) return digest(argv[2], argc > 3 && std::string(argv[3]) == "off");
     if (mode == "checkpoints" && argc > 2) return checkpoints(argv[2]);
-    std::fprintf(stderr, "usage: fsim_control_bench micro | command | world | alloc | digest FILE | checkpoints FILE\n");
+    std::fprintf(stderr, "usage: fsim_control_bench micro | command | world | alloc | digest FILE [off] | checkpoints FILE\n");
     return 2;
 }

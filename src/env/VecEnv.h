@@ -75,6 +75,9 @@ public:
     std::size_t numVehicles() const noexcept { return static_cast<std::size_t>(numEnvs_) * vehiclesPerEnv_; }
     std::size_t observationSize() const noexcept { return obsBuilder_->size(); }
     std::size_t actionSize() const noexcept { return actionMapper_->size(); }
+    /// "fixed" (the action's own ranges) or "aircraft" (the aircraft's where
+    /// its profile narrows them); false for another mode.
+    bool setActionRanges(std::string_view mode);
     const std::vector<std::string>& observationNames() const noexcept { return obsBuilder_->names(); }
     const std::vector<std::string>& actionNames() const noexcept { return actionMapper_->names(); }
     double agentStepSeconds() const noexcept { return scenario_.dt * scenario_.frameSkip; }

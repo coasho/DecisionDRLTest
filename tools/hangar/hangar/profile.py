@@ -77,18 +77,23 @@ def sections(aircraft, fbw, settings, reference, identified, flown):
         effectors["flaps_transit_s"] = FLAPS_TRANSIT_S
     out["effectors"] = effectors
 
-    # envelope: the law's limits as the design states them, and the stall as flown
-    clean = {}
-    for key, field in (("n_max", "n_max"), ("n_min", "n_min"), ("alpha_max_deg", "alpha_max_deg"), ("roll_rate_deg_s", "roll_rate_max_deg_s")):
+    # envelope: the law's limits as the design states them, and the stall as flown;
+    # a fly-by-wire law enforces its own (fcs.py), so the platform's protection
+    # clamps setpoints to them but adds no feedback limiter to fight it
+    clean, law = {}, {}
+    for key, field, flag in (("n_max", "n_max", "law_load_factor"), ("n_min", "n_min", "law_load_factor"),
+                             ("alpha_max_deg", "alpha_max_deg", "law_alpha"), ("roll_rate_deg_s", "roll_rate_max_deg_s", "law_roll_rate")):
         if key in control:
             clean[field] = float(control[key])
+            if fbw is not None:
+                law[flag] = 1
     stall = flown.get("stall") or {}
     if "stall_kcas" in stall:
         clean["cas_min_ms"] = float(stall["stall_kcas"]) * KT
         if "alpha_max_deg" not in clean and "alpha_at_stall" in stall:
             clean["alpha_max_deg"] = float(stall["alpha_at_stall"])
     if clean:
-        out["envelope"] = {"clean/" + k: v for k, v in clean.items()}
+        out["envelope"] = dict({"clean/" + k: v for k, v in clean.items()}, **law)
 
     # propulsion
     engines = aircraft.engines

@@ -77,6 +77,8 @@ VecEnv::VecEnv(const Scenario& scenario, const Options& options)
             if (!id) throw std::runtime_error("VecEnv: failed to load aircraft " + scenario_.aircraft);
             ids_.push_back(id);
         }
+    if (!setActionRanges(scenario_.actionRanges))
+        throw std::runtime_error("VecEnv: action ranges must be \"fixed\" or \"aircraft\", not '" + scenario_.actionRanges + "'");
     LOG_INFO("env") << numEnvs_ << " env(s) x " << vehiclesPerEnv_ << " " << scenario_.aircraft << "; task " << task_->name() << ", obs "
                     << obsBuilder_->size() << ", act " << actionMapper_->size() << " (" << control::levelName(actionMapper_->level()) << ")";
 }
@@ -190,6 +192,13 @@ VecEnv::StepResult VecEnv::step(Span<const float> actions) {
         }
     }
     return result();
+}
+
+bool VecEnv::setActionRanges(std::string_view mode) {
+    if (mode == "fixed") actionMapper_->useRanges({});
+    else if (mode == "aircraft") actionMapper_->useRanges(world_->capabilities(ids_.front())); // every vehicle is the same aircraft
+    else return false;
+    return true;
 }
 
 } // namespace fsim::env

@@ -177,6 +177,15 @@ FSIM_API void fsim_options_init(fsim_options* o) {
     o->publish = 1;
 }
 
+FSIM_API int fsim_vecenv_set_action_ranges(fsim_vecenv* env, const char* mode) {
+    if (!env || !mode) return FSIM_INVALID_ARGUMENT;
+    if (!env->env.setActionRanges(mode)) {
+        setError(std::string("fsim_vecenv_set_action_ranges: \"fixed\" or \"aircraft\", not '") + mode + "'");
+        return FSIM_INVALID_ARGUMENT;
+    }
+    return FSIM_OK;
+}
+
 FSIM_API int fsim_vecenv_create(const fsim_options* options, fsim_vecenv** out) {
     if (!options || !out || options->struct_size < sizeof(fsim_options)) {
         setError("fsim_vecenv_create: bad arguments (call fsim_options_init first)");
@@ -291,6 +300,7 @@ VecEnv::VecEnv(const VecEnvOptions& options) : impl_(std::make_unique<Impl>()) {
     if (fsim_vecenv_create(&c, &impl_->handle) != FSIM_OK) throw std::runtime_error(fsim_last_error());
     fsim_vecenv_set_autoreset(impl_->handle, options.autoReset == AutoReset::SameStep ? FSIM_AUTORESET_SAME_STEP
                                                                                        : FSIM_AUTORESET_NEXT_STEP);
+    if (fsim_vecenv_set_action_ranges(impl_->handle, options.actionRanges.c_str()) != FSIM_OK) throw std::runtime_error(fsim_last_error());
 }
 
 VecEnv::~VecEnv() = default;

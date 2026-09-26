@@ -396,6 +396,9 @@
       <property value="9">fsim/envelope/clean/n_max</property>
       <property value="-3">fsim/envelope/clean/n_min</property>
       <property value="240">fsim/envelope/clean/roll_rate_max_deg_s</property>
+      <property value="1">fsim/envelope/law_alpha</property>
+      <property value="1">fsim/envelope/law_load_factor</property>
+      <property value="1">fsim/envelope/law_roll_rate</property>
       <property value="1">fsim/propulsion/version</property>
       <property value="1">fsim/propulsion/provenance</property>
       <property value="1">fsim/propulsion/afterburner</property>

@@ -162,6 +162,15 @@ class VecEnvTest(unittest.TestCase):
         gc.collect()
         np.testing.assert_array_equal(obs, expected)  # still valid memory: the view keeps it alive
 
+    def test_action_ranges(self):
+        env = make(num_envs=2, aircraft="f16c", action="acceleration", altitude_m=3000.0, airspeed_ms=160.0,
+                   action_ranges="aircraft")
+        self.assertEqual(env.action_ranges, "aircraft")
+        env.reset()
+        env.step(np.ones((2, env.action_size), np.float32))  # the F-16's 9 g, not 5
+        with self.assertRaises(fsim.Error):
+            make(num_envs=1, action_ranges="roomy")
+
     def test_batch_states_and_world(self):
         env = make(num_envs=3, vehicles_per_env=2)
         env.reset()

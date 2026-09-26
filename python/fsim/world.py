@@ -106,6 +106,17 @@ class VehicleDefault(enum.IntEnum):
     HOLD = 1     #: the heading, airspeed and height each had when it was let go
 
 
+class ProtectionMode(enum.IntEnum):
+    """Envelope protection: LIMIT (the default for an aircraft with an
+    envelope) limits the demand to it and reports what crosses it; REPORT only
+    reports; OFF (the default without one) does neither. It never keeps the
+    aircraft inside: a crossing is reported, not prevented."""
+
+    OFF = 0
+    REPORT = 1
+    LIMIT = 2
+
+
 class ActivityState(enum.IntEnum):
     PENDING = 0
     ACTIVE = 1
@@ -136,6 +147,15 @@ ActivityInfo = collections.namedtuple(
     "ActivityInfo", "id vehicle capability source axes state reason by constraints constraints_seen start_time end_time")
 ActivityInfo.__doc__ = ("An activity's record: its capability (an index into Vehicle.capabilities()), who commanded it, "
                         "its state and why it ended, flags (1 saturated, 8 clamped, ...) and when it ran.")
+
+#: The envelope's limits, in the platform's order: "load_factor_max", "alpha_max", "cas_min", ...
+LIMITS = tuple(_native.limit_name(i) for i in range(10))
+LimitStatus = collections.namedtuple("LimitStatus", "limited_updates exceeded_updates exceeded_s worst_excess")
+LimitStatus.__doc__ = ("One limit since the last read: the control updates in which the demand was limited for it, those "
+                       "in which the state was beyond it, for how long (s) and by how much at most (g, rad, rad/s, m/s "
+                       "calibrated or Mach).")
+Envelope = collections.namedtuple("Envelope", "mode limits")
+Envelope.__doc__ = "What envelope protection saw: its ProtectionMode, and a LimitStatus by limit name (fsim.LIMITS)."
 
 Parameter = collections.namedtuple("Parameter", "name unit min max default optional")
 Capability = collections.namedtuple("Capability",
@@ -409,6 +429,23 @@ class Vehicle:
     @property
     def vehicle_default(self):
         return VehicleDefault(self._h.vehicle_default(self.id))
+
+    def set_protection(self, mode):
+        """Envelope protection: ProtectionMode.LIMIT ("limit"), REPORT or OFF."""
+        mode = ProtectionMode[mode.upper()] if isinstance(mode, str) else ProtectionMode(mode)
+        self._h.set_protection(self.id, int(mode))
+
+    @property
+    def protection(self):
+        return ProtectionMode(self._h.protection(self.id))
+
+    def envelope(self):
+        """What envelope protection saw since the last call (an Envelope: the
+        mode, and a LimitStatus per limit name); each call starts a new count.
+        A step's exceedances make a reward term or an episode's end - the
+        platform only reports them."""
+        mode, rows = self._h.envelope(self.id)
+        return Envelope(ProtectionMode(mode), {name: LimitStatus(*row) for name, row in zip(LIMITS, rows)})
 
     def capability_status(self, capability):
         """(Availability, reason) of a capability by id, e.g. "fsim.guidance.hold"."""

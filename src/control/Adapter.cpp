@@ -50,8 +50,9 @@ void VehicleAdapter::declare(const VehicleProfile& p, CapabilityCatalog& catalog
     if (fx.pitchTrim) catalog.addSupport(4);
     if (p.propulsion.engines > 1) catalog.addSupport(5, p.propulsion.engines); // a throttle per engine (fsim.flight.engines)
     if (!p.envelope.header.present()) return;
+    catalog.addProtection();
     // A command may ask for what the clean configuration allows; with flaps
-    // out, protection narrows further as the aircraft flies (step 4).
+    // out, protection narrows further as the aircraft flies.
     const EnvelopeLimits& e = p.envelope.clean;
     catalog.narrow("fsim.flight.attitude", "roll_rad", -e.bankMaxRad, e.bankMaxRad);
     catalog.narrow("fsim.flight.attitude", "max_bank_rad", 0.0, e.bankMaxRad);

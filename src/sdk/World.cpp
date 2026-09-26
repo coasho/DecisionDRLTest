@@ -150,6 +150,16 @@ control::VehicleDefault Vehicle::vehicleDefault() const {
     return world_ ? world_->impl_->vehicleDefault(id_) : control::VehicleDefault::Neutral;
 }
 
+control::Reason Vehicle::setProtection(control::ProtectionMode mode) {
+    return world_ ? world_->impl_->setProtection(id_, mode) : control::Reason::UnknownVehicle;
+}
+
+control::ProtectionMode Vehicle::protection() const {
+    return world_ ? world_->impl_->protection(id_) : control::ProtectionMode::Off;
+}
+
+control::EnvelopeStatus Vehicle::envelope() { return world_ ? world_->impl_->envelope(id_) : control::EnvelopeStatus{}; }
+
 control::CapabilityStatus Vehicle::capabilityStatus(std::string_view capability) const {
     if (world_) return world_->impl_->capabilityStatus(id_, capability);
     return {control::Availability::Disabled, control::Reason::UnknownVehicle};

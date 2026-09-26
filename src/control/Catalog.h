@@ -48,6 +48,8 @@ public:
     /// Offer a support effector (an adapter's declare()), by SupportCommand's
     /// alternative; for the engines' throttles, a parameter per engine (at most 4).
     void addSupport(std::size_t alternative, int engines = 0);
+    /// Offer fsim.envelope.protection: the aircraft has an envelope.
+    void addProtection();
 
     /// Add the behaviours registered since; true if there were any. Between steps only.
     bool refresh();

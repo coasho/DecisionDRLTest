@@ -284,6 +284,15 @@ static PyObject* names_list(const char* (*get)(const fsim_vecenv*, uint32_t), co
     return list;
 }
 
+static PyObject* vecenv_set_action_ranges(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    VecEnvObject* self = (VecEnvObject*)o;
+    if (!check_args(n, 1, 1, "set_action_ranges")) return NULL;
+    const char* mode = as_str(args[0], "action ranges");
+    if (!mode) return NULL;
+    if (fsim_vecenv_set_action_ranges(self->env, mode) != FSIM_OK) return fail();
+    Py_RETURN_NONE;
+}
+
 static PyObject* vecenv_names(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     VecEnvObject* self = (VecEnvObject*)o;
     (void)args;
@@ -356,6 +365,7 @@ static PyMethodDef vecenv_methods[] = {
     FAST("reset", vecenv_reset, "reset(seed=0)"),
     FAST("buffers", vecenv_buffers, "the environment's result buffers as read-only memory, and their sizes"),
     FAST("names", vecenv_names, "(observation names, action names)"),
+    FAST("set_action_ranges", vecenv_set_action_ranges, "set_action_ranges(\"fixed\" | \"aircraft\")"),
     FAST("vehicle_steps", vecenv_vehicle_steps, "FDM vehicle-steps so far"),
     FAST("set_autoreset", vecenv_set_autoreset, "set_autoreset(AUTORESET_NEXT_STEP | AUTORESET_SAME_STEP)"),
     FAST("autoreset", vecenv_autoreset, "the current auto-reset mode"),
@@ -1030,6 +1040,43 @@ static PyObject* world_vehicle_default(PyObject* o, PyObject* const* args, Py_ss
     return PyLong_FromLong(mode);
 }
 
+/* set_protection(id, mode) */
+static PyObject* world_set_protection(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int mode;
+    if (!check_args(n, 2, 2, "set_protection") || !as_u32(args[0], &id) || !as_int(args[1], &mode) || !WORLD_IDLE(self)) return NULL;
+    if (fsim_vehicle_set_protection(self->world, id, mode) != FSIM_OK) return fail();
+    Py_RETURN_NONE;
+}
+
+/* protection(id) -> mode */
+static PyObject* world_protection(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    uint32_t id;
+    int32_t mode = 0;
+    if (!check_args(n, 1, 1, "protection") || !as_u32(args[0], &id)) return NULL;
+    if (fsim_vehicle_get_protection(((WorldObject*)o)->world, id, &mode) != FSIM_OK) return fail();
+    return PyLong_FromLong(mode);
+}
+
+/* envelope(id) -> (mode, [(limited_updates, exceeded_updates, exceeded_s, worst_excess)] per limit) */
+static PyObject* world_envelope(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    fsim_envelope_status s;
+    if (!check_args(n, 1, 1, "envelope") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    if (fsim_vehicle_envelope(self->world, id, &s) != FSIM_OK) return fail();
+    PyObject* rows = PyList_New(FSIM_LIMIT_COUNT);
+    for (int l = 0; rows && l < FSIM_LIMIT_COUNT; ++l) {
+        PyObject* t = Py_BuildValue("(IIdd)", s.limited_updates[l], s.exceeded_updates[l], s.exceeded_s[l], s.worst_excess[l]);
+        if (!t || PyList_SetItem(rows, l, t) < 0) { /* SetItem takes t, even when it fails */
+            Py_CLEAR(rows);
+            break;
+        }
+    }
+    return rows ? Py_BuildValue("(iN)", s.mode, rows) : NULL;
+}
+
 static PyObject* world_active_level(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     uint32_t id;
     if (!check_args(n, 1, 1, "active_level") || !as_u32(args[0], &id)) return NULL;
@@ -1310,6 +1357,9 @@ static PyMethodDef world_methods[] = {
     FAST("profile_value", world_profile_value, "profile_value(id, path) -> float, NaN if unknown"),
     FAST("profile_section", world_profile_section, "profile_section(id, section) -> (version, provenance)"),
     FAST("set_vehicle_default", world_set_vehicle_default, "set_vehicle_default(id, mode) -> reason, 0 if set"),
+    FAST("set_protection", world_set_protection, "set_protection(id, mode)"),
+    FAST("protection", world_protection, "protection(id) -> mode"),
+    FAST("envelope", world_envelope, "envelope(id) -> (mode, [(limited_updates, exceeded_updates, exceeded_s, worst_excess)])"),
     FAST("vehicle_default", world_vehicle_default, "vehicle_default(id) -> mode"),
     FAST("active_level", world_active_level, "active_level(id)"),
     FAST("behavior_finished", world_behavior_finished, "behavior_finished(id)"),
@@ -1554,6 +1604,13 @@ static PyObject* mod_activity_state_name(PyObject* m, PyObject* const* args, Py_
     return PyUnicode_FromString(fsim_activity_state_name(code));
 }
 
+static PyObject* mod_limit_name(PyObject* m, PyObject* const* args, Py_ssize_t n) {
+    int code;
+    (void)m;
+    if (!check_args(n, 1, 1, "limit_name") || !as_int(args[0], &code)) return NULL;
+    return PyUnicode_FromString(fsim_limit_name(code));
+}
+
 static PyObject* mod_command_field_count(PyObject* m, PyObject* const* args, Py_ssize_t n) {
     int level;
     (void)m;
@@ -1614,6 +1671,7 @@ static PyMethodDef module_methods[] = {
     FAST("command_field_count", mod_command_field_count, "command_field_count(level)"),
     FAST("reason_name", mod_reason_name, "reason_name(code): why a command was refused or an activity ended"),
     FAST("activity_state_name", mod_activity_state_name, "activity_state_name(code)"),
+    FAST("limit_name", mod_limit_name, "limit_name(i): an envelope limit, \"load_factor_max\" ..."),
     FAST("layout", mod_layout, "C struct sizes and offsets"),
     {NULL, NULL, 0, NULL}};
 

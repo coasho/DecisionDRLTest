@@ -284,6 +284,9 @@ Scenario parseScenario(std::string_view json, std::string_view source) {
             v.task = ve.string("task", v.task);
             v.observation = ve.string("observation", v.observation);
             v.action = ve.string("action", v.action);
+            v.actionRanges = ve.string("action_ranges", v.actionRanges);
+            if (v.actionRanges != "fixed" && v.actionRanges != "aircraft")
+                throw Error("vecenv.action_ranges must be \"fixed\" or \"aircraft\", not '" + v.actionRanges + "'");
             v.maxEpisodeSteps = static_cast<unsigned>(ve.number("max_episode_steps", v.maxEpisodeSteps));
             const Json& jitter = ve.child("jitter");
             v.latitudeJitterDeg = jitter.number("lat_deg", v.latitudeJitterDeg);
@@ -390,6 +393,7 @@ std::string dumpScenario(const Scenario& sc) {
         Json ve;
         ve.set("num_envs", static_cast<double>(v.numEnvs)).set("vehicles_per_env", static_cast<double>(v.vehiclesPerEnv));
         ve.set("task", v.task).set("observation", v.observation).set("action", v.action);
+        if (v.actionRanges != "fixed") ve.set("action_ranges", v.actionRanges);
         ve.set("max_episode_steps", static_cast<double>(v.maxEpisodeSteps));
         ve.set("jitter", Json().set("lat_deg", v.latitudeJitterDeg).set("lon_deg", v.longitudeJitterDeg).set("alt_m", v.altitudeJitterM)
                                  .set("heading_deg", v.headingJitterDeg).set("airspeed_ms", v.airspeedJitterMs));
@@ -436,6 +440,7 @@ VecEnvOptions vecEnvOptions(const Scenario& sc) {
     o.task = v.task;
     o.observation = v.observation;
     o.action = v.action;
+    o.actionRanges = v.actionRanges;
     o.maxEpisodeSteps = v.maxEpisodeSteps;
     o.latitudeJitterDeg = v.latitudeJitterDeg;
     o.longitudeJitterDeg = v.longitudeJitterDeg;

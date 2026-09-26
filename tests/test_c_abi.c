@@ -77,6 +77,12 @@ int main(int argc, char** argv) {
     CHECK(buf.observations == obs0);
     CHECK(buf.episode_steps[0] == 0);
 
+    /* the action's ranges: the aircraft's own where its profile narrows them (1.4) */
+    CHECK(fsim_vecenv_set_action_ranges(env, "aircraft") == FSIM_OK);
+    CHECK(fsim_vecenv_set_action_ranges(env, "roomy") != FSIM_OK);
+    CHECK(fsim_vecenv_set_action_ranges(env, NULL) != FSIM_OK);
+    CHECK(fsim_vecenv_set_action_ranges(env, "fixed") == FSIM_OK);
+
     /* reset with the same seed reproduces the first observations (JSBSim's
      * IC solver leaves ~1e-16 residue from the previous state, so not bit-exact). */
     CHECK(fsim_vecenv_reset(env, 42) == FSIM_OK);
@@ -517,6 +523,8 @@ int main(int argc, char** argv) {
             uint32_t twin = 0;
             double throttles[2] = {0.9, 0.4}, five[5] = {0.5, 0.5, 0.5, 0.5, 0.5}, value = -1.0;
             fsim_activity_id engines;
+            int32_t protection = -1;
+            fsim_envelope_status envelope;
             spec.name = "cap-twin";
             spec.type = "jsbsim:a10c";
             spec.altitude_msl_m = 3000.0;
@@ -537,6 +545,17 @@ int main(int argc, char** argv) {
             CHECK(fsim_world_step(world, 1) == FSIM_OK);
             CHECK(fsim_vehicle_get_property(world, twin, "fcs/throttle-cmd-norm[0]", &value) == FSIM_OK && value == 0.7);
             CHECK(fsim_vehicle_get_property(world, twin, "fcs/throttle-cmd-norm[1]", &value) == FSIM_OK && value == 0.4);
+            /* envelope protection: on for a design with an envelope, off for a stock aircraft */
+            CHECK(fsim_vehicle_get_protection(world, twin, &protection) == FSIM_OK && protection == FSIM_PROTECTION_LIMIT);
+            CHECK(fsim_vehicle_get_protection(world, a, &protection) == FSIM_OK && protection == FSIM_PROTECTION_OFF);
+            CHECK(fsim_vehicle_set_protection(world, twin, FSIM_PROTECTION_REPORT) == FSIM_OK);
+            CHECK(fsim_vehicle_set_protection(world, twin, 9) != FSIM_OK);
+            CHECK(fsim_vehicle_set_protection(world, 999, FSIM_PROTECTION_OFF) != FSIM_OK);
+            CHECK(fsim_world_step(world, 1) == FSIM_OK);
+            CHECK(fsim_vehicle_envelope(world, twin, &envelope) == FSIM_OK && envelope.mode == FSIM_PROTECTION_REPORT);
+            CHECK(envelope.exceeded_updates[2] == 0 && envelope.worst_excess[2] == 0.0); /* level flight: well inside */
+            CHECK(fsim_vehicle_envelope(world, 999, &envelope) != FSIM_OK);
+            CHECK(strcmp(fsim_limit_name(2), "alpha_max") == 0 && strcmp(fsim_limit_name(FSIM_LIMIT_COUNT), "?") == 0);
         }
         {
             /* the profile: a stock c172x carries no sections */

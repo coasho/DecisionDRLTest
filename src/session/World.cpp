@@ -183,7 +183,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     const auto& adapter = control::adapterFor(e->profile->identity.family);
     e->stack.setAdapter(adapter);
     if (!e->profile->control.settings.empty()) e->stack.setControllerSettings(e->profile->control.settings);
-    e->host.bind(id, e->stack, *e->catalog, adapter, *e->profile);
+    e->host.bind(id, e->stack, *e->catalog, adapter, *e->profile, options_.dt * e->controlDivider);
     e->flapsPosition = pool_->vehicle(slot).property("fcs/flap-pos-norm");
     for (auto& factory : worldEffects_) e->effects.push_back(factory());
     sim::FlightModel& model = pool_->vehicle(slot);
@@ -370,6 +370,23 @@ control::Reason World::setVehicleDefault(std::uint32_t id, control::VehicleDefau
 control::VehicleDefault World::vehicleDefault(std::uint32_t id) const noexcept {
     const Entry* e = entry(id);
     return e ? e->host.vehicleDefault() : control::VehicleDefault::Neutral;
+}
+
+control::Reason World::setProtection(std::uint32_t id, control::ProtectionMode mode) {
+    Entry* e = entry(id);
+    if (!e) return control::Reason::UnknownVehicle;
+    e->host.setProtection(mode);
+    return control::Reason::None;
+}
+
+control::ProtectionMode World::protection(std::uint32_t id) const noexcept {
+    const Entry* e = entry(id);
+    return e ? e->host.protection() : control::ProtectionMode::Off;
+}
+
+control::EnvelopeStatus World::envelope(std::uint32_t id) {
+    Entry* e = entry(id);
+    return e ? e->host.envelope() : control::EnvelopeStatus{};
 }
 
 control::CommandResult World::update(control::ActivityId activity, const control::SupportCommand& setpoint) {

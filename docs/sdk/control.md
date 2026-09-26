@@ -187,6 +187,53 @@ v.submit(SpeedbrakeCommand{.position = 1.0});           // "unknown_capability" 
 - Any other level, or a behaviour, starts a new activity with no range or availability checks, exactly as before.
 - It returns `false` when the command is refused. That covers a behaviour nobody registered (until 2026-09-26 it was logged, ignored and reported as success; the C ABI now returns `FSIM_INVALID_ARGUMENT`, Python raises), or an axis an `Autopilot` or `Override` activity holds.
 
+## Envelope protection
+
+An aircraft whose profile has an envelope section flies with envelope
+protection. Every hangar design has one; a stock JSBSim aircraft has none,
+unless a `VehicleSpec::profile` gives it one.
+
+Protection limits what the control system demands to the envelope and reports
+what the aircraft does beyond it ([ADR-26](../control-architecture.md),
+section 11). It does not keep the aircraft inside: a gust, inertia, a
+saturated surface or an external force can still take it past a limit. That
+is reported, not prevented, and what to do about it is yours: a reward term,
+the end of an episode, a line in an evaluation.
+
+```cpp
+using namespace fsim::control;
+v.protection();                           // ProtectionMode::Limit with an envelope, else Off
+v.setProtection(ProtectionMode::Report);  // report only
+world.step();
+EnvelopeStatus e = v.envelope();          // since the last read; each read starts a new count
+if (e[Limit::AlphaMax].exceededUpdates) penalty += e[Limit::AlphaMax].worstExcess;
+```
+
+- **The modes.**
+  - `Limit` limits and reports. It is the default with an envelope.
+  - `Report` only reports.
+  - `Off` does neither and flies exactly as before. It is the default without an envelope.
+- **What is limited.** Each level's setpoint, before its loop flies it:
+  - airspeeds to `cas_min` .. `cas_max` and the Mach limit, converted at the present condition;
+  - bank and turn rate to `bank_max`;
+  - pitch to its limits, and to what puts the wing at α_max on the present flight path;
+  - load factor to `n_min` .. `n_max`, and to what the wing gives at α_max here;
+  - roll rate to its limit;
+  - an elevator commanded directly, on a surface-controlled aircraft: eased nose-down as α or the load factor nears its maximum.
+
+  A fly-by-wire law that limits g and α itself (hangar's does) keeps doing so. Protection clamps setpoints to its limits but adds no feedback limiter of its own, so the two cannot fight.
+- **What is reported.** For each limit, since the last `envelope()`:
+  - the control updates in which the demand was limited (`limitedUpdates`);
+  - the updates in which the state was beyond it (`exceededUpdates`), and for how long (`exceededS`);
+  - how far at most (`worstExcess`): in g, rad, rad/s, m/s calibrated or Mach.
+
+  The activity flying the axis collects `kActivityDemandLimited` and `kActivityExceeded` in its constraints. Exceedances are judged on the aircraft's truth, not on its sensors, and only in flight.
+- **Discovery.** Where the aircraft has an envelope, it offers `fsim.envelope.protection`, a status capability that owns no axis. The limits are the profile's, for example `profileValue(v.profile(), "envelope/clean/alpha_max_deg")`.
+- **Training with the aircraft's ranges.** A VecEnv with `action_ranges` set to `"aircraft"` maps actions onto the ranges the aircraft's profile narrows. A fighter's load-factor action then spans its `n_min` .. `n_max` instead of -1 .. 5 g ([vecenv.md](vecenv.md)).
+- **From C and Python.**
+  - C: `fsim_vehicle_set_protection`, `fsim_vehicle_get_protection`, `fsim_vehicle_envelope` (`fsim_envelope_status`) and `fsim_limit_name`.
+  - Python: `vehicle.set_protection("report")`, `vehicle.protection`, and `vehicle.envelope()`, which returns `fsim.Envelope(mode, {name: fsim.LimitStatus})`.
+
 ## Built-in loops and their gains
 
 | Level | id | Output | Tunables (`controller->setParameter("name", v)`) |
