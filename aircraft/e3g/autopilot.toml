@@ -7,6 +7,13 @@ tas_ms = 180.55
 eas_ms = 157.26
 altitude_m = 3000
 
+[identified]   # the responses at the reference: per unit of aileron (roll rate, rad/s), elevator (load factor,
+               # g), rudder (sideslip, rad) and throttle (acceleration, m/s2), each with its lag (s)
+roll = { gain = 0.885373, lag_s = 0.614601 }
+pitch = { gain = 4.27974, lag_s = 0.501002 }
+yaw = { gain = 0.347698 }
+speed = { gain = 2.64849, lag_s = 0.149688 }
+
 [pid_attitude]
 airspeed.ki = 0.0235983
 airspeed.kp = 0.169908

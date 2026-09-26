@@ -1,6 +1,8 @@
 """The methods, each against something it must reproduce: an analytic result,
 a published value, or a symmetry. Fast; no platform needed."""
 import math
+import os
+import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -2001,6 +2003,95 @@ class Model3D(unittest.TestCase):
         wing["leading"][1]["schedule"] = [1.0, 5.0, 0.0]
         with self.assertRaisesRegex(ValueError, "one schedule"):
             Aircraft(spec, repo("aircraft/rafale/rafale.toml"))
+
+
+class Profile(unittest.TestCase):
+    """The aircraft's profile for the platform (hangar/profile.py): only what
+    the design states, its flight tests measured and its autopilot identified."""
+
+    class Gear:
+        def __init__(self, retractable):
+            self.retractable = retractable
+
+    class Engine:
+        def __init__(self, kind, copies=1, wet=None):
+            self.type, self._copies, self.thrust_wet_kn = kind, copies, wet
+
+        def copies(self):
+            return [None] * self._copies
+
+    class Design:
+        def __init__(self, spec, channels, gear, engines):
+            self.spec, self._channels, self.gear, self.engines = spec, channels, gear, engines
+
+        def channels(self):
+            return self._channels
+
+    def fighter(self):
+        spec = {"aircraft": {"category": "fighter"},
+                "flight_control": {"type": "fbw", "n_max": 9.0, "n_min": -3.0, "alpha_max_deg": 25.0, "roll_rate_deg_s": 308.0}}
+        return self.Design(spec, ["aileron", "elevator", "rudder", "flap"], [self.Gear(True)], [self.Engine("turbofan", 1, 129.0)])
+
+    def test_a_fly_by_wire_fighter(self):
+        from hangar.profile import sections
+        settings = {"pid_velocity": {"vertical_speed.alpha_zero_lift": math.radians(-1.5)}, "pid_attitude": {"pitch.trim": 0.0}}
+        reference = {"tas_ms": 160.0, "eas_ms": 140.0, "altitude_m": 3000.0}
+        identified = {"roll": {"gain": 3.7, "lag_s": 0.25}, "pitch": {"gain": 9.6, "lag_s": 0.76}, "yaw": {"gain": 0.17},
+                      "speed": {"gain": 6.5, "lag_s": 0.17}}
+        flown = {"fighter": {"max_mach_sl": 1.2, "service_ceiling_m": 18000.0, "climb_rate_ms": 250.0}}
+        p = sections(self.fighter(), {"options": {}}, settings, reference, identified, flown)
+        self.assertEqual(p["identity"], {"family": 2, "class": 2})
+        self.assertEqual((p["effectors"]["pitch"], p["effectors"]["roll"], p["effectors"]["neutral"]), (1, 1, 1))
+        self.assertEqual(p["effectors"]["pitch_trim"], 0)  # the law trims itself
+        self.assertEqual(p["envelope"], {"clean/n_max": 9.0, "clean/n_min": -3.0, "clean/alpha_max_deg": 25.0,
+                                         "clean/roll_rate_max_deg_s": 308.0})
+        self.assertEqual(p["propulsion"]["afterburner"], 1)
+        self.assertEqual(p["propulsion"]["spool_s"], 0.17)
+        self.assertEqual(p["plant"]["roll/tau_s"], 0.25)
+        self.assertEqual(p["plant"]["pitch/gain"], 9.6)
+        self.assertNotIn("yaw/tau_s", p["plant"])  # not identified: left out, not guessed
+        self.assertAlmostEqual(p["plant"]["alpha_zero_lift_deg"], -1.5)
+        self.assertAlmostEqual(p["performance"]["max_tas_ms"], 1.2 * 340.294)
+        self.assertNotIn("cas_min_ms", p["envelope"])  # a fighter's tests fly no stall
+
+    def test_a_surface_controlled_transport_without_an_identification(self):
+        from hangar.profile import KT, sections
+        spec = {"aircraft": {"category": "transport"}, "flight_control": {"type": "direct", "yaw_damper": True}}
+        design = self.Design(spec, ["aileron", "elevator", "rudder"], [self.Gear(False)], [self.Engine("turboprop", 4)])
+        flown = {"stall": {"stall_kcas": 100.0, "alpha_at_stall": 15.0}, "max_speed_ms": 170.0,
+                 "climb": {"service_ceiling_m": 9000.0}}
+        p = sections(design, None, {}, {}, {}, flown)
+        self.assertEqual(p["identity"]["family"], 1)
+        self.assertEqual(p["effectors"]["pitch_trim"], 1)
+        self.assertEqual((p["effectors"]["flaps"], p["effectors"]["retractable_gear"]), (0, 0))
+        self.assertEqual(p["envelope"], {"clean/cas_min_ms": 100.0 * KT, "clean/alpha_max_deg": 15.0})
+        self.assertEqual(p["propulsion"], {"engines": 4, "type": 1, "afterburner": 0})
+        self.assertNotIn("plant", p)
+        self.assertEqual(p["performance"]["stall_cas_ms"], 100.0 * KT)
+        self.assertEqual(p["performance"]["ceiling_m"], 9000.0)
+
+    def test_the_sections_as_properties(self):
+        from hangar.profile import properties_xml, sections
+        xml = properties_xml(sections(self.fighter(), {"options": {}}, {}, {}, {}, {}))
+        self.assertIn('<property value="1">fsim/identity/version</property>', xml)
+        self.assertIn('<property value="1">fsim/envelope/provenance</property>', xml)
+        self.assertIn('<property value="-3">fsim/envelope/clean/n_min</property>', xml)
+        self.assertNotIn("fsim/plant", xml)
+        self.assertEqual(properties_xml({}), "")
+
+    def test_the_identification_round_trip(self):
+        import tomllib
+        from hangar.autopilot import identified_toml, load_settings
+        ident = {"roll": {"gain": 3.7, "lag_s": 0.25}, "yaw": {"gain": 0.17}}
+        text = "\n".join(["[reference]", "tas_ms = 100.0"] + identified_toml(ident) + ["", "[pid_attitude]", "roll.kp = 0.5"]) + "\n"
+        data = tomllib.loads(text)
+        self.assertEqual(data["identified"]["roll"], {"gain": 3.7, "lag_s": 0.25})
+        self.assertEqual(data["identified"]["yaw"], {"gain": 0.17})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "autopilot.toml")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+            self.assertEqual(load_settings(path), {"pid_attitude": {"roll.kp": 0.5}})
 
 
 if __name__ == "__main__":

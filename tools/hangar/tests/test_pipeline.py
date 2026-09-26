@@ -115,14 +115,23 @@ class Stages(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(d.out, "autopilot.json")))
         self.assertEqual(self.failed(ap), [])
         settings = autopilot.load_settings(os.path.join(d.dir, "autopilot.toml"))
+        reference, identified = autopilot.load_identification(os.path.join(d.dir, "autopilot.toml"))
+        self.assertIn("lag_s", identified["roll"])
         with open(build["xml"], encoding="utf-8") as f:
-            self.assertIn("fsim/control/pid_attitude/pitch/kp", f.read())
+            xml = f.read()
+        self.assertIn("fsim/control/pid_attitude/pitch/kp", xml)
+        # and its profile: the identification the stage's rebuild wrote in
+        self.assertIn("fsim/plant/roll/tau_s", xml)
+        self.assertIn("fsim/performance/stall_cas_ms", xml)
         w = fsim.World("hangar-autopilot-test", publish=False, workers=1)
         try:
             v = w.create_vehicle("t", type="jsbsim:" + self.name, altitude_msl_m=1000.0, airspeed_ms=25.0)
             for level, controller in ((fsim.Level.ATTITUDE, autopilot.ATTITUDE), (fsim.Level.VELOCITY, autopilot.VELOCITY)):
                 for k, x in settings[controller].items():
                     self.assertAlmostEqual(v.controller_parameter(level, k), x, places=9, msg=k)
+            self.assertEqual(v.profile_section("plant"), (1, 1))  # version 1, from hangar
+            self.assertAlmostEqual(v.profile_value("plant/roll/tau_s"), identified["roll"]["lag_s"], places=5)
+            self.assertEqual(v.profile_value("identity/family"), 1)
         finally:
             w.close()
         self.assertTrue(os.path.isfile(html.write(d)))

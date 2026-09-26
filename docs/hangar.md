@@ -955,6 +955,31 @@ At the reference speed:
 | Typhoon | 139 | 1.7 s, 0 % | 4.0 s, 21 % | 6.9 s, 23 % | 20 s | 4 m |
 | U-2S | 91 | 2.6 s, 2 % | 2.2 s, 23 % | 3.0 s, 22 % | 30 s | 0 m |
 
+## The profile
+
+The build also writes what the platform should know of the aircraft, its
+*profile* ([control-architecture.md](control-architecture.md), section 7).
+It goes into the flight control section beside the gains, as six sections
+`fsim/<section>/<field>`, each marked version 1 and provenance hangar
+(`hangar/profile.py`).
+
+hangar writes only what it knows; a field it does not know it leaves out,
+and the platform treats it as unknown:
+
+| Section | From |
+| --- | --- |
+| `identity` | the design's category (fighter, transport, ...) and its law: fly-by-wire or surfaces |
+| `effectors` | the law again, for what the stick means: a load-factor and roll-rate demand, or the surfaces. Also the effectors the design has: flaps if it has a flap channel, retractable gear, wheel brakes, and pitch trim where the elevator channel sums one |
+| `envelope` | the `[flight_control]` limits the design states (g, angle of attack, roll rate), and, for an aircraft without a limiting law, the stall its flight tests flew (its speed and angle) |
+| `propulsion` | the engines, their type, afterburning, and the thrust lag the autopilot identified |
+| `plant` | the autopilot's `[reference]` and `[identified]` tables in `autopilot.toml`: the responses to aileron, elevator, rudder and throttle there, each with its lag; and the trim law and zero-lift angle the gains use |
+| `performance` | the flight tests' stall speed, maximum speed, ceiling and climb (`out/fly.json`) |
+
+The platform reads the profile once per aircraft type. It drives what a
+vehicle offers: the support effectors that exist, and the envelope's ranges
+for commands that ask. It also chooses the vehicle's adapter (fly-by-wire or
+direct).
+
 ## Limits
 
 - **Speed range.** Subsonic tables, with Mach factors to about Mach 2.6.

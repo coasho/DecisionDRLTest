@@ -957,12 +957,13 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 - **The checked UPDATE path** of the new API (clamping every field) takes 14–15 ns.
 - **Throughput:** within the gate (c172x ≥ 97 % of the baseline in every run). After each world step the contract layer reads every vehicle's report: a few integer tests per slot.
 
-**Step 2 (2a profile, 2b adapters, 2c support effectors).**
+**Step 2 (2a profile, 2b adapters, 2c support effectors, 2d hangar's profiles).**
 - **Digests:** identical to the baseline after each sub-step.
 - **Allocations:** none, a support activity updated every step included.
 - **Per-step path:** unchanged (4.9 ns). The actuator stage is now the adapter's virtual `apply()`, and support axes are resolved by their owner, both within the timings' noise.
 - **NEWs and checked UPDATEs** scan the host's nine activity slots (four for the cascade, five for support axes) instead of four: 36 ns for a level switch, 18–19 ns for a checked update.
 - **Throughput:** c172x at 98.5 % of the baseline, after two economies. The flap position, for flaps that complete in position, is read only while such an activity is under way, and the post-step pass skips empty slots.
+- **2d:** hangar writes six profile sections into each of its 31 designs, and the platform reads every one without a warning. The F-16C and B-52H flights now go through the `jsbsim.fbw` and `jsbsim.direct` adapters, and their digests are still identical to the baseline.
 
 **Allocations.**
 - Per update, none, except `loiter` (4, one per parameter's map node) and `waypoints` (2): the per-step `BehaviorCommand` copy, P6.

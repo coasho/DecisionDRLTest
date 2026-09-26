@@ -430,10 +430,13 @@ def _centre_brake_xml():
       </channel>"""
 
 
-def flight_control_xml(aircraft, fbw=None, yaw_damper=None, autopilot=None):
+def flight_control_xml(aircraft, fbw=None, yaw_damper=None, autopilot=None, profile=None):
     ch = set(aircraft.channels())
     lim = {k: aircraft.channel_limits(k) for k in ch}
     parts = ["    <flight_control name=\"%s\">" % aircraft.name]
+    if profile:
+        from .profile import properties_xml as profile_xml
+        parts.append(profile_xml(profile).rstrip("\n"))
     if autopilot:
         from .autopilot import properties_xml
         parts.append(properties_xml(autopilot).rstrip("\n"))
@@ -845,7 +848,7 @@ def propulsion_xml(aircraft, mass_model, engine_files):
     return "\n".join(parts)
 
 
-def aircraft_xml(aircraft, tables, mass_model, engine_files, notes="", fbw=None, yaw_damper=None, autopilot=None):
+def aircraft_xml(aircraft, tables, mass_model, engine_files, notes="", fbw=None, yaw_damper=None, autopilot=None, profile=None):
     e = mass_model.empty()
     a = aircraft
     htail = [s for s in a.surfaces if s.kind == "htail"]
@@ -912,5 +915,5 @@ def aircraft_xml(aircraft, tables, mass_model, engine_files, notes="", fbw=None,
     </mass_balance>
 """ % (e["ixx"], e["iyy"], e["izz"], e["ixy"], e["ixz"], e["iyz"], e["mass"], _loc(e["cg"], 8), points)
     return "".join([header, metrics, mass, ground_reactions_xml(a, mass_model), "\n",
-                    propulsion_xml(a, mass_model, engine_files), "\n", flight_control_xml(a, fbw, yaw_damper, autopilot), "\n",
+                    propulsion_xml(a, mass_model, engine_files), "\n", flight_control_xml(a, fbw, yaw_damper, autopilot, profile), "\n",
                     aerodynamics_xml(tables, a), "\n</fdm_config>\n"])

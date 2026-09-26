@@ -319,6 +319,7 @@ def write_toml(d, settings, ident):
              "# this file to fly the platform's shared defaults.",
              "[reference]   # where they were designed (the gains follow the airspeed elsewhere)",
              "tas_ms = %.2f" % ident["tas_ms"], "eas_ms = %.2f" % ident["eas_ms"], "altitude_m = %.0f" % ident["altitude_m"]]
+    lines += identified_toml(ident)
     for controller, params in settings.items():
         lines.append("")
         lines.append("[%s]" % controller)
@@ -328,6 +329,30 @@ def write_toml(d, settings, ident):
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     return path
+
+
+def identified_toml(ident):
+    """The responses measured at the reference, as autopilot.toml's
+    [identified] table: the build writes them into the aircraft's profile
+    (the plant section; hangar/profile.py)."""
+    lines = ["", "[identified]   # the responses at the reference: per unit of aileron (roll rate, rad/s), elevator (load factor,",
+             "               # g), rudder (sideslip, rad) and throttle (acceleration, m/s2), each with its lag (s)"]
+    for axis in ("roll", "pitch", "yaw", "speed"):
+        r = ident.get(axis) or {}
+        fields = ", ".join("%s = %s" % (k, _num(r[k])) for k in ("gain", "lag_s") if k in r)
+        if fields:
+            lines.append("%s = { %s }" % (axis, fields))
+    return lines
+
+
+def load_identification(path):
+    """autopilot.toml's [reference] and [identified] tables ({} and {} without them)."""
+    import tomllib
+    if not os.path.isfile(path):
+        return {}, {}
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+    return data.get("reference", {}), data.get("identified", {})
 
 
 def _num(x):
@@ -345,7 +370,7 @@ def load_settings(path):
         data = tomllib.load(f)
     out = {}
     for controller, params in data.items():
-        if controller == "reference" or not isinstance(params, dict):
+        if controller in ("reference", "identified") or not isinstance(params, dict):
             continue
         flat = {}
 

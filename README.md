@@ -129,7 +129,11 @@ push, not yet tagged:
   command becomes an activity (pending, active, then completed, failed or canceled) that a policy updates
   every step, an engaged autopilot or an operator's override outranks, and a behaviour completes when it reaches
   its goal - in C++, the C ABI (1.4) and Python. Every existing command flies exactly as before, its per-step
-  path 20 % faster and allocation-free; the control stack stays the runtime underneath (step 1 of 6).
+  path 20 % faster and allocation-free; the control stack stays the runtime underneath. Each aircraft carries a
+  profile of separately versioned sections (identity, effectors, envelope, propulsion, identified plant,
+  performance, gains) - hangar writes them for its 31 designs - and flies through the adapter of its family
+  (fly-by-wire or surfaces); gear, flaps, brakes, speedbrake and pitch trim are capabilities of their own, with
+  their placards (steps 1-2 of 6).
 - `sim::VehiclePool` (one worker per physical core), JSBSim 1.3.1 adapter with terrain ground callback,
   `flightsim.exe` headless benchmark.
 

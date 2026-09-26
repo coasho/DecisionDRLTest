@@ -92,6 +92,13 @@ move on while a check fails or a picture looks wrong.
   speed; warnings at 0.7x or 1.5x are the aircraft's limits (a heavy's roll
   or load factor there) more often than the loops'. Look at
   `out/autopilot.png`: the steps should rise without ringing.
+  `autopilot.toml` also keeps what it identified (`[identified]`). The build
+  writes that, with the design's law limits and the flight tests' stall and
+  performance, into the `.xml` as the aircraft's profile (`fsim/<section>`
+  properties, `hangar/profile.py`; docs/hangar.md, The profile). State a
+  law's limits in `[flight_control]` (`n_max`, `n_min`, `alpha_max_deg`,
+  `roll_rate_deg_s`) only from published figures: they become the envelope
+  the platform limits commands to.
 - **model.** The `.glb`. Its checks must pass: no open, pinched or
   misturned edge, the airframe in one piece, every moving part closed, the
   stowed gear inside the skin (under 3 cm), length, span and height within

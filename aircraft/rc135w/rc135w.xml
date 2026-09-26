@@ -473,6 +473,54 @@
       </tank>
     </propulsion>
     <flight_control name="rc135w">
+      <!-- the aircraft's profile for the platform (docs/control-architecture.md, section 7): what
+           hangar knows of it - its design, its flight tests, its identified responses -->
+      <property value="1">fsim/identity/version</property>
+      <property value="1">fsim/identity/provenance</property>
+      <property value="5">fsim/identity/class</property>
+      <property value="1">fsim/identity/family</property>
+      <property value="1">fsim/effectors/version</property>
+      <property value="1">fsim/effectors/provenance</property>
+      <property value="1">fsim/effectors/flaps</property>
+      <property value="8">fsim/effectors/flaps_transit_s</property>
+      <property value="0.0">fsim/effectors/neutral</property>
+      <property value="0.0">fsim/effectors/pitch</property>
+      <property value="1">fsim/effectors/pitch_trim</property>
+      <property value="1">fsim/effectors/retractable_gear</property>
+      <property value="0.0">fsim/effectors/roll</property>
+      <property value="0.0">fsim/effectors/speedbrake</property>
+      <property value="1">fsim/effectors/wheel_brakes</property>
+      <property value="0.0">fsim/effectors/yaw</property>
+      <property value="1">fsim/envelope/version</property>
+      <property value="1">fsim/envelope/provenance</property>
+      <property value="17.7218">fsim/envelope/clean/alpha_max_deg</property>
+      <property value="74.7462">fsim/envelope/clean/cas_min_ms</property>
+      <property value="1">fsim/propulsion/version</property>
+      <property value="1">fsim/propulsion/provenance</property>
+      <property value="0.0">fsim/propulsion/afterburner</property>
+      <property value="4">fsim/propulsion/engines</property>
+      <property value="0.324558">fsim/propulsion/spool_s</property>
+      <property value="2">fsim/propulsion/type</property>
+      <property value="1">fsim/plant/version</property>
+      <property value="1">fsim/plant/provenance</property>
+      <property value="-2.3091">fsim/plant/alpha_zero_lift_deg</property>
+      <property value="3000">fsim/plant/altitude_m</property>
+      <property value="150.78">fsim/plant/eas_ms</property>
+      <property value="0.223431">fsim/plant/elevator_trim</property>
+      <property value="-0.33527">fsim/plant/elevator_trim_lift</property>
+      <property value="2.95304">fsim/plant/pitch/gain</property>
+      <property value="0.551475">fsim/plant/pitch/tau_s</property>
+      <property value="0.894261">fsim/plant/roll/gain</property>
+      <property value="0.404466">fsim/plant/roll/tau_s</property>
+      <property value="2.3392">fsim/plant/speed/gain</property>
+      <property value="0.324558">fsim/plant/speed/tau_s</property>
+      <property value="173.26">fsim/plant/tas_ms</property>
+      <property value="0.468328">fsim/plant/yaw/gain</property>
+      <property value="1">fsim/performance/version</property>
+      <property value="1">fsim/performance/provenance</property>
+      <property value="11794.7">fsim/performance/ceiling_m</property>
+      <property value="295.048">fsim/performance/max_tas_ms</property>
+      <property value="74.7462">fsim/performance/stall_cas_ms</property>
       <!-- the platform's built-in control loops, tuned for this aircraft (hangar autopilot):
            every vehicle of the type takes these as its controllers' parameters -->
       <property value="0.0">fsim/control/pid_acceleration/load_factor/eas_exponent</property>
