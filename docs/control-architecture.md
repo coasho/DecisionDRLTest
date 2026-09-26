@@ -915,6 +915,26 @@ Steps 1 and 2 are mostly plumbing and low-risk. Step 3 is the first real change 
 
 Filled in as the steps land: the baseline first (step 1a), then each step's numbers against it.
 
-| Step | micro (ns/update) | command (ns/call) | world (vehicle-steps/s) | allocations | digests |
-| --- | --- | --- | --- | --- | --- |
-| baseline (1a) | pending | pending | pending | pending | recorded |
+- **Machine:** AMD Ryzen 7 9700X (8 cores), Windows 11, the release build (GCC 16, `-O3`).
+- **Precision:** `micro` is the median of 5 runs of 200,000 updates, good to about ±3 % (±5 % for `position`). `world` is the best of 3 runs of 1,000 world steps on 6 pinned workers, good to about ±1 %.
+
+**Baseline (1a, 2026-09-26).** Measured on a252827, which fixed a determinism bug the digests found first: a behaviour that followed another vehicle could read it mid-step, from another worker.
+
+| micro (ns/update) | actuator | attitude | acceleration | velocity | position | hold | loiter | waypoints |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| baseline | 31 | 47 | 41 | 65 | 118–129 | 68 | 240–249 | 179–181 |
+
+| command (ns/call, 64 vehicles) | same level | level switch | behaviour |
+| --- | --- | --- | --- |
+| baseline | 6.2 | 6.7 | 57 |
+
+| world (vehicle-steps/s) | 64 c172x | 32 f16c (fly-by-wire) | 32 b52h (direct) |
+| --- | --- | --- | --- |
+| baseline | 823,000 | 556,000 | 579,000 |
+
+**Allocations.**
+- Per update, none, except `loiter` (4, one per parameter's map node) and `waypoints` (2): the per-step `BehaviorCommand` copy, P6.
+- In the world, the platform's own allocations are none, except while a behaviour with parameters runs. For example, 12,800 over 100 steps of 16 vehicles on `loiter`.
+- JSBSim allocates about 4 times per vehicle per FDM step on its own. The counter attributes an allocation to JSBSim when any caller up the stack is in its DLL, and does not gate on it.
+
+**Digests.** 20 flights, reproducible run to run: `fsim_control_bench digest`, kept outside the repository. The c172x's six closed-loop flights are committed as checkpoints (`tests/data/c172x_checkpoints.txt`).

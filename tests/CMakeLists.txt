@@ -17,6 +17,7 @@ add_executable(fsim_tests
     test_vehicle_pool.cpp
     test_vecenv.cpp
     test_control.cpp
+    test_control_compat.cpp
     test_world.cpp
     test_terrain.cpp
     test_scenario.cpp
@@ -24,13 +25,22 @@ add_executable(fsim_tests
 
 target_link_libraries(fsim_tests PRIVATE fsim::env fsim::session fsim::control fsim::effects fsim::comm fsim::ipc fsim::sim fsim::io fsim::core Catch2::Catch2WithMain)
 target_compile_definitions(fsim_tests PRIVATE FSIM_TEST_JSBSIM_ROOT="${FSIM_JSBSIM_DATA_DIR}"
-                                                FSIM_TEST_AIRCRAFT_DIR="${CMAKE_SOURCE_DIR}/aircraft")
+                                                FSIM_TEST_AIRCRAFT_DIR="${CMAKE_SOURCE_DIR}/aircraft"
+                                                FSIM_TEST_DATA_DIR="${CMAKE_SOURCE_DIR}/tests/data")
 fsim_set_warnings(fsim_tests)
 
 add_custom_command(TARGET fsim_tests POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:libJSBSim> $<TARGET_FILE_DIR:fsim_tests>)
 
 catch_discover_tests(fsim_tests ${FSIM_CATCH_DISCOVERY})
+
+# The control architecture's measurements (docs/control-architecture.md,
+# section 12): timings, heap allocations and trajectory digests. Only the
+# allocation count is a test; the rest is run by hand at each step.
+add_executable(fsim_control_bench bench_control.cpp)
+target_link_libraries(fsim_control_bench PRIVATE fsim::session fsim::control fsim::effects fsim::comm fsim::ipc fsim::sim fsim::io fsim::core)
+target_compile_definitions(fsim_control_bench PRIVATE FSIM_TEST_JSBSIM_ROOT="${FSIM_JSBSIM_DATA_DIR}")
+fsim_set_warnings(fsim_control_bench)
 
 # The public C++ SDK against fsim.dll (what a trainer links).
 add_executable(fsim_sdk_tests test_sdk.cpp)
