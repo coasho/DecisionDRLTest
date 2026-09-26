@@ -148,7 +148,8 @@ public:
     // Capability contracts (docs/sdk/control.md, "Capabilities and activities"):
     /// NEW: the command becomes an activity, or is rejected with a reason.
     control::CommandResult submit(const control::Command& command, const control::CommandOptions& options = {});
-    /// NEW for a support effector: GearCommand, FlapsCommand, WheelBrakesCommand, SpeedbrakeCommand, PitchTrimCommand.
+    /// NEW for a support effector (GearCommand, FlapsCommand, WheelBrakesCommand,
+    /// SpeedbrakeCommand, PitchTrimCommand) or the engines' throttles (EnginesCommand).
     control::CommandResult submit(const control::SupportCommand& command, const control::CommandOptions& options = {});
     template <typename C>
     control::CommandResult submit(const C& c, const control::CommandOptions& options = {}) {
@@ -165,6 +166,11 @@ public:
     /// What the vehicle knows about its aircraft: identity, effectors, envelope,
     /// propulsion, plant, performance, control (docs/control-architecture.md, 7).
     const control::VehicleProfile& profile() const;
+    /// What flies the primary axes nobody owns (docs/sdk/control.md, "Owning
+    /// axes apart"): Neutral, as always, or Hold - the heading, airspeed and
+    /// height each had when it was let go. Reason::None if set.
+    control::Reason setVehicleDefault(control::VehicleDefault mode);
+    control::VehicleDefault vehicleDefault() const;
     control::ControlStack& controls();
     control::Level activeLevel() const;
     bool use(control::Level level, std::string_view controllerId);
@@ -216,7 +222,7 @@ public:
         else
             return update(activity, control::Command(c));
     }
-    /// CANCEL: the activity ends; its axes fly the vehicle's neutral default.
+    /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// A live or recently ended activity of any vehicle; empty if unknown.
     std::optional<control::ActivityRecord> activity(control::ActivityId activity) const;

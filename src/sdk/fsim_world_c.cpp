@@ -472,6 +472,13 @@ bool toSupport(int kind, const double* f, uint32_t count, fsim::control::Support
     case FSIM_SUPPORT_WHEEL_BRAKES: return count == 2 && (out = WheelBrakesCommand{f[0], f[1]}, true);
     case FSIM_SUPPORT_SPEEDBRAKE: return count == 1 && (out = SpeedbrakeCommand{f[0]}, true);
     case FSIM_SUPPORT_PITCH_TRIM: return count == 1 && (out = PitchTrimCommand{f[0]}, true);
+    case FSIM_SUPPORT_ENGINES: {
+        if (count < 1 || count > 4) return false;
+        EnginesCommand e;
+        for (uint32_t i = 0; i < count; ++i) e.throttle[i] = f[i];
+        out = e;
+        return true;
+    }
     default: return false;
     }
 }
@@ -491,10 +498,10 @@ UpdateShape updateShape(fsim_world* w, fsim::control::ActivityId activity) {
     const auto& all = w->world.capabilities(a->vehicle);
     if (a->capability >= all.size()) return shape;
     const auto& d = all[a->capability];
-    if (d.kind == fsim::control::CapabilityKind::Support) {
-        for (std::size_t k = 0; k < fsim::control::kSupportKinds; ++k)
-            if (d.id == fsim::control::supportCapability(k)) shape.support = static_cast<int>(k);
-        shape.fields = shape.support == FSIM_SUPPORT_WHEEL_BRAKES ? 2u : 1u;
+    for (std::size_t k = 0; k < fsim::control::kSupportKinds; ++k)
+        if (d.id == fsim::control::supportCapability(k)) shape.support = static_cast<int>(k);
+    if (shape.support >= 0) {
+        shape.fields = static_cast<uint32_t>(d.parameters.size()); // set beside the cascade: a support effector or the engines
     } else if (d.kind == fsim::control::CapabilityKind::Flight) {
         shape.level = static_cast<int>(d.level);
         shape.fields = fsim_command_field_count(shape.level);
@@ -543,6 +550,7 @@ FSIM_API int fsim_vehicle_capability(fsim_world* world, uint32_t id, uint32_t in
     out->interactions = d->interactions;
     out->level = static_cast<int32_t>(d->level);
     out->axes = d->axes;
+    out->axis_groups = d->axisGroups;
     out->terminating = d->persistence == fsim::control::Persistence::Terminating ? 1 : 0;
     out->needs_target = d->needsTarget ? 1 : 0;
     out->parameter_count = static_cast<uint32_t>(d->parameters.size());
@@ -633,6 +641,20 @@ FSIM_API int fsim_activity_update_batch(fsim_world* world, const fsim_activity_i
 FSIM_API int fsim_activity_cancel(fsim_world* world, fsim_activity_id activity, fsim_command_result* result) {
     if (!world || !result) return FSIM_INVALID_ARGUMENT;
     toC(world->world.cancel(activity), result);
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_vehicle_set_default(fsim_world* world, uint32_t id, int mode, int32_t* reason) {
+    if (!world || (mode != FSIM_DEFAULT_NEUTRAL && mode != FSIM_DEFAULT_HOLD)) return FSIM_INVALID_ARGUMENT;
+    const auto r = world->world.setVehicleDefault(id, static_cast<fsim::control::VehicleDefault>(mode));
+    if (reason) *reason = static_cast<int32_t>(r);
+    if (r == fsim::control::Reason::None) return FSIM_OK;
+    return fail(FSIM_INVALID_ARGUMENT, std::string("fsim_vehicle_set_default: refused (") + fsim::control::reasonName(r) + ")");
+}
+
+FSIM_API int fsim_vehicle_get_default(const fsim_world* world, uint32_t id, int32_t* mode) {
+    if (!world || !mode || !world->world.vehicleState(id)) return FSIM_INVALID_ARGUMENT;
+    *mode = static_cast<int32_t>(world->world.vehicleDefault(id));
     return FSIM_OK;
 }
 

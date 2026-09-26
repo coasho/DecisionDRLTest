@@ -425,6 +425,7 @@ int main(int argc, char** argv) {
         CHECK(attitude < ncap);
         CHECK(fsim_vehicle_capability(world, a, attitude, &ci) == FSIM_OK);
         CHECK(ci.level == FSIM_LEVEL_ATTITUDE && ci.parameter_count == 6 && (ci.interactions & 2) != 0 && ci.terminating == 0);
+        CHECK(ci.axis_groups == (1u | 2u | 4u)); /* lateral, pitch and thrust, apart */
         CHECK(fsim_vehicle_capability_parameter(world, a, attitude, 0, &pi) == FSIM_OK);
         CHECK(strcmp(pi.name, "roll_rad") == 0 && strcmp(pi.unit, "rad") == 0 && pi.optional == 1);
         CHECK(fsim_vehicle_capability(world, a, ncap, &ci) != FSIM_OK);
@@ -479,6 +480,63 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_submit_support(world, a, FSIM_SUPPORT_SPEEDBRAKE, &position, 1, &co, &cr) == FSIM_OK);
             CHECK(cr.status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(cr.reason), "unknown_capability") == 0);
             CHECK(fsim_activity_cancel(world, flaps_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        }
+        {
+            /* axes owned apart: an autopilot's height and speed beside a policy's bank */
+            double hold[4], bank[6];
+            fsim_activity_id held;
+            int32_t mode = -1, reason = -1;
+            hold[0] = 55.0; hold[1] = 0.0; hold[2] = fsim_hold(); hold[3] = fsim_hold();
+            bank[0] = 0.3; bank[1] = fsim_hold(); bank[2] = fsim_hold(); bank[3] = 0.785; bank[4] = fsim_hold(); bank[5] = fsim_hold();
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_AUTOPILOT;
+            co.axes = 2u | 8u; /* pitch, thrust */
+            CHECK(fsim_vehicle_submit(world, b, FSIM_LEVEL_VELOCITY, hold, 4, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            held = cr.activity;
+            co.source = FSIM_SOURCE_POLICY;
+            co.axes = 1u; /* roll: yaw goes with it above the actuators */
+            CHECK(fsim_vehicle_submit(world, b, FSIM_LEVEL_ATTITUDE, bank, 6, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get(world, cr.activity, &ai) == FSIM_OK && ai.axes == (1u | 4u));
+            CHECK(fsim_activity_get(world, held, &ai) == FSIM_OK && ai.state == FSIM_ACTIVITY_PENDING); /* not preempted */
+            co.axes = 16u; /* flaps alone: no primary axis to fly */
+            CHECK(fsim_vehicle_submit(world, b, FSIM_LEVEL_ATTITUDE, bank, 6, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "invalid_axes") == 0);
+            /* the vehicle default */
+            CHECK(fsim_vehicle_get_default(world, a, &mode) == FSIM_OK && mode == FSIM_DEFAULT_NEUTRAL);
+            CHECK(fsim_vehicle_set_default(world, a, FSIM_DEFAULT_HOLD, &reason) == FSIM_OK && reason == 0);
+            CHECK(fsim_vehicle_get_default(world, a, &mode) == FSIM_OK && mode == FSIM_DEFAULT_HOLD);
+            CHECK(fsim_vehicle_set_default(world, a, 7, &reason) != FSIM_OK);
+            CHECK(fsim_vehicle_set_default(world, 999, FSIM_DEFAULT_HOLD, &reason) != FSIM_OK);
+            CHECK(strcmp(fsim_reason_name(reason), "unknown_vehicle") == 0);
+            CHECK(fsim_vehicle_get_default(world, 999, &mode) != FSIM_OK);
+            CHECK(fsim_world_step(world, 1) == FSIM_OK);
+            CHECK(fsim_activity_get(world, held, &ai) == FSIM_OK && ai.state == FSIM_ACTIVITY_ACTIVE);
+        }
+        {
+            /* the engines' throttles, one per engine, where there is more than one */
+            uint32_t twin = 0;
+            double throttles[2] = {0.9, 0.4}, five[5] = {0.5, 0.5, 0.5, 0.5, 0.5}, value = -1.0;
+            fsim_activity_id engines;
+            spec.name = "cap-twin";
+            spec.type = "jsbsim:a10c";
+            spec.altitude_msl_m = 3000.0;
+            spec.airspeed_ms = 140.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &twin) == FSIM_OK);
+            fsim_command_options_init(&co);
+            CHECK(fsim_vehicle_submit_support(world, twin, FSIM_SUPPORT_ENGINES, throttles, 2, &co, &cr) == FSIM_OK);
+            CHECK(cr.status == FSIM_COMMAND_ACCEPTED);
+            engines = cr.activity;
+            CHECK(fsim_world_step(world, 1) == FSIM_OK);
+            throttles[0] = 0.7;
+            throttles[1] = fsim_hold(); /* keeps what it flew: 0.4 */
+            CHECK(fsim_activity_update(world, engines, throttles, 2, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_vehicle_submit_support(world, twin, FSIM_SUPPORT_ENGINES, five, 5, &co, &cr) != FSIM_OK); /* at most 4 */
+            CHECK(fsim_vehicle_submit_support(world, a, FSIM_SUPPORT_ENGINES, throttles, 2, &co, &cr) == FSIM_OK);
+            CHECK(cr.status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(cr.reason), "unknown_capability") == 0);
+            CHECK(fsim_world_step(world, 1) == FSIM_OK);
+            CHECK(fsim_vehicle_get_property(world, twin, "fcs/throttle-cmd-norm[0]", &value) == FSIM_OK && value == 0.7);
+            CHECK(fsim_vehicle_get_property(world, twin, "fcs/throttle-cmd-norm[1]", &value) == FSIM_OK && value == 0.4);
         }
         {
             /* the profile: a stock c172x carries no sections */

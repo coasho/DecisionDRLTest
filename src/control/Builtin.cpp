@@ -73,32 +73,49 @@ Command AttitudeLoop::update(const ControlContext& ctx, const Command& in) {
     const auto& c = std::get<AttitudeCommand>(in);
     const auto& s = ctx.sensed;
     const double rollNow = s.eulerRad[0], pitchNow = s.eulerRad[1], yawNow = s.eulerRad[2];
-
-    double rollTarget = orHold(c.rollRad, 0.0);
-    if (!isHold(c.headingRad)) {
-        const double maxBank = orHold(c.maxBankRad, 0.785);
-        rollTarget = std::clamp(headingGain * schedule.speedRatio(s) * geo::wrapPi(c.headingRad - yawNow), -maxBank, maxBank);
-    }
-    if (!haveRef_ || resumed(ctx, lastTime_)) {
-        rollRef_ = rollNow;
-        haveRef_ = true;
-    }
-    rollRef_ = rateLimit(rollRef_, rollTarget, maxRollRateRadS, ctx.dt);
-
     ActuatorCommand out;
-    out.aileron = roll.update(geo::wrapPi(rollRef_ - rollNow), s.angularRateBodyRadS[0], ctx.dt,
-                              schedule.factor(s, rollEasExponent, rollTasExponent));
-    // Positive elevator is nose-down in JSBSim: negate the nose-up demand. The
-    // trim is the elevator a level turn at this bank holds.
-    const double turn = 1.0 / std::max(std::cos(rollNow), 0.3);
-    out.elevator = schedule.trimElevator(s, turn, pitchTrim, pitchTrimLift) -
-                   pitch.update(orHold(c.pitchRad, pitchNow) - pitchNow, s.angularRateBodyRadS[1], ctx.dt,
-                                schedule.factor(s, pitchEasExponent, pitchTasExponent));
-    out.rudder = clamp11(rudderBetaGain * s.betaRad);
-    if (!isHold(c.airspeedMs))
-        out.throttle = std::clamp(throttleFeedforward + airspeed.update(c.airspeedMs - s.airspeedTrueMs, 0.0, ctx.dt), 0.0, 1.0);
-    else
-        out.throttle = c.throttle; // may be kHold: the stack keeps the last value
+
+    // lateral: bank (or heading through bank) on the ailerons, sideslip on the rudder
+    if (ctx.engaged & axisBit(Axis::Roll)) {
+        double rollTarget = orHold(c.rollRad, 0.0);
+        if (!isHold(c.headingRad)) {
+            const double maxBank = orHold(c.maxBankRad, 0.785);
+            rollTarget = std::clamp(headingGain * schedule.speedRatio(s) * geo::wrapPi(c.headingRad - yawNow), -maxBank, maxBank);
+        }
+        if (!haveRef_ || resumed(ctx, lastTime_)) {
+            rollRef_ = rollNow;
+            haveRef_ = true;
+        }
+        rollRef_ = rateLimit(rollRef_, rollTarget, maxRollRateRadS, ctx.dt);
+        out.aileron = roll.update(geo::wrapPi(rollRef_ - rollNow), s.angularRateBodyRadS[0], ctx.dt,
+                                  schedule.factor(s, rollEasExponent, rollTasExponent));
+        out.rudder = clamp11(rudderBetaGain * s.betaRad);
+    } else {
+        roll.reset(); // someone else flies it: start afresh when it comes back
+        haveRef_ = false;
+        out.aileron = out.rudder = kHold;
+    }
+    // longitudinal: pitch attitude on the elevator. Positive elevator is
+    // nose-down in JSBSim: negate the nose-up demand. The trim is the
+    // elevator a level turn at this bank holds.
+    if (ctx.engaged & axisBit(Axis::Pitch)) {
+        const double turn = 1.0 / std::max(std::cos(rollNow), 0.3);
+        out.elevator = schedule.trimElevator(s, turn, pitchTrim, pitchTrimLift) -
+                       pitch.update(orHold(c.pitchRad, pitchNow) - pitchNow, s.angularRateBodyRadS[1], ctx.dt,
+                                    schedule.factor(s, pitchEasExponent, pitchTasExponent));
+    } else {
+        pitch.reset();
+        out.elevator = kHold;
+    }
+    if (ctx.engaged & axisBit(Axis::Thrust)) {
+        if (!isHold(c.airspeedMs))
+            out.throttle = std::clamp(throttleFeedforward + airspeed.update(c.airspeedMs - s.airspeedTrueMs, 0.0, ctx.dt), 0.0, 1.0);
+        else
+            out.throttle = c.throttle; // may be kHold: the stack keeps the last value
+    } else {
+        airspeed.reset();
+        out.throttle = kHold;
+    }
     return out;
 }
 
@@ -142,14 +159,30 @@ Command AccelerationLoop::update(const ControlContext& ctx, const Command& in) {
     // attitude (a law that holds the flight path), or 1 g (a trimmed surface)
     const double level = 1.0 + loadFactorPathHold * (std::cos(s.eulerRad[1]) * std::cos(s.eulerRad[0]) - 1.0);
     ActuatorCommand out;
-    out.elevator = schedule.trimElevator(s, n, pitchTrim, pitchTrimLift) -
-                   (sn * loadFactorFeedforward * (n - level) + loadFactor.update(n - s.loadFactor, s.angularRateBodyRadS[1], ctx.dt, sn));
-    out.aileron = sp * rollRateFeedforward * p + rollRate.update(p - s.angularRateBodyRadS[0], 0.0, ctx.dt, sp);
-    out.rudder = clamp11(rudderBetaGain * s.betaRad);
-    if (!isHold(c.longitudinalMs2))
-        out.throttle = std::clamp(throttleFeedforward + longitudinal.update(c.longitudinalMs2 - s.accelerationBodyMs2[0], 0.0, ctx.dt), 0.0, 1.0);
-    else
-        out.throttle = c.throttle;
+    if (ctx.engaged & axisBit(Axis::Pitch)) {
+        out.elevator = schedule.trimElevator(s, n, pitchTrim, pitchTrimLift) -
+                       (sn * loadFactorFeedforward * (n - level) + loadFactor.update(n - s.loadFactor, s.angularRateBodyRadS[1], ctx.dt, sn));
+    } else {
+        loadFactor.reset();
+        out.elevator = kHold;
+    }
+    if (ctx.engaged & axisBit(Axis::Roll)) {
+        out.aileron = sp * rollRateFeedforward * p + rollRate.update(p - s.angularRateBodyRadS[0], 0.0, ctx.dt, sp);
+        out.rudder = clamp11(rudderBetaGain * s.betaRad);
+    } else {
+        rollRate.reset();
+        out.aileron = out.rudder = kHold;
+    }
+    if (ctx.engaged & axisBit(Axis::Thrust)) {
+        if (!isHold(c.longitudinalMs2))
+            out.throttle =
+                std::clamp(throttleFeedforward + longitudinal.update(c.longitudinalMs2 - s.accelerationBodyMs2[0], 0.0, ctx.dt), 0.0, 1.0);
+        else
+            out.throttle = c.throttle;
+    } else {
+        longitudinal.reset();
+        out.throttle = kHold;
+    }
     return out;
 }
 
@@ -177,6 +210,14 @@ Command VelocityLoop::update(const ControlContext& ctx, const Command& in) {
     const auto& c = std::get<VelocityCommand>(in);
     const auto& s = ctx.sensed;
     AttitudeCommand out;
+    if (!(ctx.engaged & axisBit(Axis::Pitch))) {
+        // someone else flies the pitch: start afresh when it comes back
+        verticalSpeed.reset();
+        started_ = false;
+        lastTime_ = -1.0;
+        out.pitchRad = kHold;
+        return lateralAndSpeed(ctx, c, out);
+    }
     const double vz = -s.velocityNedMs[2];
     double vzTarget = orHold(c.verticalSpeedMs, 0.0);
     const double tas = std::max(s.airspeedTrueMs, 10.0);
@@ -204,16 +245,24 @@ Command VelocityLoop::update(const ControlContext& ctx, const Command& in) {
     }
     started_ = true;
     out.pitchRad = std::clamp(path + verticalSpeed.update(vzTarget - vz, 0.0, ctx.dt, scale), verticalSpeed.outMin, verticalSpeed.outMax);
-    out.maxBankRad = maxBankRad;
-    if (!isHold(c.turnRateRadS)) {
-        const double v = std::max(s.airspeedTrueMs, 10.0);
-        out.rollRad = std::clamp(std::atan(c.turnRateRadS * v / kG), -maxBankRad, maxBankRad);
-    } else if (!isHold(c.headingRad)) {
-        out.headingRad = c.headingRad;
+    return lateralAndSpeed(ctx, c, out);
+}
+
+Command VelocityLoop::lateralAndSpeed(const ControlContext& ctx, const VelocityCommand& c, AttitudeCommand& out) const {
+    if (ctx.engaged & axisBit(Axis::Roll)) {
+        out.maxBankRad = maxBankRad;
+        if (!isHold(c.turnRateRadS)) {
+            const double v = std::max(ctx.sensed.airspeedTrueMs, 10.0);
+            out.rollRad = std::clamp(std::atan(c.turnRateRadS * v / kG), -maxBankRad, maxBankRad);
+        } else if (!isHold(c.headingRad)) {
+            out.headingRad = c.headingRad;
+        } else {
+            out.rollRad = 0.0;
+        }
     } else {
-        out.rollRad = 0.0;
+        out.rollRad = out.maxBankRad = kHold;
     }
-    out.airspeedMs = c.airspeedMs;
+    out.airspeedMs = ctx.engaged & axisBit(Axis::Thrust) ? c.airspeedMs : kHold;
     return out;
 }
 
@@ -234,10 +283,14 @@ Command PositionLoop::update(const ControlContext& ctx, const Command& in) {
     const auto& c = std::get<PositionCommand>(in);
     const auto& s = ctx.sensed;
     VelocityCommand out;
-    const double distance = geo::distanceM(s.latitudeRad, s.longitudeRad, c.latitudeRad, c.longitudeRad);
-    out.headingRad = distance < c.captureRadiusM ? s.eulerRad[2] : geo::bearingRad(s.latitudeRad, s.longitudeRad, c.latitudeRad, c.longitudeRad);
-    out.verticalSpeedMs = std::clamp(altitudeGain * (c.altitudeMslM - s.altitudeMslM), -maxVerticalSpeedMs, maxVerticalSpeedMs);
-    out.airspeedMs = c.airspeedMs;
+    if (ctx.engaged & axisBit(Axis::Roll)) {
+        const double distance = geo::distanceM(s.latitudeRad, s.longitudeRad, c.latitudeRad, c.longitudeRad);
+        out.headingRad = distance < c.captureRadiusM ? s.eulerRad[2] : geo::bearingRad(s.latitudeRad, s.longitudeRad, c.latitudeRad, c.longitudeRad);
+    }
+    out.verticalSpeedMs = ctx.engaged & axisBit(Axis::Pitch)
+                              ? std::clamp(altitudeGain * (c.altitudeMslM - s.altitudeMslM), -maxVerticalSpeedMs, maxVerticalSpeedMs)
+                              : kHold;
+    out.airspeedMs = ctx.engaged & axisBit(Axis::Thrust) ? c.airspeedMs : kHold;
     return out;
 }
 

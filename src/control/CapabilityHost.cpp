@@ -10,7 +10,8 @@ namespace fsim::control {
 
 namespace {
 
-constexpr AxisMask kLateral = axisBit(Axis::Roll) | axisBit(Axis::Yaw);
+/// A level no higher than Position: a behaviour's output enters below it.
+int cascadeTop(Level level) noexcept { return static_cast<int>(std::min(level, Level::Position)); }
 
 /// What an activity takes from the runtime's flags on the axes it owns.
 std::uint16_t flagsOn(const RuntimeReport& report, AxisMask axes) noexcept {
@@ -73,22 +74,95 @@ ActivityId CapabilityHost::holder(AxisMask axes, Source source) const noexcept {
     return 0;
 }
 
+std::size_t CapabilityHost::directSlot(const SupportCommand& command) noexcept {
+    if (std::holds_alternative<EnginesCommand>(command)) return kEnginesSlot;
+    return kSlotCount + static_cast<std::size_t>(supportAxis(command)) - static_cast<std::size_t>(Axis::Flaps);
+}
+
+void CapabilityHost::writeDirect(std::size_t s, const SupportCommand& command) noexcept {
+    RuntimeConfig& config = *config_;
+    if (const auto* e = std::get_if<EnginesCommand>(&command)) {
+        for (std::size_t i = 0; i < config.engines.size(); ++i) config.engines[i] = e->throttle[i];
+        return;
+    }
+    SupportDemand& demand = config.support[s - kSlotCount];
+    supportValues(command, demand.value, demand.value2);
+    ++demand.revision;
+}
+
+Reason CapabilityHost::checkAxes(const CapabilityDescriptor& d, AxisMask axes) noexcept {
+    if (axes & ~kAllAxes) return Reason::InvalidAxes;
+    const auto primary = static_cast<AxisMask>(axes & kPrimaryAxes);
+    if (!primary) return Reason::InvalidAxes; // a slot flies through the cascade on at least one primary axis
+    if (primary == kPrimaryAxes || (d.axisGroups & kGroupEachAxis)) return Reason::None;
+    // owned apart: a union of the groups the capability allows (guidance allows none)
+    if ((primary & kLateral) && !(d.axisGroups & kGroupLateral)) return Reason::InvalidAxes;
+    if ((primary & axisBit(Axis::Pitch)) && !(d.axisGroups & kGroupPitch)) return Reason::InvalidAxes;
+    if ((primary & axisBit(Axis::Thrust)) && !(d.axisGroups & kGroupThrust)) return Reason::InvalidAxes;
+    return Reason::None;
+}
+
+Reason CapabilityHost::awareUpTo(int top) const noexcept {
+    for (int l = static_cast<int>(Level::Attitude); l <= top; ++l)
+        if (const Controller* c = runtime_->controller(static_cast<Level>(l)); c && !c->axisAware()) return Reason::ControllerNotAxisAware;
+    return Reason::None;
+}
+
+Reason CapabilityHost::checkAwareness(AxisMask taken, Level level, bool cascade) const noexcept {
+    const RuntimeConfig& c = *config_;
+    const auto primary = static_cast<AxisMask>(taken & kPrimaryAxes);
+    if (!primary || (cascade && primary == kPrimaryAxes)) return Reason::None; // no change, or one owner of every axis
+    // The highest level a controller would see axes owned apart at, afterwards:
+    // the new owner's, what the others keep, and the default's hold. (Where a
+    // demand really goes depends on the controllers; every level up to it is checked.)
+    int top = cascade ? cascadeTop(level) : -1;
+    AxisMask unowned = 0;
+    for (std::size_t s = 0; s < kSlotCount; ++s)
+        if (c.slots[s].axes & kPrimaryAxes & ~primary) top = std::max(top, cascadeTop(c.slots[s].level));
+    for (std::size_t a = 0; a < kPrimaryAxisCount; ++a)
+        if (!(primary & (1u << a)) && c.owner[a] == RuntimeConfig::kNone) unowned = static_cast<AxisMask>(unowned | (1u << a));
+    if (unowned && c.vehicleDefault == VehicleDefault::Hold) top = std::max(top, static_cast<int>(Level::Velocity));
+    return awareUpTo(top);
+}
+
+Reason CapabilityHost::setVehicleDefault(VehicleDefault mode) noexcept {
+    RuntimeConfig& c = *config_;
+    if (mode == c.vehicleDefault) return Reason::None;
+    if (mode == VehicleDefault::Hold) {
+        AxisMask unowned = 0;
+        int top = static_cast<int>(Level::Velocity);
+        for (std::size_t a = 0; a < kPrimaryAxisCount; ++a)
+            if (c.owner[a] == RuntimeConfig::kNone) unowned = static_cast<AxisMask>(unowned | (1u << a));
+        for (std::size_t s = 0; s < kSlotCount; ++s)
+            if (c.slots[s].axes & kPrimaryAxes) top = std::max(top, cascadeTop(c.slots[s].level));
+        // the hold would fly beside what others own
+        if (unowned && unowned != kPrimaryAxes)
+            if (const Reason why = awareUpTo(top); why != Reason::None) return why;
+        for (std::size_t a = 0; a < kPrimaryAxisCount; ++a)
+            if (unowned & (1u << a)) ++c.letGo[a]; // held from where they are now
+    }
+    c.vehicleDefault = mode;
+    ++c.revision;
+    return Reason::None;
+}
+
 void CapabilityHost::takeOver(AxisMask axes, ActivityId id, double now) noexcept {
     for (std::size_t s = 0; s < kActivities; ++s) {
         if (!slots_[s].activity || !(records_[s].axes & axes)) continue;
-        const AxisMask lost = records_[s].axes & axes;
+        const auto lost = static_cast<AxisMask>(records_[s].axes & axes);
         const auto kept = static_cast<AxisMask>(records_[s].axes & ~axes);
-        if ((lost & kPrimaryAxes) || !kept) {
-            // It can no longer do its job: it ends (preempted, if it was still
-            // at it) and - until step 3 lets slots share the cascade - flies nothing.
-            if (slots_[s].live) end(s, ActivityState::Canceled, Reason::Preempted, id, now);
-            release(s);
-        } else {
-            // Only support axes it can do without: it carries on without them.
-            records_[s].axes = kept;
-            if (slots_[s].live) slots_[s].flags |= kActivityAxesReduced;
-            if (!isSupport(s)) config_->slots[s].axes = kept;
+        if (slots_[s].live) {
+            if ((lost & kPrimaryAxes) || !kept) end(s, ActivityState::Canceled, Reason::Preempted, id, now);
+            else slots_[s].flags |= kActivityAxesReduced; // only support axes it can do without
         }
+        if (!isCascade(s) || !(kept & kPrimaryAxes)) {
+            release(s); // nothing left to fly through the cascade; support axes it kept return to the default
+            continue;
+        }
+        // What it keeps flies on: the live activity, or the ended one's residual hold (9.4).
+        records_[s].axes = kept;
+        config_->slots[s].axes = kept;
+        ++config_->revision;
     }
 }
 
@@ -119,15 +193,14 @@ CommandResult CapabilityHost::submit(const Command& command, const CommandOption
         if (d.version < options.minVersion) return rejected(Reason::VersionUnsupported);
     }
 
-    AxisMask axes = options.axes ? options.axes : catalog_->defaultAxes(index, command);
-    if (d.level != Level::Actuator && (axes & kLateral)) axes |= kLateral; // the loop that banks also coordinates
-    // Until axes can be owned apart (step 3), a command flies every primary axis.
-    if ((axes & kPrimaryAxes) != kPrimaryAxes || (axes & ~kAllAxes)) return rejected(Reason::InvalidAxes);
-
     Command setpoint = command;
     std::uint16_t flags = 0;
     if (checked)
         if (const Reason why = catalog_->check(index, setpoint, options.range, flags); why != Reason::None) return rejected(why);
+    AxisMask axes = options.axes ? options.axes : catalog_->defaultAxes(index, command);
+    if (d.level != Level::Actuator && (axes & kLateral)) axes |= kLateral; // the loop that banks also coordinates
+    if (const Reason why = checkAxes(d, axes); why != Reason::None) return rejected(why);
+    if (const Reason why = checkAwareness(axes, d.level, true); why != Reason::None) return rejected(why);
     if (const ActivityId other = holder(axes, options.source)) return rejected(Reason::AuthorityHeld, 0, other);
 
     std::unique_ptr<Behavior> behavior;
@@ -141,6 +214,7 @@ CommandResult CapabilityHost::submit(const Command& command, const CommandOption
 
     const ActivityId id = activityId(vehicle_, ++serial_);
     takeOver(axes, id, now);
+    // A free slot: every slot in use flies a primary axis the new activity did not take.
     std::size_t s = 0;
     while (s + 1 < kSlotCount && slots_[s].activity) ++s;
 
@@ -176,16 +250,17 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
     // the placards: no gear up on the ground, no gear or flaps out above their speeds
     if (const Reason why = adapter_->admit(setpoint, state, *profile_); why != Reason::None) return rejected(why);
     const AxisMask axes = d.axes;
+    if (options.axes && options.axes != axes) return rejected(Reason::InvalidAxes);
+    // the engines take thrust from the cascade: what flies the rest flies it apart
+    if (const Reason why = checkAwareness(axes, Level::Actuator, false); why != Reason::None) return rejected(why);
     if (const ActivityId other = holder(axes, options.source)) return rejected(Reason::AuthorityHeld, 0, other);
 
     const ActivityId id = activityId(vehicle_, ++serial_);
     takeOver(axes, id, now);
-    const Axis axis = supportAxis(setpoint);
-    const std::size_t s = supportSlot(axis);
-    SupportDemand& demand = config_->support[s - kSlotCount];
-    supportValues(setpoint, demand.value, demand.value2);
-    ++demand.revision;
-    config_->owner[static_cast<std::size_t>(axis)] = RuntimeConfig::kSupport;
+    const std::size_t s = directSlot(setpoint);
+    writeDirect(s, setpoint);
+    const auto axis = static_cast<std::size_t>(supportAxis(setpoint));
+    config_->owner[axis] = s == kEnginesSlot ? RuntimeConfig::kEngines : RuntimeConfig::kSupport;
     ++config_->revision;
     start(s, id, index, options, axes, flags, now);
     if (d.persistence == Persistence::Terminating) slots_[s].target = supportGoal(setpoint);
@@ -196,7 +271,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
-    if (isSupport(s)) return rejected(Reason::WrongCommandType, activity);
+    if (!isCascade(s)) return rejected(Reason::WrongCommandType, activity);
     const ActivityRecord& record = records_[s];
     if (!(catalog_->descriptor(record.capability).interactions & kUpdate)) return rejected(Reason::NotUpdatable, activity);
     SetpointSlot& slot = config_->slots[s];
@@ -220,7 +295,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& 
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
     const ActivityRecord& record = records_[s];
-    if (!isSupport(s) || catalog_->indexOf(setpoint) != static_cast<int>(record.capability)) return rejected(Reason::WrongCommandType, activity);
+    if (isCascade(s) || catalog_->indexOf(setpoint) != static_cast<int>(record.capability)) return rejected(Reason::WrongCommandType, activity);
     SupportCommand checked = setpoint;
     CommandResult result = accepted(activity);
     if (slots_[s].range != RangePolicy::None) {
@@ -228,9 +303,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& 
             return rejected(why, activity);
         if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
     }
-    SupportDemand& demand = config_->support[s - kSlotCount];
-    supportValues(checked, demand.value, demand.value2);
-    ++demand.revision;
+    writeDirect(s, checked);
     if (!std::isnan(slots_[s].target)) slots_[s].target = supportGoal(checked);
     return result;
 }
@@ -298,15 +371,25 @@ void CapabilityHost::end(std::size_t s, ActivityState state, Reason reason, Acti
 
 void CapabilityHost::release(std::size_t s) noexcept {
     RuntimeConfig& config = *config_;
-    if (isSupport(s)) {
+    if (s == kEnginesSlot) {
+        const auto thrust = static_cast<std::size_t>(Axis::Thrust);
+        if (config.owner[thrust] == RuntimeConfig::kEngines) {
+            config.owner[thrust] = RuntimeConfig::kNone;
+            ++config.letGo[thrust];
+        }
+        config.engines.fill(kHold);
+    } else if (isSupport(s)) {
         const auto axis = static_cast<std::size_t>(Axis::Flaps) + (s - kSlotCount);
         if (config.owner[axis] == RuntimeConfig::kSupport) config.owner[axis] = RuntimeConfig::kNone;
         SupportDemand& demand = config.support[s - kSlotCount];
         demand.value = demand.value2 = kHold;
         ++demand.revision;
     } else {
-        for (auto& owner : config.owner)
-            if (owner == s) owner = RuntimeConfig::kNone;
+        for (std::size_t a = 0; a < kAxisCount; ++a)
+            if (config.owner[a] == s) {
+                config.owner[a] = RuntimeConfig::kNone;
+                if (a < kPrimaryAxisCount) ++config.letGo[a]; // the default's hold captures it afresh
+            }
         config.slots[s].axes = 0;
         runtime_->install(s, nullptr);
         runtime_->report().slots[s] = SlotReport{}; // nothing it reported carries over to the slot's next activity
@@ -324,8 +407,8 @@ void CapabilityHost::afterStep(const sim::VehicleState& state, const EffectorPos
         if (!slot.activity) continue; // nothing flies here (and nothing reported)
         if (slot.live) {
             ActivityRecord& record = records_[s];
-            const bool flown = isSupport(s) ? report.updates > 0
-                                            : report.updates > 0 && report.slots[s].generation == config.slots[s].generation;
+            const bool flown = isCascade(s) ? report.updates > 0 && report.slots[s].generation == config.slots[s].generation
+                                            : report.updates > 0;
             if (record.state == ActivityState::Pending && flown) record.state = ActivityState::Active;
             const std::uint16_t flags = static_cast<std::uint16_t>(slot.flags | flagsOn(report, record.axes));
             record.constraints = flags;
@@ -333,11 +416,11 @@ void CapabilityHost::afterStep(const sim::VehicleState& state, const EffectorPos
             slot.flags = 0;
             if (state.diverged) {
                 end(s, ActivityState::Failed, Reason::Diverged, 0, now);
-            } else if (record.state == ActivityState::Active && !isSupport(s)) {
+            } else if (record.state == ActivityState::Active && isCascade(s)) {
                 const SlotReport& events = report.slots[s];
                 if (events.events & kFailed) end(s, ActivityState::Failed, events.failure, 0, now);
                 else if (events.events & kFinished) end(s, ActivityState::Completed, Reason::GoalReached, 0, now);
-            } else if (record.state == ActivityState::Active && !std::isnan(slot.target)) {
+            } else if (record.state == ActivityState::Active && isSupport(s) && !std::isnan(slot.target)) {
                 // gear or flaps: done when they are there (and held there, as a residual)
                 const std::size_t axis = static_cast<std::size_t>(Axis::Flaps) + (s - kSlotCount);
                 const double position = axis == static_cast<std::size_t>(Axis::Gear) ? positions.gear : positions.flaps;
@@ -345,7 +428,7 @@ void CapabilityHost::afterStep(const sim::VehicleState& state, const EffectorPos
                     end(s, ActivityState::Completed, Reason::GoalReached, 0, now);
             }
         }
-        if (!isSupport(s)) {
+        if (isCascade(s)) {
             report.slots[s].events = 0;
             report.slots[s].failure = Reason::None;
         }

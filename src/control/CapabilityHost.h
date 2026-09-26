@@ -30,8 +30,10 @@ class CapabilityHost {
 public:
     /// Ended activities a vehicle remembers for queries.
     static constexpr std::size_t kRecent = 16;
-    /// Where activities live: the cascade's slots, then one per support axis.
-    static constexpr std::size_t kActivities = kSlotCount + kSupportAxisCount;
+    /// Where activities live: the cascade's slots, one per support axis, then
+    /// the engines' throttles (fsim.flight.engines, thrust beside the cascade).
+    static constexpr std::size_t kEnginesSlot = kSlotCount + kSupportAxisCount;
+    static constexpr std::size_t kActivities = kEnginesSlot + 1;
 
     /// The vehicle this host serves, its runtime, catalog, adapter and profile (which outlive it).
     void bind(std::uint32_t vehicle, ControlStack& runtime, const CapabilityCatalog& catalog, const VehicleAdapter& adapter,
@@ -39,7 +41,7 @@ public:
 
     /// NEW. `state` is the vehicle's, for availability; `now` the simulation time.
     CommandResult submit(const Command& command, const CommandOptions& options, const sim::VehicleState& state, double now);
-    /// NEW for a support effector (gear, flaps, brakes, speedbrake, pitch trim).
+    /// NEW for a support effector (gear, flaps, brakes, speedbrake, pitch trim) or the engines' throttles.
     CommandResult submit(const SupportCommand& command, const CommandOptions& options, const sim::VehicleState& state, double now);
     /// UPDATE: a new setpoint for a live activity - the fast path; allocates nothing.
     CommandResult update(ActivityId activity, const Command& setpoint) noexcept;
@@ -67,6 +69,12 @@ public:
     std::vector<ActivityRecord> activities() const;
     CapabilityStatus status(std::size_t capability, const sim::VehicleState& state) const noexcept;
 
+    /// What flies the primary axes nobody owns (docs/control-architecture.md,
+    /// 6.2); between steps. Refused (ControllerNotAxisAware) if Hold would fly
+    /// axes owned apart through a controller that is not axis-aware.
+    Reason setVehicleDefault(VehicleDefault mode) noexcept;
+    VehicleDefault vehicleDefault() const noexcept { return config_->vehicleDefault; }
+
     /// After each world step: the runtime's report into the activities, then cleared.
     void afterStep(const sim::VehicleState& state, const EffectorPositions& positions, double now) noexcept;
     /// Whether afterStep needs the effectors' positions (a gear or flaps activity is under way).
@@ -87,15 +95,28 @@ private:
         double target = kUnknown; ///< a terminating support activity's goal (gear down 1 / up 0, a flap position)
     };
 
-    static bool isSupport(std::size_t slot) noexcept { return slot >= kSlotCount; }
-    static std::size_t supportSlot(Axis axis) noexcept {
-        return kSlotCount + static_cast<std::size_t>(axis) - static_cast<std::size_t>(Axis::Flaps);
-    }
+    /// A slot that flies through the cascade (else it is set directly: a support effector or the engines).
+    static bool isCascade(std::size_t slot) noexcept { return slot < kSlotCount; }
+    static bool isSupport(std::size_t slot) noexcept { return slot >= kSlotCount && slot < kEnginesSlot; }
+    /// Where a directly set command lives.
+    static std::size_t directSlot(const SupportCommand& command) noexcept;
+    /// Its demand into the runtime's configuration.
+    void writeDirect(std::size_t slot, const SupportCommand& command) noexcept;
+    /// The axes a flight or guidance command may own (6.1, 9.1).
+    static Reason checkAxes(const CapabilityDescriptor& d, AxisMask axes) noexcept;
+    /// ControllerNotAxisAware (9.6): after `taken` goes to a new owner - one
+    /// entering the cascade at `level`, or beside it if !cascade - would a
+    /// controller that does not honour ControlContext::engaged fly axes owned apart?
+    Reason checkAwareness(AxisMask taken, Level level, bool cascade) const noexcept;
+    /// Every controller from Attitude up to `top` is axis-aware.
+    Reason awareUpTo(int top) const noexcept;
     int liveSlot(ActivityId activity) const noexcept;
     /// A live activity of a higher source on any of `axes`, else 0.
     ActivityId holder(AxisMask axes, Source source) const noexcept;
-    /// Before activity `id` takes `axes`: what held them ends (preempted) or,
-    /// losing only support axes it can do without, gives them up.
+    /// Before activity `id` takes `axes` (9.3): a live activity that loses a
+    /// primary axis ends, preempted; one that loses only support axes carries
+    /// on without them. What keeps a primary axis flies on - a residual hold
+    /// if it ended - and a slot left without one is freed.
     void takeOver(AxisMask axes, ActivityId id, double now) noexcept;
     ActivityRecord& start(std::size_t slot, ActivityId id, std::size_t capability, const CommandOptions& options, AxisMask axes,
                           std::uint16_t flags, double now) noexcept;

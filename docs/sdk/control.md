@@ -85,7 +85,7 @@ if (!r.accepted()) std::printf("refused: %s\n", reasonName(r.reason));
 world.step();
 world.activity(r.activity)->state;          // ActivityState::Active
 world.update(r.activity, VelocityCommand{.airspeedMs = 60, .verticalSpeedMs = 0});    // UPDATE
-world.cancel(r.activity);                   // CANCEL: the vehicle flies its neutral default
+world.cancel(r.activity);                   // CANCEL: its axes fly the vehicle default
 ```
 
 **Capabilities.** One per level (`fsim.flight.actuator` ... `fsim.flight.position`)
@@ -120,7 +120,7 @@ vehicle's are `TemporarilyUnavailable` until it is reset.
   - `Failed`: `target_lost` when a followed vehicle is removed, `diverged`;
   - `Canceled`: `requested` by CANCEL, or `preempted` by a newer command.
 - While it runs, its record carries flags: an effector saturated, a setpoint clamped (`constraints` for the last step, `constraintsSeen` since it started).
-- A completed or failed behaviour keeps flying its last output, a hold, until another command takes over. CANCEL hands the axes to the vehicle's neutral default instead: surfaces centred, throttle 0, as every vehicle starts.
+- A completed or failed behaviour keeps flying its last output, a hold, until another command takes over. CANCEL hands the axes to the vehicle default instead: the neutral actuator command (surfaces centred, throttle 0, as every vehicle starts), unless the vehicle's default is a hold (below).
 - `ActivityId` is the vehicle's id in its high 32 bits and a per-vehicle count, so the same calls give the same ids. A vehicle remembers its 16 latest ended activities (`v.activities()`).
 
 **Authority.** A command has a `Source` in `CommandOptions`:
@@ -128,9 +128,43 @@ vehicle's are `TemporarilyUnavailable` until it is reset.
 - `Autopilot`: a mode a policy must not silently override;
 - `Override`: an operator or script.
 
-A newer command replaces an activity of its own or a lower source, which ends `preempted`. A higher source's activity refuses it with `authority_held`. For now a command owns every axis. Owning roll apart from pitch and thrust (a policy banking while an autopilot holds the height) comes with step 3 of the ADR.
+A newer command replaces an activity of its own or a lower source on the axes it takes, and that activity ends `preempted`. A higher source's activity refuses it with `authority_held`.
 
-**From C and Python.** The C ABI has the same calls (`fsim_vehicle_submit`, `fsim_activity_update`, `fsim_activity_cancel`, the capability and activity queries; [c_abi.md](c_abi.md)), and Python has `vehicle.submit(Level.VELOCITY, airspeed_ms=60)`, which returns an `fsim.Activity` with `update`, `cancel` and `state` ([python.md](python.md)).
+**Owning axes apart.** A command owns every primary axis (roll, pitch, yaw,
+thrust) unless its `CommandOptions::axes` names fewer. Then the others keep
+their owners, so that, for example, a policy banks while an autopilot holds
+the height and the speed:
+
+```cpp
+CommandOptions autopilot{.source = Source::Autopilot, .axes = axisBit(Axis::Pitch) | axisBit(Axis::Thrust)};
+v.submit(VelocityCommand{.airspeedMs = 55, .verticalSpeedMs = 0}, autopilot);          // the height and the speed
+auto bank = v.submit(AttitudeCommand{.rollRad = 0.35}, CommandOptions{.axes = kLateral}).activity;
+world.update(bank, AttitudeCommand{.rollRad = -0.2});                                  // the policy's per-step path
+```
+
+- **What can be owned apart.** A capability's `axisGroups` says what it can own apart:
+  - above the actuators: the lateral axes (roll and yaw together, since the loop that banks also coordinates), pitch, and thrust;
+  - at the actuators: any primary axis alone.
+
+  A command must own at least one primary axis. Guidance (a behaviour) owns all of them or none. Anything else is refused as `invalid_axes`.
+- **Merging.** The runtime makes one pass from the highest owner's level down. At each level it merges the demands that reached it into one command and runs that level's controller once. The built-in loops honour `ControlContext::engaged`: a channel whose axis belongs to someone else neither integrates nor outputs. When one activity owns every primary axis, the cascade runs exactly as it always has.
+- **Preemption leaves a residual.** A command that takes some of an activity's primary axes ends that activity as `preempted`. Its other axes keep flying what it was flying, as a *residual hold*, and a later command claims them without preempting anyone. A behaviour's residual keeps running the behaviour, and only the fields for the axes it kept are used. CANCEL, by contrast, returns an activity's axes to the vehicle default.
+- **The engines.** `fsim.flight.engines` (`EnginesCommand`) sets a throttle per engine and owns thrust beside a cascade that flies the rest. An aircraft offers it when its profile's propulsion section gives more than one engine. One with more than four gangs them onto four throttles, as its flight control system does; the B-52H flies eight engines on four throttles.
+
+  ```cpp
+  v.submit(AttitudeCommand{.rollRad = 0, .pitchRad = 0.03}, CommandOptions{.axes = kLateral | axisBit(Axis::Pitch)});
+  auto engines = v.submit(EnginesCommand{{0.9, 0.4, kHold, kHold}}).activity;   // kHold keeps what an engine flies
+  ```
+- **The vehicle default.** This is what flies a primary axis nobody owns.
+  - `VehicleDefault::Neutral`, the default, is the neutral actuator command every vehicle starts with: surfaces centred, throttle 0.
+  - `v.setVehicleDefault(VehicleDefault::Hold)` instead holds, at the velocity level, the heading, true airspeed and height each axis had when it was let go. It flies the height as `fsim.guidance.hold` does. A policy can then own the lateral axes alone and leave the aircraft flying.
+
+  A reset captures the hold again from the new state. The support effectors nobody owns keep their neutral default either way: flaps up, brakes off, the gear, speedbrake and trim left as they are.
+- **Custom controllers.** A controller of your own keeps working as before under commands that own the whole vehicle. When the axes are owned apart, a command whose demand would pass through it is refused as `controller_not_axis_aware`, unless the controller declares itself axis-aware ([Writing a controller](#writing-a-controller)).
+
+**From C and Python.**
+- **C.** The C ABI has the same calls: `fsim_vehicle_submit` (with the axes in `fsim_command_options`), `fsim_activity_update`, `fsim_activity_cancel`, `FSIM_SUPPORT_ENGINES`, `fsim_vehicle_set_default`, and the capability and activity queries ([c_abi.md](c_abi.md)).
+- **Python.** `vehicle.submit(Level.VELOCITY, airspeed_ms=60, axes=fsim.Axis.PITCH | fsim.Axis.THRUST)` returns an `fsim.Activity` with `update`, `cancel` and `state`. Alongside it are `vehicle.submit_support("engines", throttle_1=0.9)` and `vehicle.set_vehicle_default("hold")` ([python.md](python.md)).
 
 **Support effectors.** Gear, flaps, wheel brakes, speedbrake and pitch
 trim are support capabilities (`fsim.support.*`). They are set directly
@@ -305,6 +339,20 @@ v.use(fsim::control::Level::Attitude, "bang_bang_attitude");
 period `dt`, the `world` view (other vehicles, environment, time) and the
 vehicle's deterministic `rng`. Override `reset()` to clear integrators and
 `setParameter`/`parameter` to expose gains.
+
+**Axes owned apart.** When activities own the vehicle's axes apart
+([Owning axes apart](#capabilities-and-activities)), `ctx.engaged` says which
+primary axes this level drives in this update; the others belong to someone
+else. A controller that leaves those channels alone - no integrating, `kHold`
+out - says so:
+
+```cpp
+bool axisAware() const noexcept override { return true; }
+```
+
+Without it, a controller only ever sees commands that own the whole vehicle.
+A command that would split the axes through it is refused, and the controller
+flies exactly as it always has.
 
 ## Writing a behaviour
 

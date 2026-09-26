@@ -345,6 +345,7 @@ typedef struct fsim_capability_info {
     uint32_t interactions;     /* 1 command, 2 update, 4 cancel, 8 settings, 16 status */
     int32_t level;             /* fsim_level its commands enter at */
     uint32_t axes;             /* owned by default */
+    uint32_t axis_groups;      /* what it may own apart (fsim_command_options.axes): 1 roll+yaw, 2 pitch, 4 thrust, 8 any primary axis; 0 all or nothing */
     int32_t terminating;       /* 1: completes when it reaches its goal */
     int32_t needs_target;      /* 1: a behaviour that follows fsim_behavior_command.target */
     uint32_t parameter_count;  /* fsim_vehicle_capability_parameter */
@@ -373,8 +374,12 @@ FSIM_API int fsim_vehicle_submit_behavior(fsim_world* world, uint32_t id, const 
  * Fields: gear [down: 1 or 0], flaps [position 0..1], wheel brakes [left,
  * right 0..1], speedbrake [position 0..1], pitch trim [position -1..1, + nose
  * down]. Refused as "unavailable" by the placards: no gear up on the ground, no
- * gear or flaps out above their speeds. fsim_activity_update takes the same fields. */
-enum fsim_support { FSIM_SUPPORT_GEAR = 0, FSIM_SUPPORT_FLAPS, FSIM_SUPPORT_WHEEL_BRAKES, FSIM_SUPPORT_SPEEDBRAKE, FSIM_SUPPORT_PITCH_TRIM };
+ * gear or flaps out above their speeds. fsim_activity_update takes the same fields.
+ * FSIM_SUPPORT_ENGINES is fsim.flight.engines, where the aircraft has more than
+ * one engine: a throttle 0..1 per engine (1 to 4 fields; fsim_hold() keeps one),
+ * owning thrust beside the cascade. */
+enum fsim_support { FSIM_SUPPORT_GEAR = 0, FSIM_SUPPORT_FLAPS, FSIM_SUPPORT_WHEEL_BRAKES, FSIM_SUPPORT_SPEEDBRAKE, FSIM_SUPPORT_PITCH_TRIM,
+                    FSIM_SUPPORT_ENGINES };
 FSIM_API int fsim_vehicle_submit_support(fsim_world* world, uint32_t id, int kind, const double* fields, uint32_t count,
                                          const fsim_command_options* options, fsim_command_result* result);
 /* UPDATE: a new setpoint for a live activity, in its level's field order (the per-step path). */
@@ -382,8 +387,15 @@ FSIM_API int fsim_activity_update(fsim_world* world, fsim_activity_id activity, 
 /* UPDATE for many activities at once: rows of fields at the given stride (0 = the field count of each activity's level,
  * all rows the same level). FSIM_OK if every update was accepted, else FSIM_INVALID_ARGUMENT naming the first refused. */
 FSIM_API int fsim_activity_update_batch(fsim_world* world, const fsim_activity_id* activities, uint32_t count, const double* values, uint32_t stride);
-/* CANCEL: the activity ends and the vehicle flies its neutral default. */
+/* CANCEL: the activity ends and its axes fly the vehicle default. */
 FSIM_API int fsim_activity_cancel(fsim_world* world, fsim_activity_id activity, fsim_command_result* result);
+/* What flies the primary axes nobody owns: FSIM_DEFAULT_NEUTRAL (surfaces
+ * centred, throttle 0 - every vehicle's default) or FSIM_DEFAULT_HOLD (the
+ * heading, airspeed and height each had when it was let go). `reason` (may be
+ * null) says why it was refused: "controller_not_axis_aware". */
+enum fsim_vehicle_default { FSIM_DEFAULT_NEUTRAL = 0, FSIM_DEFAULT_HOLD = 1 };
+FSIM_API int fsim_vehicle_set_default(fsim_world* world, uint32_t id, int mode, int32_t* reason);
+FSIM_API int fsim_vehicle_get_default(const fsim_world* world, uint32_t id, int32_t* mode);
 /* A live or recently ended activity: FSIM_INVALID_ARGUMENT if the vehicle does not remember it. */
 FSIM_API int fsim_activity_get(const fsim_world* world, fsim_activity_id activity, fsim_activity_info* out);
 /* The vehicle's live activities, then the ended ones it remembers (newest first). */

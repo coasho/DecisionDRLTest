@@ -16,6 +16,49 @@ namespace {
 /// nobody owns: surfaces centred, throttle 0, flaps up, brakes off, gear held.
 const Command kNeutral = ActuatorCommand{};
 
+/// A command at `level` with every field kHold: the start of a merge.
+Command blankCommand(Level level) noexcept {
+    switch (level) {
+    case Level::Attitude: return AttitudeCommand{kHold, kHold, kHold, kHold, kHold, kHold};
+    case Level::Acceleration: return AccelerationCommand{kHold, kHold, kHold, kHold};
+    case Level::Velocity: return VelocityCommand{kHold, kHold, kHold, kHold};
+    case Level::Position: return PositionCommand{kHold, kHold, kHold, kHold, kHold};
+    default: return ActuatorCommand{};
+    }
+}
+
+/// Copy the fields of `axis` (docs/control-architecture.md, 9.5) from `src`
+/// into `dst`, two commands of the same level above Actuator. Above the
+/// actuators yaw goes with roll, so its fields are roll's.
+void copyAxisFields(Command& dst, const Command& src, Axis axis) noexcept {
+    const bool lateral = axis == Axis::Roll, pitch = axis == Axis::Pitch, thrust = axis == Axis::Thrust;
+    if (auto* d = std::get_if<AttitudeCommand>(&dst)) {
+        const auto* s = std::get_if<AttitudeCommand>(&src);
+        if (!s) return;
+        if (lateral) d->rollRad = s->rollRad, d->headingRad = s->headingRad, d->maxBankRad = s->maxBankRad;
+        if (pitch) d->pitchRad = s->pitchRad;
+        if (thrust) d->throttle = s->throttle, d->airspeedMs = s->airspeedMs;
+    } else if (auto* d2 = std::get_if<AccelerationCommand>(&dst)) {
+        const auto* s = std::get_if<AccelerationCommand>(&src);
+        if (!s) return;
+        if (lateral) d2->rollRateRadS = s->rollRateRadS;
+        if (pitch) d2->loadFactorG = s->loadFactorG;
+        if (thrust) d2->longitudinalMs2 = s->longitudinalMs2, d2->throttle = s->throttle;
+    } else if (auto* d3 = std::get_if<VelocityCommand>(&dst)) {
+        const auto* s = std::get_if<VelocityCommand>(&src);
+        if (!s) return;
+        if (lateral) d3->headingRad = s->headingRad, d3->turnRateRadS = s->turnRateRadS;
+        if (pitch) d3->verticalSpeedMs = s->verticalSpeedMs;
+        if (thrust) d3->airspeedMs = s->airspeedMs;
+    } else if (auto* d4 = std::get_if<PositionCommand>(&dst)) {
+        const auto* s = std::get_if<PositionCommand>(&src);
+        if (!s) return;
+        if (lateral) d4->latitudeRad = s->latitudeRad, d4->longitudeRad = s->longitudeRad, d4->captureRadiusM = s->captureRadiusM;
+        if (pitch) d4->altitudeMslM = s->altitudeMslM;
+        if (thrust) d4->airspeedMs = s->airspeedMs;
+    }
+}
+
 } // namespace
 
 const char* levelName(Level level) noexcept {
@@ -85,24 +128,43 @@ void ControlStack::command(const Command& command) {
     }
 }
 
-std::size_t ControlStack::engagedSlot() const noexcept {
-    // Until axes can be owned apart (step 3), one slot owns every primary axis.
-    const std::uint8_t owner = config_->owner[static_cast<std::size_t>(Axis::Pitch)];
-    return owner < kSlotCount ? owner : kNoSlot;
+std::size_t ControlStack::wholeSlot() const noexcept {
+    const auto& owner = config_->owner;
+    const std::uint8_t o = owner[static_cast<std::size_t>(Axis::Roll)];
+    if (o >= kSlotCount) return kNoSlot;
+    for (Axis a : {Axis::Pitch, Axis::Yaw, Axis::Thrust})
+        if (owner[static_cast<std::size_t>(a)] != o) return kNoSlot;
+    return o;
+}
+
+std::size_t ControlStack::topSlot() const noexcept {
+    std::size_t top = kNoSlot;
+    for (std::size_t s = 0; s < kSlotCount; ++s)
+        if ((config_->slots[s].axes & kPrimaryAxes) && (top == kNoSlot || config_->slots[s].level > config_->slots[top].level)) top = s;
+    return top;
+}
+
+bool ControlStack::holdsDefault() const noexcept {
+    if (config_->vehicleDefault != VehicleDefault::Hold) return false;
+    for (std::size_t a = 0; a < kPrimaryAxisCount; ++a)
+        if (config_->owner[a] == RuntimeConfig::kNone) return true;
+    return false;
 }
 
 Level ControlStack::activeLevel() const noexcept {
-    const std::size_t s = engagedSlot();
-    return s == kNoSlot ? Level::Actuator : config_->slots[s].level;
+    const std::size_t s = topSlot();
+    if (s != kNoSlot) return config_->slots[s].level;
+    return holdsDefault() ? Level::Velocity : Level::Actuator;
 }
 
 const Command* ControlStack::activeCommand() const noexcept {
-    const std::size_t s = engagedSlot();
-    return s == kNoSlot ? &kNeutral : &config_->slots[s].command;
+    const std::size_t s = topSlot();
+    if (s != kNoSlot) return &config_->slots[s].command;
+    return holdsDefault() ? &hold_ : &kNeutral;
 }
 
 const Behavior* ControlStack::behavior() const noexcept {
-    const std::size_t s = engagedSlot();
+    const std::size_t s = topSlot();
     return s == kNoSlot || config_->slots[s].level != Level::Behavior ? nullptr : behaviors_[s].get();
 }
 
@@ -164,13 +226,10 @@ void ControlStack::update(const ControlContext& ctx, sim::ControlInputs& out) {
     RuntimeReport& report = *report_;
     ++report.updates;
     derived_.fill(nullptr);
+    const std::size_t s = wholeSlot();
+    if (s == kNoSlot) return topSlot() != kNoSlot || holdsDefault() ? flyMerged(ctx, out) : flyNeutral(out);
 
-    const std::size_t s = engagedSlot();
-    if (s == kNoSlot) {
-        derived_[static_cast<std::size_t>(Level::Actuator)] = &kNeutral;
-        actuate(std::get<ActuatorCommand>(kNeutral), out);
-        return;
-    }
+    // One slot owns every primary axis (the usual case): its cascade, as it always ran.
     const SetpointSlot& slot = config_->slots[s];
     SlotReport& flown = report.slots[s];
     flown.generation = slot.generation;
@@ -201,8 +260,9 @@ void ControlStack::update(const ControlContext& ctx, sim::ControlInputs& out) {
             return fail(out);
         }
         const auto n = static_cast<std::size_t>(nextLevel);
-        produced_[n] = std::move(next);
-        derived_[n] = &produced_[n];
+        auto& produced = outputs_[static_cast<std::size_t>(level)];
+        produced = std::move(next);
+        derived_[n] = &produced;
         level = nextLevel;
         current = derived_[n];
     }
@@ -221,12 +281,160 @@ void ControlStack::update(const ControlContext& ctx, sim::ControlInputs& out) {
             return fail(out);
         }
         const auto n = static_cast<std::size_t>(nextLevel);
-        produced_[n] = std::move(next);
-        derived_[n] = &produced_[n];
+        auto& produced = outputs_[static_cast<std::size_t>(level)];
+        produced = std::move(next);
+        derived_[n] = &produced;
         level = nextLevel;
         current = derived_[n];
     }
     actuate(std::get<ActuatorCommand>(*current), out);
+}
+
+void ControlStack::flyNeutral(sim::ControlInputs& out) {
+    derived_[static_cast<std::size_t>(Level::Actuator)] = &kNeutral;
+    actuate(std::get<ActuatorCommand>(kNeutral), out);
+}
+
+void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out) {
+    const RuntimeConfig& c = *config_;
+    RuntimeReport& report = *report_;
+    constexpr std::size_t kPrimary = kPrimaryAxisCount;
+    // where each primary axis's demand has got to, and the command that carries it
+    std::array<Level, kPrimary> at{};
+    std::array<const Command*, kPrimary> from{};
+    AxisMask unowned = 0;
+    for (std::size_t a = 0; a < kPrimary; ++a) {
+        const std::uint8_t o = c.owner[a];
+        if (o < kSlotCount && (c.slots[o].axes & (1u << a))) {
+            at[a] = c.slots[o].level;
+            from[a] = &c.slots[o].command;
+        } else if (o == RuntimeConfig::kNone) {
+            unowned = static_cast<AxisMask>(unowned | (1u << a));
+        }
+    }
+    for (std::size_t s = 0; s < kSlotCount; ++s)
+        if (c.slots[s].axes & kPrimaryAxes) {
+            report.slots[s].generation = c.slots[s].generation;
+            report.slots[s].revision = c.slots[s].revision;
+        }
+
+    // The vehicle default's hold (VehicleDefault::Hold) enters at the velocity
+    // level: the heading, true airspeed and height each group had when it was
+    // let go, the height through the vertical speed as fsim.guidance.hold flies it.
+    if (c.vehicleDefault == VehicleDefault::Hold && unowned) {
+        const auto& s = ctx.sensed;
+        AxisMask fresh = 0; // let go since its target was captured
+        for (std::size_t a = 0; a < kPrimary; ++a)
+            if ((unowned & (1u << a)) && (!(holdValid_ & (1u << a)) || captured_[a] != c.letGo[a])) {
+                fresh = static_cast<AxisMask>(fresh | (1u << a));
+                captured_[a] = c.letGo[a];
+            }
+        holdValid_ = static_cast<AxisMask>(holdValid_ | unowned);
+        if (fresh & axisBit(Axis::Roll)) holdHeadingRad_ = s.eulerRad[2];
+        if (fresh & axisBit(Axis::Pitch)) holdAltitudeM_ = s.altitudeMslM;
+        if (fresh & axisBit(Axis::Thrust)) holdAirspeedMs_ = s.airspeedTrueMs;
+        auto& hold = std::get<VelocityCommand>(hold_);
+        hold.headingRad = holdHeadingRad_;
+        hold.airspeedMs = holdAirspeedMs_;
+        hold.verticalSpeedMs = std::clamp(0.25 * (holdAltitudeM_ - s.altitudeMslM), -6.0, 6.0);
+        hold.turnRateRadS = kHold;
+        for (std::size_t a = 0; a < kPrimary; ++a)
+            if (unowned & (1u << a)) {
+                at[a] = Level::Velocity;
+                from[a] = &hold_;
+            }
+    }
+
+    // A behaviour enters above the levels. Guidance takes every primary axis,
+    // so at most one flies: here, the residual of one whose other axes were taken.
+    for (std::size_t s = 0; s < kSlotCount; ++s) {
+        const SetpointSlot& slot = c.slots[s];
+        if (slot.level != Level::Behavior || !(slot.axes & kPrimaryAxes)) continue;
+        Behavior* behavior = behaviors_[s].get();
+        if (!behavior) return fail(out);
+        if (started_[s] != slot.generation) {
+            behavior->start(ctx, std::get<BehaviorCommand>(slot.command));
+            started_[s] = slot.generation;
+        }
+        Command next = behavior->update(ctx, slot.command);
+        SlotReport& flown = report.slots[s];
+        if (behavior->finished()) flown.events |= kFinished;
+        if (const Reason failure = behavior->failure(); failure != Reason::None) {
+            flown.events |= kFailed;
+            flown.failure = failure;
+        }
+        const Level nextLevel = levelOf(next);
+        if (nextLevel >= Level::Behavior) {
+            LOG_ERROR("control") << "behaviour '" << behavior->id() << "' returned a command at level " << levelName(nextLevel);
+            return fail(out);
+        }
+        auto& produced = outputs_[static_cast<std::size_t>(Level::Behavior)];
+        produced = std::move(next);
+        derived_[static_cast<std::size_t>(Level::Behavior)] = &slot.command;
+        for (std::size_t a = 0; a < kPrimary; ++a)
+            if (from[a] == &slot.command) {
+                at[a] = nextLevel;
+                from[a] = &produced;
+            }
+        break;
+    }
+
+    for (int l = static_cast<int>(Level::Position); l > static_cast<int>(Level::Actuator); --l) {
+        const auto level = static_cast<Level>(l);
+        AxisMask engaged = 0;
+        for (std::size_t a = 0; a < kPrimary; ++a)
+            if (from[a] && at[a] == level) engaged = static_cast<AxisMask>(engaged | (1u << a));
+        if (!engaged) continue;
+        // one command at this level: each engaged axis's fields from where its demand came
+        Command& merged = merged_[static_cast<std::size_t>(l)];
+        merged = blankCommand(level);
+        for (std::size_t a = 0; a < kPrimary; ++a)
+            if (engaged & (1u << a)) copyAxisFields(merged, *from[a], static_cast<Axis>(a));
+        derived_[static_cast<std::size_t>(l)] = &merged;
+        Controller* controller = controllers_[static_cast<std::size_t>(l)].get();
+        if (!controller) {
+            LOG_ERROR("control") << "no controller at level " << levelName(level);
+            return fail(out);
+        }
+        const ControlContext levelCtx{ctx.vehicleId, ctx.state, ctx.sensed, ctx.dt, ctx.world, ctx.rng, engaged};
+        Command next = controller->update(levelCtx, merged);
+        const Level nextLevel = levelOf(next);
+        if (nextLevel >= level) {
+            LOG_ERROR("control") << "controller '" << controller->id() << "' returned a command at level " << levelName(nextLevel)
+                                 << " (must be lower than " << levelName(level) << ")";
+            return fail(out);
+        }
+        auto& produced = outputs_[static_cast<std::size_t>(l)];
+        produced = std::move(next);
+        for (std::size_t a = 0; a < kPrimary; ++a)
+            if (engaged & (1u << a)) {
+                at[a] = nextLevel;
+                from[a] = &produced;
+            }
+    }
+    // The actuators: each axis's field from its demand, an axis nobody flies
+    // the neutral default; a support effector a cascade slot owns, from that
+    // slot's own chain.
+    ActuatorCommand final = std::get<ActuatorCommand>(kNeutral);
+    auto actuator = [&](std::size_t a) -> const ActuatorCommand* { return from[a] ? std::get_if<ActuatorCommand>(from[a]) : nullptr; };
+    if (const auto* x = actuator(static_cast<std::size_t>(Axis::Roll))) final.aileron = x->aileron;
+    if (const auto* x = actuator(static_cast<std::size_t>(Axis::Pitch))) final.elevator = x->elevator;
+    if (const auto* x = actuator(static_cast<std::size_t>(Axis::Yaw))) final.rudder = x->rudder;
+    if (const auto* x = actuator(static_cast<std::size_t>(Axis::Thrust))) final.throttle = x->throttle;
+    auto chainOf = [&](Axis support) -> const ActuatorCommand* {
+        const std::uint8_t o = c.owner[static_cast<std::size_t>(support)];
+        if (o >= kSlotCount) return nullptr;
+        for (std::size_t a = 0; a < kPrimary; ++a)
+            if (c.owner[a] == o && from[a]) return actuator(a);
+        return nullptr;
+    };
+    if (const auto* x = chainOf(Axis::Flaps)) final.flaps = x->flaps;
+    if (const auto* x = chainOf(Axis::Gear)) final.gearDown = x->gearDown;
+    if (const auto* x = chainOf(Axis::Brakes)) final.brakeLeft = x->brakeLeft, final.brakeRight = x->brakeRight;
+    Command& assembled = merged_[static_cast<std::size_t>(Level::Actuator)];
+    assembled = final;
+    derived_[static_cast<std::size_t>(Level::Actuator)] = &assembled;
+    actuate(final, out);
 }
 
 void ControlStack::actuate(const ActuatorCommand& a, sim::ControlInputs& out) noexcept {
@@ -254,6 +462,8 @@ void ControlStack::actuate(const ActuatorCommand& a, sim::ControlInputs& out) no
     } else if (owner(Axis::Brakes) == RuntimeConfig::kNone) {
         out.brakeLeft = out.brakeRight = 0.0;
     }
+    if (owner(Axis::Thrust) == RuntimeConfig::kEngines)
+        for (std::size_t i = 0; i < c.engines.size(); ++i) out.throttle[i] = clamp01(orHold(c.engines[i], last_.throttle[i]));
     effectors_.speedbrake = owner(Axis::Speedbrake) == RuntimeConfig::kSupport ? demand(Axis::Speedbrake).value : kHold;
     effectors_.pitchTrim = owner(Axis::PitchTrim) == RuntimeConfig::kSupport ? demand(Axis::PitchTrim).value : kHold;
     last_ = out;
@@ -274,6 +484,7 @@ void ControlStack::reset() {
         started_[s] = 0; // behaviours start again
     }
     derived_.fill(nullptr);
+    holdValid_ = 0; // the default's hold captures afresh
     last_ = initial_;
 }
 

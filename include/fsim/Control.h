@@ -123,8 +123,15 @@ struct SpeedbrakeCommand {
 struct PitchTrimCommand {
     double position = 0.0; ///< -1 .. 1, + nose down (JSBSim's sign)
 };
+/// fsim.flight.engines: a throttle per engine. A flight capability that owns
+/// thrust, set directly like the support effectors (so beside the cascade,
+/// which then flies roll and pitch without it).
+struct EnginesCommand {
+    double throttle[4] = {kHold, kHold, kHold, kHold}; ///< 0 .. 1 per engine; kHold keeps it
+};
 
-using SupportCommand = std::variant<GearCommand, FlapsCommand, WheelBrakesCommand, SpeedbrakeCommand, PitchTrimCommand>;
+/// The commands set directly beside the cascade: the support effectors and per-engine throttles.
+using SupportCommand = std::variant<GearCommand, FlapsCommand, WheelBrakesCommand, SpeedbrakeCommand, PitchTrimCommand, EnginesCommand>;
 
 inline Level levelOf(const Command& c) noexcept { return static_cast<Level>(c.index()); }
 
@@ -148,6 +155,11 @@ struct ControlContext {
     double dt = 0.0;                    ///< controller period, seconds
     const WorldView* world = nullptr;   ///< null when the stack runs stand-alone
     Rng* rng = nullptr;                 ///< this vehicle's stream (deterministic)
+    /// The primary axes this level's command drives this update
+    /// (docs/control-architecture.md, 9.5): all of them unless the vehicle's
+    /// axes are owned apart. A controller that says axisAware() leaves the
+    /// others alone - no integrating, no output (kHold).
+    AxisMask engaged = kPrimaryAxes;
 };
 
 /// One level of the cascade: accepts a command at `level()` and returns a
@@ -168,6 +180,10 @@ public:
     /// Gains and other tunables by name; unknown names return false / nullopt.
     virtual bool setParameter(std::string_view name, double value) { (void)name; (void)value; return false; }
     virtual std::optional<double> parameter(std::string_view name) const { (void)name; return std::nullopt; }
+
+    /// True if it honours ControlContext::engaged: then a command whose axes
+    /// are owned apart may pass through it (docs/control-architecture.md, 9.6).
+    virtual bool axisAware() const noexcept { return false; }
 };
 
 /// A top-level controller with a lifecycle (design 9.3 "Behavior"). A finished

@@ -68,12 +68,18 @@ struct RuntimeConfig {
     static constexpr std::size_t kSlots = kSlotCount;
     static constexpr std::uint8_t kNone = 0xFF;    ///< no owner: the vehicle default flies the axis
     static constexpr std::uint8_t kSupport = 0xFE; ///< a support activity: support[axis - Axis::Flaps]
+    static constexpr std::uint8_t kEngines = 0xFD; ///< thrust set per engine: engines[]
 
     RuntimeConfig() noexcept { owner.fill(kNone); }
 
     std::array<SetpointSlot, kSlots> slots{};
     std::array<std::uint8_t, kAxisCount> owner{};  ///< per axis: a slot index, kSupport or kNone
     std::array<SupportDemand, kSupportAxisCount> support{};
+    std::array<double, 4> engines{kHold, kHold, kHold, kHold}; ///< per-engine throttle when thrust's owner is kEngines
+    VehicleDefault vehicleDefault = VehicleDefault::Neutral;  ///< what flies a primary axis whose owner is kNone
+    /// Per primary axis: bumped each time it returns to the vehicle default
+    /// (or the default becomes a hold), so the hold captures it afresh.
+    std::array<std::uint32_t, kPrimaryAxisCount> letGo{};
     std::uint32_t revision = 0;                    ///< bumped whenever owner[] or a slot's axes change
     Protection protection{};
 };

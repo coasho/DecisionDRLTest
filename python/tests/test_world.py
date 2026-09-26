@@ -211,6 +211,9 @@ class CapabilityTest(unittest.TestCase):
         self.assertEqual(velocity.level, Level.VELOCITY)
         self.assertEqual([p.name for p in velocity.parameters], list(fsim.COMMAND_FIELDS[Level.VELOCITY]))
         self.assertTrue(caps["fsim.guidance.waypoints"].terminating)
+        self.assertEqual(velocity.axis_groups, 1 | 2 | 4)  # lateral, pitch, thrust
+        self.assertEqual(caps["fsim.flight.actuator"].axis_groups & 8, 8)  # any primary axis alone
+        self.assertEqual(caps["fsim.guidance.hold"].axis_groups, 0)  # all or nothing
         self.assertTrue(caps["fsim.guidance.pursuit"].needs_target)
         self.assertEqual(v.capability_status("fsim.guidance.hold"), (fsim.Availability.AVAILABLE, "none"))
         self.assertEqual(v.capability_status("no.such.thing")[1], "unknown_capability")
@@ -283,6 +286,63 @@ class CapabilityTest(unittest.TestCase):
         self.assertEqual(world.activity(brakes).axes, 1 << 6)  # the brakes axis
         flaps.cancel()
         self.assertEqual(flaps.info.reason, "requested")
+
+    def test_axes_apart(self):
+        world = make_world(name="py-axes")
+        v = fly(world, "apart", heading_deg=90.0, airspeed_ms=55.0)
+        hold = v.submit(Level.VELOCITY, airspeed_ms=55.0, vertical_speed_ms=0.0, source=fsim.Source.AUTOPILOT,
+                        axes=fsim.Axis.PITCH | fsim.Axis.THRUST)
+        bank = v.submit(Level.ATTITUDE, roll_rad=0.3, axes=fsim.Axis.ROLL)
+        self.assertEqual(bank.info.axes, fsim.Axis.LATERAL)  # the loop that banks also coordinates
+        self.assertTrue(hold.live)
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit(Level.ATTITUDE, pitch_rad=0.1, axes=fsim.Axis.PITCH)
+        self.assertEqual(refused.exception.reason, "authority_held")
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit(Level.ATTITUDE, axes=fsim.Axis.FLAPS)
+        self.assertEqual(refused.exception.reason, "invalid_axes")
+        altitude = v.state.altitude_msl_m
+        world.step(450)
+        self.assertLess(abs(v.state.euler_rad[0] - 0.3), 0.06)
+        self.assertLess(abs(v.state.altitude_msl_m - altitude), 20.0)
+        self.assertEqual(hold.state, fsim.ActivityState.ACTIVE)
+
+    def test_vehicle_default(self):
+        world = make_world(name="py-default")
+        v = fly(world, "held", heading_deg=90.0, airspeed_ms=55.0)
+        self.assertEqual(v.vehicle_default, fsim.VehicleDefault.NEUTRAL)
+        v.set_vehicle_default("hold")
+        self.assertEqual(v.vehicle_default, fsim.VehicleDefault.HOLD)
+        self.assertEqual(v.active_level, Level.VELOCITY)
+        altitude = v.state.altitude_msl_m
+        world.step(600)
+        self.assertLess(abs(v.state.altitude_msl_m - altitude), 15.0)
+        self.assertLess(abs(v.state.airspeed_true_ms - 55.0), 3.0)
+        v.set_vehicle_default(fsim.VehicleDefault.NEUTRAL)
+        world.step()
+        self.assertEqual(v.get_property("fcs/throttle-cmd-norm[0]"), 0.0)
+
+    def test_engines(self):
+        world = make_world(name="py-engines")
+        twin = fly(world, "twin", type="jsbsim:a10c", altitude_msl_m=3000.0, airspeed_ms=140.0)
+        caps = {c.id: c for c in twin.capabilities()}
+        self.assertEqual([p.name for p in caps["fsim.flight.engines"].parameters], ["throttle_1", "throttle_2"])
+        v = twin.submit(Level.ATTITUDE, pitch_rad=0.03, axes=fsim.Axis.LATERAL | fsim.Axis.PITCH)
+        engines = twin.submit_support("engines", throttle_1=0.9, throttle_2=0.4)
+
+        def throttles():  # what the flight model was given
+            return [twin.get_property("fcs/throttle-cmd-norm[%d]" % i) for i in range(2)]
+
+        world.step()
+        self.assertEqual(throttles(), [0.9, 0.4])
+        engines.update(throttle_1=0.7)  # the other held
+        world.step()
+        self.assertEqual(throttles(), [0.7, 0.4])
+        self.assertTrue(v.live)
+        single = fly(world, "single", longitude_deg=-122.3)
+        with self.assertRaises(fsim.Rejected) as refused:
+            single.submit_support("engines", 0.5, HOLD, HOLD, HOLD)
+        self.assertEqual(refused.exception.reason, "unknown_capability")
 
     def test_batched_updates(self):
         world = make_world(name="py-batch-updates")

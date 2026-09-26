@@ -25,6 +25,7 @@ CapabilityDescriptor flight(const char* name, Level level, std::vector<Parameter
     d.interactions = kCommand | kUpdate | kCancel | kStatus;
     d.level = level;
     d.axes = kPrimaryAxes;
+    d.axisGroups = level == Level::Actuator ? kGroupEachAxis | kGroupLateral | kGroupPitch | kGroupThrust : kGroupLateral | kGroupPitch | kGroupThrust;
     d.persistence = Persistence::Persistent;
     d.parameters = std::move(parameters);
     d.uses = std::move(uses);
@@ -80,13 +81,13 @@ std::size_t commandFields(Command& c, double* f[8]) noexcept {
 }
 
 const char* supportCapability(std::size_t alternative) noexcept {
-    static const char* const ids[] = {"fsim.support.gear", "fsim.support.flaps", "fsim.support.wheel_brakes", "fsim.support.speedbrake",
-                                      "fsim.support.pitch_trim"};
+    static const char* const ids[] = {"fsim.support.gear",       "fsim.support.flaps",      "fsim.support.wheel_brakes",
+                                      "fsim.support.speedbrake", "fsim.support.pitch_trim", "fsim.flight.engines"};
     return alternative < kSupportKinds ? ids[alternative] : "";
 }
 
 Axis supportAxis(const SupportCommand& c) noexcept {
-    static const Axis axes[] = {Axis::Gear, Axis::Flaps, Axis::Brakes, Axis::Speedbrake, Axis::PitchTrim};
+    static const Axis axes[] = {Axis::Gear, Axis::Flaps, Axis::Brakes, Axis::Speedbrake, Axis::PitchTrim, Axis::Thrust};
     return axes[c.index()];
 }
 
@@ -105,7 +106,8 @@ double supportGoal(const SupportCommand& c) noexcept {
     return kHold;
 }
 
-std::size_t supportFields(SupportCommand& c, double* f[2]) noexcept {
+std::size_t supportFields(SupportCommand& c, double* f[4]) noexcept {
+    if (auto* e = std::get_if<EnginesCommand>(&c)) return f[0] = &e->throttle[0], f[1] = &e->throttle[1], f[2] = &e->throttle[2], f[3] = &e->throttle[3], 4;
     if (auto* g = std::get_if<GearCommand>(&c)) return f[0] = &g->down, 1;
     if (auto* p = std::get_if<FlapsCommand>(&c)) return f[0] = &p->position, 1;
     if (auto* b = std::get_if<WheelBrakesCommand>(&c)) return f[0] = &b->left, f[1] = &b->right, 2;
@@ -161,12 +163,12 @@ void CapabilityCatalog::narrow(std::string_view capability, std::string_view par
         }
 }
 
-void CapabilityCatalog::addSupport(std::size_t alternative) {
+void CapabilityCatalog::addSupport(std::size_t alternative, int engines) {
     if (alternative >= kSupportKinds || bySupport_[alternative] >= 0) return;
-    static const Axis axes[] = {Axis::Gear, Axis::Flaps, Axis::Brakes, Axis::Speedbrake, Axis::PitchTrim};
+    static const Axis axes[] = {Axis::Gear, Axis::Flaps, Axis::Brakes, Axis::Speedbrake, Axis::PitchTrim, Axis::Thrust};
     CapabilityDescriptor d;
     d.id = supportCapability(alternative);
-    d.kind = CapabilityKind::Support;
+    d.kind = alternative == 5 ? CapabilityKind::Flight : CapabilityKind::Support; // the engines' throttles own thrust
     d.interactions = kCommand | kUpdate | kCancel | kStatus;
     d.level = Level::Actuator;
     d.axes = axisBit(axes[alternative]);
@@ -176,7 +178,13 @@ void CapabilityCatalog::addSupport(std::size_t alternative) {
     case 1: d.parameters = {parameter("position", "", 0.0, 0.0, 1.0, false)}; break;
     case 2: d.parameters = {parameter("left", "", 0.0, 0.0, 1.0, false), parameter("right", "", 0.0, 0.0, 1.0, false)}; break;
     case 3: d.parameters = {parameter("position", "", 0.0, 0.0, 1.0, false)}; break;
-    default: d.parameters = {parameter("position", "", 0.0, -1.0, 1.0, false)}; break;
+    case 4: d.parameters = {parameter("position", "", 0.0, -1.0, 1.0, false)}; break;
+    default: {
+        static const char* const names[] = {"throttle_1", "throttle_2", "throttle_3", "throttle_4"};
+        for (int i = 0; i < std::clamp(engines, 1, 4); ++i) d.parameters.push_back(parameter(names[i], "", kHold, 0.0, 1.0));
+        d.axisGroups = kGroupThrust;
+        break;
+    }
     }
     bySupport_[alternative] = static_cast<int>(descriptors_.size());
     descriptors_.push_back(std::move(d));
@@ -236,7 +244,7 @@ AxisMask CapabilityCatalog::defaultAxes(std::size_t index, const Command& comman
 
 Reason CapabilityCatalog::check(std::size_t index, SupportCommand& command, RangePolicy range, std::uint16_t& flags) const noexcept {
     const CapabilityDescriptor& d = descriptors_[index];
-    double* fields[2];
+    double* fields[4];
     const std::size_t n = std::min(supportFields(command, fields), d.parameters.size());
     for (std::size_t i = 0; i < n; ++i)
         if (const Reason r = checkValue(d.parameters[i], *fields[i], range, flags); r != Reason::None) return r;

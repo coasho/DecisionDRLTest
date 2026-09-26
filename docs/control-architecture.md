@@ -220,13 +220,19 @@ struct Protection {
     double gearCasMaxMs = std::numeric_limits<double>::quiet_NaN();  ///< with the gear down; NaN = no limit
 };
 
+enum class VehicleDefault : std::uint8_t { Neutral, Hold };  // public, fsim/Capability.h (step 3)
+
 struct RuntimeConfig {
     static constexpr std::size_t kSlots = 4;        ///< a slot drives at least one primary axis, so four at most
     static constexpr std::uint8_t kNone = 0xFF;     ///< no owner: the vehicle default flies the axis
     static constexpr std::uint8_t kSupport = 0xFE;  ///< a support activity: support[axis - Axis::Flaps]
+    static constexpr std::uint8_t kEngines = 0xFD;  ///< thrust set per engine: engines[] (step 3)
     std::array<SetpointSlot, kSlots> slots{};
-    std::array<std::uint8_t, kAxisCount> owner;     ///< per axis: a slot index, kSupport or kNone (all kNone at first)
+    std::array<std::uint8_t, kAxisCount> owner;     ///< per axis: a slot index, kSupport, kEngines or kNone (all kNone at first)
     std::array<SupportDemand, kSupportAxisCount> support{};
+    std::array<double, 4> engines;                  ///< per-engine throttle while thrust's owner is kEngines; kHold keeps one
+    VehicleDefault vehicleDefault = VehicleDefault::Neutral;
+    std::array<std::uint32_t, 4> letGo{};           ///< per primary axis: bumped when it returns to the default (the hold captures it afresh)
     std::uint32_t revision = 0;                     ///< bumped whenever owner[] or a slot's axes change
     Protection protection{};
 };
@@ -234,7 +240,12 @@ struct RuntimeConfig {
 }
 ```
 
-- **Vehicle default.** An axis with no owner flies the neutral actuator command `ActuatorCommand{}`: surfaces centred, throttle 0, flaps 0 and brakes off, with the gear, speedbrake and trim held. This is exactly the command a stack starts with today. Because of it, a vehicle nobody commands goes to idle at its first control update, whatever its initial inputs were. That quirk is kept for compatibility (section 13). Step 3 adds a per-vehicle setting that makes the default `hold` instead.
+- **Vehicle default.** An axis with no owner flies the neutral actuator command `ActuatorCommand{}`: surfaces centred, throttle 0, flaps 0 and brakes off, with the gear, speedbrake and trim held. This is exactly the command a stack starts with today. Because of it, a vehicle nobody commands goes to idle at its first control update, whatever its initial inputs were. That quirk is kept for compatibility (section 13).
+- **The `Hold` default (step 3).** A per-vehicle setting (`setVehicleDefault`) makes the default a hold for the primary axes instead:
+  - It enters the cascade at the velocity level and holds the heading (for roll and yaw), the true airspeed (for thrust) and the height (for pitch). It flies the height through the vertical speed as `fsim.guidance.hold` does: 0.25 s⁻¹ times the error, within ±6 m/s.
+  - The runtime captures an axis's target from the state at its first update after the axis is let go: the host bumps `letGo[axis]` when the axis returns to the default, and when the setting becomes `Hold`. A reset captures afresh.
+  - Nothing is written on the path where one slot owns every axis.
+  - The support axes keep the neutral default.
 - **Behaviour parameters.** `SetpointSlot::command` holds a `BehaviorCommand` only at `Level::Behavior`. The host builds it at NEW, the runtime reads it by reference, and it is never copied during a step (P6).
 - **Envelope source.** `Protection` comes from the profile's envelope section (section 7) and the vehicle's protection setting. The host writes it when the vehicle is created and whenever the setting changes, not every step. The runtime picks the configuration (`clean` or `flaps`) from the state on each update.
 
@@ -444,7 +455,7 @@ A capability the aircraft does not have is simply absent from its catalog.
 | `fsim.guidance.evade` | guidance | all primary | persistent; fails `TargetLost` | target, altitude_delta_m, airspeed_ms | 1 |
 | `fsim.guidance.formation` | guidance | all primary | persistent; fails `TargetLost` | target, ahead_m, right_m, below_m, closure_gain | 1 |
 | `fsim.guidance.aerobatics` | guidance | all primary | terminating: completes when the manoeuvre does | manoeuvre, load_factor_g, roll_rate_rad_s | 1 |
-| `fsim.flight.engines` | flight, actuator | thrust | persistent | throttle per engine 0..1 (the aircraft's engine count); owning thrust alone needs step 3's merging | 3 |
+| `fsim.flight.engines` | flight, actuator | thrust | persistent | a throttle per engine 0..1, `kHold` keeps one: as many as the profile's propulsion section gives, at most 4 (an aircraft with more gangs them, as its flight control system does). Offered where there is more than one engine. Set beside the cascade like the support effectors (`EnginesCommand`, an alternative of `SupportCommand`) | 3 |
 | `fsim.support.gear` | support | gear | terminating: completes when the gear is there | down 0/1; retraction unavailable on the ground; operation above `gear_cas_max_ms` unavailable | 2 |
 | `fsim.support.flaps` | support | flaps | terminating: completes at the commanded position | position 0..1; extension beyond `flaps_threshold` above the flaps configuration's `cas_max_ms` unavailable | 2 |
 | `fsim.support.wheel_brakes` | support | brakes | persistent | left, right 0..1 | 2 |
@@ -483,7 +494,7 @@ Each axis has at most one owner:
 
 A command's axes are normalized before arbitration:
 - Above the actuator level, `Roll` and `Yaw` go together.
-- A flight capability may own any union of the groups its descriptor allows (step 3; until then, all of its default axes).
+- A flight capability may own any union of the groups its descriptor allows (`axisGroups`). A command owns at least one primary axis; guidance owns all of them or none (`InvalidAxes` otherwise).
 - An actuator command owns the primary axes in its options (all four by default) and the support axes whose fields it sets.
 - A legacy command always owns the fixed legacy axes (section 10.7).
 
@@ -521,6 +532,8 @@ Protection is not a source and never owns an axis. It limits whatever the owners
 - **Completed or Failed.** The runtime keeps flying what the activity's loop produces after its goal: a finished behaviour holds its last output, as it does today. That output is the residual hold. Any NEW, of any source, may claim these axes without preempting anyone. A slot whose axes have all been claimed is freed.
 - **Canceled(Preempted).** The axes the preemptor did not take stay as a residual hold, so the aircraft keeps flying that part of the task instead of dropping to neutral.
 - **Canceled(Requested)** (CANCEL). The activity's axes return to the vehicle default. CANCEL means stop doing this.
+- **A slot left without a primary axis** is freed, and any support axes it kept return to the default: a slot flies through the cascade on a primary axis.
+- **A behaviour's residual** keeps running the behaviour, and only the fields of the axes it kept are used.
 
 ### 9.5 Merging in the runtime (step 3)
 
@@ -536,11 +549,19 @@ With several slots, the runtime runs one pass from the highest engaged level dow
 
 With a single slot this is exactly today's cascade, which is why steps 1 and 2 do not need it.
 
+Since step 3:
+- **The whole-vehicle fast path.** When one slot owns every primary axis, the runtime runs that slot's cascade exactly as before.
+- **Other entries.** A behaviour's residual enters above the levels, its output joining the pass at its level. The default's hold enters at the velocity level.
+- **The actuators.** An axis owned by nobody flies the neutral value. The engines' throttles replace thrust after the adapter's `apply()`.
+
 Each controller runs once per step, and each keeps one instance per level, as today. The built-in loops learn which groups they are driving (`ControlContext::engaged`), so the loop of a group that is not engaged neither integrates nor winds up.
 
 ### 9.6 Custom controllers
 
 A controller registered by a trainer keeps working exactly as today under whole-vehicle commands. A partial-axis command whose merge would pass mixed owners through a controller is rejected with `ControllerNotAxisAware`, unless that controller declares `axisAware()` (a new virtual that defaults to false). The built-in controllers declare it from step 3.
+
+- **Which controllers are checked.** Where a demand goes depends on the controllers, so the check is conservative: every controller from the attitude level up to the highest level any owner enters at, afterwards. That is Position for a behaviour and Velocity for the default's hold.
+- **When.** At NEW, for an engines command too, since it takes thrust from the cascade. Also when the default becomes `Hold` beside other owners.
 
 ## 10. Command lifecycle
 
@@ -648,7 +669,7 @@ struct ActivityRecord {
 ### 10.5 Records and ids
 
 - **Ids.** `ActivityId = (vehicle id << 32) | serial`. The serial starts at 1 per vehicle and counts accepted NEWs. Vehicle ids are never reused in a world.
-- **Records.** A vehicle keeps its live activities (at most 4 slots plus 5 support axes) and a ring of its 16 most recent ended ones, both fixed-size.
+- **Records.** A vehicle keeps its live activities (at most 4 slots, 5 support axes and the engines) and a ring of its 16 most recent ended ones, both fixed-size.
 - **Old ids.** A query for an older ended activity answers `UnknownActivity`.
 - **Removal.** Records go with the vehicle.
 
@@ -922,12 +943,13 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 
 **Baseline (1a, 2026-09-26).** Measured on a252827, which fixed a determinism bug the digests found first: a behaviour that followed another vehicle could read it mid-step, from another worker.
 
-| micro (ns/update) | actuator | attitude | acceleration | velocity | position | hold | loiter | waypoints |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| baseline | 31 | 47 | 41 | 65 | 118–129 | 68 | 240–249 | 179–181 |
-| 1b | 30–31 | 46–47 | 40 | 64 | 117–118 | 66–67 | 153 | 129 |
-| 1c | 30–31 | 44–47 | 40 | 63–64 | 116–117 | 65–67 | 153–156 | 127–128 |
-| 2c | 31–33 | 46 | 41–43 | 64 | 118–119 | 66–67 | 152 | 128–130 |
+| micro (ns/update) | actuator | attitude | acceleration | velocity | position | hold | loiter | waypoints | axes apart | default hold |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| baseline | 31 | 47 | 41 | 65 | 118–129 | 68 | 240–249 | 179–181 | – | – |
+| 1b | 30–31 | 46–47 | 40 | 64 | 117–118 | 66–67 | 153 | 129 | – | – |
+| 1c | 30–31 | 44–47 | 40 | 63–64 | 116–117 | 65–67 | 153–156 | 127–128 | – | – |
+| 2c | 31–33 | 46 | 41–43 | 64 | 118–119 | 66–67 | 152 | 128–130 | – | – |
+| 3 | 32 | 45–47 | 41 | 63 | 118 | 65–66 | 152–153 | 132–133 | 70 | 84 |
 
 | command (ns/call, 64 vehicles) | same level | level switch | behaviour | update, checked |
 | --- | --- | --- | --- | --- |
@@ -935,6 +957,7 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 | 1b | 7.7–8.1 | 8.0–8.6 | 63 | – |
 | 1c | 4.9–5.1 | 28–31 | 86–88 | 14–15 |
 | 2c | 4.9 | 36 | 91–94 | 18–19 |
+| 3 | 4.9–5.0 | 38 | 97–98 | 17–18 |
 
 | world (vehicle-steps/s) | 64 c172x | 32 f16c (fly-by-wire) | 32 b52h (direct) |
 | --- | --- | --- | --- |
@@ -942,6 +965,7 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 | 1b | 817,000–822,000 | 551,000–556,000 | 559,000–577,000 |
 | 1c | 802,000–823,000 | 551,000–556,000 | 568,000–581,000 |
 | 2c | 810,000–812,000 | 550,000–562,000 | 571,000–579,000 |
+| 3 | 817,000–819,000 | 551,000–557,000 | 574,000–578,000 |
 
 **Step 1b.**
 - **Allocations:** none in any case. The `control_alloc` ctest now gates it.
@@ -964,6 +988,25 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 - **NEWs and checked UPDATEs** scan the host's nine activity slots (four for the cascade, five for support axes) instead of four: 36 ns for a level switch, 18–19 ns for a checked update.
 - **Throughput:** c172x at 98.5 % of the baseline, after two economies. The flap position, for flaps that complete in position, is read only while such an activity is under way, and the post-step pass skips empty slots.
 - **2d:** hangar writes six profile sections into each of its 31 designs, and the platform reads every one without a warning. The F-16C and B-52H flights now go through the `jsbsim.fbw` and `jsbsim.direct` adapters, and their digests are still identical to the baseline.
+
+**Step 3 (per-axis authority).**
+- **Digests:** every legacy flight identical to the baseline.
+- **Allocations:** none. Two cases were added: a policy's bank updated every step beside an autopilot's height and speed, and the default's hold.
+- **A/B against step 2d.** Measured as 5 interleaved runs of each build on the same machine, which removes most of the drift between sessions:
+  - within ±3 % in every case except waypoints (+3 %, 4 ns);
+  - the whole-vehicle path is the old code, unchanged; putting it back inline, with nothing written for the hold, recovered the 1.6 ns a first version cost the actuator case.
+- **Exit criterion: mixed ownership within the manoeuvre suite's tolerances.** The flight is a policy's 20° bank beside an autopilot's velocity hold of height and speed, measured over 40 s after 20 s of settling.
+
+  | Aircraft (adapter family) | Height, worst (suite: within 50 m) | Bank error, worst (suite: 30 % overshoot) |
+  | --- | --- | --- |
+  | c172x (stock) | 1.8 m | 0.046 rad |
+  | F-16C (fly-by-wire) | 4.0 m | 0.002 rad |
+  | B-52H (direct) | 37 m | 0.002 rad |
+
+  The B-52H loses the same 37 m in the same turn flown as one whole-vehicle velocity command. The loss comes from its loops' tuning, not from the merge (`tests/test_axes.cpp`).
+- **The new cases.** Axes owned apart cost 70 ns an update (one merged pass: velocity for pitch and thrust, attitude for all four), and the default's hold 84 ns.
+- **NEWs** check the axis groups and the controllers' axis awareness: 1–4 ns more. The per-step paths are unchanged.
+- **Throughput:** c172x at 99.4 % of the baseline.
 
 **Allocations.**
 - Per update, none, except `loiter` (4, one per parameter's map node) and `waypoints` (2): the per-step `BehaviorCommand` copy, P6.

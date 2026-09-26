@@ -133,7 +133,9 @@ push, not yet tagged:
   profile of separately versioned sections (identity, effectors, envelope, propulsion, identified plant,
   performance, gains) - hangar writes them for its 31 designs - and flies through the adapter of its family
   (fly-by-wire or surfaces); gear, flaps, brakes, speedbrake and pitch trim are capabilities of their own, with
-  their placards (steps 1-2 of 6).
+  their placards. Commands can own the axes apart - a policy on the bank while an autopilot holds the height and
+  speed, merged into one pass down the cascade - with per-engine throttles and a vehicle default that holds
+  instead of idling (steps 1-3 of 6).
 - `sim::VehiclePool` (one worker per physical core), JSBSim 1.3.1 adapter with terrain ground callback,
   `flightsim.exe` headless benchmark.
 

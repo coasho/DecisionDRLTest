@@ -935,7 +935,7 @@ static PyObject* world_vehicle_activities(PyObject* o, PyObject* const* args, Py
 }
 
 /* capabilities(id) -> [(id, version, kind, interactions, level, axes, terminating, needs_target, behavior,
- *                       [(name, unit, min, max, default, optional)])] */
+ *                       [(name, unit, min, max, default, optional)], axis_groups)] */
 static PyObject* world_capabilities(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint32_t id;
@@ -957,8 +957,9 @@ static PyObject* world_capabilities(PyObject* o, PyObject* const* args, Py_ssize
             }
             Py_DECREF(t);
         }
-        PyObject* t = params ? Py_BuildValue("(sIiIiIOOsN)", c.id, c.version, c.kind, c.interactions, c.level, c.axes,
-                                             c.terminating ? Py_True : Py_False, c.needs_target ? Py_True : Py_False, c.behavior, params)
+        PyObject* t = params ? Py_BuildValue("(sIiIiIOOsNI)", c.id, c.version, c.kind, c.interactions, c.level, c.axes,
+                                             c.terminating ? Py_True : Py_False, c.needs_target ? Py_True : Py_False, c.behavior, params,
+                                             c.axis_groups)
                              : NULL;
         if (!t || PyList_Append(list, t) < 0) {
             Py_XDECREF(t);
@@ -1007,6 +1008,26 @@ static PyObject* world_profile_section(PyObject* o, PyObject* const* args, Py_ss
         return NULL;
     }
     return Py_BuildValue("(Ii)", version, provenance);
+}
+
+/* set_vehicle_default(id, mode) -> reason (0: set) */
+static PyObject* world_set_vehicle_default(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int mode;
+    int32_t reason = 0;
+    if (!check_args(n, 2, 2, "set_vehicle_default") || !as_u32(args[0], &id) || !as_int(args[1], &mode) || !WORLD_IDLE(self)) return NULL;
+    if (fsim_vehicle_set_default(self->world, id, mode, &reason) != FSIM_OK && reason == 0) return fail();
+    return PyLong_FromLong(reason);
+}
+
+/* vehicle_default(id) -> mode */
+static PyObject* world_vehicle_default(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    uint32_t id;
+    int32_t mode = 0;
+    if (!check_args(n, 1, 1, "vehicle_default") || !as_u32(args[0], &id)) return NULL;
+    if (fsim_vehicle_get_default(((WorldObject*)o)->world, id, &mode) != FSIM_OK) return fail();
+    return PyLong_FromLong(mode);
 }
 
 static PyObject* world_active_level(PyObject* o, PyObject* const* args, Py_ssize_t n) {
@@ -1288,6 +1309,8 @@ static PyMethodDef world_methods[] = {
     FAST("capability_status", world_capability_status, "capability_status(id, capability) -> (availability, reason)"),
     FAST("profile_value", world_profile_value, "profile_value(id, path) -> float, NaN if unknown"),
     FAST("profile_section", world_profile_section, "profile_section(id, section) -> (version, provenance)"),
+    FAST("set_vehicle_default", world_set_vehicle_default, "set_vehicle_default(id, mode) -> reason, 0 if set"),
+    FAST("vehicle_default", world_vehicle_default, "vehicle_default(id) -> mode"),
     FAST("active_level", world_active_level, "active_level(id)"),
     FAST("behavior_finished", world_behavior_finished, "behavior_finished(id)"),
     FAST("use_controller", world_use_controller, "use_controller(id, level, controller_id)"),

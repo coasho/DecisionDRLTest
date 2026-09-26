@@ -106,7 +106,17 @@ private:
     static constexpr std::size_t kNoSlot = kSlotCount;
 
     bool apply(Controller& controller) const;
-    std::size_t engagedSlot() const noexcept;
+    /// The slot that owns every primary axis (the usual case), else kNoSlot.
+    std::size_t wholeSlot() const noexcept;
+    /// The slot at the highest level that owns a primary axis, else kNoSlot.
+    std::size_t topSlot() const noexcept;
+    /// The vehicle default is a hold and some primary axis has no owner.
+    bool holdsDefault() const noexcept;
+    /// The axes owned apart (docs/control-architecture.md, 9.5): one pass down
+    /// the levels, each merging the demands that reached it into one command.
+    void flyMerged(const ControlContext& ctx, sim::ControlInputs& out);
+    /// Nothing flies a primary axis through the cascade: the neutral actuator command.
+    void flyNeutral(sim::ControlInputs& out);
     void actuate(const ActuatorCommand& a, sim::ControlInputs& out) noexcept;
     void fail(sim::ControlInputs& out) noexcept;
 
@@ -119,7 +129,14 @@ private:
     std::array<std::unique_ptr<Behavior>, kSlotCount> behaviors_; ///< per slot, at Level::Behavior
     std::array<std::uint32_t, kSlotCount> started_{};              ///< the slot generation each behaviour was started for
     std::array<const Command*, kLevels> derived_{};                ///< the last update's command per level (null: did not run)
-    std::array<Command, kLevels> produced_{};                      ///< the controllers' outputs, by level
+    std::array<Command, kLevels> outputs_{};                       ///< each level's controller's output, by the level that produced it
+    std::array<Command, kLevels> merged_{};                        ///< the commands merged from several demands, by level
+    // The vehicle default's hold (VehicleDefault::Hold): what the axes nobody
+    // owns fly, captured from the state as each was let go.
+    Command hold_ = VelocityCommand{};
+    std::array<std::uint32_t, kPrimaryAxisCount> captured_{}; ///< per axis: the RuntimeConfig::letGo its target was captured at
+    AxisMask holdValid_ = 0;                                  ///< the axes whose captured target is valid
+    double holdHeadingRad_ = 0.0, holdAirspeedMs_ = 0.0, holdAltitudeM_ = 0.0;
     sim::ControlInputs last_;
     sim::ControlInputs initial_;
     sim::EffectorInputs effectors_;

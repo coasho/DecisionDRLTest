@@ -23,15 +23,16 @@ std::size_t commandFields(Command& c, double* fields[8]) noexcept;
 
 // Support effectors (docs/control-architecture.md, 8.2), by SupportCommand's alternative.
 inline constexpr std::size_t kSupportKinds = std::variant_size_v<SupportCommand>;
-/// "fsim.support.gear", "fsim.support.flaps", "fsim.support.wheel_brakes", "fsim.support.speedbrake", "fsim.support.pitch_trim".
+/// "fsim.support.gear", "fsim.support.flaps", "fsim.support.wheel_brakes", "fsim.support.speedbrake",
+/// "fsim.support.pitch_trim", and "fsim.flight.engines" (a flight capability set beside the cascade like them).
 const char* supportCapability(std::size_t alternative) noexcept;
 Axis supportAxis(const SupportCommand& c) noexcept;
 /// Its demand: the one value, or the left and right brake.
 void supportValues(const SupportCommand& c, double& value, double& value2) noexcept;
 /// Where a terminating one is going: gear 1 down or 0 up, a flap position; NaN for the others.
 double supportGoal(const SupportCommand& c) noexcept;
-/// Its fields, as commandFields does; at most 2.
-std::size_t supportFields(SupportCommand& c, double* fields[2]) noexcept;
+/// Its fields, as commandFields does; at most 4.
+std::size_t supportFields(SupportCommand& c, double* fields[4]) noexcept;
 
 class VehicleAdapter;
 
@@ -44,8 +45,9 @@ public:
 
     /// Intersect a parameter's range with [lo, hi] (a NaN bound leaves that side).
     void narrow(std::string_view capability, std::string_view parameter, double lo, double hi);
-    /// Offer a support effector (an adapter's declare()), by SupportCommand's alternative.
-    void addSupport(std::size_t alternative);
+    /// Offer a support effector (an adapter's declare()), by SupportCommand's
+    /// alternative; for the engines' throttles, a parameter per engine (at most 4).
+    void addSupport(std::size_t alternative, int engines = 0);
 
     /// Add the behaviours registered since; true if there were any. Between steps only.
     bool refresh();
@@ -76,7 +78,7 @@ private:
 
     std::vector<CapabilityDescriptor> descriptors_;
     std::array<int, static_cast<std::size_t>(Level::Behavior)> byLevel_{};
-    std::array<int, kSupportKinds> bySupport_{-1, -1, -1, -1, -1};
+    std::array<int, kSupportKinds> bySupport_{-1, -1, -1, -1, -1, -1};
     std::uint64_t registryRevision_ = 0;
 };
 

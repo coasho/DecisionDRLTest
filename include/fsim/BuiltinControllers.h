@@ -78,6 +78,7 @@ class FSIM_API ActuatorPassthrough final : public Controller {
 public:
     const char* id() const noexcept override { return "actuator"; }
     Level level() const noexcept override { return Level::Actuator; }
+    bool axisAware() const noexcept override { return true; }
     Command update(const ControlContext&, const Command& in) override { return in; }
 };
 
@@ -90,6 +91,7 @@ public:
     AttitudeLoop();
     const char* id() const noexcept override { return "pid_attitude"; }
     Level level() const noexcept override { return Level::Attitude; }
+    bool axisAware() const noexcept override { return true; }
     Command update(const ControlContext& ctx, const Command& in) override;
     void reset() override;
     bool setParameter(std::string_view name, double value) override { return params_.set(name, value); }
@@ -130,6 +132,7 @@ public:
     AccelerationLoop();
     const char* id() const noexcept override { return "pid_acceleration"; }
     Level level() const noexcept override { return Level::Acceleration; }
+    bool axisAware() const noexcept override { return true; }
     Command update(const ControlContext& ctx, const Command& in) override;
     void reset() override;
     bool setParameter(std::string_view name, double value) override { return params_.set(name, value); }
@@ -167,6 +170,7 @@ public:
     VelocityLoop();
     const char* id() const noexcept override { return "pid_velocity"; }
     Level level() const noexcept override { return Level::Velocity; }
+    bool axisAware() const noexcept override { return true; }
     Command update(const ControlContext& ctx, const Command& in) override;
     void reset() override;
     bool setParameter(std::string_view name, double value) override { return params_.set(name, value); }
@@ -183,6 +187,9 @@ public:
     double commandLagS = 0.0;
 
 private:
+    /// The roll and the speed of the attitude command (whichever are engaged).
+    Command lateralAndSpeed(const ControlContext& ctx, const VelocityCommand& c, AttitudeCommand& out) const;
+
     Parameters params_;
     double vzRef_ = 0.0;  ///< the lagged vertical speed command
     double alpha_ = 0.0;  ///< the 1 g angle of attack, smoothed
@@ -197,6 +204,7 @@ public:
     PositionLoop();
     const char* id() const noexcept override { return "pid_position"; }
     Level level() const noexcept override { return Level::Position; }
+    bool axisAware() const noexcept override { return true; }
     Command update(const ControlContext& ctx, const Command& in) override;
     bool setParameter(std::string_view name, double value) override { return params_.set(name, value); }
     std::optional<double> parameter(std::string_view name) const override { return params_.get(name); }

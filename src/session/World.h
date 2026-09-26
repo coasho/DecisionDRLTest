@@ -106,13 +106,18 @@ public:
     control::CommandResult commandResult(std::uint32_t id, const control::Command& command);
     /// NEW: a command becomes an activity, or is rejected with a reason.
     control::CommandResult submit(std::uint32_t id, const control::Command& command, const control::CommandOptions& options = {});
-    /// NEW for a support effector the vehicle has (gear, flaps, brakes, speedbrake, pitch trim).
+    /// NEW for a support effector the vehicle has (gear, flaps, brakes, speedbrake, pitch trim) or its engines' throttles.
     control::CommandResult submit(std::uint32_t id, const control::SupportCommand& command, const control::CommandOptions& options = {});
     /// UPDATE: a new setpoint for a live activity (the fast path).
     control::CommandResult update(control::ActivityId activity, const control::Command& setpoint);
     control::CommandResult update(control::ActivityId activity, const control::SupportCommand& setpoint);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
+    /// What flies a vehicle's primary axes nobody owns: the neutral actuator
+    /// command (as always) or a hold of the heading, airspeed and height each
+    /// had when it was let go. Reason::None if set.
+    control::Reason setVehicleDefault(std::uint32_t id, control::VehicleDefault mode);
+    control::VehicleDefault vehicleDefault(std::uint32_t id) const noexcept;
     /// A live or recently ended activity; null if unknown.
     const control::ActivityRecord* activity(control::ActivityId activity) const noexcept;
     /// A vehicle's live activities, then the ended ones it remembers, newest first.

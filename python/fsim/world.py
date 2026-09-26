@@ -81,6 +81,31 @@ class RangePolicy(enum.IntEnum):
     NONE = 2
 
 
+class Axis(enum.IntFlag):
+    """What an activity owns: the primary axes, flown through the cascade, and
+    the support axes, set directly. Above the actuators roll and yaw go together
+    (LATERAL); a flight command may own any of LATERAL, PITCH and THRUST apart."""
+
+    ROLL = 1
+    PITCH = 2
+    YAW = 4
+    THRUST = 8
+    FLAPS = 16
+    GEAR = 32
+    BRAKES = 64
+    SPEEDBRAKE = 128
+    PITCH_TRIM = 256
+    LATERAL = ROLL | YAW
+    PRIMARY = ROLL | PITCH | YAW | THRUST
+
+
+class VehicleDefault(enum.IntEnum):
+    """What flies the primary axes nobody owns."""
+
+    NEUTRAL = 0  #: surfaces centred, throttle 0: every vehicle's default
+    HOLD = 1     #: the heading, airspeed and height each had when it was let go
+
+
 class ActivityState(enum.IntEnum):
     PENDING = 0
     ACTIVE = 1
@@ -113,8 +138,11 @@ ActivityInfo.__doc__ = ("An activity's record: its capability (an index into Veh
                         "its state and why it ended, flags (1 saturated, 8 clamped, ...) and when it ran.")
 
 Parameter = collections.namedtuple("Parameter", "name unit min max default optional")
-Capability = collections.namedtuple("Capability", "id version kind interactions level axes terminating needs_target behavior parameters")
-Capability.__doc__ = "What a vehicle offers: e.g. fsim.flight.attitude (a level) or fsim.guidance.hold (a behaviour)."
+Capability = collections.namedtuple("Capability",
+                                    "id version kind interactions level axes terminating needs_target behavior parameters axis_groups")
+Capability.__doc__ = ("What a vehicle offers: e.g. fsim.flight.attitude (a level) or fsim.guidance.hold (a behaviour). "
+                      "``axis_groups``: what it may own apart - 1 lateral (roll and yaw), 2 pitch, 4 thrust, 8 any primary "
+                      "axis; 0 all of its axes or none.")
 
 
 def _info(t):
@@ -129,12 +157,14 @@ def _checked(result):
     return result
 
 
-#: Support effectors (docs/sdk/control.md): their kinds, in the platform's
-#: order, each command's fields and what they are when not given.
-SUPPORT_KINDS = ("gear", "flaps", "wheel_brakes", "speedbrake", "pitch_trim")
+#: What is set directly beside the cascade (docs/sdk/control.md): the support
+#: effectors and the engines' throttles, in the platform's order, each
+#: command's fields and what they are when not given (HOLD keeps an engine's throttle).
+SUPPORT_KINDS = ("gear", "flaps", "wheel_brakes", "speedbrake", "pitch_trim", "engines")
 SUPPORT_FIELDS = {"gear": ("down",), "flaps": ("position",), "wheel_brakes": ("left", "right"), "speedbrake": ("position",),
-                  "pitch_trim": ("position",)}
-SUPPORT_DEFAULTS = {"gear": (1.0,), "flaps": (0.0,), "wheel_brakes": (0.0, 0.0), "speedbrake": (0.0,), "pitch_trim": (0.0,)}
+                  "pitch_trim": ("position",), "engines": ("throttle_1", "throttle_2", "throttle_3", "throttle_4")}
+SUPPORT_DEFAULTS = {"gear": (1.0,), "flaps": (0.0,), "wheel_brakes": (0.0, 0.0), "speedbrake": (0.0,), "pitch_trim": (0.0,),
+                    "engines": (HOLD, HOLD, HOLD, HOLD)}
 
 
 def _row(level, values, fields):
@@ -158,7 +188,7 @@ def _row(level, values, fields):
 class Activity:
     """A command a vehicle accepted: it runs until it completes, fails or is
     canceled. ``update`` gives it a new setpoint - its per-step path - and
-    ``cancel`` ends it, handing the vehicle to its neutral default."""
+    ``cancel`` ends it, handing its axes to the vehicle default."""
 
     __slots__ = ("world", "id", "level", "clamped")
 
@@ -180,7 +210,7 @@ class Activity:
         return bool(_checked(self.world._h.activity_update(self.id, _row(self.level, values, fields)))[4])
 
     def cancel(self):
-        """End it: the vehicle flies its neutral default. Raises fsim.Rejected if it had already ended."""
+        """End it: its axes fly the vehicle default. Raises fsim.Rejected if it had already ended."""
         _checked(self.world._h.activity_cancel(self.id))
 
     @property
@@ -302,16 +332,21 @@ class Vehicle:
         rows = None if points is None else [tuple(float(x) for x in p) for p in points]
         self._h.command_behavior(self.id, behavior, t, params or None, rows)
 
-    def submit(self, level, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
+    def submit(self, level, *values, source=Source.POLICY, axes=None, range=RangePolicy.CLAMP, min_version=0, **fields):
         """NEW: a command at ``level`` - its fields by name (fsim.COMMAND_FIELDS),
         the others as the command's defaults, or all of them in order -
-        becomes an Activity, answered at once. Raises fsim.Rejected if the
-        vehicle refuses it (a higher source holds its axes, a value out of
-        range with RangePolicy.REJECT, a required field left as HOLD)."""
+        becomes an Activity, answered at once. ``axes`` (fsim.Axis) owns part
+        of the vehicle - Axis.LATERAL, Axis.PITCH, Axis.THRUST or a union, any
+        primary axis at the actuator level - and the rest keep their owners;
+        None owns them all. Raises fsim.Rejected if the vehicle refuses it (a
+        higher source holds its axes, a value out of range with
+        RangePolicy.REJECT, a required field left as HOLD, axes it cannot own
+        apart, a controller that is not axis-aware)."""
         level = Level(level)
         if level == Level.BEHAVIOR:
             raise TypeError("submit_behavior() takes behaviours")
-        r = _checked(self._h.submit(self.id, int(level), _row(level, values, fields), int(source), None, int(range), int(min_version)))
+        r = _checked(self._h.submit(self.id, int(level), _row(level, values, fields), int(source), None if axes is None else int(axes),
+                                    int(range), int(min_version)))
         return Activity(self._world, r[2], level, bool(r[4]))
 
     def submit_behavior(self, behavior, target=None, points=None, *, source=Source.POLICY, range=RangePolicy.CLAMP,
@@ -327,7 +362,9 @@ class Vehicle:
     def submit_support(self, kind, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
         """NEW for a support effector the vehicle has - "gear" (down), "flaps"
         (position), "wheel_brakes" (left, right), "speedbrake" (position),
-        "pitch_trim" (position) - set directly beside the flight activity. An
+        "pitch_trim" (position) - set directly beside the flight activity; or
+        "engines" (throttle_1 .. throttle_4, HOLD keeps one), a throttle per
+        engine that owns thrust, where the aircraft has more than one. An
         Activity (gear and flaps complete when they are there), or fsim.Rejected:
         "unknown_capability" if the aircraft has no such effector, "unavailable"
         for the placards (gear up on the ground, gear or flaps out too fast)."""
@@ -343,7 +380,7 @@ class Vehicle:
 
     def capabilities(self):
         """What the vehicle offers: its levels and behaviours (Capability, with their Parameters)."""
-        return [Capability(c[0], c[1], c[2], c[3], Level(c[4]), c[5], c[6], c[7], c[8], [Parameter(*p) for p in c[9]])
+        return [Capability(c[0], c[1], c[2], c[3], Level(c[4]), c[5], c[6], c[7], c[8], [Parameter(*p) for p in c[9]], c[10])
                 for c in self._h.capabilities(self.id)]
 
     def profile_value(self, path):
@@ -357,6 +394,21 @@ class Vehicle:
         """(version, provenance) of a profile section: version 0 if the aircraft
         has none; provenance 0 default, 1 hangar, 2 identified, 3 user, 4 derived."""
         return self._h.profile_section(self.id, section)
+
+    def set_vehicle_default(self, mode):
+        """What flies the primary axes nobody owns: VehicleDefault.NEUTRAL (or
+        "neutral"; every vehicle's default) or VehicleDefault.HOLD ("hold"): the
+        heading, airspeed and height each had when it was let go. Raises
+        fsim.Rejected ("controller_not_axis_aware") if the hold would fly beside
+        another owner through a controller that is not axis-aware."""
+        mode = VehicleDefault[mode.upper()] if isinstance(mode, str) else VehicleDefault(mode)
+        reason = self._h.set_vehicle_default(self.id, int(mode))
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+
+    @property
+    def vehicle_default(self):
+        return VehicleDefault(self._h.vehicle_default(self.id))
 
     def capability_status(self, capability):
         """(Availability, reason) of a capability by id, e.g. "fsim.guidance.hold"."""

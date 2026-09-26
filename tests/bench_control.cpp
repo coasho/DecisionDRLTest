@@ -1,7 +1,8 @@
 // fsim_control_bench: the control architecture's measurements
 // (docs/control-architecture.md, section 12).
 //
-//   fsim_control_bench micro          ControlStack::update, ns per update, per level and behaviour
+//   fsim_control_bench micro          ControlStack::update, ns per update, per level and behaviour,
+//                                     with the axes owned apart, and the vehicle default's hold
 //   fsim_control_bench command        World::command (the legacy path), ns per call
 //   fsim_control_bench world          vehicle-steps/s with every vehicle commanded every step
 //   fsim_control_bench alloc          heap allocations in the steady state (exit 1 if any)
@@ -15,6 +16,7 @@
 
 #include "control_flights.h"
 
+#include "control/Runtime.h"
 #include "fsim/BuiltinControllers.h"
 #include "fsim/ControlStack.h"
 #include "core/Log.h"
@@ -146,7 +148,22 @@ struct Counting {
 struct Case {
     const char* name;
     std::function<Command(const sim::VehicleState&)> command;
+    /// Instead of a command: the runtime's configuration written as a host would (step 3's cases).
+    std::function<void(RuntimeConfig&)> configure = nullptr;
 };
+
+/// A slot given to an activity, as CapabilityHost::submit writes it.
+void assign(RuntimeConfig& c, std::size_t slot, const Command& command, AxisMask axes) {
+    SetpointSlot& s = c.slots[slot];
+    s.command = command;
+    s.level = levelOf(command);
+    s.axes = axes;
+    ++s.generation;
+    ++s.revision;
+    for (std::size_t a = 0; a < kAxisCount; ++a)
+        if (axes & (1u << a)) c.owner[a] = static_cast<std::uint8_t>(slot);
+    ++c.revision;
+}
 
 sim::VehicleState levelFlight() {
     sim::VehicleState s;
@@ -184,6 +201,13 @@ std::vector<Case> cases() {
                        b.params = {{"loop", 1.0}};
                        return Command(b);
                    }});
+    // step 3: a policy's bank beside an autopilot's height and speed, merged down the cascade
+    out.push_back({"axes apart", nullptr, [](RuntimeConfig& c) {
+                       assign(c, 0, AttitudeCommand{0.2, kHold, kHold, 0.785, kHold, kHold}, kLateral);
+                       assign(c, 1, VelocityCommand{60.0, 2.0, kHold, kHold}, axisBit(Axis::Pitch) | axisBit(Axis::Thrust));
+                   }});
+    // nothing owned, the vehicle default a hold
+    out.push_back({"default hold", nullptr, [](RuntimeConfig& c) { c.vehicleDefault = VehicleDefault::Hold; }});
     return out;
 }
 
@@ -207,7 +231,10 @@ struct StackRun {
     ControlStack stack;
     sim::ControlInputs out;
     double dt = 1.0 / 120.0;
-    explicit StackRun(const Case& c) { stack.command(c.command(state)); }
+    explicit StackRun(const Case& c) {
+        if (c.configure) c.configure(stack.config());
+        else stack.command(c.command(state));
+    }
     void run(int n) {
         for (int i = 0; i < n; ++i) {
             advance(state, dt);
@@ -355,6 +382,31 @@ int alloc() {
          }},
         {"hold once", [&](std::uint32_t id, int k) { if (k == 0) w.command(id, hold); }},
         {"loiter once", [&](std::uint32_t id, int k) { if (k == 0) w.command(id, loiter); }},
+        // step 3: an autopilot on pitch and thrust, the policy's bank updated every step
+        {"axes apart each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             CommandOptions lateral;
+             lateral.axes = kLateral;
+             const AttitudeCommand bank{0.2 * std::sin(k * 0.1), kHold, kHold, 0.785, kHold, kHold};
+             if (k == 0) {
+                 CommandOptions autopilot;
+                 autopilot.source = Source::Autopilot;
+                 autopilot.axes = axisBit(Axis::Pitch) | axisBit(Axis::Thrust);
+                 const bool held = w.submit(id, VelocityCommand{55.0, 0.0, kHold, kHold}, autopilot).accepted();
+                 activity[id] = w.submit(id, bank, lateral).activity;
+                 if (!held || !activity[id]) std::fprintf(stderr, "axes apart: vehicle %u refused\n", id), std::exit(3);
+             } else if (!w.update(activity[id], bank).accepted()) {
+                 std::fprintf(stderr, "axes apart: update refused\n"), std::exit(3);
+             }
+         }},
+        // everything let go: the vehicle default's hold flies it
+        {"default hold", [&](std::uint32_t id, int k) {
+             if (k != 0) return;
+             for (const auto& a : w.activities(id))
+                 if (a.live()) w.cancel(a.id);
+             if (w.setVehicleDefault(id, VehicleDefault::Hold) != Reason::None || w.controls(id)->activeLevel() != Level::Velocity)
+                 std::fprintf(stderr, "default hold: vehicle %u refused\n", id), std::exit(3);
+         }},
     };
     for (const auto& wc : worldCases) {
         for (int k = 0; k < 50; ++k) {

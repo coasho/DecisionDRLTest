@@ -73,6 +73,7 @@ from .world import (  # noqa: E402
     ActivityInfo,
     ActivityState,
     Availability,
+    Axis,
     Capability,
     Level,
     Message,
@@ -82,6 +83,7 @@ from .world import (  # noqa: E402
     Scenario,
     Source,
     Vehicle,
+    VehicleDefault,
     World,
 )
 from .vecenv import VecEnv  # noqa: E402

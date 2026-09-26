@@ -354,7 +354,22 @@ control::CommandResult World::submit(std::uint32_t id, const control::SupportCom
         r.reason = control::Reason::UnknownVehicle;
         return r;
     }
-    return e->host.submit(command, options, pool_->states()[e->slot], simTime_);
+    const control::CommandResult r = e->host.submit(command, options, pool_->states()[e->slot], simTime_);
+    if (r.accepted() && std::holds_alternative<control::EnginesCommand>(command)) levelChanged(*e); // thrust left the cascade
+    return r;
+}
+
+control::Reason World::setVehicleDefault(std::uint32_t id, control::VehicleDefault mode) {
+    Entry* e = entry(id);
+    if (!e) return control::Reason::UnknownVehicle;
+    const control::Reason r = e->host.setVehicleDefault(mode);
+    if (r == control::Reason::None) levelChanged(*e);
+    return r;
+}
+
+control::VehicleDefault World::vehicleDefault(std::uint32_t id) const noexcept {
+    const Entry* e = entry(id);
+    return e ? e->host.vehicleDefault() : control::VehicleDefault::Neutral;
 }
 
 control::CommandResult World::update(control::ActivityId activity, const control::SupportCommand& setpoint) {

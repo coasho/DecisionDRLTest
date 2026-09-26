@@ -142,6 +142,14 @@ const control::VehicleProfile& Vehicle::profile() const {
     return p ? *p : none;
 }
 
+control::Reason Vehicle::setVehicleDefault(control::VehicleDefault mode) {
+    return world_ ? world_->impl_->setVehicleDefault(id_, mode) : control::Reason::UnknownVehicle;
+}
+
+control::VehicleDefault Vehicle::vehicleDefault() const {
+    return world_ ? world_->impl_->vehicleDefault(id_) : control::VehicleDefault::Neutral;
+}
+
 control::CapabilityStatus Vehicle::capabilityStatus(std::string_view capability) const {
     if (world_) return world_->impl_->capabilityStatus(id_, capability);
     return {control::Availability::Disabled, control::Reason::UnknownVehicle};

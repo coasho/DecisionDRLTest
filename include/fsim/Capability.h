@@ -28,6 +28,7 @@ enum class Axis : std::uint8_t {
 using AxisMask = std::uint16_t;
 
 inline constexpr std::size_t kAxisCount = static_cast<std::size_t>(Axis::Count);
+inline constexpr std::size_t kPrimaryAxisCount = static_cast<std::size_t>(Axis::Flaps);
 inline constexpr std::size_t kSupportAxisCount = kAxisCount - static_cast<std::size_t>(Axis::Flaps);
 
 constexpr AxisMask axisBit(Axis a) noexcept { return static_cast<AxisMask>(1u << static_cast<unsigned>(a)); }
@@ -41,6 +42,18 @@ inline constexpr AxisMask kLegacyAxes = kPrimaryAxes | axisBit(Axis::Flaps) | ax
 /// At most this many activities fly through the cascade at once: each owns
 /// at least one primary axis.
 inline constexpr std::size_t kSlotCount = 4;
+
+/// The groups a flight command may own on its own (docs/control-architecture.md,
+/// 6.1): above the actuators, roll and yaw together (the loop that banks also
+/// coordinates), pitch, thrust. At the actuators each primary axis alone.
+inline constexpr AxisMask kLateral = axisBit(Axis::Roll) | axisBit(Axis::Yaw);
+enum AxisGroup : std::uint8_t { kGroupLateral = 1u << 0, kGroupPitch = 1u << 1, kGroupThrust = 1u << 2, kGroupEachAxis = 1u << 3 };
+
+/// What flies a primary axis nobody owns.
+enum class VehicleDefault : std::uint8_t {
+    Neutral, ///< the neutral actuator command every vehicle starts with: surfaces centred, throttle 0
+    Hold,    ///< the airspeed, heading and height it had when the axes were let go
+};
 
 /// Why a command was rejected or an activity ended (docs/control-architecture.md, 10.2).
 enum class Reason : std::uint8_t {
@@ -187,6 +200,7 @@ struct CapabilityDescriptor {
     std::uint8_t interactions = 0;         ///< Interaction bits
     Level level{};                         ///< where its commands enter the cascade
     AxisMask axes = 0;                     ///< the axes a command owns by default
+    std::uint8_t axisGroups = 0;           ///< AxisGroup bits it may own apart (CommandOptions::axes); 0 = all or nothing
     Persistence persistence = Persistence::Persistent;
     std::vector<ParameterInfo> parameters;
     std::vector<std::string> uses;         ///< the capabilities it flies through

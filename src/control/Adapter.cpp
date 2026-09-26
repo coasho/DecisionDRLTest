@@ -48,6 +48,7 @@ void VehicleAdapter::declare(const VehicleProfile& p, CapabilityCatalog& catalog
     if (fx.wheelBrakes) catalog.addSupport(2);
     if (fx.speedbrake) catalog.addSupport(3);
     if (fx.pitchTrim) catalog.addSupport(4);
+    if (p.propulsion.engines > 1) catalog.addSupport(5, p.propulsion.engines); // a throttle per engine (fsim.flight.engines)
     if (!p.envelope.header.present()) return;
     // A command may ask for what the clean configuration allows; with flaps
     // out, protection narrows further as the aircraft flies (step 4).

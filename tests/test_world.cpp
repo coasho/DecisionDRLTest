@@ -240,16 +240,27 @@ TEST_CASE("trajectories with control cascades are identical across worker counts
     auto run = [](unsigned workers) {
         session::World w(options("test-det", workers));
         std::vector<std::uint32_t> ids;
-        for (int i = 0; i < 6; ++i) {
+        for (int i = 0; i < 8; ++i) {
             auto s = spec(("v" + std::to_string(i)).c_str(), 30.0 * i);
             s.initial.longitudeDeg += 0.01 * i;
             ids.push_back(w.createVehicle(s));
         }
         control::BehaviorCommand hold;
         hold.id = "hold";
+        control::CommandOptions autopilot, lateral;
+        autopilot.source = control::Source::Autopilot;
+        autopilot.axes = control::axisBit(control::Axis::Pitch) | control::axisBit(control::Axis::Thrust);
+        lateral.axes = control::kLateral;
         for (std::size_t i = 0; i < ids.size(); ++i) {
-            if (i % 2) w.command(ids[i], hold);
-            else w.command(ids[i], control::AttitudeCommand{0.2, 0.05, control::kHold, 0.785, control::kHold, 55.0});
+            switch (i % 4) {
+            case 0: w.command(ids[i], control::AttitudeCommand{0.2, 0.05, control::kHold, 0.785, control::kHold, 55.0}); break;
+            case 1: w.command(ids[i], hold); break;
+            case 2: // the axes owned apart, merged down the cascade
+                w.submit(ids[i], control::VelocityCommand{55.0, 1.0, control::kHold, control::kHold}, autopilot);
+                w.submit(ids[i], control::AttitudeCommand{-0.2, control::kHold, control::kHold, 0.785, control::kHold, control::kHold}, lateral);
+                break;
+            default: w.setVehicleDefault(ids[i], control::VehicleDefault::Hold); break; // nothing commanded: the default's hold
+            }
         }
         w.addEffectToAll([] { return std::make_unique<effects::WindGusts>(); });
         w.step(200);
