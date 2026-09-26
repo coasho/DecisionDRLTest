@@ -369,6 +369,14 @@ FSIM_API int fsim_vehicle_submit(fsim_world* world, uint32_t id, int level, cons
                                  const fsim_command_options* options, fsim_command_result* result);
 FSIM_API int fsim_vehicle_submit_behavior(fsim_world* world, uint32_t id, const fsim_behavior_command* command,
                                           const fsim_command_options* options, fsim_command_result* result);
+/* NEW for a support effector the vehicle has, set directly beside the cascade.
+ * Fields: gear [down: 1 or 0], flaps [position 0..1], wheel brakes [left,
+ * right 0..1], speedbrake [position 0..1], pitch trim [position -1..1, + nose
+ * down]. Refused as "unavailable" by the placards: no gear up on the ground, no
+ * gear or flaps out above their speeds. fsim_activity_update takes the same fields. */
+enum fsim_support { FSIM_SUPPORT_GEAR = 0, FSIM_SUPPORT_FLAPS, FSIM_SUPPORT_WHEEL_BRAKES, FSIM_SUPPORT_SPEEDBRAKE, FSIM_SUPPORT_PITCH_TRIM };
+FSIM_API int fsim_vehicle_submit_support(fsim_world* world, uint32_t id, int kind, const double* fields, uint32_t count,
+                                         const fsim_command_options* options, fsim_command_result* result);
 /* UPDATE: a new setpoint for a live activity, in its level's field order (the per-step path). */
 FSIM_API int fsim_activity_update(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count, fsim_command_result* result);
 /* UPDATE for many activities at once: rows of fields at the given stride (0 = the field count of each activity's level,

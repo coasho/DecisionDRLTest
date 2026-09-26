@@ -180,9 +180,11 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
         e->catalog = std::make_shared<control::CapabilityCatalog>(*own, adapter);
         e->profile = std::move(own);
     }
-    e->stack.setAdapter(control::adapterFor(e->profile->identity.family));
+    const auto& adapter = control::adapterFor(e->profile->identity.family);
+    e->stack.setAdapter(adapter);
     if (!e->profile->control.settings.empty()) e->stack.setControllerSettings(e->profile->control.settings);
-    e->host.bind(id, e->stack, *e->catalog);
+    e->host.bind(id, e->stack, *e->catalog, adapter, *e->profile);
+    e->flapsPosition = pool_->vehicle(slot).property("fcs/flap-pos-norm");
     for (auto& factory : worldEffects_) e->effects.push_back(factory());
     sim::FlightModel& model = pool_->vehicle(slot);
     model.seed(e->rng.next());
@@ -345,6 +347,24 @@ control::CommandResult World::submit(std::uint32_t id, const control::Command& c
     return r;
 }
 
+control::CommandResult World::submit(std::uint32_t id, const control::SupportCommand& command, const control::CommandOptions& options) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    return e->host.submit(command, options, pool_->states()[e->slot], simTime_);
+}
+
+control::CommandResult World::update(control::ActivityId activity, const control::SupportCommand& setpoint) {
+    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, setpoint);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownActivity;
+    r.activity = activity;
+    return r;
+}
+
 control::CommandResult World::update(control::ActivityId activity, const control::Command& setpoint) {
     if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, setpoint);
     control::CommandResult r;
@@ -488,6 +508,13 @@ void World::preStep(std::size_t slot, int subStep, sim::FlightModel& model, sim:
     if (static_cast<unsigned>(subStep) % e->controlDivider == 0) {
         control::ControlContext ctx{e->info.id, e->working, e->sensed.state, options_.dt * e->controlDivider, &stepView_, &e->rng};
         e->stack.update(ctx, e->inputs);
+        // the effectors ControlInputs has no room for, when their demand changes
+        const auto& fx = e->stack.effectors();
+        auto differs = [](double a, double b) { return !(a == b || (std::isnan(a) && std::isnan(b))); };
+        if (differs(fx.speedbrake, e->effectors.speedbrake) || differs(fx.pitchTrim, e->effectors.pitchTrim)) {
+            model.setEffectors(fx);
+            e->effectors = fx;
+        }
     }
     inputs = e->inputs;
 }
@@ -508,7 +535,14 @@ void World::step(unsigned n) {
             // the contract layer reads what the runtimes flew (docs/control-architecture.md, 6.4)
             const auto after = pool_->states();
             for (std::size_t s = 0; s < entries_.size(); ++s)
-                if (entries_[s]) entries_[s]->host.afterStep(after[s], simTime_);
+                if (Entry* e = entries_[s].get()) {
+                    control::EffectorPositions positions;
+                    if (e->host.awaitsPosition()) {
+                        positions.gear = after[s].gearPosition;
+                        if (e->flapsPosition.valid()) positions.flaps = e->flapsPosition.get();
+                    }
+                    e->host.afterStep(after[s], positions, simTime_);
+                }
         }
         // Keep the tiles around every vehicle warm (background loaders) so the
         // workers seldom block on a download.

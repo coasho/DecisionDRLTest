@@ -21,6 +21,18 @@ namespace fsim::control {
 /// order (the C ABI's order too): pointers into `c`, at most 8. Returns how many.
 std::size_t commandFields(Command& c, double* fields[8]) noexcept;
 
+// Support effectors (docs/control-architecture.md, 8.2), by SupportCommand's alternative.
+inline constexpr std::size_t kSupportKinds = std::variant_size_v<SupportCommand>;
+/// "fsim.support.gear", "fsim.support.flaps", "fsim.support.wheel_brakes", "fsim.support.speedbrake", "fsim.support.pitch_trim".
+const char* supportCapability(std::size_t alternative) noexcept;
+Axis supportAxis(const SupportCommand& c) noexcept;
+/// Its demand: the one value, or the left and right brake.
+void supportValues(const SupportCommand& c, double& value, double& value2) noexcept;
+/// Where a terminating one is going: gear 1 down or 0 up, a flap position; NaN for the others.
+double supportGoal(const SupportCommand& c) noexcept;
+/// Its fields, as commandFields does; at most 2.
+std::size_t supportFields(SupportCommand& c, double* fields[2]) noexcept;
+
 class VehicleAdapter;
 
 class CapabilityCatalog {
@@ -32,6 +44,8 @@ public:
 
     /// Intersect a parameter's range with [lo, hi] (a NaN bound leaves that side).
     void narrow(std::string_view capability, std::string_view parameter, double lo, double hi);
+    /// Offer a support effector (an adapter's declare()), by SupportCommand's alternative.
+    void addSupport(std::size_t alternative);
 
     /// Add the behaviours registered since; true if there were any. Between steps only.
     bool refresh();
@@ -42,6 +56,8 @@ public:
 
     /// The capability a command selects (its level, or its behaviour's id); -1 if none.
     int indexOf(const Command& command) const noexcept;
+    /// A support effector's capability; -1 if the aircraft has none.
+    int indexOf(const SupportCommand& command) const noexcept { return bySupport_[command.index()]; }
     /// By capability id ("fsim.guidance.hold") or a behaviour's registry id ("hold"); -1 if none.
     int find(std::string_view id) const noexcept;
 
@@ -53,12 +69,14 @@ public:
     /// outside its range is clamped (kClamped in `flags`) or, with Reject,
     /// OutOfRange. None if it may fly.
     Reason check(std::size_t index, Command& command, RangePolicy range, std::uint16_t& flags) const noexcept;
+    Reason check(std::size_t index, SupportCommand& command, RangePolicy range, std::uint16_t& flags) const noexcept;
 
 private:
     void addBehaviors();
 
     std::vector<CapabilityDescriptor> descriptors_;
     std::array<int, static_cast<std::size_t>(Level::Behavior)> byLevel_{};
+    std::array<int, kSupportKinds> bySupport_{-1, -1, -1, -1, -1};
     std::uint64_t registryRevision_ = 0;
 };
 

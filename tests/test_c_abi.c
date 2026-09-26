@@ -465,6 +465,22 @@ int main(int argc, char** argv) {
         CHECK(fsim_activity_get(world, ((fsim_activity_id)a << 32) | 999u, &ai) != FSIM_OK);
         CHECK(fsim_vehicle_command_attitude(world, a, &att) == FSIM_OK); /* nothing holds its axes now */
         {
+            /* support effectors: flaps set beside the flight activity; no speedbrake on a c172x */
+            double position = 0.4, two[2] = {0.4, 0.4};
+            fsim_activity_id flaps_id;
+            fsim_command_options_init(&co);
+            CHECK(fsim_vehicle_submit_support(world, a, FSIM_SUPPORT_FLAPS, &position, 1, &co, &cr) == FSIM_OK);
+            CHECK(cr.status == FSIM_COMMAND_ACCEPTED);
+            flaps_id = cr.activity;
+            CHECK(fsim_vehicle_submit_support(world, a, FSIM_SUPPORT_FLAPS, two, 2, &co, &cr) != FSIM_OK); /* malformed */
+            position = 0.2;
+            CHECK(fsim_activity_update(world, flaps_id, &position, 1, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_update(world, flaps_id, two, 2, &cr) != FSIM_OK); /* flaps take one field */
+            CHECK(fsim_vehicle_submit_support(world, a, FSIM_SUPPORT_SPEEDBRAKE, &position, 1, &co, &cr) == FSIM_OK);
+            CHECK(cr.status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(cr.reason), "unknown_capability") == 0);
+            CHECK(fsim_activity_cancel(world, flaps_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        }
+        {
             /* the profile: a stock c172x carries no sections */
             double value = 0.0;
             uint32_t version = 9;

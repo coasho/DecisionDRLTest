@@ -132,6 +132,22 @@ A newer command replaces an activity of its own or a lower source, which ends `p
 
 **From C and Python.** The C ABI has the same calls (`fsim_vehicle_submit`, `fsim_activity_update`, `fsim_activity_cancel`, the capability and activity queries; [c_abi.md](c_abi.md)), and Python has `vehicle.submit(Level.VELOCITY, airspeed_ms=60)`, which returns an `fsim.Activity` with `update`, `cancel` and `state` ([python.md](python.md)).
 
+**Support effectors.** Gear, flaps, wheel brakes, speedbrake and pitch
+trim are support capabilities (`fsim.support.*`). They are set directly
+beside whatever flies the aircraft:
+
+```cpp
+auto flaps = v.submit(FlapsCommand{.position = 0.5});   // completes when the flaps are there, then holds them
+world.update(flaps.activity, FlapsCommand{.position = 0.2});
+v.submit(GearCommand{.down = 0.0});                     // refused "unavailable" on the ground
+v.submit(SpeedbrakeCommand{.position = 1.0});           // "unknown_capability" if the aircraft has none
+```
+
+- **Which effectors.** An aircraft offers the ones its profile's effectors section names. Without the section, it offers the ones an actuator command has always set (gear, flaps, brakes).
+- **The placards.** The adapter refuses gear up on the ground, and gear or flaps out above the envelope's speeds for them.
+- **Sharing with `command()`.** A support activity takes its axis from the command that set it until then. The per-step `command()` activity carries on without it (flagged `kActivityAxesReduced`), and a command at another level takes it back.
+- **How they reach JSBSim.** The speedbrake and trim reach the flight model beside `ControlInputs` (`EffectorInputs`), whose layout stays as viewers and recordings know it.
+
 **What `command()` does now.**
 - At the level the vehicle's own activity flies, a new setpoint updates it: the same few nanoseconds as before.
 - Any other level, or a behaviour, starts a new activity with no range or availability checks, exactly as before.

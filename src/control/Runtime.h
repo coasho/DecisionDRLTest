@@ -48,7 +48,8 @@ struct SetpointSlot {
 /// A support axis owned by a support activity (gear, flaps, ...).
 struct SupportDemand {
     std::uint32_t revision = 0;
-    double value = kHold;          ///< normalised position; kHold = keep the last input
+    double value = kHold;  ///< normalised position (the left brake); kHold = keep the last input
+    double value2 = kHold; ///< the right brake
 };
 
 inline constexpr double kNoLimit = kUnknown;

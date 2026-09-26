@@ -76,6 +76,8 @@ public:
     virtual void setExternalForceBody(const double forceN[3], const double momentNm[3]) { (void)forceN; (void)momentNm; }
     /// Seed the model's own random processes (turbulence, dispersions).
     virtual void seed(std::uint64_t value) { (void)value; }
+    /// Effectors beyond ControlInputs (speedbrake, pitch trim); NaN fields are left alone.
+    virtual void setEffectors(const EffectorInputs& effectors) { (void)effectors; }
 };
 
 } // namespace fsim::sim

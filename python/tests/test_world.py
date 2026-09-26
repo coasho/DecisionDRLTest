@@ -264,6 +264,26 @@ class CapabilityTest(unittest.TestCase):
         with self.assertRaises(fsim.Error):
             v.command_behavior("no_such_behaviour")  # refused since 2026-09-26; it used to be ignored
 
+    def test_support(self):
+        world = make_world(name="py-support")
+        v = fly(world, "support")
+        flaps = v.submit_support("flaps", position=0.5)
+        self.assertEqual(flaps.level, "flaps")
+        world.step()
+        self.assertEqual(flaps.state, fsim.ActivityState.ACTIVE)
+        self.assertFalse(flaps.update(position=0.3))
+        with self.assertRaises(TypeError):
+            flaps.update(down=1.0)
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_support("speedbrake", position=1.0)  # a c172x has none
+        self.assertEqual(refused.exception.reason, "unknown_capability")
+        with self.assertRaises(ValueError):
+            v.submit_support("afterburner")
+        brakes = v.submit_support("wheel_brakes", 0.2, 0.3)
+        self.assertEqual(world.activity(brakes).axes, 1 << 6)  # the brakes axis
+        flaps.cancel()
+        self.assertEqual(flaps.info.reason, "requested")
+
     def test_batched_updates(self):
         world = make_world(name="py-batch-updates")
         vs = [fly(world, "b%d" % i, longitude_deg=-122.38 + 0.01 * i) for i in range(3)]

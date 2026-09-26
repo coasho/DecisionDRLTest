@@ -355,15 +355,16 @@ TEST_CASE("discovery: the flight levels, the behaviours with their parameters, a
 TEST_CASE("the host fails live activities when the flight model diverges", "[capabilities]") {
     ControlStack runtime;
     CapabilityCatalog catalog;
+    VehicleProfile profile;
     CapabilityHost host;
-    host.bind(7, runtime, catalog);
+    host.bind(7, runtime, catalog, adapterFor(ControlFamily::Stock), profile);
     sim::VehicleState s;
     const auto id = host.submit(kClimb, {}, s, 0.0).activity;
     REQUIRE(id == activityId(7, 1));
     s.diverged = true;
     CHECK(host.status(static_cast<std::size_t>(catalog.find("fsim.flight.velocity")), s).availability == Availability::TemporarilyUnavailable);
     CHECK(host.submit(kBank, {}, s, 0.0).reason == Reason::Unavailable);
-    host.afterStep(s, 1.0);
+    host.afterStep(s, {}, 1.0);
     CHECK(host.activity(id)->state == ActivityState::Failed);
     CHECK(host.activity(id)->reason == Reason::Diverged);
     CHECK(host.activity(id)->endTime == 1.0);

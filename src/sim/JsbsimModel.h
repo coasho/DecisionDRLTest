@@ -30,6 +30,7 @@ public:
     bool load(const AircraftSpec& aircraft, const InitialConditions& ic) override;
     bool reset(const InitialConditions& ic) override;
     void step(const ControlInputs& inputs) override;
+    void setEffectors(const EffectorInputs& effectors) override;
     void state(VehicleState& out) const override;
     PropertyHandle property(std::string_view path) override;
     std::vector<std::pair<std::string, double>> properties(std::string_view prefix) const override;
@@ -69,6 +70,7 @@ private:
 
     // Cached command nodes (design 12.2: no string lookups in step()).
     PropertyHandle aileronCmd_, elevatorCmd_, rudderCmd_, flapCmd_, gearCmd_, leftBrakeCmd_, rightBrakeCmd_;
+    PropertyHandle speedbrakeCmd_, pitchTrimCmd_;
     std::vector<PropertyHandle> throttleCmd_;
     // External reaction injected at load (design 9.5): magnitude + unit direction properties.
     PropertyHandle extForceMag_, extForceX_, extForceY_, extForceZ_, extMomentMag_, extMomentL_, extMomentM_, extMomentN_;

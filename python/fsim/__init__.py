@@ -67,6 +67,8 @@ from ._state import (  # noqa: E402
 from .world import (  # noqa: E402
     COMMAND_DEFAULTS,
     COMMAND_FIELDS,
+    SUPPORT_FIELDS,
+    SUPPORT_KINDS,
     Activity,
     ActivityInfo,
     ActivityState,

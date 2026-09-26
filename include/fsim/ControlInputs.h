@@ -1,5 +1,7 @@
 #pragma once
 
+#include <limits>
+
 namespace fsim::sim {
 
 /// Normalised control commands written to JSBSim's `fcs/*-cmd-norm`
@@ -22,8 +24,18 @@ struct ControlInputs {
     }
 };
 
+/// Effectors ControlInputs has no room for - its layout is shared with
+/// viewers, recordings and the C ABI, so it does not grow
+/// (docs/control-architecture.md, 13). Written to the flight model beside it;
+/// NaN = leave the effector as it is.
+struct EffectorInputs {
+    double speedbrake = std::numeric_limits<double>::quiet_NaN(); ///< 0 in .. 1 out
+    double pitchTrim = std::numeric_limits<double>::quiet_NaN();  ///< -1 .. 1, + nose down
+};
+
 } // namespace fsim::sim
 
 namespace fsim {
 using sim::ControlInputs;
+using sim::EffectorInputs;
 }

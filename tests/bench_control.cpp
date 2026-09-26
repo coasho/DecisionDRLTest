@@ -348,6 +348,11 @@ int alloc() {
              if (k == 0) activity[id] = w.submit(id, AttitudeCommand{0.0, 0.03, kHold, 0.785, kHold, 55.0}).activity;
              else w.update(activity[id], AttitudeCommand{0.1 * std::sin(k * 0.1), 0.03, kHold, 0.785, kHold, 55.0});
          }},
+        {"flaps update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             if (k == 0) activity[id] = w.submit(id, FlapsCommand{0.1}).activity;
+             else w.update(activity[id], FlapsCommand{0.1 + 0.001 * (k % 10)});
+         }},
         {"hold once", [&](std::uint32_t id, int k) { if (k == 0) w.command(id, hold); }},
         {"loiter once", [&](std::uint32_t id, int k) { if (k == 0) w.command(id, loiter); }},
     };

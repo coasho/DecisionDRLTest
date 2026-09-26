@@ -231,6 +231,31 @@ void ControlStack::update(const ControlContext& ctx, sim::ControlInputs& out) {
 
 void ControlStack::actuate(const ActuatorCommand& a, sim::ControlInputs& out) noexcept {
     adapter_->apply(a, last_, out);
+    // A support axis flies its owner's demand: a support activity's, the
+    // engaged command's (as set above), or nobody's - the neutral default:
+    // flaps up, brakes off, the gear, speedbrake and trim left as they are.
+    const RuntimeConfig& c = *config_;
+    auto owner = [&c](Axis axis) { return c.owner[static_cast<std::size_t>(axis)]; };
+    auto demand = [&c](Axis axis) -> const SupportDemand& {
+        return c.support[static_cast<std::size_t>(axis) - static_cast<std::size_t>(Axis::Flaps)];
+    };
+    auto clamp01 = [](double v) { return std::clamp(v, 0.0, 1.0); };
+    if (owner(Axis::Flaps) == RuntimeConfig::kSupport) out.flaps = clamp01(orHold(demand(Axis::Flaps).value, last_.flaps));
+    else if (owner(Axis::Flaps) == RuntimeConfig::kNone) out.flaps = 0.0;
+    if (owner(Axis::Gear) == RuntimeConfig::kSupport) {
+        const double down = demand(Axis::Gear).value;
+        out.gearDown = isHold(down) ? last_.gearDown : (down >= 0.5 ? 1.0 : 0.0);
+    } else if (owner(Axis::Gear) == RuntimeConfig::kNone) {
+        out.gearDown = last_.gearDown;
+    }
+    if (owner(Axis::Brakes) == RuntimeConfig::kSupport) {
+        out.brakeLeft = clamp01(orHold(demand(Axis::Brakes).value, last_.brakeLeft));
+        out.brakeRight = clamp01(orHold(demand(Axis::Brakes).value2, last_.brakeRight));
+    } else if (owner(Axis::Brakes) == RuntimeConfig::kNone) {
+        out.brakeLeft = out.brakeRight = 0.0;
+    }
+    effectors_.speedbrake = owner(Axis::Speedbrake) == RuntimeConfig::kSupport ? demand(Axis::Speedbrake).value : kHold;
+    effectors_.pitchTrim = owner(Axis::PitchTrim) == RuntimeConfig::kSupport ? demand(Axis::PitchTrim).value : kHold;
     last_ = out;
 
     // effectors at their travel limits

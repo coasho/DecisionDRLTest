@@ -68,6 +68,8 @@ public:
 
     /// Run the cascade for one control period and write the actuator inputs.
     void update(const ControlContext& ctx, sim::ControlInputs& out);
+    /// What the last update asked of the effectors ControlInputs has no room for.
+    const sim::EffectorInputs& effectors() const noexcept { return effectors_; }
 
     /// The command the cascade produced at `level` in the last update (the
     /// engaged command at its own level), or null if that level did not run.
@@ -120,6 +122,7 @@ private:
     std::array<Command, kLevels> produced_{};                      ///< the controllers' outputs, by level
     sim::ControlInputs last_;
     sim::ControlInputs initial_;
+    sim::EffectorInputs effectors_;
 };
 
 } // namespace fsim::control

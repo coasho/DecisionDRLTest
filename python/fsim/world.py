@@ -129,17 +129,28 @@ def _checked(result):
     return result
 
 
+#: Support effectors (docs/sdk/control.md): their kinds, in the platform's
+#: order, each command's fields and what they are when not given.
+SUPPORT_KINDS = ("gear", "flaps", "wheel_brakes", "speedbrake", "pitch_trim")
+SUPPORT_FIELDS = {"gear": ("down",), "flaps": ("position",), "wheel_brakes": ("left", "right"), "speedbrake": ("position",),
+                  "pitch_trim": ("position",)}
+SUPPORT_DEFAULTS = {"gear": (1.0,), "flaps": (0.0,), "wheel_brakes": (0.0, 0.0), "speedbrake": (0.0,), "pitch_trim": (0.0,)}
+
+
 def _row(level, values, fields):
-    """A level's fields: all of them in order, or some by name with the rest as a new command's defaults."""
-    names = COMMAND_FIELDS[level]
+    """A level's (or support kind's) fields: all of them in order, or some by name with the rest as a new command's defaults."""
+    if isinstance(level, str):
+        names, defaults, what = SUPPORT_FIELDS[level], SUPPORT_DEFAULTS[level], level
+    else:
+        names, defaults, what = COMMAND_FIELDS[level], COMMAND_DEFAULTS[level], level.name
     if values:
         if fields or len(values) != len(names):
-            raise TypeError("%s takes %d values in order (%s) or fields by name" % (level.name, len(names), ", ".join(names)))
+            raise TypeError("%s takes %d values in order (%s) or fields by name" % (what, len(names), ", ".join(names)))
         return tuple(float(v) for v in values)
-    row = list(COMMAND_DEFAULTS[level])
+    row = list(defaults)
     for key, value in fields.items():
         if key not in names:
-            raise TypeError("%s has no field %r (fields: %s)" % (level.name, key, ", ".join(names)))
+            raise TypeError("%s has no field %r (fields: %s)" % (what, key, ", ".join(names)))
         row[names.index(key)] = float(value)
     return tuple(row)
 
@@ -188,7 +199,8 @@ class Activity:
 
     def __repr__(self):
         info = self.info
-        return "Activity(%#x, %s, %s)" % (self.id, self.level.name, info.state.name if info else "forgotten")
+        what = self.level if isinstance(self.level, str) else self.level.name
+        return "Activity(%#x, %s, %s)" % (self.id, what, info.state.name if info else "forgotten")
 
 
 def _options(**given):
@@ -311,6 +323,19 @@ class Vehicle:
         rows = None if points is None else [tuple(float(x) for x in p) for p in points]
         r = _checked(self._h.submit_behavior(self.id, behavior, t, params or None, rows, int(source), None, int(range), int(min_version)))
         return Activity(self._world, r[2], Level.BEHAVIOR, bool(r[4]))
+
+    def submit_support(self, kind, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
+        """NEW for a support effector the vehicle has - "gear" (down), "flaps"
+        (position), "wheel_brakes" (left, right), "speedbrake" (position),
+        "pitch_trim" (position) - set directly beside the flight activity. An
+        Activity (gear and flaps complete when they are there), or fsim.Rejected:
+        "unknown_capability" if the aircraft has no such effector, "unavailable"
+        for the placards (gear up on the ground, gear or flaps out too fast)."""
+        if kind not in SUPPORT_FIELDS:
+            raise ValueError("support kind must be one of %s" % ", ".join(SUPPORT_KINDS))
+        r = _checked(self._h.submit_support(self.id, SUPPORT_KINDS.index(kind), _row(kind, values, fields), int(source), None, int(range),
+                                            int(min_version)))
+        return Activity(self._world, r[2], kind, bool(r[4]))
 
     def activities(self):
         """The live activities (ActivityInfo), then the ended ones the vehicle remembers, newest first."""

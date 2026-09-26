@@ -419,6 +419,8 @@ void JsbsimModel::cacheCommandNodes() {
     gearCmd_ = node("gear/gear-cmd-norm");
     leftBrakeCmd_ = node("fcs/left-brake-cmd-norm");
     rightBrakeCmd_ = node("fcs/right-brake-cmd-norm");
+    speedbrakeCmd_ = node("fcs/speedbrake-cmd-norm");
+    pitchTrimCmd_ = node("fcs/pitch-trim-cmd-norm");
 
     // read-only: an aircraft whose FCS has no leading-edge flaps reports none
     lefPosDeg_ = PropertyHandle(pm->GetNode("fcs/lef-pos-deg", false));
@@ -446,6 +448,12 @@ void JsbsimModel::step(const ControlInputs& in) {
     ++stepCount_;
 
     checkDivergence();
+}
+
+void JsbsimModel::setEffectors(const EffectorInputs& e) {
+    if (!loaded_) return;
+    if (!std::isnan(e.speedbrake)) speedbrakeCmd_.set(e.speedbrake);
+    if (!std::isnan(e.pitchTrim)) pitchTrimCmd_.set(e.pitchTrim);
 }
 
 bool JsbsimModel::checkDivergence() {

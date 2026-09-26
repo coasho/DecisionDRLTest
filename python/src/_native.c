@@ -839,6 +839,21 @@ static PyObject* world_submit_behavior(PyObject* o, PyObject* const* args, Py_ss
     return result_tuple(&r);
 }
 
+/* submit_support(id, kind, values, source=None, axes=None, range=None, min_version=None) -> result */
+static PyObject* world_submit_support(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int kind;
+    double row[8];
+    fsim_command_options opt;
+    fsim_command_result r;
+    if (!check_args(n, 3, 7, "submit_support") || !as_u32(args[0], &id) || !as_int(args[1], &kind) || !WORLD_IDLE(self)) return NULL;
+    const Py_ssize_t count = read_values(args[2], row, "submit_support");
+    if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
+    if (fsim_vehicle_submit_support(self->world, id, kind, row, (uint32_t)count, &opt, &r) != FSIM_OK) return fail();
+    return result_tuple(&r);
+}
+
 /* activity_update(activity, values) -> result */
 static PyObject* world_activity_update(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
@@ -1263,6 +1278,7 @@ static PyMethodDef world_methods[] = {
     FAST("command_behavior", world_command_behavior, "command_behavior(id, behavior, target=0, params=None, points=None)"),
     FAST("submit", world_submit, "submit(id, level, values, source, axes, range, min_version) -> result"),
     FAST("submit_behavior", world_submit_behavior, "submit_behavior(id, behavior, target, params, points, source, axes, range, min_version) -> result"),
+    FAST("submit_support", world_submit_support, "submit_support(id, kind, values, source, axes, range, min_version) -> result"),
     FAST("activity_update", world_activity_update, "activity_update(activity, values) -> result"),
     FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride)"),
     FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity) -> result"),

@@ -121,6 +121,13 @@ control::CommandResult Vehicle::submit(const control::Command& command, const co
     return r;
 }
 
+control::CommandResult Vehicle::submit(const control::SupportCommand& command, const control::CommandOptions& options) {
+    if (world_) return world_->impl_->submit(id_, command, options);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownVehicle;
+    return r;
+}
+
 std::vector<control::ActivityRecord> Vehicle::activities() const {
     return world_ ? world_->impl_->activities(id_) : std::vector<control::ActivityRecord>{};
 }
@@ -223,6 +230,10 @@ std::vector<Vehicle> World::vehicles() {
 
 std::size_t World::vehicleCount() const noexcept { return impl_->vehicleCount(); }
 control::CommandResult World::update(control::ActivityId activity, const control::Command& setpoint) {
+    return impl_->update(activity, setpoint);
+}
+
+control::CommandResult World::update(control::ActivityId activity, const control::SupportCommand& setpoint) {
     return impl_->update(activity, setpoint);
 }
 

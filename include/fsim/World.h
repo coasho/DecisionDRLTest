@@ -27,6 +27,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -147,8 +148,15 @@ public:
     // Capability contracts (docs/sdk/control.md, "Capabilities and activities"):
     /// NEW: the command becomes an activity, or is rejected with a reason.
     control::CommandResult submit(const control::Command& command, const control::CommandOptions& options = {});
+    /// NEW for a support effector: GearCommand, FlapsCommand, WheelBrakesCommand, SpeedbrakeCommand, PitchTrimCommand.
+    control::CommandResult submit(const control::SupportCommand& command, const control::CommandOptions& options = {});
     template <typename C>
-    control::CommandResult submit(const C& c, const control::CommandOptions& options = {}) { return submit(control::Command(c), options); }
+    control::CommandResult submit(const C& c, const control::CommandOptions& options = {}) {
+        if constexpr (std::is_constructible_v<control::SupportCommand, C> && !std::is_constructible_v<control::Command, C>)
+            return submit(control::SupportCommand(c), options);
+        else
+            return submit(control::Command(c), options);
+    }
     /// The live activities, then the ended ones the vehicle remembers, newest first.
     std::vector<control::ActivityRecord> activities() const;
     /// What the vehicle offers: its flight levels and behaviours.
@@ -200,8 +208,14 @@ public:
 
     /// UPDATE: a new setpoint for a live activity (the per-step path; allocates nothing).
     control::CommandResult update(control::ActivityId activity, const control::Command& setpoint);
+    control::CommandResult update(control::ActivityId activity, const control::SupportCommand& setpoint);
     template <typename C>
-    control::CommandResult update(control::ActivityId activity, const C& c) { return update(activity, control::Command(c)); }
+    control::CommandResult update(control::ActivityId activity, const C& c) {
+        if constexpr (std::is_constructible_v<control::SupportCommand, C> && !std::is_constructible_v<control::Command, C>)
+            return update(activity, control::SupportCommand(c));
+        else
+            return update(activity, control::Command(c));
+    }
     /// CANCEL: the activity ends; its axes fly the vehicle's neutral default.
     control::CommandResult cancel(control::ActivityId activity);
     /// A live or recently ended activity of any vehicle; empty if unknown.

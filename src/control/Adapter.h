@@ -9,6 +9,7 @@
 #include "fsim/Control.h"
 #include "fsim/ControlInputs.h"
 #include "fsim/VehicleProfile.h"
+#include "fsim/VehicleState.h"
 
 namespace fsim::control {
 
@@ -25,8 +26,12 @@ public:
     /// Fill in what the family implies and the aircraft did not say (a
     /// fly-by-wire stick commands load factor and roll rate), as Derived.
     virtual void complete(VehicleProfile& profile) const;
-    /// Narrow the catalog's flight parameters to the profile's envelope.
+    /// Offer the support effectors the profile has, and narrow the catalog's
+    /// flight parameters to its envelope.
     virtual void declare(const VehicleProfile& profile, CapabilityCatalog& catalog) const;
+    /// Whether a support command may be flown now: the placards (no gear up on
+    /// the ground, no gear or flaps out above their speeds). None if it may.
+    virtual Reason admit(const SupportCommand& command, const sim::VehicleState& state, const VehicleProfile& profile) const noexcept;
 
     // --- Real-time face: the runtime, every control update ---------------------------
     /// The final actuator demand into the flight model's inputs. `last` is

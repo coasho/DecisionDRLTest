@@ -106,8 +106,11 @@ public:
     control::CommandResult commandResult(std::uint32_t id, const control::Command& command);
     /// NEW: a command becomes an activity, or is rejected with a reason.
     control::CommandResult submit(std::uint32_t id, const control::Command& command, const control::CommandOptions& options = {});
+    /// NEW for a support effector the vehicle has (gear, flaps, brakes, speedbrake, pitch trim).
+    control::CommandResult submit(std::uint32_t id, const control::SupportCommand& command, const control::CommandOptions& options = {});
     /// UPDATE: a new setpoint for a live activity (the fast path).
     control::CommandResult update(control::ActivityId activity, const control::Command& setpoint);
+    control::CommandResult update(control::ActivityId activity, const control::SupportCommand& setpoint);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// A live or recently ended activity; null if unknown.
@@ -161,6 +164,8 @@ private:
         control::Level level = control::Level::Actuator; ///< as last published and recorded
         std::shared_ptr<const control::VehicleProfile> profile;
         std::shared_ptr<control::CapabilityCatalog> catalog; ///< its aircraft type's (or its own, with a profile of its own)
+        sim::PropertyHandle flapsPosition;                   ///< for flap activities that complete in position
+        sim::EffectorInputs effectors;                       ///< as last written to the flight model
         std::vector<std::unique_ptr<effects::Effect>> effects;
         effects::SensedState sensed;
         Rng rng;

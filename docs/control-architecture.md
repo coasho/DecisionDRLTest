@@ -927,18 +927,21 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 | baseline | 31 | 47 | 41 | 65 | 118–129 | 68 | 240–249 | 179–181 |
 | 1b | 30–31 | 46–47 | 40 | 64 | 117–118 | 66–67 | 153 | 129 |
 | 1c | 30–31 | 44–47 | 40 | 63–64 | 116–117 | 65–67 | 153–156 | 127–128 |
+| 2c | 31–33 | 46 | 41–43 | 64 | 118–119 | 66–67 | 152 | 128–130 |
 
 | command (ns/call, 64 vehicles) | same level | level switch | behaviour | update, checked |
 | --- | --- | --- | --- | --- |
 | baseline | 6.2 | 6.7 | 57 | – |
 | 1b | 7.7–8.1 | 8.0–8.6 | 63 | – |
 | 1c | 4.9–5.1 | 28–31 | 86–88 | 14–15 |
+| 2c | 4.9 | 36 | 91–94 | 18–19 |
 
 | world (vehicle-steps/s) | 64 c172x | 32 f16c (fly-by-wire) | 32 b52h (direct) |
 | --- | --- | --- | --- |
 | baseline | 823,000 | 556,000 | 579,000 |
 | 1b | 817,000–822,000 | 551,000–556,000 | 559,000–577,000 |
 | 1c | 802,000–823,000 | 551,000–556,000 | 568,000–581,000 |
+| 2c | 810,000–812,000 | 550,000–562,000 | 571,000–579,000 |
 
 **Step 1b.**
 - **Allocations:** none in any case. The `control_alloc` ctest now gates it.
@@ -953,6 +956,13 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 - **NEWs cost more** (22 ns more for a level switch, 30 ns more for a behaviour): they validate, arbitrate and keep records. They happen once per change of level, not per step.
 - **The checked UPDATE path** of the new API (clamping every field) takes 14–15 ns.
 - **Throughput:** within the gate (c172x ≥ 97 % of the baseline in every run). After each world step the contract layer reads every vehicle's report: a few integer tests per slot.
+
+**Step 2 (2a profile, 2b adapters, 2c support effectors).**
+- **Digests:** identical to the baseline after each sub-step.
+- **Allocations:** none, a support activity updated every step included.
+- **Per-step path:** unchanged (4.9 ns). The actuator stage is now the adapter's virtual `apply()`, and support axes are resolved by their owner, both within the timings' noise.
+- **NEWs and checked UPDATEs** scan the host's nine activity slots (four for the cascade, five for support axes) instead of four: 36 ns for a level switch, 18–19 ns for a checked update.
+- **Throughput:** c172x at 98.5 % of the baseline, after two economies. The flap position, for flaps that complete in position, is read only while such an activity is under way, and the post-step pass skips empty slots.
 
 **Allocations.**
 - Per update, none, except `loiter` (4, one per parameter's map node) and `waypoints` (2): the per-step `BehaviorCommand` copy, P6.

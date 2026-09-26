@@ -99,6 +99,33 @@ struct BehaviorCommand {
 
 using Command = std::variant<ActuatorCommand, AttitudeCommand, AccelerationCommand, VelocityCommand, PositionCommand, BehaviorCommand>;
 
+// Support effectors (docs/control-architecture.md, 8.2): set directly, not
+// flown through the cascade; each its own capability (fsim.support.*) where
+// the aircraft has the effector.
+
+/// fsim.support.gear: completes when the gear is where it was told.
+struct GearCommand {
+    double down = 1.0; ///< 1 down, 0 up
+};
+/// fsim.support.flaps: completes when the flaps are where they were told.
+struct FlapsCommand {
+    double position = 0.0; ///< 0 up .. 1 full
+};
+/// fsim.support.wheel_brakes
+struct WheelBrakesCommand {
+    double left = 0.0, right = 0.0; ///< 0 .. 1
+};
+/// fsim.support.speedbrake
+struct SpeedbrakeCommand {
+    double position = 0.0; ///< 0 in .. 1 out
+};
+/// fsim.support.pitch_trim
+struct PitchTrimCommand {
+    double position = 0.0; ///< -1 .. 1, + nose down (JSBSim's sign)
+};
+
+using SupportCommand = std::variant<GearCommand, FlapsCommand, WheelBrakesCommand, SpeedbrakeCommand, PitchTrimCommand>;
+
 inline Level levelOf(const Command& c) noexcept { return static_cast<Level>(c.index()); }
 
 

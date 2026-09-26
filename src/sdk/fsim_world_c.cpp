@@ -462,12 +462,62 @@ const fsim::control::CapabilityDescriptor* capabilityAt(fsim_world* w, uint32_t 
     return index < all.size() ? &all[index] : nullptr;
 }
 
-/// The level an activity's commands enter at; FSIM_LEVEL_BEHAVIOR if it is unknown.
-int activityLevel(fsim_world* w, fsim::control::ActivityId activity) {
+/// A support command of a kind from its fields; false if the kind or count is wrong.
+bool toSupport(int kind, const double* f, uint32_t count, fsim::control::SupportCommand& out) noexcept {
+    using namespace fsim::control;
+    if (!f) return false;
+    switch (kind) {
+    case FSIM_SUPPORT_GEAR: return count == 1 && (out = GearCommand{f[0]}, true);
+    case FSIM_SUPPORT_FLAPS: return count == 1 && (out = FlapsCommand{f[0]}, true);
+    case FSIM_SUPPORT_WHEEL_BRAKES: return count == 2 && (out = WheelBrakesCommand{f[0], f[1]}, true);
+    case FSIM_SUPPORT_SPEEDBRAKE: return count == 1 && (out = SpeedbrakeCommand{f[0]}, true);
+    case FSIM_SUPPORT_PITCH_TRIM: return count == 1 && (out = PitchTrimCommand{f[0]}, true);
+    default: return false;
+    }
+}
+
+/// What an activity's UPDATE takes: its level (a flight capability), its
+/// support kind (a support one), or neither (unknown, ended long ago, a behaviour).
+struct UpdateShape {
+    int level = FSIM_LEVEL_BEHAVIOR;
+    int support = -1;
+    uint32_t fields = 0;
+};
+
+UpdateShape updateShape(fsim_world* w, fsim::control::ActivityId activity) {
+    UpdateShape shape;
     const auto* a = w->world.activity(activity);
-    if (!a) return FSIM_LEVEL_BEHAVIOR;
+    if (!a) return shape;
     const auto& all = w->world.capabilities(a->vehicle);
-    return a->capability < all.size() ? static_cast<int>(all[a->capability].level) : FSIM_LEVEL_BEHAVIOR;
+    if (a->capability >= all.size()) return shape;
+    const auto& d = all[a->capability];
+    if (d.kind == fsim::control::CapabilityKind::Support) {
+        for (std::size_t k = 0; k < fsim::control::kSupportKinds; ++k)
+            if (d.id == fsim::control::supportCapability(k)) shape.support = static_cast<int>(k);
+        shape.fields = shape.support == FSIM_SUPPORT_WHEEL_BRAKES ? 2u : 1u;
+    } else if (d.kind == fsim::control::CapabilityKind::Flight) {
+        shape.level = static_cast<int>(d.level);
+        shape.fields = fsim_command_field_count(shape.level);
+    }
+    return shape;
+}
+
+/// UPDATE from fields in the activity's own shape; an activity that takes none is answered by the host.
+fsim::control::CommandResult updateFrom(fsim_world* w, fsim::control::ActivityId activity, const UpdateShape& shape, const double* fields,
+                                        uint32_t count, bool& malformed) {
+    malformed = false;
+    if (shape.support >= 0) {
+        fsim::control::SupportCommand c;
+        if (toSupport(shape.support, fields, count, c)) return w->world.update(activity, c);
+        malformed = true;
+        return {};
+    }
+    fsim::control::Command c = fsim::control::ActuatorCommand{};
+    if (shape.level != FSIM_LEVEL_BEHAVIOR && !toCommand(shape.level, fields, count, c)) {
+        malformed = true;
+        return {};
+    }
+    return w->world.update(activity, c); // unknown, ended, or a behaviour: the host says which
 }
 
 } // namespace
@@ -541,15 +591,25 @@ FSIM_API int fsim_vehicle_submit_behavior(fsim_world* world, uint32_t id, const 
     });
 }
 
+FSIM_API int fsim_vehicle_submit_support(fsim_world* world, uint32_t id, int kind, const double* fields, uint32_t count,
+                                         const fsim_command_options* options, fsim_command_result* result) {
+    fsim::control::SupportCommand c;
+    if (!world || !result || !toSupport(kind, fields, count, c))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_support: support kind " + std::to_string(kind) + " and " +
+                                               std::to_string(count) + " fields do not match");
+    toC(world->world.submit(id, c, fromC(options)), result);
+    return FSIM_OK;
+}
+
 FSIM_API int fsim_activity_update(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count, fsim_command_result* result) {
     if (!world || !result) return FSIM_INVALID_ARGUMENT;
-    const int level = activityLevel(world, activity);
-    fsim::control::Command c;
-    if (level == FSIM_LEVEL_BEHAVIOR) c = fsim::control::ActuatorCommand{}; // unknown, ended long ago, or a behaviour: the host says which
-    else if (!toCommand(level, fields, count, c))
-        return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update: level " + std::to_string(level) + " takes " +
-                                               std::to_string(fsim_command_field_count(level)) + " fields");
-    toC(world->world.update(activity, c), result);
+    const UpdateShape shape = updateShape(world, activity);
+    bool malformed = false;
+    const auto r = updateFrom(world, activity, shape, fields, count, malformed);
+    if (malformed)
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update: activity " + std::to_string(activity) + " takes " +
+                                               std::to_string(shape.fields) + " fields");
+    toC(r, result);
     return FSIM_OK;
 }
 
@@ -557,11 +617,10 @@ FSIM_API int fsim_activity_update_batch(fsim_world* world, const fsim_activity_i
     if (!world || (count && (!activities || !values))) return FSIM_INVALID_ARGUMENT;
     std::size_t offset = 0;
     for (uint32_t i = 0; i < count; ++i) {
-        const int level = activityLevel(world, activities[i]);
-        const uint32_t fields = fsim_command_field_count(level);
-        fsim::control::Command c;
-        if (level == FSIM_LEVEL_BEHAVIOR || !toCommand(level, values + offset, fields, c)) c = fsim::control::ActuatorCommand{};
-        const auto r = world->world.update(activities[i], c);
+        const UpdateShape shape = updateShape(world, activities[i]);
+        const uint32_t fields = shape.fields;
+        bool malformed = false;
+        const auto r = updateFrom(world, activities[i], shape, values + offset, fields, malformed);
         if (!r.accepted())
             return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_batch: activity " + std::to_string(activities[i]) + " refused (" +
                                                    fsim::control::reasonName(r.reason) + ")");
