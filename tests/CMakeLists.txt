@@ -35,12 +35,16 @@ add_custom_command(TARGET fsim_tests POST_BUILD
 catch_discover_tests(fsim_tests ${FSIM_CATCH_DISCOVERY})
 
 # The control architecture's measurements (docs/control-architecture.md,
-# section 12): timings, heap allocations and trajectory digests. Only the
-# allocation count is a test; the rest is run by hand at each step.
+# section 12): timings, heap allocations and trajectory digests. The
+# allocation count is a test (none in the steady state); the rest is run by
+# hand at each step.
 add_executable(fsim_control_bench bench_control.cpp)
 target_link_libraries(fsim_control_bench PRIVATE fsim::session fsim::control fsim::effects fsim::comm fsim::ipc fsim::sim fsim::io fsim::core)
 target_compile_definitions(fsim_control_bench PRIVATE FSIM_TEST_JSBSIM_ROOT="${FSIM_JSBSIM_DATA_DIR}")
 fsim_set_warnings(fsim_control_bench)
+add_custom_command(TARGET fsim_control_bench POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:libJSBSim> $<TARGET_FILE_DIR:fsim_control_bench>)
+add_test(NAME control_alloc COMMAND fsim_control_bench alloc)
 
 # The public C++ SDK against fsim.dll (what a trainer links).
 add_executable(fsim_sdk_tests test_sdk.cpp)

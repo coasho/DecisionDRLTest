@@ -3,6 +3,7 @@
 add_library(fsim_control STATIC
     ControlStack.h
     ControlStack.cpp
+    Runtime.h
     Registry.h
     Registry.cpp
     Pid.h

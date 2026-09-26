@@ -923,14 +923,23 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 | micro (ns/update) | actuator | attitude | acceleration | velocity | position | hold | loiter | waypoints |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | baseline | 31 | 47 | 41 | 65 | 118–129 | 68 | 240–249 | 179–181 |
+| 1b | 30–31 | 46–47 | 40 | 64 | 117–118 | 66–67 | 153 | 129 |
 
 | command (ns/call, 64 vehicles) | same level | level switch | behaviour |
 | --- | --- | --- | --- |
 | baseline | 6.2 | 6.7 | 57 |
+| 1b | 7.7–8.1 | 8.0–8.6 | 63 |
 
 | world (vehicle-steps/s) | 64 c172x | 32 f16c (fly-by-wire) | 32 b52h (direct) |
 | --- | --- | --- | --- |
 | baseline | 823,000 | 556,000 | 579,000 |
+| 1b | 817,000–822,000 | 551,000–556,000 | 559,000–577,000 |
+
+**Step 1b.**
+- **Allocations:** none in any case. The `control_alloc` ctest now gates it.
+- **Behaviour updates:** loiter and waypoints are 35 % and 28 % faster, since nothing is copied any more.
+- **Digests:** identical to the baseline.
+- **Command path:** 1.5–2 ns slower, from reading the level through the config. That is over the 10 % gate, but it is an intermediate: step 1c replaces this path with the host's UPDATE, and the gate is judged there.
 
 **Allocations.**
 - Per update, none, except `loiter` (4, one per parameter's map node) and `waypoints` (2): the per-step `BehaviorCommand` copy, P6.
