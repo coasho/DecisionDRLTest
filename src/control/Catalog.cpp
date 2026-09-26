@@ -1,5 +1,6 @@
 #include "control/Catalog.h"
 
+#include "control/Adapter.h"
 #include "control/Registry.h"
 
 #include <algorithm>
@@ -108,6 +109,21 @@ CapabilityCatalog::CapabilityCatalog() {
                                   {"fsim.flight.velocity"}));
     for (std::size_t l = 0; l < byLevel_.size(); ++l) byLevel_[l] = static_cast<int>(l);
     addBehaviors();
+}
+
+CapabilityCatalog::CapabilityCatalog(const VehicleProfile& profile, const VehicleAdapter& adapter) : CapabilityCatalog() {
+    adapter.declare(profile, *this);
+}
+
+void CapabilityCatalog::narrow(std::string_view capability, std::string_view parameter, double lo, double hi) {
+    const int index = find(capability);
+    if (index < 0) return;
+    for (auto& p : descriptors_[static_cast<std::size_t>(index)].parameters)
+        if (p.name == parameter) {
+            if (!std::isnan(lo)) p.min = std::max(p.min, lo);
+            if (!std::isnan(hi)) p.max = std::min(p.max, hi);
+            if (!std::isnan(p.defaultValue)) p.defaultValue = std::clamp(p.defaultValue, p.min, std::max(p.min, p.max));
+        }
 }
 
 void CapabilityCatalog::addBehaviors() {

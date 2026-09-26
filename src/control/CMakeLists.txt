@@ -10,6 +10,8 @@ add_library(fsim_control STATIC
     CapabilityHost.cpp
     Profile.h
     Profile.cpp
+    Adapter.h
+    Adapter.cpp
     Registry.h
     Registry.cpp
     Pid.h

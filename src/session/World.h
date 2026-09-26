@@ -6,6 +6,7 @@
 // step, the message fabric, and the shared-memory publisher for viewers.
 
 #include "comm/Comm.h"
+#include "control/Adapter.h"
 #include "control/CapabilityHost.h"
 #include "control/Catalog.h"
 #include "control/ControlStack.h"
@@ -159,6 +160,7 @@ private:
         control::ActivityId commanded = 0; ///< the activity the last accepted command made or updated
         control::Level level = control::Level::Actuator; ///< as last published and recorded
         std::shared_ptr<const control::VehicleProfile> profile;
+        std::shared_ptr<control::CapabilityCatalog> catalog; ///< its aircraft type's (or its own, with a profile of its own)
         std::vector<std::unique_ptr<effects::Effect>> effects;
         effects::SensedState sensed;
         Rng rng;
@@ -202,9 +204,10 @@ private:
     std::vector<std::string> slotAircraft_;                     ///< loaded aircraft per slot (for reuse)
     /// Each loaded aircraft's profile (JSBSim properties under fsim/), read on its first load.
     std::unordered_map<std::string, std::shared_ptr<const control::VehicleProfile>> profiles_;
+    /// What each aircraft type offers, from its profile through its adapter.
+    std::unordered_map<std::string, std::shared_ptr<control::CapabilityCatalog>> catalogs_;
     std::vector<sim::ControlInputs> poolInputs_;
     std::vector<sim::VehicleState> stepStates_;                 ///< by slot: every state as the current step began
-    control::CapabilityCatalog catalog_;                        ///< what every vehicle offers (per aircraft type from step 2)
     StepView stepView_{*this};
     std::vector<EffectFactory> worldEffects_;
     sim::EnvironmentState environment_;

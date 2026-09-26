@@ -30,6 +30,7 @@ std::shared_ptr<const control::VehicleProfile> readAircraftProfile(const std::st
     auto profile = std::make_shared<control::VehicleProfile>(
         control::readProfile(aircraft, [&model](std::string_view prefix) { return model.properties(prefix); }, warnings));
     for (const auto& w : warnings) LOG_WARN("session") << w;
+    control::adapterFor(profile->identity.family).complete(*profile);
     const auto& settings = profile->control.settings;
     if (!settings.empty()) {
         control::ControlStack probe;
@@ -138,7 +139,11 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
             LOG_ERROR("session") << "failed to load aircraft '" << aircraft << "'";
             return 0;
         }
-        if (!profiles_.count(aircraft)) profiles_[aircraft] = readAircraftProfile(aircraft, *model);
+        if (!profiles_.count(aircraft)) {
+            const auto profile = readAircraftProfile(aircraft, *model);
+            profiles_[aircraft] = profile;
+            catalogs_[aircraft] = std::make_shared<control::CapabilityCatalog>(*profile, control::adapterFor(profile->identity.family));
+        }
         slot = pool_->add(std::move(model));
         entries_.emplace_back();
         slotAircraft_.push_back(aircraft);
@@ -166,10 +171,18 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     e->inputs.gearDown = spec.initial.onGround ? 1.0 : 0.0;
     e->stack.setInitialInputs(e->inputs);
     e->profile = profiles_[aircraft];
-    if (!e->profile) e->profile = std::make_shared<control::VehicleProfile>();
-    if (spec.profile) e->profile = std::make_shared<control::VehicleProfile>(control::mergeProfile(*e->profile, *spec.profile));
+    e->catalog = catalogs_[aircraft];
+    if (spec.profile) {
+        // sections of its own: its own profile, completed by its own family's adapter, and its own catalog
+        auto own = std::make_shared<control::VehicleProfile>(control::mergeProfile(*e->profile, *spec.profile));
+        const auto& adapter = control::adapterFor(own->identity.family);
+        adapter.complete(*own);
+        e->catalog = std::make_shared<control::CapabilityCatalog>(*own, adapter);
+        e->profile = std::move(own);
+    }
+    e->stack.setAdapter(control::adapterFor(e->profile->identity.family));
     if (!e->profile->control.settings.empty()) e->stack.setControllerSettings(e->profile->control.settings);
-    e->host.bind(id, e->stack, catalog_);
+    e->host.bind(id, e->stack, *e->catalog);
     for (auto& factory : worldEffects_) e->effects.push_back(factory());
     sim::FlightModel& model = pool_->vehicle(slot);
     model.seed(e->rng.next());
@@ -307,7 +320,7 @@ control::CommandResult World::commandResult(std::uint32_t id, const control::Com
         r.reason = control::Reason::UnknownVehicle;
         return r;
     }
-    if (std::holds_alternative<control::BehaviorCommand>(command)) catalog_.refresh();
+    if (std::holds_alternative<control::BehaviorCommand>(command)) e->catalog->refresh();
     const control::CommandResult r = e->host.command(command, pool_->states()[e->slot], simTime_);
     if (r.accepted() && r.activity != e->commanded) { // a new activity (an update keeps its level)
         e->commanded = r.activity;
@@ -323,7 +336,7 @@ control::CommandResult World::submit(std::uint32_t id, const control::Command& c
         r.reason = control::Reason::UnknownVehicle;
         return r;
     }
-    if (std::holds_alternative<control::BehaviorCommand>(command)) catalog_.refresh();
+    if (std::holds_alternative<control::BehaviorCommand>(command)) e->catalog->refresh();
     const control::CommandResult r = e->host.submit(command, options, pool_->states()[e->slot], simTime_);
     if (r.accepted()) {
         e->commanded = r.activity;
@@ -365,14 +378,15 @@ std::vector<control::ActivityRecord> World::activities(std::uint32_t id) const {
 
 const std::vector<control::CapabilityDescriptor>& World::capabilities(std::uint32_t id) {
     static const std::vector<control::CapabilityDescriptor> none;
-    if (!entry(id)) return none;
-    catalog_.refresh();
-    return catalog_.descriptors();
+    Entry* e = entry(id);
+    if (!e) return none;
+    e->catalog->refresh();
+    return e->catalog->descriptors();
 }
 
 control::CapabilityStatus World::capabilityStatus(std::uint32_t id, std::string_view capability) const {
     const Entry* e = entry(id);
-    const int index = catalog_.find(capability);
+    const int index = e ? e->catalog->find(capability) : -1;
     if (!e || index < 0) return {control::Availability::Disabled, e ? control::Reason::UnknownCapability : control::Reason::UnknownVehicle};
     return e->host.status(static_cast<std::size_t>(index), pool_->states()[e->slot]);
 }

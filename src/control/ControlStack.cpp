@@ -1,5 +1,6 @@
 #include "control/ControlStack.h"
 
+#include "control/Adapter.h"
 #include "control/Registry.h"
 #include "control/Runtime.h"
 #include "core/Log.h"
@@ -29,7 +30,8 @@ const char* levelName(Level level) noexcept {
     }
 }
 
-ControlStack::ControlStack() : config_(std::make_unique<RuntimeConfig>()), report_(std::make_unique<RuntimeReport>()) {
+ControlStack::ControlStack()
+    : config_(std::make_unique<RuntimeConfig>()), report_(std::make_unique<RuntimeReport>()), adapter_(&adapterFor(ControlFamily::Stock)) {
     auto& registry = ControllerRegistry::instance();
     for (std::size_t l = 0; l < static_cast<std::size_t>(Level::Behavior); ++l) {
         const Level level = static_cast<Level>(l);
@@ -228,16 +230,7 @@ void ControlStack::update(const ControlContext& ctx, sim::ControlInputs& out) {
 }
 
 void ControlStack::actuate(const ActuatorCommand& a, sim::ControlInputs& out) noexcept {
-    auto clamp01 = [](double v) { return std::clamp(v, 0.0, 1.0); };
-    auto clamp11 = [](double v) { return std::clamp(v, -1.0, 1.0); };
-    out.aileron = clamp11(orHold(a.aileron, 0.0));
-    out.elevator = clamp11(orHold(a.elevator, 0.0));
-    out.rudder = clamp11(orHold(a.rudder, 0.0));
-    out.setThrottleAll(clamp01(orHold(a.throttle, last_.throttle[0])));
-    out.flaps = clamp01(orHold(a.flaps, 0.0));
-    out.gearDown = isHold(a.gearDown) ? last_.gearDown : (a.gearDown >= 0.5 ? 1.0 : 0.0);
-    out.brakeLeft = clamp01(orHold(a.brakeLeft, 0.0));
-    out.brakeRight = clamp01(orHold(a.brakeRight, 0.0));
+    adapter_->apply(a, last_, out);
     last_ = out;
 
     // effectors at their travel limits

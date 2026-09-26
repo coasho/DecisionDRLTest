@@ -25,6 +25,7 @@ struct ControllerSetting {
 // defined in the platform's src/control/Runtime.h, not part of the SDK.
 struct RuntimeConfig;
 struct RuntimeReport;
+class VehicleAdapter;
 
 /// Per-vehicle control stack (design 9.3): one controller per level and the
 /// commands engaged. `update()` runs the cascade from the engaged level down
@@ -94,6 +95,9 @@ public:
     /// Hand over the behaviour a slot at Level::Behavior flies (between steps);
     /// it starts at its next update. Null removes it.
     void install(std::size_t slot, std::unique_ptr<Behavior> behavior) noexcept;
+    /// The adapter whose real-time face writes the inputs (a stock JSBSim one by default).
+    void setAdapter(const VehicleAdapter& adapter) noexcept { adapter_ = &adapter; }
+    const VehicleAdapter& adapter() const noexcept { return *adapter_; }
 
 private:
     static constexpr std::size_t kLevels = static_cast<std::size_t>(Level::Count);
@@ -106,6 +110,7 @@ private:
 
     std::unique_ptr<RuntimeConfig> config_;
     std::unique_ptr<RuntimeReport> report_;
+    const VehicleAdapter* adapter_ = nullptr;
     std::array<std::unique_ptr<Controller>, kLevels> controllers_;
     std::array<bool, kLevels> byId_{}; ///< created from the registry (settings apply)
     std::vector<ControllerSetting> settings_;

@@ -1,6 +1,8 @@
 // VehicleProfile (docs/control-architecture.md, section 7): sections read
 // from an aircraft's fsim/<section> properties, each with its own version
 // and provenance; a trainer's sections over the aircraft's.
+#include "control/Adapter.h"
+#include "control/Catalog.h"
 #include "control/Profile.h"
 #include "session/World.h"
 
@@ -178,4 +180,78 @@ TEST_CASE("every vehicle has its aircraft's profile; a spec's sections apply to 
     CHECK_FALSE(f->control.settings.empty());
     CHECK(profileValue(*f, "control/pid_attitude/schedule/tas_ms") == w.model(viper)->property("fsim/control/pid_attitude/schedule/tas_ms").get());
     CHECK(w.profile(999) == nullptr);
+}
+
+TEST_CASE("an adapter per family: what the family implies, and the envelope's ranges in the catalog", "[profile][adapter]") {
+    CHECK(std::string(adapterFor(ControlFamily::Stock).family()) == "jsbsim.stock");
+    CHECK(std::string(adapterFor(ControlFamily::Direct).family()) == "jsbsim.direct");
+    CHECK(std::string(adapterFor(ControlFamily::FlyByWire).family()) == "jsbsim.fbw");
+
+    // a fly-by-wire aircraft that did not say what its stick means
+    VehicleProfile fbw;
+    fbw.identity.family = ControlFamily::FlyByWire;
+    adapterFor(ControlFamily::FlyByWire).complete(fbw);
+    CHECK(fbw.effectors.pitch == PitchControl::LoadFactor);
+    CHECK(fbw.effectors.roll == RollControl::RollRate);
+    CHECK(fbw.effectors.neutral == NeutralStick::PathHold);
+    CHECK(fbw.effectors.header.provenance == Provenance::Derived);
+    // one that did keeps its word
+    VehicleProfile said;
+    said.effectors.header = {1, Provenance::Hangar};
+    adapterFor(ControlFamily::FlyByWire).complete(said);
+    CHECK(said.effectors.pitch == PitchControl::Surface);
+
+    // the envelope narrows what a command may ask
+    VehicleProfile p;
+    p.envelope.header = {1, Provenance::Hangar};
+    p.envelope.clean.loadFactorMin = -3.0;
+    p.envelope.clean.loadFactorMax = 9.0;
+    p.envelope.clean.bankMaxRad = 1.0;
+    p.envelope.clean.rollRateMaxRadS = 5.0;
+    const CapabilityCatalog catalog(p, adapterFor(ControlFamily::FlyByWire));
+    const CapabilityCatalog wide;
+    auto range = [](const CapabilityCatalog& c, const char* capability, const char* parameter) {
+        for (const auto& q : c.descriptor(static_cast<std::size_t>(c.find(capability))).parameters)
+            if (q.name == parameter) return std::make_pair(q.min, q.max);
+        return std::make_pair(0.0, 0.0);
+    };
+    CHECK(range(catalog, "fsim.flight.acceleration", "load_factor_g") == std::make_pair(-3.0, 9.0));
+    CHECK(range(catalog, "fsim.flight.acceleration", "roll_rate_rad_s") == std::make_pair(-5.0, 5.0));
+    CHECK(range(catalog, "fsim.flight.attitude", "roll_rad") == std::make_pair(-1.0, 1.0));
+    CHECK(range(catalog, "fsim.flight.attitude", "max_bank_rad") == std::make_pair(0.0, 1.0));
+    CHECK(std::isinf(range(wide, "fsim.flight.acceleration", "load_factor_g").second));
+}
+
+TEST_CASE("a vehicle flies through its family's adapter and is offered its envelope's ranges", "[profile][adapter][world]") {
+    session::WorldOptions o;
+    o.name = "test-adapter";
+    o.jsbsimRoot = FSIM_TEST_JSBSIM_ROOT;
+    o.workers = 1;
+    o.pinWorkers = false;
+    o.publish = false;
+    session::World w(o);
+    session::VehicleSpec s;
+    s.type = "jsbsim:c172x";
+    s.initial.altitudeMslM = 1500.0;
+    s.initial.airspeedTrueMs = 55.0;
+    s.name = "plain";
+    const auto plain = w.createVehicle(s);
+    auto own = std::make_shared<VehicleProfile>();
+    own->identity.header = {1, Provenance::User};
+    own->identity.family = ControlFamily::Direct;
+    own->envelope.header = {1, Provenance::User};
+    own->envelope.clean.loadFactorMin = -1.52;
+    own->envelope.clean.loadFactorMax = 3.8; // normal category
+    s.name = "limited";
+    s.profile = own;
+    const auto limited = w.createVehicle(s);
+    CHECK(std::string(w.controls(plain)->adapter().family()) == "jsbsim.stock");
+    CHECK(std::string(w.controls(limited)->adapter().family()) == "jsbsim.direct");
+    AccelerationCommand pull{6.0, 0.0, kHold, 0.7};
+    const CommandResult r = w.submit(limited, pull);
+    REQUIRE(r.accepted());
+    CHECK((r.flags & kClamped) != 0);
+    CHECK(std::get<AccelerationCommand>(*w.controls(limited)->activeCommand()).loadFactorG == 3.8);
+    const CommandResult free = w.submit(plain, pull);
+    CHECK((free.flags & kClamped) == 0); // no envelope: the loops' own range
 }
