@@ -197,5 +197,83 @@ class WorldTest(unittest.TestCase):
             fsim.set_log_level("loud")
 
 
+
+class CapabilityTest(unittest.TestCase):
+    """Capabilities and activities (docs/sdk/control.md)."""
+
+    def test_discovery(self):
+        world = make_world(name="py-caps")
+        v = fly(world, "discover")
+        caps = {c.id: c for c in v.capabilities()}
+        for cid in ("fsim.flight.actuator", "fsim.flight.velocity", "fsim.guidance.hold", "fsim.guidance.waypoints"):
+            self.assertIn(cid, caps)
+        velocity = caps["fsim.flight.velocity"]
+        self.assertEqual(velocity.level, Level.VELOCITY)
+        self.assertEqual([p.name for p in velocity.parameters], list(fsim.COMMAND_FIELDS[Level.VELOCITY]))
+        self.assertTrue(caps["fsim.guidance.waypoints"].terminating)
+        self.assertTrue(caps["fsim.guidance.pursuit"].needs_target)
+        self.assertEqual(v.capability_status("fsim.guidance.hold"), (fsim.Availability.AVAILABLE, "none"))
+        self.assertEqual(v.capability_status("no.such.thing")[1], "unknown_capability")
+
+    def test_submit_update_cancel(self):
+        world = make_world(name="py-activities")
+        v = fly(world, "active")
+        a = v.submit(Level.VELOCITY, airspeed_ms=60.0, vertical_speed_ms=1.0)
+        self.assertIsInstance(a, fsim.Activity)
+        self.assertEqual(a.id >> 32, v.id)
+        self.assertEqual(a.vehicle, v)
+        self.assertEqual(a.state, fsim.ActivityState.PENDING)
+        world.step()
+        self.assertEqual(a.state, fsim.ActivityState.ACTIVE)
+        self.assertTrue(a.live)
+        self.assertFalse(a.update(airspeed_ms=60.0, vertical_speed_ms=0.0))
+        with self.assertRaises(TypeError):
+            a.update(no_such_field=1.0)
+        self.assertTrue(v.submit(Level.ATTITUDE, roll_rad=4.0).clamped)  # beyond +-pi: clamped, and it preempted `a`
+        info = world.activity(a)
+        self.assertEqual(info.state, fsim.ActivityState.CANCELED)
+        self.assertEqual(info.reason, "preempted")
+        with self.assertRaises(fsim.Rejected) as refused:
+            a.update(airspeed_ms=60.0)
+        self.assertEqual(refused.exception.reason, "activity_ended")
+        self.assertIsInstance(refused.exception, fsim.Error)
+        hold = v.submit_behavior("hold")
+        hold.cancel()
+        self.assertEqual(hold.info.reason, "requested")
+        self.assertGreaterEqual(len(v.activities()), 3)
+
+    def test_authority_and_refusals(self):
+        world = make_world(name="py-authority")
+        v = fly(world, "held")
+        operator = v.submit(Level.VELOCITY, airspeed_ms=60.0, source=fsim.Source.OVERRIDE)
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit(Level.ATTITUDE, roll_rad=0.1)
+        self.assertEqual(refused.exception.reason, "authority_held")
+        self.assertEqual(refused.exception.other, operator.id)
+        with self.assertRaises(fsim.Error):
+            v.command_attitude(roll_rad=0.1)  # the per-step path is refused too
+        operator.cancel()
+        v.command_attitude(roll_rad=0.1)
+        with self.assertRaises(fsim.Rejected):
+            v.submit(Level.ATTITUDE, roll_rad=4.0, range=fsim.RangePolicy.REJECT)
+        with self.assertRaises(fsim.Error):
+            v.command_behavior("no_such_behaviour")  # refused since 2026-09-26; it used to be ignored
+
+    def test_batched_updates(self):
+        world = make_world(name="py-batch-updates")
+        vs = [fly(world, "b%d" % i, longitude_deg=-122.38 + 0.01 * i) for i in range(3)]
+        acts = [v.submit(Level.VELOCITY, airspeed_ms=60.0) for v in vs]
+        ids = np.array([a.id for a in acts], dtype=np.uint64)
+        rows = np.tile(np.array([60.0, 1.0, HOLD, HOLD]), (3, 1))
+        world.update(ids, rows)
+        world.update(acts, rows)
+        world.step()
+        for a in acts:
+            self.assertEqual(a.state, fsim.ActivityState.ACTIVE)
+        acts[1].cancel()
+        with self.assertRaises(fsim.Error):
+            world.update(ids, rows)
+
+
 if __name__ == "__main__":
     unittest.main()

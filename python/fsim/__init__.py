@@ -64,7 +64,24 @@ from ._state import (  # noqa: E402
     recorded_sample_dtype,
     vehicle_state_dtype,
 )
-from .world import COMMAND_DEFAULTS, COMMAND_FIELDS, Level, Message, Scenario, Vehicle, World  # noqa: E402
+from .world import (  # noqa: E402
+    COMMAND_DEFAULTS,
+    COMMAND_FIELDS,
+    Activity,
+    ActivityInfo,
+    ActivityState,
+    Availability,
+    Capability,
+    Level,
+    Message,
+    Parameter,
+    RangePolicy,
+    Rejected,
+    Scenario,
+    Source,
+    Vehicle,
+    World,
+)
 from .vecenv import VecEnv  # noqa: E402
 from .recording import Recording  # noqa: E402
 from ._threads import torch_threads  # noqa: E402

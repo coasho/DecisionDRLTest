@@ -377,6 +377,96 @@ int main(int argc, char** argv) {
         fsim_recording_destroy(NULL);
         remove("c-abi-test.fsrec");
     }
+    /* Capabilities and activities (ABI 1.4), in a world of their own. */
+    {
+        fsim_world_options wo;
+        fsim_world* world = NULL;
+        fsim_vehicle_spec spec;
+        fsim_attitude_command att;
+        uint32_t a = 0, b = 0;
+        fsim_world_options_init(&wo);
+        wo.name = "c-capabilities";
+        wo.publish = 0;
+        wo.workers = 1;
+        wo.pin_workers = 0;
+        wo.jsbsim_root = argc > 1 ? argv[1] : NULL;
+        CHECK(fsim_world_create(&wo, &world) == FSIM_OK);
+        fsim_vehicle_spec_init(&spec);
+        spec.name = "cap-a";
+        spec.altitude_msl_m = 1500.0;
+        spec.airspeed_ms = 55.0;
+        CHECK(fsim_world_create_vehicle(world, &spec, &a) == FSIM_OK);
+        spec.name = "cap-b";
+        spec.longitude_deg += 0.01;
+        CHECK(fsim_world_create_vehicle(world, &spec, &b) == FSIM_OK);
+        memset(&att, 0, sizeof att);
+        att.roll_rad = 0.1; att.pitch_rad = 0.03; att.heading_rad = fsim_hold(); att.max_bank_rad = 0.785;
+        att.throttle = fsim_hold(); att.airspeed_ms = 55.0;
+        {
+        /* Capabilities and activities (ABI 1.4) */
+        fsim_capability_info ci;
+        fsim_parameter_info pi;
+        fsim_command_options co;
+        fsim_command_result cr;
+        fsim_activity_info ai;
+        const uint32_t ncap = fsim_vehicle_capability_count(world, a);
+        uint32_t c, attitude = ncap;
+        int32_t availability = -1, why = -1;
+        double climb[4], cruise[4], rows[8];
+        fsim_activity_id acts[2], operator_id;
+        climb[0] = 55.0; climb[1] = 1.0; climb[2] = fsim_hold(); climb[3] = fsim_hold();
+        cruise[0] = 55.0; cruise[1] = 0.0; cruise[2] = fsim_hold(); cruise[3] = fsim_hold();
+
+        CHECK(ncap >= 12);
+        for (c = 0; c < ncap; ++c) {
+            CHECK(fsim_vehicle_capability(world, a, c, &ci) == FSIM_OK);
+            if (strcmp(ci.id, "fsim.flight.attitude") == 0) attitude = c;
+        }
+        CHECK(attitude < ncap);
+        CHECK(fsim_vehicle_capability(world, a, attitude, &ci) == FSIM_OK);
+        CHECK(ci.level == FSIM_LEVEL_ATTITUDE && ci.parameter_count == 6 && (ci.interactions & 2) != 0 && ci.terminating == 0);
+        CHECK(fsim_vehicle_capability_parameter(world, a, attitude, 0, &pi) == FSIM_OK);
+        CHECK(strcmp(pi.name, "roll_rad") == 0 && strcmp(pi.unit, "rad") == 0 && pi.optional == 1);
+        CHECK(fsim_vehicle_capability(world, a, ncap, &ci) != FSIM_OK);
+        CHECK(fsim_vehicle_capability_status(world, a, "fsim.guidance.hold", &availability, &why) == FSIM_OK);
+        CHECK(availability == FSIM_AVAILABLE);
+
+        fsim_command_options_init(&co);
+        CHECK(co.struct_size == sizeof co && co.source == FSIM_SOURCE_POLICY && co.range == FSIM_RANGE_CLAMP);
+        CHECK(fsim_vehicle_submit(world, a, FSIM_LEVEL_VELOCITY, climb, 4, &co, &cr) == FSIM_OK);
+        CHECK(cr.status == FSIM_COMMAND_ACCEPTED && (uint32_t)(cr.activity >> 32) == a);
+        acts[0] = cr.activity;
+        CHECK(fsim_vehicle_submit(world, a, FSIM_LEVEL_VELOCITY, climb, 3, &co, &cr) != FSIM_OK); /* malformed: 4 fields */
+        CHECK(fsim_vehicle_submit(world, b, FSIM_LEVEL_VELOCITY, cruise, 4, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+        acts[1] = cr.activity;
+        CHECK(fsim_activity_get(world, acts[0], &ai) == FSIM_OK);
+        CHECK(ai.state == FSIM_ACTIVITY_PENDING && strcmp(fsim_activity_state_name(ai.state), "pending") == 0);
+        CHECK(fsim_world_step(world, 1) == FSIM_OK);
+        CHECK(fsim_activity_get(world, acts[0], &ai) == FSIM_OK && ai.state == FSIM_ACTIVITY_ACTIVE && isnan(ai.end_time));
+        CHECK(fsim_activity_update(world, acts[0], cruise, 4, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+        memcpy(rows, climb, sizeof climb);
+        memcpy(rows + 4, cruise, sizeof cruise);
+        CHECK(fsim_activity_update_batch(world, acts, 2, rows, 0) == FSIM_OK);
+
+        /* an operator's override: the policy's activity ends preempted, a policy command is refused */
+        co.source = FSIM_SOURCE_OVERRIDE;
+        CHECK(fsim_vehicle_submit(world, a, FSIM_LEVEL_VELOCITY, climb, 4, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+        operator_id = cr.activity;
+        CHECK(fsim_activity_get(world, acts[0], &ai) == FSIM_OK && ai.state == FSIM_ACTIVITY_CANCELED && ai.by == operator_id);
+        CHECK(strcmp(fsim_reason_name(ai.reason), "preempted") == 0);
+        CHECK(fsim_activity_update(world, acts[0], cruise, 4, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+        CHECK(strcmp(fsim_reason_name(cr.reason), "activity_ended") == 0);
+        CHECK(fsim_vehicle_command_attitude(world, a, &att) != FSIM_OK);
+        CHECK(strstr(fsim_last_error(), "authority_held") != NULL);
+        CHECK(fsim_activity_update_batch(world, acts, 2, rows, 0) != FSIM_OK); /* acts[0] has ended */
+        CHECK(fsim_activity_cancel(world, operator_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        CHECK(fsim_vehicle_activity_count(world, a) >= 2);
+        CHECK(fsim_vehicle_activity(world, a, 0, &ai) == FSIM_OK && ai.vehicle == a);
+        CHECK(fsim_activity_get(world, ((fsim_activity_id)a << 32) | 999u, &ai) != FSIM_OK);
+        CHECK(fsim_vehicle_command_attitude(world, a, &att) == FSIM_OK); /* nothing holds its axes now */
+        }
+        fsim_world_destroy(world);
+    }
     printf("c abi ok\n");
     return 0;
 }

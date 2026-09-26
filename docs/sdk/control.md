@@ -130,6 +130,8 @@ vehicle's are `TemporarilyUnavailable` until it is reset.
 
 A newer command replaces an activity of its own or a lower source, which ends `preempted`. A higher source's activity refuses it with `authority_held`. For now a command owns every axis. Owning roll apart from pitch and thrust (a policy banking while an autopilot holds the height) comes with step 3 of the ADR.
 
+**From C and Python.** The C ABI has the same calls (`fsim_vehicle_submit`, `fsim_activity_update`, `fsim_activity_cancel`, the capability and activity queries; [c_abi.md](c_abi.md)), and Python has `vehicle.submit(Level.VELOCITY, airspeed_ms=60)`, which returns an `fsim.Activity` with `update`, `cancel` and `state` ([python.md](python.md)).
+
 **What `command()` does now.**
 - At the level the vehicle's own activity flies, a new setpoint updates it: the same few nanoseconds as before.
 - Any other level, or a behaviour, starts a new activity with no range or availability checks, exactly as before.

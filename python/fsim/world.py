@@ -62,6 +62,135 @@ Message.__doc__ = "A delivered message: who from and to, channel, format, when s
 BROADCAST = 0xFFFFFFFF
 
 
+# --- capabilities and activities (docs/sdk/control.md, "Capabilities and activities") ---
+
+class Source(enum.IntEnum):
+    """Who commands, in rising priority: a newer command preempts an activity
+    of its own or a lower source and is refused by a higher one."""
+
+    POLICY = 0
+    AUTOPILOT = 1
+    OVERRIDE = 2
+
+
+class RangePolicy(enum.IntEnum):
+    """What happens to a value outside a capability's advertised range."""
+
+    CLAMP = 0
+    REJECT = 1
+    NONE = 2
+
+
+class ActivityState(enum.IntEnum):
+    PENDING = 0
+    ACTIVE = 1
+    COMPLETED = 2
+    FAILED = 3
+    CANCELED = 4
+
+
+class Availability(enum.IntEnum):
+    AVAILABLE = 0
+    TEMPORARILY_UNAVAILABLE = 1
+    FAULTED = 2
+    DISABLED = 3
+
+
+class Rejected(_native.Error):
+    """A command the vehicle refused. ``reason`` says why ("authority_held",
+    "activity_ended", "invalid_parameter", ...); ``other`` is the activity that
+    holds the authority, for "authority_held"."""
+
+    def __init__(self, reason, other=0):
+        super().__init__("command refused: %s" % reason)
+        self.reason = reason
+        self.other = other
+
+
+ActivityInfo = collections.namedtuple(
+    "ActivityInfo", "id vehicle capability source axes state reason by constraints constraints_seen start_time end_time")
+ActivityInfo.__doc__ = ("An activity's record: its capability (an index into Vehicle.capabilities()), who commanded it, "
+                        "its state and why it ended, flags (1 saturated, 8 clamped, ...) and when it ran.")
+
+Parameter = collections.namedtuple("Parameter", "name unit min max default optional")
+Capability = collections.namedtuple("Capability", "id version kind interactions level axes terminating needs_target behavior parameters")
+Capability.__doc__ = "What a vehicle offers: e.g. fsim.flight.attitude (a level) or fsim.guidance.hold (a behaviour)."
+
+
+def _info(t):
+    return ActivityInfo(t[0], t[1], t[2], Source(t[3]), t[4], ActivityState(t[5]), _native.reason_name(t[6]), t[7], t[8], t[9],
+                        t[10], t[11])
+
+
+def _checked(result):
+    """A result tuple (status, reason, activity, other, clamped): raise Rejected unless accepted or canceled."""
+    if result[0] == 1:
+        raise Rejected(_native.reason_name(result[1]), result[3])
+    return result
+
+
+def _row(level, values, fields):
+    """A level's fields: all of them in order, or some by name with the rest as a new command's defaults."""
+    names = COMMAND_FIELDS[level]
+    if values:
+        if fields or len(values) != len(names):
+            raise TypeError("%s takes %d values in order (%s) or fields by name" % (level.name, len(names), ", ".join(names)))
+        return tuple(float(v) for v in values)
+    row = list(COMMAND_DEFAULTS[level])
+    for key, value in fields.items():
+        if key not in names:
+            raise TypeError("%s has no field %r (fields: %s)" % (level.name, key, ", ".join(names)))
+        row[names.index(key)] = float(value)
+    return tuple(row)
+
+
+class Activity:
+    """A command a vehicle accepted: it runs until it completes, fails or is
+    canceled. ``update`` gives it a new setpoint - its per-step path - and
+    ``cancel`` ends it, handing the vehicle to its neutral default."""
+
+    __slots__ = ("world", "id", "level", "clamped")
+
+    def __init__(self, world, activity_id, level, clamped=False):
+        self.world = world
+        self.id = activity_id
+        self.level = level
+        self.clamped = clamped  #: a value of the command was clamped to its range
+
+    @property
+    def vehicle(self):
+        return self.world._vehicle(self.id >> 32)
+
+    def update(self, *values, **fields):
+        """A new setpoint: the level's fields by name (fsim.COMMAND_FIELDS),
+        the others as a new command's defaults, or all of them in order.
+        Returns True if a value was clamped; raises fsim.Rejected if the
+        activity has ended (preempted, completed, canceled)."""
+        return bool(_checked(self.world._h.activity_update(self.id, _row(self.level, values, fields)))[4])
+
+    def cancel(self):
+        """End it: the vehicle flies its neutral default. Raises fsim.Rejected if it had already ended."""
+        _checked(self.world._h.activity_cancel(self.id))
+
+    @property
+    def info(self):
+        """Its record (ActivityInfo), or None once the vehicle no longer remembers it."""
+        return self.world.activity(self.id)
+
+    @property
+    def state(self):
+        info = self.info
+        return None if info is None else info.state
+
+    @property
+    def live(self):
+        return self.state in (ActivityState.PENDING, ActivityState.ACTIVE)
+
+    def __repr__(self):
+        info = self.info
+        return "Activity(%#x, %s, %s)" % (self.id, self.level.name, info.state.name if info else "forgotten")
+
+
 def _options(**given):
     """Only what was given: the library keeps its own defaults for the rest."""
     return {k: (int(v) if isinstance(v, bool) else v) for k, v in given.items() if v is not None}
@@ -160,6 +289,42 @@ class Vehicle:
         t = target.id if isinstance(target, Vehicle) else int(target or 0)
         rows = None if points is None else [tuple(float(x) for x in p) for p in points]
         self._h.command_behavior(self.id, behavior, t, params or None, rows)
+
+    def submit(self, level, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
+        """NEW: a command at ``level`` - its fields by name (fsim.COMMAND_FIELDS),
+        the others as the command's defaults, or all of them in order -
+        becomes an Activity, answered at once. Raises fsim.Rejected if the
+        vehicle refuses it (a higher source holds its axes, a value out of
+        range with RangePolicy.REJECT, a required field left as HOLD)."""
+        level = Level(level)
+        if level == Level.BEHAVIOR:
+            raise TypeError("submit_behavior() takes behaviours")
+        r = _checked(self._h.submit(self.id, int(level), _row(level, values, fields), int(source), None, int(range), int(min_version)))
+        return Activity(self._world, r[2], level, bool(r[4]))
+
+    def submit_behavior(self, behavior, target=None, points=None, *, source=Source.POLICY, range=RangePolicy.CLAMP,
+                        min_version=0, **params):
+        """NEW for a behaviour (see command_behavior for its arguments): an
+        Activity, or fsim.Rejected. Behaviours that follow a vehicle need
+        ``target``; a new target is a new submit."""
+        t = target.id if isinstance(target, Vehicle) else int(target or 0)
+        rows = None if points is None else [tuple(float(x) for x in p) for p in points]
+        r = _checked(self._h.submit_behavior(self.id, behavior, t, params or None, rows, int(source), None, int(range), int(min_version)))
+        return Activity(self._world, r[2], Level.BEHAVIOR, bool(r[4]))
+
+    def activities(self):
+        """The live activities (ActivityInfo), then the ended ones the vehicle remembers, newest first."""
+        return [_info(t) for t in self._h.vehicle_activities(self.id)]
+
+    def capabilities(self):
+        """What the vehicle offers: its levels and behaviours (Capability, with their Parameters)."""
+        return [Capability(c[0], c[1], c[2], c[3], Level(c[4]), c[5], c[6], c[7], c[8], [Parameter(*p) for p in c[9]])
+                for c in self._h.capabilities(self.id)]
+
+    def capability_status(self, capability):
+        """(Availability, reason) of a capability by id, e.g. "fsim.guidance.hold"."""
+        availability, reason = self._h.capability_status(self.id, capability)
+        return Availability(availability), _native.reason_name(reason)
 
     @property
     def active_level(self):
@@ -364,6 +529,21 @@ class World:
             self._h.command_batch(level, vehicles, values)
         except TypeError:
             self._h.command_batch(int(level), self.ids(vehicles), as_array(values, np.float64))
+
+    def activity(self, activity):
+        """An activity's record (ActivityInfo) by Activity or id, or None if its vehicle no longer remembers it."""
+        t = self._h.activity_info(activity.id if isinstance(activity, Activity) else int(activity))
+        return None if t is None else _info(t)
+
+    def update(self, activities, values):
+        """UPDATE many activities of one level in one call: their ids (a uint64
+        array, or Activities) and a float64 row per activity in the level's
+        field order. Raises fsim.Error naming the first one refused."""
+        if not (isinstance(activities, np.ndarray) and activities.dtype == np.uint64 and activities.flags.c_contiguous):
+            activities = np.fromiter((a.id if isinstance(a, Activity) else int(a) for a in activities), dtype=np.uint64)
+        rows = np.ascontiguousarray(as_array(values, np.float64))
+        stride = rows.shape[-1] if rows.ndim > 1 else (rows.size // max(len(activities), 1))
+        self._h.activity_update_batch(activities, rows, int(stride))
 
     # --- environment ---------------------------------------------------------------------
     @property

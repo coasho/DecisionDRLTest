@@ -123,6 +123,13 @@ push, not yet tagged:
   JSBSim file as `fsim/control` properties ([docs/hangar.md](docs/hangar.md#the-autopilot)). Of 558 manoeuvres
   (31 designs, three speeds), those that lost control, never reached their target, overshot it by more than
   half or oscillated went from 336 with the shared gains to 29.
+- **Capability contracts** ([docs/control-architecture.md](docs/control-architecture.md), ADR-26;
+  [docs/sdk/control.md](docs/sdk/control.md#capabilities-and-activities)): a vehicle says what it offers - its
+  control levels and behaviours, with typed parameters and ranges - and answers every command at once. A
+  command becomes an activity (pending, active, then completed, failed or canceled) that a policy updates
+  every step, an engaged autopilot or an operator's override outranks, and a behaviour completes when it reaches
+  its goal - in C++, the C ABI (1.4) and Python. Every existing command flies exactly as before, its per-step
+  path 20 % faster and allocation-free; the control stack stays the runtime underneath (step 1 of 6).
 - `sim::VehiclePool` (one worker per physical core), JSBSim 1.3.1 adapter with terrain ground callback,
   `flightsim.exe` headless benchmark.
 

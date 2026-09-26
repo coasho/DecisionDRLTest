@@ -287,6 +287,103 @@ FSIM_API int fsim_vehicle_set_controller_parameter(fsim_world* world, uint32_t i
  * fsim/control/<controller>/<parameter>), or the last one set. (ABI 1.3) */
 FSIM_API int fsim_vehicle_controller_parameter(const fsim_world* world, uint32_t id, int level, const char* name, double* value);
 
+/* ---------------------------------------------------------------------------
+ * Capabilities and activities (ABI 1.4; docs/control-architecture.md,
+ * docs/sdk/control.md): what a vehicle offers, commands answered at once
+ * (NEW, UPDATE, CANCEL), and the activities they become. Every call answers
+ * in its fsim_command_result and returns FSIM_OK; a non-OK code means the
+ * call itself was malformed (null pointers, a wrong field count).
+ * ------------------------------------------------------------------------- */
+
+typedef uint64_t fsim_activity_id; /* the vehicle's id in the high 32 bits, a per-vehicle count below */
+
+enum fsim_source { FSIM_SOURCE_POLICY = 0, FSIM_SOURCE_AUTOPILOT = 1, FSIM_SOURCE_OVERRIDE = 2 };
+enum fsim_range_policy { FSIM_RANGE_CLAMP = 0, FSIM_RANGE_REJECT = 1, FSIM_RANGE_NONE = 2 };
+enum fsim_command_status { FSIM_COMMAND_ACCEPTED = 0, FSIM_COMMAND_REJECTED = 1, FSIM_COMMAND_CANCELED = 2 };
+enum fsim_activity_state { FSIM_ACTIVITY_PENDING = 0, FSIM_ACTIVITY_ACTIVE, FSIM_ACTIVITY_COMPLETED, FSIM_ACTIVITY_FAILED, FSIM_ACTIVITY_CANCELED };
+enum fsim_availability { FSIM_AVAILABLE = 0, FSIM_TEMPORARILY_UNAVAILABLE, FSIM_FAULTED, FSIM_DISABLED };
+
+/* Call fsim_command_options_init() first: a policy's command, the
+ * capability's default axes, values clamped to their ranges. */
+typedef struct fsim_command_options {
+    uint32_t struct_size;
+    int32_t source;       /* fsim_source */
+    uint32_t axes;        /* 0 = the capability's default (bits: roll, pitch, yaw, thrust, flaps, gear, brakes, speedbrake, trim) */
+    int32_t range;        /* fsim_range_policy */
+    uint32_t min_version; /* refuse a capability older than this */
+} fsim_command_options;
+FSIM_API void fsim_command_options_init(fsim_command_options* options);
+
+typedef struct fsim_command_result {
+    int32_t status;            /* fsim_command_status */
+    int32_t reason;            /* why it was refused: fsim_reason_name() */
+    fsim_activity_id activity; /* the activity made (NEW) or addressed (UPDATE, CANCEL) */
+    fsim_activity_id other;    /* the activity holding the authority ("authority_held") */
+    uint32_t flags;            /* 1: a value was clamped */
+    uint32_t reserved;
+} fsim_command_result;
+
+typedef struct fsim_activity_info {
+    fsim_activity_id id;
+    uint32_t vehicle;
+    uint32_t capability;       /* index for fsim_vehicle_capability */
+    int32_t source;
+    uint32_t axes;
+    int32_t state;             /* fsim_activity_state */
+    int32_t reason;            /* why it ended */
+    fsim_activity_id by;       /* the activity that preempted it */
+    uint32_t constraints;      /* last step: 1 saturated, 2 demand limited, 4 limit exceeded, 8 clamped, 16 axes reduced */
+    uint32_t constraints_seen; /* every flag since it started */
+    double start_time, end_time; /* simulation seconds; end_time NaN while it runs */
+} fsim_activity_info;
+
+/* Strings are owned by the world and stay valid until it is destroyed. */
+typedef struct fsim_capability_info {
+    const char* id;            /* "fsim.flight.attitude", "fsim.guidance.hold", "user.guidance.<id>" */
+    uint32_t version;
+    int32_t kind;              /* 0 flight, 1 guidance, 2 support, 3 status */
+    uint32_t interactions;     /* 1 command, 2 update, 4 cancel, 8 settings, 16 status */
+    int32_t level;             /* fsim_level its commands enter at */
+    uint32_t axes;             /* owned by default */
+    int32_t terminating;       /* 1: completes when it reaches its goal */
+    int32_t needs_target;      /* 1: a behaviour that follows fsim_behavior_command.target */
+    uint32_t parameter_count;  /* fsim_vehicle_capability_parameter */
+    const char* behavior;      /* a guidance capability's behaviour id, else "" */
+} fsim_capability_info;
+
+typedef struct fsim_parameter_info {
+    const char* name;          /* a level's command field ("roll_rad") or a behaviour's parameter ("radius_m") */
+    const char* unit;
+    double min, max, default_value; /* the range for this aircraft; NaN default = as at the start */
+    int32_t optional;          /* 1: accepts fsim_hold() */
+    int32_t reserved;
+} fsim_parameter_info;
+
+FSIM_API uint32_t fsim_vehicle_capability_count(fsim_world* world, uint32_t id);
+FSIM_API int fsim_vehicle_capability(fsim_world* world, uint32_t id, uint32_t index, fsim_capability_info* out);
+FSIM_API int fsim_vehicle_capability_parameter(fsim_world* world, uint32_t id, uint32_t capability, uint32_t index, fsim_parameter_info* out);
+FSIM_API int fsim_vehicle_capability_status(const fsim_world* world, uint32_t id, const char* capability, int32_t* availability, int32_t* reason);
+
+/* NEW at a level: `fields` in that level's fsim_*_command order (fsim_command_field_count values). */
+FSIM_API int fsim_vehicle_submit(fsim_world* world, uint32_t id, int level, const double* fields, uint32_t count,
+                                 const fsim_command_options* options, fsim_command_result* result);
+FSIM_API int fsim_vehicle_submit_behavior(fsim_world* world, uint32_t id, const fsim_behavior_command* command,
+                                          const fsim_command_options* options, fsim_command_result* result);
+/* UPDATE: a new setpoint for a live activity, in its level's field order (the per-step path). */
+FSIM_API int fsim_activity_update(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count, fsim_command_result* result);
+/* UPDATE for many activities at once: rows of fields at the given stride (0 = the field count of each activity's level,
+ * all rows the same level). FSIM_OK if every update was accepted, else FSIM_INVALID_ARGUMENT naming the first refused. */
+FSIM_API int fsim_activity_update_batch(fsim_world* world, const fsim_activity_id* activities, uint32_t count, const double* values, uint32_t stride);
+/* CANCEL: the activity ends and the vehicle flies its neutral default. */
+FSIM_API int fsim_activity_cancel(fsim_world* world, fsim_activity_id activity, fsim_command_result* result);
+/* A live or recently ended activity: FSIM_INVALID_ARGUMENT if the vehicle does not remember it. */
+FSIM_API int fsim_activity_get(const fsim_world* world, fsim_activity_id activity, fsim_activity_info* out);
+/* The vehicle's live activities, then the ended ones it remembers (newest first). */
+FSIM_API uint32_t fsim_vehicle_activity_count(const fsim_world* world, uint32_t id);
+FSIM_API int fsim_vehicle_activity(const fsim_world* world, uint32_t id, uint32_t index, fsim_activity_info* out);
+FSIM_API const char* fsim_reason_name(int reason);             /* "authority_held", "goal_reached", ... */
+FSIM_API const char* fsim_activity_state_name(int state);      /* "pending", "active", ... */
+
 FSIM_API int fsim_world_get_environment(const fsim_world* world, fsim_environment* out);
 FSIM_API int fsim_world_set_environment(fsim_world* world, const fsim_environment* environment);
 
