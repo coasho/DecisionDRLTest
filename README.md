@@ -63,8 +63,9 @@ for (int k = 0; k < 3000; ++k) {
 
 ## Status
 
-Milestones **M0 (skeleton), viewer, M2 (RL environment + SDK) and M2b (vehicle SDK + transparent
-viewer) done**:
+Milestones **M0 (skeleton), viewer, M2 (RL environment + SDK), M2b (vehicle SDK + transparent
+viewer) and M4 (vision observations) done**; M5 (release v1) is packaged and built by CI on every
+push, not yet tagged:
 
 - **Vehicle SDK** (`include/fsim/World.h`, `libfsim.dll`): `World` / `Vehicle` object model over a
   lockstep worker pool; vehicles by name and type; per-vehicle random streams; determinism for any
@@ -100,10 +101,22 @@ viewer) done**:
 - **hangar, aircraft of your own** ([docs/hangar.md](docs/hangar.md)): an aircraft that exists only on paper,
   described in one TOML file (surfaces, bodies, engine, gear, masses), becomes a JSBSim aircraft with a 3D model
   and a validation report. hangar computes the aerodynamic tables over the whole attitude range, the mass
-  properties and the propeller. It then flies the result in the platform's JSBSim: trim, stall, climb, ceiling,
-  dynamic modes against MIL-F-8785C, and random-state robustness. `fsim hangar skua`. A Cessna 172P rebuilt
-  from public dimensions, with two numbers fitted to its top speed and climb rate, predicts its handbook's
-  stall speed and ceiling within 4 %.
+  properties and the engine's tables (piston or electric with a propeller, turboprop, turbofan with or without
+  afterburner). It then flies the result in the platform's JSBSim: trim, stall, climb, ceiling, dynamic modes
+  against MIL-F-8785C, and random-state robustness. `fsim hangar skua`. A Cessna 172P rebuilt from public
+  dimensions, with two numbers fitted to its top speed and climb rate, predicts its handbook's stall speed and
+  ceiling within 4 %.
+- **Fighter library** ([docs/hangar.md](docs/hangar.md#the-fighter-library)): fourteen fighters built with hangar
+  from public dimensions, weights and engine data - F-16C, F-15C, F/A-18C, F-22A, F-35A, Su-27S, Su-57, MiG-29A,
+  Typhoon, Rafale C, Gripen, Mirage 2000C, J-10A, J-20A - each flown through its own fly-by-wire (angle-of-attack
+  and g limits, roll no faster than the rudder can coordinate); the F-22A and the Su-57 vector their thrust.
+  Its published top speed is each one's only calibration target; its climb, ceiling and handling are
+  predictions. `jsbsim:<name>` in the SDKs, scenario files and the viewer;
+  `fsim python examples\python\fighters.py` flies all fourteen.
+- **Support aircraft** ([docs/hangar.md](docs/hangar.md#support-aircraft)): fifteen more, built the same way -
+  bombers (B-52H, H-6K), tankers (KC-135R, KC-46A), transports (C-130J, C-17A), AEW&C (E-3G, E-7A),
+  reconnaissance (RC-135W, U-2S, RQ-4B), electronic warfare (EC-130H, EA-18G) and attack aircraft (A-10C,
+  Su-25) - on direct controls or their own fly-by-wire, each flown against its published speed and ceiling.
 - `sim::VehiclePool` (one worker per physical core), JSBSim 1.3.1 adapter with terrain ground callback,
   `flightsim.exe` headless benchmark.
 
@@ -130,7 +143,8 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
 - **Comm bridges**: `comm::BridgeProtocol` over a `Transport` (UDP built in) makes an external process or device a
   node of the world's network (fixed "FSMG" wire format); `examples/udp_peer` + `multi_level_control --bridge`.
 - **Offline tiles**: `tools/tile_prefetch` fills the shared tile cache (elevation + imagery pyramid) for a region,
-  for training machines and viewers without network access.
+  for training machines and viewers without network access; `fetch-maps` fills the package's own maps (about
+  2.4 GB, [Map assets](#map-assets)), so a distributed viewer opens no sockets at all.
 - **Rust example** (`examples/rust_trainer`): the C ABI from Rust with hand-written `extern "C"` declarations,
   object model and VecEnv at full throughput; `cargo run --release -- world | vecenv`.
 - **Vision observations (M4)**: `fsim::vision::Sensors` mounts cameras on vehicles and renders them offscreen
@@ -140,7 +154,14 @@ vehicle-steps/s (`multi_level_control --extra 59`); VecEnv 32 envs ~180k agent-s
 
 - **Moving control surfaces**: glTF nodes named `fsim:aileron`, `fsim:elevator`, `fsim:rudder` or `fsim:flaps` turn about
   their hinge with each vehicle's own deflections in the viewer and the vision cameras; the geometry stays shared.
-  hangar writes its models this way ([docs/sdk/viewer.md](docs/sdk/viewer.md#moving-control-surfaces)).
+  Landing gear and its doors, leading-edge flaps, propellers, nozzles, struts, steering and wheels move with the
+  vehicle's state the same way. hangar writes its models this way
+  ([docs/sdk/viewer.md](docs/sdk/viewer.md#moving-control-surfaces)).
+- **Engine exhaust and airflow effects** ([docs/sdk/viewer.md](docs/sdk/viewer.md#effects)), after DCS World:
+  afterburner flames with shock diamonds, nozzle glow and heat haze; tip vortices and vapour in a hard pull, a
+  vapour cone near Mach 1, contrails in cold air, and air streaks that grow with speed - all from each vehicle's
+  reported state, shaped and animated on the GPU; the viewer's own work grows by 0.01 - 0.03 ms a frame. `e`
+  toggles them, `--no-effects` starts without.
 
 Imagery and elevation come from Esri World Imagery and AWS Terrain Tiles under their respective terms (attribution required); tiles are cached under `%LOCALAPPDATA%\flightsim\tilecache`.
 

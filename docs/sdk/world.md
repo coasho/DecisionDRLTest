@@ -77,7 +77,7 @@ first exits (a warning is logged).
 ```cpp
 struct VehicleSpec {
     std::string name;                      // unique in the world; empty = "<aircraft>-<id>"
-    std::string type = "jsbsim:c172x";     // "<flight model>:<aircraft>" - any aircraft in the JSBSim tree
+    std::string type = "jsbsim:c172x";     // "<flight model>:<aircraft>" - a stock JSBSim aircraft or a hangar design
     InitialConditions initial;             // latitudeDeg, longitudeDeg, altitudeMslM, headingDeg, pitchDeg, rollDeg, airspeedTrueMs, onGround
     std::string model;                     // optional glTF for the viewer (default: models/<type>.glb, else the platform's aircraft)
     unsigned controlDivider = 1;           // run the control stack every N FDM steps
@@ -87,6 +87,14 @@ struct VehicleSpec {
 `onGround = true` places the vehicle on the terrain (JSBSim ground trim) with
 brakes and idle power; otherwise it starts airborne at `airspeedTrueMs` with
 engines running.
+
+`jsbsim:<name>` looks for the aircraft `<name>` in the directories listed in
+`FSIM_AIRCRAFT_PATH` (`;`-separated folders of aircraft folders, which may
+shadow a stock aircraft), then among JSBSim's stock aircraft, then among the
+aircraft designed with hangar: `aircraft/` in the source tree for a
+development build, `share/flightsim/aircraft` in a package. The fighters and
+support aircraft of [hangar.md](../hangar.md) are
+`jsbsim:f16c`, `jsbsim:b52h` and so on.
 
 ## `fsim::Vehicle`
 

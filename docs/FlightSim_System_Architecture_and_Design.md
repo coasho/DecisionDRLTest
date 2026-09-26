@@ -6,7 +6,7 @@
 
 This document defines the architecture of a pure C++ flight-simulation platform for AI and reinforcement-learning (RL) training: JSBSim computes flight dynamics for many vehicles at once, VulkanSceneGraph (VSG) renders a full-Earth scene for visualisation and for vision-based observations, and a C++ SDK with a stable C ABI is the primary interface. It is the reference for structure, boundaries and major technical decisions; implementation details live in code and per-module design notes.
 
-In scope: the application skeleton, module boundaries, runtime/threading model, integration of VSG and JSBSim, the RL environment API (C++ and C ABI), the debug viewer, VSG-native full-Earth terrain, build and packaging on Windows, and the extension mechanism. Out of scope for this revision: human-piloted operation (no flight-stick input, cockpit or instrument panels), networking/multiplayer, RL algorithms themselves, and certification-grade fidelity requirements. Project owner decisions of 2026-09-19 that shaped this revision: RL training is the primary purpose, full-Earth visualisation, no human pilot for now, powerful training hardware, open-source licence, Windows only, multiple vehicles, JSBSim used as-is, VSG mandatory, no Cesium, no Python. Owner workflow statement of 2026-09-20 (section 9): researchers build training applications against the vehicle SDK; a prebuilt viewer mirrors their world through shared memory transparently and without affecting training throughput; vehicles are created by name/type/initial state and controlled through a multi-level control stack; the environment is controllable in real time; effects and communication are abstract, extensible interfaces.
+In scope: the application skeleton, module boundaries, runtime/threading model, integration of VSG and JSBSim, the RL environment API (C++ and C ABI), the debug viewer, VSG-native full-Earth terrain, build and packaging on Windows, and the extension mechanism. Out of scope for this revision: human-piloted operation (no flight-stick input, cockpit or instrument panels), networking/multiplayer, RL algorithms themselves, and certification-grade fidelity requirements. Project owner decisions of 2026-09-19 that shaped this revision: RL training is the primary purpose, full-Earth visualisation, no human pilot for now, powerful training hardware, open-source licence, Windows only, multiple vehicles, JSBSim used as-is, VSG mandatory, no Cesium, no Python. Owner workflow statement of 2026-09-20 (section 9): researchers build training applications against the vehicle SDK; a prebuilt viewer mirrors their world through shared memory transparently and without affecting training throughput; vehicles are created by name/type/initial state and controlled through a multi-level control stack; the environment is controllable in real time; effects and communication are abstract, extensible interfaces. Later owner requests added: an offline map package that ships with the viewer (2026-09-22); a Python SDK over the C ABI (2026-09-23), which relaxes "no Python" for trainers while the platform itself still embeds no language runtime (section 2); hangar (2026-09-22/23), a tool that turns an aircraft design into a flight-tested JSBSim aircraft with a 3D model, and a library of fighters and support aircraft made with it (2026-09-23 to 25); and engine exhaust and airflow effects in the viewer (2026-09-25).
 
 Reading guide: sections 2–4 fix requirements and technology choices; sections 5–10 describe the design; sections 11–13 cover build, performance and cross-cutting concerns; sections 14–17 hold risks, roadmap, decisions and open questions.
 
@@ -27,7 +27,7 @@ Secondary requirements that follow from the four drivers and the owner decisions
 - Headless first: the simulation and environment API run with no window and no GPU; rendering is an optional module attached to a running simulation for visualisation or vision observations.
 - Many vehicles: dozens to hundreds of JSBSim instances per process, stepped in parallel and in lockstep, grouped into independent environments.
 - Full-Earth world on VSG alone: any latitude/longitude, WGS-84 ECEF double precision, imagery and elevation streamed by `vsg::TileDatabase` from a tile pyramid (self-hosted or public), and the same elevation tiles used for physics ground height, headless and offline once cached.
-- Pure C++: no Python, Lua or other language runtime anywhere in the platform; external trainers use the C++ SDK or the C ABI.
+- Pure C++: no Python, Lua or other language runtime anywhere in the platform; external trainers use the C++ SDK or the C ABI. Still true since the Python SDK (2026-09-23, `python/`): it is a C extension over the C ABI loaded by the trainer's own interpreter, and hangar (`tools/hangar`), the aircraft design tool, is offline Python tooling that, like `tools/tile_builder`'s GDAL, is never part of the platform.
 - Open source: the platform is released under MIT; every dependency is MIT, Apache-2.0, BSD, Zlib or LGPL (JSBSim), with JSBSim linked as a shared library.
 - JSBSim as-is: stock aircraft, engines, systems and XML scripts from the JSBSim repository; flight-control automation uses JSBSim's own FCS/autopilot definitions; no custom FDM code in v1.
 
@@ -95,7 +95,7 @@ Scale 1 (poor) to 5 (excellent); weights follow the driver priority in section 2
 - Entry points: (1) the `fsim` library, linked by the trainer's own C++ program — the primary one; (2) `flightsim.exe` for headless batch runs, benchmarks, recording and `--serve` (shared-memory server); (3) `flightsim-viewer.exe`, or `attachViewer()` from the SDK, for the window. All construct the same `Application` object.
 - Batched API: `VecEnv` holds M environments, each with K vehicles; `step()` consumes an `(M×K×A)` action span and fills `(M×K×O)` observation, reward and flag buffers owned by the library, so one call advances every vehicle and no data is copied. The C ABI exposes the same buffers as raw pointers with sizes and a layout version.
 - Windowing and viewer: `vsg::Window` and `vsg::Viewer`, Dear ImGui through vsgImGui. The viewer never blocks the simulation; it renders the latest snapshot at display rate (section 6).
-- Not included: Python, Lua, Cesium/3D Tiles, SDL3, HUD, instruments, cockpit view. The event/property infrastructure stays, so a piloted mode can be added later as a module.
+- Not included: Python (bindings over the C ABI followed on 2026-09-23 at the owner's request, section 15), Lua, Cesium/3D Tiles, SDL3, HUD, instruments, cockpit view. The event/property infrastructure stays, so a piloted mode can be added later as a module.
 
 ## 5. System architecture overview
 
@@ -300,7 +300,7 @@ When a scenario declares a camera observation (`rgb`, `depth`, `segmentation`; r
 
 ### 8.5 Assets and cache
 
-The install ships shaders, placeholder aircraft models, the JSBSim aircraft tree and the ImGui font (< 20 MB). The tile pyramid is separate data: a global 90 m elevation + low-resolution imagery pyramid is \~3 GB; 30 m elevation with 10 m imagery for a training region of 500×500 km is \~2 GB. Both are built once with `tools/tile_builder` and either copied locally or served from any static HTTP server; the runtime disk cache has a configurable size limit (default 20 GB).
+The install ships shaders, placeholder aircraft models, the JSBSim aircraft tree and the ImGui font (< 20 MB). The tile pyramid is separate data: a global 90 m elevation + low-resolution imagery pyramid is \~3 GB; 30 m elevation with 10 m imagery for a training region of 500×500 km is \~2 GB. Both are built once with `tools/tile_builder` and either copied locally or served from any static HTTP server; the runtime disk cache has a configurable size limit (default 20 GB). As built: the package ships the aircraft designed with hangar (`share/flightsim/aircraft/<name>`: the JSBSim files and the glTF model) and, since 2026-09-22, its own maps instead of a pyramid built with `tools/tile_builder` (not needed so far): `fetch-maps` downloads the public imagery and elevation (Esri World Imagery, AWS Terrain Tiles) that `assets/config/offline-map-plan.json` asks for - a global base to level 9, mountain ranges, airports and route corridors deeper, about 2.4 GB against the owner's 2.5 GB budget - and the packaged viewer reads only those files, opening no sockets.
 
 ## 9. User interface design: the vehicle SDK, transparent visualisation and the C ABI
 
@@ -516,25 +516,32 @@ The platform embeds no scripting language. Behaviour that would be scripted else
 
 ## 11. Build, dependencies and packaging
 
-A single CMake super-project builds Windows x64 with MSVC 2022, resolves dependencies through a vcpkg manifest with pinned baseline, produces the `fsim` library (headers + DLL + import lib), two executables and the offline tile tool, and is released under MIT.
+A single CMake super-project builds Windows x64 with MSVC 2022, resolves dependencies through a vcpkg manifest with pinned baseline, produces the `fsim` library (headers + DLL + import lib), two executables and the offline tile tool, and is released under MIT. As built: the toolchain is MSYS2 UCRT64 GCC (section 3; MSVC is not used) and there is no vcpkg - VSG, vsgXchange and vsgImGui are submodules built as static libraries by a CMake superbuild (`deps/`), JSBSim is a submodule built as a DLL by the main project, Catch2 is fetched at configure time and the rest comes from MSYS2 packages. The build also produces `fsim_vision.dll`, the examples and the Python package.
 
 ### 11.1 Repository layout
 
+As built (2026-09-25; the README's Layout section says what each directory holds):
+
 ```
 flightsim/
-├─ CMakeLists.txt          options: FSIM_WITH_RENDER, FSIM_BUILD_TOOLS, FSIM_EXT_*
-├─ vcpkg.json              manifest + baseline
-├─ cmake/                  toolchain, warnings, LTO, dependency checks, install/export
+├─ CMakeLists.txt          options: FSIM_WITH_RENDER, FSIM_BUILD_TESTS, _EXAMPLES, _TOOLS, _PYTHON; presets in CMakePresets.json
+├─ fsim.cmd                the front door: build, run, the demos, hangar, Python
+├─ fetch-maps.cmd          the offline map tiles, into assets/maps
+├─ cmake/                  toolchain, warnings, dependencies, assets, install and packaging
+├─ deps/                   superbuild for the VSG stack (static)
+├─ third_party/            submodules: JSBSim (DLL; its data tree too), VSG, vsgXchange, vsgImGui; stb
 ├─ include/fsim/           public C++ SDK headers + fsim_c.h (section 10.3)
-├─ src/{app,core,env,sim,world,render,ui,io,platform,session,control,effects,comm,ipc,sdk,vision}/
-├─ ext/{env_server,recorder,web_dashboard,...}/
-├─ shaders/                GLSL -> SPIR-V at build time
-├─ assets/                 placeholder models, fonts, ui; JSBSim data tree as a submodule
-├─ scenarios/              example scenarios and tasks (.vsgt)
-├─ examples/               minimal_trainer (C++), torch_ppo (optional, LibTorch), rust_ffi (C ABI)
-├─ tests/                  Catch2 unit + integration, golden trajectories, benchmarks, ABI tests
-└─ tools/                  tile_prefetch (offline tile cache for a region); planned: tile_builder (GDAL), scenario validator, asset packer
+├─ src/{platform,core,io,sim,control,effects,comm,ipc,session,env,sdk,vision,render,world,ui,app}/
+├─ python/                 the Python SDK: C extension modules over the C ABI, the fsim package, tests, wheel
+├─ tools/                  tile_prefetch (offline tile cache for a region); hangar (aircraft design, Python + a native mesher)
+├─ aircraft/               designs made with hangar, and the JSBSim aircraft and glTF models it builds from them
+├─ assets/                 viewer config and the offline map plan; maps/ (fetched, not in git)
+├─ examples/               C++ trainers and tools, rust_trainer, python/, scenarios/ (JSON scenario files)
+├─ tests/                  Catch2 unit + JSBSim integration tests, C ABI tests compiled as C, the package consumer
+└─ docs/                   this document, hangar's guide, sdk/ (the SDK guide)
 ```
+
+The first revision's `vcpkg.json`, `ext/`, top-level `shaders/` and `scenarios/` were not needed: dependencies are submodules and MSYS2 packages (above), `ext/`'s environment server became the world segment and the UDP comm bridges and its recorder the SDK's recording (section 15), the viewer's GLSL lives in its sources, and scenarios are JSON (9.13). `tools/tile_builder`, a scenario validator and an asset packer are not built.
 
 ### 11.2 Dependency budget
 
@@ -557,13 +564,15 @@ Headless `fsim.dll`: \~5 MB. Viewer executable: \~9–12 MB. Total install well 
 | --- | --- |
 | Toolchain | MSYS2 UCRT64: GCC 16.2, CMake ≥ 3.25, Ninja, MSYS2 pacman packages (vulkan-headers, vulkan-loader, glslang, spirv-tools, assimp, curl); toolchain file cmake/toolchains/ucrt64.cmake; LTO off (GCC LTO collides with dllexport vtables in JSBSim.dll) |
 | CRT | dynamic UCRT, `/MD`; the C ABI carries no CRT types so trainers built with other compilers or runtimes can link `fsim.dll` |
-| Distribution | zip with `bin/` (`fsim.dll`, `fsim_vision.dll`, `JSBSim.dll`, `flightsim.exe`, `flightsim-viewer.exe`, tools, the MinGW runtime), `include/fsim/`, `lib/` (import libraries), `share/flightsim/` (models, JSBSim data, scenarios), `share/doc/`, CMake package config for `find_package(fsim)` -> `fsim::sdk`, `fsim::vision`. Implemented in `cmake/Install.cmake` (`cmake --install`, `cpack` ZIP, ~27 MB); `tests/package_consumer` builds against it |
+| Distribution | zip with `bin/` (`fsim.dll`, `fsim_vision.dll`, `JSBSim.dll`, `flightsim.exe`, `flightsim-viewer.exe`, tools, the MinGW runtime), `include/fsim/`, `lib/` (import libraries), `share/flightsim/` (models, JSBSim data, scenarios), `share/doc/`, CMake package config for `find_package(fsim)` -> `fsim::sdk`, `fsim::vision`. Implemented in `cmake/Install.cmake` (`cmake --install`, `cpack` ZIP, ~27 MB); `tests/package_consumer` builds against it. As built since: `fsim dist` lays out five separate trees - `viewer` (standalone, with its maps), `sdk`, `python` (the package and a cp311-abi3 wheel), `tools`, `examples` - and the zip carries hangar's aircraft too, about 480 MB from CI (which has no maps) |
 | GPU matrix | NVIDIA (RTX), AMD (RDNA), Intel Arc drivers tested in the viewer/vision CI job |
 | Future Linux | no Win32 outside `platform/` (shared memory and semaphores get a POSIX implementation); every dependency supports Linux, so a port is a CI job plus `platform/linux` |
 
 ### 11.4 Continuous integration
 
 GitHub Actions on `windows-2022`: configure and build headless and viewer configurations (Debug/Release); Catch2 suites; a 60-second headless golden-trajectory test per stock aircraft (tolerance 1e-6 relative); determinism test across worker counts; a throughput benchmark with regression gate (−10 % fails); C ABI test compiled as plain C; the `examples/minimal_trainer` built against the installed package; a 200-frame offscreen render with Vulkan validation layers on a software device (SwiftShader/Lavapipe) using a tiny bundled tile pyramid; binary size check against the budget.
+
+As built (`.github/workflows/ci.yml`, on every push): one job on `windows-2022` with MSYS2 UCRT64, about 13-19 minutes. The VSG stack is built once and cached by its submodules' commits; the release configuration (viewer and headless together) is configured and built; `ctest` runs the Catch2 suites, the C ABI tests compiled as C, the Python SDK against a python.org CPython 3.12 and hangar's own tests; a headless smoke run and a 32-vehicle throughput benchmark follow (reported, not gated); then `cmake --install` and `cpack`, a smoke run of the installed copy, and the zip kept as the run's artifact (`flightsim-win64`) - a `v*` tag publishes it as a release. Not built yet: the Debug build, golden trajectories, the offscreen render test, the size check and the benchmark gate.
 
 ## 12. Performance design
 
@@ -630,7 +639,7 @@ The largest risks are the ones the stack does not already solve: building and ho
 | Vision observations dominate step time | high when enabled | performance | shared image array, one submit per step, pager limits, region prefetch; GPU-resident path post-v1 |
 | JSBSim instance memory at hundreds of vehicles | low | memory | measured per aircraft in M1; multiple processes above \~256 vehicles |
 | JSBSim numerical divergence with extreme RL actions | medium | training stability | per-vehicle NaN/limit checks after each step → `terminated` with code, auto-reset; action rate limiting option |
-| No Python means slower adoption by RL researchers | medium | adoption | C ABI lets anyone build bindings in an afternoon; `examples/` show C++ and Rust trainers and an optional LibTorch PPO |
+| No Python means slower adoption by RL researchers | low since 2026-09-23 | adoption | the Python SDK (`import fsim`, Gymnasium and Stable-Baselines3 adapters) over the C ABI, at its speed: a 64-aircraft `VecEnv` step takes 375.4 us from Python, 375.3 us from C; `examples/` also show C++ and Rust trainers |
 | Windows-only leaves Linux training clusters out | medium | adoption | strict `platform/` isolation; every dependency supports Linux; port planned as a post-v1 CI job |
 | VSG API changes between 1.1.x releases | low | maintenance | pin by tag; quarterly upgrade with CI green |
 | Dependency budget creeps | medium | size, build time | every new library needs an ADR and the size check must pass |
@@ -638,6 +647,8 @@ The largest risks are the ones the stack does not already solve: building and ho
 ## 15. Roadmap and milestones
 
 Six milestones take the project from an empty repository to a v1 release. Re-planned 2026-09-19 at the owner's direction: visualisation is the most important component and comes first (M0 skeleton, then the viewer), the RL API follows, vision observations and release last. Status (2026-09-20): M0 done; the viewer delivered (full-Earth satellite imagery over real relief, terrain physics, N vehicles, glTF models, chase/orbit/overview mouse cameras, sky, trails, labels, ImGui monitor, interpolated motion); M2 delivered (the Rust C ABI example, `examples/rust_trainer`, followed 2026-09-21; the PPO exit criterion is met by `examples/ppo_trainer`, a dependency-free C++ PPO that trains altitude/heading hold on the c172x through the SDK in ~2 minutes) (`env::VecEnv`, two tasks, `state`/`surfaces` spaces, `libfsim.dll` with the C++ SDK and C ABI v1, `examples/minimal_trainer` PD baseline at ~0.7 M vehicle-steps/s through the SDK, C ABI tested from C99). M2b delivered 2026-09-20: `World`/`Vehicle` object model, the six-level control stack with built-in loops and behaviours, real-time environment, effects and comm interfaces with v1 implementations, `ipc` world segment, viewer mirror mode with discovery, `VecEnv` re-based on the object model with actions at any level, world C ABI, `docs/sdk/`, `examples/multi_level_control`; 64 vehicles with cascades and effects at ~760k vehicle-steps/s, within a few percent with a viewer attached. Follow-ups delivered 2026-09-20: headless terrain physics in the SDK, recording/replay (`WorldOptions::recordPath`, `flightsim-viewer --replay` with timeline seek), per-type vehicle models in the viewer, scenario files (9.13), comm bridges over UDP (9.6) and `tools/tile_prefetch`. M4 (vision observations, 8.4) delivered 2026-09-21 as `fsim_vision.dll`: RGB + depth cameras on vehicles at 64 cameras per ~8 ms step, `BatchCameras` for VecEnv, a C ABI, the viewer's live camera preview through shared memory; the `ext/env_server` item is superseded by the world segment and the UDP comm bridges. M5 items done the same day: `cmake --install` + CPack zip + `find_package(fsim)`, third-party notices, crash handler, CI green with the package as an artifact and releases on `v*` tags. The 10.1 "SDK registration" row is complete for the environment layer since 2026-09-21: `fsim::Task`, `fsim::ObservationBuilder` and `fsim::ActionMapper` are public interfaces in `fsim/VecEnvPlugins.h`, registered by id through `registerTask()` / `registerObservation()` / `registerAction()`, and the built-ins are registered against the same interfaces. Each milestone ends with CI green and the section 12 metrics recorded. Durations assume one to two developers.
+
+Status (2026-09-25), since then: the viewer's package carries its own maps and opens no sockets (2026-09-22, section 8.5). The Python SDK (2026-09-23, `python/`, [sdk/python.md](sdk/python.md)) offers the object model, the batch layer, cameras, recordings and scenarios through C extension modules over the C ABI, with Gymnasium and Stable-Baselines3 adapters, C++ plugins loaded from Python and one wheel for CPython 3.11+, at the C ABI's speed. hangar (2026-09-22/23, `tools/hangar`, [hangar.md](hangar.md)) turns a design file into a JSBSim aircraft with a glTF model and flight-tests it; a Cessna 172P rebuilt from public dimensions predicts its handbook's stall speed and ceiling within 4 %. With it came moving control surfaces, landing gear and doors, propellers, nozzles and wheels in the viewer and the vision cameras; fourteen fighters flown through their own fly-by-wire, the F-16C checked against NASA's wind-tunnel data (2026-09-23 to 25), with thrust vectoring on the F-22A and the Su-57 (2026-09-25); and fifteen support aircraft - bombers, tankers, transports, AEW&C, reconnaissance, electronic warfare and attack (2026-09-25). The viewer draws engine exhaust and airflow effects after DCS World from each vehicle's state (2026-09-25, [sdk/viewer.md](sdk/viewer.md#effects)). M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |
 | --- | --- | --- | --- | --- |
@@ -657,7 +668,7 @@ Each major choice, its alternatives and the driver that decided it; status "acce
 
 | ADR | Decision | Alternatives considered | Deciding driver | Status |
 | --- | --- | --- | --- | --- |
-| ADR-1 | C++ SDK (`fsim`) with a versioned C ABI is the primary interface; exe entry points share the same `Application` | Python bindings, gRPC service, C++-only without C ABI | owner decision (no Python), performance, extensibility | accepted |
+| ADR-1 | C++ SDK (`fsim`) with a versioned C ABI is the primary interface; exe entry points share the same `Application` | Python bindings, gRPC service, C++-only without C ABI | owner decision (no Python), performance, extensibility | accepted; amended 2026-09-23 at the owner's request: Python bindings over the C ABI (the Python SDK) |
 | ADR-2 | Lockstep, caller-driven stepping across a worker pool; no real-time clock in the training path | free-running sim thread with real-time clock | throughput, determinism | accepted |
 | ADR-3 | One JSBSim instance per vehicle, share-nothing, JSBSim used as-is (stock aircraft, FCS, scripts) | custom FDM, shared JSBSim instance | owner decision, determinism | accepted |
 | ADR-4 | Viewer = VSG native window + Dear ImGui (vsgImGui), optional module | Qt, SDL/GLFW window, RmlUi, web view | lightweight, single render pass | accepted |
@@ -668,8 +679,8 @@ Each major choice, its alternatives and the driver that decided it; status "acce
 | ADR-9 | VSG object model and serialisation (`.vsgt`) in `world`, `render`, `ui` and for scenarios/manifests; `core`, `sim` and `env` are plain C++ so the headless build has no VSG/Vulkan dependency (revised at M0) | own model, JSON everywhere | one model, VSG mandatory | proposed |
 | ADR-10 | `FlightModel` interface hides JSBSim; SI + ECEF metres at the boundary | JSBSim types used directly | extensibility, testability | proposed |
 | ADR-11 | ECEF double world frame; `TileDatabase` handles Earth precision; floating origin for vehicle subgraphs | flat local tangent plane | full-Earth correctness | proposed |
-| ADR-12 | Windows x64 / MSVC 2022 only for v1; Win32 confined to `platform/` | Linux from day one | owner decision | accepted |
-| ADR-13 | vcpkg manifest as the dependency manager; static linking except JSBSim DLL and `fsim.dll` itself | `FetchContent`, system packages | Windows build reproducibility, LGPL | proposed |
+| ADR-12 | Windows x64 / MSYS2 UCRT64 (GCC) only for v1 (section 3; first written as MSVC 2022); Win32 confined to `platform/` | Linux from day one | owner decision | accepted |
+| ADR-13 | vcpkg manifest as the dependency manager; static linking except JSBSim DLL and `fsim.dll` itself | `FetchContent`, system packages | Windows build reproducibility, LGPL | superseded: submodules (the VSG stack built static by the `deps/` superbuild, JSBSim as a DLL in the main build), Catch2 fetched at configure time, the rest from MSYS2 packages (section 11) |
 | ADR-14 | MIT licence; JSBSim as DLL | GPL, Apache-2.0 | owner decision | accepted |
 | ADR-15 | No scripting runtime anywhere; data + compiled C++ only | Lua/Python module | owner decision, lightweight | accepted |
 | ADR-16 | Shaders compiled to SPIR-V at build time | runtime glslang | size, startup | proposed |
@@ -687,12 +698,12 @@ Each major choice, its alternatives and the driver that decided it; status "acce
 
 Owner decisions so far are recorded in section 1; the remaining questions below change scope or a proposed ADR.
 
-- [ ] Tile data: build a global 90 m pyramid plus 30 m regional pyramids with `tools/tile_builder` (fully self-hosted, offline), or start from public XYZ imagery (OpenStreetMap/Bing) with elevation only for training regions?
+- [x] Tile data: settled 2026-09-22 — public tiles (Esri World Imagery, AWS Terrain Tiles), cached on disk by the viewer and the SDK, and pre-fetched into the package for offline use by `fetch-maps` within the owner's 2.5 GB budget (8.5); `tools/tile_builder` has not been needed.
 - [x] Trainer language: decided 2026-09-19 — C++. The first example trainer in M2 is C++ (\`examples/minimal\_trainer\`, then the dependency-free PPO); the Rust C ABI example (\`examples/rust\_trainer\`) landed 2026-09-21.
 - [x] First tasks: M2 ships `altitude_heading_hold` (targets sampled per episode relative to the initial state) and `level_flight` on the stock c172x; waypoint following and pursuit–evasion are queued behind vision observations.
-- [ ] Vision in v1: are image observations required for the first release (M4 as planned) or can they slip to post-v1 to bring the release forward by \~3 weeks?
+- [x] Vision in v1: delivered with M4 on 2026-09-21 (8.4).
 - [ ] Linux timing: post-v1 (as planned) or before the public release, given that most training clusters run Linux?
-- [ ] Aircraft models: placeholder low-poly models for stock JSBSim aircraft are planned; are any licensed glTF models already available?
+- [x] Aircraft models: hangar (2026-09-22/23) writes a glTF model, with its moving parts, for every aircraft it designs - 31 in `aircraft/`; a stock JSBSim aircraft without a model draws the sample aircraft.
 
 ## Sources
 

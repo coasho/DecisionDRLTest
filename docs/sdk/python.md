@@ -29,6 +29,7 @@ fsim python examples\python\train_sb3.py     PPO (Stable-Baselines3) on a 64-air
 fsim python examples\python\train_plugin.py  PPO on a task written in C++, loaded as a plugin DLL
 fsim python examples\python\cameras.py       nose and chase cameras, images as numpy arrays
 fsim python examples\python\control_surfaces.py   two hangar designs flying a slalom, for the viewer
+fsim python examples\python\fighters.py      the fourteen fighters flying in formation, for the viewer
 fsim python examples\python\speed.py         what the SDK costs, measured against C
 ```
 
