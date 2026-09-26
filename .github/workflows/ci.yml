@@ -86,8 +86,15 @@ jobs:
       - name: Deploy runtime DLLs
         run: cmake --build --preset ucrt64-release --target deploy
 
+      # The control architecture's conformance (docs/control-architecture.md,
+      # step 6): the command lifecycle's state machine for every adapter, the
+      # stock c172x's checkpoints, the allocation gate and a short manoeuvre
+      # suite for a design per adapter.
+      - name: Control conformance
+        run: ctest --preset ucrt64-release -L conformance
+
       - name: Test
-        run: ctest --preset ucrt64-release
+        run: ctest --preset ucrt64-release -LE conformance
 
       - name: Headless smoke run
         run: build/ucrt64-release/bin/flightsim.exe --vehicles 8 --steps 60 --benchmark

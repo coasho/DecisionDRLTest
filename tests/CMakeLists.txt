@@ -18,11 +18,13 @@ add_executable(fsim_tests
     test_vecenv.cpp
     test_axes.cpp
     test_capabilities.cpp
+    test_conformance.cpp
     test_control.cpp
     test_control_compat.cpp
     test_profile.cpp
     test_protection.cpp
     test_laws.cpp
+    test_manoeuvres.cpp
     test_support.cpp
     test_world.cpp
     test_terrain.cpp
@@ -38,7 +40,12 @@ fsim_set_warnings(fsim_tests)
 add_custom_command(TARGET fsim_tests POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:libJSBSim> $<TARGET_FILE_DIR:fsim_tests>)
 
-catch_discover_tests(fsim_tests ${FSIM_CATCH_DISCOVERY})
+catch_discover_tests(fsim_tests ${FSIM_CATCH_DISCOVERY} TEST_SPEC "~[conformance]")
+# The control architecture's conformance (docs/control-architecture.md, step 6):
+# the lifecycle's state machine for every adapter, the c172x checkpoints, the
+# allocation gate and a short manoeuvre suite per adapter - labelled, so CI
+# runs them as a step of their own (ctest -L conformance).
+catch_discover_tests(fsim_tests ${FSIM_CATCH_DISCOVERY} TEST_SPEC "[conformance]" PROPERTIES LABELS conformance)
 
 # The control architecture's measurements (docs/control-architecture.md,
 # section 12): timings, heap allocations and trajectory digests. The
@@ -51,6 +58,7 @@ fsim_set_warnings(fsim_control_bench)
 add_custom_command(TARGET fsim_control_bench POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:libJSBSim> $<TARGET_FILE_DIR:fsim_control_bench>)
 add_test(NAME control_alloc COMMAND fsim_control_bench alloc)
+set_tests_properties(control_alloc PROPERTIES LABELS conformance)
 
 # The public C++ SDK against fsim.dll (what a trainer links).
 add_executable(fsim_sdk_tests test_sdk.cpp)

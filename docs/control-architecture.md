@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Status | Accepted 2026-09-26. The owner approved the two-part design and asked for this record before any code; implementation follows the migration order in section 14 |
+| Status | Accepted 2026-09-26. The owner approved the two-part design and asked for this record before any code. Implemented in the migration order of section 14, all six steps (section 17) |
 | Extends | ADR-20 (the multi-level control stack), which stays in force for the runtime |
 | Scope | How consumers command aircraft; how an aircraft describes what it can do; how commands are arbitrated, tracked and ended; how knowledge about one aircraft reaches the control loops |
 | Related | [Design document](FlightSim_System_Architecture_and_Design.md) §9.3 (control), §10.3 (stability rules), §12 (performance); [sdk/control.md](sdk/control.md); [hangar.md](hangar.md) |
@@ -667,7 +667,7 @@ struct ActivityRecord {
 
 ### 10.4 Timing
 
-- **NEW before step k.** The activity is Pending. The runtime flies it during step k, and after step k it is Active. If it also reached its goal during step k, the same processing takes it on to Completed.
+- **NEW before step k.** The activity is Pending. The runtime flies it during step k, and after step k it is Active. If it also reached its goal or failed during step k, the same processing takes it on to Completed or Failed: seen from outside, straight from Pending.
 - **Completion or failure during step k.** The activity is terminal after step k, with `endTime` set to the simulation time at the end of that step.
 - **CANCEL between steps.** It takes effect at the next step's first control update.
 - **Many NEWs between two steps.** They are arbitrated in call order; the last one standing flies.
@@ -793,7 +793,7 @@ NEW for a behaviour allocates, between steps, as it does today. Step 1 removes t
 | --- | --- |
 | `micro` | `ControlStack::update` on a synthetic state with no flight model: 200,000 updates per case, reported in ns per update (median of 5). Cases: actuator, attitude, acceleration, velocity, position, `hold`, `loiter` (parameters) and `waypoints` (three points) |
 | `command` | the legacy façade and the UPDATE fast path, in ns per call over 64 vehicles; NEW and CANCEL for reference |
-| `world` | 64 c172x commanded at the attitude level every world step, as VecEnv does, plus one hangar fly-by-wire and one hangar direct design when present: vehicle-steps/s over 2,000 world steps, with a fixed worker count. `world off` flies the same with every vehicle's protection off (the designs have it on by default) |
+| `world` | 64 c172x commanded at the attitude level every world step, as VecEnv does, plus one hangar fly-by-wire and one hangar direct design when present: vehicle-steps/s over 2,000 world steps, with a fixed worker count. `world off` flies the same with every vehicle's protection off (the designs have it on by default); `world classic` flies the designs' attitude with `pid_attitude`, as before step 5b |
 | `alloc` | heap allocations counted during 10,000 steady-state updates per micro case and 200 steps of the world case: the process's `malloc`, `calloc` and `realloc` entries, in the executable and in libstdc++, redirected to counters |
 | `digest` | for a fixed set of legacy flights (the c172x at each level, a behaviour, a level switch, a reset, and the two hangar designs), an FNV-1a hash of every world step's `VehicleState` and `ControlInputs`, written to a file and compared across builds |
 
@@ -801,9 +801,11 @@ NEW for a behaviour allocates, between steps, as it does today. Step 1 removes t
 
 | Gate | Threshold | Enforced |
 | --- | --- | --- |
-| Allocations in the steady state | 0 | the `alloc` mode as a ctest, in CI |
+| Allocations in the steady state | 0 | the `alloc` mode as a ctest, in CI's conformance step |
 | Legacy flights, steps 1–3 | bit-identical digests against the build before the step | locally at each step; recorded in the commit and in section 17 |
-| Stock aircraft, always | the c172x's checkpoints (state and inputs every 5 s over 60 s, per level and for a behaviour) within 1e-9 relative of committed values. Tolerant of a toolchain's last-bit differences; any real change is orders of magnitude larger | ctest |
+| Stock aircraft, always | the c172x's checkpoints (state and inputs every 5 s over 60 s, per level and for a behaviour) within 1e-9 relative of committed values. Tolerant of a toolchain's last-bit differences; any real change is orders of magnitude larger | ctest, in CI's conformance step |
+| The command lifecycle, every adapter | the conformance suite (step 6) | ctest, in CI's conformance step |
+| Designs' flight | a short manoeuvre suite within hangar's rule, one design per adapter (step 6) | ctest, in CI's conformance step |
 | Runtime update | ≤ baseline + 10 % per case (steps 1–3); unchanged with protection `Off` | recorded per step |
 | Protection | world throughput with protection `Limit` ≥ 97 % of the same flights with it `Off` (`world` against `world off`, interleaved). The owner's decision (2026-09-26): protection is judged by what it costs a simulation, not a single update; the update's cost is recorded | recorded per step |
 | Command path | ≤ baseline + 10 % | recorded per step |
@@ -1072,6 +1074,31 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
   - Every existing update case is within ±2.3 % of step 5a (interleaved, 5 rounds).
   - Flying the attitude over pseudo-controls runs two loops where one ran: 80 ns an update instead of 60 for an attitude command, 105 instead of 83 for a velocity command.
   - World throughput, same binary, 3 interleaved rounds: the F-16C at 99.7 % and the B-52H at 99.3 % of the same flights on the old attitude loop (`world classic`). The c172x, which flies the same loop either way, at 98.7 %: the noise.
+
+**Step 6 (conformance in CI).**
+- **A step of its own.** CI's "Control conformance" step runs every test labelled `conformance` before the others (`ctest --preset ucrt64-release -L conformance`, 7 s here): the three test cases below, the c172x's checkpoints and the allocation gate.
+- **Every capability of every aircraft** (`tests/test_conformance.cpp`). The platform ships the c172x and hangar's 31 designs, between them all three adapters. For each, every descriptor is well formed, and a command built from it goes through NEW, a world step, UPDATE (the same type and another) and CANCEL as the descriptor says.
+- **The lifecycle's rules under random operations.** One aircraft per adapter (the c172x, the B-52H, the F-16C) is driven through seeded random sequences of 600 operations:
+  - NEWs from every source, with every range policy and random axes;
+  - UPDATEs and CANCELs of live, ended and unknown activities, and of another vehicle's;
+  - the existing entry point, world steps, resets and the vehicle default;
+  - a followed vehicle removed.
+- **What is checked between each operation's records before and after it.**
+  - The answer is one its operation may give, and true to the records it was given.
+  - An activity moves only along the diagram's edges, and only by what the operation can do: flown by a step, pending again after a reset, preempted by the activity just made, canceled by its own CANCEL, completed or failed at the end of a world step.
+  - An ended activity never changes, and ids count accepted NEWs.
+  - Each axis has at most one live owner, and the runtime flies it from where the host put it.
+  - A refused operation changes nothing, and the same seed gives the same answers and the same flight.
+- **Coverage.** Each run must reach every edge of the diagram and every answer an operation can give: over the three aircraft, 319 NEWs accepted, 215 activities preempted, 70 canceled on request, 25 completed and 15 failed with their target gone. Chance alone seldom completes a route or loses a target, so every 120 operations the sequence plays one of each, through the same rules.
+- **A finding.** An activity flown and ended in the step that first flies it goes from Pending straight to Completed or Failed; 10.4 now says so for failures too.
+- **A short manoeuvre suite** (`tests/test_manoeuvres.cpp`). Hangar's manoeuvres at the reference speed, judged by the suite's rule, for one design per adapter that designs fly through: the B-52H (`jsbsim.direct`) and the F-16C (`jsbsim.fbw`). The 90° turn must also end within 3°. Both pass every item, with the numbers hangar's own suite gives:
+
+  | | hold, 40 s | 30° bank | 5° pitch | climb | 1.5 g | roll rate | 90° turn ends |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | B-52H, 153 m/s | within 2 m | 5.9 s, 0 % | 5.5 s, 17 % | 7.6 s, 16 % | 1.7 s, 0 % | 1.3 s, 4 % | 90.0° |
+  | F-16C, 164 m/s | within 2 m | 2.0 s, 0 % | 3.0 s, 10 % | 5.3 s, 13 % | 1.0 s, 11 % | 0.5 s, 4 % | 90.0° |
+
+  The stock adapter's c172x flies the shared gains, which C1 freezes with its flights. Its checkpoints hold it exactly instead. By the suite's rule, its acceleration loop would fail: it overshoots a 1.5 g step by 132 %, and that is how it has always flown.
 
 **Allocations.**
 - Per update, none, except `loiter` (4, one per parameter's map node) and `waypoints` (2): the per-step `BehaviorCommand` copy, P6.

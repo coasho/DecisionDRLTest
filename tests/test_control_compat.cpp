@@ -16,7 +16,7 @@
 
 using namespace fsim;
 
-TEST_CASE("the stock c172x flies its closed-loop flights as recorded before the control architecture changed", "[control][world]") {
+TEST_CASE("the stock c172x flies its closed-loop flights as recorded before the control architecture changed", "[control][world][conformance]") {
     // name, world step -> the checkpoint's values (tests/data, written by fsim_control_bench checkpoints)
     std::map<std::pair<std::string, int>, std::vector<double>> recorded;
     std::ifstream in(FSIM_TEST_DATA_DIR "/c172x_checkpoints.txt");

@@ -138,7 +138,9 @@ push, not yet tagged:
   their placards. Commands can own the axes apart - a policy on the bank while an autopilot holds the height and
   speed, merged into one pass down the cascade - with per-engine throttles and a vehicle default that holds
   instead of idling. Envelope protection limits what an aircraft with an envelope is asked for and reports what
-  it does beyond it - how far, how long - without pretending it cannot happen (steps 1-5 of 6).
+  it does beyond it - how far, how long - without pretending it cannot happen. CI checks every adapter against the
+  command lifecycle's state machine, pins the stock c172x's flights and flies a design per adapter through a short
+  manoeuvre suite (all six steps; `ctest --preset ucrt64-release -L conformance`).
 - `sim::VehiclePool` (one worker per physical core), JSBSim 1.3.1 adapter with terrain ground callback,
   `flightsim.exe` headless benchmark.
 
