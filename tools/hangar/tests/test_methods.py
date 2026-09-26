@@ -605,9 +605,11 @@ class FlyByWire(unittest.TestCase):
         from hangar import fcs, jsbsim
         a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
         line = {"alpha_deg": np.array([-10.0, 0.0, 10.0, 20.0]), "slope": 0.3, "departure": np.zeros(4)}
+        share = np.array([-10.0, 0.0, 20.0, 40.0])
         fbw = {"qbar_psf": np.array(fcs.QBAR_PSF), "mach": np.array([0.4, 0.9]), "options": fcs.options(a),
                "gains": {k: np.full((len(fcs.QBAR_PSF), 2), 0.1) for k in fcs.GAINS},
-               "moment": dict(line, elevator=np.array([[0.01, 0.02], [0.0, 0.0], [-0.03, -0.04], [0.05, 0.06]]))}
+               "moment": dict(line, elevator=np.array([[0.01, 0.02], [0.0, 0.0], [-0.03, -0.04], [0.05, 0.06]])),
+               "roll_yaw_share": (share, np.sin(np.radians(share)) - 0.02), "yaw_coupling": 0.7}
         return ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a, fbw)), fbw
 
     def test_pitch_channel_sums_the_compensation_and_the_push(self):
@@ -663,6 +665,111 @@ class FlyByWire(unittest.TestCase):
         caps = fn("dn-stick").find("max").iter("difference")
         self.assertEqual([props(d) for d in caps], [["fcs/fbw/n-alpha", "fcs/fbw/g-ref"]] * 2)
         self.assertEqual(props(fn("dn")), ["accelerations/Nz", "fcs/fbw/g-ref"])
+
+    @staticmethod
+    def aileron_tables(cl_da, cn_da):
+        # an aileron of constant roll and yaw power, nothing else
+        al = np.arange(-20.0, 51.0)
+        d = np.array([-20.0, 0.0, 20.0])
+        z = np.zeros((len(al), 3))
+        return {"alpha": al, "beta": np.array([-3.0, 0.0, 3.0]), "rates": {}, "alphadot": {"CL": 0.0, "Cm": 0.0},
+                "base": {k: z for k in ("CD", "CY", "CL", "Cl", "Cm", "Cn")},
+                "controls": {"aileron": {"deflection": d, "Cl": np.outer(np.ones_like(al), cl_da * np.radians(d)),
+                                         "Cn": np.outer(np.ones_like(al), cn_da * np.radians(d))}}}
+
+    def test_rudder_share_of_a_roll_about_the_flight_path(self):
+        # a stability-axis roll acceleration a turns the body at a cos(alpha)
+        # about x and a sin(alpha) about z; the ailerons give the rolling moment
+        # and mu = Cn_da / Cl_da of it in yaw, the rudder the rest of the yaw.
+        # Without either the rudder's share is sin(alpha); where it is zero, an
+        # aileron's moment alone rolls the aircraft about the flight path
+        from hangar import fcs
+        m, Ixx, Izz = 1e4, 2e4, 1e5
+        share = fcs.roll_yaw_share(self.aileron_tables(0.2, 0.0), (m, None, Ixx, 8e4, Izz, 0.0))
+        np.testing.assert_allclose(share[1], np.sin(np.radians(share[0])), atol=1e-9)
+        for mu, Ixz in ((0.25, 0.0), (0.25, 4e3), (0.0, 6e3)):
+            alphas, c = fcs.roll_yaw_share(self.aileron_tables(0.2, 0.2 * mu), (m, None, Ixx, 8e4, Izz, Ixz))
+            r = np.radians(alphas)
+            with self.subTest(mu=mu, Ixz=Ixz):
+                np.testing.assert_allclose(c, np.sin(r) - mu * Ixx / Izz * np.cos(r) - Ixz / Izz * (np.cos(r) - mu * np.sin(r)),
+                                           atol=1e-9)
+                # the angle of attack where it is zero, and there a pure aileron
+                # moment (L, mu L) through the inertia: rdot / pdot = tan(alpha)
+                a0 = np.interp(0.0, c, r)
+                pdot, rdot = np.linalg.solve([[Ixx, -Ixz], [-Ixz, Izz]], [1.0, mu])
+                self.assertAlmostEqual(rdot / pdot, math.tan(a0), places=3)
+                self.assertGreater(a0, 0.0)
+
+    def test_roll_command_is_what_the_rudder_can_coordinate(self):
+        # the roll-rate command is limited to what the rudder can coordinate: the
+        # stick's rate clipped to PULL_YAW of the rudder's yaw acceleration over
+        # the yaw each unit of roll rate needs while the aircraft pitches under
+        # it; its growth to the roll acceleration all of it coordinates, over the
+        # rudder's share of the roll's yaw - unless the roll asked for could not
+        # leave ENTRY_SIDESLIP even uncoordinated; a roll stops unlimited. The
+        # rudder's yaw acceleration is a design-point table, or with canted
+        # nozzles the power there is now. The yaw damper damps the sideslip's
+        # rate, not a washed-out yaw rate
+        from hangar import fcs
+        from hangar.linear import loaded_inertia
+        from hangar.mass import MassModel
+        for name, vectored in (("gripen", False), ("su57", True)):
+            root, fbw = self.pitch_channel(name)
+            a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
+            if vectored:
+                fbw["vectoring"] = fcs.vectoring(a, loaded_inertia(MassModel(a)))
+                n = (len(fcs.QBAR_PSF), 2)
+                for gains, power in fcs.AXES.values():
+                    fbw["gains"][power] = np.full(n, 5.0 * fcs.POWER_SIGN[power])
+                    for k in gains:
+                        fbw["gains"][k + "_m"] = np.full(n, 0.5)
+                fbw["gains"]["p_per"] = np.full(n, 0.1)
+                root = ET.fromstring("<fdm>%s</fdm>" % "\n".join(fcs.channels_xml(a, fbw)))
+
+            def fn(n):
+                return root.find(".//*[@name='fcs/fbw/%s']" % n)
+
+            def props(el):
+                return [p.text for p in el.iter("property")]
+            with self.subTest(name=name):
+                cmd = fn("p-cmd")
+                self.assertEqual(cmd.tag, "actuator")
+                self.assertEqual(cmd.find("input").text, "fcs/fbw/p-limited")
+                self.assertEqual({r.get("sense"): r.text for r in cmd.findall("rate_limit")},
+                                 {"incr": "fcs/fbw/p-accel-up", "decr": "fcs/fbw/p-accel-down"})
+                for n, stop in (("p-accel-up", "lt"), ("p-accel-down", "gt")):
+                    self.assertEqual(props(fn(n)), ["fcs/fbw/p-accel", "fcs/fbw/p-cmd"])
+                    self.assertIsNotNone(fn(n).find(".//" + stop))
+                self.assertEqual(props(fn("p-limited")), ["fcs/fbw/p-stick", "fcs/fbw/p-yaw-max", "fcs/fbw/p-yaw-max"])
+                cap = fn("p-yaw-max").find("function/quotient")
+                self.assertAlmostEqual(float(cap.find("product/value").text), fcs.PULL_YAW)
+                self.assertEqual(props(cap), ["fcs/fbw/yaw-accel", "fcs/fbw/p-yaw-need"])
+                need = fn("p-yaw-need")
+                self.assertEqual(props(need), ["aero/alphadot-rad_sec", "velocities/q-rad_sec", "aero/alpha-rad",
+                                               "fcs/fbw/yaw-damping", "aero/alpha-rad"])
+                self.assertAlmostEqual(float(need.find(".//value").text), fbw["yaw_coupling"], places=5)
+                acc = fn("p-accel").find("function/product")
+                self.assertEqual(props(acc)[:2], ["fcs/fbw/yaw-accel", "fcs/fbw/roll-yaw-share"])
+                values = [float(v.text) for v in acc.iter("value")]
+                self.assertEqual(values[:3], [fcs.SHARE_FLOOR, 1.0, round(8.0 * fcs.ENTRY_SIDESLIP, 5)])
+                self.assertEqual(props(acc).count("fcs/fbw/p-limited"), 2)
+                rows = [[float(x) for x in r.split()] for r in fn("roll-yaw-share").find(".//tableData").text.strip().splitlines()]
+                np.testing.assert_allclose(np.array(rows), np.column_stack([np.radians(fbw["roll_yaw_share"][0]),
+                                                                             fbw["roll_yaw_share"][1]]), atol=1e-5)
+                accel = fn("yaw-accel")
+                if vectored:
+                    dr = math.radians(max(abs(x) for x in a.channel_limits("rudder")))
+                    self.assertEqual(props(accel), ["fcs/fbw/ndr-total"])
+                    self.assertAlmostEqual(float(accel.find(".//value").text), -dr, places=5)
+                else:
+                    self.assertIsNotNone(accel.find(".//table"))
+                # the ailerons fly the limited command
+                ail = props(fn("aileron"))
+                self.assertIn("fcs/fbw/p-cmd", ail)
+                self.assertNotIn("fcs/fbw/p-stick", ail)
+                # the yaw damper: the sideslip's rate, nothing washed out
+                self.assertIn("aero/betadot-rad_sec", props(fn("rudder")))
+                self.assertIsNone(root.find(".//washout_filter"))
 
 
 class ThrustVectoring(unittest.TestCase):

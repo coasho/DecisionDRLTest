@@ -445,8 +445,30 @@ For fighters:
     Mach), and the gains are designed on that line. A band of local
     instability, such as the F-35A's tail passing through the wing's wake
     at 2–5°, then no longer throws a 3 g step up to 70 % past its target.
-  - Roll: a roll-rate command with bank hold.
-  - Yaw: a yaw damper, and sideslip from the pedals.
+  - Roll: a roll-rate command about the flight path, with bank hold. At
+    angle of attack that roll is also a yaw, r = p sin α, and the rudder
+    gives what the ailerons' own yaw and the inclination of the principal
+    axis do not: sin α − η cos α − (I_xz/I_zz)(cos α − μ sin α) of the roll
+    acceleration, where μ = Cn_δa/Cl_δa and η = μ I_xx/I_zz. That is next to
+    nothing at a cruising angle of attack and half or more past 30°. At
+    70 m/s the rudder's yaw acceleration is a twentieth to a fifth of the
+    ailerons' roll acceleration, so the command is limited to what the
+    rudder can coordinate. Its size is limited to what half the rudder's
+    yaw holds while the aircraft pitches under the roll: the pitch rate's
+    inertia coupling (I_yy − I_xx)/I_zz · pq, the angle of attack rising,
+    and the yaw damping. While it grows, its rate of change is limited to
+    the roll acceleration whose yaw all of it gives, unless even an
+    uncoordinated roll to the rate asked for could not leave 2° of
+    sideslip (at worst c²p²/8Y, c the rudder's share, Y its yaw
+    acceleration). A roll stops unlimited. The rudder's yaw acceleration is
+    the design points' (with canted vectoring nozzles, their yaw at the
+    thrust there is now).
+  - Yaw: a yaw damper on the rate of the sideslip, and sideslip from the
+    pedals. The sideslip's rate is the yaw rate in the dutch roll and zero
+    in a steady coordinated turn, a roll about the flight path and a steady
+    sideslip, so the damper coordinates those for as long as they last. A
+    damper on the washed-out stability-axis yaw rate stopped coordinating a
+    sustained roll.
   - Thrust vectoring: the nozzles turn with the surfaces - through their
     travel as the elevator goes through its own, differentially through half
     of it with the ailerons, and with the rudder when their plane leans
@@ -455,8 +477,10 @@ For fighters:
     both give at the thrust the engines make, and the integrators hold
     moments: the loops respond alike at idle and in afterburner, and the
     nozzles add authority where the surfaces run out. At 70 m/s the F-22A's
-    3 g step rises in 1.0 s instead of 1.8 s; the Su-57, whose canted nozzles
-    yaw it into the roll, rolls 90° in 1.7 s instead of 2.2 s, with half the
+    3 g step rises in 1.0 s instead of 1.8 s. The Su-57's canted nozzles
+    add yaw to its rudder's, so the roll they can coordinate is faster: at
+    70 m/s it rolls at 76°/s and reaches 90° in 2.0 s, where without them
+    it rolls at 37°/s and does not get there in 3 s, at the same 4° of
     sideslip.
 
 ## The 3D model
@@ -632,7 +656,7 @@ Flown through its fly-by-wire:
 | top speed, 40,000 ft | Mach 2.04 (calibrated: TR 1.20) | Mach 2.05 |
 | sustained turn, Mach 0.9, 15,000 ft | 12.5 deg/s | about 13.5 deg/s |
 | full aft stick, 350 kt | 6.7 g, α held at 25.4° | α limit 25° |
-| full-stick roll, 350 kt | 266 deg/s | 308 deg/s (limit) |
+| full-stick roll, 350 kt | 267 deg/s | 308 deg/s (limit) |
 | top speed, sea level | 868 kt | 795 kt |
 | best rate of climb | 62,800 ft/min | 50,000 ft/min |
 | service ceiling | 62,300 ft | 50,000+ ft |
@@ -851,11 +875,15 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   directional stability than the real one. Thrust vectoring adds control,
   but the angle-of-attack limits stay the aerodynamic ones (the Su-57's
   26°, the F-22A's 40°): no post-stall manoeuvres such as the cobra.
-  At 70 m/s, the edge of 1 g flight, a full-stick roll holding height
-  sideslips 20-35° in several fighters (the F-35A, Gripen, J-20A, Typhoon),
-  and 58° in the F-22A, whose nozzles let it pull to near its 40° limit
-  while rolling: the roll command is not limited by the yaw the rudder can
-  coordinate. From 90 m/s none passes 14°. The F-35A's limiter holds 20°,
+  At 70 m/s, the edge of 1 g flight, the rudder can coordinate only a slow
+  roll, and the roll command is held to it (see Methods, Fly-by-wire). A
+  full-stick roll holding height sideslips 4-16° there, where it
+  sideslipped 20-35° before (the F-35A, Gripen, J-20A, Typhoon), and takes
+  2-3 s to 90° of bank, where it took 1.3-2.4 s; six of the fourteen do not
+  reach 90° within the test's 3 s (four did not before). The F-22A, whose
+  nozzles let it pull to its 40° limit while rolling, is directionally
+  unstable there and still sideslips 22° (58°, and a departure, before).
+  From 90 m/s none passes 11°. The F-35A's limiter holds 20°,
   though full nose-down stabilator brings its nose down to 38° (the real
   one flies to 50°).
 - **Tails on booms.** The lattice carries a horizontal tail across the gap
