@@ -19,7 +19,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -28,7 +28,7 @@ jobs:
       # Gymnasium adapter when it is there. (Stable-Baselines3 would pull in
       # PyTorch: its tests skip.) hangar's report and liveries need
       # matplotlib and Pillow.
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         id: py
         with:
           python-version: '3.12'
@@ -65,7 +65,7 @@ jobs:
         id: vsgkey
         run: echo "key=vsg-$(git submodule status third_party/vsg third_party/vsgXchange third_party/vsgImGui | sha256sum | cut -c1-16)-$(sha256sum deps/CMakeLists.txt | cut -c1-8)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: vsgcache
         with:
           path: build/deps-ucrt64/install
@@ -101,14 +101,14 @@ jobs:
           (cd build/ucrt64-release && cpack)
           dist/flightsim/bin/flightsim.exe --vehicles 2 --steps 10 --benchmark
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: flightsim-win64
           path: build/ucrt64-release/package/*.zip
           if-no-files-found: error
 
       # A tag v<version> publishes the zip as a GitHub release.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           files: build/ucrt64-release/package/*.zip
