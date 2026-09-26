@@ -9,6 +9,7 @@
 
 #include "fsim/Capability.h"
 #include "fsim/Control.h"
+#include "fsim/VehicleProfile.h"
 
 #include <array>
 #include <cstdint>
@@ -50,17 +51,7 @@ struct SupportDemand {
     double value = kHold;          ///< normalised position; kHold = keep the last input
 };
 
-inline constexpr double kNoLimit = std::numeric_limits<double>::quiet_NaN();
-
-/// One configuration's limits (section 11); NaN = no limit.
-struct EnvelopeLimits {
-    double loadFactorMin = kNoLimit, loadFactorMax = kNoLimit; ///< g
-    double alphaMaxRad = kNoLimit;
-    double bankMaxRad = kNoLimit, pitchMinRad = kNoLimit, pitchMaxRad = kNoLimit;
-    double rollRateMaxRadS = kNoLimit;
-    double casMinMs = kNoLimit, casMaxMs = kNoLimit;           ///< calibrated airspeed
-    double machMax = kNoLimit;
-};
+inline constexpr double kNoLimit = kUnknown;
 
 enum class ProtectionMode : std::uint8_t { Off, Report, Limit };
 

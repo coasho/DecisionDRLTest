@@ -4,6 +4,7 @@
 #include "core/Units.h"
 #include "io/AssetResolver.h"
 #include "platform/Threads.h"
+#include "control/Profile.h"
 #include "sim/JsbsimModel.h"
 
 #include <algorithm>
@@ -19,27 +20,25 @@ void copyName(char* dst, std::size_t capacity, const std::string& src) {
     std::memcpy(dst, src.data(), std::min(src.size(), capacity - 1));
 }
 
-/// The aircraft's own gains for the built-in controllers (design 9.3): its
-/// properties fsim/control/<controller id>/<parameter>, the parameter's dots
-/// written as slashes ("pid_attitude/pitch/kp" sets pid_attitude's
-/// "pitch.kp"). A setting no built-in takes is reported once, here.
-std::vector<control::ControllerSetting> readControllerSettings(const std::string& aircraft, const sim::FlightModel& model) {
-    std::vector<control::ControllerSetting> out;
-    for (auto& [path, value] : model.properties("fsim/control")) {
-        const auto slash = path.find('/');
-        if (slash == std::string::npos || slash + 1 >= path.size()) continue;
-        std::string parameter = path.substr(slash + 1);
-        std::replace(parameter.begin(), parameter.end(), '/', '.');
-        out.push_back({path.substr(0, slash), std::move(parameter), value});
+/// The aircraft's profile (docs/control-architecture.md, 7): its properties
+/// fsim/<section>/..., read once per aircraft type. Its gains are the control
+/// section, fsim/control/<controller id>/<parameter> with the parameter's
+/// dots written as slashes ("pid_attitude/pitch/kp" sets pid_attitude's
+/// "pitch.kp"); a setting no built-in takes is reported once, here.
+std::shared_ptr<const control::VehicleProfile> readAircraftProfile(const std::string& aircraft, const sim::FlightModel& model) {
+    std::vector<std::string> warnings;
+    auto profile = std::make_shared<control::VehicleProfile>(
+        control::readProfile(aircraft, [&model](std::string_view prefix) { return model.properties(prefix); }, warnings));
+    for (const auto& w : warnings) LOG_WARN("session") << w;
+    const auto& settings = profile->control.settings;
+    if (!settings.empty()) {
+        control::ControlStack probe;
+        for (const auto& s : probe.setControllerSettings(settings))
+            LOG_WARN("session") << "aircraft '" << aircraft << "': no built-in controller takes fsim/control setting " << s.controller << " "
+                                << s.parameter << "; kept for a controller registered under that id";
+        LOG_INFO("session") << "aircraft '" << aircraft << "' carries " << settings.size() << " controller settings";
     }
-    if (out.empty()) return out;
-    control::ControlStack probe;
-    const auto unused = probe.setControllerSettings(out);
-    for (const auto& s : unused)
-        LOG_WARN("session") << "aircraft '" << aircraft << "': no built-in controller takes fsim/control setting " << s.controller << " "
-                            << s.parameter << "; kept for a controller registered under that id";
-    LOG_INFO("session") << "aircraft '" << aircraft << "' carries " << out.size() << " controller settings";
-    return out;
+    return profile;
 }
 
 } // namespace
@@ -139,7 +138,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
             LOG_ERROR("session") << "failed to load aircraft '" << aircraft << "'";
             return 0;
         }
-        if (!controllerSettings_.count(aircraft)) controllerSettings_[aircraft] = readControllerSettings(aircraft, *model);
+        if (!profiles_.count(aircraft)) profiles_[aircraft] = readAircraftProfile(aircraft, *model);
         slot = pool_->add(std::move(model));
         entries_.emplace_back();
         slotAircraft_.push_back(aircraft);
@@ -166,8 +165,10 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     e->inputs.setThrottleAll(spec.initial.onGround ? 0.0 : 0.65);
     e->inputs.gearDown = spec.initial.onGround ? 1.0 : 0.0;
     e->stack.setInitialInputs(e->inputs);
-    if (const auto it = controllerSettings_.find(aircraft); it != controllerSettings_.end() && !it->second.empty())
-        e->stack.setControllerSettings(it->second);
+    e->profile = profiles_[aircraft];
+    if (!e->profile) e->profile = std::make_shared<control::VehicleProfile>();
+    if (spec.profile) e->profile = std::make_shared<control::VehicleProfile>(control::mergeProfile(*e->profile, *spec.profile));
+    if (!e->profile->control.settings.empty()) e->stack.setControllerSettings(e->profile->control.settings);
     e->host.bind(id, e->stack, catalog_);
     for (auto& factory : worldEffects_) e->effects.push_back(factory());
     sim::FlightModel& model = pool_->vehicle(slot);
@@ -374,6 +375,11 @@ control::CapabilityStatus World::capabilityStatus(std::uint32_t id, std::string_
     const int index = catalog_.find(capability);
     if (!e || index < 0) return {control::Availability::Disabled, e ? control::Reason::UnknownCapability : control::Reason::UnknownVehicle};
     return e->host.status(static_cast<std::size_t>(index), pool_->states()[e->slot]);
+}
+
+const control::VehicleProfile* World::profile(std::uint32_t id) const noexcept {
+    const Entry* e = entry(id);
+    return e ? e->profile.get() : nullptr;
 }
 
 void World::levelChanged(Entry& e) {

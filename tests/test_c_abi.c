@@ -464,6 +464,17 @@ int main(int argc, char** argv) {
         CHECK(fsim_vehicle_activity(world, a, 0, &ai) == FSIM_OK && ai.vehicle == a);
         CHECK(fsim_activity_get(world, ((fsim_activity_id)a << 32) | 999u, &ai) != FSIM_OK);
         CHECK(fsim_vehicle_command_attitude(world, a, &att) == FSIM_OK); /* nothing holds its axes now */
+        {
+            /* the profile: a stock c172x carries no sections */
+            double value = 0.0;
+            uint32_t version = 9;
+            int32_t provenance = -1;
+            CHECK(fsim_vehicle_profile_value(world, a, "envelope/clean/n_max", &value) == FSIM_OK && isnan(value));
+            CHECK(fsim_vehicle_profile_section(world, a, "control", &version, &provenance) == FSIM_OK);
+            CHECK(version == 0 && provenance == 0);
+            CHECK(fsim_vehicle_profile_section(world, a, "nonsense", &version, &provenance) != FSIM_OK);
+            CHECK(fsim_vehicle_profile_value(world, 999, "identity/class", &value) != FSIM_OK);
+        }
         }
         fsim_world_destroy(world);
     }

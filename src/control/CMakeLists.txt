@@ -8,6 +8,8 @@ add_library(fsim_control STATIC
     Catalog.cpp
     CapabilityHost.h
     CapabilityHost.cpp
+    Profile.h
+    Profile.cpp
     Registry.h
     Registry.cpp
     Pid.h

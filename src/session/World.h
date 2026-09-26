@@ -9,6 +9,7 @@
 #include "control/CapabilityHost.h"
 #include "control/Catalog.h"
 #include "control/ControlStack.h"
+#include "fsim/VehicleProfile.h"
 #include "effects/Effect.h"
 #include "fsim/EnvironmentState.h"
 #include "fsim/InitialConditions.h"
@@ -56,6 +57,9 @@ struct VehicleSpec {
     sim::InitialConditions initial;
     std::string model;                  ///< optional visual override for the viewer (glTF path)
     unsigned controlDivider = 1;        ///< run the control stack every N FDM steps
+    /// Sections of the aircraft's profile to replace for this vehicle (those
+    /// present(); docs/control-architecture.md, 7.4); null = the aircraft's own.
+    std::shared_ptr<const control::VehicleProfile> profile;
 };
 
 struct VehicleInfo {
@@ -112,6 +116,8 @@ public:
     /// What a vehicle offers (empty for an unknown vehicle).
     const std::vector<control::CapabilityDescriptor>& capabilities(std::uint32_t id);
     control::CapabilityStatus capabilityStatus(std::uint32_t id, std::string_view capability) const;
+    /// What the vehicle flies with: its aircraft's profile, with the spec's sections over it.
+    const control::VehicleProfile* profile(std::uint32_t id) const noexcept;
     control::ControlStack* controls(std::uint32_t id) noexcept;
     const control::ControlStack* controls(std::uint32_t id) const noexcept;
 
@@ -152,6 +158,7 @@ private:
         control::CapabilityHost host;      ///< its contract layer (bound to `stack`)
         control::ActivityId commanded = 0; ///< the activity the last accepted command made or updated
         control::Level level = control::Level::Actuator; ///< as last published and recorded
+        std::shared_ptr<const control::VehicleProfile> profile;
         std::vector<std::unique_ptr<effects::Effect>> effects;
         effects::SensedState sensed;
         Rng rng;
@@ -193,9 +200,8 @@ private:
     std::unordered_map<std::uint32_t, std::size_t> idToSlot_;
     std::vector<std::size_t> freeSlots_;
     std::vector<std::string> slotAircraft_;                     ///< loaded aircraft per slot (for reuse)
-    /// Each loaded aircraft's own settings for the built-in controllers
-    /// (JSBSim properties under fsim/control), read on its first load.
-    std::unordered_map<std::string, std::vector<control::ControllerSetting>> controllerSettings_;
+    /// Each loaded aircraft's profile (JSBSim properties under fsim/), read on its first load.
+    std::unordered_map<std::string, std::shared_ptr<const control::VehicleProfile>> profiles_;
     std::vector<sim::ControlInputs> poolInputs_;
     std::vector<sim::VehicleState> stepStates_;                 ///< by slot: every state as the current step began
     control::CapabilityCatalog catalog_;                        ///< what every vehicle offers (per aircraft type from step 2)

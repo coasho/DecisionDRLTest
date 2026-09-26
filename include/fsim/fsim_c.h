@@ -382,6 +382,14 @@ FSIM_API int fsim_activity_get(const fsim_world* world, fsim_activity_id activit
 FSIM_API uint32_t fsim_vehicle_activity_count(const fsim_world* world, uint32_t id);
 FSIM_API int fsim_vehicle_activity(const fsim_world* world, uint32_t id, uint32_t index, fsim_activity_info* out);
 FSIM_API const char* fsim_reason_name(int reason);             /* "authority_held", "goal_reached", ... */
+/* The vehicle's profile (docs/control-architecture.md, 7): a field by its path
+ * as the aircraft file names it, in the unit its name gives -
+ * "envelope/clean/n_max", "envelope/clean/alpha_max_deg", "plant/roll/tau_s",
+ * "identity/class", "control/pid_attitude/pitch/kp" - NaN if unknown; and a
+ * section's version (0: the aircraft has none) and provenance (0 default,
+ * 1 hangar, 2 identified, 3 user, 4 derived from the flight model). */
+FSIM_API int fsim_vehicle_profile_value(const fsim_world* world, uint32_t id, const char* path, double* value);
+FSIM_API int fsim_vehicle_profile_section(const fsim_world* world, uint32_t id, const char* section, uint32_t* version, int32_t* provenance);
 FSIM_API const char* fsim_activity_state_name(int state);      /* "pending", "active", ... */
 
 FSIM_API int fsim_world_get_environment(const fsim_world* world, fsim_environment* out);

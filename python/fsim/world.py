@@ -321,6 +321,18 @@ class Vehicle:
         return [Capability(c[0], c[1], c[2], c[3], Level(c[4]), c[5], c[6], c[7], c[8], [Parameter(*p) for p in c[9]])
                 for c in self._h.capabilities(self.id)]
 
+    def profile_value(self, path):
+        """A field of the vehicle's profile by its path as the aircraft file
+        names it, in the unit its name gives: "envelope/clean/n_max",
+        "envelope/clean/alpha_max_deg", "plant/roll/tau_s", "identity/class",
+        "control/pid_attitude/pitch/kp"; NaN if unknown (docs/control-architecture.md, 7)."""
+        return self._h.profile_value(self.id, path)
+
+    def profile_section(self, section):
+        """(version, provenance) of a profile section: version 0 if the aircraft
+        has none; provenance 0 default, 1 hangar, 2 identified, 3 user, 4 derived."""
+        return self._h.profile_section(self.id, section)
+
     def capability_status(self, capability):
         """(Availability, reason) of a capability by id, e.g. "fsim.guidance.hold"."""
         availability, reason = self._h.capability_status(self.id, capability)

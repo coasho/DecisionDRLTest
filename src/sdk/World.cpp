@@ -129,6 +129,12 @@ std::vector<control::CapabilityDescriptor> Vehicle::capabilities() const {
     return world_ ? world_->impl_->capabilities(id_) : std::vector<control::CapabilityDescriptor>{};
 }
 
+const control::VehicleProfile& Vehicle::profile() const {
+    static const control::VehicleProfile none;
+    const auto* p = world_ ? world_->impl_->profile(id_) : nullptr;
+    return p ? *p : none;
+}
+
 control::CapabilityStatus Vehicle::capabilityStatus(std::string_view capability) const {
     if (world_) return world_->impl_->capabilityStatus(id_, capability);
     return {control::Availability::Disabled, control::Reason::UnknownVehicle};
@@ -200,6 +206,7 @@ Vehicle World::createVehicle(const VehicleSpec& spec) {
     s.initial = spec.initial;
     s.model = spec.model;
     s.controlDivider = spec.controlDivider;
+    s.profile = spec.profile;
     const std::uint32_t id = impl_->createVehicle(s);
     if (!id) throw Error("World::createVehicle: failed to create '" + spec.name + "' of type '" + spec.type + "' (see log)");
     return Vehicle(this, id);

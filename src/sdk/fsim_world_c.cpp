@@ -596,6 +596,22 @@ FSIM_API int fsim_vehicle_activity(const fsim_world* world, uint32_t id, uint32_
     return FSIM_OK;
 }
 
+FSIM_API int fsim_vehicle_profile_value(const fsim_world* world, uint32_t id, const char* path, double* value) {
+    const auto* p = world && path && value ? world->world.profile(id) : nullptr;
+    if (!p) return FSIM_INVALID_ARGUMENT;
+    *value = fsim::control::profileValue(*p, path);
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_vehicle_profile_section(const fsim_world* world, uint32_t id, const char* section, uint32_t* version, int32_t* provenance) {
+    const auto* p = world && section ? world->world.profile(id) : nullptr;
+    const auto* h = p ? fsim::control::sectionHeader(*p, section) : nullptr;
+    if (!h) return FSIM_INVALID_ARGUMENT;
+    if (version) *version = h->version;
+    if (provenance) *provenance = static_cast<int32_t>(h->provenance);
+    return FSIM_OK;
+}
+
 FSIM_API const char* fsim_reason_name(int reason) {
     return reason >= 0 && reason < static_cast<int>(fsim::control::Reason::Count) ? fsim::control::reasonName(static_cast<fsim::control::Reason>(reason))
                                                                                   : "?";

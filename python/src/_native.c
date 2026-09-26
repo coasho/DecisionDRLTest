@@ -967,6 +967,33 @@ static PyObject* world_capability_status(PyObject* o, PyObject* const* args, Py_
     return Py_BuildValue("(ii)", availability, reason);
 }
 
+/* profile_value(id, path) -> float (NaN if unknown) */
+static PyObject* world_profile_value(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    double value = 0.0;
+    if (!check_args(n, 2, 2, "profile_value") || !as_u32(args[0], &id)) return NULL;
+    const char* path = as_str(args[1], "profile path");
+    if (!path) return NULL;
+    if (fsim_vehicle_profile_value(self->world, id, path, &value) != FSIM_OK) return fail();
+    return PyFloat_FromDouble(value);
+}
+
+/* profile_section(id, section) -> (version, provenance) */
+static PyObject* world_profile_section(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id, version = 0;
+    int32_t provenance = 0;
+    if (!check_args(n, 2, 2, "profile_section") || !as_u32(args[0], &id)) return NULL;
+    const char* section = as_str(args[1], "section name");
+    if (!section) return NULL;
+    if (fsim_vehicle_profile_section(self->world, id, section, &version, &provenance) != FSIM_OK) {
+        PyErr_Format(PyExc_KeyError, "no vehicle %u or no profile section %s", (unsigned)id, section);
+        return NULL;
+    }
+    return Py_BuildValue("(Ii)", version, provenance);
+}
+
 static PyObject* world_active_level(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     uint32_t id;
     if (!check_args(n, 1, 1, "active_level") || !as_u32(args[0], &id)) return NULL;
@@ -1243,6 +1270,8 @@ static PyMethodDef world_methods[] = {
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
     FAST("capabilities", world_capabilities, "capabilities(id) -> [capability]"),
     FAST("capability_status", world_capability_status, "capability_status(id, capability) -> (availability, reason)"),
+    FAST("profile_value", world_profile_value, "profile_value(id, path) -> float, NaN if unknown"),
+    FAST("profile_section", world_profile_section, "profile_section(id, section) -> (version, provenance)"),
     FAST("active_level", world_active_level, "active_level(id)"),
     FAST("behavior_finished", world_behavior_finished, "behavior_finished(id)"),
     FAST("use_controller", world_use_controller, "use_controller(id, level, controller_id)"),

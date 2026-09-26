@@ -226,6 +226,42 @@ const Command* d = stack.derived(Level::Attitude);   // what the cascade produce
 for telemetry, for observations (e.g. the attitude your velocity policy
 implied), or to debug a behaviour.
 
+## The aircraft's profile
+
+`#include <fsim/VehicleProfile.h>`. What the platform knows about an aircraft
+is its *profile* ([ADR-26](../control-architecture.md), section 7). It is
+seven small sections, each with its own version and provenance (default,
+hangar, identified, user, derived):
+
+| Section | What it holds |
+| --- | --- |
+| `identity` | class, and whether the controls are the aircraft's own FCS, surfaces or a fly-by-wire law |
+| `effectors` | what the stick means; flaps, retractable gear, speedbrake, pitch trim |
+| `envelope` | load factor, angle of attack, bank, pitch, roll rate, airspeed and Mach limits, clean and with flaps |
+| `propulsion` | engines, type, afterburner, reverse |
+| `plant` | the identified responses at a reference condition |
+| `performance` | stall speeds, maximum speed, ceiling |
+| `control` | the gains above |
+
+An aircraft carries its profile as JSBSim properties `fsim/<section>/<field>`
+in its file; the `fsim/control` gains were the first. A section the aircraft
+lacks keeps its defaults (version 0).
+
+```cpp
+const auto& p = v.profile();
+if (p.envelope.header.present()) use(p.envelope.clean.loadFactorMax);
+control::profileValue(p, "envelope/clean/alpha_max_deg");   // by path, in the unit it names; NaN if unknown
+
+auto mine = std::make_shared<control::VehicleProfile>();     // a stock aircraft's envelope, say
+mine->envelope.header = {1, control::Provenance::User};
+mine->envelope.clean.loadFactorMax = 3.8;
+spec.profile = mine;                                         // replaces those sections for this vehicle only
+```
+
+`fsim_vehicle_profile_value` and `fsim_vehicle_profile_section` do the same
+from C, and `vehicle.profile_value(path)` and `vehicle.profile_section(name)`
+from Python.
+
 ## Writing a controller
 
 A controller accepts a command at its level and returns a command at **any

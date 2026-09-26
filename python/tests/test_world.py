@@ -214,6 +214,11 @@ class CapabilityTest(unittest.TestCase):
         self.assertTrue(caps["fsim.guidance.pursuit"].needs_target)
         self.assertEqual(v.capability_status("fsim.guidance.hold"), (fsim.Availability.AVAILABLE, "none"))
         self.assertEqual(v.capability_status("no.such.thing")[1], "unknown_capability")
+        # the profile: a stock c172x carries no sections
+        self.assertEqual(v.profile_section("control"), (0, 0))
+        self.assertTrue(math.isnan(v.profile_value("envelope/clean/n_max")))
+        with self.assertRaises(KeyError):
+            v.profile_section("nonsense")
 
     def test_submit_update_cancel(self):
         world = make_world(name="py-activities")

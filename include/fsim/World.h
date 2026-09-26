@@ -17,6 +17,7 @@
 #include "fsim/GroundProvider.h"
 #include "fsim/InitialConditions.h"
 #include "fsim/Property.h"
+#include "fsim/VehicleProfile.h"
 #include "fsim/VehicleState.h"
 
 #include <cstdint>
@@ -66,6 +67,10 @@ struct VehicleSpec {
     InitialConditions initial;
     std::string model;                ///< optional glTF for the viewer
     unsigned controlDivider = 1;      ///< control stack every N FDM steps
+    /// Profile sections to replace for this vehicle (those present(); see
+    /// docs/control-architecture.md, 7.4): how a stock aircraft gets an
+    /// envelope, say. Null = the aircraft's own.
+    std::shared_ptr<const control::VehicleProfile> profile;
 };
 
 /// Calendar UTC for Environment::setTime.
@@ -149,6 +154,9 @@ public:
     /// What the vehicle offers: its flight levels and behaviours.
     std::vector<control::CapabilityDescriptor> capabilities() const;
     control::CapabilityStatus capabilityStatus(std::string_view capability) const;
+    /// What the vehicle knows about its aircraft: identity, effectors, envelope,
+    /// propulsion, plant, performance, control (docs/control-architecture.md, 7).
+    const control::VehicleProfile& profile() const;
     control::ControlStack& controls();
     control::Level activeLevel() const;
     bool use(control::Level level, std::string_view controllerId);
