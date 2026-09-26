@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -552,11 +553,21 @@ private:
 };
 
 // -- operators -------------------------------------------------------------------------------
+//
+// An operator's eval(p) is below(p, kFar), its whole value. A subtraction
+// asks its cutter, and a union its children after the first, only whether
+// they fall below the distance that would change the result.
+
+constexpr double kFar = std::numeric_limits<double>::infinity();
 
 /// Union, smooth over k: the fillet between its children. A child whose box
 /// lies further than the result so far (plus k) cannot change it and is not
 /// evaluated - but one whose box holds the point may hold the point, however
-/// deep inside the others it is, and always is.
+/// deep inside the others it is, and always is. A hard union asks each later
+/// child only whether it falls below the result so far (or the cutoff); a
+/// smooth one whether it falls below the result so far plus k (a child
+/// within k of it still moves the fillet, and no fillet lies k below its
+/// children).
 class Union final : public Node {
 public:
     Union(std::vector<NodePtr> kids, double k) : kids_(std::move(kids)), k_(k), lb_(kids_.size()) {
@@ -565,7 +576,9 @@ public:
         box = box.padded(0.5 * k_);
     }
 
-    Sample eval(V3 p) const override {
+    Sample eval(V3 p) const override { return below(p, kFar); }
+
+    Sample below(V3 p, double cutoff) const override {
         const std::size_t n = kids_.size();
         std::vector<double> lb(n);
         std::size_t first = 0;
@@ -573,11 +586,14 @@ public:
             lb[i] = kids_[i]->box.distance(p);
             if (lb[i] < lb[first]) first = i;
         }
-        Sample s = kids_[first]->eval(p);
+        if (lb[first] > 0.0 && lb[first] >= cutoff + k_) return {lb[first], 0}; // no child reaches below
+        const bool hard = k_ <= 0.0;
+        Sample s = kids_[first]->below(p, hard ? cutoff : kFar);
         double raw = s.d;
         for (std::size_t i = 0; i < n; ++i) {
-            if (i == first || (lb[i] > 0.0 && lb[i] >= s.d + k_)) continue;
-            const Sample c = kids_[i]->eval(p);
+            const double reach = hard ? std::min(s.d, cutoff) : s.d + k_;
+            if (i == first || (lb[i] > 0.0 && lb[i] >= reach)) continue;
+            const Sample c = kids_[i]->below(p, reach);
             if (c.d < raw) {
                 raw = c.d;
                 s.material = c.material;
@@ -594,15 +610,26 @@ private:
 };
 
 /// a minus b, smooth over k; the cut's surface takes cut_material (or b's).
+/// b changes the distance only where its own is below k less a's, so b is
+/// left out where its box lies further off - but not where its box holds
+/// the point: a point outside a may still lie deep inside b, and b's
+/// surface is then the nearer (just outside a skin that was cut away,
+/// beside a control surface's gap). b is asked only whether it falls below
+/// that, and stops at its first part that does not.
 class Subtract final : public Node {
 public:
     Subtract(NodePtr a, NodePtr b, double k, int cut) : a_(std::move(a)), b_(std::move(b)), k_(k), cut_(cut) {
         box = a_->box;
     }
-    Sample eval(V3 p) const override {
-        Sample s = a_->eval(p);
-        if (b_->box.distance(p) > k_ - s.d) return s; // b is too far to cut here
-        const Sample c = b_->eval(p);
+
+    Sample eval(V3 p) const override { return below(p, kFar); }
+
+    Sample below(V3 p, double cutoff) const override {
+        Sample s = a_->below(p, cutoff);
+        if (s.d >= cutoff) return s; // a cut only takes material away
+        const double lb = b_->box.distance(p);
+        if (lb > 0.0 && lb > k_ - s.d) return s; // b is too far to cut here
+        const Sample c = b_->below(p, k_ - s.d);
         if (-c.d > s.d) s.material = cut_ >= 0 ? cut_ : c.material;
         s.d = smax(s.d, -c.d, k_);
         return s;
@@ -614,6 +641,7 @@ private:
     int cut_;
 };
 
+/// The intersection: once one child lies beyond the cutoff, so does it.
 class Intersect final : public Node {
 public:
     Intersect(std::vector<NodePtr> kids, double k) : kids_(std::move(kids)), k_(k) {
@@ -621,11 +649,14 @@ public:
         box = kids_.front()->box;
         for (const auto& c : kids_) box = box.intersect(c->box);
     }
-    Sample eval(V3 p) const override {
-        Sample s = kids_.front()->eval(p);
+
+    Sample eval(V3 p) const override { return below(p, kFar); }
+
+    Sample below(V3 p, double cutoff) const override {
+        Sample s = kids_.front()->below(p, cutoff);
         double raw = s.d;
-        for (std::size_t i = 1; i < kids_.size(); ++i) {
-            const Sample c = kids_[i]->eval(p);
+        for (std::size_t i = 1; i < kids_.size() && s.d < cutoff; ++i) {
+            const Sample c = kids_[i]->below(p, cutoff);
             if (c.d > raw) {
                 raw = c.d;
                 s.material = c.material;
@@ -648,7 +679,8 @@ public:
         box.add({box.lo.x, -box.hi.y, box.lo.z});
         box.add({box.hi.x, -box.lo.y, box.hi.z});
     }
-    Sample eval(V3 p) const override { return kid_->eval({p.x, std::fabs(p.y), p.z}); }
+    Sample eval(V3 p) const override { return below(p, kFar); }
+    Sample below(V3 p, double cutoff) const override { return kid_->below({p.x, std::fabs(p.y), p.z}, cutoff); }
 
 private:
     NodePtr kid_;
@@ -661,7 +693,8 @@ public:
         box.add({kid_->box.lo.x, -kid_->box.hi.y, kid_->box.lo.z});
         box.add({kid_->box.hi.x, -kid_->box.lo.y, kid_->box.hi.z});
     }
-    Sample eval(V3 p) const override { return kid_->eval({p.x, -p.y, p.z}); }
+    Sample eval(V3 p) const override { return below(p, kFar); }
+    Sample below(V3 p, double cutoff) const override { return kid_->below({p.x, -p.y, p.z}, cutoff); }
 
 private:
     NodePtr kid_;
@@ -671,8 +704,9 @@ private:
 class Offset final : public Node {
 public:
     Offset(NodePtr kid, double r) : kid_(std::move(kid)), r_(r) { box = kid_->box.padded(std::max(r_, 0.0)); }
-    Sample eval(V3 p) const override {
-        Sample s = kid_->eval(p);
+    Sample eval(V3 p) const override { return below(p, kFar); }
+    Sample below(V3 p, double cutoff) const override {
+        Sample s = kid_->below(p, cutoff + r_);
         s.d -= r_;
         return s;
     }
@@ -687,8 +721,9 @@ private:
 class Paint final : public Node {
 public:
     Paint(NodePtr kid, int material) : kid_(std::move(kid)), mat_(material) { box = kid_->box; }
-    Sample eval(V3 p) const override {
-        Sample s = kid_->eval(p);
+    Sample eval(V3 p) const override { return below(p, kFar); }
+    Sample below(V3 p, double cutoff) const override {
+        Sample s = kid_->below(p, cutoff);
         s.material = mat_;
         return s;
     }

@@ -498,7 +498,9 @@ The model stage writes `<name>.glb` from the same design:
   as by its own shape, so a fillet or a canopy frame near such an edge grows
   nothing away from it.
 - **Control surfaces.** Each one, and each leading-edge flap, is cut from its
-  surface with a 12 mm gap and turns on its own hinge.
+  surface with a 12 mm gap and turns on its own hinge. The gap's edges are
+  square: beside a cut the mesher measures a point by how deep in the cut
+  it lies, not by the skin the cut took away.
 - **Landing gear.** Each leg swings about its trunnion and twists about its
   strut into a bay cut into the airframe. The bay opens where the leg passes
   through the skin; its two doors hinge on the edges either side of the leg's

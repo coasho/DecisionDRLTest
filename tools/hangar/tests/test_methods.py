@@ -1819,6 +1819,39 @@ class Model3D(unittest.TestCase):
             d, _ = probe([[1.0, 0.8, 0.9], [1.0, -0.3, 0.7], [2.5, 0.8, 0.9]])
         np.testing.assert_allclose(d, [0.5, 0.5 ** 0.5, 0.5 ** 0.5], rtol=0.01)
 
+    def test_a_cut_reaches_past_the_skin_it_takes_away(self):
+        # just outside a solid, inside what is cut from it, a point is as far
+        # from the cut solid as it is deep in the cut, not as near as the skin
+        # the cut took away: the mesher places the surface on its grid's edges
+        # by these values, and a subtraction that left its cutter out
+        # wherever the point lay outside the solid read 1 mm here - the
+        # edges of a control surface's gap, a gear bay or a duct stood up to
+        # 23 mm off
+        from hangar.shape import meshkit
+        if meshkit.library() is None:
+            self.skipTest("hangar_meshkit is not built")
+        wing = {"prim": "box", "centre": [1.0, 0.0, 0.0], "half": [1.0, 0.5, 0.1]}
+        body = {"prim": "ellipsoid", "centre": [-1.0, 0.0, 0.0], "radii": [1.5, 0.4, 0.4], "material": 1}
+        solid = {"op": "union", "k": 0.0, "children": [wing, body]}
+        # the wing's end cut off: 1 mm over the skin that went, 0.199 m under
+        # the cutter's top; inside the wing there; over the skin that stays,
+        # clear of the cutter's box
+        pts = [[1.8, 0.0, 0.101], [1.8, 0.0, 0.0], [1.2, 0.0, 0.101]]
+        cutter = {"prim": "box", "centre": [2.0, 0.0, 0.0], "half": [0.5, 0.3, 0.3]}
+        d, mat = meshkit.evaluate({"root": {"op": "subtract", "k": 0.0, "cut_material": 3, "a": solid, "b": cutter}}, pts)
+        np.testing.assert_allclose(d, [0.199, 0.3, 0.001], atol=1e-9)
+        self.assertEqual(list(mat), [3, 3, 0])
+        # cut as a control surface is: the band it spans, no further off the
+        # wing than 5 cm, among other cuts - asked only whether it reaches
+        # past the skin, it stops at the band where the point lies outside it
+        band = {"prim": "box", "centre": [2.0, 0.0, 0.0], "half": [0.5, 0.3, 1.0]}
+        cut = {"op": "intersect", "k": 0.0, "children": [band, {"op": "offset", "r": 0.05, "child": wing}]}
+        other = {"prim": "box", "centre": [-1.0, 3.0, 0.0], "half": [0.2, 0.2, 0.2]}
+        cuts = {"op": "union", "k": 0.0, "children": [other, cut]}
+        d, mat = meshkit.evaluate({"root": {"op": "subtract", "k": 0.0, "cut_material": 3, "a": solid, "b": cuts}}, pts)
+        np.testing.assert_allclose(d, [0.049, 0.15, 0.001], atol=1e-9)
+        self.assertEqual(list(mat), [3, 3, 0])
+
     def test_mesh_is_the_same_every_time(self):
         # a scene gives the same mesh, byte for byte, on one thread or on all
         # of them, so a design's .glb changes only when the design does: the

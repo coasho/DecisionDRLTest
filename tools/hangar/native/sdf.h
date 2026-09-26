@@ -35,6 +35,12 @@ class Node {
 public:
     virtual ~Node() = default;
     virtual Sample eval(V3 p) const = 0;
+    /// eval(p) where its distance is below cutoff; elsewhere any sample
+    /// whose distance is at or above cutoff. An operator skips what cannot
+    /// bring its distance below the cutoff - a cutter asked whether it
+    /// reaches past the surface it cuts stops at its first part that does
+    /// not; a primitive just evaluates.
+    virtual Sample below(V3 p, double /*cutoff*/) const { return eval(p); }
     Box box; ///< holds the solid
 };
 
