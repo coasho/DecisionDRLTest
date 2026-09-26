@@ -168,6 +168,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     e->stack.setInitialInputs(e->inputs);
     if (const auto it = controllerSettings_.find(aircraft); it != controllerSettings_.end() && !it->second.empty())
         e->stack.setControllerSettings(it->second);
+    e->host.bind(id, e->stack, catalog_);
     for (auto& factory : worldEffects_) e->effects.push_back(factory());
     sim::FlightModel& model = pool_->vehicle(slot);
     model.seed(e->rng.next());
@@ -224,6 +225,7 @@ bool World::resetVehicle(std::uint32_t id, const sim::InitialConditions* ic) {
     e->inputs.gearDown = e->info.initial.onGround ? 1.0 : 0.0;
     e->stack.setInitialInputs(e->inputs);
     e->stack.reset();
+    e->host.onReset();
     for (auto& fx : e->effects) fx->onReset();
     poolInputs_[e->slot] = e->inputs;
     model.state(e->working);
@@ -293,11 +295,94 @@ const sim::ControlInputs* World::inputs(std::uint32_t id) const noexcept {
 bool World::command(std::uint32_t id, const control::Command& command) {
     Entry* e = entry(id);
     if (!e) return false;
-    const auto before = e->stack.activeLevel();
-    e->stack.command(command);
-    if (publisher_) publisher_->setControlLevel(static_cast<std::uint32_t>(e->slot), static_cast<std::uint8_t>(e->stack.activeLevel()));
-    if (e->stack.activeLevel() != before) recordVehicle(*e); // the level shows in replays too
-    return true;
+    if (e->host.updateLegacy(command)) return true; // the per-step path: a new setpoint, same activity
+    return commandResult(id, command).accepted();
+}
+
+control::CommandResult World::commandResult(std::uint32_t id, const control::Command& command) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    if (std::holds_alternative<control::BehaviorCommand>(command)) catalog_.refresh();
+    const control::CommandResult r = e->host.command(command, pool_->states()[e->slot], simTime_);
+    if (r.accepted() && r.activity != e->commanded) { // a new activity (an update keeps its level)
+        e->commanded = r.activity;
+        levelChanged(*e);
+    }
+    return r;
+}
+
+control::CommandResult World::submit(std::uint32_t id, const control::Command& command, const control::CommandOptions& options) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    if (std::holds_alternative<control::BehaviorCommand>(command)) catalog_.refresh();
+    const control::CommandResult r = e->host.submit(command, options, pool_->states()[e->slot], simTime_);
+    if (r.accepted()) {
+        e->commanded = r.activity;
+        levelChanged(*e);
+    }
+    return r;
+}
+
+control::CommandResult World::update(control::ActivityId activity, const control::Command& setpoint) {
+    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, setpoint);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownActivity;
+    r.activity = activity;
+    return r;
+}
+
+control::CommandResult World::cancel(control::ActivityId activity) {
+    Entry* e = entry(control::activityVehicle(activity));
+    if (!e) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownActivity;
+        r.activity = activity;
+        return r;
+    }
+    const control::CommandResult r = e->host.cancel(activity, simTime_);
+    if (r.status == control::CommandStatus::Canceled) levelChanged(*e);
+    return r;
+}
+
+const control::ActivityRecord* World::activity(control::ActivityId activity) const noexcept {
+    const Entry* e = entry(control::activityVehicle(activity));
+    return e ? e->host.activity(activity) : nullptr;
+}
+
+std::vector<control::ActivityRecord> World::activities(std::uint32_t id) const {
+    const Entry* e = entry(id);
+    return e ? e->host.activities() : std::vector<control::ActivityRecord>{};
+}
+
+const std::vector<control::CapabilityDescriptor>& World::capabilities(std::uint32_t id) {
+    static const std::vector<control::CapabilityDescriptor> none;
+    if (!entry(id)) return none;
+    catalog_.refresh();
+    return catalog_.descriptors();
+}
+
+control::CapabilityStatus World::capabilityStatus(std::uint32_t id, std::string_view capability) const {
+    const Entry* e = entry(id);
+    const int index = catalog_.find(capability);
+    if (!e || index < 0) return {control::Availability::Disabled, e ? control::Reason::UnknownCapability : control::Reason::UnknownVehicle};
+    return e->host.status(static_cast<std::size_t>(index), pool_->states()[e->slot]);
+}
+
+void World::levelChanged(Entry& e) {
+    const auto level = e.stack.activeLevel();
+    if (publisher_) publisher_->setControlLevel(static_cast<std::uint32_t>(e.slot), static_cast<std::uint8_t>(level));
+    if (level != e.level) {
+        e.level = level;
+        recordVehicle(e); // the level shows in replays too
+    }
 }
 
 control::ControlStack* World::controls(std::uint32_t id) noexcept {
@@ -399,6 +484,12 @@ void World::step(unsigned n) {
         std::copy(before.begin(), before.end(), stepStates_.begin());
         pool_->step(Span<const sim::ControlInputs>(poolInputs_), options_.frameSkip);
         simTime_ += options_.dt * options_.frameSkip;
+        {
+            // the contract layer reads what the runtimes flew (docs/control-architecture.md, 6.4)
+            const auto after = pool_->states();
+            for (std::size_t s = 0; s < entries_.size(); ++s)
+                if (entries_[s]) entries_[s]->host.afterStep(after[s], simTime_);
+        }
         // Keep the tiles around every vehicle warm (background loaders) so the
         // workers seldom block on a download.
         if (terrain_ && worldSteps_ % 30 == 0) {

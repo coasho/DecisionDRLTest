@@ -63,7 +63,77 @@ output.
 | `aerobatics` | - | `manoeuvre` (0 aileron roll, 1 loop, 2 Immelmann, 3 split-S), `load_factor_g` (3.5), `roll_rate_rad_s` (1.5); `finished()` when done, then holds the entry altitude/heading |
 
 Behaviours that need another vehicle read it through the world view
-(`ctx.world->vehicleState(id)`), one step behind, deterministically.
+(`ctx.world->vehicleState(id)`) as the world step began, whichever worker
+steps which vehicle: the same calls fly the same trajectories with any number
+of workers.
+
+## Capabilities and activities
+
+`#include <fsim/Capability.h>`: the contract layer of
+[ADR-26](../control-architecture.md). `command()` is the per-step path and
+flies as it always has. Beside it, a vehicle says what it offers, answers
+every command at once, and keeps what it was told as an *activity* with a
+state and an end:
+
+```cpp
+using namespace fsim::control;
+for (const auto& c : v.capabilities())      // fsim.flight.attitude, fsim.guidance.hold, ...
+    std::printf("%s (v%u)\n", c.id.c_str(), c.version);
+
+CommandResult r = v.submit(VelocityCommand{.airspeedMs = 60, .verticalSpeedMs = 2});   // NEW
+if (!r.accepted()) std::printf("refused: %s\n", reasonName(r.reason));
+world.step();
+world.activity(r.activity)->state;          // ActivityState::Active
+world.update(r.activity, VelocityCommand{.airspeedMs = 60, .verticalSpeedMs = 0});    // UPDATE
+world.cancel(r.activity);                   // CANCEL: the vehicle flies its neutral default
+```
+
+**Capabilities.** One per level (`fsim.flight.actuator` ... `fsim.flight.position`)
+and one per registered behaviour (`fsim.guidance.hold`, ...; your own are
+`user.guidance.<id>`). A descriptor gives its id and version, what it
+takes (`kCommand`, `kUpdate`, `kCancel`), the level it enters at, whether it
+completes (`Persistence::Terminating`: `waypoints`, `aerobatics`) and its
+parameters. A level's parameters are its command struct's fields in order,
+with units and this aircraft's range. A behaviour's are its `params`.
+`capabilityStatus(id)` says whether it can be commanded now; a diverged
+vehicle's are `TemporarilyUnavailable` until it is reset.
+
+**Answers.** `submit` (NEW), `update` (UPDATE) and `cancel` (CANCEL) return a
+`CommandResult` at once:
+
+| Field | What it holds |
+| --- | --- |
+| `status` | `Accepted`, `Rejected` or `Canceled` |
+| `reason` | why it was rejected (`reasonName()`: `unknown_capability`, `invalid_parameter`, `out_of_range`, `authority_held`, `activity_ended`, `not_updatable`, `wrong_command_type`, ...) |
+| `activity` | the activity it made or addressed |
+| `other` | the activity that holds the authority |
+| `kClamped` | set in `flags` when a value was clamped |
+
+**Updates and parameters.**
+- `update` is the per-step path of an activity. It writes the new setpoint, checked like its NEW was, and allocates nothing. A behaviour's parameters are heap data, so a behaviour takes no UPDATE; a new target is a new `submit`.
+- Range policies: by default a value outside its advertised range is clamped (`RangePolicy::Clamp`, flagged `kClamped`). `RangePolicy::Reject` refuses the command instead. A required field left at `kHold` (a position's latitude) is refused as `invalid_parameter`.
+
+**Activities.**
+- An activity is `Pending` until the next step has flown it, then `Active`.
+- It ends in one of three ways:
+  - `Completed` (`goal_reached`): a route's last point, a manoeuvre flown;
+  - `Failed`: `target_lost` when a followed vehicle is removed, `diverged`;
+  - `Canceled`: `requested` by CANCEL, or `preempted` by a newer command.
+- While it runs, its record carries flags: an effector saturated, a setpoint clamped (`constraints` for the last step, `constraintsSeen` since it started).
+- A completed or failed behaviour keeps flying its last output, a hold, until another command takes over. CANCEL hands the axes to the vehicle's neutral default instead: surfaces centred, throttle 0, as every vehicle starts.
+- `ActivityId` is the vehicle's id in its high 32 bits and a per-vehicle count, so the same calls give the same ids. A vehicle remembers its 16 latest ended activities (`v.activities()`).
+
+**Authority.** A command has a `Source` in `CommandOptions`:
+- `Policy` (the default and what `command()` uses);
+- `Autopilot`: a mode a policy must not silently override;
+- `Override`: an operator or script.
+
+A newer command replaces an activity of its own or a lower source, which ends `preempted`. A higher source's activity refuses it with `authority_held`. For now a command owns every axis. Owning roll apart from pitch and thrust (a policy banking while an autopilot holds the height) comes with step 3 of the ADR.
+
+**What `command()` does now.**
+- At the level the vehicle's own activity flies, a new setpoint updates it: the same few nanoseconds as before.
+- Any other level, or a behaviour, starts a new activity with no range or availability checks, exactly as before.
+- It returns `false` when the command is refused. That covers a behaviour nobody registered (until 2026-09-26 it was logged, ignored and reported as success; the C ABI now returns `FSIM_INVALID_ARGUMENT`, Python raises), or an axis an `Autopilot` or `Override` activity holds.
 
 ## Built-in loops and their gains
 
@@ -196,10 +266,17 @@ struct Orbit final : fsim::control::Behavior {
         // ... aim at a point on the circle around t ...
         return p;
     }
-    bool finished() const noexcept override { return false; }
-    std::uint32_t target_ = 0; double radius_ = 800.0;
+    bool finished() const noexcept override { return false; }       // true: its activity completes
+    fsim::control::Reason failure() const noexcept override {         // not None: its activity fails
+        return lost_ ? fsim::control::Reason::TargetLost : fsim::control::Reason::None;
+    }
+    std::uint32_t target_ = 0; double radius_ = 800.0; bool lost_ = false;
 };
-fsim::control::ControllerRegistry::instance().addBehavior("orbit_target", [] { return std::make_unique<Orbit>(); });
+fsim::control::BehaviorTraits traits;   // optional: how consumers see it (user.guidance.orbit_target)
+traits.parameters = {{"radius_m", "m", 100.0, 1e5, 800.0, true}};
+traits.uses = {"fsim.flight.position"};
+traits.needsTarget = true;              // submit() refuses it without a target
+fsim::control::ControllerRegistry::instance().addBehavior("orbit_target", [] { return std::make_unique<Orbit>(); }, traits);
 v.command(fsim::control::BehaviorCommand{.id = "orbit_target", .target = other.id()});
 ```
 

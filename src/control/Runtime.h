@@ -16,6 +16,25 @@
 
 namespace fsim::control {
 
+/// `dst = src` for two commands of the same level below Behavior, without
+/// std::variant's general assignment: the per-step setpoint write.
+inline void assignSetpoint(Command& dst, const Command& src) noexcept {
+    auto as = [&](auto tag) {
+        using T = decltype(tag);
+        auto* d = std::get_if<T>(&dst);
+        const auto* s = std::get_if<T>(&src);
+        if (d && s) *d = *s;
+    };
+    switch (src.index()) {
+    case 0: as(ActuatorCommand{}); break;
+    case 1: as(AttitudeCommand{}); break;
+    case 2: as(AccelerationCommand{}); break;
+    case 3: as(VelocityCommand{}); break;
+    case 4: as(PositionCommand{}); break;
+    default: break;
+    }
+}
+
 /// One engaged activity's input to the cascade.
 struct SetpointSlot {
     std::uint32_t generation = 0;  ///< bumped when the slot is given to a new activity: per-slot runtime state restarts

@@ -5,6 +5,7 @@
 // level; `kHold` (NaN) in a field means "keep the current value / let the
 // controller decide", so partial commands are natural.
 
+#include "fsim/Capability.h"
 #include "fsim/EnvironmentState.h"
 #include "fsim/Rng.h"
 #include "fsim/VehicleState.h"
@@ -150,7 +151,12 @@ public:
 
     /// Called once with the command that selected this behaviour, before the first update().
     virtual void start(const ControlContext& ctx, const BehaviorCommand& command) { (void)ctx; (void)command; }
+    /// The goal is reached: its activity completes (docs/control-architecture.md, 10.3).
     virtual bool finished() const noexcept { return false; }
+    /// Why it can no longer do what it was asked, e.g. Reason::TargetLost once
+    /// the vehicle it follows is gone; None while it can. Its activity fails,
+    /// and it keeps flying whatever it falls back to.
+    virtual Reason failure() const noexcept { return Reason::None; }
 };
 
 } // namespace fsim::control

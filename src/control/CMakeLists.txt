@@ -4,6 +4,10 @@ add_library(fsim_control STATIC
     ControlStack.h
     ControlStack.cpp
     Runtime.h
+    Catalog.h
+    Catalog.cpp
+    CapabilityHost.h
+    CapabilityHost.cpp
     Registry.h
     Registry.cpp
     Pid.h

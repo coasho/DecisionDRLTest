@@ -189,6 +189,10 @@ void ControlStack::update(const ControlContext& ctx, sim::ControlInputs& out) {
         }
         Command next = behavior->update(ctx, *current);
         if (behavior->finished()) flown.events |= kFinished;
+        if (const Reason failure = behavior->failure(); failure != Reason::None) {
+            flown.events |= kFailed;
+            flown.failure = failure;
+        }
         const Level nextLevel = levelOf(next);
         if (nextLevel >= level) {
             LOG_ERROR("control") << "behaviour '" << behavior->id() << "' returned a command at level " << levelName(nextLevel);
@@ -278,6 +282,17 @@ const char* reasonName(Reason reason) noexcept {
     case Reason::BehaviorFailed: return "behavior_failed";
     case Reason::CapabilityLost: return "capability_lost";
     case Reason::Diverged: return "diverged";
+    default: return "?";
+    }
+}
+
+const char* activityStateName(ActivityState state) noexcept {
+    switch (state) {
+    case ActivityState::Pending: return "pending";
+    case ActivityState::Active: return "active";
+    case ActivityState::Completed: return "completed";
+    case ActivityState::Failed: return "failed";
+    case ActivityState::Canceled: return "canceled";
     default: return "?";
     }
 }

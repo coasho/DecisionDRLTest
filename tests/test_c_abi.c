@@ -188,7 +188,9 @@ int main(int argc, char** argv) {
         CHECK(fsim_vehicle_command_behavior(world, b, &beh) == FSIM_OK);
         CHECK(fsim_vehicle_active_level(world, b) == FSIM_LEVEL_BEHAVIOR);
         beh.id = "no_such_behaviour";
-        CHECK(fsim_vehicle_command_behavior(world, b, &beh) == FSIM_OK); /* logged and ignored, previous command kept */
+        CHECK(fsim_vehicle_command_behavior(world, b, &beh) == FSIM_INVALID_ARGUMENT); /* refused, previous command kept */
+        CHECK(strstr(fsim_last_error(), "unknown_capability") != NULL);
+        CHECK(fsim_vehicle_active_level(world, b) == FSIM_LEVEL_BEHAVIOR);
         CHECK(fsim_vehicle_use_controller(world, a, FSIM_LEVEL_ATTITUDE, "pid_attitude") == FSIM_OK);
         CHECK(fsim_vehicle_use_controller(world, a, FSIM_LEVEL_ATTITUDE, "nope") != FSIM_OK);
         CHECK(fsim_vehicle_set_controller_parameter(world, a, FSIM_LEVEL_ATTITUDE, "roll.kp", 2.5) == FSIM_OK);

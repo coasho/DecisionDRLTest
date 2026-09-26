@@ -245,6 +245,13 @@ FSIM_API const fsim_vehicle_state* fsim_vehicle_sensed_ptr(const fsim_world* wor
 FSIM_API int fsim_vehicle_get_property(fsim_world* world, uint32_t id, const char* path, double* value);
 FSIM_API int fsim_vehicle_set_property(fsim_world* world, uint32_t id, const char* path, double value);
 
+/* Command a vehicle at a level (docs/control-architecture.md, 10.7): at the
+ * level its own activity flies, the new setpoint updates it; otherwise a new
+ * activity takes over. FSIM_INVALID_ARGUMENT with the reason in
+ * fsim_last_error() if the vehicle is unknown or the command refused: a
+ * behaviour nobody registered ("unknown_capability"; before ABI 1.4 it was
+ * ignored and reported as FSIM_OK), or an axis an autopilot or override
+ * activity holds ("authority_held"). */
 FSIM_API int fsim_vehicle_command_actuator(fsim_world* world, uint32_t id, const fsim_actuator_command* command);
 FSIM_API int fsim_vehicle_command_attitude(fsim_world* world, uint32_t id, const fsim_attitude_command* command);
 FSIM_API int fsim_vehicle_command_acceleration(fsim_world* world, uint32_t id, const fsim_acceleration_command* command);

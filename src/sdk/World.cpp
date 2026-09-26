@@ -114,6 +114,26 @@ const ControlInputs& Vehicle::inputs() const {
 
 bool Vehicle::command(const control::Command& command) { return world_ && world_->impl_->command(id_, command); }
 
+control::CommandResult Vehicle::submit(const control::Command& command, const control::CommandOptions& options) {
+    if (world_) return world_->impl_->submit(id_, command, options);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownVehicle;
+    return r;
+}
+
+std::vector<control::ActivityRecord> Vehicle::activities() const {
+    return world_ ? world_->impl_->activities(id_) : std::vector<control::ActivityRecord>{};
+}
+
+std::vector<control::CapabilityDescriptor> Vehicle::capabilities() const {
+    return world_ ? world_->impl_->capabilities(id_) : std::vector<control::CapabilityDescriptor>{};
+}
+
+control::CapabilityStatus Vehicle::capabilityStatus(std::string_view capability) const {
+    if (world_) return world_->impl_->capabilityStatus(id_, capability);
+    return {control::Availability::Disabled, control::Reason::UnknownVehicle};
+}
+
 control::ControlStack& Vehicle::controls() {
     auto* c = world_ ? world_->impl_->controls(id_) : nullptr;
     if (!c) throw Error("Vehicle::controls: invalid vehicle handle");
@@ -195,6 +215,17 @@ std::vector<Vehicle> World::vehicles() {
 }
 
 std::size_t World::vehicleCount() const noexcept { return impl_->vehicleCount(); }
+control::CommandResult World::update(control::ActivityId activity, const control::Command& setpoint) {
+    return impl_->update(activity, setpoint);
+}
+
+control::CommandResult World::cancel(control::ActivityId activity) { return impl_->cancel(activity); }
+
+std::optional<control::ActivityRecord> World::activity(control::ActivityId activity) const {
+    if (const auto* a = impl_->activity(activity)) return *a;
+    return std::nullopt;
+}
+
 void World::step(unsigned n) { impl_->step(n); }
 double World::time() const noexcept { return impl_->simTime(); }
 double World::stepSeconds() const noexcept { return impl_->dt() * impl_->frameSkip(); }

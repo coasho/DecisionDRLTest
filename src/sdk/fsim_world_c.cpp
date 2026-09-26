@@ -96,7 +96,10 @@ const fsim_vehicle_state* asC(const fsim::sim::VehicleState* s) noexcept { retur
 
 int command(fsim_world* w, uint32_t id, const fsim::control::Command& c) {
     if (!w) return FSIM_INVALID_ARGUMENT;
-    return w->world.command(id, c) ? FSIM_OK : fail(FSIM_INVALID_ARGUMENT, "no vehicle with id " + std::to_string(id));
+    const auto r = w->world.commandResult(id, c);
+    if (r.accepted()) return FSIM_OK;
+    if (r.reason == fsim::control::Reason::UnknownVehicle) return fail(FSIM_INVALID_ARGUMENT, "no vehicle with id " + std::to_string(id));
+    return fail(FSIM_INVALID_ARGUMENT, std::string("vehicle ") + std::to_string(id) + ": command rejected (" + fsim::control::reasonName(r.reason) + ")");
 }
 
 } // namespace

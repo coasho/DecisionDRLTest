@@ -3,11 +3,13 @@
 #include "fsim/Control.h"
 #include "fsim/Export.h"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace fsim::control {
@@ -23,8 +25,12 @@ public:
 
     /// Register (or replace) a controller factory for `level`.
     void add(std::string id, Level level, Factory factory);
-    /// Register (or replace) a behaviour factory (level Behavior).
+    /// Register (or replace) a behaviour factory (level Behavior). Its traits
+    /// describe it to consumers (docs/control-architecture.md, 8): whether it
+    /// completes, its parameters, what it flies through; without them it is
+    /// persistent and undescribed.
     void addBehavior(std::string id, std::function<std::unique_ptr<Behavior>()> factory);
+    void addBehavior(std::string id, std::function<std::unique_ptr<Behavior>()> factory, BehaviorTraits traits);
 
     /// Create by id; null if unknown.
     std::unique_ptr<Controller> create(std::string_view id) const;
@@ -37,14 +43,21 @@ public:
     /// Default controller id per level (the built-in PID loops).
     const char* defaultId(Level level) const noexcept;
 
+    /// The behaviours in the order they were first registered, with their traits.
+    std::vector<std::pair<std::string, BehaviorTraits>> behaviors() const;
+    /// Bumped by every registration: a catalog built before it may be missing some.
+    std::uint64_t revision() const;
+
 private:
     ControllerRegistry();
     struct Entry {
         Level level;
         Factory factory;
+        BehaviorTraits traits;
     };
     mutable std::mutex mutex_;
     std::vector<std::pair<std::string, Entry>> entries_;
+    std::uint64_t revision_ = 0;
 };
 
 /// Registers the built-in loops and behaviours (idempotent).

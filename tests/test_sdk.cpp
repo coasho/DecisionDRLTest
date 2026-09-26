@@ -215,3 +215,33 @@ TEST_CASE("a trainer's task, observation and action are used by id", "[sdk][plug
     REQUIRE(upAltKm > downAltKm);
     REQUIRE(upReward > downReward);
 }
+
+TEST_CASE("capabilities and activities through the SDK: discover, submit, update, cancel", "[sdk][control]") {
+    WorldOptions o;
+    o.name = "sdk-capabilities";
+    o.publish = false;
+    o.workers = 1;
+    o.pinWorkers = false;
+    World world(o);
+    VehicleSpec s;
+    s.initial.altitudeMslM = 1500.0;
+    s.initial.airspeedTrueMs = 55.0;
+    Vehicle v = world.createVehicle(s);
+
+    const auto caps = v.capabilities();
+    REQUIRE(std::any_of(caps.begin(), caps.end(), [](const control::CapabilityDescriptor& c) { return c.id == "fsim.flight.velocity"; }));
+    REQUIRE(v.capabilityStatus("fsim.guidance.hold").availability == control::Availability::Available);
+
+    const control::CommandResult r = v.submit(control::VelocityCommand{55.0, 1.0, control::kHold, control::kHold});
+    REQUIRE(r.accepted());
+    REQUIRE(world.activity(r.activity)->state == control::ActivityState::Pending);
+    world.step();
+    REQUIRE(world.activity(r.activity)->state == control::ActivityState::Active);
+    REQUIRE(world.update(r.activity, control::VelocityCommand{55.0, -1.0, control::kHold, control::kHold}).accepted());
+    REQUIRE(world.cancel(r.activity).status == control::CommandStatus::Canceled);
+    REQUIRE(world.activity(r.activity)->state == control::ActivityState::Canceled);
+    REQUIRE(world.activity(r.activity)->reason == control::Reason::Requested);
+    REQUIRE(std::string(control::reasonName(control::Reason::Requested)) == "requested");
+    REQUIRE(v.activities().size() == 1);
+    REQUIRE_FALSE(world.activity(control::activityId(v.id(), 42)).has_value());
+}

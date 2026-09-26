@@ -5,6 +5,7 @@
 #include "core/Units.h"
 
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <cstring>
 
@@ -298,11 +299,12 @@ void LoiterBehavior::start(const ControlContext& ctx, const BehaviorCommand& com
 Command LoiterBehavior::update(const ControlContext& ctx, const Command&) {
     const auto& s = ctx.sensed;
     double cLat = centreLat_, cLon = centreLon_;
-    if (target_ && ctx.world)
-        if (const auto* t = ctx.world->vehicleState(target_)) {
-            cLat = t->latitudeRad;
-            cLon = t->longitudeRad;
-        }
+    const sim::VehicleState* t = target_ && ctx.world ? ctx.world->vehicleState(target_) : nullptr;
+    lost_ = target_ && !t; // circling the last centre
+    if (t) {
+        cLat = t->latitudeRad;
+        cLon = t->longitudeRad;
+    }
     double north, east;
     geo::localNorthEastM(cLat, cLon, s.latitudeRad, s.longitudeRad, north, east);
     const double distance = std::hypot(north, east);
@@ -330,6 +332,7 @@ void PursuitBehavior::start(const ControlContext&, const BehaviorCommand& comman
 Command PursuitBehavior::update(const ControlContext& ctx, const Command&) {
     const auto& s = ctx.sensed;
     const sim::VehicleState* t = ctx.world ? ctx.world->vehicleState(target_) : nullptr;
+    lost_ = !t;
     if (!t) {
         VelocityCommand hold;
         hold.headingRad = s.eulerRad[2];
@@ -358,6 +361,7 @@ Command EvadeBehavior::update(const ControlContext& ctx, const Command&) {
     out.airspeedMs = airspeed_;
     out.verticalSpeedMs = std::clamp(0.25 * (altitude_ - s.altitudeMslM), -8.0, 8.0);
     const sim::VehicleState* t = ctx.world ? ctx.world->vehicleState(target_) : nullptr;
+    lost_ = !t;
     out.headingRad = t ? geo::bearingRad(t->latitudeRad, t->longitudeRad, s.latitudeRad, s.longitudeRad) : s.eulerRad[2];
     return out;
 }
@@ -373,6 +377,7 @@ void FormationBehavior::start(const ControlContext&, const BehaviorCommand& comm
 Command FormationBehavior::update(const ControlContext& ctx, const Command&) {
     const auto& s = ctx.sensed;
     const sim::VehicleState* t = ctx.world ? ctx.world->vehicleState(target_) : nullptr;
+    lost_ = !t;
     VelocityCommand out;
     if (!t) {
         out.headingRad = s.eulerRad[2];
@@ -462,13 +467,38 @@ void registerBuiltinControllers(ControllerRegistry& r) {
     r.add("pid_acceleration", Level::Acceleration, [] { return std::make_unique<AccelerationLoop>(); });
     r.add("pid_velocity", Level::Velocity, [] { return std::make_unique<VelocityLoop>(); });
     r.add("pid_position", Level::Position, [] { return std::make_unique<PositionLoop>(); });
-    r.addBehavior("hold", [] { return std::make_unique<HoldBehavior>(); });
-    r.addBehavior("waypoints", [] { return std::make_unique<WaypointsBehavior>(); });
-    r.addBehavior("loiter", [] { return std::make_unique<LoiterBehavior>(); });
-    r.addBehavior("pursuit", [] { return std::make_unique<PursuitBehavior>(); });
-    r.addBehavior("evade", [] { return std::make_unique<EvadeBehavior>(); });
-    r.addBehavior("formation", [] { return std::make_unique<FormationBehavior>(); });
-    r.addBehavior("aerobatics", [] { return std::make_unique<AerobaticBehavior>(); });
+    // What each behaviour tells a consumer (docs/control-architecture.md, 8.2):
+    // its parameters (BehaviorCommand::params; NaN default = as at the start)
+    // and the flight capabilities its output goes through.
+    constexpr double now = kHold;
+    auto p = [](const char* name, const char* unit, double def, double lo = -std::numeric_limits<double>::infinity(),
+                double hi = std::numeric_limits<double>::infinity()) { return ParameterInfo{name, unit, lo, hi, def, true}; };
+    auto traits = [](Persistence persistence, std::vector<ParameterInfo> params, std::vector<std::string> uses, bool target = false) {
+        return BehaviorTraits{persistence, std::move(params), std::move(uses), target};
+    };
+    const std::string position = "fsim.flight.position", velocity = "fsim.flight.velocity", acceleration = "fsim.flight.acceleration";
+    r.addBehavior("hold", [] { return std::make_unique<HoldBehavior>(); },
+                  traits(Persistence::Persistent, {p("airspeed_ms", "m/s", now, 0.0), p("heading_deg", "deg", now), p("altitude_m", "m", now)}, {velocity}));
+    r.addBehavior("waypoints", [] { return std::make_unique<WaypointsBehavior>(); },
+                  traits(Persistence::Terminating, {p("loop", "", 0.0, 0.0, 1.0), p("airspeed_ms", "m/s", now, 0.0)}, {position, velocity}));
+    r.addBehavior("loiter", [] { return std::make_unique<LoiterBehavior>(); },
+                  traits(Persistence::Persistent,
+                         {p("lat_deg", "deg", now, -90.0, 90.0), p("lon_deg", "deg", now, -180.0, 180.0), p("radius_m", "m", 1500.0, 100.0),
+                          p("altitude_m", "m", now), p("clockwise", "", 1.0, 0.0, 1.0), p("airspeed_ms", "m/s", now, 0.0)},
+                         {position}));
+    r.addBehavior("pursuit", [] { return std::make_unique<PursuitBehavior>(); },
+                  traits(Persistence::Persistent,
+                         {p("range_m", "m", 300.0, 0.0), p("lead_s", "s", 2.0, 0.0), p("min_airspeed_ms", "m/s", 30.0, 0.0), p("max_airspeed_ms", "m/s", 400.0, 0.0)},
+                         {position, velocity}, true));
+    r.addBehavior("evade", [] { return std::make_unique<EvadeBehavior>(); },
+                  traits(Persistence::Persistent, {p("altitude_delta_m", "m", -300.0), p("airspeed_ms", "m/s", now, 0.0)}, {velocity}, true));
+    r.addBehavior("formation", [] { return std::make_unique<FormationBehavior>(); },
+                  traits(Persistence::Persistent,
+                         {p("ahead_m", "m", -100.0), p("right_m", "m", 60.0), p("below_m", "m", 0.0), p("closure_gain", "1/s", 0.1, 0.0)},
+                         {velocity}, true));
+    r.addBehavior("aerobatics", [] { return std::make_unique<AerobaticBehavior>(); },
+                  traits(Persistence::Terminating, {p("manoeuvre", "", 1.0, 0.0, 3.0), p("load_factor_g", "g", 3.5, 0.0), p("roll_rate_rad_s", "rad/s", 1.5, 0.0)},
+                         {acceleration, velocity}));
 }
 
 } // namespace fsim::control

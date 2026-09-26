@@ -6,6 +6,7 @@
 // transparent: every World publishes itself for flightsim-viewer.exe through
 // shared memory (design 9.7) at no cost to stepping.
 
+#include "fsim/Capability.h"
 #include "fsim/Comm.h"
 #include "fsim/Control.h"
 #include "fsim/ControlInputs.h"
@@ -21,6 +22,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -129,10 +131,24 @@ public:
     const effects::SensedState& sensed() const;    ///< through sensor effects
     const ControlInputs& inputs() const;          ///< actuator inputs the cascade produced
 
-    // Multi-level control (design 9.3)
+    // Multi-level control (design 9.3): the per-step command. At the level
+    // the vehicle's own activity flies it updates that activity, else it
+    // starts a new one (docs/control-architecture.md, 10.7); false if the
+    // command is rejected (a behaviour nobody registered, an axis an autopilot
+    // or override activity holds).
     bool command(const control::Command& command);
     template <typename C>
     bool command(const C& c) { return command(control::Command(c)); }
+    // Capability contracts (docs/sdk/control.md, "Capabilities and activities"):
+    /// NEW: the command becomes an activity, or is rejected with a reason.
+    control::CommandResult submit(const control::Command& command, const control::CommandOptions& options = {});
+    template <typename C>
+    control::CommandResult submit(const C& c, const control::CommandOptions& options = {}) { return submit(control::Command(c), options); }
+    /// The live activities, then the ended ones the vehicle remembers, newest first.
+    std::vector<control::ActivityRecord> activities() const;
+    /// What the vehicle offers: its flight levels and behaviours.
+    std::vector<control::CapabilityDescriptor> capabilities() const;
+    control::CapabilityStatus capabilityStatus(std::string_view capability) const;
     control::ControlStack& controls();
     control::Level activeLevel() const;
     bool use(control::Level level, std::string_view controllerId);
@@ -173,6 +189,15 @@ public:
     Vehicle vehicle(std::string_view name) noexcept;
     std::vector<Vehicle> vehicles();
     std::size_t vehicleCount() const noexcept;
+
+    /// UPDATE: a new setpoint for a live activity (the per-step path; allocates nothing).
+    control::CommandResult update(control::ActivityId activity, const control::Command& setpoint);
+    template <typename C>
+    control::CommandResult update(control::ActivityId activity, const C& c) { return update(activity, control::Command(c)); }
+    /// CANCEL: the activity ends; its axes fly the vehicle's neutral default.
+    control::CommandResult cancel(control::ActivityId activity);
+    /// A live or recently ended activity of any vehicle; empty if unknown.
+    std::optional<control::ActivityRecord> activity(control::ActivityId activity) const;
 
     /// Advance every vehicle by n world steps (frameSkip FDM steps each).
     void step(unsigned n = 1);

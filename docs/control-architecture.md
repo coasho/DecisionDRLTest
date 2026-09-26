@@ -123,7 +123,7 @@ None of them runs during a step.
 
 | Component | Owns | Must not |
 | --- | --- | --- |
-| `CapabilityCatalog` (per aircraft type, immutable) | The descriptors: id and version, kind, the interactions it supports, entry level, default axes, which axis subsets may be commanded, persistent or terminating, typed parameters with units and this aircraft's ranges, and `requires` | Hold per-vehicle state; run during a step |
+| `CapabilityCatalog` (per aircraft type, immutable) | The descriptors: id and version, kind, the interactions it supports, entry level, default axes, which axis subsets may be commanded, persistent or terminating, typed parameters with units and this aircraft's ranges, and what it flies through (`uses`) | Hold per-vehicle state; run during a step |
 | `CapabilityHost` (per vehicle) | <ul><li>Command intake and validation</li><li>The authority table</li><li>Activities and their records</li><li>Capability status</li><li>Settings (controller choice, gains, protection mode)</li><li>Writing `RuntimeConfig` and reading `RuntimeReport`</li><li>The legacy façade</li></ul> | Compute control outputs; touch the flight model; run inside a step |
 | `ControlStack` (the control runtime) | <ul><li>Running the engaged loops per slot and merging them per axis</li><li>The protection stage</li><li>Calling the adapter's real-time face</li><li>Writing `ControlInputs` and the report</li><li>Controller and behaviour instances</li></ul> | Validate commands; know capability ids, activities or sources; allocate or handle strings while flying |
 | `VehicleAdapter` (per aircraft family: `jsbsim.stock`, `jsbsim.direct`, `jsbsim.fbw`) | <ul><li>What each control means for this family</li><li>Which capabilities the aircraft offers, and when they are available</li><li>Allocating demand to effectors and writing the flight model's inputs</li><li>Checking the profile's claims against the loaded model</li></ul> | Know about consumers, activities or authority |
@@ -405,7 +405,9 @@ struct CapabilityDescriptor {
     std::uint8_t axisGroups;                 ///< the groups (lateral, pitch, thrust) it may own alone; step 3
     Persistence persistence;
     std::vector<ParameterInfo> parameters;
-    std::vector<std::string> requires;       ///< capabilities it flies through
+    std::vector<std::string> uses;           ///< the capabilities it flies through
+    std::string behavior;                    ///< guidance: the behaviour's registry id
+    bool needsTarget;                        ///< guidance: follows BehaviorCommand::target
 };
 ```
 
@@ -450,7 +452,7 @@ A capability the aircraft does not have is simply absent from its catalog.
 | `fsim.support.pitch_trim` | support | pitch trim | persistent | position −1..1; only where the flight model has a trim channel | 2 |
 | `fsim.envelope.protection` | status (settings, status) | none | none | mode: off, report or limit; status: the active limits, what was limited and what was exceeded | 4 |
 
-**Guidance requirements.** Guidance capabilities list the flight capabilities they fly through, for example `fsim.guidance.loiter` needs `fsim.flight.velocity`. Their availability follows the least available of those.
+**What guidance flies through.** Guidance capabilities list the flight capabilities their output goes through (`uses`), for example `fsim.guidance.hold` uses `fsim.flight.velocity`. Their availability follows the least available of those.
 
 **Updates.** Guidance capabilities do not take UPDATE in version 1, because their parameters are heap data. A new target is a NEW, which preempts the old activity.
 
@@ -924,22 +926,33 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | baseline | 31 | 47 | 41 | 65 | 118–129 | 68 | 240–249 | 179–181 |
 | 1b | 30–31 | 46–47 | 40 | 64 | 117–118 | 66–67 | 153 | 129 |
+| 1c | 30–31 | 44–47 | 40 | 63–64 | 116–117 | 65–67 | 153–156 | 127–128 |
 
-| command (ns/call, 64 vehicles) | same level | level switch | behaviour |
-| --- | --- | --- | --- |
-| baseline | 6.2 | 6.7 | 57 |
-| 1b | 7.7–8.1 | 8.0–8.6 | 63 |
+| command (ns/call, 64 vehicles) | same level | level switch | behaviour | update, checked |
+| --- | --- | --- | --- | --- |
+| baseline | 6.2 | 6.7 | 57 | – |
+| 1b | 7.7–8.1 | 8.0–8.6 | 63 | – |
+| 1c | 4.9–5.1 | 28–31 | 86–88 | 14–15 |
 
 | world (vehicle-steps/s) | 64 c172x | 32 f16c (fly-by-wire) | 32 b52h (direct) |
 | --- | --- | --- | --- |
 | baseline | 823,000 | 556,000 | 579,000 |
 | 1b | 817,000–822,000 | 551,000–556,000 | 559,000–577,000 |
+| 1c | 802,000–823,000 | 551,000–556,000 | 568,000–581,000 |
 
 **Step 1b.**
 - **Allocations:** none in any case. The `control_alloc` ctest now gates it.
 - **Behaviour updates:** loiter and waypoints are 35 % and 28 % faster, since nothing is copied any more.
 - **Digests:** identical to the baseline.
 - **Command path:** 1.5–2 ns slower, from reading the level through the config. That is over the 10 % gate, but it is an intermediate: step 1c replaces this path with the host's UPDATE, and the gate is judged there.
+
+**Step 1c.**
+- **Digests:** every legacy flight identical to the baseline.
+- **Allocations:** none, the new UPDATE path included.
+- **Legacy per-step path:** 20 % faster than the baseline. At the level its activity flies, a command is one inline write of the setpoint (`CapabilityHost::updateLegacy`).
+- **NEWs cost more** (22 ns more for a level switch, 30 ns more for a behaviour): they validate, arbitrate and keep records. They happen once per change of level, not per step.
+- **The checked UPDATE path** of the new API (clamping every field) takes 14–15 ns.
+- **Throughput:** within the gate (c172x ≥ 97 % of the baseline in every run). After each world step the contract layer reads every vehicle's report: a few integer tests per slot.
 
 **Allocations.**
 - Per update, none, except `loiter` (4, one per parameter's map node) and `waypoints` (2): the per-step `BehaviorCommand` copy, P6.

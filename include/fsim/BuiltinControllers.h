@@ -245,7 +245,11 @@ public:
     void start(const ControlContext& ctx, const BehaviorCommand& command) override;
     Command update(const ControlContext& ctx, const Command& in) override;
 
+    /// TargetLost while the vehicle it follows is gone (it flies on as it can).
+    Reason failure() const noexcept override { return lost_ ? Reason::TargetLost : Reason::None; }
+
 private:
+    bool lost_ = false;
     double centreLat_ = 0.0, centreLon_ = 0.0, radius_ = 1500.0, altitude_ = 0.0, airspeed_ = kHold;
     bool clockwise_ = true;
     std::uint32_t target_ = 0;
@@ -259,7 +263,11 @@ public:
     void start(const ControlContext& ctx, const BehaviorCommand& command) override;
     Command update(const ControlContext& ctx, const Command& in) override;
 
+    /// TargetLost while the vehicle it follows is gone (it flies on as it can).
+    Reason failure() const noexcept override { return lost_ ? Reason::TargetLost : Reason::None; }
+
 private:
+    bool lost_ = false;
     std::uint32_t target_ = 0;
     double rangeM_ = 300.0, leadS_ = 2.0, minSpeed_ = 30.0, maxSpeed_ = 400.0;
 };
@@ -272,7 +280,11 @@ public:
     void start(const ControlContext& ctx, const BehaviorCommand& command) override;
     Command update(const ControlContext& ctx, const Command& in) override;
 
+    /// TargetLost while the vehicle it follows is gone (it flies on as it can).
+    Reason failure() const noexcept override { return lost_ ? Reason::TargetLost : Reason::None; }
+
 private:
+    bool lost_ = false;
     std::uint32_t target_ = 0;
     double altitude_ = 0.0, airspeed_ = kHold;
 };
@@ -285,7 +297,11 @@ public:
     void start(const ControlContext& ctx, const BehaviorCommand& command) override;
     Command update(const ControlContext& ctx, const Command& in) override;
 
+    /// TargetLost while the vehicle it follows is gone (it flies on as it can).
+    Reason failure() const noexcept override { return lost_ ? Reason::TargetLost : Reason::None; }
+
 private:
+    bool lost_ = false;
     std::uint32_t target_ = 0;
     double ahead_ = -100.0, right_ = 60.0, below_ = 0.0;
     double closureGain_ = 0.1;

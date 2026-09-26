@@ -16,6 +16,7 @@ add_executable(fsim_tests
     test_registry.cpp
     test_vehicle_pool.cpp
     test_vecenv.cpp
+    test_capabilities.cpp
     test_control.cpp
     test_control_compat.cpp
     test_world.cpp

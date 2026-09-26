@@ -6,6 +6,8 @@
 // step, the message fabric, and the shared-memory publisher for viewers.
 
 #include "comm/Comm.h"
+#include "control/CapabilityHost.h"
+#include "control/Catalog.h"
 #include "control/ControlStack.h"
 #include "effects/Effect.h"
 #include "fsim/EnvironmentState.h"
@@ -22,6 +24,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -88,8 +91,27 @@ public:
     sim::FlightModel* model(std::uint32_t id) noexcept;
     const sim::ControlInputs* inputs(std::uint32_t id) const noexcept;
 
-    // --- Control -------------------------------------------------------------
+    // --- Control (design 9.3, docs/control-architecture.md) ---------------------
+    /// What every existing entry point calls: an update of the vehicle's own
+    /// activity at the same level, else a new one (10.7). False if the vehicle
+    /// is unknown or the command rejected (a behaviour nobody registered, an
+    /// axis an autopilot or override activity holds).
     bool command(std::uint32_t id, const control::Command& command);
+    /// command() with its answer (the C ABI reports why a command was refused).
+    control::CommandResult commandResult(std::uint32_t id, const control::Command& command);
+    /// NEW: a command becomes an activity, or is rejected with a reason.
+    control::CommandResult submit(std::uint32_t id, const control::Command& command, const control::CommandOptions& options = {});
+    /// UPDATE: a new setpoint for a live activity (the fast path).
+    control::CommandResult update(control::ActivityId activity, const control::Command& setpoint);
+    /// CANCEL: the activity ends; its axes fly the vehicle default.
+    control::CommandResult cancel(control::ActivityId activity);
+    /// A live or recently ended activity; null if unknown.
+    const control::ActivityRecord* activity(control::ActivityId activity) const noexcept;
+    /// A vehicle's live activities, then the ended ones it remembers, newest first.
+    std::vector<control::ActivityRecord> activities(std::uint32_t id) const;
+    /// What a vehicle offers (empty for an unknown vehicle).
+    const std::vector<control::CapabilityDescriptor>& capabilities(std::uint32_t id);
+    control::CapabilityStatus capabilityStatus(std::uint32_t id, std::string_view capability) const;
     control::ControlStack* controls(std::uint32_t id) noexcept;
     const control::ControlStack* controls(std::uint32_t id) const noexcept;
 
@@ -126,7 +148,10 @@ private:
     struct Entry {
         VehicleInfo info;
         std::size_t slot = 0;
-        control::ControlStack stack;
+        control::ControlStack stack;       ///< the control runtime
+        control::CapabilityHost host;      ///< its contract layer (bound to `stack`)
+        control::ActivityId commanded = 0; ///< the activity the last accepted command made or updated
+        control::Level level = control::Level::Actuator; ///< as last published and recorded
         std::vector<std::unique_ptr<effects::Effect>> effects;
         effects::SensedState sensed;
         Rng rng;
@@ -155,6 +180,7 @@ private:
     const Entry* entry(std::uint32_t id) const noexcept;
     void preStep(std::size_t slot, int subStep, sim::FlightModel& model, sim::ControlInputs& inputs);
     void applyEnvironment(sim::FlightModel& model) const;
+    void levelChanged(Entry& e);
     void publishVehicle(const Entry& e);
     static bool parseType(const std::string& type, std::string& family, std::string& aircraft);
 
@@ -172,6 +198,7 @@ private:
     std::unordered_map<std::string, std::vector<control::ControllerSetting>> controllerSettings_;
     std::vector<sim::ControlInputs> poolInputs_;
     std::vector<sim::VehicleState> stepStates_;                 ///< by slot: every state as the current step began
+    control::CapabilityCatalog catalog_;                        ///< what every vehicle offers (per aircraft type from step 2)
     StepView stepView_{*this};
     std::vector<EffectFactory> worldEffects_;
     sim::EnvironmentState environment_;

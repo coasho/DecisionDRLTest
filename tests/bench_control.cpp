@@ -270,6 +270,10 @@ int command() {
     time("level switch (new)", [&](int k) { for (auto id : ids) (k % 2) ? w.command(id, vel) : w.command(id, att); }, 20000);
     const auto hold = flights::behavior("hold");
     time("behaviour (new)", [&](int) { for (auto id : ids) w.command(id, hold); }, 2000);
+    // the contract layer's own path: an activity per vehicle, its setpoint checked and updated
+    std::vector<ActivityId> activities;
+    for (auto id : ids) activities.push_back(w.submit(id, att).activity);
+    time("update, checked", [&](int) { for (auto a : activities) w.update(a, att); }, 20000);
     return 0;
 }
 
@@ -339,6 +343,11 @@ int alloc() {
         {"actuator each step", [&](std::uint32_t id, int k) { w.command(id, ActuatorCommand{0.01 * std::sin(k * 0.1), -0.02, 0.0, 0.7}); }},
         {"attitude each step", [&](std::uint32_t id, int k) { w.command(id, AttitudeCommand{0.1 * std::sin(k * 0.1), 0.03, kHold, 0.785, kHold, 55.0}); }},
         {"velocity each step", [&](std::uint32_t id, int k) { w.command(id, VelocityCommand{55.0, std::sin(k * 0.1), kHold, 0.02}); }},
+        {"update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             if (k == 0) activity[id] = w.submit(id, AttitudeCommand{0.0, 0.03, kHold, 0.785, kHold, 55.0}).activity;
+             else w.update(activity[id], AttitudeCommand{0.1 * std::sin(k * 0.1), 0.03, kHold, 0.785, kHold, 55.0});
+         }},
         {"hold once", [&](std::uint32_t id, int k) { if (k == 0) w.command(id, hold); }},
         {"loiter once", [&](std::uint32_t id, int k) { if (k == 0) w.command(id, loiter); }},
     };
