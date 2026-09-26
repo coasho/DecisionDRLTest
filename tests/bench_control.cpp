@@ -5,7 +5,9 @@
 //                                     with the axes owned apart, the vehicle default's hold, and
 //                                     envelope protection limiting (", limit") or reporting (", report")
 //   fsim_control_bench command        World::command (the legacy path), ns per call
-//   fsim_control_bench world          vehicle-steps/s with every vehicle commanded every step
+//   fsim_control_bench world [off]    vehicle-steps/s with every vehicle commanded every step; off: every
+//                                     vehicle's envelope protection off (the designs have it on by default),
+//                                     for the protection gate: protected throughput against unprotected
 //   fsim_control_bench alloc          heap allocations in the steady state (exit 1 if any)
 //   fsim_control_bench digest FILE [off]   per-flight digests of every world step (compare across builds);
 //                                     off: every vehicle's envelope protection off
@@ -366,7 +368,7 @@ int command() {
     return 0;
 }
 
-int world() {
+int world(bool protectionOff) {
     struct Setup {
         const char* type;
         int count;
@@ -383,6 +385,8 @@ int world() {
             std::printf("%-14s not found\n", s.type);
             continue;
         }
+        if (protectionOff)
+            for (auto id : ids) w.setProtection(id, ProtectionMode::Off);
         double best = 0.0;
         for (int rep = 0; rep < 3; ++rep) {
             const auto steps0 = w.vehicleSteps();
@@ -580,10 +584,10 @@ int main(int argc, char** argv) {
     const std::string mode = argc > 1 ? argv[1] : "";
     if (mode == "micro") return micro();
     if (mode == "command") return command();
-    if (mode == "world") return world();
+    if (mode == "world") return world(argc > 2 && std::string(argv[2]) == "off");
     if (mode == "alloc") return alloc();
     if (mode == "digest" && argc > 2) return digest(argv[2], argc > 3 && std::string(argv[3]) == "off");
     if (mode == "checkpoints" && argc > 2) return checkpoints(argv[2]);
-    std::fprintf(stderr, "usage: fsim_control_bench micro | command | world | alloc | digest FILE [off] | checkpoints FILE\n");
+    std::fprintf(stderr, "usage: fsim_control_bench micro | command | world [off] | alloc | digest FILE [off] | checkpoints FILE\n");
     return 2;
 }

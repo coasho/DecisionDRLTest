@@ -791,7 +791,7 @@ NEW for a behaviour allocates, between steps, as it does today. Step 1 removes t
 | --- | --- |
 | `micro` | `ControlStack::update` on a synthetic state with no flight model: 200,000 updates per case, reported in ns per update (median of 5). Cases: actuator, attitude, acceleration, velocity, position, `hold`, `loiter` (parameters) and `waypoints` (three points) |
 | `command` | the legacy façade and the UPDATE fast path, in ns per call over 64 vehicles; NEW and CANCEL for reference |
-| `world` | 64 c172x commanded at the attitude level every world step, as VecEnv does, plus one hangar fly-by-wire and one hangar direct design when present: vehicle-steps/s over 2,000 world steps, with a fixed worker count |
+| `world` | 64 c172x commanded at the attitude level every world step, as VecEnv does, plus one hangar fly-by-wire and one hangar direct design when present: vehicle-steps/s over 2,000 world steps, with a fixed worker count. `world off` flies the same with every vehicle's protection off (the designs have it on by default) |
 | `alloc` | heap allocations counted during 10,000 steady-state updates per micro case and 200 steps of the world case: the process's `malloc`, `calloc` and `realloc` entries, in the executable and in libstdc++, redirected to counters |
 | `digest` | for a fixed set of legacy flights (the c172x at each level, a behaviour, a level switch, a reset, and the two hangar designs), an FNV-1a hash of every world step's `VehicleState` and `ControlInputs`, written to a file and compared across builds |
 
@@ -802,7 +802,8 @@ NEW for a behaviour allocates, between steps, as it does today. Step 1 removes t
 | Allocations in the steady state | 0 | the `alloc` mode as a ctest, in CI |
 | Legacy flights, steps 1–3 | bit-identical digests against the build before the step | locally at each step; recorded in the commit and in section 17 |
 | Stock aircraft, always | the c172x's checkpoints (state and inputs every 5 s over 60 s, per level and for a behaviour) within 1e-9 relative of committed values. Tolerant of a toolchain's last-bit differences; any real change is orders of magnitude larger | ctest |
-| Runtime update | ≤ baseline + 10 % per case (steps 1–3); with protection `Limit` ≤ + 25 %, unchanged with `Off` | recorded per step |
+| Runtime update | ≤ baseline + 10 % per case (steps 1–3); unchanged with protection `Off` | recorded per step |
+| Protection | world throughput with protection `Limit` ≥ 97 % of the same flights with it `Off` (`world` against `world off`, interleaved). The owner's decision (2026-09-26): protection is judged by what it costs a simulation, not a single update; the update's cost is recorded | recorded per step |
 | Command path | ≤ baseline + 10 % | recorded per step |
 | World throughput | ≥ 97 % of baseline | recorded per step |
 
@@ -1040,11 +1041,11 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
   - Every exceedance is reported, with its size and duration: a nose-up moment no elevator can hold drives a c172 past α_max. The crossing is reported with its excess and duration, and nothing else happens: no recovery, no end of the activity, no reset. The protected demand was cut as α neared.
   - No claim that the state stays within: the documentation says the opposite.
   - The manoeuvre suite with protection `Limit` (the default for all 31 designs): the same 29 of 558 failures as step 3, item for item. Protection changed 13 of 651 results, all at the slowest speed near the stall, and removed the c172's 69 % heading overshoot at 35 m/s.
-- **The update gate (12.4: protection `Limit` within +25 %) is missed** for the fastest cascades, as the table shows.
+- **The update's cost.** It was first gated at +25 % per update; the fastest cascades missed that.
   - With protection `Off`, every case is within ±3 % of step 3 in an interleaved A/B.
   - `Report` costs +8 to +18 %. `Limit` costs +23 to +31 % inside a design's envelope, and up to +43 % with every limit given and engaging every update.
-  - The cost is fixed work per update: the setpoint copied before it is limited, a division for the airspeed limits, ten comparisons for the exceedances. At the world level it disappears: the F-16C and B-52H, now protected, run at step 3's throughput.
-  - The gate is left as written. Whether it should be a throughput gate for protected flight is the owner's call.
+  - The cost is fixed work per update: the setpoint copied before it is limited, a division for the airspeed limits, ten comparisons for the exceedances.
+- **The protection gate, by throughput** (the owner's decision, 12.4): met. Interleaved in one build, 3 rounds, the F-16C flies at 100.0 % and the B-52H at 99.9 % of their throughput with protection off; the c172x, which has no envelope either way, at 100.5 %, the measurement's noise.
 
 **Step 5a (the loops designed from the plant).**
 - **What moved.** hangar's closed-form gain design (pole placement on the identified first-order responses, the schedules, the feedforwards) moved into the platform (`src/control/Laws.cpp`). An aircraft without gains of its own gets them designed from its plant section when it loads, as a control section with provenance derived. Explicit gains, the aircraft's or a trainer's, still win.
