@@ -200,6 +200,10 @@ saturated surface or an external force can still take it past a limit. That
 is reported, not prevented, and what to do about it is yours: a reward term,
 the end of an episode, a line in an evaluation.
 
+`fsim python examples/python/authority_and_envelope.py` shows it at work, beside an
+autopilot and a policy sharing an F-16C: two pairs of designs pulled hard, one of
+each pair protected, the other only reporting.
+
 ```cpp
 using namespace fsim::control;
 v.protection();                           // ProtectionMode::Limit with an envelope, else Off

@@ -148,6 +148,9 @@ echo                                          fsim viewer --camera chase --chase
 echo.
 echo   PYTHON
 echo     fsim python examples\python\world_tour.py   the object model from Python
+echo     fsim python examples\python\authority_and_envelope.py   an autopilot and a policy sharing an aircraft, and
+echo                                          envelope protection limiting a pull; watch with
+echo                                          fsim viewer --camera chase --chase-distance 40
 echo     fsim python examples\python\train_sb3.py    PPO ^(Stable-Baselines3^) on a 64-aircraft batch
 echo     fsim python examples\python\train_plugin.py PPO on a task written in C++, loaded as a plugin DLL
 echo     fsim python examples\python\speed.py        what the Python SDK costs, measured
