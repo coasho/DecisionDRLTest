@@ -1,8 +1,6 @@
 # control: multi-level control stack (design 9.3). Depends on sim for the
 # state/input types only; no JSBSim.
 add_library(fsim_control STATIC
-    Command.h
-    Controller.h
     ControlStack.h
     ControlStack.cpp
     Registry.h

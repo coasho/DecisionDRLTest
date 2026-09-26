@@ -26,9 +26,8 @@ __pycache__/
 # Dear ImGui layout files
 imgui.ini
 
-# Output written by the examples (vision_capture --out, recordings)
+# Output written by the examples (vision_capture --out; recordings: *.fsrec above)
 /captures/
-*.fsrec
 
 # Offline map tiles fetched by fetch-maps.cmd (gigabytes; not source)
 /assets/maps/

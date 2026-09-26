@@ -245,7 +245,7 @@ stations = [
 
 # The pylons: from the fan cowl's crown up into the wing ahead of its front
 # spar, then aft along its underside over the core; their ends inside the
-# nacelle and the wing, not edges (a pylon's knife edge breaks the mesh)
+# nacelle and the wing
 [[body]]
 name = "inboard pylon"
 kind = "pod"

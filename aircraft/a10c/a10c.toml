@@ -185,8 +185,7 @@ thickness = 0.300
 
 # The main gear pods under the wing's leading edge, where the wheels fold
 # forward, half out of them; they fair into the wing's underside ahead of
-# the flaps (three-view). Their ends are 0.1 m wide, not edges: a knife
-# edge's fillet with the wing grows a crease in the mesh.
+# the flaps (three-view). Their ends are 0.1 m wide.
 [[body]]
 name = "gear pod"
 kind = "pod"

@@ -320,33 +320,40 @@ directory on `PATH`) so the DLLs and `share/` are found.
 ## Layout
 
 ```
-cmake/            warnings, dependencies
-docs/             design document
+fsim.cmd          the front door: build, run, the demos, hangar, Python (fsim help)
+fetch-maps.cmd    fetches the offline map tiles into assets/maps/
+CMakeLists.txt    the build; CMakePresets.json its presets (release, debug, headless)
+cmake/            toolchains, warnings, dependencies, assets, install and packaging
+deps/             superbuild for the VSG stack (build/deps-ucrt64)
+third_party/      JSBSim (LGPL-2.1, DLL), VSG, vsgXchange, vsgImGui submodules; stb
+
+include/fsim/     public SDK headers
 src/platform/     OS isolation (the only module with Win32 includes)
 src/core/         logging, registries, module lifecycle, RNG, profiler
-src/io/           asset resolution (config, tile cache and recordings later)
+src/io/           asset resolution; the terrain tile cache the headless physics reads
 src/sim/          FlightModel, JsbsimModel (JSBSim adapter), VehiclePool, GroundProvider
 src/control/      multi-level control stack, built-in loops and behaviours, registry
-src/effects/      effect pipeline and built-in effects
+src/effects/      effect pipeline; built-in effects (sensor noise, GNSS degradation, forces, delays, dropouts)
 src/comm/         communication: network, media, codecs, protocols
 src/ipc/          shared-memory world segment: publisher, mirror, registry
 src/session/      World implementation (vehicles, stepping, environment, publisher)
 src/env/          Scenario, Task, Observation/Action spaces and their registry, VecEnv (batch layer)
 src/sdk/          libfsim.dll: C++ SDK (World, VecEnv) + C ABI
 src/vision/       libfsim_vision.dll: offscreen vehicle cameras (needs Vulkan)
-python/           the Python SDK: fsim._native / fsim._vision (C, stable ABI), the fsim package, tests, benchmark
-tools/            tile_prefetch: offline tile cache for a region; hangar: the aircraft design tool (Python)
-aircraft/         designs made with hangar: <name>.toml, and the JSBSim aircraft and model it builds
-include/fsim/     public SDK headers
-examples/         multi_level_control, minimal_trainer, ppo_trainer; python/ for the Python SDK
-docs/sdk/         SDK guide
 src/render/       VSG window, viewer, render graph (viewer builds)
-src/world/        Earth tiles (vsg::TileDatabase), vehicle visuals, cameras
+src/world/        Earth tiles, vehicle visuals, cameras, the exhaust and airflow effects
 src/ui/           Dear ImGui monitor / vehicle list, key bindings
 src/app/          flightsim.exe, flightsim-viewer.exe
-deps/             superbuild for the VSG stack
-tests/            Catch2 unit + JSBSim integration tests
-third_party/      JSBSim (LGPL-2.1, DLL), VSG, vsgXchange, vsgImGui submodules
+
+python/           the Python SDK: fsim._native / fsim._vision (C, stable ABI), the fsim package, tests, benchmark, wheel
+tools/            tile_prefetch: offline tile cache for a region; hangar: the aircraft design tool (Python; its mesher in native/)
+aircraft/         designs made with hangar: <name>.toml, and the JSBSim aircraft and 3D model it builds
+assets/           the viewer's config (viewer.json, the offline map plan, run-viewer.cmd); maps/ (fetched, not in git)
+examples/         C++ trainers and tools on the SDK, a Rust trainer, the Python examples, scenario files
+tests/            Catch2 unit + JSBSim integration tests (hangar's own: tools/hangar/tests)
+docs/             the design document and hangar's guide; sdk/ the SDK guide
+.claude/skills/   the aircraft-design skill: designing an aircraft with hangar
+.github/          CI: build, tests and the package on every push
 ```
 
 ## License
