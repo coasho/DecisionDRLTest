@@ -263,6 +263,45 @@ TEST_CASE("trajectories with control cascades are identical across worker counts
     REQUIRE(run(1) == run(3));
 }
 
+TEST_CASE("behaviours that follow other vehicles see them as the step began, with any number of workers", "[world]") {
+    // Followers before and after their targets in slot order, so the targets
+    // fall in other workers' ranges or earlier in the same one: each must read
+    // its target as the step began, not as far as a worker has got with it.
+    auto run = [](unsigned workers) {
+        session::World w(options("test-follow", workers));
+        std::vector<std::uint32_t> ids;
+        for (int i = 0; i < 8; ++i) {
+            auto s = spec(("f" + std::to_string(i)).c_str(), 45.0 * i);
+            s.initial.latitudeDeg += 0.004 * i;
+            ids.push_back(w.createVehicle(s));
+        }
+        w.command(ids[7], control::VelocityCommand{58.0, 1.0, control::kHold, 0.05});
+        w.command(ids[3], control::AttitudeCommand{-0.2, 0.04, control::kHold, 0.785, control::kHold, 56.0});
+        auto follow = [&](std::size_t who, const char* behavior, std::size_t target) {
+            control::BehaviorCommand b;
+            b.id = behavior;
+            b.target = ids[target];
+            w.command(ids[who], b);
+        };
+        follow(0, "pursuit", 7);
+        follow(1, "formation", 7);
+        follow(2, "evade", 5);
+        follow(4, "formation", 3);
+        follow(5, "pursuit", 3);
+        follow(6, "pursuit", 0);
+        w.step(300);
+        std::vector<double> trace;
+        for (auto id : ids) {
+            const auto& s = *w.vehicleState(id);
+            trace.insert(trace.end(), {s.latitudeRad, s.longitudeRad, s.altitudeMslM, s.eulerRad[0], s.eulerRad[2], s.airspeedTrueMs});
+        }
+        return trace;
+    };
+    const auto one = run(1);
+    REQUIRE(one == run(2));
+    REQUIRE(one == run(4));
+}
+
 TEST_CASE("a published world is discoverable and mirrored", "[world][ipc]") {
     session::World w(options("test-mirror", 1, true));
     REQUIRE(w.published());

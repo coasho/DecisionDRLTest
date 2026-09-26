@@ -48,7 +48,10 @@ public:
     /// Per-FDM-step hook run by the worker that owns the vehicle, before each
     /// `FlightModel::step`, with a private copy of the vehicle's inputs it may
     /// rewrite (control cascades, effects). Must not touch other vehicles'
-    /// models; may read `states()` (the previous step's snapshots).
+    /// models, and may read only its own vehicle's entry of `states()`: each
+    /// worker rewrites its vehicles' entries as it finishes them, so another
+    /// vehicle's may be from this step or the last. A hook that needs other
+    /// vehicles copies `states()` before step() (session::World::StepView).
     using PreStep = std::function<void(std::size_t vehicle, int subStep, FlightModel& model, ControlInputs& inputs)>;
     void setPreStep(PreStep hook) { preStep_ = std::move(hook); }
 

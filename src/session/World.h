@@ -137,6 +137,20 @@ private:
         bool windApplied = false;
     };
 
+    /// What the control cascades see of other vehicles during a step: each
+    /// one's state as the step began (Control.h, WorldView), whichever worker
+    /// steps which vehicle and however far it has got.
+    class StepView final : public control::WorldView {
+    public:
+        explicit StepView(const World& world) noexcept : world_(world) {}
+        const sim::VehicleState* vehicleState(std::uint32_t id) const noexcept override;
+        double simTime() const noexcept override { return world_.simTime_; }
+        const sim::EnvironmentState& environment() const noexcept override { return world_.environment_; }
+
+    private:
+        const World& world_;
+    };
+
     Entry* entry(std::uint32_t id) noexcept;
     const Entry* entry(std::uint32_t id) const noexcept;
     void preStep(std::size_t slot, int subStep, sim::FlightModel& model, sim::ControlInputs& inputs);
@@ -157,6 +171,8 @@ private:
     /// (JSBSim properties under fsim/control), read on its first load.
     std::unordered_map<std::string, std::vector<control::ControllerSetting>> controllerSettings_;
     std::vector<sim::ControlInputs> poolInputs_;
+    std::vector<sim::VehicleState> stepStates_;                 ///< by slot: every state as the current step began
+    StepView stepView_{*this};
     std::vector<EffectFactory> worldEffects_;
     sim::EnvironmentState environment_;
     std::uint64_t appliedEnvironment_ = ~0ull;

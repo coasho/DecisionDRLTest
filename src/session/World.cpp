@@ -144,6 +144,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
         entries_.emplace_back();
         slotAircraft_.push_back(aircraft);
         poolInputs_.emplace_back();
+        stepStates_.emplace_back();
     } else {
         pool_->vehicle(slot).reset(spec.initial);
     }
@@ -269,6 +270,11 @@ const sim::VehicleState* World::vehicleState(std::uint32_t id) const noexcept {
     return e ? &pool_->states()[e->slot] : nullptr;
 }
 
+const sim::VehicleState* World::StepView::vehicleState(std::uint32_t id) const noexcept {
+    const Entry* e = world_.entry(id);
+    return e ? &world_.stepStates_[e->slot] : nullptr;
+}
+
 const effects::SensedState* World::sensedState(std::uint32_t id) const noexcept {
     const Entry* e = entry(id);
     return e ? &e->sensed : nullptr;
@@ -375,7 +381,7 @@ void World::preStep(std::size_t slot, int subStep, sim::FlightModel& model, sim:
 
     // Control cascade at the FDM rate (or every `controlDivider` steps).
     if (static_cast<unsigned>(subStep) % e->controlDivider == 0) {
-        control::ControlContext ctx{e->info.id, e->working, e->sensed.state, options_.dt * e->controlDivider, this, &e->rng};
+        control::ControlContext ctx{e->info.id, e->working, e->sensed.state, options_.dt * e->controlDivider, &stepView_, &e->rng};
         e->stack.update(ctx, e->inputs);
     }
     inputs = e->inputs;
@@ -388,6 +394,9 @@ void World::step(unsigned n) {
                 if (entries_[s]) applyEnvironment(pool_->vehicle(s));
             appliedEnvironment_ = environment_.revision;
         }
+        // behaviours that follow another vehicle read it as the step began (StepView)
+        const auto before = pool_->states();
+        std::copy(before.begin(), before.end(), stepStates_.begin());
         pool_->step(Span<const sim::ControlInputs>(poolInputs_), options_.frameSkip);
         simTime_ += options_.dt * options_.frameSkip;
         // Keep the tiles around every vehicle warm (background loaders) so the
