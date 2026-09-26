@@ -709,7 +709,7 @@ TEST_CASE("conformance: every capability of every aircraft the platform ships an
         make.target = target;
         lifecycle(w, v, make);
     }
-    CHECK(families == std::set<std::string>{"jsbsim.stock", "jsbsim.direct", "jsbsim.fbw"}); // every adapter
+    CHECK(families == std::set<std::string>{"jsbsim.stock", "jsbsim.direct", "jsbsim.fbw", "jsbsim.helicopter", "jsbsim.multirotor"}); // every adapter
 }
 
 TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules through random sequences of every operation", "[conformance]") {

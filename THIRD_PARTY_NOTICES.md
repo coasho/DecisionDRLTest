@@ -35,9 +35,22 @@ them locally; using them is subject to the providers' terms:
 ## Changes to JSBSim
 
 flightsim builds JSBSim 1.3.1 from the unmodified submodule in `third_party/jsbsim`, with
-one change: in `src/models/FGLGear.cpp`, the projection of a wheel's strut on the ground
-normal is bounded at 45 degrees. Upstream divides the wheel's compression and ground force
-by that projection, so a wheel meeting the ground sideways, as in a cartwheel, got an
-unbounded force. `cmake/JsbsimPatches.cmake` makes the change: it writes the changed file into
-the build tree, with each edit marked "flightsim patch". Packages carry the changed file and
-that script in `share/doc/flightsim/jsbsim-changes/`.
+two changes:
+
+- In `src/models/FGLGear.cpp`, the projection of a wheel's strut on the ground normal is
+  bounded at 45 degrees. Upstream divides the wheel's compression and ground force by that
+  projection, so a wheel meeting the ground sideways, as in a cartwheel, got an unbounded force.
+- In `src/models/propulsion/FGRotor.h` and `FGRotor.cpp` (the helicopter rotor,
+  docs/rotorcraft.md): a reset restarts the rotor, which kept the last run's speed and
+  inflow; a rotor may choose the classical force model (`<model>classical</model>`) - the
+  in-plane forces and the torque of NASA TM-73254 (Talbot and Corliss, 1977), equations 1
+  to 4 - instead of Heffley's, which stays the default - and with it the ground effect scales
+  the steady inflow rather than the lagged one; and a start or a reset converges every
+  rotor's inflow and its ground-height filter before the first step (upstream's begin from
+  nothing and settle over the first seconds). Past that start, a rotor that does not ask for
+  the classical model flies as upstream's does.
+
+`cmake/JsbsimPatches.cmake` makes the changes: it writes the changed files into the build
+tree, with each edit marked "flightsim patch" (two files the rotor's header reaches,
+`FGEngine.cpp` and `FGTurboProp.cpp`, are compiled from there unchanged). Packages carry the
+changed files and that script in `share/doc/flightsim/jsbsim-changes/`.

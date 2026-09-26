@@ -115,6 +115,8 @@ struct ViewerOptions {
     double stats = 0.0;   // --stats <seconds>: print per-second frame statistics, exit after this long
     std::string screenshot;      // --screenshot <file.png>: save the frame after --screenshot-after seconds, then exit
     double screenshotAfter = 3.0;
+    int screenshotFrames = 1;    // --screenshot-frames <n>: n frames, <file>_000.png on, --screenshot-every <s> apart
+    double screenshotEvery = 0.1;
     int trace = -1;
     bool interpolate = true;
     bool help = false;
@@ -183,6 +185,7 @@ void usageAll(const char* prog) {
         "  --probe                  print motion smoothness statistics after ~5 s and exit\n"
         "  --stats <seconds>        print per-second frame statistics (fps, frame-time breakdown, CPU) and exit\n"
         "  --screenshot <file.png>  save the window after --screenshot-after seconds (3) and exit\n"
+        "  --screenshot-frames <n>  save n frames instead, <file>_000.png on, --screenshot-every <s> (0.1) apart\n"
         "  --view lat,lon,alt,dist[,az,el]  start with the free camera looking at that point from dist metres (az deg from north, el deg up; default 180, 45)\n"
         "  --trace <i>              print vehicle i's state once per second\n"
         "  --no-interpolate         draw raw snapshots (sample-and-hold) instead of interpolating\n"
@@ -380,6 +383,8 @@ bool parse(int argc, char** argv, ViewerOptions& o) {
             else if (a == "--stats") o.stats = std::stod(next());
             else if (a == "--screenshot") o.screenshot = next();
             else if (a == "--screenshot-after") o.screenshotAfter = std::stod(next());
+            else if (a == "--screenshot-frames") o.screenshotFrames = std::max(1, std::stoi(next()));
+            else if (a == "--screenshot-every") o.screenshotEvery = std::max(0.0, std::stod(next()));
             else if (a == "--trace") o.trace = std::stoi(next());
             else if (a == "--no-interpolate") o.interpolate = false;
             else if (a == "--log-level") {
@@ -717,12 +722,14 @@ int main(int argc, char** argv) {
             batch = first;
             interpolator.push(*first);
             visuals.update(Span<const sim::VehicleState>(first->states));
+            camera->setTargetRadius(visuals.shape(0).reach());
             camera->update(&first->states[0], 0.0);
         }
     }
 
     // --- Frame loop ------------------------------------------------------------------
     double wallSeconds = 0.0;
+    int shots = 0; // frames saved (--screenshot-frames)
     struct Stats {
         double window = 0.0, cpu0 = platform::processCpuSeconds(), maxFrame = 0.0;
         int frames = 0;
@@ -971,6 +978,7 @@ int main(int argc, char** argv) {
         if (controls->cameraReset.exchange(false)) camera->resetView();
         const sim::VehicleState* target = (batch && anyAlive && selected >= 0)
             ? &(opt.interpolate ? interpolator.states() : batch->states)[static_cast<std::size_t>(selected)] : nullptr;
+        camera->setTargetRadius(target ? visuals.shape(static_cast<std::size_t>(selected)).reach() : 0.0);
         camera->update(target, viewer.frameSeconds());
         sky.update(viewer.lookAt()->eye);
         if (atmosphere) atmosphere->update(viewer.lookAt()->eye);
@@ -1016,9 +1024,17 @@ int main(int argc, char** argv) {
         controls->frameMs.store(viewer.frameSeconds() * 1e3, std::memory_order_relaxed);
 
         if (!viewer.frame()) break;
-        if (!opt.screenshot.empty() && wallSeconds >= opt.screenshotAfter) {
-            viewer.screenshot(opt.screenshot);
-            break;
+        if (!opt.screenshot.empty() && wallSeconds >= opt.screenshotAfter + shots * opt.screenshotEvery) {
+            if (opt.screenshotFrames == 1) {
+                viewer.screenshot(opt.screenshot);
+                break;
+            }
+            // a sequence: <stem>_000<ext>, <stem>_001<ext>, ...
+            const std::filesystem::path path(opt.screenshot);
+            char number[16];
+            std::snprintf(number, sizeof number, "_%03d", shots);
+            viewer.screenshot((path.parent_path() / (path.stem().string() + number + path.extension().string())).string());
+            if (++shots >= opt.screenshotFrames) break;
         }
 
         if (opt.stats > 0.0) {

@@ -1,0 +1,268 @@
+<?xml version="1.0"?>
+<fdm_config name="iris" version="2.0" release="BETA">
+  <fileheader>
+    <author> hangar (tools/hangar), from aircraft/iris/iris.toml </author>
+    <description> 3DR IRIS+ - 1.5 kg quadrotor, brushless motors (PX4's simulation model) </description>
+    <note> Written by hangar's rotorcraft pipeline from the design file, whose comments cite every number's source. </note>
+  </fileheader>
+  <metrics>
+    <wingarea unit="FT2"> 2.2081732 </wingarea>
+    <wingspan unit="FT"> 1.6767628 </wingspan>
+    <chord unit="FT"> 1.6767628 </chord>
+    <htailarea unit="FT2"> 0 </htailarea> <htailarm unit="FT"> 0 </htailarm>
+    <vtailarea unit="FT2"> 0 </vtailarea> <vtailarm unit="FT"> 0 </vtailarm>
+    <location name="AERORP" unit="IN"> <x> 0 </x> <y> 0 </y> <z> 0 </z> </location>
+    <location name="EYEPOINT" unit="IN"> <x> 0 </x> <y> 0 </y> <z> 0 </z> </location>
+    <location name="VRP" unit="IN"> <x> 0 </x> <y> 0 </y> <z> 0 </z> </location>
+  </metrics>
+  <mass_balance>
+    <ixx unit="SLUG*FT2"> 0.021481498 </ixx>
+    <iyy unit="SLUG*FT2"> 0.021481498 </iyy>
+    <izz unit="SLUG*FT2"> 0.04073187 </izz>
+    <emptywt unit="LBS"> 3.3069345 </emptywt>
+    <location name="CG" unit="IN"> <x> 0 </x> <y> 0 </y> <z> 0 </z> </location>
+  </mass_balance>
+  <ground_reactions>
+    <contact type="BOGEY" name="leg 0">
+      <location unit="IN"> <x> -4.7834646 </x> <y> 8.3464567 </y> <z> -2.1259843 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
+      <spring_coeff unit="N/M"> 2000 </spring_coeff> <damping_coeff unit="N/M/SEC"> 60 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
+    </contact>
+    <contact type="BOGEY" name="leg 1">
+      <location unit="IN"> <x> 5.2362205 </x> <y> -7.7362205 </y> <z> -2.1259843 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
+      <spring_coeff unit="N/M"> 2000 </spring_coeff> <damping_coeff unit="N/M/SEC"> 60 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
+    </contact>
+    <contact type="BOGEY" name="leg 2">
+      <location unit="IN"> <x> -4.7834646 </x> <y> -8.3464567 </y> <z> -2.1259843 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
+      <spring_coeff unit="N/M"> 2000 </spring_coeff> <damping_coeff unit="N/M/SEC"> 60 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
+    </contact>
+    <contact type="BOGEY" name="leg 3">
+      <location unit="IN"> <x> 5.2362205 </x> <y> 7.7362205 </y> <z> -2.1259843 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
+      <spring_coeff unit="N/M"> 2000 </spring_coeff> <damping_coeff unit="N/M/SEC"> 60 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
+    </contact>
+    <contact type="STRUCTURE" name="top 0">
+      <location unit="IN"> <x> -5.1181102 </x> <y> 8.6614173 </y> <z> 0.90551181 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 2000 </spring_coeff> <damping_coeff unit="N/M/SEC"> 60 </damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="top 1">
+      <location unit="IN"> <x> 5.1181102 </x> <y> -7.8740157 </y> <z> 0.90551181 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 2000 </spring_coeff> <damping_coeff unit="N/M/SEC"> 60 </damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="top 2">
+      <location unit="IN"> <x> -5.1181102 </x> <y> -8.6614173 </y> <z> 0.90551181 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 2000 </spring_coeff> <damping_coeff unit="N/M/SEC"> 60 </damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="top 3">
+      <location unit="IN"> <x> 5.1181102 </x> <y> 7.8740157 </y> <z> 0.90551181 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 2000 </spring_coeff> <damping_coeff unit="N/M/SEC"> 60 </damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="top 4">
+      <location unit="IN"> <x> -0 </x> <y> -0 </y> <z> 1.8503937 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 2000 </spring_coeff> <damping_coeff unit="N/M/SEC"> 60 </damping_coeff>
+    </contact>
+  </ground_reactions>
+  <propulsion>
+    <engine file="iris_motor">
+      <thruster file="iris_rotor">
+        <location unit="IN"> <x> -5.1181102 </x> <y> 8.6614173 </y> <z> 0.90551181 </z> </location>
+        <orient unit="DEG"> <roll> 0 </roll> <pitch> 90 </pitch> <yaw> 0 </yaw> </orient>
+      </thruster>
+    </engine>
+    <engine file="iris_motor">
+      <thruster file="iris_rotor">
+        <location unit="IN"> <x> 5.1181102 </x> <y> -7.8740157 </y> <z> 0.90551181 </z> </location>
+        <orient unit="DEG"> <roll> 0 </roll> <pitch> 90 </pitch> <yaw> 0 </yaw> </orient>
+      </thruster>
+    </engine>
+    <engine file="iris_motor">
+      <thruster file="iris_rotor">
+        <location unit="IN"> <x> -5.1181102 </x> <y> -8.6614173 </y> <z> 0.90551181 </z> </location>
+        <orient unit="DEG"> <roll> 0 </roll> <pitch> 90 </pitch> <yaw> 0 </yaw> </orient>
+      </thruster>
+    </engine>
+    <engine file="iris_motor">
+      <thruster file="iris_rotor">
+        <location unit="IN"> <x> 5.1181102 </x> <y> 7.8740157 </y> <z> 0.90551181 </z> </location>
+        <orient unit="DEG"> <roll> 0 </roll> <pitch> 90 </pitch> <yaw> 0 </yaw> </orient>
+      </thruster>
+    </engine>
+  </propulsion>
+  <flight_control name="iris mixer and motors">
+    <!-- the aircraft's profile for the platform (docs/control-architecture.md, section 7, and
+         docs/rotorcraft.md): what hangar knows of it - its design and its flight tests -->
+    <property value="2">fsim/identity/version</property>
+    <property value="1">fsim/identity/provenance</property>
+    <property value="13">fsim/identity/class</property>
+    <property value="4">fsim/identity/family</property>
+    <property value="2">fsim/effectors/version</property>
+    <property value="1">fsim/effectors/provenance</property>
+    <property value="0">fsim/effectors/flaps</property>
+    <property value="0">fsim/effectors/neutral</property>
+    <property value="4">fsim/effectors/pitch</property>
+    <property value="0">fsim/effectors/pitch_trim</property>
+    <property value="0">fsim/effectors/retractable_gear</property>
+    <property value="3">fsim/effectors/roll</property>
+    <property value="0">fsim/effectors/speedbrake</property>
+    <property value="2">fsim/effectors/thrust</property>
+    <property value="0">fsim/effectors/wheel_brakes</property>
+    <property value="3">fsim/effectors/yaw</property>
+    <property value="1">fsim/envelope/version</property>
+    <property value="1">fsim/envelope/provenance</property>
+    <property value="35">fsim/envelope/clean/bank_max_deg</property>
+    <property value="35">fsim/envelope/clean/pitch_max_deg</property>
+    <property value="-35">fsim/envelope/clean/pitch_min_deg</property>
+    <property value="220">fsim/envelope/clean/roll_rate_max_deg_s</property>
+    <property value="2">fsim/propulsion/version</property>
+    <property value="1">fsim/propulsion/provenance</property>
+    <property value="4">fsim/propulsion/engines</property>
+    <property value="0.0125">fsim/propulsion/spool_s</property>
+    <property value="4">fsim/propulsion/type</property>
+    <property value="1">fsim/hover/version</property>
+    <property value="1">fsim/hover/provenance</property>
+    <property value="-1.1449e-15">fsim/hover/aileron_trim</property>
+    <property value="100">fsim/hover/altitude_m</property>
+    <property value="-7.19327e-11">fsim/hover/elevator_trim</property>
+    <property value="0">fsim/hover/heave/damping</property>
+    <property value="0.0125">fsim/hover/heave/lag_s</property>
+    <property value="18.317">fsim/hover/heave/power</property>
+    <property value="1.5">fsim/hover/mass_kg</property>
+    <property value="0">fsim/hover/pitch/damping</property>
+    <property value="0.0125">fsim/hover/pitch/lag_s</property>
+    <property value="-30.9996">fsim/hover/pitch/power</property>
+    <property value="6.40088e-05">fsim/hover/pitch_attitude_deg</property>
+    <property value="0">fsim/hover/roll/damping</property>
+    <property value="0.0125">fsim/hover/roll/lag_s</property>
+    <property value="50.0763">fsim/hover/roll/power</property>
+    <property value="-6.10558e-10">fsim/hover/roll_attitude_deg</property>
+    <property value="-3.08496e-15">fsim/hover/rudder_trim</property>
+    <property value="0.520031">fsim/hover/throttle_trim</property>
+    <property value="0">fsim/hover/yaw/damping</property>
+    <property value="0.0125">fsim/hover/yaw/lag_s</property>
+    <property value="-7.54612">fsim/hover/yaw/power</property>
+    <channel name="motors">
+      <!-- motor 0: front right, counter-clockwise -->
+      <fcs_function name="fcs/iris/cmd[0]">
+        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+          <property> fcs/throttle-cmd-norm[0] </property>
+          <product> <value> -0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
+          <product> <value> -0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
+          <product> <value> -0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
+        </sum> </min> </max> </function>
+      </fcs_function>
+      <fcs_function name="fcs/iris/omega-cmd[0]">
+        <function> <product> <value> 1100 </value> <sqrt> <property> fcs/iris/cmd[0] </property> </sqrt> </product> </function>
+      </fcs_function>
+      <fcs_function name="fcs/iris/motor-c1[0]">
+        <function> <ifthen> <gt> <property> fcs/iris/omega-cmd[0] </property> <property> fcs/iris/omega[0] </property> </gt>
+          <value> 80 </value> <value> 40 </value> </ifthen> </function>
+      </fcs_function>
+      <lag_filter name="fcs/iris/omega[0]"> <input> fcs/iris/omega-cmd[0] </input> <c1> fcs/iris/motor-c1[0] </c1> </lag_filter>
+      <fcs_function name="fcs/iris/thrust-norm[0]">
+        <function> <pow> <quotient> <property> fcs/iris/omega[0] </property> <value> 1100 </value> </quotient> <value> 2 </value> </pow> </function>
+        <output> fcs/throttle-pos-norm[0] </output>
+      </fcs_function>
+      <fcs_function name="fcs/iris/rpm[0]">
+        <function> <product> <property> fcs/iris/omega[0] </property> <value> 9.5492966 </value> </product> </function>
+        <output> propulsion/engine[0]/rotor-rpm </output>
+      </fcs_function>
+      <!-- motor 1: rear left, counter-clockwise -->
+      <fcs_function name="fcs/iris/cmd[1]">
+        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+          <property> fcs/throttle-cmd-norm[1] </property>
+          <product> <value> 0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
+          <product> <value> 0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
+          <product> <value> -0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
+        </sum> </min> </max> </function>
+      </fcs_function>
+      <fcs_function name="fcs/iris/omega-cmd[1]">
+        <function> <product> <value> 1100 </value> <sqrt> <property> fcs/iris/cmd[1] </property> </sqrt> </product> </function>
+      </fcs_function>
+      <fcs_function name="fcs/iris/motor-c1[1]">
+        <function> <ifthen> <gt> <property> fcs/iris/omega-cmd[1] </property> <property> fcs/iris/omega[1] </property> </gt>
+          <value> 80 </value> <value> 40 </value> </ifthen> </function>
+      </fcs_function>
+      <lag_filter name="fcs/iris/omega[1]"> <input> fcs/iris/omega-cmd[1] </input> <c1> fcs/iris/motor-c1[1] </c1> </lag_filter>
+      <fcs_function name="fcs/iris/thrust-norm[1]">
+        <function> <pow> <quotient> <property> fcs/iris/omega[1] </property> <value> 1100 </value> </quotient> <value> 2 </value> </pow> </function>
+        <output> fcs/throttle-pos-norm[1] </output>
+      </fcs_function>
+      <fcs_function name="fcs/iris/rpm[1]">
+        <function> <product> <property> fcs/iris/omega[1] </property> <value> 9.5492966 </value> </product> </function>
+        <output> propulsion/engine[1]/rotor-rpm </output>
+      </fcs_function>
+      <!-- motor 2: front left, clockwise -->
+      <fcs_function name="fcs/iris/cmd[2]">
+        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+          <property> fcs/throttle-cmd-norm[2] </property>
+          <product> <value> 0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
+          <product> <value> -0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
+          <product> <value> 0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
+        </sum> </min> </max> </function>
+      </fcs_function>
+      <fcs_function name="fcs/iris/omega-cmd[2]">
+        <function> <product> <value> 1100 </value> <sqrt> <property> fcs/iris/cmd[2] </property> </sqrt> </product> </function>
+      </fcs_function>
+      <fcs_function name="fcs/iris/motor-c1[2]">
+        <function> <ifthen> <gt> <property> fcs/iris/omega-cmd[2] </property> <property> fcs/iris/omega[2] </property> </gt>
+          <value> 80 </value> <value> 40 </value> </ifthen> </function>
+      </fcs_function>
+      <lag_filter name="fcs/iris/omega[2]"> <input> fcs/iris/omega-cmd[2] </input> <c1> fcs/iris/motor-c1[2] </c1> </lag_filter>
+      <fcs_function name="fcs/iris/thrust-norm[2]">
+        <function> <pow> <quotient> <property> fcs/iris/omega[2] </property> <value> 1100 </value> </quotient> <value> 2 </value> </pow> </function>
+        <output> fcs/throttle-pos-norm[2] </output>
+      </fcs_function>
+      <fcs_function name="fcs/iris/rpm[2]">
+        <function> <product> <property> fcs/iris/omega[2] </property> <value> 9.5492966 </value> </product> </function>
+        <output> propulsion/engine[2]/rotor-rpm </output>
+      </fcs_function>
+      <!-- motor 3: rear right, clockwise -->
+      <fcs_function name="fcs/iris/cmd[3]">
+        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+          <property> fcs/throttle-cmd-norm[3] </property>
+          <product> <value> -0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
+          <product> <value> 0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
+          <product> <value> 0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
+        </sum> </min> </max> </function>
+      </fcs_function>
+      <fcs_function name="fcs/iris/omega-cmd[3]">
+        <function> <product> <value> 1100 </value> <sqrt> <property> fcs/iris/cmd[3] </property> </sqrt> </product> </function>
+      </fcs_function>
+      <fcs_function name="fcs/iris/motor-c1[3]">
+        <function> <ifthen> <gt> <property> fcs/iris/omega-cmd[3] </property> <property> fcs/iris/omega[3] </property> </gt>
+          <value> 80 </value> <value> 40 </value> </ifthen> </function>
+      </fcs_function>
+      <lag_filter name="fcs/iris/omega[3]"> <input> fcs/iris/omega-cmd[3] </input> <c1> fcs/iris/motor-c1[3] </c1> </lag_filter>
+      <fcs_function name="fcs/iris/thrust-norm[3]">
+        <function> <pow> <quotient> <property> fcs/iris/omega[3] </property> <value> 1100 </value> </quotient> <value> 2 </value> </pow> </function>
+        <output> fcs/throttle-pos-norm[3] </output>
+      </fcs_function>
+      <fcs_function name="fcs/iris/rpm[3]">
+        <function> <product> <property> fcs/iris/omega[3] </property> <value> 9.5492966 </value> </product> </function>
+        <output> propulsion/engine[3]/rotor-rpm </output>
+      </fcs_function>
+    </channel>
+  </flight_control>
+  <aerodynamics>
+    <axis name="YAW">
+      <function name="aero/moment/iris-rotor-torque">
+        <description> the rotors' reaction torques, k_Q w^2 each </description>
+        <sum> <product> <value> 2.5844175e-07 </value> <pow> <property> fcs/iris/omega[0] </property> <value> 2 </value> </pow> </product> <product> <value> 2.5844175e-07 </value> <pow> <property> fcs/iris/omega[1] </property> <value> 2 </value> </pow> </product> <product> <value> -2.5844175e-07 </value> <pow> <property> fcs/iris/omega[2] </property> <value> 2 </value> </pow> </product> <product> <value> -2.5844175e-07 </value> <pow> <property> fcs/iris/omega[3] </property> <value> 2 </value> </pow> </product> </sum>
+      </function>
+    </axis>
+    <function name="aero/iris/rotor-speed-sum"> <sum> <property> fcs/iris/omega[0] </property> <property> fcs/iris/omega[1] </property> <property> fcs/iris/omega[2] </property> <property> fcs/iris/omega[3] </property> </sum> </function>
+    <axis name="X"> <function name="aero/force/iris-rotor-drag-x"> <product> <value> -1.1991308e-05 </value> <property> aero/iris/rotor-speed-sum </property> <property> velocities/u-aero-fps </property> </product> </function> </axis>
+    <axis name="Y"> <function name="aero/force/iris-rotor-drag-y"> <product> <value> -1.1991308e-05 </value> <property> aero/iris/rotor-speed-sum </property> <property> velocities/v-aero-fps </property> </product> </function> </axis>
+  </aerodynamics>
+</fdm_config>

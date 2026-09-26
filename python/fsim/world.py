@@ -52,9 +52,24 @@ COMMAND_DEFAULTS = {
     Level.POSITION: (0.0, 0.0, 0.0, HOLD, 200.0),
 }
 
+#: Field order of each level's command in the capability calls (Vehicle.submit,
+#: Activity.update, World.update): COMMAND_FIELDS', then the fields a rotorcraft
+#: flies with (docs/rotorcraft.md, 3.4) - a wing marks them unsupported
+#: (Parameter.supported), as a rotorcraft does what it has nothing for.
+SETPOINT_FIELDS = dict(COMMAND_FIELDS)
+SETPOINT_FIELDS[Level.ACCELERATION] = COMMAND_FIELDS[Level.ACCELERATION] + ("pitch_rate_rad_s", "yaw_rate_rad_s")
+SETPOINT_FIELDS[Level.VELOCITY] = COMMAND_FIELDS[Level.VELOCITY] + ("north_ms", "east_ms")
+SETPOINT_FIELDS[Level.POSITION] = COMMAND_FIELDS[Level.POSITION] + ("heading_rad",)
+SETPOINT_DEFAULTS = {level: COMMAND_DEFAULTS[level] + (HOLD,) * (len(SETPOINT_FIELDS[level]) - len(COMMAND_FIELDS[level]))
+                     for level in COMMAND_FIELDS}
+#: the widths of the rows only SETPOINT_FIELDS has (World.update sends those as wide as they are)
+_FULL_WIDTHS = frozenset(len(f) for level, f in SETPOINT_FIELDS.items() if len(f) != len(COMMAND_FIELDS[level]))
+
 for _level, _fields in COMMAND_FIELDS.items():
     if len(_fields) != _native.command_field_count(int(_level)):
         raise ImportError("fsim: the %s command has %d fields in the library" % (_level.name, _native.command_field_count(int(_level))))
+    if len(SETPOINT_FIELDS[_level]) != _native.command_field_count_full(int(_level)):
+        raise ImportError("fsim: the %s command has %d fields in the library" % (_level.name, _native.command_field_count_full(int(_level))))
 
 Message = collections.namedtuple("Message", "sender recipient channel format time_sent time_delivered data")
 Message.__doc__ = "A delivered message: who from and to, channel, format, when sent and delivered, the bytes."
@@ -83,8 +98,10 @@ class RangePolicy(enum.IntEnum):
 
 class Axis(enum.IntFlag):
     """What an activity owns: the primary axes, flown through the cascade, and
-    the support axes, set directly. Above the actuators roll and yaw go together
-    (LATERAL); a flight command may own any of LATERAL, PITCH and THRUST apart."""
+    the support axes, set directly. Above the actuators a wing's roll and yaw go
+    together (LATERAL), so a flight command may own any of LATERAL, PITCH and
+    THRUST apart; a rotorcraft's roll and pitch (CYCLIC), so any of CYCLIC, YAW
+    and THRUST."""
 
     ROLL = 1
     PITCH = 2
@@ -96,6 +113,7 @@ class Axis(enum.IntFlag):
     SPEEDBRAKE = 128
     PITCH_TRIM = 256
     LATERAL = ROLL | YAW
+    CYCLIC = ROLL | PITCH
     PRIMARY = ROLL | PITCH | YAW | THRUST
 
 
@@ -157,12 +175,16 @@ LimitStatus.__doc__ = ("One limit since the last read: the control updates in wh
 Envelope = collections.namedtuple("Envelope", "mode limits")
 Envelope.__doc__ = "What envelope protection saw: its ProtectionMode, and a LimitStatus by limit name (fsim.LIMITS)."
 
-Parameter = collections.namedtuple("Parameter", "name unit min max default optional")
+Parameter = collections.namedtuple("Parameter", "name unit min max default optional supported", defaults=(True,))
+Parameter.__doc__ = ("A field of a capability's command, or a behaviour's parameter: its range for this aircraft, its "
+                     "default, whether it takes HOLD, and whether the aircraft has anything it moves (not ``supported``: "
+                     "a command that sets it other than to HOLD or its default is refused, invalid_parameter).")
 Capability = collections.namedtuple("Capability",
                                     "id version kind interactions level axes terminating needs_target behavior parameters axis_groups")
 Capability.__doc__ = ("What a vehicle offers: e.g. fsim.flight.attitude (a level) or fsim.guidance.hold (a behaviour). "
                       "``axis_groups``: what it may own apart - 1 lateral (roll and yaw), 2 pitch, 4 thrust, 8 any primary "
-                      "axis; 0 all of its axes or none.")
+                      "axis, 16 cyclic (roll and pitch), 32 yaw; 0 all of its axes or none. A wing's flight capabilities "
+                      "own 1, 2 and 4 apart, a rotorcraft's 16, 32 and 4.")
 
 
 def _info(t):
@@ -188,14 +210,18 @@ SUPPORT_DEFAULTS = {"gear": (1.0,), "flaps": (0.0,), "wheel_brakes": (0.0, 0.0),
 
 
 def _row(level, values, fields):
-    """A level's (or support kind's) fields: all of them in order, or some by name with the rest as a new command's defaults."""
+    """A level's (or support kind's) fields: all of them in order - a level's COMMAND_FIELDS, or its SETPOINT_FIELDS
+    with the rotorcraft's - or some by name with the rest as a new command's defaults."""
     if isinstance(level, str):
         names, defaults, what = SUPPORT_FIELDS[level], SUPPORT_DEFAULTS[level], level
+        counts = (len(names),)
     else:
-        names, defaults, what = COMMAND_FIELDS[level], COMMAND_DEFAULTS[level], level.name
+        names, defaults, what = SETPOINT_FIELDS[level], SETPOINT_DEFAULTS[level], level.name
+        counts = (len(COMMAND_FIELDS[level]), len(names))
     if values:
-        if fields or len(values) != len(names):
-            raise TypeError("%s takes %d values in order (%s) or fields by name" % (what, len(names), ", ".join(names)))
+        if fields or len(values) not in counts:
+            raise TypeError("%s takes %s values in order (%s) or fields by name" % (what, " or ".join(str(c) for c in sorted(set(counts))),
+                                                                                   ", ".join(names)))
         return tuple(float(v) for v in values)
     row = list(defaults)
     for key, value in fields.items():
@@ -356,8 +382,9 @@ class Vehicle:
         """NEW: a command at ``level`` - its fields by name (fsim.COMMAND_FIELDS),
         the others as the command's defaults, or all of them in order -
         becomes an Activity, answered at once. ``axes`` (fsim.Axis) owns part
-        of the vehicle - Axis.LATERAL, Axis.PITCH, Axis.THRUST or a union, any
-        primary axis at the actuator level - and the rest keep their owners;
+        of the vehicle - Axis.LATERAL, Axis.PITCH, Axis.THRUST or a union (a
+        rotorcraft's Axis.CYCLIC, Axis.YAW, Axis.THRUST), any primary axis at
+        the actuator level - and the rest keep their owners;
         None owns them all. Raises fsim.Rejected if the vehicle refuses it (a
         higher source holds its axes, a value out of range with
         RangePolicy.REJECT, a required field left as HOLD, axes it cannot own
@@ -664,12 +691,16 @@ class World:
     def update(self, activities, values):
         """UPDATE many activities of one level in one call: their ids (a uint64
         array, or Activities) and a float64 row per activity in the level's
-        field order. Raises fsim.Error naming the first one refused."""
+        field order - COMMAND_FIELDS', or SETPOINT_FIELDS' with the
+        rotorcraft's. Raises fsim.Error naming the first one refused."""
         if not (isinstance(activities, np.ndarray) and activities.dtype == np.uint64 and activities.flags.c_contiguous):
             activities = np.fromiter((a.id if isinstance(a, Activity) else int(a) for a in activities), dtype=np.uint64)
         rows = np.ascontiguousarray(as_array(values, np.float64))
         stride = rows.shape[-1] if rows.ndim > 1 else (rows.size // max(len(activities), 1))
-        self._h.activity_update_batch(activities, rows, int(stride))
+        if stride in _FULL_WIDTHS:  # a row with the rotorcraft's fields: as wide as it is
+            self._h.activity_update_batch(activities, rows, int(stride), int(stride))
+        else:
+            self._h.activity_update_batch(activities, rows, int(stride))
 
     # --- environment ---------------------------------------------------------------------
     @property

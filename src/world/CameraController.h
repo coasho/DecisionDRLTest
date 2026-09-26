@@ -67,6 +67,14 @@ public:
     /// Initial/default distance behind and above; also the "reset" state.
     void setChaseOffset(double distanceM, double elevationDeg = 14.0, double azimuthDeg = 180.0);
 
+    /// How big the followed vehicle is drawn: the furthest its model reaches
+    /// from its reference point (m; 0 = not known). The closest the camera
+    /// comes to it, and how high the eye keeps over the ground at close
+    /// range, scale with it below full size, so a 9 cm quadrotor can be
+    /// followed as closely as an airliner is; a full-size vehicle keeps the
+    /// fixed limits.
+    void setTargetRadius(double radiusM) noexcept { targetRadius_ = radiusM > 0.0 ? radiusM : 0.0; }
+
     /// The angle the detached camera looks down at the ground from, in degrees
     /// above the focus' horizon, and what resetView() returns to while nothing
     /// is being followed.
@@ -133,6 +141,9 @@ private:
     /// Carry the focus a frame's worth of the way towards the wheel's target.
     void followZoomTarget(double fromDistance, double toDistance);
     void localFrame(const vsg::dvec3& pos, vsg::dvec3& east, vsg::dvec3& north, vsg::dvec3& up) const;
+    /// The closest the camera may come: to a followed vehicle (by its size)
+    /// or to the ground point it orbits.
+    double minDistance() const noexcept;
 
     vsg::ref_ptr<vsg::Camera> camera_;
     vsg::ref_ptr<vsg::LookAt> lookAt_;
@@ -140,6 +151,7 @@ private:
     GroundQuery ground_;
     Mode mode_ = Mode::Chase;
     bool hasTarget_ = false;
+    double targetRadius_ = 0.0; ///< see setTargetRadius()
 
     // View offset in the local frame of the focus.
     double azimuth_ = 3.14159265358979323846; ///< 0 = looking from ahead, pi = from behind

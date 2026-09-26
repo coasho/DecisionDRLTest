@@ -1,0 +1,277 @@
+<?xml version="1.0"?>
+<fdm_config name="cf2" version="2.0" release="BETA">
+  <fileheader>
+    <author> hangar (tools/hangar), from aircraft/cf2/cf2.toml </author>
+    <description> Bitcraze Crazyflie 2.0 - 27 g quadrotor, brushed coreless motors (Foerster 2015) </description>
+    <note> Written by hangar's rotorcraft pipeline from the design file, whose comments cite every number's source. </note>
+  </fileheader>
+  <metrics>
+    <wingarea unit="FT2"> 0.053377358 </wingarea>
+    <wingspan unit="FT"> 0.26069554 </wingspan>
+    <chord unit="FT"> 0.26069554 </chord>
+    <htailarea unit="FT2"> 0 </htailarea> <htailarm unit="FT"> 0 </htailarm>
+    <vtailarea unit="FT2"> 0 </vtailarea> <vtailarm unit="FT"> 0 </vtailarm>
+    <location name="AERORP" unit="IN"> <x> 0 </x> <y> 0 </y> <z> 0 </z> </location>
+    <location name="EYEPOINT" unit="IN"> <x> 0 </x> <y> 0 </y> <z> 0 </z> </location>
+    <location name="VRP" unit="IN"> <x> 0 </x> <y> 0 </y> <z> 0 </z> </location>
+  </metrics>
+  <mass_balance>
+    <ixx unit="SLUG*FT2"> 1.0288992e-05 </ixx>
+    <iyy unit="SLUG*FT2"> 1.0591392e-05 </iyy>
+    <izz unit="SLUG*FT2"> 1.6027225e-05 </izz>
+    <emptywt unit="LBS"> 0.059524821 </emptywt>
+    <location name="CG" unit="IN"> <x> 0 </x> <y> 0 </y> <z> 0 </z> </location>
+  </mass_balance>
+  <ground_reactions>
+    <contact type="BOGEY" name="leg 0">
+      <location unit="IN"> <x> -1.1060375 </x> <y> 1.1060375 </y> <z> -0.70866142 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
+      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
+    </contact>
+    <contact type="BOGEY" name="leg 1">
+      <location unit="IN"> <x> 1.1060375 </x> <y> 1.1060375 </y> <z> -0.70866142 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
+      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
+    </contact>
+    <contact type="BOGEY" name="leg 2">
+      <location unit="IN"> <x> 1.1060375 </x> <y> -1.1060375 </y> <z> -0.70866142 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
+      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
+    </contact>
+    <contact type="BOGEY" name="leg 3">
+      <location unit="IN"> <x> -1.1060375 </x> <y> -1.1060375 </y> <z> -0.70866142 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
+      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
+    </contact>
+    <contact type="STRUCTURE" name="top 0">
+      <location unit="IN"> <x> -1.1060375 </x> <y> 1.1060375 </y> <z> 0 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="top 1">
+      <location unit="IN"> <x> 1.1060375 </x> <y> 1.1060375 </y> <z> 0 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="top 2">
+      <location unit="IN"> <x> 1.1060375 </x> <y> -1.1060375 </y> <z> 0 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="top 3">
+      <location unit="IN"> <x> -1.1060375 </x> <y> -1.1060375 </y> <z> 0 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+    </contact>
+    <contact type="STRUCTURE" name="top 4">
+      <location unit="IN"> <x> -0 </x> <y> -0 </y> <z> 0.039370079 </z> </location>
+      <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+    </contact>
+  </ground_reactions>
+  <propulsion>
+    <engine file="cf2_motor">
+      <thruster file="cf2_rotor">
+        <location unit="IN"> <x> -1.1060375 </x> <y> 1.1060375 </y> <z> 0 </z> </location>
+        <orient unit="DEG"> <roll> 0 </roll> <pitch> 90 </pitch> <yaw> 0 </yaw> </orient>
+      </thruster>
+    </engine>
+    <engine file="cf2_motor">
+      <thruster file="cf2_rotor">
+        <location unit="IN"> <x> 1.1060375 </x> <y> 1.1060375 </y> <z> 0 </z> </location>
+        <orient unit="DEG"> <roll> 0 </roll> <pitch> 90 </pitch> <yaw> 0 </yaw> </orient>
+      </thruster>
+    </engine>
+    <engine file="cf2_motor">
+      <thruster file="cf2_rotor">
+        <location unit="IN"> <x> 1.1060375 </x> <y> -1.1060375 </y> <z> 0 </z> </location>
+        <orient unit="DEG"> <roll> 0 </roll> <pitch> 90 </pitch> <yaw> 0 </yaw> </orient>
+      </thruster>
+    </engine>
+    <engine file="cf2_motor">
+      <thruster file="cf2_rotor">
+        <location unit="IN"> <x> -1.1060375 </x> <y> -1.1060375 </y> <z> 0 </z> </location>
+        <orient unit="DEG"> <roll> 0 </roll> <pitch> 90 </pitch> <yaw> 0 </yaw> </orient>
+      </thruster>
+    </engine>
+  </propulsion>
+  <flight_control name="cf2 mixer and motors">
+    <!-- the aircraft's profile for the platform (docs/control-architecture.md, section 7, and
+         docs/rotorcraft.md): what hangar knows of it - its design and its flight tests -->
+    <property value="2">fsim/identity/version</property>
+    <property value="1">fsim/identity/provenance</property>
+    <property value="13">fsim/identity/class</property>
+    <property value="4">fsim/identity/family</property>
+    <property value="2">fsim/effectors/version</property>
+    <property value="1">fsim/effectors/provenance</property>
+    <property value="0">fsim/effectors/flaps</property>
+    <property value="0">fsim/effectors/neutral</property>
+    <property value="4">fsim/effectors/pitch</property>
+    <property value="0">fsim/effectors/pitch_trim</property>
+    <property value="0">fsim/effectors/retractable_gear</property>
+    <property value="3">fsim/effectors/roll</property>
+    <property value="0">fsim/effectors/speedbrake</property>
+    <property value="2">fsim/effectors/thrust</property>
+    <property value="0">fsim/effectors/wheel_brakes</property>
+    <property value="3">fsim/effectors/yaw</property>
+    <property value="1">fsim/envelope/version</property>
+    <property value="1">fsim/envelope/provenance</property>
+    <property value="30">fsim/envelope/clean/bank_max_deg</property>
+    <property value="30">fsim/envelope/clean/pitch_max_deg</property>
+    <property value="-30">fsim/envelope/clean/pitch_min_deg</property>
+    <property value="400">fsim/envelope/clean/roll_rate_max_deg_s</property>
+    <property value="2">fsim/propulsion/version</property>
+    <property value="1">fsim/propulsion/provenance</property>
+    <property value="4">fsim/propulsion/engines</property>
+    <property value="0.0647">fsim/propulsion/spool_s</property>
+    <property value="4">fsim/propulsion/type</property>
+    <property value="1">fsim/hover/version</property>
+    <property value="1">fsim/hover/provenance</property>
+    <property value="-1.30396e-15">fsim/hover/aileron_trim</property>
+    <property value="100">fsim/hover/altitude_m</property>
+    <property value="-4.79442e-12">fsim/hover/elevator_trim</property>
+    <property value="0">fsim/hover/heave/damping</property>
+    <property value="0.0647">fsim/hover/heave/lag_s</property>
+    <property value="21.439">fsim/hover/heave/power</property>
+    <property value="0.027">fsim/hover/mass_kg</property>
+    <property value="0.0314077">fsim/hover/pitch/damping</property>
+    <property value="0.0647">fsim/hover/pitch/lag_s</property>
+    <property value="-292.55">fsim/hover/pitch/power</property>
+    <property value="6.42747e-05">fsim/hover/pitch_attitude_deg</property>
+    <property value="0.0314077">fsim/hover/roll/damping</property>
+    <property value="0.0647">fsim/hover/roll/lag_s</property>
+    <property value="301.149">fsim/hover/roll/power</property>
+    <property value="-1.68017e-11">fsim/hover/roll_attitude_deg</property>
+    <property value="3.75311e-12">fsim/hover/rudder_trim</property>
+    <property value="0.446172">fsim/hover/throttle_trim</property>
+    <property value="0.0314458">fsim/hover/yaw/damping</property>
+    <property value="0.0647">fsim/hover/yaw/lag_s</property>
+    <property value="-172.967">fsim/hover/yaw/power</property>
+    <channel name="motors">
+      <!-- motor 0: front right, counter-clockwise -->
+      <fcs_function name="fcs/cf2/cmd[0]">
+        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+          <property> fcs/throttle-cmd-norm[0] </property>
+          <product> <value> -0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
+          <product> <value> -0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
+          <product> <value> -0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
+        </sum> </min> </max> </function>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/omega-cmd[0]">
+        <function> <product> <value> 2268.8582 </value> <sqrt> <property> fcs/cf2/cmd[0] </property> </sqrt> </product> </function>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/motor-c1[0]">
+        <function> <ifthen> <gt> <property> fcs/cf2/omega-cmd[0] </property> <property> fcs/cf2/omega[0] </property> </gt>
+          <value> 15.455951 </value> <value> 15.455951 </value> </ifthen> </function>
+      </fcs_function>
+      <lag_filter name="fcs/cf2/omega[0]"> <input> fcs/cf2/omega-cmd[0] </input> <c1> fcs/cf2/motor-c1[0] </c1> </lag_filter>
+      <fcs_function name="fcs/cf2/thrust-norm[0]">
+        <function> <pow> <quotient> <property> fcs/cf2/omega[0] </property> <value> 2268.8582 </value> </quotient> <value> 2 </value> </pow> </function>
+        <output> fcs/throttle-pos-norm[0] </output>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/rpm[0]">
+        <function> <product> <property> fcs/cf2/omega[0] </property> <value> 9.5492966 </value> </product> </function>
+        <output> propulsion/engine[0]/rotor-rpm </output>
+      </fcs_function>
+      <!-- motor 1: rear right, clockwise -->
+      <fcs_function name="fcs/cf2/cmd[1]">
+        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+          <property> fcs/throttle-cmd-norm[1] </property>
+          <product> <value> -0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
+          <product> <value> 0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
+          <product> <value> 0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
+        </sum> </min> </max> </function>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/omega-cmd[1]">
+        <function> <product> <value> 2268.8582 </value> <sqrt> <property> fcs/cf2/cmd[1] </property> </sqrt> </product> </function>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/motor-c1[1]">
+        <function> <ifthen> <gt> <property> fcs/cf2/omega-cmd[1] </property> <property> fcs/cf2/omega[1] </property> </gt>
+          <value> 15.455951 </value> <value> 15.455951 </value> </ifthen> </function>
+      </fcs_function>
+      <lag_filter name="fcs/cf2/omega[1]"> <input> fcs/cf2/omega-cmd[1] </input> <c1> fcs/cf2/motor-c1[1] </c1> </lag_filter>
+      <fcs_function name="fcs/cf2/thrust-norm[1]">
+        <function> <pow> <quotient> <property> fcs/cf2/omega[1] </property> <value> 2268.8582 </value> </quotient> <value> 2 </value> </pow> </function>
+        <output> fcs/throttle-pos-norm[1] </output>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/rpm[1]">
+        <function> <product> <property> fcs/cf2/omega[1] </property> <value> 9.5492966 </value> </product> </function>
+        <output> propulsion/engine[1]/rotor-rpm </output>
+      </fcs_function>
+      <!-- motor 2: rear left, counter-clockwise -->
+      <fcs_function name="fcs/cf2/cmd[2]">
+        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+          <property> fcs/throttle-cmd-norm[2] </property>
+          <product> <value> 0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
+          <product> <value> 0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
+          <product> <value> -0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
+        </sum> </min> </max> </function>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/omega-cmd[2]">
+        <function> <product> <value> 2268.8582 </value> <sqrt> <property> fcs/cf2/cmd[2] </property> </sqrt> </product> </function>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/motor-c1[2]">
+        <function> <ifthen> <gt> <property> fcs/cf2/omega-cmd[2] </property> <property> fcs/cf2/omega[2] </property> </gt>
+          <value> 15.455951 </value> <value> 15.455951 </value> </ifthen> </function>
+      </fcs_function>
+      <lag_filter name="fcs/cf2/omega[2]"> <input> fcs/cf2/omega-cmd[2] </input> <c1> fcs/cf2/motor-c1[2] </c1> </lag_filter>
+      <fcs_function name="fcs/cf2/thrust-norm[2]">
+        <function> <pow> <quotient> <property> fcs/cf2/omega[2] </property> <value> 2268.8582 </value> </quotient> <value> 2 </value> </pow> </function>
+        <output> fcs/throttle-pos-norm[2] </output>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/rpm[2]">
+        <function> <product> <property> fcs/cf2/omega[2] </property> <value> 9.5492966 </value> </product> </function>
+        <output> propulsion/engine[2]/rotor-rpm </output>
+      </fcs_function>
+      <!-- motor 3: front left, clockwise -->
+      <fcs_function name="fcs/cf2/cmd[3]">
+        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+          <property> fcs/throttle-cmd-norm[3] </property>
+          <product> <value> 0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
+          <product> <value> -0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
+          <product> <value> 0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
+        </sum> </min> </max> </function>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/omega-cmd[3]">
+        <function> <product> <value> 2268.8582 </value> <sqrt> <property> fcs/cf2/cmd[3] </property> </sqrt> </product> </function>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/motor-c1[3]">
+        <function> <ifthen> <gt> <property> fcs/cf2/omega-cmd[3] </property> <property> fcs/cf2/omega[3] </property> </gt>
+          <value> 15.455951 </value> <value> 15.455951 </value> </ifthen> </function>
+      </fcs_function>
+      <lag_filter name="fcs/cf2/omega[3]"> <input> fcs/cf2/omega-cmd[3] </input> <c1> fcs/cf2/motor-c1[3] </c1> </lag_filter>
+      <fcs_function name="fcs/cf2/thrust-norm[3]">
+        <function> <pow> <quotient> <property> fcs/cf2/omega[3] </property> <value> 2268.8582 </value> </quotient> <value> 2 </value> </pow> </function>
+        <output> fcs/throttle-pos-norm[3] </output>
+      </fcs_function>
+      <fcs_function name="fcs/cf2/rpm[3]">
+        <function> <product> <property> fcs/cf2/omega[3] </property> <value> 9.5492966 </value> </product> </function>
+        <output> propulsion/engine[3]/rotor-rpm </output>
+      </fcs_function>
+    </channel>
+  </flight_control>
+  <aerodynamics>
+    <axis name="YAW">
+      <function name="aero/moment/cf2-rotor-torque">
+        <description> the rotors' reaction torques, k_Q w^2 each </description>
+        <sum> <product> <value> 5.3388408e-10 </value> <pow> <property> fcs/cf2/omega[0] </property> <value> 2 </value> </pow> </product> <product> <value> -5.3388408e-10 </value> <pow> <property> fcs/cf2/omega[1] </property> <value> 2 </value> </pow> </product> <product> <value> 5.3388408e-10 </value> <pow> <property> fcs/cf2/omega[2] </property> <value> 2 </value> </pow> </product> <product> <value> -5.3388408e-10 </value> <pow> <property> fcs/cf2/omega[3] </property> <value> 2 </value> </pow> </product> </sum>
+      </function>
+    </axis>
+    <function name="aero/cf2/rotor-speed-sum"> <sum> <property> fcs/cf2/omega[0] </property> <property> fcs/cf2/omega[1] </property> <property> fcs/cf2/omega[2] </property> <property> fcs/cf2/omega[3] </property> </sum> </function>
+    <axis name="X"> <function name="aero/force/cf2-rotor-drag-x"> <product> <value> -6.2892697e-08 </value> <property> aero/cf2/rotor-speed-sum </property> <property> velocities/u-aero-fps </property> </product> </function> </axis>
+    <axis name="Y"> <function name="aero/force/cf2-rotor-drag-y"> <product> <value> -6.2892697e-08 </value> <property> aero/cf2/rotor-speed-sum </property> <property> velocities/v-aero-fps </property> </product> </function> </axis>
+    <axis name="Z"> <function name="aero/force/cf2-rotor-drag-z"> <product> <value> -7.0652787e-08 </value> <property> aero/cf2/rotor-speed-sum </property> <property> velocities/w-aero-fps </property> </product> </function> </axis>
+    <function name="aero/cf2/ground-effect-scale">
+      <description> k_ge (r / 4)^2 / h^2, h the rotors' height above the ground (m) </description>
+      <quotient> <value> 2.4621475e-12 </value> <pow> <max> <value> 0.037763713 </value>
+        <sum> <product> <property> position/h-agl-ft </property> <value> 0.3048 </value> </product> <value> 0 </value> </sum> </max> <value> 2 </value> </pow> </quotient>
+    </function>
+    <axis name="Z"> <function name="aero/force/cf2-ground-effect">
+      <product> <value> -1 </value> <property> aero/cf2/ground-effect-scale </property>
+        <sum> <pow> <property> fcs/cf2/omega[0] </property> <value> 2 </value> </pow> <pow> <property> fcs/cf2/omega[1] </property> <value> 2 </value> </pow> <pow> <property> fcs/cf2/omega[2] </property> <value> 2 </value> </pow> <pow> <property> fcs/cf2/omega[3] </property> <value> 2 </value> </pow> </sum> </product> </function> </axis>
+  </aerodynamics>
+</fdm_config>

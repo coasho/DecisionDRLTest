@@ -877,12 +877,15 @@ static PyObject* world_activity_update(PyObject* o, PyObject* const* args, Py_ss
     return result_tuple(&r);
 }
 
-/* activity_update_batch(activities uint64[n], values float64[n][stride], stride) */
+/* activity_update_batch(activities uint64[n], values float64[n][stride], stride[, fields]): with `fields`, each
+ * row holds that many (a level's fsim_command_field_count or fsim_command_field_count_full) */
 static PyObject* world_activity_update_batch(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
-    uint32_t stride;
+    uint32_t stride, fields = 0;
     Py_buffer acts, values;
-    if (!check_args(n, 3, 3, "activity_update_batch") || !as_u32(args[2], &stride) || !WORLD_IDLE(self)) return NULL;
+    if (!check_args(n, 3, 4, "activity_update_batch") || !as_u32(args[2], &stride) || (n > 3 && !as_u32(args[3], &fields)) ||
+        !WORLD_IDLE(self))
+        return NULL;
     if (!get_array(args[0], &acts, 0, "Q", 8, "activity_update_batch activities")) return NULL;
     if (!get_array(args[1], &values, 0, "d", 8, "activity_update_batch values")) {
         PyBuffer_Release(&acts);
@@ -896,7 +899,10 @@ static PyObject* world_activity_update_batch(PyObject* o, PyObject* const* args,
         PyBuffer_Release(&values);
         return NULL;
     }
-    const int rc = fsim_activity_update_batch(self->world, (const fsim_activity_id*)acts.buf, (uint32_t)count, (const double*)values.buf, stride);
+    const int rc = fields ? fsim_activity_update_batch_n(self->world, (const fsim_activity_id*)acts.buf, (uint32_t)count,
+                                                         (const double*)values.buf, stride, fields)
+                          : fsim_activity_update_batch(self->world, (const fsim_activity_id*)acts.buf, (uint32_t)count,
+                                                       (const double*)values.buf, stride);
     PyBuffer_Release(&acts);
     PyBuffer_Release(&values);
     if (rc != FSIM_OK) return fail();
@@ -945,7 +951,7 @@ static PyObject* world_vehicle_activities(PyObject* o, PyObject* const* args, Py
 }
 
 /* capabilities(id) -> [(id, version, kind, interactions, level, axes, terminating, needs_target, behavior,
- *                       [(name, unit, min, max, default, optional)], axis_groups)] */
+ *                       [(name, unit, min, max, default, optional, supported)], axis_groups)] */
 static PyObject* world_capabilities(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint32_t id;
@@ -959,7 +965,8 @@ static PyObject* world_capabilities(PyObject* o, PyObject* const* args, Py_ssize
         PyObject* params = PyList_New(0);
         for (uint32_t k = 0; params && k < c.parameter_count; ++k) {
             if (fsim_vehicle_capability_parameter(self->world, id, i, k, &p) != FSIM_OK) continue;
-            PyObject* t = Py_BuildValue("(ssdddO)", p.name, p.unit, p.min, p.max, p.default_value, p.optional ? Py_True : Py_False);
+            PyObject* t = Py_BuildValue("(ssdddOO)", p.name, p.unit, p.min, p.max, p.default_value, p.optional ? Py_True : Py_False,
+                                        p.unsupported ? Py_False : Py_True);
             if (!t || PyList_Append(params, t) < 0) {
                 Py_XDECREF(t);
                 Py_CLEAR(params);
@@ -1348,7 +1355,7 @@ static PyMethodDef world_methods[] = {
     FAST("submit_behavior", world_submit_behavior, "submit_behavior(id, behavior, target, params, points, source, axes, range, min_version) -> result"),
     FAST("submit_support", world_submit_support, "submit_support(id, kind, values, source, axes, range, min_version) -> result"),
     FAST("activity_update", world_activity_update, "activity_update(activity, values) -> result"),
-    FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride)"),
+    FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride[, fields])"),
     FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity) -> result"),
     FAST("activity_info", world_activity_info, "activity_info(activity) -> info or None"),
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
@@ -1618,6 +1625,13 @@ static PyObject* mod_command_field_count(PyObject* m, PyObject* const* args, Py_
     return PyLong_FromUnsignedLong(fsim_command_field_count(level));
 }
 
+static PyObject* mod_command_field_count_full(PyObject* m, PyObject* const* args, Py_ssize_t n) {
+    int level;
+    (void)m;
+    if (!check_args(n, 1, 1, "command_field_count_full") || !as_int(args[0], &level)) return NULL;
+    return PyLong_FromUnsignedLong(fsim_command_field_count_full(level));
+}
+
 /* layout(): the C structs' sizes and field offsets, so the Python mirrors can
  * be checked against the library they are about to read. */
 #define OFS(T, f) #f, (unsigned long long)offsetof(T, f)
@@ -1669,6 +1683,7 @@ static PyMethodDef module_methods[] = {
     FAST("log_level", mod_log_level, "the platform log's level"),
     FAST("registered_ids", mod_registered_ids, "registered_ids(REGISTRY_TASK | REGISTRY_OBSERVATION | REGISTRY_ACTION)"),
     FAST("command_field_count", mod_command_field_count, "command_field_count(level)"),
+    FAST("command_field_count_full", mod_command_field_count_full, "command_field_count_full(level)"),
     FAST("reason_name", mod_reason_name, "reason_name(code): why a command was refused or an activity ended"),
     FAST("activity_state_name", mod_activity_state_name, "activity_state_name(code)"),
     FAST("limit_name", mod_limit_name, "limit_name(i): an envelope limit, \"load_factor_max\" ..."),

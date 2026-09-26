@@ -2,6 +2,7 @@
 
 #include "control/Registry.h"
 #include "core/Geodesy.h"
+#include "fsim/RotorControllers.h"
 #include "core/Units.h"
 
 #include <algorithm>
@@ -626,9 +627,12 @@ void registerBuiltinControllers(ControllerRegistry& r) {
                   traits(Persistence::Persistent,
                          {p("ahead_m", "m", -100.0), p("right_m", "m", 60.0), p("below_m", "m", 0.0), p("closure_gain", "1/s", 0.1, 0.0)},
                          {velocity}, true));
-    r.addBehavior("aerobatics", [] { return std::make_unique<AerobaticBehavior>(); },
-                  traits(Persistence::Terminating, {p("manoeuvre", "", 1.0, 0.0, 3.0), p("load_factor_g", "g", 3.5, 0.0), p("roll_rate_rad_s", "rad/s", 1.5, 0.0)},
-                         {acceleration, velocity}));
+    auto aerobatic = traits(Persistence::Terminating,
+                            {p("manoeuvre", "", 1.0, 0.0, 3.0), p("load_factor_g", "g", 3.5, 0.0), p("roll_rate_rad_s", "rad/s", 1.5, 0.0)},
+                            {acceleration, velocity});
+    aerobatic.features = kFeatureWingborne; // a loop pulled by load factor: a wing's
+    r.addBehavior("aerobatics", [] { return std::make_unique<AerobaticBehavior>(); }, std::move(aerobatic));
+    registerRotorControllers(r); // the rotorcraft's loops and "hover" (docs/rotorcraft.md, 3.6)
 }
 
 } // namespace fsim::control

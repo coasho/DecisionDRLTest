@@ -76,6 +76,10 @@ private:
     PropertyHandle extForceMag_, extForceX_, extForceY_, extForceZ_, extMomentMag_, extMomentL_, extMomentM_, extMomentN_;
     PropertyHandle extLocX_, extLocY_, extLocZ_, cgX_, cgY_, cgZ_;
     PropertyHandle lefPosDeg_; ///< leading-edge flaps, where the aircraft's FCS has them (fcs/lef-pos-deg)
+    /// Per engine: the rotor's speed where its thruster has none of its own -
+    /// a direct thruster whose rotor the flight control system spins (a
+    /// multirotor's motors: propulsion/engine[i]/rotor-rpm, docs/rotorcraft.md)
+    std::vector<PropertyHandle> rotorRpm_;
 };
 
 } // namespace fsim::sim

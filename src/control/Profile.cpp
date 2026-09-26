@@ -21,7 +21,9 @@ enum class Kind : std::uint8_t {
 };
 
 /// One field of a section as the aircraft file names it (relative to
-/// fsim/<section>), its valid range in the file's unit, and where it lives.
+/// fsim/<section>), its valid range in the file's unit, and where it lives;
+/// and the versions of its section it belongs to - a code a newer version
+/// added is out of range in an older one, which is read as it always was.
 struct Field {
     const char* section;
     const char* name;
@@ -29,18 +31,25 @@ struct Field {
     double lo, hi;
     double scale; ///< file unit -> memory (degrees -> radians)
     void* (*at)(VehicleProfile&);
+    std::uint16_t since = 1, until = 0xFFFF;
 };
 
 #define AT(member) [](VehicleProfile& p) -> void* { return &p.member; }
 
 const Field kFields[] = {
-    {"identity", "class", Kind::Code, 0, 11, 1, AT(identity.aircraftClass)},
-    {"identity", "family", Kind::Code, 0, 2, 1, AT(identity.family)},
+    {"identity", "class", Kind::Code, 0, 11, 1, AT(identity.aircraftClass), 1, 1},
+    {"identity", "class", Kind::Code, 0, 13, 1, AT(identity.aircraftClass), 2},       // + helicopter, multirotor
+    {"identity", "family", Kind::Code, 0, 2, 1, AT(identity.family), 1, 1},
+    {"identity", "family", Kind::Code, 0, 4, 1, AT(identity.family), 2},               // + helicopter, multirotor
     {"identity", "built", Kind::Date, 19000101, 99991231, 1, AT(identity.built)},
 
-    {"effectors", "pitch", Kind::Code, 0, 2, 1, AT(effectors.pitch)},
-    {"effectors", "roll", Kind::Code, 0, 1, 1, AT(effectors.roll)},
-    {"effectors", "yaw", Kind::Code, 0, 1, 1, AT(effectors.yaw)},
+    {"effectors", "pitch", Kind::Code, 0, 2, 1, AT(effectors.pitch), 1, 1},
+    {"effectors", "pitch", Kind::Code, 0, 4, 1, AT(effectors.pitch), 2},              // + cyclic, mixer
+    {"effectors", "roll", Kind::Code, 0, 1, 1, AT(effectors.roll), 1, 1},
+    {"effectors", "roll", Kind::Code, 0, 3, 1, AT(effectors.roll), 2},
+    {"effectors", "yaw", Kind::Code, 0, 1, 1, AT(effectors.yaw), 1, 1},
+    {"effectors", "yaw", Kind::Code, 0, 3, 1, AT(effectors.yaw), 2},                  // + tail rotor, mixer
+    {"effectors", "thrust", Kind::Code, 0, 2, 1, AT(effectors.thrust), 2},
     {"effectors", "neutral", Kind::Code, 0, 2, 1, AT(effectors.neutral)},
     {"effectors", "flaps", Kind::Flag, 0, 1, 1, AT(effectors.flaps)},
     {"effectors", "retractable_gear", Kind::Flag, 0, 1, 1, AT(effectors.retractableGear)},
@@ -71,7 +80,8 @@ const Field kFields[] = {
     {"envelope", "law_roll_rate", Kind::Flag, 0, 1, 1, AT(envelope.lawRollRate)},
 
     {"propulsion", "engines", Kind::Count, 0, 16, 1, AT(propulsion.engines)},
-    {"propulsion", "type", Kind::Code, 0, 4, 1, AT(propulsion.type)},
+    {"propulsion", "type", Kind::Code, 0, 4, 1, AT(propulsion.type), 1, 1},
+    {"propulsion", "type", Kind::Code, 0, 5, 1, AT(propulsion.type), 2},              // + turboshaft
     {"propulsion", "afterburner", Kind::Flag, 0, 1, 1, AT(propulsion.afterburner)},
     {"propulsion", "afterburner_throttle", Kind::Real, 0, 1, 1, AT(propulsion.afterburnerThrottle)},
     {"propulsion", "reverse", Kind::Flag, 0, 1, 1, AT(propulsion.reverse)},
@@ -99,6 +109,21 @@ const Field kFields[] = {
     {"performance", "max_tas_ms", Kind::Real, 0, 2000, 1, AT(performance.maxTasMs)},
     {"performance", "ceiling_m", Kind::Real, 0, 40000, 1, AT(performance.ceilingM)},
     {"performance", "climb_ms", Kind::Real, 0, 1000, 1, AT(performance.climbMs)},
+
+    {"hover", "altitude_m", Kind::Real, -500, 40000, 1, AT(hover.altitudeM)},
+    {"hover", "mass_kg", Kind::Real, 0, 1e6, 1, AT(hover.massKg)},
+    {"hover", "throttle_trim", Kind::Real, 0, 1, 1, AT(hover.throttleTrim)},
+    {"hover", "aileron_trim", Kind::Real, -1, 1, 1, AT(hover.aileronTrim)},
+    {"hover", "elevator_trim", Kind::Real, -1, 1, 1, AT(hover.elevatorTrim)},
+    {"hover", "rudder_trim", Kind::Real, -1, 1, 1, AT(hover.rudderTrim)},
+    {"hover", "roll_attitude_deg", Kind::Real, -90, 90, kDeg, AT(hover.rollAttitudeRad)},
+    {"hover", "pitch_attitude_deg", Kind::Real, -90, 90, kDeg, AT(hover.pitchAttitudeRad)},
+#define AXIS(axis)                                                                                  {"hover", #axis "/power", Kind::Real, -1e6, 1e6, 1, AT(hover.axis.power)},                      {"hover", #axis "/damping", Kind::Real, 0, 1000, 1, AT(hover.axis.damping)},                     {"hover", #axis "/lag_s", Kind::Real, 0, 100, 1, AT(hover.axis.lagS)}
+    AXIS(roll),
+    AXIS(pitch),
+    AXIS(yaw),
+    AXIS(heave),
+#undef AXIS
 };
 
 #undef AT
@@ -112,7 +137,7 @@ const SectionInfo kSections[] = {
     {"identity", IdentitySection::kVersion},     {"effectors", EffectorsSection::kVersion},
     {"envelope", EnvelopeSection::kVersion},     {"propulsion", PropulsionSection::kVersion},
     {"plant", PlantSection::kVersion},           {"performance", PerformanceSection::kVersion},
-    {"control", ControlSection::kVersion},
+    {"control", ControlSection::kVersion},       {"hover", HoverSection::kVersion},
 };
 
 SectionHeader* headerPtr(VehicleProfile& p, std::string_view section) noexcept {
@@ -123,12 +148,15 @@ SectionHeader* headerPtr(VehicleProfile& p, std::string_view section) noexcept {
     if (section == "plant") return &p.plant.header;
     if (section == "performance") return &p.performance.header;
     if (section == "control") return &p.control.header;
+    if (section == "hover") return &p.hover.header;
     return nullptr;
 }
 
-const Field* findField(std::string_view section, std::string_view name) noexcept {
+/// The field as a section of `version` has it (0: any version - they all
+/// live in the same place).
+const Field* findField(std::string_view section, std::string_view name, std::uint16_t version = 0) noexcept {
     for (const auto& f : kFields)
-        if (section == f.section && name == f.name) return &f;
+        if (section == f.section && name == f.name && (version == 0 || (version >= f.since && version <= f.until))) return &f;
     return nullptr;
 }
 
@@ -212,7 +240,8 @@ VehicleProfile readProfile(const std::string& aircraft, const PropertySource& pr
                                std::to_string(info.version) + "; its defaults are used");
             continue;
         }
-        // (A version older than the newest would be converted here; version 1 is the first.)
+        // An older version is read as it was: its fields, its codes (every
+        // version so far only added to the one before, so nothing converts).
         SectionHeader& header = *headerPtr(p, info.name);
         header.version = static_cast<std::uint16_t>(version);
         header.provenance = provenance >= 0.0 && provenance <= 4.0 && provenance == std::floor(provenance)
@@ -231,7 +260,7 @@ VehicleProfile readProfile(const std::string& aircraft, const PropertySource& pr
         }
         for (const auto& [name, value] : values) {
             if (name == "version" || name == "provenance") continue;
-            const Field* f = findField(info.name, name);
+            const Field* f = findField(info.name, name, header.version);
             if (!f) warnings.push_back(aircraft + ": " + prefix + "/" + name + " is not a field this build knows; ignored");
             else if (!store(*f, p, value))
                 warnings.push_back(aircraft + ": " + prefix + "/" + name + " = " + format(value) + " is out of range [" + format(f->lo) + ", " +
@@ -252,6 +281,7 @@ VehicleProfile mergeProfile(const VehicleProfile& base, const VehicleProfile& ov
     if (over.plant.header.present()) p.plant = over.plant;
     if (over.performance.header.present()) p.performance = over.performance;
     if (over.control.header.present()) p.control = over.control;
+    if (over.hover.header.present()) p.hover = over.hover;
     return p;
 }
 

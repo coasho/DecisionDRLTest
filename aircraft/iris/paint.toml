@@ -1,0 +1,9 @@
+# The IRIS+'s black shell (the livery's); its blue front arms and black rear ones, motors and legs
+# are their parts' own
+[paint]
+scheme = "single"
+colours = ["#232527"]
+panel_lines = 0.0
+wear = 0.02
+gloss = 0.35
+seed = 3

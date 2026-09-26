@@ -1,0 +1,9 @@
+# The Crazyflie 2.0: its battery's foil grey (the livery's); the board black, the motor mounts'
+# clear white plastic and the motors' metal are their parts' own
+[paint]
+scheme = "single"
+colours = ["#a7abb0"]
+panel_lines = 0.0
+wear = 0.02
+gloss = 0.3
+seed = 2

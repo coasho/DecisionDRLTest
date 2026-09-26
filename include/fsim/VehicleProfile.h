@@ -39,13 +39,19 @@ struct SectionHeader {
 // --- identity -----------------------------------------------------------------------
 
 enum class AircraftClass : std::uint8_t {
-    Unknown = 0, LightGa, Fighter, Attack, Bomber, Transport, Tanker, Aew, Reconnaissance, ElectronicWarfare, Uav, Trainer
+    Unknown = 0, LightGa, Fighter, Attack, Bomber, Transport, Tanker, Aew, Reconnaissance, ElectronicWarfare, Uav, Trainer,
+    Helicopter, Multirotor ///< identity version 2
 };
-/// How the controls reach the surfaces: JSBSim's own FCS (unknown), surfaces, a fly-by-wire law.
-enum class ControlFamily : std::uint8_t { Stock = 0, Direct = 1, FlyByWire = 2 };
+/// How the controls reach what flies the aircraft: JSBSim's own FCS
+/// (unknown), surfaces, a fly-by-wire law; a helicopter's cyclic, pedals
+/// and collective; a multirotor's mixer and motors (docs/rotorcraft.md, 3.2).
+enum class ControlFamily : std::uint8_t { Stock = 0, Direct = 1, FlyByWire = 2, Helicopter = 3, Multirotor = 4 };
+
+/// Whether a family's aircraft flies on rotors rather than a wing.
+constexpr bool isRotorcraft(ControlFamily f) noexcept { return f == ControlFamily::Helicopter || f == ControlFamily::Multirotor; }
 
 struct IdentitySection {
-    static constexpr std::uint16_t kVersion = 1;
+    static constexpr std::uint16_t kVersion = 2; ///< 2: the rotorcraft classes and families
     SectionHeader header;
     AircraftClass aircraftClass = AircraftClass::Unknown;
     ControlFamily family = ControlFamily::Stock;
@@ -54,18 +60,26 @@ struct IdentitySection {
 
 // --- effectors ------------------------------------------------------------------------
 
-enum class PitchControl : std::uint8_t { Surface = 0, LoadFactor = 1, PitchRate = 2 };
-enum class RollControl : std::uint8_t { Surface = 0, RollRate = 1 };
-enum class YawControl : std::uint8_t { Surface = 0, Sideslip = 1 };
+/// What each input moves. A rotorcraft's (effectors version 2): the cyclic
+/// tilting its rotor, a mixer sharing the input among its rotors, the tail
+/// rotor's pitch (the pedals).
+enum class PitchControl : std::uint8_t { Surface = 0, LoadFactor = 1, PitchRate = 2, Cyclic = 3, Mixer = 4 };
+enum class RollControl : std::uint8_t { Surface = 0, RollRate = 1, Cyclic = 2, Mixer = 3 };
+enum class YawControl : std::uint8_t { Surface = 0, Sideslip = 1, TailRotor = 2, Mixer = 3 };
+/// What the thrust input (ControlInputs::throttle) moves: each engine's
+/// throttle, a helicopter's collective pitch, or a multirotor's rotors'
+/// thrust (each rotor's own, the mixer adding roll, pitch and yaw).
+enum class ThrustControl : std::uint8_t { Throttle = 0, Collective = 1, RotorThrust = 2 };
 /// What the aircraft does with the stick centred.
 enum class NeutralStick : std::uint8_t { Surface = 0, PathHold = 1, OneG = 2 };
 
 struct EffectorsSection {
-    static constexpr std::uint16_t kVersion = 1;
+    static constexpr std::uint16_t kVersion = 2; ///< 2: the rotorcraft's controls and `thrust`
     SectionHeader header;
     PitchControl pitch = PitchControl::Surface; ///< what the elevator input means
     RollControl roll = RollControl::Surface;
     YawControl yaw = YawControl::Surface;
+    ThrustControl thrust = ThrustControl::Throttle;
     NeutralStick neutral = NeutralStick::Surface;
     // the support effectors it has; without the section, those an actuator command has always set
     bool flaps = true;
@@ -95,10 +109,10 @@ struct EnvelopeSection {
 
 // --- propulsion -------------------------------------------------------------------------
 
-enum class EngineType : std::uint8_t { Piston = 0, Turboprop = 1, Turbofan = 2, Turbojet = 3, Electric = 4, Unknown = 255 };
+enum class EngineType : std::uint8_t { Piston = 0, Turboprop = 1, Turbofan = 2, Turbojet = 3, Electric = 4, Turboshaft = 5, Unknown = 255 };
 
 struct PropulsionSection {
-    static constexpr std::uint16_t kVersion = 1;
+    static constexpr std::uint16_t kVersion = 2; ///< 2: turboshaft engines
     SectionHeader header;
     int engines = 0;
     EngineType type = EngineType::Unknown;
@@ -124,6 +138,30 @@ struct PlantSection {
     double elevatorTrim = kUnknown, elevatorTrimLift = kUnknown;
     double alphaZeroLiftRad = kUnknown;
     double throttleTrim = kUnknown; ///< the throttle of level flight at the reference condition
+};
+
+// --- hover ----------------------------------------------------------------------------------------
+
+/// One axis of a rotorcraft in the hover: d(rate)/dt = -damping rate + power u,
+/// u the platform's command through the actuator's lag (and a flight model step).
+struct RotorAxis {
+    double power = kUnknown;   ///< body acceleration per unit command (rad/s2; the heave's m/s2, + up): signed, the platform's senses
+    double damping = kUnknown; ///< 1/s
+    double lagS = kUnknown;    ///< the actuator's time constant, s
+};
+
+/// How a rotorcraft answers its controls in the hover (hangar's
+/// identification; docs/rotorcraft.md, 3.5): what its loops are designed
+/// from, as the plant section is for a fixed wing.
+struct HoverSection {
+    static constexpr std::uint16_t kVersion = 1;
+    SectionHeader header;
+    double altitudeM = kUnknown, massKg = kUnknown;
+    /// the commands that hold the hover, and the attitude it hovers at
+    double throttleTrim = kUnknown, aileronTrim = kUnknown, elevatorTrim = kUnknown, rudderTrim = kUnknown;
+    double rollAttitudeRad = kUnknown, pitchAttitudeRad = kUnknown;
+    RotorAxis roll, pitch, yaw; ///< body rates p, q, r per unit aileron, elevator, rudder
+    RotorAxis heave;            ///< vertical acceleration per unit throttle (the collective, or every rotor's thrust)
 };
 
 // --- performance ------------------------------------------------------------------------------
@@ -157,14 +195,15 @@ struct VehicleProfile {
     PlantSection plant;
     PerformanceSection performance;
     ControlSection control;
+    HoverSection hover;
 };
 
 /// A section by name ("identity", "effectors", "envelope", "propulsion",
-/// "plant", "performance", "control"); null for another name.
+/// "plant", "performance", "control", "hover"); null for another name.
 FSIM_API const SectionHeader* sectionHeader(const VehicleProfile& profile, std::string_view section) noexcept;
 /// A field by its path as the aircraft file names it, in the unit its name
 /// gives: "envelope/clean/n_max", "envelope/clean/alpha_max_deg",
-/// "plant/roll/tau_s", "identity/class", "<section>/version",
+/// "plant/roll/tau_s", "hover/roll/power", "identity/class", "<section>/version",
 /// "control/pid_attitude/pitch/kp"; NaN if the profile has no such field.
 FSIM_API double profileValue(const VehicleProfile& profile, std::string_view path) noexcept;
 

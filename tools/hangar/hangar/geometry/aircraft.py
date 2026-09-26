@@ -31,6 +31,31 @@ class Strut:
             raise ValueError("strut %r: its ends must differ, its thickness lie in (0, chord]" % self.name)
 
 
+def part(spec, colours=None):
+    """A shape the stations along x cannot give ([[part]]): one of the mesher's primitives
+    (native/sdf.cpp: cylinder a, b, r[, round]; capsule a, b, r; box centre, half, axes[,
+    round]; ellipsoid centre, radii, axes; torus; revolve; plate origin, axes [u, v],
+    outline [[u, v], ...], thickness[, round]), metres in the design frame, joined to the
+    airframe - a mast, a swashplate, an exhaust, a quadrotor's circuit board. Drawn only.
+    fillet (m, default 0.02) is how far its joint to the rest is blended - a millimetre for a
+    nano quadrotor's parts; colour paints it flat in a colour of its own, not the livery
+    (colours, a list, gathers the aircraft's: a part's material is then its index past
+    hangar's own)."""
+    from ..shape import airframe as sh
+    p = dict(spec)
+    if "colour" in p:
+        c = p.pop("colour")
+        if colours is None:
+            raise ValueError("part %r: a colour needs the aircraft's list of part colours" % spec.get("name"))
+        if c not in colours:
+            colours.append(c)
+        p["material"] = len(sh.MATERIALS) + colours.index(c)
+    else:
+        p["material"] = sh.MATERIALS.index(p.get("material", "skin"))
+    p.pop("name", None)
+    return p
+
+
 class Gear:
     def __init__(self, spec):
         self.spec = spec
@@ -226,6 +251,33 @@ class Aircraft:
         default_rp = np.array([mac_le[0] + 0.25 * mac, 0.0, mac_le[2]])
         self.aero_point = np.asarray(ref.get("aero_point", default_rp), float)
         self.calibration = {}
+
+    @classmethod
+    def shape(cls, spec, path=None):
+        """A design's shape alone - its bodies, surfaces, struts and gear, in
+        the design frame - for an aircraft that is not a fixed wing (a
+        rotorcraft's airframe, hangar/rotorcraft): no wing is required, and
+        nothing aerodynamic is derived from it."""
+        a = cls.__new__(cls)
+        a.path = path
+        a.dir = os.path.dirname(os.path.abspath(path)) if path else os.getcwd()
+        a.spec = spec
+        info = spec.get("aircraft", {})
+        a.name = info.get("name") or (os.path.splitext(os.path.basename(path))[0] if path else "design")
+        a.description = info.get("description", "")
+        a.category = info.get("category", "rotorcraft")
+        a.surfaces = [Surface(s, a.dir) for s in spec.get("surface", [])]
+        a.bodies = [Body(b) for b in spec.get("body", [])] + [Intake(i) for i in spec.get("intake", [])]
+        a.gear = [Gear(g) for g in spec.get("gear", [])]
+        a.engines = []
+        a.struts = [Strut(s) for s in spec.get("strut", [])]
+        a.part_colours = []
+        a.parts = [part(p, a.part_colours) for p in spec.get("part", [])]
+        a.wing = a.surfaces[0] if a.surfaces else None
+        a.calibration = {}
+        # the mesher's cell (m) when the design sets it: a nano quadrotor's millimetres
+        a.cell = spec.get("model", {}).get("cell_m")
+        return a
 
     @classmethod
     def load(cls, path):

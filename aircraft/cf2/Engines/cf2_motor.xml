@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<!-- a motor and its rotor as JSBSim sees them: an electric engine whose power is the thrust (a
+     direct thruster's thrust is its engine's power in ft lb/s), metered by the flight control
+     system with fcs/throttle-pos-norm[i] = thrust / 0.14825082 N -->
+<electric_engine name="cf2 motor">
+  <power unit="WATTS"> 0.045186854 </power>
+</electric_engine>

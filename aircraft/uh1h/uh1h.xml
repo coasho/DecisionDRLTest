@@ -1,0 +1,396 @@
+<?xml version="1.0"?>
+<fdm_config name="uh1h" version="2.0" release="BETA">
+  <fileheader>
+    <author> hangar (tools/hangar), from aircraft/uh1h/uh1h.toml </author>
+    <description> Bell UH-1H Iroquois - single main rotor, two blades, teetering, Bell stabilizer bar (NASA TM-73254) </description>
+    <note> Written by hangar's rotorcraft pipeline from the design file, whose comments cite every number's source. </note>
+  </fileheader>
+  <metrics>
+    <wingarea unit="FT2"> 1829.214 </wingarea>
+    <wingspan unit="FT"> 48.26 </wingspan>
+    <chord unit="FT"> 1.75 </chord>
+    <htailarea unit="FT2"> 0 </htailarea> <htailarm unit="FT"> 0 </htailarm>
+    <vtailarea unit="FT2"> 0 </vtailarea> <vtailarm unit="FT"> 0 </vtailarm>
+    <location name="AERORP" unit="IN"> <x> 140 </x> <y> 0 </y> <z> 55 </z> </location>
+    <location name="EYEPOINT" unit="IN"> <x> 140 </x> <y> 0 </y> <z> 55 </z> </location>
+    <location name="VRP" unit="IN"> <x> 0 </x> <y> 0 </y> <z> 0 </z> </location>
+  </metrics>
+  <mass_balance negated_crossproduct_inertia="false">
+    <ixx unit="SLUG*FT2"> 2800 </ixx>
+    <iyy unit="SLUG*FT2"> 12733 </iyy>
+    <izz unit="SLUG*FT2"> 10800 </izz>
+    <ixz unit="SLUG*FT2"> 1480 </ixz>
+    <emptywt unit="LBS"> 6158 </emptywt>
+    <location name="CG" unit="IN"> <x> 140 </x> <y> 0 </y> <z> 55 </z> </location>
+  </mass_balance>
+  <ground_reactions>
+    <contact type="BOGEY" name="skid 0">
+      <location unit="IN"> <x> 35 </x> <y> -51.3 </y> <z> -2.6 </z> </location>
+      <static_friction> 0.6 </static_friction>
+      <dynamic_friction> 0.5 </dynamic_friction>
+      <rolling_friction> 0.5 </rolling_friction>
+      <spring_coeff unit="LBS/FT"> 20000 </spring_coeff>
+      <damping_coeff unit="LBS/FT/SEC"> 2000 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer>
+      <brake_group> NONE </brake_group>
+      <retractable> 0 </retractable>
+    </contact>
+    <contact type="BOGEY" name="skid 1">
+      <location unit="IN"> <x> 155 </x> <y> -51.3 </y> <z> -2.6 </z> </location>
+      <static_friction> 0.6 </static_friction>
+      <dynamic_friction> 0.5 </dynamic_friction>
+      <rolling_friction> 0.5 </rolling_friction>
+      <spring_coeff unit="LBS/FT"> 20000 </spring_coeff>
+      <damping_coeff unit="LBS/FT/SEC"> 2000 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer>
+      <brake_group> NONE </brake_group>
+      <retractable> 0 </retractable>
+    </contact>
+    <contact type="BOGEY" name="skid 2">
+      <location unit="IN"> <x> 35 </x> <y> 51.3 </y> <z> -2.6 </z> </location>
+      <static_friction> 0.6 </static_friction>
+      <dynamic_friction> 0.5 </dynamic_friction>
+      <rolling_friction> 0.5 </rolling_friction>
+      <spring_coeff unit="LBS/FT"> 20000 </spring_coeff>
+      <damping_coeff unit="LBS/FT/SEC"> 2000 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer>
+      <brake_group> NONE </brake_group>
+      <retractable> 0 </retractable>
+    </contact>
+    <contact type="BOGEY" name="skid 3">
+      <location unit="IN"> <x> 155 </x> <y> 51.3 </y> <z> -2.6 </z> </location>
+      <static_friction> 0.6 </static_friction>
+      <dynamic_friction> 0.5 </dynamic_friction>
+      <rolling_friction> 0.5 </rolling_friction>
+      <spring_coeff unit="LBS/FT"> 20000 </spring_coeff>
+      <damping_coeff unit="LBS/FT/SEC"> 2000 </damping_coeff>
+      <max_steer unit="DEG"> 0 </max_steer>
+      <brake_group> NONE </brake_group>
+      <retractable> 0 </retractable>
+    </contact>
+  </ground_reactions>
+  <propulsion>
+    <engine file="uh1h_engine">
+      <thruster file="uh1h_rotor">
+        <location unit="IN"> <x> 133.5 </x> <y> 0 </y> <z> 136.5 </z> </location>
+        <orient unit="DEG"> <roll> 0 </roll> <pitch> 85 </pitch> <yaw> 0 </yaw> </orient>
+        <sense> 1 </sense>
+      </thruster>
+    </engine>
+    <engine file="uh1h_tail_drive">
+      <thruster file="uh1h_tail_rotor">
+        <location unit="IN"> <x> 469.7 </x> <y> -12 </y> <z> 118.7 </z> </location>
+        <orient unit="DEG"> <roll> 0 </roll> <pitch> 0 </pitch> <yaw> 90 </yaw> </orient>
+        <sense> 1 </sense>
+      </thruster>
+    </engine>
+  </propulsion>
+  <flight_control name="uh1h">
+    <!-- the aircraft's profile for the platform (docs/control-architecture.md, section 7, and
+         docs/rotorcraft.md): what hangar knows of it - its design and its flight tests -->
+    <property value="2">fsim/identity/version</property>
+    <property value="1">fsim/identity/provenance</property>
+    <property value="12">fsim/identity/class</property>
+    <property value="3">fsim/identity/family</property>
+    <property value="2">fsim/effectors/version</property>
+    <property value="1">fsim/effectors/provenance</property>
+    <property value="0">fsim/effectors/flaps</property>
+    <property value="0">fsim/effectors/neutral</property>
+    <property value="3">fsim/effectors/pitch</property>
+    <property value="0">fsim/effectors/pitch_trim</property>
+    <property value="0">fsim/effectors/retractable_gear</property>
+    <property value="2">fsim/effectors/roll</property>
+    <property value="0">fsim/effectors/speedbrake</property>
+    <property value="1">fsim/effectors/thrust</property>
+    <property value="0">fsim/effectors/wheel_brakes</property>
+    <property value="2">fsim/effectors/yaw</property>
+    <property value="1">fsim/envelope/version</property>
+    <property value="1">fsim/envelope/provenance</property>
+    <property value="45">fsim/envelope/clean/bank_max_deg</property>
+    <property value="63.7911">fsim/envelope/clean/cas_max_ms</property>
+    <property value="30">fsim/envelope/clean/pitch_max_deg</property>
+    <property value="-30">fsim/envelope/clean/pitch_min_deg</property>
+    <property value="60">fsim/envelope/clean/roll_rate_max_deg_s</property>
+    <property value="2">fsim/propulsion/version</property>
+    <property value="1">fsim/propulsion/provenance</property>
+    <property value="1">fsim/propulsion/engines</property>
+    <property value="5">fsim/propulsion/type</property>
+    <property value="1">fsim/hover/version</property>
+    <property value="1">fsim/hover/provenance</property>
+    <property value="0.154113">fsim/hover/aileron_trim</property>
+    <property value="100">fsim/hover/altitude_m</property>
+    <property value="-0.00433047">fsim/hover/elevator_trim</property>
+    <property value="0.436392">fsim/hover/heave/damping</property>
+    <property value="0.2">fsim/hover/heave/lag_s</property>
+    <property value="35.2161">fsim/hover/heave/power</property>
+    <property value="2793.22">fsim/hover/mass_kg</property>
+    <property value="0.453821">fsim/hover/pitch/damping</property>
+    <property value="0.144">fsim/hover/pitch/lag_s</property>
+    <property value="-0.704006">fsim/hover/pitch/power</property>
+    <property value="4.58023">fsim/hover/pitch_attitude_deg</property>
+    <property value="2.69545">fsim/hover/roll/damping</property>
+    <property value="0.144">fsim/hover/roll/lag_s</property>
+    <property value="3.51448">fsim/hover/roll/power</property>
+    <property value="-1.68844">fsim/hover/roll_attitude_deg</property>
+    <property value="-0.0267005">fsim/hover/rudder_trim</property>
+    <property value="0.354523">fsim/hover/throttle_trim</property>
+    <property value="1.29812">fsim/hover/yaw/damping</property>
+    <property value="0.022973">fsim/hover/yaw/lag_s</property>
+    <property value="-2.64753">fsim/hover/yaw/power</property>
+    <channel name="pilot">
+      <!-- the controls in inches: stick and pedals from the centre, + forward, + right, + right
+           pedal; the collective from the bottom -->
+      <pure_gain name="fcs/uh1h/long-in"> <input> fcs/elevator-cmd-norm </input> <gain> 6.45 </gain> </pure_gain>
+      <pure_gain name="fcs/uh1h/lat-in"> <input> fcs/aileron-cmd-norm </input> <gain> 6.3 </gain> </pure_gain>
+      <pure_gain name="fcs/uh1h/pedal-in"> <input> fcs/rudder-cmd-norm </input> <gain> -3.45 </gain> </pure_gain>
+      <pure_gain name="fcs/uh1h/coll-in"> <input> fcs/throttle-cmd-norm[0] </input> <gain> 11 </gain>
+        <clipto> <min> 0 </min> <max> 11 </max> </clipto> </pure_gain>
+    </channel>
+    <channel name="stabilizer bar">
+      <fcs_function name="fcs/uh1h/p-shaft">
+        <function> <sum> <product> <value> 0.9961947 </value> <property> velocities/p-rad_sec </property> </product>
+          <product> <value> 0.087155743 </value> <property> velocities/r-rad_sec </property> </product> </sum> </function>
+      </fcs_function>
+      <lag_filter name="fcs/uh1h/bar-p"> <input> fcs/uh1h/p-shaft </input> <c1> 0.3030303 </c1> </lag_filter>
+      <lag_filter name="fcs/uh1h/bar-q"> <input> velocities/q-rad_sec </input> <c1> 0.3030303 </c1> </lag_filter>
+    </channel>
+    <channel name="swashplate">
+      <fcs_function name="fcs/uh1h/long-mixed"> <function> <property> fcs/uh1h/long-in </property> </function> </fcs_function>
+      <fcs_function name="fcs/uh1h/lat-mixed"> <function> <property> fcs/uh1h/lat-in </property> </function> </fcs_function>
+      <fcs_function name="fcs/uh1h/pedal-mixed"> <function> <property> fcs/uh1h/pedal-in </property> </function> </fcs_function>
+      <fcs_function name="fcs/uh1h/b1c-rad"> <function> <sum> <product> <value> 0.0324 </value> <property> fcs/uh1h/long-mixed </property> </product> <product> <value> 0.528 </value> <property> fcs/uh1h/bar-q </property> </product> </sum> </function> </fcs_function>
+      <fcs_function name="fcs/uh1h/a1c-rad"> <function> <sum> <product> <value> 0.0277 </value> <property> fcs/uh1h/lat-mixed </property> </product> <product> <value> -0.528 </value> <property> fcs/uh1h/bar-p </property> </product> </sum> </function> </fcs_function>
+      <lag_filter name="fcs/uh1h/b1s-lag"> <input> fcs/uh1h/b1c-rad </input> <c1> 6.9444444 </c1> </lag_filter>
+      <lag_filter name="fcs/uh1h/a1s-lag"> <input> fcs/uh1h/a1c-rad </input> <c1> 6.9444444 </c1> </lag_filter>
+      <fcs_function name="fcs/uh1h/b1s-rad">
+        <function> <sum> <property> fcs/uh1h/b1s-lag </property> <value> -0.0064 </value> </sum> </function>
+        <output> propulsion/engine[0]/longitudinal-ctrl-rad </output>
+      </fcs_function>
+      <fcs_function name="fcs/uh1h/a1s-rad">
+        <function> <sum> <property> fcs/uh1h/a1s-lag </property> <value> -0.0486 </value> </sum> </function>
+        <output> propulsion/engine[0]/lateral-ctrl-rad </output>
+      </fcs_function>
+      <pure_gain name="fcs/uh1h/theta75-cmd"> <input> fcs/uh1h/coll-in </input> <gain> 0.025 </gain> </pure_gain>
+      <lag_filter name="fcs/uh1h/theta75-rad"> <input> fcs/uh1h/theta75-cmd </input> <c1> 5 </c1> </lag_filter>
+      <fcs_function name="fcs/uh1h/theta0-root-rad">
+        <function> <sum> <property> fcs/uh1h/theta75-rad </property> <value> 0.14268067 </value> </sum> </function>
+        <output> propulsion/engine[0]/collective-ctrl-rad </output>
+      </fcs_function>
+      <fcs_function name="fcs/uh1h/theta-tr-rad">
+        <function> <sum> <value> 0.119 </value> <product> <value> -0.071 </value> <property> fcs/uh1h/pedal-mixed </property> </product> </sum> </function>
+        <output> propulsion/engine[1]/antitorque-ctrl-rad </output>
+      </fcs_function>
+    </channel>
+    <channel name="stabilizer">
+      <fcs_function name="fcs/uh1h/stab-rad">
+        <!-- the stabilizer is linked to the longitudinal stick (TM-73254 table 1) -->
+        <function> <table> <independentVar> fcs/uh1h/long-in </independentVar> <tableData>
+              -6.450   0.02240
+              -6.000   0.01740
+              -5.000   0.00000
+              -4.000  -0.01920
+              -3.000  -0.03840
+              -2.000  -0.05410
+              -1.000  -0.06900
+               0.000  -0.08200
+               1.000  -0.08500
+               2.000  -0.08030
+               3.000  -0.06280
+               4.000  -0.03000
+               5.000   0.00350
+               6.000   0.05930
+               6.450   0.09420
+          </tableData> </table> </function>
+        <output> fcs/elevator-pos-rad </output> <!-- the platform reports it (VehicleState::elevatorRad); the model's elevator follows -->
+      </fcs_function>
+    </channel>
+    <channel name="engine">
+      <!-- The rotor speed is a state here: the engine's power less the rotors' drives it through the
+           drive's inertia; a governor holds the design's rpm, the load fed forward. 'armed' is 0 on
+           the first frame after a load or a reset, 1 after: JSBSim resets the components' states but
+           not their output properties, nor the rotors' torques, so what the channel reads from the
+           previous frame is gated by it then. -->
+      <fcs_function name="fcs/uh1h/one"> <function> <value> 1 </value> </function> </fcs_function>
+      <lag_filter name="fcs/uh1h/armed-lag"> <input> fcs/uh1h/one </input> <c1> 1000 </c1> </lag_filter>
+      <fcs_function name="fcs/uh1h/armed"> <function> <gt> <property> fcs/uh1h/armed-lag </property> <value> 0.5 </value> </gt> </function> </fcs_function>
+      <fcs_function name="fcs/uh1h/delta-omega-prev">
+        <function> <product> <property> fcs/uh1h/armed </property> <property> fcs/uh1h/delta-omega </property> </product> </function>
+      </fcs_function>
+      <fcs_function name="fcs/uh1h/omega">
+        <function> <sum> <value> 33.897785 </value> <property> fcs/uh1h/delta-omega-prev </property> </sum> </function>
+      </fcs_function>
+      <fcs_function name="fcs/uh1h/rpm-error"> <function> <product> <value> -1 </value> <property> fcs/uh1h/delta-omega-prev </property> </product> </function> </fcs_function>
+      <pid name="fcs/uh1h/governor"> <input> fcs/uh1h/rpm-error </input>
+        <kp> 0.295 </kp> <ki> 0.295 </ki> <kd> 0 </kd>
+        <trigger> fcs/uh1h/power-saturated </trigger> </pid>
+      <fcs_function name="fcs/uh1h/load-power">
+        <function> <quotient> <product> <property> fcs/uh1h/armed </property> <property> fcs/uh1h/omega </property> <sum>
+          <property> propulsion/engine[0]/torque-lbsft </property>
+          <product> <property> propulsion/engine[1]/torque-lbsft </property> <value> 5.1365494 </value> </product>
+        </sum> </product> <value> 605000 </value> </quotient> </function>
+      </fcs_function>
+      <fcs_function name="fcs/uh1h/power-demand">
+        <function> <sum> <property> fcs/uh1h/load-power </property> <property> fcs/uh1h/governor </property> </sum> </function>
+      </fcs_function>
+      <fcs_function name="fcs/uh1h/power">
+        <function> <max> <value> 0 </value> <min> <value> 1 </value> <property> fcs/uh1h/power-demand </property> </min> </max> </function>
+        <output> fcs/throttle-pos-norm[0] </output>
+      </fcs_function>
+      <fcs_function name="fcs/uh1h/power-saturated">
+        <function> <gt> <abs> <difference> <property> fcs/uh1h/power-demand </property> <property> fcs/uh1h/power </property> </difference> </abs> <value> 1e-9 </value> </gt> </function>
+      </fcs_function>
+      <pure_gain name="fcs/uh1h/tail-drive-throttle"> <input> fcs/uh1h/power </input> <gain> 0 </gain>
+        <output> fcs/throttle-pos-norm[1] </output> </pure_gain>
+      <fcs_function name="fcs/uh1h/net-torque">
+        <function> <product> <property> fcs/uh1h/armed </property> <difference>
+          <quotient> <product> <property> fcs/uh1h/power </property> <value> 605000 </value> </product>
+            <max> <value> 1 </value> <property> fcs/uh1h/omega </property> </max> </quotient>
+          <sum> <property> propulsion/engine[0]/torque-lbsft </property>
+            <product> <property> propulsion/engine[1]/torque-lbsft </property> <value> 5.1365494 </value> </product> </sum>
+        </difference> </product> </function>
+      </fcs_function>
+      <pid name="fcs/uh1h/delta-omega"> <input> fcs/uh1h/net-torque </input>
+        <kp> 0 </kp> <ki type="trap"> 0.00018299485 </ki> <kd> 0 </kd> </pid>
+      <fcs_function name="fcs/uh1h/rotor-rpm">
+        <function> <product> <sum> <value> 33.897785 </value> <property> fcs/uh1h/delta-omega </property> </sum> <value> 9.5492966 </value> </product> </function>
+        <output> propulsion/engine[0]/x-rpm-dict </output>
+      </fcs_function>
+    </channel>
+  </flight_control>
+  <aerodynamics>
+    <!-- TM-73254 eq. 42-60, in the report's body axes - the shaft's - the velocities turned into them
+         and the forces and moments back -->
+    <function name="aero/uh1h/u-s">
+      <sum> <product> <value> 0.9961947 </value> <property> velocities/u-aero-fps </property> </product>
+        <product> <value> 0.087155743 </value> <property> velocities/w-aero-fps </property> </product> </sum>
+    </function>
+    <function name="aero/uh1h/w-s">
+      <sum> <product> <value> -0.087155743 </value> <property> velocities/u-aero-fps </property> </product>
+        <product> <value> 0.9961947 </value> <property> velocities/w-aero-fps </property> </product> </sum>
+    </function>
+    <function name="aero/uh1h/r-s">
+      <sum> <product> <value> -0.087155743 </value> <property> velocities/p-aero-rad_sec </property> </product>
+        <product> <value> 0.9961947 </value> <property> velocities/r-aero-rad_sec </property> </product> </sum>
+    </function>
+    <function name="aero/uh1h/sign-u">
+      <description> sgn u, smoothed over 1 ft/s so the force is continuous through hover </description>
+      <quotient> <property> aero/uh1h/u-s </property>
+        <sqrt> <sum> <product> <property> aero/uh1h/u-s </property> <property> aero/uh1h/u-s </property> </product> <value> 1 </value> </sum> </sqrt> </quotient>
+    </function>
+    <function name="aero/uh1h/fus-x-s">
+      <description> eq. 42: X_F = -D1 u|u| + L1 w^2 sgn u </description>
+      <sum>
+        <product> <value> -0.022 </value> <property> aero/uh1h/u-s </property> <abs> <property> aero/uh1h/u-s </property> </abs> </product>
+        <product> <value> 0.0654 </value> <property> aero/uh1h/w-s </property> <property> aero/uh1h/w-s </property> <property> aero/uh1h/sign-u </property> </product>
+      </sum>
+    </function>
+    <function name="aero/uh1h/fus-z-s">
+      <description> eq. 44: Z_F = w (-D3 |w| - L1 |u|) </description>
+      <product> <property> aero/uh1h/w-s </property>
+        <difference> <product> <value> -0.646 </value> <abs> <property> aero/uh1h/w-s </property> </abs> </product>
+          <product> <value> 0.0654 </value> <abs> <property> aero/uh1h/u-s </property> </abs> </product> </difference> </product>
+    </function>
+    <function name="aero/uh1h/w-h">
+      <description> eq. 54: the stabilizer's normal velocity: its incidence, the pitch rate and the rotor's downwash </description>
+      <sum> <property> aero/uh1h/w-s </property>
+        <product> <property> aero/uh1h/u-s </property> <property> fcs/uh1h/stab-rad </property> </product>
+        <product> <value> 19.67 </value> <property> velocities/q-aero-rad_sec </property> </product>
+        <product> <value> -1 </value> <property> propulsion/engine[0]/vi-fps </property> </product> </sum>
+    </function>
+    <function name="aero/uh1h/alpha-h">
+      <atan2> <property> aero/uh1h/w-h </property> <property> aero/uh1h/u-s </property> </atan2>
+    </function>
+    <function name="aero/uh1h/stab-z-s">
+      <description> eq. 57-59: linear to the stall, and within it of reversed flow; stalled between </description>
+      <sum>
+        <product> <value> -0.0083 </value> <property> aero/uh1h/w-h </property> <abs> <property> aero/uh1h/w-h </property> </abs> </product>
+        <ifthen> <or> <le> <abs> <property> aero/uh1h/alpha-h </property> </abs> <value> 0.34906585 </value> </le>
+                      <ge> <abs> <property> aero/uh1h/alpha-h </property> </abs> <value> 2.7925268 </value> </ge> </or>
+          <product> <value> -0.031 </value> <property> aero/uh1h/w-h </property> <property> aero/uh1h/u-s </property> </product>
+          <product> <value> -0.011283077 </value> <property> aero/uh1h/u-s </property> <property> aero/uh1h/u-s </property>
+            <sign> <property> aero/uh1h/alpha-h </property> </sign> </product>
+        </ifthen>
+      </sum>
+    </function>
+    <function name="aero/uh1h/v-f">
+      <description> eq. 48: the fin's side wind (+ from the left) </description>
+      <sum> <product> <value> -1 </value> <property> velocities/v-aero-fps </property> </product>
+        <product> <value> 25 </value> <property> aero/uh1h/r-s </property> </product> </sum>
+    </function>
+    <function name="aero/uh1h/alpha-f">
+      <atan2> <property> aero/uh1h/v-f </property> <property> aero/uh1h/u-s </property> </atan2>
+    </function>
+    <function name="aero/uh1h/fin-y">
+      <description> eq. 50-52 </description>
+      <sum>
+        <product> <value> 0.016 </value> <property> aero/uh1h/v-f </property> <abs> <property> aero/uh1h/v-f </property> </abs> </product>
+        <ifthen> <or> <le> <abs> <property> aero/uh1h/alpha-f </property> </abs> <value> 0.34906585 </value> </le>
+                      <ge> <abs> <property> aero/uh1h/alpha-f </property> </abs> <value> 2.7925268 </value> </ge> </or>
+          <product> <value> 0.0292 </value> <property> aero/uh1h/v-f </property> <property> aero/uh1h/u-s </property> </product>
+          <product> <value> 0.010627931 </value> <property> aero/uh1h/u-s </property> <property> aero/uh1h/u-s </property>
+            <sign> <property> aero/uh1h/alpha-f </property> </sign> </product>
+        </ifthen>
+      </sum>
+    </function>
+    <function name="aero/uh1h/fus-n-s">
+      <description> eq. 46: N_F = -N1 v u </description>
+      <product> <value> -0.956 </value> <property> velocities/v-aero-fps </property> <property> aero/uh1h/u-s </property> </product>
+    </function>
+    <function name="aero/uh1h/n-s">
+      <description> the yawing moment about the shaft: eq. 46 and 53 </description>
+      <sum> <property> aero/uh1h/fus-n-s </property>
+        <product> <value> -25 </value> <property> aero/uh1h/fin-y </property> </product> </sum>
+    </function>
+    <function name="aero/uh1h/tr-damping-y">
+      <description> the tail rotor's damping beyond the isolated rotor's: the design's fit to flight (TM-73254
+        eq. 37-38) less what the rotor model supplies, at the tail rotor </description>
+      <product> <value> -10.754882 </value>
+        <sum> <property> velocities/v-aero-fps </property>
+          <product> <value> -28 </value> <property> velocities/r-aero-rad_sec </property> </product>
+          <product> <value> 6.88 </value> <property> velocities/p-aero-rad_sec </property> </product> </sum> </product>
+    </function>
+    <axis name="X">
+      <function name="aero/force/uh1h-x">
+        <sum>
+          <product> <value> 0.9961947 </value> <property> aero/uh1h/fus-x-s </property> </product>
+          <product> <value> -0.087155743 </value> <sum> <property> aero/uh1h/fus-z-s </property> <property> aero/uh1h/stab-z-s </property> </sum> </product>
+        </sum>
+      </function>
+    </axis>
+    <axis name="Y">
+      <function name="aero/force/uh1h-y">
+        <description> eq. 43, the fin and the tail rotor's damping </description>
+        <sum>
+          <product> <property> velocities/v-aero-fps </property>
+            <difference> <product> <value> -0.201 </value> <abs> <property> velocities/v-aero-fps </property> </abs> </product>
+              <product> <value> 0.0654 </value> <abs> <property> aero/uh1h/u-s </property> </abs> </product> </difference> </product>
+          <property> aero/uh1h/fin-y </property>
+          <property> aero/uh1h/tr-damping-y </property>
+        </sum>
+      </function>
+    </axis>
+    <axis name="Z">
+      <function name="aero/force/uh1h-z">
+        <sum>
+          <product> <value> 0.087155743 </value> <property> aero/uh1h/fus-x-s </property> </product>
+          <product> <value> 0.9961947 </value> <sum> <property> aero/uh1h/fus-z-s </property> <property> aero/uh1h/stab-z-s </property> </sum> </product>
+        </sum>
+      </function>
+    </axis>
+    <axis name="ROLL">
+      <function name="aero/moment/uh1h-l"> <sum> <product> <value> -0.087155743 </value> <property> aero/uh1h/n-s </property> </product> <product> <value> 6.88 </value> <property> aero/uh1h/tr-damping-y </property> </product> </sum> </function>
+    </axis>
+    <axis name="PITCH">
+      <function name="aero/moment/uh1h-m">
+        <description> eq. 45 and 60 </description>
+        <sum>
+          <product> <value> 0.956 </value> <property> aero/uh1h/w-s </property> <abs> <property> aero/uh1h/u-s </property> </abs> </product>
+          <product> <value> 19.67 </value> <property> aero/uh1h/stab-z-s </property> </product>
+        </sum>
+      </function>
+    </axis>
+    <axis name="YAW">
+      <function name="aero/moment/uh1h-n"> <sum> <product> <value> 0.9961947 </value> <property> aero/uh1h/n-s </property> </product> <product> <value> -28 </value> <property> aero/uh1h/tr-damping-y </property> </product> </sum> </function>
+    </axis>
+  </aerodynamics>
+</fdm_config>

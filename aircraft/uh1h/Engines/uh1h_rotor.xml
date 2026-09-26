@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<rotor name="uh1h main rotor">
+  <diameter unit="FT"> 48.26 </diameter>
+  <numblades> 2 </numblades>
+  <gearratio> 1.0 </gearratio>
+  <nominalrpm> 323.7 </nominalrpm>
+  <minrpm> 50 </minrpm>
+  <maxrpm> 420.81 </maxrpm>
+  <chord unit="FT"> 1.75 </chord>
+  <liftcurveslope Xunit="1/RAD"> 5.73 </liftcurveslope>
+  <twist unit="DEG"> -10.9 </twist>
+  <hingeoffset unit="FT"> 0 </hingeoffset>
+  <flappingmoment unit="SLUG*FT2"> 2465.2727 </flappingmoment>
+  <massmoment> 153.24944 </massmoment>
+  <polarmoment unit="SLUG*FT2"> 4930.5454 </polarmoment>
+  <inflowlag> 0.1 </inflowlag>
+  <tiplossfactor> 1 </tiplossfactor>
+  <ExternalRPM> -1 </ExternalRPM>
+  <model> classical </model>
+  <groundeffectexp> 0.074003907 </groundeffectexp>
+  <groundeffectshift unit="FT"> 6.7916667 </groundeffectshift>
+</rotor>

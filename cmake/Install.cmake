@@ -124,8 +124,11 @@ if(TARGET flightsim-viewer)
             DESTINATION share/doc/flightsim COMPONENT viewer OPTIONAL)
     install(FILES ${CMAKE_SOURCE_DIR}/third_party/jsbsim/COPYING
             DESTINATION share/doc/flightsim RENAME LICENSE-JSBSim.txt COMPONENT viewer OPTIONAL)
-    # JSBSim is LGPL: the one file flightsim changes, as built, and how (THIRD_PARTY_NOTICES.md)
-    install(FILES ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/FGLGear.cpp ${CMAKE_SOURCE_DIR}/cmake/JsbsimPatches.cmake
+    # JSBSim is LGPL: the files flightsim changes, as built, and how (THIRD_PARTY_NOTICES.md)
+    install(FILES ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/FGLGear.cpp
+                  ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGRotor.h
+                  ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGRotor.cpp
+                  ${CMAKE_SOURCE_DIR}/cmake/JsbsimPatches.cmake
             DESTINATION share/doc/flightsim/jsbsim-changes COMPONENT viewer)
 endif()
 

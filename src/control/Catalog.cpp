@@ -35,7 +35,7 @@ CapabilityDescriptor flight(const char* name, Level level, std::vector<Parameter
 /// The platform's own behaviours are fsim.guidance.<id>; others user.guidance.<id>
 /// unless registered with a dotted id.
 std::string guidanceId(const std::string& behavior) {
-    static const char* const builtin[] = {"hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics"};
+    static const char* const builtin[] = {"hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics", "hover"};
     if (behavior.find('.') != std::string::npos) return behavior;
     for (const char* b : builtin)
         if (behavior == b) return "fsim.guidance." + behavior;
@@ -46,6 +46,7 @@ std::string guidanceId(const std::string& behavior) {
 Reason checkValue(const ParameterInfo& p, double& v, RangePolicy range, std::uint16_t& flags) noexcept {
     if (isHold(v)) return p.optional ? Reason::None : Reason::InvalidParameter;
     if (!std::isfinite(v)) return Reason::InvalidParameter;
+    if (!p.supported) return v == p.defaultValue ? Reason::None : Reason::InvalidParameter; // nothing on this aircraft moves it
     if (v >= p.min && v <= p.max) return Reason::None;
     if (range == RangePolicy::Reject) return Reason::OutOfRange;
     v = std::clamp(v, p.min, p.max);
@@ -67,17 +68,31 @@ std::size_t commandFields(Command& c, double* f[8]) noexcept {
     }
     if (auto* a = std::get_if<AccelerationCommand>(&c)) {
         f[0] = &a->loadFactorG, f[1] = &a->rollRateRadS, f[2] = &a->longitudinalMs2, f[3] = &a->throttle;
-        return 4;
+        f[4] = &a->pitchRateRadS, f[5] = &a->yawRateRadS;
+        return 6;
     }
     if (auto* v = std::get_if<VelocityCommand>(&c)) {
         f[0] = &v->airspeedMs, f[1] = &v->verticalSpeedMs, f[2] = &v->headingRad, f[3] = &v->turnRateRadS;
-        return 4;
+        f[4] = &v->northMs, f[5] = &v->eastMs;
+        return 6;
     }
     if (auto* p = std::get_if<PositionCommand>(&c)) {
         f[0] = &p->latitudeRad, f[1] = &p->longitudeRad, f[2] = &p->altitudeMslM, f[3] = &p->airspeedMs, f[4] = &p->captureRadiusM;
-        return 5;
+        f[5] = &p->headingRad;
+        return 6;
     }
     return 0;
+}
+
+std::size_t legacyFieldCount(Level level) noexcept {
+    switch (level) {
+    case Level::Actuator: return 8;
+    case Level::Attitude: return 6;
+    case Level::Acceleration: return 4;
+    case Level::Velocity: return 4;
+    case Level::Position: return 5;
+    default: return 0;
+    }
 }
 
 const char* supportCapability(std::size_t alternative) noexcept {
@@ -116,7 +131,9 @@ std::size_t supportFields(SupportCommand& c, double* f[4]) noexcept {
     return 0;
 }
 
-CapabilityCatalog::CapabilityCatalog() {
+CapabilityCatalog::CapabilityCatalog() : CapabilityCatalog(~0u) {}
+
+CapabilityCatalog::CapabilityCatalog(std::uint32_t features) : features_(features) {
     // Until a profile narrows them (step 2), the ranges are the loops' own
     // bounds: no command the existing entry points send changes.
     const double nan = kHold;
@@ -133,37 +150,62 @@ CapabilityCatalog::CapabilityCatalog() {
                                   {"fsim.flight.actuator"}));
     descriptors_.push_back(flight("acceleration", Level::Acceleration,
                                   {parameter("load_factor_g", "g", 1.0), parameter("roll_rate_rad_s", "rad/s", 0.0),
-                                   parameter("longitudinal_ms2", "m/s2", nan), parameter("throttle", "", nan, 0.0, 1.0)},
+                                   parameter("longitudinal_ms2", "m/s2", nan), parameter("throttle", "", nan, 0.0, 1.0),
+                                   parameter("pitch_rate_rad_s", "rad/s", nan), parameter("yaw_rate_rad_s", "rad/s", nan)},
                                   {"fsim.flight.actuator"}));
     descriptors_.push_back(flight("velocity", Level::Velocity,
                                   {parameter("airspeed_ms", "m/s", nan, 0.0), parameter("vertical_speed_ms", "m/s", 0.0),
-                                   parameter("heading_rad", "rad", nan), parameter("turn_rate_rad_s", "rad/s", nan)},
+                                   parameter("heading_rad", "rad", nan), parameter("turn_rate_rad_s", "rad/s", nan),
+                                   parameter("north_ms", "m/s", nan), parameter("east_ms", "m/s", nan)},
                                   {"fsim.flight.attitude"}));
     descriptors_.push_back(flight("position", Level::Position,
                                   {parameter("latitude_rad", "rad", nan, -kPi / 2, kPi / 2, false), parameter("longitude_rad", "rad", nan, -kInf, kInf, false),
                                    parameter("altitude_msl_m", "m", nan, -kInf, kInf, false), parameter("airspeed_ms", "m/s", nan, 0.0),
-                                   parameter("capture_radius_m", "m", 200.0, 0.0)},
+                                   parameter("capture_radius_m", "m", 200.0, 0.0), parameter("heading_rad", "rad", nan)},
                                   {"fsim.flight.velocity"}));
     for (std::size_t l = 0; l < byLevel_.size(); ++l) byLevel_[l] = static_cast<int>(l);
     addBehaviors();
 }
 
-CapabilityCatalog::CapabilityCatalog(const VehicleProfile& profile, const VehicleAdapter& adapter) : CapabilityCatalog() {
+CapabilityCatalog::CapabilityCatalog(const VehicleProfile& profile, const VehicleAdapter& adapter) : CapabilityCatalog(adapter.features()) {
     adapter.declare(profile, *this);
+}
+
+ParameterInfo* CapabilityCatalog::parameterOf(std::string_view capability, std::string_view parameter) noexcept {
+    const int index = find(capability);
+    if (index < 0) return nullptr;
+    for (auto& p : descriptors_[static_cast<std::size_t>(index)].parameters)
+        if (p.name == parameter) return &p;
+    return nullptr;
+}
+
+void CapabilityCatalog::rename(std::string_view capability, std::string_view parameter, std::string name) {
+    if (ParameterInfo* p = parameterOf(capability, parameter)) p->name = std::move(name);
+}
+
+void CapabilityCatalog::unsupport(std::string_view capability, std::string_view parameter) {
+    if (ParameterInfo* p = parameterOf(capability, parameter)) p->supported = false;
+}
+
+void CapabilityCatalog::setAxisGroups(std::uint8_t groups) {
+    for (std::size_t l = 0; l < byLevel_.size(); ++l) { // the five flight capabilities, by level
+        CapabilityDescriptor& d = descriptors_[static_cast<std::size_t>(byLevel_[l])];
+        d.axisGroups = d.level == Level::Actuator ? static_cast<std::uint8_t>(kGroupEachAxis | groups) : groups;
+    }
 }
 
 void CapabilityCatalog::narrow(std::string_view capability, std::string_view parameter, double lo, double hi) {
     const int index = find(capability);
     if (index < 0) return;
     for (auto& p : descriptors_[static_cast<std::size_t>(index)].parameters)
-        if (p.name == parameter) {
+        if (p.name == parameter && p.supported) { // (one the aircraft has nothing for keeps its default)
             if (!std::isnan(lo)) p.min = std::max(p.min, lo);
             if (!std::isnan(hi)) p.max = std::min(p.max, hi);
             if (!std::isnan(p.defaultValue)) p.defaultValue = std::clamp(p.defaultValue, p.min, std::max(p.min, p.max));
         }
 }
 
-void CapabilityCatalog::addSupport(std::size_t alternative, int engines) {
+void CapabilityCatalog::addSupport(std::size_t alternative, int engines, AxisMask owns) {
     if (alternative >= kSupportKinds || bySupport_[alternative] >= 0) return;
     static const Axis axes[] = {Axis::Gear, Axis::Flaps, Axis::Brakes, Axis::Speedbrake, Axis::PitchTrim, Axis::Thrust};
     CapabilityDescriptor d;
@@ -171,7 +213,7 @@ void CapabilityCatalog::addSupport(std::size_t alternative, int engines) {
     d.kind = alternative == 5 ? CapabilityKind::Flight : CapabilityKind::Support; // the engines' throttles own thrust
     d.interactions = kCommand | kUpdate | kCancel | kStatus;
     d.level = Level::Actuator;
-    d.axes = axisBit(axes[alternative]);
+    d.axes = owns ? owns : axisBit(axes[alternative]);
     d.persistence = alternative <= 1 ? Persistence::Terminating : Persistence::Persistent; // gear and flaps get somewhere
     switch (alternative) {
     case 0: d.parameters = {parameter("down", "", 1.0, 0.0, 1.0, false)}; break;
@@ -182,7 +224,7 @@ void CapabilityCatalog::addSupport(std::size_t alternative, int engines) {
     default: {
         static const char* const names[] = {"throttle_1", "throttle_2", "throttle_3", "throttle_4"};
         for (int i = 0; i < std::clamp(engines, 1, 4); ++i) d.parameters.push_back(parameter(names[i], "", kHold, 0.0, 1.0));
-        d.axisGroups = kGroupThrust;
+        d.axisGroups = d.axes == axisBit(Axis::Thrust) ? kGroupThrust : 0; // engines that fly every axis: all of them or none
         break;
     }
     }
@@ -207,7 +249,7 @@ void CapabilityCatalog::addBehaviors() {
     registryRevision_ = registry.revision();
     for (auto& [behavior, traits] : registry.behaviors()) {
         const bool known = std::any_of(descriptors_.begin(), descriptors_.end(), [&, &b = behavior](const CapabilityDescriptor& d) { return d.behavior == b; });
-        if (known) continue;
+        if (known || (traits.features & ~features_)) continue; // offered, or not for this aircraft (a hover for a wing)
         CapabilityDescriptor d;
         d.id = guidanceId(behavior);
         d.kind = CapabilityKind::Guidance;

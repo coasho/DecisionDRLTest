@@ -66,7 +66,9 @@ struct ActuatorCommand {
 
 /// Attitude hold. With `headingRad` set the roll is derived from the heading
 /// error (bounded by `maxBankRad`) and `rollRad` is ignored. Throttle either
-/// directly or through an airspeed hold.
+/// directly or through an airspeed hold. A rotorcraft flies the heading with
+/// its yaw, keeping the roll asked for (and without one holds the heading it
+/// had); its thrust is the throttle alone (docs/rotorcraft.md, 3.4).
 struct AttitudeCommand {
     double rollRad = 0.0;
     double pitchRad = 0.0;
@@ -78,29 +80,43 @@ struct AttitudeCommand {
 
 /// Manoeuvre-style command: normal load factor and roll rate (enough for
 /// loops, rolls and hard turns), optional longitudinal acceleration hold.
+/// A rotorcraft flies body rates and its thrust: the roll, pitch and yaw
+/// rates, and the load factor its rotors' thrust gives (1 in the hover);
+/// it has no longitudinal acceleration of its own. A wing has no pitch or
+/// yaw rate of its own to fly (its pitch follows the load factor).
 struct AccelerationCommand {
     double loadFactorG = 1.0;
     double rollRateRadS = 0.0;
     double longitudinalMs2 = kHold;
     double throttle = kHold;
+    double pitchRateRadS = kHold; ///< body, + nose up (a rotorcraft)
+    double yawRateRadS = kHold;   ///< body, + nose right (a rotorcraft)
 };
 
 /// Flight-path command: airspeed, vertical speed and either a heading to hold
-/// or a turn rate to fly.
+/// or a turn rate to fly. A rotorcraft may be given a velocity over the
+/// ground instead of the airspeed (north and east, both), which it flies
+/// whatever its heading: hovering, sideways, holding a point against the wind.
 struct VelocityCommand {
     double airspeedMs = kHold;
     double verticalSpeedMs = 0.0;
     double headingRad = kHold;
     double turnRateRadS = kHold;
+    double northMs = kHold; ///< over the ground (a rotorcraft)
+    double eastMs = kHold;
 };
 
-/// Fly to a geodetic point at an altitude; "captured" within the radius.
+/// Fly to a geodetic point at an altitude; "captured" within the radius. A
+/// rotorcraft stops there (its airspeed the most it flies at on the way),
+/// facing `headingRad` - or, without one, the point while it is far, then
+/// the way it came.
 struct PositionCommand {
     double latitudeRad = 0.0;
     double longitudeRad = 0.0;
     double altitudeMslM = 0.0;
     double airspeedMs = kHold;
     double captureRadiusM = 200.0;
+    double headingRad = kHold; ///< (a rotorcraft)
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").

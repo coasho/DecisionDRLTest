@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<rotor name="uh1h tail rotor">
+  <diameter unit="FT"> 8.5 </diameter>
+  <numblades> 2 </numblades>
+  <gearratio> 0.19468322 </gearratio>
+  <nominalrpm> 1662.7011 </nominalrpm>
+  <minrpm> 50 </minrpm>
+  <maxrpm> 2161.5114 </maxrpm>
+  <chord unit="FT"> 0.7 </chord>
+  <liftcurveslope Xunit="1/RAD"> 5.73 </liftcurveslope>
+  <twist unit="DEG"> 0 </twist>
+  <hingeoffset unit="FT"> 0.0 </hingeoffset>
+  <flappingmoment unit="SLUG*FT2"> 0.77763818 </flappingmoment>
+  <polarmoment unit="SLUG*FT2"> 1.5552764 </polarmoment>
+  <inflowlag> 0.1 </inflowlag>
+  <tiplossfactor> 1 </tiplossfactor>
+  <controlmap> TAIL </controlmap>
+  <ExternalRPM> 0 </ExternalRPM>
+  <model> classical </model>
+</rotor>

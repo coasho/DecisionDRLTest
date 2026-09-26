@@ -664,7 +664,13 @@ step 5b flies a design's attitude over pseudo-controls - a roll rate, a load fac
 acceleration level makes with its own surfaces or law - and took the manoeuvre suite's failures from 29 to 20 of 558;
 step 6 put the architecture's conformance in CI as a step of its own: the command lifecycle's state machine for every
 adapter, the stock c172x's checkpoints, the allocation gate and a short manoeuvre suite for a design per adapter,
-green on its first run on the runner.
+green on its first run on the runner. The same day rotorcraft entered it (ADR-27, [rotorcraft.md](rotorcraft.md)):
+the Crazyflie 2.0, the IRIS+, the UH-1H and the UH-60A, built by hangar from their published data and flown by JSBSim
+(its rotor model patched), through two new families whose adapters, native parameter names, authority groups,
+unsupported fields, command fields (body rates, a ground velocity, a heading at a point), `hover` behaviour and
+rotorcraft loops designed from an identified hover left every fixed-wing flight bit-identical; their models were
+measured from three-views, each rotor bound to the flight model's shaft, and turn at the rotor speeds the simulation
+reports - a multirotor's what user code commands.
 M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |
@@ -711,6 +717,7 @@ Each major choice, its alternatives and the driver that decided it; status "acce
 | ADR-24 | Vision observations in a separate library (`fsim_vision.dll`) over the public `World`: a headless `vsg::Viewer` with one framebuffer per camera in one command graph, cached host-visible readback, own-vehicle hiding by view masks, one Vulkan device per process | rendering inside `fsim.dll` (drags Vulkan into every trainer), a render service process with shared-memory images | the core SDK stays headless and dependency-free; trainers opt in; 64 cameras in ~8 ms meets the budget without a GPU-resident path | accepted |
 | ADR-25 | Comm bridges as a `Protocol` on an external node over a `Transport` (UDP built in) with a fixed little-endian wire format, the peer becoming a node subject to the same medium | a special medium, MAVLink | keeps the medium/protocol split; any language can speak 36 bytes + payload | accepted |
 | ADR-26 | Control as two parts: a contract layer (capability catalog per aircraft type, host per vehicle: NEW/UPDATE/CANCEL, activities, per-axis authority, discovery) between steps, over the evolved control stack as the runtime, sharing only `RuntimeConfig` and `RuntimeReport`; aircraft knowledge in a profile of versioned sections and an adapter per family; protection limits demand and reports exceedances ([control-architecture.md](control-architecture.md)) | replace the stack with a capability runtime; one layer with the bookkeeping inside the stack; UCI/A-GRA messaging and services; more per-aircraft parameters; a plan engine now; a flat profile; protection as a guarantee | owner: a system-wide control architecture that keeps the runtime deterministic and allocation-free, with no workflow engine | accepted |
+| ADR-27 | Rotorcraft in the capability architecture: helicopters and multirotors as two control families with their own adapters (authority groups, field merges, holds, features, unsupported parameters), commands extended by appended fields, a `hover` profile section identified by hangar from which rotorcraft loops are designed, JSBSim's rotor model patched and flown from NASA and identification data ([rotorcraft.md](rotorcraft.md)) | a flight model of our own; aircraft-specific branches; new command structs | owner: four real rotorcraft testing ADR-26's architecture, every fixed-wing assumption resolved by a reusable abstraction, nothing existing changed | accepted |
 
 ## 17. Open questions
 

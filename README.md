@@ -117,6 +117,12 @@ push, not yet tagged:
   bombers (B-52H, H-6K), tankers (KC-135R, KC-46A), transports (C-130J, C-17A), AEW&C (E-3G, E-7A),
   reconnaissance (RC-135W, U-2S, RQ-4B), electronic warfare (EC-130H, EA-18G) and attack aircraft (A-10C,
   Su-25) - on direct controls or their own fly-by-wire, each flown against its published speed and ceiling.
+- **Rotorcraft** ([docs/rotorcraft.md](docs/rotorcraft.md)): the Crazyflie 2.0 and IRIS+ quadrotors and the UH-1H
+  and UH-60A helicopters, from their identification papers, PX4's model and NASA's math models, on JSBSim's rotor
+  model; flown at every control level through helicopter and multirotor families (cyclic, pedals and collective;
+  each motor's thrust from user code), with body-rate, ground-velocity and hover commands and loops designed from
+  each one's identified hover. Their models are measured from three-views, each rotor bound to its shaft and
+  turned at the rotor speed the simulation reports. `fsim hangar uh60` builds and flies one.
 - **Per-aircraft gains** ([docs/sdk/control.md](docs/sdk/control.md#per-aircraft-gains)): the built-in control
   loops fly each of these aircraft with its own gains - designed by the platform from its plant, the responses
   hangar's `autopilot` stage measures with small steps at a reference condition, scheduled on airspeed, with its

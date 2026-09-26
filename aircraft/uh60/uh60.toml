@@ -1,0 +1,381 @@
+# Sikorsky UH-60A Black Hawk - flown by NASA's mathematical model of it:
+#   TM   K. B. Hilbert, "A Mathematical Model of the UH-60 Helicopter", NASA TM-85890, 1984 -
+#        table 1 (the aircraft), table 2 (the control system's gains), table 3 (the T700s),
+#        table 4 (level-flight trim, 1 to 140 kt), the fuselage's wind-tunnel regressions (p. 2-3),
+#        the stabilator schedule (figure 10) and the pitch bias actuator (figure 11).
+#   BASE P. D. Talbot, B. E. Tinling, W. A. Decker, R. T. N. Chen, "A Mathematical Model of a
+#        Single Main Rotor Helicopter for Piloted Simulation", NASA TM-84281, 1982 - the model TM
+#        revises: the stabilizer's and fin's lift and drag through 360 deg (appendix E).
+# Every number is the source's unless the note says otherwise. Frame: stations (in, aft), butt
+# lines (in, right), water lines (in, up). Senses here: stick + forward and + right, pedal +
+# right, collective + up; cyclic + tilts the thrust forward or right. (TM-84281's longitudinal
+# stick is + aft: its gains are converted and the conversion noted.)
+
+[aircraft]
+name = "uh60"
+kind = "helicopter"
+category = "helicopter"
+description = "Sikorsky UH-60A Black Hawk - four blades, articulated, canted tail rotor, stabilator (NASA TM-85890)"
+
+[mass]
+weight_lb = 16400.0                # TM table 1
+cg_in = [360.4, 0.0, 247.2]
+ixx = 5629.0                       # slug ft2
+iyy = 40000.0
+izz = 37200.0
+ixz = 1670.0
+
+[rotor.main]
+radius_ft = 26.83
+chord_ft = 1.73
+blades = 4
+rpm = 257.83                       # 27.0 rad/s
+lift_slope = 5.73
+twist_deg = -18.0                  # -0.3142 rad
+hinge_offset_ft = 1.25             # e = 0.04659 R
+lock = 8.1936
+hub_in = [341.2, 0.0, 315.0]
+mast_tilt_deg = 3.0                # 0.05236 rad, forward
+sense = "ccw"
+# TM-73254's classical forms are for an untwisted-equivalent teetering blade; with this rotor's
+# 18 deg of twist and 4.7 % hinge offset JSBSim's own forms match TM's trims (table 4) far more
+# closely (docs/rotorcraft.md, the UH-60A's validation)
+force_model = "heffley"
+tip_loss = 1.0
+inflow_lag_s = 0.1
+
+[rotor.tail]
+radius_ft = 5.5
+blades = 4
+solidity = 0.1875
+rpm = 1190.0                       # 124.62 rad/s; gear ratio 4.62 (table 3)
+lift_slope = 5.73
+twist_deg = -18.0
+lock = 3.3783
+hub_in = [732.0, 0.0, 324.7]
+thrust = "right"
+cant_deg = 20.0                    # the cant K (TM p. 3-6), up and to the right
+force_model = "heffley"
+tip_loss = 1.0
+inflow_lag_s = 0.1
+
+[engine]
+type = "turboshaft"
+count = 2
+power_shp = 2828.0                 # the main transmission's dual-engine rating (Wikipedia, "Sikorsky UH-60 Black Hawk"):
+                                   # the two T700-GE-700s give more; TM gives no limit
+# TM table 3: K_E = 1.75 HP per lb/h and the governor's K_g1 2000, K_g2 2500, K_g3 500 lb/h per
+# rad/s (per rad, per rad/s^2) of rotor speed: as fractions of the power limit per rad/s, 1.2376,
+# 1.5470 and 0.3094; the engine's lag 1.25 s, on the governor's correction (the rotors' load is fed forward)
+governor = { kp = 1.2376, ki = 1.5470, kd = 0.3094, lag_s = 1.25 }
+
+[controls]
+travel_in = { lateral = 10.0, longitudinal = 10.0, pedal = 7.0, collective = 10.0 }   # full throw: estimates
+lateral_rad_per_in = 0.02792       # CK2 (table 1)
+longitudinal_rad_per_in = 0.04939  # CK1; TM's stick + aft: here forward stick tilts forward
+collective_root_rad = 0.2286       # C5: the root pitch at the bottom
+collective_rad_per_in = 0.02792    # C6
+pedal_zero_rad = 0.1743            # C7: the tail rotor's root pitch
+pedal_rad_per_in = -0.07734        # C8
+flap_lag_s = 0.072                 # 16/(gamma Omega): the tip path's lag
+# the mixing unit and the rate feedbacks (table 2), in this file's senses: TM's collective to
+# longitudinal -0.164 and pedals to longitudinal -0.5746 are aft-positive, so + here
+stabilator = "uh60"                # figure 10
+pitch_bias_actuator = "uh60"       # figure 11
+
+[controls.mixing]
+collective_to_longitudinal = 0.164   # in/in
+pedal_to_longitudinal = 0.5746
+collective_to_lateral = -0.16
+collective_to_pedal = -0.2889
+pitch_rate_to_lateral = 1.3          # in per rad/s
+roll_rate_to_longitudinal = 0.88
+
+[airframe]
+model = "tm85890"
+fuselage_ref_in = [345.5, 234.0]
+horizontal = { sta = 700.4, wl = 244.0, area_ft2 = 45.0, aspect = 4.6, cl_max = 1.03, q_ratio = 0.4, rotor_wash = 1.8 }
+fin = { sta = 695.0, wl = 273.0, area_ft2 = 32.3, aspect = 1.92, sweep_rad = 0.7156, cl_max = 0.89, q_ratio = 0.651, tail_rotor_wash = 1.0 }
+
+[ground]
+# the wheels where the operator's manual draws them (TM 1-1520-237-10 fig. 1-1, below): the mains at
+# station 294.2, 55.8 in out, the tail wheel 29 ft behind at 641.3; each at the drawn ground line
+# (water line 184.8) less its static compression under the c.g.'s load (13,272 lb on the mains,
+# 3,128 on the tail wheel, on the springs below - which are estimates)
+contacts_in = [[294.2, -55.8, 183.5], [294.2, 55.8, 183.5], [641.3, 0.0, 182.9]]
+kind = "wheels"
+spring_lbf_per_ft = [60000.0, 60000.0, 20000.0]
+damping_lbf_per_fps = [10000.0, 10000.0, 3333.0]
+
+[envelope]
+# the bounds of the platform's commands - design choices - and the aircraft's Vne
+bank_max_deg = 45.0
+pitch_min_deg = -30.0
+pitch_max_deg = 30.0
+roll_rate_max_deg_s = 60.0
+cas_max_kt = 193.0                 # "Maximum is 193 Knots": TM 1-1520-237-10 ch. 5 as transcribed at
+                                   # oocities.org/ericdurb/limits.htm (Vne falls with altitude, temperature, weight)
+
+[targets]
+# TM table 4: level flight trim - GENHEL's, the math model the report documents (itself checked
+# against flight tests elsewhere), not flight data; this file's senses (the longitudinal stick negated)
+trim_source = "GENHEL (TM-85890 table 4)"
+trim = [
+  { kt = 1.0,   long_in = -0.1266, lat_in = 0.2321,  coll_in = 5.719, pedal_in = -1.279,    theta_deg = 5.052,  phi_deg = -2.340 },
+  { kt = 20.0,  long_in = 0.3670,  lat_in = -0.9956, coll_in = 5.361, pedal_in = -1.066,    theta_deg = 5.834,  phi_deg = -1.342 },
+  { kt = 40.0,  long_in = 0.2083,  lat_in = -0.7560, coll_in = 4.580, pedal_in = -0.5830,   theta_deg = 4.340,  phi_deg = -1.005 },
+  { kt = 60.0,  long_in = 0.4238,  lat_in = -0.2322, coll_in = 4.194, pedal_in = -0.5802,   theta_deg = 3.489,  phi_deg = 0.0 },
+  { kt = 100.0, long_in = 1.063,   lat_in = 0.1812,  coll_in = 4.425, pedal_in = -0.2606,   theta_deg = 2.469,  phi_deg = 0.0 },
+  { kt = 140.0, long_in = 1.800,   lat_in = 0.3964,  coll_in = 5.718, pedal_in = -0.005715, theta_deg = -0.2996, phi_deg = 0.0 },
+]
+
+[model]
+# What is drawn beyond the airframe's shape below: the rotors' look (their size, hub, shaft,
+# blades and sense are the flight model's, [rotor.main] and [rotor.tail]).
+
+[model.main_rotor]
+airfoil = "naca0010"               # the SC1095's 9.5 %, drawn symmetric
+root = 0.13
+pitch_75_deg = 9.0                 # drawn at a hover's pitch
+precone_deg = 2.0                  # drawn coned a little, as it flies (articulated: no precone)
+tip = { from = 0.93, sweep_deg = 20.0 }   # the swept tip, the outer 7 % swept back 20 deg
+hub = "articulated"
+hub_radius = 0.30
+grip_radius = 0.10
+colour = "#2b2d2c"
+tip_fraction = 0.0
+absorber = { above_m = 0.25, arm_m = 0.42, arm_radius_m = 0.035, weight_m = 0.085 }  # the bifilar
+
+[model.tail_rotor]
+airfoil = "naca0010"
+root = 0.2
+pitch_75_deg = 8.0
+hub = "crossbeam"
+hub_radius = 0.09
+grip_radius = 0.045
+colour = "#2b2d2c"
+tip_fraction = 0.0
+top_blade = "aft"                  # which way it turns: an assumption (no source here says)
+# TM-85890 places the hub on the centre line - where its canted shaft crosses the plane of
+# symmetry; the operator's manual's front view draws it 18.8 in right of it, on that shaft: drawn
+# there, 20 in out along the shaft (the same line of thrust)
+offset_m = 0.508
+
+# The airframe, measured from the operator's manual's principal dimensions (TM 1-1520-237-10,
+# fig. 1-1 - on Wikimedia Commons, "Sikorsky_UH-60_Black_Hawk_dimensions.png", public domain):
+# its side view scaled by its own 50 ft 7.5 in fuselage (1.233 px/in, checked against its 29 ft
+# wheel base and 41 ft 4 in folded length), registered at the main rotor's hub (TM-85890's
+# station 341.2, water line 315.0; the tail rotor's hub then falls within 6 in of TM's); its front
+# view (1.648 px/in, by its 5 ft 1 in and the hub's height) for the widths at the cockpit, the
+# engine inlets and the wheels; the plan's shape from FM 44-80's three-view ("Sikorsky UH-60A Black
+# Hawk 3-view line drawing.png", public domain; a recognition drawing, its cabin's inner lines
+# taken as the 7 ft 9 in fuselage). Metres in the structural frame (station, butt line, water
+# line x 0.0254).
+[[body]]
+name = "fuselage"
+kind = "fuselage"
+stations = [
+  { x = 3.959, w = 0.00, top = 5.591, bottom = 5.591 },
+  { x = 3.980, w = 0.482, top = 5.735, bottom = 5.447, n_top = 2.0, n_bottom = 2.2 },
+  { x = 4.021, w = 0.931, top = 5.776, bottom = 5.385, n_top = 2.0, n_bottom = 2.2 },
+  { x = 4.083, w = 1.169, top = 5.817, bottom = 5.323, n_top = 2.0, n_bottom = 2.2 },
+  { x = 4.165, w = 1.356, top = 5.859, bottom = 5.282, n_top = 2.0, n_bottom = 2.2 },
+  { x = 4.289, w = 1.578, top = 5.920, bottom = 5.220, n_top = 2.0, n_bottom = 2.2 },
+  { x = 4.454, w = 1.825, top = 6.003, bottom = 5.179, n_top = 2.0, n_bottom = 2.2 },
+  { x = 4.619, w = 2.025, top = 6.065, bottom = 5.138, n_top = 2.0, n_bottom = 2.2 },
+  { x = 4.783, w = 2.179, top = 6.147, bottom = 5.117, n_top = 2.0, n_bottom = 2.2 },
+  { x = 4.948, w = 2.274, top = 6.250, bottom = 5.096, n_top = 2.0, n_bottom = 2.2 },
+  { x = 5.113, w = 2.319, top = 6.394, bottom = 5.076, n_top = 2.3, n_bottom = 3.0 },
+  { x = 5.278, w = 2.340, top = 6.559, bottom = 5.076, n_top = 2.3, n_bottom = 3.0 },
+  { x = 5.443, w = 2.361, top = 6.724, bottom = 5.062, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 5.607, w = 2.362, top = 6.806, bottom = 5.055, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 5.855, w = 2.362, top = 6.844, bottom = 5.055, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 6.184, w = 2.362, top = 6.890, bottom = 5.055, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 6.596, w = 2.362, top = 6.921, bottom = 5.055, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 7.091, w = 2.362, top = 6.921, bottom = 5.049, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 7.667, w = 2.362, top = 6.921, bottom = 5.039, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 8.491, w = 2.362, top = 6.921, bottom = 5.035, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 9.315, w = 2.362, top = 6.921, bottom = 5.035, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 10.139, w = 2.362, top = 6.921, bottom = 5.035, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 10.757, w = 2.338, top = 6.921, bottom = 5.055, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 11.375, w = 2.087, top = 6.872, bottom = 5.014, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 11.993, w = 1.533, top = 6.772, bottom = 5.096, n_top = 2.6, n_bottom = 3.8, chine = 5.791 },
+  { x = 12.611, w = 1.037, top = 6.693, bottom = 5.138, n_top = 2.2, n_bottom = 2.3 },
+  { x = 13.229, w = 0.867, top = 6.590, bottom = 5.168, n_top = 2.2, n_bottom = 2.3 },
+  { x = 13.847, w = 0.763, top = 6.518, bottom = 5.199, n_top = 2.2, n_bottom = 2.3 },
+  { x = 14.465, w = 0.670, top = 6.435, bottom = 5.220, n_top = 2.2, n_bottom = 2.3 },
+  { x = 15.083, w = 0.586, top = 6.353, bottom = 5.241, n_top = 2.2, n_bottom = 2.3 },
+  { x = 15.701, w = 0.509, top = 6.291, bottom = 5.354, n_top = 2.2, n_bottom = 2.3 },
+  { x = 16.319, w = 0.436, top = 6.229, bottom = 5.385, n_top = 2.2, n_bottom = 2.3 },
+  { x = 16.937, w = 0.374, top = 6.250, bottom = 5.457, n_top = 2.2, n_bottom = 2.3 },
+  { x = 17.555, w = 0.330, top = 6.250, bottom = 5.550, n_top = 2.2, n_bottom = 2.3 },
+  { x = 17.967, w = 0.315, top = 6.250, bottom = 5.632, n_top = 2.2, n_bottom = 2.3 },
+]
+
+# the deck fairing over the main transmission and the engines: the side view's upper line from
+# the cockpit roof back to the tail cone, 63 in across between the nacelles
+[[body]]
+name = "deck"
+kind = "pod"
+stations = [
+  { x = 5.461, w = 0.406, top = 6.871, bottom = 6.731, n_top = 2.8, n_bottom = 2.0 },
+  { x = 6.096, w = 0.914, top = 6.968, bottom = 6.680, n_top = 2.8, n_bottom = 2.0 },
+  { x = 6.858, w = 1.321, top = 7.201, bottom = 6.680, n_top = 2.8, n_bottom = 2.0 },
+  { x = 7.620, w = 1.524, top = 7.330, bottom = 6.680, n_top = 2.8, n_bottom = 2.0 },
+  { x = 8.382, w = 1.600, top = 7.383, bottom = 6.680, n_top = 2.8, n_bottom = 2.0 },
+  { x = 10.668, w = 1.600, top = 7.301, bottom = 6.680, n_top = 2.8, n_bottom = 2.0 },
+  { x = 11.430, w = 1.372, top = 7.088, bottom = 6.680, n_top = 2.8, n_bottom = 2.0 },
+  { x = 12.192, w = 0.965, top = 6.851, bottom = 6.680, n_top = 2.8, n_bottom = 2.0 },
+  { x = 12.700, w = 0.559, top = 6.679, bottom = 6.527, n_top = 2.8, n_bottom = 2.0 },
+  { x = 12.903, w = 0.203, top = 6.630, bottom = 6.478, n_top = 2.8, n_bottom = 2.0 },
+]
+
+# the T700s' nacelles either side of it: their inlets' centres 37.9 in out and at water line 282
+# (the front view), from the inlet (the side view's, station 310) back to the exhaust
+[[body]]
+name = "nacelle"
+kind = "pod"
+mirror = true
+stations = [
+  { x = 7.925, y = 0.940, w = 0.356, top = 7.239, bottom = 6.934, n = 2.2 },
+  { x = 7.976, y = 0.940, w = 0.559, top = 7.328, bottom = 6.845, n = 2.2 },
+  { x = 8.179, y = 0.940, w = 0.660, top = 7.366, bottom = 6.807, n = 2.3 },
+  { x = 10.160, y = 0.940, w = 0.660, top = 7.366, bottom = 6.807, n = 2.3 },
+  { x = 10.668, y = 0.940, w = 0.640, top = 7.290, bottom = 6.833, n = 2.3 },
+  { x = 11.176, y = 0.940, w = 0.559, top = 7.176, bottom = 6.883, n = 2.2 },
+  { x = 11.430, y = 0.940, w = 0.305, top = 7.061, bottom = 6.934, n = 2.2 },
+  { x = 11.481, y = 0.940, w = 0.00, top = 7.000, bottom = 7.000 },
+]
+
+# the sponsons along the lower cabin (the side view's long fairing; out to 53 in, the front view)
+[[body]]
+name = "sponson"
+kind = "pod"
+mirror = true
+stations = [
+  { x = 6.040, y = 1.194, w = 0.000, top = 5.550, bottom = 5.550 },
+  { x = 6.122, y = 1.194, w = 0.305, top = 5.714, bottom = 5.385, n = 2.4 },
+  { x = 6.843, y = 1.194, w = 0.305, top = 5.797, bottom = 5.282, n = 2.4 },
+  { x = 7.667, y = 1.194, w = 0.305, top = 5.797, bottom = 5.241, n = 2.4 },
+  { x = 8.903, y = 1.194, w = 0.305, top = 5.756, bottom = 5.220, n = 2.4 },
+  { x = 9.727, y = 1.194, w = 0.305, top = 5.611, bottom = 5.241, n = 2.4 },
+  { x = 10.551, y = 1.194, w = 0.000, top = 5.364, bottom = 5.364 },
+]
+
+# the tail rotor's gearbox on the pylon's top, set toward the rotor's side; the hub it drives is
+# TM-85890's (station 732.0, water line 324.7) - the drawing's pylon is 5 to 10 in lower, raised
+[[body]]
+name = "tail rotor gearbox"
+kind = "pod"
+stations = [
+  { x = 18.110, y = 0.076, w = 0.000, top = 8.230, bottom = 8.230 },
+  { x = 18.160, y = 0.076, w = 0.200, top = 8.380, bottom = 8.080, n = 2.2 },
+  { x = 18.420, y = 0.076, w = 0.380, top = 8.510, bottom = 7.980, n = 2.4 },
+  { x = 18.920, y = 0.076, w = 0.380, top = 8.480, bottom = 7.980, n = 2.4 },
+  { x = 19.300, y = 0.076, w = 0.250, top = 8.380, bottom = 8.050, n = 2.2 },
+  { x = 19.460, y = 0.076, w = 0.000, top = 8.230, bottom = 8.230 },
+]
+
+# the tail pylon: its leading and trailing edges in the side view (swept 43.5 deg; TM's fin 41),
+# its root in the tail cone, its top raised under the gearbox
+[[surface]]
+name = "pylon"
+kind = "fin"
+airfoil = "naca0020"
+sections = [
+  { le = [16.350, 0.0, 6.045], chord = 1.473 },
+  { le = [16.525, 0.0, 6.231], chord = 1.422 },
+  { le = [18.280, 0.0, 8.077], chord = 1.092 },
+]
+
+# the stabilator: 14 ft 4.5 in across (TM's 45 sq ft at aspect 4.6), its root chord the side
+# view's (50.3 in), tapered to 26.7 in (FM 44-80's plan), at water line 240.8 (TM: 244); all of it
+# turns - TM-85890's schedule, 39 deg trailing edge down to 8 up - and the model shows it
+[[surface]]
+name = "stabilator"
+kind = "htail"
+airfoil = "naca0015"
+sections = [
+  { le = [17.412, 0.0, 6.116], chord = 1.278 },
+  { le = [17.564, 2.193, 6.116], chord = 0.678 },
+]
+controls = [{ name = "stabilator", channel = "elevator", span = [0.0, 1.0], chord_fraction = 1.0, pivot = 0.3, limits = [-8.0, 39.0] }]
+
+# the main landing gear: trailing drag beams from the sponsons to the axles
+[[strut]]
+name = "drag beam"
+from = [6.100, 1.194, 5.330]
+to = [7.380, 1.194, 5.000]
+chord = 0.10
+thickness = 0.08
+
+# the wheels, as the flight model's contacts are (the static compressions under the c.g.'s load
+# above the drawn ground line, water line 184.8): the main wheels 55.8 in out (the front view),
+# at the side view's station 294.2; the tail wheel at 641.3 on its trailing arm
+[[gear]]
+name = "main"
+position = [7.473, 1.417, 4.660]
+mirror = true
+wheel_diameter = 0.60
+wheel_width = 0.27
+attach = [7.671, 1.194, 5.690]
+static_deflection = 0.034
+[[gear]]
+name = "tail"
+position = [16.289, 0.0, 4.646]
+wheel_diameter = 0.51
+wheel_width = 0.17
+attach = [15.867, 0.0, 5.359]
+static_deflection = 0.048
+
+# the mast from the transmission to the hub (tilted 3 deg forward), its swashplate, the engines'
+# exhausts, the tail rotor's output shaft (along its canted shaft), the IR jammer on the deck
+[[part]]
+name = "mast"
+prim = "cylinder"
+material = "metal"
+a = [8.706, 0.0, 7.240]
+b = [8.672, 0.0, 7.899]
+r = 0.125
+[[part]]
+name = "swashplate"
+prim = "cylinder"
+material = "metal"
+a = [8.696, 0.0, 7.443]
+b = [8.692, 0.0, 7.519]
+r = 0.34
+round = 0.02
+[[part]]
+name = "exhaust, left"
+prim = "cylinder"
+material = "dark"
+a = [10.922, -1.041, 7.112]
+b = [11.557, -1.194, 7.137]
+r = 0.16
+[[part]]
+name = "exhaust, right"
+prim = "cylinder"
+material = "dark"
+a = [10.922, 1.041, 7.112]
+b = [11.557, 1.194, 7.137]
+r = 0.16
+[[part]]
+name = "tail rotor shaft"
+prim = "cylinder"
+material = "metal"
+a = [18.593, 0.191, 8.317]
+b = [18.593, 0.429, 8.405]
+r = 0.075
+[[part]]
+name = "IR jammer"
+prim = "cylinder"
+material = "dark"
+a = [10.033, 0.0, 7.340]
+b = [10.033, 0.0, 7.650]
+r = 0.15
+
+[dimensions]
+# the operator's manual's (TM 1-1520-237-10): the model stage checks the model against them
+length_m = 15.431                  # fuselage, 50 ft 7.5 in
+main_rotor_diameter_m = 16.358     # 53 ft 8 in
+tail_rotor_diameter_m = 3.353      # 11 ft

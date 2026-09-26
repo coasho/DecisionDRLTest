@@ -472,6 +472,19 @@ bool VehicleVisuals::Joint::parse(const std::string& name, Joint& joint) {
         joint.nozzleRad = v[1] * 3.14159265358979323846 / 180.0;
         return true;
     }
+    // a rotor's blur: fsim:disc:<engine>:<rpm> shows while that engine turns at
+    // the rpm or more, fsim:blades:<engine>:<rpm> (the blades it stands for) below it
+    if (terms.rfind("disc:", 0) == 0 || terms.rfind("blades:", 0) == 0) {
+        const bool disc = terms[0] == 'd';
+        std::vector<double> v;
+        if (!parseNumbers(terms.substr(disc ? 5 : 7), v) || v.size() != 2 || !(v[1] > 0.0)) return false;
+        if (v[0] < 0.0 || v[0] >= sim::VehicleState::kMaxEngines || v[0] != std::floor(v[0])) return false;
+        joint.kind = disc ? Disc : Blades;
+        joint.engine = static_cast<int>(v[0]);
+        joint.blurRpm = v[1];
+        joint.blurred = false;
+        return true;
+    }
     // a propeller: fsim:propeller:<engine>, at that engine's rpm
     if (terms.rfind("propeller:", 0) == 0) {
         std::vector<double> v;
@@ -553,6 +566,12 @@ vsg::dmat4 VehicleVisuals::Joint::matrix(const sim::VehicleState& s) {
         const double rpm = engineOk && std::isfinite(s.engineRpm[engine]) ? std::abs(s.engineRpm[engine]) : 0.0;
         return rest * vsg::rotate(2.0 * 3.14159265358979323846 * turn(rpm / 60.0, s.simTime), vsg::dvec3(1.0, 0.0, 0.0));
     }
+    if (kind == Disc || kind == Blades) {
+        const double rpm = engineOk && std::isfinite(s.engineRpm[engine]) ? std::abs(s.engineRpm[engine]) : 0.0;
+        blurred = rpm >= (blurred ? 0.95 : 1.0) * blurRpm;
+        // what is not shown shrinks to its origin (to nothing drawn), the matrix still invertible
+        return (kind == Disc) == blurred ? rest : rest * vsg::scale(1e-4, 1e-4, 1e-4);
+    }
     const bool wheelOk = wheel < s.wheelCount;
     if (kind == Oleo) {
         const double c = wheelOk && std::isfinite(s.wheelCompressionM[wheel]) ? std::max(s.wheelCompressionM[wheel], 0.0) : 0.0;
@@ -603,7 +622,7 @@ VehicleVisuals::Rig VehicleVisuals::Rig::find(const vsg::ref_ptr<vsg::Node>& gra
                           << "' is not a moving part (fsim:aileron|elevator|rudder|flaps[:gain][+...][@lo,hi], "
                              "fsim:gear:<deg>[:<g0>:<g1>], fsim:afterburner[:<engine>], fsim:lef[:<gain>][@lo,hi], "
                              "fsim:propeller:<engine>, fsim:nozzle:<engine>:<deg>, fsim:oleo:<wheel>[:<gain>], "
-                             "fsim:steer:<wheel>, fsim:wheel:<wheel>:<radius>); left fixed";
+                             "fsim:steer:<wheel>, fsim:wheel:<wheel>:<radius>, fsim:disc|blades:<engine>:<rpm>); left fixed";
     rig.joints = std::move(finder.joints);
     rig.spine.assign(finder.spine.begin(), finder.spine.end());
     return rig;
@@ -741,6 +760,13 @@ VehicleVisuals::Shape VehicleVisuals::measure(const vsg::ref_ptr<vsg::Node>& mod
             break;
         }
     return shape;
+}
+
+double VehicleVisuals::Shape::reach() const noexcept {
+    if (!valid) return 0.0;
+    const double x = std::max(std::abs(lo.x), std::abs(hi.x)), y = std::max(std::abs(lo.y), std::abs(hi.y)),
+                 z = std::max(std::abs(lo.z), std::abs(hi.z));
+    return std::sqrt(x * x + y * y + z * z);
 }
 
 const VehicleVisuals::Shape& VehicleVisuals::shape(std::size_t index) const {

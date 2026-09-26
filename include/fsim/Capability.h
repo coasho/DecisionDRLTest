@@ -45,10 +45,49 @@ inline constexpr AxisMask kLegacyAxes = kPrimaryAxes | axisBit(Axis::Flaps) | ax
 inline constexpr std::size_t kSlotCount = 4;
 
 /// The groups a flight command may own on its own (docs/control-architecture.md,
-/// 6.1): above the actuators, roll and yaw together (the loop that banks also
-/// coordinates), pitch, thrust. At the actuators each primary axis alone.
+/// 6.1), which the aircraft's family sets (docs/rotorcraft.md, 3.3). A wing's:
+/// above the actuators, roll and yaw together (the loop that banks also
+/// coordinates), pitch, thrust. A rotorcraft's: the cyclic's roll and pitch
+/// together (they tilt the thrust that moves it), the yaw (the pedals), the
+/// thrust (the collective). At the actuators each primary axis alone.
 inline constexpr AxisMask kLateral = axisBit(Axis::Roll) | axisBit(Axis::Yaw);
-enum AxisGroup : std::uint8_t { kGroupLateral = 1u << 0, kGroupPitch = 1u << 1, kGroupThrust = 1u << 2, kGroupEachAxis = 1u << 3 };
+inline constexpr AxisMask kCyclic = axisBit(Axis::Roll) | axisBit(Axis::Pitch);
+enum AxisGroup : std::uint8_t {
+    kGroupLateral = 1u << 0,  ///< roll and yaw
+    kGroupPitch = 1u << 1,    ///< pitch
+    kGroupThrust = 1u << 2,   ///< thrust
+    kGroupEachAxis = 1u << 3, ///< any primary axis alone
+    kGroupCyclic = 1u << 4,   ///< roll and pitch (a rotorcraft)
+    kGroupYaw = 1u << 5,      ///< yaw (a rotorcraft)
+};
+/// The axes a group (one AxisGroup bit) owns; 0 for kGroupEachAxis.
+constexpr AxisMask groupAxes(AxisGroup group) noexcept {
+    switch (group) {
+    case kGroupLateral: return kLateral;
+    case kGroupPitch: return axisBit(Axis::Pitch);
+    case kGroupThrust: return axisBit(Axis::Thrust);
+    case kGroupCyclic: return kCyclic;
+    case kGroupYaw: return axisBit(Axis::Yaw);
+    default: return 0;
+    }
+}
+/// `axes` widened to every group of `groups` it touches: what a command above
+/// the actuators owns when it asks for part of a group.
+constexpr AxisMask widenToGroups(AxisMask axes, std::uint8_t groups) noexcept {
+    AxisMask out = axes;
+    for (unsigned bit = 0; bit < 8; ++bit) {
+        const auto g = static_cast<AxisGroup>(1u << bit);
+        if ((groups & g) && (groupAxes(g) & axes)) out = static_cast<AxisMask>(out | groupAxes(g));
+    }
+    return out;
+}
+
+/// What an aircraft can do that a behaviour may need (BehaviorTraits::features),
+/// as its family's adapter declares it.
+enum Feature : std::uint32_t {
+    kFeatureWingborne = 1u << 0, ///< flies on a wing: manoeuvres by load factor and bank
+    kFeatureHover = 1u << 1,     ///< holds a point in the air
+};
 
 /// What flies a primary axis nobody owns.
 enum class VehicleDefault : std::uint8_t {
@@ -239,6 +278,10 @@ struct ParameterInfo {
     double max = std::numeric_limits<double>::infinity();
     double defaultValue = std::numeric_limits<double>::quiet_NaN();
     bool optional = true; ///< accepts kHold (NaN)
+    /// false: this aircraft has nothing the field could move (a rotorcraft's
+    /// longitudinal acceleration, a wing's pitch rate). A command that sets
+    /// it - to anything but kHold or its default - is refused (InvalidParameter).
+    bool supported = true;
 };
 
 struct CapabilityDescriptor {
@@ -262,6 +305,9 @@ struct BehaviorTraits {
     std::vector<ParameterInfo> parameters; ///< its BehaviorCommand::params, for discovery
     std::vector<std::string> uses;         ///< what it flies through, e.g. "fsim.flight.velocity"
     bool needsTarget = false;
+    /// The Feature bits an aircraft needs for it to be offered (a hover needs
+    /// kFeatureHover); 0: every aircraft.
+    std::uint32_t features = 0;
 };
 
 } // namespace fsim::control

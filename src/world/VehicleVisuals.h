@@ -161,6 +161,8 @@ public:
         vsg::dvec3 lo, hi;              ///< its bounding box (the exhaust flames' meshes left out)
         vsg::dvec3 tip;                 ///< the right wing tip's trailing edge (the widest point, lacking a wing)
         bool valid = false;             ///< false for the placeholder and a model that did not load
+        /// The furthest the bounding box reaches from the reference point (m; 0 when not valid).
+        double reach() const noexcept;
     };
     const Shape& shape(std::size_t index) const;
 
@@ -168,11 +170,12 @@ public:
     /// fsim:gear:<deg>[:<g0>:<g1>], fsim:afterburner[:<engine>],
     /// fsim:lef[:<gain>][@<lo>,<hi>], fsim:propeller:<engine>,
     /// fsim:nozzle:<engine>:<deg>, fsim:oleo:<wheel>[:<gain>],
-    /// fsim:steer:<wheel> or fsim:wheel:<wheel>:<radius> - each moved by what
-    /// the simulation reports (VehicleState), never by a guess of its own.
+    /// fsim:steer:<wheel>, fsim:wheel:<wheel>:<radius>, fsim:disc:<engine>:<rpm>
+    /// or fsim:blades:<engine>:<rpm> - each moved by what the simulation
+    /// reports (VehicleState), never by a guess of its own.
     struct Joint {
         enum Channel { Aileron, Elevator, Rudder, Flaps };
-        enum Kind { Surface, Gear, Afterburner, LeadingEdge, Propeller, Nozzle, Oleo, Steer, Wheel };
+        enum Kind { Surface, Gear, Afterburner, LeadingEdge, Propeller, Nozzle, Oleo, Steer, Wheel, Disc, Blades };
         Kind kind = Surface;
         const vsg::MatrixTransform* node = nullptr; ///< in the shared model
         vsg::dmat4 rest;                           ///< its matrix at zero deflection
@@ -197,6 +200,12 @@ public:
         /// wheel's radius (m), which turns its rolling speed into its spin
         int wheel = 0;
         double wheelRadius = 0.0;
+        /// disc, blades: a rotor's blur - its disc shown, its blades hidden,
+        /// while the engine turns at `blurRpm` or more (with 5 % of hysteresis):
+        /// sampled at the viewer's frame rate the blades of a fast rotor would
+        /// seem to stand still or creep, where the eye sees a disc
+        double blurRpm = 0.0;
+        bool blurred = false;
         /// Parses a node name; false when it is not a joint (or malformed).
         static bool parse(const std::string& name, Joint& joint);
         /// The node's matrix for the vehicle's state (a propeller or a wheel

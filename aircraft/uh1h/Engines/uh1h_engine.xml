@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<!-- the engines as one governed power source: the flight control system meters it
+     (fcs/throttle-pos-norm[0] = shaft power / the design's limit, 1100 shp) -->
+<electric_engine name="uh1h engine">
+  <power unit="WATTS"> 820270 </power>
+</electric_engine>

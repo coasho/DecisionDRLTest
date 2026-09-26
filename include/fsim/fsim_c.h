@@ -283,6 +283,13 @@ FSIM_API int fsim_vehicle_active_level(const fsim_world* world, uint32_t id);
 FSIM_API int fsim_world_gather_states(const fsim_world* world, const uint32_t* ids, uint32_t count, int sensed, fsim_vehicle_state* out);
 FSIM_API int fsim_world_command_batch(fsim_world* world, int level, const uint32_t* ids, uint32_t count, const double* values, uint32_t stride);
 FSIM_API uint32_t fsim_command_field_count(int level); /* 0 for FSIM_LEVEL_BEHAVIOR and unknown levels */
+/* Every field a level's command has (ABI 1.5; docs/rotorcraft.md): the
+ * fsim_command_field_count fields, then the rotorcraft's - acceleration
+ * pitch_rate_rad_s, yaw_rate_rad_s; velocity north_ms, east_ms; position
+ * heading_rad: actuator 8, attitude 6, acceleration 6, velocity 6, position 6.
+ * The capability calls (fsim_vehicle_submit, fsim_activity_update,
+ * fsim_activity_update_batch_n) take either count; the fields left out are fsim_hold(). */
+FSIM_API uint32_t fsim_command_field_count_full(int level);
 /* 1 if the running behaviour reports itself finished. */
 FSIM_API int fsim_vehicle_behavior_finished(const fsim_world* world, uint32_t id);
 FSIM_API int fsim_vehicle_use_controller(fsim_world* world, uint32_t id, int level, const char* controller_id);
@@ -362,7 +369,9 @@ typedef struct fsim_parameter_info {
     const char* unit;
     double min, max, default_value; /* the range for this aircraft; NaN default = as at the start */
     int32_t optional;          /* 1: accepts fsim_hold() */
-    int32_t reserved;
+    int32_t unsupported;       /* 1: this aircraft has nothing the field moves (a wing's pitch rate, a helicopter's
+                                  flaps): a command that sets it other than to fsim_hold() or its default is refused
+                                  "invalid_parameter" (ABI 1.5; before, reserved and 0) */
 } fsim_parameter_info;
 
 FSIM_API uint32_t fsim_vehicle_capability_count(fsim_world* world, uint32_t id);
@@ -370,7 +379,8 @@ FSIM_API int fsim_vehicle_capability(fsim_world* world, uint32_t id, uint32_t in
 FSIM_API int fsim_vehicle_capability_parameter(fsim_world* world, uint32_t id, uint32_t capability, uint32_t index, fsim_parameter_info* out);
 FSIM_API int fsim_vehicle_capability_status(const fsim_world* world, uint32_t id, const char* capability, int32_t* availability, int32_t* reason);
 
-/* NEW at a level: `fields` in that level's fsim_*_command order (fsim_command_field_count values). */
+/* NEW at a level: `fields` in that level's fsim_*_command order - fsim_command_field_count values, or
+ * fsim_command_field_count_full with the rotorcraft's (ABI 1.5). */
 FSIM_API int fsim_vehicle_submit(fsim_world* world, uint32_t id, int level, const double* fields, uint32_t count,
                                  const fsim_command_options* options, fsim_command_result* result);
 FSIM_API int fsim_vehicle_submit_behavior(fsim_world* world, uint32_t id, const fsim_behavior_command* command,
@@ -387,11 +397,15 @@ enum fsim_support { FSIM_SUPPORT_GEAR = 0, FSIM_SUPPORT_FLAPS, FSIM_SUPPORT_WHEE
                     FSIM_SUPPORT_ENGINES };
 FSIM_API int fsim_vehicle_submit_support(fsim_world* world, uint32_t id, int kind, const double* fields, uint32_t count,
                                          const fsim_command_options* options, fsim_command_result* result);
-/* UPDATE: a new setpoint for a live activity, in its level's field order (the per-step path). */
+/* UPDATE: a new setpoint for a live activity, in its level's field order (the per-step path; either count, as NEW). */
 FSIM_API int fsim_activity_update(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count, fsim_command_result* result);
 /* UPDATE for many activities at once: rows of fields at the given stride (0 = the field count of each activity's level,
  * all rows the same level). FSIM_OK if every update was accepted, else FSIM_INVALID_ARGUMENT naming the first refused. */
 FSIM_API int fsim_activity_update_batch(fsim_world* world, const fsim_activity_id* activities, uint32_t count, const double* values, uint32_t stride);
+/* As fsim_activity_update_batch with `fields` values in each row (ABI 1.5): the level's fsim_command_field_count or
+ * fsim_command_field_count_full (a support activity: its own count); stride 0 = `fields`. */
+FSIM_API int fsim_activity_update_batch_n(fsim_world* world, const fsim_activity_id* activities, uint32_t count, const double* values,
+                                          uint32_t stride, uint32_t fields);
 /* CANCEL: the activity ends and its axes fly the vehicle default. */
 FSIM_API int fsim_activity_cancel(fsim_world* world, fsim_activity_id activity, fsim_command_result* result);
 /* What flies the primary axes nobody owns: FSIM_DEFAULT_NEUTRAL (surfaces

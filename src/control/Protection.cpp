@@ -86,8 +86,9 @@ LimitState limitState(const sim::VehicleState& s, const EnvelopeLimits& e, const
     return here;
 }
 
-Protection protectionFor(const VehicleProfile& profile) noexcept {
+Protection protectionFor(const VehicleProfile& profile, std::uint32_t features) noexcept {
     Protection p;
+    p.wingborne = (features & kFeatureWingborne) != 0;
     const EnvelopeSection& env = profile.envelope;
     if (!env.header.present()) return p; // nothing to protect: Off
     p.mode = ProtectionMode::Limit;
@@ -134,7 +135,7 @@ LimitMask limitSetpoint(Command& c, const EnvelopeLimits& e, const Protection& p
     switch (c.index()) {
     case 1: {
         auto* a = std::get_if<AttitudeCommand>(&c);
-        if (isHold(a->headingRad)) {
+        if (isHold(a->headingRad) || !p.wingborne) { // (a rotorcraft's heading is its yaw's: the roll stands)
             k.within(a->rollRad, e.bankMaxRad, Limit::Bank);
         } else if (known(e.bankMaxRad)) { // the bank the heading is flown with
             if (isHold(a->maxBankRad) && e.bankMaxRad < kLoopMaxBankRad) a->maxBankRad = e.bankMaxRad, k.hit |= limitBit(Limit::Bank);
@@ -161,6 +162,7 @@ LimitMask limitSetpoint(Command& c, const EnvelopeLimits& e, const Protection& p
     case 3: {
         auto* v = std::get_if<VelocityCommand>(&c);
         airspeed(k, v->airspeedMs, e, here);
+        if (!p.wingborne) break; // a rotorcraft: its turn rate and vertical speed are its yaw's and its thrust's
         const double tas = std::max(s.airspeedTrueMs, 10.0);
         if (known(e.bankMaxRad) && !isHold(v->turnRateRadS))
             k.within(v->turnRateRadS, kG * std::tan(std::min(e.bankMaxRad, 1.45)) / tas, Limit::Bank);

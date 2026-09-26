@@ -424,7 +424,8 @@ fsim::control::CommandOptions fromC(const fsim_command_options* o) noexcept {
     return out;
 }
 
-/// A level's command from its fields in the C structs' order; false if the count is wrong.
+/// A level's command from its fields in the C structs' order - the struct's
+/// count, or every field with the rotorcraft's (the rest kHold); false if the count is neither.
 bool toCommand(int level, const double* fields, uint32_t count, fsim::control::Command& out) noexcept {
     switch (level) {
     case FSIM_LEVEL_ACTUATOR: out = fsim::control::ActuatorCommand{}; break;
@@ -436,9 +437,15 @@ bool toCommand(int level, const double* fields, uint32_t count, fsim::control::C
     }
     double* slots[8];
     const std::size_t n = fsim::control::commandFields(out, slots);
-    if (!fields || count != n) return false;
-    for (std::size_t i = 0; i < n; ++i) *slots[i] = fields[i];
+    if (!fields || (count != n && count != fsim_command_field_count(level))) return false;
+    for (std::size_t i = 0; i < count; ++i) *slots[i] = fields[i];
     return true;
+}
+
+/// "4 or 6": the counts a level's command is given in.
+std::string fieldCounts(int level) {
+    const uint32_t legacy = fsim_command_field_count(level), full = fsim_command_field_count_full(level);
+    return legacy == full ? std::to_string(legacy) : std::to_string(legacy) + " or " + std::to_string(full);
 }
 
 fsim::control::BehaviorCommand toBehavior(const fsim_behavior_command* c) {
@@ -568,7 +575,7 @@ FSIM_API int fsim_vehicle_capability_parameter(fsim_world* world, uint32_t id, u
     out->max = p.max;
     out->default_value = p.defaultValue;
     out->optional = p.optional ? 1 : 0;
-    out->reserved = 0;
+    out->unsupported = p.supported ? 0 : 1;
     return FSIM_OK;
 }
 
@@ -584,8 +591,7 @@ FSIM_API int fsim_vehicle_submit(fsim_world* world, uint32_t id, int level, cons
                                  const fsim_command_options* options, fsim_command_result* result) {
     fsim::control::Command c;
     if (!world || !result || !toCommand(level, fields, count, c))
-        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit: level " + std::to_string(level) + " takes " +
-                                               std::to_string(fsim_command_field_count(level)) + " fields");
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit: level " + std::to_string(level) + " takes " + fieldCounts(level) + " fields");
     toC(world->world.submit(id, c, fromC(options)), result);
     return FSIM_OK;
 }
@@ -616,7 +622,7 @@ FSIM_API int fsim_activity_update(fsim_world* world, fsim_activity_id activity, 
     const auto r = updateFrom(world, activity, shape, fields, count, malformed);
     if (malformed)
         return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update: activity " + std::to_string(activity) + " takes " +
-                                               std::to_string(shape.fields) + " fields");
+                                               (shape.support >= 0 ? std::to_string(shape.fields) : fieldCounts(shape.level)) + " fields");
     toC(r, result);
     return FSIM_OK;
 }
@@ -631,6 +637,27 @@ FSIM_API int fsim_activity_update_batch(fsim_world* world, const fsim_activity_i
         const auto r = updateFrom(world, activities[i], shape, values + offset, fields, malformed);
         if (!r.accepted())
             return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_batch: activity " + std::to_string(activities[i]) + " refused (" +
+                                                   fsim::control::reasonName(r.reason) + ")");
+        offset += stride ? stride : fields;
+    }
+    fsim::sdk::lastError().clear();
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_activity_update_batch_n(fsim_world* world, const fsim_activity_id* activities, uint32_t count, const double* values,
+                                          uint32_t stride, uint32_t fields) {
+    if (!world || (count && (!activities || !values))) return FSIM_INVALID_ARGUMENT;
+    std::size_t offset = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const UpdateShape shape = updateShape(world, activities[i]);
+        bool malformed = false;
+        const auto r = updateFrom(world, activities[i], shape, values + offset, fields, malformed);
+        if (malformed)
+            return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_batch_n: activity " + std::to_string(activities[i]) + " takes " +
+                                                   (shape.support >= 0 ? std::to_string(shape.fields) : fieldCounts(shape.level)) + " fields, not " +
+                                                   std::to_string(fields));
+        if (!r.accepted())
+            return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_batch_n: activity " + std::to_string(activities[i]) + " refused (" +
                                                    fsim::control::reasonName(r.reason) + ")");
         offset += stride ? stride : fields;
     }
@@ -747,6 +774,20 @@ FSIM_API uint32_t fsim_command_field_count(int level) {
     case FSIM_LEVEL_POSITION: return 5;
     default: return 0;
     }
+}
+
+FSIM_API uint32_t fsim_command_field_count_full(int level) {
+    if (level < FSIM_LEVEL_ACTUATOR || level >= FSIM_LEVEL_BEHAVIOR) return 0;
+    fsim::control::Command c;
+    switch (level) {
+    case FSIM_LEVEL_ACTUATOR: c = fsim::control::ActuatorCommand{}; break;
+    case FSIM_LEVEL_ATTITUDE: c = fsim::control::AttitudeCommand{}; break;
+    case FSIM_LEVEL_ACCELERATION: c = fsim::control::AccelerationCommand{}; break;
+    case FSIM_LEVEL_VELOCITY: c = fsim::control::VelocityCommand{}; break;
+    default: c = fsim::control::PositionCommand{}; break;
+    }
+    double* slots[8];
+    return static_cast<uint32_t>(fsim::control::commandFields(c, slots));
 }
 
 FSIM_API int fsim_world_gather_states(const fsim_world* world, const uint32_t* ids, uint32_t count, int sensed, fsim_vehicle_state* out) {

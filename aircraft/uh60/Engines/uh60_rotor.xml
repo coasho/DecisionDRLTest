@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<rotor name="uh60 main rotor">
+  <diameter unit="FT"> 53.66 </diameter>
+  <numblades> 4 </numblades>
+  <gearratio> 1.0 </gearratio>
+  <nominalrpm> 257.83 </nominalrpm>
+  <minrpm> 50 </minrpm>
+  <maxrpm> 335.179 </maxrpm>
+  <chord unit="FT"> 1.73 </chord>
+  <liftcurveslope Xunit="1/RAD"> 5.73 </liftcurveslope>
+  <twist unit="DEG"> -18 </twist>
+  <hingeoffset unit="FT"> 1.25 </hingeoffset>
+  <flappingmoment unit="SLUG*FT2"> 1490.1769 </flappingmoment>
+  <massmoment> 83.312166 </massmoment>
+  <polarmoment unit="SLUG*FT2"> 5960.7078 </polarmoment>
+  <inflowlag> 0.1 </inflowlag>
+  <tiplossfactor> 1 </tiplossfactor>
+  <ExternalRPM> -1 </ExternalRPM>
+  <model> heffley </model>
+</rotor>

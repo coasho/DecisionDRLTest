@@ -1,0 +1,21 @@
+# The UH-60A in the Army's helicopter green (FS 34031, matte; the colour approximate) all over;
+# its glass painted where the operator's manual's side and front views draw the windows (the
+# airframe's frame, m): the windscreen and the chin windows, the cockpit doors', the gunners'
+# and the cabin doors' windows, and the engines' dark inlets seen from ahead
+[paint]
+scheme = "single"
+colours = ["#3c4236"]
+windows = "#1c2227"
+windows_x = [4.97, 5.57]           # the windscreen, seen from the side
+windows_z = [5.98, 6.72]
+windscreen_x = [4.97, 5.57]        # ... from above
+windscreen_y = 0.80
+window_boxes = [[5.28, 6.10, 5.86, 6.54], [6.74, 7.03, 5.90, 6.54], [7.37, 7.90, 5.98, 6.54], [7.97, 8.59, 5.90, 6.54],
+                [8.76, 9.42, 5.90, 6.54], [4.31, 5.09, 5.26, 5.98]]
+front_boxes = [[0.04, 0.80, 5.99, 6.72], [0.70, 1.00, 5.27, 5.95], [0.74, 1.17, 6.91, 7.40]]
+panel_lines = 0.08
+wear = 0.05
+gloss = 0.12
+canopy = "dark"
+seed = 60
+front = "forward"

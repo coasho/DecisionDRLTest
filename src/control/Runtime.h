@@ -67,6 +67,11 @@ struct Protection {
     bool pitchSurface = false;       ///< the elevator input moves a surface (not a law's demand)
     double elevatorGainG = kNoLimit; ///< load factor per unit of elevator at elevatorGainCasMs (the plant's); NaN: no elevator limiter
     double elevatorGainCasMs = kNoLimit;
+    /// It flies on a wing (kFeatureWingborne): its flight path follows its
+    /// pitch attitude and it turns by banking, so a vertical speed is bounded
+    /// by the pitch limits and a turn rate by the bank limit. A rotorcraft
+    /// climbs level and turns with its yaw: neither is.
+    bool wingborne = true;
 };
 
 struct RuntimeConfig {

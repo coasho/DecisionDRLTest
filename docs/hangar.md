@@ -994,6 +994,55 @@ vehicle offers: the support effectors that exist, and the envelope's ranges
 for commands that ask. It also chooses the vehicle's adapter (fly-by-wire or
 direct).
 
+## Rotorcraft
+
+A design whose `[aircraft] kind` is `"helicopter"` or `"multirotor"` goes
+through a pipeline of its own (`hangar/rotorcraft`), the record of which is
+[rotorcraft.md](rotorcraft.md) (ADR-27). Four are built: the Crazyflie 2.0
+(`cf2`), the IRIS+ (`iris`), the UH-1H (`uh1h`) and the UH-60A (`uh60`).
+
+```bat
+fsim hangar uh60                      build, model, fly, report
+fsim hangar cf2 model                 one stage
+fsim python examples\...              any SDK script flies jsbsim:uh60 like any aircraft
+```
+
+| Stage | Writes |
+| --- | --- |
+| `build` | the JSBSim aircraft: a helicopter's rotors on JSBSim's rotor model, its engine and governor, its control system's mechanics (a stabilizer bar, a mixing unit, a scheduled stabilator) in the flight control system; a multirotor's motors as speed states driving direct thrusters, its mixer, rotor drag and ground effect. And its profile: identity, effectors, propulsion, envelope, and the `hover` section from `hover.toml` |
+| `model` | `<name>.glb`, from the design's shape (below) and the flight model's rotors, with its checks |
+| `fly` | in the platform's own JSBSim: the hover's trim, the published trims (the UH-60A's 1 to 140 kt), step responses, and the hover plant identified into `hover.toml` - each axis's acceleration per unit command, damping and lag, and the hover's trims - from which the platform designs the rotorcraft loops; then builds again |
+| `report` | `out/report.html` |
+
+The design file carries the flight data - `[mass]`, `[rotor.main]` and
+`[rotor.tail]` or `[rotors]`, `[engine]`, `[controls]`, `[airframe]`,
+`[ground]`, `[envelope]`, `[targets]` - each number with its source; the four
+in `aircraft\` are the examples. Its shape is drawn as a fixed wing's is:
+`[[body]]`, `[[surface]]` (a control on one moves: the UH-60A's stabilator
+follows the simulation's), `[[strut]]`, `[[gear]]` (wheels roll, oleos slide
+with the simulation's gear), measured from a three-view, with `paint.toml`
+for the livery. What a rotorcraft adds:
+
+| Key | Is |
+| --- | --- |
+| `[[part]]` | one of the mesher's primitives joined to the airframe: `cylinder` (a, b, r[, round]), `capsule`, `box` (centre, half, axes[, round]), `ellipsoid`, `torus`, `revolve`, and `plate` - an outline `[[u, v], ...]` in the plane of `axes = [u, v]` through `origin`, given a `thickness`, its edges rounded by `round`: a circuit board, a frame's arms, a landing leg. `material` is one of hangar's (skin, dark, metal, ...), or `colour = "#rrggbb"` paints it flat in its own; `fillet` (m, 0.02) blends its joint to the rest |
+| `[model] cell_m` | the mesher's cell, where some 1,500 along the aircraft would be coarser than its parts (the Crazyflie's 0.15 mm) |
+| `[model.main_rotor]`, `[model.tail_rotor]`, `[model.propeller]` | how the rotors look - their size, hub, shaft, blades, chord, twist and sense are the flight model's: `airfoil`, `root` (r/R), `pitch_75_deg` or a propeller's `pitch_m`, `chords` (r/R, fraction), `precone_deg`, `tip = { from, sweep_deg }`, `hub` (`propeller`: a spinner; otherwise grips and a hub, with `bar` for a stabilizer bar or `absorber` for a bifilar), `hub_radius`, `grip_radius`, `colour`, `tip_colour`, `tip_fraction`, a tail rotor's `top_blade` (`aft` or `forward`: which way it turns), and `offset_m`: the hub drawn that far along its shaft from the flight model's point, on the same line of thrust (the UH-60A's tail rotor) |
+| `[ground] feet_m` | a multirotor's feet where they are drawn, one per rotor (x forward, y left, m), `leg_height_m` below the c.g.; without it, under the rotors `leg_spread` of the way out. `top_m`: its top, which with the rotors' hubs it lands on upside down |
+| `[dimensions]` | `length_m`, `main_rotor_diameter_m`, `tail_rotor_diameter_m`, or a multirotor's `rotor_diameter_m`: the drawings', which the model is checked against |
+
+Each rotor is a node the viewer turns at the rpm the simulation reports for it
+(`fsim:propeller:<engine>`), holding its blades and a blur disc that swap
+above the rpm where a blade moves a third of the way to the next between
+frames. The model stage checks: the airframe closed and in one piece; its
+length and its rotors' diameters within 3 % of `[dimensions]`; each rotor's
+node at its hub (1 mm), on the flight model's line of thrust (1 mm) and turning
+about its shaft the way the rotor turns (0.1 deg) - worked out from the flight
+data and the glTF frame's definition, not from the code that wrote the node;
+its blades and disc there; and the flight model's ground contacts on what is
+drawn - a helicopter's on its skids' bottoms or its tyres', a multirotor's on
+its feet (the airframe's signed distance there, 2 mm).
+
 ## Limits
 
 - **Speed range.** Subsonic tables, with Mach factors to about Mach 2.6.

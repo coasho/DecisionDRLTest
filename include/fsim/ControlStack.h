@@ -98,7 +98,7 @@ public:
     /// it starts at its next update. Null removes it.
     void install(std::size_t slot, std::unique_ptr<Behavior> behavior) noexcept;
     /// The adapter whose real-time face writes the inputs (a stock JSBSim one by default).
-    void setAdapter(const VehicleAdapter& adapter) noexcept { adapter_ = &adapter; }
+    void setAdapter(const VehicleAdapter& adapter) noexcept;
     const VehicleAdapter& adapter() const noexcept { return *adapter_; }
 
 private:
@@ -154,7 +154,10 @@ private:
     Command hold_ = VelocityCommand{};
     std::array<std::uint32_t, kPrimaryAxisCount> captured_{}; ///< per axis: the RuntimeConfig::letGo its target was captured at
     AxisMask holdValid_ = 0;                                  ///< the axes whose captured target is valid
-    double holdHeadingRad_ = 0.0, holdAirspeedMs_ = 0.0, holdAltitudeM_ = 0.0;
+    double holdHeadingRad_ = 0.0, holdAirspeedMs_ = 0.0, holdAltitudeM_ = 0.0, holdNorthMs_ = 0.0, holdEastMs_ = 0.0;
+    /// The adapter's HoldAxes, as bits: which axis, let go, keeps each target (a wing's by default)
+    AxisMask holdHeadingBit_ = axisBit(Axis::Roll), holdAltitudeBit_ = axisBit(Axis::Pitch), holdAirspeedBit_ = axisBit(Axis::Thrust),
+             holdGroundBit_ = 0;
     sim::ControlInputs last_;
     sim::ControlInputs initial_;
     sim::EffectorInputs effectors_;

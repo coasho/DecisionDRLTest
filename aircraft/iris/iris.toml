@@ -1,0 +1,253 @@
+# 3DR IRIS+ - the quadrotor PX4 flies in simulation:
+#   PX4  PX4-SITL_gazebo-classic, models/iris/iris.sdf.jinja - mass, inertia, the rotors'
+#        positions and turning senses, and each motor's model (the gazebo_motor_model plugin):
+#        thrust = motorConstant w^2, torque = momentConstant thrust, the speed's lags up and down,
+#        the maximum speed, the rotor drag -w c v and the rolling moment.
+#   3DR  IRIS+ specifications as retailers list them (Adafruit, product 2199): 1,282 g with a
+#        400 g payload - PX4's 1.5 kg is the aircraft carrying 218 g of it.
+# SI units. Frame: x forward, y left, z up (the sources'), from the c.g.
+
+[aircraft]
+name = "iris"
+kind = "multirotor"
+category = "multirotor"
+description = "3DR IRIS+ - 1.5 kg quadrotor, brushless motors (PX4's simulation model)"
+
+[mass]
+mass_kg = 1.5                      # PX4
+ixx = 0.029125                     # kg m2, PX4
+iyy = 0.029125
+izz = 0.055225
+
+[rotors]
+radius_m = 0.128                   # PX4 (10 in propellers)
+height_m = 0.023
+# PX4's rotor_0..3: FLU position (m) and turning sense seen from above
+positions = [["front right", 0.13, -0.22, "ccw"], ["rear left", -0.13, 0.20, "ccw"], ["front left", 0.13, 0.22, "cw"], ["rear right", -0.13, -0.20, "cw"]]
+thrust_n_per_rads2 = 5.84e-6       # motorConstant
+moment_constant_m = 0.06           # momentConstant: torque = 0.06 m x thrust
+max_rads = 1100.0                  # maxRotVelocity
+lag_up_s = 0.0125                  # timeConstantUp
+lag_down_s = 0.025                 # timeConstantDown
+rotor_drag = 0.000175              # rotorDragCoefficient: F = -w c v, in the rotor's plane
+rolling_moment = 1.0e-6            # rollingMomentCoefficient
+
+[ground]
+# the feet of PX4's model (its mesh): each leg's foot centre (FLU m, in the rotors' order), 0.054 m
+# below the c.g.
+leg_height_m = 0.054
+feet_m = [[0.1215, -0.2120], [-0.1330, 0.1965], [0.1215, 0.2120], [-0.1330, -0.1965]]
+top_m = 0.047              # the shell's top: the flight model's top contact, besides the rotors' hubs
+spring_n_per_m = 2000.0
+damping_n_per_mps = 60.0
+
+[envelope]
+# the bounds of the platform's commands: design choices
+bank_max_deg = 35.0                # PX4's MPC_TILTMAX_AIR default is 45
+pitch_min_deg = -35.0
+pitch_max_deg = 35.0
+roll_rate_max_deg_s = 220.0        # PX4's MC_ROLLRATE_MAX default
+
+[targets]
+hover_rads = 793.5                 # sqrt(m g / 4 / motorConstant)
+thrust_to_weight = 1.92
+
+[model]
+# What is drawn: the rotors from the flight model's own rotor data ([rotors]), their look below;
+# the airframe from PX4's model of the IRIS+ (the one the flight data are from: PX4-SITL_gazebo-
+# classic, models/iris, BSD-3-Clause) - its mesh measured in orthographic profiles: the shell 0.22
+# x 0.124 x 0.088 m, the arms 32 x 16 mm beams from the shell to the motors, the motors in their
+# mounts, a tapered leg under each (its foot 0.054 m below the c.g.). The colours are 3DR's: a
+# black shell and rear arms, blue front arms (PX4 draws its front rotors blue)
+cell_m = 0.0006                    # the mesher's cell: 0.6 mm
+
+[model.propeller]
+blades = 2
+chord_m = 0.024                    # the widest; the plan below as fractions of it
+chords = [[0.12, 0.6], [0.3, 1.0], [0.5, 1.0], [0.8, 0.8], [0.95, 0.55], [1.0, 0.3]]
+airfoil = "naca4408"
+pitch_m = 0.1143                   # 4.5 in (the IRIS+'s 9.5 x 4.5 propellers)
+root = 0.1
+hub = "propeller"
+hub_radius = 0.008
+colour = "#202224"
+tip_fraction = 0.0
+
+# the shell (FLU x from +0.103 to -0.117, flared at the arms' roots)
+[[body]]
+name = "shell"
+kind = "fuselage"
+stations = [
+  { x = -0.1035, w = 0.000, top = 0.009, bottom = 0.007 },
+  { x = -0.1000, w = 0.030, top = 0.021, bottom = -0.004, n = 2.2 },
+  { x = -0.0950, w = 0.080, top = 0.030, bottom = -0.019, n = 2.2 },
+  { x = -0.0900, w = 0.098, top = 0.034, bottom = -0.024, n = 2.2 },
+  { x = -0.0800, w = 0.106, top = 0.039, bottom = -0.030, n = 2.2 },
+  { x = -0.0700, w = 0.114, top = 0.043, bottom = -0.034, n = 2.2 },
+  { x = -0.0550, w = 0.124, top = 0.046, bottom = -0.036, n = 2.2 },
+  { x = -0.0400, w = 0.114, top = 0.047, bottom = -0.038, n = 2.2 },
+  { x = -0.0200, w = 0.108, top = 0.047, bottom = -0.041, n = 2.2 },
+  { x = 0.0000, w = 0.106, top = 0.047, bottom = -0.041, n = 2.2 },
+  { x = 0.0200, w = 0.112, top = 0.046, bottom = -0.041, n = 2.2 },
+  { x = 0.0380, w = 0.122, top = 0.044, bottom = -0.041, n = 2.2 },
+  { x = 0.0500, w = 0.110, top = 0.043, bottom = -0.041, n = 2.2 },
+  { x = 0.0600, w = 0.100, top = 0.041, bottom = -0.037, n = 2.2 },
+  { x = 0.0700, w = 0.090, top = 0.039, bottom = -0.034, n = 2.2 },
+  { x = 0.0850, w = 0.080, top = 0.037, bottom = -0.031, n = 2.2 },
+  { x = 0.1000, w = 0.070, top = 0.031, bottom = -0.026, n = 2.2 },
+  { x = 0.1100, w = 0.062, top = 0.021, bottom = -0.016, n = 2.2 },
+  { x = 0.1160, w = 0.030, top = 0.010, bottom = -0.008, n = 2.2 },
+  { x = 0.1180, w = 0.000, top = 0.001, bottom = 0.001 },
+]
+
+[[part]]
+name = "front right arm"
+prim = "box"
+colour = "#1e63c4"
+centre = [-0.0948, 0.1285, 0.0]
+half = [0.0980, 0.0160, 0.0080]
+axes = [[-0.35898, 0.93335, 0.0], [-0.93335, -0.35898, 0.0], [0.0, 0.0, 1.0]]
+round = 0.004
+fillet = 0.004
+[[part]]
+name = "front right motor mount"
+prim = "cylinder"
+colour = "#1e63c4"
+a = [-0.1300, 0.2200, -0.0200]
+b = [-0.1300, 0.2200, 0.0060]
+r = 0.0205
+round = 0.003
+fillet = 0.002
+[[part]]
+name = "front right motor"
+prim = "cylinder"
+material = "dark"
+a = [-0.1300, 0.2200, 0.0040]
+b = [-0.1300, 0.2200, 0.0210]
+r = 0.0175
+round = 0.002
+fillet = 0.001
+[[part]]
+name = "front right leg"
+prim = "plate"
+material = "dark"
+origin = [-0.1230, 0.0, 0.0]
+axes = [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+outline = [[0.2090, -0.0180], [0.2340, -0.0180], [0.2200, -0.0540], [0.2040, -0.0540]]
+thickness = 0.0140
+round = 0.003
+fillet = 0.003
+[[part]]
+name = "rear left arm"
+prim = "box"
+material = "dark"
+centre = [0.0864, -0.1199, 0.0]
+half = [0.0912, 0.0160, 0.0080]
+axes = [[0.47801, -0.87835, 0.0], [0.87835, 0.47801, 0.0], [0.0, 0.0, 1.0]]
+round = 0.004
+fillet = 0.004
+[[part]]
+name = "rear left motor mount"
+prim = "cylinder"
+material = "dark"
+a = [0.1300, -0.2000, -0.0200]
+b = [0.1300, -0.2000, 0.0060]
+r = 0.0205
+round = 0.003
+fillet = 0.002
+[[part]]
+name = "rear left motor"
+prim = "cylinder"
+material = "dark"
+a = [0.1300, -0.2000, 0.0040]
+b = [0.1300, -0.2000, 0.0210]
+r = 0.0175
+round = 0.002
+fillet = 0.001
+[[part]]
+name = "rear left leg"
+prim = "plate"
+material = "dark"
+origin = [0.1353, 0.0, 0.0]
+axes = [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+outline = [[-0.2170, -0.0180], [-0.1930, -0.0180], [-0.1890, -0.0540], [-0.2040, -0.0540]]
+thickness = 0.0150
+round = 0.003
+fillet = 0.003
+[[part]]
+name = "front left arm"
+prim = "box"
+colour = "#1e63c4"
+centre = [-0.0948, -0.1285, 0.0]
+half = [0.0980, 0.0160, 0.0080]
+axes = [[-0.35898, -0.93335, 0.0], [0.93335, -0.35898, 0.0], [0.0, 0.0, 1.0]]
+round = 0.004
+fillet = 0.004
+[[part]]
+name = "front left motor mount"
+prim = "cylinder"
+colour = "#1e63c4"
+a = [-0.1300, -0.2200, -0.0200]
+b = [-0.1300, -0.2200, 0.0060]
+r = 0.0205
+round = 0.003
+fillet = 0.002
+[[part]]
+name = "front left motor"
+prim = "cylinder"
+material = "dark"
+a = [-0.1300, -0.2200, 0.0040]
+b = [-0.1300, -0.2200, 0.0210]
+r = 0.0175
+round = 0.002
+fillet = 0.001
+[[part]]
+name = "front left leg"
+prim = "plate"
+material = "dark"
+origin = [-0.1230, 0.0, 0.0]
+axes = [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+outline = [[-0.2340, -0.0180], [-0.2090, -0.0180], [-0.2040, -0.0540], [-0.2200, -0.0540]]
+thickness = 0.0140
+round = 0.003
+fillet = 0.003
+[[part]]
+name = "rear right arm"
+prim = "box"
+material = "dark"
+centre = [0.0864, 0.1199, 0.0]
+half = [0.0912, 0.0160, 0.0080]
+axes = [[0.47801, 0.87835, 0.0], [-0.87835, 0.47801, 0.0], [0.0, 0.0, 1.0]]
+round = 0.004
+fillet = 0.004
+[[part]]
+name = "rear right motor mount"
+prim = "cylinder"
+material = "dark"
+a = [0.1300, 0.2000, -0.0200]
+b = [0.1300, 0.2000, 0.0060]
+r = 0.0205
+round = 0.003
+fillet = 0.002
+[[part]]
+name = "rear right motor"
+prim = "cylinder"
+material = "dark"
+a = [0.1300, 0.2000, 0.0040]
+b = [0.1300, 0.2000, 0.0210]
+r = 0.0175
+round = 0.002
+fillet = 0.001
+[[part]]
+name = "rear right leg"
+prim = "plate"
+material = "dark"
+origin = [0.1353, 0.0, 0.0]
+axes = [[0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+outline = [[0.1930, -0.0180], [0.2170, -0.0180], [0.2040, -0.0540], [0.1890, -0.0540]]
+thickness = 0.0150
+round = 0.003
+fillet = 0.003
+
+[dimensions]
+rotor_diameter_m = 0.256           # PX4's 0.128 m radius

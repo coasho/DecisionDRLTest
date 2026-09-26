@@ -46,7 +46,7 @@ void CapabilityHost::bind(std::uint32_t vehicle, ControlStack& runtime, const Ca
     adapter_ = &adapter;
     profile_ = &profile;
     controlPeriodS_ = controlPeriodS;
-    config_->protection = protectionFor(profile); // Limit with an envelope section, else Off
+    config_->protection = protectionFor(profile, adapter.features()); // Limit with an envelope section, else Off
     ++config_->revision;
 }
 
@@ -113,11 +113,14 @@ Reason CapabilityHost::checkAxes(const CapabilityDescriptor& d, AxisMask axes) n
     const auto primary = static_cast<AxisMask>(axes & kPrimaryAxes);
     if (!primary) return Reason::InvalidAxes; // a slot flies through the cascade on at least one primary axis
     if (primary == kPrimaryAxes || (d.axisGroups & kGroupEachAxis)) return Reason::None;
-    // owned apart: a union of the groups the capability allows (guidance allows none)
-    if ((primary & kLateral) && !(d.axisGroups & kGroupLateral)) return Reason::InvalidAxes;
-    if ((primary & axisBit(Axis::Pitch)) && !(d.axisGroups & kGroupPitch)) return Reason::InvalidAxes;
-    if ((primary & axisBit(Axis::Thrust)) && !(d.axisGroups & kGroupThrust)) return Reason::InvalidAxes;
-    return Reason::None;
+    // owned apart: a union of whole groups the capability allows (guidance allows none)
+    AxisMask covered = 0;
+    for (unsigned bit = 0; bit < 8; ++bit) {
+        const auto group = static_cast<AxisGroup>(1u << bit);
+        const AxisMask in = groupAxes(group);
+        if ((d.axisGroups & group) && in && (primary & in) == in) covered = static_cast<AxisMask>(covered | in);
+    }
+    return covered == primary ? Reason::None : Reason::InvalidAxes;
 }
 
 Reason CapabilityHost::awareUpTo(int top) const noexcept {
@@ -217,7 +220,9 @@ CommandResult CapabilityHost::submit(const Command& command, const CommandOption
     if (checked)
         if (const Reason why = catalog_->check(index, setpoint, options.range, flags); why != Reason::None) return rejected(why);
     AxisMask axes = options.axes ? options.axes : catalog_->defaultAxes(index, command);
-    if (d.level != Level::Actuator && (axes & kLateral)) axes |= kLateral; // the loop that banks also coordinates
+    // above the actuators a command owns whole groups: a wing's loop that banks
+    // also coordinates, a rotorcraft's cyclic tilts in roll and pitch at once
+    if (d.level != Level::Actuator) axes = widenToGroups(axes, d.axisGroups);
     if (const Reason why = checkAxes(d, axes); why != Reason::None) return rejected(why);
     if (const Reason why = checkAwareness(axes, d.level, true); why != Reason::None) return rejected(why);
     if (const ActivityId other = holder(axes, options.source)) return rejected(Reason::AuthorityHeld, 0, other);
@@ -278,8 +283,12 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
     takeOver(axes, id, now);
     const std::size_t s = directSlot(setpoint);
     writeDirect(s, setpoint);
-    const auto axis = static_cast<std::size_t>(supportAxis(setpoint));
-    config_->owner[axis] = s == kEnginesSlot ? RuntimeConfig::kEngines : RuntimeConfig::kSupport;
+    if (s == kEnginesSlot) { // thrust, or every primary axis where the engines fly the aircraft (a multirotor's rotors)
+        for (std::size_t a = 0; a < kAxisCount; ++a)
+            if (axes & (1u << a)) config_->owner[a] = RuntimeConfig::kEngines;
+    } else {
+        config_->owner[static_cast<std::size_t>(supportAxis(setpoint))] = RuntimeConfig::kSupport;
+    }
     ++config_->revision;
     start(s, id, index, options, axes, flags, now);
     if (d.persistence == Persistence::Terminating) slots_[s].target = supportGoal(setpoint);
@@ -391,11 +400,11 @@ void CapabilityHost::end(std::size_t s, ActivityState state, Reason reason, Acti
 void CapabilityHost::release(std::size_t s) noexcept {
     RuntimeConfig& config = *config_;
     if (s == kEnginesSlot) {
-        const auto thrust = static_cast<std::size_t>(Axis::Thrust);
-        if (config.owner[thrust] == RuntimeConfig::kEngines) {
-            config.owner[thrust] = RuntimeConfig::kNone;
-            ++config.letGo[thrust];
-        }
+        for (std::size_t a = 0; a < kPrimaryAxisCount; ++a)
+            if (config.owner[a] == RuntimeConfig::kEngines) {
+                config.owner[a] = RuntimeConfig::kNone;
+                ++config.letGo[a];
+            }
         config.engines.fill(kHold);
     } else if (isSupport(s)) {
         const auto axis = static_cast<std::size_t>(Axis::Flaps) + (s - kSlotCount);

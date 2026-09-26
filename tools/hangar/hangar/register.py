@@ -13,6 +13,7 @@ import os
 
 import numpy as np
 
+from . import rotorcraft
 from .geometry.aircraft import Aircraft
 from .mass import MassModel
 
@@ -29,8 +30,8 @@ def stand_ins(root):
     out = []
     for name in sorted(os.listdir(root)):
         toml = os.path.join(root, name, name + ".toml")
-        if not os.path.isfile(toml):
-            continue
+        if not os.path.isfile(toml) or rotorcraft.kind_of(toml):
+            continue  # (a rotorcraft's design - hangar/rotorcraft - stands in for no stock aircraft)
         a = Aircraft.load(toml)
         stocks = a.spec.get("aircraft", {}).get("stands_in_for", [])
         if stocks:

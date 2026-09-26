@@ -416,7 +416,7 @@ int main(int argc, char** argv) {
         fsim_command_result cr;
         fsim_activity_info ai;
         const uint32_t ncap = fsim_vehicle_capability_count(world, a);
-        uint32_t c, attitude = ncap;
+        uint32_t c, attitude = ncap, velocity = ncap;
         int32_t availability = -1, why = -1;
         double climb[4], cruise[4], rows[8];
         fsim_activity_id acts[2], operator_id;
@@ -427,6 +427,7 @@ int main(int argc, char** argv) {
         for (c = 0; c < ncap; ++c) {
             CHECK(fsim_vehicle_capability(world, a, c, &ci) == FSIM_OK);
             if (strcmp(ci.id, "fsim.flight.attitude") == 0) attitude = c;
+            if (strcmp(ci.id, "fsim.flight.velocity") == 0) velocity = c;
         }
         CHECK(attitude < ncap);
         CHECK(fsim_vehicle_capability(world, a, attitude, &ci) == FSIM_OK);
@@ -454,6 +455,29 @@ int main(int argc, char** argv) {
         memcpy(rows, climb, sizeof climb);
         memcpy(rows + 4, cruise, sizeof cruise);
         CHECK(fsim_activity_update_batch(world, acts, 2, rows, 0) == FSIM_OK);
+        /* ABI 1.5: every field, the rotorcraft's appended - which a wing has nothing for */
+        CHECK(fsim_command_field_count(FSIM_LEVEL_VELOCITY) == 4 && fsim_command_field_count_full(FSIM_LEVEL_VELOCITY) == 6);
+        CHECK(fsim_command_field_count_full(FSIM_LEVEL_ACCELERATION) == 6 && fsim_command_field_count_full(FSIM_LEVEL_POSITION) == 6);
+        CHECK(fsim_command_field_count_full(FSIM_LEVEL_ATTITUDE) == 6 && fsim_command_field_count_full(FSIM_LEVEL_BEHAVIOR) == 0);
+        CHECK(velocity < ncap && fsim_vehicle_capability_parameter(world, a, velocity, 4, &pi) == FSIM_OK);
+        CHECK(strcmp(pi.name, "north_ms") == 0 && pi.unsupported == 1);
+        CHECK(fsim_vehicle_capability_parameter(world, a, velocity, 0, &pi) == FSIM_OK && pi.unsupported == 0);
+        {
+            double full[12];
+            int k;
+            for (k = 0; k < 2; ++k) {
+                full[6 * k + 0] = 55.0; full[6 * k + 1] = 0.0; full[6 * k + 2] = fsim_hold(); full[6 * k + 3] = fsim_hold();
+                full[6 * k + 4] = fsim_hold(); full[6 * k + 5] = fsim_hold();
+            }
+            CHECK(fsim_activity_update(world, acts[0], full, 6, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_update(world, acts[0], full, 5, &cr) != FSIM_OK); /* malformed: 4 or 6 */
+            CHECK(fsim_activity_update_batch_n(world, acts, 2, full, 0, 6) == FSIM_OK);
+            CHECK(fsim_activity_update_batch_n(world, acts, 2, full, 6, 4) == FSIM_OK); /* the legacy width, rows 6 apart */
+            CHECK(fsim_activity_update_batch_n(world, acts, 2, full, 6, 5) != FSIM_OK);
+            full[4] = 3.0; /* north_ms, on a wing */
+            CHECK(fsim_activity_update(world, acts[0], full, 6, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "invalid_parameter") == 0);
+        }
 
         /* an operator's override: the policy's activity ends preempted, a policy command is refused */
         co.source = FSIM_SOURCE_OVERRIDE;

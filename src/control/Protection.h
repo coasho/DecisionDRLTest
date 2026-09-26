@@ -41,7 +41,7 @@ LimitState limitState(const sim::VehicleState& s, const EnvelopeLimits& e, const
 /// configuration completed from the clean one), what the aircraft's own law
 /// enforces, the plant's numbers the elevator limiter scales by. Limit if the
 /// profile has an envelope section, else Off (D3).
-Protection protectionFor(const VehicleProfile& profile) noexcept;
+Protection protectionFor(const VehicleProfile& profile, std::uint32_t features = kFeatureWingborne) noexcept;
 
 /// The limits in force: the flaps configuration's with the flaps commanded
 /// beyond the threshold, the gear's speed with the gear down (then written into `scratch`).

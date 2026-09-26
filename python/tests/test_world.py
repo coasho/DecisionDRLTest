@@ -209,7 +209,8 @@ class CapabilityTest(unittest.TestCase):
             self.assertIn(cid, caps)
         velocity = caps["fsim.flight.velocity"]
         self.assertEqual(velocity.level, Level.VELOCITY)
-        self.assertEqual([p.name for p in velocity.parameters], list(fsim.COMMAND_FIELDS[Level.VELOCITY]))
+        self.assertEqual([p.name for p in velocity.parameters], list(fsim.SETPOINT_FIELDS[Level.VELOCITY]))
+        self.assertEqual([p.supported for p in velocity.parameters], [True] * 4 + [False] * 2)  # a wing flies through the air
         self.assertTrue(caps["fsim.guidance.waypoints"].terminating)
         self.assertEqual(velocity.axis_groups, 1 | 2 | 4)  # lateral, pitch, thrust
         self.assertEqual(caps["fsim.flight.actuator"].axis_groups & 8, 8)  # any primary axis alone
@@ -376,6 +377,41 @@ class CapabilityTest(unittest.TestCase):
         acts[1].cancel()
         with self.assertRaises(fsim.Error):
             world.update(ids, rows)
+
+
+class RotorcraftTest(unittest.TestCase):
+    """The rotorcraft (docs/rotorcraft.md): their own controls' names, velocity over the ground, rows with the new fields."""
+
+    def test_quadrotor_through_the_capability_calls(self):
+        world = make_world(name="py-rotorcraft")
+        iris = world.create_vehicle("iris", type="jsbsim:iris", latitude_deg=37.62, longitude_deg=-122.38, altitude_msl_m=100.0,
+                                    airspeed_ms=0.0)
+        caps = {c.id: c for c in iris.capabilities()}
+        self.assertEqual([p.name for p in caps["fsim.flight.actuator"].parameters][:4], ["roll", "pitch", "yaw", "thrust"])
+        self.assertEqual(caps["fsim.flight.velocity"].axis_groups, 16 | 32 | 4)  # cyclic, yaw, thrust
+        self.assertIn("fsim.guidance.hover", caps)
+        self.assertNotIn("fsim.guidance.aerobatics", caps)
+        self.assertEqual([p.name for p in caps["fsim.flight.engines"].parameters], ["rotor_1", "rotor_2", "rotor_3", "rotor_4"])
+        self.assertEqual(iris.profile_section("hover")[0], 1)
+        with self.assertRaises(fsim.Rejected):  # a rotorcraft has no longitudinal acceleration of its own
+            iris.submit(Level.ACCELERATION, longitudinal_ms2=1.0)
+        go = iris.submit(Level.VELOCITY, north_ms=2.0, east_ms=0.0, heading_rad=0.0)
+        world.step(300)  # 10 s
+        s = iris.state
+        self.assertAlmostEqual(s.velocity_ned_ms[0], 2.0, delta=0.2)
+        self.assertAlmostEqual(s.altitude_msl_m, 100.0, delta=0.5)
+        # the batch path, a row with the rotorcraft's fields: east now
+        world.update(np.array([go.id], dtype=np.uint64), np.array([[HOLD, 0.0, 0.0, HOLD, 0.0, 2.0]]))
+        world.step(300)
+        self.assertAlmostEqual(iris.state.velocity_ned_ms[1], 2.0, delta=0.2)
+        self.assertAlmostEqual(iris.state.velocity_ned_ms[0], 0.0, delta=0.2)
+        # positional values: the legacy width or the full one
+        go.update(HOLD, 0.0, 0.0, HOLD, 0.0, 0.0)
+        with self.assertRaises(TypeError):
+            go.update(HOLD, 0.0, 0.0)
+        hover = iris.submit_behavior("hover")
+        world.step(150)
+        self.assertEqual(hover.state, fsim.ActivityState.ACTIVE)
 
 
 if __name__ == "__main__":

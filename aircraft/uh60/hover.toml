@@ -1,0 +1,23 @@
+# Written by hangar fly (2026-09-26 14:28) for uh60.toml: its hover, identified in the platform's own JSBSim
+# (docs/rotorcraft.md, 3.5) - the commands that hold it, the attitude it hovers at, and each axis's
+# response: the body acceleration per unit of the platform's command (the heave's vertical, m/s2;
+# signed, the platform's senses), its damping (1/s) and the actuator's lag (s). The build writes
+# it into the aircraft's hover section; the platform designs its rotorcraft loops from it. Delete
+# this file to fly those loops' own defaults.
+[reference]
+altitude_m = 100
+mass_kg = 7438.91
+
+[trim]   # the commands and the attitude of the hover
+throttle = 0.579932
+aileron = 0.028791
+elevator = -0.0448501
+rudder = 0.401595
+roll_attitude_deg = -2.22732
+pitch_attitude_deg = 4.78471
+
+[identified]   # per unit aileron, elevator, rudder (body rates p, q, r) and throttle (heave)
+roll = { power = 6.42879, damping = 3.32986, lag_s = 0.072 }
+pitch = { power = -1.72993, damping = 1.10767, lag_s = 0.072 }
+yaw = { power = -1.99907, damping = 0.46311, lag_s = 0.0380055 }
+heave = { power = 26.6672, damping = 0.626234, lag_s = 0.072 }

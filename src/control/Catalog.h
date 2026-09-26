@@ -20,6 +20,9 @@ namespace fsim::control {
 /// The fields of a command struct below Level::Behavior, in declaration
 /// order (the C ABI's order too): pointers into `c`, at most 8. Returns how many.
 std::size_t commandFields(Command& c, double* fields[8]) noexcept;
+/// How many of a level's fields it had before the rotorcraft's were appended
+/// (docs/rotorcraft.md, 3.4): what the C ABI's fixed-size calls still take.
+std::size_t legacyFieldCount(Level level) noexcept;
 
 // Support effectors (docs/control-architecture.md, 8.2), by SupportCommand's alternative.
 inline constexpr std::size_t kSupportKinds = std::variant_size_v<SupportCommand>;
@@ -40,16 +43,29 @@ class CapabilityCatalog {
 public:
     /// The five flight capabilities with the loops' own ranges, and every behaviour registered so far.
     CapabilityCatalog();
-    /// For an aircraft: what its adapter declares for its profile.
+    /// For an aircraft: what its adapter declares for its profile, and the
+    /// behaviours its features allow.
     CapabilityCatalog(const VehicleProfile& profile, const VehicleAdapter& adapter);
 
     /// Intersect a parameter's range with [lo, hi] (a NaN bound leaves that side).
     void narrow(std::string_view capability, std::string_view parameter, double lo, double hi);
+    /// Give a parameter the name the aircraft's own controls have (a
+    /// helicopter's aileron is its lateral cyclic); its place does not change.
+    void rename(std::string_view capability, std::string_view parameter, std::string name);
+    /// Mark a parameter as one this aircraft has nothing for (ParameterInfo::supported).
+    void unsupport(std::string_view capability, std::string_view parameter);
+    /// What the flight capabilities may own apart (AxisGroup bits): the
+    /// family's groups above the actuators, and each axis alone at them.
+    void setAxisGroups(std::uint8_t groups);
     /// Offer a support effector (an adapter's declare()), by SupportCommand's
-    /// alternative; for the engines' throttles, a parameter per engine (at most 4).
-    void addSupport(std::size_t alternative, int engines = 0);
+    /// alternative; for the engines' throttles, a parameter per engine (at
+    /// most 4), owning `axes` (thrust, or every primary axis where the
+    /// engines fly the aircraft).
+    void addSupport(std::size_t alternative, int engines = 0, AxisMask axes = 0);
     /// Offer fsim.envelope.protection: the aircraft has an envelope.
     void addProtection();
+    /// The Feature bits the behaviours offered were chosen by.
+    std::uint32_t features() const noexcept { return features_; }
 
     /// Add the behaviours registered since; true if there were any. Between steps only.
     bool refresh();
@@ -76,8 +92,11 @@ public:
     Reason check(std::size_t index, SupportCommand& command, RangePolicy range, std::uint16_t& flags) const noexcept;
 
 private:
+    explicit CapabilityCatalog(std::uint32_t features);
     void addBehaviors();
+    ParameterInfo* parameterOf(std::string_view capability, std::string_view parameter) noexcept;
 
+    std::uint32_t features_ = ~0u; ///< the aircraft's; without one, every behaviour is offered
     std::vector<CapabilityDescriptor> descriptors_;
     std::array<int, static_cast<std::size_t>(Level::Behavior)> byLevel_{};
     std::array<int, kSupportKinds> bySupport_{-1, -1, -1, -1, -1, -1};

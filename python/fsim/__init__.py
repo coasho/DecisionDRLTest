@@ -67,6 +67,8 @@ from ._state import (  # noqa: E402
 from .world import (  # noqa: E402
     COMMAND_DEFAULTS,
     COMMAND_FIELDS,
+    SETPOINT_DEFAULTS,
+    SETPOINT_FIELDS,
     SUPPORT_FIELDS,
     SUPPORT_KINDS,
     Activity,
@@ -137,6 +139,8 @@ def load_plugin(path):
 __all__ = [
     "COMMAND_DEFAULTS",
     "COMMAND_FIELDS",
+    "SETPOINT_DEFAULTS",
+    "SETPOINT_FIELDS",
     "ControlInputs",
     "Error",
     "HOLD",

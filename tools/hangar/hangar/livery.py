@@ -18,6 +18,12 @@ aircraft/<name>/paint.toml (optional; a plain light grey without it):
     windows_z = [1.95, 2.35]   # between these heights (m),
     windscreen_x = [2.3, 2.7]  # and the windscreen across the nose (seen from above
     windscreen_y = 0.95        # and ahead: its half width, m)
+    window_boxes = [[x0, x1, z0, z1], ...]   # more side windows (m): a helicopter's doors
+    front_boxes = [[half_width, z0, z1], ...] # windows seen from ahead (m), about the centre line;
+                               # [y0, y1, z0, z1]: a pair either side of it, y0 to y1 out
+    front = "forward"          # only faces looking forward are painted as seen from ahead; those
+                               # looking aft take the side's paint (default "both": ahead and astern
+                               # alike - a windscreen then shows on a tail cone too)
     canopy = "gold"            # the glass: clear | gold | dark
     panel_lines = 0.12         # how much darker the panel lines are (0: none)
     wear = 0.04                # a slight unevenness of the paint (0: none)
@@ -86,7 +92,10 @@ class Livery:
         r = np.full(len(normals), SIDE)
         r[(a[:, 2] >= a[:, 0]) & (a[:, 2] >= a[:, 1]) & (normals[:, 2] > 0)] = TOP
         r[(a[:, 2] >= a[:, 0]) & (a[:, 2] >= a[:, 1]) & (normals[:, 2] <= 0)] = BOTTOM
-        r[(a[:, 0] > a[:, 1]) & (a[:, 0] > a[:, 2])] = FRONT
+        ahead = (a[:, 0] > a[:, 1]) & (a[:, 0] > a[:, 2])
+        if self.spec.get("front", "both") == "forward":
+            ahead &= normals[:, 0] < 0.0  # the design frame's x is aft
+        r[ahead] = FRONT
         return r
 
     def uv(self, p, region):
@@ -196,6 +205,13 @@ class Livery:
                 else:
                     k = np.zeros(cell.shape[:2], bool)
                 cell[k] = _rgb(win)
+                if reg == SIDE:
+                    for x0, x1, z0, z1 in spec.get("window_boxes", []):
+                        cell[(X > x0) & (X < x1) & (Z > z0) & (Z < z1)] = _rgb(win)
+                elif reg == FRONT:
+                    for box in spec.get("front_boxes", []):
+                        y0, y1, z0, z1 = box if len(box) == 4 else (0.0, *box)
+                        cell[(np.abs(Y) > y0) & (np.abs(Y) < y1) & (Z > z0) & (Z < z1)] = _rgb(win)
             if lines > 0.0 and reg != FRONT:
                 cell[self._joints(reg, X, Y, Z)] *= (1.0 - lines)
             if wear > 0.0:

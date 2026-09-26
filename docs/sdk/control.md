@@ -52,9 +52,9 @@ output.
 | --- | --- |
 | `ActuatorCommand` | `aileron`, `elevator` (+nose down, JSBSim), `rudder` (-1..1), `throttle` (0..1), `flaps` (0..1), `gearDown` (hold), `brakeLeft`, `brakeRight` |
 | `AttitudeCommand` | `rollRad`, `pitchRad`, `headingRad` (hold; when set, roll follows the heading error within `maxBankRad`), `throttle` (hold), `airspeedMs` (hold; when set, throttle holds this speed) |
-| `AccelerationCommand` | `loadFactorG` (1), `rollRateRadS` (0), `longitudinalMs2` (hold), `throttle` (hold). Works through any attitude, so it flies loops and rolls |
-| `VelocityCommand` | `airspeedMs` (hold), `verticalSpeedMs` (0), `headingRad` (hold) or `turnRateRadS` (hold) |
-| `PositionCommand` | `latitudeRad`, `longitudeRad`, `altitudeMslM`, `airspeedMs` (hold), `captureRadiusM` (200) |
+| `AccelerationCommand` | `loadFactorG` (1), `rollRateRadS` (0), `longitudinalMs2` (hold), `throttle` (hold). Works through any attitude, so it flies loops and rolls. A rotorcraft's also `pitchRateRadS`, `yawRateRadS` (hold): body rates with the collective's load factor |
+| `VelocityCommand` | `airspeedMs` (hold), `verticalSpeedMs` (0), `headingRad` (hold) or `turnRateRadS` (hold). A rotorcraft's also `northMs`, `eastMs` (hold): a velocity over the ground, the heading free - hovering, sideways |
+| `PositionCommand` | `latitudeRad`, `longitudeRad`, `altitudeMslM`, `airspeedMs` (hold), `captureRadiusM` (200). A rotorcraft's also `headingRad` (hold): it stops at the point, facing it |
 | `BehaviorCommand` | `id`, `target` (vehicle id), `params` (name -> number), `points` (route) |
 
 ## Built-in behaviours
@@ -68,6 +68,7 @@ output.
 | `evade` | `target` | `altitude_delta_m` (-300), `airspeed_ms` (current) |
 | `formation` | `target` (leader) | `ahead_m` (-100), `right_m` (60), `below_m` (0), `closure_gain` (0.1) |
 | `aerobatics` | - | `manoeuvre` (0 aileron roll, 1 loop, 2 Immelmann, 3 split-S), `load_factor_g` (3.5), `roll_rate_rad_s` (1.5); `finished()` when done, then holds the entry altitude/heading |
+| `hover` | - | `lat_deg`, `lon_deg`, `altitude_m`, `heading_deg` (all: current at start). Offered to aircraft that can hover ([rotorcraft](#rotorcraft)) |
 
 Behaviours that need another vehicle read it through the world view
 (`ctx.world->vehicleState(id)`) as the world step began, whichever worker
@@ -254,6 +255,10 @@ if (e[Limit::AlphaMax].exceededUpdates) penalty += e[Limit::AlphaMax].worstExces
 | Acceleration | `pid_acceleration` | actuators | `load_factor.kp/ki/kd`, `load_factor.integral_limit`, `load_factor.feedforward`, `load_factor.path_hold`, `roll_rate.kp/ki`, `roll_rate.integral_limit`, `roll_rate.feedforward`, `pitch.trim`, `pitch.trim_lift`, `longitudinal.kp/ki`, `longitudinal.feedforward`, `rudder.beta_gain`, `throttle.feedforward`; the schedule as above with `load_factor.*` and `roll_rate.*` exponents |
 | Velocity | `pid_velocity` | attitude | `vertical_speed.kp/ki`, `vertical_speed.integral_limit`, `vertical_speed.feedforward`, `vertical_speed.command_lag`, `vertical_speed.alpha_zero_lift`, `pitch.min`, `pitch.max`, `max_bank`, `schedule.tas_ms` |
 | Position | `pid_position` | velocity | `altitude.gain`, `max_vertical_speed` |
+| Acceleration | `rotor_allocation` | actuators | per axis `roll.*`, `pitch.*`, `yaw.*`: `power`, `damping`, `bandwidth`, `ki`, `trim`; `throttle.trim`, `heave.power`, `load_factor.ki` |
+| Attitude | `rotor_attitude` | acceleration | `roll.gain`, `pitch.gain`, `yaw.gain`, `roll.max_rate`, `pitch.max_rate`, `yaw.max_rate` |
+| Velocity | `rotor_velocity` | attitude | `horizontal.kp/ki`, `max_tilt`, `vertical.kp/ki`, `throttle.trim`, `heave.power`, `heave.damping`, `roll.trim`, `pitch.trim` |
+| Position | `rotor_position` | velocity | `horizontal.gain`, `max_speed`, `deceleration`, `velocity.lag_s`, `altitude.gain` |
 | Actuator | `actuator` | actuators | - |
 
 The defaults fly the stock JSBSim c172x, and every new parameter's default
@@ -350,11 +355,35 @@ const Command* d = stack.derived(Level::Attitude);   // what the cascade produce
 for telemetry, for observations (e.g. the attitude your velocity policy
 implied), or to debug a behaviour.
 
+## Rotorcraft
+
+Helicopters and multirotors fly every level ([rotorcraft.md](../rotorcraft.md),
+ADR-27). Their families (`ControlFamily::Helicopter`, `Multirotor`) say what
+the four channels move: a helicopter's lateral and longitudinal cyclic,
+pedals and collective; a multirotor's roll, pitch, yaw and thrust into its
+mixer, `throttle[i]` each motor's thrust. The actuator capability's parameters
+take those names (`lateral_cyclic`, ..., `collective`). A rotorcraft's
+authority groups are the cyclic (roll with pitch), the yaw and the thrust
+(`fsim_capability_info.axis_groups` 16, 32, 4). A multirotor's
+`fsim.flight.engines` owns all four axes: user code sets each motor's thrust
+directly (`submit_support("engines", t1, t2, t3, t4)` in Python), and the
+viewer turns each propeller at the rotor speed that gives.
+
+A field an aircraft has nothing for is *unsupported* (`ParameterInfo::supported`
+false: a wing's `pitchRateRadS`, a helicopter's flaps): a NEW or UPDATE that
+sets it other than to hold or its default is refused `invalid_parameter`.
+The vehicle default's hold keeps a rotorcraft's heading with the yaw, its
+height with the thrust and its velocity over the ground with the cyclic. The
+rotorcraft loops (`rotor_*` above) are designed from the profile's `hover`
+section. A rotorcraft spawned level lurches until its loops have tilted it to
+its hover attitude; spawn it at `profile_value("hover/pitch_attitude_deg")` and
+`hover/roll_attitude_deg` to start in trim.
+
 ## The aircraft's profile
 
 `#include <fsim/VehicleProfile.h>`. What the platform knows about an aircraft
 is its *profile* ([ADR-26](../control-architecture.md), section 7). It is
-seven small sections, each with its own version and provenance (default,
+eight small sections, each with its own version and provenance (default,
 hangar, identified, user, derived):
 
 | Section | What it holds |
@@ -366,6 +395,7 @@ hangar, identified, user, derived):
 | `plant` | the identified responses at a reference condition |
 | `performance` | stall speeds, maximum speed, ceiling |
 | `control` | the gains above |
+| `hover` | a rotorcraft's plant in the hover: each axis's acceleration per unit command, its damping and lag, the heave per unit thrust, the hover's commands and attitude (hangar identifies it) |
 
 An aircraft carries its profile as JSBSim properties `fsim/<section>/<field>`
 in its file; the `fsim/control` gains were the first. A section the aircraft

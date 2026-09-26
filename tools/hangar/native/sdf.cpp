@@ -491,6 +491,64 @@ private:
     int mat_;
 };
 
+/// A flat plate: a closed outline - points [u, v] in the plane through origin spanned by
+/// axes [u, v] - given a thickness across that plane, its edges rounded by round: a circuit
+/// board, a frame's arms, drawn from a plan view.
+class Plate final : public Node {
+public:
+    explicit Plate(const Json& j)
+        : o_(vec(j, "origin")), half_(0.5 * j.number("thickness", 0.0)), round_(j.number("round", 0.0)),
+          mirror_(j.boolean("mirror", false)), mat_(materialOf(j)) {
+        const Json& axes = j.child("axes");
+        if (axes.isArray() && axes.asArray().size() == 2) {
+            u_ = normalize(vec(axes.asArray()[0]));
+            v_ = normalize(vec(axes.asArray()[1]));
+        }
+        n_ = normalize(cross(u_, v_));
+        const Json& pts = j.child("outline");
+        if (!pts.isArray() || pts.asArray().size() < 3) fail("a plate needs an outline of three points or more");
+        for (const auto& q : pts.asArray()) {
+            if (!q.isArray() || q.asArray().size() != 2) fail("a plate's outline points are [u, v]");
+            pu_.push_back(q.asArray()[0].asNumber());
+            pv_.push_back(q.asArray()[1].asNumber());
+        }
+        if (half_ <= 0.0) fail("a plate needs a thickness");
+        round_ = clamp(round_, 0.0, half_);
+        for (std::size_t i = 0; i < pu_.size(); ++i)
+            for (const double s : {-half_, half_}) {
+                const V3 q = o_ + u_ * pu_[i] + v_ * pv_[i] + n_ * s;
+                box.add(q);
+                if (mirror_) box.add({q.x, -q.y, q.z});
+            }
+    }
+    Sample eval(V3 p) const override {
+        if (mirror_) p.y = std::fabs(p.y);
+        const V3 rel = p - o_;
+        const double X = dot(rel, u_), Y = dot(rel, v_), Z = dot(rel, n_);
+        // the outline's signed distance in its plane: the nearest edge, inside by the crossing number
+        double best = std::numeric_limits<double>::max();
+        bool inside = false;
+        const std::size_t n = pu_.size();
+        for (std::size_t i = 0, k = n - 1; i < n; k = i++) {
+            best = std::min(best, segment2(X, Y, pu_[k], pv_[k], pu_[i], pv_[i]));
+            if ((pv_[i] > Y) != (pv_[k] > Y) && X < (pu_[k] - pu_[i]) * (Y - pv_[i]) / (pv_[k] - pv_[i]) + pu_[i]) inside = !inside;
+        }
+        // extruded, then rounded: the outline and the thickness drawn in by round, the result grown by it
+        const double d2 = (inside ? -1.0 : 1.0) * std::sqrt(best) + round_;
+        const double h = std::fabs(Z) - (half_ - round_);
+        const double out = std::hypot(std::max(d2, 0.0), std::max(h, 0.0));
+        const double in = std::min(std::max(d2, h), 0.0);
+        return {out + in - round_, mat_};
+    }
+
+private:
+    V3 o_, u_{1.0, 0.0, 0.0}, v_{0.0, 1.0, 0.0}, n_{0.0, 0.0, 1.0};
+    std::vector<double> pu_, pv_;
+    double half_, round_;
+    bool mirror_;
+    int mat_;
+};
+
 class Ellipsoid final : public Node {
 public:
     explicit Ellipsoid(const Json& j)
@@ -764,6 +822,7 @@ NodePtr build(const Json& j, const Scene& scene) {
     if (p == "capsule") return std::make_unique<Capsule>(j);
     if (p == "cylinder") return std::make_unique<Cylinder>(j);
     if (p == "box") return std::make_unique<BoxPrim>(j);
+    if (p == "plate") return std::make_unique<Plate>(j);
     if (p == "ellipsoid") return std::make_unique<Ellipsoid>(j);
     if (p == "torus") return std::make_unique<Torus>(j);
     fail("unknown primitive '" + p + "'");

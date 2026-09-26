@@ -25,10 +25,12 @@ def _val(c):
     return "%.4g" % v
 
 
-def write(design):
+def write(design, titles=STAGE_TITLES, description=None):
+    """`titles`: the design's stages, in order, and their headings; `description` its line under
+    the name (a fixed-wing design's own, by default)."""
     d = design
     stages = {}
-    for st in STAGE_TITLES:
+    for st in titles:
         p = os.path.join(d.out, st + ".json")
         if os.path.isfile(p):
             with open(p, encoding="utf-8") as f:
@@ -39,7 +41,7 @@ def write(design):
             if c["status"] in counts:
                 counts[c["status"]] += 1
     parts = []
-    for st, title in STAGE_TITLES.items():
+    for st, title in titles.items():
         s = stages.get(st)
         if not s:
             continue
@@ -55,7 +57,7 @@ def write(design):
                      "<th>note</th></tr>%s</table>%s</section>" % (title, s.get("time", ""), "".join(rows), imgs))
     head = ("<h1>%s</h1><p>%s</p><p class=summary><span style='color:#2f855a'>%d pass</span> &middot; "
             "<span style='color:#b7791f'>%d warn</span> &middot; <span style='color:#c53030'>%d fail</span></p>"
-            % (html.escape(d.name), html.escape(d.aircraft.description), counts["pass"], counts["warn"], counts["fail"]))
+            % (html.escape(d.name), html.escape(d.aircraft.description if description is None else description), counts["pass"], counts["warn"], counts["fail"]))
     page = """<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>%s - hangar</title><style>
 :root{--bg:#fff;--fg:#1a202c;--mute:#718096;--line:#e2e8f0}

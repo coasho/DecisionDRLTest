@@ -104,6 +104,18 @@ code reads from `state()`, so what you see is what the simulation did:
   its stops.
 - `fsim:propeller:<engine>` turns about its x axis at that engine's
   `engineRpm`; it stops with the engine and holds still while the clock does.
+  A rotor's speed comes from the simulation: a helicopter's rotors report
+  their own, a multirotor's each motor's rotor as its flight control system
+  spins it from the commands (`propulsion/engine[i]/rotor-rpm`) - whatever
+  drives them, a policy's per-motor thrusts included.
+- `fsim:disc:<engine>:<rpm>` and `fsim:blades:<engine>:<rpm>` are a fast
+  rotor's blur. Sampled at the frame rate, blades turning past a few hundred
+  rpm seem to stand still or creep backwards, where the eye sees a disc: so a
+  disc node (inside the rotor's `fsim:propeller` node, a translucent annulus
+  in its y-z plane) is shown while the engine turns at `rpm` or more, and the
+  blades node beside it below that; each other time shrunk to nothing, with 5 %
+  of hysteresis. hangar puts the threshold where a blade moves a third of the
+  way to the next between frames at 60 Hz.
 - `fsim:nozzle:<engine>:<deg>` turns a nozzle petal open by `deg` times the
   engine's `nozzlePosition` (JSBSim's turbine: shut at military power, open at
   idle and with the afterburner lit).
@@ -185,7 +197,10 @@ and no vapour over the wings.
 `flightsim-viewer.exe --screenshot shot.png [--screenshot-after 5]` saves the
 window as PNG after the given number of seconds and exits (any mode: mirror,
 `--demo`, `--replay`); the copy is taken from the swapchain, so it works on a
-locked desktop and in scripts. `--view lat,lon,alt,dist[,az,el]` starts with
+locked desktop and in scripts. `--screenshot-frames 8 --screenshot-every 0.034`
+saves a sequence instead - `shot_000.png`, `shot_001.png`, ... that far apart -
+to see what moves: a rotor turning at the rpm user code set, a control surface
+following its command. `--view lat,lon,alt,dist[,az,el]` starts with
 the free camera looking at a point from `dist` metres (whole-Earth views:
 `--view 20,-30,0,30000000,180,80`); above the atmosphere the sky fades to
 black. `--camera chase --chase-distance 15` starts right behind the selected

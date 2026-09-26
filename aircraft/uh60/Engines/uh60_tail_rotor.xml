@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<rotor name="uh60 tail rotor">
+  <diameter unit="FT"> 11 </diameter>
+  <numblades> 4 </numblades>
+  <gearratio> 0.21666387 </gearratio>
+  <nominalrpm> 1190 </nominalrpm>
+  <minrpm> 50 </minrpm>
+  <maxrpm> 1547 </maxrpm>
+  <chord unit="FT"> 0.80994186 </chord>
+  <liftcurveslope Xunit="1/RAD"> 5.73 </liftcurveslope>
+  <twist unit="DEG"> -18 </twist>
+  <hingeoffset unit="FT"> 0.0 </hingeoffset>
+  <flappingmoment unit="SLUG*FT2"> 2.988066 </flappingmoment>
+  <polarmoment unit="SLUG*FT2"> 11.952264 </polarmoment>
+  <inflowlag> 0.1 </inflowlag>
+  <tiplossfactor> 1 </tiplossfactor>
+  <controlmap> TAIL </controlmap>
+  <ExternalRPM> 0 </ExternalRPM>
+  <model> heffley </model>
+</rotor>

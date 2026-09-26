@@ -20,7 +20,10 @@ GAP = 0.012  # m: between a control surface and what it is cut from
 
 
 def cell_size(aircraft):
-    """The mesher's grid: some 1,500 cells along the aircraft."""
+    """The mesher's grid: some 1,500 cells along the aircraft (the design's own, when it
+    sets one: Aircraft.shape)."""
+    if getattr(aircraft, "cell", None):
+        return float(aircraft.cell)
     lo, hi = aircraft.extent()
     return float(np.clip(np.max(hi - lo) / 1500.0, 0.002, 0.02))
 
@@ -505,6 +508,9 @@ def airframe(aircraft, cell=None, error=None, gear=None, flaps=None):
         solid = node if solid is None else union([solid, node], fillet(s, structure))
     for st in aircraft.struts:
         solid = union([solid, strut(st)], 0.03)
+    for p in getattr(aircraft, "parts", []):  # a shape's own primitives (Aircraft.shape: a rotorcraft's mast)
+        q = dict(p)
+        solid = union([solid, q], q.pop("fillet", 0.02))
     jets, cavities = nozzles(aircraft)
     cavities += [duct for _, duct in intakes]
     if jets:

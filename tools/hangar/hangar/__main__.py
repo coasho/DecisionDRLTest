@@ -61,11 +61,20 @@ def main(argv=None):
     p.add_argument("--force", action="store_true", help="rebuild the aerodynamic tables even if cached")
     p.add_argument("--quick", action="store_true", help="coarse tables and short flight tests: a first look")
     a = p.parse_args(argv)
+    path = pipeline.find_design(a.design)
+    from . import rotorcraft
+    if rotorcraft.kind_of(path):
+        # a helicopter or a multirotor: the rotorcraft pipeline (hangar/rotorcraft)
+        stages = list(rotorcraft.STAGES) if a.stages == ["all"] else a.stages
+        _, done = rotorcraft.run(path, stages)
+        if "report" in done:
+            print("report: %s" % done["report"]["path"])
+        fails = sum(1 for r in done.values() if isinstance(r, dict) for c in r.get("checks", []) if c["status"] == "fail")
+        return 1 if fails else 0
     stages = list(pipeline.DEFAULT) if a.stages == ["all"] else a.stages
     for s in stages:
         if s not in pipeline.STAGES:
             raise SystemExit("unknown stage %r (stages: %s)" % (s, " ".join(pipeline.STAGES)))
-    path = pipeline.find_design(a.design)
     d, done = pipeline.run(path, stages, reference=a.reference, force=a.force, quick=a.quick)
     if "report" in done:
         print("report: %s" % done["report"]["path"])

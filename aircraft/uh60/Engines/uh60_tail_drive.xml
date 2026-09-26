@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<!-- carries the tail rotor, which turns with the main rotor; the flight control system takes its power from the engine -->
+<electric_engine name="uh60 tail rotor drive">
+  <power unit="WATTS"> 0 </power>
+</electric_engine>

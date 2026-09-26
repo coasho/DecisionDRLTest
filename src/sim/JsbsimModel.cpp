@@ -430,6 +430,12 @@ void JsbsimModel::cacheCommandNodes() {
     for (std::size_t i = 0; i < engines; ++i) {
         throttleCmd_.push_back(PropertyHandle(pm->GetNode("fcs/throttle-cmd-norm", static_cast<int>(i), true)));
     }
+    rotorRpm_.clear();
+    for (std::size_t i = 0; i < std::min<std::size_t>(engines, VehicleState::kMaxEngines); ++i) {
+        const auto thruster = fdm_->GetPropulsion()->GetEngine(static_cast<unsigned>(i))->GetThruster();
+        const bool ownSpeed = thruster && thruster->GetType() != JSBSim::FGThruster::ttDirect;
+        rotorRpm_.push_back(ownSpeed ? PropertyHandle() : PropertyHandle(pm->GetNode("propulsion/engine[" + std::to_string(i) + "]/rotor-rpm", false)));
+    }
 }
 
 void JsbsimModel::step(const ControlInputs& in) {
@@ -542,7 +548,9 @@ void JsbsimModel::state(VehicleState& out) const {
         out.throttlePosition[i] = fcs->GetThrottlePos(static_cast<int>(i));
         const auto engine = propulsion->GetEngine(static_cast<unsigned>(i));
         out.thrustN[i] = poundsForceToNewtons(engine->GetThrust());
-        out.engineRpm[i] = engine->GetThruster() ? engine->GetThruster()->GetRPM() : 0.0;
+        out.engineRpm[i] = i < rotorRpm_.size() && rotorRpm_[i].valid() ? rotorRpm_[i].get()
+                           : engine->GetThruster()                      ? engine->GetThruster()->GetRPM()
+                                                                        : 0.0;
         out.engineN2[i] = out.afterburner[i] = out.nozzlePosition[i] = 0.0;
         if (engine->GetType() == JSBSim::FGEngine::etTurbine) {
             const auto* turbine = static_cast<const JSBSim::FGTurbine*>(engine.get());

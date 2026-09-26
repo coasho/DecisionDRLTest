@@ -10,7 +10,9 @@ namespace fsim::world {
 namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDeg = kPi / 180.0;
-constexpr double kMinDistance = 6.0;          // following a vehicle
+constexpr double kMinDistance = 6.0;          // following a full-size vehicle ...
+constexpr double kMinDistanceRadii = 1.5;     // ... or a smaller one, this many times its radius ...
+constexpr double kMinDistanceSmallest = 0.05; // ... down to this
 constexpr double kMinDistanceDetached = 25.0; // orbiting a ground point: stay clear of the drawn mesh
 constexpr double kMaxDistance = 5.0e7;        // 50,000 km: the whole Earth with room around it
 constexpr double kMinElevation = -60.0 * kDeg; // well below the focus (terrain collision takes over)
@@ -69,12 +71,18 @@ void CameraController::setFreeView(double latitudeDeg, double longitudeDeg, doub
 }
 
 void CameraController::setChaseOffset(double distanceM, double elevationDeg, double azimuthDeg) {
-    defaultDistance_ = distance_ = targetDistance_ = std::clamp(distanceM, kMinDistance, kMaxDistance);
+    // update() holds it off the followed vehicle by that vehicle's size
+    defaultDistance_ = distance_ = targetDistance_ = std::clamp(distanceM, kMinDistanceSmallest, kMaxDistance);
     defaultElevation_ = elevation_ = std::clamp(elevationDeg * kDeg, kMinElevation, kMaxElevation);
     defaultAzimuth_ = azimuth_ = wrapAngle(azimuthDeg * kDeg);
 }
 
-void CameraController::zoom(double factor) noexcept { targetDistance_ = std::clamp(targetDistance_ * factor, kMinDistance, kMaxDistance); }
+void CameraController::zoom(double factor) noexcept { targetDistance_ = std::clamp(targetDistance_ * factor, minDistance(), kMaxDistance); }
+
+double CameraController::minDistance() const noexcept {
+    if (detached()) return kMinDistanceDetached;
+    return targetRadius_ > 0.0 ? std::clamp(kMinDistanceRadii * targetRadius_, kMinDistanceSmallest, kMinDistance) : kMinDistance;
+}
 
 void CameraController::setDetachedElevation(double elevationDeg) noexcept {
     detachedElevation_ = std::clamp(elevationDeg * kDeg, kMinElevation, kMaxElevation);
@@ -341,8 +349,7 @@ void CameraController::followZoomTarget(double fromDistance, double toDistance) 
 void CameraController::apply(vsg::ScrollWheelEvent& e) {
     if (e.handled) return;
     const double from = targetDistance_;
-    targetDistance_ = std::clamp(targetDistance_ * std::pow(kZoomPerNotch, static_cast<double>(e.delta.y)),
-                                 detached() ? kMinDistanceDetached : kMinDistance, kMaxDistance);
+    targetDistance_ = std::clamp(targetDistance_ * std::pow(kZoomPerNotch, static_cast<double>(e.delta.y)), minDistance(), kMaxDistance);
     zoomTowardsCursor(from, targetDistance_);
     e.handled = true;
 }
@@ -360,6 +367,10 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
         }
     }
     const vsg::dvec3 pos = followVehicle ? positionEcef(*target) : focus_;
+    if (followVehicle) { // the followed vehicle (and so its size) may have changed
+        targetDistance_ = std::max(targetDistance_, minDistance());
+        distance_ = std::max(distance_, minDistance());
+    }
 
     // Smooth zoom towards the wheel/drag target.
     if (distance_ != targetDistance_) {
@@ -440,7 +451,9 @@ void CameraController::update(const sim::VehicleState* target, double dtSeconds)
     // drawn.
     if (ground_ && distance_ < 2.0e5) {
         const double focusAltitude = ellipsoid_->convertECEFToLatLongAltitude(orbitCentre).z;
-        const double clearance = std::min(kEyeClearanceMaxM, kEyeClearanceM + kEyeClearanceRatio * distance_);
+        // (a vehicle smaller than the close-range clearance is followed that much closer to the ground)
+        const double close = followVehicle && targetRadius_ > 0.0 ? std::clamp(targetRadius_, kMinDistanceSmallest, kEyeClearanceM) : kEyeClearanceM;
+        const double clearance = std::min(kEyeClearanceMaxM, close + kEyeClearanceRatio * distance_);
         // Detached, the focus is on the ground: never look up at it from below.
         double minElevation = followVehicle ? -kPi / 2.0 : std::asin(std::clamp(clearance / distance_, -1.0, 1.0));
 

@@ -1,0 +1,270 @@
+# Bitcraze Crazyflie 2.0 - the identified nano quadrotor:
+#   LN   C. Luis, J. Le Ny, "Design of a Trajectory Tracking Controller for a Nanoquadcopter",
+#        arXiv:1608.05786, 2016 - table 2.3.1 (after J. Foerster's identification, "System
+#        Identification of the Crazyflie 2.0 Nano Quadrocopter", ETH Zurich, 2015): mass, arm,
+#        rotor radius, inertia, C_T, C_D; eq. 2.6.1: rpm = 0.2685 PWM + 4070.3.
+#   KB   J. E. Kooi, R. Babuska, "Inclined Quadrotor Landing using Deep Reinforcement Learning",
+#        arXiv:2103.09043, 2021 - eq. 5: a motor's thrust answers its command as 1/(1 - 0.9695404 z^-1)
+#        at 500 Hz (Foerster's identification): a lag of 64.7 ms.
+#   GPD  gym-pybullet-drones (Panerati et al., MIT licence), assets/cf2x.urdf - the rotor drag and
+#        the ground effect, the rotors' layout and turning senses.
+#   DS   Bitcraze, "Datasheet Crazyflie 2.1", rev. 3 - 27 g (the 2.1: 29 g).
+# SI units. Frame: x forward, y left, z up (the sources'), from the c.g.
+
+[aircraft]
+name = "cf2"
+kind = "multirotor"
+category = "multirotor"
+description = "Bitcraze Crazyflie 2.0 - 27 g quadrotor, brushed coreless motors (Foerster 2015)"
+
+[mass]
+mass_kg = 0.027                    # LN, DS
+ixx = 1.395e-5                     # kg m2, LN
+iyy = 1.436e-5
+izz = 2.173e-5
+
+[rotors]
+arm_m = 0.03973                    # centre to rotor, LN (d); the rotors sit on the diagonals
+radius_m = 0.0231348               # LN
+height_m = 0.0
+# FLU corners (x, y signs) and turning sense seen from above: GPD's cf2x (0 and 2 counter-clockwise)
+layout = [["front right", 1, -1, "ccw"], ["rear right", -1, -1, "cw"], ["rear left", -1, 1, "ccw"], ["front left", 1, 1, "cw"]]
+thrust_n_per_rpm2 = 3.1582e-10     # C_T, LN eq. 2.3.4
+torque_nm_per_rpm2 = 7.9379e-12    # C_D, LN eq. 2.3.7
+max_rpm = 21666.0                  # LN eq. 2.6.1 at PWM 65535
+lag_up_s = 0.0647                  # KB eq. 5: -0.002 s / ln(0.9695404)
+lag_down_s = 0.0647
+drag_xy = 9.1785e-7                # GPD: F = -k (sum of the rotors' rad/s) v
+drag_z = 10.311e-7
+ground_effect = 11.36859           # GPD: thrust gain k (r / 4h)^2 per rotor
+
+[ground]
+# it stands on its motor mounts: the feet under the rotors, the motors' length below the board
+leg_height_m = 0.018
+leg_spread = 1.0
+top_m = 0.001              # the battery's top: the flight model's top contact, besides the rotors' hubs
+spring_n_per_m = 60.0
+damping_n_per_mps = 1.2
+
+[envelope]
+# the bounds of the platform's commands: design choices
+bank_max_deg = 30.0
+pitch_min_deg = -30.0
+pitch_max_deg = 30.0
+roll_rate_max_deg_s = 400.0
+
+[targets]
+hover_rpm = 14468.0                # GPD's hover rpm (its kf 3.16e-10)
+thrust_to_weight = 2.25            # GPD
+
+[model]
+# What is drawn: the rotors from the flight model's own rotor data ([rotors]), their look below;
+# the airframe from Bitcraze's drawing of the board from the top (the getting-started guide's
+# "frontCF.png": 9.11 px/mm by its expansion headers' 2 mm pitch; its arms reach 40.0 mm from the
+# centre, LN's 39.73 mm arm - the rotors' axes - at the motor mounts) and its product photograph
+# for the heights: the props 6 mm above the board, the motor mounts' feet 12 mm below it (the
+# flight model's legs, 18 mm under the rotors); Bitcraze's 92 x 92 x 29 mm spans the mounts
+cell_m = 0.00015                   # the mesher's cell: 0.15 mm
+
+[model.propeller]
+blades = 2
+chord_m = 0.0065                   # the widest, at mid-span; the plan below as fractions of it
+chords = [[0.12, 0.55], [0.3, 1.0], [0.55, 1.1], [0.8, 0.95], [0.95, 0.6], [1.0, 0.35]]
+airfoil = "naca4404"               # a thin cambered moulding
+pitch_m = 0.017                    # Bitcraze's 47-17 propellers
+root = 0.14
+hub = "propeller"
+hub_radius = 0.0022
+colour = "#161616"
+tip_fraction = 0.0
+
+# the board: 1 mm thick, black
+[[part]]
+name = "board"
+prim = "plate"
+material = "dark"
+origin = [0.0, 0.0, -0.0065]
+axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+outline = [[0.02929, -0.02719], [0.02918, -0.02757], [0.02763, -0.02912], [0.02713, -0.02923], [0.01950, -0.02166], [0.01726, -0.01968], [0.01379, -0.01726], [0.01093, -0.01583], [0.00709, -0.01453], [0.00461, -0.01398], [0.00270, -0.01375], [0.00270, -0.01387], [0.00248, -0.01386], [0.00204, -0.01431], [0.00193, -0.01541], [0.00182, -0.01540], [0.00179, -0.01574], [0.00126, -0.01652], [0.00105, -0.01651], [0.00091, -0.01674], [0.00062, -0.01673], [0.00059, -0.01684], [-0.00059, -0.01684], [-0.00083, -0.01661], [-0.00102, -0.01662], [-0.00158, -0.01607], [-0.00180, -0.01552], [-0.00193, -0.01442], [-0.00239, -0.01388], [-0.00270, -0.01375], [-0.00676, -0.01442], [-0.00981, -0.01540], [-0.01135, -0.01605], [-0.01500, -0.01804], [-0.01709, -0.01957], [-0.01884, -0.02110], [-0.02692, -0.02912], [-0.02738, -0.02923], [-0.02763, -0.02912], [-0.02906, -0.02770], [-0.02918, -0.02721], [-0.02906, -0.02686], [-0.02039, -0.01812], [-0.01929, -0.01677], [-0.01742, -0.01405], [-0.01600, -0.01131], [-0.01534, -0.00973], [-0.01540, -0.00930], [-0.01514, -0.00857], [-0.01524, -0.00849], [-0.01519, -0.00786], [-0.01485, -0.00761], [-0.01464, -0.00675], [-0.01436, -0.00658], [-0.01382, -0.00370], [-0.01383, -0.00297], [-0.01404, -0.00286], [-0.01403, -0.00266], [-0.01437, -0.00240], [-0.01438, -0.00221], [-0.01459, -0.00199], [-0.01481, -0.00198], [-0.01502, -0.00168], [-0.01569, -0.00134], [-0.01657, -0.00112], [-0.01831, -0.00108], [-0.01866, -0.00073], [-0.01866, 0.00073], [-0.01854, 0.00097], [-0.01831, 0.00108], [-0.01657, 0.00112], [-0.01569, 0.00134], [-0.01507, 0.00165], [-0.01481, 0.00198], [-0.01459, 0.00199], [-0.01437, 0.00240], [-0.01403, 0.00266], [-0.01404, 0.00286], [-0.01383, 0.00297], [-0.01382, 0.00370], [-0.01436, 0.00658], [-0.01464, 0.00675], [-0.01485, 0.00761], [-0.01519, 0.00786], [-0.01524, 0.00849], [-0.01514, 0.00857], [-0.01540, 0.00930], [-0.01536, 0.00978], [-0.01688, 0.01307], [-0.01821, 0.01528], [-0.02039, 0.01812], [-0.02906, 0.02686], [-0.02918, 0.02709], [-0.02906, 0.02770], [-0.02738, 0.02923], [-0.02692, 0.02912], [-0.01884, 0.02110], [-0.01709, 0.01957], [-0.01500, 0.01804], [-0.01135, 0.01605], [-0.00981, 0.01540], [-0.00676, 0.01442], [-0.00627, 0.01443], [-0.00461, 0.01398], [-0.00317, 0.01388], [-0.00311, 0.01376], [-0.00270, 0.01375], [-0.00206, 0.01420], [-0.00182, 0.01478], [-0.00170, 0.01586], [-0.00102, 0.01662], [-0.00083, 0.01661], [-0.00059, 0.01684], [0.00059, 0.01684], [0.00062, 0.01673], [0.00091, 0.01674], [0.00105, 0.01651], [0.00126, 0.01652], [0.00179, 0.01574], [0.00182, 0.01540], [0.00193, 0.01541], [0.00204, 0.01431], [0.00248, 0.01386], [0.00270, 0.01387], [0.00270, 0.01375], [0.00461, 0.01398], [0.00709, 0.01453], [0.01093, 0.01583], [0.01379, 0.01726], [0.01726, 0.01968], [0.01950, 0.02166], [0.02713, 0.02923], [0.02763, 0.02912], [0.02906, 0.02770], [0.02928, 0.02730], [0.02917, 0.02697], [0.02106, 0.01879], [0.01962, 0.01713], [0.01809, 0.01504], [0.01591, 0.01098], [0.01556, 0.00991], [0.01579, 0.00880], [0.01613, 0.00826], [0.01656, 0.00803], [0.01667, 0.00782], [0.01745, 0.00759], [0.01745, -0.00759], [0.01667, -0.00782], [0.01656, -0.00803], [0.01624, -0.00814], [0.01568, -0.00905], [0.01557, -0.01011], [0.01754, -0.01414], [0.01962, -0.01713], [0.02106, -0.01879]]
+thickness = 0.001
+round = 0.00015
+fillet = 0.0002
+
+# the expansion headers either side (two rows of ten, 2 mm pitch, 22 mm apart), the battery between
+[[part]]
+name = "left header"
+prim = "box"
+material = "dark"
+centre = [0.0, -0.0110, -0.0042]
+half = [0.0102, 0.0013, 0.0018]
+round = 0.0002
+fillet = 0.0002
+[[part]]
+name = "right header"
+prim = "box"
+material = "dark"
+centre = [0.0, 0.0110, -0.0042]
+half = [0.0102, 0.0013, 0.0018]
+round = 0.0002
+fillet = 0.0002
+
+# the 240 mAh LiPo on the board (30 x 18 x 7 mm)
+[[body]]
+name = "battery"
+kind = "pod"
+stations = [
+  { x = -0.0150, w = 0.0160, top = 0.0005, bottom = -0.0055, n = 5.0 },
+  { x = -0.0144, w = 0.0180, top = 0.0010, bottom = -0.0060, n = 6.0 },
+  { x = 0.0144, w = 0.0180, top = 0.0010, bottom = -0.0060, n = 6.0 },
+  { x = 0.0150, w = 0.0160, top = 0.0005, bottom = -0.0055, n = 5.0 },
+]
+
+# each motor (7 x 16 mm, coreless) in its clear plastic mount, clipped on the arm's end; the
+# mounts' feet are what it stands on
+[[part]]
+name = "front right motor mount"
+prim = "cylinder"
+colour = "#ecece8"
+a = [-0.02809, 0.02809, -0.0180]
+b = [-0.02809, 0.02809, -0.0055]
+r = 0.0048
+round = 0.0004
+fillet = 0.0003
+[[part]]
+name = "front right motor mount's foot"
+prim = "cylinder"
+colour = "#ecece8"
+a = [-0.02809, 0.02809, -0.0180]
+b = [-0.02809, 0.02809, -0.0168]
+r = 0.0056
+round = 0.0003
+fillet = 0.0003
+[[part]]
+name = "front right motor mount's clip"
+prim = "box"
+colour = "#ecece8"
+centre = [-0.02526, 0.02526, -0.0065]
+half = [0.0035, 0.0024, 0.0022]
+axes = [[-0.70711, 0.70711, 0.0], [-0.70711, -0.70711, 0.0], [0.0, 0.0, 1.0]]
+round = 0.0005
+fillet = 0.0003
+[[part]]
+name = "front right motor"
+prim = "cylinder"
+material = "metal"
+a = [-0.02809, 0.02809, -0.0165]
+b = [-0.02809, 0.02809, -0.0012]
+r = 0.0035
+round = 0.0003
+fillet = 0.0002
+[[part]]
+name = "rear right motor mount"
+prim = "cylinder"
+colour = "#ecece8"
+a = [0.02809, 0.02809, -0.0180]
+b = [0.02809, 0.02809, -0.0055]
+r = 0.0048
+round = 0.0004
+fillet = 0.0003
+[[part]]
+name = "rear right motor mount's foot"
+prim = "cylinder"
+colour = "#ecece8"
+a = [0.02809, 0.02809, -0.0180]
+b = [0.02809, 0.02809, -0.0168]
+r = 0.0056
+round = 0.0003
+fillet = 0.0003
+[[part]]
+name = "rear right motor mount's clip"
+prim = "box"
+colour = "#ecece8"
+centre = [0.02526, 0.02526, -0.0065]
+half = [0.0035, 0.0024, 0.0022]
+axes = [[0.70711, 0.70711, 0.0], [-0.70711, 0.70711, 0.0], [0.0, 0.0, 1.0]]
+round = 0.0005
+fillet = 0.0003
+[[part]]
+name = "rear right motor"
+prim = "cylinder"
+material = "metal"
+a = [0.02809, 0.02809, -0.0165]
+b = [0.02809, 0.02809, -0.0012]
+r = 0.0035
+round = 0.0003
+fillet = 0.0002
+[[part]]
+name = "rear left motor mount"
+prim = "cylinder"
+colour = "#ecece8"
+a = [0.02809, -0.02809, -0.0180]
+b = [0.02809, -0.02809, -0.0055]
+r = 0.0048
+round = 0.0004
+fillet = 0.0003
+[[part]]
+name = "rear left motor mount's foot"
+prim = "cylinder"
+colour = "#ecece8"
+a = [0.02809, -0.02809, -0.0180]
+b = [0.02809, -0.02809, -0.0168]
+r = 0.0056
+round = 0.0003
+fillet = 0.0003
+[[part]]
+name = "rear left motor mount's clip"
+prim = "box"
+colour = "#ecece8"
+centre = [0.02526, -0.02526, -0.0065]
+half = [0.0035, 0.0024, 0.0022]
+axes = [[0.70711, -0.70711, 0.0], [0.70711, 0.70711, 0.0], [0.0, 0.0, 1.0]]
+round = 0.0005
+fillet = 0.0003
+[[part]]
+name = "rear left motor"
+prim = "cylinder"
+material = "metal"
+a = [0.02809, -0.02809, -0.0165]
+b = [0.02809, -0.02809, -0.0012]
+r = 0.0035
+round = 0.0003
+fillet = 0.0002
+[[part]]
+name = "front left motor mount"
+prim = "cylinder"
+colour = "#ecece8"
+a = [-0.02809, -0.02809, -0.0180]
+b = [-0.02809, -0.02809, -0.0055]
+r = 0.0048
+round = 0.0004
+fillet = 0.0003
+[[part]]
+name = "front left motor mount's foot"
+prim = "cylinder"
+colour = "#ecece8"
+a = [-0.02809, -0.02809, -0.0180]
+b = [-0.02809, -0.02809, -0.0168]
+r = 0.0056
+round = 0.0003
+fillet = 0.0003
+[[part]]
+name = "front left motor mount's clip"
+prim = "box"
+colour = "#ecece8"
+centre = [-0.02526, -0.02526, -0.0065]
+half = [0.0035, 0.0024, 0.0022]
+axes = [[-0.70711, -0.70711, 0.0], [0.70711, -0.70711, 0.0], [0.0, 0.0, 1.0]]
+round = 0.0005
+fillet = 0.0003
+[[part]]
+name = "front left motor"
+prim = "cylinder"
+material = "metal"
+a = [-0.02809, -0.02809, -0.0165]
+b = [-0.02809, -0.02809, -0.0012]
+r = 0.0035
+round = 0.0003
+fillet = 0.0002
+
+[dimensions]
+rotor_diameter_m = 0.0463          # LN's 23.13 mm radius

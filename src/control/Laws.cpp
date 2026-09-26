@@ -128,8 +128,79 @@ std::vector<ControllerSetting> designLaws(const VehicleProfile& p) {
     return out;
 }
 
+std::vector<ControllerSetting> designRotorLaws(const VehicleProfile& p) {
+    std::vector<ControllerSetting> out;
+    const HoverSection& h = p.hover;
+    if (!h.header.present()) return out;
+    auto set = [&out](const char* controller, std::string parameter, double value) { out.push_back({controller, std::move(parameter), value}); };
+    constexpr double kStep = 1.0 / 120.0; // the flight model's step: its forces act a step late
+    auto usable = [](const RotorAxis& a) { return known(a.power) && std::abs(a.power) > 1e-6; };
+    // each rate loop as fast as its actuator lets it be: the closed loop's pole
+    // at 1 / (2.5 (lag + step)), the integral a slower pair
+    auto bandwidth = [](const RotorAxis& a, double lo, double hi) { return std::clamp(1.0 / (2.5 * (orZero(a.lagS) + kStep)), lo, hi); };
+    const char* al = "rotor_allocation";
+    const struct {
+        const char* name;
+        const RotorAxis& axis;
+        double trim, lo, hi;
+    } rates[] = {{"roll", h.roll, h.aileronTrim, 1.0, 20.0}, {"pitch", h.pitch, h.elevatorTrim, 1.0, 20.0}, {"yaw", h.yaw, h.rudderTrim, 0.5, 10.0}};
+    double w[3] = {4.0, 4.0, 3.0};
+    for (int i = 0; i < 3; ++i) {
+        const auto& r = rates[i];
+        if (!usable(r.axis)) continue;
+        w[i] = bandwidth(r.axis, r.lo, r.hi);
+        const std::string n = r.name;
+        set(al, n + ".power", r.axis.power), set(al, n + ".damping", orZero(r.axis.damping)), set(al, n + ".bandwidth", w[i]);
+        set(al, n + ".ki", w[i] * w[i] / 8.0), set(al, n + ".trim", orZero(r.trim));
+    }
+    const bool heave = usable(h.heave);
+    const double wHeave = heave ? 1.0 / (4.0 * (orZero(h.heave.lagS) + kStep)) : 1.0;
+    if (heave) set(al, "heave.power", h.heave.power), set(al, "load_factor.ki", std::clamp(wHeave, 0.5, 10.0));
+    if (known(h.throttleTrim)) set(al, "throttle.trim", h.throttleTrim);
+    // the attitude a quarter as fast as its rates, which stay within the envelope's
+    const EnvelopeLimits& e = p.envelope.clean;
+    const char* at = "rotor_attitude";
+    const double wAttitude = std::clamp(std::min(w[0], w[1]) / 4.0, 0.4, 5.0), wHeading = std::clamp(w[2] / 4.0, 0.3, 3.0);
+    const double rateMax = known(e.rollRateMaxRadS) ? std::min(e.rollRateMaxRadS, 3.0) : 1.0;
+    set(at, "roll.gain", wAttitude), set(at, "pitch.gain", wAttitude), set(at, "yaw.gain", wHeading);
+    set(at, "roll.max_rate", rateMax), set(at, "pitch.max_rate", rateMax);
+    set(at, "yaw.max_rate", usable(h.yaw) ? std::clamp(0.3 * std::abs(h.yaw.power), 0.2, 1.5) : 0.5);
+    // the velocity a third as fast as the attitude, the tilt within the envelope's bank and pitch;
+    // the height as fast as the heave's lag allows
+    const char* ve = "rotor_velocity";
+    const bool helicopter = p.identity.family == ControlFamily::Helicopter;
+    const double wVelocity = std::clamp(wAttitude / 3.0, 0.1, 2.0), wHeight = std::clamp(wHeave, 0.3, 3.0);
+    double tilt = (helicopter ? 20.0 : 30.0) * kDeg;
+    if (known(e.bankMaxRad)) tilt = std::min(tilt, 0.8 * e.bankMaxRad);
+    if (known(e.pitchMaxRad)) tilt = std::min(tilt, 0.8 * e.pitchMaxRad);
+    set(ve, "horizontal.kp", wVelocity), set(ve, "horizontal.ki", wVelocity * wVelocity / 4.0), set(ve, "max_tilt", tilt);
+    set(ve, "vertical.kp", wHeight), set(ve, "vertical.ki", wHeight * wHeight / 4.0);
+    if (heave) set(ve, "heave.power", h.heave.power), set(ve, "heave.damping", orZero(h.heave.damping));
+    if (known(h.throttleTrim)) set(ve, "throttle.trim", h.throttleTrim);
+    set(ve, "roll.trim", orZero(h.rollAttitudeRad)), set(ve, "pitch.trim", orZero(h.pitchAttitudeRad));
+    // the point: a design speed (a helicopter's cruise-climb pace; a multirotor's
+    // growing with its size), within the envelope's; stopping on half the tilt's acceleration
+    const char* po = "rotor_position";
+    const double mass = known(h.massKg) ? h.massKg : 1000.0;
+    double speed = helicopter ? 30.0 : std::clamp(8.0 * std::cbrt(mass / 1.5), 2.0, 15.0);
+    if (known(e.casMaxMs)) speed = std::min(speed, 0.6 * e.casMaxMs);
+    set(po, "horizontal.gain", wVelocity / 2.5), set(po, "max_speed", speed), set(po, "deceleration", 0.5 * kG * std::tan(tilt));
+    set(po, "velocity.lag_s", 1.0 / wVelocity);
+    set(po, "altitude.gain", wHeight / 3.0);
+    set(po, "max_vertical_speed", helicopter ? 5.0 : std::clamp(2.0 * std::cbrt(mass / 1.5), 0.5, 3.0));
+    return out;
+}
+
 bool completeControl(VehicleProfile& p) {
     if (p.control.header.present()) return false;
+    if (isRotorcraft(p.identity.family)) {
+        // its own loops at every level, designed from its hover section (without one, as they are)
+        p.control.settings = designRotorLaws(p);
+        p.control.controllers = {{Level::Acceleration, "rotor_allocation"}, {Level::Attitude, "rotor_attitude"},
+                                 {Level::Velocity, "rotor_velocity"}, {Level::Position, "rotor_position"}};
+        p.control.header = {ControlSection::kVersion, Provenance::Derived};
+        return true;
+    }
     auto settings = designLaws(p);
     if (settings.empty()) return false;
     p.control.settings = std::move(settings);

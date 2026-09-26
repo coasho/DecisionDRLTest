@@ -25,6 +25,7 @@ add_executable(fsim_tests
     test_protection.cpp
     test_laws.cpp
     test_manoeuvres.cpp
+    test_rotorcraft.cpp
     test_support.cpp
     test_world.cpp
     test_terrain.cpp

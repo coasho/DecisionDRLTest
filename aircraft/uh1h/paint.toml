@@ -1,0 +1,20 @@
+# The UH-1H's Army olive drab (FS 34087, matte) all over; its glass painted where the operator's
+# manual's three-view draws the windows (the airframe's frame, m): the windscreen and the chin
+# windows, the cockpit doors' upper and lower panes, the cabin doors' pair
+[paint]
+scheme = "single"
+colours = ["#515638"]
+windows = "#1c2227"
+windows_x = [0.09, 0.96]           # the windscreen, seen from the side
+windows_z = [1.32, 2.01]
+windscreen_x = [0.09, 0.96]        # ... from above
+windscreen_y = 0.85
+window_boxes = [[1.03, 1.94, 1.46, 2.00], [1.03, 1.62, 1.17, 1.40], [-0.22, 0.44, 0.52, 1.12], [2.47, 2.95, 0.99, 1.54],
+                [3.17, 3.67, 0.99, 1.54]]
+front_boxes = [[0.85, 1.32, 2.01], [0.62, 0.55, 1.10]]
+panel_lines = 0.08
+wear = 0.06
+gloss = 0.12
+canopy = "dark"
+seed = 21
+front = "forward"
