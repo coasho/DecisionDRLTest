@@ -18,6 +18,7 @@ stages, the file format and the methods. This skill is the working loop.
 ./fsim.cmd hangar <name> --quick             # all stages, coarse tables: ~30 s
 ./fsim.cmd hangar <name>                     # all stages, full tables: ~1-2 min
 ./fsim.cmd hangar <name> calibrate           # only with real performance data
+./fsim.cmd hangar <name> autopilot           # the platform's control loops tuned for it (~10-90 s)
 ```
 
 The outputs go to `aircraft/<name>/out/`: `<stage>.json` (the numbers and
@@ -81,6 +82,16 @@ move on while a check fails or a picture looks wrong.
   should need well under 1 m², and the pitch should land near the real
   propeller's. A large correction means the geometry is wrong. Fix that
   instead.
+- **autopilot.** Tunes the platform's built-in loops (attitude, acceleration,
+  velocity, position) for the aircraft, writes `autopilot.toml` and rebuilds
+  the `.xml` with them as `fsim/control` properties, then flies the aircraft
+  as built through steps at three speeds. Run it after any change to the
+  aerodynamics, mass, controls or engines - and after calibrate, whose drag
+  moves the trim - or the gains are stale (the `.xml` keeps whatever
+  `autopilot.toml` says). No manoeuvre may lose control at the reference
+  speed; warnings at 0.7x or 1.5x are the aircraft's limits (a heavy's roll
+  or load factor there) more often than the loops'. Look at
+  `out/autopilot.png`: the steps should rise without ringing.
 - **model.** The `.glb`. Its checks must pass: no open, pinched or
   misturned edge, the airframe in one piece, every moving part closed, the
   stowed gear inside the skin (under 3 cm), length, span and height within
@@ -290,6 +301,7 @@ move on while a check fails or a picture looks wrong.
   build writes its `.xml` files as git keeps them (LF), a rebuild that
   changes nothing keeps the aircraft's date, and the mesher gives the same
   `.glb` every time. One that should not have changed is a bug to chase,
-  not a file to check out. (calibrate dates `calibration.toml` every run.)
+  not a file to check out. (calibrate dates `calibration.toml` every run, and
+  autopilot `autopilot.toml`.)
 - The aircraft is `jsbsim:<name>` everywhere on the platform, with no copying:
   in the viewer, the C++ and Python SDKs, and scenario files.

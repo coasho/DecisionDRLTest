@@ -108,6 +108,23 @@ class Stages(unittest.TestCase):
         self.assertGreater(fly["stall"]["stall_kcas"], 15.0)
         self.assertGreater(fly["climb"]["rows"][0]["rate_ms"], 1.0)
         self.assertEqual(fly["robustness"]["diverged"], 0)
+        # the platform's loops tuned for it: written beside the design, into
+        # the JSBSim aircraft, and flown by every vehicle of the type
+        from hangar import autopilot
+        ap = autopilot.stage(d)
+        self.assertTrue(os.path.isfile(os.path.join(d.out, "autopilot.json")))
+        self.assertEqual(self.failed(ap), [])
+        settings = autopilot.load_settings(os.path.join(d.dir, "autopilot.toml"))
+        with open(build["xml"], encoding="utf-8") as f:
+            self.assertIn("fsim/control/pid_attitude/pitch/kp", f.read())
+        w = fsim.World("hangar-autopilot-test", publish=False, workers=1)
+        try:
+            v = w.create_vehicle("t", type="jsbsim:" + self.name, altitude_msl_m=1000.0, airspeed_ms=25.0)
+            for level, controller in ((fsim.Level.ATTITUDE, autopilot.ATTITUDE), (fsim.Level.VELOCITY, autopilot.VELOCITY)):
+                for k, x in settings[controller].items():
+                    self.assertAlmostEqual(v.controller_parameter(level, k), x, places=9, msg=k)
+        finally:
+            w.close()
         self.assertTrue(os.path.isfile(html.write(d)))
 
 

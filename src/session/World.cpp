@@ -19,6 +19,29 @@ void copyName(char* dst, std::size_t capacity, const std::string& src) {
     std::memcpy(dst, src.data(), std::min(src.size(), capacity - 1));
 }
 
+/// The aircraft's own gains for the built-in controllers (design 9.3): its
+/// properties fsim/control/<controller id>/<parameter>, the parameter's dots
+/// written as slashes ("pid_attitude/pitch/kp" sets pid_attitude's
+/// "pitch.kp"). A setting no built-in takes is reported once, here.
+std::vector<control::ControllerSetting> readControllerSettings(const std::string& aircraft, const sim::FlightModel& model) {
+    std::vector<control::ControllerSetting> out;
+    for (auto& [path, value] : model.properties("fsim/control")) {
+        const auto slash = path.find('/');
+        if (slash == std::string::npos || slash + 1 >= path.size()) continue;
+        std::string parameter = path.substr(slash + 1);
+        std::replace(parameter.begin(), parameter.end(), '/', '.');
+        out.push_back({path.substr(0, slash), std::move(parameter), value});
+    }
+    if (out.empty()) return out;
+    control::ControlStack probe;
+    const auto unused = probe.setControllerSettings(out);
+    for (const auto& s : unused)
+        LOG_WARN("session") << "aircraft '" << aircraft << "': no built-in controller takes fsim/control setting " << s.controller << " "
+                            << s.parameter << "; kept for a controller registered under that id";
+    LOG_INFO("session") << "aircraft '" << aircraft << "' carries " << out.size() << " controller settings";
+    return out;
+}
+
 } // namespace
 
 World::World(const WorldOptions& options) : options_(options), rng_(options.seed) {
@@ -116,6 +139,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
             LOG_ERROR("session") << "failed to load aircraft '" << aircraft << "'";
             return 0;
         }
+        if (!controllerSettings_.count(aircraft)) controllerSettings_[aircraft] = readControllerSettings(aircraft, *model);
         slot = pool_->add(std::move(model));
         entries_.emplace_back();
         slotAircraft_.push_back(aircraft);
@@ -141,6 +165,8 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     e->inputs.setThrottleAll(spec.initial.onGround ? 0.0 : 0.65);
     e->inputs.gearDown = spec.initial.onGround ? 1.0 : 0.0;
     e->stack.setInitialInputs(e->inputs);
+    if (const auto it = controllerSettings_.find(aircraft); it != controllerSettings_.end() && !it->second.empty())
+        e->stack.setControllerSettings(it->second);
     for (auto& factory : worldEffects_) e->effects.push_back(factory());
     sim::FlightModel& model = pool_->vehicle(slot);
     model.seed(e->rng.next());

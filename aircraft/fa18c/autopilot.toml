@@ -1,0 +1,67 @@
+# Written by hangar autopilot (2026-09-26 00:39) for fa18c.toml: the platform's built-in control
+# loops tuned for this aircraft (docs/hangar.md, The autopilot). The build writes
+# them into the JSBSim aircraft as fsim/control/<controller>/<parameter>. Delete
+# this file to fly the platform's shared defaults.
+[reference]   # where they were designed (the gains follow the airspeed elsewhere)
+tas_ms = 164.78
+eas_ms = 144.17
+altitude_m = 3000
+
+[pid_attitude]
+airspeed.ki = 0.0104765
+airspeed.kp = 0.0754305
+heading.gain = 3.36049
+pitch.eas_exponent = 0.0
+pitch.integral_limit = 0.3
+pitch.kd = 0.274067
+pitch.ki = 0.618425
+pitch.kp = 1.57217
+pitch.tas_exponent = -1
+pitch.trim = 0.0
+pitch.trim_lift = 0.0
+roll.eas_exponent = 0.0
+roll.kd = 0.0
+roll.ki = 0.0
+roll.kp = 0.373575
+roll.max_rate = 1.83165
+roll.tas_exponent = 0.0
+rudder.beta_gain = 0.0
+schedule.eas_ms = 144.172
+schedule.tas_ms = 164.776
+throttle.feedforward = 0.322846
+
+[pid_acceleration]
+load_factor.eas_exponent = 0.0
+load_factor.feedforward = 0.115537
+load_factor.integral_limit = 0.3
+load_factor.kd = 0.0
+load_factor.ki = 0.0572866
+load_factor.kp = 0.0135926
+load_factor.path_hold = 1
+load_factor.tas_exponent = 0.0
+longitudinal.ki = 0.167623
+longitudinal.kp = 0.0335247
+pitch.trim = 0.0
+pitch.trim_lift = 0.0
+roll_rate.eas_exponent = 0.0
+roll_rate.feedforward = 0.218382
+roll_rate.ki = 0.452357
+roll_rate.kp = 0.0272977
+roll_rate.tas_exponent = 0.0
+rudder.beta_gain = 0.0
+schedule.eas_ms = 144.172
+schedule.tas_ms = 164.776
+throttle.feedforward = 0.322846
+
+[pid_velocity]
+max_bank = 1.0472
+schedule.tas_ms = 164.776
+vertical_speed.alpha_zero_lift = -0.00914364
+vertical_speed.command_lag = 1.01689
+vertical_speed.feedforward = 1
+vertical_speed.ki = 0.00012227
+vertical_speed.kp = 0.00149202
+
+[pid_position]
+altitude.gain = 0.0819494
+max_vertical_speed = 16.4776

@@ -575,4 +575,23 @@ PropertyHandle JsbsimModel::property(std::string_view path) {
     return PropertyHandle(node);
 }
 
+std::vector<std::pair<std::string, double>> JsbsimModel::properties(std::string_view prefix) const {
+    std::vector<std::pair<std::string, double>> out;
+    if (!fdm_) return out;
+    const SGPropertyNode* root = fdm_->GetPropertyManager()->GetNode(std::string(prefix), false);
+    if (!root) return out;
+    // depth first, in the tree's order; a leaf's path joins its ancestors' names below the prefix
+    auto walk = [&out](const SGPropertyNode* node, const std::string& path, auto& self) -> void {
+        for (int i = 0; i < node->nChildren(); ++i) {
+            const SGPropertyNode* child = node->getChild(i);
+            std::string name = path.empty() ? child->getNameString() : path + "/" + child->getNameString();
+            if (child->getIndex() > 0) name += "[" + std::to_string(child->getIndex()) + "]";
+            if (child->nChildren() > 0) self(child, name, self);
+            else if (child->hasValue()) out.emplace_back(std::move(name), child->getDoubleValue());
+        }
+    };
+    walk(root, "", walk);
+    return out;
+}
+
 } // namespace fsim::sim

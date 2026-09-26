@@ -1,0 +1,67 @@
+# Written by hangar autopilot (2026-09-26 00:43) for rc135w.toml: the platform's built-in control
+# loops tuned for this aircraft (docs/hangar.md, The autopilot). The build writes
+# them into the JSBSim aircraft as fsim/control/<controller>/<parameter>. Delete
+# this file to fly the platform's shared defaults.
+[reference]   # where they were designed (the gains follow the airspeed elsewhere)
+tas_ms = 173.26
+eas_ms = 150.78
+altitude_m = 3000
+
+[pid_attitude]
+airspeed.ki = 0.0267185
+airspeed.kp = 0.192373
+heading.gain = 3.53351
+pitch.eas_exponent = 0.0
+pitch.integral_limit = 0.5
+pitch.kd = 0.67805
+pitch.ki = 0.737713
+pitch.kp = 2.7122
+pitch.tas_exponent = 0.0
+pitch.trim = 0.223431
+pitch.trim_lift = -0.33527
+roll.eas_exponent = -2
+roll.kd = 0.172796
+roll.ki = 0.0
+roll.kp = 0.691184
+roll.max_rate = 0.44713
+roll.tas_exponent = 2
+rudder.beta_gain = -1.06763
+schedule.eas_ms = 150.783
+schedule.tas_ms = 173.26
+throttle.feedforward = 0.546152
+
+[pid_acceleration]
+load_factor.eas_exponent = 0.0
+load_factor.feedforward = 0.0
+load_factor.integral_limit = 0.3
+load_factor.kd = 0.67805
+load_factor.ki = 0.184216
+load_factor.kp = 0.0338634
+load_factor.path_hold = 0.0
+load_factor.tas_exponent = 1
+longitudinal.ki = 0.427496
+longitudinal.kp = 0.138747
+pitch.trim = 0.223431
+pitch.trim_lift = -0.33527
+roll_rate.eas_exponent = -2
+roll_rate.feedforward = 0.894594
+roll_rate.ki = 0.829421
+roll_rate.kp = 0.111824
+roll_rate.tas_exponent = 2
+rudder.beta_gain = -1.06763
+schedule.eas_ms = 150.783
+schedule.tas_ms = 173.26
+throttle.feedforward = 0.546152
+
+[pid_velocity]
+max_bank = 0.523599
+schedule.tas_ms = 173.26
+vertical_speed.alpha_zero_lift = -0.0403014
+vertical_speed.command_lag = 0.919124
+vertical_speed.feedforward = 1
+vertical_speed.ki = 0.000142335
+vertical_speed.kp = 0.00156989
+
+[pid_position]
+altitude.gain = 0.090666
+max_vertical_speed = 17.326

@@ -32,6 +32,7 @@ public:
     void step(const ControlInputs& inputs) override;
     void state(VehicleState& out) const override;
     PropertyHandle property(std::string_view path) override;
+    std::vector<std::pair<std::string, double>> properties(std::string_view prefix) const override;
 
     double dt() const noexcept override { return dt_; }
     bool loaded() const noexcept override { return loaded_; }

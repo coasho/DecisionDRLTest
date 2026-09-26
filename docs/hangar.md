@@ -37,6 +37,7 @@ fsim hangar mine geometry             one stage: look at aircraft\mine\out\three
 fsim hangar mine --quick              every stage, coarse: a first look in half a minute
 fsim hangar mine                      every stage, full tables (a few minutes)
 fsim hangar mine calibrate            fit corrections to published performance
+fsim hangar mine autopilot            tune the platform's control loops for it (in every full run)
 fsim demo --aircraft mine             watch it fly
 fsim hangar f16c                      a fighter: NASA's wind-tunnel data as reference
 ```
@@ -72,6 +73,7 @@ code that computes them, changes.
 | verify | JSBSim's forces and moments at 150 random states, compared with the tables | largest error below 0.002 in any coefficient |
 | fly | trim across the speed range; stall; climb and ceiling; top speed (a jet's also at its published height); dynamic modes; 40 runs from random states; six crashes into the ground. A fly-by-wire aircraft instead: top speed at sea level and at the published height, excess power, the ceiling at the best climb speed, sustained turn, the angle-of-attack limiter, a 3 g step from trim, a full-stick roll | `[targets]`, MIL-F-8785C level 1, no diverged run; crashes that stop without blowing up |
 | calibrate | `calibration.toml`: extra drag, and the propeller pitch unless the design gives the real one; for a supersonic jet, the throttle ratio and the wave drag; for a subsonic one, where its wing's drag diverges | `[targets]` |
+| autopilot | `autopilot.toml`: the platform's control loops tuned for it, from small steps flown at a reference condition, written into `<name>.xml` as `fsim/control` properties; the aircraft then flown through standard manoeuvres at the attitude, acceleration and velocity levels at three speeds (`out/autopilot.png`) | no manoeuvre loses control at the reference speed; overshoot and height hold ([The autopilot](#the-autopilot)) |
 | report | `out/report.html` | |
 
 The fly stage flies the same tests on a reference aircraft (`reference =
@@ -852,6 +854,107 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   real engine's thrust up there is not published). Its phugoid, at L/D
   27, is barely damped (a warning).
 
+## The autopilot
+
+Every vehicle on the platform can be flown at five levels above its
+surfaces ([control.md](sdk/control.md)): attitude, acceleration, velocity,
+position and behaviours, each a built-in loop commanding the one below it.
+Their shared gains suit the stock c172x. Flown with them, every fly-by-wire
+design sat in a standing pitch oscillation of 5-15° while only holding its
+height, a 1.5 g step overshot by up to 1,500 %, and the B-52H, which needs a
+third of its elevator to trim at cruise, climbed out of a height hold. The
+autopilot stage gives each design its own gains, as a flight-test engineer
+would:
+
+1. **Identify.** From level flight at a reference condition - 3,000 m, where
+   the wing carries the weight at CL 0.35 (faster if that needs more than
+   90 % throttle, and no more than 80 % of the top speed) - small steps at
+   the actuator level: aileron 0.1, elevator 0.05, rudder 0.1, throttle
+   0.15. First-order fits give the roll rate per unit aileron and its lag,
+   the load factor per unit elevator and its lag, the sideslip the rudder
+   holds, and the thrust per unit throttle with the engine's lag. Level
+   flight at three speeds gives the elevator that trims a surface-controlled
+   aircraft and the angle of attack it flies at. A fly-by-wire law is
+   levelled at neutral stick, which holds its flight path; the rest by
+   JSBSim's trim.
+2. **Place the poles.** The bank loop's on G_p / (s (τ_p s + 1)), the pitch
+   attitude's on the pitch rate the load factor gives (g G_n / tas), damping
+   0.8; on surfaces at least a quarter of the proportional gain as rate
+   damping, for the short period and dutch roll a first-order fit cannot
+   see. The heading loop a fifth of the bank loop's speed (at most
+   0.2 rad/s), the vertical speed a quarter of the pitch's (at most 0.35),
+   the altitude a third of that.
+3. **Schedule.** The gains hold at the reference and follow the airspeed
+   elsewhere as the aircraft's answer to its controls does, so each loop
+   keeps its damping: a fly-by-wire law's roll and load factor need no
+   change; its pitch gains grow with tas (its pitch rate per g falls as
+   1 / tas); surfaces' roll gains fall as (eas / tas)² (their roll rate grows
+   as tas, their roll mode slows as tas / eas²).
+4. **Feed forward** what the loops can know: a surface-controlled aircraft's
+   trim law (the elevator that holds 1 g, growing with lift as n / eas²);
+   the flight-path angle a vertical speed needs plus the angle of attack the
+   wing flies at 1 g; the stick a load factor or a roll rate needs. On
+   aircraft without a law the rudder takes out half the sideslip.
+
+The gains go to `autopilot.toml` beside the design (reviewable; delete it
+to fly the shared defaults) and, at every build, into `<name>.xml` as
+JSBSim properties `fsim/control/<controller>/<parameter>`. The platform sets
+them on every vehicle of the type ([control.md](sdk/control.md#per-aircraft-gains));
+a trainer's own setting still wins. The stage then flies the aircraft as
+built - the platform taking the gains from its file, as it will for a
+trainer - through standard manoeuvres at 0.7, 1 and 1.5 times the reference
+speed: a 40 s velocity hold, a 30° bank step, a 5° pitch step, a climb at
+5 % of the speed, a 1.5 g step, a roll-rate step and a 90° turn
+(`out/autopilot.png`).
+
+Flown with the shared gains, 336 of the 558 manoeuvres (31 designs, three
+speeds, the hold and five steps) lost control, never reached their target,
+overshot it by more than half, or - holding - drifted over 100 m or
+oscillated. With each design's own gains, 29 do. What is left is mostly a
+heavy's roll rate or load factor at 0.7 times its reference speed, which
+the aircraft cannot give there, and the RQ-4B's pitch: its engine sits high
+on its back, so the thrust the airspeed hold adds in a pitch-up puts the
+nose down, and a 5° step settles at 3°. The same commands, before and after,
+are in [control.md](sdk/control.md#per-aircraft-gains).
+
+![The F-16C's manoeuvres at three speeds with its own gains](images/hangar-autopilot-f16c.png)
+
+At the reference speed:
+
+| aircraft | reference, m/s | 30° bank: to 90 %, overshoot | 5° pitch | climb at 5 % of the speed | 90° turn settled | height held, 40 s |
+|---|---|---|---|---|---|---|
+| A-10C | 151 | 2.3 s, 0 % | 2.3 s, 9 % | 3.5 s, 10 % | 23 s | 1 m |
+| B-52H | 153 | 5.9 s, 0 % | 4.9 s, 33 % | 7.0 s, 29 % | 51 s | 1 m |
+| C-130J | 149 | 4.2 s, 3 % | 2.1 s, 18 % | 3.1 s, 17 % | 41 s | 1 m |
+| C172 | 50 | 2.3 s, 4 % | 1.4 s, 21 % | 2.1 s, 15 % | 16 s | 1 m |
+| C-17A | 203 | 2.9 s, 0 % | 0.9 s, 14 % | 3.4 s, 11 % | 57 s | 0 m |
+| E-3G | 181 | 7.8 s, 0 % | 2.9 s, 20 % | 4.5 s, 20 % | 54 s | 3 m |
+| E-7A | 173 | 4.1 s, 0 % | 2.7 s, 25 % | 4.1 s, 24 % | 52 s | 3 m |
+| EA-18G | 174 | 1.7 s, 1 % | 2.2 s, 16 % | 4.2 s, 16 % | 23 s | 4 m |
+| EC-130H | 108 | 4.4 s, 6 % | 2.3 s, 16 % | 3.8 s, 16 % | 30 s | 1 m |
+| F-15C | 141 | 1.5 s, 0 % | 2.3 s, 15 % | 4.5 s, 17 % | 21 s | 4 m |
+| F-16C | 164 | 2.1 s, 0 % | 2.4 s, 15 % | 4.7 s, 15 % | 21 s | 1 m |
+| F-22A | 152 | 1.8 s, 0 % | 2.8 s, 16 % | 5.4 s, 16 % | 21 s | 2 m |
+| F-35A | 179 | 1.7 s, 0 % | 2.4 s, 16 % | 4.4 s, 15 % | 23 s | 3 m |
+| F/A-18C | 165 | 1.6 s, 0 % | 2.1 s, 14 % | 4.3 s, 15 % | 22 s | 3 m |
+| Gripen | 140 | 1.3 s, 0 % | 3.3 s, 19 % | 5.9 s, 21 % | 21 s | 5 m |
+| H-6K | 149 | 4.5 s, 1 % | 4.8 s, 23 % | 7.0 s, 24 % | 43 s | 1 m |
+| J-10A | 157 | 1.9 s, 0 % | 3.5 s, 19 % | 6.4 s, 20 % | 21 s | 6 m |
+| J-20A | 162 | 1.6 s, 0 % | 2.8 s, 16 % | 5.5 s, 17 % | 22 s | 5 m |
+| KC-135R | 164 | 5.7 s, 0 % | 3.3 s, 21 % | 5.0 s, 21 % | 48 s | 4 m |
+| KC-46A | 197 | 5.3 s, 0 % | 2.6 s, 17 % | 4.3 s, 18 % | 58 s | 0 m |
+| MiG-29A | 155 | 1.6 s, 0 % | 2.3 s, 15 % | 4.3 s, 16 % | 22 s | 3 m |
+| Mirage 2000C | 127 | 1.8 s, 0 % | 5.1 s, 21 % | 8.4 s, 27 % | 19 s | 3 m |
+| Rafale C | 141 | 1.6 s, 0 % | 3.0 s, 19 % | 5.2 s, 19 % | 21 s | 4 m |
+| RC-135W | 173 | 5.0 s, 0 % | 3.2 s, 21 % | 5.0 s, 21 % | 51 s | 4 m |
+| RQ-4B | 101 | 3.1 s, 1 % | not in 12 s | 17.4 s, 0 % | 58 s | 1 m |
+| Skua | 28 | 1.7 s, 3 % | 1.0 s, 19 % | 1.5 s, 10 % | 14 s | 2 m |
+| Su-25 | 164 | 2.5 s, 2 % | 2.8 s, 29 % | 4.3 s, 27 % | 26 s | 0 m |
+| Su-27S | 147 | 1.6 s, 0 % | 2.1 s, 16 % | 3.9 s, 17 % | 21 s | 3 m |
+| Su-57 | 148 | 1.7 s, 0 % | 2.9 s, 16 % | 5.6 s, 18 % | 21 s | 6 m |
+| Typhoon | 139 | 1.7 s, 0 % | 4.0 s, 21 % | 6.9 s, 23 % | 20 s | 4 m |
+| U-2S | 91 | 2.6 s, 2 % | 2.2 s, 23 % | 3.0 s, 22 % | 30 s | 0 m |
+
 ## Limits
 
 - **Speed range.** Subsonic tables, with Mach factors to about Mach 2.6.
@@ -922,6 +1025,15 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   is fitted to the airframe, not taken from drawings.
 - **Layouts.** Swing wings do not move. There is no flying wing in the
   library yet.
+- **The autopilot.** One set of gains per aircraft, designed at one
+  condition and scheduled on airspeed alone: not on configuration (flaps,
+  gear), weight, or Mach beyond what the true and equivalent airspeeds carry.
+  First-order fits stand for the aircraft's answer to its controls; the
+  loops are PID loops, not a certified autopilot. At 0.7 times their
+  reference speed the heavies roll and pull slowly - there the roll rate and
+  the load factor the aircraft can give are the limit, not the loops. The
+  B-52H has no stabiliser trim: above about 200 m/s at 3,000 m its elevator
+  runs out of nose-down travel and it holds its height to about 50 m.
 
 ## For Claude
 

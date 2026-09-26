@@ -25,6 +25,54 @@ private:
     std::vector<std::pair<const char*, double*>> table_;
 };
 
+/// A gain schedule on airspeed (design 9.3). A loop's gains are as set at the
+/// reference true and equivalent airspeeds `tasMs` and `easMs`; elsewhere a
+/// channel's are multiplied by (easMs / eas)^a * (tasMs / tas)^b, where the
+/// aircraft's response to that control grows as eas^a * tas^b - so the loop
+/// stays as fast and as damped over the envelope. A surface whose moment
+/// grows with dynamic pressure has a = 2 for the load factor it pulls; a
+/// fly-by-wire law that commands the load factor has a = b = 0. Off while
+/// `tasMs` is 0 (the default): the gains are then fixed.
+struct AirspeedSchedule {
+    double tasMs = 0.0; ///< reference true airspeed, m/s; 0 = no schedule
+    double easMs = 0.0; ///< reference equivalent airspeed, m/s; 0 = the same as tasMs
+
+    bool active() const noexcept { return tasMs > 0.0; }
+    /// The factor for a channel whose response grows as eas^a * tas^b (the
+    /// calibrated airspeed stands in for the equivalent), within 0.2 .. 5.
+    double factor(const sim::VehicleState& s, double a, double b) const noexcept {
+        if (!active() || (a == 0.0 && b == 0.0)) return 1.0;
+        const double eas0 = easMs > 0.0 ? easMs : tasMs;
+        const double tas = std::max(s.airspeedTrueMs, 0.3 * tasMs);
+        const double eas = std::max(s.airspeedCalibratedMs, 0.3 * eas0);
+        return std::clamp(power(eas0 / eas, a) * power(tasMs / tas, b), 0.2, 5.0);
+    }
+    /// x^e, by multiplication for the small whole exponents a schedule has.
+    static double power(double x, double e) noexcept {
+        if (e == 0.0) return 1.0;
+        if (e == std::floor(e) && std::abs(e) <= 4.0) {
+            double r = 1.0;
+            for (int i = 0; i < static_cast<int>(std::abs(e)); ++i) r *= x;
+            return e > 0.0 ? r : 1.0 / r;
+        }
+        return std::pow(x, e);
+    }
+    /// tas / tasMs (at least 0.3), or 1 without a schedule: for gains that
+    /// turn an angle into a rate through the flight path, which grow with speed.
+    double speedRatio(const sim::VehicleState& s) const noexcept {
+        return active() ? std::max(s.airspeedTrueMs, 0.3 * tasMs) / tasMs : 1.0;
+    }
+    /// The elevator a surface-controlled aircraft holds at load factor `n`
+    /// (+ nose down): `trim` at 1 g at the reference speed, of which
+    /// `trimLift` goes with the lift - it grows as n (easMs / eas)^2.
+    double trimElevator(const sim::VehicleState& s, double n, double trim, double trimLift) const noexcept {
+        if (trim == 0.0 && trimLift == 0.0) return 0.0;
+        const double eas0 = easMs > 0.0 ? easMs : tasMs;
+        const double ratio = eas0 > 0.0 ? eas0 / std::max(s.airspeedCalibratedMs, 0.5 * eas0) : 1.0;
+        return std::clamp(trim - trimLift + trimLift * n * ratio * ratio, -1.0, 1.0);
+    }
+};
+
 /// Level::Actuator: identity (the stack clamps).
 class FSIM_API ActuatorPassthrough final : public Controller {
 public:
@@ -35,6 +83,8 @@ public:
 
 /// Level::Attitude -> Actuator: roll/pitch PID with pitch trim integrator, beta
 /// feedback on the rudder, heading-to-roll outer loop, airspeed-to-throttle PI.
+/// With a schedule, the roll and pitch gains follow the airspeed and the
+/// heading gain grows with it (a bank turns the heading at g tan(bank) / tas).
 class FSIM_API AttitudeLoop final : public Controller {
 public:
     AttitudeLoop();
@@ -52,16 +102,29 @@ public:
     double rudderBetaGain = 1.0;   ///< rudder per rad sideslip
     double throttleFeedforward = 0.55;
     double maxRollRateRadS = 1.5;  ///< roll setpoint slew
+    AirspeedSchedule schedule;     ///< "schedule.tas_ms", "schedule.eas_ms"
+    double rollEasExponent = 0.0, rollTasExponent = 0.0;   ///< the roll gains' schedule (AirspeedSchedule::factor)
+    double pitchEasExponent = 0.0, pitchTasExponent = 0.0; ///< the pitch gains' schedule
+    /// "pitch.trim", "pitch.trim_lift": the elevator that holds level flight at
+    /// the reference speed and the part of it that goes with lift - fed forward
+    /// (AirspeedSchedule::trimElevator, at the load factor of a level turn), so
+    /// the integrator only trims what is left. 0 for a law that trims itself.
+    double pitchTrim = 0.0, pitchTrimLift = 0.0;
 
 private:
     Parameters params_;
     double rollRef_ = 0.0;
     bool haveRef_ = false;
+    double lastTime_ = -1.0; ///< the vehicle's sim time at the last update: a loop that missed a period starts again
 };
 
 /// Level::Acceleration -> Actuator: load-factor error to elevator, roll rate
 /// to aileron, sideslip to rudder, longitudinal acceleration to throttle.
 /// Works through any attitude (no Euler angles), so it flies loops and rolls.
+/// Optional feedforwards give the stick the command needs before any error
+/// builds: the load factor beyond what gravity asks at this attitude
+/// (cos pitch cos roll), and the roll rate; with a schedule they and the
+/// gains follow the airspeed.
 class FSIM_API AccelerationLoop final : public Controller {
 public:
     AccelerationLoop();
@@ -77,13 +140,28 @@ public:
     Pid longitudinal{0.15, 0.05, 0.0, 0.5, 0.0, 1.0};
     double rudderBetaGain = 1.0;
     double throttleFeedforward = 0.6;
+    double loadFactorFeedforward = 0.0; ///< nose-up stick per g beyond what neutral stick gives; 0 = none
+    /// What neutral stick gives: 1 = cos(pitch) cos(roll) - it holds the flight
+    /// path, as fly-by-wire laws do; 0 = 1 g, as a trimmed surface does
+    double loadFactorPathHold = 1.0;
+    double rollRateFeedforward = 0.0;   ///< aileron per rad/s of roll rate; 0 = none
+    AirspeedSchedule schedule;          ///< "schedule.tas_ms", "schedule.eas_ms"
+    double loadFactorEasExponent = 0.0, loadFactorTasExponent = 0.0; ///< the load-factor gains' schedule
+    double rollRateEasExponent = 0.0, rollRateTasExponent = 0.0;     ///< the roll-rate gains' schedule
+    double pitchTrim = 0.0, pitchTrimLift = 0.0; ///< as AttitudeLoop's, fed forward at the load factor commanded
 
 private:
     Parameters params_;
 };
 
 /// Level::Velocity -> Attitude: vertical speed to pitch (with trim), turn
-/// rate to bank, heading and airspeed passed to the attitude loop.
+/// rate to bank, heading and airspeed passed to the attitude loop. With a
+/// reference speed its gains hold there and scale as 1 / tas elsewhere (a
+/// pitch change moves the vertical speed by tas times as much); with the
+/// feedforward the pitch is the flight-path angle the vertical speed needs,
+/// asin(vz / tas), plus the angle of attack the wing would fly at 1 g -
+/// alpha0 + (alpha - alpha0) / n, about its zero-lift angle alpha0 - so the
+/// integrator only trims what is left.
 class FSIM_API VelocityLoop final : public Controller {
 public:
     VelocityLoop();
@@ -96,9 +174,20 @@ public:
 
     Pid verticalSpeed{0.045, 0.012, 0.0, 0.25, -0.4, 0.35};
     double maxBankRad = 0.785;
+    double referenceSpeedMs = 0.0;      ///< "schedule.tas_ms": where the gains are as set; 0 = fixed gains
+    double flightPathFeedforward = 0.0; ///< "vertical_speed.feedforward": 1 adds asin(vz / tas) + the 1 g alpha; 0 = none
+    double alphaZeroLift = 0.0;         ///< "vertical_speed.alpha_zero_lift": the wing's zero-lift angle of attack, rad
+    /// "vertical_speed.command_lag": the commanded vertical speed is followed
+    /// through a first-order lag of this time constant (s), so a step asks for
+    /// a climb the aircraft can enter without overshoot; 0 = none
+    double commandLagS = 0.0;
 
 private:
     Parameters params_;
+    double vzRef_ = 0.0;  ///< the lagged vertical speed command
+    double alpha_ = 0.0;  ///< the 1 g angle of attack, smoothed
+    bool started_ = false;
+    double lastTime_ = -1.0;
 };
 
 /// Level::Position -> Velocity: bearing to the point becomes the heading,

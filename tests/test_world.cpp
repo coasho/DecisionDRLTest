@@ -462,3 +462,27 @@ TEST_CASE("camera images round-trip through the vision segment", "[ipc][vision]"
     REQUIRE(mirror.pollTable());
     REQUIRE(mirror.cameras().empty());
 }
+
+TEST_CASE("an aircraft designed with hangar flies the built-in loops with its own gains", "[world]") {
+    session::World w(options("test-aircraft-gains"));
+    auto s = spec("viper");
+    s.type = "jsbsim:f16c";
+    s.initial.altitudeMslM = 3000.0;
+    s.initial.airspeedTrueMs = 160.0;
+    const auto viper = w.createVehicle(s);
+    REQUIRE(viper != 0);
+    // what the JSBSim file declares under fsim/control is what its controllers fly with
+    const double tas = w.model(viper)->property("fsim/control/pid_attitude/schedule/tas_ms").get();
+    const double kp = w.model(viper)->property("fsim/control/pid_velocity/vertical_speed/kp").get();
+    REQUIRE(tas > 0.0);
+    REQUIRE(*w.controls(viper)->controller(control::Level::Attitude)->parameter("schedule.tas_ms") == tas);
+    REQUIRE(*w.controls(viper)->controller(control::Level::Velocity)->parameter("vertical_speed.kp") == kp);
+    // and holds its height on them
+    REQUIRE(w.command(viper, control::VelocityCommand{160.0, 0.0, control::kHold, control::kHold}));
+    w.step(600);
+    REQUIRE(std::abs(w.vehicleState(viper)->altitudeMslM - 3000.0) < 50.0);
+    // a stock aircraft keeps the shared defaults
+    const auto cessna = w.createVehicle(spec("cessna"));
+    REQUIRE(*w.controls(cessna)->controller(control::Level::Attitude)->parameter("schedule.tas_ms") == 0.0);
+    REQUIRE(*w.controls(cessna)->controller(control::Level::Attitude)->parameter("pitch.kp") == 2.5);
+}

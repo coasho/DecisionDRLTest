@@ -7,7 +7,7 @@ import time
 
 STAGE_TITLES = {"geometry": "Geometry", "aero": "Aerodynamics", "mass": "Mass and balance", "propulsion": "Propulsion",
                 "build": "JSBSim aircraft", "verify": "JSBSim flies the tables", "fly": "Flight tests",
-                "calibrate": "Calibration to published performance"}
+                "calibrate": "Calibration to published performance", "autopilot": "The platform's control loops, tuned for it"}
 STATUS = {"pass": ("pass", "#2f855a"), "warn": ("warn", "#b7791f"), "fail": ("FAIL", "#c53030"), "info": ("", "#4a5568")}
 
 

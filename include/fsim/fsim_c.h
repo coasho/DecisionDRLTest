@@ -275,6 +275,10 @@ FSIM_API uint32_t fsim_command_field_count(int level); /* 0 for FSIM_LEVEL_BEHAV
 FSIM_API int fsim_vehicle_behavior_finished(const fsim_world* world, uint32_t id);
 FSIM_API int fsim_vehicle_use_controller(fsim_world* world, uint32_t id, int level, const char* controller_id);
 FSIM_API int fsim_vehicle_set_controller_parameter(fsim_world* world, uint32_t id, int level, const char* name, double value);
+/* A parameter of the controller at `level` as the vehicle flies it: the
+ * controller's default, the aircraft's own setting (its JSBSim properties
+ * fsim/control/<controller>/<parameter>), or the last one set. (ABI 1.3) */
+FSIM_API int fsim_vehicle_controller_parameter(const fsim_world* world, uint32_t id, int level, const char* name, double* value);
 
 FSIM_API int fsim_world_get_environment(const fsim_world* world, fsim_environment* out);
 FSIM_API int fsim_world_set_environment(fsim_world* world, const fsim_environment* environment);

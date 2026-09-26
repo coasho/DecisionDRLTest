@@ -422,3 +422,31 @@ def fighter(runs, path, name):
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)
+
+
+def autopilot(flown, path, name):
+    """The platform's loops with the aircraft's own gains: each manoeuvre's
+    response at the three speeds flown, over its target."""
+    panels = (("bank", "30 deg bank (attitude)", "deg"), ("pitch", "5 deg pitch up (attitude)", "deg"),
+              ("climb", "climb at 5 % of the speed (velocity)", "m/s"), ("heading", "90 deg turn (velocity)", "deg"),
+              ("load_factor", "1.5 g (acceleration)", "g above 1"), ("roll_rate", "roll rate 0.25 rad/s (acceleration)", "rad/s"))
+    fig, axes = plt.subplots(2, 3, figsize=(16, 7.5), dpi=95)
+    for ax, (key, title, unit) in zip(axes.flat, panels):
+        for r in flown:
+            m = r.get(key) or {}
+            if m.get("lost"):
+                ax.plot([], [], label="%.0f m/s: lost" % r["speed_ms"])
+                continue
+            if "trace" in m:
+                line, = ax.plot(m["trace"]["t"], m["trace"]["y"], lw=1.2, label="%.0f m/s" % r["speed_ms"])
+                if m.get("target") is not None:   # each speed's own (a climb's is 5 % of it)
+                    ax.axhline(m["target"], color=line.get_color(), lw=0.6, ls="--")
+        ax.set_title(title, fontsize=9)
+        ax.set_xlabel("s")
+        ax.set_ylabel(unit)
+        ax.grid(True, lw=0.3)
+        ax.legend(fontsize=7)
+    fig.suptitle("%s: the platform's control loops with its own gains" % name)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)

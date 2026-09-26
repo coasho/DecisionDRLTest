@@ -23,7 +23,10 @@ ControlStack::ControlStack() {
     auto& registry = ControllerRegistry::instance();
     for (std::size_t l = 0; l < static_cast<std::size_t>(Level::Behavior); ++l) {
         const Level level = static_cast<Level>(l);
-        if (const char* id = registry.defaultId(level)) controllers_[l] = registry.create(id);
+        if (const char* id = registry.defaultId(level)) {
+            controllers_[l] = registry.create(id);
+            byId_[l] = controllers_[l] != nullptr;
+        }
     }
     active_ = ActuatorCommand{};
 }
@@ -56,7 +59,10 @@ bool ControlStack::use(Level level, std::string_view controllerId) {
         LOG_ERROR("control") << "unknown controller '" << controllerId << "'";
         return false;
     }
-    return use(level, std::move(c));
+    apply(*c);
+    if (!use(level, std::move(c))) return false;
+    byId_[static_cast<std::size_t>(level)] = true;
+    return true;
 }
 
 bool ControlStack::use(Level level, std::unique_ptr<Controller> controller) {
@@ -65,7 +71,29 @@ bool ControlStack::use(Level level, std::unique_ptr<Controller> controller) {
         return false;
     }
     controllers_[static_cast<std::size_t>(level)] = std::move(controller);
+    byId_[static_cast<std::size_t>(level)] = false;
     return true;
+}
+
+bool ControlStack::apply(Controller& controller) const {
+    bool any = false;
+    for (const auto& s : settings_)
+        if (s.controller == controller.id()) any = controller.setParameter(s.parameter, s.value) || any;
+    return any;
+}
+
+std::vector<ControllerSetting> ControlStack::setControllerSettings(std::vector<ControllerSetting> settings) {
+    settings_ = std::move(settings);
+    std::vector<ControllerSetting> unused;
+    for (const auto& s : settings_) {
+        bool taken = false;
+        for (std::size_t l = 0; l < controllers_.size(); ++l) {
+            Controller* c = controllers_[l].get();
+            if (c && byId_[l] && s.controller == c->id()) taken = c->setParameter(s.parameter, s.value) || taken;
+        }
+        if (!taken) unused.push_back(s);
+    }
+    return unused;
 }
 
 void ControlStack::update(const ControlContext& ctx, sim::ControlInputs& out) {

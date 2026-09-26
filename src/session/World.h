@@ -153,6 +153,9 @@ private:
     std::unordered_map<std::uint32_t, std::size_t> idToSlot_;
     std::vector<std::size_t> freeSlots_;
     std::vector<std::string> slotAircraft_;                     ///< loaded aircraft per slot (for reuse)
+    /// Each loaded aircraft's own settings for the built-in controllers
+    /// (JSBSim properties under fsim/control), read on its first load.
+    std::unordered_map<std::string, std::vector<control::ControllerSetting>> controllerSettings_;
     std::vector<sim::ControlInputs> poolInputs_;
     std::vector<EffectFactory> worldEffects_;
     sim::EnvironmentState environment_;

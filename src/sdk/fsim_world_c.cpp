@@ -368,6 +368,16 @@ FSIM_API int fsim_vehicle_set_controller_parameter(fsim_world* world, uint32_t i
     return FSIM_OK;
 }
 
+FSIM_API int fsim_vehicle_controller_parameter(const fsim_world* world, uint32_t id, int level, const char* name, double* value) {
+    const auto* c = world && name && value ? world->world.controls(id) : nullptr;
+    if (!c || level < 0 || level >= static_cast<int>(fsim::control::Level::Behavior)) return FSIM_INVALID_ARGUMENT;
+    const auto* ctl = c->controller(static_cast<fsim::control::Level>(level));
+    const auto v = ctl ? ctl->parameter(name) : std::nullopt;
+    if (!v) return fail(FSIM_INVALID_ARGUMENT, std::string("unknown controller parameter ") + name);
+    *value = *v;
+    return FSIM_OK;
+}
+
 FSIM_API uint32_t fsim_command_field_count(int level) {
     switch (level) {
     case FSIM_LEVEL_ACTUATOR: return 8;

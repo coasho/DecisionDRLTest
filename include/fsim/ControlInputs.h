@@ -8,7 +8,7 @@ struct ControlInputs {
     static constexpr int kMaxEngines = 4;
 
     double aileron = 0.0;  ///< -1 (left) .. +1 (right)
-    double elevator = 0.0; ///< -1 (nose down) .. +1 (nose up), JSBSim sign convention
+    double elevator = 0.0; ///< -1 (nose up) .. +1 (nose down): JSBSim's sign, trailing edge down
     double rudder = 0.0;   ///< -1 .. +1
     double throttle[kMaxEngines] = {0, 0, 0, 0}; ///< 0 .. 1 per engine
     double flaps = 0.0;    ///< 0 .. 1

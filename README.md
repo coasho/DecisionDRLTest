@@ -117,6 +117,12 @@ push, not yet tagged:
   bombers (B-52H, H-6K), tankers (KC-135R, KC-46A), transports (C-130J, C-17A), AEW&C (E-3G, E-7A),
   reconnaissance (RC-135W, U-2S, RQ-4B), electronic warfare (EC-130H, EA-18G) and attack aircraft (A-10C,
   Su-25) - on direct controls or their own fly-by-wire, each flown against its published speed and ceiling.
+- **Per-aircraft gains** ([docs/sdk/control.md](docs/sdk/control.md#per-aircraft-gains)): the built-in control
+  loops fly each of these aircraft with its own gains - found by hangar's `autopilot` stage from small steps at a
+  reference condition, scheduled on airspeed, with its trim law and flight-path feedforwards - carried in its
+  JSBSim file as `fsim/control` properties ([docs/hangar.md](docs/hangar.md#the-autopilot)). Of 558 manoeuvres
+  (31 designs, three speeds), those that lost control, never reached their target, overshot it by more than
+  half or oscillated went from 336 with the shared gains to 29.
 - `sim::VehiclePool` (one worker per physical core), JSBSim 1.3.1 adapter with terrain ground callback,
   `flightsim.exe` headless benchmark.
 

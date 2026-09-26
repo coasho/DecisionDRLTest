@@ -66,7 +66,7 @@ Without installing, point `PYTHONPATH` at the build tree's staged package,
 | `World.from_scenario(path or Scenario)`, `world.apply_scenario(...)` | [scenarios.md](scenarios.md) |
 | `vehicle.state`, `vehicle.sensed` | a `fsim.VehicleState` (ctypes) over the platform's own snapshot: attribute reads are memory reads, and it is rewritten in place every step - `VehicleState.from_buffer_copy(v.state)` keeps one |
 | `vehicle.command_actuator/attitude/acceleration/velocity/position(...)`, `fly_to(lat_deg, lon_deg, alt)`, `command_behavior(id, target=, points=, **params)` | [control.md](control.md); every field defaults as the C++ command struct does, `fsim.HOLD` (NaN) meaning "keep / let the controller decide" |
-| `vehicle.active_level`, `behavior_finished`, `use_controller`, `set_controller_parameter`, `get_property` / `set_property`, `add_effect`, `clear_effects`, `send`, `inbox`, `attach_protocol`, `reset(**initial)`, `remove()` | |
+| `vehicle.active_level`, `behavior_finished`, `use_controller`, `set_controller_parameter`, `controller_parameter(level, name)`, `get_property` / `set_property`, `add_effect`, `clear_effects`, `send`, `inbox`, `attach_protocol`, `reset(**initial)`, `remove()` | |
 
 ## Many vehicles: the batched calls
 

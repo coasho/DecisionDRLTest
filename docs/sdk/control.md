@@ -69,14 +69,78 @@ Behaviours that need another vehicle read it through the world view
 
 | Level | id | Output | Tunables (`controller->setParameter("name", v)`) |
 | --- | --- | --- | --- |
-| Attitude | `pid_attitude` | actuators | `roll.kp/ki/kd`, `pitch.kp/ki/kd`, `airspeed.kp/ki`, `heading.gain`, `rudder.beta_gain`, `throttle.feedforward`, `roll.max_rate` |
-| Acceleration | `pid_acceleration` | actuators | `load_factor.kp/ki/kd`, `roll_rate.kp/ki`, `longitudinal.kp/ki`, `rudder.beta_gain`, `throttle.feedforward` |
-| Velocity | `pid_velocity` | attitude | `vertical_speed.kp/ki`, `max_bank` |
+| Attitude | `pid_attitude` | actuators | `roll.kp/ki/kd`, `roll.max_rate`, `roll.integral_limit`, `pitch.kp/ki/kd`, `pitch.integral_limit`, `pitch.trim`, `pitch.trim_lift`, `airspeed.kp/ki`, `airspeed.integral_limit`, `heading.gain`, `rudder.beta_gain`, `throttle.feedforward`; the schedule: `schedule.tas_ms`, `schedule.eas_ms`, `roll.eas_exponent`, `roll.tas_exponent`, `pitch.eas_exponent`, `pitch.tas_exponent` |
+| Acceleration | `pid_acceleration` | actuators | `load_factor.kp/ki/kd`, `load_factor.integral_limit`, `load_factor.feedforward`, `load_factor.path_hold`, `roll_rate.kp/ki`, `roll_rate.integral_limit`, `roll_rate.feedforward`, `pitch.trim`, `pitch.trim_lift`, `longitudinal.kp/ki`, `rudder.beta_gain`, `throttle.feedforward`; the schedule as above with `load_factor.*` and `roll_rate.*` exponents |
+| Velocity | `pid_velocity` | attitude | `vertical_speed.kp/ki`, `vertical_speed.integral_limit`, `vertical_speed.feedforward`, `vertical_speed.command_lag`, `vertical_speed.alpha_zero_lift`, `pitch.min`, `pitch.max`, `max_bank`, `schedule.tas_ms` |
 | Position | `pid_position` | velocity | `altitude.gain`, `max_vertical_speed` |
 | Actuator | `actuator` | actuators | - |
 
-Defaults fly the stock JSBSim c172x; faster aircraft usually want lower
-attitude gains and a higher `max_bank`.
+The defaults fly the stock JSBSim c172x, and every new parameter's default
+leaves that flight as it was. `controller->parameter("name")` reads one back
+(C: `fsim_vehicle_controller_parameter`, Python:
+`v.controller_parameter(Level.ATTITUDE, "pitch.kp")`).
+
+What the others do:
+
+- **The schedule.** At the reference true and equivalent airspeeds
+  (`schedule.tas_ms`, `schedule.eas_ms`) a loop's gains are as set;
+  elsewhere a channel's are multiplied by
+  (eas_ref / eas)^a (tas_ref / tas)^b, where the aircraft's response to that
+  control grows as eas^a tas^b - so the loop keeps its speed and its damping
+  over the envelope (the calibrated airspeed stands in for the equivalent;
+  the factor stays within 0.2 - 5). The heading gain grows with tas (a bank
+  turns the heading at g tan(bank) / tas) and the vertical-speed gains fall
+  with it (a pitch change moves the vertical speed by tas times as much).
+  `schedule.tas_ms` 0 - the default - turns it off.
+- **Feedforwards.** `pitch.trim` and `pitch.trim_lift` give the elevator
+  that holds a surface-controlled aircraft in level flight at the reference
+  speed and the part of it that goes with lift: the loops feed
+  trim - lift + lift n (eas_ref / eas)^2 forward (n that of a level turn at
+  the current bank, or the one commanded), so the integrator only trims what
+  is left. `load_factor.feedforward` is the stick per g beyond what neutral
+  stick gives - cos(pitch) cos(roll) when `load_factor.path_hold` is 1 (a
+  fly-by-wire law that holds its flight path), 1 g when it is 0;
+  `roll_rate.feedforward` the aileron per rad/s. With
+  `vertical_speed.feedforward` 1 the pitch is the flight-path angle the
+  vertical speed needs, asin(vz / tas), plus the angle of attack the wing
+  would fly at 1 g, alpha0 + (alpha - alpha0) / n about its zero-lift angle
+  `vertical_speed.alpha_zero_lift` (so a pull does not feed itself).
+  `vertical_speed.command_lag` (s) follows a commanded vertical speed
+  through a first-order lag, starting from the one flown, so a step asks for
+  a climb the aircraft can enter without overshoot.
+- A loop that missed a period - the stack flew another level meanwhile -
+  starts again from the state (its bank setpoint, its lagged command).
+
+## Per-aircraft gains
+
+An aircraft can carry its own gains for the built-in loops: JSBSim
+properties `fsim/control/<controller id>/<parameter>`, the parameter's dots
+written as slashes, declared in its flight control section:
+
+```xml
+<flight_control name="f16c">
+  <property value="1.11952">fsim/control/pid_attitude/pitch/kp</property>
+  <property value="163.54">fsim/control/pid_attitude/schedule/tas_ms</property>
+  ...
+```
+
+Every vehicle of that type gets them when it is created, and again whenever
+the stack creates the controller by id (`use(level, "pid_attitude")`); an
+instance you hand to `use()` is left as it is, and your own
+`setParameter` wins. The aircraft designed with hangar all carry a set,
+tuned for each by flight test ([hangar.md](../hangar.md#the-autopilot)); a
+stock JSBSim aircraft flies the shared defaults. A setting no built-in
+controller takes is logged once when the aircraft first loads, and kept for
+a controller registered under that id.
+
+![The same velocity commands with the shared gains and with each aircraft's own](../images/control-gains-before-after.png)
+
+The same commands - hold speed, height and heading, climb, turn 90° - with
+the shared gains (red) and each aircraft's own (blue): with the shared ones
+the F-16C and the B-52H never stop oscillating in pitch, and the Su-25
+departs in the turn.
+
+Retuning or replacing them in code:
 
 ```cpp
 auto& stack = v.controls();

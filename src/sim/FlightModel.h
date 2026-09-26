@@ -10,6 +10,8 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace fsim::sim {
 
@@ -48,6 +50,14 @@ public:
     /// Resolve a property path once (e.g. "velocities/vc-kts"). Invalid paths
     /// return an invalid handle and log at warn level.
     virtual PropertyHandle property(std::string_view path) = 0;
+
+    /// Every numeric property below `prefix` (e.g. "fsim/control"), with its
+    /// path relative to it ("pid_attitude/pitch/kp"): data the aircraft
+    /// carries for the platform. Empty when there is none.
+    virtual std::vector<std::pair<std::string, double>> properties(std::string_view prefix) const {
+        (void)prefix;
+        return {};
+    }
 
     virtual double dt() const noexcept = 0;
     virtual bool loaded() const noexcept = 0;

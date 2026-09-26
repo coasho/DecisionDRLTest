@@ -137,6 +137,10 @@ class WorldTest(unittest.TestCase):
         self.assertIsInstance(a.inbox(), list)
         b.clear_effects()
         a.set_controller_parameter(Level.ATTITUDE, "roll.kp", 2.5)
+        self.assertEqual(a.controller_parameter(Level.ATTITUDE, "roll.kp"), 2.5)
+        self.assertEqual(a.controller_parameter(Level.VELOCITY, "schedule.tas_ms"), 0.0)   # a stock aircraft: no schedule
+        with self.assertRaises(fsim.Error):
+            a.controller_parameter(Level.ATTITUDE, "nope")
         with self.assertRaises(fsim.Error):
             a.use_controller(Level.ATTITUDE, "nope")
 

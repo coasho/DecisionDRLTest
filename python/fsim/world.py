@@ -177,6 +177,11 @@ class Vehicle:
         """E.g. set_controller_parameter(Level.ATTITUDE, "roll.kp", 2.5)."""
         self._h.set_controller_parameter(self.id, int(level), name, value)
 
+    def controller_parameter(self, level, name):
+        """A parameter of the controller at `level` as the vehicle flies it: its
+        default, the aircraft's own setting, or the last one set."""
+        return self._h.controller_parameter(self.id, int(level), name)
+
     # --- effects --------------------------------------------------------------------
     def add_effect(self, effect, **params):
         """A built-in effect by id - "gaussian_sensor_noise", "sensor_latency",

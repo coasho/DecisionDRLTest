@@ -193,6 +193,15 @@ int main(int argc, char** argv) {
         CHECK(fsim_vehicle_use_controller(world, a, FSIM_LEVEL_ATTITUDE, "nope") != FSIM_OK);
         CHECK(fsim_vehicle_set_controller_parameter(world, a, FSIM_LEVEL_ATTITUDE, "roll.kp", 2.5) == FSIM_OK);
         CHECK(fsim_vehicle_set_controller_parameter(world, a, FSIM_LEVEL_ATTITUDE, "nope", 2.5) != FSIM_OK);
+        {
+            double kp = 0.0;
+            CHECK(fsim_vehicle_controller_parameter(world, a, FSIM_LEVEL_ATTITUDE, "roll.kp", &kp) == FSIM_OK);
+            CHECK(kp == 2.5);
+            CHECK(fsim_vehicle_controller_parameter(world, a, FSIM_LEVEL_ATTITUDE, "pitch.kp", &kp) == FSIM_OK);
+            CHECK(kp == 2.5); /* the c172x keeps the shared default */
+            CHECK(fsim_vehicle_controller_parameter(world, a, FSIM_LEVEL_ATTITUDE, "nope", &kp) != FSIM_OK);
+            CHECK(fsim_vehicle_controller_parameter(world, a, FSIM_LEVEL_ATTITUDE, "roll.kp", NULL) != FSIM_OK);
+        }
 
         CHECK(fsim_vehicle_add_effect(world, b, "gaussian_sensor_noise", enames, evalues, 1) == FSIM_OK);
         CHECK(fsim_vehicle_add_effect(world, 0, "wind_gusts", NULL, NULL, 0) == FSIM_OK);

@@ -7,6 +7,8 @@
     build       the JSBSim aircraft (+ a glTF model), found by the platform as jsbsim:<name>
     verify      JSBSim flies exactly the tables (forces at random states)
     fly         flight tests: trim, stall, climb, speed, modes, robustness
+    calibrate   the drag (or engine) fitted to the published top speed
+    autopilot   the platform's control loops tuned for it, written into the JSBSim aircraft
     report      one HTML page with everything
 
 Outputs go to aircraft/<name>/out/; the product (the JSBSim aircraft and the
@@ -28,8 +30,8 @@ import numpy as np
 from . import __version__
 from .geometry import Aircraft
 
-STAGES = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "calibrate", "report")
-DEFAULT = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "report")
+STAGES = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "calibrate", "autopilot", "report")
+DEFAULT = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "autopilot", "report")
 KT = 0.514444
 
 
@@ -569,7 +571,10 @@ class Design:
         fbw = fcs.design(tabs, a, mm)
         yd = fcs.yaw_damper(tabs, a, mm)
         xml_path = os.path.join(self.dir, a.name + ".xml")
-        text = _keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw, yaw_damper=yd))
+        # the platform's loops tuned for it (autopilot.toml, hangar autopilot) go into the flight control section
+        from .autopilot import load_settings
+        autopilot = load_settings(os.path.join(self.dir, "autopilot.toml"))
+        text = _keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw, yaw_damper=yd, autopilot=autopilot))
         with open(xml_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         # the platform finds it where it is (io::AssetResolver: the source tree's
@@ -1574,6 +1579,9 @@ def run(design, stages, log=print, reference=None, force=False, quick=False):
             done[st] = {"path": html.write(d)}
         elif st == "calibrate":
             done[st] = _calibrate(d)
+        elif st == "autopilot":
+            from . import autopilot
+            done[st] = autopilot.stage(d)
         else:
             done[st] = getattr(d, st)()
         if st != "report":

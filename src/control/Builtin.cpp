@@ -16,6 +16,17 @@ constexpr double kG = 9.80665;
 
 double clamp11(double v) noexcept { return std::clamp(v, -1.0, 1.0); }
 
+/// True when a loop missed a period - the stack flew another level meanwhile
+/// - so what it holds (a setpoint on its way, a smoothed value) no longer
+/// describes the flight and it starts again from the state. Measured on the
+/// vehicle's own clock, which a running loop sees advance by its period.
+bool resumed(const ControlContext& ctx, double& lastTime) noexcept {
+    const double t = ctx.state.simTime;
+    const bool stale = lastTime >= 0.0 && (t - lastTime > 1.5 * ctx.dt || t < lastTime);
+    lastTime = t;
+    return stale;
+}
+
 } // namespace
 
 // --- Parameters ----------------------------------------------------------------
@@ -45,6 +56,14 @@ AttitudeLoop::AttitudeLoop() {
     params_.add("rudder.beta_gain", &rudderBetaGain);
     params_.add("throttle.feedforward", &throttleFeedforward);
     params_.add("roll.max_rate", &maxRollRateRadS);
+    params_.add("roll.integral_limit", &roll.integralLimit);
+    params_.add("pitch.integral_limit", &pitch.integralLimit);
+    params_.add("airspeed.integral_limit", &airspeed.integralLimit);
+    params_.add("schedule.tas_ms", &schedule.tasMs);
+    params_.add("schedule.eas_ms", &schedule.easMs);
+    params_.add("roll.eas_exponent", &rollEasExponent); params_.add("roll.tas_exponent", &rollTasExponent);
+    params_.add("pitch.eas_exponent", &pitchEasExponent); params_.add("pitch.tas_exponent", &pitchTasExponent);
+    params_.add("pitch.trim", &pitchTrim); params_.add("pitch.trim_lift", &pitchTrimLift);
     airspeed.outMin = -1.0;
     airspeed.outMax = 1.0;
 }
@@ -57,18 +76,23 @@ Command AttitudeLoop::update(const ControlContext& ctx, const Command& in) {
     double rollTarget = orHold(c.rollRad, 0.0);
     if (!isHold(c.headingRad)) {
         const double maxBank = orHold(c.maxBankRad, 0.785);
-        rollTarget = std::clamp(headingGain * geo::wrapPi(c.headingRad - yawNow), -maxBank, maxBank);
+        rollTarget = std::clamp(headingGain * schedule.speedRatio(s) * geo::wrapPi(c.headingRad - yawNow), -maxBank, maxBank);
     }
-    if (!haveRef_) {
+    if (!haveRef_ || resumed(ctx, lastTime_)) {
         rollRef_ = rollNow;
         haveRef_ = true;
     }
     rollRef_ = rateLimit(rollRef_, rollTarget, maxRollRateRadS, ctx.dt);
 
     ActuatorCommand out;
-    out.aileron = roll.update(geo::wrapPi(rollRef_ - rollNow), s.angularRateBodyRadS[0], ctx.dt);
-    // Positive elevator is nose-down in JSBSim: negate the nose-up demand.
-    out.elevator = -pitch.update(orHold(c.pitchRad, pitchNow) - pitchNow, s.angularRateBodyRadS[1], ctx.dt);
+    out.aileron = roll.update(geo::wrapPi(rollRef_ - rollNow), s.angularRateBodyRadS[0], ctx.dt,
+                              schedule.factor(s, rollEasExponent, rollTasExponent));
+    // Positive elevator is nose-down in JSBSim: negate the nose-up demand. The
+    // trim is the elevator a level turn at this bank holds.
+    const double turn = 1.0 / std::max(std::cos(rollNow), 0.3);
+    out.elevator = schedule.trimElevator(s, turn, pitchTrim, pitchTrimLift) -
+                   pitch.update(orHold(c.pitchRad, pitchNow) - pitchNow, s.angularRateBodyRadS[1], ctx.dt,
+                                schedule.factor(s, pitchEasExponent, pitchTasExponent));
     out.rudder = clamp11(rudderBetaGain * s.betaRad);
     if (!isHold(c.airspeedMs))
         out.throttle = std::clamp(throttleFeedforward + airspeed.update(c.airspeedMs - s.airspeedTrueMs, 0.0, ctx.dt), 0.0, 1.0);
@@ -82,6 +106,7 @@ void AttitudeLoop::reset() {
     pitch.reset();
     airspeed.reset();
     haveRef_ = false;
+    lastTime_ = -1.0;
 }
 
 // --- AccelerationLoop -----------------------------------------------------------
@@ -92,6 +117,16 @@ AccelerationLoop::AccelerationLoop() {
     params_.add("longitudinal.kp", &longitudinal.kp); params_.add("longitudinal.ki", &longitudinal.ki);
     params_.add("rudder.beta_gain", &rudderBetaGain);
     params_.add("throttle.feedforward", &throttleFeedforward);
+    params_.add("load_factor.integral_limit", &loadFactor.integralLimit);
+    params_.add("roll_rate.integral_limit", &rollRate.integralLimit);
+    params_.add("load_factor.feedforward", &loadFactorFeedforward);
+    params_.add("load_factor.path_hold", &loadFactorPathHold);
+    params_.add("roll_rate.feedforward", &rollRateFeedforward);
+    params_.add("schedule.tas_ms", &schedule.tasMs);
+    params_.add("schedule.eas_ms", &schedule.easMs);
+    params_.add("load_factor.eas_exponent", &loadFactorEasExponent); params_.add("load_factor.tas_exponent", &loadFactorTasExponent);
+    params_.add("roll_rate.eas_exponent", &rollRateEasExponent); params_.add("roll_rate.tas_exponent", &rollRateTasExponent);
+    params_.add("pitch.trim", &pitchTrim); params_.add("pitch.trim_lift", &pitchTrimLift);
     longitudinal.outMin = -1.0;
     longitudinal.outMax = 1.0;
 }
@@ -99,9 +134,16 @@ AccelerationLoop::AccelerationLoop() {
 Command AccelerationLoop::update(const ControlContext& ctx, const Command& in) {
     const auto& c = std::get<AccelerationCommand>(in);
     const auto& s = ctx.sensed;
+    const double n = orHold(c.loadFactorG, 1.0), p = orHold(c.rollRateRadS, 0.0);
+    const double sn = schedule.factor(s, loadFactorEasExponent, loadFactorTasExponent);
+    const double sp = schedule.factor(s, rollRateEasExponent, rollRateTasExponent);
+    // what neutral stick gives: the load factor that balances gravity at this
+    // attitude (a law that holds the flight path), or 1 g (a trimmed surface)
+    const double level = 1.0 + loadFactorPathHold * (std::cos(s.eulerRad[1]) * std::cos(s.eulerRad[0]) - 1.0);
     ActuatorCommand out;
-    out.elevator = -loadFactor.update(orHold(c.loadFactorG, 1.0) - s.loadFactor, s.angularRateBodyRadS[1], ctx.dt);
-    out.aileron = rollRate.update(orHold(c.rollRateRadS, 0.0) - s.angularRateBodyRadS[0], 0.0, ctx.dt);
+    out.elevator = schedule.trimElevator(s, n, pitchTrim, pitchTrimLift) -
+                   (sn * loadFactorFeedforward * (n - level) + loadFactor.update(n - s.loadFactor, s.angularRateBodyRadS[1], ctx.dt, sn));
+    out.aileron = sp * rollRateFeedforward * p + rollRate.update(p - s.angularRateBodyRadS[0], 0.0, ctx.dt, sp);
     out.rudder = clamp11(rudderBetaGain * s.betaRad);
     if (!isHold(c.longitudinalMs2))
         out.throttle = std::clamp(throttleFeedforward + longitudinal.update(c.longitudinalMs2 - s.accelerationBodyMs2[0], 0.0, ctx.dt), 0.0, 1.0);
@@ -120,7 +162,14 @@ void AccelerationLoop::reset() {
 
 VelocityLoop::VelocityLoop() {
     params_.add("vertical_speed.kp", &verticalSpeed.kp); params_.add("vertical_speed.ki", &verticalSpeed.ki);
+    params_.add("vertical_speed.integral_limit", &verticalSpeed.integralLimit);
+    params_.add("vertical_speed.feedforward", &flightPathFeedforward);
+    params_.add("vertical_speed.command_lag", &commandLagS);
+    params_.add("vertical_speed.alpha_zero_lift", &alphaZeroLift);
+    params_.add("pitch.min", &verticalSpeed.outMin);
+    params_.add("pitch.max", &verticalSpeed.outMax);
     params_.add("max_bank", &maxBankRad);
+    params_.add("schedule.tas_ms", &referenceSpeedMs);
 }
 
 Command VelocityLoop::update(const ControlContext& ctx, const Command& in) {
@@ -128,7 +177,32 @@ Command VelocityLoop::update(const ControlContext& ctx, const Command& in) {
     const auto& s = ctx.sensed;
     AttitudeCommand out;
     const double vz = -s.velocityNedMs[2];
-    out.pitchRad = verticalSpeed.update(orHold(c.verticalSpeedMs, 0.0) - vz, 0.0, ctx.dt);
+    double vzTarget = orHold(c.verticalSpeedMs, 0.0);
+    const double tas = std::max(s.airspeedTrueMs, 10.0);
+    // a pitch change moves the vertical speed by tas times as much: the gains hold at the reference speed
+    const double scale = referenceSpeedMs > 0.0 ? referenceSpeedMs / std::max(tas, 0.3 * referenceSpeedMs) : 1.0;
+    const auto lag = [&](double value, double target, double seconds) {
+        return seconds > 0.0 ? value + (target - value) * std::min(1.0, ctx.dt / seconds) : target;
+    };
+    if (resumed(ctx, lastTime_)) started_ = false;
+    if (commandLagS > 0.0) {
+        // the command followed through its lag, from the vertical speed flown when the loop took over
+        vzRef_ = started_ ? lag(vzRef_, vzTarget, commandLagS) : vz;
+        vzTarget = vzRef_;
+    }
+    double path = 0.0;
+    if (flightPathFeedforward != 0.0) {
+        // pitch = the flight path the vertical speed needs + the angle of attack
+        // the wing would fly at 1 g: alpha scaled back by the load factor about
+        // the zero-lift angle, so a pull does not feed itself (and a steady
+        // turn gives the level value). Smoothed over a second; the integrator
+        // trims what is left.
+        const double alpha1g = alphaZeroLift + (s.alphaRad - alphaZeroLift) / std::clamp(s.loadFactor, 0.5, 3.0);
+        alpha_ = started_ ? lag(alpha_, alpha1g, 1.0) : alpha1g;
+        path = flightPathFeedforward * (std::asin(std::clamp(vzTarget / tas, -0.5, 0.5)) + alpha_);
+    }
+    started_ = true;
+    out.pitchRad = std::clamp(path + verticalSpeed.update(vzTarget - vz, 0.0, ctx.dt, scale), verticalSpeed.outMin, verticalSpeed.outMax);
     out.maxBankRad = maxBankRad;
     if (!isHold(c.turnRateRadS)) {
         const double v = std::max(s.airspeedTrueMs, 10.0);
@@ -142,7 +216,11 @@ Command VelocityLoop::update(const ControlContext& ctx, const Command& in) {
     return out;
 }
 
-void VelocityLoop::reset() { verticalSpeed.reset(); }
+void VelocityLoop::reset() {
+    verticalSpeed.reset();
+    started_ = false;
+    lastTime_ = -1.0;
+}
 
 // --- PositionLoop ---------------------------------------------------------------
 

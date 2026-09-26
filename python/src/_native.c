@@ -746,6 +746,19 @@ static PyObject* world_set_controller_parameter(PyObject* o, PyObject* const* ar
     Py_RETURN_NONE;
 }
 
+static PyObject* world_controller_parameter(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int level;
+    if (!check_args(n, 3, 3, "controller_parameter") || !as_u32(args[0], &id) || !as_int(args[1], &level) || !WORLD_IDLE(self))
+        return NULL;
+    const char* name = as_str(args[2], "parameter name");
+    double v = 0.0;
+    if (!name) return NULL;
+    if (fsim_vehicle_controller_parameter(self->world, id, level, name, &v) != FSIM_OK) return fail();
+    return PyFloat_FromDouble(v);
+}
+
 static PyObject* world_get_property(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint32_t id;
@@ -968,6 +981,7 @@ static PyMethodDef world_methods[] = {
     FAST("behavior_finished", world_behavior_finished, "behavior_finished(id)"),
     FAST("use_controller", world_use_controller, "use_controller(id, level, controller_id)"),
     FAST("set_controller_parameter", world_set_controller_parameter, "set_controller_parameter(id, level, name, value)"),
+    FAST("controller_parameter", world_controller_parameter, "controller_parameter(id, level, name) -> float"),
     FAST("get_property", world_get_property, "get_property(id, path)"),
     FAST("set_property", world_set_property, "set_property(id, path, value)"),
     FAST("get_environment", world_get_environment, "the environment as a dict"),

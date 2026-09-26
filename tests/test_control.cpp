@@ -191,3 +191,81 @@ TEST_CASE("controller parameters are tunable by name", "[control]") {
     REQUIRE(*att->parameter("roll.kp") == 4.0);
     REQUIRE_FALSE(att->setParameter("nonsense", 1.0));
 }
+
+TEST_CASE("a scaled PID scales its gains, not what its integrator holds", "[control]") {
+    Pid a{2.0, 0.5, 0.3, 1.0, -10.0, 10.0}, b = a;
+    // scale 1 is the unscaled update
+    REQUIRE_THAT(a.update(0.2, 0.1, 0.01), Catch::Matchers::WithinAbs(b.update(0.2, 0.1, 0.01, 1.0), 1e-12));
+    const double held = b.integral;
+    const double out = b.update(0.0, 0.0, 0.01, 3.0);
+    REQUIRE(b.integral == held);   // no error: the integrator keeps what it held
+    REQUIRE_THAT(out, Catch::Matchers::WithinAbs(held, 1e-12));
+    Pid c{2.0, 0.0, 0.5, 1.0, -10.0, 10.0};
+    REQUIRE_THAT(c.update(0.2, 0.1, 0.01, 2.0), Catch::Matchers::WithinAbs(2.0 * (2.0 * 0.2 - 0.5 * 0.1), 1e-12));
+}
+
+TEST_CASE("the airspeed schedule follows the aircraft's response, and its trim law the lift", "[control]") {
+    AirspeedSchedule off;
+    sim::VehicleState s = levelFlight(200.0);
+    s.airspeedCalibratedMs = 160.0;
+    REQUIRE(off.factor(s, 2.0, -1.0) == 1.0);
+    REQUIRE(off.speedRatio(s) == 1.0);
+    REQUIRE(off.trimElevator(s, 1.0, 0.0, 0.0) == 0.0);
+
+    AirspeedSchedule on{100.0, 80.0};
+    // a surface's load factor grows as eas^2: twice the eas, a quarter of the gain
+    REQUIRE_THAT(on.factor(s, 2.0, 0.0), Catch::Matchers::WithinAbs(0.25, 1e-12));
+    // a law's pitch rate per g falls as 1 / tas: twice the tas, twice the gain
+    REQUIRE_THAT(on.factor(s, 0.0, -1.0), Catch::Matchers::WithinAbs(2.0, 1e-12));
+    REQUIRE(on.factor(s, 8.0, 0.0) == 0.2);   // held within 0.2 .. 5
+    REQUIRE_THAT(on.speedRatio(s), Catch::Matchers::WithinAbs(2.0, 1e-12));
+    // the trim law: the trim at the reference eas, the lift's part growing as n (eas0 / eas)^2
+    s.airspeedCalibratedMs = 80.0;
+    REQUIRE_THAT(on.trimElevator(s, 1.0, 0.3, 0.2), Catch::Matchers::WithinAbs(0.3, 1e-12));
+    REQUIRE_THAT(on.trimElevator(s, 2.0, 0.3, 0.2), Catch::Matchers::WithinAbs(0.5, 1e-12));
+    s.airspeedCalibratedMs = 80.0 / std::sqrt(2.0);
+    REQUIRE_THAT(on.trimElevator(s, 1.0, 0.3, 0.2), Catch::Matchers::WithinAbs(0.5, 1e-12));
+}
+
+TEST_CASE("an aircraft's controller settings reach the loops the stack creates by id", "[control]") {
+    Harness h;
+    const auto unused = h.stack.setControllerSettings({{"pid_attitude", "pitch.kp", 1.25},
+                                                       {"pid_velocity", "schedule.tas_ms", 150.0},
+                                                       {"pid_attitude", "no.such", 1.0},
+                                                       {"someone_elses", "gain", 2.0}});
+    REQUIRE(unused.size() == 2);
+    REQUIRE(*h.stack.controller(Level::Attitude)->parameter("pitch.kp") == 1.25);
+    REQUIRE(*h.stack.controller(Level::Velocity)->parameter("schedule.tas_ms") == 150.0);
+    // a new one by id gets them again; an instance handed over is left as it is
+    REQUIRE(h.stack.use(Level::Attitude, "pid_attitude"));
+    REQUIRE(*h.stack.controller(Level::Attitude)->parameter("pitch.kp") == 1.25);
+    REQUIRE(h.stack.use(Level::Attitude, std::make_unique<AttitudeLoop>()));
+    REQUIRE(*h.stack.controller(Level::Attitude)->parameter("pitch.kp") == 2.5);
+    REQUIRE(h.stack.controllerSettings().size() == 4);
+}
+
+TEST_CASE("the velocity loop's feedforwards lag the command and hold the 1 g angle of attack", "[control]") {
+    VelocityLoop plain, fed;
+    fed.flightPathFeedforward = 1.0;
+    fed.commandLagS = 2.0;
+    fed.alphaZeroLift = -0.05;
+    sim::VehicleState s = levelFlight(100.0);
+    s.alphaRad = 0.05;
+    Rng rng{1};
+    ControlContext ctx{1, s, s, 0.1, nullptr, &rng};
+    VelocityCommand c;
+    c.verticalSpeedMs = 10.0;
+    // the lagged command starts from the vertical speed flown: no jump in pitch
+    const auto a = std::get<AttitudeCommand>(fed.update(ctx, c));
+    REQUIRE_THAT(a.pitchRad, Catch::Matchers::WithinAbs(0.05, 1e-3));   // just the 1 g alpha
+    // at 2 g the wing's alpha doubles about its zero-lift angle: the 1 g one is fed forward
+    s.alphaRad = -0.05 + 2.0 * 0.1;
+    s.loadFactor = 2.0;
+    VelocityCommand level;
+    level.verticalSpeedMs = 0.0;
+    const auto b = std::get<AttitudeCommand>(fed.update(ctx, level));
+    REQUIRE_THAT(b.pitchRad, Catch::Matchers::WithinAbs(0.05, 1e-3));
+    // without them the loop is what it was
+    const auto p = std::get<AttitudeCommand>(plain.update(ctx, c));
+    REQUIRE(p.pitchRad > 0.0);
+}

@@ -17,6 +17,13 @@ struct Pid {
         integral = std::clamp(integral + ki * error * dt, -integralLimit, integralLimit);
         return std::clamp(kp * error + integral - kd * measuredRate, outMin, outMax);
     }
+    /// The same with kp, ki and kd multiplied by `scale` (a gain schedule).
+    /// What the integrator holds is not rescaled, so the output stays
+    /// continuous as the scale changes.
+    double update(double error, double measuredRate, double dt, double scale) noexcept {
+        integral = std::clamp(integral + scale * ki * error * dt, -integralLimit, integralLimit);
+        return std::clamp(scale * (kp * error - kd * measuredRate) + integral, outMin, outMax);
+    }
     void reset() noexcept { integral = 0.0; }
 };
 
