@@ -200,12 +200,12 @@ length = 0.300
 # nose axle 3.76 m behind the nose's tip (published wheelbase 3.57 m), the
 # published 2.51 m track; the nose wheel stands lower, so the aircraft sits
 # 5 deg nose-up. The nose wheel is set right of the centre line, clear of the
-# gun (Russian sources; 0.15 m: estimate). Tyres 840x360 and 660x200. The
+# gun (Russian sources; 0.10 m: estimate). Tyres 840x360 and 660x200. The
 # main legs fold forward into the nacelles, the wheels turning to lie flat
 # (published); the nose leg forward (estimate).
 [[gear]]
 name = "Nose Gear"
-position = [3.760, 0.150, -2.720]
+position = [3.760, 0.100, -2.720]
 steerable = true
 max_steer = 60
 wheel_diameter = 0.660
@@ -213,7 +213,7 @@ wheel_width = 0.200
 retractable = true
 retract = "forward"
 static_deflection = 0.10
-attach = [3.950, 0.150, -1.100]
+attach = [3.950, 0.100, -1.100]
 
 [[gear]]
 name = "Main Gear"
