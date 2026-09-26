@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Status | Accepted 2026-09-26. The owner approved the two-part design and asked for this record before any code. Implemented in the migration order of section 14, all six steps (section 17) |
+| Status | Accepted 2026-09-26. The owner approved the two-part design and asked for this record before any code. Implemented in the migration order of section 14, all six steps, and green on CI (section 17) |
 | Extends | ADR-20 (the multi-level control stack), which stays in force for the runtime |
 | Scope | How consumers command aircraft; how an aircraft describes what it can do; how commands are arbitrated, tracked and ended; how knowledge about one aircraft reaches the control loops |
 | Related | [Design document](FlightSim_System_Architecture_and_Design.md) §9.3 (control), §10.3 (stability rules), §12 (performance); [sdk/control.md](sdk/control.md); [hangar.md](hangar.md) |
@@ -1076,7 +1076,7 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
   - World throughput, same binary, 3 interleaved rounds: the F-16C at 99.7 % and the B-52H at 99.3 % of the same flights on the old attitude loop (`world classic`). The c172x, which flies the same loop either way, at 98.7 %: the noise.
 
 **Step 6 (conformance in CI).**
-- **A step of its own.** CI's "Control conformance" step runs every test labelled `conformance` before the others (`ctest --preset ucrt64-release -L conformance`, 7 s here): the three test cases below, the c172x's checkpoints and the allocation gate.
+- **A step of its own.** CI's "Control conformance" step runs every test labelled `conformance` before the others (`ctest --preset ucrt64-release -L conformance`: 7 s on a desktop, 16 s on the runner): the three test cases below, the c172x's checkpoints and the allocation gate.
 - **Every capability of every aircraft** (`tests/test_conformance.cpp`). The platform ships the c172x and hangar's 31 designs, between them all three adapters. For each, every descriptor is well formed, and a command built from it goes through NEW, a world step, UPDATE (the same type and another) and CANCEL as the descriptor says.
 - **The lifecycle's rules under random operations.** One aircraft per adapter (the c172x, the B-52H, the F-16C) is driven through seeded random sequences of 600 operations:
   - NEWs from every source, with every range policy and random axes;
@@ -1099,6 +1099,9 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
   | F-16C, 164 m/s | within 2 m | 2.0 s, 0 % | 3.0 s, 10 % | 5.3 s, 13 % | 1.0 s, 11 % | 0.5 s, 4 % | 90.0° |
 
   The stock adapter's c172x flies the shared gains, which C1 freezes with its flights. Its checkpoints hold it exactly instead. By the suite's rule, its acceleration loop would fail: it overshoots a 1.5 g step by 132 %, and that is how it has always flown.
+- **Exit criterion: green on the runner.** Met by the first run with the step, [36248274990](https://github.com/coasho/DecisionDRLTest/actions/runs/36248274990) for 6d4679a (2026-09-26):
+  - "Control conformance" passed in 16 s, and the rest of the tests ("Test") in 532 s.
+  - The whole run took 19 minutes, the same as the run before it.
 
 **Allocations.**
 - Per update, none, except `loiter` (4, one per parameter's map node) and `waypoints` (2): the per-step `BehaviorCommand` copy, P6.

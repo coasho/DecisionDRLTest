@@ -663,7 +663,8 @@ step 5a moved the loops' design from hangar into the platform, so an aircraft ca
 step 5b flies a design's attitude over pseudo-controls - a roll rate, a load factor and an acceleration that its
 acceleration level makes with its own surfaces or law - and took the manoeuvre suite's failures from 29 to 20 of 558;
 step 6 put the architecture's conformance in CI as a step of its own: the command lifecycle's state machine for every
-adapter, the stock c172x's checkpoints, the allocation gate and a short manoeuvre suite for a design per adapter.
+adapter, the stock c172x's checkpoints, the allocation gate and a short manoeuvre suite for a design per adapter,
+green on its first run on the runner.
 M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |
