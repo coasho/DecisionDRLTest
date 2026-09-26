@@ -6,6 +6,7 @@
 #include "platform/Threads.h"
 #include "control/Laws.h"
 #include "control/Profile.h"
+#include "fsim/ControllerRegistry.h"
 #include "sim/JsbsimModel.h"
 
 #include <algorithm>
@@ -36,10 +37,14 @@ std::shared_ptr<const control::VehicleProfile> readAircraftProfile(const std::st
         LOG_INFO("session") << "aircraft '" << aircraft << "': the loops designed from its identified plant";
     const auto& settings = profile->control.settings;
     if (!settings.empty()) {
-        control::ControlStack probe;
-        for (const auto& s : probe.setControllerSettings(settings))
-            LOG_WARN("session") << "aircraft '" << aircraft << "': no built-in controller takes fsim/control setting " << s.controller << " "
-                                << s.parameter << "; kept for a controller registered under that id";
+        // a setting a controller of that id takes - whether or not a level flies it - is in use
+        std::unique_ptr<control::Controller> probe;
+        for (const auto& s : settings) {
+            if (!probe || s.controller != probe->id()) probe = control::ControllerRegistry::instance().create(s.controller);
+            if (!probe || !probe->setParameter(s.parameter, s.value))
+                LOG_WARN("session") << "aircraft '" << aircraft << "': no built-in controller takes fsim/control setting " << s.controller << " "
+                                    << s.parameter << "; kept for a controller registered under that id";
+        }
         LOG_INFO("session") << "aircraft '" << aircraft << "' carries " << settings.size() << " controller settings";
     }
     return profile;
@@ -188,6 +193,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     const auto& adapter = control::adapterFor(e->profile->identity.family);
     e->stack.setAdapter(adapter);
     if (!e->profile->control.settings.empty()) e->stack.setControllerSettings(e->profile->control.settings);
+    for (const auto& [level, controller] : e->profile->control.controllers) e->stack.use(level, controller); // with the settings above
     e->host.bind(id, e->stack, *e->catalog, adapter, *e->profile, options_.dt * e->controlDivider);
     e->flapsPosition = pool_->vehicle(slot).property("fcs/flap-pos-norm");
     for (auto& factory : worldEffects_) e->effects.push_back(factory());

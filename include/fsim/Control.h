@@ -25,10 +25,29 @@
 
 namespace fsim::control {
 
-/// Strictly ordered: each level's controller commands a lower one.
+/// The control levels. Their values are the C ABI's and Python's; their order
+/// in the cascade is levelRank's.
 enum class Level : std::uint8_t { Actuator = 0, Attitude, Acceleration, Velocity, Position, Behavior, Count };
 
 FSIM_API const char* levelName(Level level) noexcept;
+
+/// Where a level sits in the cascade, from the bottom: actuator 0,
+/// acceleration 1 (the roll rate and load factor an attitude is flown with),
+/// attitude 2, velocity 3, position 4, behaviour 5. A controller returns a
+/// command at a level of lower rank than its own.
+constexpr int levelRank(Level l) noexcept {
+    switch (l) {
+    case Level::Actuator: return 0;
+    case Level::Acceleration: return 1;
+    case Level::Attitude: return 2;
+    case Level::Velocity: return 3;
+    case Level::Position: return 4;
+    case Level::Behavior: return 5;
+    default: return -1;
+    }
+}
+/// The levels with a controller, from the top of the cascade down.
+inline constexpr Level kCascadeOrder[] = {Level::Position, Level::Velocity, Level::Attitude, Level::Acceleration};
 
 inline constexpr double kHold = std::numeric_limits<double>::quiet_NaN();
 inline bool isHold(double v) noexcept { return std::isnan(v); }
@@ -163,7 +182,7 @@ struct ControlContext {
 };
 
 /// One level of the cascade: accepts a command at `level()` and returns a
-/// command at any strictly lower level (design 9.3 "Controller").
+/// command at any level below it, by levelRank (design 9.3 "Controller").
 class Controller {
 public:
     virtual ~Controller() = default;

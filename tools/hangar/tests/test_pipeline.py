@@ -130,7 +130,7 @@ class Stages(unittest.TestCase):
             v = w.create_vehicle("t", type="jsbsim:" + self.name, altitude_msl_m=1000.0, airspeed_ms=25.0)
             self.assertEqual(v.profile_section("control"), (1, 4))  # designed from the plant (provenance: derived)
             self.assertAlmostEqual(v.controller_parameter(fsim.Level.ATTITUDE, "schedule.tas_ms"), reference["tas_ms"], places=9)
-            self.assertAlmostEqual(v.controller_parameter(fsim.Level.ATTITUDE, "throttle.feedforward"), identified["throttle_trim"],
+            self.assertAlmostEqual(v.controller_parameter(fsim.Level.ACCELERATION, "throttle.feedforward"), identified["throttle_trim"],
                                    places=9)
             self.assertEqual(v.profile_section("plant"), (1, 1))  # version 1, from hangar
             self.assertAlmostEqual(v.profile_value("plant/roll/tau_s"), identified["roll"]["lag_s"], places=5)

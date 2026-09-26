@@ -14,6 +14,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace fsim::control {
@@ -141,6 +142,10 @@ struct ControlSection {
     static constexpr std::uint16_t kVersion = 1;
     SectionHeader header;
     std::vector<ControllerSetting> settings;
+    /// The controllers, by registry id, its levels fly with instead of their
+    /// defaults: what the laws designed from the plant choose (the attitude
+    /// loop over pseudo-controls). Not carried in aircraft files.
+    std::vector<std::pair<Level, std::string>> controllers;
 };
 
 struct VehicleProfile {

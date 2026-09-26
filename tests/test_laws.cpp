@@ -76,12 +76,23 @@ TEST_CASE("each loop's poles go where the plant's lag asks", "[laws]") {
     // pitch: on the pitch rate the load factor gives, g0 G_n / tas
     const double gq = 9.80665 * 8.0 / 150.0, tq = 0.7, wq = std::min(2.5, 0.7 / tq);
     CHECK(std::abs(std::sqrt(gq * fbw.at("pid_attitude pitch.kp") / tq) - wq) < 1e-9);
+    // the loop over pseudo-controls: the same poles on the allocation's lags,
+    // in rates (a unit gain) - tau s^2 + (1 + kd) s + kp
+    const double rp = fbw.at("pseudo_attitude roll.gain"), rd = fbw.at("pseudo_attitude roll.kd");
+    CHECK(std::abs(std::sqrt(rp / tau) - w) < 1e-9);
+    CHECK(std::abs((1.0 + rd) / tau / (2.0 * w) - 0.8) < 1e-9);
+    const double pp = fbw.at("pseudo_attitude pitch.kp"), pd = fbw.at("pseudo_attitude pitch.kd");
+    CHECK(std::abs(std::sqrt(pp / tq) - wq) < 1e-9);
+    CHECK(std::abs((1.0 + pd) / tq / (2.0 * wq) - 0.8) < 1e-9);
+    CHECK(fbw.at("pseudo_attitude heading.gain") == fbw.at("pid_attitude heading.gain"));
     // a plant damped enough on its own: no negative rate feedback, the dominant pole at omega
     VehicleProfile quick = plant(ControlFamily::FlyByWire);
     quick.plant.roll = {0.05, 4.0};
     const auto q = byName(designLaws(quick));
     CHECK(q.at("pid_attitude roll.kd") == 0.0);
-    CHECK(designLaws(quick).size() == 51);
+    CHECK(q.at("pseudo_attitude roll.kd") == 0.0);
+    CHECK(std::abs(q.at("pseudo_attitude roll.gain") - 2.5 * (1.0 - 0.05 * 2.5)) < 1e-12);
+    CHECK(designLaws(quick).size() == 64);
 }
 
 TEST_CASE("a law and surfaces are designed each as it answers", "[laws]") {
@@ -105,6 +116,17 @@ TEST_CASE("a law and surfaces are designed each as it answers", "[laws]") {
     CHECK(direct.at("pid_attitude pitch.trim_lift") == 0.2);
     CHECK(std::abs(direct.at("pid_attitude rudder.beta_gain") + 0.5 / 0.4) < 1e-12);
     CHECK(direct.at("pid_attitude pitch.kd") >= 0.25 * direct.at("pid_attitude pitch.kp") - 1e-12);
+    // and over pseudo-controls, the same floors on the rate damping
+    CHECK(direct.at("pseudo_attitude pitch.kd") >= 0.25 * direct.at("pseudo_attitude pitch.kp") - 1e-12);
+    CHECK(direct.at("pseudo_attitude roll.kd") >= 0.25 * direct.at("pseudo_attitude roll.gain") - 1e-12);
+    // the allocation: the throttle an acceleration needs, from the identified thrust
+    CHECK(std::abs(direct.at("pid_acceleration longitudinal.feedforward") - 1.0 / 6.0) < 1e-12);
+    // the stick per g: most of a law's; for surfaces the trim law gives it, or
+    // without one, all of the identified response
+    CHECK(direct.at("pid_acceleration load_factor.feedforward") == 0.0);
+    VehicleProfile untrimmed = plant(ControlFamily::Direct);
+    untrimmed.plant.elevatorTrim = untrimmed.plant.elevatorTrimLift = 0.0;
+    CHECK(std::abs(byName(designLaws(untrimmed)).at("pid_acceleration load_factor.feedforward") - 1.0 / 8.0) < 1e-12);
     CHECK(direct.at("pid_acceleration load_factor.path_hold") == 0.0);
     CHECK(std::abs(direct.at("pid_velocity max_bank") - 30.0 * kDeg) < 1e-12);
     CHECK(direct.at("pid_attitude throttle.feedforward") == 0.5);
@@ -126,17 +148,25 @@ TEST_CASE("an aircraft flies the loops designed from its plant; gains it or a tr
     VehicleProfile derived = plant(ControlFamily::Direct);
     REQUIRE(completeControl(derived));
     CHECK(derived.control.header.provenance == Provenance::Derived);
+    // the attitude level then flies the loop over pseudo-controls
+    REQUIRE(derived.control.controllers.size() == 1);
+    CHECK(derived.control.controllers[0].first == Level::Attitude);
+    CHECK(derived.control.controllers[0].second == "pseudo_attitude");
+    CHECK(own.control.controllers.empty()); // gains of its own: the loops they are for
 
     session::World w(options("laws-world"));
     const auto viper = w.createVehicle(spec("viper", "jsbsim:f16c"));
     REQUIRE(viper != 0);
     const VehicleProfile& p = *w.profile(viper);
     CHECK(p.control.header.provenance == Provenance::Derived); // hangar wrote its plant, not gains
-    CHECK(p.control.settings.size() == 51);
+    CHECK(p.control.settings.size() == 64);
     const Controller* attitude = w.controls(viper)->controller(Level::Attitude);
+    const Controller* allocation = w.controls(viper)->controller(Level::Acceleration);
     REQUIRE(attitude != nullptr);
+    REQUIRE(allocation != nullptr);
+    CHECK(std::string(attitude->id()) == "pseudo_attitude");
     CHECK(attitude->parameter("schedule.tas_ms").value_or(0.0) == p.plant.tasMs);
-    CHECK(attitude->parameter("throttle.feedforward").value_or(0.0) == p.plant.throttleTrim);
+    CHECK(allocation->parameter("throttle.feedforward").value_or(0.0) == p.plant.throttleTrim);
     // a stock aircraft has neither: the loops' own defaults
     const auto stock = w.createVehicle(spec("stock", "jsbsim:c172x"));
     CHECK_FALSE(w.profile(stock)->control.header.present());
@@ -148,9 +178,10 @@ TEST_CASE("an aircraft flies the loops designed from its plant; gains it or a tr
     auto s = spec("twitchy", "jsbsim:f16c");
     s.profile = faster;
     const auto twitchy = w.createVehicle(s);
-    const double kp = attitude->parameter("roll.kp").value_or(0.0);
-    const double kpFaster = w.controls(twitchy)->controller(Level::Attitude)->parameter("roll.kp").value_or(0.0);
-    CHECK(std::abs(kpFaster - 0.5 * kp) < 1e-9 * kp); // twice the roll rate per aileron: half the gain
+    const double ff = allocation->parameter("roll_rate.feedforward").value_or(0.0);
+    const double ffFaster = w.controls(twitchy)->controller(Level::Acceleration)->parameter("roll_rate.feedforward").value_or(0.0);
+    REQUIRE(ff > 0.0);
+    CHECK(std::abs(ffFaster - 0.5 * ff) < 1e-9 * ff); // twice the roll rate per aileron: half the aileron
     // a trainer's gains of their own win
     auto gains = std::make_shared<VehicleProfile>();
     gains->control.header = {1, Provenance::User};
@@ -158,5 +189,7 @@ TEST_CASE("an aircraft flies the loops designed from its plant; gains it or a tr
     s.name = "tuned";
     s.profile = gains;
     const auto tuned = w.createVehicle(s);
-    CHECK(w.controls(tuned)->controller(Level::Attitude)->parameter("roll.kp").value_or(0.0) == 0.123);
+    const Controller* trainers = w.controls(tuned)->controller(Level::Attitude);
+    CHECK(std::string(trainers->id()) == "pid_attitude"); // the loop its gains are for
+    CHECK(trainers->parameter("roll.kp").value_or(0.0) == 0.123);
 }

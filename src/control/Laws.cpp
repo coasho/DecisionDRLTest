@@ -91,7 +91,9 @@ std::vector<ControllerSetting> designLaws(const VehicleProfile& p) {
     set(a, "pitch.eas_exponent", 0.0), set(a, "pitch.tas_exponent", fbw ? -1.0 : 0.0);
     const char* n = "pid_acceleration";
     set(n, "schedule.tas_ms", v), set(n, "schedule.eas_ms", eas);
-    set(n, "load_factor.feedforward", fbw ? 0.85 / gn : 0.0), set(n, "load_factor.path_hold", fbw ? 1.0 : 0.0);
+    // the stick per g beyond what neutral stick gives: most of a law's; all of
+    // the identified response for surfaces without a trim law, which feeds it otherwise
+    set(n, "load_factor.feedforward", fbw ? 0.85 / gn : lift == 0.0 ? 1.0 / gn : 0.0), set(n, "load_factor.path_hold", fbw ? 1.0 : 0.0);
     set(n, "load_factor.kp", 0.1 / gn), set(n, "load_factor.ki", wN / gn), set(n, "load_factor.kd", fbw ? 0.0 : pitchKd);
     set(n, "load_factor.integral_limit", 0.3), set(n, "pitch.trim", trim), set(n, "pitch.trim_lift", lift);
     set(n, "roll_rate.feedforward", 0.8 / gp), set(n, "roll_rate.kp", 0.1 / gp), set(n, "roll_rate.ki", wP / gp);
@@ -106,6 +108,23 @@ std::vector<ControllerSetting> designLaws(const VehicleProfile& p) {
     set(vel, "vertical_speed.alpha_zero_lift", alpha0), set(vel, "max_bank", maxBankDeg(p.identity.aircraftClass) * kDeg);
     const char* pos = "pid_position";
     set(pos, "altitude.gain", wVz / 3.0), set(pos, "max_vertical_speed", std::clamp(0.1 * v, 3.0, 25.0));
+    // The attitude loop over pseudo-controls (step 5b): the same poles, placed
+    // on the allocation's lags - the roll rate's, the load factor's - in rates
+    // rather than deflections (a unit gain), with the same damping floors.
+    const char* pa = "pseudo_attitude";
+    auto [kPhi, dPhi] = place(1.0, tp, wPhi);
+    if (!fbw) dPhi = std::max(dPhi, 0.25 * kPhi);
+    auto [kTheta, dTheta] = place(1.0, tn, wTheta);
+    if (!fbw) dTheta = std::max(dTheta, 0.25 * kTheta);
+    set(pa, "roll.gain", kPhi), set(pa, "roll.kd", dPhi), set(pa, "roll.max_rate", std::clamp(0.5 * gp, 0.05, 2.0));
+    set(pa, "heading.gain", wPsi * v / kG), set(pa, "schedule.tas_ms", v);
+    // the pitch integrates the rate it asks for, and the allocation trims the
+    // load factor: the integrator only takes out what the path's feedforward misses
+    set(pa, "pitch.kp", kTheta), set(pa, "pitch.kd", dTheta), set(pa, "pitch.ki", kTheta * wTheta / 8.0);
+    set(pa, "pitch.integral_limit", 0.1);
+    set(pa, "airspeed.kp", wV), set(pa, "airspeed.ki", wV * wV / 4.0), set(pa, "airspeed.integral_limit", 2.0);
+    // the allocation's thrust: the throttle an acceleration needs, from the identified response
+    set(n, "longitudinal.feedforward", 1.0 / gv);
     return out;
 }
 
@@ -114,6 +133,7 @@ bool completeControl(VehicleProfile& p) {
     auto settings = designLaws(p);
     if (settings.empty()) return false;
     p.control.settings = std::move(settings);
+    p.control.controllers = {{Level::Attitude, "pseudo_attitude"}}; // the loops above ask for pseudo-controls
     p.control.header = {ControlSection::kVersion, Provenance::Derived};
     return true;
 }

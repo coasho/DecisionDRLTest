@@ -12,7 +12,7 @@ namespace fsim::control {
 namespace {
 
 /// A level no higher than Position: a behaviour's output enters below it.
-int cascadeTop(Level level) noexcept { return static_cast<int>(std::min(level, Level::Position)); }
+int cascadeTop(Level level) noexcept { return std::min(levelRank(level), levelRank(Level::Position)); }
 
 /// What an activity takes from the runtime's flags on the axes it owns.
 std::uint16_t flagsOn(const RuntimeReport& report, AxisMask axes) noexcept {
@@ -121,8 +121,9 @@ Reason CapabilityHost::checkAxes(const CapabilityDescriptor& d, AxisMask axes) n
 }
 
 Reason CapabilityHost::awareUpTo(int top) const noexcept {
-    for (int l = static_cast<int>(Level::Attitude); l <= top; ++l)
-        if (const Controller* c = runtime_->controller(static_cast<Level>(l)); c && !c->axisAware()) return Reason::ControllerNotAxisAware;
+    for (const Level l : kCascadeOrder) // every level with a controller, from the acceleration level up to rank `top`
+        if (levelRank(l) <= top)
+            if (const Controller* c = runtime_->controller(l); c && !c->axisAware()) return Reason::ControllerNotAxisAware;
     return Reason::None;
 }
 
@@ -139,7 +140,7 @@ Reason CapabilityHost::checkAwareness(AxisMask taken, Level level, bool cascade)
         if (c.slots[s].axes & kPrimaryAxes & ~primary) top = std::max(top, cascadeTop(c.slots[s].level));
     for (std::size_t a = 0; a < kPrimaryAxisCount; ++a)
         if (!(primary & (1u << a)) && c.owner[a] == RuntimeConfig::kNone) unowned = static_cast<AxisMask>(unowned | (1u << a));
-    if (unowned && c.vehicleDefault == VehicleDefault::Hold) top = std::max(top, static_cast<int>(Level::Velocity));
+    if (unowned && c.vehicleDefault == VehicleDefault::Hold) top = std::max(top, levelRank(Level::Velocity));
     return awareUpTo(top);
 }
 
@@ -148,7 +149,7 @@ Reason CapabilityHost::setVehicleDefault(VehicleDefault mode) noexcept {
     if (mode == c.vehicleDefault) return Reason::None;
     if (mode == VehicleDefault::Hold) {
         AxisMask unowned = 0;
-        int top = static_cast<int>(Level::Velocity);
+        int top = levelRank(Level::Velocity);
         for (std::size_t a = 0; a < kPrimaryAxisCount; ++a)
             if (c.owner[a] == RuntimeConfig::kNone) unowned = static_cast<AxisMask>(unowned | (1u << a));
         for (std::size_t s = 0; s < kSlotCount; ++s)

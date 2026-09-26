@@ -160,7 +160,8 @@ std::size_t ControlStack::wholeSlot() const noexcept {
 std::size_t ControlStack::topSlot() const noexcept {
     std::size_t top = kNoSlot;
     for (std::size_t s = 0; s < kSlotCount; ++s)
-        if ((config_->slots[s].axes & kPrimaryAxes) && (top == kNoSlot || config_->slots[s].level > config_->slots[top].level)) top = s;
+        if ((config_->slots[s].axes & kPrimaryAxes) && (top == kNoSlot || levelRank(config_->slots[s].level) > levelRank(config_->slots[top].level)))
+            top = s;
     return top;
 }
 
@@ -301,7 +302,7 @@ FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::si
             flown.failure = failure;
         }
         const Level nextLevel = levelOf(next);
-        if (nextLevel >= level) {
+        if (levelRank(nextLevel) >= levelRank(level)) {
             LOG_ERROR("control") << "behaviour '" << behavior->id() << "' returned a command at level " << levelName(nextLevel);
             return fail(out);
         }
@@ -322,7 +323,7 @@ FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::si
         }
         Command next = c->update(ctx, *current);
         const Level nextLevel = levelOf(next);
-        if (nextLevel >= level) {
+        if (levelRank(nextLevel) >= levelRank(level)) {
             LOG_ERROR("control") << "controller '" << c->id() << "' returned a command at level " << levelName(nextLevel)
                                  << " (must be lower than " << levelName(level) << ")";
             return fail(out);
@@ -470,7 +471,7 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
             flown.failure = failure;
         }
         const Level nextLevel = levelOf(next);
-        if (nextLevel >= Level::Behavior) {
+        if (levelRank(nextLevel) >= levelRank(Level::Behavior)) {
             LOG_ERROR("control") << "behaviour '" << behavior->id() << "' returned a command at level " << levelName(nextLevel);
             return fail(out);
         }
@@ -485,8 +486,8 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
         break;
     }
 
-    for (int l = static_cast<int>(Level::Position); l > static_cast<int>(Level::Actuator); --l) {
-        const auto level = static_cast<Level>(l);
+    for (const Level level : kCascadeOrder) { // from the top of the cascade down: a demand reaches each level before it runs
+        const auto l = static_cast<std::size_t>(level);
         AxisMask engaged = 0;
         for (std::size_t a = 0; a < kPrimary; ++a)
             if (from[a] && at[a] == level) engaged = static_cast<AxisMask>(engaged | (1u << a));
@@ -506,7 +507,7 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
         const ControlContext levelCtx{ctx.vehicleId, ctx.state, ctx.sensed, ctx.dt, ctx.world, ctx.rng, engaged};
         Command next = controller->update(levelCtx, merged);
         const Level nextLevel = levelOf(next);
-        if (nextLevel >= level) {
+        if (levelRank(nextLevel) >= levelRank(level)) {
             LOG_ERROR("control") << "controller '" << controller->id() << "' returned a command at level " << levelName(nextLevel)
                                  << " (must be lower than " << levelName(level) << ")";
             return fail(out);

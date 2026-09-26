@@ -26,8 +26,10 @@ bool canDesignLaws(const VehicleProfile& profile) noexcept;
 std::vector<ControllerSetting> designLaws(const VehicleProfile& profile);
 
 /// A profile without gains of its own (no control section) gets the laws
-/// designed from its plant, as a control section with provenance Derived.
-/// Returns whether it did. Gains an aircraft or a trainer gives win.
+/// designed from its plant, as a control section with provenance Derived:
+/// the attitude level flown by the loop over pseudo-controls
+/// (pseudo_attitude), the acceleration level allocating them with the
+/// plant's gains. Returns whether it did. Gains an aircraft or a trainer gives win.
 bool completeControl(VehicleProfile& profile);
 
 } // namespace fsim::control

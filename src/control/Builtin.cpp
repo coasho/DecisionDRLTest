@@ -127,6 +127,80 @@ void AttitudeLoop::reset() {
     lastTime_ = -1.0;
 }
 
+// --- PseudoAttitudeLoop ---------------------------------------------------------
+
+PseudoAttitudeLoop::PseudoAttitudeLoop() {
+    params_.add("roll.gain", &rollGain);
+    params_.add("roll.kd", &rollDamping);
+    params_.add("roll.max_rate", &maxRollRateRadS);
+    params_.add("heading.gain", &headingGain);
+    params_.add("pitch.kp", &pitch.kp); params_.add("pitch.ki", &pitch.ki); params_.add("pitch.kd", &pitch.kd);
+    params_.add("pitch.integral_limit", &pitch.integralLimit);
+    params_.add("pitch.max_rate", &pitch.outMax);
+    params_.add("airspeed.kp", &airspeed.kp); params_.add("airspeed.ki", &airspeed.ki);
+    params_.add("airspeed.integral_limit", &airspeed.integralLimit);
+    params_.add("schedule.tas_ms", &schedule.tasMs);
+}
+
+Command PseudoAttitudeLoop::update(const ControlContext& ctx, const Command& in) {
+    const auto& c = std::get<AttitudeCommand>(in);
+    const auto& s = ctx.sensed;
+    const double rollNow = s.eulerRad[0], pitchNow = s.eulerRad[1];
+    const double rollCos = std::cos(rollNow);
+    AccelerationCommand out{kHold, kHold, kHold, kHold};
+
+    // lateral: the bank error to a roll rate (the setpoint slews at
+    // roll.max_rate). A heading is the path's through the air - the nose's
+    // plus the sideslip - so the dutch roll, which swings the nose about a
+    // path that stays put, does not reach the bank.
+    if (ctx.engaged & axisBit(Axis::Roll)) {
+        double rollTarget = orHold(c.rollRad, 0.0);
+        if (!isHold(c.headingRad)) {
+            const double maxBank = orHold(c.maxBankRad, 0.785);
+            const double path = s.eulerRad[2] + s.betaRad * rollCos;
+            rollTarget = std::clamp(headingGain * schedule.speedRatio(s) * geo::wrapPi(c.headingRad - path), -maxBank, maxBank);
+        }
+        if (!haveRef_ || resumed(ctx, lastTime_)) {
+            rollRef_ = rollNow;
+            haveRef_ = true;
+        }
+        rollRef_ = rateLimit(rollRef_, rollTarget, maxRollRateRadS, ctx.dt);
+        out.rollRateRadS = std::clamp(rollGain * geo::wrapPi(rollRef_ - rollNow) - rollDamping * s.angularRateBodyRadS[0], -2.0 * maxRollRateRadS,
+                                      2.0 * maxRollRateRadS);
+    } else {
+        haveRef_ = false; // someone else flies it: start afresh when it comes back
+    }
+    // longitudinal: the pitch error to a pitch rate (damped on the rate the
+    // pitch changes at, q cos(roll) - r sin(roll)), and that to the load
+    // factor that turns the path so at this bank and speed: the steady
+    // cos(path) / cos(bank), plus tas q / g over the bank
+    if (ctx.engaged & axisBit(Axis::Pitch)) {
+        pitch.outMin = -pitch.outMax;
+        const double tas = std::max(s.airspeedTrueMs, 10.0);
+        const double climb = std::clamp(-s.velocityNedMs[2] / tas, -1.0, 1.0);
+        const double pitchRate = s.angularRateBodyRadS[1] * rollCos - s.angularRateBodyRadS[2] * std::sin(rollNow);
+        const double q = pitch.update(orHold(c.pitchRad, pitchNow) - pitchNow, pitchRate, ctx.dt);
+        out.loadFactorG = (std::sqrt(1.0 - climb * climb) + tas * q / kG) / std::max(rollCos, 0.3);
+    } else {
+        pitch.reset();
+    }
+    // thrust: the airspeed error to an acceleration along the path, or the throttle as given
+    if (ctx.engaged & axisBit(Axis::Thrust)) {
+        if (!isHold(c.airspeedMs)) out.longitudinalMs2 = airspeed.update(c.airspeedMs - s.airspeedTrueMs, 0.0, ctx.dt);
+        else out.throttle = c.throttle; // may be kHold: the stack keeps the last value
+    } else {
+        airspeed.reset();
+    }
+    return out;
+}
+
+void PseudoAttitudeLoop::reset() {
+    pitch.reset();
+    airspeed.reset();
+    haveRef_ = false;
+    lastTime_ = -1.0;
+}
+
 // --- AccelerationLoop -----------------------------------------------------------
 
 AccelerationLoop::AccelerationLoop() {
@@ -140,6 +214,7 @@ AccelerationLoop::AccelerationLoop() {
     params_.add("load_factor.feedforward", &loadFactorFeedforward);
     params_.add("load_factor.path_hold", &loadFactorPathHold);
     params_.add("roll_rate.feedforward", &rollRateFeedforward);
+    params_.add("longitudinal.feedforward", &longitudinalFeedforward);
     params_.add("schedule.tas_ms", &schedule.tasMs);
     params_.add("schedule.eas_ms", &schedule.easMs);
     params_.add("load_factor.eas_exponent", &loadFactorEasExponent); params_.add("load_factor.tas_exponent", &loadFactorTasExponent);
@@ -175,8 +250,9 @@ Command AccelerationLoop::update(const ControlContext& ctx, const Command& in) {
     }
     if (ctx.engaged & axisBit(Axis::Thrust)) {
         if (!isHold(c.longitudinalMs2))
-            out.throttle =
-                std::clamp(throttleFeedforward + longitudinal.update(c.longitudinalMs2 - s.accelerationBodyMs2[0], 0.0, ctx.dt), 0.0, 1.0);
+            out.throttle = std::clamp(throttleFeedforward + longitudinalFeedforward * c.longitudinalMs2 +
+                                          longitudinal.update(c.longitudinalMs2 - s.accelerationBodyMs2[0], 0.0, ctx.dt),
+                                      0.0, 1.0);
         else
             out.throttle = c.throttle;
     } else {
@@ -517,6 +593,7 @@ Command AerobaticBehavior::update(const ControlContext& ctx, const Command&) {
 void registerBuiltinControllers(ControllerRegistry& r) {
     r.add("actuator", Level::Actuator, [] { return std::make_unique<ActuatorPassthrough>(); });
     r.add("pid_attitude", Level::Attitude, [] { return std::make_unique<AttitudeLoop>(); });
+    r.add("pseudo_attitude", Level::Attitude, [] { return std::make_unique<PseudoAttitudeLoop>(); });
     r.add("pid_acceleration", Level::Acceleration, [] { return std::make_unique<AccelerationLoop>(); });
     r.add("pid_velocity", Level::Velocity, [] { return std::make_unique<VelocityLoop>(); });
     r.add("pid_position", Level::Position, [] { return std::make_unique<PositionLoop>(); });

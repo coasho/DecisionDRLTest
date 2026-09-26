@@ -365,7 +365,7 @@ struct VehicleProfile {
 | `propulsion` | <ul><li>Engine count and type: 0 piston, 1 turboprop, 2 turbofan, 3 turbojet, 4 electric</li><li>Afterburner, with the throttle where it begins</li><li>Reverse thrust</li><li>Spool time constant</li></ul> | hangar; derived from the flight model | the adapter (per-engine throttle), the catalog |
 | `plant` | <ul><li>The reference condition: altitude, true and equivalent airspeed, mass</li><li>Identified first-order responses (time constant and gain) for roll, pitch, yaw and speed</li><li>Trim elevator and its lift part</li><li>Zero-lift angle of attack</li><li>Level flight's throttle (`throttle_trim`, step 5a)</li></ul> | hangar's identification | the control laws (step 5), the trim feedforwards |
 | `performance` | Stall speeds (clean, flaps), maximum speed, ceiling, climb rate; informational | hangar's flight tests | tasks, curricula, scenario checks |
-| `control` | The gains per controller id, as today. Since step 5a an aircraft without them gets them designed from its plant (provenance derived) | the platform (`Laws.cpp`), or by hand | the `ControlStack` settings (unchanged) |
+| `control` | The gains per controller id, as today. Since step 5a an aircraft without them gets them designed from its plant (provenance derived); since step 5b also the controllers its levels fly with, the attitude loop over pseudo-controls | the platform (`Laws.cpp`), or by hand | the `ControlStack` settings and controllers |
 
 The class codes are: 0 unknown, 1 light GA, 2 fighter, 3 attack, 4 bomber, 5 transport, 6 tanker, 7 AEW&C, 8 reconnaissance, 9 electronic warfare, 10 UAV and 11 trainer.
 
@@ -558,13 +558,15 @@ Since step 3:
 - **Other entries.** A behaviour's residual enters above the levels, its output joining the pass at its level. The default's hold enters at the velocity level.
 - **The actuators.** An axis owned by nobody flies the neutral value. The engines' throttles replace thrust after the adapter's `apply()`.
 
+Since step 5b the pass runs in the cascade's order, `levelRank`: position, velocity, attitude, acceleration. The attitude level sits above the acceleration level, so an attitude loop can ask it for pseudo-controls, and a policy's roll rate there merges with the load factor an autopilot's height hold asks for from above. The levels' enum values, which the C ABI and Python use, are unchanged.
+
 Each controller runs once per step, and each keeps one instance per level, as today. The built-in loops learn which groups they are driving (`ControlContext::engaged`), so the loop of a group that is not engaged neither integrates nor winds up.
 
 ### 9.6 Custom controllers
 
 A controller registered by a trainer keeps working exactly as today under whole-vehicle commands. A partial-axis command whose merge would pass mixed owners through a controller is rejected with `ControllerNotAxisAware`, unless that controller declares `axisAware()` (a new virtual that defaults to false). The built-in controllers declare it from step 3.
 
-- **Which controllers are checked.** Where a demand goes depends on the controllers, so the check is conservative: every controller from the attitude level up to the highest level any owner enters at, afterwards. That is Position for a behaviour and Velocity for the default's hold.
+- **Which controllers are checked.** Where a demand goes depends on the controllers, so the check is conservative: every controller from the bottom of the cascade above the actuators (the acceleration level, since step 5b) up to the highest level any owner enters at. That is Position for a behaviour and Velocity for the default's hold.
 - **When.** At NEW, for an engines command too, since it takes thrust from the cascade. Also when the default becomes `Hold` beside other owners.
 
 ## 10. Command lifecycle
@@ -823,7 +825,7 @@ NEW for a behaviour allocates, between steps, as it does today. Step 1 removes t
 - Aircraft files with `fsim/control` properties keep working (the control section, version 1).
 - `VehicleState` and `ControlInputs` grow only by appending. When they do, their shared-memory and recording layouts bump their versions, and readers accept the older ones.
 
-**C5: Custom controllers and behaviours** keep working at their level under whole-vehicle commands. Partial-axis commands pass through them only when they declare themselves axis-aware (section 9.6).
+**C5: Custom controllers and behaviours** keep working at their level under whole-vehicle commands. Partial-axis commands pass through them only when they declare themselves axis-aware (section 9.6). One deliberate exception, since step 5b: the attitude level sits above the acceleration level in the cascade, so a controller at the acceleration level that returns an attitude command is refused, as one that answers at its own level always was; an attitude-level controller may now return an acceleration command.
 
 **C6: Determinism.** The same seed and the same calls give the same trajectories and activity ids, independent of the worker count; the existing worker-count test is extended.
 
@@ -1053,6 +1055,23 @@ Filled in as the steps land: the baseline first (step 1a), then each step's numb
 - **The same gains.** For every design, each of the 51 parameters the platform designs matches the gain its file carried to within 7.2e-6 (the files store six significant figures).
 - **Digests:** the c172x flights are identical. The four hangar-design flights differ in the last digits of their gains, as C1 allows for aircraft that select the new laws.
 - **The manoeuvre suite:** the same 29 of 558 failures, item for item.
+
+**Step 5b (the attitude flown over pseudo-controls).**
+- **What changed.** An aircraft whose loops the platform designs from its plant, every hangar design, flies its attitude with `pseudo_attitude`. The bank error becomes a roll rate; the pitch error a pitch rate, and from it the load factor that turns the path so at this bank and speed; the airspeed error an acceleration along the path. The acceleration level, `pid_acceleration` designed from the same plant in step 5a, is the allocation: it makes them with this aircraft's surfaces or its law, its plant's gains and its trim. Its throttle now feeds the acceleration forward (per unit of the identified thrust).
+- **The allocation is a level, not the adapters.** Section 14 had the adapters allocate. The acceleration level's loop already turns a roll rate, a load factor and an acceleration into this aircraft's controls with its plant, so it does the allocating; the adapters keep what their families' controls mean (`apply()`).
+- **The cascade's order.** The attitude level moved above the acceleration level (`levelRank`, section 9.5; C5's exception). The enum's values, the C ABI's and Python's, are unchanged.
+- **The design.** The same poles as `pid_attitude`, placed on the allocation's lags in rates rather than deflections, with the same rate-damping floors, and a weak pitch integrator: the pitch integrates the rate it asks for, and the allocation trims the load factor. The platform designs 64 settings from the plant's 15 numbers.
+- **What the suite found on the way.** The first version got three things wrong, each fixed at its cause:
+  - A heading error taken on the nose fed the EC-130H's dutch roll into the bank at 0.7 times its reference speed, and it grew. A heading is now the path's through the air: the nose's plus the sideslip.
+  - Without rate damping, the C-17A's pitch loop wrapped round a law whose load factor overshoots by a third at low speed, and limit-cycled. Damping in the allocation instead over-damped the fighters' laws (nine new failures of the 1.5 g step), so the damping went back into the attitude loop, where `pid_attitude` had it.
+  - The Skua's trim law was never identified (its sweep had too few points), so its allocation had no elevator per g. It now feeds the identified response forward in full. Its 1.5 g step at the reference speed used to pass only because the acceleration loop started cold and dropped its trim; running as the allocation it is warm, and the step is what the aircraft gives.
+- **The manoeuvre suite:** 20 of 558 fail, down from 29; all 20 were among the 29. Fixed: the B-52H's 1.5 g step at 1.5 times its speed, the E-3G's and KC-135R's bank steps, the RQ-4B's pitch at two speeds and its climb, the Skua's 1.5 g step at 32 m/s, and the Su-25's climb and 1.5 g step. What is left: a heavy's roll rate or load factor at 0.7 times its speed (15), four fly-by-wire 1.5 g steps a little short of 90 %, and the Mirage 2000C's climb at 0.7 times. A bank step now takes about the same time at every speed, because the loop asks for a rate and the allocation makes it: the KC-135R takes 6.3, 5.2 and 5.5 s at 0.7, 1 and 1.5 times, where it took never, 5.7 and 3.0 s.
+- **Digests:** the 16 c172x flights and the F-16C's acceleration flight are identical to step 5a. The F-16C's velocity flight and the B-52H's two changed: they fly the new loop, as C1 allows. Protection off gives the same hashes.
+- **Allocations:** none, in three new update cases (a design's attitude and velocity over pseudo-controls, a policy's roll rate beside an autopilot's height) and in the world's.
+- **Cost.**
+  - Every existing update case is within ±2.3 % of step 5a (interleaved, 5 rounds).
+  - Flying the attitude over pseudo-controls runs two loops where one ran: 80 ns an update instead of 60 for an attitude command, 105 instead of 83 for a velocity command.
+  - World throughput, same binary, 3 interleaved rounds: the F-16C at 99.7 % and the B-52H at 99.3 % of the same flights on the old attitude loop (`world classic`). The c172x, which flies the same loop either way, at 98.7 %: the noise.
 
 **Allocations.**
 - Per update, none, except `loiter` (4, one per parameter's map node) and `waypoints` (2): the per-step `BehaviorCommand` copy, P6.

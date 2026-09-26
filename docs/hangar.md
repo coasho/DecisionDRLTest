@@ -897,6 +897,12 @@ to 4 below, `src/control/Laws.cpp`) whenever the aircraft loads:
    wing flies at 1 g; the stick a load factor or a roll rate needs. On
    aircraft without a law the rudder takes out half the sideslip.
 
+The attitude is flown over pseudo-controls ([control-architecture.md](control-architecture.md),
+step 5b): the attitude loop asks the acceleration level for a roll rate, a
+load factor and an acceleration along the path - the same poles, placed in
+rates rather than deflections - and the acceleration level, designed from the
+same plant, makes them with the aircraft's surfaces or its law.
+
 What was measured goes to `autopilot.toml` beside the design - `[reference]`
 and `[identified]`: the four responses, level flight's throttle, a
 surface-controlled aircraft's trim law and the zero-lift angle; reviewable,
@@ -915,12 +921,15 @@ speed: a 40 s velocity hold, a 30° bank step, a 5° pitch step, a climb at
 Flown with the shared gains, 336 of the 558 manoeuvres (31 designs, three
 speeds, the hold and five steps) lost control, never reached their target,
 overshot it by more than half, or - holding - drifted over 100 m or
-oscillated. With each design's own gains, 29 do. What is left is mostly a
-heavy's roll rate or load factor at 0.7 times its reference speed, which
-the aircraft cannot give there, and the RQ-4B's pitch: its engine sits high
-on its back, so the thrust the airspeed hold adds in a pitch-up puts the
-nose down, and a 5° step settles at 3°. The same commands, before and after,
-are in [control.md](sdk/control.md#per-aircraft-gains).
+oscillated. With each design's own gains, 29 did, and flown over
+pseudo-controls 20 do, all of them among the 29. What is left is mostly a
+heavy's roll rate or load factor at 0.7 times its reference speed, which the
+aircraft cannot give there, and four fly-by-wire 1.5 g steps that their laws
+answer a little short of 90 %. The RQ-4B, whose engine sits high on its back
+so that the thrust the airspeed hold adds in a pitch-up puts the nose down,
+now reaches its pitch, if slowly. A bank step takes about the same time at
+every speed: the loop asks for a rate, and the allocation makes it. The same
+commands, before and after, are in [control.md](sdk/control.md#per-aircraft-gains).
 
 ![The F-16C's manoeuvres at three speeds with its own gains](images/hangar-autopilot-f16c.png)
 
@@ -928,37 +937,37 @@ At the reference speed:
 
 | aircraft | reference, m/s | 30° bank: to 90 %, overshoot | 5° pitch | climb at 5 % of the speed | 90° turn settled | height held, 40 s |
 |---|---|---|---|---|---|---|
-| A-10C | 151 | 2.3 s, 0 % | 2.3 s, 9 % | 3.5 s, 10 % | 23 s | 1 m |
-| B-52H | 153 | 5.9 s, 0 % | 4.9 s, 33 % | 7.0 s, 29 % | 51 s | 1 m |
-| C-130J | 149 | 4.2 s, 3 % | 2.1 s, 18 % | 3.1 s, 17 % | 41 s | 1 m |
-| C172 | 50 | 2.3 s, 4 % | 1.4 s, 21 % | 2.1 s, 15 % | 16 s | 1 m |
-| C-17A | 203 | 2.9 s, 0 % | 0.9 s, 14 % | 3.4 s, 11 % | 57 s | 0 m |
-| E-3G | 181 | 7.8 s, 0 % | 2.9 s, 20 % | 4.5 s, 20 % | 54 s | 3 m |
-| E-7A | 173 | 4.1 s, 0 % | 2.7 s, 25 % | 4.1 s, 24 % | 52 s | 3 m |
-| EA-18G | 174 | 1.7 s, 1 % | 2.2 s, 16 % | 4.2 s, 16 % | 23 s | 4 m |
-| EC-130H | 108 | 4.4 s, 6 % | 2.3 s, 16 % | 3.8 s, 16 % | 30 s | 1 m |
-| F-15C | 141 | 1.5 s, 0 % | 2.3 s, 15 % | 4.5 s, 17 % | 21 s | 4 m |
-| F-16C | 164 | 2.1 s, 0 % | 2.4 s, 15 % | 4.7 s, 15 % | 21 s | 1 m |
-| F-22A | 152 | 1.8 s, 0 % | 2.8 s, 16 % | 5.4 s, 16 % | 21 s | 2 m |
-| F-35A | 179 | 1.7 s, 0 % | 2.4 s, 16 % | 4.4 s, 15 % | 23 s | 3 m |
-| F/A-18C | 165 | 1.6 s, 0 % | 2.1 s, 14 % | 4.3 s, 15 % | 22 s | 3 m |
-| Gripen | 140 | 1.3 s, 0 % | 3.3 s, 19 % | 5.9 s, 21 % | 21 s | 5 m |
-| H-6K | 149 | 4.5 s, 1 % | 4.8 s, 23 % | 7.0 s, 24 % | 43 s | 1 m |
-| J-10A | 157 | 1.9 s, 0 % | 3.5 s, 19 % | 6.4 s, 20 % | 21 s | 6 m |
-| J-20A | 162 | 1.6 s, 0 % | 2.8 s, 16 % | 5.5 s, 17 % | 22 s | 5 m |
-| KC-135R | 164 | 5.7 s, 0 % | 3.3 s, 21 % | 5.0 s, 21 % | 48 s | 4 m |
-| KC-46A | 197 | 5.3 s, 0 % | 2.6 s, 17 % | 4.3 s, 18 % | 58 s | 0 m |
-| MiG-29A | 155 | 1.6 s, 0 % | 2.3 s, 15 % | 4.3 s, 16 % | 22 s | 3 m |
-| Mirage 2000C | 127 | 1.8 s, 0 % | 5.1 s, 21 % | 8.4 s, 27 % | 19 s | 3 m |
-| Rafale C | 141 | 1.6 s, 0 % | 3.0 s, 19 % | 5.2 s, 19 % | 21 s | 4 m |
-| RC-135W | 173 | 5.0 s, 0 % | 3.2 s, 21 % | 5.0 s, 21 % | 51 s | 4 m |
-| RQ-4B | 101 | 3.1 s, 1 % | not in 12 s | 17.4 s, 0 % | 58 s | 1 m |
-| Skua | 28 | 1.7 s, 3 % | 1.0 s, 19 % | 1.5 s, 10 % | 14 s | 2 m |
-| Su-25 | 164 | 2.5 s, 2 % | 2.8 s, 29 % | 4.3 s, 27 % | 26 s | 0 m |
-| Su-27S | 147 | 1.6 s, 0 % | 2.1 s, 16 % | 3.9 s, 17 % | 21 s | 3 m |
-| Su-57 | 148 | 1.7 s, 0 % | 2.9 s, 16 % | 5.6 s, 18 % | 21 s | 6 m |
-| Typhoon | 139 | 1.7 s, 0 % | 4.0 s, 21 % | 6.9 s, 23 % | 20 s | 4 m |
-| U-2S | 91 | 2.6 s, 2 % | 2.2 s, 23 % | 3.0 s, 22 % | 30 s | 0 m |
+| A-10C | 151 | 2.4 s, 0 % | 2.9 s, 12 % | 3.9 s, 13 % | 23 s | 2 m |
+| B-52H | 153 | 5.9 s, 0 % | 5.5 s, 17 % | 7.6 s, 16 % | 46 s | 1 m |
+| C-130J | 149 | 4.1 s, 0 % | 2.5 s, 13 % | 3.5 s, 15 % | 43 s | 0 m |
+| C172 | 50 | 2.4 s, 2 % | 1.7 s, 18 % | 2.4 s, 13 % | 17 s | 1 m |
+| C-17A | 203 | 2.8 s, 0 % | 2.2 s, 8 % | 4.0 s, 10 % | 58 s | 0 m |
+| E-3G | 181 | 6.8 s, 0 % | 3.3 s, 12 % | 4.8 s, 14 % | 52 s | 2 m |
+| E-7A | 173 | 4.0 s, 0 % | 3.2 s, 16 % | 4.4 s, 18 % | 50 s | 2 m |
+| EA-18G | 174 | 1.7 s, 0 % | 2.7 s, 10 % | 4.8 s, 13 % | 22 s | 3 m |
+| EC-130H | 108 | 4.1 s, 1 % | 2.8 s, 12 % | 4.1 s, 15 % | 32 s | 2 m |
+| F-15C | 141 | 1.5 s, 1 % | 3.0 s, 10 % | 5.2 s, 14 % | 21 s | 3 m |
+| F-16C | 164 | 2.0 s, 0 % | 3.1 s, 10 % | 5.3 s, 13 % | 21 s | 0 m |
+| F-22A | 152 | 1.7 s, 1 % | 3.5 s, 11 % | 6.1 s, 14 % | 21 s | 1 m |
+| F-35A | 179 | 1.6 s, 0 % | 2.8 s, 10 % | 5.0 s, 13 % | 23 s | 2 m |
+| F/A-18C | 165 | 1.6 s, 0 % | 2.8 s, 9 % | 5.0 s, 13 % | 22 s | 3 m |
+| Gripen | 140 | 1.6 s, 1 % | 4.1 s, 13 % | 6.5 s, 17 % | 22 s | 3 m |
+| H-6K | 149 | 4.5 s, 0 % | 5.5 s, 17 % | 7.4 s, 20 % | 43 s | 4 m |
+| J-10A | 157 | 1.8 s, 1 % | 4.4 s, 14 % | 7.1 s, 17 % | 22 s | 4 m |
+| J-20A | 162 | 1.5 s, 1 % | 3.6 s, 11 % | 6.2 s, 15 % | 22 s | 4 m |
+| KC-135R | 164 | 5.2 s, 0 % | 3.8 s, 14 % | 5.3 s, 16 % | 47 s | 2 m |
+| KC-46A | 197 | 4.9 s, 0 % | 3.2 s, 13 % | 4.7 s, 16 % | 57 s | 0 m |
+| MiG-29A | 155 | 1.6 s, 1 % | 2.8 s, 10 % | 4.9 s, 14 % | 21 s | 3 m |
+| Mirage 2000C | 127 | 1.7 s, 1 % | 5.5 s, 15 % | 8.7 s, 22 % | 21 s | 1 m |
+| Rafale C | 141 | 1.6 s, 1 % | 3.6 s, 13 % | 5.8 s, 16 % | 20 s | 3 m |
+| RC-135W | 173 | 4.8 s, 0 % | 3.7 s, 13 % | 5.3 s, 16 % | 49 s | 2 m |
+| RQ-4B | 101 | 3.1 s, 0 % | 8.3 s, 6 % | 8.6 s, 20 % | 30 s | 1 m |
+| Skua | 28 | 1.7 s, 0 % | 1.3 s, 12 % | 1.7 s, 10 % | 15 s | 0 m |
+| Su-25 | 164 | 2.4 s, 1 % | 3.2 s, 13 % | 4.6 s, 15 % | 26 s | 0 m |
+| Su-27S | 147 | 1.6 s, 0 % | 2.6 s, 10 % | 4.4 s, 14 % | 21 s | 3 m |
+| Su-57 | 148 | 1.7 s, 1 % | 3.7 s, 11 % | 6.3 s, 15 % | 21 s | 5 m |
+| Typhoon | 139 | 1.6 s, 1 % | 4.7 s, 16 % | 7.4 s, 19 % | 21 s | 2 m |
+| U-2S | 91 | 2.6 s, 0 % | 2.6 s, 15 % | 3.3 s, 16 % | 29 s | 0 m |
 
 ## The profile
 

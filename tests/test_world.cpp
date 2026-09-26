@@ -526,6 +526,8 @@ TEST_CASE("an aircraft designed with hangar flies the built-in loops designed fr
     REQUIRE(tas > 0.0);
     REQUIRE(*w.controls(viper)->controller(control::Level::Attitude)->parameter("schedule.tas_ms") == tas);
     REQUIRE(w.profile(viper)->control.header.provenance == control::Provenance::Derived);
+    // its attitude flown over pseudo-controls, allocated at the acceleration level
+    REQUIRE(std::string(w.controls(viper)->controller(control::Level::Attitude)->id()) == "pseudo_attitude");
     // and holds its height on them
     REQUIRE(w.command(viper, control::VelocityCommand{160.0, 0.0, control::kHold, control::kHold}));
     w.step(600);

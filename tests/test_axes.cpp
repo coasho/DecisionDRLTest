@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <string>
 #include <vector>
 
 using namespace fsim;
@@ -165,6 +166,49 @@ TEST_CASE("merging: two commands owning the axes apart fly exactly as one owning
     const auto apart = fly(true), whole = fly(false);
     REQUIRE(apart.size() == whole.size());
     CHECK(apart == whole); // bit for bit
+}
+
+TEST_CASE("merging through the loop over pseudo-controls: the attitude level above the acceleration level it flies with", "[axes]") {
+    // a hangar design flies its attitude over pseudo-controls, so a velocity
+    // hold's demand passes the attitude level down to the acceleration level;
+    // merged there, it flies exactly as one command owning every axis
+    auto fly = [](bool apart) {
+        session::World w(options(apart ? "pseudo-apart" : "pseudo-whole"));
+        const auto v = w.createVehicle(spec("a", "jsbsim:f16c", 3000.0, 160.0));
+        REQUIRE(std::string(w.controls(v)->controller(Level::Attitude)->id()) == "pseudo_attitude");
+        if (apart) {
+            REQUIRE(w.submit(v, VelocityCommand{kHold, kHold, 1.8, kHold}, owning(kLateral)).accepted());
+            REQUIRE(w.submit(v, VelocityCommand{165.0, 3.0, kHold, kHold}, owning(kPitch | kThrust)).accepted());
+        } else {
+            REQUIRE(w.submit(v, VelocityCommand{165.0, 3.0, 1.8, kHold}).accepted());
+        }
+        std::vector<double> trace;
+        for (int k = 0; k < 600; ++k) {
+            w.step();
+            const auto& s = *w.vehicleState(v);
+            const auto& in = *w.inputs(v);
+            trace.insert(trace.end(), {in.aileron, in.elevator, in.rudder, in.throttle[0], s.altitudeMslM, s.eulerRad[2], s.airspeedTrueMs});
+        }
+        return trace;
+    };
+    const auto apart = fly(true), whole = fly(false);
+    REQUIRE(apart.size() == whole.size());
+    CHECK(apart == whole); // bit for bit
+
+    // a policy's roll rate, at the acceleration level, beside an autopilot's
+    // height and speed flown through the attitude level above it
+    session::World w(options("pseudo-mixed"));
+    const auto v = w.createVehicle(spec("a", "jsbsim:f16c", 3000.0, 160.0));
+    REQUIRE(w.submit(v, VelocityCommand{160.0, 0.0, kHold, kHold}, owning(kPitch | kThrust, Source::Autopilot)).accepted());
+    REQUIRE(w.submit(v, AccelerationCommand{kHold, 0.2, kHold, kHold}, owning(kLateral)).accepted());
+    w.step(30); // a second
+    const auto* merged = std::get_if<AccelerationCommand>(w.controls(v)->derived(Level::Acceleration));
+    REQUIRE(merged != nullptr);
+    CHECK(merged->rollRateRadS == 0.2);       // the policy's
+    CHECK_FALSE(isHold(merged->loadFactorG)); // the autopilot's, from the attitude level
+    CHECK_FALSE(isHold(merged->longitudinalMs2));
+    CHECK(w.vehicleState(v)->eulerRad[0] > 0.1); // rolling right
+    CHECK(w.controls(v)->report().errors == 0);
 }
 
 TEST_CASE("preempted on some axes, an activity's others fly on as a residual hold; CANCEL gives axes back to the default", "[axes]") {

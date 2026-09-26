@@ -122,7 +122,9 @@ push, not yet tagged:
   hangar's `autopilot` stage measures with small steps at a reference condition, scheduled on airspeed, with its
   trim law and flight-path feedforwards ([docs/hangar.md](docs/hangar.md#the-autopilot)). Of 558 manoeuvres
   (31 designs, three speeds), those that lost control, never reached their target, overshot it by more than
-  half or oscillated went from 336 with the shared gains to 29.
+  half or oscillated went from 336 with the shared gains to 29, and to 20 with the attitude flown over
+  pseudo-controls - a roll rate, a load factor and an acceleration that each aircraft's acceleration loop makes
+  with its own surfaces or law.
 - **Capability contracts** ([docs/control-architecture.md](docs/control-architecture.md), ADR-26;
   [docs/sdk/control.md](docs/sdk/control.md#capabilities-and-activities)): a vehicle says what it offers - its
   control levels and behaviours, with typed parameters and ranges - and answers every command at once. A
@@ -136,7 +138,7 @@ push, not yet tagged:
   their placards. Commands can own the axes apart - a policy on the bank while an autopilot holds the height and
   speed, merged into one pass down the cascade - with per-engine throttles and a vehicle default that holds
   instead of idling. Envelope protection limits what an aircraft with an envelope is asked for and reports what
-  it does beyond it - how far, how long - without pretending it cannot happen (steps 1-4 of 6).
+  it does beyond it - how far, how long - without pretending it cannot happen (steps 1-5 of 6).
 - `sim::VehiclePool` (one worker per physical core), JSBSim 1.3.1 adapter with terrain ground callback,
   `flightsim.exe` headless benchmark.
 

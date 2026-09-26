@@ -120,6 +120,47 @@ private:
     double lastTime_ = -1.0; ///< the vehicle's sim time at the last update: a loop that missed a period starts again
 };
 
+/// Level::Attitude -> Acceleration: the attitude loop over pseudo-controls
+/// (docs/control-architecture.md, step 5b). It asks the acceleration level for
+/// what every aircraft shares - a roll rate, a load factor, an acceleration
+/// along its path - and leaves how this aircraft makes them to the allocation
+/// there: its surfaces or its law's stick, its plant's gains, its trim.
+///
+/// Its own gains are in rates: rad/s of roll rate per rad of bank error, less
+/// "roll.kd" per rad/s of roll rate flown; rad/s of pitch rate per rad of
+/// pitch error (with an integral), less "pitch.kd" per rad/s the pitch
+/// changes at, turned into the load factor that pitches the path so at this
+/// bank and speed; m/s2 per m/s of airspeed error (with an integral). The
+/// damping is what the allocation's lag, and the airframe's modes it does not
+/// model, ask for. The bank setpoint slews at "roll.max_rate". A heading is
+/// the path's through the air - the nose's plus the sideslip - so the dutch
+/// roll's yawing, which leaves the path where it is, does not reach the bank.
+class FSIM_API PseudoAttitudeLoop final : public Controller {
+public:
+    PseudoAttitudeLoop();
+    const char* id() const noexcept override { return "pseudo_attitude"; }
+    Level level() const noexcept override { return Level::Attitude; }
+    bool axisAware() const noexcept override { return true; }
+    Command update(const ControlContext& ctx, const Command& in) override;
+    void reset() override;
+    bool setParameter(std::string_view name, double value) override { return params_.set(name, value); }
+    std::optional<double> parameter(std::string_view name) const override { return params_.get(name); }
+
+    double rollGain = 2.0;         ///< "roll.gain": rad/s of roll rate per rad of bank error
+    double rollDamping = 0.0;      ///< "roll.kd": rad/s of roll rate less per rad/s flown
+    double maxRollRateRadS = 1.5;  ///< "roll.max_rate": the bank setpoint's slew
+    double headingGain = 1.5;      ///< "heading.gain": rad of bank per rad of heading error (at the reference speed)
+    Pid pitch{1.0, 0.1, 0.0, 0.1, -0.35, 0.35};   ///< "pitch.*": the pitch rate, rad/s, a pitch error asks (kd on the pitch's rate)
+    Pid airspeed{0.2, 0.01, 0.0, 2.0, -5.0, 5.0}; ///< "airspeed.*": the acceleration, m/s2, an airspeed error asks
+    AirspeedSchedule schedule;     ///< "schedule.tas_ms": the heading gain grows with the speed
+
+private:
+    Parameters params_;
+    double rollRef_ = 0.0;
+    bool haveRef_ = false;
+    double lastTime_ = -1.0;
+};
+
 /// Level::Acceleration -> Actuator: load-factor error to elevator, roll rate
 /// to aileron, sideslip to rudder, longitudinal acceleration to throttle.
 /// Works through any attitude (no Euler angles), so it flies loops and rolls.
@@ -148,6 +189,7 @@ public:
     /// path, as fly-by-wire laws do; 0 = 1 g, as a trimmed surface does
     double loadFactorPathHold = 1.0;
     double rollRateFeedforward = 0.0;   ///< aileron per rad/s of roll rate; 0 = none
+    double longitudinalFeedforward = 0.0; ///< throttle per m/s2 of longitudinal acceleration; 0 = none
     AirspeedSchedule schedule;          ///< "schedule.tas_ms", "schedule.eas_ms"
     double loadFactorEasExponent = 0.0, loadFactorTasExponent = 0.0; ///< the load-factor gains' schedule
     double rollRateEasExponent = 0.0, rollRateTasExponent = 0.0;     ///< the roll-rate gains' schedule

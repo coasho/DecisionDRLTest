@@ -12,11 +12,18 @@ above the active level runs.
 Behavior   pursue / loiter / waypoints / formation / evade / aerobatics / hold / yours
   -> Position   fly to lat/lon/alt at an airspeed
     -> Velocity   airspeed, vertical speed, heading or turn rate
-      -> Acceleration   load factor, roll rate, longitudinal acceleration
-        -> Attitude   roll, pitch, heading, throttle or airspeed hold
+      -> Attitude   roll, pitch, heading, throttle or airspeed hold
+        -> Acceleration   load factor, roll rate, longitudinal acceleration
           -> Actuator   aileron, elevator, rudder, throttle, flaps, gear, brakes
             -> flight model
 ```
+
+A loop may skip levels: the default attitude loop commands the actuators
+itself. An aircraft whose loops the platform designs from its plant flies its
+attitude through the acceleration level ([per-aircraft gains](#per-aircraft-gains)).
+The order is `levelRank`'s; the levels' enum values, which the C ABI and
+Python use, are not the order (the acceleration level sat above the attitude
+level until ADR-26's step 5b).
 
 ## Choosing a level: one line
 
@@ -243,7 +250,8 @@ if (e[Limit::AlphaMax].exceededUpdates) penalty += e[Limit::AlphaMax].worstExces
 | Level | id | Output | Tunables (`controller->setParameter("name", v)`) |
 | --- | --- | --- | --- |
 | Attitude | `pid_attitude` | actuators | `roll.kp/ki/kd`, `roll.max_rate`, `roll.integral_limit`, `pitch.kp/ki/kd`, `pitch.integral_limit`, `pitch.trim`, `pitch.trim_lift`, `airspeed.kp/ki`, `airspeed.integral_limit`, `heading.gain`, `rudder.beta_gain`, `throttle.feedforward`; the schedule: `schedule.tas_ms`, `schedule.eas_ms`, `roll.eas_exponent`, `roll.tas_exponent`, `pitch.eas_exponent`, `pitch.tas_exponent` |
-| Acceleration | `pid_acceleration` | actuators | `load_factor.kp/ki/kd`, `load_factor.integral_limit`, `load_factor.feedforward`, `load_factor.path_hold`, `roll_rate.kp/ki`, `roll_rate.integral_limit`, `roll_rate.feedforward`, `pitch.trim`, `pitch.trim_lift`, `longitudinal.kp/ki`, `rudder.beta_gain`, `throttle.feedforward`; the schedule as above with `load_factor.*` and `roll_rate.*` exponents |
+| Attitude | `pseudo_attitude` | acceleration | `roll.gain`, `roll.kd`, `roll.max_rate`, `heading.gain`, `pitch.kp/ki/kd`, `pitch.integral_limit`, `pitch.max_rate`, `airspeed.kp/ki`, `airspeed.integral_limit`, `schedule.tas_ms` (the heading gain's) |
+| Acceleration | `pid_acceleration` | actuators | `load_factor.kp/ki/kd`, `load_factor.integral_limit`, `load_factor.feedforward`, `load_factor.path_hold`, `roll_rate.kp/ki`, `roll_rate.integral_limit`, `roll_rate.feedforward`, `pitch.trim`, `pitch.trim_lift`, `longitudinal.kp/ki`, `longitudinal.feedforward`, `rudder.beta_gain`, `throttle.feedforward`; the schedule as above with `load_factor.*` and `roll_rate.*` exponents |
 | Velocity | `pid_velocity` | attitude | `vertical_speed.kp/ki`, `vertical_speed.integral_limit`, `vertical_speed.feedforward`, `vertical_speed.command_lag`, `vertical_speed.alpha_zero_lift`, `pitch.min`, `pitch.max`, `max_bank`, `schedule.tas_ms` |
 | Position | `pid_position` | velocity | `altitude.gain`, `max_vertical_speed` |
 | Actuator | `actuator` | actuators | - |
@@ -295,9 +303,10 @@ and carried in its profile ([the aircraft's profile](#the-aircrafts-profile),
 - The outer loops run at a fraction of the inner ones' speed.
 - The gains are scheduled on the airspeed from the reference.
 - The trim law and the flight path's angle of attack are fed forward.
+- The attitude is flown over *pseudo-controls* (`pseudo_attitude`). The loop asks the acceleration level for a roll rate, a load factor and an acceleration along the path, with the same poles placed in rates rather than deflections. The acceleration level, designed from the same plant, makes them with the aircraft's surfaces or its law. A heading is the path's through the air, the nose's plus the sideslip, so a dutch roll does not reach the bank.
 
-The aircraft designed with hangar all carry a plant ([hangar.md](../hangar.md#the-autopilot)): 15 measured numbers where
-they used to carry 51 derived gains. A stock JSBSim aircraft carries none and
+The aircraft designed with hangar all carry a plant ([hangar.md](../hangar.md#the-autopilot)): 15 measured numbers,
+from which the platform designs 64 settings, where they used to carry 51 derived gains. A stock JSBSim aircraft carries none and
 flies the shared defaults.
 
 An aircraft can also carry gains of its own, which then win over the design:
@@ -380,7 +389,8 @@ from Python.
 ## Writing a controller
 
 A controller accepts a command at its level and returns a command at **any
-strictly lower** level; the stack keeps cascading from there.
+level below it** in the cascade - from the bottom: actuator, acceleration,
+attitude, velocity, position (`levelRank`); the stack keeps cascading from there.
 
 ```cpp
 struct BangBangAttitude final : fsim::control::Controller {

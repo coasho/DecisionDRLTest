@@ -3,6 +3,7 @@
 #include "fsim/BuiltinControllers.h"
 #include "fsim/ControlStack.h"
 #include "fsim/ControllerRegistry.h"
+#include "control/Runtime.h"
 #include "core/Geodesy.h"
 #include "core/Units.h"
 
@@ -10,6 +11,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
+#include <iterator>
 
 using namespace fsim;
 using namespace fsim::control;
@@ -54,6 +56,95 @@ TEST_CASE("levels are strictly ordered and named", "[control]") {
     REQUIRE(isHold(kHold));
     REQUIRE(orHold(kHold, 3.0) == 3.0);
     REQUIRE(orHold(2.0, 3.0) == 2.0);
+}
+
+TEST_CASE("the cascade runs by rank: an attitude above the acceleration it is flown with", "[control]") {
+    // the levels' values are the C ABI's; the cascade's order is levelRank's
+    REQUIRE(levelRank(Level::Actuator) == 0);
+    REQUIRE(levelRank(Level::Acceleration) < levelRank(Level::Attitude));
+    REQUIRE(levelRank(Level::Attitude) < levelRank(Level::Velocity));
+    REQUIRE(levelRank(Level::Velocity) < levelRank(Level::Position));
+    REQUIRE(levelRank(Level::Position) < levelRank(Level::Behavior));
+    for (std::size_t i = 1; i < std::size(kCascadeOrder); ++i) REQUIRE(levelRank(kCascadeOrder[i - 1]) > levelRank(kCascadeOrder[i]));
+
+    // the loop over pseudo-controls hands its demand to the acceleration level
+    Harness h;
+    REQUIRE(h.stack.use(Level::Attitude, "pseudo_attitude"));
+    h.stack.command(AttitudeCommand{units::degreesToRadians(30.0), 0.0, kHold, 0.785, kHold, 70.0});
+    h.run(30);
+    const auto* demand = std::get_if<AccelerationCommand>(h.stack.derived(Level::Acceleration));
+    REQUIRE(demand != nullptr);
+    REQUIRE(demand->rollRateRadS > 0.0);    // a right bank wanted: a right roll rate
+    REQUIRE(demand->longitudinalMs2 > 0.0); // 70 m/s wanted at 60: faster
+    REQUIRE(h.out.aileron > 0.0);           // allocated to the aileron
+    REQUIRE(h.stack.report().errors == 0);
+
+    // a controller answers at a lower rank: an acceleration loop that returns
+    // an attitude is refused, and the last output kept
+    struct Upward final : Controller {
+        const char* id() const noexcept override { return "test_upward"; }
+        Level level() const noexcept override { return Level::Acceleration; }
+        Command update(const ControlContext&, const Command&) override { return AttitudeCommand{}; }
+    };
+    ControllerRegistry::instance().add("test_upward", Level::Acceleration, [] { return std::make_unique<Upward>(); });
+    Harness u;
+    REQUIRE(u.stack.use(Level::Acceleration, "test_upward"));
+    u.stack.command(AccelerationCommand{});
+    u.run();
+    REQUIRE(u.stack.report().errors == 1);
+}
+
+TEST_CASE("the loop over pseudo-controls asks for damped rates and a load factor, and flies a heading's path", "[control]") {
+    PseudoAttitudeLoop loop;
+    loop.rollGain = 1.5, loop.rollDamping = 0.3, loop.maxRollRateRadS = 100.0; // the setpoint at once
+    loop.pitch.kp = 0.5, loop.pitch.ki = 0.0, loop.pitch.kd = 0.2;
+    sim::VehicleState s = levelFlight(100.0);
+    Rng rng{1};
+    ControlContext ctx{7, s, s, 0.01, nullptr, &rng};
+    auto fly = [&](const AttitudeCommand& c) {
+        loop.reset();
+        return std::get<AccelerationCommand>(loop.update(ctx, c));
+    };
+    // the bank error to a roll rate, less the damping on the roll rate flown
+    s.eulerRad[0] = 0.1, s.angularRateBodyRadS[0] = 0.2;
+    CHECK(std::abs(fly(AttitudeCommand{0.5, 0.0}).rollRateRadS - (1.5 * 0.4 - 0.3 * 0.2)) < 1e-12);
+    s.eulerRad[0] = 0.0, s.angularRateBodyRadS[0] = 0.0;
+    // a heading is the path's: the nose swung right by the dutch roll, over a
+    // sideslip that keeps the path where it was, asks for the same bank
+    AttitudeCommand heading{kHold, 0.0, 0.2, 0.785};
+    const double straight = fly(heading).rollRateRadS;
+    CHECK(std::abs(straight - 1.5 * 1.5 * 0.2) < 1e-12); // heading.gain 1.5, no schedule
+    s.eulerRad[2] = 0.05, s.betaRad = -0.05;
+    CHECK(std::abs(fly(heading).rollRateRadS - straight) < 1e-12);
+    s.eulerRad[2] = 0.0, s.betaRad = 0.0;
+    // the pitch error to a pitch rate, damped on the pitch's own rate, and that
+    // to the load factor that turns the path: 1 + tas q / g, wings level
+    s.angularRateBodyRadS[1] = 0.05;
+    CHECK(std::abs(fly(AttitudeCommand{0.0, 0.1}).loadFactorG - (1.0 + 100.0 * (0.5 * 0.1 - 0.2 * 0.05) / 9.80665)) < 1e-12);
+    s.angularRateBodyRadS[1] = 0.0;
+    // a level turn at 60 degrees of bank: 2 g, and nothing to correct
+    s.eulerRad[0] = units::degreesToRadians(60.0);
+    CHECK(std::abs(fly(AttitudeCommand{s.eulerRad[0], 0.0}).loadFactorG - 2.0) < 1e-9);
+    s.eulerRad[0] = 0.0;
+    // thrust: an airspeed to an acceleration, or the throttle as given
+    const auto faster = fly(AttitudeCommand{0.0, 0.0, kHold, 0.785, kHold, 110.0});
+    CHECK(faster.longitudinalMs2 > 0.0);
+    CHECK(isHold(faster.throttle));
+    const auto given = fly(AttitudeCommand{0.0, 0.0, kHold, 0.785, 0.7, kHold});
+    CHECK(given.throttle == 0.7);
+    CHECK(isHold(given.longitudinalMs2));
+    // axes owned apart: only the engaged ones are asked for, and the others
+    // neither integrate nor keep what they had
+    loop.pitch.ki = 0.3;
+    fly(AttitudeCommand{0.0, 0.1});
+    REQUIRE(loop.pitch.integral > 0.0);
+    ctx.engaged = axisBit(Axis::Roll);
+    const auto lateral = std::get<AccelerationCommand>(loop.update(ctx, AttitudeCommand{0.5, 0.1, kHold, 0.785, kHold, 110.0}));
+    CHECK(lateral.rollRateRadS > 0.0);
+    CHECK(isHold(lateral.loadFactorG));
+    CHECK(isHold(lateral.longitudinalMs2));
+    CHECK(isHold(lateral.throttle));
+    CHECK(loop.pitch.integral == 0.0);
 }
 
 TEST_CASE("registry has the built-ins and accepts user controllers", "[control]") {

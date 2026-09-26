@@ -372,17 +372,17 @@ Every vehicle owns a **control stack**: an ordered set of levels, one controller
 flowchart TD
     B[Behavior<br/>pursue, loiter, aerobatics, guidance] --> P
     P[Position<br/>lat/lon/alt or NED offset, speed] --> V
-    V[Velocity<br/>NED velocity / airspeed + vertical speed + heading] --> A
-    A[Acceleration<br/>body-axis specific accelerations, roll rate] --> T
-    T[Attitude<br/>roll, pitch, yaw or heading, throttle] --> U
+    V[Velocity<br/>NED velocity / airspeed + vertical speed + heading] --> T
+    T[Attitude<br/>roll, pitch, yaw or heading, throttle] --> A
+    A[Acceleration<br/>body-axis specific accelerations, roll rate] --> U
     U[Actuator<br/>aileron, elevator, rudder, throttle, flaps, gear, brakes] --> FDM[FlightModel]
 ```
 
 | Concept | Definition |
 | --- | --- |
-| `ControlLevel` | `Actuator < Attitude < Acceleration < Velocity < Position < Behavior`; a strict order, so "lower" and "higher" are unambiguous |
+| `ControlLevel` | `Actuator < Acceleration < Attitude < Velocity < Position < Behavior`; a strict order (`levelRank`), so "lower" and "higher" are unambiguous. Until ADR-26's step 5b the acceleration level sat above the attitude level; the enum's values, which the C ABI uses, keep that numbering |
 | `Command` | One plain struct per level (`ActuatorCommand`, `AttitudeCommand`, `AccelerationCommand`, `VelocityCommand`, `PositionCommand`, `BehaviorCommand`) held in a `std::variant`; every field has a `hold`/`nan` = "keep current" convention so partial commands are natural |
-| `Controller` | `level()` (the level it accepts) and `update(const ControlContext&, const Command& in) -> Command` returning a command at **any strictly lower** level; the stack keeps cascading from the returned level. A controller is plain C++ with a `reset()` and its own gains/state; built-ins are PID loops written against `VehicleState` only, so they work for any `FlightModel` |
+| `Controller` | `level()` (the level it accepts) and `update(const ControlContext&, const Command& in) -> Command` returning a command at **any lower** level in that order; the stack keeps cascading from the returned level. A controller is plain C++ with a `reset()` and its own gains/state; built-ins are PID loops written against `VehicleState` only, so they work for any `FlightModel` |
 | `Behavior` | A controller at the `Behavior` level with a lifecycle (`start`, `update`, `finished()`) and parameters, e.g. `Pursuit{target, range}`, `Loiter{centre, radius}`, `Waypoints{...}`, `Aerobatic{Loop, Roll, Immelmann}`; a finished behaviour holds its last output until replaced |
 | `ControlStack` | Per vehicle: `command(Command)` sets the active level and command; `use(level, controllerId)` swaps the controller at a level; `controller(level)` for gain tuning; `activeLevel()`; `derived(level)` returns the command the cascade produced at any lower level last step (introspection, telemetry, observations); `rateHz` (defaults to the FDM rate) |
 | `ControllerRegistry` | `registerController(id, level, factory)` and `registerBehavior(id, factory)` from trainer code or built-in modules; `VehicleSpec.controllers` and `use()` select by id, so a researcher swaps a loop without touching the rest of the stack |
@@ -659,7 +659,9 @@ an autopilot's height and speed, merged by the runtime into one pass down the ca
 preemption, per-engine throttles and a vehicle default that can hold instead of idle; step 4 added envelope protection,
 which limits what an aircraft with an envelope is asked for and reports every exceedance with its size and duration,
 promising nothing about the state, on by default for every hangar design with the manoeuvre suite's failures unchanged;
-step 5a moved the loops' design from hangar into the platform, so an aircraft carries its measured plant, not its gains.
+step 5a moved the loops' design from hangar into the platform, so an aircraft carries its measured plant, not its gains;
+step 5b flies a design's attitude over pseudo-controls - a roll rate, a load factor and an acceleration that its
+acceleration level makes with its own surfaces or law - and took the manoeuvre suite's failures from 29 to 20 of 558.
 M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |

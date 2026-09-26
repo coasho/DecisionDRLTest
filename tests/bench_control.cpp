@@ -154,6 +154,8 @@ struct Case {
     std::function<Command(const sim::VehicleState&)> command;
     /// Instead of a command: the runtime's configuration written as a host would (step 3's cases).
     std::function<void(RuntimeConfig&)> configure = nullptr;
+    /// The attitude level's controller, when not the default (step 5b's cases).
+    const char* attitudeLoop = nullptr;
 };
 
 /// Envelope protection with limits the synthetic flight (advance()) keeps
@@ -252,6 +254,26 @@ std::vector<Case> cases() {
                        protectDesign(c);
                        assign(c, 0, ActuatorCommand{0.1, -0.05, 0.0, 0.6}, kLegacyAxes);
                    }});
+    // step 5b: a design's attitude flown over pseudo-controls, allocated at the
+    // acceleration level - the attitude, velocity and merged cases above, as a hangar design flies them
+    out.push_back({"attitude, pseudo", nullptr,
+                   [](RuntimeConfig& c) {
+                       protectDesign(c);
+                       assign(c, 0, AttitudeCommand{0.2, 0.05, kHold, 0.785, kHold, 55.0}, kLegacyAxes);
+                   },
+                   "pseudo_attitude"});
+    out.push_back({"velocity, pseudo", nullptr,
+                   [](RuntimeConfig& c) {
+                       protectDesign(c);
+                       assign(c, 0, VelocityCommand{60.0, 2.0, 0.5, kHold}, kLegacyAxes);
+                   },
+                   "pseudo_attitude"});
+    out.push_back({"apart, pseudo", nullptr,
+                   [](RuntimeConfig& c) {
+                       assign(c, 0, AccelerationCommand{kHold, 0.2, kHold, kHold}, kLateral);
+                       assign(c, 1, VelocityCommand{60.0, 2.0, kHold, kHold}, axisBit(Axis::Pitch) | axisBit(Axis::Thrust));
+                   },
+                   "pseudo_attitude"});
     // ...and every limit given, the flight running into them all the time: the worst case
     for (const ProtectionMode mode : {ProtectionMode::Limit, ProtectionMode::Report}) {
         const bool limit = mode == ProtectionMode::Limit;
@@ -296,6 +318,7 @@ struct StackRun {
     sim::ControlInputs out;
     double dt = 1.0 / 120.0;
     explicit StackRun(const Case& c) {
+        if (c.attitudeLoop) stack.use(Level::Attitude, c.attitudeLoop);
         if (c.configure) c.configure(stack.config());
         else stack.command(c.command(state));
     }
@@ -368,7 +391,9 @@ int command() {
     return 0;
 }
 
-int world(bool protectionOff) {
+/// `off`: protection off. `classic`: the designs' attitude flown by pid_attitude
+/// straight to the actuators, as before step 5b, not over pseudo-controls.
+int world(bool protectionOff, bool classic) {
     struct Setup {
         const char* type;
         int count;
@@ -387,6 +412,8 @@ int world(bool protectionOff) {
         }
         if (protectionOff)
             for (auto id : ids) w.setProtection(id, ProtectionMode::Off);
+        if (classic)
+            for (auto id : ids) w.controls(id)->use(Level::Attitude, "pid_attitude");
         double best = 0.0;
         for (int rep = 0; rep < 3; ++rep) {
             const auto steps0 = w.vehicleSteps();
@@ -584,10 +611,10 @@ int main(int argc, char** argv) {
     const std::string mode = argc > 1 ? argv[1] : "";
     if (mode == "micro") return micro();
     if (mode == "command") return command();
-    if (mode == "world") return world(argc > 2 && std::string(argv[2]) == "off");
+    if (mode == "world") return world(argc > 2 && std::string(argv[2]) == "off", argc > 2 && std::string(argv[2]) == "classic");
     if (mode == "alloc") return alloc();
     if (mode == "digest" && argc > 2) return digest(argv[2], argc > 3 && std::string(argv[3]) == "off");
     if (mode == "checkpoints" && argc > 2) return checkpoints(argv[2]);
-    std::fprintf(stderr, "usage: fsim_control_bench micro | command | world [off] | alloc | digest FILE [off] | checkpoints FILE\n");
+    std::fprintf(stderr, "usage: fsim_control_bench micro | command | world [off | classic] | alloc | digest FILE [off] | checkpoints FILE\n");
     return 2;
 }
