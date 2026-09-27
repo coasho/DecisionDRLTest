@@ -142,6 +142,9 @@ enum class Reason : std::uint8_t {
     NotImplemented, ///< applicable to this aircraft, not built yet: its support table names the stage that builds it
     OnGround,       ///< unavailable to a policy on the ground (the airborne guidance)
     Airborne,       ///< unavailable to a policy in the air (the ground modes)
+    // ranks, queues and time windows (docs/flight-autonomy.md, 4.9)
+    TimeConstraint, ///< NEW rejected, or Failed: a time window it must meet cannot be met, or was missed
+    QueueFull,      ///< NEW rejected: it would wait, and as many activities as can wait already do
     Count
 };
 
@@ -210,6 +213,40 @@ struct Requirement {
 /// At most this many requirements a command traces to.
 inline constexpr std::size_t kMaxRequirements = 4;
 
+/// A command's rank among the others (A-GRA's ComparableRankingType;
+/// docs/flight-autonomy.md, 4.9): lower first - its priority, then its
+/// precedence within that priority. {0, 0}, every command's without one, ranks first.
+struct Rank {
+    std::uint16_t priority = 0;
+    std::uint16_t precedence = 0;
+    friend constexpr bool operator==(Rank a, Rank b) noexcept { return a.priority == b.priority && a.precedence == b.precedence; }
+};
+/// `a` ranks strictly ahead of `b`.
+constexpr bool ranksAhead(Rank a, Rank b) noexcept { return a.priority != b.priority ? a.priority < b.priority : a.precedence < b.precedence; }
+
+/// A command's capability precedence left as its capability's (CommandOptions::precedenceOverride).
+inline constexpr std::uint32_t kNoPrecedenceOverride = 0xFFFFFFFFu;
+
+/// Which of a command's time windows must be met for it to be of use (A-GRA's SchedulingCriticalityEnum).
+enum class TimeCriticality : std::uint8_t { None, Start, End, StartAndEnd, Count };
+/// "none", "start", "end", "start_and_end".
+FSIM_API const char* timeCriticalityName(TimeCriticality criticality) noexcept;
+
+/// When a command may start and should end (A-GRA's TemporalConstraints;
+/// docs/flight-autonomy.md, 4.9), in simulation seconds; NaN: no bound. It
+/// starts no earlier than startNotBefore; the rest, and what missing them
+/// does, `criticality` says - checked after each world step.
+struct TimeWindow {
+    static constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    double startNotBefore = kNone, startNotAfter = kNone;
+    double endNotBefore = kNone, endNotAfter = kNone;
+    TimeCriticality criticality = TimeCriticality::None;
+    bool startCritical() const noexcept { return criticality == TimeCriticality::Start || criticality == TimeCriticality::StartAndEnd; }
+    bool endCritical() const noexcept { return criticality == TimeCriticality::End || criticality == TimeCriticality::StartAndEnd; }
+    /// Any bound given.
+    bool any() const noexcept { return startNotBefore == startNotBefore || startNotAfter == startNotAfter || endNotBefore == endNotBefore || endNotAfter == endNotAfter; }
+};
+
 struct CommandOptions {
     Source source = Source::Policy;
     AxisMask axes = 0;                      ///< 0 = the capability's default axes
@@ -226,6 +263,25 @@ struct CommandOptions {
     /// Check it as a NEW is checked and answer as a NEW would, flying nothing:
     /// Valid, or Rejected with every finding (A-GRA's validation; FLIGHT_COMMAND_VALID).
     bool validateOnly = false;
+    // How it is arbitrated and scheduled (docs/flight-autonomy.md, 4.9):
+    /// Whether it interrupts what flies on its axes (A-GRA's
+    /// InterruptOtherActivities). A policy's that does takes them from what it
+    /// ranks at or ahead of and waits for the rest; one that does not waits
+    /// until they are free. The platform's own sources interrupt any rank, or,
+    /// if not, defer to it. (A-GRA's omission is false: fsim.agra maps it.)
+    bool interrupt = true;
+    /// Fly it even where a soft rejection would refuse it (A-GRA's
+    /// OverrideRejection); never over a safety limit. None exists yet: the
+    /// endurance (FA-3) and air traffic (FA-15) checks bring them.
+    bool overrideRejection = false;
+    /// Its rank among the commands its axes are contested by (A-GRA's Ranking.Rank).
+    Rank rank{};
+    /// Its capability's precedence for this command alone (A-GRA's
+    /// CapabilityPrecedenceOverride; lower first); kNoPrecedenceOverride: the
+    /// capability's own. The platform's own sources only: a policy's is refused NotAllowed.
+    std::uint32_t precedenceOverride = kNoPrecedenceOverride;
+    /// When it may start and should end (A-GRA's TemporalConstraints).
+    TimeWindow window{};
 };
 
 enum class CommandStatus : std::uint8_t {
@@ -234,7 +290,10 @@ enum class CommandStatus : std::uint8_t {
     Canceled,
     Valid, ///< CommandOptions::validateOnly: it would be accepted; nothing flies
 };
-enum CommandFlag : std::uint16_t { kClamped = 1u << 0 };
+enum CommandFlag : std::uint16_t {
+    kClamped = 1u << 0,  ///< a value was clamped to what the aircraft can do
+    kDeferred = 1u << 1, ///< accepted to wait: it starts when its start window opens and its axes are free (ActivityRecord::waiting)
+};
 
 /// The synchronous answer to NEW, UPDATE and CANCEL. The reason in words
 /// is reasonDescription(reason) (A-GRA's CannotComply description).
@@ -243,7 +302,7 @@ struct CommandResult {
     Reason reason = Reason::None;
     ActivityId activity = 0; ///< the new (NEW) or addressed (UPDATE, CANCEL) activity
     /// An id the reason is about (A-GRA's AssociatedID): the activity that
-    /// holds the authority (AuthorityHeld); 0 none.
+    /// holds the authority (AuthorityHeld), or that a deferred NEW waits for; 0 none.
     ActivityId other = 0;
     std::uint16_t flags = 0; ///< CommandFlag bits
     // What a rejection or a clamp was about (docs/vehicle-interface.md, 5.1):
@@ -300,6 +359,22 @@ enum class ActivityState : std::uint8_t { Pending, Active, Completed, Failed, Ca
 /// "pending", "active", ...
 FSIM_API const char* activityStateName(ActivityState state) noexcept;
 
+/// Why a pending activity has not started (docs/flight-autonomy.md, 4.9).
+enum class ActivityWait : std::uint8_t {
+    None,      ///< it starts at the next world step, or has started
+    Scheduled, ///< its start window has not opened
+    Queued,    ///< its axes are held by what it may not interrupt (ActivityRecord::waitingFor)
+    Count
+};
+/// "none", "scheduled", "queued".
+FSIM_API const char* activityWaitName(ActivityWait wait) noexcept;
+
+/// What an activity's record rests on (A-GRA's ActivityBasisEnum): flown, or
+/// planned - one waiting to start. The platform senses and predicts no other's.
+enum class ActivityBasis : std::uint8_t { Actual, Sensed, Predicted, Planned, Count };
+/// "actual", "sensed", "predicted", "planned".
+FSIM_API const char* activityBasisName(ActivityBasis basis) noexcept;
+
 enum ActivityFlag : std::uint16_t {
     kActivitySaturated = 1u << 0,     ///< an effector it drives sat at its travel limit
     kActivityDemandLimited = 1u << 1, ///< protection reduced its demand
@@ -338,7 +413,14 @@ struct ActivityRecord {
     std::uint64_t commandId = 0;       ///< the caller's id for it
     std::array<Requirement, kMaxRequirements> trace{}; ///< the requirements it comes from
     bool interactive = true;           ///< it takes activity commands
-    AxisMask axes = 0;                 ///< the axes it owns (or owned, once ended)
+    // how it is arbitrated and scheduled (docs/flight-autonomy.md, 4.9)
+    bool interrupt = true;             ///< its command's CommandOptions::interrupt
+    ActivityWait waiting = ActivityWait::None; ///< why it has not started, while pending
+    Rank rank{};                       ///< A-GRA's ActivityRank
+    std::uint32_t precedence = 0;      ///< its capability's precedence it is arbitrated by (its command's override, else the capability's)
+    ActivityId waitingFor = 0;         ///< Queued: an activity on its axes it may not interrupt
+    TimeWindow window{};
+    AxisMask axes = 0;                 ///< the axes it owns (or owned, once ended; will own, while it waits)
     ActivityState state = ActivityState::Pending;
     Reason reason = Reason::None;      ///< why it ended, else None
     ActivityId by = 0;                 ///< the preempting activity, with Preempted
@@ -348,6 +430,7 @@ struct ActivityRecord {
     double endTime = std::numeric_limits<double>::quiet_NaN(); ///< NaN while live
     ActivityProgress progress{};       ///< as its behaviour reported it after the last world step (a mode's)
     bool live() const noexcept { return state == ActivityState::Pending || state == ActivityState::Active; }
+    ActivityBasis basis() const noexcept { return waiting == ActivityWait::None ? ActivityBasis::Actual : ActivityBasis::Planned; }
 };
 
 // --- Envelope protection ------------------------------------------------------------

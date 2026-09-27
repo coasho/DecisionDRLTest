@@ -45,6 +45,9 @@ public:
 
     /// Ended activities a vehicle remembers for queries.
     static constexpr std::size_t kRecent = 16;
+    /// Activities that can wait to start at once (docs/flight-autonomy.md,
+    /// 4.9): a NEW that would wait beyond them is refused QueueFull.
+    static constexpr std::size_t kWaiting = 16;
     /// Where activities live: the cascade's slots, one per support axis, then
     /// the engines' throttles (fsim.flight.engines, thrust beside the cascade).
     static constexpr std::size_t kEnginesSlot = kSlotCount + kSupportAxisCount;
@@ -61,6 +64,8 @@ public:
     void setSupport(const SupportTable* support) noexcept { support_ = support; }
 
     /// NEW. `state` is the vehicle's, for availability; `now` the simulation time.
+    /// It starts at once, or waits (kDeferred; docs/flight-autonomy.md, 4.9):
+    /// for its start window, or for axes held by what it may not interrupt.
     CommandResult submit(const Command& command, const CommandOptions& options, const sim::VehicleState& state, double now);
     /// NEW for a support effector (gear, flaps, brakes, speedbrake, pitch trim) or the engines' throttles.
     CommandResult submit(const SupportCommand& command, const CommandOptions& options, const sim::VehicleState& state, double now);
@@ -95,8 +100,8 @@ public:
     CommandResult update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments, const sim::VehicleState& state,
                          Source caller) noexcept;
     /// CANCEL: the activity ends and its axes return to the vehicle default
-    /// (`caller` as for UPDATE).
-    CommandResult cancel(ActivityId activity, double now, Source caller) noexcept;
+    /// (`caller` as for UPDATE); what waited for them may start.
+    CommandResult cancel(ActivityId activity, const sim::VehicleState& state, double now, Source caller) noexcept;
     /// The existing entry points (docs/control-architecture.md, 10.7): an
     /// UPDATE of their live activity at the same capability, else a NEW with
     /// the legacy options.
@@ -126,7 +131,7 @@ public:
     /// Open (as ADR-26), or Granted: a policy's NEW then needs a grant for its
     /// capability, and the policy's live activities no grant covers end
     /// Canceled(NotGranted).
-    void setControlMode(ControlMode mode, double now) noexcept;
+    void setControlMode(ControlMode mode, const sim::VehicleState& state, double now) noexcept;
     ControlMode controlMode() const noexcept { return controlMode_; }
     /// A policy asks for control of a capability (A-GRA's ACQUIRE): granted -
     /// Reason::None - if it is allowed and available; else NotAllowed, or the
@@ -134,15 +139,15 @@ public:
     Reason requestControl(std::size_t capability, const sim::VehicleState& state) noexcept;
     /// The policy lets go: its grant ends, and its live activities of the
     /// capability end Canceled(Released); their axes fly the vehicle default.
-    Reason releaseControl(std::size_t capability, double now) noexcept;
+    Reason releaseControl(std::size_t capability, const sim::VehicleState& state, double now) noexcept;
     /// The platform takes it back: the grant ends, and the policy's live
     /// activities of the capability end Canceled with `reason`: Revoked (if
     /// None), CollisionAvoidance or Restricted; InvalidParameter for another,
     /// and nothing changes.
-    Reason revokeControl(std::size_t capability, Reason reason, double now) noexcept;
+    Reason revokeControl(std::size_t capability, Reason reason, const sim::VehicleState& state, double now) noexcept;
     /// Whether the policy may request the capability (all may, by default); a
     /// grant for one no longer allowed is revoked.
-    Reason setAllowed(std::size_t capability, bool allowed, double now) noexcept;
+    Reason setAllowed(std::size_t capability, bool allowed, const sim::VehicleState& state, double now) noexcept;
     ControlStatus controlStatus(std::size_t capability) const noexcept;
     /// The platform restricts a capability: a policy's NEW for it, and a
     /// request, are refused with `reason` - Restricted (if None),
@@ -156,15 +161,25 @@ public:
     /// availability and the performance (6.3): a consumer polls it.
     std::uint32_t controlRevision() const noexcept { return controlRevision_; }
 
+    /// A capability's precedence (A-GRA's CapabilityPrecedence; lower first, 0
+    /// for every capability until set): which of two activities of one source
+    /// keeps contested axes before their ranks are compared
+    /// (docs/flight-autonomy.md, 4.9). The platform's setting. Its live and
+    /// waiting activities that do not override it are arbitrated by it from now;
+    /// what waits may start. UnknownCapability for one it cannot command.
+    Reason setPrecedence(std::size_t capability, std::uint32_t precedence, const sim::VehicleState& state, double now) noexcept;
+    std::uint32_t precedence(std::size_t capability) const noexcept;
+
     /// Everything the checks found for the last NEW, validation or UPDATE this
     /// host answered (docs/flight-autonomy.md, 4.8): every finding - the first
     /// the answer's reason - and every value flown other than asked. The
     /// existing entry points' per-step path leaves it as it was.
     const CommandDetails& details() const noexcept { return details_; }
 
-    /// Live or recently ended; null if unknown.
+    /// Live (flying, or waiting to start) or recently ended; null if unknown.
     const ActivityRecord* activity(ActivityId activity) const noexcept;
-    /// The live activities, then the ended ones it remembers, newest first.
+    /// The live activities - those flying, then those waiting to start - then
+    /// the ended ones it remembers, newest first.
     std::vector<ActivityRecord> activities() const;
     /// Its availability as a policy is answered (docs/flight-autonomy.md, 4.1,
     /// 4.5 and 4.6): every reason that holds - the vehicle's own (a diverged
@@ -187,8 +202,10 @@ public:
     /// demand for, the state's exceedances (how long, how far). Starts a new count.
     EnvelopeStatus envelope() noexcept;
 
-    /// After each world step: the runtime's report into the activities, then cleared.
-    void afterStep(const sim::VehicleState& state, const EffectorPositions& positions, double now) noexcept;
+    /// After each world step: the runtime's report into the activities, then
+    /// cleared; the time windows kept; what waits started when it may. True if
+    /// something started (the level flown may have changed).
+    bool afterStep(const sim::VehicleState& state, const EffectorPositions& positions, double now) noexcept;
     /// Whether afterStep needs the effectors' positions (a gear or flaps activity is under way).
     bool awaitsPosition() const noexcept {
         for (std::size_t s = kSlotCount; s < kActivities; ++s)
@@ -206,7 +223,89 @@ private:
         std::uint16_t flags = 0;  ///< host flags since the last world step (kActivityClamped, kActivityAxesReduced)
         double target = kUnknown; ///< a terminating support activity's goal (gear down 1 / up 0, a flap position)
         bool outside = false;     ///< a manoeuvre's: the state went past a limit by more than a limiter overshoots
+        std::uint32_t precedenceOverride = kNoPrecedenceOverride; ///< its command's (CommandOptions::precedenceOverride)
     };
+
+    /// An activity waiting to start (docs/flight-autonomy.md, 4.9): its record
+    /// and its command as given, prepared afresh from the state when it starts.
+    struct Waiting {
+        bool used = false;
+        bool support = false;           ///< a support effector's or the engines' command
+        ActivityRecord record{};
+        CommandOptions options{};
+        Command command{};
+        SupportCommand supportCommand{};
+        std::unique_ptr<Behavior> behavior; ///< a guidance capability's, made at its NEW
+        std::vector<Waypoint> waypoints;    ///< a route's (room for the path store's, reserved at its NEW)
+        std::vector<BezierSegment> segments; ///< a curve's (likewise)
+    };
+    /// What a contender may do about a live activity on its axes.
+    enum class Standing : std::uint8_t { Takes, Waits, Refused };
+    /// The rules of docs/flight-autonomy.md, 4.9: a higher source's activity
+    /// refuses an interrupting command (AuthorityHeld) and is waited for by the
+    /// rest; the platform's interrupting command takes any rank; a policy's
+    /// that does not interrupt waits; otherwise precedence, then rank decide -
+    /// at or ahead of it (the newest, when equal) takes.
+    static Standing standing(Source source, std::uint32_t precedence, Rank rank, bool interrupt, const ActivityRecord& holder) noexcept;
+    /// A contender against every live activity on `axes`: Takes if it may take
+    /// them all; else Refused or Waits with `blocker` (Refused first).
+    Standing arbitrate(AxisMask axes, Source source, std::uint32_t precedence, Rank rank, bool interrupt, ActivityId& blocker) const noexcept;
+    /// A command's time window (docs/flight-autonomy.md, 4.9): each bound NaN
+    /// or finite and in order (InvalidParameter), and one it can still meet at
+    /// `now` - an end window not yet closed, a critical start window not yet
+    /// closed (TimeConstraint).
+    static Reason checkWindow(const TimeWindow& window, double now) noexcept;
+    /// A NEW's command prepared to fly from `state`: completed (an hsa's, a
+    /// pattern's), a route planned and a curve measured into their scratch,
+    /// checked as its range policy says - the malformed returned at once, the
+    /// rest logged - and the admission a behaviour asks. `setpoint` is what flies.
+    Reason prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, const sim::VehicleState& state,
+                   CheckLog& log);
+    /// The axes a command owns: its own, else the capability's default, widened
+    /// above the actuators to whole groups; InvalidAxes if not a flyable set.
+    Reason axesOf(std::size_t index, const Command& command, const CommandOptions& options, AxisMask& axes) const noexcept;
+    /// What a NEW or a waiting activity starts with: its record - `waited`'s,
+    /// else one made from the NEW's options - and what its checks raised.
+    struct Launch {
+        const ActivityRecord* waited = nullptr;
+        ActivityId id = 0;
+        std::size_t capability = 0;
+        AxisMask axes = 0;
+        std::uint16_t flags = 0;
+    };
+    /// What the NEW (or a waiting activity starting) flies, into a slot: it
+    /// takes its axes, its setpoint and behaviour are installed, its record
+    /// kept. A route's plan and a curve's segments go into the path store.
+    void launch(const Launch& what, const CommandOptions& options, Command&& setpoint, std::unique_ptr<Behavior>&& behavior, bool route,
+                Span<const BezierSegment> curve, double now) noexcept;
+    /// A support command's or the engines' NEW (or waiting activity) set directly.
+    void launchDirect(const Launch& what, const CommandOptions& options, const SupportCommand& setpoint, double now) noexcept;
+    /// A NEW's record, pending, from its options (docs/flight-autonomy.md, 4.8, 4.9), into `record`.
+    void makeRecord(ActivityRecord& record, ActivityId id, std::size_t capability, const CommandOptions& options, AxisMask axes, double now) const noexcept;
+    /// Room to wait: a free entry, else null (QueueFull).
+    Waiting* freeWaiting();
+    /// A waiting activity's entry; null if none waits by that id.
+    Waiting* waitingEntry(ActivityId activity) noexcept;
+    const Waiting* waitingEntry(ActivityId activity) const noexcept;
+    /// A waiting activity ends: its record kept with the ended ones.
+    void endWaiting(Waiting& w, ActivityState state, Reason reason, double now) noexcept;
+    /// What waits and may start now starts, in order of source, precedence,
+    /// rank, then age; what may not waits on (docs/flight-autonomy.md, 4.9).
+    /// A waiting activity whose windows it can no longer meet fails. True if
+    /// one started. Nothing waiting, nothing done.
+    bool schedule(const sim::VehicleState& state, double now) noexcept { return waitingCount_ && scheduleWaiting(state, now); }
+    bool scheduleWaiting(const sim::VehicleState& state, double now) noexcept;
+    /// A waiting activity started, if what it is prepared into still flies: false and it failed if not.
+    bool startWaiting(Waiting& w, const sim::VehicleState& state, double now) noexcept;
+    /// UPDATE of a waiting activity: its command's new setpoint, checked as its NEW was, kept for its start.
+    CommandResult updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
+                                const sim::VehicleState& state, Source caller) noexcept;
+    CommandResult updateWaiting(Waiting& w, const SupportCommand& setpoint, Source caller) noexcept;
+    /// The live activities' time windows after a world step: a persistent one
+    /// done at its end window's close, a terminating one late or early failed if its end is critical.
+    void keepWindows(double now) noexcept;
+    /// Its capability's precedence for an activity: its command's override, else its capability's.
+    std::uint32_t precedenceFor(std::size_t capability, std::uint32_t override) const noexcept;
 
     /// A slot that flies through the cascade (else it is set directly: a support effector or the engines).
     static bool isCascade(std::size_t slot) noexcept { return slot < kSlotCount; }
@@ -224,15 +323,13 @@ private:
     /// Every controller from Attitude up to `top` is axis-aware.
     Reason awareUpTo(int top) const noexcept;
     int liveSlot(ActivityId activity) const noexcept;
-    /// A live activity of a higher source on any of `axes`, else 0.
-    ActivityId holder(AxisMask axes, Source source) const noexcept;
     /// Before activity `id` takes `axes` (9.3): a live activity that loses a
     /// primary axis ends, preempted; one that loses only support axes carries
     /// on without them. What keeps a primary axis flies on - a residual hold
     /// if it ended - and a slot left without one is freed.
     void takeOver(AxisMask axes, ActivityId id, double now) noexcept;
-    ActivityRecord& start(std::size_t slot, ActivityId id, std::size_t capability, const CommandOptions& options, AxisMask axes,
-                          std::uint16_t flags, double now) noexcept;
+    /// Slot `slot` flies the activity `what` names (its command's options), its record made in place.
+    ActivityRecord& start(std::size_t slot, const Launch& what, const CommandOptions& options, double now) noexcept;
     void end(std::size_t slot, ActivityState state, Reason reason, ActivityId by, double now) noexcept;
     void release(std::size_t slot) noexcept;
     CommandResult rejected(Reason reason, ActivityId activity = 0, ActivityId other = 0) const noexcept;
@@ -296,13 +393,15 @@ private:
     double fastest(double altitudeM) const noexcept;
     /// The segments into the path store: after the curve's end, or a new curve.
     void writeCurve(Span<const BezierSegment> segments, bool appending);
-    /// NEW: a command (with a route's waypoints, a curve's segments).
+    /// NEW: a command (with a route's waypoints, a curve's segments). One that
+    /// may not wait (the existing entry points'): refused where it would.
     CommandResult submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, const CommandOptions& options,
-                             const sim::VehicleState& state, double now);
+                             const sim::VehicleState& state, double now, bool mayWait = true);
 
     /// A capability's standing with the vehicle's policy (6.2, 7.2).
     struct Authority {
         bool allowed = true, granted = false;
+        std::uint32_t precedence = 0;  ///< the platform's precedence for it (setPrecedence; beside what a NEW reads first)
         CapabilityStatus restricted{}; ///< the platform's restriction (setAvailability)
     };
     /// The vehicle's own availability for a capability, apart from the platform's restrictions.
@@ -319,12 +418,13 @@ private:
     /// Granted, the platform's restriction - or Reason::None. The platform's
     /// own sources are never stopped here.
     Reason admits(std::size_t capability, Source source) const noexcept;
-    /// The policy's live activities of the capability end Canceled with `reason`.
-    void endPolicy(std::size_t capability, Reason reason, double now) noexcept;
-    /// Whether `caller` may UPDATE or CANCEL slot s's live activity: any caller
-    /// under Open (ADR-26 10.1); under Granted a source no lower than the
-    /// activity's - FA stays the primary controller. Else AuthorityHeld.
-    Reason addresses(std::size_t s, Source caller) const noexcept;
+    /// The policy's live activities of the capability - flying or waiting - end
+    /// Canceled with `reason`; what waited may start.
+    void endPolicy(std::size_t capability, Reason reason, const sim::VehicleState& state, double now) noexcept;
+    /// Whether `caller` may UPDATE or CANCEL a live activity (flying or
+    /// waiting): any caller under Open (ADR-26 10.1); under Granted a source no
+    /// lower than the activity's - FA stays the primary controller. Else AuthorityHeld.
+    Reason addresses(const ActivityRecord& record, Source caller) const noexcept;
 
     std::uint32_t vehicle_ = 0;
     double controlPeriodS_ = 1.0 / 120.0;
@@ -346,12 +446,15 @@ private:
     std::array<ActivityRecord, kActivities> records_{}; ///< per slot: its activity's record
     std::array<ActivityRecord, kRecent> recent_{};      ///< ended records, a ring
     std::size_t recentNext_ = 0, recentCount_ = 0;
+    std::size_t waitingCount_ = 0;                      ///< activities waiting to start
+    std::size_t windowed_ = 0;                          ///< live activities with an end window, flying
     std::vector<Authority> authority_;                  ///< per capability (sized at bind)
     ControlMode controlMode_ = ControlMode::Open;
     std::uint32_t controlRevision_ = 0;
     std::uint32_t loopsSeen_ = 0; ///< the runtime's loops revision performance_ is from
     bool divergedSeen_ = false;   ///< (a divergence changes every capability's availability: counted)
     CommandDetails details_{};    ///< the last answer's (details())
+    std::unique_ptr<std::array<Waiting, kWaiting>> waiting_; ///< made when the first activity waits
 };
 
 } // namespace fsim::control

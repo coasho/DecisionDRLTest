@@ -206,6 +206,38 @@ What a command carries beside its setpoint, and what its answer carries beside i
 | `ActivityRecord` gains `commandId`, `trace`, `interactive` | `fsim_activity_get_envelope(world, activity, &e)` (`fsim_activity_info` has no `struct_size`) | `ActivityInfo.command_id`, `.interactive`, `.trace` |
 | `World::submitBatch(id, Span<const BatchCommand>, &details)`; `BatchCommand {command, waypoints, segments, options}` | `fsim_vehicle_submit_batch(world, id, batch, count, results, details)` (`fsim_batch_command`: the kind, its call's arguments) | `vehicle.submit_batch([fsim.BatchCommand("submit_hsa", heading_rad=1.0), ...])` → an `Activity`, `Validation` or `Rejected` each |
 
+### 4.9 Ranks, queues and time windows (as FA-2 builds it)
+
+How contested axes are arbitrated, and when a command flies: A-GRA's CapabilityCommandRankingType, ComparableRankingType, CapabilityCommandTemporalConstraintsType and the activity's rank, basis and constrained state, natively.
+
+- **Ranks (CMD-05, ACT-07).** `CommandOptions::rank` is `{priority, precedence}`, lower first; the activity keeps it. `{0, 0}` is every command's without one, and ranks first of all.
+- **Capability precedence (CMD-07).** A capability has a precedence, lower first and 0 until the platform sets one (`World::setCapabilityPrecedence`). The schema says nothing about its direction, so it is read as a rank's precedence. A command may override it for itself (`precedenceOverride`), from the platform's own sources only; a policy's override is refused `not_allowed`. The activity keeps the precedence it is arbitrated by.
+- **Who takes contested axes (CMD-06).** A NEW contests each live activity on its axes:
+  - a higher source's activity refuses an interrupting command `authority_held`, as ADR-26 has it, and is waited for by one that does not interrupt;
+  - the platform's interrupting command takes any rank (A-GRA: the primary controller "interrupts activities of any Rank");
+  - a policy's command that does not interrupt waits for whatever flies (A-GRA's "nice" command);
+  - otherwise (a policy's interrupting command, the platform's deferring one) the capability's precedence decides, then the rank: at or ahead of it takes, behind it waits. Equal, the newest takes, as ADR-26 had it.
+
+  `CommandOptions::interrupt` is true by default, today's behaviour; A-GRA's omission means false, which `fsim.agra.command_options` maps. With every rank and precedence left as they are, every answer and every flight is as before.
+- **Waiting (ACT-03, ACT-06, STS-14).** A NEW that may not take its axes, or whose start window has not opened, is accepted to wait: `kDeferred`, with `other` naming what it waits for. Its activity is pending, `waiting` `scheduled` or `queued` (and `waitingFor`), its basis `planned`. It is listed and addressed as what flies: an UPDATE changes what it will fly, checked as its NEW was, and a CANCEL ends it. It starts as soon as it may: after each world step, and after anything that frees axes or changes a precedence. Starts go in order of source, precedence, rank, then age, and a start that frees what an earlier one waited for lets that one start too. At its start it is prepared afresh from where the aircraft is then (an hsa's omitted fields, a route's plan, a behaviour's admission, a placard). A refusal there fails it, with that reason. At most 16 wait per vehicle; one more is refused `queue_full`. The existing entry points never wait: where they may not take the axes, they are refused. `fsim.agra.activity_state` names a queued activity whose start window is open ACTIVE_FULLY_CONSTRAINED.
+- **Time windows (CMD-08).** `CommandOptions::window` gives a start window, an end window (simulation seconds; NaN for no bound) and which must be met (`TimeCriticality`). A window that cannot be met is refused `time_constraint`: an end already past, or a critical start already past. One out of order is refused `invalid_parameter`. The rest act after each world step:
+  - it starts no earlier than its start window opens;
+  - a critical start window closing while it waits fails it (`time_constraint`); a start window that is not critical lets it start late;
+  - the end window closing while it waits fails it;
+  - a persistent activity (a level, a hold) is done when its end window closes (`completed`, `goal_reached`);
+  - a terminating one still flying then fails if its end is critical, and goes on late if not;
+  - one done before a critical end window opens fails.
+
+  A-GRA puts repetition on tasks, not flight commands: it comes with the flight tasks (FA-2d).
+- **Overriding a rejection (CMD-09).** `overrideRejection` is carried and kept. No soft rejection exists yet (endurance comes in FA-3, air traffic in FA-15); none of the safety limits is ever overridden.
+
+| C++ | C ABI 1.9 | Python |
+| --- | --- | --- |
+| `CommandOptions` gains `rank` (`Rank`), `interrupt`, `precedenceOverride`, `window` (`TimeWindow`, `TimeCriticality`), `overrideRejection`; `kDeferred` | `fsim_command_options` grows: `interrupt` (1 from init), `override_rejection`, `rank_priority`, `rank_precedence`, `precedence_override` (`FSIM_NO_PRECEDENCE_OVERRIDE`), the four window bounds (NaN from init), `criticality`; `FSIM_COMMAND_DEFERRED` | every `submit*` takes `rank=`, `interrupt=`, `precedence_override=`, `window=` (`fsim.TimeWindow` or a dict), `override_rejection=`; `Activity.deferred`, `Validation.deferred` |
+| `ActivityRecord` gains `rank`, `precedence`, `interrupt`, `waiting` (`ActivityWait`), `waitingFor`, `window`, `basis()` | `fsim_activity_envelope` grows: `waiting`, `basis`, `rank_priority`, `rank_precedence`, `precedence`, `waiting_for`, `interrupt`, `criticality`, the window's bounds; `fsim_activity_wait_name`, `fsim_activity_basis_name`, `fsim_time_criticality_name` | `ActivityInfo` gains `waiting` (`fsim.ActivityWait`), `basis` (`fsim.ActivityBasis`), `rank` (`fsim.Rank`), `precedence`, `waiting_for`, `interrupt`, `window` |
+| `World::setCapabilityPrecedence`, `capabilityPrecedence`; `Vehicle::` likewise | `fsim_vehicle_set_capability_precedence`, `fsim_vehicle_capability_precedence` | `vehicle.set_capability_precedence(capability, p)`, `capability_precedence(capability)`; `fsim.agra.command_options(ranking, temporal)`, `activity_basis(info)`, `activity_state(info, now)` |
+| `Reason::TimeConstraint`, `QueueFull` | `"time_constraint"`, `"queue_full"` | `fsim.agra`: `CONSTRAINT_TIME`, `INSUFFICIENT_RESOURCES` |
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -354,7 +386,7 @@ Stop advertising what does not work, at once (D4); tell physically unsupported, 
 
 The command and activity semantics A-GRA defines around every flight command.
 
-**Status:** in progress, in five steps: FA-2a the command envelope (4.8), done 2026-09-27 and measured in section 14; FA-2b ranks, queues and time windows; FA-2c the activity commands; FA-2d flight tasks, suggestions and controllers; FA-2e the reports and the fleet cases.
+**Status:** in progress, in five steps: FA-2a the command envelope (4.8) and FA-2b ranks, queues and time windows (4.9), done 2026-09-27 and measured in section 14; FA-2c the activity commands; FA-2d flight tasks, suggestions and controllers; FA-2e the reports and the fleet cases.
 
 **Items (36):** CMD-02, CMD-03, CMD-05, CMD-06, CMD-07, CMD-08, CMD-09, CMD-10, CMD-12, CMD-13, CMD-14, CMD-15, CMD-16, CMD-18, CMD-19, CMD-20; WPT-24; CRV-14; VAL-01, VAL-02, VAL-08, VAL-10, VAL-11, VAL-12; ACT-03, ACT-04, ACT-06, ACT-07, ACT-08, ACT-10, ACT-13, ACT-15; AUT-06; STS-14; TSK-01, TSK-02.
 
@@ -728,6 +760,36 @@ Filled as the stages land: each stage's criteria results, the digests (identical
 
   That is the envelope's cost. Each activity keeps its id, requirements and flag, so its record is 232 bytes (was 160). Each NEW or UPDATE resets the details, and the answer is 48 bytes (was 40). The first version cost 12.6 % a NEW: its answer also carried the description and the associated id, which are now read from its reason and `other`. Its details had also parted the per-step path's members; they now sit at the end of the host.
 - ctest: all 217 tests pass (the four envelope cases added).
+
+**FA-2b (ranks, queues and time windows: CMD-05, CMD-06, CMD-07, CMD-08, CMD-09's carrying; ACT-03, ACT-06, ACT-07; STS-14).**
+- What it built is 4.9, in C++, the C ABI (1.9) and Python. `fsim.command/rank`, `/no_interrupt`, `/precedence_override` and `/time_window` are supported on every vehicle; `/override_rejection` is partial until a soft rejection exists (FA-3).
+- `test_schedule` (6 cases, 141 checks) and its Python twin (3 tests):
+  - a policy's command ranked behind what flies waits, named in the answer, planned and queued; it starts when what it waited for ends; one ranked at or ahead takes;
+  - a command that does not interrupt waits; the platform's interrupts any rank, or, deferring, lets the rank decide;
+  - a capability's precedence decides before the rank, and a change to it starts what waited;
+  - a start window delays the start; an end window ends a level; a critical start window missed, and a terminating activity done too early or too late for its critical end, fail it;
+  - what waits is updated and canceled as what flies, a validation says it would wait, sixteen can, and the policy's end with its authority.
+
+  `test_c_abi` covers the 1.9 calls.
+- **The conformance walk checks a model of 4.9's rules on every adapter** (2,009,930 checks). A separately seeded stream gives 45 % of its NEWs a rank, 40 % of those no interrupting, some a precedence override (a policy's 5 %), half a time window, now and then out of order or already over. A new operation sets a capability's precedence. After every operation:
+  - what waits is pending and within the windows it can still meet; a scheduled one before its start window, a queued one behind something on its axes it may not take, which it names. Nothing waits that could start.
+  - What flies past its end window is only a terminating one whose end is not critical. A persistent activity completes only at its end window; a `time_constraint` failure is always one a window explains; any other failure of one that waited is a start refused.
+  - A preemption is one the rules allow; a new record waits exactly when its NEW said so; nothing waits after a step unless it just started or still may not.
+
+  Every adapter meets deferred NEWs, scheduled, queued and started activities. Across the walks: precedence changes, `not_allowed`, `time_constraint` refusals and failures, completions at an end window, failures of what waited.
+
+  Two findings made the host right: a start can free axes an earlier one in the order waited for, so the scheduler passes again after a start. The existing entry points must never wait: a platform's precedence would have queued a policy's per-step commands until the queue filled.
+
+  A family's first walk now and then misses a marker the draws moved past (the UH-1H's `active->pending` did); up to three more seeded walks of that family are run until it has them, the same every run.
+- No earlier answer or flight changes: with every rank and precedence left as they are, the arbitration is ADR-26's. Digests: identical, with protection and without.
+- The allocation gate passes, with a new case in which the steps counted end a level at its end window, start a route that waited for its start window, fail it at its critical end, and start what was queued behind it. Each is checked, with no allocation. What a start needs is made at its NEW: its behaviour, the route's scratch plan and path store, room for its waypoints or segments.
+- A/B throughput against FA-2a's build (interleaved):
+  - per step (`micro`, 5 rounds): the medians within -4.4 % to +2.7 %. A first build read +4 to 6 % on the hsa, route and pattern cases, which run only the runtime. The name functions this stage added to the runtime's file had moved its code; in the host's file, the runtime's cases read as before.
+  - the existing entry points' per-step command and a checked UPDATE (`command`, 9 rounds): -4.3 % and -0.4 %.
+  - a NEW: +18.8 % at a level switch (10 ns of 52) and +3 to 7 % with a behaviour. That is the arbitration (4 ns: precedence and rank against each holder, and the window's check) and a record of 296 bytes (was 232). The first version cost a level switch 26 %; building the record in place and passing the launch's setpoint by reference took most of it back.
+
+  Against FA-1e's build, all of FA-2 so far costs a level switch +27 % (48.5 to 61.7 ns), a behaviour's NEW +17 %, a checked UPDATE +8.5 %, and nothing per step.
+- ctest: all 223 tests pass (the six schedule cases added).
 
 
 ## Appendix A: the inventory

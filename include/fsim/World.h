@@ -220,6 +220,11 @@ public:
     /// Whether the policy may request the capability (all may, by default).
     control::Reason setAllowed(std::string_view capability, bool allowed);
     control::ControlStatus controlStatus(std::string_view capability) const;
+    /// A capability's precedence (docs/sdk/control.md, "Ranks, queues and time
+    /// windows"; lower first, 0 until set): the platform's setting, by which two
+    /// activities of one source contest axes before their ranks are compared.
+    control::Reason setCapabilityPrecedence(std::string_view capability, std::uint32_t precedence);
+    std::uint32_t capabilityPrecedence(std::string_view capability) const;
     /// The platform restricts a capability (collision avoidance, an
     /// operational restriction): a policy's NEW for it is refused with
     /// `reason`; what flies goes on. Availability::Available lifts it.

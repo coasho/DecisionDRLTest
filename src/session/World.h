@@ -194,6 +194,11 @@ public:
     /// Whether the policy may request the capability; a grant for one no longer allowed is revoked.
     control::Reason setAllowed(std::uint32_t id, std::string_view capability, bool allowed);
     control::ControlStatus controlStatus(std::uint32_t id, std::string_view capability) const;
+    /// A capability's precedence (docs/flight-autonomy.md, 4.9; lower first, 0 until set): the platform's
+    /// setting, by which two activities of one source contest axes before their ranks. UnknownCapability, or why
+    /// the vehicle does not offer it.
+    control::Reason setCapabilityPrecedence(std::uint32_t id, std::string_view capability, std::uint32_t precedence);
+    std::uint32_t capabilityPrecedence(std::uint32_t id, std::string_view capability) const;
     /// The platform restricts a capability (or, Available, lifts it): a policy's NEW for it is refused with
     /// `reason`. The status reports the id it is about and when it is expected back (NaN: not known).
     control::Reason setAvailability(std::uint32_t id, std::string_view capability, control::Availability availability,

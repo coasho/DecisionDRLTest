@@ -85,8 +85,22 @@ bool sameRecord(const ActivityRecord& a, const ActivityRecord& b) {
     const bool ends = (std::isnan(a.endTime) && std::isnan(b.endTime)) || a.endTime == b.endTime;
     return a.id == b.id && a.vehicle == b.vehicle && a.capability == b.capability && a.source == b.source && a.axes == b.axes &&
            a.state == b.state && a.reason == b.reason && a.by == b.by && a.constraints == b.constraints &&
-           a.constraintsSeen == b.constraintsSeen && a.startTime == b.startTime && ends;
+           a.constraintsSeen == b.constraintsSeen && a.startTime == b.startTime && ends && a.waiting == b.waiting && a.waitingFor == b.waitingFor &&
+           a.rank == b.rank && a.precedence == b.precedence && a.interrupt == b.interrupt;
 }
+
+/// What the rules of docs/flight-autonomy.md, 4.9 let a contender do about a live
+/// activity `h` on its axes - the model the walks hold the host to.
+enum class Standing { Takes, Waits, Refused };
+Standing standing(Source source, std::uint32_t precedence, Rank rank, bool interrupt, const ActivityRecord& h) {
+    if (h.source > source) return interrupt ? Standing::Refused : Standing::Waits; // a higher source's
+    const bool platform = source != Source::Policy;
+    if (platform && interrupt) return Standing::Takes;   // the primary controller: any rank
+    if (!platform && !interrupt) return Standing::Waits; // a policy's nice command
+    if (precedence != h.precedence) return precedence < h.precedence ? Standing::Takes : Standing::Waits;
+    return ranksAhead(h.rank, rank) ? Standing::Waits : Standing::Takes; // equal: the newest
+}
+Standing standing(const ActivityRecord& c, const ActivityRecord& h) { return standing(c.source, c.precedence, c.rank, c.interrupt, h); }
 
 std::uint32_t serialOf(ActivityId id) { return static_cast<std::uint32_t>(id & 0xFFFFFFFFu); }
 
@@ -460,7 +474,7 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
 
 // --- random sequences -----------------------------------------------------------------------------
 
-enum class Op { New, Update, Cancel, Legacy, Step, Reset, Default, Retarget, Authority };
+enum class Op { New, Update, Cancel, Legacy, Step, Reset, Default, Retarget, Authority, Precedence };
 
 const char* opName(Op op) {
     switch (op) {
@@ -472,6 +486,7 @@ const char* opName(Op op) {
     case Op::Reset: return "reset";
     case Op::Default: return "default";
     case Op::Authority: return "authority";
+    case Op::Precedence: return "precedence";
     default: return "retarget";
     }
 }
@@ -539,7 +554,16 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
                                               Reason::PerformanceLimit, Reason::InvalidWaypoint, Reason::InvalidCurve, Reason::NotGranted,
                                               Reason::CollisionAvoidance, Reason::Restricted, Reason::Diverged,
                                               // what the vehicle cannot do at all, and the flight phase (docs/flight-autonomy.md, 4.3)
-                                              Reason::NotSupported, Reason::NotImplemented, Reason::OnGround}));
+                                              Reason::NotSupported, Reason::NotImplemented, Reason::OnGround,
+                                              // a precedence override from a policy, a window it cannot meet, no room to wait (4.9)
+                                              Reason::NotAllowed, Reason::TimeConstraint, Reason::QueueFull}));
+        // a policy's precedence override is refused; one that waits was accepted to (4.9)
+        if (done.options.source == Source::Policy && done.options.precedenceOverride != kNoPrecedenceOverride) CHECK_FALSE(done.result.accepted());
+        if (done.result.reason == Reason::NotAllowed) CHECK(done.options.precedenceOverride != kNoPrecedenceOverride);
+        if (done.result.flags & kDeferred) {
+            CHECK(done.result.accepted());
+            ++seen["new:deferred"];
+        }
         // a policy is refused what the rules refuse it, and nothing else is refused for its authority (6.1, 7.2)
         const Reason refused = done.options.source == Source::Policy ? done.refused : Reason::None;
         if (refused != Reason::None) CHECK(done.result.reason == refused);
@@ -549,7 +573,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             const ActivityRecord* holder = was(done.result.other);
             REQUIRE(holder != nullptr);
             CHECK(holder->live());
-            CHECK(holder->source > done.options.source); // only a higher source holds its axes against a NEW
+            CHECK(holder->source > done.options.source); // only a higher source holds its axes against a NEW...
+            CHECK(done.options.interrupt);               // ...that would interrupt it (4.9: one that would not waits)
         }
     }
     if (done.op == Op::Update || done.op == Op::Cancel) {
@@ -578,6 +603,13 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         }
     }
 
+    // what waited and started in this operation (4.9): it may take axes from, and end, what flies
+    bool startedNow = false;
+    for (const auto& [id, r] : after) // (flying, or ended since: an activity that has started waits no more)
+        if (const ActivityRecord* old = was(id); old && old->waiting != ActivityWait::None && r.waiting == ActivityWait::None) startedNow = true;
+    for (const auto& [id, r] : after) // (a new one, taken at once by what started)
+        if (!was(id) && r.state == ActivityState::Canceled && r.reason == Reason::Preempted) startedNow = true;
+
     // every record: its state and its reason agree, and so does its end
     std::uint32_t highest = lastSerial;
     std::uint32_t newRecords = 0;
@@ -591,24 +623,46 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         if (r.progress.segments) CHECK(r.progress.segment < r.progress.segments);
         if (!std::isnan(r.progress.percent)) CHECK((r.progress.percent >= 0.0 && r.progress.percent <= 100.0));
         if (!r.live()) CHECK(r.endTime >= r.startTime);
+        const TimeWindow& window = r.window;
         switch (r.state) {
         case ActivityState::Pending:
         case ActivityState::Active: CHECK((r.reason == Reason::None && r.by == 0)); break;
-        case ActivityState::Completed: CHECK((r.reason == Reason::GoalReached && r.by == 0)); break;
+        case ActivityState::Completed:
+            CHECK((r.reason == Reason::GoalReached && r.by == 0));
+            // a persistent activity is done only when its end window closes; none is done before a critical one opens (4.9)
+            if (caps[r.capability].persistence == Persistence::Persistent) CHECK(r.endTime >= window.endNotAfter);
+            if (window.endCritical()) CHECK_FALSE(r.endTime < window.endNotBefore);
+            break;
         case ActivityState::Canceled:
             CHECK(among(r.reason, {Reason::Requested, Reason::Preempted, Reason::Released, Reason::Revoked, Reason::NotGranted, Reason::CollisionAvoidance,
                                    Reason::Restricted}));
             CHECK((r.by != 0) == (r.reason == Reason::Preempted));
             break;
         case ActivityState::Failed:
-            CHECK(among(r.reason, {Reason::TargetLost, Reason::BehaviorFailed, Reason::CapabilityLost, Reason::Diverged}));
             CHECK(r.by == 0);
             if (r.reason == Reason::TargetLost) CHECK(caps[r.capability].needsTarget);
+            if (r.reason == Reason::TimeConstraint) { // a window it had to meet, missed: waiting past it, or flying
+                const bool waited = r.waiting != ActivityWait::None;
+                if (waited) CHECK((r.endTime >= window.endNotAfter || (window.startCritical() && r.endTime > window.startNotAfter)));
+                else CHECK((window.endCritical() && (r.endTime >= window.endNotAfter || r.endTime < window.endNotBefore)));
+            } else if (!among(r.reason, {Reason::TargetLost, Reason::BehaviorFailed, Reason::CapabilityLost, Reason::Diverged})) {
+                // else only one that waited, as it would start: what its NEW's checks say from where the aircraft is then
+                CHECK(r.waiting != ActivityWait::None);
+                CHECK(among(r.reason, {Reason::OnGround, Reason::InvalidParameter, Reason::OutOfRange, Reason::PerformanceLimit, Reason::InvalidWaypoint,
+                                       Reason::InvalidCurve, Reason::NotSupported, Reason::ControllerNotAxisAware, Reason::Unavailable}));
+            }
             break;
         }
-        if (r.reason == Reason::Preempted) {
-            CHECK(serialOf(r.by) > serialOf(id)); // by a newer activity...
-            if (const auto it = after.find(r.by); it != after.end()) CHECK(it->second.source >= r.source); // ...of its own or a higher source
+        const ActivityRecord* previous = was(id);
+        if (r.reason == Reason::Preempted && (previous == nullptr || previous->live())) { // (judged as it ends)
+            const auto it = after.find(r.by);
+            const ActivityRecord* waited = was(r.by);
+            // by a newer activity, or one that waited and started now...
+            CHECK((serialOf(r.by) > serialOf(id) || (waited && waited->waiting != ActivityWait::None)));
+            if (it != after.end()) {
+                CHECK(it->second.source >= r.source);                                 // ...of its own or a higher source...
+                if (r.endTime == done.now) CHECK(standing(it->second, r) == Standing::Takes); // ...that the rules let take it (4.9)
+            }
         }
         const ActivityRecord* old = was(id);
         if (!old) {
@@ -616,10 +670,13 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             ++newRecords;
             CHECK(created);
             CHECK(serialOf(id) == lastSerial + 1);
-            CHECK(r.state == ActivityState::Pending);
+            // pending - waiting to start if its NEW said so - unless what waited started at once and took it (4.9)
+            CHECK((r.state == ActivityState::Pending || (r.state == ActivityState::Canceled && r.reason == Reason::Preempted)));
             CHECK(r.startTime == done.now);
             CHECK(r.source == (done.op == Op::New ? done.options.source : Source::Policy));
             if (done.op == Op::New) CHECK(id == done.result.activity);
+            CHECK((r.waiting != ActivityWait::None) == (done.op == Op::New && (done.result.flags & kDeferred) != 0));
+            if (done.op == Op::New) CHECK((r.rank == done.options.rank && r.interrupt == done.options.interrupt));
             highest = std::max(highest, serialOf(id));
             continue;
         }
@@ -638,9 +695,12 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
                 if (r.state == ActivityState::Active) CHECK(step);
                 else CHECK(reset);
             }
+            // waiting until it starts, never again after (4.9)
+            if (old->waiting == ActivityWait::None) CHECK(r.waiting == ActivityWait::None);
+            if (old->waiting != ActivityWait::None && r.waiting == ActivityWait::None) ++seen["started"];
             CHECK((r.axes & ~old->axes) == 0); // it never gains an axis...
             if (r.axes != old->axes) {
-                CHECK(created); // ...and loses one only to a NEW, and then only a support axis
+                CHECK((created || startedNow)); // ...and loses one only to a NEW (or what waited, starting), and then only a support axis
                 CHECK((r.axes & kPrimaryAxes) == (old->axes & kPrimaryAxes));
             }
         } else if (r.state == ActivityState::Canceled && r.reason == Reason::Requested) {
@@ -648,13 +708,24 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             CHECK(done.addressed == id);
             CHECK(r.endTime == done.now);
         } else if (r.state == ActivityState::Canceled && done.op == Op::Authority) {
-            CHECK(done.ends.count(id) == 1); // one the rules end: the policy's, of the capability (or with no grant)
-            CHECK(r.source == Source::Policy);
+            if (r.reason == Reason::Preempted) CHECK(startedNow); // (what waited, starting as what the rules end freed its axes)
+            else CHECK(done.ends.count(id) == 1); // one the rules end: the policy's, of the capability (or with no grant)
+            if (r.reason != Reason::Preempted) CHECK(r.source == Source::Policy);
             CHECK(r.endTime == done.now);
         } else if (r.state == ActivityState::Canceled) {
-            CHECK(created); // preempted by the activity just made
-            CHECK(r.by == activityId(v, lastSerial + 1));
-            CHECK(r.endTime == done.now);
+            // preempted by the activity just made, or by what waited and started now (in a step, at one of its steps' ends)
+            CHECK((created || startedNow));
+            if (!startedNow) CHECK(r.by == activityId(v, lastSerial + 1));
+            if (step) {
+                CHECK((r.endTime > done.start && r.endTime <= done.now));
+                const double steps = (r.endTime - done.start) / done.stepS;
+                CHECK(std::abs(steps - std::round(steps)) < 1e-6);
+            } else {
+                CHECK(r.endTime == done.now);
+            }
+        } else if (old->waiting != ActivityWait::None && r.state == ActivityState::Failed && r.endTime == done.now) {
+            // one that waited: failed by a window it could no longer meet, or as it would start (the scheduler's, after any operation)
+            ++seen["failed:waiting"];
         } else {
             // completed or failed: something a world step did, and it ended at that step's end
             CHECK(step);
@@ -662,6 +733,7 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             const double steps = (r.endTime - done.start) / done.stepS;
             CHECK(std::abs(steps - std::round(steps)) < 1e-6);
             if (r.reason == Reason::Diverged) CHECK(done.diverged);
+            if (caps[r.capability].persistence == Persistence::Persistent && r.state == ActivityState::Completed) ++seen["completed:window"];
         }
         if (!step && !reset) CHECK((r.constraints == old->constraints && r.constraintsSeen == old->constraintsSeen));
     }
@@ -670,15 +742,48 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
     for (const auto& [id, r] : before)
         if (!after.count(id)) CHECK_FALSE(r.live()); // only the oldest ended ones leave the records
 
-    // a step flies every live activity: none still pending
+    // a step flies every live activity: none still pending but what waits to start
     if (step)
-        for (const auto& [id, r] : after) CHECK(r.state != ActivityState::Pending);
+        for (const auto& [id, r] : after) {
+            const ActivityRecord* old = was(id);
+            CHECK((r.state != ActivityState::Pending || r.waiting != ActivityWait::None || (old && old->waiting != ActivityWait::None)));
+        }
+
+    // what waits (4.9): pending, within the windows it can still meet; scheduled until its start window opens;
+    // queued behind something on its axes it may not take, which it names - nothing waits that could start
+    auto flying = [](const ActivityRecord& r) { return r.live() && r.waiting == ActivityWait::None; };
+    for (const auto& [id, r] : after) {
+        if (!r.live()) continue;
+        const TimeWindow& t = r.window;
+        if (r.waiting == ActivityWait::None) {
+            // flying past its end window: only a terminating activity whose end is not critical (late, it goes on)
+            if (done.now >= t.endNotAfter) CHECK((caps[r.capability].persistence == Persistence::Terminating && !t.endCritical()));
+            continue;
+        }
+        INFO("waiting " << serialOf(id) << " " << activityWaitName(r.waiting));
+        CHECK(r.state == ActivityState::Pending);
+        CHECK_FALSE(done.now >= t.endNotAfter);
+        CHECK_FALSE((t.startCritical() && done.now > t.startNotAfter));
+        if (r.waiting == ActivityWait::Scheduled) {
+            CHECK(done.now < t.startNotBefore);
+            CHECK(r.waitingFor == 0);
+            ++seen["scheduled"];
+            continue;
+        }
+        CHECK_FALSE(done.now < t.startNotBefore);
+        bool blocked = false, named = false;
+        for (const auto& [hid, h] : after)
+            if (flying(h) && (h.axes & r.axes) && standing(r, h) != Standing::Takes) blocked = true, named = named || hid == r.waitingFor;
+        CHECK(blocked);
+        CHECK(named);
+        ++seen["queued"];
+    }
 
     // each axis has at most one live owner, and the runtime flies it from where the host put it
     const RuntimeConfig& config = w.controls(v)->config();
     AxisMask owned = 0;
     for (const auto& [id, r] : after) {
-        if (!r.live()) continue;
+        if (!flying(r)) continue;
         CHECK((owned & r.axes) == 0);
         owned = static_cast<AxisMask>(owned | r.axes);
         const CapabilityDescriptor& d = caps[r.capability];
@@ -718,6 +823,10 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
     AuthorityModel authority;
     std::mt19937_64 callers(seed ^ 0x9e3779b97f4a7c15ull); // who an UPDATE or a CANCEL says it is
     std::mt19937_64 validations(seed ^ 0x5851f42d4c957f2dull); // which NEWs are validated first (drawn apart, as the callers are)
+    std::mt19937_64 schedules(seed ^ 0x2545f4914f6cdd1dull);   // ranks, windows and precedence (4.9; drawn apart likewise)
+    auto chance = [&schedules](double p) { return std::uniform_real_distribution<double>(0.0, 1.0)(schedules) < p; };
+    auto draw = [&schedules](int n) { return std::uniform_int_distribution<int>(0, n - 1)(schedules); };
+    std::vector<std::uint32_t> precedences(w.capabilities(v).size(), 0); // the platform's, as the rules keep them
     authority.control.assign(w.capabilities(v).size(), ControlStatus{});
     authority.restricted.assign(w.capabilities(v).size(), CapabilityStatus{});
 
@@ -750,6 +859,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             const double u = make.uniform(0.0, 1.0);
             done.op = u < 0.36 ? Op::New : u < 0.57 ? Op::Update : u < 0.65 ? Op::Cancel : u < 0.71 ? Op::Legacy
                     : u < 0.89 ? Op::Step : u < 0.91 ? Op::Reset : u < 0.94 ? Op::Default : u < 0.95 ? Op::Retarget : Op::Authority;
+            if (chance(0.02)) done.op = Op::Precedence; // the platform sets a capability's precedence (4.9)
         }
         const auto& caps = w.capabilities(v);
         // a capability's command: flight, guidance or support
@@ -787,6 +897,23 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                                           both(axisBit(Axis::Roll), axisBit(Axis::Pitch))};
                 done.options.axes = make.chance(0.9) ? masks[make.pick(std::size(masks))] : static_cast<AxisMask>(make.pick(1u << 10));
             }
+            // ranked, not interrupting, overriding its precedence, windowed, now and then (4.9)
+            if (chance(0.45)) {
+                done.options.rank = {static_cast<std::uint16_t>(draw(4)), static_cast<std::uint16_t>(draw(4))};
+                done.options.interrupt = !chance(0.4);
+                if (chance(done.options.source == Source::Policy ? 0.05 : 0.2)) done.options.precedenceOverride = static_cast<std::uint32_t>(draw(3));
+                if (chance(0.5)) {
+                    TimeWindow& t = done.options.window;
+                    const double now = w.simTime(), step = done.stepS;
+                    if (chance(0.5)) t.startNotBefore = now + step * (1 + draw(8));
+                    if (chance(0.3)) t.startNotAfter = (std::isnan(t.startNotBefore) ? now : t.startNotBefore) + step * draw(6);
+                    if (chance(0.5)) t.endNotAfter = now + step * (2 + draw(40));
+                    if (chance(0.2)) t.endNotBefore = now + step * draw(20);
+                    t.criticality = static_cast<TimeCriticality>(draw(4));
+                    if (chance(0.05)) std::swap(t.startNotBefore, t.endNotAfter); // (out of order...)
+                    if (chance(0.04)) t.endNotAfter = now - step * draw(3);         // (...or already over)
+                }
+            }
             Command c;
             SupportCommand sc;
             const int kind = commandFor(d, c, sc);
@@ -814,6 +941,25 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             }
             if (done.result.accepted()) CHECK(done.result.newActivity);
             if (done.result.accepted()) issued.push_back(done.result.activity);
+            if (done.result.accepted()) { // its capability's precedence: its override, else the platform's (4.9)
+                const ActivityRecord* made = w.activity(done.result.activity);
+                REQUIRE(made != nullptr);
+                const std::uint32_t expected = done.options.precedenceOverride != kNoPrecedenceOverride ? done.options.precedenceOverride
+                                                                                                         : precedences[done.capability];
+                if (made->live()) CHECK(made->precedence == expected);
+            }
+            break;
+        }
+        case Op::Precedence: {
+            std::vector<std::size_t> commandable;
+            for (std::size_t i = 0; i < caps.size(); ++i)
+                if (caps[i].interactions & kCommand) commandable.push_back(i);
+            done.capability = commandable[static_cast<std::size_t>(draw(static_cast<int>(commandable.size())))];
+            const auto p = static_cast<std::uint32_t>(draw(4));
+            precedences[done.capability] = p;
+            CHECK(w.setCapabilityPrecedence(v, caps[done.capability].id, p) == Reason::None);
+            CHECK(w.capabilityPrecedence(v, caps[done.capability].id) == p);
+            ++seen["precedence"];
             break;
         }
         case Op::Update:
@@ -960,7 +1106,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
         }
         const bool changes = done.op == Op::Step || done.op == Op::Reset || (done.op == Op::New && done.result.accepted()) ||
                              (done.op == Op::Legacy && done.accepted) || (done.op == Op::Cancel && done.result.status == CommandStatus::Canceled) ||
-                             (done.op == Op::Authority && !done.ends.empty());
+                             (done.op == Op::Authority && !done.ends.empty()) || done.op == Op::Precedence;
         if (!changes) {
             // refused, an UPDATE, or nothing to do with the records: they are as they were
             CHECK(after.size() == before.size());
@@ -1015,12 +1161,18 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
         std::map<std::string, int> seen, again;
         const auto first = randomSequence(a, 20260926, 600, seen);
         CHECK(first == randomSequence(a, 20260926, 600, again)); // the same calls, the same answers and the same flight
-        // every edge of the state machine and every answer an operation can give, for every adapter
-        for (const char* what : {"pending->active", "active->pending", "pending->canceled", "active->canceled", "canceled:preempted",
-                                 "canceled:requested", "completed:goal_reached", "new:done", "new:authority_held",
-                                 "new:invalid_axes", "new:out_of_range", "new:invalid_parameter", "update:done", "update:not_updatable",
-                                 "update:wrong_command_type", "update:activity_ended", "update:unknown_activity", "cancel:done",
-                                 "cancel:activity_ended", "cancel:unknown_activity", "clamped", "validate:valid", "validate:refused"}) {
+        // every edge of the state machine and every answer an operation can give, for every adapter: a walk
+        // meets nearly all, and what one misses (any change to what a command draws moves it) another seeded
+        // walk of the same adapter meets - the same every run, at most three more
+        static const char* const kEvery[] = {"pending->active", "active->pending", "pending->canceled", "active->canceled", "canceled:preempted",
+                                             "canceled:requested", "completed:goal_reached", "new:done", "new:authority_held",
+                                             "new:invalid_axes", "new:out_of_range", "new:invalid_parameter", "update:done", "update:not_updatable",
+                                             "update:wrong_command_type", "update:activity_ended", "update:unknown_activity", "cancel:done",
+                                             "cancel:activity_ended", "cancel:unknown_activity", "clamped", "validate:valid", "validate:refused",
+                                             "new:deferred", "scheduled", "queued", "started"};
+        auto unmet = [&seen] { return std::any_of(std::begin(kEvery), std::end(kEvery), [&seen](const char* what) { return seen[what] == 0; }); };
+        for (std::uint64_t seed = 20260926 + 100; unmet() && seed < 20260926 + 103; ++seed) randomSequence(a, seed, 600, seen, 0);
+        for (const char* what : kEvery) {
             INFO(what);
             CHECK(seen[what] > 0);
         }
@@ -1034,7 +1186,10 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
     static const char* const kRare[] = {"failed:target_lost", "new:invalid_waypoint", "new:invalid_curve", "update:invalid_curve",
                                         "new:not_granted", "request:none", "request:not_allowed", "canceled:released", "canceled:revoked",
                                         "canceled:not_granted", "canceled:collision_avoidance", "mode", "release", "revoke", "allow",
-                                        "restrict", "update:authority_held", "cancel:authority_held"};
+                                        "restrict", "update:authority_held", "cancel:authority_held",
+                                        // ranks, queues and time windows (docs/flight-autonomy.md, 4.9)
+                                        "precedence", "new:not_allowed", "new:time_constraint", "failed:time_constraint", "completed:window",
+                                        "failed:waiting"};
     auto missing = [&all] { return std::any_of(std::begin(kRare), std::end(kRare), [&all](const char* what) { return all[what] == 0; }); };
     for (std::uint64_t seed = 20260927; missing() && seed < 20260927 + 12; ++seed)
         for (const Aircraft& a : kAdapters) {

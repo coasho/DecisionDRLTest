@@ -753,14 +753,15 @@ static PyObject* result_tuple(const fsim_world* world, const fsim_command_result
 /* As result_tuple, with its detail given (a batch item's). */
 static PyObject* result_tuple_with(const fsim_command_result* r, const fsim_command_detail* dp) {
     const fsim_command_detail d = *dp;
-    return Py_BuildValue("(iiKKOiiddOKKsII)", r->status, r->reason, (unsigned long long)r->activity, (unsigned long long)r->other,
-                         (r->flags & 1u) ? Py_True : Py_False, d.index, d.constraint, d.from, d.to, d.new_activity ? Py_True : Py_False,
+    return Py_BuildValue("(iiKKOiiddOKKsIIO)", r->status, r->reason, (unsigned long long)r->activity, (unsigned long long)r->other,
+                         (r->flags & FSIM_COMMAND_CLAMPED) ? Py_True : Py_False, d.index, d.constraint, d.from, d.to, d.new_activity ? Py_True : Py_False,
                          (unsigned long long)d.command_id, (unsigned long long)d.associated, d.description ? d.description : "", d.finding_count,
-                         d.adjustment_count);
+                         d.adjustment_count, (r->flags & FSIM_COMMAND_DEFERRED) ? Py_True : Py_False);
 }
 
 /* (id, vehicle, capability, source, axes, state, reason, by, constraints, constraints_seen, start_time, end_time,
- * command_id, interactive, ((kind, id) per requirement it traces to)) */
+ * command_id, interactive, ((kind, id) per requirement it traces to), waiting, basis, (priority, precedence),
+ * precedence, waiting_for, interrupt, (start_not_before, start_not_after, end_not_before, end_not_after, criticality)) */
 static PyObject* info_tuple(const fsim_world* world, const fsim_activity_info* a) {
     fsim_activity_envelope e;
     fsim_activity_envelope_init(&e);
@@ -778,9 +779,11 @@ static PyObject* info_tuple(const fsim_world* world, const fsim_activity_info* a
         }
     }
     if (!trace) return NULL;
-    return Py_BuildValue("(KIIiIiiKIIddKON)", (unsigned long long)a->id, a->vehicle, a->capability, a->source, a->axes, a->state, a->reason,
-                         (unsigned long long)a->by, a->constraints, a->constraints_seen, a->start_time, a->end_time,
-                         (unsigned long long)e.command_id, e.interactive ? Py_True : Py_False, trace);
+    return Py_BuildValue("(KIIiIiiKIIddKONii(II)IKO(ddddi))", (unsigned long long)a->id, a->vehicle, a->capability, a->source, a->axes, a->state,
+                         a->reason, (unsigned long long)a->by, a->constraints, a->constraints_seen, a->start_time, a->end_time,
+                         (unsigned long long)e.command_id, e.interactive ? Py_True : Py_False, trace, e.waiting, e.basis,
+                         (unsigned int)e.rank_priority, (unsigned int)e.rank_precedence, e.precedence, (unsigned long long)e.waiting_for,
+                         e.interrupt ? Py_True : Py_False, e.start_not_before, e.start_not_after, e.end_not_before, e.end_not_after, e.criticality);
 }
 
 static int as_u64(PyObject* o, uint64_t* out) {
@@ -790,12 +793,53 @@ static int as_u64(PyObject* o, uint64_t* out) {
     return 1;
 }
 
-/* The command envelope (ABI 1.8): (command_id, ((kind, id), ...), interactive, validate_only). */
+/* How a command is arbitrated and scheduled (ABI 1.9): (interrupt, override_rejection, (priority, precedence),
+ * precedence_override or None, (start_not_before, start_not_after, end_not_before, end_not_after), criticality). */
+static int read_schedule(PyObject* const* item, fsim_command_options* o) {
+    int ok = 1;
+    const int interrupt = PyObject_IsTrue(item[0]), override = PyObject_IsTrue(item[1]);
+    if (interrupt < 0 || override < 0) return 0;
+    o->interrupt = interrupt > 0, o->override_rejection = override > 0;
+    PyObject* priority = PySequence_Check(item[2]) && PySequence_Size(item[2]) == 2 ? PySequence_GetItem(item[2], 0) : NULL;
+    PyObject* precedence = priority ? PySequence_GetItem(item[2], 1) : NULL;
+    uint32_t p = 0, q = 0;
+    ok = precedence && as_u32(priority, &p) && as_u32(precedence, &q) && p <= 0xFFFF && q <= 0xFFFF;
+    if (!ok && !PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "a rank is (priority, precedence), each 0 .. 65535");
+    o->rank_priority = (uint16_t)p, o->rank_precedence = (uint16_t)q;
+    Py_XDECREF(precedence);
+    Py_XDECREF(priority);
+    if (ok && item[3] != Py_None) ok = as_u32(item[3], &o->precedence_override);
+    if (ok) {
+        double* bounds[] = {&o->start_not_before, &o->start_not_after, &o->end_not_before, &o->end_not_after};
+        ok = PySequence_Check(item[4]) && PySequence_Size(item[4]) == 4;
+        for (Py_ssize_t i = 0; ok && i < 4; ++i) {
+            PyObject* t = PySequence_GetItem(item[4], i);
+            ok = t != NULL;
+            if (ok) *bounds[i] = PyFloat_AsDouble(t), ok = !PyErr_Occurred();
+            Py_XDECREF(t);
+        }
+        if (!ok && !PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "a window is four times (NaN: no bound)");
+    }
+    if (ok) ok = as_int(item[5], &o->criticality);
+    return ok;
+}
+
+/* The command envelope (ABI 1.8): (command_id, ((kind, id), ...), interactive, validate_only), then (1.9) how it is
+ * arbitrated and scheduled (read_schedule's six). */
 static int read_envelope(PyObject* e, fsim_command_options* o) {
-    static const char* shape = "the envelope must be (command_id, trace, interactive, validate_only)";
-    if (!PySequence_Check(e) || PySequence_Size(e) != 4) {
+    static const char* shape = "the envelope must be (command_id, trace, interactive, validate_only[, the schedule's six])";
+    const Py_ssize_t size = PySequence_Check(e) ? PySequence_Size(e) : -1;
+    if (size != 4 && size != 10) {
         if (!PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, shape);
         return 0;
+    }
+    if (size == 10) {
+        PyObject* item[6] = {NULL, NULL, NULL, NULL, NULL, NULL};
+        int ok = 1;
+        for (Py_ssize_t i = 0; i < 6; ++i) ok = (item[i] = PySequence_GetItem(e, 4 + i)) != NULL && ok;
+        if (ok) ok = read_schedule(item, o);
+        for (Py_ssize_t i = 0; i < 6; ++i) Py_XDECREF(item[i]);
+        if (!ok) return 0;
     }
     PyObject* id = PySequence_GetItem(e, 0);
     PyObject* trace = PySequence_GetItem(e, 1);
@@ -1452,6 +1496,27 @@ static PyObject* world_control_status(PyObject* o, PyObject* const* args, Py_ssi
     return Py_BuildValue("(OO)", allowed ? Py_True : Py_False, granted ? Py_True : Py_False);
 }
 
+/* set_capability_precedence(id, capability, precedence) */
+static PyObject* world_set_capability_precedence(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id, precedence;
+    if (!check_args(n, 3, 3, "set_capability_precedence") || !as_u32(args[0], &id) || !as_u32(args[2], &precedence) || !WORLD_IDLE(self)) return NULL;
+    const char* cap = as_str(args[1], "capability id");
+    if (!cap) return NULL;
+    if (fsim_vehicle_set_capability_precedence(self->world, id, cap, precedence) != FSIM_OK) return fail();
+    Py_RETURN_NONE;
+}
+
+/* capability_precedence(id, capability) -> precedence */
+static PyObject* world_capability_precedence(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    uint32_t id, precedence = 0;
+    if (!check_args(n, 2, 2, "capability_precedence") || !as_u32(args[0], &id)) return NULL;
+    const char* cap = as_str(args[1], "capability id");
+    if (!cap) return NULL;
+    if (fsim_vehicle_capability_precedence(((WorldObject*)o)->world, id, cap, &precedence) != FSIM_OK) return fail();
+    return PyLong_FromUnsignedLong(precedence);
+}
+
 /* set_availability(id, capability, availability, reason) */
 static PyObject* world_set_availability(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
@@ -2008,6 +2073,8 @@ static PyMethodDef world_methods[] = {
     FAST("revoke_control", world_revoke_control, "revoke_control(id, capability, reason)"),
     FAST("set_allowed", world_set_allowed, "set_allowed(id, capability, allowed)"),
     FAST("control_status", world_control_status, "control_status(id, capability) -> (allowed, granted)"),
+    FAST("set_capability_precedence", world_set_capability_precedence, "set_capability_precedence(id, capability, precedence)"),
+    FAST("capability_precedence", world_capability_precedence, "capability_precedence(id, capability) -> precedence"),
     FAST("set_availability", world_set_availability, "set_availability(id, capability, availability, reason)"),
     FAST("set_availability_ex", world_set_availability_ex, "set_availability_ex(id, capability, availability, reason, associated, next_available_s)"),
     FAST("capability_status_info", world_capability_status_info,

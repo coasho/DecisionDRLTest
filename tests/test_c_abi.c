@@ -1023,6 +1023,59 @@ int main(int argc, char** argv) {
             batch[2].count = 1; /* malformed: none is made */
             CHECK(fsim_vehicle_submit_batch(world, eagle, batch, 3, results, NULL) != FSIM_OK);
         }
+        {
+            /* ABI 1.9: ranks, queues and time windows (docs/flight-autonomy.md, 4.9) */
+            fsim_command_options o;
+            fsim_command_result held, waits, later, cr;
+            fsim_activity_envelope ae;
+            uint32_t falcon = 0, precedence = 99;
+            const double hold = fsim_hold();
+            double velocity[4], hsa[6];
+            spec.name = "cap-falcon";
+            spec.type = "jsbsim:f16c";
+            spec.altitude_msl_m = 3000.0;
+            spec.airspeed_ms = 160.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &falcon) == FSIM_OK);
+            fsim_command_options_init(&o);
+            CHECK(o.interrupt == 1 && o.rank_priority == 0 && o.precedence_override == FSIM_NO_PRECEDENCE_OVERRIDE && isnan(o.start_not_before));
+            velocity[0] = 160.0, velocity[1] = 0.0, velocity[2] = 1.5, velocity[3] = hold;
+            o.rank_priority = 1;
+            CHECK(fsim_vehicle_submit(world, falcon, FSIM_LEVEL_VELOCITY, velocity, 4, &o, &held) == FSIM_OK && held.status == FSIM_COMMAND_ACCEPTED);
+            CHECK((held.flags & FSIM_COMMAND_DEFERRED) == 0);
+            /* ranked behind what flies: it waits, the answer naming what for */
+            hsa[0] = 1.0, hsa[1] = hold, hsa[2] = hold, hsa[3] = hold, hsa[4] = hold, hsa[5] = hold;
+            o.rank_priority = 5, o.rank_precedence = 2;
+            CHECK(fsim_vehicle_submit_mode(world, falcon, FSIM_MODE_HSA, hsa, 6, &o, &waits) == FSIM_OK && waits.status == FSIM_COMMAND_ACCEPTED);
+            CHECK((waits.flags & FSIM_COMMAND_DEFERRED) != 0 && waits.other == held.activity);
+            fsim_activity_envelope_init(&ae);
+            CHECK(fsim_activity_get_envelope(world, waits.activity, &ae) == FSIM_OK);
+            CHECK(ae.waiting == FSIM_WAIT_QUEUED && ae.basis == FSIM_BASIS_PLANNED && ae.waiting_for == held.activity);
+            CHECK(ae.rank_priority == 5 && ae.rank_precedence == 2 && ae.interrupt == 1 && ae.precedence == 0 && isnan(ae.end_not_after));
+            CHECK(strcmp(fsim_activity_wait_name(ae.waiting), "queued") == 0 && strcmp(fsim_activity_basis_name(ae.basis), "planned") == 0);
+            /* what it waits for ends: it starts */
+            CHECK(fsim_activity_cancel(world, held.activity, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+            CHECK(fsim_activity_get_envelope(world, waits.activity, &ae) == FSIM_OK && ae.waiting == FSIM_WAIT_NONE && ae.basis == FSIM_BASIS_ACTUAL);
+            /* a start window: scheduled; the capability's precedence the platform's */
+            fsim_command_options_init(&o);
+            o.start_not_before = fsim_world_time(world) + 1.0;
+            o.criticality = FSIM_CRITICAL_START;
+            CHECK(fsim_vehicle_submit(world, falcon, FSIM_LEVEL_VELOCITY, velocity, 4, &o, &later) == FSIM_OK && (later.flags & FSIM_COMMAND_DEFERRED) != 0);
+            CHECK(fsim_activity_get_envelope(world, later.activity, &ae) == FSIM_OK && ae.waiting == FSIM_WAIT_SCHEDULED && ae.criticality == FSIM_CRITICAL_START);
+            CHECK(strcmp(fsim_time_criticality_name(FSIM_CRITICAL_START_AND_END), "start_and_end") == 0);
+            CHECK(fsim_world_step(world, (uint32_t)(1.1 / fsim_world_step_seconds(world)) + 1) == FSIM_OK);
+            CHECK(fsim_activity_get_envelope(world, later.activity, &ae) == FSIM_OK && ae.waiting == FSIM_WAIT_NONE);
+            CHECK(fsim_vehicle_set_capability_precedence(world, falcon, "fsim.flight.velocity", 3) == FSIM_OK);
+            CHECK(fsim_vehicle_capability_precedence(world, falcon, "fsim.flight.velocity", &precedence) == FSIM_OK && precedence == 3);
+            CHECK(fsim_vehicle_set_capability_precedence(world, falcon, "fsim.guidance.hover", 1) != FSIM_OK); /* (not offered: why) */
+            /* a policy's precedence override is refused; an end window already closed cannot be met */
+            fsim_command_options_init(&o);
+            o.precedence_override = 0;
+            CHECK(fsim_vehicle_submit(world, falcon, FSIM_LEVEL_VELOCITY, velocity, 4, &o, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "not_allowed") == 0);
+            fsim_command_options_init(&o);
+            o.end_not_after = fsim_world_time(world);
+            CHECK(fsim_vehicle_submit(world, falcon, FSIM_LEVEL_VELOCITY, velocity, 4, &o, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "time_constraint") == 0);
+        }
         }
         fsim_world_destroy(world);
     }

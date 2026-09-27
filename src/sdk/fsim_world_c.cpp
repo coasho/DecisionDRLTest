@@ -455,6 +455,17 @@ fsim::control::CommandOptions fromC(const fsim_command_options* o) noexcept {
         }
     if (FSIM_HAS(o, fsim_command_options, interactive)) out.interactive = o->interactive != 0;
     if (FSIM_HAS(o, fsim_command_options, validate_only)) out.validateOnly = o->validate_only != 0;
+    // ABI 1.9: ranks, queues and time windows
+    if (FSIM_HAS(o, fsim_command_options, interrupt)) out.interrupt = o->interrupt != 0;
+    if (FSIM_HAS(o, fsim_command_options, override_rejection)) out.overrideRejection = o->override_rejection != 0;
+    if (FSIM_HAS(o, fsim_command_options, rank_precedence)) out.rank = {o->rank_priority, o->rank_precedence};
+    if (FSIM_HAS(o, fsim_command_options, precedence_override)) out.precedenceOverride = o->precedence_override;
+    if (FSIM_HAS(o, fsim_command_options, end_not_after)) {
+        out.window.startNotBefore = o->start_not_before, out.window.startNotAfter = o->start_not_after;
+        out.window.endNotBefore = o->end_not_before, out.window.endNotAfter = o->end_not_after;
+    }
+    if (FSIM_HAS(o, fsim_command_options, criticality)) // (one beyond them: the window check refuses it, InvalidParameter)
+        out.window.criticality = static_cast<fsim::control::TimeCriticality>(std::clamp(o->criticality, 0, 255));
     return out;
 }
 
@@ -656,6 +667,9 @@ FSIM_API void fsim_command_options_init(fsim_command_options* options) {
     options->source = FSIM_SOURCE_POLICY;
     options->range = FSIM_RANGE_CLAMP;
     options->interactive = 1;
+    options->interrupt = 1;
+    options->precedence_override = FSIM_NO_PRECEDENCE_OVERRIDE;
+    options->start_not_before = options->start_not_after = options->end_not_before = options->end_not_after = std::numeric_limits<double>::quiet_NaN();
 }
 
 FSIM_API uint32_t fsim_vehicle_capability_count(fsim_world* world, uint32_t id) {
@@ -771,6 +785,21 @@ FSIM_API int fsim_vehicle_revoke_control(fsim_world* world, uint32_t id, const c
 FSIM_API int fsim_vehicle_set_allowed(fsim_world* world, uint32_t id, const char* capability, int allowed) {
     if (!world || !capability) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_allowed: bad arguments");
     return authority("fsim_vehicle_set_allowed", world->world.setAllowed(id, capability, allowed != 0));
+}
+
+FSIM_API int fsim_vehicle_set_capability_precedence(fsim_world* world, uint32_t id, const char* capability, uint32_t precedence) {
+    if (!world || !capability) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_capability_precedence: bad arguments");
+    return authority("fsim_vehicle_set_capability_precedence", world->world.setCapabilityPrecedence(id, capability, precedence));
+}
+
+FSIM_API int fsim_vehicle_capability_precedence(const fsim_world* world, uint32_t id, const char* capability, uint32_t* precedence) {
+    if (!world || !capability || !precedence) return FSIM_INVALID_ARGUMENT;
+    const fsim::control::Reason known = world->world.capabilityStatus(id, capability).reason; // (an unknown vehicle, one it does not offer)
+    if (known == fsim::control::Reason::UnknownVehicle || known == fsim::control::Reason::UnknownCapability ||
+        known == fsim::control::Reason::NotSupported || known == fsim::control::Reason::NotImplemented)
+        return fail(FSIM_INVALID_ARGUMENT, std::string("fsim_vehicle_capability_precedence: ") + fsim::control::reasonName(known));
+    *precedence = world->world.capabilityPrecedence(id, capability);
+    return FSIM_OK;
 }
 
 FSIM_API int fsim_vehicle_control_status(const fsim_world* world, uint32_t id, const char* capability, int32_t* allowed, int32_t* granted) {
@@ -1195,6 +1224,8 @@ FSIM_API void fsim_activity_envelope_init(fsim_activity_envelope* e) {
     std::memset(e, 0, sizeof *e);
     e->struct_size = sizeof *e;
     e->interactive = 1;
+    e->interrupt = 1;
+    e->start_not_before = e->start_not_after = e->end_not_before = e->end_not_after = std::numeric_limits<double>::quiet_NaN();
 }
 
 FSIM_API int fsim_activity_get_envelope(const fsim_world* world, fsim_activity_id activity, fsim_activity_envelope* out) {
@@ -1208,7 +1239,33 @@ FSIM_API int fsim_activity_get_envelope(const fsim_world* world, fsim_activity_i
         c.trace[i].kind = static_cast<int32_t>(a->trace[i].kind);
         c.trace[i].id = a->trace[i].id;
     }
+    c.waiting = static_cast<int32_t>(a->waiting);
+    c.basis = static_cast<int32_t>(a->basis());
+    c.rank_priority = a->rank.priority, c.rank_precedence = a->rank.precedence;
+    c.precedence = a->precedence;
+    c.waiting_for = a->waitingFor;
+    c.interrupt = a->interrupt ? 1 : 0;
+    c.criticality = static_cast<int32_t>(a->window.criticality);
+    c.start_not_before = a->window.startNotBefore, c.start_not_after = a->window.startNotAfter;
+    c.end_not_before = a->window.endNotBefore, c.end_not_after = a->window.endNotAfter;
     return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API const char* fsim_activity_wait_name(int wait) {
+    return wait >= 0 && wait < static_cast<int>(fsim::control::ActivityWait::Count) ? fsim::control::activityWaitName(static_cast<fsim::control::ActivityWait>(wait))
+                                                                                     : "?";
+}
+
+FSIM_API const char* fsim_activity_basis_name(int basis) {
+    return basis >= 0 && basis < static_cast<int>(fsim::control::ActivityBasis::Count)
+               ? fsim::control::activityBasisName(static_cast<fsim::control::ActivityBasis>(basis))
+               : "?";
+}
+
+FSIM_API const char* fsim_time_criticality_name(int criticality) {
+    return criticality >= 0 && criticality < static_cast<int>(fsim::control::TimeCriticality::Count)
+               ? fsim::control::timeCriticalityName(static_cast<fsim::control::TimeCriticality>(criticality))
+               : "?";
 }
 
 FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsim_batch_command* batch, uint32_t count, fsim_command_result* results,

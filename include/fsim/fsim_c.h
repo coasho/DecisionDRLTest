@@ -314,6 +314,16 @@ enum fsim_range_policy { FSIM_RANGE_CLAMP = 0, FSIM_RANGE_REJECT = 1, FSIM_RANGE
 /* ABI 1.8 appends FSIM_COMMAND_VALID: a validation's answer (fsim_command_options.validate_only) - it would be accepted; nothing flies. */
 enum fsim_command_status { FSIM_COMMAND_ACCEPTED = 0, FSIM_COMMAND_REJECTED = 1, FSIM_COMMAND_CANCELED = 2, FSIM_COMMAND_VALID = 3 };
 enum fsim_activity_state { FSIM_ACTIVITY_PENDING = 0, FSIM_ACTIVITY_ACTIVE, FSIM_ACTIVITY_COMPLETED, FSIM_ACTIVITY_FAILED, FSIM_ACTIVITY_CANCELED };
+/* fsim_command_result.flags (ABI 1.9 adds DEFERRED: accepted to wait - its start window, or axes held by what it may not interrupt). */
+enum fsim_command_flag { FSIM_COMMAND_CLAMPED = 1, FSIM_COMMAND_DEFERRED = 2 };
+/* Ranks, queues and time windows (ABI 1.9; docs/flight-autonomy.md, 4.9). Why a pending activity has not started: */
+enum fsim_activity_wait { FSIM_WAIT_NONE = 0, FSIM_WAIT_SCHEDULED, FSIM_WAIT_QUEUED };
+/* What its record rests on (A-GRA's ActivityBasisEnum): flown (actual), or waiting to start (planned). */
+enum fsim_activity_basis { FSIM_BASIS_ACTUAL = 0, FSIM_BASIS_SENSED, FSIM_BASIS_PREDICTED, FSIM_BASIS_PLANNED };
+/* Which of a command's time windows must be met (A-GRA's SchedulingCriticalityEnum). */
+enum fsim_time_criticality { FSIM_CRITICAL_NONE = 0, FSIM_CRITICAL_START, FSIM_CRITICAL_END, FSIM_CRITICAL_START_AND_END };
+/* fsim_command_options.precedence_override: the capability's own precedence. */
+#define FSIM_NO_PRECEDENCE_OVERRIDE 0xFFFFFFFFu
 /* ABI 1.7 appends FSIM_UNAVAILABLE (when it returns is not known: a capability the vehicle does not offer)
  * and FSIM_EXPENDED; FSIM_DISABLED means switched off (fsim_vehicle_set_availability), never "not supported". */
 enum fsim_availability { FSIM_AVAILABLE = 0, FSIM_TEMPORARILY_UNAVAILABLE, FSIM_FAULTED, FSIM_DISABLED, FSIM_UNAVAILABLE, FSIM_EXPENDED };
@@ -341,6 +351,16 @@ typedef struct fsim_command_options {
     fsim_requirement trace[FSIM_MAX_REQUIREMENTS]; /* the requirements it comes from */
     int32_t interactive;  /* 1 (fsim_command_options_init): its activity takes activity commands */
     int32_t validate_only; /* 1: checked and answered as a NEW would be - FSIM_COMMAND_VALID, or rejected with every finding - flying nothing */
+    /* ABI 1.9, how it is arbitrated and scheduled (docs/flight-autonomy.md, 4.9): */
+    int32_t interrupt;     /* 1 (fsim_command_options_init): takes contested axes from what it may interrupt; 0: waits until they are free
+                              (a policy's), or defers to rank (the platform's). A-GRA's omission is 0 */
+    int32_t override_rejection; /* fly it where a soft rejection would refuse it; none exists yet */
+    uint16_t rank_priority, rank_precedence; /* its rank (A-GRA's Ranking.Rank): lower first; 0, 0 (the default) first of all */
+    uint32_t precedence_override; /* the capability's precedence for this command alone; FSIM_NO_PRECEDENCE_OVERRIDE (the default): its own.
+                                     The platform's sources only: a policy's is refused not_allowed */
+    double start_not_before, start_not_after, end_not_before, end_not_after; /* simulation seconds; NaN (the default): no bound */
+    int32_t criticality;   /* fsim_time_criticality: which windows must be met (a start missed, an end missed: failed, time_constraint) */
+    int32_t reserved2;
 } fsim_command_options;
 FSIM_API void fsim_command_options_init(fsim_command_options* options);
 
@@ -349,7 +369,7 @@ typedef struct fsim_command_result {
     int32_t reason;            /* why it was refused: fsim_reason_name() */
     fsim_activity_id activity; /* the activity made (NEW) or addressed (UPDATE, CANCEL) */
     fsim_activity_id other;    /* the activity holding the authority ("authority_held") */
-    uint32_t flags;            /* 1: a value was clamped */
+    uint32_t flags;            /* fsim_command_flag: 1 a value was clamped; 2 deferred - it waits to start, `other` naming what it waits for */
     uint32_t reserved;         /* ABI 1.6: the field, route point or curve segment the answer is about, plus one (0: none);
                                   fsim_last_command_detail() has the rest */
 } fsim_command_result;
@@ -813,16 +833,32 @@ typedef struct fsim_command_adjustment {
 FSIM_API void fsim_command_adjustment_init(fsim_command_adjustment* adjustment);
 FSIM_API int fsim_last_command_adjustment(const fsim_world* world, uint32_t index, fsim_command_adjustment* out);
 
-/* The command an activity came from: its id, the requirements it traces to, whether it takes activity commands. */
+/* The command an activity came from: its id, the requirements it traces to, whether it takes activity commands;
+ * ABI 1.9: how it is arbitrated and scheduled, and whether it waits to start. */
 typedef struct fsim_activity_envelope {
     uint32_t struct_size;
     int32_t interactive;
     uint64_t command_id;
     fsim_requirement trace[FSIM_MAX_REQUIREMENTS];
+    int32_t waiting;           /* fsim_activity_wait (ABI 1.9) */
+    int32_t basis;             /* fsim_activity_basis */
+    uint16_t rank_priority, rank_precedence;
+    uint32_t precedence;       /* its capability's precedence it is arbitrated by (its command's override, else the capability's) */
+    fsim_activity_id waiting_for; /* queued: an activity on its axes it may not interrupt */
+    int32_t interrupt;
+    int32_t criticality;       /* fsim_time_criticality */
+    double start_not_before, start_not_after, end_not_before, end_not_after; /* its window; NaN: none */
 } fsim_activity_envelope;
 FSIM_API void fsim_activity_envelope_init(fsim_activity_envelope* envelope);
 FSIM_API int fsim_activity_get_envelope(const fsim_world* world, fsim_activity_id activity, fsim_activity_envelope* out);
 FSIM_API const char* fsim_requirement_kind_name(int kind); /* "effect", "action", "task", "command"; "none" */
+FSIM_API const char* fsim_activity_wait_name(int wait);    /* "none", "scheduled", "queued" */
+FSIM_API const char* fsim_activity_basis_name(int basis);  /* "actual", "sensed", "predicted", "planned" */
+FSIM_API const char* fsim_time_criticality_name(int criticality); /* "none", "start", "end", "start_and_end" */
+/* A capability's precedence (ABI 1.9; lower first, 0 until set): the platform's setting, by which two activities of one
+ * source contest axes before their ranks. What waits may start at once. */
+FSIM_API int fsim_vehicle_set_capability_precedence(fsim_world* world, uint32_t id, const char* capability, uint32_t precedence);
+FSIM_API int fsim_vehicle_capability_precedence(const fsim_world* world, uint32_t id, const char* capability, uint32_t* precedence);
 
 /* One command of a batch NEW: which call it would be, and that call's arguments. */
 enum fsim_batch_kind { FSIM_BATCH_LEVEL = 0, FSIM_BATCH_BEHAVIOR, FSIM_BATCH_SUPPORT, FSIM_BATCH_MODE, FSIM_BATCH_ROUTE, FSIM_BATCH_CURVE };

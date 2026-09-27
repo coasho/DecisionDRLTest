@@ -11,7 +11,7 @@ these are names only (ADR-28, decision D1).
     >>> agra.cannot_comply(rejected.reason)         # 'INVALID_WAYPOINT'
     >>> agra.flight_capabilities(vehicle)           # {'HSA_CSA': ['fsim.guidance.hsa'], 'LOITER': [...], ...}
 """
-from .world import ActivityState
+from .world import ActivityBasis, ActivityState, ActivityWait, Rank, TimeCriticality, TimeWindow
 
 #: CommandStatus (0 accepted, 1 rejected, 2 canceled, 3 valid) -> CommandProcessingStateEnum. RECEIVED is never
 #: needed: every command is answered at once. A validation that would be accepted is ACCEPTED, and its
@@ -60,7 +60,16 @@ CANNOT_COMPLY = {
     "not_implemented": "CAPABILITY_UNAVAILABLE",
     "on_ground": "STATE_OR_SETTINGS",
     "airborne": "STATE_OR_SETTINGS",
+    "time_constraint": "CONSTRAINT_TIME",
+    "queue_full": "INSUFFICIENT_RESOURCES",
 }
+
+#: fsim.TimeCriticality names <-> A-GRA's SchedulingCriticalityEnum (its omission: none is critical)
+SCHEDULING_CRITICALITY = {"none": None, "start": "START_TIME_CRITICAL", "end": "END_TIME_CRITICAL",
+                          "start_and_end": "START_AND_END_TIME_CRITICAL"}
+
+#: fsim.ActivityBasis names -> A-GRA's ActivityBasisEnum
+ACTIVITY_BASIS = {"actual": "ACTUAL", "sensed": "SENSED", "predicted": "PREDICTED", "planned": "PLANNED"}
 
 #: reason names -> MA_ValidationResultEnum, for a flight command's rejection (CannotComplyDetails)
 VALIDATION_RESULT = {
@@ -112,13 +121,17 @@ def command_processing_state(status):
     return COMMAND_PROCESSING_STATE[int(status)]
 
 
-def activity_state(info):
-    """An activity's record (ActivityInfo) as A-GRA's ActivityStateEnum. Pending is ENABLED; an active
-    one is unconstrained, partly constrained (its demand limited, a value clamped, a support axis taken)
-    or fully constrained (an effector at its stop, a limit exceeded); a canceled one FAILED, with the
-    reason CANCELED (cannot_comply)."""
+def activity_state(info, now=None):
+    """An activity's record (ActivityInfo) as A-GRA's ActivityStateEnum. Pending is ENABLED - but one queued
+    for its axes whose start window is open is ACTIVE_FULLY_CONSTRAINED: what triggers it holds, and what it
+    may not interrupt keeps it from flying (docs/flight-autonomy.md, 4.9; ``now``, the simulation time, else
+    its window is taken as open). An active one is unconstrained, partly constrained (its demand limited, a
+    value clamped, a support axis taken) or fully constrained (an effector at its stop, a limit exceeded); a
+    canceled one FAILED, with the reason CANCELED (cannot_comply)."""
     state = ActivityState(info.state)
     if state == ActivityState.PENDING:
+        if info.waiting == ActivityWait.QUEUED and (now is None or not now < info.window.start_not_before):
+            return "ACTIVE_FULLY_CONSTRAINED"
         return "ENABLED"
     if state == ActivityState.ACTIVE:
         if info.constraints & _FULLY:
@@ -129,6 +142,34 @@ def activity_state(info):
     if state == ActivityState.COMPLETED:
         return "COMPLETED"
     return "FAILED"
+
+
+def activity_basis(info):
+    """An activity's record as A-GRA's ActivityBasisEnum: ACTUAL, or PLANNED while it waits to start."""
+    return ACTIVITY_BASIS[ActivityBasis(info.basis).name.lower()]
+
+
+def command_options(ranking=None, temporal=None, override_rejection=None):
+    """A flight command's A-GRA ranking and temporal constraints as fsim's submit keywords (docs/flight-autonomy.md,
+    4.9). ``ranking``: {"Rank": (priority, precedence), "InterruptOtherActivities": bool or None,
+    "CapabilityPrecedenceOverride": int or None} - InterruptOtherActivities left out is False, as A-GRA has it (fsim's
+    own default interrupts). ``temporal``: {"StartTimeWindow": (begin, end), "EndTimeWindow": (begin, end),
+    "TemporalCriticality": "START_TIME_CRITICAL" ...}, times in simulation seconds, None for a bound left out."""
+    out = {}
+    if ranking is not None:
+        out["rank"] = Rank(*ranking.get("Rank", (0, 0)))
+        out["interrupt"] = bool(ranking.get("InterruptOtherActivities") or False)
+        if ranking.get("CapabilityPrecedenceOverride") is not None:
+            out["precedence_override"] = int(ranking["CapabilityPrecedenceOverride"])
+    if temporal is not None:
+        start = temporal.get("StartTimeWindow") or (None, None)
+        end = temporal.get("EndTimeWindow") or (None, None)
+        critical = {v: k for k, v in SCHEDULING_CRITICALITY.items() if v}.get(temporal.get("TemporalCriticality"), "none")
+        nan = float("nan")
+        out["window"] = TimeWindow(*(nan if t is None else float(t) for t in (*start, *end)), TimeCriticality[critical.upper()])
+    if override_rejection is not None:
+        out["override_rejection"] = bool(override_rejection)
+    return out
 
 
 def cannot_comply(reason):

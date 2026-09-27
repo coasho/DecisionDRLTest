@@ -244,6 +244,14 @@ control::ControlStatus Vehicle::controlStatus(std::string_view capability) const
     return world_ ? world_->impl_->controlStatus(id_, capability) : control::ControlStatus{false, false};
 }
 
+control::Reason Vehicle::setCapabilityPrecedence(std::string_view capability, std::uint32_t precedence) {
+    return world_ ? world_->impl_->setCapabilityPrecedence(id_, capability, precedence) : control::Reason::UnknownVehicle;
+}
+
+std::uint32_t Vehicle::capabilityPrecedence(std::string_view capability) const {
+    return world_ ? world_->impl_->capabilityPrecedence(id_, capability) : 0;
+}
+
 control::Reason Vehicle::setAvailability(std::string_view capability, control::Availability availability, control::Reason reason,
                                          std::uint64_t associated, double nextAvailableS) {
     return world_ ? world_->impl_->setAvailability(id_, capability, availability, reason, associated, nextAvailableS)

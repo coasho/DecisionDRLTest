@@ -613,6 +613,38 @@ int alloc() {
                  std::fprintf(stderr, "axes apart: update refused\n"), std::exit(3);
              }
          }},
+        // ADR-29 FA-2b: in the steps counted, an end window ends a level, a route waiting for its start window
+        // starts, and a command queued behind it starts when the route's critical end window fails it
+        {"schedule, windows", [&](std::uint32_t id, int k) {
+             static std::vector<std::array<ActivityId, 3>> made(64);
+             if (k == 149) { // (the last step counted: each did as its window says)
+                 const ActivityRecord *a = w.activity(made[id][0]), *b = w.activity(made[id][1]), *c = w.activity(made[id][2]);
+                 if (!a || !b || !c || a->state != ActivityState::Completed || b->reason != Reason::TimeConstraint || !c->live() ||
+                     c->waiting != ActivityWait::None)
+                     std::fprintf(stderr, "schedule: vehicle %u did not keep its windows\n", id), std::exit(3);
+                 return;
+             }
+             if (k != 0) return;
+             for (const auto& a : w.activities(id))
+                 if (a.live()) w.cancel(a.id); // (what the cases before left flying)
+             const double t = w.simTime(), step = w.dt() * w.frameSkip();
+             CommandOptions until;
+             until.window.endNotAfter = t + 70 * step;
+             const CommandResult level = w.submit(id, VelocityCommand{55.0, 0.0, kHold, kHold}, until);
+             CommandOptions later;
+             later.window.startNotBefore = t + 90 * step, later.window.endNotAfter = t + 120 * step;
+             later.window.criticality = TimeCriticality::End;
+             const auto& s = *w.vehicleState(id);
+             const std::vector<Waypoint> route = {waypointAt(s, 0, 5000), waypointAt(s, 3000, 8000)};
+             const CommandResult waits = w.submit(id, RouteCommand{}, route, later);
+             CommandOptions queued;
+             queued.rank = {3, 0};
+             queued.window.startNotBefore = t + 100 * step;
+             const CommandResult behind = w.submit(id, VelocityCommand{55.0, 0.0, 1.0, kHold}, queued);
+             if (!level.accepted() || !(waits.flags & kDeferred) || !(behind.flags & kDeferred))
+                 std::fprintf(stderr, "schedule: vehicle %u refused\n", id), std::exit(3);
+             made[id] = {level.activity, waits.activity, behind.activity};
+         }},
         // everything let go: the vehicle default's hold flies it
         {"default hold", [&](std::uint32_t id, int k) {
              if (k != 0) return;

@@ -560,7 +560,7 @@ control::CommandResult World::update(control::Source caller, control::ActivityId
 control::CommandResult World::cancel(control::Source caller, control::ActivityId activity) {
     Entry* e = entry(control::activityVehicle(activity));
     if (!e) return unknownActivity(activity);
-    control::CommandResult r = e->host.cancel(activity, simTime_, caller);
+    control::CommandResult r = e->host.cancel(activity, pool_->states()[e->slot], simTime_, caller);
     echo(e->host, r);
     if (r.status == control::CommandStatus::Canceled) levelChanged(*e);
     return r;
@@ -641,7 +641,7 @@ const control::Performance* World::performance(std::uint32_t id) noexcept {
 control::Reason World::setControlMode(std::uint32_t id, control::ControlMode mode) {
     Entry* e = entry(id);
     if (!e) return control::Reason::UnknownVehicle;
-    e->host.setControlMode(mode, simTime_);
+    e->host.setControlMode(mode, pool_->states()[e->slot], simTime_);
     levelChanged(*e); // (what the policy flew without a grant has ended)
     return control::Reason::None;
 }
@@ -664,7 +664,7 @@ control::Reason World::releaseControl(std::uint32_t id, std::string_view capabil
     if (!e) return control::Reason::UnknownVehicle;
     const int index = e->catalog->find(capability);
     if (index < 0) return e->support->refusal(capability);
-    const control::Reason r = e->host.releaseControl(static_cast<std::size_t>(index), simTime_);
+    const control::Reason r = e->host.releaseControl(static_cast<std::size_t>(index), pool_->states()[e->slot], simTime_);
     levelChanged(*e);
     return r;
 }
@@ -674,7 +674,7 @@ control::Reason World::revokeControl(std::uint32_t id, std::string_view capabili
     if (!e) return control::Reason::UnknownVehicle;
     const int index = e->catalog->find(capability);
     if (index < 0) return e->support->refusal(capability);
-    const control::Reason r = e->host.revokeControl(static_cast<std::size_t>(index), reason, simTime_);
+    const control::Reason r = e->host.revokeControl(static_cast<std::size_t>(index), reason, pool_->states()[e->slot], simTime_);
     levelChanged(*e);
     return r;
 }
@@ -684,9 +684,25 @@ control::Reason World::setAllowed(std::uint32_t id, std::string_view capability,
     if (!e) return control::Reason::UnknownVehicle;
     const int index = e->catalog->find(capability);
     if (index < 0) return e->support->refusal(capability);
-    const control::Reason r = e->host.setAllowed(static_cast<std::size_t>(index), allowed, simTime_);
+    const control::Reason r = e->host.setAllowed(static_cast<std::size_t>(index), allowed, pool_->states()[e->slot], simTime_);
     levelChanged(*e);
     return r;
+}
+
+control::Reason World::setCapabilityPrecedence(std::uint32_t id, std::string_view capability, std::uint32_t precedence) {
+    Entry* e = entry(id);
+    if (!e) return control::Reason::UnknownVehicle;
+    const int index = e->catalog->find(capability);
+    if (index < 0) return e->support->refusal(capability);
+    const control::Reason r = e->host.setPrecedence(static_cast<std::size_t>(index), precedence, pool_->states()[e->slot], simTime_);
+    levelChanged(*e); // (what waited may have started)
+    return r;
+}
+
+std::uint32_t World::capabilityPrecedence(std::uint32_t id, std::string_view capability) const {
+    const Entry* e = entry(id);
+    const int index = e ? e->catalog->find(capability) : -1;
+    return index < 0 ? 0 : e->host.precedence(static_cast<std::size_t>(index));
 }
 
 control::ControlStatus World::controlStatus(std::uint32_t id, std::string_view capability) const {
@@ -817,7 +833,7 @@ void World::step(unsigned n) {
                         positions.gear = after[s].gearPosition;
                         if (e->flapsPosition.valid()) positions.flaps = e->flapsPosition.get();
                     }
-                    e->host.afterStep(after[s], positions, simTime_);
+                    if (e->host.afterStep(after[s], positions, simTime_)) levelChanged(*e); // (what waited started)
                 }
         }
         // Keep the tiles around every vehicle warm (background loaders) so the

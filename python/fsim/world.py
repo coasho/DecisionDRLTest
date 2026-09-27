@@ -152,6 +152,32 @@ class RequirementKind(enum.IntEnum):
     COMMAND = 4
 
 
+class ActivityWait(enum.IntEnum):
+    """Why a pending activity has not started (docs/flight-autonomy.md, 4.9): NONE (it starts at the next world
+    step, or has started), SCHEDULED (its start window has not opened), QUEUED (its axes are held by what it may not
+    interrupt: ActivityInfo.waiting_for)."""
+    NONE = 0
+    SCHEDULED = 1
+    QUEUED = 2
+
+
+class ActivityBasis(enum.IntEnum):
+    """What an activity's record rests on (A-GRA's ActivityBasisEnum): ACTUAL, flown; PLANNED, waiting to start."""
+    ACTUAL = 0
+    SENSED = 1
+    PREDICTED = 2
+    PLANNED = 3
+
+
+class TimeCriticality(enum.IntEnum):
+    """Which of a command's time windows must be met (A-GRA's SchedulingCriticalityEnum): one missed fails the
+    activity (time_constraint); the others are guidance."""
+    NONE = 0
+    START = 1
+    END = 2
+    START_AND_END = 3
+
+
 class Availability(enum.IntEnum):
     """Whether a capability can be commanded now (A-GRA's CapabilityAvailabilityEnum). DISABLED means switched off
     by the platform; a capability the vehicle does not offer is UNAVAILABLE, with the reason why
@@ -265,13 +291,28 @@ class Rejected(_native.Error):
         self.adjustments = list(adjustments)
 
 
+Rank = collections.namedtuple("Rank", "priority precedence", defaults=(0, 0))
+Rank.__doc__ = ("A command's rank (A-GRA's ComparableRankingType; docs/flight-autonomy.md, 4.9): lower first - its priority, then "
+                "its precedence within it. Rank(0, 0), every command's without one, ranks first.")
+
+TimeWindow = collections.namedtuple("TimeWindow", "start_not_before start_not_after end_not_before end_not_after criticality",
+                                    defaults=(math.nan, math.nan, math.nan, math.nan, TimeCriticality.NONE))
+TimeWindow.__doc__ = ("When a command may start and should end (A-GRA's TemporalConstraints; docs/flight-autonomy.md, 4.9), in "
+                      "simulation seconds (World.time); NaN, no bound. It starts no earlier than ``start_not_before``; "
+                      "``criticality`` (fsim.TimeCriticality or its name) says which bounds must be met - a start window closed "
+                      "while it waits, an end missed: failed, \"time_constraint\". A persistent activity (a hold, a level) is done "
+                      "when its end window closes.")
+
 ActivityInfo = collections.namedtuple(
     "ActivityInfo", "id vehicle capability source axes state reason by constraints constraints_seen start_time end_time "
-    "command_id interactive trace")
+    "command_id interactive trace waiting basis rank precedence waiting_for interrupt window")
 ActivityInfo.__doc__ = ("An activity's record: its capability (an index into Vehicle.capabilities()), who commanded it, "
                         "its state and why it ended, flags (1 saturated, 8 clamped, ...) and when it ran; the command it came "
                         "from (docs/flight-autonomy.md, 4.8): its id, whether it takes activity commands, and the requirements "
-                        "it traces to, as (fsim.RequirementKind, id) pairs.")
+                        "it traces to, as (fsim.RequirementKind, id) pairs; how it is arbitrated and scheduled (4.9): why it waits "
+                        "to start (fsim.ActivityWait), what its record rests on (fsim.ActivityBasis: planned while it waits), its "
+                        "fsim.Rank, its capability's precedence, what it waits for (queued), whether its command interrupts, and "
+                        "its fsim.TimeWindow.")
 
 Finding = collections.namedtuple("Finding", "reason index constraint section associated description")
 Finding.__doc__ = ("One reason a command cannot be flown as asked (A-GRA's ValidationResult; docs/flight-autonomy.md, 4.8): the "
@@ -283,10 +324,11 @@ Adjustment.__doc__ = ("A value a command is flown with other than asked, held to
                       "route point or curve segment; a route point's field (fsim.Waypoint's order) or -1; the limit; what was "
                       "asked and what is flown (NaN where it is not one number: a fly-by turn flown smaller).")
 
-Validation = collections.namedtuple("Validation", "valid reason clamped command_id findings adjustments")
+Validation = collections.namedtuple("Validation", "valid reason clamped command_id findings adjustments deferred", defaults=(False,))
 Validation.__doc__ = ("A validation's answer (validate_only=True; A-GRA's FLIGHT_COMMAND_VALID): whether a NEW would be accepted, "
                       "why not, whether a value would be clamped, the command's id, every finding and every value it would be "
-                      "flown with other than asked. Nothing flies.")
+                      "flown with other than asked, and whether it would wait to start (docs/flight-autonomy.md, 4.9). "
+                      "Nothing flies.")
 
 #: The envelope's limits, in the platform's order: "load_factor_max", "alpha_max", "cas_min", ...
 LIMITS = tuple(_native.limit_name(i) for i in range(10))
@@ -334,7 +376,8 @@ CommandedState.__doc__ = ("What the cascade asked for in its last control update
 
 def _info(t):
     return ActivityInfo(t[0], t[1], t[2], Source(t[3]), t[4], ActivityState(t[5]), _native.reason_name(t[6]), t[7], t[8], t[9],
-                        t[10], t[11], t[12], t[13], tuple((RequirementKind(k), i) for k, i in t[14]))
+                        t[10], t[11], t[12], t[13], tuple((RequirementKind(k), i) for k, i in t[14]), ActivityWait(t[15]),
+                        ActivityBasis(t[16]), Rank(*t[17]), t[18], t[19], bool(t[20]), TimeWindow(*t[21][:4], TimeCriticality(t[21][4])))
 
 
 def _findings(result, h):
@@ -365,18 +408,32 @@ def _checked(result, h=None):
 def _validation(result, h):
     """A validation's answer (validate_only)."""
     findings, adjustments = _findings(result, h)
-    return Validation(result[0] == 3, _native.reason_name(result[1]), bool(result[4]), result[10], findings, adjustments)
+    return Validation(result[0] == 3, _native.reason_name(result[1]), bool(result[4]), result[10], findings, adjustments, bool(result[15]))
 
 
-def _envelope(command_id, trace, interactive, validate_only):
-    """The command envelope's native form (docs/flight-autonomy.md, 4.8), or None where it is all left out."""
-    if not command_id and not trace and interactive and not validate_only:
+def _envelope(command_id, trace, interactive, validate_only, rank=None, interrupt=True, precedence_override=None, window=None,
+              override_rejection=False):
+    """The command envelope's native form (docs/flight-autonomy.md, 4.8 and 4.9), or None where it is all left out."""
+    scheduled = rank is not None or not interrupt or precedence_override is not None or window is not None or override_rejection
+    if not command_id and not trace and interactive and not validate_only and not scheduled:
         return None
     pairs = []
     for kind, rid in trace:
         kind = RequirementKind[kind.upper()] if isinstance(kind, str) else RequirementKind(kind)
         pairs.append((int(kind), int(rid)))
-    return (int(command_id), tuple(pairs), bool(interactive), bool(validate_only))
+    envelope = (int(command_id), tuple(pairs), bool(interactive), bool(validate_only))
+    if not scheduled:
+        return envelope
+    rank = Rank(*rank) if rank is not None else Rank()
+    if window is None:
+        window = TimeWindow()
+    elif isinstance(window, dict):
+        window = TimeWindow(**window)
+    criticality = window.criticality
+    criticality = TimeCriticality[criticality.upper()] if isinstance(criticality, str) else TimeCriticality(criticality)
+    bounds = tuple(math.nan if b is None else float(b) for b in window[:4])
+    return envelope + (bool(interrupt), bool(override_rejection), (int(rank.priority), int(rank.precedence)),
+                       None if precedence_override is None else int(precedence_override), bounds, int(criticality))
 
 
 #: What is set directly beside the cascade (docs/sdk/control.md): the support
@@ -528,15 +585,18 @@ class Activity:
     below an activity's may not address it (fsim.Rejected "authority_held"),
     so a policy cannot change or end what the platform's own sources fly."""
 
-    __slots__ = ("world", "id", "level", "clamped", "source", "command_id")
+    __slots__ = ("world", "id", "level", "clamped", "source", "command_id", "deferred")
 
-    def __init__(self, world, activity_id, level, clamped=False, source=Source.POLICY, command_id=0):
+    def __init__(self, world, activity_id, level, clamped=False, source=Source.POLICY, command_id=0, deferred=False):
         self.world = world
         self.id = activity_id
         self.level = level
         self.clamped = clamped  #: a value of the command was clamped to its range (World.last_command_details: which, and to what)
         self.source = Source(source)  #: the source it was submitted with, which its update and cancel declare
         self.command_id = command_id  #: the caller's id for its command (docs/flight-autonomy.md, 4.8), 0 none
+        #: it was accepted to wait (docs/flight-autonomy.md, 4.9): for its start window, or for axes held by what it may
+        #: not interrupt (``info.waiting``, ``info.waiting_for``)
+        self.deferred = deferred
 
     @property
     def vehicle(self):
@@ -631,7 +691,9 @@ class BatchCommand:
         range_ = k.pop("range", RangePolicy.CLAMP)
         min_version = k.pop("min_version", 0)
         validate = bool(k.get("validate_only", False))
-        envelope = _envelope(k.pop("command_id", 0), k.pop("trace", ()), k.pop("interactive", True), k.pop("validate_only", False))
+        envelope = _envelope(k.pop("command_id", 0), k.pop("trace", ()), k.pop("interactive", True), k.pop("validate_only", False),
+                             k.pop("rank", None), k.pop("interrupt", True), k.pop("precedence_override", None), k.pop("window", None),
+                             k.pop("override_rejection", False))
         options = (int(source), None if axes is None else int(axes), int(range_), int(min_version), envelope)
         kind, args = self._KINDS[self.method], list(self.args)
         if self.method == "submit":
@@ -754,7 +816,8 @@ class Vehicle:
         self._h.command_behavior(self.id, behavior, t, params or None, rows)
 
     def submit(self, level, *values, source=Source.POLICY, axes=None, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
-               interactive=True, validate_only=False, **fields):
+               interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,
+               override_rejection=False, **fields):
         """NEW: a command at ``level`` - its fields by name (fsim.COMMAND_FIELDS),
         the others as the command's defaults, or all of them in order -
         becomes an Activity, answered at once. ``axes`` (fsim.Axis) owns part
@@ -769,12 +832,20 @@ class Vehicle:
         The command envelope (docs/flight-autonomy.md, 4.8), on every submit: ``command_id``, the caller's id,
         echoed and kept with the activity; ``trace``, the requirements it comes from as (fsim.RequirementKind or
         its name, id) pairs; ``interactive`` False: its activity takes no activity commands; ``validate_only``
-        True: answered as a NEW would be, flying nothing - a fsim.Validation, never an Activity or Rejected."""
+        True: answered as a NEW would be, flying nothing - a fsim.Validation, never an Activity or Rejected.
+
+        How it is arbitrated and scheduled (4.9), on every submit: ``rank`` (fsim.Rank or (priority, precedence);
+        lower first) - a policy's command takes contested axes from what it ranks at or ahead of and waits for
+        the rest; ``interrupt`` False: it waits until its axes are free (the platform's sources: it defers to
+        rank); ``precedence_override`` (the platform's sources only) its capability's precedence for this command;
+        ``window`` (fsim.TimeWindow or a dict of its fields) when it may start and should end;
+        ``override_rejection`` over a soft rejection (none exists yet). One that waits is an Activity with
+        ``deferred`` True, pending until it starts."""
         level = Level(level)
         if level == Level.BEHAVIOR:
             raise TypeError("submit_behavior() takes behaviours")
         r = self._h.submit(self.id, int(level), _row(level, values, fields), int(source), None if axes is None else int(axes), int(range),
-                           int(min_version), _envelope(command_id, trace, interactive, validate_only))
+                           int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection))
         return self._answer(r, level, source, validate_only)
 
     def _answer(self, r, level, source, validate_only):
@@ -782,21 +853,22 @@ class Vehicle:
         if validate_only:
             return _validation(r, self._h)
         r = _checked(r, self._h)
-        return Activity(self._world, r[2], level, bool(r[4]), source, r[10])
+        return Activity(self._world, r[2], level, bool(r[4]), source, r[10], bool(r[15]))
 
     def submit_behavior(self, behavior, target=None, points=None, *, source=Source.POLICY, range=RangePolicy.CLAMP,
-                        min_version=0, command_id=0, trace=(), interactive=True, validate_only=False, **params):
+                        min_version=0, command_id=0, trace=(), interactive=True, validate_only=False, rank=None, interrupt=True,
+                        precedence_override=None, window=None, override_rejection=False, **params):
         """NEW for a behaviour (see command_behavior for its arguments): an
         Activity, or fsim.Rejected. Behaviours that follow a vehicle need
         ``target``; a new target is a new submit. The command envelope as submit's."""
         t = target.id if isinstance(target, Vehicle) else int(target or 0)
         rows = None if points is None else [tuple(float(x) for x in p) for p in points]
         r = self._h.submit_behavior(self.id, behavior, t, params or None, rows, int(source), None, int(range), int(min_version),
-                                    _envelope(command_id, trace, interactive, validate_only))
+                                    _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection))
         return self._answer(r, Level.BEHAVIOR, source, validate_only)
 
     def submit_hsa(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(), interactive=True,
-                   validate_only=False, **fields):
+                   validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None, override_rejection=False, **fields):
         """NEW for fsim.guidance.hsa, A-GRA's HSA/CSA (docs/vehicle-interface.md, 4.4): hold ``heading_rad`` or
         ``course_rad``, a ``speed`` in ``speed_reference`` (fsim.SpeedReference or its name: "true_airspeed",
         "calibrated_airspeed", "ground_speed", "mach") and ``altitude_m`` above ``altitude_reference``
@@ -805,11 +877,12 @@ class Vehicle:
         Activity whose ``update(**fields)`` changes only the fields given; fsim.Rejected if refused. The command
         envelope as submit's."""
         r = self._h.submit_mode(self.id, MODE_KINDS.index("hsa"), _row("hsa", values, fields), int(source), None, int(range), int(min_version),
-                                _envelope(command_id, trace, interactive, validate_only))
+                                _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection))
         return self._answer(r, "hsa", source, validate_only)
 
     def submit_route(self, waypoints, *, projection=Projection.GREAT_CIRCLE, repeat=False, end=EndBehavior.CONTINUE, start=0,
-                     source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(), interactive=True, validate_only=False):
+                     source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(), interactive=True, validate_only=False,
+                     rank=None, interrupt=True, precedence_override=None, window=None, override_rejection=False):
         """NEW for fsim.guidance.route, A-GRA's waypoint following (docs/vehicle-interface.md, 4.5): fly
         ``waypoints`` (fsim.Waypoint, dicts of its fields, or rows in its order; at most 256) as legs - great circles
         or rhumb lines (``projection``: fsim.Projection or "great_circle", "rhumb") - from where the aircraft is to
@@ -820,11 +893,12 @@ class Vehicle:
         ``findings`` every waypoint at fault. The command envelope as submit's."""
         options = {"projection": projection, "repeat": 1.0 if repeat else 0.0, "end": end, "start": start}
         r = self._h.submit_route(self.id, _row("route", (), options), _waypoints(waypoints), int(source), None, int(range), int(min_version),
-                                 _envelope(command_id, trace, interactive, validate_only))
+                                 _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection))
         return self._answer(r, "route", source, validate_only)
 
     def submit_pattern(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
-                       interactive=True, validate_only=False, **fields):
+                       interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,
+                       override_rejection=False, **fields):
         """NEW for fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md, 4.6): ``pattern``
         (fsim.PatternKind or "orbit", "racetrack", "figure_eight", "hold") round ``latitude_rad``, ``longitude_rad``
         (its centre or fix) at ``altitude_m``, with ``radius_m``, ``clockwise``, ``course_rad`` (the inbound course, a
@@ -833,11 +907,12 @@ class Vehicle:
         of its bank give (a hold's: rate one), a hold's minute-long legs. An Activity whose ``update(**fields)`` changes
         only what it gives; fsim.Rejected if refused. The command envelope as submit's."""
         r = self._h.submit_mode(self.id, MODE_KINDS.index("pattern"), _row("pattern", values, fields), int(source), None, int(range),
-                                int(min_version), _envelope(command_id, trace, interactive, validate_only))
+                                int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection))
         return self._answer(r, "pattern", source, validate_only)
 
     def submit_curve(self, segments, *, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
-                     interactive=True, validate_only=False, **fields):
+                     interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,
+                     override_rejection=False, **fields):
         """NEW for fsim.guidance.curve, A-GRA's curve following (docs/vehicle-interface.md, 4.7): fly ``segments``
         (fsim.BezierSegment, dicts of its fields, or (north, east, down) triples; 1 to 10), quintic Beziers in metres
         from ``latitude_rad``, ``longitude_rad``, ``altitude_m`` (left out: the aircraft now). Within the ground speeds
@@ -848,11 +923,12 @@ class Vehicle:
         fsim.Rejected if refused: ``index`` names the segment, ``section`` where it is too tight, ``findings``
         every segment at fault. The command envelope as submit's."""
         r = self._h.submit_curve(self.id, _row("curve", (), fields), _segments(segments), int(source), None, int(range), int(min_version),
-                                 _envelope(command_id, trace, interactive, validate_only))
+                                 _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection))
         return self._answer(r, "curve", source, validate_only)
 
     def submit_support(self, kind, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
-                       interactive=True, validate_only=False, **fields):
+                       interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,
+                       override_rejection=False, **fields):
         """NEW for a support effector the vehicle has - "gear" (down), "flaps"
         (position), "wheel_brakes" (left, right), "speedbrake" (position),
         "pitch_trim" (position) - set directly beside the flight activity; or
@@ -864,7 +940,7 @@ class Vehicle:
         if kind not in SUPPORT_FIELDS:
             raise ValueError("support kind must be one of %s" % ", ".join(SUPPORT_KINDS))
         r = self._h.submit_support(self.id, SUPPORT_KINDS.index(kind), _row(kind, values, fields), int(source), None, int(range),
-                                   int(min_version), _envelope(command_id, trace, interactive, validate_only))
+                                   int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection))
         return self._answer(r, kind, source, validate_only)
 
     def submit_batch(self, commands):
@@ -1027,6 +1103,15 @@ class Vehicle:
     def control_status(self, capability):
         """fsim.ControlStatus(allowed, granted) of a capability by id."""
         return ControlStatus(*self._h.control_status(self.id, capability))
+
+    def set_capability_precedence(self, capability, precedence):
+        """A capability's precedence (docs/flight-autonomy.md, 4.9; lower first, 0 until set): the platform's setting,
+        by which two activities of one source contest axes before their ranks are compared. What waits may start."""
+        self._h.set_capability_precedence(self.id, capability, int(precedence))
+
+    def capability_precedence(self, capability):
+        """A capability's precedence by id (set_capability_precedence)."""
+        return self._h.capability_precedence(self.id, capability)
 
     def set_availability(self, capability, availability, reason="restricted", associated=0, next_available_s=None):
         """The platform restricts a capability (fsim.Availability or its name; AVAILABLE lifts it): a policy's NEW for it

@@ -702,6 +702,8 @@ const char* reasonName(Reason reason) noexcept {
     case Reason::NotImplemented: return "not_implemented";
     case Reason::OnGround: return "on_ground";
     case Reason::Airborne: return "airborne";
+    case Reason::TimeConstraint: return "time_constraint";
+    case Reason::QueueFull: return "queue_full";
     default: return "?";
     }
 }
@@ -742,6 +744,8 @@ const char* reasonDescription(Reason reason) noexcept {
     case Reason::NotImplemented: return "applicable to this aircraft, not built yet: its support table names the stage";
     case Reason::OnGround: return "the aircraft is on the ground: the airborne guidance waits for it to fly";
     case Reason::Airborne: return "the aircraft is in the air: the ground modes wait for it to land";
+    case Reason::TimeConstraint: return "a time window it must meet cannot be met, or was missed";
+    case Reason::QueueFull: return "as many activities as can wait already do";
     default: return "";
     }
 }

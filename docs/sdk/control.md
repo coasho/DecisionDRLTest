@@ -488,6 +488,41 @@ auto answers = v.submitBatch(batch);
   `newActivity` is false for an UPDATE, a CANCEL, a validation and a command
   the existing entry points' live activity takes.
 
+### Ranks, queues and time windows
+
+Who takes contested axes, and when a command flies
+([flight-autonomy.md](../flight-autonomy.md), 4.9; A-GRA's ranking and
+temporal constraints):
+
+```cpp
+CommandOptions o;
+o.rank = {2, 0};                                    // lower first; {0, 0}, every command's without one, first of all
+CommandResult r = v.submit(hsa, o);                 // ranked behind what flies: accepted to wait
+r.flags & kDeferred;                                // r.other: what it waits for
+world.activity(r.activity)->waiting;                // ActivityWait::Queued (->waitingFor; ->basis() Planned)
+                                                    // ...and it starts once that ends: after a step, a CANCEL, a release
+o = CommandOptions{};
+o.interrupt = false;                                // a policy's "nice" command: waits for whatever flies
+o.window.startNotBefore = world.time() + 30.0;      // no earlier (ActivityWait::Scheduled until then)
+o.window.endNotAfter = world.time() + 90.0;         // a hold or a level is done then; a route late...
+o.window.criticality = TimeCriticality::End;        // ...fails (time_constraint) if its end is critical
+v.setCapabilityPrecedence("fsim.flight.velocity", 2); // the platform's: before the rank, lower first
+```
+
+- **Who takes the axes.** A higher source's activity refuses an interrupting
+  command (`authority_held`) and is waited for by one that does not. The
+  platform's own interrupting command takes any rank. A policy's command that
+  does not interrupt waits for whatever flies. Otherwise the capability's
+  precedence decides, then the rank; equal, the newest takes. Left as they are,
+  every command behaves as before.
+- **What waits** is listed with what flies, updated and canceled like it, and
+  prepared afresh from where the aircraft is when it starts: a refusal there
+  fails it with that reason. Sixteen wait at most (`queue_full`). The existing
+  entry points (`command()`) never wait: they are refused where they may not
+  take the axes.
+- **Time windows** are checked after each world step; a window that cannot be
+  met is refused `time_constraint`. Repetition is a task's (FA-2d).
+
 ### Support and availability: what a vehicle can do at all, and now
 
 Two questions, answered apart ([flight-autonomy.md](../flight-autonomy.md),
