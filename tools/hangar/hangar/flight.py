@@ -2,11 +2,12 @@
 
 The same tests fly any JSBSim aircraft - the design, and a reference to
 compare it with - through the fsim SDK, at the actuator level with small
-autopilots written here (so they measure the aircraft, not the platform's
-controllers): trimmed level flight across the speed range, the stall, the
-climb, the dynamic modes, and a robustness sweep of random attitudes and
-rates of the kind an RL agent will reach. Speeds are true airspeed in m/s
-unless named *_kcas.
+autopilots written here and without the platform's envelope protection
+(Flight), so they measure the aircraft, not the platform's controllers:
+trimmed level flight across the speed range, the stall, the climb, the
+dynamic modes, and a robustness sweep of random attitudes and rates of the
+kind an RL agent will reach. Speeds are true airspeed in m/s unless named
+*_kcas.
 """
 import math
 
@@ -19,7 +20,17 @@ G0 = 9.80665
 
 
 class Flight:
-    def __init__(self, aircraft_type, name="hangar-test", jsbsim_root=None, lat=37.6, lon=-122.4):
+    """A world to fly tests in. Its vehicles fly without the platform's
+    envelope protection (docs/control-architecture.md, section 11): on a
+    surface-controlled aircraft it eases an elevator commanded at the
+    actuator level nose-down as the angle of attack or the load factor nears
+    the profile's limit - and the build writes the angle's limit from the
+    stall these tests flew last time (profile.py). Flown under it, each stall
+    would measure the one before, and the numbers would never settle.
+    protection=None leaves the platform's default: the autopilot stage's
+    evaluation flies the aircraft as a trainer will."""
+
+    def __init__(self, aircraft_type, name="hangar-test", jsbsim_root=None, lat=37.6, lon=-122.4, protection="off"):
         import fsim  # the SDK, only needed here
         self.fsim = fsim
         opts = dict(publish=False, workers=1)
@@ -28,6 +39,7 @@ class Flight:
         self.world = fsim.World(name, **opts)
         self.type = aircraft_type if ":" in aircraft_type else "jsbsim:" + aircraft_type
         self.lat, self.lon = lat, lon
+        self.protection = protection
         self.dt = self.world.step_seconds
         self._n = 0
         self._has_prop = None
@@ -37,9 +49,12 @@ class Flight:
 
     def spawn(self, altitude_m=1500.0, speed_ms=55.0, heading_deg=0.0, pitch_deg=0.0, roll_deg=0.0):
         self._n += 1
-        return self.world.create_vehicle("t%d" % self._n, type=self.type, latitude_deg=self.lat, longitude_deg=self.lon,
-                                         altitude_msl_m=altitude_m, heading_deg=heading_deg, airspeed_ms=speed_ms,
-                                         pitch_deg=pitch_deg, roll_deg=roll_deg)
+        v = self.world.create_vehicle("t%d" % self._n, type=self.type, latitude_deg=self.lat, longitude_deg=self.lon,
+                                      altitude_msl_m=altitude_m, heading_deg=heading_deg, airspeed_ms=speed_ms,
+                                      pitch_deg=pitch_deg, roll_deg=roll_deg)
+        if self.protection is not None:
+            v.set_protection(self.protection)
+        return v
 
     @staticmethod
     def prop(v, name, default=float("nan")):

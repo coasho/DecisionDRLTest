@@ -617,8 +617,8 @@
       <property value="0.0">fsim/effectors/yaw</property>
       <property value="1">fsim/envelope/version</property>
       <property value="1">fsim/envelope/provenance</property>
-      <property value="15.169">fsim/envelope/clean/alpha_max_deg</property>
-      <property value="58.3774">fsim/envelope/clean/cas_min_ms</property>
+      <property value="16.5708">fsim/envelope/clean/alpha_max_deg</property>
+      <property value="58.6062">fsim/envelope/clean/cas_min_ms</property>
       <property value="1">fsim/propulsion/version</property>
       <property value="1">fsim/propulsion/provenance</property>
       <property value="0.0">fsim/propulsion/afterburner</property>
@@ -643,9 +643,9 @@
       <property value="0.177075">fsim/plant/yaw/gain</property>
       <property value="1">fsim/performance/version</property>
       <property value="1">fsim/performance/provenance</property>
-      <property value="16120.6">fsim/performance/ceiling_m</property>
+      <property value="16118">fsim/performance/ceiling_m</property>
       <property value="307.438">fsim/performance/max_tas_ms</property>
-      <property value="58.3774">fsim/performance/stall_cas_ms</property>
+      <property value="58.6062">fsim/performance/stall_cas_ms</property>
       <property value="1">fsim/applicability/version</property>
       <property value="1">fsim/applicability/provenance</property>
       <property value="0.0">fsim/applicability/aerobatic</property>

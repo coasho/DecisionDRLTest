@@ -79,6 +79,18 @@ code that computes them, changes.
 The fly stage flies the same tests on a reference aircraft (`reference =
 "jsbsim:c172x"` in `[targets]`) and prints its numbers beside the design's.
 
+The flight tests (fly, verify, calibrate and the autopilot stage's
+identification) command the actuators, and fly without the platform's
+envelope protection ([control.md](sdk/control.md#envelope-protection)).
+Protection eases an elevator commanded directly nose-down as the angle of
+attack nears the profile's limit, and for a design without a limiting law
+that limit is the stall the fly stage flew last time
+([The profile](#the-profile)). Flown under it, each run's stall would
+measure the previous run's, and the profile would never settle. Flown
+without it, a second run of fly and autopilot finds what the first found
+and leaves the `.xml` as it was. The autopilot stage's manoeuvres keep
+protection, as a trainer's aircraft does.
+
 A rebuild that changes nothing leaves the aircraft's files as they were:
 the build writes them with LF line ends, as git keeps them, and
 `<name>.xml` keeps the date in its header until something else in it
@@ -940,11 +952,11 @@ every vehicle of the type ([control.md](sdk/control.md#per-aircraft-gains)).
 Gains written by hand in `autopilot.toml` (`[pid_attitude]` and so on) still
 go into the aircraft as `fsim/control/<controller>/<parameter>`, and win;
 a trainer's own setting still wins. The stage then flies the aircraft as
-built - the platform taking the gains from its file, as it will for a
-trainer - through standard manoeuvres at 0.7, 1 and 1.5 times the reference
-speed: a 40 s velocity hold, a 30° bank step, a 5° pitch step, a climb at
-5 % of the speed, a 1.5 g step, a roll-rate step and a 90° turn
-(`out/autopilot.png`).
+built - the platform taking the gains from its file and limiting commands
+to its envelope, as it will for a trainer - through standard manoeuvres at
+0.7, 1 and 1.5 times the reference speed: a 40 s velocity hold, a 30° bank
+step, a 5° pitch step, a climb at 5 % of the speed, a 1.5 g step, a
+roll-rate step and a 90° turn (`out/autopilot.png`).
 
 Flown with the shared gains, 336 of the 558 manoeuvres (31 designs, three
 speeds, the hold and five steps) lost control, never reached their target,

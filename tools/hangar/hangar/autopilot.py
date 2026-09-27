@@ -331,7 +331,8 @@ class Evaluate:
 
     def __init__(self, d, ident):
         from .flight import Flight
-        self.f = Flight(d.aircraft.name, name="hangar-autopilot-eval-" + d.aircraft.name)
+        # with the envelope protection a trainer gets (Limit, from the profile's envelope)
+        self.f = Flight(d.aircraft.name, name="hangar-autopilot-eval-" + d.aircraft.name, protection=None)
         self.dt = self.f.dt
         self.alt = ident["altitude_m"]
         self.max_bank = design_max_bank(d.aircraft)

@@ -4,6 +4,7 @@ tests), so the numbers are a first look; what is asserted is that each stage
 produces its outputs and that the aircraft it builds flies. Needs the fsim
 package on the path; skipped without it."""
 import glob
+import json
 import math
 import os
 import re
@@ -59,6 +60,15 @@ class Stages(unittest.TestCase):
     def failed(self, r):
         return [c["name"] for c in r.get("checks", []) if c["status"] == "fail"]
 
+    @staticmethod
+    def measured(d):
+        """What the fly stage measured (out/fly.json's results), without the seconds each took."""
+        with open(os.path.join(d.out, "fly.json"), encoding="utf-8") as f:
+            results = json.load(f)["results"]
+        for r in results.values():
+            r.pop("seconds", None)
+        return json.dumps(results, sort_keys=True)
+
     def test_every_stage(self):
         d = pipeline.Design(self.toml, log=lambda *a: None)
         d.aircraft.spec.setdefault("analysis", {})["quick"] = True
@@ -109,6 +119,7 @@ class Stages(unittest.TestCase):
         self.assertGreater(fly["stall"]["stall_kcas"], 15.0)
         self.assertGreater(fly["climb"]["rows"][0]["rate_ms"], 1.0)
         self.assertEqual(fly["robustness"]["diverged"], 0)
+        first = self.measured(d)
         # its plant identified: written beside the design and into the JSBSim
         # aircraft, and every vehicle of the type flies the loops the platform
         # designs from it
@@ -136,8 +147,15 @@ class Stages(unittest.TestCase):
             self.assertEqual(v.profile_section("plant"), (1, 1))  # version 1, from hangar
             self.assertAlmostEqual(v.profile_value("plant/roll/tau_s"), identified["roll"]["lag_s"], places=5)
             self.assertEqual(v.profile_value("identity/family"), 1)
+            # the stall the fly stage flew is the envelope now: protected, the elevator eases near it
+            self.assertAlmostEqual(v.profile_value("envelope/clean/alpha_max_deg"), fly["stall"]["alpha_at_stall"], places=3)
+            self.assertEqual(v.protection, fsim.ProtectionMode.LIMIT)
         finally:
             w.close()
+        # the flight tests measure the aircraft, not that envelope (flight.Flight): flown
+        # again on the profile the last run wrote, they find what they found
+        self.stage(d, "fly")
+        self.assertEqual(self.measured(d), first)
         self.assertTrue(os.path.isfile(html.write(d)))
 
 

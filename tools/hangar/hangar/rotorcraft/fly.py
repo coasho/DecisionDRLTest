@@ -96,6 +96,7 @@ class Session:
         self.n += 1
         self.v = self.world.create_vehicle("r%d" % self.n, type="jsbsim:" + self.r.name, latitude_deg=37.6, longitude_deg=-122.4,
                                            altitude_msl_m=self.altitude_m, heading_deg=0.0, airspeed_ms=speed_ms)
+        self.v.set_protection("off")  # the aircraft, not the platform's envelope protection (flight.Flight)
         return self.v
 
     @staticmethod
