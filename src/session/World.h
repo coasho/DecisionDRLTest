@@ -172,6 +172,16 @@ public:
     /// cascade's levels, the acceleration they command in north, east and
     /// down, the altitude as its mode commanded it. NaN fields for an unknown vehicle.
     control::VehicleCommandState commandState(std::uint32_t id) const;
+    // --- The navigation report (docs/flight-autonomy.md, 4.14; A-GRA's MA_NavigationReport) ---
+    /// What the vehicle flies on, how much is left and for how long, its
+    /// playtime to its recovery point and its contingency (Navigation.cpp).
+    /// Energy::Unknown for an unknown vehicle, or one its flight model says
+    /// nothing of.
+    control::NavigationReport navigationReport(std::uint32_t id) const;
+    /// Its recovery point and reserve: Reason::OutOfRange for a point off the
+    /// Earth or a reserve outside [0, 1).
+    control::Reason setNavigation(std::uint32_t id, const control::NavigationSettings& settings);
+    control::NavigationSettings navigation(std::uint32_t id) const noexcept;
     /// What flies a vehicle's primary axes nobody owns: the neutral actuator
     /// command (as always) or a hold of the heading, airspeed and height each
     /// had when it was let go. Reason::None if set.
@@ -287,6 +297,7 @@ private:
         unsigned controlDivider = 1;
         bool forceApplied = false;         ///< external force pushed last step (needs zeroing)
         bool windApplied = false;
+        control::NavigationSettings navigation; ///< its recovery point and reserve
     };
 
     /// What the control cascades see of other vehicles during a step: each

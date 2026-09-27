@@ -230,4 +230,23 @@ const char* taskStateName(TaskState state) noexcept {
     }
 }
 
+const char* energyName(Energy e) noexcept {
+    switch (e) {
+    case Energy::Unknown: return "unknown";
+    case Energy::Fuel: return "fuel";
+    case Energy::Battery: return "battery";
+    default: return "?";
+    }
+}
+
+const char* contingencyName(Contingency c) noexcept {
+    switch (c) {
+    case Contingency::Normal: return "NORMAL";
+    case Contingency::MissionCritical: return "MISSION_CRITICAL";
+    case Contingency::FlightCritical: return "FLIGHT_CRITICAL";
+    case Contingency::LostComms: return "LOST_COMMS";
+    default: return "?";
+    }
+}
+
 } // namespace fsim::control

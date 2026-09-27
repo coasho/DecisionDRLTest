@@ -11,7 +11,7 @@ these are names only (ADR-28, decision D1).
     >>> agra.cannot_comply(rejected.reason)         # 'INVALID_WAYPOINT'
     >>> agra.flight_capabilities(vehicle)           # {'HSA_CSA': ['fsim.guidance.hsa'], 'LOITER': [...], ...}
 """
-from .world import ActivityBasis, ActivityState, ActivityWait, Rank, TimeCriticality, TimeWindow
+from .world import ActivityBasis, ActivityState, ActivityWait, Energy, Rank, TimeCriticality, TimeWindow
 
 #: CommandStatus (0 accepted, 1 rejected, 2 canceled, 3 valid) -> CommandProcessingStateEnum. RECEIVED is never
 #: needed: every command is answered at once. A validation that would be accepted is ACCEPTED, and its
@@ -217,6 +217,19 @@ def flyout_curve(setpoint):
     reference = (k["latitude_rad"], k["longitude_rad"], k["altitude_m"])
     return [{"CenterReference": reference, "ControlPoints": [((n, e, d), 1.0) for n, e, d in zip(s.north, s.east, s.down)],
              "KnotVector": KNOT_VECTOR} for s in setpoint.args[0]]
+
+
+def navigation_report(report):
+    """A navigation report (fsim.NavigationReport, Vehicle.navigation_report()) as A-GRA's MA_NavigationReport
+    (docs/flight-autonomy.md, 4.14): {"Endurance": {"Fuel": kg, "Percent": its fuel's or charge's, "Duration": s},
+    "Playtime": s, "ContingencyLevel": its SystemContingencyLevelEnum}. Fuel is 0 for a battery; a value the vehicle
+    has none of - Playtime without a recovery point, all of Endurance where it flies on neither - is None."""
+    def known(x):
+        return None if x != x else x
+    flies = report.energy != Energy.UNKNOWN
+    return {"Endurance": {"Fuel": report.fuel_kg if flies else None, "Percent": known(report.percent),
+                          "Duration": known(report.endurance_s)},
+            "Playtime": known(report.playtime_s), "ContingencyLevel": report.contingency.name}
 
 
 def task_state(status):

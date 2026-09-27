@@ -343,6 +343,29 @@ The performance tables (SUB-02) record what an aircraft flies level, climbs and 
 - **Looked up** (`tablesAt`, `tablesCeilingM`, fsim/VehicleProfile.h). Values are linear in altitude and weight between the conditions flown, and along each condition's band at the same fraction of it. A condition or point is read at its own value, whatever its neighbour's. Below the lowest altitude a lookup takes that row's values, and in weight it runs on down to the tanks empty. A lookup is NaN above the altitudes flown, or where a condition it lies between was not flown (above that weight's ceiling). The ceiling is where the best climb first falls below 0.5 m/s; an altitude nothing held level at climbs nothing, as the flight tests count it. An axis that is not strictly rising is refused.
 - **The rotorcraft** fly theirs with their fuel and batteries (FA-3b).
 
+### 4.14 The navigation report (as FA-3 builds it)
+
+The navigation report (STS-07; A-GRA's MA_NavigationReport) says what a vehicle flies on, how much it has left and for how long, what it can spend before it turns back, and its contingency level.
+
+- **Energy on board, all 35 aircraft.**
+  - The fixed wings burn fuel from their JSBSim tanks, and so do the UH-60A and UH-1H: their engines are JSBSim's electric engine, patched to burn their specific fuel consumption times the power they give.
+  - The IRIS+, the Crazyflie and the Skua carry batteries. Their flight controls integrate the power the motors draw into the charge left (`fsim/battery/*`), and the motors stop once it is spent.
+  - A stock JSBSim aircraft reports its tanks as they are. One with neither tanks nor a battery, such as JSBSim's gliders, reports `Energy::Unknown` and nothing more.
+- **What it reports.**
+  - The fuel (A-GRA's Fuel), what is left and the capacity: kilograms for fuel, joules for a battery. The percent left (Percent).
+  - The consumption now: the engines' fuel flow, or the power the battery gives.
+  - The endurance (Duration): what is left over the consumption now, as A-GRA defines it. It is infinite while the vehicle consumes nothing and 0 once nothing is left.
+  - The contingency level: FLIGHT_CRITICAL at or below the reserve (a tenth of capacity unless set) or with the engines starved, otherwise NORMAL. The platform models no subsystem failures and no communications, so it never reports MISSION_CRITICAL or LOST_COMMS.
+  - With a recovery point set (`setNavigation`), the playtime (Playtime): what is left less the reserve and the return, over the consumption now; 0 once past it. The return is flown at the best-range speed and fuel flow from the performance tables (4.13), at the vehicle's altitude and weight. Without tables (a stock aircraft, a rotorcraft, a battery) it is flown at the cruise speed and the consumption now. The distance is the great circle over the ground; the wind, the climb and the descent are not counted.
+- **Asked for, never stepped.** The report is worked out when asked, from the flight model's tanks, engines and battery. Nothing in the step reads it, so no flight changes.
+- **Checked on all 35** (section 14):
+  - the consumption it gives, summed step by step, is what left the tanks or the battery;
+  - flown level at cruise (the rotorcraft in the hover), the time to use a fifth of what the vehicle has, or two hours' worth, is 0 to 4.1 % longer than the report said. The difference is the weight the vehicle loses as it burns; a battery's weight does not change, and it matches.
+- **Surfaces.**
+  - C++: `World::navigationReport`, `setNavigation` and `navigation` (session); `Vehicle::navigationReport()`, `setNavigation()` and `navigation()` (fsim/World.h), with the types in fsim/Control.h.
+  - C: `fsim_vehicle_navigation_report`, `fsim_vehicle_set_navigation` and `fsim_vehicle_get_navigation` (ABI 1.13).
+  - Python: `Vehicle.navigation_report()`, `set_recovery()`, `clear_recovery()` and `navigation()`; `fsim.agra.navigation_report(report)` gives A-GRA's names.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -511,7 +534,7 @@ A-GRA's per-mode performance profile from hangar's data; energy management in ev
 
 **Status:** in progress, in five steps:
 - FA-3a, the performance tables (4.13), done 2026-09-27 and measured in section 14;
-- FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft (the rotorcraft's done 2026-09-27, section 14), the rotorcraft's tables, the navigation report (STS-07), endurance against a flown burn;
+- FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft, the navigation report (STS-07, 4.14) and endurance against a flown burn, done 2026-09-27 and measured in section 14; the rotorcraft's tables still to come;
 - FA-3c, the performance profile per mode (CAP-04 to CAP-15), updated with the condition and configuration;
 - FA-3d, energy management in every mode (HSA-10, CTG-04): the fleet climb case;
 - FA-3e, speed optimisation (HSA-05, LTR-17) and endurance validation (VAL-03), the first soft rejection override_rejection overrides.
@@ -1055,6 +1078,65 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - the quadrotors fly the same, bit for bit, until the battery is spent;
   - the fixed wings are untouched: digests identical, with protection and without.
 - ctest: all 240 tests pass.
+
+**FA-3b, the navigation report (STS-07) and the Skua's battery.**
+- **The Skua carries a battery.** `[battery] capacity_wh = 1170` is its 6.5 kg pack at 180 Wh/kg, 12S Li-ion: like everything about the Skua, a design choice. The power it gives is the motor's: the battery's 44.4 V times the throttle, times the current Drela's motor model draws.
+  - At 22 m/s and 3,000 m it gives 456 W. The report said 151.8 minutes, and the pack was spent after 152.0 minutes' flight.
+  - The motor then stops, and the Skua glides at 16 m/s, sinking 1.3 m/s.
+  - Until the pack is spent it flies the same, bit for bit: ten minutes' cruise and ten minutes' climb, compared with the aircraft file from before.
+- **The report on all 35.** Each aircraft flew level at its cruise speed at 3,000 m (the rotorcraft hovered at 300 m), after 120 s to settle.
+  - *Drain*: the consumption the report gives, summed step by step over 60 s, over what left the tanks or battery. It is 1 to within 1.1 × 10⁻⁶ on every aircraft.
+  - *Flown / report*: the time to use a fifth of what the aircraft had (or two hours' worth), over the report's time for that amount at its consumption then. It is 1.000 to 1.041, all within the plan's 5 %. The aircraft flies longer because it lightens as it burns. A battery's weight does not change, and it matches.
+  - The RQ-4B's flow stays flat. At 3,000 m it needs so little thrust that its fuel flow sits on JSBSim's idle floor for its turbine (MilThrust^0.2 × 107 lb/h: 639 lb/h), which does not change as it lightens.
+
+| Aircraft | Flies on | Left (%) | Consumption | Endurance (min) | Drain | Flown (min) | Report (min) | Flown / report |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| a10c | fuel | 98.9 | 0.2954 kg/s | 278.5 | 1.00000 | 55.9 | 55.7 | 1.004 |
+| b52h | fuel | 39.8 | 1.491 kg/s | 630.0 | 1.00000 | 121.8 | 120.0 | 1.015 |
+| c130j | fuel | 99.4 | 0.6636 kg/s | 519.9 | 1.00000 | 104.9 | 104.0 | 1.009 |
+| c172 | fuel | 99.0 | 0.006366 kg/s | 305.9 | 1.00000 | 61.6 | 61.2 | 1.006 |
+| c17a | fuel | 99.7 | 1.577 kg/s | 1133.9 | 1.00000 | 120.9 | 120.0 | 1.008 |
+| cf2 | battery | 57.2 | 7.6 W | 4.0 | 1.00000 | 0.8 | 0.8 | 1.000 |
+| e3g | fuel | 99.2 | 2.902 kg/s | 363.5 | 1.00000 | 73.7 | 72.7 | 1.013 |
+| e7a | fuel | 59.6 | 0.5196 kg/s | 399.1 | 1.00000 | 80.3 | 79.8 | 1.006 |
+| ea18g | fuel | 98.1 | 0.6491 kg/s | 159.3 | 1.00000 | 32.6 | 31.9 | 1.022 |
+| ec130h | fuel | 59.5 | 0.5797 kg/s | 356.1 | 1.00000 | 71.8 | 71.2 | 1.009 |
+| f15c | fuel | 98.5 | 0.5177 kg/s | 193.4 | 1.00000 | 39.7 | 38.7 | 1.026 |
+| f16c | fuel | 98.1 | 0.3273 kg/s | 158.6 | 1.00000 | 32.3 | 31.7 | 1.019 |
+| f22a | fuel | 98.5 | 0.6637 kg/s | 202.9 | 1.00000 | 41.6 | 40.6 | 1.026 |
+| f35a | fuel | 98.8 | 0.5528 kg/s | 246.6 | 1.00000 | 50.5 | 49.3 | 1.024 |
+| fa18c | fuel | 98.3 | 0.4498 kg/s | 178.5 | 1.00000 | 36.5 | 35.7 | 1.022 |
+| gripen | fuel | 97.8 | 0.2964 kg/s | 131.9 | 1.00000 | 27.1 | 26.4 | 1.026 |
+| h6k | fuel | 59.7 | 0.574 kg/s | 624.1 | 1.00000 | 121.9 | 120.0 | 1.016 |
+| iris | battery | 84.0 | 181.2 W | 15.7 | 1.00000 | 3.1 | 3.1 | 1.000 |
+| j10a | fuel | 98.5 | 0.3993 kg/s | 203.6 | 1.00000 | 42.2 | 40.7 | 1.035 |
+| j20a | fuel | 98.5 | 0.8369 kg/s | 206.1 | 1.00000 | 42.6 | 41.2 | 1.034 |
+| kc135r | fuel | 49.9 | 0.7217 kg/s | 1044.5 | 1.00000 | 121.4 | 120.0 | 1.012 |
+| kc46a | fuel | 99.7 | 1.367 kg/s | 1170.9 | 1.00000 | 121.7 | 120.0 | 1.014 |
+| mig29a | fuel | 97.8 | 0.4222 kg/s | 135.2 | 1.00000 | 27.5 | 27.0 | 1.019 |
+| mirage2000 | fuel | 97.7 | 0.4002 kg/s | 128.6 | 1.00000 | 26.8 | 25.7 | 1.041 |
+| rafale | fuel | 98.3 | 0.4328 kg/s | 178.0 | 1.00000 | 36.8 | 35.6 | 1.034 |
+| rc135w | fuel | 49.8 | 0.7807 kg/s | 631.1 | 1.00000 | 121.4 | 120.0 | 1.011 |
+| rq4b | fuel | 29.8 | 0.08052 kg/s | 484.3 | 1.00000 | 96.9 | 96.9 | 1.000 |
+| skua | battery | 97.0 | 684.7 W | 99.5 | 1.00000 | 19.9 | 19.9 | 1.000 |
+| su25 | fuel | 98.0 | 0.3382 kg/s | 144.8 | 1.00000 | 29.3 | 29.0 | 1.012 |
+| su27s | fuel | 98.0 | 0.5821 kg/s | 147.9 | 1.00000 | 30.1 | 29.6 | 1.017 |
+| su57 | fuel | 98.5 | 0.8278 kg/s | 204.3 | 1.00000 | 42.4 | 40.9 | 1.038 |
+| typhoon | fuel | 98.1 | 0.516 kg/s | 158.3 | 1.00000 | 32.8 | 31.7 | 1.035 |
+| u2s | fuel | 49.6 | 0.1718 kg/s | 419.7 | 1.00000 | 84.8 | 83.9 | 1.010 |
+| uh1h | fuel | 98.7 | 0.04461 kg/s | 234.3 | 1.00000 | 47.8 | 46.9 | 1.021 |
+| uh60 | fuel | 97.9 | 0.1222 kg/s | 141.8 | 1.00000 | 28.8 | 28.4 | 1.017 |
+
+- **Tests.**
+  - `test_navigation` (C++):
+    - fuel on a designed wing, a stock aircraft and a fighter, each against its drain;
+    - the UH-60A's fuel, and the Crazyflie's battery flown until spent, within 1 % of its endurance;
+    - a glider that flies on neither;
+    - the playtime to a recovery point against its terms, the reserve's contingency, the tanks emptied, the refusals.
+  - The C ABI's 1.13 block, `python/tests/test_navigation.py`, and hangar's test of the battery channel.
+- **Digests:** identical to FA-2e's and FA-3a's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-2e's build (5 interleaved rounds of `micro`, 9 of `command`): the medians are within -2.1 % to +3.0 % and -2.8 % to +0.2 %. That is the noise; FA-3a's were -1.6 % to +2.8 % and -1.5 % to +1.8 %. The report is worked out only when asked.
+- ctest: all 244 tests pass.
 
 ## Appendix A: the inventory
 

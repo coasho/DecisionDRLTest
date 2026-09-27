@@ -494,4 +494,63 @@ struct VehicleCommandState : CommandedState {
     double altitudeReference = kNone; ///< AltitudeReference
 };
 
+// --- The navigation report (docs/flight-autonomy.md, 4.14; A-GRA's MA_NavigationReport) ---
+
+/// What a vehicle flies on.
+enum class Energy : std::uint8_t {
+    Unknown = 0, ///< its flight model does not say (neither fuel nor a battery it knows)
+    Fuel = 1,
+    Battery = 2,
+};
+
+/// A-GRA's SystemContingencyLevelEnum: the vehicle's contingency. The
+/// platform reports a low fuel state (FlightCritical); it models no
+/// subsystem failures (MissionCritical) and no communications (LostComms).
+enum class Contingency : std::uint8_t {
+    Normal = 0,
+    MissionCritical = 1,
+    FlightCritical = 2, ///< at or below its reserve, or an engine starved
+    LostComms = 3,
+};
+
+/// Where a vehicle recovers to, and what it keeps for the end: its playtime
+/// counts the return and the reserve.
+struct NavigationSettings {
+    static constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    bool recovery = false;               ///< a recovery point set
+    double latitudeDeg = kNone, longitudeDeg = kNone, altitudeMslM = kNone;
+    double reserveFraction = 0.1;        ///< of its capacity, fuel or charge, kept for the end
+};
+
+/// A-GRA's MA_NavigationReport (its Endurance, Playtime and ContingencyLevel):
+/// what the vehicle flies on, how much it has and for how long. Fuel in kg
+/// (a battery's charge in J), its consumption now (kg/s, W): the engines'
+/// fuel flow or the power the battery gives.
+struct NavigationReport {
+    static constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    Energy energy = Energy::Unknown;
+    double fuelKg = kNone;       ///< A-GRA's Fuel: in its tanks (0 for a battery)
+    double remaining = kNone;    ///< fuel (kg) or charge (J)
+    double capacity = kNone;     ///< its tanks' (kg) or battery's (J), full
+    double percent = kNone;      ///< A-GRA's Percent: remaining over capacity, %
+    double consumption = kNone;  ///< now: fuel flow (kg/s) or power (W)
+    /// A-GRA's Duration: remaining over consumption now, s (infinite while it
+    /// consumes nothing: a helicopter's engines off, a multirotor at rest; 0
+    /// with nothing left).
+    double enduranceS = kNone;
+    double reserve = kNone;      ///< kept for the end (NavigationSettings), kg or J
+    /// A-GRA's Playtime, with a recovery point: what it can spend before it
+    /// turns back - remaining less the reserve and the return, over its
+    /// consumption now, s (0 once past it). NaN without a recovery point.
+    double playtimeS = kNone;
+    double returnDistanceM = kNone; ///< to the recovery point, over the ground
+    double returnTasMs = kNone;     ///< it would fly back at: its best-range speed (the tables), else its cruise
+    double returnConsumption = kNone; ///< it would burn back (kg/s or W)
+    Contingency contingency = Contingency::Normal;
+    bool starved = false;           ///< its engines have nothing left: a fuel burner's tanks empty, or the battery spent
+};
+
+FSIM_API const char* energyName(Energy e) noexcept;           ///< "unknown", "fuel", "battery"
+FSIM_API const char* contingencyName(Contingency c) noexcept; ///< A-GRA's: "NORMAL", "MISSION_CRITICAL", "FLIGHT_CRITICAL", "LOST_COMMS"
+
 } // namespace fsim::control

@@ -161,6 +161,18 @@ std::vector<control::ActivityRecord> Vehicle::activities() const {
 
 control::VehicleCommandState Vehicle::commanded() const { return world_ ? world_->impl_->commandState(id_) : control::VehicleCommandState{}; }
 
+control::NavigationReport Vehicle::navigationReport() const {
+    return world_ ? world_->impl_->navigationReport(id_) : control::NavigationReport{};
+}
+
+control::Reason Vehicle::setNavigation(const control::NavigationSettings& settings) {
+    return world_ ? world_->impl_->setNavigation(id_, settings) : control::Reason::UnknownVehicle;
+}
+
+control::NavigationSettings Vehicle::navigation() const {
+    return world_ ? world_->impl_->navigation(id_) : control::NavigationSettings{};
+}
+
 std::vector<control::CapabilityDescriptor> Vehicle::capabilities() const {
     return world_ ? world_->impl_->capabilities(id_) : std::vector<control::CapabilityDescriptor>{};
 }

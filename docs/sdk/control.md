@@ -622,6 +622,37 @@ v.releaseControl("fsim.guidance.hsa", 1);   // its grant ends, and what it flies
 - A `Source` converts to a `Caller`: the calls that took a source take the
   default policy's controller.
 
+### The navigation report: fuel, endurance, playtime
+
+What a vehicle flies on, how much it has left and for how long, and what it
+can spend before it turns back ([flight-autonomy.md](../flight-autonomy.md),
+4.14; A-GRA's MA_NavigationReport):
+
+```cpp
+NavigationReport n = v.navigationReport(); // n.energy: Energy::Fuel, Battery (Unknown: its model tells of neither)
+n.remaining, n.capacity, n.percent;        // fuel (kg) or a battery's charge (J)
+n.consumption, n.enduranceS;               // now: the fuel flow (kg/s) or the power (W); what is left over it
+NavigationSettings home;
+home.recovery = true;
+home.latitudeDeg = 37.62, home.longitudeDeg = -122.38, home.altitudeMslM = 5.0;
+home.reserveFraction = 0.2;                // kept for the end: a fifth of capacity (a tenth unless set)
+v.setNavigation(home);                     // Reason::OutOfRange: a point off the Earth, a reserve outside [0, 1)
+n = v.navigationReport();
+n.playtimeS;                               // what it can spend before it turns back: less the reserve and the return
+n.contingency;                             // FlightCritical at or below the reserve, or starved; else Normal
+```
+
+- The endurance is what is left over the consumption now, A-GRA's Duration:
+  the vehicle gets lighter as it burns, and flies 0 to 4 % longer. It is
+  infinite while the vehicle consumes nothing, 0 once nothing is left.
+- The return is flown at the best-range speed and fuel flow of the
+  performance tables, at the vehicle's altitude and weight; without tables,
+  at its cruise speed and its consumption now. The distance is over the
+  ground; the wind, the climb and the descent are not counted.
+- MissionCritical and LostComms are never reported: the platform models no
+  subsystem failures and no communications.
+- The report is worked out when asked; nothing in the step reads it.
+
 ### Support and availability: what a vehicle can do at all, and now
 
 Two questions, answered apart ([flight-autonomy.md](../flight-autonomy.md),

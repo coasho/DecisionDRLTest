@@ -1357,6 +1357,49 @@ static PyObject* world_commanded(PyObject* o, PyObject* const* args, Py_ssize_t 
                          c.east_acceleration_ms2, c.down_acceleration_ms2, c.altitude_m, c.altitude_reference);
 }
 
+/* navigation_report(id) -> (energy, fuel_kg, remaining, capacity, percent, consumption, endurance_s, reserve, playtime_s,
+ * return_distance_m, return_tas_ms, return_consumption, contingency, starved) */
+static PyObject* world_navigation_report(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    fsim_navigation_report r;
+    if (!check_args(n, 1, 1, "navigation_report") || !as_u32(args[0], &id)) return NULL;
+    fsim_navigation_report_init(&r);
+    if (fsim_vehicle_navigation_report(self->world, id, &r) != FSIM_OK) return fail();
+    return Py_BuildValue("(idddddddddddii)", r.energy, r.fuel_kg, r.remaining, r.capacity, r.percent, r.consumption, r.endurance_s,
+                         r.reserve, r.playtime_s, r.return_distance_m, r.return_tas_ms, r.return_consumption, r.contingency, r.starved);
+}
+
+/* set_navigation(id, recovery, latitude_deg, longitude_deg, altitude_msl_m, reserve_fraction) */
+static PyObject* world_set_navigation(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    fsim_navigation_settings s;
+    if (!check_args(n, 6, 6, "set_navigation") || !as_u32(args[0], &id)) return NULL;
+    fsim_navigation_settings_init(&s);
+    const int recovery = PyObject_IsTrue(args[1]);
+    if (recovery < 0) return NULL;
+    s.recovery = recovery;
+    s.latitude_deg = PyFloat_AsDouble(args[2]);
+    s.longitude_deg = PyFloat_AsDouble(args[3]);
+    s.altitude_msl_m = PyFloat_AsDouble(args[4]);
+    s.reserve_fraction = PyFloat_AsDouble(args[5]);
+    if (PyErr_Occurred()) return NULL;
+    if (fsim_vehicle_set_navigation(self->world, id, &s) != FSIM_OK) return fail();
+    Py_RETURN_NONE;
+}
+
+/* navigation(id) -> (recovery, latitude_deg, longitude_deg, altitude_msl_m, reserve_fraction) */
+static PyObject* world_navigation(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    fsim_navigation_settings s;
+    if (!check_args(n, 1, 1, "navigation") || !as_u32(args[0], &id)) return NULL;
+    fsim_navigation_settings_init(&s);
+    if (fsim_vehicle_get_navigation(self->world, id, &s) != FSIM_OK) return fail();
+    return Py_BuildValue("(Ndddd)", PyBool_FromLong(s.recovery), s.latitude_deg, s.longitude_deg, s.altitude_msl_m, s.reserve_fraction);
+}
+
 /* activity_setpoint(activity) -> (kind, code, fields, behavior, waypoints, segments), or None for one not live:
  * `behavior` (id, target, {name: value}, [(latitude_rad, longitude_rad, altitude_msl_m, airspeed_ms, capture_radius_m)])
  * or None, `waypoints` [waypoint row] or None, `segments` [18 floats: north, east, down] or None */
@@ -2303,6 +2346,9 @@ static PyMethodDef world_methods[] = {
     FAST("activity_end_points", world_activity_end_points, "activity_end_points(activity, max) -> [end point]"),
     FAST("activity_progress", world_activity_progress, "activity_progress(activity) -> progress or None"),
     FAST("commanded", world_commanded, "commanded(id) -> what the cascade asked for in its last update"),
+    FAST("navigation_report", world_navigation_report, "navigation_report(id) -> A-GRA's navigation report, 14 items"),
+    FAST("set_navigation", world_set_navigation, "set_navigation(id, recovery, latitude_deg, longitude_deg, altitude_msl_m, reserve_fraction)"),
+    FAST("navigation", world_navigation, "navigation(id) -> (recovery, latitude_deg, longitude_deg, altitude_msl_m, reserve_fraction)"),
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
     FAST("capabilities", world_capabilities, "capabilities(id) -> [capability]"),
     FAST("capability_status", world_capability_status, "capability_status(id, capability) -> (availability, reason)"),

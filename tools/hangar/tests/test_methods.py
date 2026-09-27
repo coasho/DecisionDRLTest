@@ -916,6 +916,38 @@ class ThrustVectoring(unittest.TestCase):
                     np.testing.assert_allclose(R @ kid["translation"] + j["translation"], before[v["engine"]], atol=1e-9)
 
 
+class Battery(unittest.TestCase):
+    def test_an_electric_aircrafts_battery(self):
+        # the Skua's: its capacity in joules; the power its motor drew - the
+        # battery's volts times the throttle it was given times the current it
+        # took, none returned - read before the throttle is given again, as
+        # the current is the step before's; the throttle times the supply,
+        # which stops the motor once the battery is spent
+        from hangar import jsbsim
+        from hangar.propulsion import motor_volts
+        a = Aircraft.load(repo("aircraft/skua/skua.toml"))
+        root = ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a))
+        cap = [p for p in root.iter("property") if p.text == "fsim/battery/capacity-j" and p.get("value")]
+        self.assertEqual(len(cap), 1)
+        self.assertAlmostEqual(float(cap[0].get("value")), 1170 * 3600.0)
+        ch = root.find(".//channel[@name='Battery']")
+        power = ch.find("fcs_function[@name='fsim/battery/power-w']/function/product")
+        self.assertAlmostEqual(float(power.find("value").text), motor_volts(a.engines[0]))
+        self.assertEqual(power.find("property").text, "fcs/throttle-supplied-0")
+        self.assertEqual(power.find("max/property").text, "propulsion/engine[0]/current-amperes")
+        given = ch.find("fcs_function[@name='fcs/throttle-supplied-0']")
+        self.assertEqual(given.find("output").text, "fcs/throttle-pos-norm[0]")
+        self.assertEqual([p.text for p in given.iter("property")], ["fcs/throttle-pos-norm[0]", "fsim/battery/supply"])
+        names = [f.get("name") for f in ch]
+        self.assertLess(names.index("fsim/battery/power-w"), names.index("fcs/throttle-supplied-0"))
+        # without [battery], or without a motor, none
+        del a.spec["battery"]
+        self.assertIsNone(ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(a)).find(".//channel[@name='Battery']"))
+        c172 = Aircraft.load(repo("aircraft/c172/c172.toml"))
+        c172.spec["battery"] = {"capacity_wh": 100.0}
+        self.assertIsNone(ET.fromstring("<fdm>%s</fdm>" % jsbsim.flight_control_xml(c172)).find(".//channel[@name='Battery']"))
+
+
 class LargeAircraft(unittest.TestCase):
     def test_engines_past_the_platforms_throttles_follow_one(self):
         # the platform commands four throttles: an eighth engine follows the

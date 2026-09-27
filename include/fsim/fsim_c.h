@@ -993,6 +993,47 @@ FSIM_API const char* fsim_end_point_kind_name(int kind); /* "waypoint", "turn_po
  * `out` (`out[0].struct_size` bytes apart), `*count` how many. None for one not live, an hsa's, a behaviour's. */
 FSIM_API int fsim_activity_end_points(const fsim_world* world, fsim_activity_id activity, fsim_end_point* out, uint32_t max, uint32_t* count);
 
+/* The navigation report (ABI 1.13; docs/flight-autonomy.md, 4.14; A-GRA's MA_NavigationReport): what the vehicle flies
+ * on, how much is left and for how long, its playtime to its recovery point and its contingency. Fuel in kg, a
+ * battery's charge in J; its consumption now - the engines' fuel flow (kg/s) or the power the battery gives (W). */
+enum fsim_energy { FSIM_ENERGY_UNKNOWN = 0, FSIM_ENERGY_FUEL, FSIM_ENERGY_BATTERY };
+/* A-GRA's SystemContingencyLevelEnum: the platform reports a low fuel state (flight critical: at or below the reserve,
+ * or an engine starved); it models no subsystem failures and no communications. */
+enum fsim_contingency { FSIM_CONTINGENCY_NORMAL = 0, FSIM_CONTINGENCY_MISSION_CRITICAL, FSIM_CONTINGENCY_FLIGHT_CRITICAL, FSIM_CONTINGENCY_LOST_COMMS };
+typedef struct fsim_navigation_report {
+    uint32_t struct_size;
+    int32_t energy;              /* fsim_energy: FSIM_ENERGY_UNKNOWN where its flight model tells of neither */
+    double fuel_kg;              /* A-GRA's Fuel: in its tanks (0 for a battery) */
+    double remaining, capacity;  /* fuel (kg) or charge (J): left, and full */
+    double percent;              /* A-GRA's Percent: remaining over capacity */
+    double consumption;          /* now: fuel flow (kg/s) or power (W) */
+    double endurance_s;          /* A-GRA's Duration: remaining over consumption now (infinite while it consumes nothing,
+                                  * 0 with nothing left) */
+    double reserve;              /* kept for the end: the reserve fraction of capacity */
+    double playtime_s;           /* A-GRA's Playtime: remaining less the reserve and the return, over consumption now (0 once
+                                  * past it); NaN without a recovery point */
+    double return_distance_m;    /* to the recovery point, over the ground */
+    double return_tas_ms;        /* it would fly back at: its best-range speed (the performance tables), else its cruise */
+    double return_consumption;   /* it would burn back: kg/s or W */
+    int32_t contingency;         /* fsim_contingency */
+    int32_t starved;             /* its engines have nothing left: a fuel burner's tanks empty, or the battery spent */
+} fsim_navigation_report;
+FSIM_API void fsim_navigation_report_init(fsim_navigation_report* report);
+FSIM_API int fsim_vehicle_navigation_report(const fsim_world* world, uint32_t id, fsim_navigation_report* out);
+FSIM_API const char* fsim_energy_name(int energy);           /* "unknown", "fuel", "battery" */
+FSIM_API const char* fsim_contingency_name(int contingency); /* "NORMAL", "MISSION_CRITICAL", "FLIGHT_CRITICAL", "LOST_COMMS" */
+/* Where the vehicle recovers to and what it keeps for the end: its playtime counts the return and the reserve. */
+typedef struct fsim_navigation_settings {
+    uint32_t struct_size;
+    int32_t recovery;                                  /* a recovery point set */
+    double latitude_deg, longitude_deg, altitude_msl_m;
+    double reserve_fraction;                           /* of capacity, fuel or charge, [0, 1): 0.1 by default */
+} fsim_navigation_settings;
+FSIM_API void fsim_navigation_settings_init(fsim_navigation_settings* settings); /* no recovery point, a tenth kept */
+/* FSIM_INVALID_ARGUMENT for a point off the Earth or a reserve outside [0, 1). */
+FSIM_API int fsim_vehicle_set_navigation(fsim_world* world, uint32_t id, const fsim_navigation_settings* settings);
+FSIM_API int fsim_vehicle_get_navigation(const fsim_world* world, uint32_t id, fsim_navigation_settings* out);
+
 FSIM_API int fsim_world_get_environment(const fsim_world* world, fsim_environment* out);
 FSIM_API int fsim_world_set_environment(fsim_world* world, const fsim_environment* environment);
 

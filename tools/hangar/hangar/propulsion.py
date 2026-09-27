@@ -316,6 +316,13 @@ def piston_xml(engine):
 """ % (hp, engine.rpm, engine.name, disp, hp, 0.22 * engine.rpm, engine.rpm)
 
 
+def motor_volts(engine):
+    """The battery voltage a motor runs on: the design's battery_volts, else a
+    step with its power (3S, 6S, 12S or 24S)."""
+    P = engine.power_kw * 1000.0
+    return float(engine.prop_spec.get("battery_volts", 0.0)) or (11.1 if P < 600 else 22.2 if P < 2500 else 44.4 if P < 8000 else 88.8)
+
+
 def electric_xml(engine):
     """A JSBSim brushless DC motor (Drela's first-order motor model: current
     (V - rpm/Kv)/R, torque from the current above the no-load current) sized
@@ -325,7 +332,7 @@ def electric_xml(engine):
     spins a propeller up stably - JSBSim's plain "electric" engine divides
     power by rpm and does not."""
     P = engine.power_kw * 1000.0
-    V = float(engine.prop_spec.get("battery_volts", 0.0)) or (11.1 if P < 600 else 22.2 if P < 2500 else 44.4 if P < 8000 else 88.8)
+    V = motor_volts(engine)
     kv = engine.rpm / (0.85 * V)
     R = 0.1275 * V * V / P
     i0 = max(0.3, 0.012 * 0.15 * V / R)

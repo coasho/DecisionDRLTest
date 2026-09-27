@@ -23,10 +23,12 @@
 #include <models/FGFCS.h>
 #include <models/FGGroundReactions.h>
 #include <models/FGInertial.h>
+#include <models/FGMassBalance.h>
 #include <models/FGOutput.h>
 #include <models/FGPropagate.h>
 #include <models/FGPropulsion.h>
 #include <models/propulsion/FGEngine.h>
+#include <models/propulsion/FGTank.h>
 #include <models/propulsion/FGThruster.h>
 #include <models/propulsion/FGTurbine.h>
 #include <simgear/misc/sg_path.hxx>
@@ -424,6 +426,10 @@ void JsbsimModel::cacheCommandNodes() {
 
     // read-only: an aircraft whose FCS has no leading-edge flaps reports none
     lefPosDeg_ = PropertyHandle(pm->GetNode("fcs/lef-pos-deg", false));
+    // likewise a battery: one without it has none
+    batteryCharge_ = PropertyHandle(pm->GetNode("fsim/battery/charge-j", false));
+    batteryCapacity_ = PropertyHandle(pm->GetNode("fsim/battery/capacity-j", false));
+    batteryPower_ = PropertyHandle(pm->GetNode("fsim/battery/power-w", false));
 
     throttleCmd_.clear();
     const auto engines = std::min<std::size_t>(fdm_->GetPropulsion()->GetNumEngines(), ControlInputs::kMaxEngines);
@@ -583,6 +589,34 @@ void JsbsimModel::state(VehicleState& out) const {
     const JSBSim::FGMatrix33& tb2ec = prop->GetTb2ec(); // body -> ECEF
     for (unsigned r = 1; r <= 3; ++r)
         for (unsigned c = 1; c <= 3; ++c) out.rotationBodyToEcef[(r - 1) * 3 + (c - 1)] = tb2ec(r, c);
+}
+
+EnergyOnBoard JsbsimModel::energy() const {
+    EnergyOnBoard e;
+    if (!fdm_) return e;
+    constexpr double kKgPerLb = 0.45359237;
+    const auto& propulsion = fdm_->GetPropulsion();
+    double contents = 0.0, capacity = 0.0;
+    for (unsigned i = 0; i < propulsion->GetNumTanks(); ++i) {
+        const auto tank = propulsion->GetTank(i);
+        if (tank->GetType() != JSBSim::FGTank::ttFUEL) continue;
+        contents += tank->GetContents();
+        capacity += tank->GetCapacity();
+    }
+    if (capacity > 0.0) {
+        double flow = 0.0;
+        for (unsigned i = 0; i < propulsion->GetNumEngines(); ++i) {
+            const auto engine = propulsion->GetEngine(i);
+            flow += engine->GetFuelFlowRate(); // lb/s
+            // (JSBSim counts an engine no tank feeds as starved: a tail rotor's drive burns nothing)
+            if (engine->GetNumSourceTanks() > 0 && engine->GetStarved()) e.starved = true;
+        }
+        e.fuelKg = contents * kKgPerLb, e.fuelCapacityKg = capacity * kKgPerLb, e.fuelFlowKgS = flow * kKgPerLb;
+    }
+    if (batteryCapacity_.valid() && batteryCharge_.valid() && batteryPower_.valid())
+        e.chargeJ = batteryCharge_.get(), e.chargeCapacityJ = batteryCapacity_.get(), e.powerW = batteryPower_.get();
+    e.massKg = fdm_->GetMassBalance()->GetWeight() * kKgPerLb;
+    return e;
 }
 
 PropertyHandle JsbsimModel::property(std::string_view path) {

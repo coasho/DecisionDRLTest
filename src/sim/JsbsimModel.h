@@ -43,6 +43,7 @@ public:
     void setAtmosphere(double temperatureSeaLevelK, double pressureSeaLevelPa) override;
     void setExternalForceBody(const double forceN[3], const double momentNm[3]) override;
     void seed(std::uint64_t value) override;
+    EnergyOnBoard energy() const override;
 
     /// Direct access for tests and tooling only.
     JSBSim::FGFDMExec& exec() noexcept { return *fdm_; }
@@ -76,6 +77,9 @@ private:
     PropertyHandle extForceMag_, extForceX_, extForceY_, extForceZ_, extMomentMag_, extMomentL_, extMomentM_, extMomentN_;
     PropertyHandle extLocX_, extLocY_, extLocZ_, cgX_, cgY_, cgZ_;
     PropertyHandle lefPosDeg_; ///< leading-edge flaps, where the aircraft's FCS has them (fcs/lef-pos-deg)
+    /// A battery, where the aircraft's FCS has one (fsim/battery/...: hangar's multirotors and electric wings,
+    /// docs/rotorcraft.md, docs/hangar.md)
+    PropertyHandle batteryCharge_, batteryCapacity_, batteryPower_;
     /// Per engine: the rotor's speed where its thruster has none of its own -
     /// a direct thruster whose rotor the flight control system spins (a
     /// multirotor's motors: propulsion/engine[i]/rotor-rpm, docs/rotorcraft.md)

@@ -398,6 +398,36 @@ ActivityProgress.__doc__ = ("How far an activity has got and what it commands, a
                             "heading, altitude and speed it asks for (``speed_reference``: 0 true airspeed, 1 calibrated, 2 "
                             "ground speed, 3 Mach). NaN where it says nothing.")
 
+class Energy(enum.IntEnum):
+    """What a vehicle flies on (NavigationReport.energy)."""
+    UNKNOWN = 0  # its flight model tells of neither
+    FUEL = 1
+    BATTERY = 2
+
+
+class Contingency(enum.IntEnum):
+    """A-GRA's SystemContingencyLevelEnum: the platform reports a low fuel state (FLIGHT_CRITICAL: at or below the
+    reserve, or an engine starved); it models no subsystem failures and no communications."""
+    NORMAL = 0
+    MISSION_CRITICAL = 1
+    FLIGHT_CRITICAL = 2
+    LOST_COMMS = 3
+
+
+NavigationReport = collections.namedtuple(
+    "NavigationReport", "energy fuel_kg remaining capacity percent consumption endurance_s reserve playtime_s return_distance_m "
+    "return_tas_ms return_consumption contingency starved")
+NavigationReport.__doc__ = (
+    "A-GRA's navigation report (docs/flight-autonomy.md, 4.14): what the vehicle flies on (fsim.Energy), its fuel (kg; 0 for a "
+    "battery), what is left and its capacity (fuel in kg, a battery's charge in J), the percent left, its consumption now "
+    "(the engines' fuel flow, kg/s, or the power the battery gives, W), its endurance at that (s; infinite while it consumes "
+    "nothing, 0 with nothing left), the reserve it keeps, its playtime to its recovery point (s: what is left less the reserve and the return; NaN "
+    "without a recovery point), the return's distance, speed and consumption, its contingency (fsim.Contingency) and whether its "
+    "engines have nothing left - a fuel burner's tanks empty, or the battery spent.")
+
+NavigationSettings = collections.namedtuple("NavigationSettings", "recovery latitude_deg longitude_deg altitude_msl_m reserve_fraction")
+NavigationSettings.__doc__ = "Where the vehicle recovers to (if ``recovery``) and the fraction of its capacity it keeps for the end."
+
 CommandedState = collections.namedtuple(
     "CommandedState", "top_level latitude_rad longitude_rad altitude_msl_m heading_rad turn_rate_rad_s airspeed_ms "
     "vertical_speed_ms north_ms east_ms roll_rad pitch_rad load_factor_g roll_rate_rad_s pitch_rate_rad_s yaw_rate_rad_s throttle "
@@ -1150,6 +1180,30 @@ class Vehicle:
         NaN where none is."""
         t = self._h.commanded(self.id)
         return CommandedState(Level(t[0]), *t[1:])
+
+    def navigation_report(self):
+        """A-GRA's navigation report (NavigationReport): what the vehicle flies on - fuel or a battery - how much is left
+        (and its percent of capacity), its endurance at its consumption now, its playtime to its recovery point
+        (set_recovery) and its contingency level."""
+        t = self._h.navigation_report(self.id)
+        return NavigationReport(Energy(t[0]), *t[1:12], Contingency(t[12]), bool(t[13]))
+
+    def set_recovery(self, latitude_deg, longitude_deg, altitude_msl_m, reserve_fraction=None):
+        """Where the vehicle recovers to: its navigation report's playtime counts the return (at its best-range speed,
+        from its performance tables, else its cruise) and the reserve - ``reserve_fraction`` of its capacity (as it was:
+        0.1 by default). Raises fsim.Error for a point off the Earth or a reserve outside [0, 1)."""
+        reserve = self.navigation().reserve_fraction if reserve_fraction is None else float(reserve_fraction)
+        self._h.set_navigation(self.id, True, float(latitude_deg), float(longitude_deg), float(altitude_msl_m), reserve)
+
+    def clear_recovery(self, reserve_fraction=None):
+        """No recovery point (its playtime unreported); the reserve as it was, or ``reserve_fraction``."""
+        reserve = self.navigation().reserve_fraction if reserve_fraction is None else float(reserve_fraction)
+        nan = float("nan")
+        self._h.set_navigation(self.id, False, nan, nan, nan, reserve)
+
+    def navigation(self):
+        """Its recovery point and reserve (NavigationSettings)."""
+        return NavigationSettings(*self._h.navigation(self.id))
 
     def capabilities(self):
         """What the vehicle offers: its levels and behaviours (Capability, with their Parameters and A-GRA mode)."""

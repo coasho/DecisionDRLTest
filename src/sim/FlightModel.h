@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -28,6 +29,21 @@ struct AircraftSpec {
 };
 
 
+
+/// What a vehicle flies on, as its flight model has it now (docs/flight-autonomy.md,
+/// 4.14): fuel - what its tanks hold and could, what its engines burn - or a
+/// battery - its charge and capacity, the power it gives. NaN where the model
+/// has none (an aircraft with neither, a model that does not say).
+struct EnergyOnBoard {
+    double fuelKg = std::numeric_limits<double>::quiet_NaN();         ///< in its tanks
+    double fuelCapacityKg = std::numeric_limits<double>::quiet_NaN(); ///< they hold, full
+    double fuelFlowKgS = std::numeric_limits<double>::quiet_NaN();    ///< its engines burn, now
+    double chargeJ = std::numeric_limits<double>::quiet_NaN();        ///< left in its battery
+    double chargeCapacityJ = std::numeric_limits<double>::quiet_NaN();
+    double powerW = std::numeric_limits<double>::quiet_NaN();         ///< the battery gives, now
+    double massKg = std::numeric_limits<double>::quiet_NaN();         ///< the whole vehicle's, now
+    bool starved = false; ///< an engine that burns fuel has none left
+};
 
 /// Flight-dynamics interface hiding JSBSim (design 7.1, ADR-10).
 class FlightModel {
@@ -78,6 +94,8 @@ public:
     virtual void seed(std::uint64_t value) { (void)value; }
     /// Effectors beyond ControlInputs (speedbrake, pitch trim); NaN fields are left alone.
     virtual void setEffectors(const EffectorInputs& effectors) { (void)effectors; }
+    /// What it flies on now: its fuel or its battery (none known by default).
+    virtual EnergyOnBoard energy() const { return {}; }
 };
 
 } // namespace fsim::sim

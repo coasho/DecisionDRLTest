@@ -815,6 +815,28 @@
           <output>fcs/flap-pos-norm</output>
         </pure_gain>
       </channel>
+      <property value="4.212e+06">fsim/battery/capacity-j</property>
+      <channel name="Battery">
+        <!-- 1170 Wh: the power the motors drew, the energy used, the charge left, their supply while there is some -->
+        <fcs_function name="fsim/battery/power-w">
+          <function>
+            <product> <value>44.4</value> <property>fcs/throttle-supplied-0</property>
+              <max> <value>0</value> <property>propulsion/engine[0]/current-amperes</property> </max> </product>
+          </function>
+        </fcs_function>
+        <integrator name="fsim/battery/used-j"> <input> fsim/battery/power-w </input> <c1> 1 </c1> </integrator>
+        <fcs_function name="fsim/battery/charge-j">
+          <function> <max> <value> 0 </value> <difference> <property> fsim/battery/capacity-j </property>
+            <property> fsim/battery/used-j </property> </difference> </max> </function>
+        </fcs_function>
+        <fcs_function name="fsim/battery/supply">
+          <function> <gt> <property> fsim/battery/charge-j </property> <value> 0 </value> </gt> </function>
+        </fcs_function>
+        <fcs_function name="fcs/throttle-supplied-0">
+          <function> <product> <property>fcs/throttle-pos-norm[0]</property> <property>fsim/battery/supply</property> </product> </function>
+          <output>fcs/throttle-pos-norm[0]</output>
+        </fcs_function>
+      </channel>
     </flight_control>
     <aerodynamics>
         <function name="aero/function/mach-lift">

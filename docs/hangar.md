@@ -130,6 +130,8 @@ power_kw = 3.0
 [engine.propeller]
 diameter = 0.56
 pitch = 0.30
+[battery]                        # an electric aircraft's energy: the motors stop once it is spent
+capacity_wh = 1170
 
 [mass]
 empty = 21.0                     # kg; components by name, or Raymer's statistics
@@ -319,6 +321,14 @@ stage end to end through the platform (`ctest -R hangar`).
 - **Engines.** Piston engines use JSBSim's piston engine; hangar's control
   system adds mixture that follows the altitude. Electric motors use JSBSim's
   brushless DC motor.
+- **Battery.** An electric aircraft's `[battery] capacity_wh` is its energy
+  (ADR-29 FA-3b). The control system integrates the power its motors draw
+  into the charge left (`fsim/battery/*`). That power is each motor's volts
+  (the battery's, times its throttle) times the current the motor model
+  takes, none of it returned to the battery. Once the battery is spent the
+  motors stop; until then a flight is the same, bit for bit, as without
+  one. The Skua's battery is its 6.5 kg pack: 1,170 Wh, 456 W at 22 m/s at
+  3,000 m, two and a half hours.
 - **Linear model.** Etkin & Reid's small-perturbation equations, built from
   the tables at the trim condition, the lateral ones in body axes with the
   trim angle of attack's kinematic terms (a roll rate turns the trim

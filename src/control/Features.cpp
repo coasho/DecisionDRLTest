@@ -255,7 +255,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.fa/geofence", "", N, 15, 0, ""},                      // CTG-02, ENV-08
     {"fsim.fa/terrain_avoidance", "", N, 15, 0, ""},             // CTG-03
     {"fsim.fa/tight_formation", "", N, 15, 0, ""},               // FRM-05
-    {"fsim.fa/fuel_management", "", P, 16, 0, "fuel monitoring, abnormal flow, the low-fuel procedure; the state carries the fuel"}, // CTG-05
+    {"fsim.fa/fuel_management", "", P, 16, 0, "fuel monitoring, abnormal flow, the low-fuel procedure; the navigation report gives the fuel, its endurance and the low-fuel contingency"}, // CTG-05
     {"fsim.fa/contingency_management", "", N, 16, 0, ""},        // CTG-06, CTG-11
     {"fsim.fa/emergency_divert", "", N, 16, 0, ""},              // CTG-07
     {"fsim.fa/failsafe_plan", "", N, 16, 0, ""},                 // CTG-08

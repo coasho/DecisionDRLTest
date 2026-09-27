@@ -598,6 +598,7 @@ def flight_control_xml(aircraft, fbw=None, yaw_damper=None, autopilot=None, prof
           <output>fcs/throttle-pos-norm[%d]</output>
         </pure_gain>
       </channel>""" % (i, i, lever, i))
+    parts.extend(battery_xml(aircraft))
     parts.extend(governor_xml(aircraft))
     pistons = sum(len(e.copies()) for e in aircraft.engines if e.type == "piston")
     if pistons:
@@ -635,6 +636,51 @@ def flight_control_xml(aircraft, fbw=None, yaw_damper=None, autopilot=None, prof
         parts.append(tvc)
     parts.append("    </flight_control>")
     return "\n".join(parts)
+
+
+def battery_xml(aircraft):
+    """The battery of an electric aircraft ([battery] capacity_wh): the power
+    it gives - each motor's volts (the battery's, times its throttle) times its
+    current, Drela's model's electrical power with the coil's and friction's
+    losses in it, and none back into the battery - integrated into the energy
+    used (fsim/battery/used-j), the charge left (fsim/battery/charge-j, of
+    fsim/battery/capacity-j); the motors stop once it is spent
+    (fsim/battery/supply, exactly 1 until then: a flight is the same bit for
+    bit before). The power is the one the motors drew in the step before -
+    the throttle they were given then and the current they took - as the
+    flight controls run before the engines."""
+    battery = aircraft.spec.get("battery")
+    units = [(i, e) for i, (e, _) in enumerate(_engine_units(aircraft)) if e.type == "electric"]
+    if not battery or not units:
+        return []
+    from .propulsion import motor_volts
+    cap = float(battery["capacity_wh"]) * 3600.0
+    terms = ["""            <product> <value>%.4g</value> <property>fcs/throttle-supplied-%d</property>
+              <max> <value>0</value> <property>propulsion/engine[%d]/current-amperes</property> </max> </product>"""
+             % (motor_volts(e), i, i) for i, e in units]
+    power = terms[0] if len(terms) == 1 else "            <sum>\n%s\n            </sum>" % "\n".join(terms)
+    supplied = "\n".join("""        <fcs_function name="fcs/throttle-supplied-%d">
+          <function> <product> <property>fcs/throttle-pos-norm[%d]</property> <property>fsim/battery/supply</property> </product> </function>
+          <output>fcs/throttle-pos-norm[%d]</output>
+        </fcs_function>""" % (i, i, i) for i, _ in units)
+    return ["""      <property value="%.6g">fsim/battery/capacity-j</property>
+      <channel name="Battery">
+        <!-- %.0f Wh: the power the motors drew, the energy used, the charge left, their supply while there is some -->
+        <fcs_function name="fsim/battery/power-w">
+          <function>
+%s
+          </function>
+        </fcs_function>
+        <integrator name="fsim/battery/used-j"> <input> fsim/battery/power-w </input> <c1> 1 </c1> </integrator>
+        <fcs_function name="fsim/battery/charge-j">
+          <function> <max> <value> 0 </value> <difference> <property> fsim/battery/capacity-j </property>
+            <property> fsim/battery/used-j </property> </difference> </max> </function>
+        </fcs_function>
+        <fcs_function name="fsim/battery/supply">
+          <function> <gt> <property> fsim/battery/charge-j </property> <value> 0 </value> </gt> </function>
+        </fcs_function>
+%s
+      </channel>""" % (cap, float(battery["capacity_wh"]), power, supplied)]
 
 
 def _engine_units(aircraft):

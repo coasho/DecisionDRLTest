@@ -1263,6 +1263,62 @@ int main(int argc, char** argv) {
                 CHECK(fsim_activity_get_setpoint(world, gone, &sp) == FSIM_INVALID_ARGUMENT);
             }
         }
+        {
+            /* ABI 1.13: the navigation report - its fuel, endurance, playtime to a recovery point, contingency
+             * (docs/flight-autonomy.md, 4.14) */
+            fsim_navigation_report nr;
+            fsim_navigation_settings ns, got;
+            uint32_t navigator = 0;
+            spec.name = "cap-navigator";
+            spec.type = "jsbsim:c172";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 50.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &navigator) == FSIM_OK);
+            CHECK(fsim_world_step(world, 5) == FSIM_OK);
+            fsim_navigation_report_init(&nr);
+            CHECK(nr.struct_size == sizeof nr && isnan(nr.remaining) && isnan(nr.playtime_s) && nr.energy == FSIM_ENERGY_UNKNOWN);
+            CHECK(fsim_vehicle_navigation_report(world, navigator, &nr) == FSIM_OK);
+            CHECK(nr.energy == FSIM_ENERGY_FUEL && nr.fuel_kg == nr.remaining && nr.remaining > 0.0 && nr.capacity >= nr.remaining);
+            CHECK(nr.percent > 90.0 && nr.consumption > 0.0 && fabs(nr.endurance_s - nr.remaining / nr.consumption) < 1e-6 * nr.endurance_s);
+            CHECK(fabs(nr.reserve - 0.1 * nr.capacity) < 1e-9 * nr.capacity && isnan(nr.playtime_s) && isnan(nr.return_distance_m));
+            CHECK(nr.contingency == FSIM_CONTINGENCY_NORMAL && nr.starved == 0);
+            CHECK(fsim_vehicle_navigation_report(world, 999, &nr) != FSIM_OK);
+            CHECK(strcmp(fsim_energy_name(FSIM_ENERGY_BATTERY), "battery") == 0 && strcmp(fsim_energy_name(9), "?") == 0);
+            CHECK(strcmp(fsim_contingency_name(FSIM_CONTINGENCY_FLIGHT_CRITICAL), "FLIGHT_CRITICAL") == 0);
+            CHECK(strcmp(fsim_contingency_name(-1), "?") == 0);
+            /* a recovery point: the playtime to it */
+            fsim_navigation_settings_init(&ns);
+            CHECK(ns.struct_size == sizeof ns && ns.recovery == 0 && ns.reserve_fraction == 0.1 && isnan(ns.latitude_deg));
+            ns.recovery = 1;
+            ns.latitude_deg = spec.latitude_deg;
+            ns.longitude_deg = spec.longitude_deg - 0.2;
+            ns.altitude_msl_m = 300.0;
+            CHECK(fsim_vehicle_set_navigation(world, navigator, &ns) == FSIM_OK);
+            fsim_navigation_settings_init(&got);
+            CHECK(fsim_vehicle_get_navigation(world, navigator, &got) == FSIM_OK && got.recovery == 1 && got.longitude_deg == ns.longitude_deg);
+            CHECK(fsim_vehicle_navigation_report(world, navigator, &nr) == FSIM_OK);
+            CHECK(nr.return_distance_m > 15000.0 && nr.return_tas_ms > 0.0 && nr.return_consumption > 0.0);
+            CHECK(nr.playtime_s > 0.0 && nr.playtime_s < nr.endurance_s);
+            /* what it refuses: a reserve outside [0, 1), a point off the Earth, a short struct, no such vehicle */
+            ns.reserve_fraction = 1.0;
+            CHECK(fsim_vehicle_set_navigation(world, navigator, &ns) != FSIM_OK);
+            ns.reserve_fraction = 0.2;
+            ns.latitude_deg = 95.0;
+            CHECK(fsim_vehicle_set_navigation(world, navigator, &ns) != FSIM_OK);
+            ns.latitude_deg = spec.latitude_deg;
+            ns.struct_size = (uint32_t)offsetof(fsim_navigation_settings, reserve_fraction);
+            CHECK(fsim_vehicle_set_navigation(world, navigator, &ns) != FSIM_OK);
+            ns.struct_size = sizeof ns;
+            CHECK(fsim_vehicle_set_navigation(world, 999, &ns) != FSIM_OK);
+            CHECK(fsim_vehicle_get_navigation(world, 999, &got) != FSIM_OK);
+            CHECK(fsim_vehicle_get_navigation(world, navigator, &got) == FSIM_OK && got.reserve_fraction == 0.1); /* (kept) */
+            /* a caller whose struct ends earlier is given what its header has */
+            fsim_navigation_report_init(&nr);
+            nr.struct_size = (uint32_t)offsetof(fsim_navigation_report, contingency);
+            nr.contingency = 77;
+            CHECK(fsim_vehicle_navigation_report(world, navigator, &nr) == FSIM_OK && nr.contingency == 77 && nr.playtime_s > 0.0);
+        }
         }
         fsim_world_destroy(world);
     }

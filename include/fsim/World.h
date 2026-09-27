@@ -187,6 +187,15 @@ public:
     /// it commands in north, east and down, and the altitude as its mode
     /// commanded it, in its reference (docs/flight-autonomy.md, 4.12).
     control::VehicleCommandState commanded() const;
+    /// A-GRA's navigation report (docs/flight-autonomy.md, 4.14): what the
+    /// vehicle flies on - fuel or a battery - how much is left (and its percent
+    /// of capacity), its endurance at its consumption now, its playtime to its
+    /// recovery point (setNavigation) and its contingency level.
+    control::NavigationReport navigationReport() const;
+    /// Its recovery point and the reserve it keeps (NavigationSettings):
+    /// Reason::OutOfRange for a point off the Earth or a reserve outside [0, 1).
+    control::Reason setNavigation(const control::NavigationSettings& settings);
+    control::NavigationSettings navigation() const;
     /// What the vehicle offers: its flight levels and behaviours.
     std::vector<control::CapabilityDescriptor> capabilities() const;
     /// A capability's availability now, as a policy is answered (docs/sdk/control.md,

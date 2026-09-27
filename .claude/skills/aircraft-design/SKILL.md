@@ -32,6 +32,10 @@ checks), the PNGs, and `report.html`. A fail makes the exit code 1.
   mass, CG range, engine power and rpm, propeller diameter and pitch.
 - Collect the performance targets too: stall speed, top speed, climb rate
   and ceiling. They go in `[targets]`.
+- **Energy on board.** Give an electric aircraft its battery, `[battery]
+  capacity_wh` (the pack's mass is a `[[mass.item]]`); without it the
+  platform's navigation report cannot say how long it flies. A fuel burner
+  gives each tank as a `[[mass.tank]]`.
 - **From a picture.** Read it, find one known dimension (span, length or
   wheelbase) and scale everything else from it. Note the scaling in a
   comment.

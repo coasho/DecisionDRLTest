@@ -1595,6 +1595,75 @@ FSIM_API int fsim_activity_end_points(const fsim_world* world, fsim_activity_id 
     });
 }
 
+// --- The navigation report (ABI 1.13; docs/flight-autonomy.md, 4.14) ---------------------------------------
+
+FSIM_API void fsim_navigation_report_init(fsim_navigation_report* r) {
+    if (!r) return;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::memset(r, 0, sizeof *r);
+    r->struct_size = sizeof *r;
+    r->fuel_kg = r->remaining = r->capacity = r->percent = r->consumption = r->endurance_s = r->reserve = nan;
+    r->playtime_s = r->return_distance_m = r->return_tas_ms = r->return_consumption = nan;
+}
+
+FSIM_API int fsim_vehicle_navigation_report(const fsim_world* world, uint32_t id, fsim_navigation_report* out) {
+    if (!world || !world->world.controls(id)) return FSIM_INVALID_ARGUMENT;
+    const fsim::control::NavigationReport n = world->world.navigationReport(id);
+    fsim_navigation_report r;
+    fsim_navigation_report_init(&r);
+    r.energy = static_cast<int32_t>(n.energy);
+    r.fuel_kg = n.fuelKg, r.remaining = n.remaining, r.capacity = n.capacity, r.percent = n.percent, r.consumption = n.consumption;
+    r.endurance_s = n.enduranceS, r.reserve = n.reserve, r.playtime_s = n.playtimeS;
+    r.return_distance_m = n.returnDistanceM, r.return_tas_ms = n.returnTasMs, r.return_consumption = n.returnConsumption;
+    r.contingency = static_cast<int32_t>(n.contingency);
+    r.starved = n.starved ? 1 : 0;
+    return copyOut(r, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API const char* fsim_energy_name(int energy) {
+    return energy >= 0 && energy <= static_cast<int>(fsim::control::Energy::Battery) ? fsim::control::energyName(static_cast<fsim::control::Energy>(energy))
+                                                                                      : "?";
+}
+
+FSIM_API const char* fsim_contingency_name(int contingency) {
+    return contingency >= 0 && contingency <= static_cast<int>(fsim::control::Contingency::LostComms)
+               ? fsim::control::contingencyName(static_cast<fsim::control::Contingency>(contingency))
+               : "?";
+}
+
+FSIM_API void fsim_navigation_settings_init(fsim_navigation_settings* s) {
+    if (!s) return;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::memset(s, 0, sizeof *s);
+    s->struct_size = sizeof *s;
+    s->latitude_deg = s->longitude_deg = s->altitude_msl_m = nan;
+    s->reserve_fraction = fsim::control::NavigationSettings{}.reserveFraction;
+}
+
+FSIM_API int fsim_vehicle_set_navigation(fsim_world* world, uint32_t id, const fsim_navigation_settings* settings) {
+    if (!world || !settings || !FSIM_HAS(settings, fsim_navigation_settings, reserve_fraction))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_navigation: bad arguments");
+    fsim::control::NavigationSettings s;
+    s.recovery = settings->recovery != 0;
+    s.latitudeDeg = settings->latitude_deg, s.longitudeDeg = settings->longitude_deg, s.altitudeMslM = settings->altitude_msl_m;
+    s.reserveFraction = settings->reserve_fraction;
+    const auto reason = world->world.setNavigation(id, s);
+    if (reason == fsim::control::Reason::UnknownVehicle) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_navigation: unknown vehicle");
+    if (reason != fsim::control::Reason::None)
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_navigation: a point off the Earth or a reserve outside [0, 1)");
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_vehicle_get_navigation(const fsim_world* world, uint32_t id, fsim_navigation_settings* out) {
+    if (!world || !world->world.controls(id)) return FSIM_INVALID_ARGUMENT;
+    const fsim::control::NavigationSettings n = world->world.navigation(id);
+    fsim_navigation_settings s;
+    fsim_navigation_settings_init(&s);
+    s.recovery = n.recovery ? 1 : 0;
+    s.latitude_deg = n.latitudeDeg, s.longitude_deg = n.longitudeDeg, s.altitude_msl_m = n.altitudeMslM, s.reserve_fraction = n.reserveFraction;
+    return copyOut(s, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
 FSIM_API const char* fsim_requirement_kind_name(int kind) {
     return kind >= 0 && kind < static_cast<int>(fsim::control::RequirementKind::Count)
                ? fsim::control::requirementKindName(static_cast<fsim::control::RequirementKind>(kind))
