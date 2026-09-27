@@ -690,7 +690,7 @@ def level_acceleration(f, pilot, altitude_m, speed_ms, throttle, seconds, stop_b
     wind-free, height held: the climb rate the aircraft could trade for).
     Stops early once the speed has settled."""
     v = f.spawn(altitude_m, speed_ms)
-    rec = {"t": [], "tas": [], "mach": [], "alt": [], "nz": []}
+    rec = {"t": [], "tas": [], "mach": [], "alt": [], "nz": [], "fuel": []}
     steady = [0]
 
     def control(t, s, veh):
@@ -700,6 +700,7 @@ def level_acceleration(f, pilot, altitude_m, speed_ms, throttle, seconds, stop_b
         rec["mach"].append(s.mach)
         rec["alt"].append(s.altitude_msl_m)
         rec["nz"].append(s.load_factor)
+        rec["fuel"].append(s.fuel_kg)
 
     n = int(round(seconds / f.dt))
     chunk = int(round(5.0 / f.dt))
@@ -726,7 +727,8 @@ def level_acceleration(f, pilot, altitude_m, speed_ms, throttle, seconds, stop_b
     dv = _smooth_rate(t[::6], tas[::6])
     ps = tas[::6] * dv / G0
     return {"t": t[::6], "tas": tas[::6], "mach": np.array(rec["mach"])[::6], "alt": np.array(rec["alt"])[::6],
-            "nz": np.array(rec["nz"])[::6], "ps": ps, "settled": bool(len(t) and t[-1] < seconds - 1.0)}
+            "nz": np.array(rec["nz"])[::6], "ps": ps, "settled": bool(len(t) and t[-1] < seconds - 1.0),
+            "fuel_kg": np.array(rec["fuel"])[::6]}
 
 
 def max_level_mach(f, pilot, altitude_m, throttle=1.0, start_mach=0.85, seconds=300.0):

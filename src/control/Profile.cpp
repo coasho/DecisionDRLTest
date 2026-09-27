@@ -153,7 +153,7 @@ const SectionInfo kSections[] = {
     {"envelope", EnvelopeSection::kVersion},     {"propulsion", PropulsionSection::kVersion},
     {"plant", PlantSection::kVersion},           {"performance", PerformanceSection::kVersion},
     {"control", ControlSection::kVersion},       {"hover", HoverSection::kVersion},
-    {"applicability", ApplicabilitySection::kVersion},
+    {"applicability", ApplicabilitySection::kVersion}, {"tables", TablesSection::kVersion},
 };
 
 SectionHeader* headerPtr(VehicleProfile& p, std::string_view section) noexcept {
@@ -166,6 +166,7 @@ SectionHeader* headerPtr(VehicleProfile& p, std::string_view section) noexcept {
     if (section == "control") return &p.control.header;
     if (section == "hover") return &p.hover.header;
     if (section == "applicability") return &p.applicability.header;
+    if (section == "tables") return &p.tables.header;
     return nullptr;
 }
 
@@ -434,6 +435,10 @@ VehicleProfile readProfile(const std::string& aircraft, const PropertySource& pr
         header.provenance = provenance >= 0.0 && provenance <= 4.0 && provenance == std::floor(provenance)
                                 ? static_cast<Provenance>(static_cast<std::uint8_t>(provenance))
                                 : Provenance::User;
+        if (std::string_view(info.name) == "tables") { // (arrays: read apart, PerformanceTables.cpp)
+            readTables(values, p.tables, aircraft + ": " + prefix, warnings);
+            continue;
+        }
         if (std::string_view(info.name) == "control") {
             // fsim/control/<controller id>/<parameter, its dots written as slashes>
             for (const auto& [path, value] : values) {
@@ -470,6 +475,7 @@ VehicleProfile mergeProfile(const VehicleProfile& base, const VehicleProfile& ov
     if (over.control.header.present()) p.control = over.control;
     if (over.hover.header.present()) p.hover = over.hover;
     if (over.applicability.header.present()) p.applicability = over.applicability;
+    if (over.tables.header.present()) p.tables = over.tables;
     return p;
 }
 
@@ -485,6 +491,7 @@ double profileValue(const VehicleProfile& profile, std::string_view path) noexce
     if (!header) return kUnknown;
     if (name == "version") return header->version;
     if (name == "provenance") return static_cast<double>(header->provenance);
+    if (section == "tables") return tableValue(profile.tables, name);
     if (section == "control") {
         // control/<controller>/<parameter as a path>
         const auto next = name.find('/');

@@ -38,6 +38,7 @@ fsim hangar mine --quick              every stage, coarse: a first look in half 
 fsim hangar mine                      every stage, full tables (a few minutes)
 fsim hangar mine calibrate            fit corrections to published performance
 fsim hangar mine autopilot            tune the platform's control loops for it (in every full run)
+fsim hangar mine performance          fly its performance and fuel tables (in every full run; rebuilds)
 fsim demo --aircraft mine             watch it fly
 fsim hangar f16c                      a fighter: NASA's wind-tunnel data as reference
 ```
@@ -1032,11 +1033,125 @@ and the platform treats it as unknown:
 | `plant` | the autopilot's `[reference]` and `[identified]` tables in `autopilot.toml`: the responses to aileron, elevator, rudder and throttle there, each with its lag; and the trim law and zero-lift angle the gains use |
 | `performance` | the flight tests' stall speed, maximum speed, ceiling and climb (`out/fly.json`) |
 | `applicability` | the design's `[applicability]` declarations (below) |
+| `tables` | the performance stage's tables (`out/performance.json`; below) |
 
 The platform reads the profile once per aircraft type. It drives what a
 vehicle offers: the support effectors that exist, and the envelope's ranges
 for commands that ask. It also chooses the vehicle's adapter (fly-by-wire or
 direct).
+
+### Performance and fuel: the tables
+
+The `performance` stage (`hangar/performance.py`; ADR-29 FA-3a,
+[flight-autonomy.md](flight-autonomy.md)) flies what the platform plans
+with. It flies at seven altitudes: fractions 0, 0.2, 0.4, 0.6, 0.75, 0.85
+and 0.95 of the service ceiling the flight tests found, the lowest at
+100 m. It adds the height where the design publishes its top speed, where
+the flight tests fly it. It flies three weights, the tanks a tenth, half and
+wholly full of their capacity, and adds the weight the aircraft file starts
+it at where that is none of them (a B-52H's tanks start 40 % full). An
+aircraft without fuel, the electric Skua, flies one weight. Every
+condition flies at once in one world, through the platform's own velocity
+loop with the envelope protection off:
+
+- **Full power, level**, from 1.2 times the stall: the excess power at each
+  speed, the top level speed, the best climb and its speed. Where the
+  aircraft cannot fly level at 1.2 times the stall (near its ceiling), the
+  run starts faster, at 1.8 or 2.6 times. The throttle holds full power on
+  the thrust axis while the loop flies the vertical speed on the others (its
+  airspeed hold would pace the acceleration). The run's first 8 s are left
+  out of its curve while the engines spool up: a turboprop's excess power
+  climbs from 7 to 11 m/s over the first 6 s.
+- **Short runs where that run did not fly**, flown as the flight tests fly
+  their ceiling runs: 10 s level at the speed, then 20 s at full power, the
+  excess power the energy height's rate over the last 10 s. A short run
+  counts only where it held its height at 1 g, as the flight tests count
+  theirs. They go where the long run left gaps:
+  - Below a retry's start, at 1.2 to 2.6 times the stall: near its ceiling
+    an aircraft's best climb may lie between 1.2 and 1.8 times the stall.
+  - Past a drag rise the run could not accelerate through, for a design
+    that flies supersonic, at the flight tests' Mach numbers. High and
+    heavy, a fighter accelerating level stops in the transonic drag rise:
+    the F-35A loaded at 14 km stops at Mach 1.16, yet holds Mach 1.45 once
+    it is there. From these runs come the top speed where full power holds
+    level beyond the rise and the best climb there. Up high a fighter's
+    best climb is supersonic, so its service ceiling depends on them. The
+    top a level acceleration reaches from below is kept too, as
+    `reach_tas_ms`: a height-holding mode reaches no faster.
+- **Idle, level**, from the top down: the excess power at idle (the descent
+  rate and the deceleration at each speed). It also gives the stall, read
+  as the flight tests read theirs: the lowest speed before the break. The
+  break is any of:
+  - the limit angle of attack (a law holding it within half a degree);
+  - the angle of attack falling 2° back from a peak near the limit;
+  - a sink passing 4 m/s;
+  - 20 m of height lost (a light, slow aircraft glides down gently).
+
+  The last three count only below 1.5 times the stall expected: high up,
+  at idle, an aircraft sinks well above its stall. Each weight's stall
+  comes from the highest lift coefficient any weight's run reached at that
+  altitude. A lift coefficient does not depend on the weight, and a light
+  aircraft's loop can oscillate at low dynamic pressure and end its run
+  early: the light C-17A's did at 98 m/s and 3° of its 14°.
+- **Level flight at sixteen speeds**, a weight at a time, along each
+  condition's band: from the slowest speed the full-power curve flew with
+  0.25 m/s to spare (never below 1.15 times the stall, nor the envelope's
+  least speed, which the velocity loop flies no slower than) to 97 % of the
+  top. At each point: the fuel flow, the throttle and the angle of attack,
+  counted only where the point held its speed within 2 % and its height
+  within 1 m/s. From them come the best-endurance speed (the least fuel
+  flow) and the best-range speed (the most distance per kilogram), each
+  refined by a parabola through its neighbours and kept within the band. A
+  band narrower than 5 % is none: that condition is at its ceiling and is
+  not flown.
+
+Each condition flies at its weight. The fuel stays frozen (JSBSim's fuel
+freeze) except in the level points' last ten seconds, when the engines
+report what they burn. The velocity loop holds a vertical speed, not a
+height: a fighter accelerating through Mach 1 at 100 m sinks at 2 m/s, into
+the ground. So the vertical speed asked of it follows the height (0.1 m/s
+per metre, at most 3 m/s), and the excess power counts the climb or sink it
+makes. A run that came within 10 m of the ground counts as nothing flown
+level: a fighter flies gear up, and on its belly its wheels report nothing.
+
+The platform reads each condition's level points at their fraction of its
+band, from its least speed to 97 % of its top. Each point's excess power
+comes from the runs' curves at the point's own speed: linear between the
+curve's samples, and a curve's end value stands 3 % past its end (a run is
+recorded from half a second in). Sixteen points keep the excess power
+within about 1 % of the full-power run's own curve where the flight tests
+climb. Eleven points lost 9 % near the top speed, where the curve falls
+steeply.
+
+The stage checks the tables against the flight tests within 5 %, at the
+same altitude and at the weight the aircraft spawns at, as the tests fly.
+It reads the tables as the platform reads them:
+
+- **The top level speeds and a fighter's best climb.** A fighter's top Mach
+  number and best climb are checked at the weight its run had burned down
+  to. Those tests fly for minutes at full afterburner on full tanks, so the
+  stage flies them again as they were flown and reads the fuel there.
+- **The stall.**
+- **The climb.** Each of the flight test's climbs is flown again at full
+  power holding the climb rate, and the excess power is read off the climb
+  and the speed's change. The flight test's own airspeed hold lets the speed
+  bleed off while it averages and counts that as climb (4 % on the C172). A
+  climb flown below the envelope's least speed (the Skua's above 1,500 m) is
+  beyond the tables, and is shown as such.
+- **The service ceiling.** For a straight wing, the reference is the flight
+  test's two highest climbs extended, as the tables find theirs. The ceiling
+  the test reports fits a line through its three highest climbs, the third
+  often far below, and reads low where the climb falls ever more slowly
+  with height.
+
+The tables must also agree with themselves, where no flight test reaches.
+At every altitude flown at every weight, the lighter aircraft climbs better,
+with 2 % to spare, and its ceiling is higher. A run gone wrong unseen breaks
+one of these rules, as a belly slide at 100 m did before the clearance
+above.
+
+The stage then rebuilds the JSBSim file with the tables in its profile
+(about 20-50 s a design; 1,000 to 1,800 properties).
 
 ### Applicability: what the aircraft physically is
 

@@ -312,6 +312,37 @@ What an activity flies and where to, read back as A-GRA's activity report carrie
 | `World::activitySetpoint`, `endPoints`, `commandState`; `Setpoint`, `EndPoint`, `EndPointKind`, `VehicleCommandState`; `Vehicle::commanded()`, a `VehicleCommandState` now | `fsim_activity_get_setpoint` (the `fsim_batch_command` that would command it, its arrays the library's), `fsim_activity_end_points`, `fsim_end_point`, `fsim_end_point_kind_name`; `fsim_commanded_state` grown (`north_acceleration_ms2`, `east_`, `down_`, `altitude_m`, `altitude_reference`) | `activity.setpoint()` (a `fsim.BatchCommand`), `activity.end_points(max)`, `fsim.EndPoint`, `fsim.EndPointKind`; `vehicle.commanded`'s new fields; `fsim.agra.flyout_curve`, `end_point`, `altitude_reference` |
 | `ControllerId`, `Caller`; `CommandOptions::controller`, `ActivityRecord::controller`, `ControlStatus::holder`; `requestControl` and `releaseControl` with a controller | `fsim_command_options.controller` (1.9's reserved word); `fsim_activity_update_by`, `_cancel_by`, `_update_route_by`, `_update_curve_by`; a controller on `fsim_activity_command` and `fsim_vehicle_cancel_task`; `fsim_vehicle_request_control_by`, `_release_control_by`, `fsim_vehicle_control_holder`; `fsim_activity_envelope.controller` | `controller=` on every submit and `command_task`; `Activity.controller`; `request_control(capability, controller)`, `release_control(capability, controller)`; `fsim.ControlStatus.holder`; `ActivityInfo.controller` |
 
+### 4.13 The performance tables (as FA-3 builds them)
+
+The performance tables (SUB-02) record what an aircraft flies level, climbs and descends at, and the fuel it burns, against altitude, weight and speed. FA-3's performance profile, energy management, speed optimisation and endurance all stand on them.
+
+- **Flown by hangar.** Its `performance` stage ([hangar.md](hangar.md), "Performance and fuel") flies every fixed-wing design in the platform's own JSBSim, through its velocity loop with the envelope protection off:
+  - It flies at seven altitudes: 0, 0.2, 0.4, 0.6, 0.75, 0.85 and 0.95 of the service ceiling its flight tests found, the lowest at 100 m, plus the height the design publishes its top speed at. It flies three weights, the tanks a tenth, half and wholly full of their capacity, plus the weight the aircraft file starts at where that is none of them (the B-52H's 40 %). An aircraft without fuel flies one weight.
+  - **Full power, level:** the excess power at each speed, the top level speed and the best climb; the run's first 8 s, the engines spooling up, are left out.
+  - **Short runs where that run did not fly.** Each is flown as the flight tests fly their ceiling runs: 10 s level at its speed, then 20 s at full power, counted only where it held its height at 1 g. They go where the long run left gaps:
+    - below a retry's start: near its ceiling an aircraft cannot fly level at 1.2 times the stall, and the retry begins at 1.8;
+    - for a supersonic design, past a drag rise the run could not accelerate through: loaded at 14 km, the F-35A stops at Mach 1.16 yet holds Mach 1.45 once there.
+  - **Idle, level, from the top:** the excess power at idle (the descent rate and the deceleration) and the stall, as the flight tests read it. Each weight's stall comes from the highest lift coefficient any weight's run reached at that altitude.
+  - **Level at sixteen speeds:** the fuel flow, and from it the best-endurance and best-range speeds. Each point counts only where it held its speed within 2 % and its height within 1 m/s. The band runs from the slowest speed full power flew with margin, never below the envelope's least speed, to 97 % of the top. A band narrower than 5 % is none: at its ceiling.
+
+  Each condition flies at its weight: the fuel is frozen except in the level points' last ten seconds. The vertical speed asked of the loop follows the height, since the loop holds a vertical speed, not a height. A fighter accelerating through Mach 1 at 100 m sank into the ground. Any run that comes within 10 m of the ground is refused: a fighter's gear is up, and on its belly its wheels report nothing.
+- **Checked against the flight tests** within 5 %, read as the platform reads the tables, at the same altitude and at the weight the aircraft spawns at, as the tests fly. Four items are checked:
+  - the top level speeds and the best climb; a fighter's top Mach number and best climb are read at the weight its run had burned down to (up to six minutes at full afterburner), found by flying its runs again;
+  - the stall;
+  - the service ceiling, for a straight wing against its flight test's two highest climbs extended;
+  - the climb, against a climb flown again at a held rate, since the flight test's airspeed hold counts speed bled off as climb.
+
+  The tables are also checked against themselves where no test reaches: at every altitude flown at every weight, the lighter aircraft climbs better and flies higher. Section 14 has the measurements.
+- **Carried in the profile.** The `tables` section ([control-architecture.md](control-architecture.md), 7.2) carries:
+  - the axes;
+  - per condition: the least and top level speeds; the top a level acceleration reaches, short of the top past a drag rise it cannot pass; the stall; the best-endurance and best-range speeds with their fuel flows; the best climb and its speed;
+  - per level point: its fuel flow (where it held) and the excess power at full power and at idle;
+  - the fuel capacity.
+
+  A stock JSBSim aircraft has none.
+- **Looked up** (`tablesAt`, `tablesCeilingM`, fsim/VehicleProfile.h). Values are linear in altitude and weight between the conditions flown, and along each condition's band at the same fraction of it. A condition or point is read at its own value, whatever its neighbour's. Below the lowest altitude a lookup takes that row's values, and in weight it runs on down to the tanks empty. A lookup is NaN above the altitudes flown, or where a condition it lies between was not flown (above that weight's ceiling). The ceiling is where the best climb first falls below 0.5 m/s; an altitude nothing held level at climbs nothing, as the flight tests count it. An axis that is not strictly rising is refused.
+- **The rotorcraft** fly theirs with their fuel and batteries (FA-3b).
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -477,6 +508,13 @@ The command and activity semantics A-GRA defines around every flight command.
 ### FA-3: Performance, energy management, speed optimisation, endurance (L)
 
 A-GRA's per-mode performance profile from hangar's data; energy management in every mode; long-range-cruise and max-endurance speeds; endurance validation and the fuel report.
+
+**Status:** in progress, in five steps:
+- FA-3a, the performance tables (4.13), done 2026-09-27 and measured in section 14;
+- FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft, the rotorcraft's tables, the navigation report (STS-07), endurance against a flown burn;
+- FA-3c, the performance profile per mode (CAP-04 to CAP-15), updated with the condition and configuration;
+- FA-3d, energy management in every mode (HSA-10, CTG-04): the fleet climb case;
+- FA-3e, speed optimisation (HSA-05, LTR-17) and endurance validation (VAL-03), the first soft rejection override_rejection overrides.
 
 **Supporting models:** Performance tables, fuel flow (SUB-02, SUB-03).
 
@@ -946,6 +984,66 @@ Filled as the stages land: each stage's criteria results, the digests (identical
 - A/B against FA-2d's build (the scratchpad worktree's): per step (`micro`, 5 rounds) within -0.7 % to +2.2 % ("attitude" +2.2 %, "apart, pseudo" +1.9 %, the rest within 1 %). The commands (`command`, 9 rounds): the per-step command -2.9 %, a level switch's NEW +1.9 %, a behaviour's -1.1 %, a checked UPDATE +1.2 %.
 - ctest: all 235 tests pass (the report and fleet cases added).
 
+**FA-3a (the performance tables: SUB-02, and SUB-03's fuel flow for the fixed wings).**
+- What it built is 4.13: hangar's `performance` stage, the profile's `tables` section, the lookups. No flight uses them yet (FA-3c to FA-3e will): digests identical, with protection and without.
+- The lookups are C++ (`tablesAt`, `tablesCeilingM`). The C ABI and Python read the tables' cells through the profile (`fsim_vehicle_profile_value`, `Vehicle.profile_value("tables/max_tas_ms/h0/w2")`). FA-3c brings them to both as the performance profile, A-GRA's per-mode limits.
+- **The fleet** (31 fixed-wing designs, about 20 to 50 s each; 7 or 8 altitudes by 3 weights - 4 where the aircraft file starts elsewhere, 1 without fuel - flown where the aircraft flies level). The tables against the flight tests, in percent:
+
+| Aircraft | Top speed % | Climb % | Stall % | Ceiling % | Conditions | Checks |
+| --- | --- | --- | --- | --- | --- | --- |
+| a10c | +0.0 .. +0.0 | -2.0 .. -0.3 | -0.5 | +0.5 | 21 of 21 | pass |
+| b52h | +0.1 .. +0.2 | -0.8 .. -0.3 | +1.1 | -0.2 | 25 of 28 | pass |
+| c130j | +0.5 | -4.0 .. -0.8 | +1.9 | +0.0 | 24 of 24 | pass |
+| c172 | -0.0 | -3.8 .. -2.0 | -0.9 | -0.7 | 21 of 21 | pass |
+| c17a | -0.3 .. +0.1 | -0.3 | - | -0.7 | 21 of 21 | pass |
+| e3g | -0.8 .. +0.1 | -4.0 .. -0.7 | -0.8 | -0.9 | 21 of 21 | pass |
+| e7a | -0.0 .. +0.1 | -1.7 .. -0.1 | -3.1 | +2.2 | 24 of 24 | pass |
+| ea18g | -2.3 .. +0.1 | -2.1 | - | +0.1 | 24 of 24 | pass |
+| ec130h | +0.0 | -1.3 .. -0.7 | +0.8 | +0.1 | 27 of 28 | pass |
+| f15c | +0.0 .. +0.2 | -2.0 | - | -0.1 | 24 of 24 | pass |
+| f16c | +0.0 .. +0.1 | -2.9 | - | -1.3 | 24 of 24 | pass |
+| f22a | +0.0 .. +0.2 | -2.6 | - | +0.1 | 24 of 24 | pass |
+| f35a | -1.0 .. -0.0 | -0.9 | - | -0.4 | 24 of 24 | pass |
+| fa18c | +0.0 .. +0.2 | -1.7 | - | +1.4 | 24 of 24 | pass |
+| gripen | -1.2 .. +0.1 | -3.3 | - | +1.2 | 21 of 21 | pass |
+| h6k | +0.0 .. +0.1 | -0.7 .. -0.1 | -3.1 | +1.6 | 23 of 24 | pass |
+| j10a | -0.2 .. +0.0 | -2.0 | - | +0.2 | 21 of 21 | pass |
+| j20a | -0.5 .. +0.0 | -1.5 | - | +0.2 | 21 of 21 | pass |
+| kc135r | +0.0 .. +0.1 | -2.3 .. +1.8 | -1.3 | +0.9 | 27 of 28 | pass |
+| kc46a | -0.3 .. +0.1 | -0.9 .. -0.6 | -0.5 | +2.9 | 21 of 21 | pass |
+| mig29a | -0.0 .. +0.1 | -3.0 | - | -1.1 | 24 of 24 | pass |
+| mirage2000 | -4.1 .. +0.1 | -4.4 | - | +0.2 | 21 of 21 | pass |
+| rafale | -0.7 .. +0.1 | -2.9 | - | +0.4 | 24 of 24 | pass |
+| rc135w | +0.1 .. +0.1 | -3.3 .. -0.4 | +0.8 | +1.9 | 27 of 28 | pass |
+| rq4b | +0.0 | -2.6 .. +0.4 | -1.9 | +0.2 | 27 of 28 | pass |
+| skua | +0.4 | - | -3.1 | -0.3 | 7 of 7 | pass |
+| su25 | +1.3 .. +1.3 | -2.8 .. -1.0 | +0.7 | +0.3 | 21 of 21 | pass |
+| su27s | -0.0 .. +0.1 | -2.3 | - | -0.3 | 24 of 24 | pass |
+| su57 | -0.5 .. +0.0 | -2.4 | - | +0.3 | 24 of 24 | pass |
+| typhoon | +0.0 .. +0.1 | -3.1 | - | +0.1 | 24 of 24 | pass |
+| u2s | -0.6 .. +0.2 | -1.1 .. +1.7 | +0.5 | +2.1 | 31 of 32 | pass |
+
+All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 ceilings. The worst are the Mirage 2000's top Mach number at -4.1 % and its best climb at -4.4 %, a stall at -3.1 % and the KC-46A's ceiling at +2.9 %.
+- The Mirage 2000's flight test extrapolates its Mach 2.20 from the Mach 2.106 it flew to in six minutes. The tables' settled Mach 2.111 at that weight agrees with what it flew to within 0.2 %.
+- The Skua's climbs above 1,500 m are flown below the envelope's least speed, which the platform's velocity loop flies no slower than. They are shown as beyond the tables and not compared.
+- **Past a drag rise.** 12 conditions on 9 fighters (EA-18G, F-35A and Su-57 2 each; F-15C, FA-18C, J-20A, MiG-29A, Mirage 2000 and Su-27S 1 each): in those conditions, full power holds level faster than a level acceleration reaches.
+- **Level only in short runs, near a ceiling.** 25 conditions on 15 designs, the most on the KC-135R and Mirage 2000 (4 each).
+- **Fuel-flow points.** 10,914 of 11,456 level points (95.3 %) held their speed and height, and only those carry a fuel flow. The excess power at full power is known at every point, at idle at all but 55.
+- **Size.** The tables add 41,728 properties to the 31 aircraft files: 405 on the one-weight Skua, up to 1,829. Nothing else in them changed.
+- **What the checks found, each fixed in the stage before the tables were kept:**
+  - The velocity loop holds a vertical speed, not a height. Accelerating through Mach 1 at 100 m, the F-15C and FA-18C sank into the ground and slid along it, and the slide read as a settled top speed of 90 m/s. The height is now held.
+  - A fighter's gear is up, so on its belly its wheels report nothing. The light and half-weight Su-27S slid at 1 m and were accepted, until any run within 10 m of the ground was refused.
+  - Loaded at 14 km, the F-35A stops in the transonic drag rise. The short runs past it found the top where full power holds level beyond it, and the supersonic best climbs that set the fighters' ceilings. Those ceilings were 5 to 11 % low before.
+  - The fighters' flight tests read their top Mach number and best climb after minutes at full afterburner, hundreds to thousands of kilograms lighter. They are now compared at that weight, found by flying the tests again. The re-flown tests match the originals to four figures.
+  - Eleven speed points lost up to 9 % of the excess power near the top speed, where the curve falls steeply (the Su-25). Sixteen points keep it within about 1 %.
+  - The straight wings' flight test fits its ceiling through its three highest climbs, the third often far below: the RQ-4B's read 45,152 ft. Against its two highest climbs extended, the reference the tables use, the RQ-4B agrees within 0.2 %.
+  - The B-52H's file starts its tanks 40 % full. The stage had taken that as full capacity, which would have reported 100 % on a B-52H at 40 %. The capacity is now read from the tanks.
+  - A full-power run's first seconds record the engines spooling up: the EC-130H's excess power climbs from 7 to 11 m/s over 6 s, and a band starting there read its lowest climb 6 % low. Each run's first 8 s are left out.
+  - The light C-17A's velocity loop oscillates at 98 m/s and 3° of angle of attack, which read as a stall at 91 m/s. The stall now comes from the highest lift coefficient at each altitude, and the angle-of-attack break counts only near the limit.
+- Digests are identical, with protection and without.
+- `control_alloc` passes.
+- The interleaved A/B against FA-2e's bench shows no change beyond noise. The micro-benchmark medians range from -1.6 % to +2.8 %; the largest, attitude, is +0.7 % on its minimum. The command medians range from -1.5 % to +1.8 %.
+- ctest: all 240 tests pass (the five tables cases added; hangar's performance unit tests 8).
 
 ## Appendix A: the inventory
 

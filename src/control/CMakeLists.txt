@@ -30,6 +30,7 @@ add_library(fsim_control STATIC
     Guidance.cpp
     Tasks.cpp
     Reports.cpp
+    PerformanceTables.cpp
     Names.cpp)
 add_library(fsim::control ALIAS fsim_control)
 

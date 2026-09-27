@@ -237,6 +237,63 @@ FSIM_API const char* characteristicName(Characteristic c) noexcept;
 /// Whether the section declares the characteristic: a value, and its source.
 FSIM_API bool declares(const ApplicabilitySection& section, Characteristic c) noexcept;
 
+// --- performance tables (docs/flight-autonomy.md, SUB-02; ADR-29 FA-3a) --------------------------
+
+/// What the aircraft flies level, climbs and descends at, and the fuel it
+/// burns, against altitude, weight and speed: flown by hangar (its
+/// performance stage), clean, the envelope protection off. An aircraft file
+/// carries it as fsim/tables/<axis>/<h|w|v><i> and fsim/tables/<name>/h<i>/w<j>[/v<k>].
+/// Empty for an aircraft hangar has not flown them for (a stock JSBSim aircraft).
+struct TablesSection {
+    static constexpr std::uint16_t kVersion = 1;
+    SectionHeader header;
+    std::vector<double> altitudeM;     ///< the altitudes flown, rising (the lowest a little above the ground)
+    std::vector<double> weightKg;      ///< the weights flown, rising: the tanks a tenth, half and wholly full
+    std::vector<double> speedFraction; ///< each condition's level points, from its least level speed (0) to 97 % of its top (1)
+    double fuelCapacityKg = kUnknown;
+    // per condition (an altitude and a weight), at [altitude * weights + weight]; NaN where not flown (above its ceiling)
+    std::vector<double> minTasMs;             ///< the least speed full power flew level at (never below 1.15 times the stall)
+    std::vector<double> maxTasMs;             ///< full power, level: the fastest it holds - where the drag meets the thrust
+    /// The fastest a level acceleration at full power reaches from below: maxTasMs, but past a drag rise it cannot
+    /// accelerate through (a fighter high and heavy) the speed it stops at, below the top it holds beyond it; NaN
+    /// where only beyond such a drag rise does full power hold level (a height-holding mode reaches it no other way).
+    std::vector<double> reachTasMs;
+    std::vector<double> stallCasMs;           ///< idle, the height held: the limit angle of attack, or where the height could no longer be held
+    std::vector<double> bestEnduranceTasMs, bestEnduranceFuelKgS; ///< the least fuel flow, level
+    std::vector<double> bestRangeTasMs, bestRangeFuelKgS;         ///< the most distance per kilogram, level
+    std::vector<double> maxClimbMs, climbTasMs;                   ///< the best excess power at full power, and its speed (up high, a fighter's beyond its drag rise)
+    // per level point, at [(altitude * weights + weight) * points + point]
+    std::vector<double> fuelKgS;  ///< the fuel flow, level
+    std::vector<double> psFullMs; ///< the excess power at full power, level: the climb it would make, or the speed it would gain, as a rate of height
+    std::vector<double> psIdleMs; ///< the excess power at idle (negative): the descent rate at the speed, or the deceleration
+    bool empty() const noexcept { return altitudeM.empty() || weightKg.empty(); }
+};
+
+/// The tables at a condition: linear in altitude and in weight between the
+/// conditions flown (below the lowest altitude, its values; in weight, on
+/// down to the tanks empty); NaN above the altitudes flown, or where a
+/// condition it lies between was not flown.
+struct TablesAt {
+    double minTasMs = kUnknown, maxTasMs = kUnknown, reachTasMs = kUnknown, stallCasMs = kUnknown;
+    double bestEnduranceTasMs = kUnknown, bestEnduranceFuelKgS = kUnknown;
+    double bestRangeTasMs = kUnknown, bestRangeFuelKgS = kUnknown;
+    double maxClimbMs = kUnknown, climbTasMs = kUnknown;
+};
+FSIM_API TablesAt tablesAt(const TablesSection& tables, double altitudeM, double weightKg) noexcept;
+/// ...and at a true airspeed within its level speeds (from its least to its
+/// top): the fuel flow level, the excess power at full power and at idle.
+/// Each condition's points are taken at the same fraction of its speeds.
+struct TablesAtSpeed {
+    double fuelKgS = kUnknown, psFullMs = kUnknown, psIdleMs = kUnknown;
+};
+FSIM_API TablesAtSpeed tablesAt(const TablesSection& tables, double altitudeM, double weightKg, double tasMs) noexcept;
+/// The service ceiling at a weight: rising through the altitudes flown,
+/// where the best climb first falls below 0.5 m/s (100 ft/min) - an altitude
+/// nothing held level at climbing nothing - linear between it and the one
+/// below; climbing at the highest, the highest two's line extended. NaN if
+/// it climbs at none.
+FSIM_API double tablesCeilingM(const TablesSection& tables, double weightKg) noexcept;
+
 struct VehicleProfile {
     std::string aircraft;
     IdentitySection identity;
@@ -248,17 +305,19 @@ struct VehicleProfile {
     ControlSection control;
     HoverSection hover;
     ApplicabilitySection applicability;
+    TablesSection tables;
 };
 
 /// A section by name ("identity", "effectors", "envelope", "propulsion",
-/// "plant", "performance", "control", "hover", "applicability"); null for
-/// another name.
+/// "plant", "performance", "control", "hover", "applicability", "tables");
+/// null for another name.
 FSIM_API const SectionHeader* sectionHeader(const VehicleProfile& profile, std::string_view section) noexcept;
 /// A field by its path as the aircraft file names it, in the unit its name
 /// gives: "envelope/clean/n_max", "envelope/clean/alpha_max_deg",
 /// "plant/roll/tau_s", "hover/roll/power", "identity/class", "<section>/version",
-/// "control/pid_attitude/pitch/kp", "applicability/carrier"; NaN if the
-/// profile has no such field, or does not declare it.
+/// "control/pid_attitude/pitch/kp", "applicability/carrier",
+/// "tables/max_tas_ms/h0/w2", "tables/altitude_m/h3"; NaN if the profile has
+/// no such field, or does not declare it.
 FSIM_API double profileValue(const VehicleProfile& profile, std::string_view path) noexcept;
 
 } // namespace fsim::control

@@ -30,8 +30,8 @@ import numpy as np
 from . import __version__
 from .geometry import Aircraft
 
-STAGES = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "calibrate", "autopilot", "report")
-DEFAULT = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "autopilot", "report")
+STAGES = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "calibrate", "autopilot", "performance", "report")
+DEFAULT = ("geometry", "aero", "mass", "propulsion", "build", "model", "verify", "fly", "autopilot", "performance", "report")
 KT = 0.514444
 
 
@@ -591,10 +591,10 @@ class Design:
         # plant hangar autopilot identified - the platform designs its loops from that. Gains written by
         # hand in autopilot.toml go into the flight control section too, and win.
         from .autopilot import load_identification, load_settings
-        from .profile import fly_results, sections
+        from .profile import fly_results, performance_tables, sections
         autopilot = load_settings(os.path.join(self.dir, "autopilot.toml"))
         reference, identified = load_identification(os.path.join(self.dir, "autopilot.toml"))
-        profile = sections(a, fbw, reference, identified, fly_results(self.dir))
+        profile = sections(a, fbw, reference, identified, fly_results(self.dir), performance_tables(self.dir))
         text = keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw, yaw_damper=yd, autopilot=autopilot, profile=profile))
         with open(xml_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
@@ -865,6 +865,161 @@ class Design:
         checks = self._flight_checks(results)
         return self.save("fly", {"results": results, "checks": checks,
                                  "images": ["fly_trim.png", "fly_climb.png", "fly_stall.png", "fly_longitudinal.png", "fly_lateral.png"]})
+
+    # -- performance ----------------------------------------------------------------------------
+    def performance(self):
+        """The performance tables (performance.py; ADR-29 FA-3a): what the design flies level, climbs and descends
+        at, and the fuel it burns, at the altitudes and weights the platform interpolates between - flown, checked
+        against the flight tests (fly) within 5 %, and built into the JSBSim file's profile (its tables section)."""
+        from . import performance as P
+        from .profile import fly_results
+        from .report import plots
+        flown = fly_results(self.dir)
+        if not flown:
+            raise SystemExit("%s: fly first (the tables fly at the altitudes its service ceiling sets)" % self.name)
+        opts = self.fbw_options()
+        stall = flown.get("stall") or {}
+        fighter = flown.get("fighter") or {}
+        ceiling = float((flown.get("climb") or {}).get("service_ceiling_m", fighter.get("service_ceiling_m", float("nan"))))
+        if not math.isfinite(ceiling):
+            ceiling = float(self.targets.get("service_ceiling_ft", 40000.0)) * 0.3048
+        stall_tas = float(stall.get("stall_tas_ms", self._stall_estimate()))
+        control = self.aircraft.spec.get("flight_control", {})
+        # the angle the stall is read at: the law's limit (fly-by-wire), else the stall the tests flew
+        alpha_max = float(opts["alpha_max_deg"]) if opts is not None else float(stall.get("alpha_at_stall", control.get("alpha_max_deg", 15.0)))
+        # the heights the design publishes its top speeds at (its flight tests fly them there): flown as rows too
+        extra = [self._max_speed_altitude()]
+        if "top_altitude_m" in fighter:
+            extra.append(float(fighter["top_altitude_m"]))
+        if "top_altitude_m" in flown:
+            extra.append(float(flown["top_altitude_m"]))
+        t = P.fly(self.name, ceiling, stall_tas, alpha_max, extra_altitudes=extra, log=self.log)
+        checks = self._performance_checks(P, t, flown)
+        plots.performance(t, self.img("performance.png"), self.name)
+        out = self.save("performance", {"tables": t, "checks": checks, "images": ["performance.png"]})
+        self.build()  # (the aircraft file carries them)
+        return out
+
+    def _fighter_runs_again(self, top_m):
+        """The fighter flight tests' sea-level and top Mach runs flown again as fighter_tests flies them (one pilot:
+        its height integrator carries over), each on full tanks at full power for minutes - the fuel each had where
+        its number was read: {"climb_fuel_kg": at the sea-level run's peak excess power, "top_mach": the top run's
+        Mach number, "top_reached": the Mach it flew to (the number extrapolated past it if it had not settled),
+        "top_fuel_kg": at its end}."""
+        from . import flight as F
+        opts = self.fbw_options()
+        f = F.Flight(self.name, name="hangar-perf-again-" + self.name)
+        try:
+            pilot = F.FighterPilot(f.dt, opts["n_max"], opts["n_min"])
+            _, sl = F.max_level_mach(f, pilot, SEA_LEVEL_FLOWN_M, start_mach=0.4, seconds=150.0 if self.quick else 240.0)
+            m, top = F.max_level_mach(f, pilot, top_m, start_mach=0.9, seconds=200.0 if self.quick else 360.0)
+        finally:
+            f.close()
+        ok = np.isfinite(sl["ps"])
+        i = int(np.argmax(np.where(ok, sl["ps"], -1e9)))  # (as fighter_tests reads its best climb)
+        return {"climb_fuel_kg": float(sl["fuel_kg"][i]), "top_mach": float(m), "top_reached": float(top["mach"][-1]),
+                "top_fuel_kg": float(top["fuel_kg"][-1])}
+
+    def _performance_checks(self, P, t, flown):
+        """The tables against the flight tests at the same altitude and weight - the weight it spawns at, as the
+        tests fly (a fighter's best climb and top Mach number where its run had burned down to): the top level
+        speeds, the best climb, the stall and the service ceiling, each within 5 %."""
+        checks = []
+        fighter = flown.get("fighter") or {}
+        ws = float(t["spawn_weight_kg"])  # (the tanks as the aircraft file fills them: a B-52H's 40 %)
+
+        def against(label, table, test, unit, conv=1.0, fmt="%.4g", more=""):
+            if not (np.isfinite(table) and test is not None and np.isfinite(test)):
+                note = "no flight test to compare" if np.isfinite(table) else "beyond the conditions the tables flew"
+                checks.append(info(label, float(table * conv) if np.isfinite(table) else None, unit, note=note))
+                return
+            checks.append(check(label, table * conv, 0.95 * test * conv, 1.05 * test * conv, unit,
+                                note="flight test %s (%+.1f %%)%s" % (fmt % (test * conv), 100.0 * (table / test - 1.0), more), fmt=fmt))
+        low = t["altitude_m"][0]
+        if fighter:
+            a_sl = P.speed_of_sound(low)
+            against("top level speed, %.0f m (tables)" % low, P.at_weight(t, "max_tas_ms", low, ws), fighter.get("max_mach_sl", np.nan) * a_sl,
+                    "KTAS", 1 / KT, "%.0f")
+            # the flight tests fly their best climb (the peak excess power of the sea-level run) and top Mach
+            # number on full tanks at full power for minutes: where each is read the afterburner has burned
+            # hundreds of kilograms, or thousands - flown again as they fly them, the fuel read there, the tables at
+            # that weight
+            top = float(fighter.get("top_altitude_m", np.nan))
+            again = self._fighter_runs_again(top if np.isfinite(top) else 10973.0)
+            weight = lambda fuel: float(ws - (t["spawn_fuel_kg"] - fuel))  # noqa: E731
+            if np.isfinite(top) and np.isfinite(fighter.get("max_mach_top", np.nan)):
+                w = weight(again["top_fuel_kg"])
+                against("top Mach number, %.0f m (tables at %.0f kg, where the flight test ended)" % (top, w),
+                        P.at_weight(t, "max_tas_ms", top, w) / P.speed_of_sound(top), fighter["max_mach_top"], "",
+                        more="; flown again: Mach %.4f (flown to %.4f), %.0f kg of fuel left" % (
+                            again["top_mach"], again["top_reached"], again["top_fuel_kg"]))
+            w = weight(again["climb_fuel_kg"])
+            against("best climb, %.0f m (tables: peak excess power at %.0f kg, the flight test's there)" % (low, w),
+                    P.at_weight(t, "max_climb_ms", low, w), fighter.get("climb_rate_ms"), "ft/min", 60 / 0.3048, "%.0f")
+            against("service ceiling (tables)", P.ceiling_at(t, ws), fighter.get("service_ceiling_m"), "ft", 1 / 0.3048, "%.0f")
+            checks.append(info("stall", None, note="the law holds %.0f deg: the least speed is the tables' %.0f KCAS there"
+                               % (t["alpha_max_deg"], P.at_weight(t, "stall_cas_ms", low, ws) / KT)))
+        else:
+            top = self._max_speed_altitude()
+            against("top level speed, %.0f m (tables)" % top, P.at_weight(t, "max_tas_ms", top, ws), flown.get("max_speed_ms"), "KTAS", 1 / KT, "%.0f")
+            if "max_mach_top" in flown:
+                h = float(flown["top_altitude_m"])
+                against("top Mach number, %.0f m (tables)" % h, P.at_weight(t, "max_tas_ms", h, ws) / P.speed_of_sound(h), flown["max_mach_top"], "")
+            # the climbs the flight test flew, flown again at a held climb (its own airspeed hold lets the speed
+            # bleed off as it averages, and counts it as climb: 4 % on the C172): the tables' excess power against
+            # the excess power flown, at the height and speed it was flown at
+            climb = flown.get("climb") or {}
+            rows = [r for r in climb.get("rows", []) if np.isfinite(float(r.get("rate_ms", np.nan)))]
+            flights = P.climbs(self.name, [(float(r["altitude_m"]), float(r["speed_ms"]), float(r["rate_ms"])) for r in rows])
+            for row, (h, v, ps) in zip(rows, flights):
+                against("climb at %.0f KTAS, %.0f m (tables against it flown; the flight test %.0f ft/min)"
+                        % (float(row["speed_ms"]) / KT, float(row["altitude_m"]), float(row["rate_ms"]) / 0.3048 * 60),
+                        P.ps_at_weight(t, h, v, ws), ps, "ft/min", 60 / 0.3048, "%.0f")
+            stall = flown.get("stall") or {}
+            against("stall speed, %.0f m (tables: idle, the height held, to %.1f deg)" % (low, t["alpha_max_deg"]), P.at_weight(t, "stall_cas_ms", low, ws),
+                    stall.get("stall_kcas", np.nan) * KT, "KCAS", 1 / KT, "%.1f")
+            # the ceiling as the tables find theirs: the flight test's two highest climbs, extended (the one it
+            # reports is a line through its three highest, the third often far below: a climb falling ever more
+            # slowly with height reads low along it)
+            near = sorted(rows, key=lambda r: float(r["altitude_m"]))[-2:]
+            local = float("nan")
+            if len(near) == 2 and float(near[0]["rate_ms"]) > float(near[1]["rate_ms"]):
+                (h1, c1), (h2, c2) = ((float(r["altitude_m"]), float(r["rate_ms"])) for r in near)
+                local = h2 + (c2 - P.SERVICE_MS) / (c1 - c2) * (h2 - h1)
+            reported = float(climb.get("service_ceiling_m", np.nan))
+            against("service ceiling (tables; the flight test's two highest climbs extended)", P.ceiling_at(t, ws), local, "ft", 1 / 0.3048, "%.0f",
+                    more="; it reports %.0f ft" % (reported / 0.3048))
+        # the tables against themselves, where no flight test reaches (the lighter weights, every altitude): the
+        # lighter climbs better at every altitude flown at every weight (2 % to spare) and flies higher - a run that
+        # went wrong unseen (on its belly, at 100 m) breaks one of them (the stall scales with the weight by
+        # construction: one lift coefficient per altitude)
+        climb = np.asarray(t["max_climb_ms"], dtype=float)
+        breaches = []
+        for i, h in enumerate(t["altitude_m"]):
+            row = climb[i]
+            if np.all(np.isfinite(row)) and not all(row[k] >= 0.98 * row[k + 1] for k in range(len(row) - 1)):
+                breaches.append("best climb at %.0f m: %s m/s" % (h, ", ".join("%.1f" % x for x in row)))
+        ceilings = [P.ceiling(t, k) for k in range(len(t["weight_kg"]))]
+        if all(np.isfinite(ceilings)) and not all(ceilings[k] >= ceilings[k + 1] for k in range(len(ceilings) - 1)):
+            breaches.append("ceilings %s m" % ", ".join("%.0f" % x for x in ceilings))
+        checks.append(check("the lighter climbs better and flies higher", len(breaches), 0, 0, "breaches",
+                            note="; ".join(breaches) if breaches else "at every altitude flown at every weight", fmt="%.0f"))
+        # what the tables give that no test flies: shown
+        j = len(t["weight_kg"]) - 1
+        checks.append(info("best endurance and best range at %.0f m, as it spawns" % low,
+                           "%.0f / %.0f KTAS" % (P.at_weight(t, "best_endurance_tas_ms", low, ws) / KT, P.at_weight(t, "best_range_tas_ms", low, ws) / KT),
+                           note="%.0f and %.0f kg/h" % (P.at_weight(t, "best_endurance_fuel_kg_s", low, ws) * 3600,
+                                                        P.at_weight(t, "best_range_fuel_kg_s", low, ws) * 3600)))
+        reach, top_tas = np.asarray(t["reach_tas_ms"], dtype=float), np.asarray(t["max_tas_ms"], dtype=float)
+        pocket = int(np.sum(np.isfinite(reach) & (top_tas > 1.01 * reach)))   # (held level past a drag rise it could not pass)
+        short = int(np.sum(np.isfinite(top_tas) & ~np.isfinite(reach)))       # (level only in the short runs: near a ceiling)
+        checks.append(info("conditions flown", "%d of %d" % (int(np.sum(np.isfinite(top_tas))), len(t["altitude_m"]) * len(t["weight_kg"])),
+                           note="altitudes %s m; weights %s kg; %d past a drag rise, %d level only in short runs; %d short runs counted; "
+                                "%.0f s" % (", ".join("%.0f" % h for h in t["altitude_m"]), ", ".join("%.0f" % w for w in t["weight_kg"]),
+                                            pocket, short, t.get("spot_runs", 0), t["seconds"])))
+        checks.append(info("fuel capacity", t["fuel_capacity_kg"], "kg", note="%.0f kg as it spawns; the ceilings by weight: %s m" % (
+            t["spawn_fuel_kg"], ", ".join("%.0f" % P.ceiling(t, k) for k in range(j + 1)))))
+        return checks
 
     def _aircraft_file(self, kind):
         """The JSBSim file of the design, or of a reference aircraft."""

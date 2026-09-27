@@ -26,6 +26,15 @@ using PropertySource = std::function<std::vector<std::pair<std::string, double>>
 /// nobody knows is ignored: each noted in `warnings`.
 VehicleProfile readProfile(const std::string& aircraft, const PropertySource& properties, std::vector<std::string>& warnings);
 
+/// The tables section's properties (relative to fsim/tables) into `out`
+/// (PerformanceTables.cpp): the axes, then each table sized by them; a cell
+/// out of the axes, or a name this build does not know, warned of (`where`
+/// names the section) and ignored.
+void readTables(const std::vector<std::pair<std::string, double>>& values, TablesSection& out, const std::string& where,
+                std::vector<std::string>& warnings);
+/// A tables field by its path below the section ("max_tas_ms/h0/w2", "altitude_m/h3", "fuel_capacity_kg"); NaN if none.
+double tableValue(const TablesSection& tables, std::string_view path) noexcept;
+
 /// `base` with every section `over` has (present()) replaced by `over`'s.
 VehicleProfile mergeProfile(const VehicleProfile& base, const VehicleProfile& over);
 

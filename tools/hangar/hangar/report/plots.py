@@ -299,6 +299,56 @@ def climb(runs, path):
     plt.close(fig)
 
 
+def performance(t, path, name):
+    """The performance tables (performance.py): fuel flow and excess power against speed at each altitude,
+    loaded, with the best-endurance and best-range speeds; and the speeds against altitude at each weight."""
+    hs = t["altitude_m"]
+    j = len(t["weight_kg"]) - 1
+    tas, ff = np.asarray(t["tas_ms"], dtype=float), np.asarray(t["fuel_kg_s"], dtype=float)
+    pf, pi = np.asarray(t["ps_full_ms"], dtype=float), np.asarray(t["ps_idle_ms"], dtype=float)
+    fig, axes = plt.subplots(1, 3, figsize=(17, 5), dpi=95)
+    ax = axes[0]
+    for i, h in enumerate(hs):
+        if not np.any(np.isfinite(ff[i, j])):
+            continue
+        line, = ax.plot(tas[i, j] / 0.514444, ff[i, j] * 3600, "-", lw=1.2, label="%.0f m" % h)
+        for key, mark in (("best_endurance", "o"), ("best_range", "x")):
+            v, f = t[key + "_tas_ms"][i][j], t[key + "_fuel_kg_s"][i][j]
+            if v is not None and np.isfinite(v):
+                ax.plot(v / 0.514444, f * 3600, mark, color=line.get_color(), ms=7)
+    ax.set_xlabel("true airspeed (kt)")
+    ax.set_ylabel("fuel flow (kg/h)")
+    ax.set_title("level flight, loaded: best endurance (o), best range (x)", fontsize=9)
+    ax.grid(True, lw=0.3)
+    ax.legend(fontsize=7)
+    ax = axes[1]
+    for i, h in enumerate(hs):
+        if not np.any(np.isfinite(pf[i, j])):
+            continue
+        line, = ax.plot(tas[i, j] / 0.514444, pf[i, j] / 0.3048 * 60, "-", lw=1.2, label="%.0f m" % h)
+        ax.plot(tas[i, j] / 0.514444, pi[i, j] / 0.3048 * 60, "--", lw=0.9, color=line.get_color())
+    ax.axhline(0, color="k", lw=0.6)
+    ax.set_xlabel("true airspeed (kt)")
+    ax.set_ylabel("excess power (ft/min)")
+    ax.set_title("full power (solid) and idle (dashed), loaded", fontsize=9)
+    ax.grid(True, lw=0.3)
+    ax.legend(fontsize=7)
+    ax = axes[2]
+    for w in range(len(t["weight_kg"])):
+        for key, style in (("min_tas_ms", ":"), ("max_tas_ms", "-"), ("best_range_tas_ms", "--")):
+            col = np.asarray(t[key], dtype=float)[:, w]
+            ax.plot(col / 0.514444, np.asarray(hs) / 0.3048, style, color="C%d" % w, lw=1.2,
+                    label=("%.0f kg" % t["weight_kg"][w]) if key == "max_tas_ms" else None)
+    ax.set_xlabel("true airspeed (kt): slowest level (dotted), best range (dashed), top (solid)")
+    ax.set_ylabel("altitude (ft)")
+    ax.set_title("%s: the speeds by altitude and weight" % name, fontsize=9)
+    ax.grid(True, lw=0.3)
+    ax.legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(path)
+    plt.close(fig)
+
+
 def reference_comparison(cmp, path, name):
     """The design's coefficients over alpha against its reference aircraft
     (a JSBSim model built from wind-tunnel data)."""

@@ -39,7 +39,44 @@ def fly_results(directory):
         return json.load(f).get("results", {}).get("design", {})
 
 
-def sections(aircraft, fbw, reference, identified, flown):
+def performance_tables(directory):
+    """The design's performance tables (out/performance.json's), or {} before they are flown."""
+    path = os.path.join(directory, "out", "performance.json")
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f).get("tables", {})
+
+
+def table_fields(tables):
+    """The tables section's fields (docs/flight-autonomy.md, SUB-02): the axes - altitude_m/h<i>, weight_kg/w<j>,
+    speed_fraction/v<k> - and each table's cells, <name>/h<i>/w<j> or <name>/h<i>/w<j>/v<k>; a cell not flown is
+    left out (NaN when read)."""
+    if not tables:
+        return {}
+    out = {}
+    for axis, tag in (("altitude_m", "h"), ("weight_kg", "w"), ("speed_fraction", "v")):
+        for i, x in enumerate(tables[axis]):
+            out["%s/%s%d" % (axis, tag, i)] = float(x)
+    if tables.get("fuel_capacity_kg") is not None:
+        out["fuel_capacity_kg"] = float(tables["fuel_capacity_kg"])
+    for name, value in sorted(tables.items()):
+        # (the speed, throttle and angle of attack each level point flew stay in the report: the platform reads each
+        # point at its fraction of the band, and the rest)
+        if name in ("altitude_m", "weight_kg", "speed_fraction", "tas_ms", "throttle", "alpha_deg") or not isinstance(value, list):
+            continue
+        for i, row in enumerate(value):
+            for j, cell in enumerate(row):
+                if isinstance(cell, list):
+                    for k, x in enumerate(cell):
+                        if x is not None and math.isfinite(float(x)):
+                            out["%s/h%d/w%d/v%d" % (name, i, j, k)] = float(x)
+                elif cell is not None and math.isfinite(float(cell)):
+                    out["%s/h%d/w%d" % (name, i, j)] = float(cell)
+    return out
+
+
+def sections(aircraft, fbw, reference, identified, flown, tables=None):
     """{section: {field: value}} for the JSBSim file.
 
     aircraft   the design (geometry.aircraft.Aircraft)
@@ -47,6 +84,7 @@ def sections(aircraft, fbw, reference, identified, flown):
     reference  autopilot.toml's [reference] (tas_ms, eas_ms, altitude_m), or {}
     identified autopilot.toml's [identified]: the responses measured there, or {}
     flown      the flight tests' results (fly_results), or {}
+    tables     the performance tables (performance_tables), or {}
     """
     spec = aircraft.spec
     control = spec.get("flight_control", {})
@@ -144,6 +182,11 @@ def sections(aircraft, fbw, reference, identified, flown):
     if perf:
         out["performance"] = perf
 
+    # the performance tables, as flown (performance.py)
+    fields = table_fields(tables or {})
+    if fields:
+        out["tables"] = fields
+
     # applicability: the physical characteristics the design declares, each with its source
     # (docs/flight-autonomy.md, 5.2); the sources go into the file header (jsbsim.aircraft_xml)
     from .applicability import declared
@@ -165,7 +208,7 @@ def properties_xml(profile, indent="      "):
         return ""
     lines = [indent + "<!-- the aircraft's profile for the platform (docs/control-architecture.md, section 7): what",
              indent + "     hangar knows of it - its design, its flight tests, its identified responses -->"]
-    for section in ("identity", "effectors", "envelope", "propulsion", "plant", "performance", "applicability"):
+    for section in ("identity", "effectors", "envelope", "propulsion", "plant", "performance", "applicability", "tables"):
         fields = profile.get(section)
         if not fields:
             continue

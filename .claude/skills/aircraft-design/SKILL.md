@@ -16,9 +16,10 @@ stages, the file format and the methods. This skill is the working loop.
 ./fsim.cmd hangar new <name> --like skua     # or --like c172
 ./fsim.cmd hangar <name> geometry            # any stage, or several in order
 ./fsim.cmd hangar <name> --quick             # all stages, coarse tables: ~30 s
-./fsim.cmd hangar <name>                     # all stages, full tables: ~1-2 min
+./fsim.cmd hangar <name>                     # all stages, full tables: ~2-3 min
 ./fsim.cmd hangar <name> calibrate           # only with real performance data
 ./fsim.cmd hangar <name> autopilot           # the platform's control loops tuned for it (~10-90 s)
+./fsim.cmd hangar <name> performance         # its performance and fuel tables, into the .xml (~20-50 s)
 ```
 
 The outputs go to `aircraft/<name>/out/`: `<stage>.json` (the numbers and
@@ -107,6 +108,13 @@ move on while a check fails or a picture looks wrong.
   law's limits in `[flight_control]` (`n_max`, `n_min`, `alpha_max_deg`,
   `roll_rate_deg_s`) only from published figures: they become the envelope
   the platform limits commands to.
+- **performance.** Flies the performance and fuel tables the platform plans
+  with (docs/hangar.md, Performance and fuel) and builds them into the
+  `.xml`'s `tables` section. Run it after fly, since its altitudes come from
+  the flight tests' ceiling, and after any change that moves the performance.
+  Every check must lie within 5 % of the flight tests, and the tables must
+  agree with themselves: the lighter weight climbs better and flies higher.
+  A breach means a run went wrong unseen. Look at `out/performance.png`.
 - **model.** The `.glb`. Its checks must pass: no open, pinched or
   misturned edge, the airframe in one piece, every moving part closed, the
   stowed gear inside the skin (under 3 cm), length, span and height within
