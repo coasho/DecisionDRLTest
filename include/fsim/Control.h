@@ -55,7 +55,8 @@ inline bool isHold(double v) noexcept { return std::isnan(v); }
 inline double orHold(double v, double fallback) noexcept { return std::isnan(v) ? fallback : v; }
 
 /// Normalised actuator positions, JSBSim conventions: aileron +right,
-/// elevator +nose-down, rudder +nose-right, throttle 0..1, flaps 0..1.
+/// elevator +nose-down, rudder +nose-left (trailing edge left), throttle
+/// 0..1, flaps 0..1.
 struct ActuatorCommand {
     double aileron = 0.0, elevator = 0.0, rudder = 0.0;
     double throttle = 0.0;
