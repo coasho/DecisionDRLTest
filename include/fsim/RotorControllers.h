@@ -163,9 +163,12 @@ public:
     const char* id() const noexcept override { return "hover"; }
     void start(const ControlContext& ctx, const BehaviorCommand& command) override;
     Command update(const ControlContext& ctx, const Command& in) override;
+    /// Its point, height and heading, and how far it is from the point.
+    bool progress(ActivityProgress& out) const noexcept override;
 
 private:
     PositionCommand target_;
+    double lat_ = 0.0, lon_ = 0.0; ///< as of the last update
 };
 
 /// Registers the loops above and "hover" (registerBuiltinControllers calls it).

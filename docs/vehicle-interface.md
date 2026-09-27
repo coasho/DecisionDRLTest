@@ -274,7 +274,7 @@ struct ActivityProgress {
 };
 ```
 
-- **Writing it.** A behaviour fills it through a new virtual, `Behavior::progress()`, which by default reports nothing. The runtime calls it after the behaviour's update, into the slot's report. The host copies it into the activity's record after each world step.
+- **Writing it.** A behaviour fills it through a new virtual, `Behavior::progress()`, which by default reports nothing. It keeps what it needs from its last update (a few stores); after each world step the host asks the slot's behaviour through `ControlStack::progress(slot)`, a read between steps like the report's, and keeps the answer in the activity's record. Nothing runs per control update. (Recorded at VI-2: the first design had the runtime write it into the report every update.)
 - **Legacy behaviours.** `waypoints` reports its point and the distance to it; `loiter`, its laps.
 - **The commanded state of any flight.** `World::commanded(vehicle)` reads the cascade's commands from the last update: the altitude, heading, speed and vertical speed at the velocity and position levels, the attitude, the rates and load factor, the throttle. It is read on demand, so it costs a step nothing.
 
@@ -364,7 +364,7 @@ Every change bumps the revision.
 
 ADR-26's rules B1-B8 hold, with these additions:
 - **`RuntimeConfig`** gains the path store (a pointer, allocated at the first route or curve NEW) and `Performance`.
-- **`RuntimeReport`**'s slot report gains `ActivityProgress`.
+- **Progress** is asked of the slot's behaviour by the host after each world step (`ControlStack::progress`, read-only, between steps), so the report does not grow.
 - **`ControlContext`** gains `features` (the vehicle's Feature bits) and `guidance` (its performance and path store), for behaviours. Both are trailing members with defaults, so existing initialisers keep compiling.
 - **`Behavior`** gains `start(ctx, const Command&)` and `progress()`. The old `start(ctx, const BehaviorCommand&)` is still called for a `BehaviorCommand`, by the new overload's default.
 - **B2, the fast path:** UPDATE of a mode merges or copies in place, with no allocation, strings or virtual calls; so does a route or curve UPDATE within the store's capacity. The allocation gate gains HSA and pattern updates every step, and a route replaced every step.
@@ -378,7 +378,7 @@ ADR-26's rules B1-B8 hold, with these additions:
 | `submit(HsaCommand)`, `submit(PatternCommand)`; `update(activity, …)` | `fsim_vehicle_submit_mode(world, id, FSIM_MODE_HSA / _PATTERN, fields, count, options, result)`; `fsim_activity_update` takes a mode's fields | `Vehicle.submit_hsa(**fields)`, `submit_pattern(**fields)`; `Activity.update(**fields)` merges |
 | `submit(RouteCommand, Span<const Waypoint>)`, `update(activity, RouteCommand, Span<const Waypoint>)` | `fsim_vehicle_submit_route`, `fsim_activity_update_route` (`fsim_waypoint[]`) | `submit_route(waypoints, **options)`, `Activity.update_route` |
 | `submit(CurveCommand, Span<const BezierSegment>)`, `update(…)` | `fsim_vehicle_submit_curve`, `fsim_activity_update_curve` | `submit_curve(segments, **options)`, `Activity.append(segments)` |
-| `ActivityRecord::progress`; `commanded(vehicle)` | `fsim_activity_progress`, `fsim_vehicle_commanded` | `Activity.progress`, `Vehicle.commanded` |
+| `ActivityRecord::progress`; `commanded(vehicle)` | `fsim_activity_get_progress`, `fsim_vehicle_commanded` | `Activity.progress`, `Vehicle.commanded` |
 | `CommandResult::index`, `constraint`, `from`, `to` | `fsim_command_result.reserved` = index + 1; `fsim_last_command_detail` | `Rejected.index`, `.constraint`, `.section` |
 | `performance(vehicle)`, `controlRevision(vehicle)` | `fsim_vehicle_performance`, `fsim_vehicle_control_revision` | `Vehicle.performance`, `.control_revision` |
 | grants and availability (section 6, 7.2) | `fsim_vehicle_set_control_mode`, `_request_control`, `_release_control`, `_revoke_control`, `_set_allowed`, `_control_status`, `_set_availability` | the same names on `Vehicle` |
@@ -551,6 +551,25 @@ Filled in as the steps land. The machine and the benchmark's precision are ADR-2
   - route validation.
 
   Also two Python cases: a behaviour's UPDATE refused `not_updatable`, and route points checked. ctest 161/161.
+
+**VI-2 (what a consumer is told).**
+- **Digests:** identical to step 5b, protection on and off.
+- **Allocations:** none; the host's reading of progress after each step included.
+- **Cost:** interleaved A/B against VI-1 (5 rounds). Every update case is within ±2.2 %: `waypoints` and `loiter` at +0.5 %, from a few stores per update for their progress. The progress itself is computed between steps, only for guidance activities.
+- **What it adds:**
+  - rejection detail on every answer (the field, route point or curve segment; the performance limit), with the flight capabilities' ranges saying which limit each breaks;
+  - `ActivityProgress` from `waypoints`, `loiter`, `hold` and `hover`;
+  - `ControlStack::commanded()` and `Vehicle::commanded()`;
+  - `FlightMode` on descriptors (formation, hover);
+  - the nine reasons of 5.1;
+  - C ABI 1.6 (`fsim_last_command_detail`, `fsim_activity_get_progress`, `fsim_vehicle_commanded`, `fsim_vehicle_capability_flight_mode`, and the result's index);
+  - Python's `Rejected.index`, `.constraint` and `.section`, `Activity.progress`, `Vehicle.commanded`, `Capability.mode`, and `fsim.agra`.
+- **Tests:**
+  - `tests/test_interface.cpp`: detail for a level, a design's envelope and a route; a route's progress point by point to completion; loiter laps; hold targets; the commanded state; modes;
+  - the C ABI test, and a Python case;
+  - conformance now checks every record's progress is within its bounds.
+
+  ctest 166/166.
 
 ## Appendix A: the gap analysis at a946dfe
 

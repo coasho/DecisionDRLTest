@@ -152,13 +152,21 @@ class Availability(enum.IntEnum):
 
 class Rejected(_native.Error):
     """A command the vehicle refused. ``reason`` says why ("authority_held",
-    "activity_ended", "invalid_parameter", ...); ``other`` is the activity that
-    holds the authority, for "authority_held"."""
+    "activity_ended", "invalid_parameter", "invalid_waypoint", ...); ``other``
+    is the activity that holds the authority, for "authority_held". What it was
+    about (docs/vehicle-interface.md, 5.1): ``index``, the field (in the
+    command's order), route point or curve segment, -1 if none; ``constraint``,
+    the performance limit its value broke ("max_airspeed", ... or "none");
+    ``section``, a curve segment's (from, to) parameters, or None."""
 
-    def __init__(self, reason, other=0):
-        super().__init__("command refused: %s" % reason)
+    def __init__(self, reason, other=0, index=-1, constraint="none", section=None):
+        about = "" if index < 0 else " (%s %d%s)" % ("item", index, "" if constraint == "none" else ", " + constraint)
+        super().__init__("command refused: %s%s" % (reason, about))
         self.reason = reason
         self.other = other
+        self.index = index
+        self.constraint = constraint
+        self.section = section
 
 
 ActivityInfo = collections.namedtuple(
@@ -179,12 +187,32 @@ Parameter = collections.namedtuple("Parameter", "name unit min max default optio
 Parameter.__doc__ = ("A field of a capability's command, or a behaviour's parameter: its range for this aircraft, its "
                      "default, whether it takes HOLD, and whether the aircraft has anything it moves (not ``supported``: "
                      "a command that sets it other than to HOLD or its default is refused, invalid_parameter).")
-Capability = collections.namedtuple("Capability",
-                                    "id version kind interactions level axes terminating needs_target behavior parameters axis_groups")
+Capability = collections.namedtuple(
+    "Capability", "id version kind interactions level axes terminating needs_target behavior parameters axis_groups mode",
+    defaults=("none",))
 Capability.__doc__ = ("What a vehicle offers: e.g. fsim.flight.attitude (a level) or fsim.guidance.hold (a behaviour). "
                       "``axis_groups``: what it may own apart - 1 lateral (roll and yaw), 2 pitch, 4 thrust, 8 any primary "
                       "axis, 16 cyclic (roll and pitch), 32 yaw; 0 all of its axes or none. A wing's flight capabilities "
-                      "own 1, 2 and 4 apart, a rotorcraft's 16, 32 and 4.")
+                      "own 1, 2 and 4 apart, a rotorcraft's 16, 32 and 4. ``mode``: the A-GRA flight capability type it is "
+                      "(\"hsa_csa\", \"waypoint_following\", \"loiter\", \"formation\", ... or \"none\"; fsim.agra).")
+
+ActivityProgress = collections.namedtuple(
+    "ActivityProgress", "segment segments laps segment_id percent segment_percent distance_to_go_m time_to_go_s cross_track_m "
+    "course_rad heading_rad altitude_msl_m speed_ms speed_reference")
+ActivityProgress.__doc__ = ("How far an activity has got and what it commands, as its behaviour reported it after the last "
+                            "world step (docs/vehicle-interface.md, 5.3): the waypoint, curve segment or pattern leg flown now "
+                            "(of ``segments``; 0: nothing segmented), laps, percent of the whole and of the segment, the "
+                            "distance and time to the end, the cross-track distance (+ right of the path), and the course, "
+                            "heading, altitude and speed it asks for (``speed_reference``: 0 true airspeed, 1 calibrated, 2 "
+                            "ground speed, 3 Mach). NaN where it says nothing.")
+
+CommandedState = collections.namedtuple(
+    "CommandedState", "top_level latitude_rad longitude_rad altitude_msl_m heading_rad turn_rate_rad_s airspeed_ms "
+    "vertical_speed_ms north_ms east_ms roll_rad pitch_rad load_factor_g roll_rate_rad_s pitch_rate_rad_s yaw_rate_rad_s throttle")
+CommandedState.__doc__ = ("What the cascade asked for in its last control update, level by level (A-GRA's commanded state): "
+                          "the position level's point, the velocity level's heading, turn rate, airspeed, vertical speed and "
+                          "velocity over the ground, the attitude level's roll and pitch, the acceleration level's load factor "
+                          "and rates, the throttle. NaN where no level set it.")
 
 
 def _info(t):
@@ -193,9 +221,11 @@ def _info(t):
 
 
 def _checked(result):
-    """A result tuple (status, reason, activity, other, clamped): raise Rejected unless accepted or canceled."""
+    """A result tuple (status, reason, activity, other, clamped, index, constraint, from, to): raise Rejected
+    unless accepted or canceled."""
     if result[0] == 1:
-        raise Rejected(_native.reason_name(result[1]), result[3])
+        section = None if math.isnan(result[7]) else (result[7], result[8])
+        raise Rejected(_native.reason_name(result[1]), result[3], result[5], _native.constraint_name(result[6]), section)
     return result
 
 
@@ -266,6 +296,12 @@ class Activity:
     def info(self):
         """Its record (ActivityInfo), or None once the vehicle no longer remembers it."""
         return self.world.activity(self.id)
+
+    @property
+    def progress(self):
+        """How far it has got and what it commands (ActivityProgress), or None once the vehicle no longer
+        remembers it. A guidance mode's; NaN fields for the others."""
+        return self.world.activity_progress(self.id)
 
     @property
     def state(self):
@@ -428,9 +464,17 @@ class Vehicle:
         """The live activities (ActivityInfo), then the ended ones the vehicle remembers, newest first."""
         return [_info(t) for t in self._h.vehicle_activities(self.id)]
 
+    @property
+    def commanded(self):
+        """What the cascade asked for in its last control update (CommandedState): an altitude, a heading, an
+        airspeed, an attitude, rates, a throttle - NaN where no level set it."""
+        t = self._h.commanded(self.id)
+        return CommandedState(Level(t[0]), *t[1:])
+
     def capabilities(self):
-        """What the vehicle offers: its levels and behaviours (Capability, with their Parameters)."""
-        return [Capability(c[0], c[1], c[2], c[3], Level(c[4]), c[5], c[6], c[7], c[8], [Parameter(*p) for p in c[9]], c[10])
+        """What the vehicle offers: its levels and behaviours (Capability, with their Parameters and A-GRA mode)."""
+        return [Capability(c[0], c[1], c[2], c[3], Level(c[4]), c[5], c[6], c[7], c[8], [Parameter(*p) for p in c[9]], c[10],
+                           _native.flight_mode_name(c[11]))
                 for c in self._h.capabilities(self.id)]
 
     def profile_value(self, path):
@@ -690,6 +734,11 @@ class World:
         """An activity's record (ActivityInfo) by Activity or id, or None if its vehicle no longer remembers it."""
         t = self._h.activity_info(activity.id if isinstance(activity, Activity) else int(activity))
         return None if t is None else _info(t)
+
+    def activity_progress(self, activity):
+        """An activity's progress (ActivityProgress) by Activity or id, or None if its vehicle no longer remembers it."""
+        t = self._h.activity_progress(activity.id if isinstance(activity, Activity) else int(activity))
+        return None if t is None else ActivityProgress(*t)
 
     def update(self, activities, values):
         """UPDATE many activities of one level in one call: their ids (a uint64

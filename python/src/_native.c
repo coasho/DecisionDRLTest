@@ -734,9 +734,14 @@ static PyObject* world_command_behavior(PyObject* o, PyObject* const* args, Py_s
  * constraints, constraints_seen, start_time, end_time). fsim/world.py wraps
  * them. */
 
-static PyObject* result_tuple(const fsim_command_result* r) {
-    return Py_BuildValue("(iiKKO)", r->status, r->reason, (unsigned long long)r->activity, (unsigned long long)r->other,
-                         (r->flags & 1u) ? Py_True : Py_False);
+/* (status, reason, activity, other, clamped, index, constraint, from, to): the last four what the answer was about
+ * (ABI 1.6, fsim_last_command_detail) - the field, route point or curve segment, the limit, a curve's section */
+static PyObject* result_tuple(const fsim_world* world, const fsim_command_result* r) {
+    fsim_command_detail d;
+    fsim_command_detail_init(&d);
+    fsim_last_command_detail(world, &d);
+    return Py_BuildValue("(iiKKOiidd)", r->status, r->reason, (unsigned long long)r->activity, (unsigned long long)r->other,
+                         (r->flags & 1u) ? Py_True : Py_False, d.index, d.constraint, d.from, d.to);
 }
 
 static PyObject* info_tuple(const fsim_activity_info* a) {
@@ -810,7 +815,7 @@ static PyObject* world_submit(PyObject* o, PyObject* const* args, Py_ssize_t n) 
     const Py_ssize_t count = read_values(args[2], row, "submit");
     if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
     if (fsim_vehicle_submit(self->world, id, level, row, (uint32_t)count, &opt, &r) != FSIM_OK) return fail();
-    return result_tuple(&r);
+    return result_tuple(self->world, &r);
 }
 
 /* submit_behavior(id, behavior, target=0, params=None, points=None, source=None, axes=None, range=None, min_version=None) */
@@ -846,7 +851,7 @@ static PyObject* world_submit_behavior(PyObject* o, PyObject* const* args, Py_ss
     PyMem_Free(points);
     fsim_py_params_free(&p);
     if (rc != FSIM_OK) return fail();
-    return result_tuple(&r);
+    return result_tuple(self->world, &r);
 }
 
 /* submit_support(id, kind, values, source=None, axes=None, range=None, min_version=None) -> result */
@@ -861,7 +866,7 @@ static PyObject* world_submit_support(PyObject* o, PyObject* const* args, Py_ssi
     const Py_ssize_t count = read_values(args[2], row, "submit_support");
     if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
     if (fsim_vehicle_submit_support(self->world, id, kind, row, (uint32_t)count, &opt, &r) != FSIM_OK) return fail();
-    return result_tuple(&r);
+    return result_tuple(self->world, &r);
 }
 
 /* activity_update(activity, values) -> result */
@@ -874,7 +879,7 @@ static PyObject* world_activity_update(PyObject* o, PyObject* const* args, Py_ss
     const Py_ssize_t count = read_values(args[1], row, "activity_update");
     if (count < 0) return NULL;
     if (fsim_activity_update(self->world, activity, row, (uint32_t)count, &r) != FSIM_OK) return fail();
-    return result_tuple(&r);
+    return result_tuple(self->world, &r);
 }
 
 /* activity_update_batch(activities uint64[n], values float64[n][stride], stride[, fields]): with `fields`, each
@@ -916,7 +921,7 @@ static PyObject* world_activity_cancel(PyObject* o, PyObject* const* args, Py_ss
     fsim_command_result r;
     if (!check_args(n, 1, 1, "activity_cancel") || !as_u64(args[0], &activity) || !WORLD_IDLE(self)) return NULL;
     if (fsim_activity_cancel(self->world, activity, &r) != FSIM_OK) return fail();
-    return result_tuple(&r);
+    return result_tuple(self->world, &r);
 }
 
 /* activity_info(activity) -> info tuple, or None if the vehicle does not remember it */
@@ -974,9 +979,9 @@ static PyObject* world_capabilities(PyObject* o, PyObject* const* args, Py_ssize
             }
             Py_DECREF(t);
         }
-        PyObject* t = params ? Py_BuildValue("(sIiIiIOOsNI)", c.id, c.version, c.kind, c.interactions, c.level, c.axes,
+        PyObject* t = params ? Py_BuildValue("(sIiIiIOOsNIi)", c.id, c.version, c.kind, c.interactions, c.level, c.axes,
                                              c.terminating ? Py_True : Py_False, c.needs_target ? Py_True : Py_False, c.behavior, params,
-                                             c.axis_groups)
+                                             c.axis_groups, fsim_vehicle_capability_flight_mode(self->world, id, i))
                              : NULL;
         if (!t || PyList_Append(list, t) < 0) {
             Py_XDECREF(t);
@@ -986,6 +991,35 @@ static PyObject* world_capabilities(PyObject* o, PyObject* const* args, Py_ssize
         Py_DECREF(t);
     }
     return list;
+}
+
+/* activity_progress(activity) -> (segment, segments, laps, segment_id, percent, segment_percent, distance_to_go_m,
+ * time_to_go_s, cross_track_m, course_rad, heading_rad, altitude_msl_m, speed_ms, speed_reference), or None */
+static PyObject* world_activity_progress(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t activity;
+    fsim_activity_progress p;
+    if (!check_args(n, 1, 1, "activity_progress") || !as_u64(args[0], &activity)) return NULL;
+    fsim_activity_progress_init(&p);
+    if (fsim_activity_get_progress(self->world, activity, &p) != FSIM_OK) Py_RETURN_NONE;
+    return Py_BuildValue("(IIIKdddddddddd)", p.segment, p.segments, p.laps, (unsigned long long)p.segment_id, p.percent, p.segment_percent,
+                         p.distance_to_go_m, p.time_to_go_s, p.cross_track_m, p.course_rad, p.heading_rad, p.altitude_msl_m, p.speed_ms,
+                         p.speed_reference);
+}
+
+/* commanded(id) -> (top_level, latitude_rad, longitude_rad, altitude_msl_m, heading_rad, turn_rate_rad_s, airspeed_ms,
+ * vertical_speed_ms, north_ms, east_ms, roll_rad, pitch_rad, load_factor_g, roll_rate_rad_s, pitch_rate_rad_s,
+ * yaw_rate_rad_s, throttle) */
+static PyObject* world_commanded(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    fsim_commanded_state c;
+    if (!check_args(n, 1, 1, "commanded") || !as_u32(args[0], &id)) return NULL;
+    fsim_commanded_state_init(&c);
+    if (fsim_vehicle_commanded(self->world, id, &c) != FSIM_OK) return fail();
+    return Py_BuildValue("(idddddddddddddddd)", c.top_level, c.latitude_rad, c.longitude_rad, c.altitude_msl_m, c.heading_rad,
+                         c.turn_rate_rad_s, c.airspeed_ms, c.vertical_speed_ms, c.north_ms, c.east_ms, c.roll_rad, c.pitch_rad,
+                         c.load_factor_g, c.roll_rate_rad_s, c.pitch_rate_rad_s, c.yaw_rate_rad_s, c.throttle);
 }
 
 /* capability_status(id, capability) -> (availability, reason) */
@@ -1358,6 +1392,8 @@ static PyMethodDef world_methods[] = {
     FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride[, fields])"),
     FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity) -> result"),
     FAST("activity_info", world_activity_info, "activity_info(activity) -> info or None"),
+    FAST("activity_progress", world_activity_progress, "activity_progress(activity) -> progress or None"),
+    FAST("commanded", world_commanded, "commanded(id) -> what the cascade asked for in its last update"),
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
     FAST("capabilities", world_capabilities, "capabilities(id) -> [capability]"),
     FAST("capability_status", world_capability_status, "capability_status(id, capability) -> (availability, reason)"),
@@ -1618,6 +1654,20 @@ static PyObject* mod_limit_name(PyObject* m, PyObject* const* args, Py_ssize_t n
     return PyUnicode_FromString(fsim_limit_name(code));
 }
 
+static PyObject* mod_constraint_name(PyObject* m, PyObject* const* args, Py_ssize_t n) {
+    int code;
+    (void)m;
+    if (!check_args(n, 1, 1, "constraint_name") || !as_int(args[0], &code)) return NULL;
+    return PyUnicode_FromString(fsim_constraint_name(code));
+}
+
+static PyObject* mod_flight_mode_name(PyObject* m, PyObject* const* args, Py_ssize_t n) {
+    int code;
+    (void)m;
+    if (!check_args(n, 1, 1, "flight_mode_name") || !as_int(args[0], &code)) return NULL;
+    return PyUnicode_FromString(fsim_flight_mode_name(code));
+}
+
 static PyObject* mod_command_field_count(PyObject* m, PyObject* const* args, Py_ssize_t n) {
     int level;
     (void)m;
@@ -1687,6 +1737,8 @@ static PyMethodDef module_methods[] = {
     FAST("reason_name", mod_reason_name, "reason_name(code): why a command was refused or an activity ended"),
     FAST("activity_state_name", mod_activity_state_name, "activity_state_name(code)"),
     FAST("limit_name", mod_limit_name, "limit_name(i): an envelope limit, \"load_factor_max\" ..."),
+    FAST("constraint_name", mod_constraint_name, "constraint_name(i): a performance limit a value broke, \"max_airspeed\" ..."),
+    FAST("flight_mode_name", mod_flight_mode_name, "flight_mode_name(i): an A-GRA flight capability type, \"hsa_csa\" ..."),
     FAST("layout", mod_layout, "C struct sizes and offsets"),
     {NULL, NULL, 0, NULL}};
 

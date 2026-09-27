@@ -35,6 +35,15 @@ CommandResult accepted(ActivityId activity, std::uint16_t flags = 0) noexcept {
     return r;
 }
 
+/// `r` with what the check said the answer is about (docs/vehicle-interface.md, 5.1).
+CommandResult about(CommandResult r, const CommandResult& detail) noexcept {
+    r.index = detail.index;
+    r.constraint = detail.constraint;
+    r.from = detail.from;
+    r.to = detail.to;
+    return r;
+}
+
 } // namespace
 
 void CapabilityHost::bind(std::uint32_t vehicle, ControlStack& runtime, const CapabilityCatalog& catalog, const VehicleAdapter& adapter,
@@ -217,8 +226,9 @@ CommandResult CapabilityHost::submit(const Command& command, const CommandOption
 
     Command setpoint = command;
     std::uint16_t flags = 0;
+    CommandResult detail;
     if (checked)
-        if (const Reason why = catalog_->check(index, setpoint, options.range, flags); why != Reason::None) return rejected(why);
+        if (const Reason why = catalog_->check(index, setpoint, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
     AxisMask axes = options.axes ? options.axes : catalog_->defaultAxes(index, command);
     // above the actuators a command owns whole groups: a wing's loop that banks
     // also coordinates, a rotorcraft's cyclic tilts in roll and pitch at once
@@ -254,7 +264,7 @@ CommandResult CapabilityHost::submit(const Command& command, const CommandOption
     ++config.revision;
     runtime_->install(s, std::move(behavior));
     start(s, id, index, options, axes, flags, now);
-    return accepted(id, flags);
+    return about(accepted(id, flags), detail);
 }
 
 CommandResult CapabilityHost::submit(const SupportCommand& command, const CommandOptions& options, const sim::VehicleState& state, double now) {
@@ -269,8 +279,9 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
     }
     SupportCommand setpoint = command;
     std::uint16_t flags = 0;
+    CommandResult detail;
     if (checked)
-        if (const Reason why = catalog_->check(index, setpoint, options.range, flags); why != Reason::None) return rejected(why);
+        if (const Reason why = catalog_->check(index, setpoint, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
     // the placards: no gear up on the ground, no gear or flaps out above their speeds
     if (const Reason why = adapter_->admit(setpoint, state, *profile_); why != Reason::None) return rejected(why);
     const AxisMask axes = d.axes;
@@ -292,7 +303,7 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
     ++config_->revision;
     start(s, id, index, options, axes, flags, now);
     if (d.persistence == Persistence::Terminating) slots_[s].target = supportGoal(setpoint);
-    return accepted(id, flags);
+    return about(accepted(id, flags), detail);
 }
 
 CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint) noexcept {
@@ -309,8 +320,8 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
         assignSetpoint(slot.command, setpoint);
     } else {
         Command checked = setpoint; // no heap data: guidance takes no UPDATE
-        if (const Reason why = catalog_->check(record.capability, checked, slots_[s].range, result.flags); why != Reason::None)
-            return rejected(why, activity);
+        if (const Reason why = catalog_->check(record.capability, checked, slots_[s].range, result.flags, result); why != Reason::None)
+            return about(rejected(why, activity), result);
         assignSetpoint(slot.command, checked);
         if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
     }
@@ -327,8 +338,8 @@ CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& 
     SupportCommand checked = setpoint;
     CommandResult result = accepted(activity);
     if (slots_[s].range != RangePolicy::None) {
-        if (const Reason why = catalog_->check(record.capability, checked, slots_[s].range, result.flags); why != Reason::None)
-            return rejected(why, activity);
+        if (const Reason why = catalog_->check(record.capability, checked, slots_[s].range, result.flags, result); why != Reason::None)
+            return about(rejected(why, activity), result);
         if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
     }
     writeDirect(s, checked);
@@ -442,6 +453,8 @@ void CapabilityHost::afterStep(const sim::VehicleState& state, const EffectorPos
             record.constraints = flags;
             record.constraintsSeen = static_cast<std::uint16_t>(record.constraintsSeen | flags);
             slot.flags = 0;
+            // how far a behaviour has got, before it may complete (docs/vehicle-interface.md, 5.3)
+            if (isCascade(s) && config.slots[s].level == Level::Behavior) runtime_->progress(s, record.progress);
             if (state.diverged) {
                 end(s, ActivityState::Failed, Reason::Diverged, 0, now);
             } else if (record.state == ActivityState::Active && isCascade(s)) {

@@ -18,6 +18,11 @@ ParameterInfo parameter(const char* name, const char* unit, double def, double l
     return ParameterInfo{name, unit, lo, hi, def, optional};
 }
 
+/// A parameter whose range is the aircraft's, and the limits a value beyond it breaks.
+ParameterInfo limited(const char* name, const char* unit, double def, double lo, double hi, Constraint below, Constraint above, bool optional = true) {
+    return ParameterInfo{name, unit, lo, hi, def, optional, below, above};
+}
+
 CapabilityDescriptor flight(const char* name, Level level, std::vector<ParameterInfo> parameters, std::vector<std::string> uses) {
     CapabilityDescriptor d;
     d.id = std::string("fsim.flight.") + name;
@@ -51,13 +56,21 @@ bool validPoint(const PositionCommand& p) noexcept {
            std::isfinite(p.captureRadiusM) && p.captureRadiusM > 0.0 && optional(p.airspeedMs) && !(p.airspeedMs < 0.0) && optional(p.headingRad);
 }
 
-/// Clamp or reject one value against its parameter.
-Reason checkValue(const ParameterInfo& p, double& v, RangePolicy range, std::uint16_t& flags) noexcept {
-    if (isHold(v)) return p.optional ? Reason::None : Reason::InvalidParameter;
-    if (!std::isfinite(v)) return Reason::InvalidParameter;
-    if (!p.supported) return v == p.defaultValue ? Reason::None : Reason::InvalidParameter; // nothing on this aircraft moves it
+/// Clamp or reject one value against its parameter; `detail` says which
+/// field (`field`) and what limit its value broke, for a rejection or the
+/// first clamp.
+Reason checkValue(const ParameterInfo& p, double& v, RangePolicy range, std::uint16_t& flags, CommandResult& detail, std::size_t field) noexcept {
+    auto about = [&](Reason r) {
+        detail.index = static_cast<std::int16_t>(field);
+        detail.constraint = v < p.min ? p.below : v > p.max ? p.above : Constraint::None;
+        return r;
+    };
+    if (isHold(v)) return p.optional ? Reason::None : about(Reason::InvalidParameter);
+    if (!std::isfinite(v)) return about(Reason::InvalidParameter);
+    if (!p.supported) return v == p.defaultValue ? Reason::None : about(Reason::InvalidParameter); // nothing on this aircraft moves it
     if (v >= p.min && v <= p.max) return Reason::None;
-    if (range == RangePolicy::Reject) return Reason::OutOfRange;
+    if (range == RangePolicy::Reject) return about(Reason::OutOfRange);
+    if (!(flags & kClamped)) about(Reason::None); // the first value clamped
     v = std::clamp(v, p.min, p.max);
     flags |= kClamped;
     return Reason::None;
@@ -152,24 +165,32 @@ CapabilityCatalog::CapabilityCatalog(std::uint32_t features) : features_(feature
                                    parameter("flaps", "", 0.0, 0.0, 1.0), parameter("gear_down", "", nan, 0.0, 1.0),
                                    parameter("brake_left", "", 0.0, 0.0, 1.0), parameter("brake_right", "", 0.0, 0.0, 1.0)},
                                   {}));
+    // (a range the aircraft's envelope narrows says what limit a value beyond it breaks: a rejection's detail)
+    using C = Constraint;
+    const C orientation = C::MaxOrientation, rate = C::MaxOrientationRate;
     descriptors_.push_back(flight("attitude", Level::Attitude,
-                                  {parameter("roll_rad", "rad", 0.0, -kPi, kPi), parameter("pitch_rad", "rad", 0.0, -kPi / 2, kPi / 2),
-                                   parameter("heading_rad", "rad", nan), parameter("max_bank_rad", "rad", 0.785, 0.0, kPi / 2),
-                                   parameter("throttle", "", nan, 0.0, 1.0), parameter("airspeed_ms", "m/s", nan, 0.0)},
+                                  {limited("roll_rad", "rad", 0.0, -kPi, kPi, orientation, orientation),
+                                   limited("pitch_rad", "rad", 0.0, -kPi / 2, kPi / 2, orientation, orientation), parameter("heading_rad", "rad", nan),
+                                   limited("max_bank_rad", "rad", 0.785, 0.0, kPi / 2, C::None, orientation), parameter("throttle", "", nan, 0.0, 1.0),
+                                   limited("airspeed_ms", "m/s", nan, 0.0, kInf, C::MinAirspeed, C::MaxAirspeed)},
                                   {"fsim.flight.actuator"}));
     descriptors_.push_back(flight("acceleration", Level::Acceleration,
-                                  {parameter("load_factor_g", "g", 1.0), parameter("roll_rate_rad_s", "rad/s", 0.0),
-                                   parameter("longitudinal_ms2", "m/s2", nan), parameter("throttle", "", nan, 0.0, 1.0),
-                                   parameter("pitch_rate_rad_s", "rad/s", nan), parameter("yaw_rate_rad_s", "rad/s", nan)},
+                                  {limited("load_factor_g", "g", 1.0, -kInf, kInf, C::MinAcceleration, C::MaxAcceleration),
+                                   limited("roll_rate_rad_s", "rad/s", 0.0, -kInf, kInf, rate, rate),
+                                   limited("longitudinal_ms2", "m/s2", nan, -kInf, kInf, C::MinAcceleration, C::MaxAcceleration),
+                                   parameter("throttle", "", nan, 0.0, 1.0), limited("pitch_rate_rad_s", "rad/s", nan, -kInf, kInf, rate, rate),
+                                   limited("yaw_rate_rad_s", "rad/s", nan, -kInf, kInf, rate, rate)},
                                   {"fsim.flight.actuator"}));
     descriptors_.push_back(flight("velocity", Level::Velocity,
-                                  {parameter("airspeed_ms", "m/s", nan, 0.0), parameter("vertical_speed_ms", "m/s", 0.0),
-                                   parameter("heading_rad", "rad", nan), parameter("turn_rate_rad_s", "rad/s", nan),
+                                  {limited("airspeed_ms", "m/s", nan, 0.0, kInf, C::MinAirspeed, C::MaxAirspeed),
+                                   limited("vertical_speed_ms", "m/s", 0.0, -kInf, kInf, C::MaxDescentRate, C::MaxClimbRate),
+                                   parameter("heading_rad", "rad", nan), limited("turn_rate_rad_s", "rad/s", nan, -kInf, kInf, C::MaxTurnRate, C::MaxTurnRate),
                                    parameter("north_ms", "m/s", nan), parameter("east_ms", "m/s", nan)},
                                   {"fsim.flight.attitude"}));
     descriptors_.push_back(flight("position", Level::Position,
                                   {parameter("latitude_rad", "rad", nan, -kPi / 2, kPi / 2, false), parameter("longitude_rad", "rad", nan, -kInf, kInf, false),
-                                   parameter("altitude_msl_m", "m", nan, -kInf, kInf, false), parameter("airspeed_ms", "m/s", nan, 0.0),
+                                   limited("altitude_msl_m", "m", nan, -kInf, kInf, C::MinAltitude, C::MaxAltitude, false),
+                                   limited("airspeed_ms", "m/s", nan, 0.0, kInf, C::MinAirspeed, C::MaxAirspeed),
                                    parameter("capture_radius_m", "m", 200.0, 0.0), parameter("heading_rad", "rad", nan)},
                                   {"fsim.flight.velocity"}));
     for (std::size_t l = 0; l < byLevel_.size(); ++l) byLevel_[l] = static_cast<int>(l);
@@ -270,6 +291,7 @@ void CapabilityCatalog::addBehaviors() {
         d.uses = traits.uses;
         d.behavior = behavior;
         d.needsTarget = traits.needsTarget;
+        d.mode = traits.mode;
         descriptors_.push_back(std::move(d));
     }
 }
@@ -305,31 +327,34 @@ AxisMask CapabilityCatalog::defaultAxes(std::size_t index, const Command& comman
     return axes;
 }
 
-Reason CapabilityCatalog::check(std::size_t index, SupportCommand& command, RangePolicy range, std::uint16_t& flags) const noexcept {
+Reason CapabilityCatalog::check(std::size_t index, SupportCommand& command, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept {
     const CapabilityDescriptor& d = descriptors_[index];
     double* fields[4];
     const std::size_t n = std::min(supportFields(command, fields), d.parameters.size());
     for (std::size_t i = 0; i < n; ++i)
-        if (const Reason r = checkValue(d.parameters[i], *fields[i], range, flags); r != Reason::None) return r;
+        if (const Reason r = checkValue(d.parameters[i], *fields[i], range, flags, detail, i); r != Reason::None) return r;
     return Reason::None;
 }
 
-Reason CapabilityCatalog::check(std::size_t index, Command& command, RangePolicy range, std::uint16_t& flags) const noexcept {
+Reason CapabilityCatalog::check(std::size_t index, Command& command, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept {
     const CapabilityDescriptor& d = descriptors_[index];
     if (auto* b = std::get_if<BehaviorCommand>(&command)) {
         if (d.needsTarget && b->target == 0) return Reason::InvalidParameter;
         for (auto& [key, value] : b->params)
-            for (const auto& p : d.parameters)
-                if (p.name == key)
-                    if (const Reason r = checkValue(p, value, range, flags); r != Reason::None) return r;
-        for (const auto& point : b->points)
-            if (!validPoint(point)) return Reason::InvalidParameter;
+            for (std::size_t i = 0; i < d.parameters.size(); ++i)
+                if (d.parameters[i].name == key)
+                    if (const Reason r = checkValue(d.parameters[i], value, range, flags, detail, i); r != Reason::None) return r;
+        for (std::size_t i = 0; i < b->points.size(); ++i)
+            if (!validPoint(b->points[i])) {
+                detail.index = static_cast<std::int16_t>(std::min<std::size_t>(i, 0x7FFF)); // the route's point
+                return Reason::InvalidParameter;
+            }
         return Reason::None;
     }
     double* fields[8];
     const std::size_t n = std::min(commandFields(command, fields), d.parameters.size());
     for (std::size_t i = 0; i < n; ++i)
-        if (const Reason r = checkValue(d.parameters[i], *fields[i], range, flags); r != Reason::None) return r;
+        if (const Reason r = checkValue(d.parameters[i], *fields[i], range, flags, detail, i); r != Reason::None) return r;
     return Reason::None;
 }
 

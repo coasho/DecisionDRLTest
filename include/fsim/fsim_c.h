@@ -332,7 +332,8 @@ typedef struct fsim_command_result {
     fsim_activity_id activity; /* the activity made (NEW) or addressed (UPDATE, CANCEL) */
     fsim_activity_id other;    /* the activity holding the authority ("authority_held") */
     uint32_t flags;            /* 1: a value was clamped */
-    uint32_t reserved;
+    uint32_t reserved;         /* ABI 1.6: the field, route point or curve segment the answer is about, plus one (0: none);
+                                  fsim_last_command_detail() has the rest */
 } fsim_command_result;
 
 typedef struct fsim_activity_info {
@@ -452,6 +453,81 @@ FSIM_API const char* fsim_reason_name(int reason);             /* "authority_hel
 FSIM_API int fsim_vehicle_profile_value(const fsim_world* world, uint32_t id, const char* path, double* value);
 FSIM_API int fsim_vehicle_profile_section(const fsim_world* world, uint32_t id, const char* section, uint32_t* version, int32_t* provenance);
 FSIM_API const char* fsim_activity_state_name(int state);      /* "pending", "active", ... */
+
+/* ---------------------------------------------------------------------------
+ * The Vehicle Interface (ABI 1.6; docs/vehicle-interface.md): what a command's
+ * answer was about, how far an activity has got, what the cascade commands,
+ * and which of A-GRA's flight capability types a capability is. Structs with a
+ * struct_size are filled up to the size the caller gives (its _init() sets it),
+ * so a caller built against an older header keeps working.
+ * ------------------------------------------------------------------------- */
+
+/* What the world's last answer to a NEW, UPDATE or CANCEL was about: a
+ * rejection's, or the first value a clamp changed. */
+typedef struct fsim_command_detail {
+    uint32_t struct_size;
+    int32_t reason;     /* the answer's: fsim_reason_name() */
+    int32_t index;      /* the field (the command struct's order; a behaviour's parameter in its descriptor's), route point or
+                           curve segment; -1: none */
+    int32_t constraint; /* the performance limit the value broke: fsim_constraint_name(); 0 none */
+    double from, to;    /* a curve segment's section that breaks it, its parameter 0..1; NaN otherwise */
+} fsim_command_detail;
+FSIM_API void fsim_command_detail_init(fsim_command_detail* detail);
+FSIM_API int fsim_last_command_detail(const fsim_world* world, fsim_command_detail* out);
+FSIM_API const char* fsim_constraint_name(int constraint); /* "max_airspeed", "max_orientation", "max_climb_rate", ... */
+
+/* How far an activity has got and what it commands: a guidance mode's (a route,
+ * a loiter, a hold), as its behaviour reported it after the last world step.
+ * NaN, or 0 counts, where it says nothing. */
+typedef struct fsim_activity_progress {
+    uint32_t struct_size;
+    uint32_t segment;       /* the waypoint, curve segment or pattern leg flown now (from 0) */
+    uint32_t segments;      /* of how many; 0: nothing segmented */
+    uint32_t laps;          /* a pattern's or a repeating route's, completed */
+    uint64_t segment_id;    /* the waypoint's id, where the route gave one */
+    double percent;         /* of the whole activity, 0..100 */
+    double segment_percent;
+    double distance_to_go_m, time_to_go_s; /* to the end, at the ground speed now */
+    double cross_track_m;   /* + right of the path */
+    double course_rad, heading_rad, altitude_msl_m; /* what it commands: A-GRA's VehicleCommandState */
+    double speed_ms;
+    double speed_reference; /* 0 true airspeed, 1 calibrated, 2 ground speed, 3 Mach */
+} fsim_activity_progress;
+FSIM_API void fsim_activity_progress_init(fsim_activity_progress* progress);
+FSIM_API int fsim_activity_get_progress(const fsim_world* world, fsim_activity_id activity, fsim_activity_progress* out);
+
+/* What the cascade asked for in its last control update, level by level; NaN
+ * where no level set it. */
+typedef struct fsim_commanded_state {
+    uint32_t struct_size;
+    int32_t top_level;                                /* the highest level that ran: fsim_level */
+    double latitude_rad, longitude_rad, altitude_msl_m; /* the position level's point */
+    double heading_rad, turn_rate_rad_s;              /* the velocity level's (the heading else the attitude level's) */
+    double airspeed_ms, vertical_speed_ms, north_ms, east_ms;
+    double roll_rad, pitch_rad;                       /* the attitude level's */
+    double load_factor_g, roll_rate_rad_s, pitch_rate_rad_s, yaw_rate_rad_s; /* the acceleration level's */
+    double throttle;                                  /* what the actuators were given (the first engine's) */
+} fsim_commanded_state;
+FSIM_API void fsim_commanded_state_init(fsim_commanded_state* state);
+FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_commanded_state* out);
+
+/* A-GRA's flight capability types (MA_FlightCapabilityEnum). */
+enum fsim_flight_mode {
+    FSIM_FLIGHT_MODE_NONE = 0,
+    FSIM_FLIGHT_MODE_HSA_CSA,
+    FSIM_FLIGHT_MODE_WAYPOINT_FOLLOWING,
+    FSIM_FLIGHT_MODE_CURVE_FOLLOWING,
+    FSIM_FLIGHT_MODE_LOITER,
+    FSIM_FLIGHT_MODE_FORMATION,
+    FSIM_FLIGHT_MODE_MUST_FLY,
+    FSIM_FLIGHT_MODE_ALTITUDE_STACKED_MARSHALL,
+    FSIM_FLIGHT_MODE_LAUNCH,
+    FSIM_FLIGHT_MODE_RECOVERY,
+    FSIM_FLIGHT_MODE_ROUTE_INTERCEPT
+};
+/* The A-GRA type a capability is (fsim_flight_mode); -1 if the vehicle has no such capability. */
+FSIM_API int fsim_vehicle_capability_flight_mode(fsim_world* world, uint32_t id, uint32_t capability);
+FSIM_API const char* fsim_flight_mode_name(int mode); /* "hsa_csa", "waypoint_following", "loiter", ... */
 
 FSIM_API int fsim_world_get_environment(const fsim_world* world, fsim_environment* out);
 FSIM_API int fsim_world_set_environment(fsim_world* world, const fsim_environment* environment);

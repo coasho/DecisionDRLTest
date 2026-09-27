@@ -477,6 +477,25 @@ int main(int argc, char** argv) {
             full[4] = 3.0; /* north_ms, on a wing */
             CHECK(fsim_activity_update(world, acts[0], full, 6, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
             CHECK(strcmp(fsim_reason_name(cr.reason), "invalid_parameter") == 0);
+            {
+                /* ABI 1.6: what the answer was about - the field, and the limit its value broke */
+                fsim_command_detail d;
+                double wild[6];
+                CHECK(cr.reserved == 5); /* north_ms, the fifth field */
+                fsim_command_detail_init(&d);
+                CHECK(d.struct_size == sizeof d && d.index == -1 && isnan(d.from));
+                CHECK(fsim_last_command_detail(world, &d) == FSIM_OK && d.index == 4 && d.constraint == 0);
+                CHECK(strcmp(fsim_reason_name(d.reason), "invalid_parameter") == 0);
+                wild[0] = 4.0; wild[1] = 0.0; wild[2] = fsim_hold(); wild[3] = 0.785; wild[4] = fsim_hold(); wild[5] = fsim_hold();
+                fsim_command_options_init(&co);
+                co.range = FSIM_RANGE_REJECT;
+                CHECK(fsim_vehicle_submit(world, b, FSIM_LEVEL_ATTITUDE, wild, 6, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+                CHECK(fsim_last_command_detail(world, &d) == FSIM_OK && d.index == 0 && cr.reserved == 1);
+                CHECK(strcmp(fsim_constraint_name(d.constraint), "max_orientation") == 0);
+                CHECK(strcmp(fsim_constraint_name(99), "?") == 0);
+                d.struct_size = 2; /* too small to fill */
+                CHECK(fsim_last_command_detail(world, &d) != FSIM_OK);
+            }
         }
 
         /* an operator's override: the policy's activity ends preempted, a policy command is refused */
@@ -580,6 +599,50 @@ int main(int argc, char** argv) {
             CHECK(envelope.exceeded_updates[2] == 0 && envelope.worst_excess[2] == 0.0); /* level flight: well inside */
             CHECK(fsim_vehicle_envelope(world, 999, &envelope) != FSIM_OK);
             CHECK(strcmp(fsim_limit_name(2), "alpha_max") == 0 && strcmp(fsim_limit_name(FSIM_LIMIT_COUNT), "?") == 0);
+        }
+        {
+            /* ABI 1.6: a route's progress, the commanded state, the A-GRA types */
+            fsim_behavior_command route;
+            fsim_position_command points[2];
+            fsim_activity_progress progress;
+            fsim_commanded_state commanded;
+            const fsim_vehicle_state* s = fsim_vehicle_state_ptr(world, b);
+            uint32_t k, formation = 0;
+            memset(&route, 0, sizeof route);
+            memset(points, 0, sizeof points);
+            points[0].latitude_rad = s->latitude_rad + 0.0005;
+            points[0].longitude_rad = s->longitude_rad;
+            points[0].altitude_msl_m = 1500.0;
+            points[0].airspeed_ms = fsim_hold();
+            points[0].capture_radius_m = 300.0;
+            points[1] = points[0];
+            points[1].latitude_rad += 0.0005;
+            route.id = "waypoints";
+            route.points = points;
+            route.point_count = 2;
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE; /* an autopilot holds b's height and speed (above) */
+            CHECK(fsim_vehicle_submit_behavior(world, b, &route, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_world_step(world, 5) == FSIM_OK);
+            fsim_activity_progress_init(&progress);
+            CHECK(progress.struct_size == sizeof progress && isnan(progress.percent));
+            CHECK(fsim_activity_get_progress(world, cr.activity, &progress) == FSIM_OK);
+            CHECK(progress.segment == 0 && progress.segments == 2);
+            CHECK(progress.percent >= 0.0 && progress.percent < 100.0 && progress.distance_to_go_m > 1000.0);
+            CHECK(progress.altitude_msl_m == 1500.0 && progress.speed_reference == 0.0);
+            CHECK(fsim_activity_get_progress(world, ((fsim_activity_id)b << 32) | 999u, &progress) != FSIM_OK);
+            fsim_commanded_state_init(&commanded);
+            CHECK(fsim_vehicle_commanded(world, b, &commanded) == FSIM_OK);
+            CHECK(commanded.top_level == FSIM_LEVEL_BEHAVIOR && commanded.altitude_msl_m == 1500.0 && !isnan(commanded.heading_rad));
+            CHECK(fsim_vehicle_commanded(world, 999, &commanded) != FSIM_OK);
+            for (k = 0; k < ncap; ++k)
+                if (fsim_vehicle_capability(world, b, k, &ci) == FSIM_OK && strcmp(ci.id, "fsim.guidance.formation") == 0) formation = k;
+            CHECK(fsim_vehicle_capability_flight_mode(world, b, formation) == FSIM_FLIGHT_MODE_FORMATION);
+            CHECK(fsim_vehicle_capability_flight_mode(world, b, attitude) == FSIM_FLIGHT_MODE_NONE);
+            CHECK(fsim_vehicle_capability_flight_mode(world, b, 9999) == -1);
+            CHECK(strcmp(fsim_flight_mode_name(FSIM_FLIGHT_MODE_HSA_CSA), "hsa_csa") == 0);
+            CHECK(strcmp(fsim_flight_mode_name(-1), "?") == 0);
+            CHECK(strcmp(fsim_reason_name(21), "invalid_waypoint") == 0);
         }
         {
             /* the profile: a stock c172x carries no sections */

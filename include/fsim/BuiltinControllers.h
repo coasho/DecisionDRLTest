@@ -268,6 +268,8 @@ public:
     const char* id() const noexcept override { return "hold"; }
     void start(const ControlContext& ctx, const BehaviorCommand& command) override;
     Command update(const ControlContext& ctx, const Command& in) override;
+    /// Its targets: the heading, the altitude, the airspeed or the velocity over the ground.
+    bool progress(ActivityProgress& out) const noexcept override;
 
 private:
     VelocityCommand target_;
@@ -284,11 +286,19 @@ public:
     Command update(const ControlContext& ctx, const Command& in) override;
     bool finished() const noexcept override { return finished_; }
     std::size_t index() const noexcept { return index_; }
+    /// The point flown to, the distance and time to the last one, the course,
+    /// altitude and airspeed it asks for; a looping route's laps.
+    bool progress(ActivityProgress& out) const noexcept override;
 
 private:
     std::size_t index_ = 0;
     bool loop_ = false, finished_ = false, hovers_ = false;
     double airspeed_ = kHold;
+    // for progress(): the route (the slot's command, held by the runtime while it flies), where it started and how long it is
+    const BehaviorCommand* route_ = nullptr;
+    double startLat_ = 0.0, startLon_ = 0.0, totalM_ = 0.0;
+    double lat_ = 0.0, lon_ = 0.0, north_ = 0.0, east_ = 0.0; ///< where it was and its velocity over the ground, as of the last update
+    std::uint32_t laps_ = 0;
 };
 
 /// "loiter": circle a point. params: lat_deg, lon_deg (or `target` vehicle),
@@ -303,12 +313,15 @@ public:
 
     /// TargetLost while the vehicle it follows is gone (it flies on as it can).
     Reason failure() const noexcept override { return lost_ ? Reason::TargetLost : Reason::None; }
+    /// The laps flown, how far off the circle it is (+ right of its path), its altitude and airspeed.
+    bool progress(ActivityProgress& out) const noexcept override;
 
 private:
     bool lost_ = false;
     double centreLat_ = 0.0, centreLon_ = 0.0, radius_ = 1500.0, altitude_ = 0.0, airspeed_ = kHold;
     bool clockwise_ = true;
     std::uint32_t target_ = 0;
+    double lastTheta_ = kHold, swept_ = 0.0, distance_ = kHold; ///< for progress(): the angle swept round the centre
 };
 
 /// "pursuit": chase `target` with lead pursuit. params: range_m (300),

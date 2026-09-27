@@ -159,7 +159,11 @@ public:
             return submit(control::Command(c), options);
     }
     /// The live activities, then the ended ones the vehicle remembers, newest first.
+    /// A guidance mode's record carries its progress (docs/vehicle-interface.md, 5.3).
     std::vector<control::ActivityRecord> activities() const;
+    /// What the cascade asked for in its last control update, level by level
+    /// (A-GRA's commanded state): an altitude, a heading, an airspeed, an attitude...
+    control::CommandedState commanded() const;
     /// What the vehicle offers: its flight levels and behaviours.
     std::vector<control::CapabilityDescriptor> capabilities() const;
     control::CapabilityStatus capabilityStatus(std::string_view capability) const;

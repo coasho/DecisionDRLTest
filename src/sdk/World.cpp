@@ -132,6 +132,11 @@ std::vector<control::ActivityRecord> Vehicle::activities() const {
     return world_ ? world_->impl_->activities(id_) : std::vector<control::ActivityRecord>{};
 }
 
+control::CommandedState Vehicle::commanded() const {
+    const auto* c = world_ ? world_->impl_->controls(id_) : nullptr;
+    return c ? c->commanded() : control::CommandedState{};
+}
+
 std::vector<control::CapabilityDescriptor> Vehicle::capabilities() const {
     return world_ ? world_->impl_->capabilities(id_) : std::vector<control::CapabilityDescriptor>{};
 }

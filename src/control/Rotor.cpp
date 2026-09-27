@@ -316,7 +316,19 @@ void HoverBehavior::start(const ControlContext& ctx, const BehaviorCommand& comm
     target_.captureRadiusM = 1.0;
 }
 
-Command HoverBehavior::update(const ControlContext&, const Command&) { return target_; }
+Command HoverBehavior::update(const ControlContext& ctx, const Command&) {
+    lat_ = ctx.sensed.latitudeRad, lon_ = ctx.sensed.longitudeRad;
+    return target_;
+}
+
+bool HoverBehavior::progress(ActivityProgress& out) const noexcept {
+    out.headingRad = target_.headingRad;
+    out.altitudeMslM = target_.altitudeMslM;
+    out.speedMs = 0.0;
+    out.speedReference = 2.0; // SpeedReference::GroundSpeed: none, it holds a point
+    out.distanceToGoM = geo::distanceM(lat_, lon_, target_.latitudeRad, target_.longitudeRad);
+    return true;
+}
 
 // --- Registration ----------------------------------------------------------------
 
@@ -332,7 +344,8 @@ void registerRotorControllers(ControllerRegistry& r) {
                           p("heading_deg", "deg", now, -inf, inf)},
                          {"fsim.flight.position"},
                          false,
-                         kFeatureHover};
+                         kFeatureHover,
+                         FlightMode::Loiter}; // A-GRA's LOITER, its hover
     r.addBehavior("hover", [] { return std::make_unique<HoverBehavior>(); }, std::move(hover));
 }
 

@@ -239,6 +239,31 @@ public:
     /// the vehicle it follows is gone; None while it can. Its activity fails,
     /// and it keeps flying whatever it falls back to.
     virtual Reason failure() const noexcept { return Reason::None; }
+    /// How far it has got and what it commands, as of its last update
+    /// (docs/vehicle-interface.md, 5.3): the fields it knows into `out`, and
+    /// true; false if it reports nothing. Asked between world steps (the
+    /// activity's record carries it), never during one.
+    virtual bool progress(ActivityProgress& out) const noexcept {
+        (void)out;
+        return false;
+    }
+};
+
+/// What the cascade asked for in its last control update, level by level
+/// (docs/vehicle-interface.md, 5.3; A-GRA's VehicleCommandState): each field
+/// from the level that sets it where that level ran, NaN where none did.
+struct CommandedState {
+    static constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    Level top = Level::Actuator;                                       ///< the highest level that ran
+    double latitudeRad = kNone, longitudeRad = kNone, altitudeMslM = kNone; ///< the position level's point
+    double headingRad = kNone;      ///< the velocity level's, else the attitude level's
+    double turnRateRadS = kNone;    ///< the velocity level's
+    double airspeedMs = kNone;      ///< true: the velocity level's, else the attitude level's
+    double verticalSpeedMs = kNone; ///< the velocity level's
+    double northMs = kNone, eastMs = kNone; ///< the velocity level's over the ground (a rotorcraft's)
+    double rollRad = kNone, pitchRad = kNone; ///< the attitude level's
+    double loadFactorG = kNone, rollRateRadS = kNone, pitchRateRadS = kNone, yawRateRadS = kNone; ///< the acceleration level's
+    double throttle = kNone;        ///< what the actuators were given (the first engine's)
 };
 
 } // namespace fsim::control

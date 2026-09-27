@@ -116,6 +116,7 @@ vehicle's are `TemporarilyUnavailable` until it is reset.
 | `activity` | the activity it made or addressed |
 | `other` | the activity that holds the authority |
 | `kClamped` | set in `flags` when a value was clamped |
+| `index`, `constraint` | what the answer was about: the field (in the command struct's order), route point or curve segment, and the performance limit its value broke (`constraintName()`: `max_airspeed`, `max_orientation`, `max_climb_rate`, ...). For a clamp, the first value clamped. `-1` and `None` when there is nothing to say ([The Vehicle Interface](#the-vehicle-interface)) |
 
 **Updates and parameters.**
 - `update` is the per-step path of an activity. It writes the new setpoint, checked like its NEW was, and allocates nothing. A behaviour's parameters are heap data, so a behaviour takes no UPDATE; a new target is a new `submit`.
@@ -194,6 +195,65 @@ v.submit(SpeedbrakeCommand{.position = 1.0});           // "unknown_capability" 
 - At the level the vehicle's own activity flies, a new setpoint updates it: the same few nanoseconds as before.
 - Any other level, or a behaviour, starts a new activity with no range or availability checks, exactly as before.
 - It returns `false` when the command is refused. That covers a behaviour nobody registered (until 2026-09-26 it was logged, ignored and reported as success; the C ABI now returns `FSIM_INVALID_ARGUMENT`, Python raises), or an axis an `Autopilot` or `Override` activity holds.
+
+## The Vehicle Interface
+
+[ADR-28](../vehicle-interface.md) gives the platform A-GRA ASK 6.0a's
+Vehicle Interface semantics: what a mission autonomy is told about its
+commands, how far its activities have got, what the aircraft is commanding,
+and which of A-GRA's flight modes a capability is. There are no messages;
+the platform answers in its own terms and `fsim.agra` (Python) names them
+as A-GRA does.
+
+**What an answer is about.** A rejection says which field, route point or
+curve segment it refused (`CommandResult::index`) and the performance limit
+its value broke (`constraint`); a clamp says the first value it clamped.
+
+```cpp
+auto r = v.submit(AttitudeCommand{.rollRad = 4.0}, CommandOptions{.range = RangePolicy::Reject});
+// r.reason == Reason::OutOfRange, r.index == 0 (roll_rad), r.constraint == Constraint::MaxOrientation
+```
+
+**Progress.** A guidance activity's record carries its `ActivityProgress`,
+which its behaviour reports after every world step (`Behavior::progress()`):
+
+| Field | What it holds |
+| --- | --- |
+| `segment`, `segments`, `segmentId` | the waypoint (or curve segment, or pattern leg) flown now, of how many, and the id the route gave it |
+| `laps` | a loiter's, or a repeating route's, completed |
+| `percent`, `segmentPercent` | of the whole activity and of the segment, 0..100 |
+| `distanceToGoM`, `timeToGoS` | to the end, at the ground speed now |
+| `crossTrackM` | off the path, + right of it |
+| `courseRad`, `headingRad`, `altitudeMslM`, `speedMs`, `speedReference` | what it commands (A-GRA's VehicleCommandState): `speedReference` 0 true airspeed, 1 calibrated, 2 ground speed, 3 Mach |
+
+`waypoints` reports the point it flies to, the distance and time to the last one and the course, altitude and airspeed it asks for; `loiter` its laps and how far it is off its circle; `hold` and `hover` their targets. A NaN field is one the activity says nothing about: a level's activity reports none.
+
+**The commanded state.** `v.commanded()` (`ControlStack::commanded()`) is
+what the cascade asked for in its last control update, level by level: the
+position level's point and altitude, the velocity level's heading, turn rate,
+airspeed, vertical speed and velocity over the ground, the attitude level's
+roll and pitch, the acceleration level's load factor and rates, the
+throttle. NaN where no level set it.
+
+**A-GRA's flight modes.** A capability's `mode` (`FlightMode`) is the A-GRA
+flight capability type it is: `fsim.guidance.formation` is FORMATION,
+`fsim.guidance.hover` LOITER. The platform's own levels and behaviours are
+`FlightMode::None`.
+
+**New reasons.** `invalid_waypoint`, `invalid_curve`, `performance_limit`,
+`not_granted`, `not_allowed`, `revoked`, `released`, `collision_avoidance`
+and `restricted` belong to ADR-28's modes and grants.
+
+**From C and Python.** The C ABI's result carries the index plus one in
+`fsim_command_result.reserved`; `fsim_last_command_detail()` has the rest,
+`fsim_activity_get_progress()` the progress, `fsim_vehicle_commanded()` the
+commanded state, `fsim_vehicle_capability_flight_mode()` a capability's type
+([c_abi.md](c_abi.md)). Python's `fsim.Rejected` has `.index`, `.constraint`
+and `.section`, an `Activity` its `.progress`, a `Vehicle` its `.commanded`,
+a `Capability` its `.mode`. `fsim.agra` translates: `activity_state(info)`
+(ENABLED, ACTIVE_UNCONSTRAINED, ...), `cannot_comply(reason)`,
+`validation_result(reason)`, `performance_constraint(constraint)` and
+`flight_capabilities(vehicle)` ([python.md](python.md)).
 
 ## Envelope protection
 

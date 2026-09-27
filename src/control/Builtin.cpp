@@ -397,6 +397,20 @@ Command HoldBehavior::update(const ControlContext& ctx, const Command&) {
     return out;
 }
 
+bool HoldBehavior::progress(ActivityProgress& out) const noexcept {
+    out.headingRad = target_.headingRad;
+    out.altitudeMslM = altitude_;
+    if (!isHold(target_.northMs)) { // a rotorcraft's velocity over the ground
+        out.speedMs = std::hypot(target_.northMs, target_.eastMs);
+        out.speedReference = 2.0; // SpeedReference::GroundSpeed
+        if (out.speedMs > 0.1) out.courseRad = std::atan2(target_.eastMs, target_.northMs);
+    } else {
+        out.speedMs = target_.airspeedMs;
+        out.speedReference = 0.0; // SpeedReference::TrueAirspeed
+    }
+    return true;
+}
+
 void WaypointsBehavior::start(const ControlContext& ctx, const BehaviorCommand& command) {
     index_ = 0;
     loop_ = command.param("loop", 0.0) != 0.0;
@@ -405,11 +419,23 @@ void WaypointsBehavior::start(const ControlContext& ctx, const BehaviorCommand& 
     // without one, a wing flies the airspeed it had; an aircraft that hovers
     // its position loop's own speed (hovering, the airspeed it had is none)
     airspeed_ = command.param("airspeed_ms", hovers_ ? kHold : ctx.sensed.airspeedTrueMs);
+    // the route's length from here, for progress()
+    route_ = &command;
+    laps_ = 0;
+    startLat_ = lat_ = ctx.sensed.latitudeRad, startLon_ = lon_ = ctx.sensed.longitudeRad;
+    totalM_ = 0.0;
+    double lat = startLat_, lon = startLon_;
+    for (const auto& p : command.points) {
+        totalM_ += geo::distanceM(lat, lon, p.latitudeRad, p.longitudeRad);
+        lat = p.latitudeRad, lon = p.longitudeRad;
+    }
 }
 
 Command WaypointsBehavior::update(const ControlContext& ctx, const Command& in) {
     const auto& c = std::get<BehaviorCommand>(in);
     const auto& s = ctx.sensed;
+    route_ = &c;
+    lat_ = s.latitudeRad, lon_ = s.longitudeRad, north_ = s.velocityNedMs[0], east_ = s.velocityNedMs[1]; // for progress()
     if (c.points.empty()) {
         VelocityCommand hold;
         hold.headingRad = s.eulerRad[2];
@@ -421,12 +447,44 @@ Command WaypointsBehavior::update(const ControlContext& ctx, const Command& in) 
     const PositionCommand& p = c.points[index_];
     if (!finished_ && geo::distanceM(s.latitudeRad, s.longitudeRad, p.latitudeRad, p.longitudeRad) < p.captureRadiusM) {
         if (index_ + 1 < c.points.size()) ++index_;
-        else if (loop_) index_ = 0;
+        else if (loop_) index_ = 0, ++laps_;
         else finished_ = true;
     }
     PositionCommand out = c.points[index_];
     if (isHold(out.airspeedMs)) out.airspeedMs = airspeed_;
     return out;
+}
+
+bool WaypointsBehavior::progress(ActivityProgress& out) const noexcept {
+    if (!route_ || route_->points.empty()) return false;
+    const auto& points = route_->points;
+    const std::size_t i = std::min(index_, points.size() - 1);
+    const PositionCommand& p = points[i];
+    out.segment = static_cast<std::uint32_t>(i);
+    out.segments = static_cast<std::uint32_t>(points.size());
+    out.laps = laps_;
+    out.altitudeMslM = p.altitudeMslM;
+    const double speed = isHold(p.airspeedMs) ? airspeed_ : p.airspeedMs;
+    out.speedMs = speed;
+    out.speedReference = isHold(speed) ? kHold : 0.0; // SpeedReference::TrueAirspeed; none: the position loop's own
+    if (finished_) {
+        out.percent = out.segmentPercent = 100.0;
+        out.distanceToGoM = out.timeToGoS = 0.0;
+        return true;
+    }
+    const double toPoint = geo::distanceM(lat_, lon_, p.latitudeRad, p.longitudeRad);
+    const double leg = i == 0 ? geo::distanceM(startLat_, startLon_, p.latitudeRad, p.longitudeRad)
+                              : geo::distanceM(points[i - 1].latitudeRad, points[i - 1].longitudeRad, p.latitudeRad, p.longitudeRad);
+    out.segmentPercent = leg > 1e-6 ? std::clamp(100.0 * (1.0 - toPoint / leg), 0.0, 100.0) : 100.0;
+    out.courseRad = geo::wrapPi(geo::bearingRad(lat_, lon_, p.latitudeRad, p.longitudeRad));
+    if (loop_) return true; // a route that repeats has no end to go to
+    double rest = 0.0;
+    for (std::size_t k = i + 1; k < points.size(); ++k)
+        rest += geo::distanceM(points[k - 1].latitudeRad, points[k - 1].longitudeRad, points[k].latitudeRad, points[k].longitudeRad);
+    out.distanceToGoM = toPoint + rest;
+    out.percent = totalM_ > 1e-6 ? std::clamp(100.0 * (1.0 - out.distanceToGoM / totalM_), 0.0, 100.0) : 100.0;
+    if (const double overGround = std::hypot(north_, east_); overGround > 0.1) out.timeToGoS = out.distanceToGoM / overGround;
+    return true;
 }
 
 void LoiterBehavior::start(const ControlContext& ctx, const BehaviorCommand& command) {
@@ -439,6 +497,8 @@ void LoiterBehavior::start(const ControlContext& ctx, const BehaviorCommand& com
     altitude_ = command.param("altitude_m", s.altitudeMslM);
     clockwise_ = command.param("clockwise", 1.0) != 0.0;
     airspeed_ = command.param("airspeed_ms", hovers ? kHold : s.airspeedTrueMs); // kHold: the position loop's speed
+    lastTheta_ = distance_ = kHold;
+    swept_ = 0.0;
 }
 
 Command LoiterBehavior::update(const ControlContext& ctx, const Command&) {
@@ -454,6 +514,12 @@ Command LoiterBehavior::update(const ControlContext& ctx, const Command&) {
     geo::localNorthEastM(cLat, cLon, s.latitudeRad, s.longitudeRad, north, east);
     const double distance = std::hypot(north, east);
     const double theta = std::atan2(east, north);
+    if (!isHold(lastTheta_)) { // the laps, for progress(): the angle swept (atan2's jump at +-pi taken out)
+        double d = theta - lastTheta_;
+        d += d > units::kPi ? -2.0 * units::kPi : d < -units::kPi ? 2.0 * units::kPi : 0.0;
+        swept_ += d;
+    }
+    lastTheta_ = theta, distance_ = distance;
     // Carrot on the circle, ahead of the vehicle's current angular position;
     // far away the carrot leads less so the approach is nearly direct.
     const double lead = distance > 2.0 * radius_ ? 0.15 : 0.6;
@@ -464,6 +530,15 @@ Command LoiterBehavior::update(const ControlContext& ctx, const Command&) {
     out.airspeedMs = airspeed_;
     out.captureRadiusM = 30.0;
     return out;
+}
+
+bool LoiterBehavior::progress(ActivityProgress& out) const noexcept {
+    out.laps = static_cast<std::uint32_t>(std::abs(swept_) / (2.0 * units::kPi));
+    if (!isHold(distance_)) out.crossTrackM = clockwise_ ? radius_ - distance_ : distance_ - radius_; // + right of its path: inside a right turn
+    out.altitudeMslM = altitude_;
+    out.speedMs = airspeed_;
+    out.speedReference = isHold(airspeed_) ? kHold : 0.0; // SpeedReference::TrueAirspeed
+    return true;
 }
 
 void PursuitBehavior::start(const ControlContext&, const BehaviorCommand& command) {
@@ -638,10 +713,11 @@ void registerBuiltinControllers(ControllerRegistry& r) {
                          {position, velocity}, true));
     r.addBehavior("evade", [] { return std::make_unique<EvadeBehavior>(); },
                   traits(Persistence::Persistent, {p("altitude_delta_m", "m", -300.0), p("airspeed_ms", "m/s", now, 0.0)}, {velocity}, true));
-    r.addBehavior("formation", [] { return std::make_unique<FormationBehavior>(); },
-                  traits(Persistence::Persistent,
-                         {p("ahead_m", "m", -100.0), p("right_m", "m", 60.0), p("below_m", "m", 0.0), p("closure_gain", "1/s", 0.1, 0.0)},
-                         {velocity}, true));
+    auto formation = traits(Persistence::Persistent,
+                            {p("ahead_m", "m", -100.0), p("right_m", "m", 60.0), p("below_m", "m", 0.0), p("closure_gain", "1/s", 0.1, 0.0)},
+                            {velocity}, true);
+    formation.mode = FlightMode::Formation; // A-GRA's FORMATION: a slot on a leader
+    r.addBehavior("formation", [] { return std::make_unique<FormationBehavior>(); }, std::move(formation));
     auto aerobatic = traits(Persistence::Terminating,
                             {p("manoeuvre", "", 1.0, 0.0, 3.0), p("load_factor_g", "g", 3.5, 0.0), p("roll_rate_rad_s", "rad/s", 1.5, 0.0)},
                             {acceleration, velocity});

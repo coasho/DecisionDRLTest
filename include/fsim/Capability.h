@@ -122,11 +122,41 @@ enum class Reason : std::uint8_t {
     BehaviorFailed,  ///< Failed: the behaviour gave up
     CapabilityLost,  ///< Failed: the capability became unavailable
     Diverged,        ///< Failed: the flight model diverged
+    // the Vehicle Interface (docs/vehicle-interface.md, 5.1 and 6)
+    InvalidWaypoint,    ///< NEW or UPDATE rejected: a route point it cannot fly (CommandResult::index)
+    InvalidCurve,       ///< NEW or UPDATE rejected: a curve segment it cannot fly (index, from, to)
+    PerformanceLimit,   ///< NEW or UPDATE rejected: beyond what the aircraft can do (CommandResult::constraint)
+    NotGranted,         ///< NEW rejected: the vehicle requires a grant the policy does not hold
+    NotAllowed,         ///< a request for control of a capability the policy may not have
+    Revoked,            ///< Canceled: the platform revoked the policy's grant
+    Released,           ///< Canceled: the policy released its grant
+    CollisionAvoidance, ///< unavailable while the platform avoids a collision
+    Restricted,         ///< unavailable: the platform restricts it
     Count
 };
 
 /// "authority_held", "goal_reached", ...
 FSIM_API const char* reasonName(Reason reason) noexcept;
+
+/// The performance limit a command's value breaks (CommandResult::constraint;
+/// A-GRA's MA_PerformanceConstraintEnum, docs/vehicle-interface.md 5.1).
+enum class Constraint : std::uint8_t {
+    None,
+    MinAirspeed,
+    MaxAirspeed,
+    MinAltitude,
+    MaxAltitude,
+    MinAcceleration,
+    MaxAcceleration,
+    MaxOrientation,     ///< a bank or a pitch
+    MaxOrientationRate, ///< a roll, pitch or yaw rate
+    MaxTurnRate,
+    MaxClimbRate,
+    MaxDescentRate,
+    Count
+};
+/// "max_airspeed", "max_orientation", ...; "none".
+FSIM_API const char* constraintName(Constraint constraint) noexcept;
 
 // --- Commands ---------------------------------------------------------------------
 
@@ -168,6 +198,13 @@ struct CommandResult {
     ActivityId activity = 0; ///< the new (NEW) or addressed (UPDATE, CANCEL) activity
     ActivityId other = 0;    ///< the activity that holds the authority (AuthorityHeld)
     std::uint16_t flags = 0; ///< CommandFlag bits
+    // What a rejection or a clamp was about (docs/vehicle-interface.md, 5.1):
+    /// the field (in the command struct's order, or a behaviour's named
+    /// parameter's place in its descriptor), route point or curve segment; -1: none
+    std::int16_t index = -1;
+    Constraint constraint = Constraint::None; ///< the performance limit its value broke
+    float from = std::numeric_limits<float>::quiet_NaN(); ///< a curve segment's section that breaks it: its parameter, 0..1
+    float to = std::numeric_limits<float>::quiet_NaN();
     bool accepted() const noexcept { return status == CommandStatus::Accepted; }
 };
 
@@ -185,6 +222,27 @@ enum ActivityFlag : std::uint16_t {
     kActivityAxesReduced = 1u << 4,   ///< another activity took one of its support axes
 };
 
+/// How far an activity has got and what it commands (docs/vehicle-interface.md,
+/// 5.3): a route's, a pattern's or a curve's, from its behaviour
+/// (Behavior::progress). NaN, or 0 counts, where it says nothing.
+struct ActivityProgress {
+    static constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    std::uint32_t segment = 0;   ///< the waypoint, curve segment or pattern leg flown now (from 0)
+    std::uint32_t segments = 0;  ///< of how many; 0: nothing segmented
+    std::uint64_t segmentId = 0; ///< the waypoint's id, where the route gave one
+    std::uint32_t laps = 0;      ///< a pattern's or a repeating route's, completed
+    double percent = kNone;      ///< of the whole activity, 0..100
+    double segmentPercent = kNone;
+    double distanceToGoM = kNone; ///< to the end: a route's last point, a curve's end
+    double timeToGoS = kNone;     ///< at the ground speed now
+    double crossTrackM = kNone;   ///< + right of the path
+    // what it commands: A-GRA's VehicleCommandState
+    double courseRad = kNone, headingRad = kNone; ///< true
+    double altitudeMslM = kNone;
+    double speedMs = kNone;        ///< in speedReference's terms
+    double speedReference = kNone; ///< SpeedReference (fsim/Control.h)
+};
+
 struct ActivityRecord {
     ActivityId id = 0;
     std::uint32_t vehicle = 0;
@@ -198,6 +256,7 @@ struct ActivityRecord {
     std::uint16_t constraintsSeen = 0; ///< every ActivityFlag bit since it started
     double startTime = 0.0;            ///< simulation time
     double endTime = std::numeric_limits<double>::quiet_NaN(); ///< NaN while live
+    ActivityProgress progress{};       ///< as its behaviour reported it after the last world step (a mode's)
     bool live() const noexcept { return state == ActivityState::Pending || state == ActivityState::Active; }
 };
 
@@ -269,6 +328,25 @@ enum class Persistence : std::uint8_t {
 };
 enum Interaction : std::uint8_t { kCommand = 1u << 0, kUpdate = 1u << 1, kCancel = 1u << 2, kSettings = 1u << 3, kStatus = 1u << 4 };
 
+/// Which of A-GRA's flight capability types (MA_FlightCapabilityEnum) a
+/// capability is (CapabilityDescriptor::mode; docs/vehicle-interface.md 4.1).
+enum class FlightMode : std::uint8_t {
+    None,
+    HsaCsa,
+    WaypointFollowing,
+    CurveFollowing,
+    Loiter,
+    Formation,
+    MustFly,
+    AltitudeStackedMarshall,
+    Launch,
+    Recovery,
+    RouteIntercept,
+    Count
+};
+/// "hsa_csa", "waypoint_following", ...; "none".
+FSIM_API const char* flightModeName(FlightMode mode) noexcept;
+
 /// One parameter: a field of the capability's command struct, in order, or a
 /// behaviour's named parameter.
 struct ParameterInfo {
@@ -278,6 +356,10 @@ struct ParameterInfo {
     double max = std::numeric_limits<double>::infinity();
     double defaultValue = std::numeric_limits<double>::quiet_NaN();
     bool optional = true; ///< accepts kHold (NaN)
+    /// The performance limits a value below `min` or above `max` breaks
+    /// (CommandResult::constraint): a bank's MaxOrientation, an airspeed's
+    /// MinAirspeed and MaxAirspeed. None for a range that is not the aircraft's.
+    Constraint below = Constraint::None, above = Constraint::None;
     /// false: this aircraft has nothing the field could move (a rotorcraft's
     /// longitudinal acceleration, a wing's pitch rate). A command that sets
     /// it - to anything but kHold or its default - is refused (InvalidParameter).
@@ -297,6 +379,7 @@ struct CapabilityDescriptor {
     std::vector<std::string> uses;         ///< the capabilities it flies through
     std::string behavior;                  ///< guidance: the behaviour's registry id
     bool needsTarget = false;              ///< guidance: follows BehaviorCommand::target
+    FlightMode mode = FlightMode::None;    ///< the A-GRA flight capability type it is
 };
 
 /// What a behaviour declares when it is registered (ControllerRegistry::addBehavior).
@@ -308,6 +391,7 @@ struct BehaviorTraits {
     /// The Feature bits an aircraft needs for it to be offered (a hover needs
     /// kFeatureHover); 0: every aircraft.
     std::uint32_t features = 0;
+    FlightMode mode = FlightMode::None; ///< the A-GRA flight capability type it is
 };
 
 } // namespace fsim::control

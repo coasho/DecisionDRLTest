@@ -87,9 +87,11 @@ public:
     /// Check a command's parameters against the capability's (NEW and UPDATE):
     /// a required field held (kHold) or not finite is InvalidParameter; one
     /// outside its range is clamped (kClamped in `flags`) or, with Reject,
-    /// OutOfRange. None if it may fly.
-    Reason check(std::size_t index, Command& command, RangePolicy range, std::uint16_t& flags) const noexcept;
-    Reason check(std::size_t index, SupportCommand& command, RangePolicy range, std::uint16_t& flags) const noexcept;
+    /// OutOfRange. None if it may fly. `detail` gets the field (or route
+    /// point) the answer is about - the first clamped, when one was - and the
+    /// performance limit its value broke (docs/vehicle-interface.md, 5.1).
+    Reason check(std::size_t index, Command& command, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
+    Reason check(std::size_t index, SupportCommand& command, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
 
 private:
     explicit CapabilityCatalog(std::uint32_t features);

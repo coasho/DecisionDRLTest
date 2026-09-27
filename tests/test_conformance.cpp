@@ -413,6 +413,9 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         CHECK(activityVehicle(id) == v);
         CHECK(r.vehicle == v);
         CHECK(r.live() == std::isnan(r.endTime));
+        // progress, where a behaviour gives it (docs/vehicle-interface.md, 5.3), within its bounds
+        if (r.progress.segments) CHECK(r.progress.segment < r.progress.segments);
+        if (!std::isnan(r.progress.percent)) CHECK((r.progress.percent >= 0.0 && r.progress.percent <= 100.0));
         if (!r.live()) CHECK(r.endTime >= r.startTime);
         switch (r.state) {
         case ActivityState::Pending:

@@ -78,6 +78,8 @@ public:
     /// The running behaviour, if a behaviour is engaged.
     const Behavior* behavior() const noexcept;
     bool behaviorFinished() const noexcept;
+    /// What the last update asked for, level by level (A-GRA's commanded state).
+    CommandedState commanded() const noexcept;
 
     /// Reset every controller's internal state (vehicle reset); engaged
     /// commands stay, and behaviours start again.
@@ -97,6 +99,9 @@ public:
     /// Hand over the behaviour a slot at Level::Behavior flies (between steps);
     /// it starts at its next update. Null removes it.
     void install(std::size_t slot, std::unique_ptr<Behavior> behavior) noexcept;
+    /// The slot's behaviour's progress, once it has started (between steps;
+    /// Behavior::progress). False if it has none to give.
+    bool progress(std::size_t slot, ActivityProgress& out) const noexcept;
     /// The adapter whose real-time face writes the inputs (a stock JSBSim one by default).
     void setAdapter(const VehicleAdapter& adapter) noexcept;
     const VehicleAdapter& adapter() const noexcept { return *adapter_; }

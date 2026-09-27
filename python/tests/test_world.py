@@ -275,6 +275,46 @@ class CapabilityTest(unittest.TestCase):
                 v.submit_behavior("waypoints", points=[good, bad])
             self.assertEqual(refused.exception.reason, "invalid_parameter")
 
+    def test_progress_detail_and_commanded_state(self):
+        world = make_world(name="py-interface")
+        v = fly(world, "interface")
+        s = v.state
+        points = [(s.latitude_rad, s.longitude_rad + 0.0006, 1500.0, HOLD, 300.0),
+                  (s.latitude_rad + 0.0005, s.longitude_rad + 0.0006, 1600.0, HOLD, 300.0)]
+        route = v.submit_behavior("waypoints", points=points)
+        world.step(10)
+        p = route.progress
+        self.assertIsInstance(p, fsim.ActivityProgress)
+        self.assertEqual((p.segment, p.segments), (0, 2))
+        self.assertGreater(p.distance_to_go_m, 1000.0)
+        self.assertTrue(0.0 <= p.percent < 100.0)
+        self.assertEqual(p.altitude_msl_m, 1500.0)
+        c = v.commanded
+        self.assertIsInstance(c, fsim.CommandedState)
+        self.assertEqual(c.top_level, Level.BEHAVIOR)
+        self.assertEqual(c.altitude_msl_m, 1500.0)
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit(Level.ATTITUDE, roll_rad=4.0, range=fsim.RangePolicy.REJECT)
+        self.assertEqual((refused.exception.index, refused.exception.constraint), (0, "max_orientation"))
+        self.assertIsNone(refused.exception.section)
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_behavior("waypoints", points=points + [(math.nan, 0.0, 0.0, HOLD, 1.0)])
+        self.assertEqual(refused.exception.index, 2)
+        # A-GRA's vocabulary
+        from fsim import agra
+        self.assertEqual(agra.performance_constraint("max_orientation"), "MAX_ORIENTATION_LIMIT_EXCEEDED")
+        self.assertEqual(agra.cannot_comply("invalid_waypoint"), "INFEASIBLE_ROUTE")
+        self.assertEqual(agra.validation_result("invalid_waypoint"), "INVALID_WAYPOINT")
+        self.assertIn(agra.activity_state(route.info), ("ACTIVE_UNCONSTRAINED", "ACTIVE_PARTIALLY_CONSTRAINED", "ACTIVE_FULLY_CONSTRAINED"))
+        self.assertEqual(agra.command_processing_state(1), "REJECTED")
+        caps = {cap.id: cap for cap in v.capabilities()}
+        self.assertEqual(caps["fsim.guidance.formation"].mode, "formation")
+        self.assertEqual(caps["fsim.flight.velocity"].mode, "none")
+        self.assertEqual(agra.flight_capabilities(v), {"FORMATION": ["fsim.guidance.formation"]})
+        route.cancel()
+        self.assertEqual(agra.activity_state(route.info), "FAILED")
+        self.assertEqual(agra.cannot_comply(route.info.reason), "CANCELED")
+
     def test_authority_and_refusals(self):
         world = make_world(name="py-authority")
         v = fly(world, "held")

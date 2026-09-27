@@ -171,6 +171,39 @@ bool ControlStack::behaviorFinished() const noexcept {
     return b && b->finished();
 }
 
+bool ControlStack::progress(std::size_t slot, ActivityProgress& out) const noexcept {
+    if (slot >= kSlotCount || !behaviors_[slot] || started_[slot] != config_->slots[slot].generation) return false;
+    return behaviors_[slot]->progress(out);
+}
+
+CommandedState ControlStack::commanded() const noexcept {
+    CommandedState c;
+    for (const Level level : {Level::Behavior, Level::Position, Level::Velocity, Level::Attitude, Level::Acceleration, Level::Actuator})
+        if (derived_[static_cast<std::size_t>(level)]) {
+            c.top = level;
+            break;
+        }
+    auto at = [this](Level level) { return derived_[static_cast<std::size_t>(level)]; };
+    if (const Command* p = at(Level::Position))
+        if (const auto* x = std::get_if<PositionCommand>(p)) c.latitudeRad = x->latitudeRad, c.longitudeRad = x->longitudeRad, c.altitudeMslM = x->altitudeMslM;
+    if (const Command* v = at(Level::Velocity))
+        if (const auto* x = std::get_if<VelocityCommand>(v)) {
+            c.headingRad = x->headingRad, c.turnRateRadS = x->turnRateRadS, c.airspeedMs = x->airspeedMs;
+            c.verticalSpeedMs = x->verticalSpeedMs, c.northMs = x->northMs, c.eastMs = x->eastMs;
+        }
+    if (const Command* a = at(Level::Attitude))
+        if (const auto* x = std::get_if<AttitudeCommand>(a)) {
+            c.rollRad = x->rollRad, c.pitchRad = x->pitchRad;
+            if (isHold(c.headingRad)) c.headingRad = x->headingRad;
+            if (isHold(c.airspeedMs)) c.airspeedMs = x->airspeedMs;
+        }
+    if (const Command* n = at(Level::Acceleration))
+        if (const auto* x = std::get_if<AccelerationCommand>(n))
+            c.loadFactorG = x->loadFactorG, c.rollRateRadS = x->rollRateRadS, c.pitchRateRadS = x->pitchRateRadS, c.yawRateRadS = x->yawRateRadS;
+    if (at(Level::Actuator)) c.throttle = last_.throttle[0];
+    return c;
+}
+
 bool ControlStack::use(Level level, std::string_view controllerId) {
     auto& registry = ControllerRegistry::instance();
     auto c = registry.create(controllerId);
@@ -612,6 +645,50 @@ const char* reasonName(Reason reason) noexcept {
     case Reason::BehaviorFailed: return "behavior_failed";
     case Reason::CapabilityLost: return "capability_lost";
     case Reason::Diverged: return "diverged";
+    case Reason::InvalidWaypoint: return "invalid_waypoint";
+    case Reason::InvalidCurve: return "invalid_curve";
+    case Reason::PerformanceLimit: return "performance_limit";
+    case Reason::NotGranted: return "not_granted";
+    case Reason::NotAllowed: return "not_allowed";
+    case Reason::Revoked: return "revoked";
+    case Reason::Released: return "released";
+    case Reason::CollisionAvoidance: return "collision_avoidance";
+    case Reason::Restricted: return "restricted";
+    default: return "?";
+    }
+}
+
+const char* constraintName(Constraint constraint) noexcept {
+    switch (constraint) {
+    case Constraint::None: return "none";
+    case Constraint::MinAirspeed: return "min_airspeed";
+    case Constraint::MaxAirspeed: return "max_airspeed";
+    case Constraint::MinAltitude: return "min_altitude";
+    case Constraint::MaxAltitude: return "max_altitude";
+    case Constraint::MinAcceleration: return "min_acceleration";
+    case Constraint::MaxAcceleration: return "max_acceleration";
+    case Constraint::MaxOrientation: return "max_orientation";
+    case Constraint::MaxOrientationRate: return "max_orientation_rate";
+    case Constraint::MaxTurnRate: return "max_turn_rate";
+    case Constraint::MaxClimbRate: return "max_climb_rate";
+    case Constraint::MaxDescentRate: return "max_descent_rate";
+    default: return "?";
+    }
+}
+
+const char* flightModeName(FlightMode mode) noexcept {
+    switch (mode) {
+    case FlightMode::None: return "none";
+    case FlightMode::HsaCsa: return "hsa_csa";
+    case FlightMode::WaypointFollowing: return "waypoint_following";
+    case FlightMode::CurveFollowing: return "curve_following";
+    case FlightMode::Loiter: return "loiter";
+    case FlightMode::Formation: return "formation";
+    case FlightMode::MustFly: return "must_fly";
+    case FlightMode::AltitudeStackedMarshall: return "altitude_stacked_marshall";
+    case FlightMode::Launch: return "launch";
+    case FlightMode::Recovery: return "recovery";
+    case FlightMode::RouteIntercept: return "route_intercept";
     default: return "?";
     }
 }

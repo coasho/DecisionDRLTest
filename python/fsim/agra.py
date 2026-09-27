@@ -1,0 +1,152 @@
+"""A-GRA's vocabulary for what the platform answers (docs/vehicle-interface.md, 5.4 and Appendix B).
+
+The platform speaks its own terms: a command's status and reason, an
+activity's state and constraint flags, a capability. A consumer that reasons in
+A-GRA ASK 6.0a's terms - a mission autonomy - translates them here into the
+names the Vehicle Interface volume and its schema use. There are no messages:
+these are names only (ADR-28, decision D1).
+
+    >>> from fsim import agra
+    >>> agra.activity_state(activity.info)          # 'ACTIVE_UNCONSTRAINED'
+    >>> agra.cannot_comply(rejected.reason)         # 'INVALID_WAYPOINT'
+    >>> agra.flight_capabilities(vehicle)           # {'HSA_CSA': ['fsim.guidance.hsa'], 'LOITER': [...], ...}
+"""
+from .world import ActivityState
+
+#: CommandStatus (0 accepted, 1 rejected, 2 canceled) -> CommandProcessingStateEnum. RECEIVED is never
+#: needed: every command is answered at once.
+COMMAND_PROCESSING_STATE = {0: "ACCEPTED", 1: "REJECTED", 2: "CANCELED"}
+
+#: Constraint flags an active activity carries: the demand limited, a value clamped, a support axis taken
+#: (partly constrained); an effector at its stop, a limit exceeded (fully constrained).
+_PARTLY = 2 | 8 | 16
+_FULLY = 1 | 4
+
+#: reason names (fsim.Rejected.reason, ActivityInfo.reason) -> CannotComplyEnum
+CANNOT_COMPLY = {
+    "unknown_capability": "CAPABILITY_UNAVAILABLE",
+    "unknown_vehicle": "UNKNOWN_ID",
+    "unknown_activity": "UNKNOWN_ID",
+    "unavailable": "CAPABILITY_UNAVAILABLE",
+    "version_unsupported": "INPUT_OTHER",
+    "invalid_parameter": "INVALID_INPUT_PARAMETER",
+    "out_of_range": "CAPABILITY_PERFORMANCE",
+    "invalid_axes": "INPUT_OTHER",
+    "authority_held": "CAPABILITY_PRECEDENCE",
+    "controller_not_axis_aware": "SYSTEM_CONFLICT",
+    "activity_ended": "STATE_OR_SETTINGS",
+    "not_updatable": "INPUT_OTHER",
+    "wrong_command_type": "INPUT_OTHER",
+    "requested": "CANCELED",
+    "preempted": "CAPABILITY_PRECEDENCE",
+    "target_lost": "MISSION_EVENT",
+    "behavior_failed": "CAPABILITY_FAULT",
+    "capability_lost": "CAPABILITY_FAULT",
+    "diverged": "SYSTEM_FAULT",
+    "invalid_waypoint": "INFEASIBLE_ROUTE",
+    "invalid_curve": "INFEASIBLE_ROUTE",
+    "performance_limit": "CAPABILITY_PERFORMANCE",
+    "not_granted": "INELIGIBLE_CONTROL_SOURCE",
+    "not_allowed": "INELIGIBLE_CONTROL_SOURCE",
+    "revoked": "CANCELED",
+    "released": "CANCELED",
+    "collision_avoidance": "CONSTRAINT_COLLISION_AVOIDANCE",
+    "restricted": "CONSTRAINT_OP",
+}
+
+#: reason names -> MA_ValidationResultEnum, for a flight command's rejection (CannotComplyDetails)
+VALIDATION_RESULT = {
+    "unknown_capability": "CAPABILITY_NOT_SUPPORTED",
+    "invalid_waypoint": "INVALID_WAYPOINT",
+    "invalid_curve": "INVALID_CURVE",
+    "out_of_range": "PERFORMANCE_LIMIT_EXCEEDED",
+    "performance_limit": "PERFORMANCE_LIMIT_EXCEEDED",
+}
+
+#: constraint names (fsim.Rejected.constraint) -> MA_PerformanceConstraintEnum
+PERFORMANCE_CONSTRAINT = {
+    "min_airspeed": "MIN_AIRSPEED_EXCEEDED",
+    "max_airspeed": "MAX_AIRSPEED_EXCEEDED",
+    "min_altitude": "MIN_ALTITUDE_EXCEEDED",
+    "max_altitude": "MAX_ALTITUDE_EXCEEDED",
+    "min_acceleration": "MIN_ACCELERATION_LIMIT_EXCEEDED",
+    "max_acceleration": "MAX_ACCELERATION_LIMIT_EXCEEDED",
+    "max_orientation": "MAX_ORIENTATION_LIMIT_EXCEEDED",
+    "max_orientation_rate": "MAX_ORIENTATION_RATE_LIMIT_EXCEEDED",
+    "max_turn_rate": "MAX_TURN_RATE_EXCEEDED",
+    "max_climb_rate": "MAX_CLIMB_RATE_EXCEEDED",
+    "max_descent_rate": "MAX_DESCENT_RATE_EXCEEDED",
+}
+
+#: Capability.mode -> MA_FlightCapabilityEnum
+FLIGHT_CAPABILITY = {
+    "hsa_csa": "HSA_CSA",
+    "waypoint_following": "WAYPOINT_FOLLOWING",
+    "curve_following": "CURVE_FOLLOWING",
+    "loiter": "LOITER",
+    "formation": "FORMATION",
+    "must_fly": "MUST_FLY",
+    "altitude_stacked_marshall": "ALTITUDE_STACKED_MARSHALL",
+    "launch": "LAUNCH",
+    "recovery": "RECOVERY",
+    "route_intercept": "ROUTE_INTERCEPT",
+}
+
+#: SpeedReference codes (ActivityProgress.speed_reference) -> A-GRA's SpeedReferenceEnum, or MachType
+SPEED_REFERENCE = {0: "TRUE_AIRSPEED", 1: "CALIBRATED_AIRSPEED", 2: "GROUNDSPEED", 3: "MACH"}
+
+
+def command_processing_state(status):
+    """A command's status (a result's first field, or fsim's CommandStatus value) as A-GRA's
+    CommandProcessingStateEnum."""
+    return COMMAND_PROCESSING_STATE[int(status)]
+
+
+def activity_state(info):
+    """An activity's record (ActivityInfo) as A-GRA's ActivityStateEnum. Pending is ENABLED; an active
+    one is unconstrained, partly constrained (its demand limited, a value clamped, a support axis taken)
+    or fully constrained (an effector at its stop, a limit exceeded); a canceled one FAILED, with the
+    reason CANCELED (cannot_comply)."""
+    state = ActivityState(info.state)
+    if state == ActivityState.PENDING:
+        return "ENABLED"
+    if state == ActivityState.ACTIVE:
+        if info.constraints & _FULLY:
+            return "ACTIVE_FULLY_CONSTRAINED"
+        if info.constraints & _PARTLY:
+            return "ACTIVE_PARTIALLY_CONSTRAINED"
+        return "ACTIVE_UNCONSTRAINED"
+    if state == ActivityState.COMPLETED:
+        return "COMPLETED"
+    return "FAILED"
+
+
+def cannot_comply(reason):
+    """A reason name as A-GRA's CannotComplyEnum; None for "none" and "goal_reached" (nothing went wrong)."""
+    return CANNOT_COMPLY.get(reason)
+
+
+def validation_result(reason):
+    """A rejection's reason as A-GRA's MA_ValidationResultEnum; None where the reason is not a validation's."""
+    return VALIDATION_RESULT.get(reason)
+
+
+def performance_constraint(constraint):
+    """A constraint name (fsim.Rejected.constraint) as A-GRA's MA_PerformanceConstraintEnum; None for "none"."""
+    return PERFORMANCE_CONSTRAINT.get(constraint)
+
+
+def flight_capability(capability):
+    """A Capability's A-GRA flight capability type (MA_FlightCapabilityEnum), or None."""
+    return FLIGHT_CAPABILITY.get(capability.mode)
+
+
+def flight_capabilities(vehicle):
+    """What a mission autonomy would be offered: A-GRA flight capability type -> the ids of the vehicle's
+    capabilities of that type (docs/vehicle-interface.md, 4.1)."""
+    out = {}
+    for c in vehicle.capabilities():
+        kind = flight_capability(c)
+        if kind:
+            out.setdefault(kind, []).append(c.id)
+    return out

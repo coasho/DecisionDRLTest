@@ -73,10 +73,12 @@ from .world import (  # noqa: E402
     SUPPORT_KINDS,
     Activity,
     ActivityInfo,
+    ActivityProgress,
     ActivityState,
     Availability,
     Axis,
     Capability,
+    CommandedState,
     Envelope,
     LIMITS,
     Level,
@@ -93,6 +95,7 @@ from .world import (  # noqa: E402
     World,
 )
 from .vecenv import VecEnv  # noqa: E402
+from . import agra  # noqa: E402,F401
 from .recording import Recording  # noqa: E402
 from ._threads import torch_threads  # noqa: E402
 
