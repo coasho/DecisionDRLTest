@@ -271,6 +271,17 @@ move on while a check fails or a picture looks wrong.
   A cambered wing behind a small tail can stall on the elevator's stop
   (the fly stage says "elevator limit"): move the CG aft, or give the tail
   a negative incidence (`twist`).
+- **Trimmable stabilizers.** One all-moving surface can stand for the
+  stabilizer and its elevator: give it the stabilizer's travel plus the
+  elevator's worth. A published travel ("13 deg, 9 up, 4 down") is the
+  leading edge's, so up is nose down; check the direction against a real
+  trim reading (an accident report, a flight manual). Rig its zero (the
+  tail's `twist`, with the leading edge moved so it turns about its
+  `pivot`) so that cruise trims where the real one does. A tail rigged at
+  zero on a fuselage that cruises nose down (a high-incidence wing) trims
+  far nose down and has no travel left for its flaps. Then fly flaps down
+  at approach speeds, and at cruise, under the velocity loop: the
+  stabilizer must stay off its stop.
 - **Gear.** A four-wheel truck is one leg: `wheels = 2`, `axles = 2`,
   `axle_spacing`. Its bay needs room: `door_reach` (m) lets its doors move
   out further. Where the real gear has no doors, or hangar's doors cannot

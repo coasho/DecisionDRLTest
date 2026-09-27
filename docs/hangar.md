@@ -729,7 +729,7 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
 
 | aircraft | `jsbsim:` | top speed, Mach | climb, ft/min | ceiling, ft |
 |---|---|---|---|---|
-| B-52H | `b52h` | 0.91 at 20,700 ft (0.906) | 9,300 | 53,000 (50,000) |
+| B-52H | `b52h` | 0.91 at 20,700 ft (0.906) | 9,300 | 52,900 (50,000) |
 | H-6K | `h6k` | 0.92 at 19,700 ft (0.922) | 6,500 | 41,100 (42,000) |
 | KC-135R | `kc135r` | 0.88 at 30,000 ft (0.86) | 7,100 | 40,900 (50,000 certified) |
 | RC-135W | `rc135w` | 0.88 at 30,000 ft (0.86) | 6,400 | 38,700 (50,000 certified) |
@@ -751,7 +751,14 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   dutch roll's damping from 0.11 to 0.31. Even conventional sections'
   drag rise leaves it too fast, so it needs 5 times Sears-Haack's wave
   drag, beyond the usual 2-3 (a warning in its report). Its L/D peaks at
-  19.7 (21.5 published).
+  19.7 (21.5 published). One all-moving tail stands for its stabilizer and
+  narrow elevator: 15° nose down and 10° up, the stabilizer's published 9°
+  and 4° with an estimated 6° of elevator. Its rigging is not published, so
+  it is fitted: 3° leading edge up on the fuselage, so that at 240-300 KCAS
+  at 14,000 ft it trims at 2.9-3.6° nose down, where the USAF's 2008
+  accident report has the real one at 3-4°. Cruise then trims at 3° nose
+  down, and the stabilizer holds half or full flaps at any speed up to
+  cruise (the Fowler flaps pitch it up, as they do the real one).
 - The H-6K is the Tu-16's airframe, measured off a Tu-16 three-view, with
   the H-6K's radar nose, its enlarged intakes for two D-30KP-2s, six empty
   pylons and a tail cone where the guns were. It flies at 59 t, 60 % of
@@ -861,11 +868,12 @@ surfaces ([control.md](sdk/control.md)): attitude, acceleration, velocity,
 position and behaviours, each a built-in loop commanding the one below it.
 Their shared gains suit the stock c172x. Flown with them, every fly-by-wire
 design sat in a standing pitch oscillation of 5-15° while only holding its
-height, a 1.5 g step overshot by up to 1,500 %, and the B-52H, which needs a
-third of its elevator to trim at cruise, climbed out of a height hold. The
-autopilot stage measures what the platform needs to design each one its
-own, as a flight-test engineer would; the platform does the design (steps 2
-to 4 below, `src/control/Laws.cpp`) whenever the aircraft loads:
+height, a 1.5 g step overshot by up to 1,500 %, and the B-52H, which then
+trimmed at cruise with two thirds of its nose-down stabilizer, climbed out
+of a height hold. The autopilot stage measures what the platform needs to
+design each one its own, as a flight-test engineer would; the platform does
+the design (steps 2 to 4 below, `src/control/Laws.cpp`) whenever the
+aircraft loads:
 
 1. **Identify.** From level flight at a reference condition - 3,000 m, where
    the wing carries the weight at CL 0.35 (faster if that needs more than
@@ -938,7 +946,7 @@ At the reference speed:
 | aircraft | reference, m/s | 30° bank: to 90 %, overshoot | 5° pitch | climb at 5 % of the speed | 90° turn settled | height held, 40 s |
 |---|---|---|---|---|---|---|
 | A-10C | 151 | 2.4 s, 0 % | 2.9 s, 12 % | 3.9 s, 13 % | 23 s | 2 m |
-| B-52H | 153 | 5.9 s, 0 % | 5.5 s, 17 % | 7.6 s, 16 % | 46 s | 1 m |
+| B-52H | 153 | 5.9 s, 0 % | 5.3 s, 16 % | 7.3 s, 16 % | 46 s | 1 m |
 | C-130J | 149 | 4.1 s, 0 % | 2.5 s, 13 % | 3.5 s, 15 % | 43 s | 0 m |
 | C172 | 50 | 2.4 s, 2 % | 1.7 s, 18 % | 2.4 s, 13 % | 17 s | 1 m |
 | C-17A | 203 | 2.8 s, 0 % | 2.2 s, 8 % | 4.0 s, 10 % | 58 s | 0 m |
@@ -1161,8 +1169,9 @@ its feet (the airframe's signed distance there, 2 mm).
   loops are PID loops, not a certified autopilot. At 0.7 times their
   reference speed the heavies roll and pull slowly - there the roll rate and
   the load factor the aircraft can give are the limit, not the loops. The
-  B-52H has no stabiliser trim: above about 200 m/s at 3,000 m its elevator
-  runs out of nose-down travel and it holds its height to about 50 m.
+  loops know nothing of the flaps: the B-52H balloons 90-230 m when its
+  flaps come down at approach speeds under the velocity loop (its crews
+  lower them in a descent).
 
 ## For Claude
 

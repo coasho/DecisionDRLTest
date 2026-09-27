@@ -72,21 +72,29 @@ controls = [
 
 # The horizontal tail: 15.85 m span (52 ft, B-52 Stratofortress
 # Association), leading edge swept 42 deg, root chord 8.36 m, tip 2.0 m, at
-# the fuselage's mid height. Its stabilizer trims through 13 deg (9 up, 4
-# down) and carries a narrow elevator (Wikipedia; Loftin): here it is one
-# all-moving surface, its travel the stabilizer's and the elevator's
-# together (estimate: 15 deg nose up, 10 down).
+# the fuselage's mid height. Its stabilizer trims through 13 deg, 9 up and
+# 4 down (Wikipedia; J. Baugher's B-52 history), and carries a narrow
+# elevator (Loftin): here it is one all-moving surface, its travel the
+# stabilizer's and the elevator's together, the elevator worth an estimated
+# 6 deg of stabilizer either way: 15 deg nose down, 10 up. The 9 deg are the
+# leading edge's up, nose down: the USAF's accident report on B-52H 60-0053
+# (Guam, 2008) has the stabilizer at a normal 3-4 deg nose down around 240
+# KCAS at 14,000 ft, and Boeing's data for a recovery from 7 deg nose down.
+# Its rigging on the fuselage is not published: its zero here is 3 deg
+# leading edge up, turned about the spindle, so that level flight at
+# 240-300 KCAS there trims at that report's 3-4 deg nose down (fitted: it
+# trims at 2.9-3.6; at zero it took 6.2-6.8).
 [[surface]]
 name = "htail"
 kind = "htail"
 airfoil = "naca64a010"
 vortex = false
 sections = [
-  { le = [36.600, 0.000, -0.750], chord = 8.360 },
-  { le = [43.670, 7.920, -0.750], chord = 2.000 },
+  { le = [36.605, 0.000, -0.575], chord = 8.360, twist = 3.0 },
+  { le = [43.671, 7.920, -0.708], chord = 2.000, twist = 3.0 },
 ]
 controls = [
-  { name = "stabilizer", channel = "elevator", span = [0.11, 1.0], chord_fraction = 1.0, pivot = 0.40, limits = [-15, 10] },
+  { name = "stabilizer", channel = "elevator", span = [0.11, 1.0], chord_fraction = 1.0, pivot = 0.40, limits = [-10, 15] },
 ]
 
 # The fin, 7.06 m above the fuselage's top (the published 22 ft 11 in):

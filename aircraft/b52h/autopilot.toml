@@ -1,4 +1,4 @@
-# Written by hangar autopilot (2026-09-26 00:36) for b52h.toml: the aircraft's responses to its
+# Written by hangar autopilot (2026-09-27 06:39) for b52h.toml: the aircraft's responses to its
 # controls, identified at a reference condition (docs/hangar.md, The autopilot). The
 # build writes them into the JSBSim aircraft's plant section; the platform designs its
 # control loops from them. Delete this file to fly the platform's shared defaults.
@@ -10,11 +10,11 @@ altitude_m = 3000
 [identified]   # the responses at the reference: per unit of aileron (roll rate, rad/s), elevator (load factor,
                # g), rudder (sideslip, rad) and throttle (acceleration, m/s2), each with its lag (s); level
                # flight's throttle, a surface-controlled aircraft's trim law, the zero-lift angle of attack
-roll = { gain = 0.642973, lag_s = 0.574601 }
-pitch = { gain = 3.93441, lag_s = 0.904725 }
-yaw = { gain = 0.176249 }
-speed = { gain = 1.43723, lag_s = 0.178957 }
-throttle_trim = 0.42126
-elevator_trim = 0.650906
-elevator_trim_lift = -0.2149
-alpha_zero_lift_rad = -0.145688
+roll = { gain = 0.642585, lag_s = 0.574601 }
+pitch = { gain = 5.75177, lag_s = 0.86862 }
+yaw = { gain = 0.177075 }
+speed = { gain = 1.43882, lag_s = 0.178957 }
+throttle_trim = 0.421802
+elevator_trim = 0.217485
+elevator_trim_lift = -0.150116
+alpha_zero_lift_rad = -0.146541
