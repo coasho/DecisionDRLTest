@@ -324,6 +324,31 @@ struct BatchCommand {
     CommandOptions options;
 };
 
+/// What a live activity flies now, or waits to fly (A-GRA's last flight
+/// command, in the activity report; docs/flight-autonomy.md, 4.12): its
+/// setpoint as updated - a mode's merged, a level's, a support effector's -
+/// and a route's waypoints or a curve's segments, appended ones too (a
+/// curve's: A-GRA's FlyoutCurve, from the CurveCommand's reference).
+struct Setpoint {
+    std::variant<Command, SupportCommand> command;
+    std::vector<Waypoint> waypoints;
+    std::vector<BezierSegment> segments;
+};
+
+/// Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType;
+/// docs/flight-autonomy.md, 4.12): a point, a turn flown by or over it
+/// (TurnType), or a loiter.
+enum class EndPointKind : std::uint8_t { Waypoint, TurnPoint, LoiterPoint, Count };
+struct EndPoint {
+    EndPointKind kind = EndPointKind::Waypoint;
+    double latitudeRad = kHold, longitudeRad = kHold;
+    double altitudeM = kHold;          ///< in `altitudeReference` (a waiting route's as given: kHold continues the point before)
+    double altitudeReference = kHold;  ///< AltitudeReference
+    double turn = kHold;               ///< a turn point's TurnType
+    std::uint64_t id = 0;              ///< a route waypoint's id; 0 none
+    std::int32_t index = -1;           ///< its waypoint or curve segment; 0 a pattern's or the position level's point
+};
+
 inline Level levelOf(const Command& c) noexcept {
     return c.index() < static_cast<std::size_t>(Level::Behavior) ? static_cast<Level>(c.index()) : Level::Behavior;
 }
@@ -447,6 +472,26 @@ struct CommandedState {
     double rollRad = kNone, pitchRad = kNone; ///< the attitude level's
     double loadFactorG = kNone, rollRateRadS = kNone, pitchRateRadS = kNone, yawRateRadS = kNone; ///< the acceleration level's
     double throttle = kNone;        ///< what the actuators were given (the first engine's)
+};
+
+/// What a vehicle is commanded (A-GRA's VehicleCommandState;
+/// docs/flight-autonomy.md, 4.12): the cascade's levels, the acceleration
+/// they ask of the aircraft in north, east and down, and the altitude as its
+/// mode commanded it, in the reference it was commanded in.
+struct VehicleCommandState : CommandedState {
+    /// A wing's: the acceleration level's longitudinal acceleration along its
+    /// flight path and its load factor's lift normal to the path (JSBSim's
+    /// lift load factor), with gravity's pull, at the attitude, angle of
+    /// attack and sideslip it flies - its acceleration over the Earth. NaN
+    /// where no longitudinal acceleration is commanded (a throttle given
+    /// instead), and for a rotorcraft (whose thrust, its drag unmodelled, is
+    /// not its acceleration).
+    double northAccelerationMs2 = kNone, eastAccelerationMs2 = kNone, downAccelerationMs2 = kNone;
+    /// A live hsa's or pattern's altitude, a route's point flown to's, in
+    /// their reference; a curve's, and the position level's, above sea level.
+    /// NaN where none is commanded.
+    double altitudeM = kNone;
+    double altitudeReference = kNone; ///< AltitudeReference
 };
 
 } // namespace fsim::control

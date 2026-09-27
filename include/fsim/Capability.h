@@ -197,6 +197,20 @@ enum class Source : std::uint8_t {
     Override = 2,  ///< an operator or a scenario script taking control
 };
 
+/// Which of a vehicle's policies commands (A-GRA's SystemServiceType: the
+/// mission autonomy service that holds control; docs/flight-autonomy.md,
+/// 4.12): each a name the caller gives, 0 the default policy. Under
+/// ControlMode::Granted a grant is one controller's.
+using ControllerId = std::uint32_t;
+
+/// Who addresses an activity (UPDATE, CANCEL, an activity command): a source
+/// and, a policy's, its controller. Made from a Source alone: the default policy's.
+struct Caller {
+    Source source = Source::Policy;
+    ControllerId controller = 0;
+    constexpr Caller(Source s = Source::Policy, ControllerId c = 0) noexcept : source(s), controller(c) {}
+};
+
 /// What happens to a value outside the capability's advertised range.
 enum class RangePolicy : std::uint8_t {
     Clamp,  ///< clamp it; the result says so (kClamped)
@@ -285,6 +299,9 @@ struct CommandOptions {
     /// CapabilityPrecedenceOverride; lower first); kNoPrecedenceOverride: the
     /// capability's own. The platform's own sources only: a policy's is refused NotAllowed.
     std::uint32_t precedenceOverride = kNoPrecedenceOverride;
+    /// A policy's controller (docs/flight-autonomy.md, 4.12): under
+    /// ControlMode::Granted its capability's grant must be this controller's.
+    ControllerId controller = 0;
     /// When it may start and should end (A-GRA's TemporalConstraints).
     TimeWindow window{};
 };
@@ -392,6 +409,10 @@ enum class TaskState : std::uint8_t {
 /// "awaiting_execution", "execution_pending", "executing", "completed", "dropped", "failed", "canceled".
 FSIM_API const char* taskStateName(TaskState state) noexcept;
 
+enum class EndPointKind : std::uint8_t; // fsim/Control.h
+/// "waypoint", "turn_point", "loiter_point".
+FSIM_API const char* endPointKindName(EndPointKind kind) noexcept;
+
 /// A task's status (A-GRA's TaskStatus).
 struct TaskStatus {
     TaskId id = 0;
@@ -493,6 +514,7 @@ struct ActivityRecord {
     AxisMask axes = 0;                 ///< the axes it owns (or owned, once ended; will own, while it waits)
     ActivityState state = ActivityState::Pending;
     Reason reason = Reason::None;      ///< why it ended, else None
+    ControllerId controller = 0;       ///< its command's (a policy's controller; docs/flight-autonomy.md, 4.12)
     ActivityId by = 0;                 ///< the preempting activity, with Preempted
     std::uint64_t suggestion = 0;      ///< Failed as it would start: the task the platform suggests in its place (4.11), else 0
     std::uint16_t constraints = 0;     ///< ActivityFlag bits of the last world step
@@ -603,6 +625,7 @@ enum class ControlMode : std::uint8_t {
 struct ControlStatus {
     bool allowed = true;  ///< the policy may request it (all may, by default)
     bool granted = false; ///< the policy holds a grant for it
+    ControllerId holder = 0; ///< the controller whose grant it is, while granted (docs/flight-autonomy.md, 4.12)
 };
 
 enum class CapabilityKind : std::uint8_t { Flight, Guidance, Support, Status };

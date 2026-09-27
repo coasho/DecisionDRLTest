@@ -4,6 +4,7 @@
 
 #include "fsim/Capability.h"
 #include "fsim/World.h"
+#include "fsim/fsim_c.h"
 #include "session/World.h"
 
 #include <memory>
@@ -20,6 +21,17 @@ struct fsim_world {
     uint32_t lastVehicle = 0;                      ///< the vehicle that gave it: its details (World::commandDetails) are the last command's
     std::vector<fsim::control::Waypoint> waypoints; ///< a route's, as given (reused: a route updated every step allocates nothing once it has room)
     std::vector<fsim::control::BezierSegment> segments; ///< a curve's, as given (reused likewise)
+    /// An activity's setpoint as last read back (fsim_activity_get_setpoint): what its arrays point into.
+    struct Readback {
+        fsim::control::Setpoint setpoint;
+        std::vector<double> fields;
+        std::vector<fsim_waypoint> waypoints;
+        std::vector<fsim_bezier_segment> segments;
+        fsim_behavior_command behavior{};
+        std::vector<const char*> names;
+        std::vector<double> values;
+        std::vector<fsim_position_command> points;
+    } readback;
 
     const char* intern(const std::string& s) { return strings.insert(s).first->c_str(); }
 

@@ -2,6 +2,7 @@
 // (fsim/Capability.h): what the SDKs, the logs and the reports print. Kept
 // apart from the runtime's code, whose layout they would otherwise move.
 #include "fsim/Capability.h"
+#include "fsim/Control.h"
 
 namespace fsim::control {
 
@@ -203,6 +204,15 @@ const char* activityCommandName(ActivityCommand command) noexcept {
     case ActivityCommand::Delete: return "delete";
     case ActivityCommand::ChangeRank: return "change_rank";
     case ActivityCommand::Unassign: return "unassign";
+    default: return "?";
+    }
+}
+
+const char* endPointKindName(EndPointKind kind) noexcept {
+    switch (kind) {
+    case EndPointKind::Waypoint: return "waypoint";
+    case EndPointKind::TurnPoint: return "turn_point";
+    case EndPointKind::LoiterPoint: return "loiter_point";
     default: return "?";
     }
 }

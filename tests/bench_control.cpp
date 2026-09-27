@@ -691,6 +691,34 @@ int alloc() {
              if (!(r.flags & kDeferred)) std::fprintf(stderr, "suggestion: vehicle %u: %s\n", id, reasonName(r.reason)), std::exit(3);
              made[id] = r.activity;
          }},
+        // ADR-29 FA-2e: under Granted, a named controller's activity updated every step by that controller, and what
+        // the vehicle is commanded read every step (A-GRA's VehicleCommandState, its NED acceleration)
+        {"named controller", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> made(64, 0);
+             const auto& s = *w.vehicleState(id);
+             if (k == 0) {
+                 for (const auto& a : w.activities(id))
+                     if (a.live()) w.cancel(a.id);
+                 CommandOptions three;
+                 three.controller = 3;
+                 if (w.setControlMode(id, ControlMode::Granted) != Reason::None || w.requestControl(id, "fsim.flight.velocity", 3) != Reason::None)
+                     std::fprintf(stderr, "named controller: vehicle %u refused its grant\n", id), std::exit(3);
+                 made[id] = w.submit(id, Command(VelocityCommand{s.airspeedTrueMs, 0.0, s.eulerRad[2]}), three).activity;
+                 if (!made[id]) std::fprintf(stderr, "named controller: vehicle %u refused\n", id), std::exit(3);
+                 return;
+             }
+             if (!w.update(Caller{Source::Policy, 3}, made[id], Command(VelocityCommand{s.airspeedTrueMs, 0.0, s.eulerRad[2]})).accepted())
+                 std::fprintf(stderr, "named controller: vehicle %u: its update refused\n", id), std::exit(3);
+             static double sink = 0.0;
+             const VehicleCommandState c = w.commandState(id);
+             sink += std::isnan(c.downAccelerationMs2) ? 0.0 : c.downAccelerationMs2; // (read: a level's command has no altitude)
+             if (k == 149) {
+                 const ActivityRecord* a = w.activity(made[id]);
+                 if (!a || a->state != ActivityState::Active || a->controller != 3 || !std::isfinite(sink))
+                     std::fprintf(stderr, "named controller: vehicle %u: %s\n", id, a ? activityStateName(a->state) : "none"), std::exit(3);
+                 w.setControlMode(id, ControlMode::Open); // (as the next case expects)
+             }
+         }},
         // everything let go: the vehicle default's hold flies it
         {"default hold", [&](std::uint32_t id, int k) {
              if (k != 0) return;

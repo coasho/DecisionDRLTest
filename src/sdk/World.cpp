@@ -159,10 +159,7 @@ std::vector<control::ActivityRecord> Vehicle::activities() const {
     return world_ ? world_->impl_->activities(id_) : std::vector<control::ActivityRecord>{};
 }
 
-control::CommandedState Vehicle::commanded() const {
-    const auto* c = world_ ? world_->impl_->controls(id_) : nullptr;
-    return c ? c->commanded() : control::CommandedState{};
-}
+control::VehicleCommandState Vehicle::commanded() const { return world_ ? world_->impl_->commandState(id_) : control::VehicleCommandState{}; }
 
 std::vector<control::CapabilityDescriptor> Vehicle::capabilities() const {
     return world_ ? world_->impl_->capabilities(id_) : std::vector<control::CapabilityDescriptor>{};
@@ -224,12 +221,12 @@ control::Reason Vehicle::setControlMode(control::ControlMode mode) {
 
 control::ControlMode Vehicle::controlMode() const { return world_ ? world_->impl_->controlMode(id_) : control::ControlMode::Open; }
 
-control::Reason Vehicle::requestControl(std::string_view capability) {
-    return world_ ? world_->impl_->requestControl(id_, capability) : control::Reason::UnknownVehicle;
+control::Reason Vehicle::requestControl(std::string_view capability, control::ControllerId controller) {
+    return world_ ? world_->impl_->requestControl(id_, capability, controller) : control::Reason::UnknownVehicle;
 }
 
-control::Reason Vehicle::releaseControl(std::string_view capability) {
-    return world_ ? world_->impl_->releaseControl(id_, capability) : control::Reason::UnknownVehicle;
+control::Reason Vehicle::releaseControl(std::string_view capability, control::ControllerId controller) {
+    return world_ ? world_->impl_->releaseControl(id_, capability, controller) : control::Reason::UnknownVehicle;
 }
 
 control::Reason Vehicle::revokeControl(std::string_view capability, control::Reason reason) {
@@ -258,7 +255,7 @@ control::CommandResult Vehicle::commandTask(control::TaskId task, const control:
     return world_->impl_->commandTask(id_, task, options);
 }
 
-control::CommandResult Vehicle::cancelTask(control::TaskId task, control::Source caller) {
+control::CommandResult Vehicle::cancelTask(control::TaskId task, control::Caller caller) {
     if (!world_) {
         control::CommandResult r;
         r.reason = control::Reason::UnknownVehicle;
@@ -389,28 +386,28 @@ control::CommandResult World::update(control::ActivityId activity, const control
 
 control::CommandResult World::cancel(control::ActivityId activity) { return impl_->cancel(activity); }
 
-control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::Command& setpoint) {
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::Command& setpoint) {
     return impl_->update(caller, activity, setpoint);
 }
 
-control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::SupportCommand& setpoint) {
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::SupportCommand& setpoint) {
     return impl_->update(caller, activity, setpoint);
 }
 
-control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::RouteCommand& route,
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
                                      Span<const control::Waypoint> waypoints) {
     return impl_->update(caller, activity, route, waypoints);
 }
 
-control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::CurveCommand& curve,
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                      Span<const control::BezierSegment> segments) {
     return impl_->update(caller, activity, curve, segments);
 }
 
-control::CommandResult World::cancel(control::Source caller, control::ActivityId activity) { return impl_->cancel(caller, activity); }
+control::CommandResult World::cancel(control::Caller caller, control::ActivityId activity) { return impl_->cancel(caller, activity); }
 
 control::CommandResult World::activityCommand(control::ActivityId activity, control::ActivityCommand command, control::Rank rank,
-                                              control::Source caller) {
+                                              control::Caller caller) {
     return impl_->activityCommand(caller, activity, command, rank);
 }
 
@@ -418,6 +415,14 @@ std::optional<control::ActivityRecord> World::activity(control::ActivityId activ
     if (const auto* a = impl_->activity(activity)) return *a;
     return std::nullopt;
 }
+
+std::optional<control::Setpoint> World::activitySetpoint(control::ActivityId activity) const {
+    control::Setpoint s;
+    if (!impl_->activitySetpoint(activity, s)) return std::nullopt;
+    return s;
+}
+
+std::vector<control::EndPoint> World::endPoints(control::ActivityId activity, std::size_t max) const { return impl_->endPoints(activity, max); }
 
 void World::step(unsigned n) { impl_->step(n); }
 double World::time() const noexcept { return impl_->simTime(); }

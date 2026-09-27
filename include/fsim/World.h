@@ -181,9 +181,12 @@ public:
     /// The live activities, then the ended ones the vehicle remembers, newest first.
     /// A guidance mode's record carries its progress (docs/vehicle-interface.md, 5.3).
     std::vector<control::ActivityRecord> activities() const;
-    /// What the cascade asked for in its last control update, level by level
-    /// (A-GRA's commanded state): an altitude, a heading, an airspeed, an attitude...
-    control::CommandedState commanded() const;
+    /// What the vehicle is commanded (A-GRA's VehicleCommandState): what the
+    /// cascade asked for in its last control update, level by level - an
+    /// altitude, a heading, an airspeed, an attitude... - with the acceleration
+    /// it commands in north, east and down, and the altitude as its mode
+    /// commanded it, in its reference (docs/flight-autonomy.md, 4.12).
+    control::VehicleCommandState commanded() const;
     /// What the vehicle offers: its flight levels and behaviours.
     std::vector<control::CapabilityDescriptor> capabilities() const;
     /// A capability's availability now, as a policy is answered (docs/sdk/control.md,
@@ -210,11 +213,13 @@ public:
     /// Canceled(NotGranted). The platform's own sources never need one.
     control::Reason setControlMode(control::ControlMode mode);
     control::ControlMode controlMode() const;
-    /// A policy asks for control of a capability (by id): Reason::None if
-    /// granted, else NotAllowed or why it is unavailable.
-    control::Reason requestControl(std::string_view capability);
-    /// The policy lets go: its live activities of the capability end Canceled(Released).
-    control::Reason releaseControl(std::string_view capability);
+    /// A policy's controller (0, the default policy) asks for control of a
+    /// capability (by id): Reason::None if granted, else NotAllowed, why it is
+    /// unavailable, or AuthorityHeld while another controller holds it.
+    control::Reason requestControl(std::string_view capability, control::ControllerId controller = 0);
+    /// A controller lets go: its live activities of the capability end
+    /// Canceled(Released). NotGranted, and nothing changes, for another's grant.
+    control::Reason releaseControl(std::string_view capability, control::ControllerId controller = 0);
     /// The platform takes it back: the policy's live activities of it end Canceled(`reason`).
     control::Reason revokeControl(std::string_view capability, control::Reason reason = control::Reason::Revoked);
     /// Whether the policy may request the capability (all may, by default).
@@ -236,7 +241,7 @@ public:
                               Span<const control::BezierSegment> segments = {}, control::TaskRepetition repetition = {});
     /// Fly it: the NEW of its command, the task among the requirements it traces to.
     control::CommandResult commandTask(control::TaskId task, const control::CommandOptions& options = {});
-    control::CommandResult cancelTask(control::TaskId task, control::Source caller = control::Source::Policy);
+    control::CommandResult cancelTask(control::TaskId task, control::Caller caller = {});
     control::Reason removeTask(control::TaskId task);
     std::optional<control::TaskStatus> taskStatus(control::TaskId task) const;
     std::vector<control::TaskStatus> tasks() const;
@@ -321,27 +326,39 @@ public:
     control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
-    /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do
-    /// (docs/sdk/control.md, "Grants"): under ControlMode::Granted a source
-    /// below the activity's may not address it (AuthorityHeld, naming it) - a
-    /// policy cannot change or end what the platform's own sources fly. The
-    /// calls above are the policy's; in Open mode the source changes nothing.
-    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::Command& setpoint);
-    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::SupportCommand& setpoint);
-    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::RouteCommand& route,
+    /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do,
+    /// and a policy's controller (docs/sdk/control.md, "Grants" and "Named
+    /// controllers"; a Source alone is the default policy's): under
+    /// ControlMode::Granted a source below the activity's may not address it
+    /// (AuthorityHeld, naming it) - a policy cannot change or end what the
+    /// platform's own sources fly - nor may a controller another's. The calls
+    /// above are the default policy's; in Open mode the caller changes nothing.
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::Command& setpoint);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::SupportCommand& setpoint);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
                                   Span<const control::Waypoint> waypoints);
-    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::CurveCommand& curve,
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::BezierSegment> segments);
-    control::CommandResult cancel(control::Source caller, control::ActivityId activity);
+    control::CommandResult cancel(control::Caller caller, control::ActivityId activity);
     /// An activity command (docs/sdk/control.md, "Activity commands"): Disable
     /// (it stops flying and is kept), Enable, Reset (over from its beginning),
     /// Delete (a sticky disable: it ends), ChangeRank (`rank`), Unassign (it
     /// gives up its axes and waits for them again). The caller's source as
     /// UPDATE's; refused not_interactive where its command said it takes none.
     control::CommandResult activityCommand(control::ActivityId activity, control::ActivityCommand command, control::Rank rank = {},
-                                           control::Source caller = control::Source::Policy);
+                                           control::Caller caller = {});
     /// A live or recently ended activity of any vehicle; empty if unknown.
     std::optional<control::ActivityRecord> activity(control::ActivityId activity) const;
+    /// What a live activity flies now, or waits to fly (A-GRA's last flight
+    /// command; docs/sdk/control.md, "Reports"): its setpoint as updated, a
+    /// route's waypoints, a curve's segments - appended ones too, its flyout
+    /// curve. Empty for an activity not live.
+    std::optional<control::Setpoint> activitySetpoint(control::ActivityId activity) const;
+    /// Where a live activity flies to (A-GRA's ActualEndPoint): the point it
+    /// flies to now, then those after it - a route's waypoints (a repeating
+    /// route's round again), a curve's segment ends, a pattern's fix, the
+    /// position level's point - `max` at most.
+    std::vector<control::EndPoint> endPoints(control::ActivityId activity, std::size_t max = 16) const;
 
     /// Advance every vehicle by n world steps (frameSkip FDM steps each).
     void step(unsigned n = 1);

@@ -570,6 +570,58 @@ if (!v.submit(tooFastHsa, reject).accepted())                  // refused for wh
 - A waiting activity that fails as it would start, for what Clamp would fly,
   names a suggestion in its record (`ActivityRecord::suggestion`).
 
+### Reports: what an activity flies, and where to
+
+An activity's setpoint read back, where it flies to, and what the vehicle
+is commanded ([flight-autonomy.md](../flight-autonomy.md), 4.12; A-GRA's
+activity report and VehicleCommandState):
+
+```cpp
+std::optional<Setpoint> s = world.activitySetpoint(id); // what it flies: an hsa's merged, a route's waypoints completed,
+                                                        // a curve's segments with the appended ones (its flyout curve)
+for (const EndPoint& e : world.endPoints(id, 4))       // where it flies to, from the point it flies to now:
+    e.kind;                                             // Waypoint, TurnPoint (e.turn: fly-by or fly-over), LoiterPoint
+VehicleCommandState c = v.commanded();                  // the cascade's levels, and:
+c.northAccelerationMs2;                                 // the acceleration it commands, north, east and down (a wing's)
+c.altitudeM, c.altitudeReference;                       // the altitude as its mode commanded it, in its reference
+```
+
+- A waiting activity's setpoint is its command as given; one that has
+  ended has none.
+- A route's end points are its waypoints from the one flown to - turn
+  points, the last a waypoint (a loiter point if it loiters), a repeating
+  route's round again; a curve's, its segment ends; a pattern's, its fix;
+  the position level's, its point. An hsa and a behaviour have none.
+- The acceleration is a wing's longitudinal acceleration along its path and
+  its load factor's lift normal to it, with gravity's pull: NaN where a
+  throttle is commanded in place of a longitudinal acceleration, and for a
+  rotorcraft.
+
+### Named controllers
+
+A vehicle's policy may be several services - A-GRA's mission autonomy
+services - each named by a `ControllerId` (0, the default policy):
+
+```cpp
+v.setControlMode(ControlMode::Granted);
+v.requestControl("fsim.guidance.hsa", 1);   // controller 1 holds it: controlStatus(...).holder == 1
+v.requestControl("fsim.guidance.hsa", 2);   // Reason::AuthorityHeld: another controller holds it
+CommandOptions one;
+one.controller = 1;
+CommandResult r = v.submit(hsa, one);        // flies; controller 2's NEW is refused NotGranted
+world.update(Caller{Source::Policy, 2}, r.activity, setpoint); // AuthorityHeld: another controller's activity
+v.releaseControl("fsim.guidance.hsa", 1);   // its grant ends, and what it flies of it ends Released
+```
+
+- Under `Granted` a grant is one controller's; only its holder's NEW flies
+  the capability, and only it (and the platform's own sources) address its
+  activities. A release by one that does not hold it is refused
+  `not_granted`, and nothing changes.
+- Under `Open` controllers change nothing: arbitration is by source,
+  precedence and rank.
+- A `Source` converts to a `Caller`: the calls that took a source take the
+  default policy's controller.
+
 ### Support and availability: what a vehicle can do at all, and now
 
 Two questions, answered apart ([flight-autonomy.md](../flight-autonomy.md),

@@ -142,7 +142,7 @@ CommandResult CapabilityHost::commandTask(TaskId id, CommandOptions options, con
     return r;
 }
 
-CommandResult CapabilityHost::cancelTask(TaskId id, const sim::VehicleState& state, double now, Source caller) {
+CommandResult CapabilityHost::cancelTask(TaskId id, const sim::VehicleState& state, double now, Caller caller) {
     if (pendingSuggestions_) materialize();
     Task* t = findTask(id);
     if (!t) return rejected(Reason::UnknownTask);

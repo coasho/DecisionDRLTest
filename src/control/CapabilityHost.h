@@ -83,32 +83,33 @@ public:
                          double now);
     /// UPDATE: a new setpoint for a live activity - the fast path; allocates
     /// nothing. `state` is the vehicle's: a route is planned afresh from it.
-    /// `caller` is the source the caller declares, as a NEW's options do:
-    /// under ControlMode::Granted one below the activity's may not address it
-    /// (AuthorityHeld, naming it) - a policy cannot change or end what the
-    /// platform's own sources fly. Open, as ADR-26 10.1: any caller.
-    CommandResult update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Source caller) noexcept;
-    CommandResult update(ActivityId activity, const SupportCommand& setpoint, Source caller) noexcept;
+    /// `caller` is the source the caller declares, as a NEW's options do, and
+    /// a policy's controller: under ControlMode::Granted one below the
+    /// activity's may not address it (AuthorityHeld, naming it) - a policy
+    /// cannot change or end what the platform's own sources fly - nor may a
+    /// controller another's. Open, as ADR-26 10.1: any caller.
+    CommandResult update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Caller caller) noexcept;
+    CommandResult update(ActivityId activity, const SupportCommand& setpoint, Caller caller) noexcept;
     /// UPDATE of a route: its options (a field left out, kHold, keeps its
     /// value) and its waypoints - none: those it has - checked as a NEW's,
     /// then flown afresh from its start, from where the aircraft is.
     CommandResult update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state,
-                         Source caller) noexcept;
+                         Caller caller) noexcept;
     /// UPDATE of a curve: the options given (kHold keeps one), and segments -
     /// with `append` 1, after its end, from the same reference; else a new
     /// curve, flown afresh. Options alone change how it is flown, not where.
     CommandResult update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments, const sim::VehicleState& state,
-                         Source caller) noexcept;
+                         Caller caller) noexcept;
     /// CANCEL: the activity ends and its axes return to the vehicle default
     /// (`caller` as for UPDATE); what waited for them may start.
-    CommandResult cancel(ActivityId activity, const sim::VehicleState& state, double now, Source caller) noexcept;
+    CommandResult cancel(ActivityId activity, const sim::VehicleState& state, double now, Caller caller) noexcept;
     /// An activity command (docs/flight-autonomy.md, 4.10) for a live activity
     /// - flying, waiting or disabled - `caller` as for UPDATE; `rank` for
     /// ChangeRank. Refused NotInteractive where its command said it takes
     /// none, QueueFull where a flying one has no room to be kept (Disable,
     /// Unassign). What waits may start after it. May allocate: an activity
     /// kept out of its slot keeps its route's waypoints and its curve's segments.
-    CommandResult activityCommand(ActivityId activity, ActivityCommand command, Rank rank, const sim::VehicleState& state, double now, Source caller);
+    CommandResult activityCommand(ActivityId activity, ActivityCommand command, Rank rank, const sim::VehicleState& state, double now, Caller caller);
 
     // --- Flight tasks (docs/flight-autonomy.md, 4.11): kept by id, flown on a task command ---
     /// Suggestions the platform keeps at once (the oldest not flying makes room).
@@ -124,13 +125,28 @@ public:
     /// task says. UnknownTask; TaskActive while its activity is live.
     CommandResult commandTask(TaskId id, CommandOptions options, const sim::VehicleState& state, double now);
     /// Its live activity canceled (`caller` as for CANCEL); one never commanded will not be. UnknownTask.
-    CommandResult cancelTask(TaskId id, const sim::VehicleState& state, double now, Source caller);
+    CommandResult cancelTask(TaskId id, const sim::VehicleState& state, double now, Caller caller);
     /// Forget it: UnknownTask; TaskActive while its activity is live.
     Reason removeTask(TaskId id);
     /// Its status; false for a task not kept.
     bool taskStatus(TaskId id, TaskStatus& out);
     /// Every task kept - the caller's and the platform's suggestions - in the order they were made.
     std::vector<TaskStatus> tasks();
+
+    // --- Reports (docs/flight-autonomy.md, 4.12): what an activity flies, and where to ---
+    /// What a live activity flies now, or waits to fly: its setpoint as
+    /// updated, a route's waypoints, a curve's segments (appended ones too).
+    /// False for one not live.
+    bool setpoint(ActivityId activity, Setpoint& out) const;
+    /// Where a live activity flies to: the point it flies to now, then those
+    /// after it - a route's waypoints (a repeating route's round again), a
+    /// curve's segment ends, a pattern's fix, the position level's point -
+    /// `max` at most.
+    std::vector<EndPoint> endPoints(ActivityId activity, std::size_t max) const;
+    /// What the vehicle is commanded (A-GRA's VehicleCommandState): the
+    /// runtime's levels, the acceleration they command at the attitude
+    /// `state` flies, the altitude as its mode commanded it.
+    VehicleCommandState commandState(const sim::VehicleState& state) const noexcept;
     /// The existing entry points (docs/control-architecture.md, 10.7): an
     /// UPDATE of their live activity at the same capability, else a NEW with
     /// the legacy options.
@@ -162,15 +178,17 @@ public:
     /// Canceled(NotGranted).
     void setControlMode(ControlMode mode, const sim::VehicleState& state, double now) noexcept;
     ControlMode controlMode() const noexcept { return controlMode_; }
-    /// A policy asks for control of a capability (A-GRA's ACQUIRE): granted -
-    /// Reason::None - if it is allowed and available; else NotAllowed, or the
-    /// reason it is unavailable. UnknownCapability for one it cannot command.
-    Reason requestControl(std::size_t capability, const sim::VehicleState& state) noexcept;
-    /// The policy lets go: its grant ends, and its live activities of the
+    /// A policy's controller asks for control of a capability (A-GRA's
+    /// ACQUIRE): granted - Reason::None - if it is allowed and available, and
+    /// no other controller holds it; else NotAllowed, the reason it is
+    /// unavailable, or AuthorityHeld. UnknownCapability for one it cannot command.
+    Reason requestControl(std::size_t capability, const sim::VehicleState& state, ControllerId controller = 0) noexcept;
+    /// A controller lets go: its grant ends, and its live activities of the
     /// capability end Canceled(Released); their axes fly the vehicle default.
-    Reason releaseControl(std::size_t capability, const sim::VehicleState& state, double now) noexcept;
+    /// NotGranted, and nothing changes, where another controller holds it.
+    Reason releaseControl(std::size_t capability, const sim::VehicleState& state, double now, ControllerId controller = 0) noexcept;
     /// The platform takes it back: the grant ends, and the policy's live
-    /// activities of the capability end Canceled with `reason`: Revoked (if
+    /// activities of the capability - every controller's - end Canceled with `reason`: Revoked (if
     /// None), CollisionAvoidance or Restricted; InvalidParameter for another,
     /// and nothing changes.
     Reason revokeControl(std::size_t capability, Reason reason, const sim::VehicleState& state, double now) noexcept;
@@ -385,8 +403,8 @@ private:
     bool startWaiting(Waiting& w, const sim::VehicleState& state, double now) noexcept;
     /// UPDATE of a waiting activity: its command's new setpoint, checked as its NEW was, kept for its start.
     CommandResult updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
-                                const sim::VehicleState& state, Source caller) noexcept;
-    CommandResult updateWaiting(Waiting& w, const SupportCommand& setpoint, Source caller) noexcept;
+                                const sim::VehicleState& state, Caller caller) noexcept;
+    CommandResult updateWaiting(Waiting& w, const SupportCommand& setpoint, Caller caller) noexcept;
     /// The live activities' time windows after a world step: a persistent one
     /// done at its end window's close, a terminating one late or early failed if its end is critical.
     void keepWindows(double now) noexcept;
@@ -487,6 +505,7 @@ private:
     /// A capability's standing with the vehicle's policy (6.2, 7.2).
     struct Authority {
         bool allowed = true, granted = false;
+        ControllerId holder = 0;       ///< the controller whose grant it is, while granted
         std::uint32_t precedence = 0;  ///< the platform's precedence for it (setPrecedence; beside what a NEW reads first)
         CapabilityStatus restricted{}; ///< the platform's restriction (setAvailability)
     };
@@ -500,17 +519,18 @@ private:
     Reason missing(std::string_view feature) const noexcept;
     /// Its authority, the table grown with the catalog.
     Authority& authorityOf(std::size_t capability);
-    /// Why `source` may not command the capability now - no grant under
-    /// Granted, the platform's restriction - or Reason::None. The platform's
-    /// own sources are never stopped here.
-    Reason admits(std::size_t capability, Source source) const noexcept;
-    /// The policy's live activities of the capability - flying or waiting - end
-    /// Canceled with `reason`; what waited may start.
-    void endPolicy(std::size_t capability, Reason reason, const sim::VehicleState& state, double now) noexcept;
+    /// Why `source` (a policy's `controller`) may not command the capability
+    /// now - no grant of its own under Granted, the platform's restriction -
+    /// or Reason::None. The platform's own sources are never stopped here.
+    Reason admits(std::size_t capability, Source source, ControllerId controller = 0) const noexcept;
+    /// The policy's live activities of the capability - flying or waiting;
+    /// `only` one controller's, if given - end Canceled with `reason`; what waited may start.
+    void endPolicy(std::size_t capability, Reason reason, const sim::VehicleState& state, double now, const ControllerId* only = nullptr) noexcept;
     /// Whether `caller` may UPDATE or CANCEL a live activity (flying or
     /// waiting): any caller under Open (ADR-26 10.1); under Granted a source no
-    /// lower than the activity's - FA stays the primary controller. Else AuthorityHeld.
-    Reason addresses(const ActivityRecord& record, Source caller) const noexcept;
+    /// lower than the activity's - FA stays the primary controller - and, a
+    /// policy's, only its own controller's. Else AuthorityHeld.
+    Reason addresses(const ActivityRecord& record, Caller caller) const noexcept;
 
     std::uint32_t vehicle_ = 0;
     double controlPeriodS_ = 1.0 / 120.0;

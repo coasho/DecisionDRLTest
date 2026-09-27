@@ -19,13 +19,14 @@ using namespace fsim::modes;
 
 namespace {
 
-/// An hsa east at the aircraft's speed and height, from `source`.
-CommandResult hsa(session::World& w, std::uint32_t v, Source source = Source::Policy) {
+/// An hsa east at the aircraft's speed and height, from `source` (a policy's `controller`).
+CommandResult hsa(session::World& w, std::uint32_t v, Source source = Source::Policy, ControllerId controller = 0) {
     const auto& s = *w.vehicleState(v);
     HsaCommand h;
     h.headingRad = 0.5 * kPi, h.speed = s.airspeedTrueMs, h.speedReference = 0.0, h.altitudeM = s.altitudeMslM;
     CommandOptions o;
     o.source = source;
+    o.controller = controller;
     return w.submit(v, h, o);
 }
 
@@ -197,6 +198,75 @@ TEST_CASE("grants: under Granted a policy cannot change or end what the platform
     REQUIRE(mine != 0);
     CHECK(w.update(mine, climb).accepted());
     CHECK(w.cancel(mine).status == CommandStatus::Canceled);
+}
+
+TEST_CASE("grants: named controllers - a grant is one controller's, and under Granted only its holder commands the capability and "
+          "addresses what it flies",
+          "[modes]") {
+    session::World w(options("grants-controllers"));
+    const auto v = wing(w, "c172x", 1500.0, 55.0);
+    w.step(stepsFor(w, 1.0));
+    HsaCommand climb;
+    climb.altitudeM = 1600.0;
+    REQUIRE(w.setControlMode(v, ControlMode::Granted) == Reason::None);
+    // one controller holds it; another's request is refused until it lets go
+    CHECK(w.requestControl(v, kHsa, 1) == Reason::None);
+    CHECK(w.requestControl(v, kHsa, 1) == Reason::None); // (again: still its)
+    ControlStatus st = w.controlStatus(v, kHsa);
+    CHECK((st.granted && st.holder == 1));
+    CHECK(w.requestControl(v, kHsa, 2) == Reason::AuthorityHeld);
+    CHECK(w.controlStatus(v, kHsa).holder == 1);
+    // only the holder's NEW flies; its record keeps its controller
+    CHECK(hsa(w, v, Source::Policy, 2).reason == Reason::NotGranted);
+    CHECK(hsa(w, v).reason == Reason::NotGranted); // (the default policy's: controller 0 holds none)
+    const ActivityId a = hsa(w, v, Source::Policy, 1).activity;
+    REQUIRE(a != 0);
+    CHECK(w.activity(a)->controller == 1);
+    // another controller may not address it; the holder and the platform's own sources may
+    CommandResult r = w.update(Caller{Source::Policy, 2}, a, climb);
+    CHECK((r.reason == Reason::AuthorityHeld && r.other == a));
+    CHECK(w.cancel(Caller{Source::Policy, 2}, a).reason == Reason::AuthorityHeld);
+    CHECK(w.activityCommand(Caller{Source::Policy, 2}, a, ActivityCommand::Disable).reason == Reason::AuthorityHeld);
+    CHECK(w.update(Caller{Source::Policy, 1}, a, climb).accepted());
+    CHECK(w.update(Source::Autopilot, a, climb).accepted());
+    // nor let it go: the holder's release ends what it flies of the capability
+    CHECK(w.releaseControl(v, kHsa, 2) == Reason::NotGranted);
+    w.step();
+    CHECK(w.activity(a)->state == ActivityState::Active);
+    CHECK(w.releaseControl(v, kHsa, 1) == Reason::None);
+    endedAs(w, a, Reason::Released);
+    st = w.controlStatus(v, kHsa);
+    CHECK((!st.granted && st.holder == 0));
+    CHECK(w.requestControl(v, kHsa, 2) == Reason::None);
+    CHECK(w.controlStatus(v, kHsa).holder == 2);
+    // Open: any controller commands, and addresses any activity (ADR-26 10.1)
+    REQUIRE(w.setControlMode(v, ControlMode::Open) == Reason::None);
+    const ActivityId b = hsa(w, v, Source::Policy, 1).activity;
+    REQUIRE(b != 0);
+    CHECK(w.update(Caller{Source::Policy, 3}, b, climb).accepted());
+    // back to Granted: what flies without its own controller's grant ends
+    REQUIRE(w.setControlMode(v, ControlMode::Granted) == Reason::None);
+    endedAs(w, b, Reason::NotGranted);
+    const ActivityId c = hsa(w, v, Source::Policy, 2).activity;
+    REQUIRE(c != 0);
+    // a task command is its command's NEW, with its controller; a task canceled by another controller is not
+    REQUIRE(w.cancel(Caller{Source::Policy, 2}, c).status == CommandStatus::Canceled);
+    HsaCommand east;
+    east.headingRad = 0.5 * kPi;
+    REQUIRE(w.storeTask(v, 4, Command(east)) == Reason::None);
+    CommandOptions two;
+    two.controller = 2;
+    const CommandResult t = w.commandTask(v, 4, two);
+    REQUIRE(t.accepted());
+    CHECK(w.activity(t.activity)->controller == 2);
+    CHECK(w.cancelTask(v, 4, Caller{Source::Policy, 1}).reason == Reason::AuthorityHeld);
+    CHECK(w.cancelTask(v, 4, Caller{Source::Policy, 2}).status == CommandStatus::Canceled);
+    // the platform's revocation is the capability's, whoever holds it
+    const ActivityId d = hsa(w, v, Source::Policy, 2).activity;
+    REQUIRE(d != 0);
+    CHECK(w.revokeControl(v, kHsa) == Reason::None);
+    endedAs(w, d, Reason::Revoked);
+    CHECK_FALSE(w.controlStatus(v, kHsa).granted);
 }
 
 TEST_CASE("grants: the platform revokes and restricts with its own reasons; one that would misreport an end is refused", "[modes]") {

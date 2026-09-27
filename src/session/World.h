@@ -134,31 +134,44 @@ public:
     control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
-    /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do
-    /// (docs/vehicle-interface.md, 6.1): under ControlMode::Granted a source
-    /// below the activity's may not address it (AuthorityHeld, naming it). The
-    /// calls above are the policy's.
-    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::Command& setpoint);
-    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::SupportCommand& setpoint);
-    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::RouteCommand& route,
+    /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do,
+    /// and a policy's controller (docs/vehicle-interface.md, 6.1;
+    /// docs/flight-autonomy.md, 4.12): under ControlMode::Granted a source
+    /// below the activity's may not address it (AuthorityHeld, naming it), nor
+    /// a controller another's. The calls above are the default policy's.
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::Command& setpoint);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::SupportCommand& setpoint);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
                                   Span<const control::Waypoint> waypoints);
-    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::CurveCommand& curve,
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::BezierSegment> segments);
-    control::CommandResult cancel(control::Source caller, control::ActivityId activity);
+    control::CommandResult cancel(control::Caller caller, control::ActivityId activity);
     /// An activity command (docs/flight-autonomy.md, 4.10) - disable, enable,
     /// reset, delete, change its rank, unassign it - declaring the caller's
     /// source as UPDATE does; `rank` for ChangeRank.
-    control::CommandResult activityCommand(control::Source caller, control::ActivityId activity, control::ActivityCommand command,
+    control::CommandResult activityCommand(control::Caller caller, control::ActivityId activity, control::ActivityCommand command,
                                            control::Rank rank = {});
     // --- Flight tasks (docs/flight-autonomy.md, 4.11): kept by id, flown on a task command ---
     control::Reason storeTask(std::uint32_t id, control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints = {},
                               Span<const control::BezierSegment> segments = {}, control::TaskRepetition repetition = {});
     control::CommandResult commandTask(std::uint32_t id, control::TaskId task, const control::CommandOptions& options = {});
-    control::CommandResult cancelTask(std::uint32_t id, control::TaskId task, control::Source caller = control::Source::Policy);
+    control::CommandResult cancelTask(std::uint32_t id, control::TaskId task, control::Caller caller = {});
     control::Reason removeTask(std::uint32_t id, control::TaskId task);
     /// A task's status; empty for one not kept (or an unknown vehicle).
     std::optional<control::TaskStatus> taskStatus(std::uint32_t id, control::TaskId task);
     std::vector<control::TaskStatus> tasks(std::uint32_t id);
+    // --- Reports (docs/flight-autonomy.md, 4.12): what an activity flies, and where to ---
+    /// What a live activity flies now, or waits to fly: its setpoint as
+    /// updated, a route's waypoints, a curve's segments (appended ones too: its
+    /// flyout curve). False for an activity not live.
+    bool activitySetpoint(control::ActivityId activity, control::Setpoint& out) const;
+    /// Where a live activity flies to (A-GRA's ActualEndPoint): the point it
+    /// flies to now, then those after it, `max` at most.
+    std::vector<control::EndPoint> endPoints(control::ActivityId activity, std::size_t max = 16) const;
+    /// What the vehicle is commanded (A-GRA's VehicleCommandState): the
+    /// cascade's levels, the acceleration they command in north, east and
+    /// down, the altitude as its mode commanded it. NaN fields for an unknown vehicle.
+    control::VehicleCommandState commandState(std::uint32_t id) const;
     /// What flies a vehicle's primary axes nobody owns: the neutral actuator
     /// command (as always) or a hold of the heading, airspeed and height each
     /// had when it was let go. Reason::None if set.
@@ -199,11 +212,13 @@ public:
     /// grant for its capability, and what the policy flies without one ends.
     control::Reason setControlMode(std::uint32_t id, control::ControlMode mode);
     control::ControlMode controlMode(std::uint32_t id) const noexcept;
-    /// A policy asks for control of a capability (by id): Reason::None if
-    /// granted; else NotAllowed, the reason it is unavailable, UnknownCapability.
-    control::Reason requestControl(std::uint32_t id, std::string_view capability);
-    /// The policy lets go: the grant ends, and its live activities of the capability end Canceled(Released).
-    control::Reason releaseControl(std::uint32_t id, std::string_view capability);
+    /// A policy's controller asks for control of a capability (by id):
+    /// Reason::None if granted; else NotAllowed, the reason it is unavailable,
+    /// AuthorityHeld (another controller holds it), UnknownCapability.
+    control::Reason requestControl(std::uint32_t id, std::string_view capability, control::ControllerId controller = 0);
+    /// A controller lets go: the grant ends, and its live activities of the
+    /// capability end Canceled(Released). NotGranted for another's grant.
+    control::Reason releaseControl(std::uint32_t id, std::string_view capability, control::ControllerId controller = 0);
     /// The platform takes it back: the grant ends, and the policy's live activities of it end Canceled(`reason`).
     control::Reason revokeControl(std::uint32_t id, std::string_view capability, control::Reason reason = control::Reason::Revoked);
     /// Whether the policy may request the capability; a grant for one no longer allowed is revoked.

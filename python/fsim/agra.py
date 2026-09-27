@@ -121,6 +121,18 @@ FLIGHT_CAPABILITY = {
 #: SpeedReference codes (ActivityProgress.speed_reference) -> A-GRA's SpeedReferenceEnum, or MachType
 SPEED_REFERENCE = {0: "TRUE_AIRSPEED", 1: "CALIBRATED_AIRSPEED", 2: "GROUNDSPEED", 3: "MACH"}
 
+#: AltitudeReference codes (CommandedState.altitude_reference, EndPoint.altitude_reference) -> A-GRA's AltitudeReferenceEnum
+ALTITUDE_REFERENCE = {0: "MSL", 1: "AGL", 2: "WGS_HAE"}
+
+#: fsim.EndPointKind -> the element of A-GRA's MA_EndPointType choice
+END_POINT = {0: "WayPoint", 1: "TurnPoint", 2: "LoiterPoint"}
+
+#: TurnType codes (a turn point's) -> A-GRA's TurnPointTypeEnum
+TURN_POINT_TYPE = {0: "TURN_SHORT", 1: "FLY_OVER"}
+
+#: A quintic Bezier as A-GRA's NURBS has it: its six control points weighted 1, and this clamped knot vector
+KNOT_VECTOR = (0.0,) * 6 + (1.0,) * 6
+
 
 def command_processing_state(status):
     """A command's status (a result's first field, or fsim's CommandStatus value) as A-GRA's
@@ -181,6 +193,30 @@ def command_options(ranking=None, temporal=None, override_rejection=None):
     if override_rejection is not None:
         out["override_rejection"] = bool(override_rejection)
     return out
+
+
+def altitude_reference(code):
+    """An AltitudeReference code as A-GRA's AltitudeReferenceEnum; None for NaN (none commanded)."""
+    return None if code != code else ALTITUDE_REFERENCE[int(code)]
+
+
+def end_point(point):
+    """An end point (fsim.EndPoint, Activity.end_points) as A-GRA's MA_EndPointType choice: its element
+    ("WayPoint", "TurnPoint", "LoiterPoint") and, for a turn point, its TurnPointTypeEnum (else None)."""
+    kind = END_POINT[int(point.kind)]
+    return kind, (TURN_POINT_TYPE[int(point.turn)] if kind == "TurnPoint" else None)
+
+
+def flyout_curve(setpoint):
+    """A curve's setpoint (Activity.setpoint()) as A-GRA's FlyoutCurve (docs/flight-autonomy.md, 4.12): one
+    MA_NURBS_PointType per segment it flies, appended ones too - {"CenterReference": (latitude_rad, longitude_rad,
+    altitude_m above sea level), "ControlPoints": [((north, east, down), weight 1.0)] * 6, "KnotVector": KNOT_VECTOR}."""
+    if setpoint is None or setpoint.method != "submit_curve":
+        raise ValueError("only a curve's setpoint has a flyout curve")
+    k = setpoint.kwargs
+    reference = (k["latitude_rad"], k["longitude_rad"], k["altitude_m"])
+    return [{"CenterReference": reference, "ControlPoints": [((n, e, d), 1.0) for n, e, d in zip(s.north, s.east, s.down)],
+             "KnotVector": KNOT_VECTOR} for s in setpoint.args[0]]
 
 
 def task_state(status):

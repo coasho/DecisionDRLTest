@@ -281,6 +281,37 @@ A command kept by id and flown on a task command (A-GRA's MA_TaskMT with Flight,
 | `World::storeTask`, `commandTask`, `cancelTask`, `removeTask`, `taskStatus`, `tasks`; `Vehicle::` likewise; `TaskId`, `kSuggestedTask`, `TaskRepetition`, `TaskState`, `TaskStatus`; `Reason::UnknownTask`, `TaskActive` | `fsim_vehicle_store_task` (the command as an `fsim_batch_command`), `_command_task`, `_cancel_task`, `_remove_task`, `_task_status`, `_task_count`, `_task_at`; `fsim_task_status`, `fsim_task_state_name`, `FSIM_SUGGESTED_TASK` | `vehicle.store_task(id, fsim.BatchCommand(...), attempts, interval_s)`, `command_task`, `cancel_task`, `remove_task`, `task_status`, `tasks`; `fsim.TaskState`, `fsim.TaskStatus`; `fsim.agra.task_state` |
 | `CommandDetails::suggestion`; `ActivityRecord::suggestion`, `run`, `runs` | `fsim_command_detail.suggestion`; `fsim_activity_envelope.suggestion`, `run`, `runs` | `fsim.Rejected.suggestion`; `ActivityInfo.suggestion`, `.run`, `.runs` |
 
+### 4.12 Reports and named controllers (as FA-2 builds it)
+
+What an activity flies and where to, read back as A-GRA's activity report carries them (VI 1.2.3.1; MA_CurveFollowingControlType, MA_EndPointType, MA_VehicleCommandStateType), and the several mission autonomy services that may hold control of one vehicle (SystemServiceType).
+
+- **Its setpoint read back (ACT-15).** `activitySetpoint(activity)` gives what a live activity flies now:
+  - a mode's setpoint as its NEW completed it and its UPDATEs merged (an hsa's heading, speed and altitude, with their references), a level's, a support command's, a behaviour's;
+  - a route's waypoints as completed (a field left out filled from the point before);
+  - a curve's segments, the appended ones too.
+
+  A waiting activity's is its command as given: it is completed as it starts, from where the aircraft is then. None once it has ended.
+- **Its flyout curve (CRV-14).** A curve's setpoint is its flyout curve: the reference its segments are from (fixed at its NEW; where the aircraft was, if left out) and every segment it flies. `fsim.agra.flyout_curve` gives A-GRA's form: one MA_NURBS_PointType per segment, its six control points weighted 1, the knots [0 x6, 1 x6].
+- **Its end points (ACT-10).** `endPoints(activity, max)` says where it flies to, from the point it flies to now, `max` at most:
+  - a route's waypoints, from the one its progress names (a waiting route's: from its start). Each is a turn point (A-GRA's TurnPoint: fly-by TURN_SHORT, or FLY_OVER) but the last, a waypoint - or a loiter point where the route loiters after it. A repeating route's go round again;
+  - a curve's segment ends, offset from its reference; the last a loiter point where it loiters. None for a waiting curve whose reference is left out: where it will start is not known yet;
+  - a pattern's centre or fix, a loiter point; the position level's point, a waypoint;
+  - none for an hsa, a behaviour, or a route or curve past its end that flies on.
+- **What the vehicle is commanded (ACT-13).** `commandState(vehicle)` is A-GRA's VehicleCommandState: the cascade's levels, as before (CommandedState), and:
+  - the acceleration commanded, north, east and down. A wing's is its longitudinal acceleration along its flight path and its load factor's lift normal to the path (JSBSim's lift load factor, in the plane of symmetry), with gravity's pull, at the attitude, angle of attack and sideslip it flies. In the F-16C's 60-degree turn it is the acceleration flown to within 1 m/s^2 on each axis once rolled in (test_reports). NaN where no longitudinal acceleration is commanded (a throttle given instead), and for a rotorcraft, whose thrust is not its acceleration (its drag is not modelled here);
+  - the altitude as commanded, in its reference: a live hsa's or pattern's, a route's point flown to's; a curve's (as its progress has it) and the position level's above sea level.
+- **Named controllers (AUT-06).** A vehicle's policy may be several services, each named by a `ControllerId` (0, the default policy; A-GRA's SystemServiceType). A NEW's `CommandOptions::controller` names its controller, kept with its activity (`ActivityRecord::controller`). UPDATE, CANCEL and the activity commands declare a `Caller {source, controller}`; a `Source` alone is the default policy's.
+  - Under `ControlMode::Granted` a grant is one controller's (`ControlStatus::holder`). A request while another controller holds it is refused `authority_held`; a release by one that does not hold it is refused `not_granted`, and nothing changes. A release ends the releasing controller's activities of the capability.
+  - Only the holder's NEW flies the capability (another's is refused `not_granted`), and a controller may not address another's activity (`authority_held`, naming it), as a lower source may not address a higher one's.
+  - Switching to Granted ends what flies without its own controller's grant. The platform's revocation, and a capability no longer allowed, end every controller's.
+  - Under `ControlMode::Open`, as ADR-26: any controller commands and addresses any activity. Arbitration is by source, precedence and rank, never by controller.
+  - Controllers, like sources, are declared, not authenticated.
+
+| C++ | C ABI 1.12 | Python |
+| --- | --- | --- |
+| `World::activitySetpoint`, `endPoints`, `commandState`; `Setpoint`, `EndPoint`, `EndPointKind`, `VehicleCommandState`; `Vehicle::commanded()`, a `VehicleCommandState` now | `fsim_activity_get_setpoint` (the `fsim_batch_command` that would command it, its arrays the library's), `fsim_activity_end_points`, `fsim_end_point`, `fsim_end_point_kind_name`; `fsim_commanded_state` grown (`north_acceleration_ms2`, `east_`, `down_`, `altitude_m`, `altitude_reference`) | `activity.setpoint()` (a `fsim.BatchCommand`), `activity.end_points(max)`, `fsim.EndPoint`, `fsim.EndPointKind`; `vehicle.commanded`'s new fields; `fsim.agra.flyout_curve`, `end_point`, `altitude_reference` |
+| `ControllerId`, `Caller`; `CommandOptions::controller`, `ActivityRecord::controller`, `ControlStatus::holder`; `requestControl` and `releaseControl` with a controller | `fsim_command_options.controller` (1.9's reserved word); `fsim_activity_update_by`, `_cancel_by`, `_update_route_by`, `_update_curve_by`; a controller on `fsim_activity_command` and `fsim_vehicle_cancel_task`; `fsim_vehicle_request_control_by`, `_release_control_by`, `fsim_vehicle_control_holder`; `fsim_activity_envelope.controller` | `controller=` on every submit and `command_task`; `Activity.controller`; `request_control(capability, controller)`, `release_control(capability, controller)`; `fsim.ControlStatus.holder`; `ActivityInfo.controller` |
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -429,13 +460,12 @@ Stop advertising what does not work, at once (D4); tell physically unsupported, 
 
 The command and activity semantics A-GRA defines around every flight command.
 
-**Status:** in progress, in five steps. Done 2026-09-27 and measured in section 14:
+**Status:** done 2026-09-27 in five steps, each measured in section 14:
 - FA-2a, the command envelope (4.8);
 - FA-2b, ranks, queues and time windows (4.9);
 - FA-2c, the activity commands (4.10);
-- FA-2d, flight tasks and suggestions (4.11).
-
-Still to come: FA-2e, named controllers (AUT-06, moved from FA-2d so that each step stays one reviewable change), the reports and the fleet cases.
+- FA-2d, flight tasks and suggestions (4.11);
+- FA-2e, named controllers and the reports (4.12; AUT-06 moved from FA-2d so that each step stays one reviewable change), with the fleet cases.
 
 **Items (36):** CMD-02, CMD-03, CMD-05, CMD-06, CMD-07, CMD-08, CMD-09, CMD-10, CMD-12, CMD-13, CMD-14, CMD-15, CMD-16, CMD-18, CMD-19, CMD-20; WPT-24; CRV-14; VAL-01, VAL-02, VAL-08, VAL-10, VAL-11, VAL-12; ACT-03, ACT-04, ACT-06, ACT-07, ACT-08, ACT-10, ACT-13, ACT-15; AUT-06; STS-14; TSK-01, TSK-02.
 
@@ -886,6 +916,35 @@ Filled as the stages land: each stage's criteria results, the digests (identical
 - **Code placement, again.** The per-step cases that run only the runtime read +6 to +10 % against FA-2c's build ("axes apart", "default hold", "apart, pseudo"), though FA-2d changed none of their code. The task code in the host's file, which links ahead of the runtime's, had moved it. In its own file, last in the library (`src/control/Tasks.cpp`), per step (`micro`, 5 rounds) is within -5.5 % to +0.7 %, the outliers faster.
 - A/B against FA-2c's build (`command`, 9 rounds): the per-step command +3.1 %, a level switch's NEW +2.7 %, a behaviour's +2.2 %, a checked UPDATE +1.2 %.
 - ctest: all 229 tests pass (the three task cases added).
+
+**FA-2e (named controllers and the reports: AUT-06, ACT-10, ACT-13, ACT-15, CRV-14; the fleet cases).**
+- What it built is 4.12, in C++, the C ABI (1.12) and Python. `fsim.control/controller_identity` is supported on every vehicle.
+- `test_reports` (4 cases, 137 checks) and its Python twin (3 tests; one reads an hsa's setpoint back and flies it again as a batch item):
+  - a setpoint read back completed, merged, appended, and as given while it waits; none once ended;
+  - end points of a route (turn points, the last, round again, a loiter), a curve (from its reference), a pattern and the position level; none for an hsa, nor for a waiting curve whose reference is left out;
+  - the commanded acceleration against the flown one in the F-16C's 60-degree turn, within 1 m/s^2 on each axis; a 2 g pull's -9.8 m/s^2 down; none where a throttle is given, none for the UH-60;
+  - the altitude in its reference: an hsa's above the ground, a route's point, a curve's and the position level's above sea level.
+- The named controllers' case in `test_grants` (51 checks), its Python twin (`test_controllers`), and `test_c_abi`'s 1.12 calls. One controller holds a grant. Another's request is refused `authority_held`, its NEW `not_granted`, its UPDATE, CANCEL and activity command `authority_held`, its release `not_granted`. The holder's release ends its activity, released. Open: any controller. Back to Granted: what flies without its own grant ends. A task command keeps its controller, and a revocation ends every controller's.
+- **What the probe found.** The load factor, put along the body's normal, leaked n g sin(alpha) along the flight path: -3.3 m/s^2 at 2.4 g and 8 degrees of angle of attack, where the aircraft flew -0.1. The load factor is the lift's, normal to the path (JSBSim's Nlf): in wind axes the along-path part is what the aircraft flies (-0.09 against -0.06).
+- **The conformance walk** (7,533,377 checks, every adapter). Its authority model knows controllers: every NEW, UPDATE, CANCEL, activity command, task command and cancel, request and release is drawn from three. Its rules:
+  - only the holder's NEW flies; another's call on its activity is refused under Granted;
+  - a request while another holds the grant is refused; a release of another's is refused, and ends nothing; a release ends the releaser's activities only;
+  - Granted ends what flies without its own grant;
+  - every record keeps its controller.
+
+  Across the walks: requests refused `authority_held`, releases refused `not_granted`, and calls refused for another controller's activity.
+- **The fleet** (all 35 aircraft at once, 1,976 checks):
+  - validated, nothing flying; flown and read back, its setpoint completed; its commanded altitude in its reference, and an acceleration for every wing, none for every rotorcraft;
+  - queued behind what flies and started as it ends; scheduled 2 s ahead, started, taking the axes; disabled and enabled;
+  - a task executing, then canceled; named controllers;
+  - a route's end points, and its commanded altitude the point flown to's;
+  - no ground contact, no divergence, no calibrated airspeed below the envelope's least.
+- No earlier answer or flight changes. Digests: identical, with protection and without. The record and the options keep their sizes (304 and 136 bytes): the controller fills a hole in each.
+- The allocation gate passes, with a new case in the steps counted: a named controller's activity under Granted, updated every step by it, and what the vehicle is commanded read every step.
+- Not-found answers are quiet: `fsim_vehicle_task_status` for a task not kept and `fsim_activity_get_setpoint` for an activity not live say so in `fsim_last_error`, and log nothing.
+- **Code placement.** The reports' code is in its own file at the end of the library (`src/control/Reports.cpp`, between the tasks' and the names'). The runtime's file is unchanged: the commanded acceleration and altitude are worked out beside it (`CapabilityHost::commandState`), not in `ControlStack::commanded()`.
+- A/B against FA-2d's build (the scratchpad worktree's): per step (`micro`, 5 rounds) within -0.7 % to +2.2 % ("attitude" +2.2 %, "apart, pseudo" +1.9 %, the rest within 1 %). The commands (`command`, 9 rounds): the per-step command -2.9 %, a level switch's NEW +1.9 %, a behaviour's -1.1 %, a checked UPDATE +1.2 %.
+- ctest: all 235 tests pass (the report and fleet cases added).
 
 
 ## Appendix A: the inventory

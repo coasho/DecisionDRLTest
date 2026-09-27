@@ -1094,21 +1094,21 @@ int main(int argc, char** argv) {
             fsim_command_options_init(&o);
             CHECK(fsim_vehicle_submit(world, hawk, FSIM_LEVEL_VELOCITY, velocity, 4, &o, &flying) == FSIM_OK && flying.status == FSIM_COMMAND_ACCEPTED);
             /* disabled: live, kept, flying nothing; enabled again; re-ranked; deleted for good */
-            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_DISABLE, 0, 0, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_DISABLE, 0, 0, FSIM_SOURCE_POLICY, 0, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
             CHECK(fsim_activity_get(world, flying.activity, &ai) == FSIM_OK && ai.state == FSIM_ACTIVITY_DISABLED && isnan(ai.end_time));
             CHECK(strcmp(fsim_activity_state_name(FSIM_ACTIVITY_DISABLED), "disabled") == 0);
-            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_ENABLE, 0, 0, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_ENABLE, 0, 0, FSIM_SOURCE_POLICY, 0, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
             CHECK(fsim_activity_get(world, flying.activity, &ai) == FSIM_OK && ai.state == FSIM_ACTIVITY_PENDING);
-            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_CHANGE_RANK, 2, 1, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
-            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_DELETE, 0, 0, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_CHANGE_RANK, 2, 1, FSIM_SOURCE_POLICY, 0, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_DELETE, 0, 0, FSIM_SOURCE_POLICY, 0, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
             CHECK(fsim_activity_get(world, flying.activity, &ai) == FSIM_OK && ai.state == FSIM_ACTIVITY_DELETED && strcmp(fsim_activity_state_name(ai.state), "deleted") == 0);
-            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_ENABLE, 0, 0, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "activity_ended") == 0);
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_ENABLE, 0, 0, FSIM_SOURCE_POLICY, 0, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "activity_ended") == 0);
             /* one whose command takes none refuses them */
             fsim_command_options_init(&o);
             o.interactive = 0;
             CHECK(fsim_vehicle_submit(world, hawk, FSIM_LEVEL_VELOCITY, velocity, 4, &o, &flying) == FSIM_OK && flying.status == FSIM_COMMAND_ACCEPTED);
-            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_RESET, 0, 0, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "not_interactive") == 0);
-            CHECK(fsim_activity_command(world, flying.activity, 99, 0, 0, FSIM_SOURCE_POLICY, &cr) != FSIM_OK); /* (no such command) */
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_RESET, 0, 0, FSIM_SOURCE_POLICY, 0, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "not_interactive") == 0);
+            CHECK(fsim_activity_command(world, flying.activity, 99, 0, 0, FSIM_SOURCE_POLICY, 0, &cr) != FSIM_OK); /* (no such command) */
             CHECK(strcmp(fsim_activity_command_name(FSIM_ACTIVITY_UNASSIGN), "unassign") == 0);
         }
         {
@@ -1145,7 +1145,7 @@ int main(int argc, char** argv) {
             fsim_activity_envelope_init(&ae);
             CHECK(fsim_activity_get_envelope(world, cr.activity, &ae) == FSIM_OK && ae.run == 1 && ae.runs == 1 && ae.trace[0].kind == FSIM_REQUIREMENT_TASK);
             CHECK(fsim_vehicle_command_task(world, kestrel, 5, NULL, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "task_active") == 0);
-            CHECK(fsim_vehicle_cancel_task(world, kestrel, 5, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+            CHECK(fsim_vehicle_cancel_task(world, kestrel, 5, FSIM_SOURCE_POLICY, 0, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
             CHECK(fsim_vehicle_task_status(world, kestrel, 5, &ts) == FSIM_OK && ts.state == FSIM_TASK_CANCELED);
             CHECK(fsim_vehicle_task_count(world, kestrel) == 1 && fsim_vehicle_task_at(world, kestrel, 0, &ts) == FSIM_OK && ts.task_id == 5);
             CHECK(fsim_vehicle_remove_task(world, kestrel, 5, &reason) == FSIM_OK && reason == 0);
@@ -1159,6 +1159,109 @@ int main(int argc, char** argv) {
             CHECK(fsim_last_command_detail(world, &d) == FSIM_OK && (d.suggestion & FSIM_SUGGESTED_TASK) != 0);
             CHECK(fsim_vehicle_task_status(world, kestrel, d.suggestion, &ts) == FSIM_OK && ts.suggested == 1);
             CHECK(fsim_vehicle_command_task(world, kestrel, d.suggestion, &o, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+        }
+        {
+            /* ABI 1.12: reports - an activity's setpoint read back, its end points, the commanded state grown
+             * (docs/flight-autonomy.md, 4.12) */
+            fsim_batch_command sp;
+            fsim_command_result cr;
+            fsim_end_point points[4];
+            fsim_commanded_state cs;
+            fsim_waypoint route[3];
+            fsim_bezier_segment piece;
+            const fsim_vehicle_state* st;
+            uint32_t merlin = 0, count = 0, i;
+            const double hold = fsim_hold();
+            double hsa[6], options[4] = {0.0, 0.0, 0.0, 0.0}, curve[8];
+            spec.name = "cap-merlin";
+            spec.type = "jsbsim:f16c";
+            spec.altitude_msl_m = 3000.0;
+            spec.airspeed_ms = 160.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &merlin) == FSIM_OK);
+            CHECK(fsim_world_step(world, 5) == FSIM_OK);
+            /* an hsa, read back completed; the commanded altitude in its reference */
+            hsa[0] = 1.0, hsa[1] = hold, hsa[2] = hold, hsa[3] = hold, hsa[4] = 3200.0, hsa[5] = FSIM_ALTITUDE_MSL;
+            CHECK(fsim_vehicle_submit_mode(world, merlin, FSIM_MODE_HSA, hsa, 6, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_MODE && sp.code == FSIM_MODE_HSA);
+            CHECK(sp.count == 6 && sp.fields[0] == 1.0 && sp.fields[4] == 3200.0 && sp.fields[3] == FSIM_SPEED_TRUE_AIRSPEED && sp.options == NULL);
+            CHECK(fsim_activity_end_points(world, cr.activity, points, 0, &count) == FSIM_OK && count == 0);
+            CHECK(fsim_world_step(world, 2) == FSIM_OK);
+            fsim_commanded_state_init(&cs);
+            CHECK(isnan(cs.north_acceleration_ms2) && isnan(cs.altitude_m));
+            CHECK(fsim_vehicle_commanded(world, merlin, &cs) == FSIM_OK && cs.altitude_m == 3200.0 && cs.altitude_reference == FSIM_ALTITUDE_MSL);
+            CHECK(!isnan(cs.north_acceleration_ms2) && !isnan(cs.down_acceleration_ms2));
+            /* a caller built before 1.12 is given what its header has */
+            fsim_commanded_state_init(&cs);
+            cs.struct_size = (uint32_t)offsetof(fsim_commanded_state, north_acceleration_ms2);
+            CHECK(fsim_vehicle_commanded(world, merlin, &cs) == FSIM_OK && isnan(cs.north_acceleration_ms2) && !isnan(cs.load_factor_g));
+            /* a route: its waypoints read back, its end points */
+            st = fsim_vehicle_state_ptr(world, merlin);
+            CHECK(st != NULL);
+            for (i = 0; i < 3; ++i) {
+                fsim_waypoint_init(&route[i]);
+                route[i].latitude_rad = st->latitude_rad + 0.0005 * (i + 1);
+                route[i].longitude_rad = st->longitude_rad + 0.0008;
+                route[i].altitude_m = 3100.0;
+                route[i].id = 20 + i;
+            }
+            CHECK(fsim_vehicle_submit_route(world, merlin, options, 4, route, 3, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_ROUTE && sp.waypoint_count == 3);
+            CHECK(sp.waypoints[2].id == 22 && sp.waypoints[2].altitude_m == 3100.0 && sp.waypoints[0].struct_size == sizeof(fsim_waypoint));
+            for (i = 0; i < 4; ++i) fsim_end_point_init(&points[i]);
+            CHECK(fsim_activity_end_points(world, cr.activity, points, 4, &count) == FSIM_OK && count == 3);
+            CHECK(points[0].kind == FSIM_END_POINT_TURN_POINT && points[0].id == 20 && points[2].kind == FSIM_END_POINT_WAYPOINT && points[2].index == 2);
+            CHECK(strcmp(fsim_end_point_kind_name(points[2].kind), "waypoint") == 0 && isnan(points[2].turn));
+            /* a curve: its reference in its fields, its segments */
+            for (i = 0; i < 8; ++i) curve[i] = hold;
+            fsim_bezier_segment_init(&piece);
+            for (i = 0; i < 6; ++i) piece.north[i] = 400.0 * i;
+            CHECK(fsim_vehicle_submit_curve(world, merlin, curve, 8, &piece, 1, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_CURVE && sp.segment_count == 1);
+            CHECK(sp.count == 8 && !isnan(sp.fields[0]) && sp.segments[0].north[5] == 2000.0);
+            /* named controllers: one holds a grant, its NEW flies, another's calls are refused */
+            {
+                fsim_command_options oc;
+                fsim_activity_envelope env;
+                uint32_t holder = 99;
+                int32_t granted = -1, why = -1;
+                const double east[6] = {1.57, NAN, NAN, NAN, NAN, NAN};
+                CHECK(fsim_vehicle_set_control_mode(world, merlin, FSIM_CONTROL_GRANTED) == FSIM_OK);
+                CHECK(fsim_vehicle_request_control_by(world, merlin, "fsim.guidance.hsa", 7, &why) == FSIM_OK && why == 0);
+                CHECK(fsim_vehicle_control_holder(world, merlin, "fsim.guidance.hsa", &granted, &holder) == FSIM_OK && granted == 1 && holder == 7);
+                CHECK(fsim_vehicle_request_control_by(world, merlin, "fsim.guidance.hsa", 8, &why) == FSIM_OK &&
+                      strcmp(fsim_reason_name(why), "authority_held") == 0);
+                fsim_command_options_init(&oc);
+                CHECK(oc.controller == 0);
+                CHECK(fsim_vehicle_submit_mode(world, merlin, FSIM_MODE_HSA, east, 6, &oc, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "not_granted") == 0);
+                oc.controller = 7;
+                CHECK(fsim_vehicle_submit_mode(world, merlin, FSIM_MODE_HSA, east, 6, &oc, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+                fsim_activity_envelope_init(&env);
+                CHECK(fsim_activity_get_envelope(world, cr.activity, &env) == FSIM_OK && env.controller == 7);
+                {
+                    const fsim_activity_id mine = cr.activity;
+                    CHECK(fsim_activity_cancel_by(world, mine, FSIM_SOURCE_POLICY, 8, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "authority_held") == 0);
+                    CHECK(fsim_activity_update_by(world, mine, FSIM_SOURCE_POLICY, 7, east, 6, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+                    CHECK(fsim_activity_command(world, mine, FSIM_ACTIVITY_DISABLE, 0, 0, FSIM_SOURCE_POLICY, 8, &cr) == FSIM_OK &&
+                          strcmp(fsim_reason_name(cr.reason), "authority_held") == 0);
+                    CHECK(fsim_vehicle_release_control_by(world, merlin, "fsim.guidance.hsa", 8, &why) == FSIM_OK && strcmp(fsim_reason_name(why), "not_granted") == 0);
+                    CHECK(fsim_vehicle_release_control_by(world, merlin, "fsim.guidance.hsa", 7, &why) == FSIM_OK && why == 0);
+                    CHECK(fsim_activity_get_setpoint(world, mine, &sp) == FSIM_INVALID_ARGUMENT); /* (released: ended) */
+                }
+                CHECK(fsim_vehicle_set_control_mode(world, merlin, FSIM_CONTROL_OPEN) == FSIM_OK);
+            }
+            /* a support command; one not live */
+            {
+                const double up[1] = {0.0};
+                fsim_activity_id gone = cr.activity;
+                CHECK(fsim_vehicle_submit_support(world, merlin, FSIM_SUPPORT_GEAR, up, 1, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+                CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_SUPPORT && sp.code == FSIM_SUPPORT_GEAR);
+                CHECK(sp.count == 1 && sp.fields[0] == 0.0);
+                CHECK(fsim_activity_cancel(world, gone, &cr) == FSIM_OK);
+                CHECK(fsim_activity_get_setpoint(world, gone, &sp) == FSIM_INVALID_ARGUMENT);
+            }
         }
         }
         fsim_world_destroy(world);

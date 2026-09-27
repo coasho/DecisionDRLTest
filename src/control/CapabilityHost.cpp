@@ -123,29 +123,33 @@ CapabilityHost::Authority& CapabilityHost::authorityOf(std::size_t capability) {
     return authority_[capability];
 }
 
-Reason CapabilityHost::admits(std::size_t capability, Source source) const noexcept {
+Reason CapabilityHost::admits(std::size_t capability, Source source, ControllerId controller) const noexcept {
     if (source != Source::Policy) return Reason::None; // the platform's own: FA is always the primary controller
     const Authority* a = capability < authority_.size() ? &authority_[capability] : nullptr;
-    if (controlMode_ == ControlMode::Granted && !(a && a->granted)) return Reason::NotGranted;
+    if (controlMode_ == ControlMode::Granted && !(a && a->granted && a->holder == controller)) return Reason::NotGranted;
     if (a && a->restricted.availability != Availability::Available) return a->restricted.reason;
     return Reason::None;
 }
 
-Reason CapabilityHost::addresses(const ActivityRecord& record, Source caller) const noexcept {
-    if (controlMode_ == ControlMode::Granted && caller < record.source) return Reason::AuthorityHeld;
+Reason CapabilityHost::addresses(const ActivityRecord& record, Caller caller) const noexcept {
+    if (controlMode_ != ControlMode::Granted) return Reason::None;
+    if (caller.source < record.source) return Reason::AuthorityHeld;
+    if (caller.source == Source::Policy && record.source == Source::Policy && caller.controller != record.controller) return Reason::AuthorityHeld;
     return Reason::None;
 }
 
-void CapabilityHost::endPolicy(std::size_t capability, Reason reason, const sim::VehicleState& state, double now) noexcept {
+void CapabilityHost::endPolicy(std::size_t capability, Reason reason, const sim::VehicleState& state, double now, const ControllerId* only) noexcept {
+    auto policy = [capability, only](const ActivityRecord& r) {
+        return r.capability == capability && r.source == Source::Policy && (!only || r.controller == *only);
+    };
     for (std::size_t s = 0; s < kActivities; ++s)
-        if (slots_[s].live && records_[s].capability == capability && records_[s].source == Source::Policy) {
+        if (slots_[s].live && policy(records_[s])) {
             end(s, ActivityState::Canceled, reason, 0, now);
             release(s); // its axes: the vehicle default
         }
     if (waitingCount_)
         for (Waiting& w : *waiting_)
-            if (w.used && !w.suggested && w.record.capability == capability && w.record.source == Source::Policy)
-                endWaiting(w, ActivityState::Canceled, reason, now);
+            if (w.used && !w.suggested && policy(w.record)) endWaiting(w, ActivityState::Canceled, reason, now);
     schedule(state, now); // (what waited for the axes may start)
 }
 
@@ -154,7 +158,9 @@ void CapabilityHost::setControlMode(ControlMode mode, const sim::VehicleState& s
     controlMode_ = mode;
     ++controlRevision_;
     if (mode != ControlMode::Granted) return;
-    auto ungranted = [this](const ActivityRecord& r) { return r.source == Source::Policy && admits(r.capability, Source::Policy) == Reason::NotGranted; };
+    auto ungranted = [this](const ActivityRecord& r) {
+        return r.source == Source::Policy && admits(r.capability, Source::Policy, r.controller) == Reason::NotGranted;
+    };
     for (std::size_t s = 0; s < kActivities; ++s) // what the policy flies without a grant ends, and what it waits to fly
         if (slots_[s].live && ungranted(records_[s])) {
             end(s, ActivityState::Canceled, Reason::NotGranted, 0, now);
@@ -166,21 +172,23 @@ void CapabilityHost::setControlMode(ControlMode mode, const sim::VehicleState& s
     schedule(state, now);
 }
 
-Reason CapabilityHost::requestControl(std::size_t capability, const sim::VehicleState& state) noexcept {
+Reason CapabilityHost::requestControl(std::size_t capability, const sim::VehicleState& state, ControllerId controller) noexcept {
     if (capability >= catalog_->size() || !(catalog_->descriptor(capability).interactions & kCommand)) return Reason::UnknownCapability;
     Authority& a = authorityOf(capability);
     if (!a.allowed) return Reason::NotAllowed;
     if (const CapabilityStatus st = status(capability, state); st.availability != Availability::Available)
         return st.reason != Reason::None ? st.reason : Reason::Unavailable;
-    if (!a.granted) a.granted = true, ++controlRevision_;
+    if (a.granted && a.holder != controller) return Reason::AuthorityHeld; // (another controller's: it lets go first)
+    if (!a.granted) a.granted = true, a.holder = controller, ++controlRevision_;
     return Reason::None;
 }
 
-Reason CapabilityHost::releaseControl(std::size_t capability, const sim::VehicleState& state, double now) noexcept {
+Reason CapabilityHost::releaseControl(std::size_t capability, const sim::VehicleState& state, double now, ControllerId controller) noexcept {
     if (capability >= catalog_->size()) return Reason::UnknownCapability;
     Authority& a = authorityOf(capability);
+    if (a.granted && a.holder != controller) return Reason::NotGranted; // (not its to let go)
     if (a.granted) a.granted = false, ++controlRevision_;
-    endPolicy(capability, Reason::Released, state, now);
+    endPolicy(capability, Reason::Released, state, now, &controller);
     return Reason::None;
 }
 
@@ -235,7 +243,8 @@ Reason CapabilityHost::setPrecedence(std::size_t capability, std::uint32_t prece
 
 ControlStatus CapabilityHost::controlStatus(std::size_t capability) const noexcept {
     if (capability >= authority_.size()) return {};
-    return {authority_[capability].allowed, authority_[capability].granted};
+    const Authority& a = authority_[capability];
+    return {a.allowed, a.granted, a.granted ? a.holder : 0};
 }
 
 Reason CapabilityHost::setAvailability(std::size_t capability, Availability availability, Reason reason, std::uint64_t associated,
@@ -860,6 +869,7 @@ void CapabilityHost::makeRecord(ActivityRecord& record, ActivityId id, std::size
     record.vehicle = vehicle_;
     record.capability = static_cast<std::uint16_t>(capability);
     record.source = options.source;
+    record.controller = options.controller;
     record.commandId = options.commandId;
     record.trace = options.trace;
     record.interactive = options.interactive;
@@ -1135,7 +1145,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     if (d.kind == CapabilityKind::Guidance && (d.setpoint == SetpointKind::Behavior) != std::holds_alternative<BehaviorCommand>(command))
         return rejected(Reason::WrongCommandType);
     // a policy's authority (a grant, under Granted) and the platform's restrictions, whatever the range policy
-    if (const Reason why = admits(index, options.source); why != Reason::None) return rejected(why);
+    if (const Reason why = admits(index, options.source, options.controller); why != Reason::None) return rejected(why);
     // how it is arbitrated and scheduled (docs/flight-autonomy.md, 4.9): a capability's precedence is the platform's
     if (options.precedenceOverride != kNoPrecedenceOverride && options.source == Source::Policy) return rejected(Reason::NotAllowed);
     if (const Reason why = checkWindow(options.window, now); why != Reason::None) return rejected(why);
@@ -1231,7 +1241,7 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
     if (found < 0) return rejected(missing(featureOf(command))); // the aircraft has no such effector: why
     const auto index = static_cast<std::size_t>(found);
     const CapabilityDescriptor& d = catalog_->descriptor(index);
-    if (const Reason why = admits(index, options.source); why != Reason::None) return rejected(why);
+    if (const Reason why = admits(index, options.source, options.controller); why != Reason::None) return rejected(why);
     if (options.precedenceOverride != kNoPrecedenceOverride && options.source == Source::Policy) return rejected(Reason::NotAllowed);
     if (const Reason why = checkWindow(options.window, now); why != Reason::None) return rejected(why);
     const bool checked = options.range != RangePolicy::None;
@@ -1290,7 +1300,7 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
 }
 
 CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints,
-                                     const sim::VehicleState& state, Source caller) noexcept {
+                                     const sim::VehicleState& state, Caller caller) noexcept {
     details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) {
@@ -1325,7 +1335,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
 }
 
 CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments,
-                                     const sim::VehicleState& state, Source caller) noexcept {
+                                     const sim::VehicleState& state, Caller caller) noexcept {
     details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) {
@@ -1373,7 +1383,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& cu
     return result;
 }
 
-CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Source caller) noexcept {
+CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Caller caller) noexcept {
     if (const auto* route = std::get_if<RouteCommand>(&setpoint)) return update(activity, *route, {}, state, caller);
     if (const auto* curve = std::get_if<CurveCommand>(&setpoint)) return update(activity, *curve, {}, state, caller);
     details_.clear();
@@ -1449,7 +1459,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
     return result;
 }
 
-CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& setpoint, Source caller) noexcept {
+CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& setpoint, Caller caller) noexcept {
     details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) {
@@ -1474,7 +1484,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& 
     return result;
 }
 
-CommandResult CapabilityHost::cancel(ActivityId activity, const sim::VehicleState& state, double now, Source caller) noexcept {
+CommandResult CapabilityHost::cancel(ActivityId activity, const sim::VehicleState& state, double now, Caller caller) noexcept {
     CommandResult r; // (the pending suggestions stay until a call that may allocate: a NEW, an activity or a task command)
     r.status = CommandStatus::Canceled;
     r.activity = activity;
@@ -1508,6 +1518,7 @@ CommandOptions CapabilityHost::optionsOf(std::size_t s) const noexcept {
     o.interrupt = r.interrupt;
     o.rank = r.rank;
     o.precedenceOverride = slots_[s].precedenceOverride;
+    o.controller = r.controller;
     o.window = r.window;
     return o;
 }
@@ -1569,7 +1580,7 @@ bool CapabilityHost::retire(std::size_t s, ActivityState state) {
 }
 
 CommandResult CapabilityHost::activityCommand(ActivityId activity, ActivityCommand command, Rank rank, const sim::VehicleState& state, double now,
-                                              Source caller) {
+                                              Caller caller) {
     if (pendingSuggestions_) materialize();
     details_.clear();
     const int found = liveSlot(activity);
@@ -1630,7 +1641,7 @@ CommandResult CapabilityHost::activityCommand(ActivityId activity, ActivityComma
 }
 
 CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
-                                            const sim::VehicleState& state, Source caller) noexcept {
+                                            const sim::VehicleState& state, Caller caller) noexcept {
     const ActivityRecord& record = w.record;
     const ActivityId activity = record.id;
     if (const Reason why = addresses(record, caller); why != Reason::None) return rejected(why, activity, activity);
@@ -1707,7 +1718,7 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     return result;
 }
 
-CommandResult CapabilityHost::updateWaiting(Waiting& w, const SupportCommand& setpoint, Source caller) noexcept {
+CommandResult CapabilityHost::updateWaiting(Waiting& w, const SupportCommand& setpoint, Caller caller) noexcept {
     const ActivityRecord& record = w.record;
     const ActivityId activity = record.id;
     if (const Reason why = addresses(record, caller); why != Reason::None) return rejected(why, activity, activity);

@@ -519,7 +519,7 @@ control::CommandResult World::update(control::ActivityId activity, const control
 
 control::CommandResult World::cancel(control::ActivityId activity) { return cancel(control::Source::Policy, activity); }
 
-control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::SupportCommand& setpoint) {
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::SupportCommand& setpoint) {
     if (Entry* e = entry(control::activityVehicle(activity))) {
         control::CommandResult r = e->host.update(activity, setpoint, caller);
         echo(e->host, r);
@@ -528,7 +528,7 @@ control::CommandResult World::update(control::Source caller, control::ActivityId
     return unknownActivity(activity);
 }
 
-control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::Command& setpoint) {
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::Command& setpoint) {
     if (Entry* e = entry(control::activityVehicle(activity))) {
         control::CommandResult r = e->host.update(activity, setpoint, pool_->states()[e->slot], caller);
         echo(e->host, r);
@@ -537,7 +537,7 @@ control::CommandResult World::update(control::Source caller, control::ActivityId
     return unknownActivity(activity);
 }
 
-control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::RouteCommand& route,
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
                                      Span<const control::Waypoint> waypoints) {
     if (Entry* e = entry(control::activityVehicle(activity))) {
         control::CommandResult r = e->host.update(activity, route, waypoints, pool_->states()[e->slot], caller);
@@ -547,7 +547,7 @@ control::CommandResult World::update(control::Source caller, control::ActivityId
     return unknownActivity(activity);
 }
 
-control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::CurveCommand& curve,
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                      Span<const control::BezierSegment> segments) {
     if (Entry* e = entry(control::activityVehicle(activity))) {
         control::CommandResult r = e->host.update(activity, curve, segments, pool_->states()[e->slot], caller);
@@ -557,7 +557,7 @@ control::CommandResult World::update(control::Source caller, control::ActivityId
     return unknownActivity(activity);
 }
 
-control::CommandResult World::cancel(control::Source caller, control::ActivityId activity) {
+control::CommandResult World::cancel(control::Caller caller, control::ActivityId activity) {
     Entry* e = entry(control::activityVehicle(activity));
     if (!e) return unknownActivity(activity);
     control::CommandResult r = e->host.cancel(activity, pool_->states()[e->slot], simTime_, caller);
@@ -566,7 +566,7 @@ control::CommandResult World::cancel(control::Source caller, control::ActivityId
     return r;
 }
 
-control::CommandResult World::activityCommand(control::Source caller, control::ActivityId activity, control::ActivityCommand command,
+control::CommandResult World::activityCommand(control::Caller caller, control::ActivityId activity, control::ActivityCommand command,
                                               control::Rank rank) {
     Entry* e = entry(control::activityVehicle(activity));
     if (!e) return unknownActivity(activity);
@@ -599,7 +599,7 @@ control::CommandResult World::commandTask(std::uint32_t id, control::TaskId task
     return r;
 }
 
-control::CommandResult World::cancelTask(std::uint32_t id, control::TaskId task, control::Source caller) {
+control::CommandResult World::cancelTask(std::uint32_t id, control::TaskId task, control::Caller caller) {
     Entry* e = entry(id);
     if (!e) {
         control::CommandResult r;
@@ -626,6 +626,21 @@ std::optional<control::TaskStatus> World::taskStatus(std::uint32_t id, control::
 std::vector<control::TaskStatus> World::tasks(std::uint32_t id) {
     Entry* e = entry(id);
     return e ? e->host.tasks() : std::vector<control::TaskStatus>{};
+}
+
+bool World::activitySetpoint(control::ActivityId activity, control::Setpoint& out) const {
+    const Entry* e = entry(control::activityVehicle(activity));
+    return e && e->host.setpoint(activity, out);
+}
+
+std::vector<control::EndPoint> World::endPoints(control::ActivityId activity, std::size_t max) const {
+    const Entry* e = entry(control::activityVehicle(activity));
+    return e ? e->host.endPoints(activity, max) : std::vector<control::EndPoint>{};
+}
+
+control::VehicleCommandState World::commandState(std::uint32_t id) const {
+    const Entry* e = entry(id);
+    return e ? e->host.commandState(pool_->states()[e->slot]) : control::VehicleCommandState{};
 }
 
 const control::ActivityRecord* World::activity(control::ActivityId activity) const noexcept {
@@ -713,20 +728,20 @@ control::ControlMode World::controlMode(std::uint32_t id) const noexcept {
     return e ? e->host.controlMode() : control::ControlMode::Open;
 }
 
-control::Reason World::requestControl(std::uint32_t id, std::string_view capability) {
+control::Reason World::requestControl(std::uint32_t id, std::string_view capability, control::ControllerId controller) {
     Entry* e = entry(id);
     if (!e) return control::Reason::UnknownVehicle;
     const int index = e->catalog->find(capability);
     if (index < 0) return e->support->refusal(capability);
-    return e->host.requestControl(static_cast<std::size_t>(index), pool_->states()[e->slot]);
+    return e->host.requestControl(static_cast<std::size_t>(index), pool_->states()[e->slot], controller);
 }
 
-control::Reason World::releaseControl(std::uint32_t id, std::string_view capability) {
+control::Reason World::releaseControl(std::uint32_t id, std::string_view capability, control::ControllerId controller) {
     Entry* e = entry(id);
     if (!e) return control::Reason::UnknownVehicle;
     const int index = e->catalog->find(capability);
     if (index < 0) return e->support->refusal(capability);
-    const control::Reason r = e->host.releaseControl(static_cast<std::size_t>(index), pool_->states()[e->slot], simTime_);
+    const control::Reason r = e->host.releaseControl(static_cast<std::size_t>(index), pool_->states()[e->slot], simTime_, controller);
     levelChanged(*e);
     return r;
 }

@@ -365,7 +365,8 @@ typedef struct fsim_command_options {
                                      The platform's sources only: a policy's is refused not_allowed */
     double start_not_before, start_not_after, end_not_before, end_not_after; /* simulation seconds; NaN (the default): no bound */
     int32_t criticality;   /* fsim_time_criticality: which windows must be met (a start missed, an end missed: failed, time_constraint) */
-    int32_t reserved2;
+    uint32_t controller;   /* ABI 1.12: a policy's controller (docs/flight-autonomy.md, 4.12), 0 (the default) the default policy; under
+                              FSIM_CONTROL_GRANTED its capability's grant must be this controller's */
 } fsim_command_options;
 FSIM_API void fsim_command_options_init(fsim_command_options* options);
 
@@ -460,13 +461,20 @@ FSIM_API int fsim_activity_cancel(fsim_world* world, fsim_activity_id activity, 
 FSIM_API int fsim_activity_update_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
                                      fsim_command_result* result);
 FSIM_API int fsim_activity_cancel_as(fsim_world* world, fsim_activity_id activity, int source, fsim_command_result* result);
-/* An activity command (ABI 1.10) for a live activity - flying, waiting or disabled - declaring `source` as the *_as calls
- * do: disable (it stops flying and is kept), enable, reset (over from its beginning), delete (a sticky disable: it ends),
- * change its rank (to rank_priority, rank_precedence), unassign (it gives up its axes and waits for them again). Answered
- * as an UPDATE: rejected not_interactive where its command said it takes none (fsim_command_options.interactive 0),
- * queue_full where a flying one has no room to be kept. FSIM_INVALID_ARGUMENT for a command beyond the enum. */
+/* As the *_as calls, declaring a policy's controller too (ABI 1.12; docs/flight-autonomy.md, 4.12): under
+ * FSIM_CONTROL_GRANTED a controller may not address another's activity either - rejected "authority_held", `other` the
+ * activity. The *_as calls are controller 0's. */
+FSIM_API int fsim_activity_update_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
+                                     uint32_t count, fsim_command_result* result);
+FSIM_API int fsim_activity_cancel_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, fsim_command_result* result);
+/* An activity command (ABI 1.10) for a live activity - flying, waiting or disabled - declaring `source` and `controller`
+ * as the *_by calls do: disable (it stops flying and is kept), enable, reset (over from its beginning), delete (a sticky
+ * disable: it ends), change its rank (to rank_priority, rank_precedence), unassign (it gives up its axes and waits for
+ * them again). Answered as an UPDATE: rejected not_interactive where its command said it takes none
+ * (fsim_command_options.interactive 0), queue_full where a flying one has no room to be kept. FSIM_INVALID_ARGUMENT for
+ * a command beyond the enum. */
 FSIM_API int fsim_activity_command(fsim_world* world, fsim_activity_id activity, int command, uint32_t rank_priority, uint32_t rank_precedence,
-                                   int source, fsim_command_result* result);
+                                   int source, uint32_t controller, fsim_command_result* result);
 FSIM_API const char* fsim_activity_command_name(int command); /* "disable", "enable", "reset", "delete", "change_rank", "unassign" */
 /* What flies the primary axes nobody owns: FSIM_DEFAULT_NEUTRAL (surfaces
  * centred, throttle 0 - every vehicle's default) or FSIM_DEFAULT_HOLD (the
@@ -576,6 +584,12 @@ typedef struct fsim_commanded_state {
     double roll_rad, pitch_rad;                       /* the attitude level's */
     double load_factor_g, roll_rate_rad_s, pitch_rate_rad_s, yaw_rate_rad_s; /* the acceleration level's */
     double throttle;                                  /* what the actuators were given (the first engine's) */
+    /* appended in ABI 1.12 (A-GRA's VehicleCommandState; docs/flight-autonomy.md, 4.12) */
+    double north_acceleration_ms2, east_acceleration_ms2, down_acceleration_ms2; /* a wing's, over the Earth, at the attitude it
+                                                      flies; NaN where no longitudinal acceleration is commanded, and for a rotorcraft */
+    double altitude_m, altitude_reference;            /* as its mode commanded it, in its reference (fsim_altitude_reference): a live
+                                                      hsa's or pattern's, a route's point flown to's; a curve's and the position
+                                                      level's above sea level; NaN none */
 } fsim_commanded_state;
 FSIM_API void fsim_commanded_state_init(fsim_commanded_state* state);
 FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_commanded_state* out);
@@ -645,9 +659,11 @@ FSIM_API int fsim_vehicle_submit_route(fsim_world* world, uint32_t id, const dou
  * (none: those it has), checked as a NEW's; flown afresh from its start. */
 FSIM_API int fsim_activity_update_route(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
                                         const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result);
-/* As fsim_activity_update_route, declaring the caller's source (fsim_activity_update_as). */
+/* As fsim_activity_update_route, declaring the caller's source (fsim_activity_update_as), and its controller (_by). */
 FSIM_API int fsim_activity_update_route_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
                                            const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result);
+FSIM_API int fsim_activity_update_route_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
+                                           uint32_t count, const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result);
 
 /* One segment of a curve: a quintic Bezier by its six control points (weights
  * 1, the clamped knots), metres north, east and down from the curve's
@@ -669,9 +685,11 @@ FSIM_API int fsim_vehicle_submit_curve(fsim_world* world, uint32_t id, const dou
  * flown afresh (none: those it has, flown on). */
 FSIM_API int fsim_activity_update_curve(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
                                         const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result);
-/* As fsim_activity_update_curve, declaring the caller's source (fsim_activity_update_as). */
+/* As fsim_activity_update_curve, declaring the caller's source (fsim_activity_update_as), and its controller (_by). */
 FSIM_API int fsim_activity_update_curve_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
                                            const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result);
+FSIM_API int fsim_activity_update_curve_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
+                                           uint32_t count, const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result);
 
 /* What a vehicle can do, as its guidance plans with it (docs/vehicle-interface.md,
  * 7.1; A-GRA's performance profile): NaN where the aircraft's profile and loops
@@ -714,6 +732,14 @@ FSIM_API int fsim_vehicle_revoke_control(fsim_world* world, uint32_t id, const c
 /* Whether the policy may request the capability (all may, by default); a grant for one no longer allowed is revoked. */
 FSIM_API int fsim_vehicle_set_allowed(fsim_world* world, uint32_t id, const char* capability, int allowed);
 FSIM_API int fsim_vehicle_control_status(const fsim_world* world, uint32_t id, const char* capability, int32_t* allowed, int32_t* granted);
+/* Named controllers (ABI 1.12; docs/flight-autonomy.md, 4.12; A-GRA's several MA services): the calls above are
+ * controller 0's, the default policy's. A grant is one controller's: a request while another holds it is refused
+ * "authority_held", a release of another's "not_granted" (*reason) - and nothing changes - and under
+ * FSIM_CONTROL_GRANTED only the holder commands the capability (fsim_command_options.controller). */
+FSIM_API int fsim_vehicle_request_control_by(fsim_world* world, uint32_t id, const char* capability, uint32_t controller, int32_t* reason);
+FSIM_API int fsim_vehicle_release_control_by(fsim_world* world, uint32_t id, const char* capability, uint32_t controller, int32_t* reason);
+/* Whose grant a capability's is: *granted 1 and *holder the controller, or *granted 0 (and *holder 0). */
+FSIM_API int fsim_vehicle_control_holder(const fsim_world* world, uint32_t id, const char* capability, int32_t* granted, uint32_t* holder);
 /* The platform restricts a capability (fsim_availability; FSIM_AVAILABLE lifts it):
  * a policy's NEW for it, and a request, are refused with `reason` - 0 or
  * "restricted", "collision_avoidance" or "unavailable"; another is refused
@@ -865,6 +891,8 @@ typedef struct fsim_activity_envelope {
     double start_not_before, start_not_after, end_not_before, end_not_after; /* its window; NaN: none */
     uint64_t suggestion;       /* ABI 1.11: failed as it would start - the task the platform suggests in its place; 0 none */
     uint32_t run, runs;        /* a task's repetition: the run flying, of how many; 0, 0 none */
+    uint32_t controller;       /* ABI 1.12: its command's controller (fsim_command_options.controller) */
+    uint32_t reserved;
 } fsim_activity_envelope;
 FSIM_API void fsim_activity_envelope_init(fsim_activity_envelope* envelope);
 FSIM_API int fsim_activity_get_envelope(const fsim_world* world, fsim_activity_id activity, fsim_activity_envelope* out);
@@ -928,14 +956,42 @@ FSIM_API int fsim_vehicle_store_task(fsim_world* world, uint32_t id, uint64_t ta
 /* Fly a task: its command's NEW with `options` (NULL: fsim_command_options_init's), the task among the requirements it
  * traces to; answered as the NEW (fsim_last_command_detail), unknown_task, task_active. */
 FSIM_API int fsim_vehicle_command_task(fsim_world* world, uint32_t id, uint64_t task_id, const fsim_command_options* options, fsim_command_result* result);
-/* Its live activity canceled, declaring `source`; one never commanded will not be. */
-FSIM_API int fsim_vehicle_cancel_task(fsim_world* world, uint32_t id, uint64_t task_id, int source, fsim_command_result* result);
+/* Its live activity canceled, declaring `source` and `controller` (fsim_activity_cancel_by); one never commanded will not be. */
+FSIM_API int fsim_vehicle_cancel_task(fsim_world* world, uint32_t id, uint64_t task_id, int source, uint32_t controller, fsim_command_result* result);
 FSIM_API int fsim_vehicle_remove_task(fsim_world* world, uint32_t id, uint64_t task_id, int32_t* reason);
 /* A task's status: FSIM_INVALID_ARGUMENT for one not kept. */
 FSIM_API int fsim_vehicle_task_status(fsim_world* world, uint32_t id, uint64_t task_id, fsim_task_status* out);
 /* Every task kept, the caller's and the platform's, in the order they were made. */
 FSIM_API uint32_t fsim_vehicle_task_count(fsim_world* world, uint32_t id);
 FSIM_API int fsim_vehicle_task_at(fsim_world* world, uint32_t id, uint32_t index, fsim_task_status* out);
+
+/* Reports (ABI 1.12; docs/flight-autonomy.md, 4.12): what an activity flies, and where to. */
+/* What a live activity flies now, or waits to fly (A-GRA's last flight command), as the batch item that would command
+ * it: its kind and code (a level, fsim_support, fsim_mode); its fields - a level's all of them (as
+ * fsim_command_field_count_full counts them), a mode's, a route's or a curve's options, a support command's (the
+ * engines': four throttles); a behaviour's command; a route's waypoints, or a curve's segments with the appended ones
+ * (its flyout curve, from the reference in fields 0-2). A waiting one's is as given. Its arrays are the library's,
+ * valid until the next setpoint read, world step, reset or destroy; `options` NULL. `out->struct_size` set by the
+ * caller. FSIM_INVALID_ARGUMENT for an activity not live. */
+FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id activity, fsim_batch_command* out);
+
+/* Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType): a point, a turn flown by or over it, a loiter. */
+enum fsim_end_point_kind { FSIM_END_POINT_WAYPOINT = 0, FSIM_END_POINT_TURN_POINT, FSIM_END_POINT_LOITER_POINT };
+typedef struct fsim_end_point {
+    uint32_t struct_size;
+    int32_t kind;                          /* fsim_end_point_kind */
+    double latitude_rad, longitude_rad;
+    double altitude_m, altitude_reference; /* fsim_altitude_reference; a waiting route's as given (NaN: the point before's) */
+    double turn;                           /* a turn point's fsim_turn_type; NaN otherwise */
+    uint64_t id;                           /* a route waypoint's id; 0 none */
+    int32_t index;                         /* its waypoint or curve segment; 0 a pattern's or the position level's point */
+} fsim_end_point;
+FSIM_API void fsim_end_point_init(fsim_end_point* point);
+FSIM_API const char* fsim_end_point_kind_name(int kind); /* "waypoint", "turn_point", "loiter_point" */
+/* A live activity's end points: the point it flies to now, then those after it - a route's waypoints (a repeating
+ * route's round again), a curve's segment ends, a pattern's fix, the position level's point - `max` at most into
+ * `out` (`out[0].struct_size` bytes apart), `*count` how many. None for one not live, an hsa's, a behaviour's. */
+FSIM_API int fsim_activity_end_points(const fsim_world* world, fsim_activity_id activity, fsim_end_point* out, uint32_t max, uint32_t* count);
 
 FSIM_API int fsim_world_get_environment(const fsim_world* world, fsim_environment* out);
 FSIM_API int fsim_world_set_environment(fsim_world* world, const fsim_environment* environment);

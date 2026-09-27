@@ -99,6 +99,8 @@ from .world import (  # noqa: E402
     ControlStatus,
     BezierSegment,
     EndBehavior,
+    EndPoint,
+    EndPointKind,
     Envelope,
     LIMITS,
     Level,

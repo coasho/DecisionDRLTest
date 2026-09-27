@@ -856,3 +856,163 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
         }
     }
 }
+
+
+TEST_CASE("fleet: the command interface on every aircraft - validated and read back, queued and scheduled, disabled and enabled, "
+          "a task, named controllers, a route's end points (FA-2)",
+          "[fleet]") {
+    Fleet fleet;
+    session::World& w = fleet.world();
+    auto& planes = fleet.planes();
+    fleet.standard();
+    constexpr const char* kHsa = "fsim.guidance.hsa";
+    std::map<std::uint32_t, Lows> lows;
+    auto watch = [&] {
+        for (const auto& p : planes) lows[p.id].see(*w.vehicleState(p.id));
+    };
+    // an hsa 30 degrees right of where each began, at its speed and height (a rotorcraft turns where it hovers)
+    auto turn = [](const Plane& p) {
+        HsaCommand h;
+        h.headingRad = std::remainder(p.start.eulerRad[2] + 30.0 * kDeg, 2.0 * kPi);
+        return Command(h);
+    };
+    std::map<std::uint32_t, ActivityId> flying, queued, scheduled;
+
+    // validated, then flown and read back: its setpoint completed from where it flies, what it commands
+    for (const auto& p : planes) {
+        INFO(p.type << " (" << className(p.cls) << ")");
+        REQUIRE(p.offered.count(kHsa) == 1);
+        CommandOptions check;
+        check.validateOnly = true;
+        const std::size_t records = w.activities(p.id).size();
+        CHECK(w.submit(p.id, turn(p), check).status == CommandStatus::Valid);
+        CHECK(w.activities(p.id).size() == records); // (nothing flies)
+        const CommandResult a = w.submit(p.id, turn(p));
+        REQUIRE(a.accepted());
+        flying[p.id] = a.activity;
+        Setpoint read;
+        REQUIRE(w.activitySetpoint(a.activity, read));
+        const auto* h = std::get_if<HsaCommand>(&std::get<Command>(read.command));
+        REQUIRE(h != nullptr);
+        CHECK((!isHold(h->speed) && !isHold(h->altitudeM) && h->altitudeReference == static_cast<double>(AltitudeReference::Msl)));
+        CHECK(w.endPoints(a.activity).empty());
+    }
+    fleet.fly(5.0, watch);
+    for (const auto& p : planes) {
+        INFO(p.type << " (" << className(p.cls) << ")");
+        CHECK(w.activity(flying[p.id])->state == ActivityState::Active);
+        Setpoint read;
+        REQUIRE(w.activitySetpoint(flying[p.id], read));
+        const VehicleCommandState c = w.commandState(p.id);
+        CHECK((c.altitudeM == std::get<HsaCommand>(std::get<Command>(read.command)).altitudeM &&
+               c.altitudeReference == static_cast<double>(AltitudeReference::Msl)));
+        CHECK(std::isnan(c.northAccelerationMs2) == p.rotor); // (a wing's, from its loops' longitudinal acceleration and load factor)
+    }
+
+    // queued behind what flies, then scheduled: what waits starts when it may
+    for (const auto& p : planes) {
+        INFO(p.type);
+        CommandOptions polite;
+        polite.interrupt = false;
+        const CommandResult q = w.submit(p.id, Command(Fleet::still(p, *w.vehicleState(p.id))), polite);
+        REQUIRE(q.accepted());
+        CHECK((q.flags & kDeferred) != 0);
+        const ActivityRecord& r = *w.activity(q.activity);
+        CHECK((r.waiting == ActivityWait::Queued && r.waitingFor == flying[p.id]));
+        queued[p.id] = q.activity;
+    }
+    fleet.fly(1.0, watch);
+    for (const auto& p : planes) {
+        INFO(p.type);
+        CHECK(w.activity(queued[p.id])->waiting == ActivityWait::Queued);
+        CHECK(w.cancel(flying[p.id]).status == CommandStatus::Canceled);
+        CHECK((w.activity(queued[p.id])->waiting == ActivityWait::None && w.activity(queued[p.id])->live())); // (its axes free: it flies)
+        CommandOptions later;
+        later.window.startNotBefore = w.simTime() + 2.0;
+        const CommandResult s = w.submit(p.id, turn(p), later);
+        REQUIRE(s.accepted());
+        CHECK(w.activity(s.activity)->waiting == ActivityWait::Scheduled);
+        scheduled[p.id] = s.activity;
+    }
+    fleet.fly(3.0, watch);
+    for (const auto& p : planes) {
+        INFO(p.type);
+        CHECK(w.activity(scheduled[p.id])->state == ActivityState::Active);
+        const ActivityRecord& q = *w.activity(queued[p.id]);
+        CHECK((q.state == ActivityState::Canceled && q.reason == Reason::Preempted && q.by == scheduled[p.id]));
+        // disabled: kept, not flying
+        CHECK(w.activityCommand(Source::Policy, scheduled[p.id], ActivityCommand::Disable).accepted());
+        CHECK(w.activity(scheduled[p.id])->state == ActivityState::Disabled);
+    }
+    fleet.fly(1.0, watch);
+    for (const auto& p : planes) {
+        INFO(p.type);
+        CHECK(w.activity(scheduled[p.id])->state == ActivityState::Disabled);
+        CHECK(w.activityCommand(Source::Policy, scheduled[p.id], ActivityCommand::Enable).accepted());
+    }
+    fleet.fly(1.0, watch);
+    for (const auto& p : planes) {
+        INFO(p.type);
+        CHECK(w.activity(scheduled[p.id])->state == ActivityState::Active); // enabled: it flies again
+        // a task: kept, flown on its task command, canceled
+        REQUIRE(w.storeTask(p.id, 1, turn(p)) == Reason::None);
+        REQUIRE(w.commandTask(p.id, 1).accepted());
+    }
+    fleet.fly(1.0, watch);
+    for (const auto& p : planes) {
+        INFO(p.type);
+        CHECK(w.activity(scheduled[p.id])->reason == Reason::Preempted);
+        CHECK(w.taskStatus(p.id, 1)->state == TaskState::Executing);
+        CHECK(w.cancelTask(p.id, 1).status == CommandStatus::Canceled);
+        CHECK(w.taskStatus(p.id, 1)->state == TaskState::Canceled);
+        // named controllers: a grant is one controller's, and only it commands the capability
+        REQUIRE(w.setControlMode(p.id, ControlMode::Granted) == Reason::None);
+        CHECK(w.requestControl(p.id, kHsa, 1) == Reason::None);
+        CHECK(w.requestControl(p.id, kHsa, 2) == Reason::AuthorityHeld);
+        CommandOptions one, two;
+        one.controller = 1, two.controller = 2;
+        CHECK(w.submit(p.id, turn(p), two).reason == Reason::NotGranted);
+        const CommandResult a = w.submit(p.id, turn(p), one);
+        REQUIRE(a.accepted());
+        flying[p.id] = a.activity;
+        CHECK(w.cancel(Caller{Source::Policy, 2}, a.activity).reason == Reason::AuthorityHeld);
+    }
+    fleet.fly(2.0, watch);
+    for (const auto& p : planes) {
+        INFO(p.type);
+        CHECK(w.activity(flying[p.id])->state == ActivityState::Active);
+        CHECK(w.releaseControl(p.id, kHsa, 1) == Reason::None);
+        CHECK(w.activity(flying[p.id])->reason == Reason::Released);
+        REQUIRE(w.setControlMode(p.id, ControlMode::Open) == Reason::None);
+        // a route: its points read back completed, its end points - turn points, then its last
+        const auto& s = *w.vehicleState(p.id);
+        const double d = p.scale(), psi = s.eulerRad[2];
+        auto ahead = [&](double along, double right) {
+            Waypoint wp;
+            const double north = along * std::cos(psi) - right * std::sin(psi), east = along * std::sin(psi) + right * std::cos(psi);
+            wp.latitudeRad = s.latitudeRad + north / kEarthM;
+            wp.longitudeRad = s.longitudeRad + east / (kEarthM * std::cos(s.latitudeRad));
+            return wp;
+        };
+        const std::vector<Waypoint> route = {ahead(d, 0.0), ahead(2.0 * d, d), ahead(3.0 * d, 0.0)};
+        const CommandResult r = w.submit(p.id, RouteCommand{}, route);
+        REQUIRE(r.accepted());
+        flying[p.id] = r.activity;
+        const std::vector<EndPoint> e = w.endPoints(r.activity);
+        REQUIRE(e.size() == 3);
+        CHECK((e[0].kind == EndPointKind::TurnPoint && e[1].kind == EndPointKind::TurnPoint && e[2].kind == EndPointKind::Waypoint));
+        CHECK((e[2].latitudeRad == route[2].latitudeRad && e[2].index == 2));
+    }
+    fleet.fly(2.0, watch);
+    for (const auto& p : planes) {
+        INFO(p.type << " (" << className(p.cls) << ")");
+        Setpoint read;
+        REQUIRE(w.activitySetpoint(flying[p.id], read));
+        REQUIRE(read.waypoints.size() == 3);
+        const VehicleCommandState c = w.commandState(p.id);
+        const std::uint32_t at = w.activity(flying[p.id])->progress.segment;
+        CHECK((c.altitudeM == read.waypoints[std::min<std::uint32_t>(at, 2)].altitudeM &&
+               c.altitudeReference == static_cast<double>(AltitudeReference::Msl))); // (the point flown to's, completed)
+        keptSafe(p, lows[p.id]);
+    }
+}

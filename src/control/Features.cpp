@@ -225,7 +225,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.activity/unassign", "", S, 0, 0, ""},                                              // CMD-15
     {"fsim.control/grants", "", S, 0, 0, ""},                                                 // AUT-01..05, 07..09
     {"fsim.control/restrict", "", S, 0, 0, ""},                                               // CAP-25
-    {"fsim.control/controller_identity", "", N, 2, 0, ""},                                    // AUT-06
+    {"fsim.control/controller_identity", "", S, 0, 0, ""},                                    // AUT-06
 
     // --- route plans, settings and the supporting models a consumer uses ------------------------------
     {"fsim.plan/store", "", N, 7, 0, ""},                        // RPL-01, 02, 05, 08..11

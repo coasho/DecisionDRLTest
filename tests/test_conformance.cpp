@@ -360,7 +360,7 @@ CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, c
 }
 
 /// UPDATE with what the maker made: a route's or a curve's options, and now and then its waypoints or segments.
-CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Source caller = Source::Policy) {
+CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Caller caller = {}) {
     if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints) return w.update(caller, activity, *route, make.waypoints);
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints) return w.update(caller, activity, *curve, make.segments);
     return w.update(caller, activity, c);
@@ -501,9 +501,9 @@ struct AuthorityModel {
     ControlMode mode = ControlMode::Open;
     std::vector<ControlStatus> control;       ///< per capability
     std::vector<CapabilityStatus> restricted; ///< per capability: the platform's
-    /// Why the policy may not command capability `c` now, as the rules have it; None if it may.
-    Reason refuses(std::size_t c) const {
-        if (mode == ControlMode::Granted && !control[c].granted) return Reason::NotGranted;
+    /// Why the policy's `controller` may not command capability `c` now, as the rules have it; None if it may.
+    Reason refuses(std::size_t c, ControllerId controller = 0) const {
+        if (mode == ControlMode::Granted && !(control[c].granted && control[c].holder == controller)) return Reason::NotGranted;
         if (restricted[c].availability != Availability::Available) return restricted[c].reason;
         return Reason::None;
     }
@@ -512,13 +512,19 @@ struct AuthorityModel {
 template <class T>
 bool among(T r, std::initializer_list<T> allowed) { return std::find(allowed.begin(), allowed.end(), r) != allowed.end(); }
 
+/// Whether, under Granted, `caller` may not address `r`: a lower source, or another controller of the
+/// policy (docs/vehicle-interface.md, 6.1; docs/flight-autonomy.md, 4.12).
+bool heldFrom(Caller caller, const ActivityRecord& r) {
+    return caller.source < r.source || (caller.source == Source::Policy && r.source == Source::Policy && caller.controller != r.controller);
+}
+
 /// What an operation did, for the rules it must have kept.
 struct Done {
     Op op = Op::Step;
     CommandResult result;       ///< NEW, UPDATE, CANCEL
     CommandOptions options;     ///< NEW
     ActivityId addressed = 0;   ///< UPDATE, CANCEL, an activity command
-    Source caller = Source::Policy; ///< UPDATE, CANCEL, an activity command: the source the call declares
+    Caller caller{};            ///< UPDATE, CANCEL, an activity command: the source the call declares, and a policy's controller
     ActivityCommand command = ActivityCommand::Disable; ///< an activity command (docs/flight-autonomy.md, 4.10)
     Rank rank{};                ///< ChangeRank's
     bool taskCommand = false;   ///< a task operation that was a task command: a NEW of the task's command (4.11)
@@ -594,8 +600,10 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         ++seen[what + (done.result.accepted() ? "done" : reasonName(done.result.reason))];
         if (!target) CHECK(done.result.reason == Reason::UnknownActivity);
         else if (!target->live()) CHECK(done.result.reason == Reason::ActivityEnded);
-        else if (done.mode == ControlMode::Granted && done.caller < target->source) CHECK(done.result.reason == Reason::AuthorityHeld);
-        else if (!target->interactive) CHECK(done.result.reason == Reason::NotInteractive);
+        else if (done.mode == ControlMode::Granted && heldFrom(done.caller, *target)) {
+            CHECK(done.result.reason == Reason::AuthorityHeld);
+            if (done.caller.source == target->source) ++seen["controller:held"]; // (another controller's, 4.12)
+        } else if (!target->interactive) CHECK(done.result.reason == Reason::NotInteractive);
         else if (!done.result.accepted()) {
             // only a flying one kept out of its slot finds no room
             CHECK(done.result.reason == Reason::QueueFull);
@@ -608,9 +616,10 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         const bool ok = done.op == Op::Update ? done.result.accepted() : done.result.status == CommandStatus::Canceled;
         if (!target) CHECK(done.result.reason == Reason::UnknownActivity);
         else if (!target->live()) CHECK(done.result.reason == Reason::ActivityEnded);
-        else if (done.mode == ControlMode::Granted && done.caller < target->source) { // FA stays the primary controller (6.1)
+        else if (done.mode == ControlMode::Granted && heldFrom(done.caller, *target)) { // FA stays the primary controller (6.1), and a controller has its own (4.12)
             CHECK(done.result.reason == Reason::AuthorityHeld);
             CHECK(done.result.other == done.addressed);
+            if (done.caller.source == target->source) ++seen["controller:held"];
         } else if (done.op == Op::Cancel) CHECK(ok);
         else if (!ok)
             CHECK(among(done.result.reason, {Reason::NotUpdatable, Reason::WrongCommandType, Reason::InvalidParameter, Reason::OutOfRange, Reason::PerformanceLimit,
@@ -709,6 +718,7 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             CHECK((r.state == ActivityState::Pending || (r.state == ActivityState::Canceled && r.reason == Reason::Preempted)));
             CHECK(r.startTime == done.now);
             CHECK(r.source == (made ? done.options.source : Source::Policy));
+            CHECK(r.controller == (made ? done.options.controller : 0)); // (its controller: the legacy entry points' the default policy's)
             if (made) CHECK(id == done.result.activity);
             CHECK((r.waiting != ActivityWait::None) == (made && (done.result.flags & kDeferred) != 0));
             if (made) CHECK((r.rank == done.options.rank && r.interrupt == done.options.interrupt));
@@ -892,6 +902,11 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
     std::mt19937_64 callers(seed ^ 0x9e3779b97f4a7c15ull); // who an UPDATE or a CANCEL says it is
     std::mt19937_64 validations(seed ^ 0x5851f42d4c957f2dull); // which NEWs are validated first (drawn apart, as the callers are)
     std::mt19937_64 schedules(seed ^ 0x2545f4914f6cdd1dull);   // ranks, windows and precedence (4.9; drawn apart likewise)
+    std::mt19937_64 controllers(seed ^ 0x94d049bb133111ebull); // which of the policy's controllers calls (4.12; drawn apart likewise)
+    auto controller = [&controllers] { // the default policy's mostly, else one of two others
+        const double u = std::uniform_real_distribution<double>(0.0, 1.0)(controllers);
+        return static_cast<ControllerId>(u < 0.6 ? 0 : u < 0.85 ? 1 : 2);
+    };
     auto chance = [&schedules](double p) { return std::uniform_real_distribution<double>(0.0, 1.0)(schedules) < p; };
     auto draw = [&schedules](int n) { return std::uniform_int_distribution<int>(0, n - 1)(schedules); };
     std::vector<std::uint32_t> precedences(w.capabilities(v).size(), 0); // the platform's, as the rules keep them
@@ -948,7 +963,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 if (caps[i].interactions & kCommand) commandable.push_back(i);
             done.capability = commandable[make.pick(commandable.size())];
             const CapabilityDescriptor d = caps[done.capability];
-            done.refused = authority.refuses(done.capability);
+            done.options.controller = controller();
+            done.refused = authority.refuses(done.capability, done.options.controller);
             const double s = make.uniform(0.0, 1.0);
             done.options.source = s < 0.55 ? Source::Policy : s < 0.85 ? Source::Autopilot : Source::Override;
             const double r = make.uniform(0.0, 1.0);
@@ -1033,7 +1049,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                                                               : activityId(v, lastSerial + 1 + static_cast<std::uint32_t>(draw(50)));
             done.command = static_cast<ActivityCommand>(draw(static_cast<int>(ActivityCommand::Count)));
             done.rank = {static_cast<std::uint16_t>(draw(4)), static_cast<std::uint16_t>(draw(4))};
-            done.caller = chance(0.7) ? Source::Policy : chance(0.5) ? Source::Autopilot : Source::Override;
+            done.caller = Caller{chance(0.7) ? Source::Policy : chance(0.5) ? Source::Autopilot : Source::Override, controller()};
             done.result = w.activityCommand(done.caller, done.addressed, done.command, done.rank);
             break;
         }
@@ -1067,7 +1083,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 const TaskId id = mine[static_cast<std::size_t>(draw(static_cast<int>(mine.size())))];
                 done.taskCommand = true;
                 done.capability = taskCapability[id];
-                done.refused = authority.refuses(done.capability);
+                done.options.controller = controller();
+                done.refused = authority.refuses(done.capability, done.options.controller);
                 done.options.source = chance(0.6) ? Source::Policy : Source::Autopilot;
                 done.options.range = chance(0.5) ? RangePolicy::Clamp : RangePolicy::Reject;
                 done.result = w.commandTask(v, id, done.options);
@@ -1075,13 +1092,13 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 if (done.result.accepted()) issued.push_back(done.result.activity);
             } else {
                 const TaskId id = mine[static_cast<std::size_t>(draw(static_cast<int>(mine.size())))];
-                const CommandResult r = w.cancelTask(v, id);
+                done.caller = Caller{Source::Policy, controller()};
+                const CommandResult r = w.cancelTask(v, id, done.caller);
                 ++seen[std::string("task:cancel:") + (r.status == CommandStatus::Canceled ? "done" : reasonName(r.reason))];
                 done.op = Op::Cancel; // (a cancel of its activity, when it flies: the rules of a CANCEL)
                 done.addressed = kept[0].id == id ? kept[0].activity : 0;
                 for (const TaskStatus& t : kept)
                     if (t.id == id) done.addressed = t.activity;
-                done.caller = Source::Policy;
                 done.result = r;
                 if (!done.addressed || !w.activity(done.addressed) || !before.count(done.addressed) || !before.at(done.addressed).live())
                     done.op = Op::Task, done.result = CommandResult{}; // (nothing flew: nothing to hold it to but the task's state, below)
@@ -1113,7 +1130,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                                                               : activityId(v + 1000, 1);
             // the source the call declares, the policy's mostly (drawn apart: the sequence is as it was without it)
             const double from = std::uniform_real_distribution<double>(0.0, 1.0)(callers);
-            done.caller = from < 0.7 ? Source::Policy : from < 0.85 ? Source::Autopilot : Source::Override;
+            done.caller = Caller{from < 0.7 ? Source::Policy : from < 0.85 ? Source::Autopilot : Source::Override, controller()};
             if (done.op == Op::Cancel) {
                 done.result = w.cancel(done.caller, done.addressed);
                 break;
@@ -1161,36 +1178,47 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             if (a < 0.2) {
                 done.authority = "mode";
                 const ControlMode mode = make.chance(0.6) ? ControlMode::Granted : ControlMode::Open;
-                if (mode == ControlMode::Granted && authority.mode != mode)
-                    endingPolicy([&](const ActivityRecord& r) { return !authority.control[r.capability].granted; }, Reason::NotGranted);
+                if (mode == ControlMode::Granted && authority.mode != mode) // (what flies without its own controller's grant)
+                    endingPolicy([&](const ActivityRecord& r) {
+                        return !(authority.control[r.capability].granted && authority.control[r.capability].holder == r.controller);
+                    },
+                                 Reason::NotGranted);
                 authority.mode = mode;
                 CHECK(w.setControlMode(v, mode) == Reason::None);
             } else if (a < 0.55) {
                 done.authority = "request";
                 const CapabilityStatus own = w.vehicleState(v)->diverged ? CapabilityStatus{Availability::TemporarilyUnavailable, Reason::Diverged}
                                                                           : authority.restricted[c];
-                const Reason expected = !authority.control[c].allowed ? Reason::NotAllowed
-                                        : own.availability != Availability::Available ? own.reason
-                                                                                      : Reason::None;
-                if (expected == Reason::None) authority.control[c].granted = true;
-                done.answer = w.requestControl(v, id);
+                const ControllerId by = controller();
+                const Reason expected = !authority.control[c].allowed                                      ? Reason::NotAllowed
+                                        : own.availability != Availability::Available                      ? own.reason
+                                        : authority.control[c].granted && authority.control[c].holder != by ? Reason::AuthorityHeld // (another's)
+                                                                                                           : Reason::None;
+                if (expected == Reason::None) authority.control[c].granted = true, authority.control[c].holder = by;
+                done.answer = w.requestControl(v, id, by);
                 CHECK(done.answer == expected);
             } else if (a < 0.65) {
                 done.authority = "release";
-                endingPolicy([&](const ActivityRecord& r) { return r.capability == c; }, Reason::Released);
-                authority.control[c].granted = false;
-                CHECK(w.releaseControl(v, id) == Reason::None);
+                const ControllerId by = controller();
+                if (authority.control[c].granted && authority.control[c].holder != by) { // another's: not its to let go, and nothing changes
+                    CHECK(w.releaseControl(v, id, by) == Reason::NotGranted);
+                    ++seen["release:not_granted"];
+                } else {
+                    endingPolicy([&](const ActivityRecord& r) { return r.capability == c && r.controller == by; }, Reason::Released);
+                    authority.control[c].granted = false, authority.control[c].holder = 0;
+                    CHECK(w.releaseControl(v, id, by) == Reason::None);
+                }
             } else if (a < 0.75) {
                 done.authority = "revoke";
                 const Reason why = make.chance(0.5) ? Reason::Revoked : Reason::CollisionAvoidance;
-                endingPolicy([&](const ActivityRecord& r) { return r.capability == c; }, why);
-                authority.control[c].granted = false;
+                endingPolicy([&](const ActivityRecord& r) { return r.capability == c; }, why); // (every controller's)
+                authority.control[c].granted = false, authority.control[c].holder = 0;
                 CHECK(w.revokeControl(v, id, why) == Reason::None);
             } else if (a < 0.87) {
                 done.authority = "allow";
                 const bool allowed = make.chance(0.6);
                 if (!allowed && authority.control[c].granted) endingPolicy([&](const ActivityRecord& r) { return r.capability == c; }, Reason::Revoked);
-                if (!allowed) authority.control[c].granted = false;
+                if (!allowed) authority.control[c].granted = false, authority.control[c].holder = 0;
                 authority.control[c].allowed = allowed;
                 CHECK(w.setAllowed(v, id, allowed) == Reason::None);
             } else {
@@ -1280,7 +1308,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             if (!(caps[i].interactions & kCommand)) continue;
             INFO(caps[i].id);
             const ControlStatus st = w.controlStatus(v, caps[i].id);
-            CHECK((st.allowed == authority.control[i].allowed && st.granted == authority.control[i].granted));
+            CHECK((st.allowed == authority.control[i].allowed && st.granted == authority.control[i].granted && st.holder == authority.control[i].holder));
             if (!diverged) {
                 const CapabilityStatus a = w.capabilityStatus(v, caps[i].id);
                 CHECK((a.availability == authority.restricted[i].availability && a.reason == authority.restricted[i].reason));
@@ -1378,7 +1406,9 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
                                         "failed:waiting", "activity:not_interactive", "disabled->pending", "active->disabled",
                                         // flight tasks and suggestions (4.11)
                                         "task:store:none", "task:command:done", "task:command:task_active", "task:executing", "task:completed",
-                                        "task:cancel:done", "suggested:refused"};
+                                        "task:cancel:done", "suggested:refused",
+                                        // named controllers (4.12)
+                                        "request:authority_held", "release:not_granted", "controller:held"};
     auto missing = [&all] { return std::any_of(std::begin(kRare), std::end(kRare), [&all](const char* what) { return all[what] == 0; }); };
     for (std::uint64_t seed = 20260927; missing() && seed < 20260927 + 12; ++seed)
         for (const Aircraft& a : kAdapters) {

@@ -37,6 +37,7 @@ add_executable(fsim_tests
     test_schedule.cpp
     test_activities.cpp
     test_tasks.cpp
+    test_reports.cpp
     test_protection.cpp
     test_laws.cpp
     test_manoeuvres.cpp
