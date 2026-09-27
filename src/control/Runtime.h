@@ -152,6 +152,7 @@ struct SlotReport {
     std::uint32_t revision = 0;    ///< the setpoint revision it last flew
     std::uint8_t events = 0;       ///< SlotEvent bits, latched until the host clears them
     Reason failure = Reason::None; ///< with kFailed
+    std::uint16_t flags = 0;       ///< ActivityFlag bits its behaviour reported (Behavior::constraints), latched likewise
 };
 
 struct LimitReport {

@@ -860,6 +860,9 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     }
     if (checked)
         if (const Reason why = catalog_->check(index, setpoint, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
+    if (const auto* b = std::get_if<BehaviorCommand>(&setpoint); b && checked) // what the behaviour needs from where the aircraft is
+        if (const BehaviorTraits::Admission admit = catalog_->admission(index))
+            if (const Reason why = admit(*b, state, performance_, detail); why != Reason::None) return about(rejected(why), detail);
     if (hsa && checked)
         if (const Reason why = limitHsa(*hsa, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
     if (pattern && checked)
@@ -1201,6 +1204,14 @@ void CapabilityHost::afterStep(const sim::VehicleState& state, const EffectorPos
     if (state.diverged != divergedSeen_) divergedSeen_ = state.diverged, ++controlRevision_; // every capability's availability changed
     RuntimeReport& report = runtime_->report();
     const RuntimeConfig& config = *config_;
+    // Whether the state went past the envelope this step by more than its limiters overshoot: what a
+    // manoeuvre is judged by (docs/flight-autonomy.md, 6). Per limit: 0.5 g; 3 deg of angle of attack (a
+    // fly-by-wire limiter holds within a degree or two); none for bank and pitch, which a loop and a roll
+    // pass by design; 0.35 rad/s of roll rate; 3 m/s below the least airspeed, 5 m/s above the most; Mach 0.02.
+    static constexpr float kTolerance[kLimitCount] = {0.5f, 0.5f, 0.0524f, 1e30f, 1e30f, 1e30f, 0.35f, 3.0f, 5.0f, 0.02f};
+    bool outside = false;
+    for (std::size_t l = 0; l < kLimitCount; ++l)
+        if (report.limits[l].exceededUpdates && report.limits[l].worstExcess > kTolerance[l]) outside = true;
     for (std::size_t s = 0; s < kActivities; ++s) {
         Slot& slot = slots_[s];
         if (!slot.activity) continue; // nothing flies here (and nothing reported)
@@ -1209,18 +1220,25 @@ void CapabilityHost::afterStep(const sim::VehicleState& state, const EffectorPos
             const bool flown = isCascade(s) ? report.updates > 0 && report.slots[s].generation == config.slots[s].generation
                                             : report.updates > 0;
             if (record.state == ActivityState::Pending && flown) record.state = ActivityState::Active;
-            const std::uint16_t flags = static_cast<std::uint16_t>(slot.flags | flagsOn(report, record.axes));
+            const std::uint16_t behaviorFlags = isCascade(s) ? report.slots[s].flags : std::uint16_t{0}; // what its behaviour held back
+            const std::uint16_t flags = static_cast<std::uint16_t>(slot.flags | flagsOn(report, record.axes) | behaviorFlags);
             record.constraints = flags;
             record.constraintsSeen = static_cast<std::uint16_t>(record.constraintsSeen | flags);
             slot.flags = 0;
             // how far a behaviour has got, before it may complete (docs/vehicle-interface.md, 5.3)
             if (isCascade(s) && config.slots[s].level == Level::Behavior) runtime_->progress(s, record.progress);
+            if (outside) slot.outside = true;
             if (state.diverged) {
                 end(s, ActivityState::Failed, Reason::Diverged, 0, now);
             } else if (record.state == ActivityState::Active && isCascade(s)) {
                 const SlotReport& events = report.slots[s];
                 if (events.events & kFailed) end(s, ActivityState::Failed, events.failure, 0, now);
-                else if (events.events & kFinished) end(s, ActivityState::Completed, Reason::GoalReached, 0, now);
+                else if (events.events & kFinished) {
+                    // a manoeuvre flown past the envelope is not one completed (docs/flight-autonomy.md, 6)
+                    if (slot.outside && catalog_->withinEnvelope(record.capability))
+                        end(s, ActivityState::Failed, Reason::BehaviorFailed, 0, now);
+                    else end(s, ActivityState::Completed, Reason::GoalReached, 0, now);
+                }
             } else if (record.state == ActivityState::Active && isSupport(s) && !std::isnan(slot.target)) {
                 // gear or flaps: done when they are there (and held there, as a residual)
                 const std::size_t axis = static_cast<std::size_t>(Axis::Flaps) + (s - kSlotCount);
@@ -1232,6 +1250,7 @@ void CapabilityHost::afterStep(const sim::VehicleState& state, const EffectorPos
         if (isCascade(s)) {
             report.slots[s].events = 0;
             report.slots[s].failure = Reason::None;
+            report.slots[s].flags = 0;
         }
     }
     // the envelope: what was limited, how long and how far the state was beyond each limit

@@ -563,7 +563,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         } else if (done.op == Op::Cancel) CHECK(ok);
         else if (!ok)
             CHECK(among(done.result.reason, {Reason::NotUpdatable, Reason::WrongCommandType, Reason::InvalidParameter, Reason::OutOfRange, Reason::PerformanceLimit,
-                                             Reason::InvalidWaypoint, Reason::InvalidCurve}));
+                                             Reason::InvalidWaypoint, Reason::InvalidCurve,
+                                             Reason::NotSupported})); // a field the aircraft has nothing for (docs/flight-autonomy.md, 4.3)
     }
 
     if (done.op == Op::Legacy && done.refused != Reason::None) CHECK_FALSE(done.accepted); // (the existing entry points gated the same way)
@@ -695,7 +696,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
 /// against the rules; returns what was answered and flown, to compare runs.
 /// Now and then it plays the ends chance rarely reaches through the same
 /// rules: a route done at once, and a pursuit whose target goes.
-std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed, int operations, std::map<std::string, int>& seen) {
+std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed, int operations, std::map<std::string, int>& seen,
+                                   int leastActivities = 51) {
     session::World w(options(std::string("conformance-") + aircraft.family));
     std::uint32_t target = w.createVehicle(spec("target", aircraft.type, aircraft.altitudeM, aircraft.tasMs, 0.05));
     const auto v = w.createVehicle(spec("subject", aircraft.type, aircraft.altitudeM, aircraft.tasMs));
@@ -950,7 +952,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                                              static_cast<double>(done.ends.size())});
     }
     INFO(aircraft.type << ": " << lastSerial << " activities, the last " << before.size() << " of them kept");
-    CHECK(lastSerial > 50);
+    CHECK(static_cast<int>(lastSerial) >= leastActivities);
     return transcript;
 }
 
@@ -1002,14 +1004,23 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
         }
         for (const auto& [what, n] : seen) all[what] += n;
     }
-    CHECK(all["failed:target_lost"] > 0);   // a follower whose target goes
-    CHECK(all["new:invalid_waypoint"] > 0); // a route with a point it cannot fly (docs/vehicle-interface.md, 5.1)
-    CHECK(all["new:invalid_curve"] > 0);    // a curve with a segment it cannot fly
-    CHECK(all["update:invalid_curve"] > 0); // appended where the curve does not end
-    // grants over the priorities (docs/vehicle-interface.md, 6): every answer and every end the rules give
-    for (const char* what : {"new:not_granted", "request:none", "request:not_allowed", "canceled:released", "canceled:revoked", "canceled:not_granted",
-                             "canceled:collision_avoidance", "mode", "release", "revoke", "allow", "restrict", "update:authority_held",
-                             "cancel:authority_held"}) {
+    // The rarer answers, over every adapter's walks: a follower whose target goes, a route with a point it
+    // cannot fly and a curve with a segment it cannot fly (docs/vehicle-interface.md, 5.1), an append where
+    // the curve does not end, and every answer and end the grants give (6). A walk meets some of them once
+    // or twice, and any change to what a command draws moves it: more seeded walks, the same every run,
+    // until each has appeared (at most twelve more).
+    static const char* const kRare[] = {"failed:target_lost", "new:invalid_waypoint", "new:invalid_curve", "update:invalid_curve",
+                                        "new:not_granted", "request:none", "request:not_allowed", "canceled:released", "canceled:revoked",
+                                        "canceled:not_granted", "canceled:collision_avoidance", "mode", "release", "revoke", "allow",
+                                        "restrict", "update:authority_held", "cancel:authority_held"};
+    auto missing = [&all] { return std::any_of(std::begin(kRare), std::end(kRare), [&all](const char* what) { return all[what] == 0; }); };
+    for (std::uint64_t seed = 20260927; missing() && seed < 20260927 + 12; ++seed)
+        for (const Aircraft& a : kAdapters) {
+            std::map<std::string, int> more;
+            randomSequence(a, seed, 600, more, 0); // (only for the rare answers: no least number of activities)
+            for (const auto& [what, n] : more) all[what] += n;
+        }
+    for (const char* what : kRare) {
         INFO(what);
         CHECK(all[what] > 0);
     }

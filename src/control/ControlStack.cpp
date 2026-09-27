@@ -340,6 +340,7 @@ FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::si
         ControlContext guided{ctx}; // what the vehicle can do: its guidance may differ by it
         guided.features = features_;
         guided.performance = &config_->performance;
+        guided.envelope = &config_->protection.clean;
         guided.path = config_->path.get();
         if (started_[s] != slot.generation) {
             behavior->begin(guided, *current);
@@ -351,6 +352,7 @@ FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::si
             flown.events |= kFailed;
             flown.failure = failure;
         }
+        flown.flags = static_cast<std::uint16_t>(flown.flags | behavior->constraints());
         const Level nextLevel = levelOf(next);
         if (levelRank(nextLevel) >= levelRank(level)) {
             LOG_ERROR("control") << "behaviour '" << behavior->id() << "' returned a command at level " << levelName(nextLevel);
@@ -517,6 +519,7 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
         ControlContext guided{ctx};
         guided.features = features_;
         guided.performance = &config_->performance;
+        guided.envelope = &config_->protection.clean;
         guided.path = config_->path.get();
         if (started_[s] != slot.generation) {
             behavior->begin(guided, slot.command);
@@ -529,6 +532,7 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
             flown.events |= kFailed;
             flown.failure = failure;
         }
+        flown.flags = static_cast<std::uint16_t>(flown.flags | behavior->constraints());
         const Level nextLevel = levelOf(next);
         if (levelRank(nextLevel) >= levelRank(Level::Behavior)) {
             LOG_ERROR("control") << "behaviour '" << behavior->id() << "' returned a command at level " << levelName(nextLevel);

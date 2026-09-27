@@ -355,6 +355,10 @@ struct ControlContext {
     /// What it can do in numbers, for a behaviour: its guidance plans with it
     /// (docs/vehicle-interface.md, 7.1). Null outside a vehicle's runtime.
     const Performance* performance = nullptr;
+    /// Its clean configuration's limits (the profile's envelope; NaN where it
+    /// has none), for a behaviour that flies to them: a manoeuvre that gives
+    /// up when it departs. Null outside a vehicle's runtime.
+    const EnvelopeLimits* envelope = nullptr;
     /// The vehicle's route, for the behaviour that flies it; null until one was given.
     const PathStore* path = nullptr;
 };
@@ -402,6 +406,10 @@ public:
     /// the vehicle it follows is gone; None while it can. Its activity fails,
     /// and it keeps flying whatever it falls back to.
     virtual Reason failure() const noexcept { return Reason::None; }
+    /// ActivityFlag bits for its last update, beside what the runtime sees of
+    /// the loops: a setpoint it held back to keep the aircraft safe
+    /// (kActivityClamped: an evade's descent stopped at its floor).
+    virtual std::uint16_t constraints() const noexcept { return 0; }
     /// How far it has got and what it commands, as of its last update
     /// (docs/vehicle-interface.md, 5.3): the fields it knows into `out`, and
     /// true; false if it reports nothing. Asked between world steps (the

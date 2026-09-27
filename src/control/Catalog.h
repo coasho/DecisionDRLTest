@@ -8,11 +8,13 @@
 #include "fsim/Control.h"
 #include "fsim/VehicleProfile.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace fsim::control {
@@ -89,6 +91,16 @@ public:
     }
     /// By capability id ("fsim.guidance.hold") or a behaviour's registry id ("hold"); -1 if none.
     int find(std::string_view id) const noexcept;
+    /// Whether a behaviour's activity completes only if flown within the envelope (BehaviorTraits::withinEnvelope).
+    bool withinEnvelope(std::size_t index) const noexcept {
+        return std::find(withinEnvelope_.begin(), withinEnvelope_.end(), index) != withinEnvelope_.end();
+    }
+    /// A behaviour's admission (BehaviorTraits::admit) by its capability's index; null if none.
+    BehaviorTraits::Admission admission(std::size_t index) const noexcept {
+        for (const auto& [i, admit] : admissions_)
+            if (i == index) return admit;
+        return nullptr;
+    }
 
     /// The axes a command owns when its options name none.
     AxisMask defaultAxes(std::size_t index, const Command& command) const noexcept;
@@ -112,6 +124,8 @@ private:
 
     std::uint32_t features_ = ~0u; ///< the aircraft's; without one, every behaviour is offered
     std::uint16_t excludedRules_ = 0; ///< its physical exceptions (docs/flight-autonomy.md, 5)
+    std::vector<std::pair<std::size_t, BehaviorTraits::Admission>> admissions_; ///< the behaviours' that have one, by index
+    std::vector<std::size_t> withinEnvelope_; ///< the behaviours whose activities complete only within the envelope
     std::vector<CapabilityDescriptor> descriptors_;
     std::array<int, static_cast<std::size_t>(Level::Behavior)> byLevel_{};
     std::array<int, kSupportKinds> bySupport_{-1, -1, -1, -1, -1, -1};

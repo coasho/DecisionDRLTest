@@ -328,6 +328,8 @@ void CapabilityCatalog::addBehaviors() {
         d.needsTarget = traits.needsTarget;
         d.mode = traits.mode;
         if (mode) byMode_[static_cast<std::size_t>(traits.setpoint)] = static_cast<int>(descriptors_.size());
+        if (traits.admit) admissions_.emplace_back(descriptors_.size(), traits.admit);
+        if (traits.withinEnvelope) withinEnvelope_.push_back(descriptors_.size());
         descriptors_.push_back(std::move(d));
     }
 }

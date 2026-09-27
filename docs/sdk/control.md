@@ -62,12 +62,12 @@ output.
 | id | Uses | Parameters (defaults) |
 | --- | --- | --- |
 | `hold` | - | `airspeed_ms`, `heading_deg`, `altitude_m` (all: current at start). An aircraft that hovers keeps its velocity over the ground instead of the airspeed it had (a hover stays put in wind), unless given `airspeed_ms` |
-| `waypoints` | `points` | `loop` (0), `airspeed_ms` for points without one (a wing: current; a rotorcraft: its position loop's speed). `finished()` after the last capture. A NEW checks the points: somewhere on the Earth, a positive capture radius, no negative airspeed (`invalid_parameter`) |
-| `loiter` | `target` or `lat_deg`/`lon_deg` | `radius_m` (1500; at least 100 for a wing, 1 for a rotorcraft), `altitude_m` (current), `clockwise` (1), `airspeed_ms` (a wing: current; a rotorcraft: its position loop's speed) |
-| `pursuit` | `target` | `range_m` (300), `lead_s` (2), `min_airspeed_ms` (30), `max_airspeed_ms` (400) |
-| `evade` | `target` | `altitude_delta_m` (-300), `airspeed_ms` (current) |
+| `waypoints` | `points` | `loop` (0), `airspeed_ms` for points without one (a wing: current; a rotorcraft: its position loop's speed). `finished()` after the last capture. A NEW checks the points: somewhere on the Earth, a positive capture radius, no negative airspeed (`invalid_parameter`); and, checked, none a wing cannot capture - inside a turn circle at its arrival, at its full bank, farther than its capture radius (`invalid_waypoint`, the point's index, `max_turn_rate`). One it circles a full turn without closing on fails the activity (`behavior_failed`), and it flies on straight and level. Superseded by `fsim.guidance.route` |
+| `loiter` | `target` or `lat_deg`/`lon_deg` | `radius_m` (left out: 1500, or 1.25 times the circle a wing's bank and heading loop hold at its speed - a heavy's is kilometres; at least 100 for a wing, 1 for a rotorcraft), `altitude_m` (current), `clockwise` (1), `airspeed_ms` (a wing: current; a rotorcraft: its position loop's speed). A slow-rolling wing flies its circle up to 15 % inside. Superseded by `fsim.guidance.pattern` |
+| `pursuit` | `target` | `range_m` (300), `lead_s` (2), `min_airspeed_ms` (30), `max_airspeed_ms` (400). It aims `range_m` behind the target along its track and holds that range as the least: it closes no faster than it could stop closing (0.25 m/s2 for a wing, half a rotorcraft's deceleration, after a 10 s lag), and inside the range it turns back out. A light aircraft whose speed answers in tens of seconds dips up to a quarter inside it once, then settles |
+| `evade` | `target` | `altitude_delta_m` (-300), `airspeed_ms` (current), `floor_agl_m` (150): never lower over the terrain under it than the floor (nor than it started, if that was lower); while the floor holds its descent, its activity carries `kActivityClamped` |
 | `formation` | `target` (leader) | `ahead_m` (-100), `right_m` (60), `below_m` (0), `closure_gain` (0.1) |
-| `aerobatics` | - | `manoeuvre` (0 aileron roll, 1 loop, 2 Immelmann, 3 split-S), `load_factor_g` (3.5), `roll_rate_rad_s` (1.5); `finished()` when done, then holds the entry altitude/heading |
+| `aerobatics` | - | `manoeuvre` (0 aileron roll, 1 loop, 2 Immelmann, 3 split-S), `load_factor_g` (3.5), `roll_rate_rad_s` (1.5). Offered to aircraft cleared for aerobatics (rule R10). Checked, a NEW is refused `performance_limit` too slow (`min_airspeed`: a loop or an Immelmann twice the least calibrated airspeed, a roll or a split-S the least times the root of the load factor, where the aircraft's least is known) or a split-S too low (`min_altitude`). It gives up (`behavior_failed`) below its least airspeed, past its angle of attack by more than 3 deg (a departure) or within 150 m of the ground, and completes only if flown within the envelope to its limiters' tolerance; either way it then holds the entry altitude and heading |
 | `hover` | - | `lat_deg`, `lon_deg`, `altitude_m`, `heading_deg` (all: current at start). Offered to aircraft that can hover ([rotorcraft](#rotorcraft)) |
 
 Behaviours that need another vehicle read it through the world view
@@ -826,12 +826,18 @@ struct Orbit final : fsim::control::Behavior {
     fsim::control::Reason failure() const noexcept override {         // not None: its activity fails
         return lost_ ? fsim::control::Reason::TargetLost : fsim::control::Reason::None;
     }
+    std::uint16_t constraints() const noexcept override { return 0; } // ActivityFlag bits: kActivityClamped for a
+                                                                      // setpoint it held back (ctx.envelope: the limits)
     std::uint32_t target_ = 0; double radius_ = 800.0; bool lost_ = false;
 };
 fsim::control::BehaviorTraits traits;   // optional: how consumers see it (user.guidance.orbit_target)
 traits.parameters = {{"radius_m", "m", 100.0, 1e5, 800.0, true}};
 traits.uses = {"fsim.flight.position"};
 traits.needsTarget = true;              // submit() refuses it without a target
+traits.admit = [](const BehaviorCommand& c, const sim::VehicleState& s, const Performance& perf, CommandResult& detail) {
+    return Reason::None;                // what a checked NEW must also meet from where the aircraft is (else the refusal)
+};
+traits.withinEnvelope = false;          // true: it completes only if flown within the envelope (a manoeuvre)
 fsim::control::ControllerRegistry::instance().addBehavior("orbit_target", [] { return std::make_unique<Orbit>(); }, traits);
 v.command(fsim::control::BehaviorCommand{.id = "orbit_target", .target = other.id()});
 ```

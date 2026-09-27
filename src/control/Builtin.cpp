@@ -416,6 +416,9 @@ void WaypointsBehavior::start(const ControlContext& ctx, const BehaviorCommand& 
     index_ = 0;
     loop_ = command.param("loop", 0.0) != 0.0;
     finished_ = command.points.empty();
+    failed_ = false;
+    closest_ = lastHeading_ = kHold;
+    turned_ = 0.0;
     hovers_ = (ctx.features & kFeatureHover) != 0;
     // without one, a wing flies the airspeed it had; an aircraft that hovers
     // its position loop's own speed (hovering, the airspeed it had is none)
@@ -445,11 +448,29 @@ Command WaypointsBehavior::update(const ControlContext& ctx, const Command& in) 
         return hold;
     }
     if (index_ >= c.points.size()) index_ = c.points.size() - 1;
+    if (failed_) return fallback_; // straight and level: it could not close on its point
     const PositionCommand& p = c.points[index_];
-    if (!finished_ && geo::distanceM(s.latitudeRad, s.longitudeRad, p.latitudeRad, p.longitudeRad) < p.captureRadiusM) {
+    const double distance = geo::distanceM(s.latitudeRad, s.longitudeRad, p.latitudeRad, p.longitudeRad);
+    if (!finished_ && distance < p.captureRadiusM) {
         if (index_ + 1 < c.points.size()) ++index_;
         else if (loop_) index_ = 0, ++laps_;
         else finished_ = true;
+        closest_ = lastHeading_ = kHold; // a new point to close on
+        turned_ = 0.0;
+    } else if (!finished_) {
+        // a point it circles without closing: a full turn (and a little) with no new least distance
+        if (isHold(closest_) || distance < closest_ - 1.0) closest_ = distance, turned_ = 0.0;
+        else if (!isHold(lastHeading_)) turned_ += std::abs(geo::wrapPi(s.eulerRad[2] - lastHeading_));
+        lastHeading_ = s.eulerRad[2];
+        if (turned_ > 2.0 * units::kPi + 0.5) {
+            failed_ = true;
+            fallback_ = VelocityCommand{};
+            fallback_.headingRad = s.eulerRad[2];
+            fallback_.verticalSpeedMs = 0.0;
+            if (hovers_) fallback_.northMs = fallback_.eastMs = 0.0; // stay where it is
+            else fallback_.airspeedMs = s.airspeedTrueMs;
+            return fallback_;
+        }
     }
     PositionCommand out = c.points[index_];
     if (isHold(out.airspeedMs)) out.airspeedMs = airspeed_;
@@ -494,10 +515,16 @@ void LoiterBehavior::start(const ControlContext& ctx, const BehaviorCommand& com
     centreLat_ = command.param("lat_deg", units::radiansToDegrees(s.latitudeRad)) * units::kDegreesToRadians;
     centreLon_ = command.param("lon_deg", units::radiansToDegrees(s.longitudeRad)) * units::kDegreesToRadians;
     const bool hovers = (ctx.features & kFeatureHover) != 0;
-    radius_ = std::max(hovers ? 1.0 : 100.0, command.param("radius_m", 1500.0));
+    airspeed_ = command.param("airspeed_ms", hovers ? kHold : s.airspeedTrueMs); // kHold: the position loop's speed
+    // left out: 1500 m, or wider where the aircraft's turn at the speed it flies needs it (a heavy's is kilometres)
+    double radius = command.param("radius_m", kHold);
+    if (isHold(radius)) {
+        radius = 1500.0;
+        if (ctx.performance && !hovers) radius = std::max(radius, 1.25 * orbitRadiusM(*ctx.performance, orHold(airspeed_, s.airspeedTrueMs)));
+    }
+    radius_ = std::max(hovers ? 1.0 : 100.0, radius);
     altitude_ = command.param("altitude_m", s.altitudeMslM);
     clockwise_ = command.param("clockwise", 1.0) != 0.0;
-    airspeed_ = command.param("airspeed_ms", hovers ? kHold : s.airspeedTrueMs); // kHold: the position loop's speed
     lastTheta_ = distance_ = kHold;
     swept_ = 0.0;
 }
@@ -542,12 +569,17 @@ bool LoiterBehavior::progress(ActivityProgress& out) const noexcept {
     return true;
 }
 
-void PursuitBehavior::start(const ControlContext&, const BehaviorCommand& command) {
+void PursuitBehavior::start(const ControlContext& ctx, const BehaviorCommand& command) {
     target_ = command.target;
     rangeM_ = command.param("range_m", 300.0);
     leadS_ = command.param("lead_s", 2.0);
     minSpeed_ = command.param("min_airspeed_ms", 30.0);
     maxSpeed_ = command.param("max_airspeed_ms", 400.0);
+    decelMs2_ = 0.25, lagS_ = 10.0;
+    if (const Performance* perf = ctx.performance) {
+        if (std::isfinite(perf->maxDecelerationMs2) && perf->maxDecelerationMs2 > 0.0) decelMs2_ = 0.5 * perf->maxDecelerationMs2;
+        if (std::isfinite(perf->velocityBandwidthRadS) && perf->velocityBandwidthRadS > 0.0) lagS_ = 1.0 / perf->velocityBandwidthRadS;
+    }
 }
 
 Command PursuitBehavior::update(const ControlContext& ctx, const Command&) {
@@ -560,12 +592,27 @@ Command PursuitBehavior::update(const ControlContext& ctx, const Command&) {
         hold.airspeedMs = s.airspeedTrueMs;
         return hold;
     }
-    PositionCommand out;
-    geo::offsetLatLon(t->latitudeRad, t->longitudeRad, t->velocityNedMs[0] * leadS_, t->velocityNedMs[1] * leadS_, out.latitudeRad, out.longitudeRad);
-    out.altitudeMslM = t->altitudeMslM - t->velocityNedMs[2] * leadS_;
-    const double distance = geo::distanceM(s.latitudeRad, s.longitudeRad, t->latitudeRad, t->longitudeRad);
+    // Aim at the stand-off point: range_m behind where the target will be,
+    // along its track (a target that hardly moves: range_m from it on this
+    // side). Inside the range the point is behind the pursuer, which turns
+    // back out: the range is the least it keeps.
+    double north, east; // the pursuer from the target
+    geo::localNorthEastM(t->latitudeRad, t->longitudeRad, s.latitudeRad, s.longitudeRad, north, east);
+    const double distance = std::hypot(north, east);
     const double targetSpeed = std::hypot(t->velocityNedMs[0], t->velocityNedMs[1]);
-    out.airspeedMs = std::clamp(targetSpeed + 0.1 * (distance - rangeM_), minSpeed_, maxSpeed_);
+    double un = 0.0, ue = 0.0; // the unit vector from the stand-off point to the target
+    if (targetSpeed > 1.0) un = t->velocityNedMs[0] / targetSpeed, ue = t->velocityNedMs[1] / targetSpeed;
+    else if (distance > 1.0) un = -north / distance, ue = -east / distance;
+    PositionCommand out;
+    geo::offsetLatLon(t->latitudeRad, t->longitudeRad, t->velocityNedMs[0] * leadS_ - rangeM_ * un, t->velocityNedMs[1] * leadS_ - rangeM_ * ue,
+                      out.latitudeRad, out.longitudeRad);
+    out.altitudeMslM = t->altitudeMslM - t->velocityNedMs[2] * leadS_;
+    // the target's speed, and closing no faster than it can stop closing before the range: after its
+    // speed loop's lag, at the deceleration it is designed for (lag v + v^2 / 2a = gap)
+    const double gap = distance - rangeM_;
+    const double stoppable = decelMs2_ * (std::sqrt(lagS_ * lagS_ + 2.0 * gap / decelMs2_) - lagS_);
+    const double closing = gap > 0.0 ? std::min(0.05 * gap, stoppable) : 0.05 * gap; // (a gain its speed loop follows)
+    out.airspeedMs = std::clamp(targetSpeed + closing, minSpeed_, maxSpeed_);
     out.captureRadiusM = 20.0;
     return out;
 }
@@ -574,13 +621,18 @@ void EvadeBehavior::start(const ControlContext& ctx, const BehaviorCommand& comm
     target_ = command.target;
     altitude_ = ctx.sensed.altitudeMslM + command.param("altitude_delta_m", -300.0);
     airspeed_ = command.param("airspeed_ms", ctx.sensed.airspeedTrueMs);
+    // the floor: never lower over the terrain than floor_agl_m, nor than it started when that was lower
+    floorAglM_ = std::min(command.param("floor_agl_m", 150.0), std::max(ctx.sensed.altitudeAglM, 0.0));
+    floored_ = false;
 }
 
 Command EvadeBehavior::update(const ControlContext& ctx, const Command&) {
     const auto& s = ctx.sensed;
     VelocityCommand out;
     out.airspeedMs = airspeed_;
-    out.verticalSpeedMs = std::clamp(0.25 * (altitude_ - s.altitudeMslM), -8.0, 8.0);
+    const double floor = s.altitudeMslM - s.altitudeAglM + floorAglM_; // over the terrain under it now
+    floored_ = altitude_ < floor;
+    out.verticalSpeedMs = std::clamp(0.25 * (std::max(altitude_, floor) - s.altitudeMslM), -8.0, 8.0);
     const sim::VehicleState* t = ctx.world ? ctx.world->vehicleState(target_) : nullptr;
     lost_ = !t;
     out.headingRad = t ? geo::bearingRad(t->latitudeRad, t->longitudeRad, s.latitudeRad, s.longitudeRad) : s.eulerRad[2];
@@ -627,6 +679,8 @@ void AerobaticBehavior::start(const ControlContext& ctx, const BehaviorCommand& 
     manoeuvre_ = static_cast<Manoeuvre>(static_cast<int>(command.param("manoeuvre", 1.0)));
     loadFactor_ = command.param("load_factor_g", 3.5);
     rollRate_ = command.param("roll_rate_rad_s", 1.5);
+    minCasMs_ = ctx.performance ? ctx.performance->minCasMs : kHold;
+    alphaMaxRad_ = ctx.envelope ? ctx.envelope->alphaMaxRad : kHold;
     reset();
     const auto& s = ctx.sensed;
     entryAltitude_ = s.altitudeMslM;
@@ -638,11 +692,20 @@ void AerobaticBehavior::start(const ControlContext& ctx, const BehaviorCommand& 
 void AerobaticBehavior::reset() {
     phase_ = Entry;
     pitchTravel_ = rollTravel_ = timer_ = 0.0;
+    failed_ = false;
 }
 
 Command AerobaticBehavior::update(const ControlContext& ctx, const Command&) {
     const auto& s = ctx.sensed;
     timer_ += ctx.dt;
+    // flown within the envelope, or not at all: too slow, departed (its angle of attack past the
+    // envelope's by more than a limiter overshoots, either way), or too near the ground, it gives up and levels out
+    const bool departed = std::isfinite(alphaMaxRad_) && std::abs(s.alphaRad) > alphaMaxRad_ + 0.0524;
+    if ((phase_ == Pull || phase_ == Roll) &&
+        ((std::isfinite(minCasMs_) && s.airspeedCalibratedMs < minCasMs_) || departed || s.altitudeAglM < 150.0)) {
+        failed_ = true;
+        phase_ = Done;
+    }
     AccelerationCommand out;
     out.throttle = 1.0;
     switch (phase_) {
@@ -680,6 +743,68 @@ Command AerobaticBehavior::update(const ControlContext& ctx, const Command&) {
     }
 }
 
+double LoiterBehavior::orbitRadiusM(const Performance& perf, double tasMs) noexcept {
+    // the bank its circle needs, at most what guidance may use (80 % of the most) and what its heading
+    // loop gives the carrot's 0.3 rad off its heading on the circle (0.6 rad ahead of it)
+    double bank = 0.8 * (std::isfinite(perf.maxBankRad) ? perf.maxBankRad : 0.52);
+    if (std::isfinite(perf.headingGain) && perf.headingGain > 0.0) {
+        const double gain = std::isfinite(perf.headingReferenceTasMs) ? perf.headingGain * tasMs / perf.headingReferenceTasMs : perf.headingGain;
+        bank = std::min(bank, 0.3 * gain);
+    }
+    return tasMs * tasMs / (kG * std::tan(std::max(bank, 0.05)));
+}
+
+Reason admitWaypoints(const BehaviorCommand& c, const sim::VehicleState& s, const Performance& perf, CommandResult& detail) {
+    if (c.points.empty() || perf.hovers) return Reason::None; // a rotorcraft turns on the spot
+    const double bank = std::isfinite(perf.maxBankRad) && perf.maxBankRad > 0.05 ? perf.maxBankRad : 0.52;
+    const double airspeed = c.param("airspeed_ms", s.airspeedTrueMs);
+    const bool loop = c.param("loop", 0.0) != 0.0;
+    const std::size_t n = c.points.size();
+    // where it arrives from, and the track it arrives along: the aircraft now, then each point from the one before
+    double lat = s.latitudeRad, lon = s.longitudeRad, track = s.eulerRad[2];
+    for (std::size_t k = 0; k < n + (loop && n > 1 ? 1 : 0); ++k) {
+        const std::size_t i = k % n;
+        const PositionCommand& p = c.points[i];
+        const double speed = isHold(p.airspeedMs) ? airspeed : p.airspeedMs;
+        const double radius = speed * speed / (kG * std::tan(bank)); // at its full bank
+        if (std::isfinite(radius) && p.captureRadiusM < radius) {
+            double north, east; // the point from where it arrives
+            geo::localNorthEastM(lat, lon, p.latitudeRad, p.longitudeRad, north, east);
+            const double cn = -radius * std::sin(track), ce = radius * std::cos(track); // the right turn's centre (the left's: minus)
+            const double inside = std::min(std::hypot(north - cn, east - ce), std::hypot(north + cn, east + ce));
+            if (inside < radius - p.captureRadiusM) {
+                detail.index = static_cast<std::int16_t>(std::min<std::size_t>(i, 0x7FFF));
+                detail.constraint = Constraint::MaxTurnRate;
+                return Reason::InvalidWaypoint;
+            }
+        }
+        if (geo::distanceM(lat, lon, p.latitudeRad, p.longitudeRad) > 1.0) track = geo::bearingRad(lat, lon, p.latitudeRad, p.longitudeRad);
+        lat = p.latitudeRad, lon = p.longitudeRad;
+    }
+    return Reason::None;
+}
+
+Reason admitAerobatics(const BehaviorCommand& c, const sim::VehicleState& s, const Performance& perf, CommandResult& detail) {
+    if (!std::isfinite(perf.minCasMs)) return Reason::None; // nothing known to judge by
+    const int manoeuvre = static_cast<int>(c.param("manoeuvre", 1.0));
+    const double n = std::max(c.param("load_factor_g", 3.5), 1.0);
+    const bool overTheTop = manoeuvre == AerobaticBehavior::Loop || manoeuvre == AerobaticBehavior::Immelmann;
+    const double needed = perf.minCasMs * (overTheTop ? 2.0 : std::sqrt(n));
+    if (s.airspeedCalibratedMs < needed) {
+        detail.constraint = Constraint::MinAirspeed;
+        return Reason::PerformanceLimit;
+    }
+    if (manoeuvre == AerobaticBehavior::SplitS) { // half a loop down: 2 v^2 / (g (n - 1)), and room to spare
+        const double v = s.airspeedTrueMs;
+        const double drop = n > 1.05 ? 2.0 * v * v / (kG * (n - 1.0)) : std::numeric_limits<double>::infinity();
+        if (s.altitudeAglM < drop + 300.0) {
+            detail.constraint = Constraint::MinAltitude;
+            return Reason::PerformanceLimit;
+        }
+    }
+    return Reason::None;
+}
+
 // --- Registration ----------------------------------------------------------------
 
 void registerBuiltinControllers(ControllerRegistry& r) {
@@ -701,11 +826,12 @@ void registerBuiltinControllers(ControllerRegistry& r) {
     const std::string position = "fsim.flight.position", velocity = "fsim.flight.velocity", acceleration = "fsim.flight.acceleration";
     r.addBehavior("hold", [] { return std::make_unique<HoldBehavior>(); },
                   traits(Persistence::Persistent, {p("airspeed_ms", "m/s", now, 0.0), p("heading_deg", "deg", now), p("altitude_m", "m", now)}, {velocity}));
-    r.addBehavior("waypoints", [] { return std::make_unique<WaypointsBehavior>(); },
-                  traits(Persistence::Terminating, {p("loop", "", 0.0, 0.0, 1.0), p("airspeed_ms", "m/s", now, 0.0)}, {position, velocity}));
+    auto waypoints = traits(Persistence::Terminating, {p("loop", "", 0.0, 0.0, 1.0), p("airspeed_ms", "m/s", now, 0.0)}, {position, velocity});
+    waypoints.admit = admitWaypoints; // no point it cannot capture
+    r.addBehavior("waypoints", [] { return std::make_unique<WaypointsBehavior>(); }, std::move(waypoints));
     r.addBehavior("loiter", [] { return std::make_unique<LoiterBehavior>(); },
-                  traits(Persistence::Persistent, // a wing's adapter narrows the radius to at least 100 m
-                         {p("lat_deg", "deg", now, -90.0, 90.0), p("lon_deg", "deg", now, -180.0, 180.0), p("radius_m", "m", 1500.0, 1.0),
+                  traits(Persistence::Persistent, // a wing's adapter narrows the radius to at least 100 m; left out, from its turn
+                         {p("lat_deg", "deg", now, -90.0, 90.0), p("lon_deg", "deg", now, -180.0, 180.0), p("radius_m", "m", now, 1.0),
                           p("altitude_m", "m", now), p("clockwise", "", 1.0, 0.0, 1.0), p("airspeed_ms", "m/s", now, 0.0)},
                          {position}));
     r.addBehavior("pursuit", [] { return std::make_unique<PursuitBehavior>(); },
@@ -713,7 +839,8 @@ void registerBuiltinControllers(ControllerRegistry& r) {
                          {p("range_m", "m", 300.0, 0.0), p("lead_s", "s", 2.0, 0.0), p("min_airspeed_ms", "m/s", 30.0, 0.0), p("max_airspeed_ms", "m/s", 400.0, 0.0)},
                          {position, velocity}, true));
     r.addBehavior("evade", [] { return std::make_unique<EvadeBehavior>(); },
-                  traits(Persistence::Persistent, {p("altitude_delta_m", "m", -300.0), p("airspeed_ms", "m/s", now, 0.0)}, {velocity}, true));
+                  traits(Persistence::Persistent, {p("altitude_delta_m", "m", -300.0), p("airspeed_ms", "m/s", now, 0.0), p("floor_agl_m", "m", 150.0, 0.0)},
+                         {velocity}, true));
     auto formation = traits(Persistence::Persistent,
                             {p("ahead_m", "m", -100.0), p("right_m", "m", 60.0), p("below_m", "m", 0.0), p("closure_gain", "1/s", 0.1, 0.0)},
                             {velocity}, true);
@@ -722,7 +849,9 @@ void registerBuiltinControllers(ControllerRegistry& r) {
     auto aerobatic = traits(Persistence::Terminating,
                             {p("manoeuvre", "", 1.0, 0.0, 3.0), p("load_factor_g", "g", 3.5, 0.0), p("roll_rate_rad_s", "rad/s", 1.5, 0.0)},
                             {acceleration, velocity});
-    aerobatic.features = kFeatureWingborne; // a loop pulled by load factor: a wing's
+    aerobatic.features = kFeatureWingborne; // a loop pulled by load factor: a wing's (and an aerobatic type's: rule R10)
+    aerobatic.admit = admitAerobatics;      // fast enough for it, and a split-S high enough
+    aerobatic.withinEnvelope = true;        // and completed only if flown within the envelope
     r.addBehavior("aerobatics", [] { return std::make_unique<AerobaticBehavior>(); }, std::move(aerobatic));
     registerRotorControllers(r); // the rotorcraft's loops and "hover" (docs/rotorcraft.md, 3.6)
     registerGuidanceModes(r);    // the Vehicle Interface's modes: "hsa" (docs/vehicle-interface.md)

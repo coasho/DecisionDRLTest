@@ -31,6 +31,7 @@ add_executable(fsim_tests
     test_profile.cpp
     test_applicability.cpp
     test_discovery.cpp
+    test_behaviours.cpp
     test_protection.cpp
     test_laws.cpp
     test_manoeuvres.cpp

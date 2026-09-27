@@ -278,13 +278,17 @@ private:
 
 /// "waypoints": fly `points` in order; params: loop (0/1). Finished after the last capture.
 /// Without an airspeed a wing flies the one it had, an aircraft that hovers
-/// its position loop's own speed.
+/// its position loop's own speed. A point the aircraft cannot capture is
+/// refused at NEW (admitWaypoints); one it has turned a full circle round
+/// without closing on fails it (BehaviorFailed), and it flies straight and
+/// level from there.
 class FSIM_API WaypointsBehavior final : public Behavior {
 public:
     const char* id() const noexcept override { return "waypoints"; }
     void start(const ControlContext& ctx, const BehaviorCommand& command) override;
     Command update(const ControlContext& ctx, const Command& in) override;
     bool finished() const noexcept override { return finished_; }
+    Reason failure() const noexcept override { return failed_ ? Reason::BehaviorFailed : Reason::None; }
     std::size_t index() const noexcept { return index_; }
     /// The point flown to, the distance and time to the last one, the course,
     /// altitude and airspeed it asks for; a looping route's laps.
@@ -292,8 +296,11 @@ public:
 
 private:
     std::size_t index_ = 0;
-    bool loop_ = false, finished_ = false, hovers_ = false;
+    bool loop_ = false, finished_ = false, hovers_ = false, failed_ = false;
     double airspeed_ = kHold;
+    // closing on the point flown to: the least distance so far, and how far it has turned since
+    double closest_ = kHold, turned_ = 0.0, lastHeading_ = kHold;
+    VelocityCommand fallback_; ///< straight and level, once it failed
     // for progress(): the route (the slot's command, held by the runtime while it flies), where it started and how long it is
     const BehaviorCommand* route_ = nullptr;
     double startLat_ = 0.0, startLon_ = 0.0, totalM_ = 0.0;
@@ -302,9 +309,11 @@ private:
 };
 
 /// "loiter": circle a point. params: lat_deg, lon_deg (or `target` vehicle),
-/// radius_m (1500; at least 100 m for a wing, 1 m for an aircraft that
-/// hovers), altitude_m (current), clockwise (1), airspeed_ms (a wing's as it
-/// was, a rotorcraft's its position loop's).
+/// radius_m (at least 100 m for a wing, 1 m for an aircraft that hovers;
+/// left out, 1500 m, or wider where the aircraft's turn needs it: 1.25 times
+/// the circle its bank and heading loop hold at its speed), altitude_m
+/// (current), clockwise (1), airspeed_ms (a wing's as it was, a rotorcraft's
+/// its position loop's).
 class FSIM_API LoiterBehavior final : public Behavior {
 public:
     const char* id() const noexcept override { return "loiter"; }
@@ -315,6 +324,8 @@ public:
     Reason failure() const noexcept override { return lost_ ? Reason::TargetLost : Reason::None; }
     /// The laps flown, how far off the circle it is (+ right of its path), its altitude and airspeed.
     bool progress(ActivityProgress& out) const noexcept override;
+    /// The least circle a wing holds at `tasMs` with its bank and heading loop (its default is 1.25 times it).
+    static double orbitRadiusM(const Performance& performance, double tasMs) noexcept;
 
 private:
     bool lost_ = false;
@@ -324,8 +335,11 @@ private:
     double lastTheta_ = kHold, swept_ = 0.0, distance_ = kHold; ///< for progress(): the angle swept round the centre
 };
 
-/// "pursuit": chase `target` with lead pursuit. params: range_m (300),
-/// lead_s (2), max_airspeed_ms, min_airspeed_ms.
+/// "pursuit": chase `target` with lead pursuit to a point range_m (300)
+/// behind it, and hold that range as the least: it closes no faster than it
+/// can stop closing (its deceleration), and a pursuer inside the range
+/// turns back out. params: range_m, lead_s (2), max_airspeed_ms,
+/// min_airspeed_ms.
 class FSIM_API PursuitBehavior final : public Behavior {
 public:
     const char* id() const noexcept override { return "pursuit"; }
@@ -339,10 +353,17 @@ private:
     bool lost_ = false;
     std::uint32_t target_ = 0;
     double rangeM_ = 300.0, leadS_ = 2.0, minSpeed_ = 30.0, maxSpeed_ = 400.0;
+    // what its closing speed is designed for: a deceleration it can keep up (half its performance's; a
+    // wing's 0.25 m/s2, what a sailplane-like RQ-4B sheds at idle) and its speed loop's lag (a wing's 10 s;
+    // a rotorcraft's its velocity loop's)
+    double decelMs2_ = 0.25, lagS_ = 10.0;
 };
 
 /// "evade": fly away from `target`, descending or climbing. params:
-/// altitude_delta_m (-300), airspeed_ms (hold).
+/// altitude_delta_m (-300), airspeed_ms (hold), floor_agl_m (150): it never
+/// descends below the floor above the terrain under it (nor below the
+/// height it started at, when that is lower), and says so while the floor
+/// holds its descent (kActivityClamped).
 class FSIM_API EvadeBehavior final : public Behavior {
 public:
     const char* id() const noexcept override { return "evade"; }
@@ -351,11 +372,12 @@ public:
 
     /// TargetLost while the vehicle it follows is gone (it flies on as it can).
     Reason failure() const noexcept override { return lost_ ? Reason::TargetLost : Reason::None; }
+    std::uint16_t constraints() const noexcept override { return floored_ ? kActivityClamped : 0; }
 
 private:
-    bool lost_ = false;
+    bool lost_ = false, floored_ = false;
     std::uint32_t target_ = 0;
-    double altitude_ = 0.0, airspeed_ = kHold;
+    double altitude_ = 0.0, airspeed_ = kHold, floorAglM_ = 150.0;
 };
 
 /// "formation": hold a slot relative to `target` (leader). params: ahead_m,
@@ -378,15 +400,22 @@ private:
 
 /// "aerobatics": a manoeuvre flown open-loop through the acceleration level.
 /// params: manoeuvre (0 aileron roll, 1 loop, 2 immelmann, 3 split-s),
-/// load_factor_g (3.5), roll_rate_rad_s (1.5). Finished when the manoeuvre
-/// completes; then holds level flight.
+/// load_factor_g (3.5), roll_rate_rad_s (1.5). Offered to aerobatic types
+/// (rule R10); a NEW too slow for the manoeuvre, or a split-S too low for its
+/// half loop down, is refused (admitAerobatics). Finished when the
+/// manoeuvre completes; failed (BehaviorFailed) if its airspeed falls below
+/// the aircraft's least, its angle of attack goes past the envelope's by more
+/// than 3 deg either way (a departure), or it comes within 150 m of the
+/// ground, and at its end if the state went past the envelope while it flew
+/// (BehaviorTraits::withinEnvelope); either way it then holds level flight.
 class FSIM_API AerobaticBehavior final : public Behavior {
 public:
     enum Manoeuvre { AileronRoll = 0, Loop = 1, Immelmann = 2, SplitS = 3 };
     const char* id() const noexcept override { return "aerobatics"; }
     void start(const ControlContext& ctx, const BehaviorCommand& command) override;
     Command update(const ControlContext& ctx, const Command& in) override;
-    bool finished() const noexcept override { return phase_ == Done; }
+    bool finished() const noexcept override { return phase_ == Done && !failed_; }
+    Reason failure() const noexcept override { return failed_ ? Reason::BehaviorFailed : Reason::None; }
     void reset() override;
 
 private:
@@ -395,6 +424,25 @@ private:
     double loadFactor_ = 3.5, rollRate_ = 1.5;
     double pitchTravel_ = 0.0, rollTravel_ = 0.0, timer_ = 0.0;
     double entryAltitude_ = 0.0, entryHeading_ = 0.0, entrySpeed_ = 0.0;
+    double minCasMs_ = kHold;   ///< the least calibrated airspeed it may fly at (the performance's), NaN unknown
+    double alphaMaxRad_ = kHold; ///< the envelope's angle of attack, NaN unknown
+    bool failed_ = false;
 };
+
+/// What a checked NEW of "waypoints" must meet (BehaviorTraits::admit): no
+/// point inside a turn circle at its arrival, farther inside than its
+/// capture radius - pursuit of it would circle it for ever. InvalidWaypoint
+/// with the point and MaxTurnRate. A rotorcraft turns on the spot: none.
+FSIM_API Reason admitWaypoints(const BehaviorCommand& command, const sim::VehicleState& state, const Performance& performance,
+                               CommandResult& detail);
+/// What a checked NEW of "aerobatics" must meet: a calibrated airspeed of at
+/// least twice the least for a loop or an Immelmann (over the top with speed
+/// to spare), the least times the square root of the load factor for a roll
+/// or a split-S, where the aircraft's least is known (a fly-by-wire
+/// fighter's comes with the performance tables, docs/flight-autonomy.md
+/// FA-3); and a split-S the height for its half loop down and 300 m.
+/// PerformanceLimit with MinAirspeed or MinAltitude.
+FSIM_API Reason admitAerobatics(const BehaviorCommand& command, const sim::VehicleState& state, const Performance& performance,
+                                CommandResult& detail);
 
 } // namespace fsim::control

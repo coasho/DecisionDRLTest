@@ -14,9 +14,14 @@
 #include <string>
 #include <vector>
 
+namespace fsim::sim {
+struct VehicleState; // fsim/VehicleState.h
+}
+
 namespace fsim::control {
 
 enum class Level : std::uint8_t; // fsim/Control.h
+struct BehaviorCommand;          // fsim/Control.h
 
 /// What an activity can own (docs/control-architecture.md, 6.1). The primary
 /// axes are flown through the cascade; the support axes are set directly.
@@ -513,6 +518,18 @@ struct BehaviorTraits {
     /// Behavior: parameters in a BehaviorCommand. A guidance mode's fixed-size
     /// setpoint (SetpointKind::Hsa, ...) makes it a mode: it takes UPDATE.
     SetpointKind setpoint = SetpointKind::Behavior;
+    /// What a checked NEW (RangePolicy Clamp or Reject) must also meet, from
+    /// where the aircraft is: None, or the refusal with its detail (the
+    /// point, the limit a value breaks) - an aerobatic manoeuvre's entry
+    /// speed, a route point the aircraft cannot capture
+    /// (docs/flight-autonomy.md, section 6). Null: nothing beyond the ranges.
+    using Admission = Reason (*)(const BehaviorCommand& command, const sim::VehicleState& state, const Performance& performance,
+                                 CommandResult& detail);
+    Admission admit = nullptr;
+    /// Completes only if flown within the envelope: a limit exceeded on its
+    /// axes while it flew (kActivityExceeded, envelope protection's report)
+    /// fails it (BehaviorFailed) when it finishes - an aerobatic manoeuvre.
+    bool withinEnvelope = false;
 };
 
 // --- Support (docs/flight-autonomy.md, 4.1, 4.2 and 5) --------------------------------

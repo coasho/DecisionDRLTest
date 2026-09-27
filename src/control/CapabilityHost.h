@@ -198,6 +198,7 @@ private:
         RangePolicy range = RangePolicy::Clamp;
         std::uint16_t flags = 0;  ///< host flags since the last world step (kActivityClamped, kActivityAxesReduced)
         double target = kUnknown; ///< a terminating support activity's goal (gear down 1 / up 0, a flap position)
+        bool outside = false;     ///< a manoeuvre's: the state went past a limit by more than a limiter overshoots
     };
 
     /// A slot that flies through the cascade (else it is set directly: a support effector or the engines).

@@ -247,6 +247,14 @@ Appendix B is the matrix: 35 aircraft against the capabilities the rules govern 
 - The four superseded behaviours stay under their ids, with `superseded` naming their successors (hold → hsa, waypoints → route, loiter → pattern, hover → the hover loiter).
 - Their flights change only where they were wrong: waypoints, pursuit, evade and aerobatics. The changes are measured and listed (D7).
 
+**As FA-1 fixed them** (the probe of Appendix D flown again, section 14):
+- **Waypoints (PLT-02):** a checked NEW refuses a point inside a turn circle at its arrival, at the aircraft's full bank, by more than its capture radius (`invalid_waypoint`, the point, `max_turn_rate`); a point circled a full turn without closing fails the activity (`behavior_failed`), and it flies on straight and level. The 14 aircraft that circled for ever are refused; the 21 others complete as before.
+- **Loiter (PLT-03):** left out, its radius is 1.25 times the circle the aircraft's bank and heading loop hold at its speed (at least 1,500 m): 2.3 to 4.1 km for the fighters, unchanged for the heavies, which already flew the widest circle they could. A slow-rolling wing (the B-52H's 0.3 rad/s bank rate) flies it up to 15 % inside; the pattern mode flies it exactly.
+- **Pursuit (PLT-04):** it aims `range_m` behind the target along its track and closes no faster than it can stop closing (0.25 m/s² for a wing, half a rotorcraft's deceleration, after a 10 s lag); inside the range it turns back out. The least range was 0 to 33 m on 30 aircraft. Now, of the 30 that start outside the 300 m range, 29 hold at least 318 m (the fighters settle at 341 to 427 m); the C172, whose speed answers in tens of seconds, dips once to 218 m (73 %) and settles at the range. Those that start inside it (the four rotorcraft, the Skua) open out to it.
+- **Evade (PLT-05):** a floor `floor_agl_m` (150 m) above the terrain under it, or the height it started at if lower; the floor holding its descent is reported (`kActivityClamped`). The four rotorcraft no longer reach the ground.
+- **Aerobatics (PLT-07):** offered by R10 (FA-1b). A checked NEW is refused `performance_limit` too slow where the least airspeed is known (the A-10C and Su-25; the fighters' comes with FA-3's performance tables) or a split-S too low. In flight it gives up below its least airspeed, past its angle of attack by more than 3° (a departure) or within 150 m of the ground, and completes only if flown within the envelope to its limiters' tolerance (0.5 g, 3° of angle of attack, 3 to 5 m/s; bank and pitch, which a loop passes by design, are not judged). The probe's loop from cruise: 14 of the 17 complete within the envelope; the A-10C, EA-18G and Mirage 2000 give up (they ran out of airspeed or departed over the top), where before every one reported `goal_reached`. None reaches the ground.
+- New in the SDK for these: a behaviour's admission (`BehaviorTraits::admit`), its completion within the envelope (`BehaviorTraits::withinEnvelope`), the flags it reports (`Behavior::constraints`), and the envelope it flies to (`ControlContext::envelope`).
+
 ## 7. Supporting models: minimal and deterministic (D8, D9)
 
 - **Minimal.** Each model is the least that gives its commands a meaning a mission autonomy can test against. Its assumptions are written in its stage's section of the documentation.
@@ -615,6 +623,12 @@ Filled as the stages land: each stage's criteria results, the digests (identical
 - Digests: identical to 5b's, with protection and without (`fsim_control_bench digest`).
 - The allocation gate passes (`control_alloc`).
 - A/B throughput against VI-6's build (`ab_vi.py micro`, 5 interleaved rounds): the medians within -2.3 % to +3.1 %, the noise of the VI-7 run (-2.0 % to +2.7 %); the minimums within 1.5 %. The per-step path is unchanged.
+
+**FA-1d (the platform's behaviours fixed).**
+- Section 6 has what each fix did, flown on all 35 aircraft (the probe of Appendix D again): 14 routes that circled for ever refused, no pursuit closer than 73 % of its range where it was 0 to 33 m, no rotorcraft evading into the ground, aerobatics completed within the envelope or honestly failed.
+- Digests: `pursuit` and `evade` change, by design (the pursuit aims at its stand-off point; the evade's target is that pursuer, so its flight follows); every other flight identical, with protection and without.
+- The conformance walk's rarer answers (a revocation for collision avoidance that ends what a policy flies, an append where a curve does not end) are now met over more seeded walks, the same every run, instead of on one seed's path, which any change to what a command draws moves.
+
 
 ## Appendix A: the inventory
 
