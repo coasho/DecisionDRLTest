@@ -274,6 +274,12 @@ std::vector<Case> cases() {
                        assign(c, 1, VelocityCommand{60.0, 2.0, kHold, kHold}, axisBit(Axis::Pitch) | axisBit(Axis::Thrust));
                    },
                    "pseudo_attitude"});
+    // ADR-28: the Vehicle Interface's HSA/CSA, a course with its wind triangle, flown by its behaviour
+    out.push_back({"hsa", [](const sim::VehicleState&) {
+                       HsaCommand h;
+                       h.courseRad = 0.5, h.speed = 55.0, h.speedReference = 0.0, h.altitudeM = 1600.0;
+                       return Command(h);
+                   }});
     // ...and every limit given, the flight running into them all the time: the worst case
     for (const ProtectionMode mode : {ProtectionMode::Limit, ProtectionMode::Report}) {
         const bool limit = mode == ProtectionMode::Limit;
@@ -474,6 +480,18 @@ int alloc() {
              else w.update(activity[id], FlapsCommand{0.1 + 0.001 * (k % 10)});
          }},
         {"hold once", [&](std::uint32_t id, int k) { if (k == 0) w.command(id, hold); }},
+        // ADR-28: an HSA's heading changed every step through UPDATE, its other fields kept
+        {"hsa update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             HsaCommand h;
+             h.headingRad = 1.5 + 0.2 * std::sin(k * 0.1);
+             if (k == 0) {
+                 h.speed = 55.0, h.speedReference = 0.0, h.altitudeM = 1600.0;
+                 activity[id] = w.submit(id, h).activity;
+             } else if (!w.update(activity[id], h).accepted()) {
+                 std::fprintf(stderr, "hsa: update refused\n"), std::exit(3);
+             }
+         }},
         {"loiter once", [&](std::uint32_t id, int k) { if (k == 0) w.command(id, loiter); }},
         // step 3: an autopilot on pitch and thrust, the policy's bank updated every step
         {"axes apart each step", [&](std::uint32_t id, int k) {

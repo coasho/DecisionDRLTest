@@ -125,9 +125,9 @@ struct HsaCommand {                   // fsim.guidance.hsa
 ```
 
 **Partial commands** (the VI's "partial HSA/CSA commands update the most recent commanded values"):
-- **UPDATE:** each field given replaces the commanded one, and the rest stay as commanded. A heading replaces a course and a course a heading. A new reference needs its value: a speed reference given without a speed is `InvalidParameter`.
-- **NEW:** fields left out continue the commanded values of a live `hsa` activity the NEW replaces; with none, they are what the vehicle flies now. The aircraft's current heading, its altitude above sea level, and its true airspeed (a wing) or its ground speed (a rotorcraft, so a hovering one stays put).
-- The host resolves them, so the slot always holds a complete setpoint and the runtime never guesses.
+- **UPDATE:** each field given replaces the commanded one, and the rest stay as commanded. A heading replaces a course and a course a heading. A new reference needs its value: a speed reference given without a speed is `InvalidParameter`, since an UPDATE has no state to take one from.
+- **NEW:** fields left out continue the commanded values of a live `hsa` activity the NEW replaces; with none, they are what the vehicle flies now. The aircraft's current heading, its altitude above sea level, and its true airspeed (a wing) or its ground speed (a rotorcraft, so a hovering one stays put). A reference given alone takes the aircraft's own value in it now: a Mach reference alone holds the Mach it flies.
+- The host resolves them, so the slot always holds a complete setpoint and the runtime never guesses. It checks the references are whole numbers within their enums and that one direction is given, wraps the angles, and limits the speed and altitude against the performance (7.1): the speed converted at the commanded altitude through the standard atmosphere, the altitude below the ceiling and, above ground, above it.
 
 **Laws** (`HsaBehavior`, by the vehicle's features):
 
@@ -337,13 +337,14 @@ The adapter computes a vehicle's `Performance` when the vehicle is created, and 
 | Field | Wing from | Rotorcraft from |
 | --- | --- | --- |
 | minimum, maximum calibrated airspeed; maximum Mach | the envelope; else the performance section's stall speed × 1.2 | the envelope (maximum) |
+| maximum true airspeed | the performance section's (level at full power) | — |
 | cruise speed (what a mode flies with no speed) | the plant's reference true airspeed; else the airspeed now | the position loop's `max_speed` × 0.5 |
 | maximum ground speed | — | the position loop's `max_speed` |
 | ceiling | the performance section | — |
 | bank, pitch, load factor, roll rate | the envelope; else the velocity loop's `max_bank` | the envelope; the velocity loop's `max_tilt` |
 | maximum acceleration, deceleration | — | g·tan(`max_tilt`); the position loop's `deceleration` |
 | maximum climb, descent rate | the position loop's `max_vertical_speed` (the performance section's climb, if lower) | the position loop's `max_vertical_speed` |
-| course bandwidth | the heading loop's (`heading.gain` × g / its reference speed) | the velocity loop's `horizontal.kp` |
+| course bandwidth | the heading loop's: `heading.gain` × g / its schedule's reference speed, or / the speed it flies without a schedule | the velocity loop's `horizontal.kp` |
 | altitude gain | the position loop's `altitude.gain` | the position loop's `altitude.gain` |
 
 - **Derived limits.** Turn radius, turn rate, and climb gradient at a speed follow from these (`Performance::turnRadiusM(v)` and the like).
@@ -366,7 +367,7 @@ ADR-26's rules B1-B8 hold, with these additions:
 - **`RuntimeConfig`** gains the path store (a pointer, allocated at the first route or curve NEW) and `Performance`.
 - **Progress** is asked of the slot's behaviour by the host after each world step (`ControlStack::progress`, read-only, between steps), so the report does not grow.
 - **`ControlContext`** gains `features` (the vehicle's Feature bits) and `guidance` (its performance and path store), for behaviours. Both are trailing members with defaults, so existing initialisers keep compiling.
-- **`Behavior`** gains `start(ctx, const Command&)` and `progress()`. The old `start(ctx, const BehaviorCommand&)` is still called for a `BehaviorCommand`, by the new overload's default.
+- **`Behavior`** gains `begin(ctx, const Command&)`, which the runtime calls first, and `progress()`. `begin()`'s default calls the old `start(ctx, const BehaviorCommand&)` with a `BehaviorCommand`, so existing behaviours are unchanged. (A second `start` overload would have hidden the first in every behaviour that overrides one, which `-Woverloaded-virtual` refuses.)
 - **B2, the fast path:** UPDATE of a mode merges or copies in place, with no allocation, strings or virtual calls; so does a route or curve UPDATE within the store's capacity. The allocation gate gains HSA and pattern updates every step, and a route replaced every step.
 - **B5:** the modes' behaviours allocate nothing while flying: their geometry lives in fixed arrays allocated with them at NEW.
 - **Determinism:** the modes read only the state, the setpoint, the store and the performance, so trajectories stay independent of the worker count.
@@ -570,6 +571,39 @@ Filled in as the steps land. The machine and the benchmark's precision are ADR-2
   - conformance now checks every record's progress is within its bounds.
 
   ctest 166/166.
+
+**VI-3 (HSA/CSA).**
+- **What was built:**
+  - `HsaCommand` joins the `Command` variant after `BehaviorCommand`. `levelOf()` maps it to `Level::Behavior`, and `modeBehavior()` names the behaviour that flies it, `hsa`.
+  - `Behavior::begin(ctx, const Command&)` is what the runtime calls first; by default it calls the old `start()` with a `BehaviorCommand`.
+  - `SetpointKind` on descriptors and behaviour traits: a behaviour registered with a mode's setpoint becomes a capability that takes UPDATE.
+  - `Performance` from each family's adapter (`VehicleAdapter::performance`), kept by the host and handed to behaviours through `ControlContext::performance`.
+  - `HsaBehavior` (`fsim/GuidanceModes.h`, `src/control/Guidance.cpp`) with the wind estimate and the references; `src/control/Atmosphere.h` for the standard atmosphere.
+  - A stand-alone `ControlStack` flies a mode too: its `command()` installs the mode's behaviour, and merges a repeated one.
+- **Flown**, in a 12 m/s crosswind from the east, after 150 s (`tests/test_modes.cpp`):
+
+  | | heading 180° (TAS) | course 180° (TAS) | course 0°, ground speed | CAS as now | altitude +100 m |
+  | --- | --- | --- | --- | --- | --- |
+  | c172x | 181.6° (its heading loop's steady error) | 180.0° | 55.00 m/s of 55 | 51.19 of 51.14 | 1600 of 1600 |
+  | B-52H | 180.0° | 180.1° | 180.00 of 180 | 156.77 of 156.77 | 3109 of 3100 |
+  | F-16C | 180.0° | 180.2° | 159.99 of 160 | 139.05 of 139.05 | 3101 of 3100 |
+
+  The F-16C holds Mach 0.70 at 6500 m, the B-52H Mach 0.65. In a 5 m/s wind from the west the rotorcraft:
+  - hover facing east: the IRIS within 5.7 m, the UH-60A within 4.3 m and the UH-1H within 13 m over 60 s;
+  - hold a 45° course at the ground speed asked (iris 5.00, UH-1H 20.07, UH-60A 20.00 m/s), their noses along it;
+  - with an airspeed, turn into the wind to keep the course (the UH-60A's nose at 34.8° for a 45° track at 20 m/s);
+  - along the nose at an airspeed, drift with the wind as a heading should.
+- **Semantics tested:**
+  - an UPDATE of the altitude alone keeps the heading and speed commanded;
+  - a NEW with a speed alone continues the live hsa's heading and altitude and preempts it;
+  - a course replaces a heading;
+  - a reference alone is refused in an UPDATE and holds the aircraft's own value in a NEW;
+  - AGL over ground rising 2 % to the east: within 20 m of 400 m while it climbs 150 m with it;
+  - refused or clamped: both directions, a fractional reference, faster than the F-16C flies (446 m/s), above its ceiling, below the ground, slower than the B-52H's 1.2 times its stall speed, and a `BehaviorCommand` naming `hsa`.
+- **Conformance:** every aircraft offers `fsim.guidance.hsa`, and it goes through NEW, UPDATE and CANCEL as its descriptor says. The random sequences submit and update it on all five adapters.
+- **Digests:** identical to step 5b, protection on and off. **Allocations:** none, with an HSA's heading updated every step on 16 vehicles.
+- **Cost:** an HSA update is 127 ns (a course with its wind triangle over the velocity level's 64). Every existing case is within ±2.4 % of VI-2 (interleaved A/B, 5 rounds).
+- **SDK:** C ABI `fsim_vehicle_submit_mode(FSIM_MODE_HSA)`, `fsim_mode_field_count`, `fsim_speed_reference`, `fsim_altitude_reference`; `fsim_activity_update` merges. Python `Vehicle.submit_hsa(**fields)`, `SpeedReference`, `AltitudeReference`, `MODE_FIELDS`. ctest 171/171.
 
 ## Appendix A: the gap analysis at a946dfe
 

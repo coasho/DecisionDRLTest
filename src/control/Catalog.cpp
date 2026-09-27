@@ -40,7 +40,7 @@ CapabilityDescriptor flight(const char* name, Level level, std::vector<Parameter
 /// The platform's own behaviours are fsim.guidance.<id>; others user.guidance.<id>
 /// unless registered with a dotted id.
 std::string guidanceId(const std::string& behavior) {
-    static const char* const builtin[] = {"hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics", "hover"};
+    static const char* const builtin[] = {"hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics", "hover", "hsa"};
     if (behavior.find('.') != std::string::npos) return behavior;
     for (const char* b : builtin)
         if (behavior == b) return "fsim.guidance." + behavior;
@@ -101,6 +101,11 @@ std::size_t commandFields(Command& c, double* f[8]) noexcept {
     if (auto* p = std::get_if<PositionCommand>(&c)) {
         f[0] = &p->latitudeRad, f[1] = &p->longitudeRad, f[2] = &p->altitudeMslM, f[3] = &p->airspeedMs, f[4] = &p->captureRadiusM;
         f[5] = &p->headingRad;
+        return 6;
+    }
+    if (auto* h = std::get_if<HsaCommand>(&c)) {
+        f[0] = &h->headingRad, f[1] = &h->courseRad, f[2] = &h->speed, f[3] = &h->speedReference, f[4] = &h->altitudeM;
+        f[5] = &h->altitudeReference;
         return 6;
     }
     return 0;
@@ -283,7 +288,11 @@ void CapabilityCatalog::addBehaviors() {
         CapabilityDescriptor d;
         d.id = guidanceId(behavior);
         d.kind = CapabilityKind::Guidance;
-        d.interactions = kCommand | kCancel | kStatus; // parameters are heap data: a new target is a NEW
+        // a behaviour's parameters are heap data: a new target is a NEW. A mode's
+        // setpoint is fixed-size: it takes UPDATE (docs/vehicle-interface.md, 4.2)
+        const bool mode = traits.setpoint != SetpointKind::Behavior;
+        d.interactions = mode ? kCommand | kUpdate | kCancel | kStatus : kCommand | kCancel | kStatus;
+        d.setpoint = traits.setpoint;
         d.level = Level::Behavior;
         d.axes = kPrimaryAxes;
         d.persistence = traits.persistence;
@@ -292,6 +301,7 @@ void CapabilityCatalog::addBehaviors() {
         d.behavior = behavior;
         d.needsTarget = traits.needsTarget;
         d.mode = traits.mode;
+        if (mode) byMode_[static_cast<std::size_t>(traits.setpoint)] = static_cast<int>(descriptors_.size());
         descriptors_.push_back(std::move(d));
     }
 }
@@ -305,6 +315,7 @@ bool CapabilityCatalog::refresh() {
 
 int CapabilityCatalog::indexOf(const Command& command) const noexcept {
     if (const auto* b = std::get_if<BehaviorCommand>(&command)) return find(b->id);
+    if (std::holds_alternative<HsaCommand>(command)) return byMode_[static_cast<std::size_t>(SetpointKind::Hsa)];
     return byLevel_[command.index()];
 }
 

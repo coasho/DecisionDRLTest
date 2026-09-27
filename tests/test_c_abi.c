@@ -645,6 +645,32 @@ int main(int argc, char** argv) {
             CHECK(strcmp(fsim_reason_name(21), "invalid_waypoint") == 0);
         }
         {
+            /* ABI 1.6: the HSA/CSA mode - a fixed-size setpoint in fields, a partial UPDATE keeping the rest */
+            double hsa[6], alt[6], bad[5];
+            fsim_activity_progress progress;
+            fsim_activity_id mode_id;
+            CHECK(fsim_mode_field_count(FSIM_MODE_HSA) == 6 && fsim_mode_field_count(99) == 0);
+            hsa[0] = 3.0; hsa[1] = fsim_hold(); hsa[2] = 50.0; hsa[3] = FSIM_SPEED_TRUE_AIRSPEED; hsa[4] = 1600.0; hsa[5] = FSIM_ALTITUDE_MSL;
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE; /* b's autopilot holds its height (above) */
+            CHECK(fsim_vehicle_submit_mode(world, b, FSIM_MODE_HSA, hsa, 6, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            mode_id = cr.activity;
+            CHECK(fsim_vehicle_submit_mode(world, b, FSIM_MODE_HSA, bad, 5, &co, &cr) != FSIM_OK); /* malformed: 6 fields */
+            alt[0] = alt[1] = alt[2] = alt[3] = alt[5] = fsim_hold();
+            alt[4] = 1700.0;
+            CHECK(fsim_activity_update(world, mode_id, alt, 6, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_update(world, mode_id, alt, 4, &cr) != FSIM_OK); /* malformed */
+            CHECK(fsim_world_step(world, 1) == FSIM_OK);
+            fsim_activity_progress_init(&progress);
+            CHECK(fsim_activity_get_progress(world, mode_id, &progress) == FSIM_OK);
+            CHECK(progress.altitude_msl_m == 1700.0 && progress.speed_ms == 50.0 && fabs(progress.heading_rad - 3.0) < 1e-9);
+            alt[4] = fsim_hold();
+            alt[3] = FSIM_SPEED_MACH; /* a reference without its value: an UPDATE has nothing to take it from */
+            CHECK(fsim_activity_update(world, mode_id, alt, 6, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "invalid_parameter") == 0 && cr.reserved == 3);
+            CHECK(fsim_activity_cancel(world, mode_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        }
+        {
             /* the profile: a stock c172x carries no sections */
             double value = 0.0;
             uint32_t version = 9;

@@ -1,8 +1,11 @@
 #include "control/CapabilityHost.h"
 
+#include "control/Atmosphere.h"
 #include "control/Protection.h"
 #include "control/Registry.h"
+#include "core/Geodesy.h"
 #include "core/Log.h"
+#include "fsim/GuidanceModes.h"
 
 #include <algorithm>
 #include <cmath>
@@ -56,7 +59,98 @@ void CapabilityHost::bind(std::uint32_t vehicle, ControlStack& runtime, const Ca
     profile_ = &profile;
     controlPeriodS_ = controlPeriodS;
     config_->protection = protectionFor(profile, adapter.features()); // Limit with an envelope section, else Off
+    // what the aircraft can do, from its profile and the loops it flies with (docs/vehicle-interface.md, 7.1)
+    performance_ = adapter.performance(profile, runtime);
+    performance_.revision = config_->performance.revision + 1;
+    config_->performance = performance_;
     ++config_->revision;
+}
+
+const HsaCommand* CapabilityHost::liveHsa() const noexcept {
+    for (std::size_t s = 0; s < kSlotCount; ++s)
+        if (slots_[s].live)
+            if (const auto* h = std::get_if<HsaCommand>(&config_->slots[s].command)) return h;
+    return nullptr;
+}
+
+Reason CapabilityHost::resolveHsa(HsaCommand& c, const sim::VehicleState& state, CommandResult& detail) const noexcept {
+    auto bad = [&detail](std::int16_t field) {
+        detail.index = field;
+        return Reason::InvalidParameter;
+    };
+    auto code = [](double v, int count) { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); };
+    if (!code(c.speedReference, static_cast<int>(SpeedReference::Count))) return bad(3);
+    if (!code(c.altitudeReference, static_cast<int>(AltitudeReference::Count))) return bad(5);
+    if (!isHold(c.headingRad) && !isHold(c.courseRad)) return bad(1); // one direction, a heading or a course
+    for (const auto& [v, field] : {std::pair<double, std::int16_t>{c.headingRad, 0}, {c.courseRad, 1}, {c.speed, 2}, {c.altitudeM, 4}})
+        if (!isHold(v) && !std::isfinite(v)) return bad(field);
+    // what it continues: the live hsa's commands, else what the aircraft flies now - a
+    // rotorcraft's speed over the ground (a hover stays put), a wing's through the air
+    HsaCommand base;
+    if (const HsaCommand* live = liveHsa()) {
+        base = *live;
+    } else {
+        const auto reference = (adapter_->features() & kFeatureHover) ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed;
+        base.headingRad = state.eulerRad[2];
+        base.speedReference = static_cast<double>(reference);
+        base.speed = speedNow(reference, state);
+        base.altitudeReference = static_cast<double>(AltitudeReference::Msl);
+        base.altitudeM = state.altitudeMslM;
+    }
+    // a reference given alone: the aircraft's own value in it now (hold the Mach it flies)
+    if (!isHold(c.speedReference) && isHold(c.speed)) c.speed = speedNow(static_cast<SpeedReference>(static_cast<int>(c.speedReference)), state);
+    if (!isHold(c.altitudeReference) && isHold(c.altitudeM))
+        c.altitudeM = altitudeNow(static_cast<AltitudeReference>(static_cast<int>(c.altitudeReference)), state);
+    mergeHsa(base, c); // a value given alone is in the reference it continues
+    c = base;
+    if (!isHold(c.headingRad)) c.headingRad = geo::wrapPi(c.headingRad);
+    if (!isHold(c.courseRad)) c.courseRad = geo::wrapPi(c.courseRad);
+    return Reason::None;
+}
+
+Reason CapabilityHost::limitHsa(HsaCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept {
+    const Performance& f = performance_;
+    auto limit = [&](double& value, double bound, bool above, std::int16_t field, Constraint constraint) {
+        if (std::isnan(bound) || isHold(value) || (above ? value <= bound : value >= bound)) return Reason::None;
+        detail.index = field;
+        detail.constraint = constraint;
+        if (range == RangePolicy::Reject) return Reason::PerformanceLimit;
+        value = bound;
+        flags |= kClamped;
+        return Reason::None;
+    };
+    // the altitude: under the ceiling; above ground, above it
+    const auto altitudeReference = static_cast<AltitudeReference>(static_cast<int>(orHold(c.altitudeReference, 0.0)));
+    if (altitudeReference == AltitudeReference::AboveGround) {
+        if (const Reason r = limit(c.altitudeM, 0.0, false, 4, Constraint::MinAltitude); r != Reason::None) return r;
+    } else if (const Reason r = limit(c.altitudeM, f.ceilingM, true, 4, Constraint::MaxAltitude); r != Reason::None) {
+        return r;
+    }
+    // the speed, within the envelope's calibrated speeds and Mach at the altitude it asks for (the
+    // standard atmosphere's); a rotorcraft's ground speed within its fastest
+    const auto reference = static_cast<SpeedReference>(static_cast<int>(orHold(c.speedReference, 0.0)));
+    const double h = isHold(c.altitudeM) ? 0.0 : c.altitudeM;
+    switch (reference) {
+    case SpeedReference::GroundSpeed:
+        return f.hovers ? limit(c.speed, f.maxGroundSpeedMs, true, 2, Constraint::MaxAirspeed) : Reason::None;
+    case SpeedReference::CalibratedAirspeed:
+        if (const Reason r = limit(c.speed, f.minCasMs, false, 2, Constraint::MinAirspeed); r != Reason::None) return r;
+        if (const Reason r = limit(c.speed, f.maxCasMs, true, 2, Constraint::MaxAirspeed); r != Reason::None) return r;
+        return limit(c.speed, isa::calibratedFromTrue(f.maxTasMs, h), true, 2, Constraint::MaxAirspeed);
+    case SpeedReference::TrueAirspeed:
+        if (const Reason r = limit(c.speed, isa::trueFromCalibrated(f.minCasMs, h), false, 2, Constraint::MinAirspeed); r != Reason::None) return r;
+        if (const Reason r = limit(c.speed, isa::trueFromCalibrated(f.maxCasMs, h), true, 2, Constraint::MaxAirspeed); r != Reason::None) return r;
+        if (const Reason r = limit(c.speed, f.maxMach * isa::speedOfSound(h), true, 2, Constraint::MaxAirspeed); r != Reason::None) return r;
+        return limit(c.speed, f.maxTasMs, true, 2, Constraint::MaxAirspeed);
+    case SpeedReference::Mach: {
+        const double a = isa::speedOfSound(h);
+        if (const Reason r = limit(c.speed, isa::trueFromCalibrated(f.minCasMs, h) / a, false, 2, Constraint::MinAirspeed); r != Reason::None) return r;
+        if (const Reason r = limit(c.speed, isa::trueFromCalibrated(f.maxCasMs, h) / a, true, 2, Constraint::MaxAirspeed); r != Reason::None) return r;
+        if (const Reason r = limit(c.speed, f.maxMach, true, 2, Constraint::MaxAirspeed); r != Reason::None) return r;
+        return limit(c.speed, f.maxTasMs / a, true, 2, Constraint::MaxAirspeed);
+    }
+    default: return Reason::None;
+    }
 }
 
 void CapabilityHost::setProtection(ProtectionMode mode) noexcept {
@@ -218,6 +312,9 @@ CommandResult CapabilityHost::submit(const Command& command, const CommandOption
     const auto index = static_cast<std::size_t>(found);
     const CapabilityDescriptor& d = catalog_->descriptor(index);
     if (!(d.interactions & kCommand)) return rejected(Reason::UnknownCapability);
+    // a behaviour takes a BehaviorCommand, a mode its own setpoint (a BehaviorCommand naming "hsa" is not an hsa)
+    if (d.kind == CapabilityKind::Guidance && (d.setpoint == SetpointKind::Behavior) != std::holds_alternative<BehaviorCommand>(command))
+        return rejected(Reason::WrongCommandType);
     const bool checked = options.range != RangePolicy::None;
     if (checked) {
         if (status(index, state).availability != Availability::Available) return rejected(Reason::Unavailable);
@@ -227,8 +324,13 @@ CommandResult CapabilityHost::submit(const Command& command, const CommandOption
     Command setpoint = command;
     std::uint16_t flags = 0;
     CommandResult detail;
+    auto* hsa = std::get_if<HsaCommand>(&setpoint);
+    if (hsa) // complete it first: what it leaves out, whatever the range policy (the runtime flies a complete setpoint)
+        if (const Reason why = resolveHsa(*hsa, state, detail); why != Reason::None) return about(rejected(why), detail);
     if (checked)
         if (const Reason why = catalog_->check(index, setpoint, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
+    if (hsa && checked)
+        if (const Reason why = limitHsa(*hsa, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
     AxisMask axes = options.axes ? options.axes : catalog_->defaultAxes(index, command);
     // above the actuators a command owns whole groups: a wing's loop that banks
     // also coordinates, a rotorcraft's cyclic tilts in roll and pitch at once
@@ -316,10 +418,40 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
     SetpointSlot& slot = config_->slots[s];
     if (setpoint.index() != slot.command.index()) return rejected(Reason::WrongCommandType, activity);
     CommandResult result = accepted(activity);
+    if (const auto* next = std::get_if<HsaCommand>(&setpoint)) {
+        // a partial hsa (docs/vehicle-interface.md, 4.4): the fields given replace the commanded
+        // ones; a reference needs its value (an UPDATE has no state to take one from)
+        auto bad = [&](std::int16_t field) {
+            result.index = field;
+            return about(rejected(Reason::InvalidParameter, activity), result);
+        };
+        auto code = [](double v, int count) { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); };
+        if (!code(next->speedReference, static_cast<int>(SpeedReference::Count))) return bad(3);
+        if (!code(next->altitudeReference, static_cast<int>(AltitudeReference::Count))) return bad(5);
+        if (!isHold(next->headingRad) && !isHold(next->courseRad)) return bad(1);
+        if (!isHold(next->speedReference) && isHold(next->speed)) return bad(2);
+        if (!isHold(next->altitudeReference) && isHold(next->altitudeM)) return bad(4);
+        HsaCommand merged = std::get<HsaCommand>(slot.command);
+        mergeHsa(merged, *next);
+        if (!isHold(merged.headingRad)) merged.headingRad = geo::wrapPi(merged.headingRad);
+        if (!isHold(merged.courseRad)) merged.courseRad = geo::wrapPi(merged.courseRad);
+        if (slots_[s].range != RangePolicy::None) {
+            Command checked = merged;
+            if (const Reason why = catalog_->check(record.capability, checked, slots_[s].range, result.flags, result); why != Reason::None)
+                return about(rejected(why, activity), result);
+            merged = std::get<HsaCommand>(checked);
+            if (const Reason why = limitHsa(merged, slots_[s].range, result.flags, result); why != Reason::None)
+                return about(rejected(why, activity), result);
+            if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
+        }
+        std::get<HsaCommand>(slot.command) = merged;
+        ++slot.revision;
+        return result;
+    }
     if (slots_[s].range == RangePolicy::None) {
         assignSetpoint(slot.command, setpoint);
     } else {
-        Command checked = setpoint; // no heap data: guidance takes no UPDATE
+        Command checked = setpoint; // no heap data: a behaviour takes no UPDATE
         if (const Reason why = catalog_->check(record.capability, checked, slots_[s].range, result.flags, result); why != Reason::None)
             return about(rejected(why, activity), result);
         assignSetpoint(slot.command, checked);

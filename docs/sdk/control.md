@@ -240,11 +240,40 @@ flight capability type it is: `fsim.guidance.formation` is FORMATION,
 `fsim.guidance.hover` LOITER. The platform's own levels and behaviours are
 `FlightMode::None`.
 
+### HSA/CSA: a heading or a course, a speed, an altitude
+
+`fsim.guidance.hsa` is A-GRA's HSA/CSA mode (`#include <fsim/GuidanceModes.h>`
+for its behaviour): hold a heading or a course, a speed and an altitude until
+told otherwise. Its setpoint is fixed-size, so it takes UPDATE, and an
+UPDATE changes only the fields it gives:
+
+```cpp
+HsaCommand hsa;
+hsa.courseRad = M_PI;                                          // the track over the ground (or headingRad: the nose)
+hsa.speed = 0.7, hsa.speedReference = double(SpeedReference::Mach);
+hsa.altitudeM = 6500;                                          // above sea level (AltitudeReference::Msl)
+auto a = v.submit(hsa).activity;
+HsaCommand climb;
+climb.altitudeM = 8000;                                        // only the altitude: the course and Mach as commanded
+world.update(a, climb);
+```
+
+- **References.** The speed is true airspeed, calibrated airspeed, ground speed or Mach (`SpeedReference`). The altitude is above sea level, above the ground under the aircraft, or above the ellipsoid (`AltitudeReference`; the simulation's sea level is the ellipsoid). Magnetic headings, barometric altitudes and speed optimisation are not offered.
+- **Left out.** A NEW continues what a live `hsa` it replaces commanded, else what the aircraft flies now (a rotorcraft's ground speed: a hovering one stays put). A reference given alone takes the aircraft's own value in it: `speedReference = Mach` alone holds the Mach it flies. In an UPDATE a reference needs its value.
+- **Checked** against the aircraft's performance: a speed beyond what it flies, below 1.2 times its stall speed or beyond its envelope, an altitude above its ceiling or below the ground, is clamped (flagged, with the field and the limit in the result) or, under `RangePolicy::Reject`, refused `performance_limit`.
+- **Flown** as the vehicle flies:
+  - A wing flies its heading. For a course it flies the heading that holds it against the wind its own air data see, plus a slow trim. It flies the airspeed its reference asks, or the one that makes the ground speed along its track.
+  - A rotorcraft flies its velocity over the ground along the heading or course, nose along the track. Given an airspeed, it flies along its nose, or into the wind to hold a course.
+  - Both fly the altitude at their position loop's gain and vertical-speed limits.
+
+In a 12 m/s crosswind a c172x, a B-52H and an F-16C hold a course within
+0.2° and a ground speed exactly; the tests are in `tests/test_modes.cpp`.
+
 **New reasons.** `invalid_waypoint`, `invalid_curve`, `performance_limit`,
 `not_granted`, `not_allowed`, `revoked`, `released`, `collision_avoidance`
 and `restricted` belong to ADR-28's modes and grants.
 
-**From C and Python.** The C ABI's result carries the index plus one in
+**From C and Python.** `fsim_vehicle_submit_mode(world, id, FSIM_MODE_HSA, fields, 6, &options, &result)` and `vehicle.submit_hsa(course_rad=..., speed=..., speed_reference="mach", altitude_m=...)` submit an hsa; `fsim_activity_update` and `activity.update(altitude_m=...)` change only what they give. The C ABI's result carries the index plus one in
 `fsim_command_result.reserved`; `fsim_last_command_detail()` has the rest,
 `fsim_activity_get_progress()` the progress, `fsim_vehicle_commanded()` the
 commanded state, `fsim_vehicle_capability_flight_mode()` a capability's type

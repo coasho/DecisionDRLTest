@@ -17,8 +17,9 @@
 
 namespace fsim::control {
 
-/// The fields of a command struct below Level::Behavior, in declaration
-/// order (the C ABI's order too): pointers into `c`, at most 8. Returns how many.
+/// The fields of a command struct below Level::Behavior, or of a guidance
+/// mode's setpoint, in declaration order (the C ABI's order too): pointers
+/// into `c`, at most 8. Returns how many (0 for a BehaviorCommand).
 std::size_t commandFields(Command& c, double* fields[8]) noexcept;
 /// How many of a level's fields it had before the rotorcraft's were appended
 /// (docs/rotorcraft.md, 3.4): what the C ABI's fixed-size calls still take.
@@ -74,7 +75,7 @@ public:
     const CapabilityDescriptor& descriptor(std::size_t index) const noexcept { return descriptors_[index]; }
     const std::vector<CapabilityDescriptor>& descriptors() const noexcept { return descriptors_; }
 
-    /// The capability a command selects (its level, or its behaviour's id); -1 if none.
+    /// The capability a command selects (its level, its behaviour's id, or its mode); -1 if none.
     int indexOf(const Command& command) const noexcept;
     /// A support effector's capability; -1 if the aircraft has none.
     int indexOf(const SupportCommand& command) const noexcept { return bySupport_[command.index()]; }
@@ -102,6 +103,7 @@ private:
     std::vector<CapabilityDescriptor> descriptors_;
     std::array<int, static_cast<std::size_t>(Level::Behavior)> byLevel_{};
     std::array<int, kSupportKinds> bySupport_{-1, -1, -1, -1, -1, -1};
+    std::array<int, static_cast<std::size_t>(SetpointKind::Count)> byMode_{-1, -1, -1}; ///< a guidance mode's capability, by its setpoint
     std::uint64_t registryRevision_ = 0;
 };
 

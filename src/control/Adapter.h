@@ -54,6 +54,10 @@ public:
     /// Whether a support command may be flown now: the placards (no gear up on
     /// the ground, no gear or flaps out above their speeds). None if it may.
     virtual Reason admit(const SupportCommand& command, const sim::VehicleState& state, const VehicleProfile& profile) const noexcept;
+    /// What the aircraft can do, as its guidance plans with it
+    /// (docs/vehicle-interface.md, 7.1): from the profile's sections and the
+    /// loops `runtime` flies with (their limits and gains).
+    virtual Performance performance(const VehicleProfile& profile, const ControlStack& runtime) const;
 
     // --- Real-time face: the runtime, every control update ---------------------------
     /// The final actuator demand into the flight model's inputs. `last` is

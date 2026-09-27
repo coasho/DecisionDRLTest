@@ -1,6 +1,7 @@
 #include "control/Adapter.h"
 
 #include "control/Catalog.h"
+#include "fsim/ControlStack.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,6 +9,18 @@
 namespace fsim::control {
 
 namespace {
+
+constexpr double kG = 9.80665;
+
+/// A parameter of the loop `runtime` flies `level` with; NaN if none.
+double loopParameter(const ControlStack& runtime, Level level, std::string_view name) noexcept {
+    const Controller* c = runtime.controller(level);
+    if (!c) return kUnknown;
+    const auto v = c->parameter(name);
+    return v ? *v : kUnknown;
+}
+
+double known(double v, double fallback) noexcept { return std::isnan(v) ? fallback : v; }
 
 /// A stock JSBSim aircraft: its own flight control system, whose inputs'
 /// meaning the platform does not know; an actuator command is what it was.
@@ -46,6 +59,9 @@ public:
     std::uint8_t axisGroups() const noexcept override { return kGroupCyclic | kGroupYaw | kGroupThrust; }
     HoldAxes holdAxes() const noexcept override { return {Axis::Yaw, Axis::Thrust, Axis::Count, Axis::Roll}; }
     void copyAxisFields(Command& dst, const Command& src, Axis axis) const noexcept override;
+    /// A rotorcraft's: its tilt, its velocity loop's bandwidth, its position
+    /// loop's speed, deceleration and vertical speed.
+    Performance performance(const VehicleProfile& p, const ControlStack& runtime) const override;
 
 protected:
     /// The flight capabilities as a rotorcraft flies them: the actuator's
@@ -117,6 +133,24 @@ void JsbsimRotorcraft::declareFlight(const VehicleProfile& p, CapabilityCatalog&
     c.unsupport("fsim.flight.attitude", "airspeed_ms");          // its speed comes from its attitude, not its thrust
     c.unsupport("fsim.flight.acceleration", "longitudinal_ms2"); // likewise
     c.setAxisGroups(axisGroups());
+}
+
+Performance JsbsimRotorcraft::performance(const VehicleProfile& p, const ControlStack& runtime) const {
+    Performance f;
+    f.hovers = true;
+    const EnvelopeLimits& e = p.envelope.clean;
+    f.maxCasMs = e.casMaxMs;
+    f.maxBankRad = e.bankMaxRad, f.minPitchRad = e.pitchMinRad, f.maxPitchRad = e.pitchMaxRad, f.maxRollRateRadS = e.rollRateMaxRadS;
+    f.minLoadFactor = e.loadFactorMin, f.maxLoadFactor = e.loadFactorMax;
+    f.maxTiltRad = loopParameter(runtime, Level::Velocity, "max_tilt");
+    if (!std::isnan(f.maxTiltRad)) f.maxAccelerationMs2 = kG * std::tan(f.maxTiltRad);
+    f.velocityBandwidthRadS = loopParameter(runtime, Level::Velocity, "horizontal.kp");
+    f.maxGroundSpeedMs = loopParameter(runtime, Level::Position, "max_speed");
+    f.maxDecelerationMs2 = loopParameter(runtime, Level::Position, "deceleration");
+    f.maxClimbMs = f.maxDescentMs = loopParameter(runtime, Level::Position, "max_vertical_speed");
+    f.altitudeGainPerS = loopParameter(runtime, Level::Position, "altitude.gain");
+    if (!std::isnan(f.maxGroundSpeedMs)) f.cruiseTasMs = 0.5 * f.maxGroundSpeedMs;
+    return f;
 }
 
 void JsbsimRotorcraft::copyAxisFields(Command& dst, const Command& src, Axis axis) const noexcept {
@@ -205,6 +239,28 @@ Reason VehicleAdapter::admit(const SupportCommand& c, const sim::VehicleState& s
             return Reason::Unavailable;
     }
     return Reason::None;
+}
+
+Performance VehicleAdapter::performance(const VehicleProfile& p, const ControlStack& runtime) const {
+    // a wing's: its envelope, its performance section, its reference speed and its loops' limits and gains
+    Performance f;
+    const EnvelopeLimits& e = p.envelope.clean;
+    const PerformanceSection& perf = p.performance;
+    f.minCasMs = known(e.casMinMs, 1.2 * perf.stallCasMs); // NaN where neither is given
+    f.maxCasMs = e.casMaxMs, f.maxMach = e.machMax;
+    f.maxTasMs = perf.maxTasMs;
+    f.cruiseTasMs = p.plant.tasMs;
+    f.ceilingM = perf.ceilingM;
+    f.maxBankRad = known(e.bankMaxRad, loopParameter(runtime, Level::Velocity, "max_bank"));
+    f.minPitchRad = e.pitchMinRad, f.maxPitchRad = e.pitchMaxRad, f.maxRollRateRadS = e.rollRateMaxRadS;
+    f.minLoadFactor = e.loadFactorMin, f.maxLoadFactor = e.loadFactorMax;
+    f.maxClimbMs = f.maxDescentMs = loopParameter(runtime, Level::Position, "max_vertical_speed");
+    if (!std::isnan(perf.climbMs) && !(f.maxClimbMs < perf.climbMs)) f.maxClimbMs = perf.climbMs; // no faster than it climbs
+    f.altitudeGainPerS = loopParameter(runtime, Level::Position, "altitude.gain");
+    f.headingGain = loopParameter(runtime, Level::Attitude, "heading.gain");
+    const double reference = loopParameter(runtime, Level::Attitude, "schedule.tas_ms");
+    f.headingReferenceTasMs = reference > 0.0 ? reference : kUnknown; // a schedule holds the heading loop's speed; without one it slows with speed
+    return f;
 }
 
 void VehicleAdapter::apply(const ActuatorCommand& a, const sim::ControlInputs& last, sim::ControlInputs& out) const noexcept {

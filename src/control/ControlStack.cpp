@@ -101,11 +101,19 @@ void ControlStack::command(const Command& command) {
     // A stack on its own is its own host: the command takes slot 0 and every
     // axis a command struct can set, as the World's legacy commands do.
     SetpointSlot& slot = config_->slots[0];
-    if (const auto* b = std::get_if<BehaviorCommand>(&command)) {
-        auto created = ControllerRegistry::instance().create(b->id);
+    const auto* b = std::get_if<BehaviorCommand>(&command);
+    const char* mode = modeBehavior(command); // a guidance mode's setpoint: its behaviour flies it
+    if (mode && slot.command.index() == command.index() && behaviors_[0]) {
+        applySetpoint(slot.command, command); // the same mode again: an update, merged
+        ++slot.revision;
+        return;
+    }
+    if (b || mode) {
+        const std::string_view id = b ? std::string_view(b->id) : std::string_view(mode);
+        auto created = ControllerRegistry::instance().create(id);
         auto* behavior = dynamic_cast<Behavior*>(created.get());
         if (!behavior) {
-            LOG_ERROR("control") << "unknown behaviour '" << b->id << "'; holding the current command";
+            LOG_ERROR("control") << "unknown behaviour '" << id << "'; holding the current command";
             return;
         }
         created.release();
@@ -303,8 +311,9 @@ FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::si
         if (!behavior) return fail(out);
         ControlContext guided{ctx}; // what the vehicle can do: its guidance may differ by it
         guided.features = features_;
+        guided.performance = &config_->performance;
         if (started_[s] != slot.generation) {
-            behavior->start(guided, std::get<BehaviorCommand>(*current));
+            behavior->begin(guided, *current);
             started_[s] = slot.generation;
         }
         Command next = behavior->update(guided, *current);
@@ -478,8 +487,9 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
         if (!behavior) return fail(out);
         ControlContext guided{ctx};
         guided.features = features_;
+        guided.performance = &config_->performance;
         if (started_[s] != slot.generation) {
-            behavior->start(guided, std::get<BehaviorCommand>(slot.command));
+            behavior->begin(guided, slot.command);
             started_[s] = slot.generation;
         }
         Command next = behavior->update(guided, slot.command);

@@ -511,6 +511,21 @@ typedef struct fsim_commanded_state {
 FSIM_API void fsim_commanded_state_init(fsim_commanded_state* state);
 FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_commanded_state* out);
 
+/* The Vehicle Interface's modes: fixed-size setpoints, as a level's are, that
+ * take UPDATE (docs/vehicle-interface.md, 4). FSIM_MODE_HSA is fsim.guidance.hsa
+ * (A-GRA's HSA/CSA): fields heading_rad, course_rad (one of them), speed,
+ * speed_reference (fsim_speed_reference), altitude_m, altitude_reference
+ * (fsim_altitude_reference); fsim_hold() leaves one out. A NEW continues what
+ * a live hsa commanded, else what the aircraft flies now; a reference alone
+ * takes the aircraft's own value in it. fsim_activity_update takes the same
+ * fields and keeps the ones left out. */
+enum fsim_mode { FSIM_MODE_HSA = 0 };
+enum fsim_speed_reference { FSIM_SPEED_TRUE_AIRSPEED = 0, FSIM_SPEED_CALIBRATED_AIRSPEED, FSIM_SPEED_GROUND_SPEED, FSIM_SPEED_MACH };
+enum fsim_altitude_reference { FSIM_ALTITUDE_MSL = 0, FSIM_ALTITUDE_ABOVE_GROUND, FSIM_ALTITUDE_ELLIPSOID };
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 6; 0 for an unknown mode */
+FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
+                                      const fsim_command_options* options, fsim_command_result* result);
+
 /* A-GRA's flight capability types (MA_FlightCapabilityEnum). */
 enum fsim_flight_mode {
     FSIM_FLIGHT_MODE_NONE = 0,

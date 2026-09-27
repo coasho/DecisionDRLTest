@@ -503,11 +503,22 @@ bool toSupport(int kind, const double* f, uint32_t count, fsim::control::Support
     }
 }
 
+/// A mode's setpoint from its fields in order; false if the mode or the count is wrong.
+bool toMode(int mode, const double* fields, uint32_t count, fsim::control::Command& out) noexcept {
+    if (mode != FSIM_MODE_HSA || !fields) return false;
+    out = fsim::control::HsaCommand{};
+    double* slots[8];
+    if (count != fsim::control::commandFields(out, slots)) return false;
+    for (uint32_t i = 0; i < count; ++i) *slots[i] = fields[i];
+    return true;
+}
+
 /// What an activity's UPDATE takes: its level (a flight capability), its
-/// support kind (a support one), or neither (unknown, ended long ago, a behaviour).
+/// support kind (a support one), its mode, or none (unknown, ended long ago, a behaviour).
 struct UpdateShape {
     int level = FSIM_LEVEL_BEHAVIOR;
     int support = -1;
+    int mode = -1;
     uint32_t fields = 0;
 };
 
@@ -520,7 +531,10 @@ UpdateShape updateShape(fsim_world* w, fsim::control::ActivityId activity) {
     const auto& d = all[a->capability];
     for (std::size_t k = 0; k < fsim::control::kSupportKinds; ++k)
         if (d.id == fsim::control::supportCapability(k)) shape.support = static_cast<int>(k);
-    if (shape.support >= 0) {
+    if (d.setpoint == fsim::control::SetpointKind::Hsa) {
+        shape.mode = FSIM_MODE_HSA;
+        shape.fields = fsim_mode_field_count(FSIM_MODE_HSA);
+    } else if (shape.support >= 0) {
         shape.fields = static_cast<uint32_t>(d.parameters.size()); // set beside the cascade: a support effector or the engines
     } else if (d.kind == fsim::control::CapabilityKind::Flight) {
         shape.level = static_cast<int>(d.level);
@@ -540,6 +554,11 @@ fsim::control::CommandResult updateFrom(fsim_world* w, fsim::control::ActivityId
         return {};
     }
     fsim::control::Command c = fsim::control::ActuatorCommand{};
+    if (shape.mode >= 0) {
+        if (toMode(shape.mode, fields, count, c)) return w->world.update(activity, c);
+        malformed = true;
+        return {};
+    }
     if (shape.level != FSIM_LEVEL_BEHAVIOR && !toCommand(shape.level, fields, count, c)) {
         malformed = true;
         return {};
@@ -618,6 +637,23 @@ FSIM_API int fsim_vehicle_submit_behavior(fsim_world* world, uint32_t id, const 
     });
 }
 
+FSIM_API uint32_t fsim_mode_field_count(int mode) {
+    if (mode != FSIM_MODE_HSA) return 0;
+    fsim::control::Command c = fsim::control::HsaCommand{};
+    double* slots[8];
+    return static_cast<uint32_t>(fsim::control::commandFields(c, slots));
+}
+
+FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
+                                      const fsim_command_options* options, fsim_command_result* result) {
+    fsim::control::Command c;
+    if (!world || !result || !toMode(mode, fields, count, c))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_mode: mode " + std::to_string(mode) + " takes " +
+                                               std::to_string(fsim_mode_field_count(mode)) + " fields");
+    toC(world, world->world.submit(id, c, fromC(options)), result);
+    return FSIM_OK;
+}
+
 FSIM_API int fsim_vehicle_submit_support(fsim_world* world, uint32_t id, int kind, const double* fields, uint32_t count,
                                          const fsim_command_options* options, fsim_command_result* result) {
     fsim::control::SupportCommand c;
@@ -635,7 +671,7 @@ FSIM_API int fsim_activity_update(fsim_world* world, fsim_activity_id activity, 
     const auto r = updateFrom(world, activity, shape, fields, count, malformed);
     if (malformed)
         return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update: activity " + std::to_string(activity) + " takes " +
-                                               (shape.support >= 0 ? std::to_string(shape.fields) : fieldCounts(shape.level)) + " fields");
+                                               (shape.support >= 0 || shape.mode >= 0 ? std::to_string(shape.fields) : fieldCounts(shape.level)) + " fields");
     toC(world, r, result);
     return FSIM_OK;
 }

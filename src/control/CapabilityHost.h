@@ -60,10 +60,14 @@ public:
         if (legacySlot_ < 0 || std::holds_alternative<BehaviorCommand>(command)) return false;
         SetpointSlot& slot = config_->slots[static_cast<std::size_t>(legacySlot_)];
         if (slot.command.index() != command.index()) return false;
-        assignSetpoint(slot.command, command);
+        applySetpoint(slot.command, command); // a mode's setpoint merged, a level's replaced
         ++slot.revision;
         return true;
     }
+
+    /// What the vehicle can do (docs/vehicle-interface.md, 7.1): its adapter's
+    /// answer when the host was bound, which its guidance flies with.
+    const Performance& performance() const noexcept { return performance_; }
 
     /// Live or recently ended; null if unknown.
     const ActivityRecord* activity(ActivityId activity) const noexcept;
@@ -132,6 +136,15 @@ private:
     void end(std::size_t slot, ActivityState state, Reason reason, ActivityId by, double now) noexcept;
     void release(std::size_t slot) noexcept;
     CommandResult rejected(Reason reason, ActivityId activity = 0, ActivityId other = 0) const noexcept;
+    /// The setpoint of the live hsa activity, if one flies (a NEW continues what it commanded).
+    const HsaCommand* liveHsa() const noexcept;
+    /// A NEW hsa (docs/vehicle-interface.md, 4.4): its references checked, the
+    /// fields it leaves out from the live hsa it replaces or the state, its
+    /// angles wrapped. InvalidParameter (with the field in `detail`) if malformed.
+    Reason resolveHsa(HsaCommand& c, const sim::VehicleState& state, CommandResult& detail) const noexcept;
+    /// An hsa's speed and altitude against the aircraft's performance: clamped
+    /// (kClamped) or, with Reject, PerformanceLimit - `detail` saying which field and limit.
+    Reason limitHsa(HsaCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
 
     std::uint32_t vehicle_ = 0;
     double controlPeriodS_ = 1.0 / 120.0;
@@ -141,6 +154,7 @@ private:
     const CapabilityCatalog* catalog_ = nullptr;
     const VehicleAdapter* adapter_ = nullptr;
     const VehicleProfile* profile_ = nullptr;
+    Performance performance_{};
     std::uint32_t serial_ = 0;
     std::array<Slot, kActivities> slots_{};
     std::array<ActivityRecord, kActivities> records_{}; ///< per slot: its activity's record

@@ -854,6 +854,21 @@ static PyObject* world_submit_behavior(PyObject* o, PyObject* const* args, Py_ss
     return result_tuple(self->world, &r);
 }
 
+/* submit_mode(id, mode, values, source=None, axes=None, range=None, min_version=None) -> result */
+static PyObject* world_submit_mode(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int mode;
+    double row[8];
+    fsim_command_options opt;
+    fsim_command_result r;
+    if (!check_args(n, 3, 7, "submit_mode") || !as_u32(args[0], &id) || !as_int(args[1], &mode) || !WORLD_IDLE(self)) return NULL;
+    const Py_ssize_t count = read_values(args[2], row, "submit_mode");
+    if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
+    if (fsim_vehicle_submit_mode(self->world, id, mode, row, (uint32_t)count, &opt, &r) != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
 /* submit_support(id, kind, values, source=None, axes=None, range=None, min_version=None) -> result */
 static PyObject* world_submit_support(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
@@ -1388,6 +1403,7 @@ static PyMethodDef world_methods[] = {
     FAST("submit", world_submit, "submit(id, level, values, source, axes, range, min_version) -> result"),
     FAST("submit_behavior", world_submit_behavior, "submit_behavior(id, behavior, target, params, points, source, axes, range, min_version) -> result"),
     FAST("submit_support", world_submit_support, "submit_support(id, kind, values, source, axes, range, min_version) -> result"),
+    FAST("submit_mode", world_submit_mode, "submit_mode(id, mode, values, source, axes, range, min_version) -> result"),
     FAST("activity_update", world_activity_update, "activity_update(activity, values) -> result"),
     FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride[, fields])"),
     FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity) -> result"),

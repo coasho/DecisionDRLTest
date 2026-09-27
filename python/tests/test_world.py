@@ -310,10 +310,37 @@ class CapabilityTest(unittest.TestCase):
         caps = {cap.id: cap for cap in v.capabilities()}
         self.assertEqual(caps["fsim.guidance.formation"].mode, "formation")
         self.assertEqual(caps["fsim.flight.velocity"].mode, "none")
-        self.assertEqual(agra.flight_capabilities(v), {"FORMATION": ["fsim.guidance.formation"]})
+        self.assertEqual(agra.flight_capabilities(v), {"FORMATION": ["fsim.guidance.formation"], "HSA_CSA": ["fsim.guidance.hsa"]})
         route.cancel()
         self.assertEqual(agra.activity_state(route.info), "FAILED")
         self.assertEqual(agra.cannot_comply(route.info.reason), "CANCELED")
+
+    def test_hsa_mode(self):
+        world = make_world(name="py-hsa")
+        v = fly(world, "hsa")
+        a = v.submit_hsa(heading_rad=math.pi, speed=55.0, speed_reference="true_airspeed", altitude_m=1600.0)
+        self.assertEqual(a.level, "hsa")
+        world.step()
+        self.assertEqual(a.state, fsim.ActivityState.ACTIVE)
+        a.update(altitude_m=1700.0)  # only the altitude: the rest as commanded
+        world.step()
+        p = a.progress
+        self.assertEqual((p.altitude_msl_m, p.speed_ms), (1700.0, 55.0))
+        self.assertAlmostEqual(abs(p.heading_rad), math.pi)
+        self.assertEqual(p.speed_reference, fsim.SpeedReference.TRUE_AIRSPEED)
+        a.update(speed=0.25, speed_reference=fsim.SpeedReference.MACH)
+        world.step()
+        self.assertEqual((a.progress.speed_ms, a.progress.speed_reference), (0.25, 3.0))
+        with self.assertRaises(fsim.Rejected) as refused:
+            a.update(speed_reference="calibrated_airspeed")  # a reference needs its value in an UPDATE
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_parameter", 2))
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_hsa(heading_rad=1.0, course_rad=1.0)
+        self.assertEqual(refused.exception.index, 1)
+        caps = {c.id: c for c in v.capabilities()}
+        self.assertEqual(caps["fsim.guidance.hsa"].mode, "hsa_csa")
+        self.assertEqual([q.name for q in caps["fsim.guidance.hsa"].parameters], list(fsim.MODE_FIELDS["hsa"]))
+        self.assertEqual(fsim.agra.flight_capabilities(v)["HSA_CSA"], ["fsim.guidance.hsa"])
 
     def test_authority_and_refusals(self):
         world = make_world(name="py-authority")

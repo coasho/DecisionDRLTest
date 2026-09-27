@@ -673,7 +673,10 @@ measured from three-views, each rotor bound to the flight model's shaft, and tur
 reports - a multirotor's what user code commands. Then the control system was measured against A-GRA's Vehicle
 Interface (ASK 6.0a) and the owner decided to implement its semantics (ADR-28, [vehicle-interface.md](vehicle-interface.md)):
 its first step made the behaviours offered to rotorcraft fly as rotorcraft fly - a hold that stays put in wind, routes
-and loiters at the position loop's speed - and added the guidance tests the analysis found missing.
+and loiters at the position loop's speed - and added the guidance tests the analysis found missing; the second told a
+consumer what a rejection was about, how far an activity has got and what the cascade commands; the third added the
+HSA/CSA mode - a heading or a course, a speed in any reference and an altitude above sea level or the ground, with
+partial updates, checked against each aircraft's performance and flown by wings and rotorcraft alike.
 M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |

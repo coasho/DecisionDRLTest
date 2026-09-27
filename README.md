@@ -123,6 +123,14 @@ push, not yet tagged:
   each motor's thrust from user code), with body-rate, ground-velocity and hover commands and loops designed from
   each one's identified hover. Their models are measured from three-views, each rotor bound to its shaft and
   turned at the rotor speed the simulation reports. `fsim hangar uh60` builds and flies one.
+- **The Vehicle Interface** ([docs/vehicle-interface.md](docs/vehicle-interface.md), ADR-28): A-GRA ASK 6.0a's flight
+  semantics for a mission autonomy, in C++, the C ABI and Python, on every aircraft:
+  - the HSA/CSA mode: a heading or a course, a speed in true, calibrated, ground-speed or Mach terms, and an altitude above sea level or above the ground; it takes partial updates and is checked against each aircraft's performance;
+  - rejections that name the field and the limit;
+  - an activity's progress and the commanded state;
+  - A-GRA's names for all of it (`fsim.agra`).
+
+  Waypoint following, loiter patterns, curve following and control grants follow, step by step.
 - **Per-aircraft gains** ([docs/sdk/control.md](docs/sdk/control.md#per-aircraft-gains)): the built-in control
   loops fly each of these aircraft with its own gains - designed by the platform from its plant, the responses
   hangar's `autopilot` stage measures with small steps at a reference condition, scheduled on airspeed, with its

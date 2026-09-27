@@ -104,6 +104,13 @@ public:
 
     /// A flight or guidance capability's command; false for the others.
     bool cascade(const CapabilityDescriptor& d, bool wild, Command& out) {
+        if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Hsa) { // a mode: its fixed-size setpoint's fields
+            out = HsaCommand{};
+            double* fields[8];
+            const std::size_t n = std::min(commandFields(out, fields), d.parameters.size());
+            for (std::size_t i = 0; i < n; ++i) *fields[i] = value(d.parameters[i], wild);
+            return true;
+        }
         if (d.kind == CapabilityKind::Guidance) {
             BehaviorCommand b;
             b.id = wild && chance(0.5) ? d.id : d.behavior; // either id selects it
@@ -261,7 +268,8 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
             continue;
         }
         CHECK((d.interactions & (kCancel | kStatus)) == (kCancel | kStatus));
-        CHECK(((d.interactions & kUpdate) != 0) == (d.kind != CapabilityKind::Guidance)); // a behaviour's parameters are heap data
+        // a behaviour's parameters are heap data; a mode's setpoint is fixed-size and takes UPDATE (docs/vehicle-interface.md, 4.2)
+        CHECK(((d.interactions & kUpdate) != 0) == (d.kind != CapabilityKind::Guidance || d.setpoint != SetpointKind::Behavior));
         const bool primary = (d.axes & kPrimaryAxes) != 0; // flown through the cascade, or the engines' thrust beside it
         CHECK(primary == (!Maker::isSupport(d) || d.id == "fsim.flight.engines"));
         CHECK(w.capabilityStatus(v, d.id).availability == Availability::Available);
@@ -386,7 +394,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
     if (done.op == Op::New) {
         if (done.result.accepted()) CHECK(done.result.reason == Reason::None);
         else CHECK(among(done.result.reason, {Reason::UnknownCapability, Reason::Unavailable, Reason::VersionUnsupported, Reason::InvalidParameter,
-                                              Reason::OutOfRange, Reason::InvalidAxes, Reason::AuthorityHeld, Reason::ControllerNotAxisAware}));
+                                              Reason::OutOfRange, Reason::InvalidAxes, Reason::AuthorityHeld, Reason::ControllerNotAxisAware,
+                                              Reason::PerformanceLimit}));
         if ((done.result.flags & kClamped) != 0) CHECK(done.options.range == RangePolicy::Clamp);
         if (done.result.reason == Reason::AuthorityHeld) {
             const ActivityRecord* holder = was(done.result.other);
@@ -401,7 +410,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         if (!target) CHECK(done.result.reason == Reason::UnknownActivity);
         else if (!target->live()) CHECK(done.result.reason == Reason::ActivityEnded);
         else if (done.op == Op::Cancel) CHECK(ok);
-        else if (!ok) CHECK(among(done.result.reason, {Reason::NotUpdatable, Reason::WrongCommandType, Reason::InvalidParameter, Reason::OutOfRange}));
+        else if (!ok)
+            CHECK(among(done.result.reason, {Reason::NotUpdatable, Reason::WrongCommandType, Reason::InvalidParameter, Reason::OutOfRange, Reason::PerformanceLimit}));
     }
 
     // every record: its state and its reason agree, and so does its end

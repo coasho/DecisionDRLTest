@@ -2,6 +2,7 @@
 
 #include "control/Registry.h"
 #include "core/Geodesy.h"
+#include "fsim/GuidanceModes.h"
 #include "fsim/RotorControllers.h"
 #include "core/Units.h"
 
@@ -724,6 +725,7 @@ void registerBuiltinControllers(ControllerRegistry& r) {
     aerobatic.features = kFeatureWingborne; // a loop pulled by load factor: a wing's
     r.addBehavior("aerobatics", [] { return std::make_unique<AerobaticBehavior>(); }, std::move(aerobatic));
     registerRotorControllers(r); // the rotorcraft's loops and "hover" (docs/rotorcraft.md, 3.6)
+    registerGuidanceModes(r);    // the Vehicle Interface's modes: "hsa" (docs/vehicle-interface.md)
 }
 
 } // namespace fsim::control

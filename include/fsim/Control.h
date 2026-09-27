@@ -120,6 +120,32 @@ struct PositionCommand {
     double headingRad = kHold; ///< (a rotorcraft)
 };
 
+// --- Guidance modes (docs/vehicle-interface.md, ADR-28): fixed-size setpoints,
+// flown by a behaviour per activity, that take UPDATE ----------------------------------
+
+/// What a mode's speed is measured against (A-GRA's SpeedReferenceEnum and MachType).
+enum class SpeedReference : std::uint8_t { TrueAirspeed = 0, CalibratedAirspeed = 1, GroundSpeed = 2, Mach = 3, Count };
+/// What a mode's altitude is measured from (A-GRA's AltitudeReferenceEnum). The
+/// simulation's sea level is the WGS-84 ellipsoid (JSBSim's), so Msl and
+/// Ellipsoid are one; AboveGround follows the terrain under the aircraft.
+enum class AltitudeReference : std::uint8_t { Msl = 0, AboveGround = 1, Ellipsoid = 2, Count };
+
+/// fsim.guidance.hsa (A-GRA's HSA/CSA): hold a heading or a course, a speed
+/// and an altitude, until told otherwise. Each field may be left out (kHold):
+/// a NEW keeps what a live hsa activity it replaces commanded, else what the
+/// aircraft flies now; an UPDATE keeps what was commanded. A reference given
+/// without its value takes the aircraft's own now (a Mach reference alone:
+/// hold the Mach it flies). A heading replaces a course and a course a heading.
+/// References are enum values carried as doubles, so kHold can mean "as before".
+struct HsaCommand {
+    double headingRad = kHold;        ///< the nose's direction, true north
+    double courseRad = kHold;         ///< or the track over the ground's
+    double speed = kHold;             ///< m/s, or a Mach number
+    double speedReference = kHold;    ///< SpeedReference
+    double altitudeM = kHold;
+    double altitudeReference = kHold; ///< AltitudeReference
+};
+
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
 struct BehaviorCommand {
     std::string id;                        ///< registry id: "hold", "waypoints", "loiter", "pursuit", ...
@@ -133,7 +159,10 @@ struct BehaviorCommand {
     }
 };
 
-using Command = std::variant<ActuatorCommand, AttitudeCommand, AccelerationCommand, VelocityCommand, PositionCommand, BehaviorCommand>;
+/// A command: a level's, a behaviour's, or a guidance mode's setpoint. The
+/// modes come after BehaviorCommand and enter at Level::Behavior (levelOf):
+/// the variant's index is a level's only up to it.
+using Command = std::variant<ActuatorCommand, AttitudeCommand, AccelerationCommand, VelocityCommand, PositionCommand, BehaviorCommand, HsaCommand>;
 
 // Support effectors (docs/control-architecture.md, 8.2): set directly, not
 // flown through the cascade; each its own capability (fsim.support.*) where
@@ -169,7 +198,11 @@ struct EnginesCommand {
 /// The commands set directly beside the cascade: the support effectors and per-engine throttles.
 using SupportCommand = std::variant<GearCommand, FlapsCommand, WheelBrakesCommand, SpeedbrakeCommand, PitchTrimCommand, EnginesCommand>;
 
-inline Level levelOf(const Command& c) noexcept { return static_cast<Level>(c.index()); }
+inline Level levelOf(const Command& c) noexcept {
+    return c.index() < static_cast<std::size_t>(Level::Behavior) ? static_cast<Level>(c.index()) : Level::Behavior;
+}
+/// The registered behaviour that flies a mode's setpoint ("hsa"); null for a level's or a behaviour's command.
+inline const char* modeBehavior(const Command& c) noexcept { return std::holds_alternative<HsaCommand>(c) ? "hsa" : nullptr; }
 
 
 
@@ -199,6 +232,9 @@ struct ControlContext {
     /// What the vehicle can do (Feature bits), for a behaviour whose guidance
     /// differs by it: a rotorcraft hovers (docs/vehicle-interface.md, 4.9).
     std::uint32_t features = kFeatureWingborne;
+    /// What it can do in numbers, for a behaviour: its guidance plans with it
+    /// (docs/vehicle-interface.md, 7.1). Null outside a vehicle's runtime.
+    const Performance* performance = nullptr;
 };
 
 /// One level of the cascade: accepts a command at `level()` and returns a
@@ -233,6 +269,11 @@ public:
 
     /// Called once with the command that selected this behaviour, before the first update().
     virtual void start(const ControlContext& ctx, const BehaviorCommand& command) { (void)ctx; (void)command; }
+    /// What the runtime calls first: with a BehaviorCommand, start() above; a
+    /// guidance mode (docs/vehicle-interface.md) takes its setpoint here.
+    virtual void begin(const ControlContext& ctx, const Command& command) {
+        if (const auto* b = std::get_if<BehaviorCommand>(&command)) start(ctx, *b);
+    }
     /// The goal is reached: its activity completes (docs/control-architecture.md, 10.3).
     virtual bool finished() const noexcept { return false; }
     /// Why it can no longer do what it was asked, e.g. Reason::TargetLost once

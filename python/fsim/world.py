@@ -239,10 +239,39 @@ SUPPORT_DEFAULTS = {"gear": (1.0,), "flaps": (0.0,), "wheel_brakes": (0.0, 0.0),
                     "engines": (HOLD, HOLD, HOLD, HOLD)}
 
 
+class SpeedReference(enum.IntEnum):
+    """What a mode's speed is measured against (A-GRA's SpeedReferenceEnum and MachType)."""
+    TRUE_AIRSPEED = 0
+    CALIBRATED_AIRSPEED = 1
+    GROUND_SPEED = 2
+    MACH = 3
+
+
+class AltitudeReference(enum.IntEnum):
+    """What a mode's altitude is measured from (A-GRA's AltitudeReferenceEnum). The simulation's sea level is the
+    WGS-84 ellipsoid, so MSL and ELLIPSOID are one; ABOVE_GROUND follows the terrain under the aircraft."""
+    MSL = 0
+    ABOVE_GROUND = 1
+    ELLIPSOID = 2
+
+
+#: The Vehicle Interface's modes (docs/vehicle-interface.md): their fixed-size setpoints' fields, in order. HOLD leaves
+#: one out: a NEW continues what a live one commanded (else what the aircraft flies now), an UPDATE keeps it.
+MODE_KINDS = ("hsa",)
+MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference")}
+MODE_DEFAULTS = {"hsa": (HOLD,) * 6}
+_REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference}
+
+
 def _row(level, values, fields):
-    """A level's (or support kind's) fields: all of them in order - a level's COMMAND_FIELDS, or its SETPOINT_FIELDS
-    with the rotorcraft's - or some by name with the rest as a new command's defaults."""
-    if isinstance(level, str):
+    """A level's (or support kind's, or mode's) fields: all of them in order - a level's COMMAND_FIELDS, or its
+    SETPOINT_FIELDS with the rotorcraft's - or some by name with the rest as a new command's defaults."""
+    if isinstance(level, str) and level in MODE_FIELDS:
+        # a reference by name ("mach") or enum member
+        fields = {k: (_REFERENCES[k][v.upper()] if isinstance(v, str) and k in _REFERENCES else v) for k, v in fields.items()}
+        names, defaults, what = MODE_FIELDS[level], MODE_DEFAULTS[level], level
+        counts = (len(names),)
+    elif isinstance(level, str):
         names, defaults, what = SUPPORT_FIELDS[level], SUPPORT_DEFAULTS[level], level
         counts = (len(names),)
     else:
@@ -444,6 +473,17 @@ class Vehicle:
         rows = None if points is None else [tuple(float(x) for x in p) for p in points]
         r = _checked(self._h.submit_behavior(self.id, behavior, t, params or None, rows, int(source), None, int(range), int(min_version)))
         return Activity(self._world, r[2], Level.BEHAVIOR, bool(r[4]))
+
+    def submit_hsa(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
+        """NEW for fsim.guidance.hsa, A-GRA's HSA/CSA (docs/vehicle-interface.md, 4.4): hold ``heading_rad`` or
+        ``course_rad``, a ``speed`` in ``speed_reference`` (fsim.SpeedReference or its name: "true_airspeed",
+        "calibrated_airspeed", "ground_speed", "mach") and ``altitude_m`` above ``altitude_reference``
+        (fsim.AltitudeReference: "msl", "above_ground", "ellipsoid"). What it leaves out continues what a live hsa
+        commanded, else what the aircraft flies now; a reference alone takes the aircraft's own value in it. An
+        Activity whose ``update(**fields)`` changes only the fields given; fsim.Rejected if refused."""
+        r = _checked(self._h.submit_mode(self.id, MODE_KINDS.index("hsa"), _row("hsa", values, fields), int(source), None, int(range),
+                                         int(min_version)))
+        return Activity(self._world, r[2], "hsa", bool(r[4]))
 
     def submit_support(self, kind, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
         """NEW for a support effector the vehicle has - "gear" (down), "flaps"

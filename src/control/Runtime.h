@@ -17,8 +17,9 @@
 
 namespace fsim::control {
 
-/// `dst = src` for two commands of the same level below Behavior, without
-/// std::variant's general assignment: the per-step setpoint write.
+/// `dst = src` for two commands of the same level below Behavior, or of the
+/// same guidance mode, without std::variant's general assignment: the per-step
+/// setpoint write.
 inline void assignSetpoint(Command& dst, const Command& src) noexcept {
     auto as = [&](auto tag) {
         using T = decltype(tag);
@@ -32,8 +33,29 @@ inline void assignSetpoint(Command& dst, const Command& src) noexcept {
     case 2: as(AccelerationCommand{}); break;
     case 3: as(VelocityCommand{}); break;
     case 4: as(PositionCommand{}); break;
+    case 6: as(HsaCommand{}); break;
     default: break;
     }
+}
+
+/// A partial HSA (docs/vehicle-interface.md, 4.4): the fields given replace
+/// the commanded ones, the rest stay; a heading replaces a course, a course a heading.
+inline void mergeHsa(HsaCommand& dst, const HsaCommand& src) noexcept {
+    if (!isHold(src.headingRad)) dst.headingRad = src.headingRad, dst.courseRad = kHold;
+    if (!isHold(src.courseRad)) dst.courseRad = src.courseRad, dst.headingRad = kHold;
+    if (!isHold(src.speed)) dst.speed = src.speed;
+    if (!isHold(src.speedReference)) dst.speedReference = src.speedReference;
+    if (!isHold(src.altitudeM)) dst.altitudeM = src.altitudeM;
+    if (!isHold(src.altitudeReference)) dst.altitudeReference = src.altitudeReference;
+}
+
+/// What UPDATE (and the existing entry points' per-step path) writes into a
+/// slot: a level's setpoint replaced, a mode's merged (its kHold fields keep
+/// what was commanded).
+inline void applySetpoint(Command& dst, const Command& src) noexcept {
+    if (auto* d = std::get_if<HsaCommand>(&dst))
+        if (const auto* s = std::get_if<HsaCommand>(&src)) return mergeHsa(*d, *s);
+    assignSetpoint(dst, src);
 }
 
 /// One engaged activity's input to the cascade.
@@ -87,6 +109,9 @@ struct RuntimeConfig {
     std::array<SupportDemand, kSupportAxisCount> support{};
     std::array<double, 4> engines{kHold, kHold, kHold, kHold}; ///< per-engine throttle when thrust's owner is kEngines
     VehicleDefault vehicleDefault = VehicleDefault::Neutral;  ///< what flies a primary axis whose owner is kNone
+    /// What the vehicle can do, for its guidance modes (ControlContext::performance):
+    /// the host writes it when it binds and when the vehicle's loops change.
+    Performance performance{};
     /// Per primary axis: bumped each time it returns to the vehicle default
     /// (or the default becomes a hold), so the hold captures it afresh.
     std::array<std::uint32_t, kPrimaryAxisCount> letGo{};

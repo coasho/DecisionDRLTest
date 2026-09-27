@@ -347,6 +347,56 @@ enum class FlightMode : std::uint8_t {
 /// "hsa_csa", "waypoint_following", ...; "none".
 FSIM_API const char* flightModeName(FlightMode mode) noexcept;
 
+/// What a capability's command is (CapabilityDescriptor::setpoint;
+/// docs/vehicle-interface.md 4.2): a level's struct, a behaviour's parameters
+/// (heap data: no UPDATE), or a guidance mode's fixed-size setpoint (UPDATE
+/// writes it in place).
+enum class SetpointKind : std::uint8_t {
+    Level,    ///< a level's struct (ActuatorCommand ... PositionCommand), or a support effector's
+    Behavior, ///< BehaviorCommand
+    Hsa,      ///< HsaCommand (fsim.guidance.hsa)
+    Count
+};
+
+/// What an aircraft can do, as its guidance plans with it and a consumer
+/// reads it (A-GRA's flight capability performance profile;
+/// docs/vehicle-interface.md 7.1). Its family's adapter works it out from
+/// the profile and the loops the vehicle flies with; NaN where it is not known.
+struct Performance {
+    static constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    std::uint32_t revision = 0;      ///< counts recomputations
+    bool hovers = false;             ///< a rotorcraft: holds a point, flies any direction over the ground
+    // speeds
+    double minCasMs = kNone;         ///< calibrated: the envelope's minimum, else 1.2 times the stall speed
+    double maxCasMs = kNone;         ///< calibrated: the envelope's maximum
+    double maxMach = kNone;
+    double maxTasMs = kNone;         ///< the fastest it flies (its performance section's, level at full power)
+    double cruiseTasMs = kNone;      ///< what a mode flies given no speed: a wing's reference airspeed, a rotorcraft's half its fastest
+    double maxGroundSpeedMs = kNone; ///< a rotorcraft's fastest over the ground (its position loop's)
+    // altitude
+    double ceilingM = kNone;
+    // attitude, rates, accelerations
+    double maxBankRad = kNone, minPitchRad = kNone, maxPitchRad = kNone, maxRollRateRadS = kNone;
+    double minLoadFactor = kNone, maxLoadFactor = kNone;
+    double maxTiltRad = kNone;           ///< a rotorcraft's most tilt to accelerate
+    double maxAccelerationMs2 = kNone;   ///< a rotorcraft's over the ground: g tan(maxTilt)
+    double maxDecelerationMs2 = kNone;   ///< a rotorcraft's, as its position loop stops
+    double maxClimbMs = kNone, maxDescentMs = kNone; ///< the vertical speeds guidance asks for
+    // how fast it answers guidance
+    double altitudeGainPerS = kNone;     ///< vertical speed per metre of altitude error (its position loop's)
+    double headingGain = kNone;          ///< a wing's heading loop: rad of bank per rad of heading error...
+    double headingReferenceTasMs = kNone; ///< ...at this true airspeed (it grows with speed); NaN: the same at every speed
+    double velocityBandwidthRadS = kNone; ///< a rotorcraft's velocity loop: how fast its ground velocity follows a demand
+
+    /// How fast the track follows a course demand at true airspeed `tasMs`,
+    /// rad/s: a wing's heading loop (g times its gain over the speed it holds
+    /// at), a rotorcraft's velocity loop. A guess of 0.2 where neither is known.
+    double courseBandwidthRadS(double tasMs) const noexcept;
+    /// The radius of a turn at ground speed `speedMs` with the bank or tilt
+    /// guidance may use (80 % of the most), m.
+    double turnRadiusM(double speedMs) const noexcept;
+};
+
 /// One parameter: a field of the capability's command struct, in order, or a
 /// behaviour's named parameter.
 struct ParameterInfo {
@@ -380,6 +430,7 @@ struct CapabilityDescriptor {
     std::string behavior;                  ///< guidance: the behaviour's registry id
     bool needsTarget = false;              ///< guidance: follows BehaviorCommand::target
     FlightMode mode = FlightMode::None;    ///< the A-GRA flight capability type it is
+    SetpointKind setpoint = SetpointKind::Level; ///< what its command is
 };
 
 /// What a behaviour declares when it is registered (ControllerRegistry::addBehavior).
@@ -392,6 +443,9 @@ struct BehaviorTraits {
     /// kFeatureHover); 0: every aircraft.
     std::uint32_t features = 0;
     FlightMode mode = FlightMode::None; ///< the A-GRA flight capability type it is
+    /// Behavior: parameters in a BehaviorCommand. A guidance mode's fixed-size
+    /// setpoint (SetpointKind::Hsa, ...) makes it a mode: it takes UPDATE.
+    SetpointKind setpoint = SetpointKind::Behavior;
 };
 
 } // namespace fsim::control
