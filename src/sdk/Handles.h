@@ -18,6 +18,7 @@ struct fsim_world {
     std::unordered_set<std::string> strings;      ///< strings handed out (capability ids, parameter names): stable until the world goes
     fsim::control::CommandResult last;             ///< the last answer to a NEW, UPDATE or CANCEL (fsim_last_command_detail)
     std::vector<fsim::control::Waypoint> waypoints; ///< a route's, as given (reused: a route updated every step allocates nothing once it has room)
+    std::vector<fsim::control::BezierSegment> segments; ///< a curve's, as given (reused likewise)
 
     const char* intern(const std::string& s) { return strings.insert(s).first->c_str(); }
 

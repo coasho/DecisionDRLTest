@@ -192,7 +192,10 @@ VelocityCommand follow(const ControlContext& ctx, const Performance& perf, const
     const double e = fix.crossTrackM;
     const double tn = std::cos(fix.courseRad), te = std::sin(fix.courseRad);
     const double windAlong = wind.northMs * tn + wind.eastMs * te, windAcross = -wind.northMs * te + wind.eastMs * tn;
-    auto curvatureAhead = [&](double preview) { return ahead.toChangeM < preview ? ahead.curvature : fix.curvature; };
+    auto curvatureAhead = [&](double preview) {
+        if (ahead.curvatureAt) return ahead.curvatureAt(ahead.path, preview);
+        return ahead.toChangeM < preview ? ahead.curvature : fix.curvature;
+    };
 
     if (hovers) {
         // the path speed over the ground: the segment's, or what its airspeed makes along the path in the wind
@@ -260,7 +263,12 @@ VelocityCommand follow(const ControlContext& ctx, const Performance& perf, const
     heading = kHold;
     const double error = geo::wrapPi(course - std::atan2(s.velocityNedMs[1], s.velocityNedMs[0]));
     if (std::abs(error) < 0.15) trims.courseRadS = std::clamp(trims.courseRadS + 0.25 * bandwidth * bandwidth * error * ctx.dt, -0.05, 0.05);
-    return VelocityCommand{std::max(tas, 0.0), steer.verticalSpeedMs, kHold, curvature * vg + bandwidth * error + trims.courseRadS, kHold, kHold};
+    // that is the track's rate; the velocity loop banks for the heading's, and in the wind
+    // the track turns at the heading's rate times Va cos(crab) / Vg: turned back into it
+    const double gn = s.velocityNedMs[0], ge = s.velocityNedMs[1], g2 = gn * gn + ge * ge;
+    const double dot = gn * (gn - wind.northMs) + ge * (ge - wind.eastMs); // (ground . air velocity)
+    const double toHeading = g2 > 25.0 && dot > 0.25 * g2 ? std::clamp(g2 / dot, 0.5, 2.0) : 1.0;
+    return VelocityCommand{std::max(tas, 0.0), steer.verticalSpeedMs, kHold, toHeading * (curvature * vg + bandwidth * error) + trims.courseRadS, kHold, kHold};
 }
 
 Fix onLine(const Line& line, double lat0, double lon0, double lat, double lon) noexcept {
@@ -364,6 +372,150 @@ void completePattern(PatternCommand& c, const sim::VehicleState& s, const Perfor
     if (isHold(c.radiusM))
         c.radiusM = kind == PatternKind::Hold ? std::max(gusted / (3.0 * kDeg), gusted * gusted / (kG * std::tan(25.0 * kDeg))) : f.turnRadiusM(gusted);
     if (isHold(c.legM)) c.legM = kind == PatternKind::Hold ? v * (h <= 4267.2 ? 60.0 : 90.0) : kind == PatternKind::Racetrack ? 2.0 * c.radiusM : 0.0;
+}
+
+CurvePoint evaluate(const BezierSegment& s, double t) noexcept {
+    // Bernstein's basis of degree 5, and of 4 and 3 for the derivatives
+    const double u = 1.0 - t;
+    const double u2 = u * u, t2 = t * t;
+    const double b5[6] = {u2 * u2 * u, 5.0 * u2 * u2 * t, 10.0 * u2 * u * t2, 10.0 * u2 * t2 * t, 5.0 * u * t2 * t2, t2 * t2 * t};
+    const double b4[5] = {u2 * u2, 4.0 * u2 * u * t, 6.0 * u2 * t2, 4.0 * u * t2 * t, t2 * t2};
+    const double b3[4] = {u2 * u, 3.0 * u2 * t, 3.0 * u * t2, t2 * t};
+    CurvePoint c;
+    const double* axes[3] = {s.north, s.east, s.down};
+    for (int a = 0; a < 3; ++a) {
+        const double* q = axes[a];
+        for (int i = 0; i < 6; ++i) c.p[a] += b5[i] * q[i];
+        for (int i = 0; i < 5; ++i) c.d1[a] += 5.0 * b4[i] * (q[i + 1] - q[i]);
+        for (int i = 0; i < 4; ++i) c.d2[a] += 20.0 * b3[i] * (q[i + 2] - 2.0 * q[i + 1] + q[i]);
+    }
+    return c;
+}
+
+double CurvePoint::courseRad() const noexcept { return std::atan2(d1[1], d1[0]); }
+
+double CurvePoint::curvature() const noexcept {
+    const double v2 = d1[0] * d1[0] + d1[1] * d1[1];
+    return v2 > 1e-12 ? (d1[0] * d2[1] - d1[1] * d2[0]) / (v2 * std::sqrt(v2)) : 0.0;
+}
+
+double CurvePoint::gradient() const noexcept {
+    const double ground = std::hypot(d1[0], d1[1]);
+    return ground > 1e-9 ? -d1[2] / ground : 0.0; // (down is positive)
+}
+
+double Curve::at(std::uint32_t i, double t) const noexcept {
+    const double x = std::clamp(t, 0.0, 1.0) * kSamples;
+    const int k = std::min(static_cast<int>(x), kSamples - 1);
+    return startM[i] + table[i][k] + (x - k) * (table[i][k + 1] - table[i][k]);
+}
+
+void Curve::find(double s, std::uint32_t& i, double& t) const noexcept {
+    s = std::clamp(s, 0.0, lengthM());
+    i = 0;
+    while (i + 1 < count && s >= startM[i + 1]) ++i;
+    const double local = s - startM[i];
+    int k = 0;
+    while (k + 1 < kSamples && table[i][k + 1] < local) ++k;
+    const double span = table[i][k + 1] - table[i][k];
+    t = (k + (span > 1e-12 ? std::clamp((local - table[i][k]) / span, 0.0, 1.0) : 0.0)) / kSamples;
+}
+
+void Curve::measure(std::uint32_t from) noexcept {
+    if (from == 0) startM[0] = 0.0;
+    for (std::uint32_t i = from; i < count; ++i) {
+        CurvePoint last = evaluate(segments[i], 0.0);
+        table[i][0] = 0.0;
+        for (int k = 1; k <= kSamples; ++k) {
+            const CurvePoint c = evaluate(segments[i], static_cast<double>(k) / kSamples);
+            table[i][k] = table[i][k - 1] + std::hypot(c.p[0] - last.p[0], c.p[1] - last.p[1]);
+            last = c;
+        }
+        startM[i + 1] = startM[i] + table[i][kSamples];
+    }
+}
+
+double curvatureAhead(const void* curve, double aheadM) noexcept {
+    const auto& c = *static_cast<const Curve*>(curve);
+    std::uint32_t i;
+    double t;
+    c.find(c.fromM + aheadM, i, t);
+    return evaluate(c.segments[i], t).curvature();
+}
+
+double speedLimitAhead(const Performance& performance, const Curve& c, double speedMs, bool stops) noexcept {
+    // sampled as far as it takes to stop, and a second more
+    const double reach = speedMs * speedMs / (2.0 * braking(performance)) + speedMs;
+    const double rest = c.lengthM() - c.fromM;
+    constexpr int kSteps = 24;
+    double limit = std::numeric_limits<double>::infinity();
+    for (int k = 0; k <= kSteps; ++k) {
+        const double d = reach * k / kSteps;
+        if (d > rest) break;
+        std::uint32_t i;
+        double t;
+        c.find(c.fromM + d, i, t);
+        if (const double kappa = std::abs(evaluate(c.segments[i], t).curvature()); kappa > 1e-9)
+            limit = std::min(limit, brakingLimit(performance, lateralLimit(performance, 1.0 / kappa), d));
+    }
+    if (stops) limit = std::min(limit, std::max(brakingLimit(performance, 0.0, rest), 0.5));
+    return limit;
+}
+
+Fix onCurve(const Curve& c, std::uint32_t& segment, double& t, double lat, double lon) noexcept {
+    double north, east;
+    geo::localNorthEastM(c.lat0, c.lon0, lat, lon, north, east);
+    // (B - P) . B' = 0 over the ground, from where it was: it has moved little since
+    for (int k = 0; k < 8; ++k) {
+        const CurvePoint p = evaluate(c.segments[segment], t);
+        const double dn = p.p[0] - north, de = p.p[1] - east;
+        const double g = dn * p.d1[0] + de * p.d1[1];
+        const double slope = p.d1[0] * p.d1[0] + p.d1[1] * p.d1[1];
+        const double gp = slope + dn * p.d2[0] + de * p.d2[1];
+        const double step = std::clamp(g / (gp > 0.1 * slope && gp > 1e-9 ? gp : std::max(slope, 1e-9)), -0.2, 0.2);
+        t -= step;
+        if (t > 1.0) {
+            if (segment + 1 < c.count) {
+                ++segment, t = 0.0; // on into the next
+                continue;
+            }
+            t = 1.0;
+        } else if (t < 0.0) {
+            t = 0.0;
+        }
+        if (std::abs(step) < 1e-7) break;
+    }
+    const CurvePoint p = evaluate(c.segments[segment], t);
+    Fix f;
+    f.courseRad = p.courseRad();
+    f.crossTrackM = -(north - p.p[0]) * std::sin(f.courseRad) + (east - p.p[1]) * std::cos(f.courseRad);
+    f.curvature = p.curvature();
+    f.alongM = c.at(segment, t);
+    return f;
+}
+
+bool tooTight(const BezierSegment& s, double limit, double& from, double& to) noexcept {
+    constexpr int kSteps = 64;
+    bool found = false;
+    for (int k = 0; k <= kSteps; ++k) {
+        const double t = static_cast<double>(k) / kSteps;
+        const bool over = std::abs(evaluate(s, t).curvature()) > limit;
+        if (over && !found) found = true, from = t;
+        if (over) to = t;
+        if (!over && found) break; // the first section only
+    }
+    return found;
+}
+
+double steepest(const BezierSegment& s, double& at) noexcept {
+    constexpr int kSteps = 64;
+    double most = 0.0;
+    at = 0.0;
+    for (int k = 0; k <= kSteps; ++k) {
+        const double t = static_cast<double>(k) / kSteps;
+        if (const double g = std::abs(evaluate(s, t).gradient()); g > most) most = g, at = t;
+    }
+    return most;
 }
 
 double Plan::pieceM(std::uint32_t i, bool firstLap) const noexcept {

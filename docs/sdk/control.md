@@ -299,12 +299,12 @@ world.update(a, options, other);                           // a new route, flown
   - A gradient steeper than the aircraft climbs is flown at its climb rate (clamped) or, under Reject, refused `performance_limit` with `MaxClimbRate`.
 - **UPDATE** replaces the options given (a field left out, `kHold`, keeps its value) and the waypoints (none: those it has). The route is then flown afresh from its start, from where the aircraft is.
 - **Flown** by one path follower (`RouteBehavior`, `fsim/GuidanceModes.h`), line of sight to the path with its curvature fed forward, its gains the vehicle's own course bandwidth:
-  - A wing flies it as a turn rate. It begins and ends each turn early by as long as its roll lags, and a slow integral takes out a turn-rate bias.
+  - A wing flies it as a turn rate: the heading's that turns its track as the path asks, in the wind too. It begins and ends each turn early by as long as its roll lags, and a slow integral takes out a turn-rate bias.
   - A rotorcraft flies it as a velocity over the ground, nose along the track. It slows for a turn only as much as the turn's radius asks, and to stop only at an end where it loiters.
 
 `progress` names the point flown to and its id, the laps, the percent of the
 segment and of the route, the distance and time to go and the cross-track.
-In a 12 m/s crosswind the c172x, B-52H and F-16C hold each leg within 15 m.
+In a 12 m/s crosswind the c172x, B-52H and F-16C hold each leg within 9 m.
 The UH-60A holds within 11 m and the IRIS within 1.1 m (5 m/s), and the
 rotorcraft keep 80 % of their speed through the turns (`tests/test_routes.cpp`).
 `fsim python examples/python/vehicle_interface.py` flies four of them for the
@@ -338,18 +338,65 @@ Calm, the orbits hold within 6 m. In a 12 m/s wind they hold within:
 
 | Aircraft | Radius | Worst off the circle |
 | --- | --- | --- |
-| c172x | 800 m | 30 m |
-| B-52H | 9 km | 11 m |
-| F-16C | 4 km | 21 m |
+| c172x | 800 m | 4.6 m |
+| B-52H | 9 km | 5.2 m |
+| F-16C | 4 km | 4.2 m |
 | UH-60A | 150 m | 6.6 m |
 
 An IRIS flies a 2 m circle within a centimetre (`tests/test_patterns.cpp`).
+
+### Curves: curve following
+
+`fsim.guidance.curve` is A-GRA's curve following. A `CurveCommand` holds its
+options, and its segments go beside it into the vehicle's path store:
+quintic Béziers, 1 to 10 a command, 32 at most.
+
+```cpp
+BezierSegment s;                                        // six control points, metres north, east and down
+for (int k = 0; k < 6; ++k) s.east[k] = 600.0 * k;      // from the reference: 3 km east, level
+std::vector<BezierSegment> curve = {s /* , each starting where the one before ends */};
+CurveCommand c;                                         // the reference left out: where the aircraft is
+c.speedMinMs = 45, c.speedMaxMs = 60;                   // ground speeds (or durationS: the time to fly all of it)
+c.end = double(EndBehavior::Loiter);
+auto a = v.submit(c, curve).activity;
+CurveCommand more;
+more.append = 1;                                        // after its end, from the same reference
+world.update(a, more, next);
+```
+
+- **Segments.** Each has six control points (weights 1, the clamped knots), metres north, east and down from the reference: its latitude, longitude and altitude, or where the aircraft is. `invalid_curve` refuses one, and `index` names it, when:
+  - it does not start within a metre of where the one before ends;
+  - a control point is not finite;
+  - it is shorter than a metre over the ground;
+  - there are more than 10, or more than the store has room for.
+- **Speed.** A range is of ground speeds. A wing holds its airspeed and keeps the ground speed that makes within the range; a rotorcraft flies its ground speed within it. A duration flies the ground speed that takes the rest of the curve in the rest of the time, counted from the NEW. Left out, the speed as now.
+- **Checked:**
+  - A section a wing cannot turn at its full bank, at the fastest it will fly, is refused `invalid_curve` whatever the policy: the segment, the section (`from`, `to`) and `max_turn_rate`. A rotorcraft slows for it instead.
+  - A climb steeper than the aircraft climbs at that speed is flown at its rate (clamped) or refused `performance_limit`.
+  - A range it cannot fly within, or a duration it cannot keep, is clamped or refused.
+- **UPDATE** with `append` 1 adds segments after the curve's end: the aircraft flies on to them, the activity the same. With segments and no append it is a new curve, flown afresh; with none, its options alone.
+- **End.** The activity completes at the curve's end. The aircraft continues along its last course, or loiters: a wing orbits the end point, a rotorcraft stops and hovers there.
+- **Flown** by the path follower, the nearest point found by Newton steps over the segments' length tables, the curvature ahead fed forward from them. `progress` names the segment flown, the percent of the curve and of the segment, the distance and time to go.
+
+An S of six segments (100° right, then 100° left, climbing), its tightest
+a quarter wider than the aircraft's planning radius, is flown within:
+
+| Aircraft | calm | 12 m/s crosswind |
+| --- | --- | --- |
+| c172x, R 630 m | 4.7 m | 7.4 m |
+| B-52H, R 8.4 km | 4.3 m | 4.7 m |
+| F-16C, R 2.7 km | 5.4 m | 10.4 m |
+| UH-60A, R 150 m at 20 m/s | 7.4 m | 11.9 m |
+| IRIS, R 20 m at 4 m/s (5 m/s wind) | 0.0 m | 0.2 m |
+
+A c172x meets a duration in a 10 m/s wind within 0.2 %, and an IRIS within
+0.7 % (`tests/test_curves.cpp`).
 
 **New reasons.** `invalid_waypoint`, `invalid_curve`, `performance_limit`,
 `not_granted`, `not_allowed`, `revoked`, `released`, `collision_avoidance`
 and `restricted` belong to ADR-28's modes and grants.
 
-**From C and Python.** `fsim_vehicle_submit_mode(world, id, FSIM_MODE_HSA, fields, 6, &options, &result)` and `vehicle.submit_hsa(course_rad=..., speed=..., speed_reference="mach", altitude_m=...)` submit an hsa; `fsim_activity_update` and `activity.update(altitude_m=...)` change only what they give. `fsim_vehicle_submit_route(world, id, fields, 4, waypoints, n, &options, &result)` (`fsim_waypoint`, `fsim_waypoint_init`) and `vehicle.submit_route([fsim.Waypoint(lat, lon, speed=55.0), ...], repeat=True)` submit a route; `fsim_activity_update_route` and `activity.update_route(waypoints, **options)` replace it. `fsim_vehicle_submit_mode(world, id, FSIM_MODE_PATTERN, fields, 12, &options, &result)` and `vehicle.submit_pattern(pattern="hold", latitude_rad=..., longitude_rad=...)` loiter; `activity.update(radius_m=...)` merges. The C ABI's result carries the index plus one in
+**From C and Python.** `fsim_vehicle_submit_mode(world, id, FSIM_MODE_HSA, fields, 6, &options, &result)` and `vehicle.submit_hsa(course_rad=..., speed=..., speed_reference="mach", altitude_m=...)` submit an hsa; `fsim_activity_update` and `activity.update(altitude_m=...)` change only what they give. `fsim_vehicle_submit_route(world, id, fields, 4, waypoints, n, &options, &result)` (`fsim_waypoint`, `fsim_waypoint_init`) and `vehicle.submit_route([fsim.Waypoint(lat, lon, speed=55.0), ...], repeat=True)` submit a route; `fsim_activity_update_route` and `activity.update_route(waypoints, **options)` replace it. `fsim_vehicle_submit_mode(world, id, FSIM_MODE_PATTERN, fields, 12, &options, &result)` and `vehicle.submit_pattern(pattern="hold", latitude_rad=..., longitude_rad=...)` loiter; `activity.update(radius_m=...)` merges. `fsim_vehicle_submit_curve(world, id, fields, 8, segments, n, &options, &result)` (`fsim_bezier_segment`, `fsim_bezier_segment_init`) and `vehicle.submit_curve([fsim.BezierSegment(north, east, down), ...], speed_max_ms=...)` fly a curve; `fsim_activity_update_curve` and `activity.append(segments)` or `activity.update_curve(segments)` extend or replace it. The C ABI's result carries the index plus one in
 `fsim_command_result.reserved`; `fsim_last_command_detail()` has the rest,
 `fsim_activity_get_progress()` the progress, `fsim_vehicle_commanded()` the
 commanded state, `fsim_vehicle_capability_flight_mode()` a capability's type

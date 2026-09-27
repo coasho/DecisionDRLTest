@@ -73,6 +73,10 @@ struct Ahead {
     double toChangeM = std::numeric_limits<double>::infinity(); ///< along the path to where its curvature changes
     double curvature = 0.0;  ///< its curvature from there, 1/m
     double turnRadiusM = 0.0; ///< the turn being flown or coming, for a wing's roll into it; 0: none
+    /// A path whose curvature changes all along it (a curve): its curvature
+    /// `aheadM` metres on from the fix, in place of the two above.
+    double (*curvatureAt)(const void* path, double aheadM) noexcept = nullptr;
+    const void* path = nullptr;
 };
 
 /// What the follower flies at a fix.
@@ -191,6 +195,61 @@ void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon) no
 /// give (a hold's: rate one, at most 25 degrees of bank), legs of twice the
 /// radius (a hold's: a minute's flight, 90 s above 14,000 ft). The angles wrapped.
 void completePattern(PatternCommand& c, const sim::VehicleState& state, const Performance& performance, bool hovers, double windMs) noexcept;
+
+// --- Curves (4.7) -----------------------------------------------------------------
+
+/// A Bezier segment's point at a parameter, and its first and second
+/// derivatives by the parameter: north, east, down, m.
+struct CurvePoint {
+    double p[3] = {0.0, 0.0, 0.0};
+    double d1[3] = {0.0, 0.0, 0.0};
+    double d2[3] = {0.0, 0.0, 0.0};
+    double courseRad() const noexcept;  ///< of its tangent over the ground
+    double curvature() const noexcept;  ///< over the ground, 1/m, + turning right
+    double gradient() const noexcept;   ///< its climb per metre over the ground
+};
+CurvePoint evaluate(const BezierSegment& s, double t) noexcept;
+
+/// A curve as flown: its segments, and the arc length over the ground along
+/// them (a table per segment, the Newton steps' measure of how far).
+struct Curve {
+    static constexpr std::uint32_t kMax = static_cast<std::uint32_t>(PathStore::kSegments);
+    static constexpr int kSamples = 32;
+    double lat0 = 0.0, lon0 = 0.0, alt0 = 0.0; ///< the reference
+    std::uint32_t count = 0;
+    BezierSegment segments[kMax];
+    double table[kMax][kSamples + 1];  ///< segment i's length from its start at t = k / kSamples, m
+    double startM[kMax + 1];           ///< the curve's length at each segment's start; startM[count] its whole
+    Trims trims;                       ///< the follower's, flying it
+    Turn orbit;                        ///< after its end, a wing that loiters orbits its end point
+    Line exit;                         ///< after its end, one that continues flies on along its last course
+    double fromM = 0.0;                ///< where along it the aircraft is (for Ahead::curvatureAt)
+
+    double lengthM() const noexcept { return startM[count]; }
+    /// The length along the curve to segment i's parameter t.
+    double at(std::uint32_t i, double t) const noexcept;
+    /// The segment and its parameter a length `s` along the curve (within it).
+    void find(double s, std::uint32_t& i, double& t) const noexcept;
+    /// Measure segments from `from` on: their tables, and where each starts.
+    void measure(std::uint32_t from) noexcept;
+};
+
+/// Its curvature `aheadM` on from where the aircraft is (Curve::fromM): Ahead::curvatureAt for a curve.
+double curvatureAhead(const void* curve, double aheadM) noexcept;
+/// The most a rotorcraft at `speedMs` flies along the curve from where it is:
+/// what each section within its braking distance allows (lateralLimit) and
+/// brakes to in time, and with `stops`, what stops it at the curve's end.
+double speedLimitAhead(const Performance& performance, const Curve& c, double speedMs, bool stops) noexcept;
+
+/// The aircraft at (lat, lon) against the curve: the nearest point over the
+/// ground, by Newton steps from where it was last (segment, t), moving on into
+/// the next segment past one's end. alongM is the length along the curve to it.
+Fix onCurve(const Curve& c, std::uint32_t& segment, double& t, double lat, double lon) noexcept;
+/// The first section of a segment curving tighter than `limit` (1/m) over the
+/// ground: its parameters from..to. False if it has none.
+bool tooTight(const BezierSegment& s, double limit, double& from, double& to) noexcept;
+/// A segment's steepest gradient (climb per metre over the ground, either way) and where.
+double steepest(const BezierSegment& s, double& at) noexcept;
 
 /// What a route's waypoints leave out, filled in (docs/vehicle-interface.md,
 /// 4.5): each field the previous point's, the first's the aircraft's own now

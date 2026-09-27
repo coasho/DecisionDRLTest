@@ -531,15 +531,23 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   fix), altitude_m, altitude_reference, radius_m, clockwise (1 right turns),
  *   course_rad (the inbound course, a figure-eight's axis), leg_m, speed,
  *   speed_reference, duration_s. fsim_hold() leaves one out: a NEW takes its
- *   default (an orbit here, as the aircraft flies now), an UPDATE keeps it. */
-enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2 };
+ *   default (an orbit here, as the aircraft flies now), an UPDATE keeps it.
+ * - FSIM_MODE_CURVE is fsim.guidance.curve (A-GRA's curve following): fields
+ *   latitude_rad, longitude_rad, altitude_m (the reference its segments are
+ *   from; left out: the aircraft at the NEW), speed_min_ms, speed_max_ms (the
+ *   ground speeds to fly it within), duration_s (or the time to fly all of
+ *   it), end (fsim_end_behavior), append (1 in an UPDATE: its segments after
+ *   the curve's end). Its segments go beside them, through
+ *   fsim_vehicle_submit_curve below; fsim_activity_update with a curve's
+ *   fields changes how it is flown, not where. */
+enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3 };
 enum fsim_pattern_kind { FSIM_PATTERN_ORBIT = 0, FSIM_PATTERN_RACETRACK, FSIM_PATTERN_FIGURE_EIGHT, FSIM_PATTERN_HOLD };
 enum fsim_speed_reference { FSIM_SPEED_TRUE_AIRSPEED = 0, FSIM_SPEED_CALIBRATED_AIRSPEED, FSIM_SPEED_GROUND_SPEED, FSIM_SPEED_MACH };
 enum fsim_altitude_reference { FSIM_ALTITUDE_MSL = 0, FSIM_ALTITUDE_ABOVE_GROUND, FSIM_ALTITUDE_ELLIPSOID };
 enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft) */
-FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 6, route 4, pattern 12; 0 for an unknown mode */
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 6, route 4, pattern 12, curve 8; 0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result);
 
@@ -568,6 +576,27 @@ FSIM_API int fsim_vehicle_submit_route(fsim_world* world, uint32_t id, const dou
  * (none: those it has), checked as a NEW's; flown afresh from its start. */
 FSIM_API int fsim_activity_update_route(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
                                         const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result);
+
+/* One segment of a curve: a quintic Bezier by its six control points (weights
+ * 1, the clamped knots), metres north, east and down from the curve's
+ * reference. fsim_bezier_segment_init sets struct_size and zeroes the rest. */
+typedef struct fsim_bezier_segment {
+    uint32_t struct_size;
+    double north[6], east[6], down[6];
+} fsim_bezier_segment;
+FSIM_API void fsim_bezier_segment_init(fsim_bezier_segment* segment);
+/* A curve (FSIM_MODE_CURVE's fields, `count` of them) with 1 to 10 segments,
+ * `segments[0].struct_size` bytes apart, each starting within a metre of where
+ * the one before ends. A rejection names the segment at fault in the result's
+ * reserved (its index + 1) and fsim_last_command_detail; one too tight for
+ * the aircraft names its section too (the detail's from and to, 0 to 1). */
+FSIM_API int fsim_vehicle_submit_curve(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_bezier_segment* segments,
+                                       uint32_t segment_count, const fsim_command_options* options, fsim_command_result* result);
+/* UPDATE of a curve: its options (fsim_hold() keeps one) and segments - with
+ * the append field 1 after its end, from the same reference; else a new curve,
+ * flown afresh (none: those it has, flown on). */
+FSIM_API int fsim_activity_update_curve(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
+                                        const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result);
 
 /* A-GRA's flight capability types (MA_FlightCapabilityEnum). */
 enum fsim_flight_mode {

@@ -135,6 +135,14 @@ control::CommandResult Vehicle::submit(const control::RouteCommand& route, Span<
     return r;
 }
 
+control::CommandResult Vehicle::submit(const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
+                                       const control::CommandOptions& options) {
+    if (world_) return world_->impl_->submit(id_, curve, segments, options);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownVehicle;
+    return r;
+}
+
 std::vector<control::ActivityRecord> Vehicle::activities() const {
     return world_ ? world_->impl_->activities(id_) : std::vector<control::ActivityRecord>{};
 }
@@ -269,6 +277,10 @@ control::CommandResult World::update(control::ActivityId activity, const control
 
 control::CommandResult World::update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints) {
     return impl_->update(activity, route, waypoints);
+}
+
+control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments) {
+    return impl_->update(activity, curve, segments);
 }
 
 control::CommandResult World::cancel(control::ActivityId activity) { return impl_->cancel(activity); }

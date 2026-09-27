@@ -307,6 +307,150 @@ Reason CapabilityHost::limitPattern(PatternCommand& c, RangePolicy range, std::u
     return bound(c.radiusM, least, false, 5, Constraint::MaxOrientation, range, flags, detail);
 }
 
+Reason CapabilityHost::checkCurveOptions(const CurveCommand& c, bool appending, CommandResult& detail) const noexcept {
+    auto bad = [&detail](std::int16_t field) {
+        detail.index = field;
+        return Reason::InvalidParameter;
+    };
+    auto code = [](double v, double count) { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); };
+    auto given = [](double v, double lo) { return isHold(v) || (std::isfinite(v) && v > lo); };
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    if (!isHold(c.latitudeRad) && !(std::isfinite(c.latitudeRad) && std::abs(c.latitudeRad) <= 0.5 * 3.14159265358979323846)) return bad(0);
+    if (!given(c.longitudeRad, -inf) || isHold(c.latitudeRad) != isHold(c.longitudeRad)) return bad(1);
+    if (!given(c.altitudeM, -inf)) return bad(2);
+    if (!isHold(c.speedMinMs) && !(std::isfinite(c.speedMinMs) && c.speedMinMs >= 0.0)) return bad(3);
+    if (!given(c.speedMaxMs, 0.0) || (!isHold(c.speedMinMs) && !isHold(c.speedMaxMs) && c.speedMaxMs < c.speedMinMs)) return bad(4);
+    if (!given(c.durationS, 0.0)) return bad(5);
+    if (!code(c.end, static_cast<double>(EndBehavior::Count))) return bad(6);
+    if (!code(c.append, 2.0) || (!appending && c.append == 1.0)) return bad(7); // (a NEW has nothing to append to)
+    return Reason::None;
+}
+
+double CapabilityHost::fastest(double altitudeM) const noexcept {
+    const Performance& f = performance_;
+    if (adapter_->features() & kFeatureHover) return f.maxGroundSpeedMs;
+    // (fmin passes over the NaN of a limit not known)
+    return std::fmin(std::fmin(isa::trueFromCalibrated(f.maxCasMs, altitudeM), f.maxMach * isa::speedOfSound(altitudeM)), f.maxTasMs);
+}
+
+Reason CapabilityHost::limitCurveSpeeds(CurveCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept {
+    const Performance& f = performance_;
+    const bool hovers = (adapter_->features() & kFeatureHover) != 0;
+    const double h = orHold(c.altitudeM, 0.0);
+    const double least = hovers ? 0.0 : isa::trueFromCalibrated(f.minCasMs, h); // (NaN: no limit)
+    const double most = fastest(h);
+    // a range it can fly within: no faster at its least than it flies, no slower at its most
+    // (a least below its slowest, a most above its fastest, leave it room)
+    if (const Reason r = bound(c.speedMinMs, most, true, 3, Constraint::MaxAirspeed, range, flags, detail); r != Reason::None) return r;
+    return bound(c.speedMaxMs, least, false, 4, Constraint::MinAirspeed, range, flags, detail);
+}
+
+Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> segments, bool appending, const sim::VehicleState& state,
+                                  RangePolicy range, std::uint16_t& flags, CommandResult& detail) {
+    if (const Reason r = checkCurveOptions(c, appending, detail); r != Reason::None) return r;
+    const bool hovers = (adapter_->features() & kFeatureHover) != 0;
+    if (!appending) { // what it leaves out: the reference where the aircraft is
+        if (isHold(c.latitudeRad)) c.latitudeRad = state.latitudeRad, c.longitudeRad = state.longitudeRad;
+        if (isHold(c.altitudeM)) c.altitudeM = state.altitudeMslM;
+    }
+    // the segments: 1 to 10, finite, joined (within a metre), a metre long or more over the ground, and room for them
+    auto invalid = [&detail](std::size_t segment) {
+        detail.index = static_cast<std::int16_t>(std::min<std::size_t>(segment, 0x7FFF));
+        return Reason::InvalidCurve;
+    };
+    const std::size_t n = segments.size();
+    if (n == 0) return invalid(0);
+    if (n > 10) return invalid(10);
+    const PathStore* store = config_->path.get();
+    const std::size_t held = appending && store ? store->segmentCount : 0;
+    if (held + n > PathStore::kSegments) return invalid(PathStore::kSegments - held);
+    auto gap = [](const BezierSegment& a, const BezierSegment& b) { // a's end to b's start
+        return std::sqrt(std::pow(b.north[0] - a.north[5], 2) + std::pow(b.east[0] - a.east[5], 2) + std::pow(b.down[0] - a.down[5], 2));
+    };
+    for (std::size_t i = 0; i < n; ++i) {
+        const BezierSegment& s = segments[i];
+        for (int k = 0; k < 6; ++k)
+            if (!std::isfinite(s.north[k]) || !std::isfinite(s.east[k]) || !std::isfinite(s.down[k])) return invalid(i);
+        if (i > 0 && gap(segments[i - 1], s) > 1.0) return invalid(i);
+        if (i == 0 && held > 0 && gap(store->segments[held - 1], s) > 1.0) return invalid(0); // where the curve ends
+        double length = 0.0; // (its chords: no longer than it)
+        route::CurvePoint last = route::evaluate(s, 0.0);
+        for (int k = 1; k <= 8; ++k) {
+            const route::CurvePoint p = route::evaluate(s, k / 8.0);
+            length += std::hypot(p.p[0] - last.p[0], p.p[1] - last.p[1]);
+            last = p;
+        }
+        if (length < 1.0) return invalid(i); // nothing to follow over the ground
+    }
+    if (range == RangePolicy::None) return Reason::None;
+    // its length, and the speed it will fly: the rest of the duration's, else its range's fastest
+    if (!curvePlan_) curvePlan_ = std::make_unique<route::Curve>();
+    route::Curve& k = *curvePlan_;
+    k.count = static_cast<std::uint32_t>(held + n);
+    if (held) std::copy_n(store->segments, held, k.segments);
+    std::copy_n(segments.data(), n, k.segments + held);
+    k.measure(0);
+    const Performance& f = performance_;
+    if (const Reason r = limitCurveSpeeds(c, range, flags, detail); r != Reason::None) return r;
+    const double least = hovers ? 0.0 : isa::trueFromCalibrated(f.minCasMs, c.altitudeM);
+    const double most = fastest(c.altitudeM);
+    // the fastest it flies over the ground: as now - a rotorcraft's ground speed (its
+    // cruise, if still), a wing's airspeed with the wind behind it - or the speed that
+    // takes its duration, within its range
+    WindEstimate wind;
+    wind.update(state, 0.0);
+    const double ground = std::hypot(state.velocityNedMs[0], state.velocityNedMs[1]);
+    double fast = hovers ? (ground < 1.0 ? orHold(f.cruiseTasMs, 5.0) : ground) : state.airspeedTrueMs + std::hypot(wind.northMs, wind.eastMs);
+    if (!isHold(c.durationS)) { // the speed that takes it: within the aircraft's, or (clamped) flown at the most it can
+        fast = k.lengthM() / c.durationS;
+        double w = fast;
+        if (const Reason r = bound(w, most, true, 5, Constraint::MaxAirspeed, range, flags, detail); r != Reason::None) return r;
+        if (const Reason r = bound(w, least, false, 5, Constraint::MinAirspeed, range, flags, detail); r != Reason::None) return r;
+    }
+    if (!isHold(c.speedMaxMs)) fast = std::min(fast, c.speedMaxMs);
+    if (!isHold(c.speedMinMs)) fast = std::max(fast, c.speedMinMs);
+    // a wing: no section tighter than its full bank turns at that speed; no clamp makes one flyable
+    if (!hovers && std::isfinite(f.maxBankRad) && f.maxBankRad > 0.0 && fast > 1.0) {
+        const double tightest = 9.80665 * std::tan(f.maxBankRad) / (fast * fast);
+        for (std::size_t i = 0; i < n; ++i) {
+            double from = 0.0, to = 0.0;
+            if (route::tooTight(segments[i], tightest, from, to)) {
+                detail.index = static_cast<std::int16_t>(i);
+                detail.from = static_cast<float>(from), detail.to = static_cast<float>(to);
+                detail.constraint = Constraint::MaxTurnRate;
+                return Reason::InvalidCurve;
+            }
+        }
+    }
+    // no steeper than it climbs or descends at that speed: flown at its rate (clamped), or refused
+    for (std::size_t i = 0; i < n; ++i) {
+        double at = 0.0;
+        const double gradient = route::steepest(segments[i], at);
+        const route::CurvePoint p = route::evaluate(segments[i], at);
+        const bool descends = p.gradient() < 0.0;
+        const double rate = descends ? f.maxDescentMs : f.maxClimbMs;
+        if (std::isnan(rate) || gradient * fast <= rate) continue;
+        if (range == RangePolicy::Reject || !(flags & kClamped)) {
+            detail.index = static_cast<std::int16_t>(i), detail.from = detail.to = static_cast<float>(at);
+            detail.constraint = descends ? Constraint::MaxDescentRate : Constraint::MaxClimbRate;
+        }
+        if (range == RangePolicy::Reject) return Reason::PerformanceLimit;
+        flags |= kClamped;
+        break;
+    }
+    return Reason::None;
+}
+
+void CapabilityHost::writeCurve(Span<const BezierSegment> segments, bool appending) {
+    if (!config_->path) config_->path = std::make_unique<PathStore>();
+    PathStore& store = *config_->path;
+    if (!appending) store.segmentCount = 0, ++store.curve; // a new curve: flown afresh
+    const auto n = std::min<std::size_t>(segments.size(), PathStore::kSegments - store.segmentCount);
+    std::copy_n(segments.data(), n, store.segments + store.segmentCount);
+    store.segmentCount += static_cast<std::uint32_t>(n);
+    ++store.revision;
+}
+
 void CapabilityHost::writeRoute() {
     if (!config_->path) config_->path = std::make_unique<PathStore>();
     PathStore& store = *config_->path;
@@ -470,16 +614,21 @@ ActivityRecord& CapabilityHost::start(std::size_t s, ActivityId id, std::size_t 
 }
 
 CommandResult CapabilityHost::submit(const Command& command, const CommandOptions& options, const sim::VehicleState& state, double now) {
-    return submitWith(command, {}, options, state, now);
+    return submitWith(command, {}, {}, options, state, now);
 }
 
 CommandResult CapabilityHost::submit(const RouteCommand& route, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
                                      double now) {
-    return submitWith(Command(route), waypoints, options, state, now);
+    return submitWith(Command(route), waypoints, {}, options, state, now);
 }
 
-CommandResult CapabilityHost::submitWith(const Command& command, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
-                                         double now) {
+CommandResult CapabilityHost::submit(const CurveCommand& curve, Span<const BezierSegment> segments, const CommandOptions& options,
+                                     const sim::VehicleState& state, double now) {
+    return submitWith(Command(curve), {}, segments, options, state, now);
+}
+
+CommandResult CapabilityHost::submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
+                                         const CommandOptions& options, const sim::VehicleState& state, double now) {
     const int found = catalog_->indexOf(command);
     if (found < 0) return rejected(Reason::UnknownCapability);
     const auto index = static_cast<std::size_t>(found);
@@ -503,6 +652,9 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     auto* route = std::get_if<RouteCommand>(&setpoint);
     if (route) // its waypoints completed, and checked as its range policy says
         if (const Reason why = checkRoute(*route, waypoints, state, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
+    auto* curve = std::get_if<CurveCommand>(&setpoint);
+    if (curve) // its segments checked as its range policy says
+        if (const Reason why = checkCurve(*curve, segments, false, state, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
     auto* pattern = std::get_if<PatternCommand>(&setpoint);
     if (pattern) { // complete it first, as an hsa (the runtime flies a complete setpoint)
         if (const Reason why = checkPattern(*pattern, false, detail); why != Reason::None) return about(rejected(why), detail);
@@ -541,6 +693,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
 
     RuntimeConfig& config = *config_;
     if (route) writeRoute(); // (a guidance activity owns every primary axis: one route flies at a time)
+    if (curve) writeCurve(segments, false), curve->append = kHold;
     SetpointSlot& slot = config.slots[s];
     slot.command = std::move(setpoint);
     slot.level = d.level;
@@ -621,8 +774,50 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
     return result;
 }
 
+CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments,
+                                     const sim::VehicleState& state) noexcept {
+    const int found = liveSlot(activity);
+    if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
+    const auto s = static_cast<std::size_t>(found);
+    if (!isCascade(s)) return rejected(Reason::WrongCommandType, activity);
+    if (!(catalog_->descriptor(records_[s].capability).interactions & kUpdate)) return rejected(Reason::NotUpdatable, activity); // (as update() answers)
+    auto* live = std::get_if<CurveCommand>(&config_->slots[s].command);
+    if (!live) return rejected(Reason::WrongCommandType, activity);
+    // the options given replace the curve's; `append` is this UPDATE's own
+    CurveCommand next = *live;
+    const double* given[] = {&curve.latitudeRad, &curve.longitudeRad, &curve.altitudeM, &curve.speedMinMs, &curve.speedMaxMs, &curve.durationS, &curve.end};
+    double* kept[] = {&next.latitudeRad, &next.longitudeRad, &next.altitudeM, &next.speedMinMs, &next.speedMaxMs, &next.durationS, &next.end};
+    for (std::size_t i = 0; i < std::size(given); ++i)
+        if (!isHold(*given[i])) *kept[i] = *given[i];
+    next.append = curve.append;
+    const bool appending = curve.append == 1.0;
+    CommandResult result = accepted(activity);
+    if (segments.empty()) { // its options alone: how it is flown, not where
+        if (appending) {
+            result.index = 0; // nothing to append
+            return about(rejected(Reason::InvalidCurve, activity), result);
+        }
+        if (const Reason why = checkCurveOptions(next, false, result); why != Reason::None) return about(rejected(why, activity), result);
+        if (slots_[s].range != RangePolicy::None) {
+            if (const Reason why = limitCurveSpeeds(next, slots_[s].range, result.flags, result); why != Reason::None) return about(rejected(why, activity), result);
+            if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
+        }
+    } else {
+        if (appending) next.latitudeRad = live->latitudeRad, next.longitudeRad = live->longitudeRad, next.altitudeM = live->altitudeM; // (its reference)
+        if (const Reason why = checkCurve(next, segments, appending, state, slots_[s].range, result.flags, result); why != Reason::None)
+            return about(rejected(why, activity), result);
+        if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
+        writeCurve(segments, appending);
+    }
+    next.append = kHold;
+    *live = next;
+    ++config_->slots[s].revision;
+    return result;
+}
+
 CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state) noexcept {
     if (const auto* route = std::get_if<RouteCommand>(&setpoint)) return update(activity, *route, {}, state);
+    if (const auto* curve = std::get_if<CurveCommand>(&setpoint)) return update(activity, *curve, {}, state);
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);

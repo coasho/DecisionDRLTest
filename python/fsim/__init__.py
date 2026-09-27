@@ -82,6 +82,7 @@ from .world import (  # noqa: E402
     Axis,
     Capability,
     CommandedState,
+    BezierSegment,
     EndBehavior,
     Envelope,
     LIMITS,

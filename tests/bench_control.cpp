@@ -168,6 +168,39 @@ Waypoint waypointAt(const sim::VehicleState& s, double north, double east) {
     return p;
 }
 
+/// An S of Bezier segments from where the aircraft is, flying east: 3 km on, then
+/// arcs of 2.5 km right and left, `pairs` times - each a quintic Hermite of its
+/// arc's ends (docs/vehicle-interface.md, 4.7).
+std::vector<BezierSegment> sCurve(int pairs) {
+    std::vector<BezierSegment> out;
+    double n = 0.0, e = 0.0, chi = 0.5 * 3.14159265358979323846;
+    auto piece = [&](double radius, double sweep) { // (radius 0: 3 km straight on)
+        const double length = radius > 0.0 ? radius * std::abs(sweep) : 3000.0, kappa = radius > 0.0 ? (sweep > 0.0 ? 1.0 : -1.0) / radius : 0.0;
+        const double chi1 = chi + (radius > 0.0 ? sweep : 0.0);
+        double n1 = n + length * std::cos(chi), e1 = e + length * std::sin(chi);
+        if (radius > 0.0) { // round its centre, on its right for a right turn
+            const double side = sweep > 0.0 ? 1.0 : -1.0, cn = n - side * radius * std::sin(chi), ce = e + side * radius * std::cos(chi);
+            n1 = cn + side * radius * std::sin(chi1), e1 = ce - side * radius * std::cos(chi1);
+        }
+        const double d0[2] = {length * std::cos(chi), length * std::sin(chi)}, d1[2] = {length * std::cos(chi1), length * std::sin(chi1)};
+        const double a0[2] = {-length * length * kappa * std::sin(chi), length * length * kappa * std::cos(chi)};
+        const double a1[2] = {-length * length * kappa * std::sin(chi1), length * length * kappa * std::cos(chi1)};
+        BezierSegment s;
+        double* axes[2] = {s.north, s.east};
+        const double p0[2] = {n, e}, p1[2] = {n1, e1};
+        for (int k = 0; k < 2; ++k) {
+            double* q = axes[k];
+            q[0] = p0[k], q[1] = p0[k] + d0[k] / 5.0, q[2] = p0[k] + 2.0 * d0[k] / 5.0 + a0[k] / 20.0;
+            q[3] = p1[k] - 2.0 * d1[k] / 5.0 + a1[k] / 20.0, q[4] = p1[k] - d1[k] / 5.0, q[5] = p1[k];
+        }
+        out.push_back(s);
+        n = n1, e = e1, chi = chi1;
+    };
+    piece(0.0, 0.0);
+    for (int k = 0; k < pairs; ++k) piece(2500.0, 1.5), piece(2500.0, -1.5);
+    return out;
+}
+
 /// Envelope protection with limits the synthetic flight (advance()) keeps
 /// running into: bank, pitch, alpha and the load factor all engage part of the time.
 void protect(RuntimeConfig& c, ProtectionMode mode) {
@@ -296,6 +329,11 @@ std::vector<Case> cases() {
                        RouteCommand c;
                        c.repeat = 1.0;
                        stack.command(c, route);
+                   }});
+    // ...its curve following: Bezier segments by Newton steps over their length tables
+    out.push_back({"curve", nullptr, nullptr, nullptr, [](ControlStack& stack, const sim::VehicleState&) {
+                       const std::vector<BezierSegment> s = sCurve(4);
+                       stack.command(CurveCommand{}, s);
                    }});
     // ...and its loiter: a racetrack round a fix ahead, its legs and half circles
     out.push_back({"pattern", [](const sim::VehicleState& s) {
@@ -544,6 +582,19 @@ int alloc() {
              }
              route[1].latitudeRad += 1e-6 * std::sin(k * 0.1); // (in place: nothing allocated here)
              if (!w.update(activity[id], RouteCommand{}, route).accepted()) std::fprintf(stderr, "route: update refused\n"), std::exit(3);
+         }},
+        // ADR-28: a curve replaced every step through UPDATE - its segments into the path store, measured afresh
+        {"curve update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             static std::vector<std::vector<BezierSegment>> curves(64);
+             std::vector<BezierSegment>& curve = curves[id];
+             if (k == 0) {
+                 curve = sCurve(2);
+                 activity[id] = w.submit(id, CurveCommand{}, curve).activity;
+                 return;
+             }
+             curve[1].north[2] += 0.01 * std::sin(k * 0.1); // (in place: nothing allocated here)
+             if (!w.update(activity[id], CurveCommand{}, curve).accepted()) std::fprintf(stderr, "curve: update refused\n"), std::exit(3);
          }},
         // step 3: an autopilot on pitch and thrust, the policy's bank updated every step
         {"axes apart each step", [&](std::uint32_t id, int k) {

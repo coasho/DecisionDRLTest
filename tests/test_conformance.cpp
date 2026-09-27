@@ -99,6 +99,8 @@ public:
 
     std::uint32_t target = 0; ///< the vehicle a guidance capability that needs one follows
     std::vector<Waypoint> waypoints; ///< the last route's, made beside its RouteCommand
+    std::vector<BezierSegment> segments; ///< the last curve's, made beside its CurveCommand
+    double curveEnd[3] = {0.0, 0.0, 0.0}; ///< where they end, from their reference: an append joins there
 
     double uniform(double lo, double hi) { return std::uniform_real_distribution<double>(lo, hi)(rng_); }
     bool chance(double p) { return uniform(0.0, 1.0) < p; }
@@ -138,6 +140,52 @@ public:
                 }
             }
             out = c;
+            return true;
+        }
+        if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Curve) { // its options, its segments beside them
+            CurveCommand c;
+            const auto& s = state();
+            const double ground = std::max(std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]), 3.0);
+            if (wild) { // left out mostly, else about the flight
+                auto some = [&](double v) { return chance(0.6) ? kHold : v; };
+                c.altitudeM = some(s.altitudeMslM + uniform(-100.0, 100.0));
+                c.speedMinMs = some(ground * uniform(0.6, 1.0));
+                c.speedMaxMs = some(ground * uniform(1.0, 1.4));
+                c.durationS = chance(0.85) ? kHold : uniform(30.0, 300.0);
+                c.end = chance(0.6) ? kHold : static_cast<double>(pick(2));
+                c.append = chance(0.8) ? kHold : static_cast<double>(pick(2));
+                if (chance(0.1)) { // now and then a field out of its range: refused, or clamped
+                    out = c;
+                    double* fields[kMaxCommandFields];
+                    const std::size_t n = std::min(commandFields(out, fields), d.parameters.size());
+                    const std::size_t i = pick(n);
+                    *fields[i] = value(d.parameters[i], true);
+                    c = std::get<CurveCommand>(out);
+                }
+            }
+            out = c;
+            // straight pieces of 40 s each, zigzagging ahead from its reference (the aircraft, at a NEW);
+            // an append mostly from where the last curve made ended; now and then one it cannot fly
+            const bool joins = wild && c.append == 1.0 && chance(0.7);
+            const int n = wild ? 1 + static_cast<int>(pick(4)) : 2;
+            const double leg = 40.0 * ground, psi = s.eulerRad[2];
+            double n0 = joins ? curveEnd[0] : 0.0, e0 = joins ? curveEnd[1] : 0.0;
+            const double d0 = joins ? curveEnd[2] : 0.0;
+            segments.clear();
+            for (int k = 0; k < n; ++k) {
+                const double side = (k % 2 ? 0.2 : -0.2) * leg;
+                const double n1 = n0 + leg * std::cos(psi) - side * std::sin(psi), e1 = e0 + leg * std::sin(psi) + side * std::cos(psi);
+                BezierSegment b;
+                for (int i = 0; i < 6; ++i) {
+                    const double u = i / 5.0;
+                    b.north[i] = n0 + u * (n1 - n0), b.east[i] = e0 + u * (e1 - e0), b.down[i] = d0;
+                }
+                if (wild && chance(0.03)) b.east[pick(6)] = std::numeric_limits<double>::quiet_NaN();
+                if (wild && k > 0 && chance(0.03)) b.north[0] += 5.0; // apart from the one before
+                segments.push_back(b);
+                n0 = n1, e0 = e1;
+            }
+            curveEnd[0] = n0, curveEnd[1] = e0, curveEnd[2] = d0;
             return true;
         }
         if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Route) { // its options, its waypoints beside them
@@ -288,15 +336,17 @@ private:
     std::mt19937_64 rng_;
 };
 
-/// NEW of what the maker made: a route with the waypoints it made beside it.
+/// NEW of what the maker made: a route with the waypoints it made beside it, a curve with its segments.
 CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, const Maker& make, const CommandOptions& options = {}) {
     if (const auto* route = std::get_if<RouteCommand>(&c)) return w.submit(v, *route, make.waypoints, options);
+    if (const auto* curve = std::get_if<CurveCommand>(&c)) return w.submit(v, *curve, make.segments, options);
     return w.submit(v, c, options);
 }
 
-/// UPDATE with what the maker made: a route's options, and now and then its waypoints.
+/// UPDATE with what the maker made: a route's or a curve's options, and now and then its waypoints or segments.
 CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints) {
     if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints) return w.update(activity, *route, make.waypoints);
+    if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints) return w.update(activity, *curve, make.segments);
     return w.update(activity, c);
 }
 
@@ -464,7 +514,7 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         if (done.result.accepted()) CHECK(done.result.reason == Reason::None);
         else CHECK(among(done.result.reason, {Reason::UnknownCapability, Reason::Unavailable, Reason::VersionUnsupported, Reason::InvalidParameter,
                                               Reason::OutOfRange, Reason::InvalidAxes, Reason::AuthorityHeld, Reason::ControllerNotAxisAware,
-                                              Reason::PerformanceLimit, Reason::InvalidWaypoint}));
+                                              Reason::PerformanceLimit, Reason::InvalidWaypoint, Reason::InvalidCurve}));
         if ((done.result.flags & kClamped) != 0) CHECK(done.options.range == RangePolicy::Clamp);
         if (done.result.reason == Reason::AuthorityHeld) {
             const ActivityRecord* holder = was(done.result.other);
@@ -481,7 +531,7 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         else if (done.op == Op::Cancel) CHECK(ok);
         else if (!ok)
             CHECK(among(done.result.reason, {Reason::NotUpdatable, Reason::WrongCommandType, Reason::InvalidParameter, Reason::OutOfRange, Reason::PerformanceLimit,
-                                             Reason::InvalidWaypoint}));
+                                             Reason::InvalidWaypoint, Reason::InvalidCurve}));
     }
 
     // every record: its state and its reason agree, and so does its end
@@ -817,6 +867,8 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
     }
     CHECK(all["failed:target_lost"] > 0);   // a follower whose target goes
     CHECK(all["new:invalid_waypoint"] > 0); // a route with a point it cannot fly (docs/vehicle-interface.md, 5.1)
+    CHECK(all["new:invalid_curve"] > 0);    // a curve with a segment it cannot fly
+    CHECK(all["update:invalid_curve"] > 0); // appended where the curve does not end
     std::string summary;
     for (const auto& [what, n] : all) summary += what + " " + std::to_string(n) + "; ";
     INFO(summary);

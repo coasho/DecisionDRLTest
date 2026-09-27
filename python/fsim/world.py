@@ -269,8 +269,8 @@ class Projection(enum.IntEnum):
 
 
 class EndBehavior(enum.IntEnum):
-    """What a route does after its last point: on along the last leg (its course, altitude and speed), or loiter
-    there - a wing orbits the point, a rotorcraft stops and hovers over it."""
+    """What a route or curve does after its end: on along the last leg or course (its altitude and speed), or
+    loiter there - a wing orbits the point, a rotorcraft stops and hovers over it."""
     CONTINUE = 0
     LOITER = 1
 
@@ -286,14 +286,15 @@ class PatternKind(enum.IntEnum):
 
 
 #: The Vehicle Interface's modes (docs/vehicle-interface.md): their fixed-size setpoints' fields, in order. HOLD leaves
-#: one out: a NEW continues what a live hsa commanded (else what the aircraft flies now) and takes a route's or a
-#: pattern's default; an UPDATE keeps it.
-MODE_KINDS = ("hsa", "route", "pattern")
+#: one out: a NEW continues what a live hsa commanded (else what the aircraft flies now) and takes a route's, a
+#: pattern's or a curve's default; an UPDATE keeps it.
+MODE_KINDS = ("hsa", "route", "pattern", "curve")
 MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference"),
                "route": ("projection", "repeat", "end", "start"),
                "pattern": ("pattern", "latitude_rad", "longitude_rad", "altitude_m", "altitude_reference", "radius_m", "clockwise",
-                           "course_rad", "leg_m", "speed", "speed_reference", "duration_s")}
-MODE_DEFAULTS = {"hsa": (HOLD,) * 6, "route": (HOLD,) * 4, "pattern": (HOLD,) * 12}
+                           "course_rad", "leg_m", "speed", "speed_reference", "duration_s"),
+               "curve": ("latitude_rad", "longitude_rad", "altitude_m", "speed_min_ms", "speed_max_ms", "duration_s", "end", "append")}
+MODE_DEFAULTS = {"hsa": (HOLD,) * 6, "route": (HOLD,) * 4, "pattern": (HOLD,) * 12, "curve": (HOLD,) * 8}
 _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "projection": Projection, "end": EndBehavior,
                "turn": TurnType, "pattern": PatternKind}
 
@@ -306,6 +307,27 @@ Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that end
                     "``max_bank_rad`` for its turn; ``id`` comes back in the progress. HOLD (the default) continues the "
                     "previous point's; the first point's is the aircraft's own now, and a rotorcraft given no speed flies its "
                     "cruise speed over the ground. References may be given by name.")
+
+
+BezierSegment = collections.namedtuple("BezierSegment", "north east down")
+BezierSegment.__doc__ = ("One segment of a curve (A-GRA's): a quintic Bezier by its six control points - ``north``, ``east`` "
+                         "and ``down``, six metres each, from the curve's reference - with weights 1 and the clamped knots "
+                         "[0,0,0,0,0,0,1,1,1,1,1,1]. Each segment starts where the one before ends (within a metre).")
+
+
+def _segments(segments):
+    """Segments (fsim.BezierSegment, dicts of its fields, or (north, east, down) triples) as the native rows."""
+    rows = []
+    for s in segments:
+        if isinstance(s, dict):
+            s = BezierSegment(**s)
+        elif not isinstance(s, BezierSegment):
+            s = BezierSegment(*s)
+        row = tuple(float(v) for axis in s for v in axis)
+        if len(row) != 18:
+            raise ValueError("a segment is six control points each north, east and down")
+        rows.append(row)
+    return rows
 
 
 def _waypoints(points):
@@ -383,6 +405,18 @@ class Activity:
         was clamped; raises fsim.Rejected (``index`` the waypoint at fault)."""
         rows = [] if waypoints is None else _waypoints(waypoints)
         return bool(_checked(self.world._h.activity_update_route(self.id, _row("route", (), options), rows))[4])
+
+    def update_curve(self, segments=None, **options):
+        """UPDATE of a curve: new ``segments`` (fsim.BezierSegment; None: those it has) and the options given (the
+        others kept) - with ``append=1`` the segments go after its end, from the same reference; else they are a new
+        curve, flown afresh. Returns True if a value was clamped; raises fsim.Rejected (``index`` the segment at
+        fault; ``section`` where a segment is too tight)."""
+        rows = [] if segments is None else _segments(segments)
+        return bool(_checked(self.world._h.activity_update_curve(self.id, _row("curve", (), options), rows))[4])
+
+    def append(self, segments, **options):
+        """A curve's segments after its end, from the same reference: flown on to, the activity the same."""
+        return self.update_curve(segments, append=1, **options)
 
     def cancel(self):
         """End it: its axes fly the vehicle default. Raises fsim.Rejected if it had already ended."""
@@ -577,6 +611,19 @@ class Vehicle:
         r = _checked(self._h.submit_mode(self.id, MODE_KINDS.index("pattern"), _row("pattern", values, fields), int(source), None, int(range),
                                          int(min_version)))
         return Activity(self._world, r[2], "pattern", bool(r[4]))
+
+    def submit_curve(self, segments, *, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
+        """NEW for fsim.guidance.curve, A-GRA's curve following (docs/vehicle-interface.md, 4.7): fly ``segments``
+        (fsim.BezierSegment, dicts of its fields, or (north, east, down) triples; 1 to 10), quintic Beziers in metres
+        from ``latitude_rad``, ``longitude_rad``, ``altitude_m`` (left out: the aircraft now). Within the ground speeds
+        ``speed_min_ms`` to ``speed_max_ms`` (a wing holds its airspeed within them, a rotorcraft flies its ground
+        speed), or so as to take ``duration_s``; left out, as it flies now. After its end, ``end``
+        (fsim.EndBehavior: "continue", "loiter"). An Activity that completes at its end, whose progress names the
+        segment flown; ``append`` adds segments while it flies, ``update_curve`` gives it a new curve or options.
+        fsim.Rejected if refused: ``index`` names the segment, ``section`` where it is too tight."""
+        r = _checked(self._h.submit_curve(self.id, _row("curve", (), fields), _segments(segments), int(source), None, int(range),
+                                          int(min_version)))
+        return Activity(self._world, r[2], "curve", bool(r[4]))
 
     def submit_support(self, kind, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
         """NEW for a support effector the vehicle has - "gear" (down), "flaps"

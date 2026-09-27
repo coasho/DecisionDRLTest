@@ -111,11 +111,16 @@ public:
     /// NEW of a route (fsim.guidance.route) with its waypoints (docs/vehicle-interface.md, 4.5).
     control::CommandResult submit(std::uint32_t id, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                   const control::CommandOptions& options = {});
+    /// NEW of a curve (fsim.guidance.curve) with its segments (docs/vehicle-interface.md, 4.7).
+    control::CommandResult submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
+                                  const control::CommandOptions& options = {});
     /// UPDATE: a new setpoint for a live activity (the fast path).
     control::CommandResult update(control::ActivityId activity, const control::Command& setpoint);
     control::CommandResult update(control::ActivityId activity, const control::SupportCommand& setpoint);
     /// UPDATE of a route: new options (kHold keeps one) and waypoints (none: those it has); flown afresh from its start.
     control::CommandResult update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints);
+    /// UPDATE of a curve: options, and segments appended (append 1) or a new curve.
+    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// What flies a vehicle's primary axes nobody owns: the neutral actuator

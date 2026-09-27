@@ -509,6 +509,7 @@ bool toMode(int mode, const double* fields, uint32_t count, fsim::control::Comma
     if (mode == FSIM_MODE_HSA) out = fsim::control::HsaCommand{};
     else if (mode == FSIM_MODE_ROUTE) out = fsim::control::RouteCommand{};
     else if (mode == FSIM_MODE_PATTERN) out = fsim::control::PatternCommand{};
+    else if (mode == FSIM_MODE_CURVE) out = fsim::control::CurveCommand{};
     else return false;
     double* slots[fsim::control::kMaxCommandFields];
     if (count != fsim::control::commandFields(out, slots)) return false;
@@ -540,6 +541,25 @@ bool toWaypoints(fsim_world* w, const fsim_waypoint* waypoints, uint32_t count) 
     return true;
 }
 
+/// A curve's segments as the caller's header laid them out (`segments[0].struct_size`
+/// apart), into the world's buffer; false if they cannot be read.
+bool toSegments(fsim_world* w, const fsim_bezier_segment* segments, uint32_t count) {
+    w->segments.clear();
+    if (count == 0) return true;
+    if (!segments) return false;
+    const uint32_t stride = segments[0].struct_size;
+    if (stride < sizeof(fsim_bezier_segment)) return false; // (its first layout: every control point)
+    const auto* bytes = reinterpret_cast<const unsigned char*>(segments);
+    w->segments.resize(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        fsim_bezier_segment c;
+        std::memcpy(&c, bytes + static_cast<std::size_t>(i) * stride, sizeof c);
+        fsim::control::BezierSegment& s = w->segments[i];
+        std::copy_n(c.north, 6, s.north), std::copy_n(c.east, 6, s.east), std::copy_n(c.down, 6, s.down);
+    }
+    return true;
+}
+
 /// What an activity's UPDATE takes: its level (a flight capability), its
 /// support kind (a support one), its mode, or none (unknown, ended long ago, a behaviour).
 struct UpdateShape {
@@ -558,11 +578,14 @@ UpdateShape updateShape(fsim_world* w, fsim::control::ActivityId activity) {
     const auto& d = all[a->capability];
     for (std::size_t k = 0; k < fsim::control::kSupportKinds; ++k)
         if (d.id == fsim::control::supportCapability(k)) shape.support = static_cast<int>(k);
-    if (d.setpoint == fsim::control::SetpointKind::Hsa || d.setpoint == fsim::control::SetpointKind::Route ||
-        d.setpoint == fsim::control::SetpointKind::Pattern) {
-        shape.mode = d.setpoint == fsim::control::SetpointKind::Hsa     ? FSIM_MODE_HSA
-                     : d.setpoint == fsim::control::SetpointKind::Route ? FSIM_MODE_ROUTE
-                                                                        : FSIM_MODE_PATTERN;
+    switch (d.setpoint) {
+    case fsim::control::SetpointKind::Hsa: shape.mode = FSIM_MODE_HSA; break;
+    case fsim::control::SetpointKind::Route: shape.mode = FSIM_MODE_ROUTE; break;
+    case fsim::control::SetpointKind::Pattern: shape.mode = FSIM_MODE_PATTERN; break;
+    case fsim::control::SetpointKind::Curve: shape.mode = FSIM_MODE_CURVE; break;
+    default: break;
+    }
+    if (shape.mode >= 0) {
         shape.fields = fsim_mode_field_count(shape.mode);
     } else if (shape.support >= 0) {
         shape.fields = static_cast<uint32_t>(d.parameters.size()); // set beside the cascade: a support effector or the engines
@@ -672,6 +695,7 @@ FSIM_API uint32_t fsim_mode_field_count(int mode) {
     if (mode == FSIM_MODE_HSA) c = fsim::control::HsaCommand{};
     else if (mode == FSIM_MODE_ROUTE) c = fsim::control::RouteCommand{};
     else if (mode == FSIM_MODE_PATTERN) c = fsim::control::PatternCommand{};
+    else if (mode == FSIM_MODE_CURVE) c = fsim::control::CurveCommand{};
     else return 0;
     double* slots[fsim::control::kMaxCommandFields];
     return static_cast<uint32_t>(fsim::control::commandFields(c, slots));
@@ -712,6 +736,40 @@ FSIM_API int fsim_activity_update_route(fsim_world* world, fsim_activity_id acti
         return FSIM_OK;
     } catch (const std::exception& e) {
         return fail(FSIM_ERROR, std::string("fsim_activity_update_route: ") + e.what());
+    }
+}
+
+FSIM_API void fsim_bezier_segment_init(fsim_bezier_segment* segment) {
+    if (!segment) return;
+    *segment = fsim_bezier_segment{};
+    segment->struct_size = sizeof *segment;
+}
+
+FSIM_API int fsim_vehicle_submit_curve(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_bezier_segment* segments,
+                                       uint32_t segment_count, const fsim_command_options* options, fsim_command_result* result) {
+    fsim::control::Command c;
+    if (!world || !result || !toMode(FSIM_MODE_CURVE, fields, count, c))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_curve: a curve takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_CURVE)) + " fields");
+    try {
+        if (!toSegments(world, segments, segment_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_curve: segments without their struct_size");
+        toC(world, world->world.submit(id, std::get<fsim::control::CurveCommand>(c), world->segments, fromC(options)), result);
+        return FSIM_OK;
+    } catch (const std::exception& e) {
+        return fail(FSIM_ERROR, std::string("fsim_vehicle_submit_curve: ") + e.what());
+    }
+}
+
+FSIM_API int fsim_activity_update_curve(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
+                                        const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result) {
+    fsim::control::Command c;
+    if (!world || !result || !toMode(FSIM_MODE_CURVE, fields, count, c))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_curve: a curve takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_CURVE)) + " fields");
+    try {
+        if (!toSegments(world, segments, segment_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_curve: segments without their struct_size");
+        toC(world, world->world.update(activity, std::get<fsim::control::CurveCommand>(c), world->segments), result);
+        return FSIM_OK;
+    } catch (const std::exception& e) {
+        return fail(FSIM_ERROR, std::string("fsim_activity_update_curve: ") + e.what());
     }
 }
 

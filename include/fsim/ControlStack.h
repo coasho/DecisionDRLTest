@@ -49,6 +49,10 @@ public:
     /// path store: at most PathStore::kWaypoints of them. What they leave out
     /// is filled in as a World's host would, from the flight when it starts.
     void command(const RouteCommand& route, Span<const Waypoint> waypoints);
+    /// A curve (fsim.guidance.curve) with its segments, into the stack's own
+    /// path store (at most PathStore::kSegments), flown afresh; unchecked, as
+    /// every command given the stack on its own.
+    void command(const CurveCommand& curve, Span<const BezierSegment> segments);
     /// The highest level a command enters at; Actuator before any command.
     Level activeLevel() const noexcept;
     /// The command at the active level; before any command, the neutral

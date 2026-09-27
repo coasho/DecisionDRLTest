@@ -24,6 +24,7 @@ namespace fsim::control {
 
 namespace route {
 struct Plan;
+struct Curve;
 }
 
 /// Where the support effectors are, for the activities that complete when they get there.
@@ -62,6 +63,12 @@ public:
     /// its first route). A RouteCommand submitted as a Command has none: InvalidWaypoint.
     CommandResult submit(const RouteCommand& route, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
                          double now);
+    /// NEW of a curve (fsim.guidance.curve; docs/vehicle-interface.md 4.7):
+    /// its segments checked against the aircraft (InvalidCurve naming the
+    /// segment, and a section too tight), then written into the path store.
+    /// A CurveCommand submitted as a Command has none: InvalidCurve.
+    CommandResult submit(const CurveCommand& curve, Span<const BezierSegment> segments, const CommandOptions& options, const sim::VehicleState& state,
+                         double now);
     /// UPDATE: a new setpoint for a live activity - the fast path; allocates
     /// nothing. `state` is the vehicle's: a route is planned afresh from it.
     CommandResult update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state) noexcept;
@@ -70,6 +77,10 @@ public:
     /// value) and its waypoints - none: those it has - checked as a NEW's,
     /// then flown afresh from its start, from where the aircraft is.
     CommandResult update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state) noexcept;
+    /// UPDATE of a curve: the options given (kHold keeps one), and segments -
+    /// with `append` 1, after its end, from the same reference; else a new
+    /// curve, flown afresh. Options alone change how it is flown, not where.
+    CommandResult update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments, const sim::VehicleState& state) noexcept;
     /// CANCEL: the activity ends and its axes return to the vehicle default.
     CommandResult cancel(ActivityId activity, double now) noexcept;
     /// The existing entry points (docs/control-architecture.md, 10.7): an
@@ -193,9 +204,31 @@ private:
     /// altitude, and a radius no tighter than the aircraft's full bank flies
     /// at its speed (a rotorcraft's: a metre).
     Reason limitPattern(PatternCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
-    /// NEW: a command (with a route's waypoints).
-    CommandResult submitWith(const Command& command, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
-                             double now);
+    /// A curve's options and segments (docs/vehicle-interface.md, 4.7 and 5.1):
+    /// the options whole and finite (InvalidParameter); in a NEW, what they
+    /// leave out filled in (the reference where the aircraft is; its speed as
+    /// now, with no range or duration); 1 to 10 segments, finite, each
+    /// starting within a metre of where the one before ends (appended: where
+    /// the curve ends), and room in the store (InvalidCurve). Then, unless the
+    /// range policy is None: its speeds within the aircraft's (clamped, or
+    /// PerformanceLimit), a section a wing's full bank cannot turn at its
+    /// speed (InvalidCurve, whatever the policy, with the section), a gradient
+    /// steeper than it climbs (clamped, or PerformanceLimit, with the section).
+    Reason checkCurve(CurveCommand& c, Span<const BezierSegment> segments, bool appending, const sim::VehicleState& state, RangePolicy range,
+                      std::uint16_t& flags, CommandResult& detail);
+    /// A curve's options whole and finite, as checkCurve: InvalidParameter with the field.
+    Reason checkCurveOptions(const CurveCommand& c, bool appending, CommandResult& detail) const noexcept;
+    /// Its speed range one the aircraft can fly within, as checkCurve.
+    Reason limitCurveSpeeds(CurveCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
+    /// The fastest a wing flies at `altitudeM` - its envelope's calibrated
+    /// speed and Mach there, and its profile's airspeed - or a rotorcraft over
+    /// the ground; NaN if nothing limits it.
+    double fastest(double altitudeM) const noexcept;
+    /// The segments into the path store: after the curve's end, or a new curve.
+    void writeCurve(Span<const BezierSegment> segments, bool appending);
+    /// NEW: a command (with a route's waypoints, a curve's segments).
+    CommandResult submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, const CommandOptions& options,
+                             const sim::VehicleState& state, double now);
 
     std::uint32_t vehicle_ = 0;
     double controlPeriodS_ = 1.0 / 120.0;
@@ -207,6 +240,7 @@ private:
     const VehicleProfile* profile_ = nullptr;
     Performance performance_{};
     std::unique_ptr<route::Plan> routePlan_; ///< a route's scratch, allocated at the vehicle's first route
+    std::unique_ptr<route::Curve> curvePlan_; ///< a curve's scratch, allocated at the vehicle's first curve
     std::uint32_t serial_ = 0;
     std::array<Slot, kActivities> slots_{};
     std::array<ActivityRecord, kActivities> records_{}; ///< per slot: its activity's record

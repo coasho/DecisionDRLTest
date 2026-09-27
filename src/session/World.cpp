@@ -374,6 +374,22 @@ control::CommandResult World::submit(std::uint32_t id, const control::RouteComma
     return r;
 }
 
+control::CommandResult World::submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
+                                     const control::CommandOptions& options) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    const control::CommandResult r = e->host.submit(curve, segments, options, pool_->states()[e->slot], simTime_);
+    if (r.accepted()) {
+        e->commanded = r.activity;
+        levelChanged(*e);
+    }
+    return r;
+}
+
 control::CommandResult World::submit(std::uint32_t id, const control::SupportCommand& command, const control::CommandOptions& options) {
     Entry* e = entry(id);
     if (!e) {
@@ -434,6 +450,14 @@ control::CommandResult World::update(control::ActivityId activity, const control
 
 control::CommandResult World::update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints) {
     if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, route, waypoints, pool_->states()[e->slot]);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownActivity;
+    r.activity = activity;
+    return r;
+}
+
+control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments) {
+    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, curve, segments, pool_->states()[e->slot]);
     control::CommandResult r;
     r.reason = control::Reason::UnknownActivity;
     r.activity = activity;

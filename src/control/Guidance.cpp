@@ -354,6 +354,7 @@ route::Fix RouteBehavior::locate(const sim::VehicleState& s, const Performance& 
         const route::Leg& leg = p.leg(target_, firstLap_);
         const route::Fix f = route::onLeg(leg, lat, lon);
         inPieceM_ = f.alongM - leadOut_;
+        lastCross_ = f.crossTrackM;
         if (!more) return f;
         if (turn.radiusM > 0.0) {
             if (f.alongM < leg.lengthM - turn.leadM) return f;
@@ -386,6 +387,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     }
     static const Performance kNone{};
     const Performance& perf = ctx.performance ? *ctx.performance : kNone;
+    const bool wasEnded = ended_;
     const route::Fix fix = locate(s, perf);
     const Waypoint& segment = p.points[segment_];
 
@@ -402,7 +404,10 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         if (fraction < 1.0) feedforward = span / segmentM_ * groundSpeed_;
     }
     altitudeMsl_ = altitudeMslOf(altitude, altitudeReferenceOf(segment.altitudeReference), s);
-    crossTrack_ = fix.crossTrackM;
+    // off the route; past its end, as it was off the last leg there (the progress of what it completed, not
+    // of the orbit round its point: the host may read it a few control updates later, when the world step ends)
+    if (!ended_) crossTrack_ = fix.crossTrackM;
+    else if (!wasEnded) crossTrack_ = lastCross_;
     if (hovers_ && ended_ && p.end == EndBehavior::Loiter) { // stopped: hover over the last point
         const Waypoint& last = p.points[p.last()];
         course_ = heading_ = kHold;
@@ -641,6 +646,188 @@ bool PatternBehavior::progress(ActivityProgress& out) const noexcept {
     return true;
 }
 
+// --- CurveBehavior ------------------------------------------------------------------
+
+CurveBehavior::CurveBehavior() : curve_(std::make_unique<route::Curve>()) {}
+CurveBehavior::~CurveBehavior() = default;
+
+void CurveBehavior::begin(const ControlContext& ctx, const Command& command) {
+    reset();
+    startS_ = -1.0;
+    wind_.update(ctx.sensed, ctx.dt);
+    if (const auto* c = std::get_if<CurveCommand>(&command)) restart(ctx, *c);
+}
+
+void CurveBehavior::reset() {
+    wind_.reset();
+    curve_->trims = route::Trims{};
+    lastTime_ = -1.0;
+    planned_ = false;
+}
+
+void CurveBehavior::restart(const ControlContext& ctx, const CurveCommand& c) {
+    route::Curve& k = *curve_;
+    const auto& s = ctx.sensed;
+    static const Performance kNone{};
+    const Performance& perf = ctx.performance ? *ctx.performance : kNone;
+    hovers_ = (ctx.features & kFeatureHover) != 0;
+    flown_ = c;
+    planned_ = true;
+    ended_ = finished_ = false;
+    failure_ = Reason::None;
+    segment_ = 0, t_ = 0.0;
+    const PathStore* store = ctx.path;
+    if (!store || store->segmentCount == 0) {
+        k.count = 0;
+        failure_ = Reason::BehaviorFailed; // (only a stack on its own is given a curve nobody checked)
+        return;
+    }
+    generation_ = store->curve, stored_ = store->segmentCount;
+    k.lat0 = orHold(c.latitudeRad, s.latitudeRad), k.lon0 = orHold(c.longitudeRad, s.longitudeRad), k.alt0 = orHold(c.altitudeM, s.altitudeMslM);
+    k.count = std::min<std::uint32_t>(stored_, route::Curve::kMax);
+    std::copy_n(store->segments, k.count, k.segments);
+    k.measure(0);
+    const double ground = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
+    if (hovers_) ownSpeed_ = ground < 1.0 ? (std::isfinite(perf.cruiseTasMs) ? perf.cruiseTasMs : 5.0) : ground;
+    else ownSpeed_ = std::max(s.airspeedTrueMs, 1.0);
+}
+
+void CurveBehavior::pace(const Performance& perf, const route::Fix& fix) noexcept {
+    const route::Curve& k = *curve_;
+    auto within = [this](double v) {
+        if (!isHold(flown_.speedMinMs)) v = std::max(v, flown_.speedMinMs);
+        if (!isHold(flown_.speedMaxMs)) v = std::min(v, flown_.speedMaxMs);
+        return v;
+    };
+    const SpeedReference was = reference_;
+    reference_ = SpeedReference::GroundSpeed;
+    if (!isHold(flown_.durationS) && startS_ >= 0.0) {
+        // the rest of it in the rest of the time; its last second (or once late) at the pace it had,
+        // not slowing with what is left to nothing short of its end
+        const double left = flown_.durationS - (simTime_ - startS_);
+        if (left > 1.0 || isHold(speed_) || was != SpeedReference::GroundSpeed) speed_ = within(std::max(k.lengthM() - k.fromM, 0.0) / std::max(left, 1.0));
+    } else if (hovers_) {
+        speed_ = within(ownSpeed_);
+    } else {
+        // a wing holds its airspeed; the ground speed that makes along the curve in the wind, kept within the range
+        const double tn = std::cos(fix.courseRad), te = std::sin(fix.courseRad);
+        const double along = wind_.northMs * tn + wind_.eastMs * te, across = -wind_.northMs * te + wind_.eastMs * tn;
+        auto air = [along, across](double ground) { return std::hypot(ground - along, across); };
+        speed_ = ownSpeed_;
+        if (!isHold(flown_.speedMaxMs)) speed_ = std::min(speed_, air(flown_.speedMaxMs));
+        if (!isHold(flown_.speedMinMs)) speed_ = std::max(speed_, air(flown_.speedMinMs));
+        reference_ = SpeedReference::TrueAirspeed;
+    }
+    if (hovers_ && std::isfinite(perf.maxGroundSpeedMs)) speed_ = std::min(speed_, perf.maxGroundSpeedMs);
+    speed_ = std::max(speed_, 0.1);
+}
+
+void CurveBehavior::end(const Performance& perf) {
+    route::Curve& k = *curve_;
+    ended_ = finished_ = true;
+    const route::CurvePoint p = route::evaluate(k.segments[k.count - 1], 1.0);
+    k.exit = route::Line{p.p[0], p.p[1], p.courseRad(), 0.0};
+    k.orbit = route::Turn{};
+    k.orbit.centreNorthM = p.p[0], k.orbit.centreEastM = p.p[1];
+    // (a wing's airspeed, or the ground speed, with the wind behind it)
+    k.orbit.radiusM = perf.turnRadiusM(speed_ + std::hypot(wind_.northMs, wind_.eastMs));
+    k.orbit.angleRad = 1.0; // right turns, round its end
+}
+
+Command CurveBehavior::update(const ControlContext& ctx, const Command& in) {
+    const auto& s = ctx.sensed;
+    if (resumed(ctx, lastTime_)) curve_->trims = route::Trims{}, wind_.reset();
+    wind_.update(s, ctx.dt);
+    groundSpeed_ = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
+    simTime_ = s.simTime;
+    route::Curve& k = *curve_;
+    const auto* c = std::get_if<CurveCommand>(&in);
+    if (c && (!planned_ || !ctx.path || ctx.path->curve != generation_)) {
+        restart(ctx, *c); // a new curve: flown afresh
+    } else if (c && ctx.path->segmentCount > stored_ && k.count < route::Curve::kMax) {
+        // segments appended: on along them
+        const auto from = k.count;
+        stored_ = ctx.path->segmentCount;
+        k.count = std::min<std::uint32_t>(stored_, route::Curve::kMax);
+        std::copy_n(ctx.path->segments + from, k.count - from, k.segments + from);
+        k.measure(from);
+    }
+    if (c) flown_.speedMinMs = c->speedMinMs, flown_.speedMaxMs = c->speedMaxMs, flown_.durationS = c->durationS, flown_.end = c->end;
+    if (!c || k.count == 0) { // nothing to fly: on as it flies (a rotorcraft still)
+        VelocityCommand hold{kHold, 0.0, s.eulerRad[2], kHold, kHold, kHold};
+        if (hovers_) hold.northMs = hold.eastMs = 0.0;
+        else hold.airspeedMs = s.airspeedTrueMs;
+        return hold;
+    }
+    if (startS_ < 0.0) startS_ = s.simTime;
+    static const Performance kNone{};
+    const Performance& perf = ctx.performance ? *ctx.performance : kNone;
+    const bool loiter = orHold(flown_.end, 0.0) == static_cast<double>(EndBehavior::Loiter);
+
+    route::Fix fix;
+    double feedforward = 0.0;
+    if (!ended_) {
+        fix = route::onCurve(k, segment_, t_, s.latitudeRad, s.longitudeRad);
+        k.fromM = fix.alongM;
+        crossTrack_ = fix.crossTrackM; // (past its end, as it was there: what it completed, not the orbit's)
+        pace(perf, fix);               // (past its end, on at the speed it had)
+        // its end passed abeam - or, a rotorcraft that stops there, within a metre of it
+        const bool stops = hovers_ && loiter;
+        if (segment_ + 1 == k.count && (t_ >= 1.0 - 1e-9 || (stops && k.lengthM() - k.fromM < 1.0))) end(perf);
+    }
+    const route::CurvePoint here = route::evaluate(k.segments[ended_ ? k.count - 1 : segment_], ended_ ? 1.0 : t_);
+    altitudeMsl_ = k.alt0 - here.p[2];
+    if (!ended_) feedforward = here.gradient() * groundSpeed_;
+    if (ended_) {
+        if (loiter && hovers_) { // stopped: hover over its end
+            double lat, lon;
+            geo::offsetLatLon(k.lat0, k.lon0, here.p[0], here.p[1], lat, lon);
+            course_ = heading_ = kHold;
+            return PositionCommand{lat, lon, altitudeMsl_, kHold, 1.0, kHold};
+        }
+        fix = loiter ? route::onArc(k.orbit, k.lat0, k.lon0, s.latitudeRad, s.longitudeRad)
+                     : route::onLine(k.exit, k.lat0, k.lon0, s.latitudeRad, s.longitudeRad);
+    }
+    route::Steer steer;
+    steer.speed = speed_;
+    steer.reference = reference_;
+    steer.verticalSpeedMs = route::verticalSpeedTo(altitudeMsl_, feedforward, s, perf, hovers_);
+    route::Ahead ahead;
+    if (!ended_) {
+        // the curve ahead: its curvature where a lagging loop should fly it now, and the
+        // tightest a few seconds on for a wing's roll into it; a rotorcraft no faster than
+        // the sections ahead allow, slowing in time, and stopping at an end where it hovers
+        ahead.curvatureAt = route::curvatureAhead;
+        ahead.path = &k;
+        double tightest = std::abs(fix.curvature);
+        for (const double seconds : {1.0, 2.0, 4.0}) tightest = std::max(tightest, std::abs(route::curvatureAhead(&k, seconds * std::max(groundSpeed_, 1.0))));
+        if (tightest > 1e-6) ahead.turnRadiusM = 1.0 / tightest;
+        if (hovers_) steer.speedLimitMs = route::speedLimitAhead(perf, k, std::max(speed_, groundSpeed_), loiter);
+    }
+    return route::follow(ctx, perf, wind_, hovers_, fix, ahead, steer, k.trims, course_, heading_);
+}
+
+bool CurveBehavior::progress(ActivityProgress& out) const noexcept {
+    const route::Curve& k = *curve_;
+    if (!planned_ || k.count == 0) return false;
+    out.segment = std::min(segment_, k.count - 1);
+    out.segments = k.count;
+    const double length = k.lengthM(), along = ended_ ? length : k.fromM;
+    out.percent = length > 1e-6 ? std::clamp(100.0 * along / length, 0.0, 100.0) : 100.0;
+    out.segmentPercent = ended_ ? 100.0 : std::clamp(100.0 * t_, 0.0, 100.0);
+    out.distanceToGoM = std::max(length - along, 0.0);
+    if (ended_) out.timeToGoS = 0.0;
+    else if (!isHold(flown_.durationS) && startS_ >= 0.0) out.timeToGoS = std::max(flown_.durationS - (simTime_ - startS_), 0.0);
+    else if (groundSpeed_ > 0.1) out.timeToGoS = out.distanceToGoM / groundSpeed_;
+    out.crossTrackM = crossTrack_;
+    out.courseRad = course_;
+    out.headingRad = heading_;
+    out.altitudeMslM = altitudeMsl_;
+    out.speedMs = speed_;
+    out.speedReference = static_cast<double>(reference_);
+    return true;
+}
+
 // --- Registration -------------------------------------------------------------------
 
 void registerGuidanceModes(ControllerRegistry& r) {
@@ -689,6 +876,21 @@ void registerGuidanceModes(ControllerRegistry& r) {
     pattern.mode = FlightMode::Loiter;
     pattern.setpoint = SetpointKind::Pattern;
     r.addBehavior("pattern", [] { return std::make_unique<PatternBehavior>(); }, std::move(pattern));
+    // the curve's options; its segments go beside them into the path store
+    BehaviorTraits curve;
+    curve.persistence = Persistence::Terminating;
+    curve.parameters = {p("latitude_rad", "rad", now, -0.5 * 3.14159265358979323846, 0.5 * 3.14159265358979323846),
+                        p("longitude_rad", "rad", now, -inf, inf),
+                        p("altitude_m", "m", now, -inf, inf),
+                        p("speed_min_ms", "m/s", now, 0.0, inf, Constraint::MinAirspeed, Constraint::MaxAirspeed),
+                        p("speed_max_ms", "m/s", now, 0.0, inf, Constraint::MinAirspeed, Constraint::MaxAirspeed),
+                        p("duration_s", "s", now, 0.0, inf),
+                        p("end", "", now, 0.0, static_cast<double>(EndBehavior::Count) - 1.0),
+                        p("append", "", now, 0.0, 1.0)};
+    curve.uses = {"fsim.flight.velocity", "fsim.flight.position"};
+    curve.mode = FlightMode::CurveFollowing;
+    curve.setpoint = SetpointKind::Curve;
+    r.addBehavior("curve", [] { return std::make_unique<CurveBehavior>(); }, std::move(curve));
 }
 
 } // namespace fsim::control

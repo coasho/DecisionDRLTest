@@ -209,36 +209,56 @@ struct PatternCommand {                // fsim.guidance.pattern
 
 ```cpp
 struct BezierSegment { double north[6], east[6], down[6]; }; // six control points, metres from the curve's reference
-struct CurveCommand {                  // fsim.guidance.curve; the segments go with it
+struct CurveCommand {                  // fsim.guidance.curve; the segments go beside it (World::submit and update take a Span)
     double latitudeRad = kHold, longitudeRad = kHold, altitudeM = kHold; // the reference (A-GRA CenterReference); kHold: the vehicle at NEW
-    double speedMinMs = kHold, speedMaxMs = kHold; // the ground-speed range to fly it at, or:
+    double speedMinMs = kHold, speedMaxMs = kHold; // the ground speeds to fly it within, or:
     double durationS = kHold;          // the time to fly all of it
-    double end = 0.0;                  // EndBehavior: 0 continue (course, speed, altitude), 1 orbit the endpoint
-    double append = 0.0;               // with UPDATE: add these segments after the curve's end
+    double end = kHold;                // EndBehavior: continue (course, speed, altitude), or loiter at its end
+    double append = kHold;             // in an UPDATE, 1: these segments after the curve's end
 };
 ```
 
-- **Segments:** each is a quintic Bézier: the VI's six control points with weights 1 and the clamped knot vector [0,0,0,0,0,0,1,1,1,1,1,1]. A command carries 1 to 10 of them, as the VI's does. A segment starts where the previous one ends (C0); a gap of more than 1 m is `InvalidCurve`.
-- **Append:** extends a live curve by UPDATE with `append` set. The new segments keep the reference of the curve they extend, as the VI's AppendCurve does.
-- **Speed:** within the range given, or whatever covers the rest of the curve in the rest of the duration, and within the performance's limits. Without either, the speed as now.
-- **After the end:** the course, speed and altitude continue (CSA), or the aircraft orbits the endpoint.
+- **Segments:** each is a quintic Bézier: the VI's six control points with weights 1 and the clamped knot vector [0,0,0,0,0,0,1,1,1,1,1,1]. A command carries 1 to 10 of them, as the VI's does, and the path store holds 32. Each starts where the one before ends (C0). `InvalidCurve`, naming the segment, refuses:
+  - a gap of more than 1 m;
+  - a control point not finite;
+  - a segment shorter than a metre over the ground (straight up: nothing to follow);
+  - more than 10, or more than the store has room for.
+- **Append:** extends a live curve by UPDATE with `append` 1. The new segments keep the reference of the curve they extend, as the VI's AppendCurve does, and the first starts where the curve ends. The aircraft flies on to them, the activity the same. An UPDATE with segments and no append is a new curve, flown afresh; one with none changes how the curve is flown, not where.
+- **Speed.** A range is of ground speeds:
+  - A wing holds its airspeed (the one it had at the NEW) and keeps the ground speed that makes along the curve, in the wind, within the range.
+  - A rotorcraft flies its ground speed (its cruise, if it was hovering) within the range.
+  - A duration asks for the ground speed that covers the rest of the curve in the rest of the time, recomputed every step; its last second is flown at the pace it had. It counts from the NEW, as a pattern's does, through appends and new curves alike. A wing's airspeed then varies with the wind.
+  - Without a range or a duration: the speed as now.
+- **Checked** against the aircraft's performance:
+  - A range is refused (or its end clamped) only where it cannot be flown: a least faster than the aircraft flies (`MaxAirspeed`), or a most slower (`MinAirspeed`). A least below its slowest, or a most above its fastest, leaves it room. The fastest is the envelope's calibrated speed and Mach at the reference's altitude, and the profile's airspeed; a duration whose speed is beyond it is refused or clamped likewise.
+  - A section tighter than a wing turns at its full bank, at the fastest ground speed it will fly, is refused whatever the policy: `InvalidCurve`, with the segment, the section (`from` and `to`, its parameters) and `MaxTurnRate`. No clamp makes it flyable. That speed is its airspeed plus the wind, or its range's most, or the duration's. A rotorcraft slows for such a section instead.
+  - A gradient steeper than the aircraft climbs or descends at that speed is flown at its rate (clamped) or, under Reject, refused `PerformanceLimit`, naming the segment and where on it.
+- **After the end** the activity completes. The aircraft continues along the last course at its speed and altitude (`EndBehavior::Continue`), or loiters (`Loiter`): a wing orbits the end point in right turns at the radius its speed, the wind and 80 % of its bank give; a rotorcraft slows in time, stops there and hovers.
+- **Progress:**
+  - the segment flown, of how many;
+  - the percent of the curve and of the segment;
+  - the distance to go, and the time to go (a duration's own);
+  - the cross-track;
+  - the course, altitude and speed it commands: a wing's airspeed within a range, else a ground speed.
 
 ### 4.8 The path follower
 
 Routes, patterns and curves are sequences of pieces: great-circle or rhumb legs, circular arcs (fly-by turns, patterns), and Bézier segments. One follower flies them all:
-- **Where on the path.** The nearest point, its tangent course χp and its curvature κ, and the signed cross-track distance e. Legs use closed forms on the sphere. Arcs use a plane at their centre. Béziers use a Newton step from the last parameter, over an arc-length table built when the curve starts.
+- **Where on the path.** The nearest point, its tangent course χp and its curvature κ, and the signed cross-track distance e. Legs use closed forms on the sphere. Arcs use a plane at their centre. Béziers use Newton steps from the last parameter, moving on into the next segment past one's end, over an arc-length table built when the curve starts or grows: 32 chords a segment. The curvature ahead (κa, below) is read from the table at the distance it is wanted.
 - **Lateral law.** The course to fly is χd = χp − atan(e/Δ), line-of-sight guidance with the lookahead Δ, plus the curvature's rate κ·Vg fed forward.
 - **Wings** turn at ω = κa·Vg + kχ·(χd − χg) + ∫, as a turn rate at the velocity level:
   - χg is the course over the ground. kχ is the vehicle's course bandwidth (its heading loop's: section 7.1), and Δ = 3·Vg/kχ, so the track settles well outside the heading loop's own lag.
   - κa is the path's curvature the time the roll lags ahead: half the turn's bank at the attitude loop's rate (`bankRateRadS`), plus the roll's own time constant, taken as 0.2/kχ within 0.3 to 1.5 s (a design's roll loop is five times its heading loop's bandwidth, or faster). The turn begins and ends that much early.
   - ∫ is an integral on the course error once it is under 0.15 rad, its zero at kχ/4. It takes out what the turn-rate loop leaves: the c172x needs 1.5° of bank to fly straight.
+  - ω so far is the track's turn rate. The velocity loop banks for a heading rate (the bank whose coordinated turn at the airspeed gives it), and in the wind the track turns at the heading's rate times Va·cos(crab)/Vg. So the feedforward and the proportional term are sent as the heading rate that turns the track at them: times Vg²/(V⃗g·V⃗a), within 0.5 to 2; 1 in calm air.
   - Recorded at VI-4: the first law fed the curvature forward where the arc begins and integrated the cross-track. The F-16C then overshot each leg by 48 m, and the c172x held a steady 15 m off its legs.
+  - Recorded at VI-6: until then ω went to the loop as it was. A wing under-turned downwind and over-turned upwind: in a 12 m/s wind the c172x's 800 m orbit was 30 m off it, the F-16C's 21 m, a racetrack 15 m. Sent as a heading rate they are 4.6, 4.2 and 2.1 m (section 15).
 - **Rotorcraft** fly a ground velocity along χd, at the path speed, the nose along the track:
   - Near the path the velocity is along the tangent less (kv/3)·e across it; far from it, an intercept at up to 90°, never faster than the path's speed.
   - A lead takes out the velocity loop's lag. It is the velocity error the loop's proportional term needs for the acceleration the curve asks (V²κa, κa the curvature V/kv ahead; kv the loop's bandwidth), less what the loop's own integral has taken up.
   - That integral is modelled as the loop runs it: a gain of kv²/4 that falls off beyond the error a quarter of the tilt answers. So round an orbit the lead fades, and as a turn ends it reverses.
   - An integral on the course error (commanded line of sight against the track, its zero at kv/4) takes out the rest.
-  - The path speed is limited to what the curvature allows, to what slows them in time for a smaller turn, and to what stops them at an end where they loiter; stopped, they hold the point through the position loop.
+  - The path speed is limited to what the curvature allows, to what slows them in time for a smaller turn, and to what stops them at an end where they loiter; stopped, they hold the point through the position loop. Along a curve every section within the braking distance is sampled (25 points) for what it allows and brakes to in time.
   - Recorded at VI-5: VI-4's lead was the whole κa·V/kv. On an orbit the loop's integral takes the turn up and that lead over-leads (a UH-60A settled 21 m outside, then inside), and a lead modelled as a first-order take-up reversed too soon after a route's turns.
 - **Vertical.** The altitude profile gives a vertical speed: its gradient times the ground speed, plus the altitude error at the position loop's gain, within the climb and descent limits.
 
@@ -543,7 +563,7 @@ Each step ships as commits on main with its tests, benchmark numbers (section 15
 ## 14. Consequences
 
 - **Benefits.** A mission autonomy flies the VI's modes on every aircraft the platform has, is told why a command fails and how far an activity has got, and gets and loses authority as the VI describes. The rotorcraft fly guidance correctly.
-- **Costs.** Four more command types; per vehicle that flies a route or curve, a path store (20 KB for 256 waypoints; curves' segments to come) and two route plans, the host's and the behaviour's (about 72 KB each); new C ABI calls; a guidance layer to keep tuned per family.
+- **Costs.** Four more command types; per vehicle that flies a route or curve, a path store (25 KB: 256 waypoints and 32 segments), two route plans, the host's and the behaviour's (about 72 KB each), and two curves with their length tables (about 13 KB each); new C ABI calls; a guidance layer to keep tuned per family.
 - **Risks.**
 
 | Risk | Mitigation |
@@ -724,6 +744,75 @@ Filled in as the steps land. The machine and the benchmark's precision are ADR-2
 - **Digests:** identical to step 5b, protection on and off. **Allocations:** none, with a hold's radius updated every step on 16 vehicles.
 - **Cost:** a racetrack's update 178 ns. Every existing case within ±3.0 % of VI-4 (the minima ±1.1 %). A route's is 198 ns (190 at VI-4): the follower is now a call.
 - **SDK:** C ABI `FSIM_MODE_PATTERN` (12 fields), `fsim_pattern_kind`; Python `Vehicle.submit_pattern(**fields)`, `PatternKind`, `MODE_FIELDS["pattern"]`. The example adds a Cessna holding over a fix from the defaults alone. ctest 181/181.
+
+**VI-6 (curve following).**
+- **What was built:**
+  - `BezierSegment` and `CurveCommand` join the `Command` variant after `PatternCommand` (`SetpointKind::Curve`, `modeBehavior()` "curve"). The path store holds 32 segments beside its waypoints, with a generation that a new curve bumps and an append does not.
+  - The geometry (`src/control/Route.h`):
+    - the Bernstein sums with their first and second derivatives, and the curvature and gradient over the ground;
+    - length tables of 32 chords a segment;
+    - the nearest point by Newton steps, moving on into the next segment;
+    - a segment's first section tighter than a limit, and its steepest gradient;
+    - the curvature ahead, read from the tables;
+    - a rotorcraft's speed limit along a curve: every section within its braking distance, sampled.
+  - `CurveBehavior`: a new curve is flown afresh, appended segments flown on to. Its pace is a wing's airspeed within the range, a rotorcraft's ground speed, or a duration's ground speed; then the ends.
+  - The host's `checkCurve`, `checkCurveOptions`, `limitCurveSpeeds`, `fastest()` and `writeCurve`. `World::submit(CurveCommand, Span<const BezierSegment>)` and `update(activity, CurveCommand, Span<const BezierSegment>)`; `ControlStack::command(CurveCommand, Span)` for a stack on its own.
+  - The follower sends a wing's turn rate as the heading rate that turns its track at it (4.8).
+  - Two fixes found by flying the example:
+    - A timed curve's last second is flown at the pace it had. Before, the speed shrank with what was left, and an IRIS that was to stop at its end never reached it.
+    - An activity's cross-track stays, past its end, what it was there. Before, a route or a curve that ended by loitering reported the orbit's radius: the host reads progress when the world step ends, some control updates later.
+- **Flown** (`tests/test_curves.cpp`): an S of six quintic Hermite segments from where the aircraft is, flying east. A straight lead of 2R, then a period over which the curvature runs κ sin 2πu, turning 100° right and 100° left, its tightest a quarter wider than R, climbing; a tail of 1.5R. R is a wing's planning radius at its speed plus 12 m/s, a rotorcraft's given. Off the S (past its lead), measured against the Béziers evaluated by de Casteljau's construction:
+
+  | | climb | calm | 12 m/s crosswind |
+  | --- | --- | --- | --- |
+  | c172x, R 630 m | 100 m | 4.7 m | 7.4 m |
+  | B-52H, R 8.4 km | 100 m | 4.3 m | 4.7 m |
+  | F-16C, R 2.7 km | 100 m | 5.4 m | 10.4 m |
+  | UH-60A, R 150 m at 20 m/s | 20 m | 7.4 m | 11.9 m |
+  | IRIS, R 20 m at 4 m/s (5 m/s wind) | 3 m | 0.0 m | 0.2 m |
+
+  - Heights within 6 m of the curve's, except the B-52H's 17 m.
+  - Each completes at its end, through its six segments in order, its percent never going back. The cross-track it reports is what the test measures.
+  - The first metres of a lead are the worst: the course integral builds up the bank a c172x needs to fly straight (9.5 m calm, 22.6 m in the wind, at 630 m along its lead).
+- **Pace:**
+  - a c172x meets a duration in a 10 m/s wind: 123 s of 123 (−0.2 %);
+  - an IRIS meets one and stops at its end: 34.2 s of 34.5 (−0.8 %);
+  - within 40 to 70 m/s a c172x holds its airspeed, 52.2 to 53.1 m/s from 52.7, as its ground speed swings with the wind;
+  - at most 45 m/s it flies 42.4 to 46.5 over the ground;
+  - an IRIS within 2 to 2.5 m/s flies at most 2.51.
+- **Append:** a c172x given the lead and a quarter, then the other four segments 20 s on, flies on to them within 9.9 m of the whole S from its start (height 1.6 m), the activity the same. Refused: a gap where they join, and an append of nothing (`invalid_curve`, segment 0). An UPDATE with segments and no append flies a new curve from its first segment; one with a speed alone keeps them.
+- **Ends:**
+  - a c172x that continues flies within 0.2° of its last course at its airspeed;
+  - one that loiters orbits the end point at 397 to 400 m (its speed's radius);
+  - an IRIS stops over its end within 0.01 m;
+  - a UH-60A continues east at the 15 m/s it flew.
+- **Checked:**
+  - Refused `invalid_curve`, naming the segment: none; 11; a control point not finite; 2 m from the one before (0.5 m is accepted); straight up; more than the store's 32 when appended.
+  - Options refused naming the field: a latitude without a longitude, a least over a most, a zero duration, an end of 2, an append in a NEW.
+  - An S at 0.3 of the c172x's radius is refused whatever the policy: segment 1, its section 0.359 to 1 (0.345 predicted from the design's curvature), `max_turn_rate`. An IRIS takes a 3 m S.
+  - A 1500 m climb is refused `max_climb_rate` at segment 1, or clamped.
+  - For the F-16C, a least of 900 m/s is refused `max_airspeed` (or clamped), as is 20 km in 10 s. The B-52H's most of 30 m/s is refused `min_airspeed`; a range of 5 to 1000 leaves it room. The c172x's profile knows neither end of its speeds.
+- **What the heading rate did to VI-4's and VI-5's flights:**
+
+  | In the wind | VI-5 | VI-6 |
+  | --- | --- | --- |
+  | c172x orbit, R 800 m | 30.2 m | 4.6 m |
+  | B-52H orbit, R 9 km | 10.7 m | 5.2 m |
+  | F-16C orbit, R 4 km | 21.4 m | 4.2 m |
+  | racetrack, hold, figure-eight (c172x, 8 m/s) | 15, 7, 21 m | 2.1, 1.5, 5.8 m |
+  | c172x route: legs / turns | 8.6 / 12.1 m | 2.4 / 3.4 m |
+  | B-52H route | 12.5 / 34.3 m | 8.7 / 33.0 m |
+  | F-16C route | 13.2 / 24.0 m | 7.7 / 7.8 m |
+
+  Calm flights, and every rotorcraft's, are as they were.
+- **Conformance:** the random sequences submit and update curves on all five adapters, their segments made beside them: zigzags of 40 s pieces, 3 % of control points not finite, 3 % of segments apart, appends mostly from where the last curve made ended. `invalid_curve` is a required answer for NEW and for UPDATE.
+- **Digests:** identical to step 5b, protection on and off. **Allocations:** none, with a curve replaced every step on 16 vehicles.
+- **Cost:** a curve update is 289 ns (Newton steps and the curvature ahead from the tables). Over four interleaved A/B runs against VI-5 (5 rounds each), every case is within ±3.1 % at the median, routes and patterns included, except the two whose axes are split between slots: `axes apart` and `apart, pseudo` are +2.0 to +5.2 % at the median and +2.2 to +4.8 % at the minimum, about 2.5 ns. No VI-6 code runs in them. Moving the stack's new entry point to the end of its file changed nothing, and struct copies in place of the general path's variant assignments made them slower (+7 %); the cause is not found.
+- **SDK:**
+  - C ABI: `fsim_bezier_segment`, `fsim_bezier_segment_init`, `fsim_vehicle_submit_curve`, `fsim_activity_update_curve`, `FSIM_MODE_CURVE` (8 fields). A segment array is read at its first element's `struct_size`.
+  - Python: `Vehicle.submit_curve(segments, **fields)`, `Activity.append`, `Activity.update_curve`, `BezierSegment`, `MODE_FIELDS["curve"]`.
+  - The example adds a Cessna's slalom, appended to a minute in, and an IRIS's timed climbing S.
+  - ctest 187/187.
 
 ## Appendix A: the gap analysis at a946dfe
 

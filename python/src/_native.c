@@ -956,6 +956,82 @@ static PyObject* world_activity_update_route(PyObject* o, PyObject* const* args,
     return result_tuple(self->world, &r);
 }
 
+/* A curve's segments: rows of 18 numbers, the control points north[6], east[6], down[6]. *out is
+ * PyMem-allocated (free it); the count, or -1 with an error set. */
+static Py_ssize_t read_segments(PyObject* o, fsim_bezier_segment** out) {
+    *out = NULL;
+    PyObject* seq = PySequence_Fast(o, "segments must be a sequence of 18-number rows");
+    if (!seq) return -1;
+    const Py_ssize_t count = PySequence_Size(seq);
+    fsim_bezier_segment* segments = (fsim_bezier_segment*)PyMem_Malloc(sizeof(fsim_bezier_segment) * (size_t)(count ? count : 1));
+    for (Py_ssize_t i = 0; segments && i < count; ++i) {
+        PyObject* row = PySequence_GetItem(seq, i);
+        PyObject* r = row ? PySequence_Fast(row, "each segment must be 18 numbers") : NULL;
+        fsim_bezier_segment* s = &segments[i];
+        fsim_bezier_segment_init(s);
+        if (r && PySequence_Size(r) == 18) {
+            for (int k = 0; k < 18 && !PyErr_Occurred(); ++k) {
+                PyObject* item = PySequence_GetItem(r, k);
+                const double v = item ? PyFloat_AsDouble(item) : 0.0;
+                Py_XDECREF(item);
+                if (k < 6) s->north[k] = v;
+                else if (k < 12) s->east[k - 6] = v;
+                else s->down[k - 12] = v;
+            }
+        } else if (r) {
+            PyErr_SetString(PyExc_ValueError, "each segment must be its control points north[6], east[6], down[6]");
+        }
+        Py_XDECREF(r);
+        Py_XDECREF(row);
+        if (PyErr_Occurred()) break;
+    }
+    Py_DECREF(seq);
+    if (!segments) PyErr_NoMemory();
+    if (PyErr_Occurred()) {
+        PyMem_Free(segments);
+        return -1;
+    }
+    *out = segments;
+    return count;
+}
+
+/* submit_curve(id, values, segments, source=None, axes=None, range=None, min_version=None) -> result */
+static PyObject* world_submit_curve(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    double row[FSIM_PY_VALUES];
+    fsim_command_options opt;
+    fsim_command_result r;
+    fsim_bezier_segment* segments = NULL;
+    if (!check_args(n, 3, 7, "submit_curve") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "submit_curve");
+    if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
+    const Py_ssize_t ns = read_segments(args[2], &segments);
+    if (ns < 0) return NULL;
+    const int rc = fsim_vehicle_submit_curve(self->world, id, row, (uint32_t)count, segments, (uint32_t)ns, &opt, &r);
+    PyMem_Free(segments);
+    if (rc != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
+/* activity_update_curve(activity, values, segments) -> result; segments may be empty: how it is flown alone */
+static PyObject* world_activity_update_curve(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t activity;
+    double row[FSIM_PY_VALUES];
+    fsim_command_result r;
+    fsim_bezier_segment* segments = NULL;
+    if (!check_args(n, 3, 3, "activity_update_curve") || !as_u64(args[0], &activity) || !WORLD_IDLE(self)) return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "activity_update_curve");
+    if (count < 0) return NULL;
+    const Py_ssize_t ns = read_segments(args[2], &segments);
+    if (ns < 0) return NULL;
+    const int rc = fsim_activity_update_curve(self->world, activity, row, (uint32_t)count, segments, (uint32_t)ns, &r);
+    PyMem_Free(segments);
+    if (rc != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
 /* submit_support(id, kind, values, source=None, axes=None, range=None, min_version=None) -> result */
 static PyObject* world_submit_support(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
@@ -1493,6 +1569,8 @@ static PyMethodDef world_methods[] = {
     FAST("submit_mode", world_submit_mode, "submit_mode(id, mode, values, source, axes, range, min_version) -> result"),
     FAST("submit_route", world_submit_route, "submit_route(id, values, waypoints, source, axes, range, min_version) -> result"),
     FAST("activity_update_route", world_activity_update_route, "activity_update_route(activity, values, waypoints) -> result"),
+    FAST("submit_curve", world_submit_curve, "submit_curve(id, values, segments, source, axes, range, min_version) -> result"),
+    FAST("activity_update_curve", world_activity_update_curve, "activity_update_curve(activity, values, segments) -> result"),
     FAST("activity_update", world_activity_update, "activity_update(activity, values) -> result"),
     FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride[, fields])"),
     FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity) -> result"),

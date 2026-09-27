@@ -38,6 +38,7 @@ inline void assignSetpoint(Command& dst, const Command& src) noexcept {
     case 6: as(HsaCommand{}); break;
     case 7: as(RouteCommand{}); break;
     case 8: as(PatternCommand{}); break;
+    case 9: as(CurveCommand{}); break;
     default: break;
     }
 }

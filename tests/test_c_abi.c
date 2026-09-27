@@ -752,6 +752,61 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_cancel(world, orbit_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
         }
         {
+            /* ABI 1.6: a curve - its options in fields, its Bezier segments beside them; appended to by UPDATE */
+            double fields[8], later[8];
+            fsim_bezier_segment seg[2], more, hairpin;
+            fsim_activity_progress progress;
+            fsim_command_detail detail;
+            fsim_activity_id curve_id;
+            int k;
+            CHECK(fsim_mode_field_count(FSIM_MODE_CURVE) == 8);
+            for (k = 0; k < 8; ++k) fields[k] = later[k] = fsim_hold();
+            fsim_bezier_segment_init(&seg[0]);
+            fsim_bezier_segment_init(&seg[1]);
+            fsim_bezier_segment_init(&more);
+            fsim_bezier_segment_init(&hairpin);
+            CHECK(seg[0].struct_size == sizeof seg[0] && seg[0].north[3] == 0.0 && seg[0].down[5] == 0.0);
+            for (k = 0; k < 6; ++k) { /* north, 2 km a segment, from where the aircraft is (the reference, left out) */
+                seg[0].north[k] = 400.0 * k;
+                seg[1].north[k] = 2000.0 + 400.0 * k;
+                more.north[k] = 4000.0 + 400.0 * k;
+            }
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE; /* b's autopilot holds its height (above) */
+            CHECK(fsim_vehicle_submit_curve(world, b, fields, 8, seg, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            curve_id = cr.activity;
+            CHECK(fsim_vehicle_submit_curve(world, b, fields, 7, seg, 2, &co, &cr) != FSIM_OK); /* malformed: 8 fields */
+            fsim_activity_progress_init(&progress);
+            CHECK(fsim_world_step(world, 2) == FSIM_OK && fsim_activity_get_progress(world, curve_id, &progress) == FSIM_OK);
+            CHECK(progress.segment == 0 && progress.segments == 2 && progress.distance_to_go_m > 3000.0);
+            /* appended after its end, from the same reference */
+            later[7] = 1.0; /* append */
+            CHECK(fsim_activity_update_curve(world, curve_id, later, 8, &more, 1, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_world_step(world, 1) == FSIM_OK && fsim_activity_get_progress(world, curve_id, &progress) == FSIM_OK);
+            CHECK(progress.segments == 3);
+            /* where the curve does not end: refused, naming the segment (reserved: its index + 1) */
+            more.north[0] += 5.0;
+            CHECK(fsim_activity_update_curve(world, curve_id, later, 8, &more, 1, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "invalid_curve") == 0 && cr.reserved == 1);
+            /* a hairpin tighter than it can turn: the segment, and the section of it */
+            for (k = 0; k < 6; ++k) {
+                hairpin.north[k] = k < 3 ? 30.0 * k : 30.0 * (5 - k);
+                hairpin.east[k] = k < 3 ? 0.0 : 20.0;
+            }
+            CHECK(fsim_vehicle_submit_curve(world, b, fields, 8, &hairpin, 1, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            fsim_command_detail_init(&detail);
+            CHECK(fsim_last_command_detail(world, &detail) == FSIM_OK && detail.index == 0);
+            CHECK(strcmp(fsim_constraint_name(detail.constraint), "max_turn_rate") == 0);
+            CHECK(detail.from > 0.0 && detail.from < detail.to && detail.to < 1.0);
+            /* its options alone: how it is flown, not where */
+            later[7] = fsim_hold();
+            later[4] = 50.0; /* speed_max_ms */
+            CHECK(fsim_activity_update(world, curve_id, later, 8, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_world_step(world, 1) == FSIM_OK && fsim_activity_get_progress(world, curve_id, &progress) == FSIM_OK);
+            CHECK(progress.segments == 3);
+            CHECK(fsim_activity_cancel(world, curve_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        }
+        {
             /* the profile: a stock c172x carries no sections */
             double value = 0.0;
             uint32_t version = 9;

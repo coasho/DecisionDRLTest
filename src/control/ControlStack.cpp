@@ -143,6 +143,15 @@ void ControlStack::command(const RouteCommand& route, Span<const Waypoint> waypo
     command(Command(route));
 }
 
+void ControlStack::command(const CurveCommand& curve, Span<const BezierSegment> segments) {
+    if (!config_->path) config_->path = std::make_unique<PathStore>();
+    PathStore& path = *config_->path;
+    path.segmentCount = static_cast<std::uint32_t>(std::min(segments.size(), PathStore::kSegments));
+    std::copy_n(segments.data(), path.segmentCount, path.segments);
+    ++path.curve, ++path.revision;
+    command(Command(curve));
+}
+
 std::size_t ControlStack::wholeSlot() const noexcept {
     const auto& owner = config_->owner;
     const std::uint8_t o = owner[static_cast<std::size_t>(Axis::Roll)];

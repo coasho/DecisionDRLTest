@@ -189,14 +189,43 @@ struct RouteCommand {
     double start = 0.0;      ///< the point to fly to first
 };
 
-/// Where a vehicle's route lives while it is flown (docs/vehicle-interface.md,
-/// 4.2): allocated at its first route and kept, written by the host between
-/// steps, read by the route's behaviour during them (ControlContext::path).
+/// One piece of a curve (A-GRA's): a quintic Bezier by its six control
+/// points (weights 1, the clamped knots [0,0,0,0,0,0,1,1,1,1,1,1]), metres
+/// north, east and down from the curve's reference point.
+struct BezierSegment {
+    double north[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    double east[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    double down[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+};
+
+/// fsim.guidance.curve (A-GRA's curve following): its segments - 1 to 10 a
+/// command, each starting where the one before ends - go beside it (World::submit
+/// and update take a Span) into the path store. Flown at a ground speed within
+/// a range, or so as to take a duration; completes at its end. A field left
+/// out (kHold) takes its default in a NEW and keeps its value in an UPDATE.
+struct CurveCommand {
+    double latitudeRad = kHold, longitudeRad = kHold; ///< the reference its segments are from; kHold: where the aircraft is
+    double altitudeM = kHold;          ///< the reference's height above sea level; kHold: the aircraft's
+    double speedMinMs = kHold;         ///< the ground speed to fly it within; both kHold: as now (a rotorcraft's cruise)
+    double speedMaxMs = kHold;
+    double durationS = kHold;          ///< or the time to fly all of it, from the NEW
+    double end = kHold;                ///< EndBehavior after its end; kHold: continue
+    double append = kHold;             ///< in an UPDATE, 1: its segments after the curve's end, from the same reference
+};
+
+/// Where a vehicle's route or curve lives while it is flown
+/// (docs/vehicle-interface.md, 4.2): allocated at its first and kept, written
+/// by the host between steps, read by the mode's behaviour during them
+/// (ControlContext::path).
 struct PathStore {
     static constexpr std::size_t kWaypoints = 256;
-    std::uint32_t revision = 0; ///< bumped on every write: the route is flown afresh
-    std::uint32_t count = 0;
+    static constexpr std::size_t kSegments = 32;
+    std::uint32_t revision = 0; ///< bumped on every write
+    std::uint32_t count = 0;    ///< waypoints
     Waypoint waypoints[kWaypoints];
+    std::uint32_t curve = 0;    ///< bumped when a curve is replaced (not appended to): it is flown afresh
+    std::uint32_t segmentCount = 0;
+    BezierSegment segments[kSegments];
 };
 
 /// A loiter pattern (A-GRA's LOITER).
@@ -247,7 +276,7 @@ struct BehaviorCommand {
 /// modes come after BehaviorCommand and enter at Level::Behavior (levelOf):
 /// the variant's index is a level's only up to it.
 using Command = std::variant<ActuatorCommand, AttitudeCommand, AccelerationCommand, VelocityCommand, PositionCommand, BehaviorCommand, HsaCommand,
-                             RouteCommand, PatternCommand>;
+                             RouteCommand, PatternCommand, CurveCommand>;
 
 // Support effectors (docs/control-architecture.md, 8.2): set directly, not
 // flown through the cascade; each its own capability (fsim.support.*) where
@@ -286,11 +315,12 @@ using SupportCommand = std::variant<GearCommand, FlapsCommand, WheelBrakesComman
 inline Level levelOf(const Command& c) noexcept {
     return c.index() < static_cast<std::size_t>(Level::Behavior) ? static_cast<Level>(c.index()) : Level::Behavior;
 }
-/// The registered behaviour that flies a mode's setpoint ("hsa", "route", "pattern"); null for a level's or a behaviour's command.
+/// The registered behaviour that flies a mode's setpoint ("hsa", "route", "pattern", "curve"); null for a level's or a behaviour's command.
 inline const char* modeBehavior(const Command& c) noexcept {
     if (std::holds_alternative<HsaCommand>(c)) return "hsa";
     if (std::holds_alternative<RouteCommand>(c)) return "route";
     if (std::holds_alternative<PatternCommand>(c)) return "pattern";
+    if (std::holds_alternative<CurveCommand>(c)) return "curve";
     return nullptr;
 }
 

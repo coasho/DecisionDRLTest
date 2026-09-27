@@ -71,6 +71,7 @@ private:
 namespace route {
 struct Plan;
 struct Pattern;
+struct Curve;
 struct Fix;
 } // namespace route
 
@@ -138,6 +139,7 @@ private:
     // what it commands
     double lastTime_ = -1.0;
     double crossTrack_ = kHold, course_ = kHold, heading_ = kHold, altitudeMsl_ = kHold, groundSpeed_ = 0.0;
+    double lastCross_ = kHold; ///< off the leg flown last: what it reports past its end
 };
 
 /// "pattern": fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md,
@@ -183,7 +185,59 @@ private:
     double crossTrack_ = kHold, course_ = kHold, heading_ = kHold, altitudeMsl_ = kHold, groundSpeed_ = 0.0, simTime_ = 0.0;
 };
 
-/// Registers the modes' behaviours ("hsa", "route", "pattern"); registerBuiltinControllers calls it.
+/// "curve": fsim.guidance.curve, A-GRA's curve following (docs/vehicle-interface.md,
+/// 4.7). Flies the Bezier segments of the vehicle's path store: the nearest
+/// point by Newton steps from where it was, over tables of their length; the
+/// altitude along them; its speed - a wing's airspeed, a rotorcraft's ground
+/// speed, as they were, the ground speed they make kept within the range
+/// given - or the ground speed that takes the rest of it in the rest of its
+/// duration. The route's path follower
+/// flies it, the curvature fed forward from the curve ahead. Segments appended
+/// (the store's curve the same, more segments) are flown on to; a new curve
+/// is flown afresh. At its end it completes, and flies on along its last
+/// course, or loiters: a wing orbits its end, a rotorcraft hovers there.
+class FSIM_API CurveBehavior final : public Behavior {
+public:
+    CurveBehavior();
+    ~CurveBehavior() override;
+    const char* id() const noexcept override { return "curve"; }
+    void begin(const ControlContext& ctx, const Command& command) override;
+    Command update(const ControlContext& ctx, const Command& in) override;
+    void reset() override;
+    bool finished() const noexcept override { return finished_; }
+    Reason failure() const noexcept override { return failure_; }
+    /// The segment flown (of how many), how far along it and the curve, the
+    /// distance and time to go, the cross-track, and what it commands: the
+    /// course, the altitude, the ground speed.
+    bool progress(ActivityProgress& out) const noexcept override;
+
+private:
+    /// Fly the store's curve afresh, from its start.
+    void restart(const ControlContext& ctx, const CurveCommand& c);
+    /// The speed it flies now (speed_, reference_): the rest in the rest of its
+    /// duration over the ground, or its own - a rotorcraft's ground speed, a
+    /// wing's airspeed with the ground speed it makes along `fix` in the wind -
+    /// within its range.
+    void pace(const Performance& performance, const route::Fix& fix) noexcept;
+    /// Past its end: on along its last course, or loitering.
+    void end(const Performance& performance);
+
+    std::unique_ptr<route::Curve> curve_; ///< allocated with the behaviour
+    WindEstimate wind_;
+    CurveCommand flown_{};
+    std::uint32_t generation_ = 0, stored_ = 0; ///< the store's curve, and how many of its segments it flies
+    bool planned_ = false, hovers_ = false, ended_ = false, finished_ = false;
+    Reason failure_ = Reason::None;
+    std::uint32_t segment_ = 0;
+    double t_ = 0.0;                 ///< the nearest point's parameter on segment_
+    double startS_ = -1.0;           ///< when it began (a duration counts from it)
+    double ownSpeed_ = 0.0;          ///< when it began: a rotorcraft's ground speed (its cruise, if still), a wing's airspeed
+    SpeedReference reference_ = SpeedReference::GroundSpeed; ///< speed_'s
+    double lastTime_ = -1.0;
+    double crossTrack_ = kHold, course_ = kHold, heading_ = kHold, altitudeMsl_ = kHold, groundSpeed_ = 0.0, simTime_ = 0.0, speed_ = kHold;
+};
+
+/// Registers the modes' behaviours ("hsa", "route", "pattern", "curve"); registerBuiltinControllers calls it.
 void registerGuidanceModes(ControllerRegistry& registry);
 
 } // namespace fsim::control

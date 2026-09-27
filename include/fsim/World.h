@@ -164,6 +164,12 @@ public:
     /// names the point), then flown from where the aircraft is.
     control::CommandResult submit(const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                   const control::CommandOptions& options = {});
+    /// NEW of a curve (fsim.guidance.curve, A-GRA's curve following;
+    /// docs/sdk/control.md, "Curves"): 1 to 10 quintic Bezier segments, each
+    /// starting where the one before ends, checked (InvalidCurve names the
+    /// segment, and a section too tight in CommandResult::from and to).
+    control::CommandResult submit(const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
+                                  const control::CommandOptions& options = {});
     /// The live activities, then the ended ones the vehicle remembers, newest first.
     /// A guidance mode's record carries its progress (docs/vehicle-interface.md, 5.3).
     std::vector<control::ActivityRecord> activities() const;
@@ -243,6 +249,9 @@ public:
     /// waypoints - none: those it has - checked as a NEW's; flown afresh from
     /// its start. (A RouteCommand alone, through update() above, is the same with none.)
     control::CommandResult update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints);
+    /// UPDATE of a curve: its options (kHold keeps one), and segments - with
+    /// `append` 1 after its end, from the same reference; else a new curve.
+    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// A live or recently ended activity of any vehicle; empty if unknown.

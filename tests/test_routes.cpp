@@ -349,6 +349,7 @@ TEST_CASE("route: a route that repeats flies laps; one that ends continues, orbi
     CHECK(w.activity(orbit)->reason == Reason::GoalReached);
     CHECK(orbitMin > 0.8 * radius);
     CHECK(orbitMax < 1.25 * radius);
+    CHECK(std::abs(w.activity(orbit)->progress.crossTrackM) < 50.0); // off its last leg when it ended: not the orbit's radius
     CHECK(w.activity(hover)->state == ActivityState::Completed);
     CHECK(distance(*w.vehicleState(hoverer), hop[1]) < 2.0);
     CHECK(groundSpeed(*w.vehicleState(hoverer)) < 0.3);

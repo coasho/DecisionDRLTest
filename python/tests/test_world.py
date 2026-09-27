@@ -310,8 +310,9 @@ class CapabilityTest(unittest.TestCase):
         caps = {cap.id: cap for cap in v.capabilities()}
         self.assertEqual(caps["fsim.guidance.formation"].mode, "formation")
         self.assertEqual(caps["fsim.flight.velocity"].mode, "none")
-        self.assertEqual(agra.flight_capabilities(v), {"FORMATION": ["fsim.guidance.formation"], "HSA_CSA": ["fsim.guidance.hsa"],
-                                                       "LOITER": ["fsim.guidance.pattern"], "WAYPOINT_FOLLOWING": ["fsim.guidance.route"]})
+        self.assertEqual(agra.flight_capabilities(v), {"CURVE_FOLLOWING": ["fsim.guidance.curve"], "FORMATION": ["fsim.guidance.formation"],
+                                                       "HSA_CSA": ["fsim.guidance.hsa"], "LOITER": ["fsim.guidance.pattern"],
+                                                       "WAYPOINT_FOLLOWING": ["fsim.guidance.route"]})
         route.cancel()
         self.assertEqual(agra.activity_state(route.info), "FAILED")
         self.assertEqual(agra.cannot_comply(route.info.reason), "CANCELED")
@@ -402,6 +403,48 @@ class CapabilityTest(unittest.TestCase):
         self.assertEqual(caps["fsim.guidance.pattern"].mode, "loiter")
         self.assertEqual([q.name for q in caps["fsim.guidance.pattern"].parameters], list(fsim.MODE_FIELDS["pattern"]))
         self.assertEqual(fsim.PatternKind.FIGURE_EIGHT, 2)
+
+    def test_curve_mode(self):
+        world = make_world(name="py-curve")
+        v = fly(world, "curve")
+
+        def straight(n0, e0, n1, e1):  # control points evenly along a line
+            return fsim.BezierSegment([n0 + (n1 - n0) * k / 5 for k in range(6)], [e0 + (e1 - e0) * k / 5 for k in range(6)], [0.0] * 6)
+
+        # east from where it is (the reference, left out), then a bend north; the second as a dict, the third as a triple
+        first = [straight(0, 0, 0, 2000), {"north": [0, 0, 0, 200, 600, 1000], "east": [2000, 2400, 2800, 3000, 3000, 3000], "down": [0] * 6}]
+        a = v.submit_curve(first, speed_max_ms=50.0, end="loiter")
+        self.assertEqual(a.level, "curve")
+        world.step(10)
+        p = a.progress
+        self.assertEqual((p.segment, p.segments), (0, 2))
+        self.assertEqual(p.speed_reference, fsim.SpeedReference.TRUE_AIRSPEED)  # (a wing holds its airspeed)
+        self.assertTrue(0.0 < p.percent < 100.0 and p.distance_to_go_m > 2000.0)
+        # appended while it flies: the same activity, on to the new end
+        a.append([([1000 + 400 * k for k in range(6)], [3000] * 6, [0] * 6)])
+        world.step()
+        self.assertEqual(a.progress.segments, 3)
+        # where the curve does not end: refused, naming the segment; so is a hairpin too tight, with its section
+        with self.assertRaises(fsim.Rejected) as refused:
+            a.append([straight(0, 0, 500, 500)])
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_curve", 0))
+        hairpin = fsim.BezierSegment([0, 30, 60, 60, 30, 0], [0, 0, 0, 20, 20, 20], [0] * 6)
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_curve([hairpin])
+        r = refused.exception
+        self.assertEqual((r.reason, r.index, r.constraint), ("invalid_curve", 0, "max_turn_rate"))
+        self.assertTrue(0.0 < r.section[0] < r.section[1] < 1.0)
+        # its options alone: how it is flown; a new curve through update_curve, flown afresh
+        a.update(speed_max_ms=45.0)
+        a.update_curve([straight(0, 0, 3000, 0)])
+        world.step()
+        self.assertEqual((a.progress.segment, a.progress.segments), (0, 1))
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_curve(first, append=1)  # a NEW has nothing to append to
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_parameter", 7))
+        caps = {c.id: c for c in v.capabilities()}
+        self.assertEqual(caps["fsim.guidance.curve"].mode, "curve_following")
+        self.assertEqual([q.name for q in caps["fsim.guidance.curve"].parameters], list(fsim.MODE_FIELDS["curve"]))
 
     def test_authority_and_refusals(self):
         world = make_world(name="py-authority")
