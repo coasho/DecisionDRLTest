@@ -86,7 +86,8 @@ bool sameRecord(const ActivityRecord& a, const ActivityRecord& b) {
     return a.id == b.id && a.vehicle == b.vehicle && a.capability == b.capability && a.source == b.source && a.axes == b.axes &&
            a.state == b.state && a.reason == b.reason && a.by == b.by && a.constraints == b.constraints &&
            a.constraintsSeen == b.constraintsSeen && a.startTime == b.startTime && ends && a.waiting == b.waiting && a.waitingFor == b.waitingFor &&
-           a.rank == b.rank && a.precedence == b.precedence && a.interrupt == b.interrupt;
+           a.rank == b.rank && a.precedence == b.precedence && a.interrupt == b.interrupt && a.suggestion == b.suggestion && a.run == b.run &&
+           a.runs == b.runs;
 }
 
 /// What the rules of docs/flight-autonomy.md, 4.9 let a contender do about a live
@@ -475,7 +476,7 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
 
 // --- random sequences -----------------------------------------------------------------------------
 
-enum class Op { New, Update, Cancel, Legacy, Step, Reset, Default, Retarget, Authority, Precedence, Activity };
+enum class Op { New, Update, Cancel, Legacy, Step, Reset, Default, Retarget, Authority, Precedence, Activity, Task };
 
 const char* opName(Op op) {
     switch (op) {
@@ -489,6 +490,7 @@ const char* opName(Op op) {
     case Op::Authority: return "authority";
     case Op::Precedence: return "precedence";
     case Op::Activity: return "activity";
+    case Op::Task: return "task";
     default: return "retarget";
     }
 }
@@ -519,6 +521,7 @@ struct Done {
     Source caller = Source::Policy; ///< UPDATE, CANCEL, an activity command: the source the call declares
     ActivityCommand command = ActivityCommand::Disable; ///< an activity command (docs/flight-autonomy.md, 4.10)
     Rank rank{};                ///< ChangeRank's
+    bool taskCommand = false;   ///< a task operation that was a task command: a NEW of the task's command (4.11)
     ControlMode mode = ControlMode::Open; ///< the vehicle's, as the operation was made
     bool accepted = false;      ///< the existing entry point's answer
     std::size_t capability = 0; ///< NEW, the existing entry point, an authority call: the capability it is about
@@ -540,7 +543,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
     const auto& caps = w.capabilities(v);
     INFO("after " << opName(done.op) << " at t=" << done.now);
     const bool step = done.op == Op::Step, reset = done.op == Op::Reset;
-    const bool created = (done.op == Op::New && done.result.accepted()) || (done.op == Op::Legacy && done.accepted);
+    const bool made = done.op == Op::New || (done.op == Op::Task && done.taskCommand); // (a task command is its command's NEW, 4.11)
+    const bool created = (made && done.result.accepted()) || (done.op == Op::Legacy && done.accepted);
 
     // the answer: one of the reasons its operation may give, and true to the records it was given
     auto was = [&](ActivityId id) -> const ActivityRecord* {
@@ -552,7 +556,7 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         ++seen[std::string(opName(done.op)) + ":" + (ok ? "done" : reasonName(done.result.reason))];
         if (done.result.flags & kClamped) ++seen["clamped"];
     }
-    if (done.op == Op::New) {
+    if (made) {
         if (done.result.accepted()) CHECK(done.result.reason == Reason::None);
         else CHECK(among(done.result.reason, {Reason::UnknownCapability, Reason::Unavailable, Reason::VersionUnsupported, Reason::InvalidParameter,
                                               Reason::OutOfRange, Reason::InvalidAxes, Reason::AuthorityHeld, Reason::ControllerNotAxisAware,
@@ -561,7 +565,9 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
                                               // what the vehicle cannot do at all, and the flight phase (docs/flight-autonomy.md, 4.3)
                                               Reason::NotSupported, Reason::NotImplemented, Reason::OnGround,
                                               // a precedence override from a policy, a window it cannot meet, no room to wait (4.9)
-                                              Reason::NotAllowed, Reason::TimeConstraint, Reason::QueueFull}));
+                                              Reason::NotAllowed, Reason::TimeConstraint, Reason::QueueFull,
+                                              // a task's (4.11)
+                                              Reason::UnknownTask, Reason::TaskActive}));
         // a policy's precedence override is refused; one that waits was accepted to (4.9)
         if (done.options.source == Source::Policy && done.options.precedenceOverride != kNoPrecedenceOverride) CHECK_FALSE(done.result.accepted());
         if (done.result.reason == Reason::NotAllowed) CHECK(done.options.precedenceOverride != kNoPrecedenceOverride);
@@ -625,8 +631,11 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
 
     // what waited and started in this operation (4.9): it may take axes from, and end, what flies
     bool startedNow = false;
-    for (const auto& [id, r] : after) // (flying, or ended since: an activity that has started waits no more)
-        if (const ActivityRecord* old = was(id); old && old->waiting != ActivityWait::None && r.waiting == ActivityWait::None) startedNow = true;
+    for (const auto& [id, r] : after) // (flying, or ended since: an activity that has started waits no more - and one disabled, enabled)
+        if (const ActivityRecord* old = was(id); old && ((old->waiting != ActivityWait::None && r.waiting == ActivityWait::None) ||
+                                                         (old->state == ActivityState::Disabled && r.state != ActivityState::Disabled &&
+                                                          r.waiting == ActivityWait::None)))
+            startedNow = true;
     for (const auto& [id, r] : after) // (a new one, taken at once by what started)
         if (!was(id) && r.state == ActivityState::Canceled && r.reason == Reason::Preempted) startedNow = true;
 
@@ -635,7 +644,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
     std::uint32_t newRecords = 0;
     for (const auto& [id, r] : after) {
         REQUIRE(r.capability < caps.size());
-        INFO("activity " << serialOf(id) << " " << caps[r.capability].id << " " << activityStateName(r.state) << " " << reasonName(r.reason));
+        INFO("activity " << serialOf(id) << " " << caps[r.capability].id << " " << activityStateName(r.state) << " " << reasonName(r.reason)
+                          << " (window's end " << r.window.endNotAfter << ")");
         CHECK(activityVehicle(id) == v);
         CHECK(r.vehicle == v);
         CHECK(r.live() == std::isnan(r.endTime));
@@ -663,10 +673,13 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         case ActivityState::Failed:
             CHECK(r.by == 0);
             if (r.reason == Reason::TargetLost) CHECK(caps[r.capability].needsTarget);
-            if (r.reason == Reason::TimeConstraint) { // a window it had to meet, missed: waiting past it, or flying
-                const bool waited = r.waiting != ActivityWait::None;
-                if (waited) CHECK((r.endTime >= window.endNotAfter || (window.startCritical() && r.endTime > window.startNotAfter)));
+            if (const ActivityRecord* old = was(id); r.reason == Reason::TimeConstraint && old && old->live()) {
+                // a window it had to meet, missed as it ended: disabled, or waiting, past its end window
+                // (or its critical start's); flying, its critical end's
+                if (old->state == ActivityState::Disabled) CHECK(r.endTime >= window.endNotAfter);
+                else if (old->waiting != ActivityWait::None) CHECK((r.endTime >= window.endNotAfter || (window.startCritical() && r.endTime > window.startNotAfter)));
                 else CHECK((window.endCritical() && (r.endTime >= window.endNotAfter || r.endTime < window.endNotBefore)));
+            } else if (r.reason == Reason::TimeConstraint) {
             } else if (!among(r.reason, {Reason::TargetLost, Reason::BehaviorFailed, Reason::CapabilityLost, Reason::Diverged})) {
                 // else only one that waited, as it would start: what its NEW's checks say from where the aircraft is then
                 CHECK(r.waiting != ActivityWait::None);
@@ -680,7 +693,7 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             const auto it = after.find(r.by);
             const ActivityRecord* waited = was(r.by);
             // by a newer activity, or one that waited and started now...
-            CHECK((serialOf(r.by) > serialOf(id) || (waited && waited->waiting != ActivityWait::None)));
+            CHECK((serialOf(r.by) > serialOf(id) || (waited && (waited->waiting != ActivityWait::None || waited->state == ActivityState::Disabled))));
             if (it != after.end()) {
                 CHECK(it->second.source >= r.source);                                 // ...of its own or a higher source...
                 if (r.endTime == done.now) CHECK(standing(it->second, r) == Standing::Takes); // ...that the rules let take it (4.9)
@@ -695,10 +708,10 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             // pending - waiting to start if its NEW said so - unless what waited started at once and took it (4.9)
             CHECK((r.state == ActivityState::Pending || (r.state == ActivityState::Canceled && r.reason == Reason::Preempted)));
             CHECK(r.startTime == done.now);
-            CHECK(r.source == (done.op == Op::New ? done.options.source : Source::Policy));
-            if (done.op == Op::New) CHECK(id == done.result.activity);
-            CHECK((r.waiting != ActivityWait::None) == (done.op == Op::New && (done.result.flags & kDeferred) != 0));
-            if (done.op == Op::New) CHECK((r.rank == done.options.rank && r.interrupt == done.options.interrupt));
+            CHECK(r.source == (made ? done.options.source : Source::Policy));
+            if (made) CHECK(id == done.result.activity);
+            CHECK((r.waiting != ActivityWait::None) == (made && (done.result.flags & kDeferred) != 0));
+            if (made) CHECK((r.rank == done.options.rank && r.interrupt == done.options.interrupt));
             highest = std::max(highest, serialOf(id));
             continue;
         }
@@ -752,7 +765,9 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             } else {
                 CHECK(r.endTime == done.now);
             }
-        } else if (old->waiting != ActivityWait::None && r.state == ActivityState::Failed && r.endTime == done.now) {
+        } else if ((old->waiting != ActivityWait::None || old->state == ActivityState::Disabled ||
+                    (commanded && among(done.command, {ActivityCommand::Unassign, ActivityCommand::Enable}))) &&
+                   r.state == ActivityState::Failed && r.endTime == done.now) {
             // one that waited: failed by a window it could no longer meet, or as it would start (the scheduler's, after any operation)
             ++seen["failed:waiting"];
         } else {
@@ -767,7 +782,7 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         if (!step && !reset) CHECK((r.constraints == old->constraints && r.constraintsSeen == old->constraintsSeen));
     }
     CHECK(newRecords <= 1);
-    if (done.op == Op::New && done.result.accepted()) CHECK(newRecords == 1);
+    if (made && done.result.accepted()) CHECK(newRecords == 1);
     if (done.op == Op::Activity && done.result.accepted()) { // what the command did (4.10)
         const auto it = after.find(done.addressed);
         const ActivityRecord* old = was(done.addressed);
@@ -880,6 +895,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
     auto chance = [&schedules](double p) { return std::uniform_real_distribution<double>(0.0, 1.0)(schedules) < p; };
     auto draw = [&schedules](int n) { return std::uniform_int_distribution<int>(0, n - 1)(schedules); };
     std::vector<std::uint32_t> precedences(w.capabilities(v).size(), 0); // the platform's, as the rules keep them
+    std::map<TaskId, std::size_t> taskCapability;                         // the caller's tasks' capabilities
     authority.control.assign(w.capabilities(v).size(), ControlStatus{});
     authority.restricted.assign(w.capabilities(v).size(), CapabilityStatus{});
 
@@ -914,6 +930,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                     : u < 0.89 ? Op::Step : u < 0.91 ? Op::Reset : u < 0.94 ? Op::Default : u < 0.95 ? Op::Retarget : Op::Authority;
             if (chance(0.02)) done.op = Op::Precedence; // the platform sets a capability's precedence (4.9)
             else if (chance(0.07)) done.op = Op::Activity; // an activity command (4.10)
+            else if (chance(0.05)) done.op = Op::Task;     // a flight task kept, flown or canceled (4.11)
         }
         const auto& caps = w.capabilities(v);
         // a capability's command: flight, guidance or support
@@ -1018,6 +1035,57 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             done.rank = {static_cast<std::uint16_t>(draw(4)), static_cast<std::uint16_t>(draw(4))};
             done.caller = chance(0.7) ? Source::Policy : chance(0.5) ? Source::Autopilot : Source::Override;
             done.result = w.activityCommand(done.caller, done.addressed, done.command, done.rank);
+            break;
+        }
+        case Op::Task: {
+            // flight tasks (4.11): one kept - a command drawn as a NEW's is - flown on a task command, or canceled
+            const double what = std::uniform_real_distribution<double>(0.0, 1.0)(schedules);
+            const std::vector<TaskStatus> kept = w.tasks(v);
+            std::vector<TaskId> mine; // (the caller's: a suggestion's capability is not drawn here, for the authority model)
+            for (const TaskStatus& t : kept)
+                if (!t.suggested) mine.push_back(t.id);
+            if (what < 0.4 || mine.empty()) {
+                std::vector<std::size_t> flyable;
+                for (std::size_t i = 0; i < caps.size(); ++i)
+                    if ((caps[i].interactions & kCommand) && !Maker::isSupport(caps[i])) flyable.push_back(i);
+                const std::size_t c = flyable[static_cast<std::size_t>(draw(static_cast<int>(flyable.size())))];
+                Command command;
+                if (!make.cascade(caps[c], true, command)) break;
+                TaskRepetition repetition;
+                if (caps[c].persistence == Persistence::Terminating && chance(0.5)) repetition.attempts = 2 + static_cast<std::uint32_t>(draw(2));
+                if (chance(0.5)) repetition.intervalS = done.stepS * draw(20);
+                const TaskId id = 1 + static_cast<TaskId>(draw(6));
+                Span<const Waypoint> points;
+                Span<const BezierSegment> pieces;
+                if (std::holds_alternative<RouteCommand>(command)) points = make.waypoints;
+                if (std::holds_alternative<CurveCommand>(command)) pieces = make.segments;
+                const Reason r = w.storeTask(v, id, command, points, pieces, repetition);
+                CHECK(among(r, {Reason::None, Reason::TaskActive, Reason::NotSupported, Reason::NotImplemented, Reason::UnknownCapability}));
+                ++seen[std::string("task:store:") + reasonName(r)];
+                if (r == Reason::None) taskCapability[id] = c;
+            } else if (what < 0.85) {
+                const TaskId id = mine[static_cast<std::size_t>(draw(static_cast<int>(mine.size())))];
+                done.taskCommand = true;
+                done.capability = taskCapability[id];
+                done.refused = authority.refuses(done.capability);
+                done.options.source = chance(0.6) ? Source::Policy : Source::Autopilot;
+                done.options.range = chance(0.5) ? RangePolicy::Clamp : RangePolicy::Reject;
+                done.result = w.commandTask(v, id, done.options);
+                ++seen[std::string("task:command:") + (done.result.accepted() ? "done" : reasonName(done.result.reason))];
+                if (done.result.accepted()) issued.push_back(done.result.activity);
+            } else {
+                const TaskId id = mine[static_cast<std::size_t>(draw(static_cast<int>(mine.size())))];
+                const CommandResult r = w.cancelTask(v, id);
+                ++seen[std::string("task:cancel:") + (r.status == CommandStatus::Canceled ? "done" : reasonName(r.reason))];
+                done.op = Op::Cancel; // (a cancel of its activity, when it flies: the rules of a CANCEL)
+                done.addressed = kept[0].id == id ? kept[0].activity : 0;
+                for (const TaskStatus& t : kept)
+                    if (t.id == id) done.addressed = t.activity;
+                done.caller = Source::Policy;
+                done.result = r;
+                if (!done.addressed || !w.activity(done.addressed) || !before.count(done.addressed) || !before.at(done.addressed).live())
+                    done.op = Op::Task, done.result = CommandResult{}; // (nothing flew: nothing to hold it to but the task's state, below)
+            }
             break;
         }
         case Op::Precedence: {
@@ -1161,6 +1229,50 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
         done.now = w.simTime();
         const auto after = snapshot(w, v);
         lastSerial = keepsTheRules(w, v, before, after, done, lastSerial, seen);
+        // flight tasks (4.11): each agrees with its activity, which traces to it; what a refusal or a failure suggests is kept
+        for (const TaskStatus& t : w.tasks(v)) {
+            INFO("task " << t.id << " " << taskStateName(t.state));
+            CHECK(t.run <= t.runs);
+            if (!std::isnan(t.percent)) CHECK((t.percent >= 0.0 && t.percent <= 100.0 + 1e-9));
+            CHECK(t.suggested == ((t.id & kSuggestedTask) != 0));
+            if (!t.activity) {
+                CHECK(among(t.state, {TaskState::AwaitingExecution, TaskState::Canceled}));
+                continue;
+            }
+            const ActivityRecord* a = w.activity(t.activity);
+            if (!a) continue; // (forgotten by now: its end as it was noted)
+            bool traced = false;
+            for (const Requirement& q : a->trace) traced = traced || (q.kind == RequirementKind::Task && q.id == t.id);
+            CHECK(traced);
+            if (a->live()) {
+                CHECK(t.state == (a->state == ActivityState::Active ? TaskState::Executing : TaskState::ExecutionPending));
+                CHECK((t.run == a->run && t.runs == a->runs));
+                ++seen[std::string("task:") + taskStateName(t.state)];
+            } else {
+                const TaskState end = a->state == ActivityState::Completed ? TaskState::Completed
+                                      : a->state == ActivityState::Failed  ? TaskState::Failed
+                                      : a->state == ActivityState::Deleted || a->reason == Reason::Requested ? TaskState::Canceled
+                                                                                                            : TaskState::Dropped;
+                CHECK(t.state == end);
+                ++seen[std::string("task:") + taskStateName(t.state)];
+            }
+        }
+        if ((done.op == Op::New || (done.op == Op::Task && done.taskCommand)) && !done.result.accepted() && !done.options.validateOnly)
+            if (const TaskId s = w.commandDetails(v)->suggestion) {
+                const auto t = w.taskStatus(v, s);
+                REQUIRE(t.has_value());
+                CHECK(t->suggested);
+                CHECK(done.options.range == RangePolicy::Reject);
+                ++seen["suggested:refused"];
+            }
+        for (const auto& [id, r] : after)
+            if (r.suggestion && r.endTime == done.now && before.count(id) && before.at(id).live()) {
+                CHECK(r.state == ActivityState::Failed);
+                const auto t = w.taskStatus(v, r.suggestion);
+                REQUIRE(t.has_value());
+                CHECK(t->suggested);
+                ++seen["suggested:failed"];
+            }
         // the World's authority is what the rules say it is
         CHECK(w.controlMode(v) == authority.mode);
         const bool diverged = w.vehicleState(v)->diverged != 0;
@@ -1177,7 +1289,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
         const bool changes = done.op == Op::Step || done.op == Op::Reset || (done.op == Op::New && done.result.accepted()) ||
                              (done.op == Op::Legacy && done.accepted) || (done.op == Op::Cancel && done.result.status == CommandStatus::Canceled) ||
                              (done.op == Op::Authority && !done.ends.empty()) || done.op == Op::Precedence ||
-                             (done.op == Op::Activity && done.result.accepted());
+                             (done.op == Op::Activity && done.result.accepted()) || (done.op == Op::Task && done.result.accepted());
         if (!changes) {
             // refused, an UPDATE, or nothing to do with the records: they are as they were
             CHECK(after.size() == before.size());
@@ -1263,7 +1375,10 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
                                         "restrict", "update:authority_held", "cancel:authority_held",
                                         // ranks, queues and time windows (docs/flight-autonomy.md, 4.9)
                                         "precedence", "new:not_allowed", "new:time_constraint", "failed:time_constraint", "completed:window",
-                                        "failed:waiting", "activity:not_interactive", "disabled->pending", "active->disabled"};
+                                        "failed:waiting", "activity:not_interactive", "disabled->pending", "active->disabled",
+                                        // flight tasks and suggestions (4.11)
+                                        "task:store:none", "task:command:done", "task:command:task_active", "task:executing", "task:completed",
+                                        "task:cancel:done", "suggested:refused"};
     auto missing = [&all] { return std::any_of(std::begin(kRare), std::end(kRare), [&all](const char* what) { return all[what] == 0; }); };
     for (std::uint64_t seed = 20260927; missing() && seed < 20260927 + 12; ++seed)
         for (const Aircraft& a : kAdapters) {

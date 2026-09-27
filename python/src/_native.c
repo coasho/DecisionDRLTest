@@ -753,10 +753,10 @@ static PyObject* result_tuple(const fsim_world* world, const fsim_command_result
 /* As result_tuple, with its detail given (a batch item's). */
 static PyObject* result_tuple_with(const fsim_command_result* r, const fsim_command_detail* dp) {
     const fsim_command_detail d = *dp;
-    return Py_BuildValue("(iiKKOiiddOKKsIIO)", r->status, r->reason, (unsigned long long)r->activity, (unsigned long long)r->other,
+    return Py_BuildValue("(iiKKOiiddOKKsIIOK)", r->status, r->reason, (unsigned long long)r->activity, (unsigned long long)r->other,
                          (r->flags & FSIM_COMMAND_CLAMPED) ? Py_True : Py_False, d.index, d.constraint, d.from, d.to, d.new_activity ? Py_True : Py_False,
                          (unsigned long long)d.command_id, (unsigned long long)d.associated, d.description ? d.description : "", d.finding_count,
-                         d.adjustment_count, (r->flags & FSIM_COMMAND_DEFERRED) ? Py_True : Py_False);
+                         d.adjustment_count, (r->flags & FSIM_COMMAND_DEFERRED) ? Py_True : Py_False, (unsigned long long)d.suggestion);
 }
 
 /* (id, vehicle, capability, source, axes, state, reason, by, constraints, constraints_seen, start_time, end_time,
@@ -779,11 +779,12 @@ static PyObject* info_tuple(const fsim_world* world, const fsim_activity_info* a
         }
     }
     if (!trace) return NULL;
-    return Py_BuildValue("(KIIiIiiKIIddKONii(II)IKO(ddddi))", (unsigned long long)a->id, a->vehicle, a->capability, a->source, a->axes, a->state,
+    return Py_BuildValue("(KIIiIiiKIIddKONii(II)IKO(ddddi)KII)", (unsigned long long)a->id, a->vehicle, a->capability, a->source, a->axes, a->state,
                          a->reason, (unsigned long long)a->by, a->constraints, a->constraints_seen, a->start_time, a->end_time,
                          (unsigned long long)e.command_id, e.interactive ? Py_True : Py_False, trace, e.waiting, e.basis,
                          (unsigned int)e.rank_priority, (unsigned int)e.rank_precedence, e.precedence, (unsigned long long)e.waiting_for,
-                         e.interrupt ? Py_True : Py_False, e.start_not_before, e.start_not_after, e.end_not_before, e.end_not_after, e.criticality);
+                         e.interrupt ? Py_True : Py_False, e.start_not_before, e.start_not_after, e.end_not_before, e.end_not_after, e.criticality,
+                         (unsigned long long)e.suggestion, e.run, e.runs);
 }
 
 static int as_u64(PyObject* o, uint64_t* out) {
@@ -1953,9 +1954,64 @@ static void batch_free(BatchItem* items, Py_ssize_t count) {
     PyMem_Free(items);
 }
 
-/* submit_batch(id, items) -> [result]: several NEWs at once (ABI 1.8), each item (kind, code, values, behavior,
- * waypoints, segments, options) - kind fsim_batch_kind, behavior (id, target, params, points) or None, options
- * (source, axes, range, min_version, envelope) or None - each answered on its own */
+/* One batch item (kind, code, values, behavior, waypoints, segments, options) into `it` and `b`: kind
+ * fsim_batch_kind, behavior (id, target, params, points) or None, options (source, axes, range, min_version,
+ * envelope) or None. 0 with a Python error if malformed. */
+static int read_batch_item(PyObject* item, BatchItem* it, fsim_batch_command* b) {
+    b->struct_size = sizeof *b;
+    PyObject* part[7] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+    int ok = item && PySequence_Check(item) && PySequence_Size(item) == 7;
+    if (item && !ok && !PyErr_Occurred())
+        PyErr_SetString(PyExc_ValueError, "each item must be (kind, code, values, behavior, waypoints, segments, options)");
+    for (Py_ssize_t k = 0; ok && k < 7; ++k) ok = (part[k] = PySequence_GetItem(item, k)) != NULL;
+    if (ok) ok = as_int(part[0], &b->kind) && as_int(part[1], &b->code);
+    if (ok) {
+        const Py_ssize_t values = read_values(part[2], it->row, "a batch item");
+        ok = values >= 0;
+        b->fields = it->row, b->count = (uint32_t)(values > 0 ? values : 0);
+    }
+    if (ok && part[3] != Py_None) { /* a behaviour: (id, target, params, points) */
+        PyObject* bp[4] = {NULL, NULL, NULL, NULL};
+        ok = PySequence_Check(part[3]) && PySequence_Size(part[3]) == 4;
+        if (!ok && !PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "a behaviour must be (id, target, params, points)");
+        for (Py_ssize_t k = 0; ok && k < 4; ++k) ok = (bp[k] = PySequence_GetItem(part[3], k)) != NULL;
+        if (ok) ok = (it->behavior.id = as_str(bp[0], "behaviour id")) != NULL && as_u32(bp[1], &it->behavior.target);
+        if (ok) ok = fsim_py_params_read(bp[2], &it->params) >= 0;
+        if (ok && bp[3] != Py_None) ok = read_points(bp[3], &it->points, &it->behavior.point_count) >= 0;
+        it->behavior.param_names = it->params.names, it->behavior.param_values = it->params.values, it->behavior.param_count = it->params.count;
+        it->behavior.points = it->points;
+        b->behavior = &it->behavior;
+        for (Py_ssize_t k = 0; k < 4; ++k) Py_XDECREF(bp[k]); /* (the behaviour's id stays alive in the caller's item) */
+    }
+    if (ok && part[4] != Py_None) {
+        const Py_ssize_t np = read_waypoints(part[4], &it->waypoints);
+        ok = np >= 0;
+        b->waypoints = it->waypoints, b->waypoint_count = (uint32_t)(np > 0 ? np : 0);
+    }
+    if (ok && part[5] != Py_None) {
+        const Py_ssize_t ns = read_segments(part[5], &it->segments);
+        ok = ns >= 0;
+        b->segments = it->segments, b->segment_count = (uint32_t)(ns > 0 ? ns : 0);
+    }
+    if (ok) { /* options: (source, axes, range, min_version, envelope) */
+        fsim_command_options_init(&it->options);
+        if (part[6] != Py_None) {
+            PyObject* op[5] = {NULL, NULL, NULL, NULL, NULL};
+            const Py_ssize_t size = PySequence_Check(part[6]) ? PySequence_Size(part[6]) : -1;
+            ok = size >= 0 && size <= 5;
+            if (!ok && !PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "options must be (source, axes, range, min_version, envelope)");
+            for (Py_ssize_t k = 0; ok && k < size; ++k) ok = (op[k] = PySequence_GetItem(part[6], k)) != NULL;
+            if (ok) ok = read_options(op, size, 0, &it->options);
+            for (Py_ssize_t k = 0; k < 5; ++k) Py_XDECREF(op[k]);
+        }
+        b->options = &it->options;
+    }
+    for (Py_ssize_t k = 0; k < 7; ++k) Py_XDECREF(part[k]);
+    return ok;
+}
+
+/* submit_batch(id, items) -> [result]: several NEWs at once (ABI 1.8), each item as read_batch_item reads it, each
+ * answered on its own */
 static PyObject* world_submit_batch(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint32_t id;
@@ -1970,59 +2026,9 @@ static PyObject* world_submit_batch(PyObject* o, PyObject* const* args, Py_ssize
     int ok = items && batch && results && details;
     if (!ok) PyErr_NoMemory();
     for (Py_ssize_t i = 0; ok && i < count; ++i) {
-        BatchItem* it = &items[i];
-        fsim_batch_command* b = &batch[i];
-        b->struct_size = sizeof *b;
         PyObject* item = PySequence_GetItem(args[1], i);
-        PyObject* part[7] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL};
-        ok = item && PySequence_Check(item) && PySequence_Size(item) == 7;
-        if (item && !ok && !PyErr_Occurred())
-            PyErr_SetString(PyExc_ValueError, "each item must be (kind, code, values, behavior, waypoints, segments, options)");
-        for (Py_ssize_t k = 0; ok && k < 7; ++k) ok = (part[k] = PySequence_GetItem(item, k)) != NULL;
-        if (ok) ok = as_int(part[0], &b->kind) && as_int(part[1], &b->code);
-        if (ok) {
-            const Py_ssize_t values = read_values(part[2], it->row, "submit_batch");
-            ok = values >= 0;
-            b->fields = it->row, b->count = (uint32_t)(values > 0 ? values : 0);
-        }
-        if (ok && part[3] != Py_None) { /* a behaviour: (id, target, params, points) */
-            PyObject* bp[4] = {NULL, NULL, NULL, NULL};
-            ok = PySequence_Check(part[3]) && PySequence_Size(part[3]) == 4;
-            if (!ok && !PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "a behaviour must be (id, target, params, points)");
-            for (Py_ssize_t k = 0; ok && k < 4; ++k) ok = (bp[k] = PySequence_GetItem(part[3], k)) != NULL;
-            if (ok) ok = (it->behavior.id = as_str(bp[0], "behaviour id")) != NULL && as_u32(bp[1], &it->behavior.target);
-            if (ok) ok = fsim_py_params_read(bp[2], &it->params) >= 0;
-            if (ok && bp[3] != Py_None) ok = read_points(bp[3], &it->points, &it->behavior.point_count) >= 0;
-            it->behavior.param_names = it->params.names, it->behavior.param_values = it->params.values, it->behavior.param_count = it->params.count;
-            it->behavior.points = it->points;
-            b->behavior = &it->behavior;
-            for (Py_ssize_t k = 0; k < 4; ++k) Py_XDECREF(bp[k]); /* (the behaviour's id stays alive in the caller's item) */
-        }
-        if (ok && part[4] != Py_None) {
-            const Py_ssize_t np = read_waypoints(part[4], &it->waypoints);
-            ok = np >= 0;
-            b->waypoints = it->waypoints, b->waypoint_count = (uint32_t)(np > 0 ? np : 0);
-        }
-        if (ok && part[5] != Py_None) {
-            const Py_ssize_t ns = read_segments(part[5], &it->segments);
-            ok = ns >= 0;
-            b->segments = it->segments, b->segment_count = (uint32_t)(ns > 0 ? ns : 0);
-        }
-        if (ok) { /* options: (source, axes, range, min_version, envelope) */
-            fsim_command_options_init(&it->options);
-            if (part[6] != Py_None) {
-                PyObject* op[5] = {NULL, NULL, NULL, NULL, NULL};
-                const Py_ssize_t size = PySequence_Check(part[6]) ? PySequence_Size(part[6]) : -1;
-                ok = size >= 0 && size <= 5;
-                if (!ok && !PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "options must be (source, axes, range, min_version, envelope)");
-                for (Py_ssize_t k = 0; ok && k < size; ++k) ok = (op[k] = PySequence_GetItem(part[6], k)) != NULL;
-                if (ok) ok = read_options(op, size, 0, &it->options);
-                for (Py_ssize_t k = 0; k < 5; ++k) Py_XDECREF(op[k]);
-            }
-            b->options = &it->options;
-        }
-        for (Py_ssize_t k = 0; k < 7; ++k) Py_XDECREF(part[k]);
-        Py_XDECREF(item);
+        ok = read_batch_item(item, &items[i], &batch[i]);
+        Py_XDECREF(item); /* (alive in the caller's list) */
     }
     PyObject* out = NULL;
     if (ok) {
@@ -2040,6 +2046,104 @@ static PyObject* world_submit_batch(PyObject* o, PyObject* const* args, Py_ssize
     PyMem_Free(batch);
     PyMem_Free(results);
     PyMem_Free(details);
+    return out;
+}
+
+/* (task_id, state, reason, suggested, activity, run, runs, percent, start_time, end_time, command_id) */
+static PyObject* task_tuple(const fsim_task_status* t) {
+    return Py_BuildValue("(KiiOKIIdddK)", (unsigned long long)t->task_id, t->state, t->reason, t->suggested ? Py_True : Py_False,
+                         (unsigned long long)t->activity, t->run, t->runs, t->percent, t->start_time, t->end_time, (unsigned long long)t->command_id);
+}
+
+/* store_task(id, task_id, item, attempts, interval_s) -> reason: a task kept (ABI 1.11), its command a batch item */
+static PyObject* world_store_task(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id, attempts = 1;
+    uint64_t task;
+    if (!check_args(n, 5, 5, "store_task") || !as_u32(args[0], &id) || !as_u64(args[1], &task) || !as_u32(args[3], &attempts) || !WORLD_IDLE(self))
+        return NULL;
+    const double interval = PyFloat_AsDouble(args[4]);
+    if (PyErr_Occurred()) return NULL;
+    BatchItem* it = (BatchItem*)PyMem_Calloc(1, sizeof(BatchItem));
+    fsim_batch_command b;
+    memset(&b, 0, sizeof b);
+    if (!it) return PyErr_NoMemory();
+    PyObject* out = NULL;
+    int32_t reason = 0;
+    if (read_batch_item(args[2], it, &b)) {
+        if (fsim_vehicle_store_task(self->world, id, task, &b, attempts, interval, &reason) != FSIM_OK) fail();
+        else out = PyLong_FromLong(reason);
+    }
+    batch_free(it, 1);
+    return out;
+}
+
+/* command_task(id, task_id, source, axes, range, min_version, envelope) -> result */
+static PyObject* world_command_task(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t task;
+    fsim_command_options opt;
+    fsim_command_result r;
+    if (!check_args(n, 2, 7, "command_task") || !as_u32(args[0], &id) || !as_u64(args[1], &task) || !read_options(args, n, 2, &opt) ||
+        !WORLD_IDLE(self))
+        return NULL;
+    if (fsim_vehicle_command_task(self->world, id, task, &opt, &r) != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
+/* cancel_task(id, task_id, source=0) -> result */
+static PyObject* world_cancel_task(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t task;
+    int source = 0;
+    fsim_command_result r;
+    if (!check_args(n, 2, 3, "cancel_task") || !as_u32(args[0], &id) || !as_u64(args[1], &task) || (n > 2 && !as_int(args[2], &source)) ||
+        !WORLD_IDLE(self))
+        return NULL;
+    if (fsim_vehicle_cancel_task(self->world, id, task, source, &r) != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
+/* remove_task(id, task_id) -> reason */
+static PyObject* world_remove_task(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t task;
+    int32_t reason = 0;
+    if (!check_args(n, 2, 2, "remove_task") || !as_u32(args[0], &id) || !as_u64(args[1], &task) || !WORLD_IDLE(self)) return NULL;
+    if (fsim_vehicle_remove_task(self->world, id, task, &reason) != FSIM_OK) return fail();
+    return PyLong_FromLong(reason);
+}
+
+/* task_status(id, task_id) -> status tuple, or None for one not kept */
+static PyObject* world_task_status(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t task;
+    fsim_task_status t;
+    if (!check_args(n, 2, 2, "task_status") || !as_u32(args[0], &id) || !as_u64(args[1], &task)) return NULL;
+    fsim_task_status_init(&t);
+    if (fsim_vehicle_task_status(self->world, id, task, &t) != FSIM_OK) Py_RETURN_NONE;
+    return task_tuple(&t);
+}
+
+/* tasks(id) -> [status tuple] */
+static PyObject* world_tasks(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    if (!check_args(n, 1, 1, "tasks") || !as_u32(args[0], &id)) return NULL;
+    const uint32_t count = fsim_vehicle_task_count(self->world, id);
+    PyObject* out = PyList_New(0);
+    for (uint32_t i = 0; out && i < count; ++i) {
+        fsim_task_status t;
+        fsim_task_status_init(&t);
+        if (fsim_vehicle_task_at(self->world, id, i, &t) != FSIM_OK) continue;
+        PyObject* tt = task_tuple(&t);
+        if (!tt || PyList_Append(out, tt) < 0) Py_CLEAR(out);
+        Py_XDECREF(tt);
+    }
     return out;
 }
 
@@ -2073,6 +2177,12 @@ static PyMethodDef world_methods[] = {
     FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride[, fields])"),
     FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity, source=0) -> result"),
     FAST("activity_command", world_activity_command, "activity_command(activity, command, priority, precedence, source=0) -> result"),
+    FAST("store_task", world_store_task, "store_task(id, task_id, item, attempts, interval_s) -> reason"),
+    FAST("command_task", world_command_task, "command_task(id, task_id, source, axes, range, min_version, envelope) -> result"),
+    FAST("cancel_task", world_cancel_task, "cancel_task(id, task_id, source=0) -> result"),
+    FAST("remove_task", world_remove_task, "remove_task(id, task_id) -> reason"),
+    FAST("task_status", world_task_status, "task_status(id, task_id) -> status, or None"),
+    FAST("tasks", world_tasks, "tasks(id) -> [status]"),
     FAST("activity_info", world_activity_info, "activity_info(activity) -> info or None"),
     FAST("activity_progress", world_activity_progress, "activity_progress(activity) -> progress or None"),
     FAST("commanded", world_commanded, "commanded(id) -> what the cascade asked for in its last update"),

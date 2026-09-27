@@ -244,6 +244,37 @@ control::ControlStatus Vehicle::controlStatus(std::string_view capability) const
     return world_ ? world_->impl_->controlStatus(id_, capability) : control::ControlStatus{false, false};
 }
 
+control::Reason Vehicle::storeTask(control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints,
+                                   Span<const control::BezierSegment> segments, control::TaskRepetition repetition) {
+    return world_ ? world_->impl_->storeTask(id_, task, command, waypoints, segments, repetition) : control::Reason::UnknownVehicle;
+}
+
+control::CommandResult Vehicle::commandTask(control::TaskId task, const control::CommandOptions& options) {
+    if (!world_) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    return world_->impl_->commandTask(id_, task, options);
+}
+
+control::CommandResult Vehicle::cancelTask(control::TaskId task, control::Source caller) {
+    if (!world_) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    return world_->impl_->cancelTask(id_, task, caller);
+}
+
+control::Reason Vehicle::removeTask(control::TaskId task) { return world_ ? world_->impl_->removeTask(id_, task) : control::Reason::UnknownVehicle; }
+
+std::optional<control::TaskStatus> Vehicle::taskStatus(control::TaskId task) const {
+    return world_ ? world_->impl_->taskStatus(id_, task) : std::nullopt;
+}
+
+std::vector<control::TaskStatus> Vehicle::tasks() const { return world_ ? world_->impl_->tasks(id_) : std::vector<control::TaskStatus>{}; }
+
 control::Reason Vehicle::setCapabilityPrecedence(std::string_view capability, std::uint32_t precedence) {
     return world_ ? world_->impl_->setCapabilityPrecedence(id_, capability, precedence) : control::Reason::UnknownVehicle;
 }

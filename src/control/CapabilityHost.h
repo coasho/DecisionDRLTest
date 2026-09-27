@@ -109,6 +109,28 @@ public:
     /// Unassign). What waits may start after it. May allocate: an activity
     /// kept out of its slot keeps its route's waypoints and its curve's segments.
     CommandResult activityCommand(ActivityId activity, ActivityCommand command, Rank rank, const sim::VehicleState& state, double now, Source caller);
+
+    // --- Flight tasks (docs/flight-autonomy.md, 4.11): kept by id, flown on a task command ---
+    /// Suggestions the platform keeps at once (the oldest not flying makes room).
+    static constexpr std::size_t kSuggestions = 16;
+    /// Keep a task: a flight or guidance command, a route's waypoints, a
+    /// curve's segments, how often it flies. InvalidParameter for id 0 or one
+    /// with kSuggestedTask, no runs, a negative interval, or runs of a
+    /// capability that never completes; TaskActive while its activity is live;
+    /// else why the vehicle cannot command the capability.
+    Reason storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, TaskRepetition repetition);
+    /// A task command: the NEW of its command with `options`, the task among
+    /// the requirements it traces to, answered as the NEW is; its runs, as the
+    /// task says. UnknownTask; TaskActive while its activity is live.
+    CommandResult commandTask(TaskId id, CommandOptions options, const sim::VehicleState& state, double now);
+    /// Its live activity canceled (`caller` as for CANCEL); one never commanded will not be. UnknownTask.
+    CommandResult cancelTask(TaskId id, const sim::VehicleState& state, double now, Source caller);
+    /// Forget it: UnknownTask; TaskActive while its activity is live.
+    Reason removeTask(TaskId id);
+    /// Its status; false for a task not kept.
+    bool taskStatus(TaskId id, TaskStatus& out);
+    /// Every task kept - the caller's and the platform's suggestions - in the order they were made.
+    std::vector<TaskStatus> tasks();
     /// The existing entry points (docs/control-architecture.md, 10.7): an
     /// UPDATE of their live activity at the same capability, else a NEW with
     /// the legacy options.
@@ -232,6 +254,7 @@ private:
         bool outside = false;     ///< a manoeuvre's: the state went past a limit by more than a limiter overshoots
         std::uint32_t precedenceOverride = kNoPrecedenceOverride; ///< its command's (CommandOptions::precedenceOverride)
         double firstStart = kHold; ///< a route's start as commanded: Reset flies from it (a route resumed flies from elsewhere)
+        double restartAt = kUnknown; ///< a task's next run begins then (4.11); NaN: none due
     };
 
     /// An activity waiting to start (docs/flight-autonomy.md, 4.9): its record
@@ -248,7 +271,46 @@ private:
         std::vector<BezierSegment> segments; ///< a curve's (likewise)
         std::uint64_t queued = 0;           ///< when it began to wait (queueSerial_): its place among equals
         double firstStart = kHold;          ///< a route's start as commanded (Reset: kept out of its slot, it resumed elsewhere)
+        /// A waiting activity that failed as it would start, kept as the
+        /// suggestion its record names (4.11) until a call makes it a task
+        /// (what a start in a step may not allocate).
+        bool suggested = false;
+        TaskId suggestion = 0;
+        bool resumed = false; ///< it flew before (disabled, unassigned): its start window was its first start's
     };
+    /// A flight task (4.11): its command, and what became of it.
+    struct Task {
+        TaskId id = 0;
+        bool suggested = false;             ///< the platform's
+        Command command{};
+        std::vector<Waypoint> waypoints;
+        std::vector<BezierSegment> segments;
+        TaskRepetition repetition{};
+        ActivityId activity = 0;            ///< its activity (every run's), while it is commanded
+        std::uint64_t commandId = 0;        ///< its task command's
+        TaskState ended = TaskState::AwaitingExecution; ///< once its activity ended (or it was canceled before it was commanded)
+        Reason reason = Reason::None;
+        std::uint32_t run = 0, runs = 0;    ///< its activity's, as it ended
+        double percent = kUnknown;          ///< likewise
+        double startTime = kUnknown, endTime = kUnknown;
+    };
+    Task* findTask(TaskId id) noexcept;
+    TaskStatus statusOf(const Task& t) const noexcept;
+    /// An activity ended: the task it flew (if any) takes its end - in the step, allocating nothing.
+    void noteEnd(const ActivityRecord& record) noexcept;
+    /// The platform's suggestion (4.11): a task with the command the checks
+    /// left, every value held to its limit (a route's points as planned). Its id.
+    TaskId suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments);
+    /// Room for a suggestion: the oldest not flying goes where kSuggestions are kept.
+    Task& newSuggestion(TaskId id);
+    /// Failed waiting activities kept as suggestions, made tasks now.
+    void materialize();
+    /// A task's interval between runs, by its activity; NaN if none.
+    double repeatInterval(ActivityId activity) const noexcept;
+    /// Slot s's activity flies its next run: its behaviour afresh.
+    void restartRun(std::size_t slot) noexcept;
+    /// A live activity's record, flying or waiting; null if none.
+    ActivityRecord* liveRecord(ActivityId activity) noexcept;
     /// A flying activity leaves its slot, kept in the waiting store: Disabled,
     /// or Pending to wait for its axes again, behind what waits. Its behaviour
     /// is kept, its setpoint and a route's waypoints or a curve's segments too;
@@ -472,6 +534,9 @@ private:
     std::size_t recentNext_ = 0, recentCount_ = 0;
     std::size_t waitingCount_ = 0;                      ///< activities waiting to start, or disabled
     std::uint64_t queueSerial_ = 0;                     ///< counts entries into the waiting store
+    std::vector<Task> tasks_;                           ///< the flight tasks kept (4.11), in the order they were made
+    std::uint64_t suggestionSerial_ = 0;                ///< numbers the platform's suggestions
+    std::size_t pendingSuggestions_ = 0;                ///< waiting entries kept as suggestions, not yet tasks
     std::size_t windowed_ = 0;                          ///< live activities with an end window, flying
     std::vector<Authority> authority_;                  ///< per capability (sized at bind)
     ControlMode controlMode_ = ControlMode::Open;

@@ -147,6 +147,9 @@ enum class Reason : std::uint8_t {
     QueueFull,      ///< NEW rejected: it would wait, and as many activities as can wait already do
     // activity commands (docs/flight-autonomy.md, 4.10)
     NotInteractive, ///< an activity command refused: its command said it takes none (CommandOptions::interactive)
+    // flight tasks (docs/flight-autonomy.md, 4.11)
+    UnknownTask,    ///< a task command refused: the vehicle keeps no task by that id
+    TaskActive,     ///< a task command or store refused: the task's activity is live
     Count
 };
 
@@ -350,9 +353,57 @@ struct Adjustment {
 struct CommandDetails {
     static constexpr std::size_t kMax = 16;
     std::uint8_t findingCount = 0, adjustmentCount = 0; ///< (beyond kMax: counted, not kept)
+    /// A refused command's suggestion (docs/flight-autonomy.md, 4.11): the
+    /// task the platform keeps with what it can fly in its place - every value
+    /// held to the aircraft's limits (A-GRA's best-effort MA_TaskMT); 0 none.
+    std::uint64_t suggestion = 0;
     std::array<Finding, kMax> findings{};
     std::array<Adjustment, kMax> adjustments{};
-    void clear() noexcept { findingCount = adjustmentCount = 0; }
+    void clear() noexcept { findingCount = adjustmentCount = 0, suggestion = 0; }
+};
+
+// --- Flight tasks (docs/flight-autonomy.md, 4.11) --------------------------------------
+
+/// A flight task's id (A-GRA's TaskID): the caller's own, or - kSuggestedTask
+/// set - a suggestion the platform made.
+using TaskId = std::uint64_t;
+inline constexpr TaskId kSuggestedTask = TaskId{1} << 63;
+
+/// How often a task flies (A-GRA's finite repetition): `attempts` runs in
+/// all, each after the one before completes, `intervalS` later (NaN: at
+/// once). Its one activity stays active between runs, flying what its
+/// behaviour flies when done. A terminating capability's only.
+struct TaskRepetition {
+    std::uint32_t attempts = 1;
+    double intervalS = std::numeric_limits<double>::quiet_NaN();
+};
+
+/// A task's execution state (A-GRA's RequirementExecutionStateEnum).
+enum class TaskState : std::uint8_t {
+    AwaitingExecution, ///< kept, not commanded (or commanded and refused)
+    ExecutionPending,  ///< commanded: its activity waits to start, has not flown yet, or is disabled
+    Executing,         ///< its activity flies
+    Completed,         ///< its activity completed, every run
+    Dropped,           ///< its activity lost its axes or its authority (preempted, revoked, released, ...)
+    Failed,            ///< its activity failed
+    Canceled,          ///< canceled, or its activity canceled or deleted on request
+    Count
+};
+/// "awaiting_execution", "execution_pending", "executing", "completed", "dropped", "failed", "canceled".
+FSIM_API const char* taskStateName(TaskState state) noexcept;
+
+/// A task's status (A-GRA's TaskStatus).
+struct TaskStatus {
+    TaskId id = 0;
+    TaskState state = TaskState::AwaitingExecution;
+    Reason reason = Reason::None;          ///< why it failed, was dropped or canceled: its activity's end
+    bool suggested = false;                ///< the platform's: what it can fly in place of a command it refused
+    ActivityId activity = 0;               ///< its activity (every run's); 0 before it is commanded
+    std::uint32_t run = 0, runs = 0;       ///< the run flying or flown last, of how many
+    double percent = std::numeric_limits<double>::quiet_NaN(); ///< of the whole task, 0..100 (A-GRA's PercentCompleted)
+    double startTime = std::numeric_limits<double>::quiet_NaN(); ///< when it was commanded
+    double endTime = std::numeric_limits<double>::quiet_NaN();   ///< when its activity ended
+    std::uint64_t commandId = 0;           ///< its task command's id
 };
 
 // --- Activities ---------------------------------------------------------------------
@@ -434,6 +485,7 @@ struct ActivityRecord {
     // how it is arbitrated and scheduled (docs/flight-autonomy.md, 4.9)
     bool interrupt = true;             ///< its command's CommandOptions::interrupt
     ActivityWait waiting = ActivityWait::None; ///< why it has not started, while pending
+    std::uint16_t run = 0, runs = 0;   ///< a task's repetition (4.11): the run flying, of how many; 0, 0 none
     Rank rank{};                       ///< A-GRA's ActivityRank
     std::uint32_t precedence = 0;      ///< its capability's precedence it is arbitrated by (its command's override, else the capability's)
     ActivityId waitingFor = 0;         ///< Queued: an activity on its axes it may not interrupt
@@ -442,6 +494,7 @@ struct ActivityRecord {
     ActivityState state = ActivityState::Pending;
     Reason reason = Reason::None;      ///< why it ended, else None
     ActivityId by = 0;                 ///< the preempting activity, with Preempted
+    std::uint64_t suggestion = 0;      ///< Failed as it would start: the task the platform suggests in its place (4.11), else 0
     std::uint16_t constraints = 0;     ///< ActivityFlag bits of the last world step
     std::uint16_t constraintsSeen = 0; ///< every ActivityFlag bit since it started
     double startTime = 0.0;            ///< simulation time

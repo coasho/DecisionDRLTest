@@ -144,7 +144,8 @@ void CapabilityHost::endPolicy(std::size_t capability, Reason reason, const sim:
         }
     if (waitingCount_)
         for (Waiting& w : *waiting_)
-            if (w.used && w.record.capability == capability && w.record.source == Source::Policy) endWaiting(w, ActivityState::Canceled, reason, now);
+            if (w.used && !w.suggested && w.record.capability == capability && w.record.source == Source::Policy)
+                endWaiting(w, ActivityState::Canceled, reason, now);
     schedule(state, now); // (what waited for the axes may start)
 }
 
@@ -161,7 +162,7 @@ void CapabilityHost::setControlMode(ControlMode mode, const sim::VehicleState& s
         }
     if (waitingCount_)
         for (Waiting& w : *waiting_)
-            if (w.used && ungranted(w.record)) endWaiting(w, ActivityState::Canceled, Reason::NotGranted, now);
+            if (w.used && !w.suggested && ungranted(w.record)) endWaiting(w, ActivityState::Canceled, Reason::NotGranted, now);
     schedule(state, now);
 }
 
@@ -226,7 +227,8 @@ Reason CapabilityHost::setPrecedence(std::size_t capability, std::uint32_t prece
             records_[s].precedence = precedence;
     if (waitingCount_)
         for (Waiting& w : *waiting_)
-            if (w.used && w.record.capability == capability && w.options.precedenceOverride == kNoPrecedenceOverride) w.record.precedence = precedence;
+            if (w.used && !w.suggested && w.record.capability == capability && w.options.precedenceOverride == kNoPrecedenceOverride)
+                w.record.precedence = precedence;
     schedule(state, now);
     return Reason::None;
 }
@@ -591,7 +593,7 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> seg
         const auto index = static_cast<std::int16_t>(i);
         const Constraint constraint = descends ? Constraint::MaxDescentRate : Constraint::MaxClimbRate;
         if (log.range == RangePolicy::Reject) {
-            log.find(Reason::PerformanceLimit, index, constraint, static_cast<float>(at), static_cast<float>(at));
+            log.held(Reason::PerformanceLimit, index, constraint, static_cast<float>(at), static_cast<float>(at)); // (Clamp flies it at its rate)
         } else {
             double asked = gradient * fast;
             if (!(log.result.flags & kClamped)) log.result.from = log.result.to = static_cast<float>(at); // (the first clamp's section)
@@ -967,7 +969,7 @@ CapabilityHost::Waiting* CapabilityHost::freeWaiting() {
 CapabilityHost::Waiting* CapabilityHost::waitingEntry(ActivityId activity) noexcept {
     if (!waitingCount_ || !activity) return nullptr;
     for (Waiting& w : *waiting_)
-        if (w.used && w.record.id == activity) return &w;
+        if (w.used && !w.suggested && w.record.id == activity) return &w;
     return nullptr;
 }
 
@@ -984,6 +986,7 @@ void CapabilityHost::endWaiting(Waiting& w, ActivityState state, Reason reason, 
     recent_[recentNext_] = record;
     recentNext_ = (recentNext_ + 1) % kRecent;
     recentCount_ = std::min(recentCount_ + 1, kRecent);
+    noteEnd(record);
     w.used = false;
     w.behavior.reset(); // (what it kept: freed, never allocated)
     --waitingCount_;
@@ -1018,7 +1021,23 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     const bool route = std::holds_alternative<RouteCommand>(setpoint);
     if (why == Reason::None) why = prepare(record.capability, setpoint, Span<const Waypoint>(w.waypoints.data(), w.waypoints.size()),
                                            Span<const BezierSegment>(w.segments.data(), w.segments.size()), state, log);
+    const bool found = why == Reason::None && log.refused != Reason::None; // (refused by what the checks found, not malformed)
     if (why == Reason::None) why = log.refused;
+    if (found && w.options.range == RangePolicy::Reject && log.clampable) {
+        // what Clamp would fly, suggested in its place (4.11): kept in its entry until a call makes it a task
+        w.command = std::move(setpoint);
+        if (route && routePlan_) w.waypoints.assign(routePlan_->points, routePlan_->points + routePlan_->count); // (within its room)
+        w.suggested = true;
+        w.suggestion = kSuggestedTask | ++suggestionSerial_;
+        ++pendingSuggestions_;
+        ActivityRecord& failed = w.record;
+        failed.state = ActivityState::Failed, failed.reason = why, failed.by = 0, failed.endTime = now, failed.suggestion = w.suggestion;
+        recent_[recentNext_] = failed;
+        recentNext_ = (recentNext_ + 1) % kRecent;
+        recentCount_ = std::min(recentCount_ + 1, kRecent);
+        noteEnd(failed);
+        return false;
+    }
     if (why == Reason::None) why = checkAwareness(record.axes, d.level, true);
     if (why != Reason::None) {
         endWaiting(w, ActivityState::Failed, why, now);
@@ -1037,7 +1056,7 @@ bool CapabilityHost::scheduleWaiting(const sim::VehicleState& state, double now)
     std::array<Waiting*, kWaiting> order{};
     std::size_t n = 0;
     for (Waiting& w : *waiting_)
-        if (w.used) order[n++] = &w;
+        if (w.used && !w.suggested) order[n++] = &w;
     std::sort(order.begin(), order.begin() + static_cast<std::ptrdiff_t>(n), [](const Waiting* a, const Waiting* b) {
         const ActivityRecord &x = a->record, &y = b->record;
         if (x.source != y.source) return x.source > y.source;
@@ -1056,13 +1075,14 @@ bool CapabilityHost::scheduleWaiting(const sim::VehicleState& state, double now)
             ActivityRecord& r = w.record;
             const TimeWindow& t = r.window;
             const bool disabled = r.state == ActivityState::Disabled; // (it waits for ENABLE: only its end window can end it)
+            const bool first = !w.resumed;                            // (its start window is its first start's)
             // a window it can no longer meet: its end's closed, or its critical start's
-            if (now >= t.endNotAfter || (!disabled && t.startCritical() && now > t.startNotAfter)) {
+            if (now >= t.endNotAfter || (!disabled && first && t.startCritical() && now > t.startNotAfter)) {
                 endWaiting(w, ActivityState::Failed, Reason::TimeConstraint, now);
                 continue;
             }
             if (disabled) continue;
-            if (now < t.startNotBefore) {
+            if (first && now < t.startNotBefore) {
                 r.waiting = ActivityWait::Scheduled, r.waitingFor = 0;
                 continue;
             }
@@ -1104,6 +1124,7 @@ CommandResult CapabilityHost::submit(const CurveCommand& curve, Span<const Bezie
 
 CommandResult CapabilityHost::submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
                                          const CommandOptions& options, const sim::VehicleState& state, double now, bool mayWait) {
+    if (pendingSuggestions_) materialize();
     details_.clear();
     const int found = catalog_->indexOf(command);
     if (found < 0) return rejected(missing(featureOf(command))); // not supported, not implemented, or unknown
@@ -1132,8 +1153,13 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     CommandResult detail; // what the checks found: kClamped, the first finding's detail
     CheckLog log{detail, options.range, &details_};
     if (const Reason why = prepare(index, setpoint, waypoints, segments, state, log); why != Reason::None) return about(rejected(why), detail);
-    // every finding named: refused with the first (docs/flight-autonomy.md, 4.8)
-    if (log.refused != Reason::None) return about(rejected(log.refused), detail);
+    // every finding named: refused with the first (docs/flight-autonomy.md, 4.8) - and, where Clamp
+    // would fly what the checks left, a task with it suggested in its place (4.11)
+    if (log.refused != Reason::None) {
+        if (options.range == RangePolicy::Reject && log.clampable && !options.validateOnly && d.kind != CapabilityKind::Support)
+            details_.suggestion = suggest(setpoint, waypoints, segments);
+        return about(rejected(log.refused), detail);
+    }
     const std::uint16_t flags = detail.flags;
     AxisMask axes = 0;
     if (const Reason why = axesOf(index, command, options, axes); why != Reason::None) return rejected(why);
@@ -1175,6 +1201,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
         w.record.waiting = scheduled ? ActivityWait::Scheduled : ActivityWait::Queued;
         w.record.waitingFor = blocker;
         w.queued = ++queueSerial_;
+        w.resumed = false;
         w.options = options;
         w.command = command;
         if (const auto* route = std::get_if<RouteCommand>(&command)) w.firstStart = route->start;
@@ -1198,6 +1225,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
 }
 
 CommandResult CapabilityHost::submit(const SupportCommand& command, const CommandOptions& options, const sim::VehicleState& state, double now) {
+    if (pendingSuggestions_) materialize();
     details_.clear();
     const int found = catalog_->indexOf(command);
     if (found < 0) return rejected(missing(featureOf(command))); // the aircraft has no such effector: why
@@ -1248,6 +1276,7 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
         w.record.waiting = scheduled ? ActivityWait::Scheduled : ActivityWait::Queued;
         w.record.waitingFor = blocker;
         w.queued = ++queueSerial_;
+        w.resumed = false;
         w.options = options;
         w.supportCommand = command;
         ++waitingCount_;
@@ -1446,7 +1475,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& 
 }
 
 CommandResult CapabilityHost::cancel(ActivityId activity, const sim::VehicleState& state, double now, Source caller) noexcept {
-    CommandResult r;
+    CommandResult r; // (the pending suggestions stay until a call that may allocate: a NEW, an activity or a task command)
     r.status = CommandStatus::Canceled;
     r.activity = activity;
     const int found = liveSlot(activity);
@@ -1512,6 +1541,7 @@ bool CapabilityHost::retire(std::size_t s, ActivityState state) {
     w->record.waiting = state == ActivityState::Pending ? ActivityWait::Queued : ActivityWait::None; // (the scheduler names what it waits for)
     w->record.waitingFor = 0;
     w->queued = ++queueSerial_; // behind what waits
+    w->resumed = true;          // (its start window was its first start's)
     if (w->support) {
         w->supportCommand = supportCommandOf(s);
     } else {
@@ -1540,6 +1570,7 @@ bool CapabilityHost::retire(std::size_t s, ActivityState state) {
 
 CommandResult CapabilityHost::activityCommand(ActivityId activity, ActivityCommand command, Rank rank, const sim::VehicleState& state, double now,
                                               Source caller) {
+    if (pendingSuggestions_) materialize();
     details_.clear();
     const int found = liveSlot(activity);
     Waiting* w = found < 0 ? waitingEntry(activity) : nullptr;
@@ -1568,7 +1599,7 @@ CommandResult CapabilityHost::activityCommand(ActivityId activity, ActivityComma
         if (!w && !retire(s, ActivityState::Pending)) return full();
         break; // (one that waits, or is disabled, holds nothing)
     case ActivityCommand::Enable: // a disabled one waits to start again; one live and enabled stays so
-        if (w && record.state == ActivityState::Disabled) record.state = ActivityState::Pending, w->queued = ++queueSerial_;
+        if (w && record.state == ActivityState::Disabled) record.state = ActivityState::Pending, record.waiting = ActivityWait::Queued, w->queued = ++queueSerial_;
         break;
     case ActivityCommand::Reset: // over from its beginning
         if (w) {
@@ -1576,7 +1607,8 @@ CommandResult CapabilityHost::activityCommand(ActivityId activity, ActivityComma
         } else {
             record.state = ActivityState::Pending;
             record.progress = ActivityProgress{};
-            slots_[s].outside = false;
+            if (record.runs) record.run = 1; // (a task's: its runs over from the first)
+            slots_[s].outside = false, slots_[s].restartAt = kUnknown;
             if (auto* route = isCascade(s) ? std::get_if<RouteCommand>(&config_->slots[s].command) : nullptr; route && !isHold(slots_[s].firstStart))
                 route->start = slots_[s].firstStart; // (from its first point, as commanded, not where it resumed)
             if (isCascade(s)) ++config_->slots[s].generation, ++config_->slots[s].revision; // its behaviour begins afresh
@@ -1731,7 +1763,7 @@ std::vector<ActivityRecord> CapabilityHost::activities() const {
     if (waitingCount_) { // what waits to start, oldest first
         const std::size_t first = out.size();
         for (const Waiting& w : *waiting_)
-            if (w.used) out.push_back(w.record);
+            if (w.used && !w.suggested) out.push_back(w.record);
         std::sort(out.begin() + static_cast<std::ptrdiff_t>(first), out.end(), [](const ActivityRecord& a, const ActivityRecord& b) { return a.id < b.id; });
     }
     for (std::size_t i = 0; i < recentCount_; ++i) out.push_back(recent_[(recentNext_ + kRecent - 1 - i) % kRecent]);
@@ -1750,6 +1782,7 @@ void CapabilityHost::end(std::size_t s, ActivityState state, Reason reason, Acti
     recent_[recentNext_] = record;
     recentNext_ = (recentNext_ + 1) % kRecent;
     recentCount_ = std::min(recentCount_ + 1, kRecent);
+    noteEnd(record);
 }
 
 void CapabilityHost::release(std::size_t s) noexcept {
@@ -1800,6 +1833,7 @@ bool CapabilityHost::afterStep(const sim::VehicleState& state, const EffectorPos
         if (!slot.activity) continue; // nothing flies here (and nothing reported)
         if (slot.live) {
             ActivityRecord& record = records_[s];
+            if (!std::isnan(slot.restartAt) && now >= slot.restartAt) restartRun(s); // a task's next run (4.11)
             const bool flown = isCascade(s) ? report.updates > 0 && report.slots[s].generation == config.slots[s].generation
                                             : report.updates > 0;
             if (record.state == ActivityState::Pending && flown) record.state = ActivityState::Active;
@@ -1820,6 +1854,13 @@ bool CapabilityHost::afterStep(const sim::VehicleState& state, const EffectorPos
                     // a manoeuvre flown past the envelope is not one completed (docs/flight-autonomy.md, 6)
                     if (slot.outside && catalog_->withinEnvelope(record.capability))
                         end(s, ActivityState::Failed, Reason::BehaviorFailed, 0, now);
+                    else if (record.run < record.runs) { // a task's run done, runs to come (4.11): the next, its interval later
+                        if (std::isnan(slot.restartAt)) { // (a behaviour done says so each step until it begins again)
+                            const double interval = repeatInterval(record.id);
+                            slot.restartAt = now + (std::isnan(interval) ? 0.0 : interval);
+                            if (!(slot.restartAt > now)) restartRun(s);
+                        }
+                    }
                     else if (record.window.endCritical() && now < record.window.endNotBefore) // done before its critical end window (4.9)
                         end(s, ActivityState::Failed, Reason::TimeConstraint, 0, now);
                     else end(s, ActivityState::Completed, Reason::GoalReached, 0, now);

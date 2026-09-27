@@ -180,6 +180,17 @@ class TimeCriticality(enum.IntEnum):
     START_AND_END = 3
 
 
+class TaskState(enum.IntEnum):
+    """A flight task's execution state (A-GRA's RequirementExecutionStateEnum; docs/flight-autonomy.md, 4.11)."""
+    AWAITING_EXECUTION = 0  #: kept, not commanded
+    EXECUTION_PENDING = 1   #: commanded: its activity waits, has not flown yet, or is disabled
+    EXECUTING = 2           #: its activity flies
+    COMPLETED = 3           #: every run completed
+    DROPPED = 4             #: its activity lost its axes or its authority
+    FAILED = 5
+    CANCELED = 6
+
+
 class Availability(enum.IntEnum):
     """Whether a capability can be commanded now (A-GRA's CapabilityAvailabilityEnum). DISABLED means switched off
     by the platform; a capability the vehicle does not offer is UNAVAILABLE, with the reason why
@@ -278,7 +289,7 @@ class Rejected(_native.Error):
     other than asked (fsim.Adjustment)."""
 
     def __init__(self, reason, other=0, index=-1, constraint="none", section=None, *, description="", associated=0, command_id=0,
-                 findings=(), adjustments=()):
+                 findings=(), adjustments=(), suggestion=0):
         about = "" if index < 0 else " (%s %d%s)" % ("item", index, "" if constraint == "none" else ", " + constraint)
         super().__init__("command refused: %s%s" % (reason, about))
         self.reason = reason
@@ -291,6 +302,9 @@ class Rejected(_native.Error):
         self.command_id = command_id
         self.findings = list(findings)
         self.adjustments = list(adjustments)
+        #: a task the platform keeps with what it can fly in this command's place - every value held to the
+        #: aircraft's limits (docs/flight-autonomy.md, 4.11; vehicle.command_task flies it); 0 none
+        self.suggestion = suggestion
 
 
 Rank = collections.namedtuple("Rank", "priority precedence", defaults=(0, 0))
@@ -307,14 +321,22 @@ TimeWindow.__doc__ = ("When a command may start and should end (A-GRA's Temporal
 
 ActivityInfo = collections.namedtuple(
     "ActivityInfo", "id vehicle capability source axes state reason by constraints constraints_seen start_time end_time "
-    "command_id interactive trace waiting basis rank precedence waiting_for interrupt window")
+    "command_id interactive trace waiting basis rank precedence waiting_for interrupt window suggestion run runs")
 ActivityInfo.__doc__ = ("An activity's record: its capability (an index into Vehicle.capabilities()), who commanded it, "
                         "its state and why it ended, flags (1 saturated, 8 clamped, ...) and when it ran; the command it came "
                         "from (docs/flight-autonomy.md, 4.8): its id, whether it takes activity commands, and the requirements "
                         "it traces to, as (fsim.RequirementKind, id) pairs; how it is arbitrated and scheduled (4.9): why it waits "
                         "to start (fsim.ActivityWait), what its record rests on (fsim.ActivityBasis: planned while it waits), its "
                         "fsim.Rank, its capability's precedence, what it waits for (queued), whether its command interrupts, and "
-                        "its fsim.TimeWindow.")
+                        "its fsim.TimeWindow; the task the platform suggests in its place, had it failed as it would start "
+                        "(4.11), and a task's runs: the run flying, of how many (0, 0 none).")
+
+TaskStatus = collections.namedtuple(
+    "TaskStatus", "id state reason suggested activity run runs percent start_time end_time command_id")
+TaskStatus.__doc__ = ("A flight task's status (A-GRA's TaskStatus; docs/flight-autonomy.md, 4.11): its fsim.TaskState and why it "
+                      "failed, was dropped or canceled; whether it is the platform's suggestion; its activity (every run's), the "
+                      "run flying or flown last of how many, the percent of the whole done, when it was commanded and ended, "
+                      "its task command's id.")
 
 Finding = collections.namedtuple("Finding", "reason index constraint section associated description")
 Finding.__doc__ = ("One reason a command cannot be flown as asked (A-GRA's ValidationResult; docs/flight-autonomy.md, 4.8): the "
@@ -379,7 +401,12 @@ CommandedState.__doc__ = ("What the cascade asked for in its last control update
 def _info(t):
     return ActivityInfo(t[0], t[1], t[2], Source(t[3]), t[4], ActivityState(t[5]), _native.reason_name(t[6]), t[7], t[8], t[9],
                         t[10], t[11], t[12], t[13], tuple((RequirementKind(k), i) for k, i in t[14]), ActivityWait(t[15]),
-                        ActivityBasis(t[16]), Rank(*t[17]), t[18], t[19], bool(t[20]), TimeWindow(*t[21][:4], TimeCriticality(t[21][4])))
+                        ActivityBasis(t[16]), Rank(*t[17]), t[18], t[19], bool(t[20]), TimeWindow(*t[21][:4], TimeCriticality(t[21][4])),
+                        t[22], t[23], t[24])
+
+
+def _task(t):
+    return TaskStatus(t[0], TaskState(t[1]), _native.reason_name(t[2]), bool(t[3]), t[4], t[5], t[6], t[7], t[8], t[9], t[10])
 
 
 def _findings(result, h):
@@ -395,7 +422,7 @@ def _rejected(result, h=None):
     section = None if math.isnan(result[7]) else (result[7], result[8])
     findings, adjustments = _findings(result, h)
     return Rejected(_native.reason_name(result[1]), result[3], result[5], _native.constraint_name(result[6]), section, description=result[12],
-                    associated=result[11], command_id=result[10], findings=findings, adjustments=adjustments)
+                    associated=result[11], command_id=result[10], findings=findings, adjustments=adjustments, suggestion=result[16])
 
 
 def _checked(result, h=None):
@@ -1004,6 +1031,49 @@ class Vehicle:
         """The live activities (ActivityInfo), then the ended ones the vehicle remembers, newest first."""
         return [_info(t) for t in self._h.vehicle_activities(self.id)]
 
+    # --- Flight tasks (docs/flight-autonomy.md, 4.11): a command kept by id, flown on a task command ----------
+    def store_task(self, task_id, command, attempts=1, interval_s=None):
+        """Keep a task: ``command`` a fsim.BatchCommand naming the submit it would be ("submit_hsa", "submit_route",
+        "submit_behavior", ...; its options are the task command's, not kept here), flown ``attempts`` times - each
+        run ``interval_s`` after the one before completes (None: at once), its one activity active between them.
+        Raises fsim.Rejected: "invalid_parameter" (id 0 or a suggestion's, runs of what never completes),
+        "task_active" (it flies), why the vehicle cannot command it."""
+        item, (level, _source, _validate) = command._native(self)
+        reason = self._h.store_task(self.id, int(task_id), item, int(attempts), math.nan if interval_s is None else float(interval_s))
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+        self._world._task_levels[(self.id, int(task_id))] = level
+
+    def command_task(self, task_id, *, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(), interactive=True,
+                     validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None, override_rejection=False):
+        """Fly a task: the NEW of its command, the task among the requirements it traces to (``trace`` adds to it),
+        with the options a submit takes. An Activity (a fsim.Validation with ``validate_only``), or fsim.Rejected:
+        "unknown_task", "task_active", or why its NEW is refused."""
+        r = self._h.command_task(self.id, int(task_id), int(source), None, int(range), int(min_version),
+                                 _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window,
+                                           override_rejection))
+        return self._answer(r, self._world._task_levels.get((self.id, int(task_id)), "task"), source, validate_only)
+
+    def cancel_task(self, task_id, source=Source.POLICY):
+        """Cancel a task: its live activity ends (CANCEL); one never commanded will not be. fsim.Rejected "unknown_task"."""
+        _checked(self._h.cancel_task(self.id, int(task_id), int(source)), self._h)
+
+    def remove_task(self, task_id):
+        """Forget a task: fsim.Rejected "unknown_task", or "task_active" while it flies."""
+        reason = self._h.remove_task(self.id, int(task_id))
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+        self._world._task_levels.pop((self.id, int(task_id)), None)
+
+    def task_status(self, task_id):
+        """A task's fsim.TaskStatus, or None for one not kept."""
+        t = self._h.task_status(self.id, int(task_id))
+        return None if t is None else _task(t)
+
+    def tasks(self):
+        """Every task kept - the caller's and the platform's suggestions - in the order they were made."""
+        return [_task(t) for t in self._h.tasks(self.id)]
+
     @property
     def commanded(self):
         """What the cascade asked for in its last control update (CommandedState): an altitude, a heading, an
@@ -1242,6 +1312,7 @@ class World:
         # until the garbage collector found it rather than go when its last
         # reference did.
         self._vehicles = weakref.WeakValueDictionary()
+        self._task_levels = {}  # (vehicle, task id) -> the level or mode its command is: its Activity's
         self.step = self._h.step  # step(n=1)
 
     @classmethod

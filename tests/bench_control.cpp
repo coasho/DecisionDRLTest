@@ -645,6 +645,52 @@ int alloc() {
                  std::fprintf(stderr, "schedule: vehicle %u refused\n", id), std::exit(3);
              made[id] = {level.activity, waits.activity, behind.activity};
          }},
+        // ADR-29 FA-2d: in the steps counted, a task's route begins its next run, flown afresh by its one activity
+        {"task runs", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> made(64, 0);
+             if (k == 149) {
+                 const ActivityRecord* a = w.activity(made[id]);
+                 if (!a || a->run < 2) std::fprintf(stderr, "task runs: vehicle %u flew no second run\n", id), std::exit(3);
+                 return;
+             }
+             if (k != 0) return;
+             for (const auto& a : w.activities(id))
+                 if (a.live()) w.cancel(a.id);
+             const auto& s = *w.vehicleState(id);
+             const double track = std::atan2(s.velocityNedMs[1], s.velocityNedMs[0]);
+             const std::vector<Waypoint> close = {waypointAt(s, 60 * std::cos(track), 60 * std::sin(track))}; // (done in a step or two)
+             if (w.storeTask(id, 1, Command(RouteCommand{}), close, {}, TaskRepetition{3, 60 * w.dt() * w.frameSkip()}) != Reason::None)
+                 std::fprintf(stderr, "task runs: vehicle %u kept no task\n", id), std::exit(3);
+             made[id] = w.commandTask(id, 1).activity;
+         }},
+        // ADR-29 FA-2d: in the steps counted, a waiting route refused as it would start - its climb, fine at its NEW,
+        // too steep from where the aircraft has flown by then - kept as the suggestion its record names
+        {"suggestion at a start", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> made(64, 0);
+             if (k == 149) {
+                 const ActivityRecord* a = w.activity(made[id]);
+                 if (!a || a->state != ActivityState::Failed || !a->suggestion)
+                     std::fprintf(stderr, "suggestion: vehicle %u: %s\n", id, a ? activityStateName(a->state) : "none"), std::exit(3);
+                 return;
+             }
+             if (k != 0) return;
+             for (const auto& a : w.activities(id))
+                 if (a.live()) w.cancel(a.id);
+             const auto& s = *w.vehicleState(id);
+             const double track = std::atan2(s.velocityNedMs[1], s.velocityNedMs[0]);
+             const double v = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
+             HsaCommand straight; // on along its track, level
+             straight.courseRad = track, straight.altitudeM = s.altitudeMslM;
+             w.submit(id, straight);
+             Waypoint up = waypointAt(s, 600 * std::cos(track), 600 * std::sin(track));
+             up.altitudeM = s.altitudeMslM + 0.9 * w.performance(id)->maxClimbMs * 600.0 / v; // (90 % of its climb from here)
+             CommandOptions later;
+             later.range = RangePolicy::Reject;
+             later.window.startNotBefore = w.simTime() + 60 * w.dt() * w.frameSkip();
+             const CommandResult r = w.submit(id, RouteCommand{}, std::vector<Waypoint>{up}, later);
+             if (!(r.flags & kDeferred)) std::fprintf(stderr, "suggestion: vehicle %u: %s\n", id, reasonName(r.reason)), std::exit(3);
+             made[id] = r.activity;
+         }},
         // everything let go: the vehicle default's hold flies it
         {"default hold", [&](std::uint32_t id, int k) {
              if (k != 0) return;

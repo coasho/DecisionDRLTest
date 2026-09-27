@@ -63,7 +63,13 @@ CANNOT_COMPLY = {
     "time_constraint": "CONSTRAINT_TIME",
     "queue_full": "INSUFFICIENT_RESOURCES",
     "not_interactive": "STATE_OR_SETTINGS",
+    "unknown_task": "UNKNOWN_ID",
+    "task_active": "STATE_OR_SETTINGS",
 }
+
+#: fsim.TaskState -> A-GRA's RequirementExecutionStateEnum (a task kept, not commanded, awaits approval to execute)
+REQUIREMENT_EXECUTION_STATE = {0: "AWAITING_EXECUTION_APPROVAL", 1: "EXECUTION_PENDING", 2: "EXECUTING", 3: "COMPLETED", 4: "DROPPED",
+                               5: "FAILED", 6: "CANCELED"}
 
 #: fsim.TimeCriticality names <-> A-GRA's SchedulingCriticalityEnum (its omission: none is critical)
 SCHEDULING_CRITICALITY = {"none": None, "start": "START_TIME_CRITICAL", "end": "END_TIME_CRITICAL",
@@ -175,6 +181,11 @@ def command_options(ranking=None, temporal=None, override_rejection=None):
     if override_rejection is not None:
         out["override_rejection"] = bool(override_rejection)
     return out
+
+
+def task_state(status):
+    """A task's status (fsim.TaskStatus) as A-GRA's RequirementExecutionStateEnum (docs/flight-autonomy.md, 4.11)."""
+    return REQUIREMENT_EXECUTION_STATE[int(status.state)]
 
 
 def cannot_comply(reason):

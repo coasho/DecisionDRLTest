@@ -225,6 +225,21 @@ public:
     /// activities of one source contest axes before their ranks are compared.
     control::Reason setCapabilityPrecedence(std::string_view capability, std::uint32_t precedence);
     std::uint32_t capabilityPrecedence(std::string_view capability) const;
+    // Flight tasks (docs/sdk/control.md, "Flight tasks and suggestions"): a
+    // command kept by id and flown on a task command, as often as its
+    // repetition says; the platform's suggestions are tasks too (their ids
+    // have kSuggestedTask).
+    /// Keep a task: InvalidParameter for id 0, one of the platform's, no runs
+    /// or runs of what never completes; TaskActive while it flies; else why
+    /// the vehicle cannot command it.
+    control::Reason storeTask(control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints = {},
+                              Span<const control::BezierSegment> segments = {}, control::TaskRepetition repetition = {});
+    /// Fly it: the NEW of its command, the task among the requirements it traces to.
+    control::CommandResult commandTask(control::TaskId task, const control::CommandOptions& options = {});
+    control::CommandResult cancelTask(control::TaskId task, control::Source caller = control::Source::Policy);
+    control::Reason removeTask(control::TaskId task);
+    std::optional<control::TaskStatus> taskStatus(control::TaskId task) const;
+    std::vector<control::TaskStatus> tasks() const;
     /// The platform restricts a capability (collision avoidance, an
     /// operational restriction): a policy's NEW for it is refused with
     /// `reason`; what flies goes on. Availability::Available lifts it.

@@ -576,6 +576,58 @@ control::CommandResult World::activityCommand(control::Source caller, control::A
     return r;
 }
 
+control::Reason World::storeTask(std::uint32_t id, control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints,
+                                 Span<const control::BezierSegment> segments, control::TaskRepetition repetition) {
+    Entry* e = entry(id);
+    if (!e) return control::Reason::UnknownVehicle;
+    if (std::holds_alternative<control::BehaviorCommand>(command)) e->catalog->refresh();
+    return e->host.storeTask(task, command, waypoints, segments, repetition);
+}
+
+control::CommandResult World::commandTask(std::uint32_t id, control::TaskId task, const control::CommandOptions& options) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownVehicle;
+        r.commandId = options.commandId;
+        return r;
+    }
+    e->catalog->refresh(); // (a behaviour's)
+    control::CommandResult r = e->host.commandTask(task, options, pool_->states()[e->slot], simTime_);
+    r.commandId = options.commandId;
+    if (r.accepted()) levelChanged(*e);
+    return r;
+}
+
+control::CommandResult World::cancelTask(std::uint32_t id, control::TaskId task, control::Source caller) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    control::CommandResult r = e->host.cancelTask(task, pool_->states()[e->slot], simTime_, caller);
+    if (r.status == control::CommandStatus::Canceled) levelChanged(*e);
+    return r;
+}
+
+control::Reason World::removeTask(std::uint32_t id, control::TaskId task) {
+    Entry* e = entry(id);
+    return e ? e->host.removeTask(task) : control::Reason::UnknownVehicle;
+}
+
+std::optional<control::TaskStatus> World::taskStatus(std::uint32_t id, control::TaskId task) {
+    Entry* e = entry(id);
+    control::TaskStatus s;
+    if (!e || !e->host.taskStatus(task, s)) return std::nullopt;
+    return s;
+}
+
+std::vector<control::TaskStatus> World::tasks(std::uint32_t id) {
+    Entry* e = entry(id);
+    return e ? e->host.tasks() : std::vector<control::TaskStatus>{};
+}
+
 const control::ActivityRecord* World::activity(control::ActivityId activity) const noexcept {
     const Entry* e = entry(control::activityVehicle(activity));
     return e ? e->host.activity(activity) : nullptr;

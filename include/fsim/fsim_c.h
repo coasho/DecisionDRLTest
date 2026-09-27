@@ -538,6 +538,8 @@ typedef struct fsim_command_detail {
     uint64_t command_id;       /* the command's id: a NEW's, or the addressed activity's */
     uint64_t associated;       /* an id the reason is about: the activity holding the authority; 0 none */
     const char* description;   /* the reason in words; "" when accepted */
+    uint64_t suggestion;       /* ABI 1.11: a refused command's suggestion - the task the platform keeps with what it can fly in its
+                                  place (fsim_vehicle_task_status; FSIM_SUGGESTED_TASK set); 0 none */
 } fsim_command_detail;
 FSIM_API void fsim_command_detail_init(fsim_command_detail* detail);
 FSIM_API int fsim_last_command_detail(const fsim_world* world, fsim_command_detail* out);
@@ -861,6 +863,8 @@ typedef struct fsim_activity_envelope {
     int32_t interrupt;
     int32_t criticality;       /* fsim_time_criticality */
     double start_not_before, start_not_after, end_not_before, end_not_after; /* its window; NaN: none */
+    uint64_t suggestion;       /* ABI 1.11: failed as it would start - the task the platform suggests in its place; 0 none */
+    uint32_t run, runs;        /* a task's repetition: the run flying, of how many; 0, 0 none */
 } fsim_activity_envelope;
 FSIM_API void fsim_activity_envelope_init(fsim_activity_envelope* envelope);
 FSIM_API int fsim_activity_get_envelope(const fsim_world* world, fsim_activity_id activity, fsim_activity_envelope* out);
@@ -872,6 +876,25 @@ FSIM_API const char* fsim_time_criticality_name(int criticality); /* "none", "st
  * source contest axes before their ranks. What waits may start at once. */
 FSIM_API int fsim_vehicle_set_capability_precedence(fsim_world* world, uint32_t id, const char* capability, uint32_t precedence);
 FSIM_API int fsim_vehicle_capability_precedence(const fsim_world* world, uint32_t id, const char* capability, uint32_t* precedence);
+
+/* Flight tasks (ABI 1.11; docs/flight-autonomy.md, 4.11): a command kept by id and flown on a task command. */
+#define FSIM_SUGGESTED_TASK (1ull << 63) /* set in the ids of the platform's suggestions */
+enum fsim_task_state { FSIM_TASK_AWAITING_EXECUTION = 0, FSIM_TASK_EXECUTION_PENDING, FSIM_TASK_EXECUTING, FSIM_TASK_COMPLETED, FSIM_TASK_DROPPED,
+                       FSIM_TASK_FAILED, FSIM_TASK_CANCELED };
+typedef struct fsim_task_status {
+    uint32_t struct_size;
+    int32_t state;             /* fsim_task_state */
+    int32_t reason;            /* why it failed, was dropped or canceled: its activity's end */
+    int32_t suggested;         /* 1: the platform's suggestion */
+    uint64_t task_id;
+    fsim_activity_id activity; /* its activity (every run's); 0 before it is commanded */
+    uint32_t run, runs;        /* the run flying or flown last, of how many */
+    double percent;            /* of the whole task */
+    double start_time, end_time; /* when it was commanded; when its activity ended (NaN until) */
+    uint64_t command_id;       /* its task command's */
+} fsim_task_status;
+FSIM_API void fsim_task_status_init(fsim_task_status* status);
+FSIM_API const char* fsim_task_state_name(int state); /* "awaiting_execution", "execution_pending", "executing", "completed", "dropped", ... */
 
 /* One command of a batch NEW: which call it would be, and that call's arguments. */
 enum fsim_batch_kind { FSIM_BATCH_LEVEL = 0, FSIM_BATCH_BEHAVIOR, FSIM_BATCH_SUPPORT, FSIM_BATCH_MODE, FSIM_BATCH_ROUTE, FSIM_BATCH_CURVE };
@@ -895,6 +918,24 @@ typedef struct fsim_batch_command {
  * unknown kind): FSIM_INVALID_ARGUMENT, and none is made. */
 FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsim_batch_command* batch, uint32_t count, fsim_command_result* results,
                                        fsim_command_detail* details);
+
+/* Keep a task (ABI 1.11): `command` names the call its NEW would be, as a batch item does (its options are not kept: a
+ * task command gives them); `attempts` runs (0 as 1), each `interval_s` after the one before completes (NaN: at once).
+ * FSIM_OK and `*reason` the answer: 0, or invalid_parameter (id 0, one with FSIM_SUGGESTED_TASK, runs of what never
+ * completes), task_active (it flies), why the vehicle cannot command it. FSIM_INVALID_ARGUMENT for a malformed command. */
+FSIM_API int fsim_vehicle_store_task(fsim_world* world, uint32_t id, uint64_t task_id, const fsim_batch_command* command, uint32_t attempts,
+                                     double interval_s, int32_t* reason);
+/* Fly a task: its command's NEW with `options` (NULL: fsim_command_options_init's), the task among the requirements it
+ * traces to; answered as the NEW (fsim_last_command_detail), unknown_task, task_active. */
+FSIM_API int fsim_vehicle_command_task(fsim_world* world, uint32_t id, uint64_t task_id, const fsim_command_options* options, fsim_command_result* result);
+/* Its live activity canceled, declaring `source`; one never commanded will not be. */
+FSIM_API int fsim_vehicle_cancel_task(fsim_world* world, uint32_t id, uint64_t task_id, int source, fsim_command_result* result);
+FSIM_API int fsim_vehicle_remove_task(fsim_world* world, uint32_t id, uint64_t task_id, int32_t* reason);
+/* A task's status: FSIM_INVALID_ARGUMENT for one not kept. */
+FSIM_API int fsim_vehicle_task_status(fsim_world* world, uint32_t id, uint64_t task_id, fsim_task_status* out);
+/* Every task kept, the caller's and the platform's, in the order they were made. */
+FSIM_API uint32_t fsim_vehicle_task_count(fsim_world* world, uint32_t id);
+FSIM_API int fsim_vehicle_task_at(fsim_world* world, uint32_t id, uint32_t index, fsim_task_status* out);
 
 FSIM_API int fsim_world_get_environment(const fsim_world* world, fsim_environment* out);
 FSIM_API int fsim_world_set_environment(fsim_world* world, const fsim_environment* environment);

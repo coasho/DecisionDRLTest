@@ -44,6 +44,8 @@ const char* reasonName(Reason reason) noexcept {
     case Reason::TimeConstraint: return "time_constraint";
     case Reason::QueueFull: return "queue_full";
     case Reason::NotInteractive: return "not_interactive";
+    case Reason::UnknownTask: return "unknown_task";
+    case Reason::TaskActive: return "task_active";
     default: return "?";
     }
 }
@@ -87,6 +89,8 @@ const char* reasonDescription(Reason reason) noexcept {
     case Reason::TimeConstraint: return "a time window it must meet cannot be met, or was missed";
     case Reason::QueueFull: return "as many activities as can wait already do";
     case Reason::NotInteractive: return "its command said it takes no activity commands";
+    case Reason::UnknownTask: return "no task is kept by that id";
+    case Reason::TaskActive: return "the task's activity is live";
     default: return "";
     }
 }
@@ -199,6 +203,19 @@ const char* activityCommandName(ActivityCommand command) noexcept {
     case ActivityCommand::Delete: return "delete";
     case ActivityCommand::ChangeRank: return "change_rank";
     case ActivityCommand::Unassign: return "unassign";
+    default: return "?";
+    }
+}
+
+const char* taskStateName(TaskState state) noexcept {
+    switch (state) {
+    case TaskState::AwaitingExecution: return "awaiting_execution";
+    case TaskState::ExecutionPending: return "execution_pending";
+    case TaskState::Executing: return "executing";
+    case TaskState::Completed: return "completed";
+    case TaskState::Dropped: return "dropped";
+    case TaskState::Failed: return "failed";
+    case TaskState::Canceled: return "canceled";
     default: return "?";
     }
 }

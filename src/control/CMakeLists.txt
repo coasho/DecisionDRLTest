@@ -28,6 +28,7 @@ add_library(fsim_control STATIC
     Route.h
     Route.cpp
     Guidance.cpp
+    Tasks.cpp
     Names.cpp)
 add_library(fsim::control ALIAS fsim_control)
 

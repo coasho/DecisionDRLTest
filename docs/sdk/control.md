@@ -541,6 +541,35 @@ They answer as UPDATE does, and declare a caller's source the same way (the
 last argument). An activity whose command said `interactive = false` refuses
 them all (`not_interactive`), and still takes UPDATE and CANCEL.
 
+### Flight tasks and suggestions
+
+A command kept by id, flown on a task command as often as its repetition
+says, and the best effort the platform suggests in place of a command it
+refuses ([flight-autonomy.md](../flight-autonomy.md), 4.11; A-GRA's flight
+task and task command):
+
+```cpp
+BehaviorCommand roll{.id = "aerobatics", .params = {{"manoeuvre", 0.0}}};
+v.storeTask(7, Command(roll), {}, {}, TaskRepetition{3, 2.0}); // three rolls, each two seconds after the one before
+CommandResult r = v.commandTask(7);                            // its NEW, {Task, 7} among the requirements it traces to
+v.taskStatus(7)->state;                                        // TaskState::ExecutionPending, Executing, ... Completed
+world.activity(r.activity)->run;                               // 1, 2, 3: one activity, active between its runs
+
+CommandOptions reject;
+reject.range = RangePolicy::Reject;
+if (!v.submit(tooFastHsa, reject).accepted())                  // refused for what Clamp would hold...
+    v.commandTask(v.commandDetails().suggestion);              // ...the platform's suggestion flies it, held to the limits
+```
+
+- A task is refused for id 0 or a suggestion's id (`kSuggestedTask`), for
+  runs of what never completes, and while it flies (`task_active`); a task
+  command for one not kept is `unknown_task`.
+- Its status is A-GRA's execution state: awaiting execution, pending,
+  executing, completed, dropped (its activity lost its axes or authority),
+  failed, canceled - with the reason, the run, the percent of the whole.
+- A waiting activity that fails as it would start, for what Clamp would fly,
+  names a suggestion in its record (`ActivityRecord::suggestion`).
+
 ### Support and availability: what a vehicle can do at all, and now
 
 Two questions, answered apart ([flight-autonomy.md](../flight-autonomy.md),

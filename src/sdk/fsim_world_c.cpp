@@ -1168,7 +1168,8 @@ fsim_command_detail detailOf(const fsim::control::CommandResult& r) noexcept {
 FSIM_API int fsim_last_command_detail(const fsim_world* world, fsim_command_detail* out) {
     if (!world) return FSIM_INVALID_ARGUMENT;
     fsim_command_detail d = detailOf(world->last);
-    if (const auto* details = lastDetails(world)) d.finding_count = details->findingCount, d.adjustment_count = details->adjustmentCount;
+    if (const auto* details = lastDetails(world))
+        d.finding_count = details->findingCount, d.adjustment_count = details->adjustmentCount, d.suggestion = details->suggestion;
     return copyOut(d, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
 }
 
@@ -1248,6 +1249,7 @@ FSIM_API int fsim_activity_get_envelope(const fsim_world* world, fsim_activity_i
     c.criticality = static_cast<int32_t>(a->window.criticality);
     c.start_not_before = a->window.startNotBefore, c.start_not_after = a->window.startNotAfter;
     c.end_not_before = a->window.endNotBefore, c.end_not_after = a->window.endNotAfter;
+    c.suggestion = a->suggestion, c.run = a->run, c.runs = a->runs;
     return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
 }
 
@@ -1288,6 +1290,38 @@ FSIM_API const char* fsim_time_criticality_name(int criticality) {
                : "?";
 }
 
+namespace {
+
+/// A batch item (or a task's command) into its C++ command: its waypoints and segments into `route` and `curve`.
+bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::BatchCommand& item, std::vector<fsim::control::Waypoint>& route,
+               std::vector<fsim::control::BezierSegment>& curve) {
+    item.options = fromC(b.options);
+    fsim::control::Command c;
+    fsim::control::SupportCommand sc;
+    bool ok = false;
+    switch (b.kind) {
+    case FSIM_BATCH_LEVEL: ok = toCommand(b.code, b.fields, b.count, c), item.command = c; break;
+    case FSIM_BATCH_BEHAVIOR:
+        ok = b.behavior && b.behavior->id;
+        if (ok) item.command = fsim::control::Command(toBehavior(b.behavior));
+        break;
+    case FSIM_BATCH_SUPPORT: ok = toSupport(b.code, b.fields, b.count, sc), item.command = sc; break;
+    case FSIM_BATCH_MODE: ok = (b.code == FSIM_MODE_HSA || b.code == FSIM_MODE_PATTERN) && toMode(b.code, b.fields, b.count, c), item.command = c; break;
+    case FSIM_BATCH_ROUTE:
+        ok = toMode(FSIM_MODE_ROUTE, b.fields, b.count, c) && toWaypoints(world, b.waypoints, b.waypoint_count);
+        if (ok) route = world->waypoints, item.command = c;
+        break;
+    case FSIM_BATCH_CURVE:
+        ok = toMode(FSIM_MODE_CURVE, b.fields, b.count, c) && toSegments(world, b.segments, b.segment_count);
+        if (ok) curve = world->segments, item.command = c;
+        break;
+    default: break;
+    }
+    return ok;
+}
+
+} // namespace
+
 FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsim_batch_command* batch, uint32_t count, fsim_command_result* results,
                                        fsim_command_detail* details) {
     if (!world || (count && (!batch || !results || batch[0].struct_size < sizeof(uint32_t)))) return FSIM_INVALID_ARGUMENT;
@@ -1302,29 +1336,11 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
         for (uint32_t i = 0; i < count; ++i) {
             const auto& b = *reinterpret_cast<const fsim_batch_command*>(reinterpret_cast<const char*>(batch) + i * stride);
             fsim::control::BatchCommand& item = items[i];
-            item.options = fromC(b.options);
-            fsim::control::Command c;
-            fsim::control::SupportCommand sc;
-            bool ok = false;
-            switch (b.kind) {
-            case FSIM_BATCH_LEVEL: ok = toCommand(b.code, b.fields, b.count, c), item.command = c; break;
-            case FSIM_BATCH_BEHAVIOR:
-                ok = b.behavior && b.behavior->id;
-                if (ok) item.command = fsim::control::Command(toBehavior(b.behavior));
-                break;
-            case FSIM_BATCH_SUPPORT: ok = toSupport(b.code, b.fields, b.count, sc), item.command = sc; break;
-            case FSIM_BATCH_MODE: ok = (b.code == FSIM_MODE_HSA || b.code == FSIM_MODE_PATTERN) && toMode(b.code, b.fields, b.count, c), item.command = c; break;
-            case FSIM_BATCH_ROUTE:
-                ok = toMode(FSIM_MODE_ROUTE, b.fields, b.count, c) && toWaypoints(world, b.waypoints, b.waypoint_count);
-                if (ok) routes.push_back(world->waypoints), item.waypoints = routes.back(), item.command = c;
-                break;
-            case FSIM_BATCH_CURVE:
-                ok = toMode(FSIM_MODE_CURVE, b.fields, b.count, c) && toSegments(world, b.segments, b.segment_count);
-                if (ok) curves.push_back(world->segments), item.segments = curves.back(), item.command = c;
-                break;
-            default: break;
-            }
-            if (!ok) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_batch: item " + std::to_string(i) + " is malformed");
+            std::vector<fsim::control::Waypoint>& route = routes.emplace_back();
+            std::vector<fsim::control::BezierSegment>& curve = curves.emplace_back();
+            if (!fromBatch(world, b, item, route, curve))
+                return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_batch: item " + std::to_string(i) + " is malformed");
+            item.waypoints = route, item.segments = curve;
         }
         std::vector<fsim::control::CommandDetails> checks;
         const std::vector<fsim::control::CommandResult> answers = world->world.submitBatch(id, items, &checks);
@@ -1334,11 +1350,93 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
             if (!details) continue;
             auto* out = reinterpret_cast<fsim_command_detail*>(reinterpret_cast<char*>(details) + i * detailStride);
             fsim_command_detail d = detailOf(answers[i]);
-            d.finding_count = checks[i].findingCount, d.adjustment_count = checks[i].adjustmentCount;
+            d.finding_count = checks[i].findingCount, d.adjustment_count = checks[i].adjustmentCount, d.suggestion = checks[i].suggestion;
             copyOut(d, out);
         }
         return FSIM_OK;
     });
+}
+
+FSIM_API void fsim_task_status_init(fsim_task_status* s) {
+    if (!s) return;
+    std::memset(s, 0, sizeof *s);
+    s->struct_size = sizeof *s;
+    s->percent = s->start_time = s->end_time = std::numeric_limits<double>::quiet_NaN();
+}
+
+FSIM_API const char* fsim_task_state_name(int state) {
+    return state >= 0 && state < static_cast<int>(fsim::control::TaskState::Count) ? fsim::control::taskStateName(static_cast<fsim::control::TaskState>(state))
+                                                                                    : "?";
+}
+
+namespace {
+
+int taskOut(const fsim::control::TaskStatus& t, fsim_task_status* out) {
+    fsim_task_status c;
+    fsim_task_status_init(&c);
+    c.state = static_cast<int32_t>(t.state), c.reason = static_cast<int32_t>(t.reason), c.suggested = t.suggested ? 1 : 0;
+    c.task_id = t.id, c.activity = t.activity, c.run = t.run, c.runs = t.runs;
+    c.percent = t.percent, c.start_time = t.startTime, c.end_time = t.endTime, c.command_id = t.commandId;
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+} // namespace
+
+FSIM_API int fsim_vehicle_store_task(fsim_world* world, uint32_t id, uint64_t task_id, const fsim_batch_command* command, uint32_t attempts,
+                                     double interval_s, int32_t* reason) {
+    if (!world || !command || !reason || command->struct_size < sizeof(uint32_t)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_store_task: bad arguments");
+    return guard("fsim_vehicle_store_task", [&]() -> int {
+        fsim::control::BatchCommand item;
+        std::vector<fsim::control::Waypoint> route;
+        std::vector<fsim::control::BezierSegment> curve;
+        if (!fromBatch(world, *command, item, route, curve) || !std::holds_alternative<fsim::control::Command>(item.command))
+            return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_store_task: a flight or guidance command, whole, is kept");
+        fsim::control::TaskRepetition repetition;
+        repetition.attempts = attempts ? attempts : 1;
+        repetition.intervalS = interval_s;
+        *reason = static_cast<int32_t>(world->world.storeTask(id, task_id, std::get<fsim::control::Command>(item.command), route, curve, repetition));
+        return FSIM_OK;
+    });
+}
+
+FSIM_API int fsim_vehicle_command_task(fsim_world* world, uint32_t id, uint64_t task_id, const fsim_command_options* options, fsim_command_result* result) {
+    if (!world || !result) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_command_task: bad arguments");
+    return guard("fsim_vehicle_command_task", [&]() -> int {
+        toC(world, id, world->world.commandTask(id, task_id, fromC(options)), result);
+        return FSIM_OK;
+    });
+}
+
+FSIM_API int fsim_vehicle_cancel_task(fsim_world* world, uint32_t id, uint64_t task_id, int source, fsim_command_result* result) {
+    if (!world || !result || source < 0 || source > 2) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_cancel_task: bad arguments");
+    return guard("fsim_vehicle_cancel_task", [&]() -> int {
+        toC(world, id, world->world.cancelTask(id, task_id, static_cast<fsim::control::Source>(source)), result);
+        return FSIM_OK;
+    });
+}
+
+FSIM_API int fsim_vehicle_remove_task(fsim_world* world, uint32_t id, uint64_t task_id, int32_t* reason) {
+    if (!world || !reason) return FSIM_INVALID_ARGUMENT;
+    *reason = static_cast<int32_t>(world->world.removeTask(id, task_id));
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_vehicle_task_status(fsim_world* world, uint32_t id, uint64_t task_id, fsim_task_status* out) {
+    if (!world || !out) return FSIM_INVALID_ARGUMENT;
+    const auto s = world->world.taskStatus(id, task_id);
+    if (!s) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_task_status: no task " + std::to_string(task_id));
+    return taskOut(*s, out);
+}
+
+FSIM_API uint32_t fsim_vehicle_task_count(fsim_world* world, uint32_t id) {
+    return world ? static_cast<uint32_t>(world->world.tasks(id).size()) : 0;
+}
+
+FSIM_API int fsim_vehicle_task_at(fsim_world* world, uint32_t id, uint32_t index, fsim_task_status* out) {
+    if (!world || !out) return FSIM_INVALID_ARGUMENT;
+    const auto all = world->world.tasks(id);
+    if (index >= all.size()) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_task_at: no task " + std::to_string(index));
+    return taskOut(all[index], out);
 }
 
 FSIM_API const char* fsim_requirement_kind_name(int kind) {

@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -149,6 +150,15 @@ public:
     /// source as UPDATE does; `rank` for ChangeRank.
     control::CommandResult activityCommand(control::Source caller, control::ActivityId activity, control::ActivityCommand command,
                                            control::Rank rank = {});
+    // --- Flight tasks (docs/flight-autonomy.md, 4.11): kept by id, flown on a task command ---
+    control::Reason storeTask(std::uint32_t id, control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints = {},
+                              Span<const control::BezierSegment> segments = {}, control::TaskRepetition repetition = {});
+    control::CommandResult commandTask(std::uint32_t id, control::TaskId task, const control::CommandOptions& options = {});
+    control::CommandResult cancelTask(std::uint32_t id, control::TaskId task, control::Source caller = control::Source::Policy);
+    control::Reason removeTask(std::uint32_t id, control::TaskId task);
+    /// A task's status; empty for one not kept (or an unknown vehicle).
+    std::optional<control::TaskStatus> taskStatus(std::uint32_t id, control::TaskId task);
+    std::vector<control::TaskStatus> tasks(std::uint32_t id);
     /// What flies a vehicle's primary axes nobody owns: the neutral actuator
     /// command (as always) or a hold of the heading, airspeed and height each
     /// had when it was let go. Reason::None if set.

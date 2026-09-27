@@ -83,6 +83,8 @@ from .world import (  # noqa: E402
     Finding,
     Rank,
     RequirementKind,
+    TaskState,
+    TaskStatus,
     TimeCriticality,
     TimeWindow,
     Validation,

@@ -1111,6 +1111,55 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_command(world, flying.activity, 99, 0, 0, FSIM_SOURCE_POLICY, &cr) != FSIM_OK); /* (no such command) */
             CHECK(strcmp(fsim_activity_command_name(FSIM_ACTIVITY_UNASSIGN), "unassign") == 0);
         }
+        {
+            /* ABI 1.11: flight tasks and suggestions (docs/flight-autonomy.md, 4.11) */
+            fsim_batch_command task;
+            fsim_command_options o;
+            fsim_command_result cr;
+            fsim_command_detail d;
+            fsim_task_status ts;
+            fsim_activity_envelope ae;
+            uint32_t kestrel = 0;
+            int32_t reason = -1;
+            const double hold = fsim_hold();
+            double hsa[6];
+            spec.name = "cap-kestrel";
+            spec.type = "jsbsim:f16c";
+            spec.altitude_msl_m = 3000.0;
+            spec.airspeed_ms = 160.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &kestrel) == FSIM_OK);
+            hsa[0] = 1.0, hsa[1] = hold, hsa[2] = hold, hsa[3] = hold, hsa[4] = hold, hsa[5] = hold;
+            memset(&task, 0, sizeof task);
+            task.struct_size = sizeof task;
+            task.kind = FSIM_BATCH_MODE, task.code = FSIM_MODE_HSA, task.fields = hsa, task.count = 6;
+            CHECK(fsim_vehicle_store_task(world, kestrel, 5, &task, 1, fsim_hold(), &reason) == FSIM_OK && reason == 0);
+            CHECK(fsim_vehicle_store_task(world, kestrel, 6, &task, 3, 1.0, &reason) == FSIM_OK && strcmp(fsim_reason_name(reason), "invalid_parameter") == 0);
+            fsim_task_status_init(&ts);
+            CHECK(fsim_vehicle_task_status(world, kestrel, 5, &ts) == FSIM_OK && ts.state == FSIM_TASK_AWAITING_EXECUTION && ts.runs == 1);
+            fsim_command_options_init(&o);
+            o.command_id = 9;
+            CHECK(fsim_vehicle_command_task(world, kestrel, 5, &o, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_vehicle_task_status(world, kestrel, 5, &ts) == FSIM_OK && ts.state == FSIM_TASK_EXECUTION_PENDING && ts.activity == cr.activity);
+            CHECK(ts.command_id == 9 && strcmp(fsim_task_state_name(ts.state), "execution_pending") == 0);
+            fsim_activity_envelope_init(&ae);
+            CHECK(fsim_activity_get_envelope(world, cr.activity, &ae) == FSIM_OK && ae.run == 1 && ae.runs == 1 && ae.trace[0].kind == FSIM_REQUIREMENT_TASK);
+            CHECK(fsim_vehicle_command_task(world, kestrel, 5, NULL, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "task_active") == 0);
+            CHECK(fsim_vehicle_cancel_task(world, kestrel, 5, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+            CHECK(fsim_vehicle_task_status(world, kestrel, 5, &ts) == FSIM_OK && ts.state == FSIM_TASK_CANCELED);
+            CHECK(fsim_vehicle_task_count(world, kestrel) == 1 && fsim_vehicle_task_at(world, kestrel, 0, &ts) == FSIM_OK && ts.task_id == 5);
+            CHECK(fsim_vehicle_remove_task(world, kestrel, 5, &reason) == FSIM_OK && reason == 0);
+            CHECK(fsim_vehicle_task_status(world, kestrel, 5, &ts) != FSIM_OK);
+            /* refused, what Clamp would fly is suggested as a task */
+            fsim_command_options_init(&o);
+            o.range = FSIM_RANGE_REJECT;
+            hsa[2] = 600.0, hsa[3] = FSIM_SPEED_TRUE_AIRSPEED;
+            CHECK(fsim_vehicle_submit_mode(world, kestrel, FSIM_MODE_HSA, hsa, 6, &o, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            fsim_command_detail_init(&d);
+            CHECK(fsim_last_command_detail(world, &d) == FSIM_OK && (d.suggestion & FSIM_SUGGESTED_TASK) != 0);
+            CHECK(fsim_vehicle_task_status(world, kestrel, d.suggestion, &ts) == FSIM_OK && ts.suggested == 1);
+            CHECK(fsim_vehicle_command_task(world, kestrel, d.suggestion, &o, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+        }
         }
         fsim_world_destroy(world);
     }

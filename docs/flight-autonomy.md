@@ -254,6 +254,33 @@ What may be done to an activity once its command is accepted (A-GRA's ActivityCo
 | --- | --- | --- |
 | `ActivityCommand` (`Disable`, `Enable`, `Reset`, `Delete`, `ChangeRank`, `Unassign`), `World::activityCommand(caller, activity, command, rank)`; `ActivityState::Disabled`, `Deleted`; `Reason::NotInteractive` | `fsim_activity_command(world, activity, command, rank_priority, rank_precedence, source, &result)`, `fsim_activity_command_name`; `FSIM_ACTIVITY_DISABLED`, `_DELETED` | `Activity.disable()`, `.enable()`, `.reset()`, `.delete()`, `.change_rank(rank)`, `.unassign()`; `fsim.ActivityState.DISABLED`, `.DELETED`; `fsim.agra.activity_state`: DISABLED, DELETED |
 
+### 4.11 Flight tasks and suggestions (as FA-2 builds it)
+
+A command kept by id and flown on a task command (A-GRA's MA_TaskMT with Flight, MA_TaskCommandMT, TaskStatus), and a best effort suggested in place of a command refused (VI 1.2.2.1). There is no workflow engine (section 11): a task is one command, flown as often as its repetition says.
+
+- **Kept and flown (TSK-01).** `storeTask(vehicle, id, command, waypoints, segments, repetition)` keeps a flight or guidance command. It refuses:
+  - id 0, or one with `kSuggestedTask` (the platform's own ids): `invalid_parameter`;
+  - no runs, a negative interval, or runs of a capability that never completes: `invalid_parameter`;
+  - a task whose activity is live: `task_active`;
+  - a command the vehicle cannot fly: the reason why, as a NEW's.
+
+  `commandTask(vehicle, id, options)` is the NEW of its command, with `{task, id}` among the requirements it traces to, answered as that NEW is; a task not kept is `unknown_task`, one flying `task_active`. `cancelTask` cancels its activity; `removeTask` forgets it.
+- **Its runs (A-GRA's finite repetition, which A-GRA puts on tasks).** `TaskRepetition {attempts, intervalS}`: each run begins `intervalS` after the one before completes (NaN: at once). The runs are one activity's (`ActivityRecord::run`, `runs`). Between runs it stays active and flies what its behaviour flies when done (a route's end, a manoeuvre's recovery), then begins afresh (a route from its first point); the activity completes after the last run. No run allocates anything in the step.
+- **Its status (TSK-02).** `taskStatus` gives A-GRA's execution state:
+  - `awaiting_execution` while it is kept and not commanded;
+  - `execution_pending` while its activity waits, has not flown yet, or is disabled; `executing` while it flies;
+  - `completed`, or `failed`, as its activity ended;
+  - `dropped` if its activity lost its axes or its authority (preempted, revoked, released, not granted, collision avoidance, restricted), `canceled` if canceled or deleted on request;
+
+  with the reason, its activity, the run of how many, the percent of the whole, its start and end, and its task command's id.
+- **Suggestions (VAL-10).** A NEW refused under `RangePolicy::Reject` only for values Clamp would hold (a value beyond a limit, a turn flown smaller, a climb flown at the aircraft's rate) names a suggestion: a task the platform keeps with the command its checks left, every value held to the aircraft's limits (a route's points as held). It is in `CommandDetails::suggestion`, the C ABI's detail, and `fsim.Rejected.suggestion`, and a task command flies it. A finding no clamp mends (a curve section too tight, a manoeuvre's entry) suggests nothing; nor does a validation. Sixteen suggestions are kept, the oldest not flying making room.
+- **A failed activity names one (VAL-11).** A waiting activity refused as it would start, for what Clamp would fly, fails, and its record's `suggestion` names the task kept in its place. Nothing is allocated in the step: the waiting entry keeps the suggestion until the next call that may allocate makes it a task.
+
+| C++ | C ABI 1.11 | Python |
+| --- | --- | --- |
+| `World::storeTask`, `commandTask`, `cancelTask`, `removeTask`, `taskStatus`, `tasks`; `Vehicle::` likewise; `TaskId`, `kSuggestedTask`, `TaskRepetition`, `TaskState`, `TaskStatus`; `Reason::UnknownTask`, `TaskActive` | `fsim_vehicle_store_task` (the command as an `fsim_batch_command`), `_command_task`, `_cancel_task`, `_remove_task`, `_task_status`, `_task_count`, `_task_at`; `fsim_task_status`, `fsim_task_state_name`, `FSIM_SUGGESTED_TASK` | `vehicle.store_task(id, fsim.BatchCommand(...), attempts, interval_s)`, `command_task`, `cancel_task`, `remove_task`, `task_status`, `tasks`; `fsim.TaskState`, `fsim.TaskStatus`; `fsim.agra.task_state` |
+| `CommandDetails::suggestion`; `ActivityRecord::suggestion`, `run`, `runs` | `fsim_command_detail.suggestion`; `fsim_activity_envelope.suggestion`, `run`, `runs` | `fsim.Rejected.suggestion`; `ActivityInfo.suggestion`, `.run`, `.runs` |
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -402,7 +429,13 @@ Stop advertising what does not work, at once (D4); tell physically unsupported, 
 
 The command and activity semantics A-GRA defines around every flight command.
 
-**Status:** in progress, in five steps: FA-2a the command envelope (4.8), FA-2b ranks, queues and time windows (4.9) and FA-2c the activity commands (4.10), done 2026-09-27 and measured in section 14; FA-2d flight tasks, suggestions and controllers; FA-2e the reports and the fleet cases.
+**Status:** in progress, in five steps. Done 2026-09-27 and measured in section 14:
+- FA-2a, the command envelope (4.8);
+- FA-2b, ranks, queues and time windows (4.9);
+- FA-2c, the activity commands (4.10);
+- FA-2d, flight tasks and suggestions (4.11).
+
+Still to come: FA-2e, named controllers (AUT-06, moved from FA-2d so that each step stays one reviewable change), the reports and the fleet cases.
 
 **Items (36):** CMD-02, CMD-03, CMD-05, CMD-06, CMD-07, CMD-08, CMD-09, CMD-10, CMD-12, CMD-13, CMD-14, CMD-15, CMD-16, CMD-18, CMD-19, CMD-20; WPT-24; CRV-14; VAL-01, VAL-02, VAL-08, VAL-10, VAL-11, VAL-12; ACT-03, ACT-04, ACT-06, ACT-07, ACT-08, ACT-10, ACT-13, ACT-15; AUT-06; STS-14; TSK-01, TSK-02.
 
@@ -827,6 +860,32 @@ Filled as the stages land: each stage's criteria results, the digests (identical
 - **Code placement.** The names of the contracts' enumerations moved out of the runtime's file into their own (`src/control/Names.cpp`, last in the library). The case lines this step added to them had moved the per-step cases that run only the runtime by -7 % to +7 % against FA-2b's build. With them apart, per step (`micro`, 5 rounds) is within -7.4 % to +1.4 %: the one outlier, "apart, pseudo", is faster, back where FA-2a had it.
 - A/B against FA-2b's build (`command`, 9 rounds): a level switch's NEW +2.7 %, a behaviour's -2.3 %, the per-step command +1.5 %, a checked UPDATE 0.0 %.
 - ctest: all 226 tests pass (the three activity cases added).
+
+**FA-2d (flight tasks and suggestions: TSK-01, TSK-02, VAL-10, VAL-11; CMD-08's repetition).**
+- What it built is 4.11, in C++, the C ABI (1.11) and Python. `fsim.command/task` is supported on every vehicle.
+- `test_tasks` (3 cases, 156 checks) and its Python twin (2 tests):
+  - a task is refused for a reserved id, runs of what never completes, a capability the aircraft lacks. Kept, it is flown on its command with the task in its trace; it reports pending, executing, completed (100 %), canceled; it is refused while it flies, and forgotten.
+  - An aileron roll kept for three runs, two seconds apart, flies them as one activity, active throughout. Its percent never falls, and it completes after the third.
+  - An hsa refused for its speed names a suggestion that flies at the most the F-16C flies, and a validation suggests nothing. A route waiting 20 s, its climb fine at its NEW, is too steep from where the aircraft has flown by then. It fails, naming a suggestion that flies.
+
+  `test_c_abi` covers the 1.11 calls.
+- **The conformance walk** (6,998,600 checks, every adapter). It draws a task operation for 5 % of its operations: a task kept (a command drawn as a NEW's, some with runs and intervals), flown on a task command (held to the NEW's rules), or canceled. After every operation:
+  - each task's state agrees with its activity: executing while it flies, pending while it waits, its activity's end once it ended, its runs its activity's;
+  - its activity traces to it;
+  - a refusal's suggestion, and a failure's, name a suggested task kept.
+
+  Across the walks: tasks kept, flown, refused `task_active`, executing, completed, canceled, and refusals naming suggestions.
+- **What the walk found and fixed:**
+  - a task command whose activity was taken at once by what waited left the task unaware of its end;
+  - an unassigned or enabled activity was still held to its first start's critical window, long past. A resumed activity answers to its end window only;
+  - a behaviour done reports so at every step, which put a task's next run off step after step. The next run's time is now set once.
+- No earlier answer or flight changes. Digests: identical, with protection and without.
+- The allocation gate passes, with two new cases in the steps counted, each checked:
+  - a task's route begins its second run;
+  - a waiting route refused as it would start is kept as the suggestion its record names.
+- **Code placement, again.** The per-step cases that run only the runtime read +6 to +10 % against FA-2c's build ("axes apart", "default hold", "apart, pseudo"), though FA-2d changed none of their code. The task code in the host's file, which links ahead of the runtime's, had moved it. In its own file, last in the library (`src/control/Tasks.cpp`), per step (`micro`, 5 rounds) is within -5.5 % to +0.7 %, the outliers faster.
+- A/B against FA-2c's build (`command`, 9 rounds): the per-step command +3.1 %, a level switch's NEW +2.7 %, a behaviour's +2.2 %, a checked UPDATE +1.2 %.
+- ctest: all 229 tests pass (the three task cases added).
 
 
 ## Appendix A: the inventory

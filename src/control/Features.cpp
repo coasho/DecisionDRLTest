@@ -215,7 +215,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.command/override_rejection", "", P, 3, 0, "carried and kept; no soft rejection exists to override yet (endurance, FA-3; air traffic, FA-15)"}, // CMD-09
     {"fsim.command/traceability", "", S, 0, 0, ""},                                           // CMD-10
     {"fsim.command/validate", "", S, 0, 0, ""},                                               // VAL-12
-    {"fsim.command/task", "", N, 2, 0, ""},                                                   // TSK-01, TSK-02
+    {"fsim.command/task", "", S, 0, 0, ""},                                                   // TSK-01, TSK-02
     {"fsim.command/release_envelope", "", N, 13, R9, ""},                                     // WPN-01
     {"fsim.activity/disable", "", S, 0, 0, ""},                                               // CMD-12, ACT-04
     {"fsim.activity/enable", "", S, 0, 0, ""},
