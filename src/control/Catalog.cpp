@@ -40,7 +40,8 @@ CapabilityDescriptor flight(const char* name, Level level, std::vector<Parameter
 /// The platform's own behaviours are fsim.guidance.<id>; others user.guidance.<id>
 /// unless registered with a dotted id.
 std::string guidanceId(const std::string& behavior) {
-    static const char* const builtin[] = {"hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics", "hover", "hsa", "route"};
+    static const char* const builtin[] = {"hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics", "hover", "hsa", "route",
+                                          "pattern"};
     if (behavior.find('.') != std::string::npos) return behavior;
     for (const char* b : builtin)
         if (behavior == b) return "fsim.guidance." + behavior;
@@ -78,7 +79,7 @@ Reason checkValue(const ParameterInfo& p, double& v, RangePolicy range, std::uin
 
 } // namespace
 
-std::size_t commandFields(Command& c, double* f[8]) noexcept {
+std::size_t commandFields(Command& c, double* f[kMaxCommandFields]) noexcept {
     if (auto* a = std::get_if<ActuatorCommand>(&c)) {
         f[0] = &a->aileron, f[1] = &a->elevator, f[2] = &a->rudder, f[3] = &a->throttle;
         f[4] = &a->flaps, f[5] = &a->gearDown, f[6] = &a->brakeLeft, f[7] = &a->brakeRight;
@@ -111,6 +112,12 @@ std::size_t commandFields(Command& c, double* f[8]) noexcept {
     if (auto* r = std::get_if<RouteCommand>(&c)) {
         f[0] = &r->projection, f[1] = &r->repeat, f[2] = &r->end, f[3] = &r->start;
         return 4;
+    }
+    if (auto* p = std::get_if<PatternCommand>(&c)) {
+        f[0] = &p->pattern, f[1] = &p->latitudeRad, f[2] = &p->longitudeRad, f[3] = &p->altitudeM, f[4] = &p->altitudeReference;
+        f[5] = &p->radiusM, f[6] = &p->clockwise, f[7] = &p->courseRad, f[8] = &p->legM, f[9] = &p->speed, f[10] = &p->speedReference;
+        f[11] = &p->durationS;
+        return 12;
     }
     return 0;
 }
@@ -321,6 +328,7 @@ int CapabilityCatalog::indexOf(const Command& command) const noexcept {
     if (const auto* b = std::get_if<BehaviorCommand>(&command)) return find(b->id);
     if (std::holds_alternative<HsaCommand>(command)) return byMode_[static_cast<std::size_t>(SetpointKind::Hsa)];
     if (std::holds_alternative<RouteCommand>(command)) return byMode_[static_cast<std::size_t>(SetpointKind::Route)];
+    if (std::holds_alternative<PatternCommand>(command)) return byMode_[static_cast<std::size_t>(SetpointKind::Pattern)];
     return byLevel_[command.index()];
 }
 
@@ -367,7 +375,7 @@ Reason CapabilityCatalog::check(std::size_t index, Command& command, RangePolicy
             }
         return Reason::None;
     }
-    double* fields[8];
+    double* fields[kMaxCommandFields];
     const std::size_t n = std::min(commandFields(command, fields), d.parameters.size());
     for (std::size_t i = 0; i < n; ++i)
         if (const Reason r = checkValue(d.parameters[i], *fields[i], range, flags, detail, i); r != Reason::None) return r;

@@ -89,6 +89,7 @@ from .world import (  # noqa: E402
     LimitStatus,
     Message,
     Parameter,
+    PatternKind,
     Projection,
     ProtectionMode,
     RangePolicy,

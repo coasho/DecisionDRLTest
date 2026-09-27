@@ -24,6 +24,7 @@ add_executable(fsim_tests
     test_interface.cpp
     test_modes.cpp
     test_routes.cpp
+    test_patterns.cpp
     test_control_compat.cpp
     test_profile.cpp
     test_protection.cpp

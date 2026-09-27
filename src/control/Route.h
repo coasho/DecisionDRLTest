@@ -1,15 +1,18 @@
 #pragma once
 
-// A route's geometry (docs/vehicle-interface.md, 4.5 and 4.8): its legs on the
-// sphere - great circles or rhumb lines - and its fly-by turns, arcs in the
-// plane at their waypoint; where the aircraft is against them; and the plan
-// the route's behaviour flies and the host checks a route against. The Earth
+// The guidance modes' paths (docs/vehicle-interface.md, 4.5 to 4.8): a
+// route's legs on the sphere - great circles or rhumb lines - and its fly-by
+// turns, arcs in the plane at their waypoint; where the aircraft is against
+// them; the plan the route's behaviour flies and the host checks a route
+// against; and the path follower every mode flies its path with. The Earth
 // is a sphere of the mean radius here, as for all local geometry (core/Geodesy.h).
 
 #include "fsim/Control.h"
+#include "fsim/GuidanceModes.h"
 #include "fsim/VehicleState.h"
 
 #include <cstdint>
+#include <limits>
 
 namespace fsim::control::route {
 
@@ -62,6 +65,49 @@ Fix onArc(const Turn& turn, double lat0, double lon0, double lat, double lon) no
 /// atmosphere at `altitudeMslM`), or a ground speed as it is.
 double plannedSpeed(double speed, double reference, double altitudeMslM) noexcept;
 
+// --- The path follower (4.8) ------------------------------------------------------
+
+/// What comes next along the path: a loop that lags flies the curvature
+/// there early (a turn begun before its arc, ended before the arc does).
+struct Ahead {
+    double toChangeM = std::numeric_limits<double>::infinity(); ///< along the path to where its curvature changes
+    double curvature = 0.0;  ///< its curvature from there, 1/m
+    double turnRadiusM = 0.0; ///< the turn being flown or coming, for a wing's roll into it; 0: none
+};
+
+/// What the follower flies at a fix.
+struct Steer {
+    double speed = 0.0;                     ///< the path's, in `reference`
+    SpeedReference reference = SpeedReference::TrueAirspeed;
+    double speedLimitMs = std::numeric_limits<double>::infinity(); ///< a rotorcraft's path speed at most: a curve's, a stop
+    double verticalSpeedMs = 0.0;           ///< what the altitude profile asks
+};
+
+/// What the follower integrates.
+struct Trims {
+    double courseRadS = 0.0; ///< the course error's integral: a wing's as a turn rate, a rotorcraft's as a course, rad
+    double speedMs = 0.0;    ///< a wing's ground-speed error integral, as airspeed
+    double taken = 0.0;      ///< a rotorcraft's: the acceleration its velocity loop's own integral has taken up (as modelled), m/s2
+};
+
+/// The path at `fix` flown by the vehicle (line of sight with the curvature
+/// fed forward, from its course bandwidth): a wing as a turn rate and an
+/// airspeed, a rotorcraft as its velocity over the ground, the nose along the
+/// track. `course` and `heading` get what it commands (a wing's heading: none).
+VelocityCommand follow(const ControlContext& ctx, const Performance& performance, const WindEstimate& wind, bool hovers, const Fix& fix,
+                       const Ahead& ahead, const Steer& steer, Trims& trims, double& course, double& heading) noexcept;
+
+/// The vertical speed that flies to `altitudeMslM`: `feedforward` (a
+/// profile's) plus the error at the position loop's gain, within the
+/// aircraft's climb and descent.
+double verticalSpeedTo(double altitudeMslM, double feedforward, const sim::VehicleState& s, const Performance& performance, bool hovers) noexcept;
+
+/// A rotorcraft's path speed at most, for its lateral acceleration and its
+/// braking (80 % of its performance's): on an arc of `radiusM`, and `toArcM`
+/// before one (0: none).
+double lateralLimit(const Performance& performance, double radiusM) noexcept;
+double brakingLimit(const Performance& performance, double speedAfterMs, double toGoM) noexcept;
+
 /// What a route flies, planned from its complete waypoints: fixed arrays, so
 /// the behaviour that holds it allocates nothing in flight.
 struct Plan {
@@ -80,6 +126,7 @@ struct Plan {
     Turn entryTurn;
     /// After the last point, a wing that loiters orbits it (its centre the point).
     Turn orbit;
+    Trims trims; ///< the follower's, flying it
 
     std::uint32_t last() const noexcept { return count - 1; }
     std::uint32_t next(std::uint32_t i) const noexcept { return i + 1 < count ? i + 1 : 0; }
@@ -98,6 +145,52 @@ struct Plan {
     /// A lap's length: the first from the entry, the others the whole route.
     double lapM(bool firstLap) const noexcept;
 };
+
+// --- Loiter patterns (4.6) ---------------------------------------------------------
+
+/// A straight in the plane at a pattern's point: from (north, east), m, along its course.
+struct Line {
+    double northM = 0.0, eastM = 0.0;
+    double courseRad = 0.0;
+    double lengthM = 0.0;
+};
+/// The aircraft at (lat, lon) against the line in the plane at (lat0, lon0), extended beyond its ends.
+Fix onLine(const Line& line, double lat0, double lon0, double lat, double lon) noexcept;
+
+/// A pattern's loop round its point, in the plane there: pieces flown in
+/// order and again, and for a racetrack or a hold the entry direct to the fix.
+struct Pattern {
+    struct Piece {
+        bool arc = false;
+        Line line;              ///< a straight's
+        Turn turn;              ///< an arc's: its centre from the point, its radius, its way round (the sign of angleRad), where it starts
+        double sweepRad = 0.0;  ///< an arc's, up to a whole circle
+    };
+    PatternKind kind = PatternKind::Orbit;
+    double lat0 = 0.0, lon0 = 0.0; ///< the centre, or the fix
+    double radiusM = 0.0;
+    std::uint32_t count = 0;       ///< pieces in a lap: an orbit's 1, a figure-eight's 2, a racetrack's or a hold's 4
+    std::uint32_t first = 0;       ///< the piece a lap begins with (a racetrack's: the turn at the fix)
+    Piece pieces[4];
+    Line entry;                    ///< a racetrack's or a hold's: from the aircraft to the fix (0 long: none)
+    Trims trims;                   ///< the follower's, flying it
+
+    std::uint32_t next(std::uint32_t i) const noexcept { return i + 1 < count ? i + 1 : 0; }
+    double pieceM(std::uint32_t i) const noexcept { return pieces[i].arc ? pieces[i].turn.radiusM * pieces[i].sweepRad : pieces[i].line.lengthM; }
+    double lapM() const noexcept;
+};
+
+/// The pattern `c` sets (complete: its fields the host resolved), planned
+/// from where the aircraft is: an orbit's laps counted from its bearing then.
+void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon) noexcept;
+
+/// What a pattern leaves out, filled in (docs/vehicle-interface.md, 4.6): an
+/// orbit, here, the altitude and speed it flies now (a rotorcraft's speed its
+/// cruise over the ground), right turns, its track now (a hold's course the
+/// way to its fix), the radius its speed and `windMs` and 80 % of its bank
+/// give (a hold's: rate one, at most 25 degrees of bank), legs of twice the
+/// radius (a hold's: a minute's flight, 90 s above 14,000 ft). The angles wrapped.
+void completePattern(PatternCommand& c, const sim::VehicleState& state, const Performance& performance, bool hovers, double windMs) noexcept;
 
 /// What a route's waypoints leave out, filled in (docs/vehicle-interface.md,
 /// 4.5): each field the previous point's, the first's the aircraft's own now

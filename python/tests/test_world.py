@@ -311,7 +311,7 @@ class CapabilityTest(unittest.TestCase):
         self.assertEqual(caps["fsim.guidance.formation"].mode, "formation")
         self.assertEqual(caps["fsim.flight.velocity"].mode, "none")
         self.assertEqual(agra.flight_capabilities(v), {"FORMATION": ["fsim.guidance.formation"], "HSA_CSA": ["fsim.guidance.hsa"],
-                                                       "WAYPOINT_FOLLOWING": ["fsim.guidance.route"]})
+                                                       "LOITER": ["fsim.guidance.pattern"], "WAYPOINT_FOLLOWING": ["fsim.guidance.route"]})
         route.cancel()
         self.assertEqual(agra.activity_state(route.info), "FAILED")
         self.assertEqual(agra.cannot_comply(route.info.reason), "CANCELED")
@@ -379,6 +379,29 @@ class CapabilityTest(unittest.TestCase):
         caps = {c.id: c for c in v.capabilities()}
         self.assertEqual(caps["fsim.guidance.route"].mode, "waypoint_following")
         self.assertEqual([q.name for q in caps["fsim.guidance.route"].parameters], list(fsim.MODE_FIELDS["route"]))
+
+    def test_pattern_mode(self):
+        world = make_world(name="py-pattern")
+        v = fly(world, "pattern")
+        a = v.submit_pattern(pattern="racetrack", radius_m=900.0, leg_m=3000.0, course_rad=0.0, duration_s=600.0)
+        self.assertEqual(a.level, "pattern")
+        world.step(5)
+        p = a.progress
+        self.assertEqual(p.segments, 4)
+        self.assertTrue(0.0 < p.percent < 5.0 and 590.0 < p.time_to_go_s <= 600.0)
+        a.update(radius_m=1100.0)  # only the radius: the rest as commanded
+        world.step()
+        self.assertEqual(a.progress.segments, 4)
+        with self.assertRaises(fsim.Rejected) as refused:
+            a.update(speed_reference="mach")  # a reference needs its value in an UPDATE
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_parameter", 9))
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_pattern(pattern=7)
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_parameter", 0))
+        caps = {c.id: c for c in v.capabilities()}
+        self.assertEqual(caps["fsim.guidance.pattern"].mode, "loiter")
+        self.assertEqual([q.name for q in caps["fsim.guidance.pattern"].parameters], list(fsim.MODE_FIELDS["pattern"]))
+        self.assertEqual(fsim.PatternKind.FIGURE_EIGHT, 2)
 
     def test_authority_and_refusals(self):
         world = make_world(name="py-authority")

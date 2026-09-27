@@ -17,10 +17,12 @@
 
 namespace fsim::control {
 
+/// The most fields a command struct or a guidance mode's setpoint has (a pattern's 12).
+inline constexpr std::size_t kMaxCommandFields = 16;
 /// The fields of a command struct below Level::Behavior, or of a guidance
 /// mode's setpoint, in declaration order (the C ABI's order too): pointers
-/// into `c`, at most 8. Returns how many (0 for a BehaviorCommand).
-std::size_t commandFields(Command& c, double* fields[8]) noexcept;
+/// into `c`. Returns how many (0 for a BehaviorCommand).
+std::size_t commandFields(Command& c, double* fields[kMaxCommandFields]) noexcept;
 /// How many of a level's fields it had before the rotorcraft's were appended
 /// (docs/rotorcraft.md, 3.4): what the C ABI's fixed-size calls still take.
 std::size_t legacyFieldCount(Level level) noexcept;
@@ -103,7 +105,7 @@ private:
     std::vector<CapabilityDescriptor> descriptors_;
     std::array<int, static_cast<std::size_t>(Level::Behavior)> byLevel_{};
     std::array<int, kSupportKinds> bySupport_{-1, -1, -1, -1, -1, -1};
-    std::array<int, static_cast<std::size_t>(SetpointKind::Count)> byMode_{-1, -1, -1, -1}; ///< a guidance mode's capability, by its setpoint
+    std::array<int, static_cast<std::size_t>(SetpointKind::Count)> byMode_{-1, -1, -1, -1, -1}; ///< a guidance mode's capability, by its setpoint
     std::uint64_t registryRevision_ = 0;
 };
 

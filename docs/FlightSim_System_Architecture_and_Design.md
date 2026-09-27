@@ -679,7 +679,8 @@ HSA/CSA mode - a heading or a course, a speed in any reference and an altitude a
 partial updates, checked against each aircraft's performance and flown by wings and rotorcraft alike; the fourth,
 waypoint following - great-circle and rhumb legs, fly-by turns sized for the aircraft and the wind, fly-over points,
 altitude and speed profiles, every point checked - flown by one path follower that anticipates each turn by the
-aircraft's own roll lag.
+aircraft's own roll lag; the fifth, loiter patterns - orbits, racetracks, figure-eights and ATC's hold - on the same
+follower, which now models a rotorcraft's velocity loop to take out its lag round a steady turn.
 M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |

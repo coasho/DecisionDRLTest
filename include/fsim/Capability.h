@@ -356,6 +356,7 @@ enum class SetpointKind : std::uint8_t {
     Behavior, ///< BehaviorCommand
     Hsa,      ///< HsaCommand (fsim.guidance.hsa)
     Route,    ///< RouteCommand and its waypoints (fsim.guidance.route)
+    Pattern,  ///< PatternCommand (fsim.guidance.pattern)
     Count
 };
 

@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <memory>
 
@@ -36,6 +37,7 @@ inline void assignSetpoint(Command& dst, const Command& src) noexcept {
     case 4: as(PositionCommand{}); break;
     case 6: as(HsaCommand{}); break;
     case 7: as(RouteCommand{}); break;
+    case 8: as(PatternCommand{}); break;
     default: break;
     }
 }
@@ -51,12 +53,24 @@ inline void mergeHsa(HsaCommand& dst, const HsaCommand& src) noexcept {
     if (!isHold(src.altitudeReference)) dst.altitudeReference = src.altitudeReference;
 }
 
+/// A partial pattern (docs/vehicle-interface.md, 4.6): each field given replaces the commanded one.
+inline void mergePattern(PatternCommand& dst, const PatternCommand& src) noexcept {
+    double* d[] = {&dst.pattern, &dst.latitudeRad, &dst.longitudeRad, &dst.altitudeM, &dst.altitudeReference, &dst.radiusM,
+                   &dst.clockwise, &dst.courseRad, &dst.legM, &dst.speed, &dst.speedReference, &dst.durationS};
+    const double s[] = {src.pattern, src.latitudeRad, src.longitudeRad, src.altitudeM, src.altitudeReference, src.radiusM,
+                        src.clockwise, src.courseRad, src.legM, src.speed, src.speedReference, src.durationS};
+    for (std::size_t i = 0; i < std::size(s); ++i)
+        if (!isHold(s[i])) *d[i] = s[i];
+}
+
 /// What UPDATE (and the existing entry points' per-step path) writes into a
 /// slot: a level's setpoint replaced, a mode's merged (its kHold fields keep
 /// what was commanded).
 inline void applySetpoint(Command& dst, const Command& src) noexcept {
     if (auto* d = std::get_if<HsaCommand>(&dst))
         if (const auto* s = std::get_if<HsaCommand>(&src)) return mergeHsa(*d, *s);
+    if (auto* d = std::get_if<PatternCommand>(&dst))
+        if (const auto* s = std::get_if<PatternCommand>(&src)) return mergePattern(*d, *s);
     assignSetpoint(dst, src);
 }
 

@@ -70,6 +70,7 @@ private:
 
 namespace route {
 struct Plan;
+struct Pattern;
 struct Fix;
 } // namespace route
 
@@ -134,13 +135,55 @@ private:
     // the segment flown: to point segment_, from the middle of the turn before it
     std::uint32_t segment_ = 0;
     double segmentStartM_ = 0.0, segmentM_ = 0.0, segmentStartS_ = 0.0, segmentFrom_ = 0.0;
-    // trims and what it commands
-    double courseTrim_ = 0.0;          ///< a wing's course error integral, rad/s of turn rate
-    double speedTrim_ = 0.0, lastTime_ = -1.0;
+    // what it commands
+    double lastTime_ = -1.0;
     double crossTrack_ = kHold, course_ = kHold, heading_ = kHold, altitudeMsl_ = kHold, groundSpeed_ = 0.0;
 };
 
-/// Registers the modes' behaviours ("hsa", "route"); registerBuiltinControllers calls it.
+/// "pattern": fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md,
+/// 4.6). Flies a complete PatternCommand (the host fills in what it leaves
+/// out): an orbit round its centre, a racetrack or a hold - two half circles
+/// joined by legs, the inbound one ending at the fix, entered direct to the fix -
+/// or a figure-eight, two circles meeting at the centre. The route's path
+/// follower flies it (RouteBehavior). Its laps are counted; with a duration it
+/// completes when that has passed, and flies on. A merged UPDATE flies the
+/// pattern it makes afresh, the duration still counted from the start.
+class FSIM_API PatternBehavior final : public Behavior {
+public:
+    PatternBehavior();
+    ~PatternBehavior() override;
+    const char* id() const noexcept override { return "pattern"; }
+    void begin(const ControlContext& ctx, const Command& command) override;
+    Command update(const ControlContext& ctx, const Command& in) override;
+    void reset() override;
+    bool finished() const noexcept override { return finished_; }
+    /// The piece flown (of the lap's), the laps, how far round the lap (or,
+    /// timed, through the duration) and the time to go, the cross-track, and
+    /// what it commands: the course, the altitude, the speed.
+    bool progress(ActivityProgress& out) const noexcept override;
+
+private:
+    /// Plan the pattern `c` from where the aircraft is.
+    void plan(const ControlContext& ctx, const PatternCommand& c);
+    /// Fly piece `i` from here: an arc's sweep counted from where the aircraft is round it.
+    void startPiece(std::uint32_t i, const sim::VehicleState& s);
+    /// Where the aircraft is on the pattern, passing the pieces it has finished.
+    route::Fix locate(const sim::VehicleState& s);
+
+    std::unique_ptr<route::Pattern> pattern_; ///< allocated with the behaviour
+    WindEstimate wind_;
+    PatternCommand flown_{};         ///< the setpoint it was planned from
+    PatternCommand resolved_{};      ///< the same, complete
+    bool planned_ = false, hovers_ = false, entering_ = false, finished_ = false;
+    std::uint32_t piece_ = 0, laps_ = 0;
+    double swept_ = 0.0, lastBearing_ = 0.0; ///< round the arc flown
+    double startS_ = -1.0;           ///< when it began (a duration counts from it)
+    double lapDoneM_ = 0.0, inPieceM_ = 0.0;
+    double lastTime_ = -1.0;
+    double crossTrack_ = kHold, course_ = kHold, heading_ = kHold, altitudeMsl_ = kHold, groundSpeed_ = 0.0, simTime_ = 0.0;
+};
+
+/// Registers the modes' behaviours ("hsa", "route", "pattern"); registerBuiltinControllers calls it.
 void registerGuidanceModes(ControllerRegistry& registry);
 
 } // namespace fsim::control

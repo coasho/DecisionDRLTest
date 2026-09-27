@@ -184,6 +184,15 @@ private:
                       CommandResult& detail);
     /// The route checkRoute left in the scratch plan, into the path store: flown afresh.
     void writeRoute();
+    /// A pattern's fields (docs/vehicle-interface.md, 4.6): whole numbers for
+    /// its kind, references and way round, the rest finite and in range (a
+    /// radius and a speed above 0, legs from 0, a duration above 0); in an
+    /// UPDATE (`merge`) a reference needs its value. InvalidParameter with the field.
+    static Reason checkPattern(const PatternCommand& c, bool merge, CommandResult& detail) noexcept;
+    /// A complete pattern against the performance, as limitHsa: its speed and
+    /// altitude, and a radius no tighter than the aircraft's full bank flies
+    /// at its speed (a rotorcraft's: a metre).
+    Reason limitPattern(PatternCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
     /// NEW: a command (with a route's waypoints).
     CommandResult submitWith(const Command& command, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
                              double now);

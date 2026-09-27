@@ -727,6 +727,31 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
         }
         {
+            /* ABI 1.6: a loiter pattern - twelve fields, fsim_hold() taking the defaults (an orbit here), an UPDATE merging */
+            double pattern[12], wider[12];
+            fsim_activity_progress progress;
+            fsim_activity_id orbit_id;
+            int k;
+            CHECK(fsim_mode_field_count(FSIM_MODE_PATTERN) == 12);
+            for (k = 0; k < 12; ++k) pattern[k] = wider[k] = fsim_hold();
+            pattern[0] = FSIM_PATTERN_ORBIT;
+            pattern[5] = 800.0; /* radius_m */
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE; /* b's autopilot holds its height (above) */
+            CHECK(fsim_vehicle_submit_mode(world, b, FSIM_MODE_PATTERN, pattern, 12, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            orbit_id = cr.activity;
+            CHECK(fsim_vehicle_submit_mode(world, b, FSIM_MODE_PATTERN, pattern, 11, &co, &cr) != FSIM_OK); /* malformed: 12 fields */
+            fsim_activity_progress_init(&progress);
+            CHECK(fsim_world_step(world, 2) == FSIM_OK && fsim_activity_get_progress(world, orbit_id, &progress) == FSIM_OK);
+            CHECK(progress.segments == 1 && progress.segment == 0 && progress.speed_ms > 20.0); /* the airspeed it flies */
+            wider[5] = 1200.0; /* only the radius */
+            CHECK(fsim_activity_update(world, orbit_id, wider, 12, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            wider[5] = fsim_hold();
+            wider[6] = 0.5; /* clockwise: 0 or 1 */
+            CHECK(fsim_activity_update(world, orbit_id, wider, 12, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED && cr.reserved == 7);
+            CHECK(fsim_activity_cancel(world, orbit_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        }
+        {
             /* the profile: a stock c172x carries no sections */
             double value = 0.0;
             uint32_t version = 9;

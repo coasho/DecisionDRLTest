@@ -1,5 +1,6 @@
-"""The Vehicle Interface's waypoint following (docs/vehicle-interface.md), flying
-for the viewer in an 8 m/s wind from the north. Four minutes.
+"""The Vehicle Interface's waypoint following and loiter patterns
+(docs/vehicle-interface.md), flying for the viewer in an 8 m/s wind from the
+north. Four minutes.
 
 - A Cessna 172 flies a triangle of 3 km legs round and round: fly-by turns
   begun before each point, on circles sized for its speed, the wind and 80 %
@@ -9,6 +10,9 @@ for the viewer in an 8 m/s wind from the north. Four minutes.
 - A UH-60A flies 400 m legs at 20 m/s without stopping at its points, and stops
   and hovers over the last one.
 - An IRIS flies 30 m legs round and round, its nose along its track.
+- A second Cessna holds over a fix 4 km ahead, ATC's holding pattern from
+  its defaults alone: right turns, the inbound course the way it arrived,
+  rate-one turns, a minute's legs.
 
 Each flies what its own loops can do: the turns are planned from the
 aircraft's performance, the legs flown by one path follower - a wing turns
@@ -55,13 +59,16 @@ cessna = world.create_vehicle("c172-triangle", "jsbsim:c172x", latitude_deg=37.6
                               heading_deg=90, airspeed_ms=55)
 viper = world.create_vehicle("f16-climb-orbit", "jsbsim:f16c", latitude_deg=37.66, longitude_deg=-122.38, altitude_msl_m=3000,
                              heading_deg=90, airspeed_ms=160)
+holder = world.create_vehicle("c172-hold", "jsbsim:c172x", latitude_deg=37.64, longitude_deg=-122.42, altitude_msl_m=1200,
+                              heading_deg=90, airspeed_ms=55)
 hawk = hover("uh60-hops", "uh60", 37.6, -122.36)
 quad = hover("iris-square", "iris", 37.6, -122.358)
-for v in (cessna, viper):  # on east while they get a feel for the wind (the turns are planned with it)
+for v in (cessna, viper, holder):  # on east while they get a feel for the wind (the turns are planned with it)
     v.submit_hsa(heading_rad=math.pi / 2, speed=v.state.airspeed_true_ms, altitude_m=v.state.altitude_msl_m)
 world.step(int(10.0 / world.step_seconds))
 
-routes = {
+fix = at(holder, 0, 4000)
+activities = {
     cessna: cessna.submit_route([at(cessna, 0, 3000, speed=55.0, id=1), at(cessna, 2600, 1500, id=2), at(cessna, 0, 0, id=3)],
                                 repeat=True),
     viper: viper.submit_route([at(viper, 0, 15000, altitude_m=4000.0, climb_rate_ms=10.0, id=11),
@@ -73,9 +80,10 @@ routes = {
     quad: quad.submit_route([at(quad, 0, 30, speed=5.0, speed_reference="ground_speed", id=31), at(quad, 30, 30, id=32),
                              at(quad, 30, 0, id=33), at(quad, 0, 0, id=34)],
                             repeat=True),
+    holder: holder.submit_pattern(pattern="hold", latitude_rad=fix.latitude_rad, longitude_rad=fix.longitude_rad),
 }
-for v, a in routes.items():
-    print("%-16s its route accepted: %s" % (v.name, fsim.agra.activity_state(a.info)))
+for v, a in activities.items():
+    print("%-16s its %s accepted: %s" % (v.name, a.level, fsim.agra.activity_state(a.info)))
 
 t0 = time.perf_counter()
 start = world.time
@@ -85,12 +93,13 @@ while world.time < start + 240.0:
     if world.time >= next_report:
         next_report += 20.0
         print("t=%4.0f s" % (world.time - start))
-        for v, a in routes.items():
+        for v, a in activities.items():
             p, info = a.progress, a.info
             left = "" if math.isnan(p.distance_to_go_m) else ", %5.0f m to go" % p.distance_to_go_m
-            print("    %-16s %-24s to point %d (id %2d) of %d, lap %d, %5.1f %%%s, cross-track %+6.1f m, %5.1f m/s over the ground"
-                  % (v.name, fsim.agra.activity_state(info), p.segment, p.segment_id, p.segments, p.laps, p.percent, left,
-                     p.cross_track_m, math.hypot(v.state.velocity_ned_ms[0], v.state.velocity_ned_ms[1])))
+            where = ("to point %d (id %2d)" % (p.segment, p.segment_id)) if a.level == "route" else ("on piece %d" % p.segment)
+            print("    %-16s %-24s %s of %d, lap %d, %5.1f %%%s, cross-track %+6.1f m, %5.1f m/s over the ground"
+                  % (v.name, fsim.agra.activity_state(info), where, p.segments, p.laps, p.percent, left, p.cross_track_m,
+                     math.hypot(v.state.velocity_ned_ms[0], v.state.velocity_ned_ms[1])))
         sys.stdout.flush()
     if real_time:
         ahead = (world.time - start) - (time.perf_counter() - t0)

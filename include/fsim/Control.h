@@ -199,6 +199,37 @@ struct PathStore {
     Waypoint waypoints[kWaypoints];
 };
 
+/// A loiter pattern (A-GRA's LOITER).
+enum class PatternKind : std::uint8_t {
+    Orbit = 0,       ///< a circle round the centre
+    Racetrack = 1,   ///< two half circles joined by straight legs, the inbound one ending at the fix
+    FigureEight = 2, ///< two circles meeting at the centre, one flown each way round
+    Hold = 3,        ///< ATC's holding pattern: a racetrack on the fix with a minute's legs, entered direct to the fix
+    Count
+};
+
+/// fsim.guidance.pattern (A-GRA's loiter): an orbit, a racetrack, a
+/// figure-eight or a hold, until canceled or for a duration. A field left
+/// out (kHold) takes its default in a NEW and keeps what was commanded in an
+/// UPDATE. The defaults: an orbit, where the aircraft is, as it flies now (a
+/// rotorcraft at its cruise speed over the ground), right turns, the course it
+/// tracks now (a hold's: to its fix), the radius its speed, the wind and 80 %
+/// of its bank give (a hold's: rate one, at most 25 degrees of bank), legs of
+/// twice the radius (a hold's: a minute's flight, 90 s above 14,000 ft).
+struct PatternCommand {
+    double pattern = kHold;            ///< PatternKind
+    double latitudeRad = kHold, longitudeRad = kHold; ///< the centre, or a racetrack's or a hold's fix
+    double altitudeM = kHold;
+    double altitudeReference = kHold;  ///< AltitudeReference
+    double radiusM = kHold;            ///< at least the turn radius at the aircraft's speed and full bank; a rotorcraft's a metre
+    double clockwise = kHold;          ///< 1 right turns, 0 left
+    double courseRad = kHold;          ///< a racetrack's or a hold's inbound course, a figure-eight's axis
+    double legM = kHold;               ///< a racetrack's or a hold's straight legs
+    double speed = kHold;              ///< m/s, or a Mach number
+    double speedReference = kHold;     ///< SpeedReference
+    double durationS = kHold;          ///< then it completes (and flies on); kHold: until canceled
+};
+
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
 struct BehaviorCommand {
     std::string id;                        ///< registry id: "hold", "waypoints", "loiter", "pursuit", ...
@@ -216,7 +247,7 @@ struct BehaviorCommand {
 /// modes come after BehaviorCommand and enter at Level::Behavior (levelOf):
 /// the variant's index is a level's only up to it.
 using Command = std::variant<ActuatorCommand, AttitudeCommand, AccelerationCommand, VelocityCommand, PositionCommand, BehaviorCommand, HsaCommand,
-                             RouteCommand>;
+                             RouteCommand, PatternCommand>;
 
 // Support effectors (docs/control-architecture.md, 8.2): set directly, not
 // flown through the cascade; each its own capability (fsim.support.*) where
@@ -255,10 +286,11 @@ using SupportCommand = std::variant<GearCommand, FlapsCommand, WheelBrakesComman
 inline Level levelOf(const Command& c) noexcept {
     return c.index() < static_cast<std::size_t>(Level::Behavior) ? static_cast<Level>(c.index()) : Level::Behavior;
 }
-/// The registered behaviour that flies a mode's setpoint ("hsa", "route"); null for a level's or a behaviour's command.
+/// The registered behaviour that flies a mode's setpoint ("hsa", "route", "pattern"); null for a level's or a behaviour's command.
 inline const char* modeBehavior(const Command& c) noexcept {
     if (std::holds_alternative<HsaCommand>(c)) return "hsa";
     if (std::holds_alternative<RouteCommand>(c)) return "route";
+    if (std::holds_alternative<PatternCommand>(c)) return "pattern";
     return nullptr;
 }
 

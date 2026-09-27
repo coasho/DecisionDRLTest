@@ -310,11 +310,46 @@ rotorcraft keep 80 % of their speed through the turns (`tests/test_routes.cpp`).
 `fsim python examples/python/vehicle_interface.py` flies four of them for the
 viewer.
 
+### Loiter patterns: orbit, racetrack, figure-eight, hold
+
+`fsim.guidance.pattern` is A-GRA's loiter. Its setpoint is fixed-size, and
+an UPDATE merges the fields it gives, as an hsa's does:
+
+```cpp
+PatternCommand hold;
+hold.pattern = double(PatternKind::Hold);                  // or Orbit, Racetrack, FigureEight
+hold.latitudeRad = ..., hold.longitudeRad = ...;           // the fix (a centre for an orbit or a figure-eight)
+auto a = v.submit(hold).activity;                          // right turns, inbound the way it arrives, rate one, a minute's legs
+PatternCommand wider;
+wider.radiusM = 1500;                                      // only the radius
+world.update(a, wider);
+```
+
+- **Patterns.**
+  - An orbit circles the centre.
+  - A racetrack has two half circles joined by legs, the inbound one ending at the fix; the aircraft enters it direct to the fix.
+  - A figure-eight has two circles meeting at the centre, one flown each way round.
+  - A hold is ATC's racetrack, on the fix.
+- **Left out:** an orbit, here, as the aircraft flies now (a rotorcraft at its cruise speed over the ground), right turns, its track now, the radius its speed plus the wind and 80 % of its bank give. A hold instead takes the way to its fix as its inbound course, rate-one turns and a minute's legs (90 s above 14,000 ft). A racetrack's legs are twice its radius.
+- **Checked:** a radius tighter than the aircraft's full bank flies at its speed is clamped (a rotorcraft's least is a metre), or refused `performance_limit` under Reject; speed and altitude as for an hsa.
+- **Duration:** `durationS` completes the activity when it has passed; the aircraft flies on in the pattern. `progress` has the piece flown, the laps, the percent of the lap or of the duration, and the time to go.
+
+Calm, the orbits hold within 6 m. In a 12 m/s wind they hold within:
+
+| Aircraft | Radius | Worst off the circle |
+| --- | --- | --- |
+| c172x | 800 m | 30 m |
+| B-52H | 9 km | 11 m |
+| F-16C | 4 km | 21 m |
+| UH-60A | 150 m | 6.6 m |
+
+An IRIS flies a 2 m circle within a centimetre (`tests/test_patterns.cpp`).
+
 **New reasons.** `invalid_waypoint`, `invalid_curve`, `performance_limit`,
 `not_granted`, `not_allowed`, `revoked`, `released`, `collision_avoidance`
 and `restricted` belong to ADR-28's modes and grants.
 
-**From C and Python.** `fsim_vehicle_submit_mode(world, id, FSIM_MODE_HSA, fields, 6, &options, &result)` and `vehicle.submit_hsa(course_rad=..., speed=..., speed_reference="mach", altitude_m=...)` submit an hsa; `fsim_activity_update` and `activity.update(altitude_m=...)` change only what they give. `fsim_vehicle_submit_route(world, id, fields, 4, waypoints, n, &options, &result)` (`fsim_waypoint`, `fsim_waypoint_init`) and `vehicle.submit_route([fsim.Waypoint(lat, lon, speed=55.0), ...], repeat=True)` submit a route; `fsim_activity_update_route` and `activity.update_route(waypoints, **options)` replace it. The C ABI's result carries the index plus one in
+**From C and Python.** `fsim_vehicle_submit_mode(world, id, FSIM_MODE_HSA, fields, 6, &options, &result)` and `vehicle.submit_hsa(course_rad=..., speed=..., speed_reference="mach", altitude_m=...)` submit an hsa; `fsim_activity_update` and `activity.update(altitude_m=...)` change only what they give. `fsim_vehicle_submit_route(world, id, fields, 4, waypoints, n, &options, &result)` (`fsim_waypoint`, `fsim_waypoint_init`) and `vehicle.submit_route([fsim.Waypoint(lat, lon, speed=55.0), ...], repeat=True)` submit a route; `fsim_activity_update_route` and `activity.update_route(waypoints, **options)` replace it. `fsim_vehicle_submit_mode(world, id, FSIM_MODE_PATTERN, fields, 12, &options, &result)` and `vehicle.submit_pattern(pattern="hold", latitude_rad=..., longitude_rad=...)` loiter; `activity.update(radius_m=...)` merges. The C ABI's result carries the index plus one in
 `fsim_command_result.reserved`; `fsim_last_command_detail()` has the rest,
 `fsim_activity_get_progress()` the progress, `fsim_vehicle_commanded()` the
 commanded state, `fsim_vehicle_capability_flight_mode()` a capability's type

@@ -297,6 +297,14 @@ std::vector<Case> cases() {
                        c.repeat = 1.0;
                        stack.command(c, route);
                    }});
+    // ...and its loiter: a racetrack round a fix ahead, its legs and half circles
+    out.push_back({"pattern", [](const sim::VehicleState& s) {
+                       PatternCommand p;
+                       p.pattern = static_cast<double>(PatternKind::Racetrack);
+                       p.latitudeRad = s.latitudeRad, p.longitudeRad = s.longitudeRad + 0.001, p.courseRad = 0.0, p.radiusM = 800.0, p.legM = 3000.0;
+                       p.altitudeM = 1600.0, p.speed = 55.0, p.speedReference = 0.0;
+                       return Command(p);
+                   }});
     // ...and every limit given, the flight running into them all the time: the worst case
     for (const ProtectionMode mode : {ProtectionMode::Limit, ProtectionMode::Report}) {
         const bool limit = mode == ProtectionMode::Limit;
@@ -511,6 +519,18 @@ int alloc() {
              }
          }},
         {"loiter once", [&](std::uint32_t id, int k) { if (k == 0) w.command(id, loiter); }},
+        // ADR-28: a pattern's radius changed every step through UPDATE, merged, flown afresh
+        {"pattern update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             PatternCommand p;
+             p.radiusM = 900.0 + 100.0 * std::sin(k * 0.1);
+             if (k == 0) {
+                 p.pattern = static_cast<double>(PatternKind::Hold);
+                 activity[id] = w.submit(id, p).activity;
+             } else if (!w.update(activity[id], p).accepted()) {
+                 std::fprintf(stderr, "pattern: update refused\n"), std::exit(3);
+             }
+         }},
         // ADR-28: a route replaced every step through UPDATE - its waypoints into the path store, planned afresh
         {"route update each step", [&](std::uint32_t id, int k) {
              static std::vector<ActivityId> activity(64, 0);

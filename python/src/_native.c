@@ -24,6 +24,9 @@
 
 #include <math.h>
 
+/* the most values a command's row has: a pattern's 12 fields (fsim_mode_field_count) */
+#define FSIM_PY_VALUES 16
+
 static PyObject* Error;            /* fsim.Error */
 static PyTypeObject* BufferType;
 static PyTypeObject* VecEnvType;
@@ -601,7 +604,7 @@ static PyObject* world_command(PyObject* o, PyObject* const* args, Py_ssize_t n)
     int level;
     if (!check_args(n, 3, 3, "command") || !as_u32(args[0], &id) || !as_int(args[1], &level) || !WORLD_IDLE(self)) return NULL;
     const uint32_t fields = fsim_command_field_count(level);
-    double row[8];
+    double row[FSIM_PY_VALUES];
     PyObject* seq = PySequence_Fast(args[2], "command: values must be a sequence of numbers");
     if (!seq) return NULL;
     if (!fields || PySequence_Size(seq) != (Py_ssize_t)fields) {
@@ -780,13 +783,13 @@ static int read_options(PyObject* const* args, Py_ssize_t n, Py_ssize_t first, f
     return 1;
 }
 
-/* A sequence of at most 8 numbers into row; returns how many, or -1. */
+/* A sequence of at most FSIM_PY_VALUES numbers into row; returns how many, or -1. */
 static Py_ssize_t read_values(PyObject* o, double* row, const char* what) {
     PyObject* seq = PySequence_Fast(o, "values must be a sequence of numbers");
     if (!seq) return -1;
     const Py_ssize_t count = PySequence_Size(seq);
-    if (count > 8) {
-        PyErr_Format(PyExc_ValueError, "%s: at most 8 values", what);
+    if (count > FSIM_PY_VALUES) {
+        PyErr_Format(PyExc_ValueError, "%s: at most %d values", what, FSIM_PY_VALUES);
         Py_DECREF(seq);
         return -1;
     }
@@ -808,7 +811,7 @@ static PyObject* world_submit(PyObject* o, PyObject* const* args, Py_ssize_t n) 
     WorldObject* self = (WorldObject*)o;
     uint32_t id;
     int level;
-    double row[8];
+    double row[FSIM_PY_VALUES];
     fsim_command_options opt;
     fsim_command_result r;
     if (!check_args(n, 3, 7, "submit") || !as_u32(args[0], &id) || !as_int(args[1], &level) || !WORLD_IDLE(self)) return NULL;
@@ -859,7 +862,7 @@ static PyObject* world_submit_mode(PyObject* o, PyObject* const* args, Py_ssize_
     WorldObject* self = (WorldObject*)o;
     uint32_t id;
     int mode;
-    double row[8];
+    double row[FSIM_PY_VALUES];
     fsim_command_options opt;
     fsim_command_result r;
     if (!check_args(n, 3, 7, "submit_mode") || !as_u32(args[0], &id) || !as_int(args[1], &mode) || !WORLD_IDLE(self)) return NULL;
@@ -920,7 +923,7 @@ static Py_ssize_t read_waypoints(PyObject* o, fsim_waypoint** out) {
 static PyObject* world_submit_route(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint32_t id;
-    double row[8];
+    double row[FSIM_PY_VALUES];
     fsim_command_options opt;
     fsim_command_result r;
     fsim_waypoint* points = NULL;
@@ -939,7 +942,7 @@ static PyObject* world_submit_route(PyObject* o, PyObject* const* args, Py_ssize
 static PyObject* world_activity_update_route(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint64_t activity;
-    double row[8];
+    double row[FSIM_PY_VALUES];
     fsim_command_result r;
     fsim_waypoint* points = NULL;
     if (!check_args(n, 3, 3, "activity_update_route") || !as_u64(args[0], &activity) || !WORLD_IDLE(self)) return NULL;
@@ -958,7 +961,7 @@ static PyObject* world_submit_support(PyObject* o, PyObject* const* args, Py_ssi
     WorldObject* self = (WorldObject*)o;
     uint32_t id;
     int kind;
-    double row[8];
+    double row[FSIM_PY_VALUES];
     fsim_command_options opt;
     fsim_command_result r;
     if (!check_args(n, 3, 7, "submit_support") || !as_u32(args[0], &id) || !as_int(args[1], &kind) || !WORLD_IDLE(self)) return NULL;
@@ -972,7 +975,7 @@ static PyObject* world_submit_support(PyObject* o, PyObject* const* args, Py_ssi
 static PyObject* world_activity_update(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint64_t activity;
-    double row[8];
+    double row[FSIM_PY_VALUES];
     fsim_command_result r;
     if (!check_args(n, 2, 2, "activity_update") || !as_u64(args[0], &activity) || !WORLD_IDLE(self)) return NULL;
     const Py_ssize_t count = read_values(args[1], row, "activity_update");

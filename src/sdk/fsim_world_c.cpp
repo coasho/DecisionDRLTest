@@ -448,7 +448,7 @@ bool toCommand(int level, const double* fields, uint32_t count, fsim::control::C
     case FSIM_LEVEL_POSITION: out = fsim::control::PositionCommand{}; break;
     default: return false;
     }
-    double* slots[8];
+    double* slots[fsim::control::kMaxCommandFields];
     const std::size_t n = fsim::control::commandFields(out, slots);
     if (!fields || (count != n && count != fsim_command_field_count(level))) return false;
     for (std::size_t i = 0; i < count; ++i) *slots[i] = fields[i];
@@ -508,8 +508,9 @@ bool toMode(int mode, const double* fields, uint32_t count, fsim::control::Comma
     if (!fields) return false;
     if (mode == FSIM_MODE_HSA) out = fsim::control::HsaCommand{};
     else if (mode == FSIM_MODE_ROUTE) out = fsim::control::RouteCommand{};
+    else if (mode == FSIM_MODE_PATTERN) out = fsim::control::PatternCommand{};
     else return false;
-    double* slots[8];
+    double* slots[fsim::control::kMaxCommandFields];
     if (count != fsim::control::commandFields(out, slots)) return false;
     for (uint32_t i = 0; i < count; ++i) *slots[i] = fields[i];
     return true;
@@ -557,8 +558,11 @@ UpdateShape updateShape(fsim_world* w, fsim::control::ActivityId activity) {
     const auto& d = all[a->capability];
     for (std::size_t k = 0; k < fsim::control::kSupportKinds; ++k)
         if (d.id == fsim::control::supportCapability(k)) shape.support = static_cast<int>(k);
-    if (d.setpoint == fsim::control::SetpointKind::Hsa || d.setpoint == fsim::control::SetpointKind::Route) {
-        shape.mode = d.setpoint == fsim::control::SetpointKind::Hsa ? FSIM_MODE_HSA : FSIM_MODE_ROUTE;
+    if (d.setpoint == fsim::control::SetpointKind::Hsa || d.setpoint == fsim::control::SetpointKind::Route ||
+        d.setpoint == fsim::control::SetpointKind::Pattern) {
+        shape.mode = d.setpoint == fsim::control::SetpointKind::Hsa     ? FSIM_MODE_HSA
+                     : d.setpoint == fsim::control::SetpointKind::Route ? FSIM_MODE_ROUTE
+                                                                        : FSIM_MODE_PATTERN;
         shape.fields = fsim_mode_field_count(shape.mode);
     } else if (shape.support >= 0) {
         shape.fields = static_cast<uint32_t>(d.parameters.size()); // set beside the cascade: a support effector or the engines
@@ -667,8 +671,9 @@ FSIM_API uint32_t fsim_mode_field_count(int mode) {
     fsim::control::Command c;
     if (mode == FSIM_MODE_HSA) c = fsim::control::HsaCommand{};
     else if (mode == FSIM_MODE_ROUTE) c = fsim::control::RouteCommand{};
+    else if (mode == FSIM_MODE_PATTERN) c = fsim::control::PatternCommand{};
     else return 0;
-    double* slots[8];
+    double* slots[fsim::control::kMaxCommandFields];
     return static_cast<uint32_t>(fsim::control::commandFields(c, slots));
 }
 
@@ -991,7 +996,7 @@ FSIM_API uint32_t fsim_command_field_count_full(int level) {
     case FSIM_LEVEL_VELOCITY: c = fsim::control::VelocityCommand{}; break;
     default: c = fsim::control::PositionCommand{}; break;
     }
-    double* slots[8];
+    double* slots[fsim::control::kMaxCommandFields];
     return static_cast<uint32_t>(fsim::control::commandFields(c, slots));
 }
 

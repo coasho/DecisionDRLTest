@@ -165,6 +165,207 @@ double plannedSpeed(double speed, double reference, double altitudeMslM) noexcep
     }
 }
 
+namespace {
+
+double known(double v, double fallback) noexcept { return std::isnan(v) ? fallback : v; }
+
+double lateralAcceleration(const Performance& f) noexcept { return 0.8 * known(f.maxAccelerationMs2, kG * std::tan(0.35)); }
+double braking(const Performance& f) noexcept { return 0.8 * known(f.maxDecelerationMs2, known(f.maxAccelerationMs2, kG * std::tan(0.35))); }
+
+} // namespace
+
+double lateralLimit(const Performance& performance, double radiusM) noexcept { return std::sqrt(lateralAcceleration(performance) * radiusM); }
+
+double brakingLimit(const Performance& performance, double speedAfterMs, double toGoM) noexcept {
+    return std::sqrt(speedAfterMs * speedAfterMs + 2.0 * braking(performance) * std::max(toGoM, 0.0));
+}
+
+double verticalSpeedTo(double altitudeMslM, double feedforward, const sim::VehicleState& s, const Performance& f, bool hovers) noexcept {
+    const double gain = known(f.altitudeGainPerS, hovers ? 0.5 : 0.25);
+    const double climb = known(f.maxClimbMs, hovers ? 3.0 : 6.0), descent = known(f.maxDescentMs, climb);
+    return std::clamp(feedforward + gain * (altitudeMslM - s.altitudeMslM), -descent, climb);
+}
+
+VelocityCommand follow(const ControlContext& ctx, const Performance& perf, const WindEstimate& wind, bool hovers, const Fix& fix, const Ahead& ahead,
+                       const Steer& steer, Trims& trims, double& course, double& heading) noexcept {
+    const auto& s = ctx.sensed;
+    const double e = fix.crossTrackM;
+    const double tn = std::cos(fix.courseRad), te = std::sin(fix.courseRad);
+    const double windAlong = wind.northMs * tn + wind.eastMs * te, windAcross = -wind.northMs * te + wind.eastMs * tn;
+    auto curvatureAhead = [&](double preview) { return ahead.toChangeM < preview ? ahead.curvature : fix.curvature; };
+
+    if (hovers) {
+        // the path speed over the ground: the segment's, or what its airspeed makes along the path in the wind
+        double v = steer.speed;
+        if (steer.reference != SpeedReference::GroundSpeed) {
+            const double tas = trueAirspeedOf(steer.speed, steer.reference, s);
+            const double crab = std::asin(std::clamp(-windAcross / std::max(tas, 0.5), -0.9, 0.9));
+            v = std::max(tas * std::cos(crab) + windAlong, 0.0);
+        }
+        v = std::min(v, steer.speedLimitMs);
+        // Line of sight to the path a few velocity-loop time constants ahead,
+        // turned ahead of a curve (the curve there) by the loop's lag: the
+        // velocity error its proportional term needs for the acceleration the
+        // curve asks, less what its own integral has taken up. That integral
+        // is modelled as the loop runs it (Rotor.cpp: a quarter of the
+        // bandwidth squared, its gain falling off beyond the error a quarter
+        // of the tilt answers), so round an orbit the lead fades, and as a
+        // turn ends it reverses. An integral on the course error (its zero at
+        // a quarter of the bandwidth) takes out the rest.
+        const double bandwidth = perf.courseBandwidthRadS(0.0);
+        const double lookahead = std::max(3.0 * v / bandwidth, 3.0);
+        const double wanted = fix.courseRad - std::atan(e / lookahead); // the track that closes on the path
+        const double most = known(perf.maxAccelerationMs2, kG * std::tan(0.35));
+        const double band = 0.25 * most / bandwidth, lag = (v * v * curvatureAhead(v / bandwidth) - trims.taken) / bandwidth;
+        trims.taken = std::clamp(trims.taken + 0.25 * bandwidth * bandwidth * band * band / (band * band + lag * lag) * lag * ctx.dt, -0.5 * most, 0.5 * most);
+        const double ground = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
+        if (ground > 1.0 && v > 1.0) {
+            const double error = geo::wrapPi(wanted - std::atan2(s.velocityNedMs[1], s.velocityNedMs[0]));
+            if (std::abs(error) < 0.3) trims.courseRadS = std::clamp(trims.courseRadS + 0.25 * bandwidth * bandwidth * error * ctx.dt, -0.3, 0.3);
+        }
+        course = geo::wrapPi(wanted + std::clamp(lag / std::max(v, 0.5), -0.8, 0.8) + trims.courseRadS);
+        heading = course;
+        return VelocityCommand{kHold, steer.verticalSpeedMs, course, kHold, v * std::cos(course), v * std::sin(course)};
+    }
+
+    // a wing: the airspeed, and the turn rate that holds the path
+    const double tasNow = std::max(s.airspeedTrueMs, 10.0);
+    double tas;
+    if (steer.reference == SpeedReference::GroundSpeed) {
+        // the airspeed that makes the ground speed along the path, and a slow trim on what the wind estimate misses
+        const double crab = std::asin(std::clamp(-windAcross / tasNow, -0.8, 0.8));
+        tas = (steer.speed - windAlong) / std::max(std::cos(crab), 0.3);
+        const double error = steer.speed - (s.velocityNedMs[0] * tn + s.velocityNedMs[1] * te);
+        if (std::abs(error) < 5.0) trims.speedMs = std::clamp(trims.speedMs + 0.05 * error * ctx.dt, -5.0, 5.0);
+        tas += trims.speedMs;
+    } else {
+        trims.speedMs = 0.0;
+        tas = trueAirspeedOf(steer.speed, steer.reference, s);
+    }
+    const double vg = std::max(std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]), 5.0);
+    const double bandwidth = perf.courseBandwidthRadS(tasNow);
+    const double lookahead = std::max(3.0 * vg / bandwidth, 50.0);
+    // the turn anticipated: its curvature fed forward as long before it as the
+    // roll into it lags - half the bank at the loop's rate, and the roll's own
+    // time constant (a fifth of the heading loop's, or faster)
+    double curvature = fix.curvature;
+    if (ahead.turnRadiusM > 0.0) {
+        const double bank = std::atan(vg * vg / (kG * ahead.turnRadiusM));
+        curvature = curvatureAhead(vg * (0.5 * bank / std::max(known(perf.bankRateRadS, 0.35), 0.05) + std::clamp(0.2 / bandwidth, 0.3, 1.5)));
+    }
+    // the course to the path, and the turn rate that flies it: proportional, and an
+    // integral (its zero at a quarter of the bandwidth) on what the turn-rate loop
+    // leaves - an aircraft that needs a little bank to fly straight - once near it
+    course = geo::wrapPi(fix.courseRad - std::atan(e / lookahead));
+    heading = kHold;
+    const double error = geo::wrapPi(course - std::atan2(s.velocityNedMs[1], s.velocityNedMs[0]));
+    if (std::abs(error) < 0.15) trims.courseRadS = std::clamp(trims.courseRadS + 0.25 * bandwidth * bandwidth * error * ctx.dt, -0.05, 0.05);
+    return VelocityCommand{std::max(tas, 0.0), steer.verticalSpeedMs, kHold, curvature * vg + bandwidth * error + trims.courseRadS, kHold, kHold};
+}
+
+Fix onLine(const Line& line, double lat0, double lon0, double lat, double lon) noexcept {
+    Fix f;
+    double north, east;
+    geo::localNorthEastM(lat0, lon0, lat, lon, north, east);
+    const double dn = north - line.northM, de = east - line.eastM;
+    const double c = std::cos(line.courseRad), s = std::sin(line.courseRad);
+    f.alongM = dn * c + de * s;
+    f.crossTrackM = -dn * s + de * c; // + right: the course's right normal is (-sin, cos)
+    f.courseRad = line.courseRad;
+    return f;
+}
+
+double Pattern::lapM() const noexcept {
+    double m = 0.0;
+    for (std::uint32_t i = 0; i < count; ++i) m += pieceM(i);
+    return m;
+}
+
+void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon) noexcept {
+    p.kind = static_cast<PatternKind>(static_cast<int>(orHold(c.pattern, 0.0)));
+    p.lat0 = c.latitudeRad, p.lon0 = c.longitudeRad;
+    p.radiusM = c.radiusM;
+    p.entry = Line{};
+    p.first = 0;
+    const double side = orHold(c.clockwise, 1.0) == 0.0 ? -1.0 : 1.0; // +1: right turns, clockwise seen from above
+    const double chi = orHold(c.courseRad, 0.0), r = c.radiusM, leg = orHold(c.legM, 0.0);
+    const double un = std::cos(chi), ue = std::sin(chi); // along the course
+    const double rn = -ue, re = un;                      // its right
+    double north, east;
+    geo::localNorthEastM(p.lat0, p.lon0, lat, lon, north, east); // where the aircraft is
+    auto arc = [&](Pattern::Piece& piece, double cn, double ce, double way, double startBearing, double sweep) {
+        piece = Pattern::Piece{};
+        piece.arc = true;
+        piece.turn.radiusM = r;
+        piece.turn.angleRad = way; // (its sign: the way round)
+        piece.turn.centreNorthM = cn, piece.turn.centreEastM = ce;
+        piece.turn.entryBearingRad = startBearing;
+        piece.sweepRad = sweep;
+    };
+    auto line = [](Pattern::Piece& piece, double n, double e, double course, double length) {
+        piece = Pattern::Piece{};
+        piece.line = Line{n, e, course, length};
+    };
+    switch (p.kind) {
+    case PatternKind::FigureEight:
+        // two circles meeting at the centre, their centres along the axis: the one
+        // ahead flown the pattern's way round from the centre, then the other the other way
+        p.count = 2;
+        arc(p.pieces[0], r * un, r * ue, side, geo::wrapPi(chi + kPi), 2.0 * kPi);
+        arc(p.pieces[1], -r * un, -r * ue, -side, chi, 2.0 * kPi);
+        break;
+    case PatternKind::Racetrack:
+    case PatternKind::Hold: {
+        // the inbound leg ends at the fix; half a circle to the outbound leg, and back
+        p.count = 4;
+        p.first = 1;
+        line(p.pieces[0], -leg * un, -leg * ue, chi, leg);
+        arc(p.pieces[1], side * r * rn, side * r * re, side, geo::wrapPi(chi - side * 0.5 * kPi), kPi);
+        line(p.pieces[2], 2.0 * side * r * rn, 2.0 * side * r * re, geo::wrapPi(chi + kPi), leg);
+        arc(p.pieces[3], side * r * rn - leg * un, side * r * re - leg * ue, side, geo::wrapPi(chi + side * 0.5 * kPi), kPi);
+        // entered direct to the fix
+        const double d = std::hypot(north, east);
+        if (d > 1.0) p.entry = Line{north, east, std::atan2(-east, -north), d};
+        break;
+    }
+    default: // an orbit: round the centre, its laps from where the aircraft is
+        p.count = 1;
+        arc(p.pieces[0], 0.0, 0.0, side, std::atan2(east, north), 2.0 * kPi);
+        break;
+    }
+}
+
+void completePattern(PatternCommand& c, const sim::VehicleState& s, const Performance& f, bool hovers, double windMs) noexcept {
+    const double groundSpeed = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
+    const double track = groundSpeed > 1.0 ? std::atan2(s.velocityNedMs[1], s.velocityNedMs[0]) : s.eulerRad[2];
+    if (isHold(c.pattern)) c.pattern = static_cast<double>(PatternKind::Orbit);
+    if (isHold(c.latitudeRad) || isHold(c.longitudeRad)) c.latitudeRad = s.latitudeRad, c.longitudeRad = s.longitudeRad;
+    c.longitudeRad = geo::wrapPi(c.longitudeRad);
+    if (isHold(c.altitudeReference)) c.altitudeReference = static_cast<double>(AltitudeReference::Msl);
+    if (isHold(c.altitudeM)) c.altitudeM = altitudeNow(static_cast<AltitudeReference>(static_cast<int>(c.altitudeReference)), s);
+    if (hovers && isHold(c.speed)) { // a rotorcraft's own speed (a hover's none) is no speed to fly a pattern at
+        c.speed = std::isfinite(f.cruiseTasMs) && f.cruiseTasMs > 0.0 ? f.cruiseTasMs : 5.0;
+        c.speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+    } else {
+        if (isHold(c.speedReference)) c.speedReference = static_cast<double>(hovers ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
+        if (isHold(c.speed)) c.speed = speedNow(static_cast<SpeedReference>(static_cast<int>(c.speedReference)), s);
+    }
+    if (isHold(c.clockwise)) c.clockwise = 1.0;
+    const auto kind = static_cast<PatternKind>(static_cast<int>(c.pattern));
+    if (isHold(c.courseRad)) {
+        const double away = geo::distanceM(s.latitudeRad, s.longitudeRad, c.latitudeRad, c.longitudeRad);
+        c.courseRad = kind == PatternKind::Hold && away > 100.0 ? geo::bearingRad(s.latitudeRad, s.longitudeRad, c.latitudeRad, c.longitudeRad) : track;
+    }
+    c.courseRad = geo::wrapPi(c.courseRad);
+    // the radius and the legs at the speed planned there (above ground: as high as the aircraft is)
+    const double h = c.altitudeReference == static_cast<double>(AltitudeReference::AboveGround) ? s.altitudeMslM : c.altitudeM;
+    const double v = std::max(plannedSpeed(c.speed, c.speedReference, h), 0.1);
+    const double gusted = v + (hovers && c.speedReference == static_cast<double>(SpeedReference::GroundSpeed) ? 0.0 : windMs);
+    if (isHold(c.radiusM))
+        c.radiusM = kind == PatternKind::Hold ? std::max(gusted / (3.0 * kDeg), gusted * gusted / (kG * std::tan(25.0 * kDeg))) : f.turnRadiusM(gusted);
+    if (isHold(c.legM)) c.legM = kind == PatternKind::Hold ? v * (h <= 4267.2 ? 60.0 : 90.0) : kind == PatternKind::Racetrack ? 2.0 * c.radiusM : 0.0;
+}
+
 double Plan::pieceM(std::uint32_t i, bool firstLap) const noexcept {
     const Turn* before = turnBefore(i, firstLap);
     return std::max(0.0, leg(i, firstLap).lengthM - (before ? before->leadM : 0.0) - turn(i, firstLap).leadM);

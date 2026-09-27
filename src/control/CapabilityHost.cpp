@@ -269,6 +269,44 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     return Reason::None;
 }
 
+Reason CapabilityHost::checkPattern(const PatternCommand& c, bool merge, CommandResult& detail) noexcept {
+    auto bad = [&detail](std::int16_t field) {
+        detail.index = field;
+        return Reason::InvalidParameter;
+    };
+    auto code = [](double v, double count) { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); };
+    auto given = [](double v, double lo, bool open) { return isHold(v) || (std::isfinite(v) && (open ? v > lo : v >= lo)); };
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    if (!code(c.pattern, static_cast<double>(PatternKind::Count))) return bad(0);
+    if (!isHold(c.latitudeRad) && !(std::isfinite(c.latitudeRad) && std::abs(c.latitudeRad) <= 0.5 * 3.14159265358979323846)) return bad(1);
+    if (!given(c.longitudeRad, -inf, true) || isHold(c.latitudeRad) != isHold(c.longitudeRad)) return bad(2); // a point, or none
+    if (!given(c.altitudeM, -inf, true)) return bad(3);
+    if (!code(c.altitudeReference, static_cast<double>(AltitudeReference::Count))) return bad(4);
+    if (!given(c.radiusM, 0.0, true)) return bad(5);
+    if (!code(c.clockwise, 2.0)) return bad(6);
+    if (!given(c.courseRad, -inf, true)) return bad(7);
+    if (!given(c.legM, 0.0, false)) return bad(8);
+    if (!given(c.speed, 0.0, true)) return bad(9);
+    if (!code(c.speedReference, static_cast<double>(SpeedReference::Count))) return bad(10);
+    if (!given(c.durationS, 0.0, true)) return bad(11);
+    if (merge && !isHold(c.altitudeReference) && isHold(c.altitudeM)) return bad(3); // an UPDATE has no state to take one from
+    if (merge && !isHold(c.speedReference) && isHold(c.speed)) return bad(9);
+    return Reason::None;
+}
+
+Reason CapabilityHost::limitPattern(PatternCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept {
+    if (const Reason r = limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, range, flags, detail, 9, 3); r != Reason::None) return r;
+    // a radius the aircraft can fly at its speed: a wing's at its full bank, a rotorcraft's a metre
+    const Performance& f = performance_;
+    double least = 1.0;
+    if (!f.hovers && std::isfinite(f.maxBankRad) && f.maxBankRad > 0.0) {
+        const double h = c.altitudeReference == static_cast<double>(AltitudeReference::AboveGround) ? 0.0 : c.altitudeM;
+        const double v = route::plannedSpeed(c.speed, c.speedReference, h);
+        least = v * v / (9.80665 * std::tan(f.maxBankRad));
+    }
+    return bound(c.radiusM, least, false, 5, Constraint::MaxOrientation, range, flags, detail);
+}
+
 void CapabilityHost::writeRoute() {
     if (!config_->path) config_->path = std::make_unique<PathStore>();
     PathStore& store = *config_->path;
@@ -465,10 +503,19 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     auto* route = std::get_if<RouteCommand>(&setpoint);
     if (route) // its waypoints completed, and checked as its range policy says
         if (const Reason why = checkRoute(*route, waypoints, state, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
+    auto* pattern = std::get_if<PatternCommand>(&setpoint);
+    if (pattern) { // complete it first, as an hsa (the runtime flies a complete setpoint)
+        if (const Reason why = checkPattern(*pattern, false, detail); why != Reason::None) return about(rejected(why), detail);
+        WindEstimate wind;
+        wind.update(state, 0.0);
+        route::completePattern(*pattern, state, performance_, (adapter_->features() & kFeatureHover) != 0, std::hypot(wind.northMs, wind.eastMs));
+    }
     if (checked)
         if (const Reason why = catalog_->check(index, setpoint, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
     if (hsa && checked)
         if (const Reason why = limitHsa(*hsa, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
+    if (pattern && checked)
+        if (const Reason why = limitPattern(*pattern, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
     AxisMask axes = options.axes ? options.axes : catalog_->defaultAxes(index, command);
     // above the actuators a command owns whole groups: a wing's loop that banks
     // also coordinates, a rotorcraft's cyclic tilts in roll and pitch at once
@@ -612,6 +659,21 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
             if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
         }
         std::get<HsaCommand>(slot.command) = merged;
+        ++slot.revision;
+        return result;
+    }
+    if (const auto* next = std::get_if<PatternCommand>(&setpoint)) {
+        // a partial pattern (docs/vehicle-interface.md, 4.6): the fields given replace the commanded ones
+        if (const Reason why = checkPattern(*next, true, result); why != Reason::None) return about(rejected(why, activity), result);
+        PatternCommand merged = std::get<PatternCommand>(slot.command);
+        mergePattern(merged, *next);
+        merged.courseRad = geo::wrapPi(merged.courseRad), merged.longitudeRad = geo::wrapPi(merged.longitudeRad);
+        if (slots_[s].range != RangePolicy::None) {
+            if (const Reason why = limitPattern(merged, slots_[s].range, result.flags, result); why != Reason::None)
+                return about(rejected(why, activity), result);
+            if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
+        }
+        std::get<PatternCommand>(slot.command) = merged;
         ++slot.revision;
         return result;
     }

@@ -525,14 +525,21 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   waypoints go beside them, through fsim_vehicle_submit_route below: with
  *   fsim_vehicle_submit_mode it has none and is refused (invalid_waypoint).
  *   fsim_activity_update with a route's fields keeps its waypoints and flies
- *   it afresh from its start; fsim_hold() keeps an option. */
-enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1 };
+ *   it afresh from its start; fsim_hold() keeps an option.
+ * - FSIM_MODE_PATTERN is fsim.guidance.pattern (A-GRA's loiter): fields
+ *   pattern (fsim_pattern_kind), latitude_rad, longitude_rad (its centre or
+ *   fix), altitude_m, altitude_reference, radius_m, clockwise (1 right turns),
+ *   course_rad (the inbound course, a figure-eight's axis), leg_m, speed,
+ *   speed_reference, duration_s. fsim_hold() leaves one out: a NEW takes its
+ *   default (an orbit here, as the aircraft flies now), an UPDATE keeps it. */
+enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2 };
+enum fsim_pattern_kind { FSIM_PATTERN_ORBIT = 0, FSIM_PATTERN_RACETRACK, FSIM_PATTERN_FIGURE_EIGHT, FSIM_PATTERN_HOLD };
 enum fsim_speed_reference { FSIM_SPEED_TRUE_AIRSPEED = 0, FSIM_SPEED_CALIBRATED_AIRSPEED, FSIM_SPEED_GROUND_SPEED, FSIM_SPEED_MACH };
 enum fsim_altitude_reference { FSIM_ALTITUDE_MSL = 0, FSIM_ALTITUDE_ABOVE_GROUND, FSIM_ALTITUDE_ELLIPSOID };
 enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft) */
-FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 6, route 4; 0 for an unknown mode */
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 6, route 4, pattern 12; 0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result);
 

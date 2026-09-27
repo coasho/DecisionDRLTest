@@ -108,16 +108,43 @@ public:
     bool cascade(const CapabilityDescriptor& d, bool wild, Command& out) {
         if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Hsa) { // a mode: its fixed-size setpoint's fields
             out = HsaCommand{};
-            double* fields[8];
+            double* fields[kMaxCommandFields];
             const std::size_t n = std::min(commandFields(out, fields), d.parameters.size());
             for (std::size_t i = 0; i < n; ++i) *fields[i] = value(d.parameters[i], wild);
+            return true;
+        }
+        if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Pattern) { // left out (the defaults), or about the flight
+            PatternCommand c;
+            if (wild) {
+                const auto& s = state();
+                auto some = [&](double v) { return chance(0.5) ? kHold : v; };
+                auto whole = [&](std::size_t n) { return chance(0.6) ? kHold : static_cast<double>(pick(n)); };
+                c.pattern = whole(static_cast<std::size_t>(PatternKind::Count));
+                if (chance(0.5)) c.latitudeRad = s.latitudeRad + uniform(-0.002, 0.002), c.longitudeRad = s.longitudeRad + uniform(-0.002, 0.002);
+                c.altitudeM = some(s.altitudeMslM + uniform(-200.0, 200.0));
+                c.radiusM = some(uniform(1.0, 3000.0));
+                c.clockwise = whole(2);
+                c.courseRad = some(uniform(-3.0, 3.0));
+                c.legM = some(uniform(0.0, 4000.0));
+                c.speed = some(s.airspeedTrueMs > 5.0 ? s.airspeedTrueMs * uniform(0.85, 1.15) : uniform(2.0, 8.0));
+                c.durationS = chance(0.7) ? kHold : uniform(2.0, 60.0);
+                if (chance(0.1)) { // now and then a field out of its range: refused, or clamped
+                    out = c;
+                    double* fields[kMaxCommandFields];
+                    const std::size_t n = std::min(commandFields(out, fields), d.parameters.size());
+                    const std::size_t i = pick(n);
+                    *fields[i] = value(d.parameters[i], true);
+                    return true;
+                }
+            }
+            out = c;
             return true;
         }
         if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Route) { // its options, its waypoints beside them
             const int points = wild ? 1 + static_cast<int>(pick(4)) : 2;
             RouteCommand r;
             if (wild) { // whole options mostly (a projection, a repeat, an end, a start it has), else anything its ranges allow
-                double* fields[8];
+                double* fields[kMaxCommandFields];
                 const std::size_t n = std::min(commandFields(out = r, fields), d.parameters.size());
                 for (std::size_t i = 0; i < n; ++i) *fields[i] = chance(0.9) ? static_cast<double>(pick(i == 3 ? static_cast<std::size_t>(points) : 2)) : value(d.parameters[i], wild);
                 r = std::get<RouteCommand>(out);
@@ -163,7 +190,7 @@ public:
         case Level::Position: out = PositionCommand{}; break;
         default: out = ActuatorCommand{}; break;
         }
-        double* fields[8];
+        double* fields[kMaxCommandFields];
         const std::size_t n = std::min(commandFields(out, fields), d.parameters.size());
         for (std::size_t i = 0; i < n; ++i) *fields[i] = value(d.parameters[i], wild);
         return true;

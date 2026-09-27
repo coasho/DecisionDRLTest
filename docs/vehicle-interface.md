@@ -178,7 +178,7 @@ struct RouteCommand {                  // fsim.guidance.route; the waypoints go 
 
 ```cpp
 struct PatternCommand {                // fsim.guidance.pattern
-    double pattern = 0.0;              // PatternKind: 0 orbit, 1 racetrack, 2 figure-eight, 3 hold
+    double pattern = kHold;            // PatternKind: 0 orbit (kHold), 1 racetrack, 2 figure-eight, 3 hold
     double latitudeRad = kHold, longitudeRad = kHold; // the centre; a racetrack's or a hold's fix. kHold: here
     double altitudeM = kHold, altitudeReference = kHold;
     double radiusM = kHold;            // kHold: the aircraft's turn radius at its speed and 80 % of its bank limit
@@ -190,11 +190,20 @@ struct PatternCommand {                // fsim.guidance.pattern
 };
 ```
 
-- **Orbit:** a circle around the centre.
-- **Racetrack:** two semicircles joined by legs, the inbound leg ending at the fix.
-- **Figure-eight:** two circles crossing at the centre.
-- **Hold** is the ATC holding pattern: a racetrack on the fix with the VI's defaults (right turns, inbound course the arrival's, timed legs); it is entered by intercepting the pattern.
-- **Radius:** a rotorcraft's minimum is 1 m. A wing's is its turn radius at its speed: a smaller radius is clamped, flagged, or refused under `RangePolicy::Reject`.
+- **Orbit:** a circle around the centre; its laps are counted from where the aircraft joins it.
+- **Racetrack:** two semicircles joined by legs, the inbound leg ending at the fix. Entered direct to the fix, then the turn there.
+- **Figure-eight:** two circles that meet at the centre, their centres along the axis. The one ahead is flown the pattern's way round from the centre, then the other the other way; both are tangent at the centre, so the aircraft passes straight through it.
+- **Hold** is the ATC holding pattern: a racetrack on the fix with the VI's defaults, entered direct to the fix:
+  - right turns;
+  - the inbound course the arrival's: the way to the fix when the hold starts, or the track if the aircraft is at the fix;
+  - rate-one turns: 3°/s, or 25° of bank if that is less steep, at the speed plus the wind;
+  - legs of a minute's flight, 90 s above 14,000 ft.
+- **Defaults** for the other patterns: here, the altitude and speed the aircraft flies now (a rotorcraft's speed its cruise over the ground), right turns, its track now, and the radius its speed plus the wind and 80 % of its bank give. A racetrack's legs are twice its radius. The host fills them in at NEW, as for an hsa, so the slot holds a complete pattern.
+- **Radius:** a rotorcraft's minimum is 1 m. A wing's is its turn radius at its speed and full bank: a smaller radius is clamped, flagged, or refused under `RangePolicy::Reject` (`PerformanceLimit`, `MaxOrientation`).
+- **UPDATE** merges the fields given, as an hsa's does; the pattern they make is flown afresh, and a duration still counts from the NEW.
+- **Duration:** the activity completes when it has passed, and the aircraft flies on in the pattern.
+- **Progress:** the piece flown of the lap's, the laps, and the percent of the lap (or, timed, of the duration) with the time to go.
+- **Flown** by the path follower (4.8), its pieces arcs and straights in the plane at the pattern's point.
 
 ### 4.7 Curve following
 
@@ -224,7 +233,13 @@ Routes, patterns and curves are sequences of pieces: great-circle or rhumb legs,
   - κa is the path's curvature the time the roll lags ahead: half the turn's bank at the attitude loop's rate (`bankRateRadS`), plus the roll's own time constant, taken as 0.2/kχ within 0.3 to 1.5 s (a design's roll loop is five times its heading loop's bandwidth, or faster). The turn begins and ends that much early.
   - ∫ is an integral on the course error once it is under 0.15 rad, its zero at kχ/4. It takes out what the turn-rate loop leaves: the c172x needs 1.5° of bank to fly straight.
   - Recorded at VI-4: the first law fed the curvature forward where the arc begins and integrated the cross-track. The F-16C then overshot each leg by 48 m, and the c172x held a steady 15 m off its legs.
-- **Rotorcraft** fly a ground velocity along χd plus a lead of κa·V/kv (κa the curvature V/kv ahead; kv the velocity loop's bandwidth), at the path speed, the nose along the track. The lead is the velocity loop's lag, taken out. Near the path it is the ground velocity along the tangent less (kv/3)·e across it; far from it, an intercept at up to 90°, never a speed beyond the path's. The path speed is limited to what the curvature allows, to what slows them in time for a smaller turn, and to what stops them at an end where they loiter; stopped, they hold the point through the position loop.
+- **Rotorcraft** fly a ground velocity along χd, at the path speed, the nose along the track:
+  - Near the path the velocity is along the tangent less (kv/3)·e across it; far from it, an intercept at up to 90°, never faster than the path's speed.
+  - A lead takes out the velocity loop's lag. It is the velocity error the loop's proportional term needs for the acceleration the curve asks (V²κa, κa the curvature V/kv ahead; kv the loop's bandwidth), less what the loop's own integral has taken up.
+  - That integral is modelled as the loop runs it: a gain of kv²/4 that falls off beyond the error a quarter of the tilt answers. So round an orbit the lead fades, and as a turn ends it reverses.
+  - An integral on the course error (commanded line of sight against the track, its zero at kv/4) takes out the rest.
+  - The path speed is limited to what the curvature allows, to what slows them in time for a smaller turn, and to what stops them at an end where they loiter; stopped, they hold the point through the position loop.
+  - Recorded at VI-5: VI-4's lead was the whole κa·V/kv. On an orbit the loop's integral takes the turn up and that lead over-leads (a UH-60A settled 21 m outside, then inside), and a lead modelled as a first-order take-up reversed too soon after a route's turns.
 - **Vertical.** The altitude profile gives a vertical speed: its gradient times the ground speed, plus the altitude error at the position loop's gain, within the climb and descent limits.
 
 ### 4.9 The behaviours that stay
@@ -673,6 +688,42 @@ Filled in as the steps land. The machine and the benchmark's precision are ADR-2
   - Python: `Vehicle.submit_route(waypoints, **options)`, `Activity.update_route`, `Waypoint`, `TurnType`, `Projection`, `EndBehavior`.
   - `examples/python/vehicle_interface.py` flies a c172x's triangle, an F-16C's climb, fly-over and orbit, a UH-60A that stops at its end and an IRIS square, for the viewer.
   - ctest 178/178.
+
+**VI-5 (loiter patterns).**
+- **What was built:**
+  - `PatternCommand` and `PatternKind` join the `Command` variant after `RouteCommand` (`SetpointKind::Pattern`, `modeBehavior()` "pattern"). An UPDATE merges the fields given (`mergePattern`).
+  - `PatternBehavior`, and the pattern's geometry: straights and arcs in the plane at its point (`route::Line`, `route::Pattern`), and `route::completePattern` for its defaults, used by the host and by a stack on its own.
+  - The follower's law is now one function (`route::follow`) that routes and patterns share, with the ahead, steer and trims structs. A refactor that left every route's flight bit for bit as it was.
+  - The rotorcraft's lead models the velocity loop's own integral, and a course integral took its place beside it (4.8). Routes changed with it:
+    - the UH-60A's legs 7.9 m (4.8 at VI-4) and its turns 9.6 m (11.3);
+    - the IRIS's legs 0.9 m (1.1) and its turns 1.4 m (1.7).
+  - The host's `checkPattern` and `limitPattern`: a radius no tighter than the full bank flies.
+  - `kMaxCommandFields` (16) where a command's fields were 8 at most; the C ABI and Python read 16 values.
+- **Flown** (`tests/test_patterns.cpp`), for one lap after one and a half, the most off the circle, both ways round:
+
+  | | calm | 12 m/s wind |
+  | --- | --- | --- |
+  | c172x, R 800 m | 1.3 m | 30.2 m |
+  | B-52H, R 9 km | 5.6 m | 10.7 m |
+  | F-16C, R 4 km | 4.2 m | 21.4 m |
+  | UH-60A, R 150 m | 1.4 m | 6.6 m |
+  | IRIS, R 10 m (5 m/s wind) | 0.01 m | 0.76 m |
+  | IRIS, R 2 m at 1 m/s | 0.00 m | — |
+
+- **Shapes** (c172x in an 8 m/s wind, measured against their geometry):
+  - a racetrack (R 800 m, 4 km legs) within 15 m;
+  - a hold from its defaults (inbound 90.1° the way it arrived, R 1161 m from rate one at 52.8 m/s plus the wind, 3167 m legs) within 7 m;
+  - a figure-eight (R 700 m) within 21 m, through its centre within a metre;
+  - an IRIS's 20 m racetrack with 5 m turns within 0.5 m.
+- **Semantics tested:**
+  - a 90 s orbit completes at 90 s (percent and time to go along the way), an UPDATE of its radius alone keeping the rest;
+  - refusals naming the field: a pattern 4, a latitude without a longitude, a clockwise 0.5, legs below 0, a duration of 0, a reference alone in an UPDATE;
+  - a radius tighter than the c172x's full bank refused (`max_orientation`) or clamped;
+  - discovery: LOITER on every aircraft, taking UPDATE, twelve parameters.
+- **Conformance:** the random sequences submit and update patterns (enums mostly whole, fields about the flight, now and then one out of range) on all five adapters.
+- **Digests:** identical to step 5b, protection on and off. **Allocations:** none, with a hold's radius updated every step on 16 vehicles.
+- **Cost:** a racetrack's update 178 ns. Every existing case within ±3.0 % of VI-4 (the minima ±1.1 %). A route's is 198 ns (190 at VI-4): the follower is now a call.
+- **SDK:** C ABI `FSIM_MODE_PATTERN` (12 fields), `fsim_pattern_kind`; Python `Vehicle.submit_pattern(**fields)`, `PatternKind`, `MODE_FIELDS["pattern"]`. The example adds a Cessna holding over a fix from the defaults alone. ctest 181/181.
 
 ## Appendix A: the gap analysis at a946dfe
 

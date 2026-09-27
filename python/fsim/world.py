@@ -275,15 +275,27 @@ class EndBehavior(enum.IntEnum):
     LOITER = 1
 
 
+class PatternKind(enum.IntEnum):
+    """A loiter pattern (A-GRA's LOITER): an orbit round its centre; a racetrack, two half circles joined by legs,
+    the inbound one ending at the fix; a figure-eight, two circles meeting at the centre; ATC's hold, a racetrack
+    on the fix with a minute's legs, entered direct to the fix."""
+    ORBIT = 0
+    RACETRACK = 1
+    FIGURE_EIGHT = 2
+    HOLD = 3
+
+
 #: The Vehicle Interface's modes (docs/vehicle-interface.md): their fixed-size setpoints' fields, in order. HOLD leaves
-#: one out: a NEW continues what a live hsa commanded (else what the aircraft flies now) and takes a route's option
-#: as its default; an UPDATE keeps it.
-MODE_KINDS = ("hsa", "route")
+#: one out: a NEW continues what a live hsa commanded (else what the aircraft flies now) and takes a route's or a
+#: pattern's default; an UPDATE keeps it.
+MODE_KINDS = ("hsa", "route", "pattern")
 MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference"),
-               "route": ("projection", "repeat", "end", "start")}
-MODE_DEFAULTS = {"hsa": (HOLD,) * 6, "route": (HOLD,) * 4}
+               "route": ("projection", "repeat", "end", "start"),
+               "pattern": ("pattern", "latitude_rad", "longitude_rad", "altitude_m", "altitude_reference", "radius_m", "clockwise",
+                           "course_rad", "leg_m", "speed", "speed_reference", "duration_s")}
+MODE_DEFAULTS = {"hsa": (HOLD,) * 6, "route": (HOLD,) * 4, "pattern": (HOLD,) * 12}
 _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "projection": Projection, "end": EndBehavior,
-               "turn": TurnType}
+               "turn": TurnType, "pattern": PatternKind}
 
 Waypoint = collections.namedtuple(
     "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id",
@@ -553,6 +565,18 @@ class Vehicle:
         r = _checked(self._h.submit_route(self.id, _row("route", (), options), _waypoints(waypoints), int(source), None, int(range),
                                           int(min_version)))
         return Activity(self._world, r[2], "route", bool(r[4]))
+
+    def submit_pattern(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
+        """NEW for fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md, 4.6): ``pattern``
+        (fsim.PatternKind or "orbit", "racetrack", "figure_eight", "hold") round ``latitude_rad``, ``longitude_rad``
+        (its centre or fix) at ``altitude_m``, with ``radius_m``, ``clockwise``, ``course_rad`` (the inbound course, a
+        figure-eight's axis), ``leg_m``, a ``speed`` in ``speed_reference`` and ``duration_s`` (then it completes). What it
+        leaves out takes its default: an orbit here, as the aircraft flies now, right turns, the radius its speed and 80 %
+        of its bank give (a hold's: rate one), a hold's minute-long legs. An Activity whose ``update(**fields)`` changes
+        only what it gives; fsim.Rejected if refused."""
+        r = _checked(self._h.submit_mode(self.id, MODE_KINDS.index("pattern"), _row("pattern", values, fields), int(source), None, int(range),
+                                         int(min_version)))
+        return Activity(self._world, r[2], "pattern", bool(r[4]))
 
     def submit_support(self, kind, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
         """NEW for a support effector the vehicle has - "gear" (down), "flaps"
