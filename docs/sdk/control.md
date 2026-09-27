@@ -61,9 +61,9 @@ output.
 
 | id | Uses | Parameters (defaults) |
 | --- | --- | --- |
-| `hold` | - | `airspeed_ms`, `heading_deg`, `altitude_m` (all: current at start) |
-| `waypoints` | `points` | `loop` (0), `airspeed_ms` (current) for points without one. `finished()` after the last capture |
-| `loiter` | `target` or `lat_deg`/`lon_deg` | `radius_m` (1500), `altitude_m` (current), `clockwise` (1), `airspeed_ms` (current) |
+| `hold` | - | `airspeed_ms`, `heading_deg`, `altitude_m` (all: current at start). An aircraft that hovers keeps its velocity over the ground instead of the airspeed it had (a hover stays put in wind), unless given `airspeed_ms` |
+| `waypoints` | `points` | `loop` (0), `airspeed_ms` for points without one (a wing: current; a rotorcraft: its position loop's speed). `finished()` after the last capture. A NEW checks the points: somewhere on the Earth, a positive capture radius, no negative airspeed (`invalid_parameter`) |
+| `loiter` | `target` or `lat_deg`/`lon_deg` | `radius_m` (1500; at least 100 for a wing, 1 for a rotorcraft), `altitude_m` (current), `clockwise` (1), `airspeed_ms` (a wing: current; a rotorcraft: its position loop's speed) |
 | `pursuit` | `target` | `range_m` (300), `lead_s` (2), `min_airspeed_ms` (30), `max_airspeed_ms` (400) |
 | `evade` | `target` | `altitude_delta_m` (-300), `airspeed_ms` (current) |
 | `formation` | `target` (leader) | `ahead_m` (-100), `right_m` (60), `below_m` (0), `closure_gain` (0.1) |

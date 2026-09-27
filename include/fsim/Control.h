@@ -196,6 +196,9 @@ struct ControlContext {
     /// axes are owned apart. A controller that says axisAware() leaves the
     /// others alone - no integrating, no output (kHold).
     AxisMask engaged = kPrimaryAxes;
+    /// What the vehicle can do (Feature bits), for a behaviour whose guidance
+    /// differs by it: a rotorcraft hovers (docs/vehicle-interface.md, 4.9).
+    std::uint32_t features = kFeatureWingborne;
 };
 
 /// One level of the cascade: accepts a command at `level()` and returns a

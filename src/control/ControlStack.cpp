@@ -79,6 +79,7 @@ ControlStack& ControlStack::operator=(ControlStack&&) noexcept = default;
 
 void ControlStack::setAdapter(const VehicleAdapter& adapter) noexcept {
     adapter_ = &adapter;
+    features_ = adapter.features();
     const HoldAxes keeps = adapter.holdAxes(); // read once: the hold captures each update
     auto bit = [](Axis a) { return a < Axis::Count ? axisBit(a) : static_cast<AxisMask>(0); };
     holdHeadingBit_ = bit(keeps.heading), holdAltitudeBit_ = bit(keeps.altitude), holdAirspeedBit_ = bit(keeps.airspeed);
@@ -267,11 +268,13 @@ FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::si
     if (level == Level::Behavior) {
         Behavior* behavior = behaviors_[s].get();
         if (!behavior) return fail(out);
+        ControlContext guided{ctx}; // what the vehicle can do: its guidance may differ by it
+        guided.features = features_;
         if (started_[s] != slot.generation) {
-            behavior->start(ctx, std::get<BehaviorCommand>(*current));
+            behavior->start(guided, std::get<BehaviorCommand>(*current));
             started_[s] = slot.generation;
         }
-        Command next = behavior->update(ctx, *current);
+        Command next = behavior->update(guided, *current);
         if (behavior->finished()) flown.events |= kFinished;
         if (const Reason failure = behavior->failure(); failure != Reason::None) {
             flown.events |= kFailed;
@@ -440,11 +443,13 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
         if (slot.level != Level::Behavior || !(slot.axes & kPrimaryAxes)) continue;
         Behavior* behavior = behaviors_[s].get();
         if (!behavior) return fail(out);
+        ControlContext guided{ctx};
+        guided.features = features_;
         if (started_[s] != slot.generation) {
-            behavior->start(ctx, std::get<BehaviorCommand>(slot.command));
+            behavior->start(guided, std::get<BehaviorCommand>(slot.command));
             started_[s] = slot.generation;
         }
-        Command next = behavior->update(ctx, slot.command);
+        Command next = behavior->update(guided, slot.command);
         SlotReport& flown = report.slots[s];
         if (behavior->finished()) flown.events |= kFinished;
         if (const Reason failure = behavior->failure(); failure != Reason::None) {

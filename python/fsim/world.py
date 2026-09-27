@@ -252,7 +252,10 @@ class Activity:
         """A new setpoint: the level's fields by name (fsim.COMMAND_FIELDS),
         the others as a new command's defaults, or all of them in order.
         Returns True if a value was clamped; raises fsim.Rejected if the
-        activity has ended (preempted, completed, canceled)."""
+        activity has ended (preempted, completed, canceled) or takes no
+        updates (a behaviour: a new target is a new submit_behavior)."""
+        if self.level == Level.BEHAVIOR:  # the library answers: not_updatable, or why not
+            return bool(_checked(self.world._h.activity_update(self.id, ()))[4])
         return bool(_checked(self.world._h.activity_update(self.id, _row(self.level, values, fields)))[4])
 
     def cancel(self):

@@ -261,6 +261,8 @@ private:
 // --- Behaviours -------------------------------------------------------------
 
 /// "hold": keep the altitude, heading and airspeed at the moment it started.
+/// An aircraft that hovers keeps its velocity over the ground instead (a
+/// hover stays put in wind), unless it is given an airspeed.
 class FSIM_API HoldBehavior final : public Behavior {
 public:
     const char* id() const noexcept override { return "hold"; }
@@ -273,6 +275,8 @@ private:
 };
 
 /// "waypoints": fly `points` in order; params: loop (0/1). Finished after the last capture.
+/// Without an airspeed a wing flies the one it had, an aircraft that hovers
+/// its position loop's own speed.
 class FSIM_API WaypointsBehavior final : public Behavior {
 public:
     const char* id() const noexcept override { return "waypoints"; }
@@ -283,12 +287,14 @@ public:
 
 private:
     std::size_t index_ = 0;
-    bool loop_ = false, finished_ = false;
+    bool loop_ = false, finished_ = false, hovers_ = false;
     double airspeed_ = kHold;
 };
 
 /// "loiter": circle a point. params: lat_deg, lon_deg (or `target` vehicle),
-/// radius_m (1500), altitude_m (current), clockwise (1), airspeed_ms (hold).
+/// radius_m (1500; at least 100 m for a wing, 1 m for an aircraft that
+/// hovers), altitude_m (current), clockwise (1), airspeed_ms (a wing's as it
+/// was, a rotorcraft's its position loop's).
 class FSIM_API LoiterBehavior final : public Behavior {
 public:
     const char* id() const noexcept override { return "loiter"; }

@@ -40,7 +40,9 @@ struct Aircraft {
 };
 constexpr Aircraft kAdapters[] = {{"jsbsim:c172x", "jsbsim.stock", 2500.0, 55.0},
                                   {"jsbsim:b52h", "jsbsim.direct", 3000.0, 180.0},
-                                  {"jsbsim:f16c", "jsbsim.fbw", 3000.0, 160.0}};
+                                  {"jsbsim:f16c", "jsbsim.fbw", 3000.0, 160.0},
+                                  {"jsbsim:uh1h", "jsbsim.helicopter", 300.0, 0.0},
+                                  {"jsbsim:iris", "jsbsim.multirotor", 100.0, 0.0}};
 
 session::WorldOptions options(const std::string& name) {
     session::WorldOptions o;

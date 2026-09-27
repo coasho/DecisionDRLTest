@@ -137,6 +137,7 @@ private:
     std::unique_ptr<RuntimeConfig> config_;
     std::unique_ptr<RuntimeReport> report_;
     const VehicleAdapter* adapter_ = nullptr;
+    std::uint32_t features_ = kFeatureWingborne; ///< the adapter's, for behaviours (ControlContext::features)
     std::array<std::unique_ptr<Controller>, kLevels> controllers_;
     std::array<bool, kLevels> byId_{}; ///< created from the registry (settings apply)
     std::vector<ControllerSetting> settings_;

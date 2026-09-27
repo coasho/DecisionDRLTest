@@ -191,6 +191,7 @@ void VehicleAdapter::declare(const VehicleProfile& p, CapabilityCatalog& catalog
     catalog.unsupport("fsim.flight.velocity", "north_ms");
     catalog.unsupport("fsim.flight.velocity", "east_ms");
     catalog.unsupport("fsim.flight.position", "heading_rad");
+    catalog.narrow("fsim.guidance.loiter", "radius_m", 100.0, kUnknown); // a wing circles no tighter (the behaviour's own floor)
     declareEnvelope(p, catalog);
 }
 

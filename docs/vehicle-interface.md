@@ -528,7 +528,29 @@ Each step ships as commits on main with its tests, benchmark numbers (section 15
 
 ## 15. Measurements
 
-Filled in as the steps land.
+Filled in as the steps land. The machine and the benchmark's precision are ADR-26's (its section 17).
+
+**VI-1 (the rotorcraft's defects).**
+- **Digests:** every flight of the digest set identical to step 5b, with protection on and off. The fixes act only on vehicles that hover.
+- **Routes given no airspeed**, square, from a settled hover:
+  - the IRIS's 30 m legs flown in 18 s, the Crazyflie's 3 m legs in 33 s;
+  - the UH-1H's and UH-60A's 400 m legs in 81 s and 69 s.
+  - Before, the IRIS moved 0.0 m in 60 s and the UH-1H 2.0 m in 120 s.
+- **`hold` in wind**, from a settled hover, over 30 s:
+  - the IRIS within 0.03 m (a 5 m/s wind; it went 204 m before);
+  - the UH-60A within 1.4 m and the UH-1H within 15 m (5 m/s; the UH-1H's velocity loop is the slower to take the wind out);
+  - the Crazyflie within 2.4 m (1 m/s).
+- **`loiter`:** a 20 m orbit flown by the IRIS at 19.0 m, a 2 m one by the Crazyflie at 2.0 m, the c172x's 800 m at 765 m.
+- **Conformance:** the random sequences now run the helicopter (UH-1H) and multirotor (IRIS) adapters too, with the same required coverage: every edge of the lifecycle and every answer.
+- **Tests:** `tests/test_guidance.cpp`:
+  - a wing's three-leg climbing route;
+  - rotorcraft routes given no airspeed;
+  - `hold` to a heading, altitude and airspeed in a 12 m/s crosswind;
+  - rotorcraft `hold` in wind;
+  - loiter radii, a rotorcraft's airspeed along its nose;
+  - route validation.
+
+  Also two Python cases: a behaviour's UPDATE refused `not_updatable`, and route points checked. ctest 161/161.
 
 ## Appendix A: the gap analysis at a946dfe
 

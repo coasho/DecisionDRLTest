@@ -670,7 +670,10 @@ the Crazyflie 2.0, the IRIS+, the UH-1H and the UH-60A, built by hangar from the
 unsupported fields, command fields (body rates, a ground velocity, a heading at a point), `hover` behaviour and
 rotorcraft loops designed from an identified hover left every fixed-wing flight bit-identical; their models were
 measured from three-views, each rotor bound to the flight model's shaft, and turn at the rotor speeds the simulation
-reports - a multirotor's what user code commands.
+reports - a multirotor's what user code commands. Then the control system was measured against A-GRA's Vehicle
+Interface (ASK 6.0a) and the owner decided to implement its semantics (ADR-28, [vehicle-interface.md](vehicle-interface.md)):
+its first step made the behaviours offered to rotorcraft fly as rotorcraft fly - a hold that stays put in wind, routes
+and loiters at the position loop's speed - and added the guidance tests the analysis found missing.
 M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |

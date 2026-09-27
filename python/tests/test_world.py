@@ -251,6 +251,30 @@ class CapabilityTest(unittest.TestCase):
         self.assertEqual(hold.info.reason, "requested")
         self.assertGreaterEqual(len(v.activities()), 3)
 
+    def test_behaviour_takes_no_update(self):
+        world = make_world(name="py-behaviour-update")
+        v = fly(world, "behaviour")
+        hold = v.submit_behavior("hold")
+        with self.assertRaises(fsim.Rejected) as refused:
+            hold.update()  # a new target is a new submit_behavior
+        self.assertEqual(refused.exception.reason, "not_updatable")
+        hold.cancel()
+        with self.assertRaises(fsim.Rejected) as refused:
+            hold.update()
+        self.assertEqual(refused.exception.reason, "activity_ended")
+
+    def test_route_points_are_checked(self):
+        world = make_world(name="py-route-check")
+        v = fly(world, "route")
+        s = v.state
+        good = (s.latitude_rad + 0.001, s.longitude_rad, 1500.0, HOLD, 200.0)
+        self.assertTrue(v.submit_behavior("waypoints", points=[good]).live)
+        for bad in ((math.nan, s.longitude_rad, 1500.0, HOLD, 200.0), (2.0, s.longitude_rad, 1500.0, HOLD, 200.0),
+                    (s.latitude_rad, s.longitude_rad, 1500.0, HOLD, 0.0), (s.latitude_rad, s.longitude_rad, 1500.0, -5.0, 200.0)):
+            with self.assertRaises(fsim.Rejected) as refused:
+                v.submit_behavior("waypoints", points=[good, bad])
+            self.assertEqual(refused.exception.reason, "invalid_parameter")
+
     def test_authority_and_refusals(self):
         world = make_world(name="py-authority")
         v = fly(world, "held")

@@ -375,7 +375,17 @@ Command PositionLoop::update(const ControlContext& ctx, const Command& in) {
 
 void HoldBehavior::start(const ControlContext& ctx, const BehaviorCommand& command) {
     const auto& s = ctx.sensed;
-    target_.airspeedMs = command.param("airspeed_ms", s.airspeedTrueMs);
+    const double airspeed = command.param("airspeed_ms", kHold);
+    if ((ctx.features & kFeatureHover) && isHold(airspeed)) {
+        // a rotorcraft keeps the velocity over the ground it had: a hover stays
+        // put in wind, where holding the airspeed it had would fly it off
+        target_.airspeedMs = kHold;
+        target_.northMs = s.velocityNedMs[0];
+        target_.eastMs = s.velocityNedMs[1];
+    } else {
+        target_.airspeedMs = orHold(airspeed, s.airspeedTrueMs);
+        target_.northMs = target_.eastMs = kHold;
+    }
     target_.verticalSpeedMs = 0.0;
     target_.headingRad = command.param("heading_deg", units::radiansToDegrees(s.eulerRad[2])) * units::kDegreesToRadians;
     altitude_ = command.param("altitude_m", s.altitudeMslM);
@@ -391,7 +401,10 @@ void WaypointsBehavior::start(const ControlContext& ctx, const BehaviorCommand& 
     index_ = 0;
     loop_ = command.param("loop", 0.0) != 0.0;
     finished_ = command.points.empty();
-    airspeed_ = command.param("airspeed_ms", ctx.sensed.airspeedTrueMs);
+    hovers_ = (ctx.features & kFeatureHover) != 0;
+    // without one, a wing flies the airspeed it had; an aircraft that hovers
+    // its position loop's own speed (hovering, the airspeed it had is none)
+    airspeed_ = command.param("airspeed_ms", hovers_ ? kHold : ctx.sensed.airspeedTrueMs);
 }
 
 Command WaypointsBehavior::update(const ControlContext& ctx, const Command& in) {
@@ -400,7 +413,8 @@ Command WaypointsBehavior::update(const ControlContext& ctx, const Command& in) 
     if (c.points.empty()) {
         VelocityCommand hold;
         hold.headingRad = s.eulerRad[2];
-        hold.airspeedMs = s.airspeedTrueMs;
+        if (hovers_) hold.northMs = hold.eastMs = 0.0; // stay where it is
+        else hold.airspeedMs = s.airspeedTrueMs;
         return hold;
     }
     if (index_ >= c.points.size()) index_ = c.points.size() - 1;
@@ -420,10 +434,11 @@ void LoiterBehavior::start(const ControlContext& ctx, const BehaviorCommand& com
     target_ = command.target;
     centreLat_ = command.param("lat_deg", units::radiansToDegrees(s.latitudeRad)) * units::kDegreesToRadians;
     centreLon_ = command.param("lon_deg", units::radiansToDegrees(s.longitudeRad)) * units::kDegreesToRadians;
-    radius_ = std::max(100.0, command.param("radius_m", 1500.0));
+    const bool hovers = (ctx.features & kFeatureHover) != 0;
+    radius_ = std::max(hovers ? 1.0 : 100.0, command.param("radius_m", 1500.0));
     altitude_ = command.param("altitude_m", s.altitudeMslM);
     clockwise_ = command.param("clockwise", 1.0) != 0.0;
-    airspeed_ = command.param("airspeed_ms", s.airspeedTrueMs);
+    airspeed_ = command.param("airspeed_ms", hovers ? kHold : s.airspeedTrueMs); // kHold: the position loop's speed
 }
 
 Command LoiterBehavior::update(const ControlContext& ctx, const Command&) {
@@ -613,8 +628,8 @@ void registerBuiltinControllers(ControllerRegistry& r) {
     r.addBehavior("waypoints", [] { return std::make_unique<WaypointsBehavior>(); },
                   traits(Persistence::Terminating, {p("loop", "", 0.0, 0.0, 1.0), p("airspeed_ms", "m/s", now, 0.0)}, {position, velocity}));
     r.addBehavior("loiter", [] { return std::make_unique<LoiterBehavior>(); },
-                  traits(Persistence::Persistent,
-                         {p("lat_deg", "deg", now, -90.0, 90.0), p("lon_deg", "deg", now, -180.0, 180.0), p("radius_m", "m", 1500.0, 100.0),
+                  traits(Persistence::Persistent, // a wing's adapter narrows the radius to at least 100 m
+                         {p("lat_deg", "deg", now, -90.0, 90.0), p("lon_deg", "deg", now, -180.0, 180.0), p("radius_m", "m", 1500.0, 1.0),
                           p("altitude_m", "m", now), p("clockwise", "", 1.0, 0.0, 1.0), p("airspeed_ms", "m/s", now, 0.0)},
                          {position}));
     r.addBehavior("pursuit", [] { return std::make_unique<PursuitBehavior>(); },

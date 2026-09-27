@@ -42,6 +42,15 @@ std::string guidanceId(const std::string& behavior) {
     return "user.guidance." + behavior;
 }
 
+/// A route's point (BehaviorCommand::points): somewhere on the Earth, at an
+/// altitude, reached within a positive capture radius; any airspeed or
+/// heading it gives a number.
+bool validPoint(const PositionCommand& p) noexcept {
+    auto optional = [](double v) { return isHold(v) || std::isfinite(v); };
+    return std::isfinite(p.latitudeRad) && std::abs(p.latitudeRad) <= kPi / 2 && std::isfinite(p.longitudeRad) && std::isfinite(p.altitudeMslM) &&
+           std::isfinite(p.captureRadiusM) && p.captureRadiusM > 0.0 && optional(p.airspeedMs) && !(p.airspeedMs < 0.0) && optional(p.headingRad);
+}
+
 /// Clamp or reject one value against its parameter.
 Reason checkValue(const ParameterInfo& p, double& v, RangePolicy range, std::uint16_t& flags) noexcept {
     if (isHold(v)) return p.optional ? Reason::None : Reason::InvalidParameter;
@@ -313,6 +322,8 @@ Reason CapabilityCatalog::check(std::size_t index, Command& command, RangePolicy
             for (const auto& p : d.parameters)
                 if (p.name == key)
                     if (const Reason r = checkValue(p, value, range, flags); r != Reason::None) return r;
+        for (const auto& point : b->points)
+            if (!validPoint(point)) return Reason::InvalidParameter;
         return Reason::None;
     }
     double* fields[8];

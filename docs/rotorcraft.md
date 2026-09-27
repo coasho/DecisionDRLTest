@@ -210,6 +210,14 @@ it supports.
   or `lat_deg`, `lon_deg`, `altitude_m`, `heading_deg`. A behaviour may need a
   feature (`BehaviorTraits::features`); `hover` needs `kFeatureHover`, so it is
   offered only to aircraft that can hover.
+- The behaviours both kinds are offered fly a rotorcraft as it flies
+  (ADR-28's step VI-1, [vehicle-interface.md](vehicle-interface.md)): they
+  see the vehicle's features (`ControlContext::features`). `hold` keeps the
+  velocity over the ground it had, so a hover stays put in wind (it kept the
+  airspeed it had along the nose, the wind's, and flew off at 7 m/s);
+  `waypoints` and `loiter` given no airspeed fly the position loop's own
+  speed (a route from a hover never moved: its speed was the hover's
+  airspeed, none), and `loiter` circles down to a metre.
 - Protection's wing limits are for aircraft with `kFeatureWingborne`.
 
 ### 3.4 Commands: fields a rotorcraft needs
