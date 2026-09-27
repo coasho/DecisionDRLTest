@@ -664,9 +664,11 @@ GOVERNOR_LEAD_S = 0.15
 def governor_xml(aircraft):
     """The channels that hold each turboprop's propeller at its governed
     speed, through JSBSim's fcs/advance-cmd-norm (propulsion.GOVERNOR_RANGE),
-    and set its blades while time stands still."""
+    and set its blades while time stands still; and its ground range
+    (propulsion.ground_range): on the ground, at the bottom of the throttle,
+    the blades set by the throttle and N1 holding the propeller's speed."""
     from .propulsion import (GOVERNOR_CP, GOVERNOR_RANGE, HP, TP_IDLE_N1, TP_SPOOL_S, TP_SUSTAIN_N1, Propeller,
-                             blade_angles_for_power, blades_mass, power_lapse_xml)
+                             blade_angles_for_power, blades_mass, ground_range, power_lapse_xml)
     lo, hi = GOVERNOR_RANGE
     out = []
     for i, (e, name) in enumerate(_engine_units(aircraft)):
@@ -682,28 +684,125 @@ def governor_xml(aircraft):
         s3 = (TP_SUSTAIN_N1 / 100.0) ** 3
         head = "                " + "".join("%8.2f" % c for c in GOVERNOR_CP)
         rows = "\n".join("            %6.2f " % j + "".join("%8.2f" % b for b in row) for j, row in zip(tab["J"], angles))
+        g = ground_range(e)
+        n1_rows = "\n".join("                      %8.2f %9.4f" % (b, v) for b, v in zip(g["blade_angle_deg"], g["n1"]))
         out.append("""      <channel name="Propeller Governor %(i)d">
-        <!-- %(name)s: the propeller governed at %(rpm).0f rpm. JSBSim's turboprop drops
-             its N1 to idle as time runs again after standing still (a reset, a trim; its
-             power reads 0 then): in that step the throttle puts N1 back where it was -->
+        <!-- %(name)s: the propeller governed at %(rpm).0f rpm. The ground range: with weight
+             on the wheels and time running, a throttle below %(beta_t)g sets the blades, from
+             ground idle's %(gi).2f deg (no thrust standing still) to the low stop, %(lo_deg).1f,
+             and N1 holds the propeller's speed - not below %(min_n1).1f %%, nor above the flight
+             range's N1 at the throttle; past %(os_rpm).0f rpm the blades open further -->
+        <fcs_function name="fcs/propeller-ground-range-%(i)d">
+          <function>
+            <and>
+              <gt> <property>simulation/dt</property> <value>0</value> </gt>
+              <gt> <property>gear/wow</property> <value>0</value> </gt>
+              <lt> <property>fcs/throttle-cmd-norm[%(i)d]</property> <value>%(beta_t)g</value> </lt>
+            </and>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/propeller-beta-blade-%(i)d">
+          <function>
+            <sum>
+              <value>%(gi).4f</value>
+              <product>
+                <value>%(beta_gain).6g</value>
+                <max> <value>0</value> <property>fcs/throttle-cmd-norm[%(i)d]</property> </max>
+              </product>
+            </sum>
+          </function>
+          <clipto> <min>%(gi).4f</min> <max>%(lo_deg).4f</max> </clipto>
+        </fcs_function>
+        <!-- the fuel control: the N1 that holds the governed speed standing still with the
+             blades there (sea level), less %(k_n1).4g %% for each rpm the propeller runs fast -->
+        <fcs_function name="fcs/propeller-beta-n1-%(i)d">
+          <function>
+            <min>
+              <sum>
+                <value>%(idle_n1).4f</value>
+                <product>
+                  <value>%(n1_span).4f</value>
+                  <max> <value>0</value> <property>fcs/throttle-cmd-norm[%(i)d]</property> </max>
+                </product>
+              </sum>
+              <max>
+                <value>%(min_n1).4f</value>
+                <sum>
+                  <table>
+                    <independentVar>fcs/propeller-beta-blade-%(i)d</independentVar>
+                    <tableData>
+%(n1_rows)s
+                    </tableData>
+                  </table>
+                  <product>
+                    <value>%(k_n1).6g</value>
+                    <difference> <value>%(rpm).4f</value> <property>propulsion/engine[%(i)d]/propeller-rpm</property> </difference>
+                  </product>
+                </sum>
+              </max>
+            </min>
+          </function>
+        </fcs_function>
+        <!-- JSBSim's turboprop drops its N1 to idle as time runs again after standing still (a
+             reset, a trim; its power reads 0 then): in that step the throttle puts N1 back where
+             it was, or in the ground range where the fuel control wants it -->
         <fcs_function name="fcs/propeller-throttle-%(i)d">
           <function>
             <ifthen>
-              <and>
-                <gt> <property>simulation/dt</property> <value>0</value> </gt>
-                <lt> <property>propulsion/engine[%(i)d]/power-hp</property> <value>0.5</value> </lt>
-              </and>
+              <gt> <property>fcs/propeller-ground-range-%(i)d</property> <value>0</value> </gt>
               <quotient>
-                <difference> <property>propulsion/engine[%(i)d]/n1</property> <value>%(idle_n1).4f</value> </difference>
-                <product>
-                  <value>%(n1_span).4f</value>
-                  <difference>
-                    <value>1</value>
-                    <exp> <quotient> <property>simulation/dt</property> <value>%(neg_spool).4f</value> </quotient> </exp>
-                  </difference>
-                </product>
+                <difference>
+                  <ifthen>
+                    <lt> <property>propulsion/engine[%(i)d]/power-hp</property> <value>0.5</value> </lt>
+                    <ifthen>
+                      <gt> <property>fcs/propeller-beta-n1-%(i)d</property> <value>%(idle_n1).4f</value> </gt>
+                      <sum>
+                        <value>%(idle_n1).4f</value>
+                        <quotient>
+                          <difference> <property>fcs/propeller-beta-n1-%(i)d</property> <value>%(idle_n1).4f</value> </difference>
+                          <difference>
+                            <value>1</value>
+                            <exp> <quotient> <property>simulation/dt</property> <value>%(neg_spool).4f</value> </quotient> </exp>
+                          </difference>
+                        </quotient>
+                      </sum>
+                      <quotient>
+                        <difference>
+                          <property>fcs/propeller-beta-n1-%(i)d</property>
+                          <product>
+                            <value>%(idle_n1).4f</value>
+                            <exp> <quotient> <property>simulation/dt</property> <value>%(neg_spool_down).4f</value> </quotient> </exp>
+                          </product>
+                        </difference>
+                        <difference>
+                          <value>1</value>
+                          <exp> <quotient> <property>simulation/dt</property> <value>%(neg_spool_down).4f</value> </quotient> </exp>
+                        </difference>
+                      </quotient>
+                    </ifthen>
+                    <property>fcs/propeller-beta-n1-%(i)d</property>
+                  </ifthen>
+                  <value>%(idle_n1).4f</value>
+                </difference>
+                <value>%(n1_span).4f</value>
               </quotient>
-              <property>fcs/throttle-cmd-norm[%(i)d]</property>
+              <ifthen>
+                <and>
+                  <gt> <property>simulation/dt</property> <value>0</value> </gt>
+                  <lt> <property>propulsion/engine[%(i)d]/power-hp</property> <value>0.5</value> </lt>
+                </and>
+                <quotient>
+                  <difference> <property>propulsion/engine[%(i)d]/n1</property> <value>%(idle_n1).4f</value> </difference>
+                  <product>
+                    <value>%(n1_span).4f</value>
+                    <difference>
+                      <value>1</value>
+                      <exp> <quotient> <property>simulation/dt</property> <value>%(neg_spool).4f</value> </quotient> </exp>
+                    </difference>
+                  </product>
+                </quotient>
+                <property>fcs/throttle-cmd-norm[%(i)d]</property>
+              </ifthen>
             </ifthen>
           </function>
           <output>fcs/throttle-pos-norm[%(i)d]</output>
@@ -745,9 +844,15 @@ def governor_xml(aircraft):
           <clipto> <min>0</min> <max>1</max> </clipto>
           <output>fcs/advance-cmd-norm[%(i)d]</output>
         </fcs_function>
-        <!-- time standing still: the blades held where they take the engine's power -->
+        <!-- time standing still: the blades held where they take the engine's power; in the
+             ground range: set -->
         <fcs_function name="fcs/propeller-governing-%(i)d">
-          <function> <gt> <property>simulation/dt</property> <value>0</value> </gt> </function>
+          <function>
+            <and>
+              <gt> <property>simulation/dt</property> <value>0</value> </gt>
+              <lt> <property>fcs/propeller-ground-range-%(i)d</property> <value>1</value> </lt>
+            </and>
+          </function>
           <output>propulsion/engine[%(i)d]/constant-speed-mode</output>
         </fcs_function>
         <fcs_function name="fcs/propeller-advance-ratio-%(i)d">
@@ -798,7 +903,23 @@ def governor_xml(aircraft):
           <function>
             <ifthen>
               <gt> <property>simulation/dt</property> <value>0</value> </gt>
-              <property>propulsion/engine[%(i)d]/blade-angle</property>
+              <ifthen>
+                <gt> <property>fcs/propeller-ground-range-%(i)d</property> <value>0</value> </gt>
+                <min>
+                  <value>%(hi_deg).4f</value>
+                  <sum>
+                    <property>fcs/propeller-beta-blade-%(i)d</property>
+                    <product>
+                      <value>%(k_blade).6g</value>
+                      <max>
+                        <value>0</value>
+                        <difference> <property>propulsion/engine[%(i)d]/propeller-rpm</property> <value>%(os_rpm).4f</value> </difference>
+                      </max>
+                    </product>
+                  </sum>
+                </min>
+                <property>propulsion/engine[%(i)d]/blade-angle</property>
+              </ifthen>
               <table>
                 <independentVar lookup="row">fcs/propeller-advance-ratio-%(i)d</independentVar>
                 <independentVar lookup="column">fcs/propeller-power-coefficient-%(i)d</independentVar>
@@ -818,7 +939,11 @@ def governor_xml(aircraft):
             "a0": (1.0 - lo) * e.prop_rpm, "span": (hi - lo) * e.prop_rpm,
             "nd": n * d_ft, "rating": e.power_kw * 1000.0 / HP, "thermo": e.thermo_power_kw * 1000.0 / HP,
             "idle": TP_IDLE_N1 / 100.0, "span_n1": 1.0 - TP_IDLE_N1 / 100.0, "s3": s3, "s3c": 1.0 - s3,
-            "lapse": power_lapse_xml(e, 18), "scale": n**3 * d_ft**5 / 550.0, "head": head, "rows": rows})
+            "lapse": power_lapse_xml(e, 18), "scale": n**3 * d_ft**5 / 550.0, "head": head, "rows": rows,
+            "beta_t": g["throttle"], "gi": g["ground_idle_deg"], "lo_deg": g["low_stop_deg"], "hi_deg": g["high_stop_deg"],
+            "beta_gain": (g["low_stop_deg"] - g["ground_idle_deg"]) / g["throttle"], "min_n1": g["min_n1"],
+            "k_n1": g["k_n1"], "k_blade": g["k_blade"], "os_rpm": g["overspeed_rpm"], "n1_rows": n1_rows,
+            "neg_spool_down": -2.4 * TP_SPOOL_S})
     return out
 
 

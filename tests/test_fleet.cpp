@@ -585,14 +585,17 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
         }
     }
 
-    // --- parked: a policy's airborne guidance waits for the air, the flight levels and the platform's own
-    // paths do not; the gear stays down; the flaps move; the wheel brakes hold it ----------------------------
+    // --- parked: a wing idling stands; a policy's airborne guidance waits for the air, the flight levels and
+    // the platform's own paths do not; the gear stays down; the flaps move; the wheel brakes hold it ---------
     {
         fleet.park();
         std::vector<std::pair<const Plane*, ActivityId>> flaps;
         for (const auto& p : planes) {
             INFO(p.type << " parked");
             REQUIRE(w.vehicleState(p.id)->onGround);
+            // its engines' idle thrust under 8 % of its weight (the worst: the F-22A's 4.0 %, a jet's idle; hangar's
+            // turboprops made 17 %, governed at flight idle on their low stops, until their ground range)
+            if (!p.rotor) CHECK(property(w, p.id, "forces/fbx-prop-lbs") < 0.08 * property(w, p.id, "inertia/weight-lbs"));
             CHECK(w.capabilityStatus(p.id, "fsim.flight.velocity").availability == Availability::Available);
             if (p.offered.count("fsim.guidance.hsa")) {
                 const CapabilityStatus hsa = w.capabilityStatus(p.id, "fsim.guidance.hsa");
@@ -634,7 +637,7 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             INFO(p.type << " parked: wheel brakes");
             CHECK(property(w, p.id, "fcs/left-brake-cmd-norm") == 1.0);
             CHECK(property(w, p.id, "fcs/right-brake-cmd-norm") == 1.0);
-            const auto& s = *w.vehicleState(p.id); // stopped, and held (at idle a turboprop rolls until they go on)
+            const auto& s = *w.vehicleState(p.id); // stopped, and held
             CHECK(std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]) < 0.05);
             CHECK(groundDistance(s, braked[p.id]) < 0.05);
             fleet.covered(p, "fsim.support.wheel_brakes");

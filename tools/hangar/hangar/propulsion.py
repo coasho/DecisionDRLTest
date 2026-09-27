@@ -206,6 +206,53 @@ class Propeller:
             _PITCH_TABLES[key] = {"J": J, "blade_angle": angles, "CT": CT, "CP": CP}
         return _PITCH_TABLES[key]
 
+    def ground_idle_angle(self):
+        """The blades' angle at ground idle (deg at 75 % radius, to 0.01):
+        where the propeller makes no thrust at a standstill at its governed
+        speed, sea level - where the C-130's ground idle sets them, "for
+        minimum thrust" (the ground range, below). The low stop if they make
+        none there already."""
+        key = ("ground idle", self._key())
+        if key not in _PITCH_TABLES:
+            lo = float(self.blade_angles[0])
+
+            def ct(b):
+                return float(self.forces([0.0], b)[0][0])
+            if ct(lo) <= 0.0:
+                _PITCH_TABLES[key] = lo
+            else:
+                a, b = lo - 5.0, lo
+                while ct(a) > 0.0:
+                    if a < lo - 60.0:
+                        raise ValueError("the propeller still makes thrust at a standstill 60 deg below its low stop")
+                    a, b = a - 5.0, a
+                for _ in range(20):     # bisection: 5 deg to under 0.00001
+                    m = 0.5 * (a + b)
+                    if ct(m) > 0.0:
+                        b = m
+                    else:
+                        a = m
+                _PITCH_TABLES[key] = min(round(0.5 * (a + b), 2), lo)
+        return _PITCH_TABLES[key]
+
+    def beta_tables(self, tab, step=5.0):
+        """C_THRUST and C_POWER below the governor's range, for the ground
+        range: at the advance ratios of `tab` (pitch_tables), from the
+        ground idle angle up to the low stop, every `step` down from the low
+        stop (none if ground idle is the low stop)."""
+        key = ("beta", self._key(), tuple(tab["J"]), step)
+        if key not in _PITCH_TABLES:
+            lo, gi = float(tab["blade_angle"][0]), self.ground_idle_angle()
+            angles = [] if gi >= lo else [gi] + [lo - step * k for k in range(int((lo - gi) / step), 0, -1)
+                                                  if lo - step * k > gi + 0.5]
+            J = tab["J"]
+            CT = np.empty((len(J), len(angles)))
+            CP = np.empty_like(CT)
+            for k, b in enumerate(angles):
+                CT[:, k], CP[:, k] = self.forces(J, b)
+            _PITCH_TABLES[key] = {"J": J, "blade_angle": np.array(angles, float), "CT": CT, "CP": CP}
+        return _PITCH_TABLES[key]
+
     def mach_tables(self, tab, machs=(0.0, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2)):
         """JSBSim's CT_MACH and CP_MACH for a constant-speed propeller: its
         thrust and power coefficients over the helical tip Mach number, as
@@ -459,6 +506,35 @@ TP_MACH = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)
 TP_N1 = (0.0, 20.0, 40.0, 50.0, 55.0, 60.0, 65.0, 70.0, 75.0, 80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0)
 TP_RPM = (0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2, 1.3)  # of the design speed
 
+# The ground range ("beta"). On the ground a turboprop's power lever goes
+# below flight idle, where it sets the blades' angle itself and the engine's
+# fuel control holds the propeller's speed: the C-130's 54H60 schedules its
+# blade angle and fuel flow by the lever there, the propeller held within
+# 96-103 % (Lockheed Martin Service News V26N3, 1999), and at ground idle its
+# blades are set "for minimum thrust", +5 deg at their reference station
+# against flight idle's 17.5 (US patent 4,969,367). Governed at flight idle
+# instead, a C-130J on its low stop makes 3,440 lbf a propeller standing
+# still. hangar's turboprops: with weight on the wheels, the throttle's first
+# TP_BETA_THROTTLE is the ground range - the C-130's lever travels 16 of its
+# 72 deg from ground idle to take-off between ground idle and flight idle
+# (ground idle at 18 deg, flight idle 34, take-off 90: its flight manual,
+# quoted on PPRuNe, "C130K Propeller Blade Angle"). At 0, ground idle, the
+# blades stand where the propeller makes no thrust at a standstill at its
+# governed speed (Propeller.ground_idle_angle); they open with the throttle
+# to the low stop at TP_BETA_THROTTLE, where the flight range takes over. The
+# fuel control holds the governed speed (proportional on N1, a
+# TP_BETA_BANDWIDTH loop through N1's lag), never below TP_BETA_MIN_N1 and
+# never above the flight range's N1 at that throttle, so the thrust rises
+# into the flight range without a step. Past TP_BETA_OVERSPEED of the
+# governed speed - the flat blades windmilling in a landing roll - the blades
+# open beyond the schedule to hold it (proportional, a
+# TP_BETA_BLADE_BANDWIDTH loop at ground idle). In the air nothing changes.
+TP_BETA_THROTTLE = 0.2
+TP_BETA_MIN_N1 = TP_SUSTAIN_N1 + 1.0   # the fuel control's least: the core keeps a little power over its own need
+TP_BETA_OVERSPEED = 1.01
+TP_BETA_BANDWIDTH = 0.25               # rad/s
+TP_BETA_BLADE_BANDWIDTH = 3.0          # rad/s
+
 
 def blades_mass(engine):
     """The mass (kg) whose spin inertia a turboprop's propeller has: its
@@ -542,6 +618,45 @@ def turboprop_tables(engine):
     c = TP_IDLE_FUEL
     efficiency = np.maximum(p / (c + (1.0 - c) * p), 0.02)
     return {"rpm": rpm, "n1": n1, "EnginePowerRPM_N1": power, "ITT_N1": itt, "CombustionEfficiency_N1": efficiency}
+
+
+def ground_range(engine):
+    """A turboprop's ground range (TP_BETA_THROTTLE and the rest, above), as
+    its flight controls fly it (jsbsim.governor_xml): its tables' blade
+    angles from ground idle to the low stop and one past it (deg at 75 %
+    radius), the shaft power each takes standing still at the governed
+    speed, sea level (hp), and the N1 that gives it (%, EnginePowerRPM_N1 at
+    the design speed as JSBSim reads it); the fuel control's gain (N1 % per
+    rpm) and the blades' overspeed gain (deg per rpm)."""
+    p = Propeller(engine)
+    tab = p.pitch_tables()
+    beta = p.beta_tables(tab)
+    # every column of the propeller's tables at a standstill, from ground idle up
+    angles = np.concatenate([beta["blade_angle"], tab["blade_angle"]])
+    n = p.rpm / 60.0
+    hp = np.concatenate([beta["CP"][0], tab["CP"][0]]) * RHO0 * n**3 * p.D**5 / HP
+    t = turboprop_tables(engine)
+    row, n1 = t["EnginePowerRPM_N1"][TP_RPM.index(1.0)], t["n1"]
+    run = n1 >= TP_SUSTAIN_N1             # from the self-sustaining speed up the power rises with N1
+    n1_hp = np.interp(hp, row[run], n1[run])
+    # the fuel control: N1 -> power (the table's slope at ground idle) -> the
+    # propeller's speed through its spin inertia (JSBSim's: rpm/s per hp of
+    # power to spare), N1 lagging 2.4 spool times as it falls (JSBSim's)
+    ixx = p.inertia(blades_mass(engine)) * 0.73756               # slug ft2
+    rpm_per_hp = 550.0 / (ixx * 2 * math.pi * n) * 60.0 / (2 * math.pi)
+    k = int(np.clip(np.searchsorted(n1, n1_hp[0], side="right"), 1, len(n1) - 1))
+    hp_per_n1 = (row[k] - row[k - 1]) / (n1[k] - n1[k - 1])
+    tau = 2.4 * TP_SPOOL_S
+    w = TP_BETA_BANDWIDTH
+    k_n1 = w * math.sqrt(1.0 + (tau * w) ** 2) / (hp_per_n1 * rpm_per_hp)
+    # the blades past the overspeed: their power per degree at ground idle, standing still
+    hp_per_deg = (hp[1] - hp[0]) / (angles[1] - angles[0])
+    k_blade = TP_BETA_BLADE_BANDWIDTH / (hp_per_deg * rpm_per_hp)
+    upto = len(beta["blade_angle"]) + 2     # ground idle to the low stop, and one column past it
+    return {"ground_idle_deg": float(angles[0]), "low_stop_deg": float(tab["blade_angle"][0]),
+            "high_stop_deg": float(tab["blade_angle"][-1]), "blade_angle_deg": angles[:upto], "power_hp": hp[:upto],
+            "n1": n1_hp[:upto], "k_n1": k_n1, "k_blade": k_blade, "rpm": p.rpm, "overspeed_rpm": TP_BETA_OVERSPEED * p.rpm,
+            "min_n1": TP_BETA_MIN_N1, "throttle": TP_BETA_THROTTLE}
 
 
 def power_lapse_xml(engine, indent):
@@ -716,14 +831,24 @@ def constant_speed_propeller_xml(prop, tab, mach, mass, name):
     ratio and blade angle (Propeller.pitch_tables), the blades' range as its
     minpitch and maxpitch, the governor's rpm range (GOVERNOR_RANGE) and the
     gearbox; CT_MACH and CP_MACH over the helical tip Mach number
-    (Propeller.mach_tables)."""
+    (Propeller.mach_tables). Below the governor's range, the ground range's
+    columns (Propeller.beta_tables), which the governor never reaches."""
     J, angles = tab["J"], tab["blade_angle"]
+    beta = prop.beta_tables(tab)
+    columns = {"blade_angle": angles, "CT": tab["CT"], "CP": tab["CP"]}
+    if len(beta["blade_angle"]):
+        # with a copy of the low stop's column 0.01 deg under it: JSBSim's
+        # lookups from the low stop up then give, bit for bit, what the
+        # governor's range alone gave (at the low stop itself it would
+        # otherwise take 1 x (low stop - column below) + column below)
+        columns = {k: np.hstack([beta[k], tab[k][:, :1], tab[k]]) for k in ("CT", "CP")}
+        columns["blade_angle"] = np.concatenate([beta["blade_angle"], [angles[0] - 0.01], angles])
 
     def table(key):
-        head = "            " + "".join("%9.2f" % b for b in angles)
-        body = "\n".join("      %5.2f " % j + "".join("%9.5f" % v for v in row) for j, row in zip(J, tab[key]))
+        head = "            " + "".join("%9.2f" % b for b in columns["blade_angle"])
+        body = "\n".join("      %5.2f " % j + "".join("%9.5f" % v for v in row) for j, row in zip(J, columns[key]))
         # past the last advance ratio the coefficients stay as they are there
-        last = "      %5.2f " % (J[-1] + 2.0) + "".join("%9.5f" % v for v in tab[key][-1])
+        last = "      %5.2f " % (J[-1] + 2.0) + "".join("%9.5f" % v for v in columns[key][-1])
         return "%s\n%s\n%s" % (head, body, last)
 
     def factors(key):
@@ -733,7 +858,8 @@ def constant_speed_propeller_xml(prop, tab, mach, mass, name):
     return """<?xml version="1.0"?>
 <!-- Generated by hangar: blade-element momentum theory for a %d-blade constant-speed
      propeller, %.3f m diameter, governed at %.0f rpm, its blades %.1f-%.1f deg at 75 %%
-     radius (activity factor %.0f); compressibility from the same blades at J %.2f and
+     radius (activity factor %.0f), on the ground down to ground idle's %.2f deg, where it
+     makes no thrust standing still; compressibility from the same blades at J %.2f and
      %.1f deg (Lock's drag rise past Korn's drag divergence). -->
 <propeller name="%s">
   <ixx> %.3f </ixx>
@@ -765,6 +891,6 @@ def constant_speed_propeller_xml(prop, tab, mach, mass, name):
     </tableData>
   </table>
 </propeller>
-""" % (prop.B, prop.D, prop.rpm, angles[0], angles[-1], prop.activity_factor, mach["J"], mach["blade_angle"], name, ixx,
-       prop.D, prop.B, prop.gear_ratio, angles[0], angles[-1], lo * prop.rpm, hi * prop.rpm, table("CT"), table("CP"),
-       factors("CT"), factors("CP"))
+""" % (prop.B, prop.D, prop.rpm, angles[0], angles[-1], prop.activity_factor, prop.ground_idle_angle(), mach["J"],
+       mach["blade_angle"], name, ixx, prop.D, prop.B, prop.gear_ratio, angles[0], angles[-1], lo * prop.rpm,
+       hi * prop.rpm, table("CT"), table("CP"), factors("CT"), factors("CP"))

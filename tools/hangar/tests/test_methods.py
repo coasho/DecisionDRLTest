@@ -1195,7 +1195,15 @@ class Turboprops(unittest.TestCase):
                                "numblades": 4.0})
         rows = prop.find("table[@name='C_POWER']/tableData").text.strip().split("\n")
         self.assertEqual(len(rows), len(tab["J"]) + 2)       # the blade angles, each advance ratio, one past the last
-        self.assertEqual(len(rows[0].split()), len(tab["blade_angle"]))
+        # the ground range's columns under the governor's, and a copy of the low
+        # stop's 0.01 deg below it: JSBSim then reads the governor's range as before
+        beta = p.beta_tables(tab)
+        self.assertEqual([float(b) for b in rows[0].split()],
+                         [round(float(b), 2) for b in beta["blade_angle"]] + [14.99] + [float(b) for b in tab["blade_angle"]])
+        for name in ("C_THRUST", "C_POWER"):
+            for row in prop.find("table[@name='%s']/tableData" % name).text.strip().split("\n")[1:]:
+                cells = row.split()[1:]
+                self.assertEqual(cells[len(beta["blade_angle"])], cells[len(beta["blade_angle"]) + 1])
         # the governor: at its speed, turning steadily, the advance command
         # asks JSBSim's governor for the governed speed; the channel also
         # sets the blades while time stands still and N1 back after it did
@@ -1208,10 +1216,50 @@ class Turboprops(unittest.TestCase):
             q = ch.find("fcs_function[@name='fcs/propeller-advance-%d']/function/quotient" % i)
             a0, span = float(q.find("difference/value").text), float(q.find("value").text)
             self.assertAlmostEqual(num["minrpm"] + (num["maxrpm"] - num["minrpm"]) * a0 / span, 1200.0, places=3)
+            # the ground range: with weight on the wheels, at the bottom of the throttle
+            rng = ch.find("fcs_function[@name='fcs/propeller-ground-range-%d']/function/and" % i)
+            self.assertEqual([c.find("property").text for c in rng],
+                             ["simulation/dt", "gear/wow", "fcs/throttle-cmd-norm[%d]" % i])
+            self.assertAlmostEqual(float(rng[2].find("value").text), P.TP_BETA_THROTTLE)
         # both engines draw fuel, and turn the same way (handed = false)
         xml = ET.fromstring("<fdm>%s</fdm>" % jsbsim.propulsion_xml(a, MassModel(a), [("e", "p")]))
         self.assertEqual([len(en.findall("feed")) for en in xml.findall("propulsion/engine")], [1, 1])
         self.assertEqual([en.find("thruster/sense").text for en in xml.findall("propulsion/engine")], ["-1", "-1"])
+
+    def test_ground_range(self):
+        from hangar import propulsion as P
+        e = turboprop_design().engines[0]
+        p = P.Propeller(e)
+        tab = p.pitch_tables()
+        lo = float(tab["blade_angle"][0])
+        # ground idle: below the low stop, where the propeller makes next to no
+        # thrust standing still (the BEMT scatters by some 0.003 there), though
+        # its blades still take power
+        gi = p.ground_idle_angle()
+        self.assertLess(gi, lo)
+        ct, cp = (float(x[0]) for x in p.forces([0.0], gi))
+        self.assertLess(abs(ct), 0.005)
+        self.assertGreater(cp, 0.0)
+        # from there to the low stop the thrust standing still rises with the
+        # blades; rolling, the flat blades brake
+        beta = p.beta_tables(tab)
+        self.assertEqual(float(beta["blade_angle"][0]), gi)
+        standing = np.concatenate([beta["CT"][0], tab["CT"][0, :1]])
+        self.assertTrue(np.all(np.diff(standing) > 0.0), standing)
+        self.assertLess(float(np.interp(0.3, beta["J"], beta["CT"][:, 0])), -0.05)
+        # the fuel control: at ground idle the engine's N1 gives the power the
+        # blades take at the governed speed - below flight idle, above its least
+        g = P.ground_range(e)
+        self.assertEqual(g["ground_idle_deg"], gi)
+        self.assertEqual(g["blade_angle_deg"][-2], lo)
+        t = P.turboprop_tables(e)
+        row = t["EnginePowerRPM_N1"][P.TP_RPM.index(1.0)]
+        self.assertAlmostEqual(float(np.interp(g["n1"][0], t["n1"], row)), g["power_hp"][0], places=6)
+        self.assertAlmostEqual(g["power_hp"][0], beta["CP"][0, 0] * P.RHO0 * (p.rpm / 60.0) ** 3 * p.D ** 5 / P.HP, places=6)
+        self.assertTrue(P.TP_BETA_MIN_N1 < g["n1"][0] < P.TP_IDLE_N1, g["n1"][0])
+        self.assertTrue(np.all(np.diff(g["n1"]) > 0.0))
+        self.assertGreater(g["k_n1"], 0.0)
+        self.assertGreater(g["k_blade"], 0.0)
 
 
 class Aircraft_(unittest.TestCase):

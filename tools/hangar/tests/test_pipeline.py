@@ -4,6 +4,7 @@ tests), so the numbers are a first look; what is asserted is that each stage
 produces its outputs and that the aircraft it builds flies. Needs the fsim
 package on the path; skipped without it."""
 import glob
+import math
 import os
 import re
 import shutil
@@ -146,37 +147,41 @@ class TurbopropStart(unittest.TestCase):
     and JSBSim then marches the engines to their steady state in half-second
     steps - at a spawn, a reset and in its trim. A turboprop must come out
     of each with its propeller at the governed speed and its engine at the
-    power it had, and fly on without a thrust transient."""
+    power it had, and fly on without a thrust transient; parked, it idles in
+    its ground range. One build of a copy of the C-130J serves every test."""
 
-    def setUp(self):
+    @classmethod
+    def setUpClass(cls):
         out = os.environ.get("FSIM_TEST_OUTPUT")
         if out:
             os.makedirs(out, exist_ok=True)
-        self.base = tempfile.mkdtemp(prefix="hangar-tp-", dir=out or None)
-        self.name = "hangartp"
-        folder = os.path.join(self.base, self.name)
+        cls.base = tempfile.mkdtemp(prefix="hangar-tp-", dir=out or None)
+        cls.name = "hangartp"
+        folder = os.path.join(cls.base, cls.name)
         os.makedirs(folder)
         with open(os.path.join(ROOT, "aircraft", "c130j", "c130j.toml"), encoding="utf-8") as f:
-            text = f.read().replace('name = "c130j"', 'name = "%s"' % self.name, 1)
-        self.toml = os.path.join(folder, self.name + ".toml")
-        with open(self.toml, "w", encoding="utf-8") as f:
+            text = f.read().replace('name = "c130j"', 'name = "%s"' % cls.name, 1)
+        cls.toml = os.path.join(folder, cls.name + ".toml")
+        with open(cls.toml, "w", encoding="utf-8") as f:
             f.write(text)
-        self.old_path = os.environ.get("FSIM_AIRCRAFT_PATH")
-        os.environ["FSIM_AIRCRAFT_PATH"] = self.base
+        cls.old_path = os.environ.get("FSIM_AIRCRAFT_PATH")
+        os.environ["FSIM_AIRCRAFT_PATH"] = cls.base
+        cls.d = pipeline.Design(cls.toml, log=lambda *a: None)
+        cls.d.aircraft.spec.setdefault("analysis", {})["quick"] = True
+        for stage in ("aero", "mass", "propulsion", "build"):
+            getattr(cls.d, stage)()
 
-    def tearDown(self):
-        if self.old_path is None:
+    @classmethod
+    def tearDownClass(cls):
+        if cls.old_path is None:
             os.environ.pop("FSIM_AIRCRAFT_PATH", None)
         else:
-            os.environ["FSIM_AIRCRAFT_PATH"] = self.old_path
+            os.environ["FSIM_AIRCRAFT_PATH"] = cls.old_path
         if not os.environ.get("FSIM_TEST_OUTPUT"):
-            shutil.rmtree(self.base, ignore_errors=True)
+            shutil.rmtree(cls.base, ignore_errors=True)
 
     def test_runs_from_spawn_reset_and_trim(self):
-        d = pipeline.Design(self.toml, log=lambda *a: None)
-        d.aircraft.spec.setdefault("analysis", {})["quick"] = True
-        for stage in ("aero", "mass", "propulsion", "build"):
-            getattr(d, stage)()
+        d = self.d
         e = d.aircraft.engines[0]
         world = fsim.World("hangar-test-turboprop", publish=False, workers=1)
         try:
@@ -205,6 +210,55 @@ class TurbopropStart(unittest.TestCase):
             fly("reset", 0.6)
             v.set_property("simulation/do_simple_trim", 1)
             fly("trim", v.get_property("fcs/throttle-cmd-norm"))
+        finally:
+            world.close()
+
+    def test_ground_idle(self):
+        """The ground range (propulsion.py): parked at idle from its spawn on,
+        the blades at ground idle make next to no thrust and the aircraft
+        stands still, its engines holding the propellers' speed (it rolled
+        away at 3,400 lbf a propeller, governed at flight idle on its low
+        stop); braked, the thrust rises with the throttle through the ground
+        range into the flight range's, without a step; rolling at idle the
+        flat blades brake, the propellers held near their speed."""
+        from hangar.propulsion import TP_BETA_THROTTLE
+        e = self.d.aircraft.engines[0]
+        n = sum(len(x.copies()) for x in self.d.aircraft.engines)
+        world = fsim.World("hangar-test-turboprop-ground", publish=False, workers=1, terrain=False)
+        try:
+            def spawn(name, speed):
+                return world.create_vehicle(name, type="jsbsim:" + self.name, latitude_deg=37.6, longitude_deg=-122.4,
+                                            heading_deg=0.0, on_ground=True, airspeed_ms=speed)
+
+            def fly(v, throttle, seconds, brakes=0.0):
+                most, rpm = -math.inf, []
+                for _ in range(int(seconds / world.step_seconds)):
+                    v.command_actuator(throttle=throttle, brake_left=brakes, brake_right=brakes)
+                    world.step()
+                    most = max(most, sum(v.get_property("propulsion/engine[%d]/thrust-lbs" % i) for i in range(n)))
+                    rpm += [v.get_property("propulsion/engine[%d]/propeller-rpm" % i) / e.prop_rpm for i in range(n)]
+                s = v.state
+                return most, math.hypot(s.velocity_ned_ms[0], s.velocity_ned_ms[1]), min(rpm), max(rpm)
+
+            v = spawn("parked", 0.0)
+            weight = v.get_property("inertia/weight-lbs")
+            most, speed, lo, hi = fly(v, 0.0, 20.0)
+            self.assertLess(most, 0.002 * weight)            # -1 lbf (was 46,500 falling to 14,000)
+            self.assertLess(speed, 0.05)
+            self.assertLess(max(1.0 - lo, hi - 1.0), 0.01)
+            thrust = []
+            for k in (0.25, 0.5, 0.75, 0.999, 1.0, 1.5):
+                fly(v, k * TP_BETA_THROTTLE, 15.0, brakes=1.0)
+                thrust.append(sum(v.get_property("propulsion/engine[%d]/thrust-lbs" % i) for i in range(n)))
+            self.assertTrue(all(b > a > 0.0 for a, b in zip(thrust, thrust[1:])), thrust)
+            self.assertLess(abs(thrust[4] / thrust[3] - 1.0), 0.02, thrust)
+            v.remove()
+            v = spawn("rolling", 50.0)
+            fly(v, 0.0, 2.0)
+            most, speed, lo, hi = fly(v, 0.0, 20.0)
+            self.assertLess(most, 0.0)                      # the flat blades brake
+            self.assertLess(speed, 47.0)
+            self.assertLess(max(1.0 - lo, hi - 1.0), 0.04)  # the C-130's 96-103 %
         finally:
             world.close()
 

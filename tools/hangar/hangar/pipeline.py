@@ -473,7 +473,7 @@ class Design:
         and blade angle, where the governor sets its blades at a standstill
         and what they give there, its best efficiency and its tips'
         compressibility; each engine's power lapse."""
-        from .propulsion import RHO0, Propeller, turboprop_power_lapse
+        from .propulsion import RHO0, Propeller, ground_range, turboprop_power_lapse
         from .report import plots
         a = self.aircraft
         out, checks, maps = [], [], {}
@@ -514,6 +514,15 @@ class Design:
                                 "deg", note="%.0f kW at %.0f rpm, sea level: CP %.3f" % (e.power_kw, p.rpm, need), fmt="%.1f"))
             checks.append(check("%s static thrust per shaft power" % e.name, thrust0 / e.power_kw, 10.0, 22.0, "N/kW",
                                 level="warn", note="turboprops 12-20 (2-3.3 lbf/shp): blades stalled at a standstill give less"))
+            # ground idle (propulsion: the ground range): the fuel control holds the governed speed
+            # there above its least N1, or the propeller overspeeds and its blades open into thrust
+            g = ground_range(e)
+            out[-1]["ground_range"] = {k: g[k] for k in ("ground_idle_deg", "blade_angle_deg", "power_hp", "n1", "k_n1",
+                                                         "k_blade", "throttle")}
+            checks.append(check("%s ground idle: N1 holding the governed speed" % e.name, float(g["n1"][0]), g["min_n1"],
+                                None, "%", level="warn", fmt="%.1f",
+                                note="blades at %.2f deg, no thrust standing still: %.0f hp at %.0f rpm; the ground range "
+                                     "is the throttle's first %g" % (g["ground_idle_deg"], g["power_hp"][0], p.rpm, g["throttle"])))
             checks.append(info("%s propeller's tips at helical Mach 0.9" % e.name, "CT x %.3f, CP x %.3f" % (
                 float(np.interp(0.9, mach["mach"], mach["CT"])), float(np.interp(0.9, mach["mach"], mach["CP"]))),
                 note="compressibility at J %.2f, %.1f deg" % (mach["J"], mach["blade_angle"])))

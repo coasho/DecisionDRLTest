@@ -400,6 +400,25 @@ For fighters:
   propeller's speed, and starts the engine running at its trimmed power.
   A propeller aircraft whose propellers leave nothing to fit (their pitch
   given, or constant-speed) is calibrated on its top speed alone.
+- **The ground range.** On the ground a turboprop's lever goes below
+  flight idle, where it sets the blade angle itself and the fuel control
+  holds the propeller's speed (the C-130's: 96-103 %); at ground idle the
+  blades are set for minimum thrust (the 54H60's +5 deg at its reference
+  station, flight idle 17.5). With weight on the wheels, the throttle's
+  first fifth is hangar's ground range - the C-130's lever spends 16 of its
+  72 deg from ground idle to take-off between ground idle and flight idle.
+  At 0 the blades stand where the propeller makes no thrust standing still
+  at its governed speed (the C-130J's -5.15 deg at 75 % radius, taking 144
+  hp; with the blades' twist that is +5.3 deg at 52 % radius, the 42-inch
+  station, if that is where the 54H60's angles are measured - the sources
+  do not say), and N1 holds that speed (52.5 %, below flight idle's 60).
+  The blades open with the throttle to the governor's low stop, N1 capped
+  at the flight range's, which takes over at 0.2 without a step. Rolling
+  at idle the flat blades brake, opening past 101 % of the propeller's
+  speed to hold it. Governed at flight idle on its low stop, as before, a
+  parked C-130J made 3,440 lbf a propeller and rolled from rest to 11 m/s
+  in 5 s; now it makes -1 lbf and stands still. In the air nothing changes:
+  the flight tests' reports are identical, value for value.
 - **Large aircraft.** A jet climbs best well above a propeller aircraft's
   speeds, at up to 2.8 times its stall speed. A heavy jet's stall run goes
   on until the stall breaks, and every crash test starts with the lowest

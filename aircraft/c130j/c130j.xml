@@ -610,27 +610,127 @@
         </pure_gain>
       </channel>
       <channel name="Propeller Governor 0">
-        <!-- AE 2100D3 inboard L: the propeller governed at 1020 rpm. JSBSim's turboprop drops
-             its N1 to idle as time runs again after standing still (a reset, a trim; its
-             power reads 0 then): in that step the throttle puts N1 back where it was -->
+        <!-- AE 2100D3 inboard L: the propeller governed at 1020 rpm. The ground range: with weight
+             on the wheels and time running, a throttle below 0.2 sets the blades, from
+             ground idle's -5.15 deg (no thrust standing still) to the low stop, 15.0,
+             and N1 holds the propeller's speed - not below 51.0 %, nor above the flight
+             range's N1 at the throttle; past 1030 rpm the blades open further -->
+        <fcs_function name="fcs/propeller-ground-range-0">
+          <function>
+            <and>
+              <gt> <property>simulation/dt</property> <value>0</value> </gt>
+              <gt> <property>gear/wow</property> <value>0</value> </gt>
+              <lt> <property>fcs/throttle-cmd-norm[0]</property> <value>0.2</value> </lt>
+            </and>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/propeller-beta-blade-0">
+          <function>
+            <sum>
+              <value>-5.1500</value>
+              <product>
+                <value>100.75</value>
+                <max> <value>0</value> <property>fcs/throttle-cmd-norm[0]</property> </max>
+              </product>
+            </sum>
+          </function>
+          <clipto> <min>-5.1500</min> <max>15.0000</max> </clipto>
+        </fcs_function>
+        <!-- the fuel control: the N1 that holds the governed speed standing still with the
+             blades there (sea level), less 0.0501 % for each rpm the propeller runs fast -->
+        <fcs_function name="fcs/propeller-beta-n1-0">
+          <function>
+            <min>
+              <sum>
+                <value>60.0000</value>
+                <product>
+                  <value>40.0000</value>
+                  <max> <value>0</value> <property>fcs/throttle-cmd-norm[0]</property> </max>
+                </product>
+              </sum>
+              <max>
+                <value>51.0000</value>
+                <sum>
+                  <table>
+                    <independentVar>fcs/propeller-beta-blade-0</independentVar>
+                    <tableData>
+                         -5.15   52.5438
+                          0.00   54.9396
+                          5.00   59.0637
+                         10.00   65.2608
+                         15.00   72.7477
+                         20.00   80.4850
+                    </tableData>
+                  </table>
+                  <product>
+                    <value>0.0500983</value>
+                    <difference> <value>1020.0000</value> <property>propulsion/engine[0]/propeller-rpm</property> </difference>
+                  </product>
+                </sum>
+              </max>
+            </min>
+          </function>
+        </fcs_function>
+        <!-- JSBSim's turboprop drops its N1 to idle as time runs again after standing still (a
+             reset, a trim; its power reads 0 then): in that step the throttle puts N1 back where
+             it was, or in the ground range where the fuel control wants it -->
         <fcs_function name="fcs/propeller-throttle-0">
           <function>
             <ifthen>
-              <and>
-                <gt> <property>simulation/dt</property> <value>0</value> </gt>
-                <lt> <property>propulsion/engine[0]/power-hp</property> <value>0.5</value> </lt>
-              </and>
+              <gt> <property>fcs/propeller-ground-range-0</property> <value>0</value> </gt>
               <quotient>
-                <difference> <property>propulsion/engine[0]/n1</property> <value>60.0000</value> </difference>
-                <product>
-                  <value>40.0000</value>
-                  <difference>
-                    <value>1</value>
-                    <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
-                  </difference>
-                </product>
+                <difference>
+                  <ifthen>
+                    <lt> <property>propulsion/engine[0]/power-hp</property> <value>0.5</value> </lt>
+                    <ifthen>
+                      <gt> <property>fcs/propeller-beta-n1-0</property> <value>60.0000</value> </gt>
+                      <sum>
+                        <value>60.0000</value>
+                        <quotient>
+                          <difference> <property>fcs/propeller-beta-n1-0</property> <value>60.0000</value> </difference>
+                          <difference>
+                            <value>1</value>
+                            <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
+                          </difference>
+                        </quotient>
+                      </sum>
+                      <quotient>
+                        <difference>
+                          <property>fcs/propeller-beta-n1-0</property>
+                          <product>
+                            <value>60.0000</value>
+                            <exp> <quotient> <property>simulation/dt</property> <value>-2.4000</value> </quotient> </exp>
+                          </product>
+                        </difference>
+                        <difference>
+                          <value>1</value>
+                          <exp> <quotient> <property>simulation/dt</property> <value>-2.4000</value> </quotient> </exp>
+                        </difference>
+                      </quotient>
+                    </ifthen>
+                    <property>fcs/propeller-beta-n1-0</property>
+                  </ifthen>
+                  <value>60.0000</value>
+                </difference>
+                <value>40.0000</value>
               </quotient>
-              <property>fcs/throttle-cmd-norm[0]</property>
+              <ifthen>
+                <and>
+                  <gt> <property>simulation/dt</property> <value>0</value> </gt>
+                  <lt> <property>propulsion/engine[0]/power-hp</property> <value>0.5</value> </lt>
+                </and>
+                <quotient>
+                  <difference> <property>propulsion/engine[0]/n1</property> <value>60.0000</value> </difference>
+                  <product>
+                    <value>40.0000</value>
+                    <difference>
+                      <value>1</value>
+                      <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
+                    </difference>
+                  </product>
+                </quotient>
+                <property>fcs/throttle-cmd-norm[0]</property>
+              </ifthen>
             </ifthen>
           </function>
           <output>fcs/throttle-pos-norm[0]</output>
@@ -672,9 +772,15 @@
           <clipto> <min>0</min> <max>1</max> </clipto>
           <output>fcs/advance-cmd-norm[0]</output>
         </fcs_function>
-        <!-- time standing still: the blades held where they take the engine's power -->
+        <!-- time standing still: the blades held where they take the engine's power; in the
+             ground range: set -->
         <fcs_function name="fcs/propeller-governing-0">
-          <function> <gt> <property>simulation/dt</property> <value>0</value> </gt> </function>
+          <function>
+            <and>
+              <gt> <property>simulation/dt</property> <value>0</value> </gt>
+              <lt> <property>fcs/propeller-ground-range-0</property> <value>1</value> </lt>
+            </and>
+          </function>
           <output>propulsion/engine[0]/constant-speed-mode</output>
         </fcs_function>
         <fcs_function name="fcs/propeller-advance-ratio-0">
@@ -758,7 +864,23 @@
           <function>
             <ifthen>
               <gt> <property>simulation/dt</property> <value>0</value> </gt>
-              <property>propulsion/engine[0]/blade-angle</property>
+              <ifthen>
+                <gt> <property>fcs/propeller-ground-range-0</property> <value>0</value> </gt>
+                <min>
+                  <value>65.0000</value>
+                  <sum>
+                    <property>fcs/propeller-beta-blade-0</property>
+                    <product>
+                      <value>1.10814</value>
+                      <max>
+                        <value>0</value>
+                        <difference> <property>propulsion/engine[0]/propeller-rpm</property> <value>1030.2000</value> </difference>
+                      </max>
+                    </product>
+                  </sum>
+                </min>
+                <property>propulsion/engine[0]/blade-angle</property>
+              </ifthen>
               <table>
                 <independentVar lookup="row">fcs/propeller-advance-ratio-0</independentVar>
                 <independentVar lookup="column">fcs/propeller-power-coefficient-0</independentVar>
@@ -813,27 +935,127 @@
         </fcs_function>
       </channel>
       <channel name="Propeller Governor 1">
-        <!-- AE 2100D3 inboard R: the propeller governed at 1020 rpm. JSBSim's turboprop drops
-             its N1 to idle as time runs again after standing still (a reset, a trim; its
-             power reads 0 then): in that step the throttle puts N1 back where it was -->
+        <!-- AE 2100D3 inboard R: the propeller governed at 1020 rpm. The ground range: with weight
+             on the wheels and time running, a throttle below 0.2 sets the blades, from
+             ground idle's -5.15 deg (no thrust standing still) to the low stop, 15.0,
+             and N1 holds the propeller's speed - not below 51.0 %, nor above the flight
+             range's N1 at the throttle; past 1030 rpm the blades open further -->
+        <fcs_function name="fcs/propeller-ground-range-1">
+          <function>
+            <and>
+              <gt> <property>simulation/dt</property> <value>0</value> </gt>
+              <gt> <property>gear/wow</property> <value>0</value> </gt>
+              <lt> <property>fcs/throttle-cmd-norm[1]</property> <value>0.2</value> </lt>
+            </and>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/propeller-beta-blade-1">
+          <function>
+            <sum>
+              <value>-5.1500</value>
+              <product>
+                <value>100.75</value>
+                <max> <value>0</value> <property>fcs/throttle-cmd-norm[1]</property> </max>
+              </product>
+            </sum>
+          </function>
+          <clipto> <min>-5.1500</min> <max>15.0000</max> </clipto>
+        </fcs_function>
+        <!-- the fuel control: the N1 that holds the governed speed standing still with the
+             blades there (sea level), less 0.0501 % for each rpm the propeller runs fast -->
+        <fcs_function name="fcs/propeller-beta-n1-1">
+          <function>
+            <min>
+              <sum>
+                <value>60.0000</value>
+                <product>
+                  <value>40.0000</value>
+                  <max> <value>0</value> <property>fcs/throttle-cmd-norm[1]</property> </max>
+                </product>
+              </sum>
+              <max>
+                <value>51.0000</value>
+                <sum>
+                  <table>
+                    <independentVar>fcs/propeller-beta-blade-1</independentVar>
+                    <tableData>
+                         -5.15   52.5438
+                          0.00   54.9396
+                          5.00   59.0637
+                         10.00   65.2608
+                         15.00   72.7477
+                         20.00   80.4850
+                    </tableData>
+                  </table>
+                  <product>
+                    <value>0.0500983</value>
+                    <difference> <value>1020.0000</value> <property>propulsion/engine[1]/propeller-rpm</property> </difference>
+                  </product>
+                </sum>
+              </max>
+            </min>
+          </function>
+        </fcs_function>
+        <!-- JSBSim's turboprop drops its N1 to idle as time runs again after standing still (a
+             reset, a trim; its power reads 0 then): in that step the throttle puts N1 back where
+             it was, or in the ground range where the fuel control wants it -->
         <fcs_function name="fcs/propeller-throttle-1">
           <function>
             <ifthen>
-              <and>
-                <gt> <property>simulation/dt</property> <value>0</value> </gt>
-                <lt> <property>propulsion/engine[1]/power-hp</property> <value>0.5</value> </lt>
-              </and>
+              <gt> <property>fcs/propeller-ground-range-1</property> <value>0</value> </gt>
               <quotient>
-                <difference> <property>propulsion/engine[1]/n1</property> <value>60.0000</value> </difference>
-                <product>
-                  <value>40.0000</value>
-                  <difference>
-                    <value>1</value>
-                    <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
-                  </difference>
-                </product>
+                <difference>
+                  <ifthen>
+                    <lt> <property>propulsion/engine[1]/power-hp</property> <value>0.5</value> </lt>
+                    <ifthen>
+                      <gt> <property>fcs/propeller-beta-n1-1</property> <value>60.0000</value> </gt>
+                      <sum>
+                        <value>60.0000</value>
+                        <quotient>
+                          <difference> <property>fcs/propeller-beta-n1-1</property> <value>60.0000</value> </difference>
+                          <difference>
+                            <value>1</value>
+                            <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
+                          </difference>
+                        </quotient>
+                      </sum>
+                      <quotient>
+                        <difference>
+                          <property>fcs/propeller-beta-n1-1</property>
+                          <product>
+                            <value>60.0000</value>
+                            <exp> <quotient> <property>simulation/dt</property> <value>-2.4000</value> </quotient> </exp>
+                          </product>
+                        </difference>
+                        <difference>
+                          <value>1</value>
+                          <exp> <quotient> <property>simulation/dt</property> <value>-2.4000</value> </quotient> </exp>
+                        </difference>
+                      </quotient>
+                    </ifthen>
+                    <property>fcs/propeller-beta-n1-1</property>
+                  </ifthen>
+                  <value>60.0000</value>
+                </difference>
+                <value>40.0000</value>
               </quotient>
-              <property>fcs/throttle-cmd-norm[1]</property>
+              <ifthen>
+                <and>
+                  <gt> <property>simulation/dt</property> <value>0</value> </gt>
+                  <lt> <property>propulsion/engine[1]/power-hp</property> <value>0.5</value> </lt>
+                </and>
+                <quotient>
+                  <difference> <property>propulsion/engine[1]/n1</property> <value>60.0000</value> </difference>
+                  <product>
+                    <value>40.0000</value>
+                    <difference>
+                      <value>1</value>
+                      <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
+                    </difference>
+                  </product>
+                </quotient>
+                <property>fcs/throttle-cmd-norm[1]</property>
+              </ifthen>
             </ifthen>
           </function>
           <output>fcs/throttle-pos-norm[1]</output>
@@ -875,9 +1097,15 @@
           <clipto> <min>0</min> <max>1</max> </clipto>
           <output>fcs/advance-cmd-norm[1]</output>
         </fcs_function>
-        <!-- time standing still: the blades held where they take the engine's power -->
+        <!-- time standing still: the blades held where they take the engine's power; in the
+             ground range: set -->
         <fcs_function name="fcs/propeller-governing-1">
-          <function> <gt> <property>simulation/dt</property> <value>0</value> </gt> </function>
+          <function>
+            <and>
+              <gt> <property>simulation/dt</property> <value>0</value> </gt>
+              <lt> <property>fcs/propeller-ground-range-1</property> <value>1</value> </lt>
+            </and>
+          </function>
           <output>propulsion/engine[1]/constant-speed-mode</output>
         </fcs_function>
         <fcs_function name="fcs/propeller-advance-ratio-1">
@@ -961,7 +1189,23 @@
           <function>
             <ifthen>
               <gt> <property>simulation/dt</property> <value>0</value> </gt>
-              <property>propulsion/engine[1]/blade-angle</property>
+              <ifthen>
+                <gt> <property>fcs/propeller-ground-range-1</property> <value>0</value> </gt>
+                <min>
+                  <value>65.0000</value>
+                  <sum>
+                    <property>fcs/propeller-beta-blade-1</property>
+                    <product>
+                      <value>1.10814</value>
+                      <max>
+                        <value>0</value>
+                        <difference> <property>propulsion/engine[1]/propeller-rpm</property> <value>1030.2000</value> </difference>
+                      </max>
+                    </product>
+                  </sum>
+                </min>
+                <property>propulsion/engine[1]/blade-angle</property>
+              </ifthen>
               <table>
                 <independentVar lookup="row">fcs/propeller-advance-ratio-1</independentVar>
                 <independentVar lookup="column">fcs/propeller-power-coefficient-1</independentVar>
@@ -1016,27 +1260,127 @@
         </fcs_function>
       </channel>
       <channel name="Propeller Governor 2">
-        <!-- AE 2100D3 outboard L: the propeller governed at 1020 rpm. JSBSim's turboprop drops
-             its N1 to idle as time runs again after standing still (a reset, a trim; its
-             power reads 0 then): in that step the throttle puts N1 back where it was -->
+        <!-- AE 2100D3 outboard L: the propeller governed at 1020 rpm. The ground range: with weight
+             on the wheels and time running, a throttle below 0.2 sets the blades, from
+             ground idle's -5.15 deg (no thrust standing still) to the low stop, 15.0,
+             and N1 holds the propeller's speed - not below 51.0 %, nor above the flight
+             range's N1 at the throttle; past 1030 rpm the blades open further -->
+        <fcs_function name="fcs/propeller-ground-range-2">
+          <function>
+            <and>
+              <gt> <property>simulation/dt</property> <value>0</value> </gt>
+              <gt> <property>gear/wow</property> <value>0</value> </gt>
+              <lt> <property>fcs/throttle-cmd-norm[2]</property> <value>0.2</value> </lt>
+            </and>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/propeller-beta-blade-2">
+          <function>
+            <sum>
+              <value>-5.1500</value>
+              <product>
+                <value>100.75</value>
+                <max> <value>0</value> <property>fcs/throttle-cmd-norm[2]</property> </max>
+              </product>
+            </sum>
+          </function>
+          <clipto> <min>-5.1500</min> <max>15.0000</max> </clipto>
+        </fcs_function>
+        <!-- the fuel control: the N1 that holds the governed speed standing still with the
+             blades there (sea level), less 0.0501 % for each rpm the propeller runs fast -->
+        <fcs_function name="fcs/propeller-beta-n1-2">
+          <function>
+            <min>
+              <sum>
+                <value>60.0000</value>
+                <product>
+                  <value>40.0000</value>
+                  <max> <value>0</value> <property>fcs/throttle-cmd-norm[2]</property> </max>
+                </product>
+              </sum>
+              <max>
+                <value>51.0000</value>
+                <sum>
+                  <table>
+                    <independentVar>fcs/propeller-beta-blade-2</independentVar>
+                    <tableData>
+                         -5.15   52.5438
+                          0.00   54.9396
+                          5.00   59.0637
+                         10.00   65.2608
+                         15.00   72.7477
+                         20.00   80.4850
+                    </tableData>
+                  </table>
+                  <product>
+                    <value>0.0500983</value>
+                    <difference> <value>1020.0000</value> <property>propulsion/engine[2]/propeller-rpm</property> </difference>
+                  </product>
+                </sum>
+              </max>
+            </min>
+          </function>
+        </fcs_function>
+        <!-- JSBSim's turboprop drops its N1 to idle as time runs again after standing still (a
+             reset, a trim; its power reads 0 then): in that step the throttle puts N1 back where
+             it was, or in the ground range where the fuel control wants it -->
         <fcs_function name="fcs/propeller-throttle-2">
           <function>
             <ifthen>
-              <and>
-                <gt> <property>simulation/dt</property> <value>0</value> </gt>
-                <lt> <property>propulsion/engine[2]/power-hp</property> <value>0.5</value> </lt>
-              </and>
+              <gt> <property>fcs/propeller-ground-range-2</property> <value>0</value> </gt>
               <quotient>
-                <difference> <property>propulsion/engine[2]/n1</property> <value>60.0000</value> </difference>
-                <product>
-                  <value>40.0000</value>
-                  <difference>
-                    <value>1</value>
-                    <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
-                  </difference>
-                </product>
+                <difference>
+                  <ifthen>
+                    <lt> <property>propulsion/engine[2]/power-hp</property> <value>0.5</value> </lt>
+                    <ifthen>
+                      <gt> <property>fcs/propeller-beta-n1-2</property> <value>60.0000</value> </gt>
+                      <sum>
+                        <value>60.0000</value>
+                        <quotient>
+                          <difference> <property>fcs/propeller-beta-n1-2</property> <value>60.0000</value> </difference>
+                          <difference>
+                            <value>1</value>
+                            <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
+                          </difference>
+                        </quotient>
+                      </sum>
+                      <quotient>
+                        <difference>
+                          <property>fcs/propeller-beta-n1-2</property>
+                          <product>
+                            <value>60.0000</value>
+                            <exp> <quotient> <property>simulation/dt</property> <value>-2.4000</value> </quotient> </exp>
+                          </product>
+                        </difference>
+                        <difference>
+                          <value>1</value>
+                          <exp> <quotient> <property>simulation/dt</property> <value>-2.4000</value> </quotient> </exp>
+                        </difference>
+                      </quotient>
+                    </ifthen>
+                    <property>fcs/propeller-beta-n1-2</property>
+                  </ifthen>
+                  <value>60.0000</value>
+                </difference>
+                <value>40.0000</value>
               </quotient>
-              <property>fcs/throttle-cmd-norm[2]</property>
+              <ifthen>
+                <and>
+                  <gt> <property>simulation/dt</property> <value>0</value> </gt>
+                  <lt> <property>propulsion/engine[2]/power-hp</property> <value>0.5</value> </lt>
+                </and>
+                <quotient>
+                  <difference> <property>propulsion/engine[2]/n1</property> <value>60.0000</value> </difference>
+                  <product>
+                    <value>40.0000</value>
+                    <difference>
+                      <value>1</value>
+                      <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
+                    </difference>
+                  </product>
+                </quotient>
+                <property>fcs/throttle-cmd-norm[2]</property>
+              </ifthen>
             </ifthen>
           </function>
           <output>fcs/throttle-pos-norm[2]</output>
@@ -1078,9 +1422,15 @@
           <clipto> <min>0</min> <max>1</max> </clipto>
           <output>fcs/advance-cmd-norm[2]</output>
         </fcs_function>
-        <!-- time standing still: the blades held where they take the engine's power -->
+        <!-- time standing still: the blades held where they take the engine's power; in the
+             ground range: set -->
         <fcs_function name="fcs/propeller-governing-2">
-          <function> <gt> <property>simulation/dt</property> <value>0</value> </gt> </function>
+          <function>
+            <and>
+              <gt> <property>simulation/dt</property> <value>0</value> </gt>
+              <lt> <property>fcs/propeller-ground-range-2</property> <value>1</value> </lt>
+            </and>
+          </function>
           <output>propulsion/engine[2]/constant-speed-mode</output>
         </fcs_function>
         <fcs_function name="fcs/propeller-advance-ratio-2">
@@ -1164,7 +1514,23 @@
           <function>
             <ifthen>
               <gt> <property>simulation/dt</property> <value>0</value> </gt>
-              <property>propulsion/engine[2]/blade-angle</property>
+              <ifthen>
+                <gt> <property>fcs/propeller-ground-range-2</property> <value>0</value> </gt>
+                <min>
+                  <value>65.0000</value>
+                  <sum>
+                    <property>fcs/propeller-beta-blade-2</property>
+                    <product>
+                      <value>1.10814</value>
+                      <max>
+                        <value>0</value>
+                        <difference> <property>propulsion/engine[2]/propeller-rpm</property> <value>1030.2000</value> </difference>
+                      </max>
+                    </product>
+                  </sum>
+                </min>
+                <property>propulsion/engine[2]/blade-angle</property>
+              </ifthen>
               <table>
                 <independentVar lookup="row">fcs/propeller-advance-ratio-2</independentVar>
                 <independentVar lookup="column">fcs/propeller-power-coefficient-2</independentVar>
@@ -1219,27 +1585,127 @@
         </fcs_function>
       </channel>
       <channel name="Propeller Governor 3">
-        <!-- AE 2100D3 outboard R: the propeller governed at 1020 rpm. JSBSim's turboprop drops
-             its N1 to idle as time runs again after standing still (a reset, a trim; its
-             power reads 0 then): in that step the throttle puts N1 back where it was -->
+        <!-- AE 2100D3 outboard R: the propeller governed at 1020 rpm. The ground range: with weight
+             on the wheels and time running, a throttle below 0.2 sets the blades, from
+             ground idle's -5.15 deg (no thrust standing still) to the low stop, 15.0,
+             and N1 holds the propeller's speed - not below 51.0 %, nor above the flight
+             range's N1 at the throttle; past 1030 rpm the blades open further -->
+        <fcs_function name="fcs/propeller-ground-range-3">
+          <function>
+            <and>
+              <gt> <property>simulation/dt</property> <value>0</value> </gt>
+              <gt> <property>gear/wow</property> <value>0</value> </gt>
+              <lt> <property>fcs/throttle-cmd-norm[3]</property> <value>0.2</value> </lt>
+            </and>
+          </function>
+        </fcs_function>
+        <fcs_function name="fcs/propeller-beta-blade-3">
+          <function>
+            <sum>
+              <value>-5.1500</value>
+              <product>
+                <value>100.75</value>
+                <max> <value>0</value> <property>fcs/throttle-cmd-norm[3]</property> </max>
+              </product>
+            </sum>
+          </function>
+          <clipto> <min>-5.1500</min> <max>15.0000</max> </clipto>
+        </fcs_function>
+        <!-- the fuel control: the N1 that holds the governed speed standing still with the
+             blades there (sea level), less 0.0501 % for each rpm the propeller runs fast -->
+        <fcs_function name="fcs/propeller-beta-n1-3">
+          <function>
+            <min>
+              <sum>
+                <value>60.0000</value>
+                <product>
+                  <value>40.0000</value>
+                  <max> <value>0</value> <property>fcs/throttle-cmd-norm[3]</property> </max>
+                </product>
+              </sum>
+              <max>
+                <value>51.0000</value>
+                <sum>
+                  <table>
+                    <independentVar>fcs/propeller-beta-blade-3</independentVar>
+                    <tableData>
+                         -5.15   52.5438
+                          0.00   54.9396
+                          5.00   59.0637
+                         10.00   65.2608
+                         15.00   72.7477
+                         20.00   80.4850
+                    </tableData>
+                  </table>
+                  <product>
+                    <value>0.0500983</value>
+                    <difference> <value>1020.0000</value> <property>propulsion/engine[3]/propeller-rpm</property> </difference>
+                  </product>
+                </sum>
+              </max>
+            </min>
+          </function>
+        </fcs_function>
+        <!-- JSBSim's turboprop drops its N1 to idle as time runs again after standing still (a
+             reset, a trim; its power reads 0 then): in that step the throttle puts N1 back where
+             it was, or in the ground range where the fuel control wants it -->
         <fcs_function name="fcs/propeller-throttle-3">
           <function>
             <ifthen>
-              <and>
-                <gt> <property>simulation/dt</property> <value>0</value> </gt>
-                <lt> <property>propulsion/engine[3]/power-hp</property> <value>0.5</value> </lt>
-              </and>
+              <gt> <property>fcs/propeller-ground-range-3</property> <value>0</value> </gt>
               <quotient>
-                <difference> <property>propulsion/engine[3]/n1</property> <value>60.0000</value> </difference>
-                <product>
-                  <value>40.0000</value>
-                  <difference>
-                    <value>1</value>
-                    <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
-                  </difference>
-                </product>
+                <difference>
+                  <ifthen>
+                    <lt> <property>propulsion/engine[3]/power-hp</property> <value>0.5</value> </lt>
+                    <ifthen>
+                      <gt> <property>fcs/propeller-beta-n1-3</property> <value>60.0000</value> </gt>
+                      <sum>
+                        <value>60.0000</value>
+                        <quotient>
+                          <difference> <property>fcs/propeller-beta-n1-3</property> <value>60.0000</value> </difference>
+                          <difference>
+                            <value>1</value>
+                            <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
+                          </difference>
+                        </quotient>
+                      </sum>
+                      <quotient>
+                        <difference>
+                          <property>fcs/propeller-beta-n1-3</property>
+                          <product>
+                            <value>60.0000</value>
+                            <exp> <quotient> <property>simulation/dt</property> <value>-2.4000</value> </quotient> </exp>
+                          </product>
+                        </difference>
+                        <difference>
+                          <value>1</value>
+                          <exp> <quotient> <property>simulation/dt</property> <value>-2.4000</value> </quotient> </exp>
+                        </difference>
+                      </quotient>
+                    </ifthen>
+                    <property>fcs/propeller-beta-n1-3</property>
+                  </ifthen>
+                  <value>60.0000</value>
+                </difference>
+                <value>40.0000</value>
               </quotient>
-              <property>fcs/throttle-cmd-norm[3]</property>
+              <ifthen>
+                <and>
+                  <gt> <property>simulation/dt</property> <value>0</value> </gt>
+                  <lt> <property>propulsion/engine[3]/power-hp</property> <value>0.5</value> </lt>
+                </and>
+                <quotient>
+                  <difference> <property>propulsion/engine[3]/n1</property> <value>60.0000</value> </difference>
+                  <product>
+                    <value>40.0000</value>
+                    <difference>
+                      <value>1</value>
+                      <exp> <quotient> <property>simulation/dt</property> <value>-1.0000</value> </quotient> </exp>
+                    </difference>
+                  </product>
+                </quotient>
+                <property>fcs/throttle-cmd-norm[3]</property>
+              </ifthen>
             </ifthen>
           </function>
           <output>fcs/throttle-pos-norm[3]</output>
@@ -1281,9 +1747,15 @@
           <clipto> <min>0</min> <max>1</max> </clipto>
           <output>fcs/advance-cmd-norm[3]</output>
         </fcs_function>
-        <!-- time standing still: the blades held where they take the engine's power -->
+        <!-- time standing still: the blades held where they take the engine's power; in the
+             ground range: set -->
         <fcs_function name="fcs/propeller-governing-3">
-          <function> <gt> <property>simulation/dt</property> <value>0</value> </gt> </function>
+          <function>
+            <and>
+              <gt> <property>simulation/dt</property> <value>0</value> </gt>
+              <lt> <property>fcs/propeller-ground-range-3</property> <value>1</value> </lt>
+            </and>
+          </function>
           <output>propulsion/engine[3]/constant-speed-mode</output>
         </fcs_function>
         <fcs_function name="fcs/propeller-advance-ratio-3">
@@ -1367,7 +1839,23 @@
           <function>
             <ifthen>
               <gt> <property>simulation/dt</property> <value>0</value> </gt>
-              <property>propulsion/engine[3]/blade-angle</property>
+              <ifthen>
+                <gt> <property>fcs/propeller-ground-range-3</property> <value>0</value> </gt>
+                <min>
+                  <value>65.0000</value>
+                  <sum>
+                    <property>fcs/propeller-beta-blade-3</property>
+                    <product>
+                      <value>1.10814</value>
+                      <max>
+                        <value>0</value>
+                        <difference> <property>propulsion/engine[3]/propeller-rpm</property> <value>1030.2000</value> </difference>
+                      </max>
+                    </product>
+                  </sum>
+                </min>
+                <property>propulsion/engine[3]/blade-angle</property>
+              </ifthen>
               <table>
                 <independentVar lookup="row">fcs/propeller-advance-ratio-3</independentVar>
                 <independentVar lookup="column">fcs/propeller-power-coefficient-3</independentVar>
