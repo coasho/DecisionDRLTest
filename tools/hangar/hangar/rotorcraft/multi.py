@@ -133,7 +133,7 @@ def write(spec, out_dir, profile_xml=""):
         yaw.append("<product> <value> %s </value> <pow> <property> fcs/%s/omega[%d] </property> <value> 2 </value> </pow> </product>"
                    % (_f(sense * kQ / (N_PER_LBF * M_PER_FT)), name, i))
         speeds.append("<property> fcs/%s/omega[%d] </property>" % (name, i))
-    ground_effect = ""
+    ground_effect, z_axis = "", []  # (the body Z axis's forces: its rotor drag, the ground effect)
     if "ground_effect" in r:
         # gym-pybullet-drones: each rotor's thrust grows by k_ge (r / 4 h)^2, h its height - held at
         # least GND_EFF_H_CLIP = r/4 sqrt(15 k_ge / 4), so the gain is never over 4/15 - as a force
@@ -145,11 +145,11 @@ def write(spec, out_dir, profile_xml=""):
       <quotient> <value> %(k)s </value> <pow> <max> <value> %(hmin)s </value>
         <sum> <product> <property> position/h-agl-ft </property> <value> 0.3048 </value> </product> <value> %(hr)s </value> </sum> </max> <value> 2 </value> </pow> </quotient>
     </function>
-    <axis name="Z"> <function name="aero/force/%(n)s-ground-effect">
+""" % dict(n=name, k=_f(k), hmin=_f(h_min), hr=_f(r.get("height_m", 0.0)))
+        z_axis.append("""<function name="aero/force/%(n)s-ground-effect">
       <product> <value> -1 </value> <property> aero/%(n)s/ground-effect-scale </property>
-        <sum> %(w2)s </sum> </product> </function> </axis>
-""" % dict(n=name, k=_f(k), hmin=_f(h_min), hr=_f(r.get("height_m", 0.0)),
-           w2=" ".join("<pow> <property> fcs/%s/omega[%d] </property> <value> 2 </value> </pow>" % (name, i) for i in range(len(rows))))
+        <sum> %(w2)s </sum> </product> </function>""" % dict(
+            n=name, w2=" ".join("<pow> <property> fcs/%s/omega[%d] </property> <value> 2 </value> </pow>" % (name, i) for i in range(len(rows)))))
     if "drag_xy" in r:
         # gym-pybullet-drones: F = -k (sum of the rotors' speeds, rad/s) v, per body axis
         kx, kz = r["drag_xy"], r["drag_z"]
@@ -161,8 +161,12 @@ def write(spec, out_dir, profile_xml=""):
     <axis name="Y"> <function name="aero/force/%(n)s-rotor-drag-y"> <product> <value> %(kx)s </value> <property> aero/%(n)s/rotor-speed-sum </property> <property> velocities/v-aero-fps </property> </product> </function> </axis>
 """ % dict(n=name, ws=" ".join(speeds), kx=_f(-kx * M_PER_FT / N_PER_LBF))
     if kz:
-        drag += """    <axis name="Z"> <function name="aero/force/%(n)s-rotor-drag-z"> <product> <value> %(kz)s </value> <property> aero/%(n)s/rotor-speed-sum </property> <property> velocities/w-aero-fps </property> </product> </function> </axis>
-""" % dict(n=name, kz=_f(-kz * M_PER_FT / N_PER_LBF))
+        z_axis.insert(0, """<function name="aero/force/%(n)s-rotor-drag-z"> <product> <value> %(kz)s </value> <property> aero/%(n)s/rotor-speed-sum </property> <property> velocities/w-aero-fps </property> </product> </function>"""
+                      % dict(n=name, kz=_f(-kz * M_PER_FT / N_PER_LBF)))
+    # one <axis> per name: JSBSim keeps the functions of an axis's last element only (FGAerodynamics::Load
+    # assigns each element's, it does not add them) - a second Z axis once dropped the rotors' drag along it
+    if z_axis:
+        ground_effect += "    <axis name=\"Z\"> %s </axis>\n" % "\n      ".join(z_axis)
     # (PX4's rolling moment, 1e-6 N m per rad/s per m/s, is left out: a few per cent of the rotor drag's)
     kgm2 = KG_PER_SLUG * M_PER_FT ** 2
     g = spec["ground"]

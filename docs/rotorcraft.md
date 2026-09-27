@@ -159,7 +159,10 @@ platform.
   w' = (w_cmd - w)/tau with the design's lags up and down; its thrust k_T w^2
   is a JSBSim direct thruster's; the reaction torques k_Q w^2, the rotor drag
   (gym-pybullet-drones' for the Crazyflie, PX4's in the rotors' plane for the
-  IRIS+) and the Crazyflie's ground effect are aerodynamic functions. The
+  IRIS+) and the Crazyflie's ground effect are aerodynamic functions, each
+  body axis's in one element: JSBSim keeps only the last `<axis>` of a name,
+  and a second Z axis dropped the Crazyflie's drag along its axis until
+  ADR-29 FA-3b restored it (section 10). The
   command is each motor's thrust, 0..1 of its maximum (`throttle[i]`), roll,
   pitch and yaw mixed in; the speed a motor commands is the square root of it,
   as an ESC with thrust linearisation gives it. The rotors' speeds are the
@@ -187,6 +190,21 @@ platform.
     bit, as without the battery.
   - hangar's flight tests fly with the fuel frozen, so a helicopter's hover is
     identified at the weight its design names.
+- **Performance tables** (ADR-29 FA-3b; [flight-autonomy.md](flight-autonomy.md),
+  4.13): hangar's `performance` stage flies each rotorcraft's tables with the fly
+  stage's hold.
+  - The rows are 100 m to 3,000 m. The weights are a helicopter's tank a tenth,
+    half and wholly full, and a quadrotor's one weight.
+  - The level points run from the hover to 97 % of the top level speed. The
+    top is the fastest trim within the power (a helicopter's engines short of
+    their limit, the rotor governed) and the design's pitch limit.
+  - Each point records the power (a helicopter's engines', a quadrotor's
+    battery's) and a helicopter's fuel. From them come the best-endurance and
+    best-range speeds.
+  - A helicopter's full-power climb is flown at each speed. A quadrotor has no
+    climb in the tables: its thrust ignores a climb's inflow.
+  - The stage checks the tables against the fly stage's hover and trims, the
+    lighter against the heavier, and a burn flown at the best-endurance speed.
 - **Limitations** of the models are in section 7.
 
 ### 3.2 What the controls mean: families and adapters
@@ -300,7 +318,9 @@ A rotorcraft pipeline beside the fixed-wing one (`tools/hangar/hangar/rotorcraft
 [hangar.md](hangar.md#rotorcraft)): `build` writes the JSBSim aircraft and its
 profile, `model` the viewer's model, `fly` flies it in the platform's own
 JSBSim - the hover's trim, the published trims, step responses, and the
-identification that fills the hover section - and `report` draws it. The 3D
+identification that fills the hover section - `performance` flies its
+performance tables (ADR-29 FA-3b: the profile's `tables` section), and
+`report` draws it. The 3D
 model is built as the fighters' are, from three-views (section 4), with what a
 rotorcraft needed added to hangar in general rather than for these four:
 
@@ -481,6 +501,24 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
   the ground at 40 to 50 m/s from a few hundred metres. There its legs'
   contacts throw the IRIS+ back up, and the Crazyflie diverges: a crash the
   contact model does not end.
+- **Power and thrust at altitude**: the helicopters' engines give the
+  design's rating (a transmission limit) at any height, and a quadrotor's
+  thrust is its rotors' speed squared, whatever the air's density. None of
+  the four has a ceiling in these models; their performance tables stop at
+  3,000 m, and the ceiling the platform reads from them is none.
+- **A quadrotor in forward flight**: its thrust neither falls with a climb's
+  inflow nor gains translational lift.
+  - The IRIS+'s drag is PX4's rotor drag, in the rotors' plane only. Tilted
+    forward it holds the aircraft up too, and level flight needs the weight
+    times the cosine of the tilt in thrust. Its power therefore falls all the
+    way to its top speed: 181 W in the hover, 139 W at 15.9 m/s and 33 deg
+    of tilt. Its tables' best-endurance and best-range speeds are its top.
+  - The Crazyflie's drag acts along its axis too, so its power is least in
+    the hover.
+  - Neither has a full-power climb in the tables (above).
+- **The UH-60A's top level speed** at full weight is 187 kt at 100 m, just
+  below its 193 kt never-exceed speed, with 1,375 shp at 140 kt (GENHEL's
+  trims fly the controls, not the power).
 - **Spawning**: a rotorcraft spawned level at zero airspeed lurches until its
   loops take its hover attitude (the UH-1H lurches 0.7 m/s forward and still
   moves at 0.3 m/s after 20 s). To start in trim, spawn it at its profile's hover attitude
@@ -550,3 +588,15 @@ Considered: EASA TCDS R.011 (Bo 105); FlightGear FGAddon `UH-1` and `UH-60`; JSB
   determinism among them).
 - The model stage: every check passes for the four (section 4); the
   helicopters' airframes mesh in 7 to 11 s, the quadrotors' in 2.5 to 3.5 s.
+- ADR-29 FA-3b, a named, measured change to the Crazyflie: its drag along its
+  axis (gym-pybullet-drones' 10.311e-7 per rad/s) now acts.
+  - The identified hover's heave damping goes from 0 to 0.146 1/s, and its
+    heave control power from 21.44 to 21.12 m/s2 per unit (-1.5 %). Roll,
+    pitch and yaw are unchanged.
+  - Through the platform's loops the hover is the same. At 1 m/s its climb
+    and descent track as before (the vertical speed's error 0.134 m/s rms,
+    against 0.139), with 3.6 % more power climbing and 3.5 % less
+    descending.
+  - At 6 m/s forward its vertical speed holds six times tighter, and it
+    draws 2.3 % more power, where before it drew less the faster it flew.
+  - The IRIS+'s file is unchanged, byte for byte.

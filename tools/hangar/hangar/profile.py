@@ -58,12 +58,15 @@ def table_fields(tables):
     for axis, tag in (("altitude_m", "h"), ("weight_kg", "w"), ("speed_fraction", "v")):
         for i, x in enumerate(tables[axis]):
             out["%s/%s%d" % (axis, tag, i)] = float(x)
-    if tables.get("fuel_capacity_kg") is not None:
-        out["fuel_capacity_kg"] = float(tables["fuel_capacity_kg"])
+    for name in ("fuel_capacity_kg", "battery_capacity_j"):
+        if tables.get(name) is not None:
+            out[name] = float(tables[name])
     for name, value in sorted(tables.items()):
-        # (the speed, throttle and angle of attack each level point flew stay in the report: the platform reads each
-        # point at its fraction of the band, and the rest)
-        if name in ("altitude_m", "weight_kg", "speed_fraction", "tas_ms", "throttle", "alpha_deg") or not isinstance(value, list):
+        # (the speed, throttle and angle of attack each level point flew - a rotorcraft's pitch attitude, its engines'
+        # shaft power and its rotor's speed - stay in the report: the platform reads each point at its fraction of the
+        # band, and the rest)
+        if name in ("altitude_m", "weight_kg", "speed_fraction", "tas_ms", "throttle", "alpha_deg", "pitch_deg", "shaft_power_w",
+                    "rotor_rpm") or not isinstance(value, list):
             continue
         for i, row in enumerate(value):
             for j, cell in enumerate(row):

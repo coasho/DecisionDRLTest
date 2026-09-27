@@ -1006,10 +1006,12 @@ class Design:
                             note="; ".join(breaches) if breaches else "at every altitude flown at every weight", fmt="%.0f"))
         # what the tables give that no test flies: shown
         j = len(t["weight_kg"]) - 1
+        battery = t.get("battery_capacity_j") is not None  # (its power where a fuel burner has its fuel flow)
+        per, scale, unit = ("power_w", 1.0, "W") if battery else ("fuel_kg_s", 3600.0, "kg/h")
         checks.append(info("best endurance and best range at %.0f m, as it spawns" % low,
                            "%.0f / %.0f KTAS" % (P.at_weight(t, "best_endurance_tas_ms", low, ws) / KT, P.at_weight(t, "best_range_tas_ms", low, ws) / KT),
-                           note="%.0f and %.0f kg/h" % (P.at_weight(t, "best_endurance_fuel_kg_s", low, ws) * 3600,
-                                                        P.at_weight(t, "best_range_fuel_kg_s", low, ws) * 3600)))
+                           note="%.0f and %.0f %s" % (P.at_weight(t, "best_endurance_" + per, low, ws) * scale,
+                                                      P.at_weight(t, "best_range_" + per, low, ws) * scale, unit)))
         reach, top_tas = np.asarray(t["reach_tas_ms"], dtype=float), np.asarray(t["max_tas_ms"], dtype=float)
         pocket = int(np.sum(np.isfinite(reach) & (top_tas > 1.01 * reach)))   # (held level past a drag rise it could not pass)
         short = int(np.sum(np.isfinite(top_tas) & ~np.isfinite(reach)))       # (level only in the short runs: near a ceiling)
@@ -1017,8 +1019,12 @@ class Design:
                            note="altitudes %s m; weights %s kg; %d past a drag rise, %d level only in short runs; %d short runs counted; "
                                 "%.0f s" % (", ".join("%.0f" % h for h in t["altitude_m"]), ", ".join("%.0f" % w for w in t["weight_kg"]),
                                             pocket, short, t.get("spot_runs", 0), t["seconds"])))
-        checks.append(info("fuel capacity", t["fuel_capacity_kg"], "kg", note="%.0f kg as it spawns; the ceilings by weight: %s m" % (
-            t["spawn_fuel_kg"], ", ".join("%.0f" % P.ceiling(t, k) for k in range(j + 1)))))
+        ceilings = ", ".join("%.0f" % P.ceiling(t, k) for k in range(j + 1))
+        if battery:
+            checks.append(info("battery capacity", t["battery_capacity_j"] / 3600.0, "Wh", note="the ceiling: %s m" % ceilings))
+        else:
+            checks.append(info("fuel capacity", t["fuel_capacity_kg"], "kg", note="%.0f kg as it spawns; the ceilings by weight: %s m" % (
+                t["spawn_fuel_kg"], ceilings)))
         return checks
 
     def _aircraft_file(self, kind):

@@ -1071,7 +1071,10 @@ loop with the envelope protection off:
   the thrust axis while the loop flies the vertical speed on the others (its
   airspeed hold would pace the acceleration). The run's first 8 s are left
   out of its curve while the engines spool up: a turboprop's excess power
-  climbs from 7 to 11 m/s over the first 6 s.
+  climbs from 7 to 11 m/s over the first 6 s. An electric motor needs no
+  spool-up, so only its first second is left out (ADR-29 FA-3b). A light
+  electric aircraft is past its best-endurance and best-range speeds within
+  that second: the Skua accelerates from 16 to 19 m/s in it.
 - **Short runs where that run did not fly**, flown as the flight tests fly
   their ceiling runs: 10 s level at the speed, then 20 s at full power, the
   excess power the energy height's rate over the last 10 s. A short run
@@ -1113,7 +1116,12 @@ loop with the envelope protection off:
   flow) and the best-range speed (the most distance per kilogram), each
   refined by a parabola through its neighbours and kept within the band. A
   band narrower than 5 % is none: that condition is at its ceiling and is
-  not flown.
+  not flown. An aircraft that flies on a battery (`[battery]`: the Skua) has
+  the power its battery gives in place of the fuel flow, and its best speeds
+  are the least power's and the most distance per joule's. An electric
+  aircraft's band begins at 1.15 times the stall, its least speed: its
+  full-power run is past its slow speeds within the second it is recorded
+  from, and each point there is flown and held (or counted as none).
 
 Each condition flies at its weight. The fuel stays frozen (JSBSim's fuel
 freeze) except in the level points' last ten seconds, when the engines
@@ -1211,7 +1219,7 @@ through a pipeline of its own (`hangar/rotorcraft`), the record of which is
 (`cf2`), the IRIS+ (`iris`), the UH-1H (`uh1h`) and the UH-60A (`uh60`).
 
 ```bat
-fsim hangar uh60                      build, model, fly, report
+fsim hangar uh60                      build, model, fly, performance, report
 fsim hangar cf2 model                 one stage
 fsim python examples\...              any SDK script flies jsbsim:uh60 like any aircraft
 ```
@@ -1221,7 +1229,48 @@ fsim python examples\...              any SDK script flies jsbsim:uh60 like any 
 | `build` | the JSBSim aircraft: a helicopter's rotors on JSBSim's rotor model, its engine and governor, its control system's mechanics (a stabilizer bar, a mixing unit, a scheduled stabilator) in the flight control system; a multirotor's motors as speed states driving direct thrusters, its mixer, rotor drag and ground effect. And its profile: identity, effectors, propulsion, envelope, and the `hover` section from `hover.toml` |
 | `model` | `<name>.glb`, from the design's shape (below) and the flight model's rotors, with its checks |
 | `fly` | in the platform's own JSBSim: the hover's trim, the published trims (the UH-60A's 1 to 140 kt), step responses, and the hover plant identified into `hover.toml` - each axis's acceleration per unit command, damping and lag, and the hover's trims - from which the platform designs the rotorcraft loops; then builds again |
+| `performance` | the performance tables (ADR-29 FA-3b; `hangar/rotorcraft/performance.py`), flown with the fly stage's hold and written into the profile's `tables` section, as a fixed wing's are (below) |
 | `report` | `out/report.html` |
+
+The `performance` stage flies the tables in five parts:
+
+- **The rows.** Four altitudes, 100 m to 3,000 m: the rotorcraft here fly low,
+  and their models' power does not fall with the air's density, so no ceiling
+  is flown. The weights are a helicopter's tank a tenth, half and wholly
+  full, and a multirotor's one weight.
+- **The top level speed**: the fastest level trim that holds its speed and
+  height within the power and the design's pitch limit (nose down). A
+  helicopter's engines must stay short of their limit with the rotor
+  governed; a multirotor's collective must stay short of full. It is found
+  by doubling from 1 m/s until a trim fails, then halving the bracket eight
+  times. Where full power cannot hold the hover, the least level speed is
+  found the same way.
+- **Level at sixteen speeds** from the hover to 97 % of the top: the power (a
+  helicopter's engines', a multirotor's battery's) and a helicopter's fuel
+  flow, the fuel flowing for each point's last 5 s. From them come the
+  best-endurance speed (the least fuel flow or power) and the best-range
+  speed (the most distance per kilogram or joule).
+- **A helicopter's full-power climb** at each speed, the height free. The
+  collective holds the engines at 99.5 % of their limit. The power rises to
+  it from the level point's over 15 s: at once, a UH-60A at 130 kt pitched
+  48° nose down chasing its speed.
+  - The climb is averaged over half a minute. Between 95 and 120 kt the
+    hold rings in a UH-60A's full-power climb, a ten-second cycle of ±3 m/s
+    of speed, and the average is the climb.
+  - A climb counts where it held its speed within 5 % and 0.5 m/s, the
+    average's two halves agree within 0.5 m/s, and the rotor stayed
+    governed.
+  - A multirotor's rotors are direct thrusters here, their thrust unmoved by
+    a climb's inflow, so a full-power climb would say nothing true: none is
+    flown.
+- **None of a wing's stall or idle.**
+
+The checks: the hover's power against the fly stage's (a helicopter) or the
+design's hover draw (a multirotor); the power at the published trims' speeds
+(the UH-60A's) against the fly stage's trims; the lighter burning less at
+every altitude and speed; and a burn flown at the best-endurance speed
+against the tables, for ten minutes or half what is left. The Crazyflie's
+battery lasts seven minutes.
 
 The design file carries the flight data - `[mass]`, `[rotor.main]` and
 `[rotor.tail]` or `[rotors]`, `[engine]`, `[controls]`, `[airframe]`,

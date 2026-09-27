@@ -20,6 +20,7 @@ stages, the file format and the methods. This skill is the working loop.
 ./fsim.cmd hangar <name> calibrate           # only with real performance data
 ./fsim.cmd hangar <name> autopilot           # the platform's control loops tuned for it (~10-90 s)
 ./fsim.cmd hangar <name> performance         # its performance and fuel tables, into the .xml (~20-50 s)
+./fsim.cmd hangar uh60 performance           # a rotorcraft's too: from the hover, after its fly stage (~10-40 s)
 ```
 
 The outputs go to `aircraft/<name>/out/`: `<stage>.json` (the numbers and

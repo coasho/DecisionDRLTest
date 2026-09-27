@@ -66,13 +66,13 @@ control::NavigationReport World::navigationReport(std::uint32_t id) const {
     r.starved = en.starved || (battery && !(r.remaining > 0.0));
     r.contingency = r.starved || r.remaining <= r.reserve ? control::Contingency::FlightCritical : control::Contingency::Normal;
     if (!e->navigation.recovery) return r;
-    // the return: at its best-range speed and the fuel it burns there (the tables, at its altitude and weight), else
-    // at its cruise speed burning what it burns now
+    // the return: at its best-range speed and what it consumes there - the fuel it burns, the power its battery gives
+    // (the tables, at its altitude and weight) - else at its cruise speed consuming what it does now
     const auto& nav = e->navigation;
     r.returnDistanceM = groundDistanceM(s.latitudeRad, s.longitudeRad, nav.latitudeDeg * kDeg, nav.longitudeDeg * kDeg);
-    if (fuel && e->profile && !e->profile->tables.empty()) {
+    if (e->profile && !e->profile->tables.empty()) {
         const control::TablesAt at = control::tablesAt(e->profile->tables, s.altitudeMslM, en.massKg);
-        r.returnTasMs = at.bestRangeTasMs, r.returnConsumption = at.bestRangeFuelKgS;
+        r.returnTasMs = at.bestRangeTasMs, r.returnConsumption = fuel ? at.bestRangeFuelKgS : at.bestRangePowerW;
     }
     if (!(r.returnTasMs > 0.0)) r.returnTasMs = e->host.performance().cruiseTasMs;
     if (!(r.returnConsumption > 0.0)) r.returnConsumption = r.consumption;

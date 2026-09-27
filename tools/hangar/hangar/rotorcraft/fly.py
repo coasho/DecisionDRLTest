@@ -21,10 +21,17 @@ class Hold:
     """Speed, side velocity, height and heading held through the attitudes, as a pilot flies a
     rotorcraft: the cyclic (or the mixer) tilts it, the collective (or the thrust) holds the height,
     the pedals (or the yaw mixer) the heading. `level` holds the wings level instead of the side
-    velocity (TM-85890 trims so above 60 kt)."""
+    velocity (TM-85890 trims so above 60 kt). The attitudes it asks for stay within `tilt_max` (rad).
+    With `power` (a function giving the engines' power demand, of their limit) the collective holds
+    that at `power_target` instead of the height: full power, the height free (the performance
+    stage's climbs)."""
 
-    def __init__(self, kind, dt, throttle, speed_ms, height_m, psi=0.0, level=False, gains=None):
+    POWER_GAIN = 0.5  # 1/s: the collective's integral per unit of power demand off its target
+
+    def __init__(self, kind, dt, throttle, speed_ms, height_m, psi=0.0, level=False, gains=None, tilt_max=0.35, power=None,
+                 power_target=None):
         self.kind, self.dt, self.level = kind, dt, level
+        self.tilt_max, self.power, self.power_target = tilt_max, power, power_target
         self.u_ref, self.h_ref, self.psi_ref = speed_ms, height_m, psi
         self.i = {"ail": 0.0, "ele": 0.0, "rud": 0.0, "col": throttle, "u": 0.0, "v": 0.0}
         g = {"th": 2.0, "q": 1.2, "ph": 2.0, "p": 0.8, "r": 1.2, "psi": 1.0, "vz": 0.05, "vzi": 0.03, "att_i": 0.3}
@@ -40,20 +47,25 @@ class Hold:
         eu, ev = self.u_ref - u, -v
         i["u"] = float(np.clip(i["u"] + 0.0005 * eu * dt, -0.3, 0.3))
         i["v"] = float(np.clip(i["v"] + 0.0005 * ev * dt, -0.3, 0.3))
-        th_ref = float(np.clip(-0.03 * eu - 10 * i["u"], -0.35, 0.35))
-        ph_ref = 0.0 if self.level else float(np.clip(0.03 * ev + 10 * i["v"], -0.35, 0.35))
+        th_ref = float(np.clip(-0.03 * eu - 10 * i["u"], -self.tilt_max, self.tilt_max))
+        ph_ref = 0.0 if self.level else float(np.clip(0.03 * ev + 10 * i["v"], -self.tilt_max, self.tilt_max))
         e_th, e_ph = th_ref - theta, ph_ref - phi
         i["ele"] = float(np.clip(i["ele"] - g["att_i"] * e_th * dt, -1, 1))
         i["ail"] = float(np.clip(i["ail"] + g["att_i"] * e_ph * dt, -1, 1))
         e_psi = math.atan2(math.sin(self.psi_ref - psi), math.cos(self.psi_ref - psi))
         r_cmd = g["psi"] * e_psi
         i["rud"] = float(np.clip(i["rud"] - 0.5 * (r_cmd - r) * dt, -1, 1))
-        vz_cmd = float(np.clip(0.4 * (self.h_ref - s.altitude_msl_m), -3, 3))
-        i["col"] = float(np.clip(i["col"] + g["vzi"] * (vz_cmd - vz) * dt, 0, 1))
+        if self.power is None:
+            vz_cmd = float(np.clip(0.4 * (self.h_ref - s.altitude_msl_m), -3, 3))
+            i["col"] = float(np.clip(i["col"] + g["vzi"] * (vz_cmd - vz) * dt, 0, 1))
+            col = float(np.clip(i["col"] + g["vz"] * (vz_cmd - vz), 0, 1))
+        else:  # full power: the collective holds the engines' demand, the height free
+            i["col"] = float(np.clip(i["col"] + self.POWER_GAIN * (self.power_target - self.power()) * dt, 0, 1))
+            col = i["col"]
         self.cmd = dict(ele=float(np.clip(i["ele"] - g["th"] * e_th + g["q"] * q, -1, 1)),
                         ail=float(np.clip(i["ail"] + g["ph"] * e_ph - g["p"] * p, -1, 1)),
                         rud=float(np.clip(i["rud"] - g["r"] * (r_cmd - r), -1, 1)),
-                        col=float(np.clip(i["col"] + g["vz"] * (vz_cmd - vz), 0, 1)))
+                        col=col)
         return self.cmd
 
 
@@ -89,14 +101,18 @@ class Session:
     def close(self):
         self.world.close()
 
-    def spawn(self, speed_ms):
-        """A fresh vehicle for the next test; the last one leaves the world."""
+    def spawn(self, speed_ms, fuel_fraction=None):
+        """A fresh vehicle for the next test; the last one leaves the world. A helicopter's tank at
+        `fuel_fraction` of its capacity (None: full, as it spawns)."""
         if self.v is not None:
             self.v.remove()
         self.n += 1
         self.v = self.world.create_vehicle("r%d" % self.n, type="jsbsim:" + self.r.name, latitude_deg=37.6, longitude_deg=-122.4,
                                            altitude_msl_m=self.altitude_m, heading_deg=0.0, airspeed_ms=speed_ms)
         self.v.set_protection("off")  # the aircraft, not the platform's envelope protection (flight.Flight)
+        if fuel_fraction is not None:
+            from .heli import fuel_of
+            self.v.set_property("propulsion/tank[0]/contents-lbs", fuel_of(self.r.spec)["capacity_lb"] * fuel_fraction)
         # the fuel frozen: each test flies the weight the design names, as its hover section says it was identified at
         # (a helicopter burns 1,000 lb/h: a trim's minute would lighten it 0.1 %)
         self.v.set_property("propulsion/fuel_freeze", 1)

@@ -23,6 +23,8 @@ std::vector<double>* table2(TablesSection& t, std::string_view name) noexcept {
     if (name == "best_endurance_fuel_kg_s") return &t.bestEnduranceFuelKgS;
     if (name == "best_range_tas_ms") return &t.bestRangeTasMs;
     if (name == "best_range_fuel_kg_s") return &t.bestRangeFuelKgS;
+    if (name == "best_endurance_power_w") return &t.bestEndurancePowerW;
+    if (name == "best_range_power_w") return &t.bestRangePowerW;
     if (name == "max_climb_ms") return &t.maxClimbMs;
     if (name == "climb_tas_ms") return &t.climbTasMs;
     return nullptr;
@@ -30,6 +32,7 @@ std::vector<double>* table2(TablesSection& t, std::string_view name) noexcept {
 
 std::vector<double>* table3(TablesSection& t, std::string_view name) noexcept {
     if (name == "fuel_kg_s") return &t.fuelKgS;
+    if (name == "power_w") return &t.powerW;
     if (name == "ps_full_ms") return &t.psFullMs;
     if (name == "ps_idle_ms") return &t.psIdleMs;
     return nullptr;
@@ -39,6 +42,13 @@ std::vector<double>* axis(TablesSection& t, std::string_view name) noexcept {
     if (name == "altitude_m") return &t.altitudeM;
     if (name == "weight_kg") return &t.weightKg;
     if (name == "speed_fraction") return &t.speedFraction;
+    return nullptr;
+}
+
+/// A capacity by name: the fuel's, a battery's.
+double* capacity(TablesSection& t, std::string_view name) noexcept {
+    if (name == "fuel_capacity_kg") return &t.fuelCapacityKg;
+    if (name == "battery_capacity_j") return &t.batteryCapacityJ;
     return nullptr;
 }
 
@@ -154,14 +164,15 @@ void readTables(const std::vector<std::pair<std::string, double>>& values, Table
             return;
         }
     for (const char* name : {"min_tas_ms", "max_tas_ms", "reach_tas_ms", "stall_cas_ms", "best_endurance_tas_ms", "best_endurance_fuel_kg_s",
-                             "best_range_tas_ms", "best_range_fuel_kg_s", "max_climb_ms", "climb_tas_ms"})
+                             "best_range_tas_ms", "best_range_fuel_kg_s", "best_endurance_power_w", "best_range_power_w", "max_climb_ms",
+                             "climb_tas_ms"})
         table2(out, name)->assign(nh * nw, kUnknown);
-    for (const char* name : {"fuel_kg_s", "ps_full_ms", "ps_idle_ms"}) table3(out, name)->assign(nh * nw * nk, kUnknown);
+    for (const char* name : {"fuel_kg_s", "power_w", "ps_full_ms", "ps_idle_ms"}) table3(out, name)->assign(nh * nw * nk, kUnknown);
     for (const auto& [path, value] : values) {
         const auto p = parts(path);
         if (p.empty() || p[0] == "version" || p[0] == "provenance" || axis(out, p[0])) continue;
-        if (p.size() == 1 && p[0] == "fuel_capacity_kg") {
-            out.fuelCapacityKg = value;
+        if (double* c = p.size() == 1 ? capacity(out, p[0]) : nullptr) {
+            *c = value;
             continue;
         }
         const int h = p.size() >= 3 ? index(p[1], 'h') : -1, w = p.size() >= 3 ? index(p[2], 'w') : -1;
@@ -185,7 +196,7 @@ void readTables(const std::vector<std::pair<std::string, double>>& values, Table
 double tableValue(const TablesSection& tables, std::string_view path) noexcept {
     auto& t = const_cast<TablesSection&>(tables);
     const auto p = parts(path);
-    if (p.size() == 1 && p[0] == "fuel_capacity_kg") return t.fuelCapacityKg;
+    if (const double* c = p.size() == 1 ? capacity(t, p[0]) : nullptr) return *c;
     if (p.size() == 2)
         for (const auto& [name, tag] : {std::pair<const char*, char>{"altitude_m", 'h'}, {"weight_kg", 'w'}, {"speed_fraction", 'v'}})
             if (p[0] == name) {
@@ -215,6 +226,7 @@ TablesAt tablesAt(const TablesSection& t, double altitudeM, double weightKg) noe
     out.stallCasMs = blend2(t, t.stallCasMs, c);
     out.bestEnduranceTasMs = blend2(t, t.bestEnduranceTasMs, c), out.bestEnduranceFuelKgS = blend2(t, t.bestEnduranceFuelKgS, c);
     out.bestRangeTasMs = blend2(t, t.bestRangeTasMs, c), out.bestRangeFuelKgS = blend2(t, t.bestRangeFuelKgS, c);
+    out.bestEndurancePowerW = blend2(t, t.bestEndurancePowerW, c), out.bestRangePowerW = blend2(t, t.bestRangePowerW, c);
     out.maxClimbMs = blend2(t, t.maxClimbMs, c), out.climbTasMs = blend2(t, t.climbTasMs, c);
     return out;
 }
@@ -236,7 +248,7 @@ TablesAtSpeed tablesAt(const TablesSection& t, double altitudeM, double weightKg
         };
         return mix(row(c.h), row(h1), c.fh);
     };
-    out.fuelKgS = blend(t.fuelKgS), out.psFullMs = blend(t.psFullMs), out.psIdleMs = blend(t.psIdleMs);
+    out.fuelKgS = blend(t.fuelKgS), out.powerW = blend(t.powerW), out.psFullMs = blend(t.psFullMs), out.psIdleMs = blend(t.psIdleMs);
     return out;
 }
 
@@ -258,8 +270,13 @@ double tablesCeilingM(const TablesSection& t, double weightKg) noexcept {
             const double below = climb(last), here = std::isfinite(c) ? c : 0.0; // (nothing held level there: no climb)
             return t.altitudeM[last] + (below - kServiceMs) / (below - here) * (t.altitudeM[h] - t.altitudeM[last]);
         }
-        if (last == nh - 1 && last >= 1 && std::isfinite(climb(last - 1)) && climb(last - 1) > climb(last))
-            return t.altitudeM[last] + (climb(last) - kServiceMs) / (climb(last - 1) - climb(last)) * (t.altitudeM[last] - t.altitudeM[last - 1]);
+        if (last == nh - 1 && last >= 1 && std::isfinite(climb(last - 1)) && climb(last - 1) > climb(last)) {
+            // (no further than as high again: a fixed wing's rows run to near its ceiling, a light one's reached at
+            // most 42 % above them; a rotorcraft still climbing hard at 3,000 m has its ceiling tens of times higher,
+            // where nothing was flown)
+            const double above = (climb(last) - kServiceMs) / (climb(last - 1) - climb(last)) * (t.altitudeM[last] - t.altitudeM[last - 1]);
+            return above <= t.altitudeM[last] ? t.altitudeM[last] + above : kUnknown;
+        }
         return kUnknown;
     };
     Corners c;

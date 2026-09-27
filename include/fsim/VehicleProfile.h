@@ -244,6 +244,13 @@ FSIM_API bool declares(const ApplicabilitySection& section, Characteristic c) no
 /// performance stage), clean, the envelope protection off. An aircraft file
 /// carries it as fsim/tables/<axis>/<h|w|v><i> and fsim/tables/<name>/h<i>/w<j>[/v<k>].
 /// Empty for an aircraft hangar has not flown them for (a stock JSBSim aircraft).
+///
+/// An aircraft that flies on a battery (FA-3b) has the power it gives where
+/// one that burns fuel has its fuel flow: its best speeds are the least power's
+/// and the most distance per joule's. A rotorcraft's run from the hover (its
+/// least speed 0, where full power holds it); it has no stall and no idle
+/// (NaN), and a multirotor no full-power climb (its model's thrust does not
+/// fall with a climb's inflow: docs/flight-autonomy.md, 4.13).
 struct TablesSection {
     static constexpr std::uint16_t kVersion = 1;
     SectionHeader header;
@@ -251,6 +258,7 @@ struct TablesSection {
     std::vector<double> weightKg;      ///< the weights flown, rising: the tanks a tenth, half and wholly full
     std::vector<double> speedFraction; ///< each condition's level points, from its least level speed (0) to 97 % of its top (1)
     double fuelCapacityKg = kUnknown;
+    double batteryCapacityJ = kUnknown; ///< an aircraft that flies on a battery
     // per condition (an altitude and a weight), at [altitude * weights + weight]; NaN where not flown (above its ceiling)
     std::vector<double> minTasMs;             ///< the least speed full power flew level at (never below 1.15 times the stall)
     std::vector<double> maxTasMs;             ///< full power, level: the fastest it holds - where the drag meets the thrust
@@ -259,11 +267,13 @@ struct TablesSection {
     /// where only beyond such a drag rise does full power hold level (a height-holding mode reaches it no other way).
     std::vector<double> reachTasMs;
     std::vector<double> stallCasMs;           ///< idle, the height held: the limit angle of attack, or where the height could no longer be held
-    std::vector<double> bestEnduranceTasMs, bestEnduranceFuelKgS; ///< the least fuel flow, level
-    std::vector<double> bestRangeTasMs, bestRangeFuelKgS;         ///< the most distance per kilogram, level
+    std::vector<double> bestEnduranceTasMs, bestEnduranceFuelKgS; ///< the least fuel flow, level (a battery's: the least power)
+    std::vector<double> bestRangeTasMs, bestRangeFuelKgS;         ///< the most distance per kilogram, level (a battery's: per joule)
+    std::vector<double> bestEndurancePowerW, bestRangePowerW;     ///< a battery's power at those speeds
     std::vector<double> maxClimbMs, climbTasMs;                   ///< the best excess power at full power, and its speed (up high, a fighter's beyond its drag rise)
     // per level point, at [(altitude * weights + weight) * points + point]
     std::vector<double> fuelKgS;  ///< the fuel flow, level
+    std::vector<double> powerW;   ///< the power a battery gives, level
     std::vector<double> psFullMs; ///< the excess power at full power, level: the climb it would make, or the speed it would gain, as a rate of height
     std::vector<double> psIdleMs; ///< the excess power at idle (negative): the descent rate at the speed, or the deceleration
     bool empty() const noexcept { return altitudeM.empty() || weightKg.empty(); }
@@ -275,23 +285,25 @@ struct TablesSection {
 /// condition it lies between was not flown.
 struct TablesAt {
     double minTasMs = kUnknown, maxTasMs = kUnknown, reachTasMs = kUnknown, stallCasMs = kUnknown;
-    double bestEnduranceTasMs = kUnknown, bestEnduranceFuelKgS = kUnknown;
-    double bestRangeTasMs = kUnknown, bestRangeFuelKgS = kUnknown;
+    double bestEnduranceTasMs = kUnknown, bestEnduranceFuelKgS = kUnknown, bestEndurancePowerW = kUnknown;
+    double bestRangeTasMs = kUnknown, bestRangeFuelKgS = kUnknown, bestRangePowerW = kUnknown;
     double maxClimbMs = kUnknown, climbTasMs = kUnknown;
 };
 FSIM_API TablesAt tablesAt(const TablesSection& tables, double altitudeM, double weightKg) noexcept;
 /// ...and at a true airspeed within its level speeds (from its least to its
-/// top): the fuel flow level, the excess power at full power and at idle.
-/// Each condition's points are taken at the same fraction of its speeds.
+/// top): the fuel flow (a battery's power) level, the excess power at full
+/// power and at idle. Each condition's points are taken at the same fraction
+/// of its speeds.
 struct TablesAtSpeed {
-    double fuelKgS = kUnknown, psFullMs = kUnknown, psIdleMs = kUnknown;
+    double fuelKgS = kUnknown, powerW = kUnknown, psFullMs = kUnknown, psIdleMs = kUnknown;
 };
 FSIM_API TablesAtSpeed tablesAt(const TablesSection& tables, double altitudeM, double weightKg, double tasMs) noexcept;
 /// The service ceiling at a weight: rising through the altitudes flown,
 /// where the best climb first falls below 0.5 m/s (100 ft/min) - an altitude
 /// nothing held level at climbing nothing - linear between it and the one
-/// below; climbing at the highest, the highest two's line extended. NaN if
-/// it climbs at none.
+/// below; climbing at the highest, the highest two's line extended, no
+/// further than as high again. NaN if it climbs at none, or beyond that (a
+/// rotorcraft's ceiling lies far above the altitudes it is flown at).
 FSIM_API double tablesCeilingM(const TablesSection& tables, double weightKg) noexcept;
 
 struct VehicleProfile {

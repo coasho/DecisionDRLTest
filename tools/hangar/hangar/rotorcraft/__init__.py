@@ -1,14 +1,17 @@
 """hangar's rotorcraft pipeline: helicopters and multirotors from design files that cite their
 sources (aircraft/<name>/<name>.toml with [aircraft] kind = "helicopter" or "multirotor").
 
-    python -m hangar <name> [build model fly report]
+    python -m hangar <name> [build model fly performance report]
 
-build   the JSBSim aircraft (<name>.xml, Engines/) and its profile for the platform
-model   the viewer's model (<name>.glb): the airframe, the rotors on nodes the viewer turns
-fly     flight tests in the platform's own JSBSim - trim, steps, the hover plant identified
-        into hover.toml beside the design, which the build writes into the profile's hover
-        section (fly builds again after it)
-report  out/report.html: the checks, the tables and the plots
+build        the JSBSim aircraft (<name>.xml, Engines/) and its profile for the platform
+model        the viewer's model (<name>.glb): the airframe, the rotors on nodes the viewer turns
+fly          flight tests in the platform's own JSBSim - trim, steps, the hover plant identified
+             into hover.toml beside the design, which the build writes into the profile's hover
+             section (fly builds again after it)
+performance  the performance tables (ADR-29 FA-3b; rotorcraft/performance.py): the power, fuel or
+             charge and climb against altitude, weight and speed, into the profile's tables
+             section (it builds again after them)
+report       out/report.html: the checks, the tables and the plots
 
 docs/rotorcraft.md is the design record; docs/hangar.md the tool's manual.
 """
@@ -21,7 +24,7 @@ import tomllib
 from .. import __version__
 
 KINDS = ("helicopter", "multirotor")
-STAGES = ("build", "model", "fly", "report")
+STAGES = ("build", "model", "fly", "performance", "report")
 
 #: profile codes (include/fsim/VehicleProfile.h)
 CLASS = {"helicopter": 12, "multirotor": 13}
@@ -99,6 +102,11 @@ class Rotorcraft:
         perf = (self.load("fly") or {}).get("performance") or {}
         if perf:
             out["performance"] = (1, {k: float(v) for k, v in perf.items()})
+        # the performance tables, as flown (rotorcraft/performance.py)
+        from ..profile import table_fields
+        tables = table_fields((self.load("performance") or {}).get("tables") or {})
+        if tables:
+            out["tables"] = (1, tables)
         # the physical characteristics the design declares (docs/flight-autonomy.md, 5.2); their
         # sources go into the file header (heli.write, multi.write)
         from ..applicability import VERSION, declared
@@ -203,6 +211,19 @@ class Rotorcraft:
             self.write_hover(results["hover"])
         self.build()  # the identified hover plant into the profile
         return results
+
+    def performance(self):
+        from . import performance as P
+        from ..report import plots
+        flown = self.load("fly")
+        if not flown:
+            raise SystemExit("%s: fly first (the tables' checks compare with its trims)" % self.name)
+        t = P.fly_tables(self, log=self.log)
+        checks = P.checks(self, t, flown)
+        plots.performance(t, os.path.join(self.out, "performance.png"), self.name)
+        out = self.save("performance", {"tables": t, "checks": checks, "images": ["performance.png"]})
+        self.build()  # (the aircraft file carries them)
+        return out
 
     def report(self):
         from . import report

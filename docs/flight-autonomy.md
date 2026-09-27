@@ -340,8 +340,16 @@ The performance tables (SUB-02) record what an aircraft flies level, climbs and 
   - the fuel capacity.
 
   A stock JSBSim aircraft has none.
-- **Looked up** (`tablesAt`, `tablesCeilingM`, fsim/VehicleProfile.h). Values are linear in altitude and weight between the conditions flown, and along each condition's band at the same fraction of it. A condition or point is read at its own value, whatever its neighbour's. Below the lowest altitude a lookup takes that row's values, and in weight it runs on down to the tanks empty. A lookup is NaN above the altitudes flown, or where a condition it lies between was not flown (above that weight's ceiling). The ceiling is where the best climb first falls below 0.5 m/s; an altitude nothing held level at climbs nothing, as the flight tests count it. An axis that is not strictly rising is refused.
-- **The rotorcraft** fly theirs with their fuel and batteries (FA-3b).
+- **Looked up** (`tablesAt`, `tablesCeilingM`, fsim/VehicleProfile.h). Values are linear in altitude and weight between the conditions flown, and along each condition's band at the same fraction of it. A condition or point is read at its own value, whatever its neighbour's. Below the lowest altitude a lookup takes that row's values, and in weight it runs on down to the tanks empty. A lookup is NaN above the altitudes flown, or where a condition it lies between was not flown (above that weight's ceiling). The ceiling is where the best climb first falls below 0.5 m/s; an altitude nothing held level at climbs nothing, as the flight tests count it. Still climbing at the highest row, the highest two's line is extended, but no further than as high again: the fixed wings' reached at most 42 % above their rows, a rotorcraft's tens of times. An axis that is not strictly rising is refused.
+- **Energy: fuel or a battery** (FA-3b). An aircraft that flies on a battery has the power its battery gives where one that burns fuel has its fuel flow (`powerW`, `bestEndurancePowerW`, `bestRangePowerW`, `batteryCapacityJ`). Its best speeds are the least power's and the most distance per joule's. The Skua's band begins at its least speed, 1.15 times the stall: an electric motor gives full power at once, and the full-power run is past its slow speeds within the second it is recorded from.
+- **The rotorcraft** (FA-3b; [hangar.md](hangar.md), "Rotorcraft") fly theirs with the fly stage's hold:
+  - four rows, 100 m to 3,000 m (their models' power does not fall with the air's density: no ceiling within reach);
+  - a helicopter's three weights, a multirotor's one;
+  - level from the hover to 97 % of the top level speed, the top found within the power and the design's pitch limit;
+  - a helicopter's full-power climb at each speed;
+  - no stall, no idle, and no multirotor climb (their thrust ignores a climb's inflow).
+
+  They are checked against the fly stage's hover and trims, and against a burn flown at the best-endurance speed.
 
 ### 4.14 The navigation report (as FA-3 builds it)
 
@@ -356,7 +364,7 @@ The navigation report (STS-07; A-GRA's MA_NavigationReport) says what a vehicle 
   - The consumption now: the engines' fuel flow, or the power the battery gives.
   - The endurance (Duration): what is left over the consumption now, as A-GRA defines it. It is infinite while the vehicle consumes nothing and 0 once nothing is left.
   - The contingency level: FLIGHT_CRITICAL at or below the reserve (a tenth of capacity unless set) or with the engines starved, otherwise NORMAL. The platform models no subsystem failures and no communications, so it never reports MISSION_CRITICAL or LOST_COMMS.
-  - With a recovery point set (`setNavigation`), the playtime (Playtime): what is left less the reserve and the return, over the consumption now; 0 once past it. The return is flown at the best-range speed and fuel flow from the performance tables (4.13), at the vehicle's altitude and weight. Without tables (a stock aircraft, a rotorcraft, a battery) it is flown at the cruise speed and the consumption now. The distance is the great circle over the ground; the wind, the climb and the descent are not counted.
+  - With a recovery point set (`setNavigation`), the playtime (Playtime): what is left less the reserve and the return, over the consumption now; 0 once past it. The return is flown at the best-range speed and its consumption (fuel flow, or a battery's power) from the performance tables (4.13), at the vehicle's altitude and weight. Without tables (a stock aircraft, or above the altitudes flown) it is flown at the cruise speed and the consumption now. The distance is the great circle over the ground; the wind, the climb and the descent are not counted.
 - **Asked for, never stepped.** The report is worked out when asked, from the flight model's tanks, engines and battery. Nothing in the step reads it, so no flight changes.
 - **Checked on all 35** (section 14):
   - the consumption it gives, summed step by step, is what left the tanks or the battery;
@@ -534,7 +542,7 @@ A-GRA's per-mode performance profile from hangar's data; energy management in ev
 
 **Status:** in progress, in five steps:
 - FA-3a, the performance tables (4.13), done 2026-09-27 and measured in section 14;
-- FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft, the navigation report (STS-07, 4.14) and endurance against a flown burn, done 2026-09-27 and measured in section 14; the rotorcraft's tables still to come;
+- FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft, the navigation report (STS-07, 4.14), endurance against a flown burn and the rotorcraft's tables, done 2026-09-27 and measured in section 14;
 - FA-3c, the performance profile per mode (CAP-04 to CAP-15), updated with the condition and configuration;
 - FA-3d, energy management in every mode (HSA-10, CTG-04): the fleet climb case;
 - FA-3e, speed optimisation (HSA-05, LTR-17) and endurance validation (VAL-03), the first soft rejection override_rejection overrides.
@@ -1136,6 +1144,49 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The C ABI's 1.13 block, `python/tests/test_navigation.py`, and hangar's test of the battery channel.
 - **Digests:** identical to FA-2e's and FA-3a's, with protection and without. The allocation gate passes.
 - **A/B throughput** against FA-2e's build (5 interleaved rounds of `micro`, 9 of `command`): the medians are within -2.1 % to +3.0 % and -2.8 % to +0.2 %. That is the noise; FA-3a's were -1.6 % to +2.8 % and -1.5 % to +1.8 %. The report is worked out only when asked.
+- ctest: all 244 tests pass.
+
+**FA-3b, the rotorcraft's tables (SUB-02, SUB-03), a battery's power in the tables, and two named changes.**
+- **The rotorcraft's tables** (4.13; [hangar.md](hangar.md), "Rotorcraft"), flown for all four. Loaded, at 100 m:
+
+| Aircraft | Weight | Level speeds (m/s) | Best endurance (m/s) | Best range (m/s) | Best climb (m/s) |
+| --- | --- | --- | --- | --- | --- |
+| uh60 | 7,439 kg | 0 to 96.2 | 37.9 (241 kg/h) | 62.9 (303 kg/h) | 16.0 at 24.3 m/s |
+| uh1h | 2,793 kg | 0 to 56.2 | 25.2 (109 kg/h) | 40.3 (133 kg/h) | 13.7 at 17.6 m/s |
+| iris | 1.5 kg | 0 to 16.6 | 15.9 (138.6 W) | 15.9 (138.6 W) | none flown |
+| cf2 | 0.027 kg | 0 to 21.6 | 0 (7.60 W) | 20.8 (9.59 W) | none flown |
+
+  - **Checks, all passed.**
+    - The hover's power against the fly stage's: the UH-60A's 1,698 shp, the UH-1H's 571 shp. For the quadrotors, against the design's hover draw: 181.4 W against 181.6 W, and 7.60 W against 7.60 W.
+    - The UH-60A's power at the six published trims' speeds, against the fly stage's trims: all within 1 %.
+    - The lighter burns less at every altitude and speed.
+    - A burn flown at the best-endurance speed against the tables: −0.2 % for both helicopters, 0.0 % for the IRIS+, +1.5 % for the Crazyflie (190 s, half its battery).
+  - **The helicopters' full-power climbs.** The power rises to the limit over 15 s, since stepped at once the UH-60A at 130 kt pitched 48° nose down. Each climb is averaged over half a minute.
+    - Between 95 and 120 kt the hold rings in a UH-60A's climb. In each row up to three of those speeds, and its fastest, have no stationary average, and those cells are not flown.
+    - The UH-1H's table is complete.
+  - **The quadrotors fly no climb.** Their thrust ignores a climb's inflow.
+  - **What the tables show of the models** (the owner's to weigh; [rotorcraft.md](rotorcraft.md), section 7):
+    - None of the four loses power or thrust with height, so their ceilings lie far above the rows.
+    - The IRIS+'s drag is PX4's, in the rotors' plane only, so tilted forward it lifts too. Its power falls all the way to its top speed, and its best speeds are its top.
+    - The Crazyflie's power is least in the hover: neither quadrotor model has translational lift.
+- **The ceiling's extension is capped at as high again.** A rotorcraft still climbing 15 m/s at 3,000 m would have had its ceiling extended to 50 to 300 km. The fixed wings' extensions reached at most 42 % above their rows, so every fixed wing's ceiling is unchanged.
+- **The navigation report's return** now flies a rotorcraft's best range from its tables. The UH-60A returns at 123 kt, not the loops' default 29 kt. The IRIS+'s playtime over 5.6 km is 12.2 minutes, where the default speed made it none.
+- **A named change: the Crazyflie's drag along its axis.** gym-pybullet-drones' `drag_z`, which the design gives, was dropped: JSBSim keeps only the last `<axis>` of a name, and the ground effect's Z axis came after it. Now one axis carries both. No other aircraft repeats an axis.
+  - The identified hover's heave damping goes from 0 to 0.146 1/s, and its heave control power from 21.44 to 21.12 m/s² per unit (−1.5 %).
+  - Through the platform's loops the hover is the same, and a 1 m/s climb draws 3.6 % more power.
+  - At 6 m/s its vertical speed holds six times tighter, and it draws 2.3 % more power where it drew less.
+  - The fleet test judged a rotorcraft's orbit from its first lap of bearing round the centre, which for a rotorcraft starting at the centre is its way out to the circle. The Crazyflie's way out now crossed the lap's mark 1.3 m short of the circle; its tracking is no worse, 0.03 m off the circle from the second lap against 0.04 m before. A rotorcraft is now judged from its second lap. The worst is 3.0 % of the radius, the UH-60A's, against the 10 % allowed; before, the IRIS+ in a replica read 13.9 % from the first.
+- **A named change: the Skua's tables.** They now carry its battery's power, and its band begins at 1.15 times the stall.
+  - An electric motor needs no spool-up, so its full-power run leaves out 1 s, not 8. The Skua passes its slow speeds within those 8 s, so its band had begun at 31 m/s, past the design's 22 m/s cruise.
+  - Its best endurance is now 16.1 m/s (370 W) and its best range 19.2 m/s (405 W).
+  - Its FA-3a checks still pass. Its ceiling is 34,810 ft, +2.0 % against the flight test (−0.3 % before): its low speeds' climbs now count.
+  - Its full-power climb below 19.8 m/s stays unflown, as the flight tests' climbs there were beyond the tables before.
+- **Digests:** identical to FA-2e's and FA-3a's, with protection and without. No digested flight is a rotorcraft's or the Skua's. The allocation gate passes.
+- **A/B throughput.**
+  - Micro, against FA-2e's build (5 rounds): −2.6 % to +0.4 %.
+  - Command, against FA-3b's navigation report build (15 rounds): −0.5 % to +1.6 %, but for a behaviour's NEW at +5.4 % (7 ns). That is code placement. Nothing on its path changed, and the path neither copies, destroys nor reads the tables.
+    - The larger tables section changed the profile code's inlining, and the path's functions moved 0.8 to 2.6 KB.
+    - A 448-byte unused function added to the bench moved the same case by 4 ns.
 - ctest: all 244 tests pass.
 
 ## Appendix A: the inventory

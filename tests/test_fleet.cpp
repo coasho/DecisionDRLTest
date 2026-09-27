@@ -729,19 +729,22 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
         [&](const Plane& p) {
             const CommandResult r = w.submit(p.id, PatternCommand{});
             activity[p.id] = r.activity;
-            least[p.id] = 0.0; // (here: the worst cross-track after the first lap)
+            least[p.id] = 0.0; // (here: the worst cross-track after the first lap - a rotorcraft's second, below)
             return r.accepted();
         },
         [&](const Plane& p) { return (1.0 + 2.5 * kPi) * orbitRadius(p) / std::max(p.cruiseMs, 0.1) + 60.0; },
         [&](const Plane& p) {
+            // a rotorcraft starts at its orbit's centre: its first lap of bearing round it is its way out to the circle
+            // (the Crazyflie's crossed the lap's mark 1.3 m short of it), so it is judged from its second
             const ActivityRecord& r = *w.activity(activity[p.id]);
-            if (r.progress.laps >= 1 && std::isfinite(r.progress.crossTrackM)) least[p.id] = std::max(least[p.id], std::abs(r.progress.crossTrackM));
+            if (r.progress.laps >= (p.rotor ? 2u : 1u) && std::isfinite(r.progress.crossTrackM))
+                least[p.id] = std::max(least[p.id], std::abs(r.progress.crossTrackM));
         },
         [&](const Plane& p, const Lows&) {
             const ActivityRecord& r = *w.activity(activity[p.id]);
             CHECK(r.live());
-            CHECK(r.progress.laps >= 1);
-            // (the worst: a wing 3.6 % of its radius, 7.9 % the Skua's 132 m; a rotorcraft 7.3 %)
+            CHECK(r.progress.laps >= (p.rotor ? 2u : 1u));
+            // (the worst: a wing 3.6 % of its radius, 7.9 % the Skua's 132 m; a rotorcraft 3.0 %, from its second lap)
             CHECK(least[p.id] < (p.rotor ? std::max(0.5, 0.1 * orbitRadius(p)) : std::max(20.0, 0.05 * orbitRadius(p))));
         });
     // a gentle S: a wing's six of its full-bank turns long (at least its scale), a rotorcraft's its scale

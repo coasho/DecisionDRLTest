@@ -19,7 +19,9 @@ speed at) and weight (the tanks a tenth, half and wholly full of their capacity,
 - level flight at sixteen speeds from the slowest full power flew level at to 97 % of the top: the fuel flow (the
   engines', over ten seconds), the throttle and the angle of attack - each point counted only where it held its speed
   (within 2 %) and its height (within 1 m/s), off the ground. From them the best-endurance speed (the least fuel flow)
-  and the best-range speed (the most distance per kilogram), within the band;
+  and the best-range speed (the most distance per kilogram), within the band. An aircraft that flies on a battery
+  (FA-3b: the Skua) has the power its battery gives in place of the fuel flow, and its best speeds are the least
+  power's and the most distance per joule's;
 - the stall, as the flight tests fly it: the idle run's least speed before it reached the limit angle of attack, broke
   or could no longer hold its height - at every weight from the highest lift coefficient any weight's run reached at
   that altitude (a lift coefficient does not depend on the weight; a light aircraft's loop at low dynamic pressure
@@ -59,11 +61,15 @@ CURVE_END = 0.03       # a curve's end value stands this far past its first or l
                        # half a second in: its first speed is a little past where the band begins)
 HEIGHT_LOST_M = 20.0   # near the stall, a height lost this far is a sink too (a light, slow aircraft glides down gently)
 SPOOL_S = 8.0          # a full-power run's first seconds, the engines spooling up (a turboprop's excess power climbs
-                       # from 7 to 11 m/s over 6 s), are left out of its curve
+                       # from 7 to 11 m/s over 6 s), are left out of its curve...
+ELECTRIC_SPOOL_S = 1.0  # ...an electric motor's first second only: it gives full power at once. A light electric
+                        # aircraft (the Skua) is past its best-endurance and best-range speeds within that second,
+                        # so its level points begin at the envelope's least speed, each flown and held (or none)
 FULL_SECONDS = 1200.0  # the full-power run's longest (a heavy jet at altitude settles slowly; a run settled ends there)
 IDLE_SECONDS = 900.0   # the idle run's longest (a bomber loses speed slowly)
 STARTS = (1.2, 1.8, 2.6)  # a full-power run's start, times the stall: faster again where it could not fly level
 SAMPLE_S = 0.5         # the runs' histories, every half second
+ENGINE_ELECTRIC = 4    # fsim/propulsion/type (profile.ENGINE_TYPES)
 HOLD_GAIN = 0.1        # 1/s: the vertical speed asked per metre off the height...
 HOLD_MAX_MS = 3.0      # ...at most
 GROUND_CLEARANCE_M = 10.0  # a run whose centre of gravity came this near the ground touched it (gear up, on its belly)
@@ -105,6 +111,7 @@ class _Fleet:
         self.tanks = None
         self.capacity_lbs = []  # each tank's
         self.spawn_fuel_lbs = 0.0  # what the aircraft file starts it with (a B-52H's tanks: 40 %)
+        self.battery_j = None  # its battery's capacity (J), if it flies on one
 
     def spawn(self, kind, h, v, fuel_fraction=None):
         """A vehicle at height h (m) and true airspeed v (m/s), the envelope protection off, its tanks at
@@ -118,6 +125,8 @@ class _Fleet:
             self.fsim.set_log_level("off")
             try:
                 self.tanks = next(i for i in range(64) if not np.isfinite(self.prop(veh, "propulsion/tank[%d]/contents-lbs" % i)))
+                battery = self.prop(veh, "fsim/battery/capacity-j")
+                self.battery_j = float(battery) if np.isfinite(battery) else None
             finally:
                 self.fsim.set_log_level(level)
             for i in range(self.tanks):
@@ -260,6 +269,7 @@ def fly(kind, ceiling_m, stall_tas_sl_ms, alpha_max_deg, extra_altitudes=(), wor
         # the weights: a vehicle with its tanks at each fraction - and as the file fills them (where its flight
         # tests fly), a weight of its own unless near one of those
         first = fleet.spawn(kind, 1000.0, 2.0 * stall_tas_sl_ms)
+        spool_s = ELECTRIC_SPOOL_S if fleet.prop(first, "fsim/propulsion/type") == ENGINE_ELECTRIC else SPOOL_S
         capacity = sum(fleet.capacity_lbs) * LBS
         spawn_fuel = fleet.spawn_fuel_lbs * LBS
         fill = spawn_fuel / capacity if capacity > 0.0 else 1.0
@@ -302,7 +312,8 @@ def fly(kind, ceiling_m, stall_tas_sl_ms, alpha_max_deg, extra_altitudes=(), wor
         log("  performance: full power (%.0f s)" % (time.time() - t0))
         # -- short runs where the runs did not fly: below a retry's start, past a drag rise -------------------
         spots, flown = _spots(fleet, kind, hs, conds, full, stall_tas, every, fractions)
-        curves = {c: _curve(full[c], spots.get(c, []), 1.15 * stall_tas(*c)) for c in conds}
+        curves = {c: _curve(full[c], spots.get(c, []), 1.15 * stall_tas(*c), spool_s, from_lowest=spool_s == ELECTRIC_SPOOL_S)
+                  for c in conds}
         if flown:
             log("  performance: %d short runs, %d held (%.0f s)" % (flown, sum(len(p) for p in spots.values()), time.time() - t0))
         # -- idle, level, from near the top speed down ------------------------------------------------------
@@ -336,7 +347,7 @@ def fly(kind, ceiling_m, stall_tas_sl_ms, alpha_max_deg, extra_altitudes=(), wor
     finally:
         fsim.set_log_level(level)
         world.close()
-    t = _tables(hs, weights, area, capacity, alpha_max_deg, curves, idle, steady, time.time() - t0)
+    t = _tables(hs, weights, area, capacity, alpha_max_deg, curves, idle, steady, time.time() - t0, battery_j=fleet.battery_j)
     t["spawn_fuel_kg"], t["spawn_weight_kg"] = spawn_fuel, spawn_weight
     return t
 
@@ -356,7 +367,8 @@ def _fly_level(fleet, points, every):
                 fleet.hold(p["act"], p["h0"], st.altitude_msl_m, airspeed_ms=p["v"])
     for _, p in vehs:
         p["veh"].set_property("propulsion/fuel_freeze", 0)
-    acc = {key: np.zeros(6) for key in points}
+    battery = fleet.battery_j is not None
+    acc = {key: np.zeros(7) for key in points}
     for s in range(int(round(AVERAGE_S / dt))):
         world.step()
         if s % every:
@@ -364,12 +376,12 @@ def _fly_level(fleet, points, every):
         for key, p in vehs:
             st = p["veh"].state
             acc[key] += (st.airspeed_true_ms, -st.velocity_ned_ms[2], math.degrees(st.alpha_rad), st.throttle_position[0],
-                         fleet.fuel_flow(p["veh"]), 1.0)
+                         fleet.fuel_flow(p["veh"]), fleet.prop(p["veh"], "fsim/battery/power-w") if battery else 0.0, 1.0)
             p["touched"] = p.get("touched", False) or _grounded(st)
             fleet.hold(p["act"], p["h0"], st.altitude_msl_m, airspeed_ms=p["v"])
     for key, p in vehs:
         a = acc[key]
-        p["flown"], p["vs"], p["alpha"], p["throttle"], p["fuel_kg_s"] = (a[:5] / max(a[5], 1.0)).tolist()
+        p["flown"], p["vs"], p["alpha"], p["throttle"], p["fuel_kg_s"], p["power_w"] = (a[:6] / max(a[6], 1.0)).tolist()
         p["rho"] = fleet.prop(p["veh"], "atmosphere/rho-slugs_ft3") * 515.379
         p["held"] = (not p.get("touched") and not _grounded(p["veh"].state) and abs(p["vs"]) <= HELD_VS_MS
                      and abs(p["flown"] - p["v"]) <= HELD_SPEED * p["v"])
@@ -442,7 +454,7 @@ def _spots(fleet, kind, hs, conds, full, stall_tas, every, fractions):
     return out, len(runs)
 
 
-def _curve(r, spots, lowest):
+def _curve(r, spots, lowest, spool_s=SPOOL_S, from_lowest=False):
     """A condition's excess power at full power along its speeds: its run from below (held: from its start to where
     it settled), the short runs below where it began, and those past where it got; its top level speed - where the
     excess power last falls through zero (a drag rise the run could not accelerate through, and full power holding
@@ -453,7 +465,7 @@ def _curve(r, spots, lowest):
     v, ps = _excess_power(r) if held else (np.array([]), np.array([]))
     below = []
     if held:
-        spooled = float(np.interp(SPOOL_S, r["t"], r["v"])) if len(r["t"]) else r["start"]  # (its speed once at full power)
+        spooled = float(np.interp(spool_s, r["t"], r["v"])) if len(r["t"]) else r["start"]  # (its speed once at full power)
         k = (v >= max(r["start"], spooled)) & (v <= reach)
         v, ps = v[k], ps[k]
         below = [(sv, sp) for sv, sp in spots if sv < r["start"]]
@@ -473,7 +485,7 @@ def _curve(r, spots, lowest):
     # (the band begins where the curve does: its runs' slowest speed flown with the margin - a run held level at
     # its start, but its record begins as it gathers speed)
     flyable = speeds[(powers >= 0.25) & (speeds <= top)] if np.isfinite(top) else speeds[:0]
-    lo = max(lowest, float(flyable.min())) if len(flyable) else float("nan")
+    lo = (lowest if from_lowest else max(lowest, float(flyable.min()))) if len(flyable) else float("nan")
     if not (np.isfinite(top) and np.isfinite(lo) and 0.97 * top >= BAND_MIN * lo):
         top = float("nan")  # (no band of level speeds left: at its ceiling, flown as none)
     return {"v": speeds, "ps": powers, "top": float(top), "lo": float(lo), "reach": reach if held else float("nan"),
@@ -554,12 +566,17 @@ def _held(r, h):
             and r["v"][-1] > 1.05 * r["start"])
 
 
-def _tables(hs, weights, area, capacity, alpha_max_deg, curves, idle, steady, seconds):
+def _tables(hs, weights, area, capacity, alpha_max_deg, curves, idle, steady, seconds, battery_j=None):
     nh, nw, nk = len(hs), len(weights), len(SPEED_FRACTIONS)
+    battery = battery_j is not None  # (flies on a battery: its power where a fuel burner has its fuel flow)
     grid = lambda *shape: np.full(shape, np.nan)  # noqa: E731
     t2 = {k: grid(nh, nw) for k in ("min_tas_ms", "max_tas_ms", "stall_cas_ms", "best_endurance_tas_ms", "best_endurance_fuel_kg_s",
                                      "best_range_tas_ms", "best_range_fuel_kg_s", "max_climb_ms", "climb_tas_ms", "reach_tas_ms")}
     t3 = {k: grid(nh, nw, nk) for k in ("tas_ms", "fuel_kg_s", "throttle", "alpha_deg", "ps_full_ms", "ps_idle_ms")}
+    if battery:
+        t2.update({k: grid(nh, nw) for k in ("best_endurance_power_w", "best_range_power_w")})
+        t3["power_w"] = grid(nh, nw, nk)
+    use = "power_w" if battery else "fuel_kg_s"
     for i in range(nh):
         for j in range(nw):
             c = (i, j)
@@ -592,17 +609,18 @@ def _tables(hs, weights, area, capacity, alpha_max_deg, curves, idle, steady, se
                 t3["tas_ms"][c + (k,)] = v
                 t3["throttle"][c + (k,)] = p["throttle"]
                 t3["alpha_deg"][c + (k,)] = p["alpha"]
-                t3["fuel_kg_s"][c + (k,)] = p["fuel_kg_s"]
-                speeds.append(v), fuel.append(p["fuel_kg_s"]), rho.append(p["rho"]), alpha.append(p["alpha"])
+                t3[use][c + (k,)] = p[use]
+                speeds.append(v), fuel.append(p[use]), rho.append(p["rho"]), alpha.append(p["alpha"])
             speeds, fuel, rho, alpha = (np.array(x) for x in (speeds, fuel, rho, alpha))
             if len(speeds) >= 3 and np.all(fuel > 0):
+                # (fuel: the fuel flow, kg/s - or a battery's power, W)
                 band = (cu["lo"], 0.97 * cu["top"])  # (a speed a point held, clipped to the band it was flown along)
                 ve, fe = _extremum(speeds, fuel, most=False)
                 t2["best_endurance_tas_ms"][c] = float(np.clip(ve, *band))
-                t2["best_endurance_fuel_kg_s"][c] = fe if band[0] <= ve <= band[1] else float(np.interp(np.clip(ve, *band), speeds, fuel))
+                t2["best_endurance_" + use][c] = fe if band[0] <= ve <= band[1] else float(np.interp(np.clip(ve, *band), speeds, fuel))
                 vr, _ = _extremum(speeds, speeds / fuel, most=True)
                 t2["best_range_tas_ms"][c] = float(np.clip(vr, *band))
-                t2["best_range_fuel_kg_s"][c] = float(np.interp(np.clip(vr, *band), speeds, fuel))
+                t2["best_range_" + use][c] = float(np.interp(np.clip(vr, *band), speeds, fuel))
     # the stall, as the flight tests fly it (idle, the height held, the speed bleeding off to the break; its least
     # speed up to it): at each weight from the highest lift coefficient any weight's run reached at the altitude
     for i in range(nh):
@@ -612,7 +630,8 @@ def _tables(hs, weights, area, capacity, alpha_max_deg, curves, idle, steady, se
             for j in range(nw):
                 if (i, j) in idle:
                     t2["stall_cas_ms"][i, j] = math.sqrt(2.0 * weights[j] * G0 / (RHO0 * area * max(cls)))
-    return {"altitude_m": hs, "weight_kg": weights, "speed_fraction": list(SPEED_FRACTIONS), "fuel_capacity_kg": capacity,
+    return {"altitude_m": hs, "weight_kg": weights, "speed_fraction": list(SPEED_FRACTIONS),
+            "fuel_capacity_kg": None if battery else capacity, "battery_capacity_j": battery_j,
             "wing_area_m2": area, "alpha_max_deg": alpha_max_deg, **{k: v for k, v in t2.items()}, **{k: v for k, v in t3.items()},
             "spot_runs": int(sum(cu["spots"] for cu in curves.values())), "seconds": seconds}
 
@@ -672,7 +691,8 @@ SERVICE_MS = 0.508  # the service ceiling's climb: 100 ft/min
 def ceiling(tables, j):
     """The service ceiling at weight j: rising through the altitudes, where the best climb first falls below 0.5 m/s
     (100 ft/min) - a height nothing held level at climbing nothing, as the flight tests count it - linear between
-    that altitude and the one below; climbing at the highest flown, the last two extended. NaN if it climbs at none."""
+    that altitude and the one below; climbing at the highest flown, the last two extended, no further than as high
+    again (as the platform's tablesCeilingM: a rotorcraft's lies far above its rows). NaN if it climbs at none."""
     hs = np.asarray(tables["altitude_m"], dtype=float)
     climb = np.asarray(tables["max_climb_ms"], dtype=float)[:, j]
     last = None  # the highest altitude so far that climbs
@@ -684,7 +704,8 @@ def ceiling(tables, j):
             c = climb[a] if np.isfinite(climb[a]) else 0.0
             return float(hs[last] + (climb[last] - SERVICE_MS) / (climb[last] - c) * (hs[a] - hs[last]))
     if last is not None and last == len(hs) - 1 and last >= 1 and np.isfinite(climb[last - 1]) and climb[last - 1] > climb[last]:
-        return float(hs[last] + (climb[last] - SERVICE_MS) / (climb[last - 1] - climb[last]) * (hs[last] - hs[last - 1]))
+        above = (climb[last] - SERVICE_MS) / (climb[last - 1] - climb[last]) * (hs[last] - hs[last - 1])
+        return float(hs[last] + above) if above <= hs[last] else float("nan")
     return float("nan")
 
 

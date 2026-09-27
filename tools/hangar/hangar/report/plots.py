@@ -300,24 +300,27 @@ def climb(runs, path):
 
 
 def performance(t, path, name):
-    """The performance tables (performance.py): fuel flow and excess power against speed at each altitude,
-    loaded, with the best-endurance and best-range speeds; and the speeds against altitude at each weight."""
+    """The performance tables (performance.py): fuel flow (a battery's power) and excess power against speed at
+    each altitude, loaded, with the best-endurance and best-range speeds; and the speeds against altitude at each
+    weight."""
     hs = t["altitude_m"]
     j = len(t["weight_kg"]) - 1
-    tas, ff = np.asarray(t["tas_ms"], dtype=float), np.asarray(t["fuel_kg_s"], dtype=float)
+    battery = t.get("battery_capacity_j") is not None
+    per, scale, unit = ("power_w", 1.0, "battery power (W)") if battery else ("fuel_kg_s", 3600.0, "fuel flow (kg/h)")
+    tas, ff = np.asarray(t["tas_ms"], dtype=float), np.asarray(t[per], dtype=float)
     pf, pi = np.asarray(t["ps_full_ms"], dtype=float), np.asarray(t["ps_idle_ms"], dtype=float)
     fig, axes = plt.subplots(1, 3, figsize=(17, 5), dpi=95)
     ax = axes[0]
     for i, h in enumerate(hs):
         if not np.any(np.isfinite(ff[i, j])):
             continue
-        line, = ax.plot(tas[i, j] / 0.514444, ff[i, j] * 3600, "-", lw=1.2, label="%.0f m" % h)
+        line, = ax.plot(tas[i, j] / 0.514444, ff[i, j] * scale, "-", lw=1.2, label="%.0f m" % h)
         for key, mark in (("best_endurance", "o"), ("best_range", "x")):
-            v, f = t[key + "_tas_ms"][i][j], t[key + "_fuel_kg_s"][i][j]
+            v, f = t[key + "_tas_ms"][i][j], t[key + "_" + per][i][j]
             if v is not None and np.isfinite(v):
-                ax.plot(v / 0.514444, f * 3600, mark, color=line.get_color(), ms=7)
+                ax.plot(v / 0.514444, f * scale, mark, color=line.get_color(), ms=7)
     ax.set_xlabel("true airspeed (kt)")
-    ax.set_ylabel("fuel flow (kg/h)")
+    ax.set_ylabel(unit)
     ax.set_title("level flight, loaded: best endurance (o), best range (x)", fontsize=9)
     ax.grid(True, lw=0.3)
     ax.legend(fontsize=7)
@@ -332,7 +335,8 @@ def performance(t, path, name):
     ax.set_ylabel("excess power (ft/min)")
     ax.set_title("full power (solid) and idle (dashed), loaded", fontsize=9)
     ax.grid(True, lw=0.3)
-    ax.legend(fontsize=7)
+    if ax.get_legend_handles_labels()[0]:  # (a multirotor flies no full-power climb)
+        ax.legend(fontsize=7)
     ax = axes[2]
     for w in range(len(t["weight_kg"])):
         for key, style in (("min_tas_ms", ":"), ("max_tas_ms", "-"), ("best_range_tas_ms", "--")):

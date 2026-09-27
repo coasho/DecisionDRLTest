@@ -93,10 +93,10 @@ TEST_CASE("tables: an aircraft hangar flew carries its performance tables, read 
     }
 }
 
-TEST_CASE("tables: every fixed wing hangar ships carries them; the rotorcraft's come with their fuel (FA-3b)", "[performance]") {
+TEST_CASE("tables: every aircraft hangar ships carries them, the rotorcraft's from the hover (FA-3b)", "[performance]") {
     session::World w(options("tables-fleet"));
     std::error_code ec;
-    int wings = 0;
+    int wings = 0, rotorcraft = 0;
     for (const auto& entry : std::filesystem::directory_iterator(FSIM_TEST_AIRCRAFT_DIR, ec)) {
         const std::string name = entry.path().filename().string();
         if (!entry.is_directory(ec) || !std::filesystem::is_regular_file(entry.path() / (name + ".xml"), ec)) continue;
@@ -110,7 +110,25 @@ TEST_CASE("tables: every fixed wing hangar ships carries them; the rotorcraft's 
         REQUIRE(id != 0);
         const VehicleProfile& p = *w.profile(id);
         if (isRotorcraft(p.identity.family)) {
-            CHECK(p.tables.empty());
+            ++rotorcraft;
+            REQUIRE_FALSE(p.tables.empty());
+            const TablesSection& t = p.tables;
+            const std::size_t loaded = t.weightKg.size() - 1; // (its lowest altitude, as it spawns)
+            CHECK(t.minTasMs[loaded] == 0.0);                 // (it hovers)
+            CHECK(t.maxTasMs[loaded] > 0.0);
+            CHECK(std::isnan(t.stallCasMs[loaded]));          // (no stall)
+            const TablesAt at = tablesAt(t, 500.0, t.weightKg.back());
+            CHECK(at.bestRangeTasMs > 0.0);
+            if (std::isfinite(t.fuelCapacityKg)) { // (a helicopter: fuel; a multirotor: a battery)
+                CHECK(at.bestEnduranceFuelKgS > 0.0);
+                CHECK(at.maxClimbMs > 0.0);
+            } else {
+                CHECK(t.batteryCapacityJ > 0.0);
+                CHECK(at.bestEndurancePowerW > 0.0);
+                CHECK(std::isnan(at.maxClimbMs)); // (no full-power climb: its model's thrust ignores the inflow)
+            }
+            CHECK(std::isnan(tablesCeilingM(t, t.weightKg.back()))); // (its ceiling far above the rows flown)
+            REQUIRE(w.removeVehicle(id));
             continue;
         }
         ++wings;
@@ -121,6 +139,7 @@ TEST_CASE("tables: every fixed wing hangar ships carries them; the rotorcraft's 
         REQUIRE(w.removeVehicle(id));
     }
     CHECK(wings == 31);
+    CHECK(rotorcraft == 4);
 }
 
 TEST_CASE("tables: an aircraft without them - a stock JSBSim aircraft - answers none", "[performance]") {
@@ -147,6 +166,9 @@ TEST_CASE("tables: the service ceiling - an altitude nothing held level at climb
     // climbing at the highest: the highest two's line extended
     t.maxClimbMs = {5.0, 3.0, 2.0};
     CHECK(std::abs(tablesCeilingM(t, 1000.0) - (6000.0 + (2.0 - 0.508) / 1.0 * 3000.0)) < 1e-9);
+    // ...no further than as high again (a rotorcraft climbing hard at its highest row: its ceiling not flown)
+    t.maxClimbMs = {5.0, 15.0, 14.9};
+    CHECK(std::isnan(tablesCeilingM(t, 1000.0)));
     // climbing at none
     t.maxClimbMs = {0.2, kUnknown, 0.1};
     CHECK(std::isnan(tablesCeilingM(t, 1000.0)));
