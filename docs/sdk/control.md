@@ -444,6 +444,50 @@ that polls it knows when to look again.
 `not_granted`, `not_allowed`, `revoked`, `released`, `collision_avoidance`
 and `restricted` belong to ADR-28's modes and grants.
 
+### The command envelope: ids, findings, validation, batches
+
+What a command carries beside its setpoint, and what its answer carries
+beside its reason ([flight-autonomy.md](../flight-autonomy.md), 4.8; A-GRA's
+command base and CannotComply details):
+
+```cpp
+CommandOptions o;
+o.commandId = 42;                                   // the caller's id: echoed in every answer, kept in the record
+o.trace[0] = {RequirementKind::Task, 7};            // the requirements it comes from (up to four)
+o.interactive = false;                              // its activity takes no activity commands
+CommandResult r = v.submit(hsa, o);                 // r.commandId == 42, r.newActivity
+world.activity(r.activity)->commandId;              // 42; ->trace, ->interactive
+
+o.range = RangePolicy::Reject;                      // too fast and too high: refused with the first finding...
+r = v.submit(HsaCommand{.speed = 600, .speedReference = 0, .altitudeM = 25000}, o);
+for (std::size_t i = 0; i < v.commandDetails().findingCount; ++i) ...   // ...and every one named: altitude, then speed
+o.range = RangePolicy::Clamp;                       // flown instead, each value held an adjustment:
+v.commandDetails().adjustments[0];                  // {index 4, MaxAltitude, requested 25000, adjusted <ceiling>}
+
+o.validateOnly = true;                              // checked as a NEW is, answered Valid or refused; nothing flies
+v.submit(hsa, o).status == CommandStatus::Valid;
+
+std::vector<BatchCommand> batch(2);                 // several NEWs at once, each answered on its own
+batch[0].command = Command(hsa);
+batch[1].command = SupportCommand(GearCommand{0.0});
+auto answers = v.submitBatch(batch);
+```
+
+- **Every finding.** Under Reject a command is checked as Clamp would check
+  it, each value beyond the aircraft held there so the checking goes on, and
+  each is a finding: a route's every point and field at fault (a point too
+  high also asks a climb the aircraft cannot make), a curve's every section
+  too tight, an hsa's altitude and speed. The answer is refused with the
+  first, as before. A malformed command stops at its first fault.
+- **Every value flown other than asked.** Under Clamp each value held is an
+  adjustment: the field, a route point's field (`Waypoint`'s order), the limit,
+  what was asked and what flies.
+- `commandDetails()` is the vehicle's last NEW, validation or UPDATE's;
+  `reasonDescription(r.reason)` puts the reason in words and `r.other` is the
+  id it is about (the C ABI's detail and `fsim.Rejected` carry both).
+  `newActivity` is false for an UPDATE, a CANCEL, a validation and a command
+  the existing entry points' live activity takes.
+
 ### Support and availability: what a vehicle can do at all, and now
 
 Two questions, answered apart ([flight-autonomy.md](../flight-autonomy.md),

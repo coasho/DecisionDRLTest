@@ -950,6 +950,79 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_release_control(world, viper, "fsim.guidance.hover") != FSIM_OK);
             CHECK(strstr(fsim_last_error(), "not_supported") != NULL);
         }
+        {
+            /* ABI 1.8: the command envelope (docs/flight-autonomy.md, 4.8) */
+            fsim_command_options o, reject;
+            fsim_command_result cr, results[3];
+            fsim_command_detail d, details[3];
+            fsim_command_finding f;
+            fsim_command_adjustment adj;
+            fsim_activity_envelope ae;
+            fsim_batch_command batch[3];
+            uint32_t eagle = 0, b;
+            const double hold = fsim_hold();
+            double hsa[6], gear[1], velocity[4];
+            spec.name = "cap-eagle";
+            spec.type = "jsbsim:f16c";
+            spec.altitude_msl_m = 3000.0;
+            spec.airspeed_ms = 160.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &eagle) == FSIM_OK);
+            /* its id and requirements: echoed, and kept with its activity */
+            fsim_command_options_init(&o);
+            CHECK(o.interactive == 1 && o.validate_only == 0 && o.command_id == 0);
+            o.command_id = 42;
+            o.trace[0].kind = FSIM_REQUIREMENT_TASK;
+            o.trace[0].id = 7;
+            o.interactive = 0;
+            hsa[0] = 0.5, hsa[1] = hold, hsa[2] = hold, hsa[3] = hold, hsa[4] = hold, hsa[5] = hold;
+            CHECK(fsim_vehicle_submit_mode(world, eagle, FSIM_MODE_HSA, hsa, 6, &o, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            fsim_command_detail_init(&d);
+            CHECK(fsim_last_command_detail(world, &d) == FSIM_OK);
+            CHECK(d.new_activity == 1 && d.command_id == 42 && d.finding_count == 0 && strcmp(d.description, "") == 0);
+            fsim_activity_envelope_init(&ae);
+            CHECK(fsim_activity_get_envelope(world, cr.activity, &ae) == FSIM_OK);
+            CHECK(ae.command_id == 42 && ae.interactive == 0 && ae.trace[0].kind == FSIM_REQUIREMENT_TASK && ae.trace[0].id == 7);
+            CHECK(ae.trace[1].kind == FSIM_REQUIREMENT_NONE && strcmp(fsim_requirement_kind_name(FSIM_REQUIREMENT_TASK), "task") == 0);
+            /* every finding with Reject: too fast and too high, the altitude checked first */
+            fsim_command_options_init(&reject);
+            reject.range = FSIM_RANGE_REJECT;
+            hsa[2] = 600.0, hsa[3] = FSIM_SPEED_TRUE_AIRSPEED, hsa[4] = 25000.0;
+            CHECK(fsim_vehicle_submit_mode(world, eagle, FSIM_MODE_HSA, hsa, 6, &reject, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(fsim_last_command_detail(world, &d) == FSIM_OK && d.finding_count == 2 && d.index == 4 && strlen(d.description) > 0);
+            fsim_command_finding_init(&f);
+            CHECK(fsim_last_command_finding(world, 1, &f) == FSIM_OK && f.index == 2 && strcmp(fsim_constraint_name(f.constraint), "max_airspeed") == 0);
+            CHECK(fsim_last_command_finding(world, 2, &f) != FSIM_OK);
+            /* validated with Clamp: valid, with the values it would hold; nothing flies */
+            fsim_command_options_init(&o);
+            o.validate_only = 1;
+            CHECK(fsim_vehicle_submit_mode(world, eagle, FSIM_MODE_HSA, hsa, 6, &o, &cr) == FSIM_OK);
+            CHECK(cr.status == FSIM_COMMAND_VALID && cr.activity == 0);
+            CHECK(fsim_last_command_detail(world, &d) == FSIM_OK && d.adjustment_count == 2 && d.new_activity == 0);
+            fsim_command_adjustment_init(&adj);
+            CHECK(fsim_last_command_adjustment(world, 1, &adj) == FSIM_OK && adj.index == 2 && adj.field == -1);
+            CHECK(adj.requested == 600.0 && adj.adjusted < 450.0);
+            /* several NEWs at once, each answered on its own */
+            memset(batch, 0, sizeof batch);
+            hsa[2] = hold, hsa[3] = hold, hsa[4] = hold;
+            gear[0] = 2.0; /* out of its range */
+            velocity[0] = 160.0, velocity[1] = 0.0, velocity[2] = 0.5, velocity[3] = hold;
+            for (b = 0; b < 3; ++b) batch[b].struct_size = sizeof batch[0];
+            batch[0].kind = FSIM_BATCH_MODE, batch[0].code = FSIM_MODE_HSA, batch[0].fields = hsa, batch[0].count = 6;
+            batch[1].kind = FSIM_BATCH_SUPPORT, batch[1].code = FSIM_SUPPORT_GEAR, batch[1].fields = gear, batch[1].count = 1, batch[1].options = &reject;
+            batch[2].kind = FSIM_BATCH_LEVEL, batch[2].code = FSIM_LEVEL_VELOCITY, batch[2].fields = velocity, batch[2].count = 4;
+            fsim_command_options_init(&o);
+            o.command_id = 3;
+            batch[2].options = &o;
+            for (b = 0; b < 3; ++b) fsim_command_detail_init(&details[b]);
+            CHECK(fsim_vehicle_submit_batch(world, eagle, batch, 3, results, details) == FSIM_OK);
+            CHECK(results[0].status == FSIM_COMMAND_ACCEPTED && results[2].status == FSIM_COMMAND_ACCEPTED);
+            CHECK(results[1].status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(results[1].reason), "out_of_range") == 0);
+            CHECK(details[1].finding_count == 1 && details[1].index == 0 && details[0].new_activity == 1 && details[2].command_id == 3);
+            CHECK(fsim_vehicle_submit_batch(world, eagle, batch, 3, results, NULL) == FSIM_OK); /* (the details are optional) */
+            batch[2].count = 1; /* malformed: none is made */
+            CHECK(fsim_vehicle_submit_batch(world, eagle, batch, 3, results, NULL) != FSIM_OK);
+        }
         }
         fsim_world_destroy(world);
     }

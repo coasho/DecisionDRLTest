@@ -737,19 +737,50 @@ static PyObject* world_command_behavior(PyObject* o, PyObject* const* args, Py_s
  * constraints, constraints_seen, start_time, end_time). fsim/world.py wraps
  * them. */
 
-/* (status, reason, activity, other, clamped, index, constraint, from, to): the last four what the answer was about
- * (ABI 1.6, fsim_last_command_detail) - the field, route point or curve segment, the limit, a curve's section */
+/* (status, reason, activity, other, clamped, index, constraint, from, to, new_activity, command_id, associated,
+ * description, finding_count, adjustment_count): from index 5 what the answer was about (ABI 1.6 and 1.8,
+ * fsim_last_command_detail) - the field, route point or curve segment, the limit, a curve's section; then the
+ * command envelope's, and how many findings and adjustments last_findings() and last_adjustments() have */
+static PyObject* result_tuple_with(const fsim_command_result* r, const fsim_command_detail* dp);
+
 static PyObject* result_tuple(const fsim_world* world, const fsim_command_result* r) {
     fsim_command_detail d;
     fsim_command_detail_init(&d);
     fsim_last_command_detail(world, &d);
-    return Py_BuildValue("(iiKKOiidd)", r->status, r->reason, (unsigned long long)r->activity, (unsigned long long)r->other,
-                         (r->flags & 1u) ? Py_True : Py_False, d.index, d.constraint, d.from, d.to);
+    return result_tuple_with(r, &d);
 }
 
-static PyObject* info_tuple(const fsim_activity_info* a) {
-    return Py_BuildValue("(KIIiIiiKIIdd)", (unsigned long long)a->id, a->vehicle, a->capability, a->source, a->axes, a->state, a->reason,
-                         (unsigned long long)a->by, a->constraints, a->constraints_seen, a->start_time, a->end_time);
+/* As result_tuple, with its detail given (a batch item's). */
+static PyObject* result_tuple_with(const fsim_command_result* r, const fsim_command_detail* dp) {
+    const fsim_command_detail d = *dp;
+    return Py_BuildValue("(iiKKOiiddOKKsII)", r->status, r->reason, (unsigned long long)r->activity, (unsigned long long)r->other,
+                         (r->flags & 1u) ? Py_True : Py_False, d.index, d.constraint, d.from, d.to, d.new_activity ? Py_True : Py_False,
+                         (unsigned long long)d.command_id, (unsigned long long)d.associated, d.description ? d.description : "", d.finding_count,
+                         d.adjustment_count);
+}
+
+/* (id, vehicle, capability, source, axes, state, reason, by, constraints, constraints_seen, start_time, end_time,
+ * command_id, interactive, ((kind, id) per requirement it traces to)) */
+static PyObject* info_tuple(const fsim_world* world, const fsim_activity_info* a) {
+    fsim_activity_envelope e;
+    fsim_activity_envelope_init(&e);
+    fsim_activity_get_envelope(world, a->id, &e);
+    Py_ssize_t count = 0;
+    for (int i = 0; i < FSIM_MAX_REQUIREMENTS; ++i)
+        if (e.trace[i].kind != FSIM_REQUIREMENT_NONE) ++count;
+    PyObject* trace = PyTuple_New(count);
+    for (int i = 0, k = 0; trace && i < FSIM_MAX_REQUIREMENTS; ++i) {
+        if (e.trace[i].kind == FSIM_REQUIREMENT_NONE) continue;
+        PyObject* item = Py_BuildValue("(iK)", e.trace[i].kind, (unsigned long long)e.trace[i].id);
+        if (!item || PyTuple_SetItem(trace, k++, item) < 0) { /* (SetItem takes the item, even when it fails) */
+            Py_CLEAR(trace);
+            break;
+        }
+    }
+    if (!trace) return NULL;
+    return Py_BuildValue("(KIIiIiiKIIddKON)", (unsigned long long)a->id, a->vehicle, a->capability, a->source, a->axes, a->state, a->reason,
+                         (unsigned long long)a->by, a->constraints, a->constraints_seen, a->start_time, a->end_time,
+                         (unsigned long long)e.command_id, e.interactive ? Py_True : Py_False, trace);
 }
 
 static int as_u64(PyObject* o, uint64_t* out) {
@@ -759,7 +790,46 @@ static int as_u64(PyObject* o, uint64_t* out) {
     return 1;
 }
 
-/* source, axes, range, min_version: optional, None = the default */
+/* The command envelope (ABI 1.8): (command_id, ((kind, id), ...), interactive, validate_only). */
+static int read_envelope(PyObject* e, fsim_command_options* o) {
+    static const char* shape = "the envelope must be (command_id, trace, interactive, validate_only)";
+    if (!PySequence_Check(e) || PySequence_Size(e) != 4) {
+        if (!PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, shape);
+        return 0;
+    }
+    PyObject* id = PySequence_GetItem(e, 0);
+    PyObject* trace = PySequence_GetItem(e, 1);
+    PyObject* interactive = PySequence_GetItem(e, 2);
+    PyObject* validate = PySequence_GetItem(e, 3);
+    int ok = id && trace && interactive && validate && as_u64(id, &o->command_id);
+    const Py_ssize_t count = ok ? PySequence_Size(trace) : 0;
+    if (ok && (count < 0 || count > FSIM_MAX_REQUIREMENTS)) {
+        if (!PyErr_Occurred()) PyErr_Format(PyExc_ValueError, "a command traces to at most %d requirements", FSIM_MAX_REQUIREMENTS);
+        ok = 0;
+    }
+    for (Py_ssize_t i = 0; ok && i < count; ++i) {
+        PyObject* pair = PySequence_GetItem(trace, i);
+        PyObject* kind = pair && PySequence_Check(pair) && PySequence_Size(pair) == 2 ? PySequence_GetItem(pair, 0) : NULL;
+        PyObject* rid = kind ? PySequence_GetItem(pair, 1) : NULL;
+        ok = rid && as_int(kind, &o->trace[i].kind) && as_u64(rid, &o->trace[i].id);
+        if (!ok && !PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "each requirement must be (kind, id)");
+        Py_XDECREF(rid);
+        Py_XDECREF(kind);
+        Py_XDECREF(pair);
+    }
+    if (ok) {
+        const int yes = PyObject_IsTrue(interactive), check = PyObject_IsTrue(validate);
+        ok = yes >= 0 && check >= 0;
+        o->interactive = yes > 0, o->validate_only = check > 0;
+    }
+    Py_XDECREF(validate);
+    Py_XDECREF(interactive);
+    Py_XDECREF(trace);
+    Py_XDECREF(id);
+    return ok;
+}
+
+/* source, axes, range, min_version, envelope: optional, None = the default */
 static int read_options(PyObject* const* args, Py_ssize_t n, Py_ssize_t first, fsim_command_options* o) {
     int v;
     uint32_t u;
@@ -780,6 +850,7 @@ static int read_options(PyObject* const* args, Py_ssize_t n, Py_ssize_t first, f
         if (!as_u32(args[first + 3], &u)) return 0;
         o->min_version = u;
     }
+    if (n > first + 4 && args[first + 4] != Py_None && !read_envelope(args[first + 4], o)) return 0;
     return 1;
 }
 
@@ -814,7 +885,7 @@ static PyObject* world_submit(PyObject* o, PyObject* const* args, Py_ssize_t n) 
     double row[FSIM_PY_VALUES];
     fsim_command_options opt;
     fsim_command_result r;
-    if (!check_args(n, 3, 7, "submit") || !as_u32(args[0], &id) || !as_int(args[1], &level) || !WORLD_IDLE(self)) return NULL;
+    if (!check_args(n, 3, 8, "submit") || !as_u32(args[0], &id) || !as_int(args[1], &level) || !WORLD_IDLE(self)) return NULL;
     const Py_ssize_t count = read_values(args[2], row, "submit");
     if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
     if (fsim_vehicle_submit(self->world, id, level, row, (uint32_t)count, &opt, &r) != FSIM_OK) return fail();
@@ -827,7 +898,7 @@ static PyObject* world_submit_behavior(PyObject* o, PyObject* const* args, Py_ss
     uint32_t id, target = 0;
     fsim_command_options opt;
     fsim_command_result r;
-    if (!check_args(n, 2, 9, "submit_behavior") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    if (!check_args(n, 2, 10, "submit_behavior") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
     const char* bid = as_str(args[1], "behaviour id");
     if (!bid || (n >= 3 && args[2] != Py_None && !as_u32(args[2], &target)) || !read_options(args, n, 5, &opt)) return NULL;
     fsim_py_params p;
@@ -865,7 +936,7 @@ static PyObject* world_submit_mode(PyObject* o, PyObject* const* args, Py_ssize_
     double row[FSIM_PY_VALUES];
     fsim_command_options opt;
     fsim_command_result r;
-    if (!check_args(n, 3, 7, "submit_mode") || !as_u32(args[0], &id) || !as_int(args[1], &mode) || !WORLD_IDLE(self)) return NULL;
+    if (!check_args(n, 3, 8, "submit_mode") || !as_u32(args[0], &id) || !as_int(args[1], &mode) || !WORLD_IDLE(self)) return NULL;
     const Py_ssize_t count = read_values(args[2], row, "submit_mode");
     if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
     if (fsim_vehicle_submit_mode(self->world, id, mode, row, (uint32_t)count, &opt, &r) != FSIM_OK) return fail();
@@ -927,7 +998,7 @@ static PyObject* world_submit_route(PyObject* o, PyObject* const* args, Py_ssize
     fsim_command_options opt;
     fsim_command_result r;
     fsim_waypoint* points = NULL;
-    if (!check_args(n, 3, 7, "submit_route") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    if (!check_args(n, 3, 8, "submit_route") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
     const Py_ssize_t count = read_values(args[1], row, "submit_route");
     if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
     const Py_ssize_t np = read_waypoints(args[2], &points);
@@ -1005,7 +1076,7 @@ static PyObject* world_submit_curve(PyObject* o, PyObject* const* args, Py_ssize
     fsim_command_options opt;
     fsim_command_result r;
     fsim_bezier_segment* segments = NULL;
-    if (!check_args(n, 3, 7, "submit_curve") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    if (!check_args(n, 3, 8, "submit_curve") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
     const Py_ssize_t count = read_values(args[1], row, "submit_curve");
     if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
     const Py_ssize_t ns = read_segments(args[2], &segments);
@@ -1044,7 +1115,7 @@ static PyObject* world_submit_support(PyObject* o, PyObject* const* args, Py_ssi
     double row[FSIM_PY_VALUES];
     fsim_command_options opt;
     fsim_command_result r;
-    if (!check_args(n, 3, 7, "submit_support") || !as_u32(args[0], &id) || !as_int(args[1], &kind) || !WORLD_IDLE(self)) return NULL;
+    if (!check_args(n, 3, 8, "submit_support") || !as_u32(args[0], &id) || !as_int(args[1], &kind) || !WORLD_IDLE(self)) return NULL;
     const Py_ssize_t count = read_values(args[2], row, "submit_support");
     if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
     if (fsim_vehicle_submit_support(self->world, id, kind, row, (uint32_t)count, &opt, &r) != FSIM_OK) return fail();
@@ -1117,7 +1188,7 @@ static PyObject* world_activity_info(PyObject* o, PyObject* const* args, Py_ssiz
     fsim_activity_info a;
     if (!check_args(n, 1, 1, "activity_info") || !as_u64(args[0], &activity)) return NULL;
     if (fsim_activity_get(self->world, activity, &a) != FSIM_OK) Py_RETURN_NONE;
-    return info_tuple(&a);
+    return info_tuple(self->world, &a);
 }
 
 /* vehicle_activities(id) -> [info tuple]: live, then ended (newest first) */
@@ -1130,7 +1201,7 @@ static PyObject* world_vehicle_activities(PyObject* o, PyObject* const* args, Py
     PyObject* list = PyList_New(0);
     for (uint32_t i = 0; list && i < count; ++i) {
         if (fsim_vehicle_activity(self->world, id, i, &a) != FSIM_OK) continue;
-        PyObject* t = info_tuple(&a);
+        PyObject* t = info_tuple(self->world, &a);
         if (!t || PyList_Append(list, t) < 0) {
             Py_XDECREF(t);
             Py_DECREF(list);
@@ -1731,6 +1802,168 @@ static PyObject* world_borrowed_flag(PyObject* o, PyObject* const* args, Py_ssiz
     return PyBool_FromLong(((WorldObject*)o)->owner != NULL);
 }
 
+/* last_findings() -> [(reason, index, constraint, from, to, associated, description)]: every reason the last command
+ * cannot be flown as asked (ABI 1.8), the answer's the first */
+static PyObject* world_last_findings(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    (void)args;
+    if (!check_args(n, 0, 0, "last_findings")) return NULL;
+    fsim_command_detail d;
+    fsim_command_detail_init(&d);
+    fsim_last_command_detail(self->world, &d);
+    PyObject* list = PyList_New(0);
+    for (uint32_t i = 0; list && i < d.finding_count; ++i) {
+        fsim_command_finding f;
+        fsim_command_finding_init(&f);
+        if (fsim_last_command_finding(self->world, i, &f) != FSIM_OK) break; /* (past those kept) */
+        PyObject* t = Py_BuildValue("(iiiddKs)", f.reason, f.index, f.constraint, f.from, f.to, (unsigned long long)f.associated,
+                                    f.description ? f.description : "");
+        if (!t || PyList_Append(list, t) < 0) {
+            Py_XDECREF(t);
+            Py_DECREF(list);
+            return NULL;
+        }
+        Py_DECREF(t);
+    }
+    return list;
+}
+
+/* last_adjustments() -> [(index, field, constraint, requested, adjusted)]: every value the last command is flown
+ * with other than asked (ABI 1.8) */
+static PyObject* world_last_adjustments(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    (void)args;
+    if (!check_args(n, 0, 0, "last_adjustments")) return NULL;
+    fsim_command_detail d;
+    fsim_command_detail_init(&d);
+    fsim_last_command_detail(self->world, &d);
+    PyObject* list = PyList_New(0);
+    for (uint32_t i = 0; list && i < d.adjustment_count; ++i) {
+        fsim_command_adjustment a;
+        fsim_command_adjustment_init(&a);
+        if (fsim_last_command_adjustment(self->world, i, &a) != FSIM_OK) break;
+        PyObject* t = Py_BuildValue("(iiidd)", a.index, a.field, a.constraint, a.requested, a.adjusted);
+        if (!t || PyList_Append(list, t) < 0) {
+            Py_XDECREF(t);
+            Py_DECREF(list);
+            return NULL;
+        }
+        Py_DECREF(t);
+    }
+    return list;
+}
+
+/* One batch item's storage: its values, behaviour, waypoints, segments and options. */
+typedef struct {
+    double row[FSIM_PY_VALUES];
+    fsim_py_params params;
+    fsim_position_command* points;
+    fsim_waypoint* waypoints;
+    fsim_bezier_segment* segments;
+    fsim_behavior_command behavior;
+    fsim_command_options options;
+} BatchItem;
+
+static void batch_free(BatchItem* items, Py_ssize_t count) {
+    for (Py_ssize_t i = 0; i < count; ++i) {
+        fsim_py_params_free(&items[i].params);
+        PyMem_Free(items[i].points);
+        PyMem_Free(items[i].waypoints);
+        PyMem_Free(items[i].segments);
+    }
+    PyMem_Free(items);
+}
+
+/* submit_batch(id, items) -> [result]: several NEWs at once (ABI 1.8), each item (kind, code, values, behavior,
+ * waypoints, segments, options) - kind fsim_batch_kind, behavior (id, target, params, points) or None, options
+ * (source, axes, range, min_version, envelope) or None - each answered on its own */
+static PyObject* world_submit_batch(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    if (!check_args(n, 2, 2, "submit_batch") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    const Py_ssize_t count = PySequence_Size(args[1]);
+    if (count < 0) return NULL;
+    BatchItem* items = (BatchItem*)PyMem_Calloc((size_t)(count ? count : 1), sizeof(BatchItem));
+    fsim_batch_command* batch = (fsim_batch_command*)PyMem_Calloc((size_t)(count ? count : 1), sizeof(fsim_batch_command));
+    fsim_command_result* results = (fsim_command_result*)PyMem_Calloc((size_t)(count ? count : 1), sizeof(fsim_command_result));
+    fsim_command_detail* details = (fsim_command_detail*)PyMem_Calloc((size_t)(count ? count : 1), sizeof(fsim_command_detail));
+    for (Py_ssize_t i = 0; details && i < (count ? count : 1); ++i) fsim_command_detail_init(&details[i]);
+    int ok = items && batch && results && details;
+    if (!ok) PyErr_NoMemory();
+    for (Py_ssize_t i = 0; ok && i < count; ++i) {
+        BatchItem* it = &items[i];
+        fsim_batch_command* b = &batch[i];
+        b->struct_size = sizeof *b;
+        PyObject* item = PySequence_GetItem(args[1], i);
+        PyObject* part[7] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+        ok = item && PySequence_Check(item) && PySequence_Size(item) == 7;
+        if (item && !ok && !PyErr_Occurred())
+            PyErr_SetString(PyExc_ValueError, "each item must be (kind, code, values, behavior, waypoints, segments, options)");
+        for (Py_ssize_t k = 0; ok && k < 7; ++k) ok = (part[k] = PySequence_GetItem(item, k)) != NULL;
+        if (ok) ok = as_int(part[0], &b->kind) && as_int(part[1], &b->code);
+        if (ok) {
+            const Py_ssize_t values = read_values(part[2], it->row, "submit_batch");
+            ok = values >= 0;
+            b->fields = it->row, b->count = (uint32_t)(values > 0 ? values : 0);
+        }
+        if (ok && part[3] != Py_None) { /* a behaviour: (id, target, params, points) */
+            PyObject* bp[4] = {NULL, NULL, NULL, NULL};
+            ok = PySequence_Check(part[3]) && PySequence_Size(part[3]) == 4;
+            if (!ok && !PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "a behaviour must be (id, target, params, points)");
+            for (Py_ssize_t k = 0; ok && k < 4; ++k) ok = (bp[k] = PySequence_GetItem(part[3], k)) != NULL;
+            if (ok) ok = (it->behavior.id = as_str(bp[0], "behaviour id")) != NULL && as_u32(bp[1], &it->behavior.target);
+            if (ok) ok = fsim_py_params_read(bp[2], &it->params) >= 0;
+            if (ok && bp[3] != Py_None) ok = read_points(bp[3], &it->points, &it->behavior.point_count) >= 0;
+            it->behavior.param_names = it->params.names, it->behavior.param_values = it->params.values, it->behavior.param_count = it->params.count;
+            it->behavior.points = it->points;
+            b->behavior = &it->behavior;
+            for (Py_ssize_t k = 0; k < 4; ++k) Py_XDECREF(bp[k]); /* (the behaviour's id stays alive in the caller's item) */
+        }
+        if (ok && part[4] != Py_None) {
+            const Py_ssize_t np = read_waypoints(part[4], &it->waypoints);
+            ok = np >= 0;
+            b->waypoints = it->waypoints, b->waypoint_count = (uint32_t)(np > 0 ? np : 0);
+        }
+        if (ok && part[5] != Py_None) {
+            const Py_ssize_t ns = read_segments(part[5], &it->segments);
+            ok = ns >= 0;
+            b->segments = it->segments, b->segment_count = (uint32_t)(ns > 0 ? ns : 0);
+        }
+        if (ok) { /* options: (source, axes, range, min_version, envelope) */
+            fsim_command_options_init(&it->options);
+            if (part[6] != Py_None) {
+                PyObject* op[5] = {NULL, NULL, NULL, NULL, NULL};
+                const Py_ssize_t size = PySequence_Check(part[6]) ? PySequence_Size(part[6]) : -1;
+                ok = size >= 0 && size <= 5;
+                if (!ok && !PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "options must be (source, axes, range, min_version, envelope)");
+                for (Py_ssize_t k = 0; ok && k < size; ++k) ok = (op[k] = PySequence_GetItem(part[6], k)) != NULL;
+                if (ok) ok = read_options(op, size, 0, &it->options);
+                for (Py_ssize_t k = 0; k < 5; ++k) Py_XDECREF(op[k]);
+            }
+            b->options = &it->options;
+        }
+        for (Py_ssize_t k = 0; k < 7; ++k) Py_XDECREF(part[k]);
+        Py_XDECREF(item);
+    }
+    PyObject* out = NULL;
+    if (ok) {
+        if (fsim_vehicle_submit_batch(self->world, id, batch, (uint32_t)count, results, details) != FSIM_OK) {
+            fail();
+        } else {
+            out = PyList_New(count);
+            for (Py_ssize_t i = 0; out && i < count; ++i) {
+                PyObject* t = result_tuple_with(&results[i], &details[i]);
+                if (!t || PyList_SetItem(out, i, t) < 0) Py_CLEAR(out);
+            }
+        }
+    }
+    if (items) batch_free(items, count);
+    PyMem_Free(batch);
+    PyMem_Free(results);
+    PyMem_Free(details);
+    return out;
+}
+
 static PyMethodDef world_methods[] = {
     FAST("step", world_step, "step(n=1): advance every vehicle by n world steps"),
     FAST("info", world_info, "time, step seconds, vehicle steps, published, vehicle count"),
@@ -1746,7 +1979,10 @@ static PyMethodDef world_methods[] = {
     FAST("command", world_command, "command(id, level, values)"),
     FAST("command_batch", world_command_batch, "command_batch(level, ids, values)"),
     FAST("command_behavior", world_command_behavior, "command_behavior(id, behavior, target=0, params=None, points=None)"),
-    FAST("submit", world_submit, "submit(id, level, values, source, axes, range, min_version) -> result"),
+    FAST("submit", world_submit, "submit(id, level, values, source, axes, range, min_version, envelope) -> result"),
+    FAST("submit_batch", world_submit_batch, "submit_batch(id, items) -> [result]: each item (kind, code, values, behavior, waypoints, segments, options)"),
+    FAST("last_findings", world_last_findings, "last_findings() -> [(reason, index, constraint, from, to, associated, description)]"),
+    FAST("last_adjustments", world_last_adjustments, "last_adjustments() -> [(index, field, constraint, requested, adjusted)]"),
     FAST("submit_behavior", world_submit_behavior, "submit_behavior(id, behavior, target, params, points, source, axes, range, min_version) -> result"),
     FAST("submit_support", world_submit_support, "submit_support(id, kind, values, source, axes, range, min_version) -> result"),
     FAST("submit_mode", world_submit_mode, "submit_mode(id, mode, values, source, axes, range, min_version) -> result"),

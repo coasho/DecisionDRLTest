@@ -185,6 +185,27 @@ A NEW outside the current range is refused with the same reason the status gives
 
 Everything is additive, reads allocate nothing, and structs carry their size, as ADR-26 C3 requires. The support table is built once per aircraft type (and per vehicle with a profile of its own), with its evidence; a read is a lookup.
 
+### 4.8 The command envelope (as FA-2 builds it)
+
+What a command carries beside its setpoint, and what its answer carries beside its reason: A-GRA's CapabilityCommandBaseType, ResultingActivityType, CannotComplyType and MA_CannotComplyDetails, natively.
+
+- **Its id and requirements (CMD-02, CMD-10, ACT-08).** `CommandOptions::commandId` is the caller's id for the command. Every answer about it echoes it (NEW, UPDATE and CANCEL, refused ones too), and its activity's record keeps it. `trace` names up to four requirements the command comes from (an effect, an action, a task or another command), kept likewise. The platform's activity id stays the handle.
+- **Interactive (CMD-16).** Whether its activity takes activity commands, kept in the record.
+- **New or not (CMD-18).** `CommandResult::newActivity` is true for a NEW that made an activity. It is false for an UPDATE, a CANCEL, a command the live activity takes (the existing entry points) and a validation.
+- **Why, and about what (CMD-19, VAL-08).** `reasonDescription(reason)` puts the reason in words; `other` is the id it is about (the activity holding the authority). The C ABI and Python carry both in the answer's detail.
+- **Every finding (VAL-01, VAL-02, WPT-24).** Under `RangePolicy::Reject` a command is checked as Clamp would check it. Each value beyond the aircraft is held there so that checking goes on, and each is a finding. The answer is refused with the first, which is where checking used to stop: every earlier answer and every digest is unchanged. `World::commandDetails` has them all: every point and field of a route at fault (the climb its held altitude still asks, too), every section of a curve too tight for the aircraft, an hsa's altitude and speed. A malformed command still stops at its first fault. `fsim.agra` maps them to A-GRA's ValidationResult list and a route's to its RouteValidationErrorEnum.
+- **Every value flown other than asked (CMD-20).** Under Clamp each value held is an adjustment: the field (a route point's field), the limit, what was asked and what flies. The answer's `kClamped` and first-clamp detail are as before.
+- **Validation (VAL-12).** With `validateOnly`, a command gets every check a NEW makes, authority and axes included. The answer is `Valid` or a refusal with every finding; nothing flies and no record changes. The conformance walks validate a quarter of their NEWs first and hold each NEW to the same answer.
+- **Batches (CMD-03).** `World::submitBatch` makes several NEWs in order at one simulation time and answers each on its own, with each one's details.
+
+| C++ | C ABI 1.8 | Python |
+| --- | --- | --- |
+| `CommandOptions` gains `commandId`, `trace` (`Requirement {kind, id}` × 4; `RequirementKind`), `interactive`, `validateOnly`; `CommandStatus::Valid` | `fsim_command_options` (its `struct_size` grows) gains `command_id`, `trace` (`fsim_requirement`), `interactive`, `validate_only`; `FSIM_COMMAND_VALID` | every `submit*` takes `command_id=`, `trace=[("task", 7), ...]`, `interactive=`, `validate_only=` (then a `fsim.Validation`) |
+| `CommandResult` gains `newActivity`, `commandId` (`other` is the id a reason is about; `reasonDescription(reason)` the words) | `fsim_command_detail` gains `new_activity`, `finding_count`, `adjustment_count`, `command_id`, `associated`, `description` | `Activity.command_id`; `fsim.Rejected` gains `description`, `associated`, `command_id`, `findings`, `adjustments` |
+| `CommandDetails {findings[16], adjustments[16]}` (`Finding`, `Adjustment`) by `World::commandDetails(id)`, `Vehicle::commandDetails()` | `fsim_last_command_finding(world, i, &f)`, `fsim_last_command_adjustment(world, i, &a)` | `World.last_command_details()` → (`[fsim.Finding]`, `[fsim.Adjustment]`) |
+| `ActivityRecord` gains `commandId`, `trace`, `interactive` | `fsim_activity_get_envelope(world, activity, &e)` (`fsim_activity_info` has no `struct_size`) | `ActivityInfo.command_id`, `.interactive`, `.trace` |
+| `World::submitBatch(id, Span<const BatchCommand>, &details)`; `BatchCommand {command, waypoints, segments, options}` | `fsim_vehicle_submit_batch(world, id, batch, count, results, details)` (`fsim_batch_command`: the kind, its call's arguments) | `vehicle.submit_batch([fsim.BatchCommand("submit_hsa", heading_rad=1.0), ...])` → an `Activity`, `Validation` or `Rejected` each |
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -332,6 +353,8 @@ Stop advertising what does not work, at once (D4); tell physically unsupported, 
 ### FA-2: Command envelope, activity commands, reports and flight tasks (L)
 
 The command and activity semantics A-GRA defines around every flight command.
+
+**Status:** in progress, in five steps: FA-2a the command envelope (4.8), done 2026-09-27 and measured in section 14; FA-2b ranks, queues and time windows; FA-2c the activity commands; FA-2d flight tasks, suggestions and controllers; FA-2e the reports and the fleet cases.
 
 **Items (36):** CMD-02, CMD-03, CMD-05, CMD-06, CMD-07, CMD-08, CMD-09, CMD-10, CMD-12, CMD-13, CMD-14, CMD-15, CMD-16, CMD-18, CMD-19, CMD-20; WPT-24; CRV-14; VAL-01, VAL-02, VAL-08, VAL-10, VAL-11, VAL-12; ACT-03, ACT-04, ACT-06, ACT-07, ACT-08, ACT-10, ACT-13, ACT-15; AUT-06; STS-14; TSK-01, TSK-02.
 
@@ -682,6 +705,29 @@ Filled as the stages land: each stage's criteria results, the digests (identical
 
   The new baseline awaits the owner's approval.
 - **ctest:** all 213 tests pass.
+
+**FA-2a (the command envelope: CMD-02, CMD-03, CMD-10, CMD-16's record, CMD-18, CMD-19, CMD-20; VAL-01, VAL-02, VAL-08, VAL-12; WPT-24; ACT-08).**
+- What it built is 4.8, in C++, the C ABI (1.8) and Python. `fsim.command/command_id`, `/batch`, `/traceability` and `/validate` are supported on every vehicle. The interactive flag is kept now; the activity commands it refuses come in FA-2c.
+- `test_envelope` (4 cases, 92 checks) and its Python twin (4 tests):
+  - a command's id comes back from its NEW, its UPDATEs and its CANCEL, refused ones too, and its activity keeps it with its requirements and interactive flag;
+  - only a NEW that made an activity says so;
+  - an hsa too fast and too high is refused with both findings, the altitude first as before, and flown with both values held under Clamp, each an adjustment;
+  - a route's every point at fault is named with its field, and a curve's every section too tight;
+  - a validation is answered as its NEW is, and nothing changes;
+  - a batch is answered item by item, each with its own details.
+
+  `test_c_abi` covers the 1.8 calls.
+- The conformance walk (1,987,301 checks, one aircraft per adapter) validates a quarter of its NEWs first, drawn apart from the walk so that the walk takes the same path. Each validation must leave every record as it was and answer as the NEW then does: Valid exactly when the NEW is accepted, with the same reason and flags. Every adapter meets both a valid and a refused one. Every accepted NEW must say it made an activity.
+- No earlier answer changes: under Reject a command is refused with the first finding, as before, and only the details list the others. Digests: identical, with protection and without.
+- The allocation gate passes.
+- A/B throughput against FA-1e's build (`fsim_control_bench`, interleaved):
+  - per step (`micro`, 5 rounds): the medians within -2.1 % to +1.9 %;
+  - the existing entry points' per-step command, the same level again (`command`, two runs of 9 rounds): +0.0 % and +2.9 %, the noise;
+  - a NEW: 6.6 to 8.0 % more for a level switch (3.5 ns of 49), 4.4 to 7.0 % for a behaviour (5 ns of 109);
+  - a checked UPDATE: 8.5 to 9.3 % more (2 ns of 22.5).
+
+  That is the envelope's cost. Each activity keeps its id, requirements and flag, so its record is 232 bytes (was 160). Each NEW or UPDATE resets the details, and the answer is 48 bytes (was 40). The first version cost 12.6 % a NEW: its answer also carried the description and the associated id, which are now read from its reason and `other`. Its details had also parted the per-step path's members; they now sit at the end of the host.
+- ctest: all 217 tests pass (the four envelope cases added).
 
 
 ## Appendix A: the inventory

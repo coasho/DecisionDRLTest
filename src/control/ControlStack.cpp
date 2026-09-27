@@ -793,6 +793,17 @@ const char* flightModeName(FlightMode mode) noexcept {
     }
 }
 
+const char* requirementKindName(RequirementKind kind) noexcept {
+    switch (kind) {
+    case RequirementKind::None: return "none";
+    case RequirementKind::Effect: return "effect";
+    case RequirementKind::Action: return "action";
+    case RequirementKind::Task: return "task";
+    case RequirementKind::Command: return "command";
+    default: return "?";
+    }
+}
+
 const char* activityStateName(ActivityState state) noexcept {
     switch (state) {
     case ActivityState::Pending: return "pending";

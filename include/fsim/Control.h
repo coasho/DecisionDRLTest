@@ -8,6 +8,7 @@
 #include "fsim/Capability.h"
 #include "fsim/EnvironmentState.h"
 #include "fsim/Rng.h"
+#include "fsim/Span.h"
 #include "fsim/VehicleState.h"
 
 #include "fsim/Export.h"
@@ -311,6 +312,17 @@ struct EnginesCommand {
 
 /// The commands set directly beside the cascade: the support effectors and per-engine throttles.
 using SupportCommand = std::variant<GearCommand, FlapsCommand, WheelBrakesCommand, SpeedbrakeCommand, PitchTrimCommand, EnginesCommand>;
+
+/// One command of a batch NEW (World::submitBatch; A-GRA's several command
+/// instances in one message, each answered on its own; docs/flight-autonomy.md, 4.8):
+/// a flight or guidance command - a route's waypoints or a curve's segments
+/// beside it - or a support effector's, with its options.
+struct BatchCommand {
+    std::variant<Command, SupportCommand> command;
+    Span<const Waypoint> waypoints;     ///< a RouteCommand's
+    Span<const BezierSegment> segments; ///< a CurveCommand's
+    CommandOptions options;
+};
 
 inline Level levelOf(const Command& c) noexcept {
     return c.index() < static_cast<std::size_t>(Level::Behavior) ? static_cast<Level>(c.index()) : Level::Behavior;

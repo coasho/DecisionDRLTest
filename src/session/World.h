@@ -115,6 +115,15 @@ public:
     /// NEW of a curve (fsim.guidance.curve) with its segments (docs/vehicle-interface.md, 4.7).
     control::CommandResult submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
                                   const control::CommandOptions& options = {});
+    /// Several NEWs at once (docs/flight-autonomy.md, 4.8), made in order at
+    /// this simulation time, each answered on its own; `details`, if given,
+    /// gets each answer's details (commandDetails()) in the same order.
+    std::vector<control::CommandResult> submitBatch(std::uint32_t id, Span<const control::BatchCommand> batch,
+                                                    std::vector<control::CommandDetails>* details = nullptr);
+    /// Everything the checks found for the vehicle's last NEW, validation or
+    /// UPDATE (docs/flight-autonomy.md, 4.8): every finding and every value
+    /// flown other than asked. Null for an unknown vehicle.
+    const control::CommandDetails* commandDetails(std::uint32_t id) const noexcept;
     /// UPDATE: a new setpoint for a live activity (the fast path).
     control::CommandResult update(control::ActivityId activity, const control::Command& setpoint);
     control::CommandResult update(control::ActivityId activity, const control::SupportCommand& setpoint);

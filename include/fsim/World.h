@@ -170,6 +170,14 @@ public:
     /// segment, and a section too tight in CommandResult::from and to).
     control::CommandResult submit(const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
                                   const control::CommandOptions& options = {});
+    /// Several NEWs at once (docs/sdk/control.md, "The command envelope"),
+    /// made in order at this simulation time and each answered on its own;
+    /// `details`, if given, gets each answer's commandDetails() in order.
+    std::vector<control::CommandResult> submitBatch(Span<const control::BatchCommand> batch, std::vector<control::CommandDetails>* details = nullptr);
+    /// Everything the checks found for the vehicle's last NEW, validation
+    /// (CommandOptions::validateOnly) or UPDATE: every finding - the answer's
+    /// reason the first - and every value flown other than asked.
+    control::CommandDetails commandDetails() const;
     /// The live activities, then the ended ones the vehicle remembers, newest first.
     /// A guidance mode's record carries its progress (docs/vehicle-interface.md, 5.3).
     std::vector<control::ActivityRecord> activities() const;

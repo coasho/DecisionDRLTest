@@ -13,9 +13,13 @@ these are names only (ADR-28, decision D1).
 """
 from .world import ActivityState
 
-#: CommandStatus (0 accepted, 1 rejected, 2 canceled) -> CommandProcessingStateEnum. RECEIVED is never
-#: needed: every command is answered at once.
-COMMAND_PROCESSING_STATE = {0: "ACCEPTED", 1: "REJECTED", 2: "CANCELED"}
+#: CommandStatus (0 accepted, 1 rejected, 2 canceled, 3 valid) -> CommandProcessingStateEnum. RECEIVED is never
+#: needed: every command is answered at once. A validation that would be accepted is ACCEPTED, and its
+#: validation result FLIGHT_COMMAND_VALID (validation_results).
+COMMAND_PROCESSING_STATE = {0: "ACCEPTED", 1: "REJECTED", 2: "CANCELED", 3: "ACCEPTED"}
+
+#: fsim.RequirementKind names -> the element of A-GRA's RequirementInstanceID_ChoiceType a Traceability names
+REQUIREMENT = {"effect": "EffectID", "action": "ActionID", "task": "TaskID", "command": "CapabilityCommandID"}
 
 #: Constraint flags an active activity carries: the demand limited, a value clamped, a support axis taken
 #: (partly constrained); an effector at its stop, a limit exceeded (fully constrained).
@@ -135,6 +139,37 @@ def cannot_comply(reason):
 def validation_result(reason):
     """A rejection's reason as A-GRA's MA_ValidationResultEnum; None where the reason is not a validation's."""
     return VALIDATION_RESULT.get(reason)
+
+
+def validation_results(answer):
+    """A validation (fsim.Validation) or a rejection (fsim.Rejected) as A-GRA's MA_ValidationResultEnum list,
+    "select all that apply" (docs/flight-autonomy.md, 4.8): ["FLIGHT_COMMAND_VALID"] for a valid one, else
+    each finding's validation result once, in order; [] where none is a validation's."""
+    if getattr(answer, "valid", False):
+        return ["FLIGHT_COMMAND_VALID"]
+    out = []
+    for reason in [f.reason for f in answer.findings] or [answer.reason]:
+        result = VALIDATION_RESULT.get(reason)
+        if result and result not in out:
+            out.append(result)
+    return out
+
+
+#: constraint names -> A-GRA's RouteValidationErrorEnum, for a route's findings (route_validation_error)
+_ROUTE_ERROR = {"max_orientation": "BANK_ANGLE_ERROR", "max_airspeed": "SPEED_ERROR", "min_airspeed": "SPEED_ERROR",
+                "max_altitude": "ALTITUDE_ERROR", "min_altitude": "ALTITUDE_ERROR", "max_climb_rate": "ALTITUDE_ERROR",
+                "max_descent_rate": "ALTITUDE_ERROR", "max_turn_rate": "TURN_ERROR"}
+
+
+def route_validation_error(finding):
+    """A route's finding (fsim.Finding) as A-GRA's RouteValidationErrorEnum, for its invalid segment (the
+    finding's index): a fly-by turn its legs cannot hold TURN_ERROR, a bank BANK_ANGLE_ERROR, a speed
+    SPEED_ERROR, an altitude or a climb ALTITUDE_ERROR, a malformed point REQUIRED_INPUT_ERROR."""
+    if finding.reason == "invalid_parameter" or (finding.reason == "invalid_waypoint" and finding.constraint == "none" and finding.index < 0):
+        return "REQUIRED_INPUT_ERROR"
+    if finding.reason == "invalid_waypoint" and finding.constraint == "none":
+        return "TURN_ERROR"
+    return _ROUTE_ERROR.get(finding.constraint, "OTHER_ERROR")
 
 
 def performance_constraint(constraint):

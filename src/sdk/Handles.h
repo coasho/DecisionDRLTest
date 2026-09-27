@@ -17,6 +17,7 @@ struct fsim_world {
     std::unique_ptr<fsim::World> object;          ///< the C++ view handed out by fsim_world_object(), made on demand
     std::unordered_set<std::string> strings;      ///< strings handed out (capability ids, parameter names): stable until the world goes
     fsim::control::CommandResult last;             ///< the last answer to a NEW, UPDATE or CANCEL (fsim_last_command_detail)
+    uint32_t lastVehicle = 0;                      ///< the vehicle that gave it: its details (World::commandDetails) are the last command's
     std::vector<fsim::control::Waypoint> waypoints; ///< a route's, as given (reused: a route updated every step allocates nothing once it has room)
     std::vector<fsim::control::BezierSegment> segments; ///< a curve's, as given (reused likewise)
 

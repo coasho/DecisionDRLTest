@@ -4,6 +4,7 @@
 // 8): one descriptor per flight level and per registered behaviour. Built
 // between steps and only ever extended, so an index into it never changes.
 
+#include "control/Checks.h"
 #include "fsim/Capability.h"
 #include "fsim/Control.h"
 #include "fsim/VehicleProfile.h"
@@ -106,13 +107,14 @@ public:
     AxisMask defaultAxes(std::size_t index, const Command& command) const noexcept;
 
     /// Check a command's parameters against the capability's (NEW and UPDATE):
-    /// a required field held (kHold) or not finite is InvalidParameter; one
-    /// outside its range is clamped (kClamped in `flags`) or, with Reject,
-    /// OutOfRange. None if it may fly. `detail` gets the field (or route
-    /// point) the answer is about - the first clamped, when one was - and the
-    /// performance limit its value broke (docs/vehicle-interface.md, 5.1).
-    Reason check(std::size_t index, Command& command, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
-    Reason check(std::size_t index, SupportCommand& command, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
+    /// a required field held (kHold) or not finite is InvalidParameter, and a
+    /// field the aircraft has nothing for NotSupported - returned at once, with
+    /// the field in the log's result. One outside its range is held to it and
+    /// logged (docs/flight-autonomy.md, 4.8): clamped (kClamped) or, with
+    /// Reject, an OutOfRange finding, with the field and the performance limit
+    /// its value broke (docs/vehicle-interface.md, 5.1).
+    Reason check(std::size_t index, Command& command, CheckLog& log) const noexcept;
+    Reason check(std::size_t index, SupportCommand& command, CheckLog& log) const noexcept;
 
     /// The applicability rules that exclude this aircraft (ruleBit): what it is never offered.
     std::uint16_t excludedRules() const noexcept { return excludedRules_; }

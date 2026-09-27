@@ -717,6 +717,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
     std::deque<Planned> plan;
     AuthorityModel authority;
     std::mt19937_64 callers(seed ^ 0x9e3779b97f4a7c15ull); // who an UPDATE or a CANCEL says it is
+    std::mt19937_64 validations(seed ^ 0x5851f42d4c957f2dull); // which NEWs are validated first (drawn apart, as the callers are)
     authority.control.assign(w.capabilities(v).size(), ControlStatus{});
     authority.restricted.assign(w.capabilities(v).size(), CapabilityStatus{});
 
@@ -790,7 +791,28 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             SupportCommand sc;
             const int kind = commandFor(d, c, sc);
             REQUIRE(kind >= 0);
+            // now and then validated first (docs/flight-autonomy.md, 4.8): nothing changes, and the NEW is answered alike
+            const bool validating = std::uniform_real_distribution<double>(0.0, 1.0)(validations) < 0.25;
+            CommandResult checked;
+            if (validating) {
+                CommandOptions check = done.options;
+                check.validateOnly = true;
+                checked = kind == 1 ? w.submit(v, sc, check) : submitMade(w, v, c, make, check);
+                const auto records = snapshot(w, v);
+                CHECK(records.size() == before.size());
+                for (const auto& [id, record] : records)
+                    if (const auto it = before.find(id); it != before.end()) CHECK(sameRecord(it->second, record));
+                CHECK(checked.activity == 0);
+                CHECK_FALSE(checked.newActivity);
+            }
             done.result = kind == 1 ? w.submit(v, sc, done.options) : submitMade(w, v, c, make, done.options);
+            if (validating) {
+                ++seen[checked.status == CommandStatus::Valid ? "validate:valid" : "validate:refused"];
+                CHECK((checked.status == CommandStatus::Valid) == done.result.accepted());
+                CHECK(checked.reason == done.result.reason);
+                CHECK(checked.flags == done.result.flags);
+            }
+            if (done.result.accepted()) CHECK(done.result.newActivity);
             if (done.result.accepted()) issued.push_back(done.result.activity);
             break;
         }
@@ -998,7 +1020,7 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
                                  "canceled:requested", "completed:goal_reached", "new:done", "new:authority_held",
                                  "new:invalid_axes", "new:out_of_range", "new:invalid_parameter", "update:done", "update:not_updatable",
                                  "update:wrong_command_type", "update:activity_ended", "update:unknown_activity", "cancel:done",
-                                 "cancel:activity_ended", "cancel:unknown_activity", "clamped"}) {
+                                 "cancel:activity_ended", "cancel:unknown_activity", "clamped", "validate:valid", "validate:refused"}) {
             INFO(what);
             CHECK(seen[what] > 0);
         }

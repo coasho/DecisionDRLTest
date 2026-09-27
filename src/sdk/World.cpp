@@ -143,6 +143,18 @@ control::CommandResult Vehicle::submit(const control::CurveCommand& curve, Span<
     return r;
 }
 
+std::vector<control::CommandResult> Vehicle::submitBatch(Span<const control::BatchCommand> batch, std::vector<control::CommandDetails>* details) {
+    if (world_) return world_->impl_->submitBatch(id_, batch, details);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownVehicle;
+    return std::vector<control::CommandResult>(batch.size(), r);
+}
+
+control::CommandDetails Vehicle::commandDetails() const {
+    const control::CommandDetails* d = world_ ? world_->impl_->commandDetails(id_) : nullptr;
+    return d ? *d : control::CommandDetails{};
+}
+
 std::vector<control::ActivityRecord> Vehicle::activities() const {
     return world_ ? world_->impl_->activities(id_) : std::vector<control::ActivityRecord>{};
 }

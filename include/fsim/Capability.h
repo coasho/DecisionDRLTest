@@ -196,31 +196,102 @@ enum class RangePolicy : std::uint8_t {
     None,   ///< no parameter or availability checks: the existing entry points' behaviour
 };
 
+/// What a requirement a command traces to is (A-GRA's RequirementInstanceID_Choice).
+enum class RequirementKind : std::uint8_t { None, Effect, Action, Task, Command, Count };
+/// "effect", "action", "task", "command"; "none".
+FSIM_API const char* requirementKindName(RequirementKind kind) noexcept;
+
+/// A requirement a command comes from (A-GRA's Traceability.Requirement;
+/// docs/flight-autonomy.md, 4.8): the caller's ids, kept with the activity.
+struct Requirement {
+    RequirementKind kind = RequirementKind::None;
+    std::uint64_t id = 0;
+};
+/// At most this many requirements a command traces to.
+inline constexpr std::size_t kMaxRequirements = 4;
+
 struct CommandOptions {
     Source source = Source::Policy;
     AxisMask axes = 0;                      ///< 0 = the capability's default axes
     RangePolicy range = RangePolicy::Clamp;
     std::uint16_t minVersion = 0;           ///< reject a capability older than this
+    // The command envelope (docs/flight-autonomy.md, 4.8):
+    /// The caller's id for this command (A-GRA's CommandID): echoed in its
+    /// answers and kept with its activity. 0: none.
+    std::uint64_t commandId = 0;
+    /// The requirements it comes from (A-GRA's Traceability): kept with its activity.
+    std::array<Requirement, kMaxRequirements> trace{};
+    /// Whether its activity takes activity commands (A-GRA's Interactive).
+    bool interactive = true;
+    /// Check it as a NEW is checked and answer as a NEW would, flying nothing:
+    /// Valid, or Rejected with every finding (A-GRA's validation; FLIGHT_COMMAND_VALID).
+    bool validateOnly = false;
 };
 
-enum class CommandStatus : std::uint8_t { Accepted, Rejected, Canceled };
+enum class CommandStatus : std::uint8_t {
+    Accepted,
+    Rejected,
+    Canceled,
+    Valid, ///< CommandOptions::validateOnly: it would be accepted; nothing flies
+};
 enum CommandFlag : std::uint16_t { kClamped = 1u << 0 };
 
-/// The synchronous answer to NEW, UPDATE and CANCEL.
+/// The synchronous answer to NEW, UPDATE and CANCEL. The reason in words
+/// is reasonDescription(reason) (A-GRA's CannotComply description).
 struct CommandResult {
     CommandStatus status = CommandStatus::Rejected;
     Reason reason = Reason::None;
     ActivityId activity = 0; ///< the new (NEW) or addressed (UPDATE, CANCEL) activity
-    ActivityId other = 0;    ///< the activity that holds the authority (AuthorityHeld)
+    /// An id the reason is about (A-GRA's AssociatedID): the activity that
+    /// holds the authority (AuthorityHeld); 0 none.
+    ActivityId other = 0;
     std::uint16_t flags = 0; ///< CommandFlag bits
     // What a rejection or a clamp was about (docs/vehicle-interface.md, 5.1):
     /// the field (in the command struct's order, or a behaviour's named
     /// parameter's place in its descriptor), route point or curve segment; -1: none
     std::int16_t index = -1;
     Constraint constraint = Constraint::None; ///< the performance limit its value broke
+    /// A NEW that made an activity (A-GRA's NewActivity; docs/flight-autonomy.md,
+    /// 4.8); false for an UPDATE, a CANCEL, a command the live activity takes
+    /// (the existing entry points), a validation.
+    bool newActivity = false;
     float from = std::numeric_limits<float>::quiet_NaN(); ///< a curve segment's section that breaks it: its parameter, 0..1
     float to = std::numeric_limits<float>::quiet_NaN();
+    std::uint64_t commandId = 0; ///< the command's id (docs/flight-autonomy.md, 4.8): a NEW's, or the addressed activity's
     bool accepted() const noexcept { return status == CommandStatus::Accepted; }
+};
+
+/// One reason a command cannot be flown as asked (A-GRA's ValidationResult and
+/// its reason's detail; docs/flight-autonomy.md, 4.8), as CommandResult's first.
+struct Finding {
+    Reason reason = Reason::None;
+    std::int16_t index = -1;                  ///< the field, route point or curve segment
+    Constraint constraint = Constraint::None; ///< the performance limit its value breaks
+    float from = std::numeric_limits<float>::quiet_NaN(); ///< a curve segment's section: its parameter, 0..1
+    float to = std::numeric_limits<float>::quiet_NaN();
+    std::uint64_t associated = 0;             ///< an id it is about
+    const char* description = "";            ///< in words
+};
+
+/// A value a command was flown with other than it asked (A-GRA's "accepted
+/// with less than optimum results"): clamped to what the aircraft can do.
+struct Adjustment {
+    std::int16_t index = -1;                  ///< the command's field, a route point, a curve segment
+    std::int16_t field = -1;                  ///< a route point's field (fsim/Control.h Waypoint's order); -1 none
+    Constraint constraint = Constraint::None; ///< the limit it was held to
+    double requested = std::numeric_limits<double>::quiet_NaN(); ///< NaN where it is not one number (a turn flown smaller)
+    double adjusted = std::numeric_limits<double>::quiet_NaN();
+};
+
+/// Everything the checks of a command's answer found (docs/flight-autonomy.md,
+/// 4.8): every reason it cannot be flown as asked, the first of them the
+/// answer's reason, and every value it is flown with other than it asked.
+struct CommandDetails {
+    static constexpr std::size_t kMax = 16;
+    std::uint8_t findingCount = 0, adjustmentCount = 0; ///< (beyond kMax: counted, not kept)
+    std::array<Finding, kMax> findings{};
+    std::array<Adjustment, kMax> adjustments{};
+    void clear() noexcept { findingCount = adjustmentCount = 0; }
 };
 
 // --- Activities ---------------------------------------------------------------------
@@ -263,6 +334,10 @@ struct ActivityRecord {
     std::uint32_t vehicle = 0;
     std::uint16_t capability = 0;      ///< index into the vehicle's capabilities
     Source source = Source::Policy;
+    // the command it came from (docs/flight-autonomy.md, 4.8)
+    std::uint64_t commandId = 0;       ///< the caller's id for it
+    std::array<Requirement, kMaxRequirements> trace{}; ///< the requirements it comes from
+    bool interactive = true;           ///< it takes activity commands
     AxisMask axes = 0;                 ///< the axes it owns (or owned, once ended)
     ActivityState state = ActivityState::Pending;
     Reason reason = Reason::None;      ///< why it ended, else None

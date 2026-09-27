@@ -360,10 +360,12 @@ control::CommandResult World::submit(std::uint32_t id, const control::Command& c
     if (!e) {
         control::CommandResult r;
         r.reason = control::Reason::UnknownVehicle;
+        r.commandId = options.commandId;
         return r;
     }
     if (std::holds_alternative<control::BehaviorCommand>(command)) e->catalog->refresh();
-    const control::CommandResult r = e->host.submit(command, options, pool_->states()[e->slot], simTime_);
+    control::CommandResult r = e->host.submit(command, options, pool_->states()[e->slot], simTime_);
+    r.commandId = options.commandId;
     if (r.accepted()) {
         e->commanded = r.activity;
         levelChanged(*e);
@@ -377,9 +379,11 @@ control::CommandResult World::submit(std::uint32_t id, const control::RouteComma
     if (!e) {
         control::CommandResult r;
         r.reason = control::Reason::UnknownVehicle;
+        r.commandId = options.commandId;
         return r;
     }
-    const control::CommandResult r = e->host.submit(route, waypoints, options, pool_->states()[e->slot], simTime_);
+    control::CommandResult r = e->host.submit(route, waypoints, options, pool_->states()[e->slot], simTime_);
+    r.commandId = options.commandId;
     if (r.accepted()) {
         e->commanded = r.activity;
         levelChanged(*e);
@@ -393,9 +397,11 @@ control::CommandResult World::submit(std::uint32_t id, const control::CurveComma
     if (!e) {
         control::CommandResult r;
         r.reason = control::Reason::UnknownVehicle;
+        r.commandId = options.commandId;
         return r;
     }
-    const control::CommandResult r = e->host.submit(curve, segments, options, pool_->states()[e->slot], simTime_);
+    control::CommandResult r = e->host.submit(curve, segments, options, pool_->states()[e->slot], simTime_);
+    r.commandId = options.commandId;
     if (r.accepted()) {
         e->commanded = r.activity;
         levelChanged(*e);
@@ -408,9 +414,11 @@ control::CommandResult World::submit(std::uint32_t id, const control::SupportCom
     if (!e) {
         control::CommandResult r;
         r.reason = control::Reason::UnknownVehicle;
+        r.commandId = options.commandId;
         return r;
     }
-    const control::CommandResult r = e->host.submit(command, options, pool_->states()[e->slot], simTime_);
+    control::CommandResult r = e->host.submit(command, options, pool_->states()[e->slot], simTime_);
+    r.commandId = options.commandId;
     if (r.accepted() && std::holds_alternative<control::EnginesCommand>(command)) levelChanged(*e); // thrust left the cascade
     return r;
 }
@@ -456,6 +464,43 @@ control::CommandResult unknownActivity(control::ActivityId activity) {
 
 } // namespace
 
+namespace {
+
+/// A refused UPDATE or CANCEL echoes the command id of the activity it addressed, as an accepted one does.
+void echo(const control::CapabilityHost& host, control::CommandResult& r) noexcept {
+    if (r.status == control::CommandStatus::Rejected && r.activity && !r.commandId)
+        if (const control::ActivityRecord* a = host.activity(r.activity)) r.commandId = a->commandId;
+}
+
+} // namespace
+
+std::vector<control::CommandResult> World::submitBatch(std::uint32_t id, Span<const control::BatchCommand> batch,
+                                                       std::vector<control::CommandDetails>* details) {
+    std::vector<control::CommandResult> out;
+    out.reserve(batch.size());
+    if (details) details->clear(), details->reserve(batch.size());
+    for (const control::BatchCommand& b : batch) {
+        if (const auto* support = std::get_if<control::SupportCommand>(&b.command)) {
+            out.push_back(submit(id, *support, b.options));
+        } else {
+            const control::Command& c = std::get<control::Command>(b.command);
+            if (const auto* route = std::get_if<control::RouteCommand>(&c)) out.push_back(submit(id, *route, b.waypoints, b.options));
+            else if (const auto* curve = std::get_if<control::CurveCommand>(&c)) out.push_back(submit(id, *curve, b.segments, b.options));
+            else out.push_back(submit(id, c, b.options));
+        }
+        if (details) {
+            const control::CommandDetails* d = commandDetails(id);
+            details->push_back(d ? *d : control::CommandDetails{});
+        }
+    }
+    return out;
+}
+
+const control::CommandDetails* World::commandDetails(std::uint32_t id) const noexcept {
+    const Entry* e = entry(id);
+    return e ? &e->host.details() : nullptr;
+}
+
 control::CommandResult World::update(control::ActivityId activity, const control::SupportCommand& setpoint) {
     return update(control::Source::Policy, activity, setpoint);
 }
@@ -475,31 +520,48 @@ control::CommandResult World::update(control::ActivityId activity, const control
 control::CommandResult World::cancel(control::ActivityId activity) { return cancel(control::Source::Policy, activity); }
 
 control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::SupportCommand& setpoint) {
-    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, setpoint, caller);
+    if (Entry* e = entry(control::activityVehicle(activity))) {
+        control::CommandResult r = e->host.update(activity, setpoint, caller);
+        echo(e->host, r);
+        return r;
+    }
     return unknownActivity(activity);
 }
 
 control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::Command& setpoint) {
-    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, setpoint, pool_->states()[e->slot], caller);
+    if (Entry* e = entry(control::activityVehicle(activity))) {
+        control::CommandResult r = e->host.update(activity, setpoint, pool_->states()[e->slot], caller);
+        echo(e->host, r);
+        return r;
+    }
     return unknownActivity(activity);
 }
 
 control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::RouteCommand& route,
                                      Span<const control::Waypoint> waypoints) {
-    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, route, waypoints, pool_->states()[e->slot], caller);
+    if (Entry* e = entry(control::activityVehicle(activity))) {
+        control::CommandResult r = e->host.update(activity, route, waypoints, pool_->states()[e->slot], caller);
+        echo(e->host, r);
+        return r;
+    }
     return unknownActivity(activity);
 }
 
 control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::CurveCommand& curve,
                                      Span<const control::BezierSegment> segments) {
-    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, curve, segments, pool_->states()[e->slot], caller);
+    if (Entry* e = entry(control::activityVehicle(activity))) {
+        control::CommandResult r = e->host.update(activity, curve, segments, pool_->states()[e->slot], caller);
+        echo(e->host, r);
+        return r;
+    }
     return unknownActivity(activity);
 }
 
 control::CommandResult World::cancel(control::Source caller, control::ActivityId activity) {
     Entry* e = entry(control::activityVehicle(activity));
     if (!e) return unknownActivity(activity);
-    const control::CommandResult r = e->host.cancel(activity, simTime_, caller);
+    control::CommandResult r = e->host.cancel(activity, simTime_, caller);
+    echo(e->host, r);
     if (r.status == control::CommandStatus::Canceled) levelChanged(*e);
     return r;
 }

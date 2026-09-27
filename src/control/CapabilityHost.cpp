@@ -32,11 +32,13 @@ std::uint16_t flagsOn(const RuntimeReport& report, AxisMask axes) noexcept {
     return f;
 }
 
-CommandResult accepted(ActivityId activity, std::uint16_t flags = 0) noexcept {
+/// Accepted; `made` for a NEW that made an activity (A-GRA's NewActivity).
+CommandResult accepted(ActivityId activity, std::uint16_t flags = 0, bool made = false) noexcept {
     CommandResult r;
     r.status = CommandStatus::Accepted;
     r.activity = activity;
     r.flags = flags;
+    r.newActivity = made;
     return r;
 }
 
@@ -50,17 +52,12 @@ CommandResult about(CommandResult r, const CommandResult& detail) noexcept {
 }
 
 /// `value` against a limit of the aircraft's (above: a most, else a least):
-/// None within it, or where either is not known; beyond it, clamped to it
-/// (kClamped) or, with Reject, PerformanceLimit - `detail` naming the field
-/// or waypoint `index` and the limit (the first clamp's, when clamped).
-Reason bound(double& value, double limit, bool above, std::int16_t index, Constraint constraint, RangePolicy range, std::uint16_t& flags,
-             CommandResult& detail) noexcept {
-    if (std::isnan(limit) || isHold(value) || (above ? value <= limit : value >= limit)) return Reason::None;
-    if (range == RangePolicy::Reject || !(flags & kClamped)) detail.index = index, detail.constraint = constraint;
-    if (range == RangePolicy::Reject) return Reason::PerformanceLimit;
-    value = limit;
-    flags |= kClamped;
-    return Reason::None;
+/// nothing within it, or where either is not known; beyond it, held to it and
+/// logged - clamped, or with Reject a PerformanceLimit finding - naming the
+/// field or waypoint `index` (and a waypoint's `field`) and the limit.
+void bound(double& value, double limit, bool above, std::int16_t index, Constraint constraint, CheckLog& log, std::int16_t field = -1) noexcept {
+    if (std::isnan(limit) || isHold(value) || (above ? value <= limit : value >= limit)) return;
+    log.limit(value, limit, index, field, constraint, Reason::PerformanceLimit);
 }
 
 bool aboveGround(double reference) noexcept { return reference == static_cast<double>(AltitudeReference::AboveGround); }
@@ -274,52 +271,48 @@ Reason CapabilityHost::resolveHsa(HsaCommand& c, const sim::VehicleState& state,
     return Reason::None;
 }
 
-Reason CapabilityHost::limitHsa(HsaCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept {
-    return limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, range, flags, detail, 2, 4);
-}
+void CapabilityHost::limitHsa(HsaCommand& c, CheckLog& log) const noexcept { limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, log, 2, 4); }
 
-Reason CapabilityHost::limitFlight(double& speed, double speedReference, double& altitude, double altitudeReference, RangePolicy range,
-                                   std::uint16_t& flags, CommandResult& detail, std::int16_t speedIndex, std::int16_t altitudeIndex) const noexcept {
+void CapabilityHost::limitFlight(double& speed, double speedReference, double& altitude, double altitudeReference, CheckLog& log, std::int16_t speedIndex,
+                                 std::int16_t altitudeIndex, std::int16_t speedField, std::int16_t altitudeField) const noexcept {
     const Performance& f = performance_;
-    auto limit = [&](double& value, double most, bool above, std::int16_t index, Constraint constraint) {
-        return bound(value, most, above, index, constraint, range, flags, detail);
-    };
     // the altitude: under the ceiling; above ground, above it
-    if (aboveGround(altitudeReference)) {
-        if (const Reason r = limit(altitude, 0.0, false, altitudeIndex, Constraint::MinAltitude); r != Reason::None) return r;
-    } else if (const Reason r = limit(altitude, f.ceilingM, true, altitudeIndex, Constraint::MaxAltitude); r != Reason::None) {
-        return r;
-    }
+    if (aboveGround(altitudeReference)) bound(altitude, 0.0, false, altitudeIndex, Constraint::MinAltitude, log, altitudeField);
+    else bound(altitude, f.ceilingM, true, altitudeIndex, Constraint::MaxAltitude, log, altitudeField);
     // the speed, within the envelope's calibrated speeds and Mach at the altitude it asks for (the
     // standard atmosphere's); a rotorcraft's ground speed within its fastest
+    auto limit = [&](double most, bool above, Constraint constraint) { bound(speed, most, above, speedIndex, constraint, log, speedField); };
     const auto reference = static_cast<SpeedReference>(static_cast<int>(orHold(speedReference, 0.0)));
     const double h = isHold(altitude) || aboveGround(altitudeReference) ? 0.0 : altitude;
-    const std::int16_t i = speedIndex;
     switch (reference) {
     case SpeedReference::GroundSpeed:
-        return f.hovers ? limit(speed, f.maxGroundSpeedMs, true, i, Constraint::MaxAirspeed) : Reason::None;
+        if (f.hovers) limit(f.maxGroundSpeedMs, true, Constraint::MaxAirspeed);
+        return;
     case SpeedReference::CalibratedAirspeed:
-        if (const Reason r = limit(speed, f.minCasMs, false, i, Constraint::MinAirspeed); r != Reason::None) return r;
-        if (const Reason r = limit(speed, f.maxCasMs, true, i, Constraint::MaxAirspeed); r != Reason::None) return r;
-        return limit(speed, isa::calibratedFromTrue(f.maxTasMs, h), true, i, Constraint::MaxAirspeed);
+        limit(f.minCasMs, false, Constraint::MinAirspeed);
+        limit(f.maxCasMs, true, Constraint::MaxAirspeed);
+        limit(isa::calibratedFromTrue(f.maxTasMs, h), true, Constraint::MaxAirspeed);
+        return;
     case SpeedReference::TrueAirspeed:
-        if (const Reason r = limit(speed, isa::trueFromCalibrated(f.minCasMs, h), false, i, Constraint::MinAirspeed); r != Reason::None) return r;
-        if (const Reason r = limit(speed, isa::trueFromCalibrated(f.maxCasMs, h), true, i, Constraint::MaxAirspeed); r != Reason::None) return r;
-        if (const Reason r = limit(speed, f.maxMach * isa::speedOfSound(h), true, i, Constraint::MaxAirspeed); r != Reason::None) return r;
-        return limit(speed, f.maxTasMs, true, i, Constraint::MaxAirspeed);
+        limit(isa::trueFromCalibrated(f.minCasMs, h), false, Constraint::MinAirspeed);
+        limit(isa::trueFromCalibrated(f.maxCasMs, h), true, Constraint::MaxAirspeed);
+        limit(f.maxMach * isa::speedOfSound(h), true, Constraint::MaxAirspeed);
+        limit(f.maxTasMs, true, Constraint::MaxAirspeed);
+        return;
     case SpeedReference::Mach: {
         const double a = isa::speedOfSound(h);
-        if (const Reason r = limit(speed, isa::trueFromCalibrated(f.minCasMs, h) / a, false, i, Constraint::MinAirspeed); r != Reason::None) return r;
-        if (const Reason r = limit(speed, isa::trueFromCalibrated(f.maxCasMs, h) / a, true, i, Constraint::MaxAirspeed); r != Reason::None) return r;
-        if (const Reason r = limit(speed, f.maxMach, true, i, Constraint::MaxAirspeed); r != Reason::None) return r;
-        return limit(speed, f.maxTasMs / a, true, i, Constraint::MaxAirspeed);
+        limit(isa::trueFromCalibrated(f.minCasMs, h) / a, false, Constraint::MinAirspeed);
+        limit(isa::trueFromCalibrated(f.maxCasMs, h) / a, true, Constraint::MaxAirspeed);
+        limit(f.maxMach, true, Constraint::MaxAirspeed);
+        limit(f.maxTasMs / a, true, Constraint::MaxAirspeed);
+        return;
     }
-    default: return Reason::None;
+    default: return;
     }
 }
 
-Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoints, const sim::VehicleState& state, RangePolicy range,
-                                  std::uint16_t& flags, CommandResult& detail) {
+Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log) {
+    CommandResult& detail = log.result;
     auto bad = [&detail](std::int16_t field) {
         detail.index = field;
         return Reason::InvalidParameter;
@@ -346,7 +339,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     p.repeat = c.repeat == 1.0;
     p.rhumb = c.projection == static_cast<double>(Projection::Rhumb);
     p.end = static_cast<EndBehavior>(static_cast<int>(c.end));
-    if (range == RangePolicy::None) return Reason::None; // (what it flies, the behaviour plans from where it starts)
+    if (log.range == RangePolicy::None) return Reason::None; // (what it flies, the behaviour plans from where it starts)
     const Performance& f = performance_;
     // the altitude a segment climbs from: the point before's, in the same reference; the start's, the aircraft's
     auto from = [&](std::uint32_t i, bool entry) {
@@ -355,40 +348,34 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         const Waypoint& b = p.points[p.prev(i)];
         return b.altitudeReference == w.altitudeReference ? b.altitudeM : kHold;
     };
+    // each point's fields (the Waypoint's order: altitude 2, speed 4, bank 7, climb rate 8), every one out of range logged
     for (std::uint32_t i = 0; i < count; ++i) {
         Waypoint& w = p.points[i];
         const auto index = static_cast<std::int16_t>(i);
-        if (const Reason r = limitFlight(w.speed, w.speedReference, w.altitudeM, w.altitudeReference, range, flags, detail, index, index); r != Reason::None)
-            return r;
+        limitFlight(w.speed, w.speedReference, w.altitudeM, w.altitudeReference, log, index, index, 4, 2);
         // its turn's bank within the aircraft's (a rotorcraft's, its tilt)
-        if (const Reason r = bound(w.maxBankRad, hovers ? f.maxTiltRad : f.maxBankRad, true, index, Constraint::MaxOrientation, range, flags, detail);
-            r != Reason::None)
-            return r;
+        bound(w.maxBankRad, hovers ? f.maxTiltRad : f.maxBankRad, true, index, Constraint::MaxOrientation, log, 7);
         // a climb or descent rate within the aircraft's
         if (!isHold(w.climbRateMs)) {
             const double h0 = from(i, i == p.start);
             const bool descends = !isHold(h0) && w.altitudeM < h0;
-            if (const Reason r = bound(w.climbRateMs, descends ? f.maxDescentMs : f.maxClimbMs, true, index,
-                                       descends ? Constraint::MaxDescentRate : Constraint::MaxClimbRate, range, flags, detail);
-                r != Reason::None)
-                return r;
+            bound(w.climbRateMs, descends ? f.maxDescentMs : f.maxClimbMs, true, index, descends ? Constraint::MaxDescentRate : Constraint::MaxClimbRate, log,
+                  8);
         }
     }
     WindEstimate wind;
     wind.update(state, 0.0);
     route::plan(p, state.latitudeRad, state.longitudeRad, state.altitudeMslM, std::hypot(wind.northMs, wind.eastMs), f, hovers);
     auto flown = [&p](std::uint32_t i) { return p.repeat || i >= p.start; }; // (a route that does not repeat flies nothing before its start)
-    // a fly-by turn too big for its legs: flown smaller, or refused - the first
-    // one flown (the start's from the entry, then each after it)
+    // every fly-by turn too big for its legs: flown smaller, or refused (a turn
+    // error) - the start's from the entry, then each after it
     for (std::uint32_t k = 0; k <= count; ++k) {
         const std::uint32_t i = k == 0 ? p.start : k - 1;
         if (k > 0 && (!flown(i) || (i == p.start && !p.repeat))) continue;
         if (!(k == 0 ? p.entryTurn : p.turns[i]).shrunk) continue;
-        if (range == RangePolicy::Reject || !(flags & kClamped)) detail.index = static_cast<std::int16_t>(i), detail.constraint = Constraint::None;
-        if (range == RangePolicy::Reject) return Reason::InvalidWaypoint;
-        flags |= kClamped;
+        log.reshape(static_cast<std::int16_t>(i), Constraint::None, Reason::InvalidWaypoint);
     }
-    // a gradient steeper than the aircraft climbs or descends (point to point, above sea level): flown at its rate, or refused
+    // every gradient steeper than the aircraft climbs or descends (point to point, above sea level): flown at its rate, or refused
     for (std::uint32_t i = 0; i < count; ++i) {
         Waypoint& w = p.points[i];
         if (!flown(i) || !isHold(w.climbRateMs) || aboveGround(w.altitudeReference)) continue;
@@ -401,12 +388,10 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
             if (isHold(h0) || !(leg.lengthM > 1.0)) continue;
             const bool descends = w.altitudeM < h0;
             const double most = descends ? f.maxDescentMs : f.maxClimbMs;
-            if (std::isnan(most) || std::abs(w.altitudeM - h0) * v / leg.lengthM <= most) continue;
-            if (range == RangePolicy::Reject || !(flags & kClamped))
-                detail.index = static_cast<std::int16_t>(i), detail.constraint = descends ? Constraint::MaxDescentRate : Constraint::MaxClimbRate;
-            if (range == RangePolicy::Reject) return Reason::PerformanceLimit;
+            double rate = std::abs(w.altitudeM - h0) * v / leg.lengthM; // what the gradient asks
+            if (std::isnan(most) || rate <= most) continue;
+            log.limit(rate, most, static_cast<std::int16_t>(i), 8, descends ? Constraint::MaxDescentRate : Constraint::MaxClimbRate, Reason::PerformanceLimit);
             w.climbRateMs = most;
-            flags |= kClamped;
             break;
         }
     }
@@ -438,8 +423,8 @@ Reason CapabilityHost::checkPattern(const PatternCommand& c, bool merge, Command
     return Reason::None;
 }
 
-Reason CapabilityHost::limitPattern(PatternCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept {
-    if (const Reason r = limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, range, flags, detail, 9, 3); r != Reason::None) return r;
+void CapabilityHost::limitPattern(PatternCommand& c, CheckLog& log) const noexcept {
+    limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, log, 9, 3);
     // a radius the aircraft can fly at its speed: a wing's at its full bank, a rotorcraft's a metre
     const Performance& f = performance_;
     double least = 1.0;
@@ -448,7 +433,7 @@ Reason CapabilityHost::limitPattern(PatternCommand& c, RangePolicy range, std::u
         const double v = route::plannedSpeed(c.speed, c.speedReference, h);
         least = v * v / (9.80665 * std::tan(f.maxBankRad));
     }
-    return bound(c.radiusM, least, false, 5, Constraint::MaxOrientation, range, flags, detail);
+    bound(c.radiusM, least, false, 5, Constraint::MaxOrientation, log);
 }
 
 Reason CapabilityHost::checkCurveOptions(const CurveCommand& c, bool appending, CommandResult& detail) const noexcept {
@@ -477,7 +462,7 @@ double CapabilityHost::fastest(double altitudeM) const noexcept {
     return std::fmin(std::fmin(isa::trueFromCalibrated(f.maxCasMs, altitudeM), f.maxMach * isa::speedOfSound(altitudeM)), f.maxTasMs);
 }
 
-Reason CapabilityHost::limitCurveSpeeds(CurveCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept {
+void CapabilityHost::limitCurveSpeeds(CurveCommand& c, CheckLog& log) const noexcept {
     const Performance& f = performance_;
     const bool hovers = (adapter_->features() & kFeatureHover) != 0;
     const double h = orHold(c.altitudeM, 0.0);
@@ -485,12 +470,12 @@ Reason CapabilityHost::limitCurveSpeeds(CurveCommand& c, RangePolicy range, std:
     const double most = fastest(h);
     // a range it can fly within: no faster at its least than it flies, no slower at its most
     // (a least below its slowest, a most above its fastest, leave it room)
-    if (const Reason r = bound(c.speedMinMs, most, true, 3, Constraint::MaxAirspeed, range, flags, detail); r != Reason::None) return r;
-    return bound(c.speedMaxMs, least, false, 4, Constraint::MinAirspeed, range, flags, detail);
+    bound(c.speedMinMs, most, true, 3, Constraint::MaxAirspeed, log);
+    bound(c.speedMaxMs, least, false, 4, Constraint::MinAirspeed, log);
 }
 
-Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> segments, bool appending, const sim::VehicleState& state,
-                                  RangePolicy range, std::uint16_t& flags, CommandResult& detail) {
+Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> segments, bool appending, const sim::VehicleState& state, CheckLog& log) {
+    CommandResult& detail = log.result;
     if (const Reason r = checkCurveOptions(c, appending, detail); r != Reason::None) return r;
     const bool hovers = (adapter_->features() & kFeatureHover) != 0;
     if (!appending) { // what it leaves out: the reference where the aircraft is
@@ -526,7 +511,7 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> seg
         }
         if (length < 1.0) return invalid(i); // nothing to follow over the ground
     }
-    if (range == RangePolicy::None) return Reason::None;
+    if (log.range == RangePolicy::None) return Reason::None;
     // its length, and the speed it will fly: the rest of the duration's, else its range's fastest
     if (!curvePlan_) curvePlan_ = std::make_unique<route::Curve>();
     route::Curve& k = *curvePlan_;
@@ -535,7 +520,7 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> seg
     std::copy_n(segments.data(), n, k.segments + held);
     k.measure(0);
     const Performance& f = performance_;
-    if (const Reason r = limitCurveSpeeds(c, range, flags, detail); r != Reason::None) return r;
+    limitCurveSpeeds(c, log);
     const double least = hovers ? 0.0 : isa::trueFromCalibrated(f.minCasMs, c.altitudeM);
     const double most = fastest(c.altitudeM);
     // the fastest it flies over the ground: as now - a rotorcraft's ground speed (its
@@ -548,25 +533,21 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> seg
     if (!isHold(c.durationS)) { // the speed that takes it: within the aircraft's, or (clamped) flown at the most it can
         fast = k.lengthM() / c.durationS;
         double w = fast;
-        if (const Reason r = bound(w, most, true, 5, Constraint::MaxAirspeed, range, flags, detail); r != Reason::None) return r;
-        if (const Reason r = bound(w, least, false, 5, Constraint::MinAirspeed, range, flags, detail); r != Reason::None) return r;
+        bound(w, most, true, 5, Constraint::MaxAirspeed, log);
+        bound(w, least, false, 5, Constraint::MinAirspeed, log);
     }
     if (!isHold(c.speedMaxMs)) fast = std::min(fast, c.speedMaxMs);
     if (!isHold(c.speedMinMs)) fast = std::max(fast, c.speedMinMs);
-    // a wing: no section tighter than its full bank turns at that speed; no clamp makes one flyable
+    // a wing: no section tighter than its full bank turns at that speed; no clamp makes one flyable - each named
     if (!hovers && std::isfinite(f.maxBankRad) && f.maxBankRad > 0.0 && fast > 1.0) {
         const double tightest = 9.80665 * std::tan(f.maxBankRad) / (fast * fast);
         for (std::size_t i = 0; i < n; ++i) {
             double from = 0.0, to = 0.0;
-            if (route::tooTight(segments[i], tightest, from, to)) {
-                detail.index = static_cast<std::int16_t>(i);
-                detail.from = static_cast<float>(from), detail.to = static_cast<float>(to);
-                detail.constraint = Constraint::MaxTurnRate;
-                return Reason::InvalidCurve;
-            }
+            if (route::tooTight(segments[i], tightest, from, to))
+                log.find(Reason::InvalidCurve, static_cast<std::int16_t>(i), Constraint::MaxTurnRate, static_cast<float>(from), static_cast<float>(to));
         }
     }
-    // no steeper than it climbs or descends at that speed: flown at its rate (clamped), or refused
+    // no steeper than it climbs or descends at that speed: flown at its rate (clamped), or refused - each segment's steepest
     for (std::size_t i = 0; i < n; ++i) {
         double at = 0.0;
         const double gradient = route::steepest(segments[i], at);
@@ -574,13 +555,15 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> seg
         const bool descends = p.gradient() < 0.0;
         const double rate = descends ? f.maxDescentMs : f.maxClimbMs;
         if (std::isnan(rate) || gradient * fast <= rate) continue;
-        if (range == RangePolicy::Reject || !(flags & kClamped)) {
-            detail.index = static_cast<std::int16_t>(i), detail.from = detail.to = static_cast<float>(at);
-            detail.constraint = descends ? Constraint::MaxDescentRate : Constraint::MaxClimbRate;
+        const auto index = static_cast<std::int16_t>(i);
+        const Constraint constraint = descends ? Constraint::MaxDescentRate : Constraint::MaxClimbRate;
+        if (log.range == RangePolicy::Reject) {
+            log.find(Reason::PerformanceLimit, index, constraint, static_cast<float>(at), static_cast<float>(at));
+        } else {
+            double asked = gradient * fast;
+            if (!(log.result.flags & kClamped)) log.result.from = log.result.to = static_cast<float>(at); // (the first clamp's section)
+            log.limit(asked, rate, index, -1, constraint, Reason::PerformanceLimit);
         }
-        if (range == RangePolicy::Reject) return Reason::PerformanceLimit;
-        flags |= kClamped;
-        break;
     }
     return Reason::None;
 }
@@ -624,6 +607,12 @@ CommandResult CapabilityHost::rejected(Reason reason, ActivityId activity, Activ
     r.reason = reason;
     r.activity = activity;
     r.other = other;
+    return r;
+}
+
+CommandResult CapabilityHost::valid(const CommandResult& detail) const noexcept {
+    CommandResult r = about(accepted(0, detail.flags), detail);
+    r.status = CommandStatus::Valid;
     return r;
 }
 
@@ -797,6 +786,9 @@ ActivityRecord& CapabilityHost::start(std::size_t s, ActivityId id, std::size_t 
     record.vehicle = vehicle_;
     record.capability = static_cast<std::uint16_t>(capability);
     record.source = options.source;
+    record.commandId = options.commandId;
+    record.trace = options.trace;
+    record.interactive = options.interactive;
     record.axes = axes;
     record.state = ActivityState::Pending;
     record.startTime = now;
@@ -819,6 +811,7 @@ CommandResult CapabilityHost::submit(const CurveCommand& curve, Span<const Bezie
 
 CommandResult CapabilityHost::submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
                                          const CommandOptions& options, const sim::VehicleState& state, double now) {
+    details_.clear();
     const int found = catalog_->indexOf(command);
     if (found < 0) return rejected(missing(featureOf(command))); // not supported, not implemented, or unknown
     const auto index = static_cast<std::size_t>(found);
@@ -840,17 +833,17 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     }
 
     Command setpoint = command;
-    std::uint16_t flags = 0;
-    CommandResult detail;
+    CommandResult detail; // what the checks found: kClamped, the first finding's detail
+    CheckLog log{detail, options.range, &details_};
     auto* hsa = std::get_if<HsaCommand>(&setpoint);
     if (hsa) // complete it first: what it leaves out, whatever the range policy (the runtime flies a complete setpoint)
         if (const Reason why = resolveHsa(*hsa, state, detail); why != Reason::None) return about(rejected(why), detail);
     auto* route = std::get_if<RouteCommand>(&setpoint);
     if (route) // its waypoints completed, and checked as its range policy says
-        if (const Reason why = checkRoute(*route, waypoints, state, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
+        if (const Reason why = checkRoute(*route, waypoints, state, log); why != Reason::None) return about(rejected(why), detail);
     auto* curve = std::get_if<CurveCommand>(&setpoint);
     if (curve) // its segments checked as its range policy says
-        if (const Reason why = checkCurve(*curve, segments, false, state, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
+        if (const Reason why = checkCurve(*curve, segments, false, state, log); why != Reason::None) return about(rejected(why), detail);
     auto* pattern = std::get_if<PatternCommand>(&setpoint);
     if (pattern) { // complete it first, as an hsa (the runtime flies a complete setpoint)
         if (const Reason why = checkPattern(*pattern, false, detail); why != Reason::None) return about(rejected(why), detail);
@@ -859,14 +852,17 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
         route::completePattern(*pattern, state, performance_, (adapter_->features() & kFeatureHover) != 0, std::hypot(wind.northMs, wind.eastMs));
     }
     if (checked)
-        if (const Reason why = catalog_->check(index, setpoint, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
+        if (const Reason why = catalog_->check(index, setpoint, log); why != Reason::None) return about(rejected(why), detail);
     if (const auto* b = std::get_if<BehaviorCommand>(&setpoint); b && checked) // what the behaviour needs from where the aircraft is
-        if (const BehaviorTraits::Admission admit = catalog_->admission(index))
-            if (const Reason why = admit(*b, state, performance_, detail); why != Reason::None) return about(rejected(why), detail);
-    if (hsa && checked)
-        if (const Reason why = limitHsa(*hsa, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
-    if (pattern && checked)
-        if (const Reason why = limitPattern(*pattern, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
+        if (const BehaviorTraits::Admission admit = catalog_->admission(index)) {
+            CommandResult why;
+            if (const Reason r = admit(*b, state, performance_, why); r != Reason::None) log.find(r, why.index, why.constraint, why.from, why.to);
+        }
+    if (hsa && checked) limitHsa(*hsa, log);
+    if (pattern && checked) limitPattern(*pattern, log);
+    // every finding named: refused with the first (docs/flight-autonomy.md, 4.8)
+    if (log.refused != Reason::None) return about(rejected(log.refused), detail);
+    const std::uint16_t flags = detail.flags;
     AxisMask axes = options.axes ? options.axes : catalog_->defaultAxes(index, command);
     // above the actuators a command owns whole groups: a wing's loop that banks
     // also coordinates, a rotorcraft's cyclic tilts in roll and pitch at once
@@ -874,6 +870,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     if (const Reason why = checkAxes(d, axes); why != Reason::None) return rejected(why);
     if (const Reason why = checkAwareness(axes, d.level, true); why != Reason::None) return rejected(why);
     if (const ActivityId other = holder(axes, options.source)) return rejected(Reason::AuthorityHeld, 0, other);
+    if (options.validateOnly) return valid(detail); // as a NEW would be answered; nothing flies
 
     std::unique_ptr<Behavior> behavior;
     if (d.kind == CapabilityKind::Guidance) {
@@ -904,10 +901,11 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     ++config.revision;
     runtime_->install(s, std::move(behavior));
     start(s, id, index, options, axes, flags, now);
-    return about(accepted(id, flags), detail);
+    return about(accepted(id, flags, true), detail);
 }
 
 CommandResult CapabilityHost::submit(const SupportCommand& command, const CommandOptions& options, const sim::VehicleState& state, double now) {
+    details_.clear();
     const int found = catalog_->indexOf(command);
     if (found < 0) return rejected(missing(featureOf(command))); // the aircraft has no such effector: why
     const auto index = static_cast<std::size_t>(found);
@@ -919,10 +917,12 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
         if (d.version < options.minVersion) return rejected(Reason::VersionUnsupported);
     }
     SupportCommand setpoint = command;
-    std::uint16_t flags = 0;
     CommandResult detail;
+    CheckLog log{detail, options.range, &details_};
     if (checked)
-        if (const Reason why = catalog_->check(index, setpoint, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
+        if (const Reason why = catalog_->check(index, setpoint, log); why != Reason::None) return about(rejected(why), detail);
+    if (log.refused != Reason::None) return about(rejected(log.refused), detail);
+    const std::uint16_t flags = detail.flags;
     // the placards: no gear up on the ground, no gear or flaps out above their speeds
     if (const Reason why = adapter_->admit(setpoint, state, *profile_); why != Reason::None) return rejected(why);
     const AxisMask axes = d.axes;
@@ -930,6 +930,7 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
     // the engines take thrust from the cascade: what flies the rest flies it apart
     if (const Reason why = checkAwareness(axes, Level::Actuator, false); why != Reason::None) return rejected(why);
     if (const ActivityId other = holder(axes, options.source)) return rejected(Reason::AuthorityHeld, 0, other);
+    if (options.validateOnly) return valid(detail);
 
     const ActivityId id = activityId(vehicle_, ++serial_);
     takeOver(axes, id, now);
@@ -944,11 +945,12 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
     ++config_->revision;
     start(s, id, index, options, axes, flags, now);
     if (d.persistence == Persistence::Terminating) slots_[s].target = supportGoal(setpoint);
-    return about(accepted(id, flags), detail);
+    return about(accepted(id, flags, true), detail);
 }
 
 CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints,
                                      const sim::VehicleState& state, Source caller) noexcept {
+    details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
@@ -966,8 +968,10 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
     const PathStore* store = config_->path.get();
     const Span<const Waypoint> points = waypoints.empty() && store ? Span<const Waypoint>(store->waypoints, store->count) : waypoints;
     CommandResult result = accepted(activity);
-    if (const Reason why = checkRoute(next, points, state, slots_[s].range, result.flags, result); why != Reason::None)
-        return about(rejected(why, activity), result);
+    result.commandId = records_[s].commandId;
+    CheckLog log{result, slots_[s].range, &details_};
+    if (const Reason why = checkRoute(next, points, state, log); why != Reason::None) return about(rejected(why, activity), result);
+    if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
     if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
     writeRoute();
     *live = next;
@@ -977,6 +981,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
 
 CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments,
                                      const sim::VehicleState& state, Source caller) noexcept {
+    details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
@@ -994,6 +999,8 @@ CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& cu
     next.append = curve.append;
     const bool appending = curve.append == 1.0;
     CommandResult result = accepted(activity);
+    result.commandId = records_[s].commandId;
+    CheckLog log{result, slots_[s].range, &details_};
     if (segments.empty()) { // its options alone: how it is flown, not where
         if (appending) {
             result.index = 0; // nothing to append
@@ -1001,13 +1008,14 @@ CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& cu
         }
         if (const Reason why = checkCurveOptions(next, false, result); why != Reason::None) return about(rejected(why, activity), result);
         if (slots_[s].range != RangePolicy::None) {
-            if (const Reason why = limitCurveSpeeds(next, slots_[s].range, result.flags, result); why != Reason::None) return about(rejected(why, activity), result);
+            limitCurveSpeeds(next, log);
+            if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
             if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
         }
     } else {
         if (appending) next.latitudeRad = live->latitudeRad, next.longitudeRad = live->longitudeRad, next.altitudeM = live->altitudeM; // (its reference)
-        if (const Reason why = checkCurve(next, segments, appending, state, slots_[s].range, result.flags, result); why != Reason::None)
-            return about(rejected(why, activity), result);
+        if (const Reason why = checkCurve(next, segments, appending, state, log); why != Reason::None) return about(rejected(why, activity), result);
+        if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
         if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
         writeCurve(segments, appending);
     }
@@ -1020,6 +1028,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& cu
 CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Source caller) noexcept {
     if (const auto* route = std::get_if<RouteCommand>(&setpoint)) return update(activity, *route, {}, state, caller);
     if (const auto* curve = std::get_if<CurveCommand>(&setpoint)) return update(activity, *curve, {}, state, caller);
+    details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
@@ -1030,6 +1039,8 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
     SetpointSlot& slot = config_->slots[s];
     if (setpoint.index() != slot.command.index()) return rejected(Reason::WrongCommandType, activity);
     CommandResult result = accepted(activity);
+    result.commandId = record.commandId;
+    CheckLog log{result, slots_[s].range, &details_};
     if (const auto* next = std::get_if<HsaCommand>(&setpoint)) {
         // a partial hsa (docs/vehicle-interface.md, 4.4): the fields given replace the commanded
         // ones; a reference needs its value (an UPDATE has no state to take one from)
@@ -1049,11 +1060,10 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
         if (!isHold(merged.courseRad)) merged.courseRad = geo::wrapPi(merged.courseRad);
         if (slots_[s].range != RangePolicy::None) {
             Command checked = merged;
-            if (const Reason why = catalog_->check(record.capability, checked, slots_[s].range, result.flags, result); why != Reason::None)
-                return about(rejected(why, activity), result);
+            if (const Reason why = catalog_->check(record.capability, checked, log); why != Reason::None) return about(rejected(why, activity), result);
             merged = std::get<HsaCommand>(checked);
-            if (const Reason why = limitHsa(merged, slots_[s].range, result.flags, result); why != Reason::None)
-                return about(rejected(why, activity), result);
+            limitHsa(merged, log);
+            if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
             if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
         }
         std::get<HsaCommand>(slot.command) = merged;
@@ -1067,8 +1077,8 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
         mergePattern(merged, *next);
         merged.courseRad = geo::wrapPi(merged.courseRad), merged.longitudeRad = geo::wrapPi(merged.longitudeRad);
         if (slots_[s].range != RangePolicy::None) {
-            if (const Reason why = limitPattern(merged, slots_[s].range, result.flags, result); why != Reason::None)
-                return about(rejected(why, activity), result);
+            limitPattern(merged, log);
+            if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
             if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
         }
         std::get<PatternCommand>(slot.command) = merged;
@@ -1079,8 +1089,8 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
         assignSetpoint(slot.command, setpoint);
     } else {
         Command checked = setpoint; // no heap data: a behaviour takes no UPDATE
-        if (const Reason why = catalog_->check(record.capability, checked, slots_[s].range, result.flags, result); why != Reason::None)
-            return about(rejected(why, activity), result);
+        if (const Reason why = catalog_->check(record.capability, checked, log); why != Reason::None) return about(rejected(why, activity), result);
+        if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
         assignSetpoint(slot.command, checked);
         if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
     }
@@ -1089,6 +1099,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
 }
 
 CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& setpoint, Source caller) noexcept {
+    details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
@@ -1097,9 +1108,11 @@ CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& 
     if (isCascade(s) || catalog_->indexOf(setpoint) != static_cast<int>(record.capability)) return rejected(Reason::WrongCommandType, activity);
     SupportCommand checked = setpoint;
     CommandResult result = accepted(activity);
+    result.commandId = record.commandId;
     if (slots_[s].range != RangePolicy::None) {
-        if (const Reason why = catalog_->check(record.capability, checked, slots_[s].range, result.flags, result); why != Reason::None)
-            return about(rejected(why, activity), result);
+        CheckLog log{result, slots_[s].range, &details_};
+        if (const Reason why = catalog_->check(record.capability, checked, log); why != Reason::None) return about(rejected(why, activity), result);
+        if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
         if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
     }
     writeDirect(s, checked);
@@ -1112,11 +1125,13 @@ CommandResult CapabilityHost::cancel(ActivityId activity, double now, Source cal
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
     if (const Reason why = addresses(s, caller); why != Reason::None) return rejected(why, activity, activity);
+    const std::uint64_t commandId = records_[s].commandId;
     end(s, ActivityState::Canceled, Reason::Requested, 0, now);
     release(s); // its axes: the vehicle default
     CommandResult r;
     r.status = CommandStatus::Canceled;
     r.activity = activity;
+    r.commandId = commandId;
     return r;
 }
 
@@ -1124,11 +1139,14 @@ CommandResult CapabilityHost::command(const Command& command, const sim::Vehicle
     // The fast path: the same capability as the live legacy activity (a
     // behaviour command re-creates its behaviour, as it always has).
     if (updateLegacy(command)) return accepted(legacy_);
-    CommandOptions legacy;
-    legacy.source = Source::Policy;
-    legacy.axes = kLegacyAxes;
-    legacy.range = RangePolicy::None;
-    const CommandResult r = submit(command, legacy, state, now);
+    static constexpr CommandOptions kLegacy = [] {
+        CommandOptions o;
+        o.source = Source::Policy;
+        o.axes = kLegacyAxes;
+        o.range = RangePolicy::None;
+        return o;
+    }();
+    const CommandResult r = submit(command, kLegacy, state, now);
     if (r.accepted()) {
         legacy_ = r.activity;
         legacySlot_ = liveSlot(legacy_);

@@ -206,15 +206,15 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.formation/package", "fsim.guidance.formation", N, 12, 0, ""},            // FRM-04, CAP-28
 
     // --- the command interface ---------------------------------------------------------------------------
-    {"fsim.command/command_id", "", N, 2, 0, ""},                                             // CMD-02
-    {"fsim.command/batch", "", P, 2, 0, "a batch NEW, each answered on its own; UPDATE has a batch"}, // CMD-03
+    {"fsim.command/command_id", "", S, 0, 0, ""},                                             // CMD-02
+    {"fsim.command/batch", "", S, 0, 0, ""},                                                  // CMD-03
     {"fsim.command/rank", "", P, 2, 0, "a rank within a source, compared before preemption; three sources rank now"}, // CMD-05, ACT-07
     {"fsim.command/no_interrupt", "", N, 2, 0, ""},                                           // CMD-06
     {"fsim.command/precedence_override", "", N, 2, 0, ""},                                    // CMD-07
     {"fsim.command/time_window", "", N, 2, 0, ""},                                            // CMD-08
     {"fsim.command/override_rejection", "", N, 2, 0, ""},                                     // CMD-09
-    {"fsim.command/traceability", "", N, 2, 0, ""},                                           // CMD-10
-    {"fsim.command/validate", "", N, 2, 0, ""},                                               // VAL-12
+    {"fsim.command/traceability", "", S, 0, 0, ""},                                           // CMD-10
+    {"fsim.command/validate", "", S, 0, 0, ""},                                               // VAL-12
     {"fsim.command/task", "", N, 2, 0, ""},                                                   // TSK-01, TSK-02
     {"fsim.command/release_envelope", "", N, 13, R9, ""},                                     // WPN-01
     {"fsim.activity/disable", "", N, 2, 0, ""},                                               // CMD-12, ACT-04

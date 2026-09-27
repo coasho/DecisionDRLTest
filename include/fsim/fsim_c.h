@@ -311,11 +311,21 @@ typedef uint64_t fsim_activity_id; /* the vehicle's id in the high 32 bits, a pe
 
 enum fsim_source { FSIM_SOURCE_POLICY = 0, FSIM_SOURCE_AUTOPILOT = 1, FSIM_SOURCE_OVERRIDE = 2 };
 enum fsim_range_policy { FSIM_RANGE_CLAMP = 0, FSIM_RANGE_REJECT = 1, FSIM_RANGE_NONE = 2 };
-enum fsim_command_status { FSIM_COMMAND_ACCEPTED = 0, FSIM_COMMAND_REJECTED = 1, FSIM_COMMAND_CANCELED = 2 };
+/* ABI 1.8 appends FSIM_COMMAND_VALID: a validation's answer (fsim_command_options.validate_only) - it would be accepted; nothing flies. */
+enum fsim_command_status { FSIM_COMMAND_ACCEPTED = 0, FSIM_COMMAND_REJECTED = 1, FSIM_COMMAND_CANCELED = 2, FSIM_COMMAND_VALID = 3 };
 enum fsim_activity_state { FSIM_ACTIVITY_PENDING = 0, FSIM_ACTIVITY_ACTIVE, FSIM_ACTIVITY_COMPLETED, FSIM_ACTIVITY_FAILED, FSIM_ACTIVITY_CANCELED };
 /* ABI 1.7 appends FSIM_UNAVAILABLE (when it returns is not known: a capability the vehicle does not offer)
  * and FSIM_EXPENDED; FSIM_DISABLED means switched off (fsim_vehicle_set_availability), never "not supported". */
 enum fsim_availability { FSIM_AVAILABLE = 0, FSIM_TEMPORARILY_UNAVAILABLE, FSIM_FAULTED, FSIM_DISABLED, FSIM_UNAVAILABLE, FSIM_EXPENDED };
+
+/* A requirement a command comes from (ABI 1.8; A-GRA's Traceability): the caller's ids. */
+enum fsim_requirement_kind { FSIM_REQUIREMENT_NONE = 0, FSIM_REQUIREMENT_EFFECT, FSIM_REQUIREMENT_ACTION, FSIM_REQUIREMENT_TASK, FSIM_REQUIREMENT_COMMAND };
+typedef struct fsim_requirement {
+    int32_t kind;     /* fsim_requirement_kind; 0: none */
+    uint32_t reserved;
+    uint64_t id;
+} fsim_requirement;
+#define FSIM_MAX_REQUIREMENTS 4
 
 /* Call fsim_command_options_init() first: a policy's command, the
  * capability's default axes, values clamped to their ranges. */
@@ -325,6 +335,12 @@ typedef struct fsim_command_options {
     uint32_t axes;        /* 0 = the capability's default (bits: roll, pitch, yaw, thrust, flaps, gear, brakes, speedbrake, trim) */
     int32_t range;        /* fsim_range_policy */
     uint32_t min_version; /* refuse a capability older than this */
+    /* ABI 1.8, the command envelope (docs/flight-autonomy.md, 4.8): */
+    uint32_t reserved;
+    uint64_t command_id;  /* the caller's id for it, echoed in its answers (fsim_last_command_detail) and kept with its activity; 0 none */
+    fsim_requirement trace[FSIM_MAX_REQUIREMENTS]; /* the requirements it comes from */
+    int32_t interactive;  /* 1 (fsim_command_options_init): its activity takes activity commands */
+    int32_t validate_only; /* 1: checked and answered as a NEW would be - FSIM_COMMAND_VALID, or rejected with every finding - flying nothing */
 } fsim_command_options;
 FSIM_API void fsim_command_options_init(fsim_command_options* options);
 
@@ -481,6 +497,14 @@ typedef struct fsim_command_detail {
                            curve segment; -1: none */
     int32_t constraint; /* the performance limit the value broke: fsim_constraint_name(); 0 none */
     double from, to;    /* a curve segment's section that breaks it, its parameter 0..1; NaN otherwise */
+    /* ABI 1.8 (docs/flight-autonomy.md, 4.8): */
+    int32_t new_activity;      /* 1: a NEW that made an activity (A-GRA's NewActivity) */
+    uint32_t finding_count;    /* every reason it cannot be flown as asked, the first the answer's: fsim_last_command_finding */
+    uint32_t adjustment_count; /* every value it is flown with other than asked: fsim_last_command_adjustment */
+    uint32_t reserved;
+    uint64_t command_id;       /* the command's id: a NEW's, or the addressed activity's */
+    uint64_t associated;       /* an id the reason is about: the activity holding the authority; 0 none */
+    const char* description;   /* the reason in words; "" when accepted */
 } fsim_command_detail;
 FSIM_API void fsim_command_detail_init(fsim_command_detail* detail);
 FSIM_API int fsim_last_command_detail(const fsim_world* world, fsim_command_detail* out);
@@ -755,6 +779,73 @@ FSIM_API const char* fsim_rule_description(int rule);
 /* fsim_vehicle_set_availability, with the id the restriction is about and when it is expected back (NaN: not known). */
 FSIM_API int fsim_vehicle_set_availability_ex(fsim_world* world, uint32_t id, const char* capability, int availability, int reason,
                                               uint64_t associated, double next_available_s);
+
+/* ---------------------------------------------------------------------------
+ * The command envelope (ABI 1.8; docs/flight-autonomy.md, 4.8): a command's
+ * id and the requirements it comes from (fsim_command_options), kept with its
+ * activity; a validation that flies nothing; every reason a command cannot be
+ * flown as asked, and every value it is flown with other than asked; several
+ * NEWs in one call, each answered on its own.
+ * ------------------------------------------------------------------------- */
+
+/* One reason the last command cannot be flown as asked (A-GRA's ValidationResult): the answer's reason is the first. */
+typedef struct fsim_command_finding {
+    uint32_t struct_size;
+    int32_t reason;          /* fsim_reason_name() */
+    int32_t index;           /* the field, route point or curve segment; -1 none */
+    int32_t constraint;      /* the performance limit its value breaks: fsim_constraint_name() */
+    double from, to;         /* a curve segment's section, its parameter 0..1; NaN otherwise */
+    uint64_t associated;     /* an id it is about; 0 none */
+    const char* description; /* in words */
+} fsim_command_finding;
+FSIM_API void fsim_command_finding_init(fsim_command_finding* finding);
+FSIM_API int fsim_last_command_finding(const fsim_world* world, uint32_t index, fsim_command_finding* out);
+
+/* One value the last command is flown with other than asked: held to what the aircraft can do. */
+typedef struct fsim_command_adjustment {
+    uint32_t struct_size;
+    int32_t index;       /* the command's field, a route point or a curve segment */
+    int32_t field;       /* a route point's field (fsim_waypoint's order from latitude_rad = 0); -1 none */
+    int32_t constraint;  /* the limit it was held to: fsim_constraint_name() */
+    double requested;    /* NaN where it is not one number (a fly-by turn flown smaller) */
+    double adjusted;
+} fsim_command_adjustment;
+FSIM_API void fsim_command_adjustment_init(fsim_command_adjustment* adjustment);
+FSIM_API int fsim_last_command_adjustment(const fsim_world* world, uint32_t index, fsim_command_adjustment* out);
+
+/* The command an activity came from: its id, the requirements it traces to, whether it takes activity commands. */
+typedef struct fsim_activity_envelope {
+    uint32_t struct_size;
+    int32_t interactive;
+    uint64_t command_id;
+    fsim_requirement trace[FSIM_MAX_REQUIREMENTS];
+} fsim_activity_envelope;
+FSIM_API void fsim_activity_envelope_init(fsim_activity_envelope* envelope);
+FSIM_API int fsim_activity_get_envelope(const fsim_world* world, fsim_activity_id activity, fsim_activity_envelope* out);
+FSIM_API const char* fsim_requirement_kind_name(int kind); /* "effect", "action", "task", "command"; "none" */
+
+/* One command of a batch NEW: which call it would be, and that call's arguments. */
+enum fsim_batch_kind { FSIM_BATCH_LEVEL = 0, FSIM_BATCH_BEHAVIOR, FSIM_BATCH_SUPPORT, FSIM_BATCH_MODE, FSIM_BATCH_ROUTE, FSIM_BATCH_CURVE };
+typedef struct fsim_batch_command {
+    uint32_t struct_size;
+    int32_t kind;                           /* fsim_batch_kind */
+    int32_t code;                           /* the level (FSIM_BATCH_LEVEL), fsim_support, or fsim_mode (FSIM_BATCH_MODE: hsa, pattern) */
+    uint32_t count;                         /* fields: as fsim_vehicle_submit, _support, _mode, _route or _curve takes them */
+    const double* fields;
+    const fsim_behavior_command* behavior;  /* FSIM_BATCH_BEHAVIOR */
+    const fsim_waypoint* waypoints;         /* FSIM_BATCH_ROUTE, waypoints[0].struct_size bytes apart */
+    uint32_t waypoint_count;
+    uint32_t segment_count;
+    const fsim_bezier_segment* segments;    /* FSIM_BATCH_CURVE, segments[0].struct_size bytes apart */
+    const fsim_command_options* options;    /* NULL: fsim_command_options_init's */
+} fsim_batch_command;
+/* Several NEWs at once (A-GRA's several command instances in one message), `batch[0].struct_size` bytes apart, made in
+ * order at this simulation time: `results[i]` answers `batch[i]`, and `details[i]` (may be NULL; `details[0].struct_size`
+ * bytes apart) has what fsim_last_command_detail would have right after it - its counts included, though only the last
+ * one's findings and adjustments stay to be read (fsim_last_command_finding). A malformed item (a wrong field count, an
+ * unknown kind): FSIM_INVALID_ARGUMENT, and none is made. */
+FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsim_batch_command* batch, uint32_t count, fsim_command_result* results,
+                                       fsim_command_detail* details);
 
 FSIM_API int fsim_world_get_environment(const fsim_world* world, fsim_environment* out);
 FSIM_API int fsim_world_set_environment(fsim_world* world, const fsim_environment* environment);

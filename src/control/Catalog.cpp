@@ -59,23 +59,22 @@ bool validPoint(const PositionCommand& p) noexcept {
            std::isfinite(p.captureRadiusM) && p.captureRadiusM > 0.0 && optional(p.airspeedMs) && !(p.airspeedMs < 0.0) && optional(p.headingRad);
 }
 
-/// Clamp or reject one value against its parameter; `detail` says which
-/// field (`field`) and what limit its value broke, for a rejection or the
-/// first clamp.
-Reason checkValue(const ParameterInfo& p, double& v, RangePolicy range, std::uint16_t& flags, CommandResult& detail, std::size_t field) noexcept {
-    auto about = [&](Reason r) {
-        detail.index = static_cast<std::int16_t>(field);
-        detail.constraint = v < p.min ? p.below : v > p.max ? p.above : Constraint::None;
+/// One value against its parameter: malformed (InvalidParameter) or one this
+/// aircraft has nothing for (NotSupported) returned at once, the field in the
+/// log's result; out of its range, held to it and logged (clamped, or an
+/// OutOfRange finding) with the limit it broke.
+Reason checkValue(const ParameterInfo& p, double& v, CheckLog& log, std::size_t field) noexcept {
+    const auto index = static_cast<std::int16_t>(field);
+    auto bad = [&](Reason r) {
+        log.result.index = index;
+        log.result.constraint = Constraint::None;
         return r;
     };
-    if (isHold(v)) return p.optional ? Reason::None : about(Reason::InvalidParameter);
-    if (!std::isfinite(v)) return about(Reason::InvalidParameter);
-    if (!p.supported) return v == p.defaultValue ? Reason::None : about(Reason::NotSupported); // nothing on this aircraft moves it
+    if (isHold(v)) return p.optional ? Reason::None : bad(Reason::InvalidParameter);
+    if (!std::isfinite(v)) return bad(Reason::InvalidParameter);
+    if (!p.supported) return v == p.defaultValue ? Reason::None : bad(Reason::NotSupported); // nothing on this aircraft moves it
     if (v >= p.min && v <= p.max) return Reason::None;
-    if (range == RangePolicy::Reject) return about(Reason::OutOfRange);
-    if (!(flags & kClamped)) about(Reason::None); // the first value clamped
-    v = std::clamp(v, p.min, p.max);
-    flags |= kClamped;
+    log.limit(v, std::clamp(v, p.min, p.max), index, -1, v < p.min ? p.below : p.above, Reason::OutOfRange);
     return Reason::None;
 }
 
@@ -369,26 +368,26 @@ AxisMask CapabilityCatalog::defaultAxes(std::size_t index, const Command& comman
     return axes;
 }
 
-Reason CapabilityCatalog::check(std::size_t index, SupportCommand& command, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept {
+Reason CapabilityCatalog::check(std::size_t index, SupportCommand& command, CheckLog& log) const noexcept {
     const CapabilityDescriptor& d = descriptors_[index];
     double* fields[4];
     const std::size_t n = std::min(supportFields(command, fields), d.parameters.size());
     for (std::size_t i = 0; i < n; ++i)
-        if (const Reason r = checkValue(d.parameters[i], *fields[i], range, flags, detail, i); r != Reason::None) return r;
+        if (const Reason r = checkValue(d.parameters[i], *fields[i], log, i); r != Reason::None) return r;
     return Reason::None;
 }
 
-Reason CapabilityCatalog::check(std::size_t index, Command& command, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept {
+Reason CapabilityCatalog::check(std::size_t index, Command& command, CheckLog& log) const noexcept {
     const CapabilityDescriptor& d = descriptors_[index];
     if (auto* b = std::get_if<BehaviorCommand>(&command)) {
         if (d.needsTarget && b->target == 0) return Reason::InvalidParameter;
         for (auto& [key, value] : b->params)
             for (std::size_t i = 0; i < d.parameters.size(); ++i)
                 if (d.parameters[i].name == key)
-                    if (const Reason r = checkValue(d.parameters[i], value, range, flags, detail, i); r != Reason::None) return r;
+                    if (const Reason r = checkValue(d.parameters[i], value, log, i); r != Reason::None) return r;
         for (std::size_t i = 0; i < b->points.size(); ++i)
             if (!validPoint(b->points[i])) {
-                detail.index = static_cast<std::int16_t>(std::min<std::size_t>(i, 0x7FFF)); // the route's point
+                log.result.index = static_cast<std::int16_t>(std::min<std::size_t>(i, 0x7FFF)); // the route's point
                 return Reason::InvalidParameter;
             }
         return Reason::None;
@@ -396,7 +395,7 @@ Reason CapabilityCatalog::check(std::size_t index, Command& command, RangePolicy
     double* fields[kMaxCommandFields];
     const std::size_t n = std::min(commandFields(command, fields), d.parameters.size());
     for (std::size_t i = 0; i < n; ++i)
-        if (const Reason r = checkValue(d.parameters[i], *fields[i], range, flags, detail, i); r != Reason::None) return r;
+        if (const Reason r = checkValue(d.parameters[i], *fields[i], log, i); r != Reason::None) return r;
     return Reason::None;
 }
 

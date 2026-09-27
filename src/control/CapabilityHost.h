@@ -8,6 +8,7 @@
 
 #include "control/Adapter.h"
 #include "control/Catalog.h"
+#include "control/Checks.h"
 #include "control/Runtime.h"
 #include "fsim/Capability.h"
 #include "fsim/ControlStack.h"
@@ -155,6 +156,12 @@ public:
     /// availability and the performance (6.3): a consumer polls it.
     std::uint32_t controlRevision() const noexcept { return controlRevision_; }
 
+    /// Everything the checks found for the last NEW, validation or UPDATE this
+    /// host answered (docs/flight-autonomy.md, 4.8): every finding - the first
+    /// the answer's reason - and every value flown other than asked. The
+    /// existing entry points' per-step path leaves it as it was.
+    const CommandDetails& details() const noexcept { return details_; }
+
     /// Live or recently ended; null if unknown.
     const ActivityRecord* activity(ActivityId activity) const noexcept;
     /// The live activities, then the ended ones it remembers, newest first.
@@ -229,30 +236,34 @@ private:
     void end(std::size_t slot, ActivityState state, Reason reason, ActivityId by, double now) noexcept;
     void release(std::size_t slot) noexcept;
     CommandResult rejected(Reason reason, ActivityId activity = 0, ActivityId other = 0) const noexcept;
+    /// A validation's answer (CommandOptions::validateOnly): Valid, with what the checks found.
+    CommandResult valid(const CommandResult& detail) const noexcept;
     /// The setpoint of the live hsa activity, if one flies (a NEW continues what it commanded).
     const HsaCommand* liveHsa() const noexcept;
     /// A NEW hsa (docs/vehicle-interface.md, 4.4): its references checked, the
     /// fields it leaves out from the live hsa it replaces or the state, its
     /// angles wrapped. InvalidParameter (with the field in `detail`) if malformed.
     Reason resolveHsa(HsaCommand& c, const sim::VehicleState& state, CommandResult& detail) const noexcept;
-    /// An hsa's speed and altitude against the aircraft's performance: clamped
-    /// (kClamped) or, with Reject, PerformanceLimit - `detail` saying which field and limit.
-    Reason limitHsa(HsaCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
+    /// An hsa's speed and altitude against the aircraft's performance: each
+    /// held to it and logged - clamped (kClamped), or with Reject a
+    /// PerformanceLimit finding naming the field and the limit.
+    void limitHsa(HsaCommand& c, CheckLog& log) const noexcept;
     /// A speed and an altitude in their references against the performance,
-    /// as limitHsa: `detail` names `speedIndex` or `altitudeIndex` (a field, or a waypoint).
-    Reason limitFlight(double& speed, double speedReference, double& altitude, double altitudeReference, RangePolicy range, std::uint16_t& flags,
-                       CommandResult& detail, std::int16_t speedIndex, std::int16_t altitudeIndex) const noexcept;
+    /// as limitHsa: named `speedIndex` or `altitudeIndex` (a field, or a
+    /// waypoint - then `speedField` and `altitudeField`, its fields).
+    void limitFlight(double& speed, double speedReference, double& altitude, double altitudeReference, CheckLog& log, std::int16_t speedIndex,
+                     std::int16_t altitudeIndex, std::int16_t speedField = -1, std::int16_t altitudeField = -1) const noexcept;
     /// A route's options and waypoints (docs/vehicle-interface.md, 4.5 and
     /// 5.1), into the scratch plan: the options whole and in range
     /// (InvalidParameter), the waypoints completed (InvalidWaypoint); then,
     /// unless the range policy is None, each point's speed, altitude, bank and
     /// climb rate against the performance, the route planned from where the
-    /// aircraft is, a fly-by turn too big for its legs, and a gradient steeper
-    /// than the aircraft climbs - clamped (the turn flown smaller, the
-    /// gradient at its climb rate; kClamped) or, with Reject, refused
-    /// (InvalidWaypoint, PerformanceLimit). `detail` names the point.
-    Reason checkRoute(RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state, RangePolicy range, std::uint16_t& flags,
-                      CommandResult& detail);
+    /// aircraft is, every fly-by turn too big for its legs, and every gradient
+    /// steeper than the aircraft climbs - logged: clamped (the turn flown
+    /// smaller, the gradient at its climb rate; kClamped) or, with Reject,
+    /// findings (InvalidWaypoint, PerformanceLimit) naming each point. The
+    /// malformed are returned at once, the point in the log's result.
+    Reason checkRoute(RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log);
     /// The route checkRoute left in the scratch plan, into the path store: flown afresh.
     void writeRoute();
     /// A pattern's fields (docs/vehicle-interface.md, 4.6): whole numbers for
@@ -263,23 +274,22 @@ private:
     /// A complete pattern against the performance, as limitHsa: its speed and
     /// altitude, and a radius no tighter than the aircraft's full bank flies
     /// at its speed (a rotorcraft's: a metre).
-    Reason limitPattern(PatternCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
+    void limitPattern(PatternCommand& c, CheckLog& log) const noexcept;
     /// A curve's options and segments (docs/vehicle-interface.md, 4.7 and 5.1):
     /// the options whole and finite (InvalidParameter); in a NEW, the
     /// reference where the aircraft is if left out; 1 to 10 segments, finite,
     /// each starting within a metre of where the one before ends (appended:
     /// where the curve ends), a metre long over the ground, and room in the
-    /// store (InvalidCurve). Then, unless the range policy is None: a speed
-    /// range the aircraft can fly within (clamped, or PerformanceLimit), a
-    /// section a wing's full bank cannot turn at the fastest it flies
-    /// (InvalidCurve, whatever the policy, with the section), a gradient
-    /// steeper than it climbs (clamped, or PerformanceLimit, with the section).
-    Reason checkCurve(CurveCommand& c, Span<const BezierSegment> segments, bool appending, const sim::VehicleState& state, RangePolicy range,
-                      std::uint16_t& flags, CommandResult& detail);
+    /// store (InvalidCurve) - returned at once. Then, unless the range policy
+    /// is None, logged: a speed range the aircraft can fly within (clamped, or
+    /// PerformanceLimit), every section a wing's full bank cannot turn at the
+    /// fastest it flies (InvalidCurve, whatever the policy, with the section),
+    /// every segment steeper than it climbs (clamped, or PerformanceLimit, with the section).
+    Reason checkCurve(CurveCommand& c, Span<const BezierSegment> segments, bool appending, const sim::VehicleState& state, CheckLog& log);
     /// A curve's options whole and finite, as checkCurve: InvalidParameter with the field.
     Reason checkCurveOptions(const CurveCommand& c, bool appending, CommandResult& detail) const noexcept;
     /// Its speed range one the aircraft can fly within, as checkCurve.
-    Reason limitCurveSpeeds(CurveCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
+    void limitCurveSpeeds(CurveCommand& c, CheckLog& log) const noexcept;
     /// The fastest a wing flies at `altitudeM` - its envelope's calibrated
     /// speed and Mach there, and its profile's airspeed - or a rotorcraft over
     /// the ground; NaN if nothing limits it.
@@ -320,7 +330,10 @@ private:
     double controlPeriodS_ = 1.0 / 120.0;
     EnvelopeStatus envelope_{}; ///< since the last envelope()
     ControlStack* runtime_ = nullptr;
+    // the existing entry points' per-step path (updateLegacy), together
     RuntimeConfig* config_ = nullptr; ///< the runtime's, held for the fast path
+    ActivityId legacy_ = 0;           ///< the activity the existing entry points command
+    int legacySlot_ = -1;             ///< its slot while it is live
     const CapabilityCatalog* catalog_ = nullptr;
     const VehicleAdapter* adapter_ = nullptr;
     const VehicleProfile* profile_ = nullptr;
@@ -333,13 +346,12 @@ private:
     std::array<ActivityRecord, kActivities> records_{}; ///< per slot: its activity's record
     std::array<ActivityRecord, kRecent> recent_{};      ///< ended records, a ring
     std::size_t recentNext_ = 0, recentCount_ = 0;
-    ActivityId legacy_ = 0;                             ///< the activity the existing entry points command
-    int legacySlot_ = -1;                               ///< its slot while it is live
     std::vector<Authority> authority_;                  ///< per capability (sized at bind)
     ControlMode controlMode_ = ControlMode::Open;
     std::uint32_t controlRevision_ = 0;
     std::uint32_t loopsSeen_ = 0; ///< the runtime's loops revision performance_ is from
     bool divergedSeen_ = false;   ///< (a divergence changes every capability's availability: counted)
+    CommandDetails details_{};    ///< the last answer's (details())
 };
 
 } // namespace fsim::control

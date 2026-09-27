@@ -399,9 +399,16 @@ namespace {
 
 static_assert(sizeof(fsim_activity_id) == sizeof(fsim::control::ActivityId), "activity ids are 64 bits");
 
+/// The world's last answer (fsim_last_command_detail), and the vehicle whose details go with it.
+void remember(fsim_world* w, uint32_t vehicle, const fsim::control::CommandResult& r) noexcept {
+    if (!w) return;
+    w->last = r;
+    w->lastVehicle = vehicle;
+}
+
 /// The answer into the C struct, and kept as the world's last (fsim_last_command_detail).
-void toC(fsim_world* w, const fsim::control::CommandResult& r, fsim_command_result* out) noexcept {
-    if (w) w->last = r;
+void toC(fsim_world* w, uint32_t vehicle, const fsim::control::CommandResult& r, fsim_command_result* out) noexcept {
+    remember(w, vehicle, r);
     if (!out) return;
     out->status = static_cast<int32_t>(r.status);
     out->reason = static_cast<int32_t>(r.reason);
@@ -427,6 +434,9 @@ void infoToC(const fsim::control::ActivityRecord& a, fsim_activity_info* out) no
     out->end_time = a.endTime;
 }
 
+/// Whether the caller's struct (its struct_size) reaches past `member`.
+#define FSIM_HAS(o, type, member) ((o)->struct_size >= offsetof(type, member) + sizeof((o)->member))
+
 fsim::control::CommandOptions fromC(const fsim_command_options* o) noexcept {
     fsim::control::CommandOptions out;
     if (!o) return out;
@@ -434,6 +444,17 @@ fsim::control::CommandOptions fromC(const fsim_command_options* o) noexcept {
     out.axes = static_cast<fsim::control::AxisMask>(o->axes & fsim::control::kAllAxes);
     out.range = static_cast<fsim::control::RangePolicy>(std::clamp(o->range, 0, 2));
     out.minVersion = static_cast<std::uint16_t>(std::min<uint32_t>(o->min_version, 0xFFFF));
+    // ABI 1.8: the command envelope, where the caller's header has it
+    if (FSIM_HAS(o, fsim_command_options, command_id)) out.commandId = o->command_id;
+    if (FSIM_HAS(o, fsim_command_options, trace))
+        for (std::size_t i = 0; i < fsim::control::kMaxRequirements; ++i) {
+            const int kind = o->trace[i].kind;
+            out.trace[i].kind = kind > 0 && kind < static_cast<int>(fsim::control::RequirementKind::Count) ? static_cast<fsim::control::RequirementKind>(kind)
+                                                                                                          : fsim::control::RequirementKind::None;
+            out.trace[i].id = out.trace[i].kind == fsim::control::RequirementKind::None ? 0 : o->trace[i].id;
+        }
+    if (FSIM_HAS(o, fsim_command_options, interactive)) out.interactive = o->interactive != 0;
+    if (FSIM_HAS(o, fsim_command_options, validate_only)) out.validateOnly = o->validate_only != 0;
     return out;
 }
 
@@ -634,6 +655,7 @@ FSIM_API void fsim_command_options_init(fsim_command_options* options) {
     options->struct_size = sizeof *options;
     options->source = FSIM_SOURCE_POLICY;
     options->range = FSIM_RANGE_CLAMP;
+    options->interactive = 1;
 }
 
 FSIM_API uint32_t fsim_vehicle_capability_count(fsim_world* world, uint32_t id) {
@@ -787,7 +809,7 @@ FSIM_API int fsim_vehicle_submit(fsim_world* world, uint32_t id, int level, cons
     fsim::control::Command c;
     if (!world || !result || !toCommand(level, fields, count, c))
         return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit: level " + std::to_string(level) + " takes " + fieldCounts(level) + " fields");
-    toC(world, world->world.submit(id, c, fromC(options)), result);
+    toC(world, id, world->world.submit(id, c, fromC(options)), result);
     return FSIM_OK;
 }
 
@@ -795,7 +817,7 @@ FSIM_API int fsim_vehicle_submit_behavior(fsim_world* world, uint32_t id, const 
                                           const fsim_command_options* options, fsim_command_result* result) {
     if (!world || !command || !command->id || !result) return FSIM_INVALID_ARGUMENT;
     return guard("fsim_vehicle_submit_behavior", [&] {
-        toC(world, world->world.submit(id, toBehavior(command), fromC(options)), result);
+        toC(world, id, world->world.submit(id, toBehavior(command), fromC(options)), result);
         return FSIM_OK;
     });
 }
@@ -828,7 +850,7 @@ FSIM_API int fsim_vehicle_submit_route(fsim_world* world, uint32_t id, const dou
         return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_route: a route takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_ROUTE)) + " fields");
     try { // (no std::function: an UPDATE every step allocates nothing)
         if (!toWaypoints(world, waypoints, waypoint_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_route: waypoints without their struct_size");
-        toC(world, world->world.submit(id, std::get<fsim::control::RouteCommand>(c), world->waypoints, fromC(options)), result);
+        toC(world, id, world->world.submit(id, std::get<fsim::control::RouteCommand>(c), world->waypoints, fromC(options)), result);
         return FSIM_OK;
     } catch (const std::exception& e) {
         return fail(FSIM_ERROR, std::string("fsim_vehicle_submit_route: ") + e.what());
@@ -849,7 +871,7 @@ FSIM_API int fsim_activity_update_route_as(fsim_world* world, fsim_activity_id a
         return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route: a route takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_ROUTE)) + " fields");
     try {
         if (!toWaypoints(world, waypoints, waypoint_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route: waypoints without their struct_size");
-        toC(world, world->world.update(caller, activity, std::get<fsim::control::RouteCommand>(c), world->waypoints), result);
+        toC(world, fsim::control::activityVehicle(activity), world->world.update(caller, activity, std::get<fsim::control::RouteCommand>(c), world->waypoints), result);
         return FSIM_OK;
     } catch (const std::exception& e) {
         return fail(FSIM_ERROR, std::string("fsim_activity_update_route: ") + e.what());
@@ -869,7 +891,7 @@ FSIM_API int fsim_vehicle_submit_curve(fsim_world* world, uint32_t id, const dou
         return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_curve: a curve takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_CURVE)) + " fields");
     try {
         if (!toSegments(world, segments, segment_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_curve: segments without their struct_size");
-        toC(world, world->world.submit(id, std::get<fsim::control::CurveCommand>(c), world->segments, fromC(options)), result);
+        toC(world, id, world->world.submit(id, std::get<fsim::control::CurveCommand>(c), world->segments, fromC(options)), result);
         return FSIM_OK;
     } catch (const std::exception& e) {
         return fail(FSIM_ERROR, std::string("fsim_vehicle_submit_curve: ") + e.what());
@@ -890,7 +912,7 @@ FSIM_API int fsim_activity_update_curve_as(fsim_world* world, fsim_activity_id a
         return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_curve: a curve takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_CURVE)) + " fields");
     try {
         if (!toSegments(world, segments, segment_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_curve: segments without their struct_size");
-        toC(world, world->world.update(caller, activity, std::get<fsim::control::CurveCommand>(c), world->segments), result);
+        toC(world, fsim::control::activityVehicle(activity), world->world.update(caller, activity, std::get<fsim::control::CurveCommand>(c), world->segments), result);
         return FSIM_OK;
     } catch (const std::exception& e) {
         return fail(FSIM_ERROR, std::string("fsim_activity_update_curve: ") + e.what());
@@ -903,7 +925,7 @@ FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, 
     if (!world || !result || !toMode(mode, fields, count, c))
         return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_mode: mode " + std::to_string(mode) + " takes " +
                                                std::to_string(fsim_mode_field_count(mode)) + " fields");
-    toC(world, world->world.submit(id, c, fromC(options)), result);
+    toC(world, id, world->world.submit(id, c, fromC(options)), result);
     return FSIM_OK;
 }
 
@@ -913,7 +935,7 @@ FSIM_API int fsim_vehicle_submit_support(fsim_world* world, uint32_t id, int kin
     if (!world || !result || !toSupport(kind, fields, count, c))
         return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_support: support kind " + std::to_string(kind) + " and " +
                                                std::to_string(count) + " fields do not match");
-    toC(world, world->world.submit(id, c, fromC(options)), result);
+    toC(world, id, world->world.submit(id, c, fromC(options)), result);
     return FSIM_OK;
 }
 
@@ -931,7 +953,7 @@ FSIM_API int fsim_activity_update_as(fsim_world* world, fsim_activity_id activit
     if (malformed)
         return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update: activity " + std::to_string(activity) + " takes " +
                                                (shape.support >= 0 || shape.mode >= 0 ? std::to_string(shape.fields) : fieldCounts(shape.level)) + " fields");
-    toC(world, r, result);
+    toC(world, fsim::control::activityVehicle(activity), r, result);
     return FSIM_OK;
 }
 
@@ -943,7 +965,7 @@ FSIM_API int fsim_activity_update_batch(fsim_world* world, const fsim_activity_i
         const uint32_t fields = shape.fields;
         bool malformed = false;
         const auto r = updateFrom(world, activities[i], shape, values + offset, fields, malformed);
-        world->last = r;
+        remember(world, fsim::control::activityVehicle(activities[i]), r);
         if (!r.accepted())
             return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_batch: activity " + std::to_string(activities[i]) + " refused (" +
                                                    fsim::control::reasonName(r.reason) + ")");
@@ -961,7 +983,7 @@ FSIM_API int fsim_activity_update_batch_n(fsim_world* world, const fsim_activity
         const UpdateShape shape = updateShape(world, activities[i]);
         bool malformed = false;
         const auto r = updateFrom(world, activities[i], shape, values + offset, fields, malformed);
-        world->last = r;
+        remember(world, fsim::control::activityVehicle(activities[i]), r);
         if (malformed)
             return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_batch_n: activity " + std::to_string(activities[i]) + " takes " +
                                                    (shape.support >= 0 ? std::to_string(shape.fields) : fieldCounts(shape.level)) + " fields, not " +
@@ -982,7 +1004,7 @@ FSIM_API int fsim_activity_cancel(fsim_world* world, fsim_activity_id activity, 
 FSIM_API int fsim_activity_cancel_as(fsim_world* world, fsim_activity_id activity, int source, fsim_command_result* result) {
     fsim::control::Source caller;
     if (!world || !result || !toSource(source, caller)) return FSIM_INVALID_ARGUMENT;
-    toC(world, world->world.cancel(caller, activity), result);
+    toC(world, fsim::control::activityVehicle(activity), world->world.cancel(caller, activity), result);
     return FSIM_OK;
 }
 
@@ -1090,16 +1112,162 @@ FSIM_API void fsim_command_detail_init(fsim_command_detail* d) {
     d->from = d->to = std::numeric_limits<double>::quiet_NaN();
 }
 
-FSIM_API int fsim_last_command_detail(const fsim_world* world, fsim_command_detail* out) {
-    if (!world) return FSIM_INVALID_ARGUMENT;
-    const auto& r = world->last;
+namespace {
+
+/// The last command's details: its vehicle's (they stay until that vehicle's next NEW or UPDATE).
+const fsim::control::CommandDetails* lastDetails(const fsim_world* world) noexcept {
+    return world->lastVehicle ? world->world.commandDetails(world->lastVehicle) : nullptr;
+}
+
+/// An answer's detail, its counts aside.
+fsim_command_detail detailOf(const fsim::control::CommandResult& r) noexcept {
     fsim_command_detail d;
     fsim_command_detail_init(&d);
     d.reason = static_cast<int32_t>(r.reason);
     d.index = r.index;
     d.constraint = static_cast<int32_t>(r.constraint);
     d.from = r.from, d.to = r.to;
+    d.new_activity = r.newActivity ? 1 : 0;
+    d.command_id = r.commandId;
+    d.associated = r.other;
+    d.description = fsim::control::reasonDescription(r.reason);
+    return d;
+}
+
+} // namespace
+
+FSIM_API int fsim_last_command_detail(const fsim_world* world, fsim_command_detail* out) {
+    if (!world) return FSIM_INVALID_ARGUMENT;
+    fsim_command_detail d = detailOf(world->last);
+    if (const auto* details = lastDetails(world)) d.finding_count = details->findingCount, d.adjustment_count = details->adjustmentCount;
     return copyOut(d, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API void fsim_command_finding_init(fsim_command_finding* f) {
+    if (!f) return;
+    std::memset(f, 0, sizeof *f);
+    f->struct_size = sizeof *f;
+    f->index = -1;
+    f->from = f->to = std::numeric_limits<double>::quiet_NaN();
+    f->description = "";
+}
+
+FSIM_API int fsim_last_command_finding(const fsim_world* world, uint32_t index, fsim_command_finding* out) {
+    const auto* details = world ? lastDetails(world) : nullptr;
+    if (!details || index >= std::min<uint32_t>(details->findingCount, fsim::control::CommandDetails::kMax))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_last_command_finding: no finding " + std::to_string(index));
+    const fsim::control::Finding& f = details->findings[index];
+    fsim_command_finding c;
+    fsim_command_finding_init(&c);
+    c.reason = static_cast<int32_t>(f.reason);
+    c.index = f.index;
+    c.constraint = static_cast<int32_t>(f.constraint);
+    c.from = f.from, c.to = f.to;
+    c.associated = f.associated;
+    c.description = f.description ? f.description : "";
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API void fsim_command_adjustment_init(fsim_command_adjustment* a) {
+    if (!a) return;
+    std::memset(a, 0, sizeof *a);
+    a->struct_size = sizeof *a;
+    a->index = a->field = -1;
+    a->requested = a->adjusted = std::numeric_limits<double>::quiet_NaN();
+}
+
+FSIM_API int fsim_last_command_adjustment(const fsim_world* world, uint32_t index, fsim_command_adjustment* out) {
+    const auto* details = world ? lastDetails(world) : nullptr;
+    if (!details || index >= std::min<uint32_t>(details->adjustmentCount, fsim::control::CommandDetails::kMax))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_last_command_adjustment: no adjustment " + std::to_string(index));
+    const fsim::control::Adjustment& a = details->adjustments[index];
+    fsim_command_adjustment c;
+    fsim_command_adjustment_init(&c);
+    c.index = a.index;
+    c.field = a.field;
+    c.constraint = static_cast<int32_t>(a.constraint);
+    c.requested = a.requested, c.adjusted = a.adjusted;
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API void fsim_activity_envelope_init(fsim_activity_envelope* e) {
+    if (!e) return;
+    std::memset(e, 0, sizeof *e);
+    e->struct_size = sizeof *e;
+    e->interactive = 1;
+}
+
+FSIM_API int fsim_activity_get_envelope(const fsim_world* world, fsim_activity_id activity, fsim_activity_envelope* out) {
+    const auto* a = world ? world->world.activity(activity) : nullptr;
+    if (!a) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_get_envelope: no activity " + std::to_string(activity));
+    fsim_activity_envelope c;
+    fsim_activity_envelope_init(&c);
+    c.interactive = a->interactive ? 1 : 0;
+    c.command_id = a->commandId;
+    for (std::size_t i = 0; i < fsim::control::kMaxRequirements; ++i) {
+        c.trace[i].kind = static_cast<int32_t>(a->trace[i].kind);
+        c.trace[i].id = a->trace[i].id;
+    }
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsim_batch_command* batch, uint32_t count, fsim_command_result* results,
+                                       fsim_command_detail* details) {
+    if (!world || (count && (!batch || !results || batch[0].struct_size < sizeof(uint32_t)))) return FSIM_INVALID_ARGUMENT;
+    if (count && details && details[0].struct_size < sizeof(uint32_t)) return FSIM_INVALID_ARGUMENT;
+    return guard("fsim_vehicle_submit_batch", [&]() -> int {
+        const std::size_t stride = count ? batch[0].struct_size : 0;
+        std::vector<fsim::control::BatchCommand> items(count);
+        std::vector<std::vector<fsim::control::Waypoint>> routes; // each route's own (the world's scratch is one)
+        std::vector<std::vector<fsim::control::BezierSegment>> curves;
+        routes.reserve(count), curves.reserve(count);
+        // every item made into a command first: a malformed one refuses the batch, and none is made
+        for (uint32_t i = 0; i < count; ++i) {
+            const auto& b = *reinterpret_cast<const fsim_batch_command*>(reinterpret_cast<const char*>(batch) + i * stride);
+            fsim::control::BatchCommand& item = items[i];
+            item.options = fromC(b.options);
+            fsim::control::Command c;
+            fsim::control::SupportCommand sc;
+            bool ok = false;
+            switch (b.kind) {
+            case FSIM_BATCH_LEVEL: ok = toCommand(b.code, b.fields, b.count, c), item.command = c; break;
+            case FSIM_BATCH_BEHAVIOR:
+                ok = b.behavior && b.behavior->id;
+                if (ok) item.command = fsim::control::Command(toBehavior(b.behavior));
+                break;
+            case FSIM_BATCH_SUPPORT: ok = toSupport(b.code, b.fields, b.count, sc), item.command = sc; break;
+            case FSIM_BATCH_MODE: ok = (b.code == FSIM_MODE_HSA || b.code == FSIM_MODE_PATTERN) && toMode(b.code, b.fields, b.count, c), item.command = c; break;
+            case FSIM_BATCH_ROUTE:
+                ok = toMode(FSIM_MODE_ROUTE, b.fields, b.count, c) && toWaypoints(world, b.waypoints, b.waypoint_count);
+                if (ok) routes.push_back(world->waypoints), item.waypoints = routes.back(), item.command = c;
+                break;
+            case FSIM_BATCH_CURVE:
+                ok = toMode(FSIM_MODE_CURVE, b.fields, b.count, c) && toSegments(world, b.segments, b.segment_count);
+                if (ok) curves.push_back(world->segments), item.segments = curves.back(), item.command = c;
+                break;
+            default: break;
+            }
+            if (!ok) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_batch: item " + std::to_string(i) + " is malformed");
+        }
+        std::vector<fsim::control::CommandDetails> checks;
+        const std::vector<fsim::control::CommandResult> answers = world->world.submitBatch(id, items, &checks);
+        const std::size_t detailStride = count && details ? details[0].struct_size : 0;
+        for (uint32_t i = 0; i < count; ++i) {
+            toC(world, id, answers[i], &results[i]);
+            if (!details) continue;
+            auto* out = reinterpret_cast<fsim_command_detail*>(reinterpret_cast<char*>(details) + i * detailStride);
+            fsim_command_detail d = detailOf(answers[i]);
+            d.finding_count = checks[i].findingCount, d.adjustment_count = checks[i].adjustmentCount;
+            copyOut(d, out);
+        }
+        return FSIM_OK;
+    });
+}
+
+FSIM_API const char* fsim_requirement_kind_name(int kind) {
+    return kind >= 0 && kind < static_cast<int>(fsim::control::RequirementKind::Count)
+               ? fsim::control::requirementKindName(static_cast<fsim::control::RequirementKind>(kind))
+               : "?";
 }
 
 FSIM_API const char* fsim_constraint_name(int constraint) {
