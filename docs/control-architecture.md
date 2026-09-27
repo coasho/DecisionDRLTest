@@ -4,6 +4,7 @@
 | --- | --- |
 | Status | Accepted 2026-09-26. The owner approved the two-part design and asked for this record before any code. Implemented in the migration order of section 14, all six steps, and green on CI (section 17) |
 | Extends | ADR-20 (the multi-level control stack), which stays in force for the runtime |
+| Extended by | ADR-28 ([vehicle-interface.md](vehicle-interface.md)): the A-GRA Vehicle Interface's flight modes as guidance that takes UPDATE through fixed-size setpoints (narrowing 8.2), and grants a vehicle may require of a policy (narrowing section 5's "no consent protocol") |
 | Scope | How consumers command aircraft; how an aircraft describes what it can do; how commands are arbitrated, tracked and ended; how knowledge about one aircraft reaches the control loops |
 | Related | [Design document](FlightSim_System_Architecture_and_Design.md) §9.3 (control), §10.3 (stability rules), §12 (performance); [sdk/control.md](sdk/control.md); [hangar.md](hangar.md) |
 
