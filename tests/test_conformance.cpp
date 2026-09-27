@@ -537,7 +537,9 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         else CHECK(among(done.result.reason, {Reason::UnknownCapability, Reason::Unavailable, Reason::VersionUnsupported, Reason::InvalidParameter,
                                               Reason::OutOfRange, Reason::InvalidAxes, Reason::AuthorityHeld, Reason::ControllerNotAxisAware,
                                               Reason::PerformanceLimit, Reason::InvalidWaypoint, Reason::InvalidCurve, Reason::NotGranted,
-                                              Reason::CollisionAvoidance, Reason::Restricted}));
+                                              Reason::CollisionAvoidance, Reason::Restricted, Reason::Diverged,
+                                              // what the vehicle cannot do at all, and the flight phase (docs/flight-autonomy.md, 4.3)
+                                              Reason::NotSupported, Reason::NotImplemented, Reason::OnGround}));
         // a policy is refused what the rules refuse it, and nothing else is refused for its authority (6.1, 7.2)
         const Reason refused = done.options.source == Source::Policy ? done.refused : Reason::None;
         if (refused != Reason::None) CHECK(done.result.reason == refused);

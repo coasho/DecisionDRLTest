@@ -6,6 +6,8 @@ add_library(fsim_control STATIC
     Runtime.h
     Catalog.h
     Catalog.cpp
+    Features.h
+    Features.cpp
     CapabilityHost.h
     CapabilityHost.cpp
     Profile.h

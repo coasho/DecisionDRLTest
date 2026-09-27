@@ -132,11 +132,21 @@ enum class Reason : std::uint8_t {
     Released,           ///< Canceled: the policy released its grant
     CollisionAvoidance, ///< unavailable while the platform avoids a collision
     Restricted,         ///< unavailable: the platform restricts it
+    // what the vehicle can do at all, and in which flight phase (docs/flight-autonomy.md, 4.3)
+    NotSupported,   ///< a physical exception on this aircraft: its support table names the rule and the evidence
+    NotImplemented, ///< applicable to this aircraft, not built yet: its support table names the stage that builds it
+    OnGround,       ///< unavailable to a policy on the ground (the airborne guidance)
+    Airborne,       ///< unavailable to a policy in the air (the ground modes)
     Count
 };
 
 /// "authority_held", "goal_reached", ...
 FSIM_API const char* reasonName(Reason reason) noexcept;
+/// The reason in words: "the aircraft is on the ground", ...; "" for None.
+FSIM_API const char* reasonDescription(Reason reason) noexcept;
+/// A set of reasons (CapabilityStatus::reasons): a bit per Reason.
+constexpr std::uint64_t reasonBit(Reason reason) noexcept { return std::uint64_t{1} << static_cast<unsigned>(reason); }
+static_assert(static_cast<unsigned>(Reason::Count) <= 64, "a reason set is 64 bits");
 
 /// The performance limit a command's value breaks (CommandResult::constraint;
 /// A-GRA's MA_PerformanceConstraintEnum, docs/vehicle-interface.md 5.1).
@@ -309,16 +319,41 @@ struct EnvelopeStatus {
 
 // --- Capabilities -------------------------------------------------------------------
 
+/// Whether a capability can be commanded now (A-GRA's CapabilityAvailabilityEnum;
+/// docs/flight-autonomy.md, 4.1). Whether the aircraft can do it at all is
+/// its support (Support), which never shows here as Disabled.
 enum class Availability : std::uint8_t {
     Available,
     TemporarilyUnavailable, ///< a condition that will pass (weight on wheels, a placard speed, a diverged vehicle)
     Faulted,                ///< an effector has failed
-    Disabled,               ///< switched off for this vehicle
+    Disabled,               ///< switched off for this vehicle (the platform's setAvailability)
+    Unavailable,            ///< not available, and when it returns is not known (an aircraft that cannot do it)
+    Expended,               ///< used up
+};
+/// "available", "temporarily_unavailable", "faulted", "disabled", "unavailable", "expended".
+FSIM_API const char* availabilityName(Availability availability) noexcept;
+
+/// A command field whose range is narrower now than the capability
+/// advertises (a placard: docs/flight-autonomy.md, 4.6). A NEW outside it is
+/// refused with the reason the status gives for it.
+struct CurrentRange {
+    std::int16_t parameter = -1; ///< its place in the descriptor's parameters
+    double min = -std::numeric_limits<double>::infinity();
+    double max = std::numeric_limits<double>::infinity();
 };
 
+/// A capability's availability now (A-GRA's AvailabilityInfo), as a policy
+/// is answered: what admission would say to its NEW.
 struct CapabilityStatus {
+    static constexpr std::size_t kMaxRanges = 4;
     Availability availability = Availability::Available;
-    Reason reason = Reason::None;
+    Reason reason = Reason::None;  ///< the first of `reasons`
+    std::uint64_t reasons = 0;     ///< every reason that holds now (reasonBit)
+    const char* description = "";  ///< the reason in words (reasonDescription, or the placard's own)
+    std::uint64_t associated = 0;  ///< an id the reason is about (the vehicle avoided, an activity); 0: none
+    double nextAvailableS = std::numeric_limits<double>::quiet_NaN(); ///< simulation time it is expected back; NaN: not known
+    std::uint8_t rangeCount = 0;   ///< parameters narrower now
+    std::array<CurrentRange, kMaxRanges> ranges{};
 };
 
 /// Who may command a vehicle's capabilities as Source::Policy
@@ -342,6 +377,15 @@ enum class Persistence : std::uint8_t {
     Terminating, ///< completes when it reaches its goal (a route, a manoeuvre)
 };
 enum Interaction : std::uint8_t { kCommand = 1u << 0, kUpdate = 1u << 1, kCancel = 1u << 2, kSettings = 1u << 3, kStatus = 1u << 4 };
+
+/// How a capability is controlled (A-GRA's AcceptedInterface,
+/// CapabilityControlInterfacesEnum; CapabilityDescriptor::accepted).
+enum AcceptedInterface : std::uint8_t {
+    kAcceptsCapabilityCommand = 1u << 0, ///< a command starts an activity (NEW)
+    kAcceptsActivityCommand = 1u << 1,   ///< its activities change or end on command (UPDATE, CANCEL)
+    kAcceptsTaskCommand = 1u << 2,       ///< a flight task starts it (docs/flight-autonomy.md, FA-2)
+    kAcceptsAutoMdf = 1u << 3,           ///< it acts on its own, as it is built to (envelope protection)
+};
 
 /// Which of A-GRA's flight capability types (MA_FlightCapabilityEnum) a
 /// capability is (CapabilityDescriptor::mode; docs/vehicle-interface.md 4.1).
@@ -450,6 +494,10 @@ struct CapabilityDescriptor {
     bool needsTarget = false;              ///< guidance: follows BehaviorCommand::target
     FlightMode mode = FlightMode::None;    ///< the A-GRA flight capability type it is
     SetpointKind setpoint = SetpointKind::Level; ///< what its command is
+    std::uint8_t accepted = 0;             ///< AcceptedInterface bits
+    /// A platform behaviour an A-GRA capability does better, that one's id
+    /// (hold: "fsim.guidance.hsa"); it stays, and works. "" for the others.
+    std::string superseded;
 };
 
 /// What a behaviour declares when it is registered (ControllerRegistry::addBehavior).
@@ -466,5 +514,60 @@ struct BehaviorTraits {
     /// setpoint (SetpointKind::Hsa, ...) makes it a mode: it takes UPDATE.
     SetpointKind setpoint = SetpointKind::Behavior;
 };
+
+// --- Support (docs/flight-autonomy.md, 4.1, 4.2 and 5) --------------------------------
+
+/// Whether an aircraft, in this build, can do something at all. It does not
+/// change while the vehicle flies; whether it can be commanded now is its
+/// availability (CapabilityStatus).
+enum class Support : std::uint8_t {
+    Supported,      ///< built, and offered on this aircraft
+    Partial,        ///< built and offered; SupportInfo::missing names what is not, `stage` the stage that completes it
+    NotImplemented, ///< applicable to this aircraft, not built yet: `stage` builds it
+    NotSupported,   ///< a physical exception: `rules` exclude it, `evidence` is the aircraft's
+};
+/// "supported", "partial", "not_implemented", "not_supported".
+FSIM_API const char* supportName(Support support) noexcept;
+
+/// The applicability rules (docs/flight-autonomy.md, 5.1): what a physical
+/// exception rests on. SupportInfo::rules holds them as bits (ruleBit).
+enum class Rule : std::uint8_t {
+    None = 0,
+    Hover,            ///< R1: holding a point in the air, on rotors
+    GroundTaxi,       ///< R2: taxiing, on wheels
+    CatapultArrested, ///< R3: a catapult launch and an arrested landing, carrier-capable wings
+    DeckOperations,   ///< R4: a moving deck's vertical take-off and landing
+    ArresterHook,     ///< R5: the arrester hook, as R3
+    RetractableGear,  ///< R6
+    Flaps,            ///< R7: a flap function
+    DragDevices,      ///< R8: spoilers, airbrakes, or surfaces deployed as a speedbrake
+    ReleasableStores, ///< R9: stores it carries and releases
+    Aerobatic,        ///< R10: a wing cleared for aerobatic manoeuvres
+    WheelBrakes,      ///< R11: wheel brakes, on wheels
+    PitchTrim,        ///< R12: a pitch trim the controls move (not a fly-by-wire law's, not a rotorcraft's)
+    EngineThrottles,  ///< R13: a throttle per engine, with more than one the pilot moves apart
+    Count
+};
+constexpr std::uint16_t ruleBit(Rule rule) noexcept { return static_cast<std::uint16_t>(1u << static_cast<unsigned>(rule)); }
+/// "R1" ... "R13"; "" for None.
+FSIM_API const char* ruleName(Rule rule) noexcept;
+/// What it says: "holding a point in the air applies to aircraft that fly on rotors", ...
+FSIM_API const char* ruleDescription(Rule rule) noexcept;
+
+/// One public feature's support on a vehicle. Its strings live as long as the vehicle.
+struct SupportInfo {
+    const char* feature = "";    ///< its public identifier: "fsim.guidance.hover", "fsim.guidance.hsa/direction/magnetic_north"
+    Support support = Support::NotImplemented;
+    std::uint16_t rules = 0;     ///< NotSupported: the rules that exclude it; else those that govern it (ruleBit)
+    std::uint8_t stage = 0;      ///< Partial, NotImplemented: the stage that builds it (FA-n: n); 0 none planned
+    const char* capability = ""; ///< the capability that carries it ("" for the command interface's own)
+    const char* missing = "";    ///< Partial: what is not built yet
+    const char* evidence = "";   ///< NotSupported: the aircraft's declarations the rules rest on, each with its source
+};
+
+/// Every public feature identifier, in the order a vehicle's support table
+/// lists them. An identifier, once published, never changes meaning.
+FSIM_API std::size_t supportFeatureCount() noexcept;
+FSIM_API const char* supportFeature(std::size_t index) noexcept;
 
 } // namespace fsim::control

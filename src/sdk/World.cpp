@@ -182,7 +182,21 @@ control::EnvelopeStatus Vehicle::envelope() { return world_ ? world_->impl_->env
 
 control::CapabilityStatus Vehicle::capabilityStatus(std::string_view capability) const {
     if (world_) return world_->impl_->capabilityStatus(id_, capability);
-    return {control::Availability::Disabled, control::Reason::UnknownVehicle};
+    control::CapabilityStatus none;
+    none.availability = control::Availability::Unavailable;
+    none.reason = control::Reason::UnknownVehicle;
+    none.reasons = control::reasonBit(none.reason);
+    none.description = control::reasonDescription(none.reason);
+    return none;
+}
+
+const control::SupportInfo* Vehicle::support(std::string_view feature) const {
+    return world_ ? world_->impl_->support(id_, feature) : nullptr;
+}
+
+std::vector<control::SupportInfo> Vehicle::supportTable() const {
+    const control::SupportTable* t = world_ ? world_->impl_->supportTable(id_) : nullptr;
+    return t ? t->rows() : std::vector<control::SupportInfo>{};
 }
 
 control::Performance Vehicle::performance() const {
@@ -218,8 +232,10 @@ control::ControlStatus Vehicle::controlStatus(std::string_view capability) const
     return world_ ? world_->impl_->controlStatus(id_, capability) : control::ControlStatus{false, false};
 }
 
-control::Reason Vehicle::setAvailability(std::string_view capability, control::Availability availability, control::Reason reason) {
-    return world_ ? world_->impl_->setAvailability(id_, capability, availability, reason) : control::Reason::UnknownVehicle;
+control::Reason Vehicle::setAvailability(std::string_view capability, control::Availability availability, control::Reason reason,
+                                         std::uint64_t associated, double nextAvailableS) {
+    return world_ ? world_->impl_->setAvailability(id_, capability, availability, reason, associated, nextAvailableS)
+                  : control::Reason::UnknownVehicle;
 }
 
 control::ControlStack& Vehicle::controls() {

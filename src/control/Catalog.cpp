@@ -1,6 +1,7 @@
 #include "control/Catalog.h"
 
 #include "control/Adapter.h"
+#include "control/Features.h"
 #include "control/Registry.h"
 
 #include <algorithm>
@@ -34,6 +35,7 @@ CapabilityDescriptor flight(const char* name, Level level, std::vector<Parameter
     d.persistence = Persistence::Persistent;
     d.parameters = std::move(parameters);
     d.uses = std::move(uses);
+    d.accepted = kAcceptsCapabilityCommand | kAcceptsActivityCommand;
     return d;
 }
 
@@ -68,7 +70,7 @@ Reason checkValue(const ParameterInfo& p, double& v, RangePolicy range, std::uin
     };
     if (isHold(v)) return p.optional ? Reason::None : about(Reason::InvalidParameter);
     if (!std::isfinite(v)) return about(Reason::InvalidParameter);
-    if (!p.supported) return v == p.defaultValue ? Reason::None : about(Reason::InvalidParameter); // nothing on this aircraft moves it
+    if (!p.supported) return v == p.defaultValue ? Reason::None : about(Reason::NotSupported); // nothing on this aircraft moves it
     if (v >= p.min && v <= p.max) return Reason::None;
     if (range == RangePolicy::Reject) return about(Reason::OutOfRange);
     if (!(flags & kClamped)) about(Reason::None); // the first value clamped
@@ -174,9 +176,9 @@ std::size_t supportFields(SupportCommand& c, double* f[4]) noexcept {
     return 0;
 }
 
-CapabilityCatalog::CapabilityCatalog() : CapabilityCatalog(~0u) {}
+CapabilityCatalog::CapabilityCatalog() : CapabilityCatalog(~0u, 0) {}
 
-CapabilityCatalog::CapabilityCatalog(std::uint32_t features) : features_(features) {
+CapabilityCatalog::CapabilityCatalog(std::uint32_t features, std::uint16_t excludedRules) : features_(features), excludedRules_(excludedRules) {
     // Until a profile narrows them (step 2), the ranges are the loops' own
     // bounds: no command the existing entry points send changes.
     const double nan = kHold;
@@ -218,7 +220,8 @@ CapabilityCatalog::CapabilityCatalog(std::uint32_t features) : features_(feature
     addBehaviors();
 }
 
-CapabilityCatalog::CapabilityCatalog(const VehicleProfile& profile, const VehicleAdapter& adapter) : CapabilityCatalog(adapter.features()) {
+CapabilityCatalog::CapabilityCatalog(const VehicleProfile& profile, const VehicleAdapter& adapter)
+    : CapabilityCatalog(adapter.features(), judgeRules(profile).excluded) {
     adapter.declare(profile, *this);
 }
 
@@ -258,11 +261,13 @@ void CapabilityCatalog::narrow(std::string_view capability, std::string_view par
 
 void CapabilityCatalog::addSupport(std::size_t alternative, int engines, AxisMask owns) {
     if (alternative >= kSupportKinds || bySupport_[alternative] >= 0) return;
+    if (excluded(capabilityRules(supportCapability(alternative)), excludedRules_)) return; // a physical exception
     static const Axis axes[] = {Axis::Gear, Axis::Flaps, Axis::Brakes, Axis::Speedbrake, Axis::PitchTrim, Axis::Thrust};
     CapabilityDescriptor d;
     d.id = supportCapability(alternative);
     d.kind = alternative == 5 ? CapabilityKind::Flight : CapabilityKind::Support; // the engines' throttles own thrust
     d.interactions = kCommand | kUpdate | kCancel | kStatus;
+    d.accepted = kAcceptsCapabilityCommand | kAcceptsActivityCommand;
     d.level = Level::Actuator;
     d.axes = owns ? owns : axisBit(axes[alternative]);
     d.persistence = alternative <= 1 ? Persistence::Terminating : Persistence::Persistent; // gear and flaps get somewhere
@@ -289,6 +294,7 @@ void CapabilityCatalog::addProtection() {
     d.id = "fsim.envelope.protection";
     d.kind = CapabilityKind::Status;
     d.interactions = kSettings | kStatus; // a mode to set, a status to read; nothing to command
+    d.accepted = kAcceptsAutoMdf;         // it acts on its own, as built
     d.level = Level::Actuator;
     d.axes = 0;                           // it owns no axis: it limits what the owners demand
     d.parameters = {parameter("mode", "", 2.0, 0.0, 2.0, false)}; // 0 off, 1 report, 2 limit
@@ -301,13 +307,17 @@ void CapabilityCatalog::addBehaviors() {
     for (auto& [behavior, traits] : registry.behaviors()) {
         const bool known = std::any_of(descriptors_.begin(), descriptors_.end(), [&, &b = behavior](const CapabilityDescriptor& d) { return d.behavior == b; });
         if (known || (traits.features & ~features_)) continue; // offered, or not for this aircraft (a hover for a wing)
+        const std::string id = guidanceId(behavior);
+        if (excluded(capabilityRules(id), excludedRules_)) continue; // a physical exception (aerobatics for a transport)
         CapabilityDescriptor d;
-        d.id = guidanceId(behavior);
+        d.id = id;
         d.kind = CapabilityKind::Guidance;
         // a behaviour's parameters are heap data: a new target is a NEW. A mode's
         // setpoint is fixed-size: it takes UPDATE (docs/vehicle-interface.md, 4.2)
         const bool mode = traits.setpoint != SetpointKind::Behavior;
         d.interactions = mode ? kCommand | kUpdate | kCancel | kStatus : kCommand | kCancel | kStatus;
+        d.accepted = kAcceptsCapabilityCommand | kAcceptsActivityCommand;
+        d.superseded = supersededBy(id);
         d.setpoint = traits.setpoint;
         d.level = Level::Behavior;
         d.axes = kPrimaryAxes;

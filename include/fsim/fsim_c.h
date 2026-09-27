@@ -313,7 +313,9 @@ enum fsim_source { FSIM_SOURCE_POLICY = 0, FSIM_SOURCE_AUTOPILOT = 1, FSIM_SOURC
 enum fsim_range_policy { FSIM_RANGE_CLAMP = 0, FSIM_RANGE_REJECT = 1, FSIM_RANGE_NONE = 2 };
 enum fsim_command_status { FSIM_COMMAND_ACCEPTED = 0, FSIM_COMMAND_REJECTED = 1, FSIM_COMMAND_CANCELED = 2 };
 enum fsim_activity_state { FSIM_ACTIVITY_PENDING = 0, FSIM_ACTIVITY_ACTIVE, FSIM_ACTIVITY_COMPLETED, FSIM_ACTIVITY_FAILED, FSIM_ACTIVITY_CANCELED };
-enum fsim_availability { FSIM_AVAILABLE = 0, FSIM_TEMPORARILY_UNAVAILABLE, FSIM_FAULTED, FSIM_DISABLED };
+/* ABI 1.7 appends FSIM_UNAVAILABLE (when it returns is not known: a capability the vehicle does not offer)
+ * and FSIM_EXPENDED; FSIM_DISABLED means switched off (fsim_vehicle_set_availability), never "not supported". */
+enum fsim_availability { FSIM_AVAILABLE = 0, FSIM_TEMPORARILY_UNAVAILABLE, FSIM_FAULTED, FSIM_DISABLED, FSIM_UNAVAILABLE, FSIM_EXPENDED };
 
 /* Call fsim_command_options_init() first: a policy's command, the
  * capability's default axes, values clamped to their ranges. */
@@ -372,7 +374,7 @@ typedef struct fsim_parameter_info {
     int32_t optional;          /* 1: accepts fsim_hold() */
     int32_t unsupported;       /* 1: this aircraft has nothing the field moves (a wing's pitch rate, a helicopter's
                                   flaps): a command that sets it other than to fsim_hold() or its default is refused
-                                  "invalid_parameter" (ABI 1.5; before, reserved and 0) */
+                                  "not_supported" with the field (ABI 1.7; 1.5 and 1.6: "invalid_parameter") */
 } fsim_parameter_info;
 
 FSIM_API uint32_t fsim_vehicle_capability_count(fsim_world* world, uint32_t id);
@@ -679,6 +681,80 @@ enum fsim_flight_mode {
 /* The A-GRA type a capability is (fsim_flight_mode); -1 if the vehicle has no such capability. */
 FSIM_API int fsim_vehicle_capability_flight_mode(fsim_world* world, uint32_t id, uint32_t capability);
 FSIM_API const char* fsim_flight_mode_name(int mode); /* "hsa_csa", "waypoint_following", "loiter", ... */
+
+/* ---------------------------------------------------------------------------
+ * Support and availability (ABI 1.7; docs/flight-autonomy.md, 4): whether the
+ * aircraft can do something at all - supported, partial, not implemented yet
+ * (with the stage that builds it) or not supported (a physical exception, with
+ * the rules and the aircraft's evidence) - apart from whether it can be
+ * commanded now. A NEW for a feature the vehicle does not offer is refused
+ * "not_supported" or "not_implemented"; an id no platform defines
+ * "unknown_capability". A policy's NEW of the platform's airborne guidance on
+ * the ground is refused "on_ground" (the platform's own sources never are).
+ * ------------------------------------------------------------------------- */
+
+/* A capability's availability now, as a policy is answered: every reason that
+ * holds (a bit per reason code), the first as `reason`; what it is about and
+ * when it is expected back; and how many parameters a placard narrows now
+ * (fsim_vehicle_capability_limits). One the vehicle does not offer is
+ * FSIM_UNAVAILABLE with "not_supported", "not_implemented" or "unknown_capability". */
+typedef struct fsim_capability_status {
+    uint32_t struct_size;
+    int32_t availability;    /* fsim_availability */
+    int32_t reason;          /* fsim_reason_name(): the first of `reasons` */
+    uint32_t range_count;    /* parameters narrower now than their advertised range */
+    uint64_t reasons;        /* every reason that holds: bit (1 << code) */
+    uint64_t associated;     /* an id the reason is about (the vehicle avoided); 0 none */
+    double next_available_s; /* simulation time it is expected back; NaN not known */
+    const char* description; /* the reason in words; static, "" for none */
+} fsim_capability_status;
+FSIM_API void fsim_capability_status_init(fsim_capability_status* status);
+FSIM_API int fsim_vehicle_capability_status_info(const fsim_world* world, uint32_t id, const char* capability, fsim_capability_status* out);
+/* The parameters narrower now (a placard: the gear down on the ground, the flaps in above their speed): up to
+ * `capacity` of them, `*count` how many there are. A NEW outside one is refused with the status's reason. */
+typedef struct fsim_parameter_limit {
+    uint32_t parameter; /* its index: fsim_vehicle_capability_parameter */
+    uint32_t reserved;
+    double min, max;
+} fsim_parameter_limit;
+FSIM_API int fsim_vehicle_capability_limits(const fsim_world* world, uint32_t id, const char* capability, fsim_parameter_limit* out,
+                                            uint32_t capacity, uint32_t* count);
+FSIM_API const char* fsim_availability_name(int availability); /* "available", "temporarily_unavailable", ... */
+FSIM_API const char* fsim_reason_description(int reason);       /* the reason in words */
+
+/* How a capability is controlled (A-GRA's AcceptedInterface): bits of fsim_accepted_interface; -1 if the vehicle has no
+ * such capability. And the A-GRA capability a platform behaviour is superseded by ("fsim.guidance.hold":
+ * "fsim.guidance.hsa"); "" for the others, NULL for no such capability. */
+enum fsim_accepted_interface { FSIM_ACCEPTS_CAPABILITY_COMMAND = 1, FSIM_ACCEPTS_ACTIVITY_COMMAND = 2, FSIM_ACCEPTS_TASK_COMMAND = 4,
+                               FSIM_ACCEPTS_AUTO_MDF = 8 };
+FSIM_API int fsim_vehicle_capability_accepted(fsim_world* world, uint32_t id, uint32_t capability);
+FSIM_API const char* fsim_vehicle_capability_superseded(fsim_world* world, uint32_t id, uint32_t capability);
+
+/* One public feature's support on a vehicle (fsim_support_feature(i) lists every identifier). Strings are the
+ * world's, valid while the vehicle is. */
+enum fsim_support_state { FSIM_SUPPORTED = 0, FSIM_PARTIAL, FSIM_NOT_IMPLEMENTED, FSIM_NOT_SUPPORTED };
+typedef struct fsim_support_info {
+    uint32_t struct_size;
+    int32_t support;        /* fsim_support_state: fsim_support_name() */
+    uint32_t rules;         /* not supported: the rules that exclude it, else those that govern it; bit (1 << rule), fsim_rule_name() */
+    uint32_t stage;         /* partial, not implemented: the stage that builds it (FA-n: n); 0 none */
+    const char* feature;    /* its identifier */
+    const char* capability; /* the capability that carries it; "" for the command interface's own */
+    const char* missing;    /* partial: what is not built yet */
+    const char* evidence;   /* not supported: the aircraft's declarations the rules rest on, with their sources */
+} fsim_support_info;
+FSIM_API void fsim_support_info_init(fsim_support_info* info);
+/* By identifier ("fsim.guidance.hover", "fsim.guidance.hsa/direction/magnetic_north") or a behaviour's id;
+ * FSIM_INVALID_ARGUMENT for an unknown vehicle or feature. */
+FSIM_API int fsim_vehicle_support(const fsim_world* world, uint32_t id, const char* feature, fsim_support_info* out);
+FSIM_API uint32_t fsim_support_feature_count(void);
+FSIM_API const char* fsim_support_feature(uint32_t index); /* NULL past the end */
+FSIM_API const char* fsim_support_name(int support);       /* "supported", "partial", "not_implemented", "not_supported" */
+FSIM_API const char* fsim_rule_name(int rule);             /* "R1" ... "R13" */
+FSIM_API const char* fsim_rule_description(int rule);
+/* fsim_vehicle_set_availability, with the id the restriction is about and when it is expected back (NaN: not known). */
+FSIM_API int fsim_vehicle_set_availability_ex(fsim_world* world, uint32_t id, const char* capability, int availability, int reason,
+                                              uint64_t associated, double next_available_s);
 
 FSIM_API int fsim_world_get_environment(const fsim_world* world, fsim_environment* out);
 FSIM_API int fsim_world_set_environment(fsim_world* world, const fsim_environment* environment);

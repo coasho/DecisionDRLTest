@@ -1,6 +1,7 @@
 #include "control/CapabilityHost.h"
 
 #include "control/Atmosphere.h"
+#include "control/Features.h"
 #include "control/Protection.h"
 #include "control/Registry.h"
 #include "control/Route.h"
@@ -205,7 +206,8 @@ ControlStatus CapabilityHost::controlStatus(std::size_t capability) const noexce
     return {authority_[capability].allowed, authority_[capability].granted};
 }
 
-Reason CapabilityHost::setAvailability(std::size_t capability, Availability availability, Reason reason) noexcept {
+Reason CapabilityHost::setAvailability(std::size_t capability, Availability availability, Reason reason, std::uint64_t associated,
+                                       double nextAvailableS) noexcept {
     if (capability >= catalog_->size()) return Reason::UnknownCapability;
     if (availability != Availability::Available) {
         if (reason == Reason::None) reason = Reason::Restricted;
@@ -213,8 +215,18 @@ Reason CapabilityHost::setAvailability(std::size_t capability, Availability avai
         if (reason != Reason::Restricted && reason != Reason::CollisionAvoidance && reason != Reason::Unavailable) return Reason::InvalidParameter;
     }
     Authority& a = authorityOf(capability);
-    const CapabilityStatus next{availability, availability == Availability::Available ? Reason::None : reason};
-    if (next.availability == a.restricted.availability && next.reason == a.restricted.reason) return Reason::None;
+    CapabilityStatus next;
+    if (availability != Availability::Available) {
+        next.availability = availability;
+        next.reason = reason;
+        next.reasons = reasonBit(reason);
+        next.description = reasonDescription(reason);
+        next.associated = associated;
+        next.nextAvailableS = nextAvailableS;
+    }
+    const CapabilityStatus& was = a.restricted;
+    const bool sameTime = was.nextAvailableS == next.nextAvailableS || (std::isnan(was.nextAvailableS) && std::isnan(next.nextAvailableS));
+    if (next.availability == was.availability && next.reason == was.reason && next.associated == was.associated && sameTime) return Reason::None;
     a.restricted = next;
     ++controlRevision_;
     return Reason::None;
@@ -623,16 +635,55 @@ int CapabilityHost::liveSlot(ActivityId activity) const noexcept {
 }
 
 CapabilityStatus CapabilityHost::vehicleStatus(std::size_t capability, const sim::VehicleState& state) const noexcept {
-    if (capability >= catalog_->size()) return {Availability::Disabled, Reason::UnknownCapability};
-    if (state.diverged) return {Availability::TemporarilyUnavailable, Reason::Diverged};
-    return {};
+    CapabilityStatus out;
+    if (capability >= catalog_->size()) out.availability = Availability::Unavailable, out.reason = Reason::UnknownCapability;
+    else if (state.diverged) out.availability = Availability::TemporarilyUnavailable, out.reason = Reason::Diverged;
+    return out;
+}
+
+Reason CapabilityHost::phase(const CapabilityDescriptor& d, const sim::VehicleState& state) noexcept {
+    // the platform's airborne guidance waits for the aircraft to fly; the flight
+    // levels and the support effectors are offered in every phase
+    static constexpr std::string_view kPlatform = "fsim.guidance.";
+    if (d.kind == CapabilityKind::Guidance && state.onGround && d.id.compare(0, kPlatform.size(), kPlatform) == 0) return Reason::OnGround;
+    return Reason::None;
+}
+
+Reason CapabilityHost::missing(std::string_view feature) const noexcept {
+    return support_ ? support_->refusal(feature) : Reason::UnknownCapability;
 }
 
 CapabilityStatus CapabilityHost::status(std::size_t capability, const sim::VehicleState& state) const noexcept {
+    CapabilityStatus out;
+    // every reason that holds, the first of them by precedence: the vehicle's
+    // own, the flight phase, the platform's restriction, a placard
+    auto add = [&out](Availability availability, Reason reason, const char* description) {
+        if (out.reasons == 0) out.availability = availability, out.reason = reason, out.description = description;
+        out.reasons |= reasonBit(reason);
+    };
     const CapabilityStatus own = vehicleStatus(capability, state);
-    if (own.availability != Availability::Available) return own;
-    if (capability < authority_.size() && authority_[capability].restricted.availability != Availability::Available) return authority_[capability].restricted;
-    return {};
+    if (own.availability != Availability::Available) {
+        add(own.availability, own.reason, reasonDescription(own.reason));
+        if (capability >= catalog_->size()) return out;
+    }
+    const CapabilityDescriptor& d = catalog_->descriptor(capability);
+    if (const Reason why = phase(d, state); why != Reason::None) add(Availability::TemporarilyUnavailable, why, reasonDescription(why));
+    if (capability < authority_.size() && authority_[capability].restricted.availability != Availability::Available) {
+        const CapabilityStatus& r = authority_[capability].restricted;
+        if (out.reasons == 0) out.associated = r.associated, out.nextAvailableS = r.nextAvailableS;
+        add(r.availability, r.reason, r.description);
+    }
+    const int kind = catalog_->supportKindOf(capability);
+    if (kind >= 0 && !d.parameters.empty()) { // a support effector's placard: the same as its admission's
+        const Placard p = adapter_->placard(static_cast<std::size_t>(kind), state, *profile_);
+        if (p.reason != Reason::None) {
+            add(Availability::TemporarilyUnavailable, p.reason, p.description);
+        } else if (p.min > d.parameters[0].min || p.max < d.parameters[0].max) {
+            out.ranges[out.rangeCount++] = {0, std::max(p.min, d.parameters[0].min), std::min(p.max, d.parameters[0].max)};
+            if (out.reasons == 0) out.description = p.description;
+        }
+    }
+    return out;
 }
 
 ActivityId CapabilityHost::holder(AxisMask axes, Source source) const noexcept {
@@ -769,7 +820,7 @@ CommandResult CapabilityHost::submit(const CurveCommand& curve, Span<const Bezie
 CommandResult CapabilityHost::submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
                                          const CommandOptions& options, const sim::VehicleState& state, double now) {
     const int found = catalog_->indexOf(command);
-    if (found < 0) return rejected(Reason::UnknownCapability);
+    if (found < 0) return rejected(missing(featureOf(command))); // not supported, not implemented, or unknown
     const auto index = static_cast<std::size_t>(found);
     const CapabilityDescriptor& d = catalog_->descriptor(index);
     if (!(d.interactions & kCommand)) return rejected(Reason::UnknownCapability);
@@ -781,8 +832,11 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     refreshPerformance(); // (what the checks below plan with)
     const bool checked = options.range != RangePolicy::None;
     if (checked) { // (the vehicle's own availability: the platform's restrictions stop a policy only, above)
-        if (vehicleStatus(index, state).availability != Availability::Available) return rejected(Reason::Unavailable);
+        if (const CapabilityStatus own = vehicleStatus(index, state); own.availability != Availability::Available) return rejected(own.reason);
         if (d.version < options.minVersion) return rejected(Reason::VersionUnsupported);
+        // the flight phase, as the status tells a policy (docs/flight-autonomy.md, 4.5): never FA's own sources
+        if (options.source == Source::Policy)
+            if (const Reason why = phase(d, state); why != Reason::None) return rejected(why);
     }
 
     Command setpoint = command;
@@ -852,13 +906,13 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
 
 CommandResult CapabilityHost::submit(const SupportCommand& command, const CommandOptions& options, const sim::VehicleState& state, double now) {
     const int found = catalog_->indexOf(command);
-    if (found < 0) return rejected(Reason::UnknownCapability); // the aircraft has no such effector
+    if (found < 0) return rejected(missing(featureOf(command))); // the aircraft has no such effector: why
     const auto index = static_cast<std::size_t>(found);
     const CapabilityDescriptor& d = catalog_->descriptor(index);
     if (const Reason why = admits(index, options.source); why != Reason::None) return rejected(why);
     const bool checked = options.range != RangePolicy::None;
     if (checked) {
-        if (vehicleStatus(index, state).availability != Availability::Available) return rejected(Reason::Unavailable);
+        if (const CapabilityStatus own = vehicleStatus(index, state); own.availability != Availability::Available) return rejected(own.reason);
         if (d.version < options.minVersion) return rejected(Reason::VersionUnsupported);
     }
     SupportCommand setpoint = command;

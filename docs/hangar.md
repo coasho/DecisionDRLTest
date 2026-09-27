@@ -1005,7 +1005,7 @@ declaration in the design with its public source
 ```toml
 [applicability]
 vertical_flight = false         # holds a point in the air (rule R1)
-ground_contact = "wheels"       # wheels, skids or legs (R2)
+ground_contact = "wheels"       # wheels, skids or legs (R2, R11)
 carrier = "none"                # none, catapult_arrested or deck (R3 to R5)
 retractable_gear = true         # (R6)
 flaps = true                    # a flap function (R7)

@@ -81,6 +81,12 @@ public:
     int indexOf(const Command& command) const noexcept;
     /// A support effector's capability; -1 if the aircraft has none.
     int indexOf(const SupportCommand& command) const noexcept { return bySupport_[command.index()]; }
+    /// The SupportCommand alternative a capability sets; -1 if it is not a support effector's.
+    int supportKindOf(std::size_t index) const noexcept {
+        for (std::size_t k = 0; k < kSupportKinds; ++k)
+            if (bySupport_[k] == static_cast<int>(index)) return static_cast<int>(k);
+        return -1;
+    }
     /// By capability id ("fsim.guidance.hold") or a behaviour's registry id ("hold"); -1 if none.
     int find(std::string_view id) const noexcept;
 
@@ -96,12 +102,16 @@ public:
     Reason check(std::size_t index, Command& command, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
     Reason check(std::size_t index, SupportCommand& command, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
 
+    /// The applicability rules that exclude this aircraft (ruleBit): what it is never offered.
+    std::uint16_t excludedRules() const noexcept { return excludedRules_; }
+
 private:
-    explicit CapabilityCatalog(std::uint32_t features);
+    CapabilityCatalog(std::uint32_t features, std::uint16_t excludedRules);
     void addBehaviors();
     ParameterInfo* parameterOf(std::string_view capability, std::string_view parameter) noexcept;
 
     std::uint32_t features_ = ~0u; ///< the aircraft's; without one, every behaviour is offered
+    std::uint16_t excludedRules_ = 0; ///< its physical exceptions (docs/flight-autonomy.md, 5)
     std::vector<CapabilityDescriptor> descriptors_;
     std::array<int, static_cast<std::size_t>(Level::Behavior)> byLevel_{};
     std::array<int, kSupportKinds> bySupport_{-1, -1, -1, -1, -1, -1};

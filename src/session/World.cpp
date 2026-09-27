@@ -157,6 +157,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
             const auto profile = readAircraftProfile(aircraft, *model, dir / aircraft / (aircraft + ".xml"));
             profiles_[aircraft] = profile;
             catalogs_[aircraft] = std::make_shared<control::CapabilityCatalog>(*profile, control::adapterFor(profile->identity.family));
+            supports_[aircraft] = std::make_shared<control::SupportTable>(*profile, *catalogs_[aircraft]);
         }
         slot = pool_->add(std::move(model));
         entries_.emplace_back();
@@ -186,6 +187,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     e->stack.setInitialInputs(e->inputs);
     e->profile = profiles_[aircraft];
     e->catalog = catalogs_[aircraft];
+    e->support = supports_[aircraft];
     if (spec.profile) {
         // sections of its own: its own profile, completed by its own family's adapter, and its own catalog
         auto own = std::make_shared<control::VehicleProfile>(control::mergeProfile(*e->profile, *spec.profile));
@@ -197,6 +199,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
         if (own->control.header.provenance == control::Provenance::Derived) own->control = {}; // designed again, from its plant
         control::completeControl(*own);
         e->catalog = std::make_shared<control::CapabilityCatalog>(*own, adapter);
+        e->support = std::make_shared<control::SupportTable>(*own, *e->catalog);
         e->profile = std::move(own);
     }
     const auto& adapter = control::adapterFor(e->profile->identity.family);
@@ -204,6 +207,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     if (!e->profile->control.settings.empty()) e->stack.setControllerSettings(e->profile->control.settings);
     for (const auto& [level, controller] : e->profile->control.controllers) e->stack.use(level, controller); // with the settings above
     e->host.bind(id, e->stack, *e->catalog, adapter, *e->profile, options_.dt * e->controlDivider);
+    e->host.setSupport(e->support.get());
     e->flapsPosition = pool_->vehicle(slot).property("fcs/flap-pos-norm");
     for (auto& factory : worldEffects_) e->effects.push_back(factory());
     sim::FlightModel& model = pool_->vehicle(slot);
@@ -521,8 +525,24 @@ const std::vector<control::CapabilityDescriptor>& World::capabilities(std::uint3
 control::CapabilityStatus World::capabilityStatus(std::uint32_t id, std::string_view capability) const {
     const Entry* e = entry(id);
     const int index = e ? e->catalog->find(capability) : -1;
-    if (!e || index < 0) return {control::Availability::Disabled, e ? control::Reason::UnknownCapability : control::Reason::UnknownVehicle};
-    return e->host.status(static_cast<std::size_t>(index), pool_->states()[e->slot]);
+    if (e && index >= 0) return e->host.status(static_cast<std::size_t>(index), pool_->states()[e->slot]);
+    // what it does not offer: why (never Disabled, which means switched off)
+    control::CapabilityStatus out;
+    out.availability = control::Availability::Unavailable;
+    out.reason = e ? e->support->refusal(capability) : control::Reason::UnknownVehicle;
+    out.reasons = control::reasonBit(out.reason);
+    out.description = control::reasonDescription(out.reason);
+    return out;
+}
+
+const control::SupportInfo* World::support(std::uint32_t id, std::string_view feature) const noexcept {
+    const Entry* e = entry(id);
+    return e ? e->support->find(feature) : nullptr;
+}
+
+const control::SupportTable* World::supportTable(std::uint32_t id) const noexcept {
+    const Entry* e = entry(id);
+    return e ? e->support.get() : nullptr;
 }
 
 const control::VehicleProfile* World::profile(std::uint32_t id) const noexcept {
@@ -573,7 +593,7 @@ control::Reason World::requestControl(std::uint32_t id, std::string_view capabil
     Entry* e = entry(id);
     if (!e) return control::Reason::UnknownVehicle;
     const int index = e->catalog->find(capability);
-    if (index < 0) return control::Reason::UnknownCapability;
+    if (index < 0) return e->support->refusal(capability);
     return e->host.requestControl(static_cast<std::size_t>(index), pool_->states()[e->slot]);
 }
 
@@ -581,7 +601,7 @@ control::Reason World::releaseControl(std::uint32_t id, std::string_view capabil
     Entry* e = entry(id);
     if (!e) return control::Reason::UnknownVehicle;
     const int index = e->catalog->find(capability);
-    if (index < 0) return control::Reason::UnknownCapability;
+    if (index < 0) return e->support->refusal(capability);
     const control::Reason r = e->host.releaseControl(static_cast<std::size_t>(index), simTime_);
     levelChanged(*e);
     return r;
@@ -591,7 +611,7 @@ control::Reason World::revokeControl(std::uint32_t id, std::string_view capabili
     Entry* e = entry(id);
     if (!e) return control::Reason::UnknownVehicle;
     const int index = e->catalog->find(capability);
-    if (index < 0) return control::Reason::UnknownCapability;
+    if (index < 0) return e->support->refusal(capability);
     const control::Reason r = e->host.revokeControl(static_cast<std::size_t>(index), reason, simTime_);
     levelChanged(*e);
     return r;
@@ -601,7 +621,7 @@ control::Reason World::setAllowed(std::uint32_t id, std::string_view capability,
     Entry* e = entry(id);
     if (!e) return control::Reason::UnknownVehicle;
     const int index = e->catalog->find(capability);
-    if (index < 0) return control::Reason::UnknownCapability;
+    if (index < 0) return e->support->refusal(capability);
     const control::Reason r = e->host.setAllowed(static_cast<std::size_t>(index), allowed, simTime_);
     levelChanged(*e);
     return r;
@@ -613,12 +633,13 @@ control::ControlStatus World::controlStatus(std::uint32_t id, std::string_view c
     return index < 0 ? control::ControlStatus{false, false} : e->host.controlStatus(static_cast<std::size_t>(index));
 }
 
-control::Reason World::setAvailability(std::uint32_t id, std::string_view capability, control::Availability availability, control::Reason reason) {
+control::Reason World::setAvailability(std::uint32_t id, std::string_view capability, control::Availability availability, control::Reason reason,
+                                       std::uint64_t associated, double nextAvailableS) {
     Entry* e = entry(id);
     if (!e) return control::Reason::UnknownVehicle;
     const int index = e->catalog->find(capability);
-    if (index < 0) return control::Reason::UnknownCapability;
-    return e->host.setAvailability(static_cast<std::size_t>(index), availability, reason);
+    if (index < 0) return e->support->refusal(capability);
+    return e->host.setAvailability(static_cast<std::size_t>(index), availability, reason, associated, nextAvailableS);
 }
 
 std::uint32_t World::controlRevision(std::uint32_t id) noexcept {

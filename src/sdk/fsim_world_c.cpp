@@ -708,7 +708,8 @@ namespace {
 /// An authority call's answer: FSIM_OK, or why the call itself was malformed (an unknown vehicle or capability).
 int authority(const char* call, fsim::control::Reason r) {
     using fsim::control::Reason;
-    if (r == Reason::UnknownVehicle || r == Reason::UnknownCapability || r == Reason::InvalidParameter)
+    if (r == Reason::UnknownVehicle || r == Reason::UnknownCapability || r == Reason::InvalidParameter || r == Reason::NotSupported ||
+        r == Reason::NotImplemented) // (a capability the vehicle does not offer: why)
         return fail(FSIM_INVALID_ARGUMENT, std::string(call) + ": " + (r == Reason::InvalidParameter ? "not a reason the platform gives there" : fsim::control::reasonName(r)));
     return FSIM_OK;
 }
@@ -752,8 +753,9 @@ FSIM_API int fsim_vehicle_set_allowed(fsim_world* world, uint32_t id, const char
 
 FSIM_API int fsim_vehicle_control_status(const fsim_world* world, uint32_t id, const char* capability, int32_t* allowed, int32_t* granted) {
     if (!world || !capability) return FSIM_INVALID_ARGUMENT;
-    const fsim::control::Reason known = world->world.capabilityStatus(id, capability).reason; // (an unknown vehicle or capability)
-    if (known == fsim::control::Reason::UnknownVehicle || known == fsim::control::Reason::UnknownCapability)
+    const fsim::control::Reason known = world->world.capabilityStatus(id, capability).reason; // (an unknown vehicle, one it does not offer)
+    if (known == fsim::control::Reason::UnknownVehicle || known == fsim::control::Reason::UnknownCapability ||
+        known == fsim::control::Reason::NotSupported || known == fsim::control::Reason::NotImplemented)
         return fail(FSIM_INVALID_ARGUMENT, std::string("fsim_vehicle_control_status: ") + fsim::control::reasonName(known));
     const fsim::control::ControlStatus s = world->world.controlStatus(id, capability);
     if (allowed) *allowed = s.allowed ? 1 : 0;
@@ -762,11 +764,16 @@ FSIM_API int fsim_vehicle_control_status(const fsim_world* world, uint32_t id, c
 }
 
 FSIM_API int fsim_vehicle_set_availability(fsim_world* world, uint32_t id, const char* capability, int availability, int reason) {
-    if (!world || !capability || availability < FSIM_AVAILABLE || availability > FSIM_DISABLED || !validReason(reason))
+    return fsim_vehicle_set_availability_ex(world, id, capability, availability, reason, 0, std::numeric_limits<double>::quiet_NaN());
+}
+
+FSIM_API int fsim_vehicle_set_availability_ex(fsim_world* world, uint32_t id, const char* capability, int availability, int reason,
+                                              uint64_t associated, double next_available_s) {
+    if (!world || !capability || availability < FSIM_AVAILABLE || availability > FSIM_EXPENDED || !validReason(reason))
         return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_availability: bad arguments");
     const auto r = static_cast<fsim::control::Reason>(reason == 0 ? static_cast<int>(fsim::control::Reason::Restricted) : reason);
-    return authority("fsim_vehicle_set_availability",
-                     world->world.setAvailability(id, capability, static_cast<fsim::control::Availability>(availability), r));
+    return authority("fsim_vehicle_set_availability", world->world.setAvailability(id, capability, static_cast<fsim::control::Availability>(availability),
+                                                                                   r, associated, next_available_s));
 }
 
 FSIM_API int fsim_vehicle_control_revision(fsim_world* world, uint32_t id, uint32_t* revision) {
@@ -1159,6 +1166,100 @@ FSIM_API const char* fsim_flight_mode_name(int mode) {
     return mode >= 0 && mode < static_cast<int>(fsim::control::FlightMode::Count)
                ? fsim::control::flightModeName(static_cast<fsim::control::FlightMode>(mode))
                : "?";
+}
+
+// --- Support and availability (ABI 1.7) ------------------------------------------------------
+
+FSIM_API void fsim_capability_status_init(fsim_capability_status* status) {
+    if (!status) return;
+    *status = fsim_capability_status{};
+    status->struct_size = sizeof *status;
+    status->next_available_s = std::numeric_limits<double>::quiet_NaN();
+    status->description = "";
+}
+
+FSIM_API int fsim_vehicle_capability_status_info(const fsim_world* world, uint32_t id, const char* capability, fsim_capability_status* out) {
+    if (!world || !capability || !out) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_capability_status_info: bad arguments");
+    const fsim::control::CapabilityStatus s = world->world.capabilityStatus(id, capability);
+    fsim_capability_status c;
+    fsim_capability_status_init(&c);
+    c.availability = static_cast<int32_t>(s.availability);
+    c.reason = static_cast<int32_t>(s.reason);
+    c.range_count = s.rangeCount;
+    c.reasons = s.reasons;
+    c.associated = s.associated;
+    c.next_available_s = s.nextAvailableS;
+    c.description = s.description;
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API int fsim_vehicle_capability_limits(const fsim_world* world, uint32_t id, const char* capability, fsim_parameter_limit* out,
+                                            uint32_t capacity, uint32_t* count) {
+    if (!world || !capability || !count || (capacity && !out)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_capability_limits: bad arguments");
+    const fsim::control::CapabilityStatus s = world->world.capabilityStatus(id, capability);
+    *count = s.rangeCount;
+    for (uint32_t i = 0; i < s.rangeCount && i < capacity; ++i)
+        out[i] = fsim_parameter_limit{static_cast<uint32_t>(s.ranges[i].parameter), 0u, s.ranges[i].min, s.ranges[i].max};
+    return FSIM_OK;
+}
+
+FSIM_API const char* fsim_availability_name(int availability) {
+    return availability >= FSIM_AVAILABLE && availability <= FSIM_EXPENDED
+               ? fsim::control::availabilityName(static_cast<fsim::control::Availability>(availability))
+               : "?";
+}
+
+FSIM_API const char* fsim_reason_description(int reason) {
+    return reason >= 0 && reason < static_cast<int>(fsim::control::Reason::Count) ? fsim::control::reasonDescription(static_cast<fsim::control::Reason>(reason))
+                                                                                  : "";
+}
+
+FSIM_API int fsim_vehicle_capability_accepted(fsim_world* world, uint32_t id, uint32_t capability) {
+    const auto* d = capabilityAt(world, id, capability);
+    return d ? static_cast<int>(d->accepted) : -1;
+}
+
+FSIM_API const char* fsim_vehicle_capability_superseded(fsim_world* world, uint32_t id, uint32_t capability) {
+    const auto* d = capabilityAt(world, id, capability);
+    return d ? world->intern(d->superseded) : nullptr;
+}
+
+FSIM_API void fsim_support_info_init(fsim_support_info* info) {
+    if (!info) return;
+    *info = fsim_support_info{};
+    info->struct_size = sizeof *info;
+    info->feature = info->capability = info->missing = info->evidence = "";
+}
+
+FSIM_API int fsim_vehicle_support(const fsim_world* world, uint32_t id, const char* feature, fsim_support_info* out) {
+    const fsim::control::SupportInfo* s = world && feature && out ? world->world.support(id, feature) : nullptr;
+    if (!s) return fail(FSIM_INVALID_ARGUMENT, std::string("fsim_vehicle_support: no feature '") + (feature ? feature : "") + "' on vehicle " + std::to_string(id));
+    fsim_support_info c;
+    fsim_support_info_init(&c);
+    c.support = static_cast<int32_t>(s->support);
+    c.rules = s->rules;
+    c.stage = s->stage;
+    c.feature = s->feature;
+    c.capability = s->capability;
+    c.missing = s->missing;
+    c.evidence = s->evidence;
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API uint32_t fsim_support_feature_count(void) { return static_cast<uint32_t>(fsim::control::supportFeatureCount()); }
+
+FSIM_API const char* fsim_support_feature(uint32_t index) { return fsim::control::supportFeature(index); }
+
+FSIM_API const char* fsim_support_name(int support) {
+    return support >= FSIM_SUPPORTED && support <= FSIM_NOT_SUPPORTED ? fsim::control::supportName(static_cast<fsim::control::Support>(support)) : "?";
+}
+
+FSIM_API const char* fsim_rule_name(int rule) {
+    return rule > 0 && rule < static_cast<int>(fsim::control::Rule::Count) ? fsim::control::ruleName(static_cast<fsim::control::Rule>(rule)) : "";
+}
+
+FSIM_API const char* fsim_rule_description(int rule) {
+    return rule > 0 && rule < static_cast<int>(fsim::control::Rule::Count) ? fsim::control::ruleDescription(static_cast<fsim::control::Rule>(rule)) : "";
 }
 
 FSIM_API uint32_t fsim_command_field_count(int level) {

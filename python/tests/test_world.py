@@ -534,14 +534,59 @@ class CapabilityTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             flaps.update(down=1.0)
         with self.assertRaises(fsim.Rejected) as refused:
-            v.submit_support("speedbrake", position=1.0)  # a c172x has none
-        self.assertEqual(refused.exception.reason, "unknown_capability")
+            v.submit_support("speedbrake", position=1.0)  # a c172x has none, and declares nothing: applicable, not built
+        self.assertEqual(refused.exception.reason, "not_implemented")
+        self.assertEqual(v.support("fsim.support.speedbrake").support, fsim.Support.NOT_IMPLEMENTED)
         with self.assertRaises(ValueError):
             v.submit_support("afterburner")
         brakes = v.submit_support("wheel_brakes", 0.2, 0.3)
         self.assertEqual(world.activity(brakes).axes, 1 << 6)  # the brakes axis
         flaps.cancel()
         self.assertEqual(flaps.info.reason, "requested")
+
+    def test_support_and_availability(self):
+        """Discovery that tells the truth (docs/flight-autonomy.md, 4): what an aircraft can do at all, and now."""
+        world = make_world(name="py-discovery")
+        viper = fly(world, "viper", type="jsbsim:f16c", altitude_msl_m=3000.0, airspeed_ms=160.0)
+        self.assertIn("fsim.guidance.must_fly", fsim.SUPPORT_FEATURES)
+        hover = viper.support("fsim.guidance.hover")
+        self.assertEqual(hover.support, fsim.Support.NOT_SUPPORTED)
+        self.assertEqual(hover.rules, ("R1",))
+        self.assertTrue(hover.evidence.startswith("vertical_flight = false: USAF F-16 fact sheet"))
+        with self.assertRaises(fsim.Rejected) as refused:
+            viper.submit_behavior("hover")
+        self.assertEqual(refused.exception.reason, "not_supported")
+        magnetic = viper.support("fsim.guidance.hsa/direction/magnetic_north")
+        self.assertEqual((magnetic.support, magnetic.stage), (fsim.Support.NOT_IMPLEMENTED, 4))
+        self.assertEqual(viper.support("hold").feature, "fsim.guidance.hold")  # a behaviour's id finds it
+        table = viper.support_table()
+        self.assertEqual(len(table), len(fsim.SUPPORT_FEATURES))
+        with self.assertRaises(fsim.Error):
+            viper.support("fsim.guidance.warp_drive")
+        status = viper.availability("fsim.guidance.hover")
+        self.assertEqual((status.availability, status.reason), (fsim.Availability.UNAVAILABLE, "not_supported"))
+        self.assertEqual(status.reasons, ("not_supported",))
+        viper.set_availability("fsim.flight.velocity", "temporarily_unavailable", "collision_avoidance", associated=7, next_available_s=30.0)
+        avoiding = viper.availability("fsim.flight.velocity")
+        self.assertEqual((avoiding.reason, avoiding.associated, avoiding.next_available_s), ("collision_avoidance", 7, 30.0))
+        caps = {c.id: c for c in viper.capabilities()}
+        self.assertEqual(caps["fsim.guidance.hold"].superseded, "fsim.guidance.hsa")
+        self.assertEqual(caps["fsim.envelope.protection"].accepted, 8)
+        self.assertEqual(caps["fsim.guidance.hsa"].accepted, 3)
+        # on the ground: a policy's guidance waits (on_ground); the gear's placard narrows its range
+        parked = world.create_vehicle("parked", type="jsbsim:f16c", latitude_deg=37.7, longitude_deg=-122.3, on_ground=True)
+        for _ in range(60):
+            world.step()
+        self.assertEqual(parked.availability("fsim.guidance.hsa").reason, "on_ground")
+        with self.assertRaises(fsim.Rejected) as grounded:
+            parked.submit_hsa(heading_rad=1.0, speed=80.0, speed_reference="true_airspeed", altitude_m=500.0)
+        self.assertEqual(grounded.exception.reason, "on_ground")
+        self.assertEqual(parked.capability_limits("fsim.support.gear"), (("down", 0.5, 1.0),))
+        with self.assertRaises(fsim.Rejected) as up:
+            parked.submit_support("gear", 0.0)
+        self.assertEqual(up.exception.reason, "unavailable")
+        from fsim import agra
+        self.assertEqual(agra.validation_result("not_supported"), "CAPABILITY_NOT_SUPPORTED")
 
     def test_axes_apart(self):
         world = make_world(name="py-axes")
@@ -598,7 +643,7 @@ class CapabilityTest(unittest.TestCase):
         single = fly(world, "single", longitude_deg=-122.3)
         with self.assertRaises(fsim.Rejected) as refused:
             single.submit_support("engines", 0.5, HOLD, HOLD, HOLD)
-        self.assertEqual(refused.exception.reason, "unknown_capability")
+        self.assertEqual(refused.exception.reason, "not_implemented")  # a stock aircraft's profile says nothing of its engines
 
     def test_protection(self):
         world = make_world(name="py-protection")

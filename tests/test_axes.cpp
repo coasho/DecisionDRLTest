@@ -368,9 +368,10 @@ TEST_CASE("the engines' throttles: one per engine, beside a cascade that flies t
     CHECK(w.inputs(twin)->throttle[0] == 0.5);
     CHECK(w.inputs(twin)->throttle[1] == 0.5);
 
-    // a single engine has no such capability
+    // not offered where the profile knows of no second engine: a stock aircraft's says nothing of its engines
+    // (applicable, not built: docs/flight-autonomy.md, 4.3); a hangar single's says one (rule R13)
     const auto single = w.createVehicle(spec("single"));
-    CHECK(w.submit(single, EnginesCommand{{0.5, kHold, kHold, kHold}}).reason == Reason::UnknownCapability);
+    CHECK(w.submit(single, EnginesCommand{{0.5, kHold, kHold, kHold}}).reason == Reason::NotImplemented);
 }
 
 TEST_CASE("the vehicle default: neutral idles, a hold keeps the heading, speed and height the axes were let go at", "[axes][default]") {

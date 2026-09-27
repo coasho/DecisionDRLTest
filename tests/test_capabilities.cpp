@@ -363,7 +363,7 @@ TEST_CASE("the host fails live activities when the flight model diverges", "[cap
     REQUIRE(id == activityId(7, 1));
     s.diverged = true;
     CHECK(host.status(static_cast<std::size_t>(catalog.find("fsim.flight.velocity")), s).availability == Availability::TemporarilyUnavailable);
-    CHECK(host.submit(kBank, {}, s, 0.0).reason == Reason::Unavailable);
+    CHECK(host.submit(kBank, {}, s, 0.0).reason == Reason::Diverged); // the reason the status gives
     host.afterStep(s, {}, 1.0);
     CHECK(host.activity(id)->state == ActivityState::Failed);
     CHECK(host.activity(id)->reason == Reason::Diverged);

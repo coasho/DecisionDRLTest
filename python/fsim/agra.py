@@ -52,11 +52,17 @@ CANNOT_COMPLY = {
     "released": "CANCELED",
     "collision_avoidance": "CONSTRAINT_COLLISION_AVOIDANCE",
     "restricted": "CONSTRAINT_OP",
+    "not_supported": "CAPABILITY_UNAVAILABLE",
+    "not_implemented": "CAPABILITY_UNAVAILABLE",
+    "on_ground": "STATE_OR_SETTINGS",
+    "airborne": "STATE_OR_SETTINGS",
 }
 
 #: reason names -> MA_ValidationResultEnum, for a flight command's rejection (CannotComplyDetails)
 VALIDATION_RESULT = {
     "unknown_capability": "CAPABILITY_NOT_SUPPORTED",
+    "not_supported": "CAPABILITY_NOT_SUPPORTED",
+    "not_implemented": "CAPABILITY_NOT_SUPPORTED",
     "invalid_waypoint": "INVALID_WAYPOINT",
     "invalid_curve": "INVALID_CURVE",
     "out_of_range": "PERFORMANCE_LIMIT_EXCEEDED",

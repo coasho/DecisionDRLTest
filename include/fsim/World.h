@@ -178,7 +178,17 @@ public:
     control::CommandedState commanded() const;
     /// What the vehicle offers: its flight levels and behaviours.
     std::vector<control::CapabilityDescriptor> capabilities() const;
+    /// A capability's availability now, as a policy is answered (docs/sdk/control.md,
+    /// "Support and availability"): every reason that holds, the first as `reason`,
+    /// and the ranges a placard narrows. One the vehicle does not offer is
+    /// Unavailable, with not_supported, not_implemented or unknown_capability.
     control::CapabilityStatus capabilityStatus(std::string_view capability) const;
+    /// Whether the aircraft can do a public feature at all (docs/flight-autonomy.md,
+    /// 4.2): "fsim.guidance.hover", "fsim.guidance.hsa/direction/magnetic_north",
+    /// or a behaviour's id. Null for an unknown feature; valid while the vehicle is.
+    const control::SupportInfo* support(std::string_view feature) const;
+    /// Every public feature's support, in control::supportFeature()'s order.
+    std::vector<control::SupportInfo> supportTable() const;
     /// What the vehicle can do, as its guidance plans with it: speeds, ceiling,
     /// bank, climb, the loops' gains (docs/vehicle-interface.md, 7.1; A-GRA's
     /// performance profile). Computed afresh when its loops change.
@@ -206,7 +216,8 @@ public:
     /// operational restriction): a policy's NEW for it is refused with
     /// `reason`; what flies goes on. Availability::Available lifts it.
     control::Reason setAvailability(std::string_view capability, control::Availability availability,
-                                    control::Reason reason = control::Reason::Restricted);
+                                    control::Reason reason = control::Reason::Restricted, std::uint64_t associated = 0,
+                                    double nextAvailableS = std::numeric_limits<double>::quiet_NaN());
     /// What the vehicle knows about its aircraft: identity, effectors, envelope,
     /// propulsion, plant, performance, control (docs/control-architecture.md, 7).
     const control::VehicleProfile& profile() const;

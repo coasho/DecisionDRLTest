@@ -10,6 +10,7 @@
 #include "control/CapabilityHost.h"
 #include "control/Catalog.h"
 #include "control/ControlStack.h"
+#include "control/Features.h"
 #include "fsim/VehicleProfile.h"
 #include "effects/Effect.h"
 #include "fsim/EnvironmentState.h"
@@ -151,7 +152,16 @@ public:
     std::vector<control::ActivityRecord> activities(std::uint32_t id) const;
     /// What a vehicle offers (empty for an unknown vehicle).
     const std::vector<control::CapabilityDescriptor>& capabilities(std::uint32_t id);
+    /// A capability's availability as a policy is answered (docs/flight-autonomy.md,
+    /// 4.1): for one the vehicle does not offer, Unavailable with NotSupported,
+    /// NotImplemented or UnknownCapability.
     control::CapabilityStatus capabilityStatus(std::uint32_t id, std::string_view capability) const;
+    /// Whether the vehicle's aircraft can do a public feature at all
+    /// (docs/flight-autonomy.md, 4.2), by its identifier or a behaviour's id;
+    /// null for an unknown vehicle or feature.
+    const control::SupportInfo* support(std::uint32_t id, std::string_view feature) const noexcept;
+    /// Every public feature's support on the vehicle, in supportFeature()'s order; null for an unknown vehicle.
+    const control::SupportTable* supportTable(std::uint32_t id) const noexcept;
     /// What the vehicle flies with: its aircraft's profile, with the spec's sections over it.
     const control::VehicleProfile* profile(std::uint32_t id) const noexcept;
     control::ControlStack* controls(std::uint32_t id) noexcept;
@@ -175,9 +185,11 @@ public:
     /// Whether the policy may request the capability; a grant for one no longer allowed is revoked.
     control::Reason setAllowed(std::uint32_t id, std::string_view capability, bool allowed);
     control::ControlStatus controlStatus(std::uint32_t id, std::string_view capability) const;
-    /// The platform restricts a capability (or, Available, lifts it): a policy's NEW for it is refused with `reason`.
+    /// The platform restricts a capability (or, Available, lifts it): a policy's NEW for it is refused with
+    /// `reason`. The status reports the id it is about and when it is expected back (NaN: not known).
     control::Reason setAvailability(std::uint32_t id, std::string_view capability, control::Availability availability,
-                                    control::Reason reason = control::Reason::Restricted);
+                                    control::Reason reason = control::Reason::Restricted, std::uint64_t associated = 0,
+                                    double nextAvailableS = control::kUnknown);
     /// Counts every change to grants, what is allowed, the control mode, availability and the performance (6.3).
     std::uint32_t controlRevision(std::uint32_t id) noexcept;
 
@@ -220,6 +232,7 @@ private:
         control::Level level = control::Level::Actuator; ///< as last published and recorded
         std::shared_ptr<const control::VehicleProfile> profile;
         std::shared_ptr<control::CapabilityCatalog> catalog; ///< its aircraft type's (or its own, with a profile of its own)
+        std::shared_ptr<const control::SupportTable> support; ///< likewise: what it can do at all
         sim::PropertyHandle flapsPosition;                   ///< for flap activities that complete in position
         sim::EffectorInputs effectors;                       ///< as last written to the flight model
         std::vector<std::unique_ptr<effects::Effect>> effects;
@@ -267,6 +280,8 @@ private:
     std::unordered_map<std::string, std::shared_ptr<const control::VehicleProfile>> profiles_;
     /// What each aircraft type offers, from its profile through its adapter.
     std::unordered_map<std::string, std::shared_ptr<control::CapabilityCatalog>> catalogs_;
+    /// What each aircraft type can do at all (docs/flight-autonomy.md, 4.2).
+    std::unordered_map<std::string, std::shared_ptr<const control::SupportTable>> supports_;
     std::vector<sim::ControlInputs> poolInputs_;
     std::vector<sim::VehicleState> stepStates_;                 ///< by slot: every state as the current step began
     StepView stepView_{*this};

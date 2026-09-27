@@ -229,15 +229,32 @@ void VehicleAdapter::declare(const VehicleProfile& p, CapabilityCatalog& catalog
     declareEnvelope(p, catalog);
 }
 
-Reason VehicleAdapter::admit(const SupportCommand& c, const sim::VehicleState& s, const VehicleProfile& p) const noexcept {
+Placard VehicleAdapter::placard(std::size_t alternative, const sim::VehicleState& s, const VehicleProfile& p) const noexcept {
+    Placard out;
     const double cas = s.airspeedCalibratedMs;
-    if (const auto* g = std::get_if<GearCommand>(&c)) {
-        if (g->down < 0.5 && s.onGround) return Reason::Unavailable;
-        if (!std::isnan(p.envelope.gearCasMaxMs) && cas > p.envelope.gearCasMaxMs) return Reason::Unavailable;
-    } else if (const auto* f = std::get_if<FlapsCommand>(&c)) {
-        if (f->position > p.envelope.flapsThreshold && !std::isnan(p.envelope.flaps.casMaxMs) && cas > p.envelope.flaps.casMaxMs)
-            return Reason::Unavailable;
+    if (alternative == 0) { // the gear
+        if (!std::isnan(p.envelope.gearCasMaxMs) && cas > p.envelope.gearCasMaxMs) {
+            out.reason = Reason::Unavailable;
+            out.description = "above the gear's operating speed";
+        } else if (s.onGround) {
+            out.min = 0.5; // down (a value of 0.5 or more)
+            out.description = "on the ground the gear stays down";
+        }
+    } else if (alternative == 1) { // the flaps
+        if (!std::isnan(p.envelope.flaps.casMaxMs) && cas > p.envelope.flaps.casMaxMs) {
+            out.max = p.envelope.flapsThreshold;
+            out.description = "above the flap speed the flaps stay in";
+        }
     }
+    return out;
+}
+
+Reason VehicleAdapter::admit(const SupportCommand& c, const sim::VehicleState& s, const VehicleProfile& p) const noexcept {
+    const Placard placard = this->placard(c.index(), s, p);
+    if (placard.reason != Reason::None) return placard.reason;
+    double value = kHold, value2 = kHold;
+    supportValues(c, value, value2);
+    if (!isHold(value) && (value < placard.min || value > placard.max)) return Reason::Unavailable;
     return Reason::None;
 }
 

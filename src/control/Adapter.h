@@ -12,9 +12,20 @@
 #include "fsim/VehicleProfile.h"
 #include "fsim/VehicleState.h"
 
+#include <limits>
+
 namespace fsim::control {
 
 class CapabilityCatalog;
+
+/// What a support effector allows now (docs/flight-autonomy.md, 4.6): the
+/// reason it may not be commanded at all, else the range its value may take.
+struct Placard {
+    Reason reason = Reason::None;
+    const char* description = ""; ///< the placard in words
+    double min = -std::numeric_limits<double>::infinity();
+    double max = std::numeric_limits<double>::infinity();
+};
 
 /// Which primary axis, let go, has the vehicle default's hold
 /// (VehicleDefault::Hold) keep each target: a wing keeps its heading with
@@ -51,9 +62,14 @@ public:
     /// Offer the support effectors the profile has, and narrow the catalog's
     /// flight parameters to its envelope.
     virtual void declare(const VehicleProfile& profile, CapabilityCatalog& catalog) const;
-    /// Whether a support command may be flown now: the placards (no gear up on
-    /// the ground, no gear or flaps out above their speeds). None if it may.
-    virtual Reason admit(const SupportCommand& command, const sim::VehicleState& state, const VehicleProfile& profile) const noexcept;
+    /// A support effector's placard now, by SupportCommand's alternative: no
+    /// gear operated above its speed, the gear down on the ground, no flaps out
+    /// past their threshold above the flap speed.
+    virtual Placard placard(std::size_t alternative, const sim::VehicleState& state, const VehicleProfile& profile) const noexcept;
+    /// Whether a support command may be flown now, by its placard: the
+    /// placard's reason, Unavailable for a value outside its range, else None.
+    /// A capability's status reports the same placard (CapabilityHost::status).
+    Reason admit(const SupportCommand& command, const sim::VehicleState& state, const VehicleProfile& profile) const noexcept;
     /// What the aircraft can do, as its guidance plans with it
     /// (docs/vehicle-interface.md, 7.1): from the profile's sections and the
     /// loops `runtime` flies with (their limits and gains).

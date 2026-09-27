@@ -54,7 +54,8 @@ TEST_CASE("support effectors are offered where the aircraft has them", "[support
     CHECK(offers(w, plain, "fsim.support.wheel_brakes"));
     CHECK_FALSE(offers(w, plain, "fsim.support.speedbrake"));
     CHECK_FALSE(offers(w, plain, "fsim.support.pitch_trim"));
-    CHECK(w.submit(plain, SpeedbrakeCommand{1.0}).reason == Reason::UnknownCapability);
+    // a stock aircraft declares nothing (docs/flight-autonomy.md, 5.2): no evidence, no exception - applicable, not built
+    CHECK(w.submit(plain, SpeedbrakeCommand{1.0}).reason == Reason::NotImplemented);
 
     auto own = std::make_shared<VehicleProfile>();
     own->effectors.header = {1, Provenance::User};

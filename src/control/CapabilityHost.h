@@ -27,6 +27,8 @@ struct Plan;
 struct Curve;
 }
 
+class SupportTable;
+
 /// Where the support effectors are, for the activities that complete when they get there.
 struct EffectorPositions {
     double gear = kUnknown;  ///< 0 up .. 1 down
@@ -52,6 +54,10 @@ public:
     /// the profile gives it (docs/control-architecture.md, 11).
     void bind(std::uint32_t vehicle, ControlStack& runtime, const CapabilityCatalog& catalog, const VehicleAdapter& adapter,
               const VehicleProfile& profile, double controlPeriodS = 1.0 / 120.0) noexcept;
+    /// The vehicle's support for the public features (it outlives the host):
+    /// a command for one the catalog does not offer is refused NotSupported or
+    /// NotImplemented (docs/flight-autonomy.md, 4.3). Without it, UnknownCapability.
+    void setSupport(const SupportTable* support) noexcept { support_ = support; }
 
     /// NEW. `state` is the vehicle's, for availability; `now` the simulation time.
     CommandResult submit(const Command& command, const CommandOptions& options, const sim::VehicleState& state, double now);
@@ -141,7 +147,10 @@ public:
     /// request, are refused with `reason` - Restricted (if None),
     /// CollisionAvoidance or Unavailable; InvalidParameter for another - and
     /// live activities go on. Availability::Available lifts it (its reason unused).
-    Reason setAvailability(std::size_t capability, Availability availability, Reason reason) noexcept;
+    /// The status reports it, with the id it is about (`associated`: the
+    /// vehicle avoided) and when it is expected back (simulation time; NaN: not known).
+    Reason setAvailability(std::size_t capability, Availability availability, Reason reason, std::uint64_t associated = 0,
+                           double nextAvailableS = kUnknown) noexcept;
     /// Counts every change to the grants, what is allowed, the control mode,
     /// availability and the performance (6.3): a consumer polls it.
     std::uint32_t controlRevision() const noexcept { return controlRevision_; }
@@ -150,7 +159,12 @@ public:
     const ActivityRecord* activity(ActivityId activity) const noexcept;
     /// The live activities, then the ended ones it remembers, newest first.
     std::vector<ActivityRecord> activities() const;
-    /// Its availability: the vehicle's own (a diverged vehicle), else the platform's restriction (setAvailability).
+    /// Its availability as a policy is answered (docs/flight-autonomy.md, 4.1,
+    /// 4.5 and 4.6): every reason that holds - the vehicle's own (a diverged
+    /// vehicle), the flight phase (the airborne guidance on the ground), the
+    /// platform's restriction, a support effector's placard - the first of them
+    /// as `reason`, and the ranges a placard narrows. A policy's NEW is refused
+    /// with the same reason.
     CapabilityStatus status(std::size_t capability, const sim::VehicleState& state) const noexcept;
 
     /// What flies the primary axes nobody owns (docs/control-architecture.md,
@@ -282,6 +296,12 @@ private:
     };
     /// The vehicle's own availability for a capability, apart from the platform's restrictions.
     CapabilityStatus vehicleStatus(std::size_t capability, const sim::VehicleState& state) const noexcept;
+    /// The flight phase's answer to a policy (docs/flight-autonomy.md, 4.5):
+    /// OnGround for the platform's airborne guidance on the ground, else None.
+    /// FA's own sources and running activities never meet it.
+    static Reason phase(const CapabilityDescriptor& d, const sim::VehicleState& state) noexcept;
+    /// Why a command for a feature the catalog does not offer is refused.
+    Reason missing(std::string_view feature) const noexcept;
     /// Its authority, the table grown with the catalog.
     Authority& authorityOf(std::size_t capability);
     /// Why `source` may not command the capability now - no grant under
@@ -303,6 +323,7 @@ private:
     const CapabilityCatalog* catalog_ = nullptr;
     const VehicleAdapter* adapter_ = nullptr;
     const VehicleProfile* profile_ = nullptr;
+    const SupportTable* support_ = nullptr;
     Performance performance_{};
     std::unique_ptr<route::Plan> routePlan_; ///< a route's scratch, allocated at the vehicle's first route
     std::unique_ptr<route::Curve> curvePlan_; ///< a curve's scratch, allocated at the vehicle's first curve

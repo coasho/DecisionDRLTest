@@ -1142,7 +1142,8 @@ static PyObject* world_vehicle_activities(PyObject* o, PyObject* const* args, Py
 }
 
 /* capabilities(id) -> [(id, version, kind, interactions, level, axes, terminating, needs_target, behavior,
- *                       [(name, unit, min, max, default, optional, supported)], axis_groups)] */
+ *                       [(name, unit, min, max, default, optional, supported)], axis_groups, flight_mode, accepted,
+ *                       superseded)] */
 static PyObject* world_capabilities(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint32_t id;
@@ -1165,9 +1166,11 @@ static PyObject* world_capabilities(PyObject* o, PyObject* const* args, Py_ssize
             }
             Py_DECREF(t);
         }
-        PyObject* t = params ? Py_BuildValue("(sIiIiIOOsNIi)", c.id, c.version, c.kind, c.interactions, c.level, c.axes,
+        const char* superseded = fsim_vehicle_capability_superseded(self->world, id, i);
+        PyObject* t = params ? Py_BuildValue("(sIiIiIOOsNIiis)", c.id, c.version, c.kind, c.interactions, c.level, c.axes,
                                              c.terminating ? Py_True : Py_False, c.needs_target ? Py_True : Py_False, c.behavior, params,
-                                             c.axis_groups, fsim_vehicle_capability_flight_mode(self->world, id, i))
+                                             c.axis_groups, fsim_vehicle_capability_flight_mode(self->world, id, i),
+                                             fsim_vehicle_capability_accepted(self->world, id, i), superseded ? superseded : "")
                              : NULL;
         if (!t || PyList_Append(list, t) < 0) {
             Py_XDECREF(t);
@@ -1218,6 +1221,65 @@ static PyObject* world_capability_status(PyObject* o, PyObject* const* args, Py_
     if (!cap) return NULL;
     if (fsim_vehicle_capability_status(self->world, id, cap, &availability, &reason) != FSIM_OK) return fail();
     return Py_BuildValue("(ii)", availability, reason);
+}
+
+/* capability_status_info(id, capability) -> (availability, reason, reasons, description, associated, next_available_s,
+ * [(parameter, min, max)]) */
+static PyObject* world_capability_status_info(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    fsim_capability_status s;
+    fsim_parameter_limit limits[8];
+    uint32_t count = 0;
+    if (!check_args(n, 2, 2, "capability_status_info") || !as_u32(args[0], &id)) return NULL;
+    const char* cap = as_str(args[1], "capability id");
+    if (!cap) return NULL;
+    fsim_capability_status_init(&s);
+    if (fsim_vehicle_capability_status_info(self->world, id, cap, &s) != FSIM_OK) return fail();
+    if (fsim_vehicle_capability_limits(self->world, id, cap, limits, 8, &count) != FSIM_OK) return fail();
+    PyObject* ranges = PyList_New(0);
+    for (uint32_t i = 0; ranges && i < count && i < 8; ++i) {
+        PyObject* t = Py_BuildValue("(Idd)", limits[i].parameter, limits[i].min, limits[i].max);
+        if (!t || PyList_Append(ranges, t) < 0) {
+            Py_XDECREF(t);
+            Py_CLEAR(ranges);
+            break;
+        }
+        Py_DECREF(t);
+    }
+    if (!ranges) return NULL;
+    return Py_BuildValue("(iiKsKdN)", s.availability, s.reason, (unsigned long long)s.reasons, s.description ? s.description : "",
+                         (unsigned long long)s.associated, s.next_available_s, ranges);
+}
+
+/* support(id, feature) -> (feature, support, rules, stage, capability, missing, evidence) */
+static PyObject* world_support(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    fsim_support_info s;
+    if (!check_args(n, 2, 2, "support") || !as_u32(args[0], &id)) return NULL;
+    const char* feature = as_str(args[1], "feature id");
+    if (!feature) return NULL;
+    fsim_support_info_init(&s);
+    if (fsim_vehicle_support(self->world, id, feature, &s) != FSIM_OK) return fail();
+    return Py_BuildValue("(siIIsss)", s.feature, s.support, s.rules, s.stage, s.capability, s.missing, s.evidence);
+}
+
+/* set_availability_ex(id, capability, availability, reason, associated, next_available_s) */
+static PyObject* world_set_availability_ex(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int availability, reason;
+    uint64_t associated;
+    if (!check_args(n, 6, 6, "set_availability_ex") || !as_u32(args[0], &id) || !as_int(args[2], &availability) || !as_int(args[3], &reason) ||
+        !as_u64(args[4], &associated) || !WORLD_IDLE(self))
+        return NULL;
+    const char* cap = as_str(args[1], "capability id");
+    if (!cap) return NULL;
+    const double next = PyFloat_AsDouble(args[5]);
+    if (next == -1.0 && PyErr_Occurred()) return NULL;
+    if (fsim_vehicle_set_availability_ex(self->world, id, cap, availability, reason, associated, next) != FSIM_OK) return fail();
+    Py_RETURN_NONE;
 }
 
 /* performance(id) -> (revision, hovers, 23 floats in fsim_performance's order) */
@@ -1711,6 +1773,10 @@ static PyMethodDef world_methods[] = {
     FAST("set_allowed", world_set_allowed, "set_allowed(id, capability, allowed)"),
     FAST("control_status", world_control_status, "control_status(id, capability) -> (allowed, granted)"),
     FAST("set_availability", world_set_availability, "set_availability(id, capability, availability, reason)"),
+    FAST("set_availability_ex", world_set_availability_ex, "set_availability_ex(id, capability, availability, reason, associated, next_available_s)"),
+    FAST("capability_status_info", world_capability_status_info,
+         "capability_status_info(id, capability) -> (availability, reason, reasons, description, associated, next_available_s, ranges)"),
+    FAST("support", world_support, "support(id, feature) -> (feature, support, rules, stage, capability, missing, evidence)"),
     FAST("profile_value", world_profile_value, "profile_value(id, path) -> float, NaN if unknown"),
     FAST("profile_section", world_profile_section, "profile_section(id, section) -> (version, provenance)"),
     FAST("set_vehicle_default", world_set_vehicle_default, "set_vehicle_default(id, mode) -> reason, 0 if set"),
@@ -1975,6 +2041,37 @@ static PyObject* mod_constraint_name(PyObject* m, PyObject* const* args, Py_ssiz
     return PyUnicode_FromString(fsim_constraint_name(code));
 }
 
+static PyObject* mod_support_features(PyObject* m, PyObject* const* args, Py_ssize_t n) {
+    (void)m;
+    (void)args;
+    if (!check_args(n, 0, 0, "support_features")) return NULL;
+    const uint32_t count = fsim_support_feature_count();
+    PyObject* t = PyTuple_New(count);
+    for (uint32_t i = 0; t && i < count; ++i) {
+        PyObject* s = PyUnicode_FromString(fsim_support_feature(i));
+        if (!s) {
+            Py_CLEAR(t);
+            break;
+        }
+        PyTuple_SetItem(t, i, s); /* steals */
+    }
+    return t;
+}
+
+#define NAME_FUNCTION(fn, call, what)                                                  \
+    static PyObject* fn(PyObject* m, PyObject* const* args, Py_ssize_t n) {             \
+        int code;                                                                      \
+        (void)m;                                                                       \
+        if (!check_args(n, 1, 1, what) || !as_int(args[0], &code)) return NULL;      \
+        return PyUnicode_FromString(call(code));                                       \
+    }
+NAME_FUNCTION(mod_support_name, fsim_support_name, "support_name")
+NAME_FUNCTION(mod_rule_name, fsim_rule_name, "rule_name")
+NAME_FUNCTION(mod_rule_description, fsim_rule_description, "rule_description")
+NAME_FUNCTION(mod_availability_name, fsim_availability_name, "availability_name")
+NAME_FUNCTION(mod_reason_description, fsim_reason_description, "reason_description")
+#undef NAME_FUNCTION
+
 static PyObject* mod_flight_mode_name(PyObject* m, PyObject* const* args, Py_ssize_t n) {
     int code;
     (void)m;
@@ -2053,6 +2150,12 @@ static PyMethodDef module_methods[] = {
     FAST("limit_name", mod_limit_name, "limit_name(i): an envelope limit, \"load_factor_max\" ..."),
     FAST("constraint_name", mod_constraint_name, "constraint_name(i): a performance limit a value broke, \"max_airspeed\" ..."),
     FAST("flight_mode_name", mod_flight_mode_name, "flight_mode_name(i): an A-GRA flight capability type, \"hsa_csa\" ..."),
+    FAST("support_features", mod_support_features, "support_features(): every public feature identifier"),
+    FAST("support_name", mod_support_name, "support_name(i): \"supported\", \"partial\", \"not_implemented\", \"not_supported\""),
+    FAST("rule_name", mod_rule_name, "rule_name(i): an applicability rule, \"R1\" ..."),
+    FAST("rule_description", mod_rule_description, "rule_description(i): what the rule says"),
+    FAST("availability_name", mod_availability_name, "availability_name(i): \"available\", \"temporarily_unavailable\" ..."),
+    FAST("reason_description", mod_reason_description, "reason_description(code): the reason in words"),
     FAST("layout", mod_layout, "C struct sizes and offsets"),
     {NULL, NULL, 0, NULL}};
 

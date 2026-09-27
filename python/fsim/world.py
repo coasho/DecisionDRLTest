@@ -144,10 +144,51 @@ class ActivityState(enum.IntEnum):
 
 
 class Availability(enum.IntEnum):
+    """Whether a capability can be commanded now (A-GRA's CapabilityAvailabilityEnum). DISABLED means switched off
+    by the platform; a capability the vehicle does not offer is UNAVAILABLE, with the reason why
+    (docs/flight-autonomy.md, 4.1)."""
     AVAILABLE = 0
     TEMPORARILY_UNAVAILABLE = 1
     FAULTED = 2
     DISABLED = 3
+    UNAVAILABLE = 4
+    EXPENDED = 5
+
+
+class Support(enum.IntEnum):
+    """Whether the aircraft can do a public feature at all (docs/flight-autonomy.md, 4.1): SUPPORTED; PARTIAL (what
+    is missing named); NOT_IMPLEMENTED (applicable, with the stage that builds it); NOT_SUPPORTED (a physical
+    exception, with its rules and the aircraft's evidence)."""
+    SUPPORTED = 0
+    PARTIAL = 1
+    NOT_IMPLEMENTED = 2
+    NOT_SUPPORTED = 3
+
+
+SupportInfo = collections.namedtuple("SupportInfo", "feature support rules stage capability missing evidence")
+SupportInfo.__doc__ = ("One public feature's support on a vehicle (docs/flight-autonomy.md, 4.2): ``support`` (fsim.Support); "
+                       "``rules``, the applicability rules (\"R1\" ... \"R13\") that exclude it when not supported, else those that "
+                       "govern it; ``stage``, the stage that builds it when partial or not implemented (FA-n: n; 0 none); the "
+                       "``capability`` that carries it; what is ``missing`` when partial; the aircraft's ``evidence`` when not "
+                       "supported - its declarations and their sources.")
+
+AvailabilityInfo = collections.namedtuple("AvailabilityInfo", "availability reason reasons description associated next_available_s ranges")
+AvailabilityInfo.__doc__ = ("A capability's availability now, as a policy is answered (docs/flight-autonomy.md, 4.1 and 4.6): "
+                            "``availability`` (fsim.Availability); ``reason``, the first of ``reasons`` (every reason that holds, "
+                            "by name); ``description`` in words; the id it is ``associated`` with (0 none); ``next_available_s``, the "
+                            "simulation time it is expected back (NaN: not known); ``ranges``, (parameter, min, max) of the "
+                            "parameters a placard narrows now - a NEW outside one is refused with ``reason``.")
+
+#: Every public feature identifier, in the order a vehicle's support table lists them (docs/flight-autonomy.md, 4.2).
+SUPPORT_FEATURES = _native.support_features()
+
+
+def _rules(mask):
+    return tuple(_native.rule_name(r) for r in range(1, 16) if mask & (1 << r) and _native.rule_name(r))
+
+
+def _reasons(mask):
+    return tuple(_native.reason_name(r) for r in range(64) if mask & (1 << r))
 
 
 def _reason_code(reason):
@@ -223,13 +264,16 @@ Parameter.__doc__ = ("A field of a capability's command, or a behaviour's parame
                      "default, whether it takes HOLD, and whether the aircraft has anything it moves (not ``supported``: "
                      "a command that sets it other than to HOLD or its default is refused, invalid_parameter).")
 Capability = collections.namedtuple(
-    "Capability", "id version kind interactions level axes terminating needs_target behavior parameters axis_groups mode",
-    defaults=("none",))
+    "Capability", "id version kind interactions level axes terminating needs_target behavior parameters axis_groups mode accepted superseded",
+    defaults=("none", 0, ""))
 Capability.__doc__ = ("What a vehicle offers: e.g. fsim.flight.attitude (a level) or fsim.guidance.hold (a behaviour). "
                       "``axis_groups``: what it may own apart - 1 lateral (roll and yaw), 2 pitch, 4 thrust, 8 any primary "
                       "axis, 16 cyclic (roll and pitch), 32 yaw; 0 all of its axes or none. A wing's flight capabilities "
                       "own 1, 2 and 4 apart, a rotorcraft's 16, 32 and 4. ``mode``: the A-GRA flight capability type it is "
-                      "(\"hsa_csa\", \"waypoint_following\", \"loiter\", \"formation\", ... or \"none\"; fsim.agra).")
+                      "(\"hsa_csa\", \"waypoint_following\", \"loiter\", \"formation\", ... or \"none\"; fsim.agra). "
+                      "``accepted``: how it is controlled (A-GRA's AcceptedInterface) - 1 a command starts it, 2 its activities "
+                      "change or end on command, 4 a flight task, 8 it acts on its own. ``superseded``: the A-GRA capability "
+                      "that does a platform behaviour's job better (\"fsim.guidance.hold\": \"fsim.guidance.hsa\"), else \"\".")
 
 ActivityProgress = collections.namedtuple(
     "ActivityProgress", "segment segments laps segment_id percent segment_percent distance_to_go_m time_to_go_s cross_track_m "
@@ -693,8 +737,37 @@ class Vehicle:
     def capabilities(self):
         """What the vehicle offers: its levels and behaviours (Capability, with their Parameters and A-GRA mode)."""
         return [Capability(c[0], c[1], c[2], c[3], Level(c[4]), c[5], c[6], c[7], c[8], [Parameter(*p) for p in c[9]], c[10],
-                           _native.flight_mode_name(c[11]))
+                           _native.flight_mode_name(c[11]), c[12], c[13])
                 for c in self._h.capabilities(self.id)]
+
+    def support(self, feature):
+        """Whether the aircraft can do a public feature at all (fsim.SupportInfo; docs/flight-autonomy.md, 4.2): by its
+        identifier ("fsim.guidance.hover", "fsim.guidance.hsa/direction/magnetic_north") or a behaviour's id. Raises
+        fsim.Error for an unknown feature."""
+        t = self._h.support(self.id, feature)
+        return SupportInfo(t[0], Support(t[1]), _rules(t[2]), t[3], t[4], t[5], t[6])
+
+    def support_table(self):
+        """Every public feature's support on the vehicle ([fsim.SupportInfo], in fsim.SUPPORT_FEATURES' order)."""
+        return [self.support(f) for f in SUPPORT_FEATURES]
+
+    def availability(self, capability):
+        """A capability's availability now, as a policy is answered (fsim.AvailabilityInfo): every reason that holds,
+        the id it is about, when it is expected back, and the ranges a placard narrows now. One the vehicle does not
+        offer is UNAVAILABLE with "not_supported", "not_implemented" or "unknown_capability"."""
+        t = self._h.capability_status_info(self.id, capability)
+        names = {}
+        if t[6]:
+            caps = {c.id: c for c in self.capabilities()}
+            params = caps[capability].parameters if capability in caps else []
+            names = {i: p.name for i, p in enumerate(params)}
+        ranges = tuple((names.get(i, i), lo, hi) for i, lo, hi in t[6])
+        return AvailabilityInfo(Availability(t[0]), _native.reason_name(t[1]), _reasons(t[2]), t[3], t[4], t[5], ranges)
+
+    def capability_limits(self, capability):
+        """The parameters a placard narrows now, as (name, min, max): the gear down on the ground, the flaps in above
+        their speed. A NEW outside one is refused with the reason capability_status gives."""
+        return self.availability(capability).ranges
 
     def profile_value(self, path):
         """A field of the vehicle's profile by its path as the aircraft file
@@ -789,11 +862,13 @@ class Vehicle:
         """fsim.ControlStatus(allowed, granted) of a capability by id."""
         return ControlStatus(*self._h.control_status(self.id, capability))
 
-    def set_availability(self, capability, availability, reason="restricted"):
+    def set_availability(self, capability, availability, reason="restricted", associated=0, next_available_s=None):
         """The platform restricts a capability (fsim.Availability or its name; AVAILABLE lifts it): a policy's NEW for it
-        is refused with ``reason``, and so is a request; what flies goes on. capability_status reports it."""
+        is refused with ``reason``, and so is a request; what flies goes on. capability_status reports it, and
+        availability() the id it is ``associated`` with (the vehicle avoided) and when it is expected back."""
         a = Availability[availability.upper()] if isinstance(availability, str) else availability
-        self._h.set_availability(self.id, capability, int(a), _reason_code(reason))
+        nxt = float("nan") if next_available_s is None else float(next_available_s)
+        self._h.set_availability_ex(self.id, capability, int(a), _reason_code(reason), int(associated), nxt)
 
     @property
     def active_level(self):

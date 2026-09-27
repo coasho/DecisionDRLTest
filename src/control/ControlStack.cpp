@@ -694,8 +694,64 @@ const char* reasonName(Reason reason) noexcept {
     case Reason::Released: return "released";
     case Reason::CollisionAvoidance: return "collision_avoidance";
     case Reason::Restricted: return "restricted";
+    case Reason::NotSupported: return "not_supported";
+    case Reason::NotImplemented: return "not_implemented";
+    case Reason::OnGround: return "on_ground";
+    case Reason::Airborne: return "airborne";
     default: return "?";
     }
+}
+
+const char* reasonDescription(Reason reason) noexcept {
+    switch (reason) {
+    case Reason::None: return "";
+    case Reason::UnknownVehicle: return "no such vehicle";
+    case Reason::UnknownCapability: return "no platform defines such a capability";
+    case Reason::UnknownActivity: return "no such activity";
+    case Reason::Unavailable: return "not available now";
+    case Reason::VersionUnsupported: return "the capability is older than the version asked for";
+    case Reason::InvalidParameter: return "a value is missing or malformed";
+    case Reason::OutOfRange: return "a value is outside the capability's range";
+    case Reason::InvalidAxes: return "the capability cannot own those axes";
+    case Reason::AuthorityHeld: return "a higher source holds the axes";
+    case Reason::ControllerNotAxisAware: return "a controller that is not axis-aware would fly axes owned apart";
+    case Reason::ActivityEnded: return "the activity has ended";
+    case Reason::NotUpdatable: return "the capability takes no update";
+    case Reason::WrongCommandType: return "the command is not the capability's";
+    case Reason::GoalReached: return "the activity reached its goal";
+    case Reason::Requested: return "canceled on request";
+    case Reason::Preempted: return "another activity took its axes";
+    case Reason::TargetLost: return "the vehicle it follows is gone";
+    case Reason::BehaviorFailed: return "the behaviour could not do what it was asked";
+    case Reason::CapabilityLost: return "the capability became unavailable";
+    case Reason::Diverged: return "the flight model diverged";
+    case Reason::InvalidWaypoint: return "a route point the aircraft cannot fly";
+    case Reason::InvalidCurve: return "a curve segment the aircraft cannot fly";
+    case Reason::PerformanceLimit: return "beyond what the aircraft can do";
+    case Reason::NotGranted: return "the policy holds no grant for it";
+    case Reason::NotAllowed: return "the policy may not have it";
+    case Reason::Revoked: return "the platform revoked the grant";
+    case Reason::Released: return "the policy released its grant";
+    case Reason::CollisionAvoidance: return "the platform is avoiding a collision";
+    case Reason::Restricted: return "the platform restricts it";
+    case Reason::NotSupported: return "a physical exception on this aircraft: its support table names the rule and the evidence";
+    case Reason::NotImplemented: return "applicable to this aircraft, not built yet: its support table names the stage";
+    case Reason::OnGround: return "the aircraft is on the ground: the airborne guidance waits for it to fly";
+    case Reason::Airborne: return "the aircraft is in the air: the ground modes wait for it to land";
+    default: return "";
+    }
+}
+
+const char* availabilityName(Availability availability) noexcept {
+    switch (availability) {
+    case Availability::Available: return "available";
+    case Availability::TemporarilyUnavailable: return "temporarily_unavailable";
+    case Availability::Faulted: return "faulted";
+    case Availability::Disabled: return "disabled";
+    case Availability::Unavailable: return "unavailable";
+    case Availability::Expended: return "expended";
+    }
+    return "?";
 }
 
 const char* constraintName(Constraint constraint) noexcept {

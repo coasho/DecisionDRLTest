@@ -477,7 +477,7 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_update_batch_n(world, acts, 2, full, 6, 5) != FSIM_OK);
             full[4] = 3.0; /* north_ms, on a wing */
             CHECK(fsim_activity_update(world, acts[0], full, 6, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
-            CHECK(strcmp(fsim_reason_name(cr.reason), "invalid_parameter") == 0);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "not_supported") == 0); /* ABI 1.7: a field it has nothing for */
             {
                 /* ABI 1.6: what the answer was about - the field, and the limit its value broke */
                 fsim_command_detail d;
@@ -486,7 +486,7 @@ int main(int argc, char** argv) {
                 fsim_command_detail_init(&d);
                 CHECK(d.struct_size == sizeof d && d.index == -1 && isnan(d.from));
                 CHECK(fsim_last_command_detail(world, &d) == FSIM_OK && d.index == 4 && d.constraint == 0);
-                CHECK(strcmp(fsim_reason_name(d.reason), "invalid_parameter") == 0);
+                CHECK(strcmp(fsim_reason_name(d.reason), "not_supported") == 0);
                 wild[0] = 4.0; wild[1] = 0.0; wild[2] = fsim_hold(); wild[3] = 0.785; wild[4] = fsim_hold(); wild[5] = fsim_hold();
                 fsim_command_options_init(&co);
                 co.range = FSIM_RANGE_REJECT;
@@ -528,7 +528,7 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_update(world, flaps_id, &position, 1, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
             CHECK(fsim_activity_update(world, flaps_id, two, 2, &cr) != FSIM_OK); /* flaps take one field */
             CHECK(fsim_vehicle_submit_support(world, a, FSIM_SUPPORT_SPEEDBRAKE, &position, 1, &co, &cr) == FSIM_OK);
-            CHECK(cr.status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(cr.reason), "unknown_capability") == 0);
+            CHECK(cr.status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0); /* a stock c172x: declares nothing */
             CHECK(fsim_activity_cancel(world, flaps_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
         }
         {
@@ -585,7 +585,7 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_update(world, engines, throttles, 2, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
             CHECK(fsim_vehicle_submit_support(world, twin, FSIM_SUPPORT_ENGINES, five, 5, &co, &cr) != FSIM_OK); /* at most 4 */
             CHECK(fsim_vehicle_submit_support(world, a, FSIM_SUPPORT_ENGINES, throttles, 2, &co, &cr) == FSIM_OK);
-            CHECK(cr.status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(cr.reason), "unknown_capability") == 0);
+            CHECK(cr.status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0); /* its profile says nothing of its engines */
             CHECK(fsim_world_step(world, 1) == FSIM_OK);
             CHECK(fsim_vehicle_get_property(world, twin, "fcs/throttle-cmd-norm[0]", &value) == FSIM_OK && value == 0.7);
             CHECK(fsim_vehicle_get_property(world, twin, "fcs/throttle-cmd-norm[1]", &value) == FSIM_OK && value == 0.4);
@@ -888,6 +888,67 @@ int main(int argc, char** argv) {
             CHECK(version == 0 && provenance == 0);
             CHECK(fsim_vehicle_profile_section(world, a, "nonsense", &version, &provenance) != FSIM_OK);
             CHECK(fsim_vehicle_profile_value(world, 999, "identity/class", &value) != FSIM_OK);
+        }
+        {
+            /* ABI 1.7: support and availability (docs/flight-autonomy.md, 4) */
+            fsim_support_info si;
+            fsim_capability_status cs;
+            fsim_parameter_limit limits[4];
+            fsim_command_result cr;
+            fsim_behavior_command hover;
+            uint32_t viper = 0, count = 99, n, c, found = 0;
+            const uint32_t features = fsim_support_feature_count();
+            CHECK(features > 100 && fsim_support_feature(0) != NULL && fsim_support_feature(features) == NULL);
+            spec.name = "cap-viper";
+            spec.type = "jsbsim:f16c";
+            spec.altitude_msl_m = 3000.0;
+            spec.airspeed_ms = 160.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &viper) == FSIM_OK);
+            /* a physical exception: not supported, with its rule and the aircraft's evidence */
+            fsim_support_info_init(&si);
+            CHECK(si.struct_size == sizeof si);
+            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.hover", &si) == FSIM_OK);
+            CHECK(si.support == FSIM_NOT_SUPPORTED && strcmp(fsim_support_name(si.support), "not_supported") == 0);
+            CHECK(si.rules == 2u && strcmp(fsim_rule_name(1), "R1") == 0 && strlen(fsim_rule_description(1)) > 0);
+            CHECK(strstr(si.evidence, "vertical_flight = false") == si.evidence);
+            memset(&hover, 0, sizeof hover);
+            hover.id = "hover";
+            CHECK(fsim_vehicle_submit_behavior(world, viper, &hover, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "not_supported") == 0);
+            /* applicable, not built: the stage that builds it */
+            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.hsa/direction/magnetic_north", &si) == FSIM_OK);
+            CHECK(si.support == FSIM_NOT_IMPLEMENTED && si.stage == 4);
+            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.hsa", &si) == FSIM_OK && si.support == FSIM_PARTIAL && strlen(si.missing) > 0);
+            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.warp_drive", &si) != FSIM_OK);
+            /* the status as a policy is answered: what it does not offer is unavailable, with why */
+            fsim_capability_status_init(&cs);
+            CHECK(cs.struct_size == sizeof cs && isnan(cs.next_available_s));
+            CHECK(fsim_vehicle_capability_status_info(world, viper, "fsim.guidance.hover", &cs) == FSIM_OK);
+            CHECK(cs.availability == FSIM_UNAVAILABLE && strcmp(fsim_availability_name(cs.availability), "unavailable") == 0);
+            CHECK(strcmp(fsim_reason_name(cs.reason), "not_supported") == 0 && cs.reasons == (1ull << cs.reason));
+            CHECK(strlen(fsim_reason_description(cs.reason)) > 0);
+            CHECK(fsim_vehicle_set_availability_ex(world, viper, "fsim.flight.velocity", FSIM_TEMPORARILY_UNAVAILABLE, 0, 7, 30.0) == FSIM_OK);
+            CHECK(fsim_vehicle_capability_status_info(world, viper, "fsim.flight.velocity", &cs) == FSIM_OK);
+            CHECK(strcmp(fsim_reason_name(cs.reason), "restricted") == 0 && cs.associated == 7 && cs.next_available_s == 30.0);
+            CHECK(fsim_vehicle_capability_limits(world, viper, "fsim.support.gear", limits, 4, &count) == FSIM_OK && count == 0); /* flying */
+            /* how each capability is controlled, and what supersedes a platform behaviour */
+            n = fsim_vehicle_capability_count(world, viper);
+            for (c = 0; c < n; ++c) {
+                fsim_capability_info ci;
+                CHECK(fsim_vehicle_capability(world, viper, c, &ci) == FSIM_OK);
+                CHECK(fsim_vehicle_capability_accepted(world, viper, c) > 0);
+                if (strcmp(ci.id, "fsim.guidance.hold") == 0) {
+                    CHECK(strcmp(fsim_vehicle_capability_superseded(world, viper, c), "fsim.guidance.hsa") == 0);
+                    ++found;
+                }
+                if (strcmp(ci.id, "fsim.envelope.protection") == 0) CHECK(fsim_vehicle_capability_accepted(world, viper, c) == FSIM_ACCEPTS_AUTO_MDF);
+            }
+            CHECK(found == 1);
+            CHECK(fsim_vehicle_capability_accepted(world, viper, 9999) == -1 && fsim_vehicle_capability_superseded(world, viper, 9999) == NULL);
+            /* a capability it does not offer: the authority calls fail, naming why */
+            CHECK(fsim_vehicle_release_control(world, viper, "fsim.guidance.hover") != FSIM_OK);
+            CHECK(strstr(fsim_last_error(), "not_supported") != NULL);
         }
         }
         fsim_world_destroy(world);

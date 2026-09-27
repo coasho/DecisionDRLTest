@@ -444,6 +444,95 @@ that polls it knows when to look again.
 `not_granted`, `not_allowed`, `revoked`, `released`, `collision_avoidance`
 and `restricted` belong to ADR-28's modes and grants.
 
+### Support and availability: what a vehicle can do at all, and now
+
+Two questions, answered apart ([flight-autonomy.md](../flight-autonomy.md),
+section 4). **Support** - can this aircraft, in this build, do it at all? -
+does not change while it flies. **Availability** - can it be commanded now? -
+does.
+
+```cpp
+const SupportInfo* s = v.support("fsim.guidance.hover");   // on an F-16C:
+// s->support == Support::NotSupported, s->rules == ruleBit(Rule::Hover) ("R1"),
+// s->evidence == "vertical_flight = false: USAF F-16 fact sheet: a conventional take-off and landing fighter. ..."
+v.support("fsim.guidance.hsa/direction/magnetic_north");  // NotImplemented, stage 4 (FA-4)
+v.support("fsim.guidance.hsa");                           // Partial: its `missing` says what is not built yet
+for (const SupportInfo& row : v.supportTable()) { ... }   // every public feature, in supportFeature()'s order
+```
+
+- **The public features** are the SDK's own identifiers: each capability's id
+  (`fsim.guidance.hsa`, `fsim.support.gear`), the flight capability types not
+  built yet (`fsim.guidance.must_fly`, `marshall`, `launch`, `recovery`,
+  `intercept`, `taxi`), the finer features of a capability after a slash
+  (`fsim.guidance.pattern/entry/teardrop`), and the command interface's own
+  (`fsim.command/time_window`, `fsim.activity/disable`). `supportFeatureCount()`
+  and `supportFeature(i)` list them; an identifier never changes meaning.
+- **Supported, partial, not implemented, not supported.** Partial names what
+  is missing and the stage (FA-n) that completes it; not implemented, the stage
+  that builds it; not supported is a physical exception, with the rules that
+  exclude it (`ruleName`, `ruleDescription`) and the aircraft's evidence: its
+  design's declarations and their public sources
+  ([hangar.md](../hangar.md#applicability-what-the-aircraft-physically-is)).
+  No evidence, no exception: a stock aircraft declares nothing, so nothing is
+  excluded on it, and what its model lacks is not implemented.
+- **Never offered, never advertised.** What an aircraft's rules exclude is not
+  in its capabilities (a transport has no aerobatics, a wing no hover), and
+  what is not built is not either.
+
+The answers a command gets:
+
+| Case | Refused |
+| --- | --- |
+| An id no platform defines | `unknown_capability` |
+| A physical exception, or a field the aircraft has nothing for | `not_supported` (a field's index in the result) |
+| Applicable, not built yet | `not_implemented` |
+| The platform's airborne guidance, NEW from a policy on the ground | `on_ground` |
+| A value outside a placard's range now | `unavailable`, as the status says |
+| A diverged vehicle | `diverged`, as the status says (was `unavailable`) |
+
+**The flight phase.** On the ground a policy's NEW of the platform's guidance
+(`fsim.guidance.*`) is refused `on_ground`, and the status it reads says
+`TemporarilyUnavailable` with `on_ground`. The flight levels and the support
+effectors are offered in every phase, so a policy may still fly its own
+take-off. Nothing else is gated: FA's own sources (`Autopilot`, `Override`),
+UPDATEs, activities already running, and the existing entry points
+(`RangePolicy::None`) are untouched.
+
+**The status.** `v.capabilityStatus(id)` is what admission would answer a
+policy now: `availability` and `reason`, every reason that holds in `reasons`
+(`reasonBit`), a `description`, the id the reason is about (`associated`) and
+when it is expected back (`nextAvailableS`, simulation time; NaN when not
+known) - both from the platform's `setAvailability(id, availability, reason,
+associated, nextAvailableS)`. A placard that narrows a parameter shows as a
+range (`ranges`, `rangeCount`): on the ground the gear's `down` is [0.5, 1];
+above the flap speed the flaps' `position` is at most their threshold; above
+the gear's operating speed the gear is `TemporarilyUnavailable`. A NEW outside
+a range is refused with the reason the status gives. A capability the vehicle
+does not offer is `Unavailable` with `not_supported`, `not_implemented` or
+`unknown_capability`: `Disabled` means switched off by the platform, and
+nothing else.
+
+**The descriptors** say how a capability is controlled, `accepted`
+(A-GRA's AcceptedInterface: `kAcceptsCapabilityCommand`,
+`kAcceptsActivityCommand`, and `kAcceptsAutoMdf` for envelope protection,
+which acts on its own), and which A-GRA capability supersedes a platform
+behaviour, `superseded` (`fsim.guidance.hold`: `fsim.guidance.hsa`; waypoints:
+route; loiter: pattern; hover: `fsim.guidance.pattern/hover`). A superseded
+behaviour stays, and works.
+
+**From C and Python.** `fsim_vehicle_support(world, id, feature, &info)`
+(`fsim_support_info`, `fsim_support_info_init` first), `fsim_support_feature_count`,
+`fsim_support_feature(i)`, `fsim_support_name`, `fsim_rule_name`,
+`fsim_rule_description`; `fsim_vehicle_capability_status_info(world, id, capability, &status)`
+(`fsim_capability_status`) and `fsim_vehicle_capability_limits`;
+`fsim_vehicle_capability_accepted` and `fsim_vehicle_capability_superseded`;
+`fsim_vehicle_set_availability_ex`. Python: `vehicle.support(feature)`
+(`fsim.SupportInfo`), `vehicle.support_table()`, `fsim.SUPPORT_FEATURES`,
+`vehicle.availability(capability)` (`fsim.AvailabilityInfo`),
+`vehicle.capability_limits(capability)`, `Capability.accepted` and
+`.superseded`, `fsim.Availability.UNAVAILABLE` and `.EXPENDED`
+([c_abi.md](c_abi.md), [python.md](python.md)).
+
 **From C and Python.** `fsim_vehicle_submit_mode(world, id, FSIM_MODE_HSA, fields, 6, &options, &result)` and `vehicle.submit_hsa(course_rad=..., speed=..., speed_reference="mach", altitude_m=...)` submit an hsa; `fsim_activity_update` and `activity.update(altitude_m=...)` change only what they give. `fsim_vehicle_submit_route(world, id, fields, 4, waypoints, n, &options, &result)` (`fsim_waypoint`, `fsim_waypoint_init`) and `vehicle.submit_route([fsim.Waypoint(lat, lon, speed=55.0), ...], repeat=True)` submit a route; `fsim_activity_update_route` and `activity.update_route(waypoints, **options)` replace it. `fsim_vehicle_submit_mode(world, id, FSIM_MODE_PATTERN, fields, 12, &options, &result)` and `vehicle.submit_pattern(pattern="hold", latitude_rad=..., longitude_rad=...)` loiter; `activity.update(radius_m=...)` merges. `fsim_vehicle_submit_curve(world, id, fields, 8, segments, n, &options, &result)` (`fsim_bezier_segment`, `fsim_bezier_segment_init`) and `vehicle.submit_curve([fsim.BezierSegment(north, east, down), ...], speed_max_ms=...)` fly a curve; `fsim_activity_update_curve` and `activity.append(segments)` or `activity.update_curve(segments)` extend or replace it. `fsim_vehicle_performance` (`fsim_performance`) and `vehicle.performance` give the performance; `fsim_vehicle_set_control_mode`, `_request_control`, `_release_control`, `_revoke_control`, `_set_allowed`, `_control_status`, `_set_availability` and `_control_revision`, and the same names on Python's `Vehicle` (`request_control` raises `fsim.Rejected`), the grants. The C ABI's result carries the index plus one in
 `fsim_command_result.reserved`; `fsim_last_command_detail()` has the rest,
 `fsim_activity_get_progress()` the progress, `fsim_vehicle_commanded()` the

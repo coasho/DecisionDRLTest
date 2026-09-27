@@ -165,7 +165,9 @@ TEST_CASE("rotorcraft: each family's adapter names its controls, owns its axes i
         // refused: what it has nothing for; accepted: what it flies with
         const auto& s = *w.vehicleState(id);
         AccelerationCommand along{1.0, 0.0, 0.5, kHold, kHold, kHold};
-        CHECK(w.submit(id, along).reason == Reason::InvalidParameter);
+        const auto refused = w.submit(id, along);
+        CHECK(refused.reason == Reason::NotSupported); // with the field it has nothing for (docs/flight-autonomy.md, 4.3)
+        CHECK(refused.index == 2);
         AccelerationCommand rates{1.0, 0.1, kHold, kHold, 0.05, -0.05};
         CHECK(w.submit(id, rates).accepted());
         // a cyclic command owns roll and pitch together
@@ -184,9 +186,9 @@ TEST_CASE("rotorcraft: each family's adapter names its controls, owns its axes i
     CHECK(capabilityOf(caps, "fsim.guidance.hover") == nullptr);
     CHECK(capabilityOf(caps, "fsim.guidance.aerobatics") != nullptr);
     AccelerationCommand pitchRate{1.0, 0.0, kHold, kHold, 0.1, kHold};
-    CHECK(w.submit(wing, pitchRate).reason == Reason::InvalidParameter);
+    CHECK(w.submit(wing, pitchRate).reason == Reason::NotSupported);
     VelocityCommand overGround{kHold, 0.0, kHold, kHold, 5.0, 0.0};
-    CHECK(w.submit(wing, overGround).reason == Reason::InvalidParameter);
+    CHECK(w.submit(wing, overGround).reason == Reason::NotSupported);
 }
 
 TEST_CASE("rotorcraft: the manoeuvre suite, flown by the rotorcraft loops designed from each aircraft's hover", "[conformance]") {
