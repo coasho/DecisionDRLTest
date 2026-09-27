@@ -88,13 +88,16 @@ that limit is the stall the fly stage flew last time
 ([The profile](#the-profile)). Flown under it, each run's stall would
 measure the previous run's, and the profile would never settle. Flown
 without it, a second run of fly and autopilot finds what the first found
-and leaves the `.xml` as it was. The autopilot stage's manoeuvres keep
-protection, as a trainer's aircraft does.
+and leaves the `.xml` and `autopilot.toml` as they were. The autopilot
+stage's manoeuvres keep protection, as a trainer's aircraft does.
 
 A rebuild that changes nothing leaves the aircraft's files as they were:
 the build writes them with LF line ends, as git keeps them, and
 `<name>.xml` keeps the date in its header until something else in it
-changes. An `.xml` that git shows as modified has really changed.
+changes. So do `autopilot.toml` and a rotorcraft's `hover.toml` when a
+stage identifies what they already hold. A file that git shows as
+modified has really changed. Only `calibration.toml` is dated at every
+calibrate run.
 
 ## The design file
 

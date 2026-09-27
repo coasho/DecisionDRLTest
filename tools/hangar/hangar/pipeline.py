@@ -111,16 +111,23 @@ def shown(path):
     return path if rel.startswith("..") else rel
 
 
-def _keep_date(path, text):
-    """The JSBSim aircraft `text`, dated as the file at `path` it replaces when
-    nothing else in it has changed: a rebuild that changes nothing leaves the
-    file as git keeps it, not a day newer."""
+#: where a file hangar writes carries its date: the JSBSim aircraft's element, and
+#: the first line of the settings a stage writes beside the design (autopilot.toml, hover.toml)
+XML_DATE = r"<filecreationdate>(.*)</filecreationdate>"
+WRITTEN_DATE = r"^# Written by hangar [a-z]+ \(([^)]*)\)"
+
+
+def keep_date(path, text, date=XML_DATE):
+    """The file `text`, dated as the file at `path` it replaces when nothing
+    else in it has changed (the date: the group of the pattern `date`): a
+    rerun that changes nothing leaves the file as git keeps it, not a day
+    newer."""
     try:
         with open(path, encoding="utf-8") as f:
             old = f.read()
     except (OSError, UnicodeDecodeError):
         return text
-    was, now = (re.search(r"<filecreationdate>(.*)</filecreationdate>", t) for t in (old, text))
+    was, now = (re.search(date, t) for t in (old, text))
     if was and now and text.replace(now.group(1), was.group(1)) == old:
         return old
     return text
@@ -588,7 +595,7 @@ class Design:
         autopilot = load_settings(os.path.join(self.dir, "autopilot.toml"))
         reference, identified = load_identification(os.path.join(self.dir, "autopilot.toml"))
         profile = sections(a, fbw, reference, identified, fly_results(self.dir))
-        text = _keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw, yaw_damper=yd, autopilot=autopilot, profile=profile))
+        text = keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw, yaw_damper=yd, autopilot=autopilot, profile=profile))
         with open(xml_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         # the platform finds it where it is (io::AssetResolver: the source tree's

@@ -127,7 +127,9 @@ class Rotorcraft:
         return {k: float(v) for k, v in out.items()}
 
     def write_hover(self, section):
-        """hover.toml from the fly stage's hover section (fly._hover_section)."""
+        """hover.toml from the fly stage's hover section (fly._hover_section), dated now - unless
+        the file already holds that hover: then it keeps its date, and git sees no change."""
+        from ..pipeline import WRITTEN_DATE, keep_date
         g = lambda v: "%.6g" % v  # noqa: E731
         lines = ["# Written by hangar fly (%s) for %s.toml: its hover, identified in the platform's own JSBSim" % (
                      time.strftime("%Y-%m-%d %H:%M"), self.name),
@@ -150,8 +152,10 @@ class Rotorcraft:
         for axis in self.HOVER_AXES:
             lines.append("%s = { power = %s, damping = %s, lag_s = %s }" % (
                 axis, g(section[axis + "/power"]), g(section[axis + "/damping"]), g(section[axis + "/lag_s"])))
-        with open(os.path.join(self.dir, "hover.toml"), "w", encoding="utf-8", newline="\n") as f:
-            f.write("\n".join(lines) + "\n")
+        path = os.path.join(self.dir, "hover.toml")
+        text = keep_date(path, "\n".join(lines) + "\n", WRITTEN_DATE)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
 
     def profile_xml(self, indent="    "):
         lines = [indent + "<!-- the aircraft's profile for the platform (docs/control-architecture.md, section 7, and",

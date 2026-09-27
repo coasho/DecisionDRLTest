@@ -2147,12 +2147,52 @@ class Profile(unittest.TestCase):
             self.assertEqual(autopilot.load_settings(path), {})
             with open(path, encoding="utf-8") as f:
                 self.assertIn("(2026-09-26 00:37)", f.read())
+            # identified again as it was, the file keeps its date; anything else dates it anew
+            autopilot.write_toml(d, ident)
+            with open(path, encoding="utf-8") as f:
+                self.assertIn("(2026-09-26 00:37)", f.read())
+            autopilot.write_toml(d, dict(ident, throttle_trim=0.33))
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            self.assertNotIn("(2026-09-26 00:37)", text)
+            self.assertIn("throttle_trim = 0.33", text)
         self.assertEqual(reference["tas_ms"], 163.541)   # six significant figures, not two decimals
         self.assertEqual(reference["eas_ms"], 143.067)
         self.assertEqual(identified["roll"], {"gain": 3.7, "lag_s": 0.25})
         self.assertEqual(identified["yaw"], {"gain": 0.17})
         for key in ("throttle_trim", "elevator_trim", "elevator_trim_lift", "alpha_zero_lift_rad"):
             self.assertEqual(identified[key], ident[key], key)
+
+    def test_the_hover_round_trip(self):
+        """A rotorcraft's hover.toml (its fly stage) read back as the profile's hover section; a
+        rerun that identifies the same hover leaves the file as it was, date and all."""
+        import os
+        import re
+        import tempfile
+        from hangar.rotorcraft import Rotorcraft
+        section = {"altitude_m": 100.0, "mass_kg": 1.5, "throttle_trim": 0.52, "aileron_trim": 0.01, "elevator_trim": -0.02,
+                   "rudder_trim": 0.0, "roll_attitude_deg": 0.5, "pitch_attitude_deg": -1.25}
+        for axis in Rotorcraft.HOVER_AXES:
+            section.update({axis + "/power": 20.0, axis + "/damping": -1.5, axis + "/lag_s": 0.05})
+        with tempfile.TemporaryDirectory() as folder:
+            toml = os.path.join(folder, "x.toml")
+            with open(toml, "w", encoding="utf-8") as f:
+                f.write('[aircraft]\nname = "x"\nkind = "multirotor"\n')
+            r = Rotorcraft(toml, log=lambda *a: None)
+            r.write_hover(section)
+            self.assertEqual(r.hover(), section)
+            path = os.path.join(folder, "hover.toml")
+            with open(path, encoding="utf-8") as f:
+                old = re.sub(r"\(\d{4}-\d\d-\d\d \d\d:\d\d\)", "(2000-01-01 00:00)", f.read(), count=1)
+            self.assertIn("(2000-01-01 00:00)", old)
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(old)
+            r.write_hover(section)
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(f.read(), old)
+            r.write_hover(dict(section, throttle_trim=0.53))
+            with open(path, encoding="utf-8") as f:
+                self.assertNotIn("2000-01-01", f.read())
 
     def test_gains_written_by_hand_still_go_into_the_aircraft(self):
         import os

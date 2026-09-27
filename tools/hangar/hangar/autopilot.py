@@ -234,7 +234,9 @@ def fits(ident):
 def write_toml(d, ident, date=None):
     """autopilot.toml beside the design: the reference condition and what
     was identified there - reviewable, and read into the aircraft's plant
-    section by the build."""
+    section by the build. Dated `date`, or now - unless the file already
+    holds what was identified: then it keeps its date, and git sees no change."""
+    from .pipeline import WRITTEN_DATE, keep_date
     lines = ["# Written by hangar autopilot (%s) for %s: the aircraft's responses to its" % (
              date or time.strftime("%Y-%m-%d %H:%M"), os.path.basename(d.path)),
              "# controls, identified at a reference condition (docs/hangar.md, The autopilot). The",
@@ -244,8 +246,11 @@ def write_toml(d, ident, date=None):
              "tas_ms = %s" % _num(ident["tas_ms"]), "eas_ms = %s" % _num(ident["eas_ms"]), "altitude_m = %.0f" % ident["altitude_m"]]
     lines += identified_toml(ident)
     path = os.path.join(d.dir, "autopilot.toml")
+    text = "\n".join(lines) + "\n"
+    if date is None:
+        text = keep_date(path, text, WRITTEN_DATE)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(lines) + "\n")
+        f.write(text)
     return path
 
 

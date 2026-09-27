@@ -328,8 +328,9 @@ move on while a check fails or a picture looks wrong.
   changes nothing keeps the aircraft's date, and the mesher gives the same
   `.glb` every time. The flight tests fly without the platform's envelope
   protection, so they never measure the envelope the last run wrote: fly
-  and autopilot run again leave the `.xml` as it was. One that should not
-  have changed is a bug to chase, not a file to check out. (calibrate dates
-  `calibration.toml` every run, and autopilot `autopilot.toml`.)
+  and autopilot run again leave the `.xml` and `autopilot.toml` (a
+  rotorcraft's `hover.toml`) as they were, dates and all. One that should
+  not have changed is a bug to chase, not a file to check out. (Only
+  calibrate dates its `calibration.toml` every run.)
 - The aircraft is `jsbsim:<name>` everywhere on the platform, with no copying:
   in the viewer, the C++ and Python SDKs, and scenario files.
