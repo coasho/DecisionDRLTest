@@ -4,6 +4,14 @@
     <author> hangar (tools/hangar), from aircraft/iris/iris.toml </author>
     <description> 3DR IRIS+ - 1.5 kg quadrotor, brushless motors (PX4's simulation model) </description>
     <note> Written by hangar's rotorcraft pipeline from the design file, whose comments cite every number's source. </note>
+    <reference refID="fsim/applicability/aerobatic" author="the design" title="The platform's aerobatics are a wing's manoeuvres flown by load factor (docs/flight-autonomy.md, rule R10)" date="n/a"/>
+    <reference refID="fsim/applicability/carrier" author="the design" title="A quadrotor takes off and lands vertically, as on a ship's deck" date="n/a"/>
+    <reference refID="fsim/applicability/drag_devices" author="the design" title="3DR IRIS+ specifications: a quadrotor, with no spoilers or airbrakes" date="n/a"/>
+    <reference refID="fsim/applicability/flaps" author="the design" title="3DR IRIS+ specifications: a quadrotor, with no flaps" date="n/a"/>
+    <reference refID="fsim/applicability/ground_contact" author="the design" title="PX4's iris model: four legs, no wheels" date="n/a"/>
+    <reference refID="fsim/applicability/releasable_stores" author="the design" title="3DR IRIS+ specifications: a camera mount, no release mechanism or stores stations" date="n/a"/>
+    <reference refID="fsim/applicability/retractable_gear" author="the design" title="3DR IRIS+ specifications: fixed legs" date="n/a"/>
+    <reference refID="fsim/applicability/vertical_flight" author="the design" title="3DR IRIS+ specifications and PX4's iris model: a quadrotor that hovers" date="n/a"/>
   </fileheader>
   <metrics>
     <wingarea unit="FT2"> 2.2081732 </wingarea>
@@ -151,6 +159,16 @@
     <property value="0">fsim/hover/yaw/damping</property>
     <property value="0.0125">fsim/hover/yaw/lag_s</property>
     <property value="-7.54612">fsim/hover/yaw/power</property>
+    <property value="1">fsim/applicability/version</property>
+    <property value="1">fsim/applicability/provenance</property>
+    <property value="0">fsim/applicability/aerobatic</property>
+    <property value="3">fsim/applicability/carrier</property>
+    <property value="1">fsim/applicability/drag_devices</property>
+    <property value="0">fsim/applicability/flaps</property>
+    <property value="3">fsim/applicability/ground_contact</property>
+    <property value="1">fsim/applicability/releasable_stores</property>
+    <property value="0">fsim/applicability/retractable_gear</property>
+    <property value="1">fsim/applicability/vertical_flight</property>
     <channel name="motors">
       <!-- motor 0: front right, counter-clockwise -->
       <fcs_function name="fcs/iris/cmd[0]">

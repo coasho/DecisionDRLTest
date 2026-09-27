@@ -143,6 +143,13 @@ def sections(aircraft, fbw, reference, identified, flown):
         perf["climb_ms"] = float(fighter["climb_rate_ms"])
     if perf:
         out["performance"] = perf
+
+    # applicability: the physical characteristics the design declares, each with its source
+    # (docs/flight-autonomy.md, 5.2); the sources go into the file header (jsbsim.aircraft_xml)
+    from .applicability import declared
+    fields, _ = declared(spec)
+    if fields:
+        out["applicability"] = fields
     return out
 
 
@@ -158,7 +165,7 @@ def properties_xml(profile, indent="      "):
         return ""
     lines = [indent + "<!-- the aircraft's profile for the platform (docs/control-architecture.md, section 7): what",
              indent + "     hangar knows of it - its design, its flight tests, its identified responses -->"]
-    for section in ("identity", "effectors", "envelope", "propulsion", "plant", "performance"):
+    for section in ("identity", "effectors", "envelope", "propulsion", "plant", "performance", "applicability"):
         fields = profile.get(section)
         if not fields:
             continue

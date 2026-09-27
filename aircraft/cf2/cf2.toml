@@ -268,3 +268,27 @@ fillet = 0.0002
 
 [dimensions]
 rotor_diameter_m = 0.0463          # LN's 23.13 mm radius
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = true
+ground_contact = "legs"
+carrier = "deck"
+retractable_gear = false
+flaps = false
+drag_devices = "none"
+releasable_stores = "none"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "Bitcraze Crazyflie 2.0 datasheet: a quadrotor that hovers"
+ground_contact = "Bitcraze Crazyflie 2.0 datasheet: it stands on its four motor mounts' legs; no wheels"
+carrier = "A quadrotor takes off and lands vertically, as on a ship's deck"
+retractable_gear = "Bitcraze Crazyflie 2.0 datasheet: fixed legs"
+flaps = "Bitcraze Crazyflie 2.0 datasheet: a quadrotor, with no flaps"
+drag_devices = "Bitcraze Crazyflie 2.0 datasheet: a quadrotor, with no spoilers or airbrakes"
+releasable_stores = "Bitcraze Crazyflie 2.0 datasheet: no payload release mechanism or stores stations"
+aerobatic = "The platform's aerobatics are a wing's manoeuvres flown by load factor (docs/flight-autonomy.md, rule R10)"

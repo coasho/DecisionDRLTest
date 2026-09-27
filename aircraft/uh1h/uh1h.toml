@@ -344,3 +344,27 @@ length_m = 12.624                  # fuselage, 41 ft 5.0 in
 main_rotor_diameter_m = 14.71      # 48 ft 3.2 in
 tail_rotor_diameter_m = 2.591      # 8 ft 6.0 in
 skid_tread_m = 2.606               # 8 ft 6.6 in
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = true
+ground_contact = "skids"
+carrier = "deck"
+retractable_gear = false
+flaps = false
+drag_devices = "none"
+releasable_stores = "dispensers"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "US Army TM 55-1520-210-10 (UH-1H operator's manual): a helicopter that hovers"
+ground_contact = "US Army TM 55-1520-210-10: skid landing gear"
+carrier = "A helicopter takes off and lands vertically, as on a ship's deck"
+retractable_gear = "US Army TM 55-1520-210-10: fixed skids"
+flaps = "US Army TM 55-1520-210-10: a helicopter, with no flaps"
+drag_devices = "US Army TM 55-1520-210-10: a helicopter, with no spoilers or airbrakes"
+releasable_stores = "US Army FM 20-32 (mine/countermine operations): the M56 mine dispensing subsystem on the UH-1H"
+aerobatic = "The platform's aerobatics are a wing's manoeuvres flown by load factor (docs/flight-autonomy.md, rule R10)"

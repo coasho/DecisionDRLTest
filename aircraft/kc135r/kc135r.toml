@@ -473,3 +473,27 @@ height = 12.70                # 41 ft 8 in
 max_mach = 0.86
 max_mach_altitude_ft = 30000
 operational_ceiling_ft = 50000  # USAF fact sheet: a clearance, not reached at 100 t
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "none"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "USAF KC-135 fact sheet: a conventional take-off and landing jet. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "USAF KC-135 fact sheet: tricycle wheeled gear"
+carrier = "USAF KC-135 fact sheet: a land-based tanker"
+retractable_gear = "USAF KC-135 fact sheet: retractable gear"
+flaps = "C-135 data: trailing-edge flaps"
+drag_devices = "C-135 data: spoilers"
+releasable_stores = "USAF KC-135 fact sheet: an unarmed tanker"
+aerobatic = "USAF KC-135 fact sheet: a tanker, not cleared for aerobatics"

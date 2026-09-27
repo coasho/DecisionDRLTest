@@ -19,6 +19,8 @@ rudder + nose left (left pedal: JSBSim's, trailing edge left), throttle-cmd-norm
 import math
 import os
 
+from ..applicability import references_xml
+
 RHO0 = 0.002377  # slug/ft3
 HP = 550.0       # ft lb/s
 W_PER_HP = 745.7
@@ -165,7 +167,7 @@ def write(spec, out_dir, profile_xml=""):
     <author> hangar (tools/hangar), from aircraft/%(n)s/%(n)s.toml </author>
     <description> %(desc)s </description>
     <note> Written by hangar's rotorcraft pipeline from the design file, whose comments cite every number's source. </note>
-  </fileheader>
+%(refs)s  </fileheader>
   <metrics>
     <wingarea unit="FT2"> %(area)s </wingarea>
     <wingspan unit="FT"> %(span)s </wingspan>
@@ -208,7 +210,7 @@ def write(spec, out_dir, profile_xml=""):
   <aerodynamics>
 %(aero)s  </aerodynamics>
 </fdm_config>
-""" % dict(n=name, desc=spec["aircraft"]["description"], area=_f(math.pi * mr["radius_ft"] ** 2), span=_f(2 * mr["radius_ft"]),
+""" % dict(n=name, desc=spec["aircraft"]["description"], refs=references_xml(spec, "    "), area=_f(math.pi * mr["radius_ft"] ** 2), span=_f(2 * mr["radius_ft"]),
            chord=_f(mr["chord_ft"]), cgx=_f(cg[0]), cgy=_f(cg[1]), cgz=_f(cg[2]), ixx=_f(m["ixx"]), iyy=_f(m["iyy"]),
            izz=_f(m["izz"]), ixz=_f(m.get("ixz", 0.0)), w=_f(m["weight_lb"]), gear="\n".join(contacts),
            hx=_f(mr["hub_in"][0]), hy=_f(mr["hub_in"][1]), hz=_f(mr["hub_in"][2]), mast=_f(90.0 - mr.get("mast_tilt_deg", 0.0)),

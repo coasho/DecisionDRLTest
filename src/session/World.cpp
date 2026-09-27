@@ -26,11 +26,16 @@ void copyName(char* dst, std::size_t capacity, const std::string& src) {
 /// fsim/<section>/..., read once per aircraft type. Its gains are the control
 /// section, fsim/control/<controller id>/<parameter> with the parameter's
 /// dots written as slashes ("pid_attitude/pitch/kp" sets pid_attitude's
-/// "pitch.kp"); a setting no built-in takes is reported once, here.
-std::shared_ptr<const control::VehicleProfile> readAircraftProfile(const std::string& aircraft, const sim::FlightModel& model) {
+/// "pitch.kp"); a setting no built-in takes is reported once, here. The
+/// applicability section's sources are in the header of the aircraft's
+/// `file` (docs/flight-autonomy.md, 5.2).
+std::shared_ptr<const control::VehicleProfile> readAircraftProfile(const std::string& aircraft, const sim::FlightModel& model,
+                                                                   const std::filesystem::path& file) {
     std::vector<std::string> warnings;
     auto profile = std::make_shared<control::VehicleProfile>(
         control::readProfile(aircraft, [&model](std::string_view prefix) { return model.properties(prefix); }, warnings));
+    if (profile->applicability.header.present()) control::readApplicabilitySources(file, profile->applicability);
+    control::requireSources(aircraft, profile->applicability, warnings);
     for (const auto& w : warnings) LOG_WARN("session") << w;
     control::adapterFor(profile->identity.family).complete(*profile);
     if (control::completeControl(*profile)) // no gains of its own: the laws designed from its plant
@@ -142,13 +147,14 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
                            options_.terrainPrefetchRadiusM);
     if (slot == static_cast<std::size_t>(-1)) {
         auto model = std::make_unique<sim::JsbsimModel>(options_.dt, ground_);
-        if (!model->load(sim::AircraftSpec{aircraft, jsbsimRoot_, io::AssetResolver{}.findAircraft(aircraft, jsbsimRoot_)},
-                         spec.initial)) {
+        const sim::AircraftSpec files{aircraft, jsbsimRoot_, io::AssetResolver{}.findAircraft(aircraft, jsbsimRoot_)};
+        if (!model->load(files, spec.initial)) {
             LOG_ERROR("session") << "failed to load aircraft '" << aircraft << "'";
             return 0;
         }
         if (!profiles_.count(aircraft)) {
-            const auto profile = readAircraftProfile(aircraft, *model);
+            const auto dir = files.aircraftDir.empty() ? files.jsbsimRoot / "aircraft" : files.aircraftDir;
+            const auto profile = readAircraftProfile(aircraft, *model, dir / aircraft / (aircraft + ".xml"));
             profiles_[aircraft] = profile;
             catalogs_[aircraft] = std::make_shared<control::CapabilityCatalog>(*profile, control::adapterFor(profile->identity.family));
         }
@@ -183,6 +189,9 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     if (spec.profile) {
         // sections of its own: its own profile, completed by its own family's adapter, and its own catalog
         auto own = std::make_shared<control::VehicleProfile>(control::mergeProfile(*e->profile, *spec.profile));
+        std::vector<std::string> warnings;
+        control::requireSources(e->info.name, own->applicability, warnings); // its own declarations need their sources too
+        for (const auto& w : warnings) LOG_WARN("session") << w;
         const auto& adapter = control::adapterFor(own->identity.family);
         adapter.complete(*own);
         if (own->control.header.provenance == control::Provenance::Derived) own->control = {}; // designed again, from its plant

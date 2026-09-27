@@ -284,3 +284,27 @@ height = 4.88
 max_mach = 0.715
 max_mach_altitude_ft = 60000
 service_ceiling_ft = 70000    # "above 70,000 ft" (USAF); at full weight it starts lower
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "none"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "USAF U-2 fact sheet: a conventional take-off and landing jet. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "USAF U-2 fact sheet: bicycle wheeled gear with outrigger pogos"
+carrier = "USAF U-2 fact sheet: a land-based reconnaissance aircraft (the 1960s carrier trials used modified U-2G and U-2R aircraft)"
+retractable_gear = "Lockheed Martin U-2S data: the bicycle wheels retract"
+flaps = "Lockheed Martin U-2S data: trailing-edge flaps"
+drag_devices = "Lockheed Martin U-2S data: spoilers and aft-fuselage speed brakes"
+releasable_stores = "USAF U-2 fact sheet: unarmed"
+aerobatic = "USAF U-2 fact sheet: a high-altitude reconnaissance aircraft, not cleared for aerobatics"

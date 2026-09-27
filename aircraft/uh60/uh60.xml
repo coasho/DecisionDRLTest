@@ -4,6 +4,14 @@
     <author> hangar (tools/hangar), from aircraft/uh60/uh60.toml </author>
     <description> Sikorsky UH-60A Black Hawk - four blades, articulated, canted tail rotor, stabilator (NASA TM-85890) </description>
     <note> Written by hangar's rotorcraft pipeline from the design file, whose comments cite every number's source. </note>
+    <reference refID="fsim/applicability/aerobatic" author="the design" title="The platform's aerobatics are a wing's manoeuvres flown by load factor (docs/flight-autonomy.md, rule R10)" date="n/a"/>
+    <reference refID="fsim/applicability/carrier" author="the design" title="A helicopter takes off and lands vertically, as on a ship's deck" date="n/a"/>
+    <reference refID="fsim/applicability/drag_devices" author="the design" title="US Army TM 1-1520-237-10: a helicopter, with no spoilers or airbrakes" date="n/a"/>
+    <reference refID="fsim/applicability/flaps" author="the design" title="US Army TM 1-1520-237-10: a helicopter, with no flaps" date="n/a"/>
+    <reference refID="fsim/applicability/ground_contact" author="the design" title="US Army TM 1-1520-237-10: fixed main wheels and a tail wheel" date="n/a"/>
+    <reference refID="fsim/applicability/releasable_stores" author="the design" title="US Army FM 20-32 (mine/countermine operations): the Volcano (M139) mine dispenser on the UH-60A/L; external stores support system stations" date="n/a"/>
+    <reference refID="fsim/applicability/retractable_gear" author="the design" title="US Army TM 1-1520-237-10: fixed landing gear" date="n/a"/>
+    <reference refID="fsim/applicability/vertical_flight" author="the design" title="US Army TM 1-1520-237-10 (UH-60A operator's manual): a helicopter that hovers" date="n/a"/>
   </fileheader>
   <metrics>
     <wingarea unit="FT2"> 2261.472 </wingarea>
@@ -126,6 +134,16 @@
     <property value="0.46311">fsim/hover/yaw/damping</property>
     <property value="0.0380055">fsim/hover/yaw/lag_s</property>
     <property value="-1.99907">fsim/hover/yaw/power</property>
+    <property value="1">fsim/applicability/version</property>
+    <property value="1">fsim/applicability/provenance</property>
+    <property value="0">fsim/applicability/aerobatic</property>
+    <property value="3">fsim/applicability/carrier</property>
+    <property value="1">fsim/applicability/drag_devices</property>
+    <property value="0">fsim/applicability/flaps</property>
+    <property value="1">fsim/applicability/ground_contact</property>
+    <property value="4">fsim/applicability/releasable_stores</property>
+    <property value="0">fsim/applicability/retractable_gear</property>
+    <property value="1">fsim/applicability/vertical_flight</property>
     <channel name="pilot">
       <!-- the controls in inches: stick and pedals from the centre, + forward, + right, + right
            pedal; the collective from the bottom -->

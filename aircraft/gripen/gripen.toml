@@ -240,3 +240,26 @@ height = 4.50
 max_mach = 2.0                # at altitude, full afterburner
 max_mach_altitude_ft = 36000
 operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = true
+# flaps: not declared. The model omits a flap function; whether the elevons of this canard delta give one is for type data to decide (docs/flight-autonomy.md, 5.3)
+
+[applicability.sources]
+vertical_flight = "Saab JAS 39C data: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Saab JAS 39C data: tricycle wheeled gear"
+carrier = "Saab JAS 39C data: a land-based fighter (road bases); runway arresting hook only; the Sea Gripen was not built"
+retractable_gear = "Saab JAS 39C data: retractable gear"
+drag_devices = "Saab JAS 39C data: two airbrakes on the rear fuselage"
+releasable_stores = "Saab JAS 39C data: eight hardpoints"
+aerobatic = "Saab JAS 39C data: +9 g (fsim/envelope/clean/n_max)"

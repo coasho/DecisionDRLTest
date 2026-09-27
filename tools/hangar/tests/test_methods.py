@@ -2149,3 +2149,61 @@ class Autopilot(unittest.TestCase):
         self.assertEqual(fbw["throttle_trim"], 0.5)
         self.assertAlmostEqual(direct["elevator_trim"], 0.3, places=9)
         self.assertAlmostEqual(direct["elevator_trim_lift"], 0.2, places=9)
+
+class Applicability(unittest.TestCase):
+    """What the platform's discovery rests on (hangar/applicability.py;
+    docs/flight-autonomy.md, 5.2): a design's physical characteristics, each
+    with its public source, into the profile and the file header."""
+
+    SPEC = {"applicability": {"vertical_flight": True, "ground_contact": "skids", "carrier": "deck", "aerobatic": False,
+                              "sources": {"vertical_flight": "a fact sheet", "ground_contact": "the operator's manual",
+                                          "carrier": "a <deck> & \"a\" ship", "aerobatic": "not a wing"}}}
+
+    def test_the_declarations_as_the_profile_has_them(self):
+        from hangar.applicability import declared
+        fields, sources = declared(self.SPEC)
+        self.assertEqual(fields, {"vertical_flight": 1, "ground_contact": 2, "carrier": 3, "aerobatic": 0})  # codes from 1
+        self.assertEqual(sources["ground_contact"], "the operator's manual")
+        self.assertEqual(declared({}), ({}, {}))  # nothing declared: everything stays applicable
+
+    def test_no_declaration_without_its_source_and_nothing_unknown(self):
+        from hangar.applicability import declared
+        for bad in ({"flaps": True},                                            # no source
+                    {"flaps": True, "sources": {"flaps": "  "}},                # an empty one
+                    {"wings": 2, "sources": {"wings": "x"}},                    # not a characteristic
+                    {"carrier": "boat", "sources": {"carrier": "x"}},           # not one of its values
+                    {"flaps": 1, "sources": {"flaps": "x"}},                    # a flag is true or false
+                    {"sources": {"flaps": "x"}}):                               # a source without its field
+            with self.assertRaises(ValueError, msg=str(bad)):
+                declared({"applicability": bad})
+
+    def test_what_the_design_contradicts(self):
+        from hangar.applicability import contradictions
+        self.assertEqual(contradictions(self.SPEC, retractable_gear=True, rotorcraft=True, ground_contact="skids"), [])
+        found = contradictions(self.SPEC, rotorcraft=False, ground_contact="wheels")
+        self.assertEqual(len(found), 2)
+        self.assertIn("vertical_flight", found[0])
+        self.assertIn("ground_contact", found[1])
+        gear = {"applicability": {"retractable_gear": True, "sources": {"retractable_gear": "x"}}}
+        self.assertIn("does not retract", contradictions(gear, retractable_gear=False)[0])
+
+    def test_the_sources_in_the_file_header(self):
+        import xml.etree.ElementTree as ET
+        from hangar.applicability import references_xml
+        xml = references_xml(self.SPEC, "  ")
+        refs = ET.fromstring("<fileheader>%s</fileheader>" % xml).findall("reference")
+        self.assertEqual([r.get("refID") for r in refs], ["fsim/applicability/aerobatic", "fsim/applicability/carrier",
+                                                          "fsim/applicability/ground_contact", "fsim/applicability/vertical_flight"])
+        self.assertEqual(refs[1].get("title"), "a <deck> & \"a\" ship")  # escaped, and read back as written
+        self.assertEqual(references_xml({}, "  "), "")
+
+    def test_the_profile_section(self):
+        from hangar.profile import properties_xml, sections
+        design = Profile.Design(dict(Profile().fighter().spec, **self.SPEC), ["aileron", "elevator", "rudder"], [Profile.Gear(True)],
+                                [Profile.Engine("turbofan")])
+        p = sections(design, {"options": {}}, {}, {}, {})
+        self.assertEqual(p["applicability"]["carrier"], 3)
+        xml = properties_xml(p)
+        self.assertIn('<property value="1">fsim/applicability/version</property>', xml)
+        self.assertIn('<property value="1">fsim/applicability/vertical_flight</property>', xml)
+        self.assertIn('<property value="0.0">fsim/applicability/aerobatic</property>', xml)

@@ -266,3 +266,27 @@ max_mach_altitude_ft = 40000
 max_speed_ktas = 800          # Mach 1.2 at sea level
 climb_rate_fpm = 50000
 service_ceiling_ft = 65000
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "USAF F-15 fact sheet: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "USAF F-15 fact sheet: tricycle wheeled gear"
+carrier = "USAF F-15 fact sheet: a land-based fighter; its tailhook is a runway emergency hook, not carrier-rated, and it has no launch bar"
+retractable_gear = "Jane's All the World's Aircraft: retractable gear"
+flaps = "Jane's All the World's Aircraft: plain trailing-edge flaps"
+drag_devices = "USAF F-15 fact sheet and Jane's: a dorsal speed brake"
+releasable_stores = "USAF F-15 fact sheet: AIM-7, AIM-9 and AIM-120 missiles on stations"
+aerobatic = "USAF F-15 fact sheet and Jane's: +9 g (fsim/envelope/clean/n_max)"

@@ -350,3 +350,27 @@ height = 12.57
 max_mach = 0.80
 max_mach_altitude_ft = 35000
 operational_ceiling_ft = 41000  # Wikipedia
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "none"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "Royal Australian Air Force and Boeing E-7A data: the Boeing 737-700 airframe, a conventional jet. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Boeing 737-700 data: tricycle wheeled gear"
+carrier = "Royal Australian Air Force E-7A data: a land-based AEW&C aircraft"
+retractable_gear = "Boeing 737-700 data: retractable gear"
+flaps = "Boeing 737-700 data: trailing-edge flaps"
+drag_devices = "Boeing 737-700 data: flight and ground spoilers"
+releasable_stores = "Royal Australian Air Force E-7A data: unarmed"
+aerobatic = "Royal Australian Air Force E-7A data: a large AEW&C aircraft, not cleared for aerobatics"

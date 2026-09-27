@@ -14,6 +14,8 @@ propulsion/engine[i]/rotor-rpm, which the platform shows as the engines' rpm.
 import math
 import os
 
+from ..applicability import references_xml
+
 N_PER_LBF, M_PER_FT, KG_PER_SLUG, LB_PER_KG = 4.448222, 0.3048, 14.593903, 2.204623
 RPM_PER_RADS = 60 / (2 * math.pi)
 #: a full roll, pitch or yaw command moves each motor's thrust by this much (of its maximum)
@@ -176,7 +178,7 @@ def write(spec, out_dir, profile_xml=""):
     <author> hangar (tools/hangar), from aircraft/%(n)s/%(n)s.toml </author>
     <description> %(desc)s </description>
     <note> Written by hangar's rotorcraft pipeline from the design file, whose comments cite every number's source. </note>
-  </fileheader>
+%(refs)s  </fileheader>
   <metrics>
     <wingarea unit="FT2"> %(area)s </wingarea>
     <wingspan unit="FT"> %(span)s </wingspan>
@@ -213,7 +215,7 @@ def write(spec, out_dir, profile_xml=""):
     </axis>
 %(drag)s%(ge)s  </aerodynamics>
 </fdm_config>
-""" % dict(n=name, desc=spec["aircraft"]["description"], area=_f(math.pi * (span_ft / 2) ** 2), span=_f(span_ft),
+""" % dict(n=name, desc=spec["aircraft"]["description"], refs=references_xml(spec, "    "), area=_f(math.pi * (span_ft / 2) ** 2), span=_f(span_ft),
            ixx=_f(m["ixx"] / kgm2), iyy=_f(m["iyy"] / kgm2), izz=_f(m["izz"] / kgm2), w=_f(m["mass_kg"] * LB_PER_KG),
            legs="\n".join(legs), engines="\n".join(engines), profile=profile_xml, motors="".join(motors),
            yaw=" ".join(yaw), drag=drag, ge=ground_effect)

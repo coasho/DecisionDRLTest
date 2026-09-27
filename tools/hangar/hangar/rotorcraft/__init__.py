@@ -99,6 +99,12 @@ class Rotorcraft:
         perf = (self.load("fly") or {}).get("performance") or {}
         if perf:
             out["performance"] = (1, {k: float(v) for k, v in perf.items()})
+        # the physical characteristics the design declares (docs/flight-autonomy.md, 5.2); their
+        # sources go into the file header (heli.write, multi.write)
+        from ..applicability import VERSION, declared
+        fields, _ = declared(s)
+        if fields:
+            out["applicability"] = (VERSION, fields)
         return out
 
     # -- the identified hover ----------------------------------------------------------------------
@@ -166,7 +172,12 @@ class Rotorcraft:
         else:
             from . import multi
             info = multi.write(self.spec, self.dir, self.profile_xml())
-        checks = []
+        # a declared characteristic the design itself contradicts (docs/flight-autonomy.md, 5.2)
+        from ..applicability import contradictions
+        ground = self.spec.get("ground", {})
+        stands = "legs" if "leg_height_m" in ground else {"skid": "skids", "wheels": "wheels"}.get(ground.get("kind"))
+        checks = [{"name": "applicability", "value": "contradicts the design", "unit": "", "expected": "", "status": "fail", "note": c}
+                  for c in contradictions(self.spec, retractable_gear=False, rotorcraft=True, ground_contact=stands)]
         if self.kind == "multirotor":
             t = self.spec.get("targets", {})
             checks.append(_check("thrust to weight", info["thrust_to_weight"], t.get("thrust_to_weight")))

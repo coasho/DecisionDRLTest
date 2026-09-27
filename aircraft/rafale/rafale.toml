@@ -309,3 +309,26 @@ max_mach_altitude_ft = 36000
 max_speed_ktas = 750          # sea level
 climb_rate_fpm = 60000        # 305 m/s
 operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+drag_devices = "surfaces"
+releasable_stores = "weapons"
+aerobatic = true
+# flaps: not declared. The model omits a flap function; whether the elevons of this canard delta give one is for type data to decide (docs/flight-autonomy.md, 5.3)
+
+[applicability.sources]
+vertical_flight = "Dassault Aviation and Jane's: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Dassault Aviation: tricycle wheeled gear"
+carrier = "Dassault Aviation: the Rafale C is land-based (the Rafale M is the naval variant, with a catapult bar and a carrier hook)"
+retractable_gear = "Dassault Aviation: retractable gear"
+drag_devices = "Dassault Aviation: no dedicated airbrake; the canards and elevons deflect as one"
+releasable_stores = "Dassault Aviation: fourteen hardpoints"
+aerobatic = "Dassault Aviation: +9 g (fsim/envelope/clean/n_max)"

@@ -478,3 +478,27 @@ max_mach = 0.906
 max_mach_altitude_ft = 20700
 service_ceiling_ft = 50000    # USAF fact sheet; the SAC charts give 46,900-47,700 ft at combat weight
 # climb: 6,270 ft/min (Wikipedia) - at an unstated weight, so not a target
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "USAF B-52H fact sheet: a conventional take-off and landing bomber. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "USAF fact sheet and Knaack (1988): four twin-wheel main bogies and wing-tip outrigger wheels"
+carrier = "USAF fact sheet: a land-based strategic bomber"
+retractable_gear = "Knaack (1988): the main bogies and the outriggers retract"
+flaps = "Knaack (1988) and NASA SP-468: Fowler flaps"
+drag_devices = "B. Schiff, AOPA Pilot, May 2015: spoilers roll the H (it has no ailerons) and serve as airbrakes"
+releasable_stores = "USAF fact sheet: bombs and missiles in the bomb bay and on underwing pylons"
+aerobatic = "USAF fact sheet: a strategic bomber, not cleared for aerobatic manoeuvres"

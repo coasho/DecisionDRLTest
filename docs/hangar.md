@@ -973,8 +973,8 @@ At the reference speed:
 
 The build also writes what the platform should know of the aircraft, its
 *profile* ([control-architecture.md](control-architecture.md), section 7).
-It goes into the flight control section beside the gains, as six sections
-`fsim/<section>/<field>`, each marked version 1 and provenance hangar
+It goes into the flight control section beside the gains, as sections
+`fsim/<section>/<field>`, each marked with its version and provenance hangar
 (`hangar/profile.py`).
 
 hangar writes only what it knows; a field it does not know it leaves out,
@@ -988,11 +988,52 @@ and the platform treats it as unknown:
 | `propulsion` | the engines, their type, afterburning, and the thrust lag the autopilot identified |
 | `plant` | the autopilot's `[reference]` and `[identified]` tables in `autopilot.toml`: the responses to aileron, elevator, rudder and throttle there, each with its lag; and the trim law and zero-lift angle the gains use |
 | `performance` | the flight tests' stall speed, maximum speed, ceiling and climb (`out/fly.json`) |
+| `applicability` | the design's `[applicability]` declarations (below) |
 
 The platform reads the profile once per aircraft type. It drives what a
 vehicle offers: the support effectors that exist, and the envelope's ranges
 for commands that ask. It also chooses the vehicle's adapter (fly-by-wire or
 direct).
+
+### Applicability: what the aircraft physically is
+
+The platform's discovery tells a physically unsupported capability (hover on
+an F-16C) from one not built yet, and every such exception rests on a
+declaration in the design with its public source
+([flight-autonomy.md](flight-autonomy.md), section 5):
+
+```toml
+[applicability]
+vertical_flight = false         # holds a point in the air (rule R1)
+ground_contact = "wheels"       # wheels, skids or legs (R2)
+carrier = "none"                # none, catapult_arrested or deck (R3 to R5)
+retractable_gear = true         # (R6)
+flaps = true                    # a flap function (R7)
+drag_devices = "devices"        # none, devices (spoilers, airbrakes), or surfaces the
+                                # flight control system deploys as a speedbrake (R8)
+releasable_stores = "weapons"   # none, weapons, palletized or dispensers (R9)
+aerobatic = true                # cleared for aerobatic manoeuvres (R10)
+
+[applicability.sources]
+vertical_flight = "USAF F-16 fact sheet: a conventional take-off and landing fighter"
+# ... one for each field declared
+```
+
+- **No evidence, no exception.** A field without its source is refused at
+  build; a field left out is not declared, and what it governs stays
+  applicable. A type fact still open (the flap function of the canard deltas)
+  is left out, with a comment saying why.
+- **The model and the type agree.** Where the model lacks a feature the type
+  has, the model is extended; the feature is never declared absent to match
+  the model. The build fails a declaration the design contradicts (a
+  rotorcraft that does not fly vertically, gear that does or does not retract,
+  what it stands on), and the platform's `test_applicability` checks each
+  declaration against the aircraft file (the family, the effectors, the wheel
+  brakes, an aerobatic type's `n_max` of 6 g or more).
+- hangar writes the fields as `fsim/applicability/<field>` (flags 0 or 1, the
+  others' codes from 1) and each source into the file header as
+  `<reference refID="fsim/applicability/<field>" title="<source>"/>`, which
+  the platform reports as the evidence.
 
 ## Rotorcraft
 

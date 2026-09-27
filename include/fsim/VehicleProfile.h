@@ -10,6 +10,8 @@
 #include "fsim/ControlStack.h"
 #include "fsim/Export.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -186,6 +188,55 @@ struct ControlSection {
     std::vector<std::pair<Level, std::string>> controllers;
 };
 
+// --- applicability --------------------------------------------------------------------------
+
+/// A characteristic as the aircraft's design declares it (docs/flight-autonomy.md,
+/// 5.2). Unknown when it does not: what the characteristic governs then stays
+/// applicable (no evidence, no exception). The file writes 0 or 1.
+enum class Declared : std::uint8_t { Unknown = 0, No = 1, Yes = 2 };
+/// What the aircraft stands on (rule R2).
+enum class GroundContact : std::uint8_t { Unknown = 0, Wheels = 1, Skids = 2, Legs = 3 };
+/// How it operates from a ship (rules R3 to R5): a catapult launch and an
+/// arrested landing, or vertically from a deck.
+enum class CarrierOperations : std::uint8_t { Unknown = 0, None = 1, CatapultArrested = 2, Deck = 3 };
+/// What makes drag on demand (rule R8): spoilers or airbrakes, or surfaces
+/// its flight control system deflects together as a speedbrake.
+enum class DragDevices : std::uint8_t { Unknown = 0, None = 1, Devices = 2, Surfaces = 3 };
+/// What it carries and releases (rule R9): weapons on stations or in a bay,
+/// palletized munitions from the hold, or dispensers.
+enum class ReleasableStores : std::uint8_t { Unknown = 0, None = 1, Weapons = 2, Palletized = 3, Dispensers = 4 };
+
+/// The characteristics, in the order ApplicabilitySection::sources keeps
+/// their sources.
+enum class Characteristic : std::uint8_t { VerticalFlight, GroundContact, Carrier, RetractableGear, Flaps, DragDevices, ReleasableStores, Aerobatic };
+inline constexpr std::size_t kCharacteristicCount = 8;
+
+/// The aircraft's physical characteristics as its design declares them, each
+/// with the public source it rests on: what discovery's physical exceptions
+/// rest on, and the evidence it reports for them (docs/flight-autonomy.md, 5).
+struct ApplicabilitySection {
+    static constexpr std::uint16_t kVersion = 1;
+    SectionHeader header;
+    Declared verticalFlight = Declared::Unknown;                   ///< holds a point in the air (R1)
+    GroundContact groundContact = GroundContact::Unknown;          ///< (R2)
+    CarrierOperations carrier = CarrierOperations::Unknown;        ///< (R3 to R5)
+    Declared retractableGear = Declared::Unknown;                  ///< (R6)
+    Declared flaps = Declared::Unknown;                            ///< a flap function (R7)
+    DragDevices dragDevices = DragDevices::Unknown;                ///< (R8)
+    ReleasableStores releasableStores = ReleasableStores::Unknown; ///< (R9)
+    Declared aerobatic = Declared::Unknown;                        ///< cleared for aerobatic manoeuvres (R10)
+    /// Each declared characteristic's source, by Characteristic. An aircraft
+    /// file gives them in its header (<reference refID="fsim/applicability/<name>"
+    /// title="<source>"/>). A characteristic without one is not declared.
+    std::array<std::string, kCharacteristicCount> sources;
+};
+
+/// A characteristic's name as the file writes it ("vertical_flight",
+/// "ground_contact", ...); "" out of range.
+FSIM_API const char* characteristicName(Characteristic c) noexcept;
+/// Whether the section declares the characteristic: a value, and its source.
+FSIM_API bool declares(const ApplicabilitySection& section, Characteristic c) noexcept;
+
 struct VehicleProfile {
     std::string aircraft;
     IdentitySection identity;
@@ -196,15 +247,18 @@ struct VehicleProfile {
     PerformanceSection performance;
     ControlSection control;
     HoverSection hover;
+    ApplicabilitySection applicability;
 };
 
 /// A section by name ("identity", "effectors", "envelope", "propulsion",
-/// "plant", "performance", "control", "hover"); null for another name.
+/// "plant", "performance", "control", "hover", "applicability"); null for
+/// another name.
 FSIM_API const SectionHeader* sectionHeader(const VehicleProfile& profile, std::string_view section) noexcept;
 /// A field by its path as the aircraft file names it, in the unit its name
 /// gives: "envelope/clean/n_max", "envelope/clean/alpha_max_deg",
 /// "plant/roll/tau_s", "hover/roll/power", "identity/class", "<section>/version",
-/// "control/pid_attitude/pitch/kp"; NaN if the profile has no such field.
+/// "control/pid_attitude/pitch/kp", "applicability/carrier"; NaN if the
+/// profile has no such field, or does not declare it.
 FSIM_API double profileValue(const VehicleProfile& profile, std::string_view path) noexcept;
 
 } // namespace fsim::control

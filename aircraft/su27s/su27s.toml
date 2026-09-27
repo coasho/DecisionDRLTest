@@ -299,3 +299,27 @@ max_mach_altitude_ft = 36000
 max_speed_ktas = 756          # 1,400 km/h at sea level
 climb_rate_fpm = 59000        # 300 m/s
 service_ceiling_ft = 60700    # 18.5 km
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "Sukhoi data and Jane's: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Jane's: tricycle wheeled gear"
+carrier = "Jane's: a land-based fighter (the Su-33 is the naval type)"
+retractable_gear = "Jane's: retractable gear"
+flaps = "Jane's: flaperons give the flap function"
+drag_devices = "Jane's: a dorsal airbrake"
+releasable_stores = "Jane's: ten hardpoints"
+aerobatic = "Sukhoi data: +9 g (fsim/envelope/clean/n_max)"

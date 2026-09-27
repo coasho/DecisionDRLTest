@@ -250,3 +250,27 @@ max_mach = 1.8                # at altitude, full afterburner (calibrates the wa
 max_mach_altitude_ft = 40000
 climb_rate_fpm = 45000
 operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "catapult_arrested"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "US Navy F/A-18 fact sheet: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "US Navy F/A-18 fact sheet: tricycle wheeled gear"
+carrier = "US Navy F/A-18 fact sheet: carrier-based, with a nose-gear launch bar for the catapult and an arresting hook"
+retractable_gear = "Jane's All the World's Aircraft: retractable gear"
+flaps = "NASA TM-4433: trailing-edge flaps"
+drag_devices = "Jane's All the World's Aircraft: a dorsal speed brake"
+releasable_stores = "US Navy F/A-18 fact sheet: nine stations for air-to-air and air-to-ground weapons"
+aerobatic = "US Navy F/A-18 fact sheet: +7.5 g (fsim/envelope/clean/n_max)"

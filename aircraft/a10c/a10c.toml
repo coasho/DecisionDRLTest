@@ -354,3 +354,27 @@ height = 4.47
 max_mach = 0.576              # 381 kt
 max_mach_altitude_ft = 0
 max_speed_ktas = 381          # at sea level, clean
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "USAF A-10C Thunderbolt II fact sheet: a conventional take-off and landing jet. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "USAF fact sheet: tricycle wheeled landing gear"
+carrier = "USAF fact sheet: a land-based close-support aircraft, with no launch bar or carrier arresting hook"
+retractable_gear = "Jenkins, Fairchild-Republic A/OA-10 Warthog: the main wheels retract forward into pods under the wing"
+flaps = "Jenkins, Fairchild-Republic A/OA-10 Warthog: trailing-edge flaps"
+drag_devices = "USAF fact sheet and Jenkins: split ailerons that open as speed brakes (decelerons)"
+releasable_stores = "USAF fact sheet: eleven stations for bombs, missiles and rockets"
+aerobatic = "USAF fact sheet and design limits: +7.33 g (fsim/envelope/clean/n_max), flown in loops and rolls"

@@ -379,3 +379,27 @@ r = 0.15
 length_m = 15.431                  # fuselage, 50 ft 7.5 in
 main_rotor_diameter_m = 16.358     # 53 ft 8 in
 tail_rotor_diameter_m = 3.353      # 11 ft
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = true
+ground_contact = "wheels"
+carrier = "deck"
+retractable_gear = false
+flaps = false
+drag_devices = "none"
+releasable_stores = "dispensers"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "US Army TM 1-1520-237-10 (UH-60A operator's manual): a helicopter that hovers"
+ground_contact = "US Army TM 1-1520-237-10: fixed main wheels and a tail wheel"
+carrier = "A helicopter takes off and lands vertically, as on a ship's deck"
+retractable_gear = "US Army TM 1-1520-237-10: fixed landing gear"
+flaps = "US Army TM 1-1520-237-10: a helicopter, with no flaps"
+drag_devices = "US Army TM 1-1520-237-10: a helicopter, with no spoilers or airbrakes"
+releasable_stores = "US Army FM 20-32 (mine/countermine operations): the Volcano (M139) mine dispenser on the UH-60A/L; external stores support system stations"
+aerobatic = "The platform's aerobatics are a wing's manoeuvres flown by load factor (docs/flight-autonomy.md, rule R10)"

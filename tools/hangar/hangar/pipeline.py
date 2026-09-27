@@ -586,6 +586,11 @@ class Design:
         # aircraft/ in a development build (before any staged copy), share/flightsim/aircraft
         # in a package, or FSIM_AIRCRAFT_PATH): jsbsim:<name> in any trainer, the viewer, Python
         checks = [info("JSBSim aircraft", shown(xml_path), note="type jsbsim:%s" % a.name)]
+        # a declared characteristic the design itself contradicts (docs/flight-autonomy.md, 5.2)
+        from .applicability import contradictions
+        checks += [dict(info("applicability", "contradicts the design", note=c), status="fail")
+                   for c in contradictions(a.spec, retractable_gear=any(g.retractable for g in a.gear), rotorcraft=False,
+                                           ground_contact="wheels")]  # (hangar's fixed wings stand on wheels)
         out = {"xml": xml_path, "checks": checks}
         if fbw is not None:
             checks += self._fbw_checks(fbw, tabs, mm)

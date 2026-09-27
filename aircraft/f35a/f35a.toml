@@ -318,3 +318,27 @@ height = 4.38
 max_mach = 1.6                # at altitude, full afterburner
 max_mach_altitude_ft = 40000
 operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "surfaces"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "USAF F-35A fact sheet: the conventional take-off and landing variant (the lift fan is the F-35B's). Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "USAF F-35A fact sheet: tricycle wheeled gear"
+carrier = "USAF F-35A fact sheet: the land-based variant (the F-35C is the carrier variant, with a launch bar and a carrier hook)"
+retractable_gear = "Lockheed Martin F-35 data: retractable gear"
+flaps = "Lockheed Martin F-35 data: flaperons give the flap function"
+drag_devices = "Lockheed Martin F-35 data: no dedicated speed brake; the control surfaces deflect as one"
+releasable_stores = "USAF F-35A fact sheet: internal weapons bays and external stations"
+aerobatic = "USAF F-35A fact sheet: +9 g (fsim/envelope/clean/n_max)"

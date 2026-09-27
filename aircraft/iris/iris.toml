@@ -251,3 +251,27 @@ fillet = 0.003
 
 [dimensions]
 rotor_diameter_m = 0.256           # PX4's 0.128 m radius
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = true
+ground_contact = "legs"
+carrier = "deck"
+retractable_gear = false
+flaps = false
+drag_devices = "none"
+releasable_stores = "none"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "3DR IRIS+ specifications and PX4's iris model: a quadrotor that hovers"
+ground_contact = "PX4's iris model: four legs, no wheels"
+carrier = "A quadrotor takes off and lands vertically, as on a ship's deck"
+retractable_gear = "3DR IRIS+ specifications: fixed legs"
+flaps = "3DR IRIS+ specifications: a quadrotor, with no flaps"
+drag_devices = "3DR IRIS+ specifications: a quadrotor, with no spoilers or airbrakes"
+releasable_stores = "3DR IRIS+ specifications: a camera mount, no release mechanism or stores stations"
+aerobatic = "The platform's aerobatics are a wing's manoeuvres flown by load factor (docs/flight-autonomy.md, rule R10)"

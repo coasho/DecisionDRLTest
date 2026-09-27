@@ -134,3 +134,27 @@ position = [0.300, 0.0, 0.000]
 name = "camera"
 mass = 2.0
 position = [0.200, 0.0, -0.080]
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = false
+flaps = true
+drag_devices = "none"
+releasable_stores = "none"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "This design (hypothetical): a conventional pusher UAV that cannot hover"
+ground_contact = "This design: fixed wheeled gear"
+carrier = "This design: no launch bar or arresting hook"
+retractable_gear = "This design: fixed gear"
+flaps = "This design: slotted flaps"
+drag_devices = "This design: flaps only, no spoilers or airbrakes"
+releasable_stores = "This design: no stores stations or release mechanism"
+aerobatic = "This design: a light UAV, not designed for aerobatic loads"

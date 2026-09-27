@@ -283,3 +283,27 @@ height = 4.80
 max_mach = 0.796              # 975 km/h, 526 kt
 max_mach_altitude_ft = 0
 max_speed_ktas = 526
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "Wikipedia and Russian Wikipedia, Sukhoi Su-25: a conventional take-off and landing jet. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Wikipedia and Russian Wikipedia, Sukhoi Su-25: tricycle wheeled gear"
+carrier = "Wikipedia and Russian Wikipedia, Sukhoi Su-25: a land-based attack aircraft (the Su-25UTG naval trainer is a different type)"
+retractable_gear = "Wikipedia and Russian Wikipedia, Sukhoi Su-25: retractable gear"
+flaps = "Wikipedia and Russian Wikipedia, Sukhoi Su-25: trailing-edge flaps"
+drag_devices = "Wikipedia and Russian Wikipedia, Sukhoi Su-25: split airbrakes in the wing-tip pods"
+releasable_stores = "Wikipedia and Russian Wikipedia, Sukhoi Su-25: ten underwing hardpoints"
+aerobatic = "Wikipedia and Russian Wikipedia, Sukhoi Su-25: +6.5 g (fsim/envelope/clean/n_max), flown in loops and rolls"

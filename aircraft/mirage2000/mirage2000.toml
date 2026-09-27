@@ -220,3 +220,27 @@ max_mach = 2.2                # at 11 km, full afterburner
 max_mach_altitude_ft = 36000
 climb_rate_fpm = 56000        # 285 m/s
 service_ceiling_ft = 56000
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = false
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "Dassault Aviation and Jane's: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Dassault Aviation: tricycle wheeled gear"
+carrier = "Dassault Aviation: a land-based fighter"
+retractable_gear = "Dassault Aviation: retractable gear"
+flaps = "Dassault Aviation: a tailless delta whose elevons trim and control pitch, with no flap function"
+drag_devices = "Jane's: airbrakes above and below the wings"
+releasable_stores = "Dassault Aviation: nine hardpoints"
+aerobatic = "Dassault Aviation: +9 g (fsim/envelope/clean/n_max)"

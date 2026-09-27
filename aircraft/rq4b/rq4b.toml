@@ -242,3 +242,26 @@ height = 4.66                 # 15.3 ft
 # The published 340 kt maximum has no altitude (Mach 0.59 anywhere above
 # 36,000 ft), and is flown to the envelope's Mach 0.6: not calibrated
 operational_ceiling_ft = 60000
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+releasable_stores = "none"
+aerobatic = false
+# drag_devices: not declared until a public source for how the type makes drag is recorded; the items it governs stay applicable (docs/flight-autonomy.md, 5.2)
+
+[applicability.sources]
+vertical_flight = "USAF RQ-4 fact sheet: a conventional runway take-off and landing UAV. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "USAF RQ-4 fact sheet: tricycle wheeled gear"
+carrier = "USAF RQ-4 fact sheet: a land-based UAV"
+retractable_gear = "Northrop Grumman RQ-4 data: retractable gear"
+flaps = "Northrop Grumman RQ-4 data: trailing-edge flaps"
+releasable_stores = "USAF RQ-4 fact sheet: an unarmed reconnaissance UAV"
+aerobatic = "USAF RQ-4 fact sheet: a high-altitude long-endurance UAV, not cleared for aerobatics"

@@ -173,3 +173,27 @@ max_speed_ktas = 123        # full throttle, sea level
 climb_rate_fpm = 700        # best rate of climb, sea level
 service_ceiling_ft = 13000
 reference = "jsbsim:c172x"  # fly the same tests on this JSBSim aircraft and compare
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = false
+flaps = true
+drag_devices = "none"
+releasable_stores = "none"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "Cessna 172P Pilot's Operating Handbook: a conventional light aeroplane. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Cessna 172P Pilot's Operating Handbook: fixed tricycle wheeled gear"
+carrier = "Cessna 172P Pilot's Operating Handbook: a civil land aeroplane"
+retractable_gear = "Cessna 172P Pilot's Operating Handbook: fixed landing gear"
+flaps = "Cessna 172P Pilot's Operating Handbook: electrically operated single-slot flaps to 30 deg"
+drag_devices = "Cessna 172P Pilot's Operating Handbook: no spoilers or airbrakes"
+releasable_stores = "FAA type certificate data sheet 3A12 and the Pilot's Operating Handbook: no provisions for external stores"
+aerobatic = "Cessna 172P Pilot's Operating Handbook: normal and utility categories; aerobatic manoeuvres beyond the utility category's are prohibited"

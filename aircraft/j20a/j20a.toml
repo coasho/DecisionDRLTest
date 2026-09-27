@@ -272,3 +272,26 @@ height = 4.69
 max_mach = 2.0                # at altitude, full afterburner
 max_mach_altitude_ft = 36000
 service_ceiling_ft = 66000
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+releasable_stores = "weapons"
+aerobatic = true
+# drag_devices: not declared until a public source for how the type makes drag is recorded; the items it governs stay applicable (docs/flight-autonomy.md, 5.2)
+
+[applicability.sources]
+vertical_flight = "Public reference works: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Public reference works: tricycle wheeled gear"
+carrier = "Public reference works: a land-based fighter"
+retractable_gear = "Public reference works: retractable gear"
+flaps = "Public reference works: flaperons on the wing's trailing edge"
+releasable_stores = "Public reference works: internal weapons bays"
+aerobatic = "Public reference works: +9 g (fsim/envelope/clean/n_max)"

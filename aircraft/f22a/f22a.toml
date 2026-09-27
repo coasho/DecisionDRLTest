@@ -287,3 +287,27 @@ height = 5.08
 max_mach = 2.25               # at altitude, full afterburner
 max_mach_altitude_ft = 40000
 service_ceiling_ft = 65000
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "surfaces"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "USAF F-22 fact sheet: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "USAF F-22 fact sheet: tricycle wheeled gear"
+carrier = "USAF F-22 fact sheet: a land-based fighter; runway emergency hook only, no launch bar"
+retractable_gear = "Jane's All the World's Aircraft: retractable gear"
+flaps = "Jane's All the World's Aircraft: flaperons give the flap function"
+drag_devices = "Jane's All the World's Aircraft: no dedicated speed brake; the rudders, flaperons and ailerons deflect as one"
+releasable_stores = "USAF F-22 fact sheet: internal weapons bays for AIM-120, AIM-9 and GBU-32"
+aerobatic = "USAF F-22 fact sheet: +9 g (fsim/envelope/clean/n_max)"

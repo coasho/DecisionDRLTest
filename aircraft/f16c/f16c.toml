@@ -338,3 +338,27 @@ reference = "jsbsim:f16"
 # per 20 and 30 deg of deflection - by the deflection in radians: its roll and
 # yaw control power are 1/2.865 and 1/1.910 of NASA's
 reference_control_scale = { aileron = 2.865, rudder = 1.910 }
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "USAF F-16 fact sheet: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "USAF F-16 fact sheet: tricycle wheeled gear"
+carrier = "USAF F-16 fact sheet: a land-based fighter; its tailhook is a runway emergency hook, not carrier-rated, and it has no launch bar"
+retractable_gear = "Jane's All the World's Aircraft: retractable gear"
+flaps = "NASA TP-1538 and Jane's: flaperons give the flap function"
+drag_devices = "Jane's All the World's Aircraft: split speed brakes either side of the nozzle"
+releasable_stores = "USAF F-16 fact sheet: nine stations for air-to-air and air-to-ground weapons"
+aerobatic = "USAF F-16 fact sheet: +9 g (fsim/envelope/clean/n_max)"

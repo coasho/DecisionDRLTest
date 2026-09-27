@@ -333,3 +333,27 @@ height = 11.66                  # 38 ft 3 in
 # in docs/hangar.md, not checked)
 max_speed_ktas = 261            # at max_speed_altitude_ft: calibrates the extra drag
 max_speed_altitude_ft = 20000
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "none"
+releasable_stores = "none"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "USAF EC-130H fact sheet: the C-130H airframe, a conventional turboprop. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "USAF EC-130H fact sheet: the C-130H's wheeled gear"
+carrier = "USAF EC-130H fact sheet: a land-based electronic attack aircraft"
+retractable_gear = "C-130H data: the main gear retracts into the sponsons"
+flaps = "C-130H data: Lockheed-Fowler trailing-edge flaps"
+drag_devices = "C-130H data: no spoilers or airbrakes"
+releasable_stores = "USAF EC-130H fact sheet: the Compass Call mission equipment fills the hold; no weapons stations"
+aerobatic = "USAF EC-130H fact sheet: a transport airframe, not cleared for aerobatics"

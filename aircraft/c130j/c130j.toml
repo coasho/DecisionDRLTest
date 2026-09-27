@@ -296,3 +296,27 @@ height = 11.84
 # checked here.
 max_speed_ktas = 362            # at max_speed_altitude_ft: calibrates the extra drag
 max_speed_altitude_ft = 22000
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "none"
+releasable_stores = "palletized"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "Lockheed Martin C-130J fact sheet: a conventional take-off and landing turboprop. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Lockheed Martin fact sheet: tandem main wheels in the fuselage sponsons and twin nose wheels"
+carrier = "USAF and Lockheed Martin fact sheets: a land-based tactical airlifter with no launch bar or arresting hook (the 1963 KC-130F carrier trials used neither)"
+retractable_gear = "Lockheed Martin fact sheet: the main gear retracts into the sponsons"
+flaps = "Wikipedia's C-130J article and its sources: Lockheed-Fowler trailing-edge flaps"
+drag_devices = "Lockheed Martin fact sheet and the C-130 flight manual: no spoilers or airbrakes; drag comes from the propellers and flaps"
+releasable_stores = "US Air Force Research Laboratory, Rapid Dragon (2021): palletized cruise missiles released from the cargo hold of C-130-series aircraft; cargo airdrop over the ramp"
+aerobatic = "USAF fact sheet: a transport, not cleared for aerobatic manoeuvres"

@@ -275,3 +275,27 @@ max_mach_altitude_ft = 36000
 max_speed_ktas = 810          # 1,500 km/h at sea level
 climb_rate_fpm = 65000        # 330 m/s
 service_ceiling_ft = 59000    # 18 km
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "Mikoyan data and Jane's: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Jane's: tricycle wheeled gear"
+carrier = "Jane's: a land-based fighter (the MiG-29K is the naval type)"
+retractable_gear = "Jane's: retractable gear"
+flaps = "Jane's: plain trailing-edge flaps"
+drag_devices = "Jane's: airbrakes between the engine nozzles"
+releasable_stores = "Jane's: six underwing hardpoints"
+aerobatic = "Mikoyan data: +9 g (fsim/envelope/clean/n_max)"

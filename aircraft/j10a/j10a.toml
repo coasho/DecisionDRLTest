@@ -285,3 +285,27 @@ height = 5.7
 max_mach = 2.2                # at altitude, full afterburner
 max_mach_altitude_ft = 36000
 service_ceiling_ft = 59000
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "AVIC and Jane's: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "AVIC and Jane's: tricycle wheeled gear"
+carrier = "Jane's: a land-based fighter"
+retractable_gear = "Jane's: retractable gear"
+flaps = "Jane's: flaperons on the delta wing's trailing edge, the canards trimming pitch"
+drag_devices = "Jane's: airbrakes on the rear fuselage"
+releasable_stores = "Jane's: eleven hardpoints"
+aerobatic = "Jane's: +9 g (fsim/envelope/clean/n_max)"

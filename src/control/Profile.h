@@ -7,6 +7,7 @@
 
 #include "fsim/VehicleProfile.h"
 
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -27,5 +28,16 @@ VehicleProfile readProfile(const std::string& aircraft, const PropertySource& pr
 
 /// `base` with every section `over` has (present()) replaced by `over`'s.
 VehicleProfile mergeProfile(const VehicleProfile& base, const VehicleProfile& over);
+
+/// The sources of the applicability section's declarations, from the header
+/// of the aircraft file (<reference refID="fsim/applicability/<name>"
+/// title="<source>"/>, as hangar writes them): each one found replaces the
+/// section's. A file that cannot be read gives none.
+void readApplicabilitySources(const std::filesystem::path& aircraftFile, ApplicabilitySection& section);
+
+/// No evidence, no exception (docs/flight-autonomy.md, 5.2): a characteristic
+/// declared without a source goes back to not declared, and a source without
+/// a value is dropped; each noted in `warnings`.
+void requireSources(const std::string& aircraft, ApplicabilitySection& section, std::vector<std::string>& warnings);
 
 } // namespace fsim::control

@@ -375,3 +375,26 @@ height = 10.36
 max_mach = 0.922
 max_mach_altitude_ft = 19685
 operational_ceiling_ft = 42000  # 12,800 m (Wikipedia)
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+releasable_stores = "weapons"
+aerobatic = false
+# drag_devices: not declared. Whether the type has spoilers or airbrakes is for type data to decide (docs/flight-autonomy.md, 5.3)
+
+[applicability.sources]
+vertical_flight = "Wikipedia, Xi'an H-6 (the H-6K, a rebuilt Tu-16 airframe): a conventional take-off and landing jet bomber. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Wikipedia, Xi'an H-6 and Tupolev Tu-16: main bogies retracting into wing nacelles, twin nose wheels"
+carrier = "Wikipedia, Xi'an H-6 (the H-6K): a land-based bomber"
+retractable_gear = "Wikipedia, Xi'an H-6 and Tupolev Tu-16: retractable gear"
+flaps = "Wikipedia, Xi'an H-6 and Tupolev Tu-16: trailing-edge flaps"
+releasable_stores = "Wikipedia, Xi'an H-6 (the H-6K): six underwing pylons for cruise missiles"
+aerobatic = "Wikipedia, Xi'an H-6 (the H-6K): a bomber, not cleared for aerobatic manoeuvres"

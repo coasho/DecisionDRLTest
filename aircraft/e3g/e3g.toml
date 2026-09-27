@@ -403,3 +403,27 @@ height = 12.60
 max_mach = 0.78
 max_mach_altitude_ft = 29000
 operational_ceiling_ft = 29000  # USAF fact sheet: "above 29,000 feet"
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "none"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "USAF E-3 fact sheet: the Boeing 707-320B airframe, a conventional jet. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "USAF E-3 fact sheet: tricycle wheeled gear"
+carrier = "USAF E-3 fact sheet: a land-based airborne warning and control aircraft"
+retractable_gear = "Boeing 707-320B data: retractable gear"
+flaps = "Boeing 707-320B data: trailing-edge flaps"
+drag_devices = "Boeing 707-320B data: flight and ground spoilers"
+releasable_stores = "USAF E-3 fact sheet: unarmed"
+aerobatic = "USAF E-3 fact sheet: a large airborne warning aircraft, not cleared for aerobatics"

@@ -256,3 +256,26 @@ max_mach = 2.0                # at altitude, full afterburner
 max_mach_altitude_ft = 36000
 climb_rate_fpm = 62000        # 315 m/s
 operational_ceiling_ft = 55000 # Eurofighter's figure, a clearance (65,000 ft is also quoted)
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+drag_devices = "devices"
+releasable_stores = "weapons"
+aerobatic = true
+# flaps: not declared. The model omits a flap function; whether the flaperons of this canard delta give one is for type data to decide (docs/flight-autonomy.md, 5.3)
+
+[applicability.sources]
+vertical_flight = "Eurofighter GmbH and Jane's: a conventional take-off and landing fighter. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Eurofighter GmbH: tricycle wheeled gear"
+carrier = "Eurofighter GmbH: a land-based fighter (runway arresting hook only)"
+retractable_gear = "Eurofighter GmbH: retractable gear"
+drag_devices = "Eurofighter GmbH: a dorsal airbrake behind the canopy"
+releasable_stores = "Eurofighter GmbH: thirteen hardpoints"
+aerobatic = "Eurofighter GmbH: +9 g (fsim/envelope/clean/n_max)"

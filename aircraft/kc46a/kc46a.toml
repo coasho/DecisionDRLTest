@@ -361,3 +361,27 @@ height = 15.90                # m: 52 ft 1 in
 max_mach = 0.86
 max_mach_altitude_ft = 26000
 operational_ceiling_ft = 40100  # USAF: a clearance
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "none"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "USAF KC-46 fact sheet and Boeing D6-58328 (767 airport planning): a conventional jet. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "Boeing D6-58328: tricycle wheeled gear"
+carrier = "USAF KC-46 fact sheet: a land-based tanker"
+retractable_gear = "Boeing D6-58328: retractable gear"
+flaps = "Boeing 767 data: trailing-edge flaps"
+drag_devices = "Boeing 767 data: flight and ground spoilers"
+releasable_stores = "USAF KC-46 fact sheet: an unarmed tanker"
+aerobatic = "USAF KC-46 fact sheet: a tanker, not cleared for aerobatics"

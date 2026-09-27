@@ -405,3 +405,27 @@ height = 16.79                # m: 55 ft 1 in
 max_mach = 0.875
 max_mach_altitude_ft = 28000
 operational_ceiling_ft = 45000  # FL450 (USAF): a clearance
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "none"
+retractable_gear = true
+flaps = true
+drag_devices = "devices"
+releasable_stores = "palletized"
+aerobatic = false
+
+[applicability.sources]
+vertical_flight = "USAF flight manual T.O. 1C-17A-1: a conventional take-off and landing jet. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "T.O. 1C-17A-1: tandem main gear either side in sponsons, twin nose wheels"
+carrier = "USAF C-17 fact sheet: a land-based strategic airlifter"
+retractable_gear = "T.O. 1C-17A-1: the main gear retracts into the sponsons, the nose gear forward"
+flaps = "T.O. 1C-17A-1: externally blown flaps"
+drag_devices = "T.O. 1C-17A-1: spoilers that serve as speed brakes and ground spoilers"
+releasable_stores = "US Air Force Research Laboratory, Rapid Dragon (2021): a palletized JASSM released from a C-17A's hold; cargo airdrop over the ramp"
+aerobatic = "T.O. 1C-17A-1: +2.5 g (fsim/envelope/clean/n_max); a transport, not cleared for aerobatics"

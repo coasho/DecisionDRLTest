@@ -36,6 +36,14 @@ checks), the PNGs, and `report.html`. A fail makes the exit code 1.
   comment.
 - Every number in the TOML gets a comment: its source, or "assumed" with the
   reason. The design file is the record.
+- **Declare what the aircraft physically is** in `[applicability]`, each
+  field with its public source in `[applicability.sources]` (a fact sheet, a
+  flight manual, a type certificate data sheet): whether it hovers, what it
+  stands on, carrier operations, retractable gear, flaps, drag devices,
+  releasable stores, aerobatic clearance (docs/hangar.md, "Applicability").
+  No source, no declaration: leave a field out, with a comment, until a
+  source decides it. Never declare a feature absent because the model lacks
+  it - extend the model.
 - **Frame.** Metres, with x aft, y right and z up. Put the origin where the
   sources measure from; JSBSim uses the same frame. Give wings and tails for
   the right half; they are mirrored. Fins and bodies are mirrored only with

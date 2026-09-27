@@ -15,6 +15,7 @@ import os
 import numpy as np
 
 from . import __version__
+from .applicability import references_xml
 from .fcs import YAW_DAMPER_WASHOUT_S
 from .mass import G0
 
@@ -877,9 +878,9 @@ def aircraft_xml(aircraft, tables, mass_model, engine_files, notes="", fbw=None,
       <note>Aerodynamics: vortex lattice with viscous section polars, full-envelope
         strip model, slender-body fuselage (hangar). Mass: Raymer component
         weights on the geometry. Propeller: blade-element momentum theory.</note>
-    </fileheader>
+%s    </fileheader>
 """ % (__version__, os.path.basename(a.path or a.name), datetime.date.today().isoformat(), notes, a.name,
-       datetime.date.today().isoformat(), __version__, a.description or a.name)
+       datetime.date.today().isoformat(), __version__, a.description or a.name, references_xml(a.spec, "      "))
     metrics = """    <metrics>
       <wingarea unit="M2"> %.4f </wingarea>
       <wingspan unit="M"> %.4f </wingspan>

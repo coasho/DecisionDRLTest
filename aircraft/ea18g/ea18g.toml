@@ -387,3 +387,27 @@ height = 4.88
 max_mach = 1.8                # at 40,000 ft, full afterburner (calibrates the engine and the wave drag)
 max_mach_altitude_ft = 40000
 operational_ceiling_ft = 50000 # published "50,000+": the clearance, not where the climb runs out
+
+# What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
+# aircraft's physical characteristics, each with its public source. hangar writes them into
+# the profile's applicability section and the sources into the file header. A characteristic
+# left out is not declared, and what it governs stays applicable.
+[applicability]
+vertical_flight = false
+ground_contact = "wheels"
+carrier = "catapult_arrested"
+retractable_gear = true
+flaps = true
+drag_devices = "surfaces"
+releasable_stores = "weapons"
+aerobatic = true
+
+[applicability.sources]
+vertical_flight = "US Navy EA-18G fact sheet: a conventional take-off and landing jet. Conventional take-off and landing: no rotors, lift fans or vectored lift to hover"
+ground_contact = "US Navy EA-18G fact sheet: tricycle wheeled gear"
+carrier = "US Navy EA-18G fact sheet: carrier-based, with a nose-gear launch bar for the catapult and an arresting hook"
+retractable_gear = "US Navy EA-18G fact sheet: retractable gear"
+flaps = "US Navy F/A-18E/F data: trailing-edge flaps"
+drag_devices = "US Navy F/A-18E/F data: no dorsal speed brake; the flight control system deflects the control surfaces as one"
+releasable_stores = "US Navy EA-18G fact sheet: AGM-88 HARM and AIM-120 on wing stations"
+aerobatic = "US Navy F/A-18E/F data: +7.5 g (fsim/envelope/clean/n_max), a fighter's manoeuvres"
