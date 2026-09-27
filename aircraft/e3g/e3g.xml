@@ -486,11 +486,11 @@
       <property value="2">fsim/propulsion/type</property>
       <property value="1">fsim/plant/version</property>
       <property value="1">fsim/plant/provenance</property>
-      <property value="-2.2355">fsim/plant/alpha_zero_lift_deg</property>
+      <property value="-2.23536">fsim/plant/alpha_zero_lift_deg</property>
       <property value="3000">fsim/plant/altitude_m</property>
       <property value="157.255">fsim/plant/eas_ms</property>
-      <property value="-0.0662704">fsim/plant/elevator_trim</property>
-      <property value="-0.269493">fsim/plant/elevator_trim_lift</property>
+      <property value="-0.0662668">fsim/plant/elevator_trim</property>
+      <property value="-0.269514">fsim/plant/elevator_trim_lift</property>
       <property value="4.27974">fsim/plant/pitch/gain</property>
       <property value="0.501002">fsim/plant/pitch/tau_s</property>
       <property value="0.885373">fsim/plant/roll/gain</property>
@@ -503,7 +503,7 @@
       <property value="1">fsim/performance/version</property>
       <property value="1">fsim/performance/provenance</property>
       <property value="10424.2">fsim/performance/ceiling_m</property>
-      <property value="243.354">fsim/performance/max_tas_ms</property>
+      <property value="243.159">fsim/performance/max_tas_ms</property>
       <property value="81.1826">fsim/performance/stall_cas_ms</property>
       <property value="1">fsim/applicability/version</property>
       <property value="1">fsim/applicability/provenance</property>

@@ -1,4 +1,4 @@
-# Written by hangar autopilot (2026-09-26 00:36) for e3g.toml: the aircraft's responses to its
+# Written by hangar autopilot (2026-09-27 07:37) for e3g.toml: the aircraft's responses to its
 # controls, identified at a reference condition (docs/hangar.md, The autopilot). The
 # build writes them into the JSBSim aircraft's plant section; the platform designs its
 # control loops from them. Delete this file to fly the platform's shared defaults.
@@ -15,6 +15,6 @@ pitch = { gain = 4.27974, lag_s = 0.501002 }
 yaw = { gain = 0.347698 }
 speed = { gain = 2.64849, lag_s = 0.149688 }
 throttle_trim = 0.702935
-elevator_trim = -0.0662704
-elevator_trim_lift = -0.269493
-alpha_zero_lift_rad = -0.0390169
+elevator_trim = -0.0662668
+elevator_trim_lift = -0.269514
+alpha_zero_lift_rad = -0.0390144
