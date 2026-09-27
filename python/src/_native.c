@@ -945,12 +945,14 @@ static PyObject* world_activity_update_route(PyObject* o, PyObject* const* args,
     double row[FSIM_PY_VALUES];
     fsim_command_result r;
     fsim_waypoint* points = NULL;
-    if (!check_args(n, 3, 3, "activity_update_route") || !as_u64(args[0], &activity) || !WORLD_IDLE(self)) return NULL;
+    int source = 0;
+    if (!check_args(n, 3, 4, "activity_update_route") || !as_u64(args[0], &activity) || (n > 3 && !as_int(args[3], &source)) || !WORLD_IDLE(self))
+        return NULL;
     const Py_ssize_t count = read_values(args[1], row, "activity_update_route");
     if (count < 0) return NULL;
     const Py_ssize_t np = read_waypoints(args[2], &points);
     if (np < 0) return NULL;
-    const int rc = fsim_activity_update_route(self->world, activity, row, (uint32_t)count, points, (uint32_t)np, &r);
+    const int rc = fsim_activity_update_route_as(self->world, activity, source, row, (uint32_t)count, points, (uint32_t)np, &r);
     PyMem_Free(points);
     if (rc != FSIM_OK) return fail();
     return result_tuple(self->world, &r);
@@ -1021,12 +1023,14 @@ static PyObject* world_activity_update_curve(PyObject* o, PyObject* const* args,
     double row[FSIM_PY_VALUES];
     fsim_command_result r;
     fsim_bezier_segment* segments = NULL;
-    if (!check_args(n, 3, 3, "activity_update_curve") || !as_u64(args[0], &activity) || !WORLD_IDLE(self)) return NULL;
+    int source = 0;
+    if (!check_args(n, 3, 4, "activity_update_curve") || !as_u64(args[0], &activity) || (n > 3 && !as_int(args[3], &source)) || !WORLD_IDLE(self))
+        return NULL;
     const Py_ssize_t count = read_values(args[1], row, "activity_update_curve");
     if (count < 0) return NULL;
     const Py_ssize_t ns = read_segments(args[2], &segments);
     if (ns < 0) return NULL;
-    const int rc = fsim_activity_update_curve(self->world, activity, row, (uint32_t)count, segments, (uint32_t)ns, &r);
+    const int rc = fsim_activity_update_curve_as(self->world, activity, source, row, (uint32_t)count, segments, (uint32_t)ns, &r);
     PyMem_Free(segments);
     if (rc != FSIM_OK) return fail();
     return result_tuple(self->world, &r);
@@ -1053,10 +1057,12 @@ static PyObject* world_activity_update(PyObject* o, PyObject* const* args, Py_ss
     uint64_t activity;
     double row[FSIM_PY_VALUES];
     fsim_command_result r;
-    if (!check_args(n, 2, 2, "activity_update") || !as_u64(args[0], &activity) || !WORLD_IDLE(self)) return NULL;
+    int source = 0;
+    if (!check_args(n, 2, 3, "activity_update") || !as_u64(args[0], &activity) || (n > 2 && !as_int(args[2], &source)) || !WORLD_IDLE(self))
+        return NULL;
     const Py_ssize_t count = read_values(args[1], row, "activity_update");
     if (count < 0) return NULL;
-    if (fsim_activity_update(self->world, activity, row, (uint32_t)count, &r) != FSIM_OK) return fail();
+    if (fsim_activity_update_as(self->world, activity, source, row, (uint32_t)count, &r) != FSIM_OK) return fail();
     return result_tuple(self->world, &r);
 }
 
@@ -1097,8 +1103,10 @@ static PyObject* world_activity_cancel(PyObject* o, PyObject* const* args, Py_ss
     WorldObject* self = (WorldObject*)o;
     uint64_t activity;
     fsim_command_result r;
-    if (!check_args(n, 1, 1, "activity_cancel") || !as_u64(args[0], &activity) || !WORLD_IDLE(self)) return NULL;
-    if (fsim_activity_cancel(self->world, activity, &r) != FSIM_OK) return fail();
+    int source = 0;
+    if (!check_args(n, 1, 2, "activity_cancel") || !as_u64(args[0], &activity) || (n > 1 && !as_int(args[1], &source)) || !WORLD_IDLE(self))
+        return NULL;
+    if (fsim_activity_cancel_as(self->world, activity, source, &r) != FSIM_OK) return fail();
     return result_tuple(self->world, &r);
 }
 
@@ -1681,12 +1689,12 @@ static PyMethodDef world_methods[] = {
     FAST("submit_support", world_submit_support, "submit_support(id, kind, values, source, axes, range, min_version) -> result"),
     FAST("submit_mode", world_submit_mode, "submit_mode(id, mode, values, source, axes, range, min_version) -> result"),
     FAST("submit_route", world_submit_route, "submit_route(id, values, waypoints, source, axes, range, min_version) -> result"),
-    FAST("activity_update_route", world_activity_update_route, "activity_update_route(activity, values, waypoints) -> result"),
+    FAST("activity_update_route", world_activity_update_route, "activity_update_route(activity, values, waypoints, source=0) -> result"),
     FAST("submit_curve", world_submit_curve, "submit_curve(id, values, segments, source, axes, range, min_version) -> result"),
-    FAST("activity_update_curve", world_activity_update_curve, "activity_update_curve(activity, values, segments) -> result"),
-    FAST("activity_update", world_activity_update, "activity_update(activity, values) -> result"),
+    FAST("activity_update_curve", world_activity_update_curve, "activity_update_curve(activity, values, segments, source=0) -> result"),
+    FAST("activity_update", world_activity_update, "activity_update(activity, values, source=0) -> result"),
     FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride[, fields])"),
-    FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity) -> result"),
+    FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity, source=0) -> result"),
     FAST("activity_info", world_activity_info, "activity_info(activity) -> info or None"),
     FAST("activity_progress", world_activity_progress, "activity_progress(activity) -> progress or None"),
     FAST("commanded", world_commanded, "commanded(id) -> what the cascade asked for in its last update"),

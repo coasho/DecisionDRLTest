@@ -123,6 +123,17 @@ public:
     control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
+    /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do
+    /// (docs/vehicle-interface.md, 6.1): under ControlMode::Granted a source
+    /// below the activity's may not address it (AuthorityHeld, naming it). The
+    /// calls above are the policy's.
+    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::Command& setpoint);
+    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::SupportCommand& setpoint);
+    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::RouteCommand& route,
+                                  Span<const control::Waypoint> waypoints);
+    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::CurveCommand& curve,
+                                  Span<const control::BezierSegment> segments);
+    control::CommandResult cancel(control::Source caller, control::ActivityId activity);
     /// What flies a vehicle's primary axes nobody owns: the neutral actuator
     /// command (as always) or a hold of the heading, airspeed and height each
     /// had when it was let go. Reason::None if set.

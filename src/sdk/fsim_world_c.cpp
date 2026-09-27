@@ -598,17 +598,17 @@ UpdateShape updateShape(fsim_world* w, fsim::control::ActivityId activity) {
 
 /// UPDATE from fields in the activity's own shape; an activity that takes none is answered by the host.
 fsim::control::CommandResult updateFrom(fsim_world* w, fsim::control::ActivityId activity, const UpdateShape& shape, const double* fields,
-                                        uint32_t count, bool& malformed) {
+                                        uint32_t count, bool& malformed, fsim::control::Source caller = fsim::control::Source::Policy) {
     malformed = false;
     if (shape.support >= 0) {
         fsim::control::SupportCommand c;
-        if (toSupport(shape.support, fields, count, c)) return w->world.update(activity, c);
+        if (toSupport(shape.support, fields, count, c)) return w->world.update(caller, activity, c);
         malformed = true;
         return {};
     }
     fsim::control::Command c = fsim::control::ActuatorCommand{};
     if (shape.mode >= 0) {
-        if (toMode(shape.mode, fields, count, c)) return w->world.update(activity, c);
+        if (toMode(shape.mode, fields, count, c)) return w->world.update(caller, activity, c);
         malformed = true;
         return {};
     }
@@ -616,7 +616,14 @@ fsim::control::CommandResult updateFrom(fsim_world* w, fsim::control::ActivityId
         malformed = true;
         return {};
     }
-    return w->world.update(activity, c); // unknown, ended, or a behaviour: the host says which
+    return w->world.update(caller, activity, c); // unknown, ended, or a behaviour: the host says which
+}
+
+/// A caller's declared source (fsim_source); false if it is none.
+bool toSource(int source, fsim::control::Source& out) noexcept {
+    if (source < FSIM_SOURCE_POLICY || source > FSIM_SOURCE_OVERRIDE) return false;
+    out = static_cast<fsim::control::Source>(source);
+    return true;
 }
 
 } // namespace
@@ -701,7 +708,8 @@ namespace {
 /// An authority call's answer: FSIM_OK, or why the call itself was malformed (an unknown vehicle or capability).
 int authority(const char* call, fsim::control::Reason r) {
     using fsim::control::Reason;
-    if (r == Reason::UnknownVehicle || r == Reason::UnknownCapability) return fail(FSIM_INVALID_ARGUMENT, std::string(call) + ": " + fsim::control::reasonName(r));
+    if (r == Reason::UnknownVehicle || r == Reason::UnknownCapability || r == Reason::InvalidParameter)
+        return fail(FSIM_INVALID_ARGUMENT, std::string(call) + ": " + (r == Reason::InvalidParameter ? "not a reason the platform gives there" : fsim::control::reasonName(r)));
     return FSIM_OK;
 }
 
@@ -822,12 +830,19 @@ FSIM_API int fsim_vehicle_submit_route(fsim_world* world, uint32_t id, const dou
 
 FSIM_API int fsim_activity_update_route(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
                                         const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result) {
+    return fsim_activity_update_route_as(world, activity, FSIM_SOURCE_POLICY, fields, count, waypoints, waypoint_count, result);
+}
+
+FSIM_API int fsim_activity_update_route_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
+                                           const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result) {
     fsim::control::Command c;
-    if (!world || !result || !toMode(FSIM_MODE_ROUTE, fields, count, c))
+    fsim::control::Source caller;
+    if (!world || !result || !toSource(source, caller)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route: bad arguments");
+    if (!toMode(FSIM_MODE_ROUTE, fields, count, c))
         return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route: a route takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_ROUTE)) + " fields");
     try {
         if (!toWaypoints(world, waypoints, waypoint_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route: waypoints without their struct_size");
-        toC(world, world->world.update(activity, std::get<fsim::control::RouteCommand>(c), world->waypoints), result);
+        toC(world, world->world.update(caller, activity, std::get<fsim::control::RouteCommand>(c), world->waypoints), result);
         return FSIM_OK;
     } catch (const std::exception& e) {
         return fail(FSIM_ERROR, std::string("fsim_activity_update_route: ") + e.what());
@@ -856,12 +871,19 @@ FSIM_API int fsim_vehicle_submit_curve(fsim_world* world, uint32_t id, const dou
 
 FSIM_API int fsim_activity_update_curve(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
                                         const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result) {
+    return fsim_activity_update_curve_as(world, activity, FSIM_SOURCE_POLICY, fields, count, segments, segment_count, result);
+}
+
+FSIM_API int fsim_activity_update_curve_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
+                                           const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result) {
     fsim::control::Command c;
-    if (!world || !result || !toMode(FSIM_MODE_CURVE, fields, count, c))
+    fsim::control::Source caller;
+    if (!world || !result || !toSource(source, caller)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_curve: bad arguments");
+    if (!toMode(FSIM_MODE_CURVE, fields, count, c))
         return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_curve: a curve takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_CURVE)) + " fields");
     try {
         if (!toSegments(world, segments, segment_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_curve: segments without their struct_size");
-        toC(world, world->world.update(activity, std::get<fsim::control::CurveCommand>(c), world->segments), result);
+        toC(world, world->world.update(caller, activity, std::get<fsim::control::CurveCommand>(c), world->segments), result);
         return FSIM_OK;
     } catch (const std::exception& e) {
         return fail(FSIM_ERROR, std::string("fsim_activity_update_curve: ") + e.what());
@@ -889,10 +911,16 @@ FSIM_API int fsim_vehicle_submit_support(fsim_world* world, uint32_t id, int kin
 }
 
 FSIM_API int fsim_activity_update(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count, fsim_command_result* result) {
-    if (!world || !result) return FSIM_INVALID_ARGUMENT;
+    return fsim_activity_update_as(world, activity, FSIM_SOURCE_POLICY, fields, count, result);
+}
+
+FSIM_API int fsim_activity_update_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
+                                     fsim_command_result* result) {
+    fsim::control::Source caller;
+    if (!world || !result || !toSource(source, caller)) return FSIM_INVALID_ARGUMENT;
     const UpdateShape shape = updateShape(world, activity);
     bool malformed = false;
-    const auto r = updateFrom(world, activity, shape, fields, count, malformed);
+    const auto r = updateFrom(world, activity, shape, fields, count, malformed, caller);
     if (malformed)
         return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update: activity " + std::to_string(activity) + " takes " +
                                                (shape.support >= 0 || shape.mode >= 0 ? std::to_string(shape.fields) : fieldCounts(shape.level)) + " fields");
@@ -941,8 +969,13 @@ FSIM_API int fsim_activity_update_batch_n(fsim_world* world, const fsim_activity
 }
 
 FSIM_API int fsim_activity_cancel(fsim_world* world, fsim_activity_id activity, fsim_command_result* result) {
-    if (!world || !result) return FSIM_INVALID_ARGUMENT;
-    toC(world, world->world.cancel(activity), result);
+    return fsim_activity_cancel_as(world, activity, FSIM_SOURCE_POLICY, result);
+}
+
+FSIM_API int fsim_activity_cancel_as(fsim_world* world, fsim_activity_id activity, int source, fsim_command_result* result) {
+    fsim::control::Source caller;
+    if (!world || !result || !toSource(source, caller)) return FSIM_INVALID_ARGUMENT;
+    toC(world, world->world.cancel(caller, activity), result);
     return FSIM_OK;
 }
 

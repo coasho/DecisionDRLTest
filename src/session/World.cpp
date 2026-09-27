@@ -432,47 +432,61 @@ control::EnvelopeStatus World::envelope(std::uint32_t id) {
     return e ? e->host.envelope() : control::EnvelopeStatus{};
 }
 
-control::CommandResult World::update(control::ActivityId activity, const control::SupportCommand& setpoint) {
-    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, setpoint);
+namespace {
+
+control::CommandResult unknownActivity(control::ActivityId activity) {
     control::CommandResult r;
     r.reason = control::Reason::UnknownActivity;
     r.activity = activity;
     return r;
+}
+
+} // namespace
+
+control::CommandResult World::update(control::ActivityId activity, const control::SupportCommand& setpoint) {
+    return update(control::Source::Policy, activity, setpoint);
 }
 
 control::CommandResult World::update(control::ActivityId activity, const control::Command& setpoint) {
-    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, setpoint, pool_->states()[e->slot]);
-    control::CommandResult r;
-    r.reason = control::Reason::UnknownActivity;
-    r.activity = activity;
-    return r;
+    return update(control::Source::Policy, activity, setpoint);
 }
 
 control::CommandResult World::update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints) {
-    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, route, waypoints, pool_->states()[e->slot]);
-    control::CommandResult r;
-    r.reason = control::Reason::UnknownActivity;
-    r.activity = activity;
-    return r;
+    return update(control::Source::Policy, activity, route, waypoints);
 }
 
 control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments) {
-    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, curve, segments, pool_->states()[e->slot]);
-    control::CommandResult r;
-    r.reason = control::Reason::UnknownActivity;
-    r.activity = activity;
-    return r;
+    return update(control::Source::Policy, activity, curve, segments);
 }
 
-control::CommandResult World::cancel(control::ActivityId activity) {
+control::CommandResult World::cancel(control::ActivityId activity) { return cancel(control::Source::Policy, activity); }
+
+control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::SupportCommand& setpoint) {
+    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, setpoint, caller);
+    return unknownActivity(activity);
+}
+
+control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::Command& setpoint) {
+    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, setpoint, pool_->states()[e->slot], caller);
+    return unknownActivity(activity);
+}
+
+control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::RouteCommand& route,
+                                     Span<const control::Waypoint> waypoints) {
+    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, route, waypoints, pool_->states()[e->slot], caller);
+    return unknownActivity(activity);
+}
+
+control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::CurveCommand& curve,
+                                     Span<const control::BezierSegment> segments) {
+    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, curve, segments, pool_->states()[e->slot], caller);
+    return unknownActivity(activity);
+}
+
+control::CommandResult World::cancel(control::Source caller, control::ActivityId activity) {
     Entry* e = entry(control::activityVehicle(activity));
-    if (!e) {
-        control::CommandResult r;
-        r.reason = control::Reason::UnknownActivity;
-        r.activity = activity;
-        return r;
-    }
-    const control::CommandResult r = e->host.cancel(activity, simTime_);
+    if (!e) return unknownActivity(activity);
+    const control::CommandResult r = e->host.cancel(activity, simTime_, caller);
     if (r.status == control::CommandStatus::Canceled) levelChanged(*e);
     return r;
 }

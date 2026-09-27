@@ -71,18 +71,25 @@ public:
                          double now);
     /// UPDATE: a new setpoint for a live activity - the fast path; allocates
     /// nothing. `state` is the vehicle's: a route is planned afresh from it.
-    CommandResult update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state) noexcept;
-    CommandResult update(ActivityId activity, const SupportCommand& setpoint) noexcept;
+    /// `caller` is the source the caller declares, as a NEW's options do:
+    /// under ControlMode::Granted one below the activity's may not address it
+    /// (AuthorityHeld, naming it) - a policy cannot change or end what the
+    /// platform's own sources fly. Open, as ADR-26 10.1: any caller.
+    CommandResult update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Source caller) noexcept;
+    CommandResult update(ActivityId activity, const SupportCommand& setpoint, Source caller) noexcept;
     /// UPDATE of a route: its options (a field left out, kHold, keeps its
     /// value) and its waypoints - none: those it has - checked as a NEW's,
     /// then flown afresh from its start, from where the aircraft is.
-    CommandResult update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state) noexcept;
+    CommandResult update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state,
+                         Source caller) noexcept;
     /// UPDATE of a curve: the options given (kHold keeps one), and segments -
     /// with `append` 1, after its end, from the same reference; else a new
     /// curve, flown afresh. Options alone change how it is flown, not where.
-    CommandResult update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments, const sim::VehicleState& state) noexcept;
-    /// CANCEL: the activity ends and its axes return to the vehicle default.
-    CommandResult cancel(ActivityId activity, double now) noexcept;
+    CommandResult update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments, const sim::VehicleState& state,
+                         Source caller) noexcept;
+    /// CANCEL: the activity ends and its axes return to the vehicle default
+    /// (`caller` as for UPDATE).
+    CommandResult cancel(ActivityId activity, double now, Source caller) noexcept;
     /// The existing entry points (docs/control-architecture.md, 10.7): an
     /// UPDATE of their live activity at the same capability, else a NEW with
     /// the legacy options.
@@ -122,15 +129,18 @@ public:
     /// capability end Canceled(Released); their axes fly the vehicle default.
     Reason releaseControl(std::size_t capability, double now) noexcept;
     /// The platform takes it back: the grant ends, and the policy's live
-    /// activities of the capability end Canceled with `reason` (Revoked if None).
+    /// activities of the capability end Canceled with `reason`: Revoked (if
+    /// None), CollisionAvoidance or Restricted; InvalidParameter for another,
+    /// and nothing changes.
     Reason revokeControl(std::size_t capability, Reason reason, double now) noexcept;
     /// Whether the policy may request the capability (all may, by default); a
     /// grant for one no longer allowed is revoked.
     Reason setAllowed(std::size_t capability, bool allowed, double now) noexcept;
     ControlStatus controlStatus(std::size_t capability) const noexcept;
     /// The platform restricts a capability: a policy's NEW for it, and a
-    /// request, are refused with `reason` (Unavailable if None); live
-    /// activities go on. Availability::Available lifts it.
+    /// request, are refused with `reason` - Restricted (if None),
+    /// CollisionAvoidance or Unavailable; InvalidParameter for another - and
+    /// live activities go on. Availability::Available lifts it (its reason unused).
     Reason setAvailability(std::size_t capability, Availability availability, Reason reason) noexcept;
     /// Counts every change to the grants, what is allowed, the control mode,
     /// availability and the performance (6.3): a consumer polls it.
@@ -280,6 +290,10 @@ private:
     Reason admits(std::size_t capability, Source source) const noexcept;
     /// The policy's live activities of the capability end Canceled with `reason`.
     void endPolicy(std::size_t capability, Reason reason, double now) noexcept;
+    /// Whether `caller` may UPDATE or CANCEL slot s's live activity: any caller
+    /// under Open (ADR-26 10.1); under Granted a source no lower than the
+    /// activity's - FA stays the primary controller. Else AuthorityHeld.
+    Reason addresses(std::size_t s, Source caller) const noexcept;
 
     std::uint32_t vehicle_ = 0;
     double controlPeriodS_ = 1.0 / 120.0;

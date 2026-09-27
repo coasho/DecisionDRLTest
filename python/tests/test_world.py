@@ -493,6 +493,16 @@ class CapabilityTest(unittest.TestCase):
         self.assertFalse(v.control_status("fsim.guidance.hsa").granted)
         with self.assertRaises(fsim.Error):
             v.request_control("fsim.guidance.nonsense")
+        with self.assertRaises(fsim.Error):  # not a reason the platform gives: it would misreport the end
+            v.revoke_control("fsim.guidance.hsa", "preempted")
+        # an Activity declares the source it was submitted with: a policy's handle cannot touch the platform's
+        o = v.submit_hsa(heading_rad=1.2, source=fsim.Source.OVERRIDE)
+        self.assertEqual(o.source, fsim.Source.OVERRIDE)
+        with self.assertRaises(fsim.Rejected) as refused:
+            fsim.Activity(world, o.id, "hsa").cancel()  # (a handle of its id without its source: the policy's)
+        self.assertEqual(refused.exception.reason, "authority_held")
+        o.update(heading_rad=1.3)
+        o.cancel()
         v.set_control_mode(fsim.ControlMode.OPEN)
         v.submit_hsa(heading_rad=1.0)
 

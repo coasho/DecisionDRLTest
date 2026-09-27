@@ -322,6 +322,26 @@ control::CommandResult World::update(control::ActivityId activity, const control
 
 control::CommandResult World::cancel(control::ActivityId activity) { return impl_->cancel(activity); }
 
+control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::Command& setpoint) {
+    return impl_->update(caller, activity, setpoint);
+}
+
+control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::SupportCommand& setpoint) {
+    return impl_->update(caller, activity, setpoint);
+}
+
+control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::RouteCommand& route,
+                                     Span<const control::Waypoint> waypoints) {
+    return impl_->update(caller, activity, route, waypoints);
+}
+
+control::CommandResult World::update(control::Source caller, control::ActivityId activity, const control::CurveCommand& curve,
+                                     Span<const control::BezierSegment> segments) {
+    return impl_->update(caller, activity, curve, segments);
+}
+
+control::CommandResult World::cancel(control::Source caller, control::ActivityId activity) { return impl_->cancel(caller, activity); }
+
 std::optional<control::ActivityRecord> World::activity(control::ActivityId activity) const {
     if (const auto* a = impl_->activity(activity)) return *a;
     return std::nullopt;

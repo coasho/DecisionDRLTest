@@ -133,6 +133,11 @@ Reason CapabilityHost::admits(std::size_t capability, Source source) const noexc
     return Reason::None;
 }
 
+Reason CapabilityHost::addresses(std::size_t s, Source caller) const noexcept {
+    if (controlMode_ == ControlMode::Granted && caller < records_[s].source) return Reason::AuthorityHeld;
+    return Reason::None;
+}
+
 void CapabilityHost::endPolicy(std::size_t capability, Reason reason, double now) noexcept {
     for (std::size_t s = 0; s < kActivities; ++s)
         if (slots_[s].live && records_[s].capability == capability && records_[s].source == Source::Policy) {
@@ -173,9 +178,12 @@ Reason CapabilityHost::releaseControl(std::size_t capability, double now) noexce
 
 Reason CapabilityHost::revokeControl(std::size_t capability, Reason reason, double now) noexcept {
     if (capability >= catalog_->size()) return Reason::UnknownCapability;
+    if (reason == Reason::None) reason = Reason::Revoked;
+    // why the platform takes it back: an activity ended so is Canceled, and says so
+    if (reason != Reason::Revoked && reason != Reason::CollisionAvoidance && reason != Reason::Restricted) return Reason::InvalidParameter;
     Authority& a = authorityOf(capability);
     if (a.granted) a.granted = false, ++controlRevision_;
-    endPolicy(capability, reason == Reason::None ? Reason::Revoked : reason, now);
+    endPolicy(capability, reason, now);
     return Reason::None;
 }
 
@@ -199,8 +207,13 @@ ControlStatus CapabilityHost::controlStatus(std::size_t capability) const noexce
 
 Reason CapabilityHost::setAvailability(std::size_t capability, Availability availability, Reason reason) noexcept {
     if (capability >= catalog_->size()) return Reason::UnknownCapability;
+    if (availability != Availability::Available) {
+        if (reason == Reason::None) reason = Reason::Restricted;
+        // why the platform restricts it: what a refused NEW and request then answer
+        if (reason != Reason::Restricted && reason != Reason::CollisionAvoidance && reason != Reason::Unavailable) return Reason::InvalidParameter;
+    }
     Authority& a = authorityOf(capability);
-    const CapabilityStatus next{availability, availability == Availability::Available ? Reason::None : reason == Reason::None ? Reason::Unavailable : reason};
+    const CapabilityStatus next{availability, availability == Availability::Available ? Reason::None : reason};
     if (next.availability == a.restricted.availability && next.reason == a.restricted.reason) return Reason::None;
     a.restricted = next;
     ++controlRevision_;
@@ -878,10 +891,11 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
 }
 
 CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints,
-                                     const sim::VehicleState& state) noexcept {
+                                     const sim::VehicleState& state, Source caller) noexcept {
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
+    if (const Reason why = addresses(s, caller); why != Reason::None) return rejected(why, activity, activity);
     if (!isCascade(s)) return rejected(Reason::WrongCommandType, activity);
     if (!(catalog_->descriptor(records_[s].capability).interactions & kUpdate)) return rejected(Reason::NotUpdatable, activity); // (as update() answers)
     auto* live = std::get_if<RouteCommand>(&config_->slots[s].command);
@@ -905,10 +919,11 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
 }
 
 CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments,
-                                     const sim::VehicleState& state) noexcept {
+                                     const sim::VehicleState& state, Source caller) noexcept {
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
+    if (const Reason why = addresses(s, caller); why != Reason::None) return rejected(why, activity, activity);
     if (!isCascade(s)) return rejected(Reason::WrongCommandType, activity);
     if (!(catalog_->descriptor(records_[s].capability).interactions & kUpdate)) return rejected(Reason::NotUpdatable, activity); // (as update() answers)
     auto* live = std::get_if<CurveCommand>(&config_->slots[s].command);
@@ -945,12 +960,13 @@ CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& cu
     return result;
 }
 
-CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state) noexcept {
-    if (const auto* route = std::get_if<RouteCommand>(&setpoint)) return update(activity, *route, {}, state);
-    if (const auto* curve = std::get_if<CurveCommand>(&setpoint)) return update(activity, *curve, {}, state);
+CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Source caller) noexcept {
+    if (const auto* route = std::get_if<RouteCommand>(&setpoint)) return update(activity, *route, {}, state, caller);
+    if (const auto* curve = std::get_if<CurveCommand>(&setpoint)) return update(activity, *curve, {}, state, caller);
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
+    if (const Reason why = addresses(s, caller); why != Reason::None) return rejected(why, activity, activity);
     if (!isCascade(s)) return rejected(Reason::WrongCommandType, activity);
     const ActivityRecord& record = records_[s];
     if (!(catalog_->descriptor(record.capability).interactions & kUpdate)) return rejected(Reason::NotUpdatable, activity);
@@ -1015,10 +1031,11 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
     return result;
 }
 
-CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& setpoint) noexcept {
+CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& setpoint, Source caller) noexcept {
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
+    if (const Reason why = addresses(s, caller); why != Reason::None) return rejected(why, activity, activity);
     const ActivityRecord& record = records_[s];
     if (isCascade(s) || catalog_->indexOf(setpoint) != static_cast<int>(record.capability)) return rejected(Reason::WrongCommandType, activity);
     SupportCommand checked = setpoint;
@@ -1033,10 +1050,11 @@ CommandResult CapabilityHost::update(ActivityId activity, const SupportCommand& 
     return result;
 }
 
-CommandResult CapabilityHost::cancel(ActivityId activity, double now) noexcept {
+CommandResult CapabilityHost::cancel(ActivityId activity, double now, Source caller) noexcept {
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);
+    if (const Reason why = addresses(s, caller); why != Reason::None) return rejected(why, activity, activity);
     end(s, ActivityState::Canceled, Reason::Requested, 0, now);
     release(s); // its axes: the vehicle default
     CommandResult r;

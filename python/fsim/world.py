@@ -408,15 +408,19 @@ def _row(level, values, fields):
 class Activity:
     """A command a vehicle accepted: it runs until it completes, fails or is
     canceled. ``update`` gives it a new setpoint - its per-step path - and
-    ``cancel`` ends it, handing its axes to the vehicle default."""
+    ``cancel`` ends it, handing its axes to the vehicle default. Both declare
+    the ``source`` it was submitted with: under ControlMode.GRANTED a source
+    below an activity's may not address it (fsim.Rejected "authority_held"),
+    so a policy cannot change or end what the platform's own sources fly."""
 
-    __slots__ = ("world", "id", "level", "clamped")
+    __slots__ = ("world", "id", "level", "clamped", "source")
 
-    def __init__(self, world, activity_id, level, clamped=False):
+    def __init__(self, world, activity_id, level, clamped=False, source=Source.POLICY):
         self.world = world
         self.id = activity_id
         self.level = level
         self.clamped = clamped  #: a value of the command was clamped to its range
+        self.source = Source(source)  #: the source it was submitted with, which its update and cancel declare
 
     @property
     def vehicle(self):
@@ -431,15 +435,15 @@ class Activity:
         canceled) or takes no updates (a behaviour: a new target is a new
         submit_behavior)."""
         if self.level == Level.BEHAVIOR:  # the library answers: not_updatable, or why not
-            return bool(_checked(self.world._h.activity_update(self.id, ()))[4])
-        return bool(_checked(self.world._h.activity_update(self.id, _row(self.level, values, fields)))[4])
+            return bool(_checked(self.world._h.activity_update(self.id, (), int(self.source)))[4])
+        return bool(_checked(self.world._h.activity_update(self.id, _row(self.level, values, fields), int(self.source)))[4])
 
     def update_route(self, waypoints=None, **options):
         """UPDATE of a route: new ``waypoints`` (None: those it has) and the options given (the others kept);
         checked as a NEW's, then flown afresh from its start, from where the aircraft is. Returns True if a value
         was clamped; raises fsim.Rejected (``index`` the waypoint at fault)."""
         rows = [] if waypoints is None else _waypoints(waypoints)
-        return bool(_checked(self.world._h.activity_update_route(self.id, _row("route", (), options), rows))[4])
+        return bool(_checked(self.world._h.activity_update_route(self.id, _row("route", (), options), rows, int(self.source)))[4])
 
     def update_curve(self, segments=None, **options):
         """UPDATE of a curve: new ``segments`` (fsim.BezierSegment; None: those it has) and the options given (the
@@ -447,7 +451,7 @@ class Activity:
         curve, flown afresh. Returns True if a value was clamped; raises fsim.Rejected (``index`` the segment at
         fault; ``section`` where a segment is too tight)."""
         rows = [] if segments is None else _segments(segments)
-        return bool(_checked(self.world._h.activity_update_curve(self.id, _row("curve", (), options), rows))[4])
+        return bool(_checked(self.world._h.activity_update_curve(self.id, _row("curve", (), options), rows, int(self.source)))[4])
 
     def append(self, segments, **options):
         """A curve's segments after its end, from the same reference: flown on to, the activity the same."""
@@ -455,7 +459,7 @@ class Activity:
 
     def cancel(self):
         """End it: its axes fly the vehicle default. Raises fsim.Rejected if it had already ended."""
-        _checked(self.world._h.activity_cancel(self.id))
+        _checked(self.world._h.activity_cancel(self.id, int(self.source)))
 
     @property
     def info(self):
@@ -598,7 +602,7 @@ class Vehicle:
             raise TypeError("submit_behavior() takes behaviours")
         r = _checked(self._h.submit(self.id, int(level), _row(level, values, fields), int(source), None if axes is None else int(axes),
                                     int(range), int(min_version)))
-        return Activity(self._world, r[2], level, bool(r[4]))
+        return Activity(self._world, r[2], level, bool(r[4]), source)
 
     def submit_behavior(self, behavior, target=None, points=None, *, source=Source.POLICY, range=RangePolicy.CLAMP,
                         min_version=0, **params):
@@ -608,7 +612,7 @@ class Vehicle:
         t = target.id if isinstance(target, Vehicle) else int(target or 0)
         rows = None if points is None else [tuple(float(x) for x in p) for p in points]
         r = _checked(self._h.submit_behavior(self.id, behavior, t, params or None, rows, int(source), None, int(range), int(min_version)))
-        return Activity(self._world, r[2], Level.BEHAVIOR, bool(r[4]))
+        return Activity(self._world, r[2], Level.BEHAVIOR, bool(r[4]), source)
 
     def submit_hsa(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
         """NEW for fsim.guidance.hsa, A-GRA's HSA/CSA (docs/vehicle-interface.md, 4.4): hold ``heading_rad`` or
@@ -619,7 +623,7 @@ class Vehicle:
         Activity whose ``update(**fields)`` changes only the fields given; fsim.Rejected if refused."""
         r = _checked(self._h.submit_mode(self.id, MODE_KINDS.index("hsa"), _row("hsa", values, fields), int(source), None, int(range),
                                          int(min_version)))
-        return Activity(self._world, r[2], "hsa", bool(r[4]))
+        return Activity(self._world, r[2], "hsa", bool(r[4]), source)
 
     def submit_route(self, waypoints, *, projection=Projection.GREAT_CIRCLE, repeat=False, end=EndBehavior.CONTINUE, start=0,
                      source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0):
@@ -633,7 +637,7 @@ class Vehicle:
         options = {"projection": projection, "repeat": 1.0 if repeat else 0.0, "end": end, "start": start}
         r = _checked(self._h.submit_route(self.id, _row("route", (), options), _waypoints(waypoints), int(source), None, int(range),
                                           int(min_version)))
-        return Activity(self._world, r[2], "route", bool(r[4]))
+        return Activity(self._world, r[2], "route", bool(r[4]), source)
 
     def submit_pattern(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
         """NEW for fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md, 4.6): ``pattern``
@@ -645,7 +649,7 @@ class Vehicle:
         only what it gives; fsim.Rejected if refused."""
         r = _checked(self._h.submit_mode(self.id, MODE_KINDS.index("pattern"), _row("pattern", values, fields), int(source), None, int(range),
                                          int(min_version)))
-        return Activity(self._world, r[2], "pattern", bool(r[4]))
+        return Activity(self._world, r[2], "pattern", bool(r[4]), source)
 
     def submit_curve(self, segments, *, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
         """NEW for fsim.guidance.curve, A-GRA's curve following (docs/vehicle-interface.md, 4.7): fly ``segments``
@@ -658,7 +662,7 @@ class Vehicle:
         fsim.Rejected if refused: ``index`` names the segment, ``section`` where it is too tight."""
         r = _checked(self._h.submit_curve(self.id, _row("curve", (), fields), _segments(segments), int(source), None, int(range),
                                           int(min_version)))
-        return Activity(self._world, r[2], "curve", bool(r[4]))
+        return Activity(self._world, r[2], "curve", bool(r[4]), source)
 
     def submit_support(self, kind, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
         """NEW for a support effector the vehicle has - "gear" (down), "flaps"
@@ -673,7 +677,7 @@ class Vehicle:
             raise ValueError("support kind must be one of %s" % ", ".join(SUPPORT_KINDS))
         r = _checked(self._h.submit_support(self.id, SUPPORT_KINDS.index(kind), _row(kind, values, fields), int(source), None, int(range),
                                             int(min_version)))
-        return Activity(self._world, r[2], kind, bool(r[4]))
+        return Activity(self._world, r[2], kind, bool(r[4]), source)
 
     def activities(self):
         """The live activities (ActivityInfo), then the ended ones the vehicle remembers, newest first."""

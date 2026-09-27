@@ -409,6 +409,14 @@ FSIM_API int fsim_activity_update_batch_n(fsim_world* world, const fsim_activity
                                           uint32_t stride, uint32_t fields);
 /* CANCEL: the activity ends and its axes fly the vehicle default. */
 FSIM_API int fsim_activity_cancel(fsim_world* world, fsim_activity_id activity, fsim_command_result* result);
+/* UPDATE and CANCEL declaring the caller's source (fsim_source), as a NEW's options
+ * do (ABI 1.6; docs/vehicle-interface.md, 6.1). Under FSIM_CONTROL_GRANTED a source
+ * below the activity's may not address it: rejected "authority_held", `other` the
+ * activity - a policy cannot change or end what the platform's own sources fly.
+ * The calls without _as are the policy's; in Open mode the source changes nothing. */
+FSIM_API int fsim_activity_update_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
+                                     fsim_command_result* result);
+FSIM_API int fsim_activity_cancel_as(fsim_world* world, fsim_activity_id activity, int source, fsim_command_result* result);
 /* What flies the primary axes nobody owns: FSIM_DEFAULT_NEUTRAL (surfaces
  * centred, throttle 0 - every vehicle's default) or FSIM_DEFAULT_HOLD (the
  * heading, airspeed and height each had when it was let go). `reason` (may be
@@ -576,6 +584,9 @@ FSIM_API int fsim_vehicle_submit_route(fsim_world* world, uint32_t id, const dou
  * (none: those it has), checked as a NEW's; flown afresh from its start. */
 FSIM_API int fsim_activity_update_route(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
                                         const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result);
+/* As fsim_activity_update_route, declaring the caller's source (fsim_activity_update_as). */
+FSIM_API int fsim_activity_update_route_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
+                                           const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result);
 
 /* One segment of a curve: a quintic Bezier by its six control points (weights
  * 1, the clamped knots), metres north, east and down from the curve's
@@ -597,6 +608,9 @@ FSIM_API int fsim_vehicle_submit_curve(fsim_world* world, uint32_t id, const dou
  * flown afresh (none: those it has, flown on). */
 FSIM_API int fsim_activity_update_curve(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
                                         const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result);
+/* As fsim_activity_update_curve, declaring the caller's source (fsim_activity_update_as). */
+FSIM_API int fsim_activity_update_curve_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
+                                           const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result);
 
 /* What a vehicle can do, as its guidance plans with it (docs/vehicle-interface.md,
  * 7.1; A-GRA's performance profile): NaN where the aircraft's profile and loops
@@ -633,14 +647,17 @@ FSIM_API int fsim_vehicle_request_control(fsim_world* world, uint32_t id, const 
 /* The policy lets go: its grant ends, and its live activities of the capability end canceled(released). */
 FSIM_API int fsim_vehicle_release_control(fsim_world* world, uint32_t id, const char* capability);
 /* The platform takes it back: the grant ends, and the policy's live activities of
- * the capability end canceled with `reason` (0: "revoked"). */
+ * the capability end canceled with `reason`: 0 or "revoked", "collision_avoidance"
+ * or "restricted" - another is refused (FSIM_INVALID_ARGUMENT) and nothing changes. */
 FSIM_API int fsim_vehicle_revoke_control(fsim_world* world, uint32_t id, const char* capability, int reason);
 /* Whether the policy may request the capability (all may, by default); a grant for one no longer allowed is revoked. */
 FSIM_API int fsim_vehicle_set_allowed(fsim_world* world, uint32_t id, const char* capability, int allowed);
 FSIM_API int fsim_vehicle_control_status(const fsim_world* world, uint32_t id, const char* capability, int32_t* allowed, int32_t* granted);
 /* The platform restricts a capability (fsim_availability; FSIM_AVAILABLE lifts it):
- * a policy's NEW for it, and a request, are refused with `reason` (0: "restricted");
- * what flies goes on. fsim_vehicle_capability_status reports it. */
+ * a policy's NEW for it, and a request, are refused with `reason` - 0 or
+ * "restricted", "collision_avoidance" or "unavailable"; another is refused
+ * (FSIM_INVALID_ARGUMENT) - and what flies goes on. fsim_vehicle_capability_status
+ * reports it. */
 FSIM_API int fsim_vehicle_set_availability(fsim_world* world, uint32_t id, const char* capability, int availability, int reason);
 /* Counts every change to the grants, what is allowed, the control mode, availability and the performance: poll it. */
 FSIM_API int fsim_vehicle_control_revision(fsim_world* world, uint32_t id, uint32_t* revision);

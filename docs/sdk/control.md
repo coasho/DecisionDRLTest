@@ -127,9 +127,10 @@ vehicle's are `TemporarilyUnavailable` until it is reset.
 - It ends in one of three ways:
   - `Completed` (`goal_reached`): a route's last point, a manoeuvre flown;
   - `Failed`: `target_lost` when a followed vehicle is removed, `diverged`;
-  - `Canceled`: `requested` by CANCEL, or `preempted` by a newer command.
+  - `Canceled`: `requested` by CANCEL, or `preempted` by a newer command; under grants, `released` when the policy lets go, and `revoked`, `collision_avoidance`, `restricted` or `not_granted` when the platform takes control back ([Grants](#grants-who-may-command-a-vehicle)).
 - While it runs, its record carries flags: an effector saturated, a setpoint clamped (`constraints` for the last step, `constraintsSeen` since it started).
 - A completed or failed behaviour keeps flying its last output, a hold, until another command takes over. CANCEL hands the axes to the vehicle default instead: the neutral actuator command (surfaces centred, throttle 0, as every vehicle starts), unless the vehicle's default is a hold (below).
+- **Letting go safely.** CANCEL, a release and a revocation all leave the aircraft to the vehicle default, and by default that is neutral. A mission autonomy that wants the aircraft to carry on when it lets go (A-GRA's relinquishing control to the VI) sets `v.setVehicleDefault(VehicleDefault::Hold)` first. The aircraft then holds, for its class, what it was flying: a wing its heading, height and airspeed; a rotorcraft its heading, height and velocity over the ground.
 - `ActivityId` is the vehicle's id in its high 32 bits and a per-vehicle count, so the same calls give the same ids. A vehicle remembers its 16 latest ended activities (`v.activities()`).
 
 **Authority.** A command has a `Source` in `CommandOptions`:
@@ -411,11 +412,14 @@ v.controlStatus("fsim.guidance.hsa");              // {allowed, granted}
 
 - **The platform's own sources** (`Autopilot`, `Override`) never need a grant. A grant opens a gate and nothing more: a live autopilot still holds its axes against a granted policy.
 - **The existing entry points** (`command()`, `fsim_vehicle_command_*`) are gated the same way.
+- **UPDATE and CANCEL** declare the caller's source, as a NEW's options do: `world.update(Source::Override, id, setpoint)`, `world.cancel(Source::Override, id)`; the calls without one are the policy's. Under Granted a source below the activity's is refused `authority_held`, naming it: a policy cannot change or end what the platform's own sources fly. In Open mode the source changes nothing: any caller may, as always.
 - **A request** is refused `not_allowed`, or with the reason the capability is unavailable.
-- **Release and revocation** end what the policy flies of the capability, in either mode, and the vehicle default flies its axes.
+- **Release and revocation** end what the policy flies of the capability, in either mode, and the vehicle default flies its axes. The platform says why in its own terms: `revoked` (the default), `collision_avoidance` or `restricted`. Any other reason is refused `invalid_parameter`, and nothing changes.
+- **Sources are declared, not authenticated.** The platform trusts each caller to declare what it is, as ADR-26 always has. A mission autonomy declares `Policy` (the default everywhere), and `Autopilot` and `Override` belong to the platform's own components.
 
 **Availability.** `v.setAvailability("fsim.guidance.route", Availability::TemporarilyUnavailable, Reason::CollisionAvoidance)`
-restricts a capability; `capabilityStatus` reports it. A policy's NEW for it,
+restricts a capability, with `restricted` (the default), `collision_avoidance`
+or `unavailable` (any other reason is refused); `capabilityStatus` reports it. A policy's NEW for it,
 and a request, are refused with the reason. What flies goes on, taking its
 UPDATEs, and the platform's own sources are not stopped. `Available` lifts it.
 

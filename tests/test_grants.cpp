@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <optional>
+#include <vector>
 
 using namespace fsim;
 using namespace fsim::control;
@@ -144,6 +145,89 @@ TEST_CASE("grants: release and revoke end the policy's activities; a capability 
     REQUIRE(a != 0);
     CHECK(w.releaseControl(v, kHsa) == Reason::None);
     endedAs(w, a, Reason::Released);
+}
+
+TEST_CASE("grants: under Granted a policy cannot change or end what the platform's own sources fly; Open is as ADR-26", "[modes]") {
+    session::World w(options("grants-addressing"));
+    const auto v = wing(w, "c172x", 1500.0, 55.0);
+    w.step(stepsFor(w, 1.0));
+    HsaCommand climb;
+    climb.altitudeM = 1600.0;
+    // Open: as ADR-26 10.1, an UPDATE or a CANCEL addresses any live activity
+    ActivityId a = hsa(w, v, Source::Autopilot).activity;
+    REQUIRE(a != 0);
+    CHECK(w.update(a, climb).accepted());
+    CHECK(w.cancel(a).status == CommandStatus::Canceled);
+    // Granted: the policy's calls may not address the platform's activities, and nothing changes
+    REQUIRE(w.setControlMode(v, ControlMode::Granted) == Reason::None);
+    a = hsa(w, v, Source::Autopilot).activity;
+    REQUIRE(a != 0);
+    CommandResult r = w.update(a, climb);
+    CHECK(r.reason == Reason::AuthorityHeld);
+    CHECK(r.other == a);
+    r = w.cancel(a);
+    CHECK(r.reason == Reason::AuthorityHeld);
+    CHECK(r.other == a);
+    w.step();
+    CHECK(w.activity(a)->state == ActivityState::Active);
+    // the platform's own sources address it, a higher one too
+    CHECK(w.update(Source::Autopilot, a, climb).accepted());
+    CHECK(w.update(Source::Override, a, climb).accepted());
+    // an override's activity: not an autopilot's to end, nor its route or support effector a policy's to change
+    CommandOptions over;
+    over.source = Source::Override;
+    const auto& s = *w.vehicleState(v);
+    Waypoint p;
+    p.latitudeRad = s.latitudeRad, p.longitudeRad = s.longitudeRad + 5000.0 / (6371008.8 * std::cos(s.latitudeRad));
+    const std::vector<Waypoint> route = {p};
+    const ActivityId o = w.submit(v, RouteCommand{}, route, over).activity;
+    REQUIRE(o != 0);
+    CHECK(w.activity(a)->reason == Reason::Preempted);
+    CHECK(w.update(o, RouteCommand{}, route).reason == Reason::AuthorityHeld);
+    CHECK(w.cancel(Source::Autopilot, o).reason == Reason::AuthorityHeld);
+    CHECK(w.update(Source::Override, o, RouteCommand{}, route).accepted());
+    const ActivityId flaps = w.submit(v, FlapsCommand{0.3}, over).activity;
+    REQUIRE(flaps != 0);
+    CHECK(w.update(flaps, FlapsCommand{0.6}).reason == Reason::AuthorityHeld);
+    CHECK(w.update(Source::Override, flaps, FlapsCommand{0.6}).accepted());
+    CHECK(w.cancel(Source::Override, o).status == CommandStatus::Canceled);
+    // the policy addresses its own
+    REQUIRE(w.requestControl(v, kHsa) == Reason::None);
+    const ActivityId mine = hsa(w, v).activity;
+    REQUIRE(mine != 0);
+    CHECK(w.update(mine, climb).accepted());
+    CHECK(w.cancel(mine).status == CommandStatus::Canceled);
+}
+
+TEST_CASE("grants: the platform revokes and restricts with its own reasons; one that would misreport an end is refused", "[modes]") {
+    session::World w(options("grants-reasons"));
+    const auto v = wing(w, "c172x", 1500.0, 55.0);
+    w.step(stepsFor(w, 1.0));
+    REQUIRE(w.setControlMode(v, ControlMode::Granted) == Reason::None);
+    REQUIRE(w.requestControl(v, kHsa) == Reason::None);
+    const ActivityId a = hsa(w, v).activity;
+    REQUIRE(a != 0);
+    const std::uint32_t revision = w.controlRevision(v);
+    for (const Reason bad : {Reason::Preempted, Reason::Requested, Reason::GoalReached, Reason::Released, Reason::NotGranted, Reason::Unavailable}) {
+        INFO(reasonName(bad));
+        CHECK(w.revokeControl(v, kHsa, bad) == Reason::InvalidParameter);
+    }
+    for (const Reason bad : {Reason::GoalReached, Reason::Revoked, Reason::Preempted})
+        CHECK(w.setAvailability(v, kHsa, Availability::TemporarilyUnavailable, bad) == Reason::InvalidParameter);
+    w.step();
+    CHECK(w.activity(a)->state == ActivityState::Active); // nothing changed
+    CHECK(w.controlStatus(v, kHsa).granted);
+    CHECK(w.capabilityStatus(v, kHsa).availability == Availability::Available);
+    CHECK(w.controlRevision(v) == revision);
+    // what it may say: restricted by default, collision avoidance, unavailable; lifting takes no reason
+    CHECK(w.setAvailability(v, kHsa, Availability::Faulted, Reason::None) == Reason::None);
+    CHECK(w.capabilityStatus(v, kHsa).reason == Reason::Restricted);
+    CHECK(w.setAvailability(v, kHsa, Availability::TemporarilyUnavailable, Reason::Unavailable) == Reason::None);
+    CHECK(w.capabilityStatus(v, kHsa).reason == Reason::Unavailable);
+    CHECK(w.setAvailability(v, kHsa, Availability::Available, Reason::GoalReached) == Reason::None);
+    CHECK(w.capabilityStatus(v, kHsa).availability == Availability::Available);
+    CHECK(w.revokeControl(v, kHsa, Reason::Restricted) == Reason::None);
+    endedAs(w, a, Reason::Restricted);
 }
 
 TEST_CASE("availability: the platform's restriction refuses a policy's NEW and its request with the reason; what flies goes on; the revision counts each change",

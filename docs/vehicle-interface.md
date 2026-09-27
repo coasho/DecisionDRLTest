@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | Status | Accepted 2026-09-26. The owner read the gap analysis (section 1.2) and decided: implement the Vehicle Interface's semantics in the SDK, with authority by grants over the priorities and updatable modes with fixed-size setpoints, the rotorcraft's defects fixed first (section 2). Implemented in the order of section 12: VI-1 to VI-7, 2026-09-26 and 27 (section 15) |
-| Extends | ADR-26 ([control-architecture.md](control-architecture.md)): its contract layer, runtime, boundary and gates stand. Two of its rules change: guidance may now take UPDATE (ADR-26 8.2), and a vehicle may require grants before a policy commands it (ADR-26 section 5, "no consent protocol"). ADR-27 ([rotorcraft.md](rotorcraft.md)) for the rotorcraft |
+| Extends | ADR-26 ([control-architecture.md](control-architecture.md)): its contract layer, runtime, boundary and gates stand. Three of its rules change: guidance may now take UPDATE (ADR-26 8.2); a vehicle may require grants before a policy commands it (ADR-26 section 5, "no consent protocol"); and under grants an UPDATE or a CANCEL declares its caller's source, which may not be below the activity's (ADR-26 10.1, section 6.1 here). ADR-27 ([rotorcraft.md](rotorcraft.md)) for the rotorcraft |
 | Scope | The flight modes a mission autonomy commands a vehicle through (heading/course, speed and altitude; waypoint following; loiter patterns; curve following), what it is told back (acknowledgment detail, progress, the commanded state), how it gets and loses authority, and what it learns of the vehicle's performance and availability |
 | Reference | A-GRA ASK 6.0a, the public repository open-arsenal/a-gra: the *VI L1 Interface Volume* (sections 1.1-1.4), *A-GRA_MessageDefinitions_v6_0_a.xsd* (`MA_FlightCommandMT`, `MA_FlightCommandStatusMT`, `MA_FlightActivityMT`, `MA_FlightCapabilityMT`, `MA_FlightCapabilityStatusMT`), and the *MA L1 Compliance Document* (MA-L1-013, -014, -020). Read for semantics; nothing of them is in this repository |
 | Related | [sdk/control.md](sdk/control.md), [sdk/c_abi.md](sdk/c_abi.md), [sdk/python.md](sdk/python.md), [design document](FlightSim_System_Architecture_and_Design.md) §9.3 |
@@ -353,7 +353,10 @@ Unchanged (D5): the activity ends `Canceled(Requested)` and its axes fly the veh
 `Autopilot` and `Override`, the platform's own sources (FA), never need a grant: FA is always the primary controller.
 
 - **Switching to Granted** ends the policy's live activities no grant covers: `Canceled(NotGranted)`, their axes to the vehicle default.
-- **The gate** comes before every other check of a NEW, whatever its range policy, and a refused NEW leaves no record. UPDATE and CANCEL are not gated: an activity that lost its grant has ended.
+- **The gate** comes before every other check of a NEW, whatever its range policy, and a refused NEW leaves no record. UPDATE and CANCEL need no grant: an activity that lost its grant has ended.
+- **UPDATE and CANCEL declare the caller's source**, as a NEW's options do (`update(Source, activity, ...)`, `cancel(Source, activity)`; the C ABI's `_as` calls; a Python `Activity` declares the source it was submitted with). The calls without one are the policy's. Under Granted a source below the activity's may not address it: `Rejected(AuthorityHeld)`, `other` naming the activity (A-GRA's CAPABILITY_PRECEDENCE). So a policy cannot change or end what the platform flies, and FA stays the primary controller. Open is as ADR-26 10.1: any caller may address any live activity.
+- **Sources are declared, not authenticated**, as in ADR-26: the platform trusts each caller to declare what it is. A mission autonomy declares `Policy`, the default of every call, and `Autopilot` and `Override` belong to the platform's own components. A consumer that declared `Override` would pass every gate: the grants order a mission autonomy that plays by the interface, they do not sandbox one.
+- Recorded at the review after VI-7: CANCEL and UPDATE first carried no source, so under Granted a policy could still end or retarget an autopilot's or an override's activity.
 
 ### 6.2 Requests, releases, revocations
 
@@ -361,7 +364,7 @@ Unchanged (D5): the activity ends `Canceled(Requested)` and its axes fly the veh
 | --- | --- | --- |
 | `requestControl(vehicle, capability)` | approved (`Reason::None`) if the capability is allowed and available; else rejected with `NotAllowed` or the reason it is unavailable (`Restricted`, `CollisionAvoidance`, `Diverged`); `UnknownCapability` for one that takes no command | ControlRequest ACQUIRE → APPROVED / REJECTED |
 | `releaseControl(vehicle, capability)` | the grant ends; the policy's live activities of that capability end `Canceled(Released)` | MA relinquishes control |
-| `revokeControl(vehicle, capability, reason)` | the platform ends the grant; the policy's live activities of that capability end `Canceled` with the reason (`Revoked` unless it gives another, e.g. `CollisionAvoidance`) | ControlRequestStatus CANCELED; Unpair |
+| `revokeControl(vehicle, capability, reason)` | the platform ends the grant; the policy's live activities of that capability end `Canceled` with the reason: `Revoked` (the default), `CollisionAvoidance` or `Restricted`. Any other is refused `InvalidParameter` and nothing changes: an end must say truly what ended it (`Preempted` names a preemptor, `Requested` is CANCEL's) | ControlRequestStatus CANCELED; Unpair |
 | `setAllowed(vehicle, capability, allowed)` | whether a policy may request it (all may, by default); a grant for one no longer allowed is revoked, `Canceled(Revoked)` | C2's control designations |
 | `controlStatus(vehicle, capability)` | allowed, granted; the primary controller is always the platform | ControlStatus |
 
@@ -375,7 +378,7 @@ The host counts every change to the control mode, grants, allowed capabilities, 
 
 ### 6.4 Relinquishing
 
-`releaseControl` and CANCEL end the policy's activities, and the vehicle default flies (D5).
+Every way the policy lets go ends its activities and hands their axes to the vehicle default (D5): `releaseControl` (the policy's activities of the capability, `Released`), a revocation (`Revoked` or the platform's reason) and CANCEL (the activity it names, `Requested`; under Granted only a caller whose source is at least the activity's, 6.1). The default is neutral unless the consumer set `VehicleDefault::Hold`, which holds what the aircraft was flying for its class (5.5). Completion and preemption differ: the aircraft keeps flying the ended activity's output (ADR-26 9.4).
 
 ## 7. Performance and availability
 
@@ -409,7 +412,7 @@ The adapter computes a vehicle's `Performance` when the vehicle is created, and 
 | Source | Availability, reason |
 | --- | --- |
 | a diverged vehicle | TemporarilyUnavailable, `Diverged` (as ADR-26) |
-| the platform restricts a capability: `setAvailability(vehicle, capability, availability, reason)`, e.g. FA's collision avoidance | the given state and reason (`Restricted` if it gives none), which `capabilityStatus` reports. A policy's NEW, and a request, are refused with that reason, so a consumer learns why (`CollisionAvoidance` is A-GRA's CONSTRAINT_COLLISION_AVOIDANCE). The platform's own sources are not stopped: they fly the avoidance. Live activities go on, taking UPDATEs, until the platform preempts them (an `Override` manoeuvre). `Available` lifts it |
+| the platform restricts a capability: `setAvailability(vehicle, capability, availability, reason)`, e.g. FA's collision avoidance | the given state and reason - `Restricted` (if it gives none), `CollisionAvoidance` or `Unavailable`; any other is refused `InvalidParameter` - which `capabilityStatus` reports. A policy's NEW, and a request, are refused with that reason, so a consumer learns why (`CollisionAvoidance` is A-GRA's CONSTRAINT_COLLISION_AVOIDANCE). The platform's own sources are not stopped: they fly the avoidance. Live activities go on, taking UPDATEs, until the platform preempts them (an `Override` manoeuvre). `Available` lifts it |
 | a mode whose loops the aircraft lacks | absent from the catalog |
 
 Every change bumps the revision.
@@ -436,6 +439,7 @@ ADR-26's rules B1-B8 hold, with these additions:
 | `CommandResult::index`, `constraint`, `from`, `to` | `fsim_command_result.reserved` = index + 1; `fsim_last_command_detail` | `Rejected.index`, `.constraint`, `.section` |
 | `performance(vehicle)`, `controlRevision(vehicle)` | `fsim_vehicle_performance`, `fsim_vehicle_control_revision` | `Vehicle.performance`, `.control_revision` |
 | grants and availability (section 6, 7.2): `setControlMode`, `requestControl`, `releaseControl`, `revokeControl`, `setAllowed`, `controlStatus`, `setAvailability` | `fsim_vehicle_set_control_mode`, `_request_control`, `_release_control`, `_revoke_control`, `_set_allowed`, `_control_status`, `_set_availability` | `Vehicle.set_control_mode`, `request_control` (raises `Rejected`), `release_control`, `revoke_control`, `set_allowed`, `control_status`, `set_availability` |
+| UPDATE and CANCEL declaring the caller's source (6.1): `update(Source, activity, ...)`, `cancel(Source, activity)` | `fsim_activity_update_as`, `_update_route_as`, `_update_curve_as`, `fsim_activity_cancel_as` | `Activity.source`, declared by its `update`, `update_route`, `update_curve`, `append` and `cancel` |
 
 The C ABI changes additively only (ADR-26 C3): new calls, new structs with a `struct_size`, new enum values.
 
@@ -845,6 +849,13 @@ Filled in as the steps land. The machine and the benchmark's precision are ADR-2
   Across the five adapters it sees every answer and every end.
 - **Digests:** identical to step 5b, protection on and off. **Allocations:** none.
 - **Cost:** every micro case within ±2.7 % of VI-6 at the median and ±1.2 % at the minimum (interleaved A/B, 5 rounds). The gate is a few compares in NEW, and the host's step adds one comparison of the loops' revision.
+- **Review fixes** (after VI-7, before the push):
+  - Under Granted, UPDATE and CANCEL now declare the caller's source (6.1). Before, a policy could end or retarget the platform's autopilot and override activities.
+  - Revocations and restrictions take only the platform's reasons (6.2, 7.2). Before, any reason could be recorded, so a revocation named `Preempted` left a preemption with no preemptor.
+  - The guide now tells a mission autonomy to set the hold before it lets go, as section 5.5 said it did, and lists the grants' end reasons.
+  - Tests: under Granted a policy's UPDATE and CANCEL of an autopilot's hsa, an override's route and flaps are refused `authority_held` with the activity named. The platform's sources still address them, and Open is as before. Every reason that would misreport an end is refused, and nothing changes.
+  - Conformance's UPDATE and CANCEL now declare a source, drawn from a generator of their own so the sequences are otherwise as they were. Every answer is checked against the rule, and `authority_held` is seen for both.
+  - Digests identical to step 5b; no allocations; ctest 194/194.
 - **The example:** the holding Cessna flies Granted; its hold is refused `not_granted` until it asks for the pattern. At 150 s the platform revokes the triangle Cessna's route for collision avoidance: the route ends (A-GRA's FAILED), and its vehicle default, a hold, flies on at its speed.
 - ctest 192/192.
 

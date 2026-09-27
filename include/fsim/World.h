@@ -282,6 +282,18 @@ public:
     control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
+    /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do
+    /// (docs/sdk/control.md, "Grants"): under ControlMode::Granted a source
+    /// below the activity's may not address it (AuthorityHeld, naming it) - a
+    /// policy cannot change or end what the platform's own sources fly. The
+    /// calls above are the policy's; in Open mode the source changes nothing.
+    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::Command& setpoint);
+    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::SupportCommand& setpoint);
+    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::RouteCommand& route,
+                                  Span<const control::Waypoint> waypoints);
+    control::CommandResult update(control::Source caller, control::ActivityId activity, const control::CurveCommand& curve,
+                                  Span<const control::BezierSegment> segments);
+    control::CommandResult cancel(control::Source caller, control::ActivityId activity);
     /// A live or recently ended activity of any vehicle; empty if unknown.
     std::optional<control::ActivityRecord> activity(control::ActivityId activity) const;
 

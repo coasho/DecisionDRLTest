@@ -859,6 +859,21 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_control_status(world, a, "fsim.guidance.hsa", &allowed, &granted) == FSIM_OK && granted == 0);
             CHECK(fsim_vehicle_request_control(world, a, "fsim.guidance.nonsense", &reason) != FSIM_OK);
             CHECK(fsim_vehicle_revoke_control(world, a, "fsim.guidance.hsa", 999) != FSIM_OK);
+            /* only the platform's reasons: one that would misreport an end is refused */
+            for (k = 0; k < 64 && strcmp(fsim_reason_name(k), "preempted") != 0; ++k) {}
+            CHECK(k < 64 && fsim_vehicle_revoke_control(world, a, "fsim.guidance.hsa", k) != FSIM_OK);
+            CHECK(fsim_vehicle_set_availability(world, a, "fsim.guidance.hsa", FSIM_FAULTED, k) != FSIM_OK);
+            /* UPDATE and CANCEL declare the caller's source: a policy cannot change or end the platform's */
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_mode(world, a, FSIM_MODE_HSA, hsa, 6, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            flown = cr.activity;
+            CHECK(fsim_activity_update(world, flown, hsa, 6, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "authority_held") == 0 && cr.other == flown);
+            CHECK(fsim_activity_cancel(world, flown, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED && cr.other == flown);
+            CHECK(fsim_activity_update_as(world, flown, FSIM_SOURCE_OVERRIDE, hsa, 6, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_cancel_as(world, flown, 7, &cr) != FSIM_OK); /* no such source */
+            CHECK(fsim_activity_cancel_as(world, flown, FSIM_SOURCE_OVERRIDE, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
             /* back to Open: as ever */
             CHECK(fsim_vehicle_set_control_mode(world, a, FSIM_CONTROL_OPEN) == FSIM_OK);
             CHECK(fsim_vehicle_command_attitude(world, a, &att) == FSIM_OK);

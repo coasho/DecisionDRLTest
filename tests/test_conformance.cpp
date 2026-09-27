@@ -344,10 +344,10 @@ CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, c
 }
 
 /// UPDATE with what the maker made: a route's or a curve's options, and now and then its waypoints or segments.
-CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints) {
-    if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints) return w.update(activity, *route, make.waypoints);
-    if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints) return w.update(activity, *curve, make.segments);
-    return w.update(activity, c);
+CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Source caller = Source::Policy) {
+    if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints) return w.update(caller, activity, *route, make.waypoints);
+    if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints) return w.update(caller, activity, *curve, make.segments);
+    return w.update(caller, activity, c);
 }
 
 /// A command of another type than `c`: what an UPDATE of it must refuse.
@@ -498,6 +498,8 @@ struct Done {
     CommandResult result;       ///< NEW, UPDATE, CANCEL
     CommandOptions options;     ///< NEW
     ActivityId addressed = 0;   ///< UPDATE, CANCEL
+    Source caller = Source::Policy; ///< UPDATE, CANCEL: the source the call declares
+    ControlMode mode = ControlMode::Open; ///< the vehicle's, as the operation was made
     bool accepted = false;      ///< the existing entry point's answer
     std::size_t capability = 0; ///< NEW, the existing entry point, an authority call: the capability it is about
     Reason refused = Reason::None; ///< NEW, the existing entry point: what the authority model refuses a policy
@@ -553,7 +555,10 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         const bool ok = done.op == Op::Update ? done.result.accepted() : done.result.status == CommandStatus::Canceled;
         if (!target) CHECK(done.result.reason == Reason::UnknownActivity);
         else if (!target->live()) CHECK(done.result.reason == Reason::ActivityEnded);
-        else if (done.op == Op::Cancel) CHECK(ok);
+        else if (done.mode == ControlMode::Granted && done.caller < target->source) { // FA stays the primary controller (6.1)
+            CHECK(done.result.reason == Reason::AuthorityHeld);
+            CHECK(done.result.other == done.addressed);
+        } else if (done.op == Op::Cancel) CHECK(ok);
         else if (!ok)
             CHECK(among(done.result.reason, {Reason::NotUpdatable, Reason::WrongCommandType, Reason::InvalidParameter, Reason::OutOfRange, Reason::PerformanceLimit,
                                              Reason::InvalidWaypoint, Reason::InvalidCurve}));
@@ -707,6 +712,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
     };
     std::deque<Planned> plan;
     AuthorityModel authority;
+    std::mt19937_64 callers(seed ^ 0x9e3779b97f4a7c15ull); // who an UPDATE or a CANCEL says it is
     authority.control.assign(w.capabilities(v).size(), ControlStatus{});
     authority.restricted.assign(w.capabilities(v).size(), CapabilityStatus{});
 
@@ -727,6 +733,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             plan.push_back({Op::Step, {}, 1});
         }
         Done done;
+        done.mode = authority.mode;
         done.start = w.simTime();
         done.stepS = w.dt() * w.frameSkip();
         const bool planned = !plan.empty();
@@ -794,8 +801,11 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                              : which < 0.8 && !issued.empty() ? issued[make.pick(issued.size())]
                              : which < 0.9                    ? activityId(v, lastSerial + 1 + static_cast<std::uint32_t>(make.pick(50)))
                                                               : activityId(v + 1000, 1);
+            // the source the call declares, the policy's mostly (drawn apart: the sequence is as it was without it)
+            const double from = std::uniform_real_distribution<double>(0.0, 1.0)(callers);
+            done.caller = from < 0.7 ? Source::Policy : from < 0.85 ? Source::Autopilot : Source::Override;
             if (done.op == Op::Cancel) {
-                done.result = w.cancel(done.addressed);
+                done.result = w.cancel(done.caller, done.addressed);
                 break;
             }
             // its own capability's command mostly, another now and then
@@ -804,8 +814,9 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             Command c;
             SupportCommand sc;
             const int kind = commandFor(d, c, sc);
-            done.result = kind == 1 ? w.update(done.addressed, sc) : kind == 0 ? updateMade(w, done.addressed, c, make, make.chance(0.6))
-                                                                          : w.update(done.addressed, Command(VelocityCommand{}));
+            done.result = kind == 1   ? w.update(done.caller, done.addressed, sc)
+                          : kind == 0 ? updateMade(w, done.addressed, c, make, make.chance(0.6), done.caller)
+                                      : w.update(done.caller, done.addressed, Command(VelocityCommand{}));
             break;
         }
         case Op::Legacy: {
@@ -995,7 +1006,8 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
     CHECK(all["update:invalid_curve"] > 0); // appended where the curve does not end
     // grants over the priorities (docs/vehicle-interface.md, 6): every answer and every end the rules give
     for (const char* what : {"new:not_granted", "request:none", "request:not_allowed", "canceled:released", "canceled:revoked", "canceled:not_granted",
-                             "canceled:collision_avoidance", "mode", "release", "revoke", "allow", "restrict"}) {
+                             "canceled:collision_avoidance", "mode", "release", "revoke", "allow", "restrict", "update:authority_held",
+                             "cancel:authority_held"}) {
         INFO(what);
         CHECK(all[what] > 0);
     }
