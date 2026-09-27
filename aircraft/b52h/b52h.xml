@@ -766,6 +766,11 @@
           </traverse>
           <output>fcs/flap-pos-deg</output>
         </kinematic>
+        <pure_gain name="fcs/flaps-normalized">
+          <input>fcs/flap-pos-deg</input>
+          <gain>0.0333333</gain>
+          <output>fcs/flap-pos-norm</output>
+        </pure_gain>
       </channel>
       <channel name="Throttle 4">
         <pure_gain name="fcs/throttle-lever-4">

@@ -32,6 +32,7 @@ add_executable(fsim_tests
     test_applicability.cpp
     test_discovery.cpp
     test_behaviours.cpp
+    test_fleet.cpp
     test_protection.cpp
     test_laws.cpp
     test_manoeuvres.cpp
@@ -51,7 +52,11 @@ fsim_set_warnings(fsim_tests)
 add_custom_command(TARGET fsim_tests POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:libJSBSim> $<TARGET_FILE_DIR:fsim_tests>)
 
-catch_discover_tests(fsim_tests ${FSIM_CATCH_DISCOVERY} TEST_SPEC "~[conformance]")
+catch_discover_tests(fsim_tests ${FSIM_CATCH_DISCOVERY} TEST_SPEC "~[conformance]~[fleet]")
+# The fleet acceptance test (docs/flight-autonomy.md, 9.3): every capability every
+# aircraft advertises, flown within its class's thresholds - labelled, so it runs
+# on its own too (ctest -L fleet); CI runs it with the rest.
+catch_discover_tests(fsim_tests ${FSIM_CATCH_DISCOVERY} TEST_SPEC "[fleet]" PROPERTIES LABELS fleet)
 # The control architecture's conformance (docs/control-architecture.md, step 6):
 # the lifecycle's state machine for every adapter, the c172x checkpoints, the
 # allocation gate and a short manoeuvre suite per adapter - labelled, so CI

@@ -133,8 +133,14 @@ push, not yet tagged:
   - rejections that name the field and the limit;
   - an activity's progress and the commanded state;
   - A-GRA's names for all of it (`fsim.agra`).
-
-  Waypoint following, loiter patterns, curve following and control grants follow, step by step.
+- **Flight Autonomy** ([docs/flight-autonomy.md](docs/flight-autonomy.md), ADR-29): that interface's Flight Autonomy made
+  complete, natively, on every aircraft it applies to, in 17 stages. The first is done:
+  - discovery that tells the truth: a support table for 190 public features on every vehicle - supported, partial,
+    not implemented (with the stage that builds it) or not supported (with the aircraft's declaration and its
+    source) - and availability apart from it;
+  - flight phases: a policy's airborne guidance is refused on the ground, the platform's own paths are not;
+  - the platform's behaviours fixed where they failed (waypoints, pursuit, evade, formation, hold, loiter, aerobatics);
+  - a fleet acceptance test that flies every capability each of the 35 aircraft advertises (`ctest -L fleet`).
 - **Per-aircraft gains** ([docs/sdk/control.md](docs/sdk/control.md#per-aircraft-gains)): the built-in control
   loops fly each of these aircraft with its own gains - designed by the platform from its plant, the responses
   hangar's `autopilot` stage measures with small steps at a reference condition, scheduled on airspeed, with its

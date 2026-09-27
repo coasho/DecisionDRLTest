@@ -522,6 +522,8 @@ def flight_control_xml(aircraft, fbw=None, yaw_damper=None, autopilot=None, prof
         steps = [0.0, 0.25, 0.5, 0.75, 1.0]
         settings = "\n".join("            <setting> <position>%.1f</position> <time>%.1f</time> </setting>" % (s * hi, 2.0 if s else 0.0)
                              for s in steps)
+        # and the position as a fraction of the travel, JSBSim's fcs/flap-pos-norm (which JSBSim
+        # declares but does not derive): what fsim reads to know the flaps are where they were told
         parts.append("""      <channel name="Flaps">
         <kinematic name="fcs/flaps-control">
           <input>fcs/flap-cmd-norm</input>
@@ -530,7 +532,12 @@ def flight_control_xml(aircraft, fbw=None, yaw_damper=None, autopilot=None, prof
           </traverse>
           <output>fcs/flap-pos-deg</output>
         </kinematic>
-      </channel>""" % settings)
+        <pure_gain name="fcs/flaps-normalized">
+          <input>fcs/flap-pos-deg</input>
+          <gain>%.6g</gain>
+          <output>fcs/flap-pos-norm</output>
+        </pure_gain>
+      </channel>""" % (settings, 1.0 / hi if hi > 0.0 else 0.0))
     devices = [d for _, d in aircraft.leading_devices()]
     if devices:
         # the leading-edge flaps on their schedule, a alpha - m qbar/p + b deg,

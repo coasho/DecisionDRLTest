@@ -107,7 +107,8 @@ VelocityCommand follow(const ControlContext& ctx, const Performance& performance
 double verticalSpeedTo(double altitudeMslM, double feedforward, const sim::VehicleState& s, const Performance& performance, bool hovers) noexcept;
 
 /// A rotorcraft's path speed at most, for its lateral acceleration and its
-/// braking (80 % of its performance's): on an arc of `radiusM`, and `toArcM`
+/// braking (80 % of its performance's) and a turn rate its velocity loop
+/// follows (a third of its bandwidth): on an arc of `radiusM`, and `toArcM`
 /// before one (0: none).
 double lateralLimit(const Performance& performance, double radiusM) noexcept;
 double brakingLimit(const Performance& performance, double speedAfterMs, double toGoM) noexcept;

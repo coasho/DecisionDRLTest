@@ -1,6 +1,7 @@
 #include "control/Builtin.h"
 
 #include "control/Registry.h"
+#include "control/Route.h"
 #include "core/Geodesy.h"
 #include "fsim/GuidanceModes.h"
 #include "fsim/RotorControllers.h"
@@ -390,11 +391,15 @@ void HoldBehavior::start(const ControlContext& ctx, const BehaviorCommand& comma
     target_.verticalSpeedMs = 0.0;
     target_.headingRad = command.param("heading_deg", units::radiansToDegrees(s.eulerRad[2])) * units::kDegreesToRadians;
     altitude_ = command.param("altitude_m", s.altitudeMslM);
+    hovers_ = (ctx.features & kFeatureHover) != 0;
 }
 
 Command HoldBehavior::update(const ControlContext& ctx, const Command&) {
     VelocityCommand out = target_;
-    out.verticalSpeedMs = std::clamp(0.25 * (altitude_ - ctx.sensed.altitudeMslM), -6.0, 6.0);
+    // to its altitude at its own position loop's gain and vertical speeds, as a mode flies it (a gain of
+    // 0.25/s is six times what a Mirage 2000's loops follow: it circled its new altitude 25 m either way)
+    out.verticalSpeedMs = ctx.performance ? route::verticalSpeedTo(altitude_, 0.0, ctx.sensed, *ctx.performance, hovers_)
+                                          : std::clamp(0.25 * (altitude_ - ctx.sensed.altitudeMslM), -6.0, 6.0);
     return out;
 }
 
@@ -523,10 +528,17 @@ void LoiterBehavior::start(const ControlContext& ctx, const BehaviorCommand& com
         if (ctx.performance && !hovers) radius = std::max(radius, 1.25 * orbitRadiusM(*ctx.performance, orHold(airspeed_, s.airspeedTrueMs)));
     }
     radius_ = std::max(hovers ? 1.0 : 100.0, radius);
+    // a rotorcraft given no speed: its cruise, no faster than it can follow the circle (route::lateralLimit;
+    // at the position loop's fastest, 30 m/s, a helicopter's 150 m circle needs 6 m/s2 of the 3.6 it has)
+    if (hovers && isHold(airspeed_) && ctx.performance) {
+        const Performance& perf = *ctx.performance;
+        const double cruise = std::isfinite(perf.cruiseTasMs) ? perf.cruiseTasMs : perf.maxGroundSpeedMs;
+        airspeed_ = std::isfinite(cruise) ? std::min(cruise, route::lateralLimit(perf, radius_)) : route::lateralLimit(perf, radius_);
+    }
     altitude_ = command.param("altitude_m", s.altitudeMslM);
     clockwise_ = command.param("clockwise", 1.0) != 0.0;
     lastTheta_ = distance_ = kHold;
-    swept_ = 0.0;
+    swept_ = trim_ = 0.0;
 }
 
 Command LoiterBehavior::update(const ControlContext& ctx, const Command&) {
@@ -549,11 +561,18 @@ Command LoiterBehavior::update(const ControlContext& ctx, const Command&) {
     }
     lastTheta_ = theta, distance_ = distance;
     // Carrot on the circle, ahead of the vehicle's current angular position;
-    // far away the carrot leads less so the approach is nearly direct.
+    // far away the carrot leads less so the approach is nearly direct. Near
+    // the circle the carrot's own circle is trimmed until the one flown is the
+    // one asked: a vehicle that follows the carrot at once flies the chord to
+    // it, inside (R cos 0.6 = 0.83 R), and one whose turn lags flies wider.
     const double lead = distance > 2.0 * radius_ ? 0.15 : 0.6;
-    const double aim = theta + (clockwise_ ? lead : -lead);
+    if (std::abs(distance - radius_) < 0.3 * radius_ && ctx.dt > 0.0) {
+        const double lapS = 2.0 * units::kPi * radius_ / std::max(std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]), 1.0);
+        trim_ = std::clamp(trim_ + (radius_ - distance) * ctx.dt / std::max(20.0, 0.25 * lapS), -0.3 * radius_, 0.4 * radius_);
+    }
+    const double aim = theta + (clockwise_ ? lead : -lead), carrot = radius_ + trim_;
     PositionCommand out;
-    geo::offsetLatLon(cLat, cLon, radius_ * std::cos(aim), radius_ * std::sin(aim), out.latitudeRad, out.longitudeRad);
+    geo::offsetLatLon(cLat, cLon, carrot * std::cos(aim), carrot * std::sin(aim), out.latitudeRad, out.longitudeRad);
     out.altitudeMslM = altitude_;
     out.airspeedMs = airspeed_;
     out.captureRadiusM = 30.0;
@@ -620,7 +639,11 @@ Command PursuitBehavior::update(const ControlContext& ctx, const Command&) {
 void EvadeBehavior::start(const ControlContext& ctx, const BehaviorCommand& command) {
     target_ = command.target;
     altitude_ = ctx.sensed.altitudeMslM + command.param("altitude_delta_m", -300.0);
-    airspeed_ = command.param("airspeed_ms", ctx.sensed.airspeedTrueMs);
+    // left out: the airspeed it has; a rotorcraft's at least its cruise (hovering, it has none to flee at)
+    double airspeed = ctx.sensed.airspeedTrueMs;
+    if ((ctx.features & kFeatureHover) != 0 && ctx.performance && std::isfinite(ctx.performance->cruiseTasMs))
+        airspeed = std::max(airspeed, ctx.performance->cruiseTasMs);
+    airspeed_ = command.param("airspeed_ms", airspeed);
     // the floor: never lower over the terrain than floor_agl_m, nor than it started when that was lower
     floorAglM_ = std::min(command.param("floor_agl_m", 150.0), std::max(ctx.sensed.altitudeAglM, 0.0));
     floored_ = false;
@@ -639,12 +662,20 @@ Command EvadeBehavior::update(const ControlContext& ctx, const Command&) {
     return out;
 }
 
-void FormationBehavior::start(const ControlContext&, const BehaviorCommand& command) {
+void FormationBehavior::start(const ControlContext& ctx, const BehaviorCommand& command) {
     target_ = command.target;
     ahead_ = command.param("ahead_m", -100.0);
     right_ = command.param("right_m", 60.0);
     below_ = command.param("below_m", 0.0);
-    closureGain_ = command.param("closure_gain", 0.1);
+    hovers_ = (ctx.features & kFeatureHover) != 0;
+    // what its closing is designed for, as pursuit's: a deceleration it can keep up and its speed loop's lag
+    decelMs2_ = 0.25, lagS_ = 10.0;
+    if (const Performance* perf = ctx.performance) {
+        if (std::isfinite(perf->maxDecelerationMs2) && perf->maxDecelerationMs2 > 0.0) decelMs2_ = 0.5 * perf->maxDecelerationMs2;
+        if (std::isfinite(perf->velocityBandwidthRadS) && perf->velocityBandwidthRadS > 0.0) lagS_ = 1.0 / perf->velocityBandwidthRadS;
+    }
+    // left out: half its speed loop's bandwidth, a closing its speed follows without overshoot (a wing's 0.05/s)
+    closureGain_ = command.param("closure_gain", 0.5 / lagS_);
 }
 
 Command FormationBehavior::update(const ControlContext& ctx, const Command&) {
@@ -654,7 +685,8 @@ Command FormationBehavior::update(const ControlContext& ctx, const Command&) {
     VelocityCommand out;
     if (!t) {
         out.headingRad = s.eulerRad[2];
-        out.airspeedMs = s.airspeedTrueMs;
+        if (hovers_) out.northMs = out.eastMs = 0.0;
+        else out.airspeedMs = s.airspeedTrueMs;
         return out;
     }
     const double psi = t->eulerRad[2];
@@ -665,13 +697,30 @@ Command FormationBehavior::update(const ControlContext& ctx, const Command&) {
     double meNorth, meEast;
     geo::localNorthEastM(t->latitudeRad, t->longitudeRad, s.latitudeRad, s.longitudeRad, meNorth, meEast);
     const double errNorth = slotNorth - meNorth, errEast = slotEast - meEast;
-    const double along = errNorth * cs + errEast * sn;   // + = slot is ahead of me
-    const double cross = -errNorth * sn + errEast * cs;  // + = slot is to my right
-    const double leaderSpeed = std::hypot(t->velocityNedMs[0], t->velocityNedMs[1]);
-    out.headingRad = psi + std::clamp(0.01 * cross, -0.6, 0.6);
-    out.airspeedMs = std::clamp(leaderSpeed + closureGain_ * along, 0.5 * leaderSpeed, 1.5 * leaderSpeed + 5.0);
+    // closing on the slot no faster than it could stop closing there: after its speed loop's lag, at the
+    // deceleration it is designed for (lag v + v^2 / 2a = distance), and at its gain nearer
+    auto closing = [&](double distance) {
+        return std::min(closureGain_ * distance, decelMs2_ * (std::sqrt(lagS_ * lagS_ + 2.0 * distance / decelMs2_) - lagS_));
+    };
     const double slotAltitude = t->altitudeMslM - below_;
     out.verticalSpeedMs = std::clamp(0.3 * (slotAltitude - s.altitudeMslM) - t->velocityNedMs[2], -8.0, 8.0);
+    if (hovers_) { // over the ground: the leader's velocity and a closing one straight to the slot, facing as the leader does
+        const double distance = std::hypot(errNorth, errEast);
+        const double speed = distance > 1e-6 ? closing(distance) / distance : 0.0;
+        out.northMs = t->velocityNedMs[0] + speed * errNorth;
+        out.eastMs = t->velocityNedMs[1] + speed * errEast;
+        out.headingRad = psi;
+        return out;
+    }
+    const double along = errNorth * cs + errEast * sn;  // + = slot is ahead of me
+    const double cross = -errNorth * sn + errEast * cs; // + = slot is to my right
+    // along: the leader's airspeed (the same air), and the closing; across: onto the slot's line along a
+    // look-ahead its heading loop follows, as a route's legs are flown
+    const double leaderTas = t->airspeedTrueMs > 1.0 ? t->airspeedTrueMs : std::hypot(t->velocityNedMs[0], t->velocityNedMs[1]);
+    out.airspeedMs = std::clamp(leaderTas + std::copysign(closing(std::abs(along)), along), 0.5 * leaderTas, 1.5 * leaderTas + 5.0);
+    const double bandwidth = ctx.performance ? ctx.performance->courseBandwidthRadS(s.airspeedTrueMs) : 0.2;
+    const double lookahead = std::max(3.0 * std::max(s.airspeedTrueMs, 1.0) / bandwidth, 50.0);
+    out.headingRad = psi + std::clamp(std::atan(cross / lookahead), -0.6, 0.6);
     return out;
 }
 
@@ -842,7 +891,7 @@ void registerBuiltinControllers(ControllerRegistry& r) {
                   traits(Persistence::Persistent, {p("altitude_delta_m", "m", -300.0), p("airspeed_ms", "m/s", now, 0.0), p("floor_agl_m", "m", 150.0, 0.0)},
                          {velocity}, true));
     auto formation = traits(Persistence::Persistent,
-                            {p("ahead_m", "m", -100.0), p("right_m", "m", 60.0), p("below_m", "m", 0.0), p("closure_gain", "1/s", 0.1, 0.0)},
+                            {p("ahead_m", "m", -100.0), p("right_m", "m", 60.0), p("below_m", "m", 0.0), p("closure_gain", "1/s", now, 0.0)},
                             {velocity}, true);
     formation.mode = FlightMode::Formation; // A-GRA's FORMATION: a slot on a leader
     r.addBehavior("formation", [] { return std::make_unique<FormationBehavior>(); }, std::move(formation));

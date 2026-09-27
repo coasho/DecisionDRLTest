@@ -685,7 +685,12 @@ following - quintic Bézier segments flown within a speed range or in a given ti
 and section checked - on the same follower, which now turns a wing at the heading rate that holds its track in the
 wind; the seventh, grants over the priorities - a vehicle whose policy commands only what it holds a grant for,
 requests, releases, revocations, the platform's restrictions and a revision to poll - and the vehicle's performance
-in the SDK, computed afresh when its loops change.
+in the SDK, computed afresh when its loops change. Then that interface's Flight Autonomy was audited item by item and
+the owner decided to complete it natively on every aircraft it applies to (ADR-29, [flight-autonomy.md](flight-autonomy.md)).
+Its first stage (2026-09-27) made discovery tell the truth - every public feature supported, partial, not implemented or,
+with the aircraft's own declaration and source, not supported, and availability and flight phases apart - fixed the
+platform's own behaviours where they failed, and added a fleet acceptance test that flies every capability each of the
+35 aircraft advertises.
 M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |

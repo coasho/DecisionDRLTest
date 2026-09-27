@@ -51,7 +51,9 @@ double Performance::courseBandwidthRadS(double tasMs) const noexcept {
 
 double Performance::turnRadiusM(double speedMs) const noexcept {
     const double v2 = speedMs * speedMs;
-    if (hovers) return v2 / std::max(0.8 * known(maxAccelerationMs2, kG * std::tan(0.35)), 0.1);
+    // a rotorcraft's: at 80 % of its acceleration, and no tighter than its velocity loop follows - a turn
+    // rate a third of its bandwidth, the look-ahead a path is flown with (route::follow)
+    if (hovers) return std::max(v2 / std::max(0.8 * known(maxAccelerationMs2, kG * std::tan(0.35)), 0.1), 3.0 * std::abs(speedMs) / courseBandwidthRadS(speedMs));
     const double bank = 0.8 * known(maxBankRad, 0.52);
     return v2 / (kG * std::tan(std::max(bank, 0.05)));
 }

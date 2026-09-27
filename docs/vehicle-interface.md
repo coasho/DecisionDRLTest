@@ -199,7 +199,7 @@ struct PatternCommand {                // fsim.guidance.pattern
   - the inbound course the arrival's: the way to the fix when the hold starts, or the track if the aircraft is at the fix;
   - rate-one turns: 3°/s, or 25° of bank if that is less steep, at the speed plus the wind;
   - legs of a minute's flight, 90 s above 14,000 ft.
-- **Defaults** for the other patterns: here, the altitude and speed the aircraft flies now (a rotorcraft's speed its cruise over the ground), right turns, its track now, and the radius its speed plus the wind and 80 % of its bank give. A racetrack's legs are twice its radius. The host fills them in at NEW, as for an hsa, so the slot holds a complete pattern.
+- **Defaults** for the other patterns: here, the altitude and speed the aircraft flies now (a rotorcraft's speed its cruise over the ground), right turns, its track now, and the radius its speed plus the wind and 80 % of its bank give (a rotorcraft's: 80 % of its acceleration, and a turn rate no more than a third of its velocity loop's bandwidth). A racetrack's legs are twice its radius. The host fills them in at NEW, as for an hsa, so the slot holds a complete pattern.
 - **Radius:** a rotorcraft's minimum is 1 m. A wing's is its turn radius at its speed and full bank: a smaller radius is clamped, flagged, or refused under `RangePolicy::Reject` (`PerformanceLimit`, `MaxOrientation`).
 - **UPDATE** merges the fields given, as an hsa's does; the pattern they make is flown afresh, and a duration still counts from the NEW.
 - **Duration:** the activity completes when it has passed, and the aircraft flies on in the pattern.

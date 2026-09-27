@@ -603,6 +603,11 @@
           </traverse>
           <output>fcs/flap-pos-deg</output>
         </kinematic>
+        <pure_gain name="fcs/flaps-normalized">
+          <input>fcs/flap-pos-deg</input>
+          <gain>0.0285714</gain>
+          <output>fcs/flap-pos-norm</output>
+        </pure_gain>
       </channel>
       <channel name="Propeller Governor 0">
         <!-- AE 2100D3 inboard L: the propeller governed at 1020 rpm. JSBSim's turboprop drops

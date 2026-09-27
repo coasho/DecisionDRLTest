@@ -174,7 +174,10 @@ double braking(const Performance& f) noexcept { return 0.8 * known(f.maxDecelera
 
 } // namespace
 
-double lateralLimit(const Performance& performance, double radiusM) noexcept { return std::sqrt(lateralAcceleration(performance) * radiusM); }
+double lateralLimit(const Performance& performance, double radiusM) noexcept {
+    // round the radius at 80 % of its acceleration, and at a turn rate its velocity loop follows (Performance::turnRadiusM)
+    return std::min(std::sqrt(lateralAcceleration(performance) * radiusM), radiusM * performance.courseBandwidthRadS(0.0) / 3.0);
+}
 
 double brakingLimit(const Performance& performance, double speedAfterMs, double toGoM) noexcept {
     return std::sqrt(speedAfterMs * speedAfterMs + 2.0 * braking(performance) * std::max(toGoM, 0.0));

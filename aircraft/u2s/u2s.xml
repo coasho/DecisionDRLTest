@@ -456,6 +456,11 @@
           </traverse>
           <output>fcs/flap-pos-deg</output>
         </kinematic>
+        <pure_gain name="fcs/flaps-normalized">
+          <input>fcs/flap-pos-deg</input>
+          <gain>0.0285714</gain>
+          <output>fcs/flap-pos-norm</output>
+        </pure_gain>
       </channel>
       <channel name="Landing Gear">
         <kinematic name="fcs/gear-control">

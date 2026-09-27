@@ -461,7 +461,8 @@ struct Performance {
     /// at), a rotorcraft's velocity loop. A guess of 0.2 where neither is known.
     double courseBandwidthRadS(double tasMs) const noexcept;
     /// The radius of a turn at ground speed `speedMs` with the bank or tilt
-    /// guidance may use (80 % of the most), m.
+    /// guidance may use (80 % of the most), m; a rotorcraft's no tighter than
+    /// its velocity loop follows (a turn rate a third of its bandwidth).
     double turnRadiusM(double speedMs) const noexcept;
 };
 

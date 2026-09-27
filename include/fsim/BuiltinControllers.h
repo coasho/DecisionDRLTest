@@ -262,7 +262,8 @@ private:
 
 /// "hold": keep the altitude, heading and airspeed at the moment it started.
 /// An aircraft that hovers keeps its velocity over the ground instead (a
-/// hover stays put in wind), unless it is given an airspeed.
+/// hover stays put in wind), unless it is given an airspeed. It flies to its
+/// altitude at the aircraft's own position loop gain and vertical speeds.
 class FSIM_API HoldBehavior final : public Behavior {
 public:
     const char* id() const noexcept override { return "hold"; }
@@ -274,6 +275,7 @@ public:
 private:
     VelocityCommand target_;
     double altitude_ = 0.0;
+    bool hovers_ = false;
 };
 
 /// "waypoints": fly `points` in order; params: loop (0/1). Finished after the last capture.
@@ -312,8 +314,8 @@ private:
 /// radius_m (at least 100 m for a wing, 1 m for an aircraft that hovers;
 /// left out, 1500 m, or wider where the aircraft's turn needs it: 1.25 times
 /// the circle its bank and heading loop hold at its speed), altitude_m
-/// (current), clockwise (1), airspeed_ms (a wing's as it was, a rotorcraft's
-/// its position loop's).
+/// (current), clockwise (1), airspeed_ms (a wing's as it was; a rotorcraft's
+/// its cruise, no faster than it follows the circle: route::lateralLimit).
 class FSIM_API LoiterBehavior final : public Behavior {
 public:
     const char* id() const noexcept override { return "loiter"; }
@@ -333,6 +335,7 @@ private:
     bool clockwise_ = true;
     std::uint32_t target_ = 0;
     double lastTheta_ = kHold, swept_ = 0.0, distance_ = kHold; ///< for progress(): the angle swept round the centre
+    double trim_ = 0.0; ///< added to the carrot's circle until the one flown is radius_
 };
 
 /// "pursuit": chase `target` with lead pursuit to a point range_m (300)
@@ -360,7 +363,8 @@ private:
 };
 
 /// "evade": fly away from `target`, descending or climbing. params:
-/// altitude_delta_m (-300), airspeed_ms (hold), floor_agl_m (150): it never
+/// altitude_delta_m (-300), airspeed_ms (hold; a rotorcraft's at least its
+/// cruise), floor_agl_m (150): it never
 /// descends below the floor above the terrain under it (nor below the
 /// height it started at, when that is lower), and says so while the floor
 /// holds its descent (kActivityClamped).
@@ -381,7 +385,13 @@ private:
 };
 
 /// "formation": hold a slot relative to `target` (leader). params: ahead_m,
-/// right_m, below_m (in the leader's heading frame).
+/// right_m, below_m (in the leader's heading frame), closure_gain (1/s; left
+/// out, half its speed loop's bandwidth: a wing's 0.05). It closes on the slot
+/// no faster than it could stop closing there, as pursuit does; a wing flies
+/// the leader's airspeed plus that closing and joins the slot's line along a
+/// look-ahead its heading loop follows (as a route's legs are flown); a
+/// rotorcraft flies the leader's velocity over the ground plus the closing,
+/// straight to the slot, facing as the leader does.
 class FSIM_API FormationBehavior final : public Behavior {
 public:
     const char* id() const noexcept override { return "formation"; }
@@ -392,10 +402,10 @@ public:
     Reason failure() const noexcept override { return lost_ ? Reason::TargetLost : Reason::None; }
 
 private:
-    bool lost_ = false;
+    bool lost_ = false, hovers_ = false;
     std::uint32_t target_ = 0;
     double ahead_ = -100.0, right_ = 60.0, below_ = 0.0;
-    double closureGain_ = 0.1;
+    double closureGain_ = 0.05, decelMs2_ = 0.25, lagS_ = 10.0;
 };
 
 /// "aerobatics": a manoeuvre flown open-loop through the acceleration level.
