@@ -4,7 +4,8 @@
 #        thrust = motorConstant w^2, torque = momentConstant thrust, the speed's lags up and down,
 #        the maximum speed, the rotor drag -w c v and the rolling moment.
 #   3DR  IRIS+ specifications as retailers list them (Adafruit, product 2199): 1,282 g with a
-#        400 g payload - PX4's 1.5 kg is the aircraft carrying 218 g of it.
+#        400 g payload - PX4's 1.5 kg is the aircraft carrying 218 g of it; a 3S 5.1 Ah lithium
+#        polymer battery; an average flight time of 16-22 minutes.
 # SI units. Frame: x forward, y left, z up (the sources'), from the c.g.
 
 [aircraft]
@@ -18,6 +19,13 @@ mass_kg = 1.5                      # PX4
 ixx = 0.029125                     # kg m2, PX4
 iyy = 0.029125
 izz = 0.055225
+
+[battery]
+# 3S 5.1 Ah (3DR) at 3.7 V a cell: 56.6 Wh. Its flight time (3DR) is 22 min at its own 1,282 g and 16 min with
+# its 400 g payload: at PX4's 1.5 kg, 18.7 min, taken as a hover's - the power it draws there, 181.6 W,
+# and the rotors' physics (their power as their speed cubed) away from it
+capacity_wh = 56.61
+hover_endurance_min = 18.7
 
 [rotors]
 radius_m = 0.128                   # PX4 (10 in propellers)

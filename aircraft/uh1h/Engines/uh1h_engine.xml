@@ -1,6 +1,8 @@
 <?xml version="1.0"?>
 <!-- the engines as one governed power source: the flight control system meters it
-     (fcs/throttle-pos-norm[0] = shaft power / the design's limit, 1100 shp) -->
+     (fcs/throttle-pos-norm[0] = shaft power / the design's limit, 1100 shp); it burns its specific fuel
+     consumption times the power it gives (JSBSim patched: cmake/JsbsimPatches.cmake) -->
 <electric_engine name="uh1h engine">
   <power unit="WATTS"> 820270 </power>
+  <bsfc unit="LBS/HP*HR"> 0.623 </bsfc>
 </electric_engine>

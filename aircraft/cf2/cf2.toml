@@ -9,6 +9,7 @@
 #   GPD  gym-pybullet-drones (Panerati et al., MIT licence), assets/cf2x.urdf - the rotor drag and
 #        the ground effect, the rotors' layout and turning senses.
 #   DS   Bitcraze, "Datasheet Crazyflie 2.1", rev. 3 - 27 g (the 2.1: 29 g).
+#   BC   Bitcraze store, "Crazyflie 2.0": one 240 mAh LiPo, a 7 minute flight time on it, 27 g.
 # SI units. Frame: x forward, y left, z up (the sources'), from the c.g.
 
 [aircraft]
@@ -22,6 +23,12 @@ mass_kg = 0.027                    # LN, DS
 ixx = 1.395e-5                     # kg m2, LN
 iyy = 1.436e-5
 izz = 2.173e-5
+
+[battery]
+# one 240 mAh LiPo cell (BC) at 3.7 V: 0.888 Wh. Its 7 minute flight time (BC), taken as a hover's - the
+# power it draws there, 7.6 W, and the rotors' physics (their power as their speed cubed) away from it
+capacity_wh = 0.888
+hover_endurance_min = 7.0
 
 [rotors]
 arm_m = 0.03973                    # centre to rotor, LN (d); the rotors sit on the diagonals

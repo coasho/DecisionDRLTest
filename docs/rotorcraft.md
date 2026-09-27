@@ -168,6 +168,25 @@ platform.
   (GND_EFF_H_CLIP = r/4 sqrt(15 k_ge/4)), so the gain is never over 4/15.
   Each stands on its feet (JSBSim BOGEY contacts) and, turned over, on its
   rotors' hubs and its top (STRUCTURE contacts).
+- **Energy on board** (ADR-29 FA-3b):
+  - **The helicopters' fuel.** Each carries a tank at the c.g., full as it
+    spawns and part of the design's weight, so it spawns as its report flies
+    it. The UH-60A's two tanks hold 360 gal, 2,340 lb (its operator's
+    manual); the UH-1H's cells hold 1,400 lb. The engine burns its specific
+    fuel consumption times the power it gives: the UH-60A's 1/K_E, 0.571 lb
+    per shp-h (TM-85890 table 3), and the UH-1H's 0.623, a T53's on a UH-1B.
+    Burning it takes JSBSim's electric engine patched (`cmake/JsbsimPatches.cmake`,
+    noted in THIRD_PARTY_NOTICES). Once the tank is empty the engine gives no
+    power and the rotor is left to the air.
+  - **The quadrotors' batteries.** A battery's capacity is the IRIS+'s 56.6
+    Wh or the Crazyflie 2.0's 0.888 Wh. The power it gives is the published
+    hover's - its capacity over its flight time, taken as a hover's: 181.6 W
+    and 7.6 W - scaled by the rotors' speed cubed. The charge falls with it,
+    and once it is spent the motors stop: the IRIS+ after 18.7 minutes'
+    hover, the Crazyflie after 7. Until then a flight is the same, bit for
+    bit, as without the battery.
+  - hangar's flight tests fly with the fuel frozen, so a helicopter's hover is
+    identified at the weight its design names.
 - **Limitations** of the models are in section 7.
 
 ### 3.2 What the controls mean: families and adapters
@@ -458,6 +477,10 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
   what the platform's fixed 120 Hz step can integrate; the platform reports
   the divergence (`VehicleState::diverged`). A gentler tumble comes to rest on
   its back, rocking a few degrees on its top contacts.
+- **A spent battery**: a quadrotor whose battery is spent falls, and strikes
+  the ground at 40 to 50 m/s from a few hundred metres. There its legs'
+  contacts throw the IRIS+ back up, and the Crazyflie diverges: a crash the
+  contact model does not end.
 - **Spawning**: a rotorcraft spawned level at zero airspeed lurches until its
   loops take its hover attitude (the UH-1H lurches 0.7 m/s forward and still
   moves at 0.3 m/s after 20 s). To start in trim, spawn it at its profile's hover attitude
@@ -502,6 +525,12 @@ Flight data:
 - P. D. Talbot, B. E. Tinling, W. A. Decker, R. T. N. Chen, *A Mathematical Model of a Single Main Rotor Helicopter for Piloted Simulation*, NASA TM-84281, 1982.
 - K. B. Hilbert, *A Mathematical Model of the UH-60 Helicopter*, NASA TM-85890, 1984.
 - US Army TM 1-1520-237-10, ch. 5 limits (UH-60 Vne 193 kt), as transcribed at oocities.org/ericdurb/limits.htm.
+- Energy on board (ADR-29 FA-3b):
+  - the UH-60A's two crashworthy tanks, 360 US gal (TM 1-1520-237-10, the UH-60A/L operator's manual);
+  - the UH-1H's cells full at 1,400 lb (uh1ops.com, "UH-1D/H/V Fuel System", after TM 55-1520-210-23-2);
+  - a T53's 514 lb/h at 75 % of its 1,100 shp on a UH-1B (AOPA Pilot, March 2014, "The Bell UH-1B Huey");
+  - the IRIS+'s 3S 5.1 Ah battery and 16 to 22 minutes' flight (as listed by Adafruit, product 2199);
+  - the Crazyflie 2.0's 240 mAh LiPo and 7 minutes' flight (Bitcraze store, "Crazyflie 2.0").
 
 Drawings and shapes (viewed in a browser and measured; nothing stored):
 - US Army TM 55-1520-210-10 (UH-1H operator's manual), principal dimensions, p. 29 - Wikimedia Commons "Bell UH-1H Iroquois 3-view line drawing.png", public domain.

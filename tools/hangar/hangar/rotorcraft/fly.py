@@ -97,6 +97,9 @@ class Session:
         self.v = self.world.create_vehicle("r%d" % self.n, type="jsbsim:" + self.r.name, latitude_deg=37.6, longitude_deg=-122.4,
                                            altitude_msl_m=self.altitude_m, heading_deg=0.0, airspeed_ms=speed_ms)
         self.v.set_protection("off")  # the aircraft, not the platform's envelope protection (flight.Flight)
+        # the fuel frozen: each test flies the weight the design names, as its hover section says it was identified at
+        # (a helicopter burns 1,000 lb/h: a trim's minute would lighten it 0.1 %)
+        self.v.set_property("propulsion/fuel_freeze", 1)
         return self.v
 
     @staticmethod

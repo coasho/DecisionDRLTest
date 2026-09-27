@@ -1216,7 +1216,18 @@ fsim python examples\...              any SDK script flies jsbsim:uh60 like any 
 The design file carries the flight data - `[mass]`, `[rotor.main]` and
 `[rotor.tail]` or `[rotors]`, `[engine]`, `[controls]`, `[airframe]`,
 `[ground]`, `[envelope]`, `[targets]` - each number with its source; the four
-in `aircraft\` are the examples. Its shape is drawn as a fixed wing's is:
+in `aircraft\` are the examples. The energy on board (ADR-29 FA-3b):
+
+- **A helicopter's fuel.** `[fuel] capacity_lb` is the tank, full as it
+  spawns and part of `[mass] weight_lb`, at the c.g. `[engine]
+  sfc_lb_per_shp_h` is the fuel the engines burn per shaft
+  horsepower-hour. Empty, the engines give no power.
+- **A multirotor's battery.** `[battery] capacity_wh` is its energy, and
+  `hover_endurance_min` is the published flight time, taken as a hover's.
+  The power it draws is that hover's, scaled by the rotors' speed cubed.
+  Spent, the motors stop.
+
+A rotorcraft's shape is drawn as a fixed wing's is:
 `[[body]]`, `[[surface]]` (a control on one moves: the UH-60A's stabilator
 follows the simulation's), `[[strut]]`, `[[gear]]` (wheels roll, oleos slide
 with the simulation's gear), measured from a three-view, with `paint.toml`

@@ -5,6 +5,9 @@
 #   CP   D. A. Boxwell, Y. H. Yu, F. H. Schmitz, "Hovering Impulsive Noise: Some Measured and
 #        Calculated Results", NASA CP-2052, 1978 - the blade's twist.
 #   T53  the T53-L-13B's 1,400 shp, limited to 1,100 by the power train (aircav.com, "T53-L-13").
+#   FUEL the crashworthy cells full, as the gauge reads (uh1ops.com, "UH-1D/H/V Fuel System", after
+#        TM 55-1520-210-23-2); a T53's fuel flow on a Huey (AOPA Pilot, March 2014, "The Bell UH-1B
+#        Huey": 514 lb/h at 75 % of its T53-L-11's 1,100 shp).
 # Every number is the source's unless the note says otherwise. The report gives English units;
 # they are kept. Frame: its stations (in, aft), butt lines (in, right), water lines (in, up).
 # Senses here, whatever the report's: stick + forward and + right, pedal + right, collective +
@@ -72,6 +75,12 @@ power_shp = 1100.0                 # T53
 # fractions of the power limit per rad/s of rotor speed error: a design choice (the report flies a
 # constant rpm); the rotors' load is fed forward, so the rpm holds unless the power runs out
 governor = { kp = 0.295, ki = 0.295, kd = 0.0, lag_s = 0.0 }
+sfc_lb_per_shp_h = 0.623           # FUEL: 514 lb/h at 825 shp, the nearest a T53 has published on a Huey
+
+[fuel]
+# the cells full, 1,400 lb (FUEL): full as it spawns, their fuel part of the weight above (the airframe
+# the rest), at the c.g. - so the aircraft spawns as TM flies it
+capacity_lb = 1400.0
 
 [controls]
 travel_in = { lateral = 12.6, longitudinal = 12.9, pedal = 6.9, collective = 11.0 }   # table 2, full throw

@@ -128,6 +128,7 @@ if(TARGET flightsim-viewer)
     install(FILES ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/FGLGear.cpp
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGRotor.h
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGRotor.cpp
+                  ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGElectric.cpp
                   ${CMAKE_SOURCE_DIR}/cmake/JsbsimPatches.cmake
             DESTINATION share/doc/flightsim/jsbsim-changes COMPONENT viewer)
 endif()

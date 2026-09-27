@@ -5,6 +5,11 @@ Each motor's speed is a state of the flight control system, w' = (w_cmd - w)/tau
 design's lags up and down; its thrust k_T w^2 is a JSBSim direct thruster's (an electric engine,
 whose thrust is its power in ft lb/s, metered by fcs/throttle-pos-norm[i] = thrust / maximum);
 the reaction torques k_Q w^2, the rotor drag and the ground effect are aerodynamic functions.
+The battery ([battery] capacity_wh, hover_endurance_min): the power it gives is the published hover's
+(its capacity over its flight time, taken as a hover's) scaled by the rotors' physics - a rotor's
+power grows as its speed cubed - integrated into the energy used (fsim/battery/used-j), the charge
+left (fsim/battery/charge-j, of fsim/battery/capacity-j); the motors stop once it is spent
+(fsim/battery/supply, exactly 1 until then: a flight is the same bit for bit before).
 The command: each motor's thrust (0..1 of its maximum; throttle[i]), roll, pitch and yaw mixed in
 (aileron + right, elevator + nose down, rudder + nose left), so a policy flies the motors directly
 or through the mixer. The speed each motor commands is sqrt(thrust): the thrust is linear in the
@@ -77,6 +82,12 @@ def write(spec, out_dir, profile_xml=""):
 """ % (_f(t_max), name, _f(t_max / N_PER_LBF * 745.7 / 550.0)))
     with open(os.path.join(out_dir, "Engines", name + "_rotor.xml"), "w", encoding="utf-8", newline="\n") as f:
         f.write('<?xml version="1.0"?>\n<direct name="%s rotor"/>\n' % name)
+    battery = spec.get("battery")
+    if battery:
+        # the hover's power (its capacity over its flight time, taken as a hover's), at each rotor's hover speed
+        capacity_j = float(battery["capacity_wh"]) * 3600.0
+        p_hover = capacity_j / (float(battery["hover_endurance_min"]) * 60.0)
+        w_hover = math.sqrt(weight / len(rows) / kT)
     engines, motors, yaw, speeds = [], [], [], []
     for i, (label, xf, yl, sense) in enumerate(rows):
         x_in, y_in, z_in = -xf / 0.0254, -yl / 0.0254, r.get("height_m", 0.0) / 0.0254
@@ -91,12 +102,12 @@ def write(spec, out_dir, profile_xml=""):
         mix = dict(r=MIX if yl > 0 else -MIX, p=MIX if xf < 0 else -MIX, y=MIX if sense < 0 else -MIX)
         motors.append("""      <!-- motor %(i)d: %(label)s, %(dir)s -->
       <fcs_function name="fcs/%(n)s/cmd[%(i)d]">
-        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+        <function> %(sup_open)s<max> <value> 0 </value> <min> <value> 1 </value> <sum>
           <property> fcs/throttle-cmd-norm[%(i)d] </property>
           <product> <value> %(r)s </value> <property> fcs/aileron-cmd-norm </property> </product>
           <product> <value> %(p)s </value> <property> fcs/elevator-cmd-norm </property> </product>
           <product> <value> %(y)s </value> <property> fcs/rudder-cmd-norm </property> </product>
-        </sum> </min> </max> </function>
+        </sum> </min> </max>%(sup_close)s </function>
       </fcs_function>
       <fcs_function name="fcs/%(n)s/omega-cmd[%(i)d]">
         <function> <product> <value> %(wmax)s </value> <sqrt> <property> fcs/%(n)s/cmd[%(i)d] </property> </sqrt> </product> </function>
@@ -115,7 +126,9 @@ def write(spec, out_dir, profile_xml=""):
         <output> propulsion/engine[%(i)d]/rotor-rpm </output>
       </fcs_function>
 """ % dict(mix, i=i, n=name, label=label, dir="counter-clockwise" if sense > 0 else "clockwise", wmax=_f(wmax),
-           cu=_f(1 / r["lag_up_s"]), cd=_f(1 / r["lag_down_s"]), rpmk=_f(RPM_PER_RADS)))
+           cu=_f(1 / r["lag_up_s"]), cd=_f(1 / r["lag_down_s"]), rpmk=_f(RPM_PER_RADS),
+           sup_open="<product> <property> fsim/battery/supply </property> " if battery else "",
+           sup_close=" </product>" if battery else ""))
         # a counter-clockwise rotor's reaction turns the airframe clockwise: nose right, + N
         yaw.append("<product> <value> %s </value> <pow> <property> fcs/%s/omega[%d] </property> <value> 2 </value> </pow> </product>"
                    % (_f(sense * kQ / (N_PER_LBF * M_PER_FT)), name, i))
@@ -203,7 +216,7 @@ def write(spec, out_dir, profile_xml=""):
 %(engines)s
   </propulsion>
   <flight_control name="%(n)s mixer and motors">
-%(profile)s    <channel name="motors">
+%(profile)s%(battery)s    <channel name="motors">
 %(motors)s    </channel>
   </flight_control>
   <aerodynamics>
@@ -218,6 +231,25 @@ def write(spec, out_dir, profile_xml=""):
 """ % dict(n=name, desc=spec["aircraft"]["description"], refs=references_xml(spec, "    "), area=_f(math.pi * (span_ft / 2) ** 2), span=_f(span_ft),
            ixx=_f(m["ixx"] / kgm2), iyy=_f(m["iyy"] / kgm2), izz=_f(m["izz"] / kgm2), w=_f(m["mass_kg"] * LB_PER_KG),
            legs="\n".join(legs), engines="\n".join(engines), profile=profile_xml, motors="".join(motors),
+           battery=("""    <property value="%(cap)s">fsim/battery/capacity-j</property>
+    <channel name="battery">
+      <!-- the power the battery gives: the hover's (%(ph)s W) as the rotors' speed cubed over their hover
+           speed's (%(wh)s rad/s); the energy used, the charge left, the motors' supply while there is some -->
+      <fcs_function name="fsim/battery/power-w">
+        <function> <product> <value> %(k)s </value> <sum> %(w3)s </sum> </product> </function>
+      </fcs_function>
+      <integrator name="fsim/battery/used-j"> <input> fsim/battery/power-w </input> <c1> 1 </c1> </integrator>
+      <fcs_function name="fsim/battery/charge-j">
+        <function> <max> <value> 0 </value> <difference> <property> fsim/battery/capacity-j </property>
+          <property> fsim/battery/used-j </property> </difference> </max> </function>
+      </fcs_function>
+      <fcs_function name="fsim/battery/supply">
+        <function> <gt> <property> fsim/battery/charge-j </property> <value> 0 </value> </gt> </function>
+      </fcs_function>
+    </channel>
+""" % dict(cap=_f(capacity_j), ph=_f(p_hover), wh=_f(w_hover), k=_f(p_hover / (len(rows) * w_hover ** 3)),
+           w3=" ".join("<pow> <property> fcs/%s/omega[%d] </property> <value> 3 </value> </pow>" % (name, i) for i in range(len(rows))))
+                    ) if battery else "",
            yaw=" ".join(yaw), drag=drag, ge=ground_effect)
     with open(os.path.join(out_dir, name + ".xml"), "w", encoding="utf-8", newline="\n") as f:
         f.write(xml)

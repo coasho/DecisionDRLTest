@@ -35,7 +35,7 @@ them locally; using them is subject to the providers' terms:
 ## Changes to JSBSim
 
 flightsim builds JSBSim 1.3.1 from the unmodified submodule in `third_party/jsbsim`, with
-two changes:
+three changes:
 
 - In `src/models/FGLGear.cpp`, the projection of a wheel's strut on the ground normal is
   bounded at 45 degrees. Upstream divides the wheel's compression and ground force by that
@@ -49,6 +49,11 @@ two changes:
   rotor's inflow and its ground-height filter before the first step (upstream's begin from
   nothing and settle over the first seconds). Past that start, a rotor that does not ask for
   the classical model flies as upstream's does.
+- In `src/models/propulsion/FGElectric.cpp`, an electric engine whose file gives a specific
+  fuel consumption (`<bsfc>`, as a piston engine's does) burns that times its power from the
+  tanks feeding it, and gives no power once they are empty (hangar's helicopters fly their
+  turboshafts as such a governed power source). An electric engine without one burns
+  nothing and runs as upstream's does.
 
 `cmake/JsbsimPatches.cmake` makes the changes: it writes the changed files into the build
 tree, with each edit marked "flightsim patch" (two files the rotor's header reaches,

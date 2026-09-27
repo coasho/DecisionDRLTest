@@ -15,6 +15,11 @@ fuselage and TM-84281's stabilizer and fin through 360 deg).
 Senses, the platform's: fcs/elevator-cmd-norm + nose down (stick forward), aileron + right,
 rudder + nose left (left pedal: JSBSim's, trailing edge left), throttle-cmd-norm the collective
 (every entry). The design file's stick is + forward and + right, its pedal + right.
+
+The fuel ([fuel] capacity_lb, [engine] sfc_lb_per_shp_h): a tank at the c.g., full as the aircraft
+spawns and part of its weight (so it spawns as its report flies it, the c.g. and inertia unmoved),
+feeding the engines, which burn their specific fuel consumption times the power they give
+(JSBSim's electric engine, patched: cmake/JsbsimPatches.cmake) and give none once it is empty.
 """
 import math
 import os
@@ -38,6 +43,15 @@ def _write(path, text):
 def _sum(terms):
     """JSBSim function terms added (a single term as it is: a one-term <sum> is a no-op it warns of)."""
     return terms[0] if len(terms) == 1 else "<sum> %s </sum>" % " ".join(terms)
+
+
+def fuel_of(spec):
+    """The design's fuel: {capacity_lb, sfc} - its tank's capacity (full as it spawns) and the engines'
+    specific fuel consumption (lb per shaft horsepower-hour) - or None without both."""
+    fuel, eng = spec.get("fuel", {}), spec.get("engine", {})
+    if "capacity_lb" not in fuel or "sfc_lb_per_shp_h" not in eng:
+        return None
+    return {"capacity_lb": float(fuel["capacity_lb"]), "sfc": float(eng["sfc_lb_per_shp_h"])}
 
 
 def rotor_data(spec):
@@ -70,13 +84,15 @@ def write(spec, out_dir, profile_xml=""):
     mr, tr, eng = spec["rotor"]["main"], spec["rotor"]["tail"], spec["engine"]
     p_max = eng["power_shp"] * HP
 
+    fuel = fuel_of(spec)
     _write(os.path.join(out_dir, "Engines", name + "_engine.xml"), """<?xml version="1.0"?>
 <!-- the engines as one governed power source: the flight control system meters it
-     (fcs/throttle-pos-norm[0] = shaft power / the design's limit, %.0f shp) -->
+     (fcs/throttle-pos-norm[0] = shaft power / the design's limit, %.0f shp)%s -->
 <electric_engine name="%s engine">
   <power unit="WATTS"> %.0f </power>
-</electric_engine>
-""" % (eng["power_shp"], name, eng["power_shp"] * W_PER_HP))
+%s</electric_engine>
+""" % (eng["power_shp"], "; it burns its specific fuel\n     consumption times the power it gives (JSBSim patched: cmake/JsbsimPatches.cmake)" if fuel else "",
+       name, eng["power_shp"] * W_PER_HP, ('  <bsfc unit="LBS/HP*HR"> %s </bsfc>\n' % _f(fuel["sfc"])) if fuel else ""))
     _write(os.path.join(out_dir, "Engines", name + "_tail_drive.xml"), """<?xml version="1.0"?>
 <!-- carries the tail rotor, which turns with the main rotor; the flight control system takes its power from the engine -->
 <electric_engine name="%s tail rotor drive">
@@ -183,7 +199,7 @@ def write(spec, out_dir, profile_xml=""):
     <iyy unit="SLUG*FT2"> %(iyy)s </iyy>
     <izz unit="SLUG*FT2"> %(izz)s </izz>
     <ixz unit="SLUG*FT2"> %(ixz)s </ixz>
-    <emptywt unit="LBS"> %(w)s </emptywt>
+    <emptywt unit="LBS"> %(empty)s </emptywt>
     <location name="CG" unit="IN"> <x> %(cgx)s </x> <y> %(cgy)s </y> <z> %(cgz)s </z> </location>
   </mass_balance>
   <ground_reactions>
@@ -191,7 +207,7 @@ def write(spec, out_dir, profile_xml=""):
   </ground_reactions>
   <propulsion>
     <engine file="%(n)s_engine">
-      <thruster file="%(n)s_rotor">
+%(feed)s      <thruster file="%(n)s_rotor">
         <location unit="IN"> <x> %(hx)s </x> <y> %(hy)s </y> <z> %(hz)s </z> </location>
         <orient unit="DEG"> <roll> 0 </roll> <pitch> %(mast)s </pitch> <yaw> 0 </yaw> </orient>
         <sense> %(sense)d </sense>
@@ -204,7 +220,7 @@ def write(spec, out_dir, profile_xml=""):
         <sense> 1 </sense>
       </thruster>
     </engine>
-  </propulsion>
+%(tank)s  </propulsion>
   <flight_control name="%(n)s">
 %(profile)s%(fcs)s  </flight_control>
   <aerodynamics>
@@ -212,7 +228,15 @@ def write(spec, out_dir, profile_xml=""):
 </fdm_config>
 """ % dict(n=name, desc=spec["aircraft"]["description"], refs=references_xml(spec, "    "), area=_f(math.pi * mr["radius_ft"] ** 2), span=_f(2 * mr["radius_ft"]),
            chord=_f(mr["chord_ft"]), cgx=_f(cg[0]), cgy=_f(cg[1]), cgz=_f(cg[2]), ixx=_f(m["ixx"]), iyy=_f(m["iyy"]),
-           izz=_f(m["izz"]), ixz=_f(m.get("ixz", 0.0)), w=_f(m["weight_lb"]), gear="\n".join(contacts),
+           izz=_f(m["izz"]), ixz=_f(m.get("ixz", 0.0)), empty=_f(m["weight_lb"] - (fuel["capacity_lb"] if fuel else 0.0)),
+           feed="        <feed>0</feed>\n" if fuel else "",
+           tank=("""    <tank type="FUEL">
+      <location unit="IN"> <x> %s </x> <y> %s </y> <z> %s </z> </location>
+      <capacity unit="LBS"> %s </capacity>
+      <contents unit="LBS"> %s </contents>
+    </tank>
+""" % (_f(cg[0]), _f(cg[1]), _f(cg[2]), _f(fuel["capacity_lb"]), _f(fuel["capacity_lb"]))) if fuel else "",
+           gear="\n".join(contacts),
            hx=_f(mr["hub_in"][0]), hy=_f(mr["hub_in"][1]), hz=_f(mr["hub_in"][2]), mast=_f(90.0 - mr.get("mast_tilt_deg", 0.0)),
            sense=1 if mr.get("sense", "ccw") == "ccw" else -1, tx=_f(tr["hub_in"][0]), ty=_f(tr["hub_in"][1]),
            tz=_f(tr["hub_in"][2]), cant=_f(tr.get("cant_deg", 0.0)), tyaw=tr_yaw, profile=profile_xml,
@@ -387,6 +411,14 @@ def _fcs(spec, rd, p_max):
 
 def _engine_channel(spec, rd, p_max, p):
     gov = spec["engine"].get("governor", {})
+    fuel = fuel_of(spec)
+    # with fuel, the power reaches the rotor only while the tank has some (1 exactly: a flight with fuel is the
+    # same bit for bit); empty, the engine is starved (JSBSim patched) and the rotor is left to the air
+    fed = ("""      <fcs_function name="%(p)sfed">
+        <function> <gt> <property> propulsion/total-fuel-lbs </property> <value> 0 </value> </gt> </function>
+      </fcs_function>
+""" % dict(p=p)) if fuel else ""
+    fed_term = (" <property> %sfed </property>" % p) if fuel else ""
     trk = rd["tr_omega"] / rd["omega"]
     lag = gov.get("lag_s", 0.0)
     governor_out = "%sgovernor" % p
@@ -432,9 +464,9 @@ def _engine_channel(spec, rd, p_max, p):
       </fcs_function>
       <pure_gain name="%(p)stail-drive-throttle"> <input> %(p)spower </input> <gain> 0 </gain>
         <output> fcs/throttle-pos-norm[1] </output> </pure_gain>
-      <fcs_function name="%(p)snet-torque">
+%(fed)s      <fcs_function name="%(p)snet-torque">
         <function> <product> <property> %(p)sarmed </property> <difference>
-          <quotient> <product> <property> %(p)spower </property> <value> %(pmax)s </value> </product>
+          <quotient> <product> <property> %(p)spower </property> <value> %(pmax)s </value>%(fed_term)s </product>
             <max> <value> 1 </value> <property> %(p)somega </property> </max> </quotient>
           <sum> <property> propulsion/engine[0]/torque-lbsft </property>
             <product> <property> propulsion/engine[1]/torque-lbsft </property> <value> %(trk)s </value> </product> </sum>
@@ -448,7 +480,8 @@ def _engine_channel(spec, rd, p_max, p):
       </fcs_function>
     </channel>
 """ % dict(p=p, om=_f(rd["omega"]), kp=_f(gov.get("kp", 0.3)), ki=_f(gov.get("ki", 0.3)), kd=_f(gov.get("kd", 0.0)),
-           lag=lag_xml, gout=governor_out, trk=_f(trk), pmax=_f(p_max), jinv=_f(1.0 / rd["j"]), rpmk=_f(60 / (2 * math.pi)))
+           lag=lag_xml, gout=governor_out, trk=_f(trk), pmax=_f(p_max), jinv=_f(1.0 / rd["j"]), rpmk=_f(60 / (2 * math.pi)),
+           fed=fed, fed_term=fed_term)
 
 
 # --- the airframe -------------------------------------------------------------------------------

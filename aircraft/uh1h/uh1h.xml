@@ -28,7 +28,7 @@
     <iyy unit="SLUG*FT2"> 12733 </iyy>
     <izz unit="SLUG*FT2"> 10800 </izz>
     <ixz unit="SLUG*FT2"> 1480 </ixz>
-    <emptywt unit="LBS"> 6158 </emptywt>
+    <emptywt unit="LBS"> 4758 </emptywt>
     <location name="CG" unit="IN"> <x> 140 </x> <y> 0 </y> <z> 55 </z> </location>
   </mass_balance>
   <ground_reactions>
@@ -79,6 +79,7 @@
   </ground_reactions>
   <propulsion>
     <engine file="uh1h_engine">
+        <feed>0</feed>
       <thruster file="uh1h_rotor">
         <location unit="IN"> <x> 133.5 </x> <y> 0 </y> <z> 136.5 </z> </location>
         <orient unit="DEG"> <roll> 0 </roll> <pitch> 85 </pitch> <yaw> 0 </yaw> </orient>
@@ -92,6 +93,11 @@
         <sense> 1 </sense>
       </thruster>
     </engine>
+    <tank type="FUEL">
+      <location unit="IN"> <x> 140 </x> <y> 0 </y> <z> 55 </z> </location>
+      <capacity unit="LBS"> 1400 </capacity>
+      <contents unit="LBS"> 1400 </contents>
+    </tank>
   </propulsion>
   <flight_control name="uh1h">
     <!-- the aircraft's profile for the platform (docs/control-architecture.md, section 7, and
@@ -259,9 +265,12 @@
       </fcs_function>
       <pure_gain name="fcs/uh1h/tail-drive-throttle"> <input> fcs/uh1h/power </input> <gain> 0 </gain>
         <output> fcs/throttle-pos-norm[1] </output> </pure_gain>
+      <fcs_function name="fcs/uh1h/fed">
+        <function> <gt> <property> propulsion/total-fuel-lbs </property> <value> 0 </value> </gt> </function>
+      </fcs_function>
       <fcs_function name="fcs/uh1h/net-torque">
         <function> <product> <property> fcs/uh1h/armed </property> <difference>
-          <quotient> <product> <property> fcs/uh1h/power </property> <value> 605000 </value> </product>
+          <quotient> <product> <property> fcs/uh1h/power </property> <value> 605000 </value> <property> fcs/uh1h/fed </property> </product>
             <max> <value> 1 </value> <property> fcs/uh1h/omega </property> </max> </quotient>
           <sum> <property> propulsion/engine[0]/torque-lbsft </property>
             <product> <property> propulsion/engine[1]/torque-lbsft </property> <value> 5.1365494 </value> </product> </sum>

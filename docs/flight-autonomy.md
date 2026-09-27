@@ -511,7 +511,7 @@ A-GRA's per-mode performance profile from hangar's data; energy management in ev
 
 **Status:** in progress, in five steps:
 - FA-3a, the performance tables (4.13), done 2026-09-27 and measured in section 14;
-- FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft, the rotorcraft's tables, the navigation report (STS-07), endurance against a flown burn;
+- FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft (the rotorcraft's done 2026-09-27, section 14), the rotorcraft's tables, the navigation report (STS-07), endurance against a flown burn;
 - FA-3c, the performance profile per mode (CAP-04 to CAP-15), updated with the condition and configuration;
 - FA-3d, energy management in every mode (HSA-10, CTG-04): the fleet climb case;
 - FA-3e, speed optimisation (HSA-05, LTR-17) and endurance validation (VAL-03), the first soft rejection override_rejection overrides.
@@ -1044,6 +1044,17 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
 - `control_alloc` passes.
 - The interleaved A/B against FA-2e's bench shows no change beyond noise. The micro-benchmark medians range from -1.6 % to +2.8 %; the largest, attitude, is +0.7 % on its minimum. The command medians range from -1.5 % to +1.8 %.
 - ctest: all 240 tests pass (the five tables cases added; hangar's performance unit tests 8).
+
+**FA-3b, energy on board (SUB-03: the rotorcraft's fuel and batteries).**
+- **The helicopters burn fuel.** Each has a tank at the c.g., full as it spawns and part of its design weight: the UH-60A's 2,340 lb and the UH-1H's 1,400 lb. Its engine burns its specific fuel consumption times the power it gives: 0.571 lb per shp-h (TM-85890's 1/K_E) and 0.623 (a T53's on a UH-1B). JSBSim's electric engine, their power source, is patched to burn (`cmake/JsbsimPatches.cmake`, THIRD_PARTY_NOTICES). Once the tank is empty the engine gives no power and the rotor is left to the air: the UH-60A's rotor falls from 258 to 139 rpm in 3 s, and it sinks. An electric engine without a consumption burns nothing, as before.
+- **The quadrotors carry batteries.** The power a battery gives is the published hover's (its capacity over its flight time, taken as a hover's), scaled by the rotors' speed cubed. Once it is spent the motors stop: the IRIS+ after 18.7 minutes' hover at 181.2 W, the Crazyflie 2.0 after 7.0 at 7.59 W.
+- **The named change, measured.** The helicopters now lighten as they fly:
+  - held ten minutes, the UH-60A burns 161 lb at a hover (1.0 % of its weight) and 90 lb at 30 m/s; the UH-1H burns 59 and 41 lb;
+  - their loops hold them as before: height within 0.25 m and position within 0.1 m of the flights without fuel, the collective 0.4 to 1.2 % lower as they lighten;
+  - hangar's flight tests fly with the fuel frozen, so their identified hover, and the loops the platform designs from it, are unchanged;
+  - the quadrotors fly the same, bit for bit, until the battery is spent;
+  - the fixed wings are untouched: digests identical, with protection and without.
+- ctest: all 240 tests pass.
 
 ## Appendix A: the inventory
 

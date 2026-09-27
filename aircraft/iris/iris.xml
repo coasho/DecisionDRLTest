@@ -169,15 +169,31 @@
     <property value="1">fsim/applicability/releasable_stores</property>
     <property value="0">fsim/applicability/retractable_gear</property>
     <property value="1">fsim/applicability/vertical_flight</property>
+    <property value="203796">fsim/battery/capacity-j</property>
+    <channel name="battery">
+      <!-- the power the battery gives: the hover's (181.63636 W) as the rotors' speed cubed over their hover
+           speed's (793.54132 rad/s); the energy used, the charge left, the motors' supply while there is some -->
+      <fcs_function name="fsim/battery/power-w">
+        <function> <product> <value> 9.0872853e-08 </value> <sum> <pow> <property> fcs/iris/omega[0] </property> <value> 3 </value> </pow> <pow> <property> fcs/iris/omega[1] </property> <value> 3 </value> </pow> <pow> <property> fcs/iris/omega[2] </property> <value> 3 </value> </pow> <pow> <property> fcs/iris/omega[3] </property> <value> 3 </value> </pow> </sum> </product> </function>
+      </fcs_function>
+      <integrator name="fsim/battery/used-j"> <input> fsim/battery/power-w </input> <c1> 1 </c1> </integrator>
+      <fcs_function name="fsim/battery/charge-j">
+        <function> <max> <value> 0 </value> <difference> <property> fsim/battery/capacity-j </property>
+          <property> fsim/battery/used-j </property> </difference> </max> </function>
+      </fcs_function>
+      <fcs_function name="fsim/battery/supply">
+        <function> <gt> <property> fsim/battery/charge-j </property> <value> 0 </value> </gt> </function>
+      </fcs_function>
+    </channel>
     <channel name="motors">
       <!-- motor 0: front right, counter-clockwise -->
       <fcs_function name="fcs/iris/cmd[0]">
-        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+        <function> <product> <property> fsim/battery/supply </property> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
           <property> fcs/throttle-cmd-norm[0] </property>
           <product> <value> -0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
           <product> <value> -0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
           <product> <value> -0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
-        </sum> </min> </max> </function>
+        </sum> </min> </max> </product> </function>
       </fcs_function>
       <fcs_function name="fcs/iris/omega-cmd[0]">
         <function> <product> <value> 1100 </value> <sqrt> <property> fcs/iris/cmd[0] </property> </sqrt> </product> </function>
@@ -197,12 +213,12 @@
       </fcs_function>
       <!-- motor 1: rear left, counter-clockwise -->
       <fcs_function name="fcs/iris/cmd[1]">
-        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+        <function> <product> <property> fsim/battery/supply </property> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
           <property> fcs/throttle-cmd-norm[1] </property>
           <product> <value> 0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
           <product> <value> 0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
           <product> <value> -0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
-        </sum> </min> </max> </function>
+        </sum> </min> </max> </product> </function>
       </fcs_function>
       <fcs_function name="fcs/iris/omega-cmd[1]">
         <function> <product> <value> 1100 </value> <sqrt> <property> fcs/iris/cmd[1] </property> </sqrt> </product> </function>
@@ -222,12 +238,12 @@
       </fcs_function>
       <!-- motor 2: front left, clockwise -->
       <fcs_function name="fcs/iris/cmd[2]">
-        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+        <function> <product> <property> fsim/battery/supply </property> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
           <property> fcs/throttle-cmd-norm[2] </property>
           <product> <value> 0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
           <product> <value> -0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
           <product> <value> 0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
-        </sum> </min> </max> </function>
+        </sum> </min> </max> </product> </function>
       </fcs_function>
       <fcs_function name="fcs/iris/omega-cmd[2]">
         <function> <product> <value> 1100 </value> <sqrt> <property> fcs/iris/cmd[2] </property> </sqrt> </product> </function>
@@ -247,12 +263,12 @@
       </fcs_function>
       <!-- motor 3: rear right, clockwise -->
       <fcs_function name="fcs/iris/cmd[3]">
-        <function> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
+        <function> <product> <property> fsim/battery/supply </property> <max> <value> 0 </value> <min> <value> 1 </value> <sum>
           <property> fcs/throttle-cmd-norm[3] </property>
           <product> <value> -0.25 </value> <property> fcs/aileron-cmd-norm </property> </product>
           <product> <value> 0.25 </value> <property> fcs/elevator-cmd-norm </property> </product>
           <product> <value> 0.25 </value> <property> fcs/rudder-cmd-norm </property> </product>
-        </sum> </min> </max> </function>
+        </sum> </min> </max> </product> </function>
       </fcs_function>
       <fcs_function name="fcs/iris/omega-cmd[3]">
         <function> <product> <value> 1100 </value> <sqrt> <property> fcs/iris/cmd[3] </property> </sqrt> </product> </function>

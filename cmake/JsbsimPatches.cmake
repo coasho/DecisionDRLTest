@@ -297,3 +297,56 @@ foreach(_includer FGEngine.cpp FGTurboProp.cpp)
     _fsim_jsbsim_write(models/propulsion/${_includer} _text Propulsion)
 endforeach()
 target_include_directories(Propulsion PRIVATE ${FSIM_JSBSIM_SOURCE_DIR}/src/models/propulsion) # their other headers
+
+# ---------------------------------------------------------------------------
+# models/propulsion/FGElectric.cpp: a power source that burns fuel.
+#
+# hangar's helicopters fly their turboshafts as one governed power source: an
+# electric engine whose power the flight control system meters (docs/
+# rotorcraft.md). Upstream's electric engine burns nothing, so they flew on
+# no fuel at all. An engine file may now give <bsfc unit="LBS/HP*HR"> (as a
+# piston engine's does): the engine then burns bsfc times its power from the
+# tanks that feed it - JSBSim's fuel freeze and trim honoured, its fuel flow
+# reported as any engine's - and gives no power once they are empty. Without
+# one nothing changes: it burns nothing, and a tankless engine (a
+# multirotor's motor, which JSBSim counts as starved) keeps its power. The
+# consumption is kept in the base's SLFuelFlowMax, which an electric engine
+# never used, so FGElectric.h - and every file including it - stays upstream's.
+# ---------------------------------------------------------------------------
+_fsim_jsbsim_read(models/propulsion/FGElectric.cpp _text)
+set(_old [=[  if (el->FindElement("power"))
+    PowerWatts = el->FindElementValueAsNumberConvertTo("power","WATTS");
+]=])
+set(_new [=[  if (el->FindElement("power"))
+    PowerWatts = el->FindElementValueAsNumberConvertTo("power","WATTS");
+  // flightsim patch: its specific fuel consumption, lb per hp per second (none: 0)
+  if (el->FindElement("bsfc"))
+    SLFuelFlowMax = el->FindElementValueAsNumberConvertTo("bsfc", "LBS/HP*HR") / 3600.0;
+]=])
+_fsim_jsbsim_edit(_text _old _new FGElectric.cpp "consumption")
+set(_old [=[  HP = PowerWatts * in.ThrottlePos[EngineNumber] / hptowatts;
+]=])
+set(_new [=[  HP = PowerWatts * in.ThrottlePos[EngineNumber] / hptowatts;
+  // flightsim patch: an engine that burns fuel gives no power once its tanks are empty
+  if (SLFuelFlowMax > 0.0 && Starved) {
+    HP = 0.0;
+    FuelFlowRate = 0.0;
+  }
+]=])
+_fsim_jsbsim_edit(_text _old _new FGElectric.cpp "starved")
+set(_old [=[double FGElectric::CalcFuelNeed(void)
+{
+  return 0;
+}
+]=])
+set(_new [=[double FGElectric::CalcFuelNeed(void)
+{
+  // flightsim patch: bsfc times the power (none: nothing, as upstream)
+  FuelFlowRate = SLFuelFlowMax * HP;
+  FuelExpended = FuelFlowRate * in.TotalDeltaT;
+  if (!Starved) FuelUsedLbs += FuelExpended;
+  return FuelExpended;
+}
+]=])
+_fsim_jsbsim_edit(_text _old _new FGElectric.cpp "fuel need")
+_fsim_jsbsim_write(models/propulsion/FGElectric.cpp _text Propulsion)

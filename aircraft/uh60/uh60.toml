@@ -6,6 +6,8 @@
 #   BASE P. D. Talbot, B. E. Tinling, W. A. Decker, R. T. N. Chen, "A Mathematical Model of a
 #        Single Main Rotor Helicopter for Piloted Simulation", NASA TM-84281, 1982 - the model TM
 #        revises: the stabilizer's and fin's lift and drag through 360 deg (appendix E).
+#   OM   "Operator's Manual for UH-60A Helicopter, UH-60L Helicopter", TM 1-1520-237-10 - the fuel
+#        tanks.
 # Every number is the source's unless the note says otherwise. Frame: stations (in, aft), butt
 # lines (in, right), water lines (in, up). Senses here: stick + forward and + right, pedal +
 # right, collective + up; cyclic + tilts the thrust forward or right. (TM-84281's longitudinal
@@ -68,6 +70,12 @@ power_shp = 2828.0                 # the main transmission's dual-engine rating 
 # rad/s (per rad, per rad/s^2) of rotor speed: as fractions of the power limit per rad/s, 1.2376,
 # 1.5470 and 0.3094; the engine's lag 1.25 s, on the governor's correction (the rotors' load is fed forward)
 governor = { kp = 1.2376, ki = 1.5470, kd = 0.3094, lag_s = 1.25 }
+sfc_lb_per_shp_h = 0.5714          # 1 / K_E (TM table 3): the fuel the engines burn per shaft horsepower-hour
+
+[fuel]
+# the two crashworthy tanks' 360 US gal (OM), JP-4 at 6.5 lb/gal: full as it spawns, their fuel part of
+# the weight above (the airframe the rest), at the c.g. - so the aircraft spawns as TM flies it
+capacity_lb = 2340.0
 
 [controls]
 travel_in = { lateral = 10.0, longitudinal = 10.0, pedal = 7.0, collective = 10.0 }   # full throw: estimates
