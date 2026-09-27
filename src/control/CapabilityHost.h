@@ -11,14 +11,20 @@
 #include "control/Runtime.h"
 #include "fsim/Capability.h"
 #include "fsim/ControlStack.h"
+#include "fsim/Span.h"
 #include "fsim/VehicleProfile.h"
 #include "fsim/VehicleState.h"
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace fsim::control {
+
+namespace route {
+struct Plan;
+}
 
 /// Where the support effectors are, for the activities that complete when they get there.
 struct EffectorPositions {
@@ -28,6 +34,11 @@ struct EffectorPositions {
 
 class CapabilityHost {
 public:
+    CapabilityHost();
+    ~CapabilityHost();
+    CapabilityHost(CapabilityHost&&) noexcept;
+    CapabilityHost& operator=(CapabilityHost&&) noexcept;
+
     /// Ended activities a vehicle remembers for queries.
     static constexpr std::size_t kRecent = 16;
     /// Where activities live: the cascade's slots, one per support axis, then
@@ -45,9 +56,20 @@ public:
     CommandResult submit(const Command& command, const CommandOptions& options, const sim::VehicleState& state, double now);
     /// NEW for a support effector (gear, flaps, brakes, speedbrake, pitch trim) or the engines' throttles.
     CommandResult submit(const SupportCommand& command, const CommandOptions& options, const sim::VehicleState& state, double now);
-    /// UPDATE: a new setpoint for a live activity - the fast path; allocates nothing.
-    CommandResult update(ActivityId activity, const Command& setpoint) noexcept;
+    /// NEW of a route (fsim.guidance.route; docs/vehicle-interface.md 4.5): its
+    /// waypoints completed and checked against the aircraft, planned from
+    /// where it is, then written into the vehicle's path store (allocated at
+    /// its first route). A RouteCommand submitted as a Command has none: InvalidWaypoint.
+    CommandResult submit(const RouteCommand& route, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
+                         double now);
+    /// UPDATE: a new setpoint for a live activity - the fast path; allocates
+    /// nothing. `state` is the vehicle's: a route is planned afresh from it.
+    CommandResult update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state) noexcept;
     CommandResult update(ActivityId activity, const SupportCommand& setpoint) noexcept;
+    /// UPDATE of a route: its options (a field left out, kHold, keeps its
+    /// value) and its waypoints - none: those it has - checked as a NEW's,
+    /// then flown afresh from its start, from where the aircraft is.
+    CommandResult update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state) noexcept;
     /// CANCEL: the activity ends and its axes return to the vehicle default.
     CommandResult cancel(ActivityId activity, double now) noexcept;
     /// The existing entry points (docs/control-architecture.md, 10.7): an
@@ -145,6 +167,26 @@ private:
     /// An hsa's speed and altitude against the aircraft's performance: clamped
     /// (kClamped) or, with Reject, PerformanceLimit - `detail` saying which field and limit.
     Reason limitHsa(HsaCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept;
+    /// A speed and an altitude in their references against the performance,
+    /// as limitHsa: `detail` names `speedIndex` or `altitudeIndex` (a field, or a waypoint).
+    Reason limitFlight(double& speed, double speedReference, double& altitude, double altitudeReference, RangePolicy range, std::uint16_t& flags,
+                       CommandResult& detail, std::int16_t speedIndex, std::int16_t altitudeIndex) const noexcept;
+    /// A route's options and waypoints (docs/vehicle-interface.md, 4.5 and
+    /// 5.1), into the scratch plan: the options whole and in range
+    /// (InvalidParameter), the waypoints completed (InvalidWaypoint); then,
+    /// unless the range policy is None, each point's speed, altitude, bank and
+    /// climb rate against the performance, the route planned from where the
+    /// aircraft is, a fly-by turn too big for its legs, and a gradient steeper
+    /// than the aircraft climbs - clamped (the turn flown smaller, the
+    /// gradient at its climb rate; kClamped) or, with Reject, refused
+    /// (InvalidWaypoint, PerformanceLimit). `detail` names the point.
+    Reason checkRoute(RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state, RangePolicy range, std::uint16_t& flags,
+                      CommandResult& detail);
+    /// The route checkRoute left in the scratch plan, into the path store: flown afresh.
+    void writeRoute();
+    /// NEW: a command (with a route's waypoints).
+    CommandResult submitWith(const Command& command, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
+                             double now);
 
     std::uint32_t vehicle_ = 0;
     double controlPeriodS_ = 1.0 / 120.0;
@@ -155,6 +197,7 @@ private:
     const VehicleAdapter* adapter_ = nullptr;
     const VehicleProfile* profile_ = nullptr;
     Performance performance_{};
+    std::unique_ptr<route::Plan> routePlan_; ///< a route's scratch, allocated at the vehicle's first route
     std::uint32_t serial_ = 0;
     std::array<Slot, kActivities> slots_{};
     std::array<ActivityRecord, kActivities> records_{}; ///< per slot: its activity's record

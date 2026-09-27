@@ -3,6 +3,7 @@
 #include "control/Atmosphere.h"
 #include "control/Protection.h"
 #include "control/Registry.h"
+#include "control/Route.h"
 #include "core/Geodesy.h"
 #include "core/Log.h"
 #include "fsim/GuidanceModes.h"
@@ -47,7 +48,28 @@ CommandResult about(CommandResult r, const CommandResult& detail) noexcept {
     return r;
 }
 
+/// `value` against a limit of the aircraft's (above: a most, else a least):
+/// None within it, or where either is not known; beyond it, clamped to it
+/// (kClamped) or, with Reject, PerformanceLimit - `detail` naming the field
+/// or waypoint `index` and the limit (the first clamp's, when clamped).
+Reason bound(double& value, double limit, bool above, std::int16_t index, Constraint constraint, RangePolicy range, std::uint16_t& flags,
+             CommandResult& detail) noexcept {
+    if (std::isnan(limit) || isHold(value) || (above ? value <= limit : value >= limit)) return Reason::None;
+    if (range == RangePolicy::Reject || !(flags & kClamped)) detail.index = index, detail.constraint = constraint;
+    if (range == RangePolicy::Reject) return Reason::PerformanceLimit;
+    value = limit;
+    flags |= kClamped;
+    return Reason::None;
+}
+
+bool aboveGround(double reference) noexcept { return reference == static_cast<double>(AltitudeReference::AboveGround); }
+
 } // namespace
+
+CapabilityHost::CapabilityHost() = default;
+CapabilityHost::~CapabilityHost() = default;
+CapabilityHost::CapabilityHost(CapabilityHost&&) noexcept = default;
+CapabilityHost& CapabilityHost::operator=(CapabilityHost&&) noexcept = default;
 
 void CapabilityHost::bind(std::uint32_t vehicle, ControlStack& runtime, const CapabilityCatalog& catalog, const VehicleAdapter& adapter,
                           const VehicleProfile& profile, double controlPeriodS) noexcept {
@@ -109,48 +131,151 @@ Reason CapabilityHost::resolveHsa(HsaCommand& c, const sim::VehicleState& state,
 }
 
 Reason CapabilityHost::limitHsa(HsaCommand& c, RangePolicy range, std::uint16_t& flags, CommandResult& detail) const noexcept {
+    return limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, range, flags, detail, 2, 4);
+}
+
+Reason CapabilityHost::limitFlight(double& speed, double speedReference, double& altitude, double altitudeReference, RangePolicy range,
+                                   std::uint16_t& flags, CommandResult& detail, std::int16_t speedIndex, std::int16_t altitudeIndex) const noexcept {
     const Performance& f = performance_;
-    auto limit = [&](double& value, double bound, bool above, std::int16_t field, Constraint constraint) {
-        if (std::isnan(bound) || isHold(value) || (above ? value <= bound : value >= bound)) return Reason::None;
-        detail.index = field;
-        detail.constraint = constraint;
-        if (range == RangePolicy::Reject) return Reason::PerformanceLimit;
-        value = bound;
-        flags |= kClamped;
-        return Reason::None;
+    auto limit = [&](double& value, double most, bool above, std::int16_t index, Constraint constraint) {
+        return bound(value, most, above, index, constraint, range, flags, detail);
     };
     // the altitude: under the ceiling; above ground, above it
-    const auto altitudeReference = static_cast<AltitudeReference>(static_cast<int>(orHold(c.altitudeReference, 0.0)));
-    if (altitudeReference == AltitudeReference::AboveGround) {
-        if (const Reason r = limit(c.altitudeM, 0.0, false, 4, Constraint::MinAltitude); r != Reason::None) return r;
-    } else if (const Reason r = limit(c.altitudeM, f.ceilingM, true, 4, Constraint::MaxAltitude); r != Reason::None) {
+    if (aboveGround(altitudeReference)) {
+        if (const Reason r = limit(altitude, 0.0, false, altitudeIndex, Constraint::MinAltitude); r != Reason::None) return r;
+    } else if (const Reason r = limit(altitude, f.ceilingM, true, altitudeIndex, Constraint::MaxAltitude); r != Reason::None) {
         return r;
     }
     // the speed, within the envelope's calibrated speeds and Mach at the altitude it asks for (the
     // standard atmosphere's); a rotorcraft's ground speed within its fastest
-    const auto reference = static_cast<SpeedReference>(static_cast<int>(orHold(c.speedReference, 0.0)));
-    const double h = isHold(c.altitudeM) ? 0.0 : c.altitudeM;
+    const auto reference = static_cast<SpeedReference>(static_cast<int>(orHold(speedReference, 0.0)));
+    const double h = isHold(altitude) || aboveGround(altitudeReference) ? 0.0 : altitude;
+    const std::int16_t i = speedIndex;
     switch (reference) {
     case SpeedReference::GroundSpeed:
-        return f.hovers ? limit(c.speed, f.maxGroundSpeedMs, true, 2, Constraint::MaxAirspeed) : Reason::None;
+        return f.hovers ? limit(speed, f.maxGroundSpeedMs, true, i, Constraint::MaxAirspeed) : Reason::None;
     case SpeedReference::CalibratedAirspeed:
-        if (const Reason r = limit(c.speed, f.minCasMs, false, 2, Constraint::MinAirspeed); r != Reason::None) return r;
-        if (const Reason r = limit(c.speed, f.maxCasMs, true, 2, Constraint::MaxAirspeed); r != Reason::None) return r;
-        return limit(c.speed, isa::calibratedFromTrue(f.maxTasMs, h), true, 2, Constraint::MaxAirspeed);
+        if (const Reason r = limit(speed, f.minCasMs, false, i, Constraint::MinAirspeed); r != Reason::None) return r;
+        if (const Reason r = limit(speed, f.maxCasMs, true, i, Constraint::MaxAirspeed); r != Reason::None) return r;
+        return limit(speed, isa::calibratedFromTrue(f.maxTasMs, h), true, i, Constraint::MaxAirspeed);
     case SpeedReference::TrueAirspeed:
-        if (const Reason r = limit(c.speed, isa::trueFromCalibrated(f.minCasMs, h), false, 2, Constraint::MinAirspeed); r != Reason::None) return r;
-        if (const Reason r = limit(c.speed, isa::trueFromCalibrated(f.maxCasMs, h), true, 2, Constraint::MaxAirspeed); r != Reason::None) return r;
-        if (const Reason r = limit(c.speed, f.maxMach * isa::speedOfSound(h), true, 2, Constraint::MaxAirspeed); r != Reason::None) return r;
-        return limit(c.speed, f.maxTasMs, true, 2, Constraint::MaxAirspeed);
+        if (const Reason r = limit(speed, isa::trueFromCalibrated(f.minCasMs, h), false, i, Constraint::MinAirspeed); r != Reason::None) return r;
+        if (const Reason r = limit(speed, isa::trueFromCalibrated(f.maxCasMs, h), true, i, Constraint::MaxAirspeed); r != Reason::None) return r;
+        if (const Reason r = limit(speed, f.maxMach * isa::speedOfSound(h), true, i, Constraint::MaxAirspeed); r != Reason::None) return r;
+        return limit(speed, f.maxTasMs, true, i, Constraint::MaxAirspeed);
     case SpeedReference::Mach: {
         const double a = isa::speedOfSound(h);
-        if (const Reason r = limit(c.speed, isa::trueFromCalibrated(f.minCasMs, h) / a, false, 2, Constraint::MinAirspeed); r != Reason::None) return r;
-        if (const Reason r = limit(c.speed, isa::trueFromCalibrated(f.maxCasMs, h) / a, true, 2, Constraint::MaxAirspeed); r != Reason::None) return r;
-        if (const Reason r = limit(c.speed, f.maxMach, true, 2, Constraint::MaxAirspeed); r != Reason::None) return r;
-        return limit(c.speed, f.maxTasMs / a, true, 2, Constraint::MaxAirspeed);
+        if (const Reason r = limit(speed, isa::trueFromCalibrated(f.minCasMs, h) / a, false, i, Constraint::MinAirspeed); r != Reason::None) return r;
+        if (const Reason r = limit(speed, isa::trueFromCalibrated(f.maxCasMs, h) / a, true, i, Constraint::MaxAirspeed); r != Reason::None) return r;
+        if (const Reason r = limit(speed, f.maxMach, true, i, Constraint::MaxAirspeed); r != Reason::None) return r;
+        return limit(speed, f.maxTasMs / a, true, i, Constraint::MaxAirspeed);
     }
     default: return Reason::None;
     }
+}
+
+Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoints, const sim::VehicleState& state, RangePolicy range,
+                                  std::uint16_t& flags, CommandResult& detail) {
+    auto bad = [&detail](std::int16_t field) {
+        detail.index = field;
+        return Reason::InvalidParameter;
+    };
+    auto code = [](double v, double count) { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); };
+    if (!code(c.projection, static_cast<double>(Projection::Count))) return bad(0);
+    if (!code(c.repeat, 2.0)) return bad(1);
+    if (!code(c.end, static_cast<double>(EndBehavior::Count))) return bad(2);
+    if (!code(c.start, static_cast<double>(PathStore::kWaypoints))) return bad(3);
+    c.projection = orHold(c.projection, 0.0), c.repeat = orHold(c.repeat, 0.0), c.end = orHold(c.end, 0.0), c.start = orHold(c.start, 0.0);
+    const auto count = static_cast<std::uint32_t>(std::min<std::size_t>(waypoints.size(), 0xFFFF));
+    if (c.repeat == 1.0 && count == 1) return bad(1); // round and round one point is a pattern, not a route
+    if (count > 0 && c.start >= count) return bad(3);
+    if (!routePlan_) routePlan_ = std::make_unique<route::Plan>();
+    route::Plan& p = *routePlan_;
+    const bool hovers = (adapter_->features() & kFeatureHover) != 0;
+    std::int16_t which = -1;
+    if (const Reason r = route::complete(p.points, waypoints.data(), count, c.repeat == 1.0, state, performance_, hovers, which); r != Reason::None) {
+        detail.index = which;
+        return r;
+    }
+    p.count = count;
+    p.start = static_cast<std::uint32_t>(c.start);
+    p.repeat = c.repeat == 1.0;
+    p.rhumb = c.projection == static_cast<double>(Projection::Rhumb);
+    p.end = static_cast<EndBehavior>(static_cast<int>(c.end));
+    if (range == RangePolicy::None) return Reason::None; // (what it flies, the behaviour plans from where it starts)
+    const Performance& f = performance_;
+    // the altitude a segment climbs from: the point before's, in the same reference; the start's, the aircraft's
+    auto from = [&](std::uint32_t i, bool entry) {
+        const Waypoint& w = p.points[i];
+        if (entry) return altitudeNow(static_cast<AltitudeReference>(static_cast<int>(w.altitudeReference)), state);
+        const Waypoint& b = p.points[p.prev(i)];
+        return b.altitudeReference == w.altitudeReference ? b.altitudeM : kHold;
+    };
+    for (std::uint32_t i = 0; i < count; ++i) {
+        Waypoint& w = p.points[i];
+        const auto index = static_cast<std::int16_t>(i);
+        if (const Reason r = limitFlight(w.speed, w.speedReference, w.altitudeM, w.altitudeReference, range, flags, detail, index, index); r != Reason::None)
+            return r;
+        // its turn's bank within the aircraft's (a rotorcraft's, its tilt)
+        if (const Reason r = bound(w.maxBankRad, hovers ? f.maxTiltRad : f.maxBankRad, true, index, Constraint::MaxOrientation, range, flags, detail);
+            r != Reason::None)
+            return r;
+        // a climb or descent rate within the aircraft's
+        if (!isHold(w.climbRateMs)) {
+            const double h0 = from(i, i == p.start);
+            const bool descends = !isHold(h0) && w.altitudeM < h0;
+            if (const Reason r = bound(w.climbRateMs, descends ? f.maxDescentMs : f.maxClimbMs, true, index,
+                                       descends ? Constraint::MaxDescentRate : Constraint::MaxClimbRate, range, flags, detail);
+                r != Reason::None)
+                return r;
+        }
+    }
+    WindEstimate wind;
+    wind.update(state, 0.0);
+    route::plan(p, state.latitudeRad, state.longitudeRad, state.altitudeMslM, std::hypot(wind.northMs, wind.eastMs), f, hovers);
+    auto flown = [&p](std::uint32_t i) { return p.repeat || i >= p.start; }; // (a route that does not repeat flies nothing before its start)
+    // a fly-by turn too big for its legs: flown smaller, or refused - the first
+    // one flown (the start's from the entry, then each after it)
+    for (std::uint32_t k = 0; k <= count; ++k) {
+        const std::uint32_t i = k == 0 ? p.start : k - 1;
+        if (k > 0 && (!flown(i) || (i == p.start && !p.repeat))) continue;
+        if (!(k == 0 ? p.entryTurn : p.turns[i]).shrunk) continue;
+        if (range == RangePolicy::Reject || !(flags & kClamped)) detail.index = static_cast<std::int16_t>(i), detail.constraint = Constraint::None;
+        if (range == RangePolicy::Reject) return Reason::InvalidWaypoint;
+        flags |= kClamped;
+    }
+    // a gradient steeper than the aircraft climbs or descends (point to point, above sea level): flown at its rate, or refused
+    for (std::uint32_t i = 0; i < count; ++i) {
+        Waypoint& w = p.points[i];
+        if (!flown(i) || !isHold(w.climbRateMs) || aboveGround(w.altitudeReference)) continue;
+        const double v = route::plannedSpeed(w.speed, w.speedReference, w.altitudeM);
+        // the start's segment from the aircraft; any other, and the start's after a lap, from the point before
+        for (const bool entry : {true, false}) {
+            if (entry ? i != p.start : (i == p.start && !p.repeat)) continue;
+            const route::Leg& leg = entry ? p.entry : p.legs[i];
+            const double h0 = from(i, entry);
+            if (isHold(h0) || !(leg.lengthM > 1.0)) continue;
+            const bool descends = w.altitudeM < h0;
+            const double most = descends ? f.maxDescentMs : f.maxClimbMs;
+            if (std::isnan(most) || std::abs(w.altitudeM - h0) * v / leg.lengthM <= most) continue;
+            if (range == RangePolicy::Reject || !(flags & kClamped))
+                detail.index = static_cast<std::int16_t>(i), detail.constraint = descends ? Constraint::MaxDescentRate : Constraint::MaxClimbRate;
+            if (range == RangePolicy::Reject) return Reason::PerformanceLimit;
+            w.climbRateMs = most;
+            flags |= kClamped;
+            break;
+        }
+    }
+    return Reason::None;
+}
+
+void CapabilityHost::writeRoute() {
+    if (!config_->path) config_->path = std::make_unique<PathStore>();
+    PathStore& store = *config_->path;
+    const route::Plan& p = *routePlan_;
+    std::copy_n(p.points, p.count, store.waypoints);
+    store.count = p.count;
+    ++store.revision;
 }
 
 void CapabilityHost::setProtection(ProtectionMode mode) noexcept {
@@ -307,6 +432,16 @@ ActivityRecord& CapabilityHost::start(std::size_t s, ActivityId id, std::size_t 
 }
 
 CommandResult CapabilityHost::submit(const Command& command, const CommandOptions& options, const sim::VehicleState& state, double now) {
+    return submitWith(command, {}, options, state, now);
+}
+
+CommandResult CapabilityHost::submit(const RouteCommand& route, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
+                                     double now) {
+    return submitWith(Command(route), waypoints, options, state, now);
+}
+
+CommandResult CapabilityHost::submitWith(const Command& command, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
+                                         double now) {
     const int found = catalog_->indexOf(command);
     if (found < 0) return rejected(Reason::UnknownCapability);
     const auto index = static_cast<std::size_t>(found);
@@ -327,6 +462,9 @@ CommandResult CapabilityHost::submit(const Command& command, const CommandOption
     auto* hsa = std::get_if<HsaCommand>(&setpoint);
     if (hsa) // complete it first: what it leaves out, whatever the range policy (the runtime flies a complete setpoint)
         if (const Reason why = resolveHsa(*hsa, state, detail); why != Reason::None) return about(rejected(why), detail);
+    auto* route = std::get_if<RouteCommand>(&setpoint);
+    if (route) // its waypoints completed, and checked as its range policy says
+        if (const Reason why = checkRoute(*route, waypoints, state, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
     if (checked)
         if (const Reason why = catalog_->check(index, setpoint, options.range, flags, detail); why != Reason::None) return about(rejected(why), detail);
     if (hsa && checked)
@@ -355,6 +493,7 @@ CommandResult CapabilityHost::submit(const Command& command, const CommandOption
     while (s + 1 < kSlotCount && slots_[s].activity) ++s;
 
     RuntimeConfig& config = *config_;
+    if (route) writeRoute(); // (a guidance activity owns every primary axis: one route flies at a time)
     SetpointSlot& slot = config.slots[s];
     slot.command = std::move(setpoint);
     slot.level = d.level;
@@ -408,7 +547,35 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
     return about(accepted(id, flags), detail);
 }
 
-CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint) noexcept {
+CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints,
+                                     const sim::VehicleState& state) noexcept {
+    const int found = liveSlot(activity);
+    if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
+    const auto s = static_cast<std::size_t>(found);
+    if (!isCascade(s)) return rejected(Reason::WrongCommandType, activity);
+    if (!(catalog_->descriptor(records_[s].capability).interactions & kUpdate)) return rejected(Reason::NotUpdatable, activity); // (as update() answers)
+    auto* live = std::get_if<RouteCommand>(&config_->slots[s].command);
+    if (!live || !routePlan_) return rejected(Reason::WrongCommandType, activity);
+    // the options given replace the route's; its waypoints, new ones or those it has (read before they are rewritten)
+    RouteCommand next = *live;
+    if (!isHold(route.projection)) next.projection = route.projection;
+    if (!isHold(route.repeat)) next.repeat = route.repeat;
+    if (!isHold(route.end)) next.end = route.end;
+    if (!isHold(route.start)) next.start = route.start;
+    const PathStore* store = config_->path.get();
+    const Span<const Waypoint> points = waypoints.empty() && store ? Span<const Waypoint>(store->waypoints, store->count) : waypoints;
+    CommandResult result = accepted(activity);
+    if (const Reason why = checkRoute(next, points, state, slots_[s].range, result.flags, result); why != Reason::None)
+        return about(rejected(why, activity), result);
+    if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
+    writeRoute();
+    *live = next;
+    ++config_->slots[s].revision;
+    return result;
+}
+
+CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state) noexcept {
+    if (const auto* route = std::get_if<RouteCommand>(&setpoint)) return update(activity, *route, {}, state);
     const int found = liveSlot(activity);
     if (found < 0) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     const auto s = static_cast<std::size_t>(found);

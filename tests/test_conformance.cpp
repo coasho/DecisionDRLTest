@@ -19,6 +19,7 @@
 #include <deque>
 #include <filesystem>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <random>
 #include <set>
@@ -97,6 +98,7 @@ public:
     Maker(session::World& w, std::uint32_t vehicle, std::uint64_t seed) : w_(w), vehicle_(vehicle), rng_(seed) {}
 
     std::uint32_t target = 0; ///< the vehicle a guidance capability that needs one follows
+    std::vector<Waypoint> waypoints; ///< the last route's, made beside its RouteCommand
 
     double uniform(double lo, double hi) { return std::uniform_real_distribution<double>(lo, hi)(rng_); }
     bool chance(double p) { return uniform(0.0, 1.0) < p; }
@@ -109,6 +111,34 @@ public:
             double* fields[8];
             const std::size_t n = std::min(commandFields(out, fields), d.parameters.size());
             for (std::size_t i = 0; i < n; ++i) *fields[i] = value(d.parameters[i], wild);
+            return true;
+        }
+        if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Route) { // its options, its waypoints beside them
+            const int points = wild ? 1 + static_cast<int>(pick(4)) : 2;
+            RouteCommand r;
+            if (wild) { // whole options mostly (a projection, a repeat, an end, a start it has), else anything its ranges allow
+                double* fields[8];
+                const std::size_t n = std::min(commandFields(out = r, fields), d.parameters.size());
+                for (std::size_t i = 0; i < n; ++i) *fields[i] = chance(0.9) ? static_cast<double>(pick(i == 3 ? static_cast<std::size_t>(points) : 2)) : value(d.parameters[i], wild);
+                r = std::get<RouteCommand>(out);
+            }
+            out = r;
+            const auto& s = state();
+            waypoints.clear();
+            for (int k = 0; k < points; ++k) {
+                const PositionCommand a = ahead(4000.0 * (k + 1));
+                Waypoint p;
+                p.latitudeRad = a.latitudeRad + (k % 2) * 2000.0 / kEarthRadiusM; // a turn at each point
+                p.longitudeRad = a.longitudeRad;
+                if (wild) {
+                    if (chance(0.05)) p.latitudeRad = std::numeric_limits<double>::quiet_NaN(); // one it cannot fly
+                    if (k > 0 && chance(0.05)) p = waypoints.back();                             // the same place twice
+                    if (chance(0.5)) p.altitudeM = s.altitudeMslM + uniform(-200.0, 200.0);
+                    if (chance(0.5)) p.speed = s.airspeedTrueMs > 5.0 ? s.airspeedTrueMs * uniform(0.85, 1.15) : uniform(2.0, 8.0);
+                    if (chance(0.2)) p.turn = 1.0;
+                }
+                waypoints.push_back(p);
+            }
             return true;
         }
         if (d.kind == CapabilityKind::Guidance) {
@@ -231,6 +261,18 @@ private:
     std::mt19937_64 rng_;
 };
 
+/// NEW of what the maker made: a route with the waypoints it made beside it.
+CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, const Maker& make, const CommandOptions& options = {}) {
+    if (const auto* route = std::get_if<RouteCommand>(&c)) return w.submit(v, *route, make.waypoints, options);
+    return w.submit(v, c, options);
+}
+
+/// UPDATE with what the maker made: a route's options, and now and then its waypoints.
+CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints) {
+    if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints) return w.update(activity, *route, make.waypoints);
+    return w.update(activity, c);
+}
+
 /// A command of another type than `c`: what an UPDATE of it must refuse.
 Command otherType(const Command& c) {
     if (std::holds_alternative<VelocityCommand>(c)) return AttitudeCommand{};
@@ -287,7 +329,7 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
             }
         } else {
             REQUIRE(make.cascade(d, false, c));
-            r = w.submit(v, c);
+            r = submitMade(w, v, c, make);
         }
         REQUIRE(r.accepted());
         CHECK(r.activity == activityId(v, ++serial));
@@ -395,7 +437,7 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         if (done.result.accepted()) CHECK(done.result.reason == Reason::None);
         else CHECK(among(done.result.reason, {Reason::UnknownCapability, Reason::Unavailable, Reason::VersionUnsupported, Reason::InvalidParameter,
                                               Reason::OutOfRange, Reason::InvalidAxes, Reason::AuthorityHeld, Reason::ControllerNotAxisAware,
-                                              Reason::PerformanceLimit}));
+                                              Reason::PerformanceLimit, Reason::InvalidWaypoint}));
         if ((done.result.flags & kClamped) != 0) CHECK(done.options.range == RangePolicy::Clamp);
         if (done.result.reason == Reason::AuthorityHeld) {
             const ActivityRecord* holder = was(done.result.other);
@@ -411,7 +453,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         else if (!target->live()) CHECK(done.result.reason == Reason::ActivityEnded);
         else if (done.op == Op::Cancel) CHECK(ok);
         else if (!ok)
-            CHECK(among(done.result.reason, {Reason::NotUpdatable, Reason::WrongCommandType, Reason::InvalidParameter, Reason::OutOfRange, Reason::PerformanceLimit}));
+            CHECK(among(done.result.reason, {Reason::NotUpdatable, Reason::WrongCommandType, Reason::InvalidParameter, Reason::OutOfRange, Reason::PerformanceLimit,
+                                             Reason::InvalidWaypoint}));
     }
 
     // every record: its state and its reason agree, and so does its end
@@ -613,7 +656,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             SupportCommand sc;
             const int kind = commandFor(d, c, sc);
             REQUIRE(kind >= 0);
-            done.result = kind == 1 ? w.submit(v, sc, done.options) : w.submit(v, c, done.options);
+            done.result = kind == 1 ? w.submit(v, sc, done.options) : submitMade(w, v, c, make, done.options);
             if (done.result.accepted()) issued.push_back(done.result.activity);
             break;
         }
@@ -638,7 +681,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             Command c;
             SupportCommand sc;
             const int kind = commandFor(d, c, sc);
-            done.result = kind == 1 ? w.update(done.addressed, sc) : kind == 0 ? w.update(done.addressed, c)
+            done.result = kind == 1 ? w.update(done.addressed, sc) : kind == 0 ? updateMade(w, done.addressed, c, make, make.chance(0.6))
                                                                           : w.update(done.addressed, Command(VelocityCommand{}));
             break;
         }
@@ -745,7 +788,8 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
         }
         for (const auto& [what, n] : seen) all[what] += n;
     }
-    CHECK(all["failed:target_lost"] > 0); // a follower whose target goes
+    CHECK(all["failed:target_lost"] > 0);   // a follower whose target goes
+    CHECK(all["new:invalid_waypoint"] > 0); // a route with a point it cannot fly (docs/vehicle-interface.md, 5.1)
     std::string summary;
     for (const auto& [what, n] : all) summary += what + " " + std::to_string(n) + "; ";
     INFO(summary);

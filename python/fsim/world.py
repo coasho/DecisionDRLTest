@@ -255,12 +255,58 @@ class AltitudeReference(enum.IntEnum):
     ELLIPSOID = 2
 
 
+class TurnType(enum.IntEnum):
+    """How a route passes a waypoint (A-GRA's TurnType): a fly-by turn begins before it, on a circle tangent to
+    both legs; a fly-over point is passed, then the next leg intercepted."""
+    FLY_BY = 0
+    FLY_OVER = 1
+
+
+class Projection(enum.IntEnum):
+    """What a route's legs are on the Earth."""
+    GREAT_CIRCLE = 0
+    RHUMB = 1
+
+
+class EndBehavior(enum.IntEnum):
+    """What a route does after its last point: on along the last leg (its course, altitude and speed), or loiter
+    there - a wing orbits the point, a rotorcraft stops and hovers over it."""
+    CONTINUE = 0
+    LOITER = 1
+
+
 #: The Vehicle Interface's modes (docs/vehicle-interface.md): their fixed-size setpoints' fields, in order. HOLD leaves
-#: one out: a NEW continues what a live one commanded (else what the aircraft flies now), an UPDATE keeps it.
-MODE_KINDS = ("hsa",)
-MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference")}
-MODE_DEFAULTS = {"hsa": (HOLD,) * 6}
-_REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference}
+#: one out: a NEW continues what a live hsa commanded (else what the aircraft flies now) and takes a route's option
+#: as its default; an UPDATE keeps it.
+MODE_KINDS = ("hsa", "route")
+MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference"),
+               "route": ("projection", "repeat", "end", "start")}
+MODE_DEFAULTS = {"hsa": (HOLD,) * 6, "route": (HOLD,) * 4}
+_REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "projection": Projection, "end": EndBehavior,
+               "turn": TurnType}
+
+Waypoint = collections.namedtuple(
+    "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id",
+    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0))
+Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that ends at it: reached at ``altitude_m`` above "
+                    "``altitude_reference`` along a straight profile (or climbing at ``climb_rate_ms``, then level), flown at "
+                    "``speed`` in ``speed_reference``, passed by ``turn`` (fsim.TurnType: 'fly_by', 'fly_over') with "
+                    "``max_bank_rad`` for its turn; ``id`` comes back in the progress. HOLD (the default) continues the "
+                    "previous point's; the first point's is the aircraft's own now, and a rotorcraft given no speed flies its "
+                    "cruise speed over the ground. References may be given by name.")
+
+
+def _waypoints(points):
+    """Waypoints (fsim.Waypoint, dicts of its fields, or rows in its order) as the native rows."""
+    rows = []
+    for p in points:
+        if isinstance(p, dict):
+            p = Waypoint(**p)
+        elif not isinstance(p, Waypoint):
+            p = Waypoint(*p)
+        values = [_REFERENCES[k][v.upper()] if isinstance(v, str) and k in _REFERENCES else v for k, v in zip(Waypoint._fields, p)]
+        rows.append(tuple(float(v) for v in values[:9]) + (int(values[9]),))
+    return rows
 
 
 def _row(level, values, fields):
@@ -309,13 +355,22 @@ class Activity:
 
     def update(self, *values, **fields):
         """A new setpoint: the level's fields by name (fsim.COMMAND_FIELDS),
-        the others as a new command's defaults, or all of them in order.
-        Returns True if a value was clamped; raises fsim.Rejected if the
-        activity has ended (preempted, completed, canceled) or takes no
-        updates (a behaviour: a new target is a new submit_behavior)."""
+        the others as a new command's defaults, or all of them in order - a
+        mode's fields given, the others kept (a route's options, its waypoints
+        kept and flown afresh). Returns True if a value was clamped; raises
+        fsim.Rejected if the activity has ended (preempted, completed,
+        canceled) or takes no updates (a behaviour: a new target is a new
+        submit_behavior)."""
         if self.level == Level.BEHAVIOR:  # the library answers: not_updatable, or why not
             return bool(_checked(self.world._h.activity_update(self.id, ()))[4])
         return bool(_checked(self.world._h.activity_update(self.id, _row(self.level, values, fields)))[4])
+
+    def update_route(self, waypoints=None, **options):
+        """UPDATE of a route: new ``waypoints`` (None: those it has) and the options given (the others kept);
+        checked as a NEW's, then flown afresh from its start, from where the aircraft is. Returns True if a value
+        was clamped; raises fsim.Rejected (``index`` the waypoint at fault)."""
+        rows = [] if waypoints is None else _waypoints(waypoints)
+        return bool(_checked(self.world._h.activity_update_route(self.id, _row("route", (), options), rows))[4])
 
     def cancel(self):
         """End it: its axes fly the vehicle default. Raises fsim.Rejected if it had already ended."""
@@ -484,6 +539,20 @@ class Vehicle:
         r = _checked(self._h.submit_mode(self.id, MODE_KINDS.index("hsa"), _row("hsa", values, fields), int(source), None, int(range),
                                          int(min_version)))
         return Activity(self._world, r[2], "hsa", bool(r[4]))
+
+    def submit_route(self, waypoints, *, projection=Projection.GREAT_CIRCLE, repeat=False, end=EndBehavior.CONTINUE, start=0,
+                     source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0):
+        """NEW for fsim.guidance.route, A-GRA's waypoint following (docs/vehicle-interface.md, 4.5): fly
+        ``waypoints`` (fsim.Waypoint, dicts of its fields, or rows in its order; at most 256) as legs - great circles
+        or rhumb lines (``projection``: fsim.Projection or "great_circle", "rhumb") - from where the aircraft is to
+        the point ``start``, with fly-by turns or fly-over points; again from the first point if ``repeat``; after
+        the last point, ``end`` (fsim.EndBehavior: "continue", "loiter"). An Activity that completes after the last
+        point (unless it repeats), whose progress names the point flown to; ``update_route`` gives it new waypoints
+        or options. fsim.Rejected if refused: ``index`` names the waypoint, ``constraint`` the limit it breaks."""
+        options = {"projection": projection, "repeat": 1.0 if repeat else 0.0, "end": end, "start": start}
+        r = _checked(self._h.submit_route(self.id, _row("route", (), options), _waypoints(waypoints), int(source), None, int(range),
+                                          int(min_version)))
+        return Activity(self._world, r[2], "route", bool(r[4]))
 
     def submit_support(self, kind, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, **fields):
         """NEW for a support effector the vehicle has - "gear" (down), "flaps"

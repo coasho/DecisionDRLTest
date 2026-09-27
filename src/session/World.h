@@ -108,9 +108,14 @@ public:
     control::CommandResult submit(std::uint32_t id, const control::Command& command, const control::CommandOptions& options = {});
     /// NEW for a support effector the vehicle has (gear, flaps, brakes, speedbrake, pitch trim) or its engines' throttles.
     control::CommandResult submit(std::uint32_t id, const control::SupportCommand& command, const control::CommandOptions& options = {});
+    /// NEW of a route (fsim.guidance.route) with its waypoints (docs/vehicle-interface.md, 4.5).
+    control::CommandResult submit(std::uint32_t id, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
+                                  const control::CommandOptions& options = {});
     /// UPDATE: a new setpoint for a live activity (the fast path).
     control::CommandResult update(control::ActivityId activity, const control::Command& setpoint);
     control::CommandResult update(control::ActivityId activity, const control::SupportCommand& setpoint);
+    /// UPDATE of a route: new options (kHold keeps one) and waypoints (none: those it has); flown afresh from its start.
+    control::CommandResult update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// What flies a vehicle's primary axes nobody owns: the neutral actuator
@@ -135,6 +140,8 @@ public:
     const control::VehicleProfile* profile(std::uint32_t id) const noexcept;
     control::ControlStack* controls(std::uint32_t id) noexcept;
     const control::ControlStack* controls(std::uint32_t id) const noexcept;
+    /// What the vehicle can do, as its guidance plans with it (docs/vehicle-interface.md, 7.1); null for an unknown vehicle.
+    const control::Performance* performance(std::uint32_t id) const noexcept;
 
     // --- Effects ---------------------------------------------------------------
     bool addEffect(std::uint32_t id, std::unique_ptr<effects::Effect> effect);

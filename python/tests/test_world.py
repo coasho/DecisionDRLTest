@@ -310,7 +310,8 @@ class CapabilityTest(unittest.TestCase):
         caps = {cap.id: cap for cap in v.capabilities()}
         self.assertEqual(caps["fsim.guidance.formation"].mode, "formation")
         self.assertEqual(caps["fsim.flight.velocity"].mode, "none")
-        self.assertEqual(agra.flight_capabilities(v), {"FORMATION": ["fsim.guidance.formation"], "HSA_CSA": ["fsim.guidance.hsa"]})
+        self.assertEqual(agra.flight_capabilities(v), {"FORMATION": ["fsim.guidance.formation"], "HSA_CSA": ["fsim.guidance.hsa"],
+                                                       "WAYPOINT_FOLLOWING": ["fsim.guidance.route"]})
         route.cancel()
         self.assertEqual(agra.activity_state(route.info), "FAILED")
         self.assertEqual(agra.cannot_comply(route.info.reason), "CANCELED")
@@ -341,6 +342,43 @@ class CapabilityTest(unittest.TestCase):
         self.assertEqual(caps["fsim.guidance.hsa"].mode, "hsa_csa")
         self.assertEqual([q.name for q in caps["fsim.guidance.hsa"].parameters], list(fsim.MODE_FIELDS["hsa"]))
         self.assertEqual(fsim.agra.flight_capabilities(v)["HSA_CSA"], ["fsim.guidance.hsa"])
+
+    def test_route_mode(self):
+        world = make_world(name="py-route")
+        v = fly(world, "route")
+        s = v.state
+        lat, lon = float(s.latitude_rad), float(s.longitude_rad)
+        step = 3000.0 / 6371008.8
+        points = [fsim.Waypoint(lat, lon + step / math.cos(lat), altitude_m=1550.0, speed=55.0, speed_reference="true_airspeed", id=41),
+                  {"latitude_rad": lat + step, "longitude_rad": lon + step / math.cos(lat), "turn": "fly_over", "id": 42},
+                  (lat + step, lon + 2 * step / math.cos(lat))]  # a row in Waypoint's order: the rest as before
+        a = v.submit_route(points, end="loiter")
+        self.assertEqual(a.level, "route")
+        world.step(10)
+        p = a.progress
+        self.assertEqual((p.segment, p.segments, p.segment_id), (0, 3, 41))
+        self.assertEqual((p.speed_ms, p.speed_reference), (55.0, fsim.SpeedReference.TRUE_AIRSPEED))
+        self.assertTrue(0.0 < p.percent < 100.0 and p.distance_to_go_m > 6000.0)
+        # its options alone: its waypoints kept, flown afresh from the point it names
+        a.update(start=2)
+        world.step()
+        self.assertEqual(a.progress.segment, 2)
+        # new waypoints (from the first: the start it had is kept, as every option not given); one it cannot fly is refused, naming it
+        with self.assertRaises(fsim.Rejected) as refused:
+            a.update_route([points[0], (float("nan"), lon)], start=0)
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_waypoint", 1))
+        a.update_route(points[:2], projection="rhumb", start=0)
+        world.step()
+        self.assertEqual((a.progress.segment, a.progress.segments), (0, 2))
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_route([])
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_waypoint", 0))
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_route(points, start=5)
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_parameter", 3))
+        caps = {c.id: c for c in v.capabilities()}
+        self.assertEqual(caps["fsim.guidance.route"].mode, "waypoint_following")
+        self.assertEqual([q.name for q in caps["fsim.guidance.route"].parameters], list(fsim.MODE_FIELDS["route"]))
 
     def test_authority_and_refusals(self):
         world = make_world(name="py-authority")

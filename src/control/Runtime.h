@@ -14,6 +14,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <memory>
 
 namespace fsim::control {
 
@@ -34,6 +35,7 @@ inline void assignSetpoint(Command& dst, const Command& src) noexcept {
     case 3: as(VelocityCommand{}); break;
     case 4: as(PositionCommand{}); break;
     case 6: as(HsaCommand{}); break;
+    case 7: as(RouteCommand{}); break;
     default: break;
     }
 }
@@ -112,6 +114,9 @@ struct RuntimeConfig {
     /// What the vehicle can do, for its guidance modes (ControlContext::performance):
     /// the host writes it when it binds and when the vehicle's loops change.
     Performance performance{};
+    /// The route a guidance mode flies (ControlContext::path): allocated at the
+    /// vehicle's first route and kept; the host writes it between steps.
+    std::unique_ptr<PathStore> path;
     /// Per primary axis: bumped each time it returns to the vehicle default
     /// (or the default becomes a hold), so the hold captures it afresh.
     std::array<std::uint32_t, kPrimaryAxisCount> letGo{};

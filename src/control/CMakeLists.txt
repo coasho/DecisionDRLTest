@@ -23,6 +23,8 @@ add_library(fsim_control STATIC
     Builtin.cpp
     Rotor.cpp
     Atmosphere.h
+    Route.h
+    Route.cpp
     Guidance.cpp)
 add_library(fsim::control ALIAS fsim_control)
 

@@ -505,11 +505,37 @@ bool toSupport(int kind, const double* f, uint32_t count, fsim::control::Support
 
 /// A mode's setpoint from its fields in order; false if the mode or the count is wrong.
 bool toMode(int mode, const double* fields, uint32_t count, fsim::control::Command& out) noexcept {
-    if (mode != FSIM_MODE_HSA || !fields) return false;
-    out = fsim::control::HsaCommand{};
+    if (!fields) return false;
+    if (mode == FSIM_MODE_HSA) out = fsim::control::HsaCommand{};
+    else if (mode == FSIM_MODE_ROUTE) out = fsim::control::RouteCommand{};
+    else return false;
     double* slots[8];
     if (count != fsim::control::commandFields(out, slots)) return false;
     for (uint32_t i = 0; i < count; ++i) *slots[i] = fields[i];
+    return true;
+}
+
+/// A route's waypoints as the caller's header laid them out (`waypoints[0].struct_size`
+/// apart), into the world's buffer; false if they cannot be read.
+bool toWaypoints(fsim_world* w, const fsim_waypoint* waypoints, uint32_t count) {
+    w->waypoints.clear();
+    if (count == 0) return true;
+    if (!waypoints) return false;
+    const uint32_t stride = waypoints[0].struct_size;
+    if (stride < offsetof(fsim_waypoint, altitude_m)) return false; // not even its position
+    const auto* bytes = reinterpret_cast<const unsigned char*>(waypoints);
+    w->waypoints.resize(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        fsim_waypoint c;
+        fsim_waypoint_init(&c);
+        std::memcpy(&c, bytes + static_cast<std::size_t>(i) * stride, std::min<std::size_t>(stride, sizeof c)); // what the caller's has
+        fsim::control::Waypoint& p = w->waypoints[i];
+        p.latitudeRad = c.latitude_rad, p.longitudeRad = c.longitude_rad;
+        p.altitudeM = c.altitude_m, p.altitudeReference = c.altitude_reference;
+        p.speed = c.speed, p.speedReference = c.speed_reference;
+        p.turn = c.turn, p.maxBankRad = c.max_bank_rad, p.climbRateMs = c.climb_rate_ms;
+        p.id = c.id;
+    }
     return true;
 }
 
@@ -531,9 +557,9 @@ UpdateShape updateShape(fsim_world* w, fsim::control::ActivityId activity) {
     const auto& d = all[a->capability];
     for (std::size_t k = 0; k < fsim::control::kSupportKinds; ++k)
         if (d.id == fsim::control::supportCapability(k)) shape.support = static_cast<int>(k);
-    if (d.setpoint == fsim::control::SetpointKind::Hsa) {
-        shape.mode = FSIM_MODE_HSA;
-        shape.fields = fsim_mode_field_count(FSIM_MODE_HSA);
+    if (d.setpoint == fsim::control::SetpointKind::Hsa || d.setpoint == fsim::control::SetpointKind::Route) {
+        shape.mode = d.setpoint == fsim::control::SetpointKind::Hsa ? FSIM_MODE_HSA : FSIM_MODE_ROUTE;
+        shape.fields = fsim_mode_field_count(shape.mode);
     } else if (shape.support >= 0) {
         shape.fields = static_cast<uint32_t>(d.parameters.size()); // set beside the cascade: a support effector or the engines
     } else if (d.kind == fsim::control::CapabilityKind::Flight) {
@@ -638,10 +664,50 @@ FSIM_API int fsim_vehicle_submit_behavior(fsim_world* world, uint32_t id, const 
 }
 
 FSIM_API uint32_t fsim_mode_field_count(int mode) {
-    if (mode != FSIM_MODE_HSA) return 0;
-    fsim::control::Command c = fsim::control::HsaCommand{};
+    fsim::control::Command c;
+    if (mode == FSIM_MODE_HSA) c = fsim::control::HsaCommand{};
+    else if (mode == FSIM_MODE_ROUTE) c = fsim::control::RouteCommand{};
+    else return 0;
     double* slots[8];
     return static_cast<uint32_t>(fsim::control::commandFields(c, slots));
+}
+
+FSIM_API void fsim_waypoint_init(fsim_waypoint* waypoint) {
+    if (!waypoint) return;
+    const double hold = fsim::control::kHold;
+    *waypoint = fsim_waypoint{};
+    waypoint->struct_size = sizeof *waypoint;
+    waypoint->altitude_m = waypoint->altitude_reference = waypoint->speed = waypoint->speed_reference = hold;
+    waypoint->turn = FSIM_TURN_FLY_BY;
+    waypoint->max_bank_rad = waypoint->climb_rate_ms = hold;
+}
+
+FSIM_API int fsim_vehicle_submit_route(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_waypoint* waypoints,
+                                       uint32_t waypoint_count, const fsim_command_options* options, fsim_command_result* result) {
+    fsim::control::Command c;
+    if (!world || !result || !toMode(FSIM_MODE_ROUTE, fields, count, c))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_route: a route takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_ROUTE)) + " fields");
+    try { // (no std::function: an UPDATE every step allocates nothing)
+        if (!toWaypoints(world, waypoints, waypoint_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_route: waypoints without their struct_size");
+        toC(world, world->world.submit(id, std::get<fsim::control::RouteCommand>(c), world->waypoints, fromC(options)), result);
+        return FSIM_OK;
+    } catch (const std::exception& e) {
+        return fail(FSIM_ERROR, std::string("fsim_vehicle_submit_route: ") + e.what());
+    }
+}
+
+FSIM_API int fsim_activity_update_route(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
+                                        const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result) {
+    fsim::control::Command c;
+    if (!world || !result || !toMode(FSIM_MODE_ROUTE, fields, count, c))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route: a route takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_ROUTE)) + " fields");
+    try {
+        if (!toWaypoints(world, waypoints, waypoint_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route: waypoints without their struct_size");
+        toC(world, world->world.update(activity, std::get<fsim::control::RouteCommand>(c), world->waypoints), result);
+        return FSIM_OK;
+    } catch (const std::exception& e) {
+        return fail(FSIM_ERROR, std::string("fsim_activity_update_route: ") + e.what());
+    }
 }
 
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,

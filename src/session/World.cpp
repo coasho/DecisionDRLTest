@@ -358,6 +358,22 @@ control::CommandResult World::submit(std::uint32_t id, const control::Command& c
     return r;
 }
 
+control::CommandResult World::submit(std::uint32_t id, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
+                                     const control::CommandOptions& options) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    const control::CommandResult r = e->host.submit(route, waypoints, options, pool_->states()[e->slot], simTime_);
+    if (r.accepted()) {
+        e->commanded = r.activity;
+        levelChanged(*e);
+    }
+    return r;
+}
+
 control::CommandResult World::submit(std::uint32_t id, const control::SupportCommand& command, const control::CommandOptions& options) {
     Entry* e = entry(id);
     if (!e) {
@@ -409,7 +425,15 @@ control::CommandResult World::update(control::ActivityId activity, const control
 }
 
 control::CommandResult World::update(control::ActivityId activity, const control::Command& setpoint) {
-    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, setpoint);
+    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, setpoint, pool_->states()[e->slot]);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownActivity;
+    r.activity = activity;
+    return r;
+}
+
+control::CommandResult World::update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints) {
+    if (Entry* e = entry(control::activityVehicle(activity))) return e->host.update(activity, route, waypoints, pool_->states()[e->slot]);
     control::CommandResult r;
     r.reason = control::Reason::UnknownActivity;
     r.activity = activity;
@@ -476,6 +500,11 @@ control::ControlStack* World::controls(std::uint32_t id) noexcept {
 const control::ControlStack* World::controls(std::uint32_t id) const noexcept {
     const Entry* e = entry(id);
     return e ? &e->stack : nullptr;
+}
+
+const control::Performance* World::performance(std::uint32_t id) const noexcept {
+    const Entry* e = entry(id);
+    return e ? &e->host.performance() : nullptr;
 }
 
 bool World::addEffect(std::uint32_t id, std::unique_ptr<effects::Effect> effect) {

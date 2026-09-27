@@ -269,11 +269,52 @@ world.update(a, climb);
 In a 12 m/s crosswind a c172x, a B-52H and an F-16C hold a course within
 0.2° and a ground speed exactly; the tests are in `tests/test_modes.cpp`.
 
+### Routes: waypoint following
+
+`fsim.guidance.route` is A-GRA's waypoint following. A `RouteCommand` holds
+its options, and its waypoints (at most 256) go beside it into the vehicle's
+path store:
+
+```cpp
+std::vector<Waypoint> route(3);
+route[0].latitudeRad = ..., route[0].longitudeRad = ...;   // 0 flown to from where the aircraft is
+route[0].altitudeM = 1600, route[0].speed = 55;            // (true airspeed: SpeedReference's default for a wing)
+route[1].turn = double(TurnType::FlyOver);                 // passed over, then the next leg intercepted
+route[2].climbRateMs = 3;                                  // climb at 3 m/s, then level
+RouteCommand options;
+options.repeat = 1;                                        // round and round (Projection, EndBehavior, start: the others)
+auto a = v.submit(options, route).activity;
+world.update(a, options, other);                           // a new route, flown from where the aircraft is
+```
+
+- **Legs.** Great circles between the points, or rhumb lines (`Projection::Rhumb`); the first from where the aircraft is when the route starts. Distances and the cross-track are measured on the sphere, not on a flat map: a 120 km leg east at 60° north bows 489 m to the north.
+- **Turns.** A fly-by point is turned early, on a circle tangent to both legs. The circle's radius is the one 80 % of the aircraft's bank (or the point's `maxBankRad`) gives at the faster segment's speed plus the wind. A turn of more than 150° is flown over. A fly-over point is passed abeam and the next leg intercepted.
+- **Profiles.** The altitude runs straight from point to point, or climbs at the point's `climbRateMs` and levels. Each segment flies its point's speed, in its reference.
+- **Left out.** A waypoint's fields continue the previous point's. The first point's are what the aircraft flies now, and a rotorcraft given no speed flies its cruise speed over the ground.
+- **End.** The activity completes after the last point, unless the route repeats (`progress.laps` counts). It then flies on along the last leg (`EndBehavior::Continue`), or loiters there (`Loiter`): a wing orbits the point, a rotorcraft stops and hovers over it.
+- **Checked** as it is given:
+  - A point that cannot be flown is refused `invalid_waypoint`, and `index` names it: not finite, out of range, a speed not above 0, the same place as the one before.
+  - A value beyond the aircraft's limits is clamped or refused `performance_limit`: speed, altitude, bank, climb rate.
+  - A leg too short for the fly-by turns at its ends has them flown smaller (clamped, the point named) or, under `RangePolicy::Reject`, is refused `invalid_waypoint`.
+  - A gradient steeper than the aircraft climbs is flown at its climb rate (clamped) or, under Reject, refused `performance_limit` with `MaxClimbRate`.
+- **UPDATE** replaces the options given (a field left out, `kHold`, keeps its value) and the waypoints (none: those it has). The route is then flown afresh from its start, from where the aircraft is.
+- **Flown** by one path follower (`RouteBehavior`, `fsim/GuidanceModes.h`), line of sight to the path with its curvature fed forward, its gains the vehicle's own course bandwidth:
+  - A wing flies it as a turn rate. It begins and ends each turn early by as long as its roll lags, and a slow integral takes out a turn-rate bias.
+  - A rotorcraft flies it as a velocity over the ground, nose along the track. It slows for a turn only as much as the turn's radius asks, and to stop only at an end where it loiters.
+
+`progress` names the point flown to and its id, the laps, the percent of the
+segment and of the route, the distance and time to go and the cross-track.
+In a 12 m/s crosswind the c172x, B-52H and F-16C hold each leg within 15 m.
+The UH-60A holds within 11 m and the IRIS within 1.1 m (5 m/s), and the
+rotorcraft keep 80 % of their speed through the turns (`tests/test_routes.cpp`).
+`fsim python examples/python/vehicle_interface.py` flies four of them for the
+viewer.
+
 **New reasons.** `invalid_waypoint`, `invalid_curve`, `performance_limit`,
 `not_granted`, `not_allowed`, `revoked`, `released`, `collision_avoidance`
 and `restricted` belong to ADR-28's modes and grants.
 
-**From C and Python.** `fsim_vehicle_submit_mode(world, id, FSIM_MODE_HSA, fields, 6, &options, &result)` and `vehicle.submit_hsa(course_rad=..., speed=..., speed_reference="mach", altitude_m=...)` submit an hsa; `fsim_activity_update` and `activity.update(altitude_m=...)` change only what they give. The C ABI's result carries the index plus one in
+**From C and Python.** `fsim_vehicle_submit_mode(world, id, FSIM_MODE_HSA, fields, 6, &options, &result)` and `vehicle.submit_hsa(course_rad=..., speed=..., speed_reference="mach", altitude_m=...)` submit an hsa; `fsim_activity_update` and `activity.update(altitude_m=...)` change only what they give. `fsim_vehicle_submit_route(world, id, fields, 4, waypoints, n, &options, &result)` (`fsim_waypoint`, `fsim_waypoint_init`) and `vehicle.submit_route([fsim.Waypoint(lat, lon, speed=55.0), ...], repeat=True)` submit a route; `fsim_activity_update_route` and `activity.update_route(waypoints, **options)` replace it. The C ABI's result carries the index plus one in
 `fsim_command_result.reserved`; `fsim_last_command_detail()` has the rest,
 `fsim_activity_get_progress()` the progress, `fsim_vehicle_commanded()` the
 commanded state, `fsim_vehicle_capability_flight_mode()` a capability's type

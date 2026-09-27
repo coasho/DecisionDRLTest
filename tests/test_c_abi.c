@@ -2,6 +2,7 @@
 #include "fsim/fsim_c.h"
 
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -669,6 +670,61 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_update(world, mode_id, alt, 6, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
             CHECK(strcmp(fsim_reason_name(cr.reason), "invalid_parameter") == 0 && cr.reserved == 3);
             CHECK(fsim_activity_cancel(world, mode_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        }
+        {
+            /* ABI 1.6: a route - its options in fields, its waypoints beside them; an UPDATE with new ones or none */
+            double options[4], later[4];
+            fsim_waypoint way[3];
+            double older[3 * (offsetof(fsim_waypoint, id) / sizeof(double))]; /* an older header's waypoints: no id */
+            fsim_activity_progress progress;
+            fsim_command_detail detail;
+            fsim_activity_id route_id;
+            const fsim_vehicle_state* s = fsim_vehicle_state_ptr(world, b);
+            int i;
+            CHECK(fsim_mode_field_count(FSIM_MODE_ROUTE) == 4);
+            options[0] = FSIM_PROJECTION_GREAT_CIRCLE; options[1] = 0.0; options[2] = FSIM_END_CONTINUE; options[3] = 0.0;
+            for (i = 0; i < 3; ++i) {
+                fsim_waypoint_init(&way[i]);
+                way[i].latitude_rad = s->latitude_rad + 0.00035 * (i + 1); /* 2.2 km apart, north */
+                way[i].longitude_rad = s->longitude_rad + (i == 1 ? 0.0005 : 0.0);
+                way[i].id = 7 + (uint64_t)i;
+            }
+            CHECK(way[0].struct_size == sizeof way[0] && isnan(way[0].speed) && way[0].turn == FSIM_TURN_FLY_BY);
+            way[0].altitude_m = 1550.0;
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE; /* b's autopilot holds its height (above) */
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, way, 3, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            route_id = cr.activity;
+            CHECK(fsim_vehicle_submit_route(world, b, options, 3, way, 3, &co, &cr) != FSIM_OK); /* malformed: 4 fields */
+            CHECK(fsim_world_step(world, 2) == FSIM_OK);
+            fsim_activity_progress_init(&progress);
+            CHECK(fsim_activity_get_progress(world, route_id, &progress) == FSIM_OK);
+            CHECK(progress.segment == 0 && progress.segments == 3 && progress.segment_id == 7 && progress.altitude_msl_m < 1550.0);
+            /* a waypoint it cannot fly: refused, naming it; its reserved is the index + 1 */
+            way[2].latitude_rad = NAN;
+            CHECK(fsim_activity_update_route(world, route_id, options, 4, way, 3, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 3);
+            fsim_command_detail_init(&detail);
+            CHECK(fsim_last_command_detail(world, &detail) == FSIM_OK && detail.index == 2);
+            /* new waypoints laid out by an older header, its struct_size apart (without the id): the rest as fsim_waypoint_init leaves it */
+            way[2].latitude_rad = s->latitude_rad + 0.00105;
+            for (i = 0; i < 3; ++i) {
+                way[i].struct_size = (uint32_t)offsetof(fsim_waypoint, id);
+                memcpy((char*)older + (size_t)i * offsetof(fsim_waypoint, id), &way[i], offsetof(fsim_waypoint, id));
+            }
+            CHECK(fsim_activity_update_route(world, route_id, options, 4, (const fsim_waypoint*)(const void*)older, 3, &cr) == FSIM_OK &&
+                  cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_world_step(world, 1) == FSIM_OK && fsim_activity_get_progress(world, route_id, &progress) == FSIM_OK);
+            CHECK(progress.segment_id == 0); /* (the ids were beyond the size given) */
+            /* its options alone keep its waypoints: flown again from the point it starts at */
+            later[0] = later[1] = later[2] = fsim_hold(); later[3] = 2.0;
+            CHECK(fsim_activity_update(world, route_id, later, 4, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_world_step(world, 1) == FSIM_OK && fsim_activity_get_progress(world, route_id, &progress) == FSIM_OK);
+            CHECK(progress.segment == 2 && progress.segments == 3);
+            /* a route through the modes' call has no waypoints */
+            CHECK(fsim_vehicle_submit_mode(world, b, FSIM_MODE_ROUTE, options, 4, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 1);
+            CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
         }
         {
             /* the profile: a stock c172x carries no sections */

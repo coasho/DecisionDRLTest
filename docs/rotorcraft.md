@@ -218,6 +218,12 @@ it supports.
   `waypoints` and `loiter` given no airspeed fly the position loop's own
   speed (a route from a hover never moved: its speed was the hover's
   airspeed, none), and `loiter` circles down to a metre.
+- The Vehicle Interface's modes fly a rotorcraft over the ground (VI-3, VI-4).
+  `hsa` holds a ground speed along a heading or course, or an airspeed. A
+  `route` flies its legs as a velocity over the ground, the nose along the
+  track; it slows for a turn only as much as the turn's radius asks (its
+  radius planned from the velocity loop's tilt), stops only at an end where
+  it loiters, and hovers there.
 - Protection's wing limits are for aircraft with `kFeatureWingborne`.
 
 ### 3.4 Commands: fields a rotorcraft needs

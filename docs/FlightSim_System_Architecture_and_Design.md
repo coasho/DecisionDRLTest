@@ -676,7 +676,10 @@ its first step made the behaviours offered to rotorcraft fly as rotorcraft fly -
 and loiters at the position loop's speed - and added the guidance tests the analysis found missing; the second told a
 consumer what a rejection was about, how far an activity has got and what the cascade commands; the third added the
 HSA/CSA mode - a heading or a course, a speed in any reference and an altitude above sea level or the ground, with
-partial updates, checked against each aircraft's performance and flown by wings and rotorcraft alike.
+partial updates, checked against each aircraft's performance and flown by wings and rotorcraft alike; the fourth,
+waypoint following - great-circle and rhumb legs, fly-by turns sized for the aircraft and the wind, fly-over points,
+altitude and speed profiles, every point checked - flown by one path follower that anticipates each turn by the
+aircraft's own roll lag.
 M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |

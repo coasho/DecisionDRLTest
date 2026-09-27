@@ -869,6 +869,90 @@ static PyObject* world_submit_mode(PyObject* o, PyObject* const* args, Py_ssize_
     return result_tuple(self->world, &r);
 }
 
+/* A route's waypoints: rows of (latitude_rad, longitude_rad, altitude_m, altitude_reference, speed,
+ * speed_reference, turn, max_bank_rad, climb_rate_ms, id) - NaN leaves one out. *out is PyMem-allocated
+ * (free it); the count, or -1 with an error set. */
+static Py_ssize_t read_waypoints(PyObject* o, fsim_waypoint** out) {
+    *out = NULL;
+    PyObject* seq = PySequence_Fast(o, "waypoints must be a sequence of 10-number rows");
+    if (!seq) return -1;
+    const Py_ssize_t count = PySequence_Size(seq);
+    fsim_waypoint* points = (fsim_waypoint*)PyMem_Malloc(sizeof(fsim_waypoint) * (size_t)(count ? count : 1));
+    for (Py_ssize_t i = 0; points && i < count; ++i) {
+        PyObject* row = PySequence_GetItem(seq, i);
+        PyObject* r = row ? PySequence_Fast(row, "each waypoint must be 10 numbers") : NULL;
+        fsim_waypoint* w = &points[i];
+        fsim_waypoint_init(w);
+        if (r && PySequence_Size(r) == 10) {
+            double v[9];
+            for (int k = 0; k < 9 && !PyErr_Occurred(); ++k) {
+                PyObject* item = PySequence_GetItem(r, k);
+                v[k] = item ? PyFloat_AsDouble(item) : 0.0;
+                Py_XDECREF(item);
+            }
+            PyObject* id = PySequence_GetItem(r, 9);
+            if (id && !PyErr_Occurred()) {
+                w->id = (uint64_t)PyLong_AsUnsignedLongLong(id);
+                if (PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "a waypoint's id must be a whole number from 0");
+            }
+            Py_XDECREF(id);
+            w->latitude_rad = v[0], w->longitude_rad = v[1], w->altitude_m = v[2], w->altitude_reference = v[3];
+            w->speed = v[4], w->speed_reference = v[5], w->turn = v[6], w->max_bank_rad = v[7], w->climb_rate_ms = v[8];
+        } else if (r) {
+            PyErr_SetString(PyExc_ValueError, "each waypoint must be (latitude_rad, longitude_rad, altitude_m, altitude_reference, speed, "
+                                              "speed_reference, turn, max_bank_rad, climb_rate_ms, id)");
+        }
+        Py_XDECREF(r);
+        Py_XDECREF(row);
+        if (PyErr_Occurred()) break;
+    }
+    Py_DECREF(seq);
+    if (!points) PyErr_NoMemory();
+    if (PyErr_Occurred()) {
+        PyMem_Free(points);
+        return -1;
+    }
+    *out = points;
+    return count;
+}
+
+/* submit_route(id, values, waypoints, source=None, axes=None, range=None, min_version=None) -> result */
+static PyObject* world_submit_route(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    double row[8];
+    fsim_command_options opt;
+    fsim_command_result r;
+    fsim_waypoint* points = NULL;
+    if (!check_args(n, 3, 7, "submit_route") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "submit_route");
+    if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
+    const Py_ssize_t np = read_waypoints(args[2], &points);
+    if (np < 0) return NULL;
+    const int rc = fsim_vehicle_submit_route(self->world, id, row, (uint32_t)count, points, (uint32_t)np, &opt, &r);
+    PyMem_Free(points);
+    if (rc != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
+/* activity_update_route(activity, values, waypoints) -> result; waypoints may be empty: the route's own */
+static PyObject* world_activity_update_route(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t activity;
+    double row[8];
+    fsim_command_result r;
+    fsim_waypoint* points = NULL;
+    if (!check_args(n, 3, 3, "activity_update_route") || !as_u64(args[0], &activity) || !WORLD_IDLE(self)) return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "activity_update_route");
+    if (count < 0) return NULL;
+    const Py_ssize_t np = read_waypoints(args[2], &points);
+    if (np < 0) return NULL;
+    const int rc = fsim_activity_update_route(self->world, activity, row, (uint32_t)count, points, (uint32_t)np, &r);
+    PyMem_Free(points);
+    if (rc != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
 /* submit_support(id, kind, values, source=None, axes=None, range=None, min_version=None) -> result */
 static PyObject* world_submit_support(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
@@ -1404,6 +1488,8 @@ static PyMethodDef world_methods[] = {
     FAST("submit_behavior", world_submit_behavior, "submit_behavior(id, behavior, target, params, points, source, axes, range, min_version) -> result"),
     FAST("submit_support", world_submit_support, "submit_support(id, kind, values, source, axes, range, min_version) -> result"),
     FAST("submit_mode", world_submit_mode, "submit_mode(id, mode, values, source, axes, range, min_version) -> result"),
+    FAST("submit_route", world_submit_route, "submit_route(id, values, waypoints, source, axes, range, min_version) -> result"),
+    FAST("activity_update_route", world_activity_update_route, "activity_update_route(activity, values, waypoints) -> result"),
     FAST("activity_update", world_activity_update, "activity_update(activity, values) -> result"),
     FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride[, fields])"),
     FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity) -> result"),

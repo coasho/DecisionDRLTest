@@ -512,19 +512,55 @@ FSIM_API void fsim_commanded_state_init(fsim_commanded_state* state);
 FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_commanded_state* out);
 
 /* The Vehicle Interface's modes: fixed-size setpoints, as a level's are, that
- * take UPDATE (docs/vehicle-interface.md, 4). FSIM_MODE_HSA is fsim.guidance.hsa
- * (A-GRA's HSA/CSA): fields heading_rad, course_rad (one of them), speed,
- * speed_reference (fsim_speed_reference), altitude_m, altitude_reference
- * (fsim_altitude_reference); fsim_hold() leaves one out. A NEW continues what
- * a live hsa commanded, else what the aircraft flies now; a reference alone
- * takes the aircraft's own value in it. fsim_activity_update takes the same
- * fields and keeps the ones left out. */
-enum fsim_mode { FSIM_MODE_HSA = 0 };
+ * take UPDATE (docs/vehicle-interface.md, 4).
+ * - FSIM_MODE_HSA is fsim.guidance.hsa (A-GRA's HSA/CSA): fields heading_rad,
+ *   course_rad (one of them), speed, speed_reference (fsim_speed_reference),
+ *   altitude_m, altitude_reference (fsim_altitude_reference); fsim_hold()
+ *   leaves one out. A NEW continues what a live hsa commanded, else what the
+ *   aircraft flies now; a reference alone takes the aircraft's own value in it.
+ *   fsim_activity_update takes the same fields and keeps the ones left out.
+ * - FSIM_MODE_ROUTE is fsim.guidance.route (A-GRA's waypoint following):
+ *   fields projection (fsim_projection), repeat (1: fly it again from its first
+ *   point), end (fsim_end_behavior), start (the waypoint flown to first). Its
+ *   waypoints go beside them, through fsim_vehicle_submit_route below: with
+ *   fsim_vehicle_submit_mode it has none and is refused (invalid_waypoint).
+ *   fsim_activity_update with a route's fields keeps its waypoints and flies
+ *   it afresh from its start; fsim_hold() keeps an option. */
+enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1 };
 enum fsim_speed_reference { FSIM_SPEED_TRUE_AIRSPEED = 0, FSIM_SPEED_CALIBRATED_AIRSPEED, FSIM_SPEED_GROUND_SPEED, FSIM_SPEED_MACH };
 enum fsim_altitude_reference { FSIM_ALTITUDE_MSL = 0, FSIM_ALTITUDE_ABOVE_GROUND, FSIM_ALTITUDE_ELLIPSOID };
-FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 6; 0 for an unknown mode */
+enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER };
+enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
+enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft) */
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 6, route 4; 0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result);
+
+/* One waypoint of a route, and the segment that ends at it. fsim_waypoint_init
+ * leaves every optional field out (fsim_hold()): the previous point's, the
+ * first point's the aircraft's own now (a rotorcraft given no speed flies its
+ * cruise speed over the ground). */
+typedef struct fsim_waypoint {
+    uint32_t struct_size;
+    double latitude_rad, longitude_rad;
+    double altitude_m, altitude_reference; /* fsim_altitude_reference; reached at the point along a straight profile */
+    double speed, speed_reference;         /* fsim_speed_reference; flown on the segment to the point */
+    double turn;                           /* fsim_turn_type; fsim_waypoint_init: fly-by */
+    double max_bank_rad;                   /* the bank its fly-by turn is planned with; left out: 80 % of the aircraft's */
+    double climb_rate_ms;                  /* climb or descend at it, then level; left out: along the segment's gradient */
+    uint64_t id;                           /* the caller's, reported back in the progress */
+} fsim_waypoint;
+FSIM_API void fsim_waypoint_init(fsim_waypoint* waypoint);
+/* A route (FSIM_MODE_ROUTE's fields, `count` of them) with at most 256
+ * waypoints, `waypoints[0].struct_size` bytes apart (the caller's header's
+ * size). A rejection names the waypoint at fault: the result's reserved is
+ * its index + 1, and fsim_last_command_detail has it. */
+FSIM_API int fsim_vehicle_submit_route(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_waypoint* waypoints,
+                                       uint32_t waypoint_count, const fsim_command_options* options, fsim_command_result* result);
+/* UPDATE of a route: its options (fsim_hold() keeps one) and new waypoints
+ * (none: those it has), checked as a NEW's; flown afresh from its start. */
+FSIM_API int fsim_activity_update_route(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
+                                        const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result);
 
 /* A-GRA's flight capability types (MA_FlightCapabilityEnum). */
 enum fsim_flight_mode {

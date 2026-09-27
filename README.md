@@ -126,6 +126,7 @@ push, not yet tagged:
 - **The Vehicle Interface** ([docs/vehicle-interface.md](docs/vehicle-interface.md), ADR-28): A-GRA ASK 6.0a's flight
   semantics for a mission autonomy, in C++, the C ABI and Python, on every aircraft:
   - the HSA/CSA mode: a heading or a course, a speed in true, calibrated, ground-speed or Mach terms, and an altitude above sea level or above the ground; it takes partial updates and is checked against each aircraft's performance;
+  - waypoint following: routes of great circles or rhumb lines with fly-by turns sized for the aircraft and the wind, fly-over points, altitude and speed profiles, repeats and an end to continue or loiter, each point checked and named when refused, flown by one path follower on wings and rotorcraft alike (`fsim python examples/python/vehicle_interface.py`);
   - rejections that name the field and the limit;
   - an activity's progress and the commanded state;
   - A-GRA's names for all of it (`fsim.agra`).

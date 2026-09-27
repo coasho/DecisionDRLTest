@@ -258,6 +258,7 @@ Performance VehicleAdapter::performance(const VehicleProfile& p, const ControlSt
     if (!std::isnan(perf.climbMs) && !(f.maxClimbMs < perf.climbMs)) f.maxClimbMs = perf.climbMs; // no faster than it climbs
     f.altitudeGainPerS = loopParameter(runtime, Level::Position, "altitude.gain");
     f.headingGain = loopParameter(runtime, Level::Attitude, "heading.gain");
+    f.bankRateRadS = loopParameter(runtime, Level::Attitude, "roll.max_rate");
     const double reference = loopParameter(runtime, Level::Attitude, "schedule.tas_ms");
     f.headingReferenceTasMs = reference > 0.0 ? reference : kUnknown; // a schedule holds the heading loop's speed; without one it slows with speed
     return f;

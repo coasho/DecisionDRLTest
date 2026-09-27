@@ -145,7 +145,7 @@ struct Waypoint {                      // one route segment: to here from the pr
     double latitudeRad = 0.0, longitudeRad = 0.0;
     double altitudeM = kHold;          // kHold: the previous point's (the first: as now)
     double altitudeReference = kHold;  // AltitudeReference; kHold: the previous point's
-    double speed = kHold;              // flown on this segment; kHold: the previous segment's (the first: as now)
+    double speed = kHold;              // flown on this segment; kHold: the previous segment's (the first: as now; a rotorcraft's, its cruise)
     double speedReference = kHold;
     double turn = 0.0;                 // TurnType: 0 fly-by, 1 fly-over
     double maxBankRad = kHold;         // this segment's bank limit (A-GRA MaximumRoll)
@@ -155,19 +155,24 @@ struct Waypoint {                      // one route segment: to here from the pr
 struct RouteCommand {                  // fsim.guidance.route; the waypoints go with it
     double projection = 0.0;           // Projection: 0 great circle, 1 rhumb line
     double repeat = 0.0;               // 1: fly the route again from its first point
-    double end = 0.0;                  // EndBehavior after the last point: 0 continue its course, 1 orbit it
+    double end = 0.0;                  // EndBehavior after the last point: 0 continue, 1 loiter (a wing orbits it, a rotorcraft hovers over it)
     double start = 0.0;                // the index of the point to fly to first
 };
 ```
 
-- **Legs** are great circles, or rhumb lines, between the points, the first from where the vehicle is when the route starts. Cross-track and along-track distances are computed on the sphere, not a flat projection: a 100 km leg's great circle bows 165 m from a straight line at 40° north.
-- **Fly-by** turns begin before the point, on a circle tangent to both legs. Its radius is the one the segment's bank limit (or 80 % of the performance's) gives at the planned ground speed plus the wind. A turn of more than 150° is flown over.
+- **Legs** are great circles, or rhumb lines, between the points, the first from where the vehicle is when the route starts. Cross-track and along-track distances are computed on the sphere, not a flat projection: a 100 km leg's great circle bows 165 m from a straight line at 40° north. A great circle is kept as its start's unit vector and its plane's normal (the n-vector form: Gade, 2010); a rhumb line in the Mercator projection, where it is straight.
+- **Fly-by** turns begin before the point, on a circle tangent to both legs, in a plane at the point. The radius is the one the segment's bank limit (or 80 % of the performance's) gives at the faster of the two segments' planned speeds plus the wind. A turn of more than 150° is flown over. The wind is the route's behaviour's estimate when it plans: a route given before the aircraft has flown in the wind plans its turns without it.
+- **Short legs.** Where the turns at a leg's two ends need more of it than it has, each is cut to its share of the leg, in proportion to its lead, on both legs it touches. The first turn is from the entry, and shares the next leg with the turn after it.
+  - Under `RangePolicy::Clamp` the turns are flown smaller and the answer is clamped, naming the first point so cut.
+  - Under `Reject` the route is refused `InvalidWaypoint` with that point.
+  - The entry's turn is flown over when the aircraft is too near the point to make it: where the aircraft is, is no fault of the route's.
 - **Fly-over** points are passed abeam, and the next leg is intercepted.
-- **Vertical:** the altitude runs straight from point to point along the track. With a climb rate, the aircraft climbs or descends at it and then levels.
+- **Vertical:** the altitude runs straight from point to point along the track: a segment runs from the middle of the turn before it to the middle of its own, where the path passes nearest its point. With a climb rate, the aircraft climbs or descends at it and then levels. A gradient steeper than the aircraft climbs (point to point, above sea level) is flown at its climb rate under Clamp, and refused `PerformanceLimit` (`MaxClimbRate`, `MaxDescentRate`) under Reject.
 - **Speed** per segment, in any reference.
-- **UPDATE** replaces the route (its store, its options) and restarts it at `start`.
-- **Completion** comes after the last point, unless the route repeats; then the aircraft continues the last leg's course, altitude and speed, or orbits the last point (`end`).
-- **Rotorcraft** fly the same geometry at the segment's speed. They slow for a turn only as much as its radius asks (a lateral acceleration within the performance's), and stop only at the route's end, never at each point.
+- **Left out:** a field continues the previous point's. The first point's is the aircraft's own now (a reference given alone, its value in that reference), and a rotorcraft given no speed flies its cruise speed over the ground. A later point that gives a reference alone is refused `InvalidWaypoint`: the previous point has no value in it to take.
+- **UPDATE** replaces the route's waypoints (none given: it keeps its own) and the options it gives (`kHold` keeps one), checked as a NEW's. It flies the route afresh from `start`, from where the aircraft is. An UPDATE refused leaves the route as it was.
+- **Completion** comes after the last point, unless the route repeats. Then the aircraft continues along the last leg (its course, altitude and speed), or loiters there (`end`): a wing orbits the point at the radius its speed and 80 % of its bank give, a rotorcraft stops and hovers over it.
+- **Rotorcraft** fly the same geometry at the segment's speed. They slow for a turn only as much as its radius asks (a lateral acceleration within the performance's), and stop only at the route's end when they loiter there, never at each point.
 
 ### 4.6 Loiter patterns
 
@@ -214,8 +219,12 @@ struct CurveCommand {                  // fsim.guidance.curve; the segments go w
 Routes, patterns and curves are sequences of pieces: great-circle or rhumb legs, circular arcs (fly-by turns, patterns), and Bézier segments. One follower flies them all:
 - **Where on the path.** The nearest point, its tangent course χp and its curvature κ, and the signed cross-track distance e. Legs use closed forms on the sphere. Arcs use a plane at their centre. Béziers use a Newton step from the last parameter, over an arc-length table built when the curve starts.
 - **Lateral law.** The course to fly is χd = χp − atan(e/Δ), line-of-sight guidance with the lookahead Δ, plus the curvature's rate κ·Vg fed forward.
-- **Wings** turn at ω = κ·Vg + kχ·(χd − χg), as a turn rate at the velocity level; χg is the course over the ground. kχ is the vehicle's course bandwidth (its heading loop's: section 7.1), and Δ = 3·Vg/kχ, so the track settles well outside the heading loop's own lag.
-- **Rotorcraft** fly a ground velocity: the path speed along the tangent, less kχ·e across it, the nose along the track. The path speed is limited to what the curvature allows, and to what stops them at the end.
+- **Wings** turn at ω = κa·Vg + kχ·(χd − χg) + ∫, as a turn rate at the velocity level:
+  - χg is the course over the ground. kχ is the vehicle's course bandwidth (its heading loop's: section 7.1), and Δ = 3·Vg/kχ, so the track settles well outside the heading loop's own lag.
+  - κa is the path's curvature the time the roll lags ahead: half the turn's bank at the attitude loop's rate (`bankRateRadS`), plus the roll's own time constant, taken as 0.2/kχ within 0.3 to 1.5 s (a design's roll loop is five times its heading loop's bandwidth, or faster). The turn begins and ends that much early.
+  - ∫ is an integral on the course error once it is under 0.15 rad, its zero at kχ/4. It takes out what the turn-rate loop leaves: the c172x needs 1.5° of bank to fly straight.
+  - Recorded at VI-4: the first law fed the curvature forward where the arc begins and integrated the cross-track. The F-16C then overshot each leg by 48 m, and the c172x held a steady 15 m off its legs.
+- **Rotorcraft** fly a ground velocity along χd plus a lead of κa·V/kv (κa the curvature V/kv ahead; kv the velocity loop's bandwidth), at the path speed, the nose along the track. The lead is the velocity loop's lag, taken out. Near the path it is the ground velocity along the tangent less (kv/3)·e across it; far from it, an intercept at up to 90°, never a speed beyond the path's. The path speed is limited to what the curvature allows, to what slows them in time for a smaller turn, and to what stops them at an end where they loiter; stopped, they hold the point through the position loop.
 - **Vertical.** The altitude profile gives a vertical speed: its gradient times the ground speed, plus the altitude error at the position loop's gain, within the climb and descent limits.
 
 ### 4.9 The behaviours that stay
@@ -244,9 +253,9 @@ New reasons, appended to `Reason`:
 
 | Reason | When | A-GRA |
 | --- | --- | --- |
-| `InvalidWaypoint` | a waypoint not finite or out of range, a leg too short for its fly-by turn, a repeated point | INVALID_WAYPOINT |
+| `InvalidWaypoint` | a waypoint not finite or out of range, a leg too short for its fly-by turns (under `RangePolicy::Reject`; Clamp flies them smaller), a repeated point | INVALID_WAYPOINT |
 | `InvalidCurve` | a segment count outside 1..10, a gap between segments, a curvature the aircraft cannot fly (the section named) | INVALID_CURVE |
-| `PerformanceLimit` | a value beyond the performance, under `RangePolicy::Reject`, or a geometry no range policy can clamp (a climb gradient) | PERFORMANCE_LIMIT_EXCEEDED + `constraint` |
+| `PerformanceLimit` | a value beyond the performance, or a gradient steeper than the aircraft climbs, under `RangePolicy::Reject` (Clamp flies the gradient at the climb rate); a geometry no range policy can clamp (a curve's curvature) | PERFORMANCE_LIMIT_EXCEEDED + `constraint` |
 | `NotGranted`, `NotAllowed`, `Revoked`, `Released`, `CollisionAvoidance`, `Restricted` | section 6 and 7.3 | INELIGIBLE_CONTROL_SOURCE, CANCELED, CONSTRAINT_COLLISION_AVOIDANCE, CONSTRAINT_OP |
 
 The C ABI's result gets the detail through a new call (section 9); its `reserved` field carries `index + 1`.
@@ -345,6 +354,7 @@ The adapter computes a vehicle's `Performance` when the vehicle is created, and 
 | maximum acceleration, deceleration | — | g·tan(`max_tilt`); the position loop's `deceleration` |
 | maximum climb, descent rate | the position loop's `max_vertical_speed` (the performance section's climb, if lower) | the position loop's `max_vertical_speed` |
 | course bandwidth | the heading loop's: `heading.gain` × g / its schedule's reference speed, or / the speed it flies without a schedule | the velocity loop's `horizontal.kp` |
+| bank rate (turn anticipation) | the attitude loop's `roll.max_rate` | — |
 | altitude gain | the position loop's `altitude.gain` | the position loop's `altitude.gain` |
 
 - **Derived limits.** Turn radius, turn rate, and climb gradient at a speed follow from these (`Performance::turnRadiusM(v)` and the like).
@@ -364,12 +374,12 @@ Every change bumps the revision.
 ## 8. Boundary, threads, allocation
 
 ADR-26's rules B1-B8 hold, with these additions:
-- **`RuntimeConfig`** gains the path store (a pointer, allocated at the first route or curve NEW) and `Performance`.
+- **`RuntimeConfig`** gains the path store (a pointer, allocated at the first route or curve NEW) and `Performance`. The store holds the waypoints as the host completed them; the plan made from them (legs, turns) is the behaviour's.
 - **Progress** is asked of the slot's behaviour by the host after each world step (`ControlStack::progress`, read-only, between steps), so the report does not grow.
 - **`ControlContext`** gains `features` (the vehicle's Feature bits) and `guidance` (its performance and path store), for behaviours. Both are trailing members with defaults, so existing initialisers keep compiling.
 - **`Behavior`** gains `begin(ctx, const Command&)`, which the runtime calls first, and `progress()`. `begin()`'s default calls the old `start(ctx, const BehaviorCommand&)` with a `BehaviorCommand`, so existing behaviours are unchanged. (A second `start` overload would have hidden the first in every behaviour that overrides one, which `-Woverloaded-virtual` refuses.)
 - **B2, the fast path:** UPDATE of a mode merges or copies in place, with no allocation, strings or virtual calls; so does a route or curve UPDATE within the store's capacity. The allocation gate gains HSA and pattern updates every step, and a route replaced every step.
-- **B5:** the modes' behaviours allocate nothing while flying: their geometry lives in fixed arrays allocated with them at NEW.
+- **B5:** the modes' behaviours allocate nothing while flying: their geometry lives in fixed arrays allocated with them at NEW (a route's plan, about 72 KB). The host checks a route with a plan of its own, allocated at the vehicle's first route and kept, so a route's UPDATE allocates nothing.
 - **Determinism:** the modes read only the state, the setpoint, the store and the performance, so trajectories stay independent of the worker count.
 
 ## 9. SDK surfaces
@@ -518,7 +528,7 @@ Each step ships as commits on main with its tests, benchmark numbers (section 15
 ## 14. Consequences
 
 - **Benefits.** A mission autonomy flies the VI's modes on every aircraft the platform has, is told why a command fails and how far an activity has got, and gets and loses authority as the VI describes. The rotorcraft fly guidance correctly.
-- **Costs.** Four more command types; a path store per vehicle that flies a route or curve (about 25 KB); new C ABI calls; a guidance layer to keep tuned per family.
+- **Costs.** Four more command types; per vehicle that flies a route or curve, a path store (20 KB for 256 waypoints; curves' segments to come) and two route plans, the host's and the behaviour's (about 72 KB each); new C ABI calls; a guidance layer to keep tuned per family.
 - **Risks.**
 
 | Risk | Mitigation |
@@ -604,6 +614,65 @@ Filled in as the steps land. The machine and the benchmark's precision are ADR-2
 - **Digests:** identical to step 5b, protection on and off. **Allocations:** none, with an HSA's heading updated every step on 16 vehicles.
 - **Cost:** an HSA update is 127 ns (a course with its wind triangle over the velocity level's 64). Every existing case is within ±2.4 % of VI-2 (interleaved A/B, 5 rounds).
 - **SDK:** C ABI `fsim_vehicle_submit_mode(FSIM_MODE_HSA)`, `fsim_mode_field_count`, `fsim_speed_reference`, `fsim_altitude_reference`; `fsim_activity_update` merges. Python `Vehicle.submit_hsa(**fields)`, `SpeedReference`, `AltitudeReference`, `MODE_FIELDS`. ctest 171/171.
+
+**VI-4 (the path follower and waypoint following).**
+- **What was built:**
+  - `RouteCommand`, `Waypoint`, `TurnType`, `Projection` and `EndBehavior` (`fsim/Control.h`). `RouteCommand` joins the `Command` variant after `HsaCommand`, flown by the `route` behaviour.
+  - The vehicle's `PathStore` in `RuntimeConfig`, read through `ControlContext::path`, and `SetpointKind::Route`.
+  - The geometry (`src/control/Route.h`, `.cpp`): legs as n-vectors or Mercator lines, arcs in their waypoint's plane, the completion of what points leave out, the plan and its short-leg shares.
+  - `RouteBehavior` (`fsim/GuidanceModes.h`), the path follower of 4.8.
+  - The host's `checkRoute` (completion, limits, plan, turns that fit, gradients); `limitHsa` became `limitFlight`, shared with the waypoints.
+  - `World::submit(RouteCommand, Span<const Waypoint>)` and `update(activity, RouteCommand, Span<const Waypoint>)`; `ControlStack::command(RouteCommand, Span)` for a stack on its own.
+  - `Performance::bankRateRadS`. The internal `session::World::performance(id)` (the SDK's is VI-7's).
+- **Flown** (`tests/test_routes.cpp`): a route of 5R legs, R the turn radius the route plans with: a 90° fly-by left, one right, 51° right, 78° right flown over, and on. The most cross-track in the middle of the legs after the first turn (the one after the fly-over is an intercept), the most on the turns, and each class's bound:
+
+  | | calm: legs / turns | 12 m/s crosswind: legs / turns | bound on a leg |
+  | --- | --- | --- | --- |
+  | c172x (R 425 m, 630 in wind) | 14.4 / 14.9 m | 8.6 / 12.1 m | 50 m |
+  | B-52H (R 7.4 km, 8.4) | 10.6 / 41.3 m | 12.5 / 34.3 m | 50 m |
+  | F-16C (R 2.3 km, 2.7) | 7.3 / 11.6 m | 13.2 / 24.0 m | 50 m |
+  | UH-60A (R 140 m, 20 m/s over the ground) | 4.8 / 11.3 m | 10.8 / 12.2 m | 15 m |
+  | IRIS (R 6 m, 5 m/s; 5 m/s wind) | 0.4 / 1.1 m | 1.1 / 1.7 m | 3 m |
+
+  - Each passes its fly-by points where its arc does: R (1/cos(a/2) − 1), within 8 % of R. For the B-52H that is 3107 m of 3074; for the IRIS, 4 m of 2.5.
+  - Each passes its fly-over point within 6 m.
+  - The rotorcraft keep 19.2 of 20 m/s and 4.2 of 5 through the turns.
+- **Profiles** (a c172x):
+  - altitudes at the points 1600, 1699 and 1899 m, of 1600, 1700 and 1900;
+  - a 2 m/s climb flown at 1.99;
+  - a calibrated 50 m/s flown at 49.95, a ground speed of 60 at 60.95;
+  - a point 1000 m up and 2 km away is refused (`performance_limit`, `max_climb_rate`, point 0), or clamped and climbed at its best rate.
+- **Projections** (two F-16Cs, 120 km east along 60° north):
+  - the great circle's aircraft goes 489 m north (489 by L² tan φ / 8R), 0.6 m off the circle, its track turning from 89.2° to 90.9° as the meridians close;
+  - the rhumb line's stays within 0.2 m of its parallel.
+- **Ends:**
+  - a repeating triangle flies 5 laps in 900 s and never completes, its distance to go NaN;
+  - a c172x that loiters orbits its last point at 411 to 415 m (R 425);
+  - an IRIS stops over its last point within 0.01 m;
+  - a UH-60A continues north (the last leg's course) at its cruise speed, 15 m/s, which it had been given by default.
+- **Semantics tested:**
+  - progress point by point (the segment, its id, percent and distance to go monotonic, the time to go at the ground speed, 100 % and 0 m at completion);
+  - an UPDATE mid-route flown from where the aircraft is, the same activity;
+  - a refused UPDATE (a NaN point, index 1) leaving the route flying;
+  - an UPDATE of the options alone flying the same waypoints from point 2;
+  - rejections naming the point: none, 257, NaN, a latitude beyond the pole, a fractional turn or reference, a negative speed, a bank beyond 90°, a zero climb rate, the same place twice, a reference alone after the first point; the options (a projection 2, a repeat 0.5, an end 3, a start beyond the route, a repeat of one point);
+  - the aircraft's limits (a speed, a ceiling, a bank, a climb rate, a rotorcraft's ground speed);
+  - a 300 m leg between two 90° turns: refused at point 0 under Reject, clamped under Clamp, fine when both points are flown over.
+- **Tuning found:**
+  - the turn anticipated by the roll's lag cut the F-16C's leg error from 48 m to 3 m;
+  - the course-error integral removed the c172x's 15 m bias;
+  - the entry turn sharing the leg after the start (at first it was left out of the shares, and flown over).
+- **Conformance:**
+  - `fsim.guidance.route` goes through NEW, UPDATE and CANCEL as its descriptor says, on every aircraft;
+  - the random sequences submit and update routes with their waypoints (5 % of points invalid) on all five adapters;
+  - `invalid_waypoint` is now a required answer.
+- **Digests:** identical to step 5b, protection on and off. **Allocations:** none, with a route replaced every step on 16 vehicles.
+- **Cost:** a route update on a leg is 190 ns (its follower's ~125 ns over the velocity level's 65). Every existing case is within ±3.0 % of VI-3 at the median and ±1.6 % at the minimum (interleaved A/B, 5 rounds).
+- **SDK:**
+  - C ABI: `fsim_waypoint`, `fsim_waypoint_init`, `fsim_vehicle_submit_route`, `fsim_activity_update_route`, `FSIM_MODE_ROUTE`, `fsim_turn_type`, `fsim_projection`, `fsim_end_behavior`. A waypoint array is read at its first element's `struct_size`, so an older header's works.
+  - Python: `Vehicle.submit_route(waypoints, **options)`, `Activity.update_route`, `Waypoint`, `TurnType`, `Projection`, `EndBehavior`.
+  - `examples/python/vehicle_interface.py` flies a c172x's triangle, an F-16C's climb, fly-over and orbit, a UH-60A that stops at its end and an IRIS square, for the viewer.
+  - ctest 178/178.
 
 ## Appendix A: the gap analysis at a946dfe
 

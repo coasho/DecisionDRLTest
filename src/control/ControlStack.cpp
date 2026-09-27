@@ -133,6 +133,16 @@ void ControlStack::command(const Command& command) {
     }
 }
 
+void ControlStack::command(const RouteCommand& route, Span<const Waypoint> waypoints) {
+    // the stack's own path store, as a World's host writes it (what the waypoints leave out, the behaviour fills in)
+    if (!config_->path) config_->path = std::make_unique<PathStore>();
+    PathStore& path = *config_->path;
+    path.count = static_cast<std::uint32_t>(std::min(waypoints.size(), PathStore::kWaypoints));
+    std::copy_n(waypoints.data(), path.count, path.waypoints);
+    ++path.revision;
+    command(Command(route));
+}
+
 std::size_t ControlStack::wholeSlot() const noexcept {
     const auto& owner = config_->owner;
     const std::uint8_t o = owner[static_cast<std::size_t>(Axis::Roll)];
@@ -312,6 +322,7 @@ FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::si
         ControlContext guided{ctx}; // what the vehicle can do: its guidance may differ by it
         guided.features = features_;
         guided.performance = &config_->performance;
+        guided.path = config_->path.get();
         if (started_[s] != slot.generation) {
             behavior->begin(guided, *current);
             started_[s] = slot.generation;
@@ -488,6 +499,7 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
         ControlContext guided{ctx};
         guided.features = features_;
         guided.performance = &config_->performance;
+        guided.path = config_->path.get();
         if (started_[s] != slot.generation) {
             behavior->begin(guided, slot.command);
             started_[s] = slot.generation;

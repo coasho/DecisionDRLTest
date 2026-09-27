@@ -156,7 +156,17 @@ struct Case {
     std::function<void(RuntimeConfig&)> configure = nullptr;
     /// The attitude level's controller, when not the default (step 5b's cases).
     const char* attitudeLoop = nullptr;
+    /// Instead of either: the stack commanded as it wants (a route and its waypoints).
+    std::function<void(ControlStack&, const sim::VehicleState&)> start = nullptr;
 };
+
+/// `north` and `east` metres from the state's position, as a waypoint.
+Waypoint waypointAt(const sim::VehicleState& s, double north, double east) {
+    Waypoint p;
+    p.latitudeRad = s.latitudeRad + north / 6371008.8;
+    p.longitudeRad = s.longitudeRad + east / (6371008.8 * std::cos(s.latitudeRad));
+    return p;
+}
 
 /// Envelope protection with limits the synthetic flight (advance()) keeps
 /// running into: bank, pitch, alpha and the load factor all engage part of the time.
@@ -280,6 +290,13 @@ std::vector<Case> cases() {
                        h.courseRad = 0.5, h.speed = 55.0, h.speedReference = 0.0, h.altitudeM = 1600.0;
                        return Command(h);
                    }});
+    // ...its waypoint following: a route's leg by the path follower, great circles, fly-by turns planned
+    out.push_back({"route", nullptr, nullptr, nullptr, [](ControlStack& stack, const sim::VehicleState& s) {
+                       const Waypoint route[] = {waypointAt(s, 0, 5000), waypointAt(s, 5000, 5000), waypointAt(s, 5000, 10000), waypointAt(s, 0, 10000)};
+                       RouteCommand c;
+                       c.repeat = 1.0;
+                       stack.command(c, route);
+                   }});
     // ...and every limit given, the flight running into them all the time: the worst case
     for (const ProtectionMode mode : {ProtectionMode::Limit, ProtectionMode::Report}) {
         const bool limit = mode == ProtectionMode::Limit;
@@ -325,7 +342,8 @@ struct StackRun {
     double dt = 1.0 / 120.0;
     explicit StackRun(const Case& c) {
         if (c.attitudeLoop) stack.use(Level::Attitude, c.attitudeLoop);
-        if (c.configure) c.configure(stack.config());
+        if (c.start) c.start(stack, state);
+        else if (c.configure) c.configure(stack.config());
         else stack.command(c.command(state));
     }
     void run(int n) {
@@ -493,6 +511,20 @@ int alloc() {
              }
          }},
         {"loiter once", [&](std::uint32_t id, int k) { if (k == 0) w.command(id, loiter); }},
+        // ADR-28: a route replaced every step through UPDATE - its waypoints into the path store, planned afresh
+        {"route update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             static std::vector<std::vector<Waypoint>> routes(64);
+             std::vector<Waypoint>& route = routes[id];
+             if (k == 0) {
+                 const auto& s = *w.vehicleState(id);
+                 route = {waypointAt(s, 0, 5000), waypointAt(s, 3000, 8000), waypointAt(s, 0, 11000)};
+                 activity[id] = w.submit(id, RouteCommand{}, route).activity;
+                 return;
+             }
+             route[1].latitudeRad += 1e-6 * std::sin(k * 0.1); // (in place: nothing allocated here)
+             if (!w.update(activity[id], RouteCommand{}, route).accepted()) std::fprintf(stderr, "route: update refused\n"), std::exit(3);
+         }},
         // step 3: an autopilot on pitch and thrust, the policy's bank updated every step
         {"axes apart each step", [&](std::uint32_t id, int k) {
              static std::vector<ActivityId> activity(64, 0);

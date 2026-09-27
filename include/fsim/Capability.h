@@ -355,6 +355,7 @@ enum class SetpointKind : std::uint8_t {
     Level,    ///< a level's struct (ActuatorCommand ... PositionCommand), or a support effector's
     Behavior, ///< BehaviorCommand
     Hsa,      ///< HsaCommand (fsim.guidance.hsa)
+    Route,    ///< RouteCommand and its waypoints (fsim.guidance.route)
     Count
 };
 
@@ -386,6 +387,7 @@ struct Performance {
     double altitudeGainPerS = kNone;     ///< vertical speed per metre of altitude error (its position loop's)
     double headingGain = kNone;          ///< a wing's heading loop: rad of bank per rad of heading error...
     double headingReferenceTasMs = kNone; ///< ...at this true airspeed (it grows with speed); NaN: the same at every speed
+    double bankRateRadS = kNone;         ///< a wing's attitude loop: the fastest it changes the bank (a turn is anticipated by it)
     double velocityBandwidthRadS = kNone; ///< a rotorcraft's velocity loop: how fast its ground velocity follows a demand
 
     /// How fast the track follows a course demand at true airspeed `tasMs`,

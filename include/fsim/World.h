@@ -158,6 +158,12 @@ public:
         else
             return submit(control::Command(c), options);
     }
+    /// NEW of a route (fsim.guidance.route, A-GRA's waypoint following;
+    /// docs/sdk/control.md, "Routes"): at most PathStore::kWaypoints waypoints,
+    /// each checked (InvalidWaypoint, PerformanceLimit: CommandResult::index
+    /// names the point), then flown from where the aircraft is.
+    control::CommandResult submit(const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
+                                  const control::CommandOptions& options = {});
     /// The live activities, then the ended ones the vehicle remembers, newest first.
     /// A guidance mode's record carries its progress (docs/vehicle-interface.md, 5.3).
     std::vector<control::ActivityRecord> activities() const;
@@ -233,6 +239,10 @@ public:
         else
             return update(activity, control::Command(c));
     }
+    /// UPDATE of a route: its options (a field kHold keeps its value) and new
+    /// waypoints - none: those it has - checked as a NEW's; flown afresh from
+    /// its start. (A RouteCommand alone, through update() above, is the same with none.)
+    control::CommandResult update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// A live or recently ended activity of any vehicle; empty if unknown.

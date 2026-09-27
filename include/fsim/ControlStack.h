@@ -4,6 +4,7 @@
 #include "fsim/Control.h"
 #include "fsim/ControlInputs.h"
 #include "fsim/Export.h"
+#include "fsim/Span.h"
 
 #include <array>
 #include <memory>
@@ -44,6 +45,10 @@ public:
     /// vehicles take their commands through the World, whose contract layer
     /// writes the stack's configuration; this is the stack on its own.)
     void command(const Command& command);
+    /// A route (fsim.guidance.route) with its waypoints, into the stack's own
+    /// path store: at most PathStore::kWaypoints of them. What they leave out
+    /// is filled in as a World's host would, from the flight when it starts.
+    void command(const RouteCommand& route, Span<const Waypoint> waypoints);
     /// The highest level a command enters at; Actuator before any command.
     Level activeLevel() const noexcept;
     /// The command at the active level; before any command, the neutral

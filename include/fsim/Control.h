@@ -146,6 +146,59 @@ struct HsaCommand {
     double altitudeReference = kHold; ///< AltitudeReference
 };
 
+/// How a route passes a waypoint (A-GRA's TurnType).
+enum class TurnType : std::uint8_t {
+    FlyBy = 0,   ///< the turn begins before the point, on a circle tangent to both legs
+    FlyOver = 1, ///< over the point, then the next leg is intercepted
+    Count
+};
+/// What a route's legs are on the Earth.
+enum class Projection : std::uint8_t { GreatCircle = 0, Rhumb = 1, Count };
+/// What a route does after its last point.
+enum class EndBehavior : std::uint8_t {
+    Continue = 0, ///< the last leg's course, altitude and speed, on along the leg
+    Loiter = 1,   ///< a wing orbits the point, at the radius its speed and 80 % of its bank give; a rotorcraft stops and hovers there
+    Count
+};
+
+/// One waypoint of a route (A-GRA's), and the segment that ends at it: flown
+/// to from the previous point, the first from where the aircraft is when the
+/// route starts. A field left out (kHold) continues the previous point's; the
+/// first point's is the aircraft's own now - a reference given alone, its
+/// value in that reference now - and a rotorcraft given no speed flies its
+/// cruise speed over the ground.
+struct Waypoint {
+    double latitudeRad = 0.0, longitudeRad = 0.0;
+    double altitudeM = kHold;          ///< reached at the point, along a straight profile from the previous one
+    double altitudeReference = kHold;  ///< AltitudeReference
+    double speed = kHold;              ///< flown on the segment to the point: m/s, or a Mach number
+    double speedReference = kHold;     ///< SpeedReference
+    double turn = 0.0;                 ///< TurnType
+    double maxBankRad = kHold;         ///< the bank its fly-by turn is planned with; kHold: 80 % of the aircraft's
+    double climbRateMs = kHold;        ///< climb or descend at this rate, then level; kHold: along the segment's gradient
+    std::uint64_t id = 0;              ///< the caller's, reported back in the progress
+};
+
+/// fsim.guidance.route (A-GRA's waypoint following): its waypoints go beside
+/// it (World::submit and update take a Span) into the vehicle's path store.
+/// Completes after the last point, unless it repeats.
+struct RouteCommand {
+    double projection = 0.0; ///< Projection: 0 great circles, 1 rhumb lines
+    double repeat = 0.0;     ///< 1: after the last point, fly the route again from its first
+    double end = 0.0;        ///< EndBehavior after the last point
+    double start = 0.0;      ///< the point to fly to first
+};
+
+/// Where a vehicle's route lives while it is flown (docs/vehicle-interface.md,
+/// 4.2): allocated at its first route and kept, written by the host between
+/// steps, read by the route's behaviour during them (ControlContext::path).
+struct PathStore {
+    static constexpr std::size_t kWaypoints = 256;
+    std::uint32_t revision = 0; ///< bumped on every write: the route is flown afresh
+    std::uint32_t count = 0;
+    Waypoint waypoints[kWaypoints];
+};
+
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
 struct BehaviorCommand {
     std::string id;                        ///< registry id: "hold", "waypoints", "loiter", "pursuit", ...
@@ -162,7 +215,8 @@ struct BehaviorCommand {
 /// A command: a level's, a behaviour's, or a guidance mode's setpoint. The
 /// modes come after BehaviorCommand and enter at Level::Behavior (levelOf):
 /// the variant's index is a level's only up to it.
-using Command = std::variant<ActuatorCommand, AttitudeCommand, AccelerationCommand, VelocityCommand, PositionCommand, BehaviorCommand, HsaCommand>;
+using Command = std::variant<ActuatorCommand, AttitudeCommand, AccelerationCommand, VelocityCommand, PositionCommand, BehaviorCommand, HsaCommand,
+                             RouteCommand>;
 
 // Support effectors (docs/control-architecture.md, 8.2): set directly, not
 // flown through the cascade; each its own capability (fsim.support.*) where
@@ -201,8 +255,12 @@ using SupportCommand = std::variant<GearCommand, FlapsCommand, WheelBrakesComman
 inline Level levelOf(const Command& c) noexcept {
     return c.index() < static_cast<std::size_t>(Level::Behavior) ? static_cast<Level>(c.index()) : Level::Behavior;
 }
-/// The registered behaviour that flies a mode's setpoint ("hsa"); null for a level's or a behaviour's command.
-inline const char* modeBehavior(const Command& c) noexcept { return std::holds_alternative<HsaCommand>(c) ? "hsa" : nullptr; }
+/// The registered behaviour that flies a mode's setpoint ("hsa", "route"); null for a level's or a behaviour's command.
+inline const char* modeBehavior(const Command& c) noexcept {
+    if (std::holds_alternative<HsaCommand>(c)) return "hsa";
+    if (std::holds_alternative<RouteCommand>(c)) return "route";
+    return nullptr;
+}
 
 
 
@@ -235,6 +293,8 @@ struct ControlContext {
     /// What it can do in numbers, for a behaviour: its guidance plans with it
     /// (docs/vehicle-interface.md, 7.1). Null outside a vehicle's runtime.
     const Performance* performance = nullptr;
+    /// The vehicle's route, for the behaviour that flies it; null until one was given.
+    const PathStore* path = nullptr;
 };
 
 /// One level of the cascade: accepts a command at `level()` and returns a
