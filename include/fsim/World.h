@@ -318,6 +318,13 @@ public:
     control::CommandResult update(control::Source caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::BezierSegment> segments);
     control::CommandResult cancel(control::Source caller, control::ActivityId activity);
+    /// An activity command (docs/sdk/control.md, "Activity commands"): Disable
+    /// (it stops flying and is kept), Enable, Reset (over from its beginning),
+    /// Delete (a sticky disable: it ends), ChangeRank (`rank`), Unassign (it
+    /// gives up its axes and waits for them again). The caller's source as
+    /// UPDATE's; refused not_interactive where its command said it takes none.
+    control::CommandResult activityCommand(control::ActivityId activity, control::ActivityCommand command, control::Rank rank = {},
+                                           control::Source caller = control::Source::Policy);
     /// A live or recently ended activity of any vehicle; empty if unknown.
     std::optional<control::ActivityRecord> activity(control::ActivityId activity) const;
 

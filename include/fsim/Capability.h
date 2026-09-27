@@ -145,6 +145,8 @@ enum class Reason : std::uint8_t {
     // ranks, queues and time windows (docs/flight-autonomy.md, 4.9)
     TimeConstraint, ///< NEW rejected, or Failed: a time window it must meet cannot be met, or was missed
     QueueFull,      ///< NEW rejected: it would wait, and as many activities as can wait already do
+    // activity commands (docs/flight-autonomy.md, 4.10)
+    NotInteractive, ///< an activity command refused: its command said it takes none (CommandOptions::interactive)
     Count
 };
 
@@ -355,9 +357,25 @@ struct CommandDetails {
 
 // --- Activities ---------------------------------------------------------------------
 
-enum class ActivityState : std::uint8_t { Pending, Active, Completed, Failed, Canceled };
-/// "pending", "active", ...
+/// An activity's state. Disabled (docs/flight-autonomy.md, 4.10) is live - it
+/// can be enabled - and flies nothing; Deleted is a sticky disable, ended.
+enum class ActivityState : std::uint8_t { Pending, Active, Completed, Failed, Canceled, Disabled, Deleted };
+/// "pending", "active", ..., "disabled", "deleted"
 FSIM_API const char* activityStateName(ActivityState state) noexcept;
+
+/// What an activity command asks of a live activity (A-GRA's
+/// ActivityCommandBaseType; docs/flight-autonomy.md, 4.10).
+enum class ActivityCommand : std::uint8_t {
+    Disable,    ///< it stops flying and is kept (Disabled); its axes are free
+    Enable,     ///< a disabled one waits to start again (from where it was: a route, the point it flew to)
+    Reset,      ///< it starts over from its beginning
+    Delete,     ///< a sticky disable: it ends Deleted, and cannot be enabled
+    ChangeRank, ///< its rank changes: what it contests is arbitrated afresh
+    Unassign,   ///< it gives up its axes and waits for them again, behind what waits
+    Count
+};
+/// "disable", "enable", "reset", "delete", "change_rank", "unassign".
+FSIM_API const char* activityCommandName(ActivityCommand command) noexcept;
 
 /// Why a pending activity has not started (docs/flight-autonomy.md, 4.9).
 enum class ActivityWait : std::uint8_t {
@@ -429,7 +447,7 @@ struct ActivityRecord {
     double startTime = 0.0;            ///< simulation time
     double endTime = std::numeric_limits<double>::quiet_NaN(); ///< NaN while live
     ActivityProgress progress{};       ///< as its behaviour reported it after the last world step (a mode's)
-    bool live() const noexcept { return state == ActivityState::Pending || state == ActivityState::Active; }
+    bool live() const noexcept { return state == ActivityState::Pending || state == ActivityState::Active || state == ActivityState::Disabled; }
     ActivityBasis basis() const noexcept { return waiting == ActivityWait::None ? ActivityBasis::Actual : ActivityBasis::Planned; }
 };
 

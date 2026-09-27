@@ -378,6 +378,11 @@ control::CommandResult World::update(control::Source caller, control::ActivityId
 
 control::CommandResult World::cancel(control::Source caller, control::ActivityId activity) { return impl_->cancel(caller, activity); }
 
+control::CommandResult World::activityCommand(control::ActivityId activity, control::ActivityCommand command, control::Rank rank,
+                                              control::Source caller) {
+    return impl_->activityCommand(caller, activity, command, rank);
+}
+
 std::optional<control::ActivityRecord> World::activity(control::ActivityId activity) const {
     if (const auto* a = impl_->activity(activity)) return *a;
     return std::nullopt;

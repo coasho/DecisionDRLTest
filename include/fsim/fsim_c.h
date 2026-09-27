@@ -313,7 +313,12 @@ enum fsim_source { FSIM_SOURCE_POLICY = 0, FSIM_SOURCE_AUTOPILOT = 1, FSIM_SOURC
 enum fsim_range_policy { FSIM_RANGE_CLAMP = 0, FSIM_RANGE_REJECT = 1, FSIM_RANGE_NONE = 2 };
 /* ABI 1.8 appends FSIM_COMMAND_VALID: a validation's answer (fsim_command_options.validate_only) - it would be accepted; nothing flies. */
 enum fsim_command_status { FSIM_COMMAND_ACCEPTED = 0, FSIM_COMMAND_REJECTED = 1, FSIM_COMMAND_CANCELED = 2, FSIM_COMMAND_VALID = 3 };
-enum fsim_activity_state { FSIM_ACTIVITY_PENDING = 0, FSIM_ACTIVITY_ACTIVE, FSIM_ACTIVITY_COMPLETED, FSIM_ACTIVITY_FAILED, FSIM_ACTIVITY_CANCELED };
+/* ABI 1.10 appends DISABLED (live: kept, flying nothing, until enabled) and DELETED (a sticky disable: ended). */
+enum fsim_activity_state { FSIM_ACTIVITY_PENDING = 0, FSIM_ACTIVITY_ACTIVE, FSIM_ACTIVITY_COMPLETED, FSIM_ACTIVITY_FAILED, FSIM_ACTIVITY_CANCELED,
+                           FSIM_ACTIVITY_DISABLED, FSIM_ACTIVITY_DELETED };
+/* An activity command (ABI 1.10; docs/flight-autonomy.md, 4.10): fsim_activity_command. */
+enum fsim_activity_command_kind { FSIM_ACTIVITY_DISABLE = 0, FSIM_ACTIVITY_ENABLE, FSIM_ACTIVITY_RESET, FSIM_ACTIVITY_DELETE, FSIM_ACTIVITY_CHANGE_RANK,
+                                  FSIM_ACTIVITY_UNASSIGN };
 /* fsim_command_result.flags (ABI 1.9 adds DEFERRED: accepted to wait - its start window, or axes held by what it may not interrupt). */
 enum fsim_command_flag { FSIM_COMMAND_CLAMPED = 1, FSIM_COMMAND_DEFERRED = 2 };
 /* Ranks, queues and time windows (ABI 1.9; docs/flight-autonomy.md, 4.9). Why a pending activity has not started: */
@@ -455,6 +460,14 @@ FSIM_API int fsim_activity_cancel(fsim_world* world, fsim_activity_id activity, 
 FSIM_API int fsim_activity_update_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
                                      fsim_command_result* result);
 FSIM_API int fsim_activity_cancel_as(fsim_world* world, fsim_activity_id activity, int source, fsim_command_result* result);
+/* An activity command (ABI 1.10) for a live activity - flying, waiting or disabled - declaring `source` as the *_as calls
+ * do: disable (it stops flying and is kept), enable, reset (over from its beginning), delete (a sticky disable: it ends),
+ * change its rank (to rank_priority, rank_precedence), unassign (it gives up its axes and waits for them again). Answered
+ * as an UPDATE: rejected not_interactive where its command said it takes none (fsim_command_options.interactive 0),
+ * queue_full where a flying one has no room to be kept. FSIM_INVALID_ARGUMENT for a command beyond the enum. */
+FSIM_API int fsim_activity_command(fsim_world* world, fsim_activity_id activity, int command, uint32_t rank_priority, uint32_t rank_precedence,
+                                   int source, fsim_command_result* result);
+FSIM_API const char* fsim_activity_command_name(int command); /* "disable", "enable", "reset", "delete", "change_rank", "unassign" */
 /* What flies the primary axes nobody owns: FSIM_DEFAULT_NEUTRAL (surfaces
  * centred, throttle 0 - every vehicle's default) or FSIM_DEFAULT_HOLD (the
  * heading, airspeed and height each had when it was let go). `reason` (may be

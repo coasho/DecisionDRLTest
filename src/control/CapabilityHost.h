@@ -102,6 +102,13 @@ public:
     /// CANCEL: the activity ends and its axes return to the vehicle default
     /// (`caller` as for UPDATE); what waited for them may start.
     CommandResult cancel(ActivityId activity, const sim::VehicleState& state, double now, Source caller) noexcept;
+    /// An activity command (docs/flight-autonomy.md, 4.10) for a live activity
+    /// - flying, waiting or disabled - `caller` as for UPDATE; `rank` for
+    /// ChangeRank. Refused NotInteractive where its command said it takes
+    /// none, QueueFull where a flying one has no room to be kept (Disable,
+    /// Unassign). What waits may start after it. May allocate: an activity
+    /// kept out of its slot keeps its route's waypoints and its curve's segments.
+    CommandResult activityCommand(ActivityId activity, ActivityCommand command, Rank rank, const sim::VehicleState& state, double now, Source caller);
     /// The existing entry points (docs/control-architecture.md, 10.7): an
     /// UPDATE of their live activity at the same capability, else a NEW with
     /// the legacy options.
@@ -224,6 +231,7 @@ private:
         double target = kUnknown; ///< a terminating support activity's goal (gear down 1 / up 0, a flap position)
         bool outside = false;     ///< a manoeuvre's: the state went past a limit by more than a limiter overshoots
         std::uint32_t precedenceOverride = kNoPrecedenceOverride; ///< its command's (CommandOptions::precedenceOverride)
+        double firstStart = kHold; ///< a route's start as commanded: Reset flies from it (a route resumed flies from elsewhere)
     };
 
     /// An activity waiting to start (docs/flight-autonomy.md, 4.9): its record
@@ -238,18 +246,33 @@ private:
         std::unique_ptr<Behavior> behavior; ///< a guidance capability's, made at its NEW
         std::vector<Waypoint> waypoints;    ///< a route's (room for the path store's, reserved at its NEW)
         std::vector<BezierSegment> segments; ///< a curve's (likewise)
+        std::uint64_t queued = 0;           ///< when it began to wait (queueSerial_): its place among equals
+        double firstStart = kHold;          ///< a route's start as commanded (Reset: kept out of its slot, it resumed elsewhere)
     };
+    /// A flying activity leaves its slot, kept in the waiting store: Disabled,
+    /// or Pending to wait for its axes again, behind what waits. Its behaviour
+    /// is kept, its setpoint and a route's waypoints or a curve's segments too;
+    /// a route resumes at the point it flew to. False if there is no room.
+    bool retire(std::size_t slot, ActivityState state);
+    /// The options slot `slot`'s activity was commanded with, as its record and slot keep them.
+    CommandOptions optionsOf(std::size_t slot) const noexcept;
+    /// What a support or engines slot demands now, as its command.
+    SupportCommand supportCommandOf(std::size_t slot) const noexcept;
     /// What a contender may do about a live activity on its axes.
     enum class Standing : std::uint8_t { Takes, Waits, Refused };
     /// The rules of docs/flight-autonomy.md, 4.9: a higher source's activity
     /// refuses an interrupting command (AuthorityHeld) and is waited for by the
     /// rest; the platform's interrupting command takes any rank; a policy's
     /// that does not interrupt waits; otherwise precedence, then rank decide -
-    /// at or ahead of it (the newest, when equal) takes.
-    static Standing standing(Source source, std::uint32_t precedence, Rank rank, bool interrupt, const ActivityRecord& holder) noexcept;
+    /// ahead of it takes, and when equal the newer command: `id` the
+    /// contender's (kNewest for a NEW's).
+    static Standing standing(Source source, std::uint32_t precedence, Rank rank, bool interrupt, ActivityId id, const ActivityRecord& holder) noexcept;
     /// A contender against every live activity on `axes`: Takes if it may take
     /// them all; else Refused or Waits with `blocker` (Refused first).
-    Standing arbitrate(AxisMask axes, Source source, std::uint32_t precedence, Rank rank, bool interrupt, ActivityId& blocker) const noexcept;
+    Standing arbitrate(AxisMask axes, Source source, std::uint32_t precedence, Rank rank, bool interrupt, ActivityId id,
+                       ActivityId& blocker) const noexcept;
+    /// A NEW's command, newer than every activity's.
+    static constexpr ActivityId kNewest = ~ActivityId{0};
     /// A command's time window (docs/flight-autonomy.md, 4.9): each bound NaN
     /// or finite and in order (InvalidParameter), and one it can still meet at
     /// `now` - an end window not yet closed, a critical start window not yet
@@ -272,6 +295,7 @@ private:
         std::size_t capability = 0;
         AxisMask axes = 0;
         std::uint16_t flags = 0;
+        double firstStart = kHold; ///< a route's start as commanded
     };
     /// What the NEW (or a waiting activity starting) flies, into a slot: it
     /// takes its axes, its setpoint and behaviour are installed, its record
@@ -446,7 +470,8 @@ private:
     std::array<ActivityRecord, kActivities> records_{}; ///< per slot: its activity's record
     std::array<ActivityRecord, kRecent> recent_{};      ///< ended records, a ring
     std::size_t recentNext_ = 0, recentCount_ = 0;
-    std::size_t waitingCount_ = 0;                      ///< activities waiting to start
+    std::size_t waitingCount_ = 0;                      ///< activities waiting to start, or disabled
+    std::uint64_t queueSerial_ = 0;                     ///< counts entries into the waiting store
     std::size_t windowed_ = 0;                          ///< live activities with an end window, flying
     std::vector<Authority> authority_;                  ///< per capability (sized at bind)
     ControlMode controlMode_ = ControlMode::Open;

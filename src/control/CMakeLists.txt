@@ -27,7 +27,8 @@ add_library(fsim_control STATIC
     Atmosphere.h
     Route.h
     Route.cpp
-    Guidance.cpp)
+    Guidance.cpp
+    Names.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

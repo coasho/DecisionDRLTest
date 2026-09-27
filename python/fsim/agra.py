@@ -62,6 +62,7 @@ CANNOT_COMPLY = {
     "airborne": "STATE_OR_SETTINGS",
     "time_constraint": "CONSTRAINT_TIME",
     "queue_full": "INSUFFICIENT_RESOURCES",
+    "not_interactive": "STATE_OR_SETTINGS",
 }
 
 #: fsim.TimeCriticality names <-> A-GRA's SchedulingCriticalityEnum (its omission: none is critical)
@@ -141,6 +142,10 @@ def activity_state(info, now=None):
         return "ACTIVE_UNCONSTRAINED"
     if state == ActivityState.COMPLETED:
         return "COMPLETED"
+    if state == ActivityState.DISABLED:
+        return "DISABLED"
+    if state == ActivityState.DELETED:
+        return "DELETED"
     return "FAILED"
 
 

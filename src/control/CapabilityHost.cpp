@@ -64,35 +64,6 @@ bool aboveGround(double reference) noexcept { return reference == static_cast<do
 
 } // namespace
 
-const char* timeCriticalityName(TimeCriticality criticality) noexcept {
-    switch (criticality) {
-    case TimeCriticality::None: return "none";
-    case TimeCriticality::Start: return "start";
-    case TimeCriticality::End: return "end";
-    case TimeCriticality::StartAndEnd: return "start_and_end";
-    default: return "?";
-    }
-}
-
-const char* activityWaitName(ActivityWait wait) noexcept {
-    switch (wait) {
-    case ActivityWait::None: return "none";
-    case ActivityWait::Scheduled: return "scheduled";
-    case ActivityWait::Queued: return "queued";
-    default: return "?";
-    }
-}
-
-const char* activityBasisName(ActivityBasis basis) noexcept {
-    switch (basis) {
-    case ActivityBasis::Actual: return "actual";
-    case ActivityBasis::Sensed: return "sensed";
-    case ActivityBasis::Predicted: return "predicted";
-    case ActivityBasis::Planned: return "planned";
-    default: return "?";
-    }
-}
-
 CapabilityHost::CapabilityHost() = default;
 CapabilityHost::~CapabilityHost() = default;
 CapabilityHost::CapabilityHost(CapabilityHost&&) noexcept = default;
@@ -737,23 +708,26 @@ CapabilityStatus CapabilityHost::status(std::size_t capability, const sim::Vehic
     return out;
 }
 
-CapabilityHost::Standing CapabilityHost::standing(Source source, std::uint32_t precedence, Rank rank, bool interrupt, const ActivityRecord& h) noexcept {
+CapabilityHost::Standing CapabilityHost::standing(Source source, std::uint32_t precedence, Rank rank, bool interrupt, ActivityId id,
+                                                  const ActivityRecord& h) noexcept {
     if (h.source > source) return interrupt ? Standing::Refused : Standing::Waits; // a higher source's (ADR-26): refused, or waited for
     const bool platform = source != Source::Policy;
     if (platform && interrupt) return Standing::Takes;   // the primary controller interrupts any rank
     if (!platform && !interrupt) return Standing::Waits; // a policy's "nice" command lets what flies finish
     // rank decides - a policy's interrupting command, the platform's deferring one: its
-    // capability's precedence, then its rank; equal, the newest (ADR-26's rule)
+    // capability's precedence, then its rank; equal, the newer command (ADR-26's rule: a
+    // NEW takes; what waited - unassigned, enabled, scheduled - does not take from a newer one)
     if (precedence != h.precedence) return precedence < h.precedence ? Standing::Takes : Standing::Waits;
-    return ranksAhead(h.rank, rank) ? Standing::Waits : Standing::Takes;
+    if (!(rank == h.rank)) return ranksAhead(rank, h.rank) ? Standing::Takes : Standing::Waits;
+    return id > h.id ? Standing::Takes : Standing::Waits;
 }
 
-CapabilityHost::Standing CapabilityHost::arbitrate(AxisMask axes, Source source, std::uint32_t precedence, Rank rank, bool interrupt,
+CapabilityHost::Standing CapabilityHost::arbitrate(AxisMask axes, Source source, std::uint32_t precedence, Rank rank, bool interrupt, ActivityId id,
                                                    ActivityId& blocker) const noexcept {
     Standing out = Standing::Takes;
     for (std::size_t s = 0; s < kActivities; ++s) {
         if (!slots_[s].live || !(records_[s].axes & axes)) continue;
-        const Standing st = standing(source, precedence, rank, interrupt, records_[s]);
+        const Standing st = standing(source, precedence, rank, interrupt, id, records_[s]);
         if (st == Standing::Refused) {
             blocker = records_[s].id;
             return st;
@@ -898,6 +872,7 @@ void CapabilityHost::makeRecord(ActivityRecord& record, ActivityId id, std::size
 ActivityRecord& CapabilityHost::start(std::size_t s, const Launch& what, const CommandOptions& options, double now) noexcept {
     slots_[s] = Slot{what.id, true, options.range, static_cast<std::uint16_t>(what.flags & kClamped ? kActivityClamped : 0), kUnknown};
     slots_[s].precedenceOverride = options.precedenceOverride;
+    slots_[s].firstStart = what.firstStart;
     ActivityRecord& record = records_[s];
     if (what.waited) record = *what.waited, record.waiting = ActivityWait::None, record.waitingFor = 0; // (it flies)
     else makeRecord(record, what.id, what.capability, options, what.axes, now);
@@ -1050,8 +1025,10 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
         return false;
     }
     w.used = false, --waitingCount_;
-    launch(Launch{&record, record.id, record.capability, record.axes, detail.flags}, w.options, std::move(setpoint), std::move(w.behavior), route,
-           Span<const BezierSegment>(w.segments.data(), w.segments.size()), now);
+    const auto* flown = std::get_if<RouteCommand>(&setpoint);
+    const double firstStart = !isHold(w.firstStart) ? w.firstStart : flown ? flown->start : kHold;
+    launch(Launch{&record, record.id, record.capability, record.axes, detail.flags, firstStart}, w.options, std::move(setpoint), std::move(w.behavior),
+           route, Span<const BezierSegment>(w.segments.data(), w.segments.size()), now);
     return true;
 }
 
@@ -1066,7 +1043,7 @@ bool CapabilityHost::scheduleWaiting(const sim::VehicleState& state, double now)
         if (x.source != y.source) return x.source > y.source;
         if (x.precedence != y.precedence) return x.precedence < y.precedence;
         if (!(x.rank == y.rank)) return ranksAhead(x.rank, y.rank);
-        return x.id < y.id;
+        return a->queued < b->queued; // (in the order they began to wait)
     });
     bool started = false;
     // Each start can free axes one before it in the order waited for (it ends
@@ -1078,17 +1055,19 @@ bool CapabilityHost::scheduleWaiting(const sim::VehicleState& state, double now)
             if (!w.used) continue; // (started or ended in an earlier pass)
             ActivityRecord& r = w.record;
             const TimeWindow& t = r.window;
+            const bool disabled = r.state == ActivityState::Disabled; // (it waits for ENABLE: only its end window can end it)
             // a window it can no longer meet: its end's closed, or its critical start's
-            if (now >= t.endNotAfter || (t.startCritical() && now > t.startNotAfter)) {
+            if (now >= t.endNotAfter || (!disabled && t.startCritical() && now > t.startNotAfter)) {
                 endWaiting(w, ActivityState::Failed, Reason::TimeConstraint, now);
                 continue;
             }
+            if (disabled) continue;
             if (now < t.startNotBefore) {
                 r.waiting = ActivityWait::Scheduled, r.waitingFor = 0;
                 continue;
             }
             ActivityId blocker = 0;
-            if (arbitrate(r.axes, r.source, r.precedence, r.rank, r.interrupt, blocker) != Standing::Takes) {
+            if (arbitrate(r.axes, r.source, r.precedence, r.rank, r.interrupt, r.id, blocker) != Standing::Takes) {
                 r.waiting = ActivityWait::Queued, r.waitingFor = blocker;
                 continue;
             }
@@ -1164,7 +1143,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     Standing standing = Standing::Waits;
     if (!scheduled) {
         if (const Reason why = checkAwareness(axes, d.level, true); why != Reason::None) return rejected(why);
-        standing = arbitrate(axes, options.source, precedenceFor(index, options.precedenceOverride), options.rank, options.interrupt, blocker);
+        standing = arbitrate(axes, options.source, precedenceFor(index, options.precedenceOverride), options.rank, options.interrupt, kNewest, blocker);
         if (standing == Standing::Refused) return rejected(Reason::AuthorityHeld, 0, blocker);
     }
     const bool waits = standing != Standing::Takes;
@@ -1195,8 +1174,10 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
         makeRecord(w.record, id, index, options, axes, now);
         w.record.waiting = scheduled ? ActivityWait::Scheduled : ActivityWait::Queued;
         w.record.waitingFor = blocker;
+        w.queued = ++queueSerial_;
         w.options = options;
         w.command = command;
+        if (const auto* route = std::get_if<RouteCommand>(&command)) w.firstStart = route->start;
         w.behavior = std::move(behavior);
         w.waypoints.reserve(PathStore::kWaypoints), w.waypoints.assign(waypoints.begin(), waypoints.end());
         w.segments.reserve(PathStore::kSegments), w.segments.assign(segments.begin(), segments.end());
@@ -1208,9 +1189,10 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
         r.other = blocker;
         return r;
     }
-    const bool route = std::holds_alternative<RouteCommand>(setpoint);
+    const auto* route = std::get_if<RouteCommand>(&setpoint);
+    const double firstStart = route ? route->start : kHold;
     if ((route || std::holds_alternative<CurveCommand>(setpoint)) && !config_->path) config_->path = std::make_unique<PathStore>();
-    launch(Launch{nullptr, id, index, axes, flags}, options, std::move(setpoint), std::move(behavior), route, segments, now);
+    launch(Launch{nullptr, id, index, axes, flags, firstStart}, options, std::move(setpoint), std::move(behavior), route != nullptr, segments, now);
     schedule(state, now); // (what waits is arbitrated against it)
     return about(accepted(id, flags, true), detail);
 }
@@ -1247,7 +1229,7 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
     if (!scheduled) {
         // the engines take thrust from the cascade: what flies the rest flies it apart
         if (const Reason why = checkAwareness(axes, Level::Actuator, false); why != Reason::None) return rejected(why);
-        standing = arbitrate(axes, options.source, precedenceFor(index, options.precedenceOverride), options.rank, options.interrupt, blocker);
+        standing = arbitrate(axes, options.source, precedenceFor(index, options.precedenceOverride), options.rank, options.interrupt, kNewest, blocker);
         if (standing == Standing::Refused) return rejected(Reason::AuthorityHeld, 0, blocker);
     }
     const bool waits = standing != Standing::Takes;
@@ -1265,6 +1247,7 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
         makeRecord(w.record, id, index, options, axes, now);
         w.record.waiting = scheduled ? ActivityWait::Scheduled : ActivityWait::Queued;
         w.record.waitingFor = blocker;
+        w.queued = ++queueSerial_;
         w.options = options;
         w.supportCommand = command;
         ++waitingCount_;
@@ -1306,6 +1289,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
     if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
     writeRoute();
+    if (!isHold(route.start)) slots_[s].firstStart = next.start;
     *live = next;
     ++config_->slots[s].revision;
     return result;
@@ -1483,6 +1467,136 @@ CommandResult CapabilityHost::cancel(ActivityId activity, const sim::VehicleStat
     return r;
 }
 
+CommandOptions CapabilityHost::optionsOf(std::size_t s) const noexcept {
+    const ActivityRecord& r = records_[s];
+    CommandOptions o;
+    o.source = r.source;
+    o.axes = r.axes;
+    o.range = slots_[s].range;
+    o.commandId = r.commandId;
+    o.trace = r.trace;
+    o.interactive = r.interactive;
+    o.interrupt = r.interrupt;
+    o.rank = r.rank;
+    o.precedenceOverride = slots_[s].precedenceOverride;
+    o.window = r.window;
+    return o;
+}
+
+SupportCommand CapabilityHost::supportCommandOf(std::size_t s) const noexcept {
+    const RuntimeConfig& c = *config_;
+    if (s == kEnginesSlot) {
+        EnginesCommand e;
+        for (std::size_t i = 0; i < c.engines.size(); ++i) e.throttle[i] = c.engines[i];
+        return e;
+    }
+    const SupportDemand& d = c.support[s - kSlotCount];
+    switch (static_cast<Axis>(static_cast<std::size_t>(Axis::Flaps) + (s - kSlotCount))) {
+    case Axis::Flaps: return FlapsCommand{d.value};
+    case Axis::Gear: return GearCommand{d.value};
+    case Axis::Brakes: return WheelBrakesCommand{d.value, d.value2};
+    case Axis::Speedbrake: return SpeedbrakeCommand{d.value};
+    default: return PitchTrimCommand{d.value};
+    }
+}
+
+bool CapabilityHost::retire(std::size_t s, ActivityState state) {
+    Waiting* w = freeWaiting();
+    if (!w) return false;
+    const ActivityRecord& r = records_[s];
+    w->used = true;
+    w->support = !isCascade(s);
+    w->options = optionsOf(s);
+    w->record = r;
+    w->record.state = state;
+    w->record.waiting = state == ActivityState::Pending ? ActivityWait::Queued : ActivityWait::None; // (the scheduler names what it waits for)
+    w->record.waitingFor = 0;
+    w->queued = ++queueSerial_; // behind what waits
+    if (w->support) {
+        w->supportCommand = supportCommandOf(s);
+    } else {
+        Command& flown = config_->slots[s].command;
+        w->behavior = runtime_->uninstall(s); // kept: it starts afresh when it flies again
+        w->waypoints.clear(), w->segments.clear();
+        if (auto* route = std::get_if<RouteCommand>(&flown); route && config_->path) {
+            const PathStore& store = *config_->path;
+            w->waypoints.reserve(PathStore::kWaypoints), w->waypoints.assign(store.waypoints, store.waypoints + store.count);
+            w->firstStart = isHold(slots_[s].firstStart) ? route->start : slots_[s].firstStart;
+            // resumed at the point it flew to
+            if (store.count && r.progress.segments) route->start = static_cast<double>(std::min<std::uint32_t>(r.progress.segment, store.count - 1));
+        }
+        if (std::holds_alternative<CurveCommand>(flown) && config_->path) {
+            const PathStore& store = *config_->path;
+            w->segments.reserve(PathStore::kSegments), w->segments.assign(store.segments, store.segments + store.segmentCount);
+        }
+        w->command = std::move(flown);
+    }
+    if (!std::isnan(r.window.endNotAfter)) --windowed_; // (it no longer flies)
+    ++waitingCount_;
+    // its slot freed, its record kept: its axes to the vehicle default, or to what waits
+    release(s);
+    return true;
+}
+
+CommandResult CapabilityHost::activityCommand(ActivityId activity, ActivityCommand command, Rank rank, const sim::VehicleState& state, double now,
+                                              Source caller) {
+    details_.clear();
+    const int found = liveSlot(activity);
+    Waiting* w = found < 0 ? waitingEntry(activity) : nullptr;
+    if (found < 0 && !w) return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
+    const auto s = static_cast<std::size_t>(found < 0 ? 0 : found);
+    ActivityRecord& record = w ? w->record : records_[s];
+    if (const Reason why = addresses(record, caller); why != Reason::None) return rejected(why, activity, activity);
+    if (static_cast<unsigned>(command) >= static_cast<unsigned>(ActivityCommand::Count)) return rejected(Reason::InvalidParameter, activity);
+    if (!record.interactive) return rejected(Reason::NotInteractive, activity);
+    CommandResult result = accepted(activity);
+    result.commandId = record.commandId;
+    auto full = [&] {
+        CommandResult r = rejected(Reason::QueueFull, activity);
+        r.commandId = result.commandId;
+        return r;
+    };
+    switch (command) {
+    case ActivityCommand::Disable: // it flies nothing, kept until enabled
+        if (!w) {
+            if (!retire(s, ActivityState::Disabled)) return full();
+        } else if (record.state != ActivityState::Disabled) {
+            record.state = ActivityState::Disabled, record.waiting = ActivityWait::None, record.waitingFor = 0;
+        }
+        break;
+    case ActivityCommand::Unassign: // its axes given up: it waits for them again, behind what waits
+        if (!w && !retire(s, ActivityState::Pending)) return full();
+        break; // (one that waits, or is disabled, holds nothing)
+    case ActivityCommand::Enable: // a disabled one waits to start again; one live and enabled stays so
+        if (w && record.state == ActivityState::Disabled) record.state = ActivityState::Pending, w->queued = ++queueSerial_;
+        break;
+    case ActivityCommand::Reset: // over from its beginning
+        if (w) {
+            if (auto* route = std::get_if<RouteCommand>(&w->command); route && !w->support) route->start = w->firstStart;
+        } else {
+            record.state = ActivityState::Pending;
+            record.progress = ActivityProgress{};
+            slots_[s].outside = false;
+            if (auto* route = isCascade(s) ? std::get_if<RouteCommand>(&config_->slots[s].command) : nullptr; route && !isHold(slots_[s].firstStart))
+                route->start = slots_[s].firstStart; // (from its first point, as commanded, not where it resumed)
+            if (isCascade(s)) ++config_->slots[s].generation, ++config_->slots[s].revision; // its behaviour begins afresh
+        }
+        break;
+    case ActivityCommand::Delete: // a sticky disable: it ends, and cannot be enabled
+        if (w) {
+            endWaiting(*w, ActivityState::Deleted, Reason::Requested, now);
+        } else {
+            end(s, ActivityState::Deleted, Reason::Requested, 0, now);
+            release(s);
+        }
+        break;
+    case ActivityCommand::ChangeRank: record.rank = rank; break; // what it contests, arbitrated afresh below
+    default: break;
+    }
+    schedule(state, now);
+    return result;
+}
+
 CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
                                             const sim::VehicleState& state, Source caller) noexcept {
     const ActivityRecord& record = w.record;
@@ -1554,6 +1668,7 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     if (const Reason why = prepare(record.capability, probe, points, pieces, state, log); why != Reason::None) return about(rejected(why, activity), result);
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
     // kept for its start (room reserved at its NEW)
+    if (const auto* route = std::get_if<RouteCommand>(&setpoint); route && !isHold(route->start)) w.firstStart = route->start;
     if (points.data() != w.waypoints.data()) w.waypoints.assign(points.begin(), points.end());
     if (pieces.data() != w.segments.data()) w.segments.assign(pieces.begin(), pieces.end());
     assignSetpoint(w.command, next);

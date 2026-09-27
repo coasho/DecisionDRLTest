@@ -92,15 +92,16 @@ bool sameRecord(const ActivityRecord& a, const ActivityRecord& b) {
 /// What the rules of docs/flight-autonomy.md, 4.9 let a contender do about a live
 /// activity `h` on its axes - the model the walks hold the host to.
 enum class Standing { Takes, Waits, Refused };
-Standing standing(Source source, std::uint32_t precedence, Rank rank, bool interrupt, const ActivityRecord& h) {
+Standing standing(Source source, std::uint32_t precedence, Rank rank, bool interrupt, ActivityId id, const ActivityRecord& h) {
     if (h.source > source) return interrupt ? Standing::Refused : Standing::Waits; // a higher source's
     const bool platform = source != Source::Policy;
     if (platform && interrupt) return Standing::Takes;   // the primary controller: any rank
     if (!platform && !interrupt) return Standing::Waits; // a policy's nice command
     if (precedence != h.precedence) return precedence < h.precedence ? Standing::Takes : Standing::Waits;
-    return ranksAhead(h.rank, rank) ? Standing::Waits : Standing::Takes; // equal: the newest
+    if (!(rank == h.rank)) return ranksAhead(rank, h.rank) ? Standing::Takes : Standing::Waits;
+    return id > h.id ? Standing::Takes : Standing::Waits; // equal: the newer command
 }
-Standing standing(const ActivityRecord& c, const ActivityRecord& h) { return standing(c.source, c.precedence, c.rank, c.interrupt, h); }
+Standing standing(const ActivityRecord& c, const ActivityRecord& h) { return standing(c.source, c.precedence, c.rank, c.interrupt, c.id, h); }
 
 std::uint32_t serialOf(ActivityId id) { return static_cast<std::uint32_t>(id & 0xFFFFFFFFu); }
 
@@ -474,7 +475,7 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
 
 // --- random sequences -----------------------------------------------------------------------------
 
-enum class Op { New, Update, Cancel, Legacy, Step, Reset, Default, Retarget, Authority, Precedence };
+enum class Op { New, Update, Cancel, Legacy, Step, Reset, Default, Retarget, Authority, Precedence, Activity };
 
 const char* opName(Op op) {
     switch (op) {
@@ -487,6 +488,7 @@ const char* opName(Op op) {
     case Op::Default: return "default";
     case Op::Authority: return "authority";
     case Op::Precedence: return "precedence";
+    case Op::Activity: return "activity";
     default: return "retarget";
     }
 }
@@ -505,15 +507,18 @@ struct AuthorityModel {
     }
 };
 
-bool among(Reason r, std::initializer_list<Reason> allowed) { return std::find(allowed.begin(), allowed.end(), r) != allowed.end(); }
+template <class T>
+bool among(T r, std::initializer_list<T> allowed) { return std::find(allowed.begin(), allowed.end(), r) != allowed.end(); }
 
 /// What an operation did, for the rules it must have kept.
 struct Done {
     Op op = Op::Step;
     CommandResult result;       ///< NEW, UPDATE, CANCEL
     CommandOptions options;     ///< NEW
-    ActivityId addressed = 0;   ///< UPDATE, CANCEL
-    Source caller = Source::Policy; ///< UPDATE, CANCEL: the source the call declares
+    ActivityId addressed = 0;   ///< UPDATE, CANCEL, an activity command
+    Source caller = Source::Policy; ///< UPDATE, CANCEL, an activity command: the source the call declares
+    ActivityCommand command = ActivityCommand::Disable; ///< an activity command (docs/flight-autonomy.md, 4.10)
+    Rank rank{};                ///< ChangeRank's
     ControlMode mode = ControlMode::Open; ///< the vehicle's, as the operation was made
     bool accepted = false;      ///< the existing entry point's answer
     std::size_t capability = 0; ///< NEW, the existing entry point, an authority call: the capability it is about
@@ -577,6 +582,21 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             CHECK(done.options.interrupt);               // ...that would interrupt it (4.9: one that would not waits)
         }
     }
+    if (done.op == Op::Activity) { // an activity command (4.10): refused as the rules say, else accepted
+        const ActivityRecord* target = was(done.addressed);
+        const std::string what = std::string("activity:") + activityCommandName(done.command) + ":";
+        ++seen[what + (done.result.accepted() ? "done" : reasonName(done.result.reason))];
+        if (!target) CHECK(done.result.reason == Reason::UnknownActivity);
+        else if (!target->live()) CHECK(done.result.reason == Reason::ActivityEnded);
+        else if (done.mode == ControlMode::Granted && done.caller < target->source) CHECK(done.result.reason == Reason::AuthorityHeld);
+        else if (!target->interactive) CHECK(done.result.reason == Reason::NotInteractive);
+        else if (!done.result.accepted()) {
+            // only a flying one kept out of its slot finds no room
+            CHECK(done.result.reason == Reason::QueueFull);
+            CHECK(among(done.command, {ActivityCommand::Disable, ActivityCommand::Unassign}));
+        }
+        if (target && target->live() && !target->interactive) ++seen["activity:not_interactive"];
+    }
     if (done.op == Op::Update || done.op == Op::Cancel) {
         const ActivityRecord* target = was(done.addressed);
         const bool ok = done.op == Op::Update ? done.result.accepted() : done.result.status == CommandStatus::Canceled;
@@ -627,6 +647,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         switch (r.state) {
         case ActivityState::Pending:
         case ActivityState::Active: CHECK((r.reason == Reason::None && r.by == 0)); break;
+        case ActivityState::Disabled: CHECK((r.reason == Reason::None && r.by == 0 && r.waiting == ActivityWait::None)); break; // (4.10)
+        case ActivityState::Deleted: CHECK((r.reason == Reason::Requested && r.by == 0)); break;
         case ActivityState::Completed:
             CHECK((r.reason == Reason::GoalReached && r.by == 0));
             // a persistent activity is done only when its end window closes; none is done before a critical one opens (4.9)
@@ -689,20 +711,27 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             ++seen[std::string(activityStateName(old->state)) + "->" + activityStateName(r.state)]; // the edge
             if (!r.live()) ++seen[std::string(activityStateName(r.state)) + ":" + reasonName(r.reason)]; // and why it ended
         }
+        const bool commanded = done.op == Op::Activity && done.result.accepted() && done.addressed == id; // (an activity command for it, 4.10)
         if (r.live()) {
-            // live on: active once flown, pending again only after a reset
+            // live on: active once flown; pending again only after a reset, or an activity command for it
+            // (reset, unassign, enable); disabled only by one (disable)
             if (old->state != r.state) {
                 if (r.state == ActivityState::Active) CHECK(step);
-                else CHECK(reset);
+                else if (r.state == ActivityState::Disabled) CHECK((commanded && done.command == ActivityCommand::Disable));
+                else CHECK((reset || (commanded && among(done.command, {ActivityCommand::Reset, ActivityCommand::Unassign, ActivityCommand::Enable}))));
             }
-            // waiting until it starts, never again after (4.9)
-            if (old->waiting == ActivityWait::None) CHECK(r.waiting == ActivityWait::None);
+            // waiting until it starts, never again after (4.9) - but what gives up its axes, or is enabled, waits again
+            if (old->waiting == ActivityWait::None && !(commanded && among(done.command, {ActivityCommand::Unassign, ActivityCommand::Enable})))
+                CHECK(r.waiting == ActivityWait::None);
             if (old->waiting != ActivityWait::None && r.waiting == ActivityWait::None) ++seen["started"];
             CHECK((r.axes & ~old->axes) == 0); // it never gains an axis...
             if (r.axes != old->axes) {
                 CHECK((created || startedNow)); // ...and loses one only to a NEW (or what waited, starting), and then only a support axis
                 CHECK((r.axes & kPrimaryAxes) == (old->axes & kPrimaryAxes));
             }
+        } else if (r.state == ActivityState::Deleted) {
+            CHECK((commanded && done.command == ActivityCommand::Delete)); // only by DELETE, at once (4.10)
+            CHECK(r.endTime == done.now);
         } else if (r.state == ActivityState::Canceled && r.reason == Reason::Requested) {
             CHECK(done.op == Op::Cancel);
             CHECK(done.addressed == id);
@@ -739,6 +768,23 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
     }
     CHECK(newRecords <= 1);
     if (done.op == Op::New && done.result.accepted()) CHECK(newRecords == 1);
+    if (done.op == Op::Activity && done.result.accepted()) { // what the command did (4.10)
+        const auto it = after.find(done.addressed);
+        const ActivityRecord* old = was(done.addressed);
+        REQUIRE(it != after.end());
+        REQUIRE(old != nullptr);
+        const ActivityRecord& r = it->second;
+        const bool flew = old->state == ActivityState::Pending || old->state == ActivityState::Active;
+        switch (done.command) {
+        case ActivityCommand::Disable: CHECK(r.state == ActivityState::Disabled); break;
+        case ActivityCommand::Delete: CHECK(r.state == ActivityState::Deleted); break;
+        case ActivityCommand::ChangeRank: if (r.live()) CHECK(r.rank == done.rank); break;
+        case ActivityCommand::Enable: CHECK(r.state != ActivityState::Disabled); break;
+        case ActivityCommand::Unassign: if (flew && old->waiting == ActivityWait::None) CHECK(r.state != ActivityState::Active); break;
+        case ActivityCommand::Reset: if (old->state == ActivityState::Active && r.live()) CHECK(r.state == ActivityState::Pending); break;
+        default: break;
+        }
+    }
     for (const auto& [id, r] : before)
         if (!after.count(id)) CHECK_FALSE(r.live()); // only the oldest ended ones leave the records
 
@@ -751,10 +797,17 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
 
     // what waits (4.9): pending, within the windows it can still meet; scheduled until its start window opens;
     // queued behind something on its axes it may not take, which it names - nothing waits that could start
-    auto flying = [](const ActivityRecord& r) { return r.live() && r.waiting == ActivityWait::None; };
+    auto flying = [](const ActivityRecord& r) {
+        return (r.state == ActivityState::Pending || r.state == ActivityState::Active) && r.waiting == ActivityWait::None;
+    };
     for (const auto& [id, r] : after) {
         if (!r.live()) continue;
         const TimeWindow& t = r.window;
+        if (r.state == ActivityState::Disabled) { // kept, flying nothing, until enabled or its end window closes (4.10)
+            CHECK_FALSE(done.now >= t.endNotAfter);
+            ++seen["disabled"];
+            continue;
+        }
         if (r.waiting == ActivityWait::None) {
             // flying past its end window: only a terminating activity whose end is not critical (late, it goes on)
             if (done.now >= t.endNotAfter) CHECK((caps[r.capability].persistence == Persistence::Terminating && !t.endCritical()));
@@ -860,6 +913,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             done.op = u < 0.36 ? Op::New : u < 0.57 ? Op::Update : u < 0.65 ? Op::Cancel : u < 0.71 ? Op::Legacy
                     : u < 0.89 ? Op::Step : u < 0.91 ? Op::Reset : u < 0.94 ? Op::Default : u < 0.95 ? Op::Retarget : Op::Authority;
             if (chance(0.02)) done.op = Op::Precedence; // the platform sets a capability's precedence (4.9)
+            else if (chance(0.07)) done.op = Op::Activity; // an activity command (4.10)
         }
         const auto& caps = w.capabilities(v);
         // a capability's command: flight, guidance or support
@@ -898,6 +952,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 done.options.axes = make.chance(0.9) ? masks[make.pick(std::size(masks))] : static_cast<AxisMask>(make.pick(1u << 10));
             }
             // ranked, not interrupting, overriding its precedence, windowed, now and then (4.9)
+            done.options.interactive = !chance(0.1); // (activity commands refused it, 4.10)
             if (chance(0.45)) {
                 done.options.rank = {static_cast<std::uint16_t>(draw(4)), static_cast<std::uint16_t>(draw(4))};
                 done.options.interrupt = !chance(0.4);
@@ -948,6 +1003,21 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                                                                                                          : precedences[done.capability];
                 if (made->live()) CHECK(made->precedence == expected);
             }
+            break;
+        }
+        case Op::Activity: {
+            // a live activity mostly, else one that ended or never was; the command and the caller drawn apart
+            std::vector<ActivityId> live;
+            for (const auto& [id, r] : before)
+                if (r.live()) live.push_back(id);
+            const double which = std::uniform_real_distribution<double>(0.0, 1.0)(schedules);
+            done.addressed = which < 0.8 && !live.empty() ? live[static_cast<std::size_t>(draw(static_cast<int>(live.size())))]
+                             : which < 0.95 && !issued.empty() ? issued[static_cast<std::size_t>(draw(static_cast<int>(issued.size())))]
+                                                              : activityId(v, lastSerial + 1 + static_cast<std::uint32_t>(draw(50)));
+            done.command = static_cast<ActivityCommand>(draw(static_cast<int>(ActivityCommand::Count)));
+            done.rank = {static_cast<std::uint16_t>(draw(4)), static_cast<std::uint16_t>(draw(4))};
+            done.caller = chance(0.7) ? Source::Policy : chance(0.5) ? Source::Autopilot : Source::Override;
+            done.result = w.activityCommand(done.caller, done.addressed, done.command, done.rank);
             break;
         }
         case Op::Precedence: {
@@ -1106,7 +1176,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
         }
         const bool changes = done.op == Op::Step || done.op == Op::Reset || (done.op == Op::New && done.result.accepted()) ||
                              (done.op == Op::Legacy && done.accepted) || (done.op == Op::Cancel && done.result.status == CommandStatus::Canceled) ||
-                             (done.op == Op::Authority && !done.ends.empty()) || done.op == Op::Precedence;
+                             (done.op == Op::Authority && !done.ends.empty()) || done.op == Op::Precedence ||
+                             (done.op == Op::Activity && done.result.accepted());
         if (!changes) {
             // refused, an UPDATE, or nothing to do with the records: they are as they were
             CHECK(after.size() == before.size());
@@ -1169,7 +1240,10 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
                                              "new:invalid_axes", "new:out_of_range", "new:invalid_parameter", "update:done", "update:not_updatable",
                                              "update:wrong_command_type", "update:activity_ended", "update:unknown_activity", "cancel:done",
                                              "cancel:activity_ended", "cancel:unknown_activity", "clamped", "validate:valid", "validate:refused",
-                                             "new:deferred", "scheduled", "queued", "started"};
+                                             "new:deferred", "scheduled", "queued", "started",
+                                             // the activity commands (docs/flight-autonomy.md, 4.10)
+                                             "activity:disable:done", "activity:enable:done", "activity:reset:done", "activity:delete:done",
+                                             "activity:change_rank:done", "activity:unassign:done", "disabled"};
         auto unmet = [&seen] { return std::any_of(std::begin(kEvery), std::end(kEvery), [&seen](const char* what) { return seen[what] == 0; }); };
         for (std::uint64_t seed = 20260926 + 100; unmet() && seed < 20260926 + 103; ++seed) randomSequence(a, seed, 600, seen, 0);
         for (const char* what : kEvery) {
@@ -1189,7 +1263,7 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
                                         "restrict", "update:authority_held", "cancel:authority_held",
                                         // ranks, queues and time windows (docs/flight-autonomy.md, 4.9)
                                         "precedence", "new:not_allowed", "new:time_constraint", "failed:time_constraint", "completed:window",
-                                        "failed:waiting"};
+                                        "failed:waiting", "activity:not_interactive", "disabled->pending", "active->disabled"};
     auto missing = [&all] { return std::any_of(std::begin(kRare), std::end(kRare), [&all](const char* what) { return all[what] == 0; }); };
     for (std::uint64_t seed = 20260927; missing() && seed < 20260927 + 12; ++seed)
         for (const Aircraft& a : kAdapters) {

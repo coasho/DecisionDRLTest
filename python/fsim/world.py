@@ -141,6 +141,8 @@ class ActivityState(enum.IntEnum):
     COMPLETED = 2
     FAILED = 3
     CANCELED = 4
+    DISABLED = 5  #: live: kept, flying nothing, until enabled (docs/flight-autonomy.md, 4.10)
+    DELETED = 6   #: a sticky disable: ended
 
 
 class RequirementKind(enum.IntEnum):
@@ -640,6 +642,39 @@ class Activity:
         """End it: its axes fly the vehicle default. Raises fsim.Rejected if it had already ended."""
         _checked(self.world._h.activity_cancel(self.id, int(self.source)), self.world._h)
 
+    # Activity commands (docs/flight-autonomy.md, 4.10; A-GRA's ActivityCommandBaseType), declaring the source it was
+    # submitted with. Each raises fsim.Rejected: "not_interactive" where its command said interactive=False,
+    # "activity_ended" once it has ended, "queue_full" where a flying one has no room to be kept.
+    def _command(self, command, rank=(0, 0)):
+        rank = Rank(*rank)
+        _checked(self.world._h.activity_command(self.id, command, int(rank.priority), int(rank.precedence), int(self.source)), self.world._h)
+
+    def disable(self):
+        """It stops flying and is kept, DISABLED (live), until enabled; its axes go to the vehicle default or to
+        what waits for them."""
+        self._command(0)
+
+    def enable(self):
+        """A disabled activity waits to start again, and starts when it may - a route at the point it flew to.
+        One live and enabled stays so."""
+        self._command(1)
+
+    def reset(self):
+        """Over from its beginning: a flying one's behaviour starts afresh (a route from its first point)."""
+        self._command(2)
+
+    def delete(self):
+        """A sticky disable: it ends DELETED, and cannot be enabled."""
+        self._command(3)
+
+    def change_rank(self, rank):
+        """Its rank (fsim.Rank or (priority, precedence)) changes: what it contests is arbitrated afresh."""
+        self._command(4, rank)
+
+    def unassign(self):
+        """It gives up its axes and waits for them again, behind what waits."""
+        self._command(5)
+
     @property
     def info(self):
         """Its record (ActivityInfo), or None once the vehicle no longer remembers it."""
@@ -658,7 +693,7 @@ class Activity:
 
     @property
     def live(self):
-        return self.state in (ActivityState.PENDING, ActivityState.ACTIVE)
+        return self.state in (ActivityState.PENDING, ActivityState.ACTIVE, ActivityState.DISABLED)
 
     def __repr__(self):
         info = self.info

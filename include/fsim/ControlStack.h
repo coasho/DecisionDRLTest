@@ -115,6 +115,12 @@ public:
     /// Hand over the behaviour a slot at Level::Behavior flies (between steps);
     /// it starts at its next update. Null removes it.
     void install(std::size_t slot, std::unique_ptr<Behavior> behavior) noexcept;
+    /// Take the slot's behaviour back, kept (between steps): installed again, it starts afresh.
+    std::unique_ptr<Behavior> uninstall(std::size_t slot) noexcept {
+        if (slot >= kSlotCount) return nullptr;
+        started_[slot] = 0;
+        return std::move(behaviors_[slot]);
+    }
     /// The slot's behaviour's progress, once it has started (between steps;
     /// Behavior::progress). False if it has none to give.
     bool progress(std::size_t slot, ActivityProgress& out) const noexcept;

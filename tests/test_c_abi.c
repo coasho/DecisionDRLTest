@@ -1076,6 +1076,41 @@ int main(int argc, char** argv) {
             o.end_not_after = fsim_world_time(world);
             CHECK(fsim_vehicle_submit(world, falcon, FSIM_LEVEL_VELOCITY, velocity, 4, &o, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "time_constraint") == 0);
         }
+        {
+            /* ABI 1.10: activity commands (docs/flight-autonomy.md, 4.10) */
+            fsim_command_options o;
+            fsim_command_result flying, cr;
+            fsim_activity_info ai;
+            uint32_t hawk = 0;
+            const double hold = fsim_hold();
+            double velocity[4];
+            spec.name = "cap-hawk";
+            spec.type = "jsbsim:f16c";
+            spec.altitude_msl_m = 3000.0;
+            spec.airspeed_ms = 160.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &hawk) == FSIM_OK);
+            velocity[0] = 160.0, velocity[1] = 0.0, velocity[2] = 1.5, velocity[3] = hold;
+            fsim_command_options_init(&o);
+            CHECK(fsim_vehicle_submit(world, hawk, FSIM_LEVEL_VELOCITY, velocity, 4, &o, &flying) == FSIM_OK && flying.status == FSIM_COMMAND_ACCEPTED);
+            /* disabled: live, kept, flying nothing; enabled again; re-ranked; deleted for good */
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_DISABLE, 0, 0, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get(world, flying.activity, &ai) == FSIM_OK && ai.state == FSIM_ACTIVITY_DISABLED && isnan(ai.end_time));
+            CHECK(strcmp(fsim_activity_state_name(FSIM_ACTIVITY_DISABLED), "disabled") == 0);
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_ENABLE, 0, 0, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get(world, flying.activity, &ai) == FSIM_OK && ai.state == FSIM_ACTIVITY_PENDING);
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_CHANGE_RANK, 2, 1, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_DELETE, 0, 0, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get(world, flying.activity, &ai) == FSIM_OK && ai.state == FSIM_ACTIVITY_DELETED && strcmp(fsim_activity_state_name(ai.state), "deleted") == 0);
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_ENABLE, 0, 0, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "activity_ended") == 0);
+            /* one whose command takes none refuses them */
+            fsim_command_options_init(&o);
+            o.interactive = 0;
+            CHECK(fsim_vehicle_submit(world, hawk, FSIM_LEVEL_VELOCITY, velocity, 4, &o, &flying) == FSIM_OK && flying.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_command(world, flying.activity, FSIM_ACTIVITY_RESET, 0, 0, FSIM_SOURCE_POLICY, &cr) == FSIM_OK && strcmp(fsim_reason_name(cr.reason), "not_interactive") == 0);
+            CHECK(fsim_activity_command(world, flying.activity, 99, 0, 0, FSIM_SOURCE_POLICY, &cr) != FSIM_OK); /* (no such command) */
+            CHECK(strcmp(fsim_activity_command_name(FSIM_ACTIVITY_UNASSIGN), "unassign") == 0);
+        }
         }
         fsim_world_destroy(world);
     }

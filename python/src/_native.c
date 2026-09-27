@@ -1225,6 +1225,20 @@ static PyObject* world_activity_cancel(PyObject* o, PyObject* const* args, Py_ss
     return result_tuple(self->world, &r);
 }
 
+/* activity_command(activity, command, priority, precedence, source=0) -> result */
+static PyObject* world_activity_command(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t activity;
+    uint32_t priority = 0, precedence = 0;
+    fsim_command_result r;
+    int command = 0, source = 0;
+    if (!check_args(n, 4, 5, "activity_command") || !as_u64(args[0], &activity) || !as_int(args[1], &command) || !as_u32(args[2], &priority) ||
+        !as_u32(args[3], &precedence) || (n > 4 && !as_int(args[4], &source)) || !WORLD_IDLE(self))
+        return NULL;
+    if (fsim_activity_command(self->world, activity, command, priority, precedence, source, &r) != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
 /* activity_info(activity) -> info tuple, or None if the vehicle does not remember it */
 static PyObject* world_activity_info(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
@@ -2058,6 +2072,7 @@ static PyMethodDef world_methods[] = {
     FAST("activity_update", world_activity_update, "activity_update(activity, values, source=0) -> result"),
     FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride[, fields])"),
     FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity, source=0) -> result"),
+    FAST("activity_command", world_activity_command, "activity_command(activity, command, priority, precedence, source=0) -> result"),
     FAST("activity_info", world_activity_info, "activity_info(activity) -> info or None"),
     FAST("activity_progress", world_activity_progress, "activity_progress(activity) -> progress or None"),
     FAST("commanded", world_commanded, "commanded(id) -> what the cascade asked for in its last update"),

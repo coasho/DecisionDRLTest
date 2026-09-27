@@ -144,6 +144,11 @@ public:
     control::CommandResult update(control::Source caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::BezierSegment> segments);
     control::CommandResult cancel(control::Source caller, control::ActivityId activity);
+    /// An activity command (docs/flight-autonomy.md, 4.10) - disable, enable,
+    /// reset, delete, change its rank, unassign it - declaring the caller's
+    /// source as UPDATE does; `rank` for ChangeRank.
+    control::CommandResult activityCommand(control::Source caller, control::ActivityId activity, control::ActivityCommand command,
+                                           control::Rank rank = {});
     /// What flies a vehicle's primary axes nobody owns: the neutral actuator
     /// command (as always) or a hold of the heading, airspeed and height each
     /// had when it was let go. Reason::None if set.

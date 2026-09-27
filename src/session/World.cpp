@@ -566,6 +566,16 @@ control::CommandResult World::cancel(control::Source caller, control::ActivityId
     return r;
 }
 
+control::CommandResult World::activityCommand(control::Source caller, control::ActivityId activity, control::ActivityCommand command,
+                                              control::Rank rank) {
+    Entry* e = entry(control::activityVehicle(activity));
+    if (!e) return unknownActivity(activity);
+    control::CommandResult r = e->host.activityCommand(activity, command, rank, pool_->states()[e->slot], simTime_, caller);
+    echo(e->host, r);
+    if (r.accepted()) levelChanged(*e); // (what flew may have stopped, or what waited started)
+    return r;
+}
+
 const control::ActivityRecord* World::activity(control::ActivityId activity) const noexcept {
     const Entry* e = entry(control::activityVehicle(activity));
     return e ? e->host.activity(activity) : nullptr;

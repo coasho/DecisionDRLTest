@@ -1126,7 +1126,7 @@ FSIM_API const char* fsim_reason_name(int reason) {
 }
 
 FSIM_API const char* fsim_activity_state_name(int state) {
-    return state >= 0 && state <= static_cast<int>(fsim::control::ActivityState::Canceled)
+    return state >= 0 && state <= static_cast<int>(fsim::control::ActivityState::Deleted)
                ? fsim::control::activityStateName(static_cast<fsim::control::ActivityState>(state))
                : "?";
 }
@@ -1249,6 +1249,26 @@ FSIM_API int fsim_activity_get_envelope(const fsim_world* world, fsim_activity_i
     c.start_not_before = a->window.startNotBefore, c.start_not_after = a->window.startNotAfter;
     c.end_not_before = a->window.endNotBefore, c.end_not_after = a->window.endNotAfter;
     return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API int fsim_activity_command(fsim_world* world, fsim_activity_id activity, int command, uint32_t rank_priority, uint32_t rank_precedence,
+                                   int source, fsim_command_result* result) {
+    if (!world || !result || command < 0 || command >= static_cast<int>(fsim::control::ActivityCommand::Count) || source < 0 || source > 2 ||
+        rank_priority > 0xFFFF || rank_precedence > 0xFFFF)
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_command: bad arguments");
+    return guard("fsim_activity_command", [&]() -> int {
+        const fsim::control::Rank rank{static_cast<std::uint16_t>(rank_priority), static_cast<std::uint16_t>(rank_precedence)};
+        toC(world, fsim::control::activityVehicle(activity),
+            world->world.activityCommand(static_cast<fsim::control::Source>(source), activity, static_cast<fsim::control::ActivityCommand>(command), rank),
+            result);
+        return FSIM_OK;
+    });
+}
+
+FSIM_API const char* fsim_activity_command_name(int command) {
+    return command >= 0 && command < static_cast<int>(fsim::control::ActivityCommand::Count)
+               ? fsim::control::activityCommandName(static_cast<fsim::control::ActivityCommand>(command))
+               : "?";
 }
 
 FSIM_API const char* fsim_activity_wait_name(int wait) {

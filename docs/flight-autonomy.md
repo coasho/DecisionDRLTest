@@ -216,10 +216,10 @@ How contested axes are arbitrated, and when a command flies: A-GRA's CapabilityC
   - a higher source's activity refuses an interrupting command `authority_held`, as ADR-26 has it, and is waited for by one that does not interrupt;
   - the platform's interrupting command takes any rank (A-GRA: the primary controller "interrupts activities of any Rank");
   - a policy's command that does not interrupt waits for whatever flies (A-GRA's "nice" command);
-  - otherwise (a policy's interrupting command, the platform's deferring one) the capability's precedence decides, then the rank: at or ahead of it takes, behind it waits. Equal, the newest takes, as ADR-26 had it.
+  - otherwise (a policy's interrupting command, the platform's deferring one) the capability's precedence decides, then the rank: ahead of it takes, behind it waits. Equal, the newer command takes: a NEW always, as ADR-26 had it. What waited (scheduled, unassigned, enabled) does not take axes from a newer one.
 
   `CommandOptions::interrupt` is true by default, today's behaviour; A-GRA's omission means false, which `fsim.agra.command_options` maps. With every rank and precedence left as they are, every answer and every flight is as before.
-- **Waiting (ACT-03, ACT-06, STS-14).** A NEW that may not take its axes, or whose start window has not opened, is accepted to wait: `kDeferred`, with `other` naming what it waits for. Its activity is pending, `waiting` `scheduled` or `queued` (and `waitingFor`), its basis `planned`. It is listed and addressed as what flies: an UPDATE changes what it will fly, checked as its NEW was, and a CANCEL ends it. It starts as soon as it may: after each world step, and after anything that frees axes or changes a precedence. Starts go in order of source, precedence, rank, then age, and a start that frees what an earlier one waited for lets that one start too. At its start it is prepared afresh from where the aircraft is then (an hsa's omitted fields, a route's plan, a behaviour's admission, a placard). A refusal there fails it, with that reason. At most 16 wait per vehicle; one more is refused `queue_full`. The existing entry points never wait: where they may not take the axes, they are refused. `fsim.agra.activity_state` names a queued activity whose start window is open ACTIVE_FULLY_CONSTRAINED.
+- **Waiting (ACT-03, ACT-06, STS-14).** A NEW that may not take its axes, or whose start window has not opened, is accepted to wait: `kDeferred`, with `other` naming what it waits for. Its activity is pending, `waiting` `scheduled` or `queued` (and `waitingFor`), its basis `planned`. It is listed and addressed as what flies: an UPDATE changes what it will fly, checked as its NEW was, and a CANCEL ends it. It starts as soon as it may: after each world step, and after anything that frees axes or changes a precedence. Starts go in order of source, precedence, rank, then the order they began to wait, and a start that frees what an earlier one waited for lets that one start too. At its start it is prepared afresh from where the aircraft is then (an hsa's omitted fields, a route's plan, a behaviour's admission, a placard). A refusal there fails it, with that reason. At most 16 wait per vehicle; one more is refused `queue_full`. The existing entry points never wait: where they may not take the axes, they are refused. `fsim.agra.activity_state` names a queued activity whose start window is open ACTIVE_FULLY_CONSTRAINED.
 - **Time windows (CMD-08).** `CommandOptions::window` gives a start window, an end window (simulation seconds; NaN for no bound) and which must be met (`TimeCriticality`). A window that cannot be met is refused `time_constraint`: an end already past, or a critical start already past. One out of order is refused `invalid_parameter`. The rest act after each world step:
   - it starts no earlier than its start window opens;
   - a critical start window closing while it waits fails it (`time_constraint`); a start window that is not critical lets it start late;
@@ -237,6 +237,22 @@ How contested axes are arbitrated, and when a command flies: A-GRA's CapabilityC
 | `ActivityRecord` gains `rank`, `precedence`, `interrupt`, `waiting` (`ActivityWait`), `waitingFor`, `window`, `basis()` | `fsim_activity_envelope` grows: `waiting`, `basis`, `rank_priority`, `rank_precedence`, `precedence`, `waiting_for`, `interrupt`, `criticality`, the window's bounds; `fsim_activity_wait_name`, `fsim_activity_basis_name`, `fsim_time_criticality_name` | `ActivityInfo` gains `waiting` (`fsim.ActivityWait`), `basis` (`fsim.ActivityBasis`), `rank` (`fsim.Rank`), `precedence`, `waiting_for`, `interrupt`, `window` |
 | `World::setCapabilityPrecedence`, `capabilityPrecedence`; `Vehicle::` likewise | `fsim_vehicle_set_capability_precedence`, `fsim_vehicle_capability_precedence` | `vehicle.set_capability_precedence(capability, p)`, `capability_precedence(capability)`; `fsim.agra.command_options(ranking, temporal)`, `activity_basis(info)`, `activity_state(info, now)` |
 | `Reason::TimeConstraint`, `QueueFull` | `"time_constraint"`, `"queue_full"` | `fsim.agra`: `CONSTRAINT_TIME`, `INSUFFICIENT_RESOURCES` |
+
+### 4.10 Activity commands (as FA-2 builds it)
+
+What may be done to an activity once its command is accepted (A-GRA's ActivityCommandBaseType: ChangeActivityState, DeleteActivity, ChangeActivityRank, UnassignActivity), natively: `World::activityCommand(caller, activity, command, rank)`.
+
+- **Disable and enable (CMD-12, ACT-04).** A disabled activity is kept, `disabled` and live, and flies nothing; its axes go to the vehicle default or to what waits for them. Enabled, it waits to start again and starts when it may. A route resumes at the point it flew to; the others start afresh. Disable or enable of one already so is accepted, and changes nothing. Its end window still ends it (`time_constraint`).
+- **Reset.** Over from its beginning: a flying activity's behaviour starts afresh from its setpoint (a route from its first point as commanded, wherever it resumed). One that waits, or is disabled, forgets where it would resume.
+- **Delete (CMD-13).** A sticky disable: the activity ends `deleted` (reason `requested`) and nothing enables it again.
+- **Change rank (CMD-14, ACT-07).** Its rank changes, and what it contests is arbitrated afresh at once: what waited may take its axes, or it theirs.
+- **Unassign (CMD-15).** It gives up its axes and waits for them again, behind what waits: among equals, the order they began to wait decides, and an activity that waited never takes axes from a newer command of equal rank (4.9). So what waited for its axes gets them, and it waits until they are free.
+- **Interactive (CMD-16).** An activity whose command said `interactive` false refuses all six (`not_interactive`); UPDATE and CANCEL, the command's own, it still takes.
+- They answer as UPDATE does: the addressed activity's command id; `activity_ended`, `unknown_activity`, `authority_held` (under Granted, a caller below the activity's source); `queue_full` where a flying activity kept out of its slot finds no room (the 16 of 4.9). An activity kept out of its slot keeps its behaviour, its setpoint, and a route's waypoints or a curve's segments.
+
+| C++ | C ABI 1.10 | Python |
+| --- | --- | --- |
+| `ActivityCommand` (`Disable`, `Enable`, `Reset`, `Delete`, `ChangeRank`, `Unassign`), `World::activityCommand(caller, activity, command, rank)`; `ActivityState::Disabled`, `Deleted`; `Reason::NotInteractive` | `fsim_activity_command(world, activity, command, rank_priority, rank_precedence, source, &result)`, `fsim_activity_command_name`; `FSIM_ACTIVITY_DISABLED`, `_DELETED` | `Activity.disable()`, `.enable()`, `.reset()`, `.delete()`, `.change_rank(rank)`, `.unassign()`; `fsim.ActivityState.DISABLED`, `.DELETED`; `fsim.agra.activity_state`: DISABLED, DELETED |
 
 ## 5. Applicability (D6)
 
@@ -386,7 +402,7 @@ Stop advertising what does not work, at once (D4); tell physically unsupported, 
 
 The command and activity semantics A-GRA defines around every flight command.
 
-**Status:** in progress, in five steps: FA-2a the command envelope (4.8) and FA-2b ranks, queues and time windows (4.9), done 2026-09-27 and measured in section 14; FA-2c the activity commands; FA-2d flight tasks, suggestions and controllers; FA-2e the reports and the fleet cases.
+**Status:** in progress, in five steps: FA-2a the command envelope (4.8), FA-2b ranks, queues and time windows (4.9) and FA-2c the activity commands (4.10), done 2026-09-27 and measured in section 14; FA-2d flight tasks, suggestions and controllers; FA-2e the reports and the fleet cases.
 
 **Items (36):** CMD-02, CMD-03, CMD-05, CMD-06, CMD-07, CMD-08, CMD-09, CMD-10, CMD-12, CMD-13, CMD-14, CMD-15, CMD-16, CMD-18, CMD-19, CMD-20; WPT-24; CRV-14; VAL-01, VAL-02, VAL-08, VAL-10, VAL-11, VAL-12; ACT-03, ACT-04, ACT-06, ACT-07, ACT-08, ACT-10, ACT-13, ACT-15; AUT-06; STS-14; TSK-01, TSK-02.
 
@@ -790,6 +806,27 @@ Filled as the stages land: each stage's criteria results, the digests (identical
 
   Against FA-1e's build, all of FA-2 so far costs a level switch +27 % (48.5 to 61.7 ns), a behaviour's NEW +17 %, a checked UPDATE +8.5 %, and nothing per step.
 - ctest: all 223 tests pass (the six schedule cases added).
+
+**FA-2c (activity commands: CMD-12, CMD-13, CMD-14, CMD-15, CMD-16's refusal; ACT-04).**
+- What it built is 4.10, in C++, the C ABI (1.10) and Python. `fsim.activity/disable`, `/enable`, `/reset`, `/delete`, `/change_rank` and `/unassign` are supported on every vehicle.
+- `test_activities` (3 cases, 62 checks) and its Python twin (3 tests):
+  - a route disabled partway is kept and flies nothing; the vehicle default flies. Enabled, it resumes at the point it flew to; reset, it flies from its first point.
+  - Unassigned, an hsa gives its axes to the command that waited behind it and waits in its turn. Re-ranked ahead, that command takes the axes back at once. Deleted, it ends and cannot be enabled.
+  - An activity whose command takes none refuses all six (with its command id), and still takes UPDATE and CANCEL. Under Granted, a policy may not command what the platform flies.
+
+  `test_c_abi` covers the 1.10 calls.
+- **The conformance walk** (1,744,607 checks, one aircraft per adapter) draws an activity command for 7 % of its operations, from the separate stream: one of the six, at a live activity mostly, from a drawn caller. It draws `interactive` false for 10 % of its NEWs. The model:
+  - the answer is refused exactly as the rules say (`unknown_activity`, `activity_ended`, `authority_held`, `not_interactive`, `queue_full` only for a flying one kept out of its slot);
+  - an accepted command does what it says: disabled, deleted, re-ranked, enabled out of `disabled`, reset or unassigned out of `active`;
+  - a record becomes disabled or deleted only by that command, and waits again only when unassigned or enabled;
+  - a disabled activity is live, flies nothing, and outlives no end window.
+
+  Every adapter meets all six accepted, and a disabled activity; across the walks, `not_interactive`, `active->disabled` and `disabled->pending`.
+- **A rule 4.9 needed, found as the tests were written.** Among equals, "the newest takes" had let an unassigned, enabled or scheduled activity take its axes straight back from the newer command that had just got them. Equal ranks now go to the newer command: a NEW always, so no earlier answer changes; what waited never.
+- No earlier answer or flight changes. Digests: identical, with protection and without. The allocation gate passes.
+- **Code placement.** The names of the contracts' enumerations moved out of the runtime's file into their own (`src/control/Names.cpp`, last in the library). The case lines this step added to them had moved the per-step cases that run only the runtime by -7 % to +7 % against FA-2b's build. With them apart, per step (`micro`, 5 rounds) is within -7.4 % to +1.4 %: the one outlier, "apart, pseudo", is faster, back where FA-2a had it.
+- A/B against FA-2b's build (`command`, 9 rounds): a level switch's NEW +2.7 %, a behaviour's -2.3 %, the per-step command +1.5 %, a checked UPDATE 0.0 %.
+- ctest: all 226 tests pass (the three activity cases added).
 
 
 ## Appendix A: the inventory

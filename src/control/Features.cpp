@@ -217,12 +217,12 @@ const FeatureDef kFeatures[] = {
     {"fsim.command/validate", "", S, 0, 0, ""},                                               // VAL-12
     {"fsim.command/task", "", N, 2, 0, ""},                                                   // TSK-01, TSK-02
     {"fsim.command/release_envelope", "", N, 13, R9, ""},                                     // WPN-01
-    {"fsim.activity/disable", "", N, 2, 0, ""},                                               // CMD-12, ACT-04
-    {"fsim.activity/enable", "", N, 2, 0, ""},
-    {"fsim.activity/reset", "", N, 2, 0, ""},
-    {"fsim.activity/delete", "", P, 2, 0, "the sticky DELETED state; CANCEL ends the activity"}, // CMD-13
-    {"fsim.activity/change_rank", "", N, 2, 0, ""},                                           // CMD-14
-    {"fsim.activity/unassign", "", N, 2, 0, ""},                                              // CMD-15
+    {"fsim.activity/disable", "", S, 0, 0, ""},                                               // CMD-12, ACT-04
+    {"fsim.activity/enable", "", S, 0, 0, ""},
+    {"fsim.activity/reset", "", S, 0, 0, ""},
+    {"fsim.activity/delete", "", S, 0, 0, ""},                                                // CMD-13
+    {"fsim.activity/change_rank", "", S, 0, 0, ""},                                           // CMD-14
+    {"fsim.activity/unassign", "", S, 0, 0, ""},                                              // CMD-15
     {"fsim.control/grants", "", S, 0, 0, ""},                                                 // AUT-01..05, 07..09
     {"fsim.control/restrict", "", S, 0, 0, ""},                                               // CAP-25
     {"fsim.control/controller_identity", "", N, 2, 0, ""},                                    // AUT-06

@@ -513,8 +513,8 @@ v.setCapabilityPrecedence("fsim.flight.velocity", 2); // the platform's: before 
   command (`authority_held`) and is waited for by one that does not. The
   platform's own interrupting command takes any rank. A policy's command that
   does not interrupt waits for whatever flies. Otherwise the capability's
-  precedence decides, then the rank; equal, the newest takes. Left as they are,
-  every command behaves as before.
+  precedence decides, then the rank; equal, the newer command takes - a NEW
+  always, what waited never. Left as they are, every command behaves as before.
 - **What waits** is listed with what flies, updated and canceled like it, and
   prepared afresh from where the aircraft is when it starts: a refusal there
   fails it with that reason. Sixteen wait at most (`queue_full`). The existing
@@ -522,6 +522,24 @@ v.setCapabilityPrecedence("fsim.flight.velocity", 2); // the platform's: before 
   take the axes.
 - **Time windows** are checked after each world step; a window that cannot be
   met is refused `time_constraint`. Repetition is a task's (FA-2d).
+
+### Activity commands
+
+What may be done to a live activity - flying, waiting or disabled
+([flight-autonomy.md](../flight-autonomy.md), 4.10; A-GRA's activity command):
+
+```cpp
+world.activityCommand(a, ActivityCommand::Disable);           // kept, flying nothing: ActivityState::Disabled (live)
+world.activityCommand(a, ActivityCommand::Enable);            // waits to start again (a route resumes where it was)
+world.activityCommand(a, ActivityCommand::Reset);             // over from its beginning
+world.activityCommand(a, ActivityCommand::ChangeRank, {2, 0}); // arbitrated afresh at once
+world.activityCommand(a, ActivityCommand::Unassign);          // its axes to what waits; it waits for them again
+world.activityCommand(a, ActivityCommand::Delete);            // a sticky disable: ActivityState::Deleted, ended
+```
+
+They answer as UPDATE does, and declare a caller's source the same way (the
+last argument). An activity whose command said `interactive = false` refuses
+them all (`not_interactive`), and still takes UPDATE and CANCEL.
 
 ### Support and availability: what a vehicle can do at all, and now
 
