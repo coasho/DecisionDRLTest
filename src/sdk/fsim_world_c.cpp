@@ -378,8 +378,8 @@ FSIM_API int fsim_vehicle_use_controller(fsim_world* world, uint32_t id, int lev
 FSIM_API int fsim_vehicle_set_controller_parameter(fsim_world* world, uint32_t id, int level, const char* name, double value) {
     auto* c = world && name ? world->world.controls(id) : nullptr;
     if (!c || level < 0 || level >= static_cast<int>(fsim::control::Level::Behavior)) return FSIM_INVALID_ARGUMENT;
-    auto* ctl = c->controller(static_cast<fsim::control::Level>(level));
-    if (!ctl || !ctl->setParameter(name, value)) return fail(FSIM_INVALID_ARGUMENT, std::string("unknown controller parameter ") + name);
+    // (through the stack: the vehicle's performance is computed afresh from it)
+    if (!c->setParameter(static_cast<fsim::control::Level>(level), name, value)) return fail(FSIM_INVALID_ARGUMENT, std::string("unknown controller parameter ") + name);
     return FSIM_OK;
 }
 
@@ -669,6 +669,101 @@ FSIM_API int fsim_vehicle_capability_status(const fsim_world* world, uint32_t id
     const auto s = world->world.capabilityStatus(id, capability);
     if (availability) *availability = static_cast<int32_t>(s.availability);
     if (reason) *reason = static_cast<int32_t>(s.reason);
+    return FSIM_OK;
+}
+
+FSIM_API void fsim_performance_init(fsim_performance* performance) {
+    if (!performance) return;
+    *performance = fsim_performance{};
+    performance->struct_size = sizeof *performance;
+}
+
+FSIM_API int fsim_vehicle_performance(fsim_world* world, uint32_t id, fsim_performance* out) {
+    const fsim::control::Performance* p = world && out ? world->world.performance(id) : nullptr;
+    if (!p) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_performance: no vehicle with id " + std::to_string(id));
+    fsim_performance c{};
+    c.struct_size = sizeof c;
+    c.revision = p->revision;
+    c.hovers = p->hovers ? 1 : 0;
+    c.min_cas_ms = p->minCasMs, c.max_cas_ms = p->maxCasMs, c.max_mach = p->maxMach, c.max_tas_ms = p->maxTasMs;
+    c.cruise_tas_ms = p->cruiseTasMs, c.max_ground_speed_ms = p->maxGroundSpeedMs, c.ceiling_m = p->ceilingM;
+    c.max_bank_rad = p->maxBankRad, c.min_pitch_rad = p->minPitchRad, c.max_pitch_rad = p->maxPitchRad, c.max_roll_rate_rad_s = p->maxRollRateRadS;
+    c.min_load_factor = p->minLoadFactor, c.max_load_factor = p->maxLoadFactor;
+    c.max_tilt_rad = p->maxTiltRad, c.max_acceleration_ms2 = p->maxAccelerationMs2, c.max_deceleration_ms2 = p->maxDecelerationMs2;
+    c.max_climb_ms = p->maxClimbMs, c.max_descent_ms = p->maxDescentMs;
+    c.altitude_gain_per_s = p->altitudeGainPerS, c.heading_gain = p->headingGain, c.heading_reference_tas_ms = p->headingReferenceTasMs;
+    c.bank_rate_rad_s = p->bankRateRadS, c.velocity_bandwidth_rad_s = p->velocityBandwidthRadS;
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+namespace {
+
+/// An authority call's answer: FSIM_OK, or why the call itself was malformed (an unknown vehicle or capability).
+int authority(const char* call, fsim::control::Reason r) {
+    using fsim::control::Reason;
+    if (r == Reason::UnknownVehicle || r == Reason::UnknownCapability) return fail(FSIM_INVALID_ARGUMENT, std::string(call) + ": " + fsim::control::reasonName(r));
+    return FSIM_OK;
+}
+
+bool validReason(int reason) { return reason >= 0 && reason < static_cast<int>(fsim::control::Reason::Count); }
+
+} // namespace
+
+FSIM_API int fsim_vehicle_set_control_mode(fsim_world* world, uint32_t id, int mode) {
+    if (!world || mode < FSIM_CONTROL_OPEN || mode > FSIM_CONTROL_GRANTED) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_control_mode: bad arguments");
+    return authority("fsim_vehicle_set_control_mode", world->world.setControlMode(id, static_cast<fsim::control::ControlMode>(mode)));
+}
+
+FSIM_API int fsim_vehicle_control_mode(const fsim_world* world, uint32_t id, int32_t* mode) {
+    if (!world || !mode) return FSIM_INVALID_ARGUMENT;
+    *mode = static_cast<int32_t>(world->world.controlMode(id));
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_vehicle_request_control(fsim_world* world, uint32_t id, const char* capability, int32_t* reason) {
+    if (!world || !capability || !reason) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_request_control: bad arguments");
+    const fsim::control::Reason r = world->world.requestControl(id, capability);
+    *reason = static_cast<int32_t>(r);
+    return authority("fsim_vehicle_request_control", r);
+}
+
+FSIM_API int fsim_vehicle_release_control(fsim_world* world, uint32_t id, const char* capability) {
+    if (!world || !capability) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_release_control: bad arguments");
+    return authority("fsim_vehicle_release_control", world->world.releaseControl(id, capability));
+}
+
+FSIM_API int fsim_vehicle_revoke_control(fsim_world* world, uint32_t id, const char* capability, int reason) {
+    if (!world || !capability || !validReason(reason)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_revoke_control: bad arguments");
+    return authority("fsim_vehicle_revoke_control", world->world.revokeControl(id, capability, static_cast<fsim::control::Reason>(reason)));
+}
+
+FSIM_API int fsim_vehicle_set_allowed(fsim_world* world, uint32_t id, const char* capability, int allowed) {
+    if (!world || !capability) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_allowed: bad arguments");
+    return authority("fsim_vehicle_set_allowed", world->world.setAllowed(id, capability, allowed != 0));
+}
+
+FSIM_API int fsim_vehicle_control_status(const fsim_world* world, uint32_t id, const char* capability, int32_t* allowed, int32_t* granted) {
+    if (!world || !capability) return FSIM_INVALID_ARGUMENT;
+    const fsim::control::Reason known = world->world.capabilityStatus(id, capability).reason; // (an unknown vehicle or capability)
+    if (known == fsim::control::Reason::UnknownVehicle || known == fsim::control::Reason::UnknownCapability)
+        return fail(FSIM_INVALID_ARGUMENT, std::string("fsim_vehicle_control_status: ") + fsim::control::reasonName(known));
+    const fsim::control::ControlStatus s = world->world.controlStatus(id, capability);
+    if (allowed) *allowed = s.allowed ? 1 : 0;
+    if (granted) *granted = s.granted ? 1 : 0;
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_vehicle_set_availability(fsim_world* world, uint32_t id, const char* capability, int availability, int reason) {
+    if (!world || !capability || availability < FSIM_AVAILABLE || availability > FSIM_DISABLED || !validReason(reason))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_availability: bad arguments");
+    const auto r = static_cast<fsim::control::Reason>(reason == 0 ? static_cast<int>(fsim::control::Reason::Restricted) : reason);
+    return authority("fsim_vehicle_set_availability",
+                     world->world.setAvailability(id, capability, static_cast<fsim::control::Availability>(availability), r));
+}
+
+FSIM_API int fsim_vehicle_control_revision(fsim_world* world, uint32_t id, uint32_t* revision) {
+    if (!world || !revision || !world->world.performance(id)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_control_revision: no vehicle with id " + std::to_string(id));
+    *revision = world->world.controlRevision(id);
     return FSIM_OK;
 }
 

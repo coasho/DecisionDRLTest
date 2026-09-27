@@ -129,6 +129,7 @@ push, not yet tagged:
   - waypoint following: routes of great circles or rhumb lines with fly-by turns sized for the aircraft and the wind, fly-over points, altitude and speed profiles, repeats and an end to continue or loiter, each point checked and named when refused, flown by one path follower on wings and rotorcraft alike (`fsim python examples/python/vehicle_interface.py`);
   - loiter patterns: orbits, racetracks, figure-eights and ATC's hold with its defaults (rate-one turns, a minute's legs, entered direct to the fix), for a duration or until canceled;
   - curve following: quintic Bézier segments flown within a range of ground speeds or in a given time, appended to while the aircraft flies them, each segment - and a section too tight for the aircraft - named when refused;
+  - grants over the priorities: a vehicle whose policy commands only what it holds a grant for, with requests, releases and revocations, what it may request, the platform's restrictions of a capability, and a revision to poll - with the vehicle's performance, as its guidance plans with it;
   - rejections that name the field and the limit;
   - an activity's progress and the commanded state;
   - A-GRA's names for all of it (`fsim.agra`).

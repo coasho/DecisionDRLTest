@@ -807,6 +807,63 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_cancel(world, curve_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
         }
         {
+            /* ABI 1.6: the performance, and grants over the priorities (on a, whose live activities are its policy's) */
+            fsim_performance perf;
+            int32_t mode = -1, reason = -1, allowed = -1, granted = -1, availability = -1;
+            uint32_t rev0 = 0, rev1 = 0;
+            double hsa[6], bank0 = 0.0;
+            fsim_activity_id flown;
+            int k;
+            fsim_performance_init(&perf);
+            CHECK(perf.struct_size == sizeof perf);
+            CHECK(fsim_vehicle_performance(world, a, &perf) == FSIM_OK && perf.hovers == 0 && perf.max_bank_rad > 0.0);
+            CHECK(fsim_vehicle_performance(world, 999, &perf) != FSIM_OK);
+            /* a loop's parameter changed: the performance computed afresh, and the revision counts it */
+            CHECK(fsim_vehicle_controller_parameter(world, a, FSIM_LEVEL_VELOCITY, "max_bank", &bank0) == FSIM_OK);
+            CHECK(fsim_vehicle_control_revision(world, a, &rev0) == FSIM_OK);
+            CHECK(fsim_vehicle_set_controller_parameter(world, a, FSIM_LEVEL_VELOCITY, "max_bank", 0.45) == FSIM_OK);
+            CHECK(fsim_vehicle_performance(world, a, &perf) == FSIM_OK && perf.max_bank_rad == 0.45);
+            CHECK(fsim_vehicle_control_revision(world, a, &rev1) == FSIM_OK && rev1 == rev0 + 1);
+            CHECK(fsim_vehicle_set_controller_parameter(world, a, FSIM_LEVEL_VELOCITY, "max_bank", bank0) == FSIM_OK);
+            /* Granted: a policy's NEW needs a grant; the gate is the grant, and nothing more */
+            CHECK(fsim_vehicle_control_mode(world, a, &mode) == FSIM_OK && mode == FSIM_CONTROL_OPEN);
+            CHECK(fsim_vehicle_set_control_mode(world, a, FSIM_CONTROL_GRANTED) == FSIM_OK);
+            CHECK(fsim_vehicle_control_mode(world, a, &mode) == FSIM_OK && mode == FSIM_CONTROL_GRANTED);
+            CHECK(fsim_vehicle_set_control_mode(world, a, 5) != FSIM_OK);
+            for (k = 0; k < 6; ++k) hsa[k] = fsim_hold();
+            hsa[0] = 1.0; /* heading_rad */
+            fsim_command_options_init(&co);
+            CHECK(fsim_vehicle_submit_mode(world, a, FSIM_MODE_HSA, hsa, 6, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "not_granted") == 0);
+            CHECK(fsim_vehicle_command_attitude(world, a, &att) != FSIM_OK); /* the existing entry points too */
+            CHECK(fsim_vehicle_request_control(world, a, "fsim.guidance.hsa", &reason) == FSIM_OK && reason == 0);
+            CHECK(fsim_vehicle_control_status(world, a, "fsim.guidance.hsa", &allowed, &granted) == FSIM_OK && allowed == 1 && granted == 1);
+            CHECK(fsim_vehicle_submit_mode(world, a, FSIM_MODE_HSA, hsa, 6, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            flown = cr.activity;
+            /* released: the policy lets go, its activity ends */
+            CHECK(fsim_vehicle_release_control(world, a, "fsim.guidance.hsa") == FSIM_OK);
+            CHECK(fsim_activity_get(world, flown, &ai) == FSIM_OK && ai.state == FSIM_ACTIVITY_CANCELED && strcmp(fsim_reason_name(ai.reason), "released") == 0);
+            CHECK(fsim_vehicle_control_status(world, a, "fsim.guidance.hsa", &allowed, &granted) == FSIM_OK && granted == 0);
+            /* restricted by the platform (0: "restricted"): requests and a policy's NEW refused with it */
+            CHECK(fsim_vehicle_set_availability(world, a, "fsim.guidance.hsa", FSIM_TEMPORARILY_UNAVAILABLE, 0) == FSIM_OK);
+            CHECK(fsim_vehicle_capability_status(world, a, "fsim.guidance.hsa", &availability, &reason) == FSIM_OK);
+            CHECK(availability == FSIM_TEMPORARILY_UNAVAILABLE && strcmp(fsim_reason_name(reason), "restricted") == 0);
+            CHECK(fsim_vehicle_request_control(world, a, "fsim.guidance.hsa", &reason) == FSIM_OK && strcmp(fsim_reason_name(reason), "restricted") == 0);
+            CHECK(fsim_vehicle_set_availability(world, a, "fsim.guidance.hsa", FSIM_AVAILABLE, 0) == FSIM_OK);
+            /* not allowed: refused; revoked with a reason: the grant gone */
+            CHECK(fsim_vehicle_set_allowed(world, a, "fsim.guidance.hsa", 0) == FSIM_OK);
+            CHECK(fsim_vehicle_request_control(world, a, "fsim.guidance.hsa", &reason) == FSIM_OK && strcmp(fsim_reason_name(reason), "not_allowed") == 0);
+            CHECK(fsim_vehicle_set_allowed(world, a, "fsim.guidance.hsa", 1) == FSIM_OK);
+            CHECK(fsim_vehicle_request_control(world, a, "fsim.guidance.hsa", &reason) == FSIM_OK && reason == 0);
+            CHECK(fsim_vehicle_revoke_control(world, a, "fsim.guidance.hsa", 0) == FSIM_OK);
+            CHECK(fsim_vehicle_control_status(world, a, "fsim.guidance.hsa", &allowed, &granted) == FSIM_OK && granted == 0);
+            CHECK(fsim_vehicle_request_control(world, a, "fsim.guidance.nonsense", &reason) != FSIM_OK);
+            CHECK(fsim_vehicle_revoke_control(world, a, "fsim.guidance.hsa", 999) != FSIM_OK);
+            /* back to Open: as ever */
+            CHECK(fsim_vehicle_set_control_mode(world, a, FSIM_CONTROL_OPEN) == FSIM_OK);
+            CHECK(fsim_vehicle_command_attitude(world, a, &att) == FSIM_OK);
+        }
+        {
             /* the profile: a stock c172x carries no sections */
             double value = 0.0;
             uint32_t version = 9;

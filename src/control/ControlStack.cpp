@@ -251,6 +251,14 @@ bool ControlStack::use(Level level, std::unique_ptr<Controller> controller) {
     }
     controllers_[static_cast<std::size_t>(level)] = std::move(controller);
     byId_[static_cast<std::size_t>(level)] = false;
+    ++loopsRevision_;
+    return true;
+}
+
+bool ControlStack::setParameter(Level level, std::string_view name, double value) {
+    Controller* c = level < Level::Behavior ? controllers_[static_cast<std::size_t>(level)].get() : nullptr;
+    if (!c || !c->setParameter(name, value)) return false;
+    ++loopsRevision_;
     return true;
 }
 
@@ -263,6 +271,7 @@ bool ControlStack::apply(Controller& controller) const {
 
 std::vector<ControllerSetting> ControlStack::setControllerSettings(std::vector<ControllerSetting> settings) {
     settings_ = std::move(settings);
+    ++loopsRevision_;
     std::vector<ControllerSetting> unused;
     for (const auto& s : settings_) {
         bool taken = false;

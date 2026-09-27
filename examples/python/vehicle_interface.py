@@ -5,6 +5,8 @@ from the north. Four minutes.
 - A Cessna 172 flies a triangle of 3 km legs round and round: fly-by turns
   begun before each point, on circles sized for its speed, the wind and 80 %
   of its bank; its progress names the point it flies to and counts the laps.
+  At 150 s the platform revokes its route for collision avoidance: the route
+  ends, and its vehicle default - a hold - flies on as it was.
 - An F-16C climbs at 10 m/s to 4000 m on its way, passes one point flown over
   and then intercepts the next leg, and orbits its last point when it gets there.
 - A UH-60A flies 400 m legs at 20 m/s without stopping at its points, and stops
@@ -12,7 +14,8 @@ from the north. Four minutes.
 - An IRIS flies 30 m legs round and round, its nose along its track.
 - A second Cessna holds over a fix 4 km ahead, ATC's holding pattern from
   its defaults alone: right turns, the inbound course the way it arrived,
-  rate-one turns, a minute's legs.
+  rate-one turns, a minute's legs. Its policy commands it by grant: it asks
+  for control of the pattern capability before it submits the hold.
 - A third Cessna flies a slalom of Bezier curves, holding its airspeed while
   its ground speed stays within 45 to 65 m/s; a minute in, more of the slalom
   is appended while it flies, and at the end it orbits the last point.
@@ -110,6 +113,13 @@ for v in (cessna, viper, holder, slalom):  # on east while they get a feel for t
 world.step(int(10.0 / world.step_seconds))
 
 fix = at(holder, 0, 4000)
+holder.set_control_mode("granted")               # its policy commands only what it is granted
+try:
+    holder.submit_pattern(pattern="hold")
+except fsim.Rejected as refused:
+    print("c172-hold        a hold without a grant: %s" % refused.reason)
+holder.request_control("fsim.guidance.pattern")  # granted: allowed, and available
+cessna.set_vehicle_default("hold")               # what flies its axes if its route is taken away
 activities = {
     cessna: cessna.submit_route([at(cessna, 0, 3000, speed=55.0, id=1), at(cessna, 2600, 1500, id=2), at(cessna, 0, 0, id=3)],
                                 repeat=True),
@@ -138,9 +148,16 @@ for v, a in activities.items():
 
 t0 = time.perf_counter()
 start = world.time
+revoke = True
 next_report = start
 while world.time < start + 240.0:
     world.step()
+    if revoke and world.time >= start + 150.0:
+        cessna.revoke_control("fsim.guidance.route", "collision_avoidance")
+        info = activities[cessna].info
+        print("t=%4.0f s  c172-triangle: the platform revoked its route (%s, %s); its hold flies on"
+              % (world.time - start, fsim.agra.activity_state(info), info.reason))
+        revoke = False
     if more and world.time >= start + 60.0:
         activities[slalom].append(more)  # on from where its curve ends, the same activity
         print("t=%4.0f s  c172-slalom: %d more segments appended" % (world.time - start, len(more)))

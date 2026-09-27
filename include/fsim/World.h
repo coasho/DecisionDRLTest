@@ -179,6 +179,34 @@ public:
     /// What the vehicle offers: its flight levels and behaviours.
     std::vector<control::CapabilityDescriptor> capabilities() const;
     control::CapabilityStatus capabilityStatus(std::string_view capability) const;
+    /// What the vehicle can do, as its guidance plans with it: speeds, ceiling,
+    /// bank, climb, the loops' gains (docs/vehicle-interface.md, 7.1; A-GRA's
+    /// performance profile). Computed afresh when its loops change.
+    control::Performance performance() const;
+    /// Counts every change to the grants, what is allowed, the control mode,
+    /// availability and the performance: a consumer polls it (docs/sdk/control.md, "Grants").
+    std::uint32_t controlRevision() const;
+    // Authority (docs/sdk/control.md, "Grants"): grants over the priorities.
+    /// Open (the default: as ever) or Granted: a policy's NEW then needs a
+    /// grant for its capability; what the policy flies without one ends
+    /// Canceled(NotGranted). The platform's own sources never need one.
+    control::Reason setControlMode(control::ControlMode mode);
+    control::ControlMode controlMode() const;
+    /// A policy asks for control of a capability (by id): Reason::None if
+    /// granted, else NotAllowed or why it is unavailable.
+    control::Reason requestControl(std::string_view capability);
+    /// The policy lets go: its live activities of the capability end Canceled(Released).
+    control::Reason releaseControl(std::string_view capability);
+    /// The platform takes it back: the policy's live activities of it end Canceled(`reason`).
+    control::Reason revokeControl(std::string_view capability, control::Reason reason = control::Reason::Revoked);
+    /// Whether the policy may request the capability (all may, by default).
+    control::Reason setAllowed(std::string_view capability, bool allowed);
+    control::ControlStatus controlStatus(std::string_view capability) const;
+    /// The platform restricts a capability (collision avoidance, an
+    /// operational restriction): a policy's NEW for it is refused with
+    /// `reason`; what flies goes on. Availability::Available lifts it.
+    control::Reason setAvailability(std::string_view capability, control::Availability availability,
+                                    control::Reason reason = control::Reason::Restricted);
     /// What the vehicle knows about its aircraft: identity, effectors, envelope,
     /// propulsion, plant, performance, control (docs/control-architecture.md, 7).
     const control::VehicleProfile& profile() const;

@@ -446,6 +446,56 @@ class CapabilityTest(unittest.TestCase):
         self.assertEqual(caps["fsim.guidance.curve"].mode, "curve_following")
         self.assertEqual([q.name for q in caps["fsim.guidance.curve"].parameters], list(fsim.MODE_FIELDS["curve"]))
 
+    def test_grants_and_performance(self):
+        world = make_world(name="py-grants")
+        v = fly(world, "granted")
+        world.step()
+        # the performance: its loops' bank, and computed afresh when they change, the revision counting it
+        p = v.performance
+        self.assertIsInstance(p, fsim.Performance)
+        self.assertFalse(p.hovers)
+        self.assertEqual(p.max_bank_rad, v.controller_parameter(fsim.Level.VELOCITY, "max_bank"))
+        revision = v.control_revision
+        v.set_controller_parameter(fsim.Level.VELOCITY, "max_bank", 0.4)
+        self.assertEqual(v.performance.max_bank_rad, 0.4)
+        self.assertEqual(v.performance.revision, p.revision + 1)
+        self.assertEqual(v.control_revision, revision + 1)
+        # Granted: a policy commands only what it holds a grant for
+        self.assertEqual(v.control_mode, fsim.ControlMode.OPEN)
+        v.set_control_mode("granted")
+        self.assertEqual(v.control_mode, fsim.ControlMode.GRANTED)
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_hsa(heading_rad=1.0)
+        self.assertEqual(refused.exception.reason, "not_granted")
+        v.request_control("fsim.guidance.hsa")
+        self.assertEqual(v.control_status("fsim.guidance.hsa"), fsim.ControlStatus(allowed=True, granted=True))
+        a = v.submit_hsa(heading_rad=1.0)
+        world.step()
+        v.release_control("fsim.guidance.hsa")  # it lets go: its activity ends
+        self.assertEqual((a.info.state, a.info.reason), (fsim.ActivityState.CANCELED, "released"))
+        # the platform's restriction: a request refused with its reason
+        v.set_availability("fsim.guidance.hsa", "temporarily_unavailable", "collision_avoidance")
+        self.assertEqual(v.capability_status("fsim.guidance.hsa"), (fsim.Availability.TEMPORARILY_UNAVAILABLE, "collision_avoidance"))
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.request_control("fsim.guidance.hsa")
+        self.assertEqual(refused.exception.reason, "collision_avoidance")
+        v.set_availability("fsim.guidance.hsa", "available")
+        # not allowed; revoked
+        v.set_allowed("fsim.guidance.hsa", False)
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.request_control("fsim.guidance.hsa")
+        self.assertEqual(refused.exception.reason, "not_allowed")
+        v.set_allowed("fsim.guidance.hsa", True)
+        v.request_control("fsim.guidance.hsa")
+        a = v.submit_hsa(heading_rad=1.0)
+        v.revoke_control("fsim.guidance.hsa", "restricted")
+        self.assertEqual(a.info.reason, "restricted")
+        self.assertFalse(v.control_status("fsim.guidance.hsa").granted)
+        with self.assertRaises(fsim.Error):
+            v.request_control("fsim.guidance.nonsense")
+        v.set_control_mode(fsim.ControlMode.OPEN)
+        v.submit_hsa(heading_rad=1.0)
+
     def test_authority_and_refusals(self):
         world = make_world(name="py-authority")
         v = fly(world, "held")

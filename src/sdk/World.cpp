@@ -185,6 +185,43 @@ control::CapabilityStatus Vehicle::capabilityStatus(std::string_view capability)
     return {control::Availability::Disabled, control::Reason::UnknownVehicle};
 }
 
+control::Performance Vehicle::performance() const {
+    const control::Performance* p = world_ ? world_->impl_->performance(id_) : nullptr;
+    return p ? *p : control::Performance{};
+}
+
+std::uint32_t Vehicle::controlRevision() const { return world_ ? world_->impl_->controlRevision(id_) : 0; }
+
+control::Reason Vehicle::setControlMode(control::ControlMode mode) {
+    return world_ ? world_->impl_->setControlMode(id_, mode) : control::Reason::UnknownVehicle;
+}
+
+control::ControlMode Vehicle::controlMode() const { return world_ ? world_->impl_->controlMode(id_) : control::ControlMode::Open; }
+
+control::Reason Vehicle::requestControl(std::string_view capability) {
+    return world_ ? world_->impl_->requestControl(id_, capability) : control::Reason::UnknownVehicle;
+}
+
+control::Reason Vehicle::releaseControl(std::string_view capability) {
+    return world_ ? world_->impl_->releaseControl(id_, capability) : control::Reason::UnknownVehicle;
+}
+
+control::Reason Vehicle::revokeControl(std::string_view capability, control::Reason reason) {
+    return world_ ? world_->impl_->revokeControl(id_, capability, reason) : control::Reason::UnknownVehicle;
+}
+
+control::Reason Vehicle::setAllowed(std::string_view capability, bool allowed) {
+    return world_ ? world_->impl_->setAllowed(id_, capability, allowed) : control::Reason::UnknownVehicle;
+}
+
+control::ControlStatus Vehicle::controlStatus(std::string_view capability) const {
+    return world_ ? world_->impl_->controlStatus(id_, capability) : control::ControlStatus{false, false};
+}
+
+control::Reason Vehicle::setAvailability(std::string_view capability, control::Availability availability, control::Reason reason) {
+    return world_ ? world_->impl_->setAvailability(id_, capability, availability, reason) : control::Reason::UnknownVehicle;
+}
+
 control::ControlStack& Vehicle::controls() {
     auto* c = world_ ? world_->impl_->controls(id_) : nullptr;
     if (!c) throw Error("Vehicle::controls: invalid vehicle handle");

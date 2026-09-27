@@ -321,6 +321,21 @@ struct CapabilityStatus {
     Reason reason = Reason::None;
 };
 
+/// Who may command a vehicle's capabilities as Source::Policy
+/// (docs/vehicle-interface.md, 6.1). The platform's own sources (Autopilot,
+/// Override) never need a grant.
+enum class ControlMode : std::uint8_t {
+    Open,    ///< as ADR-26: any capability, arbitrated by source and axes (the default)
+    Granted, ///< only the capabilities a grant covers: a policy's NEW without one is refused NotGranted
+};
+
+/// A capability's control status for a vehicle's policy (A-GRA's ControlStatus;
+/// the primary controller is always the platform).
+struct ControlStatus {
+    bool allowed = true;  ///< the policy may request it (all may, by default)
+    bool granted = false; ///< the policy holds a grant for it
+};
+
 enum class CapabilityKind : std::uint8_t { Flight, Guidance, Support, Status };
 enum class Persistence : std::uint8_t {
     Persistent,  ///< runs until canceled, preempted or failed (a hold)

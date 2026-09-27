@@ -245,3 +245,44 @@ TEST_CASE("capabilities and activities through the SDK: discover, submit, update
     REQUIRE(v.activities().size() == 1);
     REQUIRE_FALSE(world.activity(control::activityId(v.id(), 42)).has_value());
 }
+
+TEST_CASE("grants and the performance through the SDK", "[sdk][control]") {
+    WorldOptions o;
+    o.name = "sdk-grants";
+    o.publish = false;
+    o.workers = 1;
+    o.pinWorkers = false;
+    World world(o);
+    VehicleSpec s;
+    s.initial.altitudeMslM = 1500.0;
+    s.initial.airspeedTrueMs = 55.0;
+    Vehicle v = world.createVehicle(s);
+
+    // what it can do, and a change of its loops counted
+    const control::Performance p = v.performance();
+    REQUIRE_FALSE(p.hovers);
+    REQUIRE(p.maxBankRad > 0.0);
+    const std::uint32_t revision = v.controlRevision();
+    REQUIRE(v.controls().setParameter(control::Level::Velocity, "max_bank", 0.4));
+    REQUIRE(v.performance().maxBankRad == 0.4);
+    REQUIRE(v.controlRevision() == revision + 1);
+    // Granted: a policy's NEW needs a grant; released, its activity ends
+    REQUIRE(v.setControlMode(control::ControlMode::Granted) == control::Reason::None);
+    control::HsaCommand h;
+    h.headingRad = 1.0;
+    REQUIRE(v.submit(h).reason == control::Reason::NotGranted);
+    REQUIRE(v.requestControl("fsim.guidance.hsa") == control::Reason::None);
+    REQUIRE(v.controlStatus("fsim.guidance.hsa").granted);
+    const control::CommandResult r = v.submit(h);
+    REQUIRE(r.accepted());
+    REQUIRE(v.releaseControl("fsim.guidance.hsa") == control::Reason::None);
+    REQUIRE(world.activity(r.activity)->reason == control::Reason::Released);
+    // the platform's restriction
+    REQUIRE(v.setAvailability("fsim.guidance.hsa", control::Availability::TemporarilyUnavailable) == control::Reason::None);
+    REQUIRE(v.capabilityStatus("fsim.guidance.hsa").reason == control::Reason::Restricted);
+    REQUIRE(v.requestControl("fsim.guidance.hsa") == control::Reason::Restricted);
+    REQUIRE(v.setAllowed("fsim.guidance.hsa", false) == control::Reason::None);
+    REQUIRE_FALSE(v.controlStatus("fsim.guidance.hsa").allowed);
+    REQUIRE(v.revokeControl("fsim.guidance.hsa") == control::Reason::None);
+    REQUIRE(v.controlMode() == control::ControlMode::Granted);
+}

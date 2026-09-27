@@ -392,11 +392,55 @@ a quarter wider than the aircraft's planning radius, is flown within:
 A c172x meets a duration in a 10 m/s wind within 0.2 %, and an IRIS within
 0.7 % (`tests/test_curves.cpp`).
 
+### Grants: who may command a vehicle
+
+By default a vehicle is `ControlMode::Open`, and every command is arbitrated
+by its source and axes as it always has been. The platform's side can put a
+vehicle in `Granted` mode: its policy (`Source::Policy`) then commands only
+the capabilities it holds a grant for.
+
+```cpp
+v.setControlMode(ControlMode::Granted);            // what the policy flies without a grant ends: Canceled(NotGranted)
+v.submit(hsa);                                     // refused NotGranted, and nothing recorded
+if (v.requestControl("fsim.guidance.hsa") == Reason::None) v.submit(hsa); // granted: flown
+v.releaseControl("fsim.guidance.hsa");             // the policy lets go: its hsa ends Canceled(Released)
+v.revokeControl("fsim.guidance.route", Reason::CollisionAvoidance); // the platform takes it back, saying why
+v.setAllowed("fsim.flight.attitude", false);       // may not be requested; a grant for it is revoked
+v.controlStatus("fsim.guidance.hsa");              // {allowed, granted}
+```
+
+- **The platform's own sources** (`Autopilot`, `Override`) never need a grant. A grant opens a gate and nothing more: a live autopilot still holds its axes against a granted policy.
+- **The existing entry points** (`command()`, `fsim_vehicle_command_*`) are gated the same way.
+- **A request** is refused `not_allowed`, or with the reason the capability is unavailable.
+- **Release and revocation** end what the policy flies of the capability, in either mode, and the vehicle default flies its axes.
+
+**Availability.** `v.setAvailability("fsim.guidance.route", Availability::TemporarilyUnavailable, Reason::CollisionAvoidance)`
+restricts a capability; `capabilityStatus` reports it. A policy's NEW for it,
+and a request, are refused with the reason. What flies goes on, taking its
+UPDATEs, and the platform's own sources are not stopped. `Available` lifts it.
+
+**The performance.** `v.performance()` is what the vehicle can do, as its
+guidance plans with it (A-GRA's performance profile):
+- the calibrated speeds from its envelope, its fastest true airspeed, the cruise a mode flies given no speed, a rotorcraft's fastest over the ground;
+- its ceiling;
+- its bank, pitch, load factor and roll-rate limits; a rotorcraft's tilt and accelerations;
+- the climb and descent guidance asks for;
+- how fast its loops answer.
+
+NaN where the aircraft's profile and loops say nothing: the c172x's profile
+gives no top speed. It is computed afresh when the loops change through the
+stack (`use`, `setControllerSettings`, `ControlStack::setParameter`, the C
+ABI's and Python's parameter calls), with a new `revision`.
+
+**Polling.** `v.controlRevision()` counts every change to the control mode,
+the grants, what is allowed, availability and the performance. A consumer
+that polls it knows when to look again.
+
 **New reasons.** `invalid_waypoint`, `invalid_curve`, `performance_limit`,
 `not_granted`, `not_allowed`, `revoked`, `released`, `collision_avoidance`
 and `restricted` belong to ADR-28's modes and grants.
 
-**From C and Python.** `fsim_vehicle_submit_mode(world, id, FSIM_MODE_HSA, fields, 6, &options, &result)` and `vehicle.submit_hsa(course_rad=..., speed=..., speed_reference="mach", altitude_m=...)` submit an hsa; `fsim_activity_update` and `activity.update(altitude_m=...)` change only what they give. `fsim_vehicle_submit_route(world, id, fields, 4, waypoints, n, &options, &result)` (`fsim_waypoint`, `fsim_waypoint_init`) and `vehicle.submit_route([fsim.Waypoint(lat, lon, speed=55.0), ...], repeat=True)` submit a route; `fsim_activity_update_route` and `activity.update_route(waypoints, **options)` replace it. `fsim_vehicle_submit_mode(world, id, FSIM_MODE_PATTERN, fields, 12, &options, &result)` and `vehicle.submit_pattern(pattern="hold", latitude_rad=..., longitude_rad=...)` loiter; `activity.update(radius_m=...)` merges. `fsim_vehicle_submit_curve(world, id, fields, 8, segments, n, &options, &result)` (`fsim_bezier_segment`, `fsim_bezier_segment_init`) and `vehicle.submit_curve([fsim.BezierSegment(north, east, down), ...], speed_max_ms=...)` fly a curve; `fsim_activity_update_curve` and `activity.append(segments)` or `activity.update_curve(segments)` extend or replace it. The C ABI's result carries the index plus one in
+**From C and Python.** `fsim_vehicle_submit_mode(world, id, FSIM_MODE_HSA, fields, 6, &options, &result)` and `vehicle.submit_hsa(course_rad=..., speed=..., speed_reference="mach", altitude_m=...)` submit an hsa; `fsim_activity_update` and `activity.update(altitude_m=...)` change only what they give. `fsim_vehicle_submit_route(world, id, fields, 4, waypoints, n, &options, &result)` (`fsim_waypoint`, `fsim_waypoint_init`) and `vehicle.submit_route([fsim.Waypoint(lat, lon, speed=55.0), ...], repeat=True)` submit a route; `fsim_activity_update_route` and `activity.update_route(waypoints, **options)` replace it. `fsim_vehicle_submit_mode(world, id, FSIM_MODE_PATTERN, fields, 12, &options, &result)` and `vehicle.submit_pattern(pattern="hold", latitude_rad=..., longitude_rad=...)` loiter; `activity.update(radius_m=...)` merges. `fsim_vehicle_submit_curve(world, id, fields, 8, segments, n, &options, &result)` (`fsim_bezier_segment`, `fsim_bezier_segment_init`) and `vehicle.submit_curve([fsim.BezierSegment(north, east, down), ...], speed_max_ms=...)` fly a curve; `fsim_activity_update_curve` and `activity.append(segments)` or `activity.update_curve(segments)` extend or replace it. `fsim_vehicle_performance` (`fsim_performance`) and `vehicle.performance` give the performance; `fsim_vehicle_set_control_mode`, `_request_control`, `_release_control`, `_revoke_control`, `_set_allowed`, `_control_status`, `_set_availability` and `_control_revision`, and the same names on Python's `Vehicle` (`request_control` raises `fsim.Rejected`), the grants. The C ABI's result carries the index plus one in
 `fsim_command_result.reserved`; `fsim_last_command_detail()` has the rest,
 `fsim_activity_get_progress()` the progress, `fsim_vehicle_commanded()` the
 commanded state, `fsim_vehicle_capability_flight_mode()` a capability's type

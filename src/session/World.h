@@ -145,8 +145,30 @@ public:
     const control::VehicleProfile* profile(std::uint32_t id) const noexcept;
     control::ControlStack* controls(std::uint32_t id) noexcept;
     const control::ControlStack* controls(std::uint32_t id) const noexcept;
-    /// What the vehicle can do, as its guidance plans with it (docs/vehicle-interface.md, 7.1); null for an unknown vehicle.
-    const control::Performance* performance(std::uint32_t id) const noexcept;
+    /// What the vehicle can do, as its guidance plans with it (docs/vehicle-interface.md, 7.1): computed
+    /// afresh first if its loops changed. Null for an unknown vehicle.
+    const control::Performance* performance(std::uint32_t id) noexcept;
+
+    // --- Authority and availability (docs/vehicle-interface.md, 6 and 7.2) ---------
+    /// Open (as ADR-26, the default) or Granted: a policy's NEW then needs a
+    /// grant for its capability, and what the policy flies without one ends.
+    control::Reason setControlMode(std::uint32_t id, control::ControlMode mode);
+    control::ControlMode controlMode(std::uint32_t id) const noexcept;
+    /// A policy asks for control of a capability (by id): Reason::None if
+    /// granted; else NotAllowed, the reason it is unavailable, UnknownCapability.
+    control::Reason requestControl(std::uint32_t id, std::string_view capability);
+    /// The policy lets go: the grant ends, and its live activities of the capability end Canceled(Released).
+    control::Reason releaseControl(std::uint32_t id, std::string_view capability);
+    /// The platform takes it back: the grant ends, and the policy's live activities of it end Canceled(`reason`).
+    control::Reason revokeControl(std::uint32_t id, std::string_view capability, control::Reason reason = control::Reason::Revoked);
+    /// Whether the policy may request the capability; a grant for one no longer allowed is revoked.
+    control::Reason setAllowed(std::uint32_t id, std::string_view capability, bool allowed);
+    control::ControlStatus controlStatus(std::uint32_t id, std::string_view capability) const;
+    /// The platform restricts a capability (or, Available, lifts it): a policy's NEW for it is refused with `reason`.
+    control::Reason setAvailability(std::uint32_t id, std::string_view capability, control::Availability availability,
+                                    control::Reason reason = control::Reason::Restricted);
+    /// Counts every change to grants, what is allowed, the control mode, availability and the performance (6.3).
+    std::uint32_t controlRevision(std::uint32_t id) noexcept;
 
     // --- Effects ---------------------------------------------------------------
     bool addEffect(std::uint32_t id, std::unique_ptr<effects::Effect> effect);

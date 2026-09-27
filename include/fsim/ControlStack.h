@@ -72,6 +72,13 @@ public:
     /// (a parameter the controller does not have, or an id no level runs).
     std::vector<ControllerSetting> setControllerSettings(std::vector<ControllerSetting> settings);
     const std::vector<ControllerSetting>& controllerSettings() const noexcept { return settings_; }
+    /// Set a parameter of the controller at `level` (Controller::setParameter),
+    /// counted in loopsRevision(). False if it has none by that name.
+    bool setParameter(Level level, std::string_view name, double value);
+    /// Counts the changes made through this stack to its controllers and their
+    /// parameters (use, setControllerSettings, setParameter): what the vehicle's
+    /// performance is computed from (docs/vehicle-interface.md, 7.1).
+    std::uint32_t loopsRevision() const noexcept { return loopsRevision_; }
     Controller* controller(Level level) noexcept { return controllers_[static_cast<std::size_t>(level)].get(); }
     const Controller* controller(Level level) const noexcept { return controllers_[static_cast<std::size_t>(level)].get(); }
 
@@ -155,6 +162,7 @@ private:
     std::array<std::unique_ptr<Controller>, kLevels> controllers_;
     std::array<bool, kLevels> byId_{}; ///< created from the registry (settings apply)
     std::vector<ControllerSetting> settings_;
+    std::uint32_t loopsRevision_ = 0;
     std::array<std::unique_ptr<Behavior>, kSlotCount> behaviors_; ///< per slot, at Level::Behavior
     std::array<std::uint32_t, kSlotCount> started_{};              ///< the slot generation each behaviour was started for
     std::array<const Command*, kLevels> derived_{};                ///< the last update's command per level (null: did not run)

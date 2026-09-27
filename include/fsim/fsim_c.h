@@ -598,6 +598,53 @@ FSIM_API int fsim_vehicle_submit_curve(fsim_world* world, uint32_t id, const dou
 FSIM_API int fsim_activity_update_curve(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
                                         const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result);
 
+/* What a vehicle can do, as its guidance plans with it (docs/vehicle-interface.md,
+ * 7.1; A-GRA's performance profile): NaN where the aircraft's profile and loops
+ * say nothing. Computed afresh when its loops change (revision counts it).
+ * fsim_performance_init sets struct_size; the call fills up to it. */
+typedef struct fsim_performance {
+    uint32_t struct_size;
+    uint32_t revision;       /* counts recomputations */
+    int32_t hovers;          /* 1: a rotorcraft (holds a point, flies any direction over the ground) */
+    double min_cas_ms, max_cas_ms, max_mach; /* calibrated: the envelope's (the least else 1.2 times the stall speed) */
+    double max_tas_ms;       /* the fastest it flies (level, at full power) */
+    double cruise_tas_ms;    /* what a mode flies given no speed */
+    double max_ground_speed_ms; /* a rotorcraft's fastest over the ground */
+    double ceiling_m;
+    double max_bank_rad, min_pitch_rad, max_pitch_rad, max_roll_rate_rad_s, min_load_factor, max_load_factor;
+    double max_tilt_rad, max_acceleration_ms2, max_deceleration_ms2; /* a rotorcraft's */
+    double max_climb_ms, max_descent_ms;                             /* what guidance asks for */
+    double altitude_gain_per_s, heading_gain, heading_reference_tas_ms, bank_rate_rad_s, velocity_bandwidth_rad_s; /* how fast it answers */
+} fsim_performance;
+FSIM_API void fsim_performance_init(fsim_performance* performance);
+FSIM_API int fsim_vehicle_performance(fsim_world* world, uint32_t id, fsim_performance* out);
+
+/* Authority: grants over the priorities (docs/vehicle-interface.md, 6). Open,
+ * the default, is as ever; Granted: a policy's NEW (and the fsim_vehicle_command_*
+ * calls) needs a grant for its capability - else "not_granted" - and what the
+ * policy flies without one ends canceled(not_granted). The platform's own
+ * sources (autopilot, override) never need one. Capabilities by id. */
+enum fsim_control_mode { FSIM_CONTROL_OPEN = 0, FSIM_CONTROL_GRANTED };
+FSIM_API int fsim_vehicle_set_control_mode(fsim_world* world, uint32_t id, int mode);
+FSIM_API int fsim_vehicle_control_mode(const fsim_world* world, uint32_t id, int32_t* mode);
+/* A policy asks for control of a capability: *reason 0 if granted, else why not
+ * (fsim_reason_name: "not_allowed", or why it is unavailable). */
+FSIM_API int fsim_vehicle_request_control(fsim_world* world, uint32_t id, const char* capability, int32_t* reason);
+/* The policy lets go: its grant ends, and its live activities of the capability end canceled(released). */
+FSIM_API int fsim_vehicle_release_control(fsim_world* world, uint32_t id, const char* capability);
+/* The platform takes it back: the grant ends, and the policy's live activities of
+ * the capability end canceled with `reason` (0: "revoked"). */
+FSIM_API int fsim_vehicle_revoke_control(fsim_world* world, uint32_t id, const char* capability, int reason);
+/* Whether the policy may request the capability (all may, by default); a grant for one no longer allowed is revoked. */
+FSIM_API int fsim_vehicle_set_allowed(fsim_world* world, uint32_t id, const char* capability, int allowed);
+FSIM_API int fsim_vehicle_control_status(const fsim_world* world, uint32_t id, const char* capability, int32_t* allowed, int32_t* granted);
+/* The platform restricts a capability (fsim_availability; FSIM_AVAILABLE lifts it):
+ * a policy's NEW for it, and a request, are refused with `reason` (0: "restricted");
+ * what flies goes on. fsim_vehicle_capability_status reports it. */
+FSIM_API int fsim_vehicle_set_availability(fsim_world* world, uint32_t id, const char* capability, int availability, int reason);
+/* Counts every change to the grants, what is allowed, the control mode, availability and the performance: poll it. */
+FSIM_API int fsim_vehicle_control_revision(fsim_world* world, uint32_t id, uint32_t* revision);
+
 /* A-GRA's flight capability types (MA_FlightCapabilityEnum). */
 enum fsim_flight_mode {
     FSIM_FLIGHT_MODE_NONE = 0,

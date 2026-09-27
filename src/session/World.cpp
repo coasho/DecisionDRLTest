@@ -526,9 +526,83 @@ const control::ControlStack* World::controls(std::uint32_t id) const noexcept {
     return e ? &e->stack : nullptr;
 }
 
-const control::Performance* World::performance(std::uint32_t id) const noexcept {
+const control::Performance* World::performance(std::uint32_t id) noexcept {
+    Entry* e = entry(id);
+    if (!e) return nullptr;
+    e->host.refreshPerformance();
+    return &e->host.performance();
+}
+
+control::Reason World::setControlMode(std::uint32_t id, control::ControlMode mode) {
+    Entry* e = entry(id);
+    if (!e) return control::Reason::UnknownVehicle;
+    e->host.setControlMode(mode, simTime_);
+    levelChanged(*e); // (what the policy flew without a grant has ended)
+    return control::Reason::None;
+}
+
+control::ControlMode World::controlMode(std::uint32_t id) const noexcept {
     const Entry* e = entry(id);
-    return e ? &e->host.performance() : nullptr;
+    return e ? e->host.controlMode() : control::ControlMode::Open;
+}
+
+control::Reason World::requestControl(std::uint32_t id, std::string_view capability) {
+    Entry* e = entry(id);
+    if (!e) return control::Reason::UnknownVehicle;
+    const int index = e->catalog->find(capability);
+    if (index < 0) return control::Reason::UnknownCapability;
+    return e->host.requestControl(static_cast<std::size_t>(index), pool_->states()[e->slot]);
+}
+
+control::Reason World::releaseControl(std::uint32_t id, std::string_view capability) {
+    Entry* e = entry(id);
+    if (!e) return control::Reason::UnknownVehicle;
+    const int index = e->catalog->find(capability);
+    if (index < 0) return control::Reason::UnknownCapability;
+    const control::Reason r = e->host.releaseControl(static_cast<std::size_t>(index), simTime_);
+    levelChanged(*e);
+    return r;
+}
+
+control::Reason World::revokeControl(std::uint32_t id, std::string_view capability, control::Reason reason) {
+    Entry* e = entry(id);
+    if (!e) return control::Reason::UnknownVehicle;
+    const int index = e->catalog->find(capability);
+    if (index < 0) return control::Reason::UnknownCapability;
+    const control::Reason r = e->host.revokeControl(static_cast<std::size_t>(index), reason, simTime_);
+    levelChanged(*e);
+    return r;
+}
+
+control::Reason World::setAllowed(std::uint32_t id, std::string_view capability, bool allowed) {
+    Entry* e = entry(id);
+    if (!e) return control::Reason::UnknownVehicle;
+    const int index = e->catalog->find(capability);
+    if (index < 0) return control::Reason::UnknownCapability;
+    const control::Reason r = e->host.setAllowed(static_cast<std::size_t>(index), allowed, simTime_);
+    levelChanged(*e);
+    return r;
+}
+
+control::ControlStatus World::controlStatus(std::uint32_t id, std::string_view capability) const {
+    const Entry* e = entry(id);
+    const int index = e ? e->catalog->find(capability) : -1;
+    return index < 0 ? control::ControlStatus{false, false} : e->host.controlStatus(static_cast<std::size_t>(index));
+}
+
+control::Reason World::setAvailability(std::uint32_t id, std::string_view capability, control::Availability availability, control::Reason reason) {
+    Entry* e = entry(id);
+    if (!e) return control::Reason::UnknownVehicle;
+    const int index = e->catalog->find(capability);
+    if (index < 0) return control::Reason::UnknownCapability;
+    return e->host.setAvailability(static_cast<std::size_t>(index), availability, reason);
+}
+
+std::uint32_t World::controlRevision(std::uint32_t id) noexcept {
+    Entry* e = entry(id);
+    if (!e) return 0;
+    e->host.refreshPerformance();
+    return e->host.controlRevision();
 }
 
 bool World::addEffect(std::uint32_t id, std::unique_ptr<effects::Effect> effect) {

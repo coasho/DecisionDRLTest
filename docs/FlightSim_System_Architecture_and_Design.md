@@ -683,7 +683,9 @@ aircraft's own roll lag; the fifth, loiter patterns - orbits, racetracks, figure
 follower, which now models a rotorcraft's velocity loop to take out its lag round a steady turn; the sixth, curve
 following - quintic Bézier segments flown within a speed range or in a given time, appended to in flight, each segment
 and section checked - on the same follower, which now turns a wing at the heading rate that holds its track in the
-wind.
+wind; the seventh, grants over the priorities - a vehicle whose policy commands only what it holds a grant for,
+requests, releases, revocations, the platform's restrictions and a revision to poll - and the vehicle's performance
+in the SDK, computed afresh when its loops change.
 M5's release is still to come: no `v*` tag yet.
 
 | # | Milestone | Deliverable | Exit criteria | Duration |

@@ -1212,6 +1212,119 @@ static PyObject* world_capability_status(PyObject* o, PyObject* const* args, Py_
     return Py_BuildValue("(ii)", availability, reason);
 }
 
+/* performance(id) -> (revision, hovers, 23 floats in fsim_performance's order) */
+static PyObject* world_performance(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    fsim_performance p;
+    if (!check_args(n, 1, 1, "performance") || !as_u32(args[0], &id)) return NULL;
+    fsim_performance_init(&p);
+    if (fsim_vehicle_performance(self->world, id, &p) != FSIM_OK) return fail();
+    return Py_BuildValue("(Iiddddddddddddddddddddddd)", p.revision, p.hovers, p.min_cas_ms, p.max_cas_ms, p.max_mach, p.max_tas_ms, p.cruise_tas_ms,
+                         p.max_ground_speed_ms, p.ceiling_m, p.max_bank_rad, p.min_pitch_rad, p.max_pitch_rad, p.max_roll_rate_rad_s, p.min_load_factor,
+                         p.max_load_factor, p.max_tilt_rad, p.max_acceleration_ms2, p.max_deceleration_ms2, p.max_climb_ms, p.max_descent_ms,
+                         p.altitude_gain_per_s, p.heading_gain, p.heading_reference_tas_ms, p.bank_rate_rad_s, p.velocity_bandwidth_rad_s);
+}
+
+/* control_revision(id) -> int */
+static PyObject* world_control_revision(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    uint32_t id, revision = 0;
+    if (!check_args(n, 1, 1, "control_revision") || !as_u32(args[0], &id)) return NULL;
+    if (fsim_vehicle_control_revision(((WorldObject*)o)->world, id, &revision) != FSIM_OK) return fail();
+    return PyLong_FromUnsignedLong(revision);
+}
+
+/* set_control_mode(id, mode) */
+static PyObject* world_set_control_mode(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int mode;
+    if (!check_args(n, 2, 2, "set_control_mode") || !as_u32(args[0], &id) || !as_int(args[1], &mode) || !WORLD_IDLE(self)) return NULL;
+    if (fsim_vehicle_set_control_mode(self->world, id, mode) != FSIM_OK) return fail();
+    Py_RETURN_NONE;
+}
+
+/* control_mode(id) -> mode */
+static PyObject* world_control_mode(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    uint32_t id;
+    int32_t mode = 0;
+    if (!check_args(n, 1, 1, "control_mode") || !as_u32(args[0], &id)) return NULL;
+    if (fsim_vehicle_control_mode(((WorldObject*)o)->world, id, &mode) != FSIM_OK) return fail();
+    return PyLong_FromLong(mode);
+}
+
+/* request_control(id, capability) -> reason (0: granted) */
+static PyObject* world_request_control(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int32_t reason = 0;
+    if (!check_args(n, 2, 2, "request_control") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    const char* cap = as_str(args[1], "capability id");
+    if (!cap) return NULL;
+    if (fsim_vehicle_request_control(self->world, id, cap, &reason) != FSIM_OK) return fail();
+    return PyLong_FromLong(reason);
+}
+
+/* release_control(id, capability) */
+static PyObject* world_release_control(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    if (!check_args(n, 2, 2, "release_control") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    const char* cap = as_str(args[1], "capability id");
+    if (!cap) return NULL;
+    if (fsim_vehicle_release_control(self->world, id, cap) != FSIM_OK) return fail();
+    Py_RETURN_NONE;
+}
+
+/* revoke_control(id, capability, reason) */
+static PyObject* world_revoke_control(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int reason;
+    if (!check_args(n, 3, 3, "revoke_control") || !as_u32(args[0], &id) || !as_int(args[2], &reason) || !WORLD_IDLE(self)) return NULL;
+    const char* cap = as_str(args[1], "capability id");
+    if (!cap) return NULL;
+    if (fsim_vehicle_revoke_control(self->world, id, cap, reason) != FSIM_OK) return fail();
+    Py_RETURN_NONE;
+}
+
+/* set_allowed(id, capability, allowed) */
+static PyObject* world_set_allowed(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int allowed;
+    if (!check_args(n, 3, 3, "set_allowed") || !as_u32(args[0], &id) || !as_int(args[2], &allowed) || !WORLD_IDLE(self)) return NULL;
+    const char* cap = as_str(args[1], "capability id");
+    if (!cap) return NULL;
+    if (fsim_vehicle_set_allowed(self->world, id, cap, allowed) != FSIM_OK) return fail();
+    Py_RETURN_NONE;
+}
+
+/* control_status(id, capability) -> (allowed, granted) */
+static PyObject* world_control_status(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    uint32_t id;
+    int32_t allowed = 0, granted = 0;
+    if (!check_args(n, 2, 2, "control_status") || !as_u32(args[0], &id)) return NULL;
+    const char* cap = as_str(args[1], "capability id");
+    if (!cap) return NULL;
+    if (fsim_vehicle_control_status(((WorldObject*)o)->world, id, cap, &allowed, &granted) != FSIM_OK) return fail();
+    return Py_BuildValue("(OO)", allowed ? Py_True : Py_False, granted ? Py_True : Py_False);
+}
+
+/* set_availability(id, capability, availability, reason) */
+static PyObject* world_set_availability(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int availability, reason;
+    if (!check_args(n, 4, 4, "set_availability") || !as_u32(args[0], &id) || !as_int(args[2], &availability) || !as_int(args[3], &reason) ||
+        !WORLD_IDLE(self))
+        return NULL;
+    const char* cap = as_str(args[1], "capability id");
+    if (!cap) return NULL;
+    if (fsim_vehicle_set_availability(self->world, id, cap, availability, reason) != FSIM_OK) return fail();
+    Py_RETURN_NONE;
+}
+
 /* profile_value(id, path) -> float (NaN if unknown) */
 static PyObject* world_profile_value(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
@@ -1580,6 +1693,16 @@ static PyMethodDef world_methods[] = {
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
     FAST("capabilities", world_capabilities, "capabilities(id) -> [capability]"),
     FAST("capability_status", world_capability_status, "capability_status(id, capability) -> (availability, reason)"),
+    FAST("performance", world_performance, "performance(id) -> (revision, hovers, 23 floats in fsim_performance's order)"),
+    FAST("control_revision", world_control_revision, "control_revision(id) -> int"),
+    FAST("set_control_mode", world_set_control_mode, "set_control_mode(id, mode)"),
+    FAST("control_mode", world_control_mode, "control_mode(id) -> mode"),
+    FAST("request_control", world_request_control, "request_control(id, capability) -> reason, 0 if granted"),
+    FAST("release_control", world_release_control, "release_control(id, capability)"),
+    FAST("revoke_control", world_revoke_control, "revoke_control(id, capability, reason)"),
+    FAST("set_allowed", world_set_allowed, "set_allowed(id, capability, allowed)"),
+    FAST("control_status", world_control_status, "control_status(id, capability) -> (allowed, granted)"),
+    FAST("set_availability", world_set_availability, "set_availability(id, capability, availability, reason)"),
     FAST("profile_value", world_profile_value, "profile_value(id, path) -> float, NaN if unknown"),
     FAST("profile_section", world_profile_section, "profile_section(id, section) -> (version, provenance)"),
     FAST("set_vehicle_default", world_set_vehicle_default, "set_vehicle_default(id, mode) -> reason, 0 if set"),

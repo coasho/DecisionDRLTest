@@ -85,7 +85,126 @@ void CapabilityHost::bind(std::uint32_t vehicle, ControlStack& runtime, const Ca
     performance_ = adapter.performance(profile, runtime);
     performance_.revision = config_->performance.revision + 1;
     config_->performance = performance_;
+    loopsSeen_ = runtime.loopsRevision();
     ++config_->revision;
+    if (authority_.size() < catalog.size()) authority_.resize(catalog.size());
+}
+
+namespace {
+
+/// Every field the same (NaN the same as NaN), its revision aside.
+bool samePerformance(const Performance& a, const Performance& b) noexcept {
+    auto same = [](double x, double y) { return x == y || (std::isnan(x) && std::isnan(y)); };
+    const double fa[] = {a.minCasMs, a.maxCasMs, a.maxMach, a.maxTasMs, a.cruiseTasMs, a.maxGroundSpeedMs, a.ceilingM, a.maxBankRad, a.minPitchRad,
+                         a.maxPitchRad, a.maxRollRateRadS, a.minLoadFactor, a.maxLoadFactor, a.maxTiltRad, a.maxAccelerationMs2, a.maxDecelerationMs2,
+                         a.maxClimbMs, a.maxDescentMs, a.altitudeGainPerS, a.headingGain, a.headingReferenceTasMs, a.bankRateRadS, a.velocityBandwidthRadS};
+    const double fb[] = {b.minCasMs, b.maxCasMs, b.maxMach, b.maxTasMs, b.cruiseTasMs, b.maxGroundSpeedMs, b.ceilingM, b.maxBankRad, b.minPitchRad,
+                         b.maxPitchRad, b.maxRollRateRadS, b.minLoadFactor, b.maxLoadFactor, b.maxTiltRad, b.maxAccelerationMs2, b.maxDecelerationMs2,
+                         b.maxClimbMs, b.maxDescentMs, b.altitudeGainPerS, b.headingGain, b.headingReferenceTasMs, b.bankRateRadS, b.velocityBandwidthRadS};
+    if (a.hovers != b.hovers) return false;
+    for (std::size_t i = 0; i < std::size(fa); ++i)
+        if (!same(fa[i], fb[i])) return false;
+    return true;
+}
+
+} // namespace
+
+void CapabilityHost::refreshPerformance() noexcept {
+    if (!runtime_ || runtime_->loopsRevision() == loopsSeen_) return;
+    loopsSeen_ = runtime_->loopsRevision();
+    Performance next = adapter_->performance(*profile_, *runtime_);
+    if (samePerformance(next, performance_)) return;
+    next.revision = performance_.revision + 1;
+    performance_ = next;
+    config_->performance = performance_; // (guidance reads it there, from its next update)
+    ++controlRevision_;
+}
+
+CapabilityHost::Authority& CapabilityHost::authorityOf(std::size_t capability) {
+    if (authority_.size() < catalog_->size()) authority_.resize(catalog_->size());
+    return authority_[capability];
+}
+
+Reason CapabilityHost::admits(std::size_t capability, Source source) const noexcept {
+    if (source != Source::Policy) return Reason::None; // the platform's own: FA is always the primary controller
+    const Authority* a = capability < authority_.size() ? &authority_[capability] : nullptr;
+    if (controlMode_ == ControlMode::Granted && !(a && a->granted)) return Reason::NotGranted;
+    if (a && a->restricted.availability != Availability::Available) return a->restricted.reason;
+    return Reason::None;
+}
+
+void CapabilityHost::endPolicy(std::size_t capability, Reason reason, double now) noexcept {
+    for (std::size_t s = 0; s < kActivities; ++s)
+        if (slots_[s].live && records_[s].capability == capability && records_[s].source == Source::Policy) {
+            end(s, ActivityState::Canceled, reason, 0, now);
+            release(s); // its axes: the vehicle default
+        }
+}
+
+void CapabilityHost::setControlMode(ControlMode mode, double now) noexcept {
+    if (mode == controlMode_) return;
+    controlMode_ = mode;
+    ++controlRevision_;
+    if (mode != ControlMode::Granted) return;
+    for (std::size_t s = 0; s < kActivities; ++s) // what the policy flies without a grant ends
+        if (slots_[s].live && records_[s].source == Source::Policy && admits(records_[s].capability, Source::Policy) == Reason::NotGranted) {
+            end(s, ActivityState::Canceled, Reason::NotGranted, 0, now);
+            release(s);
+        }
+}
+
+Reason CapabilityHost::requestControl(std::size_t capability, const sim::VehicleState& state) noexcept {
+    if (capability >= catalog_->size() || !(catalog_->descriptor(capability).interactions & kCommand)) return Reason::UnknownCapability;
+    Authority& a = authorityOf(capability);
+    if (!a.allowed) return Reason::NotAllowed;
+    if (const CapabilityStatus st = status(capability, state); st.availability != Availability::Available)
+        return st.reason != Reason::None ? st.reason : Reason::Unavailable;
+    if (!a.granted) a.granted = true, ++controlRevision_;
+    return Reason::None;
+}
+
+Reason CapabilityHost::releaseControl(std::size_t capability, double now) noexcept {
+    if (capability >= catalog_->size()) return Reason::UnknownCapability;
+    Authority& a = authorityOf(capability);
+    if (a.granted) a.granted = false, ++controlRevision_;
+    endPolicy(capability, Reason::Released, now);
+    return Reason::None;
+}
+
+Reason CapabilityHost::revokeControl(std::size_t capability, Reason reason, double now) noexcept {
+    if (capability >= catalog_->size()) return Reason::UnknownCapability;
+    Authority& a = authorityOf(capability);
+    if (a.granted) a.granted = false, ++controlRevision_;
+    endPolicy(capability, reason == Reason::None ? Reason::Revoked : reason, now);
+    return Reason::None;
+}
+
+Reason CapabilityHost::setAllowed(std::size_t capability, bool allowed, double now) noexcept {
+    if (capability >= catalog_->size()) return Reason::UnknownCapability;
+    Authority& a = authorityOf(capability);
+    if (a.allowed == allowed) return Reason::None;
+    a.allowed = allowed;
+    ++controlRevision_;
+    if (!allowed && a.granted) { // no longer allowed: its grant revoked
+        a.granted = false;
+        endPolicy(capability, Reason::Revoked, now);
+    }
+    return Reason::None;
+}
+
+ControlStatus CapabilityHost::controlStatus(std::size_t capability) const noexcept {
+    if (capability >= authority_.size()) return {};
+    return {authority_[capability].allowed, authority_[capability].granted};
+}
+
+Reason CapabilityHost::setAvailability(std::size_t capability, Availability availability, Reason reason) noexcept {
+    if (capability >= catalog_->size()) return Reason::UnknownCapability;
+    Authority& a = authorityOf(capability);
+    const CapabilityStatus next{availability, availability == Availability::Available ? Reason::None : reason == Reason::None ? Reason::Unavailable : reason};
+    if (next.availability == a.restricted.availability && next.reason == a.restricted.reason) return Reason::None;
+    a.restricted = next;
+    ++controlRevision_;
+    return Reason::None;
 }
 
 const HsaCommand* CapabilityHost::liveHsa() const noexcept {
@@ -490,9 +609,16 @@ int CapabilityHost::liveSlot(ActivityId activity) const noexcept {
     return -1;
 }
 
-CapabilityStatus CapabilityHost::status(std::size_t capability, const sim::VehicleState& state) const noexcept {
+CapabilityStatus CapabilityHost::vehicleStatus(std::size_t capability, const sim::VehicleState& state) const noexcept {
     if (capability >= catalog_->size()) return {Availability::Disabled, Reason::UnknownCapability};
     if (state.diverged) return {Availability::TemporarilyUnavailable, Reason::Diverged};
+    return {};
+}
+
+CapabilityStatus CapabilityHost::status(std::size_t capability, const sim::VehicleState& state) const noexcept {
+    const CapabilityStatus own = vehicleStatus(capability, state);
+    if (own.availability != Availability::Available) return own;
+    if (capability < authority_.size() && authority_[capability].restricted.availability != Availability::Available) return authority_[capability].restricted;
     return {};
 }
 
@@ -637,9 +763,12 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     // a behaviour takes a BehaviorCommand, a mode its own setpoint (a BehaviorCommand naming "hsa" is not an hsa)
     if (d.kind == CapabilityKind::Guidance && (d.setpoint == SetpointKind::Behavior) != std::holds_alternative<BehaviorCommand>(command))
         return rejected(Reason::WrongCommandType);
+    // a policy's authority (a grant, under Granted) and the platform's restrictions, whatever the range policy
+    if (const Reason why = admits(index, options.source); why != Reason::None) return rejected(why);
+    refreshPerformance(); // (what the checks below plan with)
     const bool checked = options.range != RangePolicy::None;
-    if (checked) {
-        if (status(index, state).availability != Availability::Available) return rejected(Reason::Unavailable);
+    if (checked) { // (the vehicle's own availability: the platform's restrictions stop a policy only, above)
+        if (vehicleStatus(index, state).availability != Availability::Available) return rejected(Reason::Unavailable);
         if (d.version < options.minVersion) return rejected(Reason::VersionUnsupported);
     }
 
@@ -713,9 +842,10 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
     if (found < 0) return rejected(Reason::UnknownCapability); // the aircraft has no such effector
     const auto index = static_cast<std::size_t>(found);
     const CapabilityDescriptor& d = catalog_->descriptor(index);
+    if (const Reason why = admits(index, options.source); why != Reason::None) return rejected(why);
     const bool checked = options.range != RangePolicy::None;
     if (checked) {
-        if (status(index, state).availability != Availability::Available) return rejected(Reason::Unavailable);
+        if (vehicleStatus(index, state).availability != Availability::Available) return rejected(Reason::Unavailable);
         if (d.version < options.minVersion) return rejected(Reason::VersionUnsupported);
     }
     SupportCommand setpoint = command;
@@ -995,6 +1125,8 @@ void CapabilityHost::release(std::size_t s) noexcept {
 }
 
 void CapabilityHost::afterStep(const sim::VehicleState& state, const EffectorPositions& positions, double now) noexcept {
+    refreshPerformance();
+    if (state.diverged != divergedSeen_) divergedSeen_ = state.diverged, ++controlRevision_; // every capability's availability changed
     RuntimeReport& report = runtime_->report();
     const RuntimeConfig& config = *config_;
     for (std::size_t s = 0; s < kActivities; ++s) {

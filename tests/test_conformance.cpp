@@ -460,7 +460,7 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
 
 // --- random sequences -----------------------------------------------------------------------------
 
-enum class Op { New, Update, Cancel, Legacy, Step, Reset, Default, Retarget };
+enum class Op { New, Update, Cancel, Legacy, Step, Reset, Default, Retarget, Authority };
 
 const char* opName(Op op) {
     switch (op) {
@@ -471,9 +471,24 @@ const char* opName(Op op) {
     case Op::Step: return "step";
     case Op::Reset: return "reset";
     case Op::Default: return "default";
+    case Op::Authority: return "authority";
     default: return "retarget";
     }
 }
+
+/// What the rules say a vehicle's authority is (docs/vehicle-interface.md, 6
+/// and 7.2), kept beside the World's and compared with it after each operation.
+struct AuthorityModel {
+    ControlMode mode = ControlMode::Open;
+    std::vector<ControlStatus> control;       ///< per capability
+    std::vector<CapabilityStatus> restricted; ///< per capability: the platform's
+    /// Why the policy may not command capability `c` now, as the rules have it; None if it may.
+    Reason refuses(std::size_t c) const {
+        if (mode == ControlMode::Granted && !control[c].granted) return Reason::NotGranted;
+        if (restricted[c].availability != Availability::Available) return restricted[c].reason;
+        return Reason::None;
+    }
+};
 
 bool among(Reason r, std::initializer_list<Reason> allowed) { return std::find(allowed.begin(), allowed.end(), r) != allowed.end(); }
 
@@ -484,6 +499,11 @@ struct Done {
     CommandOptions options;     ///< NEW
     ActivityId addressed = 0;   ///< UPDATE, CANCEL
     bool accepted = false;      ///< the existing entry point's answer
+    std::size_t capability = 0; ///< NEW, the existing entry point, an authority call: the capability it is about
+    Reason refused = Reason::None; ///< NEW, the existing entry point: what the authority model refuses a policy
+    std::string authority;      ///< an authority call: which ("mode", "request", ...)
+    Reason answer = Reason::None; ///< a request's answer
+    std::map<ActivityId, Reason> ends; ///< an authority call: the policy's activities it must end, and why
     double start = 0.0;         ///< the simulation time before it
     double now = 0.0;           ///< the simulation time after it
     double stepS = 0.0;         ///< a world step
@@ -514,7 +534,12 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         if (done.result.accepted()) CHECK(done.result.reason == Reason::None);
         else CHECK(among(done.result.reason, {Reason::UnknownCapability, Reason::Unavailable, Reason::VersionUnsupported, Reason::InvalidParameter,
                                               Reason::OutOfRange, Reason::InvalidAxes, Reason::AuthorityHeld, Reason::ControllerNotAxisAware,
-                                              Reason::PerformanceLimit, Reason::InvalidWaypoint, Reason::InvalidCurve}));
+                                              Reason::PerformanceLimit, Reason::InvalidWaypoint, Reason::InvalidCurve, Reason::NotGranted,
+                                              Reason::CollisionAvoidance, Reason::Restricted}));
+        // a policy is refused what the rules refuse it, and nothing else is refused for its authority (6.1, 7.2)
+        const Reason refused = done.options.source == Source::Policy ? done.refused : Reason::None;
+        if (refused != Reason::None) CHECK(done.result.reason == refused);
+        else CHECK_FALSE(among(done.result.reason, {Reason::NotGranted, Reason::CollisionAvoidance, Reason::Restricted}));
         if ((done.result.flags & kClamped) != 0) CHECK(done.options.range == RangePolicy::Clamp);
         if (done.result.reason == Reason::AuthorityHeld) {
             const ActivityRecord* holder = was(done.result.other);
@@ -532,6 +557,17 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         else if (!ok)
             CHECK(among(done.result.reason, {Reason::NotUpdatable, Reason::WrongCommandType, Reason::InvalidParameter, Reason::OutOfRange, Reason::PerformanceLimit,
                                              Reason::InvalidWaypoint, Reason::InvalidCurve}));
+    }
+
+    if (done.op == Op::Legacy && done.refused != Reason::None) CHECK_FALSE(done.accepted); // (the existing entry points gated the same way)
+    if (done.op == Op::Authority) {
+        ++seen[done.authority + (done.authority == "request" ? std::string(":") + reasonName(done.answer) : std::string())];
+        for (const auto& [id, why] : done.ends) { // exactly the policy's activities the rules end, as they say
+            const auto it = after.find(id);
+            REQUIRE(it != after.end());
+            CHECK(it->second.state == ActivityState::Canceled);
+            CHECK(it->second.reason == why);
+        }
     }
 
     // every record: its state and its reason agree, and so does its end
@@ -552,7 +588,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         case ActivityState::Active: CHECK((r.reason == Reason::None && r.by == 0)); break;
         case ActivityState::Completed: CHECK((r.reason == Reason::GoalReached && r.by == 0)); break;
         case ActivityState::Canceled:
-            CHECK(among(r.reason, {Reason::Requested, Reason::Preempted}));
+            CHECK(among(r.reason, {Reason::Requested, Reason::Preempted, Reason::Released, Reason::Revoked, Reason::NotGranted, Reason::CollisionAvoidance,
+                                   Reason::Restricted}));
             CHECK((r.by != 0) == (r.reason == Reason::Preempted));
             break;
         case ActivityState::Failed:
@@ -601,6 +638,10 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         } else if (r.state == ActivityState::Canceled && r.reason == Reason::Requested) {
             CHECK(done.op == Op::Cancel);
             CHECK(done.addressed == id);
+            CHECK(r.endTime == done.now);
+        } else if (r.state == ActivityState::Canceled && done.op == Op::Authority) {
+            CHECK(done.ends.count(id) == 1); // one the rules end: the policy's, of the capability (or with no grant)
+            CHECK(r.source == Source::Policy);
             CHECK(r.endTime == done.now);
         } else if (r.state == ActivityState::Canceled) {
             CHECK(created); // preempted by the activity just made
@@ -665,6 +706,9 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
         unsigned steps = 1;
     };
     std::deque<Planned> plan;
+    AuthorityModel authority;
+    authority.control.assign(w.capabilities(v).size(), ControlStatus{});
+    authority.restricted.assign(w.capabilities(v).size(), CapabilityStatus{});
 
     for (int k = 0; k < operations; ++k) {
         if (k % 120 == 60) {
@@ -692,8 +736,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             done.op = next.op;
         } else {
             const double u = make.uniform(0.0, 1.0);
-            done.op = u < 0.38 ? Op::New : u < 0.60 ? Op::Update : u < 0.68 ? Op::Cancel : u < 0.74 ? Op::Legacy
-                    : u < 0.93 ? Op::Step : u < 0.95 ? Op::Reset : u < 0.99 ? Op::Default : Op::Retarget;
+            done.op = u < 0.36 ? Op::New : u < 0.57 ? Op::Update : u < 0.65 ? Op::Cancel : u < 0.71 ? Op::Legacy
+                    : u < 0.89 ? Op::Step : u < 0.91 ? Op::Reset : u < 0.94 ? Op::Default : u < 0.95 ? Op::Retarget : Op::Authority;
         }
         const auto& caps = w.capabilities(v);
         // a capability's command: flight, guidance or support
@@ -709,7 +753,9 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             std::vector<std::size_t> commandable;
             for (std::size_t i = 0; i < caps.size(); ++i)
                 if (caps[i].interactions & kCommand) commandable.push_back(i);
-            const CapabilityDescriptor d = caps[commandable[make.pick(commandable.size())]];
+            done.capability = commandable[make.pick(commandable.size())];
+            const CapabilityDescriptor d = caps[done.capability];
+            done.refused = authority.refuses(done.capability);
             const double s = make.uniform(0.0, 1.0);
             done.options.source = s < 0.55 ? Source::Policy : s < 0.85 ? Source::Autopilot : Source::Override;
             const double r = make.uniform(0.0, 1.0);
@@ -768,8 +814,71 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 if ((caps[i].kind == CapabilityKind::Flight && !Maker::isSupport(caps[i])) || (caps[i].kind == CapabilityKind::Guidance && make.chance(0.15)))
                     cascade.push_back(i);
             Command c;
-            REQUIRE(make.cascade(caps[cascade[make.pick(cascade.size())]], true, c));
+            done.capability = cascade[make.pick(cascade.size())];
+            done.refused = authority.refuses(done.capability);
+            REQUIRE(make.cascade(caps[done.capability], true, c));
             done.accepted = w.command(v, c);
+            break;
+        }
+        case Op::Authority: {
+            // one of the calls, about a capability it can command mostly; the rules' answer and ends worked out first
+            std::vector<std::size_t> commandable;
+            for (std::size_t i = 0; i < caps.size(); ++i)
+                if (caps[i].interactions & kCommand) commandable.push_back(i);
+            const double a = make.uniform(0.0, 1.0);
+            // what a release, a revocation or a refusal ends: mostly a capability the policy flies now
+            std::vector<std::size_t> flown;
+            for (const auto& [id, r] : before)
+                if (r.live() && r.source == Source::Policy) flown.push_back(r.capability);
+            const bool ending = a >= 0.55 && a < 0.87 && !flown.empty() && make.chance(0.7);
+            const std::size_t c = done.capability = ending ? flown[make.pick(flown.size())] : commandable[make.pick(commandable.size())];
+            auto endingPolicy = [&](auto matches, Reason why) {
+                for (const auto& [id, r] : before)
+                    if (r.live() && r.source == Source::Policy && matches(r)) done.ends[id] = why;
+            };
+            const std::string& id = caps[c].id;
+            if (a < 0.2) {
+                done.authority = "mode";
+                const ControlMode mode = make.chance(0.6) ? ControlMode::Granted : ControlMode::Open;
+                if (mode == ControlMode::Granted && authority.mode != mode)
+                    endingPolicy([&](const ActivityRecord& r) { return !authority.control[r.capability].granted; }, Reason::NotGranted);
+                authority.mode = mode;
+                CHECK(w.setControlMode(v, mode) == Reason::None);
+            } else if (a < 0.55) {
+                done.authority = "request";
+                const CapabilityStatus own = w.vehicleState(v)->diverged ? CapabilityStatus{Availability::TemporarilyUnavailable, Reason::Diverged}
+                                                                          : authority.restricted[c];
+                const Reason expected = !authority.control[c].allowed ? Reason::NotAllowed
+                                        : own.availability != Availability::Available ? own.reason
+                                                                                      : Reason::None;
+                if (expected == Reason::None) authority.control[c].granted = true;
+                done.answer = w.requestControl(v, id);
+                CHECK(done.answer == expected);
+            } else if (a < 0.65) {
+                done.authority = "release";
+                endingPolicy([&](const ActivityRecord& r) { return r.capability == c; }, Reason::Released);
+                authority.control[c].granted = false;
+                CHECK(w.releaseControl(v, id) == Reason::None);
+            } else if (a < 0.75) {
+                done.authority = "revoke";
+                const Reason why = make.chance(0.5) ? Reason::Revoked : Reason::CollisionAvoidance;
+                endingPolicy([&](const ActivityRecord& r) { return r.capability == c; }, why);
+                authority.control[c].granted = false;
+                CHECK(w.revokeControl(v, id, why) == Reason::None);
+            } else if (a < 0.87) {
+                done.authority = "allow";
+                const bool allowed = make.chance(0.6);
+                if (!allowed && authority.control[c].granted) endingPolicy([&](const ActivityRecord& r) { return r.capability == c; }, Reason::Revoked);
+                if (!allowed) authority.control[c].granted = false;
+                authority.control[c].allowed = allowed;
+                CHECK(w.setAllowed(v, id, allowed) == Reason::None);
+            } else {
+                done.authority = "restrict";
+                const bool lift = make.chance(0.5);
+                const Reason why = make.chance(0.5) ? Reason::Restricted : Reason::CollisionAvoidance;
+                authority.restricted[c] = lift ? CapabilityStatus{} : CapabilityStatus{Availability::TemporarilyUnavailable, why};
+                CHECK(w.setAvailability(v, id, lift ? Availability::Available : Availability::TemporarilyUnavailable, why) == Reason::None);
+            }
             break;
         }
         case Op::Step: {
@@ -799,8 +908,22 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
         done.now = w.simTime();
         const auto after = snapshot(w, v);
         lastSerial = keepsTheRules(w, v, before, after, done, lastSerial, seen);
+        // the World's authority is what the rules say it is
+        CHECK(w.controlMode(v) == authority.mode);
+        const bool diverged = w.vehicleState(v)->diverged != 0;
+        for (std::size_t i = 0; i < caps.size(); ++i) {
+            if (!(caps[i].interactions & kCommand)) continue;
+            INFO(caps[i].id);
+            const ControlStatus st = w.controlStatus(v, caps[i].id);
+            CHECK((st.allowed == authority.control[i].allowed && st.granted == authority.control[i].granted));
+            if (!diverged) {
+                const CapabilityStatus a = w.capabilityStatus(v, caps[i].id);
+                CHECK((a.availability == authority.restricted[i].availability && a.reason == authority.restricted[i].reason));
+            }
+        }
         const bool changes = done.op == Op::Step || done.op == Op::Reset || (done.op == Op::New && done.result.accepted()) ||
-                             (done.op == Op::Legacy && done.accepted) || (done.op == Op::Cancel && done.result.status == CommandStatus::Canceled);
+                             (done.op == Op::Legacy && done.accepted) || (done.op == Op::Cancel && done.result.status == CommandStatus::Canceled) ||
+                             (done.op == Op::Authority && !done.ends.empty());
         if (!changes) {
             // refused, an UPDATE, or nothing to do with the records: they are as they were
             CHECK(after.size() == before.size());
@@ -810,7 +933,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
         before = after;
         transcript.insert(transcript.end(), {static_cast<double>(done.op), static_cast<double>(done.result.status), static_cast<double>(done.result.reason),
                                              static_cast<double>(serialOf(done.result.activity)), static_cast<double>(done.result.flags),
-                                             static_cast<double>(done.accepted)});
+                                             static_cast<double>(done.accepted), static_cast<double>(done.answer),
+                                             static_cast<double>(done.ends.size())});
     }
     INFO(aircraft.type << ": " << lastSerial << " activities, the last " << before.size() << " of them kept");
     CHECK(lastSerial > 50);
@@ -869,6 +993,13 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
     CHECK(all["new:invalid_waypoint"] > 0); // a route with a point it cannot fly (docs/vehicle-interface.md, 5.1)
     CHECK(all["new:invalid_curve"] > 0);    // a curve with a segment it cannot fly
     CHECK(all["update:invalid_curve"] > 0); // appended where the curve does not end
+    // grants over the priorities (docs/vehicle-interface.md, 6): every answer and every end the rules give
+    for (const char* what : {"new:not_granted", "request:none", "request:not_allowed", "canceled:released", "canceled:revoked", "canceled:not_granted",
+                             "canceled:collision_avoidance", "mode", "release", "revoke", "allow", "restrict"}) {
+        INFO(what);
+        CHECK(all[what] > 0);
+    }
+    CHECK(all["new:restricted"] + all["new:collision_avoidance"] + all["request:restricted"] + all["request:collision_avoidance"] > 0);
     std::string summary;
     for (const auto& [what, n] : all) summary += what + " " + std::to_string(n) + "; ";
     INFO(summary);

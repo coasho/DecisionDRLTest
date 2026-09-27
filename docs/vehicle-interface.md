@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Status | Accepted 2026-09-26. The owner read the gap analysis (section 1.2) and decided: implement the Vehicle Interface's semantics in the SDK, with authority by grants over the priorities and updatable modes with fixed-size setpoints, the rotorcraft's defects fixed first (section 2). Implemented in the order of section 12 |
+| Status | Accepted 2026-09-26. The owner read the gap analysis (section 1.2) and decided: implement the Vehicle Interface's semantics in the SDK, with authority by grants over the priorities and updatable modes with fixed-size setpoints, the rotorcraft's defects fixed first (section 2). Implemented in the order of section 12: VI-1 to VI-7, 2026-09-26 and 27 (section 15) |
 | Extends | ADR-26 ([control-architecture.md](control-architecture.md)): its contract layer, runtime, boundary and gates stand. Two of its rules change: guidance may now take UPDATE (ADR-26 8.2), and a vehicle may require grants before a policy commands it (ADR-26 section 5, "no consent protocol"). ADR-27 ([rotorcraft.md](rotorcraft.md)) for the rotorcraft |
 | Scope | The flight modes a mission autonomy commands a vehicle through (heading/course, speed and altitude; waypoint following; loiter patterns; curve following), what it is told back (acknowledgment detail, progress, the commanded state), how it gets and loses authority, and what it learns of the vehicle's performance and availability |
 | Reference | A-GRA ASK 6.0a, the public repository open-arsenal/a-gra: the *VI L1 Interface Volume* (sections 1.1-1.4), *A-GRA_MessageDefinitions_v6_0_a.xsd* (`MA_FlightCommandMT`, `MA_FlightCommandStatusMT`, `MA_FlightActivityMT`, `MA_FlightCapabilityMT`, `MA_FlightCapabilityStatusMT`), and the *MA L1 Compliance Document* (MA-L1-013, -014, -020). Read for semantics; nothing of them is in this repository |
@@ -291,7 +291,7 @@ New reasons, appended to `Reason`:
 | `InvalidWaypoint` | a waypoint not finite or out of range, a leg too short for its fly-by turns (under `RangePolicy::Reject`; Clamp flies them smaller), a repeated point | INVALID_WAYPOINT |
 | `InvalidCurve` | a segment count outside 1..10, a gap between segments, a curvature the aircraft cannot fly (the section named) | INVALID_CURVE |
 | `PerformanceLimit` | a value beyond the performance, or a gradient steeper than the aircraft climbs, under `RangePolicy::Reject` (Clamp flies the gradient at the climb rate); a geometry no range policy can clamp (a curve's curvature) | PERFORMANCE_LIMIT_EXCEEDED + `constraint` |
-| `NotGranted`, `NotAllowed`, `Revoked`, `Released`, `CollisionAvoidance`, `Restricted` | section 6 and 7.3 | INELIGIBLE_CONTROL_SOURCE, CANCELED, CONSTRAINT_COLLISION_AVOIDANCE, CONSTRAINT_OP |
+| `NotGranted`, `NotAllowed`, `Revoked`, `Released`, `CollisionAvoidance`, `Restricted` | sections 6 and 7.2 | INELIGIBLE_CONTROL_SOURCE, CANCELED, CONSTRAINT_COLLISION_AVOIDANCE, CONSTRAINT_OP |
 
 The C ABI's result gets the detail through a new call (section 9); its `reserved` field carries `index + 1`.
 
@@ -352,21 +352,26 @@ Unchanged (D5): the activity ends `Canceled(Requested)` and its axes fly the veh
 
 `Autopilot` and `Override`, the platform's own sources (FA), never need a grant: FA is always the primary controller.
 
+- **Switching to Granted** ends the policy's live activities no grant covers: `Canceled(NotGranted)`, their axes to the vehicle default.
+- **The gate** comes before every other check of a NEW, whatever its range policy, and a refused NEW leaves no record. UPDATE and CANCEL are not gated: an activity that lost its grant has ended.
+
 ### 6.2 Requests, releases, revocations
 
 | Call | Effect | A-GRA |
 | --- | --- | --- |
-| `requestControl(vehicle, capability)` | approved if the capability is allowed and available; else rejected with `NotAllowed` or the availability's reason | ControlRequest ACQUIRE → APPROVED / REJECTED |
+| `requestControl(vehicle, capability)` | approved (`Reason::None`) if the capability is allowed and available; else rejected with `NotAllowed` or the reason it is unavailable (`Restricted`, `CollisionAvoidance`, `Diverged`); `UnknownCapability` for one that takes no command | ControlRequest ACQUIRE → APPROVED / REJECTED |
 | `releaseControl(vehicle, capability)` | the grant ends; the policy's live activities of that capability end `Canceled(Released)` | MA relinquishes control |
-| `revokeControl(vehicle, capability, reason)` | the platform ends the grant; the policy's live activities of that capability end `Canceled(Revoked)` | ControlRequestStatus CANCELED; Unpair |
-| `setAllowed(vehicle, capabilities)` | which capabilities a policy may request (all by default); a grant for one no longer allowed is revoked | C2's control designations |
-| `controlStatus(vehicle)` | per capability: allowed, granted; the primary controller is always the platform | ControlStatus |
+| `revokeControl(vehicle, capability, reason)` | the platform ends the grant; the policy's live activities of that capability end `Canceled` with the reason (`Revoked` unless it gives another, e.g. `CollisionAvoidance`) | ControlRequestStatus CANCELED; Unpair |
+| `setAllowed(vehicle, capability, allowed)` | whether a policy may request it (all may, by default); a grant for one no longer allowed is revoked, `Canceled(Revoked)` | C2's control designations |
+| `controlStatus(vehicle, capability)` | allowed, granted; the primary controller is always the platform | ControlStatus |
+
+Capabilities are named by id, as `capabilityStatus` names them. Release and revocation end what the policy flies of the capability whether or not it held a grant, so an Open vehicle's policy can let go the same way. Only the policy's activities end: what an autopilot or an override flies is the platform's.
 
 A grant opens a gate and nothing more. Under it, sources and axes arbitrate as before: a live `Autopilot` activity still holds its axes against a granted policy.
 
 ### 6.3 A revision to watch
 
-The host counts every change to grants, allowed capabilities, availability and performance (`controlRevision(vehicle)`). A consumer polls it instead of subscribing, keeping ADR-26's "no subscriptions".
+The host counts every change to the control mode, grants, allowed capabilities, availability (the platform's restrictions, and a divergence) and performance (`controlRevision(vehicle)`). A consumer polls it instead of subscribing, keeping ADR-26's "no subscriptions". A call that changes nothing - a grant already held, the same restriction again - does not count.
 
 ### 6.4 Relinquishing
 
@@ -395,13 +400,16 @@ The adapter computes a vehicle's `Performance` when the vehicle is created, and 
 - **Derived limits.** Turn radius, turn rate, and climb gradient at a speed follow from these (`Performance::turnRadiusM(v)` and the like).
 - **Per mode.** The VI gives a profile per mode; here every mode shares the vehicle's, and a mode states which fields it uses.
 - **Dynamic.** It is recomputed on a change, with a new revision (6.3). Configuration-dependent limits (flaps, gear) stay protection's, as ADR-26 11 has them.
+  - The stack counts the changes made through it to its loops (`ControlStack::loopsRevision`): `use`, `setControllerSettings`, and `setParameter`, which the C ABI's and Python's parameter calls go through.
+  - The host recomputes when that count moves: after each world step, before it checks a command, and when the performance or the revision is asked for. A change that leaves every field as it was makes no new revision.
+  - A caller that sets a controller's parameter on the controller itself is not counted.
 
 ### 7.2 Availability
 
 | Source | Availability, reason |
 | --- | --- |
 | a diverged vehicle | TemporarilyUnavailable, `Diverged` (as ADR-26) |
-| the platform restricts a capability: `setAvailability(vehicle, capability, availability, reason)`, e.g. FA's collision avoidance | the given state and reason; a policy's NEW is `Rejected(Unavailable)` with that reason as the result's detail. Live activities go on until the platform preempts them (an `Override` manoeuvre) |
+| the platform restricts a capability: `setAvailability(vehicle, capability, availability, reason)`, e.g. FA's collision avoidance | the given state and reason (`Restricted` if it gives none), which `capabilityStatus` reports. A policy's NEW, and a request, are refused with that reason, so a consumer learns why (`CollisionAvoidance` is A-GRA's CONSTRAINT_COLLISION_AVOIDANCE). The platform's own sources are not stopped: they fly the avoidance. Live activities go on, taking UPDATEs, until the platform preempts them (an `Override` manoeuvre). `Available` lifts it |
 | a mode whose loops the aircraft lacks | absent from the catalog |
 
 Every change bumps the revision.
@@ -427,7 +435,7 @@ ADR-26's rules B1-B8 hold, with these additions:
 | `ActivityRecord::progress`; `commanded(vehicle)` | `fsim_activity_get_progress`, `fsim_vehicle_commanded` | `Activity.progress`, `Vehicle.commanded` |
 | `CommandResult::index`, `constraint`, `from`, `to` | `fsim_command_result.reserved` = index + 1; `fsim_last_command_detail` | `Rejected.index`, `.constraint`, `.section` |
 | `performance(vehicle)`, `controlRevision(vehicle)` | `fsim_vehicle_performance`, `fsim_vehicle_control_revision` | `Vehicle.performance`, `.control_revision` |
-| grants and availability (section 6, 7.2) | `fsim_vehicle_set_control_mode`, `_request_control`, `_release_control`, `_revoke_control`, `_set_allowed`, `_control_status`, `_set_availability` | the same names on `Vehicle` |
+| grants and availability (section 6, 7.2): `setControlMode`, `requestControl`, `releaseControl`, `revokeControl`, `setAllowed`, `controlStatus`, `setAvailability` | `fsim_vehicle_set_control_mode`, `_request_control`, `_release_control`, `_revoke_control`, `_set_allowed`, `_control_status`, `_set_availability` | `Vehicle.set_control_mode`, `request_control` (raises `Rejected`), `release_control`, `revoke_control`, `set_allowed`, `control_status`, `set_availability` |
 
 The C ABI changes additively only (ADR-26 C3): new calls, new structs with a `struct_size`, new enum values.
 
@@ -813,6 +821,32 @@ Filled in as the steps land. The machine and the benchmark's precision are ADR-2
   - Python: `Vehicle.submit_curve(segments, **fields)`, `Activity.append`, `Activity.update_curve`, `BezierSegment`, `MODE_FIELDS["curve"]`.
   - The example adds a Cessna's slalom, appended to a minute in, and an IRIS's timed climbing S.
   - ctest 187/187.
+
+**VI-7 (grants, performance, availability).**
+- **What was built:**
+  - `ControlMode` (Open, Granted) and `ControlStatus` (`fsim/Capability.h`).
+  - The host keeps, per capability, whether the policy may request it, whether it holds a grant, and the platform's restriction; the control mode; and the control revision.
+  - The gate: a policy's NEW (and the existing entry points') is refused `NotGranted` without a grant under Granted, or with the restriction's reason. It comes before every other check, whatever the range policy.
+  - `requestControl`, `releaseControl`, `revokeControl`, `setAllowed`, `controlStatus`, `setAvailability`, `setControlMode`, `controlRevision` on the internal and the SDK's World and Vehicle, by capability id.
+  - `status()` reports a restriction; the NEW path checks the vehicle's own availability (a diverged vehicle) apart from it, so the platform's sources fly what it restricts.
+  - `ControlStack::loopsRevision` and `ControlStack::setParameter`. The host recomputes the performance when the loops change (after a step, before a check, when asked), with a new revision if any field changed. `fsim_vehicle_set_controller_parameter` goes through the stack now.
+  - C ABI `fsim_performance` and `fsim_vehicle_performance`, `fsim_control_mode`, and the seven authority calls and `fsim_vehicle_control_revision`. Python `Vehicle.performance`, `control_revision`, `control_mode`, `set_control_mode`, `request_control` (raises `Rejected` when refused), `release_control`, `revoke_control`, `set_allowed`, `control_status`, `set_availability`, with `ControlMode`, `ControlStatus` and `Performance`.
+- **Tests** (`tests/test_grants.cpp`):
+  - the gate: a refused NEW leaves no record; the legacy façade is gated; an autopilot needs no grant and still holds its axes against a granted policy;
+  - the ends: switching to Granted ends what flies without a grant (`not_granted`); release (`released`); revocation with the platform's reason (`revoked`, `collision_avoidance`); a capability no longer allowed (`revoked`), and a request for it refused `not_allowed`; an override's activity untouched by release and revocation;
+  - availability: a restricted capability refuses a policy's NEW and request with its reason, what flies goes on and takes UPDATEs, an override flies it; "restricted" when no reason is given; lifted;
+  - the revision: every change counted once, and a call that changes nothing not at all;
+  - the performance: a c172x's bank, roll rate, altitude gain and climb from its loops; an IRIS's tilt, acceleration, bandwidth, speed, deceleration and climb from its; a changed `max_bank` giving a new revision and a wider orbit from the defaults.
+- **Conformance:** the random sequences add an authority operation (5 % of them): a mode, a request, a release, a revocation, a refusal or a restriction. Beside the World, the test keeps what the rules say the authority is. After every operation it checks:
+  - the World's control mode, grants, what is allowed and each restriction against that model;
+  - every NEW and legacy command answered as the model has it;
+  - exactly the policy's activities it names ended, with their reasons, and nothing else changed.
+
+  Across the five adapters it sees every answer and every end.
+- **Digests:** identical to step 5b, protection on and off. **Allocations:** none.
+- **Cost:** every micro case within ±2.7 % of VI-6 at the median and ±1.2 % at the minimum (interleaved A/B, 5 rounds). The gate is a few compares in NEW, and the host's step adds one comparison of the loops' revision.
+- **The example:** the holding Cessna flies Granted; its hold is refused `not_granted` until it asks for the pattern. At 150 s the platform revokes the triangle Cessna's route for collision avoidance: the route ends (A-GRA's FAILED), and its vehicle default, a hold, flies on at its speed.
+- ctest 192/192.
 
 ## Appendix A: the gap analysis at a946dfe
 

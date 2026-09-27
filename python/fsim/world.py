@@ -150,6 +150,41 @@ class Availability(enum.IntEnum):
     DISABLED = 3
 
 
+def _reason_code(reason):
+    """A reason by name ("revoked") or code, as the library numbers it."""
+    if not isinstance(reason, str):
+        return int(reason)
+    for code in range(256):
+        name = _native.reason_name(code)
+        if name == "?":
+            break
+        if name == reason:
+            return code
+    raise ValueError("no reason named %r" % reason)
+
+
+class ControlMode(enum.IntEnum):
+    """Who may command a vehicle as a policy (docs/vehicle-interface.md, 6.1): OPEN, as ever - any capability,
+    arbitrated by source and axes; GRANTED - only the capabilities a grant covers (request_control)."""
+    OPEN = 0
+    GRANTED = 1
+
+
+Performance = collections.namedtuple(
+    "Performance", "revision hovers min_cas_ms max_cas_ms max_mach max_tas_ms cruise_tas_ms max_ground_speed_ms ceiling_m max_bank_rad "
+                   "min_pitch_rad max_pitch_rad max_roll_rate_rad_s min_load_factor max_load_factor max_tilt_rad max_acceleration_ms2 "
+                   "max_deceleration_ms2 max_climb_ms max_descent_ms altitude_gain_per_s heading_gain heading_reference_tas_ms "
+                   "bank_rate_rad_s velocity_bandwidth_rad_s")
+Performance.__doc__ = ("What a vehicle can do, as its guidance plans with it (docs/vehicle-interface.md, 7.1; A-GRA's performance "
+                       "profile): speeds (calibrated from the envelope, the fastest true airspeed, the cruise a mode flies given "
+                       "none, a rotorcraft's fastest over the ground), the ceiling, attitude and rate limits, a rotorcraft's tilt and "
+                       "accelerations, the climb and descent guidance asks for, and how fast its loops answer. NaN where the aircraft's "
+                       "profile and loops say nothing; ``revision`` counts recomputations (its loops changed).")
+
+ControlStatus = collections.namedtuple("ControlStatus", "allowed granted")
+ControlStatus.__doc__ = "A capability's standing with a vehicle's policy: whether it may be requested, whether a grant is held."
+
+
 class Rejected(_native.Error):
     """A command the vehicle refused. ``reason`` says why ("authority_held",
     "activity_ended", "invalid_parameter", "invalid_waypoint", ...); ``other``
@@ -705,6 +740,56 @@ class Vehicle:
         """(Availability, reason) of a capability by id, e.g. "fsim.guidance.hold"."""
         availability, reason = self._h.capability_status(self.id, capability)
         return Availability(availability), _native.reason_name(reason)
+
+    @property
+    def performance(self):
+        """What the vehicle can do, as its guidance plans with it (fsim.Performance): computed afresh when its loops change."""
+        return Performance(*self._h.performance(self.id))
+
+    @property
+    def control_revision(self):
+        """Counts every change to the grants, what is allowed, the control mode, availability and the performance: poll it."""
+        return self._h.control_revision(self.id)
+
+    @property
+    def control_mode(self):
+        """fsim.ControlMode: OPEN (as ever) or GRANTED (a policy needs a grant for each capability it commands)."""
+        return ControlMode(self._h.control_mode(self.id))
+
+    def set_control_mode(self, mode):
+        """OPEN or GRANTED (fsim.ControlMode or its name). Switching to GRANTED ends what the policy flies without a
+        grant: its activities end canceled, "not_granted"; the platform's own sources are never gated."""
+        self._h.set_control_mode(self.id, int(ControlMode[mode.upper()] if isinstance(mode, str) else mode))
+
+    def request_control(self, capability):
+        """A policy asks for control of a capability by id (A-GRA's ACQUIRE). Returns if granted; raises fsim.Rejected
+        with "not_allowed", or the reason it is unavailable ("restricted", "collision_avoidance", "diverged")."""
+        reason = self._h.request_control(self.id, capability)
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+
+    def release_control(self, capability):
+        """The policy lets go: its grant ends, and its live activities of the capability end canceled, "released"."""
+        self._h.release_control(self.id, capability)
+
+    def revoke_control(self, capability, reason="revoked"):
+        """The platform takes it back: the grant ends, and the policy's live activities of the capability end canceled
+        with ``reason`` (a name, e.g. "revoked", "collision_avoidance", "restricted")."""
+        self._h.revoke_control(self.id, capability, _reason_code(reason))
+
+    def set_allowed(self, capability, allowed=True):
+        """Whether the policy may request the capability (all may, by default); a grant for one no longer allowed is revoked."""
+        self._h.set_allowed(self.id, capability, 1 if allowed else 0)
+
+    def control_status(self, capability):
+        """fsim.ControlStatus(allowed, granted) of a capability by id."""
+        return ControlStatus(*self._h.control_status(self.id, capability))
+
+    def set_availability(self, capability, availability, reason="restricted"):
+        """The platform restricts a capability (fsim.Availability or its name; AVAILABLE lifts it): a policy's NEW for it
+        is refused with ``reason``, and so is a request; what flies goes on. capability_status reports it."""
+        a = Availability[availability.upper()] if isinstance(availability, str) else availability
+        self._h.set_availability(self.id, capability, int(a), _reason_code(reason))
 
     @property
     def active_level(self):
