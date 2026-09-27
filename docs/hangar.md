@@ -411,8 +411,9 @@ For fighters:
   at its governed speed (the C-130J's -5.15 deg at 75 % radius, taking 144
   hp; with the blades' twist that is +5.3 deg at 52 % radius, the 42-inch
   station, if that is where the 54H60's angles are measured - the sources
-  do not say), and N1 holds that speed (52.5 %, below flight idle's 60).
-  The blades open with the throttle to the governor's low stop, N1 capped
+  do not say), and N1 holds that speed (52.5 %, below flight idle's 60: the
+  engine's throttle position, the SDK's `throttle_position`, reads below 0
+  there). The blades open with the throttle to the governor's low stop, N1 capped
   at the flight range's, which takes over at 0.2 without a step. Rolling
   at idle the flat blades brake, opening past 101 % of the propeller's
   speed to hold it. Governed at flight idle on its low stop, as before, a
