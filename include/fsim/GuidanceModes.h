@@ -94,6 +94,8 @@ struct Ahead;
 struct Steer;
 } // namespace route
 
+class PatternBehavior;
+
 /// "route": fsim.guidance.route, A-GRA's waypoint following
 /// (docs/vehicle-interface.md, 4.5 and 4.8). Flies the waypoints of the
 /// vehicle's path store (ControlContext::path) as legs - great circles or
@@ -111,6 +113,10 @@ struct Steer;
 /// the last point unless the route repeats, and flies on: along the last
 /// leg's course, or orbiting (a wing) or hovering over (a rotorcraft) the
 /// last point. A new path store revision or new options fly it afresh.
+/// A loiter point's loiter (docs/flight-autonomy.md, 4.31) is flown where the
+/// leg meets it by a pattern's behaviour, from where the aircraft is; at its
+/// end the route goes on to the next point from where it left it - or, its
+/// last point's, completes.
 class FSIM_API RouteBehavior final : public Behavior {
 public:
     RouteBehavior();
@@ -140,6 +146,10 @@ private:
     /// Point i where its moving frame is now, as the step began (docs/flight-autonomy.md, 4.29): the frame's pose into
     /// `pose`; false if the frame's vehicle is gone. A point in no frame, or a fixed one, stays where the host put it.
     bool place(const ControlContext& ctx, std::uint32_t i, FramePose& pose);
+    /// Fly to point k: its loiter, if it has one, and how far before it it is reached.
+    void aim(std::uint32_t k, const Performance& performance) noexcept;
+    /// Its loiter flown (4.31), begun where the leg met it (`begins`); at its end, on to the next point, or the route's end.
+    Command loiter(const ControlContext& ctx, const Performance& performance, bool begins);
 
     std::unique_ptr<route::Plan> plan_; ///< allocated with the behaviour: nothing in flight
     WindEstimate wind_;
@@ -166,6 +176,12 @@ private:
     bool moving_ = false;              ///< placed and planned again as it flies them
     bool overFrame_ = false;           ///< the piece flown is in one moving frame: flown over it
     double frameNorthMs_ = 0.0, frameEastMs_ = 0.0;
+    // its loiter points' loiters (4.31)
+    std::unique_ptr<PatternBehavior> loiter_; ///< flies them: allocated with the behaviour
+    Command loiterCommand_{};          ///< the one flown's pattern
+    const RouteLoiter* loiterAhead_ = nullptr; ///< the point flown to's (the plan's); null for none
+    double reachM_ = 0.0;              ///< how far before the point flown to it is reached: a loiter's join, a stop's metre
+    bool loitering_ = false;           ///< its loiter flies
 };
 
 /// "pattern": fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md,
@@ -219,6 +235,10 @@ private:
     /// A hover over a point a moving frame carries: the frame's origin's velocity, and a closing on the point it could
     /// stop closing (a formation's), no faster than `transit`.
     VelocityCommand hoverInFrame(const ControlContext& ctx, const Performance& perf, double transit) const noexcept;
+    /// Flown inside a route, as a loiter point's loiter (docs/flight-autonomy.md, 4.31): its shape and its frame given,
+    /// not the path store's, and ended at `endTimeS` too (the world's time; kHold: none).
+    friend class RouteBehavior;
+    void embed(const PatternShape& shape, const FrameSpec& frame, double endTimeS) noexcept;
 
     std::unique_ptr<route::Pattern> pattern_; ///< allocated with the behaviour
     WindEstimate wind_;
@@ -240,6 +260,10 @@ private:
     double lastTime_ = -1.0;
     double crossTrack_ = kHold, course_ = kHold, heading_ = kHold, altitudeMsl_ = kHold, groundSpeed_ = 0.0, simTime_ = 0.0;
     double speedFlown_ = kHold; ///< the speed flown at the last update (a speed optimisation's, now)
+    // flown inside a route (4.31)
+    bool embedded_ = false;
+    PatternShape embeddedShape_{};   ///< its shape as the route gives it
+    double endTimeS_ = kHold, worldNow_ = 0.0; ///< its end time, and the world's time at the last update (read only with one)
 };
 
 /// "curve": fsim.guidance.curve, A-GRA's curve following (docs/vehicle-interface.md,

@@ -1415,6 +1415,81 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             // the Crazyflie's 0.23 m - the UH-1H's 6.5 m)
             CHECK(f.worst < (p.rotor ? std::max(0.5, 0.1 * R) : std::max(20.0, 0.05 * R)));
         });
+    // A-GRA's loiter points (ADR-29 FA-6b2: WPT-18): three orbit radii ahead, then a loiter point eight ahead - a wing's
+    // orbit once round it, a rotorcraft's hover over it for 10 s - and on to a point two radii to its right: round its point
+    // (a wing's, from half a lap in) or over it (a rotorcraft's, from its arrival) while it loiters, and the route completed
+    struct LoiterRoute {
+        PositionCommand point;
+        double radiusM = 0.0, swept = 0.0, bearing = kHold, worst = 0.0, arrived = kHold, over = 0.0, loiterS = 0.0;
+    };
+    std::map<std::uint32_t, LoiterRoute> loiterRoutes;
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double R = orbitRadius(p), psi = p.start.eulerRad[2];
+            const double c = std::cos(psi), sn = std::sin(psi);
+            auto point = [&](double ahead, double right) {
+                const PositionCommand q = pointFrom(p.start, ahead * c - right * sn, ahead * sn + right * c, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            Waypoint at = point(8.0 * R, 0.0);
+            at.kind = static_cast<double>(EndPointKind::LoiterPoint);
+            RouteLoiter l;
+            l.point = 1;
+            if (p.rotor) l.pattern.pattern = static_cast<double>(PatternKind::Hover), l.pattern.durationS = 10.0;
+            else l.shape.orbits = 1.0;
+            LoiterRoute& f = loiterRoutes[p.id];
+            f = LoiterRoute{};
+            f.point = pointFrom(p.start, 8.0 * R * c, 8.0 * R * sn, p.start.altitudeMslM, 0.0);
+            const CommandResult res =
+                w.submit(p.id, RouteCommand{}, std::vector<Waypoint>{point(3.0 * R, 0.0), at, point(8.0 * R, 2.0 * R)}, {}, std::vector<RouteLoiter>{l});
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index);
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            Setpoint sp;
+            if (res.accepted() && w.activitySetpoint(res.activity, sp) && sp.loiters.size() == 1) f.radiusM = sp.loiters[0].pattern.radiusM;
+            return res.accepted();
+        },
+        [&](const Plane& p) { return (13.0 + 2.0 * kPi) * orbitRadius(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) * 1.5 + 70.0; },
+        [&](const Plane& p) {
+            LoiterRoute& f = loiterRoutes[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const ActivityProgress& g = r.progress;
+            if (!r.live() || g.segment != 1 || g.segmentPercent != 100.0) return; // (loitering)
+            f.loiterS += w.dt() * w.frameSkip();
+            double north, east;
+            offset(*w.vehicleState(p.id), f.point.latitudeRad, f.point.longitudeRad, north, east);
+            const double d = std::hypot(north, east);
+            if (p.rotor) {
+                if (isHold(f.arrived) && d < 1.0) f.arrived = f.loiterS;
+                if (!isHold(f.arrived)) f.over = std::max(f.over, d);
+                return;
+            }
+            const double bearing = std::atan2(east, north);
+            if (!isHold(f.bearing)) f.swept += std::remainder(bearing - f.bearing, 2.0 * kPi);
+            f.bearing = bearing;
+            if (std::abs(f.swept) > kPi) f.worst = std::max(f.worst, std::abs(d - f.radiusM));
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const LoiterRoute& f = loiterRoutes[p.id];
+            INFO(activityStateName(r.state) << "; loitered " << f.loiterS << " s: a wing's R " << f.radiusM << ", " << f.swept / (2.0 * kPi)
+                                            << " laps, off its circle " << f.worst << " m; a rotorcraft's arrived " << f.arrived << " s in, over "
+                                            << "its point within " << f.over << " m");
+            CHECK(r.state == ActivityState::Completed);
+            // (the worst: a wing 2.7 % of its radius, the C172's 9.5 m - the Skua's 12.8 m of 132, in metres the F-16C's 18.7 m,
+            // 0.8 % - round 1.58 laps, once round and on to where it leaves for the next point; a rotorcraft within 1.0 m of its
+            // point once there, the UH-1H there 95 s into its loiter, its position loop's approach from where it would stop)
+            if (p.rotor) {
+                REQUIRE(!isHold(f.arrived));
+                CHECK(f.loiterS - f.arrived > 9.9); // (its time from its arrival)
+                CHECK(f.over < std::max(1.5, 0.05 * p.scale()));
+            } else {
+                CHECK(std::abs(f.swept) > 0.95 * 2.0 * kPi);
+                CHECK(f.worst < std::max(20.0, 0.05 * f.radiusM));
+            }
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

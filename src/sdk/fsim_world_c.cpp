@@ -648,6 +648,29 @@ bool toNurbs(fsim_world* w, const fsim_nurbs_segment* segments, uint32_t count) 
     return true;
 }
 
+/// A route's loiters as the caller's header laid them out (`loiters[0].struct_size` apart), into the world's buffer;
+/// false if they cannot be read.
+bool toLoiters(fsim_world* w, const fsim_route_loiter* loiters, uint32_t count) {
+    w->loiters.clear();
+    if (count == 0) return true;
+    if (!loiters) return false;
+    const uint32_t stride = loiters[0].struct_size;
+    if (stride < sizeof(fsim_route_loiter)) return false; // (its first layout)
+    const auto* bytes = reinterpret_cast<const unsigned char*>(loiters);
+    w->loiters.resize(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        fsim_route_loiter c;
+        std::memcpy(&c, bytes + static_cast<std::size_t>(i) * stride, sizeof c);
+        fsim::control::RouteLoiter& l = w->loiters[i];
+        l = fsim::control::RouteLoiter{};
+        l.point = c.point, l.endTimeS = c.end_time_s;
+        double* f[fsim::control::RouteLoiter::kFields];
+        l.fields(f);
+        for (std::size_t k = 0; k < fsim::control::RouteLoiter::kFields; ++k) *f[k] = c.fields[k];
+    }
+    return true;
+}
+
 /// What an activity's UPDATE takes: its level (a flight capability), its
 /// support kind (a support one), its mode, or none (unknown, ended long ago, a behaviour).
 struct UpdateShape {
@@ -998,6 +1021,51 @@ FSIM_API int fsim_activity_update_route_by(fsim_world* world, fsim_activity_id a
         return FSIM_OK;
     } catch (const std::exception& e) {
         return fail(FSIM_ERROR, std::string("fsim_activity_update_route: ") + e.what());
+    }
+}
+
+FSIM_API void fsim_route_loiter_init(fsim_route_loiter* loiter) {
+    if (!loiter) return;
+    *loiter = fsim_route_loiter{};
+    loiter->struct_size = sizeof *loiter;
+    for (double& f : loiter->fields) f = std::numeric_limits<double>::quiet_NaN();
+    loiter->end_time_s = std::numeric_limits<double>::quiet_NaN();
+}
+
+FSIM_API int fsim_vehicle_submit_route_loiters(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_waypoint* waypoints,
+                                               uint32_t waypoint_count, const fsim_route_loiter* loiters, uint32_t loiter_count,
+                                               const fsim_command_options* options, fsim_command_result* result) {
+    fsim::control::Command c;
+    if (!world || !result || !toMode(FSIM_MODE_ROUTE, fields, count, c))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_route_loiters: a route takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_ROUTE)) + " fields");
+    try {
+        if (!toWaypoints(world, waypoints, waypoint_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_route_loiters: waypoints without their struct_size");
+        if (!toLoiters(world, loiters, loiter_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_route_loiters: loiters without their struct_size");
+        toC(world, id, world->world.submit(id, std::get<fsim::control::RouteCommand>(c), world->waypoints, fromC(options), world->loiters), result);
+        return FSIM_OK;
+    } catch (const std::exception& e) {
+        return fail(FSIM_ERROR, std::string("fsim_vehicle_submit_route_loiters: ") + e.what());
+    }
+}
+
+FSIM_API int fsim_activity_update_route_loiters(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
+                                                uint32_t count, const fsim_waypoint* waypoints, uint32_t waypoint_count,
+                                                const fsim_route_loiter* loiters, uint32_t loiter_count, fsim_command_result* result) {
+    fsim::control::Command c;
+    fsim::control::Source from;
+    if (!world || !result || !toSource(source, from)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route_loiters: bad arguments");
+    if (!toMode(FSIM_MODE_ROUTE, fields, count, c))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route_loiters: a route takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_ROUTE)) + " fields");
+    try {
+        if (!toWaypoints(world, waypoints, waypoint_count))
+            return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route_loiters: waypoints without their struct_size");
+        if (!toLoiters(world, loiters, loiter_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route_loiters: loiters without their struct_size");
+        toC(world, fsim::control::activityVehicle(activity),
+            world->world.update(fsim::control::Caller{from, controller}, activity, std::get<fsim::control::RouteCommand>(c), world->waypoints, world->loiters),
+            result);
+        return FSIM_OK;
+    } catch (const std::exception& e) {
+        return fail(FSIM_ERROR, std::string("fsim_activity_update_route_loiters: ") + e.what());
     }
 }
 
@@ -1523,7 +1591,7 @@ namespace {
 /// has one).
 bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::BatchCommand& item, std::vector<fsim::control::Waypoint>& route,
                std::vector<fsim::control::BezierSegment>& curve, std::vector<fsim::control::NurbsSegment>& nurbs, fsim::control::PatternShape& shape,
-               fsim::control::CurveShape& curveShape) {
+               fsim::control::CurveShape& curveShape, std::vector<fsim::control::RouteLoiter>& loiters) {
     item.options = fromC(b.options);
     fsim::control::Command c;
     fsim::control::SupportCommand sc;
@@ -1539,10 +1607,13 @@ bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::Ba
         ok = (b.code == FSIM_MODE_HSA || b.code == FSIM_MODE_PATTERN) && toMode(b.code, b.fields, b.count, c, &shape), item.command = c;
         if (ok && b.code == FSIM_MODE_PATTERN && b.count > kPatternFields) item.shape = &shape;
         break;
-    case FSIM_BATCH_ROUTE:
-        ok = toMode(FSIM_MODE_ROUTE, b.fields, b.count, c) && toWaypoints(world, b.waypoints, b.waypoint_count);
-        if (ok) route = world->waypoints, item.command = c;
+    case FSIM_BATCH_ROUTE: { // (its loiters where the caller's struct has them: ABI 1.28)
+        const bool loitered = b.struct_size >= offsetof(fsim_batch_command, loiter_count) + sizeof b.loiter_count;
+        ok = toMode(FSIM_MODE_ROUTE, b.fields, b.count, c) && toWaypoints(world, b.waypoints, b.waypoint_count) &&
+             toLoiters(world, loitered ? b.loiters : nullptr, loitered ? b.loiter_count : 0);
+        if (ok) route = world->waypoints, loiters = world->loiters, item.command = c;
         break;
+    }
     case FSIM_BATCH_CURVE:
         ok = toMode(FSIM_MODE_CURVE, b.fields, b.count, c, nullptr, &curveShape) && toSegments(world, b.segments, b.segment_count);
         if (ok) curve = world->segments, item.command = c;
@@ -1571,9 +1642,10 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
         std::vector<std::vector<fsim::control::Waypoint>> routes; // each route's own (the world's scratch is one)
         std::vector<std::vector<fsim::control::BezierSegment>> curves;
         std::vector<std::vector<fsim::control::NurbsSegment>> nurbses;
+        std::vector<std::vector<fsim::control::RouteLoiter>> loiterses;
         std::vector<fsim::control::PatternShape> shapes(count); // (each pattern's own: the items point at them)
         std::vector<fsim::control::CurveShape> curveShapes(count); // (each curve's likewise)
-        routes.reserve(count), curves.reserve(count), nurbses.reserve(count);
+        routes.reserve(count), curves.reserve(count), nurbses.reserve(count), loiterses.reserve(count);
         // every item made into a command first: a malformed one refuses the batch, and none is made
         for (uint32_t i = 0; i < count; ++i) {
             const auto& b = *reinterpret_cast<const fsim_batch_command*>(reinterpret_cast<const char*>(batch) + i * stride);
@@ -1581,9 +1653,10 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
             std::vector<fsim::control::Waypoint>& route = routes.emplace_back();
             std::vector<fsim::control::BezierSegment>& curve = curves.emplace_back();
             std::vector<fsim::control::NurbsSegment>& nurbs = nurbses.emplace_back();
-            if (!fromBatch(world, b, item, route, curve, nurbs, shapes[i], curveShapes[i]))
+            std::vector<fsim::control::RouteLoiter>& loiters = loiterses.emplace_back();
+            if (!fromBatch(world, b, item, route, curve, nurbs, shapes[i], curveShapes[i], loiters))
                 return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_batch: item " + std::to_string(i) + " is malformed");
-            item.waypoints = route, item.segments = curve, item.nurbs = nurbs;
+            item.waypoints = route, item.segments = curve, item.nurbs = nurbs, item.loiters = loiters;
         }
         std::vector<fsim::control::CommandDetails> checks;
         const std::vector<fsim::control::CommandResult> answers = world->world.submitBatch(id, items, &checks);
@@ -1635,12 +1708,14 @@ FSIM_API int fsim_vehicle_store_task(fsim_world* world, uint32_t id, uint64_t ta
         std::vector<fsim::control::NurbsSegment> nurbs;
         fsim::control::PatternShape shape;
         fsim::control::CurveShape curveShape;
-        if (!fromBatch(world, *command, item, route, curve, nurbs, shape, curveShape) || !std::holds_alternative<fsim::control::Command>(item.command))
+        std::vector<fsim::control::RouteLoiter> loiters;
+        if (!fromBatch(world, *command, item, route, curve, nurbs, shape, curveShape, loiters) ||
+            !std::holds_alternative<fsim::control::Command>(item.command))
             return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_store_task: a flight or guidance command, whole, is kept");
         fsim::control::TaskRepetition repetition;
         repetition.attempts = attempts ? attempts : 1;
         repetition.intervalS = interval_s;
-        item.waypoints = route, item.segments = curve, item.nurbs = nurbs;
+        item.waypoints = route, item.segments = curve, item.nurbs = nurbs, item.loiters = loiters;
         *reason = static_cast<int32_t>(world->world.storeTask(id, task_id, item, repetition));
         return FSIM_OK;
     });
@@ -1776,6 +1851,17 @@ FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id acti
             s.curvature = p.curvature, s.first_index = p.firstIndex, s.last_index = p.lastIndex;
         }
         if (general) b.kind = FSIM_BATCH_NURBS;
+        r.loiters.resize(r.setpoint.loiters.size()); // (a route's: ABI 1.28)
+        for (std::size_t i = 0; i < r.loiters.size(); ++i) {
+            RouteLoiter l = r.setpoint.loiters[i];
+            fsim_route_loiter& c = r.loiters[i];
+            fsim_route_loiter_init(&c);
+            c.point = l.point, c.end_time_s = l.endTimeS;
+            double* f[RouteLoiter::kFields];
+            l.fields(f);
+            for (std::size_t k = 0; k < RouteLoiter::kFields; ++k) c.fields[k] = *f[k];
+        }
+        b.loiter_count = static_cast<uint32_t>(r.loiters.size()), b.loiters = r.loiters.empty() ? nullptr : r.loiters.data();
         b.count = static_cast<uint32_t>(r.fields.size()), b.fields = r.fields.empty() ? nullptr : r.fields.data();
         b.waypoint_count = static_cast<uint32_t>(r.waypoints.size()), b.waypoints = r.waypoints.empty() ? nullptr : r.waypoints.data();
         b.segment_count = static_cast<uint32_t>(general ? r.nurbs.size() : r.segments.size()), b.segments = r.segments.empty() ? nullptr : r.segments.data();

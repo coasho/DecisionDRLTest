@@ -183,6 +183,7 @@ struct RouteCommand {                  // fsim.guidance.route; the waypoints go 
 - **Completion** comes after the last point, unless the route repeats. Then the aircraft continues along the last leg (its course, altitude and speed), or loiters there (`end`): a wing orbits the point at the radius its speed and 80 % of its bank give, a rotorcraft stops and hovers over it.
 - **As A-GRA's schema gives them** (ADR-29, [flight-autonomy.md](flight-autonomy.md) 4.29): a point's altitude block and a barometric altitude on its isobar; a waypoint (no turn there, flown over) and its type; a point in a frame, placed where the frame is and, where it moves, as the route is flown.
 - **Turn points** (4.30): a capture's course, and arcs from a start turn point to the point after it (ARINC 424's radius to fix), with a course at the point and a turn's radius.
+- **Loiter points** (4.31): a loiter inside the route - any pattern at the point, for its duration, laps or end time - flown where the leg meets it and left for the next point, or the route's end.
 - **Rotorcraft** fly the same geometry at the segment's speed. They slow for a turn only as much as its radius asks (a lateral acceleration within the performance's), and stop only at the route's end when they loiter there, never at each point.
 
 ### 4.6 Loiter patterns

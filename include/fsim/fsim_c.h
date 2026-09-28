@@ -728,8 +728,8 @@ enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER = 1,
                       FSIM_TURN_CAPTURE_OUTBOUND_COURSE = 2, FSIM_TURN_START_TURN = 3, FSIM_TURN_END_TURN = 4 };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft after a route; after a curve it circles it) */
-FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 29, curve 8 (1.14: hsa 6, pattern 12; 1.15: hsa 7, pattern 13;
-                                                      1.20: hsa 8; 1.21: pattern 25); 0 for an unknown mode */
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 35, curve 20 (1.14: hsa 6, pattern 12; 1.15: hsa 7, pattern 13;
+                                                      1.20: hsa 8; 1.21: pattern 25; 1.22: pattern 29; 1.25: curve 20); 0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result);
 
@@ -783,6 +783,33 @@ FSIM_API int fsim_activity_update_route_as(fsim_world* world, fsim_activity_id a
                                            const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result);
 FSIM_API int fsim_activity_update_route_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
                                            uint32_t count, const fsim_waypoint* waypoints, uint32_t waypoint_count, fsim_command_result* result);
+
+/* The loiter a route's loiter point flies (ABI 1.28; docs/flight-autonomy.md, 4.31; A-GRA's LoiterPoint): at waypoint
+ * `point` (its kind FSIM_END_POINT_LOITER_POINT), the pattern in `fields` - FSIM_MODE_PATTERN's 35, in its order - and
+ * `end_time_s`, when it ends (the world's time, as fsim_world_time reads it). Its place is its point's: the pattern's
+ * latitude, longitude, altitude, altitude reference, frame and its offsets left out; its speed left out, the point's
+ * segment's. It ends when its duration or laps are flown (on round to its exit point, if it has one) or at its end time,
+ * the first; with none it is the route's end, and only a last point's (a route that does not repeat). Flown where the leg
+ * meets it - a radius outside an orbit's circle, else at its point (a rotorcraft stops for a hover) - from where the
+ * aircraft is; then on to the next point from where it ended. Refused as a point is, naming it (invalid_waypoint; a
+ * wing's hover and an optimisation as a pattern's are); its limits named by the point, its field after the waypoint's
+ * 22 (the pattern's 22 + 0..34, the end time 57). fsim_route_loiter_init leaves every field out (fsim_hold()). */
+typedef struct fsim_route_loiter {
+    uint32_t struct_size;
+    uint32_t point;
+    double fields[35];
+    double end_time_s;
+} fsim_route_loiter;
+FSIM_API void fsim_route_loiter_init(fsim_route_loiter* loiter);
+/* A route with its loiter points' loiters (at most 16), `loiters[0].struct_size` bytes apart; else as fsim_vehicle_submit_route. */
+FSIM_API int fsim_vehicle_submit_route_loiters(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_waypoint* waypoints,
+                                               uint32_t waypoint_count, const fsim_route_loiter* loiters, uint32_t loiter_count,
+                                               const fsim_command_options* options, fsim_command_result* result);
+/* UPDATE of a route with new waypoints and their loiters (none: those it has, and their loiters), declaring the caller's
+ * source and controller as fsim_activity_update_route_by. */
+FSIM_API int fsim_activity_update_route_loiters(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
+                                                uint32_t count, const fsim_waypoint* waypoints, uint32_t waypoint_count,
+                                                const fsim_route_loiter* loiters, uint32_t loiter_count, fsim_command_result* result);
 
 /* One segment of a curve: a quintic Bezier by its six control points (weights
  * 1, the clamped knots), metres north, east and down from the curve's
@@ -1013,7 +1040,8 @@ FSIM_API int fsim_last_command_finding(const fsim_world* world, uint32_t index, 
 typedef struct fsim_command_adjustment {
     uint32_t struct_size;
     int32_t index;       /* the command's field, a route point or a curve segment */
-    int32_t field;       /* a route point's field (fsim_waypoint's order from latitude_rad = 0); -1 none */
+    int32_t field;       /* a route point's field (fsim_waypoint's order from latitude_rad = 0; its loiter's after its 22,
+                            ABI 1.28: fsim_route_loiter's fields from 22, its end time 57); -1 none */
     int32_t constraint;  /* the limit it was held to: fsim_constraint_name() */
     double requested;    /* NaN where it is not one number (a fly-by turn flown smaller) */
     double adjusted;
@@ -1087,6 +1115,8 @@ typedef struct fsim_batch_command {
     const fsim_bezier_segment* segments;    /* FSIM_BATCH_CURVE, segments[0].struct_size bytes apart */
     const fsim_command_options* options;    /* NULL: fsim_command_options_init's */
     const fsim_nurbs_segment* nurbs;        /* FSIM_BATCH_NURBS (ABI 1.24): segment_count of them, nurbs[0].struct_size bytes apart */
+    const fsim_route_loiter* loiters;       /* FSIM_BATCH_ROUTE's loiters (ABI 1.28), loiters[0].struct_size bytes apart */
+    uint32_t loiter_count;
 } fsim_batch_command;
 /* Several NEWs at once (A-GRA's several command instances in one message), `batch[0].struct_size` bytes apart, made in
  * order at this simulation time: `results[i]` answers `batch[i]`, and `details[i]` (may be NULL; `details[0].struct_size`
@@ -1120,7 +1150,8 @@ FSIM_API int fsim_vehicle_task_at(fsim_world* world, uint32_t id, uint32_t index
  * fsim_command_field_count_full counts them), a mode's, a route's or a curve's options, a support command's (the
  * engines': four throttles); a behaviour's command; a route's waypoints, or a curve's segments with the appended ones
  * (its flyout curve, from the reference in fields 0-2) - FSIM_BATCH_CURVE's where each is a Bezier's form, else
- * FSIM_BATCH_NURBS's (ABI 1.24; `nurbs` set where the caller's struct has it). A waiting one's is as given. Its arrays are the library's,
+ * FSIM_BATCH_NURBS's (ABI 1.24; `nurbs` set where the caller's struct has it); a route's loiters (ABI 1.28, where the
+ * caller's struct has them: complete, their place their points'). A waiting one's is as given. Its arrays are the library's,
  * valid until the next setpoint read, world step, reset or destroy; `options` NULL. `out->struct_size` set by the
  * caller. FSIM_INVALID_ARGUMENT for an activity not live. */
 FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id activity, fsim_batch_command* out);

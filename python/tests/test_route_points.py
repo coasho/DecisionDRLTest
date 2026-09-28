@@ -33,11 +33,11 @@ class RoutePointsTest(unittest.TestCase):
         self.assertEqual((points[0].kind, points[0].waypoint_type), (float(fsim.EndPointKind.WAYPOINT), float(fsim.WaypointType.PASSIVE)))
         self.assertEqual(points[1].frame, float(here))
         self.assertAlmostEqual((points[1].longitude_rad - lon) * R * math.cos(lat + 6000.0 / R), 1000.0, delta=1.0)  # (placed there)
-        # not built yet: named at its point - a touchdown (FA-10), a loiter point (FA-6b)
-        for fields in ({"waypoint_type": fsim.WaypointType.TOUCHDOWN}, {"kind": "loiter_point"}):
+        # named at its point: a touchdown, not built yet (FA-10); a loiter point with no loiter beside it, no point (4.31)
+        for fields, why in (({"waypoint_type": fsim.WaypointType.TOUCHDOWN}, "not_implemented"), ({"kind": "loiter_point"}, "invalid_waypoint")):
             with self.assertRaises(fsim.Rejected) as refused:
                 v.submit_route([fsim.Waypoint(lat + 3000.0 / R, lon), fsim.Waypoint(lat + 6000.0 / R, lon, **fields)])
-            self.assertEqual((refused.exception.reason, refused.exception.index), ("not_implemented", 1), fields)
+            self.assertEqual((refused.exception.reason, refused.exception.index), (why, 1), fields)
         with self.assertRaises(fsim.Rejected) as refused:  # (a frame the world does not have)
             v.submit_route([fsim.Waypoint(0.0, 0.0, frame=here + 100)])
         self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_waypoint", 0))

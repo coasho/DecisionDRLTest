@@ -118,6 +118,7 @@ public:
     /// the others draw what they drew before - and meet the rarer answers they met.
     bool optimise = false;
     std::vector<Waypoint> waypoints; ///< the last route's, made beside its RouteCommand
+    std::vector<RouteLoiter> loiters; ///< its loiter points' loiters, beside them (in the walks of their own: ADR-29 FA-6b2)
     std::vector<BezierSegment> segments; ///< the last curve's, made beside its CurveCommand
     std::vector<NurbsSegment> nurbs;     ///< the same as cubics, as A-GRA's schema gives them (ADR-29 FA-5d1), where asNurbs
     bool asNurbs = false;                ///< given so: now and then, in the walks drawn since
@@ -307,7 +308,7 @@ public:
             }
             out = r;
             const auto& s = state();
-            waypoints.clear();
+            waypoints.clear(), loiters.clear();
             for (int k = 0; k < points; ++k) {
                 const PositionCommand a = ahead(4000.0 * (k + 1));
                 Waypoint p;
@@ -335,6 +336,22 @@ public:
                         if (chance(0.1)) p.turn = static_cast<double>(pick(static_cast<std::size_t>(TurnType::Count)));
                         if (chance(0.1)) p.courseRad = uniform(-3.0, 3.0);
                         if (chance(0.1)) p.turnRadiusM = uniform(100.0, 3000.0);
+                        // a loiter point and its loiter (FA-6b2): an orbit, a racetrack, a figure-eight, a hold - a rotorcraft's
+                        // hover too - ended by its time, laps or end time; now and then one it cannot fly
+                        if (chance(0.08)) {
+                            p.kind = static_cast<double>(EndPointKind::LoiterPoint);
+                            RouteLoiter l;
+                            l.point = static_cast<std::uint32_t>(k);
+                            const Performance* f = w_.performance(vehicle_);
+                            l.pattern.pattern = static_cast<double>(pick(f && f->hovers ? 5 : 4));
+                            l.pattern.durationS = uniform(20.0, 90.0);
+                            if (chance(0.3)) l.shape.orbits = static_cast<double>(1 + pick(2)), l.pattern.durationS = kHold;
+                            if (chance(0.1)) l.endTimeS = w_.simTime() + uniform(10.0, 200.0);
+                            if (chance(0.05)) l.pattern.durationS = l.shape.orbits = l.endTimeS = kHold; // (none: its route's last point's only)
+                            if (chance(0.05)) l.pattern.latitudeRad = p.latitudeRad, l.pattern.longitudeRad = p.longitudeRad; // (its own place)
+                            if (chance(0.05)) l.point = static_cast<std::uint32_t>(k + 1); // (at a point that is not one)
+                            loiters.push_back(l);
+                        }
                     }
                 }
                 waypoints.push_back(p);
@@ -464,7 +481,7 @@ private:
 /// NEW of what the maker made: a route with the waypoints it made beside it, a curve with its segments, a pattern with
 /// its shape (where it made one).
 CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, const Maker& make, const CommandOptions& options = {}) {
-    if (const auto* route = std::get_if<RouteCommand>(&c)) return w.submit(v, *route, make.waypoints, options);
+    if (const auto* route = std::get_if<RouteCommand>(&c)) return w.submit(v, *route, make.waypoints, options, make.loiters);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && make.asNurbs)
         return w.submit(v, *curve, Span<const NurbsSegment>(make.nurbs), options, curveShape);
@@ -475,7 +492,7 @@ CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, c
 
 /// UPDATE with what the maker made: a route's or a curve's options, and now and then its waypoints or segments.
 CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Caller caller = {}) {
-    if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints) return w.update(caller, activity, *route, make.waypoints);
+    if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints) return w.update(caller, activity, *route, make.waypoints, make.loiters);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints && make.asNurbs)
         return w.update(caller, activity, *curve, Span<const NurbsSegment>(make.nurbs), curveShape);
@@ -1231,6 +1248,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 const PatternShape* shape = std::holds_alternative<PatternCommand>(command) && !make.shape.empty() ? &make.shape : nullptr;
                 BatchCommand item; // (a curve's cubics, where made so: a batch item's form)
                 item.command = command, item.waypoints = points, item.segments = pieces, item.shape = shape;
+                if (std::holds_alternative<RouteCommand>(command)) item.loiters = make.loiters;
                 if (std::holds_alternative<CurveCommand>(command) && !make.curveShape.empty()) item.curveShape = &make.curveShape;
                 if (make.asNurbs && std::holds_alternative<CurveCommand>(command)) item.segments = {}, item.nurbs = make.nurbs;
                 const Reason r = w.storeTask(v, id, item, repetition);

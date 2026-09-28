@@ -48,7 +48,9 @@ public:
     /// A route (fsim.guidance.route) with its waypoints, into the stack's own
     /// path store: at most PathStore::kWaypoints of them. What they leave out
     /// is filled in as a World's host would, from the flight when it starts.
-    void command(const RouteCommand& route, Span<const Waypoint> waypoints);
+    /// Its loiter points' loiters beside them (docs/flight-autonomy.md, 4.31;
+    /// at most PathStore::kRouteLoiters).
+    void command(const RouteCommand& route, Span<const Waypoint> waypoints, Span<const RouteLoiter> loiters = {});
     /// A curve (fsim.guidance.curve) with its segments, into the stack's own
     /// path store (at most PathStore::kSegments), flown afresh; unchecked, as
     /// every command given the stack on its own. Bezier segments, or as

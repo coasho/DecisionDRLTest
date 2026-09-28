@@ -115,8 +115,9 @@ public:
     /// waypoints completed and checked against the aircraft, planned from
     /// where it is, then written into the vehicle's path store (allocated at
     /// its first route). A RouteCommand submitted as a Command has none: InvalidWaypoint.
+    /// The loiters its loiter points fly beside them (docs/flight-autonomy.md, 4.31).
     CommandResult submit(const RouteCommand& route, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
-                         double now);
+                         double now, Span<const RouteLoiter> loiters = {});
     /// NEW of a curve (fsim.guidance.curve; docs/vehicle-interface.md 4.7):
     /// its segments checked against the aircraft (InvalidCurve naming the
     /// segment, and a section too tight), then written into the path store.
@@ -149,9 +150,10 @@ public:
                          Caller caller) noexcept;
     /// UPDATE of a route: its options (a field left out, kHold, keeps its
     /// value) and its waypoints - none: those it has - checked as a NEW's,
-    /// then flown afresh from its start, from where the aircraft is.
+    /// then flown afresh from its start, from where the aircraft is. New
+    /// waypoints come with their loiters (4.31); none, it keeps its own.
     CommandResult update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state,
-                         Caller caller) noexcept;
+                         Caller caller, Span<const RouteLoiter> loiters = {}) noexcept;
     /// UPDATE of a curve: the options given (kHold keeps one), and segments -
     /// with `append` 1, after its end, from the same reference; else a new
     /// curve, flown afresh. Options alone change how it is flown, not where.
@@ -182,7 +184,7 @@ public:
     /// capability that never completes; TaskActive while its activity is live;
     /// else why the vehicle cannot command the capability.
     Reason storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, TaskRepetition repetition,
-                     const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr);
+                     const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {});
     /// A task command: the NEW of its command with `options`, the task among
     /// the requirements it traces to, answered as the NEW is; its runs, as the
     /// task says. UnknownTask; TaskActive while its activity is live.
@@ -360,6 +362,7 @@ private:
         bool resumed = false; ///< it flew before (disabled, unassigned): its start window was its first start's
         PatternShape shape{};  ///< a pattern's (docs/flight-autonomy.md, 4.23)
         CurveShape curveShape{}; ///< a curve's reference in a frame (4.27)
+        std::vector<RouteLoiter> loiters; ///< a route's (4.31; room for the path store's, reserved at its NEW)
     };
     /// A flight task (4.11): its command, and what became of it.
     struct Task {
@@ -370,6 +373,7 @@ private:
         std::vector<NurbsSegment> segments;
         PatternShape shape{};               ///< a pattern's (docs/flight-autonomy.md, 4.23)
         CurveShape curveShape{};            ///< a curve's reference in a frame (4.27)
+        std::vector<RouteLoiter> loiters;   ///< a route's (4.31)
         TaskRepetition repetition{};
         ActivityId activity = 0;            ///< its activity (every run's), while it is commanded
         std::uint64_t commandId = 0;        ///< its task command's
@@ -386,7 +390,7 @@ private:
     /// The platform's suggestion (4.11): a task with the command the checks
     /// left, every value held to its limit (a route's points as planned). Its id.
     TaskId suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const PatternShape* shape = nullptr,
-                   const CurveShape* curveShape = nullptr);
+                   const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {});
     /// Room for a suggestion: the oldest not flying goes where kSuggestions are kept.
     Task& newSuggestion(TaskId id);
     /// Failed waiting activities kept as suggestions, made tasks now.
@@ -431,7 +435,7 @@ private:
     /// checked as its range policy says - the malformed returned at once, the
     /// rest logged - and the admission a behaviour asks. `setpoint` is what flies.
     Reason prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const sim::VehicleState& state,
-                   CheckLog& log, const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr);
+                   CheckLog& log, const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {});
     /// The axes a command owns: its own, else the capability's default, widened
     /// above the actuators to whole groups; InvalidAxes if not a flyable set.
     Reason axesOf(std::size_t index, const Command& command, const CommandOptions& options, AxisMask& axes) const noexcept;
@@ -472,7 +476,7 @@ private:
     /// UPDATE of a waiting activity: its command's new setpoint, checked as its NEW was, kept for its start.
     CommandResult updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                 const sim::VehicleState& state, Caller caller, const PatternShape* shape = nullptr,
-                                const CurveShape* curveShape = nullptr) noexcept;
+                                const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {}) noexcept;
     CommandResult updateWaiting(Waiting& w, const SupportCommand& setpoint, Caller caller) noexcept;
     /// The live activities' time windows after a world step: a persistent one
     /// done at its end window's close, a terminating one late or early failed if its end is critical.
@@ -520,14 +524,14 @@ private:
     Reason optimisable(double optimization, std::int16_t field, CommandResult& detail) const noexcept;
     /// What a flight with an end needs, against what the vehicle has above
     /// its reserve (docs/flight-autonomy.md, 4.18): a route that does not
-    /// repeat, to its last point; a timed pattern; a curve, to its end -
+    /// repeat, to its last point (its loiters' times too: 4.31); a timed pattern; a curve, to its end -
     /// complete, and checked: its route or curve in the scratch plan. Flown
     /// level, each leg at its speed and altitude, at the weight now: the
     /// performance tables' burn there, else what it consumes now. `energy` 0:
     /// nothing to judge (no end, no energy, no speed).
-    CommandDetails::Endurance endurance(const Command& setpoint, const sim::VehicleState& state) const noexcept;
+    CommandDetails::Endurance endurance(const Command& setpoint, const sim::VehicleState& state, double now = kUnknown) const noexcept;
     /// Where a commanded path first goes below the terrain (docs/flight-autonomy.md,
-    /// 4.19): a route's legs and turns from where the aircraft is, and what it
+    /// 4.19): a route's legs and turns from where the aircraft is (its loiters' ways in and laps: 4.31), and what it
     /// flies after its last point; a pattern's lap and its entry; a curve; an
     /// hsa's line ahead for a minute - complete, its route or curve in the
     /// scratch plan. Sampled at the ground's spacing; `hit` 0: clear.
@@ -565,8 +569,23 @@ private:
     /// steeper than the aircraft climbs - logged: clamped (the turn flown
     /// smaller, the gradient at its climb rate; kClamped) or, with Reject,
     /// findings (InvalidWaypoint, PerformanceLimit) naming each point. The
-    /// malformed are returned at once, the point in the log's result.
-    Reason checkRoute(RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log);
+    /// malformed are returned at once, the point in the log's result. Its
+    /// loiters (docs/flight-autonomy.md, 4.31) into the plan too: 16 at most,
+    /// each at its loiter point (route::loiterFault), checked as a pattern
+    /// NEW (checkLoiter), completed where it flies (completeLoiters) and,
+    /// checked, limited as a pattern is (limitPattern at its point).
+    Reason checkRoute(RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log,
+                      Span<const RouteLoiter> loiters = {});
+    /// A route's loiter's pattern and shape (4.31) as a pattern NEW's are checked: InvalidWaypoint for a field
+    /// checkPattern or checkShape refuses, or a hover's (route::hoverFault); a hover where the aircraft does not hover,
+    /// and an optimisation it has no tables for, as the pattern's (NotSupported, NotImplemented). The caller names the point.
+    Reason checkLoiter(const RouteLoiter& loiter) const noexcept;
+    /// The plan's loiters completed where they fly (route::completeLoiters; `p` planned): an optimisation's speed at
+    /// its point's altitude first, as a pattern's (optimise).
+    void completeLoiters(route::Plan& p, const sim::VehicleState& state) const noexcept;
+    /// A route's loiter's fields in a finding or an adjustment (4.31): named by its point, after the waypoint's 22 -
+    /// its pattern's then its shape's (22 to 56), its end time 57.
+    static constexpr std::int16_t kLoiterField = 22;
     /// The route checkRoute left in the scratch plan, into the path store: flown afresh.
     void writeRoute();
     /// A pattern's fields (docs/vehicle-interface.md, 4.6): whole numbers for
@@ -583,8 +602,9 @@ private:
     /// altitude, and a radius no tighter than the aircraft's full bank flies
     /// at its speed (a rotorcraft's: a metre) - both circles' - or, the radius
     /// from a bank or a turn rate, one it can fly; named by `radiusFrom`, the
-    /// field the radius came from (radiusField).
-    void limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, std::int16_t radiusFrom = 5) const noexcept;
+    /// field the radius came from (radiusField). A route's loiter's at
+    /// `point` (4.31): named by the point, its field after kLoiterField.
+    void limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, std::int16_t radiusFrom = 5, std::int16_t point = -1) const noexcept;
     /// The field a pattern's radius comes from, as completion takes them: its own (5), else its shape's bank (16),
     /// turn rate (25) or turn type (26); none: its own, filled in by default.
     static std::int16_t radiusField(const PatternCommand& c, const PatternShape& shape) noexcept {
@@ -607,6 +627,8 @@ private:
     /// given a z) and its frame into the scratch - an unknown one InvalidParameter, the frame field named.
     Reason placePattern(PatternCommand& c, PatternShape& shape, CommandResult& detail, const PatternCommand* given = nullptr,
                         const PatternShape* givenShape = nullptr) noexcept;
+    /// A hover pattern's support here (4.25): None, or its row's NotSupported or NotImplemented.
+    Reason hoverSupport() const noexcept;
     /// A curve's options and segments (docs/vehicle-interface.md, 4.7 and 5.1):
     /// the options whole and finite (InvalidParameter); in a NEW, the
     /// reference where the aircraft is if left out; 1 to 10 segments, finite,
@@ -644,7 +666,7 @@ private:
     /// may not wait (the existing entry points'): refused where it would.
     CommandResult submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const CommandOptions& options,
                              const sim::VehicleState& state, double now, bool mayWait = true, const PatternShape* shape = nullptr,
-                             const CurveShape* curveShape = nullptr);
+                             const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {});
 
     /// A capability's standing with the vehicle's policy (6.2, 7.2).
     struct Authority {

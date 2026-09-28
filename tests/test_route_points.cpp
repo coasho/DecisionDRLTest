@@ -104,8 +104,7 @@ TEST_CASE("route points: an altitude block holds a point's altitude within it; a
     CHECK(w.vehicleState(v)->altitudeMslM - 2000.0 > 80.0);
 }
 
-TEST_CASE("route points: a waypoint is flown over, as its type asks; a loiter point and the types not built are refused not implemented, naming "
-          "the point",
+TEST_CASE("route points: a waypoint is flown over, as its type asks; the types not built are refused not implemented, naming the point",
           "[modes]") {
     session::World w(options("route-points-types"));
     const auto byer = wing(w, "c172x", 1500.0, 55.0), over = wing(w, "c172x", 1500.0, 55.0, 3);
@@ -143,9 +142,8 @@ TEST_CASE("route points: a waypoint is flown over, as its type asks; a loiter po
     ends = w.endPoints(typed.activity, 4);
     REQUIRE(ends.size() == 3);
     CHECK(ends[0].kind == EndPointKind::Waypoint); // (reported as given: no turn there)
-    // not built yet: each named at its point, not implemented - a loiter point (FA-6b), the end of a path before the
-    // route's own (FA-6e), a taxi's and a runway's and a takeoff's points (FA-9), an approach's and a touchdown (FA-10),
-    // a ditch (FA-16)
+    // not built yet: each named at its point, not implemented - the end of a path before the route's own (FA-6e), a
+    // taxi's and a runway's and a takeoff's points (FA-9), an approach's and a touchdown (FA-10), a ditch (FA-16)
     auto refusedAt = [&](const std::vector<Waypoint>& points, Reason why, int index) {
         const CommandResult r = w.submit(byer, RouteCommand{}, points);
         INFO(reasonName(r.reason) << " at " << r.index);
@@ -179,9 +177,9 @@ TEST_CASE("route points: a waypoint is flown over, as its type asks; a loiter po
     Waypoint early = t1;
     early.waypointType = static_cast<double>(WaypointType::EndOfPath);
     refusedAt({t0, early, t2}, Reason::NotImplemented, 1);
-    Waypoint loiter = t1;
+    Waypoint loiter = t1; // (a loiter point is flown with its loiter beside it: without one, it is no point - 4.31)
     loiter.waypointType = kHold, loiter.kind = static_cast<double>(EndPointKind::LoiterPoint);
-    refusedAt({t0, loiter, t2}, Reason::NotImplemented, 1);
+    refusedAt({t0, loiter, t2}, Reason::InvalidWaypoint, 1);
     // what does not make a point: a type with a turn point, a kind or a type that is not one
     Waypoint turned = t1;
     turned.kind = static_cast<double>(EndPointKind::TurnPoint);

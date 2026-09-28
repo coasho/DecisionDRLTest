@@ -135,6 +135,7 @@ from .world import (  # noqa: E402
     ProtectionMode,
     RangePolicy,
     Rejected,
+    RouteLoiter,
     Scenario,
     SUPPORT_FEATURES,
     Source,

@@ -129,8 +129,9 @@ control::CommandResult Vehicle::submit(const control::SupportCommand& command, c
     return r;
 }
 
-control::CommandResult Vehicle::submit(const control::RouteCommand& route, Span<const control::Waypoint> waypoints, const control::CommandOptions& options) {
-    if (world_) return world_->impl_->submit(id_, route, waypoints, options);
+control::CommandResult Vehicle::submit(const control::RouteCommand& route, Span<const control::Waypoint> waypoints, const control::CommandOptions& options,
+                                       Span<const control::RouteLoiter> loiters) {
+    if (world_) return world_->impl_->submit(id_, route, waypoints, options, loiters);
     control::CommandResult r;
     r.reason = control::Reason::UnknownVehicle;
     return r;
@@ -418,8 +419,9 @@ control::CommandResult World::update(control::ActivityId activity, const control
     return impl_->update(activity, setpoint);
 }
 
-control::CommandResult World::update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints) {
-    return impl_->update(activity, route, waypoints);
+control::CommandResult World::update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
+                                     Span<const control::RouteLoiter> loiters) {
+    return impl_->update(activity, route, waypoints, loiters);
 }
 
 control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
@@ -447,8 +449,8 @@ control::CommandResult World::update(control::Caller caller, control::ActivityId
 }
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
-                                     Span<const control::Waypoint> waypoints) {
-    return impl_->update(caller, activity, route, waypoints);
+                                     Span<const control::Waypoint> waypoints, Span<const control::RouteLoiter> loiters) {
+    return impl_->update(caller, activity, route, waypoints, loiters);
 }
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,

@@ -163,6 +163,29 @@ TEST_CASE("terrain: a route into the ground is refused terrain_conflict, with th
     CHECK(kept.waypoints[1].altitudeM == 1600.0);
 }
 
+TEST_CASE("terrain: a route's loiter is walked where it flies - an orbit into the ridge refused naming its point, one clear of it flown",
+          "[terrain_check]") {
+    session::World w(ridged("terrain-loiter"));
+    const auto v = spawn(w, "c172x", 0.0, 1000.0);
+    // level at 1,000 m, 3 km east, then an orbit at 8 km east (docs/flight-autonomy.md, 4.31): of 3 km its circle reaches
+    // 11 km east, into the ridge; of 800 m it keeps clear of it - the legs clear either way
+    Waypoint at = east(8000.0, 1000.0);
+    at.kind = static_cast<double>(EndPointKind::LoiterPoint);
+    RouteLoiter wide;
+    wide.point = 1, wide.pattern.radiusM = 3000.0, wide.pattern.durationS = 120.0;
+    const std::vector<Waypoint> points = {east(3000.0, 1000.0), at};
+    const CommandResult r = w.submit(v, RouteCommand{}, points, {}, std::vector<RouteLoiter>{wide});
+    CHECK(r.reason == Reason::TerrainConflict);
+    CHECK(r.index == 1);
+    const CommandDetails::Terrain& t = hit(w, v);
+    CHECK(t.index == 1);
+    CHECK((eastOf(t.longitudeRad) >= 10000.0 && eastOf(t.longitudeRad) <= 11000.1)); // (on its circle, where it meets the ridge)
+    CHECK(std::abs(t.altitudeMslM - 1000.0) < 1e-6);
+    RouteLoiter tight = wide;
+    tight.pattern.radiusM = 800.0;
+    CHECK(w.submit(v, RouteCommand{}, points, {}, std::vector<RouteLoiter>{tight}).accepted());
+}
+
 TEST_CASE("terrain: a pattern, a curve and an hsa into the ground are refused; clear of it, they fly", "[terrain_check]") {
     session::World w(ridged("terrain-modes"));
     const auto v = spawn(w, "c172x", 0.0, 1000.0);

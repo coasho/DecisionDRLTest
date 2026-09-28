@@ -24,7 +24,7 @@ double aboveSea(double altitudeM, double reference, const sim::VehicleState& s, 
 
 } // namespace
 
-CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, const sim::VehicleState& state) const noexcept {
+CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, const sim::VehicleState& state, double now) const noexcept {
     CommandDetails::Endurance out;
     if (!sessionView_) return out;
     // only a flight with an end: a route that does not repeat, a pattern timed or of so many laps, a curve
@@ -62,7 +62,7 @@ CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, con
         }
         seconds += timeS;
     };
-    if (route) { // to its last point, from where the aircraft is: each leg, and the turn at its end
+    if (route) { // to its last point, from where the aircraft is: each leg, and the turn at its end - and each loiter (4.31)
         const route::Plan& p = *routePlan_;
         for (std::uint32_t i = p.start; i < p.count; ++i) {
             const Waypoint& w = p.points[i];
@@ -71,6 +71,31 @@ CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, con
             const route::Turn& t = p.turn(i, true);
             const double m = p.pieceM(i, true) + (i + 1 < p.count ? t.radiusM * std::abs(t.angleRad) : 0.0);
             fly(tas > 0.5 ? m / tas : kUnknown, tas, h);
+            const RouteLoiter* l = route::loiterPoint(w) ? p.loiterAt(i) : nullptr;
+            if (!l) continue;
+            // its duration, its laps (its way in from its point, and on to its exit), or its end time from its arrival - the
+            // first; none (the last point's): the route ends as it begins. A hover burns as the tables' hover does.
+            const PatternCommand& c = l->pattern;
+            const double speed = route::plannedSpeed(c.speed, c.speedReference, h);
+            double timeS = isHold(c.durationS) ? kUnknown : c.durationS;
+            if (!isHold(l->shape.orbits) && c.pattern != static_cast<double>(PatternKind::Hover)) { // (from where it begins: 4.31)
+                const route::Leg& in = p.leg(i, true);
+                double lat = w.latitudeRad, lon = w.longitudeRad;
+                if (const double join = route::loiterJoinM(c, l->shape); join > 0.0 && in.lengthM > join)
+                    geo::destination(w.latitudeRad, w.longitudeRad, geo::wrapPi(in.courseInRad + 3.14159265358979323846), join, lat, lon);
+                PatternShape shape = l->shape;
+                route::loiterEntry(c, lat, lon, shape);
+                if (p.leaves(i)) route::loiterExit(c, p.points[p.next(i)].latitudeRad, p.points[p.next(i)].longitudeRad, shape);
+                route::Pattern lap;
+                route::planPattern(lap, c, lat, lon, shape,
+                                   l->shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? yearNow() : 2025.0,
+                                   p.leg(i, true).courseInRad);
+                const double laps = speed > 0.5 ? (lap.entryM() + l->shape.orbits * lap.lapM() + lap.toExitM()) / speed : kUnknown;
+                timeS = std::fmin(timeS, laps);
+            }
+            if (!isHold(l->endTimeS) && std::isfinite(now)) timeS = std::fmin(timeS, std::max(l->endTimeS - (now + seconds), 0.0));
+            if (std::isnan(timeS)) continue; // (no end: the route's)
+            fly(timeS, c.pattern == static_cast<double>(PatternKind::Hover) ? 0.0 : speed, h);
         }
     } else if (pattern) { // its duration, at its speed - or its laps from its way in (and on to its exit point), the first
         const double h = aboveSea(pattern->altitudeM, pattern->altitudeReference, state, config_->altimeter);

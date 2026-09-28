@@ -39,6 +39,11 @@ AltitudeReference altitudeReferenceOf(double code) noexcept {
     return static_cast<AltitudeReference>(static_cast<int>(code));
 }
 
+/// The world's date as a decimal year, for the magnetic model (a stack on its own: the model's epoch).
+double worldYear(const ControlContext& ctx, const sim::VehicleState& s) noexcept {
+    return magneticYear(ctx.world ? ctx.world->environment().epochUtcSeconds + s.simTime : 0.0);
+}
+
 } // namespace
 
 // --- Performance --------------------------------------------------------------------
@@ -274,7 +279,7 @@ double option(double v, double count) noexcept { return isHold(v) ? 0.0 : std::c
 
 } // namespace
 
-RouteBehavior::RouteBehavior() : plan_(std::make_unique<route::Plan>()) {}
+RouteBehavior::RouteBehavior() : plan_(std::make_unique<route::Plan>()), loiter_(std::make_unique<PatternBehavior>()) {}
 RouteBehavior::~RouteBehavior() = default;
 
 namespace {
@@ -323,8 +328,21 @@ void RouteBehavior::reset() {
 }
 
 bool RouteBehavior::stops() const noexcept {
+    const route::Plan& p = *plan_; // (a last point that is a loiter point ends in its loiter, whatever the end says: 4.31)
+    return hovers_ && p.end == EndBehavior::Loiter && !p.repeat && target_ == p.last() && !route::loiterPoint(p.points[target_]);
+}
+
+void RouteBehavior::aim(std::uint32_t k, const Performance& perf) noexcept {
     const route::Plan& p = *plan_;
-    return hovers_ && p.end == EndBehavior::Loiter && !p.repeat && target_ == p.last();
+    target_ = k;
+    loiterAhead_ = route::loiterPoint(p.points[k]) ? p.loiterAt(k) : nullptr;
+    reachM_ = stops() ? 1.0 : 0.0;
+    if (loiterAhead_) { // (4.31: where the leg meets it; a rotorcraft's hover, where it would stop from its speed - its position loop's)
+        const bool hover = loiterAhead_->pattern.pattern == static_cast<double>(PatternKind::Hover);
+        const Waypoint& w = p.points[k];
+        reachM_ = hovers_ && hover ? std::max(route::stoppingDistanceM(perf, route::plannedSpeed(w.speed, w.speedReference, 0.0)), 1.0)
+                                   : route::loiterJoinM(loiterAhead_->pattern, loiterAhead_->shape);
+    }
 }
 
 void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& command) {
@@ -337,6 +355,7 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     planned_ = true;
     revision_ = ctx.path ? ctx.path->revision : 0;
     target_ = 0, laps_ = 0;
+    loiterAhead_ = nullptr, reachM_ = 0.0, loitering_ = false;
     firstLap_ = true, onArc_ = midway_ = ended_ = finished_ = false;
     failure_ = Reason::None;
     leadOut_ = finishedM_ = inPieceM_ = lapStartM_ = 0.0;
@@ -352,6 +371,15 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
         return;
     }
     p.count = count;
+    // its loiters (4.31), as the host completed them (a stack's own, completed below): a loiter point with none flies nothing
+    p.loiterCount = std::min<std::uint32_t>(ctx.path->routeLoiterCount, static_cast<std::uint32_t>(PathStore::kRouteLoiters));
+    std::copy_n(ctx.path->routeLoiters, p.loiterCount, p.loiters);
+    for (std::uint32_t i = 0; i < count; ++i)
+        if (route::loiterPoint(p.points[i]) && !p.loiterAt(i)) {
+            p.count = 0;
+            failure_ = Reason::BehaviorFailed;
+            return;
+        }
     // its points in moving frames where the frames are now (4.29): placed and planned again as it flies them
     moving_ = overFrame_ = false;
     for (std::uint32_t i = 0; i < count; ++i) {
@@ -366,7 +394,13 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     }
     p.start = static_cast<std::uint32_t>(option(command.start, static_cast<double>(count)));
     route::plan(p, s.latitudeRad, s.longitudeRad, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
-    target_ = p.start;
+    if (p.loiterCount) { // (each at its point: what the host left out, nothing)
+        bool magnetic = false;
+        for (std::uint32_t k = 0; k < p.loiterCount; ++k)
+            magnetic = magnetic || p.loiters[k].shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth);
+        route::completeLoiters(p, s, perf, hovers_, wind_.northMs, wind_.eastMs, ctx.altimeter, magnetic ? worldYear(ctx, s) : 2025.0);
+    }
+    aim(p.start, perf);
     lapM_ = p.lapM(true);
     beginSegment(p.start, s, 0.0, 0.0, 0.0, true, false);
 }
@@ -378,7 +412,9 @@ void RouteBehavior::beginSegment(std::uint32_t k, const sim::VehicleState& s, do
     segmentStartM_ = atM;
     segmentStartS_ = s.simTime;
     const route::Turn& turn = p.turn(k, firstLap);
-    segmentM_ = halfArcM + std::max(0.0, p.leg(k, firstLap).lengthM - leadM - turn.leadM) + 0.5 * turn.radiusM * std::abs(turn.angleRad);
+    const RouteLoiter* loiter = route::loiterPoint(p.points[k]) ? p.loiterAt(k) : nullptr; // (4.31: to where it is joined)
+    const double joinM = loiter ? route::loiterJoinM(loiter->pattern, loiter->shape) : 0.0;
+    segmentM_ = halfArcM + std::max(0.0, p.leg(k, firstLap).lengthM - leadM - turn.leadM - joinM) + 0.5 * turn.radiusM * std::abs(turn.angleRad);
     // it climbs from the previous point's altitude, in the same reference; else from the aircraft's own now
     const Waypoint& to = p.points[k];
     if (fromPoint && p.points[from].altitudeReference == to.altitudeReference) segmentFrom_ = p.points[from].altitudeM;
@@ -405,7 +441,7 @@ void RouteBehavior::advance(const sim::VehicleState& s, const Performance& perf)
         lapStartM_ = finishedM_;
         lapM_ = p.lapM(false);
     }
-    target_ = p.next(target_);
+    aim(p.next(target_), perf);
 }
 
 route::Fix RouteBehavior::locate(const sim::VehicleState& s, const Performance& perf) {
@@ -447,8 +483,15 @@ route::Fix RouteBehavior::locate(const sim::VehicleState& s, const Performance& 
             onArc_ = true, midway_ = false;
             continue;
         }
-        // no arc: the point is passed abeam (a rotorcraft that stops there, within a metre of it)
-        if (f.alongM < leg.lengthM - (stops() ? 1.0 : 0.0)) return f;
+        // no arc: the point is passed abeam (a rotorcraft that stops there, within a metre of it); a loiter point's
+        // loiter begins where the leg meets it (4.31), the leg flown
+        if (f.alongM < leg.lengthM - reachM_) return f;
+        if (loiterAhead_) {
+            finishedM_ += std::max(0.0, leg.lengthM - leadOut_);
+            inPieceM_ = leadOut_ = 0.0;
+            loitering_ = true;
+            return f;
+        }
         finishedM_ += std::max(0.0, leg.lengthM - leadOut_);
         if (p.leaves(target_)) beginSegment(p.next(target_), s, finishedM_, 0.0, 0.0, firstLap_ && target_ != p.last(), true);
         leadOut_ = 0.0;
@@ -472,6 +515,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     }
     static const Performance kNone{};
     const Performance& perf = ctx.performance ? *ctx.performance : kNone;
+    if (loitering_) return loiter(ctx, perf, false); // (4.31)
     if (moving_) { // its points in moving frames where they are, as the step began, and the piece it flies planned again (4.29)
         route::Plan& q = *plan_;
         const std::uint32_t at = ended_ ? q.last() : target_;
@@ -487,11 +531,13 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         if (!ended_) route::replan(q, at, firstLap_, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
         // flown over the frame the piece is in: its point's and the one before's, one moving frame (past the end, the last point's)
         const Waypoint& w = q.points[at];
-        overFrame_ = moves(routeFrame(ctx.path, w.frame)) && (ended_ || (before && q.points[q.prev(at)].frame == w.frame));
+        const Waypoint& b = q.points[q.prev(at)]; // (a leg from where a loiter ended is in no frame: 4.31)
+        overFrame_ = moves(routeFrame(ctx.path, w.frame)) && (ended_ || (before && b.frame == w.frame && !route::loiterPoint(b)));
         frameNorthMs_ = overFrame_ ? pose.northMs : 0.0, frameEastMs_ = overFrame_ ? pose.eastMs : 0.0;
     }
     const bool wasEnded = ended_;
     const route::Fix fix = locate(s, perf);
+    if (loitering_) return loiter(ctx, perf, true); // (a loiter point's loiter met: 4.31)
     const Waypoint& segment = p.points[segment_];
 
     // the altitude: straight from the segment's start to its point, or at its climb rate; then held
@@ -541,6 +587,11 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
             }
         } else if (stops()) {
             steer.speedLimitMs = std::max(route::brakingLimit(perf, 0.0, toGo), 0.5);
+        } else if (hovers_ && loiterAhead_) { // (4.31: stopping for a hover, else slowing to its radius's pace where it is met)
+            const PatternCommand& c = loiterAhead_->pattern;
+            steer.speedLimitMs = c.pattern == static_cast<double>(PatternKind::Hover)
+                                     ? std::max(route::stoppingLimit(perf, toGo), 0.5)
+                                     : route::brakingLimit(perf, route::lateralLimit(perf, c.radiusM), std::max(toGo - reachM_, 0.0));
         }
         // an arc from a turn point (4.30): its curvature as it is flown, what the leg after it has at its end; a leg into one,
         // the arc's at its end - a rotorcraft no faster than the arc allows, slowing in time for it
@@ -569,6 +620,47 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     return route::follow(ctx, perf, wind_, hovers_, fix, ahead, steer, plan_->trims, course_, heading_);
 }
 
+Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf, bool begins) {
+    const route::Plan& p = *plan_;
+    const RouteLoiter& l = *loiterAhead_;
+    if (begins) { // from where the aircraft is: at its point now, its shape, its frame (a moving point's, it moves with) and its end time
+        const Waypoint& w = p.points[target_];
+        PatternCommand c = l.pattern;
+        c.latitudeRad = w.latitudeRad, c.longitudeRad = w.longitudeRad;
+        PatternShape shape = l.shape;
+        route::loiterEntry(c, ctx.sensed.latitudeRad, ctx.sensed.longitudeRad, shape); // (an orbit's: along the tangent onto it)
+        if (p.leaves(target_)) { // (left for the next point: an orbit along the tangent to it, any other at its point)
+            const Waypoint& next = p.points[p.next(target_)];
+            route::loiterExit(c, next.latitudeRad, next.longitudeRad, shape);
+        }
+        const FrameSpec* frame = routeFrame(ctx.path, l.shape.frame);
+        loiter_->embed(shape, frame ? *frame : FrameSpec{}, l.endTimeS);
+        loiterCommand_ = c;
+        loiter_->begin(ctx, loiterCommand_);
+        loiter_->wind_ = wind_; // (the estimate it flew in)
+        const bool ends = !isHold(l.pattern.durationS) || !isHold(l.shape.orbits) || !isHold(l.endTimeS);
+        if (!ends && target_ == p.last() && !p.repeat) ended_ = finished_ = true; // (the route's end: it loiters on)
+    }
+    Command out = loiter_->update(ctx, loiterCommand_);
+    if (const Reason why = loiter_->failure(); why != Reason::None) failure_ = why; // (its frame's vehicle gone)
+    if (ended_ || !loiter_->finished()) return out;
+    // its end: the route's, if it is its last point (and the pattern flies on); else on to the next point, the leg to it
+    // from here - as the entry's from where the route began - and the turn there planned again
+    if (target_ == p.last() && !p.repeat) {
+        ended_ = finished_ = true;
+        return out;
+    }
+    const sim::VehicleState& s = ctx.sensed;
+    loitering_ = false;
+    advance(s, perf);
+    route::Plan& q = *plan_;
+    route::Leg& in = firstLap_ && target_ == q.start ? q.entry : q.legs[target_];
+    in = route::makeLeg(s.latitudeRad, s.longitudeRad, q.points[target_].latitudeRad, q.points[target_].longitudeRad, q.rhumb);
+    route::replan(q, target_, firstLap_, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
+    beginSegment(target_, s, finishedM_, 0.0, 0.0, firstLap_, true);
+    return out;
+}
+
 bool RouteBehavior::progress(ActivityProgress& out) const noexcept {
     const route::Plan& p = *plan_;
     if (!planned_ || p.count == 0) return false;
@@ -577,6 +669,24 @@ bool RouteBehavior::progress(ActivityProgress& out) const noexcept {
     out.segments = p.count;
     out.segmentId = segment.id;
     out.laps = laps_;
+    if (loitering_) { // at its loiter point (4.31): the segment to it flown; the pattern's time to go, and what it commands
+        ActivityProgress pattern;
+        loiter_->progress(pattern);
+        out.segmentPercent = 100.0;
+        out.percent = ended_ || !(lapM_ > 1e-6) ? 100.0 : std::clamp(100.0 * (finishedM_ - lapStartM_) / lapM_, 0.0, 100.0);
+        if (!p.repeat) {
+            out.distanceToGoM = ended_ ? 0.0 : std::max(lapM_ - finishedM_, 0.0);
+            const double after = out.distanceToGoM > 0.0 ? (groundSpeed_ > 0.1 ? out.distanceToGoM / groundSpeed_ : kHold) : 0.0;
+            out.timeToGoS = ended_ ? 0.0 : pattern.timeToGoS + after; // (unknown with the pattern's: kHold)
+        }
+        out.crossTrackM = pattern.crossTrackM;
+        out.courseRad = pattern.courseRad;
+        out.headingRad = pattern.headingRad;
+        out.altitudeMslM = pattern.altitudeMslM;
+        out.speedMs = pattern.speedMs;
+        out.speedReference = pattern.speedReference;
+        return true;
+    }
     const double routeM = finishedM_ + inPieceM_;
     if (ended_) {
         out.percent = out.segmentPercent = 100.0;
@@ -612,11 +722,6 @@ bool same(const PatternCommand& a, const PatternCommand& b) noexcept {
     return true;
 }
 
-/// The world's date as a decimal year, for the magnetic model (a stack on its own: the model's epoch).
-double worldYear(const ControlContext& ctx, const sim::VehicleState& s) noexcept {
-    return magneticYear(ctx.world ? ctx.world->environment().epochUtcSeconds + s.simTime : 0.0);
-}
-
 } // namespace
 
 PatternBehavior::PatternBehavior() : pattern_(std::make_unique<route::Pattern>()) {}
@@ -638,6 +743,11 @@ void PatternBehavior::reset() {
     planned_ = false;
 }
 
+void PatternBehavior::embed(const PatternShape& shape, const FrameSpec& frame, double endTimeS) noexcept {
+    embedded_ = true;
+    embeddedShape_ = shape, frame_ = frame, endTimeS_ = endTimeS;
+}
+
 void PatternBehavior::plan(const ControlContext& ctx, const PatternCommand& c) {
     const auto& s = ctx.sensed;
     static const Performance kNone{};
@@ -649,11 +759,11 @@ void PatternBehavior::plan(const ControlContext& ctx, const PatternCommand& c) {
         const double best = optimalTasMs(ctx.tables, c.speedOptimization, h, s.fuelKg);
         if (std::isfinite(best)) resolved_.speed = best, resolved_.speedReference = static_cast<double>(SpeedReference::TrueAirspeed);
     }
-    // its shape (docs/flight-autonomy.md, 4.23), the path store's; what it leaves out, as the host fills it in (it has, for a
-    // World's vehicle)
-    shape_ = ctx.path ? ctx.path->pattern : PatternShape{};
+    // its shape (docs/flight-autonomy.md, 4.23), the path store's - a route's loiter's, the route's (4.31); what it leaves
+    // out, as the host fills it in (it has, for a World's vehicle)
+    shape_ = embedded_ ? embeddedShape_ : ctx.path ? ctx.path->pattern : PatternShape{};
     pathRevision_ = ctx.path ? ctx.path->revision : 0;
-    if (!isHold(shape_.frame) && ctx.path) frame_ = ctx.path->patternFrame;
+    if (!embedded_ && !isHold(shape_.frame) && ctx.path) frame_ = ctx.path->patternFrame;
     frameMoves_ = !isHold(shape_.frame) && frame_.origin != FrameOrigin::Fixed;
     frameAltitude_ = kHold;
     frameNorthMs_ = frameEastMs_ = frameDownMs_ = 0.0;
@@ -731,7 +841,7 @@ VelocityCommand PatternBehavior::hoverInFrame(const ControlContext& ctx, const P
 
 bool PatternBehavior::due(double now) const noexcept {
     return (!isHold(resolved_.durationS) && startS_ >= 0.0 && now - startS_ >= resolved_.durationS) ||
-           (!isHold(shape_.orbits) && !entering_ && laps_ >= shape_.orbits);
+           (!isHold(shape_.orbits) && !entering_ && laps_ >= shape_.orbits) || (!isHold(endTimeS_) && worldNow_ >= endTimeS_);
 }
 
 route::Fix PatternBehavior::locate(const sim::VehicleState& s) {
@@ -785,6 +895,7 @@ Command PatternBehavior::update(const ControlContext& ctx, const Command& in) {
     wind_.update(s, ctx.dt);
     groundSpeed_ = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
     simTime_ = s.simTime;
+    if (!isHold(endTimeS_)) worldNow_ = ctx.world ? ctx.world->simTime() : s.simTime; // (a route's loiter's end time: the world's)
     const auto* c = std::get_if<PatternCommand>(&in);
     if (!c) { // nothing to fly: on as it flies (a rotorcraft still)
         VelocityCommand hold{kHold, 0.0, s.eulerRad[2], kHold, kHold, kHold};
@@ -792,7 +903,7 @@ Command PatternBehavior::update(const ControlContext& ctx, const Command& in) {
         else hold.airspeedMs = s.airspeedTrueMs;
         return hold;
     }
-    if (!planned_ || !same(*c, flown_) || (ctx.path && ctx.path->revision != pathRevision_)) { // (an UPDATE: the pattern it makes, afresh)
+    if (!planned_ || !same(*c, flown_) || (!embedded_ && ctx.path && ctx.path->revision != pathRevision_)) { // (an UPDATE: afresh)
         if (planned_ && c->pattern == static_cast<double>(PatternKind::Hover) && flown_.pattern != c->pattern) startS_ = -1.0; // (a hover's from its arrival)
         plan(ctx, *c);
     }
@@ -895,6 +1006,7 @@ bool PatternBehavior::progress(ActivityProgress& out) const noexcept {
         out.percent = std::clamp(100.0 * elapsed / resolved_.durationS, 0.0, 100.0);
         out.timeToGoS = std::max(resolved_.durationS - elapsed, 0.0);
     }
+    if (!isHold(endTimeS_)) out.timeToGoS = std::fmin(out.timeToGoS, std::max(endTimeS_ - worldNow_, 0.0)); // (a route's loiter's: 4.31)
     if (leaving_) out.percent = out.segmentPercent = 100.0, out.timeToGoS = 0.0;
     out.crossTrackM = crossTrack_;
     out.courseRad = course_;

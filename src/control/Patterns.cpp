@@ -115,14 +115,18 @@ void CapabilityHost::writeShape() {
     ++store->revision;
 }
 
+Reason CapabilityHost::hoverSupport() const noexcept {
+    const SupportInfo* row = support_ ? support_->find("fsim.guidance.pattern/hover") : nullptr;
+    const Support support = row ? row->support : (adapter_->features() & kFeatureHover) ? Support::Supported : Support::NotSupported;
+    return support == Support::NotSupported ? Reason::NotSupported : support == Support::NotImplemented ? Reason::NotImplemented : Reason::None;
+}
+
 Reason CapabilityHost::placePattern(PatternCommand& c, PatternShape& shape, CommandResult& detail, const PatternCommand* given,
                                     const PatternShape* givenShape) noexcept {
     if (c.pattern == static_cast<double>(PatternKind::Hover)) { // (a hover: where the aircraft hovers; its point, altitude, speed and duration)
-        const SupportInfo* row = support_ ? support_->find("fsim.guidance.pattern/hover") : nullptr;
-        const Support support = row ? row->support : (adapter_->features() & kFeatureHover) ? Support::Supported : Support::NotSupported;
-        if (support == Support::NotSupported || support == Support::NotImplemented) {
+        if (const Reason why = hoverSupport(); why != Reason::None) {
             detail.index = 0;
-            return support == Support::NotSupported ? Reason::NotSupported : Reason::NotImplemented;
+            return why;
         }
         if (const int field = route::hoverFault(given ? *given : c, givenShape ? *givenShape : shape); field >= 0) {
             detail.index = static_cast<std::int16_t>(field);
@@ -146,6 +150,31 @@ Reason CapabilityHost::placePattern(PatternCommand& c, PatternShape& shape, Comm
     c.latitudeRad = at.latitudeRad, c.longitudeRad = geo::wrapPi(at.longitudeRad);
     if (!isHold(shape.frameZM)) c.altitudeM = at.altitudeMslM, c.altitudeReference = static_cast<double>(AltitudeReference::Msl);
     return Reason::None;
+}
+
+Reason CapabilityHost::checkLoiter(const RouteLoiter& l) const noexcept {
+    CommandResult field; // (the caller names the point)
+    if (checkPattern(l.pattern, false, field) != Reason::None || checkShape(l.pattern, l.shape, false, field) != Reason::None)
+        return Reason::InvalidWaypoint;
+    if (l.pattern.pattern == static_cast<double>(PatternKind::Hover)) { // (where the aircraft hovers, given nothing that shapes a circuit)
+        if (const Reason why = hoverSupport(); why != Reason::None) return why;
+        if (route::hoverFault(l.pattern, l.shape) >= 0) return Reason::InvalidWaypoint;
+    }
+    return optimisable(l.pattern.speedOptimization, 0, field); // (no performance tables to fly one from: not implemented)
+}
+
+void CapabilityHost::completeLoiters(route::Plan& p, const sim::VehicleState& state) const noexcept {
+    bool magnetic = false;
+    for (std::uint32_t k = 0; k < p.loiterCount; ++k) { // an optimisation's speed first, at its point's altitude, as a pattern's
+        RouteLoiter& l = p.loiters[k];
+        const Waypoint& w = p.points[l.point];
+        optimise(l.pattern.speed, l.pattern.speedReference, l.pattern.speedOptimization, w.altitudeM, w.altitudeReference, state);
+        magnetic = magnetic || l.shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth);
+    }
+    WindEstimate wind;
+    wind.update(state, 0.0);
+    route::completeLoiters(p, state, performance_, (adapter_->features() & kFeatureHover) != 0, wind.northMs, wind.eastMs, &config_->altimeter,
+                           magnetic ? yearNow() : 2025.0);
 }
 
 void ControlStack::command(const PatternCommand& pattern, const PatternShape& shape) {

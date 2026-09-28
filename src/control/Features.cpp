@@ -83,7 +83,7 @@ const FeatureDef kFeatures[] = {
 
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
-        "loiter points, speed and climb optimisation, acceleration, times of arrival, paths and branches, path terminators, "
+        "speed and climb optimisation, acceleration, times of arrival, paths and branches, path terminators, "
         "4D states and navigation performance (FA-6); planning metadata (FA-7)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
@@ -117,8 +117,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/waypoint_type/takeoff", "fsim.guidance.route", N, 9, 0, ""},
     {"fsim.guidance.route/waypoint_type/landing", "fsim.guidance.route", N, 10, 0, ""},
     {"fsim.guidance.route/waypoint_type/hard_ditch", "fsim.guidance.route", N, 16, 0, ""},
-    {"fsim.guidance.route/loiter_point", "fsim.guidance.route", P, 6, 0,
-     "a loiter inside the route, with its pattern and duration, then on; a route can end in an orbit"}, // WPT-18
+    {"fsim.guidance.route/loiter_point", "fsim.guidance.route", S, 0, 0, ""},                // WPT-18 (FA-6b2)
     {"fsim.guidance.route/path_terminators", "fsim.guidance.route", N, 6, 0, ""},            // WPT-19
     {"fsim.guidance.route/inertial_states", "fsim.guidance.route", N, 6, 0, ""},             // WPT-20
     {"fsim.guidance.route/required_navigation_performance", "fsim.guidance.route", N, 6, 0, ""}, // WPT-21

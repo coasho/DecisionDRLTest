@@ -228,6 +228,19 @@ double brakingLimit(const Performance& performance, double speedAfterMs, double 
     return std::sqrt(speedAfterMs * speedAfterMs + 2.0 * braking(performance) * std::max(toGoM, 0.0));
 }
 
+double stoppingLimit(const Performance& perf, double toGoM) noexcept {
+    const double lag = std::isfinite(perf.velocityBandwidthRadS) && perf.velocityBandwidthRadS > 0.0 ? 1.0 / perf.velocityBandwidthRadS : 10.0;
+    const double a = std::isfinite(perf.maxDecelerationMs2) && perf.maxDecelerationMs2 > 0.0 ? 0.5 * perf.maxDecelerationMs2 : 0.25;
+    return a * (std::sqrt(lag * lag + 2.0 * std::max(toGoM, 0.0) / a) - lag);
+}
+
+double stoppingDistanceM(const Performance& perf, double speedMs) noexcept {
+    const double lag = std::isfinite(perf.velocityBandwidthRadS) && perf.velocityBandwidthRadS > 0.0 ? 1.0 / perf.velocityBandwidthRadS : 10.0;
+    const double a = std::isfinite(perf.maxDecelerationMs2) && perf.maxDecelerationMs2 > 0.0 ? 0.5 * perf.maxDecelerationMs2 : 0.25;
+    const double v = std::max(speedMs, 0.0) / a + lag;
+    return 0.5 * a * (v * v - lag * lag);
+}
+
 double verticalSpeedTo(double altitudeMslM, double feedforward, const sim::VehicleState& s, const Performance& f, bool hovers) noexcept {
     const double gain = known(f.altitudeGainPerS, hovers ? 0.5 : 0.25);
     const double climb = known(f.maxClimbMs, hovers ? 3.0 : 6.0), descent = known(f.maxDescentMs, climb);
@@ -1093,6 +1106,90 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
     return Reason::None;
 }
 
+int loiterFault(const Plan& p) noexcept {
+    auto at = [](std::uint32_t i) { return static_cast<int>(std::min<std::uint32_t>(i, 0x7FFF)); };
+    for (std::uint32_t k = 0; k < p.loiterCount; ++k) {
+        const RouteLoiter& l = p.loiters[k];
+        if (l.point >= p.count || !loiterPoint(p.points[l.point])) return at(l.point); // (a loiter at no loiter point)
+        for (std::uint32_t j = 0; j < k; ++j)
+            if (p.loiters[j].point == l.point) return at(l.point); // (two for one point)
+        // its place its point's: none of its own
+        const PatternCommand& c = l.pattern;
+        const PatternShape& shape = l.shape;
+        const double own[] = {c.latitudeRad, c.longitudeRad, c.altitudeM, c.altitudeReference, shape.frame, shape.frameRotation,
+                              shape.frameOffsets, shape.frameXM, shape.frameYM, shape.frameZM};
+        for (const double v : own)
+            if (!isHold(v)) return at(l.point);
+        if (!isHold(l.endTimeS) && !std::isfinite(l.endTimeS)) return at(l.point);
+        // an end, but where it ends the route (a loiter it never leaves: nothing after it would be flown)
+        const bool ends = !isHold(c.durationS) || !isHold(shape.orbits) || !isHold(l.endTimeS);
+        if (!ends && (p.repeat || l.point != p.last())) return at(l.point);
+    }
+    for (std::uint32_t i = 0; i < p.count; ++i)
+        if (loiterPoint(p.points[i]) && !p.loiterAt(i)) return at(i); // (a loiter point with none)
+    return -1;
+}
+
+void completeLoiters(Plan& p, const sim::VehicleState& state, const Performance& performance, bool hovers, double windNorthMs, double windEastMs,
+                     const Altimeter* altimeter, double magneticYear) noexcept {
+    for (std::uint32_t k = 0; k < p.loiterCount; ++k) {
+        RouteLoiter& l = p.loiters[k];
+        if (l.point >= p.count) continue; // (loiterFault's)
+        const Waypoint& w = p.points[l.point];
+        PatternCommand& c = l.pattern;
+        PatternShape& shape = l.shape;
+        // its place its point's, in its frame (where the point moves, it moves with it: 4.25), and the point's speed
+        c.latitudeRad = w.latitudeRad, c.longitudeRad = w.longitudeRad;
+        c.altitudeM = w.altitudeM, c.altitudeReference = w.altitudeReference;
+        if (!isHold(w.frame)) {
+            shape.frame = w.frame, shape.frameRotation = w.frameRotation, shape.frameOffsets = w.frameOffsets;
+            shape.frameXM = w.frameXM, shape.frameYM = w.frameYM, shape.frameZM = w.frameZM;
+        }
+        if (isHold(c.speed) && isHold(c.speedOptimization)) c.speed = w.speed, c.speedReference = w.speedReference;
+        // then what a pattern leaves out, as an aircraft there would: arriving on the leg into it, at its speed
+        const double in = p.leg(l.point, l.point == p.start).courseInRad;
+        sim::VehicleState there = state;
+        there.latitudeRad = w.latitudeRad, there.longitudeRad = w.longitudeRad;
+        if (w.altitudeReference != static_cast<double>(AltitudeReference::AboveGround)) // (above ground: as high as the aircraft is)
+            there.altitudeMslM = altitudeMslOf(w.altitudeM, static_cast<AltitudeReference>(static_cast<int>(w.altitudeReference)), state, altimeter);
+        const double v = std::max(plannedSpeed(w.speed, w.speedReference, there.altitudeMslM), 2.0);
+        there.velocityNedMs[0] = v * std::cos(in), there.velocityNedMs[1] = v * std::sin(in);
+        there.eulerRad[2] = in;
+        completePattern(c, shape, there, performance, hovers, windNorthMs, windEastMs, altimeter, magneticYear);
+    }
+}
+
+void loiterEntry(const PatternCommand& c, double lat, double lon, PatternShape& shape) noexcept {
+    if (c.pattern != static_cast<double>(PatternKind::Orbit) || shape.twoCircles() || !isHold(shape.entryLatitudeRad)) return;
+    double north, east; // (where it begins, from its centre)
+    geo::localNorthEastM(c.latitudeRad, c.longitudeRad, lat, lon, north, east);
+    const double d = std::hypot(north, east), r = c.radiusM;
+    if (!(r > 0.0) || !(d > 1.01 * r)) return;
+    const double bearing = std::atan2(east, north) + (c.clockwise == 0.0 ? -1.0 : 1.0) * std::acos(r / d); // (the tangent's touch, its way round)
+    geo::offsetLatLon(c.latitudeRad, c.longitudeRad, r * std::cos(bearing), r * std::sin(bearing), shape.entryLatitudeRad, shape.entryLongitudeRad);
+}
+
+void loiterExit(const PatternCommand& c, double lat, double lon, PatternShape& shape) noexcept {
+    const auto kind = static_cast<PatternKind>(static_cast<int>(orHold(c.pattern, 0.0)));
+    if (kind == PatternKind::Hover || shape.twoCircles() || !isHold(shape.exitLatitudeRad)) return;
+    if (kind != PatternKind::Orbit) { // (at its point, on it)
+        shape.exitLatitudeRad = c.latitudeRad, shape.exitLongitudeRad = c.longitudeRad;
+        return;
+    }
+    double north, east; // (the next point, from its centre)
+    geo::localNorthEastM(c.latitudeRad, c.longitudeRad, lat, lon, north, east);
+    const double d = std::hypot(north, east), r = c.radiusM;
+    if (!(r > 0.0) || !(d > 1.01 * r)) return;
+    const double bearing = std::atan2(east, north) - (c.clockwise == 0.0 ? -1.0 : 1.0) * std::acos(r / d); // (the tangent's touch, its way round)
+    geo::offsetLatLon(c.latitudeRad, c.longitudeRad, r * std::cos(bearing), r * std::sin(bearing), shape.exitLatitudeRad, shape.exitLongitudeRad);
+}
+
+double loiterJoinM(const PatternCommand& c, const PatternShape& shape) noexcept {
+    const auto kind = static_cast<PatternKind>(static_cast<int>(orHold(c.pattern, 0.0)));
+    const bool circle = kind == PatternKind::Orbit || (shape.twoCircles() && (kind == PatternKind::Racetrack || kind == PatternKind::FigureEight));
+    return circle && c.radiusM > 0.0 ? 2.0 * c.radiusM : 0.0; // (a radius outside its circle)
+}
+
 void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept {
     const std::uint32_t n = p.count;
     auto point = [&p](std::uint32_t i) -> const Waypoint& { return p.points[i]; };
@@ -1159,8 +1256,7 @@ VelocityCommand hoverOver(const sim::VehicleState& s, const Performance& perf, d
     geo::localNorthEastM(s.latitudeRad, s.longitudeRad, lat, lon, north, east);
     const double distance = std::hypot(north, east);
     const double lag = std::isfinite(perf.velocityBandwidthRadS) && perf.velocityBandwidthRadS > 0.0 ? 1.0 / perf.velocityBandwidthRadS : 10.0;
-    const double a = std::isfinite(perf.maxDecelerationMs2) && perf.maxDecelerationMs2 > 0.0 ? 0.5 * perf.maxDecelerationMs2 : 0.25;
-    const double closing = std::fmin(transit, std::fmin(0.5 / lag * distance, a * (std::sqrt(lag * lag + 2.0 * distance / a) - lag)));
+    const double closing = std::fmin(transit, std::fmin(0.5 / lag * distance, stoppingLimit(perf, distance)));
     const double k = distance > 1e-6 ? closing / distance : 0.0;
     return VelocityCommand{kHold, verticalSpeedMs, kHold, kHold, frameNorthMs + k * north, frameEastMs + k * east};
 }
@@ -1168,8 +1264,9 @@ VelocityCommand hoverOver(const sim::VehicleState& s, const Performance& perf, d
 void replan(Plan& p, std::uint32_t i, bool firstLap, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept {
     const Waypoint& w = p.points[i];
     const bool entry = firstLap && i == p.start;
+    const bool kept = entry || ((i > 0 || p.repeat) && loiterPoint(p.points[p.prev(i)])); // (after a loiter, from where it ended: 4.31)
     Leg& in = entry ? p.entry : p.legs[i];
-    if (entry) {
+    if (kept) {
         in = makeLeg(in.latA, in.lonA, w.latitudeRad, w.longitudeRad, p.rhumb);
     } else if (i > 0 || p.repeat) {
         const std::uint32_t h = p.prev(i);

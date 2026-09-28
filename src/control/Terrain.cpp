@@ -120,6 +120,29 @@ struct Walk {
             h = height(x);
         });
     }
+    /// A pattern's way in and its lap from where it is joined, level at `altitude`, then its way out `awayM` long.
+    bool pattern(const route::Pattern& p, double altitude, double speedMs, bool above, std::int16_t i, double awayM) {
+        auto level = [altitude](double) { return altitude; };
+        auto line = [&](const route::Line& l) {
+            return piece(l.lengthM, speedMs, above, i, [&](double x, double& lat, double& lon, double& h) {
+                geo::offsetLatLon(p.lat0, p.lon0, l.northM + x * std::cos(l.courseRad), l.eastM + x * std::sin(l.courseRad), lat, lon);
+                h = altitude;
+            });
+        };
+        auto fly = [&](const route::Pattern::Piece& q) {
+            return q.arc ? arc(p.lat0, p.lon0, q.turn.centreNorthM, q.turn.centreEastM, q.turn.radiusM, q.turn.entryBearingRad, q.turn.angleRad,
+                               q.turn.radiusM * q.sweepRad, speedMs, above, i, level)
+                         : line(q.line);
+        };
+        for (std::uint32_t k = 0; k < p.entryCount; ++k)
+            if (fly(p.entry[k])) return true;
+        for (std::uint32_t k = 0, j = p.first; k < p.count; ++k, j = p.next(j))
+            if (fly(p.pieces[j])) return true;
+        if (!(awayM > 0.0)) return false;
+        route::Line away = p.away;
+        away.lengthM = awayM;
+        return line(away);
+    }
 };
 
 } // namespace
@@ -154,11 +177,15 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
                                                      : w.altitudeM;
             f.rateMs = isHold(w.climbRateMs) ? kNaN : w.climbRateMs;
             f.speedMs = route::plannedSpeed(w.speed, w.speedReference, msl(f.to, above, w.latitudeRad, w.longitudeRad));
-            f.lengthM = l.lengthM;
+            // (a loiter point's leg, to where its loiter is joined, its altitude there: 4.31)
+            const RouteLoiter* loiter = route::loiterPoint(w) ? p.loiterAt(i) : nullptr;
+            const double joinM = loiter ? route::loiterJoinM(loiter->pattern, loiter->shape) : 0.0;
+            f.lengthM = loiter ? std::max(l.lengthM - joinM, 0.0) : l.lengthM;
             const route::Turn* before = p.turnBefore(i, firstLap);
             const route::Turn& turn = p.turn(i, firstLap);
             const bool turns = (i + 1 < p.count || p.repeat) && turn.radiusM > 0.0;
-            const double start = before ? before->leadM : 0.0, end = l.lengthM - (turns ? turn.leadM : 0.0);
+            const double start = before ? before->leadM : 0.0;
+            const double end = loiter ? std::max(start, l.lengthM - joinM) : l.lengthM - (turns ? turn.leadM : 0.0);
             const double arcM = turns ? turn.radiusM * std::abs(turn.angleRad) : 0.0;
             const auto index = static_cast<std::int16_t>(i);
             if (walk.piece(end - start, f.speedMs, above, index, [&](double x, double& lat, double& lon, double& h) {
@@ -166,6 +193,21 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
                     h = f.at(start + x);
                 }))
                 return true;
+            if (loiter) { // its loiter from where it is joined: its way in and a lap, at its point's altitude
+                double lat = 0.0, lon = 0.0;
+                onLegAt(l, end, lat, lon);
+                PatternShape shape = loiter->shape;
+                route::loiterEntry(loiter->pattern, lat, lon, shape);
+                route::Pattern pattern;
+                route::planPattern(pattern, loiter->pattern, lat, lon, shape,
+                                   loiter->shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? yearNow() : 2025.0,
+                                   route::onLeg(l, lat, lon).courseRad);
+                const double speed = route::plannedSpeed(loiter->pattern.speed, loiter->pattern.speedReference, msl(f.to, above, lat, lon));
+                if (walk.pattern(pattern, f.to, speed, above, index, 0.0)) return true;
+                fromMsl = msl(f.to, above, w.latitudeRad, w.longitudeRad);
+                last = f;
+                return false;
+            }
             if (turns && walk.arc(w.latitudeRad, w.longitudeRad, turn.centreNorthM, turn.centreEastM, turn.radiusM, turn.entryBearingRad, turn.angleRad,
                                   arcM, f.speedMs, above, index, [&](double x) { return f.at(end + x); }))
                 return true;
@@ -181,6 +223,7 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
             return walk.hit;
         }
         const Waypoint& w = p.points[p.last()];
+        if (route::loiterPoint(w)) return walk.hit; // (it ends in its loiter, walked)
         const bool above = aboveGround(w.altitudeReference);
         const auto index = static_cast<std::int16_t>(p.last());
         auto height = [&](double x) { return last.at(last.lengthM + x); };
@@ -208,30 +251,10 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         const bool above = aboveGround(c->altitudeReference);
         const double altitude = barometric(c->altitudeReference) ? barometricMslM(config_->altimeter, c->altitudeM) : c->altitudeM; // (its isobar)
         const double speed = route::plannedSpeed(c->speed, c->speedReference, msl(altitude, above, c->latitudeRad, c->longitudeRad));
-        auto level = [&](double) { return altitude; };
         const bool leaves = p.exit >= 0 && (!isHold(c->durationS) || !isHold(shape.orbits));
         const double awayM = leaves ? std::max(speed, 0.0) * kAheadS : 0.0;
         spacing(p.entryM() + p.lapM() + awayM);
-        auto line = [&](const route::Line& l) {
-            return walk.piece(l.lengthM, speed, above, -1, [&](double x, double& lat, double& lon, double& h) {
-                geo::offsetLatLon(p.lat0, p.lon0, l.northM + x * std::cos(l.courseRad), l.eastM + x * std::sin(l.courseRad), lat, lon);
-                h = altitude;
-            });
-        };
-        auto fly = [&](const route::Pattern::Piece& piece) {
-            return piece.arc ? walk.arc(p.lat0, p.lon0, piece.turn.centreNorthM, piece.turn.centreEastM, piece.turn.radiusM,
-                                        piece.turn.entryBearingRad, piece.turn.angleRad, piece.turn.radiusM * piece.sweepRad, speed, above, -1, level)
-                             : line(piece.line);
-        };
-        for (std::uint32_t i = 0; i < p.entryCount; ++i)
-            if (fly(p.entry[i])) return walk.hit;
-        for (std::uint32_t k = 0, i = p.first; k < p.count; ++k, i = p.next(i))
-            if (fly(p.pieces[i])) return walk.hit;
-        if (leaves) {
-            route::Line away = p.away;
-            away.lengthM = awayM;
-            if (line(away)) return walk.hit;
-        }
+        walk.pattern(p, altitude, speed, above, -1, awayM);
         return walk.hit;
     }
 

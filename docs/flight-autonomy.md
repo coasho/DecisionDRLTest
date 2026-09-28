@@ -705,7 +705,7 @@ A-GRA's route segment ends at an end point that is one of three: a WayPoint ("a 
 
 - **Its altitude block** (`altitudeMinM`, `altitudeMaxM`, in the point's reference): an altitude left out is held within it - the point before's, or the aircraft's for the first. One given outside it, or a block whose most is below its least, is refused `invalid_waypoint` naming the point.
 - **A barometric altitude** on a route is flown on its isobar, as the hsa's (4.22): the behaviour reads it through the altimeter at every update, and the host's checks compare heights above sea level, the terrain walk too. Until FA-6a a route refused it `not_implemented`.
-- **Its kind** (`kind`, `EndPointKind`): left out, a turn point as `turn` says, as before. A waypoint is flown over, its next leg joined after it. A loiter point is FA-6b's: refused `not_implemented`, naming the point.
+- **Its kind** (`kind`, `EndPointKind`): left out, a turn point as `turn` says, as before. A waypoint is flown over, its next leg joined after it. A loiter point flies the loiter beside it (4.31); until FA-6b2 it was refused `not_implemented`, naming the point.
 - **A waypoint's type** (`waypointType`, `WaypointType`, A-GRA's WaypointTypeEnum): given alone, it makes the point a waypoint; given with another kind, it is refused `invalid_waypoint`.
   - Nav only and passive are flown. The end of a path is taken on the route's last point: a route is one path until FA-6e.
   - The others ask for an action FA does not fly yet. Each is answered as its row in the support table says, naming the point: `not_supported` where the aircraft cannot, else `not_implemented`. They are a taxi's points (FA-9, where the aircraft taxies), a runway's and a takeoff's (FA-9), an approach's and a touchdown (FA-10), and a hard ditch (FA-16). The end of a path before the route's end is FA-6e's.
@@ -739,6 +739,42 @@ A-GRA's TurnPoint gives a turn type (TURN_SHORT, FLY_OVER, CAPTURE_OUTBOUND_COUR
   - C++: `TurnType::CaptureOutboundCourse`, `StartTurn`, `EndTurn`; `Waypoint::courseRad`, `turnRadiusM`; `route::makeArc`.
   - C ABI 1.27: `FSIM_TURN_CAPTURE_OUTBOUND_COURSE`, `FSIM_TURN_START_TURN`, `FSIM_TURN_END_TURN`; `fsim_waypoint`'s `course_rad` and `turn_radius_m`.
   - Python: `fsim.TurnType`'s three; `fsim.Waypoint`'s `course_rad` and `turn_radius_m`.
+
+### 4.31 A-GRA's loiter points inside a route (as FA-6b2 builds them)
+
+A-GRA's third end point, the LoiterPoint, gives a loiter - an orbit, a hover or a hold (MA_LoiterType), each as the loiter command gives it - and a time it ends. Its schema says only that it "specifies a Loiter"; its ICD, that waypoint behaviour may include a loiter or a hold. Neither says where a loiter in a route begins, nor how the route leaves it. FA-6b2 flies it as a flight management system flies a hold or an orbit on a route (WPT-18).
+
+- **Its loiter** (`RouteLoiter`, beside the route's waypoints as they go beside its RouteCommand; 16 a route at most): at the waypoint `point`, of kind `EndPointKind::LoiterPoint`, a `PatternCommand` and its `PatternShape` - every pattern FA-5 flies: an orbit, a racetrack, a figure-eight, a hold with its ways in and turn types, a rotorcraft's hover, two circles, laps, entry and exit points - and `endTimeS`, A-GRA's EndTime, in simulation seconds.
+- **Its place is its point's.** The loiter takes the point's latitude, longitude, altitude, altitude reference and frame; any of its own is refused `invalid_waypoint`, naming the point. Its speed left out is the point's segment's. A point in a moving frame carries its loiter with it (4.25).
+- **Checked as a pattern NEW is**, at its point:
+  - what it leaves out is filled in as for an aircraft arriving there along the leg in: the course it tracks, and the radius its speed, the wind and 80 % of its bank give;
+  - its speed and radius are limited as a pattern's are;
+  - a field a pattern refuses is refused `invalid_waypoint`, naming the point;
+  - a hover where the aircraft does not hover, and an optimisation with no tables, are refused as a pattern's are (`not_supported`, `not_implemented`), naming the point;
+  - a limit names the point, and the loiter's field numbered after the waypoint's 22: the pattern's fields are 22 to 34, its shape's 35 to 56, its end time 57 (a radius held to the full bank's: field 27).
+- **Refused `invalid_waypoint`, naming the point:** a loiter point without a loiter; a loiter at a point that is not a loiter point, or past the route; two loiters for one point; an end time not finite.
+- **Its end:**
+  - its duration or its laps flown (then on round to its exit point, if it has one), or its end time, whichever comes first;
+  - a loiter with no end is the route's end: only its last point's, in a route that does not repeat, else refused `invalid_waypoint`;
+  - an end time already past ends it as it begins.
+- **Flown.** A loiter point has no turn of its own: a fly-by or a fly-over flies over it, and the other turn types, or a turn radius, are refused. The leg into it is flown until its pattern takes the aircraft on:
+  - an orbit (or two circles, the first), a radius outside its circle. It is entered along the tangent from there, and joins the circle on its course;
+  - a hold, a racetrack or a figure-eight, at its point, which is on the pattern. It is flown into as a pattern from there: a hold by its way in, direct or ATC's for the side the aircraft comes from;
+  - a rotorcraft's hover, where the aircraft would stop from its speed, its velocity loop's lag counted. Its position loop then makes the approach, as the hover pattern's does.
+  On the leg, a rotorcraft slows for the loiter's radius, or to stop for a hover.
+- **Left** for the next point, unless its exit point is given: an orbit where its circle's tangent runs to the next point; a hold, a racetrack or a figure-eight at its point, as a hold is left at its fix. The leg to the next point then runs from where the aircraft left, as the route's entry runs from where the route began, and the turn at the next point is planned again.
+- **The last point's** loiter: the route completes at its end (with no end, as it begins), and the pattern flies on, round or out along its exit. The route's `end` does not apply.
+- **Progress** while it loiters:
+  - its point's segment, flown (100 %);
+  - the pattern's cross-track, course, altitude and speed;
+  - the time to go: the pattern's (its duration's, its laps', its end time's) and the legs after it.
+  Its end point is a `LoiterPoint`.
+- **The checks:** the terrain walk flies each loiter's way in and a lap from where it begins, at its point's altitude, naming the point. The endurance adds each loiter's duration, laps or time to its end time from its arrival, whichever is least.
+- **Kept and read back** complete, but with its place left out, since that is its point's: a loiter read back and submitted again is taken again. An UPDATE with new waypoints takes their loiters; its options alone keep both.
+- **Surfaces.**
+  - C++: `RouteLoiter`; `PathStore::routeLoiters`; `BatchCommand::loiters`, `Setpoint::loiters`; the World's route `submit` and `update` take a `Span<const RouteLoiter>`; `ControlStack::command(route, waypoints, loiters)`.
+  - C ABI 1.28: `fsim_route_loiter` (its point, the pattern's 35 fields, `end_time_s`) and `fsim_route_loiter_init`; `fsim_vehicle_submit_route_loiters`, `fsim_activity_update_route_loiters`; `fsim_batch_command`'s `loiters` and `loiter_count`, which `fsim_activity_get_setpoint` fills.
+  - Python: `fsim.RouteLoiter(point, <the pattern's fields>, end_time_s)`; `submit_route(..., loiters=)`, `update_route(waypoints, loiters=)`, and a batch's or a task's `loiters=`; read back in the setpoint's `loiters`.
 
 ## 5. Applicability (D6)
 
@@ -970,7 +1006,7 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
 - FA-6a, the waypoint as the schema gives it: altitude blocks and the barometric reference, waypoints and their types, points in frames (WPT-12, WPT-17, WPT-22; 4.29), done 2026-09-28 and measured in section 14;
 - FA-6b, turn points and loiter points, in two steps:
   - FA-6b1, turn points: capturing the outbound course, starting and ending a turn, a course at the point, a turn's radius (WPT-04; 4.30), done 2026-09-28 and measured in section 14;
-  - FA-6b2, a loiter inside a route, then on (WPT-18);
+  - FA-6b2, a loiter inside a route, then on (WPT-18; 4.31), done 2026-09-28 and measured in section 14;
 - FA-6c, per-segment performance: speed and climb optimisation, acceleration (WPT-06, WPT-08, WPT-10);
 - FA-6d, 4D: required times of arrival, planned inertial states, required navigation performance (WPT-11, WPT-20, WPT-21);
 - FA-6e, paths: several per route with ids and types, links and conditional branches (WPT-13, WPT-14, WPT-15);
@@ -2018,6 +2054,50 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The route's look ahead for arcs runs only where its plan has one (`Plan::arcs`): the route's case read +1.4 %, then +1.2 %.
   - The command cases are within −1.2 % to +1.5 %. World throughput is 100.0 to 100.6 % of FA-6a's; protection costs at most 0.2 %.
 - ctest: all 289 tests pass.
+
+**FA-6b2, A-GRA's loiter points inside a route (WPT-18).**
+- **An orbit** (`test_route_loiters`, calm): a C172x east at 1,500 m, 4 km, then 10 km on a loiter point with an orbit of two laps, then 4 km north. Read back complete, its place left out: an orbit, right turns, R 417 m (its speed's and 80 % of its bank's), the point's segment's speed.
+  - Met 833 m from its point, a radius outside its circle, it was entered along the tangent from there. It flew 3.02 laps within 10.7 m of its circle once joined: two from where it joined, then on round to where its tangent runs to the next point.
+  - Half a lap in, its time to go read 152 s: its laps and the leg after it. It left 318 s in, and the leg on, direct from where it left, was 0.5 m off in its second half. The route completed.
+  - Handed over a radius out and left to the pattern's own join, the Skua, whose lookahead exceeds its radius, was still 21 % off its circle half a lap in (the fleet). Entered along the tangent, it read 12.8 m.
+  - Left wherever its laps ended, the leg on first intercepted the planned leg from the point: 28 m off in its second half. Flown direct from where it left, 20.6 m, after a turn onto it. Leaving where its tangent runs to the next point, 0.5 m.
+- **A hover** (an IRIS): north 50 m; east 50 m, with a 15 s hover there; south 50 m, ending in a hover until canceled.
+  - It arrived at 25.7 s and left at 40.7 s: 15.0 s there, counted from its arrival, within 0.95 m of its point.
+  - It completed on arriving at its last point, and hovered on within 0.60 m of it.
+  - A UH-1H handed over within a metre of its point, as the route's end stop is, arrived at 12.4 m/s and swung 49 m past it. Braking with its velocity loop's lag counted, it swung 16 m. Handed over where it would stop from its speed, its position loop brought it in within 3.0 m, as the hover pattern's does.
+  - The route's own end stop (`EndBehavior::Loiter`) still swings a UH-1H 49 m past its last point: raised as a task of its own.
+- **A hold** (a C172x): at a fix 10 km east until 300 s, its exit at its fix; then an orbit 5 km north that ends the route.
+  - Its inbound course was the leg's (east), its legs 3,269 m and its turns 1,040 m. It flew 1,034 m past its fix, 4,309 m back and 2,080 m to its right: the racetrack.
+  - It left 424 s in (its end time was 300 s, then on round to its fix), 0.6 m from its fix.
+  - The route completed as the aircraft joined the orbit, 506 s in, and it orbited on at 415 to 418 m (R 417).
+- **A moving point:** once round an orbit at a point 500 m west of a ship moving north at 6 m/s: 15.4 m off its circle round the ship's point (R 417), then on.
+- **Refused, naming the point:** a loiter point with no loiter; a loiter at a waypoint, past the route, or two for one point; a loiter's own latitude, altitude or frame offsets; no end before the route's end, and none in a route that repeats; an end time not finite; a kind of 7 and a radius of −5 m; a start turn type and a turn radius at a loiter point; a seventeenth loiter.
+  - A stock C172x's hover: `not_implemented`, as its hover pattern's row says (it declares nothing). The hangar's C172 declares it cannot hover: `not_supported`.
+  - An optimisation on the stock C172x (no tables): `not_implemented`. On the hangar's C172, it is planned at the tables' best speed at its point's altitude.
+  - A radius of 50 m, tighter than its full bank flies at its speed: clamped (flagged), the adjustment naming the point and field 27. Under Reject, refused `performance_limit` at the point.
+- **Kept:** read back as given while waiting for its start window, complete once started; kept by an UPDATE of the options alone, replaced with new waypoints (none for a loiter point: refused); taken by a task and by a batch, read back with it; validated.
+- **Terrain** (`test_terrain_check`): a C172x at 1,000 m with an orbit of 3 km at a point 8 km east, where a ridge rises at 10 km, was refused `terrain_conflict` at the point, on its circle. An orbit of 800 m was flown.
+- **The fleet** (`test_fleet`): every aircraft flies three orbit radii ahead, then a loiter point eight ahead, and on to a point two radii to its right. A wing orbits the point once; a rotorcraft hovers over it for 10 s. All 35 complete.
+  - The wings swept 1.58 laps each: once round, and on to where they leave for the next point.
+  - From half a lap in, the wings kept within 2.7 % of their radius: the C172's 9.5 m, the Skua's 12.8 m of 132, and in metres the F-16C's 18.7 m (0.8 %).
+  - The rotorcraft kept within 1.0 m of their point once there. The UH-1H got there 95 s into its loiter: its position loop's approach from where it would stop.
+- **Unchanged, to the last bit:**
+  - the route probe (120 lines) and the curve probe (64), identical to FA-6b1's build;
+  - the hover's closing on a moving point (`route::hoverOver`) has its stopping speed factored out as `route::stoppingLimit`, the expression unchanged.
+- **Changed, named:** a loiter point without its loiter was refused `not_implemented`; it is now refused `invalid_waypoint`. The C++ and Python tests that pinned the old refusal now expect the new one.
+- **The support table:** `route/loiter_point` is supported, and the route capability's pending list no longer names loiter points.
+- **Conformance:** the walks draw as they did. The optimise walks give points a loiter now and then, of every kind the vehicle flies. It ends by its time, its laps or its end time, and now and then it is one the vehicle cannot fly.
+- **Surfaces:** the C ABI's 1.28 block (an orbit read back; none for its point refused; an UPDATE with its waypoints and theirs; a radius clamped, named by its point and field 27; a batch's route with its loiter); Python's `test_route_loiters` (by name, read back, flown, updated, batched, a task, refused, clamped).
+- **Memory:** a loiter is 296 bytes. Sixteen take 4.6 KB in the path store, in the host's route plan and in each route behaviour's plan. A route behaviour also holds a pattern behaviour, made with it.
+- **Digests:** identical to FA-6b1's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6b1, both builds run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`.
+  - The micro cases are within −2.4 % to +1.7 %: the route's −2.4 %, the pattern's +0.8 %.
+  - The command cases are within −0.8 % to +0.8 %, but a behaviour's NEW: +6.2 % and +5.8 % (its minimum 125 and 126 ns, then 133).
+    - Every function only that path runs is the same instructions in both builds: the registry's `create`, the hold behaviour's `start`, `launch`, `takeOver`, `start`, `end`, `makeRecord`, `noteEnd`.
+    - `submitWith` and `prepare` pass one more argument. A level switch's NEW, which runs them too, read −0.6 % and +0.6 %.
+    - `submitWith` grew 448 bytes, its waiting branch's loiters: where the code falls has moved, as FA-3b recorded for this case.
+  - World throughput is 100.1 to 101.1 % of FA-6b1's; protection costs at most 0.8 %.
+- ctest: all 295 tests pass.
 
 ## Appendix A: the inventory
 

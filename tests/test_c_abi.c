@@ -985,6 +985,73 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
         }
         {
+            /* ABI 1.28 (4.31): a loiter point's loiter - twice round an orbit, its place its point's - read back complete; a
+               loiter point with none refused, naming it; an UPDATE with its waypoints and theirs; a radius tighter than it
+               flies held to it, named by its point and its field after the waypoint's 22; a batch's route with its loiters */
+            fsim_waypoint pts[3];
+            fsim_route_loiter lo;
+            fsim_batch_command sp, item;
+            fsim_command_adjustment adj;
+            fsim_command_detail d;
+            fsim_command_result answer;
+            double options[4];
+            const fsim_vehicle_state* at;
+            fsim_activity_id route_id;
+            int k;
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            at = fsim_vehicle_state_ptr(world, b);
+            for (k = 0; k < 3; ++k) fsim_waypoint_init(&pts[k]);
+            fsim_route_loiter_init(&lo);
+            CHECK(lo.struct_size == sizeof lo && lo.point == 0 && isnan(lo.fields[0]) && isnan(lo.fields[34]) && isnan(lo.end_time_s));
+            CHECK(fsim_mode_field_count(FSIM_MODE_PATTERN) == 35);
+            /* 3 km and 8 km north of b - twice round an orbit there - then 3 km east of it */
+            pts[0].latitude_rad = at->latitude_rad + 3000.0 / 6371008.8, pts[0].longitude_rad = at->longitude_rad;
+            pts[1].latitude_rad = at->latitude_rad + 8000.0 / 6371008.8, pts[1].longitude_rad = at->longitude_rad;
+            pts[1].kind = FSIM_END_POINT_LOITER_POINT;
+            pts[2].latitude_rad = pts[1].latitude_rad, pts[2].longitude_rad = at->longitude_rad + 3000.0 / (6371008.8 * cos(at->latitude_rad));
+            lo.point = 1;
+            lo.fields[0] = FSIM_PATTERN_ORBIT;
+            lo.fields[13 + 4] = 2.0; /* (its shape's orbits) */
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_route_loiters(world, b, options, 4, pts, 3, &lo, 1, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            route_id = cr.activity;
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_ROUTE && sp.loiter_count == 1);
+            CHECK(sp.loiters[0].point == 1 && sp.loiters[0].fields[0] == FSIM_PATTERN_ORBIT && sp.loiters[0].fields[13 + 4] == 2.0);
+            CHECK(isnan(sp.loiters[0].fields[1]) && sp.loiters[0].fields[5] > 100.0 && isnan(sp.loiters[0].end_time_s)); /* (its place its
+                                                                                                                           point's; its radius) */
+            /* none for its loiter point: refused, naming it */
+            CHECK(fsim_vehicle_submit_route_loiters(world, b, options, 4, pts, 3, &lo, 0, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 2);
+            /* an UPDATE: its waypoints again, and their loiter once round */
+            lo.fields[13 + 4] = 1.0;
+            CHECK(fsim_activity_update_route_loiters(world, route_id, FSIM_SOURCE_OVERRIDE, 0, options, 4, pts, 3, &lo, 1, &cr) == FSIM_OK &&
+                  cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.loiter_count == 1 && sp.loiters[0].fields[13 + 4] == 1.0);
+            /* a radius of 20 m: held to the tightest it flies, named by its point (1) and its field (22 + 5) */
+            lo.fields[5] = 20.0;
+            CHECK(fsim_vehicle_submit_route_loiters(world, b, options, 4, pts, 3, &lo, 1, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED &&
+                  (cr.flags & FSIM_COMMAND_CLAMPED) != 0);
+            fsim_command_detail_init(&d);
+            CHECK(fsim_last_command_detail(world, &d) == FSIM_OK && d.adjustment_count >= 1);
+            fsim_command_adjustment_init(&adj);
+            CHECK(fsim_last_command_adjustment(world, 0, &adj) == FSIM_OK && adj.index == 1 && adj.field == 22 + 5 && adj.requested == 20.0);
+            route_id = cr.activity;
+            /* a batch's route with its loiter (where its struct has them) */
+            memset(&item, 0, sizeof item);
+            item.struct_size = sizeof item;
+            item.kind = FSIM_BATCH_ROUTE, item.code = FSIM_MODE_ROUTE, item.fields = options, item.count = 4;
+            item.waypoints = pts, item.waypoint_count = 3, item.options = &co;
+            lo.fields[5] = fsim_hold();
+            item.loiters = &lo, item.loiter_count = 1;
+            CHECK(fsim_vehicle_submit_batch(world, b, &item, 1, &answer, NULL) == FSIM_OK && answer.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get_setpoint(world, answer.activity, &sp) == FSIM_OK && sp.loiter_count == 1 && sp.loiters[0].point == 1);
+            CHECK(fsim_activity_cancel(world, answer.activity, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+            (void)route_id;
+        }
+        {
             /* ABI 1.6: the performance, and grants over the priorities (on a, whose live activities are its policy's) */
             fsim_performance perf;
             int32_t mode = -1, reason = -1, allowed = -1, granted = -1, availability = -1;

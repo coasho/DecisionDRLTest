@@ -383,7 +383,8 @@ void CapabilityHost::limitFlight(double& speed, double speedReference, double& a
     }
 }
 
-Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log) {
+Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log,
+                                  Span<const RouteLoiter> loiters) {
     CommandResult& detail = log.result;
     auto bad = [&detail](std::int16_t field) {
         detail.index = field;
@@ -436,13 +437,12 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         detail.index = which;
         return r;
     }
-    // what is not built yet: a loiter inside a route (FA-6b), the end of a path not the route's own end (FA-6e's paths),
-    // and the actions a point's type asks - answered as its row in the support table says: not supported where the
-    // aircraft cannot (a taxi's, without its rule), else not implemented (a taxi's, a runway's and a takeoff's points
-    // FA-9's, an approach's and a touchdown FA-10's, a ditch FA-16's)
+    // what is not built yet: the end of a path not the route's own end (FA-6e's paths), and the actions a point's type
+    // asks - answered as its row in the support table says: not supported where the aircraft cannot (a taxi's, without
+    // its rule), else not implemented (a taxi's, a runway's and a takeoff's points FA-9's, an approach's and a touchdown
+    // FA-10's, a ditch FA-16's)
     for (std::uint32_t i = 0; i < count; ++i) {
         const Waypoint& w = p.points[i];
-        if (w.kind == static_cast<double>(EndPointKind::LoiterPoint)) return point(i, Reason::NotImplemented);
         if (isHold(w.waypointType)) continue;
         const auto type = static_cast<WaypointType>(static_cast<int>(w.waypointType));
         if (type == WaypointType::NavOnly || type == WaypointType::Passive || (type == WaypointType::EndOfPath && i + 1 == count)) continue;
@@ -470,7 +470,24 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     p.repeat = c.repeat == 1.0;
     p.rhumb = c.projection == static_cast<double>(Projection::Rhumb);
     p.end = static_cast<EndBehavior>(static_cast<int>(c.end));
-    if (log.range == RangePolicy::None) return Reason::None; // (what it flies, the behaviour plans from where it starts)
+    // its loiter points' loiters (4.31): 16 at most, each at its point, checked as a pattern NEW is
+    if (loiters.size() > PathStore::kRouteLoiters) return point(loiters[PathStore::kRouteLoiters].point, Reason::InvalidWaypoint);
+    p.loiterCount = static_cast<std::uint32_t>(loiters.size());
+    std::copy_n(loiters.data(), p.loiterCount, p.loiters);
+    if (const int at = route::loiterFault(p); at >= 0) return point(static_cast<std::uint32_t>(at), Reason::InvalidWaypoint);
+    for (std::uint32_t k = 0; k < p.loiterCount; ++k)
+        if (const Reason why = checkLoiter(p.loiters[k]); why != Reason::None) return point(p.loiters[k].point, why);
+    if (log.range == RangePolicy::None) { // (what it flies, the behaviour plans from where it starts: its loiters complete)
+        if (p.loiterCount) {
+            WindEstimate wind;
+            wind.update(state, 0.0);
+            route::plan(p, state.latitudeRad, state.longitudeRad, state.altitudeMslM, std::hypot(wind.northMs, wind.eastMs), performance_, hovers);
+            completeLoiters(p, state);
+            for (std::uint32_t k = 0; k < p.loiterCount; ++k)
+                if (route::shapeFault(p.loiters[k].pattern, p.loiters[k].shape) >= 0) return point(p.loiters[k].point, Reason::InvalidWaypoint);
+        }
+        return Reason::None;
+    }
     const Performance& f = performance_;
     // the altitude a segment climbs from: the point before's, in the same reference; the start's, the aircraft's
     auto from = [&](std::uint32_t i, bool entry) {
@@ -501,6 +518,18 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     WindEstimate wind;
     wind.update(state, 0.0);
     route::plan(p, state.latitudeRad, state.longitudeRad, state.altitudeMslM, std::hypot(wind.northMs, wind.eastMs), f, hovers);
+    // its loiters where they fly (4.31), each against the performance as a pattern is - named by its point, its fields
+    // after the point's - and two circles fitting as limited
+    if (p.loiterCount) {
+        std::int16_t radiusFrom[PathStore::kRouteLoiters];
+        for (std::uint32_t k = 0; k < p.loiterCount; ++k) radiusFrom[k] = radiusField(p.loiters[k].pattern, p.loiters[k].shape);
+        completeLoiters(p, state);
+        for (std::uint32_t k = 0; k < p.loiterCount; ++k) {
+            RouteLoiter& l = p.loiters[k];
+            limitPattern(l.pattern, l.shape, log, radiusFrom[k], static_cast<std::int16_t>(std::min<std::uint32_t>(l.point, 0x7FFF)));
+            if (route::shapeFault(l.pattern, l.shape) >= 0) return point(l.point, Reason::InvalidWaypoint);
+        }
+    }
     auto flown = [&p](std::uint32_t i) { return p.repeat || i >= p.start; }; // (a route that does not repeat flies nothing before its start)
     // its turn points as laid out (4.30): a start's arc through the next point, within 170 degrees, its radius given the arc's
     // (within a metre, or half a percent), one the aircraft can turn at its speed - no clamp makes one flyable: each named;
@@ -622,8 +651,11 @@ Reason CapabilityHost::checkShape(const PatternCommand& c, const PatternShape& s
     return Reason::None;
 }
 
-void CapabilityHost::limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, std::int16_t radiusFrom) const noexcept {
-    limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, log, 9, 3);
+void CapabilityHost::limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, std::int16_t radiusFrom, std::int16_t point) const noexcept {
+    // (a route's loiter's: named by its point, its field after the point's - docs/flight-autonomy.md, 4.31)
+    auto at = [point](std::int16_t field) { return point < 0 ? field : point; };
+    auto of = [point](std::int16_t field) { return point < 0 ? std::int16_t{-1} : static_cast<std::int16_t>(kLoiterField + field); };
+    limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, log, at(9), at(3), of(9), of(3));
     // a radius the aircraft can fly at its speed: a wing's at its full bank, a rotorcraft's a metre
     const Performance& f = performance_;
     double least = 1.0, v = 0.0;
@@ -637,16 +669,16 @@ void CapabilityHost::limitPattern(PatternCommand& c, PatternShape& shape, CheckL
     }
     if (radiusFrom == 16 && banks) { // a bank it can fly, and the radius it gives at it (docs/flight-autonomy.md, 4.23)
         const double given = shape.bankRad;
-        bound(shape.bankRad, f.maxBankRad, true, 16, Constraint::MaxOrientation, log);
+        bound(shape.bankRad, f.maxBankRad, true, at(16), Constraint::MaxOrientation, log, of(16));
         if (shape.bankRad != given) c.radiusM *= std::tan(given) / std::tan(shape.bankRad);
     } else if (radiusFrom == 25 && banks) { // a turn rate its full bank flies at its speed, and the radius it gives (4.24)
         const double given = shape.turnRateRadS; // (at the least radius: v / least, g tan(bank) / v)
-        bound(shape.turnRateRadS, v / least, true, 25, Constraint::MaxOrientation, log);
+        bound(shape.turnRateRadS, v / least, true, at(25), Constraint::MaxOrientation, log, of(25));
         if (shape.turnRateRadS != given) c.radiusM *= given / shape.turnRateRadS;
     } else {
-        bound(c.radiusM, least, false, radiusFrom, Constraint::MaxOrientation, log);
+        bound(c.radiusM, least, false, at(radiusFrom), Constraint::MaxOrientation, log, of(radiusFrom));
     }
-    bound(shape.radius2M, least, false, 20, Constraint::MaxOrientation, log);
+    bound(shape.radius2M, least, false, at(20), Constraint::MaxOrientation, log, of(20));
 }
 
 Reason CapabilityHost::checkCurveOptions(const CurveCommand& c, bool appending, CommandResult& detail) const noexcept {
@@ -815,6 +847,8 @@ void CapabilityHost::writeRoute() {
     store.routeFrameCount = p.frameCount; // (its points' frames, as placed: 4.29)
     std::copy_n(p.frameIds, p.frameCount, store.routeFrameIds);
     std::copy_n(p.frames, p.frameCount, store.routeFrames);
+    store.routeLoiterCount = p.loiterCount; // (its loiters complete, their place their points': 4.31)
+    for (std::uint32_t k = 0; k < p.loiterCount; ++k) store.routeLoiters[k] = route::unplaced(p.loiters[k]);
     ++store.revision;
 }
 
@@ -1089,14 +1123,15 @@ Reason CapabilityHost::axesOf(std::size_t index, const Command& command, const C
 }
 
 Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
-                               const sim::VehicleState& state, CheckLog& log, const PatternShape* shape, const CurveShape* curveShape) {
+                               const sim::VehicleState& state, CheckLog& log, const PatternShape* shape, const CurveShape* curveShape,
+                               Span<const RouteLoiter> loiters) {
     const bool checked = log.range != RangePolicy::None;
     CommandResult& detail = log.result;
     auto* hsa = std::get_if<HsaCommand>(&setpoint);
     if (hsa) // complete it first: what it leaves out, whatever the range policy (the runtime flies a complete setpoint)
         if (const Reason why = resolveHsa(*hsa, state, detail); why != Reason::None) return why;
     if (auto* route = std::get_if<RouteCommand>(&setpoint)) // its waypoints completed, and checked as its range policy says
-        if (const Reason why = checkRoute(*route, waypoints, state, log); why != Reason::None) return why;
+        if (const Reason why = checkRoute(*route, waypoints, state, log, loiters); why != Reason::None) return why;
     if (auto* curve = std::get_if<CurveCommand>(&setpoint)) { // its segments checked as its range policy says (its shape into the scratch)
         curveShape_ = curveShape ? *curveShape : CurveShape{};
         if (const Reason why = checkCurve(*curve, segments, false, state, log); why != Reason::None) return why;
@@ -1231,13 +1266,18 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     Command setpoint = std::move(w.command); // (it flies once: moved, never copied)
     const bool route = std::holds_alternative<RouteCommand>(setpoint);
     if (why == Reason::None) why = prepare(record.capability, setpoint, Span<const Waypoint>(w.waypoints.data(), w.waypoints.size()),
-                                           Span<const NurbsSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape, &w.curveShape);
+                                           Span<const NurbsSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape, &w.curveShape,
+                                           Span<const RouteLoiter>(w.loiters.data(), w.loiters.size()));
     const bool found = why == Reason::None && log.refused != Reason::None; // (refused by what the checks found, not malformed)
     if (why == Reason::None) why = log.refused;
     if (found && w.options.range == RangePolicy::Reject && log.clampable) {
         // what Clamp would fly, suggested in its place (4.11): kept in its entry until a call makes it a task
         w.command = std::move(setpoint);
-        if (route && routePlan_) w.waypoints.assign(routePlan_->points, routePlan_->points + routePlan_->count); // (within its room)
+        if (route && routePlan_) { // (within its room)
+            w.waypoints.assign(routePlan_->points, routePlan_->points + routePlan_->count);
+            w.loiters.clear();
+            for (std::uint32_t k = 0; k < routePlan_->loiterCount; ++k) w.loiters.push_back(route::unplaced(routePlan_->loiters[k]));
+        }
         if (std::holds_alternative<PatternCommand>(w.command)) w.shape = patternShape_;
         w.suggested = true;
         w.suggestion = kSuggestedTask | ++suggestionSerial_;
@@ -1325,8 +1365,8 @@ CommandResult CapabilityHost::submit(const Command& command, const CommandOption
 }
 
 CommandResult CapabilityHost::submit(const RouteCommand& route, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
-                                     double now) {
-    return submitWith(Command(route), waypoints, {}, options, state, now);
+                                     double now, Span<const RouteLoiter> loiters) {
+    return submitWith(Command(route), waypoints, {}, options, state, now, true, nullptr, nullptr, loiters);
 }
 
 CommandResult CapabilityHost::submit(const CurveCommand& curve, Span<const NurbsSegment> segments, const CommandOptions& options,
@@ -1336,7 +1376,7 @@ CommandResult CapabilityHost::submit(const CurveCommand& curve, Span<const Nurbs
 
 CommandResult CapabilityHost::submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                          const CommandOptions& options, const sim::VehicleState& state, double now, bool mayWait,
-                                         const PatternShape* shape, const CurveShape* curveShape) {
+                                         const PatternShape* shape, const CurveShape* curveShape, Span<const RouteLoiter> loiters) {
     if (pendingSuggestions_) materialize();
     details_.clear();
     const int found = catalog_->indexOf(command);
@@ -1365,19 +1405,20 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     Command setpoint = command;
     CommandResult detail; // what the checks found: kClamped, the first finding's detail
     CheckLog log{detail, options.range, &details_};
-    if (const Reason why = prepare(index, setpoint, waypoints, segments, state, log, shape, curveShape); why != Reason::None) return about(rejected(why), detail);
+    if (const Reason why = prepare(index, setpoint, waypoints, segments, state, log, shape, curveShape, loiters); why != Reason::None)
+        return about(rejected(why), detail);
     // every finding named: refused with the first (docs/flight-autonomy.md, 4.8) - and, where Clamp
     // would fly what the checks left, a task with it suggested in its place (4.11)
     if (log.refused != Reason::None) {
         if (options.range == RangePolicy::Reject && log.clampable && !options.validateOnly && d.kind != CapabilityKind::Support)
-            details_.suggestion = suggest(setpoint, waypoints, segments, &patternShape_, &curveShape_);
+            details_.suggestion = suggest(setpoint, waypoints, segments, &patternShape_, &curveShape_, loiters);
         return about(rejected(log.refused), detail);
     }
     // its endurance (4.18): a flight with an end needs no more than the vehicle has above its reserve - a soft
     // rejection, which overrideRejection overrides (the first there is). Only a route, pattern or curve can have one.
     if (checked && sessionView_ &&
         (std::holds_alternative<RouteCommand>(setpoint) || std::holds_alternative<PatternCommand>(setpoint) || std::holds_alternative<CurveCommand>(setpoint)))
-        if (const CommandDetails::Endurance need = endurance(setpoint, state); need.energy && need.required > need.remaining) {
+        if (const CommandDetails::Endurance need = endurance(setpoint, state, now); need.energy && need.required > need.remaining) {
             details_.endurance = need;
             if (!options.overrideRejection) {
                 log.find(Reason::InsufficientEndurance, -1, Constraint::None);
@@ -1435,6 +1476,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
         w.segments.reserve(PathStore::kSegments), w.segments.assign(segments.begin(), segments.end());
         w.shape = shape ? *shape : PatternShape{};
         w.curveShape = curveShape ? *curveShape : CurveShape{};
+        w.loiters.reserve(PathStore::kRouteLoiters), w.loiters.assign(loiters.begin(), loiters.end());
         if (!config_->path) config_->path = std::make_unique<PathStore>();
         if (std::holds_alternative<RouteCommand>(command) && !routePlan_) routePlan_ = std::make_unique<route::Plan>();
         if (std::holds_alternative<CurveCommand>(command) && !curvePlan_) curvePlan_ = std::make_unique<route::Curve>();
@@ -1518,11 +1560,11 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
 }
 
 CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints,
-                                     const sim::VehicleState& state, Caller caller) noexcept {
+                                     const sim::VehicleState& state, Caller caller, Span<const RouteLoiter> loiters) noexcept {
     details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) {
-        if (Waiting* w = waitingEntry(activity)) return updateWaiting(*w, Command(route), waypoints, {}, state, caller);
+        if (Waiting* w = waitingEntry(activity)) return updateWaiting(*w, Command(route), waypoints, {}, state, caller, nullptr, nullptr, loiters);
         return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     }
     const auto s = static_cast<std::size_t>(found);
@@ -1538,11 +1580,13 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
     if (!isHold(route.end)) next.end = route.end;
     if (!isHold(route.start)) next.start = route.start;
     const PathStore* store = config_->path.get();
-    const Span<const Waypoint> points = waypoints.empty() && store ? Span<const Waypoint>(store->waypoints, store->count) : waypoints;
+    const bool kept = waypoints.empty() && store; // (and its loiters: new waypoints come with theirs - 4.31)
+    const Span<const Waypoint> points = kept ? Span<const Waypoint>(store->waypoints, store->count) : waypoints;
+    const Span<const RouteLoiter> held = kept ? Span<const RouteLoiter>(store->routeLoiters, store->routeLoiterCount) : loiters;
     CommandResult result = accepted(activity);
     result.commandId = records_[s].commandId;
     CheckLog log{result, slots_[s].range, &details_};
-    if (const Reason why = checkRoute(next, points, state, log); why != Reason::None) return about(rejected(why, activity), result);
+    if (const Reason why = checkRoute(next, points, state, log, held); why != Reason::None) return about(rejected(why, activity), result);
     checkTerrain(Command(next), state, log);
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
     if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
@@ -1792,10 +1836,11 @@ bool CapabilityHost::retire(std::size_t s, ActivityState state) {
     } else {
         Command& flown = config_->slots[s].command;
         w->behavior = runtime_->uninstall(s); // kept: it starts afresh when it flies again
-        w->waypoints.clear(), w->segments.clear();
+        w->waypoints.clear(), w->segments.clear(), w->loiters.clear();
         if (auto* route = std::get_if<RouteCommand>(&flown); route && config_->path) {
             const PathStore& store = *config_->path;
             w->waypoints.reserve(PathStore::kWaypoints), w->waypoints.assign(store.waypoints, store.waypoints + store.count);
+            w->loiters.reserve(PathStore::kRouteLoiters), w->loiters.assign(store.routeLoiters, store.routeLoiters + store.routeLoiterCount);
             w->firstStart = isHold(slots_[s].firstStart) ? route->start : slots_[s].firstStart;
             // resumed at the point it flew to
             if (store.count && r.progress.segments) route->start = static_cast<double>(std::min<std::uint32_t>(r.progress.segment, store.count - 1));
@@ -1878,7 +1923,7 @@ CommandResult CapabilityHost::activityCommand(ActivityId activity, ActivityComma
 
 CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                             const sim::VehicleState& state, Caller caller, const PatternShape* shape,
-                                            const CurveShape* curveShape) noexcept {
+                                            const CurveShape* curveShape, Span<const RouteLoiter> loiters) noexcept {
     const ActivityRecord& record = w.record;
     const ActivityId activity = record.id;
     if (const Reason why = addresses(record, caller); why != Reason::None) return rejected(why, activity, activity);
@@ -1893,6 +1938,7 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     PatternShape nextShape = w.shape;
     CurveShape nextCurveShape = w.curveShape;
     Span<const Waypoint> points(w.waypoints.data(), w.waypoints.size());
+    Span<const RouteLoiter> held(w.loiters.data(), w.loiters.size());
     Span<const NurbsSegment> pieces(w.segments.data(), w.segments.size());
     std::array<NurbsSegment, PathStore::kSegments> joined; // (a curve appended to: the two together)
     if (const auto* route = std::get_if<RouteCommand>(&setpoint)) {
@@ -1900,7 +1946,7 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
         for (const auto& [from, to] : {std::pair{route->projection, &kept.projection}, {route->repeat, &kept.repeat}, {route->end, &kept.end},
                                        {route->start, &kept.start}})
             if (!isHold(from)) *to = from;
-        if (!waypoints.empty()) points = waypoints;
+        if (!waypoints.empty()) points = waypoints, held = loiters; // (new waypoints come with their loiters: 4.31)
     } else if (const auto* curve = std::get_if<CurveCommand>(&setpoint)) {
         auto& kept = std::get<CurveCommand>(next);
         const double* from[] = {&curve->latitudeRad,   &curve->longitudeRad, &curve->altitudeM,         &curve->speedMinMs,   &curve->speedMaxMs,
@@ -1959,12 +2005,13 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     }
     CheckLog log{result, w.options.range, &details_};
     Command probe = next; // (fixed-size: a behaviour takes no UPDATE)
-    if (const Reason why = prepare(record.capability, probe, points, pieces, state, log, &nextShape, &nextCurveShape); why != Reason::None)
+    if (const Reason why = prepare(record.capability, probe, points, pieces, state, log, &nextShape, &nextCurveShape, held); why != Reason::None)
         return about(rejected(why, activity), result);
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
     // kept for its start (room reserved at its NEW)
     if (const auto* route = std::get_if<RouteCommand>(&setpoint); route && !isHold(route->start)) w.firstStart = route->start;
     if (points.data() != w.waypoints.data()) w.waypoints.assign(points.begin(), points.end());
+    if (held.data() != w.loiters.data()) w.loiters.assign(held.begin(), held.end());
     if (pieces.data() != w.segments.data()) w.segments.assign(pieces.begin(), pieces.end());
     w.shape = nextShape, w.curveShape = nextCurveShape;
     assignSetpoint(w.command, next);

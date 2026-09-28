@@ -32,7 +32,7 @@ void curveOf(Setpoint& out, const NurbsSegment* segments, std::size_t count) {
 } // namespace
 
 bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
-    out.waypoints.clear(), out.segments.clear(), out.nurbs.clear();
+    out.waypoints.clear(), out.segments.clear(), out.nurbs.clear(), out.loiters.clear();
     out.shape = PatternShape{};
     out.curveShape = CurveShape{};
     if (const int found = liveSlot(activity); found >= 0) {
@@ -44,7 +44,10 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
         const Command& flown = config_->slots[s].command;
         out.command = flown;
         if (const PathStore* store = config_->path.get()) { // (one route or curve flies at a time: the store's)
-            if (std::holds_alternative<RouteCommand>(flown)) out.waypoints.assign(store->waypoints, store->waypoints + store->count);
+            if (std::holds_alternative<RouteCommand>(flown)) {
+                out.waypoints.assign(store->waypoints, store->waypoints + store->count);
+                out.loiters.assign(store->routeLoiters, store->routeLoiters + store->routeLoiterCount); // (4.31)
+            }
             if (std::holds_alternative<CurveCommand>(flown)) curveOf(out, store->segments, store->segmentCount), out.curveShape = store->curveShape;
             if (std::holds_alternative<PatternCommand>(flown)) out.shape = store->pattern;
         }
@@ -54,7 +57,7 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     if (!w) return false;
     if (w->support) out.command = w->supportCommand;
     else out.command = w->command;
-    out.waypoints = w->waypoints, out.shape = w->shape, out.curveShape = w->curveShape;
+    out.waypoints = w->waypoints, out.shape = w->shape, out.curveShape = w->curveShape, out.loiters = w->loiters;
     curveOf(out, w->segments.data(), w->segments.size());
     return true;
 }
@@ -72,7 +75,8 @@ std::vector<EndPoint> CapabilityHost::endPoints(ActivityId activity, std::size_t
     const bool past = reported && progress.distanceToGoM == 0.0; // after a route's or a curve's end, flying its end behaviour
     if (const auto* route = std::get_if<RouteCommand>(c); route && !s.waypoints.empty()) {
         const auto n = static_cast<std::uint32_t>(s.waypoints.size());
-        const bool repeats = is(route->repeat, 1), loiters = is(route->end, EndBehavior::Loiter);
+        // (a route whose last point is a loiter point ends in its loiter, whatever its end says: 4.31)
+        const bool repeats = is(route->repeat, 1), loiters = is(route->end, EndBehavior::Loiter) || route::loiterPoint(s.waypoints.back());
         std::uint32_t i = reported ? progress.segment : static_cast<std::uint32_t>(std::max(orHold(route->start, 0.0), 0.0));
         if (past && !repeats && !loiters) return out; // it flies on along its last leg
         for (; out.size() < max; ++i) {
@@ -83,7 +87,10 @@ std::vector<EndPoint> CapabilityHost::endPoints(ActivityId activity, std::size_t
             const Waypoint& w = s.waypoints[i];
             const bool last = !repeats && i + 1 == n;
             EndPoint e;
-            e.kind = !last ? (route::noTurn(w) ? EndPointKind::Waypoint : EndPointKind::TurnPoint) : loiters ? EndPointKind::LoiterPoint : EndPointKind::Waypoint;
+            e.kind = route::loiterPoint(w) ? EndPointKind::LoiterPoint
+                     : !last             ? (route::noTurn(w) ? EndPointKind::Waypoint : EndPointKind::TurnPoint)
+                     : loiters           ? EndPointKind::LoiterPoint
+                                         : EndPointKind::Waypoint;
             e.latitudeRad = w.latitudeRad, e.longitudeRad = w.longitudeRad, e.altitudeM = w.altitudeM, e.altitudeReference = w.altitudeReference;
             FrameSpec spec; // (a point in a frame: where the frame puts it now - 4.29)
             FramePose now;

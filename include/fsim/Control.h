@@ -228,7 +228,8 @@ struct Waypoint {
     std::uint64_t id = 0;              ///< the caller's, reported back in the progress
     // A-GRA's end point as its schema gives it (docs/flight-autonomy.md, 4.29)
     double altitudeMinM = kHold, altitudeMaxM = kHold; ///< its altitude block, in its reference: left out, the altitude held within it
-    double kind = kHold;               ///< EndPointKind: left out, a turn point as `turn` says; a waypoint (no turn) is flown over
+    double kind = kHold;               ///< EndPointKind: left out, a turn point as `turn` says; a waypoint (no turn) is flown over;
+                                       ///< a loiter point flies its RouteLoiter there (docs/flight-autonomy.md, 4.31)
     double waypointType = kHold;       ///< a waypoint's WaypointType (left out: NavOnly)
     double frame = kHold;              ///< a point in this frame (World::createFrame's id): its latitude and longitude where the frame puts it
     double frameRotation = kHold, frameOffsets = kHold; ///< its offsets' FrameRotation and FrameOffsets, as a pattern's point's
@@ -520,6 +521,30 @@ struct PatternShape {
     bool twoCircles() const noexcept { return !isHold(latitude2Rad) || !isHold(longitude2Rad); }
 };
 
+/// The loiter a route's loiter point flies (A-GRA's LoiterPoint, MA_LoiterPointType; docs/flight-autonomy.md, 4.31):
+/// a pattern - an orbit, a racetrack, a figure-eight, a hold or a hover, with its shape - and the time it ends. Beside
+/// the route's waypoints, as they go beside its RouteCommand (World::submit and update take a Span): 16 a route at most.
+/// Its place is its point's - where the point is, in its frame if it has one, at its altitude - so the pattern's
+/// latitude, longitude, altitude and reference, and the shape's frame, are left out; its speed left out, it flies the
+/// point's segment's. It ends when its duration or its laps are flown (on round to its exit point, if it has one), or at
+/// its end time, the first; with none, it is the route's end (its last point's only).
+struct RouteLoiter {
+    std::uint32_t point = 0; ///< its point: a waypoint of kind EndPointKind::LoiterPoint
+    PatternCommand pattern{};
+    PatternShape shape{};
+    double endTimeS = kHold; ///< when it ends (A-GRA's EndTime), in simulation seconds; kHold: none
+
+    /// Its pattern's fields then its shape's, in order (the C ABI's and Python's, as a pattern's): pointers into it.
+    static constexpr std::size_t kFields = 13 + PatternShape::kFields;
+    void fields(double* f[kFields]) noexcept {
+        PatternCommand& c = pattern;
+        f[0] = &c.pattern, f[1] = &c.latitudeRad, f[2] = &c.longitudeRad, f[3] = &c.altitudeM, f[4] = &c.altitudeReference;
+        f[5] = &c.radiusM, f[6] = &c.clockwise, f[7] = &c.courseRad, f[8] = &c.legM, f[9] = &c.speed, f[10] = &c.speedReference;
+        f[11] = &c.durationS, f[12] = &c.speedOptimization;
+        shape.fields(f + 13);
+    }
+};
+
 /// Where a vehicle's route, curve or pattern shape lives while it is flown
 /// (docs/vehicle-interface.md, 4.2): allocated at its first and kept, written
 /// by the host between steps, read by the mode's behaviour during them
@@ -542,6 +567,10 @@ struct PathStore {
     std::uint32_t routeFrameCount = 0;
     FrameId routeFrameIds[kRouteFrames] = {};
     FrameSpec routeFrames[kRouteFrames];
+    /// The loiters its loiter points fly (4.31), as the host completed them: 16 a route at most.
+    static constexpr std::size_t kRouteLoiters = 16;
+    std::uint32_t routeLoiterCount = 0;
+    RouteLoiter routeLoiters[kRouteLoiters];
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -609,6 +638,7 @@ struct BatchCommand {
     Span<const NurbsSegment> nurbs;     ///< a CurveCommand's as A-GRA's schema gives them (instead of `segments`)
     const PatternShape* shape = nullptr; ///< a PatternCommand's (null: none)
     const CurveShape* curveShape = nullptr; ///< a CurveCommand's reference in a frame (null: none)
+    Span<const RouteLoiter> loiters;     ///< a RouteCommand's: the loiters its loiter points fly (docs/flight-autonomy.md, 4.31)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight
@@ -623,6 +653,7 @@ struct Setpoint {
     PatternShape shape; ///< a pattern's, as it flies (docs/flight-autonomy.md, 4.23)
     std::vector<NurbsSegment> nurbs;     ///< a curve's, every segment, as it flies (docs/flight-autonomy.md, 4.26)
     CurveShape curveShape;               ///< a curve's reference in a frame, as it flies (4.27)
+    std::vector<RouteLoiter> loiters;    ///< a route's loiters, as they fly (4.31)
 };
 
 /// Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType;

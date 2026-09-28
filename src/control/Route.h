@@ -126,6 +126,11 @@ double verticalSpeedTo(double altitudeMslM, double feedforward, const sim::Vehic
 /// before one (0: none).
 double lateralLimit(const Performance& performance, double radiusM) noexcept;
 double brakingLimit(const Performance& performance, double speedAfterMs, double toGoM) noexcept;
+/// A rotorcraft's path speed at most to stop `toGoM` on, its velocity loop's lag counted: what it could stop from after
+/// that lag at half its deceleration (as hoverOver closes on a point).
+double stoppingLimit(const Performance& performance, double toGoM) noexcept;
+/// How far on it stops from `speedMs`, so: where stoppingLimit allows that speed.
+double stoppingDistanceM(const Performance& performance, double speedMs) noexcept;
 
 /// What a route flies, planned from its complete waypoints: fixed arrays, so
 /// the behaviour that holds it allocates nothing in flight.
@@ -151,8 +156,17 @@ struct Plan {
     std::uint32_t frameCount = 0;
     FrameId frameIds[PathStore::kRouteFrames] = {};
     FrameSpec frames[PathStore::kRouteFrames];
+    /// The loiters its loiter points fly (4.31), complete (completeLoiter): the host's check's, the behaviour's to fly.
+    std::uint32_t loiterCount = 0;
+    RouteLoiter loiters[PathStore::kRouteLoiters];
 
     std::uint32_t last() const noexcept { return count - 1; }
+    /// Point i's loiter; null for none.
+    const RouteLoiter* loiterAt(std::uint32_t i) const noexcept {
+        for (std::uint32_t k = 0; k < loiterCount; ++k)
+            if (loiters[k].point == i) return &loiters[k];
+        return nullptr;
+    }
     std::uint32_t next(std::uint32_t i) const noexcept { return i + 1 < count ? i + 1 : 0; }
     std::uint32_t prev(std::uint32_t i) const noexcept { return i > 0 ? i - 1 : count - 1; }
     /// A leg leaves point i: it is not the end of a route that does not repeat.
@@ -379,8 +393,44 @@ double steepest(const Curve& c, std::uint32_t i, double& at) noexcept;
 /// fields out of range, or its offsets without it.
 Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool repeat, const sim::VehicleState& state, const Performance& performance,
                 bool hovers, std::int16_t& bad, const Altimeter* altimeter = nullptr) noexcept;
-/// A waypoint (A-GRA's WayPoint): no turn there - flown over (4.29).
-inline bool noTurn(const Waypoint& w) noexcept { return w.kind == static_cast<double>(EndPointKind::Waypoint); }
+/// A waypoint (A-GRA's WayPoint) or a loiter point: no turn there - flown over (4.29), or to its loiter (4.31).
+inline bool noTurn(const Waypoint& w) noexcept {
+    return w.kind == static_cast<double>(EndPointKind::Waypoint) || w.kind == static_cast<double>(EndPointKind::LoiterPoint);
+}
+/// A loiter point (A-GRA's LoiterPoint, docs/flight-autonomy.md, 4.31): its RouteLoiter flown there.
+inline bool loiterPoint(const Waypoint& w) noexcept { return w.kind == static_cast<double>(EndPointKind::LoiterPoint); }
+
+/// What a route's loiters leave out, filled in (docs/flight-autonomy.md, 4.31), each from its point in `p.points`
+/// (complete, and placed): the point's place, altitude and reference - and its frame, so it moves with it - its speed
+/// and reference where it gives none (nor an optimisation), and then what a pattern leaves out (completePattern) as an
+/// aircraft there would, arriving on the course the leg into it arrives on (`p` planned). A no-op for a complete one.
+void completeLoiters(Plan& p, const sim::VehicleState& state, const Performance& performance, bool hovers, double windNorthMs, double windEastMs,
+                     const Altimeter* altimeter, double magneticYear) noexcept;
+/// Its loiters' fault (4.31), the point's index at fault, or -1: a loiter point with no loiter or a loiter at no loiter
+/// point (a point past the route: its number), two for one point; a loiter given its own place (a latitude, longitude,
+/// altitude or reference, a frame or its offsets: its point's are its); an end time not finite; no end - no
+/// duration, laps or end time - but at the last point of a route that does not repeat.
+int loiterFault(const Plan& p) noexcept;
+/// An orbit's way in, where its loiter begins at (lat, lon) (4.31): its entry point where the tangent from there meets
+/// its circle, the way it turns, into `shape` - so it is joined on its course; none inside the circle, for two circles, or
+/// where one is given. `c` complete, its centre where it is now.
+void loiterEntry(const PatternCommand& c, double lat, double lon, PatternShape& shape) noexcept;
+/// Where a loiter inside a route leaves, none given (4.31), the next point at (lat, lon): an orbit where its circle's
+/// tangent runs on to it, the way it turns - left along it; a hold's, a racetrack's or a figure-eight's at its point (the
+/// fix, the centre where its circles meet), as a hold is left; none for a hover or two circles, or the next point inside
+/// the circle. Into `shape`; `c` complete, its centre where it is now.
+void loiterExit(const PatternCommand& c, double lat, double lon, PatternShape& shape) noexcept;
+/// A loiter as it is kept (4.31): complete, its place left out - its point's, taken again as the point is placed.
+inline RouteLoiter unplaced(RouteLoiter l) noexcept {
+    l.pattern.latitudeRad = l.pattern.longitudeRad = l.pattern.altitudeM = l.pattern.altitudeReference = kHold;
+    l.shape.frame = l.shape.frameRotation = l.shape.frameOffsets = l.shape.frameXM = l.shape.frameYM = l.shape.frameZM = kHold;
+    return l;
+}
+/// Where a loiter begins, back along the leg to its point (4.31): where its pattern takes the aircraft on - a radius
+/// outside the circle round the point of an orbit, or of two circles' first, its own join bringing it round onto the
+/// circle as a pattern flown from there does - else at the point itself, on the pattern (a hold's or a racetrack's fix,
+/// a figure-eight's centre, a hover's point). `c` complete.
+double loiterJoinM(const PatternCommand& c, const PatternShape& shape) noexcept;
 
 /// The plan's geometry from its complete points (`p.points`, `p.count` and
 /// the options set): the legs, the entry from (lat, lon), the fly-by turns
@@ -394,9 +444,9 @@ void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, c
 VelocityCommand hoverOver(const sim::VehicleState& s, const Performance& performance, double lat, double lon, double transit, double frameNorthMs,
                           double frameEastMs, double verticalSpeedMs) noexcept;
 /// Point i's piece of the plan again from where its points are now (a point in a moving frame: docs/flight-autonomy.md,
-/// 4.29) - the leg to it (on the first lap at its start, the entry's, from where the entry began), the leg out of it
-/// and its fly-by turn between them, sized as plan() sizes it and made no longer than those legs leave it beside the
-/// turns at their other ends.
+/// 4.29) - the leg to it (on the first lap at its start, the entry's, from where the entry began; after a loiter point,
+/// from where its loiter ended: 4.31), the leg out of it and its fly-by turn between them, sized as plan() sizes it and
+/// made no longer than those legs leave it beside the turns at their other ends.
 void replan(Plan& p, std::uint32_t i, bool firstLap, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept;
 
 } // namespace fsim::control::route
