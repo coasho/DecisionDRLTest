@@ -101,6 +101,7 @@ from .world import (  # noqa: E402
     ControlStatus,
     BezierSegment,
     NurbsSegment,
+    CurveZ,
     EndBehavior,
     EndPoint,
     EndPointKind,

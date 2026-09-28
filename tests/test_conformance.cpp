@@ -122,7 +122,9 @@ public:
     std::vector<NurbsSegment> nurbs;     ///< the same as cubics, as A-GRA's schema gives them (ADR-29 FA-5d1), where asNurbs
     bool asNurbs = false;                ///< given so: now and then, in the walks drawn since
     PatternShape shape;                  ///< the last pattern's, made beside its PatternCommand (in the walks of their own)
+    CurveShape curveShape;               ///< the last curve's reference in a frame, likewise (ADR-29 FA-5d2)
     double curveEnd[3] = {0.0, 0.0, 0.0}; ///< where they end, from their reference: an append joins there
+    double curveZ = kHold, curveBase = 0.0; ///< how the last NEW's points' third reads, and its altitude (an append's read so)
 
     double uniform(double lo, double hi) { return std::uniform_real_distribution<double>(lo, hi)(rng_); }
     bool chance(double p) { return uniform(0.0, 1.0) < p; }
@@ -206,6 +208,7 @@ public:
         }
         if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Curve) { // its options, its segments beside them
             CurveCommand c;
+            curveShape = CurveShape{};
             const auto& s = state();
             const double ground = std::max(std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]), 3.0);
             if (wild) { // left out mostly, else about the flight
@@ -216,11 +219,33 @@ public:
                 c.durationS = chance(0.85) ? kHold : uniform(30.0, 300.0);
                 c.end = chance(0.6) ? kHold : static_cast<double>(pick(2));
                 c.append = chance(0.8) ? kHold : static_cast<double>(pick(2));
+                if (optimise) {
+                    // its reference as A-GRA's schema gives it (ADR-29 FA-5d2): now and then each other way to give it
+                    // (an append goes on from the curve's, those given with it not used)
+                    if (chance(0.15)) c.altitudeReference = static_cast<double>(pick(4));
+                    if (chance(0.1)) c.altitudeMinM = s.altitudeMslM - uniform(0.0, 300.0);
+                    if (chance(0.1)) c.altitudeMaxM = s.altitudeMslM + uniform(0.0, 300.0);
+                    if (chance(0.15)) c.pointOffsets = static_cast<double>(pick(3));
+                    if (chance(0.15)) c.pointZ = static_cast<double>(pick(3));
+                    if (chance(0.1)) { // in a frame (as a pattern's point: the session's first few, or offsets alone), turned with it
+                        if (chance(0.7)) curveShape.frame = static_cast<double>(1 + pick(3));
+                        if (chance(0.5)) c.pointRotation = static_cast<double>(pick(4));
+                        if (chance(0.5)) curveShape.frameRotation = static_cast<double>(pick(4)), curveShape.frameOffsets = static_cast<double>(pick(3));
+                        if (chance(0.5)) curveShape.frameXM = uniform(-2000.0, 2000.0), curveShape.frameYM = uniform(-2000.0, 2000.0);
+                        if (chance(0.3)) curveShape.frameZM = uniform(-300.0, 0.0);
+                    }
+                    if (chance(0.05)) { // one of its shape's out of its range
+                        double* fields[CurveShape::kFields];
+                        curveShape.fields(fields);
+                        const std::size_t i = pick(CurveShape::kFields);
+                        *fields[i] = value(d.parameters[14 + i], true);
+                    }
+                }
                 if (chance(0.1)) { // now and then a field out of its range: refused, or clamped
                     out = c;
                     double* fields[kMaxCommandFields];
                     const std::size_t n = std::min(commandFields(out, fields), d.parameters.size());
-                    const std::size_t i = pick(n);
+                    const std::size_t i = pick(optimise ? n : 8); // (its reference's, after its eight, only where it is drawn)
                     *fields[i] = value(d.parameters[i], true);
                     c = std::get<CurveCommand>(out);
                 }
@@ -248,6 +273,11 @@ public:
                 n0 = n1, e0 = e1;
             }
             curveEnd[0] = n0, curveEnd[1] = e0, curveEnd[2] = d0;
+            // its points' third as its reading gives it - an append's as the curve's it joins (the last NEW's): the same curve
+            if (c.append != 1.0) curveZ = c.pointZ, curveBase = isHold(c.altitudeM) ? s.altitudeMslM : c.altitudeM;
+            if (curveZ == static_cast<double>(CurveZ::AltitudeOffset) || curveZ == static_cast<double>(CurveZ::AbsoluteAltitude))
+                for (BezierSegment& b : segments)
+                    for (double& down : b.down) down = curveZ == static_cast<double>(CurveZ::AltitudeOffset) ? -down : curveBase - down;
             // now and then as cubics (its rational path), its faults with it - in the optimise walks alone
             asNurbs = optimise && chance(0.3);
             nurbs.clear();
@@ -418,8 +448,10 @@ private:
 /// its shape (where it made one).
 CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, const Maker& make, const CommandOptions& options = {}) {
     if (const auto* route = std::get_if<RouteCommand>(&c)) return w.submit(v, *route, make.waypoints, options);
-    if (const auto* curve = std::get_if<CurveCommand>(&c); curve && make.asNurbs) return w.submit(v, *curve, Span<const NurbsSegment>(make.nurbs), options);
-    if (const auto* curve = std::get_if<CurveCommand>(&c)) return w.submit(v, *curve, make.segments, options);
+    const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
+    if (const auto* curve = std::get_if<CurveCommand>(&c); curve && make.asNurbs)
+        return w.submit(v, *curve, Span<const NurbsSegment>(make.nurbs), options, curveShape);
+    if (const auto* curve = std::get_if<CurveCommand>(&c)) return w.submit(v, *curve, make.segments, options, curveShape);
     if (const auto* pattern = std::get_if<PatternCommand>(&c); pattern && !make.shape.empty()) return w.submit(v, *pattern, make.shape, options);
     return w.submit(v, c, options);
 }
@@ -427,9 +459,11 @@ CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, c
 /// UPDATE with what the maker made: a route's or a curve's options, and now and then its waypoints or segments.
 CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Caller caller = {}) {
     if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints) return w.update(caller, activity, *route, make.waypoints);
+    const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints && make.asNurbs)
-        return w.update(caller, activity, *curve, Span<const NurbsSegment>(make.nurbs));
-    if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints) return w.update(caller, activity, *curve, make.segments);
+        return w.update(caller, activity, *curve, Span<const NurbsSegment>(make.nurbs), curveShape);
+    if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints) return w.update(caller, activity, *curve, make.segments, curveShape);
+    if (const auto* curve = std::get_if<CurveCommand>(&c); curve && curveShape) return w.update(caller, activity, *curve, Span<const NurbsSegment>{}, curveShape);
     if (const auto* pattern = std::get_if<PatternCommand>(&c); pattern && !make.shape.empty()) return w.update(caller, activity, *pattern, make.shape);
     return w.update(caller, activity, c);
 }
@@ -1180,6 +1214,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 const PatternShape* shape = std::holds_alternative<PatternCommand>(command) && !make.shape.empty() ? &make.shape : nullptr;
                 BatchCommand item; // (a curve's cubics, where made so: a batch item's form)
                 item.command = command, item.waypoints = points, item.segments = pieces, item.shape = shape;
+                if (std::holds_alternative<CurveCommand>(command) && !make.curveShape.empty()) item.curveShape = &make.curveShape;
                 if (make.asNurbs && std::holds_alternative<CurveCommand>(command)) item.segments = {}, item.nurbs = make.nurbs;
                 const Reason r = w.storeTask(v, id, item, repetition);
                 CHECK(among(r, {Reason::None, Reason::TaskActive, Reason::NotSupported, Reason::NotImplemented, Reason::UnknownCapability}));

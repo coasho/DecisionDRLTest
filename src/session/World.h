@@ -122,11 +122,11 @@ public:
     control::CommandResult submit(std::uint32_t id, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                   const control::CommandOptions& options = {});
     /// NEW of a curve (fsim.guidance.curve) with its segments (docs/vehicle-interface.md, 4.7): Bezier segments, or as
-    /// A-GRA's schema gives them (docs/flight-autonomy.md, 4.26).
+    /// A-GRA's schema gives them (docs/flight-autonomy.md, 4.26); its reference in a frame beside it, `shape` (4.27).
     control::CommandResult submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
-                                  const control::CommandOptions& options = {});
+                                  const control::CommandOptions& options = {}, const control::CurveShape* shape = nullptr);
     control::CommandResult submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments,
-                                  const control::CommandOptions& options = {});
+                                  const control::CommandOptions& options = {}, const control::CurveShape* shape = nullptr);
     /// NEW of a pattern (fsim.guidance.pattern) with its shape (docs/flight-autonomy.md, 4.23).
     control::CommandResult submit(std::uint32_t id, const control::PatternCommand& pattern, const control::PatternShape& shape,
                                   const control::CommandOptions& options = {});
@@ -145,8 +145,10 @@ public:
     /// UPDATE of a route: new options (kHold keeps one) and waypoints (none: those it has); flown afresh from its start.
     control::CommandResult update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints);
     /// UPDATE of a curve: options, and segments appended (append 1) or a new curve.
-    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
-    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments);
+    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
+                                  const control::CurveShape* shape = nullptr);
+    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments,
+                                  const control::CurveShape* shape = nullptr);
     /// UPDATE of a pattern with its shape: the fields given in either merged (kHold keeps one), flown afresh.
     control::CommandResult update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
@@ -161,9 +163,9 @@ public:
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
                                   Span<const control::Waypoint> waypoints);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
-                                  Span<const control::BezierSegment> segments);
+                                  Span<const control::BezierSegment> segments, const control::CurveShape* shape = nullptr);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
-                                  Span<const control::NurbsSegment> segments);
+                                  Span<const control::NurbsSegment> segments, const control::CurveShape* shape = nullptr);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
                                   const control::PatternShape& shape);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);

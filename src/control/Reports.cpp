@@ -4,6 +4,7 @@
 // that growing either moves neither.
 #include "control/CapabilityHost.h"
 
+#include "control/Route.h"
 #include "core/Geodesy.h"
 
 #include <algorithm>
@@ -33,6 +34,7 @@ void curveOf(Setpoint& out, const NurbsSegment* segments, std::size_t count) {
 bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     out.waypoints.clear(), out.segments.clear(), out.nurbs.clear();
     out.shape = PatternShape{};
+    out.curveShape = CurveShape{};
     if (const int found = liveSlot(activity); found >= 0) {
         const auto s = static_cast<std::size_t>(found);
         if (!isCascade(s)) {
@@ -43,7 +45,7 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
         out.command = flown;
         if (const PathStore* store = config_->path.get()) { // (one route or curve flies at a time: the store's)
             if (std::holds_alternative<RouteCommand>(flown)) out.waypoints.assign(store->waypoints, store->waypoints + store->count);
-            if (std::holds_alternative<CurveCommand>(flown)) curveOf(out, store->segments, store->segmentCount);
+            if (std::holds_alternative<CurveCommand>(flown)) curveOf(out, store->segments, store->segmentCount), out.curveShape = store->curveShape;
             if (std::holds_alternative<PatternCommand>(flown)) out.shape = store->pattern;
         }
         return true;
@@ -52,7 +54,7 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     if (!w) return false;
     if (w->support) out.command = w->supportCommand;
     else out.command = w->command;
-    out.waypoints = w->waypoints, out.shape = w->shape;
+    out.waypoints = w->waypoints, out.shape = w->shape, out.curveShape = w->curveShape;
     curveOf(out, w->segments.data(), w->segments.size());
     return true;
 }
@@ -93,14 +95,38 @@ std::vector<EndPoint> CapabilityHost::endPoints(ActivityId activity, std::size_t
         // each segment's end, from the one flown now: metres from its reference (one left out is where it will start: not yet known)
         const bool loiters = is(curve->end, EndBehavior::Loiter);
         if (isHold(curve->latitudeRad) || (past && !loiters)) return out;
+        // its plane now (4.27): its reference where its frame is, its axes turned with it; its points as it reads them
+        double lat0 = curve->latitudeRad, lon0 = curve->longitudeRad, alt0 = curve->altitudeM;
+        if (!isHold(s.curveShape.frame)) {
+            FrameSpec spec;
+            FramePose now;
+            if (sessionView_ && sessionView_->frame(static_cast<FrameId>(s.curveShape.frame), spec, now)) {
+                const GeoPoint at = framePoint(now, s.curveShape.frameOffset());
+                lat0 = at.latitudeRad, lon0 = at.longitudeRad;
+                if (!isHold(s.curveShape.frameZM)) alt0 = at.altitudeMslM;
+            }
+        }
+        const auto offsets = isHold(curve->pointOffsets) ? FrameOffsets::Cartesian : static_cast<FrameOffsets>(static_cast<int>(curve->pointOffsets));
+        const auto z = isHold(curve->pointZ) ? CurveZ::Down : static_cast<CurveZ>(static_cast<int>(curve->pointZ));
+        const double psi = curveTurn(*curve, s.curveShape);
+        FramePose pose;
+        const bool turned = curveAttitude(*curve, s.curveShape, pose); // (in three dimensions, by its frame's attitude now)
+        const route::Attitude attitude(pose);
         for (std::size_t i = reported ? progress.segment : 0; i < s.nurbs.size() && out.size() < max; ++i) {
             const NurbsSegment& b = s.nurbs[i];
             const std::uint32_t last = b.points - 1; // (clamped: it ends at its last point)
             EndPoint e;
             e.kind = loiters && i + 1 == s.nurbs.size() ? EndPointKind::LoiterPoint : EndPointKind::Waypoint;
-            geo::offsetLatLon(curve->latitudeRad, curve->longitudeRad, b.north[last], b.east[last], e.latitudeRad, e.longitudeRad);
-            e.altitudeM = curve->altitudeM - b.down[last];
-            e.altitudeReference = static_cast<double>(AltitudeReference::Msl);
+            double north = b.north[last], east = b.east[last];
+            e.altitudeM = z == CurveZ::Down ? alt0 - b.down[last] : z == CurveZ::AltitudeOffset ? alt0 + b.down[last] : b.down[last];
+            if (turned) {
+                double down;
+                attitude.turn(north, east, z == CurveZ::Down ? b.down[last] : z == CurveZ::AltitudeOffset ? -b.down[last] : 0.0, north, east, down);
+                if (z != CurveZ::AbsoluteAltitude) e.altitudeM = alt0 - down; // (an absolute altitude's kept)
+            }
+            if (offsets == FrameOffsets::Cartesian && psi == 0.0) geo::offsetLatLon(lat0, lon0, north, east, e.latitudeRad, e.longitudeRad);
+            else route::planeToEarth(lat0, lon0, offsets, psi, north, east, e.latitudeRad, e.longitudeRad);
+            e.altitudeReference = isHold(curve->altitudeReference) ? static_cast<double>(AltitudeReference::Msl) : curve->altitudeReference;
             e.index = static_cast<std::int32_t>(i);
             out.push_back(e);
         }

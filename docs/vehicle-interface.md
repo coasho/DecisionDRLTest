@@ -254,6 +254,7 @@ struct CurveCommand {                  // fsim.guidance.curve; the segments go b
   - the cross-track;
   - the course, altitude and speed it commands: a wing's airspeed within a range, else a ground speed.
 - **As A-GRA's schema gives them** (ADR-29, [flight-autonomy.md](flight-autonomy.md) 4.26): segments may be `NurbsSegment`s, clamped rational B-splines of 4 to 10 weighted control points and 4 to 14 knots, with a curvature and indices checked against them. A Bezier segment is one, flown as before.
+- **Its reference as A-GRA's schema gives it** (ADR-29, [flight-autonomy.md](flight-autonomy.md) 4.27): the reference's altitude in a reference and within a range, or a point in a frame, carried and turned with it; the control points turned with the frame (in two dimensions or three), laid out in the plane or along great circles or rhumb lines, their third read as down, an altitude offset or the altitude itself. Where a curve is changes only with a new curve's segments.
 
 ### 4.8 The path follower
 

@@ -174,9 +174,9 @@ public:
     /// segments as A-GRA's schema gives them: clamped rational B-splines
     /// (docs/flight-autonomy.md, 4.26).
     control::CommandResult submit(const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
-                                  const control::CommandOptions& options = {});
+                                  const control::CommandOptions& options = {}, const control::CurveShape* shape = nullptr);
     control::CommandResult submit(const control::CurveCommand& curve, Span<const control::NurbsSegment> segments,
-                                  const control::CommandOptions& options = {});
+                                  const control::CommandOptions& options = {}, const control::CurveShape* shape = nullptr);
     /// NEW of a pattern (fsim.guidance.pattern) with its shape - A-GRA's orbit as
     /// its schema gives it: two circles, an inbound heading, legs by time, turns
     /// by bank, laps, entry and exit points (docs/sdk/control.md, "Patterns";
@@ -362,8 +362,10 @@ public:
     control::CommandResult update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints);
     /// UPDATE of a curve: its options (kHold keeps one), and segments - with
     /// `append` 1 after its end, from the same reference; else a new curve.
-    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
-    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments);
+    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
+                                  const control::CurveShape* shape = nullptr);
+    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments,
+                                  const control::CurveShape* shape = nullptr);
     /// UPDATE of a pattern with its shape: the fields given in either (kHold keeps one) merged, the pattern flown afresh.
     control::CommandResult update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
@@ -380,9 +382,9 @@ public:
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
                                   Span<const control::Waypoint> waypoints);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
-                                  Span<const control::BezierSegment> segments);
+                                  Span<const control::BezierSegment> segments, const control::CurveShape* shape = nullptr);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
-                                  Span<const control::NurbsSegment> segments);
+                                  Span<const control::NurbsSegment> segments, const control::CurveShape* shape = nullptr);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
                                   const control::PatternShape& shape);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);

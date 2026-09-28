@@ -122,8 +122,9 @@ std::size_t commandFields(Command& c, double* f[kMaxCommandFields]) noexcept {
     }
     if (auto* k = std::get_if<CurveCommand>(&c)) {
         f[0] = &k->latitudeRad, f[1] = &k->longitudeRad, f[2] = &k->altitudeM, f[3] = &k->speedMinMs, f[4] = &k->speedMaxMs;
-        f[5] = &k->durationS, f[6] = &k->end, f[7] = &k->append;
-        return 8;
+        f[5] = &k->durationS, f[6] = &k->end, f[7] = &k->append, f[8] = &k->altitudeReference, f[9] = &k->altitudeMinM;
+        f[10] = &k->altitudeMaxM, f[11] = &k->pointRotation, f[12] = &k->pointOffsets, f[13] = &k->pointZ;
+        return 14;
     }
     return 0;
 }

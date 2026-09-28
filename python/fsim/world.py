@@ -674,6 +674,14 @@ class FrameOffsets(enum.IntEnum):
     RHUMB = 2
 
 
+class CurveZ(enum.IntEnum):
+    """How a curve's control points' third value reads (A-GRA's Z_ChoiceType; docs/flight-autonomy.md, 4.27): metres
+    down from its reference; metres up from it; the altitude itself, in the curve's altitude reference."""
+    DOWN = 0
+    ALTITUDE_OFFSET = 1
+    ABSOLUTE_ALTITUDE = 2
+
+
 class SpeedOptimization(enum.IntEnum):
     """The speed a mode varies by itself (A-GRA's SpeedOptimizationEnum; docs/flight-autonomy.md, 4.17): the
     performance tables' best-range speed (the most distance for the fuel) or best-endurance speed (the most time),
@@ -762,13 +770,16 @@ MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", 
                            "heading_rad", "leg_s", "bank_rad", "orbits", "latitude2_rad", "longitude2_rad", "radius2_m", "entry_latitude_rad",
                            "entry_longitude_rad", "exit_latitude_rad", "exit_longitude_rad", "turn_rate_rad_s", "turn_type", "hold_entry",
                            "hold_context", "frame", "frame_rotation", "frame_offsets", "frame_x_m", "frame_y_m", "frame_z_m"),
-               "curve": ("latitude_rad", "longitude_rad", "altitude_m", "speed_min_ms", "speed_max_ms", "duration_s", "end", "append")}
-MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 35, "curve": (HOLD,) * 8}
+               "curve": ("latitude_rad", "longitude_rad", "altitude_m", "speed_min_ms", "speed_max_ms", "duration_s", "end", "append",
+                         "altitude_reference", "altitude_min_m", "altitude_max_m", "point_rotation", "point_offsets", "point_z", "frame",
+                         "frame_rotation", "frame_offsets", "frame_x_m", "frame_y_m", "frame_z_m")}
+MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 35, "curve": (HOLD,) * 20}
 _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "speed_optimization": SpeedOptimization,
                "direction_reference": DirectionReference,
                "projection": Projection, "end": EndBehavior,
                "turn": TurnType, "pattern": PatternKind, "turn_type": HoldTurn, "hold_entry": HoldEntry, "hold_context": HoldContext,
-               "frame_rotation": FrameRotation, "frame_offsets": FrameOffsets}
+               "frame_rotation": FrameRotation, "frame_offsets": FrameOffsets, "point_rotation": FrameRotation, "point_offsets": FrameOffsets,
+               "point_z": CurveZ}
 
 Waypoint = collections.namedtuple(
     "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id",
@@ -1344,7 +1355,12 @@ class Vehicle:
         them, clamped rational B-splines (fsim.NurbsSegment; docs/flight-autonomy.md, 4.26). Within the ground speeds
         ``speed_min_ms`` to ``speed_max_ms`` (a wing holds its airspeed within them, a rotorcraft flies its ground
         speed), or so as to take ``duration_s``; left out, as it flies now. After its end, ``end``
-        (fsim.EndBehavior: "continue", "loiter"). An Activity that completes at its end, whose progress names the
+        (fsim.EndBehavior: "continue", "loiter"). Its reference as A-GRA's schema gives it (4.27): ``altitude_reference``
+        (fsim.AltitudeReference), ``altitude_min_m``/``altitude_max_m`` (its range: left out, the aircraft's altitude held within
+        it), in a frame (``frame`` and its offsets, as submit_pattern's); its points' ``point_rotation`` (fsim.FrameRotation:
+        turned with its frame), ``point_offsets`` (fsim.FrameOffsets: great circles are A-GRA's layout) and ``point_z``
+        (fsim.CurveZ). Where a curve is changes only with a new curve's segments (appended ones go on from its reference,
+        read as its). An Activity that completes at its end, whose progress names the
         segment flown; ``append`` adds segments while it flies, ``update_curve`` gives it a new curve or options.
         fsim.Rejected if refused: ``index`` names the segment, ``section`` where it is too tight, ``findings``
         every segment at fault. The command envelope as submit's."""

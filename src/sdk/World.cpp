@@ -137,16 +137,16 @@ control::CommandResult Vehicle::submit(const control::RouteCommand& route, Span<
 }
 
 control::CommandResult Vehicle::submit(const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
-                                       const control::CommandOptions& options) {
-    if (world_) return world_->impl_->submit(id_, curve, segments, options);
+                                       const control::CommandOptions& options, const control::CurveShape* shape) {
+    if (world_) return world_->impl_->submit(id_, curve, segments, options, shape);
     control::CommandResult r;
     r.reason = control::Reason::UnknownVehicle;
     return r;
 }
 
 control::CommandResult Vehicle::submit(const control::CurveCommand& curve, Span<const control::NurbsSegment> segments,
-                                       const control::CommandOptions& options) {
-    if (world_) return world_->impl_->submit(id_, curve, segments, options);
+                                       const control::CommandOptions& options, const control::CurveShape* shape) {
+    if (world_) return world_->impl_->submit(id_, curve, segments, options, shape);
     control::CommandResult r;
     r.reason = control::Reason::UnknownVehicle;
     return r;
@@ -422,12 +422,14 @@ control::CommandResult World::update(control::ActivityId activity, const control
     return impl_->update(activity, route, waypoints);
 }
 
-control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments) {
-    return impl_->update(activity, curve, segments);
+control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
+                                     const control::CurveShape* shape) {
+    return impl_->update(activity, curve, segments, shape);
 }
 
-control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments) {
-    return impl_->update(activity, curve, segments);
+control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments,
+                                     const control::CurveShape* shape) {
+    return impl_->update(activity, curve, segments, shape);
 }
 
 control::CommandResult World::update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape) {
@@ -450,13 +452,13 @@ control::CommandResult World::update(control::Caller caller, control::ActivityId
 }
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
-                                     Span<const control::BezierSegment> segments) {
-    return impl_->update(caller, activity, curve, segments);
+                                     Span<const control::BezierSegment> segments, const control::CurveShape* shape) {
+    return impl_->update(caller, activity, curve, segments, shape);
 }
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
-                                     Span<const control::NurbsSegment> segments) {
-    return impl_->update(caller, activity, curve, segments);
+                                     Span<const control::NurbsSegment> segments, const control::CurveShape* shape) {
+    return impl_->update(caller, activity, curve, segments, shape);
 }
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,

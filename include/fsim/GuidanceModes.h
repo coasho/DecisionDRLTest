@@ -271,6 +271,14 @@ private:
     void pace(const Performance& performance, const route::Fix& fix) noexcept;
     /// Past its end: on along its last course, or loitering.
     void end(const Performance& performance);
+    /// Its reference where its frame is now, as the step began (a vehicle's as the world read it then), its axes turned
+    /// with the frame as its points' rotation says, and the frame's velocity (docs/flight-autonomy.md, 4.27); false if
+    /// the frame's vehicle is gone.
+    bool placeInFrame(const ControlContext& ctx, const sim::VehicleState& s);
+    /// Its points turned afresh from the store's in three dimensions by its frame's attitude (4.27: ROTATION_3D).
+    void orient(const ControlContext& ctx, const FramePose& pose);
+    /// A height along it (m, down from its reference in its plane) above sea level now, as its altitude reference reads.
+    double altitudeOf(const ControlContext& ctx, const sim::VehicleState& s, double down) const noexcept;
 
     std::unique_ptr<route::Curve> curve_; ///< allocated with the behaviour
     WindEstimate wind_;
@@ -285,6 +293,17 @@ private:
     SpeedReference reference_ = SpeedReference::GroundSpeed; ///< speed_'s
     double lastTime_ = -1.0;
     double crossTrack_ = kHold, course_ = kHold, heading_ = kHold, altitudeMsl_ = kHold, groundSpeed_ = 0.0, simTime_ = 0.0, speed_ = kHold;
+    // its reference and points as A-GRA's schema gives them (4.27)
+    CurveShape shape_{};             ///< its reference in a frame, the store's when it began
+    FrameSpec frame_{};
+    bool frameMoves_ = false;        ///< its frame is not fixed: flown over it
+    double frameNorthMs_ = 0.0, frameEastMs_ = 0.0, frameDownMs_ = 0.0;
+    FrameRotation rotation_ = FrameRotation::Unrotated;
+    AltitudeReference altitudeReference_ = AltitudeReference::Msl;
+    CurveZ z_ = CurveZ::Down;
+    double absoluteBase_ = 0.0;      ///< its reference's height when its absolute altitudes were made down from it
+    double turnedRoll_ = kHold, turnedPitch_ = kHold, turnedYaw_ = kHold; ///< the attitude its points were turned by
+    double endNorth_ = 0.0, endEast_ = 0.0; ///< its end in its plane, past it
 };
 
 /// Registers the modes' behaviours ("hsa", "route", "pattern", "curve"); registerBuiltinControllers calls it.

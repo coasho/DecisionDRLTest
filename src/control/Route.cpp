@@ -797,6 +797,22 @@ CurvePoint evaluate(const BezierSegment& s, double t) noexcept { return bernstei
 
 CurvePoint evaluate(const NurbsSegment& s, double t) noexcept { return s.bezier() ? bernstein(s.north, s.east, s.down, t) : rational(s, t); }
 
+void Curve::toPlane(double lat, double lon, double& north, double& east) const noexcept {
+    if (plain()) {
+        geo::localNorthEastM(lat0, lon0, lat, lon, north, east);
+        return;
+    }
+    earthToPlane(lat0, lon0, offsets, psi, lat, lon, north, east);
+}
+
+void Curve::fromPlane(double north, double east, double& lat, double& lon) const noexcept {
+    if (plain()) {
+        geo::offsetLatLon(lat0, lon0, north, east, lat, lon);
+        return;
+    }
+    planeToEarth(lat0, lon0, offsets, psi, north, east, lat, lon);
+}
+
 CurvePoint Curve::point(std::uint32_t i, double t) const noexcept {
     const NurbsSegment& s = segments[i];
     return bezier[i] ? bernstein(s.north, s.east, s.down, t) : rational(s, t);
@@ -875,7 +891,7 @@ double speedLimitAhead(const Performance& performance, const Curve& c, double sp
 
 Fix onCurve(const Curve& c, std::uint32_t& segment, double& t, double lat, double lon) noexcept {
     double north, east;
-    geo::localNorthEastM(c.lat0, c.lon0, lat, lon, north, east);
+    c.toPlane(lat, lon, north, east);
     // (B - P) . B' = 0 over the ground, from where it was: it has moved little since
     for (int k = 0; k < 8; ++k) {
         const CurvePoint p = c.point(segment, t);
@@ -899,7 +915,8 @@ Fix onCurve(const Curve& c, std::uint32_t& segment, double& t, double lat, doubl
     const CurvePoint p = c.point(segment, t);
     Fix f;
     f.courseRad = p.courseRad();
-    f.crossTrackM = -(north - p.p[0]) * std::sin(f.courseRad) + (east - p.p[1]) * std::cos(f.courseRad);
+    f.crossTrackM = -(north - p.p[0]) * std::sin(f.courseRad) + (east - p.p[1]) * std::cos(f.courseRad); // (in its plane, along its axes)
+    if (c.psi != 0.0) f.courseRad = geo::wrapPi(f.courseRad + c.psi); // (its axes turned: from north)
     f.curvature = p.curvature();
     f.alongM = c.at(segment, t);
     return f;

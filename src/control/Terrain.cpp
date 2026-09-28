@@ -234,6 +234,13 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         const double lat0 = isHold(c->latitudeRad) ? state.latitudeRad : c->latitudeRad;
         const double lon0 = isHold(c->longitudeRad) ? state.longitudeRad : c->longitudeRad;
         const double alt0 = isHold(c->altitudeM) ? state.altitudeMslM : c->altitudeM;
+        // its altitude as its reference reads it (4.27): over the ground under it, or on its isobar; absolute ones made
+        // down from its reference as placed (the plan's)
+        const bool above = aboveGround(c->altitudeReference);
+        auto height = [&](double down) {
+            const double h = alt0 - down;
+            return barometric(c->altitudeReference) ? barometricMslM(config_->altimeter, h) : h;
+        };
         const double length = k.lengthM();
         double speed = hovers ? std::hypot(state.velocityNedMs[0], state.velocityNedMs[1]) : state.airspeedTrueMs;
         if (!isHold(c->speedMaxMs)) speed = std::min(speed, c->speedMaxMs);
@@ -241,27 +248,31 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         if (!isHold(c->durationS) && c->durationS > 0.0) speed = length / c->durationS;
         spacing(length);
         for (std::uint32_t i = 0; i < k.count; ++i) // (each segment sampled 32 times at least: its height is not straight)
-            if (walk.piece(k.startM[i + 1] - k.startM[i], speed, false, static_cast<std::int16_t>(i),
+            if (walk.piece(k.startM[i + 1] - k.startM[i], speed, above, static_cast<std::int16_t>(i),
                            [&](double x, double& lat, double& lon, double& h) {
                                std::uint32_t j = 0;
                                double t = 0.0;
                                k.find(k.startM[i] + x, j, t);
                                const route::CurvePoint cp = k.point(j, t);
-                               geo::offsetLatLon(lat0, lon0, cp.p[0], cp.p[1], lat, lon);
-                               h = alt0 - cp.p[2];
+                               if (k.plain()) geo::offsetLatLon(lat0, lon0, cp.p[0], cp.p[1], lat, lon);
+                               else k.fromPlane(cp.p[0], cp.p[1], lat, lon);
+                               h = height(cp.p[2]);
                            },
                            route::Curve::kSamples))
                 return walk.hit;
         const route::CurvePoint end = k.point(k.count - 1, 1.0);
-        const double altitude = alt0 - end.p[2];
+        const double altitude = height(end.p[2]);
         const auto index = static_cast<std::int16_t>(k.count - 1);
+        // (past its end, laid out from its end on the Earth where its plane is not plain: 4.27)
+        double endLat = lat0, endLon = lon0, endNorth = end.p[0], endEast = end.p[1];
+        if (!k.plain()) k.fromPlane(end.p[0], end.p[1], endLat, endLon), endNorth = endEast = 0.0;
         if (!isHold(c->end) && c->end == static_cast<double>(EndBehavior::Loiter)) { // a wing orbits its end; a rotorcraft stops over it
             const double radius = hovers ? 0.0 : performance_.turnRadiusM(speed);
-            walk.arc(lat0, lon0, end.p[0], end.p[1], radius, 0.0, 1.0, 2.0 * kPi * radius, speed, false, index, [&](double) { return altitude; });
+            walk.arc(endLat, endLon, endNorth, endEast, radius, 0.0, 1.0, 2.0 * kPi * radius, speed, above, index, [&](double) { return altitude; });
         } else {
-            const double course = end.courseRad();
-            walk.piece(std::max(speed, 0.0) * kAheadS, speed, false, index, [&](double x, double& lat, double& lon, double& h) {
-                geo::offsetLatLon(lat0, lon0, end.p[0] + x * std::cos(course), end.p[1] + x * std::sin(course), lat, lon);
+            const double course = k.plain() ? end.courseRad() : geo::wrapPi(end.courseRad() + k.psi);
+            walk.piece(std::max(speed, 0.0) * kAheadS, speed, above, index, [&](double x, double& lat, double& lon, double& h) {
+                geo::offsetLatLon(endLat, endLon, endNorth + x * std::cos(course), endEast + x * std::sin(course), lat, lon);
                 h = altitude;
             });
         }

@@ -655,6 +655,38 @@ A-GRA gives a curve's segments as NURBS (MA_NURBS_PointType): 4 to 10 weighted c
   - C ABI 1.24: `fsim_nurbs_segment` (`fsim_nurbs_segment_init`), `fsim_vehicle_submit_nurbs`, `fsim_activity_update_nurbs` (`_as`, `_by`), `FSIM_BATCH_NURBS` and `fsim_batch_command::nurbs` (read only where the caller's struct has it), and `fsim_activity_get_setpoint` answering `FSIM_BATCH_NURBS` for a curve not all of Bezier segments.
   - Python: `fsim.NurbsSegment` (`north`, `east`, `down`, `knots`, `weights`, `curvature`, `first_index`, `last_index`); `submit_curve`, `update_curve`, `append`, batches and tasks take them, beside `fsim.BezierSegment`s; `setpoint()` gives them back; `fsim.agra.flyout_curve` gives A-GRA's form as given.
 
+### 4.27 A-GRA's curve reference and control points as its schema gives them (as FA-5d2 builds them)
+
+A-GRA places a curve by its CenterReference: a geodetic point with an altitude in a reference and an altitude range (CRV-04), or a point in a reference frame (CRV-05). Its control points are offsets from it (CRV-06, RelativeOffset2D_Type): turned as its RotationEnum says, laid out as its OffsetXY_Enum says, their third read as its Z_ChoiceType says. FA-5d2 flies them all.
+
+- **Its reference** (`latitudeRad`, `longitudeRad`, `altitudeM`, as before):
+  - `altitudeReference`: its altitude above sea level, above the ground, above the ellipsoid, or barometric (4.22). The curve's heights, down from the reference, are read in it: above the ground, over the ground under the aircraft as it flies; barometric, on the isobar;
+  - `altitudeMinM`, `altitudeMaxM`: its range. Left out, the altitude is the aircraft's in the reference, held within the range. Given outside it, it is refused `invalid_parameter` naming the altitude (field 2); a range whose most is below its least is refused naming the most (10);
+  - a new curve in an UPDATE given a reference without its altitude is refused naming the reference (8): the UPDATE has no aircraft's altitude to read in it. A NEW takes the aircraft's.
+- **In a frame** (`CurveShape`: `frame`, `frameRotation`, `frameOffsets`, `frameXM`, `frameYM`, `frameZM`, as a pattern's point in 4.25):
+  - the reference is the frame's point, placed where the frame is at a NEW and again at every update as the step began, so all of the curve moves with the frame. Given a z, the reference is at the frame's height there, above sea level;
+  - flown over a moving frame as a pattern is (4.25): its velocity and the wind over the frame, a rotorcraft's given back; with a z, the frame's climb fed forward;
+  - a vehicle's frame whose vehicle goes: the activity fails `target_lost`, and the aircraft flies on as it was;
+  - refused `invalid_parameter` as a pattern's are, at fields 14 to 19: a frame the world does not have (14), offsets without a frame (the first given).
+- **Its points' axes** (`pointRotation`, A-GRA's RotationEnum), turned as its frame is, so only with one (else refused naming the field, 11):
+  - `Yaw` (ROTATION_2D): by the frame's yaw; `Heading`: by its track over the ground (its yaw when still). Both turn the plane's axes, not the points;
+  - `Attitude` (ROTATION_3D): x, y and z are the frame's body axes (forward, right, down), turned by its roll, pitch and yaw into north, east and down, as a frame's point is (4.21). A NURBS curve is unchanged in form when its control points are transformed alike, weights kept, so turning the points turns the curve exactly: the curve tilts with the frame. A fixed or moving frame's attitude does not change, so its curve is turned once; a vehicle's frame's is turned afresh at every update, as the vehicle turns.
+- **Their layout on the Earth** (`pointOffsets`, A-GRA's OffsetXY_Enum):
+  - `Cartesian`: in the plane at the reference every local path is laid out in (north along the meridian, east by the latitude's cosine), as before;
+  - `GreatCircle`: A-GRA's azimuthal equidistant layout, the one its schema documents for a curve's control points. A point x north and y east of the reference is along the great circle from it on (x, y)'s bearing, as far as (x, y) is long, so a straight line through the reference is a great circle. A bridge from A-GRA's messages gives it; `Cartesian` stays the default, as every local path is laid out;
+  - `Rhumb`: north along the meridian, east as the rhumb line's departure (as a frame's point, 4.21).
+- **Their third** (`pointZ`, `CurveZ`, A-GRA's Z_ChoiceType): `Down`, metres down from the reference (as before); `AltitudeOffset`, metres up from it; `AbsoluteAltitude`, the altitude itself, in the curve's reference. Each is made metres down from the reference when the curve is planned, so the same curve given the three ways flies alike. Turned in three dimensions, an absolute altitude stays one: only its x and y are turned.
+- **Where a curve is changes only with a new curve's segments.**
+  - Its reference, range, points' reading and frame, given in an UPDATE of its options alone, are refused `invalid_parameter` naming the first given (0, 1, 2, 8 to 19). Before FA-5d2 such an UPDATE took a latitude, longitude or altitude: the setpoint and the end points read it, but the curve was never flown from it (section 14).
+  - Segments appended go on from the curve's reference, their points read as its: A-GRA's append "will use the ownship CenterReference of the preceding curve following command", though its schema gives every segment a CenterReference. Those given with them are not used; the setpoint reads the curve's back.
+  - A new curve's segments in an UPDATE place it afresh: a point replaces a frame, and a frame a point.
+- **Past its end**, a curve not in the plain layout, or in a frame, flies on (or orbits) from its end on the Earth, its last course turned as its axes are.
+- **Checked and reported as flown.** The host plans the curve as the behaviour flies it: placed, read and turned. The turn, climb and terrain checks and the endurance check see that curve, and its end points (4.13) are placed so, the frame as it is now.
+- **Surfaces.**
+  - C++: `CurveCommand`'s `altitudeReference`, `altitudeMinM`, `altitudeMaxM`, `pointRotation`, `pointOffsets` and `pointZ`; `CurveZ`; `CurveShape` (its six fields, `fields`, `frameOffset`, `empty`); the curve's `submit` and `update`, Bezier and NURBS, in their `Vehicle` and `Caller` forms, take a trailing `const CurveShape*`; `BatchCommand::curveShape`; `Setpoint::curveShape`; `PathStore::curveShape` and `curveFrame`.
+  - C ABI 1.25: `FSIM_MODE_CURVE` takes 20 fields. Eight are still taken; the reference's follow them, then the frame's (14 to 19). `enum fsim_curve_z`. A curve's setpoint reads back all 20.
+  - Python: `submit_curve`, `update_curve`, `append`, batches and tasks take `altitude_reference`, `altitude_min_m`, `altitude_max_m`, `point_rotation`, `point_offsets`, `point_z` (`fsim.CurveZ`), `frame`, `frame_rotation`, `frame_offsets`, `frame_x_m`, `frame_y_m` and `frame_z_m`, codes by name or member.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -868,7 +900,7 @@ Laps, entry and exit points, legs by time, turns by bank, rate or type, hold con
 - FA-5c, the hover loiter and relative points (LTR-15, LTR-18; 4.25), done 2026-09-28 and measured in section 14;
 - FA-5d, curves as the schema gives them, in three steps:
   - FA-5d1, general NURBS with their curvature and indices (CRV-03, CRV-08; 4.26), done 2026-09-28 and measured in section 14;
-  - FA-5d2, the curve's reference and its control points' offsets: an altitude reference and range, a frame, rotations, geodetic offsets and altitude choices (CRV-04, CRV-05, CRV-06);
+  - FA-5d2, the curve's reference and its control points' offsets: an altitude reference and range, a frame, rotations, geodetic offsets and altitude choices (CRV-04, CRV-05, CRV-06; 4.27), done 2026-09-28 and measured in section 14;
   - FA-5d3, a rotorcraft's circular loiter at the curve's end (CRV-11).
 
 **Items (17):** CRV-03, CRV-04, CRV-05, CRV-06, CRV-08, CRV-11; LTR-03, LTR-05, LTR-06, LTR-07, LTR-10, LTR-11, LTR-12, LTR-13, LTR-14, LTR-15, LTR-18.
@@ -1825,6 +1857,39 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The micro cases are within −0.8 % to +1.3 %, but the curve's 4.8 % faster (273.8 ns: its Bernstein sums now inline into the plan's point); the command cases within −1.2 % to +1.3 %.
   - World throughput is 99.9 to 100.2 % (7 rounds; 3 read 98.7 to 100.6 %) of FA-5c's; protection costs at most 0.5 %.
 - ctest: all 278 tests pass.
+
+**FA-5d2, A-GRA's curve reference and control points (CRV-04, CRV-05, CRV-06).**
+- **Its reference** (`test_curve_references`, calm):
+  - above the ground: a C172x's level curve 10 km east at 400 m, over ground rising 2 % to the east. After its first minute it kept within 4.7 m of 400 m over the ground, the ground 186 m higher at its end;
+  - its range: left out at 500 m, with a range of 1,000 to 1,200 m, the altitude was 1,000 m; given 800 m it was refused at field 2; a range whose least was above its most was refused at 10;
+  - its third three ways: the same curve, climbing 150 m in 6 km, given as down, as an altitude offset up and as absolute altitudes. After 90 s all three were at 623.129 m: the first two bit for bit, the third within a millimetre (made down from its reference by a subtraction).
+- **Laid out on the Earth** (a C172x each):
+  - along a great circle, 30 km east: its end 0.00 m from the great circle's end, where the plane's (the parallel) was 54.4 m from it; flown within 1.8 m of the great circle past its first 5 km;
+  - along a rhumb line, 25 km north-east: its end 0.00 m from the rhumb line's, where the plane's was 19.0 m from it; flown within 1.2 m.
+- **In a frame:**
+  - a ship heading 60° at 8 m/s, the curve 8 km abeam to starboard along its y axis (150°), turned with its yaw, the aircraft 2 km short of its start. From 80 s on it was within 2.8 m of the line where the ship was then, its track over the ship 0.12° off it; by the curve's end the ship had carried the line 1.5 km;
+  - this case found a defect in FA-5d2's own code before the commit: a curve whose axes are turned had its cross-track read as though they pointed north. On the curve's extension, the aircraft read 1.7 km off it, turned away, and was still 579 m off at 80 s. Read along its axes (the course turned after), 2.8 m. An unturned curve runs the same operations as before;
+  - an IRIS along a curve from 20 m east of a UH-1H flying north at 2 m/s, in the UH-1H's frame: within 0.03 m of 20 m east of it. The UH-1H removed before the curve's end: the activity failed `target_lost`, and the IRIS held still (0.00 m/s).
+- **In three dimensions:**
+  - a fixed frame heading east and pitched 2° up: a curve 6 km along its x read back ending 5,996.3 m east and 209.40 m up (6 km's cosine and sine of 2°), and was flown to 209.6 m up. Given as absolute altitudes 50 m above its reference, its end stayed 50.000 m up, only its x and y turned (5,996.3 m east);
+  - an IRIS along a line from 20 m to a UH-1H's right along its nose, in the UH-1H's body axes, turned afresh every step as the UH-1H flew north at 2 m/s. In the UH-1H's axes it kept within 0.02 m of 20 m to its right and 0.84 m of its level, the UH-1H pitched up to 4.7°: a degree swings the line a metre 60 m along it.
+- **Refused, naming the field:** a reference that is not one (8), offsets (12) and a third (13) out of range, a turn with no frame (11), a frame the world does not have (14), offsets without a frame (18); an altitude outside its range (2), and a range upside down (10). In the frame 2 km north of its origin and 200 m up, the reference was read back there, 0.31 m higher: a Cartesian offset lies in the plane at the origin (as a pattern's, FA-5c).
+- **Where a curve is changes only with a new curve's segments.** Given with its options alone: an altitude (2), offsets (12) and a frame (14) were refused; its speed alone was taken. A new curve's point left the frame. A new curve's reference given without its altitude was refused (8). Segments appended with another latitude and another reading went on from the curve's reference, read as its: the setpoint read the curve's back, and a segment appended 60 m up, read as offsets up (the curve's reading, not the down given with it), was flown 60 m up.
+  - **A fix, named:** before FA-5d2 a curve's UPDATE of its options alone took a latitude, longitude or altitude. The setpoint and end points read it, but the curve was never flown from it. It is now refused. None of the platform's own calls gave one. The conformance walks' curves that did are now answered `invalid_parameter` where they were taken: their answers change, not their draws.
+  - Built first, an append given a reference was refused too. A-GRA's ICD says the appended curve uses the preceding command's CenterReference, and its schema gives every segment one: an A-GRA append always carries one. So an append goes on from the curve's, as before.
+- **The fleet** (`test_fleet`): every aircraft flies a straight cubic twelve orbit radii long from the origin of a frame a radius ahead. The curve runs along the frame's heading, 30° right of the aircraft's, its points turned with the frame and their third read as offsets up, climbing 1 %; the frame moves to its right at a tenth of the aircraft's speed. All 35 complete.
+  - From a third along it, the wings keep within 4.3 % of their radius (the KC-46A's 385 m of 8.9 km) and the rotorcraft within 2.3 % (the UH-1H's 4.7 m); off its climb, a wing within 8.3 m (the Mirage 2000's) and a rotorcraft 0.01 m.
+  - From a fifth along it, the Skua was 21.5 m off (16 % of its 132 m): the tail of its join from a radius to the side at 30°, which overshoots 23 m and settles to 2.5 m. From a third, 10.1 m. The join is the follower's, as flown before.
+- **The support table:** `curve/reference/geodetic`, `curve/reference/frame` and `curve/offsets` are supported; the curve's capability names only a rotorcraft's circle at the end (FA-5d3) as missing.
+- **Conformance:** the walks draw as they did. The optimise walks also draw the reference, its range, the points' reading, rotations and layouts, and frames (the session's first few, which it does not have), with one of the shape's fields out of its range now and then; the segments' third is given as the reading says, the same curve.
+- **Bezier curves fly as before, to the last bit:** FA-5d1's probe (a C172x's S with a segment appended, an IRIS's curve ending in a hover), flown by this build: its 64 lines at full precision are identical to FA-5c's.
+- **Surfaces:** the C ABI's 1.25 block (20 fields - a range, great circles, offsets up - read back; an UPDATE of its options alone given a latitude or a layout refused; in a frame, read back placed; a third out of range refused; 21 fields malformed; a batch with its shape); an ABI 1.6 curve reads back 20 fields; Python's `test_curve_references` (by name and member, read back, flown, refused, appended, in a frame, in three dimensions, a batch).
+- **Digests:** identical to FA-5d1's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-5d1, both builds run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 3 of `world`.
+  - The micro cases are within −1.6 % to +0.6 % (the curve's −1.0 %); the command cases within −1.3 % to +0.4 %, but a same-level update's +3.0 % in both runs (6.8 ns where it was 6.6).
+  - That update is `World::command` with the host's `updateLegacy` inlined. Its code is the same instruction for instruction, prologue included; it sits 0x110 bytes later, 16 bytes into a cache line where it began one. Built before a four-line change elsewhere in the host (the append's refusal, taken out), it read −1.5 %: placement, not its path.
+  - World throughput is 100.0 to 100.2 % of FA-5d1's; protection costs at most 1.3 % (the B-52H's; the run before read 0.4 %).
+- ctest: all 282 tests pass.
 
 ## Appendix A: the inventory
 

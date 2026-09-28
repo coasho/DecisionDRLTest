@@ -759,7 +759,7 @@ int main(int argc, char** argv) {
             fsim_command_detail detail;
             fsim_activity_id curve_id;
             int k;
-            CHECK(fsim_mode_field_count(FSIM_MODE_CURVE) == 8);
+            CHECK(fsim_mode_field_count(FSIM_MODE_CURVE) == 20); /* (eight still taken: 1.25's after them) */
             for (k = 0; k < 8; ++k) fields[k] = later[k] = fsim_hold();
             fsim_bezier_segment_init(&seg[0]);
             fsim_bezier_segment_init(&seg[1]);
@@ -845,6 +845,65 @@ int main(int argc, char** argv) {
             item.struct_size = sizeof item;
             item.kind = FSIM_BATCH_NURBS, item.fields = fields, item.count = 8, item.nurbs = &s, item.segment_count = 1, item.options = &co;
             CHECK(fsim_vehicle_submit_batch(world, b, &item, 1, results, NULL) == FSIM_OK && results[0].status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_cancel(world, results[0].activity, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        }
+        {
+            /* ABI 1.25 (4.27): a curve's reference as A-GRA's schema gives it - within an altitude range, its points laid out
+               along great circles and read as offsets up, read back; its reference in a frame; a third out of range refused
+               naming it; where it is, given with its options alone, refused; in a batch, its shape beside it */
+            double fields[21], later[20];
+            fsim_nurbs_segment s;
+            fsim_batch_command sp, item;
+            fsim_command_result results[1];
+            fsim_frame_spec frame;
+            fsim_activity_id curve_id;
+            const fsim_vehicle_state* at;
+            uint64_t frame_id = 0;
+            int k;
+            for (k = 0; k < 21; ++k) fields[k] = fsim_hold();
+            for (k = 0; k < 20; ++k) later[k] = fsim_hold();
+            fsim_nurbs_segment_init(&s);
+            s.points = 4, s.knots = 8;
+            for (k = 0; k < 4; ++k) s.north[k] = 2000.0 * k, s.down[k] = 30.0 * k; /* (up, read as offsets up: 90 m by its end) */
+            for (k = 0; k < 8; ++k) s.knot[k] = k < 4 ? 0.0 : 1.0;
+            at = fsim_vehicle_state_ptr(world, b);
+            fields[9] = at->altitude_msl_m - 100.0, fields[10] = at->altitude_msl_m + 100.0; /* its range: the aircraft's altitude within it */
+            fields[12] = FSIM_FRAME_GREAT_CIRCLE, fields[13] = FSIM_CURVE_Z_ALTITUDE_OFFSET;
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_nurbs(world, b, fields, 20, &s, 1, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            curve_id = cr.activity;
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, curve_id, &sp) == FSIM_OK && sp.count == 20 && sp.fields[9] == fields[9] && sp.fields[10] == fields[10] &&
+                  sp.fields[12] == FSIM_FRAME_GREAT_CIRCLE && sp.fields[13] == FSIM_CURVE_Z_ALTITUDE_OFFSET && isnan(sp.fields[14]));
+            CHECK(fabs(sp.fields[2] - at->altitude_msl_m) < 1e-6); /* (left out: the aircraft's, within its range) */
+            /* where it is changes only with its segments: given with its options alone, refused naming the field */
+            later[0] = at->latitude_rad;
+            CHECK(fsim_activity_update(world, curve_id, later, 20, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED && cr.reserved == 1);
+            later[0] = fsim_hold(), later[12] = FSIM_FRAME_RHUMB;
+            CHECK(fsim_activity_update(world, curve_id, later, 20, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED && cr.reserved == 13);
+            later[12] = fsim_hold(), later[4] = 60.0; /* how it is flown: taken */
+            CHECK(fsim_activity_update(world, curve_id, later, 20, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            /* its reference in a frame: 1 km north of its origin */
+            fsim_frame_spec_init(&frame);
+            frame.origin = FSIM_FRAME_FIXED;
+            frame.latitude_rad = at->latitude_rad, frame.longitude_rad = at->longitude_rad, frame.altitude_msl_m = at->altitude_msl_m;
+            CHECK(fsim_world_create_frame(world, &frame, &frame_id) == FSIM_OK && frame_id > 0);
+            fields[9] = fields[10] = fsim_hold();
+            fields[14] = (double)frame_id, fields[17] = 1000.0;
+            CHECK(fsim_vehicle_submit_nurbs(world, b, fields, 20, &s, 1, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.count == 20 && sp.fields[14] == (double)frame_id && sp.fields[17] == 1000.0);
+            CHECK(fabs(sp.fields[0] - (at->latitude_rad + 1000.0 / 6378137.0)) < 1e-5); /* (where it is: the frame's point) */
+            fields[13] = 3.0; /* a third's reading is 0 to 2 */
+            CHECK(fsim_vehicle_submit_nurbs(world, b, fields, 20, &s, 1, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED && cr.reserved == 14);
+            CHECK(fsim_vehicle_submit_nurbs(world, b, fields, 21, &s, 1, &co, &cr) != FSIM_OK); /* malformed: 20 at most */
+            fields[13] = FSIM_CURVE_Z_ALTITUDE_OFFSET;
+            memset(&item, 0, sizeof item);
+            item.struct_size = sizeof item;
+            item.kind = FSIM_BATCH_NURBS, item.fields = fields, item.count = 20, item.nurbs = &s, item.segment_count = 1, item.options = &co;
+            CHECK(fsim_vehicle_submit_batch(world, b, &item, 1, results, NULL) == FSIM_OK && results[0].status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get_setpoint(world, results[0].activity, &sp) == FSIM_OK && sp.count == 20 && sp.fields[14] == (double)frame_id);
             CHECK(fsim_activity_cancel(world, results[0].activity, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
         }
         {
@@ -1263,7 +1322,7 @@ int main(int argc, char** argv) {
             for (i = 0; i < 6; ++i) piece.north[i] = 400.0 * i;
             CHECK(fsim_vehicle_submit_curve(world, merlin, curve, 8, &piece, 1, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
             CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_CURVE && sp.segment_count == 1);
-            CHECK(sp.count == 8 && !isnan(sp.fields[0]) && sp.segments[0].north[5] == 2000.0);
+            CHECK(sp.count == 20 && !isnan(sp.fields[0]) && sp.segments[0].north[5] == 2000.0); /* (1.25: its reference's fields after its eight) */
             /* named controllers: one holds a grant, its NEW flies, another's calls are refused */
             {
                 fsim_command_options oc;

@@ -1178,6 +1178,66 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             // the Crazyflie's 0.38 m)
             CHECK(miss < (p.rotor ? std::max(0.5, 0.1 * R) : std::max(20.0, 0.05 * R)));
         });
+    // A-GRA's curve reference (ADR-29 FA-5d2: CRV-04, CRV-05, CRV-06): a straight cubic twelve orbit radii long from the origin
+    // of a frame a radius ahead, along the frame's heading 30 degrees right of the aircraft's - its points turned with the
+    // frame, their third read as offsets up, climbing 1 % - the frame moving to its right at a tenth of the aircraft's speed:
+    // flown over the frame, off its line where the frame is now and off its height, from a third along it
+    struct TurnedPlan {
+        FrameSpec frame;
+        double base = 0.0, across = 0.0, up = 0.0;
+    };
+    std::map<std::uint32_t, TurnedPlan> turnedPlans;
+    run("fsim.guidance.curve", 0.0,
+        [&](const Plane& p) {
+            const double R = orbitRadius(p), psi = p.start.eulerRad[2] + 30.0 * kDeg, v = 0.1 * (p.rotor ? p.cruiseMs : p.start.airspeedTrueMs);
+            const PositionCommand o = alongHeading(p, R);
+            TurnedPlan& plan = turnedPlans[p.id];
+            plan = TurnedPlan{};
+            FrameSpec& f = plan.frame;
+            f.origin = FrameOrigin::Moving;
+            f.latitudeRad = o.latitudeRad, f.longitudeRad = o.longitudeRad, f.altitudeMslM = p.start.altitudeMslM, f.yawRad = psi;
+            f.northMs = -v * std::sin(psi), f.eastMs = v * std::cos(psi), f.timeS = w.simTime(); // (to its right)
+            const FrameId id = w.createFrame(f);
+            REQUIRE(id != 0);
+            NurbsSegment seg;
+            seg.points = 4, seg.knots = 8;
+            for (std::uint32_t i = 0; i < 4; ++i) seg.north[i] = 4.0 * R * i, seg.down[i] = 0.04 * R * i; // (along its x; up, read so)
+            for (std::uint32_t i = 4; i < 8; ++i) seg.knot[i] = 1.0;
+            CurveCommand c;
+            c.pointRotation = static_cast<double>(FrameRotation::Yaw), c.pointZ = static_cast<double>(CurveZ::AltitudeOffset);
+            CurveShape shape;
+            shape.frame = static_cast<double>(id);
+            plan.base = w.vehicleState(p.id)->altitudeMslM; // (its reference's height: the aircraft's)
+            const CommandResult r = w.submit(p.id, c, Span<const NurbsSegment>(&seg, 1), {}, &shape);
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            return r.accepted();
+        },
+        [&](const Plane& p) { return 14.0 * orbitRadius(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) * 1.5 + 60.0; },
+        [&](const Plane& p) {
+            TurnedPlan& plan = turnedPlans[p.id];
+            if (!w.activity(activity[p.id])->live()) return;
+            const FramePose pose = framePose(plan.frame, w.simTime());
+            const auto& s = *w.vehicleState(p.id);
+            double north, east;
+            offset(s, pose.latitudeRad, pose.longitudeRad, north, east);
+            const double along = north * std::cos(pose.yawRad) + east * std::sin(pose.yawRad);
+            if (along < 4.0 * orbitRadius(p)) return; // (from a third along it: joined from a radius off, 30 degrees across)
+            plan.across = std::max(plan.across, std::abs(-north * std::sin(pose.yawRad) + east * std::cos(pose.yawRad)));
+            plan.up = std::max(plan.up, std::abs(s.altitudeMslM - (plan.base + 0.01 * along)));
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const TurnedPlan& plan = turnedPlans[p.id];
+            const double R = orbitRadius(p);
+            INFO(activityStateName(r.state) << "; R " << R << ", off its moving line " << plan.across << " m, off its climb " << plan.up << " m");
+            CHECK(r.state == ActivityState::Completed);
+            // (the worst: a wing 4.3 % of its radius, the KC-46A's 385 m of its 8.9 km - the Skua 10.1 m, 7.7 % of its 132 m; a
+            // rotorcraft 2.3 %, the UH-1H's 4.7 m; off its climb a wing 8.3 m, the Mirage 2000's, a rotorcraft 0.01 m)
+            CHECK(plan.across < (p.rotor ? std::max(0.5, 0.1 * R) : std::max(20.0, 0.05 * R)));
+            CHECK(plan.up < (p.rotor ? 0.5 : 20.0));
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

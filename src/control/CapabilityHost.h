@@ -63,6 +63,13 @@ public:
     virtual bool frame(FrameId id, FrameSpec& spec, FramePose& now) const = 0;
 };
 
+/// A curve's shape merged as an UPDATE gives it (docs/flight-autonomy.md, 4.27): its frame's fields given replace
+/// the kept ones; a point (a latitude and longitude) given leaves the frame, and a frame given the point (Nurbs.cpp).
+void mergeCurveShape(CurveCommand& curve, CurveShape& shape, const CurveCommand& given, const CurveShape& givenShape) noexcept;
+/// The first field an UPDATE gives that moves a curve - its reference, its points' reading, its frame (0, 1, 2, 8 to 13,
+/// then its shape's 14 to 19) - or -1.
+int curveWhereField(const CurveCommand& given, const CurveShape* shape) noexcept;
+
 class CapabilityHost {
 public:
     CapabilityHost();
@@ -116,10 +123,11 @@ public:
     /// A CurveCommand submitted as a Command has none: InvalidCurve. Its
     /// segments as A-GRA's schema gives them (docs/flight-autonomy.md, 4.26),
     /// or Bezier segments, each made one (NurbsSegment::of).
+    /// Its reference in a frame beside it, `shape` (docs/flight-autonomy.md, 4.27; null: none).
     CommandResult submit(const CurveCommand& curve, Span<const NurbsSegment> segments, const CommandOptions& options, const sim::VehicleState& state,
-                         double now);
+                         double now, const CurveShape* shape = nullptr);
     CommandResult submit(const CurveCommand& curve, Span<const BezierSegment> segments, const CommandOptions& options, const sim::VehicleState& state,
-                         double now);
+                         double now, const CurveShape* shape = nullptr);
     /// NEW of a pattern with its shape (fsim.guidance.pattern; docs/flight-autonomy.md, 4.23): the two checked and
     /// completed together, the shape then written into the path store (allocated at the first shape given).
     CommandResult submit(const PatternCommand& pattern, const PatternShape& shape, const CommandOptions& options, const sim::VehicleState& state,
@@ -147,10 +155,13 @@ public:
     /// UPDATE of a curve: the options given (kHold keeps one), and segments -
     /// with `append` 1, after its end, from the same reference; else a new
     /// curve, flown afresh. Options alone change how it is flown, not where.
+    /// Where a curve is - its reference, its points' reading, its frame (4.27) - changes only with segments: given
+    /// with its options alone, InvalidParameter naming the first. Its shape merged as a pattern's (a point replaces a
+    /// frame, a frame a point); an append keeps its reference and reading.
     CommandResult update(ActivityId activity, const CurveCommand& curve, Span<const NurbsSegment> segments, const sim::VehicleState& state,
-                         Caller caller) noexcept;
+                         Caller caller, const CurveShape* shape = nullptr) noexcept;
     CommandResult update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments, const sim::VehicleState& state,
-                         Caller caller) noexcept;
+                         Caller caller, const CurveShape* shape = nullptr) noexcept;
     /// CANCEL: the activity ends and its axes return to the vehicle default
     /// (`caller` as for UPDATE); what waited for them may start.
     CommandResult cancel(ActivityId activity, const sim::VehicleState& state, double now, Caller caller) noexcept;
@@ -171,7 +182,7 @@ public:
     /// capability that never completes; TaskActive while its activity is live;
     /// else why the vehicle cannot command the capability.
     Reason storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, TaskRepetition repetition,
-                     const PatternShape* shape = nullptr);
+                     const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr);
     /// A task command: the NEW of its command with `options`, the task among
     /// the requirements it traces to, answered as the NEW is; its runs, as the
     /// task says. UnknownTask; TaskActive while its activity is live.
@@ -348,6 +359,7 @@ private:
         TaskId suggestion = 0;
         bool resumed = false; ///< it flew before (disabled, unassigned): its start window was its first start's
         PatternShape shape{};  ///< a pattern's (docs/flight-autonomy.md, 4.23)
+        CurveShape curveShape{}; ///< a curve's reference in a frame (4.27)
     };
     /// A flight task (4.11): its command, and what became of it.
     struct Task {
@@ -357,6 +369,7 @@ private:
         std::vector<Waypoint> waypoints;
         std::vector<NurbsSegment> segments;
         PatternShape shape{};               ///< a pattern's (docs/flight-autonomy.md, 4.23)
+        CurveShape curveShape{};            ///< a curve's reference in a frame (4.27)
         TaskRepetition repetition{};
         ActivityId activity = 0;            ///< its activity (every run's), while it is commanded
         std::uint64_t commandId = 0;        ///< its task command's
@@ -372,7 +385,8 @@ private:
     void noteEnd(const ActivityRecord& record) noexcept;
     /// The platform's suggestion (4.11): a task with the command the checks
     /// left, every value held to its limit (a route's points as planned). Its id.
-    TaskId suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const PatternShape* shape = nullptr);
+    TaskId suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const PatternShape* shape = nullptr,
+                   const CurveShape* curveShape = nullptr);
     /// Room for a suggestion: the oldest not flying goes where kSuggestions are kept.
     Task& newSuggestion(TaskId id);
     /// Failed waiting activities kept as suggestions, made tasks now.
@@ -417,7 +431,7 @@ private:
     /// checked as its range policy says - the malformed returned at once, the
     /// rest logged - and the admission a behaviour asks. `setpoint` is what flies.
     Reason prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const sim::VehicleState& state,
-                   CheckLog& log, const PatternShape* shape = nullptr);
+                   CheckLog& log, const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr);
     /// The axes a command owns: its own, else the capability's default, widened
     /// above the actuators to whole groups; InvalidAxes if not a flyable set.
     Reason axesOf(std::size_t index, const Command& command, const CommandOptions& options, AxisMask& axes) const noexcept;
@@ -457,7 +471,8 @@ private:
     bool startWaiting(Waiting& w, const sim::VehicleState& state, double now) noexcept;
     /// UPDATE of a waiting activity: its command's new setpoint, checked as its NEW was, kept for its start.
     CommandResult updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
-                                const sim::VehicleState& state, Caller caller, const PatternShape* shape = nullptr) noexcept;
+                                const sim::VehicleState& state, Caller caller, const PatternShape* shape = nullptr,
+                                const CurveShape* curveShape = nullptr) noexcept;
     CommandResult updateWaiting(Waiting& w, const SupportCommand& setpoint, Caller caller) noexcept;
     /// The live activities' time windows after a world step: a persistent one
     /// done at its end window's close, a terminating one late or early failed if its end is critical.
@@ -605,6 +620,16 @@ private:
     /// fastest it flies (InvalidCurve, whatever the policy, with the section),
     /// every segment steeper than it climbs (clamped, or PerformanceLimit, with the section).
     Reason checkCurve(CurveCommand& c, Span<const NurbsSegment> segments, bool appending, const sim::VehicleState& state, CheckLog& log);
+    /// A NEW curve's reference (docs/flight-autonomy.md, 4.27), from the scratch curveShape_: its frame's fields whole
+    /// and in range, offsets only with a frame (InvalidParameter, fields 14 to 19); its points turned only with a frame
+    /// (field 11); in a frame the session has, placed where the frame is now (its frame, turn and pose into the scratch;
+    /// an unknown one InvalidParameter, field 14); left out, where the aircraft is; its altitude, left out, the
+    /// aircraft's in its reference, held within its range - given, within it (field 2).
+    Reason placeCurve(CurveCommand& c, const sim::VehicleState& state, CommandResult& detail) noexcept;
+    /// The turn of a curve's axes now (4.27): its frame's yaw or track, as its pointRotation says; 0 unturned.
+    double curveTurn(const CurveCommand& c, const CurveShape& shape) const noexcept;
+    /// A curve's points turned in three dimensions (4.27: ROTATION_3D): true, its frame's pose now into `pose`.
+    bool curveAttitude(const CurveCommand& c, const CurveShape& shape, FramePose& pose) const noexcept;
     /// A curve's options whole and finite, as checkCurve: InvalidParameter with the field.
     Reason checkCurveOptions(const CurveCommand& c, bool appending, CommandResult& detail) const noexcept;
     /// Its speed range one the aircraft can fly within, as checkCurve.
@@ -618,7 +643,8 @@ private:
     /// NEW: a command (with a route's waypoints, a curve's segments). One that
     /// may not wait (the existing entry points'): refused where it would.
     CommandResult submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const CommandOptions& options,
-                             const sim::VehicleState& state, double now, bool mayWait = true, const PatternShape* shape = nullptr);
+                             const sim::VehicleState& state, double now, bool mayWait = true, const PatternShape* shape = nullptr,
+                             const CurveShape* curveShape = nullptr);
 
     /// A capability's standing with the vehicle's policy (6.2, 7.2).
     struct Authority {
@@ -686,6 +712,10 @@ private:
     const SessionView* sessionView_ = nullptr; ///< the session's (setSessionView)
     PatternShape patternShape_{}; ///< a pattern's shape as prepare() completed it: its scratch, as routePlan_ is a route's
     FrameSpec patternFrame_{};    ///< its frame's, where its point is one's
+    CurveShape curveShape_{};     ///< a curve's reference in a frame, as prepare() or an UPDATE merged it (4.27)
+    FrameSpec curveFrame_{};      ///< its frame's, where its reference is one's
+    double curveTurn_ = 0.0;      ///< its axes' turn as placed
+    FramePose curvePose_{};       ///< its frame's pose as placed: its points turned in three dimensions by its attitude
 };
 
 } // namespace fsim::control

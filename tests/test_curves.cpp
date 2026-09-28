@@ -614,7 +614,7 @@ TEST_CASE("curve: every aircraft offers A-GRA's curve following, which takes UPD
         CHECK(d->setpoint == SetpointKind::Curve);
         CHECK(d->persistence == Persistence::Terminating);
         CHECK((d->interactions & kUpdate) != 0);
-        REQUIRE(d->parameters.size() == 8);
+        REQUIRE(d->parameters.size() == 20);
         CHECK(d->parameters[7].name == "append");
     }
 }

@@ -416,7 +416,7 @@ control::CommandResult World::submit(std::uint32_t id, const control::PatternCom
 }
 
 control::CommandResult World::submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
-                                     const control::CommandOptions& options) {
+                                     const control::CommandOptions& options, const control::CurveShape* shape) {
     Entry* e = entry(id);
     if (!e) {
         control::CommandResult r;
@@ -424,7 +424,7 @@ control::CommandResult World::submit(std::uint32_t id, const control::CurveComma
         r.commandId = options.commandId;
         return r;
     }
-    control::CommandResult r = e->host.submit(curve, segments, options, pool_->states()[e->slot], simTime_);
+    control::CommandResult r = e->host.submit(curve, segments, options, pool_->states()[e->slot], simTime_, shape);
     r.commandId = options.commandId;
     if (r.accepted()) {
         e->commanded = r.activity;
@@ -434,7 +434,7 @@ control::CommandResult World::submit(std::uint32_t id, const control::CurveComma
 }
 
 control::CommandResult World::submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments,
-                                     const control::CommandOptions& options) {
+                                     const control::CommandOptions& options, const control::CurveShape* shape) {
     Entry* e = entry(id);
     if (!e) {
         control::CommandResult r;
@@ -442,7 +442,7 @@ control::CommandResult World::submit(std::uint32_t id, const control::CurveComma
         r.commandId = options.commandId;
         return r;
     }
-    control::CommandResult r = e->host.submit(curve, segments, options, pool_->states()[e->slot], simTime_);
+    control::CommandResult r = e->host.submit(curve, segments, options, pool_->states()[e->slot], simTime_, shape);
     r.commandId = options.commandId;
     if (r.accepted()) {
         e->commanded = r.activity;
@@ -528,7 +528,7 @@ std::vector<control::CommandResult> World::submitBatch(std::uint32_t id, Span<co
             const control::Command& c = std::get<control::Command>(b.command);
             if (const auto* route = std::get_if<control::RouteCommand>(&c)) out.push_back(submit(id, *route, b.waypoints, b.options));
             else if (const auto* curve = std::get_if<control::CurveCommand>(&c))
-                out.push_back(b.nurbs.empty() ? submit(id, *curve, b.segments, b.options) : submit(id, *curve, b.nurbs, b.options));
+                out.push_back(b.nurbs.empty() ? submit(id, *curve, b.segments, b.options, b.curveShape) : submit(id, *curve, b.nurbs, b.options, b.curveShape));
             else if (const auto* pattern = std::get_if<control::PatternCommand>(&c); pattern && b.shape) out.push_back(submit(id, *pattern, *b.shape, b.options));
             else out.push_back(submit(id, c, b.options));
         }
@@ -557,12 +557,14 @@ control::CommandResult World::update(control::ActivityId activity, const control
     return update(control::Source::Policy, activity, route, waypoints);
 }
 
-control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments) {
-    return update(control::Source::Policy, activity, curve, segments);
+control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
+                                     const control::CurveShape* shape) {
+    return update(control::Source::Policy, activity, curve, segments, shape);
 }
 
-control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments) {
-    return update(control::Source::Policy, activity, curve, segments);
+control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments,
+                                     const control::CurveShape* shape) {
+    return update(control::Source::Policy, activity, curve, segments, shape);
 }
 
 control::CommandResult World::update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape) {
@@ -600,9 +602,9 @@ control::CommandResult World::update(control::Caller caller, control::ActivityId
 }
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
-                                     Span<const control::BezierSegment> segments) {
+                                     Span<const control::BezierSegment> segments, const control::CurveShape* shape) {
     if (Entry* e = entry(control::activityVehicle(activity))) {
-        control::CommandResult r = e->host.update(activity, curve, segments, pool_->states()[e->slot], caller);
+        control::CommandResult r = e->host.update(activity, curve, segments, pool_->states()[e->slot], caller, shape);
         echo(e->host, r);
         return r;
     }
@@ -610,9 +612,9 @@ control::CommandResult World::update(control::Caller caller, control::ActivityId
 }
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
-                                     Span<const control::NurbsSegment> segments) {
+                                     Span<const control::NurbsSegment> segments, const control::CurveShape* shape) {
     if (Entry* e = entry(control::activityVehicle(activity))) {
-        control::CommandResult r = e->host.update(activity, curve, segments, pool_->states()[e->slot], caller);
+        control::CommandResult r = e->host.update(activity, curve, segments, pool_->states()[e->slot], caller, shape);
         echo(e->host, r);
         return r;
     }
@@ -665,7 +667,7 @@ control::Reason World::storeTask(std::uint32_t id, control::TaskId task, const c
     if (item.nurbs.empty())
         for (const control::BezierSegment& b : item.segments) made.push_back(control::NurbsSegment::of(b));
     const Span<const control::NurbsSegment> segments = item.nurbs.empty() ? Span<const control::NurbsSegment>(made) : item.nurbs;
-    return e->host.storeTask(task, *command, item.waypoints, segments, repetition, item.shape);
+    return e->host.storeTask(task, *command, item.waypoints, segments, repetition, item.shape, item.curveShape);
 }
 
 control::CommandResult World::commandTask(std::uint32_t id, control::TaskId task, const control::CommandOptions& options) {

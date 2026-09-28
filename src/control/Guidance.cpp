@@ -865,8 +865,21 @@ void CurveBehavior::restart(const ControlContext& ctx, const CurveCommand& c) {
     }
     generation_ = store->curve, stored_ = store->segmentCount;
     k.lat0 = orHold(c.latitudeRad, s.latitudeRad), k.lon0 = orHold(c.longitudeRad, s.longitudeRad), k.alt0 = orHold(c.altitudeM, s.altitudeMslM);
+    // its plane and its points' reading, its reference in a frame (4.27)
+    k.offsets = isHold(c.pointOffsets) ? FrameOffsets::Cartesian : static_cast<FrameOffsets>(static_cast<int>(c.pointOffsets));
+    k.psi = 0.0;
+    rotation_ = isHold(c.pointRotation) ? FrameRotation::Unrotated : static_cast<FrameRotation>(static_cast<int>(c.pointRotation));
+    altitudeReference_ = isHold(c.altitudeReference) ? AltitudeReference::Msl : static_cast<AltitudeReference>(static_cast<int>(c.altitudeReference));
+    z_ = isHold(c.pointZ) ? CurveZ::Down : static_cast<CurveZ>(static_cast<int>(c.pointZ));
+    absoluteBase_ = k.alt0;
+    shape_ = store->curveShape;
+    if (!isHold(shape_.frame)) frame_ = store->curveFrame;
+    frameMoves_ = !isHold(shape_.frame) && frame_.origin != FrameOrigin::Fixed;
+    frameNorthMs_ = frameEastMs_ = frameDownMs_ = 0.0;
+    turnedRoll_ = turnedPitch_ = turnedYaw_ = kHold; // (in three dimensions: turned where its frame is placed)
     k.count = std::min<std::uint32_t>(stored_, route::Curve::kMax);
     std::copy_n(store->segments, k.count, k.segments);
+    k.normalize(0, z_);
     k.measure(0);
     const double ground = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
     if (hovers_) ownSpeed_ = ground < 1.0 ? (std::isfinite(perf.cruiseTasMs) ? perf.cruiseTasMs : 5.0) : ground;
@@ -903,13 +916,59 @@ void CurveBehavior::pace(const Performance& perf, const route::Fix& fix) noexcep
     speed_ = std::max(speed_, 0.1);
 }
 
+bool CurveBehavior::placeInFrame(const ControlContext& ctx, const sim::VehicleState& s) {
+    FramePose pose;
+    if (frame_.origin == FrameOrigin::Vehicle) {
+        const sim::VehicleState* v = ctx.world ? ctx.world->vehicleState(frame_.vehicle) : nullptr;
+        if (!v) return false;
+        pose = vehiclePose(*v);
+    } else {
+        pose = framePose(frame_, ctx.world ? ctx.world->simTime() : s.simTime);
+    }
+    const GeoPoint at = framePoint(pose, shape_.frameOffset());
+    route::Curve& k = *curve_;
+    k.lat0 = at.latitudeRad, k.lon0 = at.longitudeRad; // (its plane is laid out from it: all of it moves with it)
+    if (!isHold(shape_.frameZM)) k.alt0 = at.altitudeMslM;
+    k.psi = route::frameTurn(pose, rotation_);
+    frameNorthMs_ = pose.northMs, frameEastMs_ = pose.eastMs, frameDownMs_ = pose.downMs;
+    if (rotation_ == FrameRotation::Attitude && (pose.rollRad != turnedRoll_ || pose.pitchRad != turnedPitch_ || pose.yawRad != turnedYaw_))
+        orient(ctx, pose); // (a vehicle's as it turns: every step)
+    return true;
+}
+
+void CurveBehavior::orient(const ControlContext& ctx, const FramePose& pose) {
+    route::Curve& k = *curve_;
+    if (!ctx.path) return;
+    // its points as given, made down from its reference as its first were, turned as the frame is now
+    k.count = std::min<std::uint32_t>(stored_, route::Curve::kMax);
+    std::copy_n(ctx.path->segments, k.count, k.segments);
+    const double alt0 = k.alt0;
+    k.alt0 = absoluteBase_;
+    k.normalize(0, z_);
+    k.alt0 = alt0;
+    k.orient(0, route::Attitude(pose), z_);
+    k.measure(0);
+    turnedRoll_ = pose.rollRad, turnedPitch_ = pose.pitchRad, turnedYaw_ = pose.yawRad;
+}
+
+double CurveBehavior::altitudeOf(const ControlContext& ctx, const sim::VehicleState& s, double down) const noexcept {
+    const double at = (z_ == CurveZ::AbsoluteAltitude ? absoluteBase_ : curve_->alt0) - down; // (an absolute altitude stays one)
+    return altitudeReference_ == AltitudeReference::Msl ? at : altitudeMslOf(at, altitudeReference_, s, ctx.altimeter);
+}
+
 void CurveBehavior::end(const Performance& perf) {
     route::Curve& k = *curve_;
     ended_ = finished_ = true;
     const route::CurvePoint p = k.point(k.count - 1, 1.0);
-    k.exit = route::Line{p.p[0], p.p[1], p.courseRad(), 0.0};
-    k.orbit = route::Turn{};
-    k.orbit.centreNorthM = p.p[0], k.orbit.centreEastM = p.p[1];
+    endNorth_ = p.p[0], endEast_ = p.p[1];
+    if (!k.plain() || !isHold(shape_.frame)) { // (laid out from its end, on the Earth: 4.27)
+        k.exit = route::Line{0.0, 0.0, geo::wrapPi(p.courseRad() + k.psi), 0.0};
+        k.orbit = route::Turn{};
+    } else {
+        k.exit = route::Line{p.p[0], p.p[1], p.courseRad(), 0.0};
+        k.orbit = route::Turn{};
+        k.orbit.centreNorthM = p.p[0], k.orbit.centreEastM = p.p[1];
+    }
     // (a wing's airspeed, or the ground speed, with the wind behind it)
     k.orbit.radiusM = perf.turnRadiusM(speed_ + std::hypot(wind_.northMs, wind_.eastMs));
     k.orbit.angleRad = 1.0; // right turns, round its end
@@ -931,10 +990,22 @@ Command CurveBehavior::update(const ControlContext& ctx, const Command& in) {
         stored_ = ctx.path->segmentCount;
         k.count = std::min<std::uint32_t>(stored_, route::Curve::kMax);
         std::copy_n(ctx.path->segments + from, k.count - from, k.segments + from);
+        const double alt0 = k.alt0;
+        k.alt0 = absoluteBase_; // (its absolute altitudes made down from where the first were)
+        k.normalize(from, z_);
+        k.alt0 = alt0;
         k.measure(from);
+        if (rotation_ == FrameRotation::Attitude) turnedYaw_ = kHold; // (in three dimensions: turned afresh with them, where placed)
     }
     if (c) flown_.speedMinMs = c->speedMinMs, flown_.speedMaxMs = c->speedMaxMs, flown_.durationS = c->durationS, flown_.end = c->end;
     if (!c || k.count == 0) { // nothing to fly: on as it flies (a rotorcraft still)
+        VelocityCommand hold{kHold, 0.0, s.eulerRad[2], kHold, kHold, kHold};
+        if (hovers_) hold.northMs = hold.eastMs = 0.0;
+        else hold.airspeedMs = s.airspeedTrueMs;
+        return hold;
+    }
+    if (!isHold(shape_.frame) && !placeInFrame(ctx, s)) { // (its frame's vehicle gone: nothing to fly along)
+        failure_ = Reason::TargetLost;
         VelocityCommand hold{kHold, 0.0, s.eulerRad[2], kHold, kHold, kHold};
         if (hovers_) hold.northMs = hold.eastMs = 0.0;
         else hold.airspeedMs = s.airspeedTrueMs;
@@ -957,17 +1028,24 @@ Command CurveBehavior::update(const ControlContext& ctx, const Command& in) {
         if (segment_ + 1 == k.count && (t_ >= 1.0 - 1e-9 || (stops && k.lengthM() - k.fromM < 1.0))) end(perf);
     }
     const route::CurvePoint here = k.point(ended_ ? k.count - 1 : segment_, ended_ ? 1.0 : t_);
-    altitudeMsl_ = k.alt0 - here.p[2];
+    altitudeMsl_ = altitudeReference_ == AltitudeReference::Msl && z_ != CurveZ::AbsoluteAltitude ? k.alt0 - here.p[2] : altitudeOf(ctx, s, here.p[2]);
     if (!ended_) feedforward = here.gradient() * groundSpeed_;
+    if (frameMoves_ && !isHold(shape_.frameZM) && z_ != CurveZ::AbsoluteAltitude) feedforward -= frameDownMs_; // (its frame's climb)
     if (ended_) {
         if (loiter && hovers_) { // stopped: hover over its end
             double lat, lon;
-            geo::offsetLatLon(k.lat0, k.lon0, here.p[0], here.p[1], lat, lon);
+            k.fromPlane(here.p[0], here.p[1], lat, lon);
             course_ = heading_ = kHold;
             return PositionCommand{lat, lon, altitudeMsl_, kHold, 1.0, kHold};
         }
-        fix = loiter ? route::onArc(k.orbit, k.lat0, k.lon0, s.latitudeRad, s.longitudeRad)
-                     : route::onLine(k.exit, k.lat0, k.lon0, s.latitudeRad, s.longitudeRad);
+        if (k.plain() && isHold(shape_.frame)) {
+            fix = loiter ? route::onArc(k.orbit, k.lat0, k.lon0, s.latitudeRad, s.longitudeRad)
+                         : route::onLine(k.exit, k.lat0, k.lon0, s.latitudeRad, s.longitudeRad);
+        } else { // (from its end on the Earth, as its plane lays it out now: 4.27)
+            double lat, lon;
+            k.fromPlane(endNorth_, endEast_, lat, lon);
+            fix = loiter ? route::onArc(k.orbit, lat, lon, s.latitudeRad, s.longitudeRad) : route::onLine(k.exit, lat, lon, s.latitudeRad, s.longitudeRad);
+        }
     }
     route::Steer steer;
     steer.speed = speed_;
@@ -984,6 +1062,15 @@ Command CurveBehavior::update(const ControlContext& ctx, const Command& in) {
         for (const double seconds : {1.0, 2.0, 4.0}) tightest = std::max(tightest, std::abs(route::curvatureAhead(&k, seconds * std::max(groundSpeed_, 1.0))));
         if (tightest > 1e-6) ahead.turnRadiusM = 1.0 / tightest;
         if (hovers_) steer.speedLimitMs = route::speedLimitAhead(perf, k, std::max(speed_, groundSpeed_), loiter);
+    }
+    if (frameMoves_) { // flown over its frame, as a pattern is (4.25): its velocity and the wind's over it, a rotorcraft's given back
+        sim::VehicleState over = s;
+        over.velocityNedMs[0] -= frameNorthMs_, over.velocityNedMs[1] -= frameEastMs_;
+        WindEstimate wind = wind_;
+        wind.northMs -= frameNorthMs_, wind.eastMs -= frameEastMs_;
+        VelocityCommand out = route::follow(ctx, over, perf, wind, hovers_, fix, ahead, steer, k.trims, course_, heading_);
+        if (hovers_) out.northMs += frameNorthMs_, out.eastMs += frameEastMs_;
+        return out;
     }
     return route::follow(ctx, perf, wind_, hovers_, fix, ahead, steer, k.trims, course_, heading_);
 }
@@ -1092,7 +1179,19 @@ void registerGuidanceModes(ControllerRegistry& r) {
                         p("speed_max_ms", "m/s", now, 0.0, inf, Constraint::MinAirspeed, Constraint::MaxAirspeed),
                         p("duration_s", "s", now, 0.0, inf),
                         p("end", "", now, 0.0, static_cast<double>(EndBehavior::Count) - 1.0),
-                        p("append", "", now, 0.0, 1.0)};
+                        p("append", "", now, 0.0, 1.0),
+                        p("altitude_reference", "", now, 0.0, static_cast<double>(AltitudeReference::Count) - 1.0),
+                        p("altitude_min_m", "m", now, -inf, inf),
+                        p("altitude_max_m", "m", now, -inf, inf),
+                        p("point_rotation", "", now, 0.0, static_cast<double>(FrameRotation::Count) - 1.0),
+                        p("point_offsets", "", now, 0.0, static_cast<double>(FrameOffsets::Count) - 1.0),
+                        p("point_z", "", now, 0.0, static_cast<double>(CurveZ::Count) - 1.0),
+                        p("frame", "", now, 1.0, 9007199254740992.0),
+                        p("frame_rotation", "", now, 0.0, static_cast<double>(FrameRotation::Count) - 1.0),
+                        p("frame_offsets", "", now, 0.0, static_cast<double>(FrameOffsets::Count) - 1.0),
+                        p("frame_x_m", "m", now, -inf, inf),
+                        p("frame_y_m", "m", now, -inf, inf),
+                        p("frame_z_m", "m", now, -inf, inf)};
     curve.uses = {"fsim.flight.velocity", "fsim.flight.position"};
     curve.mode = FlightMode::CurveFollowing;
     curve.setpoint = SetpointKind::Curve;

@@ -692,7 +692,21 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   from; left out: the aircraft at the NEW), speed_min_ms, speed_max_ms (the
  *   ground speeds to fly it within), duration_s (or the time to fly all of
  *   it), end (fsim_end_behavior), append (1 in an UPDATE: its segments after
- *   the curve's end). Its segments go beside them, through
+ *   the curve's end). From ABI 1.25 (docs/flight-autonomy.md, 4.27), after
+ *   them: altitude_reference (fsim_altitude_reference of altitude_m and its
+ *   range), altitude_min_m, altitude_max_m (the reference's altitude range:
+ *   left out, the aircraft's is held within it), point_rotation
+ *   (fsim_frame_rotation of its control points' axes: turned as its frame is,
+ *   so only with one - ATTITUDE in three dimensions), point_offsets
+ *   (fsim_frame_offsets: CARTESIAN the plane every local path is laid out in,
+ *   GREAT_CIRCLE A-GRA's azimuthal equidistant layout, RHUMB), point_z
+ *   (fsim_curve_z of their third), then its reference in a frame: frame,
+ *   frame_rotation, frame_offsets, frame_x_m, frame_y_m, frame_z_m (as a
+ *   pattern's, 1.23). Where a curve is changes only with a new curve's
+ *   segments: those fields in an UPDATE of its options alone are refused;
+ *   segments appended go on from its reference, their points read as its (as
+ *   A-GRA's append does), those given with them not used. Eight or more fields
+ *   are taken, the rest left out. Its segments go beside them, through
  *   fsim_vehicle_submit_curve below; fsim_activity_update with a curve's
  *   fields changes how it is flown, not where. */
 enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3 };
@@ -708,6 +722,7 @@ enum fsim_altitude_reference { FSIM_ALTITUDE_MSL = 0, FSIM_ALTITUDE_ABOVE_GROUND
                                                            or a pattern's, a route's being FA-6's */ };
 enum fsim_speed_optimization { FSIM_SPEED_LONG_RANGE_CRUISE = 0, FSIM_SPEED_MAX_ENDURANCE }; /* A-GRA's SpeedOptimizationEnum (ABI 1.15) */
 enum fsim_direction_reference { FSIM_DIRECTION_TRUE_NORTH = 0, FSIM_DIRECTION_MAGNETIC_NORTH }; /* A-GRA's MA_HeadingReferenceEnum (ABI 1.20) */
+enum fsim_curve_z { FSIM_CURVE_Z_DOWN = 0, FSIM_CURVE_Z_ALTITUDE_OFFSET, FSIM_CURVE_Z_ABSOLUTE_ALTITUDE }; /* A-GRA's Z_ChoiceType (ABI 1.25) */
 enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft) */

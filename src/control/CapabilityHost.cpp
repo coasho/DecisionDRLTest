@@ -579,6 +579,12 @@ Reason CapabilityHost::checkCurveOptions(const CurveCommand& c, bool appending, 
     if (!given(c.durationS, 0.0)) return bad(5);
     if (!code(c.end, static_cast<double>(EndBehavior::Count))) return bad(6);
     if (!code(c.append, 2.0) || (!appending && c.append == 1.0)) return bad(7); // (a NEW has nothing to append to)
+    if (!code(c.altitudeReference, static_cast<double>(AltitudeReference::Count))) return bad(8); // (4.27)
+    if (!given(c.altitudeMinM, -inf)) return bad(9);
+    if (!given(c.altitudeMaxM, -inf) || (!isHold(c.altitudeMinM) && !isHold(c.altitudeMaxM) && c.altitudeMaxM < c.altitudeMinM)) return bad(10);
+    if (!code(c.pointRotation, static_cast<double>(FrameRotation::Count))) return bad(11);
+    if (!code(c.pointOffsets, static_cast<double>(FrameOffsets::Count))) return bad(12);
+    if (!code(c.pointZ, static_cast<double>(CurveZ::Count))) return bad(13);
     return Reason::None;
 }
 
@@ -605,10 +611,8 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const NurbsSegment> segm
     CommandResult& detail = log.result;
     if (const Reason r = checkCurveOptions(c, appending, detail); r != Reason::None) return r;
     const bool hovers = (adapter_->features() & kFeatureHover) != 0;
-    if (!appending) { // what it leaves out: the reference where the aircraft is
-        if (isHold(c.latitudeRad)) c.latitudeRad = state.latitudeRad, c.longitudeRad = state.longitudeRad;
-        if (isHold(c.altitudeM)) c.altitudeM = state.altitudeMslM;
-    }
+    if (!appending) // what it leaves out: the reference where the aircraft is (4.27: in a frame, in its reference and range)
+        if (const Reason why = placeCurve(c, state, detail); why != Reason::None) return why;
     // the segments: 1 to 10, finite, joined (within a metre), a metre long or more over the ground, and room for them
     auto invalid = [&detail](std::size_t segment) {
         detail.index = static_cast<std::int16_t>(std::min<std::size_t>(segment, 0x7FFF));
@@ -650,6 +654,12 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const NurbsSegment> segm
     k.count = static_cast<std::uint32_t>(held + n);
     if (held) std::copy_n(store->segments, held, k.segments);
     std::copy_n(segments.data(), n, k.segments + held);
+    k.lat0 = c.latitudeRad, k.lon0 = c.longitudeRad, k.alt0 = c.altitudeM; // (its plane: 4.27)
+    k.offsets = isHold(c.pointOffsets) ? FrameOffsets::Cartesian : static_cast<FrameOffsets>(static_cast<int>(c.pointOffsets));
+    k.psi = curveTurn_;
+    const CurveZ z = isHold(c.pointZ) ? CurveZ::Down : static_cast<CurveZ>(static_cast<int>(c.pointZ));
+    k.normalize(0, z);
+    if (c.pointRotation == static_cast<double>(FrameRotation::Attitude)) k.orient(0, route::Attitude(curvePose_), z); // (in three dimensions)
     k.measure(0);
     const Performance& f = performance_;
     limitCurveSpeeds(c, log);
@@ -703,7 +713,7 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const NurbsSegment> segm
 void CapabilityHost::writeCurve(Span<const NurbsSegment> segments, bool appending) {
     if (!config_->path) config_->path = std::make_unique<PathStore>();
     PathStore& store = *config_->path;
-    if (!appending) store.segmentCount = 0, ++store.curve; // a new curve: flown afresh
+    if (!appending) store.segmentCount = 0, ++store.curve, store.curveShape = curveShape_, store.curveFrame = curveFrame_; // a new curve: flown afresh
     const auto n = std::min<std::size_t>(segments.size(), PathStore::kSegments - store.segmentCount);
     std::copy_n(segments.data(), n, store.segments + store.segmentCount);
     store.segmentCount += static_cast<std::uint32_t>(n);
@@ -990,7 +1000,7 @@ Reason CapabilityHost::axesOf(std::size_t index, const Command& command, const C
 }
 
 Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
-                               const sim::VehicleState& state, CheckLog& log, const PatternShape* shape) {
+                               const sim::VehicleState& state, CheckLog& log, const PatternShape* shape, const CurveShape* curveShape) {
     const bool checked = log.range != RangePolicy::None;
     CommandResult& detail = log.result;
     auto* hsa = std::get_if<HsaCommand>(&setpoint);
@@ -998,8 +1008,10 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
         if (const Reason why = resolveHsa(*hsa, state, detail); why != Reason::None) return why;
     if (auto* route = std::get_if<RouteCommand>(&setpoint)) // its waypoints completed, and checked as its range policy says
         if (const Reason why = checkRoute(*route, waypoints, state, log); why != Reason::None) return why;
-    if (auto* curve = std::get_if<CurveCommand>(&setpoint)) // its segments checked as its range policy says
+    if (auto* curve = std::get_if<CurveCommand>(&setpoint)) { // its segments checked as its range policy says (its shape into the scratch)
+        curveShape_ = curveShape ? *curveShape : CurveShape{};
         if (const Reason why = checkCurve(*curve, segments, false, state, log); why != Reason::None) return why;
+    }
     auto* pattern = std::get_if<PatternCommand>(&setpoint);
     std::int16_t radiusFrom = 5;
     if (pattern) { // complete it first, as an hsa (the runtime flies a complete setpoint) - with its shape, into the scratch
@@ -1130,7 +1142,7 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     Command setpoint = std::move(w.command); // (it flies once: moved, never copied)
     const bool route = std::holds_alternative<RouteCommand>(setpoint);
     if (why == Reason::None) why = prepare(record.capability, setpoint, Span<const Waypoint>(w.waypoints.data(), w.waypoints.size()),
-                                           Span<const NurbsSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape);
+                                           Span<const NurbsSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape, &w.curveShape);
     const bool found = why == Reason::None && log.refused != Reason::None; // (refused by what the checks found, not malformed)
     if (why == Reason::None) why = log.refused;
     if (found && w.options.range == RangePolicy::Reject && log.clampable) {
@@ -1229,13 +1241,13 @@ CommandResult CapabilityHost::submit(const RouteCommand& route, Span<const Waypo
 }
 
 CommandResult CapabilityHost::submit(const CurveCommand& curve, Span<const NurbsSegment> segments, const CommandOptions& options,
-                                     const sim::VehicleState& state, double now) {
-    return submitWith(Command(curve), {}, segments, options, state, now);
+                                     const sim::VehicleState& state, double now, const CurveShape* shape) {
+    return submitWith(Command(curve), {}, segments, options, state, now, true, nullptr, shape);
 }
 
 CommandResult CapabilityHost::submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                          const CommandOptions& options, const sim::VehicleState& state, double now, bool mayWait,
-                                         const PatternShape* shape) {
+                                         const PatternShape* shape, const CurveShape* curveShape) {
     if (pendingSuggestions_) materialize();
     details_.clear();
     const int found = catalog_->indexOf(command);
@@ -1264,12 +1276,12 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     Command setpoint = command;
     CommandResult detail; // what the checks found: kClamped, the first finding's detail
     CheckLog log{detail, options.range, &details_};
-    if (const Reason why = prepare(index, setpoint, waypoints, segments, state, log, shape); why != Reason::None) return about(rejected(why), detail);
+    if (const Reason why = prepare(index, setpoint, waypoints, segments, state, log, shape, curveShape); why != Reason::None) return about(rejected(why), detail);
     // every finding named: refused with the first (docs/flight-autonomy.md, 4.8) - and, where Clamp
     // would fly what the checks left, a task with it suggested in its place (4.11)
     if (log.refused != Reason::None) {
         if (options.range == RangePolicy::Reject && log.clampable && !options.validateOnly && d.kind != CapabilityKind::Support)
-            details_.suggestion = suggest(setpoint, waypoints, segments, &patternShape_);
+            details_.suggestion = suggest(setpoint, waypoints, segments, &patternShape_, &curveShape_);
         return about(rejected(log.refused), detail);
     }
     // its endurance (4.18): a flight with an end needs no more than the vehicle has above its reserve - a soft
@@ -1333,6 +1345,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
         w.waypoints.reserve(PathStore::kWaypoints), w.waypoints.assign(waypoints.begin(), waypoints.end());
         w.segments.reserve(PathStore::kSegments), w.segments.assign(segments.begin(), segments.end());
         w.shape = shape ? *shape : PatternShape{};
+        w.curveShape = curveShape ? *curveShape : CurveShape{};
         if (!config_->path) config_->path = std::make_unique<PathStore>();
         if (std::holds_alternative<RouteCommand>(command) && !routePlan_) routePlan_ = std::make_unique<route::Plan>();
         if (std::holds_alternative<CurveCommand>(command) && !curvePlan_) curvePlan_ = std::make_unique<route::Curve>();
@@ -1452,11 +1465,11 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
 }
 
 CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& curve, Span<const NurbsSegment> segments,
-                                     const sim::VehicleState& state, Caller caller) noexcept {
+                                     const sim::VehicleState& state, Caller caller, const CurveShape* shape) noexcept {
     details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) {
-        if (Waiting* w = waitingEntry(activity)) return updateWaiting(*w, Command(curve), {}, segments, state, caller);
+        if (Waiting* w = waitingEntry(activity)) return updateWaiting(*w, Command(curve), {}, segments, state, caller, nullptr, shape);
         return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     }
     const auto s = static_cast<std::size_t>(found);
@@ -1467,8 +1480,11 @@ CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& cu
     if (!live) return rejected(Reason::WrongCommandType, activity);
     // the options given replace the curve's; `append` is this UPDATE's own
     CurveCommand next = *live;
-    const double* given[] = {&curve.latitudeRad, &curve.longitudeRad, &curve.altitudeM, &curve.speedMinMs, &curve.speedMaxMs, &curve.durationS, &curve.end};
-    double* kept[] = {&next.latitudeRad, &next.longitudeRad, &next.altitudeM, &next.speedMinMs, &next.speedMaxMs, &next.durationS, &next.end};
+    const double* given[] = {&curve.latitudeRad,       &curve.longitudeRad,  &curve.altitudeM,    &curve.speedMinMs,    &curve.speedMaxMs,
+                             &curve.durationS,         &curve.end,           &curve.altitudeReference, &curve.altitudeMinM, &curve.altitudeMaxM,
+                             &curve.pointRotation,     &curve.pointOffsets,  &curve.pointZ};
+    double* kept[] = {&next.latitudeRad, &next.longitudeRad, &next.altitudeM,    &next.speedMinMs,    &next.speedMaxMs,   &next.durationS, &next.end,
+                      &next.altitudeReference, &next.altitudeMinM, &next.altitudeMaxM, &next.pointRotation, &next.pointOffsets, &next.pointZ};
     for (std::size_t i = 0; i < std::size(given); ++i)
         if (!isHold(*given[i])) *kept[i] = *given[i];
     next.append = curve.append;
@@ -1481,6 +1497,10 @@ CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& cu
             result.index = 0; // nothing to append
             return about(rejected(Reason::InvalidCurve, activity), result);
         }
+        if (const int field = curveWhereField(curve, shape); field >= 0) { // (where it is changes with its segments: 4.27)
+            result.index = static_cast<std::int16_t>(field);
+            return about(rejected(Reason::InvalidParameter, activity), result);
+        }
         if (const Reason why = checkCurveOptions(next, false, result); why != Reason::None) return about(rejected(why, activity), result);
         if (slots_[s].range != RangePolicy::None) {
             limitCurveSpeeds(next, log);
@@ -1488,7 +1508,21 @@ CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& cu
             if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
         }
     } else {
-        if (appending) next.latitudeRad = live->latitudeRad, next.longitudeRad = live->longitudeRad, next.altitudeM = live->altitudeM; // (its reference)
+        const CurveShape held = config_->path ? config_->path->curveShape : CurveShape{};
+        if (appending) { // (from its reference, its points read as its - A-GRA's append uses the preceding CenterReference: 4.27)
+            next.latitudeRad = live->latitudeRad, next.longitudeRad = live->longitudeRad, next.altitudeM = live->altitudeM;
+            next.altitudeReference = live->altitudeReference, next.altitudeMinM = live->altitudeMinM, next.altitudeMaxM = live->altitudeMaxM;
+            next.pointRotation = live->pointRotation, next.pointOffsets = live->pointOffsets, next.pointZ = live->pointZ;
+            curveShape_ = held, curveTurn_ = curveTurn(next, held);
+            curveAttitude(next, held, curvePose_);
+        } else { // a new curve: its shape merged, as a pattern's; a reference given alone has no value to read
+            if (!isHold(curve.altitudeReference) && isHold(curve.altitudeM)) {
+                result.index = 8;
+                return about(rejected(Reason::InvalidParameter, activity), result);
+            }
+            curveShape_ = held;
+            mergeCurveShape(next, curveShape_, curve, shape ? *shape : CurveShape{});
+        }
         if (const Reason why = checkCurve(next, segments, appending, state, log); why != Reason::None) return about(rejected(why, activity), result);
         checkTerrain(Command(next), state, log);
         if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
@@ -1682,6 +1716,7 @@ bool CapabilityHost::retire(std::size_t s, ActivityState state) {
             w->segments.reserve(PathStore::kSegments), w->segments.assign(store.segments, store.segments + store.segmentCount);
         }
         w->shape = std::holds_alternative<PatternCommand>(flown) && config_->path ? config_->path->pattern : PatternShape{};
+        w->curveShape = std::holds_alternative<CurveCommand>(flown) && config_->path ? config_->path->curveShape : CurveShape{};
         w->command = std::move(flown);
     }
     if (!std::isnan(r.window.endNotAfter)) --windowed_; // (it no longer flies)
@@ -1753,7 +1788,8 @@ CommandResult CapabilityHost::activityCommand(ActivityId activity, ActivityComma
 }
 
 CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
-                                            const sim::VehicleState& state, Caller caller, const PatternShape* shape) noexcept {
+                                            const sim::VehicleState& state, Caller caller, const PatternShape* shape,
+                                            const CurveShape* curveShape) noexcept {
     const ActivityRecord& record = w.record;
     const ActivityId activity = record.id;
     if (const Reason why = addresses(record, caller); why != Reason::None) return rejected(why, activity, activity);
@@ -1766,6 +1802,7 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     // curve's options kept where left out), then checked as its NEW was, from where the aircraft is now
     Command next = w.command;
     PatternShape nextShape = w.shape;
+    CurveShape nextCurveShape = w.curveShape;
     Span<const Waypoint> points(w.waypoints.data(), w.waypoints.size());
     Span<const NurbsSegment> pieces(w.segments.data(), w.segments.size());
     std::array<NurbsSegment, PathStore::kSegments> joined; // (a curve appended to: the two together)
@@ -1777,8 +1814,16 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
         if (!waypoints.empty()) points = waypoints;
     } else if (const auto* curve = std::get_if<CurveCommand>(&setpoint)) {
         auto& kept = std::get<CurveCommand>(next);
-        const double* from[] = {&curve->latitudeRad, &curve->longitudeRad, &curve->altitudeM, &curve->speedMinMs, &curve->speedMaxMs, &curve->durationS, &curve->end};
-        double* to[] = {&kept.latitudeRad, &kept.longitudeRad, &kept.altitudeM, &kept.speedMinMs, &kept.speedMaxMs, &kept.durationS, &kept.end};
+        const double* from[] = {&curve->latitudeRad,   &curve->longitudeRad, &curve->altitudeM,         &curve->speedMinMs,   &curve->speedMaxMs,
+                                &curve->durationS,     &curve->end,          &curve->altitudeReference, &curve->altitudeMinM, &curve->altitudeMaxM,
+                                &curve->pointRotation, &curve->pointOffsets, &curve->pointZ};
+        double* to[] = {&kept.latitudeRad, &kept.longitudeRad, &kept.altitudeM,    &kept.speedMinMs,    &kept.speedMaxMs,   &kept.durationS, &kept.end,
+                        &kept.altitudeReference, &kept.altitudeMinM, &kept.altitudeMaxM, &kept.pointRotation, &kept.pointOffsets, &kept.pointZ};
+        if (!isHold(curve->altitudeReference) && isHold(curve->altitudeM)) { // (a reference given alone has no value to read: 4.27)
+            result.index = 8;
+            return about(rejected(Reason::InvalidParameter, activity), result);
+        }
+        mergeCurveShape(kept, nextCurveShape, *curve, curveShape ? *curveShape : CurveShape{});
         for (std::size_t i = 0; i < std::size(from); ++i)
             if (!isHold(*from[i])) *to[i] = *from[i];
         const bool appending = curve->append == 1.0;
@@ -1825,14 +1870,14 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     }
     CheckLog log{result, w.options.range, &details_};
     Command probe = next; // (fixed-size: a behaviour takes no UPDATE)
-    if (const Reason why = prepare(record.capability, probe, points, pieces, state, log, &nextShape); why != Reason::None)
+    if (const Reason why = prepare(record.capability, probe, points, pieces, state, log, &nextShape, &nextCurveShape); why != Reason::None)
         return about(rejected(why, activity), result);
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
     // kept for its start (room reserved at its NEW)
     if (const auto* route = std::get_if<RouteCommand>(&setpoint); route && !isHold(route->start)) w.firstStart = route->start;
     if (points.data() != w.waypoints.data()) w.waypoints.assign(points.begin(), points.end());
     if (pieces.data() != w.segments.data()) w.segments.assign(pieces.begin(), pieces.end());
-    w.shape = nextShape;
+    w.shape = nextShape, w.curveShape = nextCurveShape;
     assignSetpoint(w.command, next);
     return result;
 }

@@ -275,6 +275,20 @@ CurvePoint rational(const NurbsSegment& s, double t) noexcept;
 /// as the degree and once more, none within them more often than the degree (a break), and the domain longer than
 /// nothing; weights above 0. Its curvature, given, above 0; its indices, given, its first point and its last.
 bool wellFormed(const NurbsSegment& s) noexcept;
+/// A curve's plane from its reference (lat0, lon0) (Nurbs.cpp): on the Earth as `offsets` says - in the plane every
+/// local path is laid out in, along great circles (A-GRA's azimuthal equidistant layout) or rhumb lines (as a frame's
+/// are, Frames.cpp) - its axes turned `psi` from north.
+void earthToPlane(double lat0, double lon0, FrameOffsets offsets, double psi, double lat, double lon, double& north, double& east) noexcept;
+void planeToEarth(double lat0, double lon0, FrameOffsets offsets, double psi, double north, double east, double& lat, double& lon) noexcept;
+/// The turn a frame's pose gives a curve's axes (4.27): its yaw, or its track over the ground (its yaw when still) - 0 unrotated.
+double frameTurn(const FramePose& pose, FrameRotation rotation) noexcept;
+/// A frame's attitude (A-GRA's ROTATION_3D): what turns its body's axes - x forward, y right, z down - into north, east
+/// and down, by its roll, pitch and yaw, as a frame's point is turned (Frames.cpp).
+struct Attitude {
+    double m[3][3];
+    explicit Attitude(const FramePose& pose) noexcept;
+    void turn(double x, double y, double z, double& north, double& east, double& down) const noexcept;
+};
 /// The first section of a segment turning more than 1 % tighter than `curvature` (1/m) over the ground - the most its
 /// curvature says it turns (4.26): its parameters from..to. False if none.
 bool sharperThan(const NurbsSegment& s, double curvature, double& from, double& to) noexcept;
@@ -294,8 +308,23 @@ struct Curve {
     Turn orbit;                        ///< after its end, a wing that loiters orbits its end point
     Line exit;                         ///< after its end, one that continues flies on along its last course
     double fromM = 0.0;                ///< where along it the aircraft is (for Ahead::curvatureAt)
+    // its plane (docs/flight-autonomy.md, 4.27): its points laid out on the Earth as `offsets` says, their axes turned
+    // `psi` from north - by default the plane at its reference every local path is laid out in, unturned
+    FrameOffsets offsets = FrameOffsets::Cartesian;
+    double psi = 0.0;
 
     double lengthM() const noexcept { return startM[count]; }
+    /// Laid out as every local path is (Cartesian: north along the meridian, east by the latitudes' cosine), unturned.
+    bool plain() const noexcept { return offsets == FrameOffsets::Cartesian && psi == 0.0; }
+    /// (lat, lon) in its plane: north and east of its reference, along its axes.
+    void toPlane(double lat, double lon, double& north, double& east) const noexcept;
+    /// Its plane's (north, east) on the Earth.
+    void fromPlane(double north, double east, double& lat, double& lon) const noexcept;
+    /// Its segments from `from` on, their third as `z` reads it (4.27) made down from its reference (at alt0).
+    void normalize(std::uint32_t from, CurveZ z) noexcept;
+    /// Its segments from `from` on, normalized, their points turned from its frame's body axes into north, east and down
+    /// (4.27: ROTATION_3D; an affine change of its points is its curve's); an absolute altitude's kept, its x and y turned.
+    void orient(std::uint32_t from, const Attitude& attitude, CurveZ z) noexcept;
     /// The length along the curve to segment i's parameter t.
     double at(std::uint32_t i, double t) const noexcept;
     /// The segment and its parameter a length `s` along the curve (within it).

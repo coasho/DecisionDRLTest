@@ -274,12 +274,57 @@ struct NurbsSegment {
 /// out (kHold) takes its default in a NEW and keeps its value in an UPDATE.
 struct CurveCommand {
     double latitudeRad = kHold, longitudeRad = kHold; ///< the reference its segments are from; kHold: where the aircraft is
-    double altitudeM = kHold;          ///< the reference's height above sea level; kHold: the aircraft's
+    double altitudeM = kHold;          ///< the reference's height in altitudeReference; kHold: the aircraft's (within its range)
     double speedMinMs = kHold;         ///< the ground speed to fly it within; both kHold: as now (a rotorcraft's cruise)
     double speedMaxMs = kHold;
     double durationS = kHold;          ///< or the time to fly all of it, from the NEW
     double end = kHold;                ///< EndBehavior after its end; kHold: continue
     double append = kHold;             ///< in an UPDATE, 1: its segments after the curve's end, from the same reference
+    // A-GRA's reference and control points as its schema gives them (docs/flight-autonomy.md, 4.27)
+    double altitudeReference = kHold;  ///< AltitudeReference of altitudeM and its range; kHold: above sea level
+    double altitudeMinM = kHold, altitudeMaxM = kHold; ///< the reference's altitude range (A-GRA's AltitudeRange), in that reference
+    double pointRotation = kHold;      ///< FrameRotation of its control points' axes; kHold: north, east, down - turned as its frame is
+    double pointOffsets = kHold;       ///< FrameOffsets of their north and east; kHold: the plane at its reference, as every local path's
+    double pointZ = kHold;             ///< CurveZ of their third; kHold: down from the reference
+};
+
+/// How a curve's control points' third value reads (A-GRA's Z_ChoiceType; docs/flight-autonomy.md, 4.27).
+enum class CurveZ : std::uint8_t {
+    Down = 0,             ///< metres down from its reference (A-GRA's Z)
+    AltitudeOffset = 1,   ///< metres up from it (AltitudeOffset)
+    AbsoluteAltitude = 2, ///< the altitude itself, in the curve's altitude reference (AbsoluteAltitude)
+    Count
+};
+
+/// A curve's reference as a point in a reference frame (A-GRA's RelativePoint; docs/flight-autonomy.md, 4.27): the
+/// frame's id (World::createFrame) and the point's offsets from its origin - turned as `frameRotation` says
+/// (FrameRotation), laid out as `frameOffsets` says (FrameOffsets), x and y, and z down (kHold: the curve's own
+/// altitude). Beside the CurveCommand, as a pattern's shape is: the curve's reference is the frame's point, carried
+/// with it as it moves (and its axes turned with it, as its pointRotation says); its latitude and longitude report
+/// where it was when placed. Given a latitude and longitude in an UPDATE, the frame is left; given a frame, the point
+/// is its.
+struct CurveShape {
+    double frame = kHold;
+    double frameRotation = kHold, frameOffsets = kHold;
+    double frameXM = kHold, frameYM = kHold, frameZM = kHold;
+
+    /// Its fields in order (the C ABI's and Python's, after the CurveCommand's): pointers into it.
+    static constexpr std::size_t kFields = 6;
+    void fields(double* f[kFields]) noexcept {
+        f[0] = &frame, f[1] = &frameRotation, f[2] = &frameOffsets, f[3] = &frameXM, f[4] = &frameYM, f[5] = &frameZM;
+    }
+    /// Its point in its frame: the offsets left out, the frame's origin.
+    FrameOffset frameOffset() const noexcept {
+        FrameOffset o;
+        o.rotation = isHold(frameRotation) ? FrameRotation::Unrotated : static_cast<FrameRotation>(static_cast<int>(frameRotation));
+        o.offsets = isHold(frameOffsets) ? FrameOffsets::Cartesian : static_cast<FrameOffsets>(static_cast<int>(frameOffsets));
+        o.x = isHold(frameXM) ? 0.0 : frameXM, o.y = isHold(frameYM) ? 0.0 : frameYM, o.z = isHold(frameZM) ? 0.0 : frameZM;
+        return o;
+    }
+    /// Every field left out: the curve's reference as its CurveCommand gives it.
+    bool empty() const noexcept {
+        return isHold(frame) && isHold(frameRotation) && isHold(frameOffsets) && isHold(frameXM) && isHold(frameYM) && isHold(frameZM);
+    }
 };
 
 
@@ -447,6 +492,8 @@ struct PathStore {
     NurbsSegment segments[kSegments]; ///< a curve's: a Bezier's as NurbsSegment::of makes it
     PatternShape pattern;       ///< the shape of the pattern that flies (empty: its PatternCommand alone)
     FrameSpec patternFrame;     ///< its frame, where its point is one's (PatternShape::frame)
+    CurveShape curveShape;      ///< the curve's reference in a frame (empty: its CurveCommand's; docs/flight-autonomy.md, 4.27)
+    FrameSpec curveFrame;       ///< its frame, where its reference is one's
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -513,6 +560,7 @@ struct BatchCommand {
     CommandOptions options;
     Span<const NurbsSegment> nurbs;     ///< a CurveCommand's as A-GRA's schema gives them (instead of `segments`)
     const PatternShape* shape = nullptr; ///< a PatternCommand's (null: none)
+    const CurveShape* curveShape = nullptr; ///< a CurveCommand's reference in a frame (null: none)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight
@@ -526,6 +574,7 @@ struct Setpoint {
     std::vector<BezierSegment> segments; ///< a curve's, where each is a Bezier segment's form
     PatternShape shape; ///< a pattern's, as it flies (docs/flight-autonomy.md, 4.23)
     std::vector<NurbsSegment> nurbs;     ///< a curve's, every segment, as it flies (docs/flight-autonomy.md, 4.26)
+    CurveShape curveShape;               ///< a curve's reference in a frame, as it flies (4.27)
 };
 
 /// Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType;

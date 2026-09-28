@@ -90,7 +90,7 @@ CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, con
         }
         fly(timeS, speed, h);
     } else { // to its end: in its duration, else at the speed it flies within its range
-        const double h = isHold(curve->altitudeM) ? state.altitudeMslM : curve->altitudeM;
+        const double h = isHold(curve->altitudeM) ? state.altitudeMslM : aboveSea(curve->altitudeM, curve->altitudeReference, state, config_->altimeter);
         const double length = curvePlan_->lengthM();
         double speed = (adapter_->features() & kFeatureHover) ? std::hypot(state.velocityNedMs[0], state.velocityNedMs[1]) : state.airspeedTrueMs;
         if (!isHold(curve->speedMaxMs)) speed = std::min(speed, curve->speedMaxMs);
