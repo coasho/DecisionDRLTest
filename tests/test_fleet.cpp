@@ -683,8 +683,9 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             secs(200.0, 60.0), none,
             [&](const Plane& p, const Lows& lows) {
                 const auto& s = *w.vehicleState(p.id);
-                // (the worst: 0.14 deg - the C172; a wing still closing on its altitude, 4.6 m off - the B-52H - a rotorcraft
-                // on it; the least airspeed 1.16 times the least - the C172, holding the margin as it climbs - the next 1.56)
+                // (the worst: 0.14 deg held, 0.11 in an hsa, which trims out what its loops leave - the C172, still climbing; a
+                // wing still closing on its altitude, 4.6 m off - the B-52H - a rotorcraft on it; the least airspeed 1.16 times
+                // the least - the C172, holding the margin as it climbs - the next 1.56)
                 CHECK(headingOffDeg(s, p.start.eulerRad[2] + 0.5 * kPi) < 1.0);
                 CHECK(std::abs(s.altitudeMslM - (p.start.altitudeMslM + climb(p))) < (p.rotor ? 0.5 : 20.0));
                 if (!p.rotor && std::isfinite(p.minCasMs)) CHECK(lows.cas >= 1.1 * p.minCasMs); // (no speed traded below the margin)
@@ -756,9 +757,11 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             const StateData d = w.stateData(p.id);
             const auto& s = *w.vehicleState(p.id);
             INFO("magnetic " << d.magneticHeadingRad / kDeg << " deg, asked " << magneticAsked[p.id] / kDeg);
-            // (commanded turned by the declination where it is - the worst 0.008 deg from the declination now, the Su-25's,
-            // moving between the 10 s it is refreshed at - and flown: the worst 0.17 deg, the Su-25)
-            CHECK(std::abs(std::remainder(w.commandState(p.id).headingRad - (magneticAsked[p.id] + d.declinationRad), 2.0 * kPi)) < 0.02 * kDeg);
+            // (commanded turned by the declination where it is - 0.008 deg from the declination now at worst, moving between
+            // the 10 s it is refreshed at - with a wing's heading trim, the mode's integral on what its loops leave, beside it:
+            // the velocity level's heading the worst 0.057 deg from it, the F-35A's. Flown: the magnetic heading asked within
+            // 0.009 deg, the true heading 0.14 deg from where it began - the Su-25's, its declination moved as it flew)
+            CHECK(std::abs(std::remainder(w.commandState(p.id).headingRad - (magneticAsked[p.id] + d.declinationRad), 2.0 * kPi)) < 0.12 * kDeg);
             CHECK(headingOffDeg(s, p.start.eulerRad[2] + 0.5 * kPi) < 1.0);
             CHECK(std::abs(std::remainder(d.magneticHeadingRad - magneticAsked[p.id], 2.0 * kPi)) < 1.0 * kDeg);
         });

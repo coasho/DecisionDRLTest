@@ -268,7 +268,7 @@ world.update(a, climb);
 - **Left out.** A NEW continues what a live `hsa` it replaces commanded, else what the aircraft flies now (a rotorcraft's ground speed: a hovering one stays put). A reference given alone takes the aircraft's own value in it: `speedReference = Mach` alone holds the Mach it flies. In an UPDATE a reference needs its value.
 - **Checked** against the aircraft's performance: a speed beyond what it flies, below 1.2 times its stall speed or beyond its envelope, an altitude above its ceiling or below the ground, is clamped (flagged, with the field and the limit in the result) or, under `RangePolicy::Reject`, refused `performance_limit`.
 - **Flown** as the vehicle flies:
-  - A wing flies its heading. For a course it flies the heading that holds it against the wind its own air data see, plus a slow trim. It flies the airspeed its reference asks, or the one that makes the ground speed along its track.
+  - A wing flies its heading, plus a slow trim on what its loops leave (the stock c172x's bank loop has no integral: untrimmed, its heading settled 1.6° off). For a course it flies the heading that holds it against the wind its own air data see, plus a slow trim. It flies the airspeed its reference asks, or the one that makes the ground speed along its track.
   - A rotorcraft flies its velocity over the ground along the heading or course, nose along the track. Given an airspeed, it flies along its nose, or into the wind to hold a course.
   - Both fly the altitude at their position loop's gain and vertical-speed limits.
 

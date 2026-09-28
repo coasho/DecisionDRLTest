@@ -142,10 +142,15 @@ struct HsaCommand {                   // fsim.guidance.hsa
 
 | | Wing | Rotorcraft |
 | --- | --- | --- |
-| Heading | the velocity level's heading | the yaw; a ground speed is flown along the nose, an airspeed along the nose through the air |
+| Heading | the velocity level's heading, plus an integral on what the loops leave (below) | the yaw; a ground speed is flown along the nose, an airspeed along the nose through the air |
 | Course | the heading that holds it against the wind estimate (the wind correction angle), plus an integral on the course error | the ground velocity along the course, the nose along the track |
 | Speed | true airspeed from the reference; a ground speed solved through the wind triangle | as ground velocity (ground speed) or airspeed |
 | Altitude | a vertical speed from the altitude error at the position loop's gain, within the performance's climb and descent rates; AGL targets ride the terrain under the aircraft | the same |
+
+- **A wing's heading is trimmed, as its course is.** The integral is of a quarter of the turn its heading law asks (the course bandwidth times the error, 7.1) less the turn made, so its zero is at a quarter of the bandwidth, as the path follower's (4.8).
+  - Turning onto the heading as the law has it, that is nothing; held off it, all of the error. It counts within 0.2 rad of the heading while the bank holds (rolling slower than 0.5°/s), since a roll in or out lags the law without any standing error, and holds at most 0.1 rad.
+  - It takes out what the loops leave. The stock c172x's bank loop has no integral against its propeller's roll, and its heading settled 1.6° off every heading until the trim; now within 0.2° ([flight-autonomy.md](flight-autonomy.md), section 14).
+  - The velocity level is asked the heading with the trim beside it, and the commanded state shows that (1.5° on the stock c172x); the progress shows the heading asked.
 
 ### 4.5 Waypoint following
 

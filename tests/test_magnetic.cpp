@@ -105,17 +105,18 @@ TEST_CASE("magnetic: an hsa flies a magnetic heading and course, turned by the d
     const double d0 = declination();
     CHECK(d0 > 12.0 * kDeg);
     CHECK(d0 < 14.0 * kDeg);
-    // magnetic north: commanded 13 degrees east of true north (the declination where it is, refreshed every 10 s),
-    // and flown there - as closely as its heading hold flies a true heading (the stock C172x's settles 1.6 degrees off
-    // this turn, the same told true north); its state data reads its heading from magnetic north
+    // magnetic north: flown 13 degrees east of true north (the declination where it is, refreshed every 10 s) - as
+    // closely as its heading hold flies a true heading (0.11 deg; untrimmed, the stock c172x's settled 1.6 deg off this
+    // turn, the same told true north). Its velocity level is asked that heading with the trim its hsa takes out what its
+    // loops leave with beside it (1.5 deg). Its state data reads its heading from magnetic north.
     HsaCommand north;
     north.headingRad = 0.0, north.directionReference = code(DirectionReference::MagneticNorth);
     const ActivityId a = w.submit(v, north).activity;
     REQUIRE(a != 0);
     w.step(stepsFor(w, 90.0));
     const StateData data = w.stateData(v);
-    CHECK(headingOff(w.commandState(v).headingRad, declination()) < 0.01 * kDeg);
-    CHECK(headingOff(w.vehicleState(v)->eulerRad[2], declination()) < 2.0 * kDeg);
+    CHECK(headingOff(w.commandState(v).headingRad, declination()) < 2.0 * kDeg);
+    CHECK(headingOff(w.vehicleState(v)->eulerRad[2], declination()) < 0.3 * kDeg);
     CHECK(headingOff(data.magneticHeadingRad, w.vehicleState(v)->eulerRad[2] - declination()) < 1e-9);
     CHECK(std::abs(data.declinationRad - declination()) < 1e-12);
     REQUIRE(w.activity(a) != nullptr);
@@ -125,8 +126,8 @@ TEST_CASE("magnetic: an hsa flies a magnetic heading and course, turned by the d
     east.headingRad = 0.5 * kPi;
     REQUIRE(w.update(a, Command(east)).accepted());
     w.step(stepsFor(w, 90.0));
-    CHECK(headingOff(w.commandState(v).headingRad, 0.5 * kPi + declination()) < 0.01 * kDeg);
-    CHECK(headingOff(w.stateData(v).magneticHeadingRad, 0.5 * kPi) < 2.0 * kDeg);
+    CHECK(headingOff(w.commandState(v).headingRad, 0.5 * kPi + declination()) < 2.0 * kDeg);
+    CHECK(headingOff(w.stateData(v).magneticHeadingRad, 0.5 * kPi) < 0.3 * kDeg); // (0.07 deg, its trim kept)
     HsaCommand alone;
     alone.directionReference = code(DirectionReference::TrueNorth);
     CommandResult r = w.update(a, Command(alone));

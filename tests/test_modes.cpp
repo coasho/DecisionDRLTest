@@ -9,6 +9,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -96,6 +97,61 @@ TEST_CASE("hsa: a wing holds a heading, a course, its altitude and its speed in 
     CHECK(std::abs(w.vehicleState(f16)->mach - 0.7) < 0.01);
     CHECK(std::abs(w.vehicleState(f16)->altitudeMslM - 6500.0) < 15.0);
     CHECK(std::abs(degreesApart(w.vehicleState(f16)->eulerRad[2], 0.5 * kPi)) < 2.0); // no direction given: the heading it had
+}
+
+TEST_CASE("hsa: a wing settles on its heading, what its loops leave trimmed out - the stock c172x's", "[modes]") {
+    // The stock c172x flies the shared loops: its bank loop has no integral and its propeller rolls it (0.07 aileron at
+    // cruise power), so its heading law held it 1.6 deg right of every heading - short of one turned onto left, past one
+    // turned onto right, off one held from the start - until the mode trimmed out what the loops leave. Four of them:
+    // a left turn onto 12.86 deg, a right turn onto 167.14 deg, the heading they had (east) held, and a magnetic
+    // heading flown to 12.86 deg true.
+    session::World w(options("modes-hsa-heading"));
+    const double headings[] = {12.86 * kDeg, 167.14 * kDeg, 0.5 * kPi, 12.86 * kDeg};
+    std::vector<std::uint32_t> v;
+    std::vector<ActivityId> act;
+    std::vector<double> asked;
+    for (int i = 0; i < 4; ++i) {
+        v.push_back(wing(w, "c172x", 1500.0, 55.0, i));
+        HsaCommand h;
+        h.headingRad = headings[i];
+        if (i == 3) {
+            h.headingRad = std::remainder(headings[i] - w.stateData(v.back()).declinationRad, 2.0 * kPi);
+            h.directionReference = static_cast<double>(DirectionReference::MagneticNorth);
+        }
+        const auto r = w.submit(v.back(), h);
+        REQUIRE(r.accepted());
+        act.push_back(r.activity);
+        asked.push_back(h.headingRad);
+    }
+    // settled once the turn is flown and its trim taken up: from a minute on (the worst 0.20 deg, the magnetic heading's;
+    // untrimmed, all four 1.6 deg)
+    w.step(stepsFor(w, 60.0));
+    double worst[4] = {};
+    for (int k = 0; k < 180; ++k) {
+        w.step(stepsFor(w, 1.0));
+        for (int i = 0; i < 4; ++i) worst[i] = std::max(worst[i], std::abs(degreesApart(w.vehicleState(v[static_cast<std::size_t>(i)])->eulerRad[2], headings[i])));
+    }
+    for (int i = 0; i < 4; ++i) {
+        INFO("case " << i << ": " << headings[i] / kDeg << " deg");
+        CHECK(worst[i] < 0.3);
+        const auto k = static_cast<std::size_t>(i); // its progress: what it commands, not its trim
+        CHECK(std::abs(degreesApart(w.activity(act[k])->progress.headingRad, asked[k])) < 1e-9);
+    }
+    // a course between two headings: the second counts the turns it makes from its start, its trim kept (the 60 deg turned
+    // on the course, counted as one update's, threw its trim to its most: 6.5 deg off within 30 s)
+    HsaCommand onCourse;
+    onCourse.courseRad = 30.0 * kDeg;
+    REQUIRE(w.update(act[2], Command(onCourse)).accepted());
+    w.step(stepsFor(w, 60.0));
+    HsaCommand back;
+    back.headingRad = w.vehicleState(v[2])->eulerRad[2];
+    REQUIRE(w.update(act[2], Command(back)).accepted());
+    double off = 0.0;
+    for (int k = 0; k < 30; ++k) {
+        w.step(stepsFor(w, 1.0));
+        off = std::max(off, std::abs(degreesApart(w.vehicleState(v[2])->eulerRad[2], back.headingRad)));
+    }
+    CHECK(off < 0.3);
 }
 
 TEST_CASE("hsa: a rotorcraft hovers facing a heading in wind, and holds a course by ground speed or airspeed", "[modes]") {

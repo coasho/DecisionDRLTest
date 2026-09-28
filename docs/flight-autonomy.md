@@ -2004,7 +2004,7 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - the coefficient package's hundred (2025.0 to 2029.5, heights to 94 km, the whole Earth) are within 7.2e-4 nT, where they are given to a millionth, and within their 0.005° rounding.
 - **Flown** (a C172x off San Francisco, where the declination is 12.9° in 2026):
   - told magnetic north, it commands a true heading within 0.01° of the declination, and its state data's magnetic heading is its heading turned back;
-  - its heading hold flies it as closely as it flies a true heading: 1.6° off after this left turn, the same told true north. That is a separate finding, set aside as a task of its own;
+  - its heading hold flies it as closely as it flies a true heading: 1.6° off after this left turn, the same told true north. That is a separate finding, set aside as a task of its own (closed at the end of this section: the hsa trims its heading);
   - an UPDATE's heading alone continues the magnetic reference; a reference alone in an UPDATE is refused; a reference given alone in a NEW holds the heading now, from that north;
   - a course from magnetic north is flown over the ground within 1° of it turned true.
 - **The fleet** (`test_fleet`): every aircraft told a magnetic heading a quarter turn right commands its true heading within 0.008° of it turned by the declination now (the worst, the Su-25's, moving between the 10 s it is refreshed at), and flies it within 0.17° (the Su-25).
@@ -2475,6 +2475,32 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases are within −2.9 % to +0.8 % from one copy, and −1.5 % to +0.8 % from three: a behaviour's NEW +0.5 % (one of FA-6e2a's copies ran it at 143.2 ns, where the other two ran 126).
   - World throughput is 100.0 to 101.2 % of FA-6e2a's; protection costs at most 0.4 %.
 - ctest: all 320 tests pass.
+
+**FA-4d's finding closed: the stock C172x's heading (HSA-01, HSA-03).**
+- **Why it was off.** The stock C172x flies the shared loops. Their bank loop (`pid_attitude`: roll `ki` 0) has no integral, and at cruise power its propeller rolls it right: it holds about −0.07 aileron.
+  - A proportional-derivative loop makes that aileron from a standing bank error, 2.0° short of its command. The heading law (1.5 rad of bank per rad of heading) asks for that bank only from a 1.6° heading error.
+  - So it settled 1.6° right of every heading: short of one turned onto left, past one turned onto right, off one held from the start, and the same from magnetic north. Its sideslip stayed within 0.1°.
+  - The hangar designs bank through the acceleration level's integral and never had it. The path follower's course integral already took it out on routes ([vehicle-interface.md](vehicle-interface.md), 4.8).
+- **Fixed in the mode, not the loops.** The shared loops are what the digests and the stock checkpoints pin, so the bank loop keeps no integral. The hsa trims its heading as it trims a course.
+  - The integral is of a quarter of the turn its heading law asks (the course bandwidth times the error) less the turn made; its zero is at a quarter of the bandwidth, as the path follower's.
+  - Turning onto the heading as the law has it, that is nothing; held off it, all of the error. It counts within 0.2 rad of the heading while the bank holds (rolling slower than 0.5°/s), and holds at most 0.1 rad.
+  - Tried first, on the fleet: an integral on the error alone wound up in every turn onto a heading (at a quarter of the bandwidth the fighters overshot 1.3 to 1.6°, the E-3G 2.3°; at the course trim's slower gain the C172x took some 75 s to come within 0.3°, and the fighters still overshot 0.5°). The turn asked less the turn made, counted without the bank's gate, took a slow roll-out's lag for a standing error: the B-52H stopped 2.4° short a minute on. Twice the gain under-damped the RQ-4B.
+- **Flown** (`test_modes`: four C172x's for four minutes after a left turn, a right turn, a heading held and a magnetic heading): each within 0.20° from a minute on, where all four were 1.6° off. Off San Francisco (`test_magnetic`): 0.11° after its left turn, 0.07° after its right turn.
+  - A course between two headings: the second counts the turns it makes from its own start, its trim kept, and holds within 0.3°. First built, it counted the 60° turned on the course as one update's turn, which threw the trim to its most: 6.5° off within 30 s.
+- **The fleet** (`test_fleet`, the 35 designs, against the same build with the trim's gain 0):
+  - A quarter turn right and 200 m up: the heading within 0.11° (the C172, still climbing), where it was 0.14°. The hold behaviour flies the same case unchanged, 0.14°.
+  - A magnetic heading: the magnetic heading asked flown within 0.009°, where it was 0.051°.
+  - A heading held while a speed optimisation flies: within 0.002°, where it was 0.22° (the C172).
+  - The altitudes, speeds and airspeed margins are as they were, within a millimetre and a hundredth of a percent.
+  - Its transients, every wing design turning a quarter right (off the test): the most any got worse from 45 s to 200 s was 0.08°, the RQ-4B's at a minute; the worst at 90 s is 0.09°.
+- **The commanded state** is the cascade's (4.12): its heading is the velocity level's, the trim beside the heading asked. That is 1.5° on the C172x, and 0.057° at most on the designs (the F-35A's). The mode's progress still reports the heading asked. FA-4d's checks read the commanded heading within 0.01° (the fleet's within 0.02°); they now read it within the trim, and `test_magnetic` checks the heading flown within 0.3°, where it allowed 2°.
+- **Unchanged:** the digests, with protection and without (the digest flights fly no hsa), and the stock C172x's checkpoints; an hsa's course and a rotorcraft's heading; the `hold` behaviour and the velocity level, which fly a heading through the loops as before. The stock C172x's `hold` still settles 1.6° off its heading: its flights are pinned by the checkpoints.
+- **Memory:** an hsa holds two more doubles, its heading trim and the heading it last saw.
+- **A/B throughput** against FA-6e2b (the same tree with its two files as they were), both benches run from their own directories, 9 interleaved rounds of `micro`:
+  - The cases are within −1.8 % to +2.3 % in their medians and −1.0 % to +1.1 % in their minimums; the `hsa` case, a course, −0.2 %.
+  - `route` read +1.4 % (its minimum +1.1 %). Its functions are the same instructions in both builds but for the padding before a loop in `restart`, so that is placement. Against FA-6c2, `pattern`'s +1.2 % was the same.
+  - None of the bench's cases flies a heading. A temporary case that did, measured against FA-6c2, read +0.9 %, 1 ns: the trim's comparisons and multiply-adds, with no division or call.
+- ctest: all 321 tests pass.
 
 ## Appendix A: the inventory
 

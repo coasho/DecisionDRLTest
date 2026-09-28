@@ -50,10 +50,12 @@ FSIM_API double optimalTasMs(const TablesSection* tables, double optimization, d
 
 /// "hsa": fsim.guidance.hsa, A-GRA's HSA/CSA (docs/vehicle-interface.md, 4.4).
 /// Flies a complete HsaCommand (the host resolves what a command leaves out):
-/// - a wing: the heading, or the heading that holds the course against the
-///   wind estimate plus a slow trim on the course error; the airspeed its
-///   reference asks, or that makes the ground speed along its track; the
-///   altitude by a vertical speed at its position loop's gain and limits;
+/// - a wing: the heading plus a slow trim on what its loops leave (the turn
+///   its heading law asks less the turn made, while the bank holds), or the
+///   heading that holds the course against the wind estimate plus a slow trim
+///   on the course error; the airspeed its reference asks, or that makes the
+///   ground speed along its track; the altitude by a vertical speed at its
+///   position loop's gain and limits;
 /// - a rotorcraft: a ground speed as its velocity over the ground along the
 ///   heading or course (the nose along the track), an airspeed along the nose
 ///   or, for a course, the air velocity whose track is the course; the same
@@ -75,6 +77,8 @@ public:
 private:
     WindEstimate wind_;
     double courseTrim_ = 0.0;  ///< a wing's course error integral, rad of heading
+    double headingTrim_ = 0.0; ///< a wing's heading: the integral of the turn its law asks less the turn made, rad
+    double lastHeading_ = kHold; ///< the heading at the last update, for the turn made since
     double speedTrim_ = 0.0;   ///< a wing's ground speed error integral, m/s of airspeed
     double lastTime_ = -1.0;   ///< the vehicle's time at the last update: a loop that missed a period starts again
     HsaCommand flown_{};       ///< the setpoint as last flown

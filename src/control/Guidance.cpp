@@ -20,6 +20,9 @@ constexpr double kG = 9.80665;
 
 double known(double v, double fallback) noexcept { return std::isnan(v) ? fallback : v; }
 
+/// An angle within 3 pi either way wrapped to within pi: a heading less another, without geo::wrapPi's division.
+double wrapped(double a) noexcept { return a > units::kPi ? a - 2.0 * units::kPi : a < -units::kPi ? a + 2.0 * units::kPi : a; }
+
 /// As the built-in loops' (Builtin.cpp): true when the behaviour missed a
 /// period - another level flew meanwhile - so what it holds no longer describes the flight.
 bool resumed(const ControlContext& ctx, double& lastTime) noexcept {
@@ -142,7 +145,8 @@ void HsaBehavior::begin(const ControlContext&, const Command& command) {
 
 void HsaBehavior::reset() {
     wind_.reset();
-    courseTrim_ = speedTrim_ = 0.0;
+    courseTrim_ = headingTrim_ = speedTrim_ = 0.0;
+    lastHeading_ = kHold;
     lastTime_ = -1.0;
     declinationAt_ = kHold;
 }
@@ -150,11 +154,12 @@ void HsaBehavior::reset() {
 Command HsaBehavior::update(const ControlContext& ctx, const Command& in) {
     const auto& s = ctx.sensed;
     const bool hovers = (ctx.features & kFeatureHover) != 0;
-    if (resumed(ctx, lastTime_)) courseTrim_ = speedTrim_ = 0.0, wind_.reset();
+    if (resumed(ctx, lastTime_)) courseTrim_ = headingTrim_ = speedTrim_ = 0.0, lastHeading_ = kHold, wind_.reset();
     wind_.update(s, ctx.dt);
     VelocityCommand out{kHold, kHold, kHold, kHold, kHold, kHold};
     const auto* h = std::get_if<HsaCommand>(&in);
     if (!h) { // (the runtime gives it its own setpoint) hold what it flies
+        lastHeading_ = kHold;
         out.verticalSpeedMs = 0.0, out.headingRad = s.eulerRad[2];
         if (hovers) out.northMs = out.eastMs = 0.0;
         else out.airspeedMs = s.airspeedTrueMs;
@@ -245,9 +250,19 @@ Command HsaBehavior::update(const ControlContext& ctx, const Command& in) {
             if (std::abs(error) < 0.2) courseTrim_ = std::clamp(courseTrim_ + 0.25 * bandwidth * bandwidth * error * ctx.dt, -0.3, 0.3);
         }
         out.headingRad = geo::wrapPi(direction + crab + courseTrim_);
+        lastHeading_ = kHold; // (a heading after it counts the turns it makes from then)
     } else {
         courseTrim_ = 0.0;
-        out.headingRad = direction;
+        // the heading, and an integral on what the loops below leave once near it: a quarter of the turn its heading law
+        // asks (the bandwidth times the error) less the turn made - its zero at a quarter of the bandwidth. Turning onto
+        // the heading as the law has it, that is nothing; held off it, all of the error: a bank loop without an integral
+        // against a propeller's roll holds the stock c172x 1.6 deg off. Counted while the bank holds, rolling slower
+        // than half a degree a second - a roll in or out lags the law, and that lag is no standing error.
+        const double psi = s.eulerRad[2], error = wrapped(direction - psi);
+        if (!isHold(lastHeading_) && std::abs(error) < 0.2 && std::abs(s.angularRateBodyRadS[0]) < 0.5 * units::kDegreesToRadians)
+            headingTrim_ = std::clamp(headingTrim_ + 0.25 * (bandwidth * error * ctx.dt - wrapped(psi - lastHeading_)), -0.1, 0.1);
+        lastHeading_ = psi;
+        out.headingRad = wrapped(direction + headingTrim_);
     }
     headingFlown_ = out.headingRad;
     return out;
