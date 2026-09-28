@@ -31,7 +31,8 @@ add_library(fsim_control STATIC
     Tasks.cpp
     Reports.cpp
     PerformanceTables.cpp
-    Names.cpp)
+    Names.cpp
+    Endurance.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

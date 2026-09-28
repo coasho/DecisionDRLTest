@@ -294,10 +294,12 @@ class Rejected(_native.Error):
     words; ``associated``, an id it is about; ``command_id``, the command's;
     ``findings``, every reason it cannot be flown as asked (fsim.Finding), the
     first this one; ``adjustments``, the values it would have been flown with
-    other than asked (fsim.Adjustment)."""
+    other than asked (fsim.Adjustment); ``endurance``, for
+    "insufficient_endurance", what its flight needs against what the vehicle
+    has (fsim.Endurance; docs/flight-autonomy.md, 4.18), else None."""
 
     def __init__(self, reason, other=0, index=-1, constraint="none", section=None, *, description="", associated=0, command_id=0,
-                 findings=(), adjustments=(), suggestion=0):
+                 findings=(), adjustments=(), suggestion=0, endurance=None):
         about = "" if index < 0 else " (%s %d%s)" % ("item", index, "" if constraint == "none" else ", " + constraint)
         super().__init__("command refused: %s%s" % (reason, about))
         self.reason = reason
@@ -313,6 +315,8 @@ class Rejected(_native.Error):
         #: a task the platform keeps with what it can fly in this command's place - every value held to the
         #: aircraft's limits (docs/flight-autonomy.md, 4.11; vehicle.command_task flies it); 0 none
         self.suggestion = suggestion
+        #: what its flight needs against what the vehicle has above its reserve (fsim.Endurance), where it needs more
+        self.endurance = endurance
 
 
 Rank = collections.namedtuple("Rank", "priority precedence", defaults=(0, 0))
@@ -357,11 +361,19 @@ Adjustment.__doc__ = ("A value a command is flown with other than asked, held to
                       "route point or curve segment; a route point's field (fsim.Waypoint's order) or -1; the limit; what was "
                       "asked and what is flown (NaN where it is not one number: a fly-by turn flown smaller).")
 
-Validation = collections.namedtuple("Validation", "valid reason clamped command_id findings adjustments deferred", defaults=(False,))
+Validation = collections.namedtuple("Validation", "valid reason clamped command_id findings adjustments deferred endurance",
+                                    defaults=(False, None))
 Validation.__doc__ = ("A validation's answer (validate_only=True; A-GRA's FLIGHT_COMMAND_VALID): whether a NEW would be accepted, "
                       "why not, whether a value would be clamped, the command's id, every finding and every value it would be "
-                      "flown with other than asked, and whether it would wait to start (docs/flight-autonomy.md, 4.9). "
-                      "Nothing flies.")
+                      "flown with other than asked, whether it would wait to start (docs/flight-autonomy.md, 4.9), and where its "
+                      "flight needs more than the vehicle has, by how much (fsim.Endurance, 4.18). Nothing flies.")
+
+Endurance = collections.namedtuple("Endurance", "energy remaining required remaining_s required_s")
+Endurance.__doc__ = ("What a flight with an end needs against what the vehicle has above its reserve (docs/flight-autonomy.md, 4.18; "
+                     "A-GRA's MA_InsufficientEnduranceType): its ``energy`` (fsim.Energy: FUEL in kg, BATTERY in J), what the vehicle "
+                     "has ``remaining`` and what the flight ``required`` - flown level at each leg's speed and altitude - and how long "
+                     "each lasts: ``remaining_s`` at what it consumes now, ``required_s`` the flight's. Given where the flight needs "
+                     "more: refused \"insufficient_endurance\", or accepted over it with override_rejection.")
 
 #: The envelope's limits, in the platform's order: "load_factor_max", "alpha_max", "cas_min", ...
 LIMITS = tuple(_native.limit_name(i) for i in range(10))
@@ -500,12 +512,20 @@ def _findings(result, h):
     return findings, adjustments
 
 
+def _endurance(h):
+    """The last command's endurance (docs/flight-autonomy.md, 4.18) as an fsim.Endurance, or None where none was short."""
+    e = h.last_endurance() if h is not None else None
+    return None if e is None else Endurance(Energy(e[0]), *e[1:])
+
+
 def _rejected(result, h=None):
     """A refused command's result tuple as the Rejected it raises."""
     section = None if math.isnan(result[7]) else (result[7], result[8])
     findings, adjustments = _findings(result, h)
+    endurance = _endurance(h) if _native.reason_name(result[1]) == "insufficient_endurance" else None
     return Rejected(_native.reason_name(result[1]), result[3], result[5], _native.constraint_name(result[6]), section, description=result[12],
-                    associated=result[11], command_id=result[10], findings=findings, adjustments=adjustments, suggestion=result[16])
+                    associated=result[11], command_id=result[10], findings=findings, adjustments=adjustments, suggestion=result[16],
+                    endurance=endurance)
 
 
 def _checked(result, h=None):
@@ -520,7 +540,9 @@ def _checked(result, h=None):
 def _validation(result, h):
     """A validation's answer (validate_only)."""
     findings, adjustments = _findings(result, h)
-    return Validation(result[0] == 3, _native.reason_name(result[1]), bool(result[4]), result[10], findings, adjustments, bool(result[15]))
+    short = _native.reason_name(result[1]) == "insufficient_endurance" or result[17]
+    return Validation(result[0] == 3, _native.reason_name(result[1]), bool(result[4]), result[10], findings, adjustments, bool(result[15]),
+                      _endurance(h) if short else None)
 
 
 def _envelope(command_id, trace, interactive, validate_only, rank=None, interrupt=True, precedence_override=None, window=None,
@@ -706,9 +728,10 @@ class Activity:
     below an activity's may not address it (fsim.Rejected "authority_held"),
     so a policy cannot change or end what the platform's own sources fly."""
 
-    __slots__ = ("world", "id", "level", "clamped", "source", "command_id", "deferred", "controller")
+    __slots__ = ("world", "id", "level", "clamped", "source", "command_id", "deferred", "controller", "overridden", "endurance")
 
-    def __init__(self, world, activity_id, level, clamped=False, source=Source.POLICY, command_id=0, deferred=False, controller=0):
+    def __init__(self, world, activity_id, level, clamped=False, source=Source.POLICY, command_id=0, deferred=False, controller=0,
+                 overridden=False, endurance=None):
         self.world = world
         self.id = activity_id
         self.level = level
@@ -721,6 +744,10 @@ class Activity:
         #: the policy's controller it was submitted by (docs/flight-autonomy.md, 4.12), which its update, cancel and
         #: activity commands declare as they do its source
         self.controller = int(controller)
+        #: accepted over a soft rejection with override_rejection (docs/flight-autonomy.md, 4.18): its flight needs more
+        #: than the vehicle has, by ``endurance`` (fsim.Endurance)
+        self.overridden = overridden
+        self.endurance = endurance
 
     @property
     def vehicle(self):
@@ -1048,7 +1075,8 @@ class Vehicle:
         if validate_only:
             return _validation(r, self._h)
         r = _checked(r, self._h)
-        return Activity(self._world, r[2], level, bool(r[4]), source, r[10], bool(r[15]), controller)
+        return Activity(self._world, r[2], level, bool(r[4]), source, r[10], bool(r[15]), controller, bool(r[17]),
+                        _endurance(self._h) if r[17] else None)
 
     def submit_behavior(self, behavior, target=None, points=None, *, source=Source.POLICY, range=RangePolicy.CLAMP,
                         min_version=0, command_id=0, trace=(), interactive=True, validate_only=False, rank=None, interrupt=True,

@@ -1,8 +1,10 @@
 // The performance tables (docs/flight-autonomy.md, SUB-02; ADR-29 FA-3a):
 // read from an aircraft's profile, and looked up at a condition - linear in
 // altitude and weight, and along each condition's level speeds at the same
-// fraction of them. Apart from the runtime's code, last in the library, so
+// fraction of them (at a speed, each altitude row at the same equivalent
+// airspeed). Apart from the runtime's code, last in the library, so
 // that growing it moves nothing that flies.
+#include "control/Atmosphere.h"
 #include "control/Profile.h"
 
 #include <algorithm>
@@ -235,19 +237,22 @@ TablesAtSpeed tablesAt(const TablesSection& t, double altitudeM, double weightKg
     TablesAtSpeed out;
     Corners c;
     if (t.empty() || !corners(t, altitudeM, weightKg, c) || !std::isfinite(tasMs)) return out;
-    // the fraction of its level speeds it lies at, from the bounds between the conditions...
-    const double lo = blend2(t, t.minTasMs, c), hi = 0.97 * blend2(t, t.maxTasMs, c);
-    if (!(hi > lo)) return out;
-    const double x = (tasMs - lo) / (hi - lo);
-    // ...and each condition's table at that fraction of its own, blended as a 2D table's cells are
     const std::size_t nw = t.weightKg.size(), h1 = std::min(c.h + 1, t.altitudeM.size() - 1), w1 = std::min(c.w + 1, nw - 1);
-    auto blend = [&](const std::vector<double>& v) {
-        auto row = [&](std::size_t h) {
-            const double a = along(t, v, h * nw + c.w, x), b = along(t, v, h * nw + w1, x);
-            return mix(a, b, c.fw);
-        };
-        return mix(row(c.h), row(h1), c.fh);
+    if (t.minTasMs.size() != t.altitudeM.size() * nw || t.maxTasMs.size() != t.minTasMs.size()) return out;
+    // Each altitude row is read at the same equivalent airspeed: at a speed through the air the drag changes little
+    // with the height, where at a true airspeed it follows the density (ADR-29 FA-3e: 3,000 m, between a fighter's
+    // rows at 100 m and 4,000 m, had read its burn 12 % high). Within a row, the speed is the fraction of its level
+    // speeds it lies at, between its weights; then linear in altitude. At a row it is the true airspeed asked, and
+    // below the lowest that row's.
+    const double sigma = isa::densityRatio(std::max(altitudeM, t.altitudeM.front()));
+    auto row = [&](std::size_t h, const std::vector<double>& v) {
+        const std::size_t a = h * nw + c.w, b = h * nw + w1;
+        const double lo = mix(t.minTasMs[a], t.minTasMs[b], c.fw), hi = 0.97 * mix(t.maxTasMs[a], t.maxTasMs[b], c.fw);
+        if (!(hi > lo)) return kUnknown;
+        const double x = (tasMs * std::sqrt(sigma / isa::densityRatio(t.altitudeM[h])) - lo) / (hi - lo);
+        return mix(along(t, v, a, x), along(t, v, b, x), c.fw);
     };
+    auto blend = [&](const std::vector<double>& v) { return mix(row(c.h, v), row(h1, v), c.fh); };
     out.fuelKgS = blend(t.fuelKgS), out.powerW = blend(t.powerW), out.psFullMs = blend(t.psFullMs), out.psIdleMs = blend(t.psIdleMs);
     return out;
 }

@@ -292,8 +292,9 @@ struct TablesAt {
 FSIM_API TablesAt tablesAt(const TablesSection& tables, double altitudeM, double weightKg) noexcept;
 /// ...and at a true airspeed within its level speeds (from its least to its
 /// top): the fuel flow (a battery's power) level, the excess power at full
-/// power and at idle. Each condition's points are taken at the same fraction
-/// of its speeds.
+/// power and at idle. Each altitude row is read at the same equivalent
+/// airspeed (the drag changes little with height at one), and within a row
+/// each weight's points at the same fraction of its speeds.
 struct TablesAtSpeed {
     double fuelKgS = kUnknown, powerW = kUnknown, psFullMs = kUnknown, psIdleMs = kUnknown;
 };

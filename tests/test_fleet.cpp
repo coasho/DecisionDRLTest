@@ -384,7 +384,7 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
     };
     // what a case records about each vehicle as it starts and flies
     std::map<std::uint32_t, ActivityId> activity;
-    std::map<std::uint32_t, double> least, gap;
+    std::map<std::uint32_t, double> least, gap, predicted, onBoard, atEnd;
     std::map<std::uint32_t, PositionCommand> target;
 
     // --- the flight levels ----------------------------------------------------------------------------
@@ -735,6 +735,54 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             return r.accepted();
         },
         aroundSquare, none, completed);
+    // its endurance (ADR-29 FA-3e, VAL-03): three times what it lasts, a timed pattern, is refused - a soft rejection,
+    // which override_rejection overrides; five minutes straight ahead at its cruise, its prediction (read under a
+    // reserve of 99.99 %, so the check reports what the flight needs) against the burn it flies, within 5 %
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const NavigationReport nav = w.navigationReport(p.id);
+            REQUIRE(nav.energy != Energy::Unknown);
+            CommandOptions validate;
+            validate.validateOnly = true;
+            PatternCommand beyond;
+            beyond.durationS = 3.0 * nav.enduranceS;
+            CHECK(w.submit(p.id, beyond, validate).reason == Reason::InsufficientEndurance);
+            CHECK(w.commandDetails(p.id)->endurance.energy == static_cast<std::uint8_t>(nav.energy));
+            validate.overrideRejection = true;
+            const CommandResult anyway = w.submit(p.id, beyond, validate);
+            CHECK((anyway.status == CommandStatus::Valid && (anyway.flags & kOverridden) != 0));
+            const double speed = p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, d = 300.0 * speed, psi = p.start.eulerRad[2];
+            const PositionCommand q = pointFrom(p.start, d * std::cos(psi), d * std::sin(psi), p.start.altitudeMslM, 0.0);
+            Waypoint ahead;
+            ahead.latitudeRad = q.latitudeRad, ahead.longitudeRad = q.longitudeRad, ahead.altitudeM = q.altitudeMslM;
+            ahead.speed = speed, ahead.speedReference = static_cast<double>(p.rotor ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
+            NavigationSettings settings = w.navigation(p.id);
+            const NavigationSettings kept = settings;
+            settings.reserveFraction = 0.9999;
+            REQUIRE(w.setNavigation(p.id, settings) == Reason::None);
+            validate.overrideRejection = false;
+            CHECK(w.submit(p.id, RouteCommand{}, Span<const Waypoint>(&ahead, 1), validate).reason == Reason::InsufficientEndurance);
+            predicted[p.id] = w.commandDetails(p.id)->endurance.required;
+            REQUIRE(w.setNavigation(p.id, kept) == Reason::None);
+            onBoard[p.id] = nav.remaining, atEnd[p.id] = kInf;
+            const CommandResult r = w.submit(p.id, RouteCommand{}, Span<const Waypoint>(&ahead, 1));
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            return r.accepted();
+        },
+        secs(330.0, 330.0),
+        [&](const Plane& p) { // (what it has as the route ends: it flies on after)
+            if (atEnd[p.id] == kInf && w.activity(activity[p.id])->state == ActivityState::Completed) atEnd[p.id] = w.navigationReport(p.id).remaining;
+        },
+        [&](const Plane& p, const Lows&) {
+            const double burned = onBoard[p.id] - atEnd[p.id];
+            INFO("predicted " << predicted[p.id] << ", burned " << burned);
+            CHECK(w.activity(activity[p.id])->state == ActivityState::Completed);
+            // no more than 5 % beyond it, the side that matters; it may be the more cautious (the worst: the Mirage
+            // 2000, its tanks full and slow on the back of its power curve, 5.5 % short of it)
+            CHECK(burned / predicted[p.id] - 1.0 < 0.05);
+            CHECK(burned / predicted[p.id] - 1.0 > -0.08);
+        });
     // round where it is: a loiter at its default radius (a rotorcraft's half its scale), a pattern's orbit at its own
     auto loiterRadius = [&](const Plane& p) {
         return p.rotor ? std::max(3.0, 0.5 * p.scale()) : std::max(1500.0, 1.25 * LoiterBehavior::orbitRadiusM(perf(p), p.start.airspeedTrueMs));

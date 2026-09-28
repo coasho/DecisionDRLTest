@@ -47,6 +47,7 @@ const char* reasonName(Reason reason) noexcept {
     case Reason::NotInteractive: return "not_interactive";
     case Reason::UnknownTask: return "unknown_task";
     case Reason::TaskActive: return "task_active";
+    case Reason::InsufficientEndurance: return "insufficient_endurance";
     default: return "?";
     }
 }
@@ -92,6 +93,7 @@ const char* reasonDescription(Reason reason) noexcept {
     case Reason::NotInteractive: return "its command said it takes no activity commands";
     case Reason::UnknownTask: return "no task is kept by that id";
     case Reason::TaskActive: return "the task's activity is live";
+    case Reason::InsufficientEndurance: return "its flight needs more fuel or charge than the vehicle has above its reserve";
     default: return "";
     }
 }

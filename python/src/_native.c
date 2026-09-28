@@ -753,10 +753,11 @@ static PyObject* result_tuple(const fsim_world* world, const fsim_command_result
 /* As result_tuple, with its detail given (a batch item's). */
 static PyObject* result_tuple_with(const fsim_command_result* r, const fsim_command_detail* dp) {
     const fsim_command_detail d = *dp;
-    return Py_BuildValue("(iiKKOiiddOKKsIIOK)", r->status, r->reason, (unsigned long long)r->activity, (unsigned long long)r->other,
+    return Py_BuildValue("(iiKKOiiddOKKsIIOKO)", r->status, r->reason, (unsigned long long)r->activity, (unsigned long long)r->other,
                          (r->flags & FSIM_COMMAND_CLAMPED) ? Py_True : Py_False, d.index, d.constraint, d.from, d.to, d.new_activity ? Py_True : Py_False,
                          (unsigned long long)d.command_id, (unsigned long long)d.associated, d.description ? d.description : "", d.finding_count,
-                         d.adjustment_count, (r->flags & FSIM_COMMAND_DEFERRED) ? Py_True : Py_False, (unsigned long long)d.suggestion);
+                         d.adjustment_count, (r->flags & FSIM_COMMAND_DEFERRED) ? Py_True : Py_False, (unsigned long long)d.suggestion,
+                         (r->flags & FSIM_COMMAND_OVERRIDDEN) ? Py_True : Py_False);
 }
 
 /* (id, vehicle, capability, source, axes, state, reason, by, constraints, constraints_seen, start_time, end_time,
@@ -2134,6 +2135,18 @@ static PyObject* world_last_findings(PyObject* o, PyObject* const* args, Py_ssiz
     return list;
 }
 
+/* last_endurance() -> (energy, remaining, required, remaining_s, required_s) or None: what the last command's flight
+ * needs against what the vehicle has above its reserve, where it needs more (ABI 1.16) */
+static PyObject* world_last_endurance(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    (void)args;
+    if (!check_args(n, 0, 0, "last_endurance")) return NULL;
+    fsim_command_endurance e;
+    fsim_command_endurance_init(&e);
+    if (fsim_last_command_endurance(self->world, &e) != FSIM_OK || e.energy == 0) Py_RETURN_NONE;
+    return Py_BuildValue("(idddd)", e.energy, e.remaining, e.required, e.remaining_s, e.required_s);
+}
+
 /* last_adjustments() -> [(index, field, constraint, requested, adjusted)]: every value the last command is flown
  * with other than asked (ABI 1.8) */
 static PyObject* world_last_adjustments(PyObject* o, PyObject* const* args, Py_ssize_t n) {
@@ -2393,6 +2406,7 @@ static PyMethodDef world_methods[] = {
     FAST("submit_batch", world_submit_batch, "submit_batch(id, items) -> [result]: each item (kind, code, values, behavior, waypoints, segments, options)"),
     FAST("last_findings", world_last_findings, "last_findings() -> [(reason, index, constraint, from, to, associated, description)]"),
     FAST("last_adjustments", world_last_adjustments, "last_adjustments() -> [(index, field, constraint, requested, adjusted)]"),
+    FAST("last_endurance", world_last_endurance, "last_endurance() -> (energy, remaining, required, remaining_s, required_s) or None"),
     FAST("submit_behavior", world_submit_behavior, "submit_behavior(id, behavior, target, params, points, source, axes, range, min_version) -> result"),
     FAST("submit_support", world_submit_support, "submit_support(id, kind, values, source, axes, range, min_version) -> result"),
     FAST("submit_mode", world_submit_mode, "submit_mode(id, mode, values, source, axes, range, min_version) -> result"),

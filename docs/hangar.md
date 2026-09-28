@@ -1110,7 +1110,9 @@ loop with the envelope protection off:
   condition's band: from the slowest speed the full-power curve flew with
   0.25 m/s to spare (never below 1.15 times the stall, nor the envelope's
   least speed, which the velocity loop flies no slower than) to 97 % of the
-  top. At each point: the fuel flow, the throttle and the angle of attack,
+  top. At each point: the fuel flow (every engine's: the state reports four
+  at most, and until FA-3e the B-52H's eight burned half in its tables), the
+  throttle and the angle of attack,
   counted only where the point held its speed within 2 % and its height
   within 1 m/s. From them come the best-endurance speed (the least fuel
   flow) and the best-range speed (the most distance per kilogram), each

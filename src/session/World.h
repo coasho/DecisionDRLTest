@@ -322,6 +322,16 @@ private:
     private:
         const World& world_;
     };
+    /// The vehicles' energy on board, for their hosts' endurance checks
+    /// (docs/flight-autonomy.md, 4.18): asked at a NEW, never stepped.
+    class Energies final : public control::EnergyView {
+    public:
+        explicit Energies(const World& world) noexcept : world_(world) {}
+        control::EnergyNow energyNow(std::uint32_t id) const override;
+
+    private:
+        const World& world_;
+    };
 
     Entry* entry(std::uint32_t id) noexcept;
     const Entry* entry(std::uint32_t id) const noexcept;
@@ -363,6 +373,7 @@ private:
     std::size_t liveCount_ = 0;
     double simTime_ = 0.0;
     std::uint64_t vehicleSteps_ = 0, worldSteps_ = 0;
+    Energies energies_{*this};
 };
 
 } // namespace fsim::session

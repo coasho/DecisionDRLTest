@@ -41,6 +41,24 @@ control::NavigationSettings World::navigation(std::uint32_t id) const noexcept {
     return e ? e->navigation : control::NavigationSettings{};
 }
 
+control::EnergyNow World::Energies::energyNow(std::uint32_t id) const {
+    // (as the navigation report counts it: fuel where it has tanks, else a battery's charge; the reserve its settings')
+    control::EnergyNow out;
+    const Entry* e = world_.entry(id);
+    if (!e) return out;
+    const sim::EnergyOnBoard en = world_.pool_->vehicle(e->slot).energy();
+    const double fraction = e->navigation.reserveFraction;
+    if (en.fuelCapacityKg > 0.0) {
+        out.energy = control::Energy::Fuel;
+        out.remaining = en.fuelKg, out.reserve = fraction * en.fuelCapacityKg, out.consumption = en.fuelFlowKgS;
+    } else if (en.chargeCapacityJ > 0.0) {
+        out.energy = control::Energy::Battery;
+        out.remaining = en.chargeJ, out.reserve = fraction * en.chargeCapacityJ, out.consumption = en.powerW;
+    }
+    out.massKg = en.massKg;
+    return out;
+}
+
 control::NavigationReport World::navigationReport(std::uint32_t id) const {
     control::NavigationReport r;
     const Entry* e = entry(id);

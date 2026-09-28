@@ -65,6 +65,7 @@ CANNOT_COMPLY = {
     "not_interactive": "STATE_OR_SETTINGS",
     "unknown_task": "UNKNOWN_ID",
     "task_active": "STATE_OR_SETTINGS",
+    "insufficient_endurance": "CONSTRAINT_ENDURANCE",
 }
 
 #: fsim.TaskState -> A-GRA's RequirementExecutionStateEnum (a task kept, not commanded, awaits approval to execute)
@@ -87,6 +88,7 @@ VALIDATION_RESULT = {
     "invalid_curve": "INVALID_CURVE",
     "out_of_range": "PERFORMANCE_LIMIT_EXCEEDED",
     "performance_limit": "PERFORMANCE_LIMIT_EXCEEDED",
+    "insufficient_endurance": "VIOLATION_ENDURANCE",
 }
 
 #: constraint names (fsim.Rejected.constraint) -> MA_PerformanceConstraintEnum
@@ -301,6 +303,27 @@ def performance_profile(profile, capacity=None):
 def task_state(status):
     """A task's status (fsim.TaskStatus) as A-GRA's RequirementExecutionStateEnum (docs/flight-autonomy.md, 4.11)."""
     return REQUIREMENT_EXECUTION_STATE[int(status.state)]
+
+
+def insufficient_endurance(endurance, capacity=None):
+    """An fsim.Endurance - a rejection's ("insufficient_endurance"), or an activity's accepted over it - as A-GRA's
+    MA_InsufficientEnduranceType (docs/flight-autonomy.md, 4.18): EnduranceRemaining, what the vehicle has above its
+    reserve, LESS_THAN what the flight needs, EnduranceRequired. Each an EnduranceType: the fuel (kg; a battery's has
+    none), the duration (s) and, given the capacity (the navigation report's: fuel kg or charge J), the percent. None
+    for None."""
+    if endurance is None:
+        return None
+
+    def one(amount, seconds):
+        out = {"Duration": seconds}
+        if endurance.energy == Energy.FUEL:
+            out["Fuel"] = amount
+        if capacity:
+            out["Percent"] = 100.0 * amount / capacity
+        return out
+
+    return {"EnduranceRemaining": {"EnduranceRemaining": one(endurance.remaining, endurance.remaining_s), "LogicalOperator": "LESS_THAN"},
+            "EnduranceRequired": one(endurance.required, endurance.required_s)}
 
 
 def cannot_comply(reason):

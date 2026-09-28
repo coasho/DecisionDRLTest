@@ -1402,6 +1402,46 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_submit_mode(world, stock, FSIM_MODE_HSA, hsa, 7, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
             CHECK(strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 7); /* (field 6, plus one) */
         }
+        {
+            /* ABI 1.16: endurance - a flight with an end needs no more than the vehicle has above its reserve, a soft
+             * rejection override_rejection overrides (docs/flight-autonomy.md, 4.18) */
+            fsim_command_endurance e;
+            fsim_command_options oo;
+            fsim_command_result cr;
+            fsim_waypoint far[1];
+            const fsim_vehicle_state* st;
+            uint32_t ranger = 0;
+            double options[4] = {0.0, 0.0, 0.0, 0.0};
+            spec.name = "cap-ranger";
+            spec.type = "jsbsim:c172";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 50.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &ranger) == FSIM_OK);
+            CHECK(fsim_world_step(world, 30) == FSIM_OK);
+            st = fsim_vehicle_state_ptr(world, ranger);
+            CHECK(st != NULL);
+            fsim_waypoint_init(&far[0]);
+            far[0].latitude_rad = st->latitude_rad + 3000e3 / 6371000.0; /* 3,000 km north: far beyond its fuel */
+            far[0].longitude_rad = st->longitude_rad;
+            far[0].altitude_m = 1500.0, far[0].speed = 50.0, far[0].speed_reference = FSIM_SPEED_TRUE_AIRSPEED;
+            CHECK(fsim_vehicle_submit_route(world, ranger, options, 4, far, 1, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "insufficient_endurance") == 0 && cr.reserved == 0);
+            fsim_command_endurance_init(&e);
+            CHECK(e.struct_size == sizeof e && e.energy == 0 && isnan(e.required));
+            CHECK(fsim_last_command_endurance(world, &e) == FSIM_OK && e.energy == FSIM_ENERGY_FUEL);
+            CHECK(e.required > e.remaining && e.remaining > 0.0 && fabs(e.required_s - 60000.0) < 600.0 && e.remaining_s > 0.0);
+            fsim_command_options_init(&oo);
+            oo.override_rejection = 1;
+            CHECK(fsim_vehicle_submit_route(world, ranger, options, 4, far, 1, &oo, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK((cr.flags & FSIM_COMMAND_OVERRIDDEN) != 0);
+            CHECK(fsim_last_command_endurance(world, &e) == FSIM_OK && e.energy == FSIM_ENERGY_FUEL && e.required > e.remaining);
+            /* a caller built before 1.16 is given what its header has */
+            fsim_command_endurance_init(&e);
+            e.struct_size = (uint32_t)offsetof(fsim_command_endurance, remaining);
+            e.remaining = 77.0;
+            CHECK(fsim_last_command_endurance(world, &e) == FSIM_OK && e.energy == FSIM_ENERGY_FUEL && e.remaining == 77.0);
+        }
         }
         fsim_world_destroy(world);
     }

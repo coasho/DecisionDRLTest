@@ -528,6 +528,8 @@ v.setCapabilityPrecedence("fsim.flight.velocity", 2); // the platform's: before 
 - **Time windows** are checked after each world step; a window that cannot be
   met is refused `time_constraint`. Repetition is a task's (FA-2d).
 
+**Endurance** ([flight-autonomy.md](../flight-autonomy.md), 4.18). A flight with an end - a route that does not repeat, a timed pattern, a curve - is checked at its NEW against what the vehicle has above its reserve (the navigation settings'). Flown level at each leg's speed and altitude, at the performance tables' burn, one that needs more is refused `InsufficientEndurance`, and `CommandDetails::endurance` says by how much (in kg, or a battery's J, and in seconds). It is the first soft rejection: `options.overrideRejection = true` flies it anyway, flagged `kOverridden`.
+
 ### Activity commands
 
 What may be done to a live activity - flying, waiting or disabled

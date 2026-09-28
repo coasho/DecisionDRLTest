@@ -242,3 +242,66 @@ TEST_CASE("envelope: several NEWs at once are each answered on their own", "[env
     CHECK(first.by == results[2].activity);
     CHECK((first.startTime == now && w.activity(results[2].activity)->startTime == now));
 }
+
+TEST_CASE("envelope: a flight with an end needs no more than the vehicle has; a soft rejection override_rejection overrides", "[envelope]") {
+    session::World w(options("envelope-endurance"));
+    const auto cessna = wing(w, "c172", 1500.0, 50.0);
+    w.step(stepsFor(w, 2.0));
+    const auto& s = *w.vehicleState(cessna);
+    auto north = [&](double km) { // two legs north at 50 m/s, the second as long as the first
+        std::vector<Waypoint> r = {at(s, 500.0 * km, 0.0, 1500.0), at(s, 1000.0 * km, 0.0, 1500.0)};
+        for (Waypoint& p : r) p.speed = 50.0, p.speedReference = code(SpeedReference::TrueAirspeed);
+        return r;
+    };
+    // near: flown, nothing said
+    CommandResult r = w.submit(cessna, RouteCommand{}, north(100.0));
+    REQUIRE(r.accepted());
+    CHECK((r.flags & kOverridden) == 0);
+    CHECK(w.commandDetails(cessna)->endurance.energy == 0);
+    // far: refused, what it needs against what the vehicle has above its reserve
+    const std::vector<Waypoint> far = north(2000.0);
+    r = w.submit(cessna, RouteCommand{}, far);
+    CHECK(r.reason == Reason::InsufficientEndurance);
+    CHECK(r.index == -1);
+    const CommandDetails d = *w.commandDetails(cessna);
+    REQUIRE(d.findingCount == 1);
+    CHECK(d.findings[0].reason == Reason::InsufficientEndurance);
+    const NavigationReport nav = w.navigationReport(cessna);
+    CHECK(d.endurance.energy == static_cast<std::uint8_t>(Energy::Fuel));
+    CHECK(std::abs(d.endurance.remaining - (nav.remaining - nav.reserve)) < 1e-9 * nav.remaining);
+    CHECK(d.endurance.required > d.endurance.remaining);
+    CHECK(std::abs(d.endurance.requiredS - 40000.0) < 400.0); // (2,000 km at 50 m/s)
+    CHECK(std::abs(d.endurance.remainingS * nav.consumption - d.endurance.remaining) < 1e-9 * d.endurance.remaining);
+    // validated: the same answer, and nothing flies
+    CommandOptions validate;
+    validate.validateOnly = true;
+    const std::size_t live = w.activities(cessna).size();
+    CHECK(w.submit(cessna, RouteCommand{}, far, validate).reason == Reason::InsufficientEndurance);
+    CHECK(w.activities(cessna).size() == live);
+    // overridden: flown, said so, with the same numbers
+    CommandOptions anyway;
+    anyway.overrideRejection = true;
+    r = w.submit(cessna, RouteCommand{}, far, anyway);
+    REQUIRE(r.accepted());
+    CHECK((r.flags & kOverridden) != 0);
+    CHECK(w.commandDetails(cessna)->findingCount == 0);
+    CHECK(w.commandDetails(cessna)->endurance.required == d.endurance.required);
+    // a route that repeats has no end: nothing to judge
+    RouteCommand again;
+    again.repeat = 1.0;
+    CHECK(w.submit(cessna, again, far).accepted());
+    // a timed pattern: its duration at its speed
+    PatternCommand orbit;
+    orbit.durationS = 40000.0;
+    CHECK(w.submit(cessna, orbit).reason == Reason::InsufficientEndurance);
+    orbit.durationS = 600.0;
+    CHECK(w.submit(cessna, orbit).accepted());
+    // a battery's charge, in joules
+    const auto skua = wing(w, "skua", 1000.0, 25.0, 1);
+    w.step(stepsFor(w, 2.0));
+    std::vector<Waypoint> away = {at(*w.vehicleState(skua), 400000.0, 0.0, 1000.0)};
+    away[0].speed = 25.0, away[0].speedReference = code(SpeedReference::TrueAirspeed);
+    CHECK(w.submit(skua, RouteCommand{}, away).reason == Reason::InsufficientEndurance);
+    CHECK(w.commandDetails(skua)->endurance.energy == static_cast<std::uint8_t>(Energy::Battery));
+    CHECK(w.commandDetails(skua)->endurance.remaining > 1e5); // (J)
+}

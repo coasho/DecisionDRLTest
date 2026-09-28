@@ -489,8 +489,10 @@ TEST_CASE("route: what cannot be flown is refused, naming the waypoint; what can
     refuse(c172, with(0, [](Waypoint& p) { p.maxBankRad = 1.2; }), RouteCommand{}, Reason::PerformanceLimit, 0, Constraint::MaxOrientation);
     refuse(c172, with(1, [](Waypoint& p) { p.altitudeM = 1800.0, p.climbRateMs = 30.0; }), RouteCommand{}, Reason::PerformanceLimit, 1,
            Constraint::MaxClimbRate);
-    refuse(iris, {at(lat0, lon0, 0, 30)}, RouteCommand{}, Reason::None, -1); // (a rotorcraft given no speed: its cruise)
-    std::vector<Waypoint> fast = {at(lat0, lon0, 0, 30)};
+    // (a rotorcraft given no speed: its cruise; 30 m from where it is - the C172's point, 13 km off, is further than its battery lasts)
+    const auto& hover = *w.vehicleState(iris);
+    refuse(iris, {at(hover.latitudeRad, hover.longitudeRad, 0, 30)}, RouteCommand{}, Reason::None, -1);
+    std::vector<Waypoint> fast = {at(hover.latitudeRad, hover.longitudeRad, 0, 30)};
     fast[0].speed = 50.0, fast[0].speedReference = code(SpeedReference::GroundSpeed);
     refuse(iris, fast, RouteCommand{}, Reason::PerformanceLimit, 0, Constraint::MaxAirspeed);
     // a leg too short for the fly-by turns at its ends: refused, or the turns flown smaller

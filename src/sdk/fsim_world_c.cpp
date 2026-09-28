@@ -1223,6 +1223,25 @@ FSIM_API int fsim_last_command_detail(const fsim_world* world, fsim_command_deta
     return copyOut(d, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
 }
 
+FSIM_API void fsim_command_endurance_init(fsim_command_endurance* e) {
+    if (!e) return;
+    std::memset(e, 0, sizeof *e);
+    e->struct_size = sizeof *e;
+    e->remaining = e->required = e->remaining_s = e->required_s = std::numeric_limits<double>::quiet_NaN();
+}
+
+FSIM_API int fsim_last_command_endurance(const fsim_world* world, fsim_command_endurance* out) {
+    if (!world) return FSIM_INVALID_ARGUMENT;
+    fsim_command_endurance e;
+    fsim_command_endurance_init(&e);
+    if (const auto* details = lastDetails(world); details && details->endurance.energy) {
+        const auto& n = details->endurance;
+        e.energy = n.energy;
+        e.remaining = n.remaining, e.required = n.required, e.remaining_s = n.remainingS, e.required_s = n.requiredS;
+    }
+    return copyOut(e, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
 FSIM_API void fsim_command_finding_init(fsim_command_finding* f) {
     if (!f) return;
     std::memset(f, 0, sizeof *f);

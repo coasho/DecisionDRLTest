@@ -36,6 +36,22 @@ struct EffectorPositions {
     double flaps = kUnknown; ///< 0 .. 1
 };
 
+/// What a vehicle has on board now, for the endurance check
+/// (docs/flight-autonomy.md, 4.18): its flight model's, through the session.
+struct EnergyNow {
+    Energy energy = Energy::Unknown;
+    double remaining = kUnknown;   ///< kg of fuel, or a battery's J
+    double reserve = kUnknown;     ///< kept back for the end, in the same unit (the navigation settings')
+    double consumption = kUnknown; ///< now: kg/s, or W
+    double massKg = kUnknown;      ///< the whole vehicle's
+};
+/// The session's view of its vehicles' energy, asked only when a flight with an end is checked.
+class EnergyView {
+public:
+    virtual ~EnergyView() = default;
+    virtual EnergyNow energyNow(std::uint32_t vehicle) const = 0;
+};
+
 class CapabilityHost {
 public:
     CapabilityHost();
@@ -58,6 +74,8 @@ public:
     /// the profile gives it (docs/control-architecture.md, 11).
     void bind(std::uint32_t vehicle, ControlStack& runtime, const CapabilityCatalog& catalog, const VehicleAdapter& adapter,
               const VehicleProfile& profile, double controlPeriodS = 1.0 / 120.0) noexcept;
+    /// What tells the vehicle's energy (which outlives the host): without one, no endurance is checked.
+    void setEnergyView(const EnergyView* view) noexcept { energyView_ = view; }
     /// The vehicle's support for the public features (it outlives the host):
     /// a command for one the catalog does not offer is refused NotSupported or
     /// NotImplemented (docs/flight-autonomy.md, 4.3). Without it, UnknownCapability.
@@ -449,6 +467,14 @@ private:
     /// 4.17): none asked for, or its performance tables to fly it from -
     /// without them NotImplemented, the field (`field`) in `detail`.
     Reason optimisable(double optimization, std::int16_t field, CommandResult& detail) const noexcept;
+    /// What a flight with an end needs, against what the vehicle has above
+    /// its reserve (docs/flight-autonomy.md, 4.18): a route that does not
+    /// repeat, to its last point; a timed pattern; a curve, to its end -
+    /// complete, and checked: its route or curve in the scratch plan. Flown
+    /// level, each leg at its speed and altitude, at the weight now: the
+    /// performance tables' burn there, else what it consumes now. `energy` 0:
+    /// nothing to judge (no end, no energy, no speed).
+    CommandDetails::Endurance endurance(const Command& setpoint, const sim::VehicleState& state) const noexcept;
     /// A speed optimisation's snapshot, as the command is given: the optimum's
     /// true airspeed at the altitude it flies to (as it flies, where the
     /// tables give none), into `speed` and `reference` - what the checks judge
@@ -576,6 +602,7 @@ private:
     bool divergedSeen_ = false;   ///< (a divergence changes every capability's availability: counted)
     CommandDetails details_{};    ///< the last answer's (details())
     std::unique_ptr<std::array<Waiting, kWaiting>> waiting_; ///< made when the first activity waits
+    const EnergyView* energyView_ = nullptr; ///< the session's (setEnergyView)
 };
 
 } // namespace fsim::control

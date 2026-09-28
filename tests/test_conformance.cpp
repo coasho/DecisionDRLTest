@@ -438,6 +438,12 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
                 b.params["manoeuvre"] = 0.0, b.params["load_factor_g"] = 2.0;
                 r = submitMade(w, v, c, make);
             }
+            if (r.reason == Reason::InsufficientEndurance) { // further than its battery takes it (the Crazyflie's route): overridden, then
+                CommandOptions anyway;
+                anyway.overrideRejection = true;
+                r = submitMade(w, v, c, make, anyway);
+                CHECK((r.flags & kOverridden) != 0);
+            }
         }
         REQUIRE(r.accepted());
         CHECK(r.activity == activityId(v, ++serial));
@@ -588,7 +594,9 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
                                               // a precedence override from a policy, a window it cannot meet, no room to wait (4.9)
                                               Reason::NotAllowed, Reason::TimeConstraint, Reason::QueueFull,
                                               // a task's (4.11)
-                                              Reason::UnknownTask, Reason::TaskActive}));
+                                              Reason::UnknownTask, Reason::TaskActive,
+                                              // further than its fuel or battery takes it (4.18)
+                                              Reason::InsufficientEndurance}));
         // a policy's precedence override is refused; one that waits was accepted to (4.9)
         if (done.options.source == Source::Policy && done.options.precedenceOverride != kNoPrecedenceOverride) CHECK_FALSE(done.result.accepted());
         if (done.result.reason == Reason::NotAllowed) CHECK(done.options.precedenceOverride != kNoPrecedenceOverride);
@@ -687,8 +695,11 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         case ActivityState::Deleted: CHECK((r.reason == Reason::Requested && r.by == 0)); break;
         case ActivityState::Completed:
             CHECK((r.reason == Reason::GoalReached && r.by == 0));
-            // a persistent activity is done only when its end window closes; none is done before a critical one opens (4.9)
-            if (caps[r.capability].persistence == Persistence::Persistent) CHECK(r.endTime >= window.endNotAfter);
+            // a persistent activity is done only when its end window closes - a timed pattern at its duration's end, its
+            // own goal (docs/vehicle-interface.md, 4.6) - and none is done before a critical one opens (4.9)
+            if (caps[r.capability].persistence == Persistence::Persistent &&
+                !(caps[r.capability].setpoint == SetpointKind::Pattern && std::isfinite(r.progress.timeToGoS)))
+                CHECK(r.endTime >= window.endNotAfter);
             if (window.endCritical()) CHECK_FALSE(r.endTime < window.endNotBefore);
             break;
         case ActivityState::Canceled:

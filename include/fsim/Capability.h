@@ -150,6 +150,8 @@ enum class Reason : std::uint8_t {
     // flight tasks (docs/flight-autonomy.md, 4.11)
     UnknownTask,    ///< a task command refused: the vehicle keeps no task by that id
     TaskActive,     ///< a task command or store refused: the task's activity is live
+    // endurance (docs/flight-autonomy.md, 4.18)
+    InsufficientEndurance, ///< NEW refused - a soft rejection, which CommandOptions::overrideRejection overrides: its flight needs more fuel or charge than the vehicle has above its reserve
     Count
 };
 
@@ -315,6 +317,7 @@ enum class CommandStatus : std::uint8_t {
 enum CommandFlag : std::uint16_t {
     kClamped = 1u << 0,  ///< a value was clamped to what the aircraft can do
     kDeferred = 1u << 1, ///< accepted to wait: it starts when its start window opens and its axes are free (ActivityRecord::waiting)
+    kOverridden = 1u << 2, ///< accepted over a soft rejection (CommandOptions::overrideRejection): CommandDetails::endurance says by how much
 };
 
 /// The synchronous answer to NEW, UPDATE and CANCEL. The reason in words
@@ -376,7 +379,18 @@ struct CommandDetails {
     std::uint64_t suggestion = 0;
     std::array<Finding, kMax> findings{};
     std::array<Adjustment, kMax> adjustments{};
-    void clear() noexcept { findingCount = adjustmentCount = 0, suggestion = 0; }
+    /// What a flight with an end needs against what the vehicle has
+    /// (docs/flight-autonomy.md, 4.18; A-GRA's MA_InsufficientEnduranceType):
+    /// set when it needs more - refused InsufficientEndurance, or accepted
+    /// over it (kOverridden); `energy` 0 otherwise.
+    struct Endurance {
+        std::uint8_t energy = 0;  ///< what it is counted in (Energy, fsim/Control.h): 1 fuel (kg), 2 a battery's charge (J)
+        double remaining = std::numeric_limits<double>::quiet_NaN();  ///< what the vehicle has above its reserve
+        double required = std::numeric_limits<double>::quiet_NaN();   ///< what the flight needs
+        double remainingS = std::numeric_limits<double>::quiet_NaN(); ///< how long `remaining` lasts at what it consumes now
+        double requiredS = std::numeric_limits<double>::quiet_NaN();  ///< how long the flight takes
+    } endurance{};
+    void clear() noexcept { findingCount = adjustmentCount = 0, suggestion = 0, endurance.energy = 0; } // (the rest means nothing without it)
 };
 
 // --- Flight tasks (docs/flight-autonomy.md, 4.11) --------------------------------------

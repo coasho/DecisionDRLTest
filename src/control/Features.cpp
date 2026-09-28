@@ -214,7 +214,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.command/no_interrupt", "", S, 0, 0, ""},                                           // CMD-06
     {"fsim.command/precedence_override", "", S, 0, 0, ""},                                    // CMD-07
     {"fsim.command/time_window", "", S, 0, 0, ""},                                            // CMD-08
-    {"fsim.command/override_rejection", "", P, 3, 0, "carried and kept; no soft rejection exists to override yet (endurance, FA-3; air traffic, FA-15)"}, // CMD-09
+    {"fsim.command/override_rejection", "", S, 0, 0, ""},                                   // CMD-09: over the soft rejections (endurance: FA-3e)
     {"fsim.command/traceability", "", S, 0, 0, ""},                                           // CMD-10
     {"fsim.command/validate", "", S, 0, 0, ""},                                               // VAL-12
     {"fsim.command/task", "", S, 0, 0, ""},                                                   // TSK-01, TSK-02

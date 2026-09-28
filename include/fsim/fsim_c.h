@@ -320,7 +320,8 @@ enum fsim_activity_state { FSIM_ACTIVITY_PENDING = 0, FSIM_ACTIVITY_ACTIVE, FSIM
 enum fsim_activity_command_kind { FSIM_ACTIVITY_DISABLE = 0, FSIM_ACTIVITY_ENABLE, FSIM_ACTIVITY_RESET, FSIM_ACTIVITY_DELETE, FSIM_ACTIVITY_CHANGE_RANK,
                                   FSIM_ACTIVITY_UNASSIGN };
 /* fsim_command_result.flags (ABI 1.9 adds DEFERRED: accepted to wait - its start window, or axes held by what it may not interrupt). */
-enum fsim_command_flag { FSIM_COMMAND_CLAMPED = 1, FSIM_COMMAND_DEFERRED = 2 };
+enum fsim_command_flag { FSIM_COMMAND_CLAMPED = 1, FSIM_COMMAND_DEFERRED = 2,
+                         FSIM_COMMAND_OVERRIDDEN = 4 /* ABI 1.16: accepted over a soft rejection (override_rejection): fsim_last_command_endurance */ };
 /* Ranks, queues and time windows (ABI 1.9; docs/flight-autonomy.md, 4.9). Why a pending activity has not started: */
 enum fsim_activity_wait { FSIM_WAIT_NONE = 0, FSIM_WAIT_SCHEDULED, FSIM_WAIT_QUEUED };
 /* What its record rests on (A-GRA's ActivityBasisEnum): flown (actual), or waiting to start (planned). */
@@ -551,6 +552,21 @@ typedef struct fsim_command_detail {
 } fsim_command_detail;
 FSIM_API void fsim_command_detail_init(fsim_command_detail* detail);
 FSIM_API int fsim_last_command_detail(const fsim_world* world, fsim_command_detail* out);
+
+/* ABI 1.16 (docs/flight-autonomy.md, 4.18; A-GRA's MA_InsufficientEnduranceType): what the last command's flight needs -
+ * a route that does not repeat, a timed pattern, a curve - against what the vehicle has above its reserve. Given when it
+ * needs more: refused insufficient_endurance (a soft rejection), or accepted over it with override_rejection
+ * (FSIM_COMMAND_OVERRIDDEN); `energy` 0 otherwise. */
+typedef struct fsim_command_endurance {
+    uint32_t struct_size;
+    int32_t energy;     /* fsim_energy: FSIM_ENERGY_FUEL (kg), FSIM_ENERGY_BATTERY (J); 0: none judged */
+    double remaining;   /* what the vehicle has above its reserve */
+    double required;    /* what the flight needs, flown level at each leg's speed and altitude */
+    double remaining_s; /* how long `remaining` lasts at what it consumes now */
+    double required_s;  /* how long the flight takes */
+} fsim_command_endurance;
+FSIM_API void fsim_command_endurance_init(fsim_command_endurance* endurance);
+FSIM_API int fsim_last_command_endurance(const fsim_world* world, fsim_command_endurance* out);
 FSIM_API const char* fsim_constraint_name(int constraint); /* "max_airspeed", "max_orientation", "max_climb_rate", ... */
 
 /* How far an activity has got and what it commands: a guidance mode's (a route,

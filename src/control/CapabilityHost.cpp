@@ -1193,6 +1193,18 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
             details_.suggestion = suggest(setpoint, waypoints, segments);
         return about(rejected(log.refused), detail);
     }
+    // its endurance (4.18): a flight with an end needs no more than the vehicle has above its reserve - a soft
+    // rejection, which overrideRejection overrides (the first there is). Only a route, pattern or curve can have one.
+    if (checked && energyView_ &&
+        (std::holds_alternative<RouteCommand>(setpoint) || std::holds_alternative<PatternCommand>(setpoint) || std::holds_alternative<CurveCommand>(setpoint)))
+        if (const CommandDetails::Endurance need = endurance(setpoint, state); need.energy && need.required > need.remaining) {
+            details_.endurance = need;
+            if (!options.overrideRejection) {
+                log.find(Reason::InsufficientEndurance, -1, Constraint::None);
+                return about(rejected(Reason::InsufficientEndurance), detail);
+            }
+            detail.flags = static_cast<std::uint16_t>(detail.flags | kOverridden);
+        }
     const std::uint16_t flags = detail.flags;
     AxisMask axes = 0;
     if (const Reason why = axesOf(index, command, options, axes); why != Reason::None) return rejected(why);

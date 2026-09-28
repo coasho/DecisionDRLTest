@@ -109,6 +109,7 @@ class _Fleet:
         self.fsim, self.w = fsim, world
         self.n = 0
         self.tanks = None
+        self.engines = 0  # (counted with the tanks, at the first spawn)
         self.capacity_lbs = []  # each tank's
         self.spawn_fuel_lbs = 0.0  # what the aircraft file starts it with (a B-52H's tanks: 40 %)
         self.battery_j = None  # its battery's capacity (J), if it flies on one
@@ -125,6 +126,8 @@ class _Fleet:
             self.fsim.set_log_level("off")
             try:
                 self.tanks = next(i for i in range(64) if not np.isfinite(self.prop(veh, "propulsion/tank[%d]/contents-lbs" % i)))
+                # (every engine: the state reports four at most, and the B-52H has eight - its burn was read as half)
+                self.engines = next(i for i in range(64) if not np.isfinite(self.prop(veh, "propulsion/engine[%d]/fuel-flow-rate-pps" % i)))
                 battery = self.prop(veh, "fsim/battery/capacity-j")
                 self.battery_j = float(battery) if np.isfinite(battery) else None
             finally:
@@ -142,7 +145,7 @@ class _Fleet:
 
     def fuel_flow(self, veh):
         """The fuel its engines burn now, kg/s."""
-        return sum(self.prop(veh, "propulsion/engine[%d]/fuel-flow-rate-pps" % e, 0.0) for e in range(veh.state.engine_count)) * LBS
+        return sum(self.prop(veh, "propulsion/engine[%d]/fuel-flow-rate-pps" % e, 0.0) for e in range(self.engines)) * LBS
 
     @staticmethod
     def prop(veh, name, default=float("nan")):

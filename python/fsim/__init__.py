@@ -102,6 +102,7 @@ from .world import (  # noqa: E402
     EndBehavior,
     EndPoint,
     EndPointKind,
+    Endurance,
     Energy,
     Envelope,
     LIMITS,

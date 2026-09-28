@@ -229,7 +229,7 @@ How contested axes are arbitrated, and when a command flies: A-GRA's CapabilityC
   - one done before a critical end window opens fails.
 
   A-GRA puts repetition on tasks, not flight commands: it comes with the flight tasks (FA-2d).
-- **Overriding a rejection (CMD-09).** `overrideRejection` is carried and kept. No soft rejection exists yet (endurance comes in FA-3, air traffic in FA-15); none of the safety limits is ever overridden.
+- **Overriding a rejection (CMD-09).** `overrideRejection` is carried and kept. The first soft rejection is endurance (FA-3e, 4.18); air traffic's comes in FA-15. None of the safety limits is ever overridden.
 
 | C++ | C ABI 1.9 | Python |
 | --- | --- | --- |
@@ -340,7 +340,7 @@ The performance tables (SUB-02) record what an aircraft flies level, climbs and 
   - the fuel capacity.
 
   A stock JSBSim aircraft has none.
-- **Looked up** (`tablesAt`, `tablesCeilingM`, fsim/VehicleProfile.h). Values are linear in altitude and weight between the conditions flown, and along each condition's band at the same fraction of it. A condition or point is read at its own value, whatever its neighbour's. Below the lowest altitude a lookup takes that row's values, and in weight it runs on down to the tanks empty. A lookup is NaN above the altitudes flown, or where a condition it lies between was not flown (above that weight's ceiling). The ceiling is where the best climb first falls below 0.5 m/s; an altitude nothing held level at climbs nothing, as the flight tests count it. Still climbing at the highest row, the highest two's line is extended, but no further than as high again: the fixed wings' reached at most 42 % above their rows, a rotorcraft's tens of times. An axis that is not strictly rising is refused.
+- **Looked up** (`tablesAt`, `tablesCeilingM`, fsim/VehicleProfile.h). Values are linear in altitude and weight between the conditions flown, and along each condition's band at the same fraction of it. At a speed (FA-3e), each altitude row is read at the same equivalent airspeed, where the drag changes little with height: at 3,000 m, between the Su-27S's rows at 100 m and 4,000 m, the same fraction had read its burn 12 % high. A condition or point is read at its own value, whatever its neighbour's. Below the lowest altitude a lookup takes that row's values, and in weight it runs on down to the tanks empty. A lookup is NaN above the altitudes flown, or where a condition it lies between was not flown (above that weight's ceiling). The ceiling is where the best climb first falls below 0.5 m/s; an altitude nothing held level at climbs nothing, as the flight tests count it. Still climbing at the highest row, the highest two's line is extended, but no further than as high again: the fixed wings' reached at most 42 % above their rows, a rotorcraft's tens of times. An axis that is not strictly rising is refused.
 - **Energy: fuel or a battery** (FA-3b). An aircraft that flies on a battery has the power its battery gives where one that burns fuel has its fuel flow (`powerW`, `bestEndurancePowerW`, `bestRangePowerW`, `batteryCapacityJ`). Its best speeds are the least power's and the most distance per joule's. The Skua's band begins at its least speed, 1.15 times the stall: an electric motor gives full power at once, and the full-power run is past its slow speeds within the second it is recorded from.
 - **The rotorcraft** (FA-3b; [hangar.md](hangar.md), "Rotorcraft") fly theirs with the fly stage's hold:
   - four rows, 100 m to 3,000 m (their models' power does not fall with the air's density: no ceiling within reach);
@@ -464,6 +464,28 @@ A speed optimisation (HSA-05, LTR-17; A-GRA's SpeedOptimizationEnum, PathSegment
   - C++: `HsaCommand::speedOptimization`, `PatternCommand::speedOptimization`, `SpeedOptimization`; `optimalTasMs` (fsim/GuidanceModes.h); `ControlContext::tables`.
   - C ABI 1.15: an hsa's seventh field and a pattern's thirteenth, `fsim_speed_optimization`.
   - Python: `speed_optimization=` ("long_range_cruise", "max_endurance"), `fsim.SpeedOptimization`, `fsim.agra.SPEED_OPTIMIZATION`.
+
+### 4.18 Endurance validation (as FA-3 builds it)
+
+A flight command whose flight has an end is checked at its NEW against the vehicle's endurance (VAL-03; A-GRA's VIOLATION_ENDURANCE with MA_InsufficientEnduranceType): it needs no more fuel, or battery charge, than the vehicle has above its reserve.
+
+- **Which flights.** A route that does not repeat, to its last point; a pattern with a duration; a curve, to its end. An hsa, a repeating route or an untimed pattern has no end, and nothing is judged.
+- **What it needs** (a minimal model):
+  - each leg flown level at its speed and altitude - a route's from where the aircraft is, with the turns between them;
+  - the performance tables' burn there (at the same equivalent airspeed between their rows, 4.13), at the weight it will have by then, a minute at a time;
+  - where the tables are silent (a stock aircraft), what it consumes now.
+
+  Climbs, descents and wind are not counted.
+- **What it has:** its fuel, or its battery's charge, above its reserve (the navigation settings', 4.14; a tenth of its capacity unless set).
+- **Refused `insufficient_endurance`** (A-GRA's CONSTRAINT_ENDURANCE and VIOLATION_ENDURANCE) where it needs more. This is the first **soft rejection**:
+  - `overrideRejection` flies it anyway, flagged `kOverridden`;
+  - the details carry both sides (`CommandDetails::endurance`): what it has and what it needs, in kg or J, and how long each lasts - at what it consumes now, and the flight's own time;
+  - a validation answers the same.
+- **Checked** on all 35 against a flown burn (section 14).
+- **Surfaces.**
+  - C++: `Reason::InsufficientEndurance`, `kOverridden`, `CommandDetails::Endurance`.
+  - C ABI 1.16: `fsim_command_endurance`, `fsim_last_command_endurance`, `FSIM_COMMAND_OVERRIDDEN`.
+  - Python: `fsim.Endurance` on `fsim.Rejected`, on a `Validation`, and on an overridden `Activity` (`overridden`); `fsim.agra.insufficient_endurance`.
 
 ## 5. Applicability (D6)
 
@@ -631,12 +653,12 @@ The command and activity semantics A-GRA defines around every flight command.
 
 A-GRA's per-mode performance profile from hangar's data; energy management in every mode; long-range-cruise and max-endurance speeds; endurance validation and the fuel report.
 
-**Status:** in progress, in five steps:
+**Status:** done 2026-09-27 in five steps:
 - FA-3a, the performance tables (4.13), done 2026-09-27 and measured in section 14;
 - FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft, the navigation report (STS-07, 4.14), endurance against a flown burn and the rotorcraft's tables, done 2026-09-27 and measured in section 14;
 - FA-3c, the performance profile per mode (CAP-04 to CAP-15, 4.15), updated with the condition and configuration, done 2026-09-27 and measured in section 14;
 - FA-3d, energy management in every mode (HSA-10, CTG-04, 4.16): the fleet climb case, done 2026-09-27 and measured in section 14;
-- FA-3e, speed optimisation (HSA-05, LTR-17, 4.17), done 2026-09-27 and measured in section 14; and endurance validation (VAL-03), the first soft rejection override_rejection overrides.
+- FA-3e, speed optimisation (HSA-05, LTR-17, 4.17) and endurance validation (VAL-03, 4.18), the first soft rejection override_rejection overrides, done 2026-09-27 and measured in section 14.
 
 **Supporting models:** Performance tables, fuel flow (SUB-02, SUB-03).
 
@@ -1001,7 +1023,7 @@ Filled as the stages land: each stage's criteria results, the digests (identical
 - ctest: all 217 tests pass (the four envelope cases added).
 
 **FA-2b (ranks, queues and time windows: CMD-05, CMD-06, CMD-07, CMD-08, CMD-09's carrying; ACT-03, ACT-06, ACT-07; STS-14).**
-- What it built is 4.9, in C++, the C ABI (1.9) and Python. `fsim.command/rank`, `/no_interrupt`, `/precedence_override` and `/time_window` are supported on every vehicle; `/override_rejection` is partial until a soft rejection exists (FA-3).
+- What it built is 4.9, in C++, the C ABI (1.9) and Python. `fsim.command/rank`, `/no_interrupt`, `/precedence_override` and `/time_window` are supported on every vehicle; `/override_rejection` is partial until a soft rejection exists (FA-3; supported since FA-3e, 4.18).
 - `test_schedule` (6 cases, 141 checks) and its Python twin (3 tests):
   - a policy's command ranked behind what flies waits, named in the answer, planned and queued; it starts when what it waited for ends; one ranked at or ahead takes;
   - a command that does not interrupt waits; the platform's interrupts any rank, or, deferring, lets the rank decide;
@@ -1396,6 +1418,29 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases are within −1.4 % to +3.0 % (0.2 ns), except a behaviour's NEW at −10 %. That baseline, built in another tree, runs it at 135 ns where this one runs 122: the layout's, as FA-3c found.
   - World throughput is 100.2 to 101.7 % of FA-3d's. Protection costs at most 0.5 % (the gate: 97 %).
 - ctest: all 249 tests pass.
+
+**FA-3e, endurance validation (VAL-03) and the first soft rejection (CMD-09).**
+- **A route against its flown burn** (the probe `endurance_burn.py`), FA-3's acceptance:
+  - Every aircraft flies at its cruise: a straight route of two legs, ten minutes long (for the Crazyflie, 40 % of the seven its battery lasts).
+  - Its prediction is read under a reserve of 99.99 %, so that the check reports what the flight needs; then the route is flown with the reserve as it was.
+  - All 35 are within 5 %: from −3.7 % (the Mirage 2000, burning less than predicted) to +2.3 % (the Crazyflie). The flights' times are within 4 s of those predicted.
+- **The fleet** (`test_fleet`):
+  - Every aircraft refuses a timed pattern three times what it lasts, counted in its own energy, and validates it when overridden.
+  - It flies five minutes ahead within 5 % over its prediction. On the cautious side, the Mirage 2000 is 5.5 % under: its tanks full, slow on the back of its power curve, where its tables' level points read high.
+- **Named changes.**
+  - **The B-52H's fuel flow** (FA-3a's tables). hangar had summed the engines the state reports, four at most, and the B-52H has eight. Its three fuel-flow tables double, exactly; nothing else changes (its best speeds, its checks). The performance profile's burn and the navigation report's burn home (its playtime) follow.
+  - **The tables' lookup at a speed between rows** (4.13): each row is now read at the same equivalent airspeed. The Su-27S's prediction went from 12.1 % high to 1.9 %. At the rows nothing changes: the profile is the same cell for cell, and no flight reads it.
+  - **The conformance tests.**
+    - The Crazyflie's route in the catalog walk is overridden (8 km on a battery that lasts 7 minutes).
+    - The random walks' model admits `insufficient_endurance`.
+    - The walks moved, and met a fourth gap in the model: a timed pattern completes at its duration.
+- **Digests:** identical to the speed optimisation's (0c63475), with protection and without. The allocation gate passes.
+- **A/B throughput** against the speed optimisation (0c63475), built in the scratch worktree: 5 rounds of `micro`, and 9 of `command` three times.
+  - The micro cases are within −1.1 % to +0.9 %.
+  - A behaviour's NEW read +2.2 % while the host called the model to learn that a hold has no end. The host now asks only for a route, a pattern or a curve, and it reads +0.2 % and +1.0 %.
+  - The other command cases are within −4.3 % to +1.7 % (0.4 ns), on paths the check is not on.
+  - World throughput is 99.9 to 100.8 % of the speed optimisation's. Protection costs at most 0.2 % (the gate: 97 %).
+- ctest: all 250 tests pass.
 
 ## Appendix A: the inventory
 
