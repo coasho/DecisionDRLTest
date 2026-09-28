@@ -1239,7 +1239,11 @@ The `performance` stage flies the tables in five parts:
   is flown. The weights are a helicopter's tank a tenth, half and wholly
   full, and a multirotor's one weight.
 - **The top level speed**: the fastest level trim that holds its speed and
-  height within the power and the design's pitch limit (nose down). A
+  height within the power and the tilt the platform's velocity loop flies
+  within (docs/rotorcraft.md: 30 degrees, a helicopter's 20, and 0.8 of the
+  design's bank and pitch limits; ADR-29 FA-3e - the multirotors had flown
+  to the full pitch limit, to speeds the platform does not fly). Its speeds
+  are along the nose, as the velocity loop flies an airspeed. A
   helicopter's engines must stay short of their limit with the rotor
   governed; a multirotor's collective must stay short of full. It is found
   by doubling from 1 m/s until a trim fails, then halving the bracket eight

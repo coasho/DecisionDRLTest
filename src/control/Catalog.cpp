@@ -107,8 +107,8 @@ std::size_t commandFields(Command& c, double* f[kMaxCommandFields]) noexcept {
     }
     if (auto* h = std::get_if<HsaCommand>(&c)) {
         f[0] = &h->headingRad, f[1] = &h->courseRad, f[2] = &h->speed, f[3] = &h->speedReference, f[4] = &h->altitudeM;
-        f[5] = &h->altitudeReference;
-        return 6;
+        f[5] = &h->altitudeReference, f[6] = &h->speedOptimization;
+        return 7;
     }
     if (auto* r = std::get_if<RouteCommand>(&c)) {
         f[0] = &r->projection, f[1] = &r->repeat, f[2] = &r->end, f[3] = &r->start;
@@ -117,8 +117,8 @@ std::size_t commandFields(Command& c, double* f[kMaxCommandFields]) noexcept {
     if (auto* p = std::get_if<PatternCommand>(&c)) {
         f[0] = &p->pattern, f[1] = &p->latitudeRad, f[2] = &p->longitudeRad, f[3] = &p->altitudeM, f[4] = &p->altitudeReference;
         f[5] = &p->radiusM, f[6] = &p->clockwise, f[7] = &p->courseRad, f[8] = &p->legM, f[9] = &p->speed, f[10] = &p->speedReference;
-        f[11] = &p->durationS;
-        return 12;
+        f[11] = &p->durationS, f[12] = &p->speedOptimization;
+        return 13;
     }
     if (auto* k = std::get_if<CurveCommand>(&c)) {
         f[0] = &k->latitudeRad, f[1] = &k->longitudeRad, f[2] = &k->altitudeM, f[3] = &k->speedMinMs, f[4] = &k->speedMaxMs;

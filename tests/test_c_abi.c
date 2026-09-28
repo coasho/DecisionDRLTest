@@ -650,7 +650,7 @@ int main(int argc, char** argv) {
             double hsa[6], alt[6], bad[5];
             fsim_activity_progress progress;
             fsim_activity_id mode_id;
-            CHECK(fsim_mode_field_count(FSIM_MODE_HSA) == 6 && fsim_mode_field_count(99) == 0);
+            CHECK(fsim_mode_field_count(FSIM_MODE_HSA) == 7 && fsim_mode_field_count(99) == 0); /* (1.15: six leave the optimisation out) */
             hsa[0] = 3.0; hsa[1] = fsim_hold(); hsa[2] = 50.0; hsa[3] = FSIM_SPEED_TRUE_AIRSPEED; hsa[4] = 1600.0; hsa[5] = FSIM_ALTITUDE_MSL;
             fsim_command_options_init(&co);
             co.source = FSIM_SOURCE_OVERRIDE; /* b's autopilot holds its height (above) */
@@ -732,7 +732,7 @@ int main(int argc, char** argv) {
             fsim_activity_progress progress;
             fsim_activity_id orbit_id;
             int k;
-            CHECK(fsim_mode_field_count(FSIM_MODE_PATTERN) == 12);
+            CHECK(fsim_mode_field_count(FSIM_MODE_PATTERN) == 13); /* (1.15: twelve leave the optimisation out) */
             for (k = 0; k < 12; ++k) pattern[k] = wider[k] = fsim_hold();
             pattern[0] = FSIM_PATTERN_ORBIT;
             pattern[5] = 800.0; /* radius_m */
@@ -1186,7 +1186,8 @@ int main(int argc, char** argv) {
             memset(&sp, 0, sizeof sp);
             sp.struct_size = sizeof sp;
             CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_MODE && sp.code == FSIM_MODE_HSA);
-            CHECK(sp.count == 6 && sp.fields[0] == 1.0 && sp.fields[4] == 3200.0 && sp.fields[3] == FSIM_SPEED_TRUE_AIRSPEED && sp.options == NULL);
+            CHECK(sp.count == 7 && sp.fields[0] == 1.0 && sp.fields[4] == 3200.0 && sp.fields[3] == FSIM_SPEED_TRUE_AIRSPEED && sp.options == NULL);
+            CHECK(isnan(sp.fields[6])); /* (no speed optimisation) */
             CHECK(fsim_activity_end_points(world, cr.activity, points, 0, &count) == FSIM_OK && count == 0);
             CHECK(fsim_world_step(world, 2) == FSIM_OK);
             fsim_commanded_state_init(&cs);
@@ -1353,6 +1354,53 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_performance_profile(world, viper, FSIM_FLIGHT_MODE_LOITER, &pp, &why) != FSIM_OK && strcmp(fsim_reason_name(why), "invalid_parameter") == 0);
             CHECK(fsim_vehicle_performance_profile(world, 999, FSIM_FLIGHT_MODE_HSA_CSA, &pp, &why) != FSIM_OK && strcmp(fsim_reason_name(why), "unknown_vehicle") == 0);
             CHECK(fsim_vehicle_performance_profile(world, viper, 99, &pp, NULL) != FSIM_OK);
+        }
+        {
+            /* ABI 1.15: speed optimisation - an hsa's seventh field and a pattern's thirteenth: the performance
+             * tables' best speed, flown at the altitude and weight now (docs/flight-autonomy.md, 4.17) */
+            fsim_activity_progress progress;
+            fsim_batch_command sp;
+            fsim_command_result cr;
+            uint32_t cruiser = 0, stock = 0;
+            const double hold = fsim_hold();
+            double hsa[7], faster[7], pattern[13];
+            int k;
+            spec.name = "cap-cruiser";
+            spec.type = "jsbsim:f16c";
+            spec.altitude_msl_m = 3000.0;
+            spec.airspeed_ms = 160.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &cruiser) == FSIM_OK);
+            CHECK(fsim_world_step(world, 30) == FSIM_OK);
+            for (k = 0; k < 7; ++k) hsa[k] = faster[k] = hold;
+            hsa[0] = 1.0, hsa[6] = FSIM_SPEED_MAX_ENDURANCE;
+            CHECK(fsim_vehicle_submit_mode(world, cruiser, FSIM_MODE_HSA, hsa, 7, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.count == 7 && sp.fields[6] == FSIM_SPEED_MAX_ENDURANCE);
+            CHECK(sp.fields[3] == FSIM_SPEED_TRUE_AIRSPEED && sp.fields[2] > 50.0 && sp.fields[2] < 250.0); /* resolved: the optimum as given */
+            CHECK(fsim_world_step(world, 2) == FSIM_OK);
+            fsim_activity_progress_init(&progress);
+            CHECK(fsim_activity_get_progress(world, cr.activity, &progress) == FSIM_OK && progress.speed_reference == FSIM_SPEED_TRUE_AIRSPEED);
+            CHECK(fabs(progress.speed_ms - sp.fields[2]) < 5.0); /* (the optimum now: the same tables, a little lighter and lower) */
+            /* a speed replaces it */
+            faster[2] = 200.0;
+            CHECK(fsim_activity_update(world, cr.activity, faster, 7, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.fields[2] == 200.0 && isnan(sp.fields[6]));
+            /* a pattern's, the same */
+            for (k = 0; k < 13; ++k) pattern[k] = hold;
+            pattern[12] = FSIM_SPEED_LONG_RANGE_CRUISE;
+            CHECK(fsim_vehicle_submit_mode(world, cruiser, FSIM_MODE_PATTERN, pattern, 13, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.count == 13 && sp.fields[12] == FSIM_SPEED_LONG_RANGE_CRUISE);
+            /* a stock aircraft has no performance tables to fly one from: not implemented, the field named */
+            spec.name = "cap-stock";
+            spec.type = "jsbsim:c172x";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 55.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &stock) == FSIM_OK);
+            CHECK(fsim_vehicle_submit_mode(world, stock, FSIM_MODE_HSA, hsa, 7, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+            CHECK(strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 7); /* (field 6, plus one) */
         }
         }
         fsim_world_destroy(world);

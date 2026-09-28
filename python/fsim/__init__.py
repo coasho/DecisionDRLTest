@@ -126,6 +126,7 @@ from .world import (  # noqa: E402
     Scenario,
     SUPPORT_FEATURES,
     Source,
+    SpeedOptimization,
     SpeedReference,
     Support,
     SupportInfo,

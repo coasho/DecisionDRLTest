@@ -552,7 +552,10 @@ bool toMode(int mode, const double* fields, uint32_t count, fsim::control::Comma
     else if (mode == FSIM_MODE_CURVE) out = fsim::control::CurveCommand{};
     else return false;
     double* slots[fsim::control::kMaxCommandFields];
-    if (count != fsim::control::commandFields(out, slots)) return false;
+    const std::size_t n = fsim::control::commandFields(out, slots);
+    // (ABI 1.14's hsa had 6 fields and its pattern 12: a caller built against it leaves the speed optimisation out)
+    const std::size_t least = mode == FSIM_MODE_HSA ? 6 : mode == FSIM_MODE_PATTERN ? 12 : n;
+    if (count < least || count > n) return false;
     for (uint32_t i = 0; i < count; ++i) *slots[i] = fields[i];
     return true;
 }

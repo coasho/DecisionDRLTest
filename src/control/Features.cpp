@@ -33,6 +33,9 @@ struct FeatureDef {
     std::uint8_t stage;
     std::uint16_t rules;
     const char* missing;
+    /// Flown from the performance tables (a speed optimisation): not implemented
+    /// on an aircraft hangar has flown none for - a stock one (FA-3's: stage 3).
+    bool tables = false;
 };
 
 #define CAP(id, built, stage, rules, missing) {id, id, built, stage, rules, missing}
@@ -63,7 +66,7 @@ const FeatureDef kFeatures[] = {
     CAP("fsim.guidance.hover", S, 0, R1, ""),       // PLT-08, superseded by the hover loiter
 
     // --- HSA/CSA ---------------------------------------------------------------------------------
-    CAP("fsim.guidance.hsa", P, 4, 0, "speed optimisation (FA-3); the magnetic and barometric references (FA-4)"), // HSA-08..10
+    CAP("fsim.guidance.hsa", P, 4, 0, "the magnetic and barometric references (FA-4)"), // HSA-08..10
     {"fsim.guidance.hsa/direction/heading", "fsim.guidance.hsa", S, 0, 0, ""},              // HSA-01
     {"fsim.guidance.hsa/direction/course", "fsim.guidance.hsa", S, 0, 0, ""},               // HSA-02
     {"fsim.guidance.hsa/direction/magnetic_north", "fsim.guidance.hsa", N, 4, 0, ""},       // HSA-03
@@ -71,8 +74,8 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.hsa/speed/calibrated_airspeed", "fsim.guidance.hsa", S, 0, 0, ""},
     {"fsim.guidance.hsa/speed/ground_speed", "fsim.guidance.hsa", S, 0, 0, ""},
     {"fsim.guidance.hsa/speed/mach", "fsim.guidance.hsa", S, 0, 0, ""},
-    {"fsim.guidance.hsa/speed/long_range_cruise", "fsim.guidance.hsa", N, 3, 0, ""},        // HSA-05
-    {"fsim.guidance.hsa/speed/max_endurance", "fsim.guidance.hsa", N, 3, 0, ""},
+    {"fsim.guidance.hsa/speed/long_range_cruise", "fsim.guidance.hsa", S, 3, 0, "", true},  // HSA-05
+    {"fsim.guidance.hsa/speed/max_endurance", "fsim.guidance.hsa", S, 3, 0, "", true},
     {"fsim.guidance.hsa/altitude/msl", "fsim.guidance.hsa", S, 0, 0, ""},                   // HSA-06
     {"fsim.guidance.hsa/altitude/agl", "fsim.guidance.hsa", S, 0, 0, ""},
     {"fsim.guidance.hsa/altitude/hae", "fsim.guidance.hsa", S, 0, 0, ""},
@@ -140,8 +143,7 @@ const FeatureDef kFeatures[] = {
     // --- loiter -----------------------------------------------------------------------------------------
     CAP("fsim.guidance.pattern", P, 5, 0,
         "two-circle patterns, fix-point options, orbit counts, entry and exit points, hold leg times, turn rates and types, "
-        "hold durations and entries, hold contexts, the hover loiter and relative points (FA-5); the barometric altitude (FA-4); "
-        "speed optimisation (FA-3)"),                                                          // LTR-09
+        "hold durations and entries, hold contexts, the hover loiter and relative points (FA-5); the barometric altitude (FA-4)"), // LTR-09
     {"fsim.guidance.pattern/orbit", "fsim.guidance.pattern", S, 0, 0, ""},                   // LTR-01
     {"fsim.guidance.pattern/racetrack", "fsim.guidance.pattern", S, 0, 0, ""},               // LTR-02
     {"fsim.guidance.pattern/figure_eight", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-04
@@ -169,8 +171,8 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.pattern/altitude/agl", "fsim.guidance.pattern", S, 0, 0, ""},
     {"fsim.guidance.pattern/altitude/hae", "fsim.guidance.pattern", S, 0, 0, ""},
     {"fsim.guidance.pattern/altitude/barometric", "fsim.guidance.pattern", N, 4, 0, ""},
-    {"fsim.guidance.pattern/speed/long_range_cruise", "fsim.guidance.pattern", N, 3, 0, ""}, // LTR-17
-    {"fsim.guidance.pattern/speed/max_endurance", "fsim.guidance.pattern", N, 3, 0, ""},
+    {"fsim.guidance.pattern/speed/long_range_cruise", "fsim.guidance.pattern", S, 3, 0, "", true}, // LTR-17
+    {"fsim.guidance.pattern/speed/max_endurance", "fsim.guidance.pattern", S, 3, 0, "", true},
     {"fsim.guidance.pattern/relative_points", "fsim.guidance.pattern", N, 5, 0, ""},         // LTR-18
 
     // --- the flight capability types not built yet (CAP-02) --------------------------------------------
@@ -445,6 +447,11 @@ SupportTable::SupportTable(const VehicleProfile& profile, const CapabilityCatalo
         row.support = f.built;
         if (f.capability == f.id && f.built != Support::NotImplemented && catalog.find(f.id) < 0) {
             row.support = Support::NotImplemented; // applicable, and the aircraft's model lacks it
+            row.stage = f.stage;
+            row.missing = "";
+        }
+        if (f.tables && profile.tables.empty() && row.support != Support::NotImplemented) {
+            row.support = Support::NotImplemented; // flown from performance tables it has none of
             row.stage = f.stage;
             row.missing = "";
         }

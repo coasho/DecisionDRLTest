@@ -3,6 +3,8 @@
 // multirotor's 2 m; a racetrack, a figure-eight and ATC's hold, each measured
 // against its own geometry computed here; a duration; UPDATE; the defaults;
 // and what cannot be flown refused.
+#include "fsim/GuidanceModes.h"
+#include "fsim/VehicleProfile.h"
 #include "mode_flights.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -213,6 +215,40 @@ TEST_CASE("pattern: a racetrack and a hold fly their legs and half circles; a fi
     CHECK(w.activity(c)->progress.segments == 2);
 }
 
+TEST_CASE("pattern: a speed optimisation is planned at the optimum where it orbits and flown at the optimum now", "[modes]") {
+    session::World w(options("patterns-optimised"));
+    const auto v = wing(w, "c172", 1500.0, 50.0); // (hangar's C172: it has performance tables)
+    settle(w, {v}, 5.0);
+    const VehicleProfile& profile = *w.profile(v);
+    REQUIRE_FALSE(profile.tables.empty());
+    PatternCommand endure;
+    endure.altitudeM = 1700.0;
+    endure.speedOptimization = static_cast<double>(SpeedOptimization::MaxEndurance);
+    const ActivityId id = submit(w, v, endure);
+    // planned at the optimum at 1,700 m: its speed, and the radius that speed and 80 % of its bank give
+    Setpoint planned;
+    REQUIRE(w.activitySetpoint(id, planned));
+    const auto& c = std::get<PatternCommand>(std::get<Command>(planned.command));
+    const double fuel = w.vehicleState(v)->fuelKg, there = optimalTasMs(&profile.tables, c.speedOptimization, 1700.0, fuel);
+    CHECK(std::abs(c.speed - there) < 1e-9);
+    CHECK(c.speedReference == static_cast<double>(SpeedReference::TrueAirspeed));
+    CHECK(c.radiusM >= w.performance(v)->turnRadiusM(there));
+    // flown at the optimum at the altitude and weight now - asked as it climbs to it, held level there
+    w.step(stepsFor(w, 330.0)); // (it climbs at its energy balance, overshoots as it levels off, and settles by 280 s)
+    const auto& s = *w.vehicleState(v);
+    const double now = optimalTasMs(&profile.tables, c.speedOptimization, s.altitudeMslM, s.fuelKg);
+    CHECK(std::abs(w.activity(id)->progress.speedMs - now) < 1e-3 * now);
+    CHECK(std::abs(s.altitudeMslM - 1700.0) < 20.0);
+    CHECK(std::abs(s.airspeedTrueMs - now) < 0.03 * now);
+    // a speed replaces it
+    PatternCommand faster;
+    faster.speed = 55.0;
+    REQUIRE(w.update(id, faster).accepted());
+    REQUIRE(w.activitySetpoint(id, planned));
+    CHECK((std::get<PatternCommand>(std::get<Command>(planned.command)).speed == 55.0 &&
+           std::isnan(std::get<PatternCommand>(std::get<Command>(planned.command)).speedOptimization)));
+}
+
 TEST_CASE("pattern: a duration completes it; an UPDATE changes only what it gives; what cannot be flown is refused", "[modes]") {
     session::World w(options("patterns-semantics"));
     const auto v = wing(w, "c172x", 1500.0, 55.0);
@@ -282,6 +318,6 @@ TEST_CASE("pattern: a duration completes it; an UPDATE changes only what it give
         CHECK(d->mode == FlightMode::Loiter);
         CHECK(d->setpoint == SetpointKind::Pattern);
         CHECK((d->interactions & kUpdate) != 0);
-        CHECK(d->parameters.size() == 12);
+        CHECK(d->parameters.size() == 13); // (the speed optimisation last: ADR-29 FA-3e)
     }
 }

@@ -345,7 +345,8 @@ The performance tables (SUB-02) record what an aircraft flies level, climbs and 
 - **The rotorcraft** (FA-3b; [hangar.md](hangar.md), "Rotorcraft") fly theirs with the fly stage's hold:
   - four rows, 100 m to 3,000 m (their models' power does not fall with the air's density: no ceiling within reach);
   - a helicopter's three weights, a multirotor's one;
-  - level from the hover to 97 % of the top level speed, the top found within the power and the design's pitch limit;
+  - level from the hover to 97 % of the top level speed, the top found within the power and the tilt the platform's velocity loop flies within (FA-3e: the multirotors had flown to the design's whole pitch limit, to speeds the platform does not fly);
+  - their speeds along the nose, as their velocity loop flies an airspeed (a multirotor flies nose down: its true airspeed is up to 12 % more);
   - a helicopter's full-power climb at each speed;
   - no stall, no idle, and no multirotor climb (their thrust ignores a climb's inflow).
 
@@ -408,6 +409,7 @@ A flight mode's performance profile (CAP-04 to CAP-15; A-GRA's MA_FlightControlM
   - A stock JSBSim aircraft's airspeeds come from its Performance at the altitude now, and it has no excess power and no burn.
   - A quadrotor has no climb.
   - A rotorcraft has no ceiling within the altitudes flown.
+- **A rotorcraft's airspeeds are along its nose**, as its loops fly an airspeed and its tables have it (4.13).
 - **A-GRA's schema has two gaps**, which the platform fills (`fsim.agra.performance_profile`):
   - MA_SpeedType, used by MaxDescentRate and ExcessPowerMaxClimb, carries an airspeed, an altitude and a weight, but no speed;
   - the VI names a maximum climb rate, which the type has no field for.
@@ -443,6 +445,25 @@ Energy management (HSA-10, CTG-04) keeps a wing from trading its airspeed for he
     - a command's speed below it is clamped or rejected (`min_airspeed`), and the profile's least airspeed is never below it (4.15);
     - a loop needs twice it to be entered, and one flown below it is given up (section 6: the fighters' least airspeed was to come with FA-3's tables).
 - **Checked** on all 31 wings by the fleet climb case, and the changed flights measured and listed (section 14).
+
+### 4.17 Speed optimisation (as FA-3 builds it)
+
+A speed optimisation (HSA-05, LTR-17; A-GRA's SpeedOptimizationEnum, PathSegmentSpeedType.SpeedOptimization) is the speed a mode varies by itself: LONG_RANGE_CRUISE, the most fuel-efficient, and MAX_ENDURANCE, the most time in the air. The platform flies the performance tables' best-range speed (the most distance per kilogram, or per joule) and best-endurance speed (the least fuel flow, or power) (4.13).
+
+- **Where.** `fsim.guidance.hsa` and `fsim.guidance.pattern` take `speedOptimization`, their setpoints' last field. A speed replaces an optimisation, and an optimisation a speed. A route's, per segment (WPT-06), comes with FA-6.
+- **How it is flown.**
+  - The host resolves it as a speed, as the command is given: the optimum's true airspeed at the altitude flown to. The checks judge it, and a pattern's radius and legs are planned with it.
+  - The mode flies the optimum afresh each update, at the altitude and the weight now: the fuel on board on the tables' weight with the tanks empty. It follows as the aircraft climbs and burns fuel. Above the altitudes the tables fly, it holds the speed resolved.
+  - A rotorcraft's is along its nose, as its loops fly an airspeed and its tables have it.
+- **Reported.** The setpoint keeps the optimisation and the speed resolved. The progress gives the speed flown now, a true airspeed.
+- **Without tables** - a stock JSBSim aircraft, which hangar has flown none for - it is not implemented. Its support table says so (the tables are FA-3's), and a command asking for one is refused `not_implemented`, the field named.
+- **Two things it found, fixed** (section 14):
+  - The multirotors' tables had been flown to their design's whole pitch limit (35° and 30°), past the 28° and 24° their velocity loop flies within. Their best range lay at the top of speeds the platform does not fly. hangar now flies every rotorcraft's tables within its loop's tilt ([hangar.md](hangar.md)).
+  - The rotor velocity loop's integral trimmed half its tilt, so a speed whose drag needs more was flown short: the Crazyflie's best range needs 22 of its 24°, and was flown 15 % short along the nose. The integral now trims the whole tilt forward and half sideways, as an orbit needs ([rotorcraft.md](rotorcraft.md)).
+- **Surfaces.**
+  - C++: `HsaCommand::speedOptimization`, `PatternCommand::speedOptimization`, `SpeedOptimization`; `optimalTasMs` (fsim/GuidanceModes.h); `ControlContext::tables`.
+  - C ABI 1.15: an hsa's seventh field and a pattern's thirteenth, `fsim_speed_optimization`.
+  - Python: `speed_optimization=` ("long_range_cruise", "max_endurance"), `fsim.SpeedOptimization`, `fsim.agra.SPEED_OPTIMIZATION`.
 
 ## 5. Applicability (D6)
 
@@ -615,7 +636,7 @@ A-GRA's per-mode performance profile from hangar's data; energy management in ev
 - FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft, the navigation report (STS-07, 4.14), endurance against a flown burn and the rotorcraft's tables, done 2026-09-27 and measured in section 14;
 - FA-3c, the performance profile per mode (CAP-04 to CAP-15, 4.15), updated with the condition and configuration, done 2026-09-27 and measured in section 14;
 - FA-3d, energy management in every mode (HSA-10, CTG-04, 4.16): the fleet climb case, done 2026-09-27 and measured in section 14;
-- FA-3e, speed optimisation (HSA-05, LTR-17) and endurance validation (VAL-03), the first soft rejection override_rejection overrides.
+- FA-3e, speed optimisation (HSA-05, LTR-17, 4.17), done 2026-09-27 and measured in section 14; and endurance validation (VAL-03), the first soft rejection override_rejection overrides.
 
 **Supporting models:** Performance tables, fuel flow (SUB-02, SUB-03).
 
@@ -1346,6 +1367,35 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - Over both runs, the other micro cases are within −1.2 % to +2.8 % on their medians, and the command cases within −0.3 % to +2.2 %. No case's rise repeated: the attitude's +2.8 % (its minimum unchanged) read −0.9 % in the second run.
   - World throughput (3 rounds): 100.0 to 100.8 % of FA-3c's. With protection on, the F-16C and B-52H fly at 99.6 % of their throughput with it off (the gate: 97 %).
 - ctest: all 247 tests pass.
+
+**FA-3e, speed optimisation (HSA-05, LTR-17).**
+- **The fleet** (`test_fleet`), FA-3's acceptance for the best speeds:
+  - Every aircraft, its heading and height held, flies each optimisation for 240 s (a rotorcraft for 90 s).
+  - Each flies its optimum within 5 %. The 31 wings are within 0.01 %, their height within 1.1 m (the Mirage 2000); the helicopters within 0.3 %; the multirotors, along the nose, within 0.84 % (the Crazyflie's best range). The Crazyflie's best endurance is its hover.
+- **HSA and pattern** (`test_modes`, `test_patterns`):
+  - The resolved speed is the optimum at the altitude flown to. Flown, it is the optimum now: the F-16C's within 2 %, the C172's orbit within 3 % once level.
+  - A speed replaces it, and a fraction is refused `invalid_parameter`.
+  - The stock c172x refuses it `not_implemented`, as its support table says.
+  - The C ABI (1.15) and Python do the same.
+- **The conformance walks.**
+  - They draw an optimisation only in walks of their own, one per adapter, held to the same rules: flown where there are tables, refused `not_implemented` on the stock aircraft. So the other walks draw what they drew before, and meet the rarer answers they met; a field more to draw had moved every walk, and no task then completed in 60 seeds.
+  - The moved walks found three gaps in the test's model, not in the platform, now closed:
+    - a task command whose task's activity is live is refused `task_active` before its NEW;
+    - an activity that waited, started and was done before its critical end window opened fails `time_constraint` within one operation;
+    - an activity command that sets a live activity waiting (unassign, disable) past its end window fails it at once.
+- **Named changes, measured.**
+  - **The multirotors' tables**, flown again within their loop's tilt:
+    - the IRIS's top level speed 16.6 → 13.1 m/s, its best endurance and range 15.9 → 12.5, its steepest pitch 33.5 → 26.7°;
+    - the Crazyflie's top 21.5 → 18.0 m/s, its best range 20.8 → 17.4 (its best endurance the hover, as before).
+  - **The helicopters' tables**, within the 20° they never approach: their level tables are identical. 17 of the UH-1H's 192 full-power climb cells at the top speeds move, by 1.18 % at most, and 9 of the UH-60's are flown where none were. Every table check passes.
+  - **The rotor velocity loop's forward integral.** 4 of the fleet's 656 flights change: the IRIS's and the Crazyflie's optimised HSAs (new), and the IRIS's waypoints, by 6e-9 m. The orbits are unchanged: sideways it trims half, as before. The whole tilt sideways had run the UH-60 up to 9 m off its 150 m circle.
+- **The performance profile** (FA-3c's check, again): cell for cell with the tables on all 35, the rotorcraft's re-flown ones too; the worst difference is 5.1e-06.
+- **Digests:** identical to FA-3d's, with protection and without; no digest flight is a rotorcraft's. The allocation gate passes.
+- **A/B throughput** against FA-3d (e2e48b4), built in the scratch worktree: 5 rounds of `micro`, and 9 of `command` twice.
+  - The micro cases are within −1.3 % to +1.8 %.
+  - The command cases are within −1.4 % to +3.0 % (0.2 ns), except a behaviour's NEW at −10 %. That baseline, built in another tree, runs it at 135 ns where this one runs 122: the layout's, as FA-3c found.
+  - World throughput is 100.2 to 101.7 % of FA-3d's. Protection costs at most 0.5 % (the gate: 97 %).
+- ctest: all 249 tests pass.
 
 ## Appendix A: the inventory
 

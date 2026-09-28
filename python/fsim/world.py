@@ -574,6 +574,14 @@ class AltitudeReference(enum.IntEnum):
     ELLIPSOID = 2
 
 
+class SpeedOptimization(enum.IntEnum):
+    """The speed a mode varies by itself (A-GRA's SpeedOptimizationEnum; docs/flight-autonomy.md, 4.17): the
+    performance tables' best-range speed (the most distance for the fuel) or best-endurance speed (the most time),
+    at the altitude and the weight now, flown as a true airspeed."""
+    LONG_RANGE_CRUISE = 0
+    MAX_ENDURANCE = 1
+
+
 class TurnType(enum.IntEnum):
     """How a route passes a waypoint (A-GRA's TurnType): a fly-by turn begins before it, on a circle tangent to
     both legs; a fly-over point is passed, then the next leg intercepted."""
@@ -608,13 +616,14 @@ class PatternKind(enum.IntEnum):
 #: one out: a NEW continues what a live hsa commanded (else what the aircraft flies now) and takes a route's, a
 #: pattern's or a curve's default; an UPDATE keeps it.
 MODE_KINDS = ("hsa", "route", "pattern", "curve")
-MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference"),
+MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference", "speed_optimization"),
                "route": ("projection", "repeat", "end", "start"),
                "pattern": ("pattern", "latitude_rad", "longitude_rad", "altitude_m", "altitude_reference", "radius_m", "clockwise",
-                           "course_rad", "leg_m", "speed", "speed_reference", "duration_s"),
+                           "course_rad", "leg_m", "speed", "speed_reference", "duration_s", "speed_optimization"),
                "curve": ("latitude_rad", "longitude_rad", "altitude_m", "speed_min_ms", "speed_max_ms", "duration_s", "end", "append")}
-MODE_DEFAULTS = {"hsa": (HOLD,) * 6, "route": (HOLD,) * 4, "pattern": (HOLD,) * 12, "curve": (HOLD,) * 8}
-_REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "projection": Projection, "end": EndBehavior,
+MODE_DEFAULTS = {"hsa": (HOLD,) * 7, "route": (HOLD,) * 4, "pattern": (HOLD,) * 13, "curve": (HOLD,) * 8}
+_REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "speed_optimization": SpeedOptimization,
+               "projection": Projection, "end": EndBehavior,
                "turn": TurnType, "pattern": PatternKind}
 
 Waypoint = collections.namedtuple(
@@ -1059,7 +1068,9 @@ class Vehicle:
         """NEW for fsim.guidance.hsa, A-GRA's HSA/CSA (docs/vehicle-interface.md, 4.4): hold ``heading_rad`` or
         ``course_rad``, a ``speed`` in ``speed_reference`` (fsim.SpeedReference or its name: "true_airspeed",
         "calibrated_airspeed", "ground_speed", "mach") and ``altitude_m`` above ``altitude_reference``
-        (fsim.AltitudeReference: "msl", "above_ground", "ellipsoid"). What it leaves out continues what a live hsa
+        (fsim.AltitudeReference: "msl", "above_ground", "ellipsoid"); or, for its speed, ``speed_optimization``
+        (fsim.SpeedOptimization: "long_range_cruise", "max_endurance"): the performance tables' best speed, flown at the
+        altitude and weight now (a speed replaces it, it a speed). What it leaves out continues what a live hsa
         commanded, else what the aircraft flies now; a reference alone takes the aircraft's own value in it. An
         Activity whose ``update(**fields)`` changes only the fields given; fsim.Rejected if refused. The command
         envelope as submit's."""
@@ -1091,7 +1102,8 @@ class Vehicle:
         """NEW for fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md, 4.6): ``pattern``
         (fsim.PatternKind or "orbit", "racetrack", "figure_eight", "hold") round ``latitude_rad``, ``longitude_rad``
         (its centre or fix) at ``altitude_m``, with ``radius_m``, ``clockwise``, ``course_rad`` (the inbound course, a
-        figure-eight's axis), ``leg_m``, a ``speed`` in ``speed_reference`` and ``duration_s`` (then it completes). What it
+        figure-eight's axis), ``leg_m``, a ``speed`` in ``speed_reference`` (or ``speed_optimization``, as submit_hsa's)
+        and ``duration_s`` (then it completes). What it
         leaves out takes its default: an orbit here, as the aircraft flies now, right turns, the radius its speed and 80 %
         of its bank give (a hold's: rate one), a hold's minute-long legs. An Activity whose ``update(**fields)`` changes
         only what it gives; fsim.Rejected if refused. The command envelope as submit's."""

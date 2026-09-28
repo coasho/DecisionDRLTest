@@ -61,7 +61,15 @@ class _Runs:
     def __init__(self, r):
         self.r, self.heli = r, r.kind == "helicopter"
         self.s = fly.Session(r)
-        self.tilt = math.radians(abs(r.spec.get("envelope", {}).get("pitch_min_deg", -20.0)))  # (its nose-down limit)
+        # the tilt the platform's velocity loop flies within (src/control/Laws.cpp: 30 degrees - a helicopter's 20 - and
+        # 0.8 of the envelope's bank and pitch): a speed only a steeper tilt holds is one the platform does not fly, so
+        # the tables end short of it (ADR-29 FA-3e: the multirotors' best range lies at the top of their speeds)
+        env = r.spec.get("envelope", {})
+        tilt = 20.0 if self.heli else 30.0
+        for key in ("bank_max_deg", "pitch_max_deg"):
+            if key in env:
+                tilt = min(tilt, 0.8 * abs(float(env[key])))
+        self.tilt = math.radians(tilt)
         self.gains = fly._gains(r)
         if self.heli:
             from .heli import rotor_data

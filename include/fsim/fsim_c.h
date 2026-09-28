@@ -598,10 +598,14 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  * take UPDATE (docs/vehicle-interface.md, 4).
  * - FSIM_MODE_HSA is fsim.guidance.hsa (A-GRA's HSA/CSA): fields heading_rad,
  *   course_rad (one of them), speed, speed_reference (fsim_speed_reference),
- *   altitude_m, altitude_reference (fsim_altitude_reference); fsim_hold()
- *   leaves one out. A NEW continues what a live hsa commanded, else what the
- *   aircraft flies now; a reference alone takes the aircraft's own value in it.
+ *   altitude_m, altitude_reference (fsim_altitude_reference) and, from ABI
+ *   1.15, speed_optimization (fsim_speed_optimization: the performance
+ *   tables' best-range or best-endurance speed, flown at the altitude and
+ *   weight now; a speed replaces it, it a speed); fsim_hold() leaves one out.
+ *   A NEW continues what a live hsa commanded, else what the aircraft flies
+ *   now; a reference alone takes the aircraft's own value in it.
  *   fsim_activity_update takes the same fields and keeps the ones left out.
+ *   Six fields (ABI 1.14's) leave the optimisation out.
  * - FSIM_MODE_ROUTE is fsim.guidance.route (A-GRA's waypoint following):
  *   fields projection (fsim_projection), repeat (1: fly it again from its first
  *   point), end (fsim_end_behavior), start (the waypoint flown to first). Its
@@ -613,8 +617,9 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   pattern (fsim_pattern_kind), latitude_rad, longitude_rad (its centre or
  *   fix), altitude_m, altitude_reference, radius_m, clockwise (1 right turns),
  *   course_rad (the inbound course, a figure-eight's axis), leg_m, speed,
- *   speed_reference, duration_s. fsim_hold() leaves one out: a NEW takes its
- *   default (an orbit here, as the aircraft flies now), an UPDATE keeps it.
+ *   speed_reference, duration_s and, from ABI 1.15, speed_optimization (as
+ *   an hsa's; twelve fields leave it out). fsim_hold() leaves one out: a NEW
+ *   takes its default (an orbit here, as the aircraft flies now), an UPDATE keeps it.
  * - FSIM_MODE_CURVE is fsim.guidance.curve (A-GRA's curve following): fields
  *   latitude_rad, longitude_rad, altitude_m (the reference its segments are
  *   from; left out: the aircraft at the NEW), speed_min_ms, speed_max_ms (the
@@ -627,10 +632,11 @@ enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, 
 enum fsim_pattern_kind { FSIM_PATTERN_ORBIT = 0, FSIM_PATTERN_RACETRACK, FSIM_PATTERN_FIGURE_EIGHT, FSIM_PATTERN_HOLD };
 enum fsim_speed_reference { FSIM_SPEED_TRUE_AIRSPEED = 0, FSIM_SPEED_CALIBRATED_AIRSPEED, FSIM_SPEED_GROUND_SPEED, FSIM_SPEED_MACH };
 enum fsim_altitude_reference { FSIM_ALTITUDE_MSL = 0, FSIM_ALTITUDE_ABOVE_GROUND, FSIM_ALTITUDE_ELLIPSOID };
+enum fsim_speed_optimization { FSIM_SPEED_LONG_RANGE_CRUISE = 0, FSIM_SPEED_MAX_ENDURANCE }; /* A-GRA's SpeedOptimizationEnum (ABI 1.15) */
 enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft) */
-FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 6, route 4, pattern 12, curve 8; 0 for an unknown mode */
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 7, route 4, pattern 13, curve 8 (1.14: hsa 6, pattern 12); 0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result);
 

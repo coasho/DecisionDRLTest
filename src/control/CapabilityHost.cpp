@@ -79,6 +79,7 @@ void CapabilityHost::bind(std::uint32_t vehicle, ControlStack& runtime, const Ca
     profile_ = &profile;
     controlPeriodS_ = controlPeriodS;
     config_->protection = protectionFor(profile, adapter.features()); // Limit with an envelope section, else Off
+    config_->tables = profile.tables.empty() ? nullptr : &profile.tables; // (what a speed optimisation flies)
     // what the aircraft can do, from its profile and the loops it flies with (docs/vehicle-interface.md, 7.1)
     performance_ = adapter.performance(profile, runtime);
     performance_.revision = config_->performance.revision + 1;
@@ -288,9 +289,11 @@ Reason CapabilityHost::resolveHsa(HsaCommand& c, const sim::VehicleState& state,
     auto code = [](double v, int count) { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); };
     if (!code(c.speedReference, static_cast<int>(SpeedReference::Count))) return bad(3);
     if (!code(c.altitudeReference, static_cast<int>(AltitudeReference::Count))) return bad(5);
+    if (!code(c.speedOptimization, static_cast<int>(SpeedOptimization::Count))) return bad(6);
     if (!isHold(c.headingRad) && !isHold(c.courseRad)) return bad(1); // one direction, a heading or a course
     for (const auto& [v, field] : {std::pair<double, std::int16_t>{c.headingRad, 0}, {c.courseRad, 1}, {c.speed, 2}, {c.altitudeM, 4}})
         if (!isHold(v) && !std::isfinite(v)) return bad(field);
+    if (const Reason why = optimisable(c.speedOptimization, 6, detail); why != Reason::None) return why;
     // what it continues: the live hsa's commands, else what the aircraft flies now - a
     // rotorcraft's speed over the ground (a hover stays put), a wing's through the air
     HsaCommand base;
@@ -312,7 +315,24 @@ Reason CapabilityHost::resolveHsa(HsaCommand& c, const sim::VehicleState& state,
     c = base;
     if (!isHold(c.headingRad)) c.headingRad = geo::wrapPi(c.headingRad);
     if (!isHold(c.courseRad)) c.courseRad = geo::wrapPi(c.courseRad);
+    optimise(c.speed, c.speedReference, c.speedOptimization, c.altitudeM, c.altitudeReference, state);
     return Reason::None;
+}
+
+Reason CapabilityHost::optimisable(double optimization, std::int16_t field, CommandResult& detail) const noexcept {
+    if (isHold(optimization) || config_->tables) return Reason::None;
+    detail.index = field; // (no performance tables to fly it from: a stock aircraft's, docs/flight-autonomy.md, 4.17)
+    return Reason::NotImplemented;
+}
+
+void CapabilityHost::optimise(double& speed, double& reference, double optimization, double altitudeM, double altitudeReference,
+                              const sim::VehicleState& state) const noexcept {
+    if (isHold(optimization)) return;
+    const double h = isHold(altitudeM) ? state.altitudeMslM
+                                       : altitudeMslOf(altitudeM, aboveGround(altitudeReference) ? AltitudeReference::AboveGround : AltitudeReference::Msl, state);
+    const double best = optimalTasMs(config_->tables, optimization, h, state.fuelKg);
+    reference = static_cast<double>(SpeedReference::TrueAirspeed);
+    speed = std::isfinite(best) ? best : state.airspeedTrueMs; // (above the altitudes flown: as it flies)
 }
 
 void CapabilityHost::limitHsa(HsaCommand& c, CheckLog& log) const noexcept { limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, log, 2, 4); }
@@ -462,8 +482,9 @@ Reason CapabilityHost::checkPattern(const PatternCommand& c, bool merge, Command
     if (!given(c.speed, 0.0, true)) return bad(9);
     if (!code(c.speedReference, static_cast<double>(SpeedReference::Count))) return bad(10);
     if (!given(c.durationS, 0.0, true)) return bad(11);
+    if (!code(c.speedOptimization, static_cast<double>(SpeedOptimization::Count))) return bad(12);
     if (merge && !isHold(c.altitudeReference) && isHold(c.altitudeM)) return bad(3); // an UPDATE has no state to take one from
-    if (merge && !isHold(c.speedReference) && isHold(c.speed)) return bad(9);
+    if (merge && !isHold(c.speedReference) && isHold(c.speed) && isHold(c.speedOptimization)) return bad(9);
     return Reason::None;
 }
 
@@ -915,6 +936,8 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
     auto* pattern = std::get_if<PatternCommand>(&setpoint);
     if (pattern) { // complete it first, as an hsa (the runtime flies a complete setpoint)
         if (const Reason why = checkPattern(*pattern, false, detail); why != Reason::None) return why;
+        if (const Reason why = optimisable(pattern->speedOptimization, 12, detail); why != Reason::None) return why;
+        optimise(pattern->speed, pattern->speedReference, pattern->speedOptimization, pattern->altitudeM, pattern->altitudeReference, state);
         WindEstimate wind;
         wind.update(state, 0.0);
         route::completePattern(*pattern, state, performance_, (adapter_->features() & kFeatureHover) != 0, std::hypot(wind.northMs, wind.eastMs));
@@ -1412,13 +1435,16 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
         auto code = [](double v, int count) { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); };
         if (!code(next->speedReference, static_cast<int>(SpeedReference::Count))) return bad(3);
         if (!code(next->altitudeReference, static_cast<int>(AltitudeReference::Count))) return bad(5);
+        if (!code(next->speedOptimization, static_cast<int>(SpeedOptimization::Count))) return bad(6);
         if (!isHold(next->headingRad) && !isHold(next->courseRad)) return bad(1);
-        if (!isHold(next->speedReference) && isHold(next->speed)) return bad(2);
+        if (!isHold(next->speedReference) && isHold(next->speed) && isHold(next->speedOptimization)) return bad(2);
         if (!isHold(next->altitudeReference) && isHold(next->altitudeM)) return bad(4);
+        if (const Reason why = optimisable(next->speedOptimization, 6, result); why != Reason::None) return about(rejected(why, activity), result);
         HsaCommand merged = std::get<HsaCommand>(slot.command);
         mergeHsa(merged, *next);
         if (!isHold(merged.headingRad)) merged.headingRad = geo::wrapPi(merged.headingRad);
         if (!isHold(merged.courseRad)) merged.courseRad = geo::wrapPi(merged.courseRad);
+        optimise(merged.speed, merged.speedReference, merged.speedOptimization, merged.altitudeM, merged.altitudeReference, state);
         if (slots_[s].range != RangePolicy::None) {
             Command checked = merged;
             if (const Reason why = catalog_->check(record.capability, checked, log); why != Reason::None) return about(rejected(why, activity), result);
@@ -1434,9 +1460,11 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
     if (const auto* next = std::get_if<PatternCommand>(&setpoint)) {
         // a partial pattern (docs/vehicle-interface.md, 4.6): the fields given replace the commanded ones
         if (const Reason why = checkPattern(*next, true, result); why != Reason::None) return about(rejected(why, activity), result);
+        if (const Reason why = optimisable(next->speedOptimization, 12, result); why != Reason::None) return about(rejected(why, activity), result);
         PatternCommand merged = std::get<PatternCommand>(slot.command);
         mergePattern(merged, *next);
         merged.courseRad = geo::wrapPi(merged.courseRad), merged.longitudeRad = geo::wrapPi(merged.longitudeRad);
+        optimise(merged.speed, merged.speedReference, merged.speedOptimization, merged.altitudeM, merged.altitudeReference, state);
         if (slots_[s].range != RangePolicy::None) {
             limitPattern(merged, log);
             if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);

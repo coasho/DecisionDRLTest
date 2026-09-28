@@ -4,6 +4,7 @@
 // partial commands, references, validation against the aircraft's performance.
 #include "control/Atmosphere.h"
 #include "fsim/GuidanceModes.h"
+#include "fsim/VehicleProfile.h"
 #include "mode_flights.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -186,6 +187,66 @@ TEST_CASE("hsa: an UPDATE changes only what it gives, a NEW continues the hsa it
     CHECK(std::abs(w.activity(holdMach.activity)->progress.speedMs - machNow) < 0.01);
 }
 
+TEST_CASE("hsa: a speed optimisation flies the tables' best speed at the altitude and weight now; a speed replaces it", "[modes]") {
+    session::World w(options("modes-hsa-optimised"));
+    const auto f16 = wing(w, "f16c", 3000.0, 160.0);
+    const VehicleProfile& profile = *w.profile(f16);
+    REQUIRE_FALSE(profile.tables.empty());
+    auto setpoint = [&](ActivityId id) {
+        Setpoint out;
+        REQUIRE(w.activitySetpoint(id, out));
+        return std::get<HsaCommand>(std::get<Command>(out.command));
+    };
+    auto best = [&](SpeedOptimization o, double altitudeM = kHold) { // (at the altitude now, else at `altitudeM`)
+        const auto& s = *w.vehicleState(f16);
+        return optimalTasMs(&profile.tables, static_cast<double>(o), isHold(altitudeM) ? s.altitudeMslM : altitudeM, s.fuelKg);
+    };
+    ActivityId flying = 0;
+    for (const SpeedOptimization o : {SpeedOptimization::MaxEndurance, SpeedOptimization::LongRangeCruise}) {
+        INFO(static_cast<int>(o));
+        HsaCommand h;
+        h.headingRad = 0.0, h.speedOptimization = static_cast<double>(o);
+        const auto r = w.submit(f16, h);
+        REQUIRE(r.accepted());
+        flying = r.activity;
+        // resolved as given: the optimum's true airspeed at the altitude it flies to (checked as a speed is)
+        const HsaCommand given = setpoint(r.activity);
+        CHECK(given.speedOptimization == static_cast<double>(o));
+        CHECK(given.speedReference == code(SpeedReference::TrueAirspeed));
+        CHECK(std::abs(given.speed - best(o, given.altitudeM)) < 1e-9);
+        // flown: the optimum at the altitude and weight now, which the progress gives
+        w.step(stepsFor(w, 90.0));
+        const auto& s = *w.vehicleState(f16);
+        const double now = best(o);
+        CHECK(std::abs(w.activity(r.activity)->progress.speedMs - now) < 1e-4 * now); // (as its last update had it)
+        CHECK(w.activity(r.activity)->progress.speedReference == code(SpeedReference::TrueAirspeed));
+        CHECK(std::abs(s.airspeedTrueMs - now) < 0.02 * now); // (the velocity loop's: within 2 %)
+    }
+    // best endurance is the slower: the least fuel flow, below the most distance per kilogram
+    CHECK(best(SpeedOptimization::MaxEndurance) < best(SpeedOptimization::LongRangeCruise));
+    // a speed replaces it, and an optimisation a speed
+    HsaCommand faster;
+    faster.speed = 200.0;
+    REQUIRE(w.update(flying, faster).accepted());
+    CHECK((setpoint(flying).speed == 200.0 && std::isnan(setpoint(flying).speedOptimization)));
+    HsaCommand endure;
+    endure.speedOptimization = static_cast<double>(SpeedOptimization::MaxEndurance);
+    REQUIRE(w.update(flying, endure).accepted());
+    const HsaCommand again = setpoint(flying);
+    CHECK((again.speedOptimization == endure.speedOptimization && std::abs(again.speed - best(SpeedOptimization::MaxEndurance, again.altitudeM)) < 1e-9));
+    // not a code: refused, the field named
+    HsaCommand odd;
+    odd.speedOptimization = 0.5;
+    const auto refused = w.submit(f16, odd);
+    CHECK((refused.reason == Reason::InvalidParameter && refused.index == 6));
+    // a stock aircraft has no tables to fly one from: not implemented, as its support table says
+    const auto stock = wing(w, "c172x", 1500.0, 55.0, 1);
+    const auto none = w.submit(stock, endure);
+    CHECK((none.reason == Reason::NotImplemented && none.index == 6));
+    CHECK(w.support(stock, "fsim.guidance.hsa/speed/max_endurance")->support == Support::NotImplemented);
+    CHECK(w.support(f16, "fsim.guidance.hsa/speed/max_endurance")->support == Support::Supported);
+}
+
 TEST_CASE("hsa: above the ground over rising terrain", "[modes]") {
     const sim::InitialConditions start;
     auto o = options("modes-hsa-agl");
@@ -267,6 +328,6 @@ TEST_CASE("hsa: what the aircraft cannot do is refused, or clamped and said so",
         CHECK(d->mode == FlightMode::HsaCsa);
         CHECK(d->setpoint == SetpointKind::Hsa);
         CHECK((d->interactions & kUpdate) != 0);
-        CHECK(d->parameters.size() == 6);
+        CHECK(d->parameters.size() == 7); // (the speed optimisation last: ADR-29 FA-3e)
     }
 }

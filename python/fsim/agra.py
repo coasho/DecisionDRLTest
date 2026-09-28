@@ -121,6 +121,9 @@ FLIGHT_CAPABILITY = {
 #: SpeedReference codes (ActivityProgress.speed_reference) -> A-GRA's SpeedReferenceEnum, or MachType
 SPEED_REFERENCE = {0: "TRUE_AIRSPEED", 1: "CALIBRATED_AIRSPEED", 2: "GROUNDSPEED", 3: "MACH"}
 
+#: SpeedOptimization codes (an hsa's or a pattern's speed_optimization) -> A-GRA's SpeedOptimizationEnum
+SPEED_OPTIMIZATION = {0: "LONG_RANGE_CRUISE", 1: "MAX_ENDURANCE"}
+
 #: AltitudeReference codes (CommandedState.altitude_reference, EndPoint.altitude_reference) -> A-GRA's AltitudeReferenceEnum
 ALTITUDE_REFERENCE = {0: "MSL", 1: "AGL", 2: "WGS_HAE"}
 

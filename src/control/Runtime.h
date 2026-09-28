@@ -43,25 +43,35 @@ inline void assignSetpoint(Command& dst, const Command& src) noexcept {
     }
 }
 
+/// A speed given replaces a speed optimisation, and an optimisation a speed
+/// (given both, the optimisation's: it is the speed a mode varies by itself).
+inline void mergeSpeed(double& speed, double& optimization, double givenSpeed, double givenOptimization) noexcept {
+    if (!isHold(givenSpeed)) speed = givenSpeed, optimization = kHold;
+    if (!isHold(givenOptimization)) optimization = givenOptimization, speed = kHold;
+}
+
 /// A partial HSA (docs/vehicle-interface.md, 4.4): the fields given replace
-/// the commanded ones, the rest stay; a heading replaces a course, a course a heading.
+/// the commanded ones, the rest stay; a heading replaces a course, a course a
+/// heading; a speed a speed optimisation, an optimisation a speed.
 inline void mergeHsa(HsaCommand& dst, const HsaCommand& src) noexcept {
     if (!isHold(src.headingRad)) dst.headingRad = src.headingRad, dst.courseRad = kHold;
     if (!isHold(src.courseRad)) dst.courseRad = src.courseRad, dst.headingRad = kHold;
-    if (!isHold(src.speed)) dst.speed = src.speed;
+    mergeSpeed(dst.speed, dst.speedOptimization, src.speed, src.speedOptimization);
     if (!isHold(src.speedReference)) dst.speedReference = src.speedReference;
     if (!isHold(src.altitudeM)) dst.altitudeM = src.altitudeM;
     if (!isHold(src.altitudeReference)) dst.altitudeReference = src.altitudeReference;
 }
 
-/// A partial pattern (docs/vehicle-interface.md, 4.6): each field given replaces the commanded one.
+/// A partial pattern (docs/vehicle-interface.md, 4.6): each field given
+/// replaces the commanded one; a speed a speed optimisation, an optimisation a speed.
 inline void mergePattern(PatternCommand& dst, const PatternCommand& src) noexcept {
     double* d[] = {&dst.pattern, &dst.latitudeRad, &dst.longitudeRad, &dst.altitudeM, &dst.altitudeReference, &dst.radiusM,
-                   &dst.clockwise, &dst.courseRad, &dst.legM, &dst.speed, &dst.speedReference, &dst.durationS};
+                   &dst.clockwise, &dst.courseRad, &dst.legM, &dst.speedReference, &dst.durationS};
     const double s[] = {src.pattern, src.latitudeRad, src.longitudeRad, src.altitudeM, src.altitudeReference, src.radiusM,
-                        src.clockwise, src.courseRad, src.legM, src.speed, src.speedReference, src.durationS};
+                        src.clockwise, src.courseRad, src.legM, src.speedReference, src.durationS};
     for (std::size_t i = 0; i < std::size(s); ++i)
         if (!isHold(s[i])) *d[i] = s[i];
+    mergeSpeed(dst.speed, dst.speedOptimization, src.speed, src.speedOptimization);
 }
 
 /// What UPDATE (and the existing entry points' per-step path) writes into a
@@ -137,6 +147,9 @@ struct RuntimeConfig {
     std::array<std::uint32_t, kPrimaryAxisCount> letGo{};
     std::uint32_t revision = 0;                    ///< bumped whenever owner[] or a slot's axes change
     Protection protection{};
+    /// Its performance tables (ControlContext::tables): the profile's, set
+    /// when the host binds; null without them.
+    const TablesSection* tables = nullptr;
 };
 
 enum AxisFlag : std::uint16_t {

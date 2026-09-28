@@ -71,6 +71,39 @@ class PerformanceProfileTest(unittest.TestCase):
                 v.performance_profile(mode)
             self.assertEqual(caught.exception.reason, "invalid_parameter")
 
+    def test_a_speed_optimisation_flies_the_best_speed(self):
+        """HSA-05 (docs/flight-autonomy.md, 4.17): the tables' best speed - the profile's - flown at the altitude and weight
+        now; a speed replaces it; a stock aircraft has no tables to fly one from."""
+        w = make_world()
+        v = w.create_vehicle("cessna", "jsbsim:c172", latitude_deg=40.0, longitude_deg=0.0, altitude_msl_m=1500.0, airspeed_ms=50.0,
+                             heading_deg=90.0)
+        v.submit(fsim.Level.VELOCITY, airspeed_ms=50.0, vertical_speed_ms=0.0, heading_rad=math.pi / 2)
+        w.step(300)
+        a = v.submit_hsa(heading_rad=math.pi / 2, speed_optimization="max_endurance")
+        given = a.setpoint().kwargs  # resolved: the optimum's true airspeed at the altitude flown to
+        self.assertEqual(given["speed_optimization"], fsim.SpeedOptimization.MAX_ENDURANCE)
+        self.assertEqual(given["speed_reference"], fsim.SpeedReference.TRUE_AIRSPEED)
+        w.step(int(round(240.0 / w.step_seconds)))
+        p = a.progress
+        self.assertEqual(p.speed_reference, fsim.SpeedReference.TRUE_AIRSPEED)
+        self.assertLess(abs(v.state.airspeed_true_ms - p.speed_ms), 0.03 * p.speed_ms)
+        # the profile's best endurance at the altitudes about it: the same tables' (and the weight now)
+        points = v.performance_profile().best_endurance_airspeed
+        below = max((q for q in points if q.altitude_msl_m <= v.state.altitude_msl_m), key=lambda q: q.altitude_msl_m)
+        above = min((q for q in points if q.altitude_msl_m > v.state.altitude_msl_m), key=lambda q: q.altitude_msl_m)
+        self.assertLessEqual(min(below.value, above.value) - 0.01, p.speed_ms)
+        self.assertLessEqual(p.speed_ms, max(below.value, above.value) + 0.01)
+        # a speed replaces it
+        a.update(speed=45.0)
+        self.assertTrue(math.isnan(a.setpoint().kwargs["speed_optimization"]))
+        self.assertEqual(agra.SPEED_OPTIMIZATION[int(fsim.SpeedOptimization.LONG_RANGE_CRUISE)], "LONG_RANGE_CRUISE")
+        stock = w.create_vehicle("stock", "jsbsim:c172x", latitude_deg=40.0, longitude_deg=0.01, altitude_msl_m=1500.0, airspeed_ms=55.0)
+        w.step(30)
+        with self.assertRaises(fsim.Rejected) as refused:
+            stock.submit_hsa(speed_optimization="long_range_cruise")
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("not_implemented", 6))
+        self.assertEqual(stock.support("fsim.guidance.hsa/speed/long_range_cruise").support, fsim.Support.NOT_IMPLEMENTED)
+
 
 if __name__ == "__main__":
     unittest.main()

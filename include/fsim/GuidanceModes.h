@@ -37,6 +37,13 @@ FSIM_API double speedNow(SpeedReference reference, const sim::VehicleState& s) n
 FSIM_API double altitudeMslOf(double altitudeM, AltitudeReference reference, const sim::VehicleState& s) noexcept;
 /// The aircraft's own altitude now in `reference`.
 FSIM_API double altitudeNow(AltitudeReference reference, const sim::VehicleState& s) noexcept;
+/// A speed optimisation's true airspeed (docs/flight-autonomy.md, 4.17): the
+/// performance tables' best-range or best-endurance speed at an altitude and
+/// at the weight `fuelKg` on board makes - the tables' weight with the tanks
+/// empty (the heaviest they fly is with them full) and the fuel; one weight
+/// flown (a battery's) is that one. NaN without tables, for an optimisation
+/// code that is none, or where they give none (above the altitudes flown).
+FSIM_API double optimalTasMs(const TablesSection* tables, double optimization, double altitudeMslM, double fuelKg) noexcept;
 
 /// "hsa": fsim.guidance.hsa, A-GRA's HSA/CSA (docs/vehicle-interface.md, 4.4).
 /// Flies a complete HsaCommand (the host resolves what a command leaves out):
@@ -48,6 +55,8 @@ FSIM_API double altitudeNow(AltitudeReference reference, const sim::VehicleState
 ///   heading or course (the nose along the track), an airspeed along the nose
 ///   or, for a course, the air velocity whose track is the course; the same
 ///   altitude law.
+/// A speed optimisation is flown as that true airspeed: the performance
+/// tables' best at the altitude and weight now (ControlContext::tables).
 /// Its output is a velocity command, flown by the vehicle's own loops.
 class FSIM_API HsaBehavior final : public Behavior {
 public:
@@ -66,6 +75,7 @@ private:
     double lastTime_ = -1.0;   ///< the vehicle's time at the last update: a loop that missed a period starts again
     HsaCommand flown_{};       ///< the setpoint as last flown
     double altitudeMsl_ = kHold, headingFlown_ = kHold;
+    double speedFlown_ = kHold; ///< the speed flown at the last update (a speed optimisation's, now)
 };
 
 namespace route {
@@ -183,6 +193,7 @@ private:
     double lapDoneM_ = 0.0, inPieceM_ = 0.0;
     double lastTime_ = -1.0;
     double crossTrack_ = kHold, course_ = kHold, heading_ = kHold, altitudeMsl_ = kHold, groundSpeed_ = 0.0, simTime_ = 0.0;
+    double speedFlown_ = kHold; ///< the speed flown at the last update (a speed optimisation's, now)
 };
 
 /// "curve": fsim.guidance.curve, A-GRA's curve following (docs/vehicle-interface.md,

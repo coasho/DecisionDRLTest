@@ -10,6 +10,8 @@
 
 #include "control/Features.h"
 #include "fsim/BuiltinControllers.h"
+#include "fsim/GuidanceModes.h"
+#include "fsim/VehicleProfile.h"
 #include "sim/FlightModel.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -671,6 +673,28 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
                 CHECK(headingOffDeg(s, p.start.eulerRad[2] + 0.5 * kPi) < 1.0);
                 CHECK(std::abs(s.altitudeMslM - (p.start.altitudeMslM + climb(p))) < (p.rotor ? 0.5 : 20.0));
                 if (!p.rotor && std::isfinite(p.minCasMs)) CHECK(lows.cas >= 1.1 * p.minCasMs); // (no speed traded below the margin)
+            });
+    }
+    // a speed optimisation (ADR-29 FA-3e, HSA-05): its heading and height held, flown at the performance tables' best
+    // speed at the altitude and weight now - within 5 % of it (FA-3's acceptance)
+    for (const SpeedOptimization o : {SpeedOptimization::MaxEndurance, SpeedOptimization::LongRangeCruise}) {
+        const char* name = o == SpeedOptimization::MaxEndurance ? "max_endurance" : "long_range_cruise";
+        run("fsim.guidance.hsa", 0.0,
+            [&](const Plane& p) {
+                HsaCommand h;
+                h.headingRad = p.start.eulerRad[2], h.speedOptimization = static_cast<double>(o);
+                return w.submit(p.id, h).accepted();
+            },
+            secs(240.0, 90.0), none,
+            [&](const Plane& p, const Lows&) {
+                const auto& s = *w.vehicleState(p.id);
+                const double best = optimalTasMs(&w.profile(p.id)->tables, static_cast<double>(o), s.altitudeMslM, s.fuelKg);
+                // (a rotorcraft's airspeed along its nose, as its loops fly it and its tables have it; a wing's true airspeed)
+                const double flown = p.rotor ? s.airspeedTrueMs * std::cos(s.alphaRad) * std::cos(s.betaRad) : s.airspeedTrueMs;
+                // (the worst: the Crazyflie's best range, 0.84 % short; every wing's within 0.01 %, its height within 1.1 m)
+                INFO(name << ": " << flown << " m/s against " << best);
+                REQUIRE(std::isfinite(best));
+                CHECK(std::abs(flown - best) < std::max(0.05 * best, 0.5)); // (the Crazyflie's best endurance: its hover)
             });
     }
     // three sides of a square, turning right: a wing's legs four of its full-bank turns long (at least 2 km), a rotorcraft's its scale

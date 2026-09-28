@@ -306,7 +306,7 @@ placement as ADR-26's step 5a (`designRotorLaws`):
 | --- | --- | --- |
 | Acceleration | `rotor_allocation` | body rates and the load factor to cyclic, pedals and collective, or to the mixer: rate loops on the identified responses, the hover trims fed forward; the load factor measured from the body's specific force (JSBSim's `Nlf` is aerodynamic only and leaves out the rotor's thrust) |
 | Attitude | `rotor_attitude` | roll and pitch attitude to rates, the heading to a yaw rate (not a bank), the thrust control passed through |
-| Velocity | `rotor_velocity` | a ground velocity - or an airspeed along the heading - to attitude within a tilt limit, the vertical speed to the thrust control, the heading held on its own; the integral's band smooth, not a hard band, which had left a dead zone |
+| Velocity | `rotor_velocity` | a ground velocity - or an airspeed along the heading - to attitude within a tilt limit, the vertical speed to the thrust control, the heading held on its own; the integral's band smooth, not a hard band, which had left a dead zone. Its integral trims the whole tilt forward - the drag of a fast multirotor takes most of it (ADR-29 FA-3e: the Crazyflie's best range needs 22 of its 24 degrees, and had been flown 15 % short on half) - and half sideways, as an orbit needs |
 | Position | `rotor_position` | the distance to go to a ground velocity that brings it to a stop there - what the velocity loop, a lag behind its command, can stop from - the height to a vertical speed, the heading on arrival |
 
 The cascade, the runtime and protection are unchanged: the acceleration

@@ -217,10 +217,11 @@ Command RotorVelocity::update(const ControlContext& ctx, const Command& in) {
         // the acceleration that closes it, and the tilt that makes it (nose down to go forward, bank to go right);
         // the integral trims near the target and slows far from it - through a change of speed it would wind up and
         // overshoot: its gain falls off as band^2 / (band^2 + error^2), band the error the proportional term answers
-        // with a quarter of the tilt
+        // with a quarter of the tilt. Forward it may trim the whole tilt - the drag of a fast multirotor takes most of
+        // it (a Crazyflie's best range, 22 of its 24 degrees: ADR-29 FA-3e); sideways half, as an orbit needs
         const double aMax = kG * std::tan(maxTiltRad);
         const double band = horizontalKp > 0.0 ? 0.25 * aMax / horizontalKp : 1.0, band2 = band * band;
-        sumX_ = std::clamp(sumX_ + horizontalKi * band2 / (band2 + ex * ex) * ex * dt, -0.5 * aMax, 0.5 * aMax);
+        sumX_ = std::clamp(sumX_ + horizontalKi * band2 / (band2 + ex * ex) * ex * dt, -aMax, aMax);
         sumY_ = std::clamp(sumY_ + horizontalKi * band2 / (band2 + ey * ey) * ey * dt, -0.5 * aMax, 0.5 * aMax);
         const double ax = std::clamp(horizontalKp * ex + sumX_, -aMax, aMax);
         const double ay = std::clamp(horizontalKp * ey + sumY_, -aMax, aMax);

@@ -122,13 +122,18 @@ struct HsaCommand {                   // fsim.guidance.hsa
     double speedReference = kHold;    // SpeedReference
     double altitudeM = kHold;
     double altitudeReference = kHold; // AltitudeReference
+    double speedOptimization = kHold; // SpeedOptimization: LongRangeCruise, MaxEndurance (the speed it varies by itself)
 };
 ```
 
 **Partial commands** (the VI's "partial HSA/CSA commands update the most recent commanded values"):
-- **UPDATE:** each field given replaces the commanded one, and the rest stay as commanded. A heading replaces a course and a course a heading. A new reference needs its value: a speed reference given without a speed is `InvalidParameter`, since an UPDATE has no state to take one from.
+- **UPDATE:** each field given replaces the commanded one, and the rest stay as commanded. A heading replaces a course and a course a heading; a speed replaces a speed optimisation and an optimisation a speed. A new reference needs its value: a speed reference given without a speed (or an optimisation) is `InvalidParameter`, since an UPDATE has no state to take one from.
 - **NEW:** fields left out continue the commanded values of a live `hsa` activity the NEW replaces; with none, they are what the vehicle flies now. The aircraft's current heading, its altitude above sea level, and its true airspeed (a wing) or its ground speed (a rotorcraft, so a hovering one stays put). A reference given alone takes the aircraft's own value in it now: a Mach reference alone holds the Mach it flies.
 - The host resolves them, so the slot always holds a complete setpoint and the runtime never guesses. It checks the references are whole numbers within their enums and that one direction is given, wraps the angles, and limits the speed and altitude against the performance (7.1): the speed converted at the commanded altitude through the standard atmosphere, the altitude below the ceiling and, above ground, above it.
+- **Speed optimisation** (A-GRA's SpeedOptimizationEnum; [flight-autonomy.md](flight-autonomy.md), 4.17): the speed the mode varies by itself, the performance tables' best-range speed (`LongRangeCruise`) or best-endurance speed (`MaxEndurance`).
+  - The host resolves it as a speed too: the optimum's true airspeed at the altitude the aircraft flies to, as the command is given. The checks judge that speed.
+  - The mode flies the optimum afresh as the altitude and the weight change, and its progress gives the speed it flies.
+  - An aircraft without performance tables (a stock one) cannot fly one: `NotImplemented`, the field named, as its support table says.
 
 **Laws** (`HsaBehavior`, by the vehicle's features):
 
@@ -188,6 +193,7 @@ struct PatternCommand {                // fsim.guidance.pattern
     double legM = kHold;               // the straight legs; a hold's kHold: 60 s at or below 14,000 ft, 90 s above
     double speed = kHold, speedReference = kHold;
     double durationS = kHold;          // then it completes; kHold: until canceled
+    double speedOptimization = kHold;  // SpeedOptimization, as an hsa's (4.4): a speed replaces it, it a speed
 };
 ```
 
@@ -201,6 +207,7 @@ struct PatternCommand {                // fsim.guidance.pattern
   - legs of a minute's flight, 90 s above 14,000 ft.
 - **Defaults** for the other patterns: here, the altitude and speed the aircraft flies now (a rotorcraft's speed its cruise over the ground), right turns, its track now, and the radius its speed plus the wind and 80 % of its bank give (a rotorcraft's: 80 % of its acceleration, and a turn rate no more than a third of its velocity loop's bandwidth). A racetrack's legs are twice its radius. The host fills them in at NEW, as for an hsa, so the slot holds a complete pattern.
 - **Radius:** a rotorcraft's minimum is 1 m. A wing's is its turn radius at its speed and full bank: a smaller radius is clamped, flagged, or refused under `RangePolicy::Reject` (`PerformanceLimit`, `MaxOrientation`).
+- **Speed optimisation**, as an hsa's (4.4): the pattern is planned at the optimum where it orbits (its radius and legs from that speed), and flown at the optimum at the altitude and weight now.
 - **UPDATE** merges the fields given, as an hsa's does; the pattern they make is flown afresh, and a duration still counts from the NEW.
 - **Duration:** the activity completes when it has passed, and the aircraft flies on in the pattern.
 - **Progress:** the piece flown of the lap's, the laps, and the percent of the lap (or, timed, of the duration) with the time to go.

@@ -130,13 +130,19 @@ enum class SpeedReference : std::uint8_t { TrueAirspeed = 0, CalibratedAirspeed 
 /// simulation's sea level is the WGS-84 ellipsoid (JSBSim's), so Msl and
 /// Ellipsoid are one; AboveGround follows the terrain under the aircraft.
 enum class AltitudeReference : std::uint8_t { Msl = 0, AboveGround = 1, Ellipsoid = 2, Count };
+/// The speed a mode varies by itself (A-GRA's SpeedOptimizationEnum;
+/// docs/flight-autonomy.md, 4.17): the performance tables' best-range speed
+/// (the most distance for the fuel) or best-endurance speed (the most time),
+/// at the altitude and the weight now, flown as a true airspeed.
+enum class SpeedOptimization : std::uint8_t { LongRangeCruise = 0, MaxEndurance = 1, Count };
 
 /// fsim.guidance.hsa (A-GRA's HSA/CSA): hold a heading or a course, a speed
 /// and an altitude, until told otherwise. Each field may be left out (kHold):
 /// a NEW keeps what a live hsa activity it replaces commanded, else what the
 /// aircraft flies now; an UPDATE keeps what was commanded. A reference given
 /// without its value takes the aircraft's own now (a Mach reference alone:
-/// hold the Mach it flies). A heading replaces a course and a course a heading.
+/// hold the Mach it flies). A heading replaces a course and a course a heading;
+/// a speed replaces a speed optimisation and an optimisation a speed.
 /// References are enum values carried as doubles, so kHold can mean "as before".
 struct HsaCommand {
     double headingRad = kHold;        ///< the nose's direction, true north
@@ -145,6 +151,10 @@ struct HsaCommand {
     double speedReference = kHold;    ///< SpeedReference
     double altitudeM = kHold;
     double altitudeReference = kHold; ///< AltitudeReference
+    /// SpeedOptimization: the speed it varies by itself. Resolved, `speed` is
+    /// the optimum's true airspeed at the altitude flown to, as the command
+    /// was given; the mode flies it afresh at the altitude and weight now.
+    double speedOptimization = kHold;
 };
 
 /// How a route passes a waypoint (A-GRA's TurnType).
@@ -258,6 +268,7 @@ struct PatternCommand {
     double speed = kHold;              ///< m/s, or a Mach number
     double speedReference = kHold;     ///< SpeedReference
     double durationS = kHold;          ///< then it completes (and flies on); kHold: until canceled
+    double speedOptimization = kHold;  ///< SpeedOptimization, as an hsa's: a speed replaces it, it a speed
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -365,6 +376,8 @@ inline const char* modeBehavior(const Command& c) noexcept {
 
 /// Read-only view of the world for behaviours that look at other vehicles.
 /// Implemented by the session; states are the previous step's snapshots.
+struct TablesSection; // fsim/VehicleProfile.h
+
 class WorldView {
 public:
     virtual ~WorldView() = default;
@@ -398,6 +411,9 @@ struct ControlContext {
     const EnvelopeLimits* envelope = nullptr;
     /// The vehicle's route, for the behaviour that flies it; null until one was given.
     const PathStore* path = nullptr;
+    /// Its performance tables (the profile's; docs/flight-autonomy.md, 4.13),
+    /// for a mode that flies their best speeds: null without them.
+    const TablesSection* tables = nullptr;
 };
 
 /// One level of the cascade: accepts a command at `level()` and returns a

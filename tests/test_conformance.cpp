@@ -114,6 +114,9 @@ public:
     Maker(session::World& w, std::uint32_t vehicle, std::uint64_t seed) : w_(w), vehicle_(vehicle), rng_(seed) {}
 
     std::uint32_t target = 0; ///< the vehicle a guidance capability that needs one follows
+    /// An hsa's and a pattern's speed optimisation drawn too (ADR-29 FA-3e): in walks of their own, so that
+    /// the others draw what they drew before - and meet the rarer answers they met.
+    bool optimise = false;
     std::vector<Waypoint> waypoints; ///< the last route's, made beside its RouteCommand
     std::vector<BezierSegment> segments; ///< the last curve's, made beside its CurveCommand
     double curveEnd[3] = {0.0, 0.0, 0.0}; ///< where they end, from their reference: an append joins there
@@ -128,7 +131,13 @@ public:
             out = HsaCommand{};
             double* fields[kMaxCommandFields];
             const std::size_t n = std::min(commandFields(out, fields), d.parameters.size());
-            for (std::size_t i = 0; i < n; ++i) *fields[i] = value(d.parameters[i], wild);
+            for (std::size_t i = 0; i < n; ++i) {
+                if (d.parameters[i].name == "speed_optimization") { // left out, or - optimising - a code mostly, else anything
+                    if (optimise && wild) *fields[i] = chance(0.5) ? kHold : chance(0.85) ? static_cast<double>(pick(2)) : value(d.parameters[i], true);
+                    continue;
+                }
+                *fields[i] = value(d.parameters[i], wild);
+            }
             return true;
         }
         if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Pattern) { // left out (the defaults), or about the flight
@@ -146,11 +155,12 @@ public:
                 c.legM = some(uniform(0.0, 4000.0));
                 c.speed = some(s.airspeedTrueMs > 5.0 ? s.airspeedTrueMs * uniform(0.85, 1.15) : uniform(2.0, 8.0));
                 c.durationS = chance(0.7) ? kHold : uniform(2.0, 60.0);
+                if (optimise) c.speedOptimization = chance(0.5) ? kHold : static_cast<double>(pick(2));
                 if (chance(0.1)) { // now and then a field out of its range: refused, or clamped
                     out = c;
                     double* fields[kMaxCommandFields];
                     const std::size_t n = std::min(commandFields(out, fields), d.parameters.size());
-                    const std::size_t i = pick(n);
+                    const std::size_t i = pick(optimise ? n : n - 1); // (the optimisation, last, only where it is drawn)
                     *fields[i] = value(d.parameters[i], true);
                     return true;
                 }
@@ -586,8 +596,10 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             CHECK(done.result.accepted());
             ++seen["new:deferred"];
         }
-        // a policy is refused what the rules refuse it, and nothing else is refused for its authority (6.1, 7.2)
-        const Reason refused = done.options.source == Source::Policy ? done.refused : Reason::None;
+        // a policy is refused what the rules refuse it, and nothing else is refused for its authority (6.1, 7.2) - but
+        // a task command refused as a task (its task unknown, or its activity live) is refused before its command's NEW
+        const bool asTask = done.op == Op::Task && among(done.result.reason, {Reason::UnknownTask, Reason::TaskActive});
+        const Reason refused = done.options.source == Source::Policy && !asTask ? done.refused : Reason::None;
         if (refused != Reason::None) CHECK(done.result.reason == refused);
         else CHECK_FALSE(among(done.result.reason, {Reason::NotGranted, Reason::CollisionAvoidance, Reason::Restricted}));
         if ((done.result.flags & kClamped) != 0) CHECK(done.options.range == RangePolicy::Clamp);
@@ -689,10 +701,16 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             if (r.reason == Reason::TargetLost) CHECK(caps[r.capability].needsTarget);
             if (const ActivityRecord* old = was(id); r.reason == Reason::TimeConstraint && old && old->live()) {
                 // a window it had to meet, missed as it ended: disabled, or waiting, past its end window
-                // (or its critical start's); flying, its critical end's
+                // (or its critical start's) - or started as the operation went and done before its critical
+                // end window opened; flying, its critical end's - or sent back to wait by an activity command
+                // (unassigned, or out-ranked) past its end window
                 if (old->state == ActivityState::Disabled) CHECK(r.endTime >= window.endNotAfter);
-                else if (old->waiting != ActivityWait::None) CHECK((r.endTime >= window.endNotAfter || (window.startCritical() && r.endTime > window.startNotAfter)));
-                else CHECK((window.endCritical() && (r.endTime >= window.endNotAfter || r.endTime < window.endNotBefore)));
+                else if (old->waiting != ActivityWait::None)
+                    CHECK((r.endTime >= window.endNotAfter || (window.startCritical() && r.endTime > window.startNotAfter) ||
+                           (window.endCritical() && r.endTime < window.endNotBefore)));
+                else
+                    CHECK(((window.endCritical() && (r.endTime >= window.endNotAfter || r.endTime < window.endNotBefore)) ||
+                           (done.op == Op::Activity && r.endTime >= window.endNotAfter)));
             } else if (r.reason == Reason::TimeConstraint) {
             } else if (!among(r.reason, {Reason::TargetLost, Reason::BehaviorFailed, Reason::CapabilityLost, Reason::Diverged})) {
                 // else only one that waited, as it would start: what its NEW's checks say from where the aircraft is then
@@ -781,9 +799,10 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
                 CHECK(r.endTime == done.now);
             }
         } else if ((old->waiting != ActivityWait::None || old->state == ActivityState::Disabled ||
-                    (commanded && among(done.command, {ActivityCommand::Unassign, ActivityCommand::Enable}))) &&
+                    (commanded && among(done.command, {ActivityCommand::Unassign, ActivityCommand::Enable, ActivityCommand::Disable}))) &&
                    r.state == ActivityState::Failed && r.endTime == done.now) {
-            // one that waited: failed by a window it could no longer meet, or as it would start (the scheduler's, after any operation)
+            // one that waited: failed by a window it could no longer meet, or as it would start (the scheduler's, after any
+            // operation) - and one an activity command set waiting (unassigned, disabled) past its end window, at once
             ++seen["failed:waiting"];
         } else {
             // completed or failed: something a world step did, and it ended at that step's end
@@ -806,7 +825,10 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         const ActivityRecord& r = it->second;
         const bool flew = old->state == ActivityState::Pending || old->state == ActivityState::Active;
         switch (done.command) {
-        case ActivityCommand::Disable: CHECK(r.state == ActivityState::Disabled); break;
+        case ActivityCommand::Disable: // (past its end window it fails at once: a disabled activity waits, and it can no longer meet it)
+            CHECK((r.state == ActivityState::Disabled ||
+                   (r.state == ActivityState::Failed && r.reason == Reason::TimeConstraint && r.endTime >= r.window.endNotAfter)));
+            break;
         case ActivityCommand::Delete: CHECK(r.state == ActivityState::Deleted); break;
         case ActivityCommand::ChangeRank: if (r.live()) CHECK(r.rank == done.rank); break;
         case ActivityCommand::Enable: CHECK(r.state != ActivityState::Disabled); break;
@@ -885,7 +907,7 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
 /// Now and then it plays the ends chance rarely reaches through the same
 /// rules: a route done at once, and a pursuit whose target goes.
 std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed, int operations, std::map<std::string, int>& seen,
-                                   int leastActivities = 51) {
+                                   int leastActivities = 51, bool optimise = false) {
     session::World w(options(std::string("conformance-") + aircraft.family));
     std::uint32_t target = w.createVehicle(spec("target", aircraft.type, aircraft.altitudeM, aircraft.tasMs, 0.05));
     const auto v = w.createVehicle(spec("subject", aircraft.type, aircraft.altitudeM, aircraft.tasMs));
@@ -893,6 +915,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
     REQUIRE(familyOf(w, v) == aircraft.family);
     Maker make(w, v, seed);
     make.target = target;
+    make.optimise = optimise;
     std::vector<double> transcript;
     std::vector<ActivityId> issued;
     std::uint32_t lastSerial = 0;
@@ -1395,6 +1418,13 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
             INFO(what);
             CHECK(seen[what] > 0);
         }
+        // and a walk that optimises the speed of its hsas and patterns (ADR-29 FA-3e), held to the same rules:
+        // flown where the performance tables are, refused not_implemented on the stock aircraft, which has none
+        std::map<std::string, int> optimised;
+        randomSequence(a, 20260927 + 50, 600, optimised, 0, true);
+        CHECK(optimised["new:done"] > 0);
+        if (std::string(a.family) == "jsbsim.stock") CHECK(optimised["new:not_implemented"] > 0);
+        else CHECK(optimised["new:not_implemented"] == 0);
         for (const auto& [what, n] : seen) all[what] += n;
     }
     // The rarer answers, over every adapter's walks: a follower whose target goes, a route with a point it

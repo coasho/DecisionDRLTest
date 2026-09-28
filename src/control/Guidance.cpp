@@ -4,6 +4,7 @@
 #include "control/Registry.h"
 #include "control/Route.h"
 #include "core/Geodesy.h"
+#include "fsim/VehicleProfile.h"
 
 #include <algorithm>
 #include <cmath>
@@ -108,6 +109,19 @@ double altitudeNow(AltitudeReference reference, const sim::VehicleState& s) noex
     return reference == AltitudeReference::AboveGround ? s.altitudeAglM : s.altitudeMslM;
 }
 
+double optimalTasMs(const TablesSection* tables, double optimization, double altitudeMslM, double fuelKg) noexcept {
+    constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    if (!tables || tables->empty() || isHold(optimization)) return kNone;
+    const TablesSection& t = *tables;
+    // the weight: the fuel on board on the tables' weight with the tanks empty (their heaviest is flown full)
+    double weight = t.weightKg.back();
+    if (t.weightKg.size() > 1 && std::isfinite(t.fuelCapacityKg) && std::isfinite(fuelKg)) weight += fuelKg - t.fuelCapacityKg;
+    const TablesAt at = tablesAt(t, altitudeMslM, weight);
+    if (optimization == static_cast<double>(SpeedOptimization::LongRangeCruise)) return at.bestRangeTasMs;
+    if (optimization == static_cast<double>(SpeedOptimization::MaxEndurance)) return at.bestEnduranceTasMs;
+    return kNone;
+}
+
 // --- HsaBehavior --------------------------------------------------------------------
 
 void HsaBehavior::begin(const ControlContext&, const Command& command) {
@@ -150,8 +164,14 @@ Command HsaBehavior::update(const ControlContext& ctx, const Command& in) {
     const double direction = course ? h->courseRad : orHold(h->headingRad, s.eulerRad[2]);
     const double tn = std::cos(direction), te = std::sin(direction);
     const double windAlong = wind_.northMs * tn + wind_.eastMs * te, windAcross = -wind_.northMs * te + wind_.eastMs * tn;
-    const SpeedReference reference = speedReferenceOf(h->speedReference, hovers ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
-    const double speed = isHold(h->speed) ? speedNow(reference, s) : h->speed;
+    SpeedReference reference = speedReferenceOf(h->speedReference, hovers ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
+    double speed = isHold(h->speed) ? speedNow(reference, s) : h->speed;
+    if (!isHold(h->speedOptimization)) { // the tables' best at the altitude and weight now (where they give none: as resolved)
+        const double best = optimalTasMs(ctx.tables, h->speedOptimization, s.altitudeMslM, s.fuelKg);
+        reference = SpeedReference::TrueAirspeed;
+        speed = std::isfinite(best) ? best : isHold(h->speed) ? s.airspeedTrueMs : h->speed;
+    }
+    speedFlown_ = speed;
 
     if (hovers) {
         if (reference == SpeedReference::GroundSpeed) {
@@ -216,8 +236,9 @@ bool HsaBehavior::progress(ActivityProgress& out) const noexcept {
     out.courseRad = flown_.courseRad;
     out.headingRad = isHold(flown_.courseRad) ? flown_.headingRad : headingFlown_;
     out.altitudeMslM = altitudeMsl_;
-    out.speedMs = flown_.speed;
-    out.speedReference = flown_.speedReference;
+    const bool optimised = !isHold(flown_.speedOptimization); // (the optimum it flies now, a true airspeed)
+    out.speedMs = optimised && !isHold(speedFlown_) ? speedFlown_ : flown_.speed;
+    out.speedReference = optimised ? static_cast<double>(SpeedReference::TrueAirspeed) : flown_.speedReference;
     return true;
 }
 
@@ -477,9 +498,9 @@ namespace {
 
 bool same(const PatternCommand& a, const PatternCommand& b) noexcept {
     const double x[] = {a.pattern, a.latitudeRad, a.longitudeRad, a.altitudeM, a.altitudeReference, a.radiusM,
-                        a.clockwise, a.courseRad, a.legM, a.speed, a.speedReference, a.durationS};
+                        a.clockwise, a.courseRad, a.legM, a.speed, a.speedReference, a.durationS, a.speedOptimization};
     const double y[] = {b.pattern, b.latitudeRad, b.longitudeRad, b.altitudeM, b.altitudeReference, b.radiusM,
-                        b.clockwise, b.courseRad, b.legM, b.speed, b.speedReference, b.durationS};
+                        b.clockwise, b.courseRad, b.legM, b.speed, b.speedReference, b.durationS, b.speedOptimization};
     for (std::size_t i = 0; i < std::size(x); ++i)
         if (!(x[i] == y[i] || (isHold(x[i]) && isHold(y[i])))) return false;
     return true;
@@ -511,6 +532,11 @@ void PatternBehavior::plan(const ControlContext& ctx, const PatternCommand& c) {
     const Performance& perf = ctx.performance ? *ctx.performance : kNone;
     hovers_ = (ctx.features & kFeatureHover) != 0;
     flown_ = resolved_ = c;
+    if (!isHold(c.speedOptimization)) { // planned at the optimum where it flies it, as the host resolves it
+        const double h = isHold(c.altitudeM) ? s.altitudeMslM : altitudeMslOf(c.altitudeM, altitudeReferenceOf(c.altitudeReference), s);
+        const double best = optimalTasMs(ctx.tables, c.speedOptimization, h, s.fuelKg);
+        if (std::isfinite(best)) resolved_.speed = best, resolved_.speedReference = static_cast<double>(SpeedReference::TrueAirspeed);
+    }
     // what it leaves out, as the host fills it in (it has, for a World's vehicle)
     route::completePattern(resolved_, s, perf, hovers_, std::hypot(wind_.northMs, wind_.eastMs));
     route::planPattern(*pattern_, resolved_, s.latitudeRad, s.longitudeRad);
@@ -596,6 +622,11 @@ Command PatternBehavior::update(const ControlContext& ctx, const Command& in) {
     route::Steer steer;
     steer.speed = resolved_.speed;
     steer.reference = speedReferenceOf(resolved_.speedReference, hovers_ ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
+    if (!isHold(resolved_.speedOptimization)) { // the optimum at the altitude and weight now
+        const double best = optimalTasMs(ctx.tables, resolved_.speedOptimization, s.altitudeMslM, s.fuelKg);
+        if (std::isfinite(best)) steer.speed = best, steer.reference = SpeedReference::TrueAirspeed;
+    }
+    speedFlown_ = steer.speed;
     steer.verticalSpeedMs = route::verticalSpeedTo(altitudeMsl_, 0.0, s, perf, hovers_);
     // what comes next: the pattern's next piece, a turn of its radius - and, for a
     // rotorcraft, no faster than the radius allows (and than slows it in time for one)
@@ -643,8 +674,9 @@ bool PatternBehavior::progress(ActivityProgress& out) const noexcept {
     out.courseRad = course_;
     out.headingRad = heading_;
     out.altitudeMslM = altitudeMsl_;
-    out.speedMs = resolved_.speed;
-    out.speedReference = resolved_.speedReference;
+    const bool optimised = !isHold(resolved_.speedOptimization); // (the optimum it flies now, a true airspeed)
+    out.speedMs = optimised && !isHold(speedFlown_) ? speedFlown_ : resolved_.speed;
+    out.speedReference = optimised ? static_cast<double>(SpeedReference::TrueAirspeed) : resolved_.speedReference;
     return true;
 }
 
@@ -844,7 +876,8 @@ void registerGuidanceModes(ControllerRegistry& r) {
                       p("speed", "m/s or Mach", now, 0.0, inf, Constraint::MinAirspeed, Constraint::MaxAirspeed),
                       p("speed_reference", "", now, 0.0, static_cast<double>(SpeedReference::Count) - 1.0),
                       p("altitude_m", "m", now, -inf, inf, Constraint::MinAltitude, Constraint::MaxAltitude),
-                      p("altitude_reference", "", now, 0.0, static_cast<double>(AltitudeReference::Count) - 1.0)};
+                      p("altitude_reference", "", now, 0.0, static_cast<double>(AltitudeReference::Count) - 1.0),
+                      p("speed_optimization", "", now, 0.0, static_cast<double>(SpeedOptimization::Count) - 1.0)};
     hsa.uses = {"fsim.flight.velocity"};
     hsa.mode = FlightMode::HsaCsa;
     hsa.setpoint = SetpointKind::Hsa;
@@ -873,7 +906,8 @@ void registerGuidanceModes(ControllerRegistry& r) {
                           p("leg_m", "m", now, 0.0, inf),
                           p("speed", "m/s or Mach", now, 0.0, inf, Constraint::MinAirspeed, Constraint::MaxAirspeed),
                           p("speed_reference", "", now, 0.0, static_cast<double>(SpeedReference::Count) - 1.0),
-                          p("duration_s", "s", now, 0.0, inf)};
+                          p("duration_s", "s", now, 0.0, inf),
+                          p("speed_optimization", "", now, 0.0, static_cast<double>(SpeedOptimization::Count) - 1.0)};
     pattern.uses = {"fsim.flight.velocity"};
     pattern.mode = FlightMode::Loiter;
     pattern.setpoint = SetpointKind::Pattern;

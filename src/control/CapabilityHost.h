@@ -445,6 +445,17 @@ private:
     /// fields it leaves out from the live hsa it replaces or the state, its
     /// angles wrapped. InvalidParameter (with the field in `detail`) if malformed.
     Reason resolveHsa(HsaCommand& c, const sim::VehicleState& state, CommandResult& detail) const noexcept;
+    /// A speed optimisation the vehicle can fly (docs/flight-autonomy.md,
+    /// 4.17): none asked for, or its performance tables to fly it from -
+    /// without them NotImplemented, the field (`field`) in `detail`.
+    Reason optimisable(double optimization, std::int16_t field, CommandResult& detail) const noexcept;
+    /// A speed optimisation's snapshot, as the command is given: the optimum's
+    /// true airspeed at the altitude it flies to (as it flies, where the
+    /// tables give none), into `speed` and `reference` - what the checks judge
+    /// and a pattern is planned with. The mode flies the optimum afresh as the
+    /// altitude and weight change. Nothing without an optimisation.
+    void optimise(double& speed, double& reference, double optimization, double altitudeM, double altitudeReference,
+                  const sim::VehicleState& state) const noexcept;
     /// An hsa's speed and altitude against the aircraft's performance: each
     /// held to it and logged - clamped (kClamped), or with Reject a
     /// PerformanceLimit finding naming the field and the limit.
