@@ -3,6 +3,7 @@
 #include "control/Atmosphere.h"
 #include "core/Geodesy.h"
 #include "fsim/GuidanceModes.h"
+#include "fsim/Magnetic.h"
 
 #include <algorithm>
 #include <cmath>
@@ -292,14 +293,168 @@ double Pattern::lapM() const noexcept {
     return m;
 }
 
-void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon) noexcept {
+double Pattern::entryM() const noexcept {
+    double m = 0.0;
+    for (std::uint32_t i = 0; i < entryCount; ++i) m += entry[i].lengthM();
+    return m;
+}
+
+double Pattern::toExitM() const noexcept {
+    if (exit < 0) return 0.0;
+    double m = 0.0;
+    for (std::uint32_t i = first; i != static_cast<std::uint32_t>(exit); i = next(i)) m += pieceM(i);
+    return m;
+}
+
+void pointOn(const Pattern::Piece& piece, double m, double& north, double& east, double& courseRad) noexcept {
+    if (piece.arc) {
+        const Turn& t = piece.turn;
+        const double way = t.angleRad >= 0.0 ? 1.0 : -1.0;
+        const double bearing = t.entryBearingRad + way * m / t.radiusM;
+        north = t.centreNorthM + t.radiusM * std::cos(bearing), east = t.centreEastM + t.radiusM * std::sin(bearing);
+        courseRad = geo::wrapPi(bearing + way * 0.5 * kPi);
+    } else {
+        const Line& l = piece.line;
+        north = l.northM + m * std::cos(l.courseRad), east = l.eastM + m * std::sin(l.courseRad);
+        courseRad = l.courseRad;
+    }
+}
+
+namespace {
+
+/// The angle swept from bearing `from` to bearing `to` going round `way` (+1 clockwise): (0, 2 pi], a whole circle
+/// where they meet.
+double sweepOf(double from, double to, double way) noexcept {
+    double a = way * (to - from);
+    a -= 2.0 * kPi * std::floor(a / (2.0 * kPi));
+    return a > 1e-9 ? a : a + 2.0 * kPi;
+}
+
+/// Where (north, east) is nearest the lap: the piece, and how far along it.
+void nearestOnLap(const Pattern& p, double north, double east, std::uint32_t& piece, double& along) noexcept {
+    double best = std::numeric_limits<double>::infinity();
+    piece = 0, along = 0.0;
+    for (std::uint32_t i = 0; i < p.count; ++i) {
+        const Pattern::Piece& q = p.pieces[i];
+        double m;
+        if (q.arc) { // at its bearing from the centre, else the end nearer round
+            const Turn& t = q.turn;
+            const double way = t.angleRad >= 0.0 ? 1.0 : -1.0;
+            double a = way * (std::atan2(east - t.centreEastM, north - t.centreNorthM) - t.entryBearingRad);
+            a -= 2.0 * kPi * std::floor(a / (2.0 * kPi));
+            if (a > q.sweepRad) a = a - q.sweepRad < 2.0 * kPi - a ? q.sweepRad : 0.0;
+            m = a * t.radiusM;
+        } else {
+            const Line& l = q.line;
+            m = std::clamp((north - l.northM) * std::cos(l.courseRad) + (east - l.eastM) * std::sin(l.courseRad), 0.0, l.lengthM);
+        }
+        double n, e, course;
+        pointOn(q, m, n, e, course);
+        if (const double d = std::hypot(north - n, east - e); d < best) best = d, piece = i, along = m;
+    }
+}
+
+/// The lap's piece that begins `m` along piece i: i itself at its start, the next at its end, else the second part
+/// of i cut there (the pieces after it, the first and the exit moved on by one).
+std::uint32_t pieceFrom(Pattern& p, std::uint32_t i, double m) noexcept {
+    if (m <= 1e-6) return i;
+    if (m >= p.pieceM(i) - 1e-6 || p.count >= Pattern::kPieces) return p.next(i);
+    for (std::uint32_t k = p.count; k > i + 1; --k) p.pieces[k] = p.pieces[k - 1];
+    Pattern::Piece& a = p.pieces[i];
+    Pattern::Piece& b = p.pieces[i + 1];
+    b = a;
+    if (a.arc) {
+        const double swept = m / a.turn.radiusM;
+        b.turn.entryBearingRad = geo::wrapPi(a.turn.entryBearingRad + (a.turn.angleRad >= 0.0 ? swept : -swept));
+        b.sweepRad = a.sweepRad - swept;
+        a.sweepRad = swept;
+    } else {
+        b.line.northM = a.line.northM + m * std::cos(a.line.courseRad), b.line.eastM = a.line.eastM + m * std::sin(a.line.courseRad);
+        b.line.lengthM = a.line.lengthM - m;
+        a.line.lengthM = m;
+    }
+    ++p.count;
+    if (p.first > i) ++p.first;
+    if (p.exit > static_cast<std::int32_t>(i)) ++p.exit;
+    return i + 1;
+}
+
+/// A racetrack or a figure-eight by two circles (docs/flight-autonomy.md, 4.23): round the first, the leg out to the
+/// second, round it, the leg back. A racetrack's circles are flown the same way and its legs touch them on the
+/// outside; a figure-eight's second the other way, its legs crossing between them. Circles that overlap (only
+/// without the host's checks) fly as if they touched.
+void planCircles(Pattern& p, const PatternCommand& c, const PatternShape& shape, double side) noexcept {
+    double n2, e2;
+    geo::localNorthEastM(p.lat0, p.lon0, shape.latitude2Rad, shape.longitude2Rad, n2, e2);
+    const double r1 = c.radiusM, r2 = orHold(shape.radius2M, r1);
+    const double d = std::max(std::hypot(n2, e2), 1e-9);
+    const double un = n2 / d, ue = e2 / d; // the axis, from the first centre to the second
+    const double ln = ue, le = -un;        // its left
+    const bool eight = p.kind == PatternKind::FigureEight;
+    const double cosB = std::clamp((eight ? r1 + r2 : r1 - r2) / d, -1.0, 1.0), sinB = std::sqrt(1.0 - cosB * cosB);
+    // from the first centre to where the leg out and the leg back touch it (a right-turning racetrack's leg out
+    // passes left of the axis); the second circle's touch points along them (a figure-eight's: against them)
+    const double outN = un * cosB + side * ln * sinB, outE = ue * cosB + side * le * sinB;
+    const double backN = un * cosB - side * ln * sinB, backE = ue * cosB - side * le * sinB;
+    const double k = eight ? -1.0 : 1.0, way2 = eight ? -side : side;
+    auto arc = [](Pattern::Piece& piece, double cn, double ce, double radius, double way, double from, double to) {
+        piece = Pattern::Piece{};
+        piece.arc = true;
+        piece.turn.radiusM = radius;
+        piece.turn.angleRad = way;
+        piece.turn.centreNorthM = cn, piece.turn.centreEastM = ce;
+        piece.turn.entryBearingRad = from;
+        piece.sweepRad = sweepOf(from, to, way);
+    };
+    auto line = [](Pattern::Piece& piece, double fromN, double fromE, double toN, double toE) {
+        piece = Pattern::Piece{};
+        piece.line = Line{fromN, fromE, std::atan2(toE - fromE, toN - fromN), std::hypot(toN - fromN, toE - fromE)};
+    };
+    arc(p.pieces[0], 0.0, 0.0, r1, side, std::atan2(backE, backN), std::atan2(outE, outN));
+    line(p.pieces[1], r1 * outN, r1 * outE, n2 + k * r2 * outN, e2 + k * r2 * outE);
+    arc(p.pieces[2], n2, e2, r2, way2, std::atan2(k * outE, k * outN), std::atan2(k * backE, k * backN));
+    line(p.pieces[3], n2 + k * r2 * backN, e2 + k * r2 * backE, r1 * backN, r1 * backE);
+    p.count = 4;
+    p.first = 0;
+    p.radiusM = std::min(r1, r2);
+}
+
+/// The course made good on `headingRad` at airspeed `v` in the wind (north, east); at a ground speed `v`
+/// (`overGround`), the course whose air vector lies along the heading.
+double madeGood(double headingRad, double v, bool overGround, double windNorthMs, double windEastMs) noexcept {
+    const double hn = std::cos(headingRad), he = std::sin(headingRad);
+    if (!overGround) return std::atan2(v * he + windEastMs, v * hn + windNorthMs);
+    const double along = windNorthMs * hn + windEastMs * he;
+    const double disc = along * along - (windNorthMs * windNorthMs + windEastMs * windEastMs) + v * v;
+    if (disc < 0.0) return headingRad; // (a wind it cannot make that ground speed in)
+    const double air = -along + std::sqrt(disc);
+    return std::atan2(windEastMs + air * he, windNorthMs + air * hn);
+}
+
+/// The ground speed along `courseRad` at airspeed `v` in the wind, its crosswind held off (a tenth of `v` at least);
+/// at a ground speed `v`, `v`.
+double groundSpeedAlong(double courseRad, double v, bool overGround, double windNorthMs, double windEastMs) noexcept {
+    if (overGround) return v;
+    const double along = windNorthMs * std::cos(courseRad) + windEastMs * std::sin(courseRad);
+    const double cross = -windNorthMs * std::sin(courseRad) + windEastMs * std::cos(courseRad);
+    return std::max(std::sqrt(std::max(v * v - cross * cross, 0.0)) + along, 0.1 * v);
+}
+
+bool magneticOf(const PatternShape& shape) noexcept { return shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth); }
+
+} // namespace
+
+void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon, const PatternShape& shape, double magneticYear) noexcept {
     p.kind = static_cast<PatternKind>(static_cast<int>(orHold(c.pattern, 0.0)));
     p.lat0 = c.latitudeRad, p.lon0 = c.longitudeRad;
     p.radiusM = c.radiusM;
-    p.entry = Line{};
+    p.entryCount = 0;
+    p.exit = -1;
     p.first = 0;
     const double side = orHold(c.clockwise, 1.0) == 0.0 ? -1.0 : 1.0; // +1: right turns, clockwise seen from above
-    const double chi = orHold(c.courseRad, 0.0), r = c.radiusM, leg = orHold(c.legM, 0.0);
+    double chi = orHold(c.courseRad, 0.0);
+    if (magneticOf(shape)) chi = geo::wrapPi(chi + declinationRad(c.latitudeRad, c.longitudeRad, 0.0, magneticYear));
+    const double r = c.radiusM, leg = orHold(c.legM, 0.0);
     const double un = std::cos(chi), ue = std::sin(chi); // along the course
     const double rn = -ue, re = un;                      // its right
     double north, east;
@@ -317,36 +472,69 @@ void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon) no
         piece = Pattern::Piece{};
         piece.line = Line{n, e, course, length};
     };
-    switch (p.kind) {
-    case PatternKind::FigureEight:
-        // two circles meeting at the centre, their centres along the axis: the one
-        // ahead flown the pattern's way round from the centre, then the other the other way
-        p.count = 2;
-        arc(p.pieces[0], r * un, r * ue, side, geo::wrapPi(chi + kPi), 2.0 * kPi);
-        arc(p.pieces[1], -r * un, -r * ue, -side, chi, 2.0 * kPi);
-        break;
-    case PatternKind::Racetrack:
-    case PatternKind::Hold: {
-        // the inbound leg ends at the fix; half a circle to the outbound leg, and back
-        p.count = 4;
-        p.first = 1;
-        line(p.pieces[0], -leg * un, -leg * ue, chi, leg);
-        arc(p.pieces[1], side * r * rn, side * r * re, side, geo::wrapPi(chi - side * 0.5 * kPi), kPi);
-        line(p.pieces[2], 2.0 * side * r * rn, 2.0 * side * r * re, geo::wrapPi(chi + kPi), leg);
-        arc(p.pieces[3], side * r * rn - leg * un, side * r * re - leg * ue, side, geo::wrapPi(chi + side * 0.5 * kPi), kPi);
-        // entered direct to the fix
-        const double d = std::hypot(north, east);
-        if (d > 1.0) p.entry = Line{north, east, std::atan2(-east, -north), d};
-        break;
+    auto enter = [&](double toNorth, double toEast) { // a line from the aircraft
+        const double d = std::hypot(toNorth - north, toEast - east);
+        if (d > 1.0) line(p.entry[0], north, east, std::atan2(toEast - east, toNorth - north), d), p.entryCount = 1;
+    };
+    if (!isHold(shape.latitude2Rad) && !isHold(shape.longitude2Rad) && (p.kind == PatternKind::Racetrack || p.kind == PatternKind::FigureEight)) {
+        planCircles(p, c, shape, side); // joined where it is nearest, as an orbit is
+        std::uint32_t i;
+        double m;
+        nearestOnLap(p, north, east, i, m);
+        p.first = pieceFrom(p, i, m);
+    } else {
+        switch (p.kind) {
+        case PatternKind::FigureEight:
+            // two circles meeting at the centre, their centres along the axis: the one
+            // ahead flown the pattern's way round from the centre, then the other the other way
+            p.count = 2;
+            arc(p.pieces[0], r * un, r * ue, side, geo::wrapPi(chi + kPi), 2.0 * kPi);
+            arc(p.pieces[1], -r * un, -r * ue, -side, chi, 2.0 * kPi);
+            break;
+        case PatternKind::Racetrack:
+        case PatternKind::Hold:
+            // the inbound leg ends at the fix; half a circle to the outbound leg, and back
+            p.count = 4;
+            p.first = 1;
+            line(p.pieces[0], -leg * un, -leg * ue, chi, leg);
+            arc(p.pieces[1], side * r * rn, side * r * re, side, geo::wrapPi(chi - side * 0.5 * kPi), kPi);
+            line(p.pieces[2], 2.0 * side * r * rn, 2.0 * side * r * re, geo::wrapPi(chi + kPi), leg);
+            arc(p.pieces[3], side * r * rn - leg * un, side * r * re - leg * ue, side, geo::wrapPi(chi + side * 0.5 * kPi), kPi);
+            // entered direct to the fix
+            if (const double d = std::hypot(north, east); d > 1.0) line(p.entry[0], north, east, std::atan2(-east, -north), d), p.entryCount = 1;
+            break;
+        default: // an orbit: round the centre, its laps from where the aircraft is
+            p.count = 1;
+            arc(p.pieces[0], 0.0, 0.0, side, std::atan2(east, north), 2.0 * kPi);
+            break;
+        }
     }
-    default: // an orbit: round the centre, its laps from where the aircraft is
-        p.count = 1;
-        arc(p.pieces[0], 0.0, 0.0, side, std::atan2(east, north), 2.0 * kPi);
-        break;
+    if (!isHold(shape.entryLatitudeRad) && !isHold(shape.entryLongitudeRad)) { // joined there, flown to directly
+        double n, e, course;
+        geo::localNorthEastM(p.lat0, p.lon0, shape.entryLatitudeRad, shape.entryLongitudeRad, n, e);
+        std::uint32_t i;
+        double m;
+        nearestOnLap(p, n, e, i, m);
+        p.first = pieceFrom(p, i, m);
+        pointOn(p.pieces[p.first], 0.0, n, e, course);
+        p.entryCount = 0;
+        enter(n, e);
+    }
+    if (!isHold(shape.exitLatitudeRad) && !isHold(shape.exitLongitudeRad)) { // left there, on along its course
+        double n, e, course;
+        geo::localNorthEastM(p.lat0, p.lon0, shape.exitLatitudeRad, shape.exitLongitudeRad, n, e);
+        std::uint32_t i;
+        double m;
+        nearestOnLap(p, n, e, i, m);
+        p.exit = static_cast<std::int32_t>(pieceFrom(p, i, m));
+        pointOn(p.pieces[p.exit], 0.0, n, e, course);
+        p.away = Line{n, e, course, 1e7};
     }
 }
 
-void completePattern(PatternCommand& c, const sim::VehicleState& s, const Performance& f, bool hovers, double windMs, const Altimeter* altimeter) noexcept {
+void completePattern(PatternCommand& c, PatternShape& shape, const sim::VehicleState& s, const Performance& f, bool hovers, double windNorthMs,
+                     double windEastMs, const Altimeter* altimeter, double magneticYear) noexcept {
+    const double windMs = std::hypot(windNorthMs, windEastMs);
     const double groundSpeed = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
     const double track = groundSpeed > 1.0 ? std::atan2(s.velocityNedMs[1], s.velocityNedMs[0]) : s.eulerRad[2];
     if (isHold(c.pattern)) c.pattern = static_cast<double>(PatternKind::Orbit);
@@ -363,19 +551,53 @@ void completePattern(PatternCommand& c, const sim::VehicleState& s, const Perfor
     }
     if (isHold(c.clockwise)) c.clockwise = 1.0;
     const auto kind = static_cast<PatternKind>(static_cast<int>(c.pattern));
-    if (isHold(c.courseRad)) {
-        const double away = geo::distanceM(s.latitudeRad, s.longitudeRad, c.latitudeRad, c.longitudeRad);
-        c.courseRad = kind == PatternKind::Hold && away > 100.0 ? geo::bearingRad(s.latitudeRad, s.longitudeRad, c.latitudeRad, c.longitudeRad) : track;
-    }
-    c.courseRad = geo::wrapPi(c.courseRad);
     // the radius and the legs at the speed planned there (above ground: as high as the aircraft is)
     const double h = c.altitudeReference == static_cast<double>(AltitudeReference::AboveGround) ? s.altitudeMslM
                                                                                                 : altitudeMslOf(c.altitudeM, static_cast<AltitudeReference>(static_cast<int>(c.altitudeReference)), s, altimeter);
     const double v = std::max(plannedSpeed(c.speed, c.speedReference, h), 0.1);
-    const double gusted = v + (hovers && c.speedReference == static_cast<double>(SpeedReference::GroundSpeed) ? 0.0 : windMs);
+    const bool overGround = c.speedReference == static_cast<double>(SpeedReference::GroundSpeed);
+    const double gusted = v + (hovers && overGround ? 0.0 : windMs);
+    const bool circles = !isHold(shape.latitude2Rad) && !isHold(shape.longitude2Rad); // (they give their course and legs)
+    const bool magnetic = magneticOf(shape);
+    const double declination = magnetic ? declinationRad(c.latitudeRad, c.longitudeRad, 0.0, magneticYear) : 0.0;
+    if (!circles) {
+        if (isHold(c.courseRad) && !isHold(shape.headingRad)) // the course it makes good on the heading, in its reference
+            c.courseRad = madeGood(shape.headingRad + declination, v, overGround, windNorthMs, windEastMs) - declination;
+        if (isHold(c.courseRad)) {
+            const double away = geo::distanceM(s.latitudeRad, s.longitudeRad, c.latitudeRad, c.longitudeRad);
+            c.courseRad = kind == PatternKind::Hold && away > 100.0 ? geo::bearingRad(s.latitudeRad, s.longitudeRad, c.latitudeRad, c.longitudeRad) : track;
+            if (magnetic) c.courseRad -= declination;
+        }
+        c.courseRad = geo::wrapPi(c.courseRad);
+    }
+    if (isHold(c.radiusM) && !isHold(shape.bankRad)) c.radiusM = gusted * gusted / (kG * std::tan(shape.bankRad));
     if (isHold(c.radiusM))
         c.radiusM = kind == PatternKind::Hold ? std::max(gusted / (3.0 * kDeg), gusted * gusted / (kG * std::tan(25.0 * kDeg))) : f.turnRadiusM(gusted);
-    if (isHold(c.legM)) c.legM = kind == PatternKind::Hold ? v * (h <= 4267.2 ? 60.0 : 90.0) : kind == PatternKind::Racetrack ? 2.0 * c.radiusM : 0.0;
+    if (circles) {
+        if (isHold(shape.radius2M)) shape.radius2M = c.radiusM;
+    } else {
+        if (isHold(c.legM) && !isHold(shape.legS)) c.legM = groundSpeedAlong(c.courseRad + declination, v, overGround, windNorthMs, windEastMs) * shape.legS;
+        if (isHold(c.legM)) c.legM = kind == PatternKind::Hold ? v * (h <= 4267.2 ? 60.0 : 90.0) : kind == PatternKind::Racetrack ? 2.0 * c.radiusM : 0.0;
+    }
+}
+
+int circlesFault(const PatternCommand& c, const PatternShape& shape) noexcept {
+    if (isHold(shape.latitude2Rad) && isHold(shape.longitude2Rad)) return -1;
+    const auto kind = static_cast<PatternKind>(static_cast<int>(orHold(c.pattern, 0.0)));
+    if (kind != PatternKind::Racetrack && kind != PatternKind::FigureEight) return 18;
+    // (the circles give its course and legs: any there were given)
+    if (!isHold(c.courseRad)) return 7;
+    if (!isHold(c.legM)) return 8;
+    if (!isHold(shape.headingRad)) return 14;
+    if (!isHold(shape.legS)) return 15;
+    const double r1 = c.radiusM, r2 = orHold(shape.radius2M, r1);
+    if (!(r1 >= 1.0)) return 5;
+    if (!(r2 >= 1.0)) return 20;
+    double n2, e2;
+    geo::localNorthEastM(c.latitudeRad, c.longitudeRad, shape.latitude2Rad, shape.longitude2Rad, n2, e2);
+    const double d = std::hypot(n2, e2);
+    if (kind == PatternKind::FigureEight ? !(d >= r1 + r2) : !(d > std::abs(r1 - r2) && d >= 1.0)) return 18;
+    return -1;
 }
 
 CurvePoint evaluate(const BezierSegment& s, double t) noexcept {

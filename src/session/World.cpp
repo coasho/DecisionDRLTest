@@ -397,6 +397,24 @@ control::CommandResult World::submit(std::uint32_t id, const control::RouteComma
     return r;
 }
 
+control::CommandResult World::submit(std::uint32_t id, const control::PatternCommand& pattern, const control::PatternShape& shape,
+                                     const control::CommandOptions& options) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownVehicle;
+        r.commandId = options.commandId;
+        return r;
+    }
+    control::CommandResult r = e->host.submit(pattern, shape, options, pool_->states()[e->slot], simTime_);
+    r.commandId = options.commandId;
+    if (r.accepted()) {
+        e->commanded = r.activity;
+        levelChanged(*e);
+    }
+    return r;
+}
+
 control::CommandResult World::submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
                                      const control::CommandOptions& options) {
     Entry* e = entry(id);
@@ -492,6 +510,7 @@ std::vector<control::CommandResult> World::submitBatch(std::uint32_t id, Span<co
             const control::Command& c = std::get<control::Command>(b.command);
             if (const auto* route = std::get_if<control::RouteCommand>(&c)) out.push_back(submit(id, *route, b.waypoints, b.options));
             else if (const auto* curve = std::get_if<control::CurveCommand>(&c)) out.push_back(submit(id, *curve, b.segments, b.options));
+            else if (const auto* pattern = std::get_if<control::PatternCommand>(&c); pattern && b.shape) out.push_back(submit(id, *pattern, *b.shape, b.options));
             else out.push_back(submit(id, c, b.options));
         }
         if (details) {
@@ -521,6 +540,10 @@ control::CommandResult World::update(control::ActivityId activity, const control
 
 control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments) {
     return update(control::Source::Policy, activity, curve, segments);
+}
+
+control::CommandResult World::update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape) {
+    return update(control::Source::Policy, activity, pattern, shape);
 }
 
 control::CommandResult World::cancel(control::ActivityId activity) { return cancel(control::Source::Policy, activity); }
@@ -563,6 +586,16 @@ control::CommandResult World::update(control::Caller caller, control::ActivityId
     return unknownActivity(activity);
 }
 
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
+                                     const control::PatternShape& shape) {
+    if (Entry* e = entry(control::activityVehicle(activity))) {
+        control::CommandResult r = e->host.update(activity, pattern, shape, pool_->states()[e->slot], caller);
+        echo(e->host, r);
+        return r;
+    }
+    return unknownActivity(activity);
+}
+
 control::CommandResult World::cancel(control::Caller caller, control::ActivityId activity) {
     Entry* e = entry(control::activityVehicle(activity));
     if (!e) return unknownActivity(activity);
@@ -583,11 +616,11 @@ control::CommandResult World::activityCommand(control::Caller caller, control::A
 }
 
 control::Reason World::storeTask(std::uint32_t id, control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints,
-                                 Span<const control::BezierSegment> segments, control::TaskRepetition repetition) {
+                                 Span<const control::BezierSegment> segments, control::TaskRepetition repetition, const control::PatternShape* shape) {
     Entry* e = entry(id);
     if (!e) return control::Reason::UnknownVehicle;
     if (std::holds_alternative<control::BehaviorCommand>(command)) e->catalog->refresh();
-    return e->host.storeTask(task, command, waypoints, segments, repetition);
+    return e->host.storeTask(task, command, waypoints, segments, repetition, shape);
 }
 
 control::CommandResult World::commandTask(std::uint32_t id, control::TaskId task, const control::CommandOptions& options) {

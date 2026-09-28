@@ -20,8 +20,8 @@
 
 namespace fsim::control {
 
-/// The most fields a command struct or a guidance mode's setpoint has (a pattern's 12).
-inline constexpr std::size_t kMaxCommandFields = 16;
+/// The most fields a command struct or a guidance mode's setpoint may have (a pattern's 13 and its shape's 12), with room to grow.
+inline constexpr std::size_t kMaxCommandFields = 40;
 /// The fields of a command struct below Level::Behavior, or of a guidance
 /// mode's setpoint, in declaration order (the C ABI's order too): pointers
 /// into `c`. Returns how many (0 for a BehaviorCommand).

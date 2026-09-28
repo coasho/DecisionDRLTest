@@ -191,27 +191,38 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         return walk.hit;
     }
 
-    if (const auto* c = std::get_if<PatternCommand>(&setpoint)) { // its lap, and a racetrack's or a hold's entry to its fix
+    if (const auto* c = std::get_if<PatternCommand>(&setpoint)) {
+        // its way in, its lap from where it is joined; its way out, where it leaves, for a minute
         route::Pattern p;
-        route::planPattern(p, *c, state.latitudeRad, state.longitudeRad);
+        const PatternShape& shape = patternShape_; // (as prepare() completed it)
+        route::planPattern(p, *c, state.latitudeRad, state.longitudeRad, shape,
+                           shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? yearNow() : 2025.0);
         const bool above = aboveGround(c->altitudeReference);
         const double altitude = barometric(c->altitudeReference) ? barometricMslM(config_->altimeter, c->altitudeM) : c->altitudeM; // (its isobar)
         const double speed = route::plannedSpeed(c->speed, c->speedReference, msl(altitude, above, c->latitudeRad, c->longitudeRad));
         auto level = [&](double) { return altitude; };
-        spacing(p.entry.lengthM + p.lapM());
+        const bool leaves = p.exit >= 0 && (!isHold(c->durationS) || !isHold(shape.orbits));
+        const double awayM = leaves ? std::max(speed, 0.0) * kAheadS : 0.0;
+        spacing(p.entryM() + p.lapM() + awayM);
         auto line = [&](const route::Line& l) {
             return walk.piece(l.lengthM, speed, above, -1, [&](double x, double& lat, double& lon, double& h) {
                 geo::offsetLatLon(p.lat0, p.lon0, l.northM + x * std::cos(l.courseRad), l.eastM + x * std::sin(l.courseRad), lat, lon);
                 h = altitude;
             });
         };
-        if (p.entry.lengthM > 0.0 && line(p.entry)) return walk.hit;
-        for (std::uint32_t k = 0, i = p.first; k < p.count; ++k, i = p.next(i)) {
-            const route::Pattern::Piece& piece = p.pieces[i];
-            if (piece.arc ? walk.arc(p.lat0, p.lon0, piece.turn.centreNorthM, piece.turn.centreEastM, piece.turn.radiusM, piece.turn.entryBearingRad,
-                                     piece.turn.angleRad, piece.turn.radiusM * piece.sweepRad, speed, above, -1, level)
-                          : line(piece.line))
-                return walk.hit;
+        auto fly = [&](const route::Pattern::Piece& piece) {
+            return piece.arc ? walk.arc(p.lat0, p.lon0, piece.turn.centreNorthM, piece.turn.centreEastM, piece.turn.radiusM,
+                                        piece.turn.entryBearingRad, piece.turn.angleRad, piece.turn.radiusM * piece.sweepRad, speed, above, -1, level)
+                             : line(piece.line);
+        };
+        for (std::uint32_t i = 0; i < p.entryCount; ++i)
+            if (fly(p.entry[i])) return walk.hit;
+        for (std::uint32_t k = 0, i = p.first; k < p.count; ++k, i = p.next(i))
+            if (fly(p.pieces[i])) return walk.hit;
+        if (leaves) {
+            route::Line away = p.away;
+            away.lengthM = awayM;
+            if (line(away)) return walk.hit;
         }
         return walk.hit;
     }

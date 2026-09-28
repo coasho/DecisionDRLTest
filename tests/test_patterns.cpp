@@ -318,6 +318,6 @@ TEST_CASE("pattern: a duration completes it; an UPDATE changes only what it give
         CHECK(d->mode == FlightMode::Loiter);
         CHECK(d->setpoint == SetpointKind::Pattern);
         CHECK((d->interactions & kUpdate) != 0);
-        CHECK(d->parameters.size() == 13); // (the speed optimisation last: ADR-29 FA-3e)
+        CHECK(d->parameters.size() == 25); // (the speed optimisation: ADR-29 FA-3e; A-GRA's orbit as its schema gives it: FA-5a)
     }
 }

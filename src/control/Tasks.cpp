@@ -85,7 +85,7 @@ TaskStatus CapabilityHost::statusOf(const Task& t) const noexcept {
 }
 
 Reason CapabilityHost::storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
-                                 TaskRepetition repetition) {
+                                 TaskRepetition repetition, const PatternShape* shape) {
     if (pendingSuggestions_) materialize();
     if (id == 0 || (id & kSuggestedTask)) return Reason::InvalidParameter; // (the platform's own ids)
     if (repetition.attempts == 0 || repetition.attempts > 0xFFFF) return Reason::InvalidParameter;
@@ -106,6 +106,7 @@ Reason CapabilityHost::storeTask(TaskId id, const Command& command, Span<const W
     t->command = command;
     t->waypoints.assign(waypoints.begin(), waypoints.end());
     t->segments.assign(segments.begin(), segments.end());
+    if (shape) t->shape = *shape;
     t->repetition = repetition;
     return Reason::None;
 }
@@ -129,8 +130,9 @@ CommandResult CapabilityHost::commandTask(TaskId id, CommandOptions options, con
     const Command command = t->command;
     const std::vector<Waypoint> waypoints = t->waypoints;
     const std::vector<BezierSegment> segments = t->segments;
+    const PatternShape shape = t->shape;
     const std::uint32_t attempts = t->repetition.attempts;
-    CommandResult r = submitWith(command, waypoints, segments, options, state, now);
+    CommandResult r = submitWith(command, waypoints, segments, options, state, now, true, &shape);
     if (!r.accepted()) return r;
     if (Task* again = findTask(id)) { // (found again: the tasks kept may have moved)
         again->activity = r.activity, again->commandId = options.commandId;
@@ -193,9 +195,10 @@ CapabilityHost::Task& CapabilityHost::newSuggestion(TaskId id) {
     return t;
 }
 
-TaskId CapabilityHost::suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments) {
+TaskId CapabilityHost::suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, const PatternShape* shape) {
     Task& t = newSuggestion(kSuggestedTask | ++suggestionSerial_);
     t.command = setpoint;
+    if (shape && std::holds_alternative<PatternCommand>(setpoint)) t.shape = *shape;
     if (std::holds_alternative<RouteCommand>(setpoint) && routePlan_) t.waypoints.assign(routePlan_->points, routePlan_->points + routePlan_->count); // (as held)
     else t.waypoints.assign(waypoints.begin(), waypoints.end());
     t.segments.assign(segments.begin(), segments.end());
@@ -210,6 +213,7 @@ void CapabilityHost::materialize() {
             t.command = std::move(w.command);
             t.waypoints = w.waypoints;
             t.segments = w.segments;
+            t.shape = w.shape;
             w.used = false, w.suggested = false, w.behavior.reset();
             --waitingCount_, --pendingSuggestions_;
         }

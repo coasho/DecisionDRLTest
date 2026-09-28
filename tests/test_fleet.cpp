@@ -892,6 +892,45 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             // (the worst: a wing 3.6 % of its radius, 7.9 % the Skua's 132 m; a rotorcraft 3.0 %, from its second lap)
             CHECK(least[p.id] < (p.rotor ? std::max(0.5, 0.1 * orbitRadius(p)) : std::max(20.0, 0.05 * orbitRadius(p))));
         });
+    // A-GRA's orbit as its schema gives it (ADR-29 FA-5a: LTR-03, LTR-06, LTR-07): a racetrack by two circles of its
+    // orbit's radius, the first two radii ahead and the second three beyond, once round from where it joins it, and out
+    // at the far end of the second - completed there, a lap counted
+    std::map<std::uint32_t, PositionCommand> exitPoint;
+    std::map<std::uint32_t, double> exitMiss;
+    auto alongHeading = [&](const Plane& p, double m) {
+        const double psi = p.start.eulerRad[2];
+        return pointFrom(p.start, m * std::cos(psi), m * std::sin(psi), p.start.altitudeMslM, 0.0);
+    };
+    run("fsim.guidance.pattern", 0.0,
+        [&](const Plane& p) {
+            const double radius = orbitRadius(p);
+            const PositionCommand a = alongHeading(p, 2.0 * radius), b = alongHeading(p, 5.0 * radius);
+            exitPoint[p.id] = alongHeading(p, 6.0 * radius);
+            exitMiss[p.id] = kInf;
+            PatternCommand c;
+            PatternShape shape;
+            c.pattern = static_cast<double>(PatternKind::Racetrack), c.radiusM = radius, shape.orbits = 1.0;
+            c.latitudeRad = a.latitudeRad, c.longitudeRad = a.longitudeRad, shape.latitude2Rad = b.latitudeRad, shape.longitude2Rad = b.longitudeRad;
+            shape.exitLatitudeRad = exitPoint[p.id].latitudeRad, shape.exitLongitudeRad = exitPoint[p.id].longitudeRad;
+            const CommandResult r = w.submit(p.id, c, shape);
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            return r.accepted();
+        },
+        [&](const Plane& p) { return 24.0 * orbitRadius(p) / std::max(p.cruiseMs, 0.1) + 60.0; },
+        [&](const Plane& p) { // (where it is as it completes: it flies on after)
+            if (exitMiss[p.id] == kInf && !w.activity(activity[p.id])->live()) exitMiss[p.id] = distanceTo(*w.vehicleState(p.id), exitPoint[p.id]);
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            INFO(activityStateName(r.state) << " " << reasonName(r.reason) << ", " << r.progress.laps << " laps, " << exitMiss[p.id] << " m from its exit point");
+            CHECK(r.state == ActivityState::Completed);
+            CHECK(r.progress.laps == 1);
+            // (the worst: a wing 10.0 m, the Gripen's 0.56 % of its radius, 3.6 % the Skua's 132 m; a rotorcraft 0.46 m, the
+            // IRIS's 6.1 % of its 7.5 m)
+            CHECK(exitMiss[p.id] < (p.rotor ? std::max(0.5, 0.1 * orbitRadius(p)) : std::max(20.0, 0.05 * orbitRadius(p))));
+        });
     // a gentle S: a wing's six of its full-bank turns long (at least its scale), a rotorcraft's its scale
     auto curveLength = [&](const Plane& p) { return p.rotor ? p.scale() : std::max(p.scale(), 6.0 * fullBankRadius(p)); };
     run("fsim.guidance.curve", 0.0,

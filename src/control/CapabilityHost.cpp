@@ -501,19 +501,52 @@ Reason CapabilityHost::checkPattern(const PatternCommand& c, bool merge, Command
     return Reason::None;
 }
 
-void CapabilityHost::limitPattern(PatternCommand& c, CheckLog& log) const noexcept {
+Reason CapabilityHost::checkShape(const PatternCommand& c, const PatternShape& s, bool merge, CommandResult& detail) noexcept {
+    auto bad = [&detail](std::int16_t field) {
+        detail.index = field;
+        return Reason::InvalidParameter;
+    };
+    auto code = [](double v, double count) { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); };
+    auto given = [](double v, double lo, bool open) { return isHold(v) || (std::isfinite(v) && (open ? v > lo : v >= lo)); };
+    auto latitude = [](double v) { return isHold(v) || (std::isfinite(v) && std::abs(v) <= 0.5 * 3.14159265358979323846); };
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    if (!code(s.directionReference, static_cast<double>(DirectionReference::Count))) return bad(13);
+    if (!given(s.headingRad, -inf, true)) return bad(14);
+    if (!given(s.legS, 0.0, false)) return bad(15);
+    if (!isHold(s.bankRad) && !(std::isfinite(s.bankRad) && s.bankRad > 0.0 && s.bankRad < 0.5 * 3.14159265358979323846)) return bad(16);
+    if (!isHold(s.orbits) && !(s.orbits == std::floor(s.orbits) && s.orbits >= 0.0 && s.orbits <= 4294967295.0)) return bad(17);
+    if (!latitude(s.latitude2Rad)) return bad(18);
+    if (!given(s.longitude2Rad, -inf, true) || isHold(s.latitude2Rad) != isHold(s.longitude2Rad)) return bad(19);
+    if (!given(s.radius2M, 0.0, true)) return bad(20);
+    if (!latitude(s.entryLatitudeRad)) return bad(21);
+    if (!given(s.entryLongitudeRad, -inf, true) || isHold(s.entryLatitudeRad) != isHold(s.entryLongitudeRad)) return bad(22);
+    if (!latitude(s.exitLatitudeRad)) return bad(23);
+    if (!given(s.exitLongitudeRad, -inf, true) || isHold(s.exitLatitudeRad) != isHold(s.exitLongitudeRad)) return bad(24);
+    if (merge && !isHold(s.directionReference) && isHold(c.courseRad) && isHold(s.headingRad)) return bad(13);
+    return Reason::None;
+}
+
+void CapabilityHost::limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, bool radiusFromBank) const noexcept {
     limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, log, 9, 3);
     // a radius the aircraft can fly at its speed: a wing's at its full bank, a rotorcraft's a metre
     const Performance& f = performance_;
     double least = 1.0;
-    if (!f.hovers && std::isfinite(f.maxBankRad) && f.maxBankRad > 0.0) {
+    const bool banks = !f.hovers && std::isfinite(f.maxBankRad) && f.maxBankRad > 0.0;
+    if (banks) {
         const double h = aboveGround(c.altitudeReference) ? 0.0
                          : c.altitudeReference == static_cast<double>(AltitudeReference::Barometric) ? barometricMslM(config_->altimeter, c.altitudeM)
                                                                                                       : c.altitudeM;
         const double v = route::plannedSpeed(c.speed, c.speedReference, h);
         least = v * v / (9.80665 * std::tan(f.maxBankRad));
     }
-    bound(c.radiusM, least, false, 5, Constraint::MaxOrientation, log);
+    if (radiusFromBank && banks) { // a bank it can fly, and the radius it gives at it (docs/flight-autonomy.md, 4.23)
+        const double given = shape.bankRad;
+        bound(shape.bankRad, f.maxBankRad, true, 16, Constraint::MaxOrientation, log);
+        if (shape.bankRad != given) c.radiusM *= std::tan(given) / std::tan(shape.bankRad);
+    } else {
+        bound(c.radiusM, least, false, 5, Constraint::MaxOrientation, log);
+    }
+    bound(shape.radius2M, least, false, 20, Constraint::MaxOrientation, log);
 }
 
 Reason CapabilityHost::checkCurveOptions(const CurveCommand& c, bool appending, CommandResult& detail) const noexcept {
@@ -938,7 +971,7 @@ Reason CapabilityHost::axesOf(std::size_t index, const Command& command, const C
 }
 
 Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
-                               const sim::VehicleState& state, CheckLog& log) {
+                               const sim::VehicleState& state, CheckLog& log, const PatternShape* shape) {
     const bool checked = log.range != RangePolicy::None;
     CommandResult& detail = log.result;
     auto* hsa = std::get_if<HsaCommand>(&setpoint);
@@ -949,14 +982,15 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
     if (auto* curve = std::get_if<CurveCommand>(&setpoint)) // its segments checked as its range policy says
         if (const Reason why = checkCurve(*curve, segments, false, state, log); why != Reason::None) return why;
     auto* pattern = std::get_if<PatternCommand>(&setpoint);
-    if (pattern) { // complete it first, as an hsa (the runtime flies a complete setpoint)
+    bool radiusFromBank = false;
+    if (pattern) { // complete it first, as an hsa (the runtime flies a complete setpoint) - with its shape, into the scratch
+        patternShape_ = shape ? *shape : PatternShape{};
         if (const Reason why = checkPattern(*pattern, false, detail); why != Reason::None) return why;
+        if (const Reason why = checkShape(*pattern, patternShape_, false, detail); why != Reason::None) return why;
         if (const Reason why = optimisable(pattern->speedOptimization, 12, detail); why != Reason::None) return why;
         optimise(pattern->speed, pattern->speedReference, pattern->speedOptimization, pattern->altitudeM, pattern->altitudeReference, state);
-        WindEstimate wind;
-        wind.update(state, 0.0);
-        route::completePattern(*pattern, state, performance_, (adapter_->features() & kFeatureHover) != 0, std::hypot(wind.northMs, wind.eastMs),
-                               &config_->altimeter);
+        radiusFromBank = isHold(pattern->radiusM) && !isHold(patternShape_.bankRad);
+        completePattern(*pattern, patternShape_, state);
     }
     if (checked)
         if (const Reason why = catalog_->check(index, setpoint, log); why != Reason::None) return why;
@@ -966,7 +1000,12 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
             if (const Reason r = admit(*b, state, performance_, why); r != Reason::None) log.find(r, why.index, why.constraint, why.from, why.to);
         }
     if (hsa && checked) limitHsa(*hsa, log);
-    if (pattern && checked) limitPattern(*pattern, log);
+    if (pattern && checked) limitPattern(*pattern, patternShape_, log, radiusFromBank);
+    if (pattern) // two circles that fit, their radii as limited (docs/flight-autonomy.md, 4.23)
+        if (const int field = route::circlesFault(*pattern, patternShape_); field >= 0) {
+            detail.index = static_cast<std::int16_t>(field);
+            return Reason::InvalidParameter;
+        }
     checkTerrain(setpoint, state, log); // (docs/flight-autonomy.md, 4.19: where it is checked)
     return Reason::None;
 }
@@ -980,6 +1019,7 @@ void CapabilityHost::launch(const Launch& what, const CommandOptions& options, C
     RuntimeConfig& config = *config_;
     if (route) writeRoute(); // (a guidance activity owns every primary axis: one route flies at a time)
     if (auto* c = std::get_if<CurveCommand>(&setpoint)) writeCurve(curve, false), c->append = kHold;
+    if (std::holds_alternative<PatternCommand>(setpoint)) writeShape();
     SetpointSlot& slot = config.slots[s];
     slot.command = std::move(setpoint);
     slot.level = catalog_->descriptor(what.capability).level;
@@ -1070,13 +1110,14 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     Command setpoint = std::move(w.command); // (it flies once: moved, never copied)
     const bool route = std::holds_alternative<RouteCommand>(setpoint);
     if (why == Reason::None) why = prepare(record.capability, setpoint, Span<const Waypoint>(w.waypoints.data(), w.waypoints.size()),
-                                           Span<const BezierSegment>(w.segments.data(), w.segments.size()), state, log);
+                                           Span<const BezierSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape);
     const bool found = why == Reason::None && log.refused != Reason::None; // (refused by what the checks found, not malformed)
     if (why == Reason::None) why = log.refused;
     if (found && w.options.range == RangePolicy::Reject && log.clampable) {
         // what Clamp would fly, suggested in its place (4.11): kept in its entry until a call makes it a task
         w.command = std::move(setpoint);
         if (route && routePlan_) w.waypoints.assign(routePlan_->points, routePlan_->points + routePlan_->count); // (within its room)
+        if (std::holds_alternative<PatternCommand>(w.command)) w.shape = patternShape_;
         w.suggested = true;
         w.suggestion = kSuggestedTask | ++suggestionSerial_;
         ++pendingSuggestions_;
@@ -1173,7 +1214,8 @@ CommandResult CapabilityHost::submit(const CurveCommand& curve, Span<const Bezie
 }
 
 CommandResult CapabilityHost::submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
-                                         const CommandOptions& options, const sim::VehicleState& state, double now, bool mayWait) {
+                                         const CommandOptions& options, const sim::VehicleState& state, double now, bool mayWait,
+                                         const PatternShape* shape) {
     if (pendingSuggestions_) materialize();
     details_.clear();
     const int found = catalog_->indexOf(command);
@@ -1202,12 +1244,12 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     Command setpoint = command;
     CommandResult detail; // what the checks found: kClamped, the first finding's detail
     CheckLog log{detail, options.range, &details_};
-    if (const Reason why = prepare(index, setpoint, waypoints, segments, state, log); why != Reason::None) return about(rejected(why), detail);
+    if (const Reason why = prepare(index, setpoint, waypoints, segments, state, log, shape); why != Reason::None) return about(rejected(why), detail);
     // every finding named: refused with the first (docs/flight-autonomy.md, 4.8) - and, where Clamp
     // would fly what the checks left, a task with it suggested in its place (4.11)
     if (log.refused != Reason::None) {
         if (options.range == RangePolicy::Reject && log.clampable && !options.validateOnly && d.kind != CapabilityKind::Support)
-            details_.suggestion = suggest(setpoint, waypoints, segments);
+            details_.suggestion = suggest(setpoint, waypoints, segments, &patternShape_);
         return about(rejected(log.refused), detail);
     }
     // its endurance (4.18): a flight with an end needs no more than the vehicle has above its reserve - a soft
@@ -1270,6 +1312,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
         w.behavior = std::move(behavior);
         w.waypoints.reserve(PathStore::kWaypoints), w.waypoints.assign(waypoints.begin(), waypoints.end());
         w.segments.reserve(PathStore::kSegments), w.segments.assign(segments.begin(), segments.end());
+        w.shape = shape ? *shape : PatternShape{};
         if (!config_->path) config_->path = std::make_unique<PathStore>();
         if (std::holds_alternative<RouteCommand>(command) && !routePlan_) routePlan_ = std::make_unique<route::Plan>();
         if (std::holds_alternative<CurveCommand>(command) && !curvePlan_) curvePlan_ = std::make_unique<route::Curve>();
@@ -1280,7 +1323,8 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     }
     const auto* route = std::get_if<RouteCommand>(&setpoint);
     const double firstStart = route ? route->start : kHold;
-    if ((route || std::holds_alternative<CurveCommand>(setpoint)) && !config_->path) config_->path = std::make_unique<PathStore>();
+    if ((route || std::holds_alternative<CurveCommand>(setpoint) || std::holds_alternative<PatternCommand>(setpoint)) && !config_->path)
+        config_->path = std::make_unique<PathStore>();
     launch(Launch{nullptr, id, index, axes, flags, firstStart}, options, std::move(setpoint), std::move(behavior), route != nullptr, segments, now);
     schedule(state, now); // (what waits is arbitrated against it)
     return about(accepted(id, flags, true), detail);
@@ -1437,13 +1481,14 @@ CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& cu
     return result;
 }
 
-CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Caller caller) noexcept {
+CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Caller caller,
+                                     const PatternShape* shape) noexcept {
     if (const auto* route = std::get_if<RouteCommand>(&setpoint)) return update(activity, *route, {}, state, caller);
     if (const auto* curve = std::get_if<CurveCommand>(&setpoint)) return update(activity, *curve, {}, state, caller);
     details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) {
-        if (Waiting* w = waitingEntry(activity)) return updateWaiting(*w, setpoint, {}, {}, state, caller);
+        if (Waiting* w = waitingEntry(activity)) return updateWaiting(*w, setpoint, {}, {}, state, caller, shape);
         return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     }
     const auto s = static_cast<std::size_t>(found);
@@ -1491,24 +1536,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
         ++slot.revision;
         return result;
     }
-    if (const auto* next = std::get_if<PatternCommand>(&setpoint)) {
-        // a partial pattern (docs/vehicle-interface.md, 4.6): the fields given replace the commanded ones
-        if (const Reason why = checkPattern(*next, true, result); why != Reason::None) return about(rejected(why, activity), result);
-        if (const Reason why = optimisable(next->speedOptimization, 12, result); why != Reason::None) return about(rejected(why, activity), result);
-        PatternCommand merged = std::get<PatternCommand>(slot.command);
-        mergePattern(merged, *next);
-        merged.courseRad = geo::wrapPi(merged.courseRad), merged.longitudeRad = geo::wrapPi(merged.longitudeRad);
-        optimise(merged.speed, merged.speedReference, merged.speedOptimization, merged.altitudeM, merged.altitudeReference, state);
-        if (slots_[s].range != RangePolicy::None) {
-            limitPattern(merged, log);
-            checkTerrain(Command(merged), state, log);
-            if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
-            if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
-        }
-        std::get<PatternCommand>(slot.command) = merged;
-        ++slot.revision;
-        return result;
-    }
+    if (const auto* next = std::get_if<PatternCommand>(&setpoint)) return updatePattern(s, activity, *next, shape, state, result, log);
     if (slots_[s].range == RangePolicy::None) {
         assignSetpoint(slot.command, setpoint);
     } else {
@@ -1633,6 +1661,7 @@ bool CapabilityHost::retire(std::size_t s, ActivityState state) {
             const PathStore& store = *config_->path;
             w->segments.reserve(PathStore::kSegments), w->segments.assign(store.segments, store.segments + store.segmentCount);
         }
+        w->shape = std::holds_alternative<PatternCommand>(flown) && config_->path ? config_->path->pattern : PatternShape{};
         w->command = std::move(flown);
     }
     if (!std::isnan(r.window.endNotAfter)) --windowed_; // (it no longer flies)
@@ -1704,7 +1733,7 @@ CommandResult CapabilityHost::activityCommand(ActivityId activity, ActivityComma
 }
 
 CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
-                                            const sim::VehicleState& state, Caller caller) noexcept {
+                                            const sim::VehicleState& state, Caller caller, const PatternShape* shape) noexcept {
     const ActivityRecord& record = w.record;
     const ActivityId activity = record.id;
     if (const Reason why = addresses(record, caller); why != Reason::None) return rejected(why, activity, activity);
@@ -1716,6 +1745,7 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     // what it will fly: the fields given replace its command's (a mode's merged, a level's replaced, a route's and a
     // curve's options kept where left out), then checked as its NEW was, from where the aircraft is now
     Command next = w.command;
+    PatternShape nextShape = w.shape;
     Span<const Waypoint> points(w.waypoints.data(), w.waypoints.size());
     Span<const BezierSegment> pieces(w.segments.data(), w.segments.size());
     std::array<BezierSegment, PathStore::kSegments> joined; // (a curve appended to: the two together)
@@ -1766,19 +1796,23 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
         if (!isHold(hsa->directionReference) && isHold(hsa->headingRad) && isHold(hsa->courseRad)) return bad(0);
         mergeHsa(std::get<HsaCommand>(next), *hsa);
     } else if (const auto* pattern = std::get_if<PatternCommand>(&setpoint)) {
+        const PatternShape given = shape ? *shape : PatternShape{};
         if (const Reason why = checkPattern(*pattern, true, result); why != Reason::None) return about(rejected(why, activity), result);
-        mergePattern(std::get<PatternCommand>(next), *pattern);
+        if (const Reason why = checkShape(*pattern, given, true, result); why != Reason::None) return about(rejected(why, activity), result);
+        mergePattern(std::get<PatternCommand>(next), nextShape, *pattern, given);
     } else {
         assignSetpoint(next, setpoint); // a level's: replaced
     }
     CheckLog log{result, w.options.range, &details_};
     Command probe = next; // (fixed-size: a behaviour takes no UPDATE)
-    if (const Reason why = prepare(record.capability, probe, points, pieces, state, log); why != Reason::None) return about(rejected(why, activity), result);
+    if (const Reason why = prepare(record.capability, probe, points, pieces, state, log, &nextShape); why != Reason::None)
+        return about(rejected(why, activity), result);
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
     // kept for its start (room reserved at its NEW)
     if (const auto* route = std::get_if<RouteCommand>(&setpoint); route && !isHold(route->start)) w.firstStart = route->start;
     if (points.data() != w.waypoints.data()) w.waypoints.assign(points.begin(), points.end());
     if (pieces.data() != w.segments.data()) w.segments.assign(pieces.begin(), pieces.end());
+    w.shape = nextShape;
     assignSetpoint(w.command, next);
     return result;
 }

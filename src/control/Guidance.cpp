@@ -524,6 +524,11 @@ bool same(const PatternCommand& a, const PatternCommand& b) noexcept {
     return true;
 }
 
+/// The world's date as a decimal year, for the magnetic model (a stack on its own: the model's epoch).
+double worldYear(const ControlContext& ctx, const sim::VehicleState& s) noexcept {
+    return magneticYear(ctx.world ? ctx.world->environment().epochUtcSeconds + s.simTime : 0.0);
+}
+
 } // namespace
 
 PatternBehavior::PatternBehavior() : pattern_(std::make_unique<route::Pattern>()) {}
@@ -555,15 +560,25 @@ void PatternBehavior::plan(const ControlContext& ctx, const PatternCommand& c) {
         const double best = optimalTasMs(ctx.tables, c.speedOptimization, h, s.fuelKg);
         if (std::isfinite(best)) resolved_.speed = best, resolved_.speedReference = static_cast<double>(SpeedReference::TrueAirspeed);
     }
-    // what it leaves out, as the host fills it in (it has, for a World's vehicle)
-    route::completePattern(resolved_, s, perf, hovers_, std::hypot(wind_.northMs, wind_.eastMs), ctx.altimeter);
-    route::planPattern(*pattern_, resolved_, s.latitudeRad, s.longitudeRad);
+    // its shape (docs/flight-autonomy.md, 4.23), the path store's; what it leaves out, as the host fills it in (it has, for a
+    // World's vehicle)
+    shape_ = ctx.path ? ctx.path->pattern : PatternShape{};
+    pathRevision_ = ctx.path ? ctx.path->revision : 0;
+    const double year = shape_.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? worldYear(ctx, s) : 2025.0;
+    route::completePattern(resolved_, shape_, s, perf, hovers_, wind_.northMs, wind_.eastMs, ctx.altimeter, year);
+    route::planPattern(*pattern_, resolved_, s.latitudeRad, s.longitudeRad, shape_, year);
     planned_ = true;
     laps_ = 0;
     lapDoneM_ = inPieceM_ = 0.0;
-    entering_ = pattern_->entry.lengthM > 0.0;
-    if (!entering_) startPiece(pattern_->first, s);
-    else piece_ = 0;
+    leaving_ = false;
+    entryPiece_ = 0;
+    entering_ = pattern_->entryCount > 0;
+    if (!entering_) {
+        startPiece(pattern_->first, s);
+    } else {
+        piece_ = 0, swept_ = 0.0;
+        if (pattern_->entry[0].arc) startArc(pattern_->entry[0].turn, s);
+    }
 }
 
 void PatternBehavior::startPiece(std::uint32_t i, const sim::VehicleState& s) {
@@ -571,7 +586,11 @@ void PatternBehavior::startPiece(std::uint32_t i, const sim::VehicleState& s) {
     piece_ = i;
     swept_ = 0.0;
     if (!p.pieces[i].arc) return;
-    const route::Turn& t = p.pieces[i].turn;
+    startArc(p.pieces[i].turn, s);
+}
+
+void PatternBehavior::startArc(const route::Turn& t, const sim::VehicleState& s) {
+    const route::Pattern& p = *pattern_;
     double north, east;
     geo::localNorthEastM(p.lat0, p.lon0, s.latitudeRad, s.longitudeRad, north, east);
     lastBearing_ = std::atan2(east - t.centreEastM, north - t.centreNorthM);
@@ -579,19 +598,18 @@ void PatternBehavior::startPiece(std::uint32_t i, const sim::VehicleState& s) {
     swept_ = way * geo::wrapPi(lastBearing_ - t.entryBearingRad); // (a little before its start: negative)
 }
 
+bool PatternBehavior::due(double now) const noexcept {
+    return (!isHold(resolved_.durationS) && startS_ >= 0.0 && now - startS_ >= resolved_.durationS) ||
+           (!isHold(shape_.orbits) && !entering_ && laps_ >= shape_.orbits);
+}
+
 route::Fix PatternBehavior::locate(const sim::VehicleState& s) {
     const route::Pattern& p = *pattern_;
     const double lat = s.latitudeRad, lon = s.longitudeRad;
+    if (leaving_) return route::onLine(p.away, p.lat0, p.lon0, lat, lon);
     for (int passed = 0;; ++passed) {
         const bool more = passed < 4; // (at most so many pieces a control period: the rest at the next)
-        if (entering_) {
-            const route::Fix f = route::onLine(p.entry, p.lat0, p.lon0, lat, lon);
-            if (f.alongM < p.entry.lengthM || !more) return f;
-            entering_ = false;
-            startPiece(p.first, s);
-            continue;
-        }
-        const route::Pattern::Piece& piece = p.pieces[piece_];
+        const route::Pattern::Piece& piece = entering_ ? p.entry[entryPiece_] : p.pieces[piece_];
         route::Fix f;
         if (piece.arc) {
             f = route::onArc(piece.turn, p.lat0, p.lon0, lat, lon);
@@ -604,13 +622,28 @@ route::Fix PatternBehavior::locate(const sim::VehicleState& s) {
             if (swept_ < piece.sweepRad || !more) return f;
         } else {
             f = route::onLine(piece.line, p.lat0, p.lon0, lat, lon);
-            inPieceM_ = f.alongM;
+            if (!entering_) inPieceM_ = f.alongM;
             if (f.alongM < piece.line.lengthM || !more) return f;
+        }
+        if (entering_) { // on to the next piece of the way in, or into the lap
+            if (entryPiece_ + 1 < p.entryCount) {
+                ++entryPiece_;
+                swept_ = 0.0;
+                if (p.entry[entryPiece_].arc) startArc(p.entry[entryPiece_].turn, s);
+                continue;
+            }
+            entering_ = false;
+            startPiece(p.first, s);
+            continue;
         }
         // on to the next piece; a lap flown when the loop begins again
         const std::uint32_t next = p.next(piece_);
         lapDoneM_ += p.pieceM(piece_);
         if (next == p.first) ++laps_, lapDoneM_ = 0.0;
+        if (p.exit >= 0 && next == static_cast<std::uint32_t>(p.exit) && due(s.simTime)) { // its exit point: out along its course
+            leaving_ = finished_ = true;
+            return route::onLine(p.away, p.lat0, p.lon0, lat, lon);
+        }
         startPiece(next, s);
     }
 }
@@ -628,13 +661,13 @@ Command PatternBehavior::update(const ControlContext& ctx, const Command& in) {
         else hold.airspeedMs = s.airspeedTrueMs;
         return hold;
     }
-    if (!planned_ || !same(*c, flown_)) plan(ctx, *c); // (an UPDATE: the pattern it makes, afresh)
+    if (!planned_ || !same(*c, flown_) || (ctx.path && ctx.path->revision != pathRevision_)) plan(ctx, *c); // (an UPDATE: the pattern it makes, afresh)
     if (startS_ < 0.0) startS_ = s.simTime;
-    if (!isHold(resolved_.durationS) && s.simTime - startS_ >= resolved_.durationS) finished_ = true; // (and flies on)
     static const Performance kNone{};
     const Performance& perf = ctx.performance ? *ctx.performance : kNone;
     const route::Pattern& p = *pattern_;
     const route::Fix fix = locate(s);
+    if (p.exit < 0 && due(s.simTime)) finished_ = true; // (and flies on)
     crossTrack_ = fix.crossTrackM;
     altitudeMsl_ = altitudeMslOf(resolved_.altitudeM, altitudeReferenceOf(resolved_.altitudeReference), s, ctx.altimeter);
     route::Steer steer;
@@ -654,18 +687,26 @@ Command PatternBehavior::update(const ControlContext& ctx, const Command& in) {
         return piece.arc ? (piece.turn.angleRad >= 0.0 ? 1.0 : -1.0) / piece.turn.radiusM : 0.0;
     };
     const double turning = route::lateralLimit(perf, p.radiusM);
-    if (entering_) {
-        ahead.toChangeM = p.entry.lengthM - fix.alongM;
-        ahead.curvature = curvatureOf(p.pieces[p.first]);
-        steer.speedLimitMs = route::brakingLimit(perf, turning, ahead.toChangeM);
-    } else if (const route::Pattern::Piece& piece = p.pieces[piece_]; piece.arc) {
-        const route::Pattern::Piece& next = p.pieces[p.next(piece_)];
-        if (&next != &piece) ahead.toChangeM = piece.turn.radiusM * piece.sweepRad - inPieceM_, ahead.curvature = curvatureOf(next);
-        steer.speedLimitMs = turning;
+    if (leaving_) { // straight on
+    } else if (entering_) {
+        const route::Pattern::Piece& piece = p.entry[entryPiece_];
+        const route::Pattern::Piece& next = entryPiece_ + 1 < p.entryCount ? p.entry[entryPiece_ + 1] : p.pieces[p.first];
+        ahead.toChangeM = piece.arc ? piece.lengthM() - inPieceM_ : piece.line.lengthM - fix.alongM;
+        ahead.curvature = curvatureOf(next);
+        steer.speedLimitMs = piece.arc ? turning : route::brakingLimit(perf, turning, ahead.toChangeM);
     } else {
-        ahead.toChangeM = piece.line.lengthM - inPieceM_;
-        ahead.curvature = curvatureOf(p.pieces[p.next(piece_)]);
-        steer.speedLimitMs = route::brakingLimit(perf, turning, ahead.toChangeM);
+        const route::Pattern::Piece& piece = p.pieces[piece_];
+        const std::uint32_t n = p.next(piece_);
+        const bool leaves = p.exit >= 0 && n == static_cast<std::uint32_t>(p.exit) && due(s.simTime); // (then the line out)
+        const double nextCurvature = leaves ? 0.0 : curvatureOf(p.pieces[n]);
+        if (piece.arc) {
+            if (n != piece_ || leaves) ahead.toChangeM = piece.turn.radiusM * piece.sweepRad - inPieceM_, ahead.curvature = nextCurvature;
+            steer.speedLimitMs = turning;
+        } else {
+            ahead.toChangeM = piece.line.lengthM - inPieceM_;
+            ahead.curvature = nextCurvature;
+            steer.speedLimitMs = route::brakingLimit(perf, turning, ahead.toChangeM);
+        }
     }
     return route::follow(ctx, perf, wind_, hovers_, fix, ahead, steer, pattern_->trims, course_, heading_);
 }
@@ -673,21 +714,28 @@ Command PatternBehavior::update(const ControlContext& ctx, const Command& in) {
 bool PatternBehavior::progress(ActivityProgress& out) const noexcept {
     if (!planned_) return false;
     const route::Pattern& p = *pattern_;
-    out.segment = entering_ ? 0 : piece_;
+    out.segment = leaving_ ? p.count : entering_ ? 0 : piece_;
     out.segments = p.count;
     out.laps = laps_;
+    const bool timed = !isHold(resolved_.durationS), counted = !isHold(shape_.orbits);
     if (!entering_) {
         const double piece = p.pieceM(piece_), lap = p.lapM();
         out.segmentPercent = piece > 1e-6 ? std::clamp(100.0 * inPieceM_ / piece, 0.0, 100.0) : 100.0;
-        if (isHold(resolved_.durationS)) out.percent = lap > 1e-6 ? std::clamp(100.0 * (lapDoneM_ + inPieceM_) / lap, 0.0, 100.0) : 100.0;
-    } else if (isHold(resolved_.durationS)) {
+        if (!timed && !counted) out.percent = lap > 1e-6 ? std::clamp(100.0 * (lapDoneM_ + inPieceM_) / lap, 0.0, 100.0) : 100.0;
+        if (!timed && counted) { // through its laps
+            const double left = (shape_.orbits - laps_) * lap - (lapDoneM_ + inPieceM_);
+            out.percent = shape_.orbits > 0.0 && lap > 1e-6 ? std::clamp(100.0 * (1.0 - left / (shape_.orbits * lap)), 0.0, 100.0) : 100.0;
+            out.timeToGoS = std::max(left, 0.0) / std::max(groundSpeed_, 1.0);
+        }
+    } else if (!timed) {
         out.percent = out.segmentPercent = 0.0;
     }
-    if (!isHold(resolved_.durationS) && startS_ >= 0.0) { // timed: through its duration
+    if (timed && startS_ >= 0.0) { // timed: through its duration
         const double elapsed = simTime_ - startS_;
         out.percent = std::clamp(100.0 * elapsed / resolved_.durationS, 0.0, 100.0);
         out.timeToGoS = std::max(resolved_.durationS - elapsed, 0.0);
     }
+    if (leaving_) out.percent = out.segmentPercent = 100.0, out.timeToGoS = 0.0;
     out.crossTrackM = crossTrack_;
     out.courseRad = course_;
     out.headingRad = heading_;
@@ -926,7 +974,19 @@ void registerGuidanceModes(ControllerRegistry& r) {
                           p("speed", "m/s or Mach", now, 0.0, inf, Constraint::MinAirspeed, Constraint::MaxAirspeed),
                           p("speed_reference", "", now, 0.0, static_cast<double>(SpeedReference::Count) - 1.0),
                           p("duration_s", "s", now, 0.0, inf),
-                          p("speed_optimization", "", now, 0.0, static_cast<double>(SpeedOptimization::Count) - 1.0)};
+                          p("speed_optimization", "", now, 0.0, static_cast<double>(SpeedOptimization::Count) - 1.0),
+                          p("direction_reference", "", now, 0.0, static_cast<double>(DirectionReference::Count) - 1.0),
+                          p("heading_rad", "rad", now, -inf, inf),
+                          p("leg_s", "s", now, 0.0, inf),
+                          p("bank_rad", "rad", now, 0.0, 0.5 * 3.14159265358979323846, Constraint::None, Constraint::MaxOrientation),
+                          p("orbits", "", now, 0.0, inf),
+                          p("latitude2_rad", "rad", now, -0.5 * 3.14159265358979323846, 0.5 * 3.14159265358979323846),
+                          p("longitude2_rad", "rad", now, -inf, inf),
+                          p("radius2_m", "m", now, 0.0, inf, Constraint::MaxOrientation, Constraint::None),
+                          p("entry_latitude_rad", "rad", now, -0.5 * 3.14159265358979323846, 0.5 * 3.14159265358979323846),
+                          p("entry_longitude_rad", "rad", now, -inf, inf),
+                          p("exit_latitude_rad", "rad", now, -0.5 * 3.14159265358979323846, 0.5 * 3.14159265358979323846),
+                          p("exit_longitude_rad", "rad", now, -inf, inf)};
     pattern.uses = {"fsim.flight.velocity"};
     pattern.mode = FlightMode::Loiter;
     pattern.setpoint = SetpointKind::Pattern;

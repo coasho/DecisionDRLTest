@@ -558,6 +558,35 @@ An hsa's heading or course may be measured from magnetic north (HSA-03), and the
   - C ABI 1.20: the hsa's eighth field and `fsim_direction_reference`; `fsim_state_data`'s `magnetic_heading_rad` and `declination_rad`; `fsim_magnetic_field`, `fsim_magnetic_field_at`, `fsim_decimal_year`, `fsim_world_magnetic_year`.
   - Python: `fsim.DirectionReference`, `submit_hsa(direction_reference=)`; `fsim.StateData`'s new fields; `fsim.magnetic_field` (`fsim.MagneticField`), `fsim.decimal_year`, `World.magnetic_year`; `fsim.agra.HEADING_REFERENCE`.
 
+### 4.23 A-GRA's orbit as its schema gives it (as FA-5a builds it)
+
+A-GRA's orbit (MA_OrbitType) gives what VI-5's pattern does not: a racetrack or a figure-eight by two circles (LTR-03), a fix-point orbit's inbound heading, legs by time and turns by bank (LTR-05; a hold's leg time, LTR-10, is the same), a number of laps (LTR-06), and where the pattern is joined and left (LTR-07).
+
+- **The shape** (`PatternShape`) goes beside the pattern, as a route's waypoints do, and the path store keeps the shape of the pattern that flies. The setpoint every command is kept in stays the size it was: grown by the shape's twelve fields, it made every command's NEW 4 % slower (section 14).
+  - In the C ABI and Python the pattern's fields and its shape's are one list, the shape's from index 13; a shape field at fault is named by that index.
+- **Another way to give one thing.** Given both, the pattern's own field flies and the shape's stays as it was given; in an UPDATE, either replaces both.
+  - A heading for the course: the course it makes good on that heading, in the wind when the pattern is planned.
+  - A time for the legs: legs as long as the inbound leg is flown in that time, at the pattern's speed in the wind then.
+  - A bank for the radius: the radius at which it banks no more, at its speed plus the wind, as the default radius has it.
+  - A course or heading may be from magnetic north (`directionReference`, as the hsa's in 4.22): turned true by the declination at the pattern's point when it is planned. A magnetic course left out is the course now, from that north.
+- **Two circles**, a racetrack's or a figure-eight's (an orbit or a hold is refused, field 18):
+  - the first round the pattern's point at its radius, the second round its own centre at `radius2M` (the first's if left out);
+  - a racetrack's legs touch both circles on the outside, both flown the pattern's way round; a figure-eight's cross between them, the second circle flown the other way;
+  - the circles give the course and the legs: given with them, a course, heading, legs or leg time is refused, and a second circle given in an UPDATE replaces them;
+  - a racetrack's circles may not lie one within the other, nor a figure-eight's overlap (field 18); a figure-eight's that touch make VI-5's own;
+  - joined at the pattern's nearest point, as an orbit is.
+- **Laps** (`orbits`): the pattern completes after so many, counted where it was joined; with a duration, whichever comes first. Its progress runs through them.
+- **The entry point:** the aircraft flies directly to the pattern's nearest point to it, and its laps are counted from there.
+- **The exit point:** its duration or laps flown, the aircraft goes on round to the pattern's nearest point to it, completes there, and flies on straight along its course there at its altitude and speed. Without a duration or laps it never leaves. The terrain check walks that line for a minute.
+- **Checked** as the pattern's fields are:
+  - the shape's fields whole and in range: a direction reference whole, a bank above 0 and below 90°, laps whole from 0, a point's latitude and longitude together; `InvalidParameter` naming the field;
+  - a bank steeper than the aircraft's full bank is clamped to it, the radius with it, or refused `performance_limit` under Reject; a second radius as the first;
+  - the endurance check (4.18) counts the laps, and the way in and out.
+- **Surfaces.**
+  - C++: `PatternShape`; `World::submit(id, PatternCommand, PatternShape)` and `update(activity, PatternCommand, PatternShape)` (and their `Vehicle` and `Caller` forms), `storeTask(..., shape)`, `BatchCommand::shape`, `Setpoint::shape`; `ControlStack::command(PatternCommand, PatternShape)`; `PathStore::pattern`.
+  - C ABI 1.21: `FSIM_MODE_PATTERN` takes 25 fields (12 and 13 still), and reads back 25.
+  - Python: `submit_pattern` and `Activity.update` take the twelve by name (`fsim.MODE_FIELDS["pattern"]`).
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -764,6 +793,12 @@ Magnetic and barometric references in every mode and in the state; the QNH setti
 ### FA-5: Loiter and curves as the schema defines them (L)
 
 Laps, entry and exit points, legs by time, turns by bank, rate or type, hold contexts and entries, two-circle patterns, the hover loiter with a duration; general NURBS curves with their references, curvature and indices.
+
+**Status:** in progress, in four steps, each measured in section 14:
+- FA-5a, A-GRA's orbit: two circles, the fix-point orbit's heading, leg time and bank, laps, entry and exit points (LTR-03, LTR-05, LTR-06, LTR-07, LTR-10; 4.23), done 2026-09-28 and measured in section 14;
+- FA-5b, the hold: its turns by rate and type, its duration by entry and exit times, its entries and context (LTR-11 to LTR-14);
+- FA-5c, the hover loiter and relative points (LTR-15, LTR-18);
+- FA-5d, curves as the schema gives them: NURBS, references, offsets, curvature and indices, a rotorcraft's circular loiter (CRV-03 to CRV-06, CRV-08, CRV-11).
 
 **Items (17):** CRV-03, CRV-04, CRV-05, CRV-06, CRV-08, CRV-11; LTR-03, LTR-05, LTR-06, LTR-07, LTR-10, LTR-11, LTR-12, LTR-13, LTR-14, LTR-15, LTR-18.
 
@@ -1601,6 +1636,40 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases are within −3.1 % to +2.0 %.
   - World throughput, over 7 rounds on a loaded machine (both builds' F-16C a sixth below the earlier runs'), is 98.4 to 100.0 % of FA-4c's. Protection costs at most 2.5 % (the gate: 97 %).
 - ctest: all 267 tests pass.
+
+**FA-5a, A-GRA's orbit (LTR-03, LTR-05, LTR-06, LTR-07, LTR-10).**
+- **Two circles, per class** (`test_pattern_shapes`), off their geometry computed in the test (each line checked to touch both circles), once joined, over 1.2 laps:
+
+  | | Circles | Apart | Racetrack | Figure-eight |
+  | --- | --- | --- | --- | --- |
+  | c172x, 8 m/s wind | 800 and 1,100 m; 700 and 900 m | 4 km; 3 km | 2.2 m | 4.3 m |
+  | UH-60A, calm | 150 and 250 m; 150 and 200 m | 800 m; 600 m | 9.4 m | 10.6 m |
+  | IRIS, calm | 5 and 8 m; 5 and 5 m | 30 m; 20 m | 0.36 m | 0.30 m |
+
+  - The c172x holds VI-5's bounds (its racetrack 15 m, its figure-eight 21 m, in the same wind) with room.
+  - The UH-60A, whose orbit holds 1.4 m, follows the steps in curvature between circles and legs as it follows a route's turns (9.6 m at VI-4) and a curve (7.4 to 11.9 m at VI-6).
+  - Each flies both lines and turns the ways the pattern does: a racetrack once round and more to the right, a figure-eight more than half a circle each way.
+- **A fix-point orbit** (a c172x in an 8 m/s wind from the west):
+  - by its inbound heading north: the course it makes good, 8.95°, flown at 9.00°, heading 0.08°;
+  - by its legs' time, a minute: 59.9 s each inbound leg;
+  - by its turns' bank, 20°: at most 20.6° flown, 969 m circles;
+  - 2.0 m off its racetrack.
+- **A magnetic course:** a racetrack inbound on magnetic north flies its inbound leg at 13.00° true, where the declination is 12.96°; 1.7 m off it.
+- **Laps, entry and exit points:**
+  - two laps of an 800 m orbit complete at 207 s (a lap 91 s), 50 % through after the first;
+  - an orbit's entry point is passed 1.5 m off before any lap is counted;
+  - a racetrack once round completes 1.1 m from its exit point and flies out along its outbound course (−179.9°, 0.1 m off the line); a minute's orbit completes 2.1 m from its exit point at 65 s and flies out along its course;
+  - an IRIS flies to its entry point (0.03 m), once round, and out at its exit point (0.10 m) on its course (−0.1°).
+- **Semantics:** refusals name the field (an orbit or a hold with a second circle, a course or leg time with two circles, circles inside or over one another, a bank of 0 or 90°, laps of 1.5, a point without its longitude); a bank beyond the c172x's full bank is refused under Reject, or clamped with the radius it gives; in an UPDATE a heading, bank or leg time replaces the course, radius or legs and is filled in again, and the other way round; a direction reference alone is refused.
+- **The fleet** (`test_fleet`): every aircraft flies a racetrack between two circles of its orbit's radius, three radii apart, once round from where it joins it, and completes at its exit point. The worst: a wing 10.0 m from it (the Gripen, 0.56 % of its radius; the Skua 3.6 % of 132 m), a rotorcraft 0.46 m (the IRIS, 6.1 % of 7.5 m).
+- **The shape beside the pattern, measured.** Its fields were first the PatternCommand's own. The Command variant that holds every setpoint grew from 120 to 216 bytes, and every command's NEW was 4 % slower (a level switch +8.1 %, a behaviour's NEW +7.1 %). FA-4d's build with only twelve unused doubles added to its PatternCommand read the same, so the size alone was the cause. Carried beside the pattern, as waypoints are, the setpoint keeps its size.
+- **A bench's reading depends on where it runs.** The same binary read `attitude, pseudo` at 86 ns from the build tree and 77 ns from a directory of its own, run after run. The A/B now runs both builds from directories whose paths are the same length.
+- **Digests:** identical to FA-4d's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-4d (ceaec64), built in the scratch worktree, both run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 3 of `world`.
+  - The micro cases are within −1.3 % to +1.1 %; the `pattern` case +1.1 % (2 ns: the path store's revision compared each update, and the ways in and out).
+  - The command cases are within −2.9 % to +1.2 %.
+  - World throughput is 100.7 to 101.5 % of FA-4d's; protection costs nothing measurable (the gate: 97 %).
+- ctest: all 271 tests pass.
 
 ## Appendix A: the inventory
 

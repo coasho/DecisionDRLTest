@@ -213,6 +213,7 @@ struct PatternCommand {                // fsim.guidance.pattern
 - **Speed optimisation**, as an hsa's (4.4): the pattern is planned at the optimum where it orbits (its radius and legs from that speed), and flown at the optimum at the altitude and weight now.
 - **UPDATE** merges the fields given, as an hsa's does; the pattern they make is flown afresh, and a duration still counts from the NEW.
 - **Duration:** the activity completes when it has passed, and the aircraft flies on in the pattern.
+- **A-GRA's orbit as its schema gives it** - two circles, an inbound heading, legs by time, turns by bank, laps, entry and exit points - goes beside the pattern in a `PatternShape` (ADR-29, [flight-autonomy.md](flight-autonomy.md) 4.23).
 - **Progress:** the piece flown of the lap's, the laps, and the percent of the lap (or, timed, of the duration) with the time to go.
 - **Flown** by the path follower (4.8), its pieces arcs and straights in the plane at the pattern's point.
 

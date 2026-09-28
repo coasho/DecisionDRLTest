@@ -89,6 +89,7 @@ struct Plan;
 struct Pattern;
 struct Curve;
 struct Fix;
+struct Turn;
 } // namespace route
 
 /// "route": fsim.guidance.route, A-GRA's waypoint following
@@ -162,10 +163,14 @@ private:
 /// 4.6). Flies a complete PatternCommand (the host fills in what it leaves
 /// out): an orbit round its centre, a racetrack or a hold - two half circles
 /// joined by legs, the inbound one ending at the fix, entered direct to the fix -
-/// or a figure-eight, two circles meeting at the centre. The route's path
-/// follower flies it (RouteBehavior). Its laps are counted; with a duration it
-/// completes when that has passed, and flies on. A merged UPDATE flies the
-/// pattern it makes afresh, the duration still counted from the start.
+/// or a figure-eight, two circles meeting at the centre - or one of A-GRA's
+/// shapes (docs/flight-autonomy.md, 4.23): two circles, an entry point flown
+/// to, an exit point left from. The route's path follower flies it
+/// (RouteBehavior). Its laps are counted from where it was joined; with a
+/// duration or a number of laps it completes when the first has passed, and
+/// flies on - round the pattern, or, given an exit point, on round to it and
+/// out along its course there. A merged UPDATE flies the pattern it makes
+/// afresh, the duration still counted from the start.
 class FSIM_API PatternBehavior final : public Behavior {
 public:
     PatternBehavior();
@@ -183,17 +188,24 @@ public:
 private:
     /// Plan the pattern `c` from where the aircraft is.
     void plan(const ControlContext& ctx, const PatternCommand& c);
-    /// Fly piece `i` from here: an arc's sweep counted from where the aircraft is round it.
+    /// Fly lap piece `i` from here: an arc's sweep counted from where the aircraft is round it.
     void startPiece(std::uint32_t i, const sim::VehicleState& s);
+    /// Round an arc from here: its sweep counted from where the aircraft is (a little before its start: negative).
+    void startArc(const route::Turn& turn, const sim::VehicleState& s);
     /// Where the aircraft is on the pattern, passing the pieces it has finished.
     route::Fix locate(const sim::VehicleState& s);
+    /// Its duration or its laps are flown.
+    bool due(double now) const noexcept;
 
     std::unique_ptr<route::Pattern> pattern_; ///< allocated with the behaviour
     WindEstimate wind_;
     PatternCommand flown_{};         ///< the setpoint it was planned from
     PatternCommand resolved_{};      ///< the same, complete
+    PatternShape shape_{};           ///< its shape, the path store's when it was planned (completed)
+    std::uint32_t pathRevision_ = 0; ///< the path store's revision then: a new shape is planned afresh
     bool planned_ = false, hovers_ = false, entering_ = false, finished_ = false;
-    std::uint32_t piece_ = 0, laps_ = 0;
+    bool leaving_ = false;           ///< past its exit point, out along its course there
+    std::uint32_t piece_ = 0, laps_ = 0, entryPiece_ = 0;
     double swept_ = 0.0, lastBearing_ = 0.0; ///< round the arc flown
     double startS_ = -1.0;           ///< when it began (a duration counts from it)
     double lapDoneM_ = 0.0, inPieceM_ = 0.0;

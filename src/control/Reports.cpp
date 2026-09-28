@@ -24,6 +24,7 @@ bool is(double code, E value) noexcept {
 
 bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     out.waypoints.clear(), out.segments.clear();
+    out.shape = PatternShape{};
     if (const int found = liveSlot(activity); found >= 0) {
         const auto s = static_cast<std::size_t>(found);
         if (!isCascade(s)) {
@@ -35,6 +36,7 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
         if (const PathStore* store = config_->path.get()) { // (one route or curve flies at a time: the store's)
             if (std::holds_alternative<RouteCommand>(flown)) out.waypoints.assign(store->waypoints, store->waypoints + store->count);
             if (std::holds_alternative<CurveCommand>(flown)) out.segments.assign(store->segments, store->segments + store->segmentCount);
+            if (std::holds_alternative<PatternCommand>(flown)) out.shape = store->pattern;
         }
         return true;
     }
@@ -42,7 +44,7 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     if (!w) return false;
     if (w->support) out.command = w->supportCommand;
     else out.command = w->command;
-    out.waypoints = w->waypoints, out.segments = w->segments;
+    out.waypoints = w->waypoints, out.segments = w->segments, out.shape = w->shape;
     return true;
 }
 

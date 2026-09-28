@@ -119,6 +119,7 @@ public:
     bool optimise = false;
     std::vector<Waypoint> waypoints; ///< the last route's, made beside its RouteCommand
     std::vector<BezierSegment> segments; ///< the last curve's, made beside its CurveCommand
+    PatternShape shape;                  ///< the last pattern's, made beside its PatternCommand (in the walks of their own)
     double curveEnd[3] = {0.0, 0.0, 0.0}; ///< where they end, from their reference: an append joins there
 
     double uniform(double lo, double hi) { return std::uniform_real_distribution<double>(lo, hi)(rng_); }
@@ -144,6 +145,7 @@ public:
         }
         if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Pattern) { // left out (the defaults), or about the flight
             PatternCommand c;
+            shape = PatternShape{};
             if (wild) {
                 const auto& s = state();
                 auto some = [&](double v) { return chance(0.5) ? kHold : v; };
@@ -157,7 +159,27 @@ public:
                 c.legM = some(uniform(0.0, 4000.0));
                 c.speed = some(s.airspeedTrueMs > 5.0 ? s.airspeedTrueMs * uniform(0.85, 1.15) : uniform(2.0, 8.0));
                 c.durationS = chance(0.7) ? kHold : uniform(2.0, 60.0);
-                if (optimise) c.speedOptimization = chance(0.5) ? kHold : static_cast<double>(pick(2));
+                if (optimise) {
+                    c.speedOptimization = chance(0.5) ? kHold : static_cast<double>(pick(2));
+                    // its shape, A-GRA's orbit as its schema gives it (ADR-29 FA-5): now and then each other way to give it
+                    if (chance(0.2)) shape.directionReference = static_cast<double>(pick(2));
+                    if (chance(0.2)) shape.headingRad = uniform(-3.0, 3.0);
+                    if (chance(0.2)) shape.legS = uniform(10.0, 90.0);
+                    if (chance(0.2)) shape.bankRad = uniform(0.1, 0.8);
+                    if (chance(0.2)) shape.orbits = static_cast<double>(pick(3));
+                    if (chance(0.15)) {
+                        shape.latitude2Rad = s.latitudeRad + uniform(-0.003, 0.003), shape.longitude2Rad = s.longitudeRad + uniform(-0.003, 0.003);
+                        shape.radius2M = some(uniform(1.0, 3000.0));
+                    }
+                    if (chance(0.15)) shape.entryLatitudeRad = s.latitudeRad + uniform(-0.002, 0.002), shape.entryLongitudeRad = s.longitudeRad + uniform(-0.002, 0.002);
+                    if (chance(0.15)) shape.exitLatitudeRad = s.latitudeRad + uniform(-0.002, 0.002), shape.exitLongitudeRad = s.longitudeRad + uniform(-0.002, 0.002);
+                    if (chance(0.05)) { // one out of its range
+                        double* fields[PatternShape::kFields];
+                        shape.fields(fields);
+                        const std::size_t i = pick(PatternShape::kFields);
+                        *fields[i] = value(d.parameters[13 + i], true);
+                    }
+                }
                 if (chance(0.1)) { // now and then a field out of its range: refused, or clamped
                     out = c;
                     double* fields[kMaxCommandFields];
@@ -364,10 +386,12 @@ private:
     std::mt19937_64 rng_;
 };
 
-/// NEW of what the maker made: a route with the waypoints it made beside it, a curve with its segments.
+/// NEW of what the maker made: a route with the waypoints it made beside it, a curve with its segments, a pattern with
+/// its shape (where it made one).
 CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, const Maker& make, const CommandOptions& options = {}) {
     if (const auto* route = std::get_if<RouteCommand>(&c)) return w.submit(v, *route, make.waypoints, options);
     if (const auto* curve = std::get_if<CurveCommand>(&c)) return w.submit(v, *curve, make.segments, options);
+    if (const auto* pattern = std::get_if<PatternCommand>(&c); pattern && !make.shape.empty()) return w.submit(v, *pattern, make.shape, options);
     return w.submit(v, c, options);
 }
 
@@ -375,6 +399,7 @@ CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, c
 CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Caller caller = {}) {
     if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints) return w.update(caller, activity, *route, make.waypoints);
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints) return w.update(caller, activity, *curve, make.segments);
+    if (const auto* pattern = std::get_if<PatternCommand>(&c); pattern && !make.shape.empty()) return w.update(caller, activity, *pattern, make.shape);
     return w.update(caller, activity, c);
 }
 
@@ -1117,7 +1142,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 Span<const BezierSegment> pieces;
                 if (std::holds_alternative<RouteCommand>(command)) points = make.waypoints;
                 if (std::holds_alternative<CurveCommand>(command)) pieces = make.segments;
-                const Reason r = w.storeTask(v, id, command, points, pieces, repetition);
+                const PatternShape* shape = std::holds_alternative<PatternCommand>(command) && !make.shape.empty() ? &make.shape : nullptr;
+                const Reason r = w.storeTask(v, id, command, points, pieces, repetition, shape);
                 CHECK(among(r, {Reason::None, Reason::TaskActive, Reason::NotSupported, Reason::NotImplemented, Reason::UnknownCapability}));
                 ++seen[std::string("task:store:") + reasonName(r)];
                 if (r == Reason::None) taskCapability[id] = c;
@@ -1434,6 +1460,7 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
         }
         // and a walk that optimises the speed of its hsas and patterns (ADR-29 FA-3e), held to the same rules:
         // flown where the performance tables are, refused not_implemented on the stock aircraft, which has none
+        // (its patterns given A-GRA's other ways too: FA-5)
         std::map<std::string, int> optimised;
         randomSequence(a, 20260927 + 50, 600, optimised, 0, true);
         CHECK(optimised["new:done"] > 0);

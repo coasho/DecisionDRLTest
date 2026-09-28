@@ -25,7 +25,7 @@
 #include <math.h>
 
 /* the most values a command's row has: a pattern's 12 fields (fsim_mode_field_count) */
-#define FSIM_PY_VALUES 16
+#define FSIM_PY_VALUES 40
 
 static PyObject* Error;            /* fsim.Error */
 static PyTypeObject* BufferType;

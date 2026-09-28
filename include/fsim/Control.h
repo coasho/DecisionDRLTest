@@ -235,20 +235,6 @@ struct CurveCommand {
     double append = kHold;             ///< in an UPDATE, 1: its segments after the curve's end, from the same reference
 };
 
-/// Where a vehicle's route or curve lives while it is flown
-/// (docs/vehicle-interface.md, 4.2): allocated at its first and kept, written
-/// by the host between steps, read by the mode's behaviour during them
-/// (ControlContext::path).
-struct PathStore {
-    static constexpr std::size_t kWaypoints = 256;
-    static constexpr std::size_t kSegments = 32;
-    std::uint32_t revision = 0; ///< bumped on every write
-    std::uint32_t count = 0;    ///< waypoints
-    Waypoint waypoints[kWaypoints];
-    std::uint32_t curve = 0;    ///< bumped when a curve is replaced (not appended to): it is flown afresh
-    std::uint32_t segmentCount = 0;
-    BezierSegment segments[kSegments];
-};
 
 /// A loiter pattern (A-GRA's LOITER).
 enum class PatternKind : std::uint8_t {
@@ -267,19 +253,95 @@ enum class PatternKind : std::uint8_t {
 /// tracks now (a hold's: to its fix), the radius its speed, the wind and 80 %
 /// of its bank give (a hold's: rate one, at most 25 degrees of bank), legs of
 /// twice the radius (a hold's: a minute's flight, 90 s above 14,000 ft).
+/// A-GRA's other ways to give a pattern go beside it, in a PatternShape.
 struct PatternCommand {
     double pattern = kHold;            ///< PatternKind
-    double latitudeRad = kHold, longitudeRad = kHold; ///< the centre, or a racetrack's or a hold's fix
+    double latitudeRad = kHold, longitudeRad = kHold; ///< the centre, a racetrack's or a hold's fix, or the first of two circles' centre
     double altitudeM = kHold;
     double altitudeReference = kHold;  ///< AltitudeReference
     double radiusM = kHold;            ///< at least the turn radius at the aircraft's speed and full bank; a rotorcraft's a metre
-    double clockwise = kHold;          ///< 1 right turns, 0 left
+    double clockwise = kHold;          ///< 1 right turns, 0 left (two circles': round the first)
     double courseRad = kHold;          ///< a racetrack's or a hold's inbound course, a figure-eight's axis
     double legM = kHold;               ///< a racetrack's or a hold's straight legs
     double speed = kHold;              ///< m/s, or a Mach number
     double speedReference = kHold;     ///< SpeedReference
     double durationS = kHold;          ///< then it completes (and flies on); kHold: until canceled
     double speedOptimization = kHold;  ///< SpeedOptimization, as an hsa's: a speed replaces it, it a speed
+};
+
+/// A pattern as A-GRA's schema gives it beyond its PatternCommand
+/// (docs/flight-autonomy.md, 4.23): beside it, as a route's waypoints are
+/// (World::submit and update take it; the path store keeps the shape of the
+/// pattern that flies), so that the setpoint every command is kept in stays
+/// the size it was. Its fields follow the PatternCommand's in the C ABI's and
+/// Python's one list (index 13 on). A field left out (kHold) is not used in a
+/// NEW and keeps what was commanded in an UPDATE. Some give a PatternCommand
+/// field another way: a heading for the course, a time for the legs, a bank
+/// for the radius. Given both, the PatternCommand's flies (the host fills it
+/// in from the shape's, which stays as it was given); in an UPDATE, either
+/// replaces the other, and a second circle replaces the course and the legs.
+struct PatternShape {
+    /// DirectionReference of the course or the heading: magnetic, turned to
+    /// true by the declination at the pattern's point when it is planned.
+    double directionReference = kHold;
+    /// Or the inbound heading: the course it makes good on that heading, in
+    /// the wind when the pattern is planned.
+    double headingRad = kHold;
+    /// Or the legs by time: as long as the inbound leg is flown in so long,
+    /// at the pattern's speed in the wind when it is planned.
+    double legS = kHold;
+    /// Or the turns by bank: the radius at which it banks no more, the wind
+    /// with it (as the default radius has it).
+    double bankRad = kHold;
+    /// Laps: then it completes (and flies on); with a duration, the first
+    /// reached. A lap is counted where the pattern was joined.
+    double orbits = kHold;
+    /// A racetrack or a figure-eight by two circles (A-GRA's): the second's
+    /// centre and radius (kHold: the first's). A racetrack's straight legs
+    /// are the lines touching both circles on the outside, a figure-eight's
+    /// those crossing between them; the pattern's course and legs are the circles'.
+    double latitude2Rad = kHold, longitude2Rad = kHold;
+    double radius2M = kHold;
+    /// Where it joins the pattern (A-GRA's EntryPoint): flown to directly,
+    /// the pattern's nearest point to it, and on round from there.
+    double entryLatitudeRad = kHold, entryLongitudeRad = kHold;
+    /// Where it leaves (A-GRA's ExitPoint): its duration or laps flown, it
+    /// goes on round to the pattern's nearest point to it, completes there
+    /// and flies on along its course.
+    double exitLatitudeRad = kHold, exitLongitudeRad = kHold;
+
+    /// Its fields in order (the C ABI's and Python's, after the PatternCommand's): pointers into it.
+    static constexpr std::size_t kFields = 12;
+    void fields(double* f[kFields]) noexcept {
+        f[0] = &directionReference, f[1] = &headingRad, f[2] = &legS, f[3] = &bankRad, f[4] = &orbits, f[5] = &latitude2Rad;
+        f[6] = &longitude2Rad, f[7] = &radius2M, f[8] = &entryLatitudeRad, f[9] = &entryLongitudeRad, f[10] = &exitLatitudeRad;
+        f[11] = &exitLongitudeRad;
+    }
+    /// Every field left out: the pattern as its PatternCommand alone gives it.
+    bool empty() const noexcept {
+        const double v[kFields] = {directionReference, headingRad, legS, bankRad, orbits, latitude2Rad, longitude2Rad, radius2M,
+                                   entryLatitudeRad, entryLongitudeRad, exitLatitudeRad, exitLongitudeRad};
+        for (const double x : v)
+            if (!isHold(x)) return false;
+        return true;
+    }
+    bool twoCircles() const noexcept { return !isHold(latitude2Rad) || !isHold(longitude2Rad); }
+};
+
+/// Where a vehicle's route, curve or pattern shape lives while it is flown
+/// (docs/vehicle-interface.md, 4.2): allocated at its first and kept, written
+/// by the host between steps, read by the mode's behaviour during them
+/// (ControlContext::path).
+struct PathStore {
+    static constexpr std::size_t kWaypoints = 256;
+    static constexpr std::size_t kSegments = 32;
+    std::uint32_t revision = 0; ///< bumped on every write
+    std::uint32_t count = 0;    ///< waypoints
+    Waypoint waypoints[kWaypoints];
+    std::uint32_t curve = 0;    ///< bumped when a curve is replaced (not appended to): it is flown afresh
+    std::uint32_t segmentCount = 0;
+    BezierSegment segments[kSegments];
+    PatternShape pattern;       ///< the shape of the pattern that flies (empty: its PatternCommand alone)
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -344,6 +406,7 @@ struct BatchCommand {
     Span<const Waypoint> waypoints;     ///< a RouteCommand's
     Span<const BezierSegment> segments; ///< a CurveCommand's
     CommandOptions options;
+    const PatternShape* shape = nullptr; ///< a PatternCommand's (null: none)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight
@@ -355,6 +418,7 @@ struct Setpoint {
     std::variant<Command, SupportCommand> command;
     std::vector<Waypoint> waypoints;
     std::vector<BezierSegment> segments;
+    PatternShape shape; ///< a pattern's, as it flies (docs/flight-autonomy.md, 4.23)
 };
 
 /// Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType;

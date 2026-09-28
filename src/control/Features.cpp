@@ -142,23 +142,22 @@ const FeatureDef kFeatures[] = {
 
     // --- loiter -----------------------------------------------------------------------------------------
     CAP("fsim.guidance.pattern", P, 5, 0,
-        "two-circle patterns, fix-point options, orbit counts, entry and exit points, hold leg times, turn rates and types, "
-        "hold durations and entries, hold contexts, the hover loiter and relative points (FA-5); the barometric altitude (FA-4)"), // LTR-09
+        "turn rates and types, hold durations by entry and exit times, hold entries and contexts, the hover loiter and relative "
+        "points (FA-5)"), // LTR-09
     {"fsim.guidance.pattern/orbit", "fsim.guidance.pattern", S, 0, 0, ""},                   // LTR-01
     {"fsim.guidance.pattern/racetrack", "fsim.guidance.pattern", S, 0, 0, ""},               // LTR-02
     {"fsim.guidance.pattern/figure_eight", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-04
-    {"fsim.guidance.pattern/two_circles", "fsim.guidance.pattern", N, 5, 0, ""},             // LTR-03
-    {"fsim.guidance.pattern/fix_point", "fsim.guidance.pattern", P, 5, 0,
-     "an inbound heading, a leg by duration, a turn by bank angle; the inbound course, leg distance and radius work"}, // LTR-05
+    {"fsim.guidance.pattern/two_circles", "fsim.guidance.pattern", S, 0, 0, ""},             // LTR-03 (FA-5a)
+    {"fsim.guidance.pattern/fix_point", "fsim.guidance.pattern", S, 0, 0, ""},               // LTR-05 (FA-5a)
     {"fsim.guidance.pattern/duration/time", "fsim.guidance.pattern", S, 0, 0, ""},           // LTR-06
-    {"fsim.guidance.pattern/duration/orbits", "fsim.guidance.pattern", N, 5, 0, ""},
-    {"fsim.guidance.pattern/entry_point", "fsim.guidance.pattern", N, 5, 0, ""},             // LTR-07
-    {"fsim.guidance.pattern/exit_point", "fsim.guidance.pattern", N, 5, 0, ""},
+    {"fsim.guidance.pattern/duration/orbits", "fsim.guidance.pattern", S, 0, 0, ""},         // (FA-5a)
+    {"fsim.guidance.pattern/entry_point", "fsim.guidance.pattern", S, 0, 0, ""},             // LTR-07 (FA-5a)
+    {"fsim.guidance.pattern/exit_point", "fsim.guidance.pattern", S, 0, 0, ""},
     {"fsim.guidance.pattern/hold", "fsim.guidance.pattern", S, 0, 0, ""},                    // LTR-08
-    {"fsim.guidance.pattern/hold/leg_time", "fsim.guidance.pattern", N, 5, 0, ""},           // LTR-10
+    {"fsim.guidance.pattern/hold/leg_time", "fsim.guidance.pattern", S, 0, 0, ""},           // LTR-10 (FA-5a)
     {"fsim.guidance.pattern/hold/turn_rate", "fsim.guidance.pattern", N, 5, 0, ""},          // LTR-11
     {"fsim.guidance.pattern/hold/turn_type", "fsim.guidance.pattern", N, 5, 0, ""},
-    {"fsim.guidance.pattern/hold/duration", "fsim.guidance.pattern", P, 5, 0, "by orbits, and by entry and exit times; by time works"}, // LTR-12
+    {"fsim.guidance.pattern/hold/duration", "fsim.guidance.pattern", P, 5, 0, "by entry and exit times; by time and by orbits work"}, // LTR-12
     {"fsim.guidance.pattern/entry/direct", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-13
     {"fsim.guidance.pattern/entry/anchor", "fsim.guidance.pattern", N, 5, 0, ""},
     {"fsim.guidance.pattern/entry/inbound", "fsim.guidance.pattern", N, 5, 0, ""},

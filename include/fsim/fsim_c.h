@@ -661,6 +661,18 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   speed_reference, duration_s and, from ABI 1.15, speed_optimization (as
  *   an hsa's; twelve fields leave it out). fsim_hold() leaves one out: a NEW
  *   takes its default (an orbit here, as the aircraft flies now), an UPDATE keeps it.
+ *   From ABI 1.21 (docs/flight-autonomy.md, 4.23; A-GRA's orbit as its schema
+ *   gives it), after them: direction_reference (fsim_direction_reference of the
+ *   course or heading), heading_rad (or the inbound heading: the course it
+ *   makes good on it), leg_s (or the legs by time: the inbound leg's), bank_rad
+ *   (or the turns by bank), orbits (laps: then it completes; with a duration,
+ *   the first), latitude2_rad, longitude2_rad, radius2_m (a racetrack's or a
+ *   figure-eight's second circle), entry_latitude_rad, entry_longitude_rad
+ *   (where it joins the pattern, flown to directly), exit_latitude_rad,
+ *   exit_longitude_rad (where it leaves, its duration or laps flown). Of a
+ *   course and a heading, legs and their time, a radius and a bank, given both
+ *   the first flies; in an UPDATE either replaces both. Twelve or more fields
+ *   are taken, the rest left out.
  * - FSIM_MODE_CURVE is fsim.guidance.curve (A-GRA's curve following): fields
  *   latitude_rad, longitude_rad, altitude_m (the reference its segments are
  *   from; left out: the aircraft at the NEW), speed_min_ms, speed_max_ms (the
@@ -680,7 +692,8 @@ enum fsim_direction_reference { FSIM_DIRECTION_TRUE_NORTH = 0, FSIM_DIRECTION_MA
 enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft) */
-FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 13, curve 8 (1.14: hsa 6, pattern 12; 1.15: hsa 7); 0 for an unknown mode */
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 25, curve 8 (1.14: hsa 6, pattern 12; 1.15: hsa 7, pattern 13;
+                                                      1.20: hsa 8); 0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result);
 

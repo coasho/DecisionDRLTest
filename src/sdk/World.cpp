@@ -144,6 +144,13 @@ control::CommandResult Vehicle::submit(const control::CurveCommand& curve, Span<
     return r;
 }
 
+control::CommandResult Vehicle::submit(const control::PatternCommand& pattern, const control::PatternShape& shape, const control::CommandOptions& options) {
+    if (world_) return world_->impl_->submit(id_, pattern, shape, options);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownVehicle;
+    return r;
+}
+
 std::vector<control::CommandResult> Vehicle::submitBatch(Span<const control::BatchCommand> batch, std::vector<control::CommandDetails>* details) {
     if (world_) return world_->impl_->submitBatch(id_, batch, details);
     control::CommandResult r;
@@ -265,8 +272,8 @@ control::ControlStatus Vehicle::controlStatus(std::string_view capability) const
 }
 
 control::Reason Vehicle::storeTask(control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints,
-                                   Span<const control::BezierSegment> segments, control::TaskRepetition repetition) {
-    return world_ ? world_->impl_->storeTask(id_, task, command, waypoints, segments, repetition) : control::Reason::UnknownVehicle;
+                                   Span<const control::BezierSegment> segments, control::TaskRepetition repetition, const control::PatternShape* shape) {
+    return world_ ? world_->impl_->storeTask(id_, task, command, waypoints, segments, repetition, shape) : control::Reason::UnknownVehicle;
 }
 
 control::CommandResult Vehicle::commandTask(control::TaskId task, const control::CommandOptions& options) {
@@ -407,6 +414,10 @@ control::CommandResult World::update(control::ActivityId activity, const control
     return impl_->update(activity, curve, segments);
 }
 
+control::CommandResult World::update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape) {
+    return impl_->update(activity, pattern, shape);
+}
+
 control::CommandResult World::cancel(control::ActivityId activity) { return impl_->cancel(activity); }
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::Command& setpoint) {
@@ -425,6 +436,11 @@ control::CommandResult World::update(control::Caller caller, control::ActivityId
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                      Span<const control::BezierSegment> segments) {
     return impl_->update(caller, activity, curve, segments);
+}
+
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
+                                     const control::PatternShape& shape) {
+    return impl_->update(caller, activity, pattern, shape);
 }
 
 control::CommandResult World::cancel(control::Caller caller, control::ActivityId activity) { return impl_->cancel(caller, activity); }

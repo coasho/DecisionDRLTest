@@ -173,6 +173,13 @@ public:
     /// segment, and a section too tight in CommandResult::from and to).
     control::CommandResult submit(const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
                                   const control::CommandOptions& options = {});
+    /// NEW of a pattern (fsim.guidance.pattern) with its shape - A-GRA's orbit as
+    /// its schema gives it: two circles, an inbound heading, legs by time, turns
+    /// by bank, laps, entry and exit points (docs/sdk/control.md, "Patterns";
+    /// docs/flight-autonomy.md, 4.23). A shape's field at fault is named by its
+    /// index after the pattern's 13.
+    control::CommandResult submit(const control::PatternCommand& pattern, const control::PatternShape& shape,
+                                  const control::CommandOptions& options = {});
     /// Several NEWs at once (docs/sdk/control.md, "The command envelope"),
     /// made in order at this simulation time and each answered on its own;
     /// `details`, if given, gets each answer's commandDetails() in order.
@@ -263,7 +270,8 @@ public:
     /// or runs of what never completes; TaskActive while it flies; else why
     /// the vehicle cannot command it.
     control::Reason storeTask(control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints = {},
-                              Span<const control::BezierSegment> segments = {}, control::TaskRepetition repetition = {});
+                              Span<const control::BezierSegment> segments = {}, control::TaskRepetition repetition = {},
+                              const control::PatternShape* shape = nullptr);
     /// Fly it: the NEW of its command, the task among the requirements it traces to.
     control::CommandResult commandTask(control::TaskId task, const control::CommandOptions& options = {});
     control::CommandResult cancelTask(control::TaskId task, control::Caller caller = {});
@@ -349,6 +357,8 @@ public:
     /// UPDATE of a curve: its options (kHold keeps one), and segments - with
     /// `append` 1 after its end, from the same reference; else a new curve.
     control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
+    /// UPDATE of a pattern with its shape: the fields given in either (kHold keeps one) merged, the pattern flown afresh.
+    control::CommandResult update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do,
@@ -364,6 +374,8 @@ public:
                                   Span<const control::Waypoint> waypoints);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::BezierSegment> segments);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
+                                  const control::PatternShape& shape);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);
     /// An activity command (docs/sdk/control.md, "Activity commands"): Disable
     /// (it stops flying and is kept), Enable, Reset (over from its beginning),

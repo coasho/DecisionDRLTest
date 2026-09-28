@@ -124,6 +124,9 @@ public:
     /// NEW of a curve (fsim.guidance.curve) with its segments (docs/vehicle-interface.md, 4.7).
     control::CommandResult submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
                                   const control::CommandOptions& options = {});
+    /// NEW of a pattern (fsim.guidance.pattern) with its shape (docs/flight-autonomy.md, 4.23).
+    control::CommandResult submit(std::uint32_t id, const control::PatternCommand& pattern, const control::PatternShape& shape,
+                                  const control::CommandOptions& options = {});
     /// Several NEWs at once (docs/flight-autonomy.md, 4.8), made in order at
     /// this simulation time, each answered on its own; `details`, if given,
     /// gets each answer's details (commandDetails()) in the same order.
@@ -140,6 +143,8 @@ public:
     control::CommandResult update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints);
     /// UPDATE of a curve: options, and segments appended (append 1) or a new curve.
     control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
+    /// UPDATE of a pattern with its shape: the fields given in either merged (kHold keeps one), flown afresh.
+    control::CommandResult update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do,
@@ -153,6 +158,8 @@ public:
                                   Span<const control::Waypoint> waypoints);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::BezierSegment> segments);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
+                                  const control::PatternShape& shape);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);
     /// An activity command (docs/flight-autonomy.md, 4.10) - disable, enable,
     /// reset, delete, change its rank, unassign it - declaring the caller's
@@ -161,7 +168,8 @@ public:
                                            control::Rank rank = {});
     // --- Flight tasks (docs/flight-autonomy.md, 4.11): kept by id, flown on a task command ---
     control::Reason storeTask(std::uint32_t id, control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints = {},
-                              Span<const control::BezierSegment> segments = {}, control::TaskRepetition repetition = {});
+                              Span<const control::BezierSegment> segments = {}, control::TaskRepetition repetition = {},
+                              const control::PatternShape* shape = nullptr);
     control::CommandResult commandTask(std::uint32_t id, control::TaskId task, const control::CommandOptions& options = {});
     control::CommandResult cancelTask(std::uint32_t id, control::TaskId task, control::Caller caller = {});
     control::Reason removeTask(std::uint32_t id, control::TaskId task);

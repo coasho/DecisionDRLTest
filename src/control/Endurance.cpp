@@ -26,12 +26,12 @@ double aboveSea(double altitudeM, double reference, const sim::VehicleState& s, 
 CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, const sim::VehicleState& state) const noexcept {
     CommandDetails::Endurance out;
     if (!sessionView_) return out;
-    // only a flight with an end: a route that does not repeat, a timed pattern, a curve
+    // only a flight with an end: a route that does not repeat, a pattern timed or of so many laps, a curve
     const auto* route = std::get_if<RouteCommand>(&setpoint);
     const auto* pattern = std::get_if<PatternCommand>(&setpoint);
     const auto* curve = std::get_if<CurveCommand>(&setpoint);
     if (route && (!routePlan_ || routePlan_->repeat || routePlan_->count == 0)) return out;
-    if (pattern && isHold(pattern->durationS)) return out;
+    if (pattern && isHold(pattern->durationS) && isHold(patternShape_.orbits)) return out; // (its shape as prepare() completed it)
     if (curve && (!curvePlan_ || curvePlan_->count == 0)) return out;
     if (!route && !pattern && !curve) return out;
     const EnergyNow en = sessionView_->energyNow(vehicle_);
@@ -71,9 +71,18 @@ CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, con
             const double m = p.pieceM(i, true) + (i + 1 < p.count ? t.radiusM * std::abs(t.angleRad) : 0.0);
             fly(tas > 0.5 ? m / tas : kUnknown, tas, h);
         }
-    } else if (pattern) { // its duration, at its speed
+    } else if (pattern) { // its duration, at its speed - or its laps from its way in (and on to its exit point), the first
         const double h = aboveSea(pattern->altitudeM, pattern->altitudeReference, state, config_->altimeter);
-        fly(pattern->durationS, route::plannedSpeed(pattern->speed, pattern->speedReference, h), h);
+        const double tas = route::plannedSpeed(pattern->speed, pattern->speedReference, h);
+        double timeS = pattern->durationS;
+        if (!isHold(patternShape_.orbits)) {
+            route::Pattern p;
+            route::planPattern(p, *pattern, state.latitudeRad, state.longitudeRad, patternShape_,
+                               patternShape_.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? yearNow() : 2025.0);
+            const double laps = tas > 0.5 ? (p.entryM() + patternShape_.orbits * p.lapM() + p.toExitM()) / tas : kUnknown;
+            timeS = isHold(timeS) ? laps : std::fmin(timeS, laps);
+        }
+        fly(timeS, tas, h);
     } else { // to its end: in its duration, else at the speed it flies within its range
         const double h = isHold(curve->altitudeM) ? state.altitudeMslM : curve->altitudeM;
         const double length = curvePlan_->lengthM();

@@ -545,8 +545,9 @@ bool toSupport(int kind, const double* f, uint32_t count, fsim::control::Support
     }
 }
 
-/// A mode's setpoint from its fields in order; false if the mode or the count is wrong.
-bool toMode(int mode, const double* fields, uint32_t count, fsim::control::Command& out) noexcept {
+/// A mode's setpoint from its fields in order - a pattern's after its 13 into `shape` (its shape, ABI 1.21; the
+/// rest left out, and none given: `shape` untouched) - false if the mode or the count is wrong.
+bool toMode(int mode, const double* fields, uint32_t count, fsim::control::Command& out, fsim::control::PatternShape* shape = nullptr) noexcept {
     if (!fields) return false;
     if (mode == FSIM_MODE_HSA) out = fsim::control::HsaCommand{};
     else if (mode == FSIM_MODE_ROUTE) out = fsim::control::RouteCommand{};
@@ -554,13 +555,20 @@ bool toMode(int mode, const double* fields, uint32_t count, fsim::control::Comma
     else if (mode == FSIM_MODE_CURVE) out = fsim::control::CurveCommand{};
     else return false;
     double* slots[fsim::control::kMaxCommandFields];
-    const std::size_t n = fsim::control::commandFields(out, slots);
+    std::size_t n = fsim::control::commandFields(out, slots);
+    if (mode == FSIM_MODE_PATTERN && shape) { // (a pattern given without room for a shape takes its 13 alone)
+        shape->fields(slots + n);
+        n += fsim::control::PatternShape::kFields;
+    }
     // (ABI 1.14's hsa had 6 fields and its pattern 12: a caller built against it leaves the speed optimisation out)
     const std::size_t least = mode == FSIM_MODE_HSA ? 6 : mode == FSIM_MODE_PATTERN ? 12 : n;
     if (count < least || count > n) return false;
     for (uint32_t i = 0; i < count; ++i) *slots[i] = fields[i];
     return true;
 }
+
+/// A pattern's fields past its 13: its shape given (ABI 1.21).
+constexpr uint32_t kPatternFields = 13;
 
 /// A route's waypoints as the caller's header laid them out (`waypoints[0].struct_size`
 /// apart), into the world's buffer; false if they cannot be read.
@@ -653,7 +661,12 @@ fsim::control::CommandResult updateFrom(fsim_world* w, fsim::control::ActivityId
     }
     fsim::control::Command c = fsim::control::ActuatorCommand{};
     if (shape.mode >= 0) {
-        if (toMode(shape.mode, fields, count, c)) return w->world.update(caller, activity, c);
+        fsim::control::PatternShape given;
+        if (toMode(shape.mode, fields, count, c, &given)) {
+            if (const auto* pattern = std::get_if<fsim::control::PatternCommand>(&c); pattern && count > kPatternFields)
+                return w->world.update(caller, activity, *pattern, given);
+            return w->world.update(caller, activity, c);
+        }
         malformed = true;
         return {};
     }
@@ -890,7 +903,8 @@ FSIM_API uint32_t fsim_mode_field_count(int mode) {
     else if (mode == FSIM_MODE_CURVE) c = fsim::control::CurveCommand{};
     else return 0;
     double* slots[fsim::control::kMaxCommandFields];
-    return static_cast<uint32_t>(fsim::control::commandFields(c, slots));
+    const auto n = static_cast<uint32_t>(fsim::control::commandFields(c, slots));
+    return mode == FSIM_MODE_PATTERN ? n + static_cast<uint32_t>(fsim::control::PatternShape::kFields) : n; // (and its shape's)
 }
 
 FSIM_API void fsim_waypoint_init(fsim_waypoint* waypoint) {
@@ -994,10 +1008,14 @@ FSIM_API int fsim_activity_update_curve_by(fsim_world* world, fsim_activity_id a
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result) {
     fsim::control::Command c;
-    if (!world || !result || !toMode(mode, fields, count, c))
+    fsim::control::PatternShape shape;
+    if (!world || !result || !toMode(mode, fields, count, c, &shape))
         return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_mode: mode " + std::to_string(mode) + " takes " +
                                                std::to_string(fsim_mode_field_count(mode)) + " fields");
-    toC(world, id, world->world.submit(id, c, fromC(options)), result);
+    if (const auto* pattern = std::get_if<fsim::control::PatternCommand>(&c); pattern && count > kPatternFields)
+        toC(world, id, world->world.submit(id, *pattern, shape, fromC(options)), result);
+    else
+        toC(world, id, world->world.submit(id, c, fromC(options)), result);
     return FSIM_OK;
 }
 
@@ -1396,9 +1414,10 @@ FSIM_API const char* fsim_time_criticality_name(int criticality) {
 
 namespace {
 
-/// A batch item (or a task's command) into its C++ command: its waypoints and segments into `route` and `curve`.
+/// A batch item (or a task's command) into its C++ command: its waypoints and segments into `route` and `curve`, a
+/// pattern's shape into `shape` (the item pointing at it where it has one).
 bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::BatchCommand& item, std::vector<fsim::control::Waypoint>& route,
-               std::vector<fsim::control::BezierSegment>& curve) {
+               std::vector<fsim::control::BezierSegment>& curve, fsim::control::PatternShape& shape) {
     item.options = fromC(b.options);
     fsim::control::Command c;
     fsim::control::SupportCommand sc;
@@ -1410,7 +1429,10 @@ bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::Ba
         if (ok) item.command = fsim::control::Command(toBehavior(b.behavior));
         break;
     case FSIM_BATCH_SUPPORT: ok = toSupport(b.code, b.fields, b.count, sc), item.command = sc; break;
-    case FSIM_BATCH_MODE: ok = (b.code == FSIM_MODE_HSA || b.code == FSIM_MODE_PATTERN) && toMode(b.code, b.fields, b.count, c), item.command = c; break;
+    case FSIM_BATCH_MODE:
+        ok = (b.code == FSIM_MODE_HSA || b.code == FSIM_MODE_PATTERN) && toMode(b.code, b.fields, b.count, c, &shape), item.command = c;
+        if (ok && b.code == FSIM_MODE_PATTERN && b.count > kPatternFields) item.shape = &shape;
+        break;
     case FSIM_BATCH_ROUTE:
         ok = toMode(FSIM_MODE_ROUTE, b.fields, b.count, c) && toWaypoints(world, b.waypoints, b.waypoint_count);
         if (ok) route = world->waypoints, item.command = c;
@@ -1435,6 +1457,7 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
         std::vector<fsim::control::BatchCommand> items(count);
         std::vector<std::vector<fsim::control::Waypoint>> routes; // each route's own (the world's scratch is one)
         std::vector<std::vector<fsim::control::BezierSegment>> curves;
+        std::vector<fsim::control::PatternShape> shapes(count); // (each pattern's own: the items point at them)
         routes.reserve(count), curves.reserve(count);
         // every item made into a command first: a malformed one refuses the batch, and none is made
         for (uint32_t i = 0; i < count; ++i) {
@@ -1442,7 +1465,7 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
             fsim::control::BatchCommand& item = items[i];
             std::vector<fsim::control::Waypoint>& route = routes.emplace_back();
             std::vector<fsim::control::BezierSegment>& curve = curves.emplace_back();
-            if (!fromBatch(world, b, item, route, curve))
+            if (!fromBatch(world, b, item, route, curve, shapes[i]))
                 return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_batch: item " + std::to_string(i) + " is malformed");
             item.waypoints = route, item.segments = curve;
         }
@@ -1493,12 +1516,14 @@ FSIM_API int fsim_vehicle_store_task(fsim_world* world, uint32_t id, uint64_t ta
         fsim::control::BatchCommand item;
         std::vector<fsim::control::Waypoint> route;
         std::vector<fsim::control::BezierSegment> curve;
-        if (!fromBatch(world, *command, item, route, curve) || !std::holds_alternative<fsim::control::Command>(item.command))
+        fsim::control::PatternShape shape;
+        if (!fromBatch(world, *command, item, route, curve, shape) || !std::holds_alternative<fsim::control::Command>(item.command))
             return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_store_task: a flight or guidance command, whole, is kept");
         fsim::control::TaskRepetition repetition;
         repetition.attempts = attempts ? attempts : 1;
         repetition.intervalS = interval_s;
-        *reason = static_cast<int32_t>(world->world.storeTask(id, task_id, std::get<fsim::control::Command>(item.command), route, curve, repetition));
+        *reason = static_cast<int32_t>(
+            world->world.storeTask(id, task_id, std::get<fsim::control::Command>(item.command), route, curve, repetition, item.shape));
         return FSIM_OK;
     });
 }
@@ -1585,6 +1610,11 @@ FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id acti
             double* slots[kMaxCommandFields];
             const std::size_t n = commandFields(c, slots);
             for (std::size_t i = 0; i < n; ++i) r.fields.push_back(*slots[i]);
+            if (std::holds_alternative<PatternCommand>(c)) { // (and its shape's, ABI 1.21)
+                double* shaped[PatternShape::kFields];
+                r.setpoint.shape.fields(shaped);
+                for (double* f : shaped) r.fields.push_back(*f);
+            }
             if (std::holds_alternative<HsaCommand>(c)) b.kind = FSIM_BATCH_MODE, b.code = FSIM_MODE_HSA;
             else if (std::holds_alternative<PatternCommand>(c)) b.kind = FSIM_BATCH_MODE, b.code = FSIM_MODE_PATTERN;
             else if (std::holds_alternative<RouteCommand>(c)) b.kind = FSIM_BATCH_ROUTE, b.code = FSIM_MODE_ROUTE;

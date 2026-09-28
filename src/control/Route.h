@@ -163,40 +163,71 @@ struct Line {
 Fix onLine(const Line& line, double lat0, double lon0, double lat, double lon) noexcept;
 
 /// A pattern's loop round its point, in the plane there: pieces flown in
-/// order and again, and for a racetrack or a hold the entry direct to the fix.
+/// order and again - a lap begins where it was joined - after the pieces
+/// that enter it: a racetrack's or a hold's line direct to the fix, a line to
+/// its entry point. Its exit point ends a lap's piece: there, its duration or
+/// laps flown, it leaves along a line (docs/flight-autonomy.md, 4.23).
 struct Pattern {
     struct Piece {
         bool arc = false;
         Line line;              ///< a straight's
         Turn turn;              ///< an arc's: its centre from the point, its radius, its way round (the sign of angleRad), where it starts
         double sweepRad = 0.0;  ///< an arc's, up to a whole circle
+        double lengthM() const noexcept { return arc ? turn.radiusM * sweepRad : line.lengthM; }
     };
+    /// A lap's pieces: four at most (an orbit's 1, a figure-eight's 2, a racetrack's or a hold's 4, two circles' 4),
+    /// and two more where one is cut to be joined and to be left.
+    static constexpr std::uint32_t kPieces = 6;
+    static constexpr std::uint32_t kEntryPieces = 6;
     PatternKind kind = PatternKind::Orbit;
-    double lat0 = 0.0, lon0 = 0.0; ///< the centre, or the fix
-    double radiusM = 0.0;
-    std::uint32_t count = 0;       ///< pieces in a lap: an orbit's 1, a figure-eight's 2, a racetrack's or a hold's 4
+    double lat0 = 0.0, lon0 = 0.0; ///< the centre, or the fix (two circles': the first's centre)
+    double radiusM = 0.0;          ///< its tightest turn's
+    std::uint32_t count = 0;       ///< pieces in a lap
     std::uint32_t first = 0;       ///< the piece a lap begins with (a racetrack's: the turn at the fix)
-    Piece pieces[4];
-    Line entry;                    ///< a racetrack's or a hold's: from the aircraft to the fix (0 long: none)
+    Piece pieces[kPieces];
+    std::uint32_t entryCount = 0;  ///< flown once, from where the aircraft is, before the lap from `first`
+    Piece entry[kEntryPieces];
+    std::int32_t exit = -1;        ///< the piece at whose start it leaves, its duration or laps flown; -1: it does not
+    Line away;                     ///< where it leaves: on along its course from there
     Trims trims;                   ///< the follower's, flying it
 
     std::uint32_t next(std::uint32_t i) const noexcept { return i + 1 < count ? i + 1 : 0; }
     double pieceM(std::uint32_t i) const noexcept { return pieces[i].arc ? pieces[i].turn.radiusM * pieces[i].sweepRad : pieces[i].line.lengthM; }
     double lapM() const noexcept;
+    double entryM() const noexcept;
+    /// Along the lap from its first piece's start to the exit point (0: none).
+    double toExitM() const noexcept;
 };
 
-/// The pattern `c` sets (complete: its fields the host resolved), planned
-/// from where the aircraft is: an orbit's laps counted from its bearing then.
-void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon) noexcept;
+/// A piece's point `m` along it (north and east, m, in the pattern's plane) and its course there.
+void pointOn(const Pattern::Piece& piece, double m, double& north, double& east, double& courseRad) noexcept;
+
+/// The pattern `c` sets (complete: its fields the host resolved) with its
+/// shape (docs/flight-autonomy.md, 4.23), planned from where the aircraft is:
+/// an orbit's laps counted from its bearing then, two circles' from their
+/// nearest point, an entry point's from it; a magnetic course turned by the
+/// declination at its point in `magneticYear` (fsim/Magnetic.h).
+void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon, const PatternShape& shape = {}, double magneticYear = 2025.0) noexcept;
 
 /// What a pattern leaves out, filled in (docs/vehicle-interface.md, 4.6): an
 /// orbit, here, the altitude and speed it flies now (a rotorcraft's speed its
 /// cruise over the ground), right turns, its track now (a hold's course the
-/// way to its fix), the radius its speed and `windMs` and 80 % of its bank
+/// way to its fix), the radius its speed and the wind and 80 % of its bank
 /// give (a hold's: rate one, at most 25 degrees of bank), legs of twice the
-/// radius (a hold's: a minute's flight, 90 s above 14,000 ft). The angles wrapped.
-void completePattern(PatternCommand& c, const sim::VehicleState& state, const Performance& performance, bool hovers, double windMs,
-                     const Altimeter* altimeter = nullptr) noexcept;
+/// radius (a hold's: a minute's flight, 90 s above 14,000 ft). The angles
+/// wrapped. What its shape gives another way (docs/flight-autonomy.md, 4.23)
+/// fills its field: a course from a heading, the legs from their time, the
+/// radius from a bank - in the wind given, north and east - and two circles'
+/// second radius (the shape's) from the first. A magnetic course left out is
+/// the course now, turned by the declination at its point in `magneticYear`.
+void completePattern(PatternCommand& c, PatternShape& shape, const sim::VehicleState& state, const Performance& performance, bool hovers,
+                     double windNorthMs, double windEastMs, const Altimeter* altimeter = nullptr, double magneticYear = 2025.0) noexcept;
+
+/// A pattern's second circle, and whether its geometry holds (docs/flight-autonomy.md, 4.23): only a racetrack's
+/// or a figure-eight's, with no course, heading, legs or leg time (the circles give them); a racetrack's two circles
+/// apart (neither inside the other), a figure-eight's clear of one another, both at least a metre in radius. Its
+/// field at fault (its index in the fields of the PatternCommand and then its shape), or -1. `c` complete.
+int circlesFault(const PatternCommand& c, const PatternShape& shape) noexcept;
 
 // --- Curves (4.7) -----------------------------------------------------------------
 

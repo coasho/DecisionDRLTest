@@ -351,6 +351,28 @@ Calm, the orbits hold within 6 m. In a 12 m/s wind they hold within:
 
 An IRIS flies a 2 m circle within a centimetre (`tests/test_patterns.cpp`).
 
+**A-GRA's orbit as its schema gives it** ([flight-autonomy.md](../flight-autonomy.md), 4.23) goes beside the pattern in a `PatternShape`, as a route's waypoints do:
+
+```cpp
+PatternCommand track;
+track.pattern = double(PatternKind::Racetrack);
+track.latitudeRad = ..., track.longitudeRad = ..., track.radiusM = 900;  // the first circle
+PatternShape shape;
+shape.latitude2Rad = ..., shape.longitude2Rad = ..., shape.radius2M = 1200; // the second
+shape.orbits = 2;                                                         // two laps, then it completes...
+shape.exitLatitudeRad = ..., shape.exitLongitudeRad = ...;                // ...at its exit point, and flies on out
+auto a = v.submit(track, shape).activity;
+PatternShape steeper;
+steeper.bankRad = 0.35;                                                   // an UPDATE: turns by bank, the radius filled in again
+world.update(a, PatternCommand{}, steeper);
+```
+
+- **Another way to give one thing:** `headingRad` for the course (the course it makes good on it, in the wind), `legS` for the legs (the inbound leg's time), `bankRad` for the radius (the radius at which it banks no more, with the wind); `directionReference` makes a course or heading magnetic. Given both, the pattern's own flies; in an UPDATE either replaces both.
+- **Two circles** make a racetrack (legs touching both on the outside) or a figure-eight (legs crossing between them, the second circle flown the other way); they give its course and legs.
+- **`orbits`:** it completes after so many laps, counted where it was joined (with a duration, the first).
+- **The entry point** is flown to directly, and the laps are counted from there; **the exit point** ends it once its duration or laps are flown, and it flies on out along its course.
+- The C ABI and Python keep one list: the shape's fields follow the pattern's 13. `activitySetpoint` gives the shape back (`Setpoint::shape`); tasks and batches carry it.
+
 ### Curves: curve following
 
 `fsim.guidance.curve` is A-GRA's curve following. A `CurveCommand` holds its

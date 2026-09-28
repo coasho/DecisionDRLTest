@@ -114,6 +114,10 @@ public:
     /// A CurveCommand submitted as a Command has none: InvalidCurve.
     CommandResult submit(const CurveCommand& curve, Span<const BezierSegment> segments, const CommandOptions& options, const sim::VehicleState& state,
                          double now);
+    /// NEW of a pattern with its shape (fsim.guidance.pattern; docs/flight-autonomy.md, 4.23): the two checked and
+    /// completed together, the shape then written into the path store (allocated at the first shape given).
+    CommandResult submit(const PatternCommand& pattern, const PatternShape& shape, const CommandOptions& options, const sim::VehicleState& state,
+                         double now);
     /// UPDATE: a new setpoint for a live activity - the fast path; allocates
     /// nothing. `state` is the vehicle's: a route is planned afresh from it.
     /// `caller` is the source the caller declares, as a NEW's options do, and
@@ -121,8 +125,14 @@ public:
     /// activity's may not address it (AuthorityHeld, naming it) - a policy
     /// cannot change or end what the platform's own sources fly - nor may a
     /// controller another's. Open, as ADR-26 10.1: any caller.
-    CommandResult update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Caller caller) noexcept;
+    /// A pattern's `shape`, if given, merged with it (as update(PatternCommand, PatternShape)).
+    CommandResult update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Caller caller,
+                         const PatternShape* shape = nullptr) noexcept;
     CommandResult update(ActivityId activity, const SupportCommand& setpoint, Caller caller) noexcept;
+    /// UPDATE of a pattern with its shape: the fields given in either (kHold keeps one) merged into both, and the
+    /// pattern flown afresh (docs/flight-autonomy.md, 4.23).
+    CommandResult update(ActivityId activity, const PatternCommand& pattern, const PatternShape& shape, const sim::VehicleState& state,
+                         Caller caller) noexcept;
     /// UPDATE of a route: its options (a field left out, kHold, keeps its
     /// value) and its waypoints - none: those it has - checked as a NEW's,
     /// then flown afresh from its start, from where the aircraft is.
@@ -152,7 +162,8 @@ public:
     /// with kSuggestedTask, no runs, a negative interval, or runs of a
     /// capability that never completes; TaskActive while its activity is live;
     /// else why the vehicle cannot command the capability.
-    Reason storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, TaskRepetition repetition);
+    Reason storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, TaskRepetition repetition,
+                     const PatternShape* shape = nullptr);
     /// A task command: the NEW of its command with `options`, the task among
     /// the requirements it traces to, answered as the NEW is; its runs, as the
     /// task says. UnknownTask; TaskActive while its activity is live.
@@ -328,6 +339,7 @@ private:
         bool suggested = false;
         TaskId suggestion = 0;
         bool resumed = false; ///< it flew before (disabled, unassigned): its start window was its first start's
+        PatternShape shape{};  ///< a pattern's (docs/flight-autonomy.md, 4.23)
     };
     /// A flight task (4.11): its command, and what became of it.
     struct Task {
@@ -336,6 +348,7 @@ private:
         Command command{};
         std::vector<Waypoint> waypoints;
         std::vector<BezierSegment> segments;
+        PatternShape shape{};               ///< a pattern's (docs/flight-autonomy.md, 4.23)
         TaskRepetition repetition{};
         ActivityId activity = 0;            ///< its activity (every run's), while it is commanded
         std::uint64_t commandId = 0;        ///< its task command's
@@ -351,7 +364,7 @@ private:
     void noteEnd(const ActivityRecord& record) noexcept;
     /// The platform's suggestion (4.11): a task with the command the checks
     /// left, every value held to its limit (a route's points as planned). Its id.
-    TaskId suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments);
+    TaskId suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, const PatternShape* shape = nullptr);
     /// Room for a suggestion: the oldest not flying goes where kSuggestions are kept.
     Task& newSuggestion(TaskId id);
     /// Failed waiting activities kept as suggestions, made tasks now.
@@ -396,7 +409,7 @@ private:
     /// checked as its range policy says - the malformed returned at once, the
     /// rest logged - and the admission a behaviour asks. `setpoint` is what flies.
     Reason prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, const sim::VehicleState& state,
-                   CheckLog& log);
+                   CheckLog& log, const PatternShape* shape = nullptr);
     /// The axes a command owns: its own, else the capability's default, widened
     /// above the actuators to whole groups; InvalidAxes if not a flyable set.
     Reason axesOf(std::size_t index, const Command& command, const CommandOptions& options, AxisMask& axes) const noexcept;
@@ -436,7 +449,7 @@ private:
     bool startWaiting(Waiting& w, const sim::VehicleState& state, double now) noexcept;
     /// UPDATE of a waiting activity: its command's new setpoint, checked as its NEW was, kept for its start.
     CommandResult updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
-                                const sim::VehicleState& state, Caller caller) noexcept;
+                                const sim::VehicleState& state, Caller caller, const PatternShape* shape = nullptr) noexcept;
     CommandResult updateWaiting(Waiting& w, const SupportCommand& setpoint, Caller caller) noexcept;
     /// The live activities' time windows after a world step: a persistent one
     /// done at its end window's close, a terminating one late or early failed if its end is critical.
@@ -499,6 +512,8 @@ private:
     /// The declination where the aircraft is, at the world's date (docs/flight-autonomy.md, 4.22): what a magnetic
     /// direction is turned by to be true.
     double declinationNow(const sim::VehicleState& state) const noexcept;
+    /// The world's date as the magnetic model reads it (fsim/Magnetic.h).
+    double yearNow() const noexcept;
     /// The terrain check of a route, pattern, curve or hsa that is checked:
     /// where it meets the ground, a finding (TerrainConflict) no range policy mends.
     void checkTerrain(const Command& setpoint, const sim::VehicleState& state, CheckLog& log) const noexcept;
@@ -536,10 +551,25 @@ private:
     /// radius and a speed above 0, legs from 0, a duration above 0); in an
     /// UPDATE (`merge`) a reference needs its value. InvalidParameter with the field.
     static Reason checkPattern(const PatternCommand& c, bool merge, CommandResult& detail) noexcept;
+    /// A pattern's shape (docs/flight-autonomy.md, 4.23), its fields numbered after the PatternCommand's: its
+    /// direction reference whole, a heading finite, a leg time from 0, a bank above 0 and below a right angle, laps
+    /// whole from 0, points whole (a latitude with its longitude), a second radius above 0; in an UPDATE (`merge`) a
+    /// direction reference needs a course or a heading. InvalidParameter with the field.
+    static Reason checkShape(const PatternCommand& c, const PatternShape& shape, bool merge, CommandResult& detail) noexcept;
     /// A complete pattern against the performance, as limitHsa: its speed and
     /// altitude, and a radius no tighter than the aircraft's full bank flies
-    /// at its speed (a rotorcraft's: a metre).
-    void limitPattern(PatternCommand& c, CheckLog& log) const noexcept;
+    /// at its speed (a rotorcraft's: a metre) - both circles' - or, the radius
+    /// from a bank, a bank it can fly.
+    void limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, bool radiusFromBank = false) const noexcept;
+    /// A pattern's fields filled in with its shape's (route::completePattern) where the aircraft is, in the wind it
+    /// flies in now, at the world's date.
+    void completePattern(PatternCommand& c, PatternShape& shape, const sim::VehicleState& state) const noexcept;
+    /// A live pattern's UPDATE in slot `s` (Patterns.cpp): `next` and its `shape`, if given, merged into what flies,
+    /// completed and checked; then written, the shape into the path store.
+    CommandResult updatePattern(std::size_t s, ActivityId activity, const PatternCommand& next, const PatternShape* shape, const sim::VehicleState& state,
+                                CommandResult& result, CheckLog& log) noexcept;
+    /// The scratch shape into the path store, for the pattern that flies: where it has one, or one flew before.
+    void writeShape();
     /// A curve's options and segments (docs/vehicle-interface.md, 4.7 and 5.1):
     /// the options whole and finite (InvalidParameter); in a NEW, the
     /// reference where the aircraft is if left out; 1 to 10 segments, finite,
@@ -564,7 +594,7 @@ private:
     /// NEW: a command (with a route's waypoints, a curve's segments). One that
     /// may not wait (the existing entry points'): refused where it would.
     CommandResult submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, const CommandOptions& options,
-                             const sim::VehicleState& state, double now, bool mayWait = true);
+                             const sim::VehicleState& state, double now, bool mayWait = true, const PatternShape* shape = nullptr);
 
     /// A capability's standing with the vehicle's policy (6.2, 7.2).
     struct Authority {
@@ -630,6 +660,7 @@ private:
     CommandDetails details_{};    ///< the last answer's (details())
     std::unique_ptr<std::array<Waiting, kWaiting>> waiting_; ///< made when the first activity waits
     const SessionView* sessionView_ = nullptr; ///< the session's (setSessionView)
+    PatternShape patternShape_{}; ///< a pattern's shape as prepare() completed it: its scratch, as routePlan_ is a route's
 };
 
 } // namespace fsim::control

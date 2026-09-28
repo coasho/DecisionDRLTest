@@ -7,9 +7,12 @@
 namespace fsim::control {
 
 double CapabilityHost::declinationNow(const sim::VehicleState& state) const noexcept {
+    return declinationRad(state.latitudeRad, state.longitudeRad, state.altitudeMslM, yearNow());
+}
+
+double CapabilityHost::yearNow() const noexcept {
     // (a host with no session reads the model's epoch)
-    const double year = magneticYear(sessionView_ ? sessionView_->utcSeconds() : 0.0);
-    return declinationRad(state.latitudeRad, state.longitudeRad, state.altitudeMslM, year);
+    return magneticYear(sessionView_ ? sessionView_->utcSeconds() : 0.0);
 }
 
 } // namespace fsim::control

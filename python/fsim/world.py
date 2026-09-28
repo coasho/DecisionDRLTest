@@ -728,9 +728,11 @@ MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", 
                        "direction_reference"),
                "route": ("projection", "repeat", "end", "start"),
                "pattern": ("pattern", "latitude_rad", "longitude_rad", "altitude_m", "altitude_reference", "radius_m", "clockwise",
-                           "course_rad", "leg_m", "speed", "speed_reference", "duration_s", "speed_optimization"),
+                           "course_rad", "leg_m", "speed", "speed_reference", "duration_s", "speed_optimization", "direction_reference",
+                           "heading_rad", "leg_s", "bank_rad", "orbits", "latitude2_rad", "longitude2_rad", "radius2_m", "entry_latitude_rad",
+                           "entry_longitude_rad", "exit_latitude_rad", "exit_longitude_rad"),
                "curve": ("latitude_rad", "longitude_rad", "altitude_m", "speed_min_ms", "speed_max_ms", "duration_s", "end", "append")}
-MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 13, "curve": (HOLD,) * 8}
+MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 25, "curve": (HOLD,) * 8}
 _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "speed_optimization": SpeedOptimization,
                "direction_reference": DirectionReference,
                "projection": Projection, "end": EndBehavior,
@@ -1221,8 +1223,16 @@ class Vehicle:
         figure-eight's axis), ``leg_m``, a ``speed`` in ``speed_reference`` (or ``speed_optimization``, as submit_hsa's)
         and ``duration_s`` (then it completes). What it
         leaves out takes its default: an orbit here, as the aircraft flies now, right turns, the radius its speed and 80 %
-        of its bank give (a hold's: rate one), a hold's minute-long legs. An Activity whose ``update(**fields)`` changes
-        only what it gives; fsim.Rejected if refused. The command envelope as submit's."""
+        of its bank give (a hold's: rate one), a hold's minute-long legs. A-GRA's orbit as its schema gives it
+        (docs/flight-autonomy.md, 4.23): ``direction_reference`` (fsim.DirectionReference of the course or heading),
+        ``heading_rad`` (or the inbound heading: the course it makes good on it), ``leg_s`` (or the legs by the inbound
+        leg's time), ``bank_rad`` (or the turns by bank), ``orbits`` (laps: then it completes; with a duration, the first),
+        ``latitude2_rad``, ``longitude2_rad``, ``radius2_m`` (a racetrack's or a figure-eight's second circle),
+        ``entry_latitude_rad``, ``entry_longitude_rad`` (where it joins, flown to directly) and ``exit_latitude_rad``,
+        ``exit_longitude_rad`` (where it leaves, its duration or laps flown, out along its course). Given a course and a
+        heading, legs and their time, or a radius and a bank, the first flies; an update of either replaces both. An
+        Activity whose ``update(**fields)`` changes only what it gives; fsim.Rejected if refused. The command envelope as
+        submit's."""
         r = self._h.submit_mode(self.id, MODE_KINDS.index("pattern"), _row("pattern", values, fields), int(source), None, int(range),
                                 int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection,
                                            controller))

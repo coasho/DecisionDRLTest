@@ -244,6 +244,27 @@ TEST_CASE("capabilities and activities through the SDK: discover, submit, update
     REQUIRE(std::string(control::reasonName(control::Reason::Requested)) == "requested");
     REQUIRE(v.activities().size() == 1);
     REQUIRE_FALSE(world.activity(control::activityId(v.id(), 42)).has_value());
+
+    // a pattern with its shape (ADR-29 FA-5a): the shape beside it, read back, merged by an UPDATE of either
+    const VehicleState here = v.state();
+    control::PatternCommand track;
+    track.pattern = static_cast<double>(control::PatternKind::Racetrack), track.radiusM = 900.0;
+    track.latitudeRad = here.latitudeRad, track.longitudeRad = here.longitudeRad + 0.0005;
+    control::PatternShape shape;
+    shape.latitude2Rad = here.latitudeRad + 0.0006, shape.longitude2Rad = track.longitudeRad, shape.orbits = 1.0;
+    const control::CommandResult t = v.submit(track, shape);
+    REQUIRE(t.accepted());
+    std::optional<control::Setpoint> flown = world.activitySetpoint(t.activity);
+    REQUIRE(flown);
+    REQUIRE((flown->shape.orbits == 1.0 && flown->shape.radius2M == 900.0)); // (the second radius the first's)
+    control::PatternShape wider;
+    wider.radius2M = 1200.0;
+    REQUIRE(world.update(t.activity, control::PatternCommand{}, wider).accepted());
+    flown = world.activitySetpoint(t.activity);
+    REQUIRE(flown);
+    REQUIRE((flown->shape.radius2M == 1200.0 && flown->shape.orbits == 1.0));
+    shape.latitude2Rad = control::kHold; // (a point needs both)
+    REQUIRE(v.submit(track, shape).index == 19);
 }
 
 TEST_CASE("grants and the performance through the SDK", "[sdk][control]") {

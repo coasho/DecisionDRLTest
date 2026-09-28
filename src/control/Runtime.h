@@ -76,6 +76,14 @@ inline void mergePattern(PatternCommand& dst, const PatternCommand& src) noexcep
     mergeSpeed(dst.speed, dst.speedOptimization, src.speed, src.speedOptimization);
 }
 
+/// A partial pattern with its shape (docs/flight-autonomy.md, 4.23): as
+/// mergePattern, and each shape field given replaces the commanded one. Of two
+/// ways to give one thing - the course or the heading, the legs or their time,
+/// the radius or the bank - either given replaces both; a second circle
+/// replaces the course and the legs (Patterns.cpp: out of line, and asked only
+/// of a pattern's UPDATE).
+void mergePattern(PatternCommand& dst, PatternShape& dstShape, const PatternCommand& src, const PatternShape& srcShape) noexcept;
+
 /// What UPDATE (and the existing entry points' per-step path) writes into a
 /// slot: a level's setpoint replaced, a mode's merged (its kHold fields keep
 /// what was commanded).

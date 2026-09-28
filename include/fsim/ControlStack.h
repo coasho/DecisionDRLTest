@@ -53,6 +53,9 @@ public:
     /// path store (at most PathStore::kSegments), flown afresh; unchecked, as
     /// every command given the stack on its own.
     void command(const CurveCommand& curve, Span<const BezierSegment> segments);
+    /// A pattern (fsim.guidance.pattern) with its shape (docs/flight-autonomy.md, 4.23), into the stack's own path
+    /// store: the shape replaces the one before, the pattern merges as the same mode again does.
+    void command(const PatternCommand& pattern, const PatternShape& shape);
     /// The highest level a command enters at; Actuator before any command.
     Level activeLevel() const noexcept;
     /// The command at the active level; before any command, the neutral
