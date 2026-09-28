@@ -122,7 +122,7 @@ const FeatureDef kFeatures[] = {
     CAP("fsim.guidance.taxi", N, 9, R2, ""),                                                  // WPT-26
 
     // --- curve following ----------------------------------------------------------------------------
-    CAP("fsim.guidance.curve", P, 5, 0, "a rotorcraft's circle at the end (FA-5d3)"), // CRV-02, 12..14
+    CAP("fsim.guidance.curve", S, 0, 0, ""), // CRV-02, 12..14
     {"fsim.guidance.curve/bezier", "fsim.guidance.curve", S, 0, 0, ""},                      // CRV-01
     {"fsim.guidance.curve/nurbs", "fsim.guidance.curve", S, 0, 0, ""},                       // CRV-03 (FA-5d1)
     {"fsim.guidance.curve/reference/geodetic", "fsim.guidance.curve", S, 0, 0, ""},          // CRV-04 (FA-5d2)
@@ -133,8 +133,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.curve/curvature", "fsim.guidance.curve", S, 0, 0, ""},                   // CRV-08 (FA-5d1: checked, the indices too)
     {"fsim.guidance.curve/append", "fsim.guidance.curve", S, 0, 0, ""},                      // CRV-09
     {"fsim.guidance.curve/end/csa", "fsim.guidance.curve", S, 0, 0, ""},                     // CRV-10
-    {"fsim.guidance.curve/end/circular_loiter", "fsim.guidance.curve", P, 5, 0,
-     "a rotorcraft's circle; a wing orbits the end, a rotorcraft hovers over it"},           // CRV-11
+    {"fsim.guidance.curve/end/circular_loiter", "fsim.guidance.curve", S, 0, 0, ""},        // CRV-11 (FA-5d3)
     {"fsim.guidance.curve/discretized", "fsim.guidance.curve", N, 17, 0, ""},                // CRV-15
 
     // --- loiter -----------------------------------------------------------------------------------------

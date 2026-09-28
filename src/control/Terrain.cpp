@@ -266,8 +266,8 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         // (past its end, laid out from its end on the Earth where its plane is not plain: 4.27)
         double endLat = lat0, endLon = lon0, endNorth = end.p[0], endEast = end.p[1];
         if (!k.plain()) k.fromPlane(end.p[0], end.p[1], endLat, endLon), endNorth = endEast = 0.0;
-        if (!isHold(c->end) && c->end == static_cast<double>(EndBehavior::Loiter)) { // a wing orbits its end; a rotorcraft stops over it
-            const double radius = hovers ? 0.0 : performance_.turnRadiusM(speed);
+        if (!isHold(c->end) && c->end == static_cast<double>(EndBehavior::Loiter)) { // each circles its end (4.28)
+            const double radius = performance_.turnRadiusM(speed);
             walk.arc(endLat, endLon, endNorth, endEast, radius, 0.0, 1.0, 2.0 * kPi * radius, speed, above, index, [&](double) { return altitude; });
         } else {
             const double course = k.plain() ? end.courseRad() : geo::wrapPi(end.courseRad() + k.psi);

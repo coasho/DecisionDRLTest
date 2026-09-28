@@ -1238,6 +1238,53 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(plan.across < (p.rotor ? std::max(0.5, 0.1 * R) : std::max(20.0, 0.05 * R)));
             CHECK(plan.up < (p.rotor ? 0.5 : 20.0));
         });
+    // A-GRA's circular loiter at a curve's end (ADR-29 FA-5d3: CRV-11): a straight cubic four orbit radii along its heading,
+    // then round its end - a rotorcraft as a wing - off the circle its pace gives: a rotorcraft from half a lap after it
+    // completes, a wing (joining from its centre) from a lap and a half
+    struct Round {
+        PositionCommand end;
+        double done = -1.0, near = 1e18, far = 0.0;
+    };
+    std::map<std::uint32_t, Round> rounds;
+    run("fsim.guidance.curve", 0.0,
+        [&](const Plane& p) {
+            const double R = orbitRadius(p);
+            NurbsSegment seg;
+            seg.points = 4, seg.knots = 8;
+            const double c = std::cos(p.start.eulerRad[2]), sn = std::sin(p.start.eulerRad[2]);
+            for (std::uint32_t i = 0; i < 4; ++i) seg.north[i] = 4.0 / 3.0 * R * i * c, seg.east[i] = 4.0 / 3.0 * R * i * sn;
+            for (std::uint32_t i = 4; i < 8; ++i) seg.knot[i] = 1.0;
+            CurveCommand loiter;
+            loiter.end = static_cast<double>(EndBehavior::Loiter);
+            rounds[p.id] = Round{alongHeading(p, 4.0 * R)};
+            const CommandResult r = w.submit(p.id, loiter, Span<const NurbsSegment>(&seg, 1));
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            return r.accepted();
+        },
+        [&](const Plane& p) { return (4.0 + 5.5 * kPi) * orbitRadius(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) * 1.1 + 60.0; },
+        [&](const Plane& p) {
+            Round& round = rounds[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            if (r.live()) return;
+            if (round.done < 0.0) round.done = w.simTime();
+            const double R = perf(p).turnRadiusM(r.progress.speedMs); // (its circle: at the pace it flew the curve, calm)
+            if (w.simTime() - round.done < (p.rotor ? 1.0 : 3.0) * kPi * R / std::max(r.progress.speedMs, 0.1)) return;
+            const double d = distanceTo(*w.vehicleState(p.id), round.end);
+            round.near = std::min(round.near, d), round.far = std::max(round.far, d);
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const Round& round = rounds[p.id];
+            const double R = perf(p).turnRadiusM(r.progress.speedMs);
+            INFO(activityStateName(r.state) << "; round its end " << round.near << " to " << round.far << " m, R " << R);
+            CHECK(r.state == ActivityState::Completed);
+            // (the worst: a wing 0.982 to 1.010 of its radius, the Skua's 129 of 132 m and the C172's 361 of 357 m; a rotorcraft
+            // 0.928 to 1.007, the Crazyflie's 6.39 of 6.89 m at a metre a second)
+            CHECK(round.near > (p.rotor ? 0.85 : 0.95) * R);
+            CHECK(round.far < (p.rotor ? 1.1 : 1.05) * R);
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

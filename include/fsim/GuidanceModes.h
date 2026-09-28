@@ -245,7 +245,8 @@ private:
 /// flies it, the curvature fed forward from the curve ahead. Segments appended
 /// (the store's curve the same, more segments) are flown on to; a new curve
 /// is flown afresh. At its end it completes, and flies on along its last
-/// course, or loiters: a wing orbits its end, a rotorcraft hovers there.
+/// course, or loiters: circles its end, a rotorcraft as a wing does (A-GRA's
+/// CIRCULAR_LOITER).
 class FSIM_API CurveBehavior final : public Behavior {
 public:
     CurveBehavior();

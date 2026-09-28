@@ -969,9 +969,9 @@ void CurveBehavior::end(const Performance& perf) {
         k.orbit = route::Turn{};
         k.orbit.centreNorthM = p.p[0], k.orbit.centreEastM = p.p[1];
     }
-    // (a wing's airspeed, or the ground speed, with the wind behind it)
-    k.orbit.radiusM = perf.turnRadiusM(speed_ + std::hypot(wind_.northMs, wind_.eastMs));
-    k.orbit.angleRad = 1.0; // right turns, round its end
+    // (a wing's airspeed with the wind behind it; a rotorcraft's ground speed, the radius its velocity loop follows)
+    k.orbit.radiusM = perf.turnRadiusM(hovers_ ? speed_ : speed_ + std::hypot(wind_.northMs, wind_.eastMs));
+    k.orbit.angleRad = 1.0; // right turns, round its end (A-GRA's CIRCULAR_LOITER: 4.28)
 }
 
 Command CurveBehavior::update(const ControlContext& ctx, const Command& in) {
@@ -1023,21 +1023,14 @@ Command CurveBehavior::update(const ControlContext& ctx, const Command& in) {
         k.fromM = fix.alongM;
         crossTrack_ = fix.crossTrackM; // (past its end, as it was there: what it completed, not the orbit's)
         pace(perf, fix);               // (past its end, on at the speed it had)
-        // its end passed abeam - or, a rotorcraft that stops there, within a metre of it
-        const bool stops = hovers_ && loiter;
-        if (segment_ + 1 == k.count && (t_ >= 1.0 - 1e-9 || (stops && k.lengthM() - k.fromM < 1.0))) end(perf);
+        // its end passed abeam (loitering, each circles it: 4.28)
+        if (segment_ + 1 == k.count && t_ >= 1.0 - 1e-9) end(perf);
     }
     const route::CurvePoint here = k.point(ended_ ? k.count - 1 : segment_, ended_ ? 1.0 : t_);
     altitudeMsl_ = altitudeReference_ == AltitudeReference::Msl && z_ != CurveZ::AbsoluteAltitude ? k.alt0 - here.p[2] : altitudeOf(ctx, s, here.p[2]);
     if (!ended_) feedforward = here.gradient() * groundSpeed_;
     if (frameMoves_ && !isHold(shape_.frameZM) && z_ != CurveZ::AbsoluteAltitude) feedforward -= frameDownMs_; // (its frame's climb)
     if (ended_) {
-        if (loiter && hovers_) { // stopped: hover over its end
-            double lat, lon;
-            k.fromPlane(here.p[0], here.p[1], lat, lon);
-            course_ = heading_ = kHold;
-            return PositionCommand{lat, lon, altitudeMsl_, kHold, 1.0, kHold};
-        }
         if (k.plain() && isHold(shape_.frame)) {
             fix = loiter ? route::onArc(k.orbit, k.lat0, k.lon0, s.latitudeRad, s.longitudeRad)
                          : route::onLine(k.exit, k.lat0, k.lon0, s.latitudeRad, s.longitudeRad);
@@ -1055,13 +1048,13 @@ Command CurveBehavior::update(const ControlContext& ctx, const Command& in) {
     if (!ended_) {
         // the curve ahead: its curvature where a lagging loop should fly it now, and the
         // tightest a few seconds on for a wing's roll into it; a rotorcraft no faster than
-        // the sections ahead allow, slowing in time, and stopping at an end where it hovers
+        // the sections ahead allow, slowing in time
         ahead.curvatureAt = route::curvatureAhead;
         ahead.path = &k;
         double tightest = std::abs(fix.curvature);
         for (const double seconds : {1.0, 2.0, 4.0}) tightest = std::max(tightest, std::abs(route::curvatureAhead(&k, seconds * std::max(groundSpeed_, 1.0))));
         if (tightest > 1e-6) ahead.turnRadiusM = 1.0 / tightest;
-        if (hovers_) steer.speedLimitMs = route::speedLimitAhead(perf, k, std::max(speed_, groundSpeed_), loiter);
+        if (hovers_) steer.speedLimitMs = route::speedLimitAhead(perf, k, std::max(speed_, groundSpeed_), false);
     }
     if (frameMoves_) { // flown over its frame, as a pattern is (4.25): its velocity and the wind's over it, a rotorcraft's given back
         sim::VehicleState over = s;

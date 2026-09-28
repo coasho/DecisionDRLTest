@@ -687,6 +687,18 @@ A-GRA places a curve by its CenterReference: a geodetic point with an altitude i
   - C ABI 1.25: `FSIM_MODE_CURVE` takes 20 fields. Eight are still taken; the reference's follow them, then the frame's (14 to 19). `enum fsim_curve_z`. A curve's setpoint reads back all 20.
   - Python: `submit_curve`, `update_curve`, `append`, batches and tasks take `altitude_reference`, `altitude_min_m`, `altitude_max_m`, `point_rotation`, `point_offsets`, `point_z` (`fsim.CurveZ`), `frame`, `frame_rotation`, `frame_offsets`, `frame_x_m`, `frame_y_m` and `frame_z_m`, codes by name or member.
 
+### 4.28 A-GRA's circular loiter at a curve's end (as FA-5d3 builds it)
+
+A-GRA ends a curve by its EndOfCurveBehavior: on at its course, speed and altitude (CSA), or "a circular loiter pattern centered around the curve's endpoint" (CIRCULAR_LOITER, CRV-11). A wing orbited the end point; a rotorcraft stopped and hovered over it. FA-5d3 makes a rotorcraft circle it too.
+
+- **Round its end** (`EndBehavior::Loiter` after a curve): each aircraft passes its end at the curve's pace, completes there, and circles the end point in right turns.
+  - A wing's radius is as before: its turn radius (80 % of its bank) at its airspeed with the wind behind it.
+  - A rotorcraft's is its turn radius at its ground speed: its acceleration's, and no tighter than its velocity loop follows (the orbit's own when its radius is left out, 4.23).
+  - A rotorcraft no longer slows to stop at the end: it flies it at the curve's pace, as a wing does, and a duration now brings it there on time at that pace.
+- **A route's end is unchanged:** a rotorcraft stops at its last point and hovers there. Routes are FA-6's.
+- **The terrain walk** circles a rotorcraft's end at its radius, as a wing's, where it walked the point alone.
+- **Surfaces:** none new. `EndBehavior::Loiter`, `FSIM_END_LOITER` and `fsim.EndBehavior.LOITER` say what it does after a curve and after a route. `fsim.guidance.curve/end/circular_loiter` is supported, and with it the curve as a whole.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -894,14 +906,14 @@ Magnetic and barometric references in every mode and in the state; the QNH setti
 
 Laps, entry and exit points, legs by time, turns by bank, rate or type, hold contexts and entries, two-circle patterns, the hover loiter with a duration; general NURBS curves with their references, curvature and indices.
 
-**Status:** in progress, in four steps, each measured in section 14:
+**Status:** done 2026-09-28 in four steps, each measured in section 14:
 - FA-5a, A-GRA's orbit: two circles, the fix-point orbit's heading, leg time and bank, laps, entry and exit points (LTR-03, LTR-05, LTR-06, LTR-07, LTR-10; 4.23), done 2026-09-28 and measured in section 14;
 - FA-5b, the hold: its turns by rate and type, its duration by entry and exit times, its entries and context (LTR-11 to LTR-14; 4.24), done 2026-09-28 and measured in section 14;
 - FA-5c, the hover loiter and relative points (LTR-15, LTR-18; 4.25), done 2026-09-28 and measured in section 14;
 - FA-5d, curves as the schema gives them, in three steps:
   - FA-5d1, general NURBS with their curvature and indices (CRV-03, CRV-08; 4.26), done 2026-09-28 and measured in section 14;
   - FA-5d2, the curve's reference and its control points' offsets: an altitude reference and range, a frame, rotations, geodetic offsets and altitude choices (CRV-04, CRV-05, CRV-06; 4.27), done 2026-09-28 and measured in section 14;
-  - FA-5d3, a rotorcraft's circular loiter at the curve's end (CRV-11).
+  - FA-5d3, a rotorcraft's circular loiter at the curve's end (CRV-11; 4.28), done 2026-09-28 and measured in section 14.
 
 **Items (17):** CRV-03, CRV-04, CRV-05, CRV-06, CRV-08, CRV-11; LTR-03, LTR-05, LTR-06, LTR-07, LTR-10, LTR-11, LTR-12, LTR-13, LTR-14, LTR-15, LTR-18.
 
@@ -1889,6 +1901,19 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The micro cases are within −1.6 % to +0.6 % (the curve's −1.0 %); the command cases within −1.3 % to +0.4 %, but a same-level update's +3.0 % in both runs (6.8 ns where it was 6.6).
   - That update is `World::command` with the host's `updateLegacy` inlined. Its code is the same instruction for instruction, prologue included; it sits 0x110 bytes later, 16 bytes into a cache line where it began one. Built before a four-line change elsewhere in the host (the append's refusal, taken out), it read −1.5 %: placement, not its path.
   - World throughput is 100.0 to 100.2 % of FA-5d1's; protection costs at most 1.3 % (the B-52H's; the run before read 0.4 %).
+- ctest: all 282 tests pass.
+
+**FA-5d3, A-GRA's circular loiter at a curve's end (CRV-11).**
+- **Round its end** (`test_curves`, calm): an IRIS's curve at 4 m/s ending in a loiter. From a minute after it completed, it circled its end at 7.49 to 7.51 m, its radius 7.50 m, at 4.00 m/s. Until now it stopped over the end and hovered (0.01 m). The C172x beside it orbits its end at 397 to 400 m as before.
+- **On time:** an IRIS given a duration over a short curve ending in a loiter reached its end in 34.5 s of 34.5 (0.1 %). Braking to stop there, it read 34.2 s (−0.8 %).
+- **The fleet** (`test_fleet`): every aircraft flies a straight cubic four orbit radii along its heading and loiters at its end. All 35 complete and circle it at the radius their pace gives. From half a lap after completing, the rotorcraft keep within 0.928 to 1.007 of it (the Crazyflie's 6.39 of 6.89 m at a metre a second); from a lap and a half, the wings within 0.982 to 1.010 (the Skua's 129 of 132 m, the C172's 361 of 357 m).
+  - A wing joins its circle from the centre, as it always has. Half a lap on, the heavies were still out at 1.43 of their radius, settling within the next lap.
+- **Changed, named:** FA-5d1's probe, flown by this build. Its 42 lines of the C172x's curve, and of the IRIS's up to its end, are identical to FA-5c's. The IRIS's 22 lines from its end at 25 s circle the end where they hovered over it. The digests fly no curve.
+- **The support table:** `fsim.guidance.curve/end/circular_loiter` is supported, and with it `fsim.guidance.curve`: the curve has nothing missing.
+- **Digests:** identical to FA-5d2's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-5d2, both builds run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`.
+  - The micro cases are within −0.4 % to +0.9 %; the command cases within −1.2 % to +0.1 %.
+  - World throughput is 99.8 to 100.0 % of FA-5d2's (3 rounds read 98.8 to 100.4 %); protection costs at most 0.6 %.
 - ctest: all 282 tests pass.
 
 ## Appendix A: the inventory

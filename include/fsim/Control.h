@@ -180,7 +180,8 @@ enum class Projection : std::uint8_t { GreatCircle = 0, Rhumb = 1, Count };
 /// What a route does after its last point.
 enum class EndBehavior : std::uint8_t {
     Continue = 0, ///< the last leg's course, altitude and speed, on along the leg
-    Loiter = 1,   ///< a wing orbits the point, at the radius its speed and 80 % of its bank give; a rotorcraft stops and hovers there
+    Loiter = 1,   ///< a wing orbits the point, at the radius its speed and 80 % of its bank give; after a route a rotorcraft stops
+                  ///< and hovers there, after a curve it circles its end too (A-GRA's CIRCULAR_LOITER)
     Count
 };
 

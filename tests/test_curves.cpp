@@ -332,14 +332,14 @@ TEST_CASE("curve: a duration is met; a range holds a wing's airspeed and a rotor
     CHECK(slowestGs > 35.0);
     CHECK(w.activity(d.activity)->progress.speedReference == static_cast<double>(SpeedReference::TrueAirspeed));
 
-    // a multirotor: a duration over its short curve, stopping at its end, and a ground speed within its range
+    // a multirotor: a duration over its short curve, circling its end, and a ground speed within its range
     session::World calm(options("curves-pace-rotor"));
     const auto quad = rotor(calm, "iris", 15.0, 0), other = rotor(calm, "iris", 15.0, 3);
     const Design q = sAbout(10.0, 2.0);
     const auto qs = q.segments();
     CurveCommand qc;
     qc.durationS = Polyline(qs).lengthM() / 3.0;
-    qc.end = code(EndBehavior::Loiter); // (braking to its end on time, not slowing with what is left to nothing short of it)
+    qc.end = code(EndBehavior::Loiter); // (on time to its end, not slowing with what is left to nothing short of it)
     const CommandResult e = calm.submit(quad, qc, qs);
     REQUIRE(e.accepted());
     CurveCommand qr;
@@ -442,7 +442,7 @@ TEST_CASE("curve: segments appended while flying are flown on to; a new curve is
     CHECK(w.activity(again.activity)->progress.speedMs > 57.0);
 }
 
-TEST_CASE("curve: at its end a curve continues, orbits its end or hovers there", "[modes]") {
+TEST_CASE("curve: at its end a curve continues, or circles its end - a wing and a rotorcraft alike (A-GRA's CIRCULAR_LOITER)", "[modes]") {
     session::World w(options("curves-ends"));
     const auto goer = wing(w, "c172x", 1500.0, 55.0, 0), orbiter = wing(w, "c172x", 1500.0, 55.0, 3);
     settle(w, {goer, orbiter}, 5.0);
@@ -454,21 +454,22 @@ TEST_CASE("curve: at its end a curve continues, orbits its end or hovers there",
     const auto& o = *w.vehicleState(orbiter);
     const double oLat = o.latitudeRad, oLon = o.longitudeRad;
     const CommandResult orbit = w.submit(orbiter, loiter, wingS);
-    const auto hoverer = rotor(w, "iris", 15.0, 6), dasher = rotor(w, "uh60", 15.0, 9);
-    const auto& h = *w.vehicleState(hoverer);
+    const auto circler = rotor(w, "iris", 15.0, 6), dasher = rotor(w, "uh60", 15.0, 9);
+    const auto& h = *w.vehicleState(circler);
     const double hLat = h.latitudeRad, hLon = h.longitudeRad;
-    CurveCommand stop = loiter;
-    stop.speedMinMs = stop.speedMaxMs = 4.0;
+    CurveCommand round = loiter;
+    round.speedMinMs = round.speedMaxMs = 4.0;
     const auto rotorS = sAbout(10.0, 0.0).segments();
-    const CommandResult hover = w.submit(hoverer, stop, rotorS);
+    const CommandResult circle = w.submit(circler, round, rotorS);
     CurveCommand dash;
     dash.speedMinMs = dash.speedMaxMs = 15.0;
     const CommandResult on = w.submit(dasher, dash, sAbout(150.0, 0.0).segments());
-    REQUIRE((go.accepted() && orbit.accepted() && hover.accepted() && on.accepted()));
+    REQUIRE((go.accepted() && orbit.accepted() && circle.accepted() && on.accepted()));
 
     const auto endOf = [](const std::vector<BezierSegment>& s) { return casteljau(s.back(), 1.0); };
     const auto wingEnd = endOf(wingS), rotorEnd = endOf(rotorS);
     double orbitMin = 1e9, orbitMax = 0.0, done = -1.0, courseOff = 0.0;
+    double roundMin = 1e9, roundMax = 0.0, roundDone = -1.0, roundSlow = 1e9, roundFast = 0.0;
     for (unsigned k = 0; k < stepsFor(w, 700.0); ++k) {
         w.step();
         if (!w.activity(orbit.activity)->live() && done < 0.0) done = w.simTime();
@@ -477,16 +478,20 @@ TEST_CASE("curve: at its end a curve continues, orbits its end or hovers there",
             const double d = std::hypot(p.north - wingEnd[0], p.east - wingEnd[1]);
             orbitMin = std::min(orbitMin, d), orbitMax = std::max(orbitMax, d);
         }
+        if (!w.activity(circle.activity)->live() && roundDone < 0.0) roundDone = w.simTime();
+        if (roundDone > 0.0 && w.simTime() > roundDone + 60.0) { // settled round its end
+            const Local p = from(*w.vehicleState(circler), hLat, hLon);
+            const double d = std::hypot(p.north - rotorEnd[0], p.east - rotorEnd[1]), v = groundSpeed(*w.vehicleState(circler));
+            roundMin = std::min(roundMin, d), roundMax = std::max(roundMax, d), roundSlow = std::min(roundSlow, v), roundFast = std::max(roundFast, v);
+        }
         if (!w.activity(go.activity)->live()) courseOff = std::max(courseOff, std::abs(degreesApart(track(*w.vehicleState(goer)), 0.5 * kPi)));
     }
-    const Local hp = from(*w.vehicleState(hoverer), hLat, hLon);
-    const double hoverOff = std::hypot(hp.north - rotorEnd[0], hp.east - rotorEnd[1]);
-    const double orbitR = w.performance(orbiter)->turnRadiusM(55.0);
-    std::printf("curve ends: on at most %.1f deg off its last course; orbit %.0f to %.0f m (R %.0f); iris %.2f m from its end at %.2f m/s; uh60 on at %.1f deg, "
-                "%.1f m/s\n",
-                courseOff, orbitMin, orbitMax, orbitR, hoverOff, groundSpeed(*w.vehicleState(hoverer)), track(*w.vehicleState(dasher)) / kDeg,
+    const double orbitR = w.performance(orbiter)->turnRadiusM(55.0), roundR = w.performance(circler)->turnRadiusM(4.0);
+    std::printf("curve ends: on at most %.1f deg off its last course; orbit %.0f to %.0f m (R %.0f); iris round its end %.2f to %.2f m (R %.2f) at %.2f to "
+                "%.2f m/s; uh60 on at %.1f deg, %.1f m/s\n",
+                courseOff, orbitMin, orbitMax, orbitR, roundMin, roundMax, roundR, roundSlow, roundFast, track(*w.vehicleState(dasher)) / kDeg,
                 groundSpeed(*w.vehicleState(dasher)));
-    for (const ActivityId id : {go.activity, orbit.activity, hover.activity, on.activity}) {
+    for (const ActivityId id : {go.activity, orbit.activity, circle.activity, on.activity}) {
         CHECK(w.activity(id)->state == ActivityState::Completed);
         CHECK(w.activity(id)->reason == Reason::GoalReached);
     }
@@ -495,8 +500,10 @@ TEST_CASE("curve: at its end a curve continues, orbits its end or hovers there",
     CHECK(orbitMin > 0.8 * orbitR);
     CHECK(orbitMax < 1.25 * orbitR);
     CHECK(std::abs(w.activity(orbit.activity)->progress.crossTrackM) < 20.0); // at its end, off the curve: not the orbit's radius
-    CHECK(hoverOff < 1.0);
-    CHECK(groundSpeed(*w.vehicleState(hoverer)) < 0.3);
+    CHECK(roundMin > 0.9 * roundR); // (a rotorcraft round its end, as a wing: at the radius its velocity loop follows)
+    CHECK(roundMax < 1.1 * roundR);
+    CHECK(roundSlow > 3.5);
+    CHECK(roundFast < 4.5);
     CHECK(std::abs(degreesApart(track(*w.vehicleState(dasher)), 0.5 * kPi)) < 3.0);
     CHECK(std::abs(groundSpeed(*w.vehicleState(dasher)) - 15.0) < 1.0); // at the speed it flew the curve
 }

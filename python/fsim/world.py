@@ -713,7 +713,8 @@ class Projection(enum.IntEnum):
 
 class EndBehavior(enum.IntEnum):
     """What a route or curve does after its end: on along the last leg or course (its altitude and speed), or
-    loiter there - a wing orbits the point, a rotorcraft stops and hovers over it."""
+    loiter there - a wing orbits the point; after a route a rotorcraft stops and hovers over it, after a curve it circles
+    it too (A-GRA's CIRCULAR_LOITER)."""
     CONTINUE = 0
     LOITER = 1
 

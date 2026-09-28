@@ -725,7 +725,7 @@ enum fsim_direction_reference { FSIM_DIRECTION_TRUE_NORTH = 0, FSIM_DIRECTION_MA
 enum fsim_curve_z { FSIM_CURVE_Z_DOWN = 0, FSIM_CURVE_Z_ALTITUDE_OFFSET, FSIM_CURVE_Z_ABSOLUTE_ALTITUDE }; /* A-GRA's Z_ChoiceType (ABI 1.25) */
 enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
-enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft) */
+enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft after a route; after a curve it circles it) */
 FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 29, curve 8 (1.14: hsa 6, pattern 12; 1.15: hsa 7, pattern 13;
                                                       1.20: hsa 8; 1.21: pattern 25); 0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
