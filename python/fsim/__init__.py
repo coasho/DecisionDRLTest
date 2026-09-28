@@ -143,6 +143,8 @@ from .world import (  # noqa: E402
     PathType,
     RouteBranch,
     Comparison,
+    RouteTerminator,
+    PathTerminator,
     Scenario,
     SUPPORT_FEATURES,
     Source,

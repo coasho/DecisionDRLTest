@@ -54,10 +54,11 @@ public:
     /// (4.36; at most PathStore::kRoutePaths): flown along its links from its
     /// start - links it cannot fly (paths that do not tile its points, a next
     /// that is none, round one point) leave it nothing to fly, and it fails -
-    /// and its conditional branches (4.37; at most PathStore::kRouteBranches),
-    /// unchecked.
+    /// its conditional branches (4.37; at most PathStore::kRouteBranches) and
+    /// its civil path terminators' data (4.38; at most
+    /// PathStore::kRouteTerminators), unchecked.
     void command(const RouteCommand& route, Span<const Waypoint> waypoints, Span<const RouteLoiter> loiters = {}, Span<const RouteState> states = {},
-                 Span<const RoutePath> paths = {}, Span<const RouteBranch> branches = {});
+                 Span<const RoutePath> paths = {}, Span<const RouteBranch> branches = {}, Span<const RouteTerminator> terminators = {});
     /// A curve (fsim.guidance.curve) with its segments, into the stack's own
     /// path store (at most PathStore::kSegments), flown afresh; unchecked, as
     /// every command given the stack on its own. Bezier segments, or as

@@ -254,6 +254,10 @@ struct Waypoint {
     // A-GRA's NextPathSegment (docs/flight-autonomy.md, 4.36): the waypoint flown after it, its index; -1, the route's end
     // there; left out, the next in its path (after its path's last, the route's end) - no paths given, the next as they are
     double next = kHold;
+    // A-GRA's CivilPathTerminator (docs/flight-autonomy.md, 4.38): the ARINC 424 leg type of the leg into it
+    // (PathTerminator), its data - a course to fix's, a radius to fix's - in a RouteTerminator beside it; left out, the
+    // route's own leg, as before
+    double terminator = kHold;
     /// Its point in its frame: the offsets left out, the frame's origin.
     FrameOffset frameOffset() const noexcept {
         FrameOffset o;
@@ -608,6 +612,63 @@ struct RouteBranch {
     }
 };
 
+/// A-GRA's civil path terminators (CivilPathTerminatorType; docs/flight-autonomy.md, 4.38): the ARINC 424 leg type of the
+/// leg into a waypoint (Waypoint::terminator), in its schema's order - ARINC 424's codes beside them. A-GRA gives data for a
+/// course to fix and a radius to fix (RouteTerminator) and leaves the others empty: a leg is flown where its segment carries
+/// what defines it.
+enum class PathTerminator : std::uint8_t {
+    ArcToFix,                         ///< AF: a DME arc round a navaid - none given, not a leg its segment defines
+    CourseToAltitude,                 ///< CA: its course until its altitude (FA-6f2)
+    CourseToDmeDistance,              ///< CD: to a navaid's DME distance - not defined
+    CourseToFix,                      ///< CF: its course into its point (RouteTerminator::courseRad)
+    CourseToIntercept,                ///< CI: its course until it meets the next leg (FA-6f2)
+    CourseToRadial,                   ///< CR: to a navaid's radial - not defined
+    DirectToFix,                      ///< DF: straight to its point from where the aircraft is as the leg begins
+    TrackToAltitude,                  ///< FA: from the point before on its course until its altitude (FA-6f2)
+    TrackFromFixToDistanceAlongTrack, ///< FC: from the point before on its course for a distance (FA-6f2)
+    TrackFromFixToDmeDistance,        ///< FD: to a navaid's DME distance - not defined
+    FixToManualTermination,           ///< FM: from the point before on its course until the operator ends it (FA-6f2)
+    HoldingWithAltitudeTermination,   ///< HA: a hold until its altitude (FA-6f2)
+    HoldingWithFixTermination,        ///< HF: a hold once round, to its fix (FA-6f2)
+    HoldingWithManualTermination,     ///< HM: a hold until the operator ends it (FA-6f2)
+    InitialFix,                       ///< IF: where a procedure begins - flown to as a direct to fix is
+    ProcedureTurnToIntercept,         ///< PI: a procedure turn - its outbound course, side and limit not given: not defined
+    RadiusToFix,                      ///< RF: an arc round its centre from the point before (RouteTerminator)
+    TrackToFix,                       ///< TF: the great circle from the point before
+    HeadingToAltitude,                ///< VA: a heading until its altitude (FA-6f2)
+    HeadingToDmeDistanceTermination,  ///< VD: to a navaid's DME distance - not defined
+    HeadingToIntercept,               ///< VI: a heading until it meets the next leg (FA-6f2)
+    HeadingToManual,                  ///< VM: a heading until the operator ends it (FA-6f2)
+    HeadingToRadialTermination,       ///< VR: to a navaid's radial - not defined
+    Count
+};
+
+/// A civil path terminator's data (A-GRA's CF_CourseToFixType and RF_RadiusToFixType; docs/flight-autonomy.md, 4.38): the
+/// leg into waypoint `point`, whose `terminator` names its type - a course to fix's course, or a radius to fix's arc. Beside
+/// the waypoints, as the loiters are: 64 a route at most, one a point. A field left out is not checked; a course to fix
+/// needs its course, a radius to fix its centre and its way round, and what else it gives must be its arc's.
+struct RouteTerminator {
+    std::uint32_t point = 0;          ///< the waypoint whose leg it is (its index as given)
+    double courseRad = kHold;         ///< CF's Course: the course into its point, from true north
+    double centerLatitudeRad = kHold, centerLongitudeRad = kHold; ///< RF's RadiusCenterPoint
+    double radiusM = kHold;           ///< RF's TurnRadius
+    double courseInRad = kHold, courseOutRad = kHold; ///< RF's CourseIn and CourseOut: the arc's courses at its start and its end
+    double initialLatitudeRad = kHold, initialLongitudeRad = kHold; ///< RF's ArcInitialPoint: where it starts, the point before
+    double endLatitudeRad = kHold, endLongitudeRad = kHold;         ///< RF's ArcEndPoint: where it ends, its point
+    double arcM = kHold;              ///< RF's ArcDistance: along the arc
+    double chordM = kHold;            ///< RF's ArcDirectDistance: straight from its start to its end
+    double clockwise = kHold;         ///< RF's TurnDirection: 1 right, 0 left (as a pattern's)
+
+    /// Its fields after `point`, in order (the C ABI's and Python's): pointers into it.
+    static constexpr std::size_t kFields = 13;
+    void fields(double* f[kFields]) noexcept {
+        double* all[kFields] = {&courseRad,          &centerLatitudeRad,   &centerLongitudeRad, &radiusM, &courseInRad,
+                                &courseOutRad,       &initialLatitudeRad,  &initialLongitudeRad, &endLatitudeRad,
+                                &endLongitudeRad,    &arcM,                &chordM,             &clockwise};
+        for (std::size_t k = 0; k < kFields; ++k) f[k] = all[k];
+    }
+};
+
 /// The loiter a route's loiter point flies (A-GRA's LoiterPoint, MA_LoiterPointType; docs/flight-autonomy.md, 4.31):
 /// a pattern - an orbit, a racetrack, a figure-eight, a hold or a hover, with its shape - and the time it ends. Beside
 /// the route's waypoints, as they go beside its RouteCommand (World::submit and update take a Span): 16 a route at most.
@@ -719,6 +780,10 @@ struct PathStore {
     std::uint32_t routeBranchCount = 0;
     RouteBranch routeBranches[kRouteBranches];
     std::uint32_t routeCommanded = 0;
+    /// Its civil path terminators' data as given (4.38): 64 a route at most.
+    static constexpr std::size_t kRouteTerminators = 64;
+    std::uint32_t routeTerminatorCount = 0;
+    RouteTerminator routeTerminators[kRouteTerminators];
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -790,6 +855,7 @@ struct BatchCommand {
     Span<const RouteState> states;       ///< a RouteCommand's: its planned inertial states (4.34)
     Span<const RoutePath> paths;         ///< a RouteCommand's: its paths (4.36)
     Span<const RouteBranch> branches;    ///< a RouteCommand's: its conditional branches (4.37)
+    Span<const RouteTerminator> terminators; ///< a RouteCommand's: its civil path terminators' data (4.38)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight
@@ -808,6 +874,7 @@ struct Setpoint {
     std::vector<RouteState> states;      ///< a route's planned inertial states, as placed (4.34)
     std::vector<RoutePath> paths;        ///< a route's paths (4.36)
     std::vector<RouteBranch> branches;   ///< a route's conditional branches (4.37)
+    std::vector<RouteTerminator> terminators; ///< a route's civil path terminators' data (4.38)
 };
 
 /// Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType;

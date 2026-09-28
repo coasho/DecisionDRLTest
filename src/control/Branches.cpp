@@ -46,8 +46,10 @@ Reason CapabilityHost::checkBranches(route::Plan& p, Span<const Waypoint> waypoi
                                      CommandResult& detail) const noexcept {
     p.branchCount = 0;
     if (branches.empty()) return Reason::None;
-    auto at = [&detail](std::uint32_t point, Reason why) {
-        detail.index = static_cast<std::int16_t>(std::min<std::uint32_t>(point, 0x7FFF));
+    // named where its point is in the plan (a linked route's flight order), so the answer names it as given (4.36)
+    auto at = [&p, &detail](std::uint32_t point, Reason why) {
+        const std::uint32_t i = p.linked && point < p.given ? p.position[point] : point;
+        detail.index = static_cast<std::int16_t>(std::min<std::uint32_t>(i, 0x7FFF));
         return why;
     };
     if (branches.size() > PathStore::kRouteBranches) return at(branches[PathStore::kRouteBranches].point, Reason::InvalidWaypoint);
@@ -126,11 +128,13 @@ void CapabilityHost::holdExtras(Waiting& w, const RouteExtras* extras) const {
     w.states.reserve(PathStore::kRouteStates), w.states.clear(), w.passed.clear();
     w.paths.reserve(PathStore::kRoutePaths), w.paths.clear();
     w.branches.reserve(PathStore::kRouteBranches), w.branches.clear(), w.commanded = 0;
+    w.terminators.reserve(PathStore::kRouteTerminators), w.terminators.clear();
     if (!extras) return;
     w.loiters.assign(extras->loiters.begin(), extras->loiters.end());
     w.states.assign(extras->states.begin(), extras->states.end());
     w.paths.assign(extras->paths.begin(), extras->paths.end());
     w.branches.assign(extras->branches.begin(), extras->branches.end());
+    w.terminators.assign(extras->terminators.begin(), extras->terminators.end());
 }
 
 std::uint32_t ControlStack::ahead(std::size_t slot, std::uint32_t* points, std::uint32_t max, bool& ends) const noexcept {

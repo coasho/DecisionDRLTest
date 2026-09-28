@@ -784,6 +784,10 @@ typedef struct fsim_waypoint {
     /* ABI 1.33 (4.36): A-GRA's NextPathSegment - the waypoint flown after it, its index; -1, the route's end there; left
        out, the next in its path (after its path's last, the route's end), or - no paths given - the next as they are */
     double next;
+    /* ABI 1.35 (4.38): A-GRA's CivilPathTerminator - the ARINC 424 leg type of the leg into it (fsim_path_terminator), its
+       data (a course to fix's course, a radius to fix's arc) in an fsim_route_terminator beside it; left out, the route's
+       own leg */
+    double terminator;
 } fsim_waypoint;
 enum fsim_climb_optimization { FSIM_CLIMB_BEST_RATE = 0, FSIM_CLIMB_EXTENDED_RANGE }; /* A-GRA's ClimbOptimizationEnum (ABI 1.29) */
 /* What a waypoint is for (A-GRA's WaypointTypeEnum; ABI 1.26): nav only and passive are flown; the end of a path at its
@@ -918,9 +922,54 @@ typedef struct fsim_route_branch {
     double fields[15];
 } fsim_route_branch;
 FSIM_API void fsim_route_branch_init(fsim_route_branch* branch);
+/* A-GRA's civil path terminators (CivilPathTerminatorType; ABI 1.35; docs/flight-autonomy.md, 4.38): the ARINC 424 leg type
+ * of the leg into a waypoint, in the schema's order, ARINC 424's code beside each. Flown: TF (the great circle from the point
+ * before), IF and DF (straight to the point from where the aircraft is as the leg begins), CF (its course into the point:
+ * fsim_route_terminator's course), RF (an arc round its centre from the point before: fsim_route_terminator's). Refused
+ * "not_implemented" (FA-6f2): CA, CI, FA, FC, FM, HA, HF, HM, VA, VI, VM. Refused "invalid_waypoint", a leg its segment does
+ * not define (A-GRA 6.0a gives no navaid, nor a procedure turn's data): AF, CD, CR, FD, PI, VD, VR. */
+enum fsim_path_terminator {
+    FSIM_PATH_TERMINATOR_ARC_TO_FIX = 0,                        /* AF */
+    FSIM_PATH_TERMINATOR_COURSE_TO_ALTITUDE,                    /* CA */
+    FSIM_PATH_TERMINATOR_COURSE_TO_DME_DISTANCE,                /* CD */
+    FSIM_PATH_TERMINATOR_COURSE_TO_FIX,                         /* CF */
+    FSIM_PATH_TERMINATOR_COURSE_TO_INTERCEPT,                   /* CI */
+    FSIM_PATH_TERMINATOR_COURSE_TO_RADIAL,                      /* CR */
+    FSIM_PATH_TERMINATOR_DIRECT_TO_FIX,                         /* DF */
+    FSIM_PATH_TERMINATOR_TRACK_TO_ALTITUDE,                     /* FA */
+    FSIM_PATH_TERMINATOR_TRACK_FROM_FIX_TO_DISTANCE_ALONG_TRACK, /* FC */
+    FSIM_PATH_TERMINATOR_TRACK_FROM_FIX_TO_DME_DISTANCE,        /* FD */
+    FSIM_PATH_TERMINATOR_FIX_TO_MANUAL_TERMINATION,             /* FM */
+    FSIM_PATH_TERMINATOR_HOLDING_WITH_ALTITUDE_TERMINATION,     /* HA */
+    FSIM_PATH_TERMINATOR_HOLDING_WITH_FIX_TERMINATION,          /* HF */
+    FSIM_PATH_TERMINATOR_HOLDING_WITH_MANUAL_TERMINATION,       /* HM */
+    FSIM_PATH_TERMINATOR_INITIAL_FIX,                           /* IF */
+    FSIM_PATH_TERMINATOR_PROCEDURE_TURN_TO_INTERCEPT,           /* PI */
+    FSIM_PATH_TERMINATOR_RADIUS_TO_FIX,                         /* RF */
+    FSIM_PATH_TERMINATOR_TRACK_TO_FIX,                          /* TF */
+    FSIM_PATH_TERMINATOR_HEADING_TO_ALTITUDE,                   /* VA */
+    FSIM_PATH_TERMINATOR_HEADING_TO_DME_DISTANCE_TERMINATION,   /* VD */
+    FSIM_PATH_TERMINATOR_HEADING_TO_INTERCEPT,                  /* VI */
+    FSIM_PATH_TERMINATOR_HEADING_TO_MANUAL,                     /* VM */
+    FSIM_PATH_TERMINATOR_HEADING_TO_RADIAL_TERMINATION          /* VR */
+};
+/* A civil path terminator's data (ABI 1.35; docs/flight-autonomy.md, 4.38; A-GRA's CF_CourseToFixType, RF_RadiusToFixType):
+ * the leg into waypoint `point`, whose `terminator` names it. `fields` in this order - CF's course (from true north); RF's
+ * centre latitude and longitude, radius (m), courses in and out (the arc's at its start and end), initial point's latitude
+ * and longitude (the point before's), end point's latitude and longitude (its point's), arc distance (m), direct distance
+ * (m), way round (1 right, 0 left) - 13. 64 a route at most, one a point. A course to fix needs its course; a radius to fix
+ * its centre and its way round, the rest checked against its arc where given (a metre or half a percent; a degree). Refused
+ * "invalid_waypoint" naming the point for data that is none, or not its leg's. fsim_route_terminator_init leaves every
+ * field out (fsim_hold()). */
+typedef struct fsim_route_terminator {
+    uint32_t struct_size;
+    uint32_t point;
+    double fields[13];
+} fsim_route_terminator;
+FSIM_API void fsim_route_terminator_init(fsim_route_terminator* terminator);
 /* What goes beside a route's waypoints (ABI 1.33): its loiter points' loiters, its planned states and its paths - and its
- * conditional branches (ABI 1.34), where the caller's struct_size has them - each array's struct_size apart.
- * fsim_route_extras_init: none. */
+ * conditional branches (ABI 1.34) and civil path terminators' data (ABI 1.35), where the caller's struct_size has them -
+ * each array's struct_size apart. fsim_route_extras_init: none. */
 typedef struct fsim_route_extras {
     uint32_t struct_size;
     uint32_t loiter_count;
@@ -931,6 +980,8 @@ typedef struct fsim_route_extras {
     const fsim_route_path* paths;
     uint32_t branch_count;
     const fsim_route_branch* branches;
+    uint32_t terminator_count;                  /* ABI 1.35: its civil path terminators' data */
+    const fsim_route_terminator* terminators;
 } fsim_route_extras;
 FSIM_API void fsim_route_extras_init(fsim_route_extras* extras);
 /* A route with what goes beside its waypoints (`extras` NULL: none); else as fsim_vehicle_submit_route. */
@@ -1255,6 +1306,8 @@ typedef struct fsim_batch_command {
     uint32_t path_count;
     const fsim_route_branch* branches;      /* FSIM_BATCH_ROUTE's conditional branches (ABI 1.34), branches[0].struct_size bytes apart */
     uint32_t branch_count;
+    const fsim_route_terminator* terminators; /* FSIM_BATCH_ROUTE's civil path terminators' data (ABI 1.35), struct_size bytes apart */
+    uint32_t terminator_count;
 } fsim_batch_command;
 /* Several NEWs at once (A-GRA's several command instances in one message), `batch[0].struct_size` bytes apart, made in
  * order at this simulation time: `results[i]` answers `batch[i]`, and `details[i]` (may be NULL; `details[0].struct_size`

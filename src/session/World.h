@@ -119,11 +119,12 @@ public:
     /// NEW for a support effector the vehicle has (gear, flaps, brakes, speedbrake, pitch trim) or its engines' throttles.
     control::CommandResult submit(std::uint32_t id, const control::SupportCommand& command, const control::CommandOptions& options = {});
     /// NEW of a route (fsim.guidance.route) with its waypoints (docs/vehicle-interface.md, 4.5), its loiter points'
-    /// loiters (docs/flight-autonomy.md, 4.31), its planned states (4.34), its paths (4.36) and its branches (4.37).
+    /// loiters (docs/flight-autonomy.md, 4.31), its planned states (4.34), its paths (4.36), its branches (4.37) and its
+    /// civil path terminators' data (4.38).
     control::CommandResult submit(std::uint32_t id, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                   const control::CommandOptions& options = {}, Span<const control::RouteLoiter> loiters = {},
                                   Span<const control::RouteState> states = {}, Span<const control::RoutePath> paths = {},
-                                  Span<const control::RouteBranch> branches = {});
+                                  Span<const control::RouteBranch> branches = {}, Span<const control::RouteTerminator> terminators = {});
     /// NEW of a curve (fsim.guidance.curve) with its segments (docs/vehicle-interface.md, 4.7): Bezier segments, or as
     /// A-GRA's schema gives them (docs/flight-autonomy.md, 4.26); its reference in a frame beside it, `shape` (4.27).
     control::CommandResult submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
@@ -145,11 +146,12 @@ public:
     /// UPDATE: a new setpoint for a live activity (the fast path).
     control::CommandResult update(control::ActivityId activity, const control::Command& setpoint);
     control::CommandResult update(control::ActivityId activity, const control::SupportCommand& setpoint);
-    /// UPDATE of a route: new options (kHold keeps one) and waypoints with their loiters, states, paths and branches (none:
-    /// those it has); flown afresh from its start.
+    /// UPDATE of a route: new options (kHold keeps one) and waypoints with their loiters, states, paths, branches and
+    /// terminators (none: those it has); flown afresh from its start.
     control::CommandResult update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                   Span<const control::RouteLoiter> loiters = {}, Span<const control::RouteState> states = {},
-                                  Span<const control::RoutePath> paths = {}, Span<const control::RouteBranch> branches = {});
+                                  Span<const control::RoutePath> paths = {}, Span<const control::RouteBranch> branches = {},
+                                  Span<const control::RouteTerminator> terminators = {});
     /// UPDATE of a curve: options, and segments appended (append 1) or a new curve.
     control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
                                   const control::CurveShape* shape = nullptr);
@@ -169,7 +171,7 @@ public:
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
                                   Span<const control::Waypoint> waypoints, Span<const control::RouteLoiter> loiters = {},
                                   Span<const control::RouteState> states = {}, Span<const control::RoutePath> paths = {},
-                                  Span<const control::RouteBranch> branches = {});
+                                  Span<const control::RouteBranch> branches = {}, Span<const control::RouteTerminator> terminators = {});
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::BezierSegment> segments, const control::CurveShape* shape = nullptr);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,

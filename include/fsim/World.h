@@ -167,12 +167,14 @@ public:
     /// names the point), then flown from where the aircraft is. Its loiter
     /// points' loiters beside them (docs/flight-autonomy.md, 4.31), its
     /// planned states (4.34): the segments fly through them, its paths
-    /// (4.36): flown along its points' links, each point named as given, and
-    /// its conditional branches (4.37): taken as their conditions say.
+    /// (4.36): flown along its points' links, each point named as given, its
+    /// conditional branches (4.37): taken as their conditions say, and its
+    /// civil path terminators' data (4.38): each point's leg flown as its
+    /// terminator (Waypoint::terminator) says.
     control::CommandResult submit(const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                   const control::CommandOptions& options = {}, Span<const control::RouteLoiter> loiters = {},
                                   Span<const control::RouteState> states = {}, Span<const control::RoutePath> paths = {},
-                                  Span<const control::RouteBranch> branches = {});
+                                  Span<const control::RouteBranch> branches = {}, Span<const control::RouteTerminator> terminators = {});
     /// NEW of a curve (fsim.guidance.curve, A-GRA's curve following;
     /// docs/sdk/control.md, "Curves"): 1 to 10 quintic Bezier segments, each
     /// starting where the one before ends, checked (InvalidCurve names the
@@ -363,12 +365,13 @@ public:
             return update(activity, control::Command(c));
     }
     /// UPDATE of a route: its options (a field kHold keeps its value) and new
-    /// waypoints with their loiters, states, paths and branches - none: those it has - checked
+    /// waypoints with their loiters, states, paths, branches and terminators - none: those it has - checked
     /// as a NEW's; flown afresh from its start. (A RouteCommand alone, through
     /// update() above, is the same with none.)
     control::CommandResult update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                   Span<const control::RouteLoiter> loiters = {}, Span<const control::RouteState> states = {},
-                                  Span<const control::RoutePath> paths = {}, Span<const control::RouteBranch> branches = {});
+                                  Span<const control::RoutePath> paths = {}, Span<const control::RouteBranch> branches = {},
+                                  Span<const control::RouteTerminator> terminators = {});
     /// UPDATE of a curve: its options (kHold keeps one), and segments - with
     /// `append` 1 after its end, from the same reference; else a new curve.
     control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
@@ -391,7 +394,7 @@ public:
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
                                   Span<const control::Waypoint> waypoints, Span<const control::RouteLoiter> loiters = {},
                                   Span<const control::RouteState> states = {}, Span<const control::RoutePath> paths = {},
-                                  Span<const control::RouteBranch> branches = {});
+                                  Span<const control::RouteBranch> branches = {}, Span<const control::RouteTerminator> terminators = {});
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::BezierSegment> segments, const control::CurveShape* shape = nullptr);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,

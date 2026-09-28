@@ -186,6 +186,11 @@ private:
     /// The plan's points in the flight order from `start` (its next `startNext`, where given) along the path store's links
     /// (4.37; Branches.cpp): false where there is none.
     bool orderFrom(const ControlContext& ctx, std::uint32_t start, double startNext, bool repeat) noexcept;
+    /// Its civil path terminators' data from the path store (4.38; Terminators.cpp), and whether a point it flies has one.
+    void takeTerminators(const ControlContext& ctx) noexcept;
+    /// A direct to fix's leg, from where the aircraft is (4.38; Terminators.cpp): made again from here - what it flew since
+    /// counted - with the turn at its point, until its track is within a degree of it; then that leg.
+    void direct(const sim::VehicleState& s, const Performance& performance);
     /// The point flown to come to (4.37; Branches.cpp): captured, its branches tried in their order - the first that holds
     /// taken, the route planned again from here (`flownM` more of it flown), on from the point (`fromPoint`: where it has a
     /// turn ahead) or from the branch's next. True where one was; once each time it comes to it.
@@ -258,6 +263,7 @@ private:
     const route::Leg* legTo_ = nullptr;
     const route::Turn* turnAt_ = nullptr;
     bool decided_ = false; ///< the point flown to's branches tried (4.37): once each time it comes to it
+    bool pursuing_ = false; ///< the leg to the point flown to, a direct to fix's, made from where it is as it turns to it (4.38)
 };
 
 /// "pattern": fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md,

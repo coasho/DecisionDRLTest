@@ -29,10 +29,10 @@ bool barometric(double reference) noexcept { return reference == static_cast<dou
 
 /// A leg's point `alongM` from its start, on past its end too (Route.h's Leg: a great circle, a rhumb line, or an arc).
 void onLegAt(const route::Leg& leg, double alongM, double& lat, double& lon) noexcept {
-    if (leg.arcRadiusM > 0.0) { // round its centre from a (4.30)
+    if (leg.arcRadiusM > 0.0) { // round its centre, in its plane (4.30, 4.38)
         const double bearing = leg.arcEntryBearingRad + (leg.arcAngleRad >= 0.0 ? 1.0 : -1.0) * alongM / leg.arcRadiusM;
-        geo::offsetLatLon(leg.latA, leg.lonA, leg.arcCentreNorthM + leg.arcRadiusM * std::cos(bearing), leg.arcCentreEastM + leg.arcRadiusM * std::sin(bearing),
-                          lat, lon);
+        geo::offsetLatLon(leg.arcLatRad, leg.arcLonRad, leg.arcCentreNorthM + leg.arcRadiusM * std::cos(bearing),
+                          leg.arcCentreEastM + leg.arcRadiusM * std::sin(bearing), lat, lon);
         return;
     }
     if (leg.rhumb) { // its latitude changes with the distance, its longitude with the stretched latitude

@@ -352,6 +352,7 @@ void RouteBehavior::aim(std::uint32_t k, const Performance& perf) noexcept {
     target_ = k;
     legTo_ = &p.leg(k, firstLap_), turnAt_ = &p.turn(k, firstLap_);
     decided_ = false;
+    pursuing_ = p.terminated && route::direct(p.points[k]) && !(leadOut_ > 0.0); // (a direct to fix's, but after a turn onto it: 4.38)
     loiterAhead_ = route::loiterPoint(p.points[k]) ? p.loiterAt(k) : nullptr;
     reachM_ = stops() ? 1.0 : 0.0;
     if (loiterAhead_) { // (4.31: where the leg meets it; a rotorcraft's hover, where it would stop from its speed - its position loop's)
@@ -439,6 +440,7 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
             return;
         }
     }
+    takeTerminators(ctx); // (its civil path terminators' data: 4.38)
     p.start = linked ? 0 : static_cast<std::uint32_t>(option(command.start, static_cast<double>(count))); // (a linked one's order begins at it)
     route::plan(p, s.latitudeRad, s.longitudeRad, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
     if (p.stateCount) route::placeStates(p);
@@ -604,6 +606,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         overFrame_ = moves(routeFrame(ctx.path, w.frame)) && (ended_ || (before && b.frame == w.frame && !route::loiterPoint(b)));
         frameNorthMs_ = overFrame_ ? pose.northMs : 0.0, frameEastMs_ = overFrame_ ? pose.eastMs : 0.0;
     }
+    if (pursuing_ && !ended_) direct(s, perf); // (a direct to fix's leg, from where it is: 4.38)
     const bool wasEnded = ended_;
     const route::Fix fix = locate(ctx, s, perf);
     if (loitering_) return loiter(ctx, perf, true); // (a loiter point's loiter met: 4.31)
@@ -830,7 +833,8 @@ Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf
     advance(s, perf);
     route::Plan& q = *plan_;
     route::Leg& in = firstLap_ && target_ == q.start ? q.entry : q.looped(target_, firstLap_) ? q.loopLeg : q.legs[target_];
-    in = route::makeLeg(s.latitudeRad, s.longitudeRad, q.points[target_].latitudeRad, q.points[target_].longitudeRad, q.rhumb);
+    in = q.terminated ? route::legFrom(q, target_, s.latitudeRad, s.longitudeRad, &q.points[q.before(target_, firstLap_)]) // (4.38)
+                      : route::makeLeg(s.latitudeRad, s.longitudeRad, q.points[target_].latitudeRad, q.points[target_].longitudeRad, q.rhumb);
     route::replan(q, target_, firstLap_, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
     beginSegment(target_, s, finishedM_, 0.0, 0.0, firstLap_, true);
     return out;

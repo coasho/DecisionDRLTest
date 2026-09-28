@@ -29,9 +29,11 @@ struct Leg {
     double a[3] = {0.0, 0.0, 0.0}; ///< a great circle's: a on the unit sphere...
     double n[3] = {0.0, 0.0, 0.0}; ///< ...and its plane's normal, a x b normalised: the left of the way it runs
     double psiA = 0.0, dPsi = 0.0, dLon = 0.0; ///< a rhumb line's: a's stretched latitude, its extent in it and in longitude
-    // an arc from a turn point (docs/flight-autonomy.md, 4.30): round a centre from a, in the plane there (radius 0: straight)
+    // an arc from a turn point (docs/flight-autonomy.md, 4.30): round a centre from a, in the plane there (radius 0: straight);
+    // a radius to fix's (4.38) in the plane at its centre - so a circle round it on the Earth - its centre there
     double arcRadiusM = 0.0, arcAngleRad = 0.0; ///< its radius, its sweep (+ right)
-    double arcCentreNorthM = 0.0, arcCentreEastM = 0.0, arcEntryBearingRad = 0.0; ///< its centre from a, and a from the centre
+    double arcCentreNorthM = 0.0, arcCentreEastM = 0.0, arcEntryBearingRad = 0.0; ///< its centre from its plane's point, and a from the centre
+    double arcLatRad = 0.0, arcLonRad = 0.0; ///< where its plane is laid out: a start turn point's at a, a radius to fix's at its centre
 };
 
 /// Where the aircraft is against a piece of the path.
@@ -212,6 +214,18 @@ struct Plan {
     std::uint32_t branchCount = 0;
     RouteBranch branches[PathStore::kRouteBranches];
     std::uint32_t branchCaptures[PathStore::kRouteBranches] = {};
+    /// Its civil path terminators' data (4.38), as given: their points named as given. `terminated`: a point it flies has
+    /// a terminator, whose leg its terminator lays out (planTerminators).
+    std::uint32_t terminatorCount = 0;
+    RouteTerminator terminators[PathStore::kRouteTerminators];
+    bool terminated = false;
+    /// Point i's terminator's data (i in its flight); null for none.
+    const RouteTerminator* terminatorAt(std::uint32_t i) const noexcept {
+        const std::uint32_t k = named(i);
+        for (std::uint32_t j = 0; j < terminatorCount; ++j)
+            if (terminators[j].point == k) return &terminators[j];
+        return nullptr;
+    }
     /// The index point i is named by: its own as given.
     std::uint32_t named(std::uint32_t i) const noexcept { return linked && i < given ? order[i] : i; }
     /// The host's own, beside its scratch (its checks leave it be): the flying route's planned states it resumed past
@@ -519,6 +533,32 @@ int pathFault(const RoutePath* paths, std::uint32_t pathCount, std::uint32_t cou
 void orderRest(std::uint32_t* order, std::uint32_t flown, std::uint32_t count) noexcept;
 /// A path store's conditional branches (4.37; Branches.cpp): `branches` as given (16 at most), none commanded.
 void takeBranches(PathStore& store, Span<const RouteBranch> branches) noexcept;
+
+// --- Civil path terminators (docs/flight-autonomy.md, 4.38; Terminators.cpp) ------------------
+
+/// Point w's civil path terminator; Count for none.
+inline PathTerminator terminatorOf(const Waypoint& w) noexcept {
+    return isHold(w.terminator) ? PathTerminator::Count : static_cast<PathTerminator>(static_cast<int>(w.terminator));
+}
+/// A direct to fix's or an initial fix's leg: from where the aircraft is as it begins it, turning straight to its point.
+inline bool direct(const Waypoint& w) noexcept {
+    return w.terminator == static_cast<double>(PathTerminator::DirectToFix) || w.terminator == static_cast<double>(PathTerminator::InitialFix);
+}
+/// A radius to fix's arc from a to b round the centre (latC, lonC), clockwise where `right`: in the plane at a, as a start
+/// turn point's is (makeArc), its radius a's distance from the centre, its sweep from a's bearing from it round to b's.
+Leg makeRadiusArc(double latA, double lonA, double latB, double lonB, double latC, double lonC, bool right) noexcept;
+/// A course to fix's leg into (latB, lonB) on `courseRad`: its great circle, from abeam (lat, lon) - the foot of the
+/// perpendicular from there. False where that is not behind the point along its course (there is past it, or at it).
+bool makeCourseLeg(double latB, double lonB, double courseRad, double lat, double lon, Leg& out) noexcept;
+/// The leg into point i from (lat, lon) as its civil path terminator gives it: a track to fix's, a direct to fix's and an
+/// initial fix's the great circle from there; a course to fix's its course's, from abeam there (direct where there is past
+/// it); a radius to fix's its arc from the point before, `before`, where the leg begins at it (or where a loiter there was
+/// left) - null (the aircraft comes to it from elsewhere: the route's entry), direct from there. A point without one: the
+/// route's own line from there.
+Leg legFrom(const Plan& p, std::uint32_t i, double lat, double lon, const Waypoint* before) noexcept;
+/// The legs the route's points' terminators lay out (`p.terminated`): each from the point before, and the one back to where
+/// it repeats from - plan()'s, before its start turns' arcs and its fly-by turns. The follower looks ahead for an arc.
+void planTerminators(Plan& p) noexcept;
 /// A path store's route linked (4.36; Paths.cpp): whether it is (paths, or a point's next), and a linked one's flight order
 /// from `c`'s start beside its points as given, as the host writes it. False where its paths or links make none it can fly
 /// - paths that do not tile its points, a next that is none, a start that is none, round one point - the store as it was.

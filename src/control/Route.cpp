@@ -86,6 +86,7 @@ double turnRadiusAt(const Plan& p, std::uint32_t i, double altitudeMslM, double 
 Leg legTo(const Plan& p, std::uint32_t from, std::uint32_t i, double inRad) noexcept {
     const Waypoint& a = p.points[from];
     const Waypoint& b = p.points[i];
+    if (!isHold(b.terminator)) return legFrom(p, i, a.latitudeRad, a.longitudeRad, &a); // (as its civil path terminator lays it out: 4.38)
     if (a.turn != static_cast<double>(TurnType::StartTurn)) return makeLeg(a.latitudeRad, a.longitudeRad, b.latitudeRad, b.longitudeRad, p.rhumb);
     return makeArc(a.latitudeRad, a.longitudeRad, b.latitudeRad, b.longitudeRad, isHold(a.courseRad) ? inRad : a.courseRad);
 }
@@ -135,6 +136,7 @@ Leg makeArc(double latA, double lonA, double latB, double lonB, double courseRad
     leg.arcAngleRad = 2.0 * alpha;
     leg.arcCentreNorthM = -side * r * te, leg.arcCentreEastM = side * r * tn; // (to the right of the course for a right turn)
     leg.arcEntryBearingRad = std::atan2(-leg.arcCentreEastM, -leg.arcCentreNorthM);
+    leg.arcLatRad = latA, leg.arcLonRad = lonA;
     leg.lengthM = r * std::abs(leg.arcAngleRad);
     leg.courseOutRad = geo::wrapPi(courseRad), leg.courseInRad = geo::wrapPi(courseRad + leg.arcAngleRad);
     return leg;
@@ -145,7 +147,7 @@ Fix onLeg(const Leg& leg, double lat, double lon) noexcept {
         Turn arc;
         arc.radiusM = leg.arcRadiusM, arc.angleRad = leg.arcAngleRad;
         arc.centreNorthM = leg.arcCentreNorthM, arc.centreEastM = leg.arcCentreEastM, arc.entryBearingRad = leg.arcEntryBearingRad;
-        return onArc(arc, leg.latA, leg.lonA, lat, lon);
+        return onArc(arc, leg.arcLatRad, leg.arcLonRad, lat, lon);
     }
     Fix f;
     const double sinLat = std::sin(lat), cosLat = std::cos(lat);
@@ -1081,6 +1083,7 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
         // its arrival window (4.33): its times finite, its begin not after its end
         if (!within(w.arrivalBeginS, -inf, inf) || !within(w.arrivalEndS, -inf, inf) || w.arrivalBeginS > w.arrivalEndS) return invalid(i);
         if (!within(w.rnpM, 0.0, inf)) return invalid(i); // (its required navigation performance: 4.35)
+        if (!code(w.terminator, PathTerminator::Count)) return invalid(i); // (its civil path terminator: 4.38)
         const bool altitudeGiven = !isHold(w.altitudeM);
         w.longitudeRad = geo::wrapPi(w.longitudeRad);
         if (i == 0) {
@@ -1228,13 +1231,16 @@ void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, c
     auto out = [&](std::uint32_t k) -> Leg& { return k + 1 < n ? p.legs[k + 1] : closing; };
     if (p.repeat && n > 1)
         closing = makeLeg(point(n - 1).latitudeRad, point(n - 1).longitudeRad, point(p.loop).latitudeRad, point(p.loop).longitudeRad, p.rhumb);
+    // the legs its points' civil path terminators lay out (4.38)
+    p.arcs = false;
+    if (p.terminated) planTerminators(p);
     // the arcs start turn points begin (4.30), in order: each tangent to the course the leg into its start arrives on
     // (the entry's, for a route's own start point it does not come back to)
-    p.arcs = false;
     for (std::uint32_t k = 0; k < n; ++k) {
         if (point(k).turn != static_cast<double>(TurnType::StartTurn) || !p.leaves(k)) continue;
         const bool first = k == p.start && !p.repeat;
-        const double in = first ? makeLeg(lat, lon, point(k).latitudeRad, point(k).longitudeRad, p.rhumb).courseInRad : p.legs[k].courseInRad;
+        const double in = first ? (p.terminated ? legFrom(p, k, lat, lon, nullptr) : makeLeg(lat, lon, point(k).latitudeRad, point(k).longitudeRad, p.rhumb)).courseInRad
+                                : p.legs[k].courseInRad;
         out(k) = legTo(p, k, p.next(k), in);
         p.arcs = p.arcs || out(k).arcRadiusM > 0.0;
     }
@@ -1250,7 +1256,7 @@ void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, c
     // before it (where the aircraft is, is no fault of the route's).
     const Waypoint& first = point(p.start);
     const std::uint32_t after = p.next(p.start);
-    p.entry = makeLeg(lat, lon, first.latitudeRad, first.longitudeRad, p.rhumb);
+    p.entry = p.terminated ? legFrom(p, p.start, lat, lon, nullptr) : makeLeg(lat, lon, first.latitudeRad, first.longitudeRad, p.rhumb);
     p.entryTurn = Turn{};
     if (p.leaves(p.start) && flyBy(p.start)) {
         p.entryTurn = makeTurn(p.entry.courseInRad, out(p.start).courseOutRad, radius(p.start));
@@ -1305,10 +1311,12 @@ void replan(Plan& p, std::uint32_t i, bool firstLap, double altitudeMslM, double
     const Waypoint& w = p.points[i];
     const bool entry = firstLap && i == p.start, looped = p.looped(i, firstLap);
     const bool preceded = i > 0 || (p.repeat && p.loop == 0) || looped; // (a leg into it: 4.36)
-    const bool kept = entry || (preceded && loiterPoint(p.points[p.before(i, firstLap)])); // (after a loiter, from where it ended: 4.31)
+    // (after a loiter, from where it ended: 4.31; a direct to fix's, from where it began - 4.38)
+    const bool kept = entry || (preceded && loiterPoint(p.points[p.before(i, firstLap)])) || (p.terminated && direct(w));
     Leg& in = entry ? p.entry : looped ? p.loopLeg : p.legs[i];
     if (kept) {
-        in = makeLeg(in.latA, in.lonA, w.latitudeRad, w.longitudeRad, p.rhumb);
+        in = p.terminated ? legFrom(p, i, in.latA, in.lonA, entry ? nullptr : &p.points[p.before(i, firstLap)])
+                          : makeLeg(in.latA, in.lonA, w.latitudeRad, w.longitudeRad, p.rhumb);
     } else if (preceded) {
         const std::uint32_t h = p.before(i, firstLap);
         in = legTo(p, h, i, h > 0 || p.repeat ? p.legs[h].courseInRad : in.courseOutRad); // (an arc's tangent: the leg before's, as planned)

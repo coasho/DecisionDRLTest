@@ -1265,6 +1265,60 @@ int main(int argc, char** argv) {
             CHECK(isnan(pts[0].rnp_m));
         }
         {
+            /* ABI 1.35 (4.38): civil path terminators - a radius to fix's quarter circle round its centre, read back; a
+               procedure turn (a leg its segment does not define) refused invalid_waypoint at its point (reserved: its index +
+               1), a course to altitude (FA-6f2's) not_implemented */
+            fsim_waypoint pts[3];
+            fsim_route_terminator rf;
+            fsim_route_extras extras;
+            fsim_batch_command sp;
+            double options[4];
+            const fsim_vehicle_state* at;
+            fsim_activity_id route_id;
+            uint32_t arced = 0;
+            int k;
+            const double ne[3][2] = {{0, 3000}, {-1500, 4500}, {-4500, 4500}};
+            spec.name = "cap-terminators";
+            spec.type = "jsbsim:c172";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 50.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &arced) == FSIM_OK);
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            at = fsim_vehicle_state_ptr(world, arced);
+            for (k = 0; k < 3; ++k) {
+                fsim_waypoint_init(&pts[k]);
+                pts[k].latitude_rad = at->latitude_rad + ne[k][0] / 6371008.8;
+                pts[k].longitude_rad = at->longitude_rad + ne[k][1] / (6371008.8 * cos(at->latitude_rad));
+            }
+            CHECK(isnan(pts[1].terminator));
+            pts[1].terminator = FSIM_PATH_TERMINATOR_RADIUS_TO_FIX;
+            fsim_route_terminator_init(&rf);
+            CHECK(rf.struct_size == sizeof rf && isnan(rf.fields[0]) && isnan(rf.fields[12]));
+            rf.point = 1;
+            rf.fields[1] = at->latitude_rad - 1500.0 / 6371008.8;                                    /* (its centre, 1,500 m south of its start) */
+            rf.fields[2] = at->longitude_rad + 3000.0 / (6371008.8 * cos(at->latitude_rad));
+            rf.fields[3] = 1500.0, rf.fields[12] = 1.0;                                               /* (its radius; right) */
+            fsim_route_extras_init(&extras);
+            extras.terminators = &rf, extras.terminator_count = 1;
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_route_extras(world, arced, options, 4, pts, 3, &extras, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            route_id = cr.activity;
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.terminator_count == 1 && sp.terminators[0].point == 1);
+            CHECK(sp.terminators[0].fields[3] == 1500.0 && sp.terminators[0].fields[12] == 1.0 && isnan(sp.terminators[0].fields[0]));
+            CHECK(sp.waypoint_count == 3 && sp.waypoints[1].terminator == FSIM_PATH_TERMINATOR_RADIUS_TO_FIX && isnan(sp.waypoints[2].terminator));
+            CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+            pts[2].terminator = FSIM_PATH_TERMINATOR_PROCEDURE_TURN_TO_INTERCEPT;
+            CHECK(fsim_vehicle_submit_route_extras(world, arced, options, 4, pts, 3, &extras, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 3);
+            pts[2].terminator = FSIM_PATH_TERMINATOR_COURSE_TO_ALTITUDE;
+            CHECK(fsim_vehicle_submit_route_extras(world, arced, options, 4, pts, 3, &extras, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 3);
+        }
+        {
             /* ABI 1.34 (4.37): conditional branches - one out of the loop once its point has been come to twice, one the
                operator commands; read back; one on to its own point refused at its point (reserved: its index + 1), an
                endurance not implemented; the operator's input to one that takes none refused naming it */
@@ -1484,8 +1538,8 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_submit_behavior(world, viper, &hover, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
             CHECK(strcmp(fsim_reason_name(cr.reason), "not_supported") == 0);
             /* applicable, not built: the stage that builds it */
-            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route/path_terminators", &si) == FSIM_OK);
-            CHECK(si.support == FSIM_NOT_IMPLEMENTED && si.stage == 6);
+            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route/metadata", &si) == FSIM_OK);
+            CHECK(si.support == FSIM_NOT_IMPLEMENTED && si.stage == 7);
             CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route", &si) == FSIM_OK && si.support == FSIM_PARTIAL && strlen(si.missing) > 0);
             CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.warp_drive", &si) != FSIM_OK);
             /* the status as a policy is answered: what it does not offer is unavailable, with why */

@@ -607,6 +607,7 @@ bool toWaypoints(fsim_world* w, const fsim_waypoint* waypoints, uint32_t count) 
         p.arrivalBeginS = c.arrival_begin_s, p.arrivalEndS = c.arrival_end_s; // (1.30)
         p.rnpM = c.rnp_m;                                                     // (1.32)
         p.next = c.next;                                                      // (1.33)
+        p.terminator = c.terminator;                                          // (1.35)
     }
     return true;
 }
@@ -739,6 +740,29 @@ bool toBranches(fsim_world* w, const fsim_route_branch* branches, uint32_t count
     return true;
 }
 
+/// A route's civil path terminators' data as the caller's header laid them out (`terminators[0].struct_size` apart), into
+/// the world's buffer; false if they cannot be read.
+bool toTerminators(fsim_world* w, const fsim_route_terminator* terminators, uint32_t count) {
+    w->terminators.clear();
+    if (count == 0) return true;
+    if (!terminators) return false;
+    const uint32_t stride = terminators[0].struct_size;
+    if (stride < sizeof(fsim_route_terminator)) return false; // (its first layout)
+    const auto* bytes = reinterpret_cast<const unsigned char*>(terminators);
+    w->terminators.resize(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        fsim_route_terminator c;
+        std::memcpy(&c, bytes + static_cast<std::size_t>(i) * stride, sizeof c);
+        fsim::control::RouteTerminator& t = w->terminators[i];
+        t = fsim::control::RouteTerminator{};
+        t.point = c.point;
+        double* f[fsim::control::RouteTerminator::kFields];
+        t.fields(f);
+        for (std::size_t k = 0; k < fsim::control::RouteTerminator::kFields; ++k) *f[k] = c.fields[k];
+    }
+    return true;
+}
+
 /// What goes beside a route's waypoints, as the caller's header laid it out, into the world's buffers (none: none); false
 /// if it cannot be read.
 bool toExtras(fsim_world* w, const fsim_route_extras* extras) {
@@ -750,7 +774,7 @@ bool toExtras(fsim_world* w, const fsim_route_extras* extras) {
         e.struct_size = sizeof e;
     }
     return toLoiters(w, e.loiters, e.loiter_count) && toStates(w, e.states, e.state_count) && toPaths(w, e.paths, e.path_count) &&
-           toBranches(w, e.branches, e.branch_count);
+           toBranches(w, e.branches, e.branch_count) && toTerminators(w, e.terminators, e.terminator_count);
 }
 
 /// What an activity's UPDATE takes: its level (a flight capability), its
@@ -1066,6 +1090,7 @@ FSIM_API void fsim_waypoint_init(fsim_waypoint* waypoint) {
     waypoint->speed_optimization = waypoint->climb_optimization = waypoint->acceleration_ms2 = hold;
     waypoint->arrival_begin_s = waypoint->arrival_end_s = hold;
     waypoint->rnp_m = waypoint->next = hold;
+    waypoint->terminator = hold;
 }
 
 FSIM_API int fsim_vehicle_submit_route(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_waypoint* waypoints,
@@ -1218,6 +1243,13 @@ FSIM_API void fsim_route_branch_init(fsim_route_branch* branch) {
     std::fill_n(branch->fields, fsim::control::RouteBranch::kFields, std::numeric_limits<double>::quiet_NaN());
 }
 
+FSIM_API void fsim_route_terminator_init(fsim_route_terminator* terminator) {
+    if (!terminator) return;
+    *terminator = fsim_route_terminator{};
+    terminator->struct_size = sizeof *terminator;
+    std::fill_n(terminator->fields, fsim::control::RouteTerminator::kFields, std::numeric_limits<double>::quiet_NaN());
+}
+
 FSIM_API void fsim_route_extras_init(fsim_route_extras* extras) {
     if (!extras) return;
     *extras = fsim_route_extras{};
@@ -1235,7 +1267,7 @@ FSIM_API int fsim_vehicle_submit_route_extras(fsim_world* world, uint32_t id, co
         if (!toExtras(world, extras)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_route_extras: extras without their struct_size");
         toC(world, id,
             world->world.submit(id, std::get<fsim::control::RouteCommand>(c), world->waypoints, fromC(options), world->loiters, world->states, world->paths,
-                                world->branches),
+                                world->branches, world->terminators),
             result);
         return FSIM_OK;
     } catch (const std::exception& e) {
@@ -1257,7 +1289,7 @@ FSIM_API int fsim_activity_update_route_extras(fsim_world* world, fsim_activity_
         if (!toExtras(world, extras)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_route_extras: extras without their struct_size");
         toC(world, fsim::control::activityVehicle(activity),
             world->world.update(fsim::control::Caller{from, controller}, activity, std::get<fsim::control::RouteCommand>(c), world->waypoints, world->loiters,
-                                world->states, world->paths, world->branches),
+                                world->states, world->paths, world->branches, world->terminators),
             result);
         return FSIM_OK;
     } catch (const std::exception& e) {
@@ -1799,7 +1831,8 @@ namespace {
 bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::BatchCommand& item, std::vector<fsim::control::Waypoint>& route,
                std::vector<fsim::control::BezierSegment>& curve, std::vector<fsim::control::NurbsSegment>& nurbs, fsim::control::PatternShape& shape,
                fsim::control::CurveShape& curveShape, std::vector<fsim::control::RouteLoiter>& loiters, std::vector<fsim::control::RouteState>& states,
-               std::vector<fsim::control::RoutePath>& paths, std::vector<fsim::control::RouteBranch>& branches) {
+               std::vector<fsim::control::RoutePath>& paths, std::vector<fsim::control::RouteBranch>& branches,
+               std::vector<fsim::control::RouteTerminator>& terminators) {
     item.options = fromC(b.options);
     fsim::control::Command c;
     fsim::control::SupportCommand sc;
@@ -1820,12 +1853,17 @@ bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::Ba
         const bool planned = b.struct_size >= offsetof(fsim_batch_command, states) + sizeof b.states;
         const bool pathed = b.struct_size >= offsetof(fsim_batch_command, path_count) + sizeof b.path_count;
         const bool branched = b.struct_size >= offsetof(fsim_batch_command, branch_count) + sizeof b.branch_count; // (ABI 1.34)
+        const bool terminated = b.struct_size >= offsetof(fsim_batch_command, terminator_count) + sizeof b.terminator_count; // (ABI 1.35)
         ok = toMode(FSIM_MODE_ROUTE, b.fields, b.count, c) && toWaypoints(world, b.waypoints, b.waypoint_count) &&
              toLoiters(world, loitered ? b.loiters : nullptr, loitered ? b.loiter_count : 0) &&
              toStates(world, planned ? b.states : nullptr, planned ? b.state_count : 0) &&
              toPaths(world, pathed ? b.paths : nullptr, pathed ? b.path_count : 0) &&
-             toBranches(world, branched ? b.branches : nullptr, branched ? b.branch_count : 0);
-        if (ok) route = world->waypoints, loiters = world->loiters, states = world->states, paths = world->paths, branches = world->branches, item.command = c;
+             toBranches(world, branched ? b.branches : nullptr, branched ? b.branch_count : 0) &&
+             toTerminators(world, terminated ? b.terminators : nullptr, terminated ? b.terminator_count : 0);
+        if (ok) {
+            route = world->waypoints, loiters = world->loiters, states = world->states, paths = world->paths, branches = world->branches;
+            terminators = world->terminators, item.command = c;
+        }
         break;
     }
     case FSIM_BATCH_CURVE:
@@ -1860,10 +1898,11 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
         std::vector<std::vector<fsim::control::RouteState>> stateses;
         std::vector<std::vector<fsim::control::RoutePath>> pathses;
         std::vector<std::vector<fsim::control::RouteBranch>> brancheses;
+        std::vector<std::vector<fsim::control::RouteTerminator>> terminatorses;
         std::vector<fsim::control::PatternShape> shapes(count); // (each pattern's own: the items point at them)
         std::vector<fsim::control::CurveShape> curveShapes(count); // (each curve's likewise)
         routes.reserve(count), curves.reserve(count), nurbses.reserve(count), loiterses.reserve(count), stateses.reserve(count), pathses.reserve(count);
-        brancheses.reserve(count);
+        brancheses.reserve(count), terminatorses.reserve(count);
         // every item made into a command first: a malformed one refuses the batch, and none is made
         for (uint32_t i = 0; i < count; ++i) {
             const auto& b = *reinterpret_cast<const fsim_batch_command*>(reinterpret_cast<const char*>(batch) + i * stride);
@@ -1875,10 +1914,11 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
             std::vector<fsim::control::RouteState>& states = stateses.emplace_back();
             std::vector<fsim::control::RoutePath>& paths = pathses.emplace_back();
             std::vector<fsim::control::RouteBranch>& branches = brancheses.emplace_back();
-            if (!fromBatch(world, b, item, route, curve, nurbs, shapes[i], curveShapes[i], loiters, states, paths, branches))
+            std::vector<fsim::control::RouteTerminator>& terminators = terminatorses.emplace_back();
+            if (!fromBatch(world, b, item, route, curve, nurbs, shapes[i], curveShapes[i], loiters, states, paths, branches, terminators))
                 return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_batch: item " + std::to_string(i) + " is malformed");
             item.waypoints = route, item.segments = curve, item.nurbs = nurbs, item.loiters = loiters, item.states = states, item.paths = paths;
-            item.branches = branches;
+            item.branches = branches, item.terminators = terminators;
         }
         std::vector<fsim::control::CommandDetails> checks;
         const std::vector<fsim::control::CommandResult> answers = world->world.submitBatch(id, items, &checks);
@@ -1934,14 +1974,15 @@ FSIM_API int fsim_vehicle_store_task(fsim_world* world, uint32_t id, uint64_t ta
         std::vector<fsim::control::RouteState> states;
         std::vector<fsim::control::RoutePath> paths;
         std::vector<fsim::control::RouteBranch> branches;
-        if (!fromBatch(world, *command, item, route, curve, nurbs, shape, curveShape, loiters, states, paths, branches) ||
+        std::vector<fsim::control::RouteTerminator> terminators;
+        if (!fromBatch(world, *command, item, route, curve, nurbs, shape, curveShape, loiters, states, paths, branches, terminators) ||
             !std::holds_alternative<fsim::control::Command>(item.command))
             return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_store_task: a flight or guidance command, whole, is kept");
         fsim::control::TaskRepetition repetition;
         repetition.attempts = attempts ? attempts : 1;
         repetition.intervalS = interval_s;
         item.waypoints = route, item.segments = curve, item.nurbs = nurbs, item.loiters = loiters, item.states = states, item.paths = paths;
-        item.branches = branches;
+        item.branches = branches, item.terminators = terminators;
         *reason = static_cast<int32_t>(world->world.storeTask(id, task_id, item, repetition));
         return FSIM_OK;
     });
@@ -2059,7 +2100,7 @@ FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id acti
             w.course_rad = p.courseRad, w.turn_radius_m = p.turnRadiusM;
             w.speed_optimization = p.speedOptimization, w.climb_optimization = p.climbOptimization, w.acceleration_ms2 = p.accelerationMs2;
             w.arrival_begin_s = p.arrivalBeginS, w.arrival_end_s = p.arrivalEndS;
-            w.rnp_m = p.rnpM, w.next = p.next;
+            w.rnp_m = p.rnpM, w.next = p.next, w.terminator = p.terminator;
         }
         r.segments.resize(r.setpoint.segments.size());
         for (std::size_t i = 0; i < r.segments.size(); ++i) {
@@ -2121,6 +2162,17 @@ FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id acti
             for (std::size_t k = 0; k < RouteBranch::kFields; ++k) c.fields[k] = *f[k];
         }
         b.branch_count = static_cast<uint32_t>(r.branches.size()), b.branches = r.branches.empty() ? nullptr : r.branches.data();
+        r.terminators.resize(r.setpoint.terminators.size()); // (a route's: ABI 1.35)
+        for (std::size_t i = 0; i < r.terminators.size(); ++i) {
+            RouteTerminator x = r.setpoint.terminators[i];
+            fsim_route_terminator& c = r.terminators[i];
+            fsim_route_terminator_init(&c);
+            c.point = x.point;
+            double* f[RouteTerminator::kFields];
+            x.fields(f);
+            for (std::size_t k = 0; k < RouteTerminator::kFields; ++k) c.fields[k] = *f[k];
+        }
+        b.terminator_count = static_cast<uint32_t>(r.terminators.size()), b.terminators = r.terminators.empty() ? nullptr : r.terminators.data();
         b.count = static_cast<uint32_t>(r.fields.size()), b.fields = r.fields.empty() ? nullptr : r.fields.data();
         b.waypoint_count = static_cast<uint32_t>(r.waypoints.size()), b.waypoints = r.waypoints.empty() ? nullptr : r.waypoints.data();
         b.segment_count = static_cast<uint32_t>(general ? r.nurbs.size() : r.segments.size()), b.segments = r.segments.empty() ? nullptr : r.segments.data();

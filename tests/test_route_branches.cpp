@@ -298,6 +298,12 @@ TEST_CASE("route branches: refused as a point is, naming its point - one that is
     CHECK((r1.reason == Reason::InvalidWaypoint && r1.index == 5));
     const CommandResult many = answer(std::vector<RouteBranch>(17, branchAt(5, 6.0)));
     CHECK((many.reason == Reason::InvalidWaypoint && many.index == 5));
+    // named as given where its flight order is not: A's last on to C's first, B aside - a branch at C's last named so
+    std::vector<Waypoint> skip = points;
+    skip.at(1).next = 6.0;
+    b = branchAt(7, 0.0), b.altitudeMinM = 2000.0, b.altitudeMaxM = 1000.0;
+    const CommandResult skipped = answer({b}, skip);
+    CHECK((skipped.reason == Reason::InvalidWaypoint && skipped.index == 7));
     // not built yet (its row, partial): a contingency the platform does not reach yet (FA-16)
     b = branchAt(5, 6.0), b.contingency = static_cast<double>(Contingency::MissionCritical);
     refused(b, Reason::NotImplemented, 5, "mission critical");

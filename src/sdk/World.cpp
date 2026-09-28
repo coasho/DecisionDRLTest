@@ -131,8 +131,9 @@ control::CommandResult Vehicle::submit(const control::SupportCommand& command, c
 
 control::CommandResult Vehicle::submit(const control::RouteCommand& route, Span<const control::Waypoint> waypoints, const control::CommandOptions& options,
                                        Span<const control::RouteLoiter> loiters, Span<const control::RouteState> states,
-                                       Span<const control::RoutePath> paths, Span<const control::RouteBranch> branches) {
-    if (world_) return world_->impl_->submit(id_, route, waypoints, options, loiters, states, paths, branches);
+                                       Span<const control::RoutePath> paths, Span<const control::RouteBranch> branches,
+                                       Span<const control::RouteTerminator> terminators) {
+    if (world_) return world_->impl_->submit(id_, route, waypoints, options, loiters, states, paths, branches, terminators);
     control::CommandResult r;
     r.reason = control::Reason::UnknownVehicle;
     return r;
@@ -422,8 +423,9 @@ control::CommandResult World::update(control::ActivityId activity, const control
 
 control::CommandResult World::update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                      Span<const control::RouteLoiter> loiters, Span<const control::RouteState> states,
-                                     Span<const control::RoutePath> paths, Span<const control::RouteBranch> branches) {
-    return impl_->update(activity, route, waypoints, loiters, states, paths, branches);
+                                     Span<const control::RoutePath> paths, Span<const control::RouteBranch> branches,
+                                     Span<const control::RouteTerminator> terminators) {
+    return impl_->update(activity, route, waypoints, loiters, states, paths, branches, terminators);
 }
 
 control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
@@ -453,8 +455,8 @@ control::CommandResult World::update(control::Caller caller, control::ActivityId
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
                                      Span<const control::Waypoint> waypoints, Span<const control::RouteLoiter> loiters,
                                      Span<const control::RouteState> states, Span<const control::RoutePath> paths,
-                                     Span<const control::RouteBranch> branches) {
-    return impl_->update(caller, activity, route, waypoints, loiters, states, paths, branches);
+                                     Span<const control::RouteBranch> branches, Span<const control::RouteTerminator> terminators) {
+    return impl_->update(caller, activity, route, waypoints, loiters, states, paths, branches, terminators);
 }
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,

@@ -122,6 +122,7 @@ public:
     std::vector<RouteState> states;   ///< its planned states, beside them (likewise: FA-6d2)
     std::vector<RoutePath> paths;     ///< its paths, beside them (likewise: FA-6e1)
     std::vector<RouteBranch> branches; ///< its conditional branches, beside them (likewise: FA-6e2)
+    std::vector<RouteTerminator> terminators; ///< its civil path terminators' data, beside them (likewise: FA-6f)
     std::vector<BezierSegment> segments; ///< the last curve's, made beside its CurveCommand
     std::vector<NurbsSegment> nurbs;     ///< the same as cubics, as A-GRA's schema gives them (ADR-29 FA-5d1), where asNurbs
     bool asNurbs = false;                ///< given so: now and then, in the walks drawn since
@@ -311,7 +312,7 @@ public:
             }
             out = r;
             const auto& s = state();
-            waypoints.clear(), loiters.clear(), states.clear(), paths.clear(), branches.clear();
+            waypoints.clear(), loiters.clear(), states.clear(), paths.clear(), branches.clear(), terminators.clear();
             bool loitered = false; // (a loiter point drawn so far: an arrival window at or after it is not implemented - FA-6d1)
             for (int k = 0; k < points; ++k) {
                 const PositionCommand a = ahead(4000.0 * (k + 1));
@@ -457,6 +458,50 @@ public:
                     branches.push_back(b);
                 }
             }
+            // its civil path terminators (FA-6f1): now and then a point's leg a track to fix, a direct to fix, an initial fix, a
+            // course to fix - mostly on the course from the point before - or a radius to fix round a centre on its chord's
+            // bisector, either way round (the long way refused, as one sweeping too far); now and then a leg its segment does
+            // not define, a code that is none, or data that is none (FA-6f2's legs, not built, are not drawn)
+            if (wild && optimise && chance(0.2)) {
+                const auto n = static_cast<std::size_t>(points);
+                for (std::size_t k = 1 + pick(2); k > 0; --k) {
+                    const auto i = pick(n);
+                    Waypoint& q = waypoints[i];
+                    const double fromLat = i == 0 ? s.latitudeRad : waypoints[i - 1].latitudeRad, fromLon = i == 0 ? s.longitudeRad : waypoints[i - 1].longitudeRad;
+                    const double dn = (q.latitudeRad - fromLat) * kEarthRadiusM, de = (q.longitudeRad - fromLon) * kEarthRadiusM * std::cos(q.latitudeRad);
+                    RouteTerminator t;
+                    t.point = static_cast<std::uint32_t>(i);
+                    switch (pick(7)) {
+                    case 0: q.terminator = static_cast<double>(PathTerminator::TrackToFix); break;
+                    case 1: q.terminator = static_cast<double>(PathTerminator::DirectToFix); break;
+                    case 2: q.terminator = static_cast<double>(PathTerminator::InitialFix); break;
+                    case 3:
+                        q.terminator = static_cast<double>(PathTerminator::CourseToFix);
+                        t.courseRad = chance(0.7) ? std::atan2(de, dn) : uniform(-3.0, 3.0);
+                        if (chance(0.95)) terminators.push_back(t);
+                        break;
+                    case 4: {
+                        q.terminator = static_cast<double>(PathTerminator::RadiusToFix);
+                        const double off = uniform(-2.0, 2.0) * std::hypot(dn, de); // (the centre off the chord's middle, along its bisector)
+                        const double cn = 0.5 * dn - off * de / std::max(std::hypot(dn, de), 1.0), ce = 0.5 * de + off * dn / std::max(std::hypot(dn, de), 1.0);
+                        t.centerLatitudeRad = fromLat + cn / kEarthRadiusM, t.centerLongitudeRad = fromLon + ce / (kEarthRadiusM * std::cos(fromLat));
+                        t.clockwise = static_cast<double>(pick(2));
+                        if (chance(0.1)) t.radiusM = uniform(100.0, 5000.0);
+                        if (chance(0.05)) t.courseRad = 0.0; // (a course on an arc)
+                        if (chance(0.95)) terminators.push_back(t);
+                        break;
+                    }
+                    case 5: { // (a leg its segment does not define: a navaid's, a procedure turn's)
+                        const PathTerminator undefined[] = {PathTerminator::ArcToFix, PathTerminator::CourseToDmeDistance, PathTerminator::CourseToRadial,
+                                                            PathTerminator::TrackFromFixToDmeDistance, PathTerminator::ProcedureTurnToIntercept,
+                                                            PathTerminator::HeadingToDmeDistanceTermination, PathTerminator::HeadingToRadialTermination};
+                        q.terminator = static_cast<double>(undefined[pick(7)]);
+                        break;
+                    }
+                    default: q.terminator = static_cast<double>(PathTerminator::Count); break; // (none)
+                    }
+                }
+            }
             return true;
         }
         if (d.kind == CapabilityKind::Guidance) {
@@ -583,7 +628,7 @@ private:
 /// its shape (where it made one).
 CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, const Maker& make, const CommandOptions& options = {}) {
     if (const auto* route = std::get_if<RouteCommand>(&c))
-        return w.submit(v, *route, make.waypoints, options, make.loiters, make.states, make.paths, make.branches);
+        return w.submit(v, *route, make.waypoints, options, make.loiters, make.states, make.paths, make.branches, make.terminators);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && make.asNurbs)
         return w.submit(v, *curve, Span<const NurbsSegment>(make.nurbs), options, curveShape);
@@ -595,7 +640,7 @@ CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, c
 /// UPDATE with what the maker made: a route's or a curve's options, and now and then its waypoints or segments.
 CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Caller caller = {}) {
     if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints)
-        return w.update(caller, activity, *route, make.waypoints, make.loiters, make.states, make.paths, make.branches);
+        return w.update(caller, activity, *route, make.waypoints, make.loiters, make.states, make.paths, make.branches, make.terminators);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints && make.asNurbs)
         return w.update(caller, activity, *curve, Span<const NurbsSegment>(make.nurbs), curveShape);
@@ -1352,7 +1397,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 BatchCommand item; // (a curve's cubics, where made so: a batch item's form)
                 item.command = command, item.waypoints = points, item.segments = pieces, item.shape = shape;
                 if (std::holds_alternative<RouteCommand>(command))
-                    item.loiters = make.loiters, item.states = make.states, item.paths = make.paths, item.branches = make.branches;
+                    item.loiters = make.loiters, item.states = make.states, item.paths = make.paths, item.branches = make.branches,
+                    item.terminators = make.terminators;
                 if (std::holds_alternative<CurveCommand>(command) && !make.curveShape.empty()) item.curveShape = &make.curveShape;
                 if (make.asNurbs && std::holds_alternative<CurveCommand>(command)) item.segments = {}, item.nurbs = make.nurbs;
                 const Reason r = w.storeTask(v, id, item, repetition);

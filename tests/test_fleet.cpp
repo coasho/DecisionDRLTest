@@ -2036,6 +2036,66 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(r.state == ActivityState::Completed); // (all 35: 161 s after the NEW, the fighters, to 229 s, the B-52H and the E-3G)
             CHECK(n.percent < enduranceAt[p.id].percent);
         });
+    // A-GRA's civil path terminators (ADR-29 FA-6f1: WPT-19): two orbit radii ahead, then a radius to fix's arc - a quarter
+    // circle of three radii round to the right, near 20 degrees of bank, as an RNP procedure's are laid out; its centre
+    // given - and two radii on: off the arc all along it, over the ground from its centre (FA-6's criterion: within 20 m)
+    struct RadiusRoute {
+        double centreLatRad = 0.0, centreLonRad = 0.0, radiusM = 0.0, worst = 0.0, cross = 0.0;
+        int samples = 0;
+    };
+    std::map<std::uint32_t, RadiusRoute> rfRoutes;
+    auto overGround = [](double lat0, double lon0, double lat, double lon) { // (the great circle's distance)
+        const double h = std::pow(std::sin(0.5 * (lat - lat0)), 2.0) + std::cos(lat0) * std::cos(lat) * std::pow(std::sin(0.5 * (lon - lon0)), 2.0);
+        return 2.0 * 6371008.8 * std::asin(std::min(1.0, std::sqrt(h)));
+    };
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double R = orbitRadius(p), psi = p.start.eulerRad[2], r = 3.0 * R;
+            const double c = std::cos(psi), sn = std::sin(psi);
+            auto point = [&](double ahead, double right) {
+                const PositionCommand q = pointFrom(p.start, ahead * c - right * sn, ahead * sn + right * c, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            std::vector<Waypoint> points = {point(2.0 * R, 0.0), point(2.0 * R + r, r), point(2.0 * R + r, r + 2.0 * R)};
+            points[1].terminator = static_cast<double>(PathTerminator::RadiusToFix);
+            const Waypoint centre = point(2.0 * R, r);
+            RouteTerminator arc;
+            arc.point = 1, arc.centerLatitudeRad = centre.latitudeRad, arc.centerLongitudeRad = centre.longitudeRad, arc.clockwise = 1.0;
+            RadiusRoute& f = rfRoutes[p.id];
+            f = RadiusRoute{};
+            f.centreLatRad = centre.latitudeRad, f.centreLonRad = centre.longitudeRad;
+            f.radiusM = overGround(centre.latitudeRad, centre.longitudeRad, points[0].latitudeRad, points[0].longitudeRad);
+            const CommandResult res = w.submit(p.id, RouteCommand{}, points, {}, {}, {}, {}, {}, std::vector<RouteTerminator>{arc});
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index);
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        [&](const Plane& p) { return (4.0 + 4.8) * orbitRadius(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) * 1.5 + 60.0; },
+        [&](const Plane& p) {
+            RadiusRoute& f = rfRoutes[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const ActivityProgress& g = r.progress;
+            if (!r.live() || g.segment != 1 || g.segmentPercent < 5.0 || g.segmentPercent > 95.0) return;
+            const auto& s = *w.vehicleState(p.id);
+            f.worst = std::max(f.worst, std::abs(overGround(f.centreLatRad, f.centreLonRad, s.latitudeRad, s.longitudeRad) - f.radiusM));
+            f.cross = std::max(f.cross, std::abs(g.crossTrackM));
+            ++f.samples;
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const RadiusRoute& f = rfRoutes[p.id];
+            INFO(activityStateName(r.state) << "; its radius to fix's arc " << f.radiusM << " m, off it " << f.worst << " m (its own cross-track "
+                                            << f.cross << " m; " << f.samples << " samples)");
+            CHECK(r.state == ActivityState::Completed);
+            CHECK(f.samples > 0);
+            // (the worst: a wing's the E-3G's 18.3 m on its 22.4 km arc, the B-52H's 17.1 m - its route's own cross-track the same
+            // to a centimetre; a rotorcraft's the UH-1H's 4.4 m, 0.7 % of its arc. Laid out in the plane at its start, as a
+            // start turn point's is, and read in the flat plane this file lays points out in, the C-17A's 28 km arc read 72 m off)
+            CHECK(f.worst < (p.rotor ? std::max(0.5, 0.05 * f.radiusM) : 20.0));
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

@@ -945,6 +945,32 @@ A-GRA's path segment may carry conditional segments (MA_PathSegmentType.Conditio
   - C ABI 1.34: `fsim_route_branch` (`fsim_route_branch_init`: every field left out), its 15 fields in `RouteBranch`'s order; `enum fsim_comparison`; `fsim_route_extras`'s `branches` and `branch_count`, where the caller's `struct_size` has them; `fsim_batch_command`'s `branches` and `branch_count`, filled by `fsim_activity_get_setpoint`; `fsim_activity_command_branch`.
   - Python: `fsim.RouteBranch` (its codes by name or member) and `fsim.Comparison`; `branches=` in `submit_route`, `update_route` and a batch's or a task's `BatchCommand("submit_route", ...)`; read back in the setpoint's `branches`; `Activity.command_branch(branch, commanded=True)`.
 
+### 4.38 A-GRA's civil path terminators (as FA-6f builds them)
+
+A-GRA's path segment may name its civil path terminator (MA_PathSegmentType.CivilPathTerminator, a CivilPathTerminatorType): "the Civil Path Terminator information associated with the End Point" - the ARINC 424 leg type of the leg into its end point, one of 23. Its schema gives data for two - a course to fix's course (CF_CourseToFixType) and a radius to fix's arc (RF_RadiusToFixType: its centre, radius, courses in and out, initial and end points, arc and direct distances, and turn direction) - and leaves the other 21 empty, their "children elements ... subject to change over the course of development". Its ICD and its VI volume say nothing more. ADR-29 plans them as WPT-19. FA-6f flies each as ARINC 424 defines it (the path terminators FAA Order 8260.58 and ICAO's PANS-OPS publish) where its segment carries what defines it - in its terminator, or in its end point - in two steps: FA-6f1 the legs that end at their fix, FA-6f2 those that end at an altitude, an intercept, a distance or the operator's hand, and the holds.
+
+- **Its type** (`terminator`, the Waypoint's field 29; `PathTerminator`, in the schema's order, ARINC 424's codes beside them): the leg into the point. Left out, the route's own leg, as before. Its data, where it has any, in a `RouteTerminator` beside the waypoints, as the loiters are: 64 a route at most, one a point.
+- **Flown** (FA-6f1):
+  - **a track to fix (TF):** the great circle from the point before - on a rhumb route too;
+  - **a direct to fix (DF):** straight to the point from where the aircraft is as the leg begins. Its leg is made again from where the aircraft is at each update, the turn at its point planned again with it, until its track is within a degree of the point; that leg is flown on. After a fly-by at the point before, whose turn is planned onto the leg from that point, the aircraft ends the turn on course; after a point flown over, a loiter, a branch taken or as the route begins, it turns straight to its point. Flown over a point and then direct, a C172 was 248 m east of the line from that point halfway to the next, where the route's own leg had brought it back to within 28 m;
+  - **an initial fix (IF):** where a procedure begins - A-GRA's end point has a leg into it all the same, flown as a direct to fix's;
+  - **a course to fix (CF):** its course's great circle into the point (`courseRad`, required), joined from abeam where the leg begins - the point before, or where the aircraft is (as the route begins, after a loiter, after a branch taken at a point flown over). Where there is past the point along its course, the leg there is direct; a point before past it is refused;
+  - **a radius to fix (RF):** the arc round its centre (`centerLatitudeRad`, `centerLongitudeRad`, required) from the point before to the point, its way round (`clockwise`, required: A-GRA's TurnDirection). It is laid out in the plane at its centre - a circle round it on the Earth, its radius the point before's distance from it - where a start turn point's arc is laid out at its start (4.30); the follower flies it as it flies those, its curvature fed forward and looked ahead for.
+- **Checked** as 4.30's turn points are - under a range policy; unchecked (`RangePolicy::None`), flown as given - refused `invalid_waypoint` naming the point:
+  - an arc: its point off its circle (by more than a metre, or half a percent of its radius), sweeping more than 170 degrees, what else its data gives not its own (its radius and its ends, a metre or half a percent; its courses in and out, a degree; its length and its chord, a metre or half a percent); at the start of a route that does not repeat (the route comes to it from where the aircraft is), at a point a later lap comes back to from its last (two points before it), its point or the one before in a moving frame (its centre does not move), after a loiter point whose loiter does not leave at its point (an orbit's, two circles', one with an exit point), and a branch's next (the branch comes to it from where it is taken: named at the branch's point). One the aircraft cannot turn at its point's speed and its full bank (a rotorcraft's, its tilt), whatever the policy;
+  - after a start turn point, whose arc is the leg, anything but an arc - its tangent at its start the start's course (given, or the leg in's) within a degree; after a capture, whose course is the leg, anything but a track to fix or a course to fix on its course (within a degree);
+  - a course to fix whose point before is past it along its course.
+- **Refused `invalid_waypoint`, naming the point, whatever the policy:** a type that is not one; data at a point past the route, two for one point, a field not finite, a way round not 0 or 1, a place's latitude without its longitude, a length not above 0; data its leg has none of (a course on an arc, an arc's data on a course to fix, any on the others); a course to fix without its course; an arc without its centre or its way round.
+- **Not defined by its segment:** a leg to or along a navaid's DME distance, radial or arc (AF, CD, CR, FD, VD, VR: A-GRA gives no navaid, and the world has none) and a procedure turn (PI: its outbound course, its side and the distance it stays within, which A-GRA does not give). Their elements are empty in A-GRA 6.0a: refused `invalid_waypoint` naming the point, as a capture without its course is (4.30). No stage builds them; where a later A-GRA gives their data, a stage will.
+- **Not implemented** (as its support row, `fsim.guidance.route/path_terminators`, says: partial, FA-6f2): a leg to an altitude (CA, FA, VA), an intercept (CI, VI), a distance (FC) or a manual termination (FM, VM), and a hold's (HA, HF, HM).
+- **Kept** as the loiters are: an UPDATE's new waypoints come with their terminators; without new waypoints it keeps its own. Read back as given.
+- **A stack on its own** takes them too, unchecked.
+- **A named change to 4.37:** a branch refused on a linked route whose flight order is not as given is named by its point as given. FA-6e2a named its place in the flight order.
+- **Surfaces.**
+  - C++: `PathTerminator`, `RouteTerminator` (`fsim/Control.h`); `Waypoint::terminator`; a `Span<const RouteTerminator>` after the branches in `World::submit`, `World::update` (a route's) and `ControlStack::command`; `BatchCommand::terminators`, `Setpoint::terminators`; `PathStore::routeTerminators`.
+  - C ABI 1.35: `enum fsim_path_terminator`; `fsim_waypoint`'s `terminator`, where the caller's `struct_size` has it (`fsim_waypoint_init` leaves it out); `fsim_route_terminator` (`fsim_route_terminator_init`: every field left out), its 13 fields in `RouteTerminator`'s order; `fsim_route_extras`'s and `fsim_batch_command`'s `terminators` and `terminator_count`, where the caller's struct has them, filled by `fsim_activity_get_setpoint`.
+  - Python: `fsim.PathTerminator` (A-GRA's names, ARINC 424's codes their aliases: by name either way, "tf" or "track_to_fix"); `fsim.Waypoint`'s `terminator`; `fsim.RouteTerminator`; `terminators=` in `submit_route`, `update_route` and a batch's or a task's `BatchCommand("submit_route", ...)`; read back in the setpoint's `terminators`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -1171,7 +1197,7 @@ Laps, entry and exit points, legs by time, turns by bank, rate or type, hold con
 
 Paths with ids and types, links and conditional branches, turn points, loiter points, per-segment optimisation, climb and acceleration, required times of arrival in 4D, altitude blocks, civil path terminators, planned states, RNP monitoring, relative points.
 
-**Status:** in progress, in six steps, each measured in section 14:
+**Status:** in progress, in seven steps, each measured in section 14:
 - FA-6a, the waypoint as the schema gives it: altitude blocks and the barometric reference, waypoints and their types, points in frames (WPT-12, WPT-17, WPT-22; 4.29), done 2026-09-28 and measured in section 14;
 - FA-6b, turn points and loiter points, in two steps:
   - FA-6b1, turn points: capturing the outbound course, starting and ending a turn, a course at the point, a turn's radius (WPT-04; 4.30), done 2026-09-28 and measured in section 14;
@@ -1188,7 +1214,10 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
   - FA-6e2, conditional branches (WPT-15), in two steps:
     - FA-6e2a, the branches, and their altitude, time, capture and operator-input conditions (4.37), done 2026-09-28 and measured in section 14;
     - FA-6e2b, their endurance and contingency conditions (4.37), done 2026-09-28 and measured in section 14; FA-6e done;
-- FA-6f, civil path terminators (WPT-19).
+- FA-6f, civil path terminators (WPT-19; 4.38), in two steps:
+  - FA-6f1, the legs that end at their fix - a track, a direct, an initial fix, a course and a radius to fix - done 2026-09-28 and measured in section 14;
+  - FA-6f2, the legs that end at an altitude, an intercept, a distance or a manual termination, and the holds;
+- FA-6g, what FA-6 has left: a time of arrival and planned states at or after a loiter point, planned states beside points in moving frames, a start turn where its links loop back, its course left out.
 
 **Items (15):** WPT-04, WPT-06, WPT-08, WPT-10, WPT-11, WPT-12, WPT-13, WPT-14, WPT-15, WPT-17, WPT-18, WPT-19, WPT-20, WPT-21, WPT-22.
 
@@ -2501,6 +2530,29 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - `route` read +1.4 % (its minimum +1.1 %). Its functions are the same instructions in both builds but for the padding before a loop in `restart`, so that is placement. Against FA-6c2, `pattern`'s +1.2 % was the same.
   - None of the bench's cases flies a heading. A temporary case that did, measured against FA-6c2, read +0.9 %, 1 ns: the trim's comparisons and multiply-adds, with no division or call.
 - ctest: all 321 tests pass.
+
+**FA-6f1, A-GRA's civil path terminators: the legs that end at their fix (WPT-19).**
+- **Flown** (`test_route_terminators`, calm; C172s east at 1,500 m and 55 m/s):
+  - a track to fix on a rhumb route at 60 degrees north, 40 km east: its great circle 54.4 m poleward of the rhumb line in its middle (the geometry's 54.3 m), 0.0 m off it; the route's own leg on the rhumb line, 0.0 m off it;
+  - a direct to fix after a waypoint flown over, 6 km on to the north: halfway, 248 m east of the line from the point flown over and never west of it; the route's own leg, back to within 28 m of that line;
+  - a course to fix due north into a point 1 km east of the line on from the point before: within 11.0 m of its course's line and 0.52 degrees of its course in its last 2 km;
+  - a radius to fix's quarter circle of 1,500 m, every field of its arc given: a C172 within 7.5 m of it, an IRIS within 0.06 m of its own of 50 m. Read back as given.
+- **Refused `invalid_waypoint`, naming the point:** a code of 23; data at a point past the route, two for one point, a radius not finite, a way round of 2, a course on an arc, an arc's data on a course to fix, data on a track to fix, a course to fix without its course, an arc without its centre or its way round, a centre's latitude alone; the seven legs A-GRA 6.0a does not define (AF, CD, CR, FD, PI, VD, VR); its point 96 m inside its circle, the long way round, a radius of 1,450 m, a course in or out not its, a start not its, a length or a chord not its; an arc at a route's start; a branch to an arc (named at the branch's point); a track to fix after a start turn point; a direct to fix after a capture; a course to fix whose point before is past it; an arc after an orbit; an arc of 100 m, which the C172 cannot turn; a 65th (the 65th's point). On a linked route whose flight order is not as given, an arc's data and its radius refused at their point as given.
+- **Not implemented** (FA-6f2): the legs to an altitude, an intercept, a distance or a manual termination, and the holds (CA, CI, FA, FC, FM, HA, HF, HM, VA, VI, VM).
+- **The fleet** (`test_fleet`): every aircraft two orbit radii ahead, then a radius to fix's quarter circle of three radii round to the right, near 20 degrees of bank, and two radii on. All 35 complete, each within 20 m of its circle round its centre, over the ground, all along it: the wings from 5.6 m (the Skua) to 18.3 m (the E-3G, on its 22.4 km arc), the rotorcraft from 0.15 m (the IRIS) to 4.4 m (the UH-1H). Their routes' own cross-tracks read the same, to a centimetre.
+  - First laid out in the plane at its start, as a start turn point's arc is, and read in the flat plane the fleet test lays points out in, the heavies' arcs of 15 to 28 km read 21 m (the B-52H) to 82 m (the KC-46A) off. A radius to fix's arc is now laid out in the plane at its centre, a circle round it on the Earth, and read by the great circle's distance from its centre.
+- **A fix to FA-6e2a:** a branch refused on a linked route whose flight order is not as given named its point's place in that order - a branch at point 3 read 2. It now names its point as given (`test_route_branches`).
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6e2b's build (the hsa trim flies no route): a route without terminators lays its legs out as before, and a start turn point's arc keeps its plane at its start.
+- **The support table:** `route/path_terminators` partial (the legs to an altitude, an intercept, a distance or a manual termination, and the holds: FA-6f2); the route capability's pending list names those in its place. The C ABI's, discovery's and Python's example of a row not built is now `route/metadata` (FA-7).
+- **Conformance:** the optimise walks give points now and then a track, a direct or a course to fix, an initial fix, a radius to fix round a centre on its chord's bisector either way round, a leg not defined, or a code that is none.
+- **Surfaces:** the C ABI's 1.35 block (a radius to fix read back; a procedure turn refused `invalid_waypoint` and a course to altitude `not_implemented`, `reserved` 3); Python's `test_route_terminators` (an arc by name, within 20 m, read back; refusals by name).
+- **Memory:** a waypoint 240 bytes (232), a leg 192 (176), the path store 108,648 (99,432), a route's plan 169,864 (156,504), a setpoint 544 (520), a batch command 408 (392); an activity record unchanged, 304.
+- **Digests:** identical to FA-6e2b's (and 84862b2's), with protection and without. The allocation gate passes.
+- **A/B throughput** against the build before it - FA-6e2b with the hsa's heading trim (84862b2), built from its own tree with the same JSBSim - both run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`; then 5 rounds of `micro` and of `command` from three copies of each.
+  - From one copy of each, the micro cases are within −0.7 % to +1.2 %, but `default hold`'s +5.6 %, which reads +0.2 % from three copies: placement, as FA-6e2b's single copies showed. From three copies of each, their medians' median, every micro case is within −1.0 % to +0.3 %; `route` −0.6 %.
+  - The command cases are within −5.7 % to +0.8 % from one copy, and −5.3 % to +0.4 % from three: a behaviour's NEW reads 125 ns where 84862b2's read 132 in all three copies.
+  - World throughput is 99.8 to 100.7 % of 84862b2's; protection costs at most 1.2 %.
+- ctest: all 325 tests pass.
 
 ## Appendix A: the inventory
 

@@ -1001,19 +1001,19 @@ static PyObject* world_submit_mode(PyObject* o, PyObject* const* args, Py_ssize_
  * out. *out is PyMem-allocated (free it); the count, or -1 with an error set. */
 static Py_ssize_t read_waypoints(PyObject* o, fsim_waypoint** out) {
     *out = NULL;
-    PyObject* seq = PySequence_Fast(o, "waypoints must be a sequence of 10-, 20-, 22-, 25-, 27-, 28- or 29-number rows");
+    PyObject* seq = PySequence_Fast(o, "waypoints must be a sequence of 10-, 20-, 22-, 25-, 27-, 28-, 29- or 30-number rows");
     if (!seq) return -1;
     const Py_ssize_t count = PySequence_Size(seq);
     fsim_waypoint* points = (fsim_waypoint*)PyMem_Malloc(sizeof(fsim_waypoint) * (size_t)(count ? count : 1));
     for (Py_ssize_t i = 0; points && i < count; ++i) {
         PyObject* row = PySequence_GetItem(seq, i);
-        PyObject* r = row ? PySequence_Fast(row, "each waypoint must be 10, 20, 22, 25, 27, 28 or 29 numbers") : NULL;
+        PyObject* r = row ? PySequence_Fast(row, "each waypoint must be 10, 20, 22, 25, 27, 28, 29 or 30 numbers") : NULL;
         fsim_waypoint* w = &points[i];
         fsim_waypoint_init(w);
         const Py_ssize_t size = r ? PySequence_Size(r) : 0;
-        if (r && (size == 10 || size == 20 || size == 22 || size == 25 || size == 27 || size == 28 || size == 29)) {
-            double v[28];
-            for (int k = 0; k < 28; ++k) v[k] = fsim_hold();
+        if (r && (size == 10 || size == 20 || size == 22 || size == 25 || size == 27 || size == 28 || size == 29 || size == 30)) {
+            double v[29];
+            for (int k = 0; k < 29; ++k) v[k] = fsim_hold();
             for (Py_ssize_t k = 0; k < size && !PyErr_Occurred(); ++k) {
                 if (k == 9) continue; /* (its id, below) */
                 PyObject* item = PySequence_GetItem(r, k);
@@ -1033,7 +1033,7 @@ static Py_ssize_t read_waypoints(PyObject* o, fsim_waypoint** out) {
             w->course_rad = v[19], w->turn_radius_m = v[20];
             w->speed_optimization = v[21], w->climb_optimization = v[22], w->acceleration_ms2 = v[23];
             w->arrival_begin_s = v[24], w->arrival_end_s = v[25];
-            w->rnp_m = v[26], w->next = v[27];
+            w->rnp_m = v[26], w->next = v[27], w->terminator = v[28];
         } else if (r) {
             PyErr_SetString(PyExc_ValueError, "each waypoint must be (latitude_rad, longitude_rad, altitude_m, altitude_reference, speed, "
                                               "speed_reference, turn, max_bank_rad, climb_rate_ms, id), and from ABI 1.26 its A-GRA fields");
@@ -1283,9 +1283,72 @@ static PyObject* branch_row(const fsim_route_branch* b) {
     return row;
 }
 
+/* A route's civil path terminators' data (ABI 1.35): rows of 14 numbers - point, then fsim_route_terminator's 13 fields.
+ * *out is PyMem-allocated (free it); the count, or -1 with an error set. */
+static Py_ssize_t read_terminators(PyObject* o, fsim_route_terminator** out) {
+    *out = NULL;
+    PyObject* seq = PySequence_Fast(o, "terminators must be a sequence of 14-number rows");
+    if (!seq) return -1;
+    const Py_ssize_t count = PySequence_Size(seq);
+    fsim_route_terminator* terminators = (fsim_route_terminator*)PyMem_Malloc(sizeof(fsim_route_terminator) * (size_t)(count ? count : 1));
+    for (Py_ssize_t i = 0; terminators && i < count; ++i) {
+        PyObject* row = PySequence_GetItem(seq, i);
+        PyObject* r = row ? PySequence_Fast(row, "each terminator must be 14 numbers") : NULL;
+        fsim_route_terminator* t = &terminators[i];
+        fsim_route_terminator_init(t);
+        if (r && PySequence_Size(r) == 14) {
+            PyObject* point = PySequence_GetItem(r, 0);
+            if (point) {
+                const unsigned long v = PyLong_AsUnsignedLong(point);
+                if (PyErr_Occurred() || v > 0xFFFFFFFFul) PyErr_SetString(PyExc_ValueError, "a terminator's point must be a whole number from 0");
+                else t->point = (uint32_t)v;
+            }
+            Py_XDECREF(point);
+            for (Py_ssize_t k = 1; k < 14 && !PyErr_Occurred(); ++k) {
+                PyObject* item = PySequence_GetItem(r, k);
+                t->fields[k - 1] = item ? PyFloat_AsDouble(item) : 0.0;
+                Py_XDECREF(item);
+            }
+        } else if (r) {
+            PyErr_SetString(PyExc_ValueError, "each terminator must be (point, fsim_route_terminator's 13 fields)");
+        }
+        Py_XDECREF(r);
+        Py_XDECREF(row);
+        if (PyErr_Occurred()) break;
+    }
+    Py_DECREF(seq);
+    if (!terminators) PyErr_NoMemory();
+    if (PyErr_Occurred()) {
+        PyMem_Free(terminators);
+        return -1;
+    }
+    *out = terminators;
+    return count;
+}
+
+/* A terminator as read_terminators's row. */
+static PyObject* terminator_row(const fsim_route_terminator* t) {
+    PyObject* row = PyTuple_New(14);
+    if (!row) return NULL;
+    PyObject* point = PyLong_FromUnsignedLong(t->point);
+    if (!point || PyTuple_SetItem(row, 0, point) < 0) {
+        Py_DECREF(row);
+        return NULL;
+    }
+    for (Py_ssize_t k = 1; k < 14; ++k) {
+        PyObject* v = PyFloat_FromDouble(t->fields[k - 1]);
+        if (!v || PyTuple_SetItem(row, k, v) < 0) {
+            Py_DECREF(row);
+            return NULL;
+        }
+    }
+    return row;
+}
+
 /* submit_route(id, values, waypoints, source=None, axes=None, range=None, min_version=None, envelope=None, loiters=None,
- * states=None, paths=None, branches=None) -> result; loiters (ABI 1.28): read_loiters's rows; states (ABI 1.31):
- * read_states's; paths (ABI 1.33): read_paths's; branches (ABI 1.34): read_branches's */
+ * states=None, paths=None, branches=None, terminators=None) -> result; loiters (ABI 1.28): read_loiters's rows; states (ABI
+ * 1.31): read_states's; paths (ABI 1.33): read_paths's; branches (ABI 1.34): read_branches's; terminators (ABI 1.35):
+ * read_terminators's */
 static PyObject* world_submit_route(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint32_t id;
@@ -1297,7 +1360,8 @@ static PyObject* world_submit_route(PyObject* o, PyObject* const* args, Py_ssize
     fsim_route_state* states = NULL;
     fsim_route_path* paths = NULL;
     fsim_route_branch* branches = NULL;
-    if (!check_args(n, 3, 12, "submit_route") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    fsim_route_terminator* terminators = NULL;
+    if (!check_args(n, 3, 13, "submit_route") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
     const Py_ssize_t count = read_values(args[1], row, "submit_route");
     if (count < 0 || !read_options(args, n > 8 ? 8 : n, 3, &opt)) return NULL;
     const Py_ssize_t np = read_waypoints(args[2], &points);
@@ -1306,31 +1370,36 @@ static PyObject* world_submit_route(PyObject* o, PyObject* const* args, Py_ssize
     const Py_ssize_t ns = nl >= 0 && n > 9 && args[9] != Py_None ? read_states(args[9], &states) : 0;
     const Py_ssize_t nr = nl >= 0 && ns >= 0 && n > 10 && args[10] != Py_None ? read_paths(args[10], &paths) : 0;
     const Py_ssize_t nb = nl >= 0 && ns >= 0 && nr >= 0 && n > 11 && args[11] != Py_None ? read_branches(args[11], &branches) : 0;
-    if (nl < 0 || ns < 0 || nr < 0 || nb < 0) {
+    const Py_ssize_t nt = nl >= 0 && ns >= 0 && nr >= 0 && nb >= 0 && n > 12 && args[12] != Py_None ? read_terminators(args[12], &terminators) : 0;
+    if (nl < 0 || ns < 0 || nr < 0 || nb < 0 || nt < 0) {
         PyMem_Free(points);
         PyMem_Free(loiters);
         PyMem_Free(states);
         PyMem_Free(paths);
+        PyMem_Free(branches);
         return NULL;
     }
     fsim_route_extras extras;
     fsim_route_extras_init(&extras);
     extras.loiters = loiters, extras.loiter_count = (uint32_t)nl, extras.states = states, extras.state_count = (uint32_t)ns;
     extras.paths = paths, extras.path_count = (uint32_t)nr, extras.branches = branches, extras.branch_count = (uint32_t)nb;
+    extras.terminators = terminators, extras.terminator_count = (uint32_t)nt;
     const int rc = fsim_vehicle_submit_route_extras(self->world, id, row, (uint32_t)count, points, (uint32_t)np, &extras, &opt, &r);
     PyMem_Free(points);
     PyMem_Free(loiters);
     PyMem_Free(states);
     PyMem_Free(paths);
     PyMem_Free(branches);
+    PyMem_Free(terminators);
     if (rc != FSIM_OK) return fail();
     return result_tuple(self->world, &r);
 }
 
 /* activity_update_route(activity, values, waypoints, source=0, controller=0, loiters=None, states=None, paths=None,
- * branches=None) -> result; waypoints may be empty: the route's own, and their loiters, states, paths and branches; given,
- * with `loiters` (ABI 1.28: read_loiters's rows), `states` (ABI 1.31: read_states's), `paths` (ABI 1.33: read_paths's) and
- * `branches` (ABI 1.34: read_branches's) */
+ * branches=None, terminators=None) -> result; waypoints may be empty: the route's own, and their loiters, states, paths,
+ * branches and terminators; given, with `loiters` (ABI 1.28: read_loiters's rows), `states` (ABI 1.31: read_states's),
+ * `paths` (ABI 1.33: read_paths's), `branches` (ABI 1.34: read_branches's) and `terminators` (ABI 1.35:
+ * read_terminators's) */
 static PyObject* world_activity_update_route(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint64_t activity;
@@ -1341,9 +1410,10 @@ static PyObject* world_activity_update_route(PyObject* o, PyObject* const* args,
     fsim_route_state* states = NULL;
     fsim_route_path* paths = NULL;
     fsim_route_branch* branches = NULL;
+    fsim_route_terminator* terminators = NULL;
     int source = 0;
     uint32_t controller = 0;
-    if (!check_args(n, 3, 9, "activity_update_route") || !as_u64(args[0], &activity) || (n > 3 && !as_int(args[3], &source)) ||
+    if (!check_args(n, 3, 10, "activity_update_route") || !as_u64(args[0], &activity) || (n > 3 && !as_int(args[3], &source)) ||
         (n > 4 && !as_u32(args[4], &controller)) || !WORLD_IDLE(self))
         return NULL;
     const Py_ssize_t count = read_values(args[1], row, "activity_update_route");
@@ -1354,23 +1424,27 @@ static PyObject* world_activity_update_route(PyObject* o, PyObject* const* args,
     const Py_ssize_t ns = nl >= 0 && n > 6 && args[6] != Py_None ? read_states(args[6], &states) : 0;
     const Py_ssize_t nr = nl >= 0 && ns >= 0 && n > 7 && args[7] != Py_None ? read_paths(args[7], &paths) : 0;
     const Py_ssize_t nb = nl >= 0 && ns >= 0 && nr >= 0 && n > 8 && args[8] != Py_None ? read_branches(args[8], &branches) : 0;
-    if (nl < 0 || ns < 0 || nr < 0 || nb < 0) {
+    const Py_ssize_t nt = nl >= 0 && ns >= 0 && nr >= 0 && nb >= 0 && n > 9 && args[9] != Py_None ? read_terminators(args[9], &terminators) : 0;
+    if (nl < 0 || ns < 0 || nr < 0 || nb < 0 || nt < 0) {
         PyMem_Free(points);
         PyMem_Free(loiters);
         PyMem_Free(states);
         PyMem_Free(paths);
+        PyMem_Free(branches);
         return NULL;
     }
     fsim_route_extras extras;
     fsim_route_extras_init(&extras);
     extras.loiters = loiters, extras.loiter_count = (uint32_t)nl, extras.states = states, extras.state_count = (uint32_t)ns;
     extras.paths = paths, extras.path_count = (uint32_t)nr, extras.branches = branches, extras.branch_count = (uint32_t)nb;
+    extras.terminators = terminators, extras.terminator_count = (uint32_t)nt;
     const int rc = fsim_activity_update_route_extras(self->world, activity, source, controller, row, (uint32_t)count, points, (uint32_t)np, &extras, &r);
     PyMem_Free(points);
     PyMem_Free(loiters);
     PyMem_Free(states);
     PyMem_Free(paths);
     PyMem_Free(branches);
+    PyMem_Free(terminators);
     if (rc != FSIM_OK) return fail();
     return result_tuple(self->world, &r);
 }
@@ -2019,12 +2093,12 @@ static PyObject* world_activity_setpoint(PyObject* o, PyObject* const* args, Py_
         waypoints = PyList_New(0);
         for (uint32_t i = 0; waypoints && i < b.waypoint_count; ++i) {
             const fsim_waypoint* w = &b.waypoints[i];
-            PyObject* row = Py_BuildValue("(dddddddddKddddddddddddddddddd)", w->latitude_rad, w->longitude_rad, w->altitude_m, w->altitude_reference,
+            PyObject* row = Py_BuildValue("(dddddddddKdddddddddddddddddddd)", w->latitude_rad, w->longitude_rad, w->altitude_m, w->altitude_reference,
                                           w->speed, w->speed_reference, w->turn, w->max_bank_rad, w->climb_rate_ms, (unsigned long long)w->id,
                                           w->altitude_min_m, w->altitude_max_m, w->kind, w->waypoint_type, w->frame, w->frame_rotation,
                                           w->frame_offsets, w->frame_x_m, w->frame_y_m, w->frame_z_m, w->course_rad, w->turn_radius_m,
                                           w->speed_optimization, w->climb_optimization, w->acceleration_ms2, w->arrival_begin_s, w->arrival_end_s,
-                                          w->rnp_m, w->next);
+                                          w->rnp_m, w->next, w->terminator);
             if (!row || PyList_Append(waypoints, row) < 0) Py_CLEAR(waypoints);
             Py_XDECREF(row);
         }
@@ -2097,12 +2171,23 @@ static PyObject* world_activity_setpoint(PyObject* o, PyObject* const* args, Py_
     } else if (paths) {
         branches = Py_NewRef(Py_None);
     }
-    if (!fields || !behavior || !waypoints || !segments || !loiters || !states || !paths || !branches) {
+    PyObject* terminators = NULL; /* (a route's: ABI 1.35, read_terminators's rows) */
+    if (branches && b.terminators) {
+        terminators = PyList_New(0);
+        for (uint32_t i = 0; terminators && i < b.terminator_count; ++i) {
+            PyObject* row = terminator_row(&b.terminators[i]);
+            if (!row || PyList_Append(terminators, row) < 0) Py_CLEAR(terminators);
+            Py_XDECREF(row);
+        }
+    } else if (branches) {
+        terminators = Py_NewRef(Py_None);
+    }
+    if (!fields || !behavior || !waypoints || !segments || !loiters || !states || !paths || !branches || !terminators) {
         Py_XDECREF(fields), Py_XDECREF(behavior), Py_XDECREF(waypoints), Py_XDECREF(segments), Py_XDECREF(loiters), Py_XDECREF(states);
-        Py_XDECREF(paths), Py_XDECREF(branches);
+        Py_XDECREF(paths), Py_XDECREF(branches), Py_XDECREF(terminators);
         return NULL;
     }
-    return Py_BuildValue("(iiNNNNNNNN)", b.kind, b.code, fields, behavior, waypoints, segments, loiters, states, paths, branches);
+    return Py_BuildValue("(iiNNNNNNNNN)", b.kind, b.code, fields, behavior, waypoints, segments, loiters, states, paths, branches, terminators);
 }
 
 /* activity_end_points(activity, max) -> [(kind, latitude_rad, longitude_rad, altitude_m, altitude_reference, turn, id, index)] */
@@ -2805,6 +2890,7 @@ typedef struct {
     fsim_route_state* states;
     fsim_route_path* paths;
     fsim_route_branch* branches;
+    fsim_route_terminator* terminators;
     fsim_behavior_command behavior;
     fsim_command_options options;
 } BatchItem;
@@ -2820,22 +2906,24 @@ static void batch_free(BatchItem* items, Py_ssize_t count) {
         PyMem_Free(items[i].states);
         PyMem_Free(items[i].paths);
         PyMem_Free(items[i].branches);
+        PyMem_Free(items[i].terminators);
     }
     PyMem_Free(items);
 }
 
-/* One batch item (kind, code, values, behavior, waypoints, segments, options[, loiters[, states[, paths[, branches]]]]) into
- * `it` and `b`: kind fsim_batch_kind, behavior (id, target, params, points) or None, options (source, axes, range,
- * min_version, envelope) or None, a route's loiters (ABI 1.28: read_loiters's rows), states (ABI 1.31: read_states's), paths
- * (ABI 1.33: read_paths's) and branches (ABI 1.34: read_branches's) or None. 0 with a Python error if malformed. */
+/* One batch item (kind, code, values, behavior, waypoints, segments, options[, loiters[, states[, paths[, branches[,
+ * terminators]]]]]) into `it` and `b`: kind fsim_batch_kind, behavior (id, target, params, points) or None, options (source,
+ * axes, range, min_version, envelope) or None, a route's loiters (ABI 1.28: read_loiters's rows), states (ABI 1.31:
+ * read_states's), paths (ABI 1.33: read_paths's), branches (ABI 1.34: read_branches's) and terminators (ABI 1.35:
+ * read_terminators's) or None. 0 with a Python error if malformed. */
 static int read_batch_item(PyObject* item, BatchItem* it, fsim_batch_command* b) {
     b->struct_size = sizeof *b;
-    PyObject* part[11] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+    PyObject* part[12] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
     const Py_ssize_t parts = item && PySequence_Check(item) ? PySequence_Size(item) : -1;
-    int ok = parts >= 7 && parts <= 11;
+    int ok = parts >= 7 && parts <= 12;
     if (item && !ok && !PyErr_Occurred())
-        PyErr_SetString(PyExc_ValueError,
-                        "each item must be (kind, code, values, behavior, waypoints, segments, options[, loiters[, states[, paths[, branches]]]])");
+        PyErr_SetString(PyExc_ValueError, "each item must be (kind, code, values, behavior, waypoints, segments, options[, loiters[, states[, paths[, "
+                                          "branches[, terminators]]]]])");
     for (Py_ssize_t k = 0; ok && k < parts; ++k) ok = (part[k] = PySequence_GetItem(item, k)) != NULL;
     if (ok) ok = as_int(part[0], &b->kind) && as_int(part[1], &b->code);
     if (ok) {
@@ -2903,7 +2991,12 @@ static int read_batch_item(PyObject* item, BatchItem* it, fsim_batch_command* b)
         ok = nb >= 0;
         b->branches = it->branches, b->branch_count = (uint32_t)(nb > 0 ? nb : 0);
     }
-    for (Py_ssize_t k = 0; k < 11; ++k) Py_XDECREF(part[k]);
+    if (ok && part[11] && part[11] != Py_None) {
+        const Py_ssize_t nt = read_terminators(part[11], &it->terminators);
+        ok = nt >= 0;
+        b->terminators = it->terminators, b->terminator_count = (uint32_t)(nt > 0 ? nt : 0);
+    }
+    for (Py_ssize_t k = 0; k < 12; ++k) Py_XDECREF(part[k]);
     return ok;
 }
 

@@ -44,7 +44,8 @@ add_library(fsim_control STATIC
     Arrival.cpp
     States.cpp
     Paths.cpp
-    Branches.cpp)
+    Branches.cpp
+    Terminators.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

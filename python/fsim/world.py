@@ -195,6 +195,63 @@ class Comparison(enum.IntEnum):
     NOT_EQUAL = 5
 
 
+class PathTerminator(enum.IntEnum):
+    """A-GRA's civil path terminators (CivilPathTerminatorType; docs/flight-autonomy.md, 4.38): the ARINC 424 leg type of the
+    leg into a waypoint (fsim.Waypoint's ``terminator``), in the schema's order - its ARINC 424 code an alias of each (TF,
+    RF, ...). Flown: TRACK_TO_FIX (the great circle from the point before), INITIAL_FIX and DIRECT_TO_FIX (straight to the
+    point from where the aircraft is as the leg begins), COURSE_TO_FIX (its course into the point) and RADIUS_TO_FIX (an arc
+    round its centre from the point before) - their data in an fsim.RouteTerminator. Refused not_implemented (FA-6f2): the
+    legs to an altitude, an intercept, a distance or a manual termination, and the holds. Refused invalid_waypoint, a leg its
+    segment does not define (A-GRA 6.0a gives no navaid, nor a procedure turn's data): AF, CD, CR, FD, PI, VD, VR."""
+    ARC_TO_FIX = 0
+    COURSE_TO_ALTITUDE = 1
+    COURSE_TO_DME_DISTANCE = 2
+    COURSE_TO_FIX = 3
+    COURSE_TO_INTERCEPT = 4
+    COURSE_TO_RADIAL = 5
+    DIRECT_TO_FIX = 6
+    TRACK_TO_ALTITUDE = 7
+    TRACK_FROM_FIX_TO_DISTANCE_ALONG_TRACK = 8
+    TRACK_FROM_FIX_TO_DME_DISTANCE = 9
+    FIX_TO_MANUAL_TERMINATION = 10
+    HOLDING_WITH_ALTITUDE_TERMINATION = 11
+    HOLDING_WITH_FIX_TERMINATION = 12
+    HOLDING_WITH_MANUAL_TERMINATION = 13
+    INITIAL_FIX = 14
+    PROCEDURE_TURN_TO_INTERCEPT = 15
+    RADIUS_TO_FIX = 16
+    TRACK_TO_FIX = 17
+    HEADING_TO_ALTITUDE = 18
+    HEADING_TO_DME_DISTANCE_TERMINATION = 19
+    HEADING_TO_INTERCEPT = 20
+    HEADING_TO_MANUAL = 21
+    HEADING_TO_RADIAL_TERMINATION = 22
+    # ARINC 424's codes
+    AF = 0
+    CA = 1
+    CD = 2
+    CF = 3
+    CI = 4
+    CR = 5
+    DF = 6
+    FA = 7
+    FC = 8
+    FD = 9
+    FM = 10
+    HA = 11
+    HF = 12
+    HM = 13
+    IF = 14
+    PI = 15
+    RF = 16
+    TF = 17
+    VA = 18
+    VD = 19
+    VI = 20
+    VM = 21
+    VR = 22
+
+
 class PathType(enum.IntEnum):
     """What a route's path is for (A-GRA's MA_PathTypeEnum; docs/flight-autonomy.md, 4.36): a label, reported back."""
     PRIMARY = 0
@@ -864,13 +921,14 @@ _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": Altitude
                "turn": TurnType, "kind": EndPointKind, "waypoint_type": WaypointType, "pattern": PatternKind, "turn_type": HoldTurn, "hold_entry": HoldEntry, "hold_context": HoldContext,
                "climb_optimization": ClimbOptimization,
                "frame_rotation": FrameRotation, "frame_offsets": FrameOffsets, "point_rotation": FrameRotation, "point_offsets": FrameOffsets,
-               "point_z": CurveZ}
+               "point_z": CurveZ, "terminator": PathTerminator}
 
 Waypoint = collections.namedtuple(
     "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id "
                 "altitude_min_m altitude_max_m kind waypoint_type frame frame_rotation frame_offsets frame_x_m frame_y_m frame_z_m "
-                "course_rad turn_radius_m speed_optimization climb_optimization acceleration_ms2 arrival_begin_s arrival_end_s rnp_m next",
-    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0) + (HOLD,) * 19)
+                "course_rad turn_radius_m speed_optimization climb_optimization acceleration_ms2 arrival_begin_s arrival_end_s rnp_m next "
+                "terminator",
+    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0) + (HOLD,) * 20)
 Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that ends at it: reached at ``altitude_m`` above "
                     "``altitude_reference`` along a straight profile (or climbing at ``climb_rate_ms``, then level), flown at "
                     "``speed`` in ``speed_reference``, passed by ``turn`` (fsim.TurnType: 'fly_by', 'fly_over') with "
@@ -891,7 +949,9 @@ Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that end
                     "side left out, open) - its speed scheduled over the ground to arrive in it. Its required navigation "
                     "performance (4.35): ``rnp_m``, how far off its path the segment may be flown (left out, none); farther, its "
                     "ActivityInfo's ``constraints`` carry fsim.ActivityFlag.NAVIGATION_PERFORMANCE. The point flown after it "
-                    "(4.36): ``next``, its index (-1: the route ends there; left out, the next in its path, or as given).")
+                    "(4.36): ``next``, its index (-1: the route ends there; left out, the next in its path, or as given). Its "
+                    "civil path terminator (4.38): ``terminator`` (fsim.PathTerminator or its name - 'tf', 'rf', ...), the ARINC 424 "
+                    "leg type of the leg into it, its data in an fsim.RouteTerminator.")
 
 RouteLoiter = collections.namedtuple("RouteLoiter", ("point",) + MODE_FIELDS["pattern"] + ("end_time_s",), defaults=(0,) + (HOLD,) * 36)
 RouteLoiter.__doc__ = ("The loiter a route's loiter point flies (A-GRA's LoiterPoint; docs/flight-autonomy.md, 4.31): at waypoint "
@@ -934,6 +994,18 @@ RouteBranch.__doc__ = ("A route's conditional branch (A-GRA's ConditionalPathSeg
                        "its ``contingency`` (fsim.Contingency or its name) - as its navigation report says. A mission critical or "
                        "lost comms contingency is refused not_implemented until FA-16. At most 16; those at one point tried in their "
                        "order, the first that holds taken, the route planned again from there.")
+
+RouteTerminator = collections.namedtuple(
+    "RouteTerminator", "point course_rad center_latitude_rad center_longitude_rad radius_m course_in_rad course_out_rad "
+                       "initial_latitude_rad initial_longitude_rad end_latitude_rad end_longitude_rad arc_m chord_m clockwise",
+    defaults=(0,) + (HOLD,) * 13)
+RouteTerminator.__doc__ = ("A civil path terminator's data (A-GRA's CF_CourseToFixType, RF_RadiusToFixType; docs/flight-autonomy.md, "
+                           "4.38): the leg into waypoint ``point``, whose ``terminator`` names it. A course to fix's ``course_rad`` "
+                           "(into its point, from true north); a radius to fix's arc - its centre ``center_latitude_rad``, "
+                           "``center_longitude_rad`` and way round ``clockwise`` (1 or True: right; 0: left) required, and where given "
+                           "its ``radius_m``, its courses at its start and end ``course_in_rad``, ``course_out_rad``, its ends "
+                           "``initial_*`` (the point before) and ``end_*`` (its point), its length ``arc_m`` and ``chord_m`` must be "
+                           "its own (a metre or half a percent; a degree). At most 64, one a point.")
 
 RoutePath = collections.namedtuple("RoutePath", "id type first count", defaults=(0, HOLD, 0, 0))
 RoutePath.__doc__ = ("One of a route's paths (A-GRA's MA_RoutePathType; docs/flight-autonomy.md, 4.36): ``count`` of its waypoints "
@@ -1084,6 +1156,18 @@ def _branches(branches):
     return rows
 
 
+def _terminators(terminators):
+    """Terminators' data (fsim.RouteTerminator or dicts of its fields) as the native rows: point, then the 13 fields."""
+    rows = []
+    for t in terminators:
+        if isinstance(t, dict):
+            t = RouteTerminator(**t)
+        elif not isinstance(t, RouteTerminator):
+            t = RouteTerminator(*t)
+        rows.append((int(t[0]),) + tuple(float(v) for v in t[1:]))
+    return rows
+
+
 def _row(level, values, fields):
     """A level's (or support kind's, or mode's) fields: all of them in order - a level's COMMAND_FIELDS, or its
     SETPOINT_FIELDS with the rotorcraft's - or some by name with the rest as a new command's defaults."""
@@ -1157,9 +1241,10 @@ class Activity:
             return bool(_checked(h.activity_update(self.id, (), int(self.source), self.controller), h)[4])
         return bool(_checked(h.activity_update(self.id, _row(self.level, values, fields), int(self.source), self.controller), h)[4])
 
-    def update_route(self, waypoints=None, loiters=None, states=None, paths=None, branches=None, **options):
+    def update_route(self, waypoints=None, loiters=None, states=None, paths=None, branches=None, terminators=None, **options):
         """UPDATE of a route: new ``waypoints`` with their ``loiters`` (fsim.RouteLoiter), ``states`` (fsim.RouteState),
-        ``paths`` (fsim.RoutePath) and ``branches`` (fsim.RouteBranch) - None: those it has, and theirs - and the options
+        ``paths`` (fsim.RoutePath), ``branches`` (fsim.RouteBranch) and ``terminators`` (fsim.RouteTerminator) - None: those it
+        has, and theirs - and the options
         given (the others kept); checked as a NEW's, then flown afresh from its start, from where the aircraft is (what the
         operator commanded forgotten). Returns True if a value was clamped; raises fsim.Rejected (``index`` the waypoint at
         fault)."""
@@ -1167,7 +1252,8 @@ class Activity:
         h = self.world._h
         return bool(_checked(h.activity_update_route(self.id, _row("route", (), options), rows, int(self.source), self.controller,
                                                      None if loiters is None else _loiters(loiters), None if states is None else _states(states),
-                                                     None if paths is None else _paths(paths), None if branches is None else _branches(branches)),
+                                                     None if paths is None else _paths(paths), None if branches is None else _branches(branches),
+                                                     None if terminators is None else _terminators(terminators)),
                              h)[4])
 
     def command_branch(self, branch, commanded=True):
@@ -1323,9 +1409,11 @@ class BatchCommand:
             route = {"projection": k.pop("projection", Projection.GREAT_CIRCLE), "repeat": 1.0 if k.pop("repeat", False) else 0.0,
                      "end": k.pop("end", EndBehavior.CONTINUE), "start": k.pop("start", 0)}
             loiters, states, paths, branches = k.pop("loiters", None), k.pop("states", None), k.pop("paths", None), k.pop("branches", None)
+            terminators = k.pop("terminators", None)
             return ((kind, 0, _row("route", (), route), None, _waypoints(waypoints), None, options, None if loiters is None else _loiters(loiters),
                      None if states is None else _states(states), None if paths is None else _paths(paths),
-                     None if branches is None else _branches(branches)), ("route", source, validate, controller))
+                     None if branches is None else _branches(branches), None if terminators is None else _terminators(terminators)),
+                    ("route", source, validate, controller))
         segments = args.pop(0) if args else k.pop("segments")
         if _is_nurbs(segments):  # (as A-GRA's schema gives them: its own kind, ABI 1.24)
             return (6, 0, _row("curve", (), k), None, None, _nurbs(segments), options), ("curve", source, validate, controller)
@@ -1334,7 +1422,7 @@ class BatchCommand:
 
 def _setpoint(t):
     """A native setpoint (activity_setpoint) as the fsim.BatchCommand that would command it."""
-    kind, code, fields, behavior, waypoints, segments, loiters, states, paths, branches = t
+    kind, code, fields, behavior, waypoints, segments, loiters, states, paths, branches, terminators = t
     if kind == 0:
         level = Level(code)
         return BatchCommand("submit", level, **dict(zip(SETPOINT_FIELDS[level], fields)))
@@ -1356,6 +1444,8 @@ def _setpoint(t):
             more["paths"] = [RoutePath(*r) for r in paths]
         if branches:  # (its conditional branches: 4.37)
             more["branches"] = [RouteBranch(int(b[0]), *b[1:]) for b in branches]
+        if terminators:  # (its civil path terminators' data: 4.38)
+            more["terminators"] = [RouteTerminator(int(t[0]), *t[1:]) for t in terminators]
         return BatchCommand("submit_route", [Waypoint(*w) for w in waypoints], projection=route["projection"], repeat=route["repeat"] == 1.0,
                             end=route["end"], start=route["start"], **more)
     if kind == 6:  # a curve's segments as A-GRA's schema gives them
@@ -1529,8 +1619,9 @@ class Vehicle:
         return self._answer(r, "hsa", source, validate_only, controller)
 
     def submit_route(self, waypoints, *, projection=Projection.GREAT_CIRCLE, repeat=False, end=EndBehavior.CONTINUE, start=0, loiters=None, states=None, paths=None,
-                     branches=None, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(), interactive=True,
-                     validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None, override_rejection=False, controller=0):
+                     branches=None, terminators=None, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
+                     interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,
+                     override_rejection=False, controller=0):
         """NEW for fsim.guidance.route, A-GRA's waypoint following (docs/vehicle-interface.md, 4.5): fly
         ``waypoints`` (fsim.Waypoint, dicts of its fields, or rows in its order; at most 256) as legs - great circles
         or rhumb lines (``projection``: fsim.Projection or "great_circle", "rhumb") - from where the aircraft is to
@@ -1542,13 +1633,16 @@ class Vehicle:
         ``states`` (fsim.RouteState, at most 64; 4.34): its segments' first lap flies through their altitudes, at their
         times. Its ``paths`` (fsim.RoutePath, at most 16; 4.36): runs of its waypoints with ids and types, flown along each
         point's ``next``. Its conditional ``branches`` (fsim.RouteBranch, at most 16; 4.37): at a point, another next where
-        their conditions hold. fsim.Rejected if refused: ``index`` names the waypoint (a loiter's, a state's or a branch's, its point),
+        their conditions hold. Its civil path terminators' data (``terminators``: fsim.RouteTerminator, at most 64; 4.38): each
+        point's leg as its ``terminator`` says. fsim.Rejected if refused: ``index`` names the waypoint (a loiter's, a state's,
+        a branch's or a terminator's, its point),
         ``constraint`` the limit it breaks, and ``findings`` every waypoint at fault. The command envelope as submit's."""
         options = {"projection": projection, "repeat": 1.0 if repeat else 0.0, "end": end, "start": start}
         r = self._h.submit_route(self.id, _row("route", (), options), _waypoints(waypoints), int(source), None, int(range), int(min_version),
                                  _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection,
                                            controller), None if loiters is None else _loiters(loiters), None if states is None else _states(states),
-                                 None if paths is None else _paths(paths), None if branches is None else _branches(branches))
+                                 None if paths is None else _paths(paths), None if branches is None else _branches(branches),
+                                 None if terminators is None else _terminators(terminators))
         return self._answer(r, "route", source, validate_only, controller)
 
     def submit_pattern(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),

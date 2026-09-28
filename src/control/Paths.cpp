@@ -187,7 +187,8 @@ void CapabilityHost::nameAsGiven(const route::Plan& p, CheckLog& log, int findin
 }
 
 void CapabilityHost::givenRoute(std::vector<Waypoint>& points, std::vector<RouteLoiter>& loiters, std::vector<RouteState>& states,
-                                std::vector<RoutePath>& paths, std::vector<RouteBranch>& branches) const {
+                                std::vector<RoutePath>& paths, std::vector<RouteBranch>& branches,
+                                std::vector<RouteTerminator>& terminators) const {
     const route::Plan& p = *routePlan_;
     const std::uint32_t count = p.linked ? p.given : p.count;
     points.clear(), loiters.clear(), states.clear(), paths.clear();
@@ -204,6 +205,7 @@ void CapabilityHost::givenRoute(std::vector<Waypoint>& points, std::vector<Route
     }
     paths.assign(p.paths, p.paths + p.pathCount);
     branches.assign(p.branches, p.branches + p.branchCount);
+    terminators.assign(p.terminators, p.terminators + p.terminatorCount);
 }
 
 bool RouteBehavior::takeOrder(const ControlContext& ctx) noexcept {

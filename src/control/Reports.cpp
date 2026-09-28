@@ -33,7 +33,7 @@ void curveOf(Setpoint& out, const NurbsSegment* segments, std::size_t count) {
 
 bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     out.waypoints.clear(), out.segments.clear(), out.nurbs.clear(), out.loiters.clear(), out.states.clear(), out.paths.clear();
-    out.branches.clear();
+    out.branches.clear(), out.terminators.clear();
     out.shape = PatternShape{};
     out.curveShape = CurveShape{};
     if (const int found = liveSlot(activity); found >= 0) {
@@ -51,6 +51,7 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
                 out.states.assign(store->routeStates, store->routeStates + store->routeStateCount);     // (4.34)
                 out.paths.assign(store->routePaths, store->routePaths + store->routePathCount);          // (4.36)
                 out.branches.assign(store->routeBranches, store->routeBranches + store->routeBranchCount); // (4.37)
+                out.terminators.assign(store->routeTerminators, store->routeTerminators + store->routeTerminatorCount); // (4.38)
             }
             if (std::holds_alternative<CurveCommand>(flown)) curveOf(out, store->segments, store->segmentCount), out.curveShape = store->curveShape;
             if (std::holds_alternative<PatternCommand>(flown)) out.shape = store->pattern;
@@ -62,7 +63,7 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     if (w->support) out.command = w->supportCommand;
     else out.command = w->command;
     out.waypoints = w->waypoints, out.shape = w->shape, out.curveShape = w->curveShape, out.loiters = w->loiters, out.states = w->states;
-    out.paths = w->paths, out.branches = w->branches;
+    out.paths = w->paths, out.branches = w->branches, out.terminators = w->terminators;
     curveOf(out, w->segments.data(), w->segments.size());
     return true;
 }
