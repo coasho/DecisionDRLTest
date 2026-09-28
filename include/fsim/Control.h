@@ -144,6 +144,9 @@ enum class DirectionReference : std::uint8_t { TrueNorth = 0, MagneticNorth = 1,
 /// (the most distance for the fuel) or best-endurance speed (the most time),
 /// at the altitude and the weight now, flown as a true airspeed.
 enum class SpeedOptimization : std::uint8_t { LongRangeCruise = 0, MaxEndurance = 1, Count };
+/// How a route's segment climbs or descends, its rate chosen by the aircraft (A-GRA's ClimbOptimizationEnum;
+/// docs/flight-autonomy.md, 4.32): at the best rate it achieves, or as efficiently as it can.
+enum class ClimbOptimization : std::uint8_t { BestRate = 0, ExtendedRange = 1, Count };
 
 /// fsim.guidance.hsa (A-GRA's HSA/CSA): hold a heading or a course, a speed
 /// and an altitude, until told otherwise. Each field may be left out (kHold):
@@ -236,6 +239,11 @@ struct Waypoint {
     double frameXM = kHold, frameYM = kHold, frameZM = kHold; ///< its offsets (z down: given, its altitude the frame's there)
     double courseRad = kHold;          ///< the course at the point (4.30): a start's arc's, an end's, the course a capture captures
     double turnRadiusM = kHold;        ///< its turn's radius: a fly-by's, a start's arc's (TurnGeometry)
+    // A-GRA's segment performance (docs/flight-autonomy.md, 4.32)
+    double speedOptimization = kHold;  ///< SpeedOptimization: the segment at the tables' best now, its speed replaced; left out with
+                                       ///< the speed, the point before's
+    double climbOptimization = kHold;  ///< ClimbOptimization: its climb or descent at a rate the aircraft chooses
+    double accelerationMs2 = kHold;    ///< the speed change into the segment at this acceleration; kHold: as the loops change it
     /// Its point in its frame: the offsets left out, the frame's origin.
     FrameOffset frameOffset() const noexcept {
         FrameOffset o;

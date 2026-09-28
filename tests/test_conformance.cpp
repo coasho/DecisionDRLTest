@@ -352,6 +352,11 @@ public:
                             if (chance(0.05)) l.point = static_cast<std::uint32_t>(k + 1); // (at a point that is not one)
                             loiters.push_back(l);
                         }
+                        // its segment's performance (FA-6c1): the tables' best speed, or an optimisation that is not one; a climb
+                        // optimisation (FA-6c2's, not implemented yet); an acceleration, now and then beyond the aircraft's, or 0
+                        if (chance(0.08)) p.speedOptimization = static_cast<double>(pick(3));
+                        if (chance(0.03)) p.climbOptimization = static_cast<double>(pick(2));
+                        if (chance(0.08)) p.accelerationMs2 = chance(0.1) ? 0.0 : uniform(0.05, 12.0);
                     }
                 }
                 waypoints.push_back(p);

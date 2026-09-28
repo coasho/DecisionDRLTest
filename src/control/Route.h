@@ -390,7 +390,9 @@ double steepest(const Curve& c, std::uint32_t i, double& at) noexcept;
 /// reference given alone after the first point, the same place as the point
 /// before (within a metre); a kind or type that is not one, a type with
 /// another kind, a block upside down or an altitude outside it, a frame's
-/// fields out of range, or its offsets without it.
+/// fields out of range, or its offsets without it; an optimisation that is
+/// not one, an acceleration not above 0 (4.32). A speed optimisation left
+/// out with the speed continues the point before's.
 Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool repeat, const sim::VehicleState& state, const Performance& performance,
                 bool hovers, std::int16_t& bad, const Altimeter* altimeter = nullptr) noexcept;
 /// A waypoint (A-GRA's WayPoint) or a loiter point: no turn there - flown over (4.29), or to its loiter (4.31).

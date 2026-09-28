@@ -83,7 +83,7 @@ const FeatureDef kFeatures[] = {
 
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
-        "speed and climb optimisation, acceleration, times of arrival, paths and branches, path terminators, "
+        "climb optimisation, times of arrival, paths and branches, path terminators, "
         "4D states and navigation performance (FA-6); planning metadata (FA-7)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
@@ -95,13 +95,13 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/turn/radius", "fsim.guidance.route", S, 0, 0, ""},
     {"fsim.guidance.route/course_at_point", "fsim.guidance.route", S, 0, 0, ""},
     {"fsim.guidance.route/segment_speed", "fsim.guidance.route", S, 0, 0, ""},               // WPT-05
-    {"fsim.guidance.route/speed/long_range_cruise", "fsim.guidance.route", N, 6, 0, ""},     // WPT-06
-    {"fsim.guidance.route/speed/max_endurance", "fsim.guidance.route", N, 6, 0, ""},
+    {"fsim.guidance.route/speed/long_range_cruise", "fsim.guidance.route", S, 6, 0, "", true}, // WPT-06 (FA-6c1)
+    {"fsim.guidance.route/speed/max_endurance", "fsim.guidance.route", S, 6, 0, "", true},
     {"fsim.guidance.route/climb_rate", "fsim.guidance.route", S, 0, 0, ""},                  // WPT-07
     {"fsim.guidance.route/climb/best_rate", "fsim.guidance.route", N, 6, 0, ""},             // WPT-08
     {"fsim.guidance.route/climb/extended_range", "fsim.guidance.route", N, 6, 0, ""},
     {"fsim.guidance.route/max_roll", "fsim.guidance.route", S, 0, 0, ""},                    // WPT-09
-    {"fsim.guidance.route/acceleration", "fsim.guidance.route", N, 6, 0, ""},                // WPT-10
+    {"fsim.guidance.route/acceleration", "fsim.guidance.route", S, 0, 0, ""},                // WPT-10 (FA-6c1)
     {"fsim.guidance.route/required_time_of_arrival", "fsim.guidance.route", N, 6, 0, ""},    // WPT-11
     {"fsim.guidance.route/altitude/msl", "fsim.guidance.route", S, 0, 0, ""},                // WPT-12
     {"fsim.guidance.route/altitude/agl", "fsim.guidance.route", S, 0, 0, ""},

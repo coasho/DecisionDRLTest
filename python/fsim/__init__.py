@@ -107,6 +107,7 @@ from .world import (  # noqa: E402
     EndPoint,
     EndPointKind,
     Endurance,
+    ClimbOptimization,
     Energy,
     Envelope,
     FrameOffsets,

@@ -1490,6 +1490,110 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
                 CHECK(f.worst < std::max(20.0, 0.05 * f.radiusM));
             }
         });
+    // A-GRA's segment performance (ADR-29 FA-6c1: WPT-06, WPT-10): segments at the tables' best range speed now, their
+    // speed replaced - flown at it in the second's middle - and a speed change made at a segment's acceleration, either
+    // held to what the aircraft can: a wing's from that speed to 90 % of it over 40 s through the air, once settled; a
+    // rotorcraft's first, from its hover to its cruise over 20 s over the ground. The ramp's middle's rate against the one
+    // the route reads back, and the route completed (judged soon after: a rotorcraft flies on at its best range speed,
+    // and the Crazyflie's battery, which lasts the route, is spent 144 s after it)
+    struct SegmentRoute {
+        double from = 0.0, to = 0.0, asked = 0.0, best = 0.0, worst = 0.0;
+        bool passed = false;
+        std::vector<double> t, v;
+        int samples = 0;
+    };
+    std::map<std::uint32_t, SegmentRoute> segmentRoutes;
+    auto rampS = [&](const Plane& p) { // (a rotorcraft's ramp: 20 s, or longer at its most)
+        const double most = perf(p).maxAccelerationMs2;
+        return std::max(20.0, std::isfinite(most) && most > 0.0 ? p.cruiseMs / most : 20.0);
+    };
+    auto rampAhead = [&](const Plane& p) { return p.cruiseMs * (0.5 * rampS(p) + 20.0); }; // (its first segment: its ramp, and 20 s on)
+    const double longRange = static_cast<double>(SpeedOptimization::LongRangeCruise);
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
+            double ahead = 0.0;
+            auto point = [&](double on) {
+                ahead += on;
+                const PositionCommand q = pointFrom(p.start, ahead * c, ahead * sn, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            SegmentRoute& f = segmentRoutes[p.id];
+            f = SegmentRoute{};
+            f.best = optimalTasMs(&w.profile(p.id)->tables, longRange, p.start.altitudeMslM, p.start.fuelKg);
+            REQUIRE(std::isfinite(f.best));
+            std::vector<Waypoint> points;
+            if (p.rotor) { // its ramp; to its best range speed, and on at it (its speed left out); on to its end, where it stops
+                Waypoint a = point(rampAhead(p));
+                a.speed = p.cruiseMs, a.speedReference = static_cast<double>(SpeedReference::GroundSpeed), a.accelerationMs2 = p.cruiseMs / 20.0;
+                Waypoint b = point(60.0 * f.best);
+                b.speedOptimization = longRange;
+                points = {a, b, point(60.0 * f.best), point(40.0 * f.best)};
+            } else { // to its best range speed, and on at it; then its ramp
+                Waypoint a = point(60.0 * p.start.airspeedTrueMs), b = point(60.0 * f.best), e = point(60.0 * f.best);
+                a.speedOptimization = longRange;
+                e.speed = 0.9 * f.best, e.accelerationMs2 = 0.1 * f.best / 40.0;
+                points = {a, b, e};
+            }
+            const CommandResult res = w.submit(p.id, RouteCommand{}, points);
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index);
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            Setpoint sp;
+            if (res.accepted() && w.activitySetpoint(res.activity, sp)) {
+                const Waypoint& ramp = sp.waypoints[p.rotor ? 0 : 2];
+                f.from = p.rotor ? 0.0 : sp.waypoints[1].speed, f.to = ramp.speed, f.asked = ramp.accelerationMs2;
+            }
+            return res.accepted();
+        },
+        [&](const Plane& p) {
+            const SegmentRoute& f = segmentRoutes[p.id];
+            const double v = p.start.airspeedTrueMs;
+            return p.rotor ? 1.1 * (rampS(p) + 200.0) + 10.0 : 1.5 * (60.0 * v / std::min(v, f.best) + 125.0) + 60.0;
+        },
+        [&](const Plane& p) {
+            SegmentRoute& f = segmentRoutes[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const ActivityProgress& g = r.progress;
+            if (!r.live()) return;
+            const auto& s = *w.vehicleState(p.id);
+            const double v = p.rotor ? std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]) : s.airspeedTrueMs; // (calm air: a rotorcraft's airspeed)
+            const std::uint32_t ramp = p.rotor ? 0 : 2, best = p.rotor ? 2 : 1;
+            const double lo = f.from + 0.2 * (f.to - f.from), hi = f.from + 0.8 * (f.to - f.from), way = f.to > f.from ? 1.0 : -1.0;
+            if (g.segment == ramp && !f.passed) {
+                if (way * (v - hi) > 0.0) f.passed = true;
+                else if (way * (v - lo) >= 0.0) f.t.push_back(w.simTime()), f.v.push_back(v);
+            }
+            if (g.segment == best && g.segmentPercent > 50.0 && g.segmentPercent < 95.0) {
+                const double now = optimalTasMs(&w.profile(p.id)->tables, longRange, s.altitudeMslM, s.fuelKg);
+                f.worst = std::max(f.worst, std::abs(v - now) / now);
+                ++f.samples;
+            }
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const SegmentRoute& f = segmentRoutes[p.id];
+            double rate = 0.0;
+            if (f.t.size() > 2) {
+                const double n = static_cast<double>(f.t.size());
+                double sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
+                for (std::size_t i = 0; i < f.t.size(); ++i) sx += f.t[i], sy += f.v[i], sxx += f.t[i] * f.t[i], sxy += f.t[i] * f.v[i];
+                rate = std::abs((n * sxy - sx * sy) / (n * sxx - sx * sx));
+            }
+            INFO(activityStateName(r.state) << "; from " << f.from << " to " << f.to << " m/s at " << f.asked << " m/s^2 (read back), flown at " << rate
+                                            << " (" << f.t.size() << " samples); off its best range speed " << 100.0 * f.worst << " % ("
+                                            << f.samples << " samples)");
+            CHECK(r.state == ActivityState::Completed);
+            // (the worst: in the ramp's middle a wing 13.2 % faster than asked, the RQ-4B's - every wing 9 to 13 %, its speed
+            // loop catching up on the lag it began with - a rotorcraft 14.9 %, the UH-60's, the Crazyflie 7.0 % slower; off
+            // the best range speed a wing 0.98 %, the C-130J's, a rotorcraft 0.09 %, the Crazyflie's)
+            CHECK(f.t.size() > 5);
+            CHECK(std::abs(rate - f.asked) < 0.2 * f.asked);
+            CHECK(f.samples > 0);
+            CHECK(f.worst < 0.02);
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

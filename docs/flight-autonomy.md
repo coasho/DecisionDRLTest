@@ -776,6 +776,28 @@ A-GRA's third end point, the LoiterPoint, gives a loiter - an orbit, a hover or 
   - C ABI 1.28: `fsim_route_loiter` (its point, the pattern's 35 fields, `end_time_s`) and `fsim_route_loiter_init`; `fsim_vehicle_submit_route_loiters`, `fsim_activity_update_route_loiters`; `fsim_batch_command`'s `loiters` and `loiter_count`, which `fsim_activity_get_setpoint` fills.
   - Python: `fsim.RouteLoiter(point, <the pattern's fields>, end_time_s)`; `submit_route(..., loiters=)`, `update_route(waypoints, loiters=)`, and a batch's or a task's `loiters=`; read back in the setpoint's `loiters`.
 
+### 4.32 A-GRA's segment performance (as FA-6c builds it)
+
+A-GRA's path segment gives its speed as a value in a reference or as an optimisation (PathSegmentSpeedType), its climb as a rate or as an optimisation (ClimbType), and an acceleration in m/s² (MA_PathSegmentType.Acceleration). Its schema says an optimisation lets the vehicle "vary its speed autonomously", and that a climb optimisation's rate is chosen autonomously. It does not say when the acceleration applies. FA-6c takes it as the rate of the speed change into the segment's speed. FA-6c1 builds the speed optimisation and the acceleration (WPT-06, WPT-10); FA-6c2 builds the climb optimisation (WPT-08).
+
+- **A segment's speed optimisation** (`speedOptimization`, `SpeedOptimization`) flies the segment at the performance tables' best speed, as an hsa's (4.17):
+  - the host resolves it as the route is given: the optimum's true airspeed at the point's altitude and the fuel on board. It replaces the point's speed, in true airspeed, and the checks (turns, gradients, terrain, endurance) judge that speed. The setpoint keeps the optimisation and the speed resolved;
+  - the behaviour flies the optimum afresh each update, at the altitude and the weight now; above the altitudes the tables fly, the speed resolved. A rotorcraft flies it as it flies any airspeed on a route: the ground speed it makes along the path in the wind;
+  - a point that leaves out its speed continues the point before's, and with it its optimisation. A speed given replaces it;
+  - without tables - a stock JSBSim aircraft - it is not implemented: refused `not_implemented`, naming the point, as its support rows say (`fsim.guidance.route/speed/long_range_cruise`, `.../max_endurance`);
+  - one that is not an optimisation is refused `invalid_waypoint`, naming the point.
+- **A segment's acceleration** (`accelerationMs2`, above 0) sets the rate of the speed change into the segment:
+  - the speed flown starts at the aircraft's speed as the segment begins: its true airspeed, or its ground speed where the segment's speed is over the ground. It runs at the acceleration to the segment's speed, or to its optimum as it is now, then holds it. Left out, the loops change the speed as they did before;
+  - the progress reports the speed flown now, the ramp's;
+  - refused `invalid_waypoint`, naming the point: 0 or less, or not finite;
+  - held to what the aircraft can, where that is known, judged from the point before's speed (the first point's from the aircraft's now) at the point's altitude and the fuel on board. A rotorcraft's is its performance (`maxAccelerationMs2` faster, `maxDecelerationMs2` slower). A wing's comes from its tables: g Ps / V, with full power's excess power faster and idle's slower, the least at nine speeds through the change within the level speeds. The tables read each altitude row at one equivalent airspeed, so a speed at the slowest level speed can fall outside the row below; such a speed is passed over. An acceleration beyond that is held to it, flagged, and named by its point and field 24 (`MaxAcceleration`, `MinAcceleration`); under `RangePolicy::Reject` it is refused `performance_limit`. A wing without tables has no known limit, and its acceleration is taken as given;
+  - the loops fly the ramp as they fly any speed setpoint. A wing's airspeed loop follows with its lag, and catches up on what it lost as the ramp began: a C172 still settling from its start fell 0.9 m/s behind and closed with a 14 s time constant. In a 40 s ramp's middle the fleet's wings slowed 9 to 13 % faster than asked, and its rotorcraft reached their cruise within 15 % of the rate asked (section 14).
+- **A segment's climb optimisation** (`climbOptimization`, `ClimbOptimization`: BestRate, ExtendedRange) is FA-6c2's. Until then a point with one is refused `not_implemented`, naming it, as its support rows say.
+- **Surfaces.**
+  - C++: `Waypoint::speedOptimization`, `climbOptimization`, `accelerationMs2` (its fields 22 to 24); `ClimbOptimization`.
+  - C ABI 1.29: `fsim_waypoint`'s `speed_optimization`, `climb_optimization` and `acceleration_ms2`, read where the caller's `struct_size` has them (`fsim_waypoint_init` leaves them out); `enum fsim_climb_optimization`.
+  - Python: `fsim.Waypoint`'s three, codes by name or member; `fsim.ClimbOptimization`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -1007,7 +1029,9 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
 - FA-6b, turn points and loiter points, in two steps:
   - FA-6b1, turn points: capturing the outbound course, starting and ending a turn, a course at the point, a turn's radius (WPT-04; 4.30), done 2026-09-28 and measured in section 14;
   - FA-6b2, a loiter inside a route, then on (WPT-18; 4.31), done 2026-09-28 and measured in section 14;
-- FA-6c, per-segment performance: speed and climb optimisation, acceleration (WPT-06, WPT-08, WPT-10);
+- FA-6c, per-segment performance, in two steps:
+  - FA-6c1, speed optimisation and acceleration (WPT-06, WPT-10; 4.32), done 2026-09-28 and measured in section 14;
+  - FA-6c2, climb optimisation (WPT-08);
 - FA-6d, 4D: required times of arrival, planned inertial states, required navigation performance (WPT-11, WPT-20, WPT-21);
 - FA-6e, paths: several per route with ids and types, links and conditional branches (WPT-13, WPT-14, WPT-15);
 - FA-6f, civil path terminators (WPT-19).
@@ -2098,6 +2122,36 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
     - `submitWith` grew 448 bytes, its waiting branch's loiters: where the code falls has moved, as FA-3b recorded for this case.
   - World throughput is 100.1 to 101.1 % of FA-6b1's; protection costs at most 0.8 %.
 - ctest: all 295 tests pass.
+
+**FA-6c1, A-GRA's segment speed optimisation and acceleration (WPT-06, WPT-10).**
+- **A best range speed** (`test_route_segments`, calm): the hangar's C172 east at 1,500 m: 3 km at 50 m/s, to 15 km at its best range speed, on to 22 km with its speed left out, then to 28 km at 45 m/s.
+  - Read back: point 1's optimisation, its speed the tables' best at the aircraft's altitude and fuel as it was sent (43.488 m/s), a true airspeed; point 2's the same, continued; point 3's its own.
+  - In its segments' middles it flew within 0.0004 m/s of the best at the altitude and fuel then (43.422 m/s by the end, the fuel burned), its progress telling that speed within 1.1e-6 m/s. Then 45.00 m/s, and it completed.
+- **An acceleration:**
+  - a C172x east at 55 m/s, then 12 km on at 40 m/s reached at 0.2 m/s²: in the ramp's middle it slowed at 0.198 m/s², and from 53 to 42 m/s at 0.198 on average. Given no acceleration, its loops slowed it through the same speeds at 1.03 m/s². Its progress told the ramp's speed;
+  - an IRIS from its hover to 6 m/s over the ground at 0.5 m/s²: 0.498.
+- **Held to what the aircraft can:**
+  - the hangar's C172 slowing from 50 to 35 m/s at 5 m/s²: held to 0.987 m/s², idle's least between (flagged; its point 1, field 24, `MinAcceleration`; read back held);
+  - an IRIS's 30 m/s² from its hover: its own most (`maxAccelerationMs2`, `MaxAcceleration`). Under Reject, refused `performance_limit` at its point;
+  - first looked up at the speed changed to, held within the level speeds: there, at the slowest, the tables gave no excess power, and 5 m/s² was taken as given. The tables read each altitude row at one equivalent airspeed, and the row below the C172's 1,477 m lay outside its own slowest (a fraction of about −0.04, past the 0.02 read beyond an edge). Now the least at nine speeds through the change, those it cannot read passed over.
+- **Refused, naming the point:** an acceleration of 0 and of −1, and an optimisation of 2 (`invalid_waypoint`); a climb optimisation (`not_implemented`, FA-6c2's); the stock C172x's best endurance, which has no tables (`not_implemented`, as its row says; the hangar's C172's row reads supported).
+- **The fleet** (`test_fleet`): all 35 complete.
+  - A wing flies to its best range speed and on at it (its speed left out), then slows to 90 % of it over 40 s. In the second segment's middle the wings kept within 0.24 % of the best at the altitude and fuel then, but the C-130J's 0.98 %.
+  - In the ramp's middle every wing slowed 9 to 13 % faster than asked (the RQ-4B's 13.2 %; none was held). A wing's airspeed loop lags the ramp as it begins and catches up in its middle. A C172 that began its ramp still settling from its start fell 0.9 m/s behind the ramp, and closed with a 14 s time constant. Begun on a wing just started, 20 s in, the wings read 9 to 14 % too: the lag is the ramp's own start.
+  - A rotorcraft goes from its hover to its cruise over 20 s, over the ground: the IRIS 0.1 % faster than asked, the UH-1H 11.5 %, the UH-60A 14.9 %, the Crazyflie 7.0 % slower. Then at its best range speed, within 0.09 % (the Crazyflie's) in the third segment's middle.
+  - First sized by its cruise, the Crazyflie's best range segment was 126 m long, and it could not reach its 17.4 m/s there: its segments are now sized by the best range speed.
+  - First judged 390 s in, the Crazyflie had fallen: a rotorcraft flies on at its best range speed once its route completes, and its battery, which lasted the route's 220 s, was spent about 360 s in. The route's endurance check covers the route; the case now judges soon after it.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6b2's build. The ramp and the optimisation run only where a segment gives them.
+- **The support table:** `route/speed/long_range_cruise` and `route/speed/max_endurance` are supported where the aircraft has tables, else not implemented; `route/acceleration` is supported. `route/climb/best_rate` and `route/climb/extended_range` stay not implemented (FA-6c2). The route capability's pending list names climb optimisation.
+- **Conformance:** the walks draw as they did. The optimise walks give points a speed optimisation (or one that is not one), now and then a climb optimisation, and an acceleration, now and then beyond the aircraft's, or 0.
+- **Surfaces:** the C ABI's 1.29 block (an acceleration read back; the stock C172x's best range speed and a climb optimisation refused `not_implemented`, an acceleration of 0 `invalid_waypoint`, each at its point); Python's `test_route_segments` (by name, read back, a ramp to the best range speed asked at 0.1 m/s², flown at 0.109 in its middle; refused, held).
+- **Memory:** a waypoint is 200 bytes where it was 176: the path store's 256, the host's route plan and each route behaviour's take 6 KB more. A route behaviour holds four more doubles, its ramp's.
+- **Digests:** identical to FA-6b2's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6b2, both builds run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`.
+  - The micro cases are within −1.8 % to +0.7 %: the route's +0.7 % (its minimum 2 ns more), a check each update for an optimisation or a ramp.
+  - The command cases are within −1.7 % to +1.5 %, but a checked update's −13.0 % in both runs (its minimum 28.1 ns, now 24.2). Every function on its path is the same instructions in both builds. The activity lookup's padding before its loop differs: it now starts on a 64-byte line, where it sat 32 bytes past one. That is layout, as FA-6b1 recorded.
+  - World throughput is 98.9 to 99.2 % of FA-6b2's (a first run: 98.9 to 100.1 %); protection costs at most 0.9 %. On the per-step path, too, only the padding before loops differs (`afterStep`'s). The functions that copy waypoints, a suggestion's and a task's, copy 24 bytes more.
+- ctest: all 298 tests pass.
 
 ## Appendix A: the inventory
 

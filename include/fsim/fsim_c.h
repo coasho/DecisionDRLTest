@@ -758,7 +758,13 @@ typedef struct fsim_waypoint {
     /* ABI 1.27 (4.30): a turn point's */
     double course_rad;                     /* the course at the point: a start's arc's (left out, the leg in's), an end's, a capture's */
     double turn_radius_m;                  /* its turn's radius: a fly-by's, a start's arc's (agreeing with the arc through the next point) */
+    /* ABI 1.29 (4.32): the segment's performance */
+    double speed_optimization;             /* fsim_speed_optimization: the segment at the tables' best now, its speed replaced (no tables:
+                                              "not_implemented"); left out with the speed, the point before's */
+    double climb_optimization;             /* fsim_climb_optimization: its climb or descent at a rate the aircraft chooses */
+    double acceleration_ms2;               /* the speed change into the segment at this acceleration (above 0); left out, as the loops change it */
 } fsim_waypoint;
+enum fsim_climb_optimization { FSIM_CLIMB_BEST_RATE = 0, FSIM_CLIMB_EXTENDED_RANGE }; /* A-GRA's ClimbOptimizationEnum (ABI 1.29) */
 /* What a waypoint is for (A-GRA's WaypointTypeEnum; ABI 1.26): nav only and passive are flown; the end of a path on a
    route's last point; the others not yet ("not_implemented", naming the point: their support table rows say when) */
 enum fsim_waypoint_type {

@@ -109,7 +109,9 @@ class PatternBehavior;
 ///   slowing for a turn only as much as its radius asks, and to stop at the
 ///   end when it is to loiter there.
 /// The altitude runs straight from point to point, or climbs at a segment's
-/// rate; the speed is each segment's, in its reference. It completes after
+/// rate; the speed is each segment's, in its reference - or the tables' best
+/// at the altitude and weight now where it optimises it, reached at its
+/// acceleration where it has one (docs/flight-autonomy.md, 4.32). It completes after
 /// the last point unless the route repeats, and flies on: along the last
 /// leg's course, or orbiting (a wing) or hovering over (a rotorcraft) the
 /// last point. A new path store revision or new options fly it afresh.
@@ -150,6 +152,8 @@ private:
     void aim(std::uint32_t k, const Performance& performance) noexcept;
     /// Its loiter flown (4.31), begun where the leg met it (`begins`); at its end, on to the next point, or the route's end.
     Command loiter(const ControlContext& ctx, const Performance& performance, bool begins);
+    /// The segment's speed as it chooses it (4.32): the tables' best now where it optimises it, reached at its acceleration.
+    void chooseSpeed(const ControlContext& ctx, const Waypoint& segment, route::Steer& steer);
 
     std::unique_ptr<route::Plan> plan_; ///< allocated with the behaviour: nothing in flight
     WindEstimate wind_;
@@ -172,6 +176,9 @@ private:
     double lastTime_ = -1.0;
     double crossTrack_ = kHold, course_ = kHold, heading_ = kHold, altitudeMsl_ = kHold, groundSpeed_ = 0.0;
     double lastCross_ = kHold; ///< off the leg flown last: what it reports past its end
+    // the segment's speed as it chooses it (docs/flight-autonomy.md, 4.32)
+    double rampFromMs_ = kHold, rampStartS_ = 0.0; ///< its acceleration's ramp: from this speed (true air, or a rotorcraft's ground), then
+    double speedFlown_ = kHold, referenceFlown_ = kHold; ///< the speed it flies now, where it optimises or ramps it
     // its points in moving frames (4.29)
     bool moving_ = false;              ///< placed and planned again as it flies them
     bool overFrame_ = false;           ///< the piece flown is in one moving frame: flown over it

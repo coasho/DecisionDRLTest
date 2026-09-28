@@ -1052,6 +1052,44 @@ int main(int argc, char** argv) {
             (void)route_id;
         }
         {
+            /* ABI 1.29 (4.32): a segment's performance - its acceleration read back; the best range speed on the stock C172x,
+               which has no performance tables, not implemented, naming its point (reserved: its index + 1); a climb
+               optimisation not implemented yet (FA-6c2's); an acceleration of 0 refused */
+            fsim_waypoint pts[2];
+            fsim_batch_command sp;
+            double options[4];
+            const fsim_vehicle_state* at;
+            fsim_activity_id route_id;
+            int k;
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            at = fsim_vehicle_state_ptr(world, b);
+            for (k = 0; k < 2; ++k) fsim_waypoint_init(&pts[k]);
+            CHECK(isnan(pts[0].speed_optimization) && isnan(pts[0].climb_optimization) && isnan(pts[0].acceleration_ms2));
+            /* 3 km north of b at 55 m/s, then on to 8 km at 45 m/s, reached at 0.3 m/s^2 */
+            pts[0].latitude_rad = at->latitude_rad + 3000.0 / 6371008.8, pts[0].longitude_rad = at->longitude_rad, pts[0].speed = 55.0;
+            pts[1].latitude_rad = at->latitude_rad + 8000.0 / 6371008.8, pts[1].longitude_rad = at->longitude_rad;
+            pts[1].speed = 45.0, pts[1].acceleration_ms2 = 0.3;
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            route_id = cr.activity;
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.waypoint_count == 2);
+            CHECK(sp.waypoints[1].acceleration_ms2 == 0.3 && sp.waypoints[1].speed == 45.0);
+            CHECK(isnan(sp.waypoints[1].speed_optimization) && isnan(sp.waypoints[1].climb_optimization));
+            pts[1].speed_optimization = FSIM_SPEED_LONG_RANGE_CRUISE;
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 2);
+            pts[1].speed_optimization = fsim_hold(), pts[1].climb_optimization = FSIM_CLIMB_BEST_RATE;
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 2);
+            pts[1].climb_optimization = fsim_hold(), pts[1].acceleration_ms2 = 0.0;
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 2);
+            CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        }
+        {
             /* ABI 1.6: the performance, and grants over the priorities (on a, whose live activities are its policy's) */
             fsim_performance perf;
             int32_t mode = -1, reason = -1, allowed = -1, granted = -1, availability = -1;

@@ -1062,6 +1062,9 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
             const std::uint32_t before = i > 0 ? i - 1 : count - 1;
             if ((i == 0 && !repeat) || count < 2 || in[before].turn != static_cast<double>(TurnType::StartTurn)) return invalid(i);
         }
+        // its segment's performance (4.32): an optimisation that is one, an acceleration above 0
+        if (!code(w.speedOptimization, SpeedOptimization::Count) || !code(w.climbOptimization, ClimbOptimization::Count)) return invalid(i);
+        if (!within(w.accelerationMs2, 0.0, inf)) return invalid(i);
         const bool altitudeGiven = !isHold(w.altitudeM);
         w.longitudeRad = geo::wrapPi(w.longitudeRad);
         if (i == 0) {
@@ -1086,8 +1089,12 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
                 w.altitudeReference = p.altitudeReference;
             }
             if (isHold(w.speed)) {
-                if (!isHold(w.speedReference) && w.speedReference != p.speedReference) return invalid(i);
+                // (an optimisation given, its speed the host resolves: the point before's holds its place; left out with the
+                // speed, the point before's optimisation too - 4.32)
+                const bool optimised = !isHold(w.speedOptimization);
+                if (!optimised && !isHold(w.speedReference) && w.speedReference != p.speedReference) return invalid(i);
                 w.speed = p.speed, w.speedReference = p.speedReference;
+                if (!optimised) w.speedOptimization = p.speedOptimization;
             } else if (isHold(w.speedReference)) {
                 w.speedReference = p.speedReference;
             }

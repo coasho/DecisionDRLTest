@@ -777,6 +777,13 @@ class HoldEntry(enum.IntEnum):
     TEARDROP = 5
 
 
+class ClimbOptimization(enum.IntEnum):
+    """How a route's segment climbs or descends, its rate chosen by the aircraft (A-GRA's ClimbOptimizationEnum;
+    docs/flight-autonomy.md, 4.32)."""
+    BEST_RATE = 0
+    EXTENDED_RANGE = 1
+
+
 class HoldContext(enum.IntEnum):
     """A hold's operational context (A-GRA's MA_HoldContextEnum): the defaults it implies are ATC's for every one."""
     ADMIN = 0
@@ -804,14 +811,15 @@ _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": Altitude
                "direction_reference": DirectionReference,
                "projection": Projection, "end": EndBehavior,
                "turn": TurnType, "kind": EndPointKind, "waypoint_type": WaypointType, "pattern": PatternKind, "turn_type": HoldTurn, "hold_entry": HoldEntry, "hold_context": HoldContext,
+               "climb_optimization": ClimbOptimization,
                "frame_rotation": FrameRotation, "frame_offsets": FrameOffsets, "point_rotation": FrameRotation, "point_offsets": FrameOffsets,
                "point_z": CurveZ}
 
 Waypoint = collections.namedtuple(
     "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id "
                 "altitude_min_m altitude_max_m kind waypoint_type frame frame_rotation frame_offsets frame_x_m frame_y_m frame_z_m "
-                "course_rad turn_radius_m",
-    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0) + (HOLD,) * 12)
+                "course_rad turn_radius_m speed_optimization climb_optimization acceleration_ms2",
+    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0) + (HOLD,) * 15)
 Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that ends at it: reached at ``altitude_m`` above "
                     "``altitude_reference`` along a straight profile (or climbing at ``climb_rate_ms``, then level), flown at "
                     "``speed`` in ``speed_reference``, passed by ``turn`` (fsim.TurnType: 'fly_by', 'fly_over') with "
@@ -824,7 +832,10 @@ Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that end
                     "at its offsets ``frame_rotation``, ``frame_offsets``, ``frame_x_m``, ``frame_y_m``, ``frame_z_m`` - "
                     "placed where the frame is, a moving one's as it is flown. A turn point's (4.30): ``turn`` "
                     "'capture_outbound_course', 'start_turn', 'end_turn', its ``course_rad`` and ``turn_radius_m``. A loiter "
-                    "point (``kind`` 'loiter_point', 4.31) flies the fsim.RouteLoiter naming it.")
+                    "point (``kind`` 'loiter_point', 4.31) flies the fsim.RouteLoiter naming it. Its segment's performance "
+                    "(4.32): ``speed_optimization`` (fsim.SpeedOptimization: the tables' best now, its speed replaced; left out "
+                    "with the speed, the point before's), ``climb_optimization`` (fsim.ClimbOptimization) and "
+                    "``acceleration_ms2`` (the speed change into the segment at it).")
 
 RouteLoiter = collections.namedtuple("RouteLoiter", ("point",) + MODE_FIELDS["pattern"] + ("end_time_s",), defaults=(0,) + (HOLD,) * 36)
 RouteLoiter.__doc__ = ("The loiter a route's loiter point flies (A-GRA's LoiterPoint; docs/flight-autonomy.md, 4.31): at waypoint "

@@ -576,6 +576,10 @@ private:
     /// checked, limited as a pattern is (limitPattern at its point).
     Reason checkRoute(RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log,
                       Span<const RouteLoiter> loiters = {});
+    /// The most a route's segment accelerates from `fromMs` to `toMs` (4.32): a rotorcraft's (Performance), a wing's from
+    /// its tables at the fuel on board - full power's excess faster, idle's slower, the least over the speeds between - as
+    /// a rate; NaN where not known.
+    double accelerationLimit(double fromMs, double toMs, double altitudeMslM, const sim::VehicleState& state) const noexcept;
     /// A route's loiter's pattern and shape (4.31) as a pattern NEW's are checked: InvalidWaypoint for a field
     /// checkPattern or checkShape refuses, or a hover's (route::hoverFault); a hover where the aircraft does not hover,
     /// and an optimisation it has no tables for, as the pattern's (NotSupported, NotImplemented). The caller names the point.

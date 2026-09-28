@@ -356,6 +356,7 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     revision_ = ctx.path ? ctx.path->revision : 0;
     target_ = 0, laps_ = 0;
     loiterAhead_ = nullptr, reachM_ = 0.0, loitering_ = false;
+    rampFromMs_ = speedFlown_ = referenceFlown_ = kHold;
     firstLap_ = true, onArc_ = midway_ = ended_ = finished_ = false;
     failure_ = Reason::None;
     leadOut_ = finishedM_ = inPieceM_ = lapStartM_ = 0.0;
@@ -419,6 +420,12 @@ void RouteBehavior::beginSegment(std::uint32_t k, const sim::VehicleState& s, do
     const Waypoint& to = p.points[k];
     if (fromPoint && p.points[from].altitudeReference == to.altitudeReference) segmentFrom_ = p.points[from].altitudeM;
     else segmentFrom_ = altitudeNow(altitudeReferenceOf(to.altitudeReference), s);
+    // its speed reached at its acceleration (4.32), from what it flies now: through the air, or a rotorcraft's over the ground
+    rampFromMs_ = kHold;
+    if (!isHold(to.accelerationMs2)) {
+        const bool ground = speedReferenceOf(to.speedReference, hovers_ ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed) == SpeedReference::GroundSpeed;
+        rampFromMs_ = ground ? std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]) : s.airspeedTrueMs, rampStartS_ = s.simTime;
+    }
 }
 
 void RouteBehavior::advance(const sim::VehicleState& s, const Performance& perf) {
@@ -568,6 +575,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     route::Steer steer;
     steer.speed = segment.speed;
     steer.reference = speedReferenceOf(segment.speedReference, hovers_ ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
+    if (!isHold(segment.speedOptimization) || !isHold(rampFromMs_)) chooseSpeed(ctx, segment, steer); // (4.32)
     steer.verticalSpeedMs = route::verticalSpeedTo(altitudeMsl_, feedforward, s, perf, hovers_);
     // what comes next: the turn at the point flown to - and, for a rotorcraft,
     // no faster than the turn's radius allows (and than stops it in time for
@@ -618,6 +626,24 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         return out;
     }
     return route::follow(ctx, perf, wind_, hovers_, fix, ahead, steer, plan_->trims, course_, heading_);
+}
+
+void RouteBehavior::chooseSpeed(const ControlContext& ctx, const Waypoint& segment, route::Steer& steer) {
+    const auto& s = ctx.sensed;
+    if (!isHold(segment.speedOptimization)) { // the tables' best at the altitude and weight now, as an hsa's (where they give none: as resolved)
+        const double best = optimalTasMs(ctx.tables, segment.speedOptimization, s.altitudeMslM, s.fuelKg);
+        if (std::isfinite(best)) steer.speed = best, steer.reference = SpeedReference::TrueAirspeed;
+    }
+    if (!isHold(rampFromMs_)) { // from the speed flown as the segment began, at its acceleration, until it is reached
+        const bool ground = steer.reference == SpeedReference::GroundSpeed;
+        const double target = ground ? steer.speed : trueAirspeedOf(steer.speed, steer.reference, s);
+        const double ramped = rampFromMs_ + std::copysign(segment.accelerationMs2 * (s.simTime - rampStartS_), target - rampFromMs_);
+        if (std::abs(ramped - rampFromMs_) < std::abs(target - rampFromMs_))
+            steer.speed = ramped, steer.reference = ground ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed;
+        else
+            rampFromMs_ = kHold; // (reached: its own from here)
+    }
+    speedFlown_ = steer.speed, referenceFlown_ = static_cast<double>(steer.reference);
 }
 
 Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf, bool begins) {
@@ -703,8 +729,9 @@ bool RouteBehavior::progress(ActivityProgress& out) const noexcept {
     out.courseRad = course_;
     out.headingRad = heading_;
     out.altitudeMslM = altitudeMsl_;
-    out.speedMs = segment.speed;
-    out.speedReference = segment.speedReference;
+    const bool chosen = (!isHold(segment.speedOptimization) || !isHold(segment.accelerationMs2)) && !isHold(speedFlown_); // (4.32)
+    out.speedMs = chosen ? speedFlown_ : segment.speed;
+    out.speedReference = chosen ? referenceFlown_ : segment.speedReference;
     return true;
 }
 

@@ -443,6 +443,11 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     // FA-10's, a ditch FA-16's)
     for (std::uint32_t i = 0; i < count; ++i) {
         const Waypoint& w = p.points[i];
+        if (!isHold(w.climbOptimization)) { // (a climb optimisation: as its row says - 4.32)
+            const bool best = w.climbOptimization == static_cast<double>(ClimbOptimization::BestRate);
+            const SupportInfo* row = support_ ? support_->find(best ? "fsim.guidance.route/climb/best_rate" : "fsim.guidance.route/climb/extended_range") : nullptr;
+            if (!row || row->support != Support::Supported) return point(i, row && row->support == Support::NotSupported ? Reason::NotSupported : Reason::NotImplemented);
+        }
         if (isHold(w.waypointType)) continue;
         const auto type = static_cast<WaypointType>(static_cast<int>(w.waypointType));
         if (type == WaypointType::NavOnly || type == WaypointType::Passive || (type == WaypointType::EndOfPath && i + 1 == count)) continue;
@@ -464,6 +469,14 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         }
         const SupportInfo* row = id && support_ ? support_->find(id) : nullptr;
         return point(i, row && row->support == Support::NotSupported ? Reason::NotSupported : Reason::NotImplemented);
+    }
+    // its segments' speed optimisations (4.32): as an hsa's, the tables' best at each point's altitude (no tables: not implemented)
+    for (std::uint32_t i = 0; i < count; ++i) {
+        Waypoint& w = p.points[i];
+        if (isHold(w.speedOptimization)) continue;
+        if (const Reason why = optimisable(w.speedOptimization, static_cast<std::int16_t>(std::min<std::uint32_t>(i, 0x7FFF)), detail); why != Reason::None)
+            return why;
+        optimise(w.speed, w.speedReference, w.speedOptimization, w.altitudeM, w.altitudeReference, state);
     }
     p.count = count;
     p.start = static_cast<std::uint32_t>(c.start);
@@ -506,6 +519,20 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         if (!isHold(w.turnRadiusM) && w.turn == static_cast<double>(TurnType::FlyBy)) {
             const double v = route::plannedSpeed(w.speed, w.speedReference, w.altitudeM), bank = hovers ? f.maxTiltRad : f.maxBankRad;
             if (std::isfinite(bank) && bank > 0.0) bound(w.turnRadiusM, v * v / (9.80665 * std::tan(bank)), false, index, Constraint::MaxOrientation, log, 21);
+        }
+        // its acceleration within the aircraft's where known (4.32): a rotorcraft's, a wing's from its tables over the speeds
+        // it changes through - from the speed the point before flies, or the aircraft's now
+        if (!isHold(w.accelerationMs2)) {
+            const double h = aboveGround(w.altitudeReference) ? state.altitudeMslM : altitudeMslOf(w.altitudeM, static_cast<AltitudeReference>(static_cast<int>(w.altitudeReference)), state, &config_->altimeter);
+            const double v = route::plannedSpeed(w.speed, w.speedReference, h);
+            const bool first = i == p.start && !p.repeat;
+            const Waypoint& b = p.points[p.prev(i)];
+            const double before = first ? (w.speedReference == static_cast<double>(SpeedReference::GroundSpeed) ? std::hypot(state.velocityNedMs[0], state.velocityNedMs[1])
+                                                                                                              : state.airspeedTrueMs)
+                                        : route::plannedSpeed(b.speed, b.speedReference, h);
+            if (v != before)
+                bound(w.accelerationMs2, accelerationLimit(before, v, h, state), true, index, v > before ? Constraint::MaxAcceleration : Constraint::MinAcceleration,
+                      log, 24);
         }
         // a climb or descent rate within the aircraft's
         if (!isHold(w.climbRateMs)) {
@@ -588,6 +615,28 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         }
     }
     return Reason::None;
+}
+
+double CapabilityHost::accelerationLimit(double fromMs, double toMs, double altitudeMslM, const sim::VehicleState& state) const noexcept {
+    const Performance& f = performance_;
+    const bool faster = toMs > fromMs;
+    if (adapter_->features() & kFeatureHover) return faster ? f.maxAccelerationMs2 : f.maxDecelerationMs2;
+    const TablesSection* t = config_->tables;
+    if (!t || t->empty()) return kUnknown;
+    double weight = t->weightKg.back(); // (the tables' weight with the tanks empty and the fuel on board, as optimalTasMs's)
+    if (t->weightKg.size() > 1 && std::isfinite(t->fuelCapacityKg) && std::isfinite(state.fuelKg)) weight += state.fuelKg - t->fuelCapacityKg;
+    const TablesAt level = tablesAt(*t, altitudeMslM, weight);
+    if (!std::isfinite(level.minTasMs) || !std::isfinite(level.maxTasMs)) return kUnknown;
+    // the least its excess power gives at nine speeds through the change, within the level speeds - full power's faster,
+    // idle's slower (a speed the tables do not read, as at a row's edge, passed over); none there, or none to give: not known
+    double least = kUnknown;
+    for (int k = 0; k <= 8; ++k) {
+        const double v = std::clamp(fromMs + (toMs - fromMs) * k / 8.0, level.minTasMs, 0.97 * level.maxTasMs);
+        const TablesAtSpeed at = tablesAt(*t, altitudeMslM, weight, v);
+        const double ps = faster ? at.psFullMs : -at.psIdleMs;
+        if (std::isfinite(ps) && v > 0.0 && !(least <= 9.80665 * ps / v)) least = 9.80665 * ps / v;
+    }
+    return least > 0.0 ? least : kUnknown;
 }
 
 Reason CapabilityHost::checkPattern(const PatternCommand& c, bool merge, CommandResult& detail) noexcept {
