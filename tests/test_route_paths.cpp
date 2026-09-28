@@ -172,6 +172,18 @@ TEST_CASE("route paths: refused as a point is, naming it - paths that do not til
     next.clear();
     for (const EndPoint& e : w.endPoints(rj.activity, 8)) next.push_back(static_cast<std::uint32_t>(e.index));
     CHECK(list(next) == "0 1 4 5 2 3 4 5");
+    // a route that repeats, begun past its first point: at its end back to its first, as an unlinked one (4.36, as FA-6e2
+    // made it: FA-6e1's went back to where it began)
+    std::vector<Waypoint> fromTwo(points.begin(), points.begin() + 6);
+    fromTwo.at(5).next = kHold; // (A on into B; B's last the end: back to A)
+    RouteCommand again;
+    again.start = 2.0, again.repeat = 1.0;
+    const std::vector<RoutePath> two = {RoutePath{1, kHold, 0, 2}, RoutePath{2, kHold, 2, 4}};
+    const CommandResult rr = w.submit(v, again, fromTwo, {}, {}, {}, two);
+    REQUIRE(rr.accepted());
+    next.clear();
+    for (const EndPoint& e : w.endPoints(rr.activity, 8)) next.push_back(static_cast<std::uint32_t>(e.index));
+    CHECK(list(next) == "2 3 4 5 0 1 2 3");
     const SupportInfo* row = w.supportTable(v)->find("fsim.guidance.route/paths");
     REQUIRE(row != nullptr);
     CHECK(row->support == Support::Supported);

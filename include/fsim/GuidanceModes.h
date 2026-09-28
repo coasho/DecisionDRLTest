@@ -140,12 +140,16 @@ public:
     /// and the route, the distance and time to go, the cross-track, and what
     /// it commands: the course, the altitude, the segment's speed.
     bool progress(ActivityProgress& out) const noexcept override;
+    /// The points it flies from here (docs/flight-autonomy.md, 4.37): as planned, a branch taken included.
+    std::uint32_t ahead(std::uint32_t* points, std::uint32_t max, bool& ends) const noexcept override;
 
 private:
-    /// Plan the route from where the aircraft is, and fly it from its start.
-    void restart(const ControlContext& ctx, const RouteCommand& command);
-    /// Where the aircraft is on the route, passing the pieces it has finished.
-    route::Fix locate(const sim::VehicleState& s, const Performance& performance);
+    /// Plan the route from where the aircraft is, and fly it from its start. `branchTo` given, a branch taken (4.37;
+    /// Branches.cpp): on from point `branchTo` - or, `fromPoint`, from the point flown to, `branchTo` its next - its laps,
+    /// the distance flown and the branches' captures kept.
+    void restart(const ControlContext& ctx, const RouteCommand& command, double branchTo = kHold, bool fromPoint = true);
+    /// Where the aircraft is on the route, passing the pieces it has finished - and the branches at a point as it comes to it.
+    route::Fix locate(const ControlContext& ctx, const sim::VehicleState& s, const Performance& performance);
     /// Point `k`'s segment begins: its length and the altitude it climbs from.
     void beginSegment(std::uint32_t k, const sim::VehicleState& s, double atM, double halfArcM, double leadM, bool firstLap, bool fromPoint);
     /// On to the next point, or the end.
@@ -175,6 +179,15 @@ private:
     /// A linked route's points from the path store in its flight order (docs/flight-autonomy.md, 4.36; Paths.cpp): true
     /// for one, its plan's count, repeat and loop the host's.
     bool takeOrder(const ControlContext& ctx) noexcept;
+    /// The plan's points in the flight order from `start` (its next `startNext`, where given) along the path store's links
+    /// (4.37; Branches.cpp): false where there is none.
+    bool orderFrom(const ControlContext& ctx, std::uint32_t start, double startNext, bool repeat) noexcept;
+    /// The point flown to come to (4.37; Branches.cpp): captured, its branches tried in their order - the first that holds
+    /// taken, the route planned again from here (`flownM` more of it flown), on from the point (`fromPoint`: where it has a
+    /// turn ahead) or from the branch's next. True where one was; once each time it comes to it.
+    bool branchAt(const ControlContext& ctx, const Performance& performance, bool fromPoint, double flownM);
+    /// Branch `b`'s conditions hold now, the point come to `captures` times.
+    bool holds(const ControlContext& ctx, const RouteBranch& b, std::uint32_t captures) const noexcept;
     /// Its next timed target this lap, from `lapM` along it (4.33, 4.34): the nearest of the next point with an arrival
     /// window and a timed state not passed; and whether the segment flown has states' altitudes. Its schedule kept while
     /// it is the one.
@@ -240,6 +253,7 @@ private:
     // where it comes back to - 4.36 - or the legs' and turns'): chosen as it aims, read as it flies
     const route::Leg* legTo_ = nullptr;
     const route::Turn* turnAt_ = nullptr;
+    bool decided_ = false; ///< the point flown to's branches tried (4.37): once each time it comes to it
 };
 
 /// "pattern": fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md,

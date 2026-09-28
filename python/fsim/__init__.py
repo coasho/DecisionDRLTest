@@ -141,6 +141,8 @@ from .world import (  # noqa: E402
     RouteState,
     RoutePath,
     PathType,
+    RouteBranch,
+    Comparison,
     Scenario,
     SUPPORT_FEATURES,
     Source,

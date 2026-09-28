@@ -381,7 +381,8 @@ control::CommandResult World::submit(std::uint32_t id, const control::Command& c
 
 control::CommandResult World::submit(std::uint32_t id, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                      const control::CommandOptions& options, Span<const control::RouteLoiter> loiters,
-                                     Span<const control::RouteState> states, Span<const control::RoutePath> paths) {
+                                     Span<const control::RouteState> states, Span<const control::RoutePath> paths,
+                                     Span<const control::RouteBranch> branches) {
     Entry* e = entry(id);
     if (!e) {
         control::CommandResult r;
@@ -389,7 +390,7 @@ control::CommandResult World::submit(std::uint32_t id, const control::RouteComma
         r.commandId = options.commandId;
         return r;
     }
-    control::CommandResult r = e->host.submit(route, waypoints, options, pool_->states()[e->slot], simTime_, loiters, states, paths);
+    control::CommandResult r = e->host.submit(route, waypoints, options, pool_->states()[e->slot], simTime_, loiters, states, paths, branches);
     r.commandId = options.commandId;
     if (r.accepted()) {
         e->commanded = r.activity;
@@ -528,7 +529,7 @@ std::vector<control::CommandResult> World::submitBatch(std::uint32_t id, Span<co
         } else {
             const control::Command& c = std::get<control::Command>(b.command);
             if (const auto* route = std::get_if<control::RouteCommand>(&c))
-                out.push_back(submit(id, *route, b.waypoints, b.options, b.loiters, b.states, b.paths));
+                out.push_back(submit(id, *route, b.waypoints, b.options, b.loiters, b.states, b.paths, b.branches));
             else if (const auto* curve = std::get_if<control::CurveCommand>(&c))
                 out.push_back(b.nurbs.empty() ? submit(id, *curve, b.segments, b.options, b.curveShape) : submit(id, *curve, b.nurbs, b.options, b.curveShape));
             else if (const auto* pattern = std::get_if<control::PatternCommand>(&c); pattern && b.shape) out.push_back(submit(id, *pattern, *b.shape, b.options));
@@ -557,8 +558,8 @@ control::CommandResult World::update(control::ActivityId activity, const control
 
 control::CommandResult World::update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                      Span<const control::RouteLoiter> loiters, Span<const control::RouteState> states,
-                                     Span<const control::RoutePath> paths) {
-    return update(control::Source::Policy, activity, route, waypoints, loiters, states, paths);
+                                     Span<const control::RoutePath> paths, Span<const control::RouteBranch> branches) {
+    return update(control::Source::Policy, activity, route, waypoints, loiters, states, paths, branches);
 }
 
 control::CommandResult World::update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
@@ -597,9 +598,10 @@ control::CommandResult World::update(control::Caller caller, control::ActivityId
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
                                      Span<const control::Waypoint> waypoints, Span<const control::RouteLoiter> loiters,
-                                     Span<const control::RouteState> states, Span<const control::RoutePath> paths) {
+                                     Span<const control::RouteState> states, Span<const control::RoutePath> paths,
+                                     Span<const control::RouteBranch> branches) {
     if (Entry* e = entry(control::activityVehicle(activity))) {
-        control::CommandResult r = e->host.update(activity, route, waypoints, pool_->states()[e->slot], caller, loiters, states, paths);
+        control::CommandResult r = e->host.update(activity, route, waypoints, pool_->states()[e->slot], caller, loiters, states, paths, branches);
         echo(e->host, r);
         return r;
     }
@@ -655,6 +657,14 @@ control::CommandResult World::activityCommand(control::Caller caller, control::A
     return r;
 }
 
+control::CommandResult World::commandBranch(control::Caller caller, control::ActivityId activity, std::uint32_t branch, bool commanded) {
+    Entry* e = entry(control::activityVehicle(activity));
+    if (!e) return unknownActivity(activity);
+    control::CommandResult r = e->host.commandBranch(activity, branch, commanded, caller);
+    echo(e->host, r);
+    return r;
+}
+
 control::Reason World::storeTask(std::uint32_t id, control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints,
                                  Span<const control::BezierSegment> segments, control::TaskRepetition repetition, const control::PatternShape* shape) {
     control::BatchCommand item;
@@ -673,7 +683,7 @@ control::Reason World::storeTask(std::uint32_t id, control::TaskId task, const c
         for (const control::BezierSegment& b : item.segments) made.push_back(control::NurbsSegment::of(b));
     const Span<const control::NurbsSegment> segments = item.nurbs.empty() ? Span<const control::NurbsSegment>(made) : item.nurbs;
     return e->host.storeTask(task, *command, item.waypoints, segments, repetition, item.shape, item.curveShape, item.loiters, item.states,
-                             item.paths);
+                             item.paths, item.branches);
 }
 
 control::CommandResult World::commandTask(std::uint32_t id, control::TaskId task, const control::CommandOptions& options) {

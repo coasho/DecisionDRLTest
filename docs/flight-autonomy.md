@@ -893,9 +893,9 @@ A-GRA's route is a set of paths (MA_RouteType.Path, each an MA_RoutePathType): a
 
 - **A path** (`RoutePath`, beside the waypoints as the loiters are; 16 a route at most): its id (`id`, A-GRA's PathID), its type (`type`, `PathType`: A-GRA's twenty; left out, primary) and its points, `count` of the waypoints from `first`. The paths tile the waypoints in order: the first from point 0, each from where the one before ends, the last to the route's last point. Given none, a route is one path, as before. A path's type is a label, read back: what a path does is its points' (a landing's points are FA-10's, 4.29).
 - **A link** (`next`, the Waypoint's field 28; A-GRA's NextPathSegment): the index of the point flown after it, in its path or another; -1, the route's end there. Left out, the next point in its path, and after its path's last the route's end; without paths, the next as they are, as before. A-GRA's segments, given in any order, are these points in some order, each with its next; its route's first path (FirstInRoutePathID) is the one its start is on.
-- **Its flight order:** from its start (`RouteCommand::start`, point 0 by default) along each point's next, until the route's end or a point it has flown before. Its laps go round from there, on and on. A route given `repeat` whose flight ends goes back to its start, as before.
+- **Its flight order:** from its start (`RouteCommand::start`, point 0 by default) along each point's next, until the route's end or a point it has flown before. Its laps go round from there, on and on. A route given `repeat` whose flight ends goes back to its first point (0), as an unlinked one does (until FA-6e2, to where it began: 4.37).
   - Its points are flown in that order, as any route's are: each turn by the legs into and out of its point in that order, and a lap's last leg from its last point back to the point it goes round from, with the turn there.
-  - A point it never comes to is not flown, but it is checked as a point is, in their order as given. A loiter on one is kept as given: checked as a loiter, not completed. An arrival window there is never due. A planned state there is refused, as one on a segment its first lap does not fly (4.34).
+  - A point it never comes to is not flown, but it is checked as a point is, in their order as given. A loiter on one is kept as given: checked as a loiter, not completed - completed and flown where a branch takes the route there (4.37). An arrival window there is due only so. A planned state there is refused, as one on a segment its first lap does not fly (4.34).
   - Its loiters (4.31), arrival windows (4.33) and planned states (4.34) are at their points as flown: a window or a state at or after a loiter point in that order is not implemented, as before.
 - **Named as given:** a point is named everywhere by its index as given - a refusal's, a finding's and an adjustment's index, its progress's segment (its segments the points given), its end points, and its loiters' and states' points read back. Its end points come in its flight order, round its laps.
 - **The end of a path** (A-GRA's END_OF_PATH; a named change to 4.29): taken at its path's last point - a route without paths, its last - and at a point whose next is -1. Where its path goes on it is none, refused `invalid_waypoint` naming the point. Until FA-6e1 it was `not_implemented`, the end of a path before the route's end.
@@ -914,6 +914,34 @@ A-GRA's route is a set of paths (MA_RouteType.Path, each an MA_RoutePathType): a
   - C++: `RoutePath` and `PathType` (`fsim/Control.h`); `Waypoint::next`; a `Span<const RoutePath>` after the states in `World::submit` and `World::update` (a route's), `ControlStack::command`, `BatchCommand::paths`, `Setpoint::paths`; `PathStore::routePaths`, and the flight order beside the points as given.
   - C ABI 1.33: `fsim_route_path` (`fsim_route_path_init`: none of it given) and `enum fsim_path_type`; `fsim_waypoint`'s `next`, where the caller's `struct_size` has it (`fsim_waypoint_init` leaves it out); `fsim_route_extras` (a route's loiters, states and paths together; `fsim_route_extras_init`: none), taken by `fsim_vehicle_submit_route_extras` and `fsim_activity_update_route_extras`; `fsim_batch_command`'s `paths` and `path_count`, filled by `fsim_activity_get_setpoint`.
   - Python: `fsim.RoutePath(id, type, first, count)`, its type by name or `fsim.PathType`; `fsim.Waypoint`'s `next`; `paths=` beside `states=` in `submit_route` and `update_route`, and in a batch's or a task's `BatchCommand("submit_route", ...)`; read back in the setpoint's `paths`.
+
+### 4.37 A-GRA's conditional branches (as FA-6e2 builds them)
+
+A-GRA's path segment may carry conditional segments (MA_PathSegmentType.ConditionalPathSegment): a segment of any path, flown next when its condition holds - "a logical AND of all fields present (except OperatorInput)". Its conditions (PathSegmentConditionType) are the altitude at the segment's end within a range, the time within a window, the segment captured so many times, the operator's input, the endurance remaining, and the contingency level. ADR-29 plans them as WPT-15, FA-6e2. FA-6e2a builds the branches with their altitude, time, capture and operator-input conditions; FA-6e2b the endurance and contingency ones.
+
+- **A branch** (`RouteBranch`, beside the waypoints as the loiters are; 16 a route at most): at waypoint `point`, on to `next` - another point's index, in its path or another; -1, the route's end there - and its conditions, each left out or given:
+  - `altitudeMinM`, `altitudeMaxM` in `altitudeReference` (left out, above mean sea level): its altitude within them, a side left out open;
+  - `timeBeginS`, `timeEndS` (the world's simulation seconds): the time within them;
+  - `captures` with `capturesComparison` (`Comparison`, A-GRA's EqualityExpressionEnum): the times it has come to the point, this one too, compared so with the count;
+  - `operatorInput` 1: only once the operator has commanded it;
+  - an endurance - `enduranceComparison` with `fuelKg`, `enduranceS`, `enduranceEndS`, `percent` - and a `contingency`: FA-6e2b's.
+  None given, it holds.
+- **Decided** as the aircraft comes to its point: where its turn there begins (a fly-by's lead), at the point (flown over), or as a loiter point's loiter ends. The point is captured then. Its branches are tried in their order and the first that holds is taken; none, its own next, as the links say.
+- **Taken:** the route goes on from the branch's next along the links; one that repeats goes back from its end to its first point, as ever. It is planned again from where the aircraft is. A branch at a fly-by is flown to its point, the turn there toward its next; at a point flown over, or as a loiter ends, on from the aircraft to its next. What was kept of the points it now flies is flown - their loiters, completed now, and their arrival windows - and the first lap's planned states are left behind. Its laps, the distance it has flown and the captures go on; its distance to go is the rest of the new flight.
+- **The operator's input** (`World::commandBranch`): a branch that takes it is commanded, or no longer, while its route flies or waits, addressed as an UPDATE is. It holds until the route is flown afresh - an UPDATE, a Reset. Refused `invalid_parameter` (its index: the branch) for one it has not, or one that takes no operator input; `wrong_command_type` for an activity that is no route.
+- **Reported:** its branches read back as given. A flying route's end points are as its behaviour flies it: a branch taken, on from there; one not yet decided, as the links say.
+- **Refused `invalid_waypoint`, naming its point:**
+  - 17 or more (the 17th's point);
+  - at a point it has not; a next that is none, or its own point;
+  - a field not finite, a code that is none; a range or a window upside down, a reference with no range; captures without their comparison or the other way round, or not whole; an operator input not 0 or 1; an endurance without its comparison or the other way round, a percent outside 0 to 100, a fuel or an endurance below 0;
+  - a flight on from it that is none: round one point.
+- **Not implemented** (as its support row, `fsim.guidance.route/conditional_segment`, says: partial): an endurance or a contingency condition (FA-6e2b).
+- **A stack on its own** takes them too, unchecked; it has no operator's input to take.
+- **A named change to 4.36:** a repeating linked route whose flight ends goes back to its first point (0), as an unlinked one does. FA-6e1's went back to where it began, which differs where that is not the first.
+- **Surfaces.**
+  - C++: `RouteBranch` and `Comparison` (`fsim/Control.h`); a `Span<const RouteBranch>` after the paths in `World::submit`, `World::update` (a route's) and `ControlStack::command`; `BatchCommand::branches`, `Setpoint::branches`; `World::commandBranch`; `PathStore::routeBranches` and `routeCommanded`; `Behavior::ahead`, the points a route flies from here.
+  - C ABI 1.34: `fsim_route_branch` (`fsim_route_branch_init`: every field left out), its 15 fields in `RouteBranch`'s order; `enum fsim_comparison`; `fsim_route_extras`'s `branches` and `branch_count`, where the caller's `struct_size` has them; `fsim_batch_command`'s `branches` and `branch_count`, filled by `fsim_activity_get_setpoint`; `fsim_activity_command_branch`.
+  - Python: `fsim.RouteBranch` (its codes by name or member) and `fsim.Comparison`; `branches=` in `submit_route`, `update_route` and a batch's or a task's `BatchCommand("submit_route", ...)`; read back in the setpoint's `branches`; `Activity.command_branch(branch, commanded=True)`.
 
 ## 5. Applicability (D6)
 
@@ -1155,7 +1183,9 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
   - FA-6d3, required navigation performance (WPT-21; 4.35), done 2026-09-28 and measured in section 14;
 - FA-6e, paths, in two steps:
   - FA-6e1, paths with ids and types, and their links (WPT-13, WPT-14; 4.36), done 2026-09-28 and measured in section 14;
-  - FA-6e2, conditional branches (WPT-15);
+  - FA-6e2, conditional branches (WPT-15), in two steps:
+    - FA-6e2a, the branches, and their altitude, time, capture and operator-input conditions (4.37), done 2026-09-28 and measured in section 14;
+    - FA-6e2b, their endurance and contingency conditions;
 - FA-6f, civil path terminators (WPT-19).
 
 **Items (15):** WPT-04, WPT-06, WPT-08, WPT-10, WPT-11, WPT-12, WPT-13, WPT-14, WPT-15, WPT-17, WPT-18, WPT-19, WPT-20, WPT-21, WPT-22.
@@ -2403,6 +2433,26 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases are within −4.5 % to +3.0 %: the same level's update +3.0 % and +1.5 % (its least the same 6.6 ns in one run, 0.2 ns more in the other), a behaviour's NEW −4.1 % and −4.5 %.
   - World throughput is 99.3 to 100.7 % of FA-6d3's; protection costs at most 1.1 %.
 - ctest: all 315 tests pass.
+
+**FA-6e2a, A-GRA's conditional branches: altitude, time, captures, the operator's input (WPT-15).**
+- **Flown** (`test_route_branches`, calm), on three paths as FA-6e1's - A, two points east, on into B, a square round and round; C, two points south of B, the way out:
+  - a C172 (3 km a unit), with a branch at B's last on to C once it has come there twice, and at A's last one at an altitude it is not at (above 2,500 m) before one it is (1,000 to 2,000 m) on into B. It flew 0 1 2 3 4 5 2 3 4 5 6 7 and completed, its end points as it flew out 6 7. A second, branching to the route's end at B's second point, flew 0 1 2 3 and completed;
+  - IRISes (20 m a unit, 3 m/s over the ground): commanded out at B's second point once round (99 s on), one flew 0 1 2 3 4 5 2 3 4 5 2 3 6 7 - held there twice, the operator's input not given, out the next time; one with a time window a minute and a half on went round until it opened, then out (0 1 2 3 4 5 2 3 4 5 2 3 4 5 2 3 4 5 6 7); one whose A's last hovered 20 s went out as the hover ended (0 1 6 7); one commanded as it waited, disabled, then enabled, went out the first time (0 1 2 3 6 7); one commanded and then updated went round and round, the input forgotten.
+- **Refused `invalid_waypoint`, naming its point:** at a point it has not (8); at 5 - a next past the route, of 2.5, or its own point; a range or a window upside down, a reference with no range; a count with no comparison, or not whole; an operator input of 2; a contingency of 7; an endurance with no comparison; 17 branches; a flight on from it round one point. **Not implemented** at 5: an endurance, a contingency. The operator's input to a branch that takes none, or one it has not: `invalid_parameter` naming it; to an hsa, `wrong_command_type`; to a route ended, `activity_ended`.
+- **A stack on its own:** its end points as it will fly them.
+- **The fleet** (`test_fleet`): every aircraft on the paths case's first two paths - a point half a minute ahead, into a square of half-minute sides linked round - with a branch at the square's last out to a point half a minute to its right once it has come there twice, the route ending in a loiter. All 35 flew 0 1 2 3 4 1 2 3 4 5 and completed: 256 s after the NEW (the fighters) to 500 s (the C-17A, whose turns are wider than the square's sides). A rotorcraft's run is 330 s, inside the Crazyflie's battery (it falls at 600).
+- **A named change to 4.36** (`test_route_paths`): a repeating linked route begun at point 2 goes back at its end to its first point, 2 3 4 5 0 1 2 3; FA-6e1's went back to 2.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6e1's build: a route without branches plans and flies as before, its distance to go counted from a lap's start the same.
+- **The support table:** `route/conditional_segment` partial (an endurance or a contingency: FA-6e2b); the route capability's pending list names those in place of conditional branches. The C ABI's, discovery's and Python's example of a row not built is `route/path_terminators` (FA-6f).
+- **Conformance:** the optimise walks give routes one or two branches now and then - at points drawn, on to one drawn or the end, with conditions drawn from those built, now and then one malformed - and a fifth of their UPDATEs are the operator's input to a branch, held to an UPDATE's rules. Those walks still answer `not_implemented` nowhere on aircraft with tables.
+- **Surfaces:** the C ABI's 1.34 block (read back; the operator's input to a branch that takes it, and to one that takes none refused, `reserved` 1; one on to its own point refused `invalid_waypoint`, `reserved` 5; an endurance `not_implemented`); Python's `test_route_branches` (read back, codes by name; round twice, then out; commanded, out the next time; refusals).
+- **Memory:** the path store is 2.0 KB larger (16 branches and the operator's commands), the host's route plan and each route behaviour's 2.1 KB (their branches, as given, and the times each one's point has been come to). A waypoint is as it was (232 bytes), and so is the activity record (304); a batch item grows 16 bytes, a setpoint 24.
+- **Digests:** identical to FA-6e1's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6e1, both builds run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`; then 5 rounds of `micro` and of `command` from three copies of each.
+  - From one copy of each, the micro cases are within −6.8 % to +0.3 % and the command cases within −0.8 % to +6.9 %: a behaviour's NEW +6.0 % and +6.9 %. From three copies of each, their medians' median, every micro case is within −0.8 % to +1.0 % and every command case within 0.0 % to +1.2 %: a behaviour's NEW +1.2 %.
+  - Before, a behaviour's NEW was 12.9 % slower on all three copies, with every instruction on its path the same except those of `submitWith`'s block for a NEW that waits, which it never runs. The branches' lines there had moved the rest of `submitWith` 80 bytes. That block now keeps what goes beside a waiting route out of line (`CapabilityHost::holdExtras`, in `Branches.cpp`), and the NEW is back to +1.2 %.
+  - World throughput is 99.2 to 100.7 % of FA-6e1's; protection costs at most 0.6 %.
+- ctest: all 319 tests pass.
 
 ## Appendix A: the inventory
 

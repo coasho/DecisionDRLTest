@@ -135,7 +135,7 @@ void ControlStack::command(const Command& command) {
 }
 
 void ControlStack::command(const RouteCommand& route, Span<const Waypoint> waypoints, Span<const RouteLoiter> loiters, Span<const RouteState> states,
-                           Span<const RoutePath> paths) {
+                           Span<const RoutePath> paths, Span<const RouteBranch> branches) {
     // the stack's own path store, as a World's host writes it (what the waypoints and loiters leave out, the behaviour fills in)
     if (!config_->path) config_->path = std::make_unique<PathStore>();
     PathStore& path = *config_->path;
@@ -147,6 +147,7 @@ void ControlStack::command(const RouteCommand& route, Span<const Waypoint> waypo
     std::copy_n(states.data(), path.routeStateCount, path.routeStates);
     path.routePathCount = static_cast<std::uint32_t>(std::min(paths.size(), PathStore::kRoutePaths));
     std::copy_n(paths.data(), path.routePathCount, path.routePaths);
+    route::takeBranches(path, branches); // (4.37)
     if (!route::linkStore(path, route)) path.routeLinked = false, path.count = 0; // (along its links: none it can fly, it fails - 4.36)
     ++path.revision;
     command(Command(route));

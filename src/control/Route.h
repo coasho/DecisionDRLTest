@@ -207,6 +207,11 @@ struct Plan {
     std::uint32_t order[kMax] = {}, position[kMax] = {};
     std::uint32_t pathCount = 0;
     RoutePath paths[PathStore::kRoutePaths];
+    /// Its conditional branches (4.37), as given: their points and nexts named as given; a behaviour's, the times each
+    /// one's point has been come to.
+    std::uint32_t branchCount = 0;
+    RouteBranch branches[PathStore::kRouteBranches];
+    std::uint32_t branchCaptures[PathStore::kRouteBranches] = {};
     /// The index point i is named by: its own as given.
     std::uint32_t named(std::uint32_t i) const noexcept { return linked && i < given ? order[i] : i; }
     /// The host's own, beside its scratch (its checks leave it be): the flying route's planned states it resumed past
@@ -510,18 +515,21 @@ inline RouteLoiter unplaced(RouteLoiter l) noexcept {
 /// do not tile the `count` waypoints in order, two with one id - the first point of the one at fault (0 for more than 16),
 /// or -1.
 int pathFault(const RoutePath* paths, std::uint32_t pathCount, std::uint32_t count) noexcept;
-/// A linked route's flight order (4.36): from point `start`, each point's next - its own, else the next in its path (paths
-/// given) or as they are - until the route's end, or a point flown before: where it loops back to (`repeat`, a route that
-/// ends goes back to its start). Their indices into `order`, their count returned; `loop` where a lap goes on from its last
-/// (-1: it does not). -1 for a next that is not a point's index or -1: `bad` the point.
 /// The points a linked route does not fly after those it flies, `flown` of them in `order`: the rest in their order as given.
 void orderRest(std::uint32_t* order, std::uint32_t flown, std::uint32_t count) noexcept;
+/// A path store's conditional branches (4.37; Branches.cpp): `branches` as given (16 at most), none commanded.
+void takeBranches(PathStore& store, Span<const RouteBranch> branches) noexcept;
 /// A path store's route linked (4.36; Paths.cpp): whether it is (paths, or a point's next), and a linked one's flight order
 /// from `c`'s start beside its points as given, as the host writes it. False where its paths or links make none it can fly
 /// - paths that do not tile its points, a next that is none, a start that is none, round one point - the store as it was.
 bool linkStore(PathStore& store, const RouteCommand& c) noexcept;
+/// A linked route's flight order (4.36): from point `start`, each point's next - its own (`startNext` in the start's place,
+/// where given: a branch taken there, 4.37), else the next in its path (paths given) or as they are - until the route's
+/// end, or a point flown before: where it loops back to. A route that repeats goes back from its end to its first point (0),
+/// as an unlinked one does. Their indices into `order`, their count returned; `loop` where a lap goes on from its last (-1:
+/// it does not). -1 for a next that is not a point's index or -1: `bad` the point.
 int flightOrder(const Waypoint* points, std::uint32_t count, const RoutePath* paths, std::uint32_t pathCount, std::uint32_t start, bool repeat,
-                std::uint32_t* order, std::int32_t& loop, std::int16_t& bad) noexcept;
+                std::uint32_t* order, std::int32_t& loop, std::int16_t& bad, double startNext = kHold) noexcept;
 /// A route is linked: paths given, or a point's next.
 bool linked(const Waypoint* points, std::uint32_t count, std::uint32_t pathCount) noexcept;
 /// Where each of its states is (4.34; States.cpp), `p` planned: its place's along its segment's leg as the first lap flies

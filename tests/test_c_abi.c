@@ -1265,6 +1265,63 @@ int main(int argc, char** argv) {
             CHECK(isnan(pts[0].rnp_m));
         }
         {
+            /* ABI 1.34 (4.37): conditional branches - one out of the loop once its point has been come to twice, one the
+               operator commands; read back; one on to its own point refused at its point (reserved: its index + 1), an
+               endurance not implemented; the operator's input to one that takes none refused naming it */
+            fsim_waypoint pts[6];
+            fsim_route_path paths[2];
+            fsim_route_branch br[2];
+            fsim_route_extras extras;
+            fsim_batch_command sp;
+            double options[4];
+            const fsim_vehicle_state* at;
+            fsim_activity_id route_id;
+            uint32_t branched = 0;
+            int k;
+            const double ne[6][2] = {{0, 1}, {0, 2}, {1, 3}, {2, 3}, {2, 4}, {-1, 4}};
+            spec.name = "cap-branches";
+            spec.type = "jsbsim:c172";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 50.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &branched) == FSIM_OK);
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            at = fsim_vehicle_state_ptr(world, branched);
+            for (k = 0; k < 6; ++k) {
+                fsim_waypoint_init(&pts[k]);
+                pts[k].latitude_rad = at->latitude_rad + ne[k][0] * 3000.0 / 6371008.8;
+                pts[k].longitude_rad = at->longitude_rad + ne[k][1] * 3000.0 / (6371008.8 * cos(at->latitude_rad));
+            }
+            pts[1].next = 2.0, pts[4].next = 2.0;
+            for (k = 0; k < 2; ++k) fsim_route_path_init(&paths[k]);
+            paths[0].id = 1, paths[0].first = 0, paths[0].count = 2;
+            paths[1].id = 2, paths[1].first = 2, paths[1].count = 4;
+            for (k = 0; k < 2; ++k) fsim_route_branch_init(&br[k]);
+            CHECK(br[0].struct_size == sizeof br[0] && isnan(br[0].fields[0]) && isnan(br[0].fields[14]));
+            br[0].point = 4, br[0].fields[0] = 5.0, br[0].fields[6] = 2.0, br[0].fields[7] = FSIM_COMPARISON_GREATER_EQUAL;
+            br[1].point = 3, br[1].fields[0] = 5.0, br[1].fields[8] = 1.0; /* (the operator's input) */
+            fsim_route_extras_init(&extras);
+            extras.paths = paths, extras.path_count = 2, extras.branches = br, extras.branch_count = 2;
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_route_extras(world, branched, options, 4, pts, 6, &extras, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            route_id = cr.activity;
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.branch_count == 2 && sp.branches[0].point == 4);
+            CHECK(sp.branches[0].fields[6] == 2.0 && sp.branches[1].fields[8] == 1.0 && isnan(sp.branches[1].fields[6]));
+            CHECK(fsim_activity_command_branch(world, route_id, FSIM_SOURCE_OVERRIDE, 0, 1, 1, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_command_branch(world, route_id, FSIM_SOURCE_OVERRIDE, 0, 0, 1, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "invalid_parameter") == 0 && cr.reserved == 1);
+            CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+            br[0].fields[0] = 4.0; /* (on to its own point) */
+            CHECK(fsim_vehicle_submit_route_extras(world, branched, options, 4, pts, 6, &extras, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 5);
+            br[0].fields[0] = 5.0, br[0].fields[13] = 20.0, br[0].fields[9] = FSIM_COMPARISON_LESS_EQUAL; /* (an endurance: FA-6e2b's) */
+            CHECK(fsim_vehicle_submit_route_extras(world, branched, options, 4, pts, 6, &extras, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 5);
+        }
+        {
             /* ABI 1.33 (4.36): paths and links - two paths, the first's last on into the second, whose three points go round;
                read back, and its end points in its flight order; paths that do not tile the points refused at the point no
                path holds (reserved: its index + 1) */
@@ -1427,7 +1484,7 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_submit_behavior(world, viper, &hover, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
             CHECK(strcmp(fsim_reason_name(cr.reason), "not_supported") == 0);
             /* applicable, not built: the stage that builds it */
-            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route/conditional_segment", &si) == FSIM_OK);
+            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route/path_terminators", &si) == FSIM_OK);
             CHECK(si.support == FSIM_NOT_IMPLEMENTED && si.stage == 6);
             CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route", &si) == FSIM_OK && si.support == FSIM_PARTIAL && strlen(si.missing) > 0);
             CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.warp_drive", &si) != FSIM_OK);

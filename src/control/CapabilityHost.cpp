@@ -389,6 +389,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     const Span<const RouteLoiter> loiters = extras ? extras->loiters : Span<const RouteLoiter>();
     const Span<const RouteState> states = extras ? extras->states : Span<const RouteState>();
     const Span<const RoutePath> paths = extras ? extras->paths : Span<const RoutePath>();
+    const Span<const RouteBranch> branches = extras ? extras->branches : Span<const RouteBranch>();
     auto bad = [&detail](std::int16_t field) {
         detail.index = field;
         return Reason::InvalidParameter;
@@ -467,6 +468,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         detail.index = which;
         return r;
     }
+    if (const Reason why = checkBranches(p, waypoints, branches, c.repeat == 1.0, detail); why != Reason::None) return why; // (its branches: 4.37)
     // what is not built yet: the actions a point's type asks - answered as its row in the support table says: not
     // supported where the aircraft cannot (a taxi's, without its rule), else not implemented (a taxi's, a runway's and a
     // takeoff's points FA-9's, an approach's and a touchdown FA-10's, a ditch FA-16's). The end of a path where its path
@@ -938,6 +940,8 @@ void CapabilityHost::writeRoute() {
     for (std::uint32_t j = 0; j < given && p.linked; ++j) store.routeOrder[j] = static_cast<std::uint16_t>(p.order[j]);
     store.routePathCount = p.pathCount;
     std::copy_n(p.paths, p.pathCount, store.routePaths);
+    store.routeBranchCount = p.branchCount, store.routeCommanded = 0; // (flown afresh: what the operator commanded goes - 4.37)
+    std::copy_n(p.branches, p.branchCount, store.routeBranches);
     store.routeFrameCount = p.frameCount; // (its points' frames, as placed: 4.29)
     std::copy_n(p.frameIds, p.frameCount, store.routeFrameIds);
     std::copy_n(p.frames, p.frameCount, store.routeFrames);
@@ -1362,7 +1366,7 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     Command setpoint = std::move(w.command); // (it flies once: moved, never copied)
     const bool route = std::holds_alternative<RouteCommand>(setpoint);
     const RouteExtras extras{Span<const RouteLoiter>(w.loiters.data(), w.loiters.size()), Span<const RouteState>(w.states.data(), w.states.size()),
-                             Span<const RoutePath>(w.paths.data(), w.paths.size())};
+                             Span<const RoutePath>(w.paths.data(), w.paths.size()), Span<const RouteBranch>(w.branches.data(), w.branches.size())};
     if (why == Reason::None) why = prepare(record.capability, setpoint, Span<const Waypoint>(w.waypoints.data(), w.waypoints.size()),
                                            Span<const NurbsSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape, &w.curveShape,
                                            &extras);
@@ -1371,7 +1375,7 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     if (found && w.options.range == RangePolicy::Reject && log.clampable) {
         // what Clamp would fly, suggested in its place (4.11): kept in its entry until a call makes it a task
         w.command = std::move(setpoint);
-        if (route && routePlan_) givenRoute(w.waypoints, w.loiters, w.states, w.paths); // (within its room: as given - 4.36)
+        if (route && routePlan_) givenRoute(w.waypoints, w.loiters, w.states, w.paths, w.branches); // (within its room: as given - 4.36)
         if (std::holds_alternative<PatternCommand>(w.command)) w.shape = patternShape_;
         w.suggested = true;
         w.suggestion = kSuggestedTask | ++suggestionSerial_;
@@ -1395,6 +1399,7 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     launch(Launch{&record, record.id, record.capability, record.axes, detail.flags, firstStart}, w.options, std::move(setpoint), std::move(w.behavior),
            route, Span<const NurbsSegment>(w.segments.data(), w.segments.size()), now);
     if (route) routePlan_->passed.swap(w.passed); // (the states it resumed past: Reset flies them again - 4.34)
+    if (route) config_->path->routeCommanded = w.commanded; // (what the operator commanded as it waited: 4.37)
     return true;
 }
 
@@ -1460,8 +1465,9 @@ CommandResult CapabilityHost::submit(const Command& command, const CommandOption
 }
 
 CommandResult CapabilityHost::submit(const RouteCommand& route, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
-                                     double now, Span<const RouteLoiter> loiters, Span<const RouteState> states, Span<const RoutePath> paths) {
-    const RouteExtras extras{loiters, states, paths};
+                                     double now, Span<const RouteLoiter> loiters, Span<const RouteState> states, Span<const RoutePath> paths,
+                                     Span<const RouteBranch> branches) {
+    const RouteExtras extras{loiters, states, paths, branches};
     return submitWith(Command(route), waypoints, {}, options, state, now, true, nullptr, nullptr, &extras);
 }
 
@@ -1572,14 +1578,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
         w.segments.reserve(PathStore::kSegments), w.segments.assign(segments.begin(), segments.end());
         w.shape = shape ? *shape : PatternShape{};
         w.curveShape = curveShape ? *curveShape : CurveShape{};
-        w.loiters.reserve(PathStore::kRouteLoiters), w.loiters.clear();
-        w.states.reserve(PathStore::kRouteStates), w.states.clear(), w.passed.clear();
-        w.paths.reserve(PathStore::kRoutePaths), w.paths.clear();
-        if (extras) {
-            w.loiters.assign(extras->loiters.begin(), extras->loiters.end());
-            w.states.assign(extras->states.begin(), extras->states.end());
-            w.paths.assign(extras->paths.begin(), extras->paths.end());
-        }
+        holdExtras(w, extras); // (a route's loiters, states, paths and branches: Branches.cpp)
         if (!config_->path) config_->path = std::make_unique<PathStore>();
         if (std::holds_alternative<RouteCommand>(command) && !routePlan_) routePlan_ = std::make_unique<route::Plan>();
         if (std::holds_alternative<CurveCommand>(command) && !curvePlan_) curvePlan_ = std::make_unique<route::Curve>();
@@ -1664,11 +1663,11 @@ CommandResult CapabilityHost::submit(const SupportCommand& command, const Comman
 
 CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints,
                                      const sim::VehicleState& state, Caller caller, Span<const RouteLoiter> loiters, Span<const RouteState> states,
-                                     Span<const RoutePath> paths) noexcept {
+                                     Span<const RoutePath> paths, Span<const RouteBranch> branches) noexcept {
     details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) {
-        const RouteExtras given{loiters, states, paths};
+        const RouteExtras given{loiters, states, paths, branches};
         if (Waiting* w = waitingEntry(activity)) return updateWaiting(*w, Command(route), waypoints, {}, state, caller, nullptr, nullptr, &given);
         return rejected(this->activity(activity) ? Reason::ActivityEnded : Reason::UnknownActivity, activity);
     }
@@ -1689,7 +1688,8 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
     const Span<const Waypoint> points = kept ? Span<const Waypoint>(store->waypoints, store->count) : waypoints;
     const Span<const RouteLoiter> held = kept ? Span<const RouteLoiter>(store->routeLoiters, store->routeLoiterCount) : loiters;
     const RouteExtras extras{held, kept ? Span<const RouteState>(store->routeStates, store->routeStateCount) : states,
-                             kept ? Span<const RoutePath>(store->routePaths, store->routePathCount) : paths};
+                             kept ? Span<const RoutePath>(store->routePaths, store->routePathCount) : paths,
+                             kept ? Span<const RouteBranch>(store->routeBranches, store->routeBranchCount) : branches};
     CommandResult result = accepted(activity);
     result.commandId = records_[s].commandId;
     CheckLog log{result, slots_[s].range, &details_};
@@ -1944,12 +1944,15 @@ bool CapabilityHost::retire(std::size_t s, ActivityState state) {
     } else {
         Command& flown = config_->slots[s].command;
         w->behavior = runtime_->uninstall(s); // kept: it starts afresh when it flies again
-        w->waypoints.clear(), w->segments.clear(), w->loiters.clear(), w->states.clear(), w->passed.clear(), w->paths.clear();
+        w->waypoints.clear(), w->segments.clear(), w->loiters.clear(), w->states.clear(), w->passed.clear(), w->paths.clear(), w->branches.clear();
+        w->commanded = 0;
         if (auto* route = std::get_if<RouteCommand>(&flown); route && config_->path) {
             const PathStore& store = *config_->path;
             w->waypoints.reserve(PathStore::kWaypoints), w->waypoints.assign(store.waypoints, store.waypoints + store.count);
             w->loiters.reserve(PathStore::kRouteLoiters), w->loiters.assign(store.routeLoiters, store.routeLoiters + store.routeLoiterCount);
             w->paths.reserve(PathStore::kRoutePaths), w->paths.assign(store.routePaths, store.routePaths + store.routePathCount);
+            w->branches.reserve(PathStore::kRouteBranches), w->branches.assign(store.routeBranches, store.routeBranches + store.routeBranchCount);
+            w->commanded = store.routeCommanded; // (as the operator commanded them: 4.37)
             w->firstStart = isHold(slots_[s].firstStart) ? route->start : slots_[s].firstStart;
             // resumed at the point it flew to (its states beyond it: 4.34)
             const bool resumes = store.count && r.progress.segments;
@@ -2011,6 +2014,7 @@ CommandResult CapabilityHost::activityCommand(ActivityId activity, ActivityComma
             if (auto* route = std::get_if<RouteCommand>(&w->command); route && !w->support) { // (its states flown past with it: 4.34)
                 route->start = w->firstStart;
                 w->states.insert(w->states.begin(), w->passed.begin(), w->passed.end()), w->passed.clear();
+                w->commanded = 0; // (flown afresh: what the operator commanded goes - 4.37)
             }
         } else {
             record.state = ActivityState::Pending;
@@ -2059,6 +2063,7 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     Span<const RouteLoiter> held(w.loiters.data(), w.loiters.size());
     Span<const RouteState> planned(w.states.data(), w.states.size());
     Span<const RoutePath> pathed(w.paths.data(), w.paths.size());
+    Span<const RouteBranch> branched(w.branches.data(), w.branches.size());
     Span<const NurbsSegment> pieces(w.segments.data(), w.segments.size());
     std::array<NurbsSegment, PathStore::kSegments> joined; // (a curve appended to: the two together)
     if (const auto* route = std::get_if<RouteCommand>(&setpoint)) {
@@ -2066,7 +2071,8 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
         for (const auto& [from, to] : {std::pair{route->projection, &kept.projection}, {route->repeat, &kept.repeat}, {route->end, &kept.end},
                                        {route->start, &kept.start}})
             if (!isHold(from)) *to = from;
-        if (!waypoints.empty() && extras) held = extras->loiters, planned = extras->states, pathed = extras->paths; // (new waypoints come with theirs: 4.31, 4.34, 4.36)
+        if (!waypoints.empty() && extras) // (new waypoints come with theirs: 4.31, 4.34, 4.36, 4.37)
+            held = extras->loiters, planned = extras->states, pathed = extras->paths, branched = extras->branches;
         if (!waypoints.empty()) points = waypoints;
     } else if (const auto* curve = std::get_if<CurveCommand>(&setpoint)) {
         auto& kept = std::get<CurveCommand>(next);
@@ -2126,7 +2132,7 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     }
     CheckLog log{result, w.options.range, &details_};
     Command probe = next; // (fixed-size: a behaviour takes no UPDATE)
-    const RouteExtras given{held, planned, pathed};
+    const RouteExtras given{held, planned, pathed, branched};
     if (const Reason why = prepare(record.capability, probe, points, pieces, state, log, &nextShape, &nextCurveShape, &given); why != Reason::None)
         return about(rejected(why, activity), result);
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
@@ -2136,6 +2142,8 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     if (held.data() != w.loiters.data()) w.loiters.assign(held.begin(), held.end());
     if (planned.data() != w.states.data()) w.states.assign(planned.begin(), planned.end()), w.passed.clear();
     if (pathed.data() != w.paths.data()) w.paths.assign(pathed.begin(), pathed.end());
+    if (branched.data() != w.branches.data()) w.branches.assign(branched.begin(), branched.end());
+    if (std::holds_alternative<RouteCommand>(setpoint)) w.commanded = 0; // (flown afresh: what the operator commanded goes - 4.37)
     if (pieces.data() != w.segments.data()) w.segments.assign(pieces.begin(), pieces.end());
     w.shape = nextShape, w.curveShape = nextCurveShape;
     assignSetpoint(w.command, next);

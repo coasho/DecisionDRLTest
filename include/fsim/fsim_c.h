@@ -478,6 +478,13 @@ FSIM_API int fsim_activity_cancel_by(fsim_world* world, fsim_activity_id activit
 FSIM_API int fsim_activity_command(fsim_world* world, fsim_activity_id activity, int command, uint32_t rank_priority, uint32_t rank_precedence,
                                    int source, uint32_t controller, fsim_command_result* result);
 FSIM_API const char* fsim_activity_command_name(int command); /* "disable", "enable", "reset", "delete", "change_rank", "unassign" */
+/* The operator's input to a route's conditional branch (ABI 1.34; docs/flight-autonomy.md, 4.37): branch `branch` of the
+ * route `activity` flies or waits to fly - one that takes it - `commanded` (1), or no longer (0), declaring the caller's
+ * source and controller as fsim_activity_update_by. Held until the route is flown afresh (an UPDATE, a Reset). Refused
+ * "invalid_parameter", `reserved` the branch + 1, for one it has not or one that takes no operator input;
+ * "wrong_command_type" for an activity that is no route. */
+FSIM_API int fsim_activity_command_branch(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, uint32_t branch, int commanded,
+                                          fsim_command_result* result);
 /* What flies the primary axes nobody owns: FSIM_DEFAULT_NEUTRAL (surfaces
  * centred, throttle 0 - every vehicle's default) or FSIM_DEFAULT_HOLD (the
  * heading, airspeed and height each had when it was let go). `reason` (may be
@@ -887,8 +894,32 @@ typedef struct fsim_route_path {
     double type;
 } fsim_route_path;
 FSIM_API void fsim_route_path_init(fsim_route_path* path);
-/* What goes beside a route's waypoints (ABI 1.33): its loiter points' loiters, its planned states and its paths, each
- * array's struct_size apart. fsim_route_extras_init: none. */
+/* How a value is compared with the one given (A-GRA's EqualityExpressionEnum; ABI 1.34): the value under test on the left. */
+enum fsim_comparison {
+    FSIM_COMPARISON_GREATER = 0, FSIM_COMPARISON_GREATER_EQUAL, FSIM_COMPARISON_LESS, FSIM_COMPARISON_LESS_EQUAL, FSIM_COMPARISON_EQUAL,
+    FSIM_COMPARISON_NOT_EQUAL
+};
+/* A route's conditional branch (ABI 1.34; docs/flight-autonomy.md, 4.37; A-GRA's ConditionalPathSegment): as the aircraft
+ * comes to waypoint `point` - where its turn there begins, at a point flown over, or as a loiter point's loiter ends - the
+ * point flown after it is the branch's next where every condition given holds; the route planned again from there.
+ * `fields` in this order - next (its index; -1: the route's end there), altitude min and max (m) and their reference
+ * (fsim_altitude_reference; NaN: above mean sea level), the time window's begin and end (fsim_world_time's clock), captures
+ * (the times it has come to the point, this one too) and their comparison (fsim_comparison), operator input (1: only once
+ * the operator has commanded it, fsim_activity_command_branch), endurance comparison (fsim_comparison), fuel (kg),
+ * endurance (s), its end (fsim_world_time's clock), percent, contingency (fsim_contingency) - 15. 16 a route at most; those
+ * at one point tried in their order, the first that holds taken. Refused naming its point: invalid_waypoint (at a point it
+ * has not, a next that is none or its own point, a range or a window upside down, captures and their comparison apart, a
+ * code that is none, a flight on from it round one point); not_implemented for an endurance or a contingency (FA-6e2b).
+ * fsim_route_branch_init leaves every field out (fsim_hold()). */
+typedef struct fsim_route_branch {
+    uint32_t struct_size;
+    uint32_t point;
+    double fields[15];
+} fsim_route_branch;
+FSIM_API void fsim_route_branch_init(fsim_route_branch* branch);
+/* What goes beside a route's waypoints (ABI 1.33): its loiter points' loiters, its planned states and its paths - and its
+ * conditional branches (ABI 1.34), where the caller's struct_size has them - each array's struct_size apart.
+ * fsim_route_extras_init: none. */
 typedef struct fsim_route_extras {
     uint32_t struct_size;
     uint32_t loiter_count;
@@ -897,6 +928,8 @@ typedef struct fsim_route_extras {
     uint32_t path_count;
     const fsim_route_state* states;
     const fsim_route_path* paths;
+    uint32_t branch_count;
+    const fsim_route_branch* branches;
 } fsim_route_extras;
 FSIM_API void fsim_route_extras_init(fsim_route_extras* extras);
 /* A route with what goes beside its waypoints (`extras` NULL: none); else as fsim_vehicle_submit_route. */
@@ -1219,6 +1252,8 @@ typedef struct fsim_batch_command {
     const fsim_route_state* states;
     const fsim_route_path* paths;           /* FSIM_BATCH_ROUTE's paths (ABI 1.33), paths[0].struct_size bytes apart */
     uint32_t path_count;
+    const fsim_route_branch* branches;      /* FSIM_BATCH_ROUTE's conditional branches (ABI 1.34), branches[0].struct_size bytes apart */
+    uint32_t branch_count;
 } fsim_batch_command;
 /* Several NEWs at once (A-GRA's several command instances in one message), `batch[0].struct_size` bytes apart, made in
  * order at this simulation time: `results[i]` answers `batch[i]`, and `details[i]` (may be NULL; `details[0].struct_size`

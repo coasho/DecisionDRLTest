@@ -84,7 +84,7 @@ const FeatureDef kFeatures[] = {
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
         "a time of arrival or a planned state at or after a loiter point, planned states beside points in moving frames, "
-        "a start turn where its links loop back, its course left out, conditional branches, path terminators (FA-6); "
+        "a start turn where its links loop back, its course left out, a branch on endurance or contingency, path terminators (FA-6); "
         "planning metadata (FA-7)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
@@ -111,7 +111,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/altitude_block", "fsim.guidance.route", S, 0, 0, ""},              // (FA-6a)
     {"fsim.guidance.route/paths", "fsim.guidance.route", S, 0, 0, ""},                       // WPT-13 (FA-6e1)
     {"fsim.guidance.route/next_segment", "fsim.guidance.route", P, 6, 0, "a start turn where the links loop back, its course left out"}, // WPT-14
-    {"fsim.guidance.route/conditional_segment", "fsim.guidance.route", N, 6, 0, ""},         // WPT-15
+    {"fsim.guidance.route/conditional_segment", "fsim.guidance.route", P, 6, 0, "a condition on endurance or contingency"}, // WPT-15 (FA-6e2a)
     {"fsim.guidance.route/waypoint_type", "fsim.guidance.route", S, 0, 0, ""},               // WPT-17 (FA-6a: nav only, passive, end of path)
     {"fsim.guidance.route/waypoint_type/taxi", "fsim.guidance.route", N, 9, R2, ""},          //   the points each action flies
     {"fsim.guidance.route/waypoint_type/runway", "fsim.guidance.route", N, 9, 0, ""},

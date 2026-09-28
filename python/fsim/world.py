@@ -184,6 +184,17 @@ class ActivityFlag(enum.IntFlag):
     NAVIGATION_PERFORMANCE = 32
 
 
+class Comparison(enum.IntEnum):
+    """How a value is compared with the one given (A-GRA's EqualityExpressionEnum; docs/flight-autonomy.md, 4.37): the value
+    under test on the left."""
+    GREATER = 0
+    GREATER_EQUAL = 1
+    LESS = 2
+    LESS_EQUAL = 3
+    EQUAL = 4
+    NOT_EQUAL = 5
+
+
 class PathType(enum.IntEnum):
     """What a route's path is for (A-GRA's MA_PathTypeEnum; docs/flight-autonomy.md, 4.36): a label, reported back."""
     PRIMARY = 0
@@ -908,6 +919,21 @@ RouteState.__doc__ = ("A planned inertial state inside a route's segment (A-GRA'
                       "relative velocities, its acceleration, its orientation and their rates - is kept and read back. At most 64, "
                       "in order along the route, each on its leg within its uncertainty (50 m at least, or 1 % of the leg).")
 
+RouteBranch = collections.namedtuple(
+    "RouteBranch", "point next altitude_min_m altitude_max_m altitude_reference time_begin_s time_end_s captures captures_comparison "
+                   "operator_input endurance_comparison fuel_kg endurance_s endurance_end_s percent contingency",
+    defaults=(0,) + (HOLD,) * 15)
+RouteBranch.__doc__ = ("A route's conditional branch (A-GRA's ConditionalPathSegment; docs/flight-autonomy.md, 4.37): as the aircraft "
+                       "comes to waypoint ``point``, the point flown after it is ``next`` (-1: the route's end there) where every "
+                       "condition given holds - its altitude between ``altitude_min_m`` and ``altitude_max_m`` (in "
+                       "``altitude_reference``; left out, above mean sea level), the time between ``time_begin_s`` and "
+                       "``time_end_s`` (World.time's clock), the times it has come to the point, this one too, compared by "
+                       "``captures_comparison`` (fsim.Comparison or its name) with ``captures``; with ``operator_input`` 1, only once "
+                       "the operator has commanded it (Activity.command_branch). An endurance (``endurance_comparison`` with "
+                       "``fuel_kg``, ``endurance_s``, ``endurance_end_s``, ``percent``) or a ``contingency`` (fsim.Contingency) is "
+                       "refused not_implemented until FA-6e2b. At most 16; those at one point tried in their order, the first that "
+                       "holds taken, the route planned again from there.")
+
 RoutePath = collections.namedtuple("RoutePath", "id type first count", defaults=(0, HOLD, 0, 0))
 RoutePath.__doc__ = ("One of a route's paths (A-GRA's MA_RoutePathType; docs/flight-autonomy.md, 4.36): ``count`` of its waypoints "
                      "from ``first``, flown in order unless a point's ``next`` says otherwise - its last the route's end unless its "
@@ -1041,6 +1067,22 @@ def _paths(paths):
     return rows
 
 
+def _branches(branches):
+    """Branches (fsim.RouteBranch or dicts of its fields) as the native rows: point, then the 15 fields - codes by name or
+    member."""
+    codes = {"altitude_reference": AltitudeReference, "captures_comparison": Comparison, "endurance_comparison": Comparison,
+             "contingency": Contingency}
+    rows = []
+    for b in branches:
+        if isinstance(b, dict):
+            b = RouteBranch(**b)
+        elif not isinstance(b, RouteBranch):
+            b = RouteBranch(*b)
+        values = [codes[k][v.upper()] if isinstance(v, str) and k in codes else v for k, v in zip(RouteBranch._fields, b)]
+        rows.append((int(values[0]),) + tuple(float(v) for v in values[1:]))
+    return rows
+
+
 def _row(level, values, fields):
     """A level's (or support kind's, or mode's) fields: all of them in order - a level's COMMAND_FIELDS, or its
     SETPOINT_FIELDS with the rotorcraft's - or some by name with the rest as a new command's defaults."""
@@ -1114,16 +1156,27 @@ class Activity:
             return bool(_checked(h.activity_update(self.id, (), int(self.source), self.controller), h)[4])
         return bool(_checked(h.activity_update(self.id, _row(self.level, values, fields), int(self.source), self.controller), h)[4])
 
-    def update_route(self, waypoints=None, loiters=None, states=None, paths=None, **options):
-        """UPDATE of a route: new ``waypoints`` with their ``loiters`` (fsim.RouteLoiter) and ``states``
-        (fsim.RouteState) - None: those it has, and theirs - and the options given (the others kept); checked as a
-        NEW's, then flown afresh from its start, from where the aircraft is. Returns True if a value was clamped; raises
-        fsim.Rejected (``index`` the waypoint at fault)."""
+    def update_route(self, waypoints=None, loiters=None, states=None, paths=None, branches=None, **options):
+        """UPDATE of a route: new ``waypoints`` with their ``loiters`` (fsim.RouteLoiter), ``states`` (fsim.RouteState),
+        ``paths`` (fsim.RoutePath) and ``branches`` (fsim.RouteBranch) - None: those it has, and theirs - and the options
+        given (the others kept); checked as a NEW's, then flown afresh from its start, from where the aircraft is (what the
+        operator commanded forgotten). Returns True if a value was clamped; raises fsim.Rejected (``index`` the waypoint at
+        fault)."""
         rows = [] if waypoints is None else _waypoints(waypoints)
         h = self.world._h
         return bool(_checked(h.activity_update_route(self.id, _row("route", (), options), rows, int(self.source), self.controller,
                                                      None if loiters is None else _loiters(loiters), None if states is None else _states(states),
-                                                     None if paths is None else _paths(paths)), h)[4])
+                                                     None if paths is None else _paths(paths), None if branches is None else _branches(branches)),
+                             h)[4])
+
+    def command_branch(self, branch, commanded=True):
+        """The operator's input to its route's conditional branch ``branch`` (its index; one with ``operator_input`` 1;
+        docs/flight-autonomy.md, 4.37): commanded - or, ``commanded`` False, no longer - as it flies or waits; taken the
+        next time its point is come to, where its other conditions hold. Declares the source it was submitted with, as
+        update does; raises fsim.Rejected (invalid_parameter, ``index`` the branch, for one it has not or one that takes no
+        operator input)."""
+        h = self.world._h
+        _checked(h.activity_command_branch(self.id, int(branch), 1 if commanded else 0, int(self.source), self.controller), h)
 
     def update_curve(self, segments=None, **options):
         """UPDATE of a curve: new ``segments`` (fsim.BezierSegment or fsim.NurbsSegment; None: those it has) and the options given (the
@@ -1268,9 +1321,10 @@ class BatchCommand:
             waypoints = args.pop(0) if args else k.pop("waypoints")
             route = {"projection": k.pop("projection", Projection.GREAT_CIRCLE), "repeat": 1.0 if k.pop("repeat", False) else 0.0,
                      "end": k.pop("end", EndBehavior.CONTINUE), "start": k.pop("start", 0)}
-            loiters, states, paths = k.pop("loiters", None), k.pop("states", None), k.pop("paths", None)
+            loiters, states, paths, branches = k.pop("loiters", None), k.pop("states", None), k.pop("paths", None), k.pop("branches", None)
             return ((kind, 0, _row("route", (), route), None, _waypoints(waypoints), None, options, None if loiters is None else _loiters(loiters),
-                     None if states is None else _states(states), None if paths is None else _paths(paths)), ("route", source, validate, controller))
+                     None if states is None else _states(states), None if paths is None else _paths(paths),
+                     None if branches is None else _branches(branches)), ("route", source, validate, controller))
         segments = args.pop(0) if args else k.pop("segments")
         if _is_nurbs(segments):  # (as A-GRA's schema gives them: its own kind, ABI 1.24)
             return (6, 0, _row("curve", (), k), None, None, _nurbs(segments), options), ("curve", source, validate, controller)
@@ -1279,7 +1333,7 @@ class BatchCommand:
 
 def _setpoint(t):
     """A native setpoint (activity_setpoint) as the fsim.BatchCommand that would command it."""
-    kind, code, fields, behavior, waypoints, segments, loiters, states, paths = t
+    kind, code, fields, behavior, waypoints, segments, loiters, states, paths, branches = t
     if kind == 0:
         level = Level(code)
         return BatchCommand("submit", level, **dict(zip(SETPOINT_FIELDS[level], fields)))
@@ -1299,6 +1353,8 @@ def _setpoint(t):
             more["states"] = [RouteState(int(s[0]), *s[1:]) for s in states]
         if paths:  # (its paths: 4.36)
             more["paths"] = [RoutePath(*r) for r in paths]
+        if branches:  # (its conditional branches: 4.37)
+            more["branches"] = [RouteBranch(int(b[0]), *b[1:]) for b in branches]
         return BatchCommand("submit_route", [Waypoint(*w) for w in waypoints], projection=route["projection"], repeat=route["repeat"] == 1.0,
                             end=route["end"], start=route["start"], **more)
     if kind == 6:  # a curve's segments as A-GRA's schema gives them
@@ -1472,8 +1528,8 @@ class Vehicle:
         return self._answer(r, "hsa", source, validate_only, controller)
 
     def submit_route(self, waypoints, *, projection=Projection.GREAT_CIRCLE, repeat=False, end=EndBehavior.CONTINUE, start=0, loiters=None, states=None, paths=None,
-                     source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(), interactive=True, validate_only=False,
-                     rank=None, interrupt=True, precedence_override=None, window=None, override_rejection=False, controller=0):
+                     branches=None, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(), interactive=True,
+                     validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None, override_rejection=False, controller=0):
         """NEW for fsim.guidance.route, A-GRA's waypoint following (docs/vehicle-interface.md, 4.5): fly
         ``waypoints`` (fsim.Waypoint, dicts of its fields, or rows in its order; at most 256) as legs - great circles
         or rhumb lines (``projection``: fsim.Projection or "great_circle", "rhumb") - from where the aircraft is to
@@ -1484,13 +1540,14 @@ class Vehicle:
         them: while one flies its progress names its point, done, with the pattern's time to go. Its planned
         ``states`` (fsim.RouteState, at most 64; 4.34): its segments' first lap flies through their altitudes, at their
         times. Its ``paths`` (fsim.RoutePath, at most 16; 4.36): runs of its waypoints with ids and types, flown along each
-        point's ``next``. fsim.Rejected if refused: ``index`` names the waypoint (a loiter's or a state's, its point),
+        point's ``next``. Its conditional ``branches`` (fsim.RouteBranch, at most 16; 4.37): at a point, another next where
+        their conditions hold. fsim.Rejected if refused: ``index`` names the waypoint (a loiter's, a state's or a branch's, its point),
         ``constraint`` the limit it breaks, and ``findings`` every waypoint at fault. The command envelope as submit's."""
         options = {"projection": projection, "repeat": 1.0 if repeat else 0.0, "end": end, "start": start}
         r = self._h.submit_route(self.id, _row("route", (), options), _waypoints(waypoints), int(source), None, int(range), int(min_version),
                                  _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection,
                                            controller), None if loiters is None else _loiters(loiters), None if states is None else _states(states),
-                                 None if paths is None else _paths(paths))
+                                 None if paths is None else _paths(paths), None if branches is None else _branches(branches))
         return self._answer(r, "route", source, validate_only, controller)
 
     def submit_pattern(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),

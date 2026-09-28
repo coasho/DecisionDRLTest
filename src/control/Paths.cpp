@@ -37,18 +37,17 @@ bool linked(const Waypoint* points, std::uint32_t count, std::uint32_t pathCount
 }
 
 int flightOrder(const Waypoint* points, std::uint32_t count, const RoutePath* paths, std::uint32_t pathCount, std::uint32_t start, bool repeat,
-                std::uint32_t* order, std::int32_t& loop, std::int16_t& bad) noexcept {
+                std::uint32_t* order, std::int32_t& loop, std::int16_t& bad, double startNext) noexcept {
     loop = -1;
     auto at = [&bad](std::uint32_t i) {
         bad = static_cast<std::int16_t>(std::min<std::uint32_t>(i, 0x7FFF));
         return -1;
     };
     // every point's next a point's index, or -1
-    for (std::uint32_t i = 0; i < count; ++i) {
-        const double next = points[i].next;
-        if (!isHold(next) && !(next == std::floor(next) && next >= -1.0 && next < static_cast<double>(count))) return at(i);
-    }
-    if (start >= count) return at(start);
+    auto none = [count](double next) { return !isHold(next) && !(next == std::floor(next) && next >= -1.0 && next < static_cast<double>(count)); };
+    for (std::uint32_t i = 0; i < count; ++i)
+        if (none(points[i].next)) return at(i);
+    if (start >= count || none(startNext)) return at(start);
     std::int32_t seen[PathStore::kWaypoints];
     std::fill_n(seen, count, -1);
     std::uint32_t n = 0;
@@ -59,19 +58,21 @@ int flightOrder(const Waypoint* points, std::uint32_t count, const RoutePath* pa
         }
         seen[i] = static_cast<std::int32_t>(n);
         order[n++] = i;
-        const double next = points[i].next;
-        if (!isHold(next)) {
-            if (next < 0.0) break; // (the route's end, there)
+        const double next = n == 1 && !isHold(startNext) ? startNext : points[i].next;
+        if (!isHold(next) && next >= 0.0) {
             i = static_cast<std::uint32_t>(next);
             continue;
         }
         std::uint32_t end = count; // (the next in its path; its path's last, the route's end)
         for (std::uint32_t k = 0; k < pathCount; ++k)
             if (i >= paths[k].first && i - paths[k].first < paths[k].count) end = paths[k].first + paths[k].count;
-        if (i + 1 >= end) break;
-        ++i;
+        if (isHold(next) && i + 1 < end) {
+            ++i;
+            continue;
+        }
+        if (!repeat) break; // (the route's end, there)
+        i = 0;              // (a route that repeats: back to its first point, as an unlinked one)
     }
-    if (loop < 0 && repeat) loop = 0; // (back to its start)
     return static_cast<int>(n);
 }
 
@@ -158,6 +159,7 @@ void CapabilityHost::resetRoute(const RouteCommand& c) noexcept {
     if (!config_->path || !routePlan_) return;
     PathStore& store = *config_->path;
     std::vector<RouteState>& passed = routePlan_->passed;
+    store.routeCommanded = 0; // (flown afresh: what the operator commanded goes - 4.37)
     bool changed = false;
     if (!passed.empty()) { // (the states it flew past, ahead of those it kept: 4.34)
         const auto n = static_cast<std::uint32_t>(std::min<std::size_t>(passed.size(), PathStore::kRouteStates - store.routeStateCount));
@@ -185,7 +187,7 @@ void CapabilityHost::nameAsGiven(const route::Plan& p, CheckLog& log, int findin
 }
 
 void CapabilityHost::givenRoute(std::vector<Waypoint>& points, std::vector<RouteLoiter>& loiters, std::vector<RouteState>& states,
-                                std::vector<RoutePath>& paths) const {
+                                std::vector<RoutePath>& paths, std::vector<RouteBranch>& branches) const {
     const route::Plan& p = *routePlan_;
     const std::uint32_t count = p.linked ? p.given : p.count;
     points.clear(), loiters.clear(), states.clear(), paths.clear();
@@ -201,6 +203,7 @@ void CapabilityHost::givenRoute(std::vector<Waypoint>& points, std::vector<Route
         states.push_back(s);
     }
     paths.assign(p.paths, p.paths + p.pathCount);
+    branches.assign(p.branches, p.branches + p.branchCount);
 }
 
 bool RouteBehavior::takeOrder(const ControlContext& ctx) noexcept {

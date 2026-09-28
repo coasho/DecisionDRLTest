@@ -1935,6 +1935,55 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(flown.rfind("0 1 2 3 4 1 2", 0) == 0);
             CHECK(f.nearestLost > p.scale()); // (every one nearest at its start, a minute off: 2.99 scales at the worst, the EC-130H)
         });
+    // A-GRA's conditional branches (ADR-29 FA-6e2: WPT-15): the same first two paths, the square's last linked round, and a
+    // branch there out to a third - a point half a minute to its right - once it has come there twice. It flies round twice,
+    // then out, and the route completes there
+    std::map<std::uint32_t, std::vector<std::uint32_t>> branchedOrders;
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
+            const double v = p.rotor ? p.cruiseMs : p.start.airspeedTrueMs;
+            branchedOrders[p.id].clear();
+            auto point = [&](double ahead, double right) { // (seconds at its speed)
+                const PositionCommand q = pointFrom(p.start, (ahead * c - right * sn) * v, (ahead * sn + right * c) * v, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            std::vector<Waypoint> points = {point(30, 0), point(60, 0), point(60, 30), point(90, 30), point(90, 0), point(90, -30)};
+            points[0].speed = v;
+            if (p.rotor) points[0].speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+            points[0].next = 1.0, points[4].next = 1.0;
+            const std::vector<RoutePath> paths = {RoutePath{1, static_cast<double>(PathType::Ingress), 0, 1},
+                                                  RoutePath{2, static_cast<double>(PathType::Primary), 1, 4},
+                                                  RoutePath{3, static_cast<double>(PathType::Egress), 5, 1}};
+            RouteBranch out;
+            out.point = 4, out.next = 5.0, out.captures = 2.0, out.capturesComparison = static_cast<double>(Comparison::GreaterEqual);
+            RouteCommand route; // (it loiters at its end: a rotorcraft hovers there, a wing orbits)
+            route.end = static_cast<double>(EndBehavior::Loiter);
+            const CommandResult res = w.submit(p.id, route, points, {}, {}, {}, paths, std::vector<RouteBranch>{out});
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index);
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        // (a rotorcraft's done within five minutes, inside the Crazyflie's battery; a heavy's turns, wider than the square's
+        // sides, take it past eight)
+        [&](const Plane& p) { return p.rotor ? 330.0 : 600.0; },
+        [&](const Plane& p) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            std::vector<std::uint32_t>& order = branchedOrders[p.id];
+            if (r.live() && (order.empty() || order.back() != r.progress.segment)) order.push_back(r.progress.segment);
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const std::vector<std::uint32_t>& order = branchedOrders[p.id];
+            std::string flown;
+            for (std::size_t i = 0; i < order.size() && i < 14; ++i) flown += (i ? " " : "") + std::to_string(order[i]);
+            INFO(activityStateName(r.state) << " " << reasonName(r.reason) << "; flew " << flown << "; ended " << r.endTime);
+            CHECK(flown == "0 1 2 3 4 1 2 3 4 5"); // (round twice, then out)
+            CHECK(r.state == ActivityState::Completed); // (all 35: 256 s after the NEW, the fighters, to 500 s, the C-17A)
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

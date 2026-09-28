@@ -119,10 +119,11 @@ public:
     /// NEW for a support effector the vehicle has (gear, flaps, brakes, speedbrake, pitch trim) or its engines' throttles.
     control::CommandResult submit(std::uint32_t id, const control::SupportCommand& command, const control::CommandOptions& options = {});
     /// NEW of a route (fsim.guidance.route) with its waypoints (docs/vehicle-interface.md, 4.5), its loiter points'
-    /// loiters (docs/flight-autonomy.md, 4.31), its planned states (4.34) and its paths (4.36).
+    /// loiters (docs/flight-autonomy.md, 4.31), its planned states (4.34), its paths (4.36) and its branches (4.37).
     control::CommandResult submit(std::uint32_t id, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                   const control::CommandOptions& options = {}, Span<const control::RouteLoiter> loiters = {},
-                                  Span<const control::RouteState> states = {}, Span<const control::RoutePath> paths = {});
+                                  Span<const control::RouteState> states = {}, Span<const control::RoutePath> paths = {},
+                                  Span<const control::RouteBranch> branches = {});
     /// NEW of a curve (fsim.guidance.curve) with its segments (docs/vehicle-interface.md, 4.7): Bezier segments, or as
     /// A-GRA's schema gives them (docs/flight-autonomy.md, 4.26); its reference in a frame beside it, `shape` (4.27).
     control::CommandResult submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
@@ -144,11 +145,11 @@ public:
     /// UPDATE: a new setpoint for a live activity (the fast path).
     control::CommandResult update(control::ActivityId activity, const control::Command& setpoint);
     control::CommandResult update(control::ActivityId activity, const control::SupportCommand& setpoint);
-    /// UPDATE of a route: new options (kHold keeps one) and waypoints with their loiters, states and paths (none: those it
-    /// has); flown afresh from its start.
+    /// UPDATE of a route: new options (kHold keeps one) and waypoints with their loiters, states, paths and branches (none:
+    /// those it has); flown afresh from its start.
     control::CommandResult update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                   Span<const control::RouteLoiter> loiters = {}, Span<const control::RouteState> states = {},
-                                  Span<const control::RoutePath> paths = {});
+                                  Span<const control::RoutePath> paths = {}, Span<const control::RouteBranch> branches = {});
     /// UPDATE of a curve: options, and segments appended (append 1) or a new curve.
     control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
                                   const control::CurveShape* shape = nullptr);
@@ -167,7 +168,8 @@ public:
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::SupportCommand& setpoint);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::RouteCommand& route,
                                   Span<const control::Waypoint> waypoints, Span<const control::RouteLoiter> loiters = {},
-                                  Span<const control::RouteState> states = {}, Span<const control::RoutePath> paths = {});
+                                  Span<const control::RouteState> states = {}, Span<const control::RoutePath> paths = {},
+                                  Span<const control::RouteBranch> branches = {});
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::BezierSegment> segments, const control::CurveShape* shape = nullptr);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
@@ -180,6 +182,12 @@ public:
     /// source as UPDATE does; `rank` for ChangeRank.
     control::CommandResult activityCommand(control::Caller caller, control::ActivityId activity, control::ActivityCommand command,
                                            control::Rank rank = {});
+    /// The operator's input to a route's conditional branch (docs/flight-autonomy.md, 4.37): branch `branch` commanded, or
+    /// no longer - declaring the caller's source as UPDATE does.
+    control::CommandResult commandBranch(control::Caller caller, control::ActivityId activity, std::uint32_t branch, bool commanded = true);
+    control::CommandResult commandBranch(control::ActivityId activity, std::uint32_t branch, bool commanded = true) {
+        return commandBranch(control::Source::Policy, activity, branch, commanded);
+    }
     // --- Flight tasks (docs/flight-autonomy.md, 4.11): kept by id, flown on a task command ---
     control::Reason storeTask(std::uint32_t id, control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints = {},
                               Span<const control::BezierSegment> segments = {}, control::TaskRepetition repetition = {},

@@ -43,7 +43,8 @@ add_library(fsim_control STATIC
     Climb.cpp
     Arrival.cpp
     States.cpp
-    Paths.cpp)
+    Paths.cpp
+    Branches.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

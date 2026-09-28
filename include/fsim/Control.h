@@ -575,6 +575,39 @@ struct RoutePath {
     std::uint32_t count = 0;  ///< how many
 };
 
+/// How a value is compared with the one given (A-GRA's EqualityExpressionEnum; docs/flight-autonomy.md, 4.37): the value
+/// under test on the left.
+enum class Comparison : std::uint8_t { Greater, GreaterEqual, Less, LessEqual, Equal, NotEqual, Count };
+
+/// A route's conditional branch (A-GRA's ConditionalPathSegment, its PathSegmentConditionType; docs/flight-autonomy.md,
+/// 4.37): as the aircraft comes to waypoint `point`, the point flown after it is `next` when every condition given holds -
+/// its altitude within a range, the time within a window, the point come to so many times, what it has left of its
+/// endurance, its contingency - and, where it takes the operator's input, once the operator has commanded it
+/// (World::commandBranch). Beside the waypoints, as the loiters are: 16 a route at most; those at one point tried in their
+/// order, the first that holds taken. None given, it holds.
+struct RouteBranch {
+    std::uint32_t point = 0;          ///< the waypoint it branches at (its index as given)
+    double next = kHold;              ///< the waypoint flown after it when taken (its index; -1: the route's end there)
+    double altitudeMinM = kHold, altitudeMaxM = kHold; ///< AltitudeRange: its altitude there (a side left out: open)
+    double altitudeReference = kHold; ///< AltitudeReference of the range (left out: above mean sea level)
+    double timeBeginS = kHold, timeEndS = kHold; ///< TimeWindow: the world's simulation seconds (a side left out: open)
+    double captures = kHold;          ///< SegmentCapture: the times it has come to the point, this one too...
+    double capturesComparison = kHold; ///< ...compared so (Comparison) with this count
+    double operatorInput = kHold;     ///< OperatorInput: 1, only once the operator has commanded it
+    double enduranceComparison = kHold; ///< EnduranceRemaining: what it has left (NavigationReport) compared so (Comparison)...
+    double fuelKg = kHold, enduranceS = kHold, enduranceEndS = kHold, percent = kHold; ///< ...with each given: its fuel, endurance, its end, percent
+    double contingency = kHold;       ///< ContingencyLevel: it is in this Contingency
+
+    /// Its fields after `point`, in order (the C ABI's and Python's): pointers into it.
+    static constexpr std::size_t kFields = 15;
+    void fields(double* f[kFields]) noexcept {
+        double* all[kFields] = {&next,           &altitudeMinM,  &altitudeMaxM, &altitudeReference,   &timeBeginS,
+                                &timeEndS,       &captures,      &capturesComparison, &operatorInput, &enduranceComparison,
+                                &fuelKg,         &enduranceS,    &enduranceEndS, &percent,            &contingency};
+        for (std::size_t k = 0; k < kFields; ++k) f[k] = all[k];
+    }
+};
+
 /// The loiter a route's loiter point flies (A-GRA's LoiterPoint, MA_LoiterPointType; docs/flight-autonomy.md, 4.31):
 /// a pattern - an orbit, a racetrack, a figure-eight, a hold or a hover, with its shape - and the time it ends. Beside
 /// the route's waypoints, as they go beside its RouteCommand (World::submit and update take a Span): 16 a route at most.
@@ -680,6 +713,12 @@ struct PathStore {
     bool routeLinked = false, routeRepeats = false;
     std::uint32_t routeFlown = 0, routeLoop = 0;
     std::uint16_t routeOrder[kWaypoints] = {};
+    /// Its conditional branches as given (4.37): 16 a route at most. `routeCommanded` has bit k while the operator has
+    /// branch k commanded (World::commandBranch): written apart from `revision`, the flight going on.
+    static constexpr std::size_t kRouteBranches = 16;
+    std::uint32_t routeBranchCount = 0;
+    RouteBranch routeBranches[kRouteBranches];
+    std::uint32_t routeCommanded = 0;
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -750,6 +789,7 @@ struct BatchCommand {
     Span<const RouteLoiter> loiters;     ///< a RouteCommand's: the loiters its loiter points fly (docs/flight-autonomy.md, 4.31)
     Span<const RouteState> states;       ///< a RouteCommand's: its planned inertial states (4.34)
     Span<const RoutePath> paths;         ///< a RouteCommand's: its paths (4.36)
+    Span<const RouteBranch> branches;    ///< a RouteCommand's: its conditional branches (4.37)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight
@@ -767,6 +807,7 @@ struct Setpoint {
     std::vector<RouteLoiter> loiters;    ///< a route's loiters, as they fly (4.31)
     std::vector<RouteState> states;      ///< a route's planned inertial states, as placed (4.34)
     std::vector<RoutePath> paths;        ///< a route's paths (4.36)
+    std::vector<RouteBranch> branches;   ///< a route's conditional branches (4.37)
 };
 
 /// Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType;
@@ -904,6 +945,14 @@ public:
     virtual bool arrival(ArrivalEstimate& out) const noexcept {
         (void)out;
         return false;
+    }
+    /// The points a route flies from here, as of its last update (docs/flight-autonomy.md, 4.37): their indices as given
+    /// into `points` - the one flown to first, at most `max` - their count returned (0: it flies no route); `ends` where
+    /// the last is the route's end. Asked between world steps.
+    virtual std::uint32_t ahead(std::uint32_t* points, std::uint32_t max, bool& ends) const noexcept {
+        (void)points, (void)max;
+        ends = false;
+        return 0;
     }
 };
 

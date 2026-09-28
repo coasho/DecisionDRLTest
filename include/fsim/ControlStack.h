@@ -53,9 +53,11 @@ public:
     /// at most PathStore::kRouteStates, each with its place), and its paths
     /// (4.36; at most PathStore::kRoutePaths): flown along its links from its
     /// start - links it cannot fly (paths that do not tile its points, a next
-    /// that is none, round one point) leave it nothing to fly, and it fails.
+    /// that is none, round one point) leave it nothing to fly, and it fails -
+    /// and its conditional branches (4.37; at most PathStore::kRouteBranches),
+    /// unchecked.
     void command(const RouteCommand& route, Span<const Waypoint> waypoints, Span<const RouteLoiter> loiters = {}, Span<const RouteState> states = {},
-                 Span<const RoutePath> paths = {});
+                 Span<const RoutePath> paths = {}, Span<const RouteBranch> branches = {});
     /// A curve (fsim.guidance.curve) with its segments, into the stack's own
     /// path store (at most PathStore::kSegments), flown afresh; unchecked, as
     /// every command given the stack on its own. Bezier segments, or as
@@ -138,6 +140,8 @@ public:
     bool progress(std::size_t slot, ActivityProgress& out) const noexcept;
     /// Its behaviour's arrival estimate (docs/flight-autonomy.md, 4.33), where the behaviour in `slot` has one.
     bool arrival(std::size_t slot, ArrivalEstimate& out) const noexcept;
+    /// The points its route flies from here (4.37; Behavior::ahead), where the behaviour in `slot` flies one: their count.
+    std::uint32_t ahead(std::size_t slot, std::uint32_t* points, std::uint32_t max, bool& ends) const noexcept;
     /// The adapter whose real-time face writes the inputs (a stock JSBSim one by default).
     void setAdapter(const VehicleAdapter& adapter) noexcept;
     const VehicleAdapter& adapter() const noexcept { return *adapter_; }

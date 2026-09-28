@@ -121,6 +121,7 @@ public:
     std::vector<RouteLoiter> loiters; ///< its loiter points' loiters, beside them (in the walks of their own: ADR-29 FA-6b2)
     std::vector<RouteState> states;   ///< its planned states, beside them (likewise: FA-6d2)
     std::vector<RoutePath> paths;     ///< its paths, beside them (likewise: FA-6e1)
+    std::vector<RouteBranch> branches; ///< its conditional branches, beside them (likewise: FA-6e2)
     std::vector<BezierSegment> segments; ///< the last curve's, made beside its CurveCommand
     std::vector<NurbsSegment> nurbs;     ///< the same as cubics, as A-GRA's schema gives them (ADR-29 FA-5d1), where asNurbs
     bool asNurbs = false;                ///< given so: now and then, in the walks drawn since
@@ -310,7 +311,7 @@ public:
             }
             out = r;
             const auto& s = state();
-            waypoints.clear(), loiters.clear(), states.clear(), paths.clear();
+            waypoints.clear(), loiters.clear(), states.clear(), paths.clear(), branches.clear();
             bool loitered = false; // (a loiter point drawn so far: an arrival window at or after it is not implemented - FA-6d1)
             for (int k = 0; k < points; ++k) {
                 const PositionCommand a = ahead(4000.0 * (k + 1));
@@ -432,6 +433,24 @@ public:
                 else if (how < 7) from.next = static_cast<double>(pick(n));
                 else if (how < 9) from.next = -1.0;
                 else from.next = static_cast<double>(n) + 0.5 * static_cast<double>(pick(2));
+            }
+            // its conditional branches (FA-6e2): now and then one or two, at points drawn, on to a point drawn or the route's
+            // end, with some of the conditions built - an altitude range about the flight, a time window, a count of times come
+            // to, the operator's input - now and then one malformed (a range or a window upside down, a comparison that is none,
+            // on to its own point)
+            if (wild && optimise && chance(0.3)) {
+                const auto n = static_cast<std::size_t>(points);
+                for (std::size_t k = 1 + pick(2); k > 0; --k) {
+                    RouteBranch b;
+                    b.point = static_cast<std::uint32_t>(pick(n));
+                    b.next = chance(0.15) ? -1.0 : static_cast<double>(pick(n));
+                    if (chance(0.3)) b.altitudeMinM = s.altitudeMslM - uniform(0.0, 300.0), b.altitudeMaxM = s.altitudeMslM + uniform(-100.0, 300.0);
+                    if (chance(0.3)) b.timeBeginS = w_.simTime() + uniform(-60.0, 300.0), b.timeEndS = b.timeBeginS + uniform(-10.0, 600.0);
+                    if (chance(0.3))
+                        b.captures = static_cast<double>(pick(3)), b.capturesComparison = static_cast<double>(pick(static_cast<std::size_t>(Comparison::Count) + 1));
+                    if (chance(0.2)) b.operatorInput = 1.0;
+                    branches.push_back(b);
+                }
             }
             return true;
         }
@@ -558,7 +577,8 @@ private:
 /// NEW of what the maker made: a route with the waypoints it made beside it, a curve with its segments, a pattern with
 /// its shape (where it made one).
 CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, const Maker& make, const CommandOptions& options = {}) {
-    if (const auto* route = std::get_if<RouteCommand>(&c)) return w.submit(v, *route, make.waypoints, options, make.loiters, make.states, make.paths);
+    if (const auto* route = std::get_if<RouteCommand>(&c))
+        return w.submit(v, *route, make.waypoints, options, make.loiters, make.states, make.paths, make.branches);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && make.asNurbs)
         return w.submit(v, *curve, Span<const NurbsSegment>(make.nurbs), options, curveShape);
@@ -570,7 +590,7 @@ CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, c
 /// UPDATE with what the maker made: a route's or a curve's options, and now and then its waypoints or segments.
 CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Caller caller = {}) {
     if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints)
-        return w.update(caller, activity, *route, make.waypoints, make.loiters, make.states, make.paths);
+        return w.update(caller, activity, *route, make.waypoints, make.loiters, make.states, make.paths, make.branches);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints && make.asNurbs)
         return w.update(caller, activity, *curve, Span<const NurbsSegment>(make.nurbs), curveShape);
@@ -1326,7 +1346,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 const PatternShape* shape = std::holds_alternative<PatternCommand>(command) && !make.shape.empty() ? &make.shape : nullptr;
                 BatchCommand item; // (a curve's cubics, where made so: a batch item's form)
                 item.command = command, item.waypoints = points, item.segments = pieces, item.shape = shape;
-                if (std::holds_alternative<RouteCommand>(command)) item.loiters = make.loiters, item.states = make.states, item.paths = make.paths;
+                if (std::holds_alternative<RouteCommand>(command))
+                    item.loiters = make.loiters, item.states = make.states, item.paths = make.paths, item.branches = make.branches;
                 if (std::holds_alternative<CurveCommand>(command) && !make.curveShape.empty()) item.curveShape = &make.curveShape;
                 if (make.asNurbs && std::holds_alternative<CurveCommand>(command)) item.segments = {}, item.nurbs = make.nurbs;
                 const Reason r = w.storeTask(v, id, item, repetition);
@@ -1387,6 +1408,10 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             done.caller = Caller{from < 0.7 ? Source::Policy : from < 0.85 ? Source::Autopilot : Source::Override, controller()};
             if (done.op == Op::Cancel) {
                 done.result = w.cancel(done.caller, done.addressed);
+                break;
+            }
+            if (make.optimise && make.chance(0.2)) { // the operator's input to a route's branch (FA-6e2), in the walks of their own
+                done.result = w.commandBranch(done.caller, done.addressed, static_cast<std::uint32_t>(make.pick(3)), make.chance(0.8));
                 break;
             }
             // its own capability's command mostly, another now and then

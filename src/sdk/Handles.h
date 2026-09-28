@@ -26,6 +26,7 @@ struct fsim_world {
     std::vector<fsim::control::RouteLoiter> loiters;    ///< a route's loiters (likewise)
     std::vector<fsim::control::RouteState> states;      ///< a route's planned states (likewise)
     std::vector<fsim::control::RoutePath> paths;        ///< a route's paths (likewise)
+    std::vector<fsim::control::RouteBranch> branches;   ///< a route's conditional branches (likewise)
     /// An activity's setpoint as last read back (fsim_activity_get_setpoint): what its arrays point into.
     struct Readback {
         fsim::control::Setpoint setpoint;
@@ -36,6 +37,7 @@ struct fsim_world {
         std::vector<fsim_route_loiter> loiters;
         std::vector<fsim_route_state> states;
         std::vector<fsim_route_path> paths;
+        std::vector<fsim_route_branch> branches;
         fsim_behavior_command behavior{};
         std::vector<const char*> names;
         std::vector<double> values;

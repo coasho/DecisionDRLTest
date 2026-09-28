@@ -78,6 +78,7 @@ struct RouteExtras {
     Span<const RouteLoiter> loiters;
     Span<const RouteState> states;
     Span<const RoutePath> paths; ///< its paths (4.36)
+    Span<const RouteBranch> branches; ///< its conditional branches (4.37)
 };
 
 class CapabilityHost {
@@ -125,9 +126,11 @@ public:
     /// waypoints completed and checked against the aircraft, planned from
     /// where it is, then written into the vehicle's path store (allocated at
     /// its first route). A RouteCommand submitted as a Command has none: InvalidWaypoint.
-    /// The loiters its loiter points fly beside them (docs/flight-autonomy.md, 4.31), and its planned states (4.34).
+    /// The loiters its loiter points fly beside them (docs/flight-autonomy.md, 4.31), its planned states (4.34), its paths
+    /// (4.36) and its conditional branches (4.37).
     CommandResult submit(const RouteCommand& route, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
-                         double now, Span<const RouteLoiter> loiters = {}, Span<const RouteState> states = {}, Span<const RoutePath> paths = {});
+                         double now, Span<const RouteLoiter> loiters = {}, Span<const RouteState> states = {}, Span<const RoutePath> paths = {},
+                         Span<const RouteBranch> branches = {});
     /// NEW of a curve (fsim.guidance.curve; docs/vehicle-interface.md 4.7):
     /// its segments checked against the aircraft (InvalidCurve naming the
     /// segment, and a section too tight), then written into the path store.
@@ -161,10 +164,15 @@ public:
     /// UPDATE of a route: its options (a field left out, kHold, keeps its
     /// value) and its waypoints - none: those it has - checked as a NEW's,
     /// then flown afresh from its start, from where the aircraft is. New
-    /// waypoints come with their loiters (4.31) and states (4.34); none, it keeps its own.
+    /// waypoints come with their loiters (4.31), states (4.34), paths (4.36) and branches (4.37); none, it keeps its own.
     CommandResult update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state,
                          Caller caller, Span<const RouteLoiter> loiters = {}, Span<const RouteState> states = {},
-                         Span<const RoutePath> paths = {}) noexcept;
+                         Span<const RoutePath> paths = {}, Span<const RouteBranch> branches = {}) noexcept;
+    /// The operator's input to a route's conditional branch (docs/flight-autonomy.md, 4.37; Branches.cpp): branch `branch`,
+    /// one that takes it, commanded (or no longer) - its route flying or waiting, addressed as an UPDATE is; held until the
+    /// route is flown afresh (a NEW, an UPDATE, a Reset). InvalidParameter (index: the branch) for one it has not, or one that
+    /// takes no operator input.
+    CommandResult commandBranch(ActivityId activity, std::uint32_t branch, bool commanded, Caller caller) noexcept;
     /// UPDATE of a curve: the options given (kHold keeps one), and segments -
     /// with `append` 1, after its end, from the same reference; else a new
     /// curve, flown afresh. Options alone change how it is flown, not where.
@@ -196,7 +204,7 @@ public:
     /// else why the vehicle cannot command the capability.
     Reason storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, TaskRepetition repetition,
                      const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {},
-                     Span<const RouteState> states = {}, Span<const RoutePath> paths = {});
+                     Span<const RouteState> states = {}, Span<const RoutePath> paths = {}, Span<const RouteBranch> branches = {});
     /// A task command: the NEW of its command with `options`, the task among
     /// the requirements it traces to, answered as the NEW is; its runs, as the
     /// task says. UnknownTask; TaskActive while its activity is live.
@@ -380,6 +388,8 @@ private:
         std::vector<RouteState> states;   ///< a route's planned states (4.34; likewise)
         std::vector<RouteState> passed;   ///< those a route resumed past (disabled, unassigned): Reset gives them back
         std::vector<RoutePath> paths;     ///< a route's paths (4.36)
+        std::vector<RouteBranch> branches; ///< a route's conditional branches (4.37)
+        std::uint32_t commanded = 0;      ///< the branches the operator has commanded (4.37: bit k, branch k)
     };
     /// A flight task (4.11): its command, and what became of it.
     struct Task {
@@ -393,6 +403,7 @@ private:
         std::vector<RouteLoiter> loiters;   ///< a route's (4.31)
         std::vector<RouteState> states;     ///< a route's planned states (4.34)
         std::vector<RoutePath> paths;       ///< a route's paths (4.36)
+        std::vector<RouteBranch> branches;  ///< a route's conditional branches (4.37)
         TaskRepetition repetition{};
         ActivityId activity = 0;            ///< its activity (every run's), while it is commanded
         std::uint64_t commandId = 0;        ///< its task command's
@@ -614,6 +625,9 @@ private:
     /// profile through their altitudes steeper than the aircraft climbs or descends, a finding (PerformanceLimit) no
     /// clamp mends.
     Reason limitStates(route::Plan& plan, const sim::VehicleState& state, CheckLog& log) const noexcept;
+    /// What goes beside a route's waypoints, kept as it waits (`extras`, null for none; room reserved for the path store's):
+    /// its loiters, states, paths and branches (4.31, 4.34, 4.36, 4.37; Branches.cpp), none of them commanded.
+    void holdExtras(Waiting& w, const RouteExtras* extras) const;
     /// A route kept waiting (disabled, unassigned: 4.10), resumed at point `start` (-1: from its own): the states beyond it
     /// along its flight (a linked route's order: 4.36), those it flew past aside (`passed`: Reset gives them back - 4.34).
     void keepStates(Waiting& w, const PathStore& store, double start) const;
@@ -629,9 +643,15 @@ private:
     /// answer's (where no finding named one before), and the findings and adjustments from those counts on.
     void nameAsGiven(const route::Plan& plan, CheckLog& log, int findingsFrom, int adjustmentsFrom, bool indexed) const noexcept;
     /// The route the plan holds as given (4.36): its points in their order as given, its loiters (unplaced) and states named
-    /// by them, its paths - a suggestion's, a waiting one's.
+    /// by them, its paths and branches - a suggestion's, a waiting one's.
     void givenRoute(std::vector<Waypoint>& points, std::vector<RouteLoiter>& loiters, std::vector<RouteState>& states,
-                    std::vector<RoutePath>& paths) const;
+                    std::vector<RoutePath>& paths, std::vector<RouteBranch>& branches) const;
+    /// A route's conditional branches checked and kept in the plan (docs/flight-autonomy.md, 4.37; Branches.cpp), `plan`
+    /// holding its paths and `waypoints` as given: InvalidWaypoint naming a branch's point for one that is none - 17 or more,
+    /// at a point it has not, a next that is none or its own point, a condition malformed, a flight on from it that is none
+    /// (round one point: `repeat` the route's); NotImplemented for an endurance or a contingency condition (FA-6e2b).
+    Reason checkBranches(route::Plan& plan, Span<const Waypoint> waypoints, Span<const RouteBranch> branches, bool repeat,
+                         CommandResult& detail) const noexcept;
     /// The most a route's segment accelerates from `fromMs` to `toMs` (4.32): a rotorcraft's (Performance), a wing's from
     /// its tables at the fuel on board - full power's excess faster, idle's slower, the least over the speeds between - as
     /// a rate; NaN where not known.

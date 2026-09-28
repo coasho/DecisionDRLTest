@@ -33,6 +33,7 @@ void curveOf(Setpoint& out, const NurbsSegment* segments, std::size_t count) {
 
 bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     out.waypoints.clear(), out.segments.clear(), out.nurbs.clear(), out.loiters.clear(), out.states.clear(), out.paths.clear();
+    out.branches.clear();
     out.shape = PatternShape{};
     out.curveShape = CurveShape{};
     if (const int found = liveSlot(activity); found >= 0) {
@@ -49,6 +50,7 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
                 out.loiters.assign(store->routeLoiters, store->routeLoiters + store->routeLoiterCount); // (4.31)
                 out.states.assign(store->routeStates, store->routeStates + store->routeStateCount);     // (4.34)
                 out.paths.assign(store->routePaths, store->routePaths + store->routePathCount);          // (4.36)
+                out.branches.assign(store->routeBranches, store->routeBranches + store->routeBranchCount); // (4.37)
             }
             if (std::holds_alternative<CurveCommand>(flown)) curveOf(out, store->segments, store->segmentCount), out.curveShape = store->curveShape;
             if (std::holds_alternative<PatternCommand>(flown)) out.shape = store->pattern;
@@ -60,7 +62,7 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     if (w->support) out.command = w->supportCommand;
     else out.command = w->command;
     out.waypoints = w->waypoints, out.shape = w->shape, out.curveShape = w->curveShape, out.loiters = w->loiters, out.states = w->states;
-    out.paths = w->paths;
+    out.paths = w->paths, out.branches = w->branches;
     curveOf(out, w->segments.data(), w->segments.size());
     return true;
 }
@@ -93,21 +95,35 @@ std::vector<EndPoint> CapabilityHost::endPoints(ActivityId activity, std::size_t
             for (std::uint32_t i = 0; i < n; ++i) order[i] = i;
         }
         const bool repeats = loop >= 0;
-        // (a route whose last point is a loiter point ends in its loiter, whatever its end says: 4.31)
-        const bool loiters = is(route->end, EndBehavior::Loiter) || route::loiterPoint(s.waypoints[order[flown - 1]]);
         std::uint32_t j = 0; // (where in its order: the point flown to, or its start)
         const std::uint32_t flying = reported ? progress.segment : first;
         while (j < flown && order[j] != flying) ++j;
         if (j == flown) j = 0;
-        if (past && !repeats && !loiters) return out; // it flies on along its last leg
-        for (; out.size() < max; ++j) {
+        // its points from here: in that order, round its laps - or, a route with branches flying, as its behaviour flies it
+        // (one taken, on from there: 4.37)
+        std::uint32_t ahead[route::Plan::kMax];
+        std::uint32_t m = 0;
+        bool ends = false;
+        const int slot = reported && !s.branches.empty() ? liveSlot(activity) : -1;
+        if (slot >= 0 && isCascade(static_cast<std::size_t>(slot)))
+            m = runtime_->ahead(static_cast<std::size_t>(slot), ahead, static_cast<std::uint32_t>(std::min<std::size_t>(max, route::Plan::kMax)), ends);
+        const bool asFlown = m > 0;
+        for (; !asFlown && !ends && m < max && m < route::Plan::kMax; ++j) {
             if (j >= flown) {
                 if (!repeats) break;
                 j = static_cast<std::uint32_t>(loop);
             }
-            const std::uint32_t i = order[j];
+            ahead[m++] = order[j];
+            ends = !repeats && j + 1 == flown;
+        }
+        if (m == 0) return out;
+        // (a route whose last point is a loiter point ends in its loiter, whatever its end says: 4.31)
+        const bool loiters = is(route->end, EndBehavior::Loiter) || route::loiterPoint(s.waypoints[ends ? ahead[m - 1] : order[flown - 1]]);
+        if (past && ends && !loiters) return out; // it flies on along its last leg
+        for (std::uint32_t k = 0; k < m && out.size() < max; ++k) {
+            const std::uint32_t i = ahead[k];
             const Waypoint& w = s.waypoints[i];
-            const bool last = !repeats && j + 1 == flown;
+            const bool last = ends && k + 1 == m;
             EndPoint e;
             e.kind = route::loiterPoint(w) ? EndPointKind::LoiterPoint
                      : !last             ? (route::noTurn(w) ? EndPointKind::Waypoint : EndPointKind::TurnPoint)

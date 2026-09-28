@@ -336,6 +336,7 @@ void RouteBehavior::aim(std::uint32_t k, const Performance& perf) noexcept {
     const route::Plan& p = *plan_;
     target_ = k;
     legTo_ = &p.leg(k, firstLap_), turnAt_ = &p.turn(k, firstLap_);
+    decided_ = false;
     loiterAhead_ = route::loiterPoint(p.points[k]) ? p.loiterAt(k) : nullptr;
     reachM_ = stops() ? 1.0 : 0.0;
     if (loiterAhead_) { // (4.31: where the leg meets it; a rotorcraft's hover, where it would stop from its speed - its position loop's)
@@ -346,16 +347,23 @@ void RouteBehavior::aim(std::uint32_t k, const Performance& perf) noexcept {
     }
 }
 
-void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& command) {
+void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& command, double branchTo, bool fromPoint) {
     route::Plan& p = *plan_;
     const auto& s = ctx.sensed;
     static const Performance kNone{};
     const Performance& perf = ctx.performance ? *ctx.performance : kNone;
+    // a branch taken (4.37): on from where it is, its laps, the distance it has flown and the branches' captures kept
+    const bool branched = !isHold(branchTo);
+    const std::uint32_t at = branched ? p.named(target_) : 0;
     hovers_ = (ctx.features & kFeatureHover) != 0;
-    flown_ = command;
-    planned_ = true;
-    revision_ = ctx.path ? ctx.path->revision : 0;
-    target_ = 0, laps_ = 0;
+    if (!branched) {
+        flown_ = command;
+        planned_ = true;
+        revision_ = ctx.path ? ctx.path->revision : 0;
+        laps_ = 0;
+        finishedM_ = 0.0;
+    }
+    target_ = 0;
     loiterAhead_ = nullptr, reachM_ = 0.0, loitering_ = false;
     rampFromMs_ = speedFlown_ = referenceFlown_ = kHold;
     climbTarget_ = climbMid_ = kHold, climbRest_ = false;
@@ -363,22 +371,29 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     segmentFirstLap_ = true, stateAltitudes_ = false;
     firstLap_ = true, onArc_ = midway_ = ended_ = finished_ = false;
     failure_ = Reason::None;
-    leadOut_ = finishedM_ = inPieceM_ = lapStartM_ = 0.0;
+    leadOut_ = inPieceM_ = 0.0, lapStartM_ = finishedM_;
     const std::uint32_t count = ctx.path ? ctx.path->count : 0;
     p.repeat = option(command.repeat, 2.0) == 1.0 && count > 1;
     p.rhumb = option(command.projection, 2.0) == 1.0;
     p.end = static_cast<EndBehavior>(static_cast<int>(option(command.end, 2.0)));
     // what the waypoints leave out, as the host fills it in (it has, for a World's vehicle) - a linked route's in its flight
-    // order, the host's (4.36)
+    // order, the host's (4.36); a branch's from where it goes on (4.37)
     std::int16_t bad = -1;
-    const bool linked = count > 0 && takeOrder(ctx);
-    if (count == 0 || (linked ? route::complete(p.points, p.points, p.count, p.repeat, s, perf, hovers_, bad, ctx.altimeter, p.loop)
-                              : route::complete(p.points, ctx.path->waypoints, count, p.repeat, s, perf, hovers_, bad, ctx.altimeter)) != Reason::None) {
+    const bool linked = count > 0 && (branched ? orderFrom(ctx, fromPoint ? at : static_cast<std::uint32_t>(branchTo), fromPoint ? branchTo : kHold, p.repeat)
+                                               : takeOrder(ctx));
+    if (count == 0 || (branched && !linked) ||
+        (linked ? route::complete(p.points, p.points, p.count, p.repeat, s, perf, hovers_, bad, ctx.altimeter, p.loop)
+                : route::complete(p.points, ctx.path->waypoints, count, p.repeat, s, perf, hovers_, bad, ctx.altimeter)) != Reason::None) {
         p.count = 0;
         failure_ = Reason::BehaviorFailed; // (only a stack on its own is given a route nobody checked)
         return;
     }
     if (!linked) p.count = count;
+    if (!branched) { // its conditional branches (4.37), as given, their points not come to yet
+        p.branchCount = std::min<std::uint32_t>(ctx.path->routeBranchCount, static_cast<std::uint32_t>(PathStore::kRouteBranches));
+        std::copy_n(ctx.path->routeBranches, p.branchCount, p.branches);
+        std::fill_n(p.branchCaptures, PathStore::kRouteBranches, 0u);
+    }
     // its loiters (4.31), as the host completed them (a stack's own, completed below): a loiter point with none flies nothing
     p.loiterCount = std::min<std::uint32_t>(ctx.path->routeLoiterCount, static_cast<std::uint32_t>(PathStore::kRouteLoiters));
     std::copy_n(ctx.path->routeLoiters, p.loiterCount, p.loiters);
@@ -390,7 +405,9 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
             failure_ = Reason::BehaviorFailed;
             return;
         }
-    if (!takeStates(ctx)) { // (its planned states, as placed: 4.34)
+    if (branched) {
+        p.stateCount = 0; // (a branch taken leaves its planned states behind, its first lap's: 4.37)
+    } else if (!takeStates(ctx)) { // (its planned states, as placed: 4.34)
         p.count = 0;
         failure_ = Reason::BehaviorFailed;
         return;
@@ -419,7 +436,8 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     }
     aim(p.start, perf);
     lapM_ = p.lapM(true);
-    beginSegment(p.start, s, 0.0, 0.0, 0.0, true, false);
+    beginSegment(p.start, s, finishedM_, 0.0, 0.0, true, false);
+    decided_ = branched && fromPoint; // (the point flown to, its branch taken: 4.37)
 }
 
 void RouteBehavior::beginSegment(std::uint32_t k, const sim::VehicleState& s, double atM, double halfArcM, double leadM, bool firstLap, bool fromPoint) {
@@ -476,7 +494,7 @@ void RouteBehavior::advance(const sim::VehicleState& s, const Performance& perf)
     aim(p.next(target_), perf);
 }
 
-route::Fix RouteBehavior::locate(const sim::VehicleState& s, const Performance& perf) {
+route::Fix RouteBehavior::locate(const ControlContext& ctx, const sim::VehicleState& s, const Performance& perf) {
     const route::Plan& p = *plan_;
     const double lat = s.latitudeRad, lon = s.longitudeRad;
     for (int passed = 0;; ++passed) {
@@ -511,6 +529,7 @@ route::Fix RouteBehavior::locate(const sim::VehicleState& s, const Performance& 
         if (!more) return f;
         if (turn.radiusM > 0.0) {
             if (f.alongM < leg.lengthM - turn.leadM) return f;
+            if (branchAt(ctx, perf, true, std::max(0.0, inPieceM_))) continue; // (a branch taken there: its turn planned again from here - 4.37)
             finishedM_ += std::max(0.0, leg.lengthM - leadOut_ - turn.leadM);
             onArc_ = true, midway_ = false;
             continue;
@@ -525,6 +544,7 @@ route::Fix RouteBehavior::locate(const sim::VehicleState& s, const Performance& 
             return f;
         }
         finishedM_ += std::max(0.0, leg.lengthM - leadOut_);
+        if (branchAt(ctx, perf, false, 0.0)) continue; // (a branch taken: on from here - 4.37)
         if (p.leaves(target_)) beginSegment(p.next(target_), s, finishedM_, 0.0, 0.0, firstLap_ && target_ != p.last(), true);
         leadOut_ = 0.0;
         advance(s, perf);
@@ -570,7 +590,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         frameNorthMs_ = overFrame_ ? pose.northMs : 0.0, frameEastMs_ = overFrame_ ? pose.eastMs : 0.0;
     }
     const bool wasEnded = ended_;
-    const route::Fix fix = locate(s, perf);
+    const route::Fix fix = locate(ctx, s, perf);
     if (loitering_) return loiter(ctx, perf, true); // (a loiter point's loiter met: 4.31)
     const Waypoint& segment = p.points[segment_];
 
@@ -783,6 +803,7 @@ Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf
     Command out = loiter_->update(ctx, loiterCommand_);
     if (const Reason why = loiter_->failure(); why != Reason::None) failure_ = why; // (its frame's vehicle gone)
     if (ended_ || !loiter_->finished()) return out;
+    if (branchAt(ctx, perf, false, 0.0)) return out; // (a branch taken as it ends: on from here - 4.37)
     // its end: the route's, if it is its last point (and the pattern flies on); else on to the next point, the leg to it
     // from here - as the entry's from where the route began - and the turn there planned again
     if (target_ == p.last() && !p.repeat) {
@@ -814,7 +835,7 @@ bool RouteBehavior::progress(ActivityProgress& out) const noexcept {
         out.segmentPercent = 100.0;
         out.percent = ended_ || !(lapM_ > 1e-6) ? 100.0 : std::clamp(100.0 * (finishedM_ - lapStartM_) / lapM_, 0.0, 100.0);
         if (!p.repeat) {
-            out.distanceToGoM = ended_ ? 0.0 : std::max(lapM_ - finishedM_, 0.0);
+            out.distanceToGoM = ended_ ? 0.0 : std::max(lapM_ - (finishedM_ - lapStartM_), 0.0); // (from its lap's start: a branch taken, 4.37)
             const double after = out.distanceToGoM > 0.0 ? (groundSpeed_ > 0.1 ? out.distanceToGoM / groundSpeed_ : kHold) : 0.0;
             out.timeToGoS = ended_ ? 0.0 : pattern.timeToGoS + after; // (unknown with the pattern's: kHold)
         }
@@ -834,7 +855,7 @@ bool RouteBehavior::progress(ActivityProgress& out) const noexcept {
         out.percent = lapM_ > 1e-6 ? std::clamp(100.0 * (routeM - lapStartM_) / lapM_, 0.0, 100.0) : 100.0; // of the lap, when it repeats
     }
     if (!p.repeat) { // a route that repeats has no end to go to
-        out.distanceToGoM = ended_ ? 0.0 : std::max(lapM_ - routeM, 0.0);
+        out.distanceToGoM = ended_ ? 0.0 : std::max(lapM_ - (routeM - lapStartM_), 0.0); // (from its lap's start: a branch taken, 4.37)
         if (ended_) out.timeToGoS = 0.0;
         else if (groundSpeed_ > 0.1) out.timeToGoS = out.distanceToGoM / groundSpeed_;
     }
