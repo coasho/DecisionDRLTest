@@ -8,6 +8,7 @@
 
 #include <chrono>
 #include <ctime>
+#include <limits>
 
 namespace fsim {
 
@@ -172,6 +173,12 @@ control::Reason Vehicle::setNavigation(const control::NavigationSettings& settin
 control::NavigationSettings Vehicle::navigation() const {
     return world_ ? world_->impl_->navigation(id_) : control::NavigationSettings{};
 }
+
+control::Reason Vehicle::setQnh(double qnhPa) { return world_ ? world_->impl_->setQnh(id_, qnhPa) : control::Reason::UnknownVehicle; }
+
+double Vehicle::qnh() const { return world_ ? world_->impl_->qnh(id_) : std::numeric_limits<double>::quiet_NaN(); }
+
+control::StateData Vehicle::stateData() const { return world_ ? world_->impl_->stateData(id_) : control::StateData{}; }
 
 control::Reason Vehicle::performanceProfile(control::FlightMode mode, control::PerformanceProfile& out) const {
     return world_ ? world_->impl_->performanceProfile(id_, mode, out) : control::Reason::UnknownVehicle;

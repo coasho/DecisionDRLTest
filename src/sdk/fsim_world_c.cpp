@@ -1708,6 +1708,38 @@ FSIM_API int fsim_vehicle_set_navigation(fsim_world* world, uint32_t id, const f
     return FSIM_OK;
 }
 
+FSIM_API int fsim_vehicle_set_qnh(fsim_world* world, uint32_t id, double qnh_pa) {
+    if (!world) return FSIM_INVALID_ARGUMENT;
+    const auto reason = world->world.setQnh(id, qnh_pa);
+    if (reason == fsim::control::Reason::UnknownVehicle) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_qnh: unknown vehicle");
+    if (reason != fsim::control::Reason::None) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_set_qnh: out_of_range - outside 850 to 1,100 hPa");
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_vehicle_qnh(const fsim_world* world, uint32_t id, double* qnh_pa) {
+    if (!world || !qnh_pa || !world->world.controls(id)) return FSIM_INVALID_ARGUMENT;
+    *qnh_pa = world->world.qnh(id);
+    return FSIM_OK;
+}
+
+FSIM_API void fsim_state_data_init(fsim_state_data* d) {
+    if (!d) return;
+    std::memset(d, 0, sizeof *d);
+    d->struct_size = sizeof *d;
+    d->indicated_altitude_m = d->indicated_altitude_rate_ms = d->kollsman_hpa = d->static_pressure_pa = d->static_temperature_k =
+        std::numeric_limits<double>::quiet_NaN();
+}
+
+FSIM_API int fsim_vehicle_state_data(const fsim_world* world, uint32_t id, fsim_state_data* out) {
+    if (!world || !world->world.controls(id)) return FSIM_INVALID_ARGUMENT;
+    const fsim::control::StateData s = world->world.stateData(id);
+    fsim_state_data d;
+    fsim_state_data_init(&d);
+    d.indicated_altitude_m = s.indicatedAltitudeM, d.indicated_altitude_rate_ms = s.indicatedAltitudeRateMs, d.kollsman_hpa = s.kollsmanHpa;
+    d.static_pressure_pa = s.staticPressurePa, d.static_temperature_k = s.staticTemperatureK;
+    return copyOut(d, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
 FSIM_API int fsim_vehicle_get_navigation(const fsim_world* world, uint32_t id, fsim_navigation_settings* out) {
     if (!world || !world->world.controls(id)) return FSIM_INVALID_ARGUMENT;
     const fsim::control::NavigationSettings n = world->world.navigation(id);

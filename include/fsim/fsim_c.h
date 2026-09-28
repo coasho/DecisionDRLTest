@@ -668,7 +668,9 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
 enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3 };
 enum fsim_pattern_kind { FSIM_PATTERN_ORBIT = 0, FSIM_PATTERN_RACETRACK, FSIM_PATTERN_FIGURE_EIGHT, FSIM_PATTERN_HOLD };
 enum fsim_speed_reference { FSIM_SPEED_TRUE_AIRSPEED = 0, FSIM_SPEED_CALIBRATED_AIRSPEED, FSIM_SPEED_GROUND_SPEED, FSIM_SPEED_MACH };
-enum fsim_altitude_reference { FSIM_ALTITUDE_MSL = 0, FSIM_ALTITUDE_ABOVE_GROUND, FSIM_ALTITUDE_ELLIPSOID };
+enum fsim_altitude_reference { FSIM_ALTITUDE_MSL = 0, FSIM_ALTITUDE_ABOVE_GROUND, FSIM_ALTITUDE_ELLIPSOID,
+                               FSIM_ALTITUDE_BAROMETRIC /* ABI 1.18: what its altimeter reads, set to its QNH (fsim_vehicle_set_qnh); an hsa's
+                                                           or a pattern's, a route's being FA-6's */ };
 enum fsim_speed_optimization { FSIM_SPEED_LONG_RANGE_CRUISE = 0, FSIM_SPEED_MAX_ENDURANCE }; /* A-GRA's SpeedOptimizationEnum (ABI 1.15) */
 enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
@@ -1076,6 +1078,26 @@ FSIM_API void fsim_navigation_settings_init(fsim_navigation_settings* settings);
 /* FSIM_INVALID_ARGUMENT for a point off the Earth or a reserve outside [0, 1). */
 FSIM_API int fsim_vehicle_set_navigation(fsim_world* world, uint32_t id, const fsim_navigation_settings* settings);
 FSIM_API int fsim_vehicle_get_navigation(const fsim_world* world, uint32_t id, fsim_navigation_settings* out);
+
+/* ABI 1.18 (docs/flight-autonomy.md, 4.20; A-GRA's QNH setting, VI 1.2.6.5): the QNH a vehicle's barometric altimeter
+ * is set to, Pa - what its barometric altitudes are read and flown at; 1013.25 hPa until set. FSIM_OK applied;
+ * FSIM_INVALID_ARGUMENT outside 850 to 1,100 hPa, or an unknown vehicle (nothing changes; fsim_last_error() says). */
+FSIM_API int fsim_vehicle_set_qnh(fsim_world* world, uint32_t id, double qnh_pa);
+FSIM_API int fsim_vehicle_qnh(const fsim_world* world, uint32_t id, double* qnh_pa);
+/* What A-GRA's detailed position report carries beyond the state (A-GRA's MA_AirDataType, VI 1.2.6.8): what the
+ * vehicle's altimeter reads, and the air it reads it in. */
+typedef struct fsim_state_data {
+    uint32_t struct_size;
+    uint32_t reserved;
+    double indicated_altitude_m;      /* A-GRA's IndicatedBaroAltitude: the standard atmosphere's height of the static
+                                       * pressure above the QNH it is set to */
+    double indicated_altitude_rate_ms; /* A-GRA's BarometricAltitudeRate */
+    double kollsman_hpa;              /* A-GRA's Kollsman: its QNH, hPa */
+    double static_pressure_pa;        /* the air's where the vehicle is */
+    double static_temperature_k;
+} fsim_state_data;
+FSIM_API void fsim_state_data_init(fsim_state_data* data);
+FSIM_API int fsim_vehicle_state_data(const fsim_world* world, uint32_t id, fsim_state_data* out);
 
 /* A flight mode's performance profile (ABI 1.14; docs/flight-autonomy.md, 4.15; A-GRA's
  * MA_FlightControlModesPerformanceProfileType, VI 1.2.6.7): the guard rails a mission autonomy shapes its commands

@@ -1465,6 +1465,30 @@ int main(int argc, char** argv) {
                 CHECK(fsim_world_terrain(world, 0, NULL, NULL, NULL) == 0);
                 CHECK(fsim_world_terrain(world, 1, NULL, lon, h) == FSIM_INVALID_ARGUMENT);
             }
+            {
+                /* ABI 1.18: the barometric altimeter - its QNH set, what it reads, a barometric altitude flown
+                 * (docs/flight-autonomy.md, 4.20) */
+                fsim_state_data sd;
+                double qnh = 0.0, standard = 0.0, hsa[6];
+                fsim_state_data_init(&sd);
+                CHECK(sd.struct_size == sizeof sd && isnan(sd.indicated_altitude_m));
+                CHECK(fsim_vehicle_qnh(world, ranger, &qnh) == FSIM_OK && qnh == 101325.0);
+                CHECK(fsim_vehicle_state_data(world, ranger, &sd) == FSIM_OK && sd.kollsman_hpa == 1013.25);
+                st = fsim_vehicle_state_ptr(world, ranger);
+                CHECK(fabs(sd.indicated_altitude_m - st->altitude_msl_m) < 1.0); /* (its geopotential height: 0.35 m less at 1,500 m) */
+                CHECK(sd.static_pressure_pa > 80000.0 && sd.static_pressure_pa < 90000.0 && sd.static_temperature_k > 270.0);
+                standard = sd.indicated_altitude_m;
+                CHECK(fsim_vehicle_set_qnh(world, ranger, 80000.0) == FSIM_INVALID_ARGUMENT);
+                CHECK(fsim_vehicle_set_qnh(world, 99999, 100000.0) == FSIM_INVALID_ARGUMENT);
+                CHECK(fsim_vehicle_set_qnh(world, ranger, 100000.0) == FSIM_OK);
+                CHECK(fsim_vehicle_qnh(world, ranger, &qnh) == FSIM_OK && qnh == 100000.0);
+                CHECK(fsim_vehicle_state_data(world, ranger, &sd) == FSIM_OK && sd.kollsman_hpa == 1000.0);
+                CHECK(fabs(standard - sd.indicated_altitude_m - 110.9) < 0.2); /* (1000 hPa is 110.9 m up the standard atmosphere) */
+                hsa[0] = hsa[1] = hsa[2] = hsa[3] = fsim_hold();
+                hsa[4] = 1400.0, hsa[5] = FSIM_ALTITUDE_BAROMETRIC;
+                CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_HSA, hsa, 6, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+                CHECK(fsim_vehicle_state_data(world, 99999, &sd) == FSIM_INVALID_ARGUMENT);
+            }
         }
         }
         fsim_world_destroy(world);

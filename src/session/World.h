@@ -192,6 +192,18 @@ public:
     std::optional<double> terrainHeightM(double latitudeRad, double longitudeRad) const {
         return ground_->knownHeightAboveEllipsoidM(latitudeRad, longitudeRad);
     }
+    // --- The barometric altimeter (docs/flight-autonomy.md, 4.20; VI 1.2.6.5 and 1.2.6.8) ---
+    /// The QNH a vehicle's altimeter is set to (A-GRA's QNH setting), Pa - what
+    /// its barometric altitudes are read and flown at: applied (Reason::None),
+    /// or OutOfRange outside 850 to 1,100 hPa (nothing changes); UnknownVehicle.
+    /// Until set, the standard 1013.25 hPa: the altimeter reads pressure altitude.
+    control::Reason setQnh(std::uint32_t id, double qnhPa);
+    double qnh(std::uint32_t id) const noexcept; ///< NaN for an unknown vehicle
+    /// What its altimeter reads now, and the air it reads it in (StateData;
+    /// A-GRA's MA_AirDataType). NaN fields for an unknown vehicle.
+    control::StateData stateData(std::uint32_t id) const;
+    /// The world's air now (its environment's sea-level temperature and pressure).
+    control::Air air() const noexcept { return control::Air{environment_.temperatureSeaLevelK, environment_.pressureSeaLevelPa}; }
     // --- The performance profile (docs/flight-autonomy.md, 4.15; A-GRA's MA_FlightControlModesPerformanceProfileType) ---
     /// A flight mode's performance profile at the vehicle's condition now - HSA/CSA, waypoint or curve following -
     /// into `out`, its vectors reused (PerformanceProfile.cpp). InvalidParameter for another mode (A-GRA profiles

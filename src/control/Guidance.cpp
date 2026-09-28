@@ -4,6 +4,7 @@
 #include "control/Registry.h"
 #include "control/Route.h"
 #include "core/Geodesy.h"
+#include "fsim/Altimeter.h"
 #include "fsim/VehicleProfile.h"
 
 #include <algorithm>
@@ -101,12 +102,16 @@ double speedNow(SpeedReference reference, const sim::VehicleState& s) noexcept {
     }
 }
 
-double altitudeMslOf(double altitudeM, AltitudeReference reference, const sim::VehicleState& s) noexcept {
-    return reference == AltitudeReference::AboveGround ? altitudeM + (s.altitudeMslM - s.altitudeAglM) : altitudeM;
+double altitudeMslOf(double altitudeM, AltitudeReference reference, const sim::VehicleState& s, const Altimeter* altimeter) noexcept {
+    if (reference == AltitudeReference::AboveGround) return altitudeM + (s.altitudeMslM - s.altitudeAglM);
+    if (reference == AltitudeReference::Barometric) return barometricMslM(altimeter ? *altimeter : Altimeter{}, altitudeM);
+    return altitudeM;
 }
 
-double altitudeNow(AltitudeReference reference, const sim::VehicleState& s) noexcept {
-    return reference == AltitudeReference::AboveGround ? s.altitudeAglM : s.altitudeMslM;
+double altitudeNow(AltitudeReference reference, const sim::VehicleState& s, const Altimeter* altimeter) noexcept {
+    if (reference == AltitudeReference::AboveGround) return s.altitudeAglM;
+    if (reference == AltitudeReference::Barometric) return indicatedAltitudeM(altimeter ? *altimeter : Altimeter{}, s.altitudeMslM);
+    return s.altitudeMslM;
 }
 
 double optimalTasMs(const TablesSection* tables, double optimization, double altitudeMslM, double fuelKg) noexcept {
@@ -154,7 +159,7 @@ Command HsaBehavior::update(const ControlContext& ctx, const Command& in) {
 
     // the altitude: a vertical speed at the position loop's gain, within its limits
     const AltitudeReference altitudeReference = altitudeReferenceOf(h->altitudeReference);
-    altitudeMsl_ = isHold(h->altitudeM) ? s.altitudeMslM : altitudeMslOf(h->altitudeM, altitudeReference, s);
+    altitudeMsl_ = isHold(h->altitudeM) ? s.altitudeMslM : altitudeMslOf(h->altitudeM, altitudeReference, s, ctx.altimeter);
     const double gain = known(perf.altitudeGainPerS, hovers ? 0.5 : 0.25);
     const double climb = known(perf.maxClimbMs, hovers ? 3.0 : 6.0), descent = known(perf.maxDescentMs, climb);
     out.verticalSpeedMs = std::clamp(gain * (altitudeMsl_ - s.altitudeMslM), -descent, climb);
@@ -426,7 +431,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         altitude = segmentFrom_ + span * fraction;
         if (fraction < 1.0) feedforward = span / segmentM_ * groundSpeed_;
     }
-    altitudeMsl_ = altitudeMslOf(altitude, altitudeReferenceOf(segment.altitudeReference), s);
+    altitudeMsl_ = altitudeMslOf(altitude, altitudeReferenceOf(segment.altitudeReference), s, ctx.altimeter);
     // off the route; past its end, as it was off the last leg there (the progress of what it completed, not
     // of the orbit round its point: the host may read it a few control updates later, when the world step ends)
     if (!ended_) crossTrack_ = fix.crossTrackM;
@@ -533,12 +538,12 @@ void PatternBehavior::plan(const ControlContext& ctx, const PatternCommand& c) {
     hovers_ = (ctx.features & kFeatureHover) != 0;
     flown_ = resolved_ = c;
     if (!isHold(c.speedOptimization)) { // planned at the optimum where it flies it, as the host resolves it
-        const double h = isHold(c.altitudeM) ? s.altitudeMslM : altitudeMslOf(c.altitudeM, altitudeReferenceOf(c.altitudeReference), s);
+        const double h = isHold(c.altitudeM) ? s.altitudeMslM : altitudeMslOf(c.altitudeM, altitudeReferenceOf(c.altitudeReference), s, ctx.altimeter);
         const double best = optimalTasMs(ctx.tables, c.speedOptimization, h, s.fuelKg);
         if (std::isfinite(best)) resolved_.speed = best, resolved_.speedReference = static_cast<double>(SpeedReference::TrueAirspeed);
     }
     // what it leaves out, as the host fills it in (it has, for a World's vehicle)
-    route::completePattern(resolved_, s, perf, hovers_, std::hypot(wind_.northMs, wind_.eastMs));
+    route::completePattern(resolved_, s, perf, hovers_, std::hypot(wind_.northMs, wind_.eastMs), ctx.altimeter);
     route::planPattern(*pattern_, resolved_, s.latitudeRad, s.longitudeRad);
     planned_ = true;
     laps_ = 0;
@@ -618,7 +623,7 @@ Command PatternBehavior::update(const ControlContext& ctx, const Command& in) {
     const route::Pattern& p = *pattern_;
     const route::Fix fix = locate(s);
     crossTrack_ = fix.crossTrackM;
-    altitudeMsl_ = altitudeMslOf(resolved_.altitudeM, altitudeReferenceOf(resolved_.altitudeReference), s);
+    altitudeMsl_ = altitudeMslOf(resolved_.altitudeM, altitudeReferenceOf(resolved_.altitudeReference), s, ctx.altimeter);
     route::Steer steer;
     steer.speed = resolved_.speed;
     steer.reference = speedReferenceOf(resolved_.speedReference, hovers_ ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);

@@ -83,6 +83,12 @@ public:
               const VehicleProfile& profile, double controlPeriodS = 1.0 / 120.0) noexcept;
     /// The session's answers (it outlives the host): without them, no endurance or terrain is checked.
     void setSessionView(const SessionView* view) noexcept { sessionView_ = view; }
+    /// Its barometric altimeter (docs/flight-autonomy.md, 4.20): the world's air and the QNH it is set to, which a
+    /// barometric altitude is checked and flown on. Written by the session between steps, once bound.
+    void setAltimeter(const Altimeter& altimeter) noexcept {
+        if (config_) config_->altimeter = altimeter;
+    }
+    Altimeter altimeter() const noexcept { return config_ ? config_->altimeter : Altimeter{}; }
     /// The vehicle's support for the public features (it outlives the host):
     /// a command for one the catalog does not offer is refused NotSupported or
     /// NotImplemented (docs/flight-autonomy.md, 4.3). Without it, UnknownCapability.

@@ -14,6 +14,7 @@ these are names only (ADR-28, decision D1).
 import datetime
 import math
 
+from . import _native
 from .world import ActivityBasis, ActivityState, ActivityWait, Energy, Rank, TimeCriticality, TimeWindow
 
 #: CommandStatus (0 accepted, 1 rejected, 2 canceled, 3 valid) -> CommandProcessingStateEnum. RECEIVED is never
@@ -363,6 +364,26 @@ def elevation_request_status(latitudes_rad, longitudes_rad, heights):
         points.append(p)
     known = not points or any(h is not None for h in heights)
     return {"RequestProcessingState": "COMPLETED" if known else "FAILED", "ElevationReturned": {"RequestPoint": points}}
+
+
+def air_data(state, data):
+    """A vehicle's state (fsim.VehicleState) and its state data (fsim.StateData) as A-GRA's MA_AirDataType
+    (docs/flight-autonomy.md, 4.20): IndicatedBaroAltitude (m), BarometricAltitudeRate (m/s), Kollsman (hPa),
+    TrueAirspeed and CalibratedAirspeed (m/s), Mach, Alpha and Beta (rad)."""
+    return {"IndicatedBaroAltitude": data.indicated_altitude_m, "BarometricAltitudeRate": data.indicated_altitude_rate_ms,
+            "Kollsman": data.kollsman_hpa, "TrueAirspeed": state.airspeed_true_ms, "CalibratedAirspeed": state.airspeed_calibrated_ms,
+            "Mach": state.mach, "Alpha": state.alpha_rad, "Beta": state.beta_rad}
+
+
+def apply_qnh_setting(vehicle, qnh_kpa):
+    """A-GRA's MA_SystemManagementRequest of VehicleSettings with a QNH_Setting (kPa; VI 1.2.6.5), applied to a vehicle
+    (fsim.Vehicle.set_qnh): its status's RequestProcessingState - "COMPLETED", or "FAILED" with its
+    RequestProcessingStateReason where the setting is not one an altimeter takes (850 to 1,100 hPa)."""
+    try:
+        vehicle.set_qnh(1000.0 * float(qnh_kpa))
+    except _native.Error as e:
+        return {"RequestProcessingState": "FAILED", "RequestProcessingStateReason": str(e)}
+    return {"RequestProcessingState": "COMPLETED"}
 
 
 def cannot_comply(reason):

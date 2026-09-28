@@ -310,7 +310,7 @@ Reason CapabilityHost::resolveHsa(HsaCommand& c, const sim::VehicleState& state,
     // a reference given alone: the aircraft's own value in it now (hold the Mach it flies)
     if (!isHold(c.speedReference) && isHold(c.speed)) c.speed = speedNow(static_cast<SpeedReference>(static_cast<int>(c.speedReference)), state);
     if (!isHold(c.altitudeReference) && isHold(c.altitudeM))
-        c.altitudeM = altitudeNow(static_cast<AltitudeReference>(static_cast<int>(c.altitudeReference)), state);
+        c.altitudeM = altitudeNow(static_cast<AltitudeReference>(static_cast<int>(c.altitudeReference)), state, &config_->altimeter);
     mergeHsa(base, c); // a value given alone is in the reference it continues
     c = base;
     if (!isHold(c.headingRad)) c.headingRad = geo::wrapPi(c.headingRad);
@@ -329,7 +329,8 @@ void CapabilityHost::optimise(double& speed, double& reference, double optimizat
                               const sim::VehicleState& state) const noexcept {
     if (isHold(optimization)) return;
     const double h = isHold(altitudeM) ? state.altitudeMslM
-                                       : altitudeMslOf(altitudeM, aboveGround(altitudeReference) ? AltitudeReference::AboveGround : AltitudeReference::Msl, state);
+                                       : altitudeMslOf(altitudeM, static_cast<AltitudeReference>(static_cast<int>(orHold(altitudeReference, 0.0))), state,
+                                                       &config_->altimeter);
     const double best = optimalTasMs(config_->tables, optimization, h, state.fuelKg);
     reference = static_cast<double>(SpeedReference::TrueAirspeed);
     speed = std::isfinite(best) ? best : state.airspeedTrueMs; // (above the altitudes flown: as it flies)
@@ -340,14 +341,16 @@ void CapabilityHost::limitHsa(HsaCommand& c, CheckLog& log) const noexcept { lim
 void CapabilityHost::limitFlight(double& speed, double speedReference, double& altitude, double altitudeReference, CheckLog& log, std::int16_t speedIndex,
                                  std::int16_t altitudeIndex, std::int16_t speedField, std::int16_t altitudeField) const noexcept {
     const Performance& f = performance_;
-    // the altitude: under the ceiling; above ground, above it
+    // the altitude: under the ceiling (barometric: what the altimeter reads there); above ground, above it
+    const bool barometric = altitudeReference == static_cast<double>(AltitudeReference::Barometric);
     if (aboveGround(altitudeReference)) bound(altitude, 0.0, false, altitudeIndex, Constraint::MinAltitude, log, altitudeField);
+    else if (barometric) bound(altitude, indicatedAltitudeM(config_->altimeter, f.ceilingM), true, altitudeIndex, Constraint::MaxAltitude, log, altitudeField);
     else bound(altitude, f.ceilingM, true, altitudeIndex, Constraint::MaxAltitude, log, altitudeField);
     // the speed, within the envelope's calibrated speeds and Mach at the altitude it asks for (the
     // standard atmosphere's); a rotorcraft's ground speed within its fastest
     auto limit = [&](double most, bool above, Constraint constraint) { bound(speed, most, above, speedIndex, constraint, log, speedField); };
     const auto reference = static_cast<SpeedReference>(static_cast<int>(orHold(speedReference, 0.0)));
-    const double h = isHold(altitude) || aboveGround(altitudeReference) ? 0.0 : altitude;
+    const double h = isHold(altitude) || aboveGround(altitudeReference) ? 0.0 : barometric ? barometricMslM(config_->altimeter, altitude) : altitude;
     switch (reference) {
     case SpeedReference::GroundSpeed:
         if (f.hovers) limit(f.maxGroundSpeedMs, true, Constraint::MaxAirspeed);
@@ -390,6 +393,11 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     const auto count = static_cast<std::uint32_t>(std::min<std::size_t>(waypoints.size(), 0xFFFF));
     if (c.repeat == 1.0 && count == 1) return bad(1); // round and round one point is a pattern, not a route
     if (count > 0 && c.start >= count) return bad(3);
+    for (std::uint32_t i = 0; i < count; ++i) // a barometric altitude on a route is FA-6's (its support table says so)
+        if (waypoints[i].altitudeReference == static_cast<double>(AltitudeReference::Barometric)) {
+            detail.index = static_cast<std::int16_t>(i);
+            return Reason::NotImplemented;
+        }
     if (!routePlan_) routePlan_ = std::make_unique<route::Plan>();
     route::Plan& p = *routePlan_;
     const bool hovers = (adapter_->features() & kFeatureHover) != 0;
@@ -494,7 +502,9 @@ void CapabilityHost::limitPattern(PatternCommand& c, CheckLog& log) const noexce
     const Performance& f = performance_;
     double least = 1.0;
     if (!f.hovers && std::isfinite(f.maxBankRad) && f.maxBankRad > 0.0) {
-        const double h = c.altitudeReference == static_cast<double>(AltitudeReference::AboveGround) ? 0.0 : c.altitudeM;
+        const double h = aboveGround(c.altitudeReference) ? 0.0
+                         : c.altitudeReference == static_cast<double>(AltitudeReference::Barometric) ? barometricMslM(config_->altimeter, c.altitudeM)
+                                                                                                      : c.altitudeM;
         const double v = route::plannedSpeed(c.speed, c.speedReference, h);
         least = v * v / (9.80665 * std::tan(f.maxBankRad));
     }
@@ -940,7 +950,8 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
         optimise(pattern->speed, pattern->speedReference, pattern->speedOptimization, pattern->altitudeM, pattern->altitudeReference, state);
         WindEstimate wind;
         wind.update(state, 0.0);
-        route::completePattern(*pattern, state, performance_, (adapter_->features() & kFeatureHover) != 0, std::hypot(wind.northMs, wind.eastMs));
+        route::completePattern(*pattern, state, performance_, (adapter_->features() & kFeatureHover) != 0, std::hypot(wind.northMs, wind.eastMs),
+                               &config_->altimeter);
     }
     if (checked)
         if (const Reason why = catalog_->check(index, setpoint, log); why != Reason::None) return why;

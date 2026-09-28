@@ -346,14 +346,14 @@ void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon) no
     }
 }
 
-void completePattern(PatternCommand& c, const sim::VehicleState& s, const Performance& f, bool hovers, double windMs) noexcept {
+void completePattern(PatternCommand& c, const sim::VehicleState& s, const Performance& f, bool hovers, double windMs, const Altimeter* altimeter) noexcept {
     const double groundSpeed = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
     const double track = groundSpeed > 1.0 ? std::atan2(s.velocityNedMs[1], s.velocityNedMs[0]) : s.eulerRad[2];
     if (isHold(c.pattern)) c.pattern = static_cast<double>(PatternKind::Orbit);
     if (isHold(c.latitudeRad) || isHold(c.longitudeRad)) c.latitudeRad = s.latitudeRad, c.longitudeRad = s.longitudeRad;
     c.longitudeRad = geo::wrapPi(c.longitudeRad);
     if (isHold(c.altitudeReference)) c.altitudeReference = static_cast<double>(AltitudeReference::Msl);
-    if (isHold(c.altitudeM)) c.altitudeM = altitudeNow(static_cast<AltitudeReference>(static_cast<int>(c.altitudeReference)), s);
+    if (isHold(c.altitudeM)) c.altitudeM = altitudeNow(static_cast<AltitudeReference>(static_cast<int>(c.altitudeReference)), s, altimeter);
     if (hovers && isHold(c.speed)) { // a rotorcraft's own speed (a hover's none) is no speed to fly a pattern at
         c.speed = std::isfinite(f.cruiseTasMs) && f.cruiseTasMs > 0.0 ? f.cruiseTasMs : 5.0;
         c.speedReference = static_cast<double>(SpeedReference::GroundSpeed);
@@ -369,7 +369,8 @@ void completePattern(PatternCommand& c, const sim::VehicleState& s, const Perfor
     }
     c.courseRad = geo::wrapPi(c.courseRad);
     // the radius and the legs at the speed planned there (above ground: as high as the aircraft is)
-    const double h = c.altitudeReference == static_cast<double>(AltitudeReference::AboveGround) ? s.altitudeMslM : c.altitudeM;
+    const double h = c.altitudeReference == static_cast<double>(AltitudeReference::AboveGround) ? s.altitudeMslM
+                                                                                                : altitudeMslOf(c.altitudeM, static_cast<AltitudeReference>(static_cast<int>(c.altitudeReference)), s, altimeter);
     const double v = std::max(plannedSpeed(c.speed, c.speedReference, h), 0.1);
     const double gusted = v + (hovers && c.speedReference == static_cast<double>(SpeedReference::GroundSpeed) ? 0.0 : windMs);
     if (isHold(c.radiusM))

@@ -509,6 +509,20 @@ A flight command's path is checked against the ground (VAL-06; A-GRA's VIOLATION
   - C ABI 1.17: `fsim_command_terrain`, `fsim_last_command_terrain`, `fsim_world_terrain`.
   - Python: `World.terrain`, `fsim.TerrainPoint` on `fsim.Rejected` and on a `Validation`; `fsim.agra.terrain_constraint`, `fsim.agra.elevation_request_status`.
 
+### 4.20 The barometric altimeter (as FA-4 builds it)
+
+Each vehicle has a barometric altimeter (ENV-03), set to a QNH (STS-10; VI 1.2.6.5). It reports what it reads (STS-04; A-GRA's IndicatedBaroAltitude, BarometricAltitudeRate and Kollsman), and hsa and patterns fly a barometric altitude on it (HSA-07, LTR-16).
+
+- **The air** is the world's: the 1976 standard atmosphere's layers with a uniform temperature bias and the sea-level pressure its environment sets. This is JSBSim's standard atmosphere, which the flight models fly in. The platform computes it itself, and matches JSBSim's pressure to 2e-9 of it and its temperature to 1e-7 K: JSBSim keeps its layers' bases in feet and their temperatures in Rankine.
+- **The altimeter** reads the ICAO standard atmosphere's height of the static pressure above the pressure it is set to. That is how an altimeter's subscale works: set 13.25 hPa low (1000 hPa), it reads 110.9 m low at every height. It reads geopotential metres, as the standard atmosphere is laid out in them.
+- **The setting.** A QNH from 850 to 1,100 hPa is applied at once; outside it, the request fails with `out_of_range` and nothing changes. Until set, it is the standard 1013.25 hPa, and the altimeter reads the pressure altitude.
+- **A barometric altitude** in an hsa or a pattern is flown on the isobar the altimeter reads it on. As the air and the setting change, the isobar moves, and the mode follows it (15 K warm, 2,000 m on the altimeter is 102 m higher). The host checks it as the altimeter would read the ceiling. A route's barometric altitude is FA-6's (WPT-12) and is refused `not_implemented`, as its support table says.
+- **The state data** (`StateData`, beyond the vehicle's state): the reading, its rate (the ratio of the air's temperature to the standard atmosphere's at that pressure, climbing), the Kollsman in hPa, and the air's static pressure and temperature.
+- **Surfaces.**
+  - C++: `fsim/Altimeter.h` (`Air`, `Altimeter`, the air's pressure and temperature, the altimeter's reading and its isobar); `AltitudeReference::Barometric`; `World::setQnh`, `qnh`, `stateData` (`Vehicle::setQnh`, `qnh`, `stateData`); `StateData`.
+  - C ABI 1.18: `FSIM_ALTITUDE_BAROMETRIC`, `fsim_vehicle_set_qnh`, `fsim_vehicle_qnh`, `fsim_state_data`, `fsim_vehicle_state_data`.
+  - Python: `fsim.AltitudeReference.BAROMETRIC`, `Vehicle.set_qnh`, `Vehicle.qnh`, `Vehicle.state_data` (`fsim.StateData`); `fsim.agra.apply_qnh_setting`, `fsim.agra.air_data`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -699,7 +713,7 @@ Magnetic and barometric references in every mode and in the state; the QNH setti
 
 **Status:** in progress, in four steps:
 - FA-4a, the terrain: the query and the paths checked against it (ENV-01, STS-11, VAL-06; 4.19), done 2026-09-27 and measured in section 14;
-- FA-4b, the barometric altimeter: the QNH setting, the indicated altitude in the state, the barometric reference in the hsa and the patterns (ENV-03, STS-10, STS-04, HSA-07, LTR-16);
+- FA-4b, the barometric altimeter: the QNH setting, what the altimeter reads in the state data, the barometric reference in the hsa and the patterns (ENV-03, STS-10, STS-04, HSA-07, LTR-16; 4.20), done 2026-09-27 and measured in section 14;
 - FA-4c, the state data and frames: orientation acceleration, winds, reference frames (STS-02, STS-06, ENV-04);
 - FA-4d, the magnetic model: declination, the magnetic reference and heading (ENV-02, HSA-03, STS-05). It needs the World Magnetic Model's published coefficients built in, which are not on this machine.
 
@@ -1488,6 +1502,35 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The other command cases are within −1.2 % to +2.0 % (0.5 ns), on paths the check is not on.
   - World throughput is 99.2 to 100.1 % of FA-3e's. Protection costs at most 0.1 % (the gate: 97 %).
 - ctest: all 254 tests pass.
+
+**FA-4b, the barometric altimeter (ENV-03, STS-10, STS-04, HSA-07, LTR-16).**
+- **The air against the flight model's** (`test_altimeter`): in three atmospheres (the standard, 15 K warm at 1020 hPa, 25 K cold at 990 hPa), from sea level to 25 km:
+  - the platform's static pressure is within 2.1e-9 of JSBSim's and its temperature within 7.8e-8 K;
+  - the isobar of JSBSim's pressure is within 15 µm of the height it was read at.
+
+  The residue is JSBSim's own rounding: its layers' bases are kept in feet to 1e-4 ft, their temperatures in Rankine to 0.01.
+- **The altimeter against the standard atmosphere:**
+  - at 1013.25 hPa it reads the standard's layer bases from their published pressures (11, 20 and 32 km) within a centimetre;
+  - at 995, 1013.25 and 1030 hPa it reads the height between the two pressures, as the standard's troposphere gives it, within a micrometre;
+  - set to 1000 hPa, it reads 110.9 m low at every height, within 5 cm (the flight model's gas constant differs from the standard's in its sixth figure).
+- **Flown** (a C172 in air 15 K warm, at a sea-level pressure of 1020 hPa):
+  - set to 1020 hPa and holding 2,000 m on its altimeter, it reads 1,999.8 m at 2,101.9 m above sea level: the isobar is 102 m up;
+  - set to 1000 hPa, it reads 166.9 m less at once, and settles reading 2,000.3 m at 2,278.0 m;
+  - its rate matches what its reading does over a second of a climb within 10 %;
+  - a reference given alone holds the reading it had;
+  - an orbit at 2,300 m on the altimeter settles within 15 m of it.
+- **The fleet** (`test_fleet`):
+  - at the standard setting, every aircraft's altimeter reads its geopotential height, within 5 cm;
+  - set 20 hPa low, every aircraft's hsa climbs on its altimeter as high as the climb case climbs, flying the isobar it reads. The worst is the Mirage 2000, 3.3 m high and still closing; the next the Typhoon, 1.2 m; every rotorcraft within a millimetre.
+- **The setting and the refusals:**
+  - a QNH outside 850 to 1,100 hPa, or NaN, is refused `out_of_range` and nothing changes; an unknown vehicle is refused;
+  - a route's barometric waypoint is refused `not_implemented`, naming the point;
+  - in A-GRA's terms, the setting is COMPLETED, or FAILED with its reason.
+- **Digests:** identical to FA-4a's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-4a (66fc223), built in the scratch worktree: 5 rounds of `micro`, and 9 of `command` twice.
+  - The micro cases are within −1.4 % to +0.3 %; the command cases within −1.5 % to +1.4 %.
+  - World throughput is 99.5 to 100.6 % of FA-4a's. Protection costs at most 0.8 % (the gate: 97 %).
+- ctest: all 258 tests pass.
 
 ## Appendix A: the inventory
 

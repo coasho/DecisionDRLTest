@@ -129,6 +129,7 @@ from .world import (  # noqa: E402
     Source,
     SpeedOptimization,
     SpeedReference,
+    StateData,
     Support,
     SupportInfo,
     TerrainPoint,

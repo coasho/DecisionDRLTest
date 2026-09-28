@@ -483,6 +483,12 @@ for _code in range(64):
     _FLIGHT_MODES[_name] = _code
 
 NavigationSettings = collections.namedtuple("NavigationSettings", "recovery latitude_deg longitude_deg altitude_msl_m reserve_fraction")
+StateData = collections.namedtuple("StateData", "indicated_altitude_m indicated_altitude_rate_ms kollsman_hpa static_pressure_pa "
+                                   "static_temperature_k")
+StateData.__doc__ = ("What A-GRA's detailed position report carries beyond the state (docs/flight-autonomy.md, 4.20; MA_AirDataType): "
+                     "what the vehicle's barometric altimeter reads - its IndicatedBaroAltitude, the standard atmosphere's height of "
+                     "the static pressure above the QNH it is set to, and its rate - its Kollsman setting (hPa), and the air's "
+                     "static pressure and temperature where the vehicle is.")
 NavigationSettings.__doc__ = "Where the vehicle recovers to (if ``recovery``) and the fraction of its capacity it keeps for the end."
 
 CommandedState = collections.namedtuple(
@@ -611,10 +617,13 @@ class SpeedReference(enum.IntEnum):
 
 class AltitudeReference(enum.IntEnum):
     """What a mode's altitude is measured from (A-GRA's AltitudeReferenceEnum). The simulation's sea level is the
-    WGS-84 ellipsoid, so MSL and ELLIPSOID are one; ABOVE_GROUND follows the terrain under the aircraft."""
+    WGS-84 ellipsoid, so MSL and ELLIPSOID are one; ABOVE_GROUND follows the terrain under the aircraft; BAROMETRIC is
+    what the vehicle's altimeter reads, set to its QNH (Vehicle.set_qnh; docs/flight-autonomy.md, 4.20): an isobar,
+    flown as the air and the setting move it - an hsa's or a pattern's (a route's is FA-6's)."""
     MSL = 0
     ABOVE_GROUND = 1
     ELLIPSOID = 2
+    BAROMETRIC = 3
 
 
 class SpeedOptimization(enum.IntEnum):
@@ -1298,6 +1307,21 @@ class Vehicle:
     def navigation(self):
         """Its recovery point and reserve (NavigationSettings)."""
         return NavigationSettings(*self._h.navigation(self.id))
+
+    def set_qnh(self, qnh_pa):
+        """Set its barometric altimeter to ``qnh_pa`` (A-GRA's QNH setting; docs/flight-autonomy.md, 4.20): what its
+        barometric altitudes are read and flown at, from the next step. Raises fsim.Error outside 850 to 1,100 hPa
+        (nothing changes). Until set, 1013.25 hPa: it reads the pressure altitude."""
+        self._h.set_qnh(self.id, float(qnh_pa))
+
+    @property
+    def qnh(self):
+        """What its barometric altimeter is set to, Pa."""
+        return self._h.qnh(self.id)
+
+    def state_data(self):
+        """What its altimeter reads now, and the air it reads it in (fsim.StateData; A-GRA's MA_AirDataType)."""
+        return StateData(*self._h.state_data(self.id))
 
     def performance_profile(self, mode="hsa_csa"):
         """A flight mode's performance profile at the vehicle's condition now (fsim.PerformanceProfile; docs/flight-autonomy.md,

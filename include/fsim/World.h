@@ -197,6 +197,14 @@ public:
     /// Reason::OutOfRange for a point off the Earth or a reserve outside [0, 1).
     control::Reason setNavigation(const control::NavigationSettings& settings);
     control::NavigationSettings navigation() const;
+    /// The QNH its barometric altimeter is set to (A-GRA's QNH setting; docs/flight-autonomy.md,
+    /// 4.20), Pa: what its barometric altitudes are read and flown at. Reason::None applied,
+    /// OutOfRange outside 850 to 1,100 hPa (nothing changes). Until set, 1013.25 hPa.
+    control::Reason setQnh(double qnhPa);
+    double qnh() const;
+    /// What its altimeter reads now - its indicated altitude and rate, its Kollsman - and the
+    /// air it reads it in (A-GRA's MA_AirDataType, beyond the state's airspeeds).
+    control::StateData stateData() const;
     /// A flight mode's performance profile (docs/flight-autonomy.md, 4.15; A-GRA's
     /// MA_FlightControlModesPerformanceProfileType) at the vehicle's condition now: HSA/CSA,
     /// waypoint or curve following, into `out` (its vectors reused). Reason::InvalidParameter

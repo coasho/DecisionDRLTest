@@ -1470,6 +1470,39 @@ static PyObject* world_navigation(PyObject* o, PyObject* const* args, Py_ssize_t
     return Py_BuildValue("(Ndddd)", PyBool_FromLong(s.recovery), s.latitude_deg, s.longitude_deg, s.altitude_msl_m, s.reserve_fraction);
 }
 
+/* set_qnh(id, qnh_pa): what its barometric altimeter is set to (ABI 1.18); an error outside 850 to 1,100 hPa */
+static PyObject* world_set_qnh(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    if (!check_args(n, 2, 2, "set_qnh") || !as_u32(args[0], &id)) return NULL;
+    const double qnh = PyFloat_AsDouble(args[1]);
+    if (PyErr_Occurred()) return NULL;
+    if (fsim_vehicle_set_qnh(self->world, id, qnh) != FSIM_OK) return fail();
+    Py_RETURN_NONE;
+}
+
+/* qnh(id) -> its altimeter's setting, Pa (ABI 1.18) */
+static PyObject* world_qnh(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    double qnh = 0.0;
+    if (!check_args(n, 1, 1, "qnh") || !as_u32(args[0], &id)) return NULL;
+    if (fsim_vehicle_qnh(self->world, id, &qnh) != FSIM_OK) return fail();
+    return PyFloat_FromDouble(qnh);
+}
+
+/* state_data(id) -> (indicated_altitude_m, indicated_altitude_rate_ms, kollsman_hpa, static_pressure_pa, static_temperature_k)
+ * (ABI 1.18) */
+static PyObject* world_state_data(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    fsim_state_data d;
+    if (!check_args(n, 1, 1, "state_data") || !as_u32(args[0], &id)) return NULL;
+    fsim_state_data_init(&d);
+    if (fsim_vehicle_state_data(self->world, id, &d) != FSIM_OK) return fail();
+    return Py_BuildValue("(ddddd)", d.indicated_altitude_m, d.indicated_altitude_rate_ms, d.kollsman_hpa, d.static_pressure_pa, d.static_temperature_k);
+}
+
 /* activity_setpoint(activity) -> (kind, code, fields, behavior, waypoints, segments), or None for one not live:
  * `behavior` (id, target, {name: value}, [(latitude_rad, longitude_rad, altitude_msl_m, airspeed_ms, capture_radius_m)])
  * or None, `waypoints` [waypoint row] or None, `segments` [18 floats: north, east, down] or None */
@@ -2491,6 +2524,9 @@ static PyMethodDef world_methods[] = {
     FAST("navigation_report", world_navigation_report, "navigation_report(id) -> A-GRA's navigation report, 14 items"),
     FAST("set_navigation", world_set_navigation, "set_navigation(id, recovery, latitude_deg, longitude_deg, altitude_msl_m, reserve_fraction)"),
     FAST("navigation", world_navigation, "navigation(id) -> (recovery, latitude_deg, longitude_deg, altitude_msl_m, reserve_fraction)"),
+    FAST("set_qnh", world_set_qnh, "set_qnh(id, qnh_pa): what its barometric altimeter is set to"),
+    FAST("qnh", world_qnh, "qnh(id) -> its altimeter's setting, Pa"),
+    FAST("state_data", world_state_data, "state_data(id) -> (indicated_altitude_m, indicated_altitude_rate_ms, kollsman_hpa, static_pressure_pa, static_temperature_k)"),
     FAST("performance_profile", world_performance_profile, "performance_profile(id, mode) -> (reason, profile or None)"),
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
     FAST("capabilities", world_capabilities, "capabilities(id) -> [capability]"),

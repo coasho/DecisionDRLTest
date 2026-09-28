@@ -7,6 +7,7 @@
 // reads and clears it after each world step. Both are per vehicle, fixed in
 // size and held by the vehicle's ControlStack.
 
+#include "fsim/Altimeter.h"
 #include "fsim/Capability.h"
 #include "fsim/Control.h"
 #include "fsim/VehicleProfile.h"
@@ -150,6 +151,9 @@ struct RuntimeConfig {
     /// Its performance tables (ControlContext::tables): the profile's, set
     /// when the host binds; null without them.
     const TablesSection* tables = nullptr;
+    /// Its barometric altimeter (ControlContext::altimeter): the world's air
+    /// and the QNH it is set to, written by the session between steps.
+    Altimeter altimeter{};
 };
 
 enum AxisFlag : std::uint16_t {

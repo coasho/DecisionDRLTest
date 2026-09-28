@@ -9,6 +9,7 @@
 #include "mode_flights.h"
 
 #include "control/Features.h"
+#include "fsim/Altimeter.h"
 #include "fsim/BuiltinControllers.h"
 #include "fsim/GuidanceModes.h"
 #include "fsim/VehicleProfile.h"
@@ -697,6 +698,29 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
                 CHECK(std::abs(flown - best) < std::max(0.05 * best, 0.5)); // (the Crazyflie's best endurance: its hover)
             });
     }
+    // a barometric altitude (ADR-29 FA-4b, HSA-07): at the standard setting the altimeter reads the geopotential height;
+    // set 20 hPa low, it reads 167 m less, and an hsa as high again as the climb case climbs on it, to its isobar
+    std::map<std::uint32_t, double> onAltimeter;
+    run("fsim.guidance.hsa", 0.0,
+        [&](const Plane& p) {
+            const double h = w.vehicleState(p.id)->altitudeMslM;
+            CHECK(std::abs(w.stateData(p.id).indicatedAltitudeM - 6356766.0 * h / (6356766.0 + h)) < 0.05);
+            REQUIRE(w.setQnh(p.id, 99325.0) == Reason::None);
+            HsaCommand hsa;
+            hsa.headingRad = p.start.eulerRad[2], hsa.altitudeReference = static_cast<double>(AltitudeReference::Barometric);
+            hsa.altitudeM = onAltimeter[p.id] = w.stateData(p.id).indicatedAltitudeM + climb(p);
+            return w.submit(p.id, hsa).accepted();
+        },
+        secs(200.0, 60.0), none,
+        [&](const Plane& p, const Lows&) {
+            const double reads = w.stateData(p.id).indicatedAltitudeM;
+            const Altimeter altimeter{Air{}, 99325.0};
+            INFO("it reads " << reads << " m, asked " << onAltimeter[p.id]);
+            // (the worst: the Mirage 2000 3.3 m high, still closing on it, the Typhoon 1.2 m; a rotorcraft within a millimetre)
+            CHECK(std::abs(reads - onAltimeter[p.id]) < (p.rotor ? 0.5 : 20.0));
+            CHECK(std::abs(w.vehicleState(p.id)->altitudeMslM - barometricMslM(altimeter, reads)) < 1e-6);
+            REQUIRE(w.setQnh(p.id, Altimeter::kStandardPa) == Reason::None); // (as it was, for the cases after)
+        });
     // three sides of a square, turning right: a wing's legs four of its full-bank turns long (at least 2 km), a rotorcraft's its scale
     auto leg = [&](const Plane& p) { return p.rotor ? p.scale() : std::max(2000.0, 4.0 * fullBankRadius(p)); };
     auto square = [&](const Plane& p) {

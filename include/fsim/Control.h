@@ -128,8 +128,11 @@ struct PositionCommand {
 enum class SpeedReference : std::uint8_t { TrueAirspeed = 0, CalibratedAirspeed = 1, GroundSpeed = 2, Mach = 3, Count };
 /// What a mode's altitude is measured from (A-GRA's AltitudeReferenceEnum). The
 /// simulation's sea level is the WGS-84 ellipsoid (JSBSim's), so Msl and
-/// Ellipsoid are one; AboveGround follows the terrain under the aircraft.
-enum class AltitudeReference : std::uint8_t { Msl = 0, AboveGround = 1, Ellipsoid = 2, Count };
+/// Ellipsoid are one; AboveGround follows the terrain under the aircraft;
+/// Barometric is what the vehicle's altimeter reads, set to its QNH
+/// (fsim/Altimeter.h; docs/flight-autonomy.md, 4.20): an isobar, flown as the
+/// air and the setting move it. A route's is FA-6's.
+enum class AltitudeReference : std::uint8_t { Msl = 0, AboveGround = 1, Ellipsoid = 2, Barometric = 3, Count };
 /// The speed a mode varies by itself (A-GRA's SpeedOptimizationEnum;
 /// docs/flight-autonomy.md, 4.17): the performance tables' best-range speed
 /// (the most distance for the fuel) or best-endurance speed (the most time),
@@ -377,6 +380,7 @@ inline const char* modeBehavior(const Command& c) noexcept {
 /// Read-only view of the world for behaviours that look at other vehicles.
 /// Implemented by the session; states are the previous step's snapshots.
 struct TablesSection; // fsim/VehicleProfile.h
+struct Altimeter;     // fsim/Altimeter.h
 
 class WorldView {
 public:
@@ -414,6 +418,10 @@ struct ControlContext {
     /// Its performance tables (the profile's; docs/flight-autonomy.md, 4.13),
     /// for a mode that flies their best speeds: null without them.
     const TablesSection* tables = nullptr;
+    /// Its barometric altimeter (docs/flight-autonomy.md, 4.20): the world's air
+    /// and the QNH it is set to, for a mode flying a barometric altitude. Null
+    /// outside a vehicle's runtime: the standard atmosphere, at 1013.25 hPa.
+    const Altimeter* altimeter = nullptr;
 };
 
 /// One level of the cascade: accepts a command at `level()` and returns a
@@ -564,6 +572,19 @@ struct NavigationReport {
     double returnConsumption = kNone; ///< it would burn back (kg/s or W)
     Contingency contingency = Contingency::Normal;
     bool starved = false;           ///< its engines have nothing left: a fuel burner's tanks empty, or the battery spent
+};
+
+/// What A-GRA's detailed position report carries beyond the vehicle's state
+/// (VehicleState; docs/flight-autonomy.md, 4.20; MA_PositionReportDetailed's
+/// AirData, VI 1.2.6.8): what its barometric altimeter reads, set to its QNH,
+/// and the air it reads it in.
+struct StateData {
+    static constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    double indicatedAltitudeM = kNone;      ///< A-GRA's IndicatedBaroAltitude: what the altimeter reads (fsim/Altimeter.h)
+    double indicatedAltitudeRateMs = kNone; ///< A-GRA's BarometricAltitudeRate: how fast its reading changes
+    double kollsmanHpa = kNone;             ///< A-GRA's Kollsman: the QNH the altimeter is set to, hPa
+    double staticPressurePa = kNone;        ///< the air's pressure where the vehicle is
+    double staticTemperatureK = kNone;      ///< and its temperature
 };
 
 FSIM_API const char* energyName(Energy e) noexcept;           ///< "unknown", "fuel", "battery"

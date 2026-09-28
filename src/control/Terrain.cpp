@@ -5,6 +5,7 @@
 
 #include "control/Route.h"
 #include "core/Geodesy.h"
+#include "fsim/Altimeter.h"
 #include "fsim/GuidanceModes.h"
 
 #include <algorithm>
@@ -24,6 +25,7 @@ constexpr double kMaxSamples = 100000.0;
 constexpr double kAheadS = 60.0;
 
 bool aboveGround(double reference) noexcept { return reference == static_cast<double>(AltitudeReference::AboveGround); }
+bool barometric(double reference) noexcept { return reference == static_cast<double>(AltitudeReference::Barometric); }
 
 /// A leg's point `alongM` from its start, on past its end too (Route.h's Leg: a great circle, or a rhumb line).
 void onLegAt(const route::Leg& leg, double alongM, double& lat, double& lon) noexcept {
@@ -200,13 +202,14 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         route::Pattern p;
         route::planPattern(p, *c, state.latitudeRad, state.longitudeRad);
         const bool above = aboveGround(c->altitudeReference);
-        const double speed = route::plannedSpeed(c->speed, c->speedReference, msl(c->altitudeM, above, c->latitudeRad, c->longitudeRad));
-        auto level = [&](double) { return c->altitudeM; };
+        const double altitude = barometric(c->altitudeReference) ? barometricMslM(config_->altimeter, c->altitudeM) : c->altitudeM; // (its isobar)
+        const double speed = route::plannedSpeed(c->speed, c->speedReference, msl(altitude, above, c->latitudeRad, c->longitudeRad));
+        auto level = [&](double) { return altitude; };
         spacing(p.entry.lengthM + p.lapM());
         auto line = [&](const route::Line& l) {
             return walk.piece(l.lengthM, speed, above, -1, [&](double x, double& lat, double& lon, double& h) {
                 geo::offsetLatLon(p.lat0, p.lon0, l.northM + x * std::cos(l.courseRad), l.eastM + x * std::sin(l.courseRad), lat, lon);
-                h = c->altitudeM;
+                h = altitude;
             });
         };
         if (p.entry.lengthM > 0.0 && line(p.entry)) return walk.hit;
@@ -263,7 +266,9 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
 
     if (const auto* c = std::get_if<HsaCommand>(&setpoint)) { // no end: its line ahead, level at its altitude, for a minute
         const bool above = aboveGround(c->altitudeReference);
-        const double altitude = isHold(c->altitudeM) ? (above ? state.altitudeAglM : state.altitudeMslM) : c->altitudeM;
+        const double altitude = isHold(c->altitudeM)               ? (above ? state.altitudeAglM : state.altitudeMslM)
+                                : barometric(c->altitudeReference) ? barometricMslM(config_->altimeter, c->altitudeM) // (its isobar)
+                                                                   : c->altitudeM;
         const double course = !isHold(c->courseRad)    ? c->courseRad
                               : !isHold(c->headingRad) ? c->headingRad
                                                        : std::atan2(state.velocityNedMs[1], state.velocityNedMs[0]);

@@ -49,6 +49,7 @@ add_executable(fsim_tests
     test_world.cpp
     test_terrain.cpp
     test_terrain_check.cpp
+    test_altimeter.cpp
     test_scenario.cpp
     test_comm.cpp)
 

@@ -195,7 +195,8 @@ void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon) no
 /// way to its fix), the radius its speed and `windMs` and 80 % of its bank
 /// give (a hold's: rate one, at most 25 degrees of bank), legs of twice the
 /// radius (a hold's: a minute's flight, 90 s above 14,000 ft). The angles wrapped.
-void completePattern(PatternCommand& c, const sim::VehicleState& state, const Performance& performance, bool hovers, double windMs) noexcept;
+void completePattern(PatternCommand& c, const sim::VehicleState& state, const Performance& performance, bool hovers, double windMs,
+                     const Altimeter* altimeter = nullptr) noexcept;
 
 // --- Curves (4.7) -----------------------------------------------------------------
 

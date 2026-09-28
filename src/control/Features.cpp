@@ -79,7 +79,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.hsa/altitude/msl", "fsim.guidance.hsa", S, 0, 0, ""},                   // HSA-06
     {"fsim.guidance.hsa/altitude/agl", "fsim.guidance.hsa", S, 0, 0, ""},
     {"fsim.guidance.hsa/altitude/hae", "fsim.guidance.hsa", S, 0, 0, ""},
-    {"fsim.guidance.hsa/altitude/barometric", "fsim.guidance.hsa", N, 4, 0, ""},            // HSA-07
+    {"fsim.guidance.hsa/altitude/barometric", "fsim.guidance.hsa", S, 0, 0, ""},            // HSA-07 (FA-4b)
 
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
@@ -170,7 +170,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.pattern/altitude/msl", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-16
     {"fsim.guidance.pattern/altitude/agl", "fsim.guidance.pattern", S, 0, 0, ""},
     {"fsim.guidance.pattern/altitude/hae", "fsim.guidance.pattern", S, 0, 0, ""},
-    {"fsim.guidance.pattern/altitude/barometric", "fsim.guidance.pattern", N, 4, 0, ""},
+    {"fsim.guidance.pattern/altitude/barometric", "fsim.guidance.pattern", S, 0, 0, ""},     // LTR-16 (FA-4b)
     {"fsim.guidance.pattern/speed/long_range_cruise", "fsim.guidance.pattern", S, 3, 0, "", true}, // LTR-17
     {"fsim.guidance.pattern/speed/max_endurance", "fsim.guidance.pattern", S, 3, 0, "", true},
     {"fsim.guidance.pattern/relative_points", "fsim.guidance.pattern", N, 5, 0, ""},         // LTR-18
@@ -234,7 +234,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.plan/fa_plans", "", N, 7, 0, ""},                     // RPL-03
     {"fsim.plan/validate", "", N, 7, 0, ""},                     // RPL-06, RPL-07, ENV-10
     {"fsim.plan/airfields", "", N, 7, 0, ""},                    // RPL-04, ENV-05
-    {"fsim.setting/qnh", "", N, 4, 0, ""},                       // STS-10, ENV-03
+    {"fsim.setting/qnh", "", S, 0, 0, ""},                       // STS-10, ENV-03: the altimeter's setting (FA-4b)
     {"fsim.setting/lights", "", N, 14, 0, ""},                   // STS-17
     {"fsim.setting/antennas", "", N, 14, 0, ""},
     {"fsim.setting/transponder", "", N, 14, 0, ""},

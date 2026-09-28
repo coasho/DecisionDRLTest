@@ -343,6 +343,7 @@ FSIM_ALWAYS_INLINE void ControlStack::cascade(const ControlContext& ctx, std::si
         guided.envelope = &config_->protection.clean;
         guided.path = config_->path.get();
         guided.tables = config_->tables;
+        guided.altimeter = &config_->altimeter;
         if (started_[s] != slot.generation) {
             behavior->begin(guided, *current);
             started_[s] = slot.generation;
@@ -523,6 +524,7 @@ void ControlStack::flyMerged(const ControlContext& ctx, sim::ControlInputs& out)
         guided.envelope = &config_->protection.clean;
         guided.path = config_->path.get();
         guided.tables = config_->tables;
+        guided.altimeter = &config_->altimeter;
         if (started_[s] != slot.generation) {
             behavior->begin(guided, slot.command);
             started_[s] = slot.generation;

@@ -209,6 +209,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     e->host.bind(id, e->stack, *e->catalog, adapter, *e->profile, options_.dt * e->controlDivider);
     e->host.setSupport(e->support.get());
     e->host.setSessionView(&answers_); // (its endurance and terrain checks: docs/flight-autonomy.md, 4.18, 4.19)
+    e->host.setAltimeter(control::Altimeter{air(), control::Altimeter::kStandardPa}); // (until its QNH is set: 4.20)
     e->flapsPosition = pool_->vehicle(slot).property("fcs/flap-pos-norm");
     for (auto& factory : worldEffects_) e->effects.push_back(factory());
     sim::FlightModel& model = pool_->vehicle(slot);
@@ -827,6 +828,12 @@ void World::setEnvironment(const sim::EnvironmentState& environment) {
     environment_ = environment;
     environment_.revision = appliedEnvironment_ == ~0ull ? 1 : appliedEnvironment_ + 1;
     if (publisher_) publisher_->setEnvironment(environment_);
+    for (auto& e : entries_) // (the air every altimeter reads, and a barometric altitude is flown in, from the next step: 4.20)
+        if (e) {
+            control::Altimeter a = e->host.altimeter();
+            a.air = air();
+            e->host.setAltimeter(a);
+        }
 }
 
 void World::applyEnvironment(sim::FlightModel& model) const {

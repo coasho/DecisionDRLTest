@@ -3,6 +3,7 @@
 #include "control/CapabilityHost.h"
 
 #include "control/Route.h"
+#include "fsim/Altimeter.h"
 #include "fsim/GuidanceModes.h"
 
 #include <algorithm>
@@ -13,10 +14,11 @@ namespace fsim::control {
 
 namespace {
 
-/// An altitude in its reference as the height above sea level, the ground's under the aircraft now.
-double aboveSea(double altitudeM, double reference, const sim::VehicleState& s) noexcept {
+/// An altitude in its reference as the height above sea level: the ground's under the aircraft now, the isobar
+/// its altimeter reads it on.
+double aboveSea(double altitudeM, double reference, const sim::VehicleState& s, const Altimeter& altimeter) noexcept {
     if (isHold(altitudeM)) return s.altitudeMslM;
-    return reference == static_cast<double>(AltitudeReference::AboveGround) ? altitudeM + (s.altitudeMslM - s.altitudeAglM) : altitudeM;
+    return altitudeMslOf(altitudeM, static_cast<AltitudeReference>(static_cast<int>(reference)), s, &altimeter);
 }
 
 } // namespace
@@ -63,14 +65,14 @@ CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, con
         const route::Plan& p = *routePlan_;
         for (std::uint32_t i = p.start; i < p.count; ++i) {
             const Waypoint& w = p.points[i];
-            const double h = aboveSea(w.altitudeM, w.altitudeReference, state);
+            const double h = aboveSea(w.altitudeM, w.altitudeReference, state, config_->altimeter);
             const double tas = route::plannedSpeed(w.speed, w.speedReference, h);
             const route::Turn& t = p.turn(i, true);
             const double m = p.pieceM(i, true) + (i + 1 < p.count ? t.radiusM * std::abs(t.angleRad) : 0.0);
             fly(tas > 0.5 ? m / tas : kUnknown, tas, h);
         }
     } else if (pattern) { // its duration, at its speed
-        const double h = aboveSea(pattern->altitudeM, pattern->altitudeReference, state);
+        const double h = aboveSea(pattern->altitudeM, pattern->altitudeReference, state, config_->altimeter);
         fly(pattern->durationS, route::plannedSpeed(pattern->speed, pattern->speedReference, h), h);
     } else { // to its end: in its duration, else at the speed it flies within its range
         const double h = isHold(curve->altitudeM) ? state.altitudeMslM : curve->altitudeM;

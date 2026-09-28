@@ -33,10 +33,13 @@ FSIM_API double trueAirspeedOf(double speed, SpeedReference reference, const sim
 /// The aircraft's own speed now in `reference`.
 FSIM_API double speedNow(SpeedReference reference, const sim::VehicleState& s) noexcept;
 /// An altitude in `reference` as the height above sea level to fly now: above
-/// the ground, over the terrain under the aircraft.
-FSIM_API double altitudeMslOf(double altitudeM, AltitudeReference reference, const sim::VehicleState& s) noexcept;
-/// The aircraft's own altitude now in `reference`.
-FSIM_API double altitudeNow(AltitudeReference reference, const sim::VehicleState& s) noexcept;
+/// the ground, over the terrain under the aircraft; barometric, on the isobar
+/// the altimeter reads it on (docs/flight-autonomy.md, 4.20; null: the
+/// standard atmosphere's, at 1013.25 hPa).
+FSIM_API double altitudeMslOf(double altitudeM, AltitudeReference reference, const sim::VehicleState& s,
+                              const Altimeter* altimeter = nullptr) noexcept;
+/// The aircraft's own altitude now in `reference` (barometric: what its altimeter reads).
+FSIM_API double altitudeNow(AltitudeReference reference, const sim::VehicleState& s, const Altimeter* altimeter = nullptr) noexcept;
 /// A speed optimisation's true airspeed (docs/flight-autonomy.md, 4.17): the
 /// performance tables' best-range or best-endurance speed at an altitude and
 /// at the weight `fuelKg` on board makes - the tables' weight with the tanks
