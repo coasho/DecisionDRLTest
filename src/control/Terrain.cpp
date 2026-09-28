@@ -246,13 +246,13 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
                                std::uint32_t j = 0;
                                double t = 0.0;
                                k.find(k.startM[i] + x, j, t);
-                               const route::CurvePoint cp = route::evaluate(k.segments[j], t);
+                               const route::CurvePoint cp = k.point(j, t);
                                geo::offsetLatLon(lat0, lon0, cp.p[0], cp.p[1], lat, lon);
                                h = alt0 - cp.p[2];
                            },
                            route::Curve::kSamples))
                 return walk.hit;
-        const route::CurvePoint end = route::evaluate(k.segments[k.count - 1], 1.0);
+        const route::CurvePoint end = k.point(k.count - 1, 1.0);
         const double altitude = alt0 - end.p[2];
         const auto index = static_cast<std::int16_t>(k.count - 1);
         if (!isHold(c->end) && c->end == static_cast<double>(EndBehavior::Loiter)) { // a wing orbits its end; a rotorcraft stops over it

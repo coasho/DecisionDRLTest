@@ -253,6 +253,7 @@ struct CurveCommand {                  // fsim.guidance.curve; the segments go b
   - the distance to go, and the time to go (a duration's own);
   - the cross-track;
   - the course, altitude and speed it commands: a wing's airspeed within a range, else a ground speed.
+- **As A-GRA's schema gives them** (ADR-29, [flight-autonomy.md](flight-autonomy.md) 4.26): segments may be `NurbsSegment`s, clamped rational B-splines of 4 to 10 weighted control points and 4 to 14 knots, with a curvature and indices checked against them. A Bezier segment is one, flown as before.
 
 ### 4.8 The path follower
 

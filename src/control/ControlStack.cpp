@@ -147,7 +147,7 @@ void ControlStack::command(const CurveCommand& curve, Span<const BezierSegment> 
     if (!config_->path) config_->path = std::make_unique<PathStore>();
     PathStore& path = *config_->path;
     path.segmentCount = static_cast<std::uint32_t>(std::min(segments.size(), PathStore::kSegments));
-    std::copy_n(segments.data(), path.segmentCount, path.segments);
+    for (std::uint32_t i = 0; i < path.segmentCount; ++i) path.segments[i] = NurbsSegment::of(segments[i]);
     ++path.curve, ++path.revision;
     command(Command(curve));
 }

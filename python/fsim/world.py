@@ -787,6 +787,59 @@ BezierSegment.__doc__ = ("One segment of a curve (A-GRA's): a quintic Bezier by 
                          "[0,0,0,0,0,0,1,1,1,1,1,1]. Each segment starts where the one before ends (within a metre).")
 
 
+NurbsSegment = collections.namedtuple("NurbsSegment", "north east down knots weights curvature first_index last_index",
+                                      defaults=(None, HOLD, HOLD, HOLD))
+NurbsSegment.__doc__ = ("One segment of a curve as A-GRA's schema gives it (MA_NURBS_PointType; docs/flight-autonomy.md, "
+                        "4.26): a clamped rational B-spline - its 4 to 10 control points ``north``, ``east`` and ``down`` in "
+                        "metres from the curve's reference, each with its ``weights`` (None: all 1), and its 4 to 14 ``knots`` "
+                        "(its degree: knots - points - 1), from 0 and never decreasing, the first and the last each as many "
+                        "times as the degree and once more. ``curvature`` (1/m; HOLD: not said) is the most it turns, checked "
+                        "against it; ``first_index`` and ``last_index`` (HOLD: not said) its first and last control points, "
+                        "0 and its last. A BezierSegment is one: six points, weights 1, knots [0]*6 + [1]*6.")
+
+
+def _nurbs_of(s):
+    """A segment (fsim.NurbsSegment, dicts of its fields, or an fsim.BezierSegment) as fsim.NurbsSegment."""
+    if isinstance(s, dict):
+        s = NurbsSegment(**s) if "knots" in s else BezierSegment(**s)
+    if isinstance(s, NurbsSegment):
+        return s
+    b = s if isinstance(s, BezierSegment) else BezierSegment(*s)
+    return NurbsSegment(list(b.north), list(b.east), list(b.down), [0.0] * 6 + [1.0] * 6)
+
+
+def _is_nurbs(segments):
+    """Whether any of the segments is given as A-GRA's schema gives it (fsim.NurbsSegment, or a dict with knots)."""
+    return any(isinstance(s, NurbsSegment) or (isinstance(s, dict) and "knots" in s) for s in segments)
+
+
+def _nurbs(segments):
+    """Segments as the native rows of 59 numbers: points, knots, north[10], east[10], down[10], weight[10], knot[14],
+    curvature, first_index, last_index."""
+    rows = []
+    for s in segments:
+        s = _nurbs_of(s)
+        points, knots = len(s.north), len(s.knots)
+        weights = [1.0] * points if s.weights is None else list(s.weights)
+        if len(s.east) != points or len(s.down) != points or len(weights) != points:
+            raise ValueError("a segment's north, east, down and weights are one for each control point")
+        if points > 10 or knots > 14:
+            raise ValueError("a segment has at most 10 control points and 14 knots")
+
+        def pad(v, n, fill=0.0):
+            return [float(x) for x in v] + [fill] * (n - len(v))
+        rows.append(tuple([float(points), float(knots)] + pad(s.north, 10) + pad(s.east, 10) + pad(s.down, 10) + pad(weights, 10, 1.0) +
+                          pad(s.knots, 14) + [float(s.curvature), float(s.first_index), float(s.last_index)]))
+    return rows
+
+
+def _nurbs_segment(row):
+    """A native row of 59 numbers as fsim.NurbsSegment."""
+    p, k = int(row[0]), int(row[1])
+    return NurbsSegment(list(row[2:2 + p]), list(row[12:12 + p]), list(row[22:22 + p]), list(row[42:42 + k]), list(row[32:32 + p]), row[56],
+                        row[57], row[58])
+
+
 def _segments(segments):
     """Segments (fsim.BezierSegment, dicts of its fields, or (north, east, down) triples) as the native rows."""
     rows = []
@@ -897,12 +950,14 @@ class Activity:
         return bool(_checked(h.activity_update_route(self.id, _row("route", (), options), rows, int(self.source), self.controller), h)[4])
 
     def update_curve(self, segments=None, **options):
-        """UPDATE of a curve: new ``segments`` (fsim.BezierSegment; None: those it has) and the options given (the
+        """UPDATE of a curve: new ``segments`` (fsim.BezierSegment or fsim.NurbsSegment; None: those it has) and the options given (the
         others kept) - with ``append=1`` the segments go after its end, from the same reference; else they are a new
         curve, flown afresh. Returns True if a value was clamped; raises fsim.Rejected (``index`` the segment at
         fault; ``section`` where a segment is too tight)."""
-        rows = [] if segments is None else _segments(segments)
         h = self.world._h
+        if segments is not None and _is_nurbs(segments):  # (as A-GRA's schema gives them)
+            return bool(_checked(h.activity_update_nurbs(self.id, _row("curve", (), options), _nurbs(segments), int(self.source), self.controller), h)[4])
+        rows = [] if segments is None else _segments(segments)
         return bool(_checked(h.activity_update_curve(self.id, _row("curve", (), options), rows, int(self.source), self.controller), h)[4])
 
     def append(self, segments, **options):
@@ -1039,6 +1094,8 @@ class BatchCommand:
                      "end": k.pop("end", EndBehavior.CONTINUE), "start": k.pop("start", 0)}
             return (kind, 0, _row("route", (), route), None, _waypoints(waypoints), None, options), ("route", source, validate, controller)
         segments = args.pop(0) if args else k.pop("segments")
+        if _is_nurbs(segments):  # (as A-GRA's schema gives them: its own kind, ABI 1.24)
+            return (6, 0, _row("curve", (), k), None, None, _nurbs(segments), options), ("curve", source, validate, controller)
         return (kind, 0, _row("curve", (), k), None, None, _segments(segments), options), ("curve", source, validate, controller)
 
 
@@ -1061,6 +1118,8 @@ def _setpoint(t):
         route = dict(zip(MODE_FIELDS["route"], fields))
         return BatchCommand("submit_route", [Waypoint(*w) for w in waypoints], projection=route["projection"], repeat=route["repeat"] == 1.0,
                             end=route["end"], start=route["start"])
+    if kind == 6:  # a curve's segments as A-GRA's schema gives them
+        return BatchCommand("submit_curve", [_nurbs_segment(s) for s in segments], **dict(zip(MODE_FIELDS["curve"], fields)))
     return BatchCommand("submit_curve", [BezierSegment(s[0:6], s[6:12], s[12:18]) for s in segments], **dict(zip(MODE_FIELDS["curve"], fields)))
 
 
@@ -1281,16 +1340,18 @@ class Vehicle:
                      override_rejection=False, controller=0, **fields):
         """NEW for fsim.guidance.curve, A-GRA's curve following (docs/vehicle-interface.md, 4.7): fly ``segments``
         (fsim.BezierSegment, dicts of its fields, or (north, east, down) triples; 1 to 10), quintic Beziers in metres
-        from ``latitude_rad``, ``longitude_rad``, ``altitude_m`` (left out: the aircraft now). Within the ground speeds
+        from ``latitude_rad``, ``longitude_rad``, ``altitude_m`` (left out: the aircraft now) - or as A-GRA's schema gives
+        them, clamped rational B-splines (fsim.NurbsSegment; docs/flight-autonomy.md, 4.26). Within the ground speeds
         ``speed_min_ms`` to ``speed_max_ms`` (a wing holds its airspeed within them, a rotorcraft flies its ground
         speed), or so as to take ``duration_s``; left out, as it flies now. After its end, ``end``
         (fsim.EndBehavior: "continue", "loiter"). An Activity that completes at its end, whose progress names the
         segment flown; ``append`` adds segments while it flies, ``update_curve`` gives it a new curve or options.
         fsim.Rejected if refused: ``index`` names the segment, ``section`` where it is too tight, ``findings``
         every segment at fault. The command envelope as submit's."""
-        r = self._h.submit_curve(self.id, _row("curve", (), fields), _segments(segments), int(source), None, int(range), int(min_version),
-                                 _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection,
-                                           controller))
+        submit = self._h.submit_nurbs if _is_nurbs(segments) else self._h.submit_curve
+        rows = _nurbs(segments) if _is_nurbs(segments) else _segments(segments)
+        r = submit(self.id, _row("curve", (), fields), rows, int(source), None, int(range), int(min_version),
+                   _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection, controller))
         return self._answer(r, "curve", source, validate_only, controller)
 
     def submit_support(self, kind, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),

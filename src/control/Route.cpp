@@ -770,7 +770,10 @@ int hoverFault(const PatternCommand& c, const PatternShape& shape) noexcept {
     return -1;
 }
 
-CurvePoint evaluate(const BezierSegment& s, double t) noexcept {
+namespace {
+
+/// A quintic Bezier's point by Bernstein's basis: its six control points on each axis.
+inline CurvePoint bernstein(const double* north, const double* east, const double* down, double t) noexcept {
     // Bernstein's basis of degree 5, and of 4 and 3 for the derivatives
     const double u = 1.0 - t;
     const double u2 = u * u, t2 = t * t;
@@ -778,7 +781,7 @@ CurvePoint evaluate(const BezierSegment& s, double t) noexcept {
     const double b4[5] = {u2 * u2, 4.0 * u2 * u * t, 6.0 * u2 * t2, 4.0 * u * t2 * t, t2 * t2};
     const double b3[4] = {u2 * u, 3.0 * u2 * t, 3.0 * u * t2, t2 * t};
     CurvePoint c;
-    const double* axes[3] = {s.north, s.east, s.down};
+    const double* axes[3] = {north, east, down};
     for (int a = 0; a < 3; ++a) {
         const double* q = axes[a];
         for (int i = 0; i < 6; ++i) c.p[a] += b5[i] * q[i];
@@ -786,6 +789,17 @@ CurvePoint evaluate(const BezierSegment& s, double t) noexcept {
         for (int i = 0; i < 4; ++i) c.d2[a] += 20.0 * b3[i] * (q[i + 2] - 2.0 * q[i + 1] + q[i]);
     }
     return c;
+}
+
+} // namespace
+
+CurvePoint evaluate(const BezierSegment& s, double t) noexcept { return bernstein(s.north, s.east, s.down, t); }
+
+CurvePoint evaluate(const NurbsSegment& s, double t) noexcept { return s.bezier() ? bernstein(s.north, s.east, s.down, t) : rational(s, t); }
+
+CurvePoint Curve::point(std::uint32_t i, double t) const noexcept {
+    const NurbsSegment& s = segments[i];
+    return bezier[i] ? bernstein(s.north, s.east, s.down, t) : rational(s, t);
 }
 
 double CurvePoint::courseRad() const noexcept { return std::atan2(d1[1], d1[0]); }
@@ -820,10 +834,11 @@ void Curve::find(double s, std::uint32_t& i, double& t) const noexcept {
 void Curve::measure(std::uint32_t from) noexcept {
     if (from == 0) startM[0] = 0.0;
     for (std::uint32_t i = from; i < count; ++i) {
-        CurvePoint last = evaluate(segments[i], 0.0);
+        bezier[i] = segments[i].bezier();
+        CurvePoint last = point(i, 0.0);
         table[i][0] = 0.0;
         for (int k = 1; k <= kSamples; ++k) {
-            const CurvePoint c = evaluate(segments[i], static_cast<double>(k) / kSamples);
+            const CurvePoint c = point(i, static_cast<double>(k) / kSamples);
             table[i][k] = table[i][k - 1] + std::hypot(c.p[0] - last.p[0], c.p[1] - last.p[1]);
             last = c;
         }
@@ -836,7 +851,7 @@ double curvatureAhead(const void* curve, double aheadM) noexcept {
     std::uint32_t i;
     double t;
     c.find(c.fromM + aheadM, i, t);
-    return evaluate(c.segments[i], t).curvature();
+    return c.point(i, t).curvature();
 }
 
 double speedLimitAhead(const Performance& performance, const Curve& c, double speedMs, bool stops) noexcept {
@@ -851,7 +866,7 @@ double speedLimitAhead(const Performance& performance, const Curve& c, double sp
         std::uint32_t i;
         double t;
         c.find(c.fromM + d, i, t);
-        if (const double kappa = std::abs(evaluate(c.segments[i], t).curvature()); kappa > 1e-9)
+        if (const double kappa = std::abs(c.point(i, t).curvature()); kappa > 1e-9)
             limit = std::min(limit, brakingLimit(performance, lateralLimit(performance, 1.0 / kappa), d));
     }
     if (stops) limit = std::min(limit, std::max(brakingLimit(performance, 0.0, rest), 0.5));
@@ -863,7 +878,7 @@ Fix onCurve(const Curve& c, std::uint32_t& segment, double& t, double lat, doubl
     geo::localNorthEastM(c.lat0, c.lon0, lat, lon, north, east);
     // (B - P) . B' = 0 over the ground, from where it was: it has moved little since
     for (int k = 0; k < 8; ++k) {
-        const CurvePoint p = evaluate(c.segments[segment], t);
+        const CurvePoint p = c.point(segment, t);
         const double dn = p.p[0] - north, de = p.p[1] - east;
         const double g = dn * p.d1[0] + de * p.d1[1];
         const double slope = p.d1[0] * p.d1[0] + p.d1[1] * p.d1[1];
@@ -881,7 +896,7 @@ Fix onCurve(const Curve& c, std::uint32_t& segment, double& t, double lat, doubl
         }
         if (std::abs(step) < 1e-7) break;
     }
-    const CurvePoint p = evaluate(c.segments[segment], t);
+    const CurvePoint p = c.point(segment, t);
     Fix f;
     f.courseRad = p.courseRad();
     f.crossTrackM = -(north - p.p[0]) * std::sin(f.courseRad) + (east - p.p[1]) * std::cos(f.courseRad);
@@ -890,12 +905,12 @@ Fix onCurve(const Curve& c, std::uint32_t& segment, double& t, double lat, doubl
     return f;
 }
 
-bool tooTight(const BezierSegment& s, double limit, double& from, double& to) noexcept {
+bool tooTight(const Curve& c, std::uint32_t i, double limit, double& from, double& to) noexcept {
     constexpr int kSteps = 64;
     bool found = false;
     for (int k = 0; k <= kSteps; ++k) {
         const double t = static_cast<double>(k) / kSteps;
-        const bool over = std::abs(evaluate(s, t).curvature()) > limit;
+        const bool over = std::abs(c.point(i, t).curvature()) > limit;
         if (over && !found) found = true, from = t;
         if (over) to = t;
         if (!over && found) break; // the first section only
@@ -903,13 +918,13 @@ bool tooTight(const BezierSegment& s, double limit, double& from, double& to) no
     return found;
 }
 
-double steepest(const BezierSegment& s, double& at) noexcept {
+double steepest(const Curve& c, std::uint32_t i, double& at) noexcept {
     constexpr int kSteps = 64;
     double most = 0.0;
     at = 0.0;
     for (int k = 0; k <= kSteps; ++k) {
         const double t = static_cast<double>(k) / kSteps;
-        if (const double g = std::abs(evaluate(s, t).gradient()); g > most) most = g, at = t;
+        if (const double g = std::abs(c.point(i, t).gradient()); g > most) most = g, at = t;
     }
     return most;
 }

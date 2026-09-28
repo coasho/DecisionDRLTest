@@ -20,10 +20,18 @@ bool is(double code, E value) noexcept {
     return code == static_cast<double>(value);
 }
 
+/// A curve's segments as it flies them (docs/flight-autonomy.md, 4.26): every one as A-GRA's schema gives it, and
+/// as Bezier segments too where each is one's form.
+void curveOf(Setpoint& out, const NurbsSegment* segments, std::size_t count) {
+    out.nurbs.assign(segments, segments + count);
+    if (std::all_of(segments, segments + count, [](const NurbsSegment& s) { return s.bezier(); }))
+        for (std::size_t i = 0; i < count; ++i) out.segments.push_back(segments[i].asBezier());
+}
+
 } // namespace
 
 bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
-    out.waypoints.clear(), out.segments.clear();
+    out.waypoints.clear(), out.segments.clear(), out.nurbs.clear();
     out.shape = PatternShape{};
     if (const int found = liveSlot(activity); found >= 0) {
         const auto s = static_cast<std::size_t>(found);
@@ -35,7 +43,7 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
         out.command = flown;
         if (const PathStore* store = config_->path.get()) { // (one route or curve flies at a time: the store's)
             if (std::holds_alternative<RouteCommand>(flown)) out.waypoints.assign(store->waypoints, store->waypoints + store->count);
-            if (std::holds_alternative<CurveCommand>(flown)) out.segments.assign(store->segments, store->segments + store->segmentCount);
+            if (std::holds_alternative<CurveCommand>(flown)) curveOf(out, store->segments, store->segmentCount);
             if (std::holds_alternative<PatternCommand>(flown)) out.shape = store->pattern;
         }
         return true;
@@ -44,7 +52,8 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     if (!w) return false;
     if (w->support) out.command = w->supportCommand;
     else out.command = w->command;
-    out.waypoints = w->waypoints, out.segments = w->segments, out.shape = w->shape;
+    out.waypoints = w->waypoints, out.shape = w->shape;
+    curveOf(out, w->segments.data(), w->segments.size());
     return true;
 }
 
@@ -80,16 +89,17 @@ std::vector<EndPoint> CapabilityHost::endPoints(ActivityId activity, std::size_t
         }
         return out;
     }
-    if (const auto* curve = std::get_if<CurveCommand>(c); curve && !s.segments.empty()) {
+    if (const auto* curve = std::get_if<CurveCommand>(c); curve && !s.nurbs.empty()) {
         // each segment's end, from the one flown now: metres from its reference (one left out is where it will start: not yet known)
         const bool loiters = is(curve->end, EndBehavior::Loiter);
         if (isHold(curve->latitudeRad) || (past && !loiters)) return out;
-        for (std::size_t i = reported ? progress.segment : 0; i < s.segments.size() && out.size() < max; ++i) {
-            const BezierSegment& b = s.segments[i];
+        for (std::size_t i = reported ? progress.segment : 0; i < s.nurbs.size() && out.size() < max; ++i) {
+            const NurbsSegment& b = s.nurbs[i];
+            const std::uint32_t last = b.points - 1; // (clamped: it ends at its last point)
             EndPoint e;
-            e.kind = loiters && i + 1 == s.segments.size() ? EndPointKind::LoiterPoint : EndPointKind::Waypoint;
-            geo::offsetLatLon(curve->latitudeRad, curve->longitudeRad, b.north[5], b.east[5], e.latitudeRad, e.longitudeRad);
-            e.altitudeM = curve->altitudeM - b.down[5];
+            e.kind = loiters && i + 1 == s.nurbs.size() ? EndPointKind::LoiterPoint : EndPointKind::Waypoint;
+            geo::offsetLatLon(curve->latitudeRad, curve->longitudeRad, b.north[last], b.east[last], e.latitudeRad, e.longitudeRad);
+            e.altitudeM = curve->altitudeM - b.down[last];
             e.altitudeReference = static_cast<double>(AltitudeReference::Msl);
             e.index = static_cast<std::int32_t>(i);
             out.push_back(e);

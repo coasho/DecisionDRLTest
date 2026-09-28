@@ -122,18 +122,16 @@ const FeatureDef kFeatures[] = {
     CAP("fsim.guidance.taxi", N, 9, R2, ""),                                                  // WPT-26
 
     // --- curve following ----------------------------------------------------------------------------
-    CAP("fsim.guidance.curve", P, 5, 0,
-        "general NURBS, frame references, offset options, curvature and indices, a rotorcraft's circle at the end (FA-5); "
-        "the curve flown, reported back (FA-2)"),                                              // CRV-02, 12..14
+    CAP("fsim.guidance.curve", P, 5, 0, "frame references, offset options, a rotorcraft's circle at the end (FA-5)"), // CRV-02, 12..14
     {"fsim.guidance.curve/bezier", "fsim.guidance.curve", S, 0, 0, ""},                      // CRV-01
-    {"fsim.guidance.curve/nurbs", "fsim.guidance.curve", N, 5, 0, ""},                       // CRV-03
+    {"fsim.guidance.curve/nurbs", "fsim.guidance.curve", S, 0, 0, ""},                       // CRV-03 (FA-5d1)
     {"fsim.guidance.curve/reference/geodetic", "fsim.guidance.curve", P, 5, 0, "the altitude's reference and range at the centre"}, // CRV-04
     {"fsim.guidance.curve/reference/frame", "fsim.guidance.curve", N, 5, 0, ""},             // CRV-05
     {"fsim.guidance.curve/offsets", "fsim.guidance.curve", P, 5, 0,
      "rotations, geodetic offsets and altitude choices; north, east and down metres work"},  // CRV-06
     {"fsim.guidance.curve/traversal/speed_range", "fsim.guidance.curve", S, 0, 0, ""},       // CRV-07
     {"fsim.guidance.curve/traversal/duration", "fsim.guidance.curve", S, 0, 0, ""},
-    {"fsim.guidance.curve/curvature", "fsim.guidance.curve", N, 5, 0, ""},                   // CRV-08
+    {"fsim.guidance.curve/curvature", "fsim.guidance.curve", S, 0, 0, ""},                   // CRV-08 (FA-5d1: checked, the indices too)
     {"fsim.guidance.curve/append", "fsim.guidance.curve", S, 0, 0, ""},                      // CRV-09
     {"fsim.guidance.curve/end/csa", "fsim.guidance.curve", S, 0, 0, ""},                     // CRV-10
     {"fsim.guidance.curve/end/circular_loiter", "fsim.guidance.curve", P, 5, 0,

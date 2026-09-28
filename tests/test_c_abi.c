@@ -807,6 +807,47 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_cancel(world, curve_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
         }
         {
+            /* ABI 1.24: a curve's segments as A-GRA's schema gives them - a clamped rational cubic, read back as given;
+               appended; one not clamped refused naming it; in a batch, its own kind */
+            double fields[8], later[8];
+            fsim_nurbs_segment s, t, bad;
+            fsim_batch_command sp, item;
+            fsim_command_result results[1];
+            fsim_activity_id nurbs_id;
+            int k;
+            const double north[7] = {0.0, 1200.0, 2400.0, 4000.0, 5600.0, 6800.0, 8000.0}, east[7] = {0.0, 0.0, 400.0, 400.0, -400.0, 0.0, 0.0};
+            const double weights[7] = {1.0, 1.4, 0.8, 1.0, 1.25, 0.9, 1.0}, knots[11] = {0.0, 0.0, 0.0, 0.0, 0.2, 0.45, 0.7, 1.0, 1.0, 1.0, 1.0};
+            for (k = 0; k < 8; ++k) fields[k] = later[k] = fsim_hold();
+            fsim_nurbs_segment_init(&s);
+            CHECK(s.struct_size == sizeof s && s.weight[9] == 1.0 && isnan(s.curvature) && isnan(s.first_index) && s.points == 0);
+            s.points = 7, s.knots = 11;
+            for (k = 0; k < 7; ++k) s.north[k] = north[k], s.east[k] = east[k], s.weight[k] = weights[k];
+            for (k = 0; k < 11; ++k) s.knot[k] = knots[k];
+            t = s;
+            for (k = 0; k < 7; ++k) t.north[k] += 8000.0; /* (from where s ends) */
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_nurbs(world, b, fields, 8, &s, 1, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            nurbs_id = cr.activity;
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, nurbs_id, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_NURBS && sp.segment_count == 1 && sp.nurbs != NULL &&
+                  sp.segments == NULL);
+            CHECK(sp.nurbs[0].points == 7 && sp.nurbs[0].knots == 11 && sp.nurbs[0].weight[1] == 1.4 && sp.nurbs[0].knot[5] == 0.45);
+            later[7] = 1.0; /* append */
+            CHECK(fsim_activity_update_nurbs(world, nurbs_id, later, 8, &t, 1, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get_setpoint(world, nurbs_id, &sp) == FSIM_OK && sp.segment_count == 2);
+            bad = s;
+            bad.knot[3] = 0.1; /* not clamped at its start */
+            CHECK(fsim_vehicle_submit_nurbs(world, b, fields, 8, &bad, 1, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "invalid_curve") == 0 && cr.reserved == 1);
+            memset(&item, 0, sizeof item);
+            item.struct_size = sizeof item;
+            item.kind = FSIM_BATCH_NURBS, item.fields = fields, item.count = 8, item.nurbs = &s, item.segment_count = 1, item.options = &co;
+            CHECK(fsim_vehicle_submit_batch(world, b, &item, 1, results, NULL) == FSIM_OK && results[0].status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_cancel(world, results[0].activity, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        }
+        {
             /* ABI 1.6: the performance, and grants over the priorities (on a, whose live activities are its policy's) */
             fsim_performance perf;
             int32_t mode = -1, reason = -1, allowed = -1, granted = -1, availability = -1;

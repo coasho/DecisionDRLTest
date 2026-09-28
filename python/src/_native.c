@@ -1122,6 +1122,69 @@ static Py_ssize_t read_segments(PyObject* o, fsim_bezier_segment** out) {
     return count;
 }
 
+/* A curve's segments as A-GRA's schema gives them (ABI 1.24): rows of 59 numbers - points, knots, north[10], east[10],
+ * down[10], weight[10], knot[14], curvature, first_index, last_index. *out is PyMem-allocated (free it); the count, or
+ * -1 with an error set. */
+static Py_ssize_t read_nurbs(PyObject* o, fsim_nurbs_segment** out) {
+    *out = NULL;
+    PyObject* seq = PySequence_Fast(o, "segments must be a sequence of 59-number rows");
+    if (!seq) return -1;
+    const Py_ssize_t count = PySequence_Size(seq);
+    fsim_nurbs_segment* segments = (fsim_nurbs_segment*)PyMem_Malloc(sizeof(fsim_nurbs_segment) * (size_t)(count ? count : 1));
+    for (Py_ssize_t i = 0; segments && i < count; ++i) {
+        PyObject* row = PySequence_GetItem(seq, i);
+        PyObject* r = row ? PySequence_Fast(row, "each segment must be 59 numbers") : NULL;
+        fsim_nurbs_segment* s = &segments[i];
+        fsim_nurbs_segment_init(s);
+        if (r && PySequence_Size(r) == 59) {
+            double v[59];
+            for (int k = 0; k < 59 && !PyErr_Occurred(); ++k) {
+                PyObject* item = PySequence_GetItem(r, k);
+                v[k] = item ? PyFloat_AsDouble(item) : 0.0;
+                Py_XDECREF(item);
+            }
+            if (!PyErr_Occurred()) {
+                const double points = v[0], knots = v[1];
+                if (!(points >= 0.0 && points <= 10.0 && knots >= 0.0 && knots <= 14.0))
+                    PyErr_SetString(PyExc_ValueError, "a segment has at most 10 control points and 14 knots");
+                s->points = (uint32_t)points, s->knots = (uint32_t)knots;
+                for (int k = 0; k < 10; ++k) s->north[k] = v[2 + k], s->east[k] = v[12 + k], s->down[k] = v[22 + k], s->weight[k] = v[32 + k];
+                for (int k = 0; k < 14; ++k) s->knot[k] = v[42 + k];
+                s->curvature = v[56], s->first_index = v[57], s->last_index = v[58];
+            }
+        } else if (r) {
+            PyErr_SetString(PyExc_ValueError, "each segment must be points, knots, north[10], east[10], down[10], weight[10], knot[14], curvature, "
+                                              "first_index, last_index");
+        }
+        Py_XDECREF(r);
+        Py_XDECREF(row);
+        if (PyErr_Occurred()) break;
+    }
+    Py_DECREF(seq);
+    if (!segments) PyErr_NoMemory();
+    if (PyErr_Occurred()) {
+        PyMem_Free(segments);
+        return -1;
+    }
+    *out = segments;
+    return count;
+}
+
+/* A segment as A-GRA's schema gives it, as the 59 numbers read_nurbs reads. */
+static PyObject* nurbs_row(const fsim_nurbs_segment* s) {
+    PyObject* row = PyTuple_New(59);
+    double v[59];
+    v[0] = s->points, v[1] = s->knots;
+    for (int k = 0; k < 10; ++k) v[2 + k] = s->north[k], v[12 + k] = s->east[k], v[22 + k] = s->down[k], v[32 + k] = s->weight[k];
+    for (int k = 0; k < 14; ++k) v[42 + k] = s->knot[k];
+    v[56] = s->curvature, v[57] = s->first_index, v[58] = s->last_index;
+    for (int k = 0; row && k < 59; ++k) {
+        PyObject* x = PyFloat_FromDouble(v[k]);
+        if (!x || PyTuple_SetItem(row, k, x) < 0) Py_CLEAR(row); /* (SetItem takes the item, even when it fails) */
+    }
+    return row;
+}
+
 /* submit_curve(id, values, segments, source=None, axes=None, range=None, min_version=None) -> result */
 static PyObject* world_submit_curve(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
@@ -1158,6 +1221,48 @@ static PyObject* world_activity_update_curve(PyObject* o, PyObject* const* args,
     const Py_ssize_t ns = read_segments(args[2], &segments);
     if (ns < 0) return NULL;
     const int rc = fsim_activity_update_curve_by(self->world, activity, source, controller, row, (uint32_t)count, segments, (uint32_t)ns, &r);
+    PyMem_Free(segments);
+    if (rc != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
+/* submit_nurbs(id, values, segments, source=None, axes=None, range=None, min_version=None) -> result: segments as
+ * A-GRA's schema gives them (read_nurbs's rows) */
+static PyObject* world_submit_nurbs(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    double row[FSIM_PY_VALUES];
+    fsim_command_options opt;
+    fsim_command_result r;
+    fsim_nurbs_segment* segments = NULL;
+    if (!check_args(n, 3, 8, "submit_nurbs") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "submit_nurbs");
+    if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
+    const Py_ssize_t ns = read_nurbs(args[2], &segments);
+    if (ns < 0) return NULL;
+    const int rc = fsim_vehicle_submit_nurbs(self->world, id, row, (uint32_t)count, segments, (uint32_t)ns, &opt, &r);
+    PyMem_Free(segments);
+    if (rc != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
+/* activity_update_nurbs(activity, values, segments, source=0, controller=0) -> result */
+static PyObject* world_activity_update_nurbs(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t activity;
+    double row[FSIM_PY_VALUES];
+    fsim_command_result r;
+    fsim_nurbs_segment* segments = NULL;
+    int source = 0;
+    uint32_t controller = 0;
+    if (!check_args(n, 3, 5, "activity_update_nurbs") || !as_u64(args[0], &activity) || (n > 3 && !as_int(args[3], &source)) ||
+        (n > 4 && !as_u32(args[4], &controller)) || !WORLD_IDLE(self))
+        return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "activity_update_nurbs");
+    if (count < 0) return NULL;
+    const Py_ssize_t ns = read_nurbs(args[2], &segments);
+    if (ns < 0) return NULL;
+    const int rc = fsim_activity_update_nurbs_by(self->world, activity, source, controller, row, (uint32_t)count, segments, (uint32_t)ns, &r);
     PyMem_Free(segments);
     if (rc != FSIM_OK) return fail();
     return result_tuple(self->world, &r);
@@ -1564,7 +1669,8 @@ static PyObject* world_frame_point(PyObject* o, PyObject* const* args, Py_ssize_
 
 /* activity_setpoint(activity) -> (kind, code, fields, behavior, waypoints, segments), or None for one not live:
  * `behavior` (id, target, {name: value}, [(latitude_rad, longitude_rad, altitude_msl_m, airspeed_ms, capture_radius_m)])
- * or None, `waypoints` [waypoint row] or None, `segments` [18 floats: north, east, down] or None */
+ * or None, `waypoints` [waypoint row] or None, `segments` [18 floats: north, east, down] or None - a curve's as A-GRA's
+ * schema gives them (kind FSIM_BATCH_NURBS) [59 floats: read_nurbs's] */
 static PyObject* world_activity_setpoint(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint64_t activity;
@@ -1613,7 +1719,14 @@ static PyObject* world_activity_setpoint(PyObject* o, PyObject* const* args, Py_
         waypoints = Py_NewRef(Py_None);
     }
     PyObject* segments = NULL;
-    if (waypoints && b.segments) {
+    if (waypoints && b.kind == FSIM_BATCH_NURBS && b.nurbs) { /* (ABI 1.24: read_nurbs's rows) */
+        segments = PyList_New(0);
+        for (uint32_t i = 0; segments && i < b.segment_count; ++i) {
+            PyObject* row = nurbs_row(&b.nurbs[i]);
+            if (!row || PyList_Append(segments, row) < 0) Py_CLEAR(segments);
+            Py_XDECREF(row);
+        }
+    } else if (waypoints && b.segments) {
         segments = PyList_New(0);
         for (uint32_t i = 0; segments && i < b.segment_count; ++i) {
             const fsim_bezier_segment* s = &b.segments[i];
@@ -2328,6 +2441,7 @@ typedef struct {
     fsim_position_command* points;
     fsim_waypoint* waypoints;
     fsim_bezier_segment* segments;
+    fsim_nurbs_segment* nurbs;
     fsim_behavior_command behavior;
     fsim_command_options options;
 } BatchItem;
@@ -2338,6 +2452,7 @@ static void batch_free(BatchItem* items, Py_ssize_t count) {
         PyMem_Free(items[i].points);
         PyMem_Free(items[i].waypoints);
         PyMem_Free(items[i].segments);
+        PyMem_Free(items[i].nurbs);
     }
     PyMem_Free(items);
 }
@@ -2376,7 +2491,11 @@ static int read_batch_item(PyObject* item, BatchItem* it, fsim_batch_command* b)
         ok = np >= 0;
         b->waypoints = it->waypoints, b->waypoint_count = (uint32_t)(np > 0 ? np : 0);
     }
-    if (ok && part[5] != Py_None) {
+    if (ok && part[5] != Py_None && b->kind == FSIM_BATCH_NURBS) { /* (ABI 1.24: read_nurbs's rows) */
+        const Py_ssize_t ns = read_nurbs(part[5], &it->nurbs);
+        ok = ns >= 0;
+        b->nurbs = it->nurbs, b->segment_count = (uint32_t)(ns > 0 ? ns : 0);
+    } else if (ok && part[5] != Py_None) {
         const Py_ssize_t ns = read_segments(part[5], &it->segments);
         ok = ns >= 0;
         b->segments = it->segments, b->segment_count = (uint32_t)(ns > 0 ? ns : 0);
@@ -2565,6 +2684,8 @@ static PyMethodDef world_methods[] = {
     FAST("activity_update_route", world_activity_update_route, "activity_update_route(activity, values, waypoints, source=0) -> result"),
     FAST("submit_curve", world_submit_curve, "submit_curve(id, values, segments, source, axes, range, min_version) -> result"),
     FAST("activity_update_curve", world_activity_update_curve, "activity_update_curve(activity, values, segments, source=0) -> result"),
+    FAST("submit_nurbs", world_submit_nurbs, "submit_nurbs(id, values, segments, source, axes, range, min_version) -> result"),
+    FAST("activity_update_nurbs", world_activity_update_nurbs, "activity_update_nurbs(activity, values, segments, source=0) -> result"),
     FAST("activity_update", world_activity_update, "activity_update(activity, values, source=0) -> result"),
     FAST("activity_update_batch", world_activity_update_batch, "activity_update_batch(activities uint64, values float64, stride[, fields])"),
     FAST("activity_cancel", world_activity_cancel, "activity_cancel(activity, source=0) -> result"),

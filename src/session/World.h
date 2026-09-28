@@ -121,8 +121,11 @@ public:
     /// NEW of a route (fsim.guidance.route) with its waypoints (docs/vehicle-interface.md, 4.5).
     control::CommandResult submit(std::uint32_t id, const control::RouteCommand& route, Span<const control::Waypoint> waypoints,
                                   const control::CommandOptions& options = {});
-    /// NEW of a curve (fsim.guidance.curve) with its segments (docs/vehicle-interface.md, 4.7).
+    /// NEW of a curve (fsim.guidance.curve) with its segments (docs/vehicle-interface.md, 4.7): Bezier segments, or as
+    /// A-GRA's schema gives them (docs/flight-autonomy.md, 4.26).
     control::CommandResult submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
+                                  const control::CommandOptions& options = {});
+    control::CommandResult submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments,
                                   const control::CommandOptions& options = {});
     /// NEW of a pattern (fsim.guidance.pattern) with its shape (docs/flight-autonomy.md, 4.23).
     control::CommandResult submit(std::uint32_t id, const control::PatternCommand& pattern, const control::PatternShape& shape,
@@ -143,6 +146,7 @@ public:
     control::CommandResult update(control::ActivityId activity, const control::RouteCommand& route, Span<const control::Waypoint> waypoints);
     /// UPDATE of a curve: options, and segments appended (append 1) or a new curve.
     control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
+    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments);
     /// UPDATE of a pattern with its shape: the fields given in either merged (kHold keeps one), flown afresh.
     control::CommandResult update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
@@ -158,6 +162,8 @@ public:
                                   Span<const control::Waypoint> waypoints);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::BezierSegment> segments);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
+                                  Span<const control::NurbsSegment> segments);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
                                   const control::PatternShape& shape);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);
@@ -170,6 +176,9 @@ public:
     control::Reason storeTask(std::uint32_t id, control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints = {},
                               Span<const control::BezierSegment> segments = {}, control::TaskRepetition repetition = {},
                               const control::PatternShape* shape = nullptr);
+    /// A task whose command is a batch item's - a route's waypoints, a curve's segments either way, a pattern's shape
+    /// beside it (its options not kept: a task command gives them). InvalidParameter for a support command's.
+    control::Reason storeTask(std::uint32_t id, control::TaskId task, const control::BatchCommand& command, control::TaskRepetition repetition = {});
     control::CommandResult commandTask(std::uint32_t id, control::TaskId task, const control::CommandOptions& options = {});
     control::CommandResult cancelTask(std::uint32_t id, control::TaskId task, control::Caller caller = {});
     control::Reason removeTask(std::uint32_t id, control::TaskId task);

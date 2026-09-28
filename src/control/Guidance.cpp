@@ -906,7 +906,7 @@ void CurveBehavior::pace(const Performance& perf, const route::Fix& fix) noexcep
 void CurveBehavior::end(const Performance& perf) {
     route::Curve& k = *curve_;
     ended_ = finished_ = true;
-    const route::CurvePoint p = route::evaluate(k.segments[k.count - 1], 1.0);
+    const route::CurvePoint p = k.point(k.count - 1, 1.0);
     k.exit = route::Line{p.p[0], p.p[1], p.courseRad(), 0.0};
     k.orbit = route::Turn{};
     k.orbit.centreNorthM = p.p[0], k.orbit.centreEastM = p.p[1];
@@ -956,7 +956,7 @@ Command CurveBehavior::update(const ControlContext& ctx, const Command& in) {
         const bool stops = hovers_ && loiter;
         if (segment_ + 1 == k.count && (t_ >= 1.0 - 1e-9 || (stops && k.lengthM() - k.fromM < 1.0))) end(perf);
     }
-    const route::CurvePoint here = route::evaluate(k.segments[ended_ ? k.count - 1 : segment_], ended_ ? 1.0 : t_);
+    const route::CurvePoint here = k.point(ended_ ? k.count - 1 : segment_, ended_ ? 1.0 : t_);
     altitudeMsl_ = k.alt0 - here.p[2];
     if (!ended_) feedforward = here.gradient() * groundSpeed_;
     if (ended_) {

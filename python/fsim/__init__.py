@@ -100,6 +100,7 @@ from .world import (  # noqa: E402
     DirectionReference,
     ControlStatus,
     BezierSegment,
+    NurbsSegment,
     EndBehavior,
     EndPoint,
     EndPointKind,

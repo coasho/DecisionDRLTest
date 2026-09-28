@@ -386,7 +386,7 @@ TEST_CASE("curve: segments appended while flying are flown on to; a new curve is
     CommandResult refused = w.update(r.activity, append, gapped);
     CHECK(refused.reason == Reason::InvalidCurve);
     CHECK(refused.index == 0);
-    refused = w.update(r.activity, append, {});
+    refused = w.update(r.activity, append, Span<const BezierSegment>{});
     CHECK(refused.reason == Reason::InvalidCurve);
     CHECK(refused.index == 0);
     const CommandResult appended = w.update(r.activity, append, rest);

@@ -408,6 +408,7 @@ world.update(a, more, next);
 - **UPDATE** with `append` 1 adds segments after the curve's end: the aircraft flies on to them, the activity the same. With segments and no append it is a new curve, flown afresh; with none, its options alone.
 - **End.** The activity completes at the curve's end. The aircraft continues along its last course, or loiters: a wing orbits the end point, a rotorcraft stops and hovers there.
 - **Flown** by the path follower, the nearest point found by Newton steps over the segments' length tables, the curvature ahead fed forward from them. `progress` names the segment flown, the percent of the curve and of the segment, the distance and time to go.
+- **As A-GRA's schema gives them** ([flight-autonomy.md](../flight-autonomy.md), 4.26): `NurbsSegment`s, clamped rational B-splines - 4 to 10 control points with their weights, 4 to 14 knots, of the degree they make - submitted, updated, appended, batched and kept as tasks as Bezier segments are (`Span<const NurbsSegment>`). One that is not a clamped curve is refused `invalid_curve` naming it; its `curvature`, given, is checked: turning tighter anywhere is refused, naming the section; its `firstIndex` and `lastIndex`, given, are 0 and its last point. A Bezier's form flies as a `BezierSegment` does. `Setpoint::nurbs` gives every segment back.
 
 An S of six segments (100° right, then 100° left, climbing), its tightest
 a quarter wider than the aircraft's planning radius, is flown within:

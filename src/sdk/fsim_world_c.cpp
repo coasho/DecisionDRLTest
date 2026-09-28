@@ -613,6 +613,28 @@ bool toSegments(fsim_world* w, const fsim_bezier_segment* segments, uint32_t cou
     return true;
 }
 
+/// A curve's segments as A-GRA's schema gives them, as the caller's header laid them out (`segments[0].struct_size`
+/// apart), into the world's buffer; false if they cannot be read.
+bool toNurbs(fsim_world* w, const fsim_nurbs_segment* segments, uint32_t count) {
+    w->nurbs.clear();
+    if (count == 0) return true;
+    if (!segments) return false;
+    const uint32_t stride = segments[0].struct_size;
+    if (stride < sizeof(fsim_nurbs_segment)) return false; // (its first layout)
+    const auto* bytes = reinterpret_cast<const unsigned char*>(segments);
+    w->nurbs.resize(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        fsim_nurbs_segment c;
+        std::memcpy(&c, bytes + static_cast<std::size_t>(i) * stride, sizeof c);
+        fsim::control::NurbsSegment& s = w->nurbs[i];
+        s.points = c.points, s.knots = c.knots;
+        std::copy_n(c.north, 10, s.north), std::copy_n(c.east, 10, s.east), std::copy_n(c.down, 10, s.down), std::copy_n(c.weight, 10, s.weight);
+        std::copy_n(c.knot, 14, s.knot);
+        s.curvature = c.curvature, s.firstIndex = c.first_index, s.lastIndex = c.last_index;
+    }
+    return true;
+}
+
 /// What an activity's UPDATE takes: its level (a flight capability), its
 /// support kind (a support one), its mode, or none (unknown, ended long ago, a behaviour).
 struct UpdateShape {
@@ -975,6 +997,57 @@ FSIM_API int fsim_vehicle_submit_curve(fsim_world* world, uint32_t id, const dou
         return FSIM_OK;
     } catch (const std::exception& e) {
         return fail(FSIM_ERROR, std::string("fsim_vehicle_submit_curve: ") + e.what());
+    }
+}
+
+FSIM_API void fsim_nurbs_segment_init(fsim_nurbs_segment* segment) {
+    if (!segment) return;
+    *segment = fsim_nurbs_segment{};
+    segment->struct_size = sizeof *segment;
+    for (double& w : segment->weight) w = 1.0;
+    segment->curvature = segment->first_index = segment->last_index = std::numeric_limits<double>::quiet_NaN();
+}
+
+FSIM_API int fsim_vehicle_submit_nurbs(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_nurbs_segment* segments,
+                                       uint32_t segment_count, const fsim_command_options* options, fsim_command_result* result) {
+    fsim::control::Command c;
+    if (!world || !result || !toMode(FSIM_MODE_CURVE, fields, count, c))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_nurbs: a curve takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_CURVE)) + " fields");
+    try {
+        if (!toNurbs(world, segments, segment_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_nurbs: segments without their struct_size");
+        toC(world, id, world->world.submit(id, std::get<fsim::control::CurveCommand>(c), fsim::Span<const fsim::control::NurbsSegment>(world->nurbs), fromC(options)),
+            result);
+        return FSIM_OK;
+    } catch (const std::exception& e) {
+        return fail(FSIM_ERROR, std::string("fsim_vehicle_submit_nurbs: ") + e.what());
+    }
+}
+
+FSIM_API int fsim_activity_update_nurbs(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
+                                        const fsim_nurbs_segment* segments, uint32_t segment_count, fsim_command_result* result) {
+    return fsim_activity_update_nurbs_by(world, activity, FSIM_SOURCE_POLICY, 0, fields, count, segments, segment_count, result);
+}
+
+FSIM_API int fsim_activity_update_nurbs_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
+                                           const fsim_nurbs_segment* segments, uint32_t segment_count, fsim_command_result* result) {
+    return fsim_activity_update_nurbs_by(world, activity, source, 0, fields, count, segments, segment_count, result);
+}
+
+FSIM_API int fsim_activity_update_nurbs_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
+                                           uint32_t count, const fsim_nurbs_segment* segments, uint32_t segment_count, fsim_command_result* result) {
+    fsim::control::Command c;
+    fsim::control::Source from;
+    if (!world || !result || !toSource(source, from)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_nurbs: bad arguments");
+    const fsim::control::Caller caller{from, controller};
+    if (!toMode(FSIM_MODE_CURVE, fields, count, c))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_nurbs: a curve takes " + std::to_string(fsim_mode_field_count(FSIM_MODE_CURVE)) + " fields");
+    try {
+        if (!toNurbs(world, segments, segment_count)) return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_nurbs: segments without their struct_size");
+        toC(world, fsim::control::activityVehicle(activity),
+            world->world.update(caller, activity, std::get<fsim::control::CurveCommand>(c), fsim::Span<const fsim::control::NurbsSegment>(world->nurbs)), result);
+        return FSIM_OK;
+    } catch (const std::exception& e) {
+        return fail(FSIM_ERROR, std::string("fsim_activity_update_nurbs: ") + e.what());
     }
 }
 
@@ -1414,10 +1487,11 @@ FSIM_API const char* fsim_time_criticality_name(int criticality) {
 
 namespace {
 
-/// A batch item (or a task's command) into its C++ command: its waypoints and segments into `route` and `curve`, a
-/// pattern's shape into `shape` (the item pointing at it where it has one).
+/// A batch item (or a task's command) into its C++ command: its waypoints and segments into `route` and `curve` (or
+/// `nurbs`: ABI 1.24, where the item's struct has them), a pattern's shape into `shape` (the item pointing at it where it
+/// has one).
 bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::BatchCommand& item, std::vector<fsim::control::Waypoint>& route,
-               std::vector<fsim::control::BezierSegment>& curve, fsim::control::PatternShape& shape) {
+               std::vector<fsim::control::BezierSegment>& curve, std::vector<fsim::control::NurbsSegment>& nurbs, fsim::control::PatternShape& shape) {
     item.options = fromC(b.options);
     fsim::control::Command c;
     fsim::control::SupportCommand sc;
@@ -1441,6 +1515,11 @@ bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::Ba
         ok = toMode(FSIM_MODE_CURVE, b.fields, b.count, c) && toSegments(world, b.segments, b.segment_count);
         if (ok) curve = world->segments, item.command = c;
         break;
+    case FSIM_BATCH_NURBS:
+        ok = b.struct_size >= offsetof(fsim_batch_command, nurbs) + sizeof b.nurbs && toMode(FSIM_MODE_CURVE, b.fields, b.count, c) &&
+             toNurbs(world, b.nurbs, b.segment_count);
+        if (ok) nurbs = world->nurbs, item.command = c;
+        break;
     default: break;
     }
     return ok;
@@ -1457,17 +1536,19 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
         std::vector<fsim::control::BatchCommand> items(count);
         std::vector<std::vector<fsim::control::Waypoint>> routes; // each route's own (the world's scratch is one)
         std::vector<std::vector<fsim::control::BezierSegment>> curves;
+        std::vector<std::vector<fsim::control::NurbsSegment>> nurbses;
         std::vector<fsim::control::PatternShape> shapes(count); // (each pattern's own: the items point at them)
-        routes.reserve(count), curves.reserve(count);
+        routes.reserve(count), curves.reserve(count), nurbses.reserve(count);
         // every item made into a command first: a malformed one refuses the batch, and none is made
         for (uint32_t i = 0; i < count; ++i) {
             const auto& b = *reinterpret_cast<const fsim_batch_command*>(reinterpret_cast<const char*>(batch) + i * stride);
             fsim::control::BatchCommand& item = items[i];
             std::vector<fsim::control::Waypoint>& route = routes.emplace_back();
             std::vector<fsim::control::BezierSegment>& curve = curves.emplace_back();
-            if (!fromBatch(world, b, item, route, curve, shapes[i]))
+            std::vector<fsim::control::NurbsSegment>& nurbs = nurbses.emplace_back();
+            if (!fromBatch(world, b, item, route, curve, nurbs, shapes[i]))
                 return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_batch: item " + std::to_string(i) + " is malformed");
-            item.waypoints = route, item.segments = curve;
+            item.waypoints = route, item.segments = curve, item.nurbs = nurbs;
         }
         std::vector<fsim::control::CommandDetails> checks;
         const std::vector<fsim::control::CommandResult> answers = world->world.submitBatch(id, items, &checks);
@@ -1516,14 +1597,15 @@ FSIM_API int fsim_vehicle_store_task(fsim_world* world, uint32_t id, uint64_t ta
         fsim::control::BatchCommand item;
         std::vector<fsim::control::Waypoint> route;
         std::vector<fsim::control::BezierSegment> curve;
+        std::vector<fsim::control::NurbsSegment> nurbs;
         fsim::control::PatternShape shape;
-        if (!fromBatch(world, *command, item, route, curve, shape) || !std::holds_alternative<fsim::control::Command>(item.command))
+        if (!fromBatch(world, *command, item, route, curve, nurbs, shape) || !std::holds_alternative<fsim::control::Command>(item.command))
             return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_store_task: a flight or guidance command, whole, is kept");
         fsim::control::TaskRepetition repetition;
         repetition.attempts = attempts ? attempts : 1;
         repetition.intervalS = interval_s;
-        *reason = static_cast<int32_t>(
-            world->world.storeTask(id, task_id, std::get<fsim::control::Command>(item.command), route, curve, repetition, item.shape));
+        item.waypoints = route, item.segments = curve, item.nurbs = nurbs;
+        *reason = static_cast<int32_t>(world->world.storeTask(id, task_id, item, repetition));
         return FSIM_OK;
     });
 }
@@ -1637,9 +1719,22 @@ FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id acti
             fsim_bezier_segment_init(&s);
             std::copy_n(p.north, 6, s.north), std::copy_n(p.east, 6, s.east), std::copy_n(p.down, 6, s.down);
         }
+        const bool general = b.kind == FSIM_BATCH_CURVE && r.segments.empty() && !r.setpoint.nurbs.empty(); // (not all Bezier's form: ABI 1.24)
+        r.nurbs.resize(general ? r.setpoint.nurbs.size() : 0);
+        for (std::size_t i = 0; i < r.nurbs.size(); ++i) {
+            const NurbsSegment& p = r.setpoint.nurbs[i];
+            fsim_nurbs_segment& s = r.nurbs[i];
+            fsim_nurbs_segment_init(&s);
+            s.points = p.points, s.knots = p.knots;
+            std::copy_n(p.north, 10, s.north), std::copy_n(p.east, 10, s.east), std::copy_n(p.down, 10, s.down), std::copy_n(p.weight, 10, s.weight);
+            std::copy_n(p.knot, 14, s.knot);
+            s.curvature = p.curvature, s.first_index = p.firstIndex, s.last_index = p.lastIndex;
+        }
+        if (general) b.kind = FSIM_BATCH_NURBS;
         b.count = static_cast<uint32_t>(r.fields.size()), b.fields = r.fields.empty() ? nullptr : r.fields.data();
         b.waypoint_count = static_cast<uint32_t>(r.waypoints.size()), b.waypoints = r.waypoints.empty() ? nullptr : r.waypoints.data();
-        b.segment_count = static_cast<uint32_t>(r.segments.size()), b.segments = r.segments.empty() ? nullptr : r.segments.data();
+        b.segment_count = static_cast<uint32_t>(general ? r.nurbs.size() : r.segments.size()), b.segments = r.segments.empty() ? nullptr : r.segments.data();
+        b.nurbs = r.nurbs.empty() ? nullptr : r.nurbs.data();
         return copyOut(b, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
     });
 }

@@ -113,7 +113,11 @@ public:
     /// NEW of a curve (fsim.guidance.curve; docs/vehicle-interface.md 4.7):
     /// its segments checked against the aircraft (InvalidCurve naming the
     /// segment, and a section too tight), then written into the path store.
-    /// A CurveCommand submitted as a Command has none: InvalidCurve.
+    /// A CurveCommand submitted as a Command has none: InvalidCurve. Its
+    /// segments as A-GRA's schema gives them (docs/flight-autonomy.md, 4.26),
+    /// or Bezier segments, each made one (NurbsSegment::of).
+    CommandResult submit(const CurveCommand& curve, Span<const NurbsSegment> segments, const CommandOptions& options, const sim::VehicleState& state,
+                         double now);
     CommandResult submit(const CurveCommand& curve, Span<const BezierSegment> segments, const CommandOptions& options, const sim::VehicleState& state,
                          double now);
     /// NEW of a pattern with its shape (fsim.guidance.pattern; docs/flight-autonomy.md, 4.23): the two checked and
@@ -143,6 +147,8 @@ public:
     /// UPDATE of a curve: the options given (kHold keeps one), and segments -
     /// with `append` 1, after its end, from the same reference; else a new
     /// curve, flown afresh. Options alone change how it is flown, not where.
+    CommandResult update(ActivityId activity, const CurveCommand& curve, Span<const NurbsSegment> segments, const sim::VehicleState& state,
+                         Caller caller) noexcept;
     CommandResult update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments, const sim::VehicleState& state,
                          Caller caller) noexcept;
     /// CANCEL: the activity ends and its axes return to the vehicle default
@@ -164,7 +170,7 @@ public:
     /// with kSuggestedTask, no runs, a negative interval, or runs of a
     /// capability that never completes; TaskActive while its activity is live;
     /// else why the vehicle cannot command the capability.
-    Reason storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, TaskRepetition repetition,
+    Reason storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, TaskRepetition repetition,
                      const PatternShape* shape = nullptr);
     /// A task command: the NEW of its command with `options`, the task among
     /// the requirements it traces to, answered as the NEW is; its runs, as the
@@ -332,7 +338,7 @@ private:
         SupportCommand supportCommand{};
         std::unique_ptr<Behavior> behavior; ///< a guidance capability's, made at its NEW
         std::vector<Waypoint> waypoints;    ///< a route's (room for the path store's, reserved at its NEW)
-        std::vector<BezierSegment> segments; ///< a curve's (likewise)
+        std::vector<NurbsSegment> segments; ///< a curve's (likewise)
         std::uint64_t queued = 0;           ///< when it began to wait (queueSerial_): its place among equals
         double firstStart = kHold;          ///< a route's start as commanded (Reset: kept out of its slot, it resumed elsewhere)
         /// A waiting activity that failed as it would start, kept as the
@@ -349,7 +355,7 @@ private:
         bool suggested = false;             ///< the platform's
         Command command{};
         std::vector<Waypoint> waypoints;
-        std::vector<BezierSegment> segments;
+        std::vector<NurbsSegment> segments;
         PatternShape shape{};               ///< a pattern's (docs/flight-autonomy.md, 4.23)
         TaskRepetition repetition{};
         ActivityId activity = 0;            ///< its activity (every run's), while it is commanded
@@ -366,7 +372,7 @@ private:
     void noteEnd(const ActivityRecord& record) noexcept;
     /// The platform's suggestion (4.11): a task with the command the checks
     /// left, every value held to its limit (a route's points as planned). Its id.
-    TaskId suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, const PatternShape* shape = nullptr);
+    TaskId suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const PatternShape* shape = nullptr);
     /// Room for a suggestion: the oldest not flying goes where kSuggestions are kept.
     Task& newSuggestion(TaskId id);
     /// Failed waiting activities kept as suggestions, made tasks now.
@@ -410,7 +416,7 @@ private:
     /// pattern's), a route planned and a curve measured into their scratch,
     /// checked as its range policy says - the malformed returned at once, the
     /// rest logged - and the admission a behaviour asks. `setpoint` is what flies.
-    Reason prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, const sim::VehicleState& state,
+    Reason prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const sim::VehicleState& state,
                    CheckLog& log, const PatternShape* shape = nullptr);
     /// The axes a command owns: its own, else the capability's default, widened
     /// above the actuators to whole groups; InvalidAxes if not a flyable set.
@@ -429,7 +435,7 @@ private:
     /// takes its axes, its setpoint and behaviour are installed, its record
     /// kept. A route's plan and a curve's segments go into the path store.
     void launch(const Launch& what, const CommandOptions& options, Command&& setpoint, std::unique_ptr<Behavior>&& behavior, bool route,
-                Span<const BezierSegment> curve, double now) noexcept;
+                Span<const NurbsSegment> curve, double now) noexcept;
     /// A support command's or the engines' NEW (or waiting activity) set directly.
     void launchDirect(const Launch& what, const CommandOptions& options, const SupportCommand& setpoint, double now) noexcept;
     /// A NEW's record, pending, from its options (docs/flight-autonomy.md, 4.8, 4.9), into `record`.
@@ -450,7 +456,7 @@ private:
     /// A waiting activity started, if what it is prepared into still flies: false and it failed if not.
     bool startWaiting(Waiting& w, const sim::VehicleState& state, double now) noexcept;
     /// UPDATE of a waiting activity: its command's new setpoint, checked as its NEW was, kept for its start.
-    CommandResult updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
+    CommandResult updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                 const sim::VehicleState& state, Caller caller, const PatternShape* shape = nullptr) noexcept;
     CommandResult updateWaiting(Waiting& w, const SupportCommand& setpoint, Caller caller) noexcept;
     /// The live activities' time windows after a world step: a persistent one
@@ -591,12 +597,14 @@ private:
     /// reference where the aircraft is if left out; 1 to 10 segments, finite,
     /// each starting within a metre of where the one before ends (appended:
     /// where the curve ends), a metre long over the ground, and room in the
-    /// store (InvalidCurve) - returned at once. Then, unless the range policy
+    /// store (InvalidCurve) - returned at once; each well formed, and turning
+    /// no tighter than its curvature, given (4.26: InvalidCurve with the
+    /// section). Then, unless the range policy
     /// is None, logged: a speed range the aircraft can fly within (clamped, or
     /// PerformanceLimit), every section a wing's full bank cannot turn at the
     /// fastest it flies (InvalidCurve, whatever the policy, with the section),
     /// every segment steeper than it climbs (clamped, or PerformanceLimit, with the section).
-    Reason checkCurve(CurveCommand& c, Span<const BezierSegment> segments, bool appending, const sim::VehicleState& state, CheckLog& log);
+    Reason checkCurve(CurveCommand& c, Span<const NurbsSegment> segments, bool appending, const sim::VehicleState& state, CheckLog& log);
     /// A curve's options whole and finite, as checkCurve: InvalidParameter with the field.
     Reason checkCurveOptions(const CurveCommand& c, bool appending, CommandResult& detail) const noexcept;
     /// Its speed range one the aircraft can fly within, as checkCurve.
@@ -606,10 +614,10 @@ private:
     /// the ground; NaN if nothing limits it.
     double fastest(double altitudeM) const noexcept;
     /// The segments into the path store: after the curve's end, or a new curve.
-    void writeCurve(Span<const BezierSegment> segments, bool appending);
+    void writeCurve(Span<const NurbsSegment> segments, bool appending);
     /// NEW: a command (with a route's waypoints, a curve's segments). One that
     /// may not wait (the existing entry points'): refused where it would.
-    CommandResult submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, const CommandOptions& options,
+    CommandResult submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const CommandOptions& options,
                              const sim::VehicleState& state, double now, bool mayWait = true, const PatternShape* shape = nullptr);
 
     /// A capability's standing with the vehicle's policy (6.2, 7.2).

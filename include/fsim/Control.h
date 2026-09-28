@@ -221,6 +221,52 @@ struct BezierSegment {
     double down[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 };
 
+/// One piece of a curve as A-GRA's schema gives it (MA_NURBS_PointType;
+/// docs/flight-autonomy.md, 4.26): a clamped rational B-spline - its 4 to 10
+/// control points, metres north, east and down from the curve's reference,
+/// each with its weight, and its 4 to 14 knots. Its degree is their counts'
+/// difference less one (knots - points - 1, from 1). Clamped, it starts at its
+/// first control point and ends at its last: its first knot comes as many
+/// times as its degree and once more, and its last likewise. A BezierSegment
+/// is one (NurbsSegment::of): six points, weights 1, knots [0 x6, 1 x6].
+struct NurbsSegment {
+    static constexpr std::size_t kPoints = 10, kKnots = 14;
+    std::uint32_t points = 0; ///< its control points: 4 to 10
+    std::uint32_t knots = 0;  ///< its knots: 4 to 14, and at least points + 2
+    double north[kPoints] = {}, east[kPoints] = {}, down[kPoints] = {};
+    double weight[kPoints] = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}; ///< each above 0
+    double knot[kKnots] = {}; ///< from 0, never decreasing
+    /// A-GRA's Curvature: the most it turns over the ground, 1/m - checked against it. kHold: not said.
+    double curvature = kHold;
+    /// A-GRA's Initial and FinalControlPointIndex: its first and last control points - 0 and its last, as a clamped
+    /// curve starts and ends at them. kHold: not said.
+    double firstIndex = kHold, lastIndex = kHold;
+
+    /// A Bezier segment as one.
+    static NurbsSegment of(const BezierSegment& b) noexcept {
+        NurbsSegment s;
+        s.points = 6, s.knots = 12;
+        for (int i = 0; i < 6; ++i) s.north[i] = b.north[i], s.east[i] = b.east[i], s.down[i] = b.down[i];
+        for (int i = 6; i < 12; ++i) s.knot[i] = 1.0;
+        return s;
+    }
+    /// It is a BezierSegment's: six points, weights 1, knots [0 x6, 1 x6] - flown as one is.
+    bool bezier() const noexcept {
+        if (points != 6 || knots != 12) return false;
+        for (int i = 0; i < 6; ++i)
+            if (weight[i] != 1.0 || knot[i] != 0.0 || knot[i + 6] != 1.0) return false;
+        return true;
+    }
+    /// Its first six points as a BezierSegment (what it is, when bezier()).
+    BezierSegment asBezier() const noexcept {
+        BezierSegment b;
+        for (int i = 0; i < 6; ++i) b.north[i] = north[i], b.east[i] = east[i], b.down[i] = down[i];
+        return b;
+    }
+    /// Its degree: knots - points - 1.
+    int degree() const noexcept { return static_cast<int>(knots) - static_cast<int>(points) - 1; }
+};
+
 /// fsim.guidance.curve (A-GRA's curve following): its segments - 1 to 10 a
 /// command, each starting where the one before ends - go beside it (World::submit
 /// and update take a Span) into the path store. Flown at a ground speed within
@@ -398,7 +444,7 @@ struct PathStore {
     Waypoint waypoints[kWaypoints];
     std::uint32_t curve = 0;    ///< bumped when a curve is replaced (not appended to): it is flown afresh
     std::uint32_t segmentCount = 0;
-    BezierSegment segments[kSegments];
+    NurbsSegment segments[kSegments]; ///< a curve's: a Bezier's as NurbsSegment::of makes it
     PatternShape pattern;       ///< the shape of the pattern that flies (empty: its PatternCommand alone)
     FrameSpec patternFrame;     ///< its frame, where its point is one's (PatternShape::frame)
 };
@@ -465,6 +511,7 @@ struct BatchCommand {
     Span<const Waypoint> waypoints;     ///< a RouteCommand's
     Span<const BezierSegment> segments; ///< a CurveCommand's
     CommandOptions options;
+    Span<const NurbsSegment> nurbs;     ///< a CurveCommand's as A-GRA's schema gives them (instead of `segments`)
     const PatternShape* shape = nullptr; ///< a PatternCommand's (null: none)
 };
 
@@ -476,8 +523,9 @@ struct BatchCommand {
 struct Setpoint {
     std::variant<Command, SupportCommand> command;
     std::vector<Waypoint> waypoints;
-    std::vector<BezierSegment> segments;
+    std::vector<BezierSegment> segments; ///< a curve's, where each is a Bezier segment's form
     PatternShape shape; ///< a pattern's, as it flies (docs/flight-autonomy.md, 4.23)
+    std::vector<NurbsSegment> nurbs;     ///< a curve's, every segment, as it flies (docs/flight-autonomy.md, 4.26)
 };
 
 /// Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType;

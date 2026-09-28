@@ -84,7 +84,7 @@ TaskStatus CapabilityHost::statusOf(const Task& t) const noexcept {
     return s;
 }
 
-Reason CapabilityHost::storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
+Reason CapabilityHost::storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                  TaskRepetition repetition, const PatternShape* shape) {
     if (pendingSuggestions_) materialize();
     if (id == 0 || (id & kSuggestedTask)) return Reason::InvalidParameter; // (the platform's own ids)
@@ -129,7 +129,7 @@ CommandResult CapabilityHost::commandTask(TaskId id, CommandOptions options, con
     // its NEW (from copies: a suggestion made as it is refused may move the tasks kept)
     const Command command = t->command;
     const std::vector<Waypoint> waypoints = t->waypoints;
-    const std::vector<BezierSegment> segments = t->segments;
+    const std::vector<NurbsSegment> segments = t->segments;
     const PatternShape shape = t->shape;
     const std::uint32_t attempts = t->repetition.attempts;
     CommandResult r = submitWith(command, waypoints, segments, options, state, now, true, &shape);
@@ -195,7 +195,7 @@ CapabilityHost::Task& CapabilityHost::newSuggestion(TaskId id) {
     return t;
 }
 
-TaskId CapabilityHost::suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments, const PatternShape* shape) {
+TaskId CapabilityHost::suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const PatternShape* shape) {
     Task& t = newSuggestion(kSuggestedTask | ++suggestionSerial_);
     t.command = setpoint;
     if (shape && std::holds_alternative<PatternCommand>(setpoint)) t.shape = *shape;

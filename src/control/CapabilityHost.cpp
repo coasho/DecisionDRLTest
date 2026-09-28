@@ -601,7 +601,7 @@ void CapabilityHost::limitCurveSpeeds(CurveCommand& c, CheckLog& log) const noex
     bound(c.speedMaxMs, least, false, 4, Constraint::MinAirspeed, log);
 }
 
-Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> segments, bool appending, const sim::VehicleState& state, CheckLog& log) {
+Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const NurbsSegment> segments, bool appending, const sim::VehicleState& state, CheckLog& log) {
     CommandResult& detail = log.result;
     if (const Reason r = checkCurveOptions(c, appending, detail); r != Reason::None) return r;
     const bool hovers = (adapter_->features() & kFeatureHover) != 0;
@@ -620,13 +620,13 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> seg
     const PathStore* store = config_->path.get();
     const std::size_t held = appending && store ? store->segmentCount : 0;
     if (held + n > PathStore::kSegments) return invalid(PathStore::kSegments - held);
-    auto gap = [](const BezierSegment& a, const BezierSegment& b) { // a's end to b's start
-        return std::sqrt(std::pow(b.north[0] - a.north[5], 2) + std::pow(b.east[0] - a.east[5], 2) + std::pow(b.down[0] - a.down[5], 2));
+    auto gap = [](const NurbsSegment& a, const NurbsSegment& b) { // a's end to b's start (clamped: their last point and first)
+        const std::uint32_t e = a.points - 1;
+        return std::sqrt(std::pow(b.north[0] - a.north[e], 2) + std::pow(b.east[0] - a.east[e], 2) + std::pow(b.down[0] - a.down[e], 2));
     };
     for (std::size_t i = 0; i < n; ++i) {
-        const BezierSegment& s = segments[i];
-        for (int k = 0; k < 6; ++k)
-            if (!std::isfinite(s.north[k]) || !std::isfinite(s.east[k]) || !std::isfinite(s.down[k])) return invalid(i);
+        const NurbsSegment& s = segments[i];
+        if (!route::wellFormed(s)) return invalid(i); // (its values finite, a clamped curve: 4.26)
         if (i > 0 && gap(segments[i - 1], s) > 1.0) return invalid(i);
         if (i == 0 && held > 0 && gap(store->segments[held - 1], s) > 1.0) return invalid(0); // where the curve ends
         double length = 0.0; // (its chords: no longer than it)
@@ -637,6 +637,11 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> seg
             last = p;
         }
         if (length < 1.0) return invalid(i); // nothing to follow over the ground
+        double from = 0.0, to = 0.0; // turning no tighter than its curvature, given (4.26)
+        if (!isHold(s.curvature) && route::sharperThan(s, s.curvature, from, to)) {
+            detail.from = static_cast<float>(from), detail.to = static_cast<float>(to);
+            return invalid(i);
+        }
     }
     if (log.range == RangePolicy::None) return Reason::None;
     // its length, and the speed it will fly: the rest of the duration's, else its range's fastest
@@ -670,15 +675,15 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> seg
         const double tightest = 9.80665 * std::tan(f.maxBankRad) / (fast * fast);
         for (std::size_t i = 0; i < n; ++i) {
             double from = 0.0, to = 0.0;
-            if (route::tooTight(segments[i], tightest, from, to))
+            if (route::tooTight(k, static_cast<std::uint32_t>(held + i), tightest, from, to))
                 log.find(Reason::InvalidCurve, static_cast<std::int16_t>(i), Constraint::MaxTurnRate, static_cast<float>(from), static_cast<float>(to));
         }
     }
     // no steeper than it climbs or descends at that speed: flown at its rate (clamped), or refused - each segment's steepest
     for (std::size_t i = 0; i < n; ++i) {
         double at = 0.0;
-        const double gradient = route::steepest(segments[i], at);
-        const route::CurvePoint p = route::evaluate(segments[i], at);
+        const double gradient = route::steepest(k, static_cast<std::uint32_t>(held + i), at);
+        const route::CurvePoint p = k.point(static_cast<std::uint32_t>(held + i), at);
         const bool descends = p.gradient() < 0.0;
         const double rate = descends ? f.maxDescentMs : f.maxClimbMs;
         if (std::isnan(rate) || gradient * fast <= rate) continue;
@@ -695,7 +700,7 @@ Reason CapabilityHost::checkCurve(CurveCommand& c, Span<const BezierSegment> seg
     return Reason::None;
 }
 
-void CapabilityHost::writeCurve(Span<const BezierSegment> segments, bool appending) {
+void CapabilityHost::writeCurve(Span<const NurbsSegment> segments, bool appending) {
     if (!config_->path) config_->path = std::make_unique<PathStore>();
     PathStore& store = *config_->path;
     if (!appending) store.segmentCount = 0, ++store.curve; // a new curve: flown afresh
@@ -984,7 +989,7 @@ Reason CapabilityHost::axesOf(std::size_t index, const Command& command, const C
     return checkAxes(d, axes);
 }
 
-Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
+Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                const sim::VehicleState& state, CheckLog& log, const PatternShape* shape) {
     const bool checked = log.range != RangePolicy::None;
     CommandResult& detail = log.result;
@@ -1026,7 +1031,7 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
 }
 
 void CapabilityHost::launch(const Launch& what, const CommandOptions& options, Command&& setpoint, std::unique_ptr<Behavior>&& behavior, bool route,
-                            Span<const BezierSegment> curve, double now) noexcept {
+                            Span<const NurbsSegment> curve, double now) noexcept {
     takeOver(what.axes, what.id, now);
     // A free slot: every slot in use flies a primary axis the new activity did not take.
     std::size_t s = 0;
@@ -1125,7 +1130,7 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     Command setpoint = std::move(w.command); // (it flies once: moved, never copied)
     const bool route = std::holds_alternative<RouteCommand>(setpoint);
     if (why == Reason::None) why = prepare(record.capability, setpoint, Span<const Waypoint>(w.waypoints.data(), w.waypoints.size()),
-                                           Span<const BezierSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape);
+                                           Span<const NurbsSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape);
     const bool found = why == Reason::None && log.refused != Reason::None; // (refused by what the checks found, not malformed)
     if (why == Reason::None) why = log.refused;
     if (found && w.options.range == RangePolicy::Reject && log.clampable) {
@@ -1153,7 +1158,7 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     const auto* flown = std::get_if<RouteCommand>(&setpoint);
     const double firstStart = !isHold(w.firstStart) ? w.firstStart : flown ? flown->start : kHold;
     launch(Launch{&record, record.id, record.capability, record.axes, detail.flags, firstStart}, w.options, std::move(setpoint), std::move(w.behavior),
-           route, Span<const BezierSegment>(w.segments.data(), w.segments.size()), now);
+           route, Span<const NurbsSegment>(w.segments.data(), w.segments.size()), now);
     return true;
 }
 
@@ -1223,12 +1228,12 @@ CommandResult CapabilityHost::submit(const RouteCommand& route, Span<const Waypo
     return submitWith(Command(route), waypoints, {}, options, state, now);
 }
 
-CommandResult CapabilityHost::submit(const CurveCommand& curve, Span<const BezierSegment> segments, const CommandOptions& options,
+CommandResult CapabilityHost::submit(const CurveCommand& curve, Span<const NurbsSegment> segments, const CommandOptions& options,
                                      const sim::VehicleState& state, double now) {
     return submitWith(Command(curve), {}, segments, options, state, now);
 }
 
-CommandResult CapabilityHost::submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
+CommandResult CapabilityHost::submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                          const CommandOptions& options, const sim::VehicleState& state, double now, bool mayWait,
                                          const PatternShape* shape) {
     if (pendingSuggestions_) materialize();
@@ -1446,7 +1451,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
     return result;
 }
 
-CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& curve, Span<const BezierSegment> segments,
+CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& curve, Span<const NurbsSegment> segments,
                                      const sim::VehicleState& state, Caller caller) noexcept {
     details_.clear();
     const int found = liveSlot(activity);
@@ -1499,7 +1504,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& cu
 CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoint, const sim::VehicleState& state, Caller caller,
                                      const PatternShape* shape) noexcept {
     if (const auto* route = std::get_if<RouteCommand>(&setpoint)) return update(activity, *route, {}, state, caller);
-    if (const auto* curve = std::get_if<CurveCommand>(&setpoint)) return update(activity, *curve, {}, state, caller);
+    if (const auto* curve = std::get_if<CurveCommand>(&setpoint)) return update(activity, *curve, Span<const NurbsSegment>{}, state, caller);
     details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) {
@@ -1747,7 +1752,7 @@ CommandResult CapabilityHost::activityCommand(ActivityId activity, ActivityComma
     return result;
 }
 
-CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const BezierSegment> segments,
+CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                             const sim::VehicleState& state, Caller caller, const PatternShape* shape) noexcept {
     const ActivityRecord& record = w.record;
     const ActivityId activity = record.id;
@@ -1762,8 +1767,8 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     Command next = w.command;
     PatternShape nextShape = w.shape;
     Span<const Waypoint> points(w.waypoints.data(), w.waypoints.size());
-    Span<const BezierSegment> pieces(w.segments.data(), w.segments.size());
-    std::array<BezierSegment, PathStore::kSegments> joined; // (a curve appended to: the two together)
+    Span<const NurbsSegment> pieces(w.segments.data(), w.segments.size());
+    std::array<NurbsSegment, PathStore::kSegments> joined; // (a curve appended to: the two together)
     if (const auto* route = std::get_if<RouteCommand>(&setpoint)) {
         auto& kept = std::get<RouteCommand>(next);
         for (const auto& [from, to] : {std::pair{route->projection, &kept.projection}, {route->repeat, &kept.repeat}, {route->end, &kept.end},
@@ -1792,7 +1797,7 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
             }
             std::copy(w.segments.begin(), w.segments.end(), joined.begin());
             std::copy(segments.begin(), segments.end(), joined.begin() + static_cast<std::ptrdiff_t>(w.segments.size()));
-            pieces = Span<const BezierSegment>(joined.data(), w.segments.size() + segments.size());
+            pieces = Span<const NurbsSegment>(joined.data(), w.segments.size() + segments.size());
         } else if (!segments.empty()) {
             pieces = segments;
         }

@@ -9,6 +9,7 @@
 #include "mode_flights.h"
 
 #include "control/Features.h"
+#include "control/Route.h"
 #include "fsim/Altimeter.h"
 #include "fsim/BuiltinControllers.h"
 #include "fsim/GuidanceModes.h"
@@ -1101,6 +1102,82 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             return r.accepted();
         },
         [&](const Plane& p) { return 1.5 * curveLength(p) / std::max(p.cruiseMs, 0.1) + 30.0; }, none, completed);
+    // A-GRA's curve as its schema gives it (ADR-29 FA-5d1: CRV-03): clamped rational B-splines - an S as a rational
+    // cubic (seven points unevenly weighted, three interior knots) twelve orbit radii long, a semicircle round to the
+    // right as a rational quadratic (NURBS's exact circle), a straight cubic on - off the curve from a fifth along it
+    struct NurbsPlan {
+        std::vector<std::array<double, 3>> line; ///< the curve, dense, north and east of its start
+        std::size_t hint = 0;
+        double miss = 0.0;
+    };
+    std::map<std::uint32_t, NurbsPlan> nurbsPlans;
+    auto knotted = [](int degree, const std::vector<std::array<double, 3>>& points, const std::vector<double>& weights, const std::vector<double>& interior) {
+        NurbsSegment seg;
+        seg.points = static_cast<std::uint32_t>(points.size());
+        for (std::size_t i = 0; i < points.size(); ++i) seg.north[i] = points[i][0], seg.east[i] = points[i][1], seg.down[i] = points[i][2], seg.weight[i] = weights[i];
+        std::vector<double> k(static_cast<std::size_t>(degree + 1), 0.0);
+        k.insert(k.end(), interior.begin(), interior.end());
+        k.insert(k.end(), static_cast<std::size_t>(degree + 1), 1.0);
+        seg.knots = static_cast<std::uint32_t>(k.size());
+        std::copy(k.begin(), k.end(), seg.knot);
+        return seg;
+    };
+    run("fsim.guidance.curve", 0.0,
+        [&](const Plane& p) {
+            const double R = orbitRadius(p), L = 12.0 * R, a = 0.8 * R, rc = 1.6 * R, half = std::sqrt(0.5);
+            std::vector<NurbsSegment> segments = {
+                knotted(3, {{0.0, 0.0, 0.0}, {0.15 * L, 0.0, 0.0}, {0.3 * L, a, 0.0}, {0.5 * L, a, 0.0}, {0.7 * L, -a, 0.0}, {0.85 * L, 0.0, 0.0}, {L, 0.0, 0.0}},
+                        {1.0, 1.4, 0.8, 1.0, 1.25, 0.9, 1.0}, {0.2, 0.45, 0.7}),
+                knotted(2, {{L, 0.0, 0.0}, {L + rc, 0.0, 0.0}, {L + rc, rc, 0.0}, {L + rc, 2 * rc, 0.0}, {L, 2 * rc, 0.0}}, {1.0, half, 1.0, half, 1.0},
+                        {0.5, 0.5}),
+                knotted(3, {{L, 2 * rc, 0.0}, {L - R, 2 * rc, 0.0}, {L - 2 * R, 2 * rc, 0.0}, {L - 3 * R, 2 * rc, 0.0}}, {1.0, 1.0, 1.0, 1.0}, {})};
+            const double c = std::cos(p.start.eulerRad[2]), sn = std::sin(p.start.eulerRad[2]);
+            for (auto& seg : segments) // (along its heading)
+                for (std::uint32_t i = 0; i < seg.points; ++i) {
+                    const double n = seg.north[i], e = seg.east[i];
+                    seg.north[i] = n * c - e * sn, seg.east[i] = n * sn + e * c;
+                }
+            NurbsPlan& plan = nurbsPlans[p.id];
+            plan = NurbsPlan{};
+            for (const auto& seg : segments)
+                for (int k = plan.line.empty() ? 0 : 1; k <= 1500; ++k) {
+                    const route::CurvePoint q = route::rational(seg, k / 1500.0);
+                    plan.line.push_back({q.p[0], q.p[1], q.p[2]});
+                }
+            const CommandResult r = w.submit(p.id, CurveCommand{}, Span<const NurbsSegment>(segments));
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            return r.accepted();
+        },
+        [&](const Plane& p) { return (12.0 + 1.6 * kPi + 3.0) * orbitRadius(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) * 1.5 + 60.0; },
+        [&](const Plane& p) { // the nearest point of the curve, searched about the last
+            NurbsPlan& plan = nurbsPlans[p.id];
+            if (!w.activity(activity[p.id])->live()) return;
+            double north, east;
+            offset(*w.vehicleState(p.id), p.start.latitudeRad, p.start.longitudeRad, north, east);
+            const std::size_t lo = plan.hint > 300 ? plan.hint - 300 : 0, hi = std::min(plan.line.size() - 1, plan.hint + 1500);
+            double best = 1e18;
+            std::size_t at = plan.hint;
+            for (std::size_t j = lo; j < hi; ++j) {
+                const auto& a0 = plan.line[j];
+                const auto& b0 = plan.line[j + 1];
+                const double bn = b0[0] - a0[0], be = b0[1] - a0[1], span = bn * bn + be * be;
+                const double u = span > 0.0 ? std::clamp(((north - a0[0]) * bn + (east - a0[1]) * be) / span, 0.0, 1.0) : 0.0;
+                if (const double d = std::hypot(a0[0] + u * bn - north, a0[1] + u * be - east); d < best) best = d, at = j;
+            }
+            plan.hint = at;
+            if (at > 300) plan.miss = std::max(plan.miss, best); // (from a fifth along the S: joined)
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const double R = orbitRadius(p), miss = nurbsPlans[p.id].miss;
+            INFO(activityStateName(r.state) << "; R " << R << ", off the curve " << miss << " m");
+            CHECK(r.state == ActivityState::Completed);
+            // (the worst: a wing 3.8 % of its radius, the Skua's 5.1 m - the KC-46A's 287 m, 3.2 % of its 8.9 km; a rotorcraft 5.6 %,
+            // the Crazyflie's 0.38 m)
+            CHECK(miss < (p.rotor ? std::max(0.5, 0.1 * R) : std::max(20.0, 0.05 * R)));
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

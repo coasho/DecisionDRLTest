@@ -51,8 +51,10 @@ public:
     void command(const RouteCommand& route, Span<const Waypoint> waypoints);
     /// A curve (fsim.guidance.curve) with its segments, into the stack's own
     /// path store (at most PathStore::kSegments), flown afresh; unchecked, as
-    /// every command given the stack on its own.
+    /// every command given the stack on its own. Bezier segments, or as
+    /// A-GRA's schema gives them (docs/flight-autonomy.md, 4.26).
     void command(const CurveCommand& curve, Span<const BezierSegment> segments);
+    void command(const CurveCommand& curve, Span<const NurbsSegment> segments);
     /// A pattern (fsim.guidance.pattern) with its shape (docs/flight-autonomy.md, 4.23), into the stack's own path
     /// store: the shape replaces the one before, the pattern merges as the same mode again does.
     void command(const PatternCommand& pattern, const PatternShape& shape);

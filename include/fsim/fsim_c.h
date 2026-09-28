@@ -772,6 +772,34 @@ FSIM_API int fsim_activity_update_curve_as(fsim_world* world, fsim_activity_id a
                                            const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result);
 FSIM_API int fsim_activity_update_curve_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
                                            uint32_t count, const fsim_bezier_segment* segments, uint32_t segment_count, fsim_command_result* result);
+/* ABI 1.24 (docs/flight-autonomy.md, 4.26): a curve's segment as A-GRA's schema gives it (MA_NURBS_PointType) - a
+ * clamped rational B-spline: `points` control points (4 to 10), metres north, east and down from the curve's
+ * reference, each with its `weight` (above 0), and `knots` knots (4 to 14, at least points + 2: its degree is knots -
+ * points - 1), from 0 and never decreasing, the first and the last each as many times as the degree and once more.
+ * `curvature` (1/m; NaN: not said) is the most it turns, checked against it; `first_index` and `last_index` (NaN: not
+ * said) its first and last control points: 0 and points - 1. A Bezier segment is one: six points, weights 1, knots
+ * [0 x6, 1 x6]. fsim_nurbs_segment_init sets struct_size, every weight 1, the last three NaN and the rest 0. */
+typedef struct fsim_nurbs_segment {
+    uint32_t struct_size;
+    uint32_t points, knots;
+    uint32_t reserved;
+    double north[10], east[10], down[10], weight[10];
+    double knot[14];
+    double curvature, first_index, last_index;
+} fsim_nurbs_segment;
+FSIM_API void fsim_nurbs_segment_init(fsim_nurbs_segment* segment);
+/* A curve with its segments as A-GRA's schema gives them (1 to 10, `segments[0].struct_size` bytes apart), as
+ * fsim_vehicle_submit_curve takes Bezier segments: a malformed one (not a clamped curve, or turning tighter than its
+ * curvature says) refused invalid_curve naming it, and the section. */
+FSIM_API int fsim_vehicle_submit_nurbs(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_nurbs_segment* segments,
+                                       uint32_t segment_count, const fsim_command_options* options, fsim_command_result* result);
+/* UPDATE of a curve with segments as A-GRA's schema gives them, as fsim_activity_update_curve (_as, _by). */
+FSIM_API int fsim_activity_update_nurbs(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
+                                        const fsim_nurbs_segment* segments, uint32_t segment_count, fsim_command_result* result);
+FSIM_API int fsim_activity_update_nurbs_as(fsim_world* world, fsim_activity_id activity, int source, const double* fields, uint32_t count,
+                                           const fsim_nurbs_segment* segments, uint32_t segment_count, fsim_command_result* result);
+FSIM_API int fsim_activity_update_nurbs_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
+                                           uint32_t count, const fsim_nurbs_segment* segments, uint32_t segment_count, fsim_command_result* result);
 
 /* What a vehicle can do, as its guidance plans with it (docs/vehicle-interface.md,
  * 7.1; A-GRA's performance profile): NaN where the aircraft's profile and loops
@@ -1007,7 +1035,8 @@ FSIM_API void fsim_task_status_init(fsim_task_status* status);
 FSIM_API const char* fsim_task_state_name(int state); /* "awaiting_execution", "execution_pending", "executing", "completed", "dropped", ... */
 
 /* One command of a batch NEW: which call it would be, and that call's arguments. */
-enum fsim_batch_kind { FSIM_BATCH_LEVEL = 0, FSIM_BATCH_BEHAVIOR, FSIM_BATCH_SUPPORT, FSIM_BATCH_MODE, FSIM_BATCH_ROUTE, FSIM_BATCH_CURVE };
+enum fsim_batch_kind { FSIM_BATCH_LEVEL = 0, FSIM_BATCH_BEHAVIOR, FSIM_BATCH_SUPPORT, FSIM_BATCH_MODE, FSIM_BATCH_ROUTE, FSIM_BATCH_CURVE,
+                       FSIM_BATCH_NURBS /* ABI 1.24: a curve with segments as A-GRA's schema gives them */ };
 typedef struct fsim_batch_command {
     uint32_t struct_size;
     int32_t kind;                           /* fsim_batch_kind */
@@ -1020,6 +1049,7 @@ typedef struct fsim_batch_command {
     uint32_t segment_count;
     const fsim_bezier_segment* segments;    /* FSIM_BATCH_CURVE, segments[0].struct_size bytes apart */
     const fsim_command_options* options;    /* NULL: fsim_command_options_init's */
+    const fsim_nurbs_segment* nurbs;        /* FSIM_BATCH_NURBS (ABI 1.24): segment_count of them, nurbs[0].struct_size bytes apart */
 } fsim_batch_command;
 /* Several NEWs at once (A-GRA's several command instances in one message), `batch[0].struct_size` bytes apart, made in
  * order at this simulation time: `results[i]` answers `batch[i]`, and `details[i]` (may be NULL; `details[0].struct_size`
@@ -1052,7 +1082,8 @@ FSIM_API int fsim_vehicle_task_at(fsim_world* world, uint32_t id, uint32_t index
  * it: its kind and code (a level, fsim_support, fsim_mode); its fields - a level's all of them (as
  * fsim_command_field_count_full counts them), a mode's, a route's or a curve's options, a support command's (the
  * engines': four throttles); a behaviour's command; a route's waypoints, or a curve's segments with the appended ones
- * (its flyout curve, from the reference in fields 0-2). A waiting one's is as given. Its arrays are the library's,
+ * (its flyout curve, from the reference in fields 0-2) - FSIM_BATCH_CURVE's where each is a Bezier's form, else
+ * FSIM_BATCH_NURBS's (ABI 1.24; `nurbs` set where the caller's struct has it). A waiting one's is as given. Its arrays are the library's,
  * valid until the next setpoint read, world step, reset or destroy; `options` NULL. `out->struct_size` set by the
  * caller. FSIM_INVALID_ARGUMENT for an activity not live. */
 FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id activity, fsim_batch_command* out);

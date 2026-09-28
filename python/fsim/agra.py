@@ -15,7 +15,7 @@ import datetime
 import math
 
 from . import _native
-from .world import ActivityBasis, ActivityState, ActivityWait, Energy, Rank, TimeCriticality, TimeWindow
+from .world import ActivityBasis, ActivityState, ActivityWait, Energy, NurbsSegment, Rank, TimeCriticality, TimeWindow
 
 #: CommandStatus (0 accepted, 1 rejected, 2 canceled, 3 valid) -> CommandProcessingStateEnum. RECEIVED is never
 #: needed: every command is answered at once. A validation that would be accepted is ACCEPTED, and its
@@ -224,13 +224,28 @@ def end_point(point):
 def flyout_curve(setpoint):
     """A curve's setpoint (Activity.setpoint()) as A-GRA's FlyoutCurve (docs/flight-autonomy.md, 4.12): one
     MA_NURBS_PointType per segment it flies, appended ones too - {"CenterReference": (latitude_rad, longitude_rad,
-    altitude_m above sea level), "ControlPoints": [((north, east, down), weight 1.0)] * 6, "KnotVector": KNOT_VECTOR}."""
+    altitude_m above sea level), "ControlPoints": [((north, east, down), weight)], "KnotVector": [knots]}: a Bezier
+    segment's six points weighted 1.0 and KNOT_VECTOR, a segment given as A-GRA's schema gives it (fsim.NurbsSegment,
+    4.26) as it was given, with its "Curvature", "InitialControlPointIndex" and "FinalControlPointIndex" where said."""
     if setpoint is None or setpoint.method != "submit_curve":
         raise ValueError("only a curve's setpoint has a flyout curve")
     k = setpoint.kwargs
     reference = (k["latitude_rad"], k["longitude_rad"], k["altitude_m"])
-    return [{"CenterReference": reference, "ControlPoints": [((n, e, d), 1.0) for n, e, d in zip(s.north, s.east, s.down)],
-             "KnotVector": KNOT_VECTOR} for s in setpoint.args[0]]
+    out = []
+    for s in setpoint.args[0]:
+        if isinstance(s, NurbsSegment):
+            weights = s.weights if s.weights is not None else [1.0] * len(s.north)
+            segment = {"CenterReference": reference, "ControlPoints": [((n, e, d), w) for n, e, d, w in zip(s.north, s.east, s.down, weights)],
+                       "KnotVector": list(s.knots)}
+            for key, value in (("Curvature", s.curvature), ("InitialControlPointIndex", s.first_index),
+                               ("FinalControlPointIndex", s.last_index)):
+                if value == value:  # (said)
+                    segment[key] = int(value) if key != "Curvature" else value
+            out.append(segment)
+        else:
+            out.append({"CenterReference": reference, "ControlPoints": [((n, e, d), 1.0) for n, e, d in zip(s.north, s.east, s.down)],
+                        "KnotVector": KNOT_VECTOR})
+    return out
 
 
 def navigation_report(report):

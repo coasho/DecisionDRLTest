@@ -170,8 +170,12 @@ public:
     /// NEW of a curve (fsim.guidance.curve, A-GRA's curve following;
     /// docs/sdk/control.md, "Curves"): 1 to 10 quintic Bezier segments, each
     /// starting where the one before ends, checked (InvalidCurve names the
-    /// segment, and a section too tight in CommandResult::from and to).
+    /// segment, and a section too tight in CommandResult::from and to). Or its
+    /// segments as A-GRA's schema gives them: clamped rational B-splines
+    /// (docs/flight-autonomy.md, 4.26).
     control::CommandResult submit(const control::CurveCommand& curve, Span<const control::BezierSegment> segments,
+                                  const control::CommandOptions& options = {});
+    control::CommandResult submit(const control::CurveCommand& curve, Span<const control::NurbsSegment> segments,
                                   const control::CommandOptions& options = {});
     /// NEW of a pattern (fsim.guidance.pattern) with its shape - A-GRA's orbit as
     /// its schema gives it: two circles, an inbound heading, legs by time, turns
@@ -272,6 +276,8 @@ public:
     control::Reason storeTask(control::TaskId task, const control::Command& command, Span<const control::Waypoint> waypoints = {},
                               Span<const control::BezierSegment> segments = {}, control::TaskRepetition repetition = {},
                               const control::PatternShape* shape = nullptr);
+    /// Keep a task whose command is a batch item's: a curve's segments either way (its options not kept).
+    control::Reason storeTask(control::TaskId task, const control::BatchCommand& command, control::TaskRepetition repetition = {});
     /// Fly it: the NEW of its command, the task among the requirements it traces to.
     control::CommandResult commandTask(control::TaskId task, const control::CommandOptions& options = {});
     control::CommandResult cancelTask(control::TaskId task, control::Caller caller = {});
@@ -357,6 +363,7 @@ public:
     /// UPDATE of a curve: its options (kHold keeps one), and segments - with
     /// `append` 1 after its end, from the same reference; else a new curve.
     control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::BezierSegment> segments);
+    control::CommandResult update(control::ActivityId activity, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments);
     /// UPDATE of a pattern with its shape: the fields given in either (kHold keeps one) merged, the pattern flown afresh.
     control::CommandResult update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
@@ -374,6 +381,8 @@ public:
                                   Span<const control::Waypoint> waypoints);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::BezierSegment> segments);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
+                                  Span<const control::NurbsSegment> segments);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
                                   const control::PatternShape& shape);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);

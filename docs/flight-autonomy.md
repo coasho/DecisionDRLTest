@@ -636,6 +636,25 @@ A-GRA's loiter gives two things the patterns did not: a rotorcraft's hover over 
   - C ABI 1.23: `FSIM_PATTERN_HOVER`; `FSIM_MODE_PATTERN` takes 35 fields.
   - Python: `fsim.PatternKind.HOVER`; `submit_pattern(frame=, frame_rotation=, frame_offsets=, frame_x_m=, frame_y_m=, frame_z_m=)`, the rotation and offsets by name or member.
 
+### 4.26 A-GRA's curve segments as its schema gives them (as FA-5d builds them)
+
+A-GRA gives a curve's segments as NURBS (MA_NURBS_PointType): 4 to 10 weighted control points and 4 to 14 knots, of any degree they make (CRV-03), with a curvature and the first and last control points' indices (CRV-08). The VI's quintic Bezier is one of them. FA-5d1 flies them all.
+
+- **The segment** (`NurbsSegment`): its control points, metres north, east and down from the curve's reference as a Bezier's are, each with its weight; its knots; its degree `knots - points - 1`. The schema asks for curves "terminated at both endpoints", so a segment is a clamped B-spline: its first knot comes as many times as its degree and once more, and its last likewise. It starts at its first control point and ends at its last.
+- **Evaluated** by the published mathematics: the B-spline basis and its first two derivatives by the Cox-de Boor recursion (the triangle of knot differences), and a rational curve's derivatives by the quotient rule. Its parameter 0 to 1 runs over its knots' domain. Everything a curve does with a segment - its length tables, the nearest point by Newton steps, the curvature ahead, the checks, the terrain walk - takes its point and derivatives there.
+- **A Bezier's form** - six points, weights 1, knots [0 x6, 1 x6] - is flown by Bernstein's basis, as a `BezierSegment` is. The curve notes each segment's form when it measures it, so a Bezier curve flies bit for bit as before, however it was given. A `BezierSegment` is made one exactly (`NurbsSegment::of`); the path store, the waiting store and tasks hold the general form.
+- **Well formed**, or refused `invalid_curve` naming the segment:
+  - 4 to 10 points, 4 to 14 knots, a degree of 1 or more, every value finite;
+  - weights above 0; knots from 0, never decreasing;
+  - clamped: its first and its last knot each exactly degree + 1 times;
+  - no knot within the domain more often than the degree. More would break the curve there. As often as the degree makes a corner, which is allowed: NURBS's circle joins its quarters so, and the turn checks refuse a corner nothing can fly.
+- **Its curvature**, given: the most it turns over the ground, 1/m. A curve turning more than 1 % tighter anywhere is refused `invalid_curve`, naming the segment and the section (`from`, `to`), whatever the policy. The curvature must be above 0.
+- **Its indices**, given: its first and last control points, which a clamped curve starts and ends at - 0, and its last. Others are refused as ill formed. The continuity check joins each segment's last point to the next one's first, within a metre, as before.
+- **Surfaces.**
+  - C++: `NurbsSegment` (`of`, `bezier`, `asBezier`, `degree`); `World::submit(id, CurveCommand, Span<const NurbsSegment>)` and `update(activity, CurveCommand, Span<const NurbsSegment>)` (their `Vehicle` and `Caller` forms), `storeTask(id, task, BatchCommand)`; `BatchCommand::nurbs`; `Setpoint::nurbs` (a curve's every segment; `segments` its Bezier ones, where each is one); `ControlStack::command(CurveCommand, Span<const NurbsSegment>)`. A curve's UPDATE given `{}` for its segments is ambiguous now: give the span's type, or `update(activity, curve)` for its options alone.
+  - C ABI 1.24: `fsim_nurbs_segment` (`fsim_nurbs_segment_init`), `fsim_vehicle_submit_nurbs`, `fsim_activity_update_nurbs` (`_as`, `_by`), `FSIM_BATCH_NURBS` and `fsim_batch_command::nurbs` (read only where the caller's struct has it), and `fsim_activity_get_setpoint` answering `FSIM_BATCH_NURBS` for a curve not all of Bezier segments.
+  - Python: `fsim.NurbsSegment` (`north`, `east`, `down`, `knots`, `weights`, `curvature`, `first_index`, `last_index`); `submit_curve`, `update_curve`, `append`, batches and tasks take them, beside `fsim.BezierSegment`s; `setpoint()` gives them back; `fsim.agra.flyout_curve` gives A-GRA's form as given.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -847,7 +866,10 @@ Laps, entry and exit points, legs by time, turns by bank, rate or type, hold con
 - FA-5a, A-GRA's orbit: two circles, the fix-point orbit's heading, leg time and bank, laps, entry and exit points (LTR-03, LTR-05, LTR-06, LTR-07, LTR-10; 4.23), done 2026-09-28 and measured in section 14;
 - FA-5b, the hold: its turns by rate and type, its duration by entry and exit times, its entries and context (LTR-11 to LTR-14; 4.24), done 2026-09-28 and measured in section 14;
 - FA-5c, the hover loiter and relative points (LTR-15, LTR-18; 4.25), done 2026-09-28 and measured in section 14;
-- FA-5d, curves as the schema gives them: NURBS, references, offsets, curvature and indices, a rotorcraft's circular loiter (CRV-03 to CRV-06, CRV-08, CRV-11).
+- FA-5d, curves as the schema gives them, in three steps:
+  - FA-5d1, general NURBS with their curvature and indices (CRV-03, CRV-08; 4.26), done 2026-09-28 and measured in section 14;
+  - FA-5d2, the curve's reference and its control points' offsets: an altitude reference and range, a frame, rotations, geodetic offsets and altitude choices (CRV-04, CRV-05, CRV-06);
+  - FA-5d3, a rotorcraft's circular loiter at the curve's end (CRV-11).
 
 **Items (17):** CRV-03, CRV-04, CRV-05, CRV-06, CRV-08, CRV-11; LTR-03, LTR-05, LTR-06, LTR-07, LTR-10, LTR-11, LTR-12, LTR-13, LTR-14, LTR-15, LTR-18.
 
@@ -1778,6 +1800,31 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The micro cases are within −0.9 % to +0.7 %; the command cases within −2.9 % to 0.0 %.
   - World throughput is 99.3 to 99.6 % of FA-5b's; protection costs at most 0.6 %.
 - ctest: all 275 tests pass.
+
+**FA-5d1, A-GRA's curve segments (CRV-03, CRV-08).**
+- **Evaluated** (`test_nurbs`), against the Cox-de Boor recursion evaluated in the test:
+  - a rational cubic with three interior knots and uneven weights, and a quartic with a double knot: their points within 9.1e-13 m;
+  - their derivatives against Richardson-extrapolated central differences: the first within 8.3e-10 of its size (at step 1e-3, 1.3e-8: sixteen times as much, the extrapolation's own error of order h^4); the second within 1.5e-8, rounding's floor at either step;
+  - a semicircle as a rational quadratic (NURBS's exact circle), 700 m: within 3.4e-13 m of its radius, its curvature within 1.1e-15 of 1/700;
+  - a Bezier's form through the rational basis: within 9.1e-13 m of Bernstein's; flown by Bernstein's, identical.
+- **Bezier curves fly as before, to the last bit:** a C172x's two-segment S with a segment appended, and an IRIS's curve ending in a hover, flown by this build and by FA-5c's. Their states and progress over 80 s, 64 lines at full precision, are identical. The digests fly no curve; this does.
+- **Refused:**
+  - each of fifteen malformed segments: 3 or 11 points, 15 knots, no degree, a point not finite, a weight of 0, a negative knot, knots falling, not clamped at either end, the first knot once too often, a break (an interior knot degree + 1 times), a curvature of 0, a first index of 1, a last index not its last point;
+  - a curve's second segment not clamped: `invalid_curve` at 1;
+  - a curvature said as 0.8 of the most it turns (5.07e-4 1/m where it turns 6.34e-4): `invalid_curve`, the section 0.688 to 0.719, where it turns tighter; said as 1.02 of it, accepted.
+- **Flown** (`test_nurbs`, calm): a rational cubic S twelve radii long, a semicircle of 1.6 radii round to the right as a rational quadratic, and a cubic straight on.
+  - a C172x (radius 425 m): 7.1 m off the curve, 2.3 m off the semicircle's radius; completed;
+  - an IRIS (20 m): 0.12 m off the curve and the radius.
+  - Its setpoint reads the segments back as given, and no Bezier ones.
+- **The fleet** (`test_fleet`): every aircraft flies the same curve scaled to its orbit's radius, and completes. From a fifth along it, the wings keep within 3.8 % of their radius (the Skua's 5.1 m; in metres, the KC-46A's 287 m, 3.2 % of its 8.9 km) and the rotorcraft within 5.6 % (the Crazyflie's 0.38 m).
+- **Conformance:** the optimise walks give a curve now and then as cubic NURBS - its rational path - with the same faults the Bezier ones carry.
+- **Surfaces:** the C ABI's 1.24 block (a rational cubic submitted, read back as `FSIM_BATCH_NURBS`, appended, one not clamped refused, a batch); Python's `test_nurbs` (submitted, read back, `flyout_curve`, appended as a dict, refused, a batch, a task).
+- **Memory:** the path store holds 32 segments of 464 bytes where it held 144 (10 KB more a vehicle); the host's plan and each curve behaviour's likewise.
+- **Digests:** identical to FA-5c's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-5c, both builds run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 3 of `world`.
+  - The micro cases are within −0.8 % to +1.3 %, but the curve's 4.8 % faster (273.8 ns: its Bernstein sums now inline into the plan's point); the command cases within −1.2 % to +1.3 %.
+  - World throughput is 99.9 to 100.2 % (7 rounds; 3 read 98.7 to 100.6 %) of FA-5c's; protection costs at most 0.5 %.
+- ctest: all 278 tests pass.
 
 ## Appendix A: the inventory
 

@@ -22,12 +22,14 @@ struct fsim_world {
     uint32_t lastVehicle = 0;                      ///< the vehicle that gave it: its details (World::commandDetails) are the last command's
     std::vector<fsim::control::Waypoint> waypoints; ///< a route's, as given (reused: a route updated every step allocates nothing once it has room)
     std::vector<fsim::control::BezierSegment> segments; ///< a curve's, as given (reused likewise)
+    std::vector<fsim::control::NurbsSegment> nurbs;     ///< a curve's as A-GRA's schema gives them (likewise)
     /// An activity's setpoint as last read back (fsim_activity_get_setpoint): what its arrays point into.
     struct Readback {
         fsim::control::Setpoint setpoint;
         std::vector<double> fields;
         std::vector<fsim_waypoint> waypoints;
         std::vector<fsim_bezier_segment> segments;
+        std::vector<fsim_nurbs_segment> nurbs;
         fsim_behavior_command behavior{};
         std::vector<const char*> names;
         std::vector<double> values;
