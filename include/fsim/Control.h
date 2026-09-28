@@ -842,6 +842,7 @@ inline const char* modeBehavior(const Command& c) noexcept {
 /// Implemented by the session; states are the previous step's snapshots.
 struct TablesSection; // fsim/VehicleProfile.h
 struct Altimeter;     // fsim/Altimeter.h
+struct NavigationReport;
 
 class WorldView {
 public:
@@ -849,6 +850,13 @@ public:
     virtual const sim::VehicleState* vehicleState(std::uint32_t id) const noexcept = 0;
     virtual double simTime() const noexcept = 0;
     virtual const sim::EnvironmentState& environment() const noexcept = 0;
+    /// A vehicle's navigation report now (docs/flight-autonomy.md, 4.14): what it has left, its endurance, its contingency.
+    /// During a step only the vehicle whose control update asks may ask for its own - its flight model idle while its
+    /// cascade runs (a route's branch on them: 4.37). False for none (a vehicle it has not; a stack on its own).
+    virtual bool navigation(std::uint32_t id, NavigationReport& out) const noexcept {
+        (void)id, (void)out;
+        return false;
+    }
 };
 
 /// What a controller sees each update (design 9.3 "ControlContext").

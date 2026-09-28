@@ -929,10 +929,11 @@ RouteBranch.__doc__ = ("A route's conditional branch (A-GRA's ConditionalPathSeg
                        "``altitude_reference``; left out, above mean sea level), the time between ``time_begin_s`` and "
                        "``time_end_s`` (World.time's clock), the times it has come to the point, this one too, compared by "
                        "``captures_comparison`` (fsim.Comparison or its name) with ``captures``; with ``operator_input`` 1, only once "
-                       "the operator has commanded it (Activity.command_branch). An endurance (``endurance_comparison`` with "
-                       "``fuel_kg``, ``endurance_s``, ``endurance_end_s``, ``percent``) or a ``contingency`` (fsim.Contingency) is "
-                       "refused not_implemented until FA-6e2b. At most 16; those at one point tried in their order, the first that "
-                       "holds taken, the route planned again from there.")
+                       "the operator has commanded it (Activity.command_branch); what it has left, compared by "
+                       "``endurance_comparison`` with each of ``fuel_kg``, ``endurance_s``, ``endurance_end_s`` and ``percent`` given; "
+                       "its ``contingency`` (fsim.Contingency or its name) - as its navigation report says. A mission critical or "
+                       "lost comms contingency is refused not_implemented until FA-16. At most 16; those at one point tried in their "
+                       "order, the first that holds taken, the route planned again from there.")
 
 RoutePath = collections.namedtuple("RoutePath", "id type first count", defaults=(0, HOLD, 0, 0))
 RoutePath.__doc__ = ("One of a route's paths (A-GRA's MA_RoutePathType; docs/flight-autonomy.md, 4.36): ``count`` of its waypoints "

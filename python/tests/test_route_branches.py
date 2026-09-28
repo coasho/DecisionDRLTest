@@ -58,6 +58,15 @@ class RouteBranchesTest(unittest.TestCase):
         with self.assertRaises(fsim.Rejected) as refused:
             v.submit_route(points, paths=paths, branches=[fsim.RouteBranch(5, 5)])
         self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_waypoint", 5))
+        # what it has left and its contingency, by name: taken as its navigation report says (FA-6e2b); a contingency the
+        # platform does not reach yet refused, naming its point (FA-16)
+        left = v.navigation_report()
+        low = fsim.RouteBranch(5, 6, percent=left.percent + 1.0, endurance_comparison="less_equal", contingency="normal")
+        c = v.submit_route(points, paths=paths, branches=[low])
+        self.assertEqual(c.setpoint().kwargs["branches"][0].contingency, float(fsim.Contingency.NORMAL))
+        with self.assertRaises(fsim.Rejected) as lost:
+            v.submit_route(points, paths=paths, branches=[fsim.RouteBranch(5, 6, contingency="lost_comms")])
+        self.assertEqual((lost.exception.reason, lost.exception.index), ("not_implemented", 5))
 
 
 if __name__ == "__main__":

@@ -59,6 +59,12 @@ control::EnergyNow World::Answers::energyNow(std::uint32_t id) const {
     return out;
 }
 
+bool World::navigation(std::uint32_t id, control::NavigationReport& out) const noexcept {
+    if (!entry(id)) return false;
+    out = navigationReport(id);
+    return true;
+}
+
 control::NavigationReport World::navigationReport(std::uint32_t id) const {
     control::NavigationReport r;
     const Entry* e = entry(id);

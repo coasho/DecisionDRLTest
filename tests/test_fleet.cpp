@@ -1984,6 +1984,55 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(flown == "0 1 2 3 4 1 2 3 4 5"); // (round twice, then out)
             CHECK(r.state == ActivityState::Completed); // (all 35: 256 s after the NEW, the fighters, to 500 s, the C-17A)
         });
+    // and on what it has left (FA-6e2b): the same route, out at the square's last once its fuel or charge is below what it had
+    // at the NEW, as its navigation report says - the first time it comes there
+    std::map<std::uint32_t, std::vector<std::uint32_t>> enduranceOrders;
+    std::map<std::uint32_t, NavigationReport> enduranceAt;
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
+            const double v = p.rotor ? p.cruiseMs : p.start.airspeedTrueMs;
+            enduranceOrders[p.id].clear();
+            auto point = [&](double ahead, double right) { // (seconds at its speed)
+                const PositionCommand q = pointFrom(p.start, (ahead * c - right * sn) * v, (ahead * sn + right * c) * v, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            std::vector<Waypoint> points = {point(30, 0), point(60, 0), point(60, 30), point(90, 30), point(90, 0), point(90, -30)};
+            points[0].speed = v;
+            if (p.rotor) points[0].speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+            points[0].next = 1.0, points[4].next = 1.0;
+            const std::vector<RoutePath> paths = {RoutePath{1, kHold, 0, 1}, RoutePath{2, kHold, 1, 4}, RoutePath{3, kHold, 5, 1}};
+            const NavigationReport n0 = w.navigationReport(p.id);
+            enduranceAt[p.id] = n0;
+            RouteBranch out;
+            out.point = 4, out.next = 5.0, out.percent = n0.percent - 1e-6, out.enduranceComparison = static_cast<double>(Comparison::LessEqual);
+            RouteCommand route;
+            route.end = static_cast<double>(EndBehavior::Loiter);
+            const CommandResult res = w.submit(p.id, route, points, {}, {}, {}, paths, std::vector<RouteBranch>{out});
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index << "; " << energyName(n0.energy) << " " << n0.percent << " %");
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        [&](const Plane& p) { return p.rotor ? 250.0 : 420.0; },
+        [&](const Plane& p) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            std::vector<std::uint32_t>& order = enduranceOrders[p.id];
+            if (r.live() && (order.empty() || order.back() != r.progress.segment)) order.push_back(r.progress.segment);
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const std::vector<std::uint32_t>& order = enduranceOrders[p.id];
+            std::string flown;
+            for (std::size_t i = 0; i < order.size() && i < 14; ++i) flown += (i ? " " : "") + std::to_string(order[i]);
+            const NavigationReport n = w.navigationReport(p.id);
+            INFO(activityStateName(r.state) << "; flew " << flown << "; " << n.percent << " % left of " << enduranceAt[p.id].percent);
+            CHECK(flown == "0 1 2 3 4 5"); // (out the first time)
+            CHECK(r.state == ActivityState::Completed); // (all 35: 161 s after the NEW, the fighters, to 229 s, the B-52H and the E-3G)
+            CHECK(n.percent < enduranceAt[p.id].percent);
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

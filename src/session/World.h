@@ -337,6 +337,7 @@ public:
 
     // --- Environment, time, comm ---------------------------------------------
     const sim::EnvironmentState& environment() const noexcept override { return environment_; }
+    bool navigation(std::uint32_t id, control::NavigationReport& out) const noexcept override;
     void setEnvironment(const sim::EnvironmentState& environment);
     double simTime() const noexcept override { return simTime_; }
     double dt() const noexcept { return options_.dt; }
@@ -392,6 +393,8 @@ private:
         const sim::VehicleState* vehicleState(std::uint32_t id) const noexcept override;
         double simTime() const noexcept override { return world_.simTime_; }
         const sim::EnvironmentState& environment() const noexcept override { return world_.environment_; }
+        /// Its own report, for the vehicle whose control update asks (4.37: a route's branch).
+        bool navigation(std::uint32_t id, control::NavigationReport& out) const noexcept override { return world_.navigation(id, out); }
 
     private:
         const World& world_;

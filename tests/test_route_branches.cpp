@@ -198,8 +198,63 @@ TEST_CASE("route branches: the operator's input - held until commanded, then tak
     CHECK(list(ff.order).rfind("0 1 2 3 4 5 2 3 4 5 2", 0) == 0);
 }
 
-TEST_CASE("route branches: refused as a point is, naming its point - one that is none, a condition malformed, 17; not built, "
-          "an endurance or a contingency; the operator's input refused where it takes none",
+TEST_CASE("route branches: what it has left and its contingency, as its navigation report says - out once it has burned any, "
+          "never at an endurance it will not reach, the first contingency that is its own",
+          "[modes]") {
+    session::World w(options("route-branches-endurance"));
+    const auto burned = wing(w, "c172", 1500.0, 55.0);
+    const auto never = wing(w, "c172", 1500.0, 55.0, 1);
+    const auto critical = wing(w, "c172", 1500.0, 55.0, 2);
+    const auto normal = wing(w, "c172", 1500.0, 55.0, 3);
+    NavigationSettings reserve; // (a reserve of nearly all it has: flight critical)
+    reserve.reserveFraction = 0.99;
+    REQUIRE(w.setNavigation(critical, reserve) == Reason::None);
+    w.step(stepsFor(w, 2.0));
+    auto routeFor = [&](std::uint32_t id, const std::vector<RouteBranch>& branches) {
+        const auto& s = *w.vehicleState(id);
+        std::vector<RoutePath> paths;
+        const std::vector<Waypoint> points = threePaths(s.latitudeRad, s.longitudeRad, 3000.0, paths);
+        const CommandResult r = w.submit(id, RouteCommand{}, points, {}, {}, {}, paths, branches);
+        INFO(reasonName(r.reason) << " at " << r.index);
+        REQUIRE(r.accepted());
+        return r.activity;
+    };
+    const NavigationReport n0 = w.navigationReport(burned);
+    REQUIRE(n0.energy == Energy::Fuel);
+    const double now = w.simTime();
+    // out by C once it has burned any fuel; never where it would have to have burned 90 % of it
+    RouteBranch any = branchAt(5, 6.0), most = branchAt(5, 6.0);
+    any.percent = n0.percent - 1e-6, any.enduranceComparison = static_cast<double>(Comparison::LessEqual);
+    most.percent = n0.percent - 90.0, most.enduranceComparison = static_cast<double>(Comparison::LessEqual);
+    const ActivityId a = routeFor(burned, {any}), b = routeFor(never, {most});
+    // flight critical (its reserve): a branch for normal not taken, the next for flight critical taken - to C's last
+    RouteBranch forNormal = branchAt(5, 6.0), forCritical = branchAt(5, 7.0);
+    forNormal.contingency = static_cast<double>(Contingency::Normal), forCritical.contingency = static_cast<double>(Contingency::FlightCritical);
+    const ActivityId c = routeFor(critical, {forNormal, forCritical});
+    // normal: the one for flight critical not taken, then one on its endurance's end and fuel taken
+    RouteBranch ending = branchAt(5, 6.0);
+    ending.enduranceEndS = now + 1e9, ending.fuelKg = n0.fuelKg - 1e-6, ending.enduranceComparison = static_cast<double>(Comparison::LessEqual);
+    const ActivityId d = routeFor(normal, {forCritical, ending});
+    Flown fa, fb, fc, fd;
+    for (unsigned k = 0; k < stepsFor(w, 700.0); ++k) {
+        w.step();
+        fa.watch(w, a), fb.watch(w, b), fc.watch(w, c), fd.watch(w, d);
+    }
+    const NavigationReport na = w.navigationReport(burned), nc = w.navigationReport(critical);
+    std::printf("route branches: out once burned any (%.3f %% left of %.3f) flew %s; never at 90 %% flew %s; flight critical (%s) flew %s; "
+                "normal flew %s\n",
+                na.percent, n0.percent, list(fa.order).c_str(), list(fb.order).c_str(), contingencyName(nc.contingency), list(fc.order).c_str(),
+                list(fd.order).c_str());
+    CHECK(list(fa.order) == "0 1 2 3 4 5 6 7");
+    CHECK(list(fb.order).rfind("0 1 2 3 4 5 2 3 4 5", 0) == 0);
+    CHECK(std::find(fb.order.begin(), fb.order.end(), 6u) == fb.order.end());
+    CHECK(nc.contingency == Contingency::FlightCritical);
+    CHECK(list(fc.order) == "0 1 2 3 4 5 7");
+    CHECK(list(fd.order) == "0 1 2 3 4 5 6 7");
+}
+
+TEST_CASE("route branches: refused as a point is, naming its point - one that is none, a condition malformed, 17; not built, a "
+          "contingency the platform does not reach yet; the operator's input refused where it takes none",
           "[modes]") {
     session::World w(options("route-branches-refused"));
     const auto v = wing(w, "c172", 1500.0, 55.0);
@@ -243,11 +298,13 @@ TEST_CASE("route branches: refused as a point is, naming its point - one that is
     CHECK((r1.reason == Reason::InvalidWaypoint && r1.index == 5));
     const CommandResult many = answer(std::vector<RouteBranch>(17, branchAt(5, 6.0)));
     CHECK((many.reason == Reason::InvalidWaypoint && many.index == 5));
-    // not built yet: its row, partial
-    b = branchAt(5, 6.0), b.percent = 20.0, b.enduranceComparison = static_cast<double>(Comparison::LessEqual);
-    refused(b, Reason::NotImplemented, 5, "an endurance");
-    b = branchAt(5, 6.0), b.contingency = static_cast<double>(Contingency::FlightCritical);
-    refused(b, Reason::NotImplemented, 5, "a contingency");
+    // not built yet (its row, partial): a contingency the platform does not reach yet (FA-16)
+    b = branchAt(5, 6.0), b.contingency = static_cast<double>(Contingency::MissionCritical);
+    refused(b, Reason::NotImplemented, 5, "mission critical");
+    b = branchAt(5, 6.0), b.contingency = static_cast<double>(Contingency::LostComms);
+    refused(b, Reason::NotImplemented, 5, "lost comms");
+    b = branchAt(5, 6.0), b.percent = 20.0, b.enduranceComparison = static_cast<double>(Comparison::LessEqual), b.contingency = 0.0;
+    CHECK(answer({b}).accepted()); // (an endurance and a normal contingency: built)
     const SupportInfo* row = w.supportTable(v)->find("fsim.guidance.route/conditional_segment");
     REQUIRE(row != nullptr);
     CHECK(row->support == Support::Partial);

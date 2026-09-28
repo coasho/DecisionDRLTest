@@ -449,6 +449,11 @@ public:
                     if (chance(0.3))
                         b.captures = static_cast<double>(pick(3)), b.capturesComparison = static_cast<double>(pick(static_cast<std::size_t>(Comparison::Count) + 1));
                     if (chance(0.2)) b.operatorInput = 1.0;
+                    if (chance(0.2)) { // (what it has left, FA-6e2b: now and then without its comparison)
+                        b.percent = uniform(0.0, 110.0), b.enduranceS = chance(0.5) ? kHold : uniform(0.0, 20000.0);
+                        if (chance(0.9)) b.enduranceComparison = static_cast<double>(pick(static_cast<std::size_t>(Comparison::Count)));
+                    }
+                    if (chance(0.1)) b.contingency = chance(0.5) ? static_cast<double>(Contingency::Normal) : static_cast<double>(Contingency::FlightCritical);
                     branches.push_back(b);
                 }
             }

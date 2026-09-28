@@ -84,11 +84,11 @@ Reason CapabilityHost::checkBranches(route::Plan& p, Span<const Waypoint> waypoi
         const int n = route::flightOrder(waypoints.data(), given, p.paths, p.pathCount, k, repeat, order, loop, bad, b.next);
         if (n < 0 || (loop >= 0 && loop + 1 == n)) return at(k, Reason::InvalidWaypoint); // (a next that is none, round one point)
     }
-    // not built yet (its row, partial): the endurance and contingency conditions (FA-6e2b)
-    for (const RouteBranch& b : branches) {
-        const bool endurance = !isHold(b.fuelKg) || !isHold(b.enduranceS) || !isHold(b.enduranceEndS) || !isHold(b.percent);
-        if (endurance || !isHold(b.contingency)) return at(b.point, Reason::NotImplemented);
-    }
+    // not built yet (its row, partial): a contingency the platform does not reach yet - mission critical (a subsystem's
+    // failure) and lost comms (the policy's link) are FA-16's
+    for (const RouteBranch& b : branches)
+        if (b.contingency == static_cast<double>(Contingency::MissionCritical) || b.contingency == static_cast<double>(Contingency::LostComms))
+            return at(b.point, Reason::NotImplemented);
     p.branchCount = static_cast<std::uint32_t>(branches.size());
     std::copy_n(branches.data(), p.branchCount, p.branches);
     return Reason::None;
@@ -169,7 +169,21 @@ bool RouteBehavior::holds(const ControlContext& ctx, const RouteBranch& b, std::
     }
     const double now = ctx.world ? ctx.world->simTime() : s.simTime; // (its window's clock: the world's)
     if (!(isHold(b.timeBeginS) || now >= b.timeBeginS) || !(isHold(b.timeEndS) || now <= b.timeEndS)) return false;
-    return isHold(b.captures) || compared(static_cast<double>(captures), b.capturesComparison, b.captures);
+    if (!isHold(b.captures) && !compared(static_cast<double>(captures), b.capturesComparison, b.captures)) return false;
+    // what it has left and its contingency, as its navigation report says (4.14): without one (a stack on its own), neither
+    // holds; an endurance where its flight model tells of no energy, none
+    const bool endurance = !isHold(b.fuelKg) || !isHold(b.enduranceS) || !isHold(b.enduranceEndS) || !isHold(b.percent);
+    if (!endurance && isHold(b.contingency)) return true;
+    NavigationReport r;
+    if (!ctx.world || !ctx.world->navigation(ctx.vehicleId, r)) return false;
+    if (endurance) {
+        const double how = b.enduranceComparison;
+        if (r.energy == Energy::Unknown || (!isHold(b.fuelKg) && !compared(r.fuelKg, how, b.fuelKg)) ||
+            (!isHold(b.enduranceS) && !compared(r.enduranceS, how, b.enduranceS)) ||
+            (!isHold(b.enduranceEndS) && !compared(now + r.enduranceS, how, b.enduranceEndS)) || (!isHold(b.percent) && !compared(r.percent, how, b.percent)))
+            return false;
+    }
+    return isHold(b.contingency) || static_cast<double>(r.contingency) == b.contingency;
 }
 
 bool RouteBehavior::branchAt(const ControlContext& ctx, const Performance& perf, bool fromPoint, double flownM) {

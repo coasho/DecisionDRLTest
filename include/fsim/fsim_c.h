@@ -909,7 +909,8 @@ enum fsim_comparison {
  * endurance (s), its end (fsim_world_time's clock), percent, contingency (fsim_contingency) - 15. 16 a route at most; those
  * at one point tried in their order, the first that holds taken. Refused naming its point: invalid_waypoint (at a point it
  * has not, a next that is none or its own point, a range or a window upside down, captures and their comparison apart, a
- * code that is none, a flight on from it round one point); not_implemented for an endurance or a contingency (FA-6e2b).
+ * code that is none, a flight on from it round one point); not_implemented for a mission critical or lost comms
+ * contingency (FA-16). What it has left and its contingency are its navigation report's (fsim_vehicle_navigation_report).
  * fsim_route_branch_init leaves every field out (fsim_hold()). */
 typedef struct fsim_route_branch {
     uint32_t struct_size;

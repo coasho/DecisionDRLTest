@@ -649,7 +649,7 @@ private:
     /// A route's conditional branches checked and kept in the plan (docs/flight-autonomy.md, 4.37; Branches.cpp), `plan`
     /// holding its paths and `waypoints` as given: InvalidWaypoint naming a branch's point for one that is none - 17 or more,
     /// at a point it has not, a next that is none or its own point, a condition malformed, a flight on from it that is none
-    /// (round one point: `repeat` the route's); NotImplemented for an endurance or a contingency condition (FA-6e2b).
+    /// (round one point: `repeat` the route's); NotImplemented for a mission critical or lost comms contingency (FA-16).
     Reason checkBranches(route::Plan& plan, Span<const Waypoint> waypoints, Span<const RouteBranch> branches, bool repeat,
                          CommandResult& detail) const noexcept;
     /// The most a route's segment accelerates from `fromMs` to `toMs` (4.32): a rotorcraft's (Performance), a wing's from

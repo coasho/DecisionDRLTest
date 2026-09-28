@@ -1317,7 +1317,7 @@ int main(int argc, char** argv) {
             br[0].fields[0] = 4.0; /* (on to its own point) */
             CHECK(fsim_vehicle_submit_route_extras(world, branched, options, 4, pts, 6, &extras, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
                   strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 5);
-            br[0].fields[0] = 5.0, br[0].fields[13] = 20.0, br[0].fields[9] = FSIM_COMPARISON_LESS_EQUAL; /* (an endurance: FA-6e2b's) */
+            br[0].fields[0] = 5.0, br[0].fields[14] = FSIM_CONTINGENCY_LOST_COMMS; /* (a contingency not reached yet: FA-16's) */
             CHECK(fsim_vehicle_submit_route_extras(world, branched, options, 4, pts, 6, &extras, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
                   strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 5);
         }

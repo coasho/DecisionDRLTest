@@ -366,7 +366,7 @@ The navigation report (STS-07; A-GRA's MA_NavigationReport) says what a vehicle 
   - The endurance (Duration): what is left over the consumption now, as A-GRA defines it. It is infinite while the vehicle consumes nothing and 0 once nothing is left.
   - The contingency level: FLIGHT_CRITICAL at or below the reserve (a tenth of capacity unless set) or with the engines starved, otherwise NORMAL. The platform models no subsystem failures and no communications, so it never reports MISSION_CRITICAL or LOST_COMMS.
   - With a recovery point set (`setNavigation`), the playtime (Playtime): what is left less the reserve and the return, over the consumption now; 0 once past it. The return is flown at the best-range speed and its consumption (fuel flow, or a battery's power) from the performance tables (4.13), at the vehicle's altitude and weight. Without tables (a stock aircraft, or above the altitudes flown) it is flown at the cruise speed and the consumption now. The distance is the great circle over the ground; the wind, the climb and the descent are not counted.
-- **Asked for, never stepped.** The report is worked out when asked, from the flight model's tanks, engines and battery. Nothing in the step reads it, so no flight changes.
+- **Asked for, never stepped.** The report is worked out when asked, from the flight model's tanks, engines and battery. Nothing in the step reads it, so no flight changes - but a route's branch on what it has left or its contingency, which reads its own vehicle's as the branch is decided (since FA-6e2b: 4.37).
 - **Checked on all 35** (section 14):
   - the consumption it gives, summed step by step, is what left the tanks or the battery;
   - flown level at cruise (the rotorcraft in the hover), the time to use a fifth of what the vehicle has, or two hours' worth, is 0 to 4.1 % longer than the report said. The difference is the weight the vehicle loses as it burns; a battery's weight does not change, and it matches.
@@ -917,14 +917,16 @@ A-GRA's route is a set of paths (MA_RouteType.Path, each an MA_RoutePathType): a
 
 ### 4.37 A-GRA's conditional branches (as FA-6e2 builds them)
 
-A-GRA's path segment may carry conditional segments (MA_PathSegmentType.ConditionalPathSegment): a segment of any path, flown next when its condition holds - "a logical AND of all fields present (except OperatorInput)". Its conditions (PathSegmentConditionType) are the altitude at the segment's end within a range, the time within a window, the segment captured so many times, the operator's input, the endurance remaining, and the contingency level. ADR-29 plans them as WPT-15, FA-6e2. FA-6e2a builds the branches with their altitude, time, capture and operator-input conditions; FA-6e2b the endurance and contingency ones.
+A-GRA's path segment may carry conditional segments (MA_PathSegmentType.ConditionalPathSegment): a segment of any path, flown next when its condition holds - "a logical AND of all fields present (except OperatorInput)". Its conditions (PathSegmentConditionType) are the altitude at the segment's end within a range, the time within a window, the segment captured so many times, the operator's input, the endurance remaining, and the contingency level. ADR-29 plans them as WPT-15, FA-6e2. FA-6e2a built the branches with their altitude, time, capture and operator-input conditions; FA-6e2b the endurance and contingency ones.
 
 - **A branch** (`RouteBranch`, beside the waypoints as the loiters are; 16 a route at most): at waypoint `point`, on to `next` - another point's index, in its path or another; -1, the route's end there - and its conditions, each left out or given:
   - `altitudeMinM`, `altitudeMaxM` in `altitudeReference` (left out, above mean sea level): its altitude within them, a side left out open;
   - `timeBeginS`, `timeEndS` (the world's simulation seconds): the time within them;
   - `captures` with `capturesComparison` (`Comparison`, A-GRA's EqualityExpressionEnum): the times it has come to the point, this one too, compared so with the count;
   - `operatorInput` 1: only once the operator has commanded it;
-  - an endurance - `enduranceComparison` with `fuelKg`, `enduranceS`, `enduranceEndS`, `percent` - and a `contingency`: FA-6e2b's.
+  - what it has left, compared by `enduranceComparison` with each of `fuelKg`, `enduranceS`, `enduranceEndS` (the world's simulation seconds: now and its endurance) and `percent` given;
+  - its `contingency`: NORMAL, or FLIGHT_CRITICAL (at or below its reserve, or its engines starved).
+  What it has left and its contingency are as its navigation report says (4.14), read as the branch is decided: the behaviour asks the step's world for its own vehicle's (`WorldView::navigation`; its flight model idle while its cascade runs). A battery's fuel is 0; where the flight model tells of no energy, an endurance never holds; a stack on its own has no report, and neither holds.
   None given, it holds.
 - **Decided** as the aircraft comes to its point: where its turn there begins (a fly-by's lead), at the point (flown over), or as a loiter point's loiter ends. The point is captured then. Its branches are tried in their order and the first that holds is taken; none, its own next, as the links say.
 - **Taken:** the route goes on from the branch's next along the links; one that repeats goes back from its end to its first point, as ever. It is planned again from where the aircraft is. A branch at a fly-by is flown to its point, the turn there toward its next; at a point flown over, or as a loiter ends, on from the aircraft to its next. What was kept of the points it now flies is flown - their loiters, completed now, and their arrival windows - and the first lap's planned states are left behind. Its laps, the distance it has flown and the captures go on; its distance to go is the rest of the new flight.
@@ -935,11 +937,11 @@ A-GRA's path segment may carry conditional segments (MA_PathSegmentType.Conditio
   - at a point it has not; a next that is none, or its own point;
   - a field not finite, a code that is none; a range or a window upside down, a reference with no range; captures without their comparison or the other way round, or not whole; an operator input not 0 or 1; an endurance without its comparison or the other way round, a percent outside 0 to 100, a fuel or an endurance below 0;
   - a flight on from it that is none: round one point.
-- **Not implemented** (as its support row, `fsim.guidance.route/conditional_segment`, says: partial): an endurance or a contingency condition (FA-6e2b).
+- **Not implemented** (as its support row, `fsim.guidance.route/conditional_segment`, says: partial): a contingency the platform does not reach yet - MISSION_CRITICAL (a subsystem's failure) and LOST_COMMS (the policy's link), FA-16's.
 - **A stack on its own** takes them too, unchecked; it has no operator's input to take.
 - **A named change to 4.36:** a repeating linked route whose flight ends goes back to its first point (0), as an unlinked one does. FA-6e1's went back to where it began, which differs where that is not the first.
 - **Surfaces.**
-  - C++: `RouteBranch` and `Comparison` (`fsim/Control.h`); a `Span<const RouteBranch>` after the paths in `World::submit`, `World::update` (a route's) and `ControlStack::command`; `BatchCommand::branches`, `Setpoint::branches`; `World::commandBranch`; `PathStore::routeBranches` and `routeCommanded`; `Behavior::ahead`, the points a route flies from here.
+  - C++: `RouteBranch` and `Comparison` (`fsim/Control.h`); a `Span<const RouteBranch>` after the paths in `World::submit`, `World::update` (a route's) and `ControlStack::command`; `BatchCommand::branches`, `Setpoint::branches`; `World::commandBranch`; `PathStore::routeBranches` and `routeCommanded`; `Behavior::ahead`, the points a route flies from here; `WorldView::navigation`, a vehicle's own report as its cascade runs.
   - C ABI 1.34: `fsim_route_branch` (`fsim_route_branch_init`: every field left out), its 15 fields in `RouteBranch`'s order; `enum fsim_comparison`; `fsim_route_extras`'s `branches` and `branch_count`, where the caller's `struct_size` has them; `fsim_batch_command`'s `branches` and `branch_count`, filled by `fsim_activity_get_setpoint`; `fsim_activity_command_branch`.
   - Python: `fsim.RouteBranch` (its codes by name or member) and `fsim.Comparison`; `branches=` in `submit_route`, `update_route` and a batch's or a task's `BatchCommand("submit_route", ...)`; read back in the setpoint's `branches`; `Activity.command_branch(branch, commanded=True)`.
 
@@ -1181,11 +1183,11 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
   - FA-6d1, required times of arrival (WPT-11; 4.33), done 2026-09-28 and measured in section 14;
   - FA-6d2, planned inertial states (WPT-20; 4.34), done 2026-09-28 and measured in section 14;
   - FA-6d3, required navigation performance (WPT-21; 4.35), done 2026-09-28 and measured in section 14;
-- FA-6e, paths, in two steps:
+- FA-6e, paths, in two steps, done:
   - FA-6e1, paths with ids and types, and their links (WPT-13, WPT-14; 4.36), done 2026-09-28 and measured in section 14;
   - FA-6e2, conditional branches (WPT-15), in two steps:
     - FA-6e2a, the branches, and their altitude, time, capture and operator-input conditions (4.37), done 2026-09-28 and measured in section 14;
-    - FA-6e2b, their endurance and contingency conditions;
+    - FA-6e2b, their endurance and contingency conditions (4.37), done 2026-09-28 and measured in section 14; FA-6e done;
 - FA-6f, civil path terminators (WPT-19).
 
 **Items (15):** WPT-04, WPT-06, WPT-08, WPT-10, WPT-11, WPT-12, WPT-13, WPT-14, WPT-15, WPT-17, WPT-18, WPT-19, WPT-20, WPT-21, WPT-22.
@@ -2453,6 +2455,26 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - Before, a behaviour's NEW was 12.9 % slower on all three copies, with every instruction on its path the same except those of `submitWith`'s block for a NEW that waits, which it never runs. The branches' lines there had moved the rest of `submitWith` 80 bytes. That block now keeps what goes beside a waiting route out of line (`CapabilityHost::holdExtras`, in `Branches.cpp`), and the NEW is back to +1.2 %.
   - World throughput is 99.2 to 100.7 % of FA-6e1's; protection costs at most 0.6 %.
 - ctest: all 319 tests pass.
+
+**FA-6e2b, A-GRA's conditional branches: endurance and contingency (WPT-15); FA-6e done.**
+- **Flown** (`test_route_branches`, calm): four C172s on FA-6e2a's three paths (3 km a unit), each with branches at B's last:
+  - out once its percent is at or below what it had at the NEW, less a millionth: out the first time it came there, 0 1 2 3 4 5 6 7 (99.994 % at the NEW, 95.860 % at the end);
+  - out once it has burned 90 %: never, round and round (0 1 2 3 4 5 2 3 4 5 2 3 4);
+  - its reserve set at 99 % of its capacity, so flight critical: a branch for NORMAL not taken, the next, for FLIGHT_CRITICAL, taken to C's last (0 1 2 3 4 5 7);
+  - normal: a branch for FLIGHT_CRITICAL not taken, the next, on its endurance's end (within 10⁹ s of now) and its fuel (below what it had), taken (0 1 2 3 4 5 6 7).
+- **Refused `not_implemented` at its point:** a MISSION_CRITICAL or a LOST_COMMS contingency (FA-16). An endurance with a NORMAL contingency is accepted.
+- **The fleet** (`test_fleet`): every aircraft on the paths case's square, out at its last once its fuel or charge is below what it had at the NEW. All 35 went out the first time (0 1 2 3 4 5) and completed, 161 s after the NEW (the fighters) to 229 s (the B-52H, the E-3G), each with less than it had.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6e2a's build: no branch reads the report but one with such a condition, as it is decided.
+- **The support table:** `route/conditional_segment` partial, now FA-16's: a mission critical or lost comms contingency. The route capability's pending list names it under FA-16.
+- **Conformance:** the optimise walks' branches now and then carry what it has left (a percent, an endurance, a comparison drawn - now and then none) or a contingency (normal, flight critical); those walks answer `not_implemented` nowhere on aircraft with tables.
+- **Surfaces:** the C ABI's 1.34 block (a LOST_COMMS contingency `not_implemented`, `reserved` 5); Python's `test_route_branches` (an endurance and a contingency by name, read back; LOST_COMMS refused `not_implemented` at its point).
+- **Memory:** as FA-6e2a's: its fields were there.
+- **Digests:** identical to FA-6e2a's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6e2a, both builds run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`; then 5 rounds of `micro` and of `command` from three copies of each.
+  - From one copy of each, the micro cases are within −16.5 % to +0.5 %: FA-6e2a's copy ran its attitude cases slow (54.8 ns, where its three copies ran 46.1 to 46.3). From three copies of each, their medians' median, every micro case is within −1.0 % to +1.3 %.
+  - The command cases are within −2.9 % to +0.8 % from one copy, and −1.5 % to +0.8 % from three: a behaviour's NEW +0.5 % (one of FA-6e2a's copies ran it at 143.2 ns, where the other two ran 126).
+  - World throughput is 100.0 to 101.2 % of FA-6e2a's; protection costs at most 0.4 %.
+- ctest: all 320 tests pass.
 
 ## Appendix A: the inventory
 
