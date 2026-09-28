@@ -557,6 +557,48 @@ struct RouteLoiter {
     }
 };
 
+/// A planned inertial state inside a route's segment (A-GRA's InertialState, InertialStateRelativeType;
+/// docs/flight-autonomy.md, 4.34): where and when the aircraft is to be - a place on the segment's leg, at its altitude and
+/// time - and what else the plan gives there, kept for analysis and read back. Beside the route's waypoints, as its
+/// loiters are (World::submit and update take a Span): 64 a route at most. Its place in a frame is where the frame is at
+/// its time. The segment flies through the states' altitudes and arrives at each at its time.
+struct RouteState {
+    std::uint32_t point = 0;           ///< its segment: the one ending at waypoint `point`
+    double latitudeRad = kHold, longitudeRad = kHold;
+    double altitudeM = kHold;          ///< the altitude it passes it at (left out: the segment's own profile there)
+    double altitudeReference = kHold;  ///< AltitudeReference (left out: its point's)
+    double timeS = kHold;              ///< when it is to be there, the world's simulation seconds (left out: no time)
+    double frame = kHold;              ///< a place in this frame (World::createFrame's id), where the frame is at its time
+    double frameRotation = kHold, frameOffsets = kHold; ///< its offsets' FrameRotation and FrameOffsets, as a waypoint's
+    double frameXM = kHold, frameYM = kHold, frameZM = kHold; ///< its offsets (z down)
+    // what else A-GRA's InertialState gives: kept for analysis, and read back
+    double uncertaintyM = kHold;       ///< PositionUncertainty: its radius
+    double groundNorthMs = kHold, groundEastMs = kHold;                         ///< GroundVelocity
+    double domainNorthMs = kHold, domainEastMs = kHold, domainDownMs = kHold;   ///< DomainVelocity (through the air)
+    double relativeNorthMs = kHold, relativeEastMs = kHold, relativeDownMs = kHold; ///< RelativeVelocity (in its frame)
+    double accelerationNorthMs2 = kHold, accelerationEastMs2 = kHold, accelerationDownMs2 = kHold; ///< DomainAcceleration
+    double yawRad = kHold, pitchRad = kHold, rollRad = kHold;                   ///< Orientation
+    double yawRateRadS = kHold, pitchRateRadS = kHold, rollRateRadS = kHold;    ///< OrientationRate
+
+    /// Its fields after `point`, in order (the C ABI's and Python's): pointers into it.
+    static constexpr std::size_t kFields = 29;
+    void fields(double* f[kFields]) noexcept {
+        double* all[kFields] = {&latitudeRad, &longitudeRad, &altitudeM, &altitudeReference, &timeS, &frame, &frameRotation, &frameOffsets, &frameXM,
+                                &frameYM, &frameZM, &uncertaintyM, &groundNorthMs, &groundEastMs, &domainNorthMs, &domainEastMs, &domainDownMs,
+                                &relativeNorthMs, &relativeEastMs, &relativeDownMs, &accelerationNorthMs2, &accelerationEastMs2, &accelerationDownMs2,
+                                &yawRad, &pitchRad, &rollRad, &yawRateRadS, &pitchRateRadS, &rollRateRadS};
+        for (std::size_t k = 0; k < kFields; ++k) f[k] = all[k];
+    }
+    /// Its place in its frame: the offsets left out, the frame's origin.
+    FrameOffset frameOffset() const noexcept {
+        FrameOffset o;
+        o.rotation = isHold(frameRotation) ? FrameRotation::Unrotated : static_cast<FrameRotation>(static_cast<int>(frameRotation));
+        o.offsets = isHold(frameOffsets) ? FrameOffsets::Cartesian : static_cast<FrameOffsets>(static_cast<int>(frameOffsets));
+        o.x = isHold(frameXM) ? 0.0 : frameXM, o.y = isHold(frameYM) ? 0.0 : frameYM, o.z = isHold(frameZM) ? 0.0 : frameZM;
+        return o;
+    }
+};
+
 /// Where a vehicle's route, curve or pattern shape lives while it is flown
 /// (docs/vehicle-interface.md, 4.2): allocated at its first and kept, written
 /// by the host between steps, read by the mode's behaviour during them
@@ -583,6 +625,10 @@ struct PathStore {
     static constexpr std::size_t kRouteLoiters = 16;
     std::uint32_t routeLoiterCount = 0;
     RouteLoiter routeLoiters[kRouteLoiters];
+    /// Its planned inertial states (4.34), as the host placed them (one in a frame where the frame is at its time): 64 a route at most.
+    static constexpr std::size_t kRouteStates = 64;
+    std::uint32_t routeStateCount = 0;
+    RouteState routeStates[kRouteStates];
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -651,6 +697,7 @@ struct BatchCommand {
     const PatternShape* shape = nullptr; ///< a PatternCommand's (null: none)
     const CurveShape* curveShape = nullptr; ///< a CurveCommand's reference in a frame (null: none)
     Span<const RouteLoiter> loiters;     ///< a RouteCommand's: the loiters its loiter points fly (docs/flight-autonomy.md, 4.31)
+    Span<const RouteState> states;       ///< a RouteCommand's: its planned inertial states (4.34)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight
@@ -666,6 +713,7 @@ struct Setpoint {
     std::vector<NurbsSegment> nurbs;     ///< a curve's, every segment, as it flies (docs/flight-autonomy.md, 4.26)
     CurveShape curveShape;               ///< a curve's reference in a frame, as it flies (4.27)
     std::vector<RouteLoiter> loiters;    ///< a route's loiters, as they fly (4.31)
+    std::vector<RouteState> states;      ///< a route's planned inertial states, as placed (4.34)
 };
 
 /// Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType;

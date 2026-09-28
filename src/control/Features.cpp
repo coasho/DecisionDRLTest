@@ -83,8 +83,8 @@ const FeatureDef kFeatures[] = {
 
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
-        "a time of arrival at or after a loiter point, paths and branches, path terminators, "
-        "4D states and navigation performance (FA-6); planning metadata (FA-7)"), // WPT-01, 16, 24, 25
+        "a time of arrival or a planned state at or after a loiter point, planned states beside points in moving frames, "
+        "paths and branches, path terminators and navigation performance (FA-6); planning metadata (FA-7)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
     {"fsim.guidance.route/turn/fly_by", "fsim.guidance.route", S, 0, 0, ""},                 // WPT-03
@@ -119,7 +119,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/waypoint_type/hard_ditch", "fsim.guidance.route", N, 16, 0, ""},
     {"fsim.guidance.route/loiter_point", "fsim.guidance.route", S, 0, 0, ""},                // WPT-18 (FA-6b2)
     {"fsim.guidance.route/path_terminators", "fsim.guidance.route", N, 6, 0, ""},            // WPT-19
-    {"fsim.guidance.route/inertial_states", "fsim.guidance.route", N, 6, 0, ""},             // WPT-20
+    {"fsim.guidance.route/inertial_states", "fsim.guidance.route", P, 6, 0, "at or after a loiter point, beside points in moving frames"}, // WPT-20 (FA-6d2)
     {"fsim.guidance.route/required_navigation_performance", "fsim.guidance.route", N, 6, 0, ""}, // WPT-21
     {"fsim.guidance.route/relative_points", "fsim.guidance.route", S, 0, 0, ""},             // WPT-22 (FA-6a)
     {"fsim.guidance.route/metadata", "fsim.guidance.route", N, 7, 0, ""},                    // WPT-23

@@ -133,7 +133,7 @@ void ControlStack::command(const Command& command) {
     }
 }
 
-void ControlStack::command(const RouteCommand& route, Span<const Waypoint> waypoints, Span<const RouteLoiter> loiters) {
+void ControlStack::command(const RouteCommand& route, Span<const Waypoint> waypoints, Span<const RouteLoiter> loiters, Span<const RouteState> states) {
     // the stack's own path store, as a World's host writes it (what the waypoints and loiters leave out, the behaviour fills in)
     if (!config_->path) config_->path = std::make_unique<PathStore>();
     PathStore& path = *config_->path;
@@ -141,6 +141,8 @@ void ControlStack::command(const RouteCommand& route, Span<const Waypoint> waypo
     std::copy_n(waypoints.data(), path.count, path.waypoints);
     path.routeLoiterCount = static_cast<std::uint32_t>(std::min(loiters.size(), PathStore::kRouteLoiters));
     std::copy_n(loiters.data(), path.routeLoiterCount, path.routeLoiters);
+    path.routeStateCount = static_cast<std::uint32_t>(std::min(states.size(), PathStore::kRouteStates));
+    std::copy_n(states.data(), path.routeStateCount, path.routeStates);
     ++path.revision;
     command(Command(route));
 }

@@ -825,6 +825,38 @@ FSIM_API int fsim_activity_update_route_loiters(fsim_world* world, fsim_activity
                                                 uint32_t count, const fsim_waypoint* waypoints, uint32_t waypoint_count,
                                                 const fsim_route_loiter* loiters, uint32_t loiter_count, fsim_command_result* result);
 
+/* A planned inertial state inside a route's segment (ABI 1.31; docs/flight-autonomy.md, 4.34; A-GRA's InertialState): on
+ * the segment ending at waypoint `point`, `fields` in this order - its place (latitude, longitude, altitude, altitude
+ * reference), when it is to be there (the world's time, as fsim_world_time reads it), a place in a frame instead
+ * (fsim_frame_create's id, its offsets' rotation and form, x, y, z - z down: where the frame is at its time, a vehicle's
+ * where its velocity now carries it), its position's uncertainty (m), its ground velocity (north, east), its velocity
+ * through the air (north, east, down), in its frame (north, east, down), its acceleration (north, east, down), its
+ * orientation (yaw, pitch, roll) and their rates - 29. The segment's first lap flies through its altitude (in its point's
+ * reference: left out, its point's) and arrives at it at its time; the rest is kept and read back. Refused as a point is,
+ * naming it: invalid_waypoint (past the route or out of order, not finite, no place, another altitude reference, a time
+ * past or not after the one before, an altitude beside a climb rate or optimisation, a place off its leg by more than its
+ * uncertainty - 50 m at least, or 1 % of the leg); performance_limit (a climb or descent steeper than the aircraft's, a
+ * time it cannot make); not_implemented (at or after a loiter point, beside points in moving frames, a time without
+ * performance tables). fsim_route_state_init leaves every field out (fsim_hold()). */
+typedef struct fsim_route_state {
+    uint32_t struct_size;
+    uint32_t point;
+    double fields[29];
+} fsim_route_state;
+FSIM_API void fsim_route_state_init(fsim_route_state* state);
+/* A route with its loiter points' loiters and its planned states (at most 64, in order along it), `states[0].struct_size`
+ * bytes apart; else as fsim_vehicle_submit_route_loiters. */
+FSIM_API int fsim_vehicle_submit_route_states(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_waypoint* waypoints,
+                                              uint32_t waypoint_count, const fsim_route_loiter* loiters, uint32_t loiter_count,
+                                              const fsim_route_state* states, uint32_t state_count, const fsim_command_options* options,
+                                              fsim_command_result* result);
+/* UPDATE of a route with new waypoints and their loiters and states (none: those it has, and theirs), as
+ * fsim_activity_update_route_loiters. */
+FSIM_API int fsim_activity_update_route_states(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
+                                               uint32_t count, const fsim_waypoint* waypoints, uint32_t waypoint_count,
+                                               const fsim_route_loiter* loiters, uint32_t loiter_count, const fsim_route_state* states,
+                                               uint32_t state_count, fsim_command_result* result);
+
 /* One segment of a curve: a quintic Bezier by its six control points (weights
  * 1, the clamped knots), metres north, east and down from the curve's
  * reference. fsim_bezier_segment_init sets struct_size and zeroes the rest. */
@@ -1131,6 +1163,8 @@ typedef struct fsim_batch_command {
     const fsim_nurbs_segment* nurbs;        /* FSIM_BATCH_NURBS (ABI 1.24): segment_count of them, nurbs[0].struct_size bytes apart */
     const fsim_route_loiter* loiters;       /* FSIM_BATCH_ROUTE's loiters (ABI 1.28), loiters[0].struct_size bytes apart */
     uint32_t loiter_count;
+    uint32_t state_count;                   /* FSIM_BATCH_ROUTE's planned states (ABI 1.31), states[0].struct_size bytes apart */
+    const fsim_route_state* states;
 } fsim_batch_command;
 /* Several NEWs at once (A-GRA's several command instances in one message), `batch[0].struct_size` bytes apart, made in
  * order at this simulation time: `results[i]` answers `batch[i]`, and `details[i]` (may be NULL; `details[0].struct_size`
@@ -1165,7 +1199,8 @@ FSIM_API int fsim_vehicle_task_at(fsim_world* world, uint32_t id, uint32_t index
  * engines': four throttles); a behaviour's command; a route's waypoints, or a curve's segments with the appended ones
  * (its flyout curve, from the reference in fields 0-2) - FSIM_BATCH_CURVE's where each is a Bezier's form, else
  * FSIM_BATCH_NURBS's (ABI 1.24; `nurbs` set where the caller's struct has it); a route's loiters (ABI 1.28, where the
- * caller's struct has them: complete, their place their points'). A waiting one's is as given. Its arrays are the library's,
+ * caller's struct has them: complete, their place their points'), and its planned states (ABI 1.31, likewise: as placed,
+ * their altitude reference completed). A waiting one's is as given. Its arrays are the library's,
  * valid until the next setpoint read, world step, reset or destroy; `options` NULL. `out->struct_size` set by the
  * caller. FSIM_INVALID_ARGUMENT for an activity not live. */
 FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id activity, fsim_batch_command* out);

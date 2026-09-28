@@ -358,7 +358,8 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     loiterAhead_ = nullptr, reachM_ = 0.0, loitering_ = false;
     rampFromMs_ = speedFlown_ = referenceFlown_ = kHold;
     climbTarget_ = climbMid_ = kHold, climbRest_ = false;
-    arrivalPoint_ = -1, arrivalAimS_ = arrivalSpeedMs_ = arrivalS_ = arrivalDeltaS_ = kHold;
+    arrivalPoint_ = arrivalState_ = -1, arrivalAimS_ = arrivalSpeedMs_ = arrivalS_ = arrivalDeltaS_ = kHold;
+    segmentFirstLap_ = true, stateAltitudes_ = false;
     firstLap_ = true, onArc_ = midway_ = ended_ = finished_ = false;
     failure_ = Reason::None;
     leadOut_ = finishedM_ = inPieceM_ = lapStartM_ = 0.0;
@@ -383,6 +384,11 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
             failure_ = Reason::BehaviorFailed;
             return;
         }
+    if (!takeStates(ctx)) { // (its planned states, as placed: 4.34)
+        p.count = 0;
+        failure_ = Reason::BehaviorFailed;
+        return;
+    }
     // its points in moving frames where the frames are now (4.29): placed and planned again as it flies them
     moving_ = overFrame_ = false;
     for (std::uint32_t i = 0; i < count; ++i) {
@@ -397,6 +403,8 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     }
     p.start = static_cast<std::uint32_t>(option(command.start, static_cast<double>(count)));
     route::plan(p, s.latitudeRad, s.longitudeRad, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
+    if (p.stateCount) route::placeStates(p);
+    route::limitClimbs(p, s, ctx.tables, perf, hovers_, ctx.altimeter); // (a route with times to arrive at: 4.34)
     if (p.loiterCount) { // (each at its point: what the host left out, nothing)
         bool magnetic = false;
         for (std::uint32_t k = 0; k < p.loiterCount; ++k)
@@ -434,16 +442,9 @@ void RouteBehavior::beginSegment(std::uint32_t k, const sim::VehicleState& s, do
     const bool efficient = to.climbOptimization == static_cast<double>(ClimbOptimization::ExtendedRange);
     if (!isHold(to.climbOptimization) && !isHold(to.altitudeM) && !(efficient && to.altitudeM < segmentFrom_))
         climbTarget_ = segmentFrom_, climbLastS_ = s.simTime;
-    // the next point with an arrival window, this lap (4.33); its schedule kept while it is the one
-    const std::int32_t ahead = arrivalPoint_;
-    arrivalPoint_ = -1;
-    if (firstLap)
-        for (std::uint32_t i = k; i < p.count; ++i)
-            if (!isHold(p.points[i].arrivalBeginS) || !isHold(p.points[i].arrivalEndS)) {
-                arrivalPoint_ = static_cast<std::int32_t>(i);
-                break;
-            }
-    if (arrivalPoint_ != ahead) arrivalAimS_ = arrivalSpeedMs_ = arrivalS_ = arrivalDeltaS_ = kHold;
+    // the next timed target this lap (4.33, 4.34), and its states' altitudes
+    segmentFirstLap_ = firstLap;
+    nextArrival(atM - lapStartM_);
 }
 
 void RouteBehavior::advance(const sim::VehicleState& s, const Performance& perf) {
@@ -571,6 +572,8 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     double altitude = segment.altitudeM, feedforward = 0.0;
     if (!ended_ && !isHold(climbTarget_)) {
         altitude = climbProfile(ctx, perf, segment, routeM, feedforward); // (4.32)
+    } else if (!ended_ && stateAltitudes_) {
+        altitude = stateAltitude(routeM, feedforward); // (4.34)
     } else if (!ended_ && !isHold(segment.climbRateMs)) {
         const double climbed = segment.climbRateMs * (s.simTime - segmentStartS_);
         if (climbed < std::abs(span)) altitude = segmentFrom_ + std::copysign(climbed, span), feedforward = std::copysign(segment.climbRateMs, span);
@@ -596,7 +599,8 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     steer.speed = segment.speed;
     steer.reference = speedReferenceOf(segment.speedReference, hovers_ ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
     if (!isHold(segment.speedOptimization) || !isHold(rampFromMs_)) chooseSpeed(ctx, segment, steer); // (4.32)
-    if (arrivalPoint_ >= 0 && !ended_) scheduleArrival(ctx, perf, routeM, steer);             // (4.33)
+    if (arrivalState_ >= 0 && routeM - lapStartM_ >= p.stateLapM[arrivalState_]) nextArrival(routeM - lapStartM_); // (one passed: 4.34)
+    if ((arrivalPoint_ >= 0 || arrivalState_ >= 0) && !ended_) scheduleArrival(ctx, perf, routeM, steer);          // (4.33)
     steer.verticalSpeedMs = route::verticalSpeedTo(altitudeMsl_, feedforward, s, perf, hovers_);
     // what comes next: the turn at the point flown to - and, for a rotorcraft,
     // no faster than the turn's radius allows (and than stops it in time for
@@ -702,7 +706,7 @@ double RouteBehavior::climbProfile(const ControlContext& ctx, const Performance&
 }
 
 bool RouteBehavior::arrival(ArrivalEstimate& out) const noexcept {
-    if (!planned_ || arrivalPoint_ < 0 || ended_ || isHold(arrivalS_)) return false;
+    if (!planned_ || (arrivalPoint_ < 0 && arrivalState_ < 0) || ended_ || isHold(arrivalS_)) return false;
     out.arrivalS = arrivalS_, out.deltaS = arrivalDeltaS_;
     return true;
 }
@@ -710,16 +714,19 @@ bool RouteBehavior::arrival(ArrivalEstimate& out) const noexcept {
 void RouteBehavior::scheduleArrival(const ControlContext& ctx, const Performance& perf, double routeM, route::Steer& steer) {
     const route::Plan& p = *plan_;
     const auto& s = ctx.sensed;
-    const Waypoint& w = p.points[static_cast<std::uint32_t>(arrivalPoint_)];
+    const bool state = arrivalState_ >= 0; // (a state's time: a window of none at its place - 4.34)
+    const auto i = static_cast<std::uint32_t>(arrivalPoint_), j = static_cast<std::uint32_t>(arrivalState_);
     const double now = ctx.world ? ctx.world->simTime() : s.simTime; // (its window's clock: the world's)
-    const double toGoM = std::max(p.arrivalM(static_cast<std::uint32_t>(arrivalPoint_), true) - (routeM - lapStartM_), 0.0);
-    // as planned: its speed over the ground, in the wind now along its course
+    const double fromM = routeM - lapStartM_, toM = state ? p.stateLapM[j] : p.arrivalM(i, true), toGoM = std::max(toM - fromM, 0.0);
+    // as planned: its speed over the ground, in the wind now along its course - its climbs no faster than it climbs them (4.34)
     const double along = isHold(course_) ? 0.0 : wind_.northMs * std::cos(course_) + wind_.eastMs * std::sin(course_);
     double speed = steer.reference == SpeedReference::GroundSpeed ? steer.speed : trueAirspeedOf(steer.speed, steer.reference, s) + along;
-    const double eta = now + toGoM / std::max(speed, 0.1);
+    const double climbAlong = hovers_ ? 0.0 : along;
+    auto takes = [&](double v) { return p.climbCount ? p.climbTimeS(fromM, toM, v, climbAlong) : toGoM / std::max(v, 0.1); };
+    const double eta = now + takes(speed);
     // beyond its window: to arrive a quarter of its width inside it (5 s at most, and past a side alone; a point window, at
     // it), within the speeds it flies level - through the air, in that wind
-    const double begin = w.arrivalBeginS, end = w.arrivalEndS;
+    const double begin = state ? p.states[j].timeS : p.points[i].arrivalBeginS, end = state ? p.states[j].timeS : p.points[i].arrivalEndS;
     const double inside = !isHold(begin) && !isHold(end) ? std::min(0.25 * (end - begin), 5.0) : 5.0;
     if (isHold(arrivalAimS_)) arrivalAimS_ = eta < begin ? begin + inside : eta > end ? end - inside : kHold; // (a side left out: never beyond it)
     const double aim = arrivalAimS_;
@@ -729,14 +736,17 @@ void RouteBehavior::scheduleArrival(const ControlContext& ctx, const Performance
         const double lo = hovers_ ? least : least + along, hi = hovers_ ? most : most + along;
         // (its last second: the speed it asked, held; its aim past, as fast as it flies)
         speed = aim - now > 1.0 ? toGoM / (aim - now) : aim > now && !isHold(arrivalSpeedMs_) ? arrivalSpeedMs_ : hi;
+        if (p.climbCount && aim - now > 1.0) speed = paceThroughClimbs(fromM, toM, aim - now, lo, hi, climbAlong); // (4.34)
         if (std::isfinite(hi)) speed = std::min(speed, hi);
         if (std::isfinite(lo)) speed = std::max(speed, lo);
         speed = std::max(speed, 0.5);
         steer.speed = arrivalSpeedMs_ = speed, steer.reference = SpeedReference::GroundSpeed;
+        if (p.climbCount) steer.speed = std::min(speed, climbMostHere(fromM, climbAlong)); // (in a climb, no faster than it climbs it)
     }
     speedFlown_ = steer.speed, referenceFlown_ = static_cast<double>(steer.reference);
-    arrivalS_ = now + toGoM / std::max(speed, 0.1);
-    arrivalDeltaS_ = arrivalS_ < begin ? arrivalS_ - begin : arrivalS_ > end ? arrivalS_ - end : 0.0;
+    arrivalS_ = now + takes(speed);
+    const double slack = 1e-6; // (a state's time is a window of none: within it, to a microsecond - 4.34)
+    arrivalDeltaS_ = arrivalS_ < begin - slack ? arrivalS_ - begin : arrivalS_ > end + slack ? arrivalS_ - end : 0.0;
 }
 
 Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf, bool begins) {
@@ -822,7 +832,8 @@ bool RouteBehavior::progress(ActivityProgress& out) const noexcept {
     out.courseRad = course_;
     out.headingRad = heading_;
     out.altitudeMslM = altitudeMsl_;
-    const bool chosen = (!isHold(segment.speedOptimization) || !isHold(segment.accelerationMs2) || arrivalPoint_ >= 0) && !isHold(speedFlown_); // (4.32)
+    const bool chosen = (!isHold(segment.speedOptimization) || !isHold(segment.accelerationMs2) || arrivalPoint_ >= 0 || arrivalState_ >= 0) &&
+                        !isHold(speedFlown_); // (4.32, 4.33)
     out.speedMs = chosen ? speedFlown_ : segment.speed;
     out.speedReference = chosen ? referenceFlown_ : segment.speedReference;
     return true;

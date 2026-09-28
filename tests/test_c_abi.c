@@ -1142,6 +1142,84 @@ int main(int argc, char** argv) {
                   strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 2);
         }
         {
+            /* ABI 1.31 (4.34): planned states - a hangar C172's through a state's altitude at its time, read back (its
+               altitude reference completed, what else it gives kept), its progress estimating its arrival there; one off
+               its leg refused at its point (reserved: its index + 1), in a batch too; a time on the stock C172x (no
+               performance tables) not implemented; an UPDATE's new waypoints with theirs */
+            fsim_waypoint pts[2];
+            fsim_route_state st[2];
+            fsim_batch_command sp, item;
+            fsim_command_result answer;
+            fsim_activity_progress prog;
+            double options[4];
+            const fsim_vehicle_state* at;
+            fsim_activity_id route_id;
+            uint32_t planned = 0;
+            int k;
+            const double now = fsim_world_time(world);
+            spec.name = "cap-states";
+            spec.type = "jsbsim:c172";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 50.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &planned) == FSIM_OK);
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            at = fsim_vehicle_state_ptr(world, planned);
+            for (k = 0; k < 2; ++k) fsim_waypoint_init(&pts[k]), fsim_route_state_init(&st[k]);
+            CHECK(st[0].struct_size == sizeof st[0] && isnan(st[0].fields[0]) && isnan(st[0].fields[28]));
+            /* 3 km north at 50 m/s, then 5 km on at 1500 m; 5.5 km north, 1550 m at 140 s from now (it would be there at 110 s:
+               slowed), and before it, 1.5 km north, a yaw alone */
+            pts[0].latitude_rad = at->latitude_rad + 3000.0 / 6371008.8, pts[0].longitude_rad = at->longitude_rad, pts[0].speed = 50.0;
+            pts[0].altitude_m = 1500.0;
+            pts[1].latitude_rad = at->latitude_rad + 8000.0 / 6371008.8, pts[1].longitude_rad = at->longitude_rad, pts[1].altitude_m = 1500.0;
+            st[0].point = 0, st[0].fields[0] = at->latitude_rad + 1500.0 / 6371008.8, st[0].fields[1] = at->longitude_rad, st[0].fields[23] = 0.0;
+            st[1].point = 1, st[1].fields[0] = at->latitude_rad + 5500.0 / 6371008.8, st[1].fields[1] = at->longitude_rad;
+            st[1].fields[2] = 1550.0, st[1].fields[4] = now + 140.0;
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_route_states(world, planned, options, 4, pts, 2, NULL, 0, st, 2, &co, &cr) == FSIM_OK &&
+                  cr.status == FSIM_COMMAND_ACCEPTED);
+            route_id = cr.activity;
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.state_count == 2);
+            CHECK(sp.states[0].fields[23] == 0.0 && isnan(sp.states[0].fields[4]));
+            CHECK(sp.states[1].point == 1 && sp.states[1].fields[2] == 1550.0 && sp.states[1].fields[4] == now + 140.0);
+            CHECK(sp.states[1].fields[3] == sp.waypoints[1].altitude_reference); /* (completed: its point's) */
+            CHECK(fsim_world_step(world, 30) == FSIM_OK);
+            fsim_activity_progress_init(&prog);
+            CHECK(fsim_activity_get_progress(world, route_id, &prog) == FSIM_OK);
+            CHECK(fabs(prog.arrival_s - (now + 140.0)) < 1e-6 && prog.arrival_delta_s == 0.0); /* (at its time) */
+            CHECK(prog.speed_reference == FSIM_SPEED_GROUND_SPEED && prog.speed_ms < 50.0);
+            /* an UPDATE's new waypoints with theirs: none */
+            CHECK(fsim_activity_update_route_states(world, route_id, FSIM_SOURCE_OVERRIDE, 0, options, 4, pts, 2, NULL, 0, NULL, 0, &cr) == FSIM_OK &&
+                  cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.state_count == 0);
+            CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+            /* one off its leg (a kilometre east): invalid, at its point; in a batch too */
+            at = fsim_vehicle_state_ptr(world, planned);
+            pts[0].latitude_rad = at->latitude_rad + 3000.0 / 6371008.8, pts[0].longitude_rad = at->longitude_rad;
+            pts[1].latitude_rad = at->latitude_rad + 8000.0 / 6371008.8, pts[1].longitude_rad = at->longitude_rad;
+            st[1].fields[0] = at->latitude_rad + 5500.0 / 6371008.8, st[1].fields[1] = at->longitude_rad + 1000.0 / (6371008.8 * cos(at->latitude_rad));
+            st[1].fields[4] = fsim_hold();
+            CHECK(fsim_vehicle_submit_route_states(world, planned, options, 4, pts, 2, NULL, 0, &st[1], 1, &co, &cr) == FSIM_OK &&
+                  cr.status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 2);
+            memset(&item, 0, sizeof item);
+            item.struct_size = sizeof item;
+            item.kind = FSIM_BATCH_ROUTE, item.code = FSIM_MODE_ROUTE, item.fields = options, item.count = 4;
+            item.waypoints = pts, item.waypoint_count = 2, item.options = &co;
+            item.states = &st[1], item.state_count = 1;
+            CHECK(fsim_vehicle_submit_batch(world, planned, &item, 1, &answer, NULL) == FSIM_OK && answer.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(answer.reason), "invalid_waypoint") == 0 && answer.reserved == 2);
+            /* the stock C172x's time: not implemented */
+            at = fsim_vehicle_state_ptr(world, b);
+            pts[0].latitude_rad = at->latitude_rad + 3000.0 / 6371008.8, pts[0].longitude_rad = at->longitude_rad;
+            pts[1].latitude_rad = at->latitude_rad + 8000.0 / 6371008.8, pts[1].longitude_rad = at->longitude_rad;
+            st[1].fields[0] = at->latitude_rad + 5500.0 / 6371008.8, st[1].fields[1] = at->longitude_rad, st[1].fields[4] = now + 300.0;
+            CHECK(fsim_vehicle_submit_route_states(world, b, options, 4, pts, 2, NULL, 0, &st[1], 1, &co, &cr) == FSIM_OK &&
+                  cr.status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 2);
+        }
+        {
             /* ABI 1.6: the performance, and grants over the priorities (on a, whose live activities are its policy's) */
             fsim_performance perf;
             int32_t mode = -1, reason = -1, allowed = -1, granted = -1, availability = -1;

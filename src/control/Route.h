@@ -177,6 +177,20 @@ struct Plan {
     /// The loiters its loiter points fly (4.31), complete (completeLoiter): the host's check's, the behaviour's to fly.
     std::uint32_t loiterCount = 0;
     RouteLoiter loiters[PathStore::kRouteLoiters];
+    /// Its planned states (4.34), placed and complete: the host's check's, the behaviour's to fly. Where each is
+    /// (placeStates): along its segment's leg as the first lap flies it (the entry's from where the aircraft was), and
+    /// along that lap; -1 on a segment the first lap does not fly.
+    std::uint32_t stateCount = 0;
+    RouteState states[PathStore::kRouteStates];
+    double stateAlongM[PathStore::kRouteStates] = {};
+    double stateLapM[PathStore::kRouteStates] = {};
+    /// Where its first lap climbs more steeply than the aircraft climbs at its fastest level speed (limitClimbs; 4.33,
+    /// 4.34): each such piece of its profile, from and to along the lap, and the fastest it climbs it at (true airspeed; a
+    /// rotorcraft's over the ground) - the host's check's and the behaviour's schedule's. Only for a route with a time to
+    /// arrive at.
+    static constexpr std::uint32_t kClimbs = static_cast<std::uint32_t>(PathStore::kWaypoints + PathStore::kRouteStates);
+    std::uint32_t climbCount = 0;
+    double climbFromM[kClimbs] = {}, climbToM[kClimbs] = {}, climbMostMs[kClimbs] = {};
 
     std::uint32_t last() const noexcept { return count - 1; }
     /// Point i's loiter; null for none.
@@ -202,6 +216,15 @@ struct Plan {
     double lapM(bool firstLap) const noexcept;
     /// How far along a lap point k is reached (its segment's end: its turn's middle), from the lap's start (4.33).
     double arrivalM(std::uint32_t k, bool firstLap) const noexcept;
+    /// How long its first lap takes from `fromM` to `toM` along it at `speedMs` (4.34; States.cpp), its climbs no faster
+    /// than it climbs them (`alongMs`: the wind's part of a wing's speed over the ground).
+    double climbTimeS(double fromM, double toM, double speedMs, double alongMs) const noexcept;
+    /// Segment i's states give altitudes (4.34): its first lap flies through them.
+    bool stateAltitudes(std::uint32_t i) const noexcept {
+        for (std::uint32_t j = 0; j < stateCount; ++j)
+            if (states[j].point == i && !isHold(states[j].altitudeM)) return true;
+        return false;
+    }
 };
 
 // --- Loiter patterns (4.6) ---------------------------------------------------------
@@ -449,6 +472,16 @@ inline RouteLoiter unplaced(RouteLoiter l) noexcept {
     l.shape.frame = l.shape.frameRotation = l.shape.frameOffsets = l.shape.frameXM = l.shape.frameYM = l.shape.frameZM = kHold;
     return l;
 }
+/// Where each of its states is (4.34; States.cpp), `p` planned: its place's along its segment's leg as the first lap flies
+/// it, and along that lap - within the piece of the leg the lap flies, between its turns.
+void placeStates(Plan& p) noexcept;
+/// Its first lap's climbs steeper than the aircraft climbs at its fastest level speed (4.34; States.cpp), for a route with a
+/// time to arrive at (`p` planned, its states placed): each segment's profile - from where it climbs from (the aircraft's
+/// altitude now for its first), through its states' altitudes, to its point's - the fastest speed it climbs each piece at
+/// by its tables at full power (climbRateMs), found down from its fastest level speed. A segment at a climb rate or
+/// optimisation, or above the ground, has none.
+void limitClimbs(Plan& p, const sim::VehicleState& state, const TablesSection* tables, const Performance& performance, bool hovers,
+                 const Altimeter* altimeter) noexcept;
 /// Where a loiter begins, back along the leg to its point (4.31): where its pattern takes the aircraft on - a radius
 /// outside the circle round the point of an orbit, or of two circles' first, its own join bringing it round onto the
 /// circle as a pattern flown from there does - else at the point itself, on the pattern (a hold's or a racetrack's fix,

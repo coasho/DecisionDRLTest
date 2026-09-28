@@ -137,6 +137,7 @@ from .world import (  # noqa: E402
     RangePolicy,
     Rejected,
     RouteLoiter,
+    RouteState,
     Scenario,
     SUPPORT_FEATURES,
     Source,

@@ -11,6 +11,7 @@
 #include "fsim/VehicleProfile.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace fsim::control {
 
@@ -46,21 +47,44 @@ Reason CapabilityHost::checkArrivals(const route::Plan& p, const sim::VehicleSta
     return Reason::None;
 }
 
-void CapabilityHost::limitArrivals(const route::Plan& p, const sim::VehicleState& state, CheckLog& log) const noexcept {
+void CapabilityHost::limitArrivals(route::Plan& p, const sim::VehicleState& state, CheckLog& log) const noexcept {
     const double worldNow = sessionView_ ? sessionView_->simTimeS() : state.simTime;
     const bool hovers = (adapter_->features() & kFeatureHover) != 0;
-    for (std::uint32_t i = p.start; i < p.count; ++i) {
-        const Waypoint& w = p.points[i];
-        if (isHold(w.arrivalBeginS) && isHold(w.arrivalEndS)) continue;
-        const double h = aboveGround(w.altitudeReference) ? state.altitudeMslM
-                                                          : altitudeMslOf(w.altitudeM, static_cast<AltitudeReference>(static_cast<int>(w.altitudeReference)),
-                                                                          state, &config_->altimeter);
+    route::limitClimbs(p, state, config_->tables, performance_, hovers, &config_->altimeter); // (its climbs, no faster than it climbs them)
+    // each timed target in turn along its first lap - its states' times (4.34), then its point's window - from the
+    // earliest and the latest it can be at the one before (at first, where the aircraft is now), at the speeds it flies
+    // level at the target's altitude: where it cannot make one, as early as it can, or as late
+    double fromM = 0.0, earliest = worldNow, latest = worldNow;
+    auto target = [&](double alongM, double begin, double end, double altitudeM, double reference, std::uint32_t point) {
+        const double h = aboveGround(reference) ? state.altitudeMslM
+                                                : altitudeMslOf(altitudeM, static_cast<AltitudeReference>(static_cast<int>(reference)), state, &config_->altimeter);
         double least = kUnknown, most = kUnknown;
         route::levelSpeedsMs(config_->tables, performance_, hovers, h, state.fuelKg, least, most);
-        const double alongM = p.arrivalM(i, true);
-        const auto index = static_cast<std::int16_t>(std::min<std::uint32_t>(i, 0x7FFF));
-        if (most > 0.0 && w.arrivalEndS < worldNow + alongM / most - 1.0) log.find(Reason::PerformanceLimit, index, Constraint::MaxAirspeed);
-        else if (least > 0.0 && w.arrivalBeginS > worldNow + alongM / least + 1.0) log.find(Reason::PerformanceLimit, index, Constraint::MinAirspeed);
+        const double d = std::max(alongM - fromM, 0.0);
+        const double first = !(most > 0.0) ? earliest : p.climbCount ? earliest + p.climbTimeS(fromM, alongM, most, 0.0) : earliest + d / most;
+        const double last = least > 0.0 ? latest + d / least : std::numeric_limits<double>::infinity();
+        const auto index = static_cast<std::int16_t>(std::min<std::uint32_t>(point, 0x7FFF));
+        fromM = alongM;
+        if (end < first - 1.0) {
+            log.find(Reason::PerformanceLimit, index, Constraint::MaxAirspeed);
+            earliest = latest = first;
+        } else if (begin > last + 1.0) {
+            log.find(Reason::PerformanceLimit, index, Constraint::MinAirspeed);
+            earliest = latest = last;
+        } else {
+            earliest = isHold(begin) ? first : std::max(first, begin), latest = isHold(end) ? last : std::min(last, end);
+            if (latest < earliest) latest = earliest; // (within its second's slack)
+        }
+    };
+    std::uint32_t j = 0;
+    for (std::uint32_t i = p.start; i < p.count; ++i) {
+        const Waypoint& w = p.points[i];
+        for (; j < p.stateCount && p.states[j].point <= i; ++j) {
+            const RouteState& s = p.states[j];
+            if (s.point == i && !isHold(s.timeS))
+                target(p.stateLapM[j], s.timeS, s.timeS, isHold(s.altitudeM) ? w.altitudeM : s.altitudeM, w.altitudeReference, i);
+        }
+        if (!isHold(w.arrivalBeginS) || !isHold(w.arrivalEndS)) target(p.arrivalM(i, true), w.arrivalBeginS, w.arrivalEndS, w.altitudeM, w.altitudeReference, i);
     }
 }
 

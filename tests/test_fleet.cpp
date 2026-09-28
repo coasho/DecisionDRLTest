@@ -1747,6 +1747,80 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(std::abs(f.arrivedS - f.aimS) < 2.0); // (FA-6's acceptance: within 2 s of a feasible time of arrival)
             CHECK(std::abs(f.estimateS - f.arrivedS) < 2.0);
         });
+    // A-GRA's planned inertial states (ADR-29 FA-6d2: WPT-20): a point half a minute on at its speed, and another two and a half
+    // minutes on; between them two states - up, a minute on from the first point, by what it climbs in 20 s at a third of its
+    // most (60 m at the most), and back down a minute later - each timed a tenth later than its speed makes it (slowed), or
+    // where its slowest cannot take that, a tenth sooner (sped up). It passes each within 2 s of its time, near its altitude
+    struct StatesRoute {
+        route::Leg line;
+        double t0 = 0.0, dh = 0.0, along[2] = {0.0, 0.0}, due[2] = {kHold, kHold}, passed[2] = {kHold, kHold}, off[2] = {kHold, kHold};
+        bool slowed = true;
+    };
+    std::map<std::uint32_t, StatesRoute> statesRoutes;
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
+            const double v = p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, h0 = p.start.altitudeMslM;
+            StatesRoute& f = statesRoutes[p.id];
+            f = StatesRoute{};
+            f.t0 = w.simTime();
+            double slowest = kHold, fastest = kHold;
+            route::levelSpeedsMs(&w.profile(p.id)->tables, perf(p), p.rotor, h0, p.start.fuelKg, slowest, fastest);
+            f.slowed = !(slowest > v / 1.1 - 1.0);
+            const double later = f.slowed ? 1.1 : 0.9;
+            f.dh = std::min(60.0, 20.0 * perf(p).maxClimbMs / 3.0);
+            auto point = [&](double seconds, double altitude) {
+                const PositionCommand q = pointFrom(p.start, seconds * v * c, seconds * v * sn, altitude, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = altitude;
+                return wp;
+            };
+            Waypoint a = point(30.0, h0), b = point(180.0, h0);
+            a.speed = v;
+            if (p.rotor) a.speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+            f.line = route::makeLeg(p.start.latitudeRad, p.start.longitudeRad, b.latitudeRad, b.longitudeRad, false);
+            std::vector<RouteState> states;
+            const double at[2] = {90.0, 150.0}, high[2] = {h0 + f.dh, h0};
+            for (int j = 0; j < 2; ++j) {
+                const Waypoint q = point(at[j], high[j]);
+                RouteState st;
+                st.point = 1, st.latitudeRad = q.latitudeRad, st.longitudeRad = q.longitudeRad, st.altitudeM = high[j];
+                st.timeS = f.t0 + later * at[j];
+                f.due[j] = later * at[j], f.along[j] = route::onLeg(f.line, q.latitudeRad, q.longitudeRad).alongM;
+                states.push_back(st);
+            }
+            const CommandResult res = w.submit(p.id, RouteCommand{}, std::vector<Waypoint>{a, b}, {}, {}, states);
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index << " (" << constraintName(res.constraint) << "; its level speeds " << slowest
+                             << " to " << fastest << ", at " << v << ", " << f.dh << " m up)");
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        [&](const Plane&) { return 1.1 * 180.0 * 1.2 + 40.0; },
+        [&](const Plane& p) {
+            StatesRoute& f = statesRoutes[p.id];
+            const auto& s = *w.vehicleState(p.id);
+            const double x = route::onLeg(f.line, s.latitudeRad, s.longitudeRad).alongM;
+            for (int j = 0; j < 2; ++j)
+                if (isHold(f.passed[j]) && x >= f.along[j])
+                    f.passed[j] = w.simTime() - f.t0, f.off[j] = s.altitudeMslM - (p.start.altitudeMslM + (j == 0 ? f.dh : 0.0));
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const StatesRoute& f = statesRoutes[p.id];
+            INFO(activityStateName(r.state) << "; " << (f.slowed ? "slowed" : "sped up") << ", " << f.dh << " m up: due at " << f.due[0] << " s, passed at "
+                                            << f.passed[0] << " s, " << f.off[0] << " m off; due at " << f.due[1] << " s, passed at " << f.passed[1] << " s, "
+                                            << f.off[1] << " m off");
+            CHECK(r.state == ActivityState::Completed);
+            // (the worst: every one past each 0.03 s after its time, a control period; the Mirage 2000 9.2 m over at the top,
+            // where its profile turns from climb to descent, the RQ-4B 9.2 m under - every other within 4.2 m, a rotorcraft
+            // within 0.01 m; 34 slowed, the Crazyflie sped up)
+            for (int j = 0; j < 2; ++j) {
+                REQUIRE(!isHold(f.passed[j]));
+                CHECK(std::abs(f.passed[j] - f.due[j]) < 2.0); // (FA-6's acceptance: within 2 s of a feasible time)
+                CHECK(std::abs(f.off[j]) < std::max(3.0, 0.25 * f.dh));
+            }
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

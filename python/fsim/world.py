@@ -852,6 +852,21 @@ RouteLoiter.__doc__ = ("The loiter a route's loiter point flies (A-GRA's LoiterP
                        "a radius outside its circle, anything else at its point (a rotorcraft stops for a hover) - then on to the "
                        "next point from where it leaves: an orbit where its tangent runs to it, a hold at its fix.")
 
+RouteState = collections.namedtuple(
+    "RouteState", "point latitude_rad longitude_rad altitude_m altitude_reference time_s frame frame_rotation frame_offsets frame_x_m frame_y_m "
+                  "frame_z_m uncertainty_m ground_north_ms ground_east_ms domain_north_ms domain_east_ms domain_down_ms relative_north_ms "
+                  "relative_east_ms relative_down_ms acceleration_north_ms2 acceleration_east_ms2 acceleration_down_ms2 yaw_rad pitch_rad roll_rad "
+                  "yaw_rate_rad_s pitch_rate_rad_s roll_rate_rad_s",
+    defaults=(0,) + (HOLD,) * 29)
+RouteState.__doc__ = ("A planned inertial state inside a route's segment (A-GRA's InertialState; docs/flight-autonomy.md, 4.34): on "
+                      "the segment ending at waypoint ``point``, where the aircraft is to be - ``latitude_rad``, ``longitude_rad``, "
+                      "``altitude_m`` in ``altitude_reference`` (left out, its point's) - and when, ``time_s`` (World.time's clock); or "
+                      "a place in a ``frame`` at its offsets (``frame_rotation``, ``frame_offsets``, ``frame_x_m``, ``frame_y_m``, "
+                      "``frame_z_m``), where the frame is at its time. The segment's first lap flies through its altitude and "
+                      "arrives at it at its time; the rest A-GRA's plan gives there - ``uncertainty_m``, its ground, air and "
+                      "relative velocities, its acceleration, its orientation and their rates - is kept and read back. At most 64, "
+                      "in order along the route, each on its leg within its uncertainty (50 m at least, or 1 % of the leg).")
+
 
 BezierSegment = collections.namedtuple("BezierSegment", "north east down")
 BezierSegment.__doc__ = ("One segment of a curve (A-GRA's): a quintic Bezier by its six control points - ``north``, ``east`` "
@@ -953,6 +968,19 @@ def _loiters(loiters):
     return rows
 
 
+def _states(states):
+    """States (fsim.RouteState or dicts of its fields) as the native rows: point, then the 29 fields."""
+    rows = []
+    for s in states:
+        if isinstance(s, dict):
+            s = RouteState(**s)
+        elif not isinstance(s, RouteState):
+            s = RouteState(*s)
+        values = [_REFERENCES[k][v.upper()] if isinstance(v, str) and k in _REFERENCES else v for k, v in zip(RouteState._fields, s)]
+        rows.append((int(values[0]),) + tuple(float(v) for v in values[1:]))
+    return rows
+
+
 def _row(level, values, fields):
     """A level's (or support kind's, or mode's) fields: all of them in order - a level's COMMAND_FIELDS, or its
     SETPOINT_FIELDS with the rotorcraft's - or some by name with the rest as a new command's defaults."""
@@ -1026,15 +1054,16 @@ class Activity:
             return bool(_checked(h.activity_update(self.id, (), int(self.source), self.controller), h)[4])
         return bool(_checked(h.activity_update(self.id, _row(self.level, values, fields), int(self.source), self.controller), h)[4])
 
-    def update_route(self, waypoints=None, loiters=None, **options):
-        """UPDATE of a route: new ``waypoints`` with their ``loiters`` (fsim.RouteLoiter; None: those it has, and
-        theirs) and the options given (the others kept); checked as a NEW's, then flown afresh from its start, from
-        where the aircraft is. Returns True if a value was clamped; raises fsim.Rejected (``index`` the waypoint at
-        fault)."""
+    def update_route(self, waypoints=None, loiters=None, states=None, **options):
+        """UPDATE of a route: new ``waypoints`` with their ``loiters`` (fsim.RouteLoiter) and ``states``
+        (fsim.RouteState) - None: those it has, and theirs - and the options given (the others kept); checked as a
+        NEW's, then flown afresh from its start, from where the aircraft is. Returns True if a value was clamped; raises
+        fsim.Rejected (``index`` the waypoint at fault)."""
         rows = [] if waypoints is None else _waypoints(waypoints)
         h = self.world._h
         return bool(_checked(h.activity_update_route(self.id, _row("route", (), options), rows, int(self.source), self.controller,
-                                                     None if loiters is None else _loiters(loiters)), h)[4])
+                                                     None if loiters is None else _loiters(loiters), None if states is None else _states(states)),
+                             h)[4])
 
     def update_curve(self, segments=None, **options):
         """UPDATE of a curve: new ``segments`` (fsim.BezierSegment or fsim.NurbsSegment; None: those it has) and the options given (the
@@ -1179,9 +1208,9 @@ class BatchCommand:
             waypoints = args.pop(0) if args else k.pop("waypoints")
             route = {"projection": k.pop("projection", Projection.GREAT_CIRCLE), "repeat": 1.0 if k.pop("repeat", False) else 0.0,
                      "end": k.pop("end", EndBehavior.CONTINUE), "start": k.pop("start", 0)}
-            loiters = k.pop("loiters", None)
-            return ((kind, 0, _row("route", (), route), None, _waypoints(waypoints), None, options, None if loiters is None else _loiters(loiters)),
-                    ("route", source, validate, controller))
+            loiters, states = k.pop("loiters", None), k.pop("states", None)
+            return ((kind, 0, _row("route", (), route), None, _waypoints(waypoints), None, options, None if loiters is None else _loiters(loiters),
+                     None if states is None else _states(states)), ("route", source, validate, controller))
         segments = args.pop(0) if args else k.pop("segments")
         if _is_nurbs(segments):  # (as A-GRA's schema gives them: its own kind, ABI 1.24)
             return (6, 0, _row("curve", (), k), None, None, _nurbs(segments), options), ("curve", source, validate, controller)
@@ -1190,7 +1219,7 @@ class BatchCommand:
 
 def _setpoint(t):
     """A native setpoint (activity_setpoint) as the fsim.BatchCommand that would command it."""
-    kind, code, fields, behavior, waypoints, segments, loiters = t
+    kind, code, fields, behavior, waypoints, segments, loiters, states = t
     if kind == 0:
         level = Level(code)
         return BatchCommand("submit", level, **dict(zip(SETPOINT_FIELDS[level], fields)))
@@ -1206,6 +1235,8 @@ def _setpoint(t):
     if kind == 4:
         route = dict(zip(MODE_FIELDS["route"], fields))
         more = {"loiters": [RouteLoiter(*l) for l in loiters]} if loiters else {}  # (its loiters, complete: 4.31)
+        if states:  # (its planned states, as placed: 4.34)
+            more["states"] = [RouteState(int(s[0]), *s[1:]) for s in states]
         return BatchCommand("submit_route", [Waypoint(*w) for w in waypoints], projection=route["projection"], repeat=route["repeat"] == 1.0,
                             end=route["end"], start=route["start"], **more)
     if kind == 6:  # a curve's segments as A-GRA's schema gives them
@@ -1378,7 +1409,7 @@ class Vehicle:
                                            controller))
         return self._answer(r, "hsa", source, validate_only, controller)
 
-    def submit_route(self, waypoints, *, projection=Projection.GREAT_CIRCLE, repeat=False, end=EndBehavior.CONTINUE, start=0, loiters=None,
+    def submit_route(self, waypoints, *, projection=Projection.GREAT_CIRCLE, repeat=False, end=EndBehavior.CONTINUE, start=0, loiters=None, states=None,
                      source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(), interactive=True, validate_only=False,
                      rank=None, interrupt=True, precedence_override=None, window=None, override_rejection=False, controller=0):
         """NEW for fsim.guidance.route, A-GRA's waypoint following (docs/vehicle-interface.md, 4.5): fly
@@ -1388,13 +1419,14 @@ class Vehicle:
         the last point, ``end`` (fsim.EndBehavior: "continue", "loiter"). An Activity that completes after the last
         point (unless it repeats), whose progress names the point flown to; ``update_route`` gives it new waypoints
         or options. Its loiter points' ``loiters`` (fsim.RouteLoiter, at most 16; docs/flight-autonomy.md, 4.31) beside
-        them: while one flies its progress names its point, done, with the pattern's time to go. fsim.Rejected if
-        refused: ``index`` names the waypoint (a loiter's, its point), ``constraint`` the limit it breaks, and
-        ``findings`` every waypoint at fault. The command envelope as submit's."""
+        them: while one flies its progress names its point, done, with the pattern's time to go. Its planned
+        ``states`` (fsim.RouteState, at most 64; 4.34): its segments' first lap flies through their altitudes, at their
+        times. fsim.Rejected if refused: ``index`` names the waypoint (a loiter's or a state's, its point),
+        ``constraint`` the limit it breaks, and ``findings`` every waypoint at fault. The command envelope as submit's."""
         options = {"projection": projection, "repeat": 1.0 if repeat else 0.0, "end": end, "start": start}
         r = self._h.submit_route(self.id, _row("route", (), options), _waypoints(waypoints), int(source), None, int(range), int(min_version),
                                  _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection,
-                                           controller), None if loiters is None else _loiters(loiters))
+                                           controller), None if loiters is None else _loiters(loiters), None if states is None else _states(states))
         return self._answer(r, "route", source, validate_only, controller)
 
     def submit_pattern(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),

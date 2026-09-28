@@ -72,6 +72,13 @@ void mergeCurveShape(CurveCommand& curve, CurveShape& shape, const CurveCommand&
 /// then its shape's 14 to 19) - or -1.
 int curveWhereField(const CurveCommand& given, const CurveShape* shape) noexcept;
 
+/// A route's own beside its waypoints, as the host's checks take them (docs/flight-autonomy.md, 4.31, 4.34): its loiter
+/// points' loiters and its planned states - passed down by pointer, so what is not a route passes none.
+struct RouteExtras {
+    Span<const RouteLoiter> loiters;
+    Span<const RouteState> states;
+};
+
 class CapabilityHost {
 public:
     CapabilityHost();
@@ -117,9 +124,9 @@ public:
     /// waypoints completed and checked against the aircraft, planned from
     /// where it is, then written into the vehicle's path store (allocated at
     /// its first route). A RouteCommand submitted as a Command has none: InvalidWaypoint.
-    /// The loiters its loiter points fly beside them (docs/flight-autonomy.md, 4.31).
+    /// The loiters its loiter points fly beside them (docs/flight-autonomy.md, 4.31), and its planned states (4.34).
     CommandResult submit(const RouteCommand& route, Span<const Waypoint> waypoints, const CommandOptions& options, const sim::VehicleState& state,
-                         double now, Span<const RouteLoiter> loiters = {});
+                         double now, Span<const RouteLoiter> loiters = {}, Span<const RouteState> states = {});
     /// NEW of a curve (fsim.guidance.curve; docs/vehicle-interface.md 4.7):
     /// its segments checked against the aircraft (InvalidCurve naming the
     /// segment, and a section too tight), then written into the path store.
@@ -153,9 +160,9 @@ public:
     /// UPDATE of a route: its options (a field left out, kHold, keeps its
     /// value) and its waypoints - none: those it has - checked as a NEW's,
     /// then flown afresh from its start, from where the aircraft is. New
-    /// waypoints come with their loiters (4.31); none, it keeps its own.
+    /// waypoints come with their loiters (4.31) and states (4.34); none, it keeps its own.
     CommandResult update(ActivityId activity, const RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state,
-                         Caller caller, Span<const RouteLoiter> loiters = {}) noexcept;
+                         Caller caller, Span<const RouteLoiter> loiters = {}, Span<const RouteState> states = {}) noexcept;
     /// UPDATE of a curve: the options given (kHold keeps one), and segments -
     /// with `append` 1, after its end, from the same reference; else a new
     /// curve, flown afresh. Options alone change how it is flown, not where.
@@ -186,7 +193,8 @@ public:
     /// capability that never completes; TaskActive while its activity is live;
     /// else why the vehicle cannot command the capability.
     Reason storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, TaskRepetition repetition,
-                     const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {});
+                     const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {},
+                     Span<const RouteState> states = {});
     /// A task command: the NEW of its command with `options`, the task among
     /// the requirements it traces to, answered as the NEW is; its runs, as the
     /// task says. UnknownTask; TaskActive while its activity is live.
@@ -367,6 +375,7 @@ private:
         PatternShape shape{};  ///< a pattern's (docs/flight-autonomy.md, 4.23)
         CurveShape curveShape{}; ///< a curve's reference in a frame (4.27)
         std::vector<RouteLoiter> loiters; ///< a route's (4.31; room for the path store's, reserved at its NEW)
+        std::vector<RouteState> states;   ///< a route's planned states (4.34; likewise)
     };
     /// A flight task (4.11): its command, and what became of it.
     struct Task {
@@ -378,6 +387,7 @@ private:
         PatternShape shape{};               ///< a pattern's (docs/flight-autonomy.md, 4.23)
         CurveShape curveShape{};            ///< a curve's reference in a frame (4.27)
         std::vector<RouteLoiter> loiters;   ///< a route's (4.31)
+        std::vector<RouteState> states;     ///< a route's planned states (4.34)
         TaskRepetition repetition{};
         ActivityId activity = 0;            ///< its activity (every run's), while it is commanded
         std::uint64_t commandId = 0;        ///< its task command's
@@ -394,7 +404,7 @@ private:
     /// The platform's suggestion (4.11): a task with the command the checks
     /// left, every value held to its limit (a route's points as planned). Its id.
     TaskId suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const PatternShape* shape = nullptr,
-                   const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {});
+                   const CurveShape* curveShape = nullptr, const RouteExtras* extras = nullptr);
     /// Room for a suggestion: the oldest not flying goes where kSuggestions are kept.
     Task& newSuggestion(TaskId id);
     /// Failed waiting activities kept as suggestions, made tasks now.
@@ -439,7 +449,7 @@ private:
     /// checked as its range policy says - the malformed returned at once, the
     /// rest logged - and the admission a behaviour asks. `setpoint` is what flies.
     Reason prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const sim::VehicleState& state,
-                   CheckLog& log, const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {});
+                   CheckLog& log, const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr, const RouteExtras* extras = nullptr);
     /// The axes a command owns: its own, else the capability's default, widened
     /// above the actuators to whole groups; InvalidAxes if not a flyable set.
     Reason axesOf(std::size_t index, const Command& command, const CommandOptions& options, AxisMask& axes) const noexcept;
@@ -480,7 +490,7 @@ private:
     /// UPDATE of a waiting activity: its command's new setpoint, checked as its NEW was, kept for its start.
     CommandResult updateWaiting(Waiting& w, const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                 const sim::VehicleState& state, Caller caller, const PatternShape* shape = nullptr,
-                                const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {}) noexcept;
+                                const CurveShape* curveShape = nullptr, const RouteExtras* extras = nullptr) noexcept;
     CommandResult updateWaiting(Waiting& w, const SupportCommand& setpoint, Caller caller) noexcept;
     /// The live activities' time windows after a world step: a persistent one
     /// done at its end window's close, a terminating one late or early failed if its end is critical.
@@ -579,14 +589,28 @@ private:
     /// NEW (checkLoiter), completed where it flies (completeLoiters) and,
     /// checked, limited as a pattern is (limitPattern at its point).
     Reason checkRoute(RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log,
-                      Span<const RouteLoiter> loiters = {});
+                      const RouteExtras* extras = nullptr);
     /// A route's arrival windows as given (4.33; Arrival.cpp), its first lap's: one past refused invalid; one at or after
     /// a loiter point, or on an aircraft without the tables its speeds come from, not implemented - the point named.
     Reason checkArrivals(const route::Plan& plan, const sim::VehicleState& state, CommandResult& detail) const noexcept;
-    /// Its windows against what the aircraft can make, planned from where it is, in calm air (4.33): a finding
-    /// (PerformanceLimit) where even the fastest it flies level arrives after one (MaxAirspeed), or a wing's slowest
-    /// before one (MinAirspeed) - no clamp mends either.
-    void limitArrivals(const route::Plan& plan, const sim::VehicleState& state, CheckLog& log) const noexcept;
+    /// Its windows and its states' times against what the aircraft can make, planned from where it is, in calm air (4.33,
+    /// 4.34), each in turn along its first lap from the times it can make the ones before: a finding (PerformanceLimit)
+    /// where even the fastest it flies level arrives after one (MaxAirspeed), or a wing's slowest before one
+    /// (MinAirspeed) - no clamp mends either.
+    void limitArrivals(route::Plan& plan, const sim::VehicleState& state, CheckLog& log) const noexcept;
+    /// A route's planned states as given (4.34; States.cpp), into the plan placed and complete: 64 at most, each on a
+    /// segment its first lap flies, in order, its fields finite, with a place (in a frame, where the frame is at its
+    /// time), its altitude in its point's reference, a time not past and after the one before; an altitude beside a climb
+    /// rate or optimisation - else invalid. At or after a loiter point, on a route with a point in a moving frame, or a
+    /// time without the tables its speeds come from, not implemented. The point named.
+    Reason checkStates(route::Plan& plan, Span<const RouteState> states, const sim::VehicleState& state, CommandResult& detail) const;
+    /// Its states on their legs as planned from where the aircraft is (4.34): one off its leg by more than its
+    /// uncertainty (50 m at least, or 1 % of the leg), or behind the one before, invalid - the point named; a piece of the
+    /// profile through their altitudes steeper than the aircraft climbs or descends, a finding (PerformanceLimit) no
+    /// clamp mends.
+    Reason limitStates(route::Plan& plan, const sim::VehicleState& state, CheckLog& log) const noexcept;
+    /// A route kept waiting as it is reset (4.34), resumed at point `start` (-1: from its own): the states beyond it.
+    void keepStates(Waiting& w, const PathStore& store, double start) const;
     /// The most a route's segment accelerates from `fromMs` to `toMs` (4.32): a rotorcraft's (Performance), a wing's from
     /// its tables at the fuel on board - full power's excess faster, idle's slower, the least over the speeds between - as
     /// a rate; NaN where not known.
@@ -681,7 +705,7 @@ private:
     /// may not wait (the existing entry points'): refused where it would.
     CommandResult submitWith(const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const CommandOptions& options,
                              const sim::VehicleState& state, double now, bool mayWait = true, const PatternShape* shape = nullptr,
-                             const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {});
+                             const CurveShape* curveShape = nullptr, const RouteExtras* extras = nullptr);
 
     /// A capability's standing with the vehicle's policy (6.2, 7.2).
     struct Authority {

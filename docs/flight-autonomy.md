@@ -816,17 +816,57 @@ A-GRA's path segment gives a required time of arrival at its end point (MA_PathS
   - the distance to it along the route, as the route measures its segments;
   - its arrival at the speed planned: its segment's, over the ground in the wind now along its course;
   - within the window, flown as planned. Beyond it, from then until the point, the ground speed that arrives a quarter of the window's width inside it (5 s at most, and 5 s past a side given alone; a point window, at it), re-planned each update, so it closes on its own error. In its last second it holds the speed it asked;
-  - within the speeds it flies level: a wing's from 1.2 times its envelope's least up to its tables' fastest at the altitude and fuel on board, less 3 %, and its most. A wing's tables' slowest level speed is narrower than what it flies (a Typhoon at 139 m/s where they read 168), and energy management begins to act at 1.1 times its least. A rotorcraft's is from a metre a second up to its fastest over the ground.
+  - within the speeds it flies level: a wing's from 1.2 times its envelope's least up to its tables' fastest at the altitude and fuel on board, less 3 %, and its most. A wing's tables' slowest level speed is narrower than what it flies (a Typhoon at 139 m/s where they read 168), and energy management begins to act at 1.1 times its least. A rotorcraft's is from a metre a second up to its fastest over the ground;
+  - since FA-6d2, a climb steeper than the aircraft climbs at its fastest level speed is flown no faster than it climbs it, and the rest paced to make up for it (4.34).
   The point after the window is flown at its own speed again.
-- **Checked:** the time it would arrive at the fastest and the slowest of those speeds (in calm air) against the window. A window it cannot make is refused `performance_limit` naming the point, whatever the range policy: `MaxAirspeed` where even its fastest arrives after it, `MinAirspeed` where even a wing's slowest arrives before it. Unchecked (`RangePolicy::None`), it is flown at its limit.
+- **Checked:** the time it would arrive at the fastest and the slowest of those speeds (in calm air) against the window: since FA-6d2, from the earliest and the latest it can be at the timed target before it - a window, a planned state's time - the first from now, its climbs no faster than it climbs them (4.34). A window it cannot make is refused `performance_limit` naming the point, whatever the range policy: `MaxAirspeed` where even its fastest arrives after it, `MinAirspeed` where even a wing's slowest arrives before it. Unchecked (`RangePolicy::None`), it is flown at its limit.
 - **Not implemented** (as its support row, `fsim.guidance.route/required_time_of_arrival`, says, partial):
   - a window at or after a loiter point: the time a loiter takes is its end time's to set (4.31);
   - an aircraft without performance tables, whose speeds it would have no floor for (a stock JSBSim aircraft): its row reads not implemented, as the speed optimisation's does.
-- **Reported:** the estimated arrival at the next point with a window (the aim, once scheduled), and that against its window: + late, − early, 0 within. C++ asks the route for it (`World::activityArrival`, an `ArrivalEstimate`), apart from the progress: every activity record carries a progress, and the host holds 26 records a vehicle, so 16 bytes more there cost a level switch's NEW 9 % (section 14). The C ABI's and Python's progress carry it, NaN where there is none. The speed the progress reports is the ground speed its schedule asks.
+- **Reported:** the estimated arrival at the next point with a window (the aim, once scheduled; a planned state's time, 4.34), and that against its window: + late, − early, 0 within (to a microsecond). C++ asks the route for it (`World::activityArrival`, an `ArrivalEstimate`), apart from the progress: every activity record carries a progress, and the host holds 26 records a vehicle, so 16 bytes more there cost a level switch's NEW 9 % (section 14). The C ABI's and Python's progress carry it, NaN where there is none. The speed the progress reports is the ground speed its schedule asks.
 - **Surfaces.**
   - C++: `Waypoint::arrivalBeginS`, `arrivalEndS`; `World::activityArrival` and `ArrivalEstimate`; `Behavior::arrival`.
   - C ABI 1.30: `fsim_waypoint`'s `arrival_begin_s` and `arrival_end_s`, and `fsim_activity_progress`'s `arrival_s` and `arrival_delta_s`, each where the caller's `struct_size` has them.
   - Python: `fsim.Waypoint`'s `arrival_begin_s` and `arrival_end_s`; `fsim.ActivityProgress`'s `arrival_s` and `arrival_delta_s`.
+
+### 4.34 A-GRA's planned inertial states (as FA-6d2 builds them)
+
+A-GRA's path segment carries planned inertial states (MA_PathSegmentType.InertialState, an InertialStateRelativeType, any number of them): "detailed inertial state information at user defined increments within a path segment", data a route's pre-mission analysis may need. Each is a place - a point, or one relative to a reference frame - with the time it is to be reached, and the velocities, acceleration, orientation and rates planned there. ADR-29 plans them as the segment's reference trajectory (WPT-20); FA-6d2 builds that.
+
+- **A state** (`RouteState`, beside the waypoints as the loiters are; 64 a route at most, in order along it):
+  - its segment, `point`: the one ending at that waypoint;
+  - its place: a latitude and longitude, or a place in a frame (a frame and its offsets, as a waypoint's) where the frame is at the state's time - a fixed frame's place, a moving one's at its velocity, a vehicle's where its velocity now carries it; without a time, where it is now;
+  - its altitude, in its point's reference (a reference left out takes it), and its time (`timeS`, the world's simulation seconds). Either may be left out;
+  - the rest A-GRA gives - its position's uncertainty, its ground velocity, its velocity through the air and in its frame, its acceleration, its orientation and its rates - kept and read back.
+- **Flown** on the first lap (a repeating route's later laps fly their segments as without them):
+  - its altitude: the segment's profile runs straight from where it climbs from through each state's altitude, at its place along the leg, to its point's, in place of its gradient;
+  - its time: a window of none at its place (4.33). The next timed target is the nearer of the next point with a window and the next timed state not yet passed, and its schedule aims at the state's time;
+  - a climb: where a piece of the first lap's profile - a segment's gradient, or a piece between its states' altitudes - is steeper than the aircraft climbs at its fastest level speed, the fastest speed it climbs it at is found from its tables' full power excess power (4.32's rate), down from that speed. The schedule flies no faster there, and paces the rest to make up for it: the ground speed that arrives on time with its climbs no faster. This holds for a route with a time to arrive at; a segment at a climb rate or optimisation, or above the ground, has none. First scheduled at one ground speed throughout, a C172 climbing 150 m to a state held 49.4 m/s at full power while its schedule asked up to 59, and passed it 1.4 s late (section 14).
+- **Refused `invalid_waypoint`, naming the point:**
+  - 65 or more;
+  - on a segment past the route, or one its first lap does not fly (before its start);
+  - out of order along the route;
+  - a field not finite, or a code not whole;
+  - no place (neither a latitude and longitude nor a frame), or a frame the session has not;
+  - an altitude in another reference than its point's;
+  - a time past, or not after the one before;
+  - an altitude beside a climb rate or a climb optimisation: two profiles;
+  - checked (a range policy given), a place off its leg as planned by more than its uncertainty (50 m at least, or 1 % of the leg), or behind the state before it on the leg.
+- **Refused `performance_limit`, naming the point, whatever the range policy:**
+  - a piece of its profile steeper than the aircraft climbs or descends (`MaxClimbRate`, `MaxDescentRate`): at its point's speed, or between two times in the time between them;
+  - a time it cannot make (`MaxAirspeed`, `MinAirspeed`), as a window's (4.33).
+- **Checked** by the terrain walk too: its first lap through its states' altitudes.
+- **Not implemented** (as its support row, `fsim.guidance.route/inertial_states`, says: partial):
+  - a state at or after a loiter point, whose leg after the loiter is flown from where it ends;
+  - on a route with a point in a moving frame, whose legs move;
+  - a timed state on an aircraft without performance tables, as a window's (4.33).
+- **Kept** as the loiters are: an UPDATE's new waypoints come with their states, and without new waypoints it keeps its own. A route kept waiting as it is reset resumes at the point it flew to, with the states beyond it.
+- **Reported:** the arrival estimate (4.33) is the next timed target's, a state's time too. The setpoint reads its states back as placed: one in a frame with its latitude, longitude and altitude where the frame was at its time.
+- **A route's times taken together** (a named change to 4.33): FA-6d1 checked each window from now alone. A route's windows and its states' times are now checked in turn along its first lap, each from the earliest and the latest the aircraft can be at the one before, and its climbs no faster than it climbs them. So two windows it could make each alone, but not both, are refused (`MaxAirspeed` at the second). The first is checked as before.
+- **Surfaces.**
+  - C++: `RouteState` (`fsim/Control.h`); a `Span<const RouteState>` beside the loiters in `World::submit` and `World::update` (a route's), `BatchCommand::states`, `Setpoint::states`, `ControlStack::command`; `PathStore::routeStates`.
+  - C ABI 1.31: `fsim_route_state` (`fsim_route_state_init`: every field left out), its 29 fields in `RouteState`'s order (`fsim/fsim_c.h` lists them); `fsim_vehicle_submit_route_states`, `fsim_activity_update_route_states`; `fsim_batch_command`'s `states` and `state_count`, where the caller's struct has them, filled by `fsim_activity_get_setpoint`.
+  - Python: `fsim.RouteState`, by name or member; `states=` beside `loiters=` in `submit_route` and `update_route`, and in a batch's or a task's `BatchCommand("submit_route", ...)`; read back in the setpoint's `states`.
 
 ## 5. Applicability (D6)
 
@@ -1064,7 +1104,7 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
   - FA-6c2, climb optimisation (WPT-08; 4.32), done 2026-09-28 and measured in section 14;
 - FA-6d, 4D, in three steps:
   - FA-6d1, required times of arrival (WPT-11; 4.33), done 2026-09-28 and measured in section 14;
-  - FA-6d2, planned inertial states (WPT-20);
+  - FA-6d2, planned inertial states (WPT-20; 4.34), done 2026-09-28 and measured in section 14;
   - FA-6d3, required navigation performance (WPT-21);
 - FA-6e, paths: several per route with ids and types, links and conditional branches (WPT-13, WPT-14, WPT-15);
 - FA-6f, civil path terminators (WPT-19).
@@ -2243,6 +2283,31 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - Then a behaviour's NEW read +8.6 % and +9.5 % (its minimum 130 ns, then 142), every function on its path the same instructions in both builds. The arrival checks inside `checkRoute`, before them in their file, had moved `prepare` and `submitWith` some 600 bytes on. Outlined into their own translation unit, last in the library (`Arrival.cpp`, with the estimate's plumbing), `checkRoute` is 192 bytes longer than FA-6c2's, they move 64 bytes, and the NEW reads +0.7 % and +1.4 %.
   - World throughput is 97.7 to 100.9 % of FA-6c2's (another session's process ran once beside it; the runs before read 99.6 to 101.9 %); protection costs at most 1.6 %.
 - ctest: all 304 tests pass.
+
+**FA-6d2, A-GRA's planned inertial states (WPT-20).**
+- **Flown** (`test_route_states`, calm):
+  - a C172 east, 3 km at 55 m/s, then 12 km on at 1,500 m, through two states: 1,650 m at 7 km, due at 140 s (at 55 m/s it would be there at 127 s: slowed), and 1,550 m at 11 km, due at 210 s (sped up). It passed them at 140.2 s, 1,650.1 m high, and at 210.2 s, 1,550.1 m; no higher than 1,651.8 m. After 5 km its estimate read 140.12 s: its climb paced no faster than it climbs it;
+  - first scheduled at one ground speed throughout, it held 49.4 m/s at full power through the climb while its schedule asked up to 59, and passed the first state 1.4 s late, its estimate reading 140.00 s all the while. Then, catching up in the descent, it ran to 64 m/s on a command of 59 and passed the second 1.7 s early. Its climbs are now paced (4.34): the level entry flown at 51 to 52 m/s where it had been 50, the climb at 49.07, the fastest its tables' full power climbs that gradient at;
+  - an IRIS north 300 m at 5 m/s over the ground: 20 m up at a moving frame's origin at 50 s - the frame 2 m/s north from where the IRIS was, the state placed 100 m north (within 0.5 m) - and 30 m up 200 m north at 75 s. It passed them at 50.0 s, 20.0 m up, and at 75.0 s, 30.0 m up.
+- **Read back as placed:** what else a state gives (a ground speed, a yaw, an uncertainty, a roll rate of 0) as given; its altitude reference its point's; a state in a frame with its latitude and altitude where the frame was at its time, its frame kept.
+- **Refused, naming the point:** past the route, out of order, a field not finite, no place, a frame the session has not, another altitude reference, a time past, a time not after the one before, an altitude beside a climb rate, a segment its first lap does not fly, 65 states, 1 km off a 12 km leg (1 % of it is 120 m), behind the state before (`invalid_waypoint`); 500 m up in a kilometre (`performance_limit`, `MaxClimbRate`, clamped too), 4 km in 10 s (`MaxAirspeed`), a time too late for its slowest (`MinAirspeed`); at or after a loiter point, beside a point in a moving frame, and the stock C172x's time (`not_implemented`). Flown: 300 m off its leg within its own 400 m uncertainty; unchecked, 1 km off; the stock C172x's altitude without a time.
+- **Kept:** an UPDATE of its options alone keeps its states; one with new waypoints and none has none.
+- **A route's times taken together:** a C172's windows at 8 km (240 to 245 s) and 13 km (250 to 260 s) - each it could make alone - are refused `performance_limit`, `MaxAirspeed`, at the second: after the first, 5 km on takes it to 317 s at the earliest. FA-6d1's check, each from now alone, passed them. With the second at 330 to 340 s, flown.
+- **The fleet** (`test_fleet`): every aircraft flies to a point half a minute on at its speed, then two and a half minutes on; between them two states - up a minute on, by what it climbs in 20 s at a third of its most (60 m at the most: the C172's 33.7 m, the Skua's 20 m, a rotorcraft's 3.5 to 33.3 m), and back down a minute later - each timed a tenth later than its speed makes it (slowed), or where its slowest cannot take that, a tenth sooner (sped up). All 35 complete; 34 were slowed, and the Crazyflie sped up.
+  - Every one passed each state 0.03 s after its time, a control period.
+  - Every one passed each within 9.3 m of its altitude: the Mirage 2000 9.2 m over at the top, where its profile turns from climb to descent, and the RQ-4B 9.2 m under; every other within 4.2 m (the Typhoon's), a rotorcraft within 0.01 m.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6d1's build. The states' profile, their schedule and the climbs' pace run only where a route has states or times to arrive at; the terrain walk's profile runs through states only on a segment with their altitudes.
+- **The support table:** `route/inertial_states` is partial on every aircraft (at or after a loiter point, beside points in moving frames, not implemented); a time without tables is refused as a window's, by `route/required_time_of_arrival`'s row. The route capability's pending list names a planned state at or after a loiter point or beside points in moving frames, where it named 4D states.
+- **Conformance:** the optimise walks give routes one to three states now and then, halfway along their legs before any loiter point: up or down, a time it may make or not; one off its leg, one not finite, some out of order.
+- **Surfaces:** the C ABI's 1.31 block (a hangar C172's states read back, its altitude reference completed; its progress's estimate the state's time, 140 s, and its delta 0; an UPDATE's new waypoints with none; one off its leg refused `invalid_waypoint` at its point, in a batch too; the stock C172x's time `not_implemented`); Python's `test_route_states` (by name, read back, passed within 2 s and 25 m, its estimate within 0.5 s; in a batch; refused).
+- **Memory:** a state is 240 bytes. The path store holds 64 (15 KB); the host's route plan and each route behaviour's 64 placed, where each is, and the first lap's climbs (24 KB more); a waiting activity keeps room for 64 (15 KB, reserved at its NEW). A route behaviour holds an index and two flags more. The activity record is as it was.
+- **Digests:** identical to FA-6d1's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6d1, both builds run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`.
+  - The micro cases are within −6.3 % to +1.2 %: the curve's −6.3 % (its minimum 18 ns less), the hsa's +1.2 %.
+  - The command cases are within −2.0 % to +1.5 %: a behaviour's NEW −2.0 % in both runs (its minimum 130.5 ns, now 128.1), a level switch's −0.4 % and −1.6 %.
+  - First passed down beside the loiters as a second span, the states made `submitWith` 544 bytes longer (58 instructions): Windows x64 passes a 16-byte struct by a hidden reference, copied as the function begins, and its registers were allocated afresh throughout. A behaviour's NEW read +2.7 % and +3.5 % (its minimum 131 ns, then 135), a level switch's +3.1 % and +1.9 %. A route's loiters and states now go down the host's private calls as one pointer (`RouteExtras`), null for anything not a route: `submitWith` is 48 bytes shorter than FA-6d1's, `prepare` too, and the NEWs read as above.
+  - World throughput is 100.2 to 100.5 % of FA-6d1's; protection costs at most 0.6 %.
+- ctest: all 308 tests pass.
 
 ## Appendix A: the inventory
 

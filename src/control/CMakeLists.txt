@@ -41,7 +41,8 @@ add_library(fsim_control STATIC
     Patterns.cpp
     Nurbs.cpp
     Climb.cpp
-    Arrival.cpp)
+    Arrival.cpp
+    States.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

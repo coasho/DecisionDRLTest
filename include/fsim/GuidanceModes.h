@@ -162,10 +162,24 @@ private:
     /// rate, while it changes, as `feedforward`.
     double climbProfile(const ControlContext& ctx, const Performance& performance, const Waypoint& segment, double routeM, double& feedforward);
     bool arrival(ArrivalEstimate& out) const noexcept override;
-    /// Its speed scheduled to its next arrival window (4.33), `routeM` along the route: as planned while that arrives within
-    /// it; else, from then to the point, the ground speed that arrives a little inside it, within the speeds it flies level.
-    /// Its estimate kept.
+    /// Its speed scheduled to its next arrival window (4.33) or timed state (4.34), `routeM` along the route: as planned
+    /// while that arrives within it; else, from then to it, the ground speed that arrives a little inside it (at a state's
+    /// time), within the speeds it flies level. Its estimate kept.
     void scheduleArrival(const ControlContext& ctx, const Performance& performance, double routeM, route::Steer& steer);
+    /// Its planned states from the path store (4.34; States.cpp): false for one without a place, or past the route.
+    bool takeStates(const ControlContext& ctx) noexcept;
+    /// Its next timed target this lap, from `lapM` along it (4.33, 4.34): the nearest of the next point with an arrival
+    /// window and a timed state not passed; and whether the segment flown has states' altitudes. Its schedule kept while
+    /// it is the one.
+    void nextArrival(double lapM) noexcept;
+    /// The segment's altitude through its states' (4.34), `routeM` along the route: straight from each to the next,
+    /// from where it climbs from to its point; the gradient's rate as `feedforward`.
+    double stateAltitude(double routeM, double& feedforward) const noexcept;
+    /// The ground speed that takes it from `fromM` to `toM` along the first lap in `seconds`, its climbs no faster than it
+    /// climbs them (4.34): within `lo` to `hi`, the least that makes it; `hi` where none does.
+    double paceThroughClimbs(double fromM, double toM, double seconds, double lo, double hi, double alongMs) const noexcept;
+    /// The fastest it climbs the piece `lapM` along the first lap is in (over the ground), or infinity where it is not in one.
+    double climbMostHere(double lapM, double alongMs) const noexcept;
 
     std::unique_ptr<route::Plan> plan_; ///< allocated with the behaviour: nothing in flight
     WindEstimate wind_;
@@ -196,8 +210,11 @@ private:
     double climbMid_ = kHold;          ///< the altitude it holds between (an efficient climb's cheapest; else its end)
     double climbLastS_ = 0.0;          ///< when the profile last moved
     bool climbRest_ = false;           ///< the rest of the change, from where it held, begun
-    // its next point with an arrival window (4.33)
-    std::int32_t arrivalPoint_ = -1;   ///< its index; -1: none ahead this lap
+    // its next point with an arrival window (4.33), or timed state (4.34): the nearer
+    std::int32_t arrivalPoint_ = -1;   ///< its index; -1: none ahead this lap (or a state first)
+    std::int32_t arrivalState_ = -1;   ///< the state's; -1: none first
+    bool segmentFirstLap_ = true;      ///< the segment flown is the first lap's: its states flown
+    bool stateAltitudes_ = false;      ///< the segment flown has states' altitudes (4.34)
     double arrivalAimS_ = kHold;       ///< when it is to arrive there, once its schedule has begun; kHold: as planned
     double arrivalSpeedMs_ = kHold;    ///< the ground speed its schedule last asked (held through its last second)
     double arrivalS_ = kHold, arrivalDeltaS_ = kHold; ///< when it is estimated to arrive there, and that against its window

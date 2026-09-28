@@ -57,7 +57,13 @@ struct Profile {
     double rateMs = kNaN; ///< its climb rate; NaN: along its gradient
     double speedMs = 0.0, lengthM = 0.0;
     bool late = false;    ///< its change at its rate made to end at its point (an efficient climb's, as late as it goes: 4.32)
+    /// Its states' altitudes, where its first lap flies through them (4.34): the plan's for point `point`, as `height` reads each.
+    const route::Plan* states = nullptr;
+    std::uint32_t point = 0;
+    double (*height)(double altitudeM, const Altimeter& altimeter) = nullptr;
+    const Altimeter* altimeter = nullptr;
     double at(double x) const noexcept {
+        if (states) return through(x);
         if (rateMs > 0.0 && speedMs > 0.0) {
             if (late) x -= std::max(lengthM - std::abs(to - from) / rateMs * speedMs, 0.0);
             if (late && x < 0.0) return from;
@@ -66,8 +72,24 @@ struct Profile {
         return lengthM > 1.0 ? from + (to - from) * std::clamp(x / lengthM, 0.0, 1.0) : to;
     }
     /// How far past its point it is still climbing or descending to it.
-    double pastM() const noexcept { return rateMs > 0.0 && speedMs > 0.0 ? std::max(std::abs(to - from) / rateMs * speedMs - lengthM, 0.0) : 0.0; }
+    double pastM() const noexcept { return rateMs > 0.0 && speedMs > 0.0 && !states ? std::max(std::abs(to - from) / rateMs * speedMs - lengthM, 0.0) : 0.0; }
+    /// Straight from its start through each state's altitude, at its place along the leg, to its point.
+    double through(double x) const noexcept {
+        double x0 = 0.0, h0 = from, x1 = lengthM, h1 = to;
+        for (std::uint32_t j = 0; j < states->stateCount; ++j) {
+            const RouteState& s = states->states[j];
+            if (s.point != point || isHold(s.altitudeM)) continue;
+            const double along = states->stateAlongM[j], h = height(s.altitudeM, *altimeter);
+            if (along <= x && along >= x0) x0 = along, h0 = h;
+            else if (along > x && along < x1) x1 = along, h1 = h;
+        }
+        if (x >= lengthM) return to;
+        return x1 - x0 > 1e-6 ? h0 + (h1 - h0) * std::clamp((x - x0) / (x1 - x0), 0.0, 1.0) : h1;
+    }
 };
+
+double asGiven(double altitudeM, const Altimeter&) { return altitudeM; }
+double onIsobar(double altitudeM, const Altimeter& altimeter) { return barometricMslM(altimeter, altitudeM); }
 
 /// The path walked piece by piece, each sampled at the spacing (its ends too), and the time along it at its
 /// speeds: where a sample is below the ground, the place it first goes below, found between it and the one before.
@@ -203,6 +225,10 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
             if (!isHold(w.climbOptimization) && f.to != f.from && !(efficient && f.to < f.from)) { // (4.32: the lowest it could fly)
                 const double toMsl = msl(f.to, above, w.latitudeRad, w.longitudeRad), fromHere = above ? msl(f.from, true, l.latA, l.lonA) : f.from;
                 climbProfile(f, efficient, fromHere, toMsl, state.fuelKg);
+            }
+            if (firstLap && p.stateAltitudes(i)) { // (through its states: 4.34)
+                f.states = &p, f.point = i, f.altimeter = &config_->altimeter;
+                f.height = barometric(w.altitudeReference) ? onIsobar : asGiven;
             }
             // (a loiter point's leg, to where its loiter is joined, its altitude there: 4.31)
             const RouteLoiter* loiter = route::loiterPoint(w) ? p.loiterAt(i) : nullptr;

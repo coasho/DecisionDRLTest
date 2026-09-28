@@ -119,6 +119,7 @@ public:
     bool optimise = false;
     std::vector<Waypoint> waypoints; ///< the last route's, made beside its RouteCommand
     std::vector<RouteLoiter> loiters; ///< its loiter points' loiters, beside them (in the walks of their own: ADR-29 FA-6b2)
+    std::vector<RouteState> states;   ///< its planned states, beside them (likewise: FA-6d2)
     std::vector<BezierSegment> segments; ///< the last curve's, made beside its CurveCommand
     std::vector<NurbsSegment> nurbs;     ///< the same as cubics, as A-GRA's schema gives them (ADR-29 FA-5d1), where asNurbs
     bool asNurbs = false;                ///< given so: now and then, in the walks drawn since
@@ -308,7 +309,7 @@ public:
             }
             out = r;
             const auto& s = state();
-            waypoints.clear(), loiters.clear();
+            waypoints.clear(), loiters.clear(), states.clear();
             bool loitered = false; // (a loiter point drawn so far: an arrival window at or after it is not implemented - FA-6d1)
             for (int k = 0; k < points; ++k) {
                 const PositionCommand a = ahead(4000.0 * (k + 1));
@@ -368,6 +369,30 @@ public:
                     }
                 }
                 waypoints.push_back(p);
+            }
+            // its planned states (FA-6d2): now and then one to three on its segments before any loiter point, halfway along
+            // their legs - up or down, a time it may make or not; now and then one off its leg, one not finite, some out of order
+            if (wild && optimise && chance(0.1)) {
+                int before = points; // (the first loiter point: a state at or after it is not implemented)
+                for (int k = 0; k < points && before == points; ++k)
+                    if (waypoints[static_cast<std::size_t>(k)].kind == static_cast<double>(EndPointKind::LoiterPoint)) before = k;
+                const int n = 1 + static_cast<int>(pick(3));
+                for (int i = 0; i < n && before > 0; ++i) {
+                    const auto k = static_cast<std::size_t>(pick(static_cast<std::size_t>(before)));
+                    const Waypoint& to = waypoints[k];
+                    const double fromLat = k == 0 ? s.latitudeRad : waypoints[k - 1].latitudeRad, fromLon = k == 0 ? s.longitudeRad : waypoints[k - 1].longitudeRad;
+                    RouteState st;
+                    st.point = static_cast<std::uint32_t>(k);
+                    st.latitudeRad = 0.5 * (fromLat + to.latitudeRad), st.longitudeRad = 0.5 * (fromLon + to.longitudeRad);
+                    if (chance(0.7)) st.altitudeM = s.altitudeMslM + uniform(-100.0, 100.0);
+                    if (chance(0.5)) st.timeS = w_.simTime() + uniform(-30.0, 600.0);
+                    if (chance(0.05)) st.latitudeRad += 3000.0 / kEarthRadiusM;
+                    if (chance(0.05)) st.groundNorthMs = std::numeric_limits<double>::infinity();
+                    if (chance(0.3)) st.yawRad = uniform(-3.0, 3.0), st.groundEastMs = uniform(0.0, 100.0);
+                    states.push_back(st);
+                }
+                if (chance(0.7))
+                    std::stable_sort(states.begin(), states.end(), [](const RouteState& a, const RouteState& b) { return a.point < b.point; });
             }
             return true;
         }
@@ -494,7 +519,7 @@ private:
 /// NEW of what the maker made: a route with the waypoints it made beside it, a curve with its segments, a pattern with
 /// its shape (where it made one).
 CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, const Maker& make, const CommandOptions& options = {}) {
-    if (const auto* route = std::get_if<RouteCommand>(&c)) return w.submit(v, *route, make.waypoints, options, make.loiters);
+    if (const auto* route = std::get_if<RouteCommand>(&c)) return w.submit(v, *route, make.waypoints, options, make.loiters, make.states);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && make.asNurbs)
         return w.submit(v, *curve, Span<const NurbsSegment>(make.nurbs), options, curveShape);
@@ -505,7 +530,8 @@ CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, c
 
 /// UPDATE with what the maker made: a route's or a curve's options, and now and then its waypoints or segments.
 CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Caller caller = {}) {
-    if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints) return w.update(caller, activity, *route, make.waypoints, make.loiters);
+    if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints)
+        return w.update(caller, activity, *route, make.waypoints, make.loiters, make.states);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints && make.asNurbs)
         return w.update(caller, activity, *curve, Span<const NurbsSegment>(make.nurbs), curveShape);
@@ -1261,7 +1287,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 const PatternShape* shape = std::holds_alternative<PatternCommand>(command) && !make.shape.empty() ? &make.shape : nullptr;
                 BatchCommand item; // (a curve's cubics, where made so: a batch item's form)
                 item.command = command, item.waypoints = points, item.segments = pieces, item.shape = shape;
-                if (std::holds_alternative<RouteCommand>(command)) item.loiters = make.loiters;
+                if (std::holds_alternative<RouteCommand>(command)) item.loiters = make.loiters, item.states = make.states;
                 if (std::holds_alternative<CurveCommand>(command) && !make.curveShape.empty()) item.curveShape = &make.curveShape;
                 if (make.asNurbs && std::holds_alternative<CurveCommand>(command)) item.segments = {}, item.nurbs = make.nurbs;
                 const Reason r = w.storeTask(v, id, item, repetition);
