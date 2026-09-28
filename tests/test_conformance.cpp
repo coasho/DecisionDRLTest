@@ -319,6 +319,19 @@ public:
                     if (chance(0.5)) p.altitudeM = s.altitudeMslM + uniform(-200.0, 200.0);
                     if (chance(0.5)) p.speed = s.airspeedTrueMs > 5.0 ? s.airspeedTrueMs * uniform(0.85, 1.15) : uniform(2.0, 8.0);
                     if (chance(0.2)) p.turn = 1.0;
+                    if (optimise) { // the point as A-GRA's schema gives it (ADR-29 FA-6a): now and then each other way to give it
+                        if (chance(0.1)) p.altitudeMinM = s.altitudeMslM - uniform(0.0, 300.0), p.altitudeMaxM = s.altitudeMslM + uniform(-100.0, 300.0);
+                        // (what is built: the actions not built yet answer not implemented everywhere, as their own tests show)
+                        if (chance(0.1)) p.kind = static_cast<double>(pick(2)); // (a waypoint, a turn point)
+                        if (chance(0.1)) {
+                            const std::size_t t = pick(4); // nav only, passive, a last point's end of path, or one that is not one
+                            p.waypointType = t == 0 || (t == 2 && k + 1 < points) ? static_cast<double>(WaypointType::NavOnly)
+                                             : t == 1                             ? static_cast<double>(WaypointType::Passive)
+                                             : t == 2                             ? static_cast<double>(WaypointType::EndOfPath)
+                                                                                  : static_cast<double>(WaypointType::Count);
+                        }
+                        if (chance(0.05)) p.frame = static_cast<double>(1 + pick(3)), p.frameXM = uniform(-2000.0, 2000.0); // (the session's first few)
+                    }
                 }
                 waypoints.push_back(p);
             }

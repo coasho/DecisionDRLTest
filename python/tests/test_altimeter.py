@@ -35,11 +35,10 @@ class AltimeterTest(unittest.TestCase):
         self.assertEqual(a["Kollsman"], 1000.0)
         self.assertAlmostEqual(a["TrueAirspeed"], v.state.airspeed_true_ms)
         self.assertTrue(math.isfinite(a["BarometricAltitudeRate"]))
-        # a route's barometric altitude is FA-6's
+        # a route's barometric altitude taken (ADR-29 FA-6a: flown on its isobar in test_route_points)
         s = fsim.VehicleState.from_buffer_copy(v.state)
-        with self.assertRaises(fsim.Rejected) as refused:
-            v.submit_route([fsim.Waypoint(s.latitude_rad + 0.01, s.longitude_rad, altitude_m=1500.0, altitude_reference="barometric")])
-        self.assertEqual((refused.exception.reason, refused.exception.index), ("not_implemented", 0))
+        r = v.submit_route([fsim.Waypoint(s.latitude_rad + 0.01, s.longitude_rad, altitude_m=1500.0, altitude_reference="barometric")])
+        self.assertEqual(r.setpoint().args[0][0].altitude_reference, float(fsim.AltitudeReference.BAROMETRIC))
 
     def test_flown_on_its_isobar(self):
         w = make_world()

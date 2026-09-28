@@ -185,6 +185,27 @@ enum class EndBehavior : std::uint8_t {
     Count
 };
 
+/// What a waypoint is for (A-GRA's WaypointTypeEnum; docs/flight-autonomy.md, 4.29): navigation alone, or the
+/// action it marks - a taxi, a runway's points, an approach's, a takeoff's, a touchdown, a ditch, the end of its path.
+enum class WaypointType : std::uint8_t {
+    NavOnly = 0,
+    Taxi,
+    RunwayStart,
+    RunwayThreshold,
+    RunwayLimit,
+    Approach,
+    ApproachInitialPoint,
+    ApproachFinalPoint,
+    Takeoff,
+    TakeoffInitialPoint,
+    TakeoffFinalPoint,
+    Touchdown,
+    Passive, ///< (A-GRA gives it no meaning: flown as NavOnly)
+    HardDitch,
+    EndOfPath,
+    Count
+};
+
 /// One waypoint of a route (A-GRA's), and the segment that ends at it: flown
 /// to from the previous point, the first from where the aircraft is when the
 /// route starts. A field left out (kHold) continues the previous point's; the
@@ -201,6 +222,21 @@ struct Waypoint {
     double maxBankRad = kHold;         ///< the bank its fly-by turn is planned with; kHold: 80 % of the aircraft's
     double climbRateMs = kHold;        ///< climb or descend at this rate, then level; kHold: along the segment's gradient
     std::uint64_t id = 0;              ///< the caller's, reported back in the progress
+    // A-GRA's end point as its schema gives it (docs/flight-autonomy.md, 4.29)
+    double altitudeMinM = kHold, altitudeMaxM = kHold; ///< its altitude block, in its reference: left out, the altitude held within it
+    double kind = kHold;               ///< EndPointKind: left out, a turn point as `turn` says; a waypoint (no turn) is flown over
+    double waypointType = kHold;       ///< a waypoint's WaypointType (left out: NavOnly)
+    double frame = kHold;              ///< a point in this frame (World::createFrame's id): its latitude and longitude where the frame puts it
+    double frameRotation = kHold, frameOffsets = kHold; ///< its offsets' FrameRotation and FrameOffsets, as a pattern's point's
+    double frameXM = kHold, frameYM = kHold, frameZM = kHold; ///< its offsets (z down: given, its altitude the frame's there)
+    /// Its point in its frame: the offsets left out, the frame's origin.
+    FrameOffset frameOffset() const noexcept {
+        FrameOffset o;
+        o.rotation = isHold(frameRotation) ? FrameRotation::Unrotated : static_cast<FrameRotation>(static_cast<int>(frameRotation));
+        o.offsets = isHold(frameOffsets) ? FrameOffsets::Cartesian : static_cast<FrameOffsets>(static_cast<int>(frameOffsets));
+        o.x = isHold(frameXM) ? 0.0 : frameXM, o.y = isHold(frameYM) ? 0.0 : frameYM, o.z = isHold(frameZM) ? 0.0 : frameZM;
+        return o;
+    }
 };
 
 /// fsim.guidance.route (A-GRA's waypoint following): its waypoints go beside
@@ -495,6 +531,11 @@ struct PathStore {
     FrameSpec patternFrame;     ///< its frame, where its point is one's (PatternShape::frame)
     CurveShape curveShape;      ///< the curve's reference in a frame (empty: its CurveCommand's; docs/flight-autonomy.md, 4.27)
     FrameSpec curveFrame;       ///< its frame, where its reference is one's
+    /// The frames a route's waypoints are in (docs/flight-autonomy.md, 4.29), as they were at its NEW: 16 a route at most.
+    static constexpr std::size_t kRouteFrames = 16;
+    std::uint32_t routeFrameCount = 0;
+    FrameId routeFrameIds[kRouteFrames] = {};
+    FrameSpec routeFrames[kRouteFrames];
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").

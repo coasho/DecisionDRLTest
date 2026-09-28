@@ -398,18 +398,72 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     const auto count = static_cast<std::uint32_t>(std::min<std::size_t>(waypoints.size(), 0xFFFF));
     if (c.repeat == 1.0 && count == 1) return bad(1); // round and round one point is a pattern, not a route
     if (count > 0 && c.start >= count) return bad(3);
-    for (std::uint32_t i = 0; i < count; ++i) // a barometric altitude on a route is FA-6's (its support table says so)
-        if (waypoints[i].altitudeReference == static_cast<double>(AltitudeReference::Barometric)) {
-            detail.index = static_cast<std::int16_t>(i);
-            return Reason::NotImplemented;
-        }
     if (!routePlan_) routePlan_ = std::make_unique<route::Plan>();
     route::Plan& p = *routePlan_;
     const bool hovers = (adapter_->features() & kFeatureHover) != 0;
     std::int16_t which = -1;
-    if (const Reason r = route::complete(p.points, waypoints.data(), count, c.repeat == 1.0, state, performance_, hovers, which); r != Reason::None) {
+    auto point = [&detail](std::uint32_t i, Reason why) {
+        detail.index = static_cast<std::int16_t>(std::min<std::uint32_t>(i, 0x7FFF));
+        return why;
+    };
+    // its points in frames placed where the frames are now (4.29) - 16 frames at most, each one the session has
+    const std::uint32_t n = std::min<std::uint32_t>(count, route::Plan::kMax);
+    std::copy_n(waypoints.data(), n, p.points);
+    p.frameCount = 0;
+    for (std::uint32_t i = 0; i < n; ++i) {
+        Waypoint& w = p.points[i];
+        auto finite = [](double v) { return isHold(v) || std::isfinite(v); };
+        if (isHold(w.frame) || !(w.frame == std::floor(w.frame) && w.frame >= 1.0 && w.frame <= 9007199254740992.0) ||
+            !code(w.frameRotation, static_cast<double>(FrameRotation::Count)) || !code(w.frameOffsets, static_cast<double>(FrameOffsets::Count)) ||
+            !finite(w.frameXM) || !finite(w.frameYM) || !finite(w.frameZM))
+            continue; // (none, or not whole: complete() refuses it)
+        const auto id = static_cast<FrameId>(w.frame);
+        FrameSpec spec;
+        FramePose now;
+        if (!sessionView_ || !sessionView_->frame(id, spec, now)) return point(i, Reason::InvalidWaypoint);
+        std::uint32_t k = 0;
+        while (k < p.frameCount && p.frameIds[k] != id) ++k;
+        if (k == p.frameCount) {
+            if (k == PathStore::kRouteFrames) return point(i, Reason::InvalidWaypoint);
+            p.frameIds[k] = id, p.frames[k] = spec, ++p.frameCount;
+        }
+        const GeoPoint at = framePoint(now, w.frameOffset());
+        w.latitudeRad = at.latitudeRad, w.longitudeRad = geo::wrapPi(at.longitudeRad);
+        if (!isHold(w.frameZM)) w.altitudeM = at.altitudeMslM, w.altitudeReference = static_cast<double>(AltitudeReference::Msl);
+    }
+    if (const Reason r = route::complete(p.points, p.points, count, c.repeat == 1.0, state, performance_, hovers, which, &config_->altimeter);
+        r != Reason::None) {
         detail.index = which;
         return r;
+    }
+    // what is not built yet: a loiter inside a route (FA-6b), the end of a path not the route's own end (FA-6e's paths),
+    // and the actions a point's type asks - answered as its row in the support table says: not supported where the
+    // aircraft cannot (a taxi's, without its rule), else not implemented (a taxi's, a runway's and a takeoff's points
+    // FA-9's, an approach's and a touchdown FA-10's, a ditch FA-16's)
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const Waypoint& w = p.points[i];
+        if (w.kind == static_cast<double>(EndPointKind::LoiterPoint)) return point(i, Reason::NotImplemented);
+        if (isHold(w.waypointType)) continue;
+        const auto type = static_cast<WaypointType>(static_cast<int>(w.waypointType));
+        if (type == WaypointType::NavOnly || type == WaypointType::Passive || (type == WaypointType::EndOfPath && i + 1 == count)) continue;
+        const char* id = nullptr;
+        switch (type) {
+        case WaypointType::Taxi: id = "fsim.guidance.route/waypoint_type/taxi"; break;
+        case WaypointType::RunwayStart:
+        case WaypointType::RunwayThreshold:
+        case WaypointType::RunwayLimit: id = "fsim.guidance.route/waypoint_type/runway"; break;
+        case WaypointType::Takeoff:
+        case WaypointType::TakeoffInitialPoint:
+        case WaypointType::TakeoffFinalPoint: id = "fsim.guidance.route/waypoint_type/takeoff"; break;
+        case WaypointType::Approach:
+        case WaypointType::ApproachInitialPoint:
+        case WaypointType::ApproachFinalPoint:
+        case WaypointType::Touchdown: id = "fsim.guidance.route/waypoint_type/landing"; break;
+        case WaypointType::HardDitch: id = "fsim.guidance.route/waypoint_type/hard_ditch"; break;
+        default: break; // (the end of a path before the route's end: FA-6e's)
+        }
+        const SupportInfo* row = id && support_ ? support_->find(id) : nullptr;
+        return point(i, row && row->support == Support::NotSupported ? Reason::NotSupported : Reason::NotImplemented);
     }
     p.count = count;
     p.start = static_cast<std::uint32_t>(c.start);
@@ -421,7 +475,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     // the altitude a segment climbs from: the point before's, in the same reference; the start's, the aircraft's
     auto from = [&](std::uint32_t i, bool entry) {
         const Waypoint& w = p.points[i];
-        if (entry) return altitudeNow(static_cast<AltitudeReference>(static_cast<int>(w.altitudeReference)), state);
+        if (entry) return altitudeNow(static_cast<AltitudeReference>(static_cast<int>(w.altitudeReference)), state, &config_->altimeter);
         const Waypoint& b = p.points[p.prev(i)];
         return b.altitudeReference == w.altitudeReference ? b.altitudeM : kHold;
     };
@@ -461,11 +515,13 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         for (const bool entry : {true, false}) {
             if (entry ? i != p.start : (i == p.start && !p.repeat)) continue;
             const route::Leg& leg = entry ? p.entry : p.legs[i];
-            const double h0 = from(i, entry);
+            double h0 = from(i, entry), h1 = w.altitudeM;
             if (isHold(h0) || !(leg.lengthM > 1.0)) continue;
-            const bool descends = w.altitudeM < h0;
+            if (w.altitudeReference == static_cast<double>(AltitudeReference::Barometric)) // (on their isobars: above sea level)
+                h0 = barometricMslM(config_->altimeter, h0), h1 = barometricMslM(config_->altimeter, h1);
+            const bool descends = h1 < h0;
             const double most = descends ? f.maxDescentMs : f.maxClimbMs;
-            double rate = std::abs(w.altitudeM - h0) * v / leg.lengthM; // what the gradient asks
+            double rate = std::abs(h1 - h0) * v / leg.lengthM; // what the gradient asks
             if (std::isnan(most) || rate <= most) continue;
             log.limit(rate, most, static_cast<std::int16_t>(i), 8, descends ? Constraint::MaxDescentRate : Constraint::MaxClimbRate, Reason::PerformanceLimit);
             w.climbRateMs = most;
@@ -726,6 +782,9 @@ void CapabilityHost::writeRoute() {
     const route::Plan& p = *routePlan_;
     std::copy_n(p.points, p.count, store.waypoints);
     store.count = p.count;
+    store.routeFrameCount = p.frameCount; // (its points' frames, as placed: 4.29)
+    std::copy_n(p.frameIds, p.frameCount, store.routeFrameIds);
+    std::copy_n(p.frames, p.frameCount, store.routeFrames);
     ++store.revision;
 }
 

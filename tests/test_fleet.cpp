@@ -240,6 +240,19 @@ double groundDistance(const sim::VehicleState& a, const sim::VehicleState& b) {
 }
 
 /// How far `s` is from a point over the ground.
+/// (lat, lon) in the plane square to the vertical at (lat0, lon0), north and east metres - as a frame's Cartesian offsets
+/// are laid out (Frames.cpp): the central projection, in which great circles are straight.
+void tangentPlane(double lat0, double lon0, double lat, double lon, double& north, double& east) {
+    const double r = 6371008.8;
+    const double o[3] = {std::cos(lat0) * std::cos(lon0), std::cos(lat0) * std::sin(lon0), std::sin(lat0)};
+    const double n[3] = {-std::sin(lat0) * std::cos(lon0), -std::sin(lat0) * std::sin(lon0), std::cos(lat0)};
+    const double e[3] = {-std::sin(lon0), std::cos(lon0), 0.0};
+    const double u[3] = {std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+    const double along = u[0] * o[0] + u[1] * o[1] + u[2] * o[2];
+    north = r * (u[0] * n[0] + u[1] * n[1] + u[2] * n[2]) / along;
+    east = r * (u[0] * e[0] + u[1] * e[1] + u[2] * e[2]) / along;
+}
+
 double distanceTo(const sim::VehicleState& s, const PositionCommand& point) {
     double north, east;
     offset(s, point.latitudeRad, point.longitudeRad, north, east);
@@ -1284,6 +1297,69 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             // 0.928 to 1.007, the Crazyflie's 6.39 of 6.89 m at a metre a second)
             CHECK(round.near > (p.rotor ? 0.85 : 0.95) * R);
             CHECK(round.far < (p.rotor ? 1.1 : 1.05) * R);
+        });
+    // A-GRA's relative points in a route (ADR-29 FA-6a: WPT-22): three points in a frame at the aircraft, turned with its
+    // heading and moving to its right at a tenth of its speed - five orbit radii ahead, five to the right, five ahead
+    // again - its two legs in the frame flown over it: off each where the frame is now, in its middle third
+    struct FramedRoute {
+        FrameSpec frame;
+        double worst = 0.0;
+        int samples = 0;
+    };
+    std::map<std::uint32_t, FramedRoute> framedRoutes;
+    const double zig[3][2] = {{5.0, 0.0}, {5.0, 5.0}, {10.0, 5.0}}; // (radii along its heading, and to its right)
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double R = orbitRadius(p), psi = p.start.eulerRad[2], v = 0.1 * (p.rotor ? p.cruiseMs : p.start.airspeedTrueMs);
+            FramedRoute& f = framedRoutes[p.id];
+            f = FramedRoute{};
+            const auto& s = *w.vehicleState(p.id);
+            f.frame.origin = FrameOrigin::Moving;
+            f.frame.latitudeRad = s.latitudeRad, f.frame.longitudeRad = s.longitudeRad, f.frame.yawRad = psi;
+            f.frame.northMs = -v * std::sin(psi), f.frame.eastMs = v * std::cos(psi), f.frame.timeS = w.simTime(); // (to its right)
+            const FrameId id = w.createFrame(f.frame);
+            REQUIRE(id != 0);
+            std::vector<Waypoint> points;
+            for (const auto& z : zig) {
+                Waypoint q;
+                q.frame = static_cast<double>(id), q.frameRotation = static_cast<double>(FrameRotation::Yaw);
+                q.frameXM = z[0] * R, q.frameYM = z[1] * R;
+                points.push_back(q);
+            }
+            const CommandResult r = w.submit(p.id, RouteCommand{}, points);
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            return r.accepted();
+        },
+        [&](const Plane& p) { return 16.0 * orbitRadius(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) * 1.5 + 60.0; },
+        [&](const Plane& p) {
+            FramedRoute& f = framedRoutes[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const ActivityProgress& g = r.progress;
+            if (!r.live() || g.segment < 1 || g.segmentPercent < 33.0 || g.segmentPercent > 67.0) return;
+            const FramePose pose = framePose(f.frame, w.simTime());
+            double north, east; // (in the plane at its origin its points are laid out in: its great circles are straight there)
+            const auto& s = *w.vehicleState(p.id);
+            tangentPlane(pose.latitudeRad, pose.longitudeRad, s.latitudeRad, s.longitudeRad, north, east);
+            const double c = std::cos(pose.yawRad), sn = std::sin(pose.yawRad), R = orbitRadius(p);
+            const double x = north * c + east * sn, y = -north * sn + east * c; // (in its axes)
+            const double x0 = zig[g.segment - 1][0] * R, y0 = zig[g.segment - 1][1] * R, x1 = zig[g.segment][0] * R, y1 = zig[g.segment][1] * R;
+            const double length = std::hypot(x1 - x0, y1 - y0);
+            f.worst = std::max(f.worst, std::abs(-(x - x0) * (y1 - y0) / length + (y - y0) * (x1 - x0) / length));
+            ++f.samples;
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const FramedRoute& f = framedRoutes[p.id];
+            const double R = orbitRadius(p);
+            INFO(activityStateName(r.state) << "; R " << R << ", off its legs in the frame " << f.worst << " m (" << f.samples << " samples)");
+            CHECK(r.state == ActivityState::Completed);
+            CHECK(f.samples > 0);
+            // (the worst: a wing 5.1 % of its radius, the Skua's 6.7 m - in metres the F-35A's 49 m, 1.6 %; a rotorcraft 8.3 %, the
+            // Crazyflie's 0.57 m. Measured in the plane at the frame's origin its points are laid out in, where its great circles
+            // are straight: along its parallel instead, the heavies' legs 90 km out read 530 m off)
+            CHECK(f.worst < (p.rotor ? std::max(0.5, 0.1 * R) : std::max(20.0, 0.05 * R)));
         });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {

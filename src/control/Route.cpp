@@ -70,6 +70,16 @@ void shrink(Turn& t, double leadM, bool flag) noexcept {
 bool aboveGround(const Waypoint& w) noexcept { return w.altitudeReference == static_cast<double>(AltitudeReference::AboveGround); }
 bool overGround(const Waypoint& w) noexcept { return w.speedReference == static_cast<double>(SpeedReference::GroundSpeed); }
 
+/// A turn at point i is planned at the faster of the segments either side of it, plus the wind (what the ground speed
+/// reaches downwind; a rotorcraft flying over the ground has no such gust), with its bank.
+double turnRadiusAt(const Plan& p, std::uint32_t i, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept {
+    const Waypoint& a = p.points[i];
+    const Waypoint& b = p.points[p.next(i)];
+    auto speedOf = [&](const Waypoint& w) { return plannedSpeed(w.speed, w.speedReference, aboveGround(w) ? altitudeMslM : w.altitudeM); };
+    const double v = std::max(speedOf(a), speedOf(b)) + (hovers && overGround(a) && overGround(b) ? 0.0 : windMs);
+    return isHold(a.maxBankRad) ? performance.turnRadiusM(v) : v * v / (kG * std::tan(a.maxBankRad));
+}
+
 } // namespace
 
 Leg makeLeg(double latA, double lonA, double latB, double lonB, bool rhumb) noexcept {
@@ -961,7 +971,7 @@ double Plan::lapM(bool firstLap) const noexcept {
 }
 
 Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool repeat, const sim::VehicleState& state, const Performance& performance,
-                bool hovers, std::int16_t& bad) noexcept {
+                bool hovers, std::int16_t& bad, const Altimeter* altimeter) noexcept {
     auto invalid = [&bad](std::uint32_t i) {
         bad = static_cast<std::int16_t>(std::min<std::uint32_t>(i, 0x7FFF));
         return Reason::InvalidWaypoint;
@@ -978,11 +988,25 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
         if (!code(w.altitudeReference, AltitudeReference::Count) || !code(w.speedReference, SpeedReference::Count)) return invalid(i);
         if (!isHold(w.altitudeM) && !std::isfinite(w.altitudeM)) return invalid(i);
         if (!within(w.speed, 0.0, inf) || !within(w.maxBankRad, 0.0, 0.5 * kPi) || !within(w.climbRateMs, 0.0, inf)) return invalid(i);
+        // its end point as A-GRA's schema gives it (4.29): a kind and a type (a waypoint's), a block, a frame's fields whole
+        if (!code(w.kind, EndPointKind::Count) || !code(w.waypointType, WaypointType::Count)) return invalid(i);
+        if (!isHold(w.waypointType)) {
+            if (isHold(w.kind)) w.kind = static_cast<double>(EndPointKind::Waypoint);
+            if (w.kind != static_cast<double>(EndPointKind::Waypoint)) return invalid(i);
+        }
+        if (!within(w.altitudeMinM, -inf, inf) || !within(w.altitudeMaxM, -inf, inf)) return invalid(i);
+        if (!isHold(w.altitudeMinM) && !isHold(w.altitudeMaxM) && w.altitudeMaxM < w.altitudeMinM) return invalid(i);
+        if (!isHold(w.frame) && !(w.frame == std::floor(w.frame) && w.frame >= 1.0 && w.frame <= 9007199254740992.0)) return invalid(i);
+        if (!code(w.frameRotation, FrameRotation::Count) || !code(w.frameOffsets, FrameOffsets::Count)) return invalid(i);
+        if (!within(w.frameXM, -inf, inf) || !within(w.frameYM, -inf, inf) || !within(w.frameZM, -inf, inf)) return invalid(i);
+        if (isHold(w.frame) && !(isHold(w.frameRotation) && isHold(w.frameOffsets) && isHold(w.frameXM) && isHold(w.frameYM) && isHold(w.frameZM)))
+            return invalid(i); // (offsets without their frame)
+        const bool altitudeGiven = !isHold(w.altitudeM);
         w.longitudeRad = geo::wrapPi(w.longitudeRad);
         if (i == 0) {
             // the aircraft's own now; a reference given alone, its value in that reference
             if (isHold(w.altitudeReference)) w.altitudeReference = static_cast<double>(AltitudeReference::Msl);
-            if (isHold(w.altitudeM)) w.altitudeM = altitudeNow(static_cast<AltitudeReference>(static_cast<int>(w.altitudeReference)), state);
+            if (isHold(w.altitudeM)) w.altitudeM = altitudeNow(static_cast<AltitudeReference>(static_cast<int>(w.altitudeReference)), state, altimeter);
             if (hovers && isHold(w.speed)) { // a rotorcraft's own speed (a hover's none) is no speed to fly a route at
                 w.speed = std::isfinite(performance.cruiseTasMs) && performance.cruiseTasMs > 0.0 ? performance.cruiseTasMs : 5.0;
                 w.speedReference = static_cast<double>(SpeedReference::GroundSpeed);
@@ -1008,6 +1032,11 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
             }
             if (geo::distanceM(p.latitudeRad, p.longitudeRad, w.latitudeRad, w.longitudeRad) < 1.0) return invalid(i); // the same place
         }
+        // within its block: given, or refused; left out, held within it
+        if (altitudeGiven && ((!isHold(w.altitudeMinM) && w.altitudeM < w.altitudeMinM) || (!isHold(w.altitudeMaxM) && w.altitudeM > w.altitudeMaxM)))
+            return invalid(i);
+        if (!isHold(w.altitudeMinM)) w.altitudeM = std::max(w.altitudeM, w.altitudeMinM);
+        if (!isHold(w.altitudeMaxM)) w.altitudeM = std::min(w.altitudeM, w.altitudeMaxM);
         if (!(w.speed > 0.0) || !std::isfinite(w.speed)) return invalid(i); // (the aircraft's own, stopped)
         out[i] = w;
     }
@@ -1025,17 +1054,8 @@ void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, c
     }
     if (p.repeat && n > 1) p.legs[0] = makeLeg(point(n - 1).latitudeRad, point(n - 1).longitudeRad, point(0).latitudeRad, point(0).longitudeRad, p.rhumb);
 
-    // A turn at point i is planned at the faster of the segments either side
-    // of it, plus the wind (what the ground speed reaches downwind; a
-    // rotorcraft flying over the ground has no such gust), with its bank.
-    auto radius = [&](std::uint32_t i) {
-        const Waypoint& a = point(i);
-        const Waypoint& b = point(p.next(i));
-        auto speedOf = [&](const Waypoint& w) { return plannedSpeed(w.speed, w.speedReference, aboveGround(w) ? altitudeMslM : w.altitudeM); };
-        const double v = std::max(speedOf(a), speedOf(b)) + (hovers && overGround(a) && overGround(b) ? 0.0 : windMs);
-        return isHold(a.maxBankRad) ? performance.turnRadiusM(v) : v * v / (kG * std::tan(a.maxBankRad));
-    };
-    auto flyBy = [&](std::uint32_t i) { return point(i).turn == static_cast<double>(TurnType::FlyBy); };
+    auto radius = [&](std::uint32_t i) { return turnRadiusAt(p, i, altitudeMslM, windMs, performance, hovers); };
+    auto flyBy = [&](std::uint32_t i) { return point(i).turn == static_cast<double>(TurnType::FlyBy) && !noTurn(point(i)); }; // (a waypoint: flown over)
     for (std::uint32_t i = 0; i < n; ++i)
         if (p.leaves(i) && (i > 0 || p.repeat) && flyBy(i)) p.turns[i] = makeTurn(p.legs[i].courseInRad, p.legs[p.next(i)].courseOutRad, radius(i));
 
@@ -1073,6 +1093,50 @@ void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, c
         if (t.radiusM > 0.0 && f < 1.0) shrink(t, t.leadM * f, true);
     }
     if (p.entryTurn.radiusM > 0.0 && share[after] < 1.0) shrink(p.entryTurn, p.entryTurn.leadM * share[after], true);
+}
+
+VelocityCommand hoverOver(const sim::VehicleState& s, const Performance& perf, double lat, double lon, double transit, double frameNorthMs,
+                          double frameEastMs, double verticalSpeedMs) noexcept {
+    double north, east; // the point, from here
+    geo::localNorthEastM(s.latitudeRad, s.longitudeRad, lat, lon, north, east);
+    const double distance = std::hypot(north, east);
+    const double lag = std::isfinite(perf.velocityBandwidthRadS) && perf.velocityBandwidthRadS > 0.0 ? 1.0 / perf.velocityBandwidthRadS : 10.0;
+    const double a = std::isfinite(perf.maxDecelerationMs2) && perf.maxDecelerationMs2 > 0.0 ? 0.5 * perf.maxDecelerationMs2 : 0.25;
+    const double closing = std::fmin(transit, std::fmin(0.5 / lag * distance, a * (std::sqrt(lag * lag + 2.0 * distance / a) - lag)));
+    const double k = distance > 1e-6 ? closing / distance : 0.0;
+    return VelocityCommand{kHold, verticalSpeedMs, kHold, kHold, frameNorthMs + k * north, frameEastMs + k * east};
+}
+
+void replan(Plan& p, std::uint32_t i, bool firstLap, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept {
+    const Waypoint& w = p.points[i];
+    const bool entry = firstLap && i == p.start;
+    Leg& in = entry ? p.entry : p.legs[i];
+    if (entry) {
+        in = makeLeg(in.latA, in.lonA, w.latitudeRad, w.longitudeRad, p.rhumb);
+    } else if (i > 0 || p.repeat) {
+        const Waypoint& a = p.points[p.prev(i)];
+        in = makeLeg(a.latitudeRad, a.longitudeRad, w.latitudeRad, w.longitudeRad, p.rhumb);
+    }
+    Turn& t = entry ? p.entryTurn : p.turns[i];
+    t = Turn{};
+    if (!p.leaves(i)) return;
+    const std::uint32_t j = p.next(i);
+    const Waypoint& b = p.points[j];
+    Leg& out = p.legs[j];
+    out = makeLeg(w.latitudeRad, w.longitudeRad, b.latitudeRad, b.longitudeRad, p.rhumb);
+    if (w.turn != static_cast<double>(TurnType::FlyBy) || noTurn(w) || (!entry && i == 0 && !p.repeat)) return;
+    t = makeTurn(in.courseInRad, out.courseOutRad, turnRadiusAt(p, i, altitudeMslM, windMs, performance, hovers));
+    if (entry && t.leadM > in.lengthM) { // (too near its point to turn before it: flown over)
+        t = Turn{};
+        return;
+    }
+    // its share of the legs either side, beside the turns at their other ends (plan()'s, here)
+    const double before = entry ? 0.0 : firstLap && p.prev(i) == p.start ? p.entryTurn.leadM : p.turns[p.prev(i)].leadM;
+    const double after = p.turns[j].leadM;
+    double share = 1.0;
+    if (before + t.leadM > in.lengthM) share = std::min(share, in.lengthM / (before + t.leadM));
+    if (t.leadM + after > out.lengthM) share = std::min(share, out.lengthM / (t.leadM + after));
+    if (t.radiusM > 0.0 && share < 1.0) shrink(t, t.leadM * share, true);
 }
 
 } // namespace fsim::control::route

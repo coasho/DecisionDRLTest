@@ -744,7 +744,24 @@ typedef struct fsim_waypoint {
     double max_bank_rad;                   /* the bank its fly-by turn is planned with; left out: 80 % of the aircraft's */
     double climb_rate_ms;                  /* climb or descend at it, then level; left out: along the segment's gradient */
     uint64_t id;                           /* the caller's, reported back in the progress */
+    /* ABI 1.26 (docs/flight-autonomy.md, 4.29): A-GRA's end point as its schema gives it; read where the caller's
+       struct_size has them */
+    double altitude_min_m, altitude_max_m; /* its altitude block, in its reference: an altitude left out held within it */
+    double kind;                           /* fsim_end_point_kind: left out, a turn point as `turn` says; a waypoint (no turn) flown over */
+    double waypoint_type;                  /* a waypoint's fsim_waypoint_type (left out: nav only; given alone, a waypoint) */
+    double frame;                          /* a point in this frame (fsim_world_create_frame's id): placed where it is, its latitude and
+                                              longitude not read; a moving one's placed as it is flown */
+    double frame_rotation, frame_offsets;  /* fsim_frame_rotation, fsim_frame_offsets of its offsets */
+    double frame_x_m, frame_y_m, frame_z_m; /* its offsets (z down: given, its altitude the frame's there) */
 } fsim_waypoint;
+/* What a waypoint is for (A-GRA's WaypointTypeEnum; ABI 1.26): nav only and passive are flown; the end of a path on a
+   route's last point; the others not yet ("not_implemented", naming the point: their support table rows say when) */
+enum fsim_waypoint_type {
+    FSIM_WAYPOINT_NAV_ONLY = 0, FSIM_WAYPOINT_TAXI, FSIM_WAYPOINT_RUNWAY_START, FSIM_WAYPOINT_RUNWAY_THRESHOLD, FSIM_WAYPOINT_RUNWAY_LIMIT,
+    FSIM_WAYPOINT_APPROACH, FSIM_WAYPOINT_APPROACH_INITIAL_POINT, FSIM_WAYPOINT_APPROACH_FINAL_POINT, FSIM_WAYPOINT_TAKEOFF,
+    FSIM_WAYPOINT_TAKEOFF_INITIAL_POINT, FSIM_WAYPOINT_TAKEOFF_FINAL_POINT, FSIM_WAYPOINT_TOUCHDOWN, FSIM_WAYPOINT_PASSIVE,
+    FSIM_WAYPOINT_HARD_DITCH, FSIM_WAYPOINT_END_OF_PATH
+};
 FSIM_API void fsim_waypoint_init(fsim_waypoint* waypoint);
 /* A route (FSIM_MODE_ROUTE's fields, `count` of them) with at most 256
  * waypoints, `waypoints[0].struct_size` bytes apart (the caller's header's

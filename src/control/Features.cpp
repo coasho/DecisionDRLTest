@@ -83,8 +83,8 @@ const FeatureDef kFeatures[] = {
 
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
-        "turn point types, speed and climb optimisation, acceleration, times of arrival, altitude blocks, paths and branches, "
-        "waypoint types, path terminators, 4D states, navigation performance and relative points (FA-6); planning metadata (FA-7)"), // WPT-01, 16, 24, 25
+        "turn point types, speed and climb optimisation, acceleration, times of arrival, paths and branches, path terminators, "
+        "4D states and navigation performance (FA-6); planning metadata (FA-7)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
     {"fsim.guidance.route/turn/fly_by", "fsim.guidance.route", S, 0, 0, ""},                 // WPT-03
@@ -106,18 +106,23 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/altitude/msl", "fsim.guidance.route", S, 0, 0, ""},                // WPT-12
     {"fsim.guidance.route/altitude/agl", "fsim.guidance.route", S, 0, 0, ""},
     {"fsim.guidance.route/altitude/hae", "fsim.guidance.route", S, 0, 0, ""},
-    {"fsim.guidance.route/altitude/barometric", "fsim.guidance.route", N, 6, 0, ""},
-    {"fsim.guidance.route/altitude_block", "fsim.guidance.route", N, 6, 0, ""},
+    {"fsim.guidance.route/altitude/barometric", "fsim.guidance.route", S, 0, 0, ""},          // (FA-6a)
+    {"fsim.guidance.route/altitude_block", "fsim.guidance.route", S, 0, 0, ""},              // (FA-6a)
     {"fsim.guidance.route/paths", "fsim.guidance.route", N, 6, 0, ""},                       // WPT-13
     {"fsim.guidance.route/next_segment", "fsim.guidance.route", N, 6, 0, ""},                // WPT-14
     {"fsim.guidance.route/conditional_segment", "fsim.guidance.route", N, 6, 0, ""},         // WPT-15
-    {"fsim.guidance.route/waypoint_type", "fsim.guidance.route", N, 6, 0, ""},               // WPT-17
+    {"fsim.guidance.route/waypoint_type", "fsim.guidance.route", S, 0, 0, ""},               // WPT-17 (FA-6a: nav only, passive, end of path)
+    {"fsim.guidance.route/waypoint_type/taxi", "fsim.guidance.route", N, 9, R2, ""},          //   the points each action flies
+    {"fsim.guidance.route/waypoint_type/runway", "fsim.guidance.route", N, 9, 0, ""},
+    {"fsim.guidance.route/waypoint_type/takeoff", "fsim.guidance.route", N, 9, 0, ""},
+    {"fsim.guidance.route/waypoint_type/landing", "fsim.guidance.route", N, 10, 0, ""},
+    {"fsim.guidance.route/waypoint_type/hard_ditch", "fsim.guidance.route", N, 16, 0, ""},
     {"fsim.guidance.route/loiter_point", "fsim.guidance.route", P, 6, 0,
      "a loiter inside the route, with its pattern and duration, then on; a route can end in an orbit"}, // WPT-18
     {"fsim.guidance.route/path_terminators", "fsim.guidance.route", N, 6, 0, ""},            // WPT-19
     {"fsim.guidance.route/inertial_states", "fsim.guidance.route", N, 6, 0, ""},             // WPT-20
     {"fsim.guidance.route/required_navigation_performance", "fsim.guidance.route", N, 6, 0, ""}, // WPT-21
-    {"fsim.guidance.route/relative_points", "fsim.guidance.route", N, 6, 0, ""},             // WPT-22
+    {"fsim.guidance.route/relative_points", "fsim.guidance.route", S, 0, 0, ""},             // WPT-22 (FA-6a)
     {"fsim.guidance.route/metadata", "fsim.guidance.route", N, 7, 0, ""},                    // WPT-23
     CAP("fsim.guidance.taxi", N, 9, R2, ""),                                                  // WPT-26
 

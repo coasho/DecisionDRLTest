@@ -102,6 +102,7 @@ from .world import (  # noqa: E402
     BezierSegment,
     NurbsSegment,
     CurveZ,
+    WaypointType,
     EndBehavior,
     EndPoint,
     EndPointKind,

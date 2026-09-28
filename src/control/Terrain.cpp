@@ -143,7 +143,9 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
             f.from = firstLap && i == p.start ? (above ? state.altitudeAglM : state.altitudeMslM)
                      : above                  ? fromMsl - sessionView_->groundM(l.latA, l.lonA)
                                               : fromMsl;
-            f.to = isHold(w.altitudeM) ? f.from : w.altitudeM;
+            f.to = isHold(w.altitudeM)                 ? f.from
+                   : barometric(w.altitudeReference) ? barometricMslM(config_->altimeter, w.altitudeM) // (on its isobar: 4.29)
+                                                     : w.altitudeM;
             f.rateMs = isHold(w.climbRateMs) ? kNaN : w.climbRateMs;
             f.speedMs = route::plannedSpeed(w.speed, w.speedReference, msl(f.to, above, w.latitudeRad, w.longitudeRad));
             f.lengthM = l.lengthM;

@@ -137,6 +137,9 @@ private:
     void advance(const sim::VehicleState& s, const Performance& performance);
     /// A rotorcraft that loiters at the end stops at the last point.
     bool stops() const noexcept;
+    /// Point i where its moving frame is now, as the step began (docs/flight-autonomy.md, 4.29): the frame's pose into
+    /// `pose`; false if the frame's vehicle is gone. A point in no frame, or a fixed one, stays where the host put it.
+    bool place(const ControlContext& ctx, std::uint32_t i, FramePose& pose);
 
     std::unique_ptr<route::Plan> plan_; ///< allocated with the behaviour: nothing in flight
     WindEstimate wind_;
@@ -159,6 +162,10 @@ private:
     double lastTime_ = -1.0;
     double crossTrack_ = kHold, course_ = kHold, heading_ = kHold, altitudeMsl_ = kHold, groundSpeed_ = 0.0;
     double lastCross_ = kHold; ///< off the leg flown last: what it reports past its end
+    // its points in moving frames (4.29)
+    bool moving_ = false;              ///< placed and planned again as it flies them
+    bool overFrame_ = false;           ///< the piece flown is in one moving frame: flown over it
+    double frameNorthMs_ = 0.0, frameEastMs_ = 0.0;
 };
 
 /// "pattern": fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md,

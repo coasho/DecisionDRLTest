@@ -277,6 +277,38 @@ double option(double v, double count) noexcept { return isHold(v) ? 0.0 : std::c
 RouteBehavior::RouteBehavior() : plan_(std::make_unique<route::Plan>()) {}
 RouteBehavior::~RouteBehavior() = default;
 
+namespace {
+
+/// A route point's frame as the host placed it (its store's table): null for none (docs/flight-autonomy.md, 4.29).
+const FrameSpec* routeFrame(const PathStore* store, double frame) noexcept {
+    if (!store || isHold(frame)) return nullptr;
+    const auto id = static_cast<FrameId>(frame);
+    for (std::uint32_t k = 0; k < store->routeFrameCount; ++k)
+        if (store->routeFrameIds[k] == id) return &store->routeFrames[k];
+    return nullptr;
+}
+
+bool moves(const FrameSpec* f) noexcept { return f && f->origin != FrameOrigin::Fixed; }
+
+} // namespace
+
+bool RouteBehavior::place(const ControlContext& ctx, std::uint32_t i, FramePose& pose) {
+    Waypoint& w = plan_->points[i];
+    const FrameSpec* f = routeFrame(ctx.path, w.frame);
+    if (!moves(f)) return true; // (where the host placed it)
+    if (f->origin == FrameOrigin::Vehicle) {
+        const sim::VehicleState* v = ctx.world ? ctx.world->vehicleState(f->vehicle) : nullptr;
+        if (!v) return false;
+        pose = vehiclePose(*v);
+    } else {
+        pose = framePose(*f, ctx.world ? ctx.world->simTime() : ctx.sensed.simTime);
+    }
+    const GeoPoint at = framePoint(pose, w.frameOffset());
+    w.latitudeRad = at.latitudeRad, w.longitudeRad = geo::wrapPi(at.longitudeRad);
+    if (!isHold(w.frameZM)) w.altitudeM = at.altitudeMslM;
+    return true;
+}
+
 void RouteBehavior::begin(const ControlContext& ctx, const Command& command) {
     reset();
     wind_.update(ctx.sensed, ctx.dt); // what the first turns are planned with
@@ -314,12 +346,24 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     p.end = static_cast<EndBehavior>(static_cast<int>(option(command.end, 2.0)));
     // what the waypoints leave out, as the host fills it in (it has, for a World's vehicle)
     std::int16_t bad = -1;
-    if (count == 0 || route::complete(p.points, ctx.path->waypoints, count, p.repeat, s, perf, hovers_, bad) != Reason::None) {
+    if (count == 0 || route::complete(p.points, ctx.path->waypoints, count, p.repeat, s, perf, hovers_, bad, ctx.altimeter) != Reason::None) {
         p.count = 0;
         failure_ = Reason::BehaviorFailed; // (only a stack on its own is given a route nobody checked)
         return;
     }
     p.count = count;
+    // its points in moving frames where the frames are now (4.29): placed and planned again as it flies them
+    moving_ = overFrame_ = false;
+    for (std::uint32_t i = 0; i < count; ++i) {
+        if (!moves(routeFrame(ctx.path, p.points[i].frame))) continue;
+        moving_ = true;
+        FramePose pose;
+        if (!place(ctx, i, pose)) { // (its frame's vehicle gone: nothing to fly to)
+            p.count = 0;
+            failure_ = Reason::TargetLost;
+            return;
+        }
+    }
     p.start = static_cast<std::uint32_t>(option(command.start, static_cast<double>(count)));
     route::plan(p, s.latitudeRad, s.longitudeRad, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
     target_ = p.start;
@@ -428,6 +472,24 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     }
     static const Performance kNone{};
     const Performance& perf = ctx.performance ? *ctx.performance : kNone;
+    if (moving_) { // its points in moving frames where they are, as the step began, and the piece it flies planned again (4.29)
+        route::Plan& q = *plan_;
+        const std::uint32_t at = ended_ ? q.last() : target_;
+        const bool entry = firstLap_ && at == q.start, before = !ended_ && !entry && (at > 0 || q.repeat), after = !ended_ && q.leaves(at);
+        FramePose pose, other;
+        if (!place(ctx, at, pose) || (before && !place(ctx, q.prev(at), other)) || (after && !place(ctx, q.next(at), other))) {
+            failure_ = Reason::TargetLost; // (its frame's vehicle gone: on as it flies, a rotorcraft still)
+            VelocityCommand hold{kHold, 0.0, s.eulerRad[2], kHold, kHold, kHold};
+            if (hovers_) hold.northMs = hold.eastMs = 0.0;
+            else hold.airspeedMs = s.airspeedTrueMs;
+            return hold;
+        }
+        if (!ended_) route::replan(q, at, firstLap_, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
+        // flown over the frame the piece is in: its point's and the one before's, one moving frame (past the end, the last point's)
+        const Waypoint& w = q.points[at];
+        overFrame_ = moves(routeFrame(ctx.path, w.frame)) && (ended_ || (before && q.points[q.prev(at)].frame == w.frame));
+        frameNorthMs_ = overFrame_ ? pose.northMs : 0.0, frameEastMs_ = overFrame_ ? pose.eastMs : 0.0;
+    }
     const bool wasEnded = ended_;
     const route::Fix fix = locate(s, perf);
     const Waypoint& segment = p.points[segment_];
@@ -452,6 +514,9 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     if (hovers_ && ended_ && p.end == EndBehavior::Loiter) { // stopped: hover over the last point
         const Waypoint& last = p.points[p.last()];
         course_ = heading_ = kHold;
+        if (overFrame_) // (a point a moving frame carries: over it, closing on it as the hover pattern does - 4.25)
+            return route::hoverOver(s, perf, last.latitudeRad, last.longitudeRad, route::plannedSpeed(last.speed, last.speedReference, s.altitudeMslM),
+                                    frameNorthMs_, frameEastMs_, route::verticalSpeedTo(altitudeMsl_, 0.0, s, perf, true));
         return PositionCommand{last.latitudeRad, last.longitudeRad, altitudeMsl_, kHold, 1.0, kHold};
     }
     route::Steer steer;
@@ -477,6 +542,15 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         } else if (stops()) {
             steer.speedLimitMs = std::max(route::brakingLimit(perf, 0.0, toGo), 0.5);
         }
+    }
+    if (overFrame_) { // over its frame, as a pattern's (4.25): its velocity and the wind's over it, a rotorcraft's given back
+        sim::VehicleState over = s;
+        over.velocityNedMs[0] -= frameNorthMs_, over.velocityNedMs[1] -= frameEastMs_;
+        WindEstimate wind = wind_;
+        wind.northMs -= frameNorthMs_, wind.eastMs -= frameEastMs_;
+        VelocityCommand out = route::follow(ctx, over, perf, wind, hovers_, fix, ahead, steer, plan_->trims, course_, heading_);
+        if (hovers_) out.northMs += frameNorthMs_, out.eastMs += frameEastMs_;
+        return out;
     }
     return route::follow(ctx, perf, wind_, hovers_, fix, ahead, steer, plan_->trims, course_, heading_);
 }
@@ -636,18 +710,9 @@ VelocityCommand PatternBehavior::followInFrame(const ControlContext& ctx, const 
 
 VelocityCommand PatternBehavior::hoverInFrame(const ControlContext& ctx, const Performance& perf, double transit) const noexcept {
     const auto& s = ctx.sensed;
-    double north, east; // the point, from here
-    geo::localNorthEastM(s.latitudeRad, s.longitudeRad, pattern_->lat0, pattern_->lon0, north, east);
-    const double distance = std::hypot(north, east);
-    // closing on it no faster than it could stop closing there, as a formation's slot is closed on: after its velocity
-    // loop's lag, at half its deceleration, and at half its bandwidth nearer
-    const double lag = std::isfinite(perf.velocityBandwidthRadS) && perf.velocityBandwidthRadS > 0.0 ? 1.0 / perf.velocityBandwidthRadS : 10.0;
-    const double a = std::isfinite(perf.maxDecelerationMs2) && perf.maxDecelerationMs2 > 0.0 ? 0.5 * perf.maxDecelerationMs2 : 0.25;
-    const double closing = std::fmin(transit, std::fmin(0.5 / lag * distance, a * (std::sqrt(lag * lag + 2.0 * distance / a) - lag)));
-    const double k = distance > 1e-6 ? closing / distance : 0.0;
     const double climb = isHold(frameAltitude_) ? 0.0 : -frameDownMs_; // (its frame's height, where it has a z)
-    return VelocityCommand{kHold, route::verticalSpeedTo(altitudeMsl_, climb, s, perf, true), kHold, kHold, frameNorthMs_ + k * north,
-                           frameEastMs_ + k * east};
+    return route::hoverOver(s, perf, pattern_->lat0, pattern_->lon0, transit, frameNorthMs_, frameEastMs_,
+                            route::verticalSpeedTo(altitudeMsl_, climb, s, perf, true));
 }
 
 bool PatternBehavior::due(double now) const noexcept {

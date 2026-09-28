@@ -907,6 +907,49 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_cancel(world, results[0].activity, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
         }
         {
+            /* ABI 1.26 (4.29): a route's waypoints as A-GRA's schema gives them - a block, a waypoint's type, a point in a
+               frame - read back; a type not built refused, naming its point */
+            fsim_waypoint pts[2];
+            fsim_batch_command sp;
+            fsim_frame_spec frame;
+            uint64_t frame_id = 0;
+            double options[4];
+            const fsim_vehicle_state* at;
+            fsim_activity_id route_id;
+            int k;
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            at = fsim_vehicle_state_ptr(world, b);
+            fsim_waypoint_init(&pts[0]);
+            fsim_waypoint_init(&pts[1]);
+            CHECK(pts[0].struct_size == sizeof pts[0] && isnan(pts[0].altitude_min_m) && isnan(pts[0].kind) && isnan(pts[0].waypoint_type) &&
+                  isnan(pts[0].frame) && isnan(pts[0].frame_z_m));
+            pts[0].latitude_rad = at->latitude_rad + 0.02, pts[0].longitude_rad = at->longitude_rad;
+            pts[0].altitude_min_m = at->altitude_msl_m + 100.0, pts[0].altitude_max_m = at->altitude_msl_m + 300.0; /* (its altitude left out) */
+            pts[0].waypoint_type = FSIM_WAYPOINT_PASSIVE;                                                      /* (given alone: a waypoint) */
+            fsim_frame_spec_init(&frame);
+            frame.latitude_rad = at->latitude_rad + 0.04, frame.longitude_rad = at->longitude_rad;
+            CHECK(fsim_world_create_frame(world, &frame, &frame_id) == FSIM_OK && frame_id > 0);
+            pts[1].frame = (double)frame_id, pts[1].frame_y_m = 1000.0; /* (1 km east of its origin) */
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            route_id = cr.activity;
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_ROUTE && sp.waypoint_count == 2);
+            CHECK(sp.waypoints[0].altitude_m == pts[0].altitude_min_m && sp.waypoints[0].altitude_max_m == pts[0].altitude_max_m);
+            CHECK(sp.waypoints[0].kind == FSIM_END_POINT_WAYPOINT && sp.waypoints[0].waypoint_type == FSIM_WAYPOINT_PASSIVE);
+            CHECK(sp.waypoints[1].frame == (double)frame_id && sp.waypoints[1].frame_y_m == 1000.0);
+            CHECK(fabs((sp.waypoints[1].longitude_rad - frame.longitude_rad) * 6371008.8 * cos(frame.latitude_rad) - 1000.0) < 1.0); /* (placed there) */
+            pts[0].waypoint_type = FSIM_WAYPOINT_TOUCHDOWN; /* (an approach's and a touchdown: FA-10's) */
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 1);
+            pts[0].waypoint_type = FSIM_WAYPOINT_NAV_ONLY, pts[0].kind = FSIM_END_POINT_TURN_POINT; /* (a type is a waypoint's) */
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 1);
+            CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        }
+        {
             /* ABI 1.6: the performance, and grants over the priorities (on a, whose live activities are its policy's) */
             fsim_performance perf;
             int32_t mode = -1, reason = -1, allowed = -1, granted = -1, availability = -1;
@@ -1017,7 +1060,7 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_submit_behavior(world, viper, &hover, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
             CHECK(strcmp(fsim_reason_name(cr.reason), "not_supported") == 0);
             /* applicable, not built: the stage that builds it */
-            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route/altitude/barometric", &si) == FSIM_OK);
+            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route/paths", &si) == FSIM_OK);
             CHECK(si.support == FSIM_NOT_IMPLEMENTED && si.stage == 6);
             CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route", &si) == FSIM_OK && si.support == FSIM_PARTIAL && strlen(si.missing) > 0);
             CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.warp_drive", &si) != FSIM_OK);

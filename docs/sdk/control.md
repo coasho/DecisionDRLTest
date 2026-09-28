@@ -259,7 +259,7 @@ climb.altitudeM = 8000;                                        // only the altit
 world.update(a, climb);
 ```
 
-- **References.** The speed is true airspeed, calibrated airspeed, ground speed or Mach (`SpeedReference`). The altitude is above sea level, above the ground under the aircraft, or above the ellipsoid (`AltitudeReference`; the simulation's sea level is the ellipsoid). Magnetic headings and barometric altitudes are not offered.
+- **References.** The speed is true airspeed, calibrated airspeed, ground speed or Mach (`SpeedReference`). The altitude is above sea level, above the ground under the aircraft, or above the ellipsoid (`AltitudeReference`; the simulation's sea level is the ellipsoid), or barometric - on the isobar the altimeter reads it on (below). A heading or course may be magnetic (`directionReference`, [flight-autonomy.md](../flight-autonomy.md) 4.22).
 - **Speed optimisation** ([flight-autonomy.md](../flight-autonomy.md), 4.17). `hsa.speedOptimization = double(SpeedOptimization::MaxEndurance)` (or `LongRangeCruise`) flies the performance tables' best-endurance (or best-range) speed at the altitude and weight now, as a true airspeed, in place of a speed.
   - A speed replaces it, and it a speed.
   - Resolved, `speed` is the optimum's at the altitude flown to as the command was given; the progress gives the speed flown now.
@@ -304,6 +304,7 @@ world.update(a, options, other);                           // a new route, flown
   - A leg too short for the fly-by turns at its ends has them flown smaller (clamped, the point named) or, under `RangePolicy::Reject`, is refused `invalid_waypoint`.
   - A gradient steeper than the aircraft climbs is flown at its climb rate (clamped) or, under Reject, refused `performance_limit` with `MaxClimbRate`.
 - **UPDATE** replaces the options given (a field left out, `kHold`, keeps its value) and the waypoints (none: those it has). The route is then flown afresh from its start, from where the aircraft is.
+- **As A-GRA's schema gives them** ([flight-autonomy.md](../flight-autonomy.md), 4.29): a point's altitude block (`altitudeMinM`, `altitudeMaxM`: an altitude left out held within it, one given outside it refused); a barometric altitude flown on its isobar; its `kind` (`EndPointKind`: a waypoint, with no turn there, is flown over) and a waypoint's `waypointType` (`WaypointType`: nav only, passive and a last point's end of path flown; the actions not built yet refused naming the point, `not_implemented` or `not_supported` as the support table says); a point in a frame (`frame` and its offsets, as a pattern's point: placed where the frame is, a moving one's as the route is flown, a leg within one moving frame flown over it, a leg to a moving point pursuing it).
 - **Flown** by one path follower (`RouteBehavior`, `fsim/GuidanceModes.h`), line of sight to the path with its curvature fed forward, its gains the vehicle's own course bandwidth:
   - A wing flies it as a turn rate: the heading's that turns its track as the path asks, in the wind too. It begins and ends each turn early by as long as its roll lags, and a slow integral takes out a turn-rate bias.
   - A rotorcraft flies it as a velocity over the ground, nose along the track. It slows for a turn only as much as the turn's radius asks, and to stop only at an end where it loiters.

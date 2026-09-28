@@ -99,7 +99,8 @@ TEST_CASE("discovery: the public features, each answered on every vehicle", "[di
     for (const auto& row : table->rows()) CHECK(row.support != Support::NotSupported);
     CHECK(supportOf(w, c172x, "fsim.guidance.hsa").support == Support::Supported); // (whole since FA-4)
     CHECK(supportOf(w, c172x, "fsim.guidance.hsa/direction/magnetic_north").support == Support::Supported);
-    CHECK(supportOf(w, c172x, "fsim.guidance.route/altitude/barometric").stage == 6);
+    CHECK(supportOf(w, c172x, "fsim.guidance.route/altitude/barometric").support == Support::Supported); // (FA-6a)
+    CHECK(supportOf(w, c172x, "fsim.guidance.route/paths").stage == 6);
     CHECK(supportOf(w, c172x, "hold").support == Support::Supported); // a behaviour's id finds its feature
     CHECK(w.support(c172x, "fsim.guidance.warp_drive") == nullptr);
     CHECK(w.support(999, "fsim.guidance.hsa") == nullptr);

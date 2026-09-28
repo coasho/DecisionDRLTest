@@ -139,6 +139,10 @@ struct Plan {
     /// After the last point, a wing that loiters orbits it (its centre the point).
     Turn orbit;
     Trims trims; ///< the follower's, flying it
+    /// The frames its points are in, as the host placed them (docs/flight-autonomy.md, 4.29): the host's check's.
+    std::uint32_t frameCount = 0;
+    FrameId frameIds[PathStore::kRouteFrames] = {};
+    FrameSpec frames[PathStore::kRouteFrames];
 
     std::uint32_t last() const noexcept { return count - 1; }
     std::uint32_t next(std::uint32_t i) const noexcept { return i + 1 < count ? i + 1 : 0; }
@@ -354,14 +358,21 @@ double steepest(const Curve& c, std::uint32_t i, double& at) noexcept;
 
 /// What a route's waypoints leave out, filled in (docs/vehicle-interface.md,
 /// 4.5): each field the previous point's, the first's the aircraft's own now
-/// (a reference given alone, its value in that reference now; a rotorcraft's
-/// speed its cruise over the ground); longitudes wrapped. InvalidWaypoint,
-/// with the point's index in `bad`, for a point that cannot be flown: not
-/// finite, out of range, a reference that is not one, a speed that is not
-/// positive, a bank or climb rate out of range, a reference given alone after
-/// the first point, the same place as the point before (within a metre).
+/// (a reference given alone, its value in that reference now, the altimeter's
+/// where barometric; a rotorcraft's speed its cruise over the ground);
+/// longitudes wrapped; an altitude left out held within its point's block
+/// (docs/flight-autonomy.md, 4.29), a type given alone making the point a
+/// waypoint. InvalidWaypoint, with the point's index in `bad`, for a point
+/// that cannot be flown: not finite, out of range, a reference that is not
+/// one, a speed that is not positive, a bank or climb rate out of range, a
+/// reference given alone after the first point, the same place as the point
+/// before (within a metre); a kind or type that is not one, a type with
+/// another kind, a block upside down or an altitude outside it, a frame's
+/// fields out of range, or its offsets without it.
 Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool repeat, const sim::VehicleState& state, const Performance& performance,
-                bool hovers, std::int16_t& bad) noexcept;
+                bool hovers, std::int16_t& bad, const Altimeter* altimeter = nullptr) noexcept;
+/// A waypoint (A-GRA's WayPoint): no turn there - flown over (4.29).
+inline bool noTurn(const Waypoint& w) noexcept { return w.kind == static_cast<double>(EndPointKind::Waypoint); }
 
 /// The plan's geometry from its complete points (`p.points`, `p.count` and
 /// the options set): the legs, the entry from (lat, lon), the fly-by turns
@@ -369,5 +380,15 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
 /// legs (Turn::shrunk). The entry's turn is flown over if the aircraft is too
 /// near its point to make it.
 void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept;
+/// A rotorcraft over a point a moving frame carries (docs/flight-autonomy.md, 4.25, 4.29): the frame's velocity and a
+/// closing on the point it could stop closing - after its velocity loop's lag, at half its deceleration, at half its
+/// bandwidth nearer, as a formation closes on its slot - no faster than `transit`; its vertical speed as given.
+VelocityCommand hoverOver(const sim::VehicleState& s, const Performance& performance, double lat, double lon, double transit, double frameNorthMs,
+                          double frameEastMs, double verticalSpeedMs) noexcept;
+/// Point i's piece of the plan again from where its points are now (a point in a moving frame: docs/flight-autonomy.md,
+/// 4.29) - the leg to it (on the first lap at its start, the entry's, from where the entry began), the leg out of it
+/// and its fly-by turn between them, sized as plan() sizes it and made no longer than those legs leave it beside the
+/// turns at their other ends.
+void replan(Plan& p, std::uint32_t i, bool firstLap, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept;
 
 } // namespace fsim::control::route

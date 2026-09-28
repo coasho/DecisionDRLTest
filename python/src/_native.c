@@ -996,24 +996,28 @@ static PyObject* world_submit_mode(PyObject* o, PyObject* const* args, Py_ssize_
 }
 
 /* A route's waypoints: rows of (latitude_rad, longitude_rad, altitude_m, altitude_reference, speed,
- * speed_reference, turn, max_bank_rad, climb_rate_ms, id) - NaN leaves one out. *out is PyMem-allocated
- * (free it); the count, or -1 with an error set. */
+ * speed_reference, turn, max_bank_rad, climb_rate_ms, id) and, from ABI 1.26, (altitude_min_m, altitude_max_m,
+ * kind, waypoint_type, frame, frame_rotation, frame_offsets, frame_x_m, frame_y_m, frame_z_m) - NaN leaves one
+ * out. *out is PyMem-allocated (free it); the count, or -1 with an error set. */
 static Py_ssize_t read_waypoints(PyObject* o, fsim_waypoint** out) {
     *out = NULL;
-    PyObject* seq = PySequence_Fast(o, "waypoints must be a sequence of 10-number rows");
+    PyObject* seq = PySequence_Fast(o, "waypoints must be a sequence of 10- or 20-number rows");
     if (!seq) return -1;
     const Py_ssize_t count = PySequence_Size(seq);
     fsim_waypoint* points = (fsim_waypoint*)PyMem_Malloc(sizeof(fsim_waypoint) * (size_t)(count ? count : 1));
     for (Py_ssize_t i = 0; points && i < count; ++i) {
         PyObject* row = PySequence_GetItem(seq, i);
-        PyObject* r = row ? PySequence_Fast(row, "each waypoint must be 10 numbers") : NULL;
+        PyObject* r = row ? PySequence_Fast(row, "each waypoint must be 10 or 20 numbers") : NULL;
         fsim_waypoint* w = &points[i];
         fsim_waypoint_init(w);
-        if (r && PySequence_Size(r) == 10) {
-            double v[9];
-            for (int k = 0; k < 9 && !PyErr_Occurred(); ++k) {
+        const Py_ssize_t size = r ? PySequence_Size(r) : 0;
+        if (r && (size == 10 || size == 20)) {
+            double v[19];
+            for (int k = 0; k < 19; ++k) v[k] = fsim_hold();
+            for (Py_ssize_t k = 0; k < size && !PyErr_Occurred(); ++k) {
+                if (k == 9) continue; /* (its id, below) */
                 PyObject* item = PySequence_GetItem(r, k);
-                v[k] = item ? PyFloat_AsDouble(item) : 0.0;
+                v[k < 9 ? k : k - 1] = item ? PyFloat_AsDouble(item) : 0.0;
                 Py_XDECREF(item);
             }
             PyObject* id = PySequence_GetItem(r, 9);
@@ -1024,9 +1028,11 @@ static Py_ssize_t read_waypoints(PyObject* o, fsim_waypoint** out) {
             Py_XDECREF(id);
             w->latitude_rad = v[0], w->longitude_rad = v[1], w->altitude_m = v[2], w->altitude_reference = v[3];
             w->speed = v[4], w->speed_reference = v[5], w->turn = v[6], w->max_bank_rad = v[7], w->climb_rate_ms = v[8];
+            w->altitude_min_m = v[9], w->altitude_max_m = v[10], w->kind = v[11], w->waypoint_type = v[12], w->frame = v[13];
+            w->frame_rotation = v[14], w->frame_offsets = v[15], w->frame_x_m = v[16], w->frame_y_m = v[17], w->frame_z_m = v[18];
         } else if (r) {
             PyErr_SetString(PyExc_ValueError, "each waypoint must be (latitude_rad, longitude_rad, altitude_m, altitude_reference, speed, "
-                                              "speed_reference, turn, max_bank_rad, climb_rate_ms, id)");
+                                              "speed_reference, turn, max_bank_rad, climb_rate_ms, id), and from ABI 1.26 its A-GRA fields");
         }
         Py_XDECREF(r);
         Py_XDECREF(row);
@@ -1710,8 +1716,10 @@ static PyObject* world_activity_setpoint(PyObject* o, PyObject* const* args, Py_
         waypoints = PyList_New(0);
         for (uint32_t i = 0; waypoints && i < b.waypoint_count; ++i) {
             const fsim_waypoint* w = &b.waypoints[i];
-            PyObject* row = Py_BuildValue("(dddddddddK)", w->latitude_rad, w->longitude_rad, w->altitude_m, w->altitude_reference, w->speed,
-                                          w->speed_reference, w->turn, w->max_bank_rad, w->climb_rate_ms, (unsigned long long)w->id);
+            PyObject* row = Py_BuildValue("(dddddddddKdddddddddd)", w->latitude_rad, w->longitude_rad, w->altitude_m, w->altitude_reference,
+                                          w->speed, w->speed_reference, w->turn, w->max_bank_rad, w->climb_rate_ms, (unsigned long long)w->id,
+                                          w->altitude_min_m, w->altitude_max_m, w->kind, w->waypoint_type, w->frame, w->frame_rotation,
+                                          w->frame_offsets, w->frame_x_m, w->frame_y_m, w->frame_z_m);
             if (!row || PyList_Append(waypoints, row) < 0) Py_CLEAR(waypoints);
             Py_XDECREF(row);
         }

@@ -698,6 +698,26 @@ class DirectionReference(enum.IntEnum):
     MAGNETIC_NORTH = 1
 
 
+class WaypointType(enum.IntEnum):
+    """What a waypoint is for (A-GRA's WaypointTypeEnum; docs/flight-autonomy.md, 4.29): nav only and passive are flown, the
+    end of a path on a route's last point; the others not yet (refused "not_implemented", naming the point)."""
+    NAV_ONLY = 0
+    TAXI = 1
+    RUNWAY_START = 2
+    RUNWAY_THRESHOLD = 3
+    RUNWAY_LIMIT = 4
+    APPROACH = 5
+    APPROACH_INITIAL_POINT = 6
+    APPROACH_FINAL_POINT = 7
+    TAKEOFF = 8
+    TAKEOFF_INITIAL_POINT = 9
+    TAKEOFF_FINAL_POINT = 10
+    TOUCHDOWN = 11
+    PASSIVE = 12
+    HARD_DITCH = 13
+    END_OF_PATH = 14
+
+
 class TurnType(enum.IntEnum):
     """How a route passes a waypoint (A-GRA's TurnType): a fly-by turn begins before it, on a circle tangent to
     both legs; a fly-over point is passed, then the next leg intercepted."""
@@ -778,19 +798,25 @@ MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 
 _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "speed_optimization": SpeedOptimization,
                "direction_reference": DirectionReference,
                "projection": Projection, "end": EndBehavior,
-               "turn": TurnType, "pattern": PatternKind, "turn_type": HoldTurn, "hold_entry": HoldEntry, "hold_context": HoldContext,
+               "turn": TurnType, "kind": EndPointKind, "waypoint_type": WaypointType, "pattern": PatternKind, "turn_type": HoldTurn, "hold_entry": HoldEntry, "hold_context": HoldContext,
                "frame_rotation": FrameRotation, "frame_offsets": FrameOffsets, "point_rotation": FrameRotation, "point_offsets": FrameOffsets,
                "point_z": CurveZ}
 
 Waypoint = collections.namedtuple(
-    "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id",
-    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0))
+    "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id "
+                "altitude_min_m altitude_max_m kind waypoint_type frame frame_rotation frame_offsets frame_x_m frame_y_m frame_z_m",
+    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0) + (HOLD,) * 10)
 Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that ends at it: reached at ``altitude_m`` above "
                     "``altitude_reference`` along a straight profile (or climbing at ``climb_rate_ms``, then level), flown at "
                     "``speed`` in ``speed_reference``, passed by ``turn`` (fsim.TurnType: 'fly_by', 'fly_over') with "
                     "``max_bank_rad`` for its turn; ``id`` comes back in the progress. HOLD (the default) continues the "
                     "previous point's; the first point's is the aircraft's own now, and a rotorcraft given no speed flies its "
-                    "cruise speed over the ground. References may be given by name.")
+                    "cruise speed over the ground. References may be given by name. As A-GRA's schema gives it "
+                    "(docs/flight-autonomy.md, 4.29): its altitude block ``altitude_min_m``/``altitude_max_m`` (an altitude left "
+                    "out held within it), its ``kind`` (fsim.EndPointKind: a turn point, or a waypoint - no turn, flown over) "
+                    "and a waypoint's ``waypoint_type`` (fsim.WaypointType), a point in a ``frame`` (World.create_frame's id) "
+                    "at its offsets ``frame_rotation``, ``frame_offsets``, ``frame_x_m``, ``frame_y_m``, ``frame_z_m`` - "
+                    "placed where the frame is, a moving one's as it is flown.")
 
 
 BezierSegment = collections.namedtuple("BezierSegment", "north east down")
@@ -876,7 +902,7 @@ def _waypoints(points):
         elif not isinstance(p, Waypoint):
             p = Waypoint(*p)
         values = [_REFERENCES[k][v.upper()] if isinstance(v, str) and k in _REFERENCES else v for k, v in zip(Waypoint._fields, p)]
-        rows.append(tuple(float(v) for v in values[:9]) + (int(values[9]),))
+        rows.append(tuple(float(v) for v in values[:9]) + (int(values[9]),) + tuple(float(v) for v in values[10:]))
     return rows
 
 

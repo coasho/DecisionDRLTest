@@ -83,9 +83,16 @@ std::vector<EndPoint> CapabilityHost::endPoints(ActivityId activity, std::size_t
             const Waypoint& w = s.waypoints[i];
             const bool last = !repeats && i + 1 == n;
             EndPoint e;
-            e.kind = !last ? EndPointKind::TurnPoint : loiters ? EndPointKind::LoiterPoint : EndPointKind::Waypoint;
+            e.kind = !last ? (route::noTurn(w) ? EndPointKind::Waypoint : EndPointKind::TurnPoint) : loiters ? EndPointKind::LoiterPoint : EndPointKind::Waypoint;
             e.latitudeRad = w.latitudeRad, e.longitudeRad = w.longitudeRad, e.altitudeM = w.altitudeM, e.altitudeReference = w.altitudeReference;
-            if (!last) e.turn = w.turn;
+            FrameSpec spec; // (a point in a frame: where the frame puts it now - 4.29)
+            FramePose now;
+            if (!isHold(w.frame) && sessionView_ && sessionView_->frame(static_cast<FrameId>(w.frame), spec, now)) {
+                const GeoPoint at = framePoint(now, w.frameOffset());
+                e.latitudeRad = at.latitudeRad, e.longitudeRad = geo::wrapPi(at.longitudeRad);
+                if (!isHold(w.frameZM)) e.altitudeM = at.altitudeMslM, e.altitudeReference = static_cast<double>(AltitudeReference::Msl);
+            }
+            if (!last && !route::noTurn(w)) e.turn = w.turn;
             e.id = w.id, e.index = static_cast<std::int32_t>(i);
             out.push_back(e);
         }

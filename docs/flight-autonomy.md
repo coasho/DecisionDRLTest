@@ -699,6 +699,29 @@ A-GRA ends a curve by its EndOfCurveBehavior: on at its course, speed and altitu
 - **The terrain walk** circles a rotorcraft's end at its radius, as a wing's, where it walked the point alone.
 - **Surfaces:** none new. `EndBehavior::Loiter`, `FSIM_END_LOITER` and `fsim.EndBehavior.LOITER` say what it does after a curve and after a route. `fsim.guidance.curve/end/circular_loiter` is supported, and with it the curve as a whole.
 
+### 4.29 A-GRA's waypoint as its schema gives it (as FA-6a builds it)
+
+A-GRA's route segment ends at an end point that is one of three: a WayPoint ("a point in the route where no turning occurs", with its WaypointType), a TurnPoint (its type, a course and a turn's geometry) or a LoiterPoint. Each is a geodetic point with an altitude, its reference and an altitude range, or a point relative to a reference frame. FA-6a builds the altitude range and the barometric reference, the waypoint and its type, and points in frames (WPT-12, WPT-17, WPT-22). FA-6b builds the turn points' other types and loiter points.
+
+- **Its altitude block** (`altitudeMinM`, `altitudeMaxM`, in the point's reference): an altitude left out is held within it - the point before's, or the aircraft's for the first. One given outside it, or a block whose most is below its least, is refused `invalid_waypoint` naming the point.
+- **A barometric altitude** on a route is flown on its isobar, as the hsa's (4.22): the behaviour reads it through the altimeter at every update, and the host's checks compare heights above sea level, the terrain walk too. Until FA-6a a route refused it `not_implemented`.
+- **Its kind** (`kind`, `EndPointKind`): left out, a turn point as `turn` says, as before. A waypoint is flown over, its next leg joined after it. A loiter point is FA-6b's: refused `not_implemented`, naming the point.
+- **A waypoint's type** (`waypointType`, `WaypointType`, A-GRA's WaypointTypeEnum): given alone, it makes the point a waypoint; given with another kind, it is refused `invalid_waypoint`.
+  - Nav only and passive are flown. The end of a path is taken on the route's last point: a route is one path until FA-6e.
+  - The others ask for an action FA does not fly yet. Each is answered as its row in the support table says, naming the point: `not_supported` where the aircraft cannot, else `not_implemented`. They are a taxi's points (FA-9, where the aircraft taxies), a runway's and a takeoff's (FA-9), an approach's and a touchdown (FA-10), and a hard ditch (FA-16). The end of a path before the route's end is FA-6e's.
+- **A point in a frame** (`frame`, `frameRotation`, `frameOffsets`, `frameXM`, `frameYM`, `frameZM`, as a pattern's point in 4.25): its latitude and longitude are where the frame puts it, and those given are not read. Given a z, its altitude is the frame's there, above sea level.
+  - Refused `invalid_waypoint`, naming the point: a frame the world does not have; its fields out of range; offsets without a frame; a seventeenth frame in one route (the path store keeps 16).
+  - The host places the points at the NEW, where the frames are then; its checks (turns, gradients, terrain, endurance) see the route so placed. The path store keeps each frame as it was then; a moving one goes on at its velocity from there.
+  - A fixed frame's points stay where they were placed. A moving frame's, or a vehicle's, are placed again as the route is flown: at every update, as the step began, the point flown to and those either side of it. The legs into and out of the point flown to, and its fly-by turn, are planned again from where they are (`route::replan`): the entry keeps its start, and the turn keeps its share of the legs as `plan()` gives it.
+  - A leg whose two ends are in one moving frame is flown over the frame: the aircraft's velocity and the wind less the frame's, a rotorcraft's given back, as a pattern's (4.25). Any other leg is flown over the ground, so a leg to a moving point pursues it.
+  - A rotorcraft that loiters at a route's end over a moving point hovers over it as the hover pattern does: the frame's velocity, and a closing it could stop.
+  - A vehicle's frame whose vehicle is gone: the activity fails `target_lost`, and the aircraft flies on as it was.
+  - The progress measures along the legs as they are when flown. The end points report each point where its frame is now.
+- **Surfaces.**
+  - C++: `Waypoint`'s `altitudeMinM`, `altitudeMaxM`, `kind`, `waypointType`, `frame`, `frameRotation`, `frameOffsets`, `frameXM`, `frameYM`, `frameZM` and `frameOffset()`; `WaypointType`; `PathStore::routeFrames`, `routeFrameIds`, `routeFrameCount`.
+  - C ABI 1.26: `fsim_waypoint`'s ten new fields, read where the caller's `struct_size` has them (`fsim_waypoint_init` leaves them out); `enum fsim_waypoint_type`.
+  - Python: `fsim.Waypoint`'s ten new fields, codes by name or member; `fsim.WaypointType`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -924,6 +947,14 @@ Laps, entry and exit points, legs by time, turns by bank, rate or type, hold con
 ### FA-6: Routes as the schema defines them (XL)
 
 Paths with ids and types, links and conditional branches, turn points, loiter points, per-segment optimisation, climb and acceleration, required times of arrival in 4D, altitude blocks, civil path terminators, planned states, RNP monitoring, relative points.
+
+**Status:** in progress, in six steps, each measured in section 14:
+- FA-6a, the waypoint as the schema gives it: altitude blocks and the barometric reference, waypoints and their types, points in frames (WPT-12, WPT-17, WPT-22; 4.29), done 2026-09-28 and measured in section 14;
+- FA-6b, turn points and loiter points: capturing the outbound course, starting and ending a turn, a course at the point, a turn's radius or bank; a loiter inside a route, then on (WPT-04, WPT-18);
+- FA-6c, per-segment performance: speed and climb optimisation, acceleration (WPT-06, WPT-08, WPT-10);
+- FA-6d, 4D: required times of arrival, planned inertial states, required navigation performance (WPT-11, WPT-20, WPT-21);
+- FA-6e, paths: several per route with ids and types, links and conditional branches (WPT-13, WPT-14, WPT-15);
+- FA-6f, civil path terminators (WPT-19).
 
 **Items (15):** WPT-04, WPT-06, WPT-08, WPT-10, WPT-11, WPT-12, WPT-13, WPT-14, WPT-15, WPT-17, WPT-18, WPT-19, WPT-20, WPT-21, WPT-22.
 
@@ -1915,6 +1946,41 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The micro cases are within −0.4 % to +0.9 %; the command cases within −1.2 % to +0.1 %.
   - World throughput is 99.8 to 100.0 % of FA-5d2's (3 rounds read 98.8 to 100.4 %); protection costs at most 0.6 %.
 - ctest: all 282 tests pass.
+
+**FA-6a, A-GRA's waypoint as its schema gives it (WPT-12, WPT-17, WPT-22).**
+- **A block** (`test_route_points`, calm): a C172x east at 1,500 m, then a point whose block of 1,700 to 1,900 m was left to choose. It read back 1,700 m (the point before's, held up to its least) and was flown over at 1,700.2 m. An altitude of 1,600 m given there was refused at the point, and so was a block upside down.
+- **Barometric** (warm, high air, QNH 1,020 hPa): on along its last leg at 2,000.2 m on the altimeter, 2,102.3 m above sea level against its isobar's 2,102.1 m.
+- **A waypoint:** at a corner 4 km out, a turn point was passed 173 m off (turned short) and a waypoint 0.4 m (flown over).
+- **Types:**
+  - nav only and passive were flown, and the end of a path on the last point; a type given alone made the point a waypoint, reported so;
+  - the twelve not built were refused at their point, as the stock C172x's support table rows say: not implemented, since it declares nothing. So were the end of a path before the last point and a loiter point;
+  - a type with a turn point, a kind of 3 and a type of 15 were refused as invalid.
+- **Frames:**
+  - a fixed frame's point was placed 4 km along its x, turned with its yaw (east), within a metre;
+  - a C172x round a box 3 km a side about a ship moving north at 8 m/s: from its second lap, within 4.0 m of the legs where the ship was, and 0.95° off them over the ship. Its end point was 0.31 m from the ship's corner as it was then;
+  - a chaser: a point 2 km east, then two of another ship's points flown over, the legs to them pursuing them. It passed within 17.8 and 6.7 m of them, and completed;
+  - an IRIS loitering at a route's end over a point a frame carries east at 2 m/s held within 0.03 m of it;
+  - an IRIS round points in a UH-1H's frame, the UH-1H removed: failed `target_lost`;
+  - refused, naming the point: a frame the world does not have, offsets without a frame, a rotation of 4, a seventeenth frame (sixteen were taken).
+- **The fleet** (`test_fleet`): every aircraft flies three points in a frame at it, turned with its heading and moving to its right at a tenth of its speed: five orbit radii ahead, five to the right, five ahead again. All 35 complete.
+  - In the middle third of its two legs in the frame, the wings kept within 5.1 % of their radius (the Skua's 6.7 m; in metres the F-35A's 49 m, 1.6 %; the heavies 0.1 to 0.6 %). The rotorcraft kept within 8.3 % (the Crazyflie's 0.57 m).
+  - First flown on legs three radii long, the rotorcraft read 10.7 %. With the frame still they read as much (the Crazyflie 12 %, the UH-60A 8.5 %): short legs read mostly the turns' joins, and legs five radii long read the frame.
+  - First measured along the frame's parallel, the heavies' legs 90 km out read 530 m off. The points are laid out in the plane at the frame's origin, where great circles are straight: measured there, 14 to 30 m.
+- **Unchanged, to the last bit:**
+  - a route probe, 120 lines of states and progress at full precision, identical to FA-5d3's build: a C172x's fly-by turns, a climb by rate, a fly-over and a loiter; an F-16C's repeating rhumb lines from its second point; an IRIS's short legs to a hover;
+  - the curve probe, identical to FA-5d3's;
+  - the pattern tests' hovers and frames print the same numbers. The hover's closing is now `route::hoverOver`, shared with the route.
+- **Changed, named:** a barometric altitude on a route, refused `not_implemented` until now, is flown. The C ABI, Python and C++ tests that pinned the refusal now fly or read it.
+- **The support table:** `route/altitude/barometric`, `route/altitude_block`, `route/waypoint_type` and `route/relative_points` are supported. `route/waypoint_type/taxi` (FA-9, rule R2), `/runway` and `/takeoff` (FA-9), `/landing` (FA-10) and `/hard_ditch` (FA-16) are new, not implemented.
+- **Conformance:** the walks draw as they did. The optimise walks give points blocks, both built kinds, the built types and one that is not one, and frames (the session's first few, which it does not have).
+- **Surfaces:** the C ABI's 1.26 block (a block, a waypoint by its type, a point in a frame read back; a touchdown refused at its point; a type with a turn point refused as invalid); Python's `test_route_points` (by name and member, read back, refused, round a ship).
+- **Memory:** a waypoint is 160 bytes where it was 80. The path store's 256 take 20 KB more, as do the host's plan and each route behaviour's; the frames 1.8 KB in the path store and each plan.
+- **Digests:** identical to FA-5d3's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-5d3, both builds run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`.
+  - The micro cases are within −0.4 % to +1.7 %, but the pattern's −6.0 %: FA-5d3's build read 192 ns this run where it read 181 in the others, and this build read 180.9 as before. The command cases are within −1.5 % to +2.2 %.
+  - Built first with a route's frames in the host (1.7 KB more a vehicle), a same-level update read +5.9 % and +9.0 %, and a behaviour's NEW +3.7 % and +4.2 %: the host is each vehicle's, and it grew. The frames went into the host's route plan, allocated at its first route: +0.0 % and +1.1 %.
+  - World throughput is 99.1 to 99.8 % of FA-5d3's; protection costs at most 0.8 %.
+- ctest: all 286 tests pass.
 
 ## Appendix A: the inventory
 

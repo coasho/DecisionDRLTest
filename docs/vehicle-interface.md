@@ -181,6 +181,7 @@ struct RouteCommand {                  // fsim.guidance.route; the waypoints go 
 - **Left out:** a field continues the previous point's. The first point's is the aircraft's own now (a reference given alone, its value in that reference), and a rotorcraft given no speed flies its cruise speed over the ground. A later point that gives a reference alone is refused `InvalidWaypoint`: the previous point has no value in it to take.
 - **UPDATE** replaces the route's waypoints (none given: it keeps its own) and the options it gives (`kHold` keeps one), checked as a NEW's. It flies the route afresh from `start`, from where the aircraft is. An UPDATE refused leaves the route as it was.
 - **Completion** comes after the last point, unless the route repeats. Then the aircraft continues along the last leg (its course, altitude and speed), or loiters there (`end`): a wing orbits the point at the radius its speed and 80 % of its bank give, a rotorcraft stops and hovers over it.
+- **As A-GRA's schema gives them** (ADR-29, [flight-autonomy.md](flight-autonomy.md) 4.29): a point's altitude block and a barometric altitude on its isobar; a waypoint (no turn there, flown over) and its type; a point in a frame, placed where the frame is and, where it moves, as the route is flown.
 - **Rotorcraft** fly the same geometry at the segment's speed. They slow for a turn only as much as its radius asks (a lateral acceleration within the performance's), and stop only at the route's end when they loiter there, never at each point.
 
 ### 4.6 Loiter patterns

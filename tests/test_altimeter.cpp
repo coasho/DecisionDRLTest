@@ -148,7 +148,7 @@ TEST_CASE("altimeter: an hsa and an orbit fly a barometric altitude on its isoba
     CHECK(std::abs(w.stateData(v).indicatedAltitudeM - 2300.0) < 15.0);
 }
 
-TEST_CASE("altimeter: the setting's range, a route's barometric altitude refused as FA-6's", "[altimeter]") {
+TEST_CASE("altimeter: the setting's range; a route's barometric altitude taken (ADR-29 FA-6a)", "[altimeter]") {
     session::World w(options("altimeter-setting"));
     const auto v = wing(w, "c172x", 1500.0, 55.0);
     CHECK(w.qnh(v) == Altimeter::kStandardPa); // (until set: the pressure altitude)
@@ -166,6 +166,6 @@ TEST_CASE("altimeter: the setting's range, a route's barometric altitude refused
     Waypoint q = p;
     q.latitudeRad += 0.01, q.altitudeReference = code(AltitudeReference::Barometric);
     const CommandResult r = w.submit(v, RouteCommand{}, std::vector<Waypoint>{p, q});
-    CHECK(r.reason == Reason::NotImplemented);
-    CHECK(r.index == 1);
+    INFO(reasonName(r.reason) << " at " << r.index);
+    CHECK(r.accepted()); // (flown on its isobar: test_route_points)
 }
