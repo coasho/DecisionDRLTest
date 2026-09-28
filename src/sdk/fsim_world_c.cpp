@@ -7,6 +7,7 @@
 #include "fsim/fsim_c.h"
 
 #include "control/Catalog.h"
+#include "fsim/Magnetic.h"
 #include "core/Log.h"
 #include "sdk/Handles.h"
 #include "sdk/LastError.h"
@@ -1731,6 +1732,7 @@ FSIM_API void fsim_state_data_init(fsim_state_data* d) {
     d->yaw_rate_rad_s = d->pitch_rate_rad_s = d->roll_rate_rad_s = std::numeric_limits<double>::quiet_NaN();
     d->yaw_acceleration_rad_s2 = d->pitch_acceleration_rad_s2 = d->roll_acceleration_rad_s2 = std::numeric_limits<double>::quiet_NaN();
     d->wander_angle_rad = d->wind_north_ms = d->wind_east_ms = d->wind_down_ms = std::numeric_limits<double>::quiet_NaN();
+    d->magnetic_heading_rad = d->declination_rad = std::numeric_limits<double>::quiet_NaN();
 }
 
 FSIM_API int fsim_vehicle_state_data(const fsim_world* world, uint32_t id, fsim_state_data* out) {
@@ -1743,7 +1745,35 @@ FSIM_API int fsim_vehicle_state_data(const fsim_world* world, uint32_t id, fsim_
     d.yaw_rate_rad_s = s.yawRateRadS, d.pitch_rate_rad_s = s.pitchRateRadS, d.roll_rate_rad_s = s.rollRateRadS;
     d.yaw_acceleration_rad_s2 = s.yawAccelerationRadS2, d.pitch_acceleration_rad_s2 = s.pitchAccelerationRadS2, d.roll_acceleration_rad_s2 = s.rollAccelerationRadS2;
     d.wander_angle_rad = s.wanderAngleRad, d.wind_north_ms = s.windNorthMs, d.wind_east_ms = s.windEastMs, d.wind_down_ms = s.windDownMs;
+    d.magnetic_heading_rad = s.magneticHeadingRad, d.declination_rad = s.declinationRad;
     return copyOut(d, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API void fsim_magnetic_field_init(fsim_magnetic_field* field) {
+    if (!field) return;
+    std::memset(field, 0, sizeof *field);
+    field->struct_size = sizeof *field;
+    field->north_nt = field->east_nt = field->down_nt = field->horizontal_nt = field->total_nt = std::numeric_limits<double>::quiet_NaN();
+    field->declination_rad = field->inclination_rad = std::numeric_limits<double>::quiet_NaN();
+}
+
+FSIM_API int fsim_magnetic_field_at(double latitude_rad, double longitude_rad, double height_m, double decimal_year, fsim_magnetic_field* out) {
+    if (!std::isfinite(latitude_rad) || std::abs(latitude_rad) > 0.5 * 3.14159265358979323846 || !std::isfinite(longitude_rad) ||
+        !std::isfinite(height_m) || !std::isfinite(decimal_year))
+        return FSIM_INVALID_ARGUMENT;
+    const fsim::control::MagneticField m = fsim::control::magneticField(latitude_rad, longitude_rad, height_m, decimal_year);
+    fsim_magnetic_field f;
+    fsim_magnetic_field_init(&f);
+    f.north_nt = m.northNt, f.east_nt = m.eastNt, f.down_nt = m.downNt, f.horizontal_nt = m.horizontalNt, f.total_nt = m.totalNt;
+    f.declination_rad = m.declinationRad, f.inclination_rad = m.inclinationRad;
+    return copyOut(f, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API double fsim_decimal_year(double unix_seconds) { return fsim::control::decimalYear(unix_seconds); }
+
+FSIM_API double fsim_world_magnetic_year(const fsim_world* world) {
+    if (!world) return std::numeric_limits<double>::quiet_NaN();
+    return fsim::control::magneticYear(world->world.environment().epochUtcSeconds + world->world.simTime());
 }
 
 FSIM_API void fsim_frame_spec_init(fsim_frame_spec* spec) {

@@ -638,11 +638,15 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   altitude_m, altitude_reference (fsim_altitude_reference) and, from ABI
  *   1.15, speed_optimization (fsim_speed_optimization: the performance
  *   tables' best-range or best-endurance speed, flown at the altitude and
- *   weight now; a speed replaces it, it a speed); fsim_hold() leaves one out.
+ *   weight now; a speed replaces it, it a speed) and, from ABI 1.20,
+ *   direction_reference (fsim_direction_reference: magnetic, the heading or
+ *   course is flown turned by the declination where the aircraft is, at the
+ *   world's date); fsim_hold() leaves one out.
  *   A NEW continues what a live hsa commanded, else what the aircraft flies
  *   now; a reference alone takes the aircraft's own value in it.
  *   fsim_activity_update takes the same fields and keeps the ones left out.
- *   Six fields (ABI 1.14's) leave the optimisation out.
+ *   Six fields (ABI 1.14's) leave the optimisation out, seven (1.15's) the
+ *   direction reference.
  * - FSIM_MODE_ROUTE is fsim.guidance.route (A-GRA's waypoint following):
  *   fields projection (fsim_projection), repeat (1: fly it again from its first
  *   point), end (fsim_end_behavior), start (the waypoint flown to first). Its
@@ -672,10 +676,11 @@ enum fsim_altitude_reference { FSIM_ALTITUDE_MSL = 0, FSIM_ALTITUDE_ABOVE_GROUND
                                FSIM_ALTITUDE_BAROMETRIC /* ABI 1.18: what its altimeter reads, set to its QNH (fsim_vehicle_set_qnh); an hsa's
                                                            or a pattern's, a route's being FA-6's */ };
 enum fsim_speed_optimization { FSIM_SPEED_LONG_RANGE_CRUISE = 0, FSIM_SPEED_MAX_ENDURANCE }; /* A-GRA's SpeedOptimizationEnum (ABI 1.15) */
+enum fsim_direction_reference { FSIM_DIRECTION_TRUE_NORTH = 0, FSIM_DIRECTION_MAGNETIC_NORTH }; /* A-GRA's MA_HeadingReferenceEnum (ABI 1.20) */
 enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft) */
-FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 7, route 4, pattern 13, curve 8 (1.14: hsa 6, pattern 12); 0 for an unknown mode */
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 13, curve 8 (1.14: hsa 6, pattern 12; 1.15: hsa 7); 0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result);
 
@@ -1102,9 +1107,28 @@ typedef struct fsim_state_data {
     double yaw_acceleration_rad_s2, pitch_acceleration_rad_s2, roll_acceleration_rad_s2;
     double wander_angle_rad;          /* A-GRA's WanderAngle: 0 (its navigation frame is north's) */
     double wind_north_ms, wind_east_ms, wind_down_ms; /* A-GRA's wind data: the air's velocity over the ground where it is */
+    /* ABI 1.20 (docs/flight-autonomy.md, 4.22): A-GRA's MagneticHeading - its heading from magnetic north - and the
+     * declination that turns it true: the World Magnetic Model 2025's where it is, at the world's date */
+    double magnetic_heading_rad, declination_rad;
 } fsim_state_data;
 FSIM_API void fsim_state_data_init(fsim_state_data* data);
 FSIM_API int fsim_vehicle_state_data(const fsim_world* world, uint32_t id, fsim_state_data* out);
+/* ABI 1.20 (4.22): the Earth's magnetic field, the World Magnetic Model 2025 (NOAA NCEI and the British Geological
+ * Survey), at a geodetic place, a height above the WGS-84 ellipsoid and a decimal year (outside 2025.0 to 2030.0,
+ * carried on at its rates of change): north, east and down, horizontal and total (nT), declination and inclination.
+ * FSIM_INVALID_ARGUMENT for a place or date not finite. */
+typedef struct fsim_magnetic_field {
+    uint32_t struct_size;
+    uint32_t reserved;
+    double north_nt, east_nt, down_nt, horizontal_nt, total_nt;
+    double declination_rad, inclination_rad;
+} fsim_magnetic_field;
+FSIM_API void fsim_magnetic_field_init(fsim_magnetic_field* field);
+FSIM_API int fsim_magnetic_field_at(double latitude_rad, double longitude_rad, double height_m, double decimal_year, fsim_magnetic_field* out);
+/* A UTC time (Unix seconds) as a decimal year; and the date the model is read at for a world now: its UTC's, held
+ * within 2025.0 to 2030.0 (a world whose clock was never set reads 2025.0). NaN for no world. */
+FSIM_API double fsim_decimal_year(double unix_seconds);
+FSIM_API double fsim_world_magnetic_year(const fsim_world* world);
 
 /* ABI 1.19 (docs/flight-autonomy.md, 4.21; A-GRA's ReferenceFrame and its relative points): frames by id - fixed, moving
  * at a constant velocity from a time, or following a vehicle - and where a point in one is at a time. The Earth is a

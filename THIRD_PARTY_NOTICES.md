@@ -15,6 +15,7 @@ with the following components; each keeps its own licence.
 | [glslang](https://github.com/KhronosGroup/glslang), [SPIRV-Tools](https://github.com/KhronosGroup/SPIRV-Tools) | runtime shader compilation | BSD-3-Clause / Apache-2.0 | MSYS2 packages |
 | [Vulkan loader](https://github.com/KhronosGroup/Vulkan-Loader) | | Apache-2.0 | `vulkan-1.dll` from the graphics driver / MSYS2 |
 | MinGW-w64 / GCC runtime (`libstdc++-6.dll`, `libgcc_s_seh-1.dll`, `libwinpthread-1.dll`) | C++ runtime | GPL with runtime exception / MIT (winpthreads) | MSYS2 UCRT64 packages |
+| [World Magnetic Model 2025](https://www.ncei.noaa.gov/products/world-magnetic-model) (NOAA National Centers for Environmental Information and the British Geological Survey) | the magnetic field and declination (`src/control/Magnetic.cpp`): its coefficients (`WMM.COF` of 11/13/2024) built in; its test values (`tests/data/wmm2025_test_values.txt`) test it | a work of the US Government, public domain | compiled into `libfsim.dll`; the test values not shipped |
 | [Catch2](https://github.com/catchorg/Catch2) | tests only | BSL-1.0 | not shipped |
 | Cesium Air (`Cesium_Air.glb`) | sample aircraft model | Apache-2.0, (c) CesiumGS, Inc. and Contributors | downloaded at configure time (`assets/models/NOTICE.md`) |
 

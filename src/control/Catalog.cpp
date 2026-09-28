@@ -107,8 +107,8 @@ std::size_t commandFields(Command& c, double* f[kMaxCommandFields]) noexcept {
     }
     if (auto* h = std::get_if<HsaCommand>(&c)) {
         f[0] = &h->headingRad, f[1] = &h->courseRad, f[2] = &h->speed, f[3] = &h->speedReference, f[4] = &h->altitudeM;
-        f[5] = &h->altitudeReference, f[6] = &h->speedOptimization;
-        return 7;
+        f[5] = &h->altitudeReference, f[6] = &h->speedOptimization, f[7] = &h->directionReference;
+        return 8;
     }
     if (auto* r = std::get_if<RouteCommand>(&c)) {
         f[0] = &r->projection, f[1] = &r->repeat, f[2] = &r->end, f[3] = &r->start;

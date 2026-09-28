@@ -116,13 +116,14 @@ The behaviours with heap parameters (`hold`, `waypoints`, `loiter`, `pursuit`, `
 
 ```cpp
 struct HsaCommand {                   // fsim.guidance.hsa
-    double headingRad = kHold;        // the nose's direction, true, -pi..pi, or:
+    double headingRad = kHold;        // the nose's direction, -pi..pi (from true north, or magnetic), or:
     double courseRad = kHold;         // the track over the ground's
     double speed = kHold;             // m/s, or a Mach number
     double speedReference = kHold;    // SpeedReference
     double altitudeM = kHold;
     double altitudeReference = kHold; // AltitudeReference
     double speedOptimization = kHold; // SpeedOptimization: LongRangeCruise, MaxEndurance (the speed it varies by itself)
+    double directionReference = kHold; // DirectionReference: TrueNorth, MagneticNorth (ADR-29 FA-4d)
 };
 ```
 
@@ -130,6 +131,7 @@ struct HsaCommand {                   // fsim.guidance.hsa
 - **UPDATE:** each field given replaces the commanded one, and the rest stay as commanded. A heading replaces a course and a course a heading; a speed replaces a speed optimisation and an optimisation a speed. A new reference needs its value: a speed reference given without a speed (or an optimisation) is `InvalidParameter`, since an UPDATE has no state to take one from.
 - **NEW:** fields left out continue the commanded values of a live `hsa` activity the NEW replaces; with none, they are what the vehicle flies now. The aircraft's current heading, its altitude above sea level, and its true airspeed (a wing) or its ground speed (a rotorcraft, so a hovering one stays put). A reference given alone takes the aircraft's own value in it now: a Mach reference alone holds the Mach it flies.
 - The host resolves them, so the slot always holds a complete setpoint and the runtime never guesses. It checks the references are whole numbers within their enums and that one direction is given, wraps the angles, and limits the speed and altitude against the performance (7.1): the speed converted at the commanded altitude through the standard atmosphere, the altitude below the ceiling and, above ground, above it.
+- **A magnetic heading or course** (`directionReference = DirectionReference::MagneticNorth`; [flight-autonomy.md](flight-autonomy.md), 4.22) is flown turned by the World Magnetic Model's declination where the aircraft is, at the world's date, refreshed every 10 s. A heading or course given alone continues the reference it replaces; a reference alone takes the heading now (in an UPDATE it needs its value).
 - **A barometric altitude** (`AltitudeReference::Barometric`; [flight-autonomy.md](flight-autonomy.md), 4.20) is what the vehicle's altimeter reads, set to its QNH. It is flown on the isobar it is read on, which moves as the air and the setting change; the ceiling is checked as the altimeter would read it there. A pattern's is the same; a route's is FA-6's, refused `not_implemented`.
 - **Speed optimisation** (A-GRA's SpeedOptimizationEnum; [flight-autonomy.md](flight-autonomy.md), 4.17): the speed the mode varies by itself, the performance tables' best-range speed (`LongRangeCruise`) or best-endurance speed (`MaxEndurance`).
   - The host resolves it as a speed too: the optimum's true airspeed at the altitude the aircraft flies to, as the command is given. The checks judge that speed.

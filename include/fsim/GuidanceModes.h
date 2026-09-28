@@ -67,8 +67,9 @@ public:
     void begin(const ControlContext& ctx, const Command& command) override;
     Command update(const ControlContext& ctx, const Command& in) override;
     void reset() override;
-    /// What it commands: the heading or course, the altitude (as the height
-    /// above sea level to fly now), the speed and its reference.
+    /// What it commands: the heading or course (from the north it was
+    /// commanded from), the altitude (as the height above sea level to fly
+    /// now), the speed and its reference.
     bool progress(ActivityProgress& out) const noexcept override;
 
 private:
@@ -79,6 +80,8 @@ private:
     HsaCommand flown_{};       ///< the setpoint as last flown
     double altitudeMsl_ = kHold, headingFlown_ = kHold;
     double speedFlown_ = kHold; ///< the speed flown at the last update (a speed optimisation's, now)
+    /// A magnetic direction's declination where the aircraft was, and when (every 10 s: docs/flight-autonomy.md, 4.22).
+    double declination_ = 0.0, declinationAt_ = kHold;
 };
 
 namespace route {

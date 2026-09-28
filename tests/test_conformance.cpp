@@ -132,7 +132,9 @@ public:
             double* fields[kMaxCommandFields];
             const std::size_t n = std::min(commandFields(out, fields), d.parameters.size());
             for (std::size_t i = 0; i < n; ++i) {
-                if (d.parameters[i].name == "speed_optimization") { // left out, or - optimising - a code mostly, else anything
+                // the fields added after the walks were drawn (a speed optimisation, ADR-29 FA-3e; a direction reference,
+                // FA-4d): left out, or - in the walks of their own - a code mostly, else anything
+                if (d.parameters[i].name == "speed_optimization" || d.parameters[i].name == "direction_reference") {
                     if (optimise && wild) *fields[i] = chance(0.5) ? kHold : chance(0.85) ? static_cast<double>(pick(2)) : value(d.parameters[i], true);
                     continue;
                 }

@@ -61,6 +61,7 @@ inline void mergeHsa(HsaCommand& dst, const HsaCommand& src) noexcept {
     if (!isHold(src.speedReference)) dst.speedReference = src.speedReference;
     if (!isHold(src.altitudeM)) dst.altitudeM = src.altitudeM;
     if (!isHold(src.altitudeReference)) dst.altitudeReference = src.altitudeReference;
+    if (!isHold(src.directionReference)) dst.directionReference = src.directionReference;
 }
 
 /// A partial pattern (docs/vehicle-interface.md, 4.6): each field given

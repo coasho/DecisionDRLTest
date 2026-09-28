@@ -262,8 +262,10 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         const double altitude = isHold(c->altitudeM)               ? (above ? state.altitudeAglM : state.altitudeMslM)
                                 : barometric(c->altitudeReference) ? barometricMslM(config_->altimeter, c->altitudeM) // (its isobar)
                                                                    : c->altitudeM;
-        const double course = !isHold(c->courseRad)    ? c->courseRad
-                              : !isHold(c->headingRad) ? c->headingRad
+        // (a magnetic direction turned true by the declination where it is: 4.22)
+        const double turned = c->directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? declinationNow(state) : 0.0;
+        const double course = !isHold(c->courseRad)    ? c->courseRad + turned
+                              : !isHold(c->headingRad) ? c->headingRad + turned
                                                        : std::atan2(state.velocityNedMs[1], state.velocityNedMs[0]);
         double speed = isHold(c->speed) ? std::hypot(state.velocityNedMs[0], state.velocityNedMs[1])
                                         : route::plannedSpeed(c->speed, c->speedReference, msl(altitude, above, state.latitudeRad, state.longitudeRad));

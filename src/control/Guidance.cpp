@@ -5,6 +5,7 @@
 #include "control/Route.h"
 #include "core/Geodesy.h"
 #include "fsim/Altimeter.h"
+#include "fsim/Magnetic.h"
 #include "fsim/VehicleProfile.h"
 
 #include <algorithm>
@@ -138,6 +139,7 @@ void HsaBehavior::reset() {
     wind_.reset();
     courseTrim_ = speedTrim_ = 0.0;
     lastTime_ = -1.0;
+    declinationAt_ = kHold;
 }
 
 Command HsaBehavior::update(const ControlContext& ctx, const Command& in) {
@@ -166,7 +168,16 @@ Command HsaBehavior::update(const ControlContext& ctx, const Command& in) {
 
     // the direction, and the wind along it and to its right
     const bool course = !isHold(h->courseRad);
-    const double direction = course ? h->courseRad : orHold(h->headingRad, s.eulerRad[2]);
+    double direction = course ? h->courseRad : orHold(h->headingRad, s.eulerRad[2]);
+    if (h->directionReference == static_cast<double>(DirectionReference::MagneticNorth) && (course || !isHold(h->headingRad))) {
+        // a magnetic one, turned by the declination where the aircraft is, at the world's date, every 10 s (4.22)
+        if (!(s.simTime - declinationAt_ < 10.0)) {
+            const double utc = ctx.world ? ctx.world->environment().epochUtcSeconds + s.simTime : 0.0;
+            declination_ = declinationRad(s.latitudeRad, s.longitudeRad, s.altitudeMslM, magneticYear(utc));
+            declinationAt_ = s.simTime;
+        }
+        direction = geo::wrapPi(direction + declination_);
+    }
     const double tn = std::cos(direction), te = std::sin(direction);
     const double windAlong = wind_.northMs * tn + wind_.eastMs * te, windAcross = -wind_.northMs * te + wind_.eastMs * tn;
     SpeedReference reference = speedReferenceOf(h->speedReference, hovers ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
@@ -239,7 +250,9 @@ Command HsaBehavior::update(const ControlContext& ctx, const Command& in) {
 
 bool HsaBehavior::progress(ActivityProgress& out) const noexcept {
     out.courseRad = flown_.courseRad;
-    out.headingRad = isHold(flown_.courseRad) ? flown_.headingRad : headingFlown_;
+    // (the heading a course is flown on, from the north it was commanded from)
+    const bool magnetic = flown_.directionReference == static_cast<double>(DirectionReference::MagneticNorth);
+    out.headingRad = isHold(flown_.courseRad) ? flown_.headingRad : isHold(headingFlown_) || !magnetic ? headingFlown_ : geo::wrapPi(headingFlown_ - declination_);
     out.altitudeMslM = altitudeMsl_;
     const bool optimised = !isHold(flown_.speedOptimization); // (the optimum it flies now, a true airspeed)
     out.speedMs = optimised && !isHold(speedFlown_) ? speedFlown_ : flown_.speed;
@@ -882,7 +895,8 @@ void registerGuidanceModes(ControllerRegistry& r) {
                       p("speed_reference", "", now, 0.0, static_cast<double>(SpeedReference::Count) - 1.0),
                       p("altitude_m", "m", now, -inf, inf, Constraint::MinAltitude, Constraint::MaxAltitude),
                       p("altitude_reference", "", now, 0.0, static_cast<double>(AltitudeReference::Count) - 1.0),
-                      p("speed_optimization", "", now, 0.0, static_cast<double>(SpeedOptimization::Count) - 1.0)};
+                      p("speed_optimization", "", now, 0.0, static_cast<double>(SpeedOptimization::Count) - 1.0),
+                      p("direction_reference", "", now, 0.0, static_cast<double>(DirectionReference::Count) - 1.0)};
     hsa.uses = {"fsim.flight.velocity"};
     hsa.mode = FlightMode::HsaCsa;
     hsa.setpoint = SetpointKind::Hsa;

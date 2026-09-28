@@ -66,10 +66,10 @@ const FeatureDef kFeatures[] = {
     CAP("fsim.guidance.hover", S, 0, R1, ""),       // PLT-08, superseded by the hover loiter
 
     // --- HSA/CSA ---------------------------------------------------------------------------------
-    CAP("fsim.guidance.hsa", P, 4, 0, "the magnetic and barometric references (FA-4)"), // HSA-08..10
+    CAP("fsim.guidance.hsa", S, 0, 0, ""), // HSA-08..10: whole since FA-4 (its barometric and magnetic references)
     {"fsim.guidance.hsa/direction/heading", "fsim.guidance.hsa", S, 0, 0, ""},              // HSA-01
     {"fsim.guidance.hsa/direction/course", "fsim.guidance.hsa", S, 0, 0, ""},               // HSA-02
-    {"fsim.guidance.hsa/direction/magnetic_north", "fsim.guidance.hsa", N, 4, 0, ""},       // HSA-03
+    {"fsim.guidance.hsa/direction/magnetic_north", "fsim.guidance.hsa", S, 0, 0, ""},       // HSA-03 (FA-4d)
     {"fsim.guidance.hsa/speed/true_airspeed", "fsim.guidance.hsa", S, 0, 0, ""},            // HSA-04
     {"fsim.guidance.hsa/speed/calibrated_airspeed", "fsim.guidance.hsa", S, 0, 0, ""},
     {"fsim.guidance.hsa/speed/ground_speed", "fsim.guidance.hsa", S, 0, 0, ""},

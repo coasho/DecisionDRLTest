@@ -539,6 +539,25 @@ The state data carries what A-GRA's detailed position report and the vehicle's w
   - C ABI 1.19: `fsim_state_data`'s new fields; `fsim_frame_spec`, `fsim_frame_offset`, `fsim_world_create_frame`, `fsim_world_remove_frame`, `fsim_world_frame_point`.
   - Python: `fsim.StateData`'s new fields; `fsim.FrameOrigin`, `fsim.FrameRotation`, `fsim.FrameOffsets`; `World.create_frame`, `remove_frame`, `frame_point`; `fsim.agra.orientation_rate`, `orientation_acceleration`, `wind_data`.
 
+### 4.22 The magnetic model (as FA-4 builds it)
+
+An hsa's heading or course may be measured from magnetic north (HSA-03), and the state data gives the magnetic heading (STS-05), both from the Earth's magnetic field (ENV-02).
+
+- **The model** is the World Magnetic Model 2025 of NOAA's National Centers for Environmental Information and the British Geological Survey, a work of the US Government in the public domain.
+  - Its published coefficients (`WMM.COF` of 11/13/2024) are built in, evaluated with the equations its technical report publishes: degree 12, Schmidt semi-normalized, a place's geodetic latitude and height above the WGS-84 ellipsoid turned geocentric.
+  - It gives the field north, east and down, its horizontal and total intensity, its declination and its inclination.
+- **The date** is the world's UTC as a decimal year, held within the model's five years, 2025.0 to 2030.0. A world whose clock was never set (1970: a C ABI or Python world until its environment's epoch is set) reads the model's epoch. The model itself, asked for another date, is carried on at its rates of change, as NOAA's software does.
+- **A magnetic heading or course** (`DirectionReference::MagneticNorth`, the hsa's `direction_reference`) is flown turned by the declination where the aircraft is: true = magnetic + declination. The declination is refreshed every 10 s of simulation time, never every step.
+  - A reference given alone holds the heading the aircraft flies now, from that north; a heading or course given alone continues the reference it replaces; in an UPDATE, a reference needs its value.
+  - The progress reports the direction from the north it was commanded from.
+  - The terrain check turns the hsa's line ahead the same way.
+- **The state data** gives the magnetic heading (A-GRA's MagneticHeading) and the declination.
+- **Checked** against NOAA's published test values (section 14).
+- **Surfaces.**
+  - C++: `fsim/Magnetic.h` (`magneticField`, `declinationRad`, `decimalYear`, `magneticYear`); `DirectionReference`, `HsaCommand::directionReference`; `StateData`'s `magneticHeadingRad` and `declinationRad`.
+  - C ABI 1.20: the hsa's eighth field and `fsim_direction_reference`; `fsim_state_data`'s `magnetic_heading_rad` and `declination_rad`; `fsim_magnetic_field`, `fsim_magnetic_field_at`, `fsim_decimal_year`, `fsim_world_magnetic_year`.
+  - Python: `fsim.DirectionReference`, `submit_hsa(direction_reference=)`; `fsim.StateData`'s new fields; `fsim.magnetic_field` (`fsim.MagneticField`), `fsim.decimal_year`, `World.magnetic_year`; `fsim.agra.HEADING_REFERENCE`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -727,11 +746,11 @@ A-GRA's per-mode performance profile from hangar's data; energy management in ev
 
 Magnetic and barometric references in every mode and in the state; the QNH setting; reference frames; the terrain query; winds; orientation acceleration; terrain validation of commanded paths.
 
-**Status:** in progress, in four steps:
+**Status:** done 2026-09-27 in four steps, each measured in section 14:
 - FA-4a, the terrain: the query and the paths checked against it (ENV-01, STS-11, VAL-06; 4.19), done 2026-09-27 and measured in section 14;
 - FA-4b, the barometric altimeter: the QNH setting, what the altimeter reads in the state data, the barometric reference in the hsa and the patterns (ENV-03, STS-10, STS-04, HSA-07, LTR-16; 4.20), done 2026-09-27 and measured in section 14;
 - FA-4c, the state data and frames: orientation rates and accelerations, the wind, reference frames (STS-02, STS-06, ENV-04; 4.21), done 2026-09-27 and measured in section 14;
-- FA-4d, the magnetic model: declination, the magnetic reference and heading (ENV-02, HSA-03, STS-05). It needs the World Magnetic Model's published coefficients built in, which are not on this machine.
+- FA-4d, the magnetic model: declination, the magnetic reference and heading (ENV-02, HSA-03, STS-05; 4.22), done 2026-09-27 and measured in section 14. The World Magnetic Model 2025's coefficients were downloaded from NOAA NCEI with the owner's approval.
 
 **Supporting models:** Terrain service, magnetic model, altimeter, frames (ENV-01 to ENV-04).
 
@@ -1563,6 +1582,25 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The micro cases are within −1.8 % to +0.9 %; the command cases within −1.5 % to +0.4 %.
   - World throughput is 99.1 to 100.4 % of FA-4b's. Protection costs at most 0.5 % (the gate: 97 %).
 - ctest: all 262 tests pass.
+
+**FA-4d, the magnetic model (ENV-02, HSA-03, STS-05).** It closes FA-4, whose acceptance it completes: the declination against the World Magnetic Model's published test values.
+- **The model against NOAA's published test values** (`test_magnetic`):
+  - the technical report's twelve (2025.0 and 2027.5, at sea level and 100 km, 80° N, the equator and 80° S) are within the rounding they are given to: 0.05 nT for every component and intensity, 0.005° for the declination and inclination;
+  - the coefficient package's hundred (2025.0 to 2029.5, heights to 94 km, the whole Earth) are within 7.2e-4 nT, where they are given to a millionth, and within their 0.005° rounding.
+- **Flown** (a C172x off San Francisco, where the declination is 12.9° in 2026):
+  - told magnetic north, it commands a true heading within 0.01° of the declination, and its state data's magnetic heading is its heading turned back;
+  - its heading hold flies it as closely as it flies a true heading: 1.6° off after this left turn, the same told true north. That is a separate finding, set aside as a task of its own;
+  - an UPDATE's heading alone continues the magnetic reference; a reference alone in an UPDATE is refused; a reference given alone in a NEW holds the heading now, from that north;
+  - a course from magnetic north is flown over the ground within 1° of it turned true.
+- **The fleet** (`test_fleet`): every aircraft told a magnetic heading a quarter turn right commands its true heading within 0.008° of it turned by the declination now (the worst, the Su-25's, moving between the 10 s it is refreshed at), and flies it within 0.17° (the Su-25).
+- **The date:** a world whose clock was never set reads the model's epoch; the 2026 clock reads 2026; 2033 reads 2030.0.
+- **Found in passing:** `ALTITUDE_REFERENCE` in `fsim.agra` had no name for FA-4b's barometric reference; reading one back would have failed. It has one now.
+- **Digests:** identical to FA-4c's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-4c (338f948), built in the scratch worktree: 5 rounds of `micro`, and 9 of `command` three times.
+  - The `hsa` micro case read +7.6 % while the mode wrapped every direction, true ones too. It now turns and wraps only a magnetic one, and reads +0.0 %. The other micro cases are within −3.9 % to +1.2 %.
+  - The command cases are within −3.1 % to +2.0 %.
+  - World throughput, over 7 rounds on a loaded machine (both builds' F-16C a sixth below the earlier runs'), is 98.4 to 100.0 % of FA-4c's. Protection costs at most 2.5 % (the gate: 97 %).
+- ctest: all 267 tests pass.
 
 ## Appendix A: the inventory
 

@@ -1501,10 +1501,18 @@ static PyObject* world_state_data(PyObject* o, PyObject* const* args, Py_ssize_t
     if (!check_args(n, 1, 1, "state_data") || !as_u32(args[0], &id)) return NULL;
     fsim_state_data_init(&d);
     if (fsim_vehicle_state_data(self->world, id, &d) != FSIM_OK) return fail();
-    return Py_BuildValue("(ddddddddddddddd)", d.indicated_altitude_m, d.indicated_altitude_rate_ms, d.kollsman_hpa, d.static_pressure_pa,
+    return Py_BuildValue("(ddddddddddddddddd)", d.indicated_altitude_m, d.indicated_altitude_rate_ms, d.kollsman_hpa, d.static_pressure_pa,
                          d.static_temperature_k, d.yaw_rate_rad_s, d.pitch_rate_rad_s, d.roll_rate_rad_s, d.yaw_acceleration_rad_s2,
                          d.pitch_acceleration_rad_s2, d.roll_acceleration_rad_s2, d.wander_angle_rad, d.wind_north_ms, d.wind_east_ms,
-                         d.wind_down_ms);
+                         d.wind_down_ms, d.magnetic_heading_rad, d.declination_rad);
+}
+
+/* magnetic_year() -> the date the World Magnetic Model is read at for this world now (ABI 1.20) */
+static PyObject* world_magnetic_year(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    (void)args;
+    if (!check_args(n, 0, 0, "magnetic_year")) return NULL;
+    return PyFloat_FromDouble(fsim_world_magnetic_year(self->world));
 }
 
 /* create_frame(origin, vehicle, latitude_rad, longitude_rad, altitude_msl_m, yaw_rad, pitch_rad, roll_rad, north_ms, east_ms,
@@ -2578,6 +2586,7 @@ static PyMethodDef world_methods[] = {
     FAST("set_qnh", world_set_qnh, "set_qnh(id, qnh_pa): what its barometric altimeter is set to"),
     FAST("qnh", world_qnh, "qnh(id) -> its altimeter's setting, Pa"),
     FAST("state_data", world_state_data, "state_data(id) -> its altimeter's reading, the air, its orientation's rates, the wind: 15 items"),
+    FAST("magnetic_year", world_magnetic_year, "magnetic_year() -> the decimal year the World Magnetic Model is read at for this world now"),
     FAST("create_frame", world_create_frame, "create_frame(origin, vehicle, latitude_rad, longitude_rad, altitude_msl_m, yaw_rad, pitch_rad, roll_rad, north_ms, east_ms, down_ms, time_s) -> id"),
     FAST("remove_frame", world_remove_frame, "remove_frame(id) -> bool"),
     FAST("frame_point", world_frame_point, "frame_point(id, rotation, offsets, x, y, z, time_s) -> (latitude_rad, longitude_rad, altitude_msl_m) or None"),
@@ -2837,6 +2846,32 @@ static PyObject* mod_registered_ids(PyObject* m, PyObject* const* args, Py_ssize
     return list;
 }
 
+/* magnetic_field(latitude_rad, longitude_rad, height_m, decimal_year) -> (north_nt, east_nt, down_nt, horizontal_nt,
+ * total_nt, declination_rad, inclination_rad): the World Magnetic Model 2025 (ABI 1.20) */
+static PyObject* mod_magnetic_field(PyObject* m, PyObject* const* args, Py_ssize_t n) {
+    (void)m;
+    if (!check_args(n, 4, 4, "magnetic_field")) return NULL;
+    double v[4];
+    for (int k = 0; k < 4; ++k) v[k] = PyFloat_AsDouble(args[k]);
+    if (PyErr_Occurred()) return NULL;
+    fsim_magnetic_field f;
+    fsim_magnetic_field_init(&f);
+    if (fsim_magnetic_field_at(v[0], v[1], v[2], v[3], &f) != FSIM_OK) {
+        PyErr_SetString(PyExc_ValueError, "magnetic_field: a place or date not finite, or a latitude off the Earth");
+        return NULL;
+    }
+    return Py_BuildValue("(ddddddd)", f.north_nt, f.east_nt, f.down_nt, f.horizontal_nt, f.total_nt, f.declination_rad, f.inclination_rad);
+}
+
+/* decimal_year(unix_seconds) -> the year and the part of it gone (ABI 1.20) */
+static PyObject* mod_decimal_year(PyObject* m, PyObject* const* args, Py_ssize_t n) {
+    (void)m;
+    if (!check_args(n, 1, 1, "decimal_year")) return NULL;
+    const double t = PyFloat_AsDouble(args[0]);
+    if (PyErr_Occurred()) return NULL;
+    return PyFloat_FromDouble(fsim_decimal_year(t));
+}
+
 static PyObject* mod_reason_name(PyObject* m, PyObject* const* args, Py_ssize_t n) {
     int code;
     (void)m;
@@ -2981,6 +3016,8 @@ static PyMethodDef module_methods[] = {
     FAST("availability_name", mod_availability_name, "availability_name(i): \"available\", \"temporarily_unavailable\" ..."),
     FAST("reason_description", mod_reason_description, "reason_description(code): the reason in words"),
     FAST("layout", mod_layout, "C struct sizes and offsets"),
+    FAST("magnetic_field", mod_magnetic_field, "magnetic_field(latitude_rad, longitude_rad, height_m, decimal_year): the World Magnetic Model 2025"),
+    FAST("decimal_year", mod_decimal_year, "decimal_year(unix_seconds)"),
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef module = {PyModuleDef_HEAD_INIT, "fsim._native", "fsim's native core over the C ABI", -1,

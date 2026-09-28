@@ -133,7 +133,10 @@ SPEED_REFERENCE = {0: "TRUE_AIRSPEED", 1: "CALIBRATED_AIRSPEED", 2: "GROUNDSPEED
 SPEED_OPTIMIZATION = {0: "LONG_RANGE_CRUISE", 1: "MAX_ENDURANCE"}
 
 #: AltitudeReference codes (CommandedState.altitude_reference, EndPoint.altitude_reference) -> A-GRA's AltitudeReferenceEnum
-ALTITUDE_REFERENCE = {0: "MSL", 1: "AGL", 2: "WGS_HAE"}
+ALTITUDE_REFERENCE = {0: "MSL", 1: "AGL", 2: "WGS_HAE", 3: "ALTITUDE_BAROMETRIC"}
+
+#: DirectionReference codes (an hsa's direction_reference) -> A-GRA's MA_HeadingReferenceEnum
+HEADING_REFERENCE = {0: "TRUE_NORTH", 1: "MAGNETIC_NORTH"}
 
 #: fsim.EndPointKind -> the element of A-GRA's MA_EndPointType choice
 END_POINT = {0: "WayPoint", 1: "TurnPoint", 2: "LoiterPoint"}

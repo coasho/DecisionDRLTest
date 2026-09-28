@@ -650,7 +650,7 @@ int main(int argc, char** argv) {
             double hsa[6], alt[6], bad[5];
             fsim_activity_progress progress;
             fsim_activity_id mode_id;
-            CHECK(fsim_mode_field_count(FSIM_MODE_HSA) == 7 && fsim_mode_field_count(99) == 0); /* (1.15: six leave the optimisation out) */
+            CHECK(fsim_mode_field_count(FSIM_MODE_HSA) == 8 && fsim_mode_field_count(99) == 0); /* (1.15: six leave the optimisation out; 1.20: seven the direction reference) */
             hsa[0] = 3.0; hsa[1] = fsim_hold(); hsa[2] = 50.0; hsa[3] = FSIM_SPEED_TRUE_AIRSPEED; hsa[4] = 1600.0; hsa[5] = FSIM_ALTITUDE_MSL;
             fsim_command_options_init(&co);
             co.source = FSIM_SOURCE_OVERRIDE; /* b's autopilot holds its height (above) */
@@ -917,9 +917,9 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_submit_behavior(world, viper, &hover, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
             CHECK(strcmp(fsim_reason_name(cr.reason), "not_supported") == 0);
             /* applicable, not built: the stage that builds it */
-            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.hsa/direction/magnetic_north", &si) == FSIM_OK);
-            CHECK(si.support == FSIM_NOT_IMPLEMENTED && si.stage == 4);
-            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.hsa", &si) == FSIM_OK && si.support == FSIM_PARTIAL && strlen(si.missing) > 0);
+            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route/altitude/barometric", &si) == FSIM_OK);
+            CHECK(si.support == FSIM_NOT_IMPLEMENTED && si.stage == 6);
+            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route", &si) == FSIM_OK && si.support == FSIM_PARTIAL && strlen(si.missing) > 0);
             CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.warp_drive", &si) != FSIM_OK);
             /* the status as a policy is answered: what it does not offer is unavailable, with why */
             fsim_capability_status_init(&cs);
@@ -1186,8 +1186,9 @@ int main(int argc, char** argv) {
             memset(&sp, 0, sizeof sp);
             sp.struct_size = sizeof sp;
             CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_MODE && sp.code == FSIM_MODE_HSA);
-            CHECK(sp.count == 7 && sp.fields[0] == 1.0 && sp.fields[4] == 3200.0 && sp.fields[3] == FSIM_SPEED_TRUE_AIRSPEED && sp.options == NULL);
-            CHECK(isnan(sp.fields[6])); /* (no speed optimisation) */
+            CHECK(sp.count == 8 && sp.fields[0] == 1.0 && sp.fields[4] == 3200.0 && sp.fields[3] == FSIM_SPEED_TRUE_AIRSPEED && sp.options == NULL);
+            CHECK(isnan(sp.fields[6]));                         /* (no speed optimisation) */
+            CHECK(sp.fields[7] == FSIM_DIRECTION_TRUE_NORTH); /* (1.20: its heading from true north, as it was given none) */
             CHECK(fsim_activity_end_points(world, cr.activity, points, 0, &count) == FSIM_OK && count == 0);
             CHECK(fsim_world_step(world, 2) == FSIM_OK);
             fsim_commanded_state_init(&cs);
@@ -1377,7 +1378,7 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_submit_mode(world, cruiser, FSIM_MODE_HSA, hsa, 7, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
             memset(&sp, 0, sizeof sp);
             sp.struct_size = sizeof sp;
-            CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.count == 7 && sp.fields[6] == FSIM_SPEED_MAX_ENDURANCE);
+            CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.count == 8 && sp.fields[6] == FSIM_SPEED_MAX_ENDURANCE);
             CHECK(sp.fields[3] == FSIM_SPEED_TRUE_AIRSPEED && sp.fields[2] > 50.0 && sp.fields[2] < 250.0); /* resolved: the optimum as given */
             CHECK(fsim_world_step(world, 2) == FSIM_OK);
             fsim_activity_progress_init(&progress);
@@ -1528,6 +1529,32 @@ int main(int argc, char** argv) {
                 CHECK(fsim_world_frame_point(world, frame, &fo, NAN, &lat, &lon, &alt) == FSIM_INVALID_ARGUMENT);
                 fs.vehicle = 99999;
                 CHECK(fsim_world_create_frame(world, &fs, &frame) == FSIM_INVALID_ARGUMENT);
+            }
+            {
+                /* ABI 1.20: the magnetic model, and a heading from magnetic north (docs/flight-autonomy.md, 4.22) */
+                const double pi = 3.14159265358979323846;
+                fsim_magnetic_field mf;
+                fsim_state_data sd;
+                double hsa[8];
+                fsim_magnetic_field_init(&mf);
+                CHECK(mf.struct_size == sizeof mf && isnan(mf.declination_rad));
+                /* the technical report's first test value: 2025.0, at sea level, 80 N 0 E - X 6521.6 nT, D 1.28 deg */
+                CHECK(fsim_magnetic_field_at(80.0 * pi / 180.0, 0.0, 0.0, 2025.0, &mf) == FSIM_OK);
+                CHECK(fabs(mf.north_nt - 6521.6) < 0.05 && fabs(mf.declination_rad * 180.0 / pi - 1.28) < 0.005);
+                CHECK(fsim_magnetic_field_at(2.0, 0.0, 0.0, 2025.0, &mf) == FSIM_INVALID_ARGUMENT); /* (off the Earth) */
+                CHECK(fsim_decimal_year(1735689600.0) == 2025.0);
+                CHECK(fsim_world_magnetic_year(world) == 2025.0); /* (its clock never set) */
+                /* an hsa's eighth field */
+                hsa[0] = 0.0, hsa[1] = hsa[2] = hsa[3] = hsa[4] = hsa[5] = hsa[6] = fsim_hold(), hsa[7] = FSIM_DIRECTION_MAGNETIC_NORTH;
+                CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_HSA, hsa, 8, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+                hsa[7] = 2.0; /* not one */
+                CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_HSA, hsa, 8, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                      cr.reserved == 8); /* (the field's index plus one) */
+                fsim_state_data_init(&sd);
+                CHECK(isnan(sd.magnetic_heading_rad) && isnan(sd.declination_rad));
+                CHECK(fsim_vehicle_state_data(world, ranger, &sd) == FSIM_OK && isfinite(sd.declination_rad));
+                st = fsim_vehicle_state_ptr(world, ranger);
+                CHECK(fabs(remainder(sd.magnetic_heading_rad - (st->euler_rad[2] - sd.declination_rad), 2.0 * pi)) < 1e-9);
             }
         }
         }

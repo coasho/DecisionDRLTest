@@ -57,6 +57,8 @@ public:
     /// commanded path is checked against (docs/flight-autonomy.md, 4.19).
     virtual double groundM(double latitudeRad, double longitudeRad) const = 0;
     virtual double groundResolutionM() const = 0;
+    /// The world's UTC now, Unix seconds: the date a magnetic direction is turned at (4.22).
+    virtual double utcSeconds() const = 0;
 };
 
 class CapabilityHost {
@@ -494,6 +496,9 @@ private:
     /// hsa's line ahead for a minute - complete, its route or curve in the
     /// scratch plan. Sampled at the ground's spacing; `hit` 0: clear.
     CommandDetails::Terrain terrain(const Command& setpoint, const sim::VehicleState& state) const noexcept;
+    /// The declination where the aircraft is, at the world's date (docs/flight-autonomy.md, 4.22): what a magnetic
+    /// direction is turned by to be true.
+    double declinationNow(const sim::VehicleState& state) const noexcept;
     /// The terrain check of a route, pattern, curve or hsa that is checked:
     /// where it meets the ground, a finding (TerrainConflict) no range policy mends.
     void checkTerrain(const Command& setpoint, const sim::VehicleState& state, CheckLog& log) const noexcept;

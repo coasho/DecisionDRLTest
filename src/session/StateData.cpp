@@ -3,6 +3,7 @@
 #include "session/World.h"
 
 #include "fsim/Altimeter.h"
+#include "fsim/Magnetic.h"
 
 #include <cmath>
 #include <limits>
@@ -62,6 +63,10 @@ control::StateData World::stateData(std::uint32_t id) const {
         }
     }
     out.wanderAngleRad = 0.0; // (its navigation frame is north's)
+    // its heading from magnetic north (4.22): the declination where it is, at the world's date
+    out.declinationRad = control::declinationRad(s.latitudeRad, s.longitudeRad, s.altitudeMslM,
+                                                 control::magneticYear(environment_.epochUtcSeconds + simTime_));
+    out.magneticHeadingRad = std::remainder(psi - out.declinationRad, 2.0 * 3.14159265358979323846);
 
     // the wind where it is (4.21): its ground velocity less its velocity through the air, turned from its body's axes
     // to north, east and down

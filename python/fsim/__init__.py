@@ -97,6 +97,7 @@ from .world import (  # noqa: E402
     CommandedState,
     Contingency,
     ControlMode,
+    DirectionReference,
     ControlStatus,
     BezierSegment,
     EndBehavior,
@@ -111,6 +112,7 @@ from .world import (  # noqa: E402
     LIMITS,
     Level,
     LimitStatus,
+    MagneticField,
     Message,
     NavigationReport,
     NavigationSettings,
@@ -141,6 +143,8 @@ from .world import (  # noqa: E402
     VehicleDefault,
     Waypoint,
     World,
+    decimal_year,
+    magnetic_field,
 )
 from .vecenv import VecEnv  # noqa: E402
 from . import agra  # noqa: E402,F401

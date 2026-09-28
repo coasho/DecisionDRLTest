@@ -328,6 +328,6 @@ TEST_CASE("hsa: what the aircraft cannot do is refused, or clamped and said so",
         CHECK(d->mode == FlightMode::HsaCsa);
         CHECK(d->setpoint == SetpointKind::Hsa);
         CHECK((d->interactions & kUpdate) != 0);
-        CHECK(d->parameters.size() == 7); // (the speed optimisation last: ADR-29 FA-3e)
+        CHECK(d->parameters.size() == 8); // (the speed optimisation: ADR-29 FA-3e; the direction reference last: FA-4d)
     }
 }

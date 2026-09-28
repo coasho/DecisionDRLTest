@@ -133,6 +133,11 @@ enum class SpeedReference : std::uint8_t { TrueAirspeed = 0, CalibratedAirspeed 
 /// (fsim/Altimeter.h; docs/flight-autonomy.md, 4.20): an isobar, flown as the
 /// air and the setting move it. A route's is FA-6's.
 enum class AltitudeReference : std::uint8_t { Msl = 0, AboveGround = 1, Ellipsoid = 2, Barometric = 3, Count };
+/// What a heading or a course is measured from (A-GRA's MA_HeadingReferenceEnum;
+/// docs/flight-autonomy.md, 4.22): true north, or magnetic north - the World
+/// Magnetic Model's declination where the aircraft is, at the world's date
+/// (fsim/Magnetic.h), turns it to true.
+enum class DirectionReference : std::uint8_t { TrueNorth = 0, MagneticNorth = 1, Count };
 /// The speed a mode varies by itself (A-GRA's SpeedOptimizationEnum;
 /// docs/flight-autonomy.md, 4.17): the performance tables' best-range speed
 /// (the most distance for the fuel) or best-endurance speed (the most time),
@@ -148,7 +153,7 @@ enum class SpeedOptimization : std::uint8_t { LongRangeCruise = 0, MaxEndurance 
 /// a speed replaces a speed optimisation and an optimisation a speed.
 /// References are enum values carried as doubles, so kHold can mean "as before".
 struct HsaCommand {
-    double headingRad = kHold;        ///< the nose's direction, true north
+    double headingRad = kHold;        ///< the nose's direction, from true north (or magnetic: directionReference)
     double courseRad = kHold;         ///< or the track over the ground's
     double speed = kHold;             ///< m/s, or a Mach number
     double speedReference = kHold;    ///< SpeedReference
@@ -158,6 +163,9 @@ struct HsaCommand {
     /// the optimum's true airspeed at the altitude flown to, as the command
     /// was given; the mode flies it afresh at the altitude and weight now.
     double speedOptimization = kHold;
+    /// DirectionReference of the heading or course: magnetic, it is flown
+    /// turned by the declination where the aircraft is (refreshed every 10 s).
+    double directionReference = kHold;
 };
 
 /// How a route passes a waypoint (A-GRA's TurnType).
@@ -594,6 +602,10 @@ struct StateData {
     /// A-GRA's WanderAngle: its navigation frame's x axis from north. The
     /// platform's is north's: 0.
     double wanderAngleRad = kNone;
+    /// A-GRA's MagneticHeading (docs/flight-autonomy.md, 4.22): its heading
+    /// from magnetic north, and the declination that turns it true - the World
+    /// Magnetic Model's where it is, at the world's date.
+    double magneticHeadingRad = kNone, declinationRad = kNone;
     /// A-GRA's wind data (VI 1.2.6.8): the air's velocity over the ground where
     /// the vehicle is, as its air data measures it (its ground velocity less its
     /// velocity through the air), north, east and down, m/s.

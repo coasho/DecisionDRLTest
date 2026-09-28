@@ -369,6 +369,7 @@ private:
         control::EnergyNow energyNow(std::uint32_t id) const override;
         double groundM(double latitudeRad, double longitudeRad) const override { return world_.ground_->heightAboveEllipsoidM(latitudeRad, longitudeRad); }
         double groundResolutionM() const override { return world_.ground_->resolutionM(); }
+        double utcSeconds() const override { return world_.environment_.epochUtcSeconds + world_.simTime_; }
 
     private:
         const World& world_;

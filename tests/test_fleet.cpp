@@ -726,6 +726,28 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(std::abs(w.vehicleState(p.id)->altitudeMslM - barometricMslM(altimeter, reads)) < 1e-6);
             REQUIRE(w.setQnh(p.id, Altimeter::kStandardPa) == Reason::None); // (as it was, for the cases after)
         });
+    // a magnetic heading (ADR-29 FA-4d, HSA-03): a quarter turn right from magnetic north, flown as the true heading the
+    // declination where the aircraft is turns it to (the world's clock unset: the model's epoch, 2025.0)
+    std::map<std::uint32_t, double> magneticAsked;
+    run("fsim.guidance.hsa", 0.0,
+        [&](const Plane& p) {
+            const double declination = w.stateData(p.id).declinationRad;
+            HsaCommand hsa;
+            hsa.headingRad = magneticAsked[p.id] = std::remainder(p.start.eulerRad[2] + 0.5 * kPi - declination, 2.0 * kPi);
+            hsa.directionReference = static_cast<double>(DirectionReference::MagneticNorth);
+            return w.submit(p.id, hsa).accepted();
+        },
+        secs(200.0, 60.0), none,
+        [&](const Plane& p, const Lows&) {
+            const StateData d = w.stateData(p.id);
+            const auto& s = *w.vehicleState(p.id);
+            INFO("magnetic " << d.magneticHeadingRad / kDeg << " deg, asked " << magneticAsked[p.id] / kDeg);
+            // (commanded turned by the declination where it is - the worst 0.008 deg from the declination now, the Su-25's,
+            // moving between the 10 s it is refreshed at - and flown: the worst 0.17 deg, the Su-25)
+            CHECK(std::abs(std::remainder(w.commandState(p.id).headingRad - (magneticAsked[p.id] + d.declinationRad), 2.0 * kPi)) < 0.02 * kDeg);
+            CHECK(headingOffDeg(s, p.start.eulerRad[2] + 0.5 * kPi) < 1.0);
+            CHECK(std::abs(std::remainder(d.magneticHeadingRad - magneticAsked[p.id], 2.0 * kPi)) < 1.0 * kDeg);
+        });
     // three sides of a square, turning right: a wing's legs four of its full-bank turns long (at least 2 km), a rotorcraft's its scale
     auto leg = [&](const Plane& p) { return p.rotor ? p.scale() : std::max(2000.0, 4.0 * fullBankRadius(p)); };
     auto square = [&](const Plane& p) {

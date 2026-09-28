@@ -323,6 +323,24 @@ class Rejected(_native.Error):
         self.terrain = terrain
 
 
+MagneticField = collections.namedtuple("MagneticField", "north_nt east_nt down_nt horizontal_nt total_nt declination_rad inclination_rad")
+MagneticField.__doc__ = ("The Earth's magnetic field at a place and date (docs/flight-autonomy.md, 4.22; the World Magnetic Model 2025 of "
+                         "NOAA NCEI and the British Geological Survey): north, east and down, horizontal and total (nT), its declination "
+                         "(east of true north) and inclination (below the horizontal).")
+
+
+def magnetic_field(latitude_rad, longitude_rad, height_m, decimal_year):
+    """The World Magnetic Model 2025's field at a geodetic place, a height above the WGS-84 ellipsoid and a decimal year
+    (fsim.MagneticField; outside 2025.0 to 2030.0 carried on at its rates of change). World.magnetic_year is a world's
+    date as the platform reads it."""
+    return MagneticField(*_native.magnetic_field(float(latitude_rad), float(longitude_rad), float(height_m), float(decimal_year)))
+
+
+def decimal_year(unix_seconds):
+    """A UTC time (Unix seconds) as a decimal year."""
+    return _native.decimal_year(float(unix_seconds))
+
+
 Rank = collections.namedtuple("Rank", "priority precedence", defaults=(0, 0))
 Rank.__doc__ = ("A command's rank (A-GRA's ComparableRankingType; docs/flight-autonomy.md, 4.9): lower first - its priority, then "
                 "its precedence within it. Rank(0, 0), every command's without one, ranks first.")
@@ -486,13 +504,14 @@ NavigationSettings = collections.namedtuple("NavigationSettings", "recovery lati
 StateData = collections.namedtuple("StateData", "indicated_altitude_m indicated_altitude_rate_ms kollsman_hpa static_pressure_pa "
                                    "static_temperature_k yaw_rate_rad_s pitch_rate_rad_s roll_rate_rad_s yaw_acceleration_rad_s2 "
                                    "pitch_acceleration_rad_s2 roll_acceleration_rad_s2 wander_angle_rad wind_north_ms wind_east_ms "
-                                   "wind_down_ms")
+                                   "wind_down_ms magnetic_heading_rad declination_rad")
 StateData.__doc__ = ("What A-GRA's detailed position report carries beyond the state (docs/flight-autonomy.md, 4.20 and 4.21): what "
                      "the vehicle's barometric altimeter reads - its IndicatedBaroAltitude, the standard atmosphere's height of the "
                      "static pressure above the QNH it is set to, and its rate - its Kollsman setting (hPa), and the air's static "
                      "pressure and temperature where the vehicle is (MA_AirDataType); how fast its Euler angles change and how that "
                      "changes (OrientationRate, OrientationAcceleration; NaN pitched straight up or down); its WanderAngle (0: its "
-                     "navigation frame is north's); the wind where it is, the air's velocity over the ground (north, east, down).")
+                     "navigation frame is north's); the wind where it is, the air's velocity over the ground (north, east, down); its "
+                     "MagneticHeading and the declination that turns it true (4.22).")
 NavigationSettings.__doc__ = "Where the vehicle recovers to (if ``recovery``) and the fraction of its capacity it keeps for the end."
 
 CommandedState = collections.namedtuple(
@@ -663,6 +682,14 @@ class SpeedOptimization(enum.IntEnum):
     MAX_ENDURANCE = 1
 
 
+class DirectionReference(enum.IntEnum):
+    """What an hsa's heading or course is measured from (A-GRA's MA_HeadingReferenceEnum; docs/flight-autonomy.md, 4.22):
+    true north, or magnetic north - flown turned by the World Magnetic Model's declination where the aircraft is, at
+    the world's date."""
+    TRUE_NORTH = 0
+    MAGNETIC_NORTH = 1
+
+
 class TurnType(enum.IntEnum):
     """How a route passes a waypoint (A-GRA's TurnType): a fly-by turn begins before it, on a circle tangent to
     both legs; a fly-over point is passed, then the next leg intercepted."""
@@ -697,13 +724,15 @@ class PatternKind(enum.IntEnum):
 #: one out: a NEW continues what a live hsa commanded (else what the aircraft flies now) and takes a route's, a
 #: pattern's or a curve's default; an UPDATE keeps it.
 MODE_KINDS = ("hsa", "route", "pattern", "curve")
-MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference", "speed_optimization"),
+MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference", "speed_optimization",
+                       "direction_reference"),
                "route": ("projection", "repeat", "end", "start"),
                "pattern": ("pattern", "latitude_rad", "longitude_rad", "altitude_m", "altitude_reference", "radius_m", "clockwise",
                            "course_rad", "leg_m", "speed", "speed_reference", "duration_s", "speed_optimization"),
                "curve": ("latitude_rad", "longitude_rad", "altitude_m", "speed_min_ms", "speed_max_ms", "duration_s", "end", "append")}
-MODE_DEFAULTS = {"hsa": (HOLD,) * 7, "route": (HOLD,) * 4, "pattern": (HOLD,) * 13, "curve": (HOLD,) * 8}
+MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 13, "curve": (HOLD,) * 8}
 _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "speed_optimization": SpeedOptimization,
+               "direction_reference": DirectionReference,
                "projection": Projection, "end": EndBehavior,
                "turn": TurnType, "pattern": PatternKind}
 
@@ -1765,6 +1794,12 @@ class World:
             self._h.activity_update_batch(activities, rows, int(stride), int(stride))
         else:
             self._h.activity_update_batch(activities, rows, int(stride))
+
+    @property
+    def magnetic_year(self):
+        """The date the World Magnetic Model is read at for this world now (docs/flight-autonomy.md, 4.22): its UTC's
+        decimal year, held within 2025.0 to 2030.0 - a world whose clock was never set reads 2025.0."""
+        return self._h.magnetic_year()
 
     # --- the terrain -----------------------------------------------------------------
     def terrain(self, latitude_rad, longitude_rad):

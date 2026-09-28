@@ -290,6 +290,7 @@ Reason CapabilityHost::resolveHsa(HsaCommand& c, const sim::VehicleState& state,
     if (!code(c.speedReference, static_cast<int>(SpeedReference::Count))) return bad(3);
     if (!code(c.altitudeReference, static_cast<int>(AltitudeReference::Count))) return bad(5);
     if (!code(c.speedOptimization, static_cast<int>(SpeedOptimization::Count))) return bad(6);
+    if (!code(c.directionReference, static_cast<int>(DirectionReference::Count))) return bad(7);
     if (!isHold(c.headingRad) && !isHold(c.courseRad)) return bad(1); // one direction, a heading or a course
     for (const auto& [v, field] : {std::pair<double, std::int16_t>{c.headingRad, 0}, {c.courseRad, 1}, {c.speed, 2}, {c.altitudeM, 4}})
         if (!isHold(v) && !std::isfinite(v)) return bad(field);
@@ -302,6 +303,7 @@ Reason CapabilityHost::resolveHsa(HsaCommand& c, const sim::VehicleState& state,
     } else {
         const auto reference = (adapter_->features() & kFeatureHover) ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed;
         base.headingRad = state.eulerRad[2];
+        base.directionReference = static_cast<double>(DirectionReference::TrueNorth);
         base.speedReference = static_cast<double>(reference);
         base.speed = speedNow(reference, state);
         base.altitudeReference = static_cast<double>(AltitudeReference::Msl);
@@ -311,6 +313,9 @@ Reason CapabilityHost::resolveHsa(HsaCommand& c, const sim::VehicleState& state,
     if (!isHold(c.speedReference) && isHold(c.speed)) c.speed = speedNow(static_cast<SpeedReference>(static_cast<int>(c.speedReference)), state);
     if (!isHold(c.altitudeReference) && isHold(c.altitudeM))
         c.altitudeM = altitudeNow(static_cast<AltitudeReference>(static_cast<int>(c.altitudeReference)), state, &config_->altimeter);
+    if (!isHold(c.directionReference) && isHold(c.headingRad) && isHold(c.courseRad)) // (its heading now, from that north)
+        c.headingRad = c.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? geo::wrapPi(state.eulerRad[2] - declinationNow(state))
+                                                                                                        : state.eulerRad[2];
     mergeHsa(base, c); // a value given alone is in the reference it continues
     c = base;
     if (!isHold(c.headingRad)) c.headingRad = geo::wrapPi(c.headingRad);
@@ -1462,7 +1467,9 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
         if (!code(next->speedReference, static_cast<int>(SpeedReference::Count))) return bad(3);
         if (!code(next->altitudeReference, static_cast<int>(AltitudeReference::Count))) return bad(5);
         if (!code(next->speedOptimization, static_cast<int>(SpeedOptimization::Count))) return bad(6);
+        if (!code(next->directionReference, static_cast<int>(DirectionReference::Count))) return bad(7);
         if (!isHold(next->headingRad) && !isHold(next->courseRad)) return bad(1);
+        if (!isHold(next->directionReference) && isHold(next->headingRad) && isHold(next->courseRad)) return bad(0);
         if (!isHold(next->speedReference) && isHold(next->speed) && isHold(next->speedOptimization)) return bad(2);
         if (!isHold(next->altitudeReference) && isHold(next->altitudeM)) return bad(4);
         if (const Reason why = optimisable(next->speedOptimization, 6, result); why != Reason::None) return about(rejected(why, activity), result);
@@ -1754,7 +1761,9 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
         auto code = [](double v, int count) { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); };
         if (!code(hsa->speedReference, static_cast<int>(SpeedReference::Count))) return bad(3);
         if (!code(hsa->altitudeReference, static_cast<int>(AltitudeReference::Count))) return bad(5);
+        if (!code(hsa->directionReference, static_cast<int>(DirectionReference::Count))) return bad(7);
         if (!isHold(hsa->headingRad) && !isHold(hsa->courseRad)) return bad(1);
+        if (!isHold(hsa->directionReference) && isHold(hsa->headingRad) && isHold(hsa->courseRad)) return bad(0);
         mergeHsa(std::get<HsaCommand>(next), *hsa);
     } else if (const auto* pattern = std::get_if<PatternCommand>(&setpoint)) {
         if (const Reason why = checkPattern(*pattern, true, result); why != Reason::None) return about(rejected(why, activity), result);
