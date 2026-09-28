@@ -527,6 +527,7 @@
       <property value="1">fsim/envelope/version</property>
       <property value="1">fsim/envelope/provenance</property>
       <property value="14">fsim/envelope/clean/alpha_max_deg</property>
+      <property value="86.1628">fsim/envelope/clean/cas_min_ms</property>
       <property value="2.5">fsim/envelope/clean/n_max</property>
       <property value="-1">fsim/envelope/clean/n_min</property>
       <property value="35">fsim/envelope/clean/roll_rate_max_deg_s</property>

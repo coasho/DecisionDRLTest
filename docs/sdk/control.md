@@ -811,6 +811,7 @@ if (e[Limit::AlphaMax].exceededUpdates) penalty += e[Limit::AlphaMax].worstExces
   - `Off` does neither and flies exactly as before. It is the default without an envelope.
 - **What is limited.** Each level's setpoint, before its loop flies it:
   - airspeeds to `cas_min` .. `cas_max` and the Mach limit, converted at the present condition;
+  - a vertical speed to the climb the airspeed affords over `cas_min` (energy management, [flight-autonomy.md](../flight-autonomy.md) 4.16): 0.5 m/s for each m/s above 1.1 times it, none between, a descent below it. It is reported under `cas_min`;
   - bank and turn rate to `bank_max`;
   - pitch to its limits, and to what puts the wing at α_max on the present flight path;
   - load factor to `n_min` .. `n_max`, and to what the wing gives at α_max here;

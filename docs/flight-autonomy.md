@@ -417,6 +417,33 @@ A flight mode's performance profile (CAP-04 to CAP-15; A-GRA's MA_FlightControlM
   - C: `fsim_vehicle_performance_profile` (ABI 1.14).
   - Python: `Vehicle.performance_profile(mode)`; `fsim.agra.performance_profile(profile, capacity=None)` gives A-GRA's names.
 
+### 4.16 Energy management (as FA-3 builds it)
+
+Energy management (HSA-10, CTG-04) keeps a wing from trading its airspeed for height. Asked to climb faster than its power allows, it climbs at what its airspeed's margin over its least airspeed affords, and the height waits.
+
+- **The rule**, on a wing's vertical speed, at its calibrated airspeed now:
+  - above 1.1 times its least airspeed, a climb of at most 0.5 m/s for each m/s above that;
+  - between its least and 1.1 times it, no climb: the height is held;
+  - below its least, a descent of 0.5 m/s for each m/s short.
+
+  A climb asked for more than the power gives settles where the power holds the climb that the margin affords. The C172 at full power climbs at 0.8 m/s at 1.16 times its least. The 1.1 is FA-3's criterion.
+- **Where it acts.** It is envelope protection's, in `Limit`, the default with an envelope. It limits the vertical speed at the velocity level, as the flight path the pitch limits allow already does ([control-architecture.md](control-architecture.md), 11.3). So:
+  - every mode a wing flies through its velocity level has it: HSA and hold, routes, patterns and curves, pursuit, evasion and formation, and a velocity command itself;
+  - an attitude, acceleration or actuator command is flown as given, within the attitude limits;
+  - a rotorcraft has no least airspeed, so no rule: its climb costs no airspeed;
+  - hangar's flight tests and performance tables fly with protection off, as before.
+- **Reported as the least airspeed's limit** (HSA-10's "performance limited"). While the rule holds a climb back:
+  - the envelope report counts the update under `cas_min`;
+  - the activity is flagged demand-limited: A-GRA's ACTIVE_PARTIALLY_CONSTRAINED, or ACTIVE_FULLY_CONSTRAINED where its throttle is also at its stop (the C172's climb).
+- **A least airspeed on all 31 wings.**
+  - The 15 wings without a limiting law have the stall their flight tests flew.
+  - The 16 fly-by-wire designs had none (CAP-05's probe), since their law will not let a stall be flown. hangar now writes theirs from the performance tables (`profile.py`, `spawn_stall`): the tables' stall (idle, the height held, to the law's angle of attack) at the lowest altitude, at the weight the aircraft spawns at.
+  - With it they are treated as the other wings are:
+    - protection holds their airspeed setpoints at their least or above;
+    - a command's speed below it is clamped or rejected (`min_airspeed`), and the profile's least airspeed is never below it (4.15);
+    - a loop needs twice it to be entered, and one flown below it is given up (section 6: the fighters' least airspeed was to come with FA-3's tables).
+- **Checked** on all 31 wings by the fleet climb case, and the changed flights measured and listed (section 14).
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -486,7 +513,7 @@ Appendix B is the matrix: 35 aircraft against the capabilities the rules govern 
 - **Evade (PLT-05):** a floor `floor_agl_m` (150 m) above the terrain under it, or the height it started at if lower; the floor holding its descent is reported (`kActivityClamped`). The four rotorcraft no longer reach the ground. Given no speed, a rotorcraft flees at its cruise at least (FA-1e): from a hover it kept the airspeed it had, none, and drifted 150 m in 90 s; now the helicopters are 1.26 km further off.
 - **Hold (PLT-01, FA-1e):** it flies to its altitude at the aircraft's own position-loop gain and vertical speeds, as the modes do, where it used 0.25/s for every aircraft: six times what the Mirage 2000's loops follow, which circled its new altitude 25 m either way for good. Now every aircraft settles as under HSA (the slowest, the B-52H, 8.4 m short after 120 s of a 200 m descent). The stock c172x's own gain is 0.25/s, so its flights do not change.
 - **Formation (PLT-06, FA-1e):** it closes on its slot no faster than it could stop closing there, as pursuit does, at a gain half its speed loop's bandwidth (0.05/s for a wing); a wing flies the leader's airspeed plus that closing and joins the slot's line along the look-ahead a route's legs are flown with, and a rotorcraft flies the leader's velocity over the ground plus the closing, straight to its slot. From 5 s of cruise behind (a rotorcraft three times its slot's distance) every wing is within 9.3 m of its slot after 150 s, where 33 of 35 were 48 m to 1.8 km off, and every rotorcraft within 0.01 m.
-- **Aerobatics (PLT-07):** offered by R10 (FA-1b). A checked NEW is refused `performance_limit` too slow where the least airspeed is known (the A-10C and Su-25; the fighters' comes with FA-3's performance tables) or a split-S too low. In flight it gives up below its least airspeed, past its angle of attack by more than 3° (a departure) or within 150 m of the ground, and completes only if flown within the envelope to its limiters' tolerance (0.5 g, 3° of angle of attack, 3 to 5 m/s; bank and pitch, which a loop passes by design, are not judged). The probe's loop from cruise: 14 of the 17 complete within the envelope; the A-10C, EA-18G and Mirage 2000 give up (they ran out of airspeed or departed over the top), where before every one reported `goal_reached`. None reaches the ground.
+- **Aerobatics (PLT-07):** offered by R10 (FA-1b). A checked NEW is refused `performance_limit` too slow where the least airspeed is known (the A-10C and Su-25; the fighters' comes with FA-3's performance tables) or a split-S too low. In flight it gives up below its least airspeed, past its angle of attack by more than 3° (a departure) or within 150 m of the ground, and completes only if flown within the envelope to its limiters' tolerance (0.5 g, 3° of angle of attack, 3 to 5 m/s; bank and pitch, which a loop passes by design, are not judged). The probe's loop from cruise: 14 of the 17 complete within the envelope; the A-10C, EA-18G and Mirage 2000 give up (they ran out of airspeed or departed over the top), where before every one reported `goal_reached`. None reaches the ground. With FA-3d the fighters' least airspeeds are known (4.16). The fleet test's loops from cruise: 7 of the 17 complete; 9 give up, 7 of them fighters that float over the top below their least airspeed; the Mirage 2000 is refused for its entry speed (section 14).
 - New in the SDK for these: a behaviour's admission (`BehaviorTraits::admit`), its completion within the envelope (`BehaviorTraits::withinEnvelope`), the flags it reports (`Behavior::constraints`), and the envelope it flies to (`ControlContext::envelope`).
 
 ## 7. Supporting models: minimal and deterministic (D8, D9)
@@ -587,7 +614,7 @@ A-GRA's per-mode performance profile from hangar's data; energy management in ev
 - FA-3a, the performance tables (4.13), done 2026-09-27 and measured in section 14;
 - FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft, the navigation report (STS-07, 4.14), endurance against a flown burn and the rotorcraft's tables, done 2026-09-27 and measured in section 14;
 - FA-3c, the performance profile per mode (CAP-04 to CAP-15, 4.15), updated with the condition and configuration, done 2026-09-27 and measured in section 14;
-- FA-3d, energy management in every mode (HSA-10, CTG-04): the fleet climb case;
+- FA-3d, energy management in every mode (HSA-10, CTG-04, 4.16): the fleet climb case, done 2026-09-27 and measured in section 14;
 - FA-3e, speed optimisation (HSA-05, LTR-17) and endurance validation (VAL-03), the first soft rejection override_rejection overrides.
 
 **Supporting models:** Performance tables, fuel flow (SUB-02, SUB-03).
@@ -893,7 +920,7 @@ Filled as the stages land: each stage's criteria results, the digests (identical
   - **A rotorcraft's turns.** Its default pattern circle, and the speed it flies a given circle at, now also keep the turn rate within a third of its velocity loop's bandwidth (the rule a route's look-ahead follows), besides 80 % of its acceleration. The UH-1H (0.22 rad/s) flew its 79 m default circle up to 30 m off; its circle is now 206 m, flown within 7.3 m. The Crazyflie's 0.3 m circle, flown 0.75 m off, is now 6.9 m, flown within 0.27 m. No digest flight is a rotorcraft's.
 - What it found for later stages, not fixed in FA-1:
   - **No hangar design records its gear or flap speeds.** The envelope section hangar writes carries the flight-control limits and the stall, so the placards of 4.6 have nothing to act on across the fleet, and a policy may lower flaps at any speed. The B-52H's stabilizer, at 65 % of its nose-down travel in trimmed cruise, cannot hold the pitch-up of half flaps from about 1.5 times its least airspeed up: lowered at cruise (132 m/s CAS), it climbs away until its airspeed is 50 m/s (fixed in the design since: the next entry). Recording each design's speeds, with their sources, in that section is data work for hangar, proposed with FA-3's performance tables. Meanwhile the fleet test lowers the flaps where a flap speed usually is: 1.4 times the least airspeed (about 1.7 times the stall).
-  - **A climb trades airspeed** (FA-3's energy management): asked by HSA or hold for 200 m more at 3,000 m, the C172 pulls up to its least airspeed at full throttle, then creeps at 0.1 m/s. Until FA-3 brings the fleet climb case, the wings' HSA and hold cases descend 200 m (rotorcraft climb).
+  - **A climb trades airspeed** (FA-3's energy management): asked by HSA or hold for 200 m more at 3,000 m, the C172 pulls up to its least airspeed at full throttle, then creeps at 0.1 m/s. Until FA-3 brings the fleet climb case, the wings' HSA and hold cases descend 200 m (rotorcraft climb). **Fixed in FA-3d** (4.16): the C172 climbs at 0.8 m/s at 1.16 times its least airspeed and reaches its height, and the wings' HSA and hold cases climb 200 m (section 14).
   - hangar's turboprops idle at 5,000 to 11,000 lbf on the ground: parked, the C-130J rolls to 11 m/s in 5 s until braked. A model item for hangar; the fleet test judges the wheel brakes by the stop. **Fixed in hangar since** (its ground range, docs/hangar.md): governed at flight idle on their low stop, the propellers made 3,440 lbf each standing still (the 11,000 was engine[0] at the spawn, where JSBSim starts every engine at full throttle). Now, with weight on the wheels, the throttle's first fifth sets the blades from ground idle, where they make no thrust standing still, and the engines hold the propellers' speed. Parked at idle, the C-130J makes -1 lbf and the EC-130H -84 lbf from the first step, and neither moves. Their flight tests' reports are identical before and after.
 - Digests: `formation` and `loiter` change, by design; every other flight identical, with protection and without (the hold flights too: the c172x's own altitude gain is 0.25/s). The formation's c172x, joining from 2.9 km behind, ends 44 m from where it did; the loiter's ends 16.5 m off, on its 800 m circle now.
 - The c172x's checkpoints (docs/control-architecture.md, 12.4): the loiter's rows from step 600 recorded again, as its trim takes it out to its circle (up to 47 m by step 1800; its height and airspeed within 0.1 m and 0.04 m/s); the other five flights' rows are byte-identical.
@@ -1286,6 +1313,37 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - the micro cases are within −3.2 % to +0.9 %, and the command cases −1.5 % to 0.0 %;
   - a behaviour's NEW reads −16.4 %, because that baseline, built in another tree, runs it at 161.7 ns where the same source built in this tree ran 134.3 ns. It is +0.7 % against that.
   - The profile's code is not linked into the bench: it is asked for, never stepped.
+- ctest: all 247 tests pass.
+
+**FA-3d, energy management (HSA-10, CTG-04).**
+- **The fleet climb case** (`test_fleet`), FA-3's second acceptance criterion:
+  - Every wing is asked, by hold and by HSA, for 200 m more and a quarter turn at 3,000 m, and given 200 s. Until now the case descended.
+  - Each keeps its calibrated airspeed at 1.1 times its least or more. The lowest is the C172 at 1.16 times, then the EC-130H at 1.56.
+  - Each ends within 4.6 m of its height (the B-52H) and within 0.14° of its heading (the C172).
+- **The C172's climb** (the probe `energy_report.py`), asked by HSA for 200 m at 3,000 m and 50 m/s:
+  - At full power, its airspeed settles at 1.16 times its least while it climbs at 0.8 m/s. It reaches its height in 150 s and gathers its speed again.
+  - FA-1e found it pulling up to its least airspeed and creeping at 0.1 m/s, 100 m short.
+  - While the rule holds the climb back, the envelope report counts every update under `cas_min`, and the activity is flagged demand-limited and saturated (its throttle at its stop): A-GRA's ACTIVE_FULLY_CONSTRAINED.
+- **Changed flights, measured.** The fleet test was flown twice with the same cases: once by FA-3c's rules (no energy rule, the fly-by-wire designs without a least airspeed), once by FA-3d's. Each flight's end state was compared bit for bit: 611 of the 622 flights are identical. The 11 that change:
+  - **The C172's climb, by hold and by HSA.** Its least airspeed goes from 24.6 to 29.5 m/s (its least is 25.4), and it ends 88 m higher, at its height.
+  - **The A-10C's loop**, given up below its least airspeed as before. In its recovery the rule asks for a descent of 8.0 to 8.7 m/s where the recovery asked for 8, and its saturated recovery flies the same. Its end state differs in the 14th digit of its velocity.
+  - **The loops of seven fly-by-wire fighters** (F-22A, F/A-18C, Gripen, J-10A, J-20A, Rafale, Su-57). They float over the top 3 to 26 % below their new least airspeed.
+    - They are now given up there (failed, `behavior_failed`), where they completed.
+    - Their recoveries then slow further, by up to 10.6 m/s: the Gripen's lowest airspeed goes from 48.6 to 38.0 m/s.
+    - The give-up is FA-1d's rule (section 6), now that their least airspeed is known. Pulling through would lose less speed than levelling out from the top; that is an open finding for the aerobatics behaviour.
+  - **The Mirage 2000's loop** is refused for its entry speed (`performance_limit`). A loop needs twice its least airspeed, 117 m/s, and it flies at 110. Before, the loop was accepted and failed, falling to 12.6 m/s.
+  - The other loops complete as before: the F-15C, F-16C, F-35A, MiG-29A, Su-25, Su-27S and Typhoon. The EA-18G's is given up as before.
+- **Tests that change with the fighters' least airspeed:**
+  - `test_envelope`:
+    - The F-16C's route finds a fourth fault. Its last point, 25 km up, asks for 200 m/s, which is under its least there. Clamped, that point is flown at its least at the ceiling it is held to, 215 m/s.
+    - The UPDATE's speed is now one it flies at that ceiling, 300 m/s.
+  - `test_conformance`: the Mirage 2000 is asked for a loop at its reference condition and refused for its speed. The test then asks for an aileron roll at 2 g, as it asks for the gear up where the gear's placard refuses it down.
+- **The performance profile** (the FA-3c check, again): cell for cell with its tables on all 35, at the weight each is spawned at with full tanks; the worst difference is 4.9e-06.
+- **Digests:** identical to FA-3c's (and FA-2e's), with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-3c (8913081), built in the scratch worktree: 5 rounds of `micro` and 9 of `command`, twice each.
+  - The three velocity-level cases with protection limiting (`limit`, `design`, `pseudo`) are +1.0 to +2.0 %, 0.9 to 1.6 ns on their medians: the rule's arithmetic.
+  - Over both runs, the other micro cases are within −1.2 % to +2.8 % on their medians, and the command cases within −0.3 % to +2.2 %. No case's rise repeated: the attitude's +2.8 % (its minimum unchanged) read −0.9 % in the second run.
+  - World throughput (3 rounds): 100.0 to 100.8 % of FA-3c's. With protection on, the F-16C and B-52H fly at 99.6 % of their throughput with it off (the gate: 97 %).
 - ctest: all 247 tests pass.
 
 ## Appendix A: the inventory

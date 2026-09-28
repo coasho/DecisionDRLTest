@@ -2134,7 +2134,25 @@ class Profile(unittest.TestCase):
         self.assertAlmostEqual(p["plant"]["alpha_zero_lift_deg"], -1.5)
         self.assertEqual(p["plant"]["throttle_trim"], 0.33)  # what the platform designs the loops from
         self.assertAlmostEqual(p["performance"]["max_tas_ms"], 1.2 * 340.294)
-        self.assertNotIn("cas_min_ms", p["envelope"])  # a fighter's tests fly no stall
+        self.assertNotIn("cas_min_ms", p["envelope"])  # a fighter's tests fly no stall...
+
+    def test_a_fly_by_wire_fighters_least_speed_is_its_tables_stall(self):
+        # ...so its least speed is its performance tables' stall at their lowest altitude, at the weight it spawns at,
+        # linear between the weights flown (ADR-29 FA-3d: energy management keeps a margin over it)
+        from hangar.profile import sections, spawn_stall
+        tables = {"altitude_m": [0.0, 3000.0], "weight_kg": [10000.0, 14000.0], "speed_fraction": [0.0, 1.0],
+                  "spawn_weight_kg": 11000.0, "stall_cas_ms": [[50.0, 60.0], [51.0, 61.0]]}
+        self.assertAlmostEqual(spawn_stall(tables), 52.5)
+        self.assertAlmostEqual(spawn_stall(dict(tables, spawn_weight_kg=9000.0)), 50.0)  # (past the weights flown: the nearest)
+        self.assertAlmostEqual(spawn_stall(dict(tables, stall_cas_ms=[[None, 60.0], [51.0, 61.0]])), 60.0)  # a stall not flown is left out
+        self.assertIsNone(spawn_stall({}))
+        reference = {"tas_ms": 160.0, "eas_ms": 140.0, "altitude_m": 3000.0}
+        flown = {"fighter": {"max_mach_sl": 1.2, "service_ceiling_m": 18000.0, "climb_rate_ms": 250.0}}
+        p = sections(self.fighter(), {"options": {}}, reference, {}, flown, tables)
+        self.assertAlmostEqual(p["envelope"]["clean/cas_min_ms"], 52.5)
+        flown["stall"] = {"stall_kcas": 100.0}  # a stall flown is the one it has
+        p = sections(self.fighter(), {"options": {}}, reference, {}, flown, tables)
+        self.assertAlmostEqual(p["envelope"]["clean/cas_min_ms"], 100.0 * 0.514444, places=3)
 
     def test_a_surface_controlled_transport_without_an_identification(self):
         from hangar.profile import KT, sections

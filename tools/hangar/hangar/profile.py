@@ -48,6 +48,21 @@ def performance_tables(directory):
         return json.load(f).get("tables", {})
 
 
+def spawn_stall(tables):
+    """The performance tables' stall (calibrated, m/s) at their lowest altitude, at the weight the aircraft spawns at
+    (linear between the weights flown); None without one."""
+    if not tables or not tables.get("stall_cas_ms"):
+        return None
+    points = [(float(w), float(x)) for w, x in zip(tables["weight_kg"], tables["stall_cas_ms"][0]) if x is not None and math.isfinite(float(x))]
+    if not points:
+        return None
+    w = float(tables.get("spawn_weight_kg", points[-1][0]))
+    for (w0, x0), (w1, x1) in zip(points, points[1:]):
+        if w0 <= w <= w1:
+            return x0 + (x1 - x0) * (w - w0) / (w1 - w0)
+    return points[0][1] if w < points[0][0] else points[-1][1]
+
+
 def table_fields(tables):
     """The tables section's fields (docs/flight-autonomy.md, SUB-02): the axes - altitude_m/h<i>, weight_kg/w<j>,
     speed_fraction/v<k> - and each table's cells, <name>/h<i>/w<j> or <name>/h<i>/w<j>/v<k>; a cell not flown is
@@ -132,6 +147,11 @@ def sections(aircraft, fbw, reference, identified, flown, tables=None):
         clean["cas_min_ms"] = float(stall["stall_kcas"]) * KT
         if "alpha_max_deg" not in clean and "alpha_at_stall" in stall:
             clean["alpha_max_deg"] = float(stall["alpha_at_stall"])
+    elif spawn_stall(tables) is not None:
+        # no stall flown (a fly-by-wire law will not let one be): the performance tables' - idle, the height held, to
+        # the law's angle of attack - at the lowest altitude, as the aircraft spawns (ADR-29 FA-3d: the least it is
+        # flown at, which energy management keeps a margin over)
+        clean["cas_min_ms"] = spawn_stall(tables)
     if clean:
         out["envelope"] = dict({"clean/" + k: v for k, v in clean.items()}, **law)
 

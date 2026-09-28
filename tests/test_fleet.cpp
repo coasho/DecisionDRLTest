@@ -645,10 +645,10 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
     }
 
     // --- guidance ------------------------------------------------------------------------------------
-    // a new heading, a quarter turn right, and a new altitude: a wing 200 m lower (the climb case waits for
-    // FA-3's energy management: asked for 200 m at 3,000 m, a C172 trades its speed down to its least and
-    // creeps), a rotorcraft a tenth of its scale higher (2 to 20 m)
-    auto climb = [](const Plane& p) { return p.rotor ? std::clamp(0.1 * p.scale(), 2.0, 20.0) : -200.0; };
+    // a new heading, a quarter turn right, and a new altitude: a wing 200 m higher - the fleet climb case (ADR-29
+    // FA-3d): energy management keeps its calibrated airspeed at 1.1 times its least or more, where a C172 once
+    // traded its speed down to its least and crept - a rotorcraft a tenth of its scale higher (2 to 20 m)
+    auto climb = [](const Plane& p) { return p.rotor ? std::clamp(0.1 * p.scale(), 2.0, 20.0) : 200.0; };
     for (const char* mode : {"fsim.guidance.hold", "fsim.guidance.hsa"}) {
         const bool hold = std::string(mode) == "fsim.guidance.hold";
         run(mode, 0.0,
@@ -663,12 +663,14 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
                 h.headingRad = heading, h.altitudeM = p.start.altitudeMslM + climb(p);
                 return w.submit(p.id, h).accepted();
             },
-            secs(120.0, 60.0), none,
-            [&](const Plane& p, const Lows&) {
+            secs(200.0, 60.0), none,
+            [&](const Plane& p, const Lows& lows) {
                 const auto& s = *w.vehicleState(p.id);
-                // (the worst: 0.05 deg; a wing still closing on its altitude, 8.4 m off - the B-52H - a rotorcraft on it)
+                // (the worst: 0.14 deg - the C172; a wing still closing on its altitude, 4.6 m off - the B-52H - a rotorcraft
+                // on it; the least airspeed 1.16 times the least - the C172, holding the margin as it climbs - the next 1.56)
                 CHECK(headingOffDeg(s, p.start.eulerRad[2] + 0.5 * kPi) < 1.0);
                 CHECK(std::abs(s.altitudeMslM - (p.start.altitudeMslM + climb(p))) < (p.rotor ? 0.5 : 20.0));
+                if (!p.rotor && std::isfinite(p.minCasMs)) CHECK(lows.cas >= 1.1 * p.minCasMs); // (no speed traded below the margin)
             });
     }
     // three sides of a square, turning right: a wing's legs four of its full-bank turns long (at least 2 km), a rotorcraft's its scale
@@ -769,7 +771,9 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(std::abs(s.altitudeMslM - p.start.altitudeMslM) < 0.1);
         });
     // aerobatics: an aileron roll completes; a loop completes, or ends honestly - refused for its entry
-    // speed, or given up when the aircraft leaves its envelope (below its least airspeed it may then go)
+    // speed, or given up when the aircraft leaves its envelope (below its least airspeed it may then go).
+    // From cruise 7 of the 17 complete; 9 give up, 7 of them fighters floating over the top below their
+    // least airspeed; the Mirage 2000 is refused (ADR-29 FA-3d)
     for (const double manoeuvre : {0.0, 1.0}) {
         const bool roll = manoeuvre == 0.0;
         run("fsim.guidance.aerobatics", 0.0,

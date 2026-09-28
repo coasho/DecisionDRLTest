@@ -16,6 +16,12 @@ constexpr double kBand = 0.2;
 /// ...and inside the band moves the elevator this many times what changes the
 /// load factor by as much as the state is inside it, here.
 constexpr double kStiffness = 2.0;
+/// Energy management (docs/flight-autonomy.md, 4.16): a wing climbs no faster
+/// than kEnergyGain m/s per m/s of calibrated airspeed above kEnergyMargin
+/// times the least, holds its height between that and the least, and
+/// descends below the least - the speed is not traded below it for height.
+constexpr double kEnergyGain = 0.5;   ///< 1/s
+constexpr double kEnergyMargin = 1.1;
 
 bool known(double v) noexcept { return !std::isnan(v); }
 double orClean(double flaps, double clean) noexcept { return known(flaps) ? flaps : clean; }
@@ -166,6 +172,13 @@ LimitMask limitSetpoint(Command& c, const EnvelopeLimits& e, const Protection& p
         const double tas = std::max(s.airspeedTrueMs, 10.0);
         if (known(e.bankMaxRad) && !isHold(v->turnRateRadS))
             k.within(v->turnRateRadS, kG * std::tan(std::min(e.bankMaxRad, 1.45)) / tas, Limit::Bank);
+        // energy: the climb the airspeed's margin over the least affords (HSA-10; none above the margin, a descent below
+        // the least), as the cas_min limit's
+        if (known(e.casMinMs) && !isHold(v->verticalSpeedMs)) {
+            const double cas = s.airspeedCalibratedMs;
+            k.atMost(v->verticalSpeedMs, kEnergyGain * (std::max(cas - kEnergyMargin * e.casMinMs, 0.0) + std::min(cas - e.casMinMs, 0.0)),
+                     Limit::CasMin);
+        }
         // the vertical speed of the flight paths the pitch limits allow at this angle of attack
         if ((known(e.pitchMaxRad) || known(e.pitchMinRad)) && !isHold(v->verticalSpeedMs)) {
             const double onPath = s.alphaRad * here.bankCos;

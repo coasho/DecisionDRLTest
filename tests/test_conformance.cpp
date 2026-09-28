@@ -423,6 +423,11 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
         } else {
             REQUIRE(make.cascade(d, false, c));
             r = submitMade(w, v, c, make);
+            if (r.reason == Reason::PerformanceLimit && d.behavior == "aerobatics") { // too slow for a loop there (the Mirage 2000): a gentle roll, then
+                auto& b = std::get<BehaviorCommand>(c);
+                b.params["manoeuvre"] = 0.0, b.params["load_factor_g"] = 2.0;
+                r = submitMade(w, v, c, make);
+            }
         }
         REQUIRE(r.accepted());
         CHECK(r.activity == activityId(v, ++serial));

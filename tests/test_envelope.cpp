@@ -162,14 +162,15 @@ TEST_CASE("envelope: every finding is named, the answer's reason the first, and 
     CHECK(d.adjustments[0].adjusted < 25000.0);
     CHECK((d.adjustments[1].index == 2 && d.adjustments[1].constraint == Constraint::MaxAirspeed && d.adjustments[1].requested == 600.0));
     CHECK(d.adjustments[1].adjusted < 450.0);
-    // an UPDATE's details are its own
+    // an UPDATE's details are its own (a speed it flies at the ceiling it still climbs to: 215 to 446 m/s there)
     HsaCommand slower;
-    slower.speed = 200.0, slower.speedReference = code(SpeedReference::TrueAirspeed);
+    slower.speed = 300.0, slower.speedReference = code(SpeedReference::TrueAirspeed);
     REQUIRE(w.update(r.activity, Command(slower)).accepted());
     CHECK((w.commandDetails(f16)->findingCount == 0 && w.commandDetails(f16)->adjustmentCount == 0));
 
     // a route: every point beyond the aircraft, each named with its field (A-GRA's invalid segments): the
-    // first point too fast, the last too high - and so too steep a climb to it, even held to the ceiling
+    // first point too fast, the last too high - too slow up there, under its least - and so too steep a
+    // climb to it, even held to the ceiling
     const auto& s = *w.vehicleState(f16);
     std::vector<Waypoint> route = {at(s, 0.0, 6000.0, 3000.0), at(s, 0.0, 12000.0, 3000.0), at(s, 0.0, 18000.0, 3000.0)};
     for (Waypoint& p : route) p.speed = 200.0, p.speedReference = code(SpeedReference::TrueAirspeed);
@@ -179,18 +180,21 @@ TEST_CASE("envelope: every finding is named, the answer's reason the first, and 
     CHECK(r.reason == Reason::PerformanceLimit);
     CHECK(r.index == 0);
     d = *w.commandDetails(f16);
-    REQUIRE(d.findingCount == 3);
+    REQUIRE(d.findingCount == 4);
     CHECK(same(d.findings[0], Reason::PerformanceLimit, 0, Constraint::MaxAirspeed));
     CHECK(same(d.findings[1], Reason::PerformanceLimit, 2, Constraint::MaxAltitude));
-    CHECK(same(d.findings[2], Reason::PerformanceLimit, 2, Constraint::MaxClimbRate));
+    CHECK(same(d.findings[2], Reason::PerformanceLimit, 2, Constraint::MinAirspeed));
+    CHECK(same(d.findings[3], Reason::PerformanceLimit, 2, Constraint::MaxClimbRate));
     r = w.submit(f16, RouteCommand{}, route);
     REQUIRE(r.accepted());
     d = *w.commandDetails(f16);
-    REQUIRE(d.adjustmentCount == 3);
+    REQUIRE(d.adjustmentCount == 4);
     CHECK((d.adjustments[0].index == 0 && d.adjustments[0].field == 4 && d.adjustments[0].constraint == Constraint::MaxAirspeed));
     CHECK((d.adjustments[1].index == 2 && d.adjustments[1].field == 2 && d.adjustments[1].constraint == Constraint::MaxAltitude));
-    CHECK((d.adjustments[2].index == 2 && d.adjustments[2].field == 8 && d.adjustments[2].constraint == Constraint::MaxClimbRate));
-    CHECK(d.adjustments[2].adjusted < d.adjustments[2].requested); // flown at the rate it climbs
+    CHECK((d.adjustments[2].index == 2 && d.adjustments[2].field == 4 && d.adjustments[2].constraint == Constraint::MinAirspeed));
+    CHECK(d.adjustments[2].adjusted > d.adjustments[2].requested); // flown at its least at the ceiling
+    CHECK((d.adjustments[3].index == 2 && d.adjustments[3].field == 8 && d.adjustments[3].constraint == Constraint::MaxClimbRate));
+    CHECK(d.adjustments[3].adjusted < d.adjustments[3].requested); // flown at the rate it climbs
 
     // a curve: every section too tight for the aircraft, whatever the policy, each with its section
     BezierSegment corner{{0.0, 150.0, 200.0, 200.0, 200.0, 200.0}, {0.0, 0.0, 0.0, 50.0, 150.0, 200.0}, {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}};

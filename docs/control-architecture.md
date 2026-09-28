@@ -736,7 +736,7 @@ The limits are those in `EnvelopeLimits` (section 6.2), taken from the profile's
 | Level | Demand limiting |
 | --- | --- |
 | Behaviour, position | the airspeed setpoint to [cas_min, cas_max], converted at the current condition |
-| Velocity | <ul><li>Turn rate: to the bank limit, \|ω\| ≤ g·tan(bank_max)/v</li><li>Vertical speed: to the flight path the pitch limits allow</li><li>Airspeed: as above</li></ul> |
+| Velocity | <ul><li>Turn rate: to the bank limit, \|ω\| ≤ g·tan(bank_max)/v</li><li>Vertical speed: to the flight path the pitch limits allow, and to the climb the airspeed's margin over cas_min affords (energy management, [ADR-29](flight-autonomy.md) 4.16): 0.5 m/s per m/s above 1.1·cas_min, none between, a descent below cas_min. Reported under cas_min</li><li>Airspeed: as above</li></ul> |
 | Attitude | roll to ±bank_max (the bank a heading is flown with, in heading mode); pitch to [pitch_min, pitch_max], and to the pitch attitude that puts the wing at α_max on the present flight path, θ + (α_max − α)·cos φ; airspeed as above |
 | Acceleration | <ul><li>Load factor: to [n_min, min(n_max, n_α)], where n_α = n·(α_max − α₀)/(α − α₀) is the load factor the wing gives at α_max here</li><li>Roll rate: to ±roll_rate_max</li></ul> |
 | Actuator (after the loops) | on the elevator of a directly controlled aircraft, a nose-down correction as α or n nears its limit. It only ever moves the demand away from the limit, and it is skipped for limits in `lawEnforces` |
