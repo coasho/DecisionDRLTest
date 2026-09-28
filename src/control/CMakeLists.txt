@@ -34,7 +34,8 @@ add_library(fsim_control STATIC
     Names.cpp
     Endurance.cpp
     Terrain.cpp
-    Altimeter.cpp)
+    Altimeter.cpp
+    Frames.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

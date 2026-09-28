@@ -44,13 +44,6 @@ void onLegAt(const route::Leg& leg, double alongM, double& lat, double& lon) noe
     lon = std::atan2(p[1], p[0]);
 }
 
-/// The point `distanceM` from (lat, lon) along the great circle leaving it on `courseRad`.
-void ahead(double lat, double lon, double courseRad, double distanceM, double& latOut, double& lonOut) noexcept {
-    const double d = distanceM / kR;
-    latOut = std::asin(std::clamp(std::sin(lat) * std::cos(d) + std::cos(lat) * std::sin(d) * std::cos(courseRad), -1.0, 1.0));
-    lonOut = geo::wrapPi(lon + std::atan2(std::sin(courseRad) * std::sin(d) * std::cos(lat), std::cos(d) - std::sin(lat) * std::sin(latOut)));
-}
-
 /// A route leg's altitude in its reference, `x` metres from its start, as the route flies it: straight to its
 /// point, or at its climb rate and then level; on past its end, on to the point's altitude at the rate.
 struct Profile {
@@ -277,7 +270,7 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         if (!(speed > 0.0)) speed = 0.0;
         spacing(speed * kAheadS);
         walk.piece(speed * kAheadS, speed, above, -1, [&](double x, double& lat, double& lon, double& h) {
-            ahead(state.latitudeRad, state.longitudeRad, course, x, lat, lon);
+            geo::destination(state.latitudeRad, state.longitudeRad, course, x, lat, lon);
             h = altitude;
         });
         return walk.hit;

@@ -211,6 +211,10 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     e->host.setSessionView(&answers_); // (its endurance and terrain checks: docs/flight-autonomy.md, 4.18, 4.19)
     e->host.setAltimeter(control::Altimeter{air(), control::Altimeter::kStandardPa}); // (until its QNH is set: 4.20)
     e->flapsPosition = pool_->vehicle(slot).property("fcs/flap-pos-norm");
+    for (int k = 0; k < 3; ++k) // (its state data's: docs/flight-autonomy.md, 4.21)
+        e->angularAcceleration[static_cast<std::size_t>(k)] = pool_->vehicle(slot).property(k == 0 ? "accelerations/pdot-rad_sec2"
+                                                                                                : k == 1 ? "accelerations/qdot-rad_sec2"
+                                                                                                         : "accelerations/rdot-rad_sec2");
     for (auto& factory : worldEffects_) e->effects.push_back(factory());
     sim::FlightModel& model = pool_->vehicle(slot);
     model.seed(e->rng.next());

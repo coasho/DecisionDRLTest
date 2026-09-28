@@ -1491,8 +1491,9 @@ static PyObject* world_qnh(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     return PyFloat_FromDouble(qnh);
 }
 
-/* state_data(id) -> (indicated_altitude_m, indicated_altitude_rate_ms, kollsman_hpa, static_pressure_pa, static_temperature_k)
- * (ABI 1.18) */
+/* state_data(id) -> (indicated_altitude_m, indicated_altitude_rate_ms, kollsman_hpa, static_pressure_pa, static_temperature_k,
+ * yaw_rate_rad_s, pitch_rate_rad_s, roll_rate_rad_s, yaw_acceleration_rad_s2, pitch_acceleration_rad_s2,
+ * roll_acceleration_rad_s2, wander_angle_rad, wind_north_ms, wind_east_ms, wind_down_ms) (ABI 1.18, 1.19) */
 static PyObject* world_state_data(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
     uint32_t id;
@@ -1500,7 +1501,57 @@ static PyObject* world_state_data(PyObject* o, PyObject* const* args, Py_ssize_t
     if (!check_args(n, 1, 1, "state_data") || !as_u32(args[0], &id)) return NULL;
     fsim_state_data_init(&d);
     if (fsim_vehicle_state_data(self->world, id, &d) != FSIM_OK) return fail();
-    return Py_BuildValue("(ddddd)", d.indicated_altitude_m, d.indicated_altitude_rate_ms, d.kollsman_hpa, d.static_pressure_pa, d.static_temperature_k);
+    return Py_BuildValue("(ddddddddddddddd)", d.indicated_altitude_m, d.indicated_altitude_rate_ms, d.kollsman_hpa, d.static_pressure_pa,
+                         d.static_temperature_k, d.yaw_rate_rad_s, d.pitch_rate_rad_s, d.roll_rate_rad_s, d.yaw_acceleration_rad_s2,
+                         d.pitch_acceleration_rad_s2, d.roll_acceleration_rad_s2, d.wander_angle_rad, d.wind_north_ms, d.wind_east_ms,
+                         d.wind_down_ms);
+}
+
+/* create_frame(origin, vehicle, latitude_rad, longitude_rad, altitude_msl_m, yaw_rad, pitch_rad, roll_rad, north_ms, east_ms,
+ * down_ms, time_s) -> its id (ABI 1.19); an error where refused */
+static PyObject* world_create_frame(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    fsim_frame_spec spec;
+    uint32_t vehicle;
+    if (!check_args(n, 12, 12, "create_frame") || !as_u32(args[1], &vehicle)) return NULL;
+    fsim_frame_spec_init(&spec);
+    spec.origin = (int32_t)PyLong_AsLong(args[0]);
+    spec.vehicle = vehicle;
+    double* fields[] = {&spec.latitude_rad, &spec.longitude_rad, &spec.altitude_msl_m, &spec.yaw_rad, &spec.pitch_rad, &spec.roll_rad,
+                        &spec.north_ms, &spec.east_ms, &spec.down_ms, &spec.time_s};
+    for (int k = 0; k < 10 && !PyErr_Occurred(); ++k) *fields[k] = PyFloat_AsDouble(args[k + 2]);
+    if (PyErr_Occurred()) return NULL;
+    uint64_t id = 0;
+    if (fsim_world_create_frame(self->world, &spec, &id) != FSIM_OK) return fail();
+    return PyLong_FromUnsignedLongLong(id);
+}
+
+/* remove_frame(id) -> bool (ABI 1.19) */
+static PyObject* world_remove_frame(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t id;
+    if (!check_args(n, 1, 1, "remove_frame") || !as_u64(args[0], &id)) return NULL;
+    return PyBool_FromLong(fsim_world_remove_frame(self->world, id) == FSIM_OK);
+}
+
+/* frame_point(id, rotation, offsets, x, y, z, time_s) -> (latitude_rad, longitude_rad, altitude_msl_m), or None for an
+ * unknown frame or one whose vehicle is gone (ABI 1.19) */
+static PyObject* world_frame_point(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t id;
+    fsim_frame_offset offset;
+    if (!check_args(n, 7, 7, "frame_point") || !as_u64(args[0], &id)) return NULL;
+    fsim_frame_offset_init(&offset);
+    offset.rotation = (int32_t)PyLong_AsLong(args[1]);
+    offset.offsets = (int32_t)PyLong_AsLong(args[2]);
+    offset.x = PyFloat_AsDouble(args[3]);
+    offset.y = PyFloat_AsDouble(args[4]);
+    offset.z = PyFloat_AsDouble(args[5]);
+    const double time = PyFloat_AsDouble(args[6]);
+    if (PyErr_Occurred()) return NULL;
+    double lat = 0.0, lon = 0.0, alt = 0.0;
+    if (fsim_world_frame_point(self->world, id, &offset, time, &lat, &lon, &alt) != FSIM_OK) Py_RETURN_NONE;
+    return Py_BuildValue("(ddd)", lat, lon, alt);
 }
 
 /* activity_setpoint(activity) -> (kind, code, fields, behavior, waypoints, segments), or None for one not live:
@@ -2526,7 +2577,10 @@ static PyMethodDef world_methods[] = {
     FAST("navigation", world_navigation, "navigation(id) -> (recovery, latitude_deg, longitude_deg, altitude_msl_m, reserve_fraction)"),
     FAST("set_qnh", world_set_qnh, "set_qnh(id, qnh_pa): what its barometric altimeter is set to"),
     FAST("qnh", world_qnh, "qnh(id) -> its altimeter's setting, Pa"),
-    FAST("state_data", world_state_data, "state_data(id) -> (indicated_altitude_m, indicated_altitude_rate_ms, kollsman_hpa, static_pressure_pa, static_temperature_k)"),
+    FAST("state_data", world_state_data, "state_data(id) -> its altimeter's reading, the air, its orientation's rates, the wind: 15 items"),
+    FAST("create_frame", world_create_frame, "create_frame(origin, vehicle, latitude_rad, longitude_rad, altitude_msl_m, yaw_rad, pitch_rad, roll_rad, north_ms, east_ms, down_ms, time_s) -> id"),
+    FAST("remove_frame", world_remove_frame, "remove_frame(id) -> bool"),
+    FAST("frame_point", world_frame_point, "frame_point(id, rotation, offsets, x, y, z, time_s) -> (latitude_rad, longitude_rad, altitude_msl_m) or None"),
     FAST("performance_profile", world_performance_profile, "performance_profile(id, mode) -> (reason, profile or None)"),
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
     FAST("capabilities", world_capabilities, "capabilities(id) -> [capability]"),

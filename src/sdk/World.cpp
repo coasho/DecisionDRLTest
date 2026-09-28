@@ -453,6 +453,18 @@ double World::stepSeconds() const noexcept { return impl_->dt() * impl_->frameSk
 comm::Network& World::network() { return impl_->network(); }
 
 std::optional<double> World::terrainHeightM(double latitudeRad, double longitudeRad) const { return impl_->terrainHeightM(latitudeRad, longitudeRad); }
+
+control::FrameId World::createFrame(const control::FrameSpec& spec) { return impl_->createFrame(spec); }
+
+bool World::removeFrame(control::FrameId id) { return impl_->removeFrame(id); }
+
+std::optional<control::FrameSpec> World::frame(control::FrameId id) const { return impl_->frame(id); }
+
+std::optional<control::FramePose> World::framePose(control::FrameId id, double timeS) const { return impl_->framePose(id, timeS); }
+
+std::optional<control::GeoPoint> World::framePoint(control::FrameId id, const control::FrameOffset& offset, double timeS) const {
+    return impl_->framePoint(id, offset, timeS);
+}
 void World::addEffectToAll(std::function<std::unique_ptr<effects::Effect>()> factory) { impl_->addEffectToAll(std::move(factory)); }
 const std::string& World::name() const noexcept { return impl_->name(); }
 bool World::published() const noexcept { return impl_->published(); }

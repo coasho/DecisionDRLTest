@@ -1489,6 +1489,46 @@ int main(int argc, char** argv) {
                 CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_HSA, hsa, 6, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
                 CHECK(fsim_vehicle_state_data(world, 99999, &sd) == FSIM_INVALID_ARGUMENT);
             }
+            {
+                /* ABI 1.19: the state data's orientation rates, wander angle and wind; reference frames
+                 * (docs/flight-autonomy.md, 4.21) */
+                fsim_state_data sd;
+                fsim_frame_spec fs;
+                fsim_frame_offset fo;
+                uint64_t frame = 0;
+                double lat = 0.0, lon = 0.0, alt = 0.0;
+                fsim_state_data_init(&sd);
+                CHECK(isnan(sd.yaw_rate_rad_s) && isnan(sd.wind_down_ms));
+                CHECK(fsim_vehicle_state_data(world, ranger, &sd) == FSIM_OK);
+                CHECK(sd.wander_angle_rad == 0.0 && isfinite(sd.yaw_rate_rad_s) && isfinite(sd.roll_acceleration_rad_s2));
+                CHECK(sqrt(sd.wind_north_ms * sd.wind_north_ms + sd.wind_east_ms * sd.wind_east_ms + sd.wind_down_ms * sd.wind_down_ms) < 1e-6); /* (calm) */
+                /* a caller built before 1.19 is given what its header has */
+                fsim_state_data_init(&sd);
+                sd.struct_size = (uint32_t)offsetof(fsim_state_data, yaw_rate_rad_s);
+                sd.yaw_rate_rad_s = 77.0;
+                CHECK(fsim_vehicle_state_data(world, ranger, &sd) == FSIM_OK && sd.yaw_rate_rad_s == 77.0 && isfinite(sd.kollsman_hpa));
+                /* a fixed frame: 1 km north round the sphere */
+                fsim_frame_spec_init(&fs);
+                CHECK(fs.struct_size == sizeof fs && fs.origin == FSIM_FRAME_FIXED);
+                fs.latitude_rad = 0.6, fs.longitude_rad = -2.1, fs.altitude_msl_m = 100.0;
+                CHECK(fsim_world_create_frame(world, &fs, &frame) == FSIM_OK && frame != 0);
+                fsim_frame_offset_init(&fo);
+                fo.offsets = FSIM_FRAME_GREAT_CIRCLE, fo.x = 1000.0;
+                CHECK(fsim_world_frame_point(world, frame, &fo, NAN, &lat, &lon, &alt) == FSIM_OK);
+                CHECK(fabs(lat - (0.6 + 1000.0 / 6371008.8)) < 1e-12 && fabs(lon + 2.1) < 1e-12 && alt == 100.0);
+                CHECK(fsim_world_remove_frame(world, frame) == FSIM_OK && fsim_world_remove_frame(world, frame) == FSIM_INVALID_ARGUMENT);
+                /* a vehicle's: where it is */
+                fs.origin = FSIM_FRAME_VEHICLE, fs.vehicle = ranger;
+                CHECK(fsim_world_create_frame(world, &fs, &frame) == FSIM_OK);
+                fsim_frame_offset_init(&fo);
+                CHECK(fsim_world_frame_point(world, frame, &fo, NAN, &lat, &lon, &alt) == FSIM_OK);
+                st = fsim_vehicle_state_ptr(world, ranger);
+                CHECK(fabs(lat - st->latitude_rad) < 1e-12 && fabs(lon - st->longitude_rad) < 1e-12 && fabs(alt - st->altitude_msl_m) < 1e-6);
+                fo.rotation = 9; /* not one */
+                CHECK(fsim_world_frame_point(world, frame, &fo, NAN, &lat, &lon, &alt) == FSIM_INVALID_ARGUMENT);
+                fs.vehicle = 99999;
+                CHECK(fsim_world_create_frame(world, &fs, &frame) == FSIM_INVALID_ARGUMENT);
+            }
         }
         }
         fsim_world_destroy(world);

@@ -14,6 +14,7 @@
 #include "fsim/Effects.h"
 #include "fsim/EnvironmentState.h"
 #include "fsim/Export.h"
+#include "fsim/Frames.h"
 #include "fsim/GroundProvider.h"
 #include "fsim/InitialConditions.h"
 #include "fsim/PerformanceProfile.h"
@@ -23,6 +24,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -395,6 +397,17 @@ public:
     /// (docs/flight-autonomy.md, 4.19; VI 1.2.6.9, A-GRA's elevation request).
     /// Empty where it has no data (a terrain tile it cannot load).
     std::optional<double> terrainHeightM(double latitudeRad, double longitudeRad) const;
+    /// Reference frames (docs/flight-autonomy.md, 4.21; A-GRA's ReferenceFrame): a frame by id -
+    /// fixed, moving at a constant velocity from a time, or following a vehicle; 0 refused (a
+    /// value not finite, a latitude off the Earth, an unknown vehicle).
+    control::FrameId createFrame(const control::FrameSpec& spec);
+    bool removeFrame(control::FrameId id);
+    std::optional<control::FrameSpec> frame(control::FrameId id) const;
+    /// A frame as it is at a time (NaN: now) - a vehicle's carried on at its velocity to another
+    /// time - and where a point in it is then. Empty for an unknown frame, or one whose vehicle is gone.
+    std::optional<control::FramePose> framePose(control::FrameId id, double timeS = std::numeric_limits<double>::quiet_NaN()) const;
+    std::optional<control::GeoPoint> framePoint(control::FrameId id, const control::FrameOffset& offset,
+                                                double timeS = std::numeric_limits<double>::quiet_NaN()) const;
 
     /// Give every vehicle (present and future) its own effect instance.
     void addEffectToAll(std::function<std::unique_ptr<effects::Effect>()> factory);

@@ -375,6 +375,23 @@ def air_data(state, data):
             "Mach": state.mach, "Alpha": state.alpha_rad, "Beta": state.beta_rad}
 
 
+def orientation_rate(data):
+    """An fsim.StateData's Euler angles' rates as A-GRA's OrientationRateType (docs/flight-autonomy.md, 4.21): YawRate,
+    PitchRate, RollRate (rad/s)."""
+    return {"YawRate": data.yaw_rate_rad_s, "PitchRate": data.pitch_rate_rad_s, "RollRate": data.roll_rate_rad_s}
+
+
+def orientation_acceleration(data):
+    """And their accelerations as A-GRA's OrientationAccelerationType: YawAccel, PitchAccel, RollAccel (rad/s2)."""
+    return {"YawAccel": data.yaw_acceleration_rad_s2, "PitchAccel": data.pitch_acceleration_rad_s2, "RollAccel": data.roll_acceleration_rad_s2}
+
+
+def wind_data(data):
+    """The wind a vehicle measures (fsim.StateData) as A-GRA's WindDataType (VI 1.2.6.8; its source, the vehicle, is
+    Other): its WindChoice's WindVelocity - NorthSpeed, EastSpeed, DownSpeed (m/s)."""
+    return {"WindChoice": {"WindVelocity": {"NorthSpeed": data.wind_north_ms, "EastSpeed": data.wind_east_ms, "DownSpeed": data.wind_down_ms}}}
+
+
 def apply_qnh_setting(vehicle, qnh_kpa):
     """A-GRA's MA_SystemManagementRequest of VehicleSettings with a QNH_Setting (kPa; VI 1.2.6.5), applied to a vehicle
     (fsim.Vehicle.set_qnh): its status's RequestProcessingState - "COMPLETED", or "FAILED" with its

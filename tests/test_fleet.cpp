@@ -704,7 +704,12 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
     run("fsim.guidance.hsa", 0.0,
         [&](const Plane& p) {
             const double h = w.vehicleState(p.id)->altitudeMslM;
-            CHECK(std::abs(w.stateData(p.id).indicatedAltitudeM - 6356766.0 * h / (6356766.0 + h)) < 0.05);
+            const StateData d = w.stateData(p.id);
+            CHECK(std::abs(d.indicatedAltitudeM - 6356766.0 * h / (6356766.0 + h)) < 0.05);
+            // (the rest of its state data, ADR-29 FA-4c: the calm air it measures - the worst the Crazyflie's, 7.4e-5 m/s,
+            // its air data at a few metres a second; every other within 1e-6 - and its orientation's rates)
+            CHECK(std::sqrt(d.windNorthMs * d.windNorthMs + d.windEastMs * d.windEastMs + d.windDownMs * d.windDownMs) < 1e-3);
+            CHECK((d.wanderAngleRad == 0.0 && std::isfinite(d.yawRateRadS) && std::isfinite(d.rollAccelerationRadS2)));
             REQUIRE(w.setQnh(p.id, 99325.0) == Reason::None);
             HsaCommand hsa;
             hsa.headingRad = p.start.eulerRad[2], hsa.altitudeReference = static_cast<double>(AltitudeReference::Barometric);

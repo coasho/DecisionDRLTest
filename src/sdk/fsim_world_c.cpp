@@ -1728,6 +1728,9 @@ FSIM_API void fsim_state_data_init(fsim_state_data* d) {
     d->struct_size = sizeof *d;
     d->indicated_altitude_m = d->indicated_altitude_rate_ms = d->kollsman_hpa = d->static_pressure_pa = d->static_temperature_k =
         std::numeric_limits<double>::quiet_NaN();
+    d->yaw_rate_rad_s = d->pitch_rate_rad_s = d->roll_rate_rad_s = std::numeric_limits<double>::quiet_NaN();
+    d->yaw_acceleration_rad_s2 = d->pitch_acceleration_rad_s2 = d->roll_acceleration_rad_s2 = std::numeric_limits<double>::quiet_NaN();
+    d->wander_angle_rad = d->wind_north_ms = d->wind_east_ms = d->wind_down_ms = std::numeric_limits<double>::quiet_NaN();
 }
 
 FSIM_API int fsim_vehicle_state_data(const fsim_world* world, uint32_t id, fsim_state_data* out) {
@@ -1737,7 +1740,61 @@ FSIM_API int fsim_vehicle_state_data(const fsim_world* world, uint32_t id, fsim_
     fsim_state_data_init(&d);
     d.indicated_altitude_m = s.indicatedAltitudeM, d.indicated_altitude_rate_ms = s.indicatedAltitudeRateMs, d.kollsman_hpa = s.kollsmanHpa;
     d.static_pressure_pa = s.staticPressurePa, d.static_temperature_k = s.staticTemperatureK;
+    d.yaw_rate_rad_s = s.yawRateRadS, d.pitch_rate_rad_s = s.pitchRateRadS, d.roll_rate_rad_s = s.rollRateRadS;
+    d.yaw_acceleration_rad_s2 = s.yawAccelerationRadS2, d.pitch_acceleration_rad_s2 = s.pitchAccelerationRadS2, d.roll_acceleration_rad_s2 = s.rollAccelerationRadS2;
+    d.wander_angle_rad = s.wanderAngleRad, d.wind_north_ms = s.windNorthMs, d.wind_east_ms = s.windEastMs, d.wind_down_ms = s.windDownMs;
     return copyOut(d, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API void fsim_frame_spec_init(fsim_frame_spec* spec) {
+    if (!spec) return;
+    std::memset(spec, 0, sizeof *spec);
+    spec->struct_size = sizeof *spec;
+}
+
+FSIM_API int fsim_world_create_frame(fsim_world* world, const fsim_frame_spec* spec, uint64_t* id) {
+    if (!world || !spec || !id || !FSIM_HAS(spec, fsim_frame_spec, time_s)) return fail(FSIM_INVALID_ARGUMENT, "fsim_world_create_frame: bad arguments");
+    if (spec->origin < 0 || spec->origin >= static_cast<int32_t>(fsim::control::FrameOrigin::Count))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_world_create_frame: an origin not one");
+    fsim::control::FrameSpec s;
+    s.origin = static_cast<fsim::control::FrameOrigin>(spec->origin);
+    s.latitudeRad = spec->latitude_rad, s.longitudeRad = spec->longitude_rad, s.altitudeMslM = spec->altitude_msl_m;
+    s.yawRad = spec->yaw_rad, s.pitchRad = spec->pitch_rad, s.rollRad = spec->roll_rad;
+    s.northMs = spec->north_ms, s.eastMs = spec->east_ms, s.downMs = spec->down_ms, s.timeS = spec->time_s;
+    s.vehicle = spec->vehicle;
+    const fsim::control::FrameId made = world->world.createFrame(s);
+    if (!made) return fail(FSIM_INVALID_ARGUMENT, "fsim_world_create_frame: a value not finite, a latitude off the Earth, or an unknown vehicle");
+    *id = made;
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_world_remove_frame(fsim_world* world, uint64_t id) {
+    if (!world) return FSIM_INVALID_ARGUMENT;
+    if (!world->world.removeFrame(id)) return absent(FSIM_INVALID_ARGUMENT, "fsim_world_remove_frame: no such frame");
+    return FSIM_OK;
+}
+
+FSIM_API void fsim_frame_offset_init(fsim_frame_offset* offset) {
+    if (!offset) return;
+    std::memset(offset, 0, sizeof *offset);
+    offset->struct_size = sizeof *offset;
+}
+
+FSIM_API int fsim_world_frame_point(const fsim_world* world, uint64_t id, const fsim_frame_offset* offset, double time_s, double* latitude_rad,
+                                    double* longitude_rad, double* altitude_msl_m) {
+    if (!world || !offset || !latitude_rad || !longitude_rad || !altitude_msl_m || !FSIM_HAS(offset, fsim_frame_offset, z))
+        return FSIM_INVALID_ARGUMENT;
+    if (offset->rotation < 0 || offset->rotation >= static_cast<int32_t>(fsim::control::FrameRotation::Count) || offset->offsets < 0 ||
+        offset->offsets >= static_cast<int32_t>(fsim::control::FrameOffsets::Count))
+        return FSIM_INVALID_ARGUMENT;
+    fsim::control::FrameOffset o;
+    o.rotation = static_cast<fsim::control::FrameRotation>(offset->rotation);
+    o.offsets = static_cast<fsim::control::FrameOffsets>(offset->offsets);
+    o.x = offset->x, o.y = offset->y, o.z = offset->z;
+    const std::optional<fsim::control::GeoPoint> p = world->world.framePoint(id, o, time_s);
+    if (!p) return FSIM_INVALID_ARGUMENT;
+    *latitude_rad = p->latitudeRad, *longitude_rad = p->longitudeRad, *altitude_msl_m = p->altitudeMslM;
+    return FSIM_OK;
 }
 
 FSIM_API int fsim_vehicle_get_navigation(const fsim_world* world, uint32_t id, fsim_navigation_settings* out) {

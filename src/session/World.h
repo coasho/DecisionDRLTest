@@ -14,6 +14,7 @@
 #include "fsim/VehicleProfile.h"
 #include "effects/Effect.h"
 #include "fsim/EnvironmentState.h"
+#include "fsim/Frames.h"
 #include "fsim/InitialConditions.h"
 #include "fsim/Rng.h"
 #include "io/TerrainTiles.h"
@@ -22,9 +23,12 @@
 #include "sim/GroundProvider.h"
 #include "sim/VehiclePool.h"
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -204,6 +208,20 @@ public:
     control::StateData stateData(std::uint32_t id) const;
     /// The world's air now (its environment's sea-level temperature and pressure).
     control::Air air() const noexcept { return control::Air{environment_.temperatureSeaLevelK, environment_.pressureSeaLevelPa}; }
+    // --- Reference frames (docs/flight-autonomy.md, 4.21; A-GRA's ReferenceFrame) ---
+    /// A frame by id (A-GRA's ReferenceFrameID): fixed, moving at a constant
+    /// velocity from a time, or following a vehicle. 0: refused - a value not
+    /// finite, a latitude off the Earth, an origin not one, an unknown vehicle.
+    control::FrameId createFrame(const control::FrameSpec& spec);
+    bool removeFrame(control::FrameId id);
+    std::optional<control::FrameSpec> frame(control::FrameId id) const;
+    /// A frame as it is at a time (NaN: now; simulation seconds, simTime()): a
+    /// vehicle's from its state now, carried on at its velocity to another
+    /// time. Empty for an unknown frame, or one whose vehicle is gone.
+    std::optional<control::FramePose> framePose(control::FrameId id, double timeS = std::numeric_limits<double>::quiet_NaN()) const;
+    /// Where a point in a frame is at a time (NaN: now).
+    std::optional<control::GeoPoint> framePoint(control::FrameId id, const control::FrameOffset& offset,
+                                                double timeS = std::numeric_limits<double>::quiet_NaN()) const;
     // --- The performance profile (docs/flight-autonomy.md, 4.15; A-GRA's MA_FlightControlModesPerformanceProfileType) ---
     /// A flight mode's performance profile at the vehicle's condition now - HSA/CSA, waypoint or curve following -
     /// into `out`, its vectors reused (PerformanceProfile.cpp). InvalidParameter for another mode (A-GRA profiles
@@ -315,6 +333,8 @@ private:
         std::shared_ptr<control::CapabilityCatalog> catalog; ///< its aircraft type's (or its own, with a profile of its own)
         std::shared_ptr<const control::SupportTable> support; ///< likewise: what it can do at all
         sim::PropertyHandle flapsPosition;                   ///< for flap activities that complete in position
+        /// Its body's angular accelerations (p, q, r dot), for its state data's orientation accelerations (StateData.cpp).
+        std::array<sim::PropertyHandle, 3> angularAcceleration;
         sim::EffectorInputs effectors;                       ///< as last written to the flight model
         std::vector<std::unique_ptr<effects::Effect>> effects;
         effects::SensedState sensed;
@@ -395,6 +415,8 @@ private:
     double simTime_ = 0.0;
     std::uint64_t vehicleSteps_ = 0, worldSteps_ = 0;
     Answers answers_{*this};
+    std::map<control::FrameId, control::FrameSpec> frames_; ///< the reference frames, by id (4.21)
+    control::FrameId lastFrame_ = 0;
 };
 
 } // namespace fsim::session

@@ -2,6 +2,7 @@
 
 #include "core/Units.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace fsim::geo {
@@ -46,6 +47,13 @@ inline void localNorthEastM(double lat1, double lon1, double lat2, double lon2, 
 inline void offsetLatLon(double lat, double lon, double north, double east, double& latOut, double& lonOut) noexcept {
     latOut = lat + north / kEarthRadiusM;
     lonOut = lon + east / (kEarthRadiusM * std::cos(lat));
+}
+
+/// The point `distanceM` from (lat, lon) along the great circle leaving it on `courseRad`.
+inline void destination(double lat, double lon, double courseRad, double distanceM, double& latOut, double& lonOut) noexcept {
+    const double d = distanceM / kEarthRadiusM;
+    latOut = std::asin(std::clamp(std::sin(lat) * std::cos(d) + std::cos(lat) * std::sin(d) * std::cos(courseRad), -1.0, 1.0));
+    lonOut = wrapPi(lon + std::atan2(std::sin(courseRad) * std::sin(d) * std::cos(lat), std::cos(d) - std::sin(lat) * std::sin(latOut)));
 }
 
 } // namespace fsim::geo

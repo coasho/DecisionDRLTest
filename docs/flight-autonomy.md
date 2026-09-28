@@ -523,6 +523,22 @@ Each vehicle has a barometric altimeter (ENV-03), set to a QNH (STS-10; VI 1.2.6
   - C ABI 1.18: `FSIM_ALTITUDE_BAROMETRIC`, `fsim_vehicle_set_qnh`, `fsim_vehicle_qnh`, `fsim_state_data`, `fsim_vehicle_state_data`.
   - Python: `fsim.AltitudeReference.BAROMETRIC`, `Vehicle.set_qnh`, `Vehicle.qnh`, `Vehicle.state_data` (`fsim.StateData`); `fsim.agra.apply_qnh_setting`, `fsim.agra.air_data`.
 
+### 4.21 The state data and reference frames (as FA-4 builds them)
+
+The state data carries what A-GRA's detailed position report and the vehicle's weather observation hold beyond the vehicle's state (STS-02, STS-06; VI 1.2.6.8). Reference frames (ENV-04) are by id.
+
+- **Orientation rates and accelerations** (A-GRA's OrientationRate and OrientationAcceleration): how fast the Euler angles change - yaw, pitch and roll over the local north, east and down - and how that changes. The rates come from the body's rates through the kinematic equations; the accelerations from the body's angular accelerations, the flight model's. Pitched within 0.06° of straight up or down, where yaw and roll are one, they are NaN.
+- **The wander angle** is 0: the platform's navigation frame is north's.
+- **The wind** where the vehicle is, as its air data measures it: its velocity over the ground less its velocity through the air (its true airspeed along its angle of attack and sideslip, turned from its body's axes to north, east and down). It is A-GRA's WindData, whose source is Other: the vehicle.
+- **Reference frames** (A-GRA's ReferenceFrame) have an id and an origin: fixed at a place and orientation, moving from a place at a constant velocity from a time, or following a vehicle.
+  - A point in one (A-GRA's relative point) is offsets turned as A-GRA's RotationEnum says - unrotated (x north, y east, z down), by the origin's yaw, by its body's axes, or by its track - and laid out as its OffsetXY_Enum says: in the plane square to the vertical at the origin, along a great circle, or along a rhumb line, on the platform's sphere.
+  - At a time: a moving origin is carried on at its velocity; a vehicle's from its state now, carried on at its velocity. A frame whose vehicle is gone answers nothing.
+  - The modes' relative points (WPT-22, CRV-05, LTR-18) use them in FA-5 and FA-6.
+- **Surfaces.**
+  - C++: `StateData`'s orientation rates and accelerations, `wanderAngleRad`, wind; `fsim/Frames.h` (`FrameSpec`, `FrameOffset`, `FramePose`, `GeoPoint`; `framePose`, `framePoint`, `carried`); `World::createFrame`, `removeFrame`, `frame`, `framePose`, `framePoint`.
+  - C ABI 1.19: `fsim_state_data`'s new fields; `fsim_frame_spec`, `fsim_frame_offset`, `fsim_world_create_frame`, `fsim_world_remove_frame`, `fsim_world_frame_point`.
+  - Python: `fsim.StateData`'s new fields; `fsim.FrameOrigin`, `fsim.FrameRotation`, `fsim.FrameOffsets`; `World.create_frame`, `remove_frame`, `frame_point`; `fsim.agra.orientation_rate`, `orientation_acceleration`, `wind_data`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -714,7 +730,7 @@ Magnetic and barometric references in every mode and in the state; the QNH setti
 **Status:** in progress, in four steps:
 - FA-4a, the terrain: the query and the paths checked against it (ENV-01, STS-11, VAL-06; 4.19), done 2026-09-27 and measured in section 14;
 - FA-4b, the barometric altimeter: the QNH setting, what the altimeter reads in the state data, the barometric reference in the hsa and the patterns (ENV-03, STS-10, STS-04, HSA-07, LTR-16; 4.20), done 2026-09-27 and measured in section 14;
-- FA-4c, the state data and frames: orientation acceleration, winds, reference frames (STS-02, STS-06, ENV-04);
+- FA-4c, the state data and frames: orientation rates and accelerations, the wind, reference frames (STS-02, STS-06, ENV-04; 4.21), done 2026-09-27 and measured in section 14;
 - FA-4d, the magnetic model: declination, the magnetic reference and heading (ENV-02, HSA-03, STS-05). It needs the World Magnetic Model's published coefficients built in, which are not on this machine.
 
 **Supporting models:** Terrain service, magnetic model, altimeter, frames (ENV-01 to ENV-04).
@@ -1531,6 +1547,22 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The micro cases are within −1.4 % to +0.3 %; the command cases within −1.5 % to +1.4 %.
   - World throughput is 99.5 to 100.6 % of FA-4a's. Protection costs at most 0.8 % (the gate: 97 %).
 - ctest: all 258 tests pass.
+
+**FA-4c, the state data and reference frames (STS-02, STS-06, ENV-04).**
+- **The wind** (`test_state_data`): in a steady wind of 10 m/s, a C172 flying and an IRIS hovering each measure it within 1e-6 m/s; when it drops, they measure none.
+- **The fleet** (`test_fleet`): in calm air every aircraft measures no wind. The worst is the Crazyflie, 7.4e-5 m/s: its air data at a few metres a second. Every other aircraft is within 1e-6. Its wander angle is 0, and its orientation's rates and accelerations are given.
+- **The orientation's rates and accelerations:** a C172 rolling in, stepped a flight-model step at a time.
+  - The Euler rates match the angles' central differences within 1 % of their peak, beyond the difference's own error where the roll jumps in: 0.0104 rad/s, half a step's worth of 2.5 rad/s².
+  - The accelerations match the rates' differences within 4 % of theirs.
+- **The frames:**
+  - Points in fixed, moving and vehicle frames - every rotation and every layout - match the sphere's geometry, worked out in the test, within 1e-12 rad and a micrometre.
+  - A vehicle's frame, carried on 10 s, moves 10 s of its ground speed within a centimetre.
+  - One whose vehicle is gone answers nothing; a latitude off the Earth, a value not finite and an unknown vehicle are refused.
+- **Digests:** identical to FA-4b's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-4b (ffa9bec), built in the scratch worktree: 5 rounds of `micro`, and 9 of `command` twice.
+  - The micro cases are within −1.8 % to +0.9 %; the command cases within −1.5 % to +0.4 %.
+  - World throughput is 99.1 to 100.4 % of FA-4b's. Protection costs at most 0.5 % (the gate: 97 %).
+- ctest: all 262 tests pass.
 
 ## Appendix A: the inventory
 

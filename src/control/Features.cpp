@@ -245,7 +245,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.setting/survivability", "", N, 14, 0, ""},            // STS-18
     {"fsim.setting/lost_comm", "", N, 16, 0, ""},                // STS-19
     {"fsim.query/terrain", "", S, 0, 0, ""},                     // STS-11, ENV-01: the query, and the paths checked against it (FA-4a)
-    {"fsim.frame", "", N, 4, 0, ""},                             // ENV-04
+    {"fsim.frame", "", S, 0, 0, ""},                             // ENV-04: frames by id, and their points (FA-4c)
     {"fsim.geometry", "", N, 8, 0, ""},                          // ENV-06
     {"fsim.ship", "", N, 11, 0, ""},                             // ENV-07
     {"fsim.stores", "", N, 13, R9, ""},                          // SUB-07

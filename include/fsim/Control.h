@@ -585,6 +585,19 @@ struct StateData {
     double kollsmanHpa = kNone;             ///< A-GRA's Kollsman: the QNH the altimeter is set to, hPa
     double staticPressurePa = kNone;        ///< the air's pressure where the vehicle is
     double staticTemperatureK = kNone;      ///< and its temperature
+    /// A-GRA's OrientationRate and OrientationAcceleration (docs/flight-autonomy.md,
+    /// 4.21): how fast its Euler angles - yaw, pitch and roll, over the local
+    /// north, east and down - change, and how that changes. NaN pitched within
+    /// 0.06 degrees of straight up or down, where yaw and roll are one.
+    double yawRateRadS = kNone, pitchRateRadS = kNone, rollRateRadS = kNone;
+    double yawAccelerationRadS2 = kNone, pitchAccelerationRadS2 = kNone, rollAccelerationRadS2 = kNone;
+    /// A-GRA's WanderAngle: its navigation frame's x axis from north. The
+    /// platform's is north's: 0.
+    double wanderAngleRad = kNone;
+    /// A-GRA's wind data (VI 1.2.6.8): the air's velocity over the ground where
+    /// the vehicle is, as its air data measures it (its ground velocity less its
+    /// velocity through the air), north, east and down, m/s.
+    double windNorthMs = kNone, windEastMs = kNone, windDownMs = kNone;
 };
 
 FSIM_API const char* energyName(Energy e) noexcept;           ///< "unknown", "fuel", "battery"

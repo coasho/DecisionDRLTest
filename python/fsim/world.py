@@ -484,11 +484,15 @@ for _code in range(64):
 
 NavigationSettings = collections.namedtuple("NavigationSettings", "recovery latitude_deg longitude_deg altitude_msl_m reserve_fraction")
 StateData = collections.namedtuple("StateData", "indicated_altitude_m indicated_altitude_rate_ms kollsman_hpa static_pressure_pa "
-                                   "static_temperature_k")
-StateData.__doc__ = ("What A-GRA's detailed position report carries beyond the state (docs/flight-autonomy.md, 4.20; MA_AirDataType): "
-                     "what the vehicle's barometric altimeter reads - its IndicatedBaroAltitude, the standard atmosphere's height of "
-                     "the static pressure above the QNH it is set to, and its rate - its Kollsman setting (hPa), and the air's "
-                     "static pressure and temperature where the vehicle is.")
+                                   "static_temperature_k yaw_rate_rad_s pitch_rate_rad_s roll_rate_rad_s yaw_acceleration_rad_s2 "
+                                   "pitch_acceleration_rad_s2 roll_acceleration_rad_s2 wander_angle_rad wind_north_ms wind_east_ms "
+                                   "wind_down_ms")
+StateData.__doc__ = ("What A-GRA's detailed position report carries beyond the state (docs/flight-autonomy.md, 4.20 and 4.21): what "
+                     "the vehicle's barometric altimeter reads - its IndicatedBaroAltitude, the standard atmosphere's height of the "
+                     "static pressure above the QNH it is set to, and its rate - its Kollsman setting (hPa), and the air's static "
+                     "pressure and temperature where the vehicle is (MA_AirDataType); how fast its Euler angles change and how that "
+                     "changes (OrientationRate, OrientationAcceleration; NaN pitched straight up or down); its WanderAngle (0: its "
+                     "navigation frame is north's); the wind where it is, the air's velocity over the ground (north, east, down).")
 NavigationSettings.__doc__ = "Where the vehicle recovers to (if ``recovery``) and the fraction of its capacity it keeps for the end."
 
 CommandedState = collections.namedtuple(
@@ -624,6 +628,31 @@ class AltitudeReference(enum.IntEnum):
     ABOVE_GROUND = 1
     ELLIPSOID = 2
     BAROMETRIC = 3
+
+
+class FrameOrigin(enum.IntEnum):
+    """A reference frame's origin (A-GRA's ReferenceFrameOriginChoiceType; docs/flight-autonomy.md, 4.21): a place; a place
+    moving at a constant velocity from a time; a world vehicle, followed."""
+    FIXED = 0
+    MOVING = 1
+    VEHICLE = 2
+
+
+class FrameRotation(enum.IntEnum):
+    """How a point's offsets in a frame are turned (A-GRA's RotationEnum): x north, y east, z down; by the origin's yaw; by
+    its body's axes (x forward, y right, z down, as it is pitched and rolled too); by its track over the ground."""
+    UNROTATED = 0
+    YAW = 1
+    ATTITUDE = 2
+    HEADING = 3
+
+
+class FrameOffsets(enum.IntEnum):
+    """How they are laid out on the Earth (A-GRA's OffsetXY_Enum): in the plane square to the vertical at the origin; along
+    the great circle their way; along the rhumb line."""
+    CARTESIAN = 0
+    GREAT_CIRCLE = 1
+    RHUMB = 2
 
 
 class SpeedOptimization(enum.IntEnum):
@@ -1747,6 +1776,32 @@ class World:
         if np.ndim(latitude_rad) == 0 and np.ndim(longitude_rad) == 0:
             return self._h.terrain([float(latitude_rad)], [float(longitude_rad)])[0]
         return self._h.terrain([float(x) for x in latitude_rad], [float(x) for x in longitude_rad])
+
+    # --- reference frames ------------------------------------------------------------
+    def create_frame(self, origin=FrameOrigin.FIXED, *, latitude_rad=0.0, longitude_rad=0.0, altitude_msl_m=0.0, yaw_rad=0.0,
+                     pitch_rad=0.0, roll_rad=0.0, north_ms=0.0, east_ms=0.0, down_ms=0.0, time_s=0.0, vehicle=None):
+        """A reference frame (A-GRA's ReferenceFrame; docs/flight-autonomy.md, 4.21), its id: ``origin`` (fsim.FrameOrigin or its
+        name) "fixed" at a place and orientation; "moving" from that place at ``time_s`` (World.time) at a constant velocity;
+        "vehicle", following ``vehicle`` (a Vehicle or its id). Raises fsim.Error where refused (a value not finite, a
+        latitude off the Earth, an unknown vehicle)."""
+        origin = FrameOrigin[origin.upper()] if isinstance(origin, str) else FrameOrigin(origin)
+        vid = 0 if vehicle is None else int(getattr(vehicle, "id", vehicle))
+        return self._h.create_frame(int(origin), vid, float(latitude_rad), float(longitude_rad), float(altitude_msl_m), float(yaw_rad),
+                                    float(pitch_rad), float(roll_rad), float(north_ms), float(east_ms), float(down_ms), float(time_s))
+
+    def remove_frame(self, frame):
+        """Remove a frame; False if there was none."""
+        return self._h.remove_frame(int(frame))
+
+    def frame_point(self, frame, x=0.0, y=0.0, z=0.0, *, rotation=FrameRotation.UNROTATED, offsets=FrameOffsets.CARTESIAN, time_s=None):
+        """Where a point in a frame is (A-GRA's relative point): ``x``, ``y``, ``z`` metres (z down) turned as ``rotation``
+        (fsim.FrameRotation or its name) says and laid out as ``offsets`` (fsim.FrameOffsets) says, at ``time_s`` (None: now;
+        a vehicle's frame carried on at its velocity to another time). (latitude_rad, longitude_rad, altitude_msl_m), or None
+        for an unknown frame or one whose vehicle is gone."""
+        rotation = FrameRotation[rotation.upper()] if isinstance(rotation, str) else FrameRotation(rotation)
+        offsets = FrameOffsets[offsets.upper()] if isinstance(offsets, str) else FrameOffsets(offsets)
+        t = math.nan if time_s is None else float(time_s)
+        return self._h.frame_point(int(frame), int(rotation), int(offsets), float(x), float(y), float(z), t)
 
     # --- environment ---------------------------------------------------------------------
     @property

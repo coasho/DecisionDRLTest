@@ -1095,9 +1095,53 @@ typedef struct fsim_state_data {
     double kollsman_hpa;              /* A-GRA's Kollsman: its QNH, hPa */
     double static_pressure_pa;        /* the air's where the vehicle is */
     double static_temperature_k;
+    /* ABI 1.19 (docs/flight-autonomy.md, 4.21): A-GRA's OrientationRate and OrientationAcceleration - how fast its Euler
+     * angles (yaw, pitch, roll over north, east and down) change, and how that changes; NaN pitched within 0.06 degrees
+     * of straight up or down */
+    double yaw_rate_rad_s, pitch_rate_rad_s, roll_rate_rad_s;
+    double yaw_acceleration_rad_s2, pitch_acceleration_rad_s2, roll_acceleration_rad_s2;
+    double wander_angle_rad;          /* A-GRA's WanderAngle: 0 (its navigation frame is north's) */
+    double wind_north_ms, wind_east_ms, wind_down_ms; /* A-GRA's wind data: the air's velocity over the ground where it is */
 } fsim_state_data;
 FSIM_API void fsim_state_data_init(fsim_state_data* data);
 FSIM_API int fsim_vehicle_state_data(const fsim_world* world, uint32_t id, fsim_state_data* out);
+
+/* ABI 1.19 (docs/flight-autonomy.md, 4.21; A-GRA's ReferenceFrame and its relative points): frames by id - fixed, moving
+ * at a constant velocity from a time, or following a vehicle - and where a point in one is at a time. The Earth is a
+ * sphere of the mean radius, as for all the platform's local geometry. */
+enum fsim_frame_origin { FSIM_FRAME_FIXED = 0, FSIM_FRAME_MOVING, FSIM_FRAME_VEHICLE };
+/* how a point's offsets are turned (A-GRA's RotationEnum): x north, y east, z down; by the origin's yaw; by its body's
+ * axes (x forward, y right, z down, pitched and rolled); by its track over the ground */
+enum fsim_frame_rotation { FSIM_FRAME_UNROTATED = 0, FSIM_FRAME_YAW, FSIM_FRAME_ATTITUDE, FSIM_FRAME_HEADING };
+/* how they are laid out on the Earth (A-GRA's OffsetXY_Enum): in the plane square to the vertical at the origin; along
+ * the great circle their way; along the rhumb line */
+enum fsim_frame_offsets { FSIM_FRAME_CARTESIAN = 0, FSIM_FRAME_GREAT_CIRCLE, FSIM_FRAME_RHUMB };
+typedef struct fsim_frame_spec {
+    uint32_t struct_size;
+    int32_t origin;                                   /* fsim_frame_origin */
+    uint32_t vehicle;                                 /* FSIM_FRAME_VEHICLE: the vehicle it follows */
+    uint32_t reserved;
+    double latitude_rad, longitude_rad, altitude_msl_m; /* a fixed origin's; a moving one's at time_s */
+    double yaw_rad, pitch_rad, roll_rad;              /* a fixed or moving origin's orientation */
+    double north_ms, east_ms, down_ms;                /* a moving origin's velocity */
+    double time_s;                                    /* when a moving origin is at its place (fsim_world_time) */
+} fsim_frame_spec;
+FSIM_API void fsim_frame_spec_init(fsim_frame_spec* spec);
+/* FSIM_INVALID_ARGUMENT: refused - a value not finite, a latitude off the Earth, an origin not one, an unknown vehicle */
+FSIM_API int fsim_world_create_frame(fsim_world* world, const fsim_frame_spec* spec, uint64_t* id);
+FSIM_API int fsim_world_remove_frame(fsim_world* world, uint64_t id);
+typedef struct fsim_frame_offset {
+    uint32_t struct_size;
+    int32_t rotation;  /* fsim_frame_rotation */
+    int32_t offsets;   /* fsim_frame_offsets */
+    int32_t reserved;
+    double x, y, z;    /* m along the axes; z down */
+} fsim_frame_offset;
+FSIM_API void fsim_frame_offset_init(fsim_frame_offset* offset);
+/* Where a point in a frame is at a time (NaN: now) - a vehicle's frame carried on at its velocity to another time.
+ * FSIM_INVALID_ARGUMENT for an unknown frame, one whose vehicle is gone, or an offset's code not one. */
+FSIM_API int fsim_world_frame_point(const fsim_world* world, uint64_t id, const fsim_frame_offset* offset, double time_s,
+                                    double* latitude_rad, double* longitude_rad, double* altitude_msl_m);
 
 /* A flight mode's performance profile (ABI 1.14; docs/flight-autonomy.md, 4.15; A-GRA's
  * MA_FlightControlModesPerformanceProfileType, VI 1.2.6.7): the guard rails a mission autonomy shapes its commands
