@@ -6,6 +6,7 @@
 // radius, as for all the platform's local geometry (core/Geodesy.h); heights are above sea level.
 
 #include "fsim/Export.h"
+#include "fsim/VehicleState.h"
 
 #include <cstdint>
 
@@ -72,6 +73,8 @@ struct GeoPoint {
 FSIM_API FramePose framePose(const FrameSpec& spec, double timeS) noexcept;
 /// A pose carried on at its velocity for `seconds` (a vehicle's, to another time).
 FSIM_API FramePose carried(const FramePose& pose, double seconds) noexcept;
+/// A vehicle's pose as a frame that follows it has it: where it is, as it is turned and moving.
+FSIM_API FramePose vehiclePose(const sim::VehicleState& s) noexcept;
 /// Where a point in a frame is, the frame as it is.
 FSIM_API GeoPoint framePoint(const FramePose& pose, const FrameOffset& offset) noexcept;
 

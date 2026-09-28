@@ -676,8 +676,17 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   give the radius, after the bank - hold_entry (fsim_hold_entry: a
  *   racetrack's or a hold's way in; left out, direct to the fix) and
  *   hold_context (fsim_hold_context: ATC's defaults for every one); a hold's
- *   entry and exit times are the command's time window. Twelve or more fields
- *   are taken, the rest left out.
+ *   entry and exit times are the command's time window. From ABI 1.23 (4.25):
+ *   FSIM_PATTERN_HOVER, a rotorcraft's hover over its point, its duration
+ *   from its arrival (a wing's refused "not_supported", field 0);
+ *   and its point in a frame (A-GRA's relative point): frame (the frame's id,
+ *   fsim_world_create_frame), frame_rotation (fsim_frame_rotation),
+ *   frame_offsets (fsim_frame_offsets), frame_x_m, frame_y_m, frame_z_m (z
+ *   down; left out, the pattern's own altitude) - the pattern's point is the
+ *   frame's, carried as it moves (a vehicle's frame whose vehicle is gone:
+ *   the activity fails "target_lost"). A point replaces a frame in
+ *   an UPDATE, and a frame a point. Twelve or more fields are taken, the rest
+ *   left out.
  * - FSIM_MODE_CURVE is fsim.guidance.curve (A-GRA's curve following): fields
  *   latitude_rad, longitude_rad, altitude_m (the reference its segments are
  *   from; left out: the aircraft at the NEW), speed_min_ms, speed_max_ms (the
@@ -687,7 +696,8 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   fsim_vehicle_submit_curve below; fsim_activity_update with a curve's
  *   fields changes how it is flown, not where. */
 enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3 };
-enum fsim_pattern_kind { FSIM_PATTERN_ORBIT = 0, FSIM_PATTERN_RACETRACK, FSIM_PATTERN_FIGURE_EIGHT, FSIM_PATTERN_HOLD };
+enum fsim_pattern_kind { FSIM_PATTERN_ORBIT = 0, FSIM_PATTERN_RACETRACK, FSIM_PATTERN_FIGURE_EIGHT, FSIM_PATTERN_HOLD,
+                         FSIM_PATTERN_HOVER /* ABI 1.23: a rotorcraft's */ };
 enum fsim_hold_turn { FSIM_HOLD_TURN_STANDARD = 0, FSIM_HOLD_TURN_MIL_POWER, FSIM_HOLD_TURN_RELAX }; /* A-GRA's MA_HoldTurnTypeEnum (ABI 1.22) */
 enum fsim_hold_entry { FSIM_HOLD_ENTRY_DIRECT = 0, FSIM_HOLD_ENTRY_ANCHOR, FSIM_HOLD_ENTRY_INBOUND, FSIM_HOLD_ENTRY_OUTBOUND,
                        FSIM_HOLD_ENTRY_PARALLEL, FSIM_HOLD_ENTRY_TEARDROP }; /* A-GRA's MA_HoldEntryTypeEnum and ATC's (ABI 1.22) */

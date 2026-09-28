@@ -98,8 +98,15 @@ struct Trims {
 /// fed forward, from its course bandwidth): a wing as a turn rate and an
 /// airspeed, a rotorcraft as its velocity over the ground, the nose along the
 /// track. `course` and `heading` get what it commands (a wing's heading: none).
-VelocityCommand follow(const ControlContext& ctx, const Performance& performance, const WindEstimate& wind, bool hovers, const Fix& fix,
-                       const Ahead& ahead, const Steer& steer, Trims& trims, double& course, double& heading) noexcept;
+/// `s` is the aircraft as the path's ground sees it: its sensed state, or over
+/// a frame the path moves with, its velocity over the frame (and `wind` the
+/// wind's through it; docs/flight-autonomy.md, 4.25).
+VelocityCommand follow(const ControlContext& ctx, const sim::VehicleState& s, const Performance& performance, const WindEstimate& wind, bool hovers,
+                       const Fix& fix, const Ahead& ahead, const Steer& steer, Trims& trims, double& course, double& heading) noexcept;
+inline VelocityCommand follow(const ControlContext& ctx, const Performance& performance, const WindEstimate& wind, bool hovers, const Fix& fix,
+                              const Ahead& ahead, const Steer& steer, Trims& trims, double& course, double& heading) noexcept {
+    return follow(ctx, ctx.sensed, performance, wind, hovers, fix, ahead, steer, trims, course, heading);
+}
 
 /// The vertical speed that flies to `altitudeMslM`: `feedforward` (a
 /// profile's) plus the error at the position loop's gain, within the
@@ -227,7 +234,8 @@ void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon, co
 /// radius from a bank - in the wind given, north and east - and two circles'
 /// second radius (the shape's) from the first; the radius by a turn rate or
 /// type (4.24) too. A magnetic course left out is the course now, turned by
-/// the declination at its point in `magneticYear`.
+/// the declination at its point in `magneticYear`. A hover (4.25) has its
+/// point, its altitude and its speed there alone: nothing round it.
 void completePattern(PatternCommand& c, PatternShape& shape, const sim::VehicleState& state, const Performance& performance, bool hovers,
                      double windNorthMs, double windEastMs, const Altimeter* altimeter = nullptr, double magneticYear = 2025.0) noexcept;
 
@@ -235,8 +243,13 @@ void completePattern(PatternCommand& c, PatternShape& shape, const sim::VehicleS
 /// racetrack's or a figure-eight's, with no course, heading, legs or leg time (the circles give them), a racetrack's
 /// two circles apart (neither inside the other), a figure-eight's clear of one another, both at least a metre in
 /// radius; an entry only a racetrack's or a hold's on its fix (no second circle, no entry point); a context only a
-/// hold's. Its field at fault (its index in the fields of the PatternCommand and then its shape), or -1. `c` complete.
+/// hold's; a frame's offsets only with their frame. Its field at fault (its index in the fields of the PatternCommand
+/// and then its shape), or -1. `c` complete.
 int shapeFault(const PatternCommand& c, const PatternShape& shape) noexcept;
+/// A hover's field at fault (docs/flight-autonomy.md, 4.25): one given that shapes a circuit - a radius or a way to
+/// give it, a way round, a course or heading, legs, laps, a second circle, an entry or exit point, a hold's entry or
+/// context. A hover has its point (or its frame's), its altitude, its speed there and its duration alone. -1 if none.
+int hoverFault(const PatternCommand& c, const PatternShape& shape) noexcept;
 
 // --- Curves (4.7) -----------------------------------------------------------------
 

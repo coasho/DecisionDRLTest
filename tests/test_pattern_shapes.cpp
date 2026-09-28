@@ -1,10 +1,13 @@
 // A-GRA's orbit and hold as its schema gives them, flown (docs/flight-autonomy.md,
-// 4.23 and 4.24; ADR-29 FA-5): a racetrack and a figure-eight by two circles for
+// 4.23 to 4.25; ADR-29 FA-5): a racetrack and a figure-eight by two circles for
 // each class, measured against their geometry computed here; a fix-point orbit
 // by its inbound heading, its legs' time and its turns' bank, and by a magnetic
 // course; laps that complete it; an entry point flown to and an exit point left
 // from; a hold's turns by type and rate, its entry and exit times, and each of
-// its entries; and what does not make a pattern refused, naming the field.
+// its entries; a rotorcraft's hover, its duration from its arrival; a pattern's
+// point in a frame - fixed, moving, a vehicle's - flown as the frame moves; and
+// what does not make a pattern refused, naming the field.
+#include "fsim/Frames.h"
 #include "fsim/GuidanceModes.h"
 #include "fsim/Magnetic.h"
 #include "fsim/VehicleProfile.h"
@@ -672,4 +675,264 @@ TEST_CASE("pattern shapes: each hold entry flown as specified - direct, anchor f
         if (cases[i].entry == HoldEntry::Direct) CHECK(firstAtFix[i] > 150.0); // (joined where nearest, not over the fix)
         CHECK(off[i] < 60.0);
     }
+}
+
+TEST_CASE("pattern shapes: a rotorcraft's hover over its point, its duration from its arrival; a wing's refused, and what shapes a circuit", "[modes]") {
+    session::World w(options("pattern-hover"));
+    const auto plane = wing(w, "c172", 1500.0, 55.0, 12), stock = wing(w, "c172x", 1500.0, 55.0, 15);
+    const auto quad = rotor(w, "iris", 15.0), heli = rotor(w, "uh60", 15.0, 3), huey = rotor(w, "uh1h", 15.0, 6);
+    struct Hover {
+        std::uint32_t v;
+        double north, east, up; ///< where, from where it is
+        double lat = 0.0, lon = 0.0, alt = 0.0;
+        ActivityId id = 0;
+        double arrived = kHold, worst = 0.0, early = 0.0;
+    };
+    Hover h[3] = {{quad, 40.0, 30.0, 15.0}, {heli, 300.0, 200.0, 30.0}, {huey, 0.0, 0.0, 0.0}};
+    PatternCommand c;
+    c.pattern = code(PatternKind::Hover), c.durationS = 20.0, c.altitudeReference = static_cast<double>(AltitudeReference::Msl);
+    for (int i = 0; i < 2; ++i) {
+        const auto& s = *w.vehicleState(h[i].v);
+        std::tie(h[i].lat, h[i].lon) = at(Local{h[i].north, h[i].east}, s.latitudeRad, s.longitudeRad);
+        h[i].alt = s.altitudeMslM + h[i].up;
+        c.latitudeRad = h[i].lat, c.longitudeRad = h[i].lon, c.altitudeM = h[i].alt;
+        h[i].id = submit(w, h[i].v, c, PatternShape{});
+        const Shaped made = planned(w, h[i].id); // (its point, altitude and speed: nothing round it)
+        CHECK(isHold(made.c.radiusM));
+        CHECK(isHold(made.c.clockwise));
+        CHECK(isHold(made.c.courseRad));
+        CHECK(isHold(made.c.legM));
+        CHECK(made.c.speed > 0.0);
+    }
+    // the UH-1H orbits a point 80 m north of it; an UPDATE makes it a hover there, its duration from its arrival
+    {
+        const auto& s = *w.vehicleState(huey);
+        std::tie(h[2].lat, h[2].lon) = at(Local{80.0, 0.0}, s.latitudeRad, s.longitudeRad);
+        h[2].alt = s.altitudeMslM;
+        PatternCommand round;
+        round.latitudeRad = h[2].lat, round.longitudeRad = h[2].lon, round.radiusM = 60.0;
+        h[2].id = submit(w, huey, round, PatternShape{});
+    }
+    // a wing's refused, its reason the support table's: not supported where its design says it does not fly on rotors (R1),
+    // not implemented where nothing says (a stock model's: as the hover capability is for it); a hover given what shapes
+    // a circuit, refused naming the field
+    const CommandResult winged = w.submit(plane, c);
+    CHECK(winged.reason == Reason::NotSupported);
+    CHECK(winged.index == 0);
+    CHECK(w.supportTable(plane)->find("fsim.guidance.pattern/hover")->support == Support::NotSupported);
+    const CommandResult undeclared = w.submit(stock, c);
+    CHECK(undeclared.reason == Reason::NotImplemented);
+    CHECK(undeclared.index == 0);
+    CHECK(w.supportTable(stock)->find("fsim.guidance.pattern/hover")->support == Support::NotImplemented);
+    CHECK(w.supportTable(quad)->find("fsim.guidance.pattern/hover")->support == Support::Supported);
+    auto refusedAt = [&](const PatternCommand& bad, const PatternShape& shape, int index) {
+        const CommandResult r = w.submit(quad, bad, shape);
+        INFO(reasonName(r.reason) << " at " << r.index);
+        CHECK(r.reason == Reason::InvalidParameter);
+        CHECK(r.index == index);
+    };
+    c.latitudeRad = h[0].lat, c.longitudeRad = h[0].lon, c.altitudeM = h[0].alt;
+    {
+        PatternCommand b = c;
+        b.radiusM = 10.0;
+        refusedAt(b, {}, 5);
+        b = c, b.clockwise = 0.0;
+        refusedAt(b, {}, 6);
+        b = c, b.courseRad = 1.0;
+        refusedAt(b, {}, 7);
+        PatternShape shape;
+        shape.orbits = 2.0;
+        refusedAt(c, shape, 17);
+        shape = PatternShape{}, shape.exitLatitudeRad = c.latitudeRad, shape.exitLongitudeRad = c.longitudeRad;
+        refusedAt(c, shape, 23);
+        shape = PatternShape{}, shape.turnType = 0.0;
+        refusedAt(c, shape, 26);
+    }
+    const double t0 = w.simTime();
+    bool moved = false, turned = false;
+    for (unsigned k = 0; k < stepsFor(w, 150.0); ++k) {
+        w.step();
+        const double t = w.simTime() - t0;
+        for (int i = 0; i < 3; ++i) {
+            Hover& x = h[i];
+            if (i == 2 && !turned) continue;
+            const auto& st = *w.vehicleState(x.v);
+            const Local q = from(st, x.lat, x.lon);
+            const double off = std::hypot(q.north, q.east), dz = st.altitudeMslM - x.alt;
+            const ActivityRecord& r = *w.activity(x.id);
+            if (isHold(x.arrived) && off < 1.0 && std::abs(dz) < 2.0) x.arrived = w.simTime();
+            if (isHold(x.arrived)) x.early = std::max(x.early, r.progress.percent);
+            if (!r.live() && w.simTime() - r.endTime < 30.0) x.worst = std::max(x.worst, std::hypot(off, dz)); // (hovering on)
+        }
+        if (!moved && t >= 3.0) { // the UH-60's point, 100 m further north before it gets there; a radius for its hover, refused
+            PatternCommand next;
+            std::tie(next.latitudeRad, next.longitudeRad) = at(Local{100.0, 0.0}, h[1].lat, h[1].lon);
+            REQUIRE(w.update(h[1].id, next, PatternShape{}).accepted());
+            h[1].lat = next.latitudeRad, h[1].lon = next.longitudeRad;
+            PatternCommand radius;
+            radius.radiusM = 50.0;
+            const CommandResult r = w.update(h[1].id, radius, PatternShape{});
+            CHECK(r.reason == Reason::InvalidParameter);
+            CHECK(r.index == 5);
+            moved = true;
+        }
+        if (!turned && t >= 30.0) { // the UH-1H's orbit, a hover now over its centre for 10 s
+            PatternCommand hover;
+            hover.pattern = code(PatternKind::Hover), hover.durationS = 10.0;
+            REQUIRE(w.update(h[2].id, hover, PatternShape{}).accepted());
+            const Shaped made = planned(w, h[2].id);
+            CHECK(isHold(made.c.radiusM));
+            CHECK(isHold(made.c.courseRad));
+            turned = true;
+        }
+    }
+    const char* names[3] = {"IRIS", "UH-60A, its point moved", "UH-1H, from an orbit"};
+    for (int i = 0; i < 3; ++i) {
+        const ActivityRecord& r = *w.activity(h[i].id);
+        std::printf("pattern hover, %s: arrived at %.1f s, completed %.2f s after; %.0f %% before; then within %.2f m\n", names[i], h[i].arrived - t0,
+                    r.endTime - h[i].arrived, h[i].early, h[i].worst);
+        CHECK(r.state == ActivityState::Completed);
+        CHECK(r.reason == Reason::GoalReached);
+        REQUIRE_FALSE(isHold(h[i].arrived));
+        CHECK(std::abs(r.endTime - h[i].arrived - (i == 2 ? 10.0 : 20.0)) < 0.5); // (its own arrival, at its own mark)
+        CHECK(h[i].early == 0.0);
+        CHECK(h[i].worst < 1.0);
+    }
+}
+
+TEST_CASE("pattern shapes: a pattern's point in a frame - fixed, moving, a vehicle's - flown as the frame moves; its vehicle gone, lost", "[modes]") {
+    session::World w(options("pattern-frames"));
+    const auto plane = wing(w, "c172x", 1500.0, 55.0), still = wing(w, "c172x", 1500.0, 55.0, 3), placed = wing(w, "c172x", 1500.0, 55.0, 6);
+    const auto leader = rotor(w, "uh1h", 15.0, 9), follower = rotor(w, "iris", 15.0, 9); // (one place: they do not collide)
+    settle(w, {plane, still, placed}, 5.0);
+    // a ship: a frame moving north-east at 8.5 m/s, its heading that way, from 3 km east of the wing; an orbit of 1 km round
+    // the point 500 m ahead of it
+    const sim::VehicleState s0 = *w.vehicleState(plane); // (as it was: copies)
+    FrameSpec ship;
+    ship.origin = FrameOrigin::Moving;
+    std::tie(ship.latitudeRad, ship.longitudeRad) = at(Local{0.0, 3000.0}, s0.latitudeRad, s0.longitudeRad);
+    ship.altitudeMslM = 0.0, ship.yawRad = 0.25 * kPi, ship.northMs = ship.eastMs = 6.0, ship.timeS = w.simTime();
+    const FrameId shipId = w.createFrame(ship);
+    REQUIRE(shipId != 0);
+    FrameOffset ahead;
+    ahead.rotation = FrameRotation::Yaw, ahead.x = 500.0;
+    PatternCommand orbit;
+    orbit.radiusM = 1000.0;
+    PatternShape onShip;
+    onShip.frame = static_cast<double>(shipId), onShip.frameRotation = static_cast<double>(FrameRotation::Yaw), onShip.frameXM = 500.0;
+    const ActivityId a = submit(w, plane, orbit, onShip);
+    {
+        const Shaped made = planned(w, a); // (where it is now: the frame's point, as it was placed)
+        const GeoPoint now = framePoint(framePose(ship, w.simTime()), ahead);
+        CHECK(std::abs(made.c.latitudeRad - now.latitudeRad) * kR < 1.0);
+        CHECK(made.s.frame == static_cast<double>(shipId));
+    }
+    // the same orbit round a still point, for the error its path has anyway
+    const sim::VehicleState s1 = *w.vehicleState(still);
+    PatternCommand fixed = orbit;
+    std::tie(fixed.latitudeRad, fixed.longitudeRad) = at(Local{0.0, 3000.0}, s1.latitudeRad, s1.longitudeRad);
+    const ActivityId b = submit(w, still, fixed, PatternShape{});
+    // a fixed frame 300 m below the wing, its point 2 km east and 300 m up (z down): the orbit at that height
+    const sim::VehicleState s2 = *w.vehicleState(placed);
+    FrameSpec ground;
+    ground.latitudeRad = s2.latitudeRad, ground.longitudeRad = s2.longitudeRad, ground.altitudeMslM = s2.altitudeMslM - 300.0;
+    const FrameId groundId = w.createFrame(ground);
+    PatternShape up;
+    up.frame = static_cast<double>(groundId), up.frameYM = 2000.0, up.frameZM = -350.0;
+    const ActivityId d = submit(w, placed, orbit, up);
+    FrameOffset upOffset;
+    upOffset.y = 2000.0, upOffset.z = -350.0;
+    const GeoPoint upPoint = framePoint(framePose(ground, w.simTime()), upOffset); // (in the plane at the origin: 2 km out, 0.31 m above the sphere)
+    {
+        const Shaped made = planned(w, d);
+        CHECK(std::abs(made.c.altitudeM - upPoint.altitudeMslM) < 1e-6);
+        CHECK(std::abs(upPoint.altitudeMslM - (s2.altitudeMslM + 50.0) - 2000.0 * 2000.0 / (2.0 * 6371008.8)) < 1e-3);
+        CHECK(made.c.altitudeReference == static_cast<double>(AltitudeReference::Msl));
+        CHECK(std::abs(from(made.c.latitudeRad, made.c.longitudeRad, s2.latitudeRad, s2.longitudeRad).east - 2000.0) < 1.0);
+    }
+    // a rotorcraft over a point 15 m east of another as it flies north at 2 m/s: the other's frame, unrotated
+    FrameSpec other;
+    other.origin = FrameOrigin::Vehicle, other.vehicle = leader;
+    const FrameId otherId = w.createFrame(other);
+    REQUIRE(otherId != 0);
+    VelocityCommand north;
+    north.northMs = 2.0, north.eastMs = 0.0, north.verticalSpeedMs = 0.0;
+    REQUIRE(w.submit(leader, north).accepted());
+    PatternCommand hover;
+    hover.pattern = code(PatternKind::Hover);
+    PatternShape beside;
+    beside.frame = static_cast<double>(otherId), beside.frameYM = 15.0;
+    const ActivityId e = submit(w, follower, hover, beside);
+    // what does not make one: a frame not the session's, offsets without their frame
+    {
+        PatternShape none;
+        none.frame = static_cast<double>(otherId + 100);
+        const CommandResult r = w.submit(plane, orbit, none);
+        CHECK(r.reason == Reason::InvalidParameter);
+        CHECK(r.index == 29);
+        PatternShape loose;
+        loose.frameYM = 10.0;
+        const CommandResult l = w.submit(plane, orbit, loose);
+        CHECK(l.reason == Reason::InvalidParameter);
+        CHECK(l.index == 33);
+    }
+
+    const double t0 = w.simTime();
+    double shipWorst = 0.0, stillWorst = 0.0, placedWorst = 0.0, placedHeight = 0.0, keptWorst = 0.0, keptArrived = kHold;
+    for (unsigned k = 0; k < stepsFor(w, 480.0); ++k) {
+        w.step();
+        const double t = w.simTime() - t0;
+        const GeoPoint centre = framePoint(framePose(ship, w.simTime()), ahead);
+        const Local p = from(*w.vehicleState(plane), centre.latitudeRad, centre.longitudeRad);
+        const Local q = from(*w.vehicleState(still), fixed.latitudeRad, fixed.longitudeRad);
+        const Shaped dm = planned(w, d);
+        const Local r = from(*w.vehicleState(placed), dm.c.latitudeRad, dm.c.longitudeRad);
+        if (t > 200.0) { // joined, and round twice
+            shipWorst = std::max(shipWorst, std::abs(std::hypot(p.north, p.east) - 1000.0));
+            stillWorst = std::max(stillWorst, std::abs(std::hypot(q.north, q.east) - 1000.0));
+            placedWorst = std::max(placedWorst, std::abs(std::hypot(r.north, r.east) - 1000.0));
+            placedHeight = std::max(placedHeight, std::abs(w.vehicleState(placed)->altitudeMslM - upPoint.altitudeMslM));
+        }
+        const auto& lead = *w.vehicleState(leader);
+        const Local f = from(*w.vehicleState(follower), lead.latitudeRad, lead.longitudeRad);
+        const double kept = std::hypot(f.north, f.east - 15.0);
+        if (isHold(keptArrived) && kept < 1.0) keptArrived = t;
+        if (!isHold(keptArrived) && t - keptArrived > 5.0) keptWorst = std::max(keptWorst, kept);
+    }
+    const ActivityRecord& held = *w.activity(e);
+    CHECK(held.live());
+    // the other gone: nothing to hover beside
+    REQUIRE(w.removeVehicle(leader));
+    w.step(stepsFor(w, 5.0));
+    const ActivityRecord& lost = *w.activity(e);
+    const double drift = groundSpeed(*w.vehicleState(follower));
+    std::printf("pattern frames: an orbit round a ship's point %.1f m off its circle (round a still one %.1f m); round a fixed frame's point "
+                "%.1f m off, %.1f m off its height; beside a rotorcraft flying north, there at %.1f s and then within %.2f m; it gone, %s (%s), "
+                "%.2f m/s over the ground\n",
+                shipWorst, stillWorst, placedWorst, placedHeight, keptArrived, keptWorst, activityStateName(lost.state), reasonName(lost.reason), drift);
+    CHECK(w.activity(a)->live());
+    CHECK(w.activity(b)->live());
+    // (2.9 m round the ship's point - flown as though the frame were still, 67 m - and 1.4 m round the fixed frame's, its height
+    // within 0.3 m; beside the UH-1H within 0.12 m, where without the frame's velocity it never came within a metre)
+    CHECK(shipWorst < 10.0);
+    CHECK(placedWorst < 10.0);
+    CHECK(placedHeight < 2.0);
+    REQUIRE_FALSE(isHold(keptArrived));
+    CHECK(keptWorst < 0.5);
+    CHECK(lost.state == ActivityState::Failed);
+    CHECK(lost.reason == Reason::TargetLost);
+    CHECK(drift < 1.0);
+    // an UPDATE: a point leaves the frame; a frame replaces the point
+    PatternCommand there;
+    std::tie(there.latitudeRad, there.longitudeRad) = at(Local{0.0, 0.0}, fixed.latitudeRad, fixed.longitudeRad);
+    REQUIRE(w.update(a, there, PatternShape{}).accepted());
+    Shaped made = planned(w, a);
+    CHECK(isHold(made.s.frame));
+    CHECK(isHold(made.s.frameRotation));
+    CHECK(made.c.latitudeRad == there.latitudeRad);
+    REQUIRE(w.update(b, PatternCommand{}, onShip).accepted());
+    made = planned(w, b);
+    CHECK(made.s.frame == static_cast<double>(shipId));
+    const GeoPoint now = framePoint(framePose(ship, w.simTime()), ahead);
+    CHECK(std::abs(made.c.latitudeRad - now.latitudeRad) * kR < 1.0);
 }

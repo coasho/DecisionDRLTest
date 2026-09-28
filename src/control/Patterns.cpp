@@ -4,6 +4,7 @@
 
 #include "control/Adapter.h"
 #include "control/ControlStack.h"
+#include "control/Features.h"
 #include "control/Route.h"
 #include "control/Runtime.h"
 #include "core/Geodesy.h"
@@ -35,6 +36,10 @@ void mergePattern(PatternCommand& dst, PatternShape& dstShape, const PatternComm
     for (std::size_t i = 0; i < PatternShape::kFields; ++i)
         if (!isHold(*from[i])) *to[i] = *from[i];
     if (srcShape.twoCircles()) dst.courseRad = dst.legM = dstShape.headingRad = dstShape.legS = kHold; // (the circles give them)
+    // (a point replaces a frame's, and a frame a point: filled in again from it)
+    if (!isHold(src.latitudeRad) || !isHold(src.longitudeRad))
+        dstShape.frame = dstShape.frameRotation = dstShape.frameOffsets = dstShape.frameXM = dstShape.frameYM = dstShape.frameZM = kHold;
+    if (!isHold(srcShape.frame)) dst.latitudeRad = dst.longitudeRad = kHold;
     auto either = [](double& a, double& b, double givenA, double givenB) {
         if (!isHold(givenA) || !isHold(givenB)) a = givenA, b = givenB;
     };
@@ -77,6 +82,7 @@ CommandResult CapabilityHost::updatePattern(std::size_t s, ActivityId activity, 
     const bool shaped = shape || !mergedShape.empty();
     if (shaped) mergePattern(merged, mergedShape, next, given);
     else mergePattern(merged, next);
+    if (const Reason why = placePattern(merged, mergedShape, result, &next, &given); why != Reason::None) return about(rejected(why, activity), result);
     merged.courseRad = geo::wrapPi(merged.courseRad), merged.longitudeRad = geo::wrapPi(merged.longitudeRad);
     optimise(merged.speed, merged.speedReference, merged.speedOptimization, merged.altitudeM, merged.altitudeReference, state);
     // what the merge left to be filled in again: a course from a heading, legs from their time, a radius from a bank, rate or type
@@ -105,7 +111,41 @@ void CapabilityHost::writeShape() {
     PathStore* store = config_->path.get();
     if (!store || (patternShape_.empty() && store->pattern.empty())) return;
     store->pattern = patternShape_;
+    store->patternFrame = patternFrame_;
     ++store->revision;
+}
+
+Reason CapabilityHost::placePattern(PatternCommand& c, PatternShape& shape, CommandResult& detail, const PatternCommand* given,
+                                    const PatternShape* givenShape) noexcept {
+    if (c.pattern == static_cast<double>(PatternKind::Hover)) { // (a hover: where the aircraft hovers; its point, altitude, speed and duration)
+        const SupportInfo* row = support_ ? support_->find("fsim.guidance.pattern/hover") : nullptr;
+        const Support support = row ? row->support : (adapter_->features() & kFeatureHover) ? Support::Supported : Support::NotSupported;
+        if (support == Support::NotSupported || support == Support::NotImplemented) {
+            detail.index = 0;
+            return support == Support::NotSupported ? Reason::NotSupported : Reason::NotImplemented;
+        }
+        if (const int field = route::hoverFault(given ? *given : c, givenShape ? *givenShape : shape); field >= 0) {
+            detail.index = static_cast<std::int16_t>(field);
+            return Reason::InvalidParameter;
+        }
+        if (given) { // (an UPDATE: the circuit the pattern it was had, gone - its frame kept)
+            c.radiusM = c.clockwise = c.courseRad = c.legM = kHold;
+            PatternShape kept;
+            kept.frame = shape.frame, kept.frameRotation = shape.frameRotation, kept.frameOffsets = shape.frameOffsets;
+            kept.frameXM = shape.frameXM, kept.frameYM = shape.frameYM, kept.frameZM = shape.frameZM;
+            shape = kept;
+        }
+    }
+    if (isHold(shape.frame)) return Reason::None;
+    FramePose now;
+    if (!sessionView_ || !sessionView_->frame(static_cast<FrameId>(shape.frame), patternFrame_, now)) {
+        detail.index = 29;
+        return Reason::InvalidParameter;
+    }
+    const GeoPoint at = framePoint(now, shape.frameOffset());
+    c.latitudeRad = at.latitudeRad, c.longitudeRad = geo::wrapPi(at.longitudeRad);
+    if (!isHold(shape.frameZM)) c.altitudeM = at.altitudeMslM, c.altitudeReference = static_cast<double>(AltitudeReference::Msl);
+    return Reason::None;
 }
 
 void ControlStack::command(const PatternCommand& pattern, const PatternShape& shape) {

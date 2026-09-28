@@ -190,9 +190,8 @@ double verticalSpeedTo(double altitudeMslM, double feedforward, const sim::Vehic
     return std::clamp(feedforward + gain * (altitudeMslM - s.altitudeMslM), -descent, climb);
 }
 
-VelocityCommand follow(const ControlContext& ctx, const Performance& perf, const WindEstimate& wind, bool hovers, const Fix& fix, const Ahead& ahead,
-                       const Steer& steer, Trims& trims, double& course, double& heading) noexcept {
-    const auto& s = ctx.sensed;
+VelocityCommand follow(const ControlContext& ctx, const sim::VehicleState& s, const Performance& perf, const WindEstimate& wind, bool hovers,
+                       const Fix& fix, const Ahead& ahead, const Steer& steer, Trims& trims, double& course, double& heading) noexcept {
     const double e = fix.crossTrackM;
     const double tn = std::cos(fix.courseRad), te = std::sin(fix.courseRad);
     const double windAlong = wind.northMs * tn + wind.eastMs * te, windAcross = -wind.northMs * te + wind.eastMs * tn;
@@ -646,6 +645,11 @@ void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon, co
                 enterHold(p, static_cast<HoldEntry>(static_cast<int>(shape.holdEntry)), north, east, trackRad, chi, side, r, leg);
             }
             break;
+        case PatternKind::Hover: // its point, and the way there
+            p.count = 1;
+            line(p.pieces[0], 0.0, 0.0, 0.0, 0.0);
+            if (const double d = std::hypot(north, east); d > 1.0) line(p.entry[0], north, east, std::atan2(-east, -north), d), p.entryCount = 1;
+            break;
         default: // an orbit: round the centre, its laps from where the aircraft is
             p.count = 1;
             arc(p.pieces[0], 0.0, 0.0, side, std::atan2(east, north), 2.0 * kPi);
@@ -692,8 +696,9 @@ void completePattern(PatternCommand& c, PatternShape& shape, const sim::VehicleS
         if (isHold(c.speedReference)) c.speedReference = static_cast<double>(hovers ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
         if (isHold(c.speed)) c.speed = speedNow(static_cast<SpeedReference>(static_cast<int>(c.speedReference)), s);
     }
-    if (isHold(c.clockwise)) c.clockwise = 1.0;
     const auto kind = static_cast<PatternKind>(static_cast<int>(c.pattern));
+    if (kind == PatternKind::Hover) return; // (its point, its altitude and its speed there: nothing round it - 4.25)
+    if (isHold(c.clockwise)) c.clockwise = 1.0;
     // the radius and the legs at the speed planned there (above ground: as high as the aircraft is)
     const double h = c.altitudeReference == static_cast<double>(AltitudeReference::AboveGround) ? s.altitudeMslM
                                                                                                 : altitudeMslOf(c.altitudeM, static_cast<AltitudeReference>(static_cast<int>(c.altitudeReference)), s, altimeter);
@@ -731,6 +736,11 @@ int shapeFault(const PatternCommand& c, const PatternShape& shape) noexcept {
     const bool onFix = kind == PatternKind::Racetrack || kind == PatternKind::Hold;
     if (!isHold(shape.holdEntry) && (!onFix || shape.twoCircles() || !isHold(shape.entryLatitudeRad))) return 27;
     if (!isHold(shape.holdContext) && kind != PatternKind::Hold) return 28;
+    if (isHold(shape.frame)) { // (a frame's offsets need their frame)
+        const double offsets[] = {shape.frameRotation, shape.frameOffsets, shape.frameXM, shape.frameYM, shape.frameZM};
+        for (int i = 0; i < 5; ++i)
+            if (!isHold(offsets[i])) return 30 + i;
+    }
     if (isHold(shape.latitude2Rad) && isHold(shape.longitude2Rad)) return -1;
     if (kind != PatternKind::Racetrack && kind != PatternKind::FigureEight) return 18;
     // (the circles give its course and legs: any there were given)
@@ -745,6 +755,18 @@ int shapeFault(const PatternCommand& c, const PatternShape& shape) noexcept {
     geo::localNorthEastM(c.latitudeRad, c.longitudeRad, shape.latitude2Rad, shape.longitude2Rad, n2, e2);
     const double d = std::hypot(n2, e2);
     if (kind == PatternKind::FigureEight ? !(d >= r1 + r2) : !(d > std::abs(r1 - r2) && d >= 1.0)) return 18;
+    return -1;
+}
+
+int hoverFault(const PatternCommand& c, const PatternShape& shape) noexcept {
+    const double fields[] = {c.radiusM, c.clockwise, c.courseRad, c.legM};
+    for (int i = 0; i < 4; ++i)
+        if (!isHold(fields[i])) return 5 + i;
+    const double shaped[] = {shape.directionReference, shape.headingRad, shape.legS, shape.bankRad, shape.orbits, shape.latitude2Rad,
+                             shape.longitude2Rad, shape.radius2M, shape.entryLatitudeRad, shape.entryLongitudeRad, shape.exitLatitudeRad,
+                             shape.exitLongitudeRad, shape.turnRateRadS, shape.turnType, shape.holdEntry, shape.holdContext};
+    for (int i = 0; i < 16; ++i)
+        if (!isHold(shaped[i])) return 13 + i;
     return -1;
 }
 

@@ -538,6 +538,7 @@ void PatternBehavior::begin(const ControlContext& ctx, const Command& command) {
     reset();
     startS_ = -1.0;
     finished_ = false;
+    failure_ = Reason::None;
     wind_.update(ctx.sensed, ctx.dt);
     if (const auto* c = std::get_if<PatternCommand>(&command)) plan(ctx, *c);
 }
@@ -564,6 +565,10 @@ void PatternBehavior::plan(const ControlContext& ctx, const PatternCommand& c) {
     // World's vehicle)
     shape_ = ctx.path ? ctx.path->pattern : PatternShape{};
     pathRevision_ = ctx.path ? ctx.path->revision : 0;
+    if (!isHold(shape_.frame) && ctx.path) frame_ = ctx.path->patternFrame;
+    frameMoves_ = !isHold(shape_.frame) && frame_.origin != FrameOrigin::Fixed;
+    frameAltitude_ = kHold;
+    frameNorthMs_ = frameEastMs_ = frameDownMs_ = 0.0;
     const double year = shape_.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? worldYear(ctx, s) : 2025.0;
     route::completePattern(resolved_, shape_, s, perf, hovers_, wind_.northMs, wind_.eastMs, ctx.altimeter, year);
     route::planPattern(*pattern_, resolved_, s.latitudeRad, s.longitudeRad, shape_, year, route::trackOf(s));
@@ -596,6 +601,53 @@ void PatternBehavior::startArc(const route::Turn& t, const sim::VehicleState& s)
     lastBearing_ = std::atan2(east - t.centreEastM, north - t.centreNorthM);
     const double way = t.angleRad >= 0.0 ? 1.0 : -1.0;
     swept_ = way * geo::wrapPi(lastBearing_ - t.entryBearingRad); // (a little before its start: negative)
+}
+
+bool PatternBehavior::placeInFrame(const ControlContext& ctx, const sim::VehicleState& s) {
+    // as the step began, as a vehicle followed is read (the world's time: a vehicle's own clock starts at its creation)
+    FramePose pose;
+    if (frame_.origin == FrameOrigin::Vehicle) {
+        const sim::VehicleState* v = ctx.world ? ctx.world->vehicleState(frame_.vehicle) : nullptr;
+        if (!v) return false;
+        pose = vehiclePose(*v);
+    } else {
+        pose = framePose(frame_, ctx.world ? ctx.world->simTime() : s.simTime);
+    }
+    const GeoPoint at = framePoint(pose, shape_.frameOffset());
+    pattern_->lat0 = at.latitudeRad, pattern_->lon0 = at.longitudeRad; // (the pattern's pieces are laid out from it: all move with it)
+    if (!isHold(shape_.frameZM)) frameAltitude_ = at.altitudeMslM;
+    frameNorthMs_ = pose.northMs, frameEastMs_ = pose.eastMs, frameDownMs_ = pose.downMs;
+    return true;
+}
+
+VelocityCommand PatternBehavior::followInFrame(const ControlContext& ctx, const Performance& perf, const route::Fix& fix, const route::Ahead& ahead,
+                                               const route::Steer& steer) {
+    // A frame moving steadily is ground like any other: the aircraft flies over it at its velocity less the frame's,
+    // through air moving over it at the wind less the frame's. (A frame turned with its origin swings the point as
+    // the origin turns: that the path's feedback follows.)
+    sim::VehicleState over = ctx.sensed;
+    over.velocityNedMs[0] -= frameNorthMs_, over.velocityNedMs[1] -= frameEastMs_;
+    WindEstimate wind = wind_;
+    wind.northMs -= frameNorthMs_, wind.eastMs -= frameEastMs_;
+    VelocityCommand out = route::follow(ctx, over, perf, wind, hovers_, fix, ahead, steer, pattern_->trims, course_, heading_);
+    if (hovers_) out.northMs += frameNorthMs_, out.eastMs += frameEastMs_; // (a rotorcraft's velocity is over the ground)
+    return out;
+}
+
+VelocityCommand PatternBehavior::hoverInFrame(const ControlContext& ctx, const Performance& perf, double transit) const noexcept {
+    const auto& s = ctx.sensed;
+    double north, east; // the point, from here
+    geo::localNorthEastM(s.latitudeRad, s.longitudeRad, pattern_->lat0, pattern_->lon0, north, east);
+    const double distance = std::hypot(north, east);
+    // closing on it no faster than it could stop closing there, as a formation's slot is closed on: after its velocity
+    // loop's lag, at half its deceleration, and at half its bandwidth nearer
+    const double lag = std::isfinite(perf.velocityBandwidthRadS) && perf.velocityBandwidthRadS > 0.0 ? 1.0 / perf.velocityBandwidthRadS : 10.0;
+    const double a = std::isfinite(perf.maxDecelerationMs2) && perf.maxDecelerationMs2 > 0.0 ? 0.5 * perf.maxDecelerationMs2 : 0.25;
+    const double closing = std::fmin(transit, std::fmin(0.5 / lag * distance, a * (std::sqrt(lag * lag + 2.0 * distance / a) - lag)));
+    const double k = distance > 1e-6 ? closing / distance : 0.0;
+    const double climb = isHold(frameAltitude_) ? 0.0 : -frameDownMs_; // (its frame's height, where it has a z)
+    return VelocityCommand{kHold, route::verticalSpeedTo(altitudeMsl_, climb, s, perf, true), kHold, kHold, frameNorthMs_ + k * north,
+                           frameEastMs_ + k * east};
 }
 
 bool PatternBehavior::due(double now) const noexcept {
@@ -661,15 +713,39 @@ Command PatternBehavior::update(const ControlContext& ctx, const Command& in) {
         else hold.airspeedMs = s.airspeedTrueMs;
         return hold;
     }
-    if (!planned_ || !same(*c, flown_) || (ctx.path && ctx.path->revision != pathRevision_)) plan(ctx, *c); // (an UPDATE: the pattern it makes, afresh)
-    if (startS_ < 0.0) startS_ = s.simTime;
+    if (!planned_ || !same(*c, flown_) || (ctx.path && ctx.path->revision != pathRevision_)) { // (an UPDATE: the pattern it makes, afresh)
+        if (planned_ && c->pattern == static_cast<double>(PatternKind::Hover) && flown_.pattern != c->pattern) startS_ = -1.0; // (a hover's from its arrival)
+        plan(ctx, *c);
+    }
+    if (!isHold(shape_.frame) && !placeInFrame(ctx, s)) { // (its frame's vehicle gone: nothing to fly round)
+        failure_ = Reason::TargetLost;
+        VelocityCommand hold{kHold, 0.0, s.eulerRad[2], kHold, kHold, kHold};
+        if (hovers_) hold.northMs = hold.eastMs = 0.0;
+        else hold.airspeedMs = s.airspeedTrueMs;
+        return hold;
+    }
     static const Performance kNone{};
     const Performance& perf = ctx.performance ? *ctx.performance : kNone;
     const route::Pattern& p = *pattern_;
+    if (p.kind == PatternKind::Hover) { // over its point, by the position loop; its duration from its arrival there (4.25)
+        altitudeMsl_ = isHold(frameAltitude_) ? altitudeMslOf(resolved_.altitudeM, altitudeReferenceOf(resolved_.altitudeReference), s, ctx.altimeter)
+                                              : frameAltitude_;
+        const double off = geo::distanceM(s.latitudeRad, s.longitudeRad, p.lat0, p.lon0);
+        if (startS_ < 0.0 && off < 1.0 && std::abs(s.altitudeMslM - altitudeMsl_) < 2.0) startS_ = s.simTime;
+        if (due(s.simTime)) finished_ = true; // (and hovers on)
+        // (its speed there: the position loop's most, a ground speed - an airspeed's true airspeed, calm)
+        const SpeedReference reference = speedReferenceOf(resolved_.speedReference, SpeedReference::GroundSpeed);
+        const double transit = reference == SpeedReference::GroundSpeed ? resolved_.speed : trueAirspeedOf(resolved_.speed, reference, s);
+        crossTrack_ = off, course_ = heading_ = kHold, speedFlown_ = transit;
+        if (frameMoves_) return hoverInFrame(ctx, perf, transit);
+        return PositionCommand{p.lat0, p.lon0, altitudeMsl_, transit, 1.0, kHold};
+    }
+    if (startS_ < 0.0) startS_ = s.simTime;
     const route::Fix fix = locate(s);
     if (p.exit < 0 && due(s.simTime)) finished_ = true; // (and flies on)
     crossTrack_ = fix.crossTrackM;
-    altitudeMsl_ = altitudeMslOf(resolved_.altitudeM, altitudeReferenceOf(resolved_.altitudeReference), s, ctx.altimeter);
+    altitudeMsl_ = isHold(frameAltitude_) ? altitudeMslOf(resolved_.altitudeM, altitudeReferenceOf(resolved_.altitudeReference), s, ctx.altimeter)
+                                          : frameAltitude_; // (its frame's, given a z)
     route::Steer steer;
     steer.speed = resolved_.speed;
     steer.reference = speedReferenceOf(resolved_.speedReference, hovers_ ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
@@ -678,7 +754,7 @@ Command PatternBehavior::update(const ControlContext& ctx, const Command& in) {
         if (std::isfinite(best)) steer.speed = best, steer.reference = SpeedReference::TrueAirspeed;
     }
     speedFlown_ = steer.speed;
-    steer.verticalSpeedMs = route::verticalSpeedTo(altitudeMsl_, 0.0, s, perf, hovers_);
+    steer.verticalSpeedMs = route::verticalSpeedTo(altitudeMsl_, frameMoves_ && !isHold(frameAltitude_) ? -frameDownMs_ : 0.0, s, perf, hovers_);
     // what comes next: the pattern's next piece, a turn of its radius - and, for a
     // rotorcraft, no faster than the radius allows (and than slows it in time for one)
     route::Ahead ahead;
@@ -708,6 +784,7 @@ Command PatternBehavior::update(const ControlContext& ctx, const Command& in) {
             steer.speedLimitMs = route::brakingLimit(perf, turning, ahead.toChangeM);
         }
     }
+    if (frameMoves_) return followInFrame(ctx, perf, fix, ahead, steer);
     return route::follow(ctx, perf, wind_, hovers_, fix, ahead, steer, pattern_->trims, course_, heading_);
 }
 
@@ -718,7 +795,11 @@ bool PatternBehavior::progress(ActivityProgress& out) const noexcept {
     out.segments = p.count;
     out.laps = laps_;
     const bool timed = !isHold(resolved_.durationS), counted = !isHold(shape_.orbits);
-    if (!entering_) {
+    if (p.kind == PatternKind::Hover) { // on its way there; then over it, its duration from its arrival
+        out.segment = 0;
+        out.segmentPercent = out.percent = startS_ >= 0.0 ? 100.0 : 0.0;
+        if (startS_ < 0.0 && timed) out.timeToGoS = crossTrack_ / std::fmax(speedFlown_, 1.0) + resolved_.durationS;
+    } else if (!entering_) {
         const double piece = p.pieceM(piece_), lap = p.lapM();
         out.segmentPercent = piece > 1e-6 ? std::clamp(100.0 * inPieceM_ / piece, 0.0, 100.0) : 100.0;
         if (!timed && !counted) out.percent = lap > 1e-6 ? std::clamp(100.0 * (lapDoneM_ + inPieceM_) / lap, 0.0, 100.0) : 100.0;
@@ -990,7 +1071,13 @@ void registerGuidanceModes(ControllerRegistry& r) {
                           p("turn_rate_rad_s", "rad/s", now, 0.0, inf, Constraint::None, Constraint::MaxOrientation),
                           p("turn_type", "", now, 0.0, static_cast<double>(HoldTurn::Count) - 1.0),
                           p("hold_entry", "", now, 0.0, static_cast<double>(HoldEntry::Count) - 1.0),
-                          p("hold_context", "", now, 0.0, static_cast<double>(HoldContext::Count) - 1.0)};
+                          p("hold_context", "", now, 0.0, static_cast<double>(HoldContext::Count) - 1.0),
+                          p("frame", "", now, 1.0, 9007199254740992.0),
+                          p("frame_rotation", "", now, 0.0, static_cast<double>(FrameRotation::Count) - 1.0),
+                          p("frame_offsets", "", now, 0.0, static_cast<double>(FrameOffsets::Count) - 1.0),
+                          p("frame_x_m", "m", now, -inf, inf),
+                          p("frame_y_m", "m", now, -inf, inf),
+                          p("frame_z_m", "m", now, -inf, inf)};
     pattern.uses = {"fsim.flight.velocity"};
     pattern.mode = FlightMode::Loiter;
     pattern.setpoint = SetpointKind::Pattern;

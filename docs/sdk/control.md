@@ -316,7 +316,7 @@ rotorcraft keep 80 % of their speed through the turns (`tests/test_routes.cpp`).
 `fsim python examples/python/vehicle_interface.py` flies four of them for the
 viewer.
 
-### Loiter patterns: orbit, racetrack, figure-eight, hold
+### Loiter patterns: orbit, racetrack, figure-eight, hold, hover
 
 `fsim.guidance.pattern` is A-GRA's loiter. Its setpoint is fixed-size, and
 an UPDATE merges the fields it gives, as an hsa's does:
@@ -372,6 +372,8 @@ world.update(a, PatternCommand{}, steeper);
 - **`orbits`:** it completes after so many laps, counted where it was joined (with a duration, the first).
 - **The entry point** is flown to directly, and the laps are counted from there; **the exit point** ends it once its duration or laps are flown, and it flies on out along its course.
 - **A hold's** ([flight-autonomy.md](../flight-autonomy.md), 4.24): `turnRateRadS` or `turnType` (`HoldTurn`: STANDARD rate one, MIL_POWER its tightest, RELAX half rate one) for the radius; `holdEntry` (`HoldEntry`) for a racetrack's or a hold's way in - DIRECT where it is nearest, ANCHOR at the fix by ATC's entry for the side it comes from, INBOUND or OUTBOUND onto that leg on its course, ATC's PARALLEL or TEARDROP; left out, direct to the fix; `holdContext` (`HoldContext`), ATC's defaults for every one. Its entry and exit times are the command's `options.window`.
+- **A hover** ([flight-autonomy.md](../flight-autonomy.md), 4.25; `PatternKind::Hover`), a rotorcraft's: over its point at its altitude, its duration from its arrival there (within a metre, and 2 m of its height), then it completes and hovers on. It takes its point, altitude, speed there and duration alone: anything that shapes a circuit is refused naming the field. A wing's is refused `not_supported` (`not_implemented` for a stock model whose design declares nothing), naming field 0.
+- **A point in a frame** (4.25): `frame` (`World::createFrame`'s id), `frameRotation` (`FrameRotation`), `frameOffsets` (`FrameOffsets`), `frameXM`, `frameYM`, `frameZM` (z down; left out, the pattern's own altitude). The pattern's point - its centre, fix or hover's point - is the frame's, placed as the frame moves; the pattern is flown over the frame. A vehicle's frame whose vehicle is gone fails the activity `target_lost`. In an UPDATE a point replaces the frame, and a frame the point.
 - The C ABI and Python keep one list: the shape's fields follow the pattern's 13. `activitySetpoint` gives the shape back (`Setpoint::shape`); tasks and batches carry it.
 
 ### Curves: curve following

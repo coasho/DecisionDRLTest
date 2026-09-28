@@ -37,6 +37,14 @@ FramePose carried(const FramePose& pose, double seconds) noexcept {
     return out;
 }
 
+FramePose vehiclePose(const sim::VehicleState& s) noexcept {
+    FramePose pose;
+    pose.latitudeRad = s.latitudeRad, pose.longitudeRad = s.longitudeRad, pose.altitudeMslM = s.altitudeMslM;
+    pose.rollRad = s.eulerRad[0], pose.pitchRad = s.eulerRad[1], pose.yawRad = s.eulerRad[2];
+    pose.northMs = s.velocityNedMs[0], pose.eastMs = s.velocityNedMs[1], pose.downMs = s.velocityNedMs[2];
+    return pose;
+}
+
 FramePose framePose(const FrameSpec& spec, double timeS) noexcept {
     FramePose pose;
     pose.latitudeRad = spec.latitudeRad, pose.longitudeRad = spec.longitudeRad, pose.altitudeMslM = spec.altitudeMslM;

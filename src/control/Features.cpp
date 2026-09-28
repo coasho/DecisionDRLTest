@@ -141,7 +141,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.curve/discretized", "fsim.guidance.curve", N, 17, 0, ""},                // CRV-15
 
     // --- loiter -----------------------------------------------------------------------------------------
-    CAP("fsim.guidance.pattern", P, 5, 0, "the hover loiter and relative points (FA-5)"), // LTR-09
+    CAP("fsim.guidance.pattern", S, 0, 0, ""),                                               // LTR-09
     {"fsim.guidance.pattern/orbit", "fsim.guidance.pattern", S, 0, 0, ""},                   // LTR-01
     {"fsim.guidance.pattern/racetrack", "fsim.guidance.pattern", S, 0, 0, ""},               // LTR-02
     {"fsim.guidance.pattern/figure_eight", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-04
@@ -163,14 +163,14 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.pattern/entry/parallel", "fsim.guidance.pattern", S, 0, 0, ""},
     {"fsim.guidance.pattern/entry/teardrop", "fsim.guidance.pattern", S, 0, 0, ""},
     {"fsim.guidance.pattern/hold/context", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-14 (FA-5b: ATC's defaults for every context)
-    {"fsim.guidance.pattern/hover", "fsim.guidance.pattern", N, 5, R1, ""},                  // LTR-15
+    {"fsim.guidance.pattern/hover", "fsim.guidance.pattern", S, 0, R1, ""},                  // LTR-15 (FA-5c)
     {"fsim.guidance.pattern/altitude/msl", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-16
     {"fsim.guidance.pattern/altitude/agl", "fsim.guidance.pattern", S, 0, 0, ""},
     {"fsim.guidance.pattern/altitude/hae", "fsim.guidance.pattern", S, 0, 0, ""},
     {"fsim.guidance.pattern/altitude/barometric", "fsim.guidance.pattern", S, 0, 0, ""},     // LTR-16 (FA-4b)
     {"fsim.guidance.pattern/speed/long_range_cruise", "fsim.guidance.pattern", S, 3, 0, "", true}, // LTR-17
     {"fsim.guidance.pattern/speed/max_endurance", "fsim.guidance.pattern", S, 3, 0, "", true},
-    {"fsim.guidance.pattern/relative_points", "fsim.guidance.pattern", N, 5, 0, ""},         // LTR-18
+    {"fsim.guidance.pattern/relative_points", "fsim.guidance.pattern", S, 0, 0, ""},         // LTR-18 (FA-5c)
 
     // --- the flight capability types not built yet (CAP-02) --------------------------------------------
     CAP("fsim.guidance.must_fly", N, 8, 0, ""),                                               // MFY-01..07
@@ -445,6 +445,11 @@ SupportTable::SupportTable(const VehicleProfile& profile, const CapabilityCatalo
         if (f.capability == f.id && f.built != Support::NotImplemented && catalog.find(f.id) < 0) {
             row.support = Support::NotImplemented; // applicable, and the aircraft's model lacks it
             row.stage = f.stage;
+            row.missing = "";
+        }
+        if (f.capability != f.id && f.rules == R1 && f.built != Support::NotImplemented && !(catalog.features() & kFeatureHover)) {
+            row.support = Support::NotImplemented; // a hover option, its rule undecided (no declaration), and a model that does not hover:
+            row.stage = f.stage;                   // as the hover capability is for it (ADR-29 FA-5c)
             row.missing = "";
         }
         if (f.tables && profile.tables.empty() && row.support != Support::NotImplemented) {

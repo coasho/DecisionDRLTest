@@ -59,6 +59,8 @@ public:
     virtual double groundResolutionM() const = 0;
     /// The world's UTC now, Unix seconds: the date a magnetic direction is turned at (4.22).
     virtual double utcSeconds() const = 0;
+    /// A reference frame, and where it is now (4.21, 4.25): false for one it does not have (or whose vehicle is gone).
+    virtual bool frame(FrameId id, FrameSpec& spec, FramePose& now) const = 0;
 };
 
 class CapabilityHost {
@@ -574,8 +576,16 @@ private:
     /// completed and checked; then written, the shape into the path store.
     CommandResult updatePattern(std::size_t s, ActivityId activity, const PatternCommand& next, const PatternShape* shape, const sim::VehicleState& state,
                                 CommandResult& result, CheckLog& log) noexcept;
-    /// The scratch shape into the path store, for the pattern that flies: where it has one, or one flew before.
+    /// The scratch shape into the path store, for the pattern that flies: where it has one, or one flew before - its
+    /// frame with it.
     void writeShape();
+    /// Where a pattern is (docs/flight-autonomy.md, 4.25): a hover only where the aircraft hovers (the support table's
+    /// reason, the pattern field named), and given nothing that shapes a circuit (route::hoverFault, of what was given:
+    /// `given` and `givenShape` in an UPDATE, whose merge's other fields are the pattern's it was, cleared); a point in a
+    /// frame the session has, resolved where it is now into the pattern's latitude and longitude (and its altitude,
+    /// given a z) and its frame into the scratch - an unknown one InvalidParameter, the frame field named.
+    Reason placePattern(PatternCommand& c, PatternShape& shape, CommandResult& detail, const PatternCommand* given = nullptr,
+                        const PatternShape* givenShape = nullptr) noexcept;
     /// A curve's options and segments (docs/vehicle-interface.md, 4.7 and 5.1):
     /// the options whole and finite (InvalidParameter); in a NEW, the
     /// reference where the aircraft is if left out; 1 to 10 segments, finite,
@@ -667,6 +677,7 @@ private:
     std::unique_ptr<std::array<Waiting, kWaiting>> waiting_; ///< made when the first activity waits
     const SessionView* sessionView_ = nullptr; ///< the session's (setSessionView)
     PatternShape patternShape_{}; ///< a pattern's shape as prepare() completed it: its scratch, as routePlan_ is a route's
+    FrameSpec patternFrame_{};    ///< its frame's, where its point is one's
 };
 
 } // namespace fsim::control

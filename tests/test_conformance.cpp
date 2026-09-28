@@ -150,7 +150,7 @@ public:
                 const auto& s = state();
                 auto some = [&](double v) { return chance(0.5) ? kHold : v; };
                 auto whole = [&](std::size_t n) { return chance(0.6) ? kHold : static_cast<double>(pick(n)); };
-                c.pattern = whole(static_cast<std::size_t>(PatternKind::Count));
+                c.pattern = whole(optimise ? static_cast<std::size_t>(PatternKind::Count) : 4); // (a hover, FA-5c: in the walks drawn since)
                 if (chance(0.5)) c.latitudeRad = s.latitudeRad + uniform(-0.002, 0.002), c.longitudeRad = s.longitudeRad + uniform(-0.002, 0.002);
                 c.altitudeM = some(s.altitudeMslM + uniform(-200.0, 200.0));
                 c.radiusM = some(uniform(1.0, 3000.0));
@@ -177,6 +177,12 @@ public:
                     if (chance(0.15)) shape.turnType = static_cast<double>(pick(3));
                     if (chance(0.15)) shape.holdEntry = static_cast<double>(pick(6));
                     if (chance(0.1)) shape.holdContext = static_cast<double>(pick(3));
+                    if (chance(0.1)) { // a point in a frame (FA-5c): the session's first few, or offsets alone
+                        if (chance(0.7)) shape.frame = static_cast<double>(1 + pick(3));
+                        if (chance(0.5)) shape.frameRotation = static_cast<double>(pick(4)), shape.frameOffsets = static_cast<double>(pick(3));
+                        if (chance(0.5)) shape.frameXM = uniform(-2000.0, 2000.0), shape.frameYM = uniform(-2000.0, 2000.0);
+                        if (chance(0.3)) shape.frameZM = uniform(-300.0, 0.0);
+                    }
                     if (chance(0.05)) { // one out of its range
                         double* fields[PatternShape::kFields];
                         shape.fields(fields);
@@ -677,11 +683,14 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             CHECK(done.result.other == done.addressed);
             if (done.caller.source == target->source) ++seen["controller:held"];
         } else if (done.op == Op::Cancel) CHECK(ok);
-        else if (!ok)
+        else if (!ok) {
+            INFO("refused " << reasonName(done.result.reason) << " at " << done.result.index);
             CHECK(among(done.result.reason, {Reason::NotUpdatable, Reason::WrongCommandType, Reason::InvalidParameter, Reason::OutOfRange, Reason::PerformanceLimit,
                                              Reason::InvalidWaypoint, Reason::InvalidCurve,
                                              Reason::NotSupported,      // a field the aircraft has nothing for (docs/flight-autonomy.md, 4.3)
+                                             Reason::NotImplemented,    // or nothing yet: a stock model's hover (4.25)
                                              Reason::TerrainConflict})); // a path into the ground (4.19)
+        }
     }
 
     if (done.op == Op::Legacy && done.refused != Reason::None) CHECK_FALSE(done.accepted); // (the existing entry points gated the same way)
@@ -741,7 +750,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
             break;
         case ActivityState::Failed:
             CHECK(r.by == 0);
-            if (r.reason == Reason::TargetLost) CHECK(caps[r.capability].needsTarget);
+            // (a pattern's too, whose point is in the frame of a vehicle gone: ADR-29 FA-5c)
+            if (r.reason == Reason::TargetLost) CHECK((caps[r.capability].needsTarget || caps[r.capability].setpoint == SetpointKind::Pattern));
             if (const ActivityRecord* old = was(id); r.reason == Reason::TimeConstraint && old && old->live()) {
                 // a window it had to meet, missed as it ended: disabled, or waiting, past its end window
                 // (or its critical start's) - or started as the operation went and done before its critical

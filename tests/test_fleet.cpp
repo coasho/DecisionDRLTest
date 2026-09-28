@@ -997,6 +997,95 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(parallelMiss[p.id] < (p.rotor ? std::max(0.5, 0.1 * h.radiusM) : std::max(20.0, 0.05 * h.radiusM)));
             CHECK(apart < 10.0);
         });
+    // A-GRA's hover (ADR-29 FA-5c: LTR-15): a rotorcraft over a point ten seconds of its cruise ahead and 10 m up, for 20 s from
+    // its arrival there; a wing's refused, as its support table says (R1: its design does not fly on rotors)
+    std::map<std::uint32_t, PositionCommand> hoverPoint;
+    std::map<std::uint32_t, double> hoverArrived, hoverAfter;
+    run("fsim.guidance.pattern", 0.0,
+        [&](const Plane& p) {
+            const double psi = p.start.eulerRad[2], d = 0.5 * p.scale();
+            const PositionCommand q = pointFrom(p.start, d * std::cos(psi), d * std::sin(psi), p.start.altitudeMslM + 10.0, 0.0);
+            PatternCommand c;
+            c.pattern = static_cast<double>(PatternKind::Hover), c.latitudeRad = q.latitudeRad, c.longitudeRad = q.longitudeRad;
+            c.altitudeM = q.altitudeMslM, c.altitudeReference = static_cast<double>(AltitudeReference::Msl), c.durationS = 20.0;
+            const CommandResult r = w.submit(p.id, c);
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            const control::SupportInfo* row = w.supportTable(p.id)->find("fsim.guidance.pattern/hover");
+            REQUIRE(row != nullptr);
+            if (!p.rotor) { // (not supported: its design says so)
+                CHECK(row->support == Support::NotSupported);
+                CHECK(r.reason == Reason::NotSupported);
+                CHECK(r.index == 0);
+                return false;
+            }
+            CHECK(row->support == Support::Supported);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            hoverPoint[p.id] = q, hoverArrived[p.id] = kHold, hoverAfter[p.id] = 0.0;
+            return r.accepted();
+        },
+        [&](const Plane& p) { // there, and the last metres at its position loop's pace (the UH-1H's gain 0.053/s: its last 17 m took 65 s)
+            const double bandwidth = perf(p).velocityBandwidthRadS;
+            return 4.0 * 0.5 * p.scale() / std::max(p.cruiseMs, 0.1) + (std::isfinite(bandwidth) && bandwidth > 0.0 ? 20.0 / bandwidth : 150.0) + 40.0;
+        },
+        [&](const Plane& p) { // there within a metre and 2 m of its height; after, how far off
+            const auto& s = *w.vehicleState(p.id);
+            const double off = std::hypot(distanceTo(s, hoverPoint[p.id]), s.altitudeMslM - hoverPoint[p.id].altitudeMslM);
+            if (isHold(hoverArrived[p.id]) && distanceTo(s, hoverPoint[p.id]) < 1.0 && std::abs(s.altitudeMslM - hoverPoint[p.id].altitudeMslM) < 2.0)
+                hoverArrived[p.id] = w.simTime();
+            if (!w.activity(activity[p.id])->live()) hoverAfter[p.id] = std::max(hoverAfter[p.id], off);
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            INFO(activityStateName(r.state) << "; arrived " << hoverArrived[p.id] << ", completed " << r.endTime << "; then within " << hoverAfter[p.id] << " m");
+            CHECK(r.state == ActivityState::Completed);
+            REQUIRE_FALSE(isHold(hoverArrived[p.id]));
+            // (each completed 20.00 to 20.03 s after its arrival - the UH-1H's 85 s after its command, the UH-60A's 17 s - and hovered
+            // on within 0.65 m, the UH-60A's)
+            CHECK(std::abs(r.endTime - hoverArrived[p.id] - 20.0) < 0.5); // (its duration from its arrival)
+            CHECK(hoverAfter[p.id] < 1.0);
+        });
+    // A-GRA's relative point (ADR-29 FA-5c: LTR-18): an orbit round the origin of a frame moving across its heading at a tenth of
+    // its speed, from two radii ahead - flown over the frame, round the point as it moves
+    std::map<std::uint32_t, FrameSpec> carrier;
+    std::map<std::uint32_t, double> carriedMiss;
+    run("fsim.guidance.pattern", 0.0,
+        [&](const Plane& p) {
+            const double radius = orbitRadius(p), psi = p.start.eulerRad[2], v = 0.1 * (p.rotor ? p.cruiseMs : p.start.airspeedTrueMs);
+            const PositionCommand o = alongHeading(p, 2.0 * radius);
+            FrameSpec f;
+            f.origin = FrameOrigin::Moving;
+            f.latitudeRad = o.latitudeRad, f.longitudeRad = o.longitudeRad, f.altitudeMslM = p.start.altitudeMslM, f.yawRad = psi;
+            f.northMs = -v * std::sin(psi), f.eastMs = v * std::cos(psi), f.timeS = w.simTime(); // (to its right)
+            const FrameId id = w.createFrame(f);
+            REQUIRE(id != 0);
+            carrier[p.id] = f, carriedMiss[p.id] = 0.0;
+            PatternCommand c;
+            PatternShape shape;
+            c.radiusM = radius, shape.frame = static_cast<double>(id);
+            const CommandResult r = w.submit(p.id, c, shape);
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            return r.accepted();
+        },
+        [&](const Plane& p) { return (2.0 + 3.5 * kPi) * orbitRadius(p) / std::max(0.9 * (p.rotor ? p.cruiseMs : p.start.airspeedTrueMs), 0.1) + 60.0; },
+        [&](const Plane& p) { // off its circle round the point where the frame is now, from its first lap
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            if (r.progress.laps < 1) return;
+            const GeoPoint centre = framePoint(framePose(carrier[p.id], w.simTime()), FrameOffset{});
+            double north, east;
+            offset(*w.vehicleState(p.id), centre.latitudeRad, centre.longitudeRad, north, east);
+            carriedMiss[p.id] = std::max(carriedMiss[p.id], std::abs(std::hypot(north, east) - orbitRadius(p)));
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            INFO(activityStateName(r.state) << ", " << r.progress.laps << " laps; R " << orbitRadius(p) << ", off its moving circle " << carriedMiss[p.id] << " m");
+            CHECK(r.live());
+            CHECK(r.progress.laps >= 1);
+            // (the worst: a wing 16.8 m, the C172's 4.7 % of its 357 m; a rotorcraft 4.3 m, the UH-1H's 2.1 %)
+            CHECK(carriedMiss[p.id] < (p.rotor ? std::max(0.5, 0.1 * orbitRadius(p)) : std::max(20.0, 0.05 * orbitRadius(p))));
+        });
     // a gentle S: a wing's six of its full-bank turns long (at least its scale), a rotorcraft's its scale
     auto curveLength = [&](const Plane& p) { return p.rotor ? p.scale() : std::max(p.scale(), 6.0 * fullBankRadius(p)); };
     run("fsim.guidance.curve", 0.0,

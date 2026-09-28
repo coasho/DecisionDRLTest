@@ -3,6 +3,7 @@
 #include "control/CapabilityHost.h"
 
 #include "control/Route.h"
+#include "core/Geodesy.h"
 #include "fsim/Altimeter.h"
 #include "fsim/GuidanceModes.h"
 
@@ -74,8 +75,12 @@ CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, con
     } else if (pattern) { // its duration, at its speed - or its laps from its way in (and on to its exit point), the first
         const double h = aboveSea(pattern->altitudeM, pattern->altitudeReference, state, config_->altimeter);
         const double tas = route::plannedSpeed(pattern->speed, pattern->speedReference, h);
-        double timeS = pattern->durationS;
-        if (!isHold(patternShape_.orbits)) {
+        double timeS = pattern->durationS, speed = tas;
+        if (pattern->pattern == static_cast<double>(PatternKind::Hover)) { // its way there at its speed, then its duration over it (4.25)
+            const double away = geo::distanceM(state.latitudeRad, state.longitudeRad, pattern->latitudeRad, pattern->longitudeRad);
+            fly(tas > 0.5 ? away / tas : kUnknown, tas, h);
+            speed = 0.0; // (the tables' burn in the hover, their least speed)
+        } else if (!isHold(patternShape_.orbits)) {
             route::Pattern p;
             route::planPattern(p, *pattern, state.latitudeRad, state.longitudeRad, patternShape_,
                                patternShape_.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? yearNow() : 2025.0,
@@ -83,7 +88,7 @@ CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, con
             const double laps = tas > 0.5 ? (p.entryM() + patternShape_.orbits * p.lapM() + p.toExitM()) / tas : kUnknown;
             timeS = isHold(timeS) ? laps : std::fmin(timeS, laps);
         }
-        fly(timeS, tas, h);
+        fly(timeS, speed, h);
     } else { // to its end: in its duration, else at the speed it flies within its range
         const double h = isHold(curve->altitudeM) ? state.altitudeMslM : curve->altitudeM;
         const double length = curvePlan_->lengthM();

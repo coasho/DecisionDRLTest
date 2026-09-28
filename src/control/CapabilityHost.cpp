@@ -526,6 +526,12 @@ Reason CapabilityHost::checkShape(const PatternCommand& c, const PatternShape& s
     if (!code(s.turnType, static_cast<double>(HoldTurn::Count))) return bad(26);
     if (!code(s.holdEntry, static_cast<double>(HoldEntry::Count))) return bad(27);
     if (!code(s.holdContext, static_cast<double>(HoldContext::Count))) return bad(28);
+    if (!isHold(s.frame) && !(s.frame == std::floor(s.frame) && s.frame >= 1.0 && s.frame <= 9007199254740992.0)) return bad(29);
+    if (!code(s.frameRotation, static_cast<double>(FrameRotation::Count))) return bad(30);
+    if (!code(s.frameOffsets, static_cast<double>(FrameOffsets::Count))) return bad(31);
+    if (!given(s.frameXM, -inf, true)) return bad(32);
+    if (!given(s.frameYM, -inf, true)) return bad(33);
+    if (!given(s.frameZM, -inf, true)) return bad(34);
     if (merge && !isHold(s.directionReference) && isHold(c.courseRad) && isHold(s.headingRad)) return bad(13);
     return Reason::None;
 }
@@ -995,6 +1001,7 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
         patternShape_ = shape ? *shape : PatternShape{};
         if (const Reason why = checkPattern(*pattern, false, detail); why != Reason::None) return why;
         if (const Reason why = checkShape(*pattern, patternShape_, false, detail); why != Reason::None) return why;
+        if (const Reason why = placePattern(*pattern, patternShape_, detail); why != Reason::None) return why; // (a hover, a frame's point: 4.25)
         if (const Reason why = optimisable(pattern->speedOptimization, 12, detail); why != Reason::None) return why;
         optimise(pattern->speed, pattern->speedReference, pattern->speedOptimization, pattern->altitudeM, pattern->altitudeReference, state);
         radiusFrom = radiusField(*pattern, patternShape_);

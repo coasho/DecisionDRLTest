@@ -287,8 +287,10 @@ TEST_CASE("pattern: a duration completes it; an UPDATE changes only what it give
         return r;
     };
     PatternCommand c;
-    c.pattern = 4.0;
+    c.pattern = 5.0;
     refused(c, Reason::InvalidParameter, 0);
+    c.pattern = 4.0; // a hover: a rotorcraft's (ADR-29 FA-5c) - not implemented for a stock model nothing declares
+    refused(c, Reason::NotImplemented, 0);
     c = PatternCommand{}, c.latitudeRad = 0.5; // a point needs both
     refused(c, Reason::InvalidParameter, 2);
     c = PatternCommand{}, c.clockwise = 0.5;
@@ -318,6 +320,6 @@ TEST_CASE("pattern: a duration completes it; an UPDATE changes only what it give
         CHECK(d->mode == FlightMode::Loiter);
         CHECK(d->setpoint == SetpointKind::Pattern);
         CHECK((d->interactions & kUpdate) != 0);
-        CHECK(d->parameters.size() == 29); // (the speed optimisation: ADR-29 FA-3e; the pattern's shape: FA-5a, FA-5b)
+        CHECK(d->parameters.size() == 35); // (the speed optimisation: ADR-29 FA-3e; the pattern's shape: FA-5a, FA-5b, FA-5c)
     }
 }

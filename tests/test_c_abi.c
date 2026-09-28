@@ -732,7 +732,7 @@ int main(int argc, char** argv) {
             fsim_activity_progress progress;
             fsim_activity_id orbit_id;
             int k;
-            CHECK(fsim_mode_field_count(FSIM_MODE_PATTERN) == 29); /* (1.15: twelve leave the optimisation out; 1.21, 1.22: its shape's after) */
+            CHECK(fsim_mode_field_count(FSIM_MODE_PATTERN) == 35); /* (1.15: twelve leave the optimisation out; 1.21 to 1.23: its shape's after) */
             for (k = 0; k < 12; ++k) pattern[k] = wider[k] = fsim_hold();
             pattern[0] = FSIM_PATTERN_ORBIT;
             pattern[5] = 800.0; /* radius_m */
@@ -1392,7 +1392,7 @@ int main(int argc, char** argv) {
             for (k = 0; k < 13; ++k) pattern[k] = hold;
             pattern[12] = FSIM_SPEED_LONG_RANGE_CRUISE;
             CHECK(fsim_vehicle_submit_mode(world, cruiser, FSIM_MODE_PATTERN, pattern, 13, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
-            CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.count == 29 && sp.fields[12] == FSIM_SPEED_LONG_RANGE_CRUISE); /* (1.22: 29) */
+            CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp) == FSIM_OK && sp.count == 35 && sp.fields[12] == FSIM_SPEED_LONG_RANGE_CRUISE); /* (1.23: 35) */
             /* a stock aircraft has no performance tables to fly one from: not implemented, the field named */
             spec.name = "cap-stock";
             spec.type = "jsbsim:c172x";
@@ -1559,12 +1559,12 @@ int main(int argc, char** argv) {
             {
                 /* ABI 1.21: A-GRA's orbit as its schema gives it (docs/flight-autonomy.md, 4.23) - a racetrack by two
                    circles, read back complete; one refused naming its field; laps that complete it */
-                double pattern[30];
+                double pattern[36];
                 fsim_batch_command sp2;
                 fsim_activity_progress progress;
                 int k;
                 st = fsim_vehicle_state_ptr(world, ranger);
-                for (k = 0; k < 30; ++k) pattern[k] = fsim_hold();
+                for (k = 0; k < 36; ++k) pattern[k] = fsim_hold();
                 pattern[0] = FSIM_PATTERN_RACETRACK;
                 pattern[1] = st->latitude_rad, pattern[2] = st->longitude_rad + 0.0005; /* the first circle's centre */
                 pattern[5] = 900.0;
@@ -1574,7 +1574,7 @@ int main(int argc, char** argv) {
                 CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_PATTERN, pattern, 25, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
                 memset(&sp2, 0, sizeof sp2);
                 sp2.struct_size = sizeof sp2;
-                CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp2) == FSIM_OK && sp2.code == FSIM_MODE_PATTERN && sp2.count == 29);
+                CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp2) == FSIM_OK && sp2.code == FSIM_MODE_PATTERN && sp2.count == 35);
                 CHECK(sp2.fields[20] == 1200.0 && sp2.fields[17] == 1.0 && isnan(sp2.fields[7]) && isnan(sp2.fields[8])); /* (the circles give the legs) */
                 CHECK(isnan(sp2.fields[26]) && isnan(sp2.fields[27]));
                 fsim_activity_progress_init(&progress);
@@ -1591,7 +1591,33 @@ int main(int argc, char** argv) {
                 pattern[28] = 3.0; /* a context is 0 to 2 */
                 CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_PATTERN, pattern, 29, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
                       cr.reserved == 29);
-                CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_PATTERN, pattern, 30, NULL, &cr) != FSIM_OK); /* malformed: 29 at most */
+                CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_PATTERN, pattern, 36, NULL, &cr) != FSIM_OK); /* malformed: 35 at most */
+                /* ABI 1.23 (4.25): a hover is a rotorcraft's; a pattern's point in a frame, carried with it */
+                pattern[28] = fsim_hold();
+                for (k = 0; k < 36; ++k) pattern[k] = fsim_hold();
+                pattern[0] = FSIM_PATTERN_HOVER;
+                CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_PATTERN, pattern, 13, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                      strcmp(fsim_reason_name(cr.reason), "not_supported") == 0 && cr.reserved == 1);
+                {
+                    fsim_frame_spec frame;
+                    uint64_t id = 0;
+                    st = fsim_vehicle_state_ptr(world, ranger);
+                    fsim_frame_spec_init(&frame);
+                    frame.origin = FSIM_FRAME_FIXED;
+                    frame.latitude_rad = st->latitude_rad, frame.longitude_rad = st->longitude_rad, frame.altitude_msl_m = st->altitude_msl_m;
+                    CHECK(fsim_world_create_frame(world, &frame, &id) == FSIM_OK && id > 0);
+                    pattern[0] = FSIM_PATTERN_ORBIT;
+                    pattern[29] = (double)id, pattern[32] = 3000.0; /* 3 km north of its origin */
+                    CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_PATTERN, pattern, 35, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+                    CHECK(fsim_activity_get_setpoint(world, cr.activity, &sp2) == FSIM_OK && sp2.fields[29] == (double)id && sp2.fields[32] == 3000.0);
+                    CHECK(fabs(sp2.fields[1] - (st->latitude_rad + 3000.0 / 6378137.0)) < 1e-5); /* (where it is: the frame's point) */
+                    pattern[29] = (double)(id + 1000); /* no such frame */
+                    CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_PATTERN, pattern, 35, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                          cr.reserved == 30);
+                    pattern[29] = fsim_hold(); /* offsets without their frame */
+                    CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_PATTERN, pattern, 35, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                          cr.reserved == 33);
+                }
             }
         }
         }

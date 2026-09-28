@@ -187,7 +187,7 @@ struct RouteCommand {                  // fsim.guidance.route; the waypoints go 
 
 ```cpp
 struct PatternCommand {                // fsim.guidance.pattern
-    double pattern = kHold;            // PatternKind: 0 orbit (kHold), 1 racetrack, 2 figure-eight, 3 hold
+    double pattern = kHold;            // PatternKind: 0 orbit (kHold), 1 racetrack, 2 figure-eight, 3 hold, 4 a rotorcraft's hover
     double latitudeRad = kHold, longitudeRad = kHold; // the centre; a racetrack's or a hold's fix. kHold: here
     double altitudeM = kHold, altitudeReference = kHold;
     double radiusM = kHold;            // kHold: the aircraft's turn radius at its speed and 80 % of its bank limit
@@ -213,7 +213,8 @@ struct PatternCommand {                // fsim.guidance.pattern
 - **Speed optimisation**, as an hsa's (4.4): the pattern is planned at the optimum where it orbits (its radius and legs from that speed), and flown at the optimum at the altitude and weight now.
 - **UPDATE** merges the fields given, as an hsa's does; the pattern they make is flown afresh, and a duration still counts from the NEW.
 - **Duration:** the activity completes when it has passed, and the aircraft flies on in the pattern.
-- **A-GRA's orbit as its schema gives it** - two circles, an inbound heading, legs by time, turns by bank, laps, entry and exit points - goes beside the pattern in a `PatternShape` (ADR-29, [flight-autonomy.md](flight-autonomy.md) 4.23).
+- **Hover** (ADR-29, [flight-autonomy.md](flight-autonomy.md) 4.25): a rotorcraft's, over its point at its altitude by the position loop; its duration counts from its arrival there. It takes nothing that shapes a circuit; a wing's is refused.
+- **A-GRA's orbit and hold as its schema gives them** - two circles, an inbound heading, legs by time, turns by bank, rate or type, laps, entry and exit points, a hold's entries and context, a point in a reference frame - go beside the pattern in a `PatternShape` (ADR-29, [flight-autonomy.md](flight-autonomy.md) 4.23 to 4.25).
 - **Progress:** the piece flown of the lap's, the laps, and the percent of the lap (or, timed, of the duration) with the time to go.
 - **Flown** by the path follower (4.8), its pieces arcs and straights in the plane at the pattern's point.
 

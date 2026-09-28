@@ -90,6 +90,8 @@ struct Pattern;
 struct Curve;
 struct Fix;
 struct Turn;
+struct Ahead;
+struct Steer;
 } // namespace route
 
 /// "route": fsim.guidance.route, A-GRA's waypoint following
@@ -164,8 +166,10 @@ private:
 /// out): an orbit round its centre, a racetrack or a hold - two half circles
 /// joined by legs, the inbound one ending at the fix, entered direct to the fix -
 /// or a figure-eight, two circles meeting at the centre - or one of A-GRA's
-/// shapes (docs/flight-autonomy.md, 4.23): two circles, an entry point flown
-/// to, an exit point left from. The route's path follower flies it
+/// shapes (docs/flight-autonomy.md, 4.23 to 4.25): two circles, an entry
+/// point flown to, an exit point left from, a hold's ways in, a point in a
+/// frame carried as the frame moves; or a rotorcraft's hover over its point,
+/// its duration from its arrival. The route's path follower flies it
 /// (RouteBehavior). Its laps are counted from where it was joined; with a
 /// duration or a number of laps it completes when the first has passed, and
 /// flies on - round the pattern, or, given an exit point, on round to it and
@@ -180,6 +184,8 @@ public:
     Command update(const ControlContext& ctx, const Command& in) override;
     void reset() override;
     bool finished() const noexcept override { return finished_; }
+    /// TargetLost: the vehicle its frame follows is gone (docs/flight-autonomy.md, 4.25).
+    Reason failure() const noexcept override { return failure_; }
     /// The piece flown (of the lap's), the laps, how far round the lap (or,
     /// timed, through the duration) and the time to go, the cross-track, and
     /// what it commands: the course, the altitude, the speed.
@@ -196,6 +202,16 @@ private:
     route::Fix locate(const sim::VehicleState& s);
     /// Its duration or its laps are flown.
     bool due(double now) const noexcept;
+    /// Its point where its frame is now, as the step began (a vehicle's as the world read it then), and the frame's
+    /// velocity; false if the frame's vehicle is gone.
+    bool placeInFrame(const ControlContext& ctx, const sim::VehicleState& s);
+    /// The path flown over a frame that moves (4.25): the aircraft's velocity and the wind's over the frame, the frame's
+    /// origin's velocity taken out - a rotorcraft's given back to it over the ground.
+    VelocityCommand followInFrame(const ControlContext& ctx, const Performance& perf, const route::Fix& fix, const route::Ahead& ahead,
+                                  const route::Steer& steer);
+    /// A hover over a point a moving frame carries: the frame's origin's velocity, and a closing on the point it could
+    /// stop closing (a formation's), no faster than `transit`.
+    VelocityCommand hoverInFrame(const ControlContext& ctx, const Performance& perf, double transit) const noexcept;
 
     std::unique_ptr<route::Pattern> pattern_; ///< allocated with the behaviour
     WindEstimate wind_;
@@ -203,6 +219,11 @@ private:
     PatternCommand resolved_{};      ///< the same, complete
     PatternShape shape_{};           ///< its shape, the path store's when it was planned (completed)
     std::uint32_t pathRevision_ = 0; ///< the path store's revision then: a new shape is planned afresh
+    FrameSpec frame_{};              ///< its frame, where its point is one's
+    double frameAltitude_ = kHold;   ///< the frame's point's height, where the shape gives it a z
+    bool frameMoves_ = false;        ///< its frame is not fixed: flown over it
+    double frameNorthMs_ = 0.0, frameEastMs_ = 0.0, frameDownMs_ = 0.0; ///< its origin's velocity, as it was placed
+    Reason failure_ = Reason::None;
     bool planned_ = false, hovers_ = false, entering_ = false, finished_ = false;
     bool leaving_ = false;           ///< past its exit point, out along its course there
     std::uint32_t piece_ = 0, laps_ = 0, entryPiece_ = 0;

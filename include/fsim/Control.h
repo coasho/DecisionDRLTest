@@ -7,6 +7,7 @@
 
 #include "fsim/Capability.h"
 #include "fsim/EnvironmentState.h"
+#include "fsim/Frames.h"
 #include "fsim/Rng.h"
 #include "fsim/Span.h"
 #include "fsim/VehicleState.h"
@@ -242,6 +243,7 @@ enum class PatternKind : std::uint8_t {
     Racetrack = 1,   ///< two half circles joined by straight legs, the inbound one ending at the fix
     FigureEight = 2, ///< two circles meeting at the centre, one flown each way round
     Hold = 3,        ///< ATC's holding pattern: a racetrack on the fix with a minute's legs, entered direct to the fix
+    Hover = 4,       ///< a rotorcraft's hover over its point, at its altitude; its duration counted from its arrival there (4.25)
     Count
 };
 
@@ -343,19 +345,40 @@ struct PatternShape {
     double holdEntry = kHold;
     /// HoldContext of a hold: its defaults ATC's, whichever it is.
     double holdContext = kHold;
+    /// Its point in a reference frame (A-GRA's relative point; 4.25): the
+    /// frame's id (World::createFrame), and its offsets from the frame's
+    /// origin - turned as `frameRotation` says (FrameRotation), laid out as
+    /// `frameOffsets` says (FrameOffsets), x and y, and z down (kHold: the
+    /// pattern's own altitude). The pattern's point - its centre, fix, first
+    /// circle's centre or hover's point - is the frame's, carried with it as
+    /// it moves; the pattern's latitude and longitude report where it was
+    /// when planned. Given a latitude and longitude in an UPDATE, the frame is
+    /// left; given a frame, the point is its.
+    double frame = kHold;
+    double frameRotation = kHold, frameOffsets = kHold;
+    double frameXM = kHold, frameYM = kHold, frameZM = kHold;
 
     /// Its fields in order (the C ABI's and Python's, after the PatternCommand's): pointers into it.
-    static constexpr std::size_t kFields = 16;
+    static constexpr std::size_t kFields = 22;
     void fields(double* f[kFields]) noexcept {
         f[0] = &directionReference, f[1] = &headingRad, f[2] = &legS, f[3] = &bankRad, f[4] = &orbits, f[5] = &latitude2Rad;
         f[6] = &longitude2Rad, f[7] = &radius2M, f[8] = &entryLatitudeRad, f[9] = &entryLongitudeRad, f[10] = &exitLatitudeRad;
-        f[11] = &exitLongitudeRad, f[12] = &turnRateRadS, f[13] = &turnType, f[14] = &holdEntry, f[15] = &holdContext;
+        f[11] = &exitLongitudeRad, f[12] = &turnRateRadS, f[13] = &turnType, f[14] = &holdEntry, f[15] = &holdContext, f[16] = &frame;
+        f[17] = &frameRotation, f[18] = &frameOffsets, f[19] = &frameXM, f[20] = &frameYM, f[21] = &frameZM;
+    }
+    /// Its point in its frame: the offsets left out, the frame's origin.
+    FrameOffset frameOffset() const noexcept {
+        FrameOffset o;
+        o.rotation = isHold(frameRotation) ? FrameRotation::Unrotated : static_cast<FrameRotation>(static_cast<int>(frameRotation));
+        o.offsets = isHold(frameOffsets) ? FrameOffsets::Cartesian : static_cast<FrameOffsets>(static_cast<int>(frameOffsets));
+        o.x = isHold(frameXM) ? 0.0 : frameXM, o.y = isHold(frameYM) ? 0.0 : frameYM, o.z = isHold(frameZM) ? 0.0 : frameZM;
+        return o;
     }
     /// Every field left out: the pattern as its PatternCommand alone gives it.
     bool empty() const noexcept {
         const double v[kFields] = {directionReference, headingRad, legS, bankRad, orbits, latitude2Rad, longitude2Rad, radius2M,
                                    entryLatitudeRad, entryLongitudeRad, exitLatitudeRad, exitLongitudeRad, turnRateRadS, turnType, holdEntry,
-                                   holdContext};
+                                   holdContext, frame, frameRotation, frameOffsets, frameXM, frameYM, frameZM};
         for (const double x : v)
             if (!isHold(x)) return false;
         return true;
@@ -377,6 +400,7 @@ struct PathStore {
     std::uint32_t segmentCount = 0;
     BezierSegment segments[kSegments];
     PatternShape pattern;       ///< the shape of the pattern that flies (empty: its PatternCommand alone)
+    FrameSpec patternFrame;     ///< its frame, where its point is one's (PatternShape::frame)
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").

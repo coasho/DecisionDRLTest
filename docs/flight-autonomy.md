@@ -611,6 +611,31 @@ A-GRA's hold (MA_HoldType) gives what a hold on its fix did not: its turns by ra
   - C ABI 1.22: `FSIM_MODE_PATTERN` takes 29 fields; `fsim_hold_turn`, `fsim_hold_entry`, `fsim_hold_context`.
   - Python: `fsim.HoldTurn`, `fsim.HoldEntry`, `fsim.HoldContext`; `submit_pattern(turn_rate_rad_s=, turn_type=, hold_entry=, hold_context=)`, by name or member.
 
+### 4.25 A-GRA's hover and relative points (as FA-5c builds them)
+
+A-GRA's loiter gives two things the patterns did not: a rotorcraft's hover over a point for a duration (LTR-15, MA_LoiterType's Hover), and a pattern's point in a reference frame (LTR-18, its RelativePoint), which moves as the frame does. Both are the pattern's: a hover is a kind of it, and the frame goes in its shape (4.23).
+
+- **The hover** (`PatternKind::Hover`), a rotorcraft's:
+  - over its point at its altitude (in its reference), flown by the position loop at its speed there at most, slowing to stop over it. That speed is a ground speed: the pattern's speed, a rotorcraft's cruise by default; an airspeed is taken as its true airspeed in calm air;
+  - its duration counts from its arrival: within a metre of the point and 2 m of its height. Then it completes and hovers on; without a duration it hovers until replaced. An UPDATE that moves the point keeps the count from the first arrival; one that makes another pattern a hover starts the count at its arrival;
+  - it has its point, its altitude, its speed there and its duration, nothing else. Given a radius or a way to give it, a way round, a course or heading, legs, laps, a second circle, an entry or exit point, or a hold's entry or context, it is refused `invalid_parameter` naming the field, in a NEW or an UPDATE. Its setpoint reads back without them (NaN); an UPDATE that makes another pattern a hover drops that pattern's circuit;
+  - its progress: 0 % on its way there, then through its duration (untimed, 100 %); on its way, its time to go is the distance at its speed plus the duration;
+  - the endurance check (4.18) counts its way there at its speed, then its duration at the tables' burn in the hover (their least speed);
+  - a wing's is refused, naming the pattern field (0), as its support table says:
+    - `not_supported` where its design declares it does not fly on rotors (R1, with that evidence);
+    - `not_implemented` where nothing declares it and its model does not hover: a stock JSBSim model's, the same answer the hover capability gives for it.
+- **Relative points** (`frame`, `frameRotation`, `frameOffsets`, `frameXM`, `frameYM`, `frameZM`): the pattern's point is a point in one of the world's frames (4.21), its offsets as a `FrameOffset` gives them. That point is an orbit's centre, a racetrack's or a hold's fix, two circles' first centre, or a hover's point. Given a z, the pattern flies at the frame's height there (above sea level); left out, at its own altitude.
+  - At a NEW or an UPDATE, the host places the point where the frame is then, in the pattern's latitude and longitude (and its altitude, given a z); the setpoint reads it back so. A frame it cannot place - one the world does not have, or a vehicle's whose vehicle is gone - is refused `invalid_parameter` (field 29); offsets without a frame are refused naming the first given (30 to 34).
+  - The behaviour places the point again at every update, as the step began: a fixed or moving frame at the world's time (a vehicle's own clock starts at its creation), a vehicle's frame as the world read that vehicle then. The pattern is laid out from the point, so all of it moves with the frame: a second circle and entry and exit points too, placed from the point when the pattern is planned.
+  - Flown over the frame where the frame moves. A frame moving steadily is ground like any other: the aircraft flies the pattern at its velocity over the frame (its ground velocity less the frame origin's), through air moving over the frame at the wind less the frame's velocity. A rotorcraft's velocity is given back to it over the ground. A hover over a point a moving frame carries flies the frame's velocity and a closing on the point it could stop closing, as a formation closes on its slot, no faster than its speed there; given a z, it climbs as the frame does.
+  - The velocity fed forward is the frame origin's. A point turned with its origin swings as the origin turns; the feedback follows that.
+  - A vehicle's frame whose vehicle is gone: the activity fails `target_lost`, and the aircraft flies on as it was (a wing straight and level, a rotorcraft hovering).
+  - In an UPDATE a point (a latitude and longitude) replaces the frame, and a frame replaces the point.
+- **Surfaces.**
+  - C++: `PatternKind::Hover`; `PatternShape`'s `frame`, `frameRotation`, `frameOffsets`, `frameXM`, `frameYM`, `frameZM` and `frameOffset()`; `PathStore::patternFrame`; `vehiclePose()` (fsim/Frames.h).
+  - C ABI 1.23: `FSIM_PATTERN_HOVER`; `FSIM_MODE_PATTERN` takes 35 fields.
+  - Python: `fsim.PatternKind.HOVER`; `submit_pattern(frame=, frame_rotation=, frame_offsets=, frame_x_m=, frame_y_m=, frame_z_m=)`, the rotation and offsets by name or member.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -821,7 +846,7 @@ Laps, entry and exit points, legs by time, turns by bank, rate or type, hold con
 **Status:** in progress, in four steps, each measured in section 14:
 - FA-5a, A-GRA's orbit: two circles, the fix-point orbit's heading, leg time and bank, laps, entry and exit points (LTR-03, LTR-05, LTR-06, LTR-07, LTR-10; 4.23), done 2026-09-28 and measured in section 14;
 - FA-5b, the hold: its turns by rate and type, its duration by entry and exit times, its entries and context (LTR-11 to LTR-14; 4.24), done 2026-09-28 and measured in section 14;
-- FA-5c, the hover loiter and relative points (LTR-15, LTR-18);
+- FA-5c, the hover loiter and relative points (LTR-15, LTR-18; 4.25), done 2026-09-28 and measured in section 14;
 - FA-5d, curves as the schema gives them: NURBS, references, offsets, curvature and indices, a rotorcraft's circular loiter (CRV-03 to CRV-06, CRV-08, CRV-11).
 
 **Items (17):** CRV-03, CRV-04, CRV-05, CRV-06, CRV-08, CRV-11; LTR-03, LTR-05, LTR-06, LTR-07, LTR-10, LTR-11, LTR-12, LTR-13, LTR-14, LTR-15, LTR-18.
@@ -1727,6 +1752,32 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The micro cases are within −0.6 % to +1.3 %; the command cases within −0.4 % to +2.0 %.
   - World throughput is 99.2 to 100.2 % of FA-5a's; protection costs at most 0.3 %.
 - ctest: all 273 tests pass.
+
+**FA-5c, A-GRA's hover and relative points (LTR-15, LTR-18).**
+- **The hover** (`test_pattern_shapes`, calm):
+  - an IRIS over a point 50 m away and 15 m up, for 20 s: there at 13.8 s, completed 20.00 s after, then within 0.01 m;
+  - a UH-60A, its point moved 100 m further at 3 s, before it got there: there at 61.4 s, completed 20.00 s after, then within 0.19 m;
+  - a UH-1H orbiting at 60 m, made a hover over the centre for 10 s by an UPDATE at 30 s: there 57 s later, completed 10.00 s after, then within 0.63 m;
+  - each at 0 % until it was there; each setpoint without a radius, a way round, a course or legs;
+  - a radius, a way round, a course, laps, an exit point and a turn type refused naming their fields (5, 6, 7, 17, 23, 26), and a radius in an UPDATE;
+  - the hangar's C172 refused `not_supported` at field 0, the stock C172x `not_implemented`.
+- **Relative points** (`test_pattern_shapes`, calm):
+  - a C172x round a ship's point (a frame moving north-east at 8.5 m/s, the point 500 m ahead along its heading), an orbit of 1 km: 2.9 m off its moving circle over two laps, where round a still point it was 1.5 m off. Flown as though the frame were still, it was 67 m off;
+  - round a fixed frame's point 2 km east and 350 m up: 1.4 m off, and within 0.3 m of the point's height. That height is 0.31 m above the origin's plus 350 m: a Cartesian offset lies in the plane at the origin, and 2 km out that plane is 0.31 m above the sphere;
+  - an IRIS 15 m east of a UH-1H flying north at 2 m/s, in the UH-1H's frame: there at 5.4 s, then within 0.12 m. Flown without the frame's velocity, it never came within a metre. The UH-1H removed, it failed `target_lost` and hovered (0.07 m/s over the ground);
+  - an UPDATE's point left the frame, and a frame replaced a point.
+- **The fleet** (`test_fleet`):
+  - the hover: each rotorcraft over a point ten seconds of its cruise ahead and 10 m up, for 20 s. Each completed 20.00 to 20.03 s after its arrival and hovered on within 0.65 m (the UH-60A's). Every wing was refused `not_supported` at field 0, as its support table says;
+  - the UH-1H arrived 85 s after its command, the UH-60A 17 s: it closed its last 17 m in 65 s. Its position loop's gain is 0.053/s: its identified pitch power puts its attitude bandwidth at the floor of ADR-27's law (0.4 rad/s). That is the rotorcraft loops' design, not the hover's, and is left to a separate look;
+  - relative points: every aircraft round the origin of a frame moving across its heading at a tenth of its speed, measured from its first lap. The wings were within 16.8 m (the C172's, 4.7 % of its 357 m; the jets 0.1 to 0.6 %), the rotorcraft within 4.3 m (the UH-1H's, 2.1 %);
+  - after it is judged, the Crazyflie flies on until the longest aircraft's case ends. Its battery is spent at about 450 s, and it falls and diverges, as in the cases before ([rotorcraft.md](rotorcraft.md), section 7: a spent battery).
+- **The support table:** an option governed by R1 alone, on an aircraft nothing declares and whose model does not hover (a stock JSBSim model), now reads `not_implemented`, as the hover capability does for it; it had read supported. The 35 designs declare R1: their answers are unchanged.
+- **Conformance:** a refused UPDATE may now answer `not_implemented`, as a refused NEW could: an UPDATE making a stock C172x's pattern a hover drew it in the optimise walks. A pattern's activity may fail `target_lost`, its frame's vehicle gone.
+- **Digests:** identical to FA-5b's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-5b, both builds run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 3 of `world`.
+  - The micro cases are within −0.9 % to +0.7 %; the command cases within −2.9 % to 0.0 %.
+  - World throughput is 99.3 to 99.6 % of FA-5b's; protection costs at most 0.6 %.
+- ctest: all 275 tests pass.
 
 ## Appendix A: the inventory
 

@@ -378,6 +378,7 @@ private:
         double groundM(double latitudeRad, double longitudeRad) const override { return world_.ground_->heightAboveEllipsoidM(latitudeRad, longitudeRad); }
         double groundResolutionM() const override { return world_.ground_->resolutionM(); }
         double utcSeconds() const override { return world_.environment_.epochUtcSeconds + world_.simTime_; }
+        bool frame(control::FrameId id, control::FrameSpec& spec, control::FramePose& now) const override;
 
     private:
         const World& world_;

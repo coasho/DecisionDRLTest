@@ -713,11 +713,13 @@ class EndBehavior(enum.IntEnum):
 class PatternKind(enum.IntEnum):
     """A loiter pattern (A-GRA's LOITER): an orbit round its centre; a racetrack, two half circles joined by legs,
     the inbound one ending at the fix; a figure-eight, two circles meeting at the centre; ATC's hold, a racetrack
-    on the fix with a minute's legs, entered direct to the fix."""
+    on the fix with a minute's legs, entered direct to the fix; a rotorcraft's hover over its point, its duration from
+    its arrival (docs/flight-autonomy.md, 4.25)."""
     ORBIT = 0
     RACETRACK = 1
     FIGURE_EIGHT = 2
     HOLD = 3
+    HOVER = 4
 
 
 class HoldTurn(enum.IntEnum):
@@ -759,13 +761,14 @@ MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", 
                            "course_rad", "leg_m", "speed", "speed_reference", "duration_s", "speed_optimization", "direction_reference",
                            "heading_rad", "leg_s", "bank_rad", "orbits", "latitude2_rad", "longitude2_rad", "radius2_m", "entry_latitude_rad",
                            "entry_longitude_rad", "exit_latitude_rad", "exit_longitude_rad", "turn_rate_rad_s", "turn_type", "hold_entry",
-                           "hold_context"),
+                           "hold_context", "frame", "frame_rotation", "frame_offsets", "frame_x_m", "frame_y_m", "frame_z_m"),
                "curve": ("latitude_rad", "longitude_rad", "altitude_m", "speed_min_ms", "speed_max_ms", "duration_s", "end", "append")}
-MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 29, "curve": (HOLD,) * 8}
+MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 35, "curve": (HOLD,) * 8}
 _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "speed_optimization": SpeedOptimization,
                "direction_reference": DirectionReference,
                "projection": Projection, "end": EndBehavior,
-               "turn": TurnType, "pattern": PatternKind, "turn_type": HoldTurn, "hold_entry": HoldEntry, "hold_context": HoldContext}
+               "turn": TurnType, "pattern": PatternKind, "turn_type": HoldTurn, "hold_entry": HoldEntry, "hold_context": HoldContext,
+               "frame_rotation": FrameRotation, "frame_offsets": FrameOffsets}
 
 Waypoint = collections.namedtuple(
     "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id",
@@ -1247,7 +1250,7 @@ class Vehicle:
                        interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,
                        override_rejection=False, controller=0, **fields):
         """NEW for fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md, 4.6): ``pattern``
-        (fsim.PatternKind or "orbit", "racetrack", "figure_eight", "hold") round ``latitude_rad``, ``longitude_rad``
+        (fsim.PatternKind or "orbit", "racetrack", "figure_eight", "hold", "hover") round ``latitude_rad``, ``longitude_rad``
         (its centre or fix) at ``altitude_m``, with ``radius_m``, ``clockwise``, ``course_rad`` (the inbound course, a
         figure-eight's axis), ``leg_m``, a ``speed`` in ``speed_reference`` (or ``speed_optimization``, as submit_hsa's)
         and ``duration_s`` (then it completes). What it
@@ -1261,8 +1264,12 @@ class Vehicle:
         ``exit_longitude_rad`` (where it leaves, its duration or laps flown, out along its course). A hold's (4.24):
         ``turn_rate_rad_s`` or ``turn_type`` (fsim.HoldTurn) for its radius, ``hold_entry`` (fsim.HoldEntry: a racetrack's
         or a hold's way in) and ``hold_context`` (fsim.HoldContext: ATC's defaults for every one); its entry and exit
-        times are the command's ``window``. Given more than one way to give the course, the legs or the radius, the
-        first flies; an update of any one replaces them all. An Activity whose ``update(**fields)`` changes only what it
+        times are the command's ``window``. A rotorcraft's hover (4.25) over its point, its duration from its arrival
+        (a wing's refused not_supported). Its point in a frame (A-GRA's relative point): ``frame`` (World.create_frame's
+        id), ``frame_rotation`` (fsim.FrameRotation), ``frame_offsets`` (fsim.FrameOffsets), ``frame_x_m``,
+        ``frame_y_m``, ``frame_z_m`` (z down; left out, its own altitude) - carried as the frame moves; a point replaces
+        a frame in an update, and a frame a point. Given more than one way to give the course, the legs or the radius,
+        the first flies; an update of any one replaces them all. An Activity whose ``update(**fields)`` changes only what it
         gives; fsim.Rejected if refused. The command envelope as submit's."""
         r = self._h.submit_mode(self.id, MODE_KINDS.index("pattern"), _row("pattern", values, fields), int(source), None, int(range),
                                 int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection,

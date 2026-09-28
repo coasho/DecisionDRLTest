@@ -34,12 +34,7 @@ std::optional<control::FramePose> World::framePose(control::FrameId id, double t
     // a vehicle's: where it is now, as it is turned and moving, carried on to the time
     const Entry* e = entry(spec.vehicle);
     if (!e) return std::nullopt;
-    const sim::VehicleState& s = pool_->states()[e->slot];
-    control::FramePose pose;
-    pose.latitudeRad = s.latitudeRad, pose.longitudeRad = s.longitudeRad, pose.altitudeMslM = s.altitudeMslM;
-    pose.rollRad = s.eulerRad[0], pose.pitchRad = s.eulerRad[1], pose.yawRad = s.eulerRad[2];
-    pose.northMs = s.velocityNedMs[0], pose.eastMs = s.velocityNedMs[1], pose.downMs = s.velocityNedMs[2];
-    return control::carried(pose, t - simTime_);
+    return control::carried(control::vehiclePose(pool_->states()[e->slot]), t - simTime_);
 }
 
 std::optional<control::GeoPoint> World::framePoint(control::FrameId id, const control::FrameOffset& offset, double timeS) const {
@@ -47,6 +42,14 @@ std::optional<control::GeoPoint> World::framePoint(control::FrameId id, const co
     const std::optional<control::FramePose> pose = framePose(id, timeS);
     if (!pose) return std::nullopt;
     return control::framePoint(*pose, offset);
+}
+
+bool World::Answers::frame(control::FrameId id, control::FrameSpec& spec, control::FramePose& now) const {
+    const std::optional<control::FrameSpec> found = world_.frame(id);
+    const std::optional<control::FramePose> pose = found ? world_.framePose(id) : std::nullopt;
+    if (!pose) return false;
+    spec = *found, now = *pose;
+    return true;
 }
 
 } // namespace fsim::session
