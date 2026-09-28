@@ -951,6 +951,7 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
         }
     if (hsa && checked) limitHsa(*hsa, log);
     if (pattern && checked) limitPattern(*pattern, log);
+    checkTerrain(setpoint, state, log); // (docs/flight-autonomy.md, 4.19: where it is checked)
     return Reason::None;
 }
 
@@ -1195,7 +1196,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     }
     // its endurance (4.18): a flight with an end needs no more than the vehicle has above its reserve - a soft
     // rejection, which overrideRejection overrides (the first there is). Only a route, pattern or curve can have one.
-    if (checked && energyView_ &&
+    if (checked && sessionView_ &&
         (std::holds_alternative<RouteCommand>(setpoint) || std::holds_alternative<PatternCommand>(setpoint) || std::holds_alternative<CurveCommand>(setpoint)))
         if (const CommandDetails::Endurance need = endurance(setpoint, state); need.energy && need.required > need.remaining) {
             details_.endurance = need;
@@ -1360,6 +1361,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const RouteCommand& ro
     result.commandId = records_[s].commandId;
     CheckLog log{result, slots_[s].range, &details_};
     if (const Reason why = checkRoute(next, points, state, log); why != Reason::None) return about(rejected(why, activity), result);
+    checkTerrain(Command(next), state, log);
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
     if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
     writeRoute();
@@ -1408,6 +1410,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const CurveCommand& cu
     } else {
         if (appending) next.latitudeRad = live->latitudeRad, next.longitudeRad = live->longitudeRad, next.altitudeM = live->altitudeM; // (its reference)
         if (const Reason why = checkCurve(next, segments, appending, state, log); why != Reason::None) return about(rejected(why, activity), result);
+        checkTerrain(Command(next), state, log);
         if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
         if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
         writeCurve(segments, appending);
@@ -1462,6 +1465,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
             if (const Reason why = catalog_->check(record.capability, checked, log); why != Reason::None) return about(rejected(why, activity), result);
             merged = std::get<HsaCommand>(checked);
             limitHsa(merged, log);
+            checkTerrain(Command(merged), state, log);
             if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
             if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
         }
@@ -1479,6 +1483,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
         optimise(merged.speed, merged.speedReference, merged.speedOptimization, merged.altitudeM, merged.altitudeReference, state);
         if (slots_[s].range != RangePolicy::None) {
             limitPattern(merged, log);
+            checkTerrain(Command(merged), state, log);
             if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
             if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
         }

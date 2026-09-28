@@ -260,6 +260,20 @@ double TerrainTiles::heightAboveEllipsoidM(double latitudeRad, double longitudeR
     return sample(*t, tx, ty);
 }
 
+std::optional<double> TerrainTiles::knownHeightAboveEllipsoidM(double latitudeRad, double longitudeRad) const {
+    double tx, ty;
+    mercatorTile(latitudeRad, longitudeRad, options_.zoom, tx, ty);
+    const double n = static_cast<double>(1u << options_.zoom);
+    const Tile t = tile(static_cast<unsigned>(std::floor(tx)), static_cast<unsigned>(std::clamp(std::floor(ty), 0.0, n - 1.0)));
+    if (!t || !t->valid()) return std::nullopt;
+    return sample(*t, tx, ty);
+}
+
+double TerrainTiles::resolutionM() const noexcept {
+    const double across = options_.meshDimension >= 2 ? options_.meshDimension - 1.0 : 256.0; // (resampled, or the raster's pixels)
+    return 40075016.686 / static_cast<double>(1u << options_.zoom) / across;
+}
+
 std::optional<double> TerrainTiles::cachedHeightAboveEllipsoidM(double latitudeRad, double longitudeRad) {
     double tx, ty;
     mercatorTile(latitudeRad, longitudeRad, options_.zoom, tx, ty);

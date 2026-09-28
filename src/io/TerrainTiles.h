@@ -69,6 +69,10 @@ public:
     ~TerrainTiles() override;
 
     double heightAboveEllipsoidM(double latitudeRad, double longitudeRad) const override;
+    /// Empty where its tile cannot be loaded (offline, and not on disk).
+    std::optional<double> knownHeightAboveEllipsoidM(double latitudeRad, double longitudeRad) const override;
+    /// A tile's pixel at the equator (a Terrarium tile is 256 across): 38 m at zoom 12.
+    double resolutionM() const noexcept override;
 
     /// Height if the tile is already decoded (never blocks); else nullopt and
     /// the tile is queued for background loading.

@@ -39,7 +39,11 @@ network access and an empty cache the ground is flat at 0 m (a warning is
 logged per missing tile) - fill the cache beforehand with
 `tile_prefetch --lat .. --lon .. --radius-km ..` (elevation and imagery for
 the whole level pyramid; the directory can be copied to an offline machine). Implement `fsim::GroundProvider` for a custom
-height model (a single virtual, thread-safe call).
+height model (a single virtual, thread-safe call). The same ground answers `World::terrainHeightM(lat, lon)` - empty where
+the provider has no data, which the physics reads as sea level - and every route, pattern, curve and hsa a vehicle is
+commanded is checked against it: a path into the ground is refused `terrain_conflict`, the place it would meet it named
+([flight-autonomy.md](../flight-autonomy.md), 4.19). A provider may also override `knownHeightAboveEllipsoidM` (to say
+where it has no data) and `resolutionM` (its data's spacing, which paths are sampled at: 30 m unless it says).
 
 With `recordPath` set the world appends every vehicle's state (and each
 creation, reset and removal) to a `.fsrec` file as it steps, independent of

@@ -131,6 +131,7 @@ from .world import (  # noqa: E402
     SpeedReference,
     Support,
     SupportInfo,
+    TerrainPoint,
     TurnType,
     Vehicle,
     VehicleDefault,

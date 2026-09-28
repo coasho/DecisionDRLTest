@@ -756,6 +756,26 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             Waypoint ahead;
             ahead.latitudeRad = q.latitudeRad, ahead.longitudeRad = q.longitudeRad, ahead.altitudeM = q.altitudeMslM;
             ahead.speed = speed, ahead.speedReference = static_cast<double>(p.rotor ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
+            // the terrain (ADR-29 FA-4a, VAL-06): a path under the ground - flat, at sea level - is refused, overridden or
+            // not, the place it meets it named: an hsa's where it is, at once; a route's to a point under it, on its way
+            // down (at its steepest descent, if the leg is steeper)
+            HsaCommand under;
+            under.altitudeM = -100.0;
+            CHECK(w.submit(p.id, under, validate).reason == Reason::TerrainConflict);
+            {
+                const CommandDetails::Terrain& t = w.commandDetails(p.id)->terrain;
+                CHECK((t.hit == 1 && t.index == -1 && t.altitudeMslM == -100.0 && t.groundM == 0.0 && std::abs(t.timeS) < 1e-9));
+                PositionCommand there;
+                there.latitudeRad = t.latitudeRad, there.longitudeRad = t.longitudeRad;
+                CHECK(distanceTo(*w.vehicleState(p.id), there) < 1.0);
+            }
+            Waypoint down = ahead;
+            down.altitudeM = -100.0;
+            CHECK(w.submit(p.id, RouteCommand{}, Span<const Waypoint>(&down, 1), validate).reason == Reason::TerrainConflict);
+            {
+                const CommandDetails::Terrain& t = w.commandDetails(p.id)->terrain;
+                CHECK((t.hit == 1 && t.index == 0 && t.altitudeMslM < 0.0 && t.altitudeMslM > -0.1 && t.timeS > 0.0));
+            }
             NavigationSettings settings = w.navigation(p.id);
             const NavigationSettings kept = settings;
             settings.reserveFraction = 0.9999;

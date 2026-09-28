@@ -152,6 +152,8 @@ enum class Reason : std::uint8_t {
     TaskActive,     ///< a task command or store refused: the task's activity is live
     // endurance (docs/flight-autonomy.md, 4.18)
     InsufficientEndurance, ///< NEW refused - a soft rejection, which CommandOptions::overrideRejection overrides: its flight needs more fuel or charge than the vehicle has above its reserve
+    // the terrain (docs/flight-autonomy.md, 4.19)
+    TerrainConflict, ///< NEW or UPDATE refused, never overridden: its path goes below the terrain (CommandDetails::terrain)
     Count
 };
 
@@ -390,7 +392,19 @@ struct CommandDetails {
         double remainingS = std::numeric_limits<double>::quiet_NaN(); ///< how long `remaining` lasts at what it consumes now
         double requiredS = std::numeric_limits<double>::quiet_NaN();  ///< how long the flight takes
     } endurance{};
-    void clear() noexcept { findingCount = adjustmentCount = 0, suggestion = 0, endurance.energy = 0; } // (the rest means nothing without it)
+    /// Where its path meets the ground (docs/flight-autonomy.md, 4.19; A-GRA's
+    /// TerrainConstraint, a Point4D): set when refused TerrainConflict, the
+    /// first place along it below the terrain; `hit` 0 otherwise.
+    struct Terrain {
+        std::uint8_t hit = 0;
+        std::int16_t index = -1; ///< the route point it flies to there, or the curve segment it is on; -1 otherwise
+        double latitudeRad = std::numeric_limits<double>::quiet_NaN();
+        double longitudeRad = std::numeric_limits<double>::quiet_NaN();
+        double altitudeMslM = std::numeric_limits<double>::quiet_NaN(); ///< the path's there, above the WGS-84 ellipsoid
+        double groundM = std::numeric_limits<double>::quiet_NaN();      ///< the terrain's there, likewise
+        double timeS = std::numeric_limits<double>::quiet_NaN();        ///< from the command: when it would be there, at its planned speeds
+    } terrain{};
+    void clear() noexcept { findingCount = adjustmentCount = 0, suggestion = 0, endurance.energy = 0, terrain.hit = 0; } // (the rest means nothing without them)
 };
 
 // --- Flight tasks (docs/flight-autonomy.md, 4.11) --------------------------------------

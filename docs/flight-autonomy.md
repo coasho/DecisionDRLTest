@@ -487,6 +487,28 @@ A flight command whose flight has an end is checked at its NEW against the vehic
   - C ABI 1.16: `fsim_command_endurance`, `fsim_last_command_endurance`, `FSIM_COMMAND_OVERRIDDEN`.
   - Python: `fsim.Endurance` on `fsim.Rejected`, on a `Validation`, and on an overridden `Activity` (`overridden`); `fsim.agra.insufficient_endurance`.
 
+### 4.19 The terrain (as FA-4 builds it)
+
+A flight command's path is checked against the ground (VAL-06; A-GRA's VIOLATION_TERRAIN with its TerrainConstraint), and the ground can be asked for (STS-11, ENV-01; VI 1.2.6.9's elevation request).
+
+- **The ground** is the physics' own: the world's `GroundProvider` - flat at sea level unless set, the public elevation tiles with `terrain`, or the caller's own. What a path is checked against is what the aircraft would meet.
+- **The query:** the height above the WGS-84 ellipsoid at a place, or nothing where the provider has no data (a terrain tile it cannot load, which the physics reads as sea level). A provider tells the two apart through `knownHeightAboveEllipsoidM`.
+- **Which paths** (a minimal model):
+  - a route: each leg from where the aircraft is, its altitude in its own reference as the route flies it - straight to its point, or at its climb rate and then level - with its fly-by turns. A descent too steep to fly as asked is clamped to the aircraft's steepest, and goes on down past its point. A route that repeats is checked once round again; one that does not, for what it flies after its last point: until its altitude has settled, and then a minute on (a lap, round its point);
+  - a pattern: its lap at its altitude, and a racetrack's or a hold's entry to its fix;
+  - a curve: its segments, then a minute on along its last course (a lap round its end);
+  - an hsa: its line ahead, level at its altitude, for a minute at its speed.
+
+  A path above the ground follows it. The climb or descent to a pattern's or an hsa's altitude, and the wind, are not modelled.
+- **Sampled** at the ground's own spacing: a tile's pixel (38 m at zoom 12), 30 m for a provider that does not say, and the ends alone for flat ground. A curve's segment is sampled 32 times at least, since its height is not straight. Where a sample is below the ground, the first place the path goes below is found between it and the sample before, to a tenth of a metre.
+- **Refused `terrain_conflict`** where the path goes below the ground: at a NEW, a validation or an UPDATE that is checked, whatever the range policy. It is never overridden.
+  - The details (`CommandDetails::terrain`) name the place, the path's altitude and the ground's there, when it would be there (seconds from the command, at its planned speeds), and the route point it flies to there or the curve segment.
+  - In A-GRA's terms: the validation result VIOLATION_TERRAIN, the cannot-comply CONSTRAINT_SAFETY.
+- **Surfaces.**
+  - C++: `Reason::TerrainConflict`, `CommandDetails::Terrain`, `World::terrainHeightM`; `GroundProvider::knownHeightAboveEllipsoidM` and `resolutionM`.
+  - C ABI 1.17: `fsim_command_terrain`, `fsim_last_command_terrain`, `fsim_world_terrain`.
+  - Python: `World.terrain`, `fsim.TerrainPoint` on `fsim.Rejected` and on a `Validation`; `fsim.agra.terrain_constraint`, `fsim.agra.elevation_request_status`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -674,6 +696,12 @@ A-GRA's per-mode performance profile from hangar's data; energy management in ev
 ### FA-4: References and state data (M)
 
 Magnetic and barometric references in every mode and in the state; the QNH setting; reference frames; the terrain query; winds; orientation acceleration; terrain validation of commanded paths.
+
+**Status:** in progress, in four steps:
+- FA-4a, the terrain: the query and the paths checked against it (ENV-01, STS-11, VAL-06; 4.19), done 2026-09-27 and measured in section 14;
+- FA-4b, the barometric altimeter: the QNH setting, the indicated altitude in the state, the barometric reference in the hsa and the patterns (ENV-03, STS-10, STS-04, HSA-07, LTR-16);
+- FA-4c, the state data and frames: orientation acceleration, winds, reference frames (STS-02, STS-06, ENV-04);
+- FA-4d, the magnetic model: declination, the magnetic reference and heading (ENV-02, HSA-03, STS-05). It needs the World Magnetic Model's published coefficients built in, which are not on this machine.
 
 **Supporting models:** Terrain service, magnetic model, altimeter, frames (ENV-01 to ENV-04).
 
@@ -1441,6 +1469,25 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The other command cases are within −4.3 % to +1.7 % (0.4 ns), on paths the check is not on.
   - World throughput is 99.9 to 100.8 % of the speed optimisation's. Protection costs at most 0.2 % (the gate: 97 %).
 - ctest: all 250 tests pass.
+
+**FA-4a, the terrain (ENV-01, STS-11, VAL-06).**
+- **The checks** (`test_terrain_check`, over a ridge 1,500 m high laid across the way):
+  - A route, a pattern, a curve and an hsa into the ridge are refused `terrain_conflict`. Each names the ridge's edge to a tenth of a metre, the time at its planned speeds (within half a second of distance over speed), and the route point or curve segment.
+  - Over it, or above the ground, they fly.
+  - A route that ends short of the ridge is refused for flying on into it; loitering round its last point, it flies.
+  - A validation answers the same. Clamp refuses it too, with no suggestion; unchecked (`RangePolicy::None`), it flies.
+  - An UPDATE into the ridge is refused, and the activity flies on as it was: a route's, a pattern's and an hsa's.
+  - The query answers the ridge, sea level, and nothing where the ground has no data. The tiles tell no data apart from sea level (`test_terrain`).
+  - Python: a descent the aircraft can fly crosses sea level halfway along its leg, as asked. One too steep is clamped to its steepest descent and meets the ground past its point.
+- **The fleet** (`test_fleet`): every aircraft refuses an hsa under the ground at once, where it is, and a route to a point under the ground, on its way down. Both are refused with override_rejection set.
+- **The walks**: the random-sequence conformance draws altitudes 200 m either side of a multirotor's 100 m and meets `terrain_conflict`; its model admits it for a NEW and an UPDATE.
+- **Digests:** identical to FA-3e's, with protection and without; no digest flight goes below the ground. The allocation gate passes.
+- **A/B throughput** against FA-3e (02ee658), built in the scratch worktree: 5 rounds of `micro`, and 9 of `command` twice.
+  - The micro cases are within −1.3 % to +0.5 %.
+  - A behaviour's NEW reads −2.4 % and −2.8 %: that baseline, built in another tree, runs it slower (as FA-3c and FA-3e found).
+  - The other command cases are within −1.2 % to +2.0 % (0.5 ns), on paths the check is not on.
+  - World throughput is 99.2 to 100.1 % of FA-3e's. Protection costs at most 0.1 % (the gate: 97 %).
+- ctest: all 254 tests pass.
 
 ## Appendix A: the inventory
 

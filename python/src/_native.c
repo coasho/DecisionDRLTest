@@ -2147,6 +2147,63 @@ static PyObject* world_last_endurance(PyObject* o, PyObject* const* args, Py_ssi
     return Py_BuildValue("(idddd)", e.energy, e.remaining, e.required, e.remaining_s, e.required_s);
 }
 
+/* last_terrain() -> (index, latitude_rad, longitude_rad, altitude_msl_m, ground_m, time_s) or None: where the last
+ * command's path first goes below the terrain (ABI 1.17) */
+static PyObject* world_last_terrain(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    (void)args;
+    if (!check_args(n, 0, 0, "last_terrain")) return NULL;
+    fsim_command_terrain t;
+    fsim_command_terrain_init(&t);
+    if (fsim_last_command_terrain(self->world, &t) != FSIM_OK || !t.hit) Py_RETURN_NONE;
+    return Py_BuildValue("(iddddd)", t.index, t.latitude_rad, t.longitude_rad, t.altitude_msl_m, t.ground_m, t.time_s);
+}
+
+/* terrain(latitudes_rad, longitudes_rad) -> [height_m or None]: the ground's height above the WGS-84 ellipsoid at each
+ * place - the physics' own - None where it has no data (ABI 1.17) */
+static PyObject* world_terrain(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    if (!check_args(n, 2, 2, "terrain")) return NULL;
+    const Py_ssize_t count = PySequence_Size(args[0]);
+    if (count < 0) return NULL;
+    if (PySequence_Size(args[1]) != count || count > (Py_ssize_t)UINT32_MAX) {
+        if (!PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "terrain: as many longitudes as latitudes");
+        return NULL;
+    }
+    double* v = (double*)PyMem_Malloc(sizeof(double) * 3 * (size_t)(count ? count : 1));
+    if (!v) return PyErr_NoMemory();
+    for (Py_ssize_t i = 0; i < count && !PyErr_Occurred(); ++i)
+        for (int k = 0; k < 2; ++k) {
+            PyObject* item = PySequence_GetItem(args[k], i);
+            v[k * count + i] = item ? PyFloat_AsDouble(item) : 0.0;
+            Py_XDECREF(item);
+        }
+    PyObject* list = NULL;
+    if (!PyErr_Occurred()) {
+        if (fsim_world_terrain(self->world, (uint32_t)count, v, v + count, v + 2 * count) < 0) {
+            PyErr_SetString(PyExc_RuntimeError, "terrain: the query failed");
+        } else {
+            list = PyList_New(count);
+            for (Py_ssize_t i = 0; list && i < count; ++i) {
+                const double h = v[2 * count + i];
+                PyObject* x = NULL;
+                if (isnan(h)) {
+                    Py_INCREF(Py_None);
+                    x = Py_None;
+                } else {
+                    x = PyFloat_FromDouble(h);
+                }
+                if (!x || PyList_SetItem(list, i, x) < 0) { /* (it takes x) */
+                    Py_DECREF(list);
+                    list = NULL;
+                }
+            }
+        }
+    }
+    PyMem_Free(v);
+    return list;
+}
+
 /* last_adjustments() -> [(index, field, constraint, requested, adjusted)]: every value the last command is flown
  * with other than asked (ABI 1.8) */
 static PyObject* world_last_adjustments(PyObject* o, PyObject* const* args, Py_ssize_t n) {
@@ -2407,6 +2464,8 @@ static PyMethodDef world_methods[] = {
     FAST("last_findings", world_last_findings, "last_findings() -> [(reason, index, constraint, from, to, associated, description)]"),
     FAST("last_adjustments", world_last_adjustments, "last_adjustments() -> [(index, field, constraint, requested, adjusted)]"),
     FAST("last_endurance", world_last_endurance, "last_endurance() -> (energy, remaining, required, remaining_s, required_s) or None"),
+    FAST("last_terrain", world_last_terrain, "last_terrain() -> (index, latitude_rad, longitude_rad, altitude_msl_m, ground_m, time_s) or None"),
+    FAST("terrain", world_terrain, "terrain(latitudes_rad, longitudes_rad) -> [height_m or None]: the ground's height above the WGS-84 ellipsoid"),
     FAST("submit_behavior", world_submit_behavior, "submit_behavior(id, behavior, target, params, points, source, axes, range, min_version) -> result"),
     FAST("submit_support", world_submit_support, "submit_support(id, kind, values, source, axes, range, min_version) -> result"),
     FAST("submit_mode", world_submit_mode, "submit_mode(id, mode, values, source, axes, range, min_version) -> result"),

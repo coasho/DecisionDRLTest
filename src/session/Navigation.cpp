@@ -41,7 +41,7 @@ control::NavigationSettings World::navigation(std::uint32_t id) const noexcept {
     return e ? e->navigation : control::NavigationSettings{};
 }
 
-control::EnergyNow World::Energies::energyNow(std::uint32_t id) const {
+control::EnergyNow World::Answers::energyNow(std::uint32_t id) const {
     // (as the navigation report counts it: fuel where it has tanks, else a battery's charge; the reserve its settings')
     control::EnergyNow out;
     const Entry* e = world_.entry(id);

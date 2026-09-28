@@ -444,6 +444,8 @@ void World::step(unsigned n) { impl_->step(n); }
 double World::time() const noexcept { return impl_->simTime(); }
 double World::stepSeconds() const noexcept { return impl_->dt() * impl_->frameSkip(); }
 comm::Network& World::network() { return impl_->network(); }
+
+std::optional<double> World::terrainHeightM(double latitudeRad, double longitudeRad) const { return impl_->terrainHeightM(latitudeRad, longitudeRad); }
 void World::addEffectToAll(std::function<std::unique_ptr<effects::Effect>()> factory) { impl_->addEffectToAll(std::move(factory)); }
 const std::string& World::name() const noexcept { return impl_->name(); }
 bool World::published() const noexcept { return impl_->published(); }

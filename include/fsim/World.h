@@ -382,6 +382,11 @@ public:
 
     Environment& environment() noexcept { return environment_; }
     comm::Network& network();
+    /// The ground's height above the WGS-84 ellipsoid at a place - the
+    /// physics' own ground, which commanded paths are checked against
+    /// (docs/flight-autonomy.md, 4.19; VI 1.2.6.9, A-GRA's elevation request).
+    /// Empty where it has no data (a terrain tile it cannot load).
+    std::optional<double> terrainHeightM(double latitudeRad, double longitudeRad) const;
 
     /// Give every vehicle (present and future) its own effect instance.
     void addEffectToAll(std::function<std::unique_ptr<effects::Effect>()> factory);

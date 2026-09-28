@@ -567,6 +567,27 @@ typedef struct fsim_command_endurance {
 } fsim_command_endurance;
 FSIM_API void fsim_command_endurance_init(fsim_command_endurance* endurance);
 FSIM_API int fsim_last_command_endurance(const fsim_world* world, fsim_command_endurance* out);
+
+/* ABI 1.17 (docs/flight-autonomy.md, 4.19; A-GRA's TerrainConstraint, a Point4D): where the last command's path first goes
+ * below the terrain - a route's legs and turns and what it flies after its last point, a pattern's lap, a curve, an hsa's
+ * line a minute ahead. Given when refused terrain_conflict; `hit` 0 otherwise. */
+typedef struct fsim_command_terrain {
+    uint32_t struct_size;
+    int32_t hit;           /* 1: its path meets the ground there */
+    int32_t index;         /* the route point it flies to there, or the curve segment; -1 otherwise */
+    int32_t reserved;
+    double latitude_rad, longitude_rad;
+    double altitude_msl_m; /* the path's there, above the WGS-84 ellipsoid */
+    double ground_m;       /* the terrain's there, likewise */
+    double time_s;         /* from the command: when it would be there, at its planned speeds */
+} fsim_command_terrain;
+FSIM_API void fsim_command_terrain_init(fsim_command_terrain* terrain);
+FSIM_API int fsim_last_command_terrain(const fsim_world* world, fsim_command_terrain* out);
+/* ABI 1.17 (4.19; VI 1.2.6.9, A-GRA's elevation request): the ground's height above the WGS-84 ellipsoid at `count`
+ * places - the physics' own ground, which commanded paths are checked against - into `height_m`, NaN where it has no
+ * data (a terrain tile it cannot load). Returns how many it knows, or a negative fsim_status. */
+FSIM_API int fsim_world_terrain(const fsim_world* world, uint32_t count, const double* latitude_rad, const double* longitude_rad,
+                                double* height_m);
 FSIM_API const char* fsim_constraint_name(int constraint); /* "max_airspeed", "max_orientation", "max_climb_rate", ... */
 
 /* How far an activity has got and what it commands: a guidance mode's (a route,

@@ -48,6 +48,7 @@ const char* reasonName(Reason reason) noexcept {
     case Reason::UnknownTask: return "unknown_task";
     case Reason::TaskActive: return "task_active";
     case Reason::InsufficientEndurance: return "insufficient_endurance";
+    case Reason::TerrainConflict: return "terrain_conflict";
     default: return "?";
     }
 }
@@ -94,6 +95,7 @@ const char* reasonDescription(Reason reason) noexcept {
     case Reason::UnknownTask: return "no task is kept by that id";
     case Reason::TaskActive: return "the task's activity is live";
     case Reason::InsufficientEndurance: return "its flight needs more fuel or charge than the vehicle has above its reserve";
+    case Reason::TerrainConflict: return "its path goes below the terrain";
     default: return "";
     }
 }

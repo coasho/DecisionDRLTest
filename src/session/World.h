@@ -186,6 +186,12 @@ public:
     /// Earth or a reserve outside [0, 1).
     control::Reason setNavigation(std::uint32_t id, const control::NavigationSettings& settings);
     control::NavigationSettings navigation(std::uint32_t id) const noexcept;
+    // --- The terrain (docs/flight-autonomy.md, 4.19; VI 1.2.6.9, A-GRA's elevation request) ---
+    /// The ground's height above the WGS-84 ellipsoid at a place, as the
+    /// physics has it; empty where it has no data (a terrain tile it cannot load).
+    std::optional<double> terrainHeightM(double latitudeRad, double longitudeRad) const {
+        return ground_->knownHeightAboveEllipsoidM(latitudeRad, longitudeRad);
+    }
     // --- The performance profile (docs/flight-autonomy.md, 4.15; A-GRA's MA_FlightControlModesPerformanceProfileType) ---
     /// A flight mode's performance profile at the vehicle's condition now - HSA/CSA, waypoint or curve following -
     /// into `out`, its vectors reused (PerformanceProfile.cpp). InvalidParameter for another mode (A-GRA profiles
@@ -322,12 +328,15 @@ private:
     private:
         const World& world_;
     };
-    /// The vehicles' energy on board, for their hosts' endurance checks
-    /// (docs/flight-autonomy.md, 4.18): asked at a NEW, never stepped.
-    class Energies final : public control::EnergyView {
+    /// What the vehicles' hosts ask of the world when they check a command
+    /// (docs/flight-autonomy.md, 4.18, 4.19): the energy on board, the
+    /// ground's height. Asked at a NEW or an UPDATE, never while stepping.
+    class Answers final : public control::SessionView {
     public:
-        explicit Energies(const World& world) noexcept : world_(world) {}
+        explicit Answers(const World& world) noexcept : world_(world) {}
         control::EnergyNow energyNow(std::uint32_t id) const override;
+        double groundM(double latitudeRad, double longitudeRad) const override { return world_.ground_->heightAboveEllipsoidM(latitudeRad, longitudeRad); }
+        double groundResolutionM() const override { return world_.ground_->resolutionM(); }
 
     private:
         const World& world_;
@@ -373,7 +382,7 @@ private:
     std::size_t liveCount_ = 0;
     double simTime_ = 0.0;
     std::uint64_t vehicleSteps_ = 0, worldSteps_ = 0;
-    Energies energies_{*this};
+    Answers answers_{*this};
 };
 
 } // namespace fsim::session

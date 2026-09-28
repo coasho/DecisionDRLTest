@@ -208,7 +208,7 @@ std::uint32_t World::createVehicle(const VehicleSpec& spec) {
     for (const auto& [level, controller] : e->profile->control.controllers) e->stack.use(level, controller); // with the settings above
     e->host.bind(id, e->stack, *e->catalog, adapter, *e->profile, options_.dt * e->controlDivider);
     e->host.setSupport(e->support.get());
-    e->host.setEnergyView(&energies_); // (its endurance checks: docs/flight-autonomy.md, 4.18)
+    e->host.setSessionView(&answers_); // (its endurance and terrain checks: docs/flight-autonomy.md, 4.18, 4.19)
     e->flapsPosition = pool_->vehicle(slot).property("fcs/flap-pos-norm");
     for (auto& factory : worldEffects_) e->effects.push_back(factory());
     sim::FlightModel& model = pool_->vehicle(slot);

@@ -45,11 +45,18 @@ struct EnergyNow {
     double consumption = kUnknown; ///< now: kg/s, or W
     double massKg = kUnknown;      ///< the whole vehicle's
 };
-/// The session's view of its vehicles' energy, asked only when a flight with an end is checked.
-class EnergyView {
+/// What the host asks of the session it runs in, when it checks a command -
+/// never while it steps.
+class SessionView {
 public:
-    virtual ~EnergyView() = default;
+    virtual ~SessionView() = default;
+    /// A vehicle's energy on board, for a flight with an end (docs/flight-autonomy.md, 4.18).
     virtual EnergyNow energyNow(std::uint32_t vehicle) const = 0;
+    /// The ground's height above the WGS-84 ellipsoid at a place, as the
+    /// physics has it, and the spacing of its data (GroundProvider): what a
+    /// commanded path is checked against (docs/flight-autonomy.md, 4.19).
+    virtual double groundM(double latitudeRad, double longitudeRad) const = 0;
+    virtual double groundResolutionM() const = 0;
 };
 
 class CapabilityHost {
@@ -74,8 +81,8 @@ public:
     /// the profile gives it (docs/control-architecture.md, 11).
     void bind(std::uint32_t vehicle, ControlStack& runtime, const CapabilityCatalog& catalog, const VehicleAdapter& adapter,
               const VehicleProfile& profile, double controlPeriodS = 1.0 / 120.0) noexcept;
-    /// What tells the vehicle's energy (which outlives the host): without one, no endurance is checked.
-    void setEnergyView(const EnergyView* view) noexcept { energyView_ = view; }
+    /// The session's answers (it outlives the host): without them, no endurance or terrain is checked.
+    void setSessionView(const SessionView* view) noexcept { sessionView_ = view; }
     /// The vehicle's support for the public features (it outlives the host):
     /// a command for one the catalog does not offer is refused NotSupported or
     /// NotImplemented (docs/flight-autonomy.md, 4.3). Without it, UnknownCapability.
@@ -475,6 +482,15 @@ private:
     /// performance tables' burn there, else what it consumes now. `energy` 0:
     /// nothing to judge (no end, no energy, no speed).
     CommandDetails::Endurance endurance(const Command& setpoint, const sim::VehicleState& state) const noexcept;
+    /// Where a commanded path first goes below the terrain (docs/flight-autonomy.md,
+    /// 4.19): a route's legs and turns from where the aircraft is, and what it
+    /// flies after its last point; a pattern's lap and its entry; a curve; an
+    /// hsa's line ahead for a minute - complete, its route or curve in the
+    /// scratch plan. Sampled at the ground's spacing; `hit` 0: clear.
+    CommandDetails::Terrain terrain(const Command& setpoint, const sim::VehicleState& state) const noexcept;
+    /// The terrain check of a route, pattern, curve or hsa that is checked:
+    /// where it meets the ground, a finding (TerrainConflict) no range policy mends.
+    void checkTerrain(const Command& setpoint, const sim::VehicleState& state, CheckLog& log) const noexcept;
     /// A speed optimisation's snapshot, as the command is given: the optimum's
     /// true airspeed at the altitude it flies to (as it flies, where the
     /// tables give none), into `speed` and `reference` - what the checks judge
@@ -602,7 +618,7 @@ private:
     bool divergedSeen_ = false;   ///< (a divergence changes every capability's availability: counted)
     CommandDetails details_{};    ///< the last answer's (details())
     std::unique_ptr<std::array<Waiting, kWaiting>> waiting_; ///< made when the first activity waits
-    const EnergyView* energyView_ = nullptr; ///< the session's (setEnergyView)
+    const SessionView* sessionView_ = nullptr; ///< the session's (setSessionView)
 };
 
 } // namespace fsim::control

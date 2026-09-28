@@ -127,6 +127,8 @@ TEST_CASE("TerrainTiles samples, caches and prefetches synthetic tiles", "[terra
     REQUIRE(terrain.cachedTiles() == 1);
     terrain.heightAboveEllipsoidM(lat, lon);
     REQUIRE(fetches == 1); // cached
+    // what the terrain query answers (docs/flight-autonomy.md, 4.19): the same height where the tile has data
+    REQUIRE(terrain.knownHeightAboveEllipsoidM(lat, lon) == h);
 
     // Non-blocking query: unknown tile -> nullopt, then loaded in the background.
     const double lat2 = units::degreesToRadians(45.0), lon2 = units::degreesToRadians(10.0);
@@ -194,4 +196,9 @@ TEST_CASE("TerrainTiles reports failures as sea level", "[terrain]") {
     io::TerrainTiles terrain(o, [](unsigned, unsigned, unsigned, std::vector<std::uint8_t>&) { return false; });
     REQUIRE(terrain.heightAboveEllipsoidM(0.5, 0.5) == 0.0);
     REQUIRE(terrain.failures() == 1);
+    // the terrain query tells them apart (docs/flight-autonomy.md, 4.19): no data, not sea level
+    CHECK_FALSE(terrain.knownHeightAboveEllipsoidM(0.5, 0.5).has_value());
+    // the spacing a commanded path is checked at: a zoom-5 tile's pixel at the equator
+    CHECK_THAT(terrain.resolutionM(), Catch::Matchers::WithinAbs(40075016.686 / 32.0 / 256.0, 1e-6));
+    CHECK(std::isinf(sim::FlatGround(0.0).resolutionM()));
 }

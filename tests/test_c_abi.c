@@ -1441,6 +1441,30 @@ int main(int argc, char** argv) {
             e.struct_size = (uint32_t)offsetof(fsim_command_endurance, remaining);
             e.remaining = 77.0;
             CHECK(fsim_last_command_endurance(world, &e) == FSIM_OK && e.energy == FSIM_ENERGY_FUEL && e.remaining == 77.0);
+            {
+                /* ABI 1.17: the terrain - a path into the ground is refused terrain_conflict, with the place it would meet
+                 * it and when (docs/flight-autonomy.md, 4.19); the ground is asked for */
+                fsim_command_terrain t;
+                double hsa[6], lat[2], lon[2], h[2];
+                hsa[0] = hsa[1] = hsa[2] = hsa[3] = fsim_hold();
+                hsa[4] = -50.0, hsa[5] = FSIM_ALTITUDE_MSL; /* under the flat ground, at sea level */
+                CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_HSA, hsa, 6, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
+                CHECK(strcmp(fsim_reason_name(cr.reason), "terrain_conflict") == 0);
+                fsim_command_terrain_init(&t);
+                CHECK(t.struct_size == sizeof t && t.hit == 0 && t.index == -1 && isnan(t.time_s));
+                CHECK(fsim_last_command_terrain(world, &t) == FSIM_OK && t.hit == 1 && t.index == -1);
+                CHECK(t.altitude_msl_m == -50.0 && t.ground_m == 0.0 && fabs(t.time_s) < 1e-9); /* where it is, at once */
+                st = fsim_vehicle_state_ptr(world, ranger);
+                CHECK(fabs(t.latitude_rad - st->latitude_rad) < 1e-9 && fabs(t.longitude_rad - st->longitude_rad) < 1e-9);
+                hsa[4] = 1200.0;
+                CHECK(fsim_vehicle_submit_mode(world, ranger, FSIM_MODE_HSA, hsa, 6, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+                CHECK(fsim_last_command_terrain(world, &t) == FSIM_OK && t.hit == 0);
+                /* the ground: flat, at sea level */
+                lat[0] = st->latitude_rad, lon[0] = st->longitude_rad, lat[1] = 0.1, lon[1] = 0.2;
+                CHECK(fsim_world_terrain(world, 2, lat, lon, h) == 2 && h[0] == 0.0 && h[1] == 0.0);
+                CHECK(fsim_world_terrain(world, 0, NULL, NULL, NULL) == 0);
+                CHECK(fsim_world_terrain(world, 1, NULL, lon, h) == FSIM_INVALID_ARGUMENT);
+            }
         }
         }
         fsim_world_destroy(world);

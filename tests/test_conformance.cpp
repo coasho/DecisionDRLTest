@@ -595,8 +595,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
                                               Reason::NotAllowed, Reason::TimeConstraint, Reason::QueueFull,
                                               // a task's (4.11)
                                               Reason::UnknownTask, Reason::TaskActive,
-                                              // further than its fuel or battery takes it (4.18)
-                                              Reason::InsufficientEndurance}));
+                                              // further than its fuel or battery takes it (4.18), into the ground (4.19)
+                                              Reason::InsufficientEndurance, Reason::TerrainConflict}));
         // a policy's precedence override is refused; one that waits was accepted to (4.9)
         if (done.options.source == Source::Policy && done.options.precedenceOverride != kNoPrecedenceOverride) CHECK_FALSE(done.result.accepted());
         if (done.result.reason == Reason::NotAllowed) CHECK(done.options.precedenceOverride != kNoPrecedenceOverride);
@@ -649,7 +649,8 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         else if (!ok)
             CHECK(among(done.result.reason, {Reason::NotUpdatable, Reason::WrongCommandType, Reason::InvalidParameter, Reason::OutOfRange, Reason::PerformanceLimit,
                                              Reason::InvalidWaypoint, Reason::InvalidCurve,
-                                             Reason::NotSupported})); // a field the aircraft has nothing for (docs/flight-autonomy.md, 4.3)
+                                             Reason::NotSupported,      // a field the aircraft has nothing for (docs/flight-autonomy.md, 4.3)
+                                             Reason::TerrainConflict})); // a path into the ground (4.19)
     }
 
     if (done.op == Op::Legacy && done.refused != Reason::None) CHECK_FALSE(done.accepted); // (the existing entry points gated the same way)

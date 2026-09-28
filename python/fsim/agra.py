@@ -11,6 +11,9 @@ these are names only (ADR-28, decision D1).
     >>> agra.cannot_comply(rejected.reason)         # 'INVALID_WAYPOINT'
     >>> agra.flight_capabilities(vehicle)           # {'HSA_CSA': ['fsim.guidance.hsa'], 'LOITER': [...], ...}
 """
+import datetime
+import math
+
 from .world import ActivityBasis, ActivityState, ActivityWait, Energy, Rank, TimeCriticality, TimeWindow
 
 #: CommandStatus (0 accepted, 1 rejected, 2 canceled, 3 valid) -> CommandProcessingStateEnum. RECEIVED is never
@@ -66,6 +69,7 @@ CANNOT_COMPLY = {
     "unknown_task": "UNKNOWN_ID",
     "task_active": "STATE_OR_SETTINGS",
     "insufficient_endurance": "CONSTRAINT_ENDURANCE",
+    "terrain_conflict": "CONSTRAINT_SAFETY",
 }
 
 #: fsim.TaskState -> A-GRA's RequirementExecutionStateEnum (a task kept, not commanded, awaits approval to execute)
@@ -89,6 +93,7 @@ VALIDATION_RESULT = {
     "out_of_range": "PERFORMANCE_LIMIT_EXCEEDED",
     "performance_limit": "PERFORMANCE_LIMIT_EXCEEDED",
     "insufficient_endurance": "VIOLATION_ENDURANCE",
+    "terrain_conflict": "VIOLATION_TERRAIN",
 }
 
 #: constraint names (fsim.Rejected.constraint) -> MA_PerformanceConstraintEnum
@@ -324,6 +329,40 @@ def insufficient_endurance(endurance, capacity=None):
 
     return {"EnduranceRemaining": {"EnduranceRemaining": one(endurance.remaining, endurance.remaining_s), "LogicalOperator": "LESS_THAN"},
             "EnduranceRequired": one(endurance.required, endurance.required_s)}
+
+
+def _timestamp(utc_s):
+    """Unix seconds as A-GRA's DateTimeType (UTC, ending Z)."""
+    return datetime.datetime.fromtimestamp(utc_s, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def terrain_constraint(point, now_utc_s=None):
+    """An fsim.TerrainPoint - a rejection's ("terrain_conflict") - as A-GRA's TerrainConstraint, a Point4D_Type
+    (docs/flight-autonomy.md, 4.19): the place (radians), the path's altitude there above the WGS-84 ellipsoid (the
+    Point4D's own reference when none is named) and, given ``now_utc_s`` - the world's UTC as Unix seconds
+    (World.environment's epoch_utc_seconds plus World.time) - its Timestamp: when the aircraft would be there. None for
+    None."""
+    if point is None:
+        return None
+    out = {"Latitude": point.latitude_rad, "Longitude": point.longitude_rad, "Altitude": point.altitude_msl_m}
+    if now_utc_s is not None and math.isfinite(point.time_s):
+        out["Timestamp"] = _timestamp(now_utc_s + point.time_s)
+    return out
+
+
+def elevation_request_status(latitudes_rad, longitudes_rad, heights):
+    """World.terrain's heights for an ElevationRequest's points as A-GRA's ElevationRequestStatus (VI 1.2.6.9;
+    docs/flight-autonomy.md, 4.19): ElevationReturned's RequestPoint list in the request's order, each a Point2D with
+    its Altitude above the WGS-84 ellipsoid where the platform has the ground there, without one where it has none;
+    RequestProcessingState COMPLETED, or FAILED where it has none of them."""
+    points = []
+    for lat, lon, h in zip(latitudes_rad, longitudes_rad, heights):
+        p = {"Latitude": lat, "Longitude": lon}
+        if h is not None:
+            p["Altitude"] = h
+        points.append(p)
+    known = not points or any(h is not None for h in heights)
+    return {"RequestProcessingState": "COMPLETED" if known else "FAILED", "ElevationReturned": {"RequestPoint": points}}
 
 
 def cannot_comply(reason):

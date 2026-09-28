@@ -23,7 +23,7 @@ double aboveSea(double altitudeM, double reference, const sim::VehicleState& s) 
 
 CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, const sim::VehicleState& state) const noexcept {
     CommandDetails::Endurance out;
-    if (!energyView_) return out;
+    if (!sessionView_) return out;
     // only a flight with an end: a route that does not repeat, a timed pattern, a curve
     const auto* route = std::get_if<RouteCommand>(&setpoint);
     const auto* pattern = std::get_if<PatternCommand>(&setpoint);
@@ -32,7 +32,7 @@ CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, con
     if (pattern && isHold(pattern->durationS)) return out;
     if (curve && (!curvePlan_ || curvePlan_->count == 0)) return out;
     if (!route && !pattern && !curve) return out;
-    const EnergyNow en = energyView_->energyNow(vehicle_);
+    const EnergyNow en = sessionView_->energyNow(vehicle_);
     if (en.energy == Energy::Unknown || !std::isfinite(en.remaining)) return out;
 
     // flown level, each leg at its speed and altitude, at the weight it has by then - the fuel burned before it gone,

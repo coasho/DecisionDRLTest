@@ -530,6 +530,8 @@ v.setCapabilityPrecedence("fsim.flight.velocity", 2); // the platform's: before 
 
 **Endurance** ([flight-autonomy.md](../flight-autonomy.md), 4.18). A flight with an end - a route that does not repeat, a timed pattern, a curve - is checked at its NEW against what the vehicle has above its reserve (the navigation settings'). Flown level at each leg's speed and altitude, at the performance tables' burn, one that needs more is refused `InsufficientEndurance`, and `CommandDetails::endurance` says by how much (in kg, or a battery's J, and in seconds). It is the first soft rejection: `options.overrideRejection = true` flies it anyway, flagged `kOverridden`.
 
+**The terrain** ([flight-autonomy.md](../flight-autonomy.md), 4.19). A route, a pattern, a curve or an hsa is checked against the world's ground at a NEW, a validation or an UPDATE: a route's legs and turns as it flies them and what it flies after its last point, a pattern's lap, a curve, an hsa's line a minute ahead. One whose path goes below the ground is refused `TerrainConflict`, whatever the range policy, and nothing overrides it; `CommandDetails::terrain` names the place, the path's altitude and the ground's there, when it would be there, and the route point or curve segment. `World::terrainHeightM(lat, lon)` answers the ground itself, empty where the provider has no data.
+
 ### Activity commands
 
 What may be done to a live activity - flying, waiting or disabled

@@ -20,6 +20,7 @@
 #include <exception>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -1240,6 +1241,37 @@ FSIM_API int fsim_last_command_endurance(const fsim_world* world, fsim_command_e
         e.remaining = n.remaining, e.required = n.required, e.remaining_s = n.remainingS, e.required_s = n.requiredS;
     }
     return copyOut(e, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API void fsim_command_terrain_init(fsim_command_terrain* t) {
+    if (!t) return;
+    std::memset(t, 0, sizeof *t);
+    t->struct_size = sizeof *t;
+    t->index = -1;
+    t->latitude_rad = t->longitude_rad = t->altitude_msl_m = t->ground_m = t->time_s = std::numeric_limits<double>::quiet_NaN();
+}
+
+FSIM_API int fsim_last_command_terrain(const fsim_world* world, fsim_command_terrain* out) {
+    if (!world) return FSIM_INVALID_ARGUMENT;
+    fsim_command_terrain t;
+    fsim_command_terrain_init(&t);
+    if (const auto* details = lastDetails(world); details && details->terrain.hit) {
+        const auto& h = details->terrain;
+        t.hit = 1, t.index = h.index;
+        t.latitude_rad = h.latitudeRad, t.longitude_rad = h.longitudeRad, t.altitude_msl_m = h.altitudeMslM, t.ground_m = h.groundM, t.time_s = h.timeS;
+    }
+    return copyOut(t, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+FSIM_API int fsim_world_terrain(const fsim_world* world, uint32_t count, const double* latitude_rad, const double* longitude_rad, double* height_m) {
+    if (!world || (count && (!latitude_rad || !longitude_rad || !height_m))) return FSIM_INVALID_ARGUMENT;
+    int known = 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const std::optional<double> h = world->world.terrainHeightM(latitude_rad[i], longitude_rad[i]);
+        height_m[i] = h ? *h : std::numeric_limits<double>::quiet_NaN();
+        known += h ? 1 : 0;
+    }
+    return known;
 }
 
 FSIM_API void fsim_command_finding_init(fsim_command_finding* f) {
