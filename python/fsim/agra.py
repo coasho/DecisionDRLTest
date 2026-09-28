@@ -232,6 +232,69 @@ def navigation_report(report):
             "Playtime": known(report.playtime_s), "ContingencyLevel": report.contingency.name}
 
 
+def performance_profile(profile, capacity=None):
+    """A performance profile (fsim.PerformanceProfile, Vehicle.performance_profile()) as A-GRA's
+    MA_FlightControlModesPerformanceProfileType (docs/flight-autonomy.md, 4.15). Each point carries its airspeed
+    ({"Value", "Reference": "TRUE_AIRSPEED"}), its altitude ({"AltitudeReference": "MSL", "Altitude"}) and its weight
+    (kg), None where it has none. A-GRA 6.0a's gaps are filled, and named so:
+    - MA_SpeedType (MaxDescentRate, ExcessPowerMaxClimb) carries no value: the rate is under "Value";
+    - FuelBurnRate's Endurance: a burn as what an hour uses, Duration 3600 s, with its Fuel (kg), or a battery's Percent
+      of `capacity` (J: NavigationReport.capacity);
+    - the control system's climb limit, which the VI names but the type does not carry, is "MaxClimbRate"."""
+    def known(x):
+        return None if x != x else x
+
+    def speed(v):
+        return None if v != v else {"Value": v, "Reference": "TRUE_AIRSPEED"}
+
+    def altitude(h):
+        return None if h != h else {"AltitudeReference": "MSL", "Altitude": h}
+
+    def airspeeds(points):
+        return [{"AirspeedLimit": speed(q.value), "AltitudePair": altitude(q.altitude_msl_m), "WeightPair": known(q.weight_kg)} for q in points]
+
+    def acceleration(x, y, z, mach, tas, h, w):
+        return {"AccelerationLimit": {"X_Accel": known(x), "Y_Accel": known(y), "Z_Accel": known(z)},
+                "AccelerationLimitValue": {"MachValue": known(mach)}, "Airspeed": speed(tas), "Altitude": altitude(h), "Weight": known(w)}
+
+    def accelerations(points):
+        return [acceleration(a.x_ms2, a.y_ms2, a.z_ms2, a.mach, a.tas_ms, a.altitude_msl_m, a.weight_kg) for a in points]
+
+    def rate(value, tas, h, w):
+        return {"Value": known(value), "Airspeed": speed(tas), "Altitude": altitude(h), "Weight": known(w)}
+
+    burn = []
+    for q in profile.burn:
+        if profile.energy == Energy.FUEL:
+            endurance = {"Fuel": q.value * 3600.0, "Duration": 3600.0}
+        elif profile.energy == Energy.BATTERY and capacity:
+            endurance = {"Percent": 100.0 * q.value * 3600.0 / capacity, "Duration": 3600.0}
+        else:
+            endurance = {"Duration": 3600.0}
+        burn.append({"Endurance": endurance, "Airspeed": speed(q.tas_ms), "Altitude": altitude(q.altitude_msl_m), "Weight": known(q.weight_kg)})
+    power = [{"ExcessPowerMaxClimb": rate(e.climb_ms, e.tas_ms, e.altitude_msl_m, e.weight_kg),
+              "ExcessPowerMaxAcceleration": acceleration(e.acceleration_ms2, float("nan"), float("nan"), float("nan"), e.tas_ms,
+                                                         e.altitude_msl_m, e.weight_kg)} for e in profile.excess_power]
+    return {
+        "MinAirspeed": airspeeds(profile.min_airspeed), "MaxAirspeed": airspeeds(profile.max_airspeed),
+        "BestEnduranceAirspeed": airspeeds(profile.best_endurance_airspeed), "BestRangeAirspeed": airspeeds(profile.best_range_airspeed),
+        "MinAltitude": altitude(profile.min_altitude_msl_m), "MaxAltitude": altitude(profile.max_altitude_msl_m),
+        "MinAccelerationLimits": accelerations(profile.min_acceleration), "MaxAccelerationLimits": accelerations(profile.max_acceleration),
+        "ExcessPowerOrAcceleration": {"ExcessPower": power} if power else None,
+        "MaxOrientationLimits": [{"OrientationLimits": {"Yaw": known(o.yaw_rad), "Pitch": known(o.pitch_rad), "Roll": known(o.roll_rad)},
+                                  "Airspeed": speed(o.tas_ms), "Altitude": altitude(o.altitude_msl_m), "Weight": known(o.weight_kg)}
+                                 for o in profile.max_orientation],
+        "MaxOrientationRateLimits": [{"OrientationRateLimits": {"RollRate": known(r.roll_rad_s), "PitchRate": known(r.pitch_rad_s),
+                                                                "YawRate": known(r.yaw_rad_s)}, "AirspeedPair": speed(r.tas_ms)}
+                                     for r in profile.max_orientation_rate],
+        "MaxTurnRate": known(profile.max_turn_rate_rad_s),
+        "MaxClimbRate": known(profile.max_climb_rate_ms),
+        "MaxDescentRate": [rate(q.value, q.tas_ms, q.altitude_msl_m, q.weight_kg) for q in profile.max_descent_rate],
+        "MaxDeceleration": accelerations(profile.max_deceleration),
+        "FuelBurnRate": burn,
+    }
+
+
 def task_state(status):
     """A task's status (fsim.TaskStatus) as A-GRA's RequirementExecutionStateEnum (docs/flight-autonomy.md, 4.11)."""
     return REQUIREMENT_EXECUTION_STATE[int(status.state)]

@@ -173,6 +173,10 @@ control::NavigationSettings Vehicle::navigation() const {
     return world_ ? world_->impl_->navigation(id_) : control::NavigationSettings{};
 }
 
+control::Reason Vehicle::performanceProfile(control::FlightMode mode, control::PerformanceProfile& out) const {
+    return world_ ? world_->impl_->performanceProfile(id_, mode, out) : control::Reason::UnknownVehicle;
+}
+
 std::vector<control::CapabilityDescriptor> Vehicle::capabilities() const {
     return world_ ? world_->impl_->capabilities(id_) : std::vector<control::CapabilityDescriptor>{};
 }

@@ -2,6 +2,7 @@
 
 // The C ABI's opaque handles (shared by the translation units of fsim.dll).
 
+#include "fsim/PerformanceProfile.h"
 #include "fsim/Capability.h"
 #include "fsim/World.h"
 #include "fsim/fsim_c.h"
@@ -32,6 +33,8 @@ struct fsim_world {
         std::vector<double> values;
         std::vector<fsim_position_command> points;
     } readback;
+    /// The performance profile last asked for (fsim_vehicle_performance_profile): what its arrays point into.
+    fsim::control::PerformanceProfile profile;
 
     const char* intern(const std::string& s) { return strings.insert(s).first->c_str(); }
 

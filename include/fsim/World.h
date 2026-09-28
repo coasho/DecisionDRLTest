@@ -16,6 +16,7 @@
 #include "fsim/Export.h"
 #include "fsim/GroundProvider.h"
 #include "fsim/InitialConditions.h"
+#include "fsim/PerformanceProfile.h"
 #include "fsim/Property.h"
 #include "fsim/VehicleProfile.h"
 #include "fsim/VehicleState.h"
@@ -196,6 +197,11 @@ public:
     /// Reason::OutOfRange for a point off the Earth or a reserve outside [0, 1).
     control::Reason setNavigation(const control::NavigationSettings& settings);
     control::NavigationSettings navigation() const;
+    /// A flight mode's performance profile (docs/flight-autonomy.md, 4.15; A-GRA's
+    /// MA_FlightControlModesPerformanceProfileType) at the vehicle's condition now: HSA/CSA,
+    /// waypoint or curve following, into `out` (its vectors reused). Reason::InvalidParameter
+    /// for another mode; NotSupported or NotImplemented for one the vehicle does not offer.
+    control::Reason performanceProfile(control::FlightMode mode, control::PerformanceProfile& out) const;
     /// What the vehicle offers: its flight levels and behaviours.
     std::vector<control::CapabilityDescriptor> capabilities() const;
     /// A capability's availability now, as a policy is answered (docs/sdk/control.md,

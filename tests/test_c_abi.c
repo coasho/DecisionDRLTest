@@ -1319,6 +1319,41 @@ int main(int argc, char** argv) {
             nr.contingency = 77;
             CHECK(fsim_vehicle_navigation_report(world, navigator, &nr) == FSIM_OK && nr.contingency == 77 && nr.playtime_s > 0.0);
         }
+        {
+            /* ABI 1.14: the performance profile - a flight mode's guard rails at the condition now
+             * (docs/flight-autonomy.md, 4.15) */
+            fsim_performance_profile pp;
+            int32_t why = -1;
+            uint32_t viper = 0, k;
+            spec.name = "cap-profiled";
+            spec.type = "jsbsim:f16c";
+            spec.altitude_msl_m = 3000.0;
+            spec.airspeed_ms = 160.0;
+            spec.longitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &viper) == FSIM_OK);
+            CHECK(fsim_world_step(world, 300) == FSIM_OK); /* (10 s: spawned in the air with its gear down, it retracts it) */
+            fsim_performance_profile_init(&pp);
+            CHECK(pp.struct_size == sizeof pp && isnan(pp.max_altitude_msl_m) && pp.max_airspeed == NULL && pp.max_airspeed_count == 0);
+            CHECK(fsim_vehicle_performance_profile(world, viper, FSIM_FLIGHT_MODE_HSA_CSA, &pp, &why) == FSIM_OK && why == 0);
+            CHECK(pp.mode == FSIM_FLIGHT_MODE_HSA_CSA && pp.energy == FSIM_ENERGY_FUEL && pp.clean == 1 && pp.gear_down == 0);
+            CHECK(pp.weight_kg > 0.0 && fabs(pp.altitude_msl_m - 3000.0) < 200.0);
+            CHECK(pp.max_airspeed_count >= 3 && pp.max_airspeed != NULL && pp.min_airspeed_count == pp.max_airspeed_count);
+            for (k = 0; k < pp.max_airspeed_count; ++k)
+                CHECK(pp.max_airspeed[k].value > pp.min_airspeed[k].value && pp.max_airspeed[k].altitude_msl_m == pp.min_airspeed[k].altitude_msl_m);
+            CHECK(pp.best_range_airspeed_count > 0 && pp.best_range_airspeed[0].value > pp.min_airspeed[0].value);
+            CHECK(pp.excess_power_count >= 48 && pp.excess_power[0].climb_ms > 0.0 && pp.excess_power[0].tas_ms > 0.0);
+            CHECK(pp.burn_count > 0 && pp.burn[0].value > 0.0);
+            CHECK(pp.min_acceleration_count > 0 && pp.min_acceleration[0].z_ms2 < -9.8); /* (a pull: body z up) */
+            CHECK(pp.max_deceleration_count > 0 && pp.max_deceleration[0].x_ms2 < 0.0);
+            CHECK(pp.max_orientation_count == 1 && pp.max_orientation[0].roll_rad > 0.0 && isnan(pp.max_orientation[0].yaw_rad));
+            CHECK(pp.max_orientation_rate_count == 1 && pp.max_altitude_msl_m > 10000.0 && isnan(pp.min_altitude_msl_m));
+            CHECK(pp.max_turn_rate_rad_s > 0.0 && pp.max_climb_rate_ms > 0.0);
+            CHECK(fsim_vehicle_performance_profile(world, viper, FSIM_FLIGHT_MODE_CURVE_FOLLOWING, &pp, NULL) == FSIM_OK && pp.mode == FSIM_FLIGHT_MODE_CURVE_FOLLOWING);
+            /* what has none: another mode, no such vehicle, not a mode */
+            CHECK(fsim_vehicle_performance_profile(world, viper, FSIM_FLIGHT_MODE_LOITER, &pp, &why) != FSIM_OK && strcmp(fsim_reason_name(why), "invalid_parameter") == 0);
+            CHECK(fsim_vehicle_performance_profile(world, 999, FSIM_FLIGHT_MODE_HSA_CSA, &pp, &why) != FSIM_OK && strcmp(fsim_reason_name(why), "unknown_vehicle") == 0);
+            CHECK(fsim_vehicle_performance_profile(world, viper, 99, &pp, NULL) != FSIM_OK);
+        }
         }
         fsim_world_destroy(world);
     }

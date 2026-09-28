@@ -374,6 +374,49 @@ The navigation report (STS-07; A-GRA's MA_NavigationReport) says what a vehicle 
   - C: `fsim_vehicle_navigation_report`, `fsim_vehicle_set_navigation` and `fsim_vehicle_get_navigation` (ABI 1.13).
   - Python: `Vehicle.navigation_report()`, `set_recovery()`, `clear_recovery()` and `navigation()`; `fsim.agra.navigation_report(report)` gives A-GRA's names.
 
+### 4.15 The performance profile (as FA-3 builds it)
+
+A flight mode's performance profile (CAP-04 to CAP-15; A-GRA's MA_FlightControlModesPerformanceProfileType, VI 1.2.6.7) is the set of guard rails a mission autonomy shapes its commands within.
+
+- **Per mode, worked out when asked.**
+  - A-GRA profiles three modes: HSA/CSA, waypoint following and curve following. The platform gives each one the vehicle offers.
+  - The modes share the vehicle's performance ([vehicle-interface.md](vehicle-interface.md), 7.1), so the three profiles carry the same values, each under its own mode.
+  - Another mode is refused `invalid_parameter`. One the vehicle does not offer is refused with its support table's reason, `not_supported` or `not_implemented`.
+  - The profile is worked out at the vehicle's condition now: its altitude, weight and airspeed, its flaps and gear. Nothing in the step reads it.
+- **What it carries**, under A-GRA's fields:
+  - *Airspeeds against altitude* (true airspeeds, at the weight now; CAP-05). The least and the most are what the aircraft flies within what it may:
+    - it flies from the tables' least to their top level speed, a rotorcraft's from the hover;
+    - it may fly within the envelope's calibrated and Mach limits and the gear's placard.
+
+    With them come the best-endurance and best-range speeds.
+  - *Altitudes* (CAP-06): the most is the service ceiling at the weight now. There is no least: the platform keeps no floor but the ground.
+  - *Against airspeed and altitude*, at the weight now:
+    - acceleration limits in body axes (CAP-07): x from the excess power at full power and at idle over the speed, z from the load factors; a rotorcraft's from its tilt and its loops' deceleration;
+    - specific excess power (CAP-08): the climb holding the speed, and the acceleration holding the height;
+    - the steepest descent holding the speed at idle, no faster than guidance asks (CAP-12);
+    - the deceleration at idle (CAP-13), clean: the tables fly no drag devices;
+    - the burn (CAP-14): the fuel flow, or a battery's power.
+  - *At the condition now*:
+    - the attitude limits (CAP-09): pitch up and down, and bank; no yaw limit;
+    - the rate limits (CAP-10): roll, where the aircraft has one;
+    - the fastest turn guidance flies at the airspeed now (CAP-11), and the fastest climb it asks.
+- **Updated with the configuration and the condition** (CAP-15). Asked again, the profile is worked out afresh.
+  - The flaps count as out when commanded beyond their threshold, as protection judges them; the gear counts as down when not fully up.
+  - Then what the tables give is left out, since they are flown clean, and the flaps' and gear's placards bound the airspeeds.
+  - The weight is the vehicle's now; the altitude limits and attitudes are the condition's now.
+- **Where the tables are silent, it says nothing.**
+  - A stock JSBSim aircraft's airspeeds come from its Performance at the altitude now, and it has no excess power and no burn.
+  - A quadrotor has no climb.
+  - A rotorcraft has no ceiling within the altitudes flown.
+- **A-GRA's schema has two gaps**, which the platform fills (`fsim.agra.performance_profile`):
+  - MA_SpeedType, used by MaxDescentRate and ExcessPowerMaxClimb, carries an airspeed, an altitude and a weight, but no speed;
+  - the VI names a maximum climb rate, which the type has no field for.
+- **Checked on all 35**, through the SDK (section 14). At a weight the tables flew, each of the profile's points is the table's cell, to the six digits the aircraft file keeps. FA-3a checked those tables against the flight tests, within 5 %.
+- **Surfaces.**
+  - C++: `World::performanceProfile(id, mode, out)` and `Vehicle::performanceProfile(mode, out)`, with the types in fsim/PerformanceProfile.h. A profile asked again into the same one allocates nothing.
+  - C: `fsim_vehicle_performance_profile` (ABI 1.14).
+  - Python: `Vehicle.performance_profile(mode)`; `fsim.agra.performance_profile(profile, capacity=None)` gives A-GRA's names.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -543,7 +586,7 @@ A-GRA's per-mode performance profile from hangar's data; energy management in ev
 **Status:** in progress, in five steps:
 - FA-3a, the performance tables (4.13), done 2026-09-27 and measured in section 14;
 - FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft, the navigation report (STS-07, 4.14), endurance against a flown burn and the rotorcraft's tables, done 2026-09-27 and measured in section 14;
-- FA-3c, the performance profile per mode (CAP-04 to CAP-15), updated with the condition and configuration;
+- FA-3c, the performance profile per mode (CAP-04 to CAP-15, 4.15), updated with the condition and configuration, done 2026-09-27 and measured in section 14;
 - FA-3d, energy management in every mode (HSA-10, CTG-04): the fleet climb case;
 - FA-3e, speed optimisation (HSA-05, LTR-17) and endurance validation (VAL-03), the first soft rejection override_rejection overrides.
 
@@ -1188,6 +1231,62 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
     - The larger tables section changed the profile code's inlining, and the path's functions moved 0.8 to 2.6 KB.
     - A 448-byte unused function added to the bench moved the same case by 4 ns.
 - ctest: all 244 tests pass.
+
+**FA-3c, the performance profile (CAP-04 to CAP-15).**
+- **The profile on all 35, against its tables.** Each aircraft flew its cruise level at 3,000 m for 15 s (the rotorcraft hovered at 300 m), its tanks full and the fuel frozen: a weight every table flies.
+  - At that weight each of the profile's points is a table's cell. That covers the airspeeds against altitude (within the envelope's limits, which bind none of the designs), the best speeds, the ceiling, and every excess-power and burn point with its speed, the band's fraction.
+  - The profile matched cell for cell on all 35, 15,479 values in all, to within 4.9e-06: the six digits the aircraft file keeps.
+  - FA-3a checked the fixed wings' tables against their flight tests (level speeds, climb, stall and ceiling) within 5 %. FA-3b checked the rotorcraft's against their fly stage's hover and trims and a flown burn. All 230 of those checks pass, and the profile carries them: FA-3's first acceptance criterion.
+
+| Aircraft | Rows | Points | Worst | Ceiling at full tanks (m) | Tables' checks |
+| --- | --- | --- | --- | --- | --- |
+| a10c | 7 | 477 | 3.8e-06 | 9,165 | 10 of 10 |
+| b52h | 5 | 255 | 4.1e-06 | 13,486 | 9 of 9 |
+| c130j | 8 | 545 | 4.6e-06 | 9,886 | 8 of 8 |
+| c172 | 7 | 477 | 4.4e-06 | 3,936 | 7 of 7 |
+| c17a | 7 | 477 | 4.6e-06 | 11,135 | 5 of 5 |
+| cf2 | 4 | 145 | 3.5e-06 | none | 2 of 2 |
+| e3g | 7 | 477 | 4.4e-06 | 10,341 | 9 of 9 |
+| e7a | 8 | 545 | 4.6e-06 | 11,800 | 10 of 10 |
+| ea18g | 8 | 539 | 4.7e-06 | 17,449 | 5 of 5 |
+| ec130h | 6 | 409 | 4.8e-06 | 6,571 | 8 of 8 |
+| f15c | 8 | 507 | 4.5e-06 | 19,635 | 5 of 5 |
+| f16c | 8 | 535 | 4.5e-06 | 18,730 | 5 of 5 |
+| f22a | 8 | 509 | 4.4e-06 | 18,430 | 5 of 5 |
+| f35a | 8 | 543 | 4.0e-06 | 17,470 | 5 of 5 |
+| fa18c | 8 | 539 | 4.9e-06 | 18,540 | 5 of 5 |
+| gripen | 7 | 443 | 4.6e-06 | 18,487 | 5 of 5 |
+| h6k | 7 | 443 | 4.8e-06 | 11,628 | 9 of 9 |
+| iris | 4 | 145 | 3.5e-06 | none | 2 of 2 |
+| j10a | 7 | 435 | 4.7e-06 | 18,109 | 5 of 5 |
+| j20a | 7 | 447 | 4.3e-06 | 17,929 | 5 of 5 |
+| kc135r | 6 | 409 | 4.7e-06 | 10,723 | 10 of 10 |
+| kc46a | 7 | 477 | 4.6e-06 | 9,269 | 9 of 9 |
+| mig29a | 8 | 541 | 4.2e-06 | 18,913 | 5 of 5 |
+| mirage2000 | 7 | 361 | 4.4e-06 | 17,901 | 5 of 5 |
+| rafale | 8 | 539 | 3.9e-06 | 18,962 | 5 of 5 |
+| rc135w | 6 | 409 | 4.6e-06 | 10,925 | 11 of 11 |
+| rq4b | 6 | 409 | 4.3e-06 | 12,110 | 10 of 10 |
+| skua | 7 | 447 | 4.7e-06 | 10,611 | 4 of 4 |
+| su25 | 7 | 477 | 3.3e-06 | 16,012 | 10 of 10 |
+| su27s | 8 | 539 | 4.8e-06 | 19,934 | 5 of 5 |
+| su57 | 8 | 501 | 3.9e-06 | 17,748 | 5 of 5 |
+| typhoon | 8 | 479 | 3.9e-06 | 18,964 | 5 of 5 |
+| u2s | 7 | 477 | 4.1e-06 | 18,447 | 10 of 10 |
+| uh1h | 4 | 273 | 4.9e-06 | none | 3 of 3 |
+| uh60 | 4 | 249 | 4.5e-06 | none | 9 of 9 |
+
+- **Configuration and condition** (`test_performance_profile`):
+  - An F-16C given flap and gear placards, with its flaps out and gear down, has its airspeed bounded by the gear's placard at the altitude now, and the tables' values left out.
+  - Spawned in the air, its gear retracting, it is not clean until the gear is up.
+  - A profile asked again into the same one reuses its vectors, and its weight follows the fuel burned.
+- **A-GRA's schema**: MA_SpeedType carries an airspeed, an altitude and a weight, but no speed. So MaxDescentRate and ExcessPowerMaxClimb cannot carry the rate in the schema; `fsim.agra.performance_profile` adds it as "Value".
+- **Digests:** identical to FA-2e's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-3b's rotorcraft build (8edf5da), built in the scratch worktree (5 rounds of `micro`, 9 of `command`):
+  - the micro cases are within −3.2 % to +0.9 %, and the command cases −1.5 % to 0.0 %;
+  - a behaviour's NEW reads −16.4 %, because that baseline, built in another tree, runs it at 161.7 ns where the same source built in this tree ran 134.3 ns. It is +0.7 % against that.
+  - The profile's code is not linked into the bench: it is asked for, never stepped.
+- ctest: all 247 tests pass.
 
 ## Appendix A: the inventory
 

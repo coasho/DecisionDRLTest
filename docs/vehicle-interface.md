@@ -402,7 +402,7 @@ The adapter computes a vehicle's `Performance` when the vehicle is created, and 
 | altitude gain | the position loop's `altitude.gain` | the position loop's `altitude.gain` |
 
 - **Derived limits.** Turn radius, turn rate, and climb gradient at a speed follow from these (`Performance::turnRadiusM(v)` and the like).
-- **Per mode.** The VI gives a profile per mode; here every mode shares the vehicle's, and a mode states which fields it uses.
+- **Per mode.** The VI gives a profile per mode; here every mode shares the vehicle's, and a mode states which fields it uses. ADR-29 FA-3c works out A-GRA's per-mode profile from it and the performance tables, at the vehicle's condition now ([flight-autonomy.md](flight-autonomy.md), 4.15).
 - **Dynamic.** It is recomputed on a change, with a new revision (6.3). Configuration-dependent limits (flaps, gear) stay protection's, as ADR-26 11 has them.
   - The stack counts the changes made through it to its loops (`ControlStack::loopsRevision`): `use`, `setControllerSettings`, and `setParameter`, which the C ABI's and Python's parameter calls go through.
   - The host recomputes when that count moves: after each world step, before it checks a command, and when the performance or the revision is asked for. A change that leaves every field as it was makes no new revision.

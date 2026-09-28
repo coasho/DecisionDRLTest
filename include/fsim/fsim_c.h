@@ -1034,6 +1034,57 @@ FSIM_API void fsim_navigation_settings_init(fsim_navigation_settings* settings);
 FSIM_API int fsim_vehicle_set_navigation(fsim_world* world, uint32_t id, const fsim_navigation_settings* settings);
 FSIM_API int fsim_vehicle_get_navigation(const fsim_world* world, uint32_t id, fsim_navigation_settings* out);
 
+/* A flight mode's performance profile (ABI 1.14; docs/flight-autonomy.md, 4.15; A-GRA's
+ * MA_FlightControlModesPerformanceProfileType, VI 1.2.6.7): the guard rails a mission autonomy shapes its commands
+ * within, worked out at the vehicle's condition now (its altitude, weight and airspeed; its flaps and gear) from its
+ * performance tables, its envelope and its loops. Airspeeds are true, altitudes above sea level; NaN where a value
+ * does not depend on one, or where there is none. */
+typedef struct fsim_profile_point {                    /* A-GRA's MA_AirspeedLimitType, MA_SpeedType, MA_FuelBurnRateType */
+    double value;                                      /* m/s (an airspeed, a climb or descent rate), or a burn: kg/s, W */
+    double tas_ms, altitude_msl_m, weight_kg;
+} fsim_profile_point;
+typedef struct fsim_profile_acceleration {             /* A-GRA's MA_AccelerationLimitsType: body axes, x forward, y right, */
+    double x_ms2, y_ms2, z_ms2;                        /* z down; the specific force (1 g of lift is -9.81 in z) */
+    double mach, tas_ms, altitude_msl_m, weight_kg;
+} fsim_profile_acceleration;
+typedef struct fsim_profile_excess_power {             /* A-GRA's MA_SpecificExcessPowerType, at full power */
+    double climb_ms, acceleration_ms2;                 /* holding the speed; holding the height */
+    double tas_ms, altitude_msl_m, weight_kg;
+} fsim_profile_excess_power;
+typedef struct fsim_profile_orientation {              /* A-GRA's MA_OrientationLimitType; pitch_min_rad the most nose-down */
+    double yaw_rad, pitch_rad, pitch_min_rad, roll_rad;
+    double tas_ms, altitude_msl_m, weight_kg;
+} fsim_profile_orientation;
+typedef struct fsim_profile_rates {                    /* A-GRA's MA_OrientationRateLimitsType, body axes */
+    double roll_rad_s, pitch_rad_s, yaw_rad_s, tas_ms;
+} fsim_profile_rates;
+typedef struct fsim_performance_profile {
+    uint32_t struct_size;
+    int32_t mode;                                      /* fsim_flight_mode */
+    int32_t energy;                                    /* fsim_energy: what `burn` is, fuel (kg/s) or a battery's power (W) */
+    int32_t clean, flaps_out, gear_down;               /* flaps and gear up: what the tables give (flown clean) is in */
+    double time_s, altitude_msl_m, weight_kg, tas_ms;  /* the condition it was worked out at */
+    double min_altitude_msl_m, max_altitude_msl_m;     /* none; the ceiling at the weight now */
+    double max_turn_rate_rad_s, max_climb_rate_ms;     /* at the airspeed now; what guidance asks at most */
+    /* arrays the library owns until the next profile asked of this world, or its destroy */
+    const fsim_profile_point *min_airspeed, *max_airspeed, *best_endurance_airspeed, *best_range_airspeed; /* against altitude */
+    uint32_t min_airspeed_count, max_airspeed_count, best_endurance_airspeed_count, best_range_airspeed_count;
+    const fsim_profile_acceleration *min_acceleration, *max_acceleration, *max_deceleration; /* against speed and altitude */
+    uint32_t min_acceleration_count, max_acceleration_count, max_deceleration_count;
+    const fsim_profile_excess_power* excess_power;
+    uint32_t excess_power_count;
+    const fsim_profile_point *max_descent_rate, *burn;
+    uint32_t max_descent_rate_count, burn_count;
+    const fsim_profile_orientation* max_orientation;   /* at the condition now */
+    const fsim_profile_rates* max_orientation_rate;
+    uint32_t max_orientation_count, max_orientation_rate_count;
+} fsim_performance_profile;
+FSIM_API void fsim_performance_profile_init(fsim_performance_profile* profile);
+/* FSIM_OK and `out` filled; FSIM_INVALID_ARGUMENT for an unknown vehicle, a mode A-GRA gives no profile (another than
+ * HSA/CSA, waypoint and curve following), or one the vehicle does not offer - `reason` (may be NULL) says which
+ * (fsim_reason_name: "unknown_vehicle", "invalid_parameter", "not_supported", "not_implemented"). */
+FSIM_API int fsim_vehicle_performance_profile(fsim_world* world, uint32_t id, int32_t mode, fsim_performance_profile* out, int32_t* reason);
+
 FSIM_API int fsim_world_get_environment(const fsim_world* world, fsim_environment* out);
 FSIM_API int fsim_world_set_environment(fsim_world* world, const fsim_environment* environment);
 

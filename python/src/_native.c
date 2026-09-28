@@ -1370,6 +1370,75 @@ static PyObject* world_navigation_report(PyObject* o, PyObject* const* args, Py_
                          r.reserve, r.playtime_s, r.return_distance_m, r.return_tas_ms, r.return_consumption, r.contingency, r.starved);
 }
 
+/* `count` records of `fields` doubles each, as a list of tuples */
+static PyObject* double_records(const void* data, uint32_t count, int fields) {
+    const double* d = (const double*)data;
+    PyObject* list = PyList_New((Py_ssize_t)count);
+    if (!list) return NULL;
+    for (uint32_t i = 0; i < count; ++i) {
+        PyObject* t = PyTuple_New(fields);
+        if (!t) {
+            Py_DECREF(list);
+            return NULL;
+        }
+        for (int f = 0; f < fields; ++f) {
+            PyObject* x = PyFloat_FromDouble(d[(size_t)i * (size_t)fields + (size_t)f]);
+            if (!x || PyTuple_SetItem(t, f, x) < 0) { /* (it takes x, set or not) */
+                Py_DECREF(t);
+                Py_DECREF(list);
+                return NULL;
+            }
+        }
+        if (PyList_SetItem(list, (Py_ssize_t)i, t) < 0) { /* (it takes t, set or not) */
+            Py_DECREF(list);
+            return NULL;
+        }
+    }
+    return list;
+}
+
+/* performance_profile(id, mode) -> (reason, None) where it has none, else (0, (mode, energy, clean, flaps_out,
+ * gear_down, time_s, altitude_msl_m, weight_kg, tas_ms, min_altitude_msl_m, max_altitude_msl_m, max_turn_rate_rad_s,
+ * max_climb_rate_ms, min_airspeed, max_airspeed, best_endurance_airspeed, best_range_airspeed, min_acceleration,
+ * max_acceleration, max_deceleration, excess_power, max_descent_rate, burn, max_orientation, max_orientation_rate)),
+ * each of the last twelve a list of tuples */
+static PyObject* world_performance_profile(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    int32_t why = 0;
+    fsim_performance_profile p;
+    if (!check_args(n, 2, 2, "performance_profile") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    const long mode = PyLong_AsLong(args[1]);
+    if (mode == -1 && PyErr_Occurred()) return NULL;
+    fsim_performance_profile_init(&p);
+    if (fsim_vehicle_performance_profile(self->world, id, (int32_t)mode, &p, &why) != FSIM_OK) {
+        if (why) return Py_BuildValue("(iO)", why, Py_None);
+        return fail();
+    }
+    PyObject* lists[12] = {
+        double_records(p.min_airspeed, p.min_airspeed_count, 4),
+        double_records(p.max_airspeed, p.max_airspeed_count, 4),
+        double_records(p.best_endurance_airspeed, p.best_endurance_airspeed_count, 4),
+        double_records(p.best_range_airspeed, p.best_range_airspeed_count, 4),
+        double_records(p.min_acceleration, p.min_acceleration_count, 7),
+        double_records(p.max_acceleration, p.max_acceleration_count, 7),
+        double_records(p.max_deceleration, p.max_deceleration_count, 7),
+        double_records(p.excess_power, p.excess_power_count, 5),
+        double_records(p.max_descent_rate, p.max_descent_rate_count, 4),
+        double_records(p.burn, p.burn_count, 4),
+        double_records(p.max_orientation, p.max_orientation_count, 7),
+        double_records(p.max_orientation_rate, p.max_orientation_rate_count, 4),
+    };
+    for (int i = 0; i < 12; ++i)
+        if (!lists[i]) {
+            for (int j = 0; j < 12; ++j) Py_XDECREF(lists[j]);
+            return NULL;
+        }
+    return Py_BuildValue("(i(iiiiiddddddddNNNNNNNNNNNN))", 0, p.mode, p.energy, p.clean, p.flaps_out, p.gear_down, p.time_s, p.altitude_msl_m,
+                         p.weight_kg, p.tas_ms, p.min_altitude_msl_m, p.max_altitude_msl_m, p.max_turn_rate_rad_s, p.max_climb_rate_ms, lists[0],
+                         lists[1], lists[2], lists[3], lists[4], lists[5], lists[6], lists[7], lists[8], lists[9], lists[10], lists[11]);
+}
+
 /* set_navigation(id, recovery, latitude_deg, longitude_deg, altitude_msl_m, reserve_fraction) */
 static PyObject* world_set_navigation(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
@@ -2349,6 +2418,7 @@ static PyMethodDef world_methods[] = {
     FAST("navigation_report", world_navigation_report, "navigation_report(id) -> A-GRA's navigation report, 14 items"),
     FAST("set_navigation", world_set_navigation, "set_navigation(id, recovery, latitude_deg, longitude_deg, altitude_msl_m, reserve_fraction)"),
     FAST("navigation", world_navigation, "navigation(id) -> (recovery, latitude_deg, longitude_deg, altitude_msl_m, reserve_fraction)"),
+    FAST("performance_profile", world_performance_profile, "performance_profile(id, mode) -> (reason, profile or None)"),
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
     FAST("capabilities", world_capabilities, "capabilities(id) -> [capability]"),
     FAST("capability_status", world_capability_status, "capability_status(id, capability) -> (availability, reason)"),

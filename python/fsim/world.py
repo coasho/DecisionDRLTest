@@ -425,6 +425,39 @@ NavigationReport.__doc__ = (
     "without a recovery point), the return's distance, speed and consumption, its contingency (fsim.Contingency) and whether its "
     "engines have nothing left - a fuel burner's tanks empty, or the battery spent.")
 
+ProfilePoint = collections.namedtuple("ProfilePoint", "value tas_ms altitude_msl_m weight_kg")
+ProfilePoint.__doc__ = ("A value at a true airspeed, an altitude (above sea level) and a weight: an airspeed or a climb or descent rate "
+                        "(m/s), or a burn (kg/s of fuel, W of a battery); NaN where it does not depend on one.")
+ProfileAcceleration = collections.namedtuple("ProfileAcceleration", "x_ms2 y_ms2 z_ms2 mach tas_ms altitude_msl_m weight_kg")
+ProfileAcceleration.__doc__ = ("Acceleration limits in body axes (x forward, y right, z down) as the specific force the aircraft can make "
+                               "(1 g of lift is -9.81 in z), at a Mach number, airspeed, altitude and weight; NaN where none.")
+ProfileExcessPower = collections.namedtuple("ProfileExcessPower", "climb_ms acceleration_ms2 tas_ms altitude_msl_m weight_kg")
+ProfileExcessPower.__doc__ = "Specific excess power at full power: the climb holding the speed, the acceleration holding the height."
+ProfileOrientation = collections.namedtuple("ProfileOrientation", "yaw_rad pitch_rad pitch_min_rad roll_rad tas_ms altitude_msl_m weight_kg")
+ProfileOrientation.__doc__ = "Attitude limits: the most nose-up pitch, the most nose-down (pitch_min_rad), the bank; NaN: none (the yaw)."
+ProfileRates = collections.namedtuple("ProfileRates", "roll_rad_s pitch_rad_s yaw_rad_s tas_ms")
+ProfileRates.__doc__ = "Attitude rate limits at an airspeed, body axes; NaN: none known."
+PerformanceProfile = collections.namedtuple(
+    "PerformanceProfile", "mode energy clean flaps_out gear_down time_s altitude_msl_m weight_kg tas_ms min_altitude_msl_m max_altitude_msl_m "
+    "max_turn_rate_rad_s max_climb_rate_ms min_airspeed max_airspeed best_endurance_airspeed best_range_airspeed min_acceleration "
+    "max_acceleration max_deceleration excess_power max_descent_rate burn max_orientation max_orientation_rate")
+PerformanceProfile.__doc__ = (
+    "A flight mode's performance profile (docs/flight-autonomy.md, 4.15; A-GRA's MA_FlightControlModesPerformanceProfileType) at "
+    "the vehicle's condition when asked: the mode's name; what `burn` is (fsim.Energy); whether it was clean (flaps and gear up: "
+    "only then are the tables' values - flown clean - in); the condition (time, altitude, weight, true airspeed); the least and "
+    "most altitude; the fastest turn and climb guidance flies; and lists: the airspeeds (fsim.ProfilePoint, true) against "
+    "altitude at the weight now; the accelerations (fsim.ProfileAcceleration), excess power (fsim.ProfileExcessPower), idle "
+    "descents, decelerations and burn against airspeed and altitude; the attitude (fsim.ProfileOrientation) and rate "
+    "(fsim.ProfileRates) limits at the condition now. fsim.agra.performance_profile gives it in A-GRA's names.")
+
+#: flight mode names (fsim.Capability.mode) -> their codes
+_FLIGHT_MODES = {}
+for _code in range(64):
+    _name = _native.flight_mode_name(_code)
+    if _name == "?":
+        break
+    _FLIGHT_MODES[_name] = _code
+
 NavigationSettings = collections.namedtuple("NavigationSettings", "recovery latitude_deg longitude_deg altitude_msl_m reserve_fraction")
 NavigationSettings.__doc__ = "Where the vehicle recovers to (if ``recovery``) and the fraction of its capacity it keeps for the end."
 
@@ -1204,6 +1237,21 @@ class Vehicle:
     def navigation(self):
         """Its recovery point and reserve (NavigationSettings)."""
         return NavigationSettings(*self._h.navigation(self.id))
+
+    def performance_profile(self, mode="hsa_csa"):
+        """A flight mode's performance profile at the vehicle's condition now (fsim.PerformanceProfile; docs/flight-autonomy.md,
+        4.15): "hsa_csa", "waypoint_following" or "curve_following" (A-GRA profiles those three). Raises fsim.Rejected -
+        "invalid_parameter" for another mode, "not_supported" or "not_implemented" for one the vehicle does not offer."""
+        code = _FLIGHT_MODES.get(mode, -1) if isinstance(mode, str) else int(mode)
+        reason, t = self._h.performance_profile(self.id, code)
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+        return PerformanceProfile(_native.flight_mode_name(t[0]), Energy(t[1]), bool(t[2]), bool(t[3]), bool(t[4]), *t[5:13],
+                                  *([ProfilePoint(*r) for r in rows] for rows in t[13:17]),
+                                  *([ProfileAcceleration(*r) for r in rows] for rows in t[17:20]),
+                                  [ProfileExcessPower(*r) for r in t[20]], [ProfilePoint(*r) for r in t[21]],
+                                  [ProfilePoint(*r) for r in t[22]], [ProfileOrientation(*r) for r in t[23]],
+                                  [ProfileRates(*r) for r in t[24]])
 
     def capabilities(self):
         """What the vehicle offers: its levels and behaviours (Capability, with their Parameters and A-GRA mode)."""

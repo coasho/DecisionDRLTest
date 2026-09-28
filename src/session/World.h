@@ -32,6 +32,10 @@
 #include <unordered_map>
 #include <vector>
 
+namespace fsim::control {
+struct PerformanceProfile; // fsim/PerformanceProfile.h
+}
+
 namespace fsim::session {
 
 struct WorldOptions {
@@ -182,6 +186,11 @@ public:
     /// Earth or a reserve outside [0, 1).
     control::Reason setNavigation(std::uint32_t id, const control::NavigationSettings& settings);
     control::NavigationSettings navigation(std::uint32_t id) const noexcept;
+    // --- The performance profile (docs/flight-autonomy.md, 4.15; A-GRA's MA_FlightControlModesPerformanceProfileType) ---
+    /// A flight mode's performance profile at the vehicle's condition now - HSA/CSA, waypoint or curve following -
+    /// into `out`, its vectors reused (PerformanceProfile.cpp). InvalidParameter for another mode (A-GRA profiles
+    /// those three), the support table's refusal for one the vehicle does not offer, UnknownVehicle.
+    control::Reason performanceProfile(std::uint32_t id, control::FlightMode mode, control::PerformanceProfile& out);
     /// What flies a vehicle's primary axes nobody owns: the neutral actuator
     /// command (as always) or a hold of the heading, airspeed and height each
     /// had when it was let go. Reason::None if set.

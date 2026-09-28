@@ -1664,6 +1664,71 @@ FSIM_API int fsim_vehicle_get_navigation(const fsim_world* world, uint32_t id, f
     return copyOut(s, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
 }
 
+// --- The performance profile (ABI 1.14; docs/flight-autonomy.md, 4.15) ------------------------------------
+
+// (its points are the C++ ones, field for field: the arrays point into the world's profile)
+static_assert(sizeof(fsim_profile_point) == sizeof(fsim::control::ProfilePoint) && offsetof(fsim_profile_point, weight_kg) == offsetof(fsim::control::ProfilePoint, weightKg));
+static_assert(sizeof(fsim_profile_acceleration) == sizeof(fsim::control::ProfileAcceleration) &&
+              offsetof(fsim_profile_acceleration, mach) == offsetof(fsim::control::ProfileAcceleration, mach) &&
+              offsetof(fsim_profile_acceleration, weight_kg) == offsetof(fsim::control::ProfileAcceleration, weightKg));
+static_assert(sizeof(fsim_profile_excess_power) == sizeof(fsim::control::ProfileExcessPower) &&
+              offsetof(fsim_profile_excess_power, weight_kg) == offsetof(fsim::control::ProfileExcessPower, weightKg));
+static_assert(sizeof(fsim_profile_orientation) == sizeof(fsim::control::ProfileOrientation) &&
+              offsetof(fsim_profile_orientation, roll_rad) == offsetof(fsim::control::ProfileOrientation, rollRad) &&
+              offsetof(fsim_profile_orientation, weight_kg) == offsetof(fsim::control::ProfileOrientation, weightKg));
+static_assert(sizeof(fsim_profile_rates) == sizeof(fsim::control::ProfileRates) && offsetof(fsim_profile_rates, tas_ms) == offsetof(fsim::control::ProfileRates, tasMs));
+
+FSIM_API void fsim_performance_profile_init(fsim_performance_profile* p) {
+    if (!p) return;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::memset(p, 0, sizeof *p);
+    p->struct_size = sizeof *p;
+    p->time_s = p->altitude_msl_m = p->weight_kg = p->tas_ms = nan;
+    p->min_altitude_msl_m = p->max_altitude_msl_m = p->max_turn_rate_rad_s = p->max_climb_rate_ms = nan;
+}
+
+FSIM_API int fsim_vehicle_performance_profile(fsim_world* world, uint32_t id, int32_t mode, fsim_performance_profile* out, int32_t* reason) {
+    if (reason) *reason = static_cast<int32_t>(fsim::control::Reason::None);
+    if (!world || !out) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_performance_profile: bad arguments");
+    if (mode < 0 || mode >= static_cast<int32_t>(fsim::control::FlightMode::Count)) {
+        if (reason) *reason = static_cast<int32_t>(fsim::control::Reason::InvalidParameter);
+        return absent(FSIM_INVALID_ARGUMENT, "fsim_vehicle_performance_profile: not a flight mode");
+    }
+    fsim::control::PerformanceProfile& p = world->profile;
+    const auto why = world->world.performanceProfile(id, static_cast<fsim::control::FlightMode>(mode), p);
+    if (why != fsim::control::Reason::None) { // (a query's no: its reason, nothing logged)
+        if (reason) *reason = static_cast<int32_t>(why);
+        return absent(FSIM_INVALID_ARGUMENT, std::string("fsim_vehicle_performance_profile: ") + fsim::control::reasonName(why));
+    }
+    fsim_performance_profile r;
+    fsim_performance_profile_init(&r);
+    r.mode = static_cast<int32_t>(p.mode), r.energy = static_cast<int32_t>(p.energy);
+    r.clean = p.clean ? 1 : 0, r.flaps_out = p.flapsOut ? 1 : 0, r.gear_down = p.gearDown ? 1 : 0;
+    r.time_s = p.timeS, r.altitude_msl_m = p.altitudeMslM, r.weight_kg = p.weightKg, r.tas_ms = p.tasMs;
+    r.min_altitude_msl_m = p.minAltitudeMslM, r.max_altitude_msl_m = p.maxAltitudeMslM;
+    r.max_turn_rate_rad_s = p.maxTurnRateRadS, r.max_climb_rate_ms = p.maxClimbRateMs;
+    auto points = [](const std::vector<fsim::control::ProfilePoint>& v, const fsim_profile_point*& to, uint32_t& n) {
+        to = v.empty() ? nullptr : reinterpret_cast<const fsim_profile_point*>(v.data()), n = static_cast<uint32_t>(v.size());
+    };
+    auto accelerations = [](const std::vector<fsim::control::ProfileAcceleration>& v, const fsim_profile_acceleration*& to, uint32_t& n) {
+        to = v.empty() ? nullptr : reinterpret_cast<const fsim_profile_acceleration*>(v.data()), n = static_cast<uint32_t>(v.size());
+    };
+    points(p.minAirspeed, r.min_airspeed, r.min_airspeed_count), points(p.maxAirspeed, r.max_airspeed, r.max_airspeed_count);
+    points(p.bestEnduranceAirspeed, r.best_endurance_airspeed, r.best_endurance_airspeed_count);
+    points(p.bestRangeAirspeed, r.best_range_airspeed, r.best_range_airspeed_count);
+    accelerations(p.minAcceleration, r.min_acceleration, r.min_acceleration_count);
+    accelerations(p.maxAcceleration, r.max_acceleration, r.max_acceleration_count);
+    accelerations(p.maxDeceleration, r.max_deceleration, r.max_deceleration_count);
+    r.excess_power = p.excessPower.empty() ? nullptr : reinterpret_cast<const fsim_profile_excess_power*>(p.excessPower.data());
+    r.excess_power_count = static_cast<uint32_t>(p.excessPower.size());
+    points(p.maxDescentRate, r.max_descent_rate, r.max_descent_rate_count), points(p.burn, r.burn, r.burn_count);
+    r.max_orientation = p.maxOrientation.empty() ? nullptr : reinterpret_cast<const fsim_profile_orientation*>(p.maxOrientation.data());
+    r.max_orientation_count = static_cast<uint32_t>(p.maxOrientation.size());
+    r.max_orientation_rate = p.maxOrientationRate.empty() ? nullptr : reinterpret_cast<const fsim_profile_rates*>(p.maxOrientationRate.data());
+    r.max_orientation_rate_count = static_cast<uint32_t>(p.maxOrientationRate.size());
+    return copyOut(r, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
 FSIM_API const char* fsim_requirement_kind_name(int kind) {
     return kind >= 0 && kind < static_cast<int>(fsim::control::RequirementKind::Count)
                ? fsim::control::requirementKindName(static_cast<fsim::control::RequirementKind>(kind))

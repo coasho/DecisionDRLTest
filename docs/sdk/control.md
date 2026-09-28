@@ -653,6 +653,32 @@ n.contingency;                             // FlightCritical at or below the res
   subsystem failures and no communications.
 - The report is worked out when asked; nothing in the step reads it.
 
+### The performance profile: a mode's guard rails
+
+A flight mode's performance profile ([flight-autonomy.md](../flight-autonomy.md),
+4.15; A-GRA's MA_FlightControlModesPerformanceProfileType): what a mission
+autonomy shapes its commands within, worked out at the vehicle's condition now.
+
+```cpp
+PerformanceProfile p;                                // fsim/PerformanceProfile.h; asked again into it, it allocates nothing
+Reason r = v.performanceProfile(FlightMode::HsaCsa, p); // or WaypointFollowing, CurveFollowing (InvalidParameter: another)
+p.maxAirspeed;                                       // ProfilePoint{value, tasMs, altitudeMslM, weightKg} against altitude
+p.maxAltitudeMslM;                                   // the service ceiling at the weight now
+p.excessPower;                                       // the climb and acceleration at full power, against airspeed and altitude
+p.burn;                                              // fuel flow (kg/s) or a battery's power (W): p.energy says which
+p.clean;                                             // flaps and gear up: false, and the tables' values are left out
+```
+
+- The airspeeds are true; the least and most are what it flies (the
+  tables' level speeds) within what it may (the envelope's and the gear's
+  placards). A stock aircraft's come from its Performance at the altitude
+  now, with no excess power or burn.
+- Accelerations are in body axes, x forward and z down: the specific force
+  (1 g of lift is -9.81 m/s2 in z).
+- The three modes share the vehicle's performance, so their profiles carry
+  the same values; one the vehicle does not offer is refused with its
+  support table's reason.
+
 ### Support and availability: what a vehicle can do at all, and now
 
 Two questions, answered apart ([flight-autonomy.md](../flight-autonomy.md),
