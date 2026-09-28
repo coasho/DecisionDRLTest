@@ -1,5 +1,6 @@
 // A route segment's climb optimisation (docs/flight-autonomy.md, 4.32; ADR-29 FA-6c2): the rate the aircraft climbs
-// or descends at holding its speed, and the altitude an efficient change holds - both from its performance tables.
+// or descends at holding its speed, and the altitude an efficient change holds - both from its performance tables; and
+// the speeds it flies level at, a required time of arrival's (4.33; FA-6d1).
 #include "control/Route.h"
 
 #include "fsim/VehicleProfile.h"
@@ -71,6 +72,23 @@ double cheapestAltitudeM(const TablesSection* tables, double fromMslM, double to
     }
     consider(fromMslM);
     return best;
+}
+
+void levelSpeedsMs(const TablesSection* tables, const Performance& f, bool hovers, double altitudeMslM, double fuelKg, double& least,
+                   double& most) noexcept {
+    least = hovers ? 1.0 : std::numeric_limits<double>::quiet_NaN(), most = std::numeric_limits<double>::quiet_NaN();
+    if (hovers) { // (its fastest over the ground: a route's own limit)
+        most = std::isfinite(f.maxGroundSpeedMs) ? f.maxGroundSpeedMs : f.maxTasMs;
+        return;
+    }
+    // (its slowest: 1.2 times its envelope's least, above where energy management begins to act (1.1 times) - the tables'
+    // slowest level speed is narrower than what it flies: a Typhoon at 139 m/s where they read 168 - else theirs)
+    if (tables && !tables->empty()) {
+        const TablesAt level = tablesAt(*tables, altitudeMslM, weightOf(*tables, fuelKg));
+        least = level.minTasMs, most = 0.97 * level.maxTasMs;
+    }
+    if (std::isfinite(f.minCasMs)) least = plannedSpeed(1.2 * f.minCasMs, static_cast<double>(SpeedReference::CalibratedAirspeed), altitudeMslM);
+    if (std::isfinite(f.maxTasMs)) most = std::isfinite(most) ? std::min(most, f.maxTasMs) : f.maxTasMs;
 }
 
 } // namespace fsim::control::route

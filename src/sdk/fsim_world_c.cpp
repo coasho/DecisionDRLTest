@@ -604,6 +604,7 @@ bool toWaypoints(fsim_world* w, const fsim_waypoint* waypoints, uint32_t count) 
         p.frameXM = c.frame_x_m, p.frameYM = c.frame_y_m, p.frameZM = c.frame_z_m;
         p.courseRad = c.course_rad, p.turnRadiusM = c.turn_radius_m; // (ABI 1.27)
         p.speedOptimization = c.speed_optimization, p.climbOptimization = c.climb_optimization, p.accelerationMs2 = c.acceleration_ms2; // (1.29)
+        p.arrivalBeginS = c.arrival_begin_s, p.arrivalEndS = c.arrival_end_s; // (1.30)
     }
     return true;
 }
@@ -983,6 +984,7 @@ FSIM_API void fsim_waypoint_init(fsim_waypoint* waypoint) {
     waypoint->frame = waypoint->frame_rotation = waypoint->frame_offsets = waypoint->frame_x_m = waypoint->frame_y_m = waypoint->frame_z_m = hold;
     waypoint->course_rad = waypoint->turn_radius_m = hold;
     waypoint->speed_optimization = waypoint->climb_optimization = waypoint->acceleration_ms2 = hold;
+    waypoint->arrival_begin_s = waypoint->arrival_end_s = hold;
 }
 
 FSIM_API int fsim_vehicle_submit_route(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_waypoint* waypoints,
@@ -1834,6 +1836,7 @@ FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id acti
             w.frame_x_m = p.frameXM, w.frame_y_m = p.frameYM, w.frame_z_m = p.frameZM;
             w.course_rad = p.courseRad, w.turn_radius_m = p.turnRadiusM;
             w.speed_optimization = p.speedOptimization, w.climb_optimization = p.climbOptimization, w.acceleration_ms2 = p.accelerationMs2;
+            w.arrival_begin_s = p.arrivalBeginS, w.arrival_end_s = p.arrivalEndS;
         }
         r.segments.resize(r.setpoint.segments.size());
         for (std::size_t i = 0; i < r.segments.size(); ++i) {
@@ -2180,6 +2183,7 @@ FSIM_API void fsim_activity_progress_init(fsim_activity_progress* p) {
     p->struct_size = sizeof *p;
     p->percent = p->segment_percent = p->distance_to_go_m = p->time_to_go_s = p->cross_track_m = nan;
     p->course_rad = p->heading_rad = p->altitude_msl_m = p->speed_ms = p->speed_reference = nan;
+    p->arrival_s = p->arrival_delta_s = nan;
 }
 
 FSIM_API int fsim_activity_get_progress(const fsim_world* world, fsim_activity_id activity, fsim_activity_progress* out) {
@@ -2193,6 +2197,8 @@ FSIM_API int fsim_activity_get_progress(const fsim_world* world, fsim_activity_i
     p.distance_to_go_m = g.distanceToGoM, p.time_to_go_s = g.timeToGoS, p.cross_track_m = g.crossTrackM;
     p.course_rad = g.courseRad, p.heading_rad = g.headingRad, p.altitude_msl_m = g.altitudeMslM;
     p.speed_ms = g.speedMs, p.speed_reference = g.speedReference;
+    fsim::control::ArrivalEstimate arrival; // (1.30: asked of its behaviour, apart from the record's progress)
+    if (world->world.activityArrival(activity, arrival)) p.arrival_s = arrival.arrivalS, p.arrival_delta_s = arrival.deltaS;
     return copyOut(p, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
 }
 

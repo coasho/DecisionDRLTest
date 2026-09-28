@@ -83,7 +83,7 @@ const FeatureDef kFeatures[] = {
 
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
-        "times of arrival, paths and branches, path terminators, "
+        "a time of arrival at or after a loiter point, paths and branches, path terminators, "
         "4D states and navigation performance (FA-6); planning metadata (FA-7)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
@@ -102,7 +102,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/climb/extended_range", "fsim.guidance.route", S, 6, 0, "", true},
     {"fsim.guidance.route/max_roll", "fsim.guidance.route", S, 0, 0, ""},                    // WPT-09
     {"fsim.guidance.route/acceleration", "fsim.guidance.route", S, 0, 0, ""},                // WPT-10 (FA-6c1)
-    {"fsim.guidance.route/required_time_of_arrival", "fsim.guidance.route", N, 6, 0, ""},    // WPT-11
+    {"fsim.guidance.route/required_time_of_arrival", "fsim.guidance.route", P, 6, 0, "at or after a loiter point", true}, // WPT-11 (FA-6d1)
     {"fsim.guidance.route/altitude/msl", "fsim.guidance.route", S, 0, 0, ""},                // WPT-12
     {"fsim.guidance.route/altitude/agl", "fsim.guidance.route", S, 0, 0, ""},
     {"fsim.guidance.route/altitude/hae", "fsim.guidance.route", S, 0, 0, ""},

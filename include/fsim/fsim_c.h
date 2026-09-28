@@ -606,6 +606,9 @@ typedef struct fsim_activity_progress {
     double course_rad, heading_rad, altitude_msl_m; /* what it commands: A-GRA's VehicleCommandState */
     double speed_ms;
     double speed_reference; /* 0 true airspeed, 1 calibrated, 2 ground speed, 3 Mach */
+    /* ABI 1.30 (4.33): a route's next point with an arrival window - when it is estimated to arrive there (simulation
+       seconds), and that against its window: + late, - early, 0 within (NaN: none) */
+    double arrival_s, arrival_delta_s;
 } fsim_activity_progress;
 FSIM_API void fsim_activity_progress_init(fsim_activity_progress* progress);
 FSIM_API int fsim_activity_get_progress(const fsim_world* world, fsim_activity_id activity, fsim_activity_progress* out);
@@ -763,6 +766,10 @@ typedef struct fsim_waypoint {
                                               "not_implemented"); left out with the speed, the point before's */
     double climb_optimization;             /* fsim_climb_optimization: its climb or descent at a rate the aircraft chooses */
     double acceleration_ms2;               /* the speed change into the segment at this acceleration (above 0); left out, as the loops change it */
+    /* ABI 1.30 (4.33): its required time of arrival - the window it is to arrive at the point in, the world's simulation
+       seconds; either side left out, open (a begin alone: no earlier; an end alone: no later) */
+    double arrival_begin_s;
+    double arrival_end_s;
 } fsim_waypoint;
 enum fsim_climb_optimization { FSIM_CLIMB_BEST_RATE = 0, FSIM_CLIMB_EXTENDED_RANGE }; /* A-GRA's ClimbOptimizationEnum (ABI 1.29) */
 /* What a waypoint is for (A-GRA's WaypointTypeEnum; ABI 1.26): nav only and passive are flown; the end of a path on a

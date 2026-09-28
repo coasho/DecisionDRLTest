@@ -1687,6 +1687,66 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             REQUIRE(!isHold(f.arrived));
             CHECK(std::abs(f.arrived) < 0.05 * f.dh);
         });
+    // A-GRA's required time of arrival (ADR-29 FA-6d1: WPT-11): a point three minutes on at its speed, given a window of 10 s
+    // a tenth later - slowed - or, where the slowest it flies level cannot take that, a tenth sooner - sped up. It arrives
+    // within 2 s of when it aimed (a quarter of the window inside it), its estimate halfway told within as much
+    struct ArrivalRoute {
+        double aimS = kHold, arrivedS = kHold, estimateS = kHold, t0 = 0.0;
+        bool slowed = true;
+    };
+    std::map<std::uint32_t, ArrivalRoute> arrivalRoutes;
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
+            const double v = p.rotor ? p.cruiseMs : p.start.airspeedTrueMs;
+            ArrivalRoute& f = arrivalRoutes[p.id];
+            f = ArrivalRoute{};
+            f.t0 = w.simTime();
+            double slowest = kHold, fastest = kHold;
+            route::levelSpeedsMs(&w.profile(p.id)->tables, perf(p), p.rotor, p.start.altitudeMslM, p.start.fuelKg, slowest, fastest);
+            f.slowed = !(slowest > v / 1.1 - 1.0);
+            const double later = f.slowed ? 1.1 : 0.9, planned = 180.0;
+            auto point = [&](double ahead) {
+                const PositionCommand q = pointFrom(p.start, ahead * c, ahead * sn, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            Waypoint a = point(60.0 * v), b = point(planned * v);
+            a.speed = v;
+            if (p.rotor) a.speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+            b.arrivalBeginS = f.t0 + later * planned - 5.0, b.arrivalEndS = f.t0 + later * planned + 5.0;
+            f.aimS = f.slowed ? later * planned - 2.5 : later * planned + 2.5;
+            const CommandResult res = w.submit(p.id, RouteCommand{}, std::vector<Waypoint>{a, b});
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index << " (its level speeds " << slowest << " to " << fastest << ", at " << v << ")");
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        [&](const Plane&) { return 1.1 * 180.0 * 1.2 + 40.0; },
+        [&](const Plane& p) {
+            ArrivalRoute& f = arrivalRoutes[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            if (!isHold(f.arrivedS)) return;
+            if (!r.live()) {
+                f.arrivedS = w.simTime() - f.t0;
+                return;
+            }
+            ArrivalEstimate e;
+            if (isHold(f.estimateS) && r.progress.percent >= 50.0 && w.activityArrival(activity[p.id], e)) f.estimateS = e.arrivalS - f.t0;
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const ArrivalRoute& f = arrivalRoutes[p.id];
+            INFO(activityStateName(r.state) << "; " << (f.slowed ? "slowed" : "sped up") << ": aimed at " << f.aimS << " s, arrived at " << f.arrivedS
+                                            << " s; its estimate halfway " << f.estimateS << " s");
+            CHECK(r.state == ActivityState::Completed);
+            REQUIRE((!isHold(f.arrivedS) && !isHold(f.estimateS)));
+            // (the worst: every one 0.03 s after its aim, a control period - its schedule closing on its own error each update -
+            // its estimate halfway its aim; 34 slowed, the Crazyflie, at a metre a second its slowest, sped up)
+            CHECK(std::abs(f.arrivedS - f.aimS) < 2.0); // (FA-6's acceptance: within 2 s of a feasible time of arrival)
+            CHECK(std::abs(f.estimateS - f.arrivedS) < 2.0);
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

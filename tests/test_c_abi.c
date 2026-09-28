@@ -1090,6 +1090,58 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
         }
         {
+            /* ABI 1.30 (4.33): a required time of arrival - a hangar C172's window read back, its progress estimating its
+               arrival in it; the stock C172x's (no performance tables) not implemented, and a window upside down refused,
+               each at its point (reserved: its index + 1) */
+            fsim_waypoint pts[2];
+            fsim_batch_command sp;
+            fsim_activity_progress prog;
+            double options[4];
+            const fsim_vehicle_state* at;
+            fsim_activity_id route_id;
+            uint32_t timed = 0;
+            int k;
+            const double now = fsim_world_time(world);
+            spec.name = "cap-arrival";
+            spec.type = "jsbsim:c172";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 50.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &timed) == FSIM_OK);
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            at = fsim_vehicle_state_ptr(world, timed);
+            for (k = 0; k < 2; ++k) fsim_waypoint_init(&pts[k]);
+            CHECK(isnan(pts[0].arrival_begin_s) && isnan(pts[0].arrival_end_s));
+            /* 3 km north at 50 m/s, then 5 km on: there between 200 and 210 s from now (it would be at 160 s: slowed) */
+            pts[0].latitude_rad = at->latitude_rad + 3000.0 / 6371008.8, pts[0].longitude_rad = at->longitude_rad, pts[0].speed = 50.0;
+            pts[1].latitude_rad = at->latitude_rad + 8000.0 / 6371008.8, pts[1].longitude_rad = at->longitude_rad;
+            pts[1].arrival_begin_s = now + 200.0, pts[1].arrival_end_s = now + 210.0;
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_route(world, timed, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            route_id = cr.activity;
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.waypoint_count == 2);
+            CHECK(sp.waypoints[1].arrival_begin_s == now + 200.0 && sp.waypoints[1].arrival_end_s == now + 210.0);
+            CHECK(fsim_world_step(world, 30) == FSIM_OK);
+            fsim_activity_progress_init(&prog);
+            CHECK(isnan(prog.arrival_s) && isnan(prog.arrival_delta_s));
+            CHECK(fsim_activity_get_progress(world, route_id, &prog) == FSIM_OK);
+            CHECK(fabs(prog.arrival_s - (now + 202.5)) < 1e-6 && prog.arrival_delta_s == 0.0); /* (aimed a quarter of it inside) */
+            CHECK(prog.speed_reference == FSIM_SPEED_GROUND_SPEED && prog.speed_ms < 50.0);
+            CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+            /* the stock C172x's: not implemented; upside down: invalid */
+            at = fsim_vehicle_state_ptr(world, b);
+            pts[0].latitude_rad = at->latitude_rad + 3000.0 / 6371008.8, pts[0].longitude_rad = at->longitude_rad;
+            pts[1].latitude_rad = at->latitude_rad + 8000.0 / 6371008.8, pts[1].longitude_rad = at->longitude_rad;
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 2);
+            pts[1].arrival_begin_s = now + 300.0;
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 2);
+        }
+        {
             /* ABI 1.6: the performance, and grants over the priorities (on a, whose live activities are its policy's) */
             fsim_performance perf;
             int32_t mode = -1, reason = -1, allowed = -1, granted = -1, availability = -1;

@@ -112,7 +112,9 @@ class PatternBehavior;
 /// rate; the speed is each segment's, in its reference - or the tables' best
 /// at the altitude and weight now where it optimises it, reached at its
 /// acceleration where it has one; a climb optimisation climbs or descends at
-/// the most it can holding that speed (docs/flight-autonomy.md, 4.32). It completes after
+/// the most it can holding that speed (docs/flight-autonomy.md, 4.32); and
+/// where a point has an arrival window, the ground speed that arrives in it
+/// (4.33). It completes after
 /// the last point unless the route repeats, and flies on: along the last
 /// leg's course, or orbiting (a wing) or hovering over (a rotorcraft) the
 /// last point. A new path store revision or new options fly it afresh.
@@ -159,6 +161,11 @@ private:
     /// its speed, to where it holds (an efficient climb's cheapest altitude), then the rest to arrive at its point; its
     /// rate, while it changes, as `feedforward`.
     double climbProfile(const ControlContext& ctx, const Performance& performance, const Waypoint& segment, double routeM, double& feedforward);
+    bool arrival(ArrivalEstimate& out) const noexcept override;
+    /// Its speed scheduled to its next arrival window (4.33), `routeM` along the route: as planned while that arrives within
+    /// it; else, from then to the point, the ground speed that arrives a little inside it, within the speeds it flies level.
+    /// Its estimate kept.
+    void scheduleArrival(const ControlContext& ctx, const Performance& performance, double routeM, route::Steer& steer);
 
     std::unique_ptr<route::Plan> plan_; ///< allocated with the behaviour: nothing in flight
     WindEstimate wind_;
@@ -189,6 +196,11 @@ private:
     double climbMid_ = kHold;          ///< the altitude it holds between (an efficient climb's cheapest; else its end)
     double climbLastS_ = 0.0;          ///< when the profile last moved
     bool climbRest_ = false;           ///< the rest of the change, from where it held, begun
+    // its next point with an arrival window (4.33)
+    std::int32_t arrivalPoint_ = -1;   ///< its index; -1: none ahead this lap
+    double arrivalAimS_ = kHold;       ///< when it is to arrive there, once its schedule has begun; kHold: as planned
+    double arrivalSpeedMs_ = kHold;    ///< the ground speed its schedule last asked (held through its last second)
+    double arrivalS_ = kHold, arrivalDeltaS_ = kHold; ///< when it is estimated to arrive there, and that against its window
     // its points in moving frames (4.29)
     bool moving_ = false;              ///< placed and planned again as it flies them
     bool overFrame_ = false;           ///< the piece flown is in one moving frame: flown over it

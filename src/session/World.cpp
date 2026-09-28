@@ -720,6 +720,11 @@ bool World::activitySetpoint(control::ActivityId activity, control::Setpoint& ou
     return e && e->host.setpoint(activity, out);
 }
 
+bool World::activityArrival(control::ActivityId activity, control::ArrivalEstimate& out) const {
+    const Entry* e = entry(control::activityVehicle(activity));
+    return e && e->host.arrival(activity, out);
+}
+
 std::vector<control::EndPoint> World::endPoints(control::ActivityId activity, std::size_t max) const {
     const Entry* e = entry(control::activityVehicle(activity));
     return e ? e->host.endPoints(activity, max) : std::vector<control::EndPoint>{};

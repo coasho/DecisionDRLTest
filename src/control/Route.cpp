@@ -1017,6 +1017,16 @@ double Plan::lapM(bool firstLap) const noexcept {
     return m;
 }
 
+double Plan::arrivalM(std::uint32_t k, bool firstLap) const noexcept {
+    double m = 0.0;
+    for (std::uint32_t i = firstLap ? start : 0; i < k; ++i) {
+        const Turn& t = turn(i, firstLap);
+        m += pieceM(i, firstLap) + t.radiusM * std::abs(t.angleRad);
+    }
+    const Turn& t = turn(k, firstLap);
+    return m + pieceM(k, firstLap) + 0.5 * t.radiusM * std::abs(t.angleRad);
+}
+
 Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool repeat, const sim::VehicleState& state, const Performance& performance,
                 bool hovers, std::int16_t& bad, const Altimeter* altimeter) noexcept {
     auto invalid = [&bad](std::uint32_t i) {
@@ -1067,6 +1077,8 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
         if (!code(w.speedOptimization, SpeedOptimization::Count) || !code(w.climbOptimization, ClimbOptimization::Count)) return invalid(i);
         if (!isHold(w.climbOptimization) && !isHold(w.climbRateMs)) return invalid(i);
         if (!within(w.accelerationMs2, 0.0, inf)) return invalid(i);
+        // its arrival window (4.33): its times finite, its begin not after its end
+        if (!within(w.arrivalBeginS, -inf, inf) || !within(w.arrivalEndS, -inf, inf) || w.arrivalBeginS > w.arrivalEndS) return invalid(i);
         const bool altitudeGiven = !isHold(w.altitudeM);
         w.longitudeRad = geo::wrapPi(w.longitudeRad);
         if (i == 0) {

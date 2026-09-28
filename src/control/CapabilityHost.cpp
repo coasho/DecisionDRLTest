@@ -490,6 +490,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     if (const int at = route::loiterFault(p); at >= 0) return point(static_cast<std::uint32_t>(at), Reason::InvalidWaypoint);
     for (std::uint32_t k = 0; k < p.loiterCount; ++k)
         if (const Reason why = checkLoiter(p.loiters[k]); why != Reason::None) return point(p.loiters[k].point, why);
+    if (const Reason why = checkArrivals(p, state, detail); why != Reason::None) return why; // (its arrival windows: 4.33)
     if (log.range == RangePolicy::None) { // (what it flies, the behaviour plans from where it starts: its loiters complete)
         if (p.loiterCount) {
             WindEstimate wind;
@@ -557,6 +558,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
             if (route::shapeFault(l.pattern, l.shape) >= 0) return point(l.point, Reason::InvalidWaypoint);
         }
     }
+    limitArrivals(p, state, log); // (its arrival windows it can make at its speeds: 4.33)
     auto flown = [&p](std::uint32_t i) { return p.repeat || i >= p.start; }; // (a route that does not repeat flies nothing before its start)
     // its turn points as laid out (4.30): a start's arc through the next point, within 170 degrees, its radius given the arc's
     // (within a metre, or half a percent), one the aircraft can turn at its speed - no clamp makes one flyable: each named;

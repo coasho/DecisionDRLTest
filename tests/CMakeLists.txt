@@ -33,6 +33,7 @@ add_executable(fsim_tests
     test_turn_points.cpp
     test_route_loiters.cpp
     test_route_segments.cpp
+    test_route_arrivals.cpp
     test_grants.cpp
     test_control_compat.cpp
     test_profile.cpp

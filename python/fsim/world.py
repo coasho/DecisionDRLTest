@@ -432,13 +432,15 @@ Capability.__doc__ = ("What a vehicle offers: e.g. fsim.flight.attitude (a level
 
 ActivityProgress = collections.namedtuple(
     "ActivityProgress", "segment segments laps segment_id percent segment_percent distance_to_go_m time_to_go_s cross_track_m "
-    "course_rad heading_rad altitude_msl_m speed_ms speed_reference")
+    "course_rad heading_rad altitude_msl_m speed_ms speed_reference arrival_s arrival_delta_s")
 ActivityProgress.__doc__ = ("How far an activity has got and what it commands, as its behaviour reported it after the last "
                             "world step (docs/vehicle-interface.md, 5.3): the waypoint, curve segment or pattern leg flown now "
                             "(of ``segments``; 0: nothing segmented), laps, percent of the whole and of the segment, the "
                             "distance and time to the end, the cross-track distance (+ right of the path), and the course, "
                             "heading, altitude and speed it asks for (``speed_reference``: 0 true airspeed, 1 calibrated, 2 "
-                            "ground speed, 3 Mach). NaN where it says nothing.")
+                            "ground speed, 3 Mach); a route's next point with an arrival window (docs/flight-autonomy.md, "
+                            "4.33): ``arrival_s``, when it is estimated to arrive there (World.time's clock), and "
+                            "``arrival_delta_s``, that against its window (+ late, - early, 0 within). NaN where it says nothing.")
 
 class Energy(enum.IntEnum):
     """What a vehicle flies on (NavigationReport.energy)."""
@@ -818,8 +820,8 @@ _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": Altitude
 Waypoint = collections.namedtuple(
     "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id "
                 "altitude_min_m altitude_max_m kind waypoint_type frame frame_rotation frame_offsets frame_x_m frame_y_m frame_z_m "
-                "course_rad turn_radius_m speed_optimization climb_optimization acceleration_ms2",
-    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0) + (HOLD,) * 15)
+                "course_rad turn_radius_m speed_optimization climb_optimization acceleration_ms2 arrival_begin_s arrival_end_s",
+    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0) + (HOLD,) * 17)
 Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that ends at it: reached at ``altitude_m`` above "
                     "``altitude_reference`` along a straight profile (or climbing at ``climb_rate_ms``, then level), flown at "
                     "``speed`` in ``speed_reference``, passed by ``turn`` (fsim.TurnType: 'fly_by', 'fly_over') with "
@@ -835,7 +837,9 @@ Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that end
                     "point (``kind`` 'loiter_point', 4.31) flies the fsim.RouteLoiter naming it. Its segment's performance "
                     "(4.32): ``speed_optimization`` (fsim.SpeedOptimization: the tables' best now, its speed replaced; left out "
                     "with the speed, the point before's), ``climb_optimization`` (fsim.ClimbOptimization) and "
-                    "``acceleration_ms2`` (the speed change into the segment at it).")
+                    "``acceleration_ms2`` (the speed change into the segment at it). Its required time of arrival (4.33): "
+                    "``arrival_begin_s`` and ``arrival_end_s``, the window it is to arrive in (World.time's clock; either "
+                    "side left out, open) - its speed scheduled over the ground to arrive in it.")
 
 RouteLoiter = collections.namedtuple("RouteLoiter", ("point",) + MODE_FIELDS["pattern"] + ("end_time_s",), defaults=(0,) + (HOLD,) * 36)
 RouteLoiter.__doc__ = ("The loiter a route's loiter point flies (A-GRA's LoiterPoint; docs/flight-autonomy.md, 4.31): at waypoint "

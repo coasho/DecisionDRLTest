@@ -806,6 +806,28 @@ A-GRA's path segment gives its speed as a value in a reference or as an optimisa
   - C ABI 1.29: `fsim_waypoint`'s `speed_optimization`, `climb_optimization` and `acceleration_ms2`, read where the caller's `struct_size` has them (`fsim_waypoint_init` leaves them out); `enum fsim_climb_optimization`.
   - Python: `fsim.Waypoint`'s three, codes by name or member; `fsim.ClimbOptimization`.
 
+### 4.33 A-GRA's required time of arrival (as FA-6d1 builds it)
+
+A-GRA's path segment gives a required time of arrival at its end point (MA_PathSegmentType.RequiredTimeOfArrival, a TimeWindowType): "a constraint on the timing of the waypoint", which "allows the operator to see a delta between the required and estimated arrival times that would allow for speed up/slow down determinations". A TimeWindowType is a range (a begin and an end; an end alone starts now, a begin alone runs on) and a duration. FA-6d1 builds it (WPT-11); FA-6d2 builds the planned inertial states and FA-6d3 the required navigation performance.
+
+- **Its window** (`arrivalBeginS`, `arrivalEndS`, the Waypoint's fields 25 and 26): when it is to arrive at the point, in the world's simulation seconds, as a loiter's end time. Either side left out is open: a begin alone, no earlier; an end alone, no later. A duration is the caller's to add to its begin. Arriving is reaching the point's segment's end, its turn's middle, where the progress's segment moves on.
+- **Refused `invalid_waypoint`, naming the point:** a time not finite; a begin after its end; an end already past.
+- **Its speed scheduled** to the next point with a window (a repeating route's are its first lap's):
+  - the distance to it along the route, as the route measures its segments;
+  - its arrival at the speed planned: its segment's, over the ground in the wind now along its course;
+  - within the window, flown as planned. Beyond it, from then until the point, the ground speed that arrives a quarter of the window's width inside it (5 s at most, and 5 s past a side given alone; a point window, at it), re-planned each update, so it closes on its own error. In its last second it holds the speed it asked;
+  - within the speeds it flies level: a wing's from 1.2 times its envelope's least up to its tables' fastest at the altitude and fuel on board, less 3 %, and its most. A wing's tables' slowest level speed is narrower than what it flies (a Typhoon at 139 m/s where they read 168), and energy management begins to act at 1.1 times its least. A rotorcraft's is from a metre a second up to its fastest over the ground.
+  The point after the window is flown at its own speed again.
+- **Checked:** the time it would arrive at the fastest and the slowest of those speeds (in calm air) against the window. A window it cannot make is refused `performance_limit` naming the point, whatever the range policy: `MaxAirspeed` where even its fastest arrives after it, `MinAirspeed` where even a wing's slowest arrives before it. Unchecked (`RangePolicy::None`), it is flown at its limit.
+- **Not implemented** (as its support row, `fsim.guidance.route/required_time_of_arrival`, says, partial):
+  - a window at or after a loiter point: the time a loiter takes is its end time's to set (4.31);
+  - an aircraft without performance tables, whose speeds it would have no floor for (a stock JSBSim aircraft): its row reads not implemented, as the speed optimisation's does.
+- **Reported:** the estimated arrival at the next point with a window (the aim, once scheduled), and that against its window: + late, − early, 0 within. C++ asks the route for it (`World::activityArrival`, an `ArrivalEstimate`), apart from the progress: every activity record carries a progress, and the host holds 26 records a vehicle, so 16 bytes more there cost a level switch's NEW 9 % (section 14). The C ABI's and Python's progress carry it, NaN where there is none. The speed the progress reports is the ground speed its schedule asks.
+- **Surfaces.**
+  - C++: `Waypoint::arrivalBeginS`, `arrivalEndS`; `World::activityArrival` and `ArrivalEstimate`; `Behavior::arrival`.
+  - C ABI 1.30: `fsim_waypoint`'s `arrival_begin_s` and `arrival_end_s`, and `fsim_activity_progress`'s `arrival_s` and `arrival_delta_s`, each where the caller's `struct_size` has them.
+  - Python: `fsim.Waypoint`'s `arrival_begin_s` and `arrival_end_s`; `fsim.ActivityProgress`'s `arrival_s` and `arrival_delta_s`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -1040,7 +1062,10 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
 - FA-6c, per-segment performance, in two steps:
   - FA-6c1, speed optimisation and acceleration (WPT-06, WPT-10; 4.32), done 2026-09-28 and measured in section 14;
   - FA-6c2, climb optimisation (WPT-08; 4.32), done 2026-09-28 and measured in section 14;
-- FA-6d, 4D: required times of arrival, planned inertial states, required navigation performance (WPT-11, WPT-20, WPT-21);
+- FA-6d, 4D, in three steps:
+  - FA-6d1, required times of arrival (WPT-11; 4.33), done 2026-09-28 and measured in section 14;
+  - FA-6d2, planned inertial states (WPT-20);
+  - FA-6d3, required navigation performance (WPT-21);
 - FA-6e, paths: several per route with ids and types, links and conditional branches (WPT-13, WPT-14, WPT-15);
 - FA-6f, civil path terminators (WPT-19).
 
@@ -2193,6 +2218,31 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases are within −1.5 % to +1.6 %, but a behaviour's NEW: +1.3 % and +2.2 % (its minimum 128 ns, now 131; beside the other session's benchmarks, +4 %). Every function on its path is the same instructions in both builds but for their padding: layout, as FA-3b and FA-6b2 recorded for this case.
   - World throughput is 99.0 to 101.0 % of FA-6c1's; protection costs at most 1.4 %.
 - ctest: all 301 tests pass.
+
+**FA-6d1, A-GRA's required time of arrival (WPT-11).**
+- **Flown** (`test_route_arrivals`, calm):
+  - three C172s east, 3 km, then 12 km on to a point with a window, some 273 s away at 55 m/s. Given 330 to 340 s, one was slowed and arrived at 332.5 s, its aim (a quarter of the window inside it); its estimate, from a third of the way on, was its aim. One at 45 m/s given 280 to 290 s was sped up and arrived at 287.5 s. One given 260 to 300 s flew as planned, at its own speed, and arrived at 273.5 s;
+  - an IRIS, 300 m at 5 m/s over the ground, given 90 to 100 s: slowed, it arrived at 92.5 s (aimed 92.5);
+  - a C172 through two windows: 200 to 205 s at 201.3 s (aimed 201.25); the next point at its own 55 m/s again; 370 to 400 s, as planned, at 384.4 s;
+  - first released to its planned speed once the arrival that speed gave came within the window, a C172 sped up in its last 10 s and arrived 1.1 s before its aim: a schedule once begun now holds to its point. In its last second it first asked its fastest (its estimate read 202.32 s, aiming at 202.5): it now holds the speed it asked.
+- **Refused, naming the point:** a begin after its end, an end not finite, an end already past (`invalid_waypoint`); a window too soon for the fastest it flies level (`performance_limit`, `MaxAirspeed`, clamped too) or too late for its slowest (`MinAirspeed`); unchecked, flown; a window after a loiter point, and the stock C172x's, `not_implemented`.
+  - The stock C172x first had no speeds to bound its schedule (no tables, no envelope): its windows went unchecked, and a far one would have slowed it below its stall. Its row now reads not implemented, as the speed optimisation's does.
+- **The fleet** (`test_fleet`): every aircraft flies to a point three minutes on at its speed, given a window of 10 s a tenth later (slowed), or, where the slowest it flies level cannot take that, a tenth sooner (sped up). All 35 complete; 34 were slowed, and the Crazyflie, whose slowest is its 1 m/s cruise, was sped up.
+  - Every one arrived 0.03 s after its aim, a control period: its schedule closes on its own error each update. Its estimate halfway was its aim.
+  - First bounded below by its tables' slowest level speed, the Typhoon's window was refused: they read 167.5 m/s at 3,000 m, where it flies 139 m/s. Its floor is now 1.2 times its envelope's least.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6c2's build. The schedule runs only where a point has a window.
+- **The support table:** `route/required_time_of_arrival` is partial where the aircraft has tables (at or after a loiter point, not implemented), else not implemented. The route capability's pending list names a time of arrival at or after a loiter point.
+- **Conformance:** the optimise walks give points windows now and then: one it may make, one too soon or too late for its speeds, one past, one upside down, one side of it alone - never at or after a loiter point.
+- **Surfaces:** the C ABI's 1.30 block (a hangar C172's window read back; its progress's estimate its aim, 202.5 s, and its delta 0, at a ground speed under 50 m/s; the stock C172x's refused `not_implemented` and one upside down `invalid_waypoint`, at its point); Python's `test_route_segments` (by name, read back, arrived within 2 s of its aim, its estimate within 0.5 s; the stock C172x's refused).
+- **Memory:** a waypoint is 216 bytes where it was 200: the path store's 256, the host's route plan and each route behaviour's take 4 KB more. A route behaviour holds six more numbers, its schedule's. The activity record is as it was.
+- **Digests:** identical to FA-6c2's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6c2, both builds run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`. Another session's builds, tests and benchmarks ran beside the first runs; each was run again once two minutes had passed with none.
+  - The micro cases are within −0.9 % to +2.0 %: the hsa's +2.0 % (its minimum 1.6 ns more).
+  - The command cases are within −1.6 % to +1.5 %.
+  - First carried in the progress, the estimate made every activity record 16 bytes longer (304 to 320), and the host holds 26 records a vehicle, its 10 slots' and 16 ended (416 bytes more): a level switch's NEW read +7.8 % and +7.9 % (its minimum 67 ns, then 73). The estimate is now asked of the route (`World::activityArrival`), and the record is 304 bytes again.
+  - Then a behaviour's NEW read +8.6 % and +9.5 % (its minimum 130 ns, then 142), every function on its path the same instructions in both builds. The arrival checks inside `checkRoute`, before them in their file, had moved `prepare` and `submitWith` some 600 bytes on. Outlined into their own translation unit, last in the library (`Arrival.cpp`, with the estimate's plumbing), `checkRoute` is 192 bytes longer than FA-6c2's, they move 64 bytes, and the NEW reads +0.7 % and +1.4 %.
+  - World throughput is 97.7 to 100.9 % of FA-6c2's (another session's process ran once beside it; the runs before read 99.6 to 101.9 %); protection costs at most 1.6 %.
+- ctest: all 304 tests pass.
 
 ## Appendix A: the inventory
 

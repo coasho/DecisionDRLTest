@@ -131,6 +131,8 @@ public:
     /// The slot's behaviour's progress, once it has started (between steps;
     /// Behavior::progress). False if it has none to give.
     bool progress(std::size_t slot, ActivityProgress& out) const noexcept;
+    /// Its behaviour's arrival estimate (docs/flight-autonomy.md, 4.33), where the behaviour in `slot` has one.
+    bool arrival(std::size_t slot, ArrivalEstimate& out) const noexcept;
     /// The adapter whose real-time face writes the inputs (a stock JSBSim one by default).
     void setAdapter(const VehicleAdapter& adapter) noexcept;
     const VehicleAdapter& adapter() const noexcept { return *adapter_; }

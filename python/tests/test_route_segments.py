@@ -83,6 +83,41 @@ class RouteSegmentsTest(unittest.TestCase):
         self.assertGreater(len(rates), 10)
         self.assertTrue(all(1.0 < r < 2.5 for r in rates), rates)  # (its tables' excess power at 50 m/s: 1.5 to 1.9 m/s here)
 
+    def test_required_time_of_arrival(self):
+        """A point's arrival window by name (docs/flight-autonomy.md, 4.33): read back, the speed slowed over the ground to
+        arrive in it, the estimate and its delta in the progress; the stock C172x's refused, naming the point."""
+        w = make_world("py-route-arrivals")
+        v = w.create_vehicle("hangar-cessna", "jsbsim:c172", latitude_deg=37.6188, longitude_deg=-122.375, altitude_msl_m=1500.0,
+                             airspeed_ms=50.0, heading_deg=90.0)
+        stock = w.create_vehicle("cessna", "jsbsim:c172x", latitude_deg=37.7, longitude_deg=-122.375, altitude_msl_m=1500.0, airspeed_ms=55.0,
+                                 heading_deg=90.0)
+        w.step(10)
+        t0 = w.time
+        lat, lon = v.state.latitude_rad, v.state.longitude_rad
+        east = lambda m: m / (R * math.cos(lat))  # noqa: E731
+        # the stock C172x's window, without the tables its speeds would come from: refused, naming the point
+        slat, slon = stock.state.latitude_rad, stock.state.longitude_rad
+        with self.assertRaises(fsim.Rejected) as refused:
+            stock.submit_route([fsim.Waypoint(slat, slon + east(3000.0)), fsim.Waypoint(slat, slon + east(8000.0), arrival_end_s=t0 + 600.0)])
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("not_implemented", 1))
+        # east 3 km at 50 m/s, then 5 km on, there between 200 and 210 s from now (at 50 m/s some 160 s: slowed)
+        a = v.submit_route([fsim.Waypoint(lat, lon + east(3000.0), speed=50.0),
+                            fsim.Waypoint(lat, lon + east(8000.0), arrival_begin_s=t0 + 200.0, arrival_end_s=t0 + 210.0)])
+        back = a.setpoint().args[0]
+        self.assertEqual((back[1].arrival_begin_s, back[1].arrival_end_s), (t0 + 200.0, t0 + 210.0))
+        arrived = None
+        while w.time - t0 < 260.0 and arrived is None:
+            w.step(int(round(1.0 / w.step_seconds)))
+            if a.state == fsim.ActivityState.COMPLETED:
+                arrived = w.time - t0
+            elif w.time - t0 > 60.0:
+                p = a.progress
+                self.assertAlmostEqual(p.arrival_s - t0, 202.5, delta=0.5)  # (aimed a quarter of its width inside)
+                self.assertEqual(p.arrival_delta_s, 0.0)
+                self.assertEqual(p.speed_reference, float(fsim.SpeedReference.GROUND_SPEED))
+        self.assertIsNotNone(arrived)
+        self.assertAlmostEqual(arrived, 202.5, delta=2.0)
+
 
 if __name__ == "__main__":
     unittest.main()

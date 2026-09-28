@@ -84,6 +84,11 @@ double climbRateMs(const TablesSection* tables, const Performance& performance, 
 /// airspeed `tasMs` and the fuel on board costs the least fuel (without fuel in its tables, power): the altitude an
 /// efficient climb or descent holds (ties, and no tables, `toMslM`).
 double cheapestAltitudeM(const TablesSection* tables, double fromMslM, double toMslM, double tasMs, double fuelKg) noexcept;
+/// The true airspeeds the aircraft flies level at, m/s (a required time of arrival's, 4.33): a wing's from 1.2 times its
+/// envelope's least (else its tables' slowest level speed) up to its tables' fastest at the altitude and fuel on board, less
+/// 3 %, and its most; a rotorcraft's from a metre a second up to its fastest over the ground. NaN where not known.
+void levelSpeedsMs(const TablesSection* tables, const Performance& performance, bool hovers, double altitudeMslM, double fuelKg, double& least,
+                   double& most) noexcept;
 
 // --- The path follower (4.8) ------------------------------------------------------
 
@@ -195,6 +200,8 @@ struct Plan {
     double pieceM(std::uint32_t i, bool firstLap) const noexcept;
     /// A lap's length: the first from the entry, the others the whole route.
     double lapM(bool firstLap) const noexcept;
+    /// How far along a lap point k is reached (its segment's end: its turn's middle), from the lap's start (4.33).
+    double arrivalM(std::uint32_t k, bool firstLap) const noexcept;
 };
 
 // --- Loiter patterns (4.6) ---------------------------------------------------------
@@ -405,8 +412,8 @@ double steepest(const Curve& c, std::uint32_t i, double& at) noexcept;
 /// another kind, a block upside down or an altitude outside it, a frame's
 /// fields out of range, or its offsets without it; an optimisation that is
 /// not one, a climb rate with a climb optimisation, an acceleration not above
-/// 0 (4.32). A speed optimisation left out with the speed continues the point
-/// before's.
+/// 0 (4.32); an arrival window not finite, or upside down (4.33). A speed
+/// optimisation left out with the speed continues the point before's.
 Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool repeat, const sim::VehicleState& state, const Performance& performance,
                 bool hovers, std::int16_t& bad, const Altimeter* altimeter = nullptr) noexcept;
 /// A waypoint (A-GRA's WayPoint) or a loiter point: no turn there - flown over (4.29), or to its loiter (4.31).

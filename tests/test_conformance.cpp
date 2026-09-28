@@ -309,6 +309,7 @@ public:
             out = r;
             const auto& s = state();
             waypoints.clear(), loiters.clear();
+            bool loitered = false; // (a loiter point drawn so far: an arrival window at or after it is not implemented - FA-6d1)
             for (int k = 0; k < points; ++k) {
                 const PositionCommand a = ahead(4000.0 * (k + 1));
                 Waypoint p;
@@ -357,6 +358,13 @@ public:
                         if (chance(0.08)) p.speedOptimization = static_cast<double>(pick(3));
                         if (chance(0.03)) p.climbOptimization = static_cast<double>(pick(2));
                         if (chance(0.08)) p.accelerationMs2 = chance(0.1) ? 0.0 : uniform(0.05, 12.0);
+                        // its arrival window (FA-6d1): one it may make, one too soon or too late for its speeds, one past,
+                        // one upside down, one side of it alone - never at or after a loiter point
+                        loitered = loitered || p.kind == static_cast<double>(EndPointKind::LoiterPoint);
+                        if (!loitered && chance(0.06)) {
+                            p.arrivalBeginS = w_.simTime() + uniform(-60.0, 900.0), p.arrivalEndS = p.arrivalBeginS + uniform(-10.0, 120.0);
+                            if (chance(0.2)) (chance(0.5) ? p.arrivalBeginS : p.arrivalEndS) = kHold;
+                        }
                     }
                 }
                 waypoints.push_back(p);

@@ -194,6 +194,9 @@ public:
     /// updated, a route's waypoints, a curve's segments (appended ones too: its
     /// flyout curve). False for an activity not live.
     bool activitySetpoint(control::ActivityId activity, control::Setpoint& out) const;
+    /// A live route's next point with a required time of arrival, as it estimates it now (docs/flight-autonomy.md, 4.33):
+    /// when it will arrive, and that against its window; false where it has none.
+    bool activityArrival(control::ActivityId activity, control::ArrivalEstimate& out) const;
     /// Where a live activity flies to (A-GRA's ActualEndPoint): the point it
     /// flies to now, then those after it, `max` at most.
     std::vector<control::EndPoint> endPoints(control::ActivityId activity, std::size_t max = 16) const;
@@ -391,6 +394,7 @@ private:
         double groundM(double latitudeRad, double longitudeRad) const override { return world_.ground_->heightAboveEllipsoidM(latitudeRad, longitudeRad); }
         double groundResolutionM() const override { return world_.ground_->resolutionM(); }
         double utcSeconds() const override { return world_.environment_.epochUtcSeconds + world_.simTime_; }
+        double simTimeS() const override { return world_.simTime_; }
         bool frame(control::FrameId id, control::FrameSpec& spec, control::FramePose& now) const override;
 
     private:

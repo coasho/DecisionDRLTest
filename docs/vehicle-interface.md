@@ -185,6 +185,7 @@ struct RouteCommand {                  // fsim.guidance.route; the waypoints go 
 - **Turn points** (4.30): a capture's course, and arcs from a start turn point to the point after it (ARINC 424's radius to fix), with a course at the point and a turn's radius.
 - **Loiter points** (4.31): a loiter inside the route - any pattern at the point, for its duration, laps or end time - flown where the leg meets it and left for the next point, or the route's end.
 - **Segment performance** (4.32): a segment at the performance tables' best speed now, and the speed change into a segment at a given acceleration, held to what the aircraft can; its climb or descent at the most the aircraft makes holding its speed, or an efficient climb timed by its tables.
+- **Required times of arrival** (4.33): a point's window, the speed scheduled over the ground to arrive in it, and the estimate against it in the progress.
 - **Rotorcraft** fly the same geometry at the segment's speed. They slow for a turn only as much as its radius asks (a lateral acceleration within the performance's), and stop only at the route's end when they loiter there, never at each point.
 
 ### 4.6 Loiter patterns

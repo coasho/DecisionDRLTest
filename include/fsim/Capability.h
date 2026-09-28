@@ -522,6 +522,13 @@ struct ActivityProgress {
     double speedReference = kNone; ///< SpeedReference (fsim/Control.h)
 };
 
+/// A route's next point with a required time of arrival (docs/flight-autonomy.md, 4.33), as its behaviour estimates it:
+/// asked of it apart from the progress, which every activity record carries (a record's size is each NEW's).
+struct ArrivalEstimate {
+    double arrivalS = std::numeric_limits<double>::quiet_NaN(); ///< when it is estimated to arrive there, simulation seconds
+    double deltaS = std::numeric_limits<double>::quiet_NaN();   ///< that against its window: + late, - early, 0 within
+};
+
 struct ActivityRecord {
     ActivityId id = 0;
     std::uint32_t vehicle = 0;

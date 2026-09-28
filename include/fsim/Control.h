@@ -244,6 +244,10 @@ struct Waypoint {
                                        ///< the speed, the point before's
     double climbOptimization = kHold;  ///< ClimbOptimization: its climb or descent at a rate the aircraft chooses
     double accelerationMs2 = kHold;    ///< the speed change into the segment at this acceleration; kHold: as the loops change it
+    // A-GRA's required time of arrival (docs/flight-autonomy.md, 4.33): the window it is to arrive at the point in, in the
+    // world's simulation seconds - either side left out, open (a begin alone: no earlier; an end alone: no later)
+    double arrivalBeginS = kHold;
+    double arrivalEndS = kHold;
     /// Its point in its frame: the offsets left out, the frame's origin.
     FrameOffset frameOffset() const noexcept {
         FrameOffset o;
@@ -791,6 +795,12 @@ public:
     /// true; false if it reports nothing. Asked between world steps (the
     /// activity's record carries it), never during one.
     virtual bool progress(ActivityProgress& out) const noexcept {
+        (void)out;
+        return false;
+    }
+    /// Its next point with a required time of arrival's estimate (docs/flight-autonomy.md, 4.33), as of its last update:
+    /// true where it has one. Asked between world steps.
+    virtual bool arrival(ArrivalEstimate& out) const noexcept {
         (void)out;
         return false;
     }

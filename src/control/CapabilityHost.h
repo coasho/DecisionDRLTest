@@ -59,6 +59,8 @@ public:
     virtual double groundResolutionM() const = 0;
     /// The world's UTC now, Unix seconds: the date a magnetic direction is turned at (4.22).
     virtual double utcSeconds() const = 0;
+    /// The world's simulation time now, s: a route's arrival windows' clock (4.33).
+    virtual double simTimeS() const = 0;
     /// A reference frame, and where it is now (4.21, 4.25): false for one it does not have (or whose vehicle is gone).
     virtual bool frame(FrameId id, FrameSpec& spec, FramePose& now) const = 0;
 };
@@ -203,6 +205,8 @@ public:
     /// updated, a route's waypoints, a curve's segments (appended ones too).
     /// False for one not live.
     bool setpoint(ActivityId activity, Setpoint& out) const;
+    /// A live route's next point with a required time of arrival, as its behaviour estimates it (4.33): false for none.
+    bool arrival(ActivityId activity, ArrivalEstimate& out) const noexcept;
     /// Where a live activity flies to: the point it flies to now, then those
     /// after it - a route's waypoints (a repeating route's round again), a
     /// curve's segment ends, a pattern's fix, the position level's point -
@@ -576,6 +580,13 @@ private:
     /// checked, limited as a pattern is (limitPattern at its point).
     Reason checkRoute(RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log,
                       Span<const RouteLoiter> loiters = {});
+    /// A route's arrival windows as given (4.33; Arrival.cpp), its first lap's: one past refused invalid; one at or after
+    /// a loiter point, or on an aircraft without the tables its speeds come from, not implemented - the point named.
+    Reason checkArrivals(const route::Plan& plan, const sim::VehicleState& state, CommandResult& detail) const noexcept;
+    /// Its windows against what the aircraft can make, planned from where it is, in calm air (4.33): a finding
+    /// (PerformanceLimit) where even the fastest it flies level arrives after one (MaxAirspeed), or a wing's slowest
+    /// before one (MinAirspeed) - no clamp mends either.
+    void limitArrivals(const route::Plan& plan, const sim::VehicleState& state, CheckLog& log) const noexcept;
     /// The most a route's segment accelerates from `fromMs` to `toMs` (4.32): a rotorcraft's (Performance), a wing's from
     /// its tables at the fuel on board - full power's excess faster, idle's slower, the least over the speeds between - as
     /// a rate; NaN where not known.
