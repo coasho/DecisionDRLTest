@@ -184,7 +184,7 @@ struct RouteCommand {                  // fsim.guidance.route; the waypoints go 
 - **As A-GRA's schema gives them** (ADR-29, [flight-autonomy.md](flight-autonomy.md) 4.29): a point's altitude block and a barometric altitude on its isobar; a waypoint (no turn there, flown over) and its type; a point in a frame, placed where the frame is and, where it moves, as the route is flown.
 - **Turn points** (4.30): a capture's course, and arcs from a start turn point to the point after it (ARINC 424's radius to fix), with a course at the point and a turn's radius.
 - **Loiter points** (4.31): a loiter inside the route - any pattern at the point, for its duration, laps or end time - flown where the leg meets it and left for the next point, or the route's end.
-- **Segment performance** (4.32): a segment at the performance tables' best speed now, and the speed change into a segment at a given acceleration, held to what the aircraft can.
+- **Segment performance** (4.32): a segment at the performance tables' best speed now, and the speed change into a segment at a given acceleration, held to what the aircraft can; its climb or descent at the most the aircraft makes holding its speed, or an efficient climb timed by its tables.
 - **Rotorcraft** fly the same geometry at the segment's speed. They slow for a turn only as much as its radius asks (a lateral acceleration within the performance's), and stop only at the route's end when they loiter there, never at each point.
 
 ### 4.6 Loiter patterns

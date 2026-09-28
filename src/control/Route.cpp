@@ -1062,8 +1062,10 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
             const std::uint32_t before = i > 0 ? i - 1 : count - 1;
             if ((i == 0 && !repeat) || count < 2 || in[before].turn != static_cast<double>(TurnType::StartTurn)) return invalid(i);
         }
-        // its segment's performance (4.32): an optimisation that is one, an acceleration above 0
+        // its segment's performance (4.32): an optimisation that is one, a climb by its rate or optimised (A-GRA's choice),
+        // an acceleration above 0
         if (!code(w.speedOptimization, SpeedOptimization::Count) || !code(w.climbOptimization, ClimbOptimization::Count)) return invalid(i);
+        if (!isHold(w.climbOptimization) && !isHold(w.climbRateMs)) return invalid(i);
         if (!within(w.accelerationMs2, 0.0, inf)) return invalid(i);
         const bool altitudeGiven = !isHold(w.altitudeM);
         w.longitudeRad = geo::wrapPi(w.longitudeRad);

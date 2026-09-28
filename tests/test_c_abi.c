@@ -1052,9 +1052,9 @@ int main(int argc, char** argv) {
             (void)route_id;
         }
         {
-            /* ABI 1.29 (4.32): a segment's performance - its acceleration read back; the best range speed on the stock C172x,
-               which has no performance tables, not implemented, naming its point (reserved: its index + 1); a climb
-               optimisation not implemented yet (FA-6c2's); an acceleration of 0 refused */
+            /* ABI 1.29 (4.32): a segment's performance - its acceleration read back; the best range speed and a climb
+               optimisation on the stock C172x, which has no performance tables, not implemented, naming its point (reserved:
+               its index + 1); an acceleration of 0 refused */
             fsim_waypoint pts[2];
             fsim_batch_command sp;
             double options[4];

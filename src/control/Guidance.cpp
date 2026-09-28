@@ -357,6 +357,7 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     target_ = 0, laps_ = 0;
     loiterAhead_ = nullptr, reachM_ = 0.0, loitering_ = false;
     rampFromMs_ = speedFlown_ = referenceFlown_ = kHold;
+    climbTarget_ = climbMid_ = kHold, climbRest_ = false;
     firstLap_ = true, onArc_ = midway_ = ended_ = finished_ = false;
     failure_ = Reason::None;
     leadOut_ = finishedM_ = inPieceM_ = lapStartM_ = 0.0;
@@ -426,6 +427,12 @@ void RouteBehavior::beginSegment(std::uint32_t k, const sim::VehicleState& s, do
         const bool ground = speedReferenceOf(to.speedReference, hovers_ ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed) == SpeedReference::GroundSpeed;
         rampFromMs_ = ground ? std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]) : s.airspeedTrueMs, rampStartS_ = s.simTime;
     }
+    // its climb optimisation's profile (4.32), from the altitude it climbs from - where it holds chosen as it is first flown;
+    // an efficient descent along its gradient, as without one (at idle an engine burns fuel it does not turn into flight)
+    climbTarget_ = climbMid_ = kHold, climbRest_ = false;
+    const bool efficient = to.climbOptimization == static_cast<double>(ClimbOptimization::ExtendedRange);
+    if (!isHold(to.climbOptimization) && !isHold(to.altitudeM) && !(efficient && to.altitudeM < segmentFrom_))
+        climbTarget_ = segmentFrom_, climbLastS_ = s.simTime;
 }
 
 void RouteBehavior::advance(const sim::VehicleState& s, const Performance& perf) {
@@ -551,7 +558,9 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     const double routeM = finishedM_ + inPieceM_;
     const double span = segment.altitudeM - segmentFrom_;
     double altitude = segment.altitudeM, feedforward = 0.0;
-    if (!ended_ && !isHold(segment.climbRateMs)) {
+    if (!ended_ && !isHold(climbTarget_)) {
+        altitude = climbProfile(ctx, perf, segment, routeM, feedforward); // (4.32)
+    } else if (!ended_ && !isHold(segment.climbRateMs)) {
         const double climbed = segment.climbRateMs * (s.simTime - segmentStartS_);
         if (climbed < std::abs(span)) altitude = segmentFrom_ + std::copysign(climbed, span), feedforward = std::copysign(segment.climbRateMs, span);
     } else if (!ended_ && segmentM_ > 1.0) {
@@ -644,6 +653,40 @@ void RouteBehavior::chooseSpeed(const ControlContext& ctx, const Waypoint& segme
             rampFromMs_ = kHold; // (reached: its own from here)
     }
     speedFlown_ = steer.speed, referenceFlown_ = static_cast<double>(steer.reference);
+}
+
+double RouteBehavior::climbProfile(const ControlContext& ctx, const Performance& perf, const Waypoint& segment, double routeM, double& feedforward) {
+    const auto& s = ctx.sensed;
+    const double end = segment.altitudeM;
+    const AltitudeReference reference = altitudeReferenceOf(segment.altitudeReference);
+    const bool up = end > segmentFrom_;
+    auto msl = [&](double h) { return altitudeMslOf(h, reference, s, ctx.altimeter); };
+    if (isHold(climbMid_)) { // where it holds: an efficient climb's cheapest altitude between its ends, at its speed now; else its end
+        climbMid_ = end;
+        const double from = msl(segmentFrom_), to = msl(end);
+        const double mid = segment.climbOptimization == static_cast<double>(ClimbOptimization::ExtendedRange)
+                               ? route::cheapestAltitudeM(ctx.tables, from, to, s.airspeedTrueMs, s.fuelKg)
+                               : to;
+        if (mid == from) climbMid_ = segmentFrom_;
+        else if (mid != to) climbMid_ = segmentFrom_ + (end - segmentFrom_) * (mid - from) / (to - from); // (a row between, in its reference)
+    }
+    const double dt = std::max(s.simTime - climbLastS_, 0.0);
+    climbLastS_ = s.simTime;
+    // held between: the rest begins where what is left needs the distance to go, at the rate halfway through it, and as long
+    // again as its altitude loop lags (route::verticalSpeedTo's time constant)
+    if (!climbRest_ && climbTarget_ == climbMid_ && climbMid_ != end) {
+        const double toGoM = std::max(segmentM_ - (routeM - segmentStartM_), 0.0);
+        const double halfway = route::climbRateMs(ctx.tables, perf, hovers_, up, msl(0.5 * (climbMid_ + end)), s.airspeedTrueMs, s.fuelKg);
+        const double lagS = 1.0 / (std::isfinite(perf.altitudeGainPerS) && perf.altitudeGainPerS > 0.0 ? perf.altitudeGainPerS : hovers_ ? 0.5 : 0.25);
+        climbRest_ = toGoM <= (std::abs(end - climbMid_) / std::max(halfway, 1e-3) + lagS) * std::max(groundSpeed_, 1.0);
+    }
+    const double goal = climbRest_ ? end : climbMid_;
+    if (climbTarget_ != goal) { // at the most it climbs or descends holding its speed, now
+        const double step = route::climbRateMs(ctx.tables, perf, hovers_, up, s.altitudeMslM, s.airspeedTrueMs, s.fuelKg) * dt;
+        climbTarget_ = std::abs(goal - climbTarget_) <= step ? goal : climbTarget_ + std::copysign(step, goal - climbTarget_);
+        if (climbTarget_ != goal && dt > 0.0) feedforward = std::copysign(step / dt, goal - climbTarget_);
+    }
+    return climbTarget_;
 }
 
 Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf, bool begins) {

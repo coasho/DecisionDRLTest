@@ -1594,6 +1594,99 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(f.samples > 0);
             CHECK(f.worst < 0.02);
         });
+    // A-GRA's climb optimisation (ADR-29 FA-6c2: WPT-08): a minute on (a rotorcraft's 20 s), then a best rate climb, an
+    // efficient climb and a best rate descent through both, each change sized to take some 40 s at the rate its tables give
+    // (a wing's 300 m at the least; a rotorcraft's 20 s, 10 to 40 m, within the Crazyflie's battery); then level. Through
+    // each best rate change's middle half, its mean rate against the mean its tables give as it flies; the efficient climb
+    // at its altitude at its point, as its tables timed it; the route completed
+    struct ClimbRoute {
+        double h0 = 0.0, dh = 0.0, arrived = kHold, promisedUp = 0.0, promisedDown = 0.0;
+        double into[2] = {kHold, kHold}, outOf[2] = {kHold, kHold}, promised[2] = {0.0, 0.0}; ///< each change's middle half: when, what promised
+        int samples[2] = {0, 0};
+        std::uint32_t segment = 0;
+    };
+    std::map<std::uint32_t, ClimbRoute> climbRoutes;
+    auto climbAt = [&](const Plane& p, bool up, double altitudeMslM, double tasMs, double fuelKg) {
+        return route::climbRateMs(&w.profile(p.id)->tables, perf(p), p.rotor, up, altitudeMslM, tasMs, fuelKg);
+    };
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
+            const double v = p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, h0 = p.start.altitudeMslM;
+            ClimbRoute& f = climbRoutes[p.id];
+            f = ClimbRoute{};
+            f.h0 = h0;
+            const double up = climbAt(p, true, h0, v, p.start.fuelKg), down = climbAt(p, false, h0, v, p.start.fuelKg);
+            f.dh = p.rotor ? std::clamp(20.0 * up, 10.0, 40.0) : std::clamp(40.0 * up, 300.0, 1500.0);
+            double ahead = 0.0;
+            auto point = [&](double seconds, double altitude) {
+                ahead += v * seconds;
+                const PositionCommand q = pointFrom(p.start, ahead * c, ahead * sn, altitude, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = altitude;
+                return wp;
+            };
+            const double lead = p.rotor ? 20.0 : 60.0, spare = p.rotor ? 15.0 : 30.0;
+            Waypoint a = point(lead, h0), b = point(2.0 * f.dh / up + spare, h0 + f.dh), e = point(2.0 * f.dh / up + spare, h0 + 2.0 * f.dh),
+                     d = point(1.5 * 2.0 * f.dh / down + spare, h0), end = point(spare, h0);
+            if (p.rotor) a.speed = v, a.speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+            b.climbOptimization = d.climbOptimization = static_cast<double>(ClimbOptimization::BestRate);
+            e.climbOptimization = static_cast<double>(ClimbOptimization::ExtendedRange);
+            const CommandResult res = w.submit(p.id, RouteCommand{}, std::vector<Waypoint>{a, b, e, d, end});
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index);
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            f.promisedUp = up, f.promisedDown = down;
+            return res.accepted();
+        },
+        [&](const Plane& p) {
+            const ClimbRoute& f = climbRoutes[p.id];
+            const double lead = p.rotor ? 20.0 : 60.0, spare = p.rotor ? 15.0 : 30.0;
+            return 1.3 * (lead + 2.0 * (2.0 * f.dh / f.promisedUp + spare) + 1.5 * 2.0 * f.dh / f.promisedDown + 2.0 * spare) + 20.0;
+        },
+        [&](const Plane& p) {
+            ClimbRoute& f = climbRoutes[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            if (!r.live()) return;
+            const ActivityProgress& g = r.progress;
+            const auto& s = *w.vehicleState(p.id);
+            if (g.segment != f.segment) {
+                if (f.segment == 2) f.arrived = s.altitudeMslM - (f.h0 + 2.0 * f.dh);
+                f.segment = g.segment;
+            }
+            // (the climb from halfway up to nine tenths - its loops caught up on the lag it began with; the descent's middle
+            // half, through both climbs)
+            for (int j = 0; j < 2; ++j) {
+                if (g.segment != (j == 0 ? 1u : 3u)) continue;
+                const double lo = j == 0 ? f.h0 + 0.5 * f.dh : f.h0 + 0.5 * f.dh, hi = j == 0 ? f.h0 + 0.9 * f.dh : f.h0 + 1.5 * f.dh;
+                const bool inside = s.altitudeMslM > lo && s.altitudeMslM < hi;
+                if (inside && isHold(f.outOf[j])) {
+                    if (isHold(f.into[j])) f.into[j] = w.simTime();
+                    f.promised[j] += climbAt(p, j == 0, s.altitudeMslM, s.airspeedTrueMs, s.fuelKg), ++f.samples[j];
+                }
+                if (!inside && !isHold(f.into[j]) && isHold(f.outOf[j])) f.outOf[j] = w.simTime();
+            }
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const ClimbRoute& f = climbRoutes[p.id];
+            double off[2] = {kHold, kHold};
+            for (int j = 0; j < 2; ++j)
+                if (!isHold(f.outOf[j]) && f.samples[j] > 0) off[j] = ((j == 0 ? 0.4 : 1.0) * f.dh / (f.outOf[j] - f.into[j])) / (f.promised[j] / f.samples[j]) - 1.0;
+            INFO(activityStateName(r.state) << "; " << f.dh << " m at a time: through its middle half, its best rate climb " << 100.0 * off[0]
+                                            << " % off its tables' (" << f.samples[0] << " samples), its descent " << 100.0 * off[1] << " % ("
+                                            << f.samples[1] << "); the efficient climb " << f.arrived << " m off at its point");
+            CHECK(r.state == ActivityState::Completed);
+            REQUIRE((!isHold(off[0]) && !isHold(off[1])));
+            // (the worst: in the climb's second part the Mirage 2000 12.4 % and the RQ-4B 11.4 % faster than its tables' rate,
+            // their vertical loops still catching up on the lag the climb began with - every other wing within 6.2 %, a
+            // rotorcraft within 1.1 %; through the descent's middle half within 4.3 %, the Mirage's; the efficient climb within
+            // 9.1 m of its point's altitude there, the J-20A's)
+            CHECK(std::abs(off[0]) < 0.25);
+            CHECK(std::abs(off[1]) < 0.1);
+            REQUIRE(!isHold(f.arrived));
+            CHECK(std::abs(f.arrived) < 0.05 * f.dh);
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

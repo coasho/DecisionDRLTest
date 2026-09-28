@@ -111,7 +111,8 @@ class PatternBehavior;
 /// The altitude runs straight from point to point, or climbs at a segment's
 /// rate; the speed is each segment's, in its reference - or the tables' best
 /// at the altitude and weight now where it optimises it, reached at its
-/// acceleration where it has one (docs/flight-autonomy.md, 4.32). It completes after
+/// acceleration where it has one; a climb optimisation climbs or descends at
+/// the most it can holding that speed (docs/flight-autonomy.md, 4.32). It completes after
 /// the last point unless the route repeats, and flies on: along the last
 /// leg's course, or orbiting (a wing) or hovering over (a rotorcraft) the
 /// last point. A new path store revision or new options fly it afresh.
@@ -154,6 +155,10 @@ private:
     Command loiter(const ControlContext& ctx, const Performance& performance, bool begins);
     /// The segment's speed as it chooses it (4.32): the tables' best now where it optimises it, reached at its acceleration.
     void chooseSpeed(const ControlContext& ctx, const Waypoint& segment, route::Steer& steer);
+    /// Its climb optimisation's altitude now (4.32), `routeM` along the route: at the most it climbs or descends holding
+    /// its speed, to where it holds (an efficient climb's cheapest altitude), then the rest to arrive at its point; its
+    /// rate, while it changes, as `feedforward`.
+    double climbProfile(const ControlContext& ctx, const Performance& performance, const Waypoint& segment, double routeM, double& feedforward);
 
     std::unique_ptr<route::Plan> plan_; ///< allocated with the behaviour: nothing in flight
     WindEstimate wind_;
@@ -179,6 +184,11 @@ private:
     // the segment's speed as it chooses it (docs/flight-autonomy.md, 4.32)
     double rampFromMs_ = kHold, rampStartS_ = 0.0; ///< its acceleration's ramp: from this speed (true air, or a rotorcraft's ground), then
     double speedFlown_ = kHold, referenceFlown_ = kHold; ///< the speed it flies now, where it optimises or ramps it
+    // its climb optimisation's profile (4.32), in the segment's reference
+    double climbTarget_ = kHold;       ///< the altitude the profile has reached; kHold: the segment has none
+    double climbMid_ = kHold;          ///< the altitude it holds between (an efficient climb's cheapest; else its end)
+    double climbLastS_ = 0.0;          ///< when the profile last moved
+    bool climbRest_ = false;           ///< the rest of the change, from where it held, begun
     // its points in moving frames (4.29)
     bool moving_ = false;              ///< placed and planned again as it flies them
     bool overFrame_ = false;           ///< the piece flown is in one moving frame: flown over it

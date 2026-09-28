@@ -1,7 +1,8 @@
 """A route's segment performance as A-GRA's schema gives it, through Python (docs/flight-autonomy.md, 4.32): a segment at
 the performance tables' best range speed now, its speed replaced, by name - read back and flown - reached at its
-acceleration; refused as a point is, naming it: a speed optimisation without performance tables, a climb optimisation
-(not built yet), an acceleration of 0; an acceleration beyond the aircraft's held to it, named by its point and field 24."""
+acceleration; refused as a point is, naming it: a speed or a climb optimisation without performance tables, an
+acceleration of 0; an acceleration beyond the aircraft's held to it, named by its point and field 24; a climb at the most
+the aircraft climbs holding its speed, by name."""
 import math
 import unittest
 
@@ -68,6 +69,19 @@ class RouteSegmentsTest(unittest.TestCase):
         self.assertEqual((adjustment.index, adjustment.field, adjustment.requested), (1, 24, 5.0))
         self.assertTrue(0.1 < adjustment.adjusted < 5.0)
         self.assertEqual(c.setpoint().args[0][1].acceleration_ms2, adjustment.adjusted)
+        # up 300 m at its best rate, by name: read back, and climbing at what its tables give holding its speed
+        c.cancel()
+        lat, lon, alt = v.state.latitude_rad, v.state.longitude_rad, v.state.altitude_msl_m
+        d = v.submit_route([fsim.Waypoint(lat, lon + east(3000.0), altitude_m=alt, speed=50.0),
+                            fsim.Waypoint(lat, lon + east(20000.0), altitude_m=alt + 300.0, climb_optimization="best_rate")])
+        self.assertEqual(d.setpoint().args[0][1].climb_optimization, float(fsim.ClimbOptimization.BEST_RATE))
+        rates, t0 = [], w.time
+        while w.time - t0 < 400.0 and d.state != fsim.ActivityState.COMPLETED:
+            w.step(int(round(1.0 / w.step_seconds)))
+            if d.progress.segment == 1 and alt + 50.0 < v.state.altitude_msl_m < alt + 250.0:
+                rates.append(-v.state.velocity_ned_ms[2])
+        self.assertGreater(len(rates), 10)
+        self.assertTrue(all(1.0 < r < 2.5 for r in rates), rates)  # (its tables' excess power at 50 m/s: 1.5 to 1.9 m/s here)
 
 
 if __name__ == "__main__":

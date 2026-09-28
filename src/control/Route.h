@@ -72,6 +72,19 @@ Fix onArc(const Turn& turn, double lat0, double lon0, double lat, double lon) no
 /// atmosphere at `altitudeMslM`), or a ground speed as it is.
 double plannedSpeed(double speed, double reference, double altitudeMslM) noexcept;
 
+// --- A segment's climb optimisation (docs/flight-autonomy.md, 4.32; Climb.cpp) ---------
+
+/// The most the aircraft climbs (`climbing`) or descends holding true airspeed `tasMs`, m/s: its tables' full power
+/// excess power, or a wing's idle's, at the altitude and the fuel on board - at the nearest speed they read, where they
+/// do not read that one (a rotorcraft's tables have no idle: its guidance's most descent); within its guidance's most
+/// (Performance), which it is where the tables read nothing. 0 where they give nothing to climb with.
+double climbRateMs(const TablesSection* tables, const Performance& performance, bool hovers, bool climbing, double altitudeMslM, double tasMs,
+                   double fuelKg) noexcept;
+/// The altitude from `fromMslM` to `toMslM` - the ends, and the tables' rows between - where level flight at true
+/// airspeed `tasMs` and the fuel on board costs the least fuel (without fuel in its tables, power): the altitude an
+/// efficient climb or descent holds (ties, and no tables, `toMslM`).
+double cheapestAltitudeM(const TablesSection* tables, double fromMslM, double toMslM, double tasMs, double fuelKg) noexcept;
+
 // --- The path follower (4.8) ------------------------------------------------------
 
 /// What comes next along the path: a loop that lags flies the curvature
@@ -391,8 +404,9 @@ double steepest(const Curve& c, std::uint32_t i, double& at) noexcept;
 /// before (within a metre); a kind or type that is not one, a type with
 /// another kind, a block upside down or an altitude outside it, a frame's
 /// fields out of range, or its offsets without it; an optimisation that is
-/// not one, an acceleration not above 0 (4.32). A speed optimisation left
-/// out with the speed continues the point before's.
+/// not one, a climb rate with a climb optimisation, an acceleration not above
+/// 0 (4.32). A speed optimisation left out with the speed continues the point
+/// before's.
 Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool repeat, const sim::VehicleState& state, const Performance& performance,
                 bool hovers, std::int16_t& bad, const Altimeter* altimeter = nullptr) noexcept;
 /// A waypoint (A-GRA's WayPoint) or a loiter point: no turn there - flown over (4.29), or to its loiter (4.31).

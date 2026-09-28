@@ -1,7 +1,9 @@
 // A route's segment performance as A-GRA's schema gives it (docs/flight-autonomy.md, 4.32; ADR-29 FA-6c): a segment flown
 // at the performance tables' best speed at the altitude and weight now, its speed replaced; the speed change into a
-// segment made at its acceleration, a wing's through the air and a rotorcraft's over the ground; what does not make one
-// refused, naming the point; an acceleration beyond the aircraft's held to it.
+// segment made at its acceleration, a wing's through the air and a rotorcraft's over the ground; a climb or descent at the
+// most the aircraft makes holding its speed, an efficient climb timed by the tables and an efficient descent along its
+// gradient; what does not make one refused, naming the point; an acceleration beyond the aircraft's held to it.
+#include "control/Route.h"
 #include "fsim/GuidanceModes.h"
 #include "mode_flights.h"
 
@@ -62,6 +64,12 @@ TEST_CASE("route segments: a segment flown at the tables' best speed now, its sp
     CHECK((none.reason == Reason::NotImplemented && none.index == 1));
     CHECK(w.supportTable(stock)->find("fsim.guidance.route/speed/max_endurance")->support == Support::NotImplemented);
     CHECK(w.supportTable(v)->find("fsim.guidance.route/speed/max_endurance")->support == Support::Supported);
+    Waypoint up = q;
+    up.speedOptimization = kHold, up.climbOptimization = static_cast<double>(ClimbOptimization::ExtendedRange), up.altitudeM = 1800.0;
+    const CommandResult noClimb = w.submit(stock, RouteCommand{}, std::vector<Waypoint>{at(t0.latitudeRad, t0.longitudeRad, 0.0, 2000.0), up});
+    CHECK((noClimb.reason == Reason::NotImplemented && noClimb.index == 1));
+    CHECK(w.supportTable(stock)->find("fsim.guidance.route/climb/extended_range")->support == Support::NotImplemented);
+    CHECK(w.supportTable(v)->find("fsim.guidance.route/climb/best_rate")->support == Support::Supported);
     const auto& s0 = *w.vehicleState(v);
     const double lat0 = s0.latitudeRad, lon0 = s0.longitudeRad;
     // east: 3 km at 50 m/s; to 15 km at the best range speed; on to 22 km, its speed left out; to 28 km at 45 m/s
@@ -169,8 +177,8 @@ TEST_CASE("route segments: the speed change into a segment made at its accelerat
     CHECK(std::abs(quadRate - 0.5) < 0.08);
 }
 
-TEST_CASE("route segments: refused as a point is, naming it - an acceleration not above 0, an optimisation that is not one, a climb optimisation "
-          "not built yet; an acceleration beyond the aircraft's held to it, named by its point and field 24",
+TEST_CASE("route segments: refused as a point is, naming it - an acceleration not above 0, an optimisation that is not one, a climb rate "
+          "beside a climb optimisation; an acceleration beyond the aircraft's held to it, named by its point and field 24",
           "[modes]") {
     session::World w(options("route-segments-refusals"));
     const auto v = wing(w, "c172", 1500.0, 50.0);
@@ -196,8 +204,11 @@ TEST_CASE("route segments: refused as a point is, naming it - an acceleration no
     refusedAt(notOne, Reason::InvalidWaypoint, "an optimisation of 2");
     Waypoint climb = p1;
     climb.climbOptimization = static_cast<double>(ClimbOptimization::BestRate);
-    climb.altitudeM = 2500.0;
-    refusedAt(climb, Reason::NotImplemented, "a climb optimisation (FA-6c2's)");
+    climb.altitudeM = 2500.0, climb.climbRateMs = 1.0;
+    refusedAt(climb, Reason::InvalidWaypoint, "a climb rate beside a climb optimisation (A-GRA's choice)");
+    Waypoint notClimb = p1;
+    notClimb.climbOptimization = 2.0;
+    refusedAt(notClimb, Reason::InvalidWaypoint, "a climb optimisation of 2");
     // a C172 slowing from 50 to 35 m/s at 5 m/s^2: more than idle slows it at 35, held to that (MinAcceleration)
     Waypoint hard = p1;
     hard.speed = 35.0, hard.accelerationMs2 = 5.0;
@@ -227,4 +238,152 @@ TEST_CASE("route segments: refused as a point is, naming it - an acceleration no
     reject.range = RangePolicy::Reject;
     const CommandResult refused = w.submit(quad, RouteCommand{}, std::vector<Waypoint>{fast}, reject);
     CHECK((refused.reason == Reason::PerformanceLimit && refused.index == 0 && refused.constraint == Constraint::MaxAcceleration));
+}
+
+TEST_CASE("route segments: a climb at the most the aircraft climbs holding its speed, then level; an efficient climb timed by the tables; "
+          "an efficient descent along its gradient; a rotorcraft's",
+          "[modes]") {
+    session::World w(options("route-segments-climb"));
+    const auto best = wing(w, "c172", 1500.0, 50.0), efficient = wing(w, "c172", 1500.0, 40.0, 3);
+    const auto quad = rotor(w, "iris", 15.0, 6);
+    w.step(stepsFor(w, 2.0));
+    const VehicleProfile& profile = *w.profile(best);
+    const Performance& perf = *w.performance(best);
+    // east: 3 km, then 20 km on to 2,000 m, then 20 km on back down to 1,500 m, then 7 km: the first at 50 m/s flies a best
+    // rate climb and descent; the second at 40 m/s an efficient climb and descent - where its tables have level flight
+    // cheaper low at every altitude they fly, so it climbs late
+    auto route = [&](std::uint32_t v, ClimbOptimization o, double speed) {
+        const auto& s0 = *w.vehicleState(v);
+        Waypoint a = at(s0.latitudeRad, s0.longitudeRad, 0.0, 3000.0), b = at(s0.latitudeRad, s0.longitudeRad, 0.0, 23000.0),
+                 c = at(s0.latitudeRad, s0.longitudeRad, 0.0, 43000.0);
+        a.speed = speed, a.altitudeM = 1500.0;
+        b.altitudeM = 2000.0, c.altitudeM = 1500.0;
+        b.climbOptimization = c.climbOptimization = static_cast<double>(o);
+        const CommandResult r = w.submit(v, RouteCommand{}, std::vector<Waypoint>{a, b, c, at(s0.latitudeRad, s0.longitudeRad, 0.0, 50000.0)});
+        INFO(reasonName(r.reason) << " at " << r.index);
+        REQUIRE(r.accepted());
+        return r.activity;
+    };
+    const ActivityId ra = route(best, ClimbOptimization::BestRate, 50.0), rb = route(efficient, ClimbOptimization::ExtendedRange, 40.0);
+    CHECK(route::cheapestAltitudeM(&profile.tables, 1500.0, 2000.0, 40.0, w.vehicleState(efficient)->fuelKg) == 1500.0);
+    const Setpoint sp = flown(w, rb);
+    CHECK(sp.waypoints[1].climbOptimization == static_cast<double>(ClimbOptimization::ExtendedRange));
+    CHECK(isHold(sp.waypoints[1].climbRateMs)); // (its rate the aircraft's, as it flies)
+    // a rotorcraft from its hover: north 200 m at 5 m/s, 600 m on up to 140 m at its best rate, 600 m on down to 100 m at it
+    const auto& q0 = *w.vehicleState(quad);
+    Waypoint qa = at(q0.latitudeRad, q0.longitudeRad, 200.0, 0.0), qb = at(q0.latitudeRad, q0.longitudeRad, 800.0, 0.0), qc = at(q0.latitudeRad, q0.longitudeRad, 1400.0, 0.0);
+    qa.speed = 5.0, qa.speedReference = static_cast<double>(SpeedReference::GroundSpeed), qa.altitudeM = 100.0;
+    qb.altitudeM = 140.0, qc.altitudeM = 100.0;
+    qb.climbOptimization = qc.climbOptimization = static_cast<double>(ClimbOptimization::BestRate);
+    const CommandResult rq = w.submit(quad, RouteCommand{}, std::vector<Waypoint>{qa, qb, qc});
+    INFO(reasonName(rq.reason) << " at " << rq.index);
+    REQUIRE(rq.accepted());
+    const VehicleProfile& quadProfile = *w.profile(quad);
+    const Performance& quadPerf = *w.performance(quad);
+    double climbOff = 0.0, descentOff = 0.0, speedOff = 0.0, gradientOff = 0.0, quadClimbOff = 0.0, quadDescentOff = 0.0;
+    double halfway = kHold, levelAt = kHold, arrivedA = kHold, arrivedB = kHold, toppedB = kHold, climbVz = 0.0, quadVz = 0.0, quadDown = 0.0;
+    int samples[4] = {0, 0, 0, 0};
+    std::uint32_t lastA = 0, lastB = 0;
+    for (unsigned k = 0; k < stepsFor(w, 1400.0); ++k) {
+        w.step();
+        const ActivityRecord& a = *w.activity(ra);
+        const ActivityRecord& b = *w.activity(rb);
+        const auto& sa = *w.vehicleState(best);
+        const auto& sb = *w.vehicleState(efficient);
+        // the best rate's: in the middle of its climb and its descent, the rate its tables promise now, its speed held
+        if (a.live() && sa.altitudeMslM > 1550.0 && sa.altitudeMslM < 1950.0 && (a.progress.segment == 1 || a.progress.segment == 2)) {
+            const bool up = a.progress.segment == 1;
+            const double promised = route::climbRateMs(&profile.tables, perf, false, up, sa.altitudeMslM, sa.airspeedTrueMs, sa.fuelKg);
+            const double vz = -sa.velocityNedMs[2];
+            (up ? climbOff : descentOff) = std::max(up ? climbOff : descentOff, std::abs(std::abs(vz) - promised) / promised);
+            if (up) climbVz = vz;
+            speedOff = std::max(speedOff, std::abs(sa.airspeedTrueMs - 50.0));
+            ++samples[up ? 0 : 1];
+        }
+        if (a.live() && a.progress.segment == 1 && isHold(levelAt) && sa.altitudeMslM > 1999.0) levelAt = a.progress.segmentPercent;
+        if (a.live() && a.progress.segment != lastA) {
+            if (lastA == 2) arrivedA = sa.altitudeMslM;
+            lastA = a.progress.segment;
+        }
+        // the efficient one's: climbing early where the higher is cheaper at its speed; descending along its gradient
+        if (b.live() && b.progress.segment == 1 && isHold(halfway) && b.progress.segmentPercent >= 50.0) halfway = sb.altitudeMslM;
+        if (b.live() && b.progress.segment == 2 && b.progress.segmentPercent > 10.0 && b.progress.segmentPercent < 90.0) {
+            gradientOff = std::max(gradientOff, std::abs(sb.altitudeMslM - (2000.0 - 5.0 * b.progress.segmentPercent)));
+            ++samples[2];
+        }
+        if (b.live() && b.progress.segment != lastB) {
+            if (lastB == 1) toppedB = sb.altitudeMslM;
+            if (lastB == 2) arrivedB = sb.altitudeMslM;
+            lastB = b.progress.segment;
+        }
+        // the rotorcraft's
+        const ActivityRecord& r = *w.activity(rq.activity);
+        const auto& sq = *w.vehicleState(quad);
+        if (r.live() && (r.progress.segment == 1 || r.progress.segment == 2) && sq.altitudeMslM > 105.0 && sq.altitudeMslM < 135.0) {
+            const bool up = r.progress.segment == 1;
+            const double promised = route::climbRateMs(&quadProfile.tables, quadPerf, true, up, sq.altitudeMslM, sq.airspeedTrueMs, sq.fuelKg);
+            const double vz = -sq.velocityNedMs[2];
+            (up ? quadClimbOff : quadDescentOff) = std::max(up ? quadClimbOff : quadDescentOff, std::abs(std::abs(vz) - promised) / promised);
+            (up ? quadVz : quadDown) = vz;
+            ++samples[3];
+        }
+    }
+    std::printf("route segments, climbs: a C172's best rate climb %.2f m/s, within %.1f %% of its tables' now, its descent within %.1f %%, its "
+                "speed within %.2f m/s (%d, %d samples); level at 2,000 m %.0f %% into the segment, at 1,500 m %.1f m off at the point. An "
+                "efficient climb at 1,500 m %+.1f m halfway, at 2,000 m %+.1f m at its point; its descent within %.1f m of its gradient (%d samples), %.1f m off at "
+                "the point. An "
+                "IRIS's climb %.2f m/s, within %.1f %% of its tables', its descent %.2f m/s, within %.1f %% of its most (%d samples)\n",
+                climbVz, 100.0 * climbOff, 100.0 * descentOff, speedOff, samples[0], samples[1], levelAt, arrivedA - 1500.0, halfway - 1500.0, toppedB - 2000.0, gradientOff,
+                samples[2], arrivedB - 1500.0, quadVz, 100.0 * quadClimbOff, quadDown, 100.0 * quadDescentOff, samples[3]);
+    CHECK((samples[0] > 10 && samples[1] > 10 && samples[2] > 10 && samples[3] > 10));
+    CHECK(climbOff < 0.05);
+    CHECK(descentOff < 0.05);
+    CHECK(speedOff < 2.5);
+    CHECK(levelAt < 90.0);
+    CHECK(std::abs(arrivedA - 1500.0) < 3.0);
+    CHECK(std::abs(halfway - 1500.0) < 3.0); // (held low, where it is cheaper, until the climb's time)
+    CHECK(std::abs(toppedB - 2000.0) < 10.0);
+    CHECK(gradientOff < 10.0);
+    CHECK(std::abs(arrivedB - 1500.0) < 3.0);
+    CHECK(quadClimbOff < 0.1);
+    CHECK(quadDescentOff < 0.1);
+    CHECK(w.activity(ra)->state == ActivityState::Completed);
+    CHECK(w.activity(rb)->state == ActivityState::Completed);
+}
+
+TEST_CASE("route segments: an efficient climb spends less fuel than a climb along the gradient; an efficient descent as much as one",
+          "[modes]") {
+    session::World w(options("route-segments-climb-fuel"));
+    // two KC-135Rs east at 3,000 m and 170 m/s: 10 km, then 68 km on up to 4,000 m, then 68 km on back down; one efficient,
+    // the other along the gradients
+    const std::uint32_t ids[2] = {wing(w, "kc135r", 3000.0, 170.0), wing(w, "kc135r", 3000.0, 170.0, 3)};
+    w.step(stepsFor(w, 2.0));
+    ActivityId acts[2];
+    for (int k = 0; k < 2; ++k) {
+        const auto& s0 = *w.vehicleState(ids[k]);
+        Waypoint a = at(s0.latitudeRad, s0.longitudeRad, 0.0, 10200.0), b = at(s0.latitudeRad, s0.longitudeRad, 0.0, 78200.0),
+                 c = at(s0.latitudeRad, s0.longitudeRad, 0.0, 146200.0);
+        a.speed = 170.0, a.altitudeM = 3000.0;
+        b.altitudeM = 4000.0, c.altitudeM = 3000.0;
+        if (k == 0) b.climbOptimization = c.climbOptimization = static_cast<double>(ClimbOptimization::ExtendedRange);
+        const CommandResult r = w.submit(ids[k], RouteCommand{}, std::vector<Waypoint>{a, b, c, at(s0.latitudeRad, s0.longitudeRad, 0.0, 151300.0)});
+        REQUIRE(r.accepted());
+        acts[k] = r.activity;
+    }
+    double fuelAt[2][4] = {{kHold, kHold, kHold, kHold}, {kHold, kHold, kHold, kHold}};
+    for (unsigned k = 0; k < stepsFor(w, 1000.0); ++k) {
+        w.step();
+        for (int j = 0; j < 2; ++j) {
+            const ActivityRecord& r = *w.activity(acts[j]);
+            const std::uint32_t g = r.live() ? r.progress.segment : 3;
+            if (g >= 1 && g <= 3 && isHold(fuelAt[j][g])) fuelAt[j][g] = w.vehicleState(ids[j])->fuelKg;
+        }
+        if (!w.activity(acts[0])->live() && !w.activity(acts[1])->live()) break;
+    }
+    const double climbs[2] = {fuelAt[0][1] - fuelAt[0][2], fuelAt[1][1] - fuelAt[1][2]}, descents[2] = {fuelAt[0][2] - fuelAt[0][3], fuelAt[1][2] - fuelAt[1][3]};
+    std::printf("route segments, efficiency: a KC-135R's efficient climb %.1f kg, along the gradient %.1f kg (%.1f %%); its descent %.1f kg, along the "
+                "gradient %.1f kg\n",
+                climbs[0], climbs[1], 100.0 * (climbs[0] / climbs[1] - 1.0), descents[0], descents[1]);
+    CHECK(climbs[0] < 0.98 * climbs[1]);
+    CHECK(std::abs(descents[0] / descents[1] - 1.0) < 0.01);
 }

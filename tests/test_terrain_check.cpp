@@ -186,6 +186,46 @@ TEST_CASE("terrain: a route's loiter is walked where it flies - an orbit into th
     CHECK(w.submit(v, RouteCommand{}, points, {}, std::vector<RouteLoiter>{tight}).accepted());
 }
 
+TEST_CASE("terrain: a climb optimisation is walked as the lowest it could fly - a best rate climb over the ridge flown over it, an efficient "
+          "one, which may climb late, refused at its point",
+          "[terrain_check]") {
+    session::World w(ridged("terrain-climb"));
+    session::VehicleSpec spec;
+    spec.name = "c172";
+    spec.type = "jsbsim:c172"; // (the hangar's: it has performance tables)
+    spec.initial.altitudeMslM = 1400.0;
+    spec.initial.headingDeg = 90.0;
+    spec.initial.airspeedTrueMs = 50.0;
+    const auto v = w.createVehicle(spec);
+    REQUIRE(v != 0);
+    // 3 km east at 1,400 m, then on to 20 km east at 1,600 m, over the ridge 10 km east (docs/flight-autonomy.md, 4.32):
+    // climbing at once, even at the least rate its tables give it clears the ridge; an efficient climb is walked from the
+    // latest it could start - there, whichever it would choose, still at 1,400 m at the ridge
+    Waypoint up = east(20000.0, 1600.0);
+    up.climbOptimization = static_cast<double>(ClimbOptimization::ExtendedRange);
+    const CommandResult r = w.submit(v, RouteCommand{}, std::vector<Waypoint>{east(3000.0, 1400.0), up});
+    CHECK(r.reason == Reason::TerrainConflict);
+    CHECK(r.index == 1);
+    {
+        const CommandDetails::Terrain& t = hit(w, v);
+        CHECK((eastOf(t.longitudeRad) >= 10000.0 && eastOf(t.longitudeRad) < 10000.2));
+        CHECK(std::abs(t.altitudeMslM - 1400.0) < 1e-6);
+    }
+    up.climbOptimization = static_cast<double>(ClimbOptimization::BestRate);
+    const CommandResult flying = w.submit(v, RouteCommand{}, std::vector<Waypoint>{east(3000.0, 1400.0), up});
+    REQUIRE(flying.accepted());
+    CHECK(w.commandDetails(v)->terrain.hit == 0);
+    double over = kHold; // (its least height over the ridge)
+    for (unsigned k = 0; k < stepsFor(w, 300.0) && eastOf(w.vehicleState(v)->longitudeRad) < 12500.0; ++k) {
+        w.step();
+        const auto& s = *w.vehicleState(v);
+        if (eastOf(s.longitudeRad) >= 10000.0 && eastOf(s.longitudeRad) <= 12000.0) over = isHold(over) ? s.altitudeMslM : std::min(over, s.altitudeMslM);
+    }
+    INFO("its least over the ridge: " << over << " m");
+    REQUIRE(!isHold(over));
+    CHECK(over > 1590.0);
+}
+
 TEST_CASE("terrain: a pattern, a curve and an hsa into the ground are refused; clear of it, they fly", "[terrain_check]") {
     session::World w(ridged("terrain-modes"));
     const auto v = spawn(w, "c172x", 0.0, 1000.0);

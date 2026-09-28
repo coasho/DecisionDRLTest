@@ -56,8 +56,13 @@ struct Profile {
     double from = 0.0, to = 0.0;
     double rateMs = kNaN; ///< its climb rate; NaN: along its gradient
     double speedMs = 0.0, lengthM = 0.0;
+    bool late = false;    ///< its change at its rate made to end at its point (an efficient climb's, as late as it goes: 4.32)
     double at(double x) const noexcept {
-        if (rateMs > 0.0 && speedMs > 0.0) return from + std::copysign(std::min(rateMs * x / speedMs, std::abs(to - from)), to - from);
+        if (rateMs > 0.0 && speedMs > 0.0) {
+            if (late) x -= std::max(lengthM - std::abs(to - from) / rateMs * speedMs, 0.0);
+            if (late && x < 0.0) return from;
+            return from + std::copysign(std::min(rateMs * x / speedMs, std::abs(to - from)), to - from);
+        }
         return lengthM > 1.0 ? from + (to - from) * std::clamp(x / lengthM, 0.0, 1.0) : to;
     }
     /// How far past its point it is still climbing or descending to it.
@@ -155,6 +160,23 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
     auto spacing = [&](double lengthM) { walk.spacingM = std::max(resolution, std::isfinite(lengthM) ? lengthM / kMaxSamples : 0.0); };
     // a place's altitude in a reference, above sea level: above ground, the ground's there
     auto msl = [&](double altitude, bool above, double lat, double lon) { return above ? altitude + sessionView_->groundM(lat, lon) : altitude; };
+    // a climb optimisation's change (4.32), walked as the lowest it could fly: a climb from the start at the least rate the
+    // tables give through it, an efficient climb at the end at the most (its latest start); a best rate's descent from the
+    // start at the most (0.1 m/s at the least: a change it can barely make). An efficient descent is along its gradient.
+    auto climbProfile = [&](Profile& f, bool efficient, double fromMsl, double toMsl, double fuelKg) {
+        const bool up = toMsl > fromMsl;
+        double least = route::climbRateMs(config_->tables, performance_, hovers, up, fromMsl, f.speedMs, fuelKg), most = least;
+        auto see = [&](double h) {
+            const double r = route::climbRateMs(config_->tables, performance_, hovers, up, h, f.speedMs, fuelKg);
+            least = std::min(least, r), most = std::max(most, r);
+        };
+        see(toMsl);
+        if (config_->tables)
+            for (const double h : config_->tables->altitudeM)
+                if (h > std::min(fromMsl, toMsl) && h < std::max(fromMsl, toMsl)) see(h);
+        f.rateMs = std::max(up && !efficient ? least : most, 0.1);
+        f.late = up && efficient;
+    };
 
     if (std::get_if<RouteCommand>(&setpoint) && routePlan_ && routePlan_->count > 0) {
         // each leg from where the one before left the aircraft, its altitude in its own reference, and its fly-by turn
@@ -177,6 +199,11 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
                                                      : w.altitudeM;
             f.rateMs = isHold(w.climbRateMs) ? kNaN : w.climbRateMs;
             f.speedMs = route::plannedSpeed(w.speed, w.speedReference, msl(f.to, above, w.latitudeRad, w.longitudeRad));
+            const bool efficient = w.climbOptimization == static_cast<double>(ClimbOptimization::ExtendedRange);
+            if (!isHold(w.climbOptimization) && f.to != f.from && !(efficient && f.to < f.from)) { // (4.32: the lowest it could fly)
+                const double toMsl = msl(f.to, above, w.latitudeRad, w.longitudeRad), fromHere = above ? msl(f.from, true, l.latA, l.lonA) : f.from;
+                climbProfile(f, efficient, fromHere, toMsl, state.fuelKg);
+            }
             // (a loiter point's leg, to where its loiter is joined, its altitude there: 4.31)
             const RouteLoiter* loiter = route::loiterPoint(w) ? p.loiterAt(i) : nullptr;
             const double joinM = loiter ? route::loiterJoinM(loiter->pattern, loiter->shape) : 0.0;

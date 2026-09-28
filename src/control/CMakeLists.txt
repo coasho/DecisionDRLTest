@@ -39,7 +39,8 @@ add_library(fsim_control STATIC
     Magnetic.cpp
     Declination.cpp
     Patterns.cpp
-    Nurbs.cpp)
+    Nurbs.cpp
+    Climb.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

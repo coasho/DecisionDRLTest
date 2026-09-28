@@ -443,7 +443,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     // FA-10's, a ditch FA-16's)
     for (std::uint32_t i = 0; i < count; ++i) {
         const Waypoint& w = p.points[i];
-        if (!isHold(w.climbOptimization)) { // (a climb optimisation: as its row says - 4.32)
+        if (!isHold(w.climbOptimization)) { // (a climb optimisation: as its row says - no tables, not implemented: 4.32)
             const bool best = w.climbOptimization == static_cast<double>(ClimbOptimization::BestRate);
             const SupportInfo* row = support_ ? support_->find(best ? "fsim.guidance.route/climb/best_rate" : "fsim.guidance.route/climb/extended_range") : nullptr;
             if (!row || row->support != Support::Supported) return point(i, row && row->support == Support::NotSupported ? Reason::NotSupported : Reason::NotImplemented);
@@ -593,9 +593,10 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         log.reshape(static_cast<std::int16_t>(i), Constraint::None, Reason::InvalidWaypoint);
     }
     // every gradient steeper than the aircraft climbs or descends (point to point, above sea level): flown at its rate, or refused
+    // (a climb optimisation flies its own: 4.32)
     for (std::uint32_t i = 0; i < count; ++i) {
         Waypoint& w = p.points[i];
-        if (!flown(i) || !isHold(w.climbRateMs) || aboveGround(w.altitudeReference)) continue;
+        if (!flown(i) || !isHold(w.climbRateMs) || !isHold(w.climbOptimization) || aboveGround(w.altitudeReference)) continue;
         const double v = route::plannedSpeed(w.speed, w.speedReference, w.altitudeM);
         // the start's segment from the aircraft; any other, and the start's after a lap, from the point before
         for (const bool entry : {true, false}) {
