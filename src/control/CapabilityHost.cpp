@@ -522,29 +522,37 @@ Reason CapabilityHost::checkShape(const PatternCommand& c, const PatternShape& s
     if (!given(s.entryLongitudeRad, -inf, true) || isHold(s.entryLatitudeRad) != isHold(s.entryLongitudeRad)) return bad(22);
     if (!latitude(s.exitLatitudeRad)) return bad(23);
     if (!given(s.exitLongitudeRad, -inf, true) || isHold(s.exitLatitudeRad) != isHold(s.exitLongitudeRad)) return bad(24);
+    if (!given(s.turnRateRadS, 0.0, true)) return bad(25);
+    if (!code(s.turnType, static_cast<double>(HoldTurn::Count))) return bad(26);
+    if (!code(s.holdEntry, static_cast<double>(HoldEntry::Count))) return bad(27);
+    if (!code(s.holdContext, static_cast<double>(HoldContext::Count))) return bad(28);
     if (merge && !isHold(s.directionReference) && isHold(c.courseRad) && isHold(s.headingRad)) return bad(13);
     return Reason::None;
 }
 
-void CapabilityHost::limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, bool radiusFromBank) const noexcept {
+void CapabilityHost::limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, std::int16_t radiusFrom) const noexcept {
     limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, log, 9, 3);
     // a radius the aircraft can fly at its speed: a wing's at its full bank, a rotorcraft's a metre
     const Performance& f = performance_;
-    double least = 1.0;
+    double least = 1.0, v = 0.0;
     const bool banks = !f.hovers && std::isfinite(f.maxBankRad) && f.maxBankRad > 0.0;
     if (banks) {
         const double h = aboveGround(c.altitudeReference) ? 0.0
                          : c.altitudeReference == static_cast<double>(AltitudeReference::Barometric) ? barometricMslM(config_->altimeter, c.altitudeM)
                                                                                                       : c.altitudeM;
-        const double v = route::plannedSpeed(c.speed, c.speedReference, h);
+        v = route::plannedSpeed(c.speed, c.speedReference, h);
         least = v * v / (9.80665 * std::tan(f.maxBankRad));
     }
-    if (radiusFromBank && banks) { // a bank it can fly, and the radius it gives at it (docs/flight-autonomy.md, 4.23)
+    if (radiusFrom == 16 && banks) { // a bank it can fly, and the radius it gives at it (docs/flight-autonomy.md, 4.23)
         const double given = shape.bankRad;
         bound(shape.bankRad, f.maxBankRad, true, 16, Constraint::MaxOrientation, log);
         if (shape.bankRad != given) c.radiusM *= std::tan(given) / std::tan(shape.bankRad);
+    } else if (radiusFrom == 25 && banks) { // a turn rate its full bank flies at its speed, and the radius it gives (4.24)
+        const double given = shape.turnRateRadS; // (at the least radius: v / least, g tan(bank) / v)
+        bound(shape.turnRateRadS, v / least, true, 25, Constraint::MaxOrientation, log);
+        if (shape.turnRateRadS != given) c.radiusM *= given / shape.turnRateRadS;
     } else {
-        bound(c.radiusM, least, false, 5, Constraint::MaxOrientation, log);
+        bound(c.radiusM, least, false, radiusFrom, Constraint::MaxOrientation, log);
     }
     bound(shape.radius2M, least, false, 20, Constraint::MaxOrientation, log);
 }
@@ -982,14 +990,14 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
     if (auto* curve = std::get_if<CurveCommand>(&setpoint)) // its segments checked as its range policy says
         if (const Reason why = checkCurve(*curve, segments, false, state, log); why != Reason::None) return why;
     auto* pattern = std::get_if<PatternCommand>(&setpoint);
-    bool radiusFromBank = false;
+    std::int16_t radiusFrom = 5;
     if (pattern) { // complete it first, as an hsa (the runtime flies a complete setpoint) - with its shape, into the scratch
         patternShape_ = shape ? *shape : PatternShape{};
         if (const Reason why = checkPattern(*pattern, false, detail); why != Reason::None) return why;
         if (const Reason why = checkShape(*pattern, patternShape_, false, detail); why != Reason::None) return why;
         if (const Reason why = optimisable(pattern->speedOptimization, 12, detail); why != Reason::None) return why;
         optimise(pattern->speed, pattern->speedReference, pattern->speedOptimization, pattern->altitudeM, pattern->altitudeReference, state);
-        radiusFromBank = isHold(pattern->radiusM) && !isHold(patternShape_.bankRad);
+        radiusFrom = radiusField(*pattern, patternShape_);
         completePattern(*pattern, patternShape_, state);
     }
     if (checked)
@@ -1000,9 +1008,9 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
             if (const Reason r = admit(*b, state, performance_, why); r != Reason::None) log.find(r, why.index, why.constraint, why.from, why.to);
         }
     if (hsa && checked) limitHsa(*hsa, log);
-    if (pattern && checked) limitPattern(*pattern, patternShape_, log, radiusFromBank);
+    if (pattern && checked) limitPattern(*pattern, patternShape_, log, radiusFrom);
     if (pattern) // two circles that fit, their radii as limited (docs/flight-autonomy.md, 4.23)
-        if (const int field = route::circlesFault(*pattern, patternShape_); field >= 0) {
+        if (const int field = route::shapeFault(*pattern, patternShape_); field >= 0) {
             detail.index = static_cast<std::int16_t>(field);
             return Reason::InvalidParameter;
         }

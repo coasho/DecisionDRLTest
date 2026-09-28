@@ -720,6 +720,34 @@ class PatternKind(enum.IntEnum):
     HOLD = 3
 
 
+class HoldTurn(enum.IntEnum):
+    """A hold's turns by type (A-GRA's MA_HoldTurnTypeEnum; docs/flight-autonomy.md, 4.24): rate one at most 25
+    degrees of bank (a hold's default); the tightest the pattern flies (80 % of the aircraft's bank); half rate one at
+    most 15 degrees."""
+    STANDARD = 0
+    MIL_POWER = 1
+    RELAX = 2
+
+
+class HoldEntry(enum.IntEnum):
+    """How a racetrack or a hold is entered (A-GRA's MA_HoldEntryTypeEnum, and ATC's; docs/flight-autonomy.md, 4.24):
+    where it is nearest; at the fix by ATC's entry for the side the aircraft comes from; along the inbound or the
+    outbound leg; ATC's parallel or teardrop entry. Left out: direct to the fix, then round."""
+    DIRECT = 0
+    ANCHOR = 1
+    INBOUND = 2
+    OUTBOUND = 3
+    PARALLEL = 4
+    TEARDROP = 5
+
+
+class HoldContext(enum.IntEnum):
+    """A hold's operational context (A-GRA's MA_HoldContextEnum): the defaults it implies are ATC's for every one."""
+    ADMIN = 0
+    TACTICAL = 1
+    ATC = 2
+
+
 #: The Vehicle Interface's modes (docs/vehicle-interface.md): their fixed-size setpoints' fields, in order. HOLD leaves
 #: one out: a NEW continues what a live hsa commanded (else what the aircraft flies now) and takes a route's, a
 #: pattern's or a curve's default; an UPDATE keeps it.
@@ -730,13 +758,14 @@ MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", 
                "pattern": ("pattern", "latitude_rad", "longitude_rad", "altitude_m", "altitude_reference", "radius_m", "clockwise",
                            "course_rad", "leg_m", "speed", "speed_reference", "duration_s", "speed_optimization", "direction_reference",
                            "heading_rad", "leg_s", "bank_rad", "orbits", "latitude2_rad", "longitude2_rad", "radius2_m", "entry_latitude_rad",
-                           "entry_longitude_rad", "exit_latitude_rad", "exit_longitude_rad"),
+                           "entry_longitude_rad", "exit_latitude_rad", "exit_longitude_rad", "turn_rate_rad_s", "turn_type", "hold_entry",
+                           "hold_context"),
                "curve": ("latitude_rad", "longitude_rad", "altitude_m", "speed_min_ms", "speed_max_ms", "duration_s", "end", "append")}
-MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 25, "curve": (HOLD,) * 8}
+MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 29, "curve": (HOLD,) * 8}
 _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "speed_optimization": SpeedOptimization,
                "direction_reference": DirectionReference,
                "projection": Projection, "end": EndBehavior,
-               "turn": TurnType, "pattern": PatternKind}
+               "turn": TurnType, "pattern": PatternKind, "turn_type": HoldTurn, "hold_entry": HoldEntry, "hold_context": HoldContext}
 
 Waypoint = collections.namedtuple(
     "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id",
@@ -1229,10 +1258,12 @@ class Vehicle:
         leg's time), ``bank_rad`` (or the turns by bank), ``orbits`` (laps: then it completes; with a duration, the first),
         ``latitude2_rad``, ``longitude2_rad``, ``radius2_m`` (a racetrack's or a figure-eight's second circle),
         ``entry_latitude_rad``, ``entry_longitude_rad`` (where it joins, flown to directly) and ``exit_latitude_rad``,
-        ``exit_longitude_rad`` (where it leaves, its duration or laps flown, out along its course). Given a course and a
-        heading, legs and their time, or a radius and a bank, the first flies; an update of either replaces both. An
-        Activity whose ``update(**fields)`` changes only what it gives; fsim.Rejected if refused. The command envelope as
-        submit's."""
+        ``exit_longitude_rad`` (where it leaves, its duration or laps flown, out along its course). A hold's (4.24):
+        ``turn_rate_rad_s`` or ``turn_type`` (fsim.HoldTurn) for its radius, ``hold_entry`` (fsim.HoldEntry: a racetrack's
+        or a hold's way in) and ``hold_context`` (fsim.HoldContext: ATC's defaults for every one); its entry and exit
+        times are the command's ``window``. Given more than one way to give the course, the legs or the radius, the
+        first flies; an update of any one replaces them all. An Activity whose ``update(**fields)`` changes only what it
+        gives; fsim.Rejected if refused. The command envelope as submit's."""
         r = self._h.submit_mode(self.id, MODE_KINDS.index("pattern"), _row("pattern", values, fields), int(source), None, int(range),
                                 int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection,
                                            controller))

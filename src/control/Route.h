@@ -199,6 +199,11 @@ struct Pattern {
     double toExitM() const noexcept;
 };
 
+/// Its track over the ground, rad: its heading when it barely moves (a metre a second).
+inline double trackOf(const sim::VehicleState& s) noexcept {
+    return std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]) > 1.0 ? std::atan2(s.velocityNedMs[1], s.velocityNedMs[0]) : s.eulerRad[2];
+}
+
 /// A piece's point `m` along it (north and east, m, in the pattern's plane) and its course there.
 void pointOn(const Pattern::Piece& piece, double m, double& north, double& east, double& courseRad) noexcept;
 
@@ -206,8 +211,10 @@ void pointOn(const Pattern::Piece& piece, double m, double& north, double& east,
 /// shape (docs/flight-autonomy.md, 4.23), planned from where the aircraft is:
 /// an orbit's laps counted from its bearing then, two circles' from their
 /// nearest point, an entry point's from it; a magnetic course turned by the
-/// declination at its point in `magneticYear` (fsim/Magnetic.h).
-void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon, const PatternShape& shape = {}, double magneticYear = 2025.0) noexcept;
+/// declination at its point in `magneticYear` (fsim/Magnetic.h). `trackRad`,
+/// the aircraft's track then, starts a hold's way in onto a leg (4.24).
+void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon, const PatternShape& shape = {}, double magneticYear = 2025.0,
+                 double trackRad = kHold) noexcept;
 
 /// What a pattern leaves out, filled in (docs/vehicle-interface.md, 4.6): an
 /// orbit, here, the altitude and speed it flies now (a rotorcraft's speed its
@@ -218,16 +225,18 @@ void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon, co
 /// wrapped. What its shape gives another way (docs/flight-autonomy.md, 4.23)
 /// fills its field: a course from a heading, the legs from their time, the
 /// radius from a bank - in the wind given, north and east - and two circles'
-/// second radius (the shape's) from the first. A magnetic course left out is
-/// the course now, turned by the declination at its point in `magneticYear`.
+/// second radius (the shape's) from the first; the radius by a turn rate or
+/// type (4.24) too. A magnetic course left out is the course now, turned by
+/// the declination at its point in `magneticYear`.
 void completePattern(PatternCommand& c, PatternShape& shape, const sim::VehicleState& state, const Performance& performance, bool hovers,
                      double windNorthMs, double windEastMs, const Altimeter* altimeter = nullptr, double magneticYear = 2025.0) noexcept;
 
-/// A pattern's second circle, and whether its geometry holds (docs/flight-autonomy.md, 4.23): only a racetrack's
-/// or a figure-eight's, with no course, heading, legs or leg time (the circles give them); a racetrack's two circles
-/// apart (neither inside the other), a figure-eight's clear of one another, both at least a metre in radius. Its
-/// field at fault (its index in the fields of the PatternCommand and then its shape), or -1. `c` complete.
-int circlesFault(const PatternCommand& c, const PatternShape& shape) noexcept;
+/// Whether a pattern's shape fits the pattern (docs/flight-autonomy.md, 4.23, 4.24): a second circle only a
+/// racetrack's or a figure-eight's, with no course, heading, legs or leg time (the circles give them), a racetrack's
+/// two circles apart (neither inside the other), a figure-eight's clear of one another, both at least a metre in
+/// radius; an entry only a racetrack's or a hold's on its fix (no second circle, no entry point); a context only a
+/// hold's. Its field at fault (its index in the fields of the PatternCommand and then its shape), or -1. `c` complete.
+int shapeFault(const PatternCommand& c, const PatternShape& shape) noexcept;
 
 // --- Curves (4.7) -----------------------------------------------------------------
 

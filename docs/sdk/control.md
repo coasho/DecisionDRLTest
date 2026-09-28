@@ -371,6 +371,7 @@ world.update(a, PatternCommand{}, steeper);
 - **Two circles** make a racetrack (legs touching both on the outside) or a figure-eight (legs crossing between them, the second circle flown the other way); they give its course and legs.
 - **`orbits`:** it completes after so many laps, counted where it was joined (with a duration, the first).
 - **The entry point** is flown to directly, and the laps are counted from there; **the exit point** ends it once its duration or laps are flown, and it flies on out along its course.
+- **A hold's** ([flight-autonomy.md](../flight-autonomy.md), 4.24): `turnRateRadS` or `turnType` (`HoldTurn`: STANDARD rate one, MIL_POWER its tightest, RELAX half rate one) for the radius; `holdEntry` (`HoldEntry`) for a racetrack's or a hold's way in - DIRECT where it is nearest, ANCHOR at the fix by ATC's entry for the side it comes from, INBOUND or OUTBOUND onto that leg on its course, ATC's PARALLEL or TEARDROP; left out, direct to the fix; `holdContext` (`HoldContext`), ATC's defaults for every one. Its entry and exit times are the command's `options.window`.
 - The C ABI and Python keep one list: the shape's fields follow the pattern's 13. `activitySetpoint` gives the shape back (`Setpoint::shape`); tasks and batches carry it.
 
 ### Curves: curve following

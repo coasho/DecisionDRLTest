@@ -671,7 +671,12 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   (where it joins the pattern, flown to directly), exit_latitude_rad,
  *   exit_longitude_rad (where it leaves, its duration or laps flown). Of a
  *   course and a heading, legs and their time, a radius and a bank, given both
- *   the first flies; in an UPDATE either replaces both. Twelve or more fields
+ *   the first flies; in an UPDATE either replaces both. From ABI 1.22 (4.24,
+ *   A-GRA's hold): turn_rate_rad_s, turn_type (fsim_hold_turn) - other ways to
+ *   give the radius, after the bank - hold_entry (fsim_hold_entry: a
+ *   racetrack's or a hold's way in; left out, direct to the fix) and
+ *   hold_context (fsim_hold_context: ATC's defaults for every one); a hold's
+ *   entry and exit times are the command's time window. Twelve or more fields
  *   are taken, the rest left out.
  * - FSIM_MODE_CURVE is fsim.guidance.curve (A-GRA's curve following): fields
  *   latitude_rad, longitude_rad, altitude_m (the reference its segments are
@@ -683,6 +688,10 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   fields changes how it is flown, not where. */
 enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3 };
 enum fsim_pattern_kind { FSIM_PATTERN_ORBIT = 0, FSIM_PATTERN_RACETRACK, FSIM_PATTERN_FIGURE_EIGHT, FSIM_PATTERN_HOLD };
+enum fsim_hold_turn { FSIM_HOLD_TURN_STANDARD = 0, FSIM_HOLD_TURN_MIL_POWER, FSIM_HOLD_TURN_RELAX }; /* A-GRA's MA_HoldTurnTypeEnum (ABI 1.22) */
+enum fsim_hold_entry { FSIM_HOLD_ENTRY_DIRECT = 0, FSIM_HOLD_ENTRY_ANCHOR, FSIM_HOLD_ENTRY_INBOUND, FSIM_HOLD_ENTRY_OUTBOUND,
+                       FSIM_HOLD_ENTRY_PARALLEL, FSIM_HOLD_ENTRY_TEARDROP }; /* A-GRA's MA_HoldEntryTypeEnum and ATC's (ABI 1.22) */
+enum fsim_hold_context { FSIM_HOLD_CONTEXT_ADMIN = 0, FSIM_HOLD_CONTEXT_TACTICAL, FSIM_HOLD_CONTEXT_ATC }; /* A-GRA's MA_HoldContextEnum (ABI 1.22) */
 enum fsim_speed_reference { FSIM_SPEED_TRUE_AIRSPEED = 0, FSIM_SPEED_CALIBRATED_AIRSPEED, FSIM_SPEED_GROUND_SPEED, FSIM_SPEED_MACH };
 enum fsim_altitude_reference { FSIM_ALTITUDE_MSL = 0, FSIM_ALTITUDE_ABOVE_GROUND, FSIM_ALTITUDE_ELLIPSOID,
                                FSIM_ALTITUDE_BAROMETRIC /* ABI 1.18: what its altimeter reads, set to its QNH (fsim_vehicle_set_qnh); an hsa's
@@ -692,8 +701,8 @@ enum fsim_direction_reference { FSIM_DIRECTION_TRUE_NORTH = 0, FSIM_DIRECTION_MA
 enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft) */
-FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 25, curve 8 (1.14: hsa 6, pattern 12; 1.15: hsa 7, pattern 13;
-                                                      1.20: hsa 8); 0 for an unknown mode */
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 29, curve 8 (1.14: hsa 6, pattern 12; 1.15: hsa 7, pattern 13;
+                                                      1.20: hsa 8; 1.21: pattern 25); 0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result);
 

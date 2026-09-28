@@ -931,6 +931,72 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             // IRIS's 6.1 % of its 7.5 m)
             CHECK(exitMiss[p.id] < (p.rotor ? std::max(0.5, 0.1 * orbitRadius(p)) : std::max(20.0, 0.05 * orbitRadius(p))));
         });
+    // A-GRA's hold (ADR-29 FA-5b: LTR-10, LTR-13): on a fix two turns ahead, entered at it by ATC's entry for the side it
+    // comes from - here the parallel's: out a leg along the inbound course, round toward the holding side, back to the fix
+    // - its legs half a minute, once round
+    struct HoldPlan {
+        PositionCommand fix;
+        double courseRad = 0.0, radiusM = 0.0, legM = 0.0, startS = 0.0, speedMs = 0.0, inRad = 0.0;
+    };
+    std::map<std::uint32_t, HoldPlan> holds;
+    std::map<std::uint32_t, double> parallelMiss, parallelTrack;
+    run("fsim.guidance.pattern", 0.0,
+        [&](const Plane& p) {
+            HoldPlan& h = holds[p.id];
+            h.speedMs = p.rotor ? p.cruiseMs : p.start.airspeedTrueMs;
+            const double turn = std::max(h.speedMs / (3.0 * kDeg), h.speedMs * h.speedMs / (9.80665 * std::tan(25.0 * kDeg)));
+            const double psi = h.inRad = p.start.eulerRad[2];
+            h.fix = pointFrom(p.start, 2.0 * turn * std::cos(psi), 2.0 * turn * std::sin(psi), p.start.altitudeMslM, 0.0);
+            PatternCommand c;
+            c.pattern = static_cast<double>(PatternKind::Hold), c.latitudeRad = h.fix.latitudeRad, c.longitudeRad = h.fix.longitudeRad;
+            c.courseRad = std::remainder(psi + 120.0 * kDeg, 2.0 * kPi); // (it comes 120 degrees left of the inbound course: the parallel's side)
+            PatternShape shape;
+            shape.holdEntry = static_cast<double>(HoldEntry::Anchor), shape.legS = 30.0, shape.orbits = 1.0;
+            const CommandResult r = w.submit(p.id, c, shape);
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            // (the Crazyflie's battery does not last a hold at its cruise of a metre a second - flown anyway, it flies the entry
+            // and the lap, then falls: its endurance check is right, and the multirotor is flown here by the IRIS)
+            if (p.rotor && r.reason == Reason::InsufficientEndurance) return false;
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            parallelMiss[p.id] = kInf, parallelTrack[p.id] = kHold;
+            if (!r.accepted()) return false;
+            Setpoint flown;
+            REQUIRE(w.activitySetpoint(r.activity, flown));
+            const auto& planned = std::get<PatternCommand>(std::get<Command>(flown.command));
+            h.courseRad = planned.courseRad, h.radiusM = planned.radiusM, h.legM = planned.legM, h.startS = w.simTime();
+            return true;
+        },
+        [&](const Plane& p) { // to the fix, its parallel leg, turn and way back, and a lap: two legs and two half circles
+            const HoldPlan& h = holds[p.id];
+            return (2.0 * h.radiusM + 4.3 * h.legM + 3.0 * kPi * h.radiusM) / std::max(h.speedMs, 0.1) * 1.25 + 60.0;
+        },
+        [&](const Plane& p) { // its mark: half a leg out along the inbound course, flown away from the fix, begun where the turn over the
+                              // fix onto it ended - while it enters
+            const HoldPlan& h = holds[p.id];
+            if (w.simTime() - h.startS > (2.0 * h.radiusM + 2.0 * h.legM) / std::max(h.speedMs, 0.1) * 1.2) return;
+            const auto& s = *w.vehicleState(p.id);
+            double north, east;
+            offset(s, h.fix.latitudeRad, h.fix.longitudeRad, north, east); // (the aircraft from the fix)
+            const double out = h.courseRad + kPi, way = std::remainder(out - h.inRad, 2.0 * kPi) >= 0.0 ? 1.0 : -1.0;
+            const double markN = way * h.radiusM * (std::sin(out) - std::sin(h.inRad)) + 0.5 * h.legM * std::cos(out);
+            const double markE = way * h.radiusM * (std::cos(h.inRad) - std::cos(out)) + 0.5 * h.legM * std::sin(out);
+            const double d = std::hypot(north - markN, east - markE);
+            if (d < parallelMiss[p.id]) parallelMiss[p.id] = d, parallelTrack[p.id] = std::atan2(s.velocityNedMs[1], s.velocityNedMs[0]);
+        },
+        [&](const Plane& p, const Lows&) {
+            const HoldPlan& h = holds[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const double apart = std::abs(std::remainder(parallelTrack[p.id] - (h.courseRad + kPi), 2.0 * kPi)) / kDeg;
+            INFO(activityStateName(r.state) << ", " << r.progress.laps << " laps; R " << h.radiusM << ", legs " << h.legM << "; its parallel leg passed "
+                                            << parallelMiss[p.id] << " m off, its track " << apart << " deg off");
+            CHECK(r.state == ActivityState::Completed);
+            CHECK(r.progress.laps == 1);
+            // (the worst: a wing 29 m and 1.3 deg, the E-3G's 0.41 % of its radius, the B-52H's 21 m; a rotorcraft 5.1 m and 3.4 deg,
+            // the UH-1H's 1.8 %)
+            CHECK(parallelMiss[p.id] < (p.rotor ? std::max(0.5, 0.1 * h.radiusM) : std::max(20.0, 0.05 * h.radiusM)));
+            CHECK(apart < 10.0);
+        });
     // a gentle S: a wing's six of its full-bank turns long (at least its scale), a rotorcraft's its scale
     auto curveLength = [&](const Plane& p) { return p.rotor ? p.scale() : std::max(p.scale(), 6.0 * fullBankRadius(p)); };
     run("fsim.guidance.curve", 0.0,

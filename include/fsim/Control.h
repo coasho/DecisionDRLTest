@@ -269,6 +269,28 @@ struct PatternCommand {
     double speedOptimization = kHold;  ///< SpeedOptimization, as an hsa's: a speed replaces it, it a speed
 };
 
+/// A hold's turns by type (A-GRA's MA_HoldTurnTypeEnum; docs/flight-autonomy.md, 4.24): the radius they give
+/// at the pattern's speed plus the wind.
+enum class HoldTurn : std::uint8_t {
+    Standard = 0, ///< rate one, 3 degrees a second, at most 25 degrees of bank (a hold's default)
+    MilPower = 1, ///< the tightest the pattern flies: 80 % of the aircraft's bank (an orbit's default)
+    Relax = 2,    ///< half rate one, at most 15 degrees of bank
+    Count
+};
+/// How a racetrack or a hold is entered (A-GRA's MA_HoldEntryTypeEnum, and ATC's entries; 4.24). Left out: direct
+/// to the fix, then round from the turn there, wherever the aircraft comes from.
+enum class HoldEntry : std::uint8_t {
+    Direct = 0,   ///< where the pattern is nearest, joined as an orbit is
+    Anchor = 1,   ///< at the fix, by ATC's entry for the side the aircraft comes from: direct, parallel or teardrop
+    Inbound = 2,  ///< along the inbound leg: onto its course before it, then to the fix
+    Outbound = 3, ///< along the outbound leg: onto its course before it, abeam the fix
+    Parallel = 4, ///< ATC's parallel entry: over the fix, out along the inbound course a leg, round toward the holding side, back to the fix
+    Teardrop = 5, ///< ATC's teardrop entry: over the fix, out 30 degrees into the holding side a leg, round the pattern's way, back to the fix
+    Count
+};
+/// A hold's operational context (A-GRA's MA_HoldContextEnum; 4.24): the defaults it implies are ATC's for every one.
+enum class HoldContext : std::uint8_t { Admin = 0, Tactical = 1, Atc = 2, Count };
+
 /// A pattern as A-GRA's schema gives it beyond its PatternCommand
 /// (docs/flight-autonomy.md, 4.23): beside it, as a route's waypoints are
 /// (World::submit and update take it; the path store keeps the shape of the
@@ -276,10 +298,12 @@ struct PatternCommand {
 /// the size it was. Its fields follow the PatternCommand's in the C ABI's and
 /// Python's one list (index 13 on). A field left out (kHold) is not used in a
 /// NEW and keeps what was commanded in an UPDATE. Some give a PatternCommand
-/// field another way: a heading for the course, a time for the legs, a bank
-/// for the radius. Given both, the PatternCommand's flies (the host fills it
-/// in from the shape's, which stays as it was given); in an UPDATE, either
-/// replaces the other, and a second circle replaces the course and the legs.
+/// field another way: a heading for the course, a time for the legs, a bank,
+/// a turn rate or a turn type for the radius. Given more than one, the first
+/// flies - the PatternCommand's, then the bank, the rate, the type - and the
+/// host fills it in from the shape's, which stay as they were given; in an
+/// UPDATE, any one replaces the others, and a second circle replaces the
+/// course and the legs.
 struct PatternShape {
     /// DirectionReference of the course or the heading: magnetic, turned to
     /// true by the declination at the pattern's point when it is planned.
@@ -309,18 +333,29 @@ struct PatternShape {
     /// goes on round to the pattern's nearest point to it, completes there
     /// and flies on along its course.
     double exitLatitudeRad = kHold, exitLongitudeRad = kHold;
+    /// Or the turns by rate (a hold's TurnRate): the radius it turns at that
+    /// rate on, at its speed plus the wind.
+    double turnRateRadS = kHold;
+    /// Or by type: HoldTurn.
+    double turnType = kHold;
+    /// HoldEntry: how a racetrack or a hold (with no second circle, nor an
+    /// entry point) is entered.
+    double holdEntry = kHold;
+    /// HoldContext of a hold: its defaults ATC's, whichever it is.
+    double holdContext = kHold;
 
     /// Its fields in order (the C ABI's and Python's, after the PatternCommand's): pointers into it.
-    static constexpr std::size_t kFields = 12;
+    static constexpr std::size_t kFields = 16;
     void fields(double* f[kFields]) noexcept {
         f[0] = &directionReference, f[1] = &headingRad, f[2] = &legS, f[3] = &bankRad, f[4] = &orbits, f[5] = &latitude2Rad;
         f[6] = &longitude2Rad, f[7] = &radius2M, f[8] = &entryLatitudeRad, f[9] = &entryLongitudeRad, f[10] = &exitLatitudeRad;
-        f[11] = &exitLongitudeRad;
+        f[11] = &exitLongitudeRad, f[12] = &turnRateRadS, f[13] = &turnType, f[14] = &holdEntry, f[15] = &holdContext;
     }
     /// Every field left out: the pattern as its PatternCommand alone gives it.
     bool empty() const noexcept {
         const double v[kFields] = {directionReference, headingRad, legS, bankRad, orbits, latitude2Rad, longitude2Rad, radius2M,
-                                   entryLatitudeRad, entryLongitudeRad, exitLatitudeRad, exitLongitudeRad};
+                                   entryLatitudeRad, entryLongitudeRad, exitLatitudeRad, exitLongitudeRad, turnRateRadS, turnType, holdEntry,
+                                   holdContext};
         for (const double x : v)
             if (!isHold(x)) return false;
         return true;

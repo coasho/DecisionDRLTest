@@ -442,9 +442,149 @@ double groundSpeedAlong(double courseRad, double v, bool overGround, double wind
 
 bool magneticOf(const PatternShape& shape) noexcept { return shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth); }
 
+/// A racetrack's or a hold's way in (docs/flight-autonomy.md, 4.24), from (north, east) where the aircraft is, on
+/// `track` (kHold: toward where it goes first): its pieces into p.entry, and the piece of the lap it joins (p.first).
+/// The lap as planPattern lays it: [0] the inbound leg to the fix, [1] the turn there, [2] the outbound leg, [3] the
+/// turn back. Turns are of the pattern's radius, and tangent where the way in turns: a leg from the fix begins with a
+/// turn over the fix, as ATC's entries do; the way onto a leg's start is the shortest of turn, straight, turn (Dubins's).
+void enterHold(Pattern& p, HoldEntry entry, double north, double east, double track, double chi, double side, double r, double leg) noexcept {
+    const double un = std::cos(chi), ue = std::sin(chi); // inbound
+    const double hn = -side * ue, he = side * un;        // toward the holding side
+    std::uint32_t n = 0;
+    double atN = north, atE = east; // where the way in has come to
+    auto lineTo = [&](double toN, double toE) {
+        const double d = std::hypot(toN - atN, toE - atE);
+        if (d > 1.0 && n < Pattern::kEntryPieces) {
+            Pattern::Piece& piece = p.entry[n++];
+            piece = Pattern::Piece{};
+            piece.line = Line{atN, atE, std::atan2(toE - atE, toN - atN), d};
+        }
+        atN = toN, atE = toE;
+    };
+    auto arcRound = [&](double centreN, double centreE, double way, double sweep) { // from where it has come to
+        if (n >= Pattern::kEntryPieces || sweep < 1e-6) return;
+        Pattern::Piece& piece = p.entry[n++];
+        piece = Pattern::Piece{};
+        piece.arc = true;
+        piece.turn.radiusM = std::hypot(atN - centreN, atE - centreE);
+        piece.turn.angleRad = way;
+        piece.turn.centreNorthM = centreN, piece.turn.centreEastM = centreE;
+        piece.turn.entryBearingRad = std::atan2(atE - centreE, atN - centreN);
+        piece.sweepRad = sweep;
+        const double end = piece.turn.entryBearingRad + way * sweep;
+        atN = centreN + piece.turn.radiusM * std::cos(end), atE = centreE + piece.turn.radiusM * std::sin(end);
+    };
+    // on `from`, a turn of radius r to `to`, the way it is shorter (none under a thousandth of a radian)
+    auto turnTo = [&](double from, double to) {
+        const double turn = geo::wrapPi(to - from), way = turn >= 0.0 ? 1.0 : -1.0;
+        if (std::abs(turn) > 1e-3) arcRound(atN - way * r * std::sin(from), atE + way * r * std::cos(from), way, std::abs(turn));
+    };
+    // the shortest turn - straight - turn from where it is on `from` to (toN, toE) on `to`
+    auto dubins = [&](double from, double toN, double toE, double to) {
+        struct Way {
+            double length = std::numeric_limits<double>::infinity(), way1 = 1.0, way2 = 1.0;
+            double c1n = 0.0, c1e = 0.0, c2n = 0.0, c2e = 0.0, t1n = 0.0, t1e = 0.0, t2n = 0.0, t2e = 0.0;
+        } best;
+        auto sweep = [](double fromBearing, double toBearing, double way) { // [0, 2 pi)
+            double a = way * (toBearing - fromBearing);
+            return a - 2.0 * kPi * std::floor(a / (2.0 * kPi));
+        };
+        for (const double w1 : {1.0, -1.0})
+            for (const double w2 : {1.0, -1.0}) {
+                Way c;
+                c.way1 = w1, c.way2 = w2;
+                c.c1n = atN - w1 * r * std::sin(from), c.c1e = atE + w1 * r * std::cos(from); // (the turn's side of the way it goes)
+                c.c2n = toN - w2 * r * std::sin(to), c.c2e = toE + w2 * r * std::cos(to);
+                const double dn = c.c2n - c.c1n, de = c.c2e - c.c1e, d = std::hypot(dn, de);
+                if (d < 1e-9) continue;
+                const double vn = dn / d, ve = de / d;
+                double nn, ne; // from the first centre to where the straight leaves it
+                if (w1 == w2) {
+                    nn = w1 * ve, ne = -w1 * vn; // (its outside: turned a quarter from the straight, against the way round)
+                    c.t1n = c.c1n + r * nn, c.t1e = c.c1e + r * ne, c.t2n = c.c2n + r * nn, c.t2e = c.c2e + r * ne;
+                } else {
+                    if (d < 2.0 * r) continue;
+                    const double cb = 2.0 * r / d, sb = std::sqrt(1.0 - cb * cb);
+                    nn = vn * cb + w1 * ve * sb, ne = ve * cb - w1 * vn * sb; // (so that it leaves along the straight, the way round)
+                    c.t1n = c.c1n + r * nn, c.t1e = c.c1e + r * ne, c.t2n = c.c2n - r * nn, c.t2e = c.c2e - r * ne;
+                }
+                const double straight = std::hypot(c.t2n - c.t1n, c.t2e - c.t1e);
+                const double course = std::atan2(c.t2e - c.t1e, c.t2n - c.t1n);
+                c.length = r * (sweep(from, course, w1) + sweep(course, to, w2)) + straight;
+                if (c.length < best.length) best = c;
+            }
+        if (!std::isfinite(best.length)) return lineTo(toN, toE);
+        const double course = std::atan2(best.t2e - best.t1e, best.t2n - best.t1n);
+        arcRound(best.c1n, best.c1e, best.way1, sweep(from, course, best.way1));
+        lineTo(best.t2n, best.t2e);
+        arcRound(best.c2n, best.c2e, best.way2, sweep(course, to, best.way2));
+        atN = toN, atE = toE; // (where it ends: the target, to rounding)
+    };
+    const double toFix = std::atan2(-east, -north); // its way to the fix
+    const double on = isHold(track) ? toFix : track;
+    bool overFix = false; // ATC's direct entry: to the fix, then round
+    if (entry == HoldEntry::Anchor) { // ATC's entry for the side it comes from, by its way to the fix (left turns mirrored)
+        const double a = side * geo::wrapPi(toFix - chi);
+        if (a < -70.0 * kDeg) entry = HoldEntry::Parallel;
+        else if (a > 110.0 * kDeg) entry = HoldEntry::Teardrop;
+        else overFix = true;
+    }
+    if (overFix) {
+        lineTo(0.0, 0.0);
+        p.first = 1;
+    } else {
+        switch (entry) {
+        case HoldEntry::Direct: { // where the lap is nearest, as an orbit is joined: no way in
+            std::uint32_t i;
+            double m;
+            nearestOnLap(p, north, east, i, m);
+            p.first = pieceFrom(p, i, m);
+            break;
+        }
+        case HoldEntry::Inbound: // onto the inbound leg's start, on its course
+            dubins(on, -leg * un, -leg * ue, chi);
+            p.first = 0;
+            break;
+        case HoldEntry::Outbound: // onto the outbound leg's start, abeam the fix, on its course
+            dubins(on, 2.0 * r * hn, 2.0 * r * he, chi + kPi);
+            p.first = 2;
+            break;
+        case HoldEntry::Parallel: { // over the fix, turned out a leg along the inbound course, round toward the holding side, to the fix
+            lineTo(0.0, 0.0);
+            turnTo(toFix, chi + kPi);
+            lineTo(atN - leg * un, atE - leg * ue);
+            arcRound(atN + r * hn, atE + r * he, -side, kPi);
+            lineTo(0.0, 0.0);
+            p.first = 1;
+            break;
+        }
+        default: { // teardrop: over the fix, turned out a leg 30 degrees into the holding side, round the pattern's way, to the fix
+            lineTo(0.0, 0.0);
+            const double t = chi + kPi - side * 30.0 * kDeg;
+            turnTo(toFix, t);
+            lineTo(atN + leg * std::cos(t), atE + leg * std::sin(t));
+            arcRound(atN - side * r * std::sin(t), atE + side * r * std::cos(t), side, kPi + 30.0 * kDeg);
+            lineTo(0.0, 0.0);
+            p.first = 1;
+            break;
+        }
+        }
+    }
+    p.entryCount = n;
+}
+
+/// The radius a hold's turn type gives at `gusted` (its speed plus the wind), 4.24.
+double turnTypeRadiusM(HoldTurn type, double gusted, const Performance& f) noexcept {
+    switch (type) {
+    case HoldTurn::MilPower: return f.turnRadiusM(gusted);
+    case HoldTurn::Relax: return std::max(gusted / (1.5 * kDeg), gusted * gusted / (kG * std::tan(15.0 * kDeg)));
+    default: return std::max(gusted / (3.0 * kDeg), gusted * gusted / (kG * std::tan(25.0 * kDeg)));
+    }
+}
+
 } // namespace
 
-void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon, const PatternShape& shape, double magneticYear) noexcept {
+void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon, const PatternShape& shape, double magneticYear, double trackRad) noexcept {
     p.kind = static_cast<PatternKind>(static_cast<int>(orHold(c.pattern, 0.0)));
     p.lat0 = c.latitudeRad, p.lon0 = c.longitudeRad;
     p.radiusM = c.radiusM;
@@ -500,8 +640,11 @@ void planPattern(Pattern& p, const PatternCommand& c, double lat, double lon, co
             arc(p.pieces[1], side * r * rn, side * r * re, side, geo::wrapPi(chi - side * 0.5 * kPi), kPi);
             line(p.pieces[2], 2.0 * side * r * rn, 2.0 * side * r * re, geo::wrapPi(chi + kPi), leg);
             arc(p.pieces[3], side * r * rn - leg * un, side * r * re - leg * ue, side, geo::wrapPi(chi + side * 0.5 * kPi), kPi);
-            // entered direct to the fix
-            if (const double d = std::hypot(north, east); d > 1.0) line(p.entry[0], north, east, std::atan2(-east, -north), d), p.entryCount = 1;
+            if (isHold(shape.holdEntry)) { // entered direct to the fix
+                if (const double d = std::hypot(north, east); d > 1.0) line(p.entry[0], north, east, std::atan2(-east, -north), d), p.entryCount = 1;
+            } else { // as its entry says (4.24)
+                enterHold(p, static_cast<HoldEntry>(static_cast<int>(shape.holdEntry)), north, east, trackRad, chi, side, r, leg);
+            }
             break;
         default: // an orbit: round the centre, its laps from where the aircraft is
             p.count = 1;
@@ -571,6 +714,8 @@ void completePattern(PatternCommand& c, PatternShape& shape, const sim::VehicleS
         c.courseRad = geo::wrapPi(c.courseRad);
     }
     if (isHold(c.radiusM) && !isHold(shape.bankRad)) c.radiusM = gusted * gusted / (kG * std::tan(shape.bankRad));
+    if (isHold(c.radiusM) && !isHold(shape.turnRateRadS)) c.radiusM = gusted / shape.turnRateRadS;
+    if (isHold(c.radiusM) && !isHold(shape.turnType)) c.radiusM = turnTypeRadiusM(static_cast<HoldTurn>(static_cast<int>(shape.turnType)), gusted, f);
     if (isHold(c.radiusM))
         c.radiusM = kind == PatternKind::Hold ? std::max(gusted / (3.0 * kDeg), gusted * gusted / (kG * std::tan(25.0 * kDeg))) : f.turnRadiusM(gusted);
     if (circles) {
@@ -581,9 +726,12 @@ void completePattern(PatternCommand& c, PatternShape& shape, const sim::VehicleS
     }
 }
 
-int circlesFault(const PatternCommand& c, const PatternShape& shape) noexcept {
-    if (isHold(shape.latitude2Rad) && isHold(shape.longitude2Rad)) return -1;
+int shapeFault(const PatternCommand& c, const PatternShape& shape) noexcept {
     const auto kind = static_cast<PatternKind>(static_cast<int>(orHold(c.pattern, 0.0)));
+    const bool onFix = kind == PatternKind::Racetrack || kind == PatternKind::Hold;
+    if (!isHold(shape.holdEntry) && (!onFix || shape.twoCircles() || !isHold(shape.entryLatitudeRad))) return 27;
+    if (!isHold(shape.holdContext) && kind != PatternKind::Hold) return 28;
+    if (isHold(shape.latitude2Rad) && isHold(shape.longitude2Rad)) return -1;
     if (kind != PatternKind::Racetrack && kind != PatternKind::FigureEight) return 18;
     // (the circles give its course and legs: any there were given)
     if (!isHold(c.courseRad)) return 7;

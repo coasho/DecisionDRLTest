@@ -587,6 +587,30 @@ A-GRA's orbit (MA_OrbitType) gives what VI-5's pattern does not: a racetrack or 
   - C ABI 1.21: `FSIM_MODE_PATTERN` takes 25 fields (12 and 13 still), and reads back 25.
   - Python: `submit_pattern` and `Activity.update` take the twelve by name (`fsim.MODE_FIELDS["pattern"]`).
 
+### 4.24 A-GRA's hold as its schema gives it (as FA-5b builds it)
+
+A-GRA's hold (MA_HoldType) gives what a hold on its fix did not: its turns by rate or by type (LTR-11), its duration by entry and exit times (LTR-12), how it is entered (LTR-13) and its context (LTR-14). The shape (4.23) carries them.
+
+- **Turns by rate or type.** A turn rate (`turnRateRadS`): the radius it turns at that rate on, at its speed plus the wind. A type (`HoldTurn`):
+  - STANDARD: rate one, at most 25° of bank (a hold's default);
+  - MIL_POWER: the tightest the pattern flies, 80 % of the aircraft's bank (an orbit's default);
+  - RELAX: half rate one, at most 15° of bank.
+  Given more than one of the radius, a bank, a rate and a type, the first flies; in an UPDATE any one replaces them all. A rate faster than the aircraft turns at its full bank is clamped to that (the radius with it), or refused `performance_limit`.
+- **Entry and exit times** (A-GRA's EntryExitTime) are the command's time window (4.9): it waits for its start, and completes when its end window closes.
+- **Entries** (`HoldEntry`), a racetrack's or a hold's on its fix (not with two circles or an entry point):
+  - left out: direct to the fix, then round, whichever way the aircraft comes, as before;
+  - DIRECT: where the pattern is nearest, joined as an orbit is;
+  - ANCHOR: at the fix, by ATC's entry for the side the aircraft comes from, by its way to the fix against the inbound course (right turns; left mirrored). From 70° left of it to 110° right, ATC's direct entry: to the fix, then round. Beyond 110° right, the teardrop; beyond 70° left, the parallel. These are the AIM's sectors;
+  - INBOUND and OUTBOUND: onto the leg's start, on its course, by the shortest turn, straight and turn (Dubins's) from where the aircraft is on its track;
+  - PARALLEL and TEARDROP, ATC's: over the fix, then turned onto a leg out, a leg long, and round back to the fix. The parallel's leg runs along the inbound course and ends on the non-holding side; it turns back a half circle toward the holding side. The teardrop's leg runs 30° into the holding side; it turns back 210° the pattern's way.
+  - The way in turns at the pattern's radius, tangent where it turns, so the follower flies its curvature: joined at corners, a heavy's legs were flown half a radius off (section 14).
+- **The context** (`HoldContext`: ADMIN, TACTICAL, ATC) is accepted and reported. The defaults it implies are ATC's for every context, the only ones implemented (Appendix A, LTR-14): rate-one turns at most 25°, a minute's legs (90 s above 14,000 ft), right turns.
+- **Checked:** a turn rate above 0; a type, entry and context among theirs; an entry only a racetrack's or a hold's on its fix without a second circle or an entry point (field 27); a context only a hold's (field 28).
+- **Surfaces.**
+  - C++: `HoldTurn`, `HoldEntry`, `HoldContext`; `PatternShape`'s `turnRateRadS`, `turnType`, `holdEntry`, `holdContext`.
+  - C ABI 1.22: `FSIM_MODE_PATTERN` takes 29 fields; `fsim_hold_turn`, `fsim_hold_entry`, `fsim_hold_context`.
+  - Python: `fsim.HoldTurn`, `fsim.HoldEntry`, `fsim.HoldContext`; `submit_pattern(turn_rate_rad_s=, turn_type=, hold_entry=, hold_context=)`, by name or member.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -796,7 +820,7 @@ Laps, entry and exit points, legs by time, turns by bank, rate or type, hold con
 
 **Status:** in progress, in four steps, each measured in section 14:
 - FA-5a, A-GRA's orbit: two circles, the fix-point orbit's heading, leg time and bank, laps, entry and exit points (LTR-03, LTR-05, LTR-06, LTR-07, LTR-10; 4.23), done 2026-09-28 and measured in section 14;
-- FA-5b, the hold: its turns by rate and type, its duration by entry and exit times, its entries and context (LTR-11 to LTR-14);
+- FA-5b, the hold: its turns by rate and type, its duration by entry and exit times, its entries and context (LTR-11 to LTR-14; 4.24), done 2026-09-28 and measured in section 14;
 - FA-5c, the hover loiter and relative points (LTR-15, LTR-18);
 - FA-5d, curves as the schema gives them: NURBS, references, offsets, curvature and indices, a rotorcraft's circular loiter (CRV-03 to CRV-06, CRV-08, CRV-11).
 
@@ -1670,6 +1694,39 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases are within −2.9 % to +1.2 %.
   - World throughput is 100.7 to 101.5 % of FA-4d's; protection costs nothing measurable (the gate: 97 %).
 - ctest: all 271 tests pass.
+
+**FA-5b, A-GRA's hold (LTR-11, LTR-12, LTR-13, LTR-14).**
+- **Turns** (`test_pattern_shapes`, a c172x, calm): each radius the formula's to a millionth.
+  - STANDARD: 1,017 m, at most 16.6° of bank;
+  - MIL_POWER: 398 m, 38.2°;
+  - RELAX: 2,034 m, 8.5°;
+  - 0.04 rad/s: 1,331 m, 12.8°.
+- **Entry and exit times:** a hold whose window starts in 30 s and ends in 150 s waited, started at 30.0 s and completed at 150.0 s.
+- **Entries** (a c172x, calm, a fix 5 km ahead; radius 1,017 m, legs 3,195 m). Each passed the place and course only its entry flies:
+
+  | Entry | Its mark | Off | Track |
+  | --- | --- | --- | --- |
+  | inbound | the inbound leg's start | 0.9 m | 0.6° |
+  | outbound | the outbound leg's start | 0.4 m | 1.0° |
+  | parallel | halfway out its leg | 0.6 m | 0.1° |
+  | teardrop | halfway out its leg | 1.5 m | 0.2° |
+  | direct, left turns | the outbound leg's end | 29.9 m | 2.5° |
+  | anchor, the direct sector | the fix, inbound | 0.2 m | 0.7° |
+  | anchor, the teardrop sector | the teardrop's leg | 0.8 m | 0.0° |
+  | anchor, the parallel sector | the parallel's leg | 2.1 m | 0.2° |
+
+  - The direct entry joined the outbound leg where the hold was nearest: first over the fix at 209 s, where the others were at 89 s.
+  - Each flew the hold after within 1.1 to 4.3 m.
+  - The direct entry's 30 m is its convergence onto the outbound leg, joined at an angle: it has no way in of its own.
+- **The entries, first flown at corners.** The way in was first straight pieces meeting at corners. The follower anticipates a change of curvature, not a corner, so a wing whose rate-one radius is as long as its legs came out of the corner at the fix half a leg off. On the fleet, the parallel leg was passed 13 % to 50 % of the radius off (the heavies up to 2.5 km, 49°). Turned tangent (over the fix, and Dubins's onto a leg), it is passed within 0.42 %.
+- **The fleet** (`test_fleet`): every aircraft holds on a fix two turns ahead, entered by ATC's parallel entry, its legs half a minute by time, once round, and completes.
+  - The parallel leg is passed within 29 m and 1.3° by a wing (the E-3G, 0.41 % of its radius; the B-52H 21 m), and within 5.1 m and 3.4° by a rotorcraft (the UH-1H, 1.8 %).
+  - The Crazyflie's is refused `insufficient_endurance`: its battery does not last a hold at its cruise of a metre a second. Flown anyway, it flies the entry and the lap, then falls: the endurance check is right.
+- **Digests:** identical to FA-5a's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-5a, both builds run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 3 of `world`.
+  - The micro cases are within −0.6 % to +1.3 %; the command cases within −0.4 % to +2.0 %.
+  - World throughput is 99.2 to 100.2 % of FA-5a's; protection costs at most 0.3 %.
+- ctest: all 273 tests pass.
 
 ## Appendix A: the inventory
 

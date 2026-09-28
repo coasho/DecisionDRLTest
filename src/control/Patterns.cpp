@@ -38,7 +38,9 @@ void mergePattern(PatternCommand& dst, PatternShape& dstShape, const PatternComm
     auto either = [](double& a, double& b, double givenA, double givenB) {
         if (!isHold(givenA) || !isHold(givenB)) a = givenA, b = givenB;
     };
-    either(dst.radiusM, dstShape.bankRad, src.radiusM, srcShape.bankRad);
+    // (the radius: its own, a bank, a turn rate or a type - any given replaces them all)
+    if (!isHold(src.radiusM) || !isHold(srcShape.bankRad) || !isHold(srcShape.turnRateRadS) || !isHold(srcShape.turnType))
+        dst.radiusM = src.radiusM, dstShape.bankRad = srcShape.bankRad, dstShape.turnRateRadS = srcShape.turnRateRadS, dstShape.turnType = srcShape.turnType;
     either(dst.courseRad, dstShape.headingRad, src.courseRad, srcShape.headingRad);
     either(dst.legM, dstShape.legS, src.legM, srcShape.legS);
 }
@@ -77,16 +79,16 @@ CommandResult CapabilityHost::updatePattern(std::size_t s, ActivityId activity, 
     else mergePattern(merged, next);
     merged.courseRad = geo::wrapPi(merged.courseRad), merged.longitudeRad = geo::wrapPi(merged.longitudeRad);
     optimise(merged.speed, merged.speedReference, merged.speedOptimization, merged.altitudeM, merged.altitudeReference, state);
-    // what the merge left to be filled in again: a course from a heading, legs from their time, a radius from a bank
-    const bool radiusFromBank = isHold(merged.radiusM) && !isHold(mergedShape.bankRad);
+    // what the merge left to be filled in again: a course from a heading, legs from their time, a radius from a bank, rate or type
+    const std::int16_t radiusFrom = radiusField(merged, mergedShape);
     if (isHold(merged.radiusM) || (mergedShape.twoCircles() ? isHold(mergedShape.radius2M) : isHold(merged.courseRad) || isHold(merged.legM)))
         completePattern(merged, mergedShape, state);
-    if (const int field = route::circlesFault(merged, mergedShape); field >= 0) {
+    if (const int field = route::shapeFault(merged, mergedShape); field >= 0) {
         result.index = static_cast<std::int16_t>(field);
         return about(rejected(Reason::InvalidParameter, activity), result);
     }
     if (slots_[s].range != RangePolicy::None) {
-        limitPattern(merged, mergedShape, log, radiusFromBank);
+        limitPattern(merged, mergedShape, log, radiusFrom);
         patternShape_ = mergedShape; // (the shape the terrain check walks)
         checkTerrain(Command(merged), state, log);
         if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);

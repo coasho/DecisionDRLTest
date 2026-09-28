@@ -173,6 +173,10 @@ public:
                     }
                     if (chance(0.15)) shape.entryLatitudeRad = s.latitudeRad + uniform(-0.002, 0.002), shape.entryLongitudeRad = s.longitudeRad + uniform(-0.002, 0.002);
                     if (chance(0.15)) shape.exitLatitudeRad = s.latitudeRad + uniform(-0.002, 0.002), shape.exitLongitudeRad = s.longitudeRad + uniform(-0.002, 0.002);
+                    if (chance(0.15)) shape.turnRateRadS = uniform(0.02, 0.2);
+                    if (chance(0.15)) shape.turnType = static_cast<double>(pick(3));
+                    if (chance(0.15)) shape.holdEntry = static_cast<double>(pick(6));
+                    if (chance(0.1)) shape.holdContext = static_cast<double>(pick(3));
                     if (chance(0.05)) { // one out of its range
                         double* fields[PatternShape::kFields];
                         shape.fields(fields);

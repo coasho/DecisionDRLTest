@@ -141,9 +141,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.curve/discretized", "fsim.guidance.curve", N, 17, 0, ""},                // CRV-15
 
     // --- loiter -----------------------------------------------------------------------------------------
-    CAP("fsim.guidance.pattern", P, 5, 0,
-        "turn rates and types, hold durations by entry and exit times, hold entries and contexts, the hover loiter and relative "
-        "points (FA-5)"), // LTR-09
+    CAP("fsim.guidance.pattern", P, 5, 0, "the hover loiter and relative points (FA-5)"), // LTR-09
     {"fsim.guidance.pattern/orbit", "fsim.guidance.pattern", S, 0, 0, ""},                   // LTR-01
     {"fsim.guidance.pattern/racetrack", "fsim.guidance.pattern", S, 0, 0, ""},               // LTR-02
     {"fsim.guidance.pattern/figure_eight", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-04
@@ -155,16 +153,16 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.pattern/exit_point", "fsim.guidance.pattern", S, 0, 0, ""},
     {"fsim.guidance.pattern/hold", "fsim.guidance.pattern", S, 0, 0, ""},                    // LTR-08
     {"fsim.guidance.pattern/hold/leg_time", "fsim.guidance.pattern", S, 0, 0, ""},           // LTR-10 (FA-5a)
-    {"fsim.guidance.pattern/hold/turn_rate", "fsim.guidance.pattern", N, 5, 0, ""},          // LTR-11
-    {"fsim.guidance.pattern/hold/turn_type", "fsim.guidance.pattern", N, 5, 0, ""},
-    {"fsim.guidance.pattern/hold/duration", "fsim.guidance.pattern", P, 5, 0, "by entry and exit times; by time and by orbits work"}, // LTR-12
-    {"fsim.guidance.pattern/entry/direct", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-13
-    {"fsim.guidance.pattern/entry/anchor", "fsim.guidance.pattern", N, 5, 0, ""},
-    {"fsim.guidance.pattern/entry/inbound", "fsim.guidance.pattern", N, 5, 0, ""},
-    {"fsim.guidance.pattern/entry/outbound", "fsim.guidance.pattern", N, 5, 0, ""},
-    {"fsim.guidance.pattern/entry/parallel", "fsim.guidance.pattern", N, 5, 0, ""},
-    {"fsim.guidance.pattern/entry/teardrop", "fsim.guidance.pattern", N, 5, 0, ""},
-    {"fsim.guidance.pattern/hold/context", "fsim.guidance.pattern", N, 5, 0, ""},            // LTR-14
+    {"fsim.guidance.pattern/hold/turn_rate", "fsim.guidance.pattern", S, 0, 0, ""},          // LTR-11 (FA-5b)
+    {"fsim.guidance.pattern/hold/turn_type", "fsim.guidance.pattern", S, 0, 0, ""},
+    {"fsim.guidance.pattern/hold/duration", "fsim.guidance.pattern", S, 0, 0, ""},           // LTR-12 (FA-5b: entry and exit times, the time window)
+    {"fsim.guidance.pattern/entry/direct", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-13 (FA-5b)
+    {"fsim.guidance.pattern/entry/anchor", "fsim.guidance.pattern", S, 0, 0, ""},
+    {"fsim.guidance.pattern/entry/inbound", "fsim.guidance.pattern", S, 0, 0, ""},
+    {"fsim.guidance.pattern/entry/outbound", "fsim.guidance.pattern", S, 0, 0, ""},
+    {"fsim.guidance.pattern/entry/parallel", "fsim.guidance.pattern", S, 0, 0, ""},
+    {"fsim.guidance.pattern/entry/teardrop", "fsim.guidance.pattern", S, 0, 0, ""},
+    {"fsim.guidance.pattern/hold/context", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-14 (FA-5b: ATC's defaults for every context)
     {"fsim.guidance.pattern/hover", "fsim.guidance.pattern", N, 5, R1, ""},                  // LTR-15
     {"fsim.guidance.pattern/altitude/msl", "fsim.guidance.pattern", S, 0, 0, ""},            // LTR-16
     {"fsim.guidance.pattern/altitude/agl", "fsim.guidance.pattern", S, 0, 0, ""},

@@ -566,7 +566,7 @@ void PatternBehavior::plan(const ControlContext& ctx, const PatternCommand& c) {
     pathRevision_ = ctx.path ? ctx.path->revision : 0;
     const double year = shape_.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? worldYear(ctx, s) : 2025.0;
     route::completePattern(resolved_, shape_, s, perf, hovers_, wind_.northMs, wind_.eastMs, ctx.altimeter, year);
-    route::planPattern(*pattern_, resolved_, s.latitudeRad, s.longitudeRad, shape_, year);
+    route::planPattern(*pattern_, resolved_, s.latitudeRad, s.longitudeRad, shape_, year, route::trackOf(s));
     planned_ = true;
     laps_ = 0;
     lapDoneM_ = inPieceM_ = 0.0;
@@ -986,7 +986,11 @@ void registerGuidanceModes(ControllerRegistry& r) {
                           p("entry_latitude_rad", "rad", now, -0.5 * 3.14159265358979323846, 0.5 * 3.14159265358979323846),
                           p("entry_longitude_rad", "rad", now, -inf, inf),
                           p("exit_latitude_rad", "rad", now, -0.5 * 3.14159265358979323846, 0.5 * 3.14159265358979323846),
-                          p("exit_longitude_rad", "rad", now, -inf, inf)};
+                          p("exit_longitude_rad", "rad", now, -inf, inf),
+                          p("turn_rate_rad_s", "rad/s", now, 0.0, inf, Constraint::None, Constraint::MaxOrientation),
+                          p("turn_type", "", now, 0.0, static_cast<double>(HoldTurn::Count) - 1.0),
+                          p("hold_entry", "", now, 0.0, static_cast<double>(HoldEntry::Count) - 1.0),
+                          p("hold_context", "", now, 0.0, static_cast<double>(HoldContext::Count) - 1.0)};
     pattern.uses = {"fsim.flight.velocity"};
     pattern.mode = FlightMode::Loiter;
     pattern.setpoint = SetpointKind::Pattern;

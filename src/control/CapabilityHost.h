@@ -559,8 +559,14 @@ private:
     /// A complete pattern against the performance, as limitHsa: its speed and
     /// altitude, and a radius no tighter than the aircraft's full bank flies
     /// at its speed (a rotorcraft's: a metre) - both circles' - or, the radius
-    /// from a bank, a bank it can fly.
-    void limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, bool radiusFromBank = false) const noexcept;
+    /// from a bank or a turn rate, one it can fly; named by `radiusFrom`, the
+    /// field the radius came from (radiusField).
+    void limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, std::int16_t radiusFrom = 5) const noexcept;
+    /// The field a pattern's radius comes from, as completion takes them: its own (5), else its shape's bank (16),
+    /// turn rate (25) or turn type (26); none: its own, filled in by default.
+    static std::int16_t radiusField(const PatternCommand& c, const PatternShape& shape) noexcept {
+        return !isHold(c.radiusM) ? 5 : !isHold(shape.bankRad) ? 16 : !isHold(shape.turnRateRadS) ? 25 : !isHold(shape.turnType) ? 26 : 5;
+    }
     /// A pattern's fields filled in with its shape's (route::completePattern) where the aircraft is, in the wind it
     /// flies in now, at the world's date.
     void completePattern(PatternCommand& c, PatternShape& shape, const sim::VehicleState& state) const noexcept;

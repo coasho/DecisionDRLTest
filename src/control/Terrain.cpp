@@ -196,7 +196,7 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         route::Pattern p;
         const PatternShape& shape = patternShape_; // (as prepare() completed it)
         route::planPattern(p, *c, state.latitudeRad, state.longitudeRad, shape,
-                           shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? yearNow() : 2025.0);
+                           shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? yearNow() : 2025.0, route::trackOf(state));
         const bool above = aboveGround(c->altitudeReference);
         const double altitude = barometric(c->altitudeReference) ? barometricMslM(config_->altimeter, c->altitudeM) : c->altitudeM; // (its isobar)
         const double speed = route::plannedSpeed(c->speed, c->speedReference, msl(altitude, above, c->latitudeRad, c->longitudeRad));

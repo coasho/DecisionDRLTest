@@ -78,7 +78,8 @@ CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, con
         if (!isHold(patternShape_.orbits)) {
             route::Pattern p;
             route::planPattern(p, *pattern, state.latitudeRad, state.longitudeRad, patternShape_,
-                               patternShape_.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? yearNow() : 2025.0);
+                               patternShape_.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? yearNow() : 2025.0,
+                               route::trackOf(state));
             const double laps = tas > 0.5 ? (p.entryM() + patternShape_.orbits * p.lapM() + p.toExitM()) / tas : kUnknown;
             timeS = isHold(timeS) ? laps : std::fmin(timeS, laps);
         }

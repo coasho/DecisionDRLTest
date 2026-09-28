@@ -1,6 +1,6 @@
-"""A-GRA's orbit as its schema gives it, through Python (docs/flight-autonomy.md, 4.23): a racetrack by two circles
-read back complete, a hold by its inbound heading, legs' time and bank, laps that complete it, an exit point it leaves
-from, and a refusal naming its field."""
+"""A-GRA's orbit and hold as its schema gives them, through Python (docs/flight-autonomy.md, 4.23, 4.24): a racetrack
+by two circles read back complete, a hold by its inbound heading, legs' time and bank, a hold's turn type, entry and
+context by name, laps that complete it, an exit point it leaves from, and refusals naming their field."""
 import math
 import unittest
 
@@ -42,6 +42,18 @@ class PatternShapesTest(unittest.TestCase):
         h.update(bank_rad=math.radians(25.0))
         self.assertAlmostEqual(h.setpoint().kwargs["radius_m"], gusted * gusted / (9.80665 * math.tan(math.radians(25.0))),
                                delta=0.01 * held["radius_m"])
+        # a hold's turns by type, its entry and context (4.24), by name
+        t = v.submit_pattern(pattern="hold", latitude_rad=s.latitude_rad, longitude_rad=s.longitude_rad + 5000.0 * east, turn_type="relax",
+                             hold_entry="anchor", hold_context="atc")
+        held = t.setpoint().kwargs
+        self.assertEqual((held["turn_type"], held["hold_entry"], held["hold_context"]),
+                         (fsim.HoldTurn.RELAX, fsim.HoldEntry.ANCHOR, fsim.HoldContext.ATC))
+        speed = held["speed"]
+        self.assertAlmostEqual(held["radius_m"], max(speed / math.radians(1.5), speed * speed / (9.80665 * math.tan(math.radians(15.0)))),
+                               delta=1e-6 * held["radius_m"])
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_pattern(hold_entry="parallel")  # an orbit has no fix to enter by
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_parameter", 27))
         with self.assertRaises(fsim.Rejected) as refused:
             v.submit_pattern(latitude2_rad=s.latitude_rad, longitude2_rad=s.longitude_rad)  # an orbit is one circle
         self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_parameter", 18))
