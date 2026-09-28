@@ -335,6 +335,7 @@ bool RouteBehavior::stops() const noexcept {
 void RouteBehavior::aim(std::uint32_t k, const Performance& perf) noexcept {
     const route::Plan& p = *plan_;
     target_ = k;
+    legTo_ = &p.leg(k, firstLap_), turnAt_ = &p.turn(k, firstLap_);
     loiterAhead_ = route::loiterPoint(p.points[k]) ? p.loiterAt(k) : nullptr;
     reachM_ = stops() ? 1.0 : 0.0;
     if (loiterAhead_) { // (4.31: where the leg meets it; a rotorcraft's hover, where it would stop from its speed - its position loop's)
@@ -367,18 +368,23 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     p.repeat = option(command.repeat, 2.0) == 1.0 && count > 1;
     p.rhumb = option(command.projection, 2.0) == 1.0;
     p.end = static_cast<EndBehavior>(static_cast<int>(option(command.end, 2.0)));
-    // what the waypoints leave out, as the host fills it in (it has, for a World's vehicle)
+    // what the waypoints leave out, as the host fills it in (it has, for a World's vehicle) - a linked route's in its flight
+    // order, the host's (4.36)
     std::int16_t bad = -1;
-    if (count == 0 || route::complete(p.points, ctx.path->waypoints, count, p.repeat, s, perf, hovers_, bad, ctx.altimeter) != Reason::None) {
+    const bool linked = count > 0 && takeOrder(ctx);
+    if (count == 0 || (linked ? route::complete(p.points, p.points, p.count, p.repeat, s, perf, hovers_, bad, ctx.altimeter, p.loop)
+                              : route::complete(p.points, ctx.path->waypoints, count, p.repeat, s, perf, hovers_, bad, ctx.altimeter)) != Reason::None) {
         p.count = 0;
         failure_ = Reason::BehaviorFailed; // (only a stack on its own is given a route nobody checked)
         return;
     }
-    p.count = count;
+    if (!linked) p.count = count;
     // its loiters (4.31), as the host completed them (a stack's own, completed below): a loiter point with none flies nothing
     p.loiterCount = std::min<std::uint32_t>(ctx.path->routeLoiterCount, static_cast<std::uint32_t>(PathStore::kRouteLoiters));
     std::copy_n(ctx.path->routeLoiters, p.loiterCount, p.loiters);
-    for (std::uint32_t i = 0; i < count; ++i)
+    for (std::uint32_t k = 0; k < p.loiterCount && linked; ++k) // (each at its point in the flight order: 4.36)
+        if (p.loiters[k].point < p.given) p.loiters[k].point = p.position[p.loiters[k].point];
+    for (std::uint32_t i = 0; i < p.count; ++i)
         if (route::loiterPoint(p.points[i]) && !p.loiterAt(i)) {
             p.count = 0;
             failure_ = Reason::BehaviorFailed;
@@ -391,7 +397,7 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     }
     // its points in moving frames where the frames are now (4.29): placed and planned again as it flies them
     moving_ = overFrame_ = false;
-    for (std::uint32_t i = 0; i < count; ++i) {
+    for (std::uint32_t i = 0; i < p.count; ++i) {
         if (!moves(routeFrame(ctx.path, p.points[i].frame))) continue;
         moving_ = true;
         FramePose pose;
@@ -401,7 +407,7 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
             return;
         }
     }
-    p.start = static_cast<std::uint32_t>(option(command.start, static_cast<double>(count)));
+    p.start = linked ? 0 : static_cast<std::uint32_t>(option(command.start, static_cast<double>(count))); // (a linked one's order begins at it)
     route::plan(p, s.latitudeRad, s.longitudeRad, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
     if (p.stateCount) route::placeStates(p);
     route::limitClimbs(p, s, ctx.tables, perf, hovers_, ctx.altimeter); // (a route with times to arrive at: 4.34)
@@ -478,9 +484,9 @@ route::Fix RouteBehavior::locate(const sim::VehicleState& s, const Performance& 
         if (ended_) {
             inPieceM_ = 0.0;
             if (p.end == EndBehavior::Loiter && !hovers_) return route::onArc(p.orbit, point.latitudeRad, point.longitudeRad, lat, lon);
-            return route::onLeg(p.leg(target_, firstLap_), lat, lon); // the last leg, on beyond its point
+            return route::onLeg(*legTo_, lat, lon); // the last leg, on beyond its point
         }
-        const route::Turn& turn = p.turn(target_, firstLap_);
+        const route::Turn& turn = *turnAt_;
         const bool more = passed < 8; // (at most so many pieces a control period: the rest at the next)
         if (onArc_) {
             const route::Fix f = route::onArc(turn, point.latitudeRad, point.longitudeRad, lat, lon);
@@ -498,7 +504,7 @@ route::Fix RouteBehavior::locate(const sim::VehicleState& s, const Performance& 
             advance(s, perf);
             continue;
         }
-        const route::Leg& leg = p.leg(target_, firstLap_);
+        const route::Leg& leg = *legTo_;
         const route::Fix f = route::onLeg(leg, lat, lon);
         inPieceM_ = f.alongM - leadOut_;
         lastCross_ = f.crossTrackM;
@@ -546,9 +552,10 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     if (moving_) { // its points in moving frames where they are, as the step began, and the piece it flies planned again (4.29)
         route::Plan& q = *plan_;
         const std::uint32_t at = ended_ ? q.last() : target_;
-        const bool entry = firstLap_ && at == q.start, before = !ended_ && !entry && (at > 0 || q.repeat), after = !ended_ && q.leaves(at);
+        const bool entry = firstLap_ && at == q.start, after = !ended_ && q.leaves(at);
+        const bool before = !ended_ && !entry && (at > 0 || (q.repeat && q.loop == 0) || q.looped(at, firstLap_));
         FramePose pose, other;
-        if (!place(ctx, at, pose) || (before && !place(ctx, q.prev(at), other)) || (after && !place(ctx, q.next(at), other))) {
+        if (!place(ctx, at, pose) || (before && !place(ctx, q.before(at, firstLap_), other)) || (after && !place(ctx, q.next(at), other))) {
             failure_ = Reason::TargetLost; // (its frame's vehicle gone: on as it flies, a rotorcraft still)
             VelocityCommand hold{kHold, 0.0, s.eulerRad[2], kHold, kHold, kHold};
             if (hovers_) hold.northMs = hold.eastMs = 0.0;
@@ -558,7 +565,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         if (!ended_) route::replan(q, at, firstLap_, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
         // flown over the frame the piece is in: its point's and the one before's, one moving frame (past the end, the last point's)
         const Waypoint& w = q.points[at];
-        const Waypoint& b = q.points[q.prev(at)]; // (a leg from where a loiter ended is in no frame: 4.31)
+        const Waypoint& b = q.points[q.before(at, firstLap_)]; // (a leg from where a loiter ended is in no frame: 4.31)
         overFrame_ = moves(routeFrame(ctx.path, w.frame)) && (ended_ || (before && b.frame == w.frame && !route::loiterPoint(b)));
         frameNorthMs_ = overFrame_ ? pose.northMs : 0.0, frameEastMs_ = overFrame_ ? pose.eastMs : 0.0;
     }
@@ -609,15 +616,15 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     // no faster than the turn's radius allows (and than stops it in time for
     // one), or than stops it at the end
     route::Ahead ahead;
-    if (const route::Turn& turn = p.turn(target_, firstLap_); !ended_) {
-        const double toGo = std::max(p.leg(target_, firstLap_).lengthM - std::max(inPieceM_ + leadOut_, 0.0) - turn.leadM, 0.0);
+    if (const route::Turn& turn = *turnAt_; !ended_) {
+        const double toGo = std::max(legTo_->lengthM - std::max(inPieceM_ + leadOut_, 0.0) - turn.leadM, 0.0);
         if (turn.radiusM > 0.0) {
             ahead.turnRadiusM = turn.radiusM;
             if (onArc_) {
                 ahead.toChangeM = turn.radiusM * std::abs(turn.angleRad) - inPieceM_; // then its leg out, straight
                 steer.speedLimitMs = route::lateralLimit(perf, turn.radiusM);
             } else {
-                ahead.toChangeM = p.leg(target_, firstLap_).lengthM - turn.leadM - (inPieceM_ + leadOut_);
+                ahead.toChangeM = legTo_->lengthM - turn.leadM - (inPieceM_ + leadOut_);
                 ahead.curvature = (turn.angleRad >= 0.0 ? 1.0 : -1.0) / turn.radiusM;
                 steer.speedLimitMs = route::brakingLimit(perf, route::lateralLimit(perf, turn.radiusM), toGo);
             }
@@ -631,8 +638,8 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         }
         // an arc from a turn point (4.30): its curvature as it is flown, what the leg after it has at its end; a leg into one,
         // the arc's at its end - a rotorcraft no faster than the arc allows, slowing in time for it
-        const route::Leg& leg = p.leg(target_, firstLap_);
-        const route::Leg* next = p.arcs && p.leaves(target_) ? &p.legs[p.next(target_)] : nullptr;
+        const route::Leg& leg = *legTo_;
+        const route::Leg* next = p.arcs && p.leaves(target_) ? &p.legOut(target_) : nullptr;
         if (p.arcs && turn.radiusM <= 0.0 && (leg.arcRadiusM > 0.0 || (next && next->arcRadiusM > 0.0))) {
             ahead.toChangeM = leg.lengthM - (inPieceM_ + leadOut_);
             ahead.curvature = next && next->arcRadiusM > 0.0 ? (next->arcAngleRad >= 0.0 ? 1.0 : -1.0) / next->arcRadiusM : 0.0;
@@ -786,7 +793,7 @@ Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf
     loitering_ = false;
     advance(s, perf);
     route::Plan& q = *plan_;
-    route::Leg& in = firstLap_ && target_ == q.start ? q.entry : q.legs[target_];
+    route::Leg& in = firstLap_ && target_ == q.start ? q.entry : q.looped(target_, firstLap_) ? q.loopLeg : q.legs[target_];
     in = route::makeLeg(s.latitudeRad, s.longitudeRad, q.points[target_].latitudeRad, q.points[target_].longitudeRad, q.rhumb);
     route::replan(q, target_, firstLap_, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
     beginSegment(target_, s, finishedM_, 0.0, 0.0, firstLap_, true);
@@ -797,8 +804,8 @@ bool RouteBehavior::progress(ActivityProgress& out) const noexcept {
     const route::Plan& p = *plan_;
     if (!planned_ || p.count == 0) return false;
     const Waypoint& segment = p.points[segment_];
-    out.segment = segment_;
-    out.segments = p.count;
+    out.segment = p.named(segment_); // (a linked route's point as given: 4.36)
+    out.segments = p.linked ? p.given : p.count;
     out.segmentId = segment.id;
     out.laps = laps_;
     if (loitering_) { // at its loiter point (4.31): the segment to it flown; the pattern's time to go, and what it commands

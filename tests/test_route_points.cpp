@@ -142,8 +142,8 @@ TEST_CASE("route points: a waypoint is flown over, as its type asks; the types n
     ends = w.endPoints(typed.activity, 4);
     REQUIRE(ends.size() == 3);
     CHECK(ends[0].kind == EndPointKind::Waypoint); // (reported as given: no turn there)
-    // not built yet: each named at its point, not implemented - the end of a path before the route's own (FA-6e), a
-    // taxi's and a runway's and a takeoff's points (FA-9), an approach's and a touchdown (FA-10), a ditch (FA-16)
+    // not built yet: each named at its point, not implemented - a taxi's and a runway's and a takeoff's points (FA-9), an
+    // approach's and a touchdown (FA-10), a ditch (FA-16)
     auto refusedAt = [&](const std::vector<Waypoint>& points, Reason why, int index) {
         const CommandResult r = w.submit(byer, RouteCommand{}, points);
         INFO(reasonName(r.reason) << " at " << r.index);
@@ -174,9 +174,9 @@ TEST_CASE("route points: a waypoint is flown over, as its type asks; the types n
         CHECK((row->support == Support::NotImplemented || row->support == Support::NotSupported));
         refusedAt({t0, x, t2}, row->support == Support::NotSupported ? Reason::NotSupported : Reason::NotImplemented, 1);
     }
-    Waypoint early = t1;
+    Waypoint early = t1; // (the end of a path where it goes on is none: 4.36 - not implemented until FA-6e1 built paths)
     early.waypointType = static_cast<double>(WaypointType::EndOfPath);
-    refusedAt({t0, early, t2}, Reason::NotImplemented, 1);
+    refusedAt({t0, early, t2}, Reason::InvalidWaypoint, 1);
     Waypoint loiter = t1; // (a loiter point is flown with its loiter beside it: without one, it is no point - 4.31)
     loiter.waypointType = kHold, loiter.kind = static_cast<double>(EndPointKind::LoiterPoint);
     refusedAt({t0, loiter, t2}, Reason::InvalidWaypoint, 1);

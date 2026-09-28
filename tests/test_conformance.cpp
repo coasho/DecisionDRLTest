@@ -120,6 +120,7 @@ public:
     std::vector<Waypoint> waypoints; ///< the last route's, made beside its RouteCommand
     std::vector<RouteLoiter> loiters; ///< its loiter points' loiters, beside them (in the walks of their own: ADR-29 FA-6b2)
     std::vector<RouteState> states;   ///< its planned states, beside them (likewise: FA-6d2)
+    std::vector<RoutePath> paths;     ///< its paths, beside them (likewise: FA-6e1)
     std::vector<BezierSegment> segments; ///< the last curve's, made beside its CurveCommand
     std::vector<NurbsSegment> nurbs;     ///< the same as cubics, as A-GRA's schema gives them (ADR-29 FA-5d1), where asNurbs
     bool asNurbs = false;                ///< given so: now and then, in the walks drawn since
@@ -309,7 +310,7 @@ public:
             }
             out = r;
             const auto& s = state();
-            waypoints.clear(), loiters.clear(), states.clear();
+            waypoints.clear(), loiters.clear(), states.clear(), paths.clear();
             bool loitered = false; // (a loiter point drawn so far: an arrival window at or after it is not implemented - FA-6d1)
             for (int k = 0; k < points; ++k) {
                 const PositionCommand a = ahead(4000.0 * (k + 1));
@@ -395,6 +396,42 @@ public:
                 }
                 if (chance(0.7))
                     std::stable_sort(states.begin(), states.end(), [](const RouteState& a, const RouteState& b) { return a.point < b.point; });
+            }
+            // its paths and links (FA-6e1): now and then its points in one to three paths of types drawn - now and then one
+            // that is not one, paths that do not tile them, an id twice - and now and then a point's next: its last back to a
+            // point before (a lap), one on to any point (on into another path, over some, round one point), the route's end
+            // there, or one that is no point
+            if (wild && optimise && chance(0.3)) {
+                auto left = static_cast<std::uint32_t>(points);
+                const auto parts = static_cast<std::uint32_t>(1 + pick(std::min<std::size_t>(3, left)));
+                for (std::uint32_t k = 0; k < parts; ++k) {
+                    RoutePath path;
+                    path.id = 10 + k;
+                    path.first = static_cast<std::uint32_t>(points) - left;
+                    path.count = k + 1 == parts ? left : 1 + static_cast<std::uint32_t>(pick(left - (parts - k - 1)));
+                    path.type = chance(0.9) ? static_cast<double>(pick(static_cast<std::size_t>(PathType::Count)))
+                                            : chance(0.5) ? kHold : static_cast<double>(PathType::Count);
+                    left -= path.count;
+                    paths.push_back(path);
+                }
+                if (chance(0.05)) paths.back().count += 1;                                  // (past the last point)
+                if (chance(0.05) && paths.size() > 1) paths.back().id = paths.front().id; // (an id twice)
+            }
+            // (points' next only where what they may reorder is built: no arrival window or state beside a loiter point -
+            // one after it is not implemented - and no start turn with its course left out, which they may loop back to)
+            bool reorderable = true, loiterPoint = false, planned = !states.empty();
+            for (const Waypoint& q : waypoints) {
+                loiterPoint = loiterPoint || q.kind == static_cast<double>(EndPointKind::LoiterPoint);
+                planned = planned || !isHold(q.arrivalBeginS) || !isHold(q.arrivalEndS);
+                reorderable = reorderable && !(q.turn == static_cast<double>(TurnType::StartTurn) && isHold(q.courseRad));
+            }
+            if (wild && optimise && chance(0.3) && reorderable && !(loiterPoint && planned)) {
+                const auto n = static_cast<std::size_t>(points), how = pick(10);
+                Waypoint& from = waypoints[pick(n)];
+                if (how < 4 && n > 1) waypoints.back().next = static_cast<double>(pick(n - 1));
+                else if (how < 7) from.next = static_cast<double>(pick(n));
+                else if (how < 9) from.next = -1.0;
+                else from.next = static_cast<double>(n) + 0.5 * static_cast<double>(pick(2));
             }
             return true;
         }
@@ -521,7 +558,7 @@ private:
 /// NEW of what the maker made: a route with the waypoints it made beside it, a curve with its segments, a pattern with
 /// its shape (where it made one).
 CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, const Maker& make, const CommandOptions& options = {}) {
-    if (const auto* route = std::get_if<RouteCommand>(&c)) return w.submit(v, *route, make.waypoints, options, make.loiters, make.states);
+    if (const auto* route = std::get_if<RouteCommand>(&c)) return w.submit(v, *route, make.waypoints, options, make.loiters, make.states, make.paths);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && make.asNurbs)
         return w.submit(v, *curve, Span<const NurbsSegment>(make.nurbs), options, curveShape);
@@ -533,7 +570,7 @@ CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, c
 /// UPDATE with what the maker made: a route's or a curve's options, and now and then its waypoints or segments.
 CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Caller caller = {}) {
     if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints)
-        return w.update(caller, activity, *route, make.waypoints, make.loiters, make.states);
+        return w.update(caller, activity, *route, make.waypoints, make.loiters, make.states, make.paths);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
     if (const auto* curve = std::get_if<CurveCommand>(&c); curve && waypoints && make.asNurbs)
         return w.update(caller, activity, *curve, Span<const NurbsSegment>(make.nurbs), curveShape);
@@ -1289,7 +1326,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 const PatternShape* shape = std::holds_alternative<PatternCommand>(command) && !make.shape.empty() ? &make.shape : nullptr;
                 BatchCommand item; // (a curve's cubics, where made so: a batch item's form)
                 item.command = command, item.waypoints = points, item.segments = pieces, item.shape = shape;
-                if (std::holds_alternative<RouteCommand>(command)) item.loiters = make.loiters, item.states = make.states;
+                if (std::holds_alternative<RouteCommand>(command)) item.loiters = make.loiters, item.states = make.states, item.paths = make.paths;
                 if (std::holds_alternative<CurveCommand>(command) && !make.curveShape.empty()) item.curveShape = &make.curveShape;
                 if (make.asNurbs && std::holds_alternative<CurveCommand>(command)) item.segments = {}, item.nurbs = make.nurbs;
                 const Reason r = w.storeTask(v, id, item, repetition);

@@ -86,7 +86,7 @@ TaskStatus CapabilityHost::statusOf(const Task& t) const noexcept {
 
 Reason CapabilityHost::storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                  TaskRepetition repetition, const PatternShape* shape, const CurveShape* curveShape, Span<const RouteLoiter> loiters,
-                                 Span<const RouteState> states) {
+                                 Span<const RouteState> states, Span<const RoutePath> paths) {
     if (pendingSuggestions_) materialize();
     if (id == 0 || (id & kSuggestedTask)) return Reason::InvalidParameter; // (the platform's own ids)
     if (repetition.attempts == 0 || repetition.attempts > 0xFFFF) return Reason::InvalidParameter;
@@ -109,6 +109,7 @@ Reason CapabilityHost::storeTask(TaskId id, const Command& command, Span<const W
     t->segments.assign(segments.begin(), segments.end());
     t->loiters.assign(loiters.begin(), loiters.end());
     t->states.assign(states.begin(), states.end());
+    t->paths.assign(paths.begin(), paths.end());
     if (shape) t->shape = *shape;
     if (curveShape) t->curveShape = *curveShape;
     t->repetition = repetition;
@@ -138,8 +139,9 @@ CommandResult CapabilityHost::commandTask(TaskId id, CommandOptions options, con
     const CurveShape curveShape = t->curveShape;
     const std::vector<RouteLoiter> loiters = t->loiters;
     const std::vector<RouteState> states = t->states;
+    const std::vector<RoutePath> paths = t->paths;
     const std::uint32_t attempts = t->repetition.attempts;
-    const RouteExtras extras{loiters, states};
+    const RouteExtras extras{loiters, states, paths};
     CommandResult r = submitWith(command, waypoints, segments, options, state, now, true, &shape, &curveShape, &extras);
     if (!r.accepted()) return r;
     if (Task* again = findTask(id)) { // (found again: the tasks kept may have moved)
@@ -209,13 +211,14 @@ TaskId CapabilityHost::suggest(const Command& setpoint, Span<const Waypoint> way
     t.command = setpoint;
     if (shape && std::holds_alternative<PatternCommand>(setpoint)) t.shape = *shape;
     if (curveShape && std::holds_alternative<CurveCommand>(setpoint)) t.curveShape = *curveShape;
-    if (std::holds_alternative<RouteCommand>(setpoint) && routePlan_) { // (as held: its loiters complete, their place their points' - 4.31)
-        t.waypoints.assign(routePlan_->points, routePlan_->points + routePlan_->count);
-        for (std::uint32_t k = 0; k < routePlan_->loiterCount; ++k) t.loiters.push_back(route::unplaced(routePlan_->loiters[k]));
-        t.states.assign(routePlan_->states, routePlan_->states + routePlan_->stateCount); // (as placed: 4.34)
+    if (std::holds_alternative<RouteCommand>(setpoint) && routePlan_) { // (as held, as given: 4.31, 4.34, 4.36)
+        givenRoute(t.waypoints, t.loiters, t.states, t.paths);
     } else {
         t.waypoints.assign(waypoints.begin(), waypoints.end());
-        if (extras) t.loiters.assign(extras->loiters.begin(), extras->loiters.end()), t.states.assign(extras->states.begin(), extras->states.end());
+        if (extras) {
+            t.loiters.assign(extras->loiters.begin(), extras->loiters.end()), t.states.assign(extras->states.begin(), extras->states.end());
+            t.paths.assign(extras->paths.begin(), extras->paths.end());
+        }
     }
     t.segments.assign(segments.begin(), segments.end());
     return t.id;
@@ -231,6 +234,7 @@ void CapabilityHost::materialize() {
             t.segments = w.segments;
             t.loiters = w.loiters;
             t.states = w.states;
+            t.paths = w.paths;
             t.shape = w.shape, t.curveShape = w.curveShape;
             w.used = false, w.suggested = false, w.behavior.reset();
             --waitingCount_, --pendingSuggestions_;

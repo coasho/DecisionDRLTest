@@ -774,10 +774,14 @@ typedef struct fsim_waypoint {
     /* ABI 1.32 (4.35): its required navigation performance - how far off its path the segment may be flown, m (above 0; left
        out, none); farther, its activity's constraints say so (32) */
     double rnp_m;
+    /* ABI 1.33 (4.36): A-GRA's NextPathSegment - the waypoint flown after it, its index; -1, the route's end there; left
+       out, the next in its path (after its path's last, the route's end), or - no paths given - the next as they are */
+    double next;
 } fsim_waypoint;
 enum fsim_climb_optimization { FSIM_CLIMB_BEST_RATE = 0, FSIM_CLIMB_EXTENDED_RANGE }; /* A-GRA's ClimbOptimizationEnum (ABI 1.29) */
-/* What a waypoint is for (A-GRA's WaypointTypeEnum; ABI 1.26): nav only and passive are flown; the end of a path on a
-   route's last point; the others not yet ("not_implemented", naming the point: their support table rows say when) */
+/* What a waypoint is for (A-GRA's WaypointTypeEnum; ABI 1.26): nav only and passive are flown; the end of a path at its
+   path's last point (1.33: a route without paths, its last; elsewhere "invalid_waypoint"); the others not yet
+   ("not_implemented", naming the point: their support table rows say when) */
 enum fsim_waypoint_type {
     FSIM_WAYPOINT_NAV_ONLY = 0, FSIM_WAYPOINT_TAXI, FSIM_WAYPOINT_RUNWAY_START, FSIM_WAYPOINT_RUNWAY_THRESHOLD, FSIM_WAYPOINT_RUNWAY_LIMIT,
     FSIM_WAYPOINT_APPROACH, FSIM_WAYPOINT_APPROACH_INITIAL_POINT, FSIM_WAYPOINT_APPROACH_FINAL_POINT, FSIM_WAYPOINT_TAKEOFF,
@@ -860,6 +864,50 @@ FSIM_API int fsim_activity_update_route_states(fsim_world* world, fsim_activity_
                                                uint32_t count, const fsim_waypoint* waypoints, uint32_t waypoint_count,
                                                const fsim_route_loiter* loiters, uint32_t loiter_count, const fsim_route_state* states,
                                                uint32_t state_count, fsim_command_result* result);
+
+/* What a route's path is for (A-GRA's MA_PathTypeEnum; ABI 1.33): a label, reported back. */
+enum fsim_path_type {
+    FSIM_PATH_PRIMARY = 0, FSIM_PATH_ALTERNATE, FSIM_PATH_LOSS_OF_COMM, FSIM_PATH_RETURN_TO_BASE, FSIM_PATH_SOFT_DITCH, FSIM_PATH_HARD_DITCH,
+    FSIM_PATH_INGRESS, FSIM_PATH_EGRESS, FSIM_PATH_TAKEOFF, FSIM_PATH_LANDING, FSIM_PATH_EMERGENCY_LANDING, FSIM_PATH_TAXI, FSIM_PATH_AIRBORNE,
+    FSIM_PATH_ARCING, FSIM_PATH_BREAKING, FSIM_PATH_ON_DEPARTURE_RADIAL, FSIM_PATH_INITIAL_APPROACH, FSIM_PATH_INTERMEDIATE_APPROACH,
+    FSIM_PATH_FINAL_APPROACH, FSIM_PATH_BOLTER_WAVEOFF
+};
+/* One of a route's paths (ABI 1.33; docs/flight-autonomy.md, 4.36; A-GRA's MA_RoutePathType): `count` of its waypoints
+ * from `first`, flown in order unless a point's `next` says otherwise - its last the route's end unless its `next` goes on
+ * - with its id and `type` (fsim_path_type; NaN, primary). 16 a route at most, tiling its waypoints in order; the route
+ * begins at its first path's first point (its start option picks another). Paths that do not tile them: "invalid_waypoint"
+ * at the first point at fault; a type that is none, one id twice: at the path's first point; 17 or more: at point 0.
+ * fsim_route_path_init: none of it given. */
+typedef struct fsim_route_path {
+    uint32_t struct_size;
+    uint32_t first;
+    uint32_t count;
+    uint32_t reserved;
+    uint64_t id;
+    double type;
+} fsim_route_path;
+FSIM_API void fsim_route_path_init(fsim_route_path* path);
+/* What goes beside a route's waypoints (ABI 1.33): its loiter points' loiters, its planned states and its paths, each
+ * array's struct_size apart. fsim_route_extras_init: none. */
+typedef struct fsim_route_extras {
+    uint32_t struct_size;
+    uint32_t loiter_count;
+    const fsim_route_loiter* loiters;
+    uint32_t state_count;
+    uint32_t path_count;
+    const fsim_route_state* states;
+    const fsim_route_path* paths;
+} fsim_route_extras;
+FSIM_API void fsim_route_extras_init(fsim_route_extras* extras);
+/* A route with what goes beside its waypoints (`extras` NULL: none); else as fsim_vehicle_submit_route. */
+FSIM_API int fsim_vehicle_submit_route_extras(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_waypoint* waypoints,
+                                              uint32_t waypoint_count, const fsim_route_extras* extras, const fsim_command_options* options,
+                                              fsim_command_result* result);
+/* UPDATE of a route with new waypoints and what goes beside them (none: those it has, and theirs), declaring the caller's
+ * source and controller as fsim_activity_update_route_by. */
+FSIM_API int fsim_activity_update_route_extras(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
+                                               uint32_t count, const fsim_waypoint* waypoints, uint32_t waypoint_count, const fsim_route_extras* extras,
+                                               fsim_command_result* result);
 
 /* One segment of a curve: a quintic Bezier by its six control points (weights
  * 1, the clamped knots), metres north, east and down from the curve's
@@ -1169,6 +1217,8 @@ typedef struct fsim_batch_command {
     uint32_t loiter_count;
     uint32_t state_count;                   /* FSIM_BATCH_ROUTE's planned states (ABI 1.31), states[0].struct_size bytes apart */
     const fsim_route_state* states;
+    const fsim_route_path* paths;           /* FSIM_BATCH_ROUTE's paths (ABI 1.33), paths[0].struct_size bytes apart */
+    uint32_t path_count;
 } fsim_batch_command;
 /* Several NEWs at once (A-GRA's several command instances in one message), `batch[0].struct_size` bytes apart, made in
  * order at this simulation time: `results[i]` answers `batch[i]`, and `details[i]` (may be NULL; `details[0].struct_size`
@@ -1204,7 +1254,7 @@ FSIM_API int fsim_vehicle_task_at(fsim_world* world, uint32_t id, uint32_t index
  * (its flyout curve, from the reference in fields 0-2) - FSIM_BATCH_CURVE's where each is a Bezier's form, else
  * FSIM_BATCH_NURBS's (ABI 1.24; `nurbs` set where the caller's struct has it); a route's loiters (ABI 1.28, where the
  * caller's struct has them: complete, their place their points'), and its planned states (ABI 1.31, likewise: as placed,
- * their altitude reference completed). A waiting one's is as given. Its arrays are the library's,
+ * their altitude reference completed), and its paths (ABI 1.33, likewise). A waiting one's is as given. Its arrays are the library's,
  * valid until the next setpoint read, world step, reset or destroy; `options` NULL. `out->struct_size` set by the
  * caller. FSIM_INVALID_ARGUMENT for an activity not live. */
 FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id activity, fsim_batch_command* out);

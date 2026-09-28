@@ -167,6 +167,7 @@ void CapabilityHost::completeLoiters(route::Plan& p, const sim::VehicleState& st
     bool magnetic = false;
     for (std::uint32_t k = 0; k < p.loiterCount; ++k) { // an optimisation's speed first, at its point's altitude, as a pattern's
         RouteLoiter& l = p.loiters[k];
+        if (l.point >= p.count) continue; // (on a point it does not fly: kept as given - 4.36)
         const Waypoint& w = p.points[l.point];
         optimise(l.pattern.speed, l.pattern.speedReference, l.pattern.speedOptimization, w.altitudeM, w.altitudeReference, state);
         magnetic = magnetic || l.shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth);

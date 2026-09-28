@@ -1010,7 +1010,7 @@ double Plan::pieceM(std::uint32_t i, bool firstLap) const noexcept {
 
 double Plan::lapM(bool firstLap) const noexcept {
     double m = 0.0;
-    for (std::uint32_t i = firstLap ? start : 0; i < count; ++i) {
+    for (std::uint32_t i = firstLap ? start : loop; i < count; ++i) {
         const Turn& t = turn(i, firstLap);
         m += pieceM(i, firstLap) + t.radiusM * std::abs(t.angleRad);
     }
@@ -1019,7 +1019,7 @@ double Plan::lapM(bool firstLap) const noexcept {
 
 double Plan::arrivalM(std::uint32_t k, bool firstLap) const noexcept {
     double m = 0.0;
-    for (std::uint32_t i = firstLap ? start : 0; i < k; ++i) {
+    for (std::uint32_t i = firstLap ? start : loop; i < k; ++i) {
         const Turn& t = turn(i, firstLap);
         m += pieceM(i, firstLap) + t.radiusM * std::abs(t.angleRad);
     }
@@ -1028,7 +1028,7 @@ double Plan::arrivalM(std::uint32_t k, bool firstLap) const noexcept {
 }
 
 Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool repeat, const sim::VehicleState& state, const Performance& performance,
-                bool hovers, std::int16_t& bad, const Altimeter* altimeter) noexcept {
+                bool hovers, std::int16_t& bad, const Altimeter* altimeter, std::uint32_t loop) noexcept {
     auto invalid = [&bad](std::uint32_t i) {
         bad = static_cast<std::int16_t>(std::min<std::uint32_t>(i, 0x7FFF));
         return Reason::InvalidWaypoint;
@@ -1068,9 +1068,10 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
         if (!isHold(w.turnRadiusM) && !(turn == TurnType::StartTurn || (turn == TurnType::FlyBy && !noTurn(w)))) return invalid(i);
         if (turn == TurnType::CaptureOutboundCourse && isHold(w.courseRad)) return invalid(i);
         if (turn == TurnType::StartTurn && !(i + 1 < count || repeat)) return invalid(i); // (an arc to no point)
-        if (turn == TurnType::EndTurn) { // (a turn it ends: the point before begins it)
+        if (turn == TurnType::EndTurn) { // (a turn it ends: the point before begins it - a lap on too, where it comes back to: 4.36)
             const std::uint32_t before = i > 0 ? i - 1 : count - 1;
-            if ((i == 0 && !repeat) || count < 2 || in[before].turn != static_cast<double>(TurnType::StartTurn)) return invalid(i);
+            if ((i == 0 && !(repeat && loop == 0)) || count < 2 || in[before].turn != static_cast<double>(TurnType::StartTurn)) return invalid(i);
+            if (repeat && loop > 0 && i == loop && in[count - 1].turn != static_cast<double>(TurnType::StartTurn)) return invalid(i);
         }
         // its segment's performance (4.32): an optimisation that is one, a climb by its rate or optimised (A-GRA's choice),
         // an acceleration above 0
@@ -1123,16 +1124,18 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
         if (!(w.speed > 0.0) || !std::isfinite(w.speed)) return invalid(i); // (the aircraft's own, stopped)
         out[i] = w;
     }
-    if (repeat && count > 1 && geo::distanceM(out[count - 1].latitudeRad, out[count - 1].longitudeRad, out[0].latitudeRad, out[0].longitudeRad) < 1.0)
-        return invalid(0); // the leg back to the first point would be none
+    if (repeat && count > 1 && loop < count &&
+        geo::distanceM(out[count - 1].latitudeRad, out[count - 1].longitudeRad, out[loop].latitudeRad, out[loop].longitudeRad) < 1.0)
+        return invalid(loop); // the leg back to where it repeats from would be none
     return Reason::None;
 }
 
 int loiterFault(const Plan& p) noexcept {
     auto at = [](std::uint32_t i) { return static_cast<int>(std::min<std::uint32_t>(i, 0x7FFF)); };
+    const std::uint32_t held = p.linked ? p.given : p.count; // (a linked route's points it does not fly too, after them: 4.36)
     for (std::uint32_t k = 0; k < p.loiterCount; ++k) {
         const RouteLoiter& l = p.loiters[k];
-        if (l.point >= p.count || !loiterPoint(p.points[l.point])) return at(l.point); // (a loiter at no loiter point)
+        if (l.point >= held || !loiterPoint(p.points[l.point])) return at(l.point); // (a loiter at no loiter point)
         for (std::uint32_t j = 0; j < k; ++j)
             if (p.loiters[j].point == l.point) return at(l.point); // (two for one point)
         // its place its point's: none of its own
@@ -1145,9 +1148,9 @@ int loiterFault(const Plan& p) noexcept {
         if (!isHold(l.endTimeS) && !std::isfinite(l.endTimeS)) return at(l.point);
         // an end, but where it ends the route (a loiter it never leaves: nothing after it would be flown)
         const bool ends = !isHold(c.durationS) || !isHold(shape.orbits) || !isHold(l.endTimeS);
-        if (!ends && (p.repeat || l.point != p.last())) return at(l.point);
+        if (!ends && l.point < p.count && (p.repeat || l.point != p.last())) return at(l.point);
     }
-    for (std::uint32_t i = 0; i < p.count; ++i)
+    for (std::uint32_t i = 0; i < held; ++i)
         if (loiterPoint(p.points[i]) && !p.loiterAt(i)) return at(i); // (a loiter point with none)
     return -1;
 }
@@ -1156,7 +1159,7 @@ void completeLoiters(Plan& p, const sim::VehicleState& state, const Performance&
                      const Altimeter* altimeter, double magneticYear) noexcept {
     for (std::uint32_t k = 0; k < p.loiterCount; ++k) {
         RouteLoiter& l = p.loiters[k];
-        if (l.point >= p.count) continue; // (loiterFault's)
+        if (l.point >= p.count) continue; // (on a point it does not fly, kept as given: 4.36)
         const Waypoint& w = p.points[l.point];
         PatternCommand& c = l.pattern;
         PatternShape& shape = l.shape;
@@ -1219,7 +1222,12 @@ void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, c
         p.turns[i] = Turn{};
         p.legs[i] = i > 0 ? makeLeg(point(i - 1).latitudeRad, point(i - 1).longitudeRad, point(i).latitudeRad, point(i).longitudeRad, p.rhumb) : Leg{};
     }
-    if (p.repeat && n > 1) p.legs[0] = makeLeg(point(n - 1).latitudeRad, point(n - 1).longitudeRad, point(0).latitudeRad, point(0).longitudeRad, p.rhumb);
+    // a lap on, from its last point back to where it repeats from (4.36): legs[0], or a later point's own
+    p.loopLeg = Leg{}, p.loopTurn = Turn{};
+    Leg& closing = p.loop > 0 ? p.loopLeg : p.legs[0];
+    auto out = [&](std::uint32_t k) -> Leg& { return k + 1 < n ? p.legs[k + 1] : closing; };
+    if (p.repeat && n > 1)
+        closing = makeLeg(point(n - 1).latitudeRad, point(n - 1).longitudeRad, point(p.loop).latitudeRad, point(p.loop).longitudeRad, p.rhumb);
     // the arcs start turn points begin (4.30), in order: each tangent to the course the leg into its start arrives on
     // (the entry's, for a route's own start point it does not come back to)
     p.arcs = false;
@@ -1227,14 +1235,15 @@ void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, c
         if (point(k).turn != static_cast<double>(TurnType::StartTurn) || !p.leaves(k)) continue;
         const bool first = k == p.start && !p.repeat;
         const double in = first ? makeLeg(lat, lon, point(k).latitudeRad, point(k).longitudeRad, p.rhumb).courseInRad : p.legs[k].courseInRad;
-        p.legs[p.next(k)] = legTo(p, k, p.next(k), in);
-        p.arcs = p.arcs || p.legs[p.next(k)].arcRadiusM > 0.0;
+        out(k) = legTo(p, k, p.next(k), in);
+        p.arcs = p.arcs || out(k).arcRadiusM > 0.0;
     }
 
     auto radius = [&](std::uint32_t i) { return turnRadiusAt(p, i, altitudeMslM, windMs, performance, hovers); };
     auto flyBy = [&](std::uint32_t i) { return point(i).turn == static_cast<double>(TurnType::FlyBy) && !noTurn(point(i)); }; // (a waypoint: flown over)
     for (std::uint32_t i = 0; i < n; ++i)
-        if (p.leaves(i) && (i > 0 || p.repeat) && flyBy(i)) p.turns[i] = makeTurn(p.legs[i].courseInRad, p.legs[p.next(i)].courseOutRad, radius(i));
+        if (p.leaves(i) && (i > 0 || (p.repeat && p.loop == 0)) && flyBy(i)) p.turns[i] = makeTurn(p.legs[i].courseInRad, out(i).courseOutRad, radius(i));
+    if (p.repeat && p.loop > 0 && flyBy(p.loop)) p.loopTurn = makeTurn(p.loopLeg.courseInRad, out(p.loop).courseOutRad, radius(p.loop));
 
     // The entry, from where the aircraft is, and its turn at the first point
     // flown to - flown over if the aircraft is too near that point to turn
@@ -1244,7 +1253,7 @@ void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, c
     p.entry = makeLeg(lat, lon, first.latitudeRad, first.longitudeRad, p.rhumb);
     p.entryTurn = Turn{};
     if (p.leaves(p.start) && flyBy(p.start)) {
-        p.entryTurn = makeTurn(p.entry.courseInRad, p.legs[after].courseOutRad, radius(p.start));
+        p.entryTurn = makeTurn(p.entry.courseInRad, out(p.start).courseOutRad, radius(p.start));
         if (p.entryTurn.leadM > p.entry.lengthM) p.entryTurn = Turn{};
     }
 
@@ -1252,23 +1261,32 @@ void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, c
     // to its share of it - in proportion to its lead - on both legs it
     // touches. The leg after the start is shared with the entry's turn too
     // (and, when the route repeats, with the start's own).
+    // (a route that loops back to a later point: the leg out of it is flown after its turn on either lap, and the leg back
+    // to it between the turns at its last point and its own a lap on)
     auto leadBefore = [&](std::uint32_t i) {
-        double lead = i > 0 || p.repeat ? p.turns[p.prev(i)].leadM : 0.0;
+        double lead = i > 0 || (p.repeat && p.loop == 0) ? p.turns[p.prev(i)].leadM : 0.0;
+        if (p.loop > 0 && i == p.loop + 1) lead = std::max(lead, p.loopTurn.leadM);
         if (i == after && p.leaves(p.start)) lead = p.repeat ? std::max(lead, p.entryTurn.leadM) : p.entryTurn.leadM;
         return lead;
     };
     double share[Plan::kMax];
     for (std::uint32_t i = 0; i < n; ++i) {
         share[i] = 1.0;
-        if (i == 0 && !p.repeat) continue;
+        if (i == 0 && !(p.repeat && p.loop == 0)) continue;
         const double leads = leadBefore(i) + p.turns[i].leadM;
         if (leads > p.legs[i].lengthM) share[i] = p.legs[i].lengthM / leads;
     }
+    double loopShare = 1.0;
+    if (p.repeat && p.loop > 0 && p.turns[n - 1].leadM + p.loopTurn.leadM > p.loopLeg.lengthM)
+        loopShare = p.loopLeg.lengthM / (p.turns[n - 1].leadM + p.loopTurn.leadM);
+    auto shareOut = [&](std::uint32_t i) { return i + 1 < n ? share[i + 1] : p.loop > 0 ? loopShare : share[0]; };
     for (std::uint32_t i = 0; i < n; ++i) {
         Turn& t = p.turns[i];
-        const double f = std::min(share[i], share[p.next(i)]);
+        const double f = std::min(share[i], shareOut(i));
         if (t.radiusM > 0.0 && f < 1.0) shrink(t, t.leadM * f, true);
     }
+    if (p.loop > 0 && p.loopTurn.radiusM > 0.0 && std::min(loopShare, shareOut(p.loop)) < 1.0)
+        shrink(p.loopTurn, p.loopTurn.leadM * std::min(loopShare, shareOut(p.loop)), true);
     if (p.entryTurn.radiusM > 0.0 && share[after] < 1.0) shrink(p.entryTurn, p.entryTurn.leadM * share[after], true);
 }
 
@@ -1285,30 +1303,31 @@ VelocityCommand hoverOver(const sim::VehicleState& s, const Performance& perf, d
 
 void replan(Plan& p, std::uint32_t i, bool firstLap, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept {
     const Waypoint& w = p.points[i];
-    const bool entry = firstLap && i == p.start;
-    const bool kept = entry || ((i > 0 || p.repeat) && loiterPoint(p.points[p.prev(i)])); // (after a loiter, from where it ended: 4.31)
-    Leg& in = entry ? p.entry : p.legs[i];
+    const bool entry = firstLap && i == p.start, looped = p.looped(i, firstLap);
+    const bool preceded = i > 0 || (p.repeat && p.loop == 0) || looped; // (a leg into it: 4.36)
+    const bool kept = entry || (preceded && loiterPoint(p.points[p.before(i, firstLap)])); // (after a loiter, from where it ended: 4.31)
+    Leg& in = entry ? p.entry : looped ? p.loopLeg : p.legs[i];
     if (kept) {
         in = makeLeg(in.latA, in.lonA, w.latitudeRad, w.longitudeRad, p.rhumb);
-    } else if (i > 0 || p.repeat) {
-        const std::uint32_t h = p.prev(i);
+    } else if (preceded) {
+        const std::uint32_t h = p.before(i, firstLap);
         in = legTo(p, h, i, h > 0 || p.repeat ? p.legs[h].courseInRad : in.courseOutRad); // (an arc's tangent: the leg before's, as planned)
     }
-    Turn& t = entry ? p.entryTurn : p.turns[i];
+    Turn& t = entry ? p.entryTurn : looped ? p.loopTurn : p.turns[i];
     t = Turn{};
     if (!p.leaves(i)) return;
     const std::uint32_t j = p.next(i);
-    Leg& out = p.legs[j];
+    Leg& out = i + 1 < p.count ? p.legs[j] : p.loop > 0 ? p.loopLeg : p.legs[0];
     out = legTo(p, i, j, in.courseInRad);
-    if (w.turn != static_cast<double>(TurnType::FlyBy) || noTurn(w) || (!entry && i == 0 && !p.repeat)) return;
+    if (w.turn != static_cast<double>(TurnType::FlyBy) || noTurn(w) || (!entry && !preceded)) return;
     t = makeTurn(in.courseInRad, out.courseOutRad, turnRadiusAt(p, i, altitudeMslM, windMs, performance, hovers));
     if (entry && t.leadM > in.lengthM) { // (too near its point to turn before it: flown over)
         t = Turn{};
         return;
     }
     // its share of the legs either side, beside the turns at their other ends (plan()'s, here)
-    const double before = entry ? 0.0 : firstLap && p.prev(i) == p.start ? p.entryTurn.leadM : p.turns[p.prev(i)].leadM;
-    const double after = p.turns[j].leadM;
+    const double before = entry ? 0.0 : p.turn(p.before(i, firstLap), firstLap).leadM;
+    const double after = (i + 1 < p.count ? p.turns[j] : p.turn(j, false)).leadM; // (back where it repeats from: that lap's)
     double share = 1.0;
     if (before + t.leadM > in.lengthM) share = std::min(share, in.lengthM / (before + t.leadM));
     if (t.leadM + after > out.lengthM) share = std::min(share, out.lengthM / (t.leadM + after));

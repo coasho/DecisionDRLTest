@@ -1879,6 +1879,62 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(f.missed == 0);
             CHECK(f.spurious == 0);
         });
+    // A-GRA's paths and links (ADR-29 FA-6e1: WPT-13, WPT-14): a path of one point half a minute on, linked into a second -
+    // a square of half-minute sides, round and round - and a third linked from nowhere, behind to the left. It flies the
+    // first, then round the square, the points named as given, and never near the third
+    struct PathsRoute {
+        std::vector<std::uint32_t> order;
+        double nearestLost = 1e30;
+        PositionCommand lost{};
+    };
+    std::map<std::uint32_t, PathsRoute> pathsRoutes;
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
+            const double v = p.rotor ? p.cruiseMs : p.start.airspeedTrueMs;
+            PathsRoute& f = pathsRoutes[p.id];
+            f = PathsRoute{};
+            auto point = [&](double ahead, double right) { // (seconds at its speed)
+                const PositionCommand q = pointFrom(p.start, (ahead * c - right * sn) * v, (ahead * sn + right * c) * v, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            std::vector<Waypoint> points = {point(30, 0), point(60, 0), point(60, 30), point(90, 30), point(90, 0), point(0, -60)};
+            points[0].speed = v;
+            if (p.rotor) points[0].speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+            points[0].next = 1.0, points[4].next = 1.0; // (on into the square; round it)
+            f.lost = pointFrom(p.start, (0 * c + 60 * sn) * v, (0 * sn - 60 * c) * v, p.start.altitudeMslM, 0.0);
+            const std::vector<RoutePath> paths = {RoutePath{1, static_cast<double>(PathType::Ingress), 0, 1},
+                                                  RoutePath{2, static_cast<double>(PathType::Primary), 1, 4},
+                                                  RoutePath{3, static_cast<double>(PathType::ReturnToBase), 5, 1}};
+            const CommandResult res = w.submit(p.id, RouteCommand{}, points, {}, {}, {}, paths);
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index);
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        [&](const Plane&) { return 330.0; },
+        [&](const Plane& p) {
+            PathsRoute& f = pathsRoutes[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            if (!r.live()) return;
+            if (f.order.empty() || f.order.back() != r.progress.segment) f.order.push_back(r.progress.segment);
+            const auto& s = *w.vehicleState(p.id);
+            const double north = (f.lost.latitudeRad - s.latitudeRad) * kEarthM, east = (f.lost.longitudeRad - s.longitudeRad) * kEarthM * std::cos(s.latitudeRad);
+            f.nearestLost = std::min(f.nearestLost, std::hypot(north, east));
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const PathsRoute& f = pathsRoutes[p.id];
+            std::string flown;
+            for (std::size_t i = 0; i < f.order.size() && i < 12; ++i) flown += (i ? " " : "") + std::to_string(f.order[i]);
+            INFO(activityStateName(r.state) << "; flew " << flown << ", nearest the third path's point " << f.nearestLost << " m");
+            CHECK(r.live()); // (round and round: no end)
+            REQUIRE(f.order.size() >= 7);
+            CHECK(flown.rfind("0 1 2 3 4 1 2", 0) == 0);
+            CHECK(f.nearestLost > p.scale()); // (every one nearest at its start, a minute off: 2.99 scales at the worst, the EC-130H)
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

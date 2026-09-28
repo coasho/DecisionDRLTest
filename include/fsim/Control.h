@@ -251,6 +251,9 @@ struct Waypoint {
     // A-GRA's required navigation performance (docs/flight-autonomy.md, 4.35): how far off its path the segment may be flown,
     // m; left out, none. Farther, its activity says so (kActivityNavigationPerformance)
     double rnpM = kHold;
+    // A-GRA's NextPathSegment (docs/flight-autonomy.md, 4.36): the waypoint flown after it, its index; -1, the route's end
+    // there; left out, the next in its path (after its path's last, the route's end) - no paths given, the next as they are
+    double next = kHold;
     /// Its point in its frame: the offsets left out, the frame's origin.
     FrameOffset frameOffset() const noexcept {
         FrameOffset o;
@@ -536,6 +539,42 @@ struct PatternShape {
     bool twoCircles() const noexcept { return !isHold(latitude2Rad) || !isHold(longitude2Rad); }
 };
 
+/// What a route's path is for (A-GRA's MA_PathTypeEnum; docs/flight-autonomy.md, 4.36): a label, reported back.
+enum class PathType : std::uint8_t {
+    Primary,
+    Alternate,
+    LossOfComm,
+    ReturnToBase,
+    SoftDitch,
+    HardDitch,
+    Ingress,
+    Egress,
+    Takeoff,
+    Landing,
+    EmergencyLanding,
+    Taxi,
+    Airborne,
+    Arcing,
+    Breaking,
+    OnDepartureRadial,
+    InitialApproach,
+    IntermediateApproach,
+    FinalApproach,
+    BolterWaveoff,
+    Count
+};
+
+/// One of a route's paths (A-GRA's MA_RoutePathType; docs/flight-autonomy.md, 4.36): `count` of its waypoints from
+/// `first`, flown in order unless a point's `next` says otherwise - its last the route's end unless its `next` goes on -
+/// with its id and type. Beside the waypoints, as the loiters are: 16 a route at most, tiling them in order; the route
+/// begins at its first path's first point (RouteCommand::start picks another).
+struct RoutePath {
+    std::uint64_t id = 0;     ///< the caller's (A-GRA's PathID)
+    double type = kHold;      ///< PathType; left out, Primary
+    std::uint32_t first = 0;  ///< its first waypoint's index
+    std::uint32_t count = 0;  ///< how many
+};
+
 /// The loiter a route's loiter point flies (A-GRA's LoiterPoint, MA_LoiterPointType; docs/flight-autonomy.md, 4.31):
 /// a pattern - an orbit, a racetrack, a figure-eight, a hold or a hover, with its shape - and the time it ends. Beside
 /// the route's waypoints, as they go beside its RouteCommand (World::submit and update take a Span): 16 a route at most.
@@ -632,6 +671,15 @@ struct PathStore {
     static constexpr std::size_t kRouteStates = 64;
     std::uint32_t routeStateCount = 0;
     RouteState routeStates[kRouteStates];
+    /// Its paths as given (4.36): 16 a route at most. A linked route - paths, or a point's next - flown in its flight
+    /// order: `routeOrder` the waypoints' indices in it, the `routeFlown` it flies first; after its last, on from
+    /// `routeLoop` where it repeats (`routeRepeats`).
+    static constexpr std::size_t kRoutePaths = 16;
+    std::uint32_t routePathCount = 0;
+    RoutePath routePaths[kRoutePaths];
+    bool routeLinked = false, routeRepeats = false;
+    std::uint32_t routeFlown = 0, routeLoop = 0;
+    std::uint16_t routeOrder[kWaypoints] = {};
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -701,6 +749,7 @@ struct BatchCommand {
     const CurveShape* curveShape = nullptr; ///< a CurveCommand's reference in a frame (null: none)
     Span<const RouteLoiter> loiters;     ///< a RouteCommand's: the loiters its loiter points fly (docs/flight-autonomy.md, 4.31)
     Span<const RouteState> states;       ///< a RouteCommand's: its planned inertial states (4.34)
+    Span<const RoutePath> paths;         ///< a RouteCommand's: its paths (4.36)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight
@@ -717,6 +766,7 @@ struct Setpoint {
     CurveShape curveShape;               ///< a curve's reference in a frame, as it flies (4.27)
     std::vector<RouteLoiter> loiters;    ///< a route's loiters, as they fly (4.31)
     std::vector<RouteState> states;      ///< a route's planned inertial states, as placed (4.34)
+    std::vector<RoutePath> paths;        ///< a route's paths (4.36)
 };
 
 /// Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType;

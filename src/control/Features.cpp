@@ -84,7 +84,8 @@ const FeatureDef kFeatures[] = {
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
         "a time of arrival or a planned state at or after a loiter point, planned states beside points in moving frames, "
-        "paths and branches, path terminators (FA-6); planning metadata (FA-7)"), // WPT-01, 16, 24, 25
+        "a start turn where its links loop back, its course left out, conditional branches, path terminators (FA-6); "
+        "planning metadata (FA-7)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
     {"fsim.guidance.route/turn/fly_by", "fsim.guidance.route", S, 0, 0, ""},                 // WPT-03
@@ -108,8 +109,8 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/altitude/hae", "fsim.guidance.route", S, 0, 0, ""},
     {"fsim.guidance.route/altitude/barometric", "fsim.guidance.route", S, 0, 0, ""},          // (FA-6a)
     {"fsim.guidance.route/altitude_block", "fsim.guidance.route", S, 0, 0, ""},              // (FA-6a)
-    {"fsim.guidance.route/paths", "fsim.guidance.route", N, 6, 0, ""},                       // WPT-13
-    {"fsim.guidance.route/next_segment", "fsim.guidance.route", N, 6, 0, ""},                // WPT-14
+    {"fsim.guidance.route/paths", "fsim.guidance.route", S, 0, 0, ""},                       // WPT-13 (FA-6e1)
+    {"fsim.guidance.route/next_segment", "fsim.guidance.route", P, 6, 0, "a start turn where the links loop back, its course left out"}, // WPT-14
     {"fsim.guidance.route/conditional_segment", "fsim.guidance.route", N, 6, 0, ""},         // WPT-15
     {"fsim.guidance.route/waypoint_type", "fsim.guidance.route", S, 0, 0, ""},               // WPT-17 (FA-6a: nav only, passive, end of path)
     {"fsim.guidance.route/waypoint_type/taxi", "fsim.guidance.route", N, 9, R2, ""},          //   the points each action flies

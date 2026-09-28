@@ -136,11 +136,14 @@ Reason CapabilityHost::checkStates(route::Plan& p, Span<const RouteState> states
     for (std::uint32_t k = 0; k < p.frameCount; ++k) moving = moving || p.frames[k].origin != FrameOrigin::Fixed;
     const SupportInfo* timed = support_ ? support_->find("fsim.guidance.route/required_time_of_arrival") : nullptr;
     double before = -std::numeric_limits<double>::infinity();
+    std::uint32_t last = 0;
     for (std::uint32_t j = 0; j < states.size(); ++j) {
         RouteState s = states[j];
-        const std::uint32_t k = s.point;
+        const std::uint32_t k = p.linked && s.point < p.given ? p.position[s.point] : s.point; // (in a linked route's flight order: 4.36)
+        s.point = k;
         // on a segment its first lap flies, in order along the route; its fields finite, its codes whole
-        if (k < p.start || k >= p.count || (j > 0 && k < states[j - 1].point)) return at(k, Reason::InvalidWaypoint);
+        if (k < p.start || k >= p.count || (j > 0 && k < last)) return at(k, Reason::InvalidWaypoint);
+        last = k;
         double* f[RouteState::kFields];
         s.fields(f);
         for (const double* v : f)
@@ -241,9 +244,15 @@ Reason CapabilityHost::limitStates(route::Plan& p, const sim::VehicleState& stat
 }
 
 void CapabilityHost::keepStates(Waiting& w, const PathStore& store, double start) const {
-    w.states.reserve(PathStore::kRouteStates), w.states.clear();
+    w.states.reserve(PathStore::kRouteStates), w.states.clear(), w.passed.clear();
+    auto along = [&store](double point) { // (where a point comes in its flight: a linked route's order - 4.36 - else as given)
+        for (std::uint32_t j = 0; j < store.count && store.routeLinked && point >= 0.0; ++j)
+            if (static_cast<double>(store.routeOrder[j]) == point) return static_cast<double>(j);
+        return point;
+    };
+    const double from = along(start);
     for (std::uint32_t j = 0; j < store.routeStateCount; ++j)
-        if (static_cast<double>(store.routeStates[j].point) > start) w.states.push_back(store.routeStates[j]);
+        (along(static_cast<double>(store.routeStates[j].point)) > from ? w.states : w.passed).push_back(store.routeStates[j]);
 }
 
 // --- flown ---------------------------------------------------------------------------------
@@ -254,6 +263,7 @@ bool RouteBehavior::takeStates(const ControlContext& ctx) noexcept {
     std::copy_n(ctx.path->routeStates, p.stateCount, p.states);
     for (std::uint32_t j = 0; j < p.stateCount; ++j) {
         RouteState& s = p.states[j];
+        if (p.linked && s.point < p.given) s.point = p.position[s.point]; // (in a linked route's flight order: 4.36)
         if (s.point >= p.count || !std::isfinite(s.latitudeRad) || !std::isfinite(s.longitudeRad)) return false;
         if (isHold(s.altitudeReference)) s.altitudeReference = p.points[s.point].altitudeReference; // (a stack's own: its point's)
     }

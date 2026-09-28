@@ -187,6 +187,7 @@ struct RouteCommand {                  // fsim.guidance.route; the waypoints go 
 - **Segment performance** (4.32): a segment at the performance tables' best speed now, and the speed change into a segment at a given acceleration, held to what the aircraft can; its climb or descent at the most the aircraft makes holding its speed, or an efficient climb timed by its tables.
 - **Required times of arrival** (4.33): a point's window, the speed scheduled over the ground to arrive in it, and the estimate against it in the progress.
 - **Planned states** (4.34): places inside a segment, each with an altitude and a time; the segment flown through their altitudes, arriving at each at its time, what else the plan gives kept and read back.
+- **Paths and links** (4.36): runs of waypoints with ids and types, and a point's next into another path or back round a loop; flown along the links from its start, every point named as given.
 - **Required navigation performance** (4.35): a segment's RNP in metres; the route farther off its path than it, its activity flagged `kActivityNavigationPerformance`.
 - **Rotorcraft** fly the same geometry at the segment's speed. They slow for a turn only as much as its radius asks (a lateral acceleration within the performance's), and stop only at the route's end when they loiter there, never at each point.
 

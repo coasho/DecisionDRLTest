@@ -13,6 +13,7 @@
 
 #include <cstdint>
 #include <limits>
+#include <vector>
 
 namespace fsim::control::route {
 
@@ -158,8 +159,13 @@ struct Plan {
     bool repeat = false, rhumb = false;
     bool arcs = false; ///< a leg is an arc a start turn point begins (4.30): what the follower looks ahead for
     EndBehavior end = EndBehavior::Continue;
+    /// Where a repeating route goes on from its last point (docs/flight-autonomy.md, 4.36): its first (0) - or, its links
+    /// looping back to a later point, that one, the points before it its first lap's alone. There the leg into it and its
+    /// turn differ by lap: legs[loop] and turns[loop] the first lap's, from the point before it; loopLeg and loopTurn the
+    /// later laps', from its last point.
+    std::uint32_t loop = 0;
     Waypoint points[kMax];
-    /// legs[i]: to point i from the one before (legs[0]: from the last, when it repeats).
+    /// legs[i]: to point i from the one before (legs[0]: from the last, when it repeats back to it).
     Leg legs[kMax];
     /// turns[i]: at point i, from legs[i] to the leg after it.
     Turn turns[kMax];
@@ -191,6 +197,21 @@ struct Plan {
     static constexpr std::uint32_t kClimbs = static_cast<std::uint32_t>(PathStore::kWaypoints + PathStore::kRouteStates);
     std::uint32_t climbCount = 0;
     double climbFromM[kClimbs] = {}, climbToM[kClimbs] = {}, climbMostMs[kClimbs] = {};
+    /// A later lap's leg into point `loop` and its turn there (4.36), where it is above 0.
+    Leg loopLeg;
+    Turn loopTurn;
+    /// A linked route's (4.36): its waypoints as given - `given` of them - in its flight order, the `count` it flies first,
+    /// the rest after; `order`, each one's index as given, and `position` each given one's here. Its paths as given.
+    bool linked = false;
+    std::uint32_t given = 0;
+    std::uint32_t order[kMax] = {}, position[kMax] = {};
+    std::uint32_t pathCount = 0;
+    RoutePath paths[PathStore::kRoutePaths];
+    /// The index point i is named by: its own as given.
+    std::uint32_t named(std::uint32_t i) const noexcept { return linked && i < given ? order[i] : i; }
+    /// The host's own, beside its scratch (its checks leave it be): the flying route's planned states it resumed past
+    /// (disabled or unassigned, then flown again: 4.34), which Reset flies again. A behaviour's plan has none.
+    std::vector<RouteState> passed;
 
     std::uint32_t last() const noexcept { return count - 1; }
     /// Point i's loiter; null for none.
@@ -199,20 +220,29 @@ struct Plan {
             if (loiters[k].point == i) return &loiters[k];
         return nullptr;
     }
-    std::uint32_t next(std::uint32_t i) const noexcept { return i + 1 < count ? i + 1 : 0; }
+    std::uint32_t next(std::uint32_t i) const noexcept { return i + 1 < count ? i + 1 : loop; }
     std::uint32_t prev(std::uint32_t i) const noexcept { return i > 0 ? i - 1 : count - 1; }
+    /// A later lap back at point `loop` (above 0): from the last point, by its own leg and turn (loopLeg, loopTurn).
+    bool looped(std::uint32_t i, bool firstLap) const noexcept { return !firstLap && i == loop && loop > 0; }
+    /// The point flown before point i on a lap: the last, where a later lap comes back to it.
+    std::uint32_t before(std::uint32_t i, bool firstLap) const noexcept { return looped(i, firstLap) ? count - 1 : prev(i); }
     /// A leg leaves point i: it is not the end of a route that does not repeat.
     bool leaves(std::uint32_t i) const noexcept { return i + 1 < count || repeat; }
-    const Leg& leg(std::uint32_t i, bool firstLap) const noexcept { return firstLap && i == start ? entry : legs[i]; }
-    const Turn& turn(std::uint32_t i, bool firstLap) const noexcept { return firstLap && i == start ? entryTurn : turns[i]; }
-    /// The turn a lap flies at the start of leg i; null for the entry, or the first point of a route that does not repeat.
+    const Leg& leg(std::uint32_t i, bool firstLap) const noexcept { return firstLap && i == start ? entry : looped(i, firstLap) ? loopLeg : legs[i]; }
+    const Turn& turn(std::uint32_t i, bool firstLap) const noexcept {
+        return firstLap && i == start ? entryTurn : looped(i, firstLap) ? loopTurn : turns[i];
+    }
+    /// The leg out of point i: into the next - from the last, back to where the route repeats from.
+    const Leg& legOut(std::uint32_t i) const noexcept { return i + 1 < count ? legs[i + 1] : loop > 0 ? loopLeg : legs[0]; }
+    /// The turn a lap flies at the start of leg i; null for the entry, or the first point of a route that does not come
+    /// back to it.
     const Turn* turnBefore(std::uint32_t i, bool firstLap) const noexcept {
-        if ((firstLap && i == start) || (i == 0 && !repeat)) return nullptr;
-        return &turn(prev(i), firstLap);
+        if ((firstLap && i == start) || (i == 0 && !(repeat && loop == 0))) return nullptr;
+        return &turn(before(i, firstLap), firstLap);
     }
     /// Leg i as a lap flies it: its length less the turns' leads at its ends.
     double pieceM(std::uint32_t i, bool firstLap) const noexcept;
-    /// A lap's length: the first from the entry, the others the whole route.
+    /// A lap's length: the first from the entry, the others from where the route repeats from.
     double lapM(bool firstLap) const noexcept;
     /// How far along a lap point k is reached (its segment's end: its turn's middle), from the lap's start (4.33).
     double arrivalM(std::uint32_t k, bool firstLap) const noexcept;
@@ -438,7 +468,10 @@ double steepest(const Curve& c, std::uint32_t i, double& at) noexcept;
 /// 0 (4.32); an arrival window not finite, or upside down (4.33). A speed
 /// optimisation left out with the speed continues the point before's.
 Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool repeat, const sim::VehicleState& state, const Performance& performance,
-                bool hovers, std::int16_t& bad, const Altimeter* altimeter = nullptr) noexcept;
+                bool hovers, std::int16_t& bad, const Altimeter* altimeter = nullptr, std::uint32_t loop = 0) noexcept;
+/// A linked route's point i ends its path (4.36; Paths.cpp): its path's last as given (none given, the route's last), or
+/// its next -1, the route's end there.
+bool endsPath(const Plan& p, std::uint32_t i) noexcept;
 /// A waypoint (A-GRA's WayPoint) or a loiter point: no turn there - flown over (4.29), or to its loiter (4.31).
 inline bool noTurn(const Waypoint& w) noexcept {
     return w.kind == static_cast<double>(EndPointKind::Waypoint) || w.kind == static_cast<double>(EndPointKind::LoiterPoint);
@@ -455,7 +488,8 @@ void completeLoiters(Plan& p, const sim::VehicleState& state, const Performance&
 /// Its loiters' fault (4.31), the point's index at fault, or -1: a loiter point with no loiter or a loiter at no loiter
 /// point (a point past the route: its number), two for one point; a loiter given its own place (a latitude, longitude,
 /// altitude or reference, a frame or its offsets: its point's are its); an end time not finite; no end - no
-/// duration, laps or end time - but at the last point of a route that does not repeat.
+/// duration, laps or end time - but at the last point of a route that does not repeat. A linked route's points it does
+/// not fly are held too, their loiters kept as given (4.36): no end is theirs to have.
 int loiterFault(const Plan& p) noexcept;
 /// An orbit's way in, where its loiter begins at (lat, lon) (4.31): its entry point where the tangent from there meets
 /// its circle, the way it turns, into `shape` - so it is joined on its course; none inside the circle, for two circles, or
@@ -472,6 +506,24 @@ inline RouteLoiter unplaced(RouteLoiter l) noexcept {
     l.shape.frame = l.shape.frameRotation = l.shape.frameOffsets = l.shape.frameXM = l.shape.frameYM = l.shape.frameZM = kHold;
     return l;
 }
+/// Its paths' fault (docs/flight-autonomy.md, 4.36; Paths.cpp): more than 16, a type that is none, a path of none, paths that
+/// do not tile the `count` waypoints in order, two with one id - the first point of the one at fault (0 for more than 16),
+/// or -1.
+int pathFault(const RoutePath* paths, std::uint32_t pathCount, std::uint32_t count) noexcept;
+/// A linked route's flight order (4.36): from point `start`, each point's next - its own, else the next in its path (paths
+/// given) or as they are - until the route's end, or a point flown before: where it loops back to (`repeat`, a route that
+/// ends goes back to its start). Their indices into `order`, their count returned; `loop` where a lap goes on from its last
+/// (-1: it does not). -1 for a next that is not a point's index or -1: `bad` the point.
+/// The points a linked route does not fly after those it flies, `flown` of them in `order`: the rest in their order as given.
+void orderRest(std::uint32_t* order, std::uint32_t flown, std::uint32_t count) noexcept;
+/// A path store's route linked (4.36; Paths.cpp): whether it is (paths, or a point's next), and a linked one's flight order
+/// from `c`'s start beside its points as given, as the host writes it. False where its paths or links make none it can fly
+/// - paths that do not tile its points, a next that is none, a start that is none, round one point - the store as it was.
+bool linkStore(PathStore& store, const RouteCommand& c) noexcept;
+int flightOrder(const Waypoint* points, std::uint32_t count, const RoutePath* paths, std::uint32_t pathCount, std::uint32_t start, bool repeat,
+                std::uint32_t* order, std::int32_t& loop, std::int16_t& bad) noexcept;
+/// A route is linked: paths given, or a point's next.
+bool linked(const Waypoint* points, std::uint32_t count, std::uint32_t pathCount) noexcept;
 /// Where each of its states is (4.34; States.cpp), `p` planned: its place's along its segment's leg as the first lap flies
 /// it, and along that lap - within the piece of the leg the lap flies, between its turns.
 void placeStates(Plan& p) noexcept;

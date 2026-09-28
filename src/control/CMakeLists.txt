@@ -42,7 +42,8 @@ add_library(fsim_control STATIC
     Nurbs.cpp
     Climb.cpp
     Arrival.cpp
-    States.cpp)
+    States.cpp
+    Paths.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

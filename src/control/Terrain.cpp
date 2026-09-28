@@ -240,7 +240,7 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
             const double start = before ? before->leadM : 0.0;
             const double end = loiter ? std::max(start, l.lengthM - joinM) : l.lengthM - (turns ? turn.leadM : 0.0);
             const double arcM = turns ? turn.radiusM * std::abs(turn.angleRad) : 0.0;
-            const auto index = static_cast<std::int16_t>(i);
+            const auto index = static_cast<std::int16_t>(std::min<std::uint32_t>(p.named(i), 0x7FFF)); // (as given: 4.36)
             if (walk.piece(end - start, f.speedMs, above, index, [&](double x, double& lat, double& lon, double& h) {
                     onLegAt(l, start + x, lat, lon);
                     h = f.at(start + x);
@@ -271,14 +271,14 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         for (std::uint32_t i = p.start; i < p.count; ++i)
             if (leg(i, true)) return walk.hit;
         if (p.repeat) {
-            for (std::uint32_t i = 0; i < p.count; ++i)
+            for (std::uint32_t i = p.loop; i < p.count; ++i) // (a lap on, from where it repeats from: 4.36)
                 if (leg(i, false)) return walk.hit;
             return walk.hit;
         }
         const Waypoint& w = p.points[p.last()];
         if (route::loiterPoint(w)) return walk.hit; // (it ends in its loiter, walked)
         const bool above = aboveGround(w.altitudeReference);
-        const auto index = static_cast<std::int16_t>(p.last());
+        const auto index = static_cast<std::int16_t>(std::min<std::uint32_t>(p.named(p.last()), 0x7FFF));
         auto height = [&](double x) { return last.at(last.lengthM + x); };
         if (p.end == EndBehavior::Loiter && hovers) { // a rotorcraft stops over the point, and settles at its altitude
             walk.piece(0.0, 0.0, above, index, [&](double, double& lat, double& lon, double& h) { lat = w.latitudeRad, lon = w.longitudeRad, h = last.to; });

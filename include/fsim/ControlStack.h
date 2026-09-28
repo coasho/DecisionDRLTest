@@ -49,9 +49,13 @@ public:
     /// path store: at most PathStore::kWaypoints of them. What they leave out
     /// is filled in as a World's host would, from the flight when it starts.
     /// Its loiter points' loiters beside them (docs/flight-autonomy.md, 4.31;
-    /// at most PathStore::kRouteLoiters), and its planned inertial states
-    /// (4.34; at most PathStore::kRouteStates, each with its place).
-    void command(const RouteCommand& route, Span<const Waypoint> waypoints, Span<const RouteLoiter> loiters = {}, Span<const RouteState> states = {});
+    /// at most PathStore::kRouteLoiters), its planned inertial states (4.34;
+    /// at most PathStore::kRouteStates, each with its place), and its paths
+    /// (4.36; at most PathStore::kRoutePaths): flown along its links from its
+    /// start - links it cannot fly (paths that do not tile its points, a next
+    /// that is none, round one point) leave it nothing to fly, and it fails.
+    void command(const RouteCommand& route, Span<const Waypoint> waypoints, Span<const RouteLoiter> loiters = {}, Span<const RouteState> states = {},
+                 Span<const RoutePath> paths = {});
     /// A curve (fsim.guidance.curve) with its segments, into the stack's own
     /// path store (at most PathStore::kSegments), flown afresh; unchecked, as
     /// every command given the stack on its own. Bezier segments, or as

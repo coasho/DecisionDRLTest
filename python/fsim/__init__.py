@@ -139,6 +139,8 @@ from .world import (  # noqa: E402
     Rejected,
     RouteLoiter,
     RouteState,
+    RoutePath,
+    PathType,
     Scenario,
     SUPPORT_FEATURES,
     Source,

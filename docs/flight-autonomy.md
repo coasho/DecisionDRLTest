@@ -707,8 +707,8 @@ A-GRA's route segment ends at an end point that is one of three: a WayPoint ("a 
 - **A barometric altitude** on a route is flown on its isobar, as the hsa's (4.22): the behaviour reads it through the altimeter at every update, and the host's checks compare heights above sea level, the terrain walk too. Until FA-6a a route refused it `not_implemented`.
 - **Its kind** (`kind`, `EndPointKind`): left out, a turn point as `turn` says, as before. A waypoint is flown over, its next leg joined after it. A loiter point flies the loiter beside it (4.31); until FA-6b2 it was refused `not_implemented`, naming the point.
 - **A waypoint's type** (`waypointType`, `WaypointType`, A-GRA's WaypointTypeEnum): given alone, it makes the point a waypoint; given with another kind, it is refused `invalid_waypoint`.
-  - Nav only and passive are flown. The end of a path is taken on the route's last point: a route is one path until FA-6e.
-  - The others ask for an action FA does not fly yet. Each is answered as its row in the support table says, naming the point: `not_supported` where the aircraft cannot, else `not_implemented`. They are a taxi's points (FA-9, where the aircraft taxies), a runway's and a takeoff's (FA-9), an approach's and a touchdown (FA-10), and a hard ditch (FA-16). The end of a path before the route's end is FA-6e's.
+  - Nav only and passive are flown. The end of a path is taken at its path's last point: the route's last until FA-6e1, then its path's as given (4.36) - a route without paths is one, and a point whose next is -1 ends it there. Where its path goes on it is none, refused `invalid_waypoint` naming the point (until FA-6e1, `not_implemented`).
+  - The others ask for an action FA does not fly yet. Each is answered as its row in the support table says, naming the point: `not_supported` where the aircraft cannot, else `not_implemented`. They are a taxi's points (FA-9, where the aircraft taxies), a runway's and a takeoff's (FA-9), an approach's and a touchdown (FA-10), and a hard ditch (FA-16).
 - **A point in a frame** (`frame`, `frameRotation`, `frameOffsets`, `frameXM`, `frameYM`, `frameZM`, as a pattern's point in 4.25): its latitude and longitude are where the frame puts it, and those given are not read. Given a z, its altitude is the frame's there, above sea level.
   - Refused `invalid_waypoint`, naming the point: a frame the world does not have; its fields out of range; offsets without a frame; a seventeenth frame in one route (the path store keeps 16).
   - The host places the points at the NEW, where the frames are then; its checks (turns, gradients, terrain, endurance) see the route so placed. The path store keeps each frame as it was then; a moving one goes on at its velocity from there.
@@ -860,7 +860,7 @@ A-GRA's path segment carries planned inertial states (MA_PathSegmentType.Inertia
   - a state at or after a loiter point, whose leg after the loiter is flown from where it ends;
   - on a route with a point in a moving frame, whose legs move;
   - a timed state on an aircraft without performance tables, as a window's (4.33).
-- **Kept** as the loiters are: an UPDATE's new waypoints come with their states, and without new waypoints it keeps its own. A route kept waiting as it is reset resumes at the point it flew to, with the states beyond it.
+- **Kept** as the loiters are: an UPDATE's new waypoints come with their states, and without new waypoints it keeps its own. A route kept waiting (disabled, unassigned) resumes at the point it flew to, with the states beyond it. Reset, it flies all its states again, those it flew past too (since FA-6e1: 4.36).
 - **Reported:** the arrival estimate (4.33) is the next timed target's, a state's time too. The setpoint reads its states back as placed: one in a frame with its latitude, longitude and altitude where the frame was at its time.
 - **A route's times taken together** (a named change to 4.33): FA-6d1 checked each window from now alone. A route's windows and its states' times are now checked in turn along its first lap, each from the earliest and the latest the aircraft can be at the one before, and its climbs no faster than it climbs them. So two windows it could make each alone, but not both, are refused (`MaxAirspeed` at the second). The first is checked as before.
 - **Surfaces.**
@@ -886,6 +886,34 @@ A-GRA's path segment gives a required navigation performance (MA_PathSegmentType
   - C++: `Waypoint::rnpM`; `kActivityNavigationPerformance` (`fsim/Capability.h`).
   - C ABI 1.32: `fsim_waypoint`'s `rnp_m`, where the caller's `struct_size` has it (`fsim_waypoint_init` leaves it out); the activity info's `constraints` bit 32.
   - Python: `fsim.Waypoint`'s `rnp_m`; `fsim.ActivityFlag` (its NAVIGATION_PERFORMANCE and the other five) for `ActivityInfo.constraints`; `fsim.agra.activity_state` reads it as partly constrained.
+
+### 4.36 A-GRA's paths and links (as FA-6e1 builds them)
+
+A-GRA's route is a set of paths (MA_RouteType.Path, each an MA_RoutePathType): a primary path, "alternate routes and contingency routes which branch from the primary path", and paths standing alone. A path has an id and a type (MA_PathTypeEnum: primary, alternate, loss of comm, return to base, ingress, egress, a takeoff's, a landing's, a ditch's and the carrier's departure and recovery, twenty in all). Its segments are not given in flight order: each segment's NextPathSegment names the one flown after it, in its own path or another, and its ConditionalPathSegment one flown when its conditions hold. ADR-29 plans the paths and their links (WPT-13, WPT-14) and the branches (WPT-15) as FA-6e. FA-6e1 builds the paths and their links; FA-6e2 builds the branches.
+
+- **A path** (`RoutePath`, beside the waypoints as the loiters are; 16 a route at most): its id (`id`, A-GRA's PathID), its type (`type`, `PathType`: A-GRA's twenty; left out, primary) and its points, `count` of the waypoints from `first`. The paths tile the waypoints in order: the first from point 0, each from where the one before ends, the last to the route's last point. Given none, a route is one path, as before. A path's type is a label, read back: what a path does is its points' (a landing's points are FA-10's, 4.29).
+- **A link** (`next`, the Waypoint's field 28; A-GRA's NextPathSegment): the index of the point flown after it, in its path or another; -1, the route's end there. Left out, the next point in its path, and after its path's last the route's end; without paths, the next as they are, as before. A-GRA's segments, given in any order, are these points in some order, each with its next; its route's first path (FirstInRoutePathID) is the one its start is on.
+- **Its flight order:** from its start (`RouteCommand::start`, point 0 by default) along each point's next, until the route's end or a point it has flown before. Its laps go round from there, on and on. A route given `repeat` whose flight ends goes back to its start, as before.
+  - Its points are flown in that order, as any route's are: each turn by the legs into and out of its point in that order, and a lap's last leg from its last point back to the point it goes round from, with the turn there.
+  - A point it never comes to is not flown, but it is checked as a point is, in their order as given. A loiter on one is kept as given: checked as a loiter, not completed. An arrival window there is never due. A planned state there is refused, as one on a segment its first lap does not fly (4.34).
+  - Its loiters (4.31), arrival windows (4.33) and planned states (4.34) are at their points as flown: a window or a state at or after a loiter point in that order is not implemented, as before.
+- **Named as given:** a point is named everywhere by its index as given - a refusal's, a finding's and an adjustment's index, its progress's segment (its segments the points given), its end points, and its loiters' and states' points read back. Its end points come in its flight order, round its laps.
+- **The end of a path** (A-GRA's END_OF_PATH; a named change to 4.29): taken at its path's last point - a route without paths, its last - and at a point whose next is -1. Where its path goes on it is none, refused `invalid_waypoint` naming the point. Until FA-6e1 it was `not_implemented`, the end of a path before the route's end.
+- **Refused `invalid_waypoint`, naming the point:**
+  - 17 paths or more (point 0);
+  - paths that do not tile the points - one of none, one that does not begin where the one before ends, one that runs past the route, points no path holds after the last - at the first point at fault: where the one before ended, or its own first;
+  - a type not one of the twenty, or an id twice (the path's first point);
+  - a next that is neither a point's index nor -1;
+  - a lap round one point: that is a loiter point's loiter (4.31).
+- **Not implemented** (as its support row, `fsim.guidance.route/next_segment`, says: partial): a start turn (4.30) at the point its links go round from, its course left out. Its arc's tangent is the course of the leg into it, and its laps come to it from another point than its first lap does. It is named after the checks a point has.
+- **Kept** as the loiters are: an UPDATE's new waypoints come with their paths (none given: one path), and without new waypoints it keeps its own. A route kept waiting (disabled, unassigned: 4.10) resumes at the point it flew to along its links, with the states beyond it in its flight order.
+- **Reset** (4.10; a named change to 4.34): over from its first start, a linked route along its links from there, with all its states - those it flew past before it was kept waiting too. Until FA-6e1 a route reset after it had resumed flew without those, and a linked one would have gone on from where it resumed.
+- **A stack on its own** (`ControlStack::command`, unchecked) takes its paths too, and flies along its links from its start; links it cannot fly leave it nothing to fly, and its behaviour fails.
+- **The support rows,** `fsim.guidance.route/paths` supported and `fsim.guidance.route/next_segment` partial (the start turn above), are the same on every aircraft: they need nothing an aircraft may lack.
+- **Surfaces.**
+  - C++: `RoutePath` and `PathType` (`fsim/Control.h`); `Waypoint::next`; a `Span<const RoutePath>` after the states in `World::submit` and `World::update` (a route's), `ControlStack::command`, `BatchCommand::paths`, `Setpoint::paths`; `PathStore::routePaths`, and the flight order beside the points as given.
+  - C ABI 1.33: `fsim_route_path` (`fsim_route_path_init`: none of it given) and `enum fsim_path_type`; `fsim_waypoint`'s `next`, where the caller's `struct_size` has it (`fsim_waypoint_init` leaves it out); `fsim_route_extras` (a route's loiters, states and paths together; `fsim_route_extras_init`: none), taken by `fsim_vehicle_submit_route_extras` and `fsim_activity_update_route_extras`; `fsim_batch_command`'s `paths` and `path_count`, filled by `fsim_activity_get_setpoint`.
+  - Python: `fsim.RoutePath(id, type, first, count)`, its type by name or `fsim.PathType`; `fsim.Waypoint`'s `next`; `paths=` beside `states=` in `submit_route` and `update_route`, and in a batch's or a task's `BatchCommand("submit_route", ...)`; read back in the setpoint's `paths`.
 
 ## 5. Applicability (D6)
 
@@ -1125,7 +1153,9 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
   - FA-6d1, required times of arrival (WPT-11; 4.33), done 2026-09-28 and measured in section 14;
   - FA-6d2, planned inertial states (WPT-20; 4.34), done 2026-09-28 and measured in section 14;
   - FA-6d3, required navigation performance (WPT-21; 4.35), done 2026-09-28 and measured in section 14;
-- FA-6e, paths: several per route with ids and types, links and conditional branches (WPT-13, WPT-14, WPT-15);
+- FA-6e, paths, in two steps:
+  - FA-6e1, paths with ids and types, and their links (WPT-13, WPT-14; 4.36), done 2026-09-28 and measured in section 14;
+  - FA-6e2, conditional branches (WPT-15);
 - FA-6f, civil path terminators (WPT-19).
 
 **Items (15):** WPT-04, WPT-06, WPT-08, WPT-10, WPT-11, WPT-12, WPT-13, WPT-14, WPT-15, WPT-17, WPT-18, WPT-19, WPT-20, WPT-21, WPT-22.
@@ -2348,6 +2378,31 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases are within −0.0 % to +3.0 %: the same level's update +3.0 % in one run (its minimum 0.1 ns more) and 0.0 % in the other.
   - World throughput is 100.1 to 100.9 % of FA-6d2's; protection costs at most 0.7 %.
 - ctest: all 310 tests pass.
+
+**FA-6e1, A-GRA's paths and links (WPT-13, WPT-14).**
+- **Flown** (`test_route_paths`, calm): three paths - A, two points east; B, four points round a square, its last linked back to its first; C, two points behind, linked from nowhere - flown by a C172 at 3 km a unit and an IRIS at 20 m a unit (3 m/s over the ground), for 900 s:
+  - the C172 flew 0 1 2 3 4 5 2 3 4 5 2 3 4 5 2: A, then three laps round B. It passed within 27 m of A's points and 132 m of B's (its fly-by arcs cut B's corners), and never came nearer C than 3,000 m;
+  - the IRIS flew A, then 37 laps round B, within 2.36 m of B's points, and never nearer C than 20.0 m (A's first point is that far from it);
+  - their end points came in that order, round B (0 1 2 3 4 5 2 3), and the setpoint read their points, links and paths back as given.
+- **Refused `invalid_waypoint`, naming the point** as given: a point no path holds (2), a path of none (6), a type that is none (2), an id twice (6), a next of 2.5 (3) or past the route (4), a lap round one point (5). A link to -1 ends the route there (end points 0 1 2 3); links without paths take the points as they are (0 1 4 5 2 3 4 5).
+- **A path it does not fly, held as given:** C's last a loiter point with its hold - accepted, the hold read back as given (its radius left out: not completed), never flown. Without its hold, refused at 7; a planned state on C, refused at 6 (4.34).
+- **The end of a path** (a named change to 4.29): taken at A's last and at B's (which links back round); in B's middle refused `invalid_waypoint` at 3, where FA-6a answered `not_implemented` (`test_route_points` now says so).
+- **Not implemented:** a start turn at B's first, where its links go round, its course left out: at 2. Its course given, not so.
+- **Kept waiting and reset** (a named change to 4.34): a route from 0 on to 4, 5, then 2 and 3 (0 1 4 5 2 3, round from 4), a state on the leg into 4 and one on the leg into 2. Disabled flying to 5 and enabled, it went on at 5 - end points 5 2 3 4 5 2 3 4 - with the state into 2, not the one into 4 it had passed (as given 4 comes after 2; FA-6d2 kept those beyond by their index). Reset as it flew, and again reset as it waited: from 0 along its links (0 1 4 5 2 3 4 5), with both states. Before FA-6e1 a reset after a resume flew without the states passed, and a linked route would have gone on from where it resumed: without the new reset step, three of the test's checks fail.
+- **A stack on its own** (`ControlStack::command`): three paths, A's last linked to -1: 6 km to go, not the 20 its points make in their order. A lap round one point: its behaviour fails.
+- **The fleet** (`test_fleet`): every aircraft's route of three paths - one point half a minute ahead, linked into a square of half-minute sides linked round and round; one point a minute behind to the left, linked from nowhere. All 35 flew 0 1 2 3 4 1 2, and on round the square; none came nearer the third path's point than its start, a minute from it (2.99 of its scale at the worst, the EC-130H).
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6d3's build: a route without paths or links plans and flies as before.
+- **The support table:** `route/paths` supported, `route/next_segment` partial (the start turn above), on every aircraft; `route/conditional_segment` not implemented (FA-6e2). The route capability's pending list names the start turn, conditional branches and path terminators.
+- **Conformance:** the optimise walks give routes paths now and then (one to three, of types drawn; now and then a type that is none, paths that do not tile the points, an id twice) and links (the last point back to one before, a jump, the route's end, a next that is none) - links only where what they may reorder is built, so those walks answer `not_implemented` nowhere on aircraft with tables, as before. Most of what they draw is refused, as their other routes are: the walks hold the refusals to the lifecycle's rules, the fleet and `test_route_paths` fly.
+- **Surfaces:** the C ABI's 1.33 block (two paths, the second round and round: read back, end points in its flight order 0 1 2 3 4 2; a point no path holds refused `invalid_waypoint` at 2); Python's `test_route_paths` (paths by name and by member, read back; end points and its flight in that order; refused at 2).
+- **Memory:** a waypoint is 232 bytes where it was 224. The path store is 2.9 KB larger (its waypoints, 16 paths, the flight order), and the host's route plan and each route behaviour's plan 4.6 KB (their waypoints, the flight order and where each point is in it, 16 paths, a later lap's leg and turn). A route behaviour holds the leg and turn it flies to (16 bytes). The activity record is as it was (304 bytes); a batch item grows 16 bytes, a setpoint 24.
+- **Digests:** identical to FA-6d3's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6d3, both builds run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`.
+  - The micro cases are within −1.1 % to +2.4 %: the attitude case's median +2.4 % (its least 0.2 ns more), a route's +1.8 %. That route figure is where its copy ran from: the same executable copied to another directory as long read 1.4 % faster. Run from three copies of each build, their medians' median, every micro case is within −0.7 % to +1.1 %, a route's −0.2 %.
+  - The route follower takes the leg to its point and the turn there once, as it aims (`RouteBehavior::legTo_`, `turnAt_`). Before, it asked the plan at every call, each ask now minding a later lap's own leg and turn, and its update was 576 bytes longer than FA-6d3's; now 240, and its `locate` 144 shorter.
+  - The command cases are within −4.5 % to +3.0 %: the same level's update +3.0 % and +1.5 % (its least the same 6.6 ns in one run, 0.2 ns more in the other), a behaviour's NEW −4.1 % and −4.5 %.
+  - World throughput is 99.3 to 100.7 % of FA-6d3's; protection costs at most 1.1 %.
+- ctest: all 315 tests pass.
 
 ## Appendix A: the inventory
 

@@ -89,6 +89,7 @@ struct Plan;
 struct Pattern;
 struct Curve;
 struct Fix;
+struct Leg;
 struct Turn;
 struct Ahead;
 struct Steer;
@@ -171,6 +172,9 @@ private:
     void scheduleArrival(const ControlContext& ctx, const Performance& performance, double routeM, route::Steer& steer);
     /// Its planned states from the path store (4.34; States.cpp): false for one without a place, or past the route.
     bool takeStates(const ControlContext& ctx) noexcept;
+    /// A linked route's points from the path store in its flight order (docs/flight-autonomy.md, 4.36; Paths.cpp): true
+    /// for one, its plan's count, repeat and loop the host's.
+    bool takeOrder(const ControlContext& ctx) noexcept;
     /// Its next timed target this lap, from `lapM` along it (4.33, 4.34): the nearest of the next point with an arrival
     /// window and a timed state not passed; and whether the segment flown has states' altitudes. Its schedule kept while
     /// it is the one.
@@ -232,6 +236,10 @@ private:
     const RouteLoiter* loiterAhead_ = nullptr; ///< the point flown to's (the plan's); null for none
     double reachM_ = 0.0;              ///< how far before the point flown to it is reached: a loiter's join, a stop's metre
     bool loitering_ = false;           ///< its loiter flies
+    // the leg to the point flown to and the turn there, as this lap flies them (the plan's: the entry, a later lap's own
+    // where it comes back to - 4.36 - or the legs' and turns'): chosen as it aims, read as it flies
+    const route::Leg* legTo_ = nullptr;
+    const route::Turn* turnAt_ = nullptr;
 };
 
 /// "pattern": fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md,
