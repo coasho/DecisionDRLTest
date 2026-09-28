@@ -25,9 +25,9 @@ COMMAND_PROCESSING_STATE = {0: "ACCEPTED", 1: "REJECTED", 2: "CANCELED", 3: "ACC
 #: fsim.RequirementKind names -> the element of A-GRA's RequirementInstanceID_ChoiceType a Traceability names
 REQUIREMENT = {"effect": "EffectID", "action": "ActionID", "task": "TaskID", "command": "CapabilityCommandID"}
 
-#: Constraint flags an active activity carries: the demand limited, a value clamped, a support axis taken
-#: (partly constrained); an effector at its stop, a limit exceeded (fully constrained).
-_PARTLY = 2 | 8 | 16
+#: Constraint flags an active activity carries: the demand limited, a value clamped, a support axis taken, a route off
+#: its required navigation performance (partly constrained); an effector at its stop, a limit exceeded (fully constrained).
+_PARTLY = 2 | 8 | 16 | 32
 _FULLY = 1 | 4
 
 #: reason names (fsim.Rejected.reason, ActivityInfo.reason) -> CannotComplyEnum

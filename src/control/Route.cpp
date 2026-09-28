@@ -1079,6 +1079,7 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
         if (!within(w.accelerationMs2, 0.0, inf)) return invalid(i);
         // its arrival window (4.33): its times finite, its begin not after its end
         if (!within(w.arrivalBeginS, -inf, inf) || !within(w.arrivalEndS, -inf, inf) || w.arrivalBeginS > w.arrivalEndS) return invalid(i);
+        if (!within(w.rnpM, 0.0, inf)) return invalid(i); // (its required navigation performance: 4.35)
         const bool altitudeGiven = !isHold(w.altitudeM);
         w.longitudeRad = geo::wrapPi(w.longitudeRad);
         if (i == 0) {

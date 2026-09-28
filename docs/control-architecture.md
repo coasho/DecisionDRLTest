@@ -646,6 +646,7 @@ enum ActivityFlag : std::uint16_t {
     kActivityExceeded      = 1 << 2,   ///< from the report: the state was beyond a limit on its axes
     kActivityClamped       = 1 << 3,   ///< from the host: a setpoint was clamped to the advertised range
     kActivityAxesReduced   = 1 << 4,   ///< from the host: another activity took one of its support axes
+    kActivityNavigationPerformance = 1 << 5, ///< from its behaviour: a route off its segment's RNP (ADR-29, flight-autonomy.md 4.35)
 };
 
 struct ActivityRecord {

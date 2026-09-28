@@ -75,6 +75,7 @@ from .world import (  # noqa: E402
     MODE_KINDS,
     Activity,
     ActivityBasis,
+    ActivityFlag,
     ActivityInfo,
     ActivityProgress,
     ActivityWait,

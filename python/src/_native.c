@@ -1001,19 +1001,19 @@ static PyObject* world_submit_mode(PyObject* o, PyObject* const* args, Py_ssize_
  * out. *out is PyMem-allocated (free it); the count, or -1 with an error set. */
 static Py_ssize_t read_waypoints(PyObject* o, fsim_waypoint** out) {
     *out = NULL;
-    PyObject* seq = PySequence_Fast(o, "waypoints must be a sequence of 10-, 20-, 22-, 25- or 27-number rows");
+    PyObject* seq = PySequence_Fast(o, "waypoints must be a sequence of 10-, 20-, 22-, 25-, 27- or 28-number rows");
     if (!seq) return -1;
     const Py_ssize_t count = PySequence_Size(seq);
     fsim_waypoint* points = (fsim_waypoint*)PyMem_Malloc(sizeof(fsim_waypoint) * (size_t)(count ? count : 1));
     for (Py_ssize_t i = 0; points && i < count; ++i) {
         PyObject* row = PySequence_GetItem(seq, i);
-        PyObject* r = row ? PySequence_Fast(row, "each waypoint must be 10, 20, 22, 25 or 27 numbers") : NULL;
+        PyObject* r = row ? PySequence_Fast(row, "each waypoint must be 10, 20, 22, 25, 27 or 28 numbers") : NULL;
         fsim_waypoint* w = &points[i];
         fsim_waypoint_init(w);
         const Py_ssize_t size = r ? PySequence_Size(r) : 0;
-        if (r && (size == 10 || size == 20 || size == 22 || size == 25 || size == 27)) {
-            double v[26];
-            for (int k = 0; k < 26; ++k) v[k] = fsim_hold();
+        if (r && (size == 10 || size == 20 || size == 22 || size == 25 || size == 27 || size == 28)) {
+            double v[27];
+            for (int k = 0; k < 27; ++k) v[k] = fsim_hold();
             for (Py_ssize_t k = 0; k < size && !PyErr_Occurred(); ++k) {
                 if (k == 9) continue; /* (its id, below) */
                 PyObject* item = PySequence_GetItem(r, k);
@@ -1033,6 +1033,7 @@ static Py_ssize_t read_waypoints(PyObject* o, fsim_waypoint** out) {
             w->course_rad = v[19], w->turn_radius_m = v[20];
             w->speed_optimization = v[21], w->climb_optimization = v[22], w->acceleration_ms2 = v[23];
             w->arrival_begin_s = v[24], w->arrival_end_s = v[25];
+            w->rnp_m = v[26];
         } else if (r) {
             PyErr_SetString(PyExc_ValueError, "each waypoint must be (latitude_rad, longitude_rad, altitude_m, altitude_reference, speed, "
                                               "speed_reference, turn, max_bank_rad, climb_rate_ms, id), and from ABI 1.26 its A-GRA fields");
@@ -1873,11 +1874,12 @@ static PyObject* world_activity_setpoint(PyObject* o, PyObject* const* args, Py_
         waypoints = PyList_New(0);
         for (uint32_t i = 0; waypoints && i < b.waypoint_count; ++i) {
             const fsim_waypoint* w = &b.waypoints[i];
-            PyObject* row = Py_BuildValue("(dddddddddKddddddddddddddddd)", w->latitude_rad, w->longitude_rad, w->altitude_m, w->altitude_reference,
+            PyObject* row = Py_BuildValue("(dddddddddKdddddddddddddddddd)", w->latitude_rad, w->longitude_rad, w->altitude_m, w->altitude_reference,
                                           w->speed, w->speed_reference, w->turn, w->max_bank_rad, w->climb_rate_ms, (unsigned long long)w->id,
                                           w->altitude_min_m, w->altitude_max_m, w->kind, w->waypoint_type, w->frame, w->frame_rotation,
                                           w->frame_offsets, w->frame_x_m, w->frame_y_m, w->frame_z_m, w->course_rad, w->turn_radius_m,
-                                          w->speed_optimization, w->climb_optimization, w->acceleration_ms2, w->arrival_begin_s, w->arrival_end_s);
+                                          w->speed_optimization, w->climb_optimization, w->acceleration_ms2, w->arrival_begin_s, w->arrival_end_s,
+                                          w->rnp_m);
             if (!row || PyList_Append(waypoints, row) < 0) Py_CLEAR(waypoints);
             Py_XDECREF(row);
         }

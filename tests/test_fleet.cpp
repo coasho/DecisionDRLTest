@@ -1821,6 +1821,64 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
                 CHECK(std::abs(f.off[j]) < std::max(3.0, 0.25 * f.dh));
             }
         });
+    // A-GRA's required navigation performance (ADR-29 FA-6d3: WPT-21): half a minute straight on at its speed, an RNP of a
+    // fifth of its scale; a fly-over point there, a quarter turn right, and half a minute on at an RNP of 0.1 m. Straight on it
+    // never says it is off; past the corner it does, at every step that ends farther off than 0.1 m and at none that ends
+    // well within it
+    struct RnpRoute {
+        double farthest[2] = {0.0, 0.0};
+        int flagged[2] = {0, 0}, missed = 0, spurious = 0;
+        bool seen = false;
+    };
+    std::map<std::uint32_t, RnpRoute> rnpRoutes;
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
+            const double v = p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, ahead = 30.0 * v;
+            rnpRoutes[p.id] = RnpRoute{};
+            auto point = [&](double north, double east) {
+                const PositionCommand q = pointFrom(p.start, north, east, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            Waypoint a = point(ahead * c, ahead * sn), b = point(ahead * c - ahead * sn, ahead * sn + ahead * c);
+            a.speed = v, a.turn = static_cast<double>(TurnType::FlyOver), a.rnpM = 0.2 * p.scale(), b.rnpM = 0.1;
+            if (p.rotor) a.speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+            const CommandResult res = w.submit(p.id, RouteCommand{}, std::vector<Waypoint>{a, b});
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index);
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        [&](const Plane&) { return 60.0 * 1.3 + 20.0; },
+        [&](const Plane& p) {
+            RnpRoute& f = rnpRoutes[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            if (!r.live()) return;
+            const std::uint32_t k = std::min<std::uint32_t>(r.progress.segment, 1);
+            const bool flagged = (r.constraints & kActivityNavigationPerformance) != 0;
+            const double off = std::abs(r.progress.crossTrackM);
+            f.farthest[k] = std::max(f.farthest[k], off);
+            if (flagged) ++f.flagged[k];
+            if (k == 1 && off > 0.1 && !flagged) ++f.missed;
+            if (k == 1 && off < 0.09 && flagged) ++f.spurious;
+            f.seen = (r.constraintsSeen & kActivityNavigationPerformance) != 0;
+        },
+        [&](const Plane& p, const Lows&) {
+            const RnpRoute& f = rnpRoutes[p.id];
+            INFO("straight on " << f.farthest[0] << " m off at most (RNP " << 0.2 * p.scale() << " m), said so " << f.flagged[0] << " times; past the corner "
+                                << f.farthest[1] << " m off at most (RNP 0.1 m), said so " << f.flagged[1] << " times, missed " << f.missed
+                                << ", well within " << f.spurious);
+            // (the worst: straight on the UH-1H 5.86 m off, of 60; every wing within 0.95 m. Past the corner a wing 150 m (the
+            // Skua) to 7.6 km (the C-17A) off, turning as it can after flying over it; a rotorcraft 1.4 m (the Crazyflie) to 60 m)
+            CHECK(f.flagged[0] == 0);
+            CHECK(f.farthest[1] > 0.1);
+            CHECK(f.flagged[1] > 0);
+            CHECK(f.seen);
+            CHECK(f.missed == 0);
+            CHECK(f.spurious == 0);
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

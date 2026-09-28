@@ -868,6 +868,25 @@ A-GRA's path segment carries planned inertial states (MA_PathSegmentType.Inertia
   - C ABI 1.31: `fsim_route_state` (`fsim_route_state_init`: every field left out), its 29 fields in `RouteState`'s order (`fsim/fsim_c.h` lists them); `fsim_vehicle_submit_route_states`, `fsim_activity_update_route_states`; `fsim_batch_command`'s `states` and `state_count`, where the caller's struct has them, filled by `fsim_activity_get_setpoint`.
   - Python: `fsim.RouteState`, by name or member; `states=` beside `loiters=` in `submit_route` and `update_route`, and in a batch's or a task's `BatchCommand("submit_route", ...)`; read back in the setpoint's `states`.
 
+### 4.35 A-GRA's required navigation performance (as FA-6d3 builds it)
+
+A-GRA's path segment gives a required navigation performance (MA_PathSegmentType.RequiredNavigationPerformanceInMeters, a distance): "the navigation performance accuracy required in an airspace", in metres rather than RNP's nautical miles. ADR-29 plans it as a monitor (WPT-21): the cross-track against it, reported and alerted. FA-6d3 builds that.
+
+- **Its RNP** (`rnpM`, the Waypoint's field 27): how far off its path its segment may be flown, in metres. Left out, the segment has none; unlike most of a point's fields, it does not continue the previous point's (an airspace's RNP is the segment's own).
+- **Refused `invalid_waypoint`, naming the point:** an RNP not above 0, or not finite.
+- **Monitored** each control update, on every lap:
+  - the route's cross-track against the RNP of the segment it flies. Its path is its own: its legs, its fly-by turns' arcs and a start turn's arc (4.30), so a fly-by cutting its corner is on it;
+  - the platform navigates exactly: its total system error is its flight technical error, the cross-track the progress reports;
+  - not in a loiter point's loiter, which is no segment, nor past the route's end.
+- **Alerted:** farther off than its RNP, the route's behaviour says so (`Behavior::constraints`, `kActivityNavigationPerformance`). Its activity's record carries the flag for each world step in which it was (`constraints`) and every one since it started (`constraintsSeen`), as the platform's other constraint flags (docs/vehicle-interface.md). The record does not grow: its constraints have room. A-GRA reads it as ACTIVE_PARTIALLY_CONSTRAINED: performed, its performance limited.
+- **Reported:** the cross-track in the progress, as before; its RNP read back with its point.
+- **Nothing else is done:** a route off its RNP flies on as it would. What to do about it (a missed approach, a new clearance) is its policy's.
+- **The support row** (`fsim.guidance.route/required_navigation_performance`) is supported on every aircraft: the monitor needs nothing an aircraft may lack.
+- **Surfaces.**
+  - C++: `Waypoint::rnpM`; `kActivityNavigationPerformance` (`fsim/Capability.h`).
+  - C ABI 1.32: `fsim_waypoint`'s `rnp_m`, where the caller's `struct_size` has it (`fsim_waypoint_init` leaves it out); the activity info's `constraints` bit 32.
+  - Python: `fsim.Waypoint`'s `rnp_m`; `fsim.ActivityFlag` (its NAVIGATION_PERFORMANCE and the other five) for `ActivityInfo.constraints`; `fsim.agra.activity_state` reads it as partly constrained.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -1102,10 +1121,10 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
 - FA-6c, per-segment performance, in two steps:
   - FA-6c1, speed optimisation and acceleration (WPT-06, WPT-10; 4.32), done 2026-09-28 and measured in section 14;
   - FA-6c2, climb optimisation (WPT-08; 4.32), done 2026-09-28 and measured in section 14;
-- FA-6d, 4D, in three steps:
+- FA-6d, 4D, in three steps, done:
   - FA-6d1, required times of arrival (WPT-11; 4.33), done 2026-09-28 and measured in section 14;
   - FA-6d2, planned inertial states (WPT-20; 4.34), done 2026-09-28 and measured in section 14;
-  - FA-6d3, required navigation performance (WPT-21);
+  - FA-6d3, required navigation performance (WPT-21; 4.35), done 2026-09-28 and measured in section 14;
 - FA-6e, paths: several per route with ids and types, links and conditional branches (WPT-13, WPT-14, WPT-15);
 - FA-6f, civil path terminators (WPT-19).
 
@@ -2308,6 +2327,27 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - First passed down beside the loiters as a second span, the states made `submitWith` 544 bytes longer (58 instructions): Windows x64 passes a 16-byte struct by a hidden reference, copied as the function begins, and its registers were allocated afresh throughout. A behaviour's NEW read +2.7 % and +3.5 % (its minimum 131 ns, then 135), a level switch's +3.1 % and +1.9 %. A route's loiters and states now go down the host's private calls as one pointer (`RouteExtras`), null for anything not a route: `submitWith` is 48 bytes shorter than FA-6d1's, `prepare` too, and the NEWs read as above.
   - World throughput is 100.2 to 100.5 % of FA-6d1's; protection costs at most 0.6 %.
 - ctest: all 308 tests pass.
+
+**FA-6d3, A-GRA's required navigation performance (WPT-21).**
+- **Flown** (`test_route_rnp`, calm):
+  - three C172s east at 1,500 m, each given a route north - a quarter turn left onto its first leg, 3 km, then 5 km on - at an RNP of 20 m, 5 km and none. Turning onto its leg each was 386.1 m off at most. At 20 m its activity said so at 1,896 of the 1,908 steps it flew that segment: at every step that ended more than 20 m off (none missed), at none that ended under 18 m. On its second leg, still closing on it, 24.5 m off at most: said so for 184 steps, and no longer at its end, its `constraintsSeen` still holding it. At 5 km, and with none, never;
+  - a C172's fly-by turn, east 3 km then north 4 km, 17.5 m off its path at most: at 30 m it never said so, its arc on its path;
+  - an IRIS north 100 m, flown over, then east 100 m at 5 m/s over the ground: past the corner 3.2 m off its next leg at most. At 0.5 m it said so at 166 of 632 steps, none missed, none that ended well within it; its first segment, with none, never.
+- **Refused, naming the point:** an RNP of 0, −5 m, not finite (`invalid_waypoint`).
+- **The fleet** (`test_fleet`): every aircraft flies half a minute straight on at an RNP of a fifth of its scale; then a fly-over point, a quarter turn right and half a minute on at 0.1 m. All 35:
+  - straight on, none said so: the worst the UH-1H, 5.86 m off of 60; every wing within 0.95 m;
+  - past the corner every one did, at every step that ended more than 0.1 m off and at none that ended under 0.09 m: a wing 150 m (the Skua) to 7.6 km (the C-17A) off, turning as it can after flying over its point; a rotorcraft 1.4 m (the Crazyflie) to 60 m.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6d2's build: the monitor reads the cross-track and sets a flag; it flies nothing.
+- **The support table:** `route/required_navigation_performance` is supported on every aircraft. The route capability's pending list no longer names navigation performance.
+- **Conformance:** the optimise walks give points an RNP now and then: 1 m to 3 km, now and then 0.
+- **Surfaces:** the C ABI's 1.32 block (read back; a hangar C172 turning onto a leg 3 km to its right at 20 m, its activity's `constraints` and `constraints_seen` carrying 32; 0 refused `invalid_waypoint` at its point; `fsim_waypoint_init` leaving it out); Python's `test_route_rnp` (read back; `fsim.ActivityFlag.NAVIGATION_PERFORMANCE` in its constraints and those seen; `fsim.agra.activity_state` ACTIVE_PARTIALLY_CONSTRAINED; 0 refused).
+- **Memory:** a waypoint is 224 bytes where it was 216: the path store's 256, the host's route plan and each route behaviour's take 2 KB more. A route behaviour holds its last update's flags. The activity record is as it was.
+- **Digests:** identical to FA-6d2's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6d2, both builds run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`.
+  - The micro cases are within −3.2 % to +1.6 %: a route's −0.4 %.
+  - The command cases are within −0.0 % to +3.0 %: the same level's update +3.0 % in one run (its minimum 0.1 ns more) and 0.0 % in the other.
+  - World throughput is 100.1 to 100.9 % of FA-6d2's; protection costs at most 0.7 %.
+- ctest: all 310 tests pass.
 
 ## Appendix A: the inventory
 

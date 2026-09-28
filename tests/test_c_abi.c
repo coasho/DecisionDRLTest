@@ -1220,6 +1220,51 @@ int main(int argc, char** argv) {
                   cr.status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 2);
         }
         {
+            /* ABI 1.32 (4.35): a required navigation performance - read back; a hangar C172 turning onto a leg 3 km to its
+               right, 20 m off it and more, its activity's constraints saying so (32), and remembering it; one of 0 refused at
+               its point (reserved: its index + 1) */
+            fsim_waypoint pts[2];
+            fsim_batch_command sp;
+            fsim_activity_info info;
+            double options[4];
+            const fsim_vehicle_state* at;
+            fsim_activity_id route_id;
+            uint32_t monitored = 0;
+            double yaw, north, east;
+            int k;
+            spec.name = "cap-rnp";
+            spec.type = "jsbsim:c172";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 50.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &monitored) == FSIM_OK);
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            at = fsim_vehicle_state_ptr(world, monitored);
+            yaw = at->euler_rad[2], north = -sin(yaw), east = cos(yaw); /* (its right) */
+            for (k = 0; k < 2; ++k) {
+                fsim_waypoint_init(&pts[k]);
+                pts[k].latitude_rad = at->latitude_rad + (k + 1) * 3000.0 * north / 6371008.8;
+                pts[k].longitude_rad = at->longitude_rad + (k + 1) * 3000.0 * east / (6371008.8 * cos(at->latitude_rad));
+                pts[k].rnp_m = 20.0;
+            }
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_route(world, monitored, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            route_id = cr.activity;
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.waypoint_count == 2 && sp.waypoints[0].rnp_m == 20.0);
+            CHECK(fsim_world_step(world, 150) == FSIM_OK);
+            CHECK(fsim_activity_get(world, route_id, &info) == FSIM_OK);
+            CHECK((info.constraints & 32u) != 0 && (info.constraints_seen & 32u) != 0);
+            CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+            pts[1].rnp_m = 0.0;
+            CHECK(fsim_vehicle_submit_route(world, monitored, options, 4, pts, 2, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 2);
+            fsim_waypoint_init(&pts[0]);
+            CHECK(isnan(pts[0].rnp_m));
+        }
+        {
             /* ABI 1.6: the performance, and grants over the priorities (on a, whose live activities are its policy's) */
             fsim_performance perf;
             int32_t mode = -1, reason = -1, allowed = -1, granted = -1, availability = -1;

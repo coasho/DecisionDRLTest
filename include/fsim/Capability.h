@@ -499,6 +499,7 @@ enum ActivityFlag : std::uint16_t {
     kActivityExceeded = 1u << 2,      ///< the state was beyond a limit on its axes
     kActivityClamped = 1u << 3,       ///< a setpoint was clamped to the advertised range
     kActivityAxesReduced = 1u << 4,   ///< another activity took one of its support axes
+    kActivityNavigationPerformance = 1u << 5, ///< its route was farther off its path than its segment's required navigation performance
 };
 
 /// How far an activity has got and what it commands (docs/vehicle-interface.md,

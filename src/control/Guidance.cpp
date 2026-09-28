@@ -529,6 +529,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     const auto& s = ctx.sensed;
     if (resumed(ctx, lastTime_)) plan_->trims = route::Trims{}, wind_.reset();
     wind_.update(s, ctx.dt);
+    constraints_ = 0;
     const auto* command = std::get_if<RouteCommand>(&in);
     if (command && (!planned_ || !ctx.path || ctx.path->revision != revision_ || !same(*command, flown_))) restart(ctx, *command);
     const route::Plan& p = *plan_;
@@ -587,6 +588,8 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     // of the orbit round its point: the host may read it a few control updates later, when the world step ends)
     if (!ended_) crossTrack_ = fix.crossTrackM;
     else if (!wasEnded) crossTrack_ = lastCross_;
+    // off its path by more than the segment's required navigation performance (4.35): its exact navigation's total error its cross-track
+    if (!ended_ && !isHold(segment.rnpM) && std::abs(fix.crossTrackM) > segment.rnpM) constraints_ = kActivityNavigationPerformance;
     if (hovers_ && ended_ && p.end == EndBehavior::Loiter) { // stopped: hover over the last point
         const Waypoint& last = p.points[p.last()];
         course_ = heading_ = kHold;

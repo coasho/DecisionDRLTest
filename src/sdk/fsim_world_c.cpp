@@ -605,6 +605,7 @@ bool toWaypoints(fsim_world* w, const fsim_waypoint* waypoints, uint32_t count) 
         p.courseRad = c.course_rad, p.turnRadiusM = c.turn_radius_m; // (ABI 1.27)
         p.speedOptimization = c.speed_optimization, p.climbOptimization = c.climb_optimization, p.accelerationMs2 = c.acceleration_ms2; // (1.29)
         p.arrivalBeginS = c.arrival_begin_s, p.arrivalEndS = c.arrival_end_s; // (1.30)
+        p.rnpM = c.rnp_m;                                                     // (1.32)
     }
     return true;
 }
@@ -1008,6 +1009,7 @@ FSIM_API void fsim_waypoint_init(fsim_waypoint* waypoint) {
     waypoint->course_rad = waypoint->turn_radius_m = hold;
     waypoint->speed_optimization = waypoint->climb_optimization = waypoint->acceleration_ms2 = hold;
     waypoint->arrival_begin_s = waypoint->arrival_end_s = hold;
+    waypoint->rnp_m = hold;
 }
 
 FSIM_API int fsim_vehicle_submit_route(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_waypoint* waypoints,
@@ -1915,6 +1917,7 @@ FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id acti
             w.course_rad = p.courseRad, w.turn_radius_m = p.turnRadiusM;
             w.speed_optimization = p.speedOptimization, w.climb_optimization = p.climbOptimization, w.acceleration_ms2 = p.accelerationMs2;
             w.arrival_begin_s = p.arrivalBeginS, w.arrival_end_s = p.arrivalEndS;
+            w.rnp_m = p.rnpM;
         }
         r.segments.resize(r.setpoint.segments.size());
         for (std::size_t i = 0; i < r.segments.size(); ++i) {

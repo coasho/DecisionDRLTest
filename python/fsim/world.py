@@ -171,6 +171,19 @@ class ActivityBasis(enum.IntEnum):
     PLANNED = 3
 
 
+class ActivityFlag(enum.IntFlag):
+    """What held an activity back (ActivityInfo.constraints: its last world step's; constraints_seen: every one since it
+    started): an effector it drives at its travel limit, protection reducing its demand, the state beyond a limit on its
+    axes, a setpoint clamped to its range, a support axis another took; a route farther off its path than its segment's
+    required navigation performance (docs/flight-autonomy.md, 4.35)."""
+    SATURATED = 1
+    DEMAND_LIMITED = 2
+    EXCEEDED = 4
+    CLAMPED = 8
+    AXES_REDUCED = 16
+    NAVIGATION_PERFORMANCE = 32
+
+
 class EndPointKind(enum.IntEnum):
     """What an activity's end point is (A-GRA's MA_EndPointType): a point, a turn flown by or over it, a loiter."""
     WAYPOINT = 0
@@ -820,8 +833,8 @@ _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": Altitude
 Waypoint = collections.namedtuple(
     "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id "
                 "altitude_min_m altitude_max_m kind waypoint_type frame frame_rotation frame_offsets frame_x_m frame_y_m frame_z_m "
-                "course_rad turn_radius_m speed_optimization climb_optimization acceleration_ms2 arrival_begin_s arrival_end_s",
-    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0) + (HOLD,) * 17)
+                "course_rad turn_radius_m speed_optimization climb_optimization acceleration_ms2 arrival_begin_s arrival_end_s rnp_m",
+    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0) + (HOLD,) * 18)
 Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that ends at it: reached at ``altitude_m`` above "
                     "``altitude_reference`` along a straight profile (or climbing at ``climb_rate_ms``, then level), flown at "
                     "``speed`` in ``speed_reference``, passed by ``turn`` (fsim.TurnType: 'fly_by', 'fly_over') with "
@@ -839,7 +852,9 @@ Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that end
                     "with the speed, the point before's), ``climb_optimization`` (fsim.ClimbOptimization) and "
                     "``acceleration_ms2`` (the speed change into the segment at it). Its required time of arrival (4.33): "
                     "``arrival_begin_s`` and ``arrival_end_s``, the window it is to arrive in (World.time's clock; either "
-                    "side left out, open) - its speed scheduled over the ground to arrive in it.")
+                    "side left out, open) - its speed scheduled over the ground to arrive in it. Its required navigation "
+                    "performance (4.35): ``rnp_m``, how far off its path the segment may be flown (left out, none); farther, its "
+                    "ActivityInfo's ``constraints`` carry fsim.ActivityFlag.NAVIGATION_PERFORMANCE.")
 
 RouteLoiter = collections.namedtuple("RouteLoiter", ("point",) + MODE_FIELDS["pattern"] + ("end_time_s",), defaults=(0,) + (HOLD,) * 36)
 RouteLoiter.__doc__ = ("The loiter a route's loiter point flies (A-GRA's LoiterPoint; docs/flight-autonomy.md, 4.31): at waypoint "

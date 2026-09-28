@@ -366,6 +366,8 @@ public:
                             p.arrivalBeginS = w_.simTime() + uniform(-60.0, 900.0), p.arrivalEndS = p.arrivalBeginS + uniform(-10.0, 120.0);
                             if (chance(0.2)) (chance(0.5) ? p.arrivalBeginS : p.arrivalEndS) = kHold;
                         }
+                        // its required navigation performance (FA-6d3): one it may hold or not, now and then one of 0
+                        if (chance(0.05)) p.rnpM = chance(0.1) ? 0.0 : uniform(1.0, 3000.0);
                     }
                 }
                 waypoints.push_back(p);

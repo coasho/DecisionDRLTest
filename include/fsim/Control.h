@@ -248,6 +248,9 @@ struct Waypoint {
     // world's simulation seconds - either side left out, open (a begin alone: no earlier; an end alone: no later)
     double arrivalBeginS = kHold;
     double arrivalEndS = kHold;
+    // A-GRA's required navigation performance (docs/flight-autonomy.md, 4.35): how far off its path the segment may be flown,
+    // m; left out, none. Farther, its activity says so (kActivityNavigationPerformance)
+    double rnpM = kHold;
     /// Its point in its frame: the offsets left out, the frame's origin.
     FrameOffset frameOffset() const noexcept {
         FrameOffset o;

@@ -390,7 +390,8 @@ typedef struct fsim_activity_info {
     int32_t state;             /* fsim_activity_state */
     int32_t reason;            /* why it ended */
     fsim_activity_id by;       /* the activity that preempted it */
-    uint32_t constraints;      /* last step: 1 saturated, 2 demand limited, 4 limit exceeded, 8 clamped, 16 axes reduced */
+    uint32_t constraints;      /* last step: 1 saturated, 2 demand limited, 4 limit exceeded, 8 clamped, 16 axes reduced, 32 (ABI 1.32)
+                                  a route off its path by more than its segment's required navigation performance */
     uint32_t constraints_seen; /* every flag since it started */
     double start_time, end_time; /* simulation seconds; end_time NaN while it runs */
 } fsim_activity_info;
@@ -770,6 +771,9 @@ typedef struct fsim_waypoint {
        seconds; either side left out, open (a begin alone: no earlier; an end alone: no later) */
     double arrival_begin_s;
     double arrival_end_s;
+    /* ABI 1.32 (4.35): its required navigation performance - how far off its path the segment may be flown, m (above 0; left
+       out, none); farther, its activity's constraints say so (32) */
+    double rnp_m;
 } fsim_waypoint;
 enum fsim_climb_optimization { FSIM_CLIMB_BEST_RATE = 0, FSIM_CLIMB_EXTENDED_RANGE }; /* A-GRA's ClimbOptimizationEnum (ABI 1.29) */
 /* What a waypoint is for (A-GRA's WaypointTypeEnum; ABI 1.26): nav only and passive are flown; the end of a path on a

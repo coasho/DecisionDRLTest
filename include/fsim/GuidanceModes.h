@@ -132,6 +132,9 @@ public:
     void reset() override;
     bool finished() const noexcept override { return finished_; }
     Reason failure() const noexcept override { return failure_; }
+    /// kActivityNavigationPerformance where, in its last update, it was farther off its path than the required navigation
+    /// performance of the segment it flew (docs/flight-autonomy.md, 4.35).
+    std::uint16_t constraints() const noexcept override { return constraints_; }
     /// The waypoint flown to and its id, the laps, how far along the segment
     /// and the route, the distance and time to go, the cross-track, and what
     /// it commands: the course, the altitude, the segment's speed.
@@ -202,6 +205,7 @@ private:
     double lastTime_ = -1.0;
     double crossTrack_ = kHold, course_ = kHold, heading_ = kHold, altitudeMsl_ = kHold, groundSpeed_ = 0.0;
     double lastCross_ = kHold; ///< off the leg flown last: what it reports past its end
+    std::uint16_t constraints_ = 0; ///< its last update's ActivityFlag bits (4.35)
     // the segment's speed as it chooses it (docs/flight-autonomy.md, 4.32)
     double rampFromMs_ = kHold, rampStartS_ = 0.0; ///< its acceleration's ramp: from this speed (true air, or a rotorcraft's ground), then
     double speedFlown_ = kHold, referenceFlown_ = kHold; ///< the speed it flies now, where it optimises or ramps it
