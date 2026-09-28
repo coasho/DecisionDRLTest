@@ -63,7 +63,7 @@ const FeatureDef kFeatures[] = {
     CAP("fsim.guidance.hover", S, 0, R1, ""),       // PLT-08, superseded by the hover loiter
 
     // --- HSA/CSA ---------------------------------------------------------------------------------
-    CAP("fsim.guidance.hsa", P, 4, 0, "energy management and speed optimisation (FA-3); the magnetic and barometric references (FA-4)"), // HSA-08..10
+    CAP("fsim.guidance.hsa", P, 4, 0, "speed optimisation (FA-3); the magnetic and barometric references (FA-4)"), // HSA-08..10
     {"fsim.guidance.hsa/direction/heading", "fsim.guidance.hsa", S, 0, 0, ""},              // HSA-01
     {"fsim.guidance.hsa/direction/course", "fsim.guidance.hsa", S, 0, 0, ""},               // HSA-02
     {"fsim.guidance.hsa/direction/magnetic_north", "fsim.guidance.hsa", N, 4, 0, ""},       // HSA-03
@@ -250,7 +250,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.fault", "", N, 16, 0, ""},                            // SUB-09, STS-09
 
     // --- FA's own functions (VI 1.4) --------------------------------------------------------------------------
-    {"fsim.fa/envelope_management", "", P, 3, 0, "energy management and a stall margin held by every mode; protection limits the demand"}, // CTG-04
+    {"fsim.fa/envelope_management", "", S, 0, 0, ""},            // CTG-04: protection's limits, energy management (FA-3d)
     {"fsim.fa/collision_avoidance", "", P, 15, 0, "detection and the avoidance manoeuvre; the platform can restrict capabilities for it"}, // CTG-01
     {"fsim.fa/geofence", "", N, 15, 0, ""},                      // CTG-02, ENV-08
     {"fsim.fa/terrain_avoidance", "", N, 15, 0, ""},             // CTG-03

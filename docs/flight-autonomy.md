@@ -1338,6 +1338,7 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
     - The F-16C's route finds a fourth fault. Its last point, 25 km up, asks for 200 m/s, which is under its least there. Clamped, that point is flown at its least at the ceiling it is held to, 215 m/s.
     - The UPDATE's speed is now one it flies at that ceiling, 300 m/s.
   - `test_conformance`: the Mirage 2000 is asked for a loop at its reference condition and refused for its speed. The test then asks for an aileron roll at 2 g, as it asks for the gear up where the gear's placard refuses it down.
+- **The support table:** `fsim.fa/envelope_management` (CTG-04) is supported: protection's limits, and now energy management. `fsim.guidance.hsa` stays partial for its speed optimisation (FA-3e) and its magnetic and barometric references (FA-4).
 - **The performance profile** (the FA-3c check, again): cell for cell with its tables on all 35, at the weight each is spawned at with full tanks; the worst difference is 4.9e-06.
 - **Digests:** identical to FA-3c's (and FA-2e's), with protection and without. The allocation gate passes.
 - **A/B throughput** against FA-3c (8913081), built in the scratch worktree: 5 rounds of `micro` and 9 of `command`, twice each.
