@@ -751,7 +751,7 @@ A-GRA's third end point, the LoiterPoint, gives a loiter - an orbit, a hover or 
   - its speed and radius are limited as a pattern's are;
   - a field a pattern refuses is refused `invalid_waypoint`, naming the point;
   - a hover where the aircraft does not hover, and an optimisation with no tables, are refused as a pattern's are (`not_supported`, `not_implemented`), naming the point;
-  - a limit names the point, and the loiter's field numbered after the waypoint's 22: the pattern's fields are 22 to 34, its shape's 35 to 56, its end time 57 (a radius held to the full bank's: field 27).
+  - a limit names the point, and the loiter's field numbered from 100, past the waypoint's own with room left for them: the pattern's fields are 100 to 112, its shape's 113 to 134, its end time 135 (a radius held to the full bank's: field 105).
 - **Refused `invalid_waypoint`, naming the point:** a loiter point without a loiter; a loiter at a point that is not a loiter point, or past the route; two loiters for one point; an end time not finite.
 - **Its end:**
   - its duration or its laps flown (then on round to its exit point, if it has one), or its end time, whichever comes first;
@@ -2074,7 +2074,7 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
 - **Refused, naming the point:** a loiter point with no loiter; a loiter at a waypoint, past the route, or two for one point; a loiter's own latitude, altitude or frame offsets; no end before the route's end, and none in a route that repeats; an end time not finite; a kind of 7 and a radius of −5 m; a start turn type and a turn radius at a loiter point; a seventeenth loiter.
   - A stock C172x's hover: `not_implemented`, as its hover pattern's row says (it declares nothing). The hangar's C172 declares it cannot hover: `not_supported`.
   - An optimisation on the stock C172x (no tables): `not_implemented`. On the hangar's C172, it is planned at the tables' best speed at its point's altitude.
-  - A radius of 50 m, tighter than its full bank flies at its speed: clamped (flagged), the adjustment naming the point and field 27. Under Reject, refused `performance_limit` at the point.
+  - A radius of 50 m, tighter than its full bank flies at its speed: clamped (flagged), the adjustment naming the point and field 105. Under Reject, refused `performance_limit` at the point.
 - **Kept:** read back as given while waiting for its start window, complete once started; kept by an UPDATE of the options alone, replaced with new waypoints (none for a loiter point: refused); taken by a task and by a batch, read back with it; validated.
 - **Terrain** (`test_terrain_check`): a C172x at 1,000 m with an orbit of 3 km at a point 8 km east, where a ridge rises at 10 km, was refused `terrain_conflict` at the point, on its circle. An orbit of 800 m was flown.
 - **The fleet** (`test_fleet`): every aircraft flies three orbit radii ahead, then a loiter point eight ahead, and on to a point two radii to its right. A wing orbits the point once; a rotorcraft hovers over it for 10 s. All 35 complete.
@@ -2087,7 +2087,7 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
 - **Changed, named:** a loiter point without its loiter was refused `not_implemented`; it is now refused `invalid_waypoint`. The C++ and Python tests that pinned the old refusal now expect the new one.
 - **The support table:** `route/loiter_point` is supported, and the route capability's pending list no longer names loiter points.
 - **Conformance:** the walks draw as they did. The optimise walks give points a loiter now and then, of every kind the vehicle flies. It ends by its time, its laps or its end time, and now and then it is one the vehicle cannot fly.
-- **Surfaces:** the C ABI's 1.28 block (an orbit read back; none for its point refused; an UPDATE with its waypoints and theirs; a radius clamped, named by its point and field 27; a batch's route with its loiter); Python's `test_route_loiters` (by name, read back, flown, updated, batched, a task, refused, clamped).
+- **Surfaces:** the C ABI's 1.28 block (an orbit read back; none for its point refused; an UPDATE with its waypoints and theirs; a radius clamped, named by its point and field 105; a batch's route with its loiter); Python's `test_route_loiters` (by name, read back, flown, updated, batched, a task, refused, clamped).
 - **Memory:** a loiter is 296 bytes. Sixteen take 4.6 KB in the path store, in the host's route plan and in each route behaviour's plan. A route behaviour also holds a pattern behaviour, made with it.
 - **Digests:** identical to FA-6b1's, with protection and without. The allocation gate passes.
 - **A/B throughput** against FA-6b1, both builds run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`.

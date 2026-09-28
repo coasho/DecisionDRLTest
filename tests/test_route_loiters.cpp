@@ -359,7 +359,7 @@ TEST_CASE("route loiters: refused as a point is, naming it - no loiter for a loi
         loiters.push_back(l);
     }
     refusedAt(many, loiters, Reason::InvalidWaypoint, 16, "a seventeenth");
-    // limited as a pattern: a radius tighter than its full bank flies, held to it - named by its point, its field 22 + 5
+    // limited as a pattern: a radius tighter than its full bank flies, held to it - named by its point, its field 100 + 5
     RouteLoiter tight = ok;
     tight.pattern.radiusM = 50.0;
     const CommandResult clamped = w.submit(v, RouteCommand{}, std::vector<Waypoint>{p0, p1, p2}, {}, std::vector<RouteLoiter>{tight});
@@ -368,7 +368,7 @@ TEST_CASE("route loiters: refused as a point is, naming it - no loiter for a loi
     const CommandDetails d = w.commandDetails(v) ? *w.commandDetails(v) : CommandDetails{};
     REQUIRE(d.adjustmentCount >= 1);
     CHECK(d.adjustments[0].index == 1);
-    CHECK(d.adjustments[0].field == 22 + 5);
+    CHECK(d.adjustments[0].field == 100 + 5);
     CHECK(d.adjustments[0].constraint == Constraint::MaxOrientation);
     CHECK(flown(w, clamped.activity).loiters[0].pattern.radiusM == d.adjustments[0].adjusted);
     CommandOptions reject;

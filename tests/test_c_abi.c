@@ -987,7 +987,7 @@ int main(int argc, char** argv) {
         {
             /* ABI 1.28 (4.31): a loiter point's loiter - twice round an orbit, its place its point's - read back complete; a
                loiter point with none refused, naming it; an UPDATE with its waypoints and theirs; a radius tighter than it
-               flies held to it, named by its point and its field after the waypoint's 22; a batch's route with its loiters */
+               flies held to it, named by its point and its field from 100; a batch's route with its loiters */
             fsim_waypoint pts[3];
             fsim_route_loiter lo;
             fsim_batch_command sp, item;
@@ -1030,14 +1030,14 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_update_route_loiters(world, route_id, FSIM_SOURCE_OVERRIDE, 0, options, 4, pts, 3, &lo, 1, &cr) == FSIM_OK &&
                   cr.status == FSIM_COMMAND_ACCEPTED);
             CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.loiter_count == 1 && sp.loiters[0].fields[13 + 4] == 1.0);
-            /* a radius of 20 m: held to the tightest it flies, named by its point (1) and its field (22 + 5) */
+            /* a radius of 20 m: held to the tightest it flies, named by its point (1) and its field (100 + 5) */
             lo.fields[5] = 20.0;
             CHECK(fsim_vehicle_submit_route_loiters(world, b, options, 4, pts, 3, &lo, 1, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED &&
                   (cr.flags & FSIM_COMMAND_CLAMPED) != 0);
             fsim_command_detail_init(&d);
             CHECK(fsim_last_command_detail(world, &d) == FSIM_OK && d.adjustment_count >= 1);
             fsim_command_adjustment_init(&adj);
-            CHECK(fsim_last_command_adjustment(world, 0, &adj) == FSIM_OK && adj.index == 1 && adj.field == 22 + 5 && adj.requested == 20.0);
+            CHECK(fsim_last_command_adjustment(world, 0, &adj) == FSIM_OK && adj.index == 1 && adj.field == 100 + 5 && adj.requested == 20.0);
             route_id = cr.activity;
             /* a batch's route with its loiter (where its struct has them) */
             memset(&item, 0, sizeof item);

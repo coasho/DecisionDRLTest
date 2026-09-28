@@ -792,8 +792,9 @@ FSIM_API int fsim_activity_update_route_by(fsim_world* world, fsim_activity_id a
  * the first; with none it is the route's end, and only a last point's (a route that does not repeat). Flown where the leg
  * meets it - a radius outside an orbit's circle, else at its point (a rotorcraft stops for a hover) - from where the
  * aircraft is; then on to the next point from where it ended. Refused as a point is, naming it (invalid_waypoint; a
- * wing's hover and an optimisation as a pattern's are); its limits named by the point, its field after the waypoint's
- * 22 (the pattern's 22 + 0..34, the end time 57). fsim_route_loiter_init leaves every field out (fsim_hold()). */
+ * wing's hover and an optimisation as a pattern's are); its limits named by the point, its field numbered from 100 -
+ * past the waypoint's own, room left for them - the pattern's 100 + 0..34, the end time 135. fsim_route_loiter_init
+ * leaves every field out (fsim_hold()). */
 typedef struct fsim_route_loiter {
     uint32_t struct_size;
     uint32_t point;
@@ -1040,8 +1041,8 @@ FSIM_API int fsim_last_command_finding(const fsim_world* world, uint32_t index, 
 typedef struct fsim_command_adjustment {
     uint32_t struct_size;
     int32_t index;       /* the command's field, a route point or a curve segment */
-    int32_t field;       /* a route point's field (fsim_waypoint's order from latitude_rad = 0; its loiter's after its 22,
-                            ABI 1.28: fsim_route_loiter's fields from 22, its end time 57); -1 none */
+    int32_t field;       /* a route point's field (fsim_waypoint's order from latitude_rad = 0; its loiter's from 100,
+                            ABI 1.28: fsim_route_loiter's fields from 100, its end time 135); -1 none */
     int32_t constraint;  /* the limit it was held to: fsim_constraint_name() */
     double requested;    /* NaN where it is not one number (a fly-by turn flown smaller) */
     double adjusted;

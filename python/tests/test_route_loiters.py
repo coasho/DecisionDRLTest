@@ -1,7 +1,7 @@
 """A route's loiter points as A-GRA's schema gives them, through Python (docs/flight-autonomy.md, 4.31): an orbit of two
 laps inside a route by name, read back complete and flown, then on; its time to go while it loiters; an UPDATE with new
 waypoints and theirs; a batch's and a task's route with its loiters; a loiter point with none refused, naming it; a
-radius tighter than it flies held to it, named by its point and its field after the waypoint's 22."""
+radius tighter than it flies held to it, named by its point and its field from 100."""
 import math
 import unittest
 
@@ -73,14 +73,14 @@ class RouteLoitersTest(unittest.TestCase):
         self.assertEqual(tasked.setpoint().kwargs["loiters"][0].pattern, float(fsim.PatternKind.HOLD))
         tasked.cancel()
         # a loiter point with none: refused, naming it; a radius of 20 m held to the tightest it flies, named by its point
-        # and its field (22 + 5)
+        # and its field (100 + 5)
         with self.assertRaises(fsim.Rejected) as refused:
             v.submit_route(points)
         self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_waypoint", 1))
         c = v.submit_route(points, loiters=[orbit._replace(radius_m=20.0)])
         self.assertTrue(c.clamped)
         adjustment = w.last_command_details()[1][0]
-        self.assertEqual((adjustment.index, adjustment.field, adjustment.requested), (1, 22 + 5, 20.0))
+        self.assertEqual((adjustment.index, adjustment.field, adjustment.requested), (1, 100 + 5, 20.0))
 
 
 if __name__ == "__main__":

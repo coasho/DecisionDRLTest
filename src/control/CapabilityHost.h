@@ -583,9 +583,9 @@ private:
     /// The plan's loiters completed where they fly (route::completeLoiters; `p` planned): an optimisation's speed at
     /// its point's altitude first, as a pattern's (optimise).
     void completeLoiters(route::Plan& p, const sim::VehicleState& state) const noexcept;
-    /// A route's loiter's fields in a finding or an adjustment (4.31): named by its point, after the waypoint's 22 -
-    /// its pattern's then its shape's (22 to 56), its end time 57.
-    static constexpr std::int16_t kLoiterField = 22;
+    /// A route's loiter's fields in a finding or an adjustment (4.31): named by its point, numbered from 100 - past the
+    /// waypoint's own, room left for them - its pattern's then its shape's (100 to 134), its end time 135.
+    static constexpr std::int16_t kLoiterField = 100;
     /// The route checkRoute left in the scratch plan, into the path store: flown afresh.
     void writeRoute();
     /// A pattern's fields (docs/vehicle-interface.md, 4.6): whole numbers for
