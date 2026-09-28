@@ -171,8 +171,12 @@ struct HsaCommand {
 
 /// How a route passes a waypoint (A-GRA's TurnType).
 enum class TurnType : std::uint8_t {
-    FlyBy = 0,   ///< the turn begins before the point, on a circle tangent to both legs
+    FlyBy = 0,   ///< the turn begins before the point, on a circle tangent to both legs (A-GRA's TURN_SHORT)
     FlyOver = 1, ///< over the point, then the next leg is intercepted
+    // A-GRA's other turn points (docs/flight-autonomy.md, 4.30)
+    CaptureOutboundCourse = 2, ///< over the point, then its course captured: the next point along it
+    StartTurn = 3,             ///< an arc begins at the point: to the next, tangent to its course here (ARINC 424's RF)
+    EndTurn = 4,               ///< the arc from the point before ends here; on straight
     Count
 };
 /// What a route's legs are on the Earth.
@@ -229,6 +233,8 @@ struct Waypoint {
     double frame = kHold;              ///< a point in this frame (World::createFrame's id): its latitude and longitude where the frame puts it
     double frameRotation = kHold, frameOffsets = kHold; ///< its offsets' FrameRotation and FrameOffsets, as a pattern's point's
     double frameXM = kHold, frameYM = kHold, frameZM = kHold; ///< its offsets (z down: given, its altitude the frame's there)
+    double courseRad = kHold;          ///< the course at the point (4.30): a start's arc's, an end's, the course a capture captures
+    double turnRadiusM = kHold;        ///< its turn's radius: a fly-by's, a start's arc's (TurnGeometry)
     /// Its point in its frame: the offsets left out, the frame's origin.
     FrameOffset frameOffset() const noexcept {
         FrameOffset o;

@@ -83,17 +83,17 @@ const FeatureDef kFeatures[] = {
 
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
-        "turn point types, speed and climb optimisation, acceleration, times of arrival, paths and branches, path terminators, "
+        "loiter points, speed and climb optimisation, acceleration, times of arrival, paths and branches, path terminators, "
         "4D states and navigation performance (FA-6); planning metadata (FA-7)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
     {"fsim.guidance.route/turn/fly_by", "fsim.guidance.route", S, 0, 0, ""},                 // WPT-03
     {"fsim.guidance.route/turn/fly_over", "fsim.guidance.route", S, 0, 0, ""},
-    {"fsim.guidance.route/turn/capture_outbound_course", "fsim.guidance.route", N, 6, 0, ""}, // WPT-04
-    {"fsim.guidance.route/turn/start_turn", "fsim.guidance.route", N, 6, 0, ""},
-    {"fsim.guidance.route/turn/end_turn", "fsim.guidance.route", N, 6, 0, ""},
-    {"fsim.guidance.route/turn/radius", "fsim.guidance.route", N, 6, 0, ""},
-    {"fsim.guidance.route/course_at_point", "fsim.guidance.route", N, 6, 0, ""},
+    {"fsim.guidance.route/turn/capture_outbound_course", "fsim.guidance.route", S, 0, 0, ""}, // WPT-04 (FA-6b)
+    {"fsim.guidance.route/turn/start_turn", "fsim.guidance.route", S, 0, 0, ""},
+    {"fsim.guidance.route/turn/end_turn", "fsim.guidance.route", S, 0, 0, ""},
+    {"fsim.guidance.route/turn/radius", "fsim.guidance.route", S, 0, 0, ""},
+    {"fsim.guidance.route/course_at_point", "fsim.guidance.route", S, 0, 0, ""},
     {"fsim.guidance.route/segment_speed", "fsim.guidance.route", S, 0, 0, ""},               // WPT-05
     {"fsim.guidance.route/speed/long_range_cruise", "fsim.guidance.route", N, 6, 0, ""},     // WPT-06
     {"fsim.guidance.route/speed/max_endurance", "fsim.guidance.route", N, 6, 0, ""},

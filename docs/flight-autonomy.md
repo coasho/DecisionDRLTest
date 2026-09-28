@@ -722,6 +722,24 @@ A-GRA's route segment ends at an end point that is one of three: a WayPoint ("a 
   - C ABI 1.26: `fsim_waypoint`'s ten new fields, read where the caller's `struct_size` has them (`fsim_waypoint_init` leaves them out); `enum fsim_waypoint_type`.
   - Python: `fsim.Waypoint`'s ten new fields, codes by name or member; `fsim.WaypointType`.
 
+### 4.30 A-GRA's turn points as its schema gives them (as FA-6b builds them)
+
+A-GRA's TurnPoint gives a turn type (TURN_SHORT, FLY_OVER, CAPTURE_OUTBOUND_COURSE, START_TURN, END_TURN), a course at the point, and a turn's geometry (a radius or a bank). Its schema says only that turn points "will generally come in groups of at least two in linked PathSegments", all but the last with a radius; its ICD and its VI volume say nothing more. FA-6b takes the geometry from the published leg type the groups describe (ARINC 424's radius to fix) and from what each type's words ask (WPT-04).
+
+- **Its type** (`turn`, `TurnType`): a fly-by (TURN_SHORT) and a fly-over as before, and:
+  - **a capture** (`CaptureOutboundCourse`): the point is flown over and its course (`courseRad`, required) captured. The leg out of it is that course, so the next point must lie along it within a degree; else it is refused `invalid_waypoint`, naming the point;
+  - **a start** (`StartTurn`): an arc begins at the point and runs to the next, ARINC 424's radius to fix. It leaves the point on the point's course, or, left out, on the course the leg into it arrives on (the entry's, at a route's own start). It is the circle tangent to that course there through the next point: its sweep is twice the chord's angle from the course, its radius half the chord over that angle's sine;
+  - **an end** (`EndTurn`): the arc from the point before, which must be a start, ends here, and the route goes on straight. A course given must be the arc's there, within a degree.
+- **An arc's checks.** A radius given (`turnRadiusM`, A-GRA's TurnGeometry) must be the arc's, within a metre or half a percent. An arc sweeping more than 170 degrees is refused too: give a start between. Both are refused `invalid_waypoint`, naming the point the arc does not reach. An arc the aircraft cannot turn at the next point's speed and its full bank (a rotorcraft's, its tilt) is refused `invalid_waypoint` naming its end, whatever the policy: no clamp moves a point.
+- **Corners.** Where an arc's end is not tangent to the leg beside it (a course given across the leg in, or a leg out across the arc's end), the corner is flown over: the aircraft reaches the point, then turns.
+- **A fly-by's radius** (`turnRadiusM`): its turn's radius, in place of the one its speed and bank give. One tighter than its full-bank turns at its speed is clamped to that (flagged), or refused `performance_limit` under `RangePolicy::Reject`. A bank is a fly-by's `maxBankRad`, as before.
+- **Refused `invalid_waypoint`, naming the point**, for what does not make a turn point: a course where its type has none (a fly-by's, a fly-over's); a radius where it has none (a fly-over's, a capture's, an end's); a capture without its course; a start with no point after it; an end not after a start; a waypoint (no turn) given a turn type; a type that is not one.
+- **Flown as a leg.** An arc is a leg (`route::Leg` holds it), so it is flown, measured and walked as one. Its length is its arc's, and its courses at its ends are the arc's tangents. The follower flies it as it flies a turn, its curvature fed forward, and looks ahead to the curvature after it: a rotorcraft slows in time for an arc and flies it no faster than it allows. The terrain walk walks it round its centre.
+- **Surfaces.**
+  - C++: `TurnType::CaptureOutboundCourse`, `StartTurn`, `EndTurn`; `Waypoint::courseRad`, `turnRadiusM`; `route::makeArc`.
+  - C ABI 1.27: `FSIM_TURN_CAPTURE_OUTBOUND_COURSE`, `FSIM_TURN_START_TURN`, `FSIM_TURN_END_TURN`; `fsim_waypoint`'s `course_rad` and `turn_radius_m`.
+  - Python: `fsim.TurnType`'s three; `fsim.Waypoint`'s `course_rad` and `turn_radius_m`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -950,7 +968,9 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
 
 **Status:** in progress, in six steps, each measured in section 14:
 - FA-6a, the waypoint as the schema gives it: altitude blocks and the barometric reference, waypoints and their types, points in frames (WPT-12, WPT-17, WPT-22; 4.29), done 2026-09-28 and measured in section 14;
-- FA-6b, turn points and loiter points: capturing the outbound course, starting and ending a turn, a course at the point, a turn's radius or bank; a loiter inside a route, then on (WPT-04, WPT-18);
+- FA-6b, turn points and loiter points, in two steps:
+  - FA-6b1, turn points: capturing the outbound course, starting and ending a turn, a course at the point, a turn's radius (WPT-04; 4.30), done 2026-09-28 and measured in section 14;
+  - FA-6b2, a loiter inside a route, then on (WPT-18);
 - FA-6c, per-segment performance: speed and climb optimisation, acceleration (WPT-06, WPT-08, WPT-10);
 - FA-6d, 4D: required times of arrival, planned inertial states, required navigation performance (WPT-11, WPT-20, WPT-21);
 - FA-6e, paths: several per route with ids and types, links and conditional branches (WPT-13, WPT-14, WPT-15);
@@ -1981,6 +2001,23 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - Built first with a route's frames in the host (1.7 KB more a vehicle), a same-level update read +5.9 % and +9.0 %, and a behaviour's NEW +3.7 % and +4.2 %: the host is each vehicle's, and it grew. The frames went into the host's route plan, allocated at its first route: +0.0 % and +1.1 %.
   - World throughput is 99.1 to 99.8 % of FA-5d3's; protection costs at most 0.8 %.
 - ctest: all 286 tests pass.
+
+**FA-6b1, A-GRA's turn points (WPT-04).**
+- **Arcs** (`test_turn_points`, calm): east 3 km, then a quarter circle of 1,200 m round to the right from a start to an end turn point, then south 3 km. A C172x flew the arc within 3.8 m, and an IRIS its 30 m one within 0.10 m; both completed. Read back: the types, the start's radius and the end's course as given.
+- **A capture:** a point 3 km east flown over at 0.7 m, then its course (north-east) held within 1.15°.
+- **A fly-by's radius:** a corner turned on a 2 km circle given was passed 829 m off it (the geometry's 828). Given 100 m, tighter than its full bank at its speed, it was clamped (flagged, read back over 150 m); under Reject, refused `performance_limit` at the point.
+- **Refused, naming the point:** a radius the arc does not have (1,500 m where it is 1,200) and an end's course across the arc's; a start with no point after it; an end nothing began; a course on a fly-by and a radius on a fly-over; a capture without its course, and one whose next point is not along it; a waypoint given a turn type; a type of 5; an arc of more than 170 degrees; an arc of 150 m a C172x cannot turn at its speed.
+- **The fleet** (`test_fleet`): every aircraft flies two orbit radii ahead, a quarter circle of twice its radius round to the right from a start to an end turn point, and two radii on. All 35 complete. In the arc's middle the wings kept within 3.2 % of its radius (the Skua's 8.4 m; in metres the F-16C's 25 m, 0.5 %), the rotorcraft within 1.7 % (the Crazyflie's 0.23 m; the UH-1H's 6.5 m).
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe, identical to FA-6a's build. An arc is a leg (`route::Leg`): a straight leg's path runs the operations it did, one branch aside.
+- **The support table:** `route/turn/capture_outbound_course`, `route/turn/start_turn`, `route/turn/end_turn`, `route/turn/radius` and `route/course_at_point` are supported.
+- **Conformance:** the walks draw as they did. The optimise walks give points each turn type, a course and a radius now and then: most of what they make is refused as invalid, and what is not is flown.
+- **Surfaces:** the C ABI's 1.27 block (an arc from a start to an end turn point read back; a radius the arc does not have refused at its end); Python's `test_turn_points` (by name, read back, flown, refused, a capture).
+- **Digests:** identical to FA-6a's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6a, both builds run from their own directories: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`.
+  - The micro cases are within −1.3 % to +1.2 %, but the curve's +2.2 % (its minimum 6 ns more). Its update, `onCurve`, `curvatureAhead`, `rational`, `follow` and `verticalSpeedTo` are each the same instructions in both builds. Each case's stack holds every mode's behaviour, and a route's plan grew 10 KB, a leg holding its arc: where the curve's structures fall has moved. Aligned to a cache line, `follow` read the same, and its alignment is not the cause.
+  - The route's look ahead for arcs runs only where its plan has one (`Plan::arcs`): the route's case read +1.4 %, then +1.2 %.
+  - The command cases are within −1.2 % to +1.5 %. World throughput is 100.0 to 100.6 % of FA-6a's; protection costs at most 0.2 %.
+- ctest: all 289 tests pass.
 
 ## Appendix A: the inventory
 

@@ -723,7 +723,9 @@ enum fsim_altitude_reference { FSIM_ALTITUDE_MSL = 0, FSIM_ALTITUDE_ABOVE_GROUND
 enum fsim_speed_optimization { FSIM_SPEED_LONG_RANGE_CRUISE = 0, FSIM_SPEED_MAX_ENDURANCE }; /* A-GRA's SpeedOptimizationEnum (ABI 1.15) */
 enum fsim_direction_reference { FSIM_DIRECTION_TRUE_NORTH = 0, FSIM_DIRECTION_MAGNETIC_NORTH }; /* A-GRA's MA_HeadingReferenceEnum (ABI 1.20) */
 enum fsim_curve_z { FSIM_CURVE_Z_DOWN = 0, FSIM_CURVE_Z_ALTITUDE_OFFSET, FSIM_CURVE_Z_ABSOLUTE_ALTITUDE }; /* A-GRA's Z_ChoiceType (ABI 1.25) */
-enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER };
+enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER = 1,
+                      /* ABI 1.27 (docs/flight-autonomy.md, 4.30): A-GRA's other turn points */
+                      FSIM_TURN_CAPTURE_OUTBOUND_COURSE = 2, FSIM_TURN_START_TURN = 3, FSIM_TURN_END_TURN = 4 };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft after a route; after a curve it circles it) */
 FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 29, curve 8 (1.14: hsa 6, pattern 12; 1.15: hsa 7, pattern 13;
@@ -753,6 +755,9 @@ typedef struct fsim_waypoint {
                                               longitude not read; a moving one's placed as it is flown */
     double frame_rotation, frame_offsets;  /* fsim_frame_rotation, fsim_frame_offsets of its offsets */
     double frame_x_m, frame_y_m, frame_z_m; /* its offsets (z down: given, its altitude the frame's there) */
+    /* ABI 1.27 (4.30): a turn point's */
+    double course_rad;                     /* the course at the point: a start's arc's (left out, the leg in's), an end's, a capture's */
+    double turn_radius_m;                  /* its turn's radius: a fly-by's, a start's arc's (agreeing with the arc through the next point) */
 } fsim_waypoint;
 /* What a waypoint is for (A-GRA's WaypointTypeEnum; ABI 1.26): nav only and passive are flown; the end of a path on a
    route's last point; the others not yet ("not_implemented", naming the point: their support table rows say when) */

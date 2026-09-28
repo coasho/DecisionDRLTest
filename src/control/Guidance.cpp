@@ -542,6 +542,20 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         } else if (stops()) {
             steer.speedLimitMs = std::max(route::brakingLimit(perf, 0.0, toGo), 0.5);
         }
+        // an arc from a turn point (4.30): its curvature as it is flown, what the leg after it has at its end; a leg into one,
+        // the arc's at its end - a rotorcraft no faster than the arc allows, slowing in time for it
+        const route::Leg& leg = p.leg(target_, firstLap_);
+        const route::Leg* next = p.arcs && p.leaves(target_) ? &p.legs[p.next(target_)] : nullptr;
+        if (p.arcs && turn.radiusM <= 0.0 && (leg.arcRadiusM > 0.0 || (next && next->arcRadiusM > 0.0))) {
+            ahead.toChangeM = leg.lengthM - (inPieceM_ + leadOut_);
+            ahead.curvature = next && next->arcRadiusM > 0.0 ? (next->arcAngleRad >= 0.0 ? 1.0 : -1.0) / next->arcRadiusM : 0.0;
+            if (hovers_) {
+                const double here = leg.arcRadiusM > 0.0 ? route::lateralLimit(perf, leg.arcRadiusM) : std::numeric_limits<double>::infinity();
+                const double after = next && next->arcRadiusM > 0.0 ? route::brakingLimit(perf, route::lateralLimit(perf, next->arcRadiusM), toGo)
+                                                                    : std::numeric_limits<double>::infinity();
+                if (std::isfinite(std::min(here, after))) steer.speedLimitMs = std::fmin(steer.speedLimitMs, std::min(here, after));
+            }
+        }
     }
     if (overFrame_) { // over its frame, as a pattern's (4.25): its velocity and the wind's over it, a rotorcraft's given back
         sim::VehicleState over = s;

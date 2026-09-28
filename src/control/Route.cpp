@@ -76,8 +76,18 @@ double turnRadiusAt(const Plan& p, std::uint32_t i, double altitudeMslM, double 
     const Waypoint& a = p.points[i];
     const Waypoint& b = p.points[p.next(i)];
     auto speedOf = [&](const Waypoint& w) { return plannedSpeed(w.speed, w.speedReference, aboveGround(w) ? altitudeMslM : w.altitudeM); };
+    if (!isHold(a.turnRadiusM)) return a.turnRadiusM; // (its TurnGeometry's: 4.30)
     const double v = std::max(speedOf(a), speedOf(b)) + (hovers && overGround(a) && overGround(b) ? 0.0 : windMs);
     return isHold(a.maxBankRad) ? performance.turnRadiusM(v) : v * v / (kG * std::tan(a.maxBankRad));
+}
+
+/// The leg to point i, the one before it `from`: straight, or the arc a start turn point begins - tangent there to its
+/// course, left out the course the leg into it arrives on (`inRad`) - as plan() and replan() lay it (4.30).
+Leg legTo(const Plan& p, std::uint32_t from, std::uint32_t i, double inRad) noexcept {
+    const Waypoint& a = p.points[from];
+    const Waypoint& b = p.points[i];
+    if (a.turn != static_cast<double>(TurnType::StartTurn)) return makeLeg(a.latitudeRad, a.longitudeRad, b.latitudeRad, b.longitudeRad, p.rhumb);
+    return makeArc(a.latitudeRad, a.longitudeRad, b.latitudeRad, b.longitudeRad, isHold(a.courseRad) ? inRad : a.courseRad);
 }
 
 } // namespace
@@ -112,7 +122,31 @@ Leg makeLeg(double latA, double lonA, double latB, double lonB, bool rhumb) noex
     return leg;
 }
 
+Leg makeArc(double latA, double lonA, double latB, double lonB, double courseRad) noexcept {
+    Leg leg = makeLeg(latA, lonA, latB, lonB, false);
+    double n, e;
+    geo::localNorthEastM(latA, lonA, latB, lonB, n, e);
+    const double tn = std::cos(courseRad), te = std::sin(courseRad);
+    const double alpha = std::atan2(tn * e - te * n, tn * n + te * e); // the chord from the course, + right
+    const double chord = std::hypot(n, e);
+    if (chord < 1e-9 || std::abs(alpha) < 1e-9) return leg; // (straight on)
+    const double r = chord / (2.0 * std::abs(std::sin(alpha))), side = alpha >= 0.0 ? 1.0 : -1.0;
+    leg.arcRadiusM = r;
+    leg.arcAngleRad = 2.0 * alpha;
+    leg.arcCentreNorthM = -side * r * te, leg.arcCentreEastM = side * r * tn; // (to the right of the course for a right turn)
+    leg.arcEntryBearingRad = std::atan2(-leg.arcCentreEastM, -leg.arcCentreNorthM);
+    leg.lengthM = r * std::abs(leg.arcAngleRad);
+    leg.courseOutRad = geo::wrapPi(courseRad), leg.courseInRad = geo::wrapPi(courseRad + leg.arcAngleRad);
+    return leg;
+}
+
 Fix onLeg(const Leg& leg, double lat, double lon) noexcept {
+    if (leg.arcRadiusM > 0.0) { // (an arc from a turn point: round it, as a turn is)
+        Turn arc;
+        arc.radiusM = leg.arcRadiusM, arc.angleRad = leg.arcAngleRad;
+        arc.centreNorthM = leg.arcCentreNorthM, arc.centreEastM = leg.arcCentreEastM, arc.entryBearingRad = leg.arcEntryBearingRad;
+        return onArc(arc, leg.latA, leg.lonA, lat, lon);
+    }
     Fix f;
     const double sinLat = std::sin(lat), cosLat = std::cos(lat);
     if (leg.rhumb) {
@@ -1001,6 +1035,20 @@ Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool rep
         if (!within(w.frameXM, -inf, inf) || !within(w.frameYM, -inf, inf) || !within(w.frameZM, -inf, inf)) return invalid(i);
         if (isHold(w.frame) && !(isHold(w.frameRotation) && isHold(w.frameOffsets) && isHold(w.frameXM) && isHold(w.frameYM) && isHold(w.frameZM)))
             return invalid(i); // (offsets without their frame)
+        // a turn point's course and radius where its type has them (4.30): a capture's course; a start's radius and course;
+        // an end's course; a fly-by's radius - a start with a point after it, an end after a start; a waypoint turns none
+        if (!within(w.courseRad, -inf, inf) || !within(w.turnRadiusM, 0.0, inf)) return invalid(i);
+        const auto turn = static_cast<TurnType>(static_cast<int>(w.turn));
+        if (noTurn(w) && turn != TurnType::FlyBy && turn != TurnType::FlyOver) return invalid(i);
+        const bool coursed = turn == TurnType::CaptureOutboundCourse || turn == TurnType::StartTurn || turn == TurnType::EndTurn;
+        if (!isHold(w.courseRad) && !coursed) return invalid(i);
+        if (!isHold(w.turnRadiusM) && !(turn == TurnType::StartTurn || (turn == TurnType::FlyBy && !noTurn(w)))) return invalid(i);
+        if (turn == TurnType::CaptureOutboundCourse && isHold(w.courseRad)) return invalid(i);
+        if (turn == TurnType::StartTurn && !(i + 1 < count || repeat)) return invalid(i); // (an arc to no point)
+        if (turn == TurnType::EndTurn) { // (a turn it ends: the point before begins it)
+            const std::uint32_t before = i > 0 ? i - 1 : count - 1;
+            if ((i == 0 && !repeat) || count < 2 || in[before].turn != static_cast<double>(TurnType::StartTurn)) return invalid(i);
+        }
         const bool altitudeGiven = !isHold(w.altitudeM);
         w.longitudeRad = geo::wrapPi(w.longitudeRad);
         if (i == 0) {
@@ -1053,6 +1101,16 @@ void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, c
         p.legs[i] = i > 0 ? makeLeg(point(i - 1).latitudeRad, point(i - 1).longitudeRad, point(i).latitudeRad, point(i).longitudeRad, p.rhumb) : Leg{};
     }
     if (p.repeat && n > 1) p.legs[0] = makeLeg(point(n - 1).latitudeRad, point(n - 1).longitudeRad, point(0).latitudeRad, point(0).longitudeRad, p.rhumb);
+    // the arcs start turn points begin (4.30), in order: each tangent to the course the leg into its start arrives on
+    // (the entry's, for a route's own start point it does not come back to)
+    p.arcs = false;
+    for (std::uint32_t k = 0; k < n; ++k) {
+        if (point(k).turn != static_cast<double>(TurnType::StartTurn) || !p.leaves(k)) continue;
+        const bool first = k == p.start && !p.repeat;
+        const double in = first ? makeLeg(lat, lon, point(k).latitudeRad, point(k).longitudeRad, p.rhumb).courseInRad : p.legs[k].courseInRad;
+        p.legs[p.next(k)] = legTo(p, k, p.next(k), in);
+        p.arcs = p.arcs || p.legs[p.next(k)].arcRadiusM > 0.0;
+    }
 
     auto radius = [&](std::uint32_t i) { return turnRadiusAt(p, i, altitudeMslM, windMs, performance, hovers); };
     auto flyBy = [&](std::uint32_t i) { return point(i).turn == static_cast<double>(TurnType::FlyBy) && !noTurn(point(i)); }; // (a waypoint: flown over)
@@ -1114,16 +1172,15 @@ void replan(Plan& p, std::uint32_t i, bool firstLap, double altitudeMslM, double
     if (entry) {
         in = makeLeg(in.latA, in.lonA, w.latitudeRad, w.longitudeRad, p.rhumb);
     } else if (i > 0 || p.repeat) {
-        const Waypoint& a = p.points[p.prev(i)];
-        in = makeLeg(a.latitudeRad, a.longitudeRad, w.latitudeRad, w.longitudeRad, p.rhumb);
+        const std::uint32_t h = p.prev(i);
+        in = legTo(p, h, i, h > 0 || p.repeat ? p.legs[h].courseInRad : in.courseOutRad); // (an arc's tangent: the leg before's, as planned)
     }
     Turn& t = entry ? p.entryTurn : p.turns[i];
     t = Turn{};
     if (!p.leaves(i)) return;
     const std::uint32_t j = p.next(i);
-    const Waypoint& b = p.points[j];
     Leg& out = p.legs[j];
-    out = makeLeg(w.latitudeRad, w.longitudeRad, b.latitudeRad, b.longitudeRad, p.rhumb);
+    out = legTo(p, i, j, in.courseInRad);
     if (w.turn != static_cast<double>(TurnType::FlyBy) || noTurn(w) || (!entry && i == 0 && !p.repeat)) return;
     t = makeTurn(in.courseInRad, out.courseOutRad, turnRadiusAt(p, i, altitudeMslM, windMs, performance, hovers));
     if (entry && t.leadM > in.lengthM) { // (too near its point to turn before it: flown over)

@@ -28,6 +28,9 @@ struct Leg {
     double a[3] = {0.0, 0.0, 0.0}; ///< a great circle's: a on the unit sphere...
     double n[3] = {0.0, 0.0, 0.0}; ///< ...and its plane's normal, a x b normalised: the left of the way it runs
     double psiA = 0.0, dPsi = 0.0, dLon = 0.0; ///< a rhumb line's: a's stretched latitude, its extent in it and in longitude
+    // an arc from a turn point (docs/flight-autonomy.md, 4.30): round a centre from a, in the plane there (radius 0: straight)
+    double arcRadiusM = 0.0, arcAngleRad = 0.0; ///< its radius, its sweep (+ right)
+    double arcCentreNorthM = 0.0, arcCentreEastM = 0.0, arcEntryBearingRad = 0.0; ///< its centre from a, and a from the centre
 };
 
 /// Where the aircraft is against a piece of the path.
@@ -53,6 +56,10 @@ struct Turn {
     double inRad = 0.0;    ///< the leg in's course at the point
     bool shrunk = false;   ///< smaller than planned, to fit a short leg
 };
+/// The arc from a to b leaving a on `courseRad` (4.30: a start turn point's): the circle tangent to that course at a
+/// through b, in the plane at a - its sweep twice the chord's angle from the course; its length, and its courses at
+/// its ends. Straight on (b dead ahead) it is the great circle's leg.
+Leg makeArc(double latA, double lonA, double latB, double lonB, double courseRad) noexcept;
 /// The turn from course `in` to course `out` on a circle of `radiusM`; no arc
 /// for a change under a degree or over 150 degrees (flown over).
 Turn makeTurn(double inRad, double outRad, double radiusM) noexcept;
@@ -126,6 +133,7 @@ struct Plan {
     static constexpr std::uint32_t kMax = static_cast<std::uint32_t>(PathStore::kWaypoints);
     std::uint32_t count = 0, start = 0;
     bool repeat = false, rhumb = false;
+    bool arcs = false; ///< a leg is an arc a start turn point begins (4.30): what the follower looks ahead for
     EndBehavior end = EndBehavior::Continue;
     Waypoint points[kMax];
     /// legs[i]: to point i from the one before (legs[0]: from the last, when it repeats).

@@ -1361,6 +1361,60 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             // are straight: along its parallel instead, the heavies' legs 90 km out read 530 m off)
             CHECK(f.worst < (p.rotor ? std::max(0.5, 0.1 * R) : std::max(20.0, 0.05 * R)));
         });
+    // A-GRA's turn points (ADR-29 FA-6b: WPT-04): two orbit radii ahead, a quarter circle of twice its radius round to the
+    // right from a start turn point to an end turn point - ARINC 424's radius to fix - and two radii on: off the arc's
+    // circle in its middle
+    struct ArcRoute {
+        PositionCommand start;
+        double centreNorthM = 0.0, centreEastM = 0.0, worst = 0.0;
+        int samples = 0;
+    };
+    std::map<std::uint32_t, ArcRoute> arcRoutes;
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double R = orbitRadius(p), psi = p.start.eulerRad[2], r = 2.0 * R;
+            const double c = std::cos(psi), sn = std::sin(psi);
+            auto point = [&](double ahead, double right) {
+                const PositionCommand q = pointFrom(p.start, ahead * c - right * sn, ahead * sn + right * c, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            Waypoint a = point(2.0 * R, 0.0), b = point(2.0 * R + r, r);
+            const Waypoint e = point(2.0 * R + r, r + 2.0 * R);
+            a.turn = static_cast<double>(TurnType::StartTurn), b.turn = static_cast<double>(TurnType::EndTurn);
+            ArcRoute& f = arcRoutes[p.id];
+            f = ArcRoute{};
+            f.start = pointFrom(p.start, 2.0 * R * c, 2.0 * R * sn, p.start.altitudeMslM, 0.0);
+            f.centreNorthM = -r * sn, f.centreEastM = r * c; // (from the arc's start: to its right)
+            const CommandResult res = w.submit(p.id, RouteCommand{}, std::vector<Waypoint>{a, b, e});
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index);
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        [&](const Plane& p) { return (4.0 + 3.2) * orbitRadius(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) * 1.5 + 60.0; },
+        [&](const Plane& p) {
+            ArcRoute& f = arcRoutes[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const ActivityProgress& g = r.progress;
+            if (!r.live() || g.segment != 1 || g.segmentPercent < 15.0 || g.segmentPercent > 85.0) return;
+            double north, east;
+            offset(*w.vehicleState(p.id), f.start.latitudeRad, f.start.longitudeRad, north, east);
+            f.worst = std::max(f.worst, std::abs(std::hypot(north - f.centreNorthM, east - f.centreEastM) - 2.0 * orbitRadius(p)));
+            ++f.samples;
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const ArcRoute& f = arcRoutes[p.id];
+            const double R = 2.0 * orbitRadius(p);
+            INFO(activityStateName(r.state) << "; its arc " << R << " m, off it " << f.worst << " m (" << f.samples << " samples)");
+            CHECK(r.state == ActivityState::Completed);
+            CHECK(f.samples > 0);
+            // (the worst: a wing 3.2 % of its arc's radius, the Skua's 8.4 m - in metres the F-16C's 25 m, 0.5 %; a rotorcraft 1.7 %,
+            // the Crazyflie's 0.23 m - the UH-1H's 6.5 m)
+            CHECK(f.worst < (p.rotor ? std::max(0.5, 0.1 * R) : std::max(20.0, 0.05 * R)));
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

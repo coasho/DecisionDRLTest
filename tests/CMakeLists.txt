@@ -30,6 +30,7 @@ add_executable(fsim_tests
     test_nurbs.cpp
     test_curve_references.cpp
     test_route_points.cpp
+    test_turn_points.cpp
     test_grants.cpp
     test_control_compat.cpp
     test_profile.cpp

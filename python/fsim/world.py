@@ -720,9 +720,14 @@ class WaypointType(enum.IntEnum):
 
 class TurnType(enum.IntEnum):
     """How a route passes a waypoint (A-GRA's TurnType): a fly-by turn begins before it, on a circle tangent to
-    both legs; a fly-over point is passed, then the next leg intercepted."""
+    both legs; a fly-over point is passed, then the next leg intercepted. A-GRA's others (docs/flight-autonomy.md, 4.30): a
+    capture flies over the point and captures its course, the next point along it; a start begins an arc to the next point
+    (ARINC 424's radius to fix), tangent to its course there; an end ends it."""
     FLY_BY = 0
     FLY_OVER = 1
+    CAPTURE_OUTBOUND_COURSE = 2
+    START_TURN = 3
+    END_TURN = 4
 
 
 class Projection(enum.IntEnum):
@@ -804,8 +809,9 @@ _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": Altitude
 
 Waypoint = collections.namedtuple(
     "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id "
-                "altitude_min_m altitude_max_m kind waypoint_type frame frame_rotation frame_offsets frame_x_m frame_y_m frame_z_m",
-    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0) + (HOLD,) * 10)
+                "altitude_min_m altitude_max_m kind waypoint_type frame frame_rotation frame_offsets frame_x_m frame_y_m frame_z_m "
+                "course_rad turn_radius_m",
+    defaults=(HOLD, HOLD, HOLD, HOLD, 0, HOLD, HOLD, 0) + (HOLD,) * 12)
 Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that ends at it: reached at ``altitude_m`` above "
                     "``altitude_reference`` along a straight profile (or climbing at ``climb_rate_ms``, then level), flown at "
                     "``speed`` in ``speed_reference``, passed by ``turn`` (fsim.TurnType: 'fly_by', 'fly_over') with "
@@ -816,7 +822,8 @@ Waypoint.__doc__ = ("One waypoint of a route (A-GRA's), and the segment that end
                     "out held within it), its ``kind`` (fsim.EndPointKind: a turn point, or a waypoint - no turn, flown over) "
                     "and a waypoint's ``waypoint_type`` (fsim.WaypointType), a point in a ``frame`` (World.create_frame's id) "
                     "at its offsets ``frame_rotation``, ``frame_offsets``, ``frame_x_m``, ``frame_y_m``, ``frame_z_m`` - "
-                    "placed where the frame is, a moving one's as it is flown.")
+                    "placed where the frame is, a moving one's as it is flown. A turn point's (4.30): ``turn`` "
+                    "'capture_outbound_course', 'start_turn', 'end_turn', its ``course_rad`` and ``turn_radius_m``.")
 
 
 BezierSegment = collections.namedtuple("BezierSegment", "north east down")

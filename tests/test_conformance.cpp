@@ -331,6 +331,10 @@ public:
                                                                                   : static_cast<double>(WaypointType::Count);
                         }
                         if (chance(0.05)) p.frame = static_cast<double>(1 + pick(3)), p.frameXM = uniform(-2000.0, 2000.0); // (the session's first few)
+                        // its turn point's type, course and radius (FA-6b): most of what they make refused, as it is not one
+                        if (chance(0.1)) p.turn = static_cast<double>(pick(static_cast<std::size_t>(TurnType::Count)));
+                        if (chance(0.1)) p.courseRad = uniform(-3.0, 3.0);
+                        if (chance(0.1)) p.turnRadiusM = uniform(100.0, 3000.0);
                     }
                 }
                 waypoints.push_back(p);

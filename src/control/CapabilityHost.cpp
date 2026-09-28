@@ -484,8 +484,12 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         Waypoint& w = p.points[i];
         const auto index = static_cast<std::int16_t>(i);
         limitFlight(w.speed, w.speedReference, w.altitudeM, w.altitudeReference, log, index, index, 4, 2);
-        // its turn's bank within the aircraft's (a rotorcraft's, its tilt)
+        // its turn's bank within the aircraft's (a rotorcraft's, its tilt); a fly-by's radius given, no tighter than that bank's
         bound(w.maxBankRad, hovers ? f.maxTiltRad : f.maxBankRad, true, index, Constraint::MaxOrientation, log, 7);
+        if (!isHold(w.turnRadiusM) && w.turn == static_cast<double>(TurnType::FlyBy)) {
+            const double v = route::plannedSpeed(w.speed, w.speedReference, w.altitudeM), bank = hovers ? f.maxTiltRad : f.maxBankRad;
+            if (std::isfinite(bank) && bank > 0.0) bound(w.turnRadiusM, v * v / (9.80665 * std::tan(bank)), false, index, Constraint::MaxOrientation, log, 21);
+        }
         // a climb or descent rate within the aircraft's
         if (!isHold(w.climbRateMs)) {
             const double h0 = from(i, i == p.start);
@@ -498,6 +502,32 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     wind.update(state, 0.0);
     route::plan(p, state.latitudeRad, state.longitudeRad, state.altitudeMslM, std::hypot(wind.northMs, wind.eastMs), f, hovers);
     auto flown = [&p](std::uint32_t i) { return p.repeat || i >= p.start; }; // (a route that does not repeat flies nothing before its start)
+    // its turn points as laid out (4.30): a start's arc through the next point, within 170 degrees, its radius given the arc's
+    // (within a metre, or half a percent), one the aircraft can turn at its speed - no clamp makes one flyable: each named;
+    // an end's course the arc's there, a capture's the next leg's (within a degree)
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const Waypoint& w = p.points[i];
+        if (!flown(i)) continue;
+        const std::uint32_t j = p.next(i);
+        const auto turn = static_cast<TurnType>(static_cast<int>(w.turn));
+        if (turn == TurnType::StartTurn && p.leaves(i)) {
+            const route::Leg& arc = p.legs[j];
+            if (arc.arcRadiusM > 0.0 && std::abs(arc.arcAngleRad) > 170.0 * 3.14159265358979323846 / 180.0) return point(j, Reason::InvalidWaypoint);
+            if (!isHold(w.turnRadiusM) && !(arc.arcRadiusM > 0.0 && std::abs(arc.arcRadiusM - w.turnRadiusM) <= std::max(1.0, 0.005 * w.turnRadiusM)))
+                return point(j, Reason::InvalidWaypoint);
+            const Waypoint& b = p.points[j];
+            const double v = route::plannedSpeed(b.speed, b.speedReference, b.altitudeM), bank = hovers ? f.maxTiltRad : f.maxBankRad;
+            if (arc.arcRadiusM > 0.0 && std::isfinite(bank) && bank > 0.0 && arc.arcRadiusM < v * v / (9.80665 * std::tan(bank)))
+                log.find(Reason::InvalidWaypoint, static_cast<std::int16_t>(j), Constraint::MaxTurnRate);
+        }
+        const double within = 3.14159265358979323846 / 180.0;
+        if (turn == TurnType::EndTurn && !isHold(w.courseRad)) {
+            const route::Leg& in = p.leg(i, i == p.start);
+            if (std::abs(geo::wrapPi(in.courseInRad - w.courseRad)) > within) return point(i, Reason::InvalidWaypoint);
+        }
+        if (turn == TurnType::CaptureOutboundCourse && p.leaves(i) && std::abs(geo::wrapPi(p.legs[j].courseOutRad - w.courseRad)) > within)
+            return point(i, Reason::InvalidWaypoint);
+    }
     // every fly-by turn too big for its legs: flown smaller, or refused (a turn
     // error) - the start's from the entry, then each after it
     for (std::uint32_t k = 0; k <= count; ++k) {

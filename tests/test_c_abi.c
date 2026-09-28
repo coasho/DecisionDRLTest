@@ -950,6 +950,41 @@ int main(int argc, char** argv) {
             CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
         }
         {
+            /* ABI 1.27 (4.30): turn points - an arc from a start turn point to an end turn point, read back; a radius the arc
+               does not have refused, naming the point it does not reach */
+            fsim_waypoint pts[3];
+            fsim_batch_command sp;
+            double options[4];
+            const fsim_vehicle_state* at;
+            fsim_activity_id route_id;
+            int k;
+            const double r = 1500.0;
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            at = fsim_vehicle_state_ptr(world, b);
+            for (k = 0; k < 3; ++k) fsim_waypoint_init(&pts[k]);
+            CHECK(isnan(pts[0].course_rad) && isnan(pts[0].turn_radius_m));
+            /* 3 km north of b, a quarter circle of 1.5 km from north round to the right - east - and on east 3 km */
+            pts[0].latitude_rad = at->latitude_rad + 3000.0 / 6371008.8, pts[0].longitude_rad = at->longitude_rad;
+            pts[0].turn = FSIM_TURN_START_TURN, pts[0].turn_radius_m = r, pts[0].course_rad = 0.0;
+            pts[1].latitude_rad = at->latitude_rad + (3000.0 + r) / 6371008.8;
+            pts[1].longitude_rad = at->longitude_rad + r / (6371008.8 * cos(at->latitude_rad));
+            pts[1].turn = FSIM_TURN_END_TURN;
+            pts[2].latitude_rad = pts[1].latitude_rad, pts[2].longitude_rad = pts[1].longitude_rad + 3000.0 / (6371008.8 * cos(at->latitude_rad));
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 3, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            route_id = cr.activity;
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, route_id, &sp) == FSIM_OK && sp.waypoint_count == 3);
+            CHECK(sp.waypoints[0].turn == FSIM_TURN_START_TURN && sp.waypoints[0].turn_radius_m == r && sp.waypoints[0].course_rad == 0.0);
+            CHECK(sp.waypoints[1].turn == FSIM_TURN_END_TURN && isnan(sp.waypoints[1].course_rad));
+            pts[0].turn_radius_m = 2000.0; /* (the arc through the next point is 1.5 km) */
+            CHECK(fsim_vehicle_submit_route(world, b, options, 4, pts, 3, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 2);
+            CHECK(fsim_activity_cancel(world, route_id, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_CANCELED);
+        }
+        {
             /* ABI 1.6: the performance, and grants over the priorities (on a, whose live activities are its policy's) */
             fsim_performance perf;
             int32_t mode = -1, reason = -1, allowed = -1, granted = -1, availability = -1;
