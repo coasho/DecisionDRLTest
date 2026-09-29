@@ -732,9 +732,10 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
 enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3, FSIM_MODE_MUST_FLY = 4 /* ABI 1.39 */ };
 /* A must fly's location (ABI 1.39; A-GRA's MustFlyLocationType): a point, another vehicle, an operational point by its id;
  * from ABI 1.40 a zone given with it (fsim_vehicle_submit_must_fly) or an operational zone by its id, entered; from ABI 1.41
- * a corridor given with it (fsim_vehicle_submit_must_fly_line) or an operational line by its id, flown through */
+ * a corridor given with it (fsim_vehicle_submit_must_fly_line) or an operational line by its id, flown through; from ABI 1.42
+ * a volume given with it (fsim_vehicle_submit_must_fly_volume) or an operational volume by its id, entered */
 enum fsim_must_fly_location { FSIM_MUST_FLY_POINT = 0, FSIM_MUST_FLY_ENTITY, FSIM_MUST_FLY_OP_POINT, FSIM_MUST_FLY_ZONE, FSIM_MUST_FLY_OP_ZONE,
-                              FSIM_MUST_FLY_LINE, FSIM_MUST_FLY_OP_LINE };
+                              FSIM_MUST_FLY_LINE, FSIM_MUST_FLY_OP_LINE, FSIM_MUST_FLY_VOLUME, FSIM_MUST_FLY_OP_VOLUME };
 enum fsim_pattern_kind { FSIM_PATTERN_ORBIT = 0, FSIM_PATTERN_RACETRACK, FSIM_PATTERN_FIGURE_EIGHT, FSIM_PATTERN_HOLD,
                          FSIM_PATTERN_HOVER /* ABI 1.23: a rotorcraft's */ };
 enum fsim_hold_turn { FSIM_HOLD_TURN_STANDARD = 0, FSIM_HOLD_TURN_MIL_POWER, FSIM_HOLD_TURN_RELAX }; /* A-GRA's MA_HoldTurnTypeEnum (ABI 1.22) */
@@ -1328,6 +1329,7 @@ typedef struct fsim_batch_command {
     uint32_t terminator_count;
     const struct fsim_op_zone* zone;        /* ABI 1.40: a must fly's zone given with it (FSIM_BATCH_MODE, FSIM_MODE_MUST_FLY); NULL none */
     const struct fsim_op_line* line;        /* ABI 1.41: a must fly's corridor given with it, likewise; NULL none (never with a zone) */
+    const struct fsim_op_volume* volume;    /* ABI 1.42: a must fly's volume given with it, likewise; NULL none (one of the three) */
 } fsim_batch_command;
 /* Several NEWs at once (A-GRA's several command instances in one message), `batch[0].struct_size` bytes apart, made in
  * order at this simulation time: `results[i]` answers `batch[i]`, and `details[i]` (may be NULL; `details[0].struct_size`
@@ -1827,6 +1829,52 @@ FSIM_API int fsim_activity_update_must_fly_line(fsim_world* world, fsim_activity
                                                 const fsim_op_line* line, fsim_command_result* result);
 FSIM_API int fsim_activity_update_must_fly_line_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller,
                                                    const double* fields, uint32_t count, const fsim_op_line* line, fsim_command_result* result);
+
+/* Operational volumes (ABI 1.42; docs/flight-autonomy.md, 4.45; A-GRA's OpVolume and its OpVolumeType): kept by the world by id
+ * for a must fly to name, or given with one, entered. Its shape about its point - on the Earth (with its altitude), or in a
+ * frame (x and y along the frame's turned axes; its altitude left out, the frame's) - turned by yaw, pitch and roll from
+ * north-east-down (an ellipsoid's, a cylinder's, a cone's): a sphere or a dome (radius; a dome the half above its point), an
+ * ellipsoid (semi-axes along its x, y and z), a cylinder (radius, length from its point along its x; left out, without end), a
+ * cone or a rectangular cone (their vertex its point, their axis its x: half angles, range; left out, without end); or a
+ * geocentric volume: between two latitudes, two longitudes (the least clockwise to the most) and two altitudes. A velocity from
+ * time_s (World::time; left out, when set). A-GRA's orbital volumes are none of an aircraft's. fsim_op_volume_init leaves every
+ * field out (fsim_hold()). */
+enum fsim_volume_shape { FSIM_VOLUME_SPHERE = 0, FSIM_VOLUME_DOME, FSIM_VOLUME_ELLIPSOID, FSIM_VOLUME_CYLINDER, FSIM_VOLUME_CONE,
+                         FSIM_VOLUME_RECTANGULAR_CONE, FSIM_VOLUME_GEOCENTRIC };
+typedef struct fsim_op_volume {
+    uint32_t struct_size;
+    uint32_t revision;                  /* read back: one more each time it is set (ignored as set) */
+    uint64_t op_volume_id;              /* not 0 */
+    double shape;                       /* fsim_volume_shape */
+    double latitude_rad, longitude_rad, x_m, y_m; /* its point: on the Earth, or in the frame */
+    double altitude_m, altitude_reference;        /* its point's (fsim_altitude_reference: a geocentric volume's band's) */
+    double radius_m, semi_axis_a_m, semi_axis_b_m, semi_axis_c_m, length_m;
+    double half_angle_rad, length_half_angle_rad, width_half_angle_rad, range_m;
+    double yaw_rad, pitch_rad, roll_rad;
+    double latitude_min_rad, latitude_max_rad, longitude_min_rad, longitude_max_rad, altitude_min_m, altitude_max_m; /* geocentric */
+    double frame, frame_rotation;       /* fsim_world_create_frame's id; fsim_frame_rotation */
+    double north_ms, east_ms, down_ms, time_s; /* moving */
+} fsim_op_volume;
+FSIM_API void fsim_op_volume_init(fsim_op_volume* volume);
+/* Kept in place of any by its id, its revision one more. `*reason` 0, or invalid_parameter for one A-GRA's schema would not
+ * take: a shape not one; a point off the Earth, or without its altitude on the Earth; dimensions not above 0, a half angle not
+ * below a quarter turn; an attitude on a sphere, a dome or a geocentric volume; bounds out of order; a frame the world does
+ * not have; a velocity with a frame. */
+FSIM_API int fsim_world_set_op_volume(fsim_world* world, const fsim_op_volume* volume, int32_t* reason);
+FSIM_API int fsim_world_remove_op_volume(fsim_world* world, uint64_t id); /* FSIM_INVALID_ARGUMENT for one not kept */
+/* The volumes kept, by id; one read back. FSIM_INVALID_ARGUMENT for one not kept. */
+FSIM_API uint32_t fsim_world_op_volume_count(const fsim_world* world);
+FSIM_API int fsim_world_get_op_volume_at(const fsim_world* world, uint32_t index, fsim_op_volume* out);
+FSIM_API int fsim_world_get_op_volume(const fsim_world* world, uint64_t id, fsim_op_volume* out);
+/* A must fly (FSIM_MODE_MUST_FLY's fields) with its volume given (location FSIM_MUST_FLY_VOLUME): the volume checked - a field at
+ * fault named from 10 - and laid out as it is given, then entered; done once the aircraft is in it. NULL none, as
+ * fsim_vehicle_submit_mode. The UPDATEs: its fields merged, and a volume given replacing its own. */
+FSIM_API int fsim_vehicle_submit_must_fly_volume(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_op_volume* volume,
+                                                 const fsim_command_options* options, fsim_command_result* result);
+FSIM_API int fsim_activity_update_must_fly_volume(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
+                                                  const fsim_op_volume* volume, fsim_command_result* result);
+FSIM_API int fsim_activity_update_must_fly_volume_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller,
+                                                     const double* fields, uint32_t count, const fsim_op_volume* volume, fsim_command_result* result);
 
 /* A flight mode's performance profile (ABI 1.14; docs/flight-autonomy.md, 4.15; A-GRA's
  * MA_FlightControlModesPerformanceProfileType, VI 1.2.6.7): the guard rails a mission autonomy shapes its commands

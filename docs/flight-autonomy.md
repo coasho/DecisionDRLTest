@@ -1083,7 +1083,7 @@ MA may have FA validate a route plan without flying it (VI 1.2.5.5: RoutePlanVal
 
 ### 4.42 A-GRA's must fly: points, entities, operational points and the ingress window (as FA-8a builds them)
 
-A-GRA's MUST_FLY (MA_FlightCapabilityEnum; the flight command's MustFly, MustFlyType) is a location the aircraft must fly: a point, an entity, an operational point, line, zone or volume by id, or a zone, line or volume given with it - approached, where it says so, from within a window of bearings (its IngressConstraint: "the acceptable range of bearing values at the ... Location that the System must approach from. Bearing from is defined as the true heading from the ... Location to the System"). ADR-29 plans it as MFY-01 to MFY-07, with operational geometry (ENV-06), FA-8. FA-8a builds the points, entities, operational points and the ingress window (MFY-01, MFY-02, MFY-07; MFY-03 and ENV-06 for points). FA-8b builds zones (FA-8b1: 4.43), corridors (FA-8b2: 4.44) and volumes.
+A-GRA's MUST_FLY (MA_FlightCapabilityEnum; the flight command's MustFly, MustFlyType) is a location the aircraft must fly: a point, an entity, an operational point, line, zone or volume by id, or a zone, line or volume given with it - approached, where it says so, from within a window of bearings (its IngressConstraint: "the acceptable range of bearing values at the ... Location that the System must approach from. Bearing from is defined as the true heading from the ... Location to the System"). ADR-29 plans it as MFY-01 to MFY-07, with operational geometry (ENV-06), FA-8. FA-8a builds the points, entities, operational points and the ingress window (MFY-01, MFY-02, MFY-07; MFY-03 and ENV-06 for points). FA-8b builds zones (FA-8b1: 4.43), corridors (FA-8b2: 4.44) and volumes (FA-8b3: 4.45).
 
 - **The mode** (`MustFlyCommand`, fsim.guidance.must_fly): `location` (`MustFlyLocation`: a point, an entity, an operational point), a point's `latitudeRad` and `longitudeRad`, the `altitudeM` it flies over the location at and its `altitudeReference`, a `target` (an entity's vehicle id, or an operational point's id), `ingressMinRad` and `ingressMaxRad`, a `speed` and its `speedReference`. It joins the command variant no larger than its largest (4.23): ten fields. It takes NEW, UPDATE and CANCEL, as the other modes do.
 - **Laid out as a route** from where the aircraft is, when it is commanded (or starts, where it waits). The route has the points it approaches through, then the location, which is flown over (a waypoint). It is flown by the route's follower, and checked as a route is: its turns, gradients, terrain and endurance, by point (0 and 1 its approaches, the last its location). It completes as the location is passed, and flies on along its course there. Its setpoint reads back as commanded; its route is in its setpoint's waypoints and its end points.
@@ -1128,7 +1128,7 @@ A must fly may name an operational zone (A-GRA's OpZoneID) or be given a zone wi
   - Either way it aims a fifth of the way across the zone further in (200 m at most), and flies there as a route, checked as one, the aim flown over. A moving zone's aim is where the zone will be as the aircraft gets there; a framed zone's is in its frame.
   - The altitude is the one given. Where the zone has a band, that altitude must lie within it, in the band's reference (left out, it takes the band's): otherwise the zone would never be entered, and the command is refused `invalid_parameter` (field 3, or 4 for the reference). Given none, the altitude is the aircraft's where that lies within the band, or the band's nearer edge moved a tenth of the band in (30 m at most, and never past its middle).
   - Already over the zone, the aircraft flies on along its track for 10 s, to that altitude, and completes at once where it is within the band.
-- **Completed** once the aircraft is in it: over its area where it is then (moving, or in its frame as the frame is), and within its band. The behaviour tests this each step. Completion does not wait for the route's end, and an UPDATE looks afresh. An aircraft that passes its aim outside the band flies on along its course, to the band's altitude, and completes once in the zone.
+- **Completed** once the aircraft is in it: over its area where it is then (moving, or in its frame as the frame is), and within its band. The behaviour tests this each step. Completion does not wait for the route's end, and an UPDATE looks afresh. The route ends in a loiter at its aim - a rotorcraft stops over it, a wing orbits it - so an aircraft that reaches the aim outside the band climbs or descends to it there, and completes once in the zone (from FA-8b3, 4.45; before, it flew on along its course).
 - **Operational zones** (ENV-06; A-GRA's OpZone): `World::setOpZone` keeps one by its id, in place of any with that id, its revision one more. With it come `opZones`, `opZone` and `removeOpZone`.
   - Refused `invalid_parameter`: id 0, or any fault above.
   - A moving zone's time left out is when it was set.
@@ -1175,6 +1175,35 @@ A must fly may name an operational line (A-GRA's OpLineID) or be given a corrido
   - C++: `OpLine`, `OpLineId`, `LineVertex`, and `MustFlyLocation::Line` and `OpLine` (`fsim/Control.h`); `World::submit(vehicle, MustFlyCommand, OpLine)`, `World::update(activity, MustFlyCommand, OpLine)`; `World::setOpLine`, `removeOpLine`, `opLines`, `opLine`.
   - C ABI 1.41: `FSIM_MUST_FLY_LINE` and `FSIM_MUST_FLY_OP_LINE`; `fsim_line_vertex` (`fsim_line_vertex_init`), `fsim_op_line` (`fsim_op_line_init`); `fsim_world_set_op_line`, `fsim_world_remove_op_line`, `fsim_world_op_line_count`, `fsim_world_get_op_line_at`, `fsim_world_get_op_line`; `fsim_vehicle_submit_must_fly_line`, `fsim_activity_update_must_fly_line`, `fsim_activity_update_must_fly_line_by`; `fsim_batch_command.line`.
   - Python: `vehicle.submit_must_fly(line=fsim.OpLine(...), ...)` (its location Line where a line is given), `activity.update_must_fly(line=...)`; `fsim.OpLine`, `fsim.LineVertex`; `World.set_op_line`, `op_lines`, `op_line`, `remove_op_line`.
+
+### 4.45 A-GRA's must fly: volumes, given or by id (as FA-8b3 builds them)
+
+A must fly may name an operational volume (A-GRA's OpVolumeID) or be given a volume with it (its VolumeTarget: "Use of the Volume Target implies that a vehicle must enter the volume"). A volume (A-GRA's OpVolumeType) is one of three kinds. It may be geometric: a sphere, a dome, an ellipsoid, a cylinder, a cone or a rectangular cone at a point, moving with it. It may be geocentric: between latitudes, longitudes and altitudes. Or it may be orbital. ADR-29 plans the must fly into a volume as MFY-06, and volumes among the operational geometry (ENV-06). FA-8b3 builds both; with them the must fly and the operational geometry are whole on every aircraft.
+
+- **The volumes of the atmosphere** (`OpVolume`; `shape` a `VolumeShape`):
+  - A sphere (`radiusM`) round its point; a dome (`radiusM`), the half of a sphere above its point's level.
+  - An ellipsoid (`semiAxisAM`, `semiAxisBM`, `semiAxisCM`) round its point, along its x, y and z.
+  - A cylinder (`radiusM`; `lengthM`, left out without end) from its point along its x.
+  - A cone (`halfAngleRad`) and a rectangular cone (`lengthHalfAngleRad` in its x-y plane, `widthHalfAngleRad` in its x-z plane): their vertex its point, their axis its x, out to `rangeM` from it (left out, without end).
+  - Its axes are turned by `yawRad`, `pitchRad` and `rollRad` from north-east-down at its point (in a frame, from the frame's turned axes). A-GRA gives an ellipsoid its attitude as a quaternion, and a cone's axis only through orbital kinematics; here each shape with an axis is turned by its own. A vertical column is a cylinder pitched 90 degrees.
+  - Its point is on the Earth, at its `altitudeM` in its `altitudeReference`. Or it is in a frame (`frame`, `frameRotation`): x and y along the frame's turned axes, and, its altitude left out, the frame's origin's - so a volume in the frame that follows another vehicle moves with it. Or it moves, at a velocity north, east and down from `timeS`.
+  - A geocentric volume: `latitudeMinRad` to `latitudeMaxRad`, `longitudeMinRad` clockwise to `longitudeMaxRad`, `altitudeMinM` to `altitudeMaxM` (either left out: open that way).
+  - Checked as A-GRA's schema restricts it. A fault is refused `invalid_parameter`, naming the field from 10 on: 10 the shape, 11 the point (off the Earth, or on it without its altitude), 12 the dimensions (not above 0, a half angle not below a quarter turn, or another shape's), 13 the attitude (on a sphere, a dome or a geocentric volume), 14 the geocentric bounds, 15 the frame, 16 the velocity.
+- **Not supported:** A-GRA's orbital volumes lie outside the atmosphere every aircraft here flies in. These are its ArcVolume and IncRaPeriodVolume shapes, orbital kinematics and a body's local position, orbit regimes, orbit altitudes and its qualitative regions. The C++, C and Python surfaces do not express them.
+- **Laid out** in the plane at its point as a zone is (a geocentric volume's at its bounds' middle), with its axes, and kept as a zone's is.
+- **Where it goes in.** Every shape is convex, so a containment test finds it.
+  - Its height is the altitude given, which must lie inside it over a point well inside it, in its reference (else field 3 or 4). That point is its centre, a dome's halfway up, a cylinder's or a cone's along its axis. Given none, it is the aircraft's, held between its top and bottom over that point as a zone's band holds it: a tenth of the way in, 30 m at most, or its middle where it is thinner.
+  - At that height it aims toward that point from the aircraft - or along a bearing from it within a window of bearings - finds its edge, and goes a fifth of the way across it further in (200 m at most, never past that point). Over it already, the aircraft flies on as it flies for ten seconds.
+  - It is flown there as a route, as a zone's is. A moving volume's aim is where it will be, its height too.
+- **Completed** once the aircraft is in it, tested each step in three dimensions as the volume is then: moving, or where its frame's vehicle is.
+- **Its route ends in a loiter at its aim** - a rotorcraft stops over it, a wing orbits it - so an aircraft that reaches the aim before it is in (still climbing to it) goes on until it is. A zone's route ends so too now (4.43).
+- **Operational volumes** (ENV-06; A-GRA's OpVolume): `World::setOpVolume` keeps one by its id as a zone is kept; with it come `opVolumes`, `opVolume` and `removeOpVolume`. A must fly naming one the world does not keep, or one whose frame is gone, is refused `unknown_geometry` (field 5).
+- **The command:** its `location` is Volume (the volume given with it: `World::submit(vehicle, MustFlyCommand, OpVolume)`) or OpVolume (`target` the id). The rest is as a zone's: a Volume without a volume is refused (field 0); an UPDATE may give one in place of its own, and given none keeps it; a batch's must fly gives it by `BatchCommand::volume`; a task keeps it as it was laid out.
+- **The support rows:** `fsim.guidance.must_fly` and `fsim.geometry` are supported on every aircraft.
+- **Surfaces.**
+  - C++: `OpVolume`, `OpVolumeId`, `VolumeShape`, and `MustFlyLocation::Volume` and `OpVolume` (`fsim/Control.h`); `World::submit(vehicle, MustFlyCommand, OpVolume)`, `World::update(activity, MustFlyCommand, OpVolume)`; `World::setOpVolume`, `removeOpVolume`, `opVolumes`, `opVolume`.
+  - C ABI 1.42: `FSIM_MUST_FLY_VOLUME` and `FSIM_MUST_FLY_OP_VOLUME`; `enum fsim_volume_shape`, `fsim_op_volume` (`fsim_op_volume_init`); `fsim_world_set_op_volume`, `fsim_world_remove_op_volume`, `fsim_world_op_volume_count`, `fsim_world_get_op_volume_at`, `fsim_world_get_op_volume`; `fsim_vehicle_submit_must_fly_volume`, `fsim_activity_update_must_fly_volume`, `fsim_activity_update_must_fly_volume_by`; `fsim_batch_command.volume`.
+  - Python: `vehicle.submit_must_fly(volume=fsim.OpVolume(...), ...)` (its location Volume where a volume is given), `activity.update_must_fly(volume=...)`; `fsim.OpVolume`, `fsim.VolumeShape`; `World.set_op_volume`, `op_volumes`, `op_volume`, `remove_op_volume`.
 
 ## 5. Applicability (D6)
 
@@ -1466,7 +1495,7 @@ Three of the missing capability types.
 - FA-8a, must fly a point, an entity or an operational point, from within a window of bearings; operational points (MFY-01, MFY-02, MFY-07; MFY-03 and ENV-06 for points; 4.42), done 2026-09-29 and measured in section 14;
 - FA-8b1, must fly a zone, given or by id; operational zones (MFY-04; MFY-03 and ENV-06 for zones; 4.43), done 2026-09-29 and measured in section 14;
 - FA-8b2, must fly a corridor, given or by id; operational lines (MFY-05; MFY-03 and ENV-06 for lines; 4.44), done 2026-09-29 and measured in section 14;
-- FA-8b3, must fly a volume, given or by id; operational volumes (MFY-06; MFY-03 and ENV-06 for volumes);
+- FA-8b3, must fly a volume, given or by id; operational volumes (MFY-06; MFY-03 and ENV-06 for volumes; 4.45), done 2026-09-29 and measured in section 14: FA-8b done, and with it the must fly and the operational geometry;
 - FA-8c, the altitude stacked marshall (ASM-01);
 - FA-8d, the route intercept (RIC-01 to RIC-03; CAP-02).
 
@@ -3018,6 +3047,27 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The NEWs in the default builds: a level switch +1.2 % and −1.3 % (+0.6 % from three copies), a behaviour −1.6 % twice (+1.0 %); the same level's update and a checked update within −1.6 % to +1.5 %. Built with every function aligned, all four within −2.9 % to +3.0 %.
   - World throughput is 98.4 to 100.8 % of FA-8b1's, and 100.0 to 100.3 % from three copies. Protection costs at most 1.5 %.
 - ctest: all 352 tests pass.
+
+**FA-8b3, A-GRA's must fly into a volume; operational volumes (MFY-06; MFY-03 and ENV-06 for volumes). FA-8b done.**
+- What it built is 4.45, in C++, the C ABI (1.42) and Python. `fsim.guidance.must_fly` and `fsim.geometry` are supported on every aircraft. A-GRA's orbital volumes lie outside the atmosphere, and the surfaces do not express them.
+- **Flown** (`test_must_fly_volumes`, 4 cases, 80 checks; its Python twin, a test more; `test_c_abi`'s 1.42 block):
+  - A volume of each kind, per class: a sphere 5 km east of a C172; a cone 6 km ahead of an F-16C, opening away from it 10 degrees each side (entered just past its vertex); a dome beside a UH-60A; a column 30 m across beside an IRIS. Each completed in its volume, within a metre.
+  - A sphere whose lowest point was 500 m above a C172, climbed into. An ellipsoid entered from the north through its window. A geocentric box, 1,700 to 1,900 m, climbed into within its bounds. A sphere moving north at 10 m/s, entered where it was then. A sphere 300 m round another aircraft flying north, in the frame that follows it, flown into.
+  - An operational volume (51) kept, set again (revision 2), read back and entered by its id. One the world does not keep, or one removed, is refused `unknown_geometry`.
+  - Nine malformed volumes are refused naming their fields, 10 to 16. So are an altitude outside the volume over its inner point, or in another reference (fields 3 and 4), a Volume given no volume, and a volume kept with id 0.
+  - An UPDATE's volume, moved 3 km north, was entered. A must fly queued behind a start window with its volume started 20 s later and entered it.
+- **The fleet** (`test_fleet`, a case of its own): on every aircraft, a sphere a quarter of a leg in radius - its centre a leg ahead, half a leg to the right and 100 m above the aircraft (a rotorcraft's 20 m) - was entered on all 35. Each completed inside it, from 0.01 m (the CF2, after climbing 14.8 m into its 5 m sphere) to 7.95 m (the E-3G), within 21 s (the IRIS) to 126 s (the C-17A).
+- **Found and fixed:**
+  - The multirotors reached their aim before they had climbed into their spheres, flew on along their course, and never entered them. A zone's or a volume's route now ends in a loiter at its aim - a rotorcraft stops over it, a wing orbits it - so the aircraft goes on until it is in. FA-8b1's zones end so too; their tests and fleet case read as before.
+  - The IRIS's height lay exactly at its sphere's lowest point, which counts as inside, so it went in there with no room and took 52 s to complete. A volume's height is now held between its top and bottom over its inner point as a zone's band holds it: a tenth of the way in, 30 m at most. The IRIS then went in 3.8 m up, in 21 s.
+  - FA-8a's test named location 7 as a code that was not one; 7 is now a volume's.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-8b2's build.
+- **Digests:** identical to FA-8b2's, with protection and without. The allocation gate passes, with three cases more: an ellipsoid given and moved every step through UPDATE; a column kept by the world, its must fly's speed updated every step by its id; and a sphere round another vehicle, tested every step where that vehicle is.
+- **A/B throughput** against FA-8b2, both builds run from their own directories in a quiet window held throughout, as FA-8b2's were measured.
+  - The micro cases are within −1.3 % to +1.6 % from one copy, and −1.3 % to +1.3 % from three.
+  - The NEWs in the default builds: a level switch +0.6 % and −0.9 % (−1.0 % from three copies), a behaviour +0.7 % and +1.4 % (−2.2 %); the same level's update and a checked update within −1.5 % to +1.2 %. Built with every function aligned, all four within −3.6 % to +2.9 %.
+  - World throughput from three copies first read 98.0 to 99.4 % of FA-8b2's, one directory's drifting as before (FA-7c's). Run again apart, it read 99.4 to 100.2 % from one copy and 99.5 to 100.3 % from three. Protection costs at most 1.1 %.
+- ctest: all 356 tests pass.
 
 ## Appendix A: the inventory
 

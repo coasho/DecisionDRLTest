@@ -1869,6 +1869,23 @@ bool lineFromC(const fsim_op_line& c, fsim::control::OpLine& l) {
     return true;
 }
 
+/// An operational volume from the caller's (ABI 1.42): false where its struct is short.
+bool volumeFromC(const fsim_op_volume& c, fsim::control::OpVolume& v) {
+    if (c.struct_size < offsetof(fsim_op_volume, time_s) + sizeof c.time_s) return false;
+    v = fsim::control::OpVolume{};
+    v.id = c.op_volume_id, v.shape = c.shape;
+    v.latitudeRad = c.latitude_rad, v.longitudeRad = c.longitude_rad, v.xM = c.x_m, v.yM = c.y_m;
+    v.altitudeM = c.altitude_m, v.altitudeReference = c.altitude_reference;
+    v.radiusM = c.radius_m, v.semiAxisAM = c.semi_axis_a_m, v.semiAxisBM = c.semi_axis_b_m, v.semiAxisCM = c.semi_axis_c_m, v.lengthM = c.length_m;
+    v.halfAngleRad = c.half_angle_rad, v.lengthHalfAngleRad = c.length_half_angle_rad, v.widthHalfAngleRad = c.width_half_angle_rad, v.rangeM = c.range_m;
+    v.yawRad = c.yaw_rad, v.pitchRad = c.pitch_rad, v.rollRad = c.roll_rad;
+    v.latitudeMinRad = c.latitude_min_rad, v.latitudeMaxRad = c.latitude_max_rad, v.longitudeMinRad = c.longitude_min_rad;
+    v.longitudeMaxRad = c.longitude_max_rad, v.altitudeMinM = c.altitude_min_m, v.altitudeMaxM = c.altitude_max_m;
+    v.frame = c.frame, v.frameRotation = c.frame_rotation;
+    v.northMs = c.north_ms, v.eastMs = c.east_ms, v.downMs = c.down_ms, v.timeS = c.time_s;
+    return true;
+}
+
 /// A batch item (or a task's command) into its C++ command: its waypoints and segments into `route` and `curve` (or
 /// `nurbs`: ABI 1.24, where the item's struct has them), a pattern's shape into `shape` (the item pointing at it where it
 /// has one).
@@ -1876,7 +1893,8 @@ bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::Ba
                std::vector<fsim::control::BezierSegment>& curve, std::vector<fsim::control::NurbsSegment>& nurbs, fsim::control::PatternShape& shape,
                fsim::control::CurveShape& curveShape, std::vector<fsim::control::RouteLoiter>& loiters, std::vector<fsim::control::RouteState>& states,
                std::vector<fsim::control::RoutePath>& paths, std::vector<fsim::control::RouteBranch>& branches,
-               std::vector<fsim::control::RouteTerminator>& terminators, fsim::control::OpZone& zone, fsim::control::OpLine& line) {
+               std::vector<fsim::control::RouteTerminator>& terminators, fsim::control::OpZone& zone, fsim::control::OpLine& line,
+               fsim::control::OpVolume& volume) {
     item.options = fromC(b.options);
     fsim::control::Command c;
     fsim::control::SupportCommand sc;
@@ -1899,6 +1917,10 @@ bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::Ba
         if (ok && b.code == FSIM_MODE_MUST_FLY && b.struct_size >= offsetof(fsim_batch_command, line) + sizeof b.line && b.line) { // (ABI 1.41)
             ok = lineFromC(*b.line, line);
             item.line = &line;
+        }
+        if (ok && b.code == FSIM_MODE_MUST_FLY && b.struct_size >= offsetof(fsim_batch_command, volume) + sizeof b.volume && b.volume) { // (ABI 1.42)
+            ok = volumeFromC(*b.volume, volume);
+            item.volume = &volume;
         }
         break;
     case FSIM_BATCH_ROUTE: { // (its loiters and states where the caller's struct has them: ABI 1.28, 1.31)
@@ -1955,6 +1977,7 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
         std::vector<fsim::control::PatternShape> shapes(count); // (each pattern's own: the items point at them)
         std::vector<fsim::control::OpZone> zones(count);          // (each must fly's zone given, likewise)
         std::vector<fsim::control::OpLine> lines(count);          // (and corridor)
+        std::vector<fsim::control::OpVolume> volumes(count);      // (and volume)
         std::vector<fsim::control::CurveShape> curveShapes(count); // (each curve's likewise)
         routes.reserve(count), curves.reserve(count), nurbses.reserve(count), loiterses.reserve(count), stateses.reserve(count), pathses.reserve(count);
         brancheses.reserve(count), terminatorses.reserve(count);
@@ -1971,7 +1994,7 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
             std::vector<fsim::control::RouteBranch>& branches = brancheses.emplace_back();
             std::vector<fsim::control::RouteTerminator>& terminators = terminatorses.emplace_back();
             if (!fromBatch(world, b, item, route, curve, nurbs, shapes[i], curveShapes[i], loiters, states, paths, branches, terminators, zones[i],
-                           lines[i]))
+                           lines[i], volumes[i]))
                 return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_batch: item " + std::to_string(i) + " is malformed");
             item.waypoints = route, item.segments = curve, item.nurbs = nurbs, item.loiters = loiters, item.states = states, item.paths = paths;
             item.branches = branches, item.terminators = terminators;
@@ -2033,7 +2056,9 @@ FSIM_API int fsim_vehicle_store_task(fsim_world* world, uint32_t id, uint64_t ta
         std::vector<fsim::control::RouteTerminator> terminators;
         fsim::control::OpZone zone;
         fsim::control::OpLine line;
-        if (!fromBatch(world, *command, item, route, curve, nurbs, shape, curveShape, loiters, states, paths, branches, terminators, zone, line) ||
+        fsim::control::OpVolume volume;
+        if (!fromBatch(world, *command, item, route, curve, nurbs, shape, curveShape, loiters, states, paths, branches, terminators, zone, line,
+                       volume) ||
             !std::holds_alternative<fsim::control::Command>(item.command))
             return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_store_task: a flight or guidance command, whole, is kept");
         fsim::control::TaskRepetition repetition;
@@ -2397,10 +2422,11 @@ const char* planFromC(fsim_world* world, const fsim_route_plan& plan, fsim::cont
     CurveShape curveShape;
     OpZone zone; // (a route's: none)
     OpLine line;
+    OpVolume volume;
     const Command* c = nullptr;
     if (plan.route.kind != FSIM_BATCH_ROUTE ||
         !fromBatch(world, plan.route, item, p.waypoints, curve, nurbs, shape, curveShape, p.loiters, p.states, p.paths, p.branches, p.terminators, zone,
-                   line) ||
+                   line, volume) ||
         !(c = std::get_if<Command>(&item.command)) || !std::holds_alternative<RouteCommand>(*c))
         return "its route cannot be read";
     if (!toPointMetadata(plan.points, plan.point_count, p.pointMetadata) || !toPathMetadata(plan.paths, plan.path_count, p.pathMetadata))
@@ -3141,6 +3167,96 @@ FSIM_API int fsim_activity_update_must_fly_line_by(fsim_world* world, fsim_activ
         return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_must_fly_line: a must fly takes 10 fields, and a line's vertices whole");
     toC(world, fsim::control::activityVehicle(activity),
         world->world.update(fsim::control::Caller{from, controller}, activity, std::get<fsim::control::MustFlyCommand>(c), l), result);
+    return FSIM_OK;
+}
+
+/// A volume kept, into the caller's struct.
+void volumeToC(const fsim::control::OpVolume& v, fsim_op_volume& c) {
+    const uint32_t size = c.struct_size;
+    fsim_op_volume_init(&c);
+    c.struct_size = size;
+    c.revision = v.revision, c.op_volume_id = v.id, c.shape = v.shape;
+    c.latitude_rad = v.latitudeRad, c.longitude_rad = v.longitudeRad, c.x_m = v.xM, c.y_m = v.yM;
+    c.altitude_m = v.altitudeM, c.altitude_reference = v.altitudeReference;
+    c.radius_m = v.radiusM, c.semi_axis_a_m = v.semiAxisAM, c.semi_axis_b_m = v.semiAxisBM, c.semi_axis_c_m = v.semiAxisCM, c.length_m = v.lengthM;
+    c.half_angle_rad = v.halfAngleRad, c.length_half_angle_rad = v.lengthHalfAngleRad, c.width_half_angle_rad = v.widthHalfAngleRad, c.range_m = v.rangeM;
+    c.yaw_rad = v.yawRad, c.pitch_rad = v.pitchRad, c.roll_rad = v.rollRad;
+    c.latitude_min_rad = v.latitudeMinRad, c.latitude_max_rad = v.latitudeMaxRad, c.longitude_min_rad = v.longitudeMinRad;
+    c.longitude_max_rad = v.longitudeMaxRad, c.altitude_min_m = v.altitudeMinM, c.altitude_max_m = v.altitudeMaxM;
+    c.frame = v.frame, c.frame_rotation = v.frameRotation;
+    c.north_ms = v.northMs, c.east_ms = v.eastMs, c.down_ms = v.downMs, c.time_s = v.timeS;
+}
+
+FSIM_API void fsim_op_volume_init(fsim_op_volume* volume) {
+    if (!volume) return;
+    std::memset(volume, 0, sizeof *volume);
+    volume->struct_size = sizeof *volume;
+    const double hold = fsim::control::kHold;
+    double* fields[] = {&volume->shape, &volume->latitude_rad, &volume->longitude_rad, &volume->x_m, &volume->y_m, &volume->altitude_m,
+                        &volume->altitude_reference, &volume->radius_m, &volume->semi_axis_a_m, &volume->semi_axis_b_m, &volume->semi_axis_c_m,
+                        &volume->length_m, &volume->half_angle_rad, &volume->length_half_angle_rad, &volume->width_half_angle_rad, &volume->range_m,
+                        &volume->yaw_rad, &volume->pitch_rad, &volume->roll_rad, &volume->latitude_min_rad, &volume->latitude_max_rad,
+                        &volume->longitude_min_rad, &volume->longitude_max_rad, &volume->altitude_min_m, &volume->altitude_max_m, &volume->frame,
+                        &volume->frame_rotation, &volume->north_ms, &volume->east_ms, &volume->down_ms, &volume->time_s};
+    for (double* f : fields) *f = hold;
+}
+
+FSIM_API int fsim_world_set_op_volume(fsim_world* world, const fsim_op_volume* volume, int32_t* reason) {
+    fsim::control::OpVolume v;
+    if (!world || !volume || !reason || !volumeFromC(*volume, v)) return FSIM_INVALID_ARGUMENT;
+    *reason = static_cast<int32_t>(world->world.setOpVolume(v));
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_world_remove_op_volume(fsim_world* world, uint64_t id) {
+    if (!world) return FSIM_INVALID_ARGUMENT;
+    if (!world->world.removeOpVolume(id)) return absent(FSIM_INVALID_ARGUMENT, "fsim_world_remove_op_volume: no such volume");
+    return FSIM_OK;
+}
+
+FSIM_API uint32_t fsim_world_op_volume_count(const fsim_world* world) { return world ? static_cast<uint32_t>(world->world.opVolumes().size()) : 0u; }
+
+FSIM_API int fsim_world_get_op_volume(const fsim_world* world, uint64_t id, fsim_op_volume* out) {
+    if (!world || !out || !FSIM_HAS(out, fsim_op_volume, time_s)) return FSIM_INVALID_ARGUMENT;
+    const std::optional<fsim::control::OpVolume> v = world->world.opVolume(id);
+    if (!v) return absent(FSIM_INVALID_ARGUMENT, "fsim_world_get_op_volume: no such volume");
+    volumeToC(*v, *out);
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_world_get_op_volume_at(const fsim_world* world, uint32_t index, fsim_op_volume* out) {
+    if (!world || !out) return FSIM_INVALID_ARGUMENT;
+    const std::vector<fsim::control::OpVolumeId> ids = world->world.opVolumes();
+    if (index >= ids.size()) return absent(FSIM_INVALID_ARGUMENT, "fsim_world_get_op_volume_at: no such volume");
+    return fsim_world_get_op_volume(world, ids[index], out);
+}
+
+FSIM_API int fsim_vehicle_submit_must_fly_volume(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_op_volume* volume,
+                                                 const fsim_command_options* options, fsim_command_result* result) {
+    if (!volume) return fsim_vehicle_submit_mode(world, id, FSIM_MODE_MUST_FLY, fields, count, options, result);
+    fsim::control::Command c;
+    fsim::control::OpVolume v;
+    if (!world || !result || !toMode(FSIM_MODE_MUST_FLY, fields, count, c) || !volumeFromC(*volume, v))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_must_fly_volume: a must fly takes 10 fields, and a volume whole");
+    toC(world, id, world->world.submit(id, std::get<fsim::control::MustFlyCommand>(c), v, fromC(options)), result);
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_activity_update_must_fly_volume(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
+                                                  const fsim_op_volume* volume, fsim_command_result* result) {
+    return fsim_activity_update_must_fly_volume_by(world, activity, FSIM_SOURCE_POLICY, 0, fields, count, volume, result);
+}
+
+FSIM_API int fsim_activity_update_must_fly_volume_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller,
+                                                     const double* fields, uint32_t count, const fsim_op_volume* volume, fsim_command_result* result) {
+    if (!volume) return fsim_activity_update_by(world, activity, source, controller, fields, count, result);
+    fsim::control::Source from;
+    fsim::control::Command c;
+    fsim::control::OpVolume v;
+    if (!world || !result || !toSource(source, from) || !toMode(FSIM_MODE_MUST_FLY, fields, count, c) || !volumeFromC(*volume, v))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_must_fly_volume: a must fly takes 10 fields, and a volume whole");
+    toC(world, fsim::control::activityVehicle(activity),
+        world->world.update(fsim::control::Caller{from, controller}, activity, std::get<fsim::control::MustFlyCommand>(c), v), result);
     return FSIM_OK;
 }
 

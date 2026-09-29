@@ -1328,6 +1328,52 @@ int main(int argc, char** argv) {
             CHECK(fsim_world_remove_op_zone(world, 21) == FSIM_OK && fsim_world_remove_op_zone(world, 21) == FSIM_INVALID_ARGUMENT);
         }
         {
+            /* ABI 1.42 (4.45): a must fly into a volume - a sphere kept and read back, flown by its id, then given in place of its
+               own; one given with a must fly, entered; a malformed one refused naming its field from 10 */
+            fsim_op_volume volume, back;
+            fsim_command_result vr;
+            fsim_activity_info vi;
+            const fsim_vehicle_state* at;
+            double vfields[10];
+            uint32_t balled = 0;
+            int32_t reason = -1;
+            int k;
+            spec.name = "must-fly-volume";
+            spec.type = "jsbsim:c172x";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 55.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &balled) == FSIM_OK);
+            at = fsim_vehicle_state_ptr(world, balled);
+            fsim_op_volume_init(&volume);
+            CHECK(volume.struct_size == sizeof volume && isnan(volume.shape) && isnan(volume.radius_m) && isnan(volume.down_ms));
+            volume.op_volume_id = 61, volume.shape = FSIM_VOLUME_SPHERE, volume.radius_m = 600.0;
+            volume.latitude_rad = at->latitude_rad, volume.longitude_rad = at->longitude_rad + 2600.0 / (6371000.0 * cos(at->latitude_rad));
+            volume.altitude_m = 1500.0;
+            CHECK(fsim_world_set_op_volume(world, &volume, &reason) == FSIM_OK && reason == 0);
+            fsim_op_volume_init(&back);
+            CHECK(fsim_world_op_volume_count(world) == 1 && fsim_world_get_op_volume(world, 61, &back) == FSIM_OK && back.revision == 1 &&
+                  back.shape == FSIM_VOLUME_SPHERE && back.radius_m == 600.0 && isnan(back.length_m));
+            /* by its id: accepted; then a volume given in place of its own */
+            for (k = 0; k < 10; ++k) vfields[k] = fsim_hold();
+            vfields[0] = FSIM_MUST_FLY_OP_VOLUME, vfields[5] = 61.0;
+            CHECK(fsim_vehicle_submit_mode(world, balled, FSIM_MODE_MUST_FLY, vfields, 10, &co, &vr) == FSIM_OK && vr.status == FSIM_COMMAND_ACCEPTED);
+            volume.op_volume_id = 0;
+            for (k = 0; k < 10; ++k) vfields[k] = fsim_hold();
+            vfields[0] = FSIM_MUST_FLY_VOLUME;
+            CHECK(fsim_activity_update_must_fly_volume(world, vr.activity, vfields, 10, &volume, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_cancel(world, vr.activity, &cr) == FSIM_OK);
+            /* given with it: entered, done once in it */
+            CHECK(fsim_vehicle_submit_must_fly_volume(world, balled, vfields, 10, &volume, &co, &vr) == FSIM_OK && vr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_world_step(world, 1800) == FSIM_OK); /* (a minute) */
+            CHECK(fsim_activity_get(world, vr.activity, &vi) == FSIM_OK && strcmp(fsim_activity_state_name(vi.state), "completed") == 0);
+            /* malformed: a length on a sphere - its dimensions, field 12 */
+            volume.length_m = 100.0;
+            CHECK(fsim_vehicle_submit_must_fly_volume(world, balled, vfields, 10, &volume, &co, &vr) == FSIM_OK && vr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(vr.reason), "invalid_parameter") == 0 && vr.reserved == 13); /* (the field plus one) */
+            CHECK(fsim_world_remove_op_volume(world, 61) == FSIM_OK && fsim_world_remove_op_volume(world, 61) == FSIM_INVALID_ARGUMENT);
+        }
+        {
             /* ABI 1.41 (4.44): a must fly through a corridor - a line kept and read back, flown by its id, then given in place
                of its own; one given with a must fly, flown through; a malformed one refused naming its field from 10 */
             fsim_op_line line, back;

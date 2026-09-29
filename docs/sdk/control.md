@@ -438,11 +438,11 @@ A c172x meets a duration in a 10 m/s wind within 0.2 %, and an IRIS within
 ### Must fly: a location flown over
 
 `fsim.guidance.must_fly` is A-GRA's must fly
-([flight-autonomy.md](../flight-autonomy.md), 4.42 to 4.44): a location the
+([flight-autonomy.md](../flight-autonomy.md), 4.42 to 4.45): a location the
 aircraft must fly over - a point, another vehicle, or an operational point the
-world keeps - a zone it must enter, or a corridor it must fly through, given or
-kept by the world, approached, where it is given, from within a window of
-bearings.
+world keeps - a zone or a volume it must enter, or a corridor it must fly
+through, given or kept by the world, approached, where it is given, from within
+a window of bearings.
 
 ```cpp
 OpPoint ip;                                              // an operational point, kept by the world by its id
@@ -503,7 +503,22 @@ over.location = double(MustFlyLocation::Entity), over.target = double(other);
   - Each turn in it is checked against its widths at the radius the route plans it with: a turn that cuts inside by more than the width there is refused `performance_limit` (`max_turn_rate`), naming its point.
   - Each vertex flies at the altitude given (within its band), else its own, else the aircraft's held within its band.
   - A malformed line is refused `invalid_parameter` naming its field from 10 on (10 vertices, 11 projection, 12 widths, 13 band, 14 frame, 15 velocity).
-- Volumes are FA-8b3's: the capability is partial until then.
+- **A volume** (`OpVolume`; 4.45) is a sphere, a dome, an ellipsoid, a cylinder, a cone or a rectangular cone at its point - on the Earth or in a frame, turned by its yaw, pitch and roll, maybe moving - or a geocentric box of latitudes, longitudes and altitudes. It is given with the command (`location` Volume: `v.submit(m, volume)`) or kept by the world by its id (`location` OpVolume: `World::setOpVolume`, `opVolumes`, `opVolume`, `removeOpVolume`).
+
+  ```cpp
+  OpVolume column;                                         // a column 800 m round, from the sea to 4 km, 5 km east
+  column.shape = double(VolumeShape::Cylinder);
+  column.latitudeRad = lat, column.longitudeRad = lon + 5000.0 / (R * std::cos(lat)), column.altitudeM = 0.0;
+  column.radiusM = 800.0, column.lengthM = 4000.0, column.pitchRad = kPi / 2; // (its x up)
+  MustFlyCommand into;
+  into.location = double(MustFlyLocation::Volume);
+  auto e = v.submit(into, column).activity;                // at a height inside it, a little past its edge; done once in it
+  ```
+
+  - It goes in at the altitude given (inside it over a point well inside it), else the aircraft's held between its top and bottom there; toward that point from the aircraft (or from within a window) to its edge, and a fifth of the way across further in.
+  - It completes once the aircraft is in it, tested each step in three dimensions. The route ends in a loiter at its aim - a rotorcraft stops, a wing orbits - until it is (a zone's too).
+  - A volume in the frame that follows another vehicle (`FrameOrigin::Vehicle`), its altitude left out, is round that vehicle: flown into as it moves.
+  - A malformed volume is refused `invalid_parameter` naming its field from 10 on (10 shape, 11 point, 12 dimensions, 13 attitude, 14 geocentric bounds, 15 frame, 16 velocity). A-GRA's orbital volumes are none of an aircraft's: the SDK does not express them.
 
 ### Grants: who may command a vehicle
 

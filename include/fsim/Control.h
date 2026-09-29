@@ -744,6 +744,8 @@ enum class MustFlyLocation : std::uint8_t {
     OpZone = 4,  ///< an operational zone by its id (OpZoneID; World::setOpZone): entered
     Line = 5,    ///< a corridor given with it (A-GRA's LineTarget; an OpLine beside the command): flown through (4.44)
     OpLine = 6,  ///< an operational line by its id (OpLineID; World::setOpLine): flown through
+    Volume = 7,  ///< a volume given with it (A-GRA's VolumeTarget; an OpVolume beside the command): entered (4.45)
+    OpVolume = 8, ///< an operational volume by its id (OpVolumeID; World::setOpVolume): entered
     Count
 };
 
@@ -761,7 +763,7 @@ struct MustFlyCommand {
     double latitudeRad = kHold, longitudeRad = kHold; ///< a point's
     double altitudeM = kHold;          ///< a point's, or the altitude it flies over the location at; kHold: 4.42
     double altitudeReference = kHold;  ///< AltitudeReference
-    double target = kHold;             ///< an entity's vehicle id, or an operational point's, zone's or line's id
+    double target = kHold;             ///< an entity's vehicle id, or an operational point's, zone's, line's or volume's id
     double ingressMinRad = kHold, ingressMaxRad = kHold; ///< the bearings from the location it approaches from: both or neither
     double speed = kHold;              ///< m/s, or a Mach number; kHold: as it flies now (a rotorcraft its cruise)
     double speedReference = kHold;     ///< SpeedReference
@@ -843,6 +845,51 @@ struct OpLine {
     std::uint32_t revision = 0;                  ///< read back: one more each time it is set
 };
 
+/// An operational volume's shape (A-GRA's Shape3D_ChoiceType and GeocentricVolumeType; docs/flight-autonomy.md, 4.45): those of
+/// the atmosphere. A-GRA's orbital volumes - its ArcVolume and IncRaPeriodVolume, orbital kinematics, orbit regimes - are none of
+/// an aircraft's.
+enum class VolumeShape : std::uint8_t {
+    Sphere = 0,          ///< round its point: its radius
+    Dome = 1,            ///< the half of a sphere above its point's level: its radius
+    Ellipsoid = 2,       ///< round its point: its semi-axes along its x, y and z
+    Cylinder = 3,        ///< from its point along its x: its radius, and its length (left out: without end)
+    Cone = 4,            ///< its vertex its point, its axis its x: its half angle, and its range (left out: without end)
+    RectangularCone = 5, ///< likewise: its half angles in its x-y plane (its length's) and its x-z plane (its width's)
+    Geocentric = 6,      ///< between two latitudes, two longitudes and two altitudes
+    Count
+};
+
+/// An operational volume's id (A-GRA's OpVolumeID): not 0.
+using OpVolumeId = std::uint64_t;
+
+/// An operational volume (A-GRA's OpVolume, its OpVolumeType; docs/flight-autonomy.md, 4.45), kept by the world by its id for a
+/// must fly to name (World::setOpVolume), or given with one: its shape at its point - on the Earth, or in a reference frame -
+/// turned by its attitude, and the velocity it moves at from a time; or, geocentric, its bounds. A field left out is kHold.
+struct OpVolume {
+    OpVolumeId id = 0;
+    double shape = kHold;                              ///< VolumeShape
+    double latitudeRad = kHold, longitudeRad = kHold;  ///< its point, on the Earth
+    double xM = kHold, yM = kHold;                     ///< or in the frame
+    double altitudeM = kHold;                          ///< its point's altitude
+    double altitudeReference = kHold;                  ///< AltitudeReference of its point's altitude, or of a geocentric volume's band
+    double radiusM = kHold;                            ///< a sphere's, a dome's or a cylinder's
+    double semiAxisAM = kHold, semiAxisBM = kHold, semiAxisCM = kHold; ///< an ellipsoid's, along its x, y and z
+    double lengthM = kHold;                            ///< a cylinder's (left out: without end)
+    double halfAngleRad = kHold;                       ///< a cone's, from its axis
+    double lengthHalfAngleRad = kHold, widthHalfAngleRad = kHold; ///< a rectangular cone's
+    double rangeM = kHold;                             ///< a cone's or a rectangular cone's, from its vertex (left out: without end)
+    double yawRad = kHold, pitchRad = kHold, rollRad = kHold; ///< its axes from north-east-down at its point (in a frame, from the
+                                                              ///< frame's turned axes): an ellipsoid's, a cylinder's or a cone's
+    double latitudeMinRad = kHold, latitudeMaxRad = kHold;   ///< a geocentric volume's
+    double longitudeMinRad = kHold, longitudeMaxRad = kHold; ///< from the least clockwise to the most
+    double altitudeMinM = kHold, altitudeMaxM = kHold;       ///< its band: left out, from the surface, and with no top
+    double frame = kHold;                              ///< its point in this frame (World::createFrame's id)
+    double frameRotation = kHold;                      ///< FrameRotation: its x and y turned with the frame's yaw or track
+    double northMs = kHold, eastMs = kHold, downMs = kHold; ///< moving (A-GRA's Velocity): from where it is at `timeS` (down left out: 0)
+    double timeS = kHold;                              ///< World::time; left out, when it is set
+    std::uint32_t revision = 0;                        ///< read back: one more each time it is set
+};
+
 /// A must fly's zone or corridor as the host laid it out (docs/flight-autonomy.md, 4.43 and 4.44), for the behaviour to find
 /// the aircraft in at every update and for an UPDATE, a waiting start or a task to fly again: its shape in the plane at its
 /// reference point - north and east metres, or x and y along its frame's axes - the band of altitudes a zone spans, a
@@ -877,9 +924,18 @@ struct MustFlyArea {
     double lineMinM[kVertices] = {}, lineMaxM[kVertices] = {};
     AltitudeReference lineBandReference[kVertices] = {};
     double leftWidthM[kVertices] = {}, rightWidthM[kVertices] = {};
+    // a volume's (4.45; `shape` Count, `lineCount` 0): its shape about its point - its reference, or in its frame at `frameXM`,
+    // `frameYM` - at `pointAltitudeM` (in `altitudeReference`, moving at `downMs`), its axes `axes` in north-east-down (in a
+    // frame, along the frame's turned axes and down); a geocentric volume's bounds, its band `altitudeMinM` to `altitudeMaxM`
+    VolumeShape volume = VolumeShape::Count;     ///< Count: none
+    double pointAltitudeM = 0.0, downMs = 0.0;
+    double radiusM = 0.0, semiAxesM[3] = {}, lengthM = 0.0, halfAngleRad = 0.0, lengthHalfAngleRad = 0.0, widthHalfAngleRad = 0.0;
+    double rangeM = 0.0;                         ///< a cone's (infinite: without end), as a cylinder's length
+    double axes[3][3] = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}}; ///< its x, y and z (rows)
+    double latitudeMinRad = 0.0, latitudeMaxRad = 0.0, longitudeMinRad = 0.0, longitudeMaxRad = 0.0;
 
-    /// A zone or a corridor laid out (false: a point's must fly, or none).
-    bool laidOut() const noexcept { return shape != ZoneShape::Count || lineCount != 0; }
+    /// A zone, a corridor or a volume laid out (false: a point's must fly, or none).
+    bool laidOut() const noexcept { return shape != ZoneShape::Count || lineCount != 0 || volume != VolumeShape::Count; }
 };
 
 /// Where a vehicle's route, curve or pattern shape lives while it is flown
@@ -1007,6 +1063,7 @@ struct BatchCommand {
     Span<const RouteTerminator> terminators; ///< a RouteCommand's: its civil path terminators' data (4.38)
     const OpZone* zone = nullptr;        ///< a MustFlyCommand's zone given with it (4.43; null: none)
     const OpLine* line = nullptr;        ///< a MustFlyCommand's corridor given with it (4.44; null: none)
+    const OpVolume* volume = nullptr;    ///< a MustFlyCommand's volume given with it (4.45; null: none)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight

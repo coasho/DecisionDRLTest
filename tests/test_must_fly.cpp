@@ -127,7 +127,7 @@ TEST_CASE("must fly: a point flown over at its altitude, completed as it is pass
         CHECK(p.closestM < k.closestM);
         CHECK(std::abs(p.altitudeM - commands[i].altitudeM) < k.heightM);
     }
-    CHECK(w.supportTable(c172)->find("fsim.guidance.must_fly")->support == Support::Partial);
+    CHECK(w.supportTable(c172)->find("fsim.guidance.must_fly")->support == Support::Supported);
 }
 
 TEST_CASE("must fly: from within its window of bearings - the nearer edge, or behind it through a point abeam (MFY-07)", "[modes][must_fly]") {
@@ -263,7 +263,7 @@ TEST_CASE("must fly: an operational point the world keeps by its id, with its ow
     CHECK_FALSE(w.removeOpPoint(7));
     c.target = 7.0;
     CHECK(w.submit(v, c).reason == Reason::UnknownGeometry);
-    CHECK(w.supportTable(v)->find("fsim.geometry")->support == Support::Partial);
+    CHECK(w.supportTable(v)->find("fsim.geometry")->support == Support::Supported);
 }
 
 TEST_CASE("must fly: refused as malformed, naming the field; an UPDATE merged and flown afresh", "[modes][must_fly]") {
@@ -276,7 +276,7 @@ TEST_CASE("must fly: refused as malformed, naming the field; an UPDATE merged an
         const CommandResult r = w.submit(v, c);
         return r.reason == Reason::InvalidParameter ? static_cast<int>(r.index) : -100;
     };
-    CHECK(refusal([](MustFlyCommand& c) { c.location = 7.0; }) == 0);
+    CHECK(refusal([](MustFlyCommand& c) { c.location = 9.0; }) == 0);
     CHECK(refusal([](MustFlyCommand& c) { c.longitudeRad = kHold; }) == 2);
     CHECK(refusal([](MustFlyCommand& c) { c.latitudeRad = 2.0; }) == 1);
     CHECK(refusal([](MustFlyCommand& c) { c.altitudeReference = 9.0; }) == 4);

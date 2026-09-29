@@ -116,7 +116,7 @@ TEST_CASE("must fly: a zone of each shape entered, and completed once in it - pe
     offset(slant.latitudeRad, slant.longitudeRad, ended[3].latitudeRad, ended[3].longitudeRad, n, e);
     const double range = std::hypot(n, e), bearing = std::atan2(e, n);
     CHECK((range >= 49.0 && range <= 151.0 && std::abs(std::remainder(bearing - kPi, 2.0 * kPi)) <= 30.5 * kDeg));
-    CHECK(w.supportTable(c172)->find("fsim.guidance.must_fly")->support == Support::Partial);
+    CHECK(w.supportTable(c172)->find("fsim.guidance.must_fly")->support == Support::Supported);
 }
 
 TEST_CASE("must fly: a zone's band climbed into, and its window of bearings kept - on the Earth and in a turned frame", "[modes][must_fly]") {
@@ -257,7 +257,7 @@ TEST_CASE("must fly: an operational zone kept by its id, one in a frame and one 
     OpZone kept = square;
     kept.id = 0;
     CHECK(w.setOpZone(kept) == Reason::InvalidParameter);
-    CHECK(w.supportTable(v)->find("fsim.geometry")->support == Support::Partial);
+    CHECK(w.supportTable(v)->find("fsim.geometry")->support == Support::Supported);
 }
 
 TEST_CASE("must fly: a zone's UPDATE flies to the new one; queued with its zone, it starts later", "[modes][must_fly]") {

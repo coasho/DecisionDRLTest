@@ -85,6 +85,11 @@ public:
         (void)id;
         return nullptr;
     }
+    /// An operational volume the world keeps (4.45; World::setOpVolume), read where it is kept: null for one it does not keep.
+    virtual const OpVolume* opVolume(OpVolumeId id) const {
+        (void)id;
+        return nullptr;
+    }
 };
 
 /// A vehicle's own frame, as the session answers it (SessionView::frame): this plus the vehicle's id - whole, and within the
@@ -110,7 +115,7 @@ struct RouteExtras {
     Span<const RoutePath> paths; ///< its paths (4.36)
     Span<const RouteBranch> branches; ///< its conditional branches (4.37)
     Span<const RouteTerminator> terminators; ///< its civil path terminators' data (4.38)
-    const MustFlyArea* area = nullptr;       ///< a must fly's zone or corridor given with it, as it was laid out then (4.43, 4.44)
+    const MustFlyArea* area = nullptr;       ///< a must fly's zone, corridor or volume given with it, as it was laid out then (4.43 to 4.45)
 };
 
 class CapabilityHost {
@@ -186,6 +191,9 @@ public:
     /// NEW and UPDATE of a must fly with its corridor given (4.44): as a zone's, the line's fields named from 10.
     CommandResult submit(const MustFlyCommand& mustFly, const OpLine* line, const CommandOptions& options, const sim::VehicleState& state, double now);
     CommandResult update(ActivityId activity, const MustFlyCommand& mustFly, const OpLine* line, const sim::VehicleState& state, Caller caller);
+    /// NEW and UPDATE of a must fly with its volume given (4.45): as a zone's, the volume's fields named from 10.
+    CommandResult submit(const MustFlyCommand& mustFly, const OpVolume* volume, const CommandOptions& options, const sim::VehicleState& state, double now);
+    CommandResult update(ActivityId activity, const MustFlyCommand& mustFly, const OpVolume* volume, const sim::VehicleState& state, Caller caller);
     /// UPDATE: a new setpoint for a live activity - the fast path; allocates
     /// nothing. `state` is the vehicle's: a route is planned afresh from it.
     /// `caller` is the source the caller declares, as a NEW's options do, and
@@ -247,7 +255,8 @@ public:
     Reason storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, TaskRepetition repetition,
                      const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {},
                      Span<const RouteState> states = {}, Span<const RoutePath> paths = {}, Span<const RouteBranch> branches = {},
-                     Span<const RouteTerminator> terminators = {}, const OpZone* zone = nullptr, const OpLine* line = nullptr);
+                     Span<const RouteTerminator> terminators = {}, const OpZone* zone = nullptr, const OpLine* line = nullptr,
+                     const OpVolume* volume = nullptr);
     /// A task command: the NEW of its command with `options`, the task among
     /// the requirements it traces to, answered as the NEW is; its runs, as the
     /// task says. UnknownTask; TaskActive while its activity is live.
@@ -483,7 +492,7 @@ private:
         std::vector<RouteBranch> branches; ///< a route's conditional branches (4.37)
         std::uint32_t commanded = 0;      ///< the branches the operator has commanded (4.37: bit k, branch k)
         std::vector<RouteTerminator> terminators; ///< a route's civil path terminators' data (4.38)
-        MustFlyArea area; ///< a must fly's zone or corridor given with it, as laid out (4.43, 4.44; laidOut() false: none)
+        MustFlyArea area; ///< a must fly's zone, corridor or volume given with it, as laid out (4.43 to 4.45; laidOut() false: none)
     };
     /// A flight task (4.11): its command, and what became of it.
     struct Task {
@@ -507,7 +516,7 @@ private:
         std::uint32_t run = 0, runs = 0;    ///< its activity's, as it ended
         double percent = kUnknown;          ///< likewise
         double startTime = kUnknown, endTime = kUnknown;
-        MustFlyArea area;                   ///< a must fly's zone or corridor given with it, as laid out (4.43, 4.44; laidOut() false: none)
+        MustFlyArea area;                   ///< a must fly's zone, corridor or volume given with it, as laid out (4.43 to 4.45; laidOut() false: none)
     };
     Task* findTask(TaskId id) noexcept;
     TaskStatus statusOf(const Task& t) const noexcept;
@@ -718,7 +727,12 @@ private:
     /// A corridor's must fly laid out as a route through it (4.44; MustFly.cpp): onto its first segment from behind its first
     /// vertex, then every vertex, the last flown over; each turn checked against its widths (PerformanceLimit, by point).
     Reason flyLine(const MustFlyCommand& c, MustFlyArea& line, double ingressMin, double ingressMax, const sim::VehicleState& state, CheckLog& log);
-    /// A must fly's NEW or UPDATE with its zone or corridor laid out (MustFly.cpp).
+    /// A volume given with a must fly checked and laid out, as a zone is (4.45; MustFly.cpp).
+    Reason layOutVolume(const OpVolume& volume, MustFlyArea& out, CommandResult& detail) const;
+    /// A volume's must fly laid out as a route into it (4.45; MustFly.cpp): at a height inside it over its inner point, toward
+    /// that point from the aircraft - or from within a window of bearings - to its edge, and a little further in.
+    Reason enterVolume(const MustFlyCommand& c, MustFlyArea& volume, double ingressMin, double ingressMax, const sim::VehicleState& state, CheckLog& log);
+    /// A must fly's NEW or UPDATE with its zone, corridor or volume laid out (MustFly.cpp).
     CommandResult submitLaidOut(const MustFlyCommand& mustFly, const MustFlyArea& area, const CommandOptions& options, const sim::VehicleState& state,
                                 double now);
     CommandResult updateLaidOut(ActivityId activity, const MustFlyCommand& mustFly, const MustFlyArea& area, const sim::VehicleState& state,

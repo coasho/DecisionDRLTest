@@ -138,6 +138,9 @@ public:
     /// NEW of a must fly with its corridor given (4.44): the line checked and laid out as it is given.
     control::CommandResult submit(std::uint32_t id, const control::MustFlyCommand& mustFly, const control::OpLine& line,
                                   const control::CommandOptions& options = {});
+    /// NEW of a must fly with its volume given (4.45): the volume checked and laid out as it is given.
+    control::CommandResult submit(std::uint32_t id, const control::MustFlyCommand& mustFly, const control::OpVolume& volume,
+                                  const control::CommandOptions& options = {});
     control::CommandResult submit(std::uint32_t id, const control::PatternCommand& pattern, const control::PatternShape& shape,
                                   const control::CommandOptions& options = {});
     /// Several NEWs at once (docs/flight-autonomy.md, 4.8), made in order at
@@ -168,6 +171,7 @@ public:
     /// UPDATE of a must fly with a zone given in place of its own (4.43), or a corridor (4.44).
     control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpZone& zone);
     control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpLine& line);
+    control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpVolume& volume);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do,
@@ -189,6 +193,8 @@ public:
                                   const control::OpZone& zone);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
                                   const control::OpLine& line);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
+                                  const control::OpVolume& volume);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
                                   const control::PatternShape& shape);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);
@@ -329,6 +335,12 @@ public:
     bool removeOpLine(control::OpLineId id);
     std::vector<control::OpLineId> opLines() const;
     std::optional<control::OpLine> opLine(control::OpLineId id) const;
+    /// An operational volume (4.45; A-GRA's OpVolume), kept as a zone is (Geometry.cpp). InvalidParameter for one A-GRA's schema
+    /// would not take, or a frame the world does not have.
+    control::Reason setOpVolume(const control::OpVolume& volume);
+    bool removeOpVolume(control::OpVolumeId id);
+    std::vector<control::OpVolumeId> opVolumes() const;
+    std::optional<control::OpVolume> opVolume(control::OpVolumeId id) const;
     // --- The performance profile (docs/flight-autonomy.md, 4.15; A-GRA's MA_FlightControlModesPerformanceProfileType) ---
     /// A flight mode's performance profile at the vehicle's condition now - HSA/CSA, waypoint or curve following -
     /// into `out`, its vectors reused (PerformanceProfile.cpp). InvalidParameter for another mode (A-GRA profiles
@@ -485,6 +497,7 @@ private:
         bool opPoint(control::OpPointId id, control::OpPoint& out) const override;
         const control::OpZone* opZone(control::OpZoneId id) const override;
         const control::OpLine* opLine(control::OpLineId id) const override;
+        const control::OpVolume* opVolume(control::OpVolumeId id) const override;
 
     private:
         const World& world_;
@@ -536,6 +549,7 @@ private:
     std::map<control::OpPointId, control::OpPoint> opPoints_; ///< the operational points, by id (4.42)
     std::map<control::OpZoneId, control::OpZone> opZones_;    ///< the operational zones, by id (4.43)
     std::map<control::OpLineId, control::OpLine> opLines_;    ///< the operational lines, by id (4.44)
+    std::map<control::OpVolumeId, control::OpVolume> opVolumes_; ///< the operational volumes, by id (4.45)
 };
 
 } // namespace fsim::session

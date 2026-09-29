@@ -1,13 +1,14 @@
-// A must fly (docs/flight-autonomy.md, 4.42 to 4.44; A-GRA's MUST_FLY): its location laid out as a route from where the
+// A must fly (docs/flight-autonomy.md, 4.42 to 4.45; A-GRA's MUST_FLY): its location laid out as a route from where the
 // aircraft is - the points it approaches through where it has a window of bearings to come from, then the location, flown
-// over; a zone's point a little inside it; a corridor's vertices - as it is commanded or updated, and flown by the route's
-// follower. In a file of its own: the host's checks and the behaviour.
+// over; a zone's or a volume's point a little inside it; a corridor's vertices - as it is commanded or updated, and flown by
+// the route's follower. In a file of its own: the host's checks and the behaviour.
 #include "control/CapabilityHost.h"
 
 #include "control/Checks.h"
 #include "control/Lines.h"
 #include "control/Route.h"
 #include "control/Runtime.h"
+#include "control/Volumes.h"
 #include "control/Zones.h"
 #include "core/Geodesy.h"
 #include "fsim/ControllerRegistry.h"
@@ -135,6 +136,20 @@ Reason CapabilityHost::layOutLine(const OpLine& line, MustFlyArea& out, CommandR
     return Reason::None;
 }
 
+Reason CapabilityHost::layOutVolume(const OpVolume& volume, MustFlyArea& out, CommandResult& detail) const {
+    FrameSpec spec;
+    FramePose pose;
+    const bool known = isHold(volume.frame) ||
+                       (volume.frame == std::floor(volume.frame) && volume.frame >= 1.0 && volume.frame <= 9007199254740992.0 && sessionView_ &&
+                        sessionView_->frame(static_cast<FrameId>(volume.frame), spec, pose));
+    if (const int f = volumes::fault(volume, known); f >= 0) {
+        detail.index = static_cast<std::int16_t>(10 + f); // (a volume's fields named after the must fly's ten)
+        return Reason::InvalidParameter;
+    }
+    volumes::layOut(volume, isHold(volume.frame) ? nullptr : &spec, sessionView_ ? sessionView_->simTimeS() : 0.0, out);
+    return Reason::None;
+}
+
 Reason CapabilityHost::prepareMustFly(MustFlyCommand& c, const sim::VehicleState& state, CheckLog& log, const MustFlyArea* given) {
     CommandResult& detail = log.result;
     auto bad = [&detail](std::int16_t field) {
@@ -156,7 +171,7 @@ Reason CapabilityHost::prepareMustFly(MustFlyCommand& c, const sim::VehicleState
     c.location = orHold(c.location, 0.0);
     const auto kind = static_cast<MustFlyLocation>(static_cast<int>(c.location));
     const bool named = kind == MustFlyLocation::Entity || kind == MustFlyLocation::OpPoint || kind == MustFlyLocation::OpZone ||
-                       kind == MustFlyLocation::OpLine;
+                       kind == MustFlyLocation::OpLine || kind == MustFlyLocation::OpVolume;
     if (kind != MustFlyLocation::Point && (!isHold(c.latitudeRad) || !isHold(c.longitudeRad))) return bad(isHold(c.latitudeRad) ? 2 : 1);
     if (!named && !isHold(c.target)) return bad(5);
     if (named && (isHold(c.target) || !anId(c.target))) return bad(5);
@@ -168,7 +183,7 @@ Reason CapabilityHost::prepareMustFly(MustFlyCommand& c, const sim::VehicleState
     double ingressMin = c.ingressMinRad, ingressMax = c.ingressMaxRad;
     FramePose pose;       // (a location in a frame: the frame now)
     bool framed = false;
-    MustFlyArea area;     // (a zone's or a corridor's: 4.43, 4.44)
+    MustFlyArea area;     // (a zone's, a corridor's or a volume's: 4.43 to 4.45)
     switch (kind) {
     case MustFlyLocation::Point:
         if (isHold(c.latitudeRad) || std::abs(c.latitudeRad) > 0.5 * kPi) return bad(1);
@@ -235,10 +250,24 @@ Reason CapabilityHost::prepareMustFly(MustFlyCommand& c, const sim::VehicleState
         }
         break;
     }
+    case MustFlyLocation::Volume: // (given with it, as it was laid out then)
+        if (!given || given->volume == VolumeShape::Count) return bad(0);
+        area = *given;
+        break;
+    case MustFlyLocation::OpVolume: { // (the world's, as it is now)
+        const OpVolume* v = sessionView_ ? sessionView_->opVolume(static_cast<OpVolumeId>(c.target)) : nullptr;
+        CommandResult ignored;
+        if (!v || layOutVolume(*v, area, ignored) != Reason::None) {
+            detail.index = 5;
+            return Reason::UnknownGeometry; // (none by that id, or its frame gone)
+        }
+        break;
+    }
     default: return bad(0);
     }
     if (area.shape != ZoneShape::Count) return enterZone(c, area, ingressMin, ingressMax, state, log);
     if (area.lineCount) return flyLine(c, area, ingressMin, ingressMax, state, log);
+    if (area.volume != VolumeShape::Count) return enterVolume(c, area, ingressMin, ingressMax, state, log);
 
     // its window of bearings to come from: the points it approaches through, laid out from where the location and the
     // aircraft are now - in the location's frame, where it is in one, north and east of the frame's origin
@@ -371,7 +400,8 @@ Reason CapabilityHost::enterZone(const MustFlyCommand& c, MustFlyArea& area, dou
         }
     }
     points[n - 1].kind = static_cast<double>(EndPointKind::Waypoint); // (flown over, where it has not gone in before it)
-    RouteCommand laid;
+    RouteCommand laid; // (ending in a loiter at its aim, until the aircraft is in it: as the behaviour flies it)
+    laid.end = static_cast<double>(EndBehavior::Loiter);
     if (const Reason why = checkRoute(laid, Span<const Waypoint>(points, n), state, log); why != Reason::None) return why;
     routePlan_->area = area; // (after the checks, which clear it)
     return Reason::None;
@@ -467,6 +497,119 @@ Reason CapabilityHost::flyLine(const MustFlyCommand& c, MustFlyArea& line, doubl
     return Reason::None;
 }
 
+Reason CapabilityHost::enterVolume(const MustFlyCommand& c, MustFlyArea& volume, double ingressMin, double ingressMax, const sim::VehicleState& state,
+                                   CheckLog& log) {
+    // the volume where it is now (a frame's where the frame is), and the aircraft in its plane and below its point
+    FramePose pose;
+    if (volume.framed) {
+        FrameSpec spec;
+        if (!sessionView_ || !sessionView_->frame(volume.frameId, spec, pose)) {
+            log.result.index = 5;
+            return Reason::UnknownGeometry; // (its frame gone)
+        }
+    }
+    const double now = sessionView_ ? sessionView_->simTimeS() : 0.0;
+    const FramePose* at = volume.framed ? &pose : nullptr;
+    const double turn = zones::turnNow(volume, at);
+    double ax = 0.0, ay = 0.0, ix = 0.0, iy = 0.0, iz = 0.0;
+    zones::toPlane(volume, at, now, state.latitudeRad, state.longitudeRad, ax, ay);
+    volumes::inner(volume, ix, iy, iz);
+    const double base = volumes::pointAltitude(volume, at, now);
+    const double reference = static_cast<double>(volume.altitudeReference);
+    const double az = base - altitudeNow(volume.altitudeReference, state, &config_->altimeter); // (below its point)
+    // the height to go in at, below its point: the altitude given - inside it over its inner point, in its reference - else the
+    // aircraft's, held within it on that vertical as a zone's band holds it (a tenth of the way in from its top and bottom, 30 m
+    // at most; its middle, where it is thinner)
+    const double speed = approachSpeed(c, state, state.altitudeMslM), reach = volumes::extent(volume);
+    const double far = 2.0 * reach + std::abs(az - iz) + 1000.0;
+    auto edge = [&](double outside) { // (its edge between the inner point and one that way, halved toward it: every shape is convex)
+        double in = iz, out = outside;
+        if (volumes::contains(volume, ix, iy, out)) return out; // (it runs on that way)
+        for (int k = 0; k < 48; ++k) (volumes::contains(volume, ix, iy, 0.5 * (in + out)) ? in : out) = 0.5 * (in + out);
+        return in;
+    };
+    const double top = edge(iz - far), bottom = edge(iz + far);
+    double z = az;
+    if (!isHold(c.altitudeM)) {
+        const int field = !isHold(c.altitudeReference) && c.altitudeReference != reference ? 4 : volumes::contains(volume, ix, iy, base - c.altitudeM) ? -1 : 3;
+        if (field >= 0) {
+            log.result.index = static_cast<std::int16_t>(field);
+            return Reason::InvalidParameter;
+        }
+        z = base - c.altitudeM;
+    } else {
+        const double in = std::min(0.1 * (bottom - top), 30.0);
+        z = top + in <= bottom - in ? std::clamp(az, top + in, bottom - in) : 0.5 * (top + bottom);
+    }
+    // where it goes in, at that height: toward its inner point from the aircraft - or, with a window of bearings, from the
+    // bearing within it from the inner point - its edge, and a fifth of the way across it further in (200 m at most, never
+    // past the inner point); over it already, on as it flies for ten seconds
+    double aimX = ax, aimY = ay;
+    const bool inside = volumes::contains(volume, ax, ay, z);
+    if (inside) {
+        const double track = (std::hypot(state.velocityNedMs[0], state.velocityNedMs[1]) > 0.5 ? std::atan2(state.velocityNedMs[1], state.velocityNedMs[0])
+                                                                                                : state.eulerRad[2]) -
+                             turn;
+        aimX = ax + 10.0 * std::max(speed, 1.0) * std::cos(track), aimY = ay + 10.0 * std::max(speed, 1.0) * std::sin(track);
+    } else {
+        double ox = ax, oy = ay; // (outside it)
+        if (!isHold(ingressMin)) {
+            const double from = geo::wrapTwoPi(std::atan2(ay - iy, ax - ix)), lo = ingressMin - turn, hi = ingressMax - turn;
+            const double width = geo::wrapTwoPi(hi - lo), margin = std::min(5.0 * kDeg, 0.5 * width);
+            const double bearing = geo::wrapTwoPi(from - lo) <= width                          ? from
+                                   : geo::wrapTwoPi(lo - from) <= geo::wrapTwoPi(from - hi) ? lo + margin
+                                                                                             : hi - margin;
+            for (double outM = 2.0 * reach + 1000.0; outM < 64.0 * (reach + 1000.0); outM *= 2.0) { // (out of it that way: a cone may run on)
+                ox = ix + outM * std::cos(bearing), oy = iy + outM * std::sin(bearing);
+                if (!volumes::contains(volume, ox, oy, z)) break;
+            }
+            if (volumes::contains(volume, ox, oy, z)) ox = ax, oy = ay; // (it has no edge that way: from the aircraft's side)
+        }
+        double t0 = 0.0, t1 = 1.0; // (along from outside to the inner point: its edge)
+        for (int k = 0; k < 48; ++k) {
+            const double t = 0.5 * (t0 + t1);
+            (volumes::contains(volume, ox + t * (ix - ox), oy + t * (iy - oy), z) ? t1 : t0) = t;
+        }
+        const double length = std::hypot(ix - ox, iy - oy);
+        const double deep = std::min({0.2 * reach, 200.0, (1.0 - t1) * length});
+        const double ux = length > 1e-9 ? (ix - ox) / length : 0.0, uy = length > 1e-9 ? (iy - oy) / length : 0.0;
+        aimX = ox + t1 * (ix - ox) + deep * ux, aimY = oy + t1 * (iy - oy) + deep * uy;
+    }
+    // its points: the approach from within its window (as a point's), then where it aims - in its frame where it is in one,
+    // else on the Earth (a moving volume's where it will be as the aircraft gets there) - at the height chosen
+    Waypoint points[3];
+    std::uint32_t n = 0;
+    double plane[3][2];
+    if (!isHold(ingressMin) && !inside) {
+        double out[2][2];
+        int k = 0;
+        const double radius = approachRadius(c, state, state.altitudeMslM);
+        approach(ax - aimX, ay - aimY, ingressMin - turn, ingressMax - turn, std::max(3.0 * radius, 10.0 * speed), radius, out, k);
+        for (int j = 0; j < k; ++j) plane[n][0] = aimX + out[j][0], plane[n][1] = aimY + out[j][1], ++n;
+    }
+    plane[n][0] = aimX, plane[n][1] = aimY, ++n;
+    const double lead = volume.framed ? 0.0 : std::hypot(aimX - ax, aimY - ay) / std::max(speed, 1.0);
+    for (std::uint32_t j = 0; j < n; ++j) {
+        Waypoint& w = points[j];
+        w.altitudeM = volumes::pointAltitude(volume, at, now + lead) - z, w.altitudeReference = reference;
+        w.speed = c.speed, w.speedReference = c.speedReference;
+        if (volume.framed) {
+            w.frame = static_cast<double>(volume.frameId);
+            w.frameRotation = static_cast<double>(volume.rotation == FrameRotation::Attitude ? FrameRotation::Yaw : volume.rotation);
+            w.frameOffsets = static_cast<double>(FrameOffsets::Cartesian);
+            w.frameXM = volume.frameXM + plane[j][0], w.frameYM = volume.frameYM + plane[j][1];
+        } else {
+            zones::fromPlane(volume, nullptr, now + lead, plane[j][0], plane[j][1], w.latitudeRad, w.longitudeRad);
+        }
+    }
+    points[n - 1].kind = static_cast<double>(EndPointKind::Waypoint); // (flown over, where it has not gone in before it)
+    RouteCommand laid; // (ending in a loiter at its aim, as a zone's)
+    laid.end = static_cast<double>(EndBehavior::Loiter);
+    if (const Reason why = checkRoute(laid, Span<const Waypoint>(points, n), state, log); why != Reason::None) return why;
+    routePlan_->area = volume; // (after the checks, which clear it)
+    return Reason::None;
+}
+
 CommandResult CapabilityHost::submitLaidOut(const MustFlyCommand& mustFly, const MustFlyArea& area, const CommandOptions& options,
                                             const sim::VehicleState& state, double now) {
     RouteExtras extras;
@@ -508,6 +651,34 @@ CommandResult CapabilityHost::update(ActivityId activity, const MustFlyCommand& 
     MustFlyArea area;
     CommandResult detail;
     if (const Reason why = layOutZone(*zone, area, detail); why != Reason::None) {
+        details_.clear();
+        CommandResult r = rejected(why, activity);
+        r.index = detail.index;
+        return r;
+    }
+    return updateLaidOut(activity, mustFly, area, state, caller);
+}
+
+CommandResult CapabilityHost::submit(const MustFlyCommand& mustFly, const OpVolume* volume, const CommandOptions& options, const sim::VehicleState& state,
+                                     double now) {
+    if (!volume) return submitWith(Command(mustFly), {}, {}, options, state, now);
+    MustFlyArea area;
+    CommandResult detail;
+    if (const Reason why = layOutVolume(*volume, area, detail); why != Reason::None) {
+        details_.clear();
+        CommandResult r = rejected(why);
+        r.index = detail.index;
+        return r;
+    }
+    return submitLaidOut(mustFly, area, options, state, now);
+}
+
+CommandResult CapabilityHost::update(ActivityId activity, const MustFlyCommand& mustFly, const OpVolume* volume, const sim::VehicleState& state,
+                                     Caller caller) {
+    if (!volume) return update(activity, Command(mustFly), state, caller);
+    MustFlyArea area;
+    CommandResult detail;
+    if (const Reason why = layOutVolume(*volume, area, detail); why != Reason::None) {
         details_.clear();
         CommandResult r = rejected(why, activity);
         r.index = detail.index;
@@ -562,9 +733,11 @@ CommandResult CapabilityHost::updateMustFly(std::size_t s, ActivityId activity, 
         result.index = isHold(next.ingressMinRad) ? 6 : 7;
         return about(rejected(Reason::InvalidParameter, activity), result);
     }
-    // a zone or a corridor given with it before: the one it flies, as it was laid out then, where none is given now (4.43, 4.44)
+    // a zone, a corridor or a volume given with it before: the one it flies, as it was laid out then, where none is given now
+    // (4.43 to 4.45)
     const PathStore* store = config_->path.get();
-    const bool keeps = merged.location == static_cast<double>(MustFlyLocation::Zone) || merged.location == static_cast<double>(MustFlyLocation::Line);
+    const bool keeps = merged.location == static_cast<double>(MustFlyLocation::Zone) || merged.location == static_cast<double>(MustFlyLocation::Line) ||
+                       merged.location == static_cast<double>(MustFlyLocation::Volume);
     if (!given && store && store->mustFlyArea.laidOut() && keeps) given = &store->mustFlyArea;
     MustFlyArea kept; // (a copy: the checks lay a route out into the scratch plan, never the store it may be in)
     if (given) kept = *given;
@@ -606,7 +779,7 @@ struct MustFlyBehavior::Lead final : WorldView {
 namespace {
 
 /// The aircraft in a must fly's zone now: over the ground (the zone where it is, a frame's as the step began) and within its
-/// band, in its reference (4.43).
+/// band, in its reference (4.43); or in its volume, below the volume's point as it is now (4.45).
 bool inZone(const ControlContext& ctx, const MustFlyArea& a) noexcept {
     const sim::VehicleState& s = ctx.sensed;
     const double now = ctx.world ? ctx.world->simTime() : s.simTime;
@@ -622,9 +795,18 @@ bool inZone(const ControlContext& ctx, const MustFlyArea& a) noexcept {
     }
     double x = 0.0, y = 0.0;
     zones::toPlane(a, a.framed ? &pose : nullptr, now, s.latitudeRad, s.longitudeRad, x, y);
+    if (a.volume != VolumeShape::Count)
+        return volumes::contains(a, x, y, volumes::pointAltitude(a, a.framed ? &pose : nullptr, now) - altitudeNow(a.altitudeReference, s, ctx.altimeter));
     if (!zones::contains(a, x, y)) return false;
     const double h = altitudeNow(a.altitudeReference, s, ctx.altimeter);
     return (isHold(a.altitudeMinM) || h >= a.altitudeMinM) && (isHold(a.altitudeMaxM) || h <= a.altitudeMaxM);
+}
+
+/// How a must fly's route ends (4.43 to 4.45): a zone's or a volume's in a loiter at its aim - a rotorcraft stops over it, a wing
+/// orbits it - until the aircraft is in it; a point's and a corridor's on along its course, done as it is passed.
+double endOf(const ControlContext& ctx) noexcept {
+    const bool enters = ctx.path && (ctx.path->mustFlyArea.shape != ZoneShape::Count || ctx.path->mustFlyArea.volume != VolumeShape::Count);
+    return static_cast<double>(enters ? EndBehavior::Loiter : EndBehavior::Continue);
 }
 
 } // namespace
@@ -634,12 +816,14 @@ MustFlyBehavior::~MustFlyBehavior() = default;
 
 void MustFlyBehavior::begin(const ControlContext& ctx, const Command&) {
     zoned_ = inside_ = false, areaRevision_ = 0;
+    std::get<RouteCommand>(options_).end = endOf(ctx);
     route_->begin(ctx, options_);
 }
 
 Command MustFlyBehavior::update(const ControlContext& ctx, const Command& in) {
     // a zone's: entered once the aircraft is in it (a new route in the store - an UPDATE - looks afresh)
-    zoned_ = ctx.path && ctx.path->mustFlyArea.shape != ZoneShape::Count;
+    zoned_ = ctx.path && (ctx.path->mustFlyArea.shape != ZoneShape::Count || ctx.path->mustFlyArea.volume != VolumeShape::Count);
+    std::get<RouteCommand>(options_).end = endOf(ctx); // (an UPDATE to another kind of location changes it)
     if (zoned_) {
         if (ctx.path->revision != areaRevision_) inside_ = false, areaRevision_ = ctx.path->revision;
         inside_ = inside_ || inZone(ctx, ctx.path->mustFlyArea);

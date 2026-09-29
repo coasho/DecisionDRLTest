@@ -176,6 +176,13 @@ control::CommandResult Vehicle::submit(const control::MustFlyCommand& mustFly, c
     return r;
 }
 
+control::CommandResult Vehicle::submit(const control::MustFlyCommand& mustFly, const control::OpVolume& volume, const control::CommandOptions& options) {
+    if (world_) return world_->impl_->submit(id_, mustFly, volume, options);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownVehicle;
+    return r;
+}
+
 std::vector<control::CommandResult> Vehicle::submitBatch(Span<const control::BatchCommand> batch, std::vector<control::CommandDetails>* details) {
     if (world_) return world_->impl_->submitBatch(id_, batch, details);
     control::CommandResult r;
@@ -532,6 +539,10 @@ control::CommandResult World::update(control::ActivityId activity, const control
     return impl_->update(activity, mustFly, line);
 }
 
+control::CommandResult World::update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpVolume& volume) {
+    return impl_->update(activity, mustFly, volume);
+}
+
 control::CommandResult World::cancel(control::ActivityId activity) { return impl_->cancel(activity); }
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::Command& setpoint) {
@@ -572,6 +583,11 @@ control::CommandResult World::update(control::Caller caller, control::ActivityId
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
                                      const control::OpLine& line) {
     return impl_->update(caller, activity, mustFly, line);
+}
+
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
+                                     const control::OpVolume& volume) {
+    return impl_->update(caller, activity, mustFly, volume);
 }
 
 control::CommandResult World::cancel(control::Caller caller, control::ActivityId activity) { return impl_->cancel(caller, activity); }
@@ -618,6 +634,10 @@ control::Reason World::setOpLine(const control::OpLine& line) { return impl_->se
 bool World::removeOpLine(control::OpLineId id) { return impl_->removeOpLine(id); }
 std::vector<control::OpLineId> World::opLines() const { return impl_->opLines(); }
 std::optional<control::OpLine> World::opLine(control::OpLineId id) const { return impl_->opLine(id); }
+control::Reason World::setOpVolume(const control::OpVolume& volume) { return impl_->setOpVolume(volume); }
+bool World::removeOpVolume(control::OpVolumeId id) { return impl_->removeOpVolume(id); }
+std::vector<control::OpVolumeId> World::opVolumes() const { return impl_->opVolumes(); }
+std::optional<control::OpVolume> World::opVolume(control::OpVolumeId id) const { return impl_->opVolume(id); }
 
 bool World::removeFrame(control::FrameId id) { return impl_->removeFrame(id); }
 

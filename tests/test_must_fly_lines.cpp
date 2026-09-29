@@ -124,7 +124,7 @@ TEST_CASE("must fly: a corridor flown through, each turn within its widths, per 
         CHECK(flown[k].worstOffM <= widths[k]); // (within its widths once in it: the C172 122 m, the F-16C 170, the UH-60A 15, the IRIS 0.9)
         CHECK(flown[k].fromEndM <= 20.0);       // (done as its last vertex is passed: 0.4 to 6.5 m from it)
     }
-    CHECK(w.supportTable(c172)->find("fsim.guidance.must_fly")->support == Support::Partial);
+    CHECK(w.supportTable(c172)->find("fsim.guidance.must_fly")->support == Support::Supported);
 }
 
 TEST_CASE("must fly: a corridor's band and altitudes flown, its window of bearings kept; a turn too tight refused", "[modes][must_fly]") {
@@ -281,7 +281,7 @@ TEST_CASE("must fly: an operational line kept by its id, one in a frame and one 
     OpLine none = kept.line;
     none.id = 0;
     CHECK(w.setOpLine(none) == Reason::InvalidParameter);
-    CHECK(w.supportTable(v)->find("fsim.geometry")->support == Support::Partial);
+    CHECK(w.supportTable(v)->find("fsim.geometry")->support == Support::Supported);
 }
 
 TEST_CASE("must fly: a corridor's UPDATE flies the new one, or keeps its own; queued with its line, it starts later", "[modes][must_fly]") {

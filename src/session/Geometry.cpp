@@ -1,8 +1,9 @@
-// Operational geometry (docs/flight-autonomy.md, 4.42 to 4.44; A-GRA's OpPoint, OpZone and OpLine): the world's store of it,
+// Operational geometry (docs/flight-autonomy.md, 4.42 to 4.45; A-GRA's OpPoint, OpZone, OpLine and OpVolume): the world's store of it,
 // by id, for the commands that name it (a must fly). Set and asked for between steps, never stepped.
 #include "session/World.h"
 
 #include "control/Lines.h"
+#include "control/Volumes.h"
 #include "control/Zones.h"
 
 #include <cmath>
@@ -125,6 +126,38 @@ std::optional<control::OpLine> World::opLine(control::OpLineId id) const {
 const control::OpLine* World::Answers::opLine(control::OpLineId id) const {
     const auto it = world_.opLines_.find(id);
     return it == world_.opLines_.end() ? nullptr : &it->second;
+}
+
+control::Reason World::setOpVolume(const control::OpVolume& volume) {
+    const bool known = control::isHold(volume.frame) || (volume.frame == std::floor(volume.frame) && volume.frame >= 1.0 &&
+                                                        frames_.count(static_cast<control::FrameId>(volume.frame)));
+    if (volume.id == 0 || control::volumes::fault(volume, known) >= 0) return control::Reason::InvalidParameter;
+    control::OpVolume& kept = opVolumes_[volume.id];
+    const std::uint32_t revision = kept.revision + 1;
+    kept = volume;
+    kept.revision = revision;
+    if (!control::isHold(kept.northMs) && control::isHold(kept.timeS)) kept.timeS = simTime_; // (a moving volume's: from now)
+    return control::Reason::None;
+}
+
+bool World::removeOpVolume(control::OpVolumeId id) { return opVolumes_.erase(id) > 0; }
+
+std::vector<control::OpVolumeId> World::opVolumes() const {
+    std::vector<control::OpVolumeId> out;
+    out.reserve(opVolumes_.size());
+    for (const auto& [id, v] : opVolumes_) out.push_back(id);
+    return out;
+}
+
+std::optional<control::OpVolume> World::opVolume(control::OpVolumeId id) const {
+    const auto it = opVolumes_.find(id);
+    if (it == opVolumes_.end()) return std::nullopt;
+    return it->second;
+}
+
+const control::OpVolume* World::Answers::opVolume(control::OpVolumeId id) const {
+    const auto it = world_.opVolumes_.find(id);
+    return it == world_.opVolumes_.end() ? nullptr : &it->second;
 }
 
 } // namespace fsim::session

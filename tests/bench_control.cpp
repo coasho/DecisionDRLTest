@@ -731,6 +731,57 @@ int alloc() {
              }
              if (!w.update(activity[id], c).accepted()) std::fprintf(stderr, "must fly op line: update refused\n"), std::exit(3);
          }},
+        // ADR-29 FA-8b3: a must fly into an ellipsoid above, given and moved every step through UPDATE - its height inside it
+        // found afresh, into the path store, its containment tested by the behaviour every step
+        {"must fly volume update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             static std::vector<OpVolume> volumes(64);
+             MustFlyCommand c;
+             c.location = static_cast<double>(MustFlyLocation::Volume);
+             OpVolume& v = volumes[id];
+             if (k == 0) {
+                 const auto& s = *w.vehicleState(id);
+                 const Waypoint at = waypointAt(s, 3000, 8000);
+                 v.shape = static_cast<double>(VolumeShape::Ellipsoid);
+                 v.latitudeRad = at.latitudeRad, v.longitudeRad = at.longitudeRad, v.altitudeM = s.altitudeMslM + 400.0;
+                 v.semiAxisAM = 1500.0, v.semiAxisBM = 800.0, v.semiAxisCM = 300.0, v.yawRad = 0.3;
+                 activity[id] = w.submit(id, c, v).activity;
+                 return;
+             }
+             v.latitudeRad += 1e-7 * std::sin(k * 0.1); // (in place: nothing allocated here)
+             if (!w.update(activity[id], c, v).accepted()) std::fprintf(stderr, "must fly volume: update refused\n"), std::exit(3);
+         }},
+        // ...one kept by the world, its speed changed every step through UPDATE by its id; and a sphere round another vehicle, in
+        // the frame that follows it, tested every step where that vehicle is
+        {"must fly op volume update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             MustFlyCommand c;
+             c.location = static_cast<double>(MustFlyLocation::OpVolume), c.target = static_cast<double>(400 + id);
+             c.speed = 50.0 + std::sin(k * 0.1);
+             if (k == 0) {
+                 const auto& s = *w.vehicleState(id);
+                 const Waypoint at = waypointAt(s, 3000, 8000);
+                 OpVolume v;
+                 v.id = 400 + id, v.shape = static_cast<double>(VolumeShape::Cylinder);
+                 v.latitudeRad = at.latitudeRad, v.longitudeRad = at.longitudeRad, v.altitudeM = 0.0;
+                 v.radiusM = 800.0, v.lengthM = 4000.0, v.pitchRad = 1.5707963267948966; // (a column)
+                 if (w.setOpVolume(v) != Reason::None) std::fprintf(stderr, "must fly op volume: vehicle %u refused\n", id), std::exit(3);
+                 activity[id] = w.submit(id, c).activity;
+                 return;
+             }
+             if (!w.update(activity[id], c).accepted()) std::fprintf(stderr, "must fly op volume: update refused\n"), std::exit(3);
+         }},
+        {"must fly round a vehicle", [&](std::uint32_t id, int k) {
+             if (k != 0) return;
+             FrameSpec follows;
+             follows.origin = FrameOrigin::Vehicle, follows.vehicle = id == 1 ? 2 : 1;
+             const FrameId frame = w.createFrame(follows);
+             OpVolume v;
+             v.shape = static_cast<double>(VolumeShape::Sphere), v.frame = static_cast<double>(frame), v.xM = v.yM = 0.0, v.radiusM = 300.0;
+             MustFlyCommand c;
+             c.location = static_cast<double>(MustFlyLocation::Volume);
+             if (!frame || !w.submit(id, c, v).accepted()) std::fprintf(stderr, "must fly round a vehicle: vehicle %u refused\n", id), std::exit(3);
+         }},
         // step 3: an autopilot on pitch and thrust, the policy's bank updated every step
         {"axes apart each step", [&](std::uint32_t id, int k) {
              static std::vector<ActivityId> activity(64, 0);

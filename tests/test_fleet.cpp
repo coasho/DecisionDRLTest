@@ -978,6 +978,43 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(offLine[p.id] <= (p.rotor ? 0.25 : 0.1) * leg(p));
             CHECK(fromEnd[p.id] <= (p.rotor ? 10.0 : 50.0));
         });
+    // a must fly into a volume (ADR-29 FA-8b3, MFY-06): a sphere a quarter of a leg across its radius, its centre a leg ahead,
+    // half a leg to the right and 100 m above the aircraft (a rotorcraft's 20 m) - entered, and completed once in it
+    std::map<std::uint32_t, double> fromCentre;
+    auto ballOf = [&](const Plane& p) {
+        const PositionCommand c = pointFrom(p.start, leg(p), 0.5 * leg(p), 0.0, 0.0);
+        OpVolume v;
+        v.shape = static_cast<double>(VolumeShape::Sphere);
+        v.latitudeRad = c.latitudeRad, v.longitudeRad = c.longitudeRad, v.altitudeM = p.start.altitudeMslM + (p.rotor ? 20.0 : 100.0);
+        v.radiusM = 0.25 * leg(p);
+        return v;
+    };
+    run("fsim.guidance.must_fly", 0.0,
+        [&](const Plane& p) {
+            MustFlyCommand c;
+            c.location = static_cast<double>(MustFlyLocation::Volume);
+            const CommandResult r = w.submit(p.id, c, ballOf(p));
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            fromCentre[p.id] = std::numeric_limits<double>::quiet_NaN();
+            return r.accepted();
+        },
+        [&](const Plane& p) { return 4.0 * leg(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) + 60.0; },
+        [&](const Plane& p) {
+            const ActivityRecord* r = w.activity(activity[p.id]);
+            if (!std::isnan(fromCentre[p.id]) || !r || r->live()) return;
+            const auto& s = *w.vehicleState(p.id);
+            const OpVolume v = ballOf(p);
+            const double north = (s.latitudeRad - v.latitudeRad) * kEarthM, east = (s.longitudeRad - v.longitudeRad) * kEarthM * std::cos(v.latitudeRad);
+            fromCentre[p.id] = std::sqrt(north * north + east * east + (s.altitudeMslM - v.altitudeM) * (s.altitudeMslM - v.altitudeM)) - v.radiusM;
+        },
+        [&](const Plane& p, const Lows& lows) {
+            completed(p, lows);
+            // in it as it completed - a CF2 0.01 m inside its 5 m sphere after climbing 15 m, an E-3G 8 m inside its 5.8 km one; 0.5 %
+            // of its radius for this flat measure
+            CHECK(fromCentre[p.id] <= 0.005 * 0.25 * leg(p));
+        });
     // its endurance (ADR-29 FA-3e, VAL-03): three times what it lasts, a timed pattern, is refused - a soft rejection,
     // which override_rejection overrides; five minutes straight ahead at its cruise, its prediction (read under a
     // reserve of 99.99 %, so the check reports what the flight needs) against the burn it flies, within 5 %

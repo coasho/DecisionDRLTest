@@ -103,6 +103,8 @@ from .world import (  # noqa: E402
     ZoneVertex,
     OpLine,
     LineVertex,
+    OpVolume,
+    VolumeShape,
     Runway,
     RunwayCoordinates,
     RunwayPoint,

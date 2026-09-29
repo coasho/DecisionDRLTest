@@ -1,6 +1,6 @@
-"""A must fly through Python (docs/flight-autonomy.md, 4.42 to 4.44): a point flown over at its altitude; an operational point
+"""A must fly through Python (docs/flight-autonomy.md, 4.42 to 4.45): a point flown over at its altitude; an operational point
 kept by the world, read back and flown from within its window of bearings; another vehicle flown over; zones entered; corridors
-flown through; refusals."""
+flown through; volumes entered; refusals."""
 import math
 import unittest
 
@@ -167,6 +167,40 @@ class MustFlyTest(unittest.TestCase):
         self.assertFalse(w.remove_op_line(41))
         self.assertIsNone(w.op_line(41))
 
+    def test_volume_given_and_kept(self):
+        """A volume (docs/flight-autonomy.md, 4.45): a sphere above given with a must fly, climbed into; a column kept by the
+        world, read back and entered by its id, then given a volume in place of its own; one malformed refused naming its
+        field."""
+        w, v = self.w, self.v
+        lat, lon = self.place(0.0, 4000.0)
+        a = v.submit_must_fly(volume=fsim.OpVolume(0, "sphere", lat, lon, altitude_m=2200.0, radius_m=500.0))
+        self.assertEqual(a.setpoint().kwargs["location"], float(fsim.MustFlyLocation.VOLUME))
+        for _ in range(1500):
+            w.step(6)
+            if not a.live:
+                break
+        self.assertEqual(a.state, fsim.ActivityState.COMPLETED)
+        s = v.state
+        north, east = (s.latitude_rad - lat) * R, (s.longitude_rad - lon) * R * math.cos(lat)
+        self.assertLessEqual(math.sqrt(north ** 2 + east ** 2 + (s.altitude_msl_m - 2200.0) ** 2), 501.0)  # (in it, as it completed)
+        # a column kept, read back and entered by its id; then a volume given in place of its own
+        clat, clon = self.place(0.0, 4000.0)
+        w.set_op_volume(fsim.OpVolume(61, fsim.VolumeShape.CYLINDER, clat, clon, altitude_m=0.0, radius_m=700.0, length_m=5000.0,
+                                      pitch_rad=math.pi / 2))
+        back = w.op_volume(61)
+        self.assertEqual((back.id, back.revision, back.shape, back.radius_m, back.length_m), (61, 1, float(fsim.VolumeShape.CYLINDER), 700.0, 5000.0))
+        self.assertTrue(math.isnan(back.half_angle_rad))
+        self.assertEqual([x.id for x in w.op_volumes()], [61])
+        b = v.submit_must_fly(location="op_volume", target=61)
+        b.update_must_fly(volume=fsim.OpVolume(0, "dome", clat, clon, altitude_m=1000.0, radius_m=1500.0), location="volume")
+        self.assertEqual(b.setpoint().kwargs["location"], float(fsim.MustFlyLocation.VOLUME))
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_must_fly(volume=fsim.OpVolume(0, "sphere", clat, clon, altitude_m=1500.0, radius_m=500.0, yaw_rad=1.0))  # (a sphere turns not)
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_parameter", 13))
+        self.assertTrue(w.remove_op_volume(61))
+        self.assertFalse(w.remove_op_volume(61))
+        self.assertIsNone(w.op_volume(61))
+
     def test_refused_and_updated(self):
         v = self.v
         lat, lon = self.place(0.0, 4000.0)
@@ -181,8 +215,8 @@ class MustFlyTest(unittest.TestCase):
         a.update(latitude_rad=lat2, longitude_rad=lon2)
         kept = a.setpoint().kwargs
         self.assertEqual((kept["latitude_rad"], kept["longitude_rad"], kept["altitude_m"]), (lat2, lon2, 1500.0))  # (the altitude kept)
-        self.assertEqual(v.support("fsim.guidance.must_fly").support, fsim.Support.PARTIAL)
-        self.assertEqual(v.support("fsim.geometry").support, fsim.Support.PARTIAL)
+        self.assertEqual(v.support("fsim.guidance.must_fly").support, fsim.Support.SUPPORTED)
+        self.assertEqual(v.support("fsim.geometry").support, fsim.Support.SUPPORTED)
 
 
 if __name__ == "__main__":

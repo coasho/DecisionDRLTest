@@ -984,7 +984,7 @@ class MustFlyLocation(enum.IntEnum):
     """Where a must fly goes (A-GRA's MustFlyLocationType; docs/flight-autonomy.md, 4.42 to 4.44): a point, another vehicle,
     an operational point by its id (World.set_op_point); a zone given with it (``zone=``), or an operational zone by its id
     (World.set_op_zone), entered; a corridor given with it (``line=``), or an operational line by its id (World.set_op_line),
-    flown through."""
+    flown through; a volume given with it (``volume=``), or an operational volume by its id (World.set_op_volume), entered."""
     POINT = 0
     ENTITY = 1
     OP_POINT = 2
@@ -992,6 +992,20 @@ class MustFlyLocation(enum.IntEnum):
     OP_ZONE = 4
     LINE = 5
     OP_LINE = 6
+    VOLUME = 7
+    OP_VOLUME = 8
+
+
+class VolumeShape(enum.IntEnum):
+    """An operational volume's shape (A-GRA's Shape3D_ChoiceType and GeocentricVolumeType; docs/flight-autonomy.md, 4.45): those
+    of the atmosphere."""
+    SPHERE = 0
+    DOME = 1
+    ELLIPSOID = 2
+    CYLINDER = 3
+    CONE = 4
+    RECTANGULAR_CONE = 5
+    GEOCENTRIC = 6
 
 
 class ZoneShape(enum.IntEnum):
@@ -1210,6 +1224,19 @@ OpLine.__doc__ = ("An operational line (A-GRA's OpLine and its LineType; docs/fl
                   "band ``altitude_min_m`` to ``altitude_max_m`` in ``altitude_reference``; its vertices in ``frame`` (``frame_rotation``: "
                   "fsim.FrameRotation); a velocity ``north_ms``, ``east_ms`` from ``time_s``; read back, its ``revision``.")
 
+OpVolume = collections.namedtuple(
+    "OpVolume", "id shape " + " ".join(['shape', 'latitude_rad', 'longitude_rad', 'x_m', 'y_m', 'altitude_m', 'altitude_reference', 'radius_m', 'semi_axis_a_m', 'semi_axis_b_m', 'semi_axis_c_m', 'length_m', 'half_angle_rad', 'length_half_angle_rad', 'width_half_angle_rad', 'range_m', 'yaw_rad', 'pitch_rad', 'roll_rad', 'latitude_min_rad', 'latitude_max_rad', 'longitude_min_rad', 'longitude_max_rad', 'altitude_min_m', 'altitude_max_m', 'frame', 'frame_rotation', 'north_ms', 'east_ms', 'down_ms', 'time_s'][1:]) + " revision", defaults=(HOLD,) * 31 + (0,))
+OpVolume.__doc__ = ("An operational volume (A-GRA's OpVolume and its OpVolumeType; docs/flight-autonomy.md, 4.45), kept by the world by its "
+                    "``id`` (World.set_op_volume) or given with a must fly (``submit_must_fly(volume=)``): its ``shape`` (fsim.VolumeShape or "
+                    "its name) about its point - ``latitude_rad``, ``longitude_rad`` at ``altitude_m`` (in ``altitude_reference``), or "
+                    "``x_m``, ``y_m`` in ``frame`` (its altitude left out: the frame's) - turned by ``yaw_rad``, ``pitch_rad``, ``roll_rad`` "
+                    "(an ellipsoid's, a cylinder's, a cone's): a sphere's or a dome's ``radius_m``; an ellipsoid's ``semi_axis_a_m``, "
+                    "``semi_axis_b_m``, ``semi_axis_c_m``; a cylinder's ``radius_m`` and ``length_m``; a cone's ``half_angle_rad``, a "
+                    "rectangular cone's ``length_half_angle_rad`` and ``width_half_angle_rad``, their ``range_m``; or a geocentric volume's "
+                    "``latitude_min_rad`` to ``latitude_max_rad``, ``longitude_min_rad`` clockwise to ``longitude_max_rad``, "
+                    "``altitude_min_m`` to ``altitude_max_m``; a velocity ``north_ms``, ``east_ms``, ``down_ms`` from ``time_s``; read "
+                    "back, its ``revision``.")
+
 
 BezierSegment = collections.namedtuple("BezierSegment", "north east down")
 BezierSegment.__doc__ = ("One segment of a curve (A-GRA's): a quintic Bezier by its six control points - ``north``, ``east`` "
@@ -1326,6 +1353,19 @@ def _line_tuple(line):
 def _op_line(t):
     """An operational line from its native tuple."""
     return OpLine(t[0], [LineVertex(*r) for r in t[1]], *t[2:13], revision=t[13])
+
+
+def _volume_tuple(volume):
+    """An operational volume (fsim.OpVolume, a dict, or its fields in order) as the native layer takes it."""
+    v = volume if isinstance(volume, OpVolume) else OpVolume(**volume) if isinstance(volume, dict) else OpVolume(*volume)
+    codes = {"shape": VolumeShape, "altitude_reference": AltitudeReference, "frame_rotation": FrameRotation}
+    d = {k: (codes[k][x.upper()] if k in codes and isinstance(x, str) else x) for k, x in zip(OpVolume._fields, v)}
+    return (int(d["id"]),) + tuple(float(d[k]) for k in OpVolume._fields[1:32])
+
+
+def _op_volume(t):
+    """An operational volume from its native tuple."""
+    return OpVolume(*t[:32], revision=t[32])
 
 
 def _op_point(t):
@@ -1510,18 +1550,21 @@ class Activity:
         h = self.world._h
         _checked(h.activity_command_branch(self.id, int(branch), 1 if commanded else 0, int(self.source), self.controller), h)
 
-    def update_must_fly(self, zone=None, line=None, **fields):
-        """UPDATE of a must fly (docs/flight-autonomy.md, 4.42 to 4.44): the fields given merged (a location another than it was
-        replacing the location's own), and a ``zone`` (fsim.OpZone) or a ``line`` (fsim.OpLine) given in place of its own; laid
-        out afresh from where the aircraft is. Returns True if a value was clamped; raises fsim.Rejected."""
-        if zone is not None and line is not None:
-            raise ValueError("a must fly takes a zone or a line, not both")
+    def update_must_fly(self, zone=None, line=None, volume=None, **fields):
+        """UPDATE of a must fly (docs/flight-autonomy.md, 4.42 to 4.45): the fields given merged (a location another than it was
+        replacing the location's own), and a ``zone`` (fsim.OpZone), a ``line`` (fsim.OpLine) or a ``volume`` (fsim.OpVolume)
+        given in place of its own; laid out afresh from where the aircraft is. Returns True if a value was clamped; raises
+        fsim.Rejected."""
+        if sum(x is not None for x in (zone, line, volume)) > 1:
+            raise ValueError("a must fly takes a zone, a line or a volume: one")
         if "target" in fields:
             fields["target"] = getattr(fields["target"], "id", fields["target"])
         h = self.world._h
         row = _row("must_fly", (), fields)
         if line is not None:
             r = h.activity_update_must_fly_line(self.id, row, _line_tuple(line), int(self.source), self.controller)
+        elif volume is not None:
+            r = h.activity_update_must_fly_volume(self.id, row, _volume_tuple(volume), int(self.source), self.controller)
         else:
             r = h.activity_update_must_fly(self.id, row, None if zone is None else _zone_tuple(zone), int(self.source), self.controller)
         return bool(_checked(r, h)[4])
@@ -1953,17 +1996,20 @@ class Vehicle:
         A zone given (``zone=``: fsim.OpZone; location "zone") or kept by its id ("op_zone", World.set_op_zone) is entered: it
         completes once the aircraft is in it (4.43). A corridor given (``line=``: fsim.OpLine; location "line") or kept by its
         id ("op_line", World.set_op_line) is flown through, from its first vertex to its last, each turn in it within its
-        widths (4.44). An Activity whose ``update(**fields)`` merges what it gives (a location another than it was replacing
-        the location's own; ``update_must_fly(zone=, line=)`` gives a zone or a corridor in place of its own); fsim.Rejected if
-        refused ("unknown_geometry": an operational point, zone or line the world does not keep). The command envelope as
-        submit's."""
-        zone, line = fields.pop("zone", None), fields.pop("line", None)
-        if zone is not None and line is not None:
-            raise ValueError("a must fly takes a zone or a line, not both")
+        widths (4.44). A volume given (``volume=``: fsim.OpVolume; location "volume") or kept by its id ("op_volume",
+        World.set_op_volume) is entered: it completes once the aircraft is in it (4.45). An Activity whose ``update(**fields)``
+        merges what it gives (a location another than it was replacing the location's own; ``update_must_fly(zone=, line=,
+        volume=)`` gives one in place of its own); fsim.Rejected if refused ("unknown_geometry": an operational point, zone, line
+        or volume the world does not keep). The command envelope as submit's."""
+        zone, line, volume = fields.pop("zone", None), fields.pop("line", None), fields.pop("volume", None)
+        if sum(x is not None for x in (zone, line, volume)) > 1:
+            raise ValueError("a must fly takes a zone, a line or a volume: one")
         if "target" in fields:
             fields["target"] = getattr(fields["target"], "id", fields["target"])
-        if (zone is not None or line is not None) and "location" not in fields and not values:
-            fields["location"] = MustFlyLocation.ZONE if zone is not None else MustFlyLocation.LINE
+        if "location" not in fields and not values:
+            given = MustFlyLocation.ZONE if zone is not None else MustFlyLocation.LINE if line is not None else MustFlyLocation.VOLUME if volume is not None else None
+            if given is not None:
+                fields["location"] = given
         envelope = _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection, controller)
         if zone is not None:
             r = self._h.submit_must_fly(self.id, _row("must_fly", values, fields), _zone_tuple(zone), int(source), None, int(range),
@@ -1971,6 +2017,9 @@ class Vehicle:
         elif line is not None:
             r = self._h.submit_must_fly_line(self.id, _row("must_fly", values, fields), _line_tuple(line), int(source), None, int(range),
                                              int(min_version), envelope)
+        elif volume is not None:
+            r = self._h.submit_must_fly_volume(self.id, _row("must_fly", values, fields), _volume_tuple(volume), int(source), None, int(range),
+                                               int(min_version), envelope)
         else:
             r = self._h.submit_mode(self.id, MODE_KINDS.index("must_fly"), _row("must_fly", values, fields), int(source), None, int(range),
                                     int(min_version), envelope)
@@ -2811,6 +2860,29 @@ class World:
     def remove_op_line(self, line_id):
         """Forget an operational line; False if there was none."""
         return self._h.remove_op_line(int(line_id))
+
+    def set_op_volume(self, volume):
+        """Keep an operational volume (fsim.OpVolume; docs/flight-autonomy.md, 4.45) in place of any by its id, its revision one
+        more; its codes by name or member. fsim.Rejected("invalid_parameter") for one A-GRA's schema would not take: a shape not
+        one, a point off the Earth or without its altitude there, dimensions not above 0, a half angle not below a quarter
+        turn, an attitude on a shape that has none, bounds out of order, a frame the world does not have, a velocity with a
+        frame."""
+        reason = self._h.set_op_volume(_volume_tuple(volume))
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+
+    def op_volumes(self):
+        """The operational volumes kept (fsim.OpVolume), by id."""
+        return [_op_volume(t) for t in self._h.op_volumes()]
+
+    def op_volume(self, volume_id):
+        """An operational volume kept (fsim.OpVolume), or None."""
+        t = self._h.op_volume(int(volume_id))
+        return None if t is None else _op_volume(t)
+
+    def remove_op_volume(self, volume_id):
+        """Forget an operational volume; False if there was none."""
+        return self._h.remove_op_volume(int(volume_id))
 
     def frame_point(self, frame, x=0.0, y=0.0, z=0.0, *, rotation=FrameRotation.UNROTATED, offsets=FrameOffsets.CARTESIAN, time_s=None):
         """Where a point in a frame is (A-GRA's relative point): ``x``, ``y``, ``z`` metres (z down) turned as ``rotation``

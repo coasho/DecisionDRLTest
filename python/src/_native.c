@@ -2521,6 +2521,115 @@ static PyObject* world_activity_update_must_fly_line(PyObject* o, PyObject* cons
     return result_tuple(self->world, &r);
 }
 
+/* An operational volume (ABI 1.42) as its tuple: (id, shape, latitude_rad, longitude_rad, x_m, y_m, altitude_m, altitude_reference,
+ * radius_m, semi_axis_a_m, semi_axis_b_m, semi_axis_c_m, length_m, half_angle_rad, length_half_angle_rad, width_half_angle_rad,
+ * range_m, yaw_rad, pitch_rad, roll_rad, latitude_min_rad, latitude_max_rad, longitude_min_rad, longitude_max_rad, altitude_min_m,
+ * altitude_max_m, frame, frame_rotation, north_ms, east_ms, down_ms, time_s, revision). */
+static int read_volume(PyObject* o, fsim_op_volume* a) {
+    fsim_op_volume_init(a);
+    PyObject* t = PySequence_Tuple(o);
+    if (!t) return 0;
+    int ok = PyTuple_Size(t) >= 32;
+    if (!ok) PyErr_SetString(PyExc_ValueError, "a volume is 32 items (fsim.OpVolume)");
+    if (ok) ok = as_u64(PyTuple_GetItem(t, 0), &a->op_volume_id);
+    double* fields[] = {&a->shape, &a->latitude_rad, &a->longitude_rad, &a->x_m, &a->y_m, &a->altitude_m, &a->altitude_reference, &a->radius_m, &a->semi_axis_a_m, &a->semi_axis_b_m, &a->semi_axis_c_m, &a->length_m, &a->half_angle_rad, &a->length_half_angle_rad, &a->width_half_angle_rad, &a->range_m, &a->yaw_rad, &a->pitch_rad, &a->roll_rad, &a->latitude_min_rad, &a->latitude_max_rad, &a->longitude_min_rad, &a->longitude_max_rad, &a->altitude_min_m, &a->altitude_max_m, &a->frame, &a->frame_rotation, &a->north_ms, &a->east_ms, &a->down_ms, &a->time_s};
+    for (int k = 0; ok && k < 31; ++k) {
+        *fields[k] = PyFloat_AsDouble(PyTuple_GetItem(t, 1 + k));
+        ok = !PyErr_Occurred();
+    }
+    Py_DECREF(t);
+    return ok;
+}
+
+static PyObject* volume_tuple(const fsim_op_volume* v) {
+    return Py_BuildValue("(KdddddddddddddddddddddddddddddddI)", (unsigned long long)v->op_volume_id, v->shape, v->latitude_rad, v->longitude_rad, v->x_m, v->y_m, v->altitude_m, v->altitude_reference, v->radius_m, v->semi_axis_a_m, v->semi_axis_b_m, v->semi_axis_c_m, v->length_m, v->half_angle_rad, v->length_half_angle_rad, v->width_half_angle_rad, v->range_m, v->yaw_rad, v->pitch_rad, v->roll_rad, v->latitude_min_rad, v->latitude_max_rad, v->longitude_min_rad, v->longitude_max_rad, v->altitude_min_m, v->altitude_max_m, v->frame, v->frame_rotation, v->north_ms, v->east_ms, v->down_ms, v->time_s, (unsigned int)v->revision);
+}
+
+/* set_op_volume(volume tuple) -> reason (0: kept) (ABI 1.42) */
+static PyObject* world_set_op_volume(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    fsim_op_volume v;
+    if (!check_args(n, 1, 1, "set_op_volume") || !read_volume(args[0], &v)) return NULL;
+    int32_t reason = 0;
+    if (fsim_world_set_op_volume(self->world, &v, &reason) != FSIM_OK) return fail();
+    return PyLong_FromLong(reason);
+}
+
+/* op_volumes() -> [volume tuple], by id (ABI 1.42) */
+static PyObject* world_op_volumes(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    (void)args;
+    if (!check_args(n, 0, 0, "op_volumes")) return NULL;
+    const uint32_t count = fsim_world_op_volume_count(self->world);
+    PyObject* list = PyList_New(0);
+    for (uint32_t i = 0; list && i < count; ++i) {
+        fsim_op_volume v;
+        fsim_op_volume_init(&v);
+        if (fsim_world_get_op_volume_at(self->world, i, &v) != FSIM_OK) continue;
+        PyObject* t = volume_tuple(&v);
+        if (!t || PyList_Append(list, t) < 0) {
+            Py_XDECREF(t);
+            Py_DECREF(list);
+            return NULL;
+        }
+        Py_DECREF(t);
+    }
+    return list;
+}
+
+/* op_volume(id) -> volume tuple, or None for one not kept (ABI 1.42) */
+static PyObject* world_op_volume(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t id;
+    fsim_op_volume v;
+    if (!check_args(n, 1, 1, "op_volume") || !as_u64(args[0], &id)) return NULL;
+    fsim_op_volume_init(&v);
+    if (fsim_world_get_op_volume(self->world, id, &v) != FSIM_OK) Py_RETURN_NONE;
+    return volume_tuple(&v);
+}
+
+/* remove_op_volume(id) -> bool (ABI 1.42) */
+static PyObject* world_remove_op_volume(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t id;
+    if (!check_args(n, 1, 1, "remove_op_volume") || !as_u64(args[0], &id)) return NULL;
+    return PyBool_FromLong(fsim_world_remove_op_volume(self->world, id) == FSIM_OK);
+}
+
+/* submit_must_fly_volume(id, values, volume tuple, source=None, axes=None, range=None, min_version=None, envelope=None) -> result
+ * (ABI 1.42) */
+static PyObject* world_submit_must_fly_volume(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    double row[FSIM_PY_VALUES];
+    fsim_command_options opt;
+    fsim_command_result r;
+    fsim_op_volume v;
+    if (!check_args(n, 3, 8, "submit_must_fly_volume") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "submit_must_fly_volume");
+    if (count < 0 || !read_options(args, n, 3, &opt) || !read_volume(args[2], &v)) return NULL;
+    if (fsim_vehicle_submit_must_fly_volume(self->world, id, row, (uint32_t)count, &v, &opt, &r) != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
+/* activity_update_must_fly_volume(activity, values, volume tuple, source, controller) -> result (ABI 1.42) */
+static PyObject* world_activity_update_must_fly_volume(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t activity;
+    double row[FSIM_PY_VALUES];
+    fsim_command_result r;
+    int source = 0;
+    uint32_t controller = 0;
+    fsim_op_volume v;
+    if (!check_args(n, 3, 5, "activity_update_must_fly_volume") || !as_u64(args[0], &activity) || (n > 3 && !as_int(args[3], &source)) ||
+        (n > 4 && !as_u32(args[4], &controller)) || !WORLD_IDLE(self))
+        return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "activity_update_must_fly_volume");
+    if (count < 0 || !read_volume(args[2], &v)) return NULL;
+    if (fsim_activity_update_must_fly_volume_by(self->world, activity, source, controller, row, (uint32_t)count, &v, &r) != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
 /* activity_setpoint(activity) -> (kind, code, fields, behavior, waypoints, segments), or None for one not live:
  * `behavior` (id, target, {name: value}, [(latitude_rad, longitude_rad, altitude_msl_m, airspeed_ms, capture_radius_m)])
  * or None, `waypoints` [waypoint row] or None, `segments` [18 floats: north, east, down] or None - a curve's as A-GRA's
@@ -4094,6 +4203,12 @@ static PyMethodDef world_methods[] = {
     FAST("remove_op_line", world_remove_op_line, "remove_op_line(id) -> bool"),
     FAST("submit_must_fly_line", world_submit_must_fly_line, "submit_must_fly_line(id, values, line, source, axes, range, min_version, envelope) -> result"),
     FAST("activity_update_must_fly_line", world_activity_update_must_fly_line, "activity_update_must_fly_line(activity, values, line, source, controller) -> result"),
+    FAST("set_op_volume", world_set_op_volume, "set_op_volume(volume tuple) -> reason"),
+    FAST("op_volumes", world_op_volumes, "op_volumes() -> [volume tuple]"),
+    FAST("op_volume", world_op_volume, "op_volume(id) -> volume tuple or None"),
+    FAST("remove_op_volume", world_remove_op_volume, "remove_op_volume(id) -> bool"),
+    FAST("submit_must_fly_volume", world_submit_must_fly_volume, "submit_must_fly_volume(id, values, volume, source, axes, range, min_version, envelope) -> result"),
+    FAST("activity_update_must_fly_volume", world_activity_update_must_fly_volume, "activity_update_must_fly_volume(activity, values, volume, source, controller) -> result"),
     FAST("performance_profile", world_performance_profile, "performance_profile(id, mode) -> (reason, profile or None)"),
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
     FAST("capabilities", world_capabilities, "capabilities(id) -> [capability]"),
