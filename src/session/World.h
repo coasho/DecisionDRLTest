@@ -221,6 +221,15 @@ public:
     std::vector<control::PlanStatus> plans(std::uint32_t id) const;
     /// A plan's content as uploaded last, its metadata with it; empty for one not kept, or not yet uploaded.
     std::optional<control::RoutePlan> plan(std::uint32_t id, control::PlanId plan) const;
+    // FA's own plans and the airfields (docs/flight-autonomy.md, 4.40): the platform's, read only to MA
+    /// FA's own plan: kept Uploaded, in place of any plan by its id not flying. InvalidParameter, UnknownAirfield (a takeoff's
+    /// or a landing's path naming an airfield or runway the vehicle does not keep), WrongPlanState, PlanStoreFull.
+    control::Reason loadPlan(std::uint32_t id, const control::RoutePlan& plan);
+    /// An airfield: kept in place of any by its id, its revision one more. InvalidParameter, PlanStoreFull.
+    control::Reason loadAirfield(std::uint32_t id, const control::Airfield& airfield);
+    /// Every airfield kept, as loaded (A-GRA's query for the airfields).
+    std::vector<control::Airfield> airfields(std::uint32_t id) const;
+    std::optional<control::Airfield> airfield(std::uint32_t id, control::AirfieldId airfield) const;
     // --- Reports (docs/flight-autonomy.md, 4.12): what an activity flies, and where to ---
     /// What a live activity flies now, or waits to fly: its setpoint as
     /// updated, a route's waypoints, a curve's segments (appended ones too: its

@@ -247,6 +247,22 @@ public:
     std::vector<PlanStatus> plans() const;
     /// Its content as uploaded last, its metadata with it; false for a plan not kept, or kept before its first upload.
     bool plan(PlanId id, RoutePlan& out) const;
+    // FA's own plans and the airfields (4.40)
+    /// The airfields a vehicle keeps.
+    static constexpr std::size_t kAirfields = 32;
+    /// FA's own plan, the platform's: kept Uploaded and read only to MA, in
+    /// place of any plan by its id whose activity is not live. InvalidParameter
+    /// as a published plan's; UnknownAirfield for a takeoff's or a landing's
+    /// path whose airfield or runway the vehicle does not keep; WrongPlanState
+    /// while the plan it replaces flies; PlanStoreFull. May allocate.
+    Reason loadPlan(const RoutePlan& plan);
+    /// An airfield, the platform's: kept in place of any by its id, its
+    /// revision one more. InvalidParameter for a malformed one; PlanStoreFull. May allocate.
+    Reason loadAirfield(const Airfield& airfield);
+    /// Every airfield kept, as loaded, in the order they were first loaded.
+    std::vector<Airfield> airfields() const;
+    /// One airfield as loaded; false for one not kept.
+    bool airfield(AirfieldId id, Airfield& out) const;
 
     // --- Reports (docs/flight-autonomy.md, 4.12): what an activity flies, and where to ---
     /// What a live activity flies now, or waits to fly: its setpoint as

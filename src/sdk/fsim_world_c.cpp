@@ -2281,13 +2281,15 @@ bool toPathMetadata(const fsim_path_metadata* m, uint32_t count, std::vector<fsi
     using fsim::control::RouteState;
     out.clear();
     if (count == 0) return true;
-    if (!m || m[0].struct_size < sizeof(fsim_path_metadata)) return false;
+    constexpr std::size_t kFirst = offsetof(fsim_path_metadata, airfield); // (ABI 1.36's layout; 1.37 adds its airfield and runway)
+    if (!m || m[0].struct_size < kFirst) return false;
     const uint32_t stride = m[0].struct_size;
     const auto* bytes = reinterpret_cast<const unsigned char*>(m);
     out.resize(count);
     for (uint32_t i = 0; i < count; ++i) {
         fsim_path_metadata c;
-        std::memcpy(&c, bytes + static_cast<std::size_t>(i) * stride, sizeof c);
+        fsim_path_metadata_init(&c);
+        std::memcpy(&c, bytes + static_cast<std::size_t>(i) * stride, std::min<std::size_t>(stride, sizeof c));
         fsim::control::PathMetadata& p = out[i];
         p.path = c.path;
         p.initial.point = c.initial.point;
@@ -2295,6 +2297,7 @@ bool toPathMetadata(const fsim_path_metadata* m, uint32_t count, std::vector<fsi
         p.initial.fields(f);
         for (std::size_t k = 0; k < RouteState::kFields; ++k) *f[k] = c.initial.fields[k];
         p.enduranceS = c.endurance_s, p.fuelKg = c.fuel_kg, p.grossWeightKg = c.gross_weight_kg, p.transitionPlan = c.transition_plan;
+        if (stride >= sizeof c) p.airfield = c.airfield, p.runway = c.runway;
     }
     return true;
 }
@@ -2304,6 +2307,7 @@ int planStatusOut(const fsim::control::PlanStatus& s, fsim_plan_status* out) {
     fsim_plan_status_init(&c);
     c.state = static_cast<int32_t>(s.state), c.plan_id = s.id, c.version = s.version, c.revision = s.revision;
     c.execution = static_cast<int32_t>(s.execution), c.reason = static_cast<int32_t>(s.reason), c.for_planning_use_only = s.forPlanningUseOnly ? 1 : 0;
+    c.fa_owned = s.faOwned ? 1 : 0;
     c.activity = s.activity, c.percent = s.percent, c.start_time = s.startTime, c.end_time = s.endTime, c.command_id = s.commandId;
     return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
 }
@@ -2322,28 +2326,144 @@ int planResultOut(fsim_world* world, uint32_t id, const fsim::control::PlanComma
 
 } // namespace
 
+namespace {
+
+/// A plan as the caller laid it out: "" read, else what could not be read.
+const char* planFromC(fsim_world* world, const fsim_route_plan& plan, fsim::control::RoutePlan& p) {
+    using namespace fsim::control;
+    BatchCommand item;
+    std::vector<BezierSegment> curve;
+    std::vector<NurbsSegment> nurbs;
+    PatternShape shape;
+    CurveShape curveShape;
+    const Command* c = nullptr;
+    if (plan.route.kind != FSIM_BATCH_ROUTE ||
+        !fromBatch(world, plan.route, item, p.waypoints, curve, nurbs, shape, curveShape, p.loiters, p.states, p.paths, p.branches, p.terminators) ||
+        !(c = std::get_if<Command>(&item.command)) || !std::holds_alternative<RouteCommand>(*c))
+        return "its route cannot be read";
+    if (!toPointMetadata(plan.points, plan.point_count, p.pointMetadata) || !toPathMetadata(plan.paths, plan.path_count, p.pathMetadata))
+        return "its metadata cannot be read";
+    p.id = plan.plan_id, p.version = plan.version, p.forPlanningUseOnly = plan.for_planning_use_only != 0;
+    p.route = std::get<RouteCommand>(*c), p.detailed = plan.detailed != 0;
+    p.remarksName = text(plan.remarks_name), p.remarks = text(plan.remarks);
+    return "";
+}
+
+} // namespace
+
 FSIM_API int fsim_vehicle_publish_plan(fsim_world* world, uint32_t id, const fsim_route_plan* plan, int32_t* reason) {
     if (!world || !plan || !reason || plan->struct_size < sizeof(fsim_route_plan)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_publish_plan: bad arguments");
     return guard("fsim_vehicle_publish_plan", [&]() -> int {
-        using namespace fsim::control;
-        BatchCommand item;
-        std::vector<BezierSegment> curve;
-        std::vector<NurbsSegment> nurbs;
-        PatternShape shape;
-        CurveShape curveShape;
-        RoutePlan p;
-        const Command* c = nullptr;
-        if (plan->route.kind != FSIM_BATCH_ROUTE ||
-            !fromBatch(world, plan->route, item, p.waypoints, curve, nurbs, shape, curveShape, p.loiters, p.states, p.paths, p.branches, p.terminators) ||
-            !(c = std::get_if<Command>(&item.command)) || !std::holds_alternative<RouteCommand>(*c))
-            return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_publish_plan: its route cannot be read");
-        if (!toPointMetadata(plan->points, plan->point_count, p.pointMetadata) || !toPathMetadata(plan->paths, plan->path_count, p.pathMetadata))
-            return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_publish_plan: its metadata cannot be read");
-        p.id = plan->plan_id, p.version = plan->version, p.forPlanningUseOnly = plan->for_planning_use_only != 0;
-        p.route = std::get<RouteCommand>(*c), p.detailed = plan->detailed != 0;
-        p.remarksName = text(plan->remarks_name), p.remarks = text(plan->remarks);
+        fsim::control::RoutePlan p;
+        if (const char* why = planFromC(world, *plan, p); *why) return fail(FSIM_INVALID_ARGUMENT, std::string("fsim_vehicle_publish_plan: ") + why);
         *reason = static_cast<int32_t>(world->world.publishPlan(id, p));
         return FSIM_OK;
+    });
+}
+
+FSIM_API int fsim_vehicle_load_plan(fsim_world* world, uint32_t id, const fsim_route_plan* plan, int32_t* reason) {
+    if (!world || !plan || !reason || plan->struct_size < sizeof(fsim_route_plan)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_load_plan: bad arguments");
+    return guard("fsim_vehicle_load_plan", [&]() -> int {
+        fsim::control::RoutePlan p;
+        if (const char* why = planFromC(world, *plan, p); *why) return fail(FSIM_INVALID_ARGUMENT, std::string("fsim_vehicle_load_plan: ") + why);
+        *reason = static_cast<int32_t>(world->world.loadPlan(id, p));
+        return FSIM_OK;
+    });
+}
+
+FSIM_API void fsim_runway_init(fsim_runway* runway) {
+    if (!runway) return;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::memset(runway, 0, sizeof *runway);
+    runway->struct_size = sizeof *runway;
+    runway->direction_rad = runway->available_length_m = nan;
+    for (fsim_runway_coordinates* c : {&runway->takeoff, &runway->landing})
+        for (fsim_runway_point* q : {&c->start, &c->threshold, &c->limit})
+            q->latitude_rad = q->longitude_rad = q->altitude_m = q->altitude_reference = nan;
+}
+
+FSIM_API void fsim_airfield_init(fsim_airfield* airfield) {
+    if (!airfield) return;
+    std::memset(airfield, 0, sizeof *airfield);
+    airfield->struct_size = sizeof *airfield;
+    airfield->qnh_pa = std::numeric_limits<double>::quiet_NaN();
+}
+
+namespace {
+
+fsim::control::RunwayPoint runwayPointFromC(const fsim_runway_point& q) {
+    fsim::control::RunwayPoint p;
+    p.latitudeRad = q.latitude_rad, p.longitudeRad = q.longitude_rad, p.altitudeM = q.altitude_m, p.altitudeReference = q.altitude_reference;
+    return p;
+}
+
+fsim_runway_point runwayPointToC(const fsim::control::RunwayPoint& p) {
+    return fsim_runway_point{p.latitudeRad, p.longitudeRad, p.altitudeM, p.altitudeReference};
+}
+
+/// An airfield read back into the world's readback (its runways and ICAO code the caller's to read until the next).
+int airfieldOut(fsim_world* world, fsim::control::Airfield&& a, fsim_airfield* out) {
+    auto& r = world->airfieldReadback;
+    r.airfield = std::move(a);
+    r.runways.resize(r.airfield.runways.size());
+    for (std::size_t i = 0; i < r.runways.size(); ++i) {
+        const fsim::control::Runway& x = r.airfield.runways[i];
+        fsim_runway& c = r.runways[i];
+        fsim_runway_init(&c);
+        c.runway_id = x.id, c.direction_rad = x.directionRad, c.available_length_m = x.availableLengthM;
+        c.takeoff = fsim_runway_coordinates{runwayPointToC(x.takeoff.start), runwayPointToC(x.takeoff.threshold), runwayPointToC(x.takeoff.limit)};
+        c.landing = fsim_runway_coordinates{runwayPointToC(x.landing.start), runwayPointToC(x.landing.threshold), runwayPointToC(x.landing.limit)};
+    }
+    fsim_airfield c;
+    fsim_airfield_init(&c);
+    c.airfield_id = r.airfield.id, c.icao = r.airfield.icao.c_str(), c.qnh_pa = r.airfield.qnhPa, c.revision = r.airfield.revision;
+    c.runway_count = static_cast<uint32_t>(r.runways.size()), c.runways = r.runways.empty() ? nullptr : r.runways.data();
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+} // namespace
+
+FSIM_API int fsim_vehicle_load_airfield(fsim_world* world, uint32_t id, const fsim_airfield* airfield, int32_t* reason) {
+    if (!world || !airfield || !reason || airfield->struct_size < sizeof(fsim_airfield) ||
+        (airfield->runway_count && (!airfield->runways || airfield->runways[0].struct_size < sizeof(fsim_runway))))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_load_airfield: bad arguments");
+    return guard("fsim_vehicle_load_airfield", [&]() -> int {
+        fsim::control::Airfield a;
+        a.id = airfield->airfield_id, a.icao = text(airfield->icao), a.qnhPa = airfield->qnh_pa;
+        const uint32_t stride = airfield->runway_count ? airfield->runways[0].struct_size : 0;
+        const auto* bytes = reinterpret_cast<const unsigned char*>(airfield->runways);
+        for (uint32_t i = 0; i < airfield->runway_count; ++i) {
+            fsim_runway c;
+            std::memcpy(&c, bytes + static_cast<std::size_t>(i) * stride, sizeof c);
+            fsim::control::Runway& r = a.runways.emplace_back();
+            r.id = c.runway_id, r.directionRad = c.direction_rad, r.availableLengthM = c.available_length_m;
+            r.takeoff = {runwayPointFromC(c.takeoff.start), runwayPointFromC(c.takeoff.threshold), runwayPointFromC(c.takeoff.limit)};
+            r.landing = {runwayPointFromC(c.landing.start), runwayPointFromC(c.landing.threshold), runwayPointFromC(c.landing.limit)};
+        }
+        *reason = static_cast<int32_t>(world->world.loadAirfield(id, a));
+        return FSIM_OK;
+    });
+}
+
+FSIM_API uint32_t fsim_vehicle_airfield_count(fsim_world* world, uint32_t id) {
+    return world ? static_cast<uint32_t>(world->world.airfields(id).size()) : 0;
+}
+
+FSIM_API int fsim_vehicle_get_airfield_at(fsim_world* world, uint32_t id, uint32_t index, fsim_airfield* out) {
+    if (!world || !out || out->struct_size < sizeof(uint32_t)) return FSIM_INVALID_ARGUMENT;
+    return guard("fsim_vehicle_get_airfield_at", [&]() -> int {
+        auto all = world->world.airfields(id);
+        if (index >= all.size()) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_get_airfield_at: no airfield " + std::to_string(index));
+        return airfieldOut(world, std::move(all[index]), out);
+    });
+}
+
+FSIM_API int fsim_vehicle_get_airfield(fsim_world* world, uint32_t id, uint64_t airfield_id, fsim_airfield* out) {
+    if (!world || !out || out->struct_size < sizeof(uint32_t)) return FSIM_INVALID_ARGUMENT;
+    return guard("fsim_vehicle_get_airfield", [&]() -> int {
+        auto a = world->world.airfield(id, airfield_id);
+        if (!a) return absent(FSIM_INVALID_ARGUMENT, "fsim_vehicle_get_airfield: no airfield " + std::to_string(airfield_id));
+        return airfieldOut(world, std::move(*a), out);
     });
 }
 
@@ -2426,6 +2546,7 @@ FSIM_API int fsim_vehicle_get_plan(fsim_world* world, uint32_t id, uint64_t plan
             m.initial.fields(f);
             for (std::size_t k = 0; k < RouteState::kFields; ++k) x.initial.fields[k] = *f[k];
             x.endurance_s = m.enduranceS, x.fuel_kg = m.fuelKg, x.gross_weight_kg = m.grossWeightKg, x.transition_plan = m.transitionPlan;
+            x.airfield = m.airfield, x.runway = m.runway;
         }
         c.points = pr.points.empty() ? nullptr : pr.points.data(), c.point_count = static_cast<uint32_t>(pr.points.size());
         c.paths = pr.paths.empty() ? nullptr : pr.paths.data(), c.path_count = static_cast<uint32_t>(pr.paths.size());

@@ -77,6 +77,9 @@ CANNOT_COMPLY = {
     "plan_not_received": "INIT_CRITERIA_NOT_MET",
     "planning_only": "STATE_OR_SETTINGS",
     "plan_store_full": "INSUFFICIENT_RESOURCES",
+    "read_only_plan": "INELIGIBLE_CONTROL_SOURCE",
+    "safety_critical_plan": "CONSTRAINT_SAFETY",
+    "unknown_airfield": "UNKNOWN_ID",
 }
 
 #: fsim.PlanState -> A-GRA's PlanActivationStateEnum (docs/flight-autonomy.md, 4.39): the states FA reaches
@@ -358,6 +361,30 @@ def plan_activation_status(answer):
 def plan_execution_state(status):
     """A route plan's status (fsim.PlanStatus) as A-GRA's PlanExecutionStateEnum: None for one never activated."""
     return PLAN_EXECUTION_STATE[int(status.execution)]
+
+
+def airfield_report(airfield):
+    """An airfield (fsim.Airfield) as A-GRA's AirfieldReportMDT's parts (docs/flight-autonomy.md, 4.40): its AirfieldID, its
+    Information's ICAO_Code and QNH_Setting (Pa), and its runways - each its RunwayID, Direction, AvailableLength and its
+    TakeoffCoordinates and LandingCoordinates (Start, Threshold, Limit: Point3D_Type's Latitude, Longitude, Altitude and
+    AltitudeReference). What is left out is None."""
+    def known(v):
+        return None if v is None or (isinstance(v, float) and math.isnan(v)) else v
+
+    def point(q):
+        if math.isnan(q.latitude_rad):
+            return None
+        ref = known(q.altitude_reference)
+        return {"Latitude": q.latitude_rad, "Longitude": q.longitude_rad, "Altitude": q.altitude_m,
+                "AltitudeReference": None if ref is None else ALTITUDE_REFERENCE.get(int(ref))}
+
+    def coordinates(c):
+        start = point(c.start)
+        return None if start is None else {"Start": start, "Threshold": point(c.threshold), "Limit": point(c.limit)}
+
+    runways = [{"RunwayID": r.id, "Direction": known(r.direction_rad), "AvailableLength": known(r.available_length_m),
+                "TakeoffCoordinates": coordinates(r.takeoff), "LandingCoordinates": coordinates(r.landing)} for r in airfield.runways]
+    return {"AirfieldID": airfield.id, "Information": {"ICAO_Code": airfield.icao or None, "QNH_Setting": known(airfield.qnh_pa), "Runway": runways}}
 
 
 def insufficient_endurance(endurance, capacity=None):

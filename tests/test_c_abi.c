@@ -1265,6 +1265,86 @@ int main(int argc, char** argv) {
             CHECK(isnan(pts[0].rnp_m));
         }
         {
+            /* ABI 1.37 (4.40): FA's airfields and its own plans - an airfield loaded and read back; FA's landing plan loaded,
+               naming its runway, and read only to MA; a path's metadata as ABI 1.36 laid it out still read */
+            fsim_waypoint pts[2];
+            fsim_runway rw;
+            fsim_airfield field, back;
+            fsim_path_metadata paths[2];
+            fsim_route_path rp[2];
+            fsim_route_plan plan, got;
+            fsim_plan_command_result pr;
+            fsim_plan_status ps;
+            double options[4];
+            const fsim_vehicle_state* at;
+            uint32_t fa = 0;
+            int32_t reason = -1;
+            int k;
+            spec.name = "cap-airfields";
+            spec.type = "jsbsim:c172";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 50.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &fa) == FSIM_OK);
+            at = fsim_vehicle_state_ptr(world, fa);
+            fsim_runway_init(&rw);
+            CHECK(rw.struct_size == sizeof rw && rw.runway_id == 0 && isnan(rw.direction_rad) && isnan(rw.landing.limit.altitude_m));
+            rw.runway_id = 2, rw.direction_rad = 0.0, rw.available_length_m = 2500.0;
+            rw.landing.start.latitude_rad = at->latitude_rad + 0.003, rw.landing.start.longitude_rad = at->longitude_rad;
+            rw.landing.start.altitude_m = 12.0;
+            fsim_airfield_init(&field);
+            CHECK(field.struct_size == sizeof field && isnan(field.qnh_pa) && field.icao == NULL);
+            field.airfield_id = 5, field.icao = "kxyz", field.qnh_pa = 101325.0, field.runways = &rw, field.runway_count = 1;
+            CHECK(fsim_vehicle_load_airfield(world, fa, &field, &reason) == FSIM_OK && strcmp(fsim_reason_name(reason), "invalid_parameter") == 0);
+            field.icao = "KXYZ";
+            CHECK(fsim_vehicle_load_airfield(world, fa, &field, &reason) == FSIM_OK && reason == 0);
+            CHECK(fsim_vehicle_airfield_count(world, fa) == 1);
+            fsim_airfield_init(&back);
+            CHECK(fsim_vehicle_get_airfield(world, fa, 5, &back) == FSIM_OK && back.airfield_id == 5 && strcmp(back.icao, "KXYZ") == 0 &&
+                  back.revision == 1 && back.runway_count == 1);
+            CHECK(back.runways[0].runway_id == 2 && back.runways[0].landing.start.altitude_m == 12.0 && isnan(back.runways[0].takeoff.start.latitude_rad));
+            CHECK(fsim_vehicle_get_airfield_at(world, fa, 0, &back) == FSIM_OK && back.qnh_pa == 101325.0);
+            CHECK(fsim_vehicle_get_airfield(world, fa, 6, &back) == FSIM_INVALID_ARGUMENT);
+            /* FA's landing plan: its landing's path names runway 2 of airfield 5 */
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            for (k = 0; k < 2; ++k) {
+                fsim_waypoint_init(&pts[k]);
+                pts[k].latitude_rad = at->latitude_rad + 0.001 * (k + 1), pts[k].longitude_rad = at->longitude_rad, pts[k].altitude_m = 1500.0;
+            }
+            for (k = 0; k < 2; ++k) fsim_route_path_init(&rp[k]);
+            rp[0].id = 1, rp[0].type = FSIM_PATH_FINAL_APPROACH, rp[0].first = 0, rp[0].count = 1;
+            rp[1].id = 2, rp[1].type = FSIM_PATH_LANDING, rp[1].first = 1, rp[1].count = 1;
+            for (k = 0; k < 2; ++k) fsim_path_metadata_init(&paths[k]);
+            CHECK(paths[0].airfield == 0 && paths[0].runway == 0);
+            paths[0].path = 1, paths[0].airfield = 5, paths[0].runway = 9; /* (a runway it has not) */
+            fsim_route_plan_init(&plan);
+            plan.plan_id = 81, plan.version = 1;
+            plan.route.fields = options, plan.route.count = 4, plan.route.waypoints = pts, plan.route.waypoint_count = 2;
+            plan.route.paths = rp, plan.route.path_count = 2;
+            plan.paths = paths, plan.path_count = 1;
+            CHECK(fsim_vehicle_load_plan(world, fa, &plan, &reason) == FSIM_OK && strcmp(fsim_reason_name(reason), "unknown_airfield") == 0);
+            paths[0].runway = 2;
+            CHECK(fsim_vehicle_load_plan(world, fa, &plan, &reason) == FSIM_OK && reason == 0);
+            fsim_plan_status_init(&ps);
+            CHECK(fsim_vehicle_plan_status(world, fa, 81, &ps) == FSIM_OK && ps.fa_owned == 1 && ps.state == FSIM_PLAN_UPLOADED);
+            fsim_plan_command_result_init(&pr);
+            CHECK(fsim_vehicle_plan_command(world, fa, 81, FSIM_PLAN_PREPARE_FOR_UPLOAD, NULL, &pr) == FSIM_OK && pr.completed == 0 &&
+                  strcmp(fsim_reason_name(pr.reason), "read_only_plan") == 0);
+            fsim_route_plan_init(&got);
+            CHECK(fsim_vehicle_get_plan(world, fa, 81, &got) == FSIM_OK && got.path_count == 1 && got.paths[0].airfield == 5 && got.paths[0].runway == 2);
+            /* MA's own for a landing: refused as published */
+            CHECK(fsim_vehicle_plan_command(world, fa, 82, FSIM_PLAN_PREPARE_FOR_UPLOAD, NULL, &pr) == FSIM_OK && pr.completed == 1);
+            plan.plan_id = 82;
+            CHECK(fsim_vehicle_publish_plan(world, fa, &plan, &reason) == FSIM_OK && strcmp(fsim_reason_name(reason), "safety_critical_plan") == 0);
+            /* a path's metadata as ABI 1.36 laid it out (no airfield, no runway): read as ever */
+            plan.route.paths = NULL, plan.route.path_count = 0;
+            paths[0].path = 0;
+            paths[0].struct_size = (uint32_t)offsetof(fsim_path_metadata, airfield);
+            CHECK(fsim_vehicle_publish_plan(world, fa, &plan, &reason) == FSIM_OK && reason == 0);
+            CHECK(fsim_vehicle_plan_command(world, fa, 82, FSIM_PLAN_UPLOAD, NULL, &pr) == FSIM_OK && pr.completed == 1);
+            CHECK(fsim_vehicle_get_plan(world, fa, 82, &got) == FSIM_OK && got.path_count == 1 && got.paths[0].airfield == 0);
+        }
+        {
             /* ABI 1.36 (4.39): route plans - prepared for upload, published, uploaded and read back with its metadata;
                prepared for activation and activated, executing once it flies, its deactivation failing while it does; FA's
                own deactivation; a plan for planning use only failing its preparation for activation */

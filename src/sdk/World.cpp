@@ -351,6 +351,22 @@ std::optional<control::RoutePlan> Vehicle::plan(control::PlanId plan) const {
     return world_ ? world_->impl_->plan(id_, plan) : std::nullopt;
 }
 
+control::Reason Vehicle::loadPlan(const control::RoutePlan& plan) {
+    return world_ ? world_->impl_->loadPlan(id_, plan) : control::Reason::UnknownVehicle;
+}
+
+control::Reason Vehicle::loadAirfield(const control::Airfield& airfield) {
+    return world_ ? world_->impl_->loadAirfield(id_, airfield) : control::Reason::UnknownVehicle;
+}
+
+std::vector<control::Airfield> Vehicle::airfields() const {
+    return world_ ? world_->impl_->airfields(id_) : std::vector<control::Airfield>{};
+}
+
+std::optional<control::Airfield> Vehicle::airfield(control::AirfieldId airfield) const {
+    return world_ ? world_->impl_->airfield(id_, airfield) : std::nullopt;
+}
+
 control::Reason Vehicle::setCapabilityPrecedence(std::string_view capability, std::uint32_t precedence) {
     return world_ ? world_->impl_->setCapabilityPrecedence(id_, capability, precedence) : control::Reason::UnknownVehicle;
 }

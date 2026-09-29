@@ -2399,7 +2399,7 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
 
 
 TEST_CASE("fleet: the command interface on every aircraft - validated and read back, queued and scheduled, disabled and enabled, "
-          "a task, named controllers, a route's end points (FA-2)",
+          "a task, named controllers, a route's end points (FA-2), FA's own plan (FA-7b)",
           "[fleet]") {
     Fleet fleet;
     session::World& w = fleet.world();
@@ -2553,6 +2553,38 @@ TEST_CASE("fleet: the command interface on every aircraft - validated and read b
         const std::uint32_t at = w.activity(flying[p.id])->progress.segment;
         CHECK((c.altitudeM == read.waypoints[std::min<std::uint32_t>(at, 2)].altitudeM &&
                c.altitudeReference == static_cast<double>(AltitudeReference::Msl))); // (the point flown to's, completed)
+        keptSafe(p, lows[p.id]);
+    }
+    // FA's own (FA-7b): an airfield where each began, and a departure plan over the route it flies, loaded by the platform -
+    // read only to MA, activated by it, and flown
+    for (const auto& p : planes) {
+        INFO(p.type);
+        Airfield field;
+        field.id = 1;
+        Runway runway;
+        runway.id = 1, runway.takeoff.start.latitudeRad = p.start.latitudeRad, runway.takeoff.start.longitudeRad = p.start.longitudeRad;
+        runway.takeoff.start.altitudeM = 0.0;
+        field.runways = {runway};
+        REQUIRE(w.loadAirfield(p.id, field) == Reason::None);
+        Setpoint read;
+        REQUIRE(w.activitySetpoint(flying[p.id], read));
+        RoutePlan departure;
+        departure.id = 1, departure.version = 1, departure.waypoints = read.waypoints; // (the route flying, completed)
+        departure.paths = {RoutePath{1, static_cast<double>(PathType::Airborne), 0, static_cast<std::uint32_t>(read.waypoints.size())}};
+        REQUIRE(w.loadPlan(p.id, departure) == Reason::None);
+        CHECK(w.planCommand(p.id, 1, PlanCommand::PrepareForUpload).reason == Reason::ReadOnlyPlan);
+        REQUIRE(w.planCommand(p.id, 1, PlanCommand::PrepareForActivation).completed);
+        const PlanCommandResult activated = w.planCommand(p.id, 1, PlanCommand::Activate);
+        REQUIRE(activated.completed);
+        flying[p.id] = activated.check.activity;
+    }
+    fleet.fly(2.0, watch);
+    for (const auto& p : planes) {
+        INFO(p.type << " (" << className(p.cls) << ")");
+        const auto st = w.planStatus(p.id, 1);
+        REQUIRE(st.has_value());
+        CHECK((st->faOwned && st->execution == PlanExecution::Executing && st->activity == flying[p.id]));
+        CHECK((w.airfields(p.id).size() == 1 && w.airfield(p.id, 1)->revision == 1));
         keptSafe(p, lows[p.id]);
     }
 }

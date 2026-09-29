@@ -660,6 +660,29 @@ v.plan(17)->pointMetadata[0].fixKey;                              // "ALPHA": ke
   activated (`planning_only`). A vehicle keeps 32 (`plan_store_full`);
   `removePlan` forgets one that is not flying.
 
+FA's own - the airfields, and the plans for a takeoff, a departure, an
+approach or a landing - are the platform's to load, and read only to MA
+([flight-autonomy.md](../flight-autonomy.md), 4.40):
+
+```cpp
+Airfield field;
+field.id = 5, field.icao = "KXYZ", field.qnhPa = 101325.0;
+Runway two;
+two.id = 2, two.directionRad = 0.0, two.availableLengthM = 2500.0;
+two.landing.start = threshold;                                   // a RunwayPoint: latitude, longitude, altitude
+field.runways = {two};
+v.loadAirfield(field);                                           // kept by its id; v.airfields(), v.airfield(5)
+RoutePlan landing;                                               // its last path a landing's...
+landing.pathMetadata[i].airfield = 5, landing.pathMetadata[i].runway = 2; // ...naming the runway it lands on
+v.loadPlan(landing);                                             // FA's own: Uploaded, planStatus(id)->faOwned
+v.planCommand(landing.id, PlanCommand::PrepareForUpload).reason; // Reason::ReadOnlyPlan: MA activates it, never replaces it
+```
+
+- A takeoff's or a landing's path on FA's plan names an airfield and a
+  runway the vehicle keeps (`unknown_airfield` otherwise).
+- MA's own plan for a takeoff, a departure, an approach or a landing is
+  refused as published (`safety_critical_plan`); a taxi route is MA's too.
+
 ### Reports: what an activity flies, and where to
 
 An activity's setpoint read back, where it flies to, and what the vehicle

@@ -229,9 +229,9 @@ const FeatureDef kFeatures[] = {
 
     // --- route plans, settings and the supporting models a consumer uses ------------------------------
     {"fsim.plan/store", "", S, 0, 0, ""},                        // RPL-01, 02, 05, 08..11 (FA-7a)
-    {"fsim.plan/fa_plans", "", N, 7, 0, ""},                     // RPL-03
+    {"fsim.plan/fa_plans", "", S, 0, 0, ""},                     // RPL-03 (FA-7b)
     {"fsim.plan/validate", "", N, 7, 0, ""},                     // RPL-06, RPL-07, ENV-10
-    {"fsim.plan/airfields", "", N, 7, 0, ""},                    // RPL-04, ENV-05
+    {"fsim.plan/airfields", "", S, 0, 0, ""},                    // RPL-04, ENV-05 (FA-7b)
     {"fsim.setting/qnh", "", S, 0, 0, ""},                       // STS-10, ENV-03: the altimeter's setting (FA-4b)
     {"fsim.setting/lights", "", N, 14, 0, ""},                   // STS-17
     {"fsim.setting/antennas", "", N, 14, 0, ""},

@@ -160,7 +160,11 @@ enum class Reason : std::uint8_t {
     PlanExecuting,   ///< a deactivation failed: the plan executes (VI 1.2.5.4)
     PlanNotReceived, ///< an upload failed: no plan by its id was published since FA was prepared for its upload
     PlanningOnly,    ///< a plan for planning use only (A-GRA's ForPlanningUseOnly): never prepared for activation, or activated
-    PlanStoreFull,   ///< a preparation for upload failed: the vehicle keeps as many plans as it can
+    PlanStoreFull,   ///< a preparation for upload, or a load, failed: the vehicle keeps as many plans, or airfields, as it can
+    // FA's own plans and the airfields (docs/flight-autonomy.md, 4.40)
+    ReadOnlyPlan,       ///< a plan command or a removal refused: the plan is FA's own, which MA activates but never replaces or removes
+    SafetyCriticalPlan, ///< a plan published refused: a takeoff's, a departure's, an approach's or a landing's, which are FA's own alone (VI 1.2.5.2)
+    UnknownAirfield,    ///< a plan loaded refused: a takeoff's or a landing's path names an airfield or a runway the vehicle does not keep
     Count
 };
 
@@ -527,6 +531,7 @@ struct PlanStatus {
     double startTime = std::numeric_limits<double>::quiet_NaN(); ///< when it was activated last
     double endTime = std::numeric_limits<double>::quiet_NaN();   ///< when its activity ended
     std::uint64_t commandId = 0;        ///< its activation's command id
+    bool faOwned = false;               ///< FA's own: loaded by the platform, read only to MA (4.40)
 };
 
 /// The answer to a plan command (A-GRA's MA_MissionPlanActivationCommandStatus):

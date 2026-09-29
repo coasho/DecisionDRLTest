@@ -1026,12 +1026,42 @@ A-GRA's route plan (MA_RoutePlanMT) is a route FA keeps by its id and version, t
 - **FA's own deactivation** (VI 1.2.5.7; RPL-09): `World::abortPlan(vehicle, plan, reason)`, the platform's. A plan ready for activation or activated is `Deactivated`, and its execution, unless done, `Canceled`: its activity, if live, canceled with the reason (`restricted` by default). So is one whose activity the platform itself ends: its grant revoked, or for collision avoidance or a restriction.
 - **Queries** (RPL-05): `World::plans(vehicle)` gives every plan kept, in the order they were first prepared for upload - its id, version, revision, state and execution (A-GRA's query for identifiers only); `planStatus(vehicle, plan)` one; `plan(vehicle, plan)` its content as uploaded last, its metadata with it. The revision stands for A-GRA's hash of a plan's content (XPT-07).
 - `World::removePlan(vehicle, plan)` forgets a plan whose activity is not live (`unknown_plan`, `wrong_plan_state`).
-- **Until FA-7b**, a plan whose paths are a takeoff's, a departure's, an approach's or a landing's is kept as any other (a path's type is a label: 4.36). FA-7b keeps those FA's own, and adds the airfields. Validation with weather, and patches, are FA-7c's: their support rows say so.
+- **FA-7b** keeps a plan whose paths are a takeoff's, a departure's, an approach's or a landing's FA's own, refused to MA, and adds the airfields (4.40). Validation with weather, and patches, are FA-7c's: their support row says so.
 - **The support rows,** `fsim.plan/store` and `fsim.guidance.route/metadata`, are supported on every aircraft: they need nothing an aircraft may lack. The route capability's pending list now names FA-16's contingencies alone.
 - **Surfaces.**
   - C++: `PlanId`, `PlanCommand`, `PlanState`, `PlanExecution`, `PlanStatus`, `PlanCommandResult` (`fsim/Capability.h`); `PointSource`, `PointMetadata`, `PathMetadata`, `RoutePlan` (`fsim/Control.h`); `World::publishPlan`, `planCommand`, `abortPlan`, `removePlan`, `planStatus`, `plans`, `plan`, and `Vehicle::` likewise; `Reason::UnknownPlan`, `WrongPlanState`, `PlanExecuting`, `PlanNotReceived`, `PlanningOnly`, `PlanStoreFull`; `planCommandName`, `planStateName`, `planExecutionName`, `pointSourceName`.
   - C ABI 1.36: `fsim_route_plan` (`fsim_route_plan_init`: its `route` a `FSIM_BATCH_ROUTE` item), `fsim_point_metadata`, `fsim_path_metadata` (their inits: none of it given), `enum fsim_point_source`; `fsim_vehicle_publish_plan`; `fsim_vehicle_plan_command` (`enum fsim_plan_command`) and `fsim_vehicle_abort_plan`, answered in an `fsim_plan_command_result` (`enum fsim_plan_state`); `fsim_vehicle_remove_plan`; `fsim_vehicle_plan_status`, `_plan_count`, `_plan_at` (`fsim_plan_status`, `enum fsim_plan_execution`); `fsim_vehicle_get_plan`, its arrays and texts the library's; `fsim_plan_command_name`, `fsim_plan_state_name`, `fsim_plan_execution_name`, `fsim_point_source_name`.
   - Python: `fsim.RoutePlan(id, fsim.BatchCommand("submit_route", ...), ...)`, `fsim.PointMetadata`, `fsim.PathMetadata`, `fsim.PointSource`; `vehicle.publish_plan(plan)`; `vehicle.plan_command(plan_id, command, **options)` (`fsim.PlanCommand` or its name) and `abort_plan(plan_id, reason)`, each a `fsim.PlanCommandResult` (`fsim.PlanState`; an activation's `Activity`; the point a failed check names, and its findings); `remove_plan`; `plan_status`, `plans()` (`fsim.PlanStatus`, `fsim.PlanExecution`); `plan(plan_id)`; `fsim.agra.plan_activation_status`, `plan_execution_state`.
+
+### 4.40 A-GRA's airfields, and FA's own route plans (as FA-7b builds them)
+
+FA keeps what is safety critical: the airfields and the route plans for takeoff, departure, approach and landing, "loaded on FA pre-mission ... read only" (VI 1.2.6.3, 1.2.6.4). An airfield is A-GRA's AirfieldReportMT: its runways, each with its takeoff and landing coordinates and limits. MA queries them, and activates one of FA's plans; it never sends one of its own for those phases (1.2.5.2). A takeoff's or a landing's path names its airfield and runway, which must be FA's. ADR-29 plans these as RPL-03, RPL-04 and ENV-05, FA-7b.
+
+- **An airfield** (`Airfield`, A-GRA's AirfieldReportMDT's): its id (`id`, not 0: A-GRA's AirfieldID), its ICAO code (`icao`: four capitals, or none), its QNH (`qnhPa`: A-GRA's QNH_Setting; left out, none) and its runways (`Runway`, 16 at most):
+  - a runway's id (`id`, not 0: RunwayID), its direction (`directionRad`: from true north, 0 to 2 pi; left out, none) and its available length (`availableLengthM`, above 0; left out, none);
+  - its takeoff and landing coordinates (`takeoff`, `landing`: A-GRA's RunwayCoordinatesType). Each set is its `start`, `threshold` and `limit`, each a `RunwayPoint`: A-GRA's Point3D_Type - latitude, longitude, altitude, and the altitude's reference, above the WGS-84 ellipsoid when left out. A set's start is required where any of it is given; each runway gives at least one set.
+  Its elevation is its points' altitudes; its ends, a set's start and limit.
+- **Loaded by the platform** (`World::loadAirfield(vehicle, airfield)`), before a mission or as FA's database changes: kept by its id - one loaded again in its place, its revision one more (`Airfield::revision`, read back). 32 a vehicle; with no room left, `plan_store_full`. Refused `invalid_parameter`:
+  - id 0, a runway's id 0 or twice, more than 16 runways;
+  - a point off the Earth or not whole (its latitude given without its longitude or altitude), a reference that is none;
+  - a set without its start, a runway with neither set;
+  - a direction outside 0 to 2 pi, a length not above 0;
+  - an ICAO code not four capitals, a QNH outside 850 to 1,100 hPa (the altimeter's: 4.20).
+- **Queried** (VI 1.2.6.3; RPL-05): `World::airfields(vehicle)` gives every airfield kept, as loaded, in the order they were first loaded; `airfield(vehicle, id)` one.
+- **FA's own plans** (RPL-03): `World::loadPlan(vehicle, plan)`, the platform's, keeps a route plan `Uploaded` and FA's (`PlanStatus::faOwned`), its revision one more. It takes the place of any plan by its id whose activity is not live (else `wrong_plan_state`); with no room, `plan_store_full`; malformed, `invalid_parameter`, as a published plan. MA prepares it for activation, activates and deactivates it as its own. Its preparation for upload and its removal are refused `read_only_plan`, and FA listens for no plan by its id. The platform deactivates it as any other (4.39).
+- **A takeoff's or a landing's path** (A-GRA's TAKEOFF, LANDING, EMERGENCY_LANDING), on FA's own plan, names its airfield and runway (`PathMetadata::airfield`, `runway`: A-GRA's MA_RoutePathType.AirfieldID and RunwayID). They must be ones the vehicle keeps: with none, or one it does not keep, the plan is refused `unknown_airfield`. On any other path they are kept and read back.
+- **MA's plans for those phases** (VI 1.2.5.2) are refused as published, `safety_critical_plan`, and FA listens on. They are plans with a path of a takeoff's, a departure's, an approach's or a landing's type:
+  - A-GRA's TAKEOFF, LANDING and EMERGENCY_LANDING;
+  - a departure's: AIRBORNE, ARCING, BREAKING, ON_DEP_RADIAL (CV Admin's);
+  - an approach's: INITIAL_APP, INTERMEDIATE_APP, FINAL_APP and BOLTER_WAVEOFF (CV Admin's recovery).
+  A taxi route (TAXI) is MA's too: an aborted takeoff's is FA's as part of its takeoff plan.
+- **What flies:** FA's plans fly as their routes, as MA's do (4.39). A path's type is a label (4.36): a takeoff's or a landing's path is flown as its points, not as a takeoff or a landing, until FA-9 and FA-10 build those (their support rows say so).
+- **A named change to 4.39:** a plan with a takeoff's, a departure's, an approach's or a landing's path, published by MA, is refused. FA-7a kept it as any other.
+- **The support rows,** `fsim.plan/fa_plans` and `fsim.plan/airfields`, are supported on every aircraft.
+- **Surfaces.**
+  - C++: `AirfieldId`, `RunwayId`, `RunwayPoint`, `RunwayCoordinates`, `Runway`, `Airfield` (`fsim/Control.h`); `PathMetadata::airfield`, `runway`; `PlanStatus::faOwned`; `World::loadAirfield`, `airfields`, `airfield`, `loadPlan`, and `Vehicle::` likewise; `Reason::ReadOnlyPlan`, `SafetyCriticalPlan`, `UnknownAirfield`.
+  - C ABI 1.37: `fsim_runway_point`, `fsim_runway_coordinates`, `fsim_runway` (`fsim_runway_init`: every place and value left out), `fsim_airfield` (`fsim_airfield_init`); `fsim_vehicle_load_airfield`, `_airfield_count`, `_get_airfield_at`, `_get_airfield`, its runways and ICAO code the library's; `fsim_vehicle_load_plan`; `fsim_path_metadata`'s `airfield` and `runway`, where the caller's `struct_size` has them; `fsim_plan_status`'s `fa_owned` (1.36's reserved word).
+  - Python: `fsim.Airfield`, `fsim.Runway`, `fsim.RunwayCoordinates`, `fsim.RunwayPoint`; `vehicle.load_airfield(airfield)`, `airfields()`, `airfield(id)`, `load_plan(plan)`; `fsim.PathMetadata`'s `airfield` and `runway`, `fsim.PlanStatus.fa_owned`; `fsim.agra.airfield_report`.
 
 ## 5. Applicability (D6)
 
@@ -1300,7 +1330,7 @@ Plans by id and version, their activation states, FA-owned read-only plans, airf
 
 **Status:** in three steps:
 - FA-7a, the plan store: its activation states, execution, queries and the route's planning metadata (RPL-01, RPL-02, RPL-05, RPL-08, RPL-09, RPL-10, RPL-11, WPT-23; 4.39), done 2026-09-29 and measured in section 14;
-- FA-7b, FA's own plans and the airfields (RPL-03, RPL-04, ENV-05);
+- FA-7b, FA's own plans and the airfields (RPL-03, RPL-04, ENV-05; 4.40), done 2026-09-29 and measured in section 14;
 - FA-7c, validation with weather, and patches (RPL-06, RPL-07, ENV-10).
 
 **Supporting models:** Airfields, weather for validation (ENV-05, ENV-10).
@@ -2766,6 +2796,23 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - **Where the code lies was the rest.** The hot functions are the same, instruction for instruction, but not where they were: the host's `admits`, `checkAwareness` and `start`, and the World's `command`, `commandResult` and `levelChanged`, each begin 16 bytes further into its cache line. Built again with every function aligned to 64 bytes - 9 rounds of `command` twice, and 5 from three copies of each - the two builds read a level switch within −0.3 % to +1.5 % of each other, and a behaviour within +0.7 % to +2.4 % (124 to 128 ns). FA-6g3b's own build reads as the aligned ones do. FA-7a's lands its unchanged code 5 ns worse for a level switch and 13 ns for a behaviour, until another change moves it again.
   - **The rest is even.** The updates: the same level's 6.6 to 6.9 ns either way, a checked one within 1.6 %. The micro cases, from three copies of each, are within −1.3 % to +1.0 %. From one copy, some rounds' interference lifted four cases' medians 5 to 8 %, their least readings unchanged; the watcher saw no other session's work, but twice a bench whose command line it could not read. World throughput is 99.2 to 99.9 % of FA-6g3b's (99.1 to 99.8 % from three copies), and protection costs at most 0.6 %.
 - ctest: all 336 tests pass.
+
+**FA-7b, A-GRA's airfields and FA's own route plans (RPL-03, RPL-04, ENV-05).**
+- What it built is 4.40, in C++, the C ABI (1.37) and Python. `fsim.plan/fa_plans` and `fsim.plan/airfields` are supported on every aircraft; of stage 7's rows, `fsim.plan/validate` is left (FA-7c).
+- **The VI's sequences replayed** (`test_route_plans`, 2 cases more, 98 checks; its Python twin, 1 test more; `test_c_abi`'s 1.37 block), a C172 flying at 1,500 m:
+  - Query Airfield Update (1.2.6.3): an airfield 20 km north, with a runway whose takeoff and landing coordinates are both given and one with its landing's start alone, is loaded and read back as given. Loaded again, it takes its own place, its revision one more. Each of 14 malformations A-GRA's schema would not take is refused, from a runway's id given twice to a QNH outside the altimeter's range. 32 airfields are kept; the 33rd fails `plan_store_full`.
+  - Query Route Plan (1.2.6.4) and FA's own (1.2.5.2): FA's landing plan - an approach's path, then a landing's naming runway 2 of airfield 5 - is refused `unknown_airfield` until the airfield is loaded, and again for a runway it has not. Loaded, it is FA's and read only to MA: its preparation for upload and its removal are refused `read_only_plan`, and FA listens for no plan by its id. Its metadata reads back with its airfield and runway.
+  - MA's own plan with a takeoff's, a departure's, an approach's or a landing's path - each of the eleven types - is refused as published, `safety_critical_plan`, FA listening on; one with a taxi route is taken.
+  - FA's departure plan, activated by MA, flies. It is refused a reload while it flies, and, deactivated by FA, reloads, its revision 2.
+- **The fleet** (`test_fleet`'s command interface): on every aircraft, an airfield where it began and FA's departure plan over the route it flies, loaded by the platform. MA is refused its upload, and flies it once activated: executing 2 s later, on all 35 aircraft.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-7a's build.
+- **Memory:** the airfields live in the plans' store, made at the first loaded or prepared for upload; the host does not grow.
+- **Digests:** identical to FA-7a's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-7a, both builds run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`; then 5 rounds of `micro` and of `command`, and 3 of `world`, from three copies of each; and 9 rounds of `command` twice, and 5 from three copies of each, between the two built with every function aligned to 64 bytes.
+  - No other session's work ran during any of it. From one copy of each, the micro cases are within −3.5 % to +0.4 %; from three copies, −0.6 % to +0.4 %.
+  - The command cases are within −3.2 % to +3.0 % from one copy - the same level's update 6.6 to 6.8 ns either way - and within −3.1 % to +0.4 % from three copies, the NEWs a little faster. Built with every function aligned to 64 bytes, a level switch reads within −1.3 % to +0.5 %, and a behaviour −3.2 % to −1.8 %.
+  - World throughput is 99.7 to 100.1 % of FA-7a's (100.0 to 100.4 % from three copies), and protection costs at most 1.0 %.
+- ctest: all 338 tests pass.
 
 ## Appendix A: the inventory
 

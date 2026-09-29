@@ -903,6 +903,43 @@ inline const char* modeBehavior(const Command& c) noexcept {
     return nullptr;
 }
 
+/// An airfield's id (A-GRA's AirfieldID) and a runway's (RunwayID): not 0.
+using AirfieldId = std::uint64_t;
+using RunwayId = std::uint64_t;
+
+/// A place on a runway (A-GRA's Point3D_Type; docs/flight-autonomy.md, 4.40): above the WGS-84 ellipsoid unless its
+/// reference says otherwise. Its latitude left out, none.
+struct RunwayPoint {
+    double latitudeRad = kHold, longitudeRad = kHold;
+    double altitudeM = kHold;
+    double altitudeReference = kHold; ///< AltitudeReference; left out, above the ellipsoid (A-GRA's Point3D's)
+};
+
+/// A runway's takeoff or landing coordinates (A-GRA's RunwayCoordinatesType): its start - required where any of them is
+/// given - and its threshold and limit, its nearest and furthest points.
+struct RunwayCoordinates {
+    RunwayPoint start, threshold, limit;
+};
+
+/// A runway (A-GRA's AirfieldRunwayType): its takeoff coordinates or its landing coordinates, or both.
+struct Runway {
+    RunwayId id = 0;
+    double directionRad = kHold;        ///< from true north, 0 to 2 pi (A-GRA's Direction)
+    double availableLengthM = kHold;    ///< above 0 (A-GRA's AvailableLength)
+    RunwayCoordinates takeoff, landing; ///< (A-GRA's TakeoffCoordinates, LandingCoordinates)
+};
+
+/// An airfield (A-GRA's AirfieldReportMDT; docs/flight-autonomy.md, 4.40): FA's, loaded by the platform before a mission and
+/// read only to MA - its runways, their takeoff and landing coordinates and limits, and its QNH.
+struct Airfield {
+    static constexpr std::size_t kRunways = 16;
+    AirfieldId id = 0;
+    std::string icao;             ///< A-GRA's ICAO_Code: four capitals, or none
+    double qnhPa = kHold;         ///< A-GRA's QNH_Setting: 850 to 1,100 hPa
+    std::vector<Runway> runways;  ///< kRunways at most
+    std::uint32_t revision = 0;   ///< its loads kept, read back (ignored as loaded)
+};
+
 /// Who made a route plan's point (A-GRA's PathSegmentSourceEnum).
 enum class PointSource : std::uint8_t { AutoRouted, OperatorDefined, Count };
 /// "auto_routed", "operator_defined".
@@ -931,6 +968,10 @@ struct PathMetadata {
     double fuelKg = kHold;        ///< its Endurance's Fuel
     double grossWeightKg = kHold; ///< its GrossWeight
     PlanId transitionPlan = 0;    ///< its TransitionRoute: a route plan's id; 0 none
+    /// Its airfield and runway (A-GRA's MA_RoutePathType.AirfieldID and RunwayID; 4.40): a takeoff's or a landing's path, on
+    /// FA's own plan, names ones the vehicle keeps. 0: none.
+    AirfieldId airfield = 0;
+    RunwayId runway = 0;
 };
 
 /// A route plan (A-GRA's MA_RoutePlanMT; docs/flight-autonomy.md, 4.39): a route FA keeps by its id and version,

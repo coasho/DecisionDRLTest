@@ -307,6 +307,12 @@ public:
     std::vector<control::PlanStatus> plans() const;
     /// Its content as uploaded last, its planning metadata with it.
     std::optional<control::RoutePlan> plan(control::PlanId plan) const;
+    // FA's own plans and the airfields (docs/sdk/control.md, "Route plans"): the platform's, read only to MA.
+    /// FA's own plan, kept Uploaded: UnknownAirfield where a takeoff's or a landing's path names an airfield or runway not kept.
+    control::Reason loadPlan(const control::RoutePlan& plan);
+    control::Reason loadAirfield(const control::Airfield& airfield);
+    std::vector<control::Airfield> airfields() const;
+    std::optional<control::Airfield> airfield(control::AirfieldId airfield) const;
     /// The platform restricts a capability (collision avoidance, an
     /// operational restriction): a policy's NEW for it is refused with
     /// `reason`; what flies goes on. Availability::Available lifts it.

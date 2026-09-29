@@ -523,13 +523,14 @@ TaskStatus.__doc__ = ("A flight task's status (A-GRA's TaskStatus; docs/flight-a
                       "its task command's id.")
 
 PlanStatus = collections.namedtuple(
-    "PlanStatus", "id state version revision execution reason for_planning_use_only activity percent start_time end_time command_id")
+    "PlanStatus", "id state version revision execution reason for_planning_use_only activity percent start_time end_time command_id fa_owned")
 PlanStatus.__doc__ = ("A route plan's status (A-GRA's plan activation status and route plan execution status; "
                       "docs/flight-autonomy.md, 4.39): its fsim.PlanState; the version kept (0 before an upload) and its "
                       "``revision``, its uploads kept; its fsim.PlanExecution, its activity's since it was activated last; why "
                       "its last command failed or why its execution ended; whether it is for planning use only; its activity "
                       "(0 before it was activated), the percent of its route flown, when it was activated and its activity "
-                      "ended, and its activation's command id.")
+                      "ended, and its activation's command id; ``fa_owned``, FA's own - loaded by the platform, read only to "
+                      "MA (4.40).")
 
 PlanCommandResult = collections.namedtuple("PlanCommandResult", "plan command completed state reason activity index findings")
 PlanCommandResult.__doc__ = ("A plan command's answer (A-GRA's MA_MissionPlanActivationCommandStatus; docs/flight-autonomy.md, "
@@ -711,9 +712,18 @@ def _task(t):
     return TaskStatus(t[0], TaskState(t[1]), _native.reason_name(t[2]), bool(t[3]), t[4], t[5], t[6], t[7], t[8], t[9], t[10])
 
 
+def _airfield(t):
+    def place(v, k):
+        return RunwayPoint(*v[k:k + 4])
+
+    runways = tuple(Runway(int(r[0]), r[1], r[2], RunwayCoordinates(place(r, 3), place(r, 7), place(r, 11)),
+                           RunwayCoordinates(place(r, 15), place(r, 19), place(r, 23))) for r in t[4])
+    return Airfield(t[0], t[1], t[2], runways, t[3])
+
+
 def _plan_status(t):
     return PlanStatus(t[0], PlanState(t[1]), t[2], t[3], PlanExecution(t[4]), _native.reason_name(t[5]), bool(t[6]), t[7], t[8], t[9],
-                      t[10], t[11])
+                      t[10], t[11], bool(t[12]))
 
 
 def _findings(result, h):
@@ -1085,13 +1095,33 @@ PointMetadata.__doc__ = ("A route plan's point's planning metadata (A-GRA's MA_P
                          "most; ``remarks``: 1,024) and its fix's identifier (``fix_key``, ``fix_system``: 256 each). Printable ASCII. "
                          "Kept with its plan and read back; nothing flies by it.")
 
-PathMetadata = collections.namedtuple("PathMetadata", "path initial endurance_s fuel_kg gross_weight_kg transition_plan",
-                                      defaults=(0, None, HOLD, HOLD, HOLD, 0))
+PathMetadata = collections.namedtuple("PathMetadata", "path initial endurance_s fuel_kg gross_weight_kg transition_plan airfield runway",
+                                      defaults=(0, None, HOLD, HOLD, HOLD, 0, 0, 0))
 PathMetadata.__doc__ = ("A route plan's path's planning metadata (A-GRA's MA_RoutePathType.InitialConditions; "
                         "docs/flight-autonomy.md, 4.39), for path ``path`` (0 without paths): the aircraft's state as planned or "
                         "assessed where it begins - ``initial``, a fsim.RouteState (its point not used; None: left out), its "
                         "endurance (``endurance_s``, ``fuel_kg``), ``gross_weight_kg``, and ``transition_plan``, a route plan's id "
-                        "(0 none). Kept with its plan and read back; nothing flies by it.")
+                        "(0 none); its ``airfield`` and ``runway`` (A-GRA's AirfieldID, RunwayID; 0 none), which a takeoff's or a "
+                        "landing's path on FA's own plan names from those the vehicle keeps (4.40). Kept with its plan and read back; "
+                        "nothing flies by it.")
+
+RunwayPoint = collections.namedtuple("RunwayPoint", "latitude_rad longitude_rad altitude_m altitude_reference", defaults=(HOLD,) * 4)
+RunwayPoint.__doc__ = ("A place on a runway (A-GRA's Point3D_Type; docs/flight-autonomy.md, 4.40): above the WGS-84 ellipsoid "
+                       "unless ``altitude_reference`` (fsim.AltitudeReference or its name) says otherwise; its latitude left out, none.")
+
+RunwayCoordinates = collections.namedtuple("RunwayCoordinates", "start threshold limit", defaults=(RunwayPoint(),) * 3)
+RunwayCoordinates.__doc__ = ("A runway's takeoff or landing coordinates (A-GRA's RunwayCoordinatesType): its ``start`` - required where "
+                             "any is given - its ``threshold`` and ``limit``, its nearest and furthest points (fsim.RunwayPoint).")
+
+Runway = collections.namedtuple("Runway", "id direction_rad available_length_m takeoff landing",
+                                defaults=(0, HOLD, HOLD, RunwayCoordinates(), RunwayCoordinates()))
+Runway.__doc__ = ("A runway (A-GRA's AirfieldRunwayType): its ``id`` (not 0), ``direction_rad`` (from true north, 0 to 2 pi), "
+                  "``available_length_m``, and its ``takeoff`` and ``landing`` coordinates (fsim.RunwayCoordinates), at least one.")
+
+Airfield = collections.namedtuple("Airfield", "id icao qnh_pa runways revision", defaults=(0, "", HOLD, (), 0))
+Airfield.__doc__ = ("An airfield (A-GRA's AirfieldReportMDT; docs/flight-autonomy.md, 4.40): FA's, loaded by the platform "
+                    "(Vehicle.load_airfield) and read only to MA - its ``id`` (not 0), ``icao`` code (four capitals, or none), "
+                    "``qnh_pa`` (850 to 1,100 hPa), its ``runways`` (fsim.Runway, 16 at most) and, read back, its ``revision``.")
 
 RoutePlan = collections.namedtuple(
     "RoutePlan", "id route version for_planning_use_only detailed remarks_name remarks point_metadata path_metadata",
@@ -1883,6 +1913,22 @@ class Vehicle:
         for upload (plan_command) - A-GRA's notification CONFIRMED. fsim.Rejected: "wrong_plan_state" where FA does not
         listen for it; "invalid_parameter" for id 0, or metadata at no point or path, twice for one, or a text that is not
         printable ASCII or is longer than A-GRA's."""
+        reason = self._h.publish_plan(self.id, *self._plan_native(plan))
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+
+    def load_plan(self, plan):
+        """FA's own route plan (fsim.RoutePlan; docs/flight-autonomy.md, 4.40), the platform's: kept uploaded and read only to
+        MA, in place of any plan by its id not flying - MA prepares it for activation, activates and deactivates it, but never
+        replaces or removes it ("read_only_plan"). A takeoff's or a landing's path names, in its fsim.PathMetadata, an airfield
+        and a runway the vehicle keeps. fsim.Rejected: "invalid_parameter" (as publish_plan's), "unknown_airfield",
+        "wrong_plan_state" (the plan it replaces flies), "plan_store_full"."""
+        reason = self._h.load_plan(self.id, *self._plan_native(plan))
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+
+    def _plan_native(self, plan):
+        """A fsim.RoutePlan as the native publish_plan and load_plan take it (after the vehicle's id)."""
         route = plan.route
         if not isinstance(route, BatchCommand) or route.method != "submit_route":
             raise ValueError("a plan's route is a fsim.BatchCommand('submit_route', ...)")
@@ -1897,11 +1943,46 @@ class Vehicle:
         for m in plan.path_metadata:
             m = PathMetadata(**m) if isinstance(m, dict) else PathMetadata(*m)
             initial = _states([RouteState() if m.initial is None else m.initial])[0]
-            paths.append((int(m.path), initial, float(m.endurance_s), float(m.fuel_kg), float(m.gross_weight_kg), int(m.transition_plan)))
-        reason = self._h.publish_plan(self.id, int(plan.id), int(plan.version), bool(plan.for_planning_use_only), bool(plan.detailed),
-                                      str(plan.remarks_name), str(plan.remarks), item, points, paths)
+            paths.append((int(m.path), initial, float(m.endurance_s), float(m.fuel_kg), float(m.gross_weight_kg), int(m.transition_plan),
+                          int(m.airfield), int(m.runway)))
+        return (int(plan.id), int(plan.version), bool(plan.for_planning_use_only), bool(plan.detailed), str(plan.remarks_name), str(plan.remarks),
+                item, points, paths)
+
+    def load_airfield(self, airfield):
+        """An airfield (fsim.Airfield; A-GRA's AirfieldReportMT; docs/flight-autonomy.md, 4.40), the platform's: kept in place
+        of any by its id, its revision one more, read only to MA. fsim.Rejected: "invalid_parameter" for one A-GRA's schema
+        would not take - an id 0, a runway's id 0 or twice, a point off the Earth or not whole, a set of coordinates without its
+        start, a runway with neither, a direction outside 0 to 2 pi, a length not above 0, an ICAO code not four capitals, a
+        QNH outside 850 to 1,100 hPa; "plan_store_full" (32 kept)."""
+        a = Airfield(**airfield) if isinstance(airfield, dict) else airfield
+
+        def place(q):
+            q = RunwayPoint(*q) if not isinstance(q, RunwayPoint) else q
+            ref = q.altitude_reference
+            ref = float(_REFERENCES["altitude_reference"][ref.upper()]) if isinstance(ref, str) else float(ref)
+            return (float(q.latitude_rad), float(q.longitude_rad), float(q.altitude_m), ref)
+
+        rows = []
+        for r in a.runways:
+            r = Runway(**r) if isinstance(r, dict) else r
+            takeoff, landing = RunwayCoordinates(*r.takeoff), RunwayCoordinates(*r.landing)
+            row = (int(r.id), float(r.direction_rad), float(r.available_length_m))
+            for q in (takeoff.start, takeoff.threshold, takeoff.limit, landing.start, landing.threshold, landing.limit):
+                row += place(q)
+            rows.append(row)
+        reason = self._h.load_airfield(self.id, int(a.id), a.icao or None, float(a.qnh_pa), rows)
         if reason:
             raise Rejected(_native.reason_name(reason))
+
+    def airfields(self):
+        """Every airfield kept (fsim.Airfield), as loaded, in the order they were first loaded (A-GRA's query for the
+        airfields, VI 1.2.6.3)."""
+        return [_airfield(t) for t in self._h.airfields(self.id)]
+
+    def airfield(self, airfield_id):
+        """An airfield kept (fsim.Airfield), or None."""
+        t = self._h.get_airfield(self.id, int(airfield_id))
+        return None if t is None else _airfield(t)
 
     def plan_command(self, plan_id, command, *, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
                      interactive=True, rank=None, interrupt=True, precedence_override=None, window=None, override_rejection=False, controller=0):

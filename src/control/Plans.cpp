@@ -1,7 +1,7 @@
 // Route plans (docs/flight-autonomy.md, 4.39): the vehicle's store of A-GRA's
 // route plans, taken through the VI's plan activation states (1.2.5), and
-// their execution - CapabilityHost's. Apart from the host's other code, so
-// that growing either moves neither.
+// their execution; FA's own plans and the airfields (4.40) - CapabilityHost's.
+// Apart from the host's other code, so that growing either moves neither.
 #include "control/CapabilityHost.h"
 
 #include <algorithm>
@@ -22,15 +22,19 @@ struct CapabilityHost::PlanEntry {
     std::uint64_t commandId = 0;  ///< its activation's
     PlanExecution ended = PlanExecution::None; ///< once its activity ended (or FA aborted it unflown)
     double percent = kUnknown, startTime = kUnknown, endTime = kUnknown;
+    bool faOwned = false;         ///< FA's own: loaded by the platform, read only to MA (4.40)
 };
 
 struct CapabilityHost::PlanStore {
-    std::vector<PlanEntry> plans; ///< in the order they were first prepared for upload
+    std::vector<PlanEntry> plans;    ///< in the order they were first prepared for upload, or loaded
+    std::vector<Airfield> airfields; ///< FA's (4.40), in the order they were first loaded
 };
 
 void CapabilityHost::PlanStoreFree::operator()(PlanStore* store) const noexcept { delete store; }
 
 namespace {
+
+constexpr double kPi = 3.14159265358979323846;
 
 /// A text A-GRA's VisibleString takes: printable ASCII, `most` characters at most.
 bool visible(const std::string& s, std::size_t most) noexcept {
@@ -64,6 +68,81 @@ bool wellFormed(const RoutePlan& p) noexcept {
         if (!given(m.enduranceS, 0.0) || !given(m.fuelKg, 0.0) || !given(m.grossWeightKg, 0.0)) return false;
         for (std::size_t j = 0; j < i; ++j)
             if (p.pathMetadata[j].path == m.path) return false;
+    }
+    return true;
+}
+
+/// A path of a takeoff's, a departure's, an approach's or a landing's type: FA's own alone (VI 1.2.5.2; 4.40).
+bool safetyCritical(double type) noexcept {
+    if (!(type >= 0.0 && type < static_cast<double>(PathType::Count))) return false;
+    switch (static_cast<PathType>(static_cast<int>(type))) {
+    case PathType::Takeoff:
+    case PathType::Landing:
+    case PathType::EmergencyLanding:
+    case PathType::Airborne:          // (a departure's: CV Admin's)
+    case PathType::Arcing:
+    case PathType::Breaking:
+    case PathType::OnDepartureRadial:
+    case PathType::InitialApproach:   // (an approach's: CV Admin's recovery)
+    case PathType::IntermediateApproach:
+    case PathType::FinalApproach:
+    case PathType::BolterWaveoff: return true;
+    default: return false;
+    }
+}
+
+/// A takeoff's or a landing's path, which names its airfield and runway.
+bool atRunway(double type) noexcept {
+    return type == static_cast<double>(PathType::Takeoff) || type == static_cast<double>(PathType::Landing) ||
+           type == static_cast<double>(PathType::EmergencyLanding);
+}
+
+/// A runway's point: none (its latitude left out, and all of it), or whole - on the Earth, its altitude finite, its
+/// reference left out or an AltitudeReference.
+bool runwayPoint(const RunwayPoint& q, bool& given) noexcept {
+    given = !std::isnan(q.latitudeRad);
+    if (!given) return std::isnan(q.longitudeRad) && std::isnan(q.altitudeM) && std::isnan(q.altitudeReference);
+    const double r = q.altitudeReference;
+    return std::abs(q.latitudeRad) <= 0.5 * kPi && std::abs(q.longitudeRad) <= kPi && std::isfinite(q.altitudeM) &&
+           (std::isnan(r) || (r >= 0.0 && r < static_cast<double>(AltitudeReference::Count) && r == std::floor(r)));
+}
+
+/// A runway's takeoff or landing coordinates: none of them, or its start with its threshold and limit if given.
+bool runwayCoordinates(const RunwayCoordinates& c, bool& given) noexcept {
+    bool start = false, threshold = false, limit = false;
+    if (!runwayPoint(c.start, start) || !runwayPoint(c.threshold, threshold) || !runwayPoint(c.limit, limit)) return false;
+    given = start;
+    return start || !(threshold || limit);
+}
+
+/// An airfield as A-GRA's schema bounds it (4.40).
+bool wellFormed(const Airfield& a) noexcept {
+    if (a.id == 0 || a.runways.size() > Airfield::kRunways) return false;
+    if (!a.icao.empty() && !(a.icao.size() == 4 && std::all_of(a.icao.begin(), a.icao.end(), [](char c) { return c >= 'A' && c <= 'Z'; })))
+        return false;
+    if (!std::isnan(a.qnhPa) && !(a.qnhPa >= 85000.0 && a.qnhPa <= 110000.0)) return false; // (the altimeter's range: 4.20)
+    for (std::size_t i = 0; i < a.runways.size(); ++i) {
+        const Runway& r = a.runways[i];
+        if (r.id == 0) return false;
+        for (std::size_t j = 0; j < i; ++j)
+            if (a.runways[j].id == r.id) return false;
+        if (!std::isnan(r.directionRad) && !(r.directionRad >= 0.0 && r.directionRad < 2.0 * kPi)) return false;
+        if (!std::isnan(r.availableLengthM) && !(std::isfinite(r.availableLengthM) && r.availableLengthM > 0.0)) return false;
+        bool takeoff = false, landing = false;
+        if (!runwayCoordinates(r.takeoff, takeoff) || !runwayCoordinates(r.landing, landing) || !(takeoff || landing)) return false;
+    }
+    return true;
+}
+
+/// Its takeoff's and landing's paths each name an airfield kept, and one of its runways.
+bool runwaysKept(const RoutePlan& p, const std::vector<Airfield>& airfields) noexcept {
+    for (std::size_t i = 0; i < p.paths.size(); ++i) {
+        if (!atRunway(p.paths[i].type)) continue;
+        const PathMetadata* m = nullptr;
+        for (const PathMetadata& x : p.pathMetadata)
+            if (x.path == i) m = &x;
+        const auto a = std::find_if(airfields.begin(), airfields.end(), [&](const Airfield& f) { return m && m->airfield && f.id == m->airfield; });
+        if (a == airfields.end() || std::none_of(a->runways.begin(), a->runways.end(), [&](const Runway& r) { return r.id == m->runway; })) return false;
     }
     return true;
 }
@@ -112,7 +191,7 @@ PlanStatus CapabilityHost::planStatusOf(const PlanEntry& e) const noexcept {
     s.id = e.id, s.revision = e.revision, s.state = e.state, s.reason = e.reason;
     if (e.revision) s.version = e.kept.version, s.forPlanningUseOnly = e.kept.forPlanningUseOnly;
     s.activity = e.activity, s.commandId = e.commandId, s.startTime = e.startTime;
-    s.execution = e.ended, s.percent = e.percent, s.endTime = e.endTime;
+    s.execution = e.ended, s.percent = e.percent, s.endTime = e.endTime, s.faOwned = e.faOwned;
     if (const ActivityRecord* a = e.activity ? activity(e.activity) : nullptr; a && a->live()) {
         s.execution = a->state == ActivityState::Active ? PlanExecution::Executing : PlanExecution::Pending;
         s.percent = a->progress.percent;
@@ -136,6 +215,8 @@ Reason CapabilityHost::publishPlan(const RoutePlan& plan) {
     if (plan.id == 0 || !wellFormed(plan)) return Reason::InvalidParameter;
     PlanEntry* e = findPlan(plan.id);
     if (!e || e->state != PlanState::ReadyForUpload) return Reason::WrongPlanState; // (FA listens for those prepared for upload alone)
+    if (std::any_of(plan.paths.begin(), plan.paths.end(), [](const RoutePath& path) { return safetyCritical(path.type); }))
+        return Reason::SafetyCriticalPlan; // (FA's own alone: VI 1.2.5.2)
     e->received = plan, e->hasReceived = true; // (published again: the later one)
     return Reason::None;
 }
@@ -179,6 +260,8 @@ PlanCommandResult CapabilityHost::planCommand(PlanId id, PlanCommand command, co
             }
             e = &plans_->plans.emplace_back();
             e->id = id;
+        } else if (e->faOwned) {
+            return refused(Reason::ReadOnlyPlan);
         } else if (!idle) {
             return refused(Reason::WrongPlanState);
         }
@@ -256,6 +339,7 @@ PlanCommandResult CapabilityHost::abortPlan(PlanId id, Reason reason, const sim:
 Reason CapabilityHost::removePlan(PlanId id) {
     PlanEntry* e = findPlan(id);
     if (!e) return Reason::UnknownPlan;
+    if (e->faOwned) return Reason::ReadOnlyPlan;
     if (e->state == PlanState::Activated && live(*this, e->activity)) return Reason::WrongPlanState;
     plans_->plans.erase(plans_->plans.begin() + (e - plans_->plans.data()));
     return Reason::None;
@@ -281,6 +365,53 @@ bool CapabilityHost::plan(PlanId id, RoutePlan& out) const {
     if (!e || !e->revision) return false;
     out = e->kept;
     return true;
+}
+
+Reason CapabilityHost::loadPlan(const RoutePlan& plan) {
+    if (plan.id == 0 || !wellFormed(plan)) return Reason::InvalidParameter;
+    static const std::vector<Airfield> none;
+    if (!runwaysKept(plan, plans_ ? plans_->airfields : none)) return Reason::UnknownAirfield;
+    PlanEntry* e = findPlan(plan.id);
+    if (e && e->state == PlanState::Activated && live(*this, e->activity)) return Reason::WrongPlanState;
+    if (!e) {
+        if (!plans_) plans_.reset(new PlanStore), planned_ = true;
+        if (plans_->plans.size() >= kPlans) return Reason::PlanStoreFull;
+        e = &plans_->plans.emplace_back();
+        e->id = plan.id;
+    }
+    e->kept = plan, e->received = RoutePlan{}, e->hasReceived = false;
+    ++e->revision;
+    e->faOwned = true, e->state = PlanState::Uploaded, e->reason = Reason::None; // (kept, as an upload keeps one)
+    e->activity = 0, e->commandId = 0, e->ended = PlanExecution::None;
+    e->percent = e->startTime = e->endTime = kUnknown;
+    return Reason::None;
+}
+
+Reason CapabilityHost::loadAirfield(const Airfield& airfield) {
+    if (!wellFormed(airfield)) return Reason::InvalidParameter;
+    if (!plans_) plans_.reset(new PlanStore), planned_ = true;
+    for (Airfield& a : plans_->airfields)
+        if (a.id == airfield.id) { // (in its place, its revision one more)
+            const std::uint32_t revision = a.revision + 1;
+            a = airfield, a.revision = revision;
+            return Reason::None;
+        }
+    if (plans_->airfields.size() >= kAirfields) return Reason::PlanStoreFull;
+    plans_->airfields.push_back(airfield);
+    plans_->airfields.back().revision = 1;
+    return Reason::None;
+}
+
+std::vector<Airfield> CapabilityHost::airfields() const { return plans_ ? plans_->airfields : std::vector<Airfield>{}; }
+
+bool CapabilityHost::airfield(AirfieldId id, Airfield& out) const {
+    if (!plans_ || id == 0) return false;
+    for (const Airfield& a : plans_->airfields)
+        if (a.id == id) {
+            out = a;
+            return true;
+        }
+    return false;
 }
 
 } // namespace fsim::control

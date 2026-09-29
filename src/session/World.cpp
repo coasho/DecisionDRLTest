@@ -789,6 +789,28 @@ std::optional<control::RoutePlan> World::plan(std::uint32_t id, control::PlanId 
     return p;
 }
 
+control::Reason World::loadPlan(std::uint32_t id, const control::RoutePlan& plan) {
+    Entry* e = entry(id);
+    return e ? e->host.loadPlan(plan) : control::Reason::UnknownVehicle;
+}
+
+control::Reason World::loadAirfield(std::uint32_t id, const control::Airfield& airfield) {
+    Entry* e = entry(id);
+    return e ? e->host.loadAirfield(airfield) : control::Reason::UnknownVehicle;
+}
+
+std::vector<control::Airfield> World::airfields(std::uint32_t id) const {
+    const Entry* e = entry(id);
+    return e ? e->host.airfields() : std::vector<control::Airfield>{};
+}
+
+std::optional<control::Airfield> World::airfield(std::uint32_t id, control::AirfieldId airfield) const {
+    const Entry* e = entry(id);
+    control::Airfield a;
+    if (!e || !e->host.airfield(airfield, a)) return std::nullopt;
+    return a;
+}
+
 bool World::activitySetpoint(control::ActivityId activity, control::Setpoint& out) const {
     const Entry* e = entry(control::activityVehicle(activity));
     return e && e->host.setpoint(activity, out);

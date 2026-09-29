@@ -3157,9 +3157,9 @@ static PyObject* plan_result_tuple(const fsim_world* world, const fsim_plan_comm
 /* (plan_id, state, version, revision, execution, reason, for_planning_use_only, activity, percent, start_time, end_time,
  * command_id) */
 static PyObject* plan_status_tuple(const fsim_plan_status* s) {
-    return Py_BuildValue("(KiIIiiOKdddK)", (unsigned long long)s->plan_id, s->state, s->version, s->revision, s->execution, s->reason,
+    return Py_BuildValue("(KiIIiiOKdddKO)", (unsigned long long)s->plan_id, s->state, s->version, s->revision, s->execution, s->reason,
                          s->for_planning_use_only ? Py_True : Py_False, (unsigned long long)s->activity, s->percent, s->start_time, s->end_time,
-                         (unsigned long long)s->command_id);
+                         (unsigned long long)s->command_id, s->fa_owned ? Py_True : Py_False);
 }
 
 /* A text: a str, or None (NULL); its UTF-8, the object's while it lives (the platform refuses what is not printable ASCII). */
@@ -3171,14 +3171,15 @@ static int text_of(PyObject* o, const char** out) {
 
 /* publish_plan(id, plan_id, version, for_planning_use_only, detailed, remarks_name, remarks, item, points, paths) -> reason:
  * `item` a route's batch item; `points` [(point, source, locked, modified, remarks_name, remarks, fix_key, fix_system)];
- * `paths` [(path, a state's row of 30 numbers (its point not used), endurance_s, fuel_kg, gross_weight_kg, transition_plan)] */
-static PyObject* world_publish_plan(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+ * `paths` [(path, a state's row of 30 numbers (its point not used), endurance_s, fuel_kg, gross_weight_kg, transition_plan,
+ * airfield, runway)]. load_plan takes the same: FA's own (ABI 1.37). */
+static PyObject* plan_call(PyObject* o, PyObject* const* args, Py_ssize_t n, int load) {
     WorldObject* self = (WorldObject*)o;
     uint32_t id, version;
     uint64_t plan_id;
     fsim_route_plan plan;
-    if (!check_args(n, 10, 10, "publish_plan") || !as_u32(args[0], &id) || !as_u64(args[1], &plan_id) || !as_u32(args[2], &version) ||
-        !WORLD_IDLE(self))
+    if (!check_args(n, 10, 10, load ? "load_plan" : "publish_plan") || !as_u32(args[0], &id) || !as_u64(args[1], &plan_id) ||
+        !as_u32(args[2], &version) || !WORLD_IDLE(self))
         return NULL;
     fsim_route_plan_init(&plan);
     plan.plan_id = plan_id, plan.version = version;
@@ -3210,10 +3211,12 @@ static PyObject* world_publish_plan(PyObject* o, PyObject* const* args, Py_ssize
         PyObject* row = PyTuple_GetItem(paths, i);
         fsim_path_metadata* m = &qm[i];
         fsim_path_metadata_init(m);
-        ok = row && PyTuple_Check(row) && PyTuple_Size(row) == 6;
+        ok = row && PyTuple_Check(row) && PyTuple_Size(row) == 8;
         if (!ok && !PyErr_Occurred())
-            PyErr_SetString(PyExc_ValueError, "each path's metadata must be (path, initial state row, endurance_s, fuel_kg, gross_weight_kg, transition_plan)");
-        if (ok) ok = as_u32(PyTuple_GetItem(row, 0), &m->path) && as_u64(PyTuple_GetItem(row, 5), &m->transition_plan);
+            PyErr_SetString(PyExc_ValueError, "each path's metadata must be (path, initial state row, endurance_s, fuel_kg, gross_weight_kg, "
+                                              "transition_plan, airfield, runway)");
+        if (ok) ok = as_u32(PyTuple_GetItem(row, 0), &m->path) && as_u64(PyTuple_GetItem(row, 5), &m->transition_plan) &&
+                     as_u64(PyTuple_GetItem(row, 6), &m->airfield) && as_u64(PyTuple_GetItem(row, 7), &m->runway);
         if (ok) {
             PyObject* one = PyTuple_Pack(1, PyTuple_GetItem(row, 1));
             fsim_route_state* initial = NULL;
@@ -3234,7 +3237,8 @@ static PyObject* world_publish_plan(PyObject* o, PyObject* const* args, Py_ssize
         int32_t reason = 0;
         plan.points = np ? pm : NULL, plan.point_count = (uint32_t)np;
         plan.paths = nq ? qm : NULL, plan.path_count = (uint32_t)nq;
-        if (fsim_vehicle_publish_plan(self->world, id, &plan, &reason) != FSIM_OK) fail();
+        const int status = load ? fsim_vehicle_load_plan(self->world, id, &plan, &reason) : fsim_vehicle_publish_plan(self->world, id, &plan, &reason);
+        if (status != FSIM_OK) fail();
         else out = PyLong_FromLong(reason);
     }
     if (it) batch_free(it, 1);
@@ -3243,6 +3247,124 @@ static PyObject* world_publish_plan(PyObject* o, PyObject* const* args, Py_ssize
     Py_XDECREF(points);
     Py_XDECREF(paths);
     return out;
+}
+
+static PyObject* world_publish_plan(PyObject* o, PyObject* const* args, Py_ssize_t n) { return plan_call(o, args, n, 0); }
+
+/* load_plan(...) -> reason: FA's own plan, the platform's (ABI 1.37), its arguments publish_plan's */
+static PyObject* world_load_plan(PyObject* o, PyObject* const* args, Py_ssize_t n) { return plan_call(o, args, n, 1); }
+
+/* A runway point: 4 numbers (latitude_rad, longitude_rad, altitude_m, altitude_reference). */
+static int read_runway_point(PyObject* seq, Py_ssize_t at, fsim_runway_point* q) {
+    double* f[4] = {&q->latitude_rad, &q->longitude_rad, &q->altitude_m, &q->altitude_reference};
+    for (Py_ssize_t k = 0; k < 4; ++k) {
+        PyObject* v = PyTuple_GetItem(seq, at + k);
+        if (!v) return 0;
+        *f[k] = PyFloat_AsDouble(v);
+        if (PyErr_Occurred()) return 0;
+    }
+    return 1;
+}
+
+/* load_airfield(id, airfield_id, icao, qnh_pa, runways) -> reason (ABI 1.37): `runways` [(runway_id, direction_rad,
+ * available_length_m, then the takeoff's start, threshold and limit and the landing's, each 4 numbers: 27 in all)] */
+static PyObject* world_load_airfield(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t airfield_id;
+    fsim_airfield field;
+    if (!check_args(n, 5, 5, "load_airfield") || !as_u32(args[0], &id) || !as_u64(args[1], &airfield_id) || !WORLD_IDLE(self)) return NULL;
+    fsim_airfield_init(&field);
+    field.airfield_id = airfield_id;
+    if (!text_of(args[2], &field.icao)) return NULL;
+    field.qnh_pa = PyFloat_AsDouble(args[3]);
+    if (PyErr_Occurred()) return NULL;
+    PyObject* rows = PySequence_Tuple(args[4]);
+    if (!rows) return NULL;
+    const Py_ssize_t count = PyTuple_Size(rows);
+    fsim_runway* runways = (fsim_runway*)PyMem_Calloc((size_t)(count ? count : 1), sizeof(fsim_runway));
+    int ok = runways != NULL;
+    if (!ok) PyErr_NoMemory();
+    for (Py_ssize_t i = 0; ok && i < count; ++i) {
+        PyObject* row = PyTuple_GetItem(rows, i);
+        fsim_runway* r = &runways[i];
+        fsim_runway_init(r);
+        ok = row && PyTuple_Check(row) && PyTuple_Size(row) == 27;
+        if (!ok && !PyErr_Occurred()) PyErr_SetString(PyExc_ValueError, "each runway must be 27 numbers: id, direction, length, then 6 points of 4");
+        if (ok) ok = as_u64(PyTuple_GetItem(row, 0), &r->runway_id);
+        if (ok) {
+            r->direction_rad = PyFloat_AsDouble(PyTuple_GetItem(row, 1));
+            r->available_length_m = PyFloat_AsDouble(PyTuple_GetItem(row, 2));
+            ok = !PyErr_Occurred();
+        }
+        fsim_runway_point* points[6] = {&r->takeoff.start, &r->takeoff.threshold, &r->takeoff.limit, &r->landing.start, &r->landing.threshold, &r->landing.limit};
+        for (Py_ssize_t k = 0; ok && k < 6; ++k) ok = read_runway_point(row, 3 + 4 * k, points[k]);
+    }
+    PyObject* out = NULL;
+    if (ok) {
+        int32_t reason = 0;
+        field.runways = count ? runways : NULL, field.runway_count = (uint32_t)count;
+        if (fsim_vehicle_load_airfield(self->world, id, &field, &reason) != FSIM_OK) fail();
+        else out = PyLong_FromLong(reason);
+    }
+    PyMem_Free(runways);
+    Py_DECREF(rows);
+    return out;
+}
+
+/* An airfield read back: (airfield_id, icao, qnh_pa, revision, [runway rows as load_airfield takes them]) */
+static PyObject* airfield_tuple(const fsim_airfield* a) {
+    PyObject* runways = PyList_New(0);
+    for (uint32_t i = 0; runways && i < a->runway_count; ++i) {
+        const fsim_runway* r = &a->runways[i];
+        const fsim_runway_point* q[6] = {&r->takeoff.start, &r->takeoff.threshold, &r->takeoff.limit, &r->landing.start, &r->landing.threshold, &r->landing.limit};
+        PyObject* row = PyTuple_New(27);
+        int ok = row != NULL;
+        PyObject* rid = ok ? PyLong_FromUnsignedLongLong((unsigned long long)r->runway_id) : NULL;
+        ok = ok && rid && PyTuple_SetItem(row, 0, rid) == 0;
+        double values[26];
+        values[0] = r->direction_rad, values[1] = r->available_length_m;
+        for (int k = 0; k < 6; ++k)
+            values[2 + 4 * k] = q[k]->latitude_rad, values[3 + 4 * k] = q[k]->longitude_rad, values[4 + 4 * k] = q[k]->altitude_m,
+                      values[5 + 4 * k] = q[k]->altitude_reference;
+        for (Py_ssize_t k = 0; ok && k < 26; ++k) {
+            PyObject* v = PyFloat_FromDouble(values[k]);
+            ok = v && PyTuple_SetItem(row, k + 1, v) == 0; /* (SetItem takes the item, even when it fails) */
+        }
+        if (!ok || PyList_Append(runways, row) < 0) Py_CLEAR(runways);
+        Py_XDECREF(row);
+    }
+    if (!runways) return NULL;
+    return Py_BuildValue("(KsdIN)", (unsigned long long)a->airfield_id, a->icao ? a->icao : "", a->qnh_pa, a->revision, runways);
+}
+
+/* airfields(id) -> [airfield tuple]; get_airfield(id, airfield_id) -> airfield tuple or None (ABI 1.37) */
+static PyObject* world_airfields(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    if (!check_args(n, 1, 1, "airfields") || !as_u32(args[0], &id)) return NULL;
+    const uint32_t count = fsim_vehicle_airfield_count(self->world, id);
+    PyObject* out = PyList_New(0);
+    for (uint32_t i = 0; out && i < count; ++i) {
+        fsim_airfield a;
+        fsim_airfield_init(&a);
+        if (fsim_vehicle_get_airfield_at(self->world, id, i, &a) != FSIM_OK) continue;
+        PyObject* t = airfield_tuple(&a);
+        if (!t || PyList_Append(out, t) < 0) Py_CLEAR(out);
+        Py_XDECREF(t);
+    }
+    return out;
+}
+
+static PyObject* world_get_airfield(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t airfield_id;
+    fsim_airfield a;
+    if (!check_args(n, 2, 2, "get_airfield") || !as_u32(args[0], &id) || !as_u64(args[1], &airfield_id)) return NULL;
+    fsim_airfield_init(&a);
+    if (fsim_vehicle_get_airfield(self->world, id, airfield_id, &a) != FSIM_OK) Py_RETURN_NONE;
+    return airfield_tuple(&a);
 }
 
 /* plan_command(id, plan_id, command, source, axes, range, min_version, envelope) -> plan result tuple */
@@ -3341,8 +3463,9 @@ static PyObject* world_get_plan(PyObject* o, PyObject* const* args, Py_ssize_t n
     for (uint32_t i = 0; paths && i < p.path_count; ++i) {
         const fsim_path_metadata* m = &p.paths[i];
         PyObject* initial = state_row(&m->initial);
-        PyObject* row = initial ? Py_BuildValue("(INdddK)", m->path, initial, m->endurance_s, m->fuel_kg, m->gross_weight_kg,
-                                                (unsigned long long)m->transition_plan)
+        PyObject* row = initial ? Py_BuildValue("(INdddKKK)", m->path, initial, m->endurance_s, m->fuel_kg, m->gross_weight_kg,
+                                                (unsigned long long)m->transition_plan, (unsigned long long)m->airfield,
+                                                (unsigned long long)m->runway)
                                 : NULL;
         if (!row || PyList_Append(paths, row) < 0) Py_CLEAR(paths);
         Py_XDECREF(row);
@@ -3409,6 +3532,10 @@ static PyMethodDef world_methods[] = {
     FAST("plan_status", world_plan_status, "plan_status(id, plan_id) -> status or None"),
     FAST("plans", world_plans, "plans(id) -> [status]"),
     FAST("get_plan", world_get_plan, "get_plan(id, plan_id) -> plan tuple or None"),
+    FAST("load_plan", world_load_plan, "load_plan(id, ...publish_plan's) -> reason: FA's own plan"),
+    FAST("load_airfield", world_load_airfield, "load_airfield(id, airfield_id, icao, qnh_pa, runways) -> reason"),
+    FAST("airfields", world_airfields, "airfields(id) -> [airfield tuple]"),
+    FAST("get_airfield", world_get_airfield, "get_airfield(id, airfield_id) -> airfield tuple or None"),
     FAST("activity_info", world_activity_info, "activity_info(activity) -> info or None"),
     FAST("activity_setpoint", world_activity_setpoint,
          "activity_setpoint(activity) -> (kind, code, fields, behavior, waypoints, segments, loiters, states, paths) or None"),

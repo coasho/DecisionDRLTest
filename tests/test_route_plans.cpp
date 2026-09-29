@@ -3,12 +3,14 @@
 // states (1.2.5) - converted and uploaded, prepared for activation, activated,
 // deactivated - their execution reported (1.2.6.6), FA's own deactivation
 // (1.2.5.7), the queries for their ids and content (1.2.4.2, 1.2.6.4), and their
-// planning metadata read back as given (WPT-23).
+// planning metadata read back as given (WPT-23); FA's airfields and its own plans,
+// read only to MA, and MA's for a takeoff, a departure, an approach or a landing refused (4.40).
 #include "mode_flights.h"
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,6 +48,26 @@ RoutePlan eastPlan(const sim::VehicleState& s, PlanId id, std::uint32_t version)
     path.initial.yawRad = 1.5, path.enduranceS = 7200.0, path.fuelKg = 80.0, path.grossWeightKg = 1000.0, path.transitionPlan = 9;
     p.pathMetadata = {path};
     return p;
+}
+
+/// An airfield 20 km north of the aircraft, 12 m high: runway 2 north, 2,500 m, its takeoff and landing coordinates both;
+/// runway 4, its landing's start alone.
+Airfield airfieldAt(const sim::VehicleState& s, AirfieldId id) {
+    auto place = [&](double north) {
+        RunwayPoint q;
+        q.latitudeRad = s.latitudeRad + north / kEarthM, q.longitudeRad = s.longitudeRad, q.altitudeM = 12.0;
+        return q;
+    };
+    Airfield a;
+    a.id = id, a.icao = "KXYZ", a.qnhPa = 101325.0;
+    Runway two;
+    two.id = 2, two.directionRad = 0.0, two.availableLengthM = 2500.0;
+    two.takeoff.start = place(20000.0), two.takeoff.limit = place(22500.0);
+    two.landing.start = place(20000.0), two.landing.threshold = place(20300.0), two.landing.limit = place(22500.0);
+    Runway four;
+    four.id = 4, four.landing.start = place(21000.0);
+    a.runways = {two, four};
+    return a;
 }
 
 /// Prepared for upload, published and uploaded.
@@ -290,4 +312,117 @@ TEST_CASE("route plans: for planning use only, never activated; the store's room
     // the support rows
     CHECK(w.supportTable(v)->find("fsim.plan/store")->support == Support::Supported);
     CHECK(w.supportTable(v)->find("fsim.guidance.route/metadata")->support == Support::Supported);
+}
+
+TEST_CASE("route plans: FA's airfields loaded by the platform, queried and read back (VI 1.2.6.3, 1.2.4.2)", "[plan]") {
+    session::World w(options("plans-airfields"));
+    const auto v = wing(w, "c172x", 1500.0, 55.0);
+    const sim::VehicleState s = *w.vehicleState(v);
+    const Airfield field = airfieldAt(s, 5);
+    CHECK(w.airfields(v).empty());
+    REQUIRE(w.loadAirfield(v, field) == Reason::None);
+    auto back = w.airfield(v, 5);
+    REQUIRE(back.has_value());
+    CHECK((back->id == 5 && back->icao == "KXYZ" && back->qnhPa == 101325.0 && back->revision == 1 && back->runways.size() == 2));
+    const Runway& two = back->runways[0];
+    CHECK((two.id == 2 && two.directionRad == 0.0 && two.availableLengthM == 2500.0));
+    CHECK((two.takeoff.start.latitudeRad == field.runways[0].takeoff.start.latitudeRad && std::isnan(two.takeoff.threshold.latitudeRad)));
+    CHECK((two.landing.threshold.altitudeM == 12.0 && std::isnan(two.landing.threshold.altitudeReference)));
+    CHECK((back->runways[1].id == 4 && std::isnan(back->runways[1].takeoff.start.latitudeRad)));
+    // loaded again: in its place, its revision one more
+    Airfield again = field;
+    again.qnhPa = 100800.0;
+    REQUIRE(w.loadAirfield(v, again) == Reason::None);
+    CHECK((w.airfield(v, 5)->qnhPa == 100800.0 && w.airfield(v, 5)->revision == 2 && w.airfields(v).size() == 1));
+    CHECK_FALSE(w.airfield(v, 6).has_value());
+    // what A-GRA's schema would not take
+    auto refused = [&](const std::function<void(Airfield&)>& spoil) {
+        Airfield a = airfieldAt(s, 6);
+        spoil(a);
+        return w.loadAirfield(v, a) == Reason::InvalidParameter;
+    };
+    CHECK(refused([](Airfield& a) { a.id = 0; }));
+    CHECK(refused([](Airfield& a) { a.runways[1].id = 0; }));
+    CHECK(refused([](Airfield& a) { a.runways[1].id = 2; }));                                       // (twice)
+    CHECK(refused([](Airfield& a) { a.runways[1].landing.start = RunwayPoint{}; }));                // (neither set)
+    CHECK(refused([](Airfield& a) { a.runways[0].takeoff.start = RunwayPoint{}; }));                // (a limit without its start)
+    CHECK(refused([](Airfield& a) { a.runways[0].takeoff.start.latitudeRad = 1.6; }));              // (off the Earth)
+    CHECK(refused([](Airfield& a) { a.runways[0].takeoff.start.altitudeM = kHold; }));              // (not whole)
+    CHECK(refused([](Airfield& a) { a.runways[0].takeoff.start.altitudeReference = 7.0; }));        // (no such reference)
+    CHECK(refused([](Airfield& a) { a.runways[0].directionRad = 2.0 * kPi; }));
+    CHECK(refused([](Airfield& a) { a.runways[0].availableLengthM = 0.0; }));
+    CHECK(refused([](Airfield& a) { a.icao = "KXY"; }));
+    CHECK(refused([](Airfield& a) { a.icao = "kxyz"; }));
+    CHECK(refused([](Airfield& a) { a.qnhPa = 80000.0; }));
+    CHECK(refused([](Airfield& a) { a.runways.resize(Airfield::kRunways + 1, a.runways[1]); }));
+    CHECK(w.airfields(v).size() == 1);
+    // 32 kept; the 33rd fails
+    for (AirfieldId id = 100; id < 131; ++id) REQUIRE(w.loadAirfield(v, airfieldAt(s, id)) == Reason::None);
+    CHECK(w.loadAirfield(v, airfieldAt(s, 200)) == Reason::PlanStoreFull);
+    const auto all = w.airfields(v);
+    REQUIRE(all.size() == 32);
+    CHECK((all[0].id == 5 && all[1].id == 100 && all[31].id == 130));
+    CHECK(w.supportTable(v)->find("fsim.plan/airfields")->support == Support::Supported);
+}
+
+TEST_CASE("route plans: FA's own - read only to MA, activated by it; MA's for a takeoff, a departure, an approach or a landing "
+          "refused (VI 1.2.5.2, 1.2.6.4)",
+          "[plan]") {
+    session::World w(options("plans-fa"));
+    const auto v = wing(w, "c172x", 1500.0, 55.0);
+    const sim::VehicleState s = *w.vehicleState(v);
+    const auto type = [](PathType t) { return static_cast<double>(t); };
+    // FA's landing plan: an approach's path, then a landing's at runway 2 of airfield 5 - which it must keep
+    RoutePlan landing = eastPlan(s, 71, 1);
+    landing.paths = {RoutePath{1, type(PathType::FinalApproach), 0, 1}, RoutePath{2, type(PathType::Landing), 1, 1}};
+    PathMetadata at;
+    at.path = 1, at.airfield = 5, at.runway = 2;
+    landing.pathMetadata = {at};
+    CHECK(w.loadPlan(v, landing) == Reason::UnknownAirfield); // (no airfield kept yet)
+    REQUIRE(w.loadAirfield(v, airfieldAt(s, 5)) == Reason::None);
+    landing.pathMetadata[0].runway = 9;
+    CHECK(w.loadPlan(v, landing) == Reason::UnknownAirfield); // (a runway it has not)
+    landing.pathMetadata[0].runway = 2;
+    REQUIRE(w.loadPlan(v, landing) == Reason::None);
+    auto st = w.planStatus(v, 71);
+    CHECK((st->state == PlanState::Uploaded && st->faOwned && st->revision == 1 && st->version == 1));
+    const auto kept = w.plan(v, 71);
+    REQUIRE(kept.has_value());
+    CHECK((kept->pathMetadata.size() == 1 && kept->pathMetadata[0].airfield == 5 && kept->pathMetadata[0].runway == 2));
+    // read only to MA: not prepared for upload, not removed, not listened for
+    PlanCommandResult r = w.planCommand(v, 71, PlanCommand::PrepareForUpload);
+    CHECK((!r.completed && r.state == PlanState::Uploaded && r.reason == Reason::ReadOnlyPlan));
+    CHECK(w.removePlan(v, 71) == Reason::ReadOnlyPlan);
+    CHECK(w.publishPlan(v, landing) == Reason::WrongPlanState);
+    // MA's own plan for a takeoff, a departure, an approach or a landing: refused as published, FA listening on
+    REQUIRE(w.planCommand(v, 72, PlanCommand::PrepareForUpload).completed);
+    RoutePlan mine = eastPlan(s, 72, 1);
+    mine.pathMetadata.clear();
+    for (const PathType critical : {PathType::Takeoff, PathType::Landing, PathType::EmergencyLanding, PathType::Airborne, PathType::Arcing,
+                                    PathType::Breaking, PathType::OnDepartureRadial, PathType::InitialApproach, PathType::IntermediateApproach,
+                                    PathType::FinalApproach, PathType::BolterWaveoff}) {
+        mine.paths = {RoutePath{1, type(PathType::Primary), 0, 1}, RoutePath{2, type(critical), 1, 1}};
+        INFO(static_cast<int>(critical));
+        CHECK(w.publishPlan(v, mine) == Reason::SafetyCriticalPlan);
+    }
+    CHECK(w.planStatus(v, 72)->state == PlanState::ReadyForUpload);
+    mine.paths = {RoutePath{1, type(PathType::Primary), 0, 1}, RoutePath{2, type(PathType::Taxi), 1, 1}}; // (a taxi route: MA's too)
+    CHECK(w.publishPlan(v, mine) == Reason::None);
+    // FA's departure plan, flown when MA activates it
+    RoutePlan departure = eastPlan(s, 73, 1);
+    departure.paths = {RoutePath{1, type(PathType::Airborne), 0, 2}};
+    REQUIRE(w.loadPlan(v, departure) == Reason::None);
+    REQUIRE(w.planCommand(v, 73, PlanCommand::PrepareForActivation).completed);
+    r = w.planCommand(v, 73, PlanCommand::Activate);
+    REQUIRE(r.completed);
+    fly(w, 5.0);
+    st = w.planStatus(v, 73);
+    CHECK((st->state == PlanState::Activated && st->execution == PlanExecution::Executing && st->faOwned));
+    CHECK(w.loadPlan(v, departure) == Reason::WrongPlanState); // (not while it flies)
+    CHECK(w.planCommand(v, 73, PlanCommand::Deactivate).reason == Reason::PlanExecuting);
+    CHECK(w.abortPlan(v, 73).completed); // (FA's own deactivation)
+    CHECK(w.loadPlan(v, departure) == Reason::None);
+    CHECK((w.planStatus(v, 73)->revision == 2 && w.planStatus(v, 73)->state == PlanState::Uploaded));
+    CHECK(std::string_view(reasonName(Reason::SafetyCriticalPlan)) == "safety_critical_plan");
+    CHECK(w.supportTable(v)->find("fsim.plan/fa_plans")->support == Support::Supported);
 }

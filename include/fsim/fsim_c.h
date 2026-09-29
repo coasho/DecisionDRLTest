@@ -1371,6 +1371,9 @@ typedef struct fsim_path_metadata {
     double endurance_s, fuel_kg;   /* its Endurance's Duration and Fuel (NaN: left out) */
     double gross_weight_kg;        /* its GrossWeight */
     uint64_t transition_plan;      /* its TransitionRoute: a route plan's id; 0 none */
+    /* ABI 1.37, where the caller's struct_size has them (4.40): its airfield and runway (A-GRA's AirfieldID, RunwayID) - a
+       takeoff's or a landing's path, on FA's own plan, names ones the vehicle keeps; 0 none */
+    uint64_t airfield, runway;
 } fsim_path_metadata;
 FSIM_API void fsim_path_metadata_init(fsim_path_metadata* metadata);
 /* A route plan (A-GRA's MA_RoutePlanMT): its route a FSIM_BATCH_ROUTE item - its four options, its waypoints and their
@@ -1400,7 +1403,7 @@ typedef struct fsim_plan_status {
     int32_t execution;             /* fsim_plan_execution */
     int32_t reason;                /* why its last command failed, or why its execution ended */
     int32_t for_planning_use_only;
-    int32_t reserved;
+    int32_t fa_owned;              /* ABI 1.37: 1, FA's own - loaded by the platform, read only to MA (4.40) */
     fsim_activity_id activity;     /* its activity, since it was activated last; 0 before */
     double percent;                /* of its route: as it flies, or as it ended */
     double start_time, end_time;   /* when it was activated last; when its activity ended (NaN until) */
@@ -1448,6 +1451,53 @@ FSIM_API const char* fsim_plan_command_name(int command);     /* "prepare_for_up
 FSIM_API const char* fsim_plan_state_name(int state);         /* "inactive", "ready_for_upload", ... */
 FSIM_API const char* fsim_plan_execution_name(int execution); /* "none", "pending", "executing", ... */
 FSIM_API const char* fsim_point_source_name(int source);      /* "auto_routed", "operator_defined" */
+
+/* FA's own plans and the airfields (ABI 1.37; docs/flight-autonomy.md, 4.40): the platform's, loaded before a mission and read
+ * only to MA. A place on a runway (A-GRA's Point3D_Type): above the WGS-84 ellipsoid unless its reference says otherwise; its
+ * latitude NaN, none. */
+typedef struct fsim_runway_point {
+    double latitude_rad, longitude_rad, altitude_m;
+    double altitude_reference;     /* fsim_altitude_reference; NaN, above the ellipsoid */
+} fsim_runway_point;
+/* A runway's takeoff or landing coordinates (A-GRA's RunwayCoordinatesType): its start - required where any is given - its
+ * threshold and limit. */
+typedef struct fsim_runway_coordinates {
+    fsim_runway_point start, threshold, limit;
+} fsim_runway_coordinates;
+/* A runway (A-GRA's AirfieldRunwayType): its takeoff coordinates or its landing coordinates, or both. */
+typedef struct fsim_runway {
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t runway_id;            /* not 0 */
+    double direction_rad;          /* from true north, 0 to 2 pi; NaN none */
+    double available_length_m;     /* above 0; NaN none */
+    fsim_runway_coordinates takeoff, landing;
+} fsim_runway;
+FSIM_API void fsim_runway_init(fsim_runway* runway); /* no id, every place and value left out */
+/* An airfield (A-GRA's AirfieldReportMDT): 16 runways at most. */
+typedef struct fsim_airfield {
+    uint32_t struct_size;
+    uint32_t runway_count;
+    uint64_t airfield_id;          /* not 0 */
+    const char* icao;              /* four capitals, or NULL or "": none */
+    double qnh_pa;                 /* 850 to 1,100 hPa; NaN none */
+    const fsim_runway* runways;    /* runways[0].struct_size bytes apart */
+    uint32_t revision;             /* read back: its loads kept (ignored as loaded) */
+    uint32_t reserved;
+} fsim_airfield;
+FSIM_API void fsim_airfield_init(fsim_airfield* airfield);
+/* An airfield loaded by the platform: kept in place of any by its id, its revision one more. `*reason` 0, invalid_parameter
+ * (a malformed one), plan_store_full (32 kept). */
+FSIM_API int fsim_vehicle_load_airfield(fsim_world* world, uint32_t id, const fsim_airfield* airfield, int32_t* reason);
+/* Every airfield kept, in the order they were first loaded; one read back, its runways and ICAO code the library's until the
+ * next of these reads. FSIM_INVALID_ARGUMENT for one not kept. */
+FSIM_API uint32_t fsim_vehicle_airfield_count(fsim_world* world, uint32_t id);
+FSIM_API int fsim_vehicle_get_airfield_at(fsim_world* world, uint32_t id, uint32_t index, fsim_airfield* out);
+FSIM_API int fsim_vehicle_get_airfield(fsim_world* world, uint32_t id, uint64_t airfield_id, fsim_airfield* out);
+/* FA's own plan, the platform's: kept uploaded and read only to MA, in place of any plan by its id not flying. `*reason` 0,
+ * invalid_parameter (as a published plan's), unknown_airfield (a takeoff's or a landing's path naming an airfield or a
+ * runway the vehicle does not keep), wrong_plan_state (the plan it replaces flies), plan_store_full. */
+FSIM_API int fsim_vehicle_load_plan(fsim_world* world, uint32_t id, const fsim_route_plan* plan, int32_t* reason);
 
 /* Reports (ABI 1.12; docs/flight-autonomy.md, 4.12): what an activity flies, and where to. */
 /* What a live activity flies now, or waits to fly (A-GRA's last flight command), as the batch item that would command

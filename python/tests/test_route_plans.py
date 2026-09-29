@@ -118,5 +118,49 @@ class RoutePlansTest(unittest.TestCase):
         self.assertEqual(refused.exception.reason, "unknown_plan")
 
 
+    def test_airfields_and_fa_plans(self):
+        """FA's airfields and its own plans (docs/flight-autonomy.md, 4.40): loaded by the platform, read back, read only to MA;
+        MA's own for a landing refused."""
+        v = self.v
+        lat, lon = v.state.latitude_rad, v.state.longitude_rad
+        place = lambda north: fsim.RunwayPoint(lat + north / R, lon, 12.0)  # noqa: E731
+        two = fsim.Runway(2, 0.0, 2500.0, takeoff=fsim.RunwayCoordinates(place(20000.0), limit=place(22500.0)),
+                          landing=fsim.RunwayCoordinates(place(20000.0), place(20300.0), place(22500.0)))
+        field = fsim.Airfield(5, "KXYZ", 101325.0, [two])
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.load_airfield(field._replace(icao="kxyz"))
+        self.assertEqual(refused.exception.reason, "invalid_parameter")
+        v.load_airfield(field)
+        back = v.airfield(5)
+        self.assertEqual((back.id, back.icao, back.qnh_pa, back.revision, len(back.runways)), (5, "KXYZ", 101325.0, 1, 1))
+        self.assertEqual(back.runways[0].landing.threshold.altitude_m, 12.0)
+        self.assertTrue(math.isnan(back.runways[0].takeoff.threshold.latitude_rad))
+        self.assertEqual([a.id for a in v.airfields()], [5])
+        self.assertIsNone(v.airfield(6))
+        report = agra.airfield_report(back)
+        self.assertEqual((report["AirfieldID"], report["Information"]["ICAO_Code"]), (5, "KXYZ"))
+        self.assertIsNone(report["Information"]["Runway"][0]["TakeoffCoordinates"]["Threshold"])
+        self.assertEqual(report["Information"]["Runway"][0]["LandingCoordinates"]["Limit"]["Altitude"], 12.0)
+        # FA's landing plan: its landing's path names runway 2 of airfield 5
+        route = fsim.BatchCommand("submit_route", self.points, paths=[fsim.RoutePath(1, "final_approach", 0, 1), fsim.RoutePath(2, "landing", 1, 1)])
+        plan = fsim.RoutePlan(71, route, path_metadata=[fsim.PathMetadata(1, airfield=5, runway=9)])
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.load_plan(plan)
+        self.assertEqual(refused.exception.reason, "unknown_airfield")
+        v.load_plan(plan._replace(path_metadata=[fsim.PathMetadata(1, airfield=5, runway=2)]))
+        s = v.plan_status(71)
+        self.assertEqual((s.state, s.fa_owned), (fsim.PlanState.UPLOADED, True))
+        r = v.plan_command(71, "prepare_for_upload")
+        self.assertEqual((r.completed, r.reason), (False, "read_only_plan"))
+        kept = v.plan(71).path_metadata[0]
+        self.assertEqual((kept.path, kept.airfield, kept.runway), (1, 5, 2))
+        # MA's own for a landing: refused as published
+        v.plan_command(72, "prepare_for_upload")
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.publish_plan(plan._replace(id=72, path_metadata=()))
+        self.assertEqual(refused.exception.reason, "safety_critical_plan")
+        self.assertEqual(agra.CANNOT_COMPLY["read_only_plan"], "INELIGIBLE_CONTROL_SOURCE")
+
+
 if __name__ == "__main__":
     unittest.main()

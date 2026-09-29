@@ -52,6 +52,11 @@ struct fsim_world {
         std::vector<fsim_point_metadata> points;
         std::vector<fsim_path_metadata> paths;
     } planReadback;
+    /// An airfield as last read back (fsim_vehicle_get_airfield, _at): what its runways and ICAO code point into.
+    struct AirfieldReadback {
+        fsim::control::Airfield airfield;
+        std::vector<fsim_runway> runways;
+    } airfieldReadback;
     /// The performance profile last asked for (fsim_vehicle_performance_profile): what its arrays point into.
     fsim::control::PerformanceProfile profile;
 

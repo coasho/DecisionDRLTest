@@ -55,6 +55,9 @@ const char* reasonName(Reason reason) noexcept {
     case Reason::PlanNotReceived: return "plan_not_received";
     case Reason::PlanningOnly: return "planning_only";
     case Reason::PlanStoreFull: return "plan_store_full";
+    case Reason::ReadOnlyPlan: return "read_only_plan";
+    case Reason::SafetyCriticalPlan: return "safety_critical_plan";
+    case Reason::UnknownAirfield: return "unknown_airfield";
     default: return "?";
     }
 }
@@ -107,7 +110,10 @@ const char* reasonDescription(Reason reason) noexcept {
     case Reason::PlanExecuting: return "the plan executes";
     case Reason::PlanNotReceived: return "no plan by its id was published since FA was prepared for its upload";
     case Reason::PlanningOnly: return "the plan is for planning use only: it is never activated";
-    case Reason::PlanStoreFull: return "the vehicle keeps as many plans as it can";
+    case Reason::PlanStoreFull: return "the vehicle keeps as many plans, or airfields, as it can";
+    case Reason::ReadOnlyPlan: return "the plan is FA's own: MA activates it, never replaces or removes it";
+    case Reason::SafetyCriticalPlan: return "a takeoff's, a departure's, an approach's or a landing's plan is FA's own alone";
+    case Reason::UnknownAirfield: return "a takeoff's or a landing's path names an airfield or a runway the vehicle does not keep";
     default: return "";
     }
 }
