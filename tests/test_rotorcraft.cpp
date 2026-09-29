@@ -477,11 +477,93 @@ TEST_CASE("rotorcraft: a quadrotor that strikes the ground comes to rest, whatev
             // (the last metre's fall adds 1 %; before, the Crazyflie left the ground 1.6 to 6.4 times as fast, and
             // three of the five diverged; the IRIS+ up to 4.3 times)
             CHECK(f.fastestMs < 1.05 * f.nearMs);
-            // at rest on the ground at least 4 s after it struck (the worst: 0.24 m/s, rocking on its back; the
-            // IRIS+ on its side, its centre of gravity 0.21 m up)
+            // at rest on the ground at least 4 s after it struck (the fastest 0.004 m/s, the IRIS+ on its back; on
+            // their contacts before they were sized for the step, the Crazyflie still rocked at 0.05 m/s and the
+            // IRIS+ lay on its side, its centre of gravity 0.21 m up)
             CHECK(s.simTime - f.nearS > 4.0);
             CHECK(std::hypot(s.velocityNedMs[0], s.velocityNedMs[1], s.velocityNedMs[2]) < 0.5);
             CHECK(s.altitudeAglM < 0.3);
+        }
+    }
+}
+
+TEST_CASE("rotorcraft: a quadrotor parked stays still, and dropped a little comes to rest without bouncing up again", "[rotorcraft]") {
+    // Its contacts are sized for the step (hangar's rotorcraft/multi.py, contact_set). The Crazyflie's own, 60 N/m
+    // and 1.2 N s/m each on 27 g, made it hop parked, its feet off the ground a quarter of the time at up to
+    // 0.37 m/s, and dropped on its back from 5 cm it rose 12 cm; the IRIS+ rocked on its feet and never came to
+    // rest (docs/rotorcraft.md, 7).
+    struct Type {
+        const char* name;
+        double legM, topM; ///< its feet below the c.g., and its top above (the lowest point upright and upside down)
+    };
+    struct Case {
+        const char* name;
+        double heightM; ///< its lowest point above the ground as it is let go; 0: parked
+        double rollDeg;
+    };
+    const Case cases[] = {{"parked", 0.0, 0.0},
+                          {"level from 5 cm", 0.05, 0.0},
+                          {"level from 30 cm", 0.30, 0.0},
+                          {"on its back from 5 cm", 0.05, 180.0},
+                          {"on its back from 30 cm", 0.30, 180.0}};
+    for (const Type& t : {Type{"cf2", 0.018, 0.001}, Type{"iris", 0.054, 0.047}}) {
+        session::WorldOptions o = options("rotorcraft-rest");
+        o.frameSkip = 1; // every step of the flight model seen
+        session::World w(o);
+        struct Flight {
+            const Case* c;
+            std::uint32_t id = 0;
+            double releaseM = 0.0;  ///< its c.g.'s height as it is let go
+            bool rose = false;      ///< it has moved up since
+            double highestM = 0.0;  ///< the c.g.'s highest after that
+            double fastestUp = 0.0; ///< its fastest up
+            int offGround = 0;      ///< steps with no foot touching (parked)
+        };
+        std::vector<Flight> flights;
+        for (const auto& c : cases) {
+            session::VehicleSpec s = spec(std::string(t.name) + " " + c.name, t.name, 0.01 * static_cast<double>(flights.size() + 1));
+            if (c.heightM > 0.0) {
+                s.initial.altitudeMslM = c.heightM + (c.rollDeg > 90.0 ? t.topM : t.legM); // the ground at 0 m
+                s.initial.rollDeg = c.rollDeg;
+            } else {
+                s.initial.onGround = true;
+            }
+            flights.push_back({&c, w.createVehicle(s)});
+            REQUIRE(flights.back().id != 0);
+            flights.back().releaseM = w.vehicleState(flights.back().id)->altitudeAglM;
+        }
+        for (int k = 0; k < 6 * 120; ++k) {
+            w.step();
+            for (auto& f : flights) {
+                const auto& s = *w.vehicleState(f.id);
+                const double up = -s.velocityNedMs[2];
+                f.rose = f.rose || up > 0.0;
+                if (f.rose) f.highestM = std::max(f.highestM, s.altitudeAglM);
+                f.fastestUp = std::max(f.fastestUp, up);
+                if (!s.onGround) ++f.offGround;
+            }
+        }
+        for (const auto& f : flights) {
+            const auto& s = *w.vehicleState(f.id);
+            const double speed = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1], s.velocityNedMs[2]);
+            const double rate = std::max({std::abs(s.angularRateBodyRadS[0]), std::abs(s.angularRateBodyRadS[1]),
+                                          std::abs(s.angularRateBodyRadS[2])});
+            const double impactMs = std::sqrt(2.0 * 9.80665 * f.c->heightM);
+            INFO(t.name << " " << f.c->name << ": let go at " << f.releaseM << " m, the highest after it moved up " << f.highestM
+                        << " m, the fastest up " << f.fastestUp << " m/s (struck at " << impactMs << "), off the ground "
+                        << f.offGround << " steps; 6 s on " << speed << " m/s, " << rate << " rad/s");
+            if (f.c->heightM > 0.0) {
+                // it never rises half as high as it fell from, nor moves up as fast as it struck (the highest: the
+                // Crazyflie's centre of gravity 26 mm up after 30 cm level, 11 mm over where it rests; the fastest
+                // up: 0.82 of its strike, the same flight)
+                CHECK(f.highestM < f.releaseM - 0.5 * f.c->heightM);
+                CHECK(f.fastestUp < impactMs);
+            } else {
+                CHECK(f.offGround == 0);
+            }
+            // at rest (the last to settle: the IRIS+ on its back, 4.2 s after it was let go)
+            CHECK(speed < 1e-3);
+            CHECK(rate < 1e-2);
         }
     }
 }

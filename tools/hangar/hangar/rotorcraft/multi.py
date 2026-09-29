@@ -15,9 +15,13 @@ The command: each motor's thrust (0..1 of its maximum; throttle[i]), roll, pitch
 or through the mixer. The speed each motor commands is sqrt(thrust): the thrust is linear in the
 command, as an ESC with thrust linearisation gives it. The rotors' speeds are reported as
 propulsion/engine[i]/rotor-rpm, which the platform shows as the engines' rpm.
+It stands on its feet (BOGEY contacts) and, turned over, on its rotors' hubs and its top (STRUCTURE
+contacts), their springs and dampers sized for the platform's step (contact_set).
 """
 import math
 import os
+
+import numpy as np
 
 from ..applicability import references_xml
 
@@ -25,6 +29,24 @@ N_PER_LBF, M_PER_FT, KG_PER_SLUG, LB_PER_KG = 4.448222, 0.3048, 14.593903, 2.204
 RPM_PER_RADS = 60 / (2 * math.pi)
 #: a full roll, pitch or yaw command moves each motor's thrust by this much (of its maximum)
 MIX = 0.25
+
+# The ground contacts, sized for the step. JSBSim applies a contact's spring and damper, as they are at the
+# step's start, for the platform's whole step, and integrates what they do with Adams-Bashforth 2 (the
+# airframe's velocity) and forward Euler (its body rates). Too stiff or too damped for that and a contact adds
+# energy: the Crazyflie's feet, 60 N/m and 1.2 N s/m each on 27 g, made it hop parked (docs/rotorcraft.md, 7).
+# The contacts that stand on the ground together - the feet, or upside down the tops - move the airframe as
+# one set of modes: heave, roll and pitch. Their springs put the set's fastest mode at CONTACT_OMEGA_DT
+# (omega dt: 72 rad/s at 120 Hz), inside Adams-Bashforth 2's stable range with margin (with damping it ends
+# near 0.7; Euler's, damped at CONTACT_ZETA, near 1.4), and their dampers damp that mode at CONTACT_ZETA:
+# less leaves a bounce, and more, applied for a whole step, reverses the speed it damps (the Crazyflie,
+# damped at 1.0, left the ground faster than it struck). The slower modes are damped less, as the dampers
+# follow the springs. Measured (docs/rotorcraft.md, 10): at 0.65 the Crazyflie left the ground as fast as
+# it struck it, and softer than 0.6 the IRIS+ fallen on its side kept rocking.
+STEP_S = 1.0 / 120.0  # the platform's JSBSim step (fly.FDM_DT)
+CONTACT_OMEGA_DT = 0.6
+CONTACT_ZETA = 0.7
+#: the legs' static deflection a design may reach before the build warns: a quarter of their length
+LEG_SAG_SHARE = 0.25
 
 
 def _f(x):
@@ -62,6 +84,41 @@ def feet(spec):
         return [(float(x), float(y)) for x, y in rows]
     spread = g.get("leg_spread", 0.8)  # a share of the way out to the rotors
     return [(xf * spread, yl * spread) for _, xf, yl, _ in rotors(spec)[0]]
+
+
+def contact_set(spec, points):
+    """(spring N/m, damping N s/m) for each of `points` - (x forward, y left, z up) m from the c.g. - standing
+    on the ground together: the set's fastest mode (heave, roll or pitch: M^-1 K) at CONTACT_OMEGA_DT, damped
+    at CONTACT_ZETA."""
+    m = spec["mass"]
+    M = np.diag([m["mass_kg"], m["ixx"], m["iyy"]])
+    # a point's height changes by z + y roll - x pitch
+    G = sum(np.outer(j, j) for j in (np.array([1.0, y, -x]) for x, y, _ in points))
+    fastest = float(np.max(np.linalg.eigvals(np.linalg.solve(M, G)).real))  # omega^2 per N/m of each spring
+    omega = CONTACT_OMEGA_DT / STEP_S
+    k = omega * omega / fastest
+    return k, 2.0 * CONTACT_ZETA * k / omega
+
+
+def contacts(spec):
+    """{"feet": [(x, y, z)], "tops": [...], ...}: where it stands and what it lands on upside down - the rotors'
+    hubs and the top of the airframe ([ground] top_m above the c.g.), so a tumble on the ground comes to rest
+    instead of sinking through it - each set with its spring and damper (contact_set) and the legs' static
+    deflection under the aircraft's weight."""
+    g, r = spec["ground"], spec["rotors"]
+    old = [key for key in ("spring_n_per_m", "damping_n_per_mps") if key in g]
+    if old:
+        raise ValueError("[ground] %s: hangar sizes a multirotor's contacts for the platform's step (docs/hangar.md, "
+                         "Rotorcraft); leave them out" % ", ".join(old))
+    rows = rotors(spec)[0]
+    feet_pts = [(xf, yl, -g["leg_height_m"]) for xf, yl in feet(spec)]
+    tops = [(xf, yl, r.get("height_m", 0.0)) for _, xf, yl, _ in rows] + [(0.0, 0.0, g.get("top_m", r.get("height_m", 0.0)))]
+    k_feet, c_feet = contact_set(spec, feet_pts)
+    k_tops, c_tops = contact_set(spec, tops)
+    sag = spec["mass"]["mass_kg"] * 9.80665 / (len(feet_pts) * k_feet)
+    return {"feet": feet_pts, "feet_spring_n_per_m": k_feet, "feet_damping_n_per_mps": c_feet,
+            "tops": tops, "tops_spring_n_per_m": k_tops, "tops_damping_n_per_mps": c_tops,
+            "leg_sag_m": sag, "leg_height_m": g["leg_height_m"]}
 
 
 def write(spec, out_dir, profile_xml=""):
@@ -169,25 +226,23 @@ def write(spec, out_dir, profile_xml=""):
         ground_effect += "    <axis name=\"Z\"> %s </axis>\n" % "\n      ".join(z_axis)
     # (PX4's rolling moment, 1e-6 N m per rad/s per m/s, is left out: a few per cent of the rotor drag's)
     kgm2 = KG_PER_SLUG * M_PER_FT ** 2
-    g = spec["ground"]
+    ground = contacts(spec)
     legs = []
-    for i, (xf, yl) in enumerate(feet(spec)):
+    for i, (xf, yl, zu) in enumerate(ground["feet"]):
         legs.append("""    <contact type="BOGEY" name="leg %d">
       <location unit="IN"> <x> %s </x> <y> %s </y> <z> %s </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
       <spring_coeff unit="N/M"> %s </spring_coeff> <damping_coeff unit="N/M/SEC"> %s </damping_coeff>
       <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
-    </contact>""" % (i, _f(-xf / 0.0254), _f(-yl / 0.0254), _f(-g["leg_height_m"] / 0.0254),
-                     _f(g["spring_n_per_m"]), _f(g["damping_n_per_mps"])))
-    # what it lands on upside down: the rotors' hubs and the top of the airframe ([ground] top_m
-    # above the c.g.) - so a tumble on the ground comes to rest instead of sinking through it
-    tops = [(xf, yl, r.get("height_m", 0.0)) for _, xf, yl, _ in rows] + [(0.0, 0.0, g.get("top_m", r.get("height_m", 0.0)))]
-    for i, (xf, yl, zu) in enumerate(tops):
+    </contact>""" % (i, _f(-xf / 0.0254), _f(-yl / 0.0254), _f(zu / 0.0254),
+                     _f(ground["feet_spring_n_per_m"]), _f(ground["feet_damping_n_per_mps"])))
+    for i, (xf, yl, zu) in enumerate(ground["tops"]):
         legs.append("""    <contact type="STRUCTURE" name="top %d">
       <location unit="IN"> <x> %s </x> <y> %s </y> <z> %s </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
       <spring_coeff unit="N/M"> %s </spring_coeff> <damping_coeff unit="N/M/SEC"> %s </damping_coeff>
-    </contact>""" % (i, _f(-xf / 0.0254), _f(-yl / 0.0254), _f(zu / 0.0254), _f(g["spring_n_per_m"]), _f(g["damping_n_per_mps"])))
+    </contact>""" % (i, _f(-xf / 0.0254), _f(-yl / 0.0254), _f(zu / 0.0254),
+                     _f(ground["tops_spring_n_per_m"]), _f(ground["tops_damping_n_per_mps"])))
     span_ft = 2 * max(math.hypot(x, y) for _, x, y, _ in rows) / M_PER_FT
     xml = """<?xml version="1.0"?>
 <fdm_config name="%(n)s" version="2.0" release="BETA">
@@ -258,4 +313,6 @@ def write(spec, out_dir, profile_xml=""):
     with open(os.path.join(out_dir, name + ".xml"), "w", encoding="utf-8", newline="\n") as f:
         f.write(xml)
     return dict(kT=kT, kQ=kQ, omega_max=wmax, thrust_max_n=t_max, hover=weight / 4 / t_max,
-                hover_rpm=math.sqrt(weight / 4 / kT) * RPM_PER_RADS, thrust_to_weight=4 * t_max / weight)
+                hover_rpm=math.sqrt(weight / 4 / kT) * RPM_PER_RADS, thrust_to_weight=4 * t_max / weight,
+                **{key: ground[key] for key in ("feet_spring_n_per_m", "feet_damping_n_per_mps", "tops_spring_n_per_m",
+                                                "tops_damping_n_per_mps", "leg_sag_m")})

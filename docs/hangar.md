@@ -316,7 +316,9 @@ stage end to end through the platform (`ctest -R hangar`).
   stage checks the result by crashing the aircraft six ways. The wheels
   stay JSBSim's; flightsim's build of JSBSim fixes their force when one
   lands on its side, and makes an impact the step cannot resolve inelastic
-  (THIRD_PARTY_NOTICES.md, "Changes to JSBSim"; docs/rotorcraft.md, 7).
+  (THIRD_PARTY_NOTICES.md, "Changes to JSBSim"; docs/rotorcraft.md, 7). A
+  multirotor's feet and tops are sized for the step too, as sets
+  (Rotorcraft, below).
 - **Propeller.** Blade-element momentum theory with Prandtl's tip and hub
   losses.
 - **Engines.** Piston engines use JSBSim's piston engine; hangar's control
@@ -1293,6 +1295,38 @@ in `aircraft\` are the examples. The energy on board (ADR-29 FA-3b):
   The power it draws is that hover's, scaled by the rotors' speed cubed.
   Spent, the motors stop.
 
+A multirotor stands on its feet and, upside down, on its rotors' hubs and its
+top (`[ground]`, below). hangar sizes their springs and dampers for the
+platform's 120 Hz step (`contact_set` in `hangar/rotorcraft/multi.py`); a
+design gives none, and one that still gives `spring_n_per_m` or
+`damping_n_per_mps` is refused.
+
+- **Why.** JSBSim applies a contact's force, as it is at the step's start,
+  for the whole step. It integrates the velocity with Adams-Bashforth 2 and
+  the body rates with forward Euler. A contact too stiff or too damped for
+  that adds energy: the Crazyflie's feet, at 60 N/m and 1.2 N s/m each, made
+  it hop parked and bounce higher than it fell (rotorcraft.md, 7).
+- **The rule.** The contacts that stand together - the feet, or the tops -
+  move the airframe as one set of modes: heave, roll and pitch. Their springs
+  put the set's fastest mode at ω·dt = 0.6 (72 rad/s at 120 Hz), inside
+  Adams-Bashforth 2's stable range with a margin. Their dampers damp that
+  mode at ζ = 0.7: less leaves a bounce, and more, applied for a whole step,
+  reverses the speed it damps. This is the fixed-wing rule (Methods, Ground
+  contacts) for contacts that act together: a fixed wing's structure
+  contacts are sized one by one, on the mass each moves.
+- **How it was chosen.** Flown in the platform, parked and dropped from 1 cm
+  to 30 cm level, on the back, tilted, on an edge and nose first: at
+  ω·dt = 0.6 with ζ from 0.6 to 0.8 every case came to rest, none leaving
+  the ground as fast as it struck it. Softer springs left the IRIS+ rocking
+  on its side (still at 0.06 m/s 30 s on at 0.5); stiffer, 0.65, let the
+  Crazyflie leave the ground as fast as it struck it, and damped at 1.0,
+  faster.
+- **The check.** The build reports the legs' static deflection under the
+  weight and warns past a quarter of their length. The Crazyflie's legs sink
+  2.9 mm of their 18 mm (22.9 N/m and 0.445 N s/m on each of its nine
+  contacts); the IRIS+'s 4.1 mm of their 54 mm (its feet 903 N/m and
+  17.6 N s/m, its tops 854 N/m and 16.6 N s/m).
+
 A rotorcraft's shape is drawn as a fixed wing's is:
 `[[body]]`, `[[surface]]` (a control on one moves: the UH-60A's stabilator
 follows the simulation's), `[[strut]]`, `[[gear]]` (wheels roll, oleos slide
@@ -1304,7 +1338,7 @@ for the livery. What a rotorcraft adds:
 | `[[part]]` | one of the mesher's primitives joined to the airframe: `cylinder` (a, b, r[, round]), `capsule`, `box` (centre, half, axes[, round]), `ellipsoid`, `torus`, `revolve`, and `plate` - an outline `[[u, v], ...]` in the plane of `axes = [u, v]` through `origin`, given a `thickness`, its edges rounded by `round`: a circuit board, a frame's arms, a landing leg. `material` is one of hangar's (skin, dark, metal, ...), or `colour = "#rrggbb"` paints it flat in its own; `fillet` (m, 0.02) blends its joint to the rest |
 | `[model] cell_m` | the mesher's cell, where some 1,500 along the aircraft would be coarser than its parts (the Crazyflie's 0.15 mm) |
 | `[model.main_rotor]`, `[model.tail_rotor]`, `[model.propeller]` | how the rotors look - their size, hub, shaft, blades, chord, twist and sense are the flight model's: `airfoil`, `root` (r/R), `pitch_75_deg` or a propeller's `pitch_m`, `chords` (r/R, fraction), `precone_deg`, `tip = { from, sweep_deg }`, `hub` (`propeller`: a spinner; otherwise grips and a hub, with `bar` for a stabilizer bar or `absorber` for a bifilar), `hub_radius`, `grip_radius`, `colour`, `tip_colour`, `tip_fraction`, a tail rotor's `top_blade` (`aft` or `forward`: which way it turns), and `offset_m`: the hub drawn that far along its shaft from the flight model's point, on the same line of thrust (the UH-60A's tail rotor) |
-| `[ground] feet_m` | a multirotor's feet where they are drawn, one per rotor (x forward, y left, m), `leg_height_m` below the c.g.; without it, under the rotors `leg_spread` of the way out. `top_m`: its top, which with the rotors' hubs it lands on upside down |
+| `[ground] feet_m` | a multirotor's feet where they are drawn, one per rotor (x forward, y left, m), `leg_height_m` below the c.g.; without it, under the rotors `leg_spread` of the way out. `top_m`: its top, which with the rotors' hubs it lands on upside down. Their springs and dampers are hangar's, sized for the step (above) |
 | `[dimensions]` | `length_m`, `main_rotor_diameter_m`, `tail_rotor_diameter_m`, or a multirotor's `rotor_diameter_m`: the drawings', which the model is checked against |
 
 Each rotor is a node the viewer turns at the rpm the simulation reports for it

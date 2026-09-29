@@ -42,12 +42,10 @@ rolling_moment = 1.0e-6            # rollingMomentCoefficient
 
 [ground]
 # the feet of PX4's model (its mesh): each leg's foot centre (FLU m, in the rotors' order), 0.054 m
-# below the c.g.
+# below the c.g. (their springs and dampers are hangar's, sized for the platform's step)
 leg_height_m = 0.054
 feet_m = [[0.1215, -0.2120], [-0.1330, 0.1965], [0.1215, 0.2120], [-0.1330, -0.1965]]
 top_m = 0.047              # the shell's top: the flight model's top contact, besides the rotors' hubs
-spring_n_per_m = 2000.0
-damping_n_per_mps = 60.0
 
 [envelope]
 # the bounds of the platform's commands: design choices

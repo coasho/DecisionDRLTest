@@ -1476,6 +1476,56 @@ class Contacts(unittest.TestCase):
                     self.assertLessEqual(math.sqrt(k / m_eff), jsbsim.STRUCTURE_OMEGA + 1e-9)
                     self.assertLessEqual(c / m_eff * (1.0 / 120.0), 0.3)  # damping well inside the step's limit
 
+    def test_multirotor_contacts_for_the_step(self):
+        # a quadrotor's feet standing, and its tops upside down, move it as one set of modes (heave, roll,
+        # pitch): the springs put the fastest at CONTACT_OMEGA_DT and the dampers damp it at CONTACT_ZETA,
+        # and JSBSim's integration of them - the heave's velocity by Adams-Bashforth 2 over a position by
+        # Adams-Bashforth 3, the body rates and attitude by forward Euler - shrinks every disturbance. The
+        # Crazyflie's feet at 60 N/m and 1.2 N s/m grew one by a fifth each step: parked, it hopped.
+        import tomllib
+        from hangar.rotorcraft import multi
+        dt = multi.STEP_S
+
+        def growth(M, K, C):
+            """The most one JSBSim step multiplies a disturbance of M q'' + C q' + K q = 0 by, q = (heave,
+            roll, pitch); the state is q, q' and what the multistep integrators remember."""
+            n = len(M)
+            Aq, Au = -np.linalg.solve(M, K), -np.linalg.solve(M, C)
+            T = np.diag([1.0, 0.0, 0.0])  # the heave: JSBSim's translational integrators
+            R = np.eye(n) - T              # roll and pitch: its rotational (Euler)
+            W = 1.5 * T + R
+            I, Z = np.eye(n), np.zeros((n, n))
+            S = np.block([[I, dt * (23.0 / 12.0 * T + R), -dt * 16.0 / 12.0 * T, dt * 5.0 / 12.0 * T, Z],
+                          [dt * W @ Aq, I + dt * W @ Au, Z, Z, -0.5 * dt * T],
+                          [Z, I, Z, Z, Z],
+                          [Z, Z, I, Z, Z],
+                          [Aq, Au, Z, Z, Z]])
+            return float(np.max(np.abs(np.linalg.eigvals(S))))
+
+        for name, sag_mm in (("cf2", 2.89), ("iris", 4.07)):
+            with open(repo("aircraft/%s/%s.toml" % (name, name)), "rb") as f:
+                spec = tomllib.load(f)
+            g = multi.contacts(spec)
+            m = spec["mass"]
+            M = np.diag([m["mass_kg"], m["ixx"], m["iyy"]])
+            for group in ("feet", "tops"):
+                with self.subTest(design=name, contacts=group):
+                    G = sum(np.outer(j, j) for j in (np.array([1.0, y, -x]) for x, y, _ in g[group]))
+                    k, c = g[group + "_spring_n_per_m"], g[group + "_damping_n_per_mps"]
+                    w = math.sqrt(float(np.max(np.linalg.eigvals(np.linalg.solve(M, k * G)).real)))
+                    self.assertAlmostEqual(w * dt, multi.CONTACT_OMEGA_DT, places=9)
+                    self.assertAlmostEqual(c * w / (2.0 * k), multi.CONTACT_ZETA, places=9)
+                    self.assertLess(growth(M, k * G, c * G), 0.95)  # (the Crazyflie's feet 0.75, the IRIS+'s 0.90)
+                    if name == "cf2" and group == "feet":
+                        self.assertGreater(growth(M, 60.0 * G, 1.2 * G), 1.15)  # its own springs and dampers: 1.21
+            # the legs sink under its weight by a share of their length
+            self.assertAlmostEqual(1e3 * g["leg_sag_m"], sag_mm, delta=0.01)
+            self.assertLess(g["leg_sag_m"], multi.LEG_SAG_SHARE * g["leg_height_m"])
+        # a design that still gives the contacts' spring and damper is told they are hangar's
+        spec["ground"]["spring_n_per_m"] = 2000.0
+        with self.assertRaises(ValueError):
+            multi.contacts(spec)
+
 
 class Model3D(unittest.TestCase):
     def test_control_surfaces_hinge_the_way_jsbsim_deflects(self):

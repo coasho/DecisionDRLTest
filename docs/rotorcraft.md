@@ -170,7 +170,8 @@ platform.
   effect is gym-pybullet-drones' k_ge (r/4h)^2 with its height clip
   (GND_EFF_H_CLIP = r/4 sqrt(15 k_ge/4)), so the gain is never over 4/15.
   Each stands on its feet (JSBSim BOGEY contacts) and, turned over, on its
-  rotors' hubs and its top (STRUCTURE contacts).
+  rotors' hubs and its top (STRUCTURE contacts), their springs and dampers
+  sized by hangar for the platform's step (section 7).
 - **Energy on board** (ADR-29 FA-3b):
   - **The helicopters' fuel.** Each carries a tank at the c.g., full as it
     spawns and part of the design's weight, so it spawns as its report flies
@@ -501,7 +502,7 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
   THIRD_PARTY_NOTICES.md): a quadrotor whose battery is spent, striking at
   40 to 50 m/s, or a Crazyflie tumbled into the ground at 150 rad/s (two
   motors at 90 % for 0.4 s), comes to rest where it strikes, within a hop of
-  2 m (section 10).
+  2.5 m (section 10).
 - **Left uncommanded in the air**: under the neutral vehicle default
   (`VehicleDefault::Neutral`) a rotorcraft's thrust stands still and it
   falls. A Crazyflie let go at 150 m for 5 s is at 27 m falling at 49 m/s.
@@ -511,16 +512,25 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
   flies on or lies there. ADR-29 FA-3e took the divergence for its velocity
   loop's at 25 and 30 m/s ([flight-autonomy.md](flight-autonomy.md), 4.48).
   Settle it first (a velocity command, or `VehicleDefault::Hold`).
-- **The Crazyflie's contacts are stiff for the step**: short of such an
-  impact they act as they did. Their springs and dampers (60 N/m and
-  1.2 N s/m each, on 27 g) are more than the 120 Hz step integrates, and at
-  a small scale they still add energy: parked on its legs the Crazyflie
-  hops, its feet leaving the ground by up to 4 mm at up to 0.4 m/s; dropped
-  on its back from 5 cm it bounces 0.2 m on its top contacts (and may land
-  on its legs), and from 10 cm it is still rocking on its back 10 s later.
-  hangar sizes a fixed-wing design's structure contacts for the step from
-  the mass each moves (docs/hangar.md); the quadrotors' come from their
-  design files.
+- **The quadrotors' contacts, sized for the step**: short of such an impact
+  the contacts act as JSBSim gives them. The design files' springs and
+  dampers - the Crazyflie's 60 N/m and 1.2 N s/m on each contact, on 27 g,
+  and the IRIS+'s 2,000 N/m and 60 N s/m on 1.5 kg - were more than the
+  120 Hz step integrates, and added energy:
+  - parked, the Crazyflie hopped, its feet off the ground a quarter of the
+    time at up to 0.37 m/s, and the IRIS+ rocked on its feet without end;
+  - dropped on its back from 5 cm, the Crazyflie rose 12 cm, and from 10 cm
+    it was still rocking on its back 10 s later.
+
+  hangar now sizes them from the modes the contacts standing together make
+  (docs/hangar.md, Rotorcraft). Parked, both stand still, their legs sunk
+  2.9 mm and 4.1 mm. Dropped from up to 30 cm, level or on the back, neither
+  moves up faster than 0.81 of the speed it struck at, nor rises more than
+  a centimetre off the ground, and both come to rest, the IRIS+ on its back
+  within 4.4 s (section 10). The rule sizes the feet standing and the tops
+  upside down. On its side an airframe rests on some of each, which it does
+  not size: the IRIS+ fallen on its side comes to rest in 5.4 s, but with
+  softer springs it kept rocking.
 - **The helicopters on the ground, left uncommanded** (found with the
   above; unchanged): the UH-1H settles on its skids, then pitches up and
   rolls over, and with no contact but its skids it sinks into the ground and
@@ -751,3 +761,116 @@ Considered: EASA TCDS R.011 (Bo 105); FlightGear FGAddon `UH-1` and `UH-60`; JSB
     once). The fleet's flights ended diverged 39 times; now 3, the UH-1H's,
     as before. Control digests, with protection and without, and the
     route and curve probes are unchanged; `ctest`: 370 of 370.
+- **The quadrotors' contacts sized for the step**, a named, measured change
+  (hangar: `contact_set` in `hangar/rotorcraft/multi.py`, docs/hangar.md,
+  Rotorcraft; section 7), measured on top of the ground impact's change
+  (above).
+  - Why they added energy. JSBSim applies a contact's force for the whole
+    step. It integrates the velocity with Adams-Bashforth 2 (over a
+    position by Adams-Bashforth 3), and the body rates and attitude with
+    forward Euler. Standing together, a set of contacts moves the airframe
+    in three modes, heave, roll and pitch. Worked out as one JSBSim step of
+    those modes (the test in `tools/hangar/tests/test_methods.py`), the old
+    contacts grew a disturbance each step:
+    - the Crazyflie's feet by 1.21 a step: their heave at ω·dt = 0.79,
+      damped at 0.94, beyond Adams-Bashforth 2's stable range. Its tops,
+      upside down, by 1.38;
+    - the IRIS+'s feet by 1.56: their roll at ω·dt = 0.89, so overdamped
+      (1.61) that Euler's step overshoots. Its tops by 1.73. On its back it
+      came to rest anyway: it lies on its top and two hubs, a set whose
+      modes are slower.
+  - The rule: each set's springs put its fastest mode at ω·dt = 0.6, its
+    dampers damp that mode at ζ = 0.7. The Crazyflie's nine contacts get
+    22.9 N/m and 0.445 N s/m each (its tops' fastest mode is its feet's, the
+    same roll); the IRIS+'s feet 903 N/m and 17.6 N s/m, its tops 854 N/m
+    and 16.6 N s/m. One step now shrinks a disturbance to 0.75 of itself
+    (the Crazyflie) and 0.90 (the IRIS+, whose slowest mode, the pitch, is
+    damped least). The legs sink 2.9 mm (the Crazyflie) and 4.1 mm (the
+    IRIS+) under the weight, where they sank 1.1 and 1.8.
+  - Chosen by flying candidates, with the probe below, from ω·dt = 0.5 to
+    0.7 and ζ = 0.5 to 1.0 (variant files through FSIM_AIRCRAFT_PATH). At 0.6
+    with ζ from 0.6 to 0.8 every case came to rest. At 0.65 and ζ = 0.7 the
+    Crazyflie moved up as fast as it struck; at 0.7 and ζ = 1.0, 1.57 times
+    as fast. At 0.5 the IRIS+ fallen on its side kept rocking, at 0.06 m/s
+    30 s on.
+  - Flown with its motors off, a JSBSim step at a time, parked for 10 s,
+    and dropped with its lowest contact 1 cm to 30 cm up: level, on its
+    back, tilted (20 deg of roll, 10 of pitch), on an edge and nose first
+    (10 cm).
+    - The Crazyflie parked. Before, it hopped, its feet off the ground in
+      298 of 1,200 steps, at up to 0.37 m/s, and 10 s on still moved at
+      1.7 rad/s. Now it stands still from the first step, its centre of
+      gravity 15.1 mm up.
+    - The Crazyflie dropped. Before, it moved up at up to 2.7 times the
+      speed it struck at. It rose higher than it fell from: 23 mm from
+      2 cm on its back, 12 cm from 5 cm, 17 cm from 10 cm, 13 cm from 10 cm
+      nose first, 34 cm from 30 cm level (landing on its back). None was
+      at rest 10 s on. Now it moves up at most at 0.81 of the speed it
+      struck at, rises off the ground only from 30 cm (8 mm level, 4 mm
+      on its back), and comes to rest in 0.2 to 0.7 s; from an edge it
+      rolls onto its back and rests in 3.8 s.
+    - The IRIS+ parked. Before, it rocked on its feet, at 0.34 rad/s 10 s
+      on. Now it stands still from the first step, 49.9 mm up.
+    - The IRIS+ dropped. Before, level from 5 and 10 cm and nose first it
+      moved up at 1.06 to 1.07 times the speed it struck at, and upright it
+      was never at rest; on its edge it came down on its side, still moving
+      at 0.08 m/s 10 s on. Now it moves up at most at 0.38 of the speed it
+      struck at and rises 9 mm from 30 cm, and comes to rest: upright in
+      0.3 to 1.1 s, on its back in 4.0 to 4.4 s, on its side in 5.4 s.
+  - The impacts the ground impact's change takes over (its drops from 5 to
+    128 m and its tumbles, above): still none
+    faster after it strikes than as it struck; the Crazyflie's 5 m drop on
+    its back, 1.09 times as fast before, now 1.00. The hops change: the
+    Crazyflie's 0.2 to 2.5 m (0.3 to 2.0 before), the IRIS+'s 0.2 to 1.2 m
+    (0.15 to 0.85). 3 s later every one is at rest, at 0.008 m/s at most
+    (the Crazyflie) and 0.03 (the IRIS+), where before the Crazyflie still
+    moved at up to 0.23 m/s. The eight tumbles, still moving at up to
+    0.19 m/s 8 s on, are at rest. The found case (a Crazyflie commanded an
+    HSA after falling 124 m) lay on its back; now it comes down on its legs
+    and flies on, as does the IRIS+ flown so.
+  - Hover and flight tests: hangar's `fly` and `performance` stages give the
+    same results, bit for bit (`out/fly.json` and `out/performance.json`,
+    save the time they took), run on the old files and the new. The new
+    aircraft files differ from the old only in their contacts' springs and
+    dampers: `hover.toml`, the profile and the tables are unchanged.
+  - Control digests (`fsim_control_bench digest`, 20 flights, protection on
+    and off): identical. None of them flies a quadrotor.
+  - The fleet test, flown before and after with every flight's end state
+    printed (docs/flight-autonomy.md, section 14): 3,284 states, 3,249
+    identical, every judged state among them but one.
+    - 33 are quadrotors on the ground as their cases end - 22 Crazyflies
+      and 11 IRIS+, fallen once their batteries ran out, or left
+      uncommanded in cases other aircraft fly, or parked. Before, 29 of
+      them still hopped or rocked (0.01 to 0.22 m/s, 0.08 to 9.8 rad/s)
+      and 4 IRIS+ lay still on their backs. Now 32 of them are at rest -
+      among them 11 Crazyflies on their backs that had hopped upright, and
+      3 IRIS+ upright that had lain on their backs - and the 33rd, a
+      Crazyflie whose battery ran out as its case ended, is still tumbling
+      (0.10 m/s).
+    - The other two are one Crazyflie hovering at 152 m in the `hold` case,
+      as it is judged and as its case ends: they differ in their 15th and
+      16th figures. It was spawned into the slot a parked Crazyflie had
+      left, and a vehicle spawned into a used slot starts from bits that
+      depend on what the slot last held (JSBSim's initial conditions keep
+      the last vehicle's position): parked lower now, the Crazyflie left a
+      start one unit in the last place away. The same spawn in a fresh
+      world is unchanged, bit for bit.
+  - `test_rotorcraft` gains the parked and dropped quadrotors: both parked
+    never lift a foot and stand still; dropped 5 and 30 cm level and on
+    their backs, they never rise half as high as they fell nor move up as
+    fast as they struck, and are at rest 6 s on. It fails on the old
+    contacts, 28 of its 48 checks. hangar's tests gain the rule's (each
+    set's fastest mode and its damping, JSBSim's step shrinking every
+    disturbance, the legs' deflection, the old keys refused).
+  - `ctest`: 329 of 329, the new case among them.
+  - Merged onto main at FA-8d (2026-09-29), on top of the ground impact's
+    change as it was written, and measured there the same way; hangar and
+    the two quadrotors' files on main were the ones it was written on. Of
+    the fleet test's 3,992 states, 3,948 are identical, every judged state
+    among them but the Crazyflie hovering in the `hold` case, spawned into
+    a used slot (1.4 nm, as above; as its case ends too). The other 42 are
+    quadrotors on the ground as their cases end, 31 Crazyflies and 11
+    IRIS+: 37 still moved before (over 1 cm/s), 1 now, a Crazyflie
+    tumbling as its battery ran out (0.11 m/s). Control digests, with
+    protection and without, and the route and curve probes are unchanged;
+    `ctest`: 371 of 371.

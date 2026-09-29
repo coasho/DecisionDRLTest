@@ -195,6 +195,13 @@ class Rotorcraft:
             checks.append(_check("thrust to weight", info["thrust_to_weight"], t.get("thrust_to_weight")))
             target_rpm = t.get("hover_rpm", t["hover_rads"] * 60.0 / (2.0 * math.pi) if "hover_rads" in t else None)
             checks.append(_check("hover rpm", info["hover_rpm"], target_rpm))
+            # its contacts, sized for the step (multi.contact_set), let the legs sink under its weight: by a
+            # share of their length, or it stands lower than it is drawn
+            from . import multi
+            most = multi.LEG_SAG_SHARE * ground["leg_height_m"]
+            checks.append({"name": "legs' static deflection", "value": 1e3 * info["leg_sag_m"], "unit": "mm",
+                           "expected": "<= %.3g" % (1e3 * most), "status": "pass" if info["leg_sag_m"] <= most else "warn",
+                           "note": "the contacts sized for the platform's step"})
         return self.save("build", {"info": info, "checks": checks})
 
     def model(self):

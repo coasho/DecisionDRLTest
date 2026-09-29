@@ -34,51 +34,51 @@
     <contact type="BOGEY" name="leg 0">
       <location unit="IN"> <x> -1.1060375 </x> <y> 1.1060375 </y> <z> -0.70866142 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
-      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <spring_coeff unit="N/M"> 22.907204 </spring_coeff> <damping_coeff unit="N/M/SEC"> 0.44541785 </damping_coeff>
       <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
     </contact>
     <contact type="BOGEY" name="leg 1">
       <location unit="IN"> <x> 1.1060375 </x> <y> 1.1060375 </y> <z> -0.70866142 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
-      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <spring_coeff unit="N/M"> 22.907204 </spring_coeff> <damping_coeff unit="N/M/SEC"> 0.44541785 </damping_coeff>
       <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
     </contact>
     <contact type="BOGEY" name="leg 2">
       <location unit="IN"> <x> 1.1060375 </x> <y> -1.1060375 </y> <z> -0.70866142 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
-      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <spring_coeff unit="N/M"> 22.907204 </spring_coeff> <damping_coeff unit="N/M/SEC"> 0.44541785 </damping_coeff>
       <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
     </contact>
     <contact type="BOGEY" name="leg 3">
       <location unit="IN"> <x> -1.1060375 </x> <y> -1.1060375 </y> <z> -0.70866142 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
-      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <spring_coeff unit="N/M"> 22.907204 </spring_coeff> <damping_coeff unit="N/M/SEC"> 0.44541785 </damping_coeff>
       <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
     </contact>
     <contact type="STRUCTURE" name="top 0">
       <location unit="IN"> <x> -1.1060375 </x> <y> 1.1060375 </y> <z> 0 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
-      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <spring_coeff unit="N/M"> 22.907204 </spring_coeff> <damping_coeff unit="N/M/SEC"> 0.44541785 </damping_coeff>
     </contact>
     <contact type="STRUCTURE" name="top 1">
       <location unit="IN"> <x> 1.1060375 </x> <y> 1.1060375 </y> <z> 0 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
-      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <spring_coeff unit="N/M"> 22.907204 </spring_coeff> <damping_coeff unit="N/M/SEC"> 0.44541785 </damping_coeff>
     </contact>
     <contact type="STRUCTURE" name="top 2">
       <location unit="IN"> <x> 1.1060375 </x> <y> -1.1060375 </y> <z> 0 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
-      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <spring_coeff unit="N/M"> 22.907204 </spring_coeff> <damping_coeff unit="N/M/SEC"> 0.44541785 </damping_coeff>
     </contact>
     <contact type="STRUCTURE" name="top 3">
       <location unit="IN"> <x> -1.1060375 </x> <y> -1.1060375 </y> <z> 0 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
-      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <spring_coeff unit="N/M"> 22.907204 </spring_coeff> <damping_coeff unit="N/M/SEC"> 0.44541785 </damping_coeff>
     </contact>
     <contact type="STRUCTURE" name="top 4">
       <location unit="IN"> <x> -0 </x> <y> -0 </y> <z> 0.039370079 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction>
-      <spring_coeff unit="N/M"> 60 </spring_coeff> <damping_coeff unit="N/M/SEC"> 1.2 </damping_coeff>
+      <spring_coeff unit="N/M"> 22.907204 </spring_coeff> <damping_coeff unit="N/M/SEC"> 0.44541785 </damping_coeff>
     </contact>
   </ground_reactions>
   <propulsion>

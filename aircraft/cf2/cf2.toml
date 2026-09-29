@@ -46,12 +46,11 @@ drag_z = 10.311e-7
 ground_effect = 11.36859           # GPD: thrust gain k (r / 4h)^2 per rotor
 
 [ground]
-# it stands on its motor mounts: the feet under the rotors, the motors' length below the board
+# it stands on its motor mounts: the feet under the rotors, the motors' length below the board (their
+# springs and dampers are hangar's, sized for the platform's step)
 leg_height_m = 0.018
 leg_spread = 1.0
 top_m = 0.001              # the battery's top: the flight model's top contact, besides the rotors' hubs
-spring_n_per_m = 60.0
-damping_n_per_mps = 1.2
 
 [envelope]
 # the bounds of the platform's commands: design choices
