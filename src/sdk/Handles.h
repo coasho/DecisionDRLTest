@@ -57,6 +57,13 @@ struct fsim_world {
         fsim::control::Airfield airfield;
         std::vector<fsim_runway> runways;
     } airfieldReadback;
+    /// An operational zone as last read back (fsim_world_get_op_zone, _at): what its vertices and holes point into.
+    struct ZoneReadback {
+        std::vector<fsim_zone_vertex> vertices;
+        std::vector<std::vector<fsim_zone_vertex>> holes;
+        std::vector<const fsim_zone_vertex*> holePointers;
+        std::vector<uint32_t> holeSizes;
+    } zoneReadback;
     /// The performance profile last asked for (fsim_vehicle_performance_profile): what its arrays point into.
     fsim::control::PerformanceProfile profile;
 

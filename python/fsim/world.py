@@ -981,11 +981,22 @@ class HoldContext(enum.IntEnum):
 
 
 class MustFlyLocation(enum.IntEnum):
-    """Where a must fly goes (A-GRA's MustFlyLocationType; docs/flight-autonomy.md, 4.42): a point, another vehicle, an
-    operational point by its id (World.set_op_point)."""
+    """Where a must fly goes (A-GRA's MustFlyLocationType; docs/flight-autonomy.md, 4.42, 4.43): a point, another vehicle, an
+    operational point by its id (World.set_op_point); a zone given with it (``zone=``), or an operational zone by its id
+    (World.set_op_zone), entered."""
     POINT = 0
     ENTITY = 1
     OP_POINT = 2
+    ZONE = 3
+    OP_ZONE = 4
+
+
+class ZoneShape(enum.IntEnum):
+    """An operational zone's shape (A-GRA's AreaChoiceType; docs/flight-autonomy.md, 4.43)."""
+    POLYGON = 0
+    ELLIPSE = 1
+    RECTANGLE = 2
+    SLANT_RANGE = 3
 
 
 #: The Vehicle Interface's modes (docs/vehicle-interface.md): their fixed-size setpoints' fields, in order. HOLD leaves
@@ -1160,6 +1171,23 @@ OpPoint.__doc__ = ("An operational point (A-GRA's OpPoint; docs/flight-autonomy.
                    "(left out, none: flown at the aircraft's); the window of bearings from it it is approached from, "
                    "``ingress_min_rad`` clockwise to ``ingress_max_rad`` (both or neither); read back, its ``revision``.")
 
+ZoneVertex = collections.namedtuple("ZoneVertex", "latitude_rad longitude_rad x_m y_m", defaults=(HOLD,) * 4)
+ZoneVertex.__doc__ = ("A vertex of a zone's polygon: on the Earth (``latitude_rad``, ``longitude_rad``), or - the zone in a frame - along "
+                      "its axes (``x_m``, ``y_m``). A pair (latitude, longitude) is taken as one.")
+
+OpZone = collections.namedtuple(
+    "OpZone", "id shape vertices holes latitude_rad longitude_rad x_m y_m semi_major_m semi_minor_m width_m height_m range_min_m "
+              "range_max_m azimuth_min_rad azimuth_max_rad orientation_rad altitude_min_m altitude_max_m altitude_reference frame "
+              "frame_rotation north_ms east_ms time_s revision", defaults=((), ()) + (HOLD,) * 21 + (0,))
+OpZone.__doc__ = ("An operational zone (A-GRA's OpZone and its ZoneType; docs/flight-autonomy.md, 4.43), kept by the world by its ``id`` "
+                  "(World.set_op_zone) or given with a must fly (``submit_must_fly(zone=)``): its ``shape`` (fsim.ZoneShape or its name) - a "
+                  "polygon's ``vertices`` (3 to 32, fsim.ZoneVertex or (latitude, longitude)) and ``holes`` (4 at most, inside it); an "
+                  "ellipse's ``semi_major_m``, ``semi_minor_m``; a rectangle's ``width_m`` (across) and ``height_m`` (along its bearing); a "
+                  "slant range area's ``range_min_m``, ``range_max_m`` and bearings ``azimuth_min_rad`` clockwise to ``azimuth_max_rad`` - "
+                  "round ``latitude_rad``, ``longitude_rad`` (or ``x_m``, ``y_m`` in ``frame``), turned by ``orientation_rad``; its band "
+                  "``altitude_min_m`` to ``altitude_max_m`` in ``altitude_reference``; ``frame_rotation`` (fsim.FrameRotation); a velocity "
+                  "``north_ms``, ``east_ms`` from ``time_s``; read back, its ``revision``.")
+
 
 BezierSegment = collections.namedtuple("BezierSegment", "north east down")
 BezierSegment.__doc__ = ("One segment of a curve (A-GRA's): a quintic Bezier by its six control points - ``north``, ``east`` "
@@ -1233,6 +1261,28 @@ def _segments(segments):
             raise ValueError("a segment is six control points each north, east and down")
         rows.append(row)
     return rows
+
+
+def _zone_tuple(zone):
+    """An operational zone (fsim.OpZone, a dict, or its fields in order) as the native layer takes it."""
+    z = zone if isinstance(zone, OpZone) else OpZone(**zone) if isinstance(zone, dict) else OpZone(*zone)
+    codes = {"shape": ZoneShape, "altitude_reference": AltitudeReference, "frame_rotation": FrameRotation}
+    v = {k: (codes[k][x.upper()] if k in codes and isinstance(x, str) else x) for k, x in zip(OpZone._fields, z)}
+
+    def ring(points):
+        rows = []
+        for p in points:
+            q = tuple(p)
+            rows.append(tuple(float(x) for x in (q + (HOLD, HOLD) if len(q) == 2 else q)))
+        return rows
+
+    numbers = OpZone._fields[4:25]
+    return (int(v["id"]), float(v["shape"]), ring(v["vertices"]), [ring(h) for h in v["holes"]]) + tuple(float(v[k]) for k in numbers)
+
+
+def _op_zone(t):
+    """An operational zone from its native tuple."""
+    return OpZone(t[0], t[1], [ZoneVertex(*r) for r in t[2]], [[ZoneVertex(*r) for r in h] for h in t[3]], *t[4:25], revision=t[25])
 
 
 def _op_point(t):
@@ -1416,6 +1466,17 @@ class Activity:
         operator input)."""
         h = self.world._h
         _checked(h.activity_command_branch(self.id, int(branch), 1 if commanded else 0, int(self.source), self.controller), h)
+
+    def update_must_fly(self, zone=None, **fields):
+        """UPDATE of a must fly (docs/flight-autonomy.md, 4.42, 4.43): the fields given merged (a location another than it was
+        replacing the location's own), and a ``zone`` (fsim.OpZone) given in place of its own; laid out afresh from where the
+        aircraft is. Returns True if a value was clamped; raises fsim.Rejected."""
+        if "target" in fields:
+            fields["target"] = getattr(fields["target"], "id", fields["target"])
+        h = self.world._h
+        row = _row("must_fly", (), fields)
+        r = h.activity_update_must_fly(self.id, row, None if zone is None else _zone_tuple(zone), int(self.source), self.controller)
+        return bool(_checked(r, h)[4])
 
     def update_curve(self, segments=None, **options):
         """UPDATE of a curve: new ``segments`` (fsim.BezierSegment or fsim.NurbsSegment; None: those it has) and the options given (the
@@ -1844,11 +1905,18 @@ class Vehicle:
         An Activity whose ``update(**fields)`` merges what it gives (a location another than it was replacing the
         location's own); fsim.Rejected if refused ("unknown_geometry": an operational point the world does not keep). The
         command envelope as submit's."""
+        zone = fields.pop("zone", None)
         if "target" in fields:
             fields["target"] = getattr(fields["target"], "id", fields["target"])
-        r = self._h.submit_mode(self.id, MODE_KINDS.index("must_fly"), _row("must_fly", values, fields), int(source), None, int(range),
-                                int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window,
-                                                            override_rejection, controller))
+        if zone is not None and "location" not in fields and not values:
+            fields["location"] = MustFlyLocation.ZONE
+        envelope = _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection, controller)
+        if zone is not None:
+            r = self._h.submit_must_fly(self.id, _row("must_fly", values, fields), _zone_tuple(zone), int(source), None, int(range),
+                                        int(min_version), envelope)
+        else:
+            r = self._h.submit_mode(self.id, MODE_KINDS.index("must_fly"), _row("must_fly", values, fields), int(source), None, int(range),
+                                    int(min_version), envelope)
         return self._answer(r, "must_fly", source, validate_only, controller)
 
     def submit_curve(self, segments, *, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
@@ -2642,6 +2710,28 @@ class World:
     def remove_op_point(self, point_id):
         """Forget an operational point; False if there was none."""
         return self._h.remove_op_point(int(point_id))
+
+    def set_op_zone(self, zone):
+        """Keep an operational zone (fsim.OpZone; docs/flight-autonomy.md, 4.43) in place of any by its id, its revision one
+        more; its codes by name or member. fsim.Rejected("invalid_parameter") for one A-GRA's schema would not take: a polygon not
+        simple or its holes not inside it, a centre off the Earth, dimensions not above 0, bearings beyond their turn, a band
+        upside down, a frame the world does not have, a velocity with a frame."""
+        reason = self._h.set_op_zone(_zone_tuple(zone))
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+
+    def op_zones(self):
+        """The operational zones kept (fsim.OpZone), by id."""
+        return [_op_zone(t) for t in self._h.op_zones()]
+
+    def op_zone(self, zone_id):
+        """An operational zone kept (fsim.OpZone), or None."""
+        t = self._h.op_zone(int(zone_id))
+        return None if t is None else _op_zone(t)
+
+    def remove_op_zone(self, zone_id):
+        """Forget an operational zone; False if there was none."""
+        return self._h.remove_op_zone(int(zone_id))
 
     def frame_point(self, frame, x=0.0, y=0.0, z=0.0, *, rotation=FrameRotation.UNROTATED, offsets=FrameOffsets.CARTESIAN, time_s=None):
         """Where a point in a frame is (A-GRA's relative point): ``x``, ``y``, ``z`` metres (z down) turned as ``rotation``

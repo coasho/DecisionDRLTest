@@ -301,6 +301,9 @@ struct Plan {
             if (states[j].point == i && !isHold(states[j].altitudeM)) return true;
         return false;
     }
+    /// A must fly's zone, as its route was laid out to it (docs/flight-autonomy.md, 4.43): written with it into the path
+    /// store. Its shape Count: none (every other route; checkRoute clears it).
+    MustFlyArea area;
 };
 
 // --- Loiter patterns (4.6) ---------------------------------------------------------

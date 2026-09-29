@@ -2116,6 +2116,238 @@ static PyObject* world_remove_op_point(PyObject* o, PyObject* const* args, Py_ss
     return PyBool_FromLong(fsim_world_remove_op_point(self->world, id) == FSIM_OK);
 }
 
+/* An operational zone (ABI 1.40) as its tuple: (id, shape, vertices, holes, latitude_rad, longitude_rad, x_m, y_m, semi_major_m,
+ * semi_minor_m, width_m, height_m, range_min_m, range_max_m, azimuth_min_rad, azimuth_max_rad, orientation_rad, altitude_min_m,
+ * altitude_max_m, altitude_reference, frame, frame_rotation, north_ms, east_ms, time_s, revision) - vertices a sequence of
+ * (latitude_rad, longitude_rad, x_m, y_m), holes a sequence of such sequences. read_zone fills `z` and its arrays (PyMem:
+ * zone_free frees them). */
+typedef struct {
+    fsim_op_zone z;
+    fsim_zone_vertex* vertices;
+    fsim_zone_vertex** holes;
+    uint32_t* sizes;
+} ZoneArrays;
+
+static void zone_free(ZoneArrays* a) {
+    if (a->holes)
+        for (uint32_t k = 0; k < a->z.hole_count; ++k) PyMem_Free(a->holes[k]);
+    PyMem_Free(a->vertices), PyMem_Free(a->holes), PyMem_Free(a->sizes);
+    a->vertices = NULL, a->holes = NULL, a->sizes = NULL;
+}
+
+/* A ring's vertices from a sequence of 4-number rows, into a new array (its count into `count`); NULL with an error set. */
+static fsim_zone_vertex* read_ring(PyObject* o, uint32_t* count) {
+    PyObject* rows = PySequence_Tuple(o);
+    if (!rows) return NULL;
+    const Py_ssize_t n = PyTuple_Size(rows);
+    fsim_zone_vertex* out = (fsim_zone_vertex*)PyMem_Calloc((size_t)(n ? n : 1), sizeof(fsim_zone_vertex));
+    int ok = out != NULL;
+    if (!ok) PyErr_NoMemory();
+    for (Py_ssize_t i = 0; ok && i < n; ++i) {
+        PyObject* row = PySequence_Tuple(PyTuple_GetItem(rows, i));
+        ok = row && PyTuple_Size(row) == 4;
+        if (ok) {
+            out[i].latitude_rad = PyFloat_AsDouble(PyTuple_GetItem(row, 0)), out[i].longitude_rad = PyFloat_AsDouble(PyTuple_GetItem(row, 1));
+            out[i].x_m = PyFloat_AsDouble(PyTuple_GetItem(row, 2)), out[i].y_m = PyFloat_AsDouble(PyTuple_GetItem(row, 3));
+            ok = !PyErr_Occurred();
+        } else if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_ValueError, "a zone's vertex is 4 numbers: latitude_rad, longitude_rad, x_m, y_m");
+        }
+        Py_XDECREF(row);
+    }
+    Py_DECREF(rows);
+    if (!ok) {
+        PyMem_Free(out);
+        return NULL;
+    }
+    *count = (uint32_t)n;
+    return out;
+}
+
+static int read_zone(PyObject* o, ZoneArrays* a) {
+    fsim_op_zone_init(&a->z);
+    a->vertices = NULL, a->holes = NULL, a->sizes = NULL;
+    PyObject* t = PySequence_Tuple(o);
+    if (!t) return 0;
+    int ok = PyTuple_Size(t) >= 25;
+    if (!ok) PyErr_SetString(PyExc_ValueError, "a zone is 25 items (fsim.OpZone)");
+    if (ok) ok = as_u64(PyTuple_GetItem(t, 0), &a->z.op_zone_id);
+    if (ok) {
+        a->z.shape = PyFloat_AsDouble(PyTuple_GetItem(t, 1));
+        ok = !PyErr_Occurred();
+    }
+    if (ok) {
+        a->vertices = read_ring(PyTuple_GetItem(t, 2), &a->z.vertex_count);
+        ok = a->vertices != NULL;
+    }
+    if (ok) {
+        PyObject* holes = PySequence_Tuple(PyTuple_GetItem(t, 3));
+        ok = holes != NULL;
+        const Py_ssize_t h = ok ? PyTuple_Size(holes) : 0;
+        if (ok) {
+            a->holes = (fsim_zone_vertex**)PyMem_Calloc((size_t)(h ? h : 1), sizeof(fsim_zone_vertex*));
+            a->sizes = (uint32_t*)PyMem_Calloc((size_t)(h ? h : 1), sizeof(uint32_t));
+            ok = a->holes && a->sizes;
+            if (!ok) PyErr_NoMemory();
+        }
+        for (Py_ssize_t k = 0; ok && k < h; ++k) {
+            a->holes[k] = read_ring(PyTuple_GetItem(holes, k), &a->sizes[k]);
+            ok = a->holes[k] != NULL;
+            a->z.hole_count = (uint32_t)(k + 1);
+        }
+        Py_XDECREF(holes);
+    }
+    double* fields[] = {&a->z.latitude_rad, &a->z.longitude_rad, &a->z.x_m, &a->z.y_m, &a->z.semi_major_m, &a->z.semi_minor_m, &a->z.width_m,
+                        &a->z.height_m, &a->z.range_min_m, &a->z.range_max_m, &a->z.azimuth_min_rad, &a->z.azimuth_max_rad,
+                        &a->z.orientation_rad, &a->z.altitude_min_m, &a->z.altitude_max_m, &a->z.altitude_reference, &a->z.frame,
+                        &a->z.frame_rotation, &a->z.north_ms, &a->z.east_ms, &a->z.time_s};
+    for (int k = 0; ok && k < 21; ++k) {
+        *fields[k] = PyFloat_AsDouble(PyTuple_GetItem(t, 4 + k));
+        ok = !PyErr_Occurred();
+    }
+    Py_DECREF(t);
+    if (ok) {
+        a->z.vertices = a->z.vertex_count ? a->vertices : NULL;
+        a->z.holes = a->z.hole_count ? (const fsim_zone_vertex* const*)a->holes : NULL;
+        a->z.hole_sizes = a->z.hole_count ? a->sizes : NULL;
+    } else {
+        zone_free(a);
+    }
+    return ok;
+}
+
+static PyObject* ring_list(const fsim_zone_vertex* v, uint32_t n) {
+    PyObject* list = PyList_New(0);
+    for (uint32_t i = 0; list && i < n; ++i) {
+        PyObject* row = Py_BuildValue("(dddd)", v[i].latitude_rad, v[i].longitude_rad, v[i].x_m, v[i].y_m);
+        if (!row || PyList_Append(list, row) < 0) {
+            Py_XDECREF(row);
+            Py_DECREF(list);
+            return NULL;
+        }
+        Py_DECREF(row);
+    }
+    return list;
+}
+
+static PyObject* zone_tuple(const fsim_op_zone* z) {
+    PyObject* vertices = ring_list(z->vertices, z->vertex_count);
+    PyObject* holes = vertices ? PyList_New(0) : NULL;
+    for (uint32_t k = 0; holes && k < z->hole_count; ++k) {
+        PyObject* ring = ring_list(z->holes[k], z->hole_sizes[k]);
+        if (!ring || PyList_Append(holes, ring) < 0) {
+            Py_XDECREF(ring);
+            Py_CLEAR(holes);
+            break;
+        }
+        Py_DECREF(ring);
+    }
+    if (!vertices || !holes) {
+        Py_XDECREF(vertices);
+        Py_XDECREF(holes);
+        return NULL;
+    }
+    return Py_BuildValue("(KdNNdddddddddddddddddddddI)", (unsigned long long)z->op_zone_id, z->shape, vertices, holes, z->latitude_rad,
+                         z->longitude_rad, z->x_m, z->y_m, z->semi_major_m, z->semi_minor_m, z->width_m, z->height_m, z->range_min_m,
+                         z->range_max_m, z->azimuth_min_rad, z->azimuth_max_rad, z->orientation_rad, z->altitude_min_m, z->altitude_max_m,
+                         z->altitude_reference, z->frame, z->frame_rotation, z->north_ms, z->east_ms, z->time_s, (unsigned int)z->revision);
+}
+
+/* set_op_zone(zone tuple) -> reason (0: kept) (ABI 1.40) */
+static PyObject* world_set_op_zone(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    ZoneArrays a;
+    if (!check_args(n, 1, 1, "set_op_zone") || !read_zone(args[0], &a)) return NULL;
+    int32_t reason = 0;
+    const int rc = fsim_world_set_op_zone(self->world, &a.z, &reason);
+    zone_free(&a);
+    if (rc != FSIM_OK) return fail();
+    return PyLong_FromLong(reason);
+}
+
+/* op_zones() -> [zone tuple], by id (ABI 1.40) */
+static PyObject* world_op_zones(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    (void)args;
+    if (!check_args(n, 0, 0, "op_zones")) return NULL;
+    const uint32_t count = fsim_world_op_zone_count(self->world);
+    PyObject* list = PyList_New(0);
+    for (uint32_t i = 0; list && i < count; ++i) {
+        fsim_op_zone z;
+        fsim_op_zone_init(&z);
+        if (fsim_world_get_op_zone_at(self->world, i, &z) != FSIM_OK) continue;
+        PyObject* t = zone_tuple(&z);
+        if (!t || PyList_Append(list, t) < 0) {
+            Py_XDECREF(t);
+            Py_DECREF(list);
+            return NULL;
+        }
+        Py_DECREF(t);
+    }
+    return list;
+}
+
+/* op_zone(id) -> zone tuple, or None for one not kept (ABI 1.40) */
+static PyObject* world_op_zone(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t id;
+    fsim_op_zone z;
+    if (!check_args(n, 1, 1, "op_zone") || !as_u64(args[0], &id)) return NULL;
+    fsim_op_zone_init(&z);
+    if (fsim_world_get_op_zone(self->world, id, &z) != FSIM_OK) Py_RETURN_NONE;
+    return zone_tuple(&z);
+}
+
+/* remove_op_zone(id) -> bool (ABI 1.40) */
+static PyObject* world_remove_op_zone(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t id;
+    if (!check_args(n, 1, 1, "remove_op_zone") || !as_u64(args[0], &id)) return NULL;
+    return PyBool_FromLong(fsim_world_remove_op_zone(self->world, id) == FSIM_OK);
+}
+
+/* submit_must_fly(id, values, zone tuple or None, source=None, axes=None, range=None, min_version=None, envelope=None) -> result
+ * (ABI 1.40) */
+static PyObject* world_submit_must_fly(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    double row[FSIM_PY_VALUES];
+    fsim_command_options opt;
+    fsim_command_result r;
+    ZoneArrays a;
+    if (!check_args(n, 3, 8, "submit_must_fly") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "submit_must_fly");
+    if (count < 0 || !read_options(args, n, 3, &opt)) return NULL;
+    const int zoned = args[2] != Py_None;
+    if (zoned && !read_zone(args[2], &a)) return NULL;
+    const int rc = fsim_vehicle_submit_must_fly(self->world, id, row, (uint32_t)count, zoned ? &a.z : NULL, &opt, &r);
+    if (zoned) zone_free(&a);
+    if (rc != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
+/* activity_update_must_fly(activity, values, zone tuple or None, source, controller) -> result (ABI 1.40) */
+static PyObject* world_activity_update_must_fly(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t activity;
+    double row[FSIM_PY_VALUES];
+    fsim_command_result r;
+    int source = 0;
+    uint32_t controller = 0;
+    ZoneArrays a;
+    if (!check_args(n, 3, 5, "activity_update_must_fly") || !as_u64(args[0], &activity) || (n > 3 && !as_int(args[3], &source)) ||
+        (n > 4 && !as_u32(args[4], &controller)) || !WORLD_IDLE(self))
+        return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "activity_update_must_fly");
+    if (count < 0) return NULL;
+    const int zoned = args[2] != Py_None;
+    if (zoned && !read_zone(args[2], &a)) return NULL;
+    const int rc = fsim_activity_update_must_fly_by(self->world, activity, source, controller, row, (uint32_t)count, zoned ? &a.z : NULL, &r);
+    if (zoned) zone_free(&a);
+    if (rc != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
 /* activity_setpoint(activity) -> (kind, code, fields, behavior, waypoints, segments), or None for one not live:
  * `behavior` (id, target, {name: value}, [(latitude_rad, longitude_rad, altitude_msl_m, airspeed_ms, capture_radius_m)])
  * or None, `waypoints` [waypoint row] or None, `segments` [18 floats: north, east, down] or None - a curve's as A-GRA's
@@ -3677,6 +3909,12 @@ static PyMethodDef world_methods[] = {
     FAST("op_points", world_op_points, "op_points() -> [op point tuple]"),
     FAST("op_point", world_op_point, "op_point(id) -> op point tuple or None"),
     FAST("remove_op_point", world_remove_op_point, "remove_op_point(id) -> bool"),
+    FAST("set_op_zone", world_set_op_zone, "set_op_zone(zone tuple) -> reason"),
+    FAST("op_zones", world_op_zones, "op_zones() -> [zone tuple]"),
+    FAST("op_zone", world_op_zone, "op_zone(id) -> zone tuple or None"),
+    FAST("remove_op_zone", world_remove_op_zone, "remove_op_zone(id) -> bool"),
+    FAST("submit_must_fly", world_submit_must_fly, "submit_must_fly(id, values, zone or None, source, axes, range, min_version, envelope) -> result"),
+    FAST("activity_update_must_fly", world_activity_update_must_fly, "activity_update_must_fly(activity, values, zone or None, source, controller) -> result"),
     FAST("performance_profile", world_performance_profile, "performance_profile(id, mode) -> (reason, profile or None)"),
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
     FAST("capabilities", world_capabilities, "capabilities(id) -> [capability]"),

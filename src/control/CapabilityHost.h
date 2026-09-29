@@ -72,6 +72,13 @@ public:
         (void)id, (void)out;
         return false;
     }
+    /// An operational zone the world keeps (4.43; World::setOpZone), read where it is kept - a polygon's vertices copied
+    /// would allocate, at a waiting must fly's start within a step - until the world's next change to it: null for one it
+    /// does not keep.
+    virtual const OpZone* opZone(OpZoneId id) const {
+        (void)id;
+        return nullptr;
+    }
 };
 
 /// A vehicle's own frame, as the session answers it (SessionView::frame): this plus the vehicle's id - whole, and within the
@@ -97,6 +104,7 @@ struct RouteExtras {
     Span<const RoutePath> paths; ///< its paths (4.36)
     Span<const RouteBranch> branches; ///< its conditional branches (4.37)
     Span<const RouteTerminator> terminators; ///< its civil path terminators' data (4.38)
+    const MustFlyArea* area = nullptr;       ///< a must fly's zone given with it, as it was laid out then (4.43)
 };
 
 class CapabilityHost {
@@ -164,6 +172,11 @@ public:
     /// completed together, the shape then written into the path store (allocated at the first shape given).
     CommandResult submit(const PatternCommand& pattern, const PatternShape& shape, const CommandOptions& options, const sim::VehicleState& state,
                          double now);
+    /// NEW of a must fly with its zone given (fsim.guidance.must_fly; docs/flight-autonomy.md, 4.43; MustFly.cpp): the zone
+    /// checked (InvalidParameter naming its field from 10) and laid out as it is given, then kept with the activity.
+    CommandResult submit(const MustFlyCommand& mustFly, const OpZone* zone, const CommandOptions& options, const sim::VehicleState& state, double now);
+    /// UPDATE of a must fly with a zone given in place of its own (4.43): as submit's, then as update's.
+    CommandResult update(ActivityId activity, const MustFlyCommand& mustFly, const OpZone* zone, const sim::VehicleState& state, Caller caller);
     /// UPDATE: a new setpoint for a live activity - the fast path; allocates
     /// nothing. `state` is the vehicle's: a route is planned afresh from it.
     /// `caller` is the source the caller declares, as a NEW's options do, and
@@ -225,7 +238,7 @@ public:
     Reason storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, TaskRepetition repetition,
                      const PatternShape* shape = nullptr, const CurveShape* curveShape = nullptr, Span<const RouteLoiter> loiters = {},
                      Span<const RouteState> states = {}, Span<const RoutePath> paths = {}, Span<const RouteBranch> branches = {},
-                     Span<const RouteTerminator> terminators = {});
+                     Span<const RouteTerminator> terminators = {}, const OpZone* zone = nullptr);
     /// A task command: the NEW of its command with `options`, the task among
     /// the requirements it traces to, answered as the NEW is; its runs, as the
     /// task says. UnknownTask; TaskActive while its activity is live.
@@ -461,6 +474,7 @@ private:
         std::vector<RouteBranch> branches; ///< a route's conditional branches (4.37)
         std::uint32_t commanded = 0;      ///< the branches the operator has commanded (4.37: bit k, branch k)
         std::vector<RouteTerminator> terminators; ///< a route's civil path terminators' data (4.38)
+        MustFlyArea area; ///< a must fly's zone given with it, as laid out (4.43; its shape Count: none)
     };
     /// A flight task (4.11): its command, and what became of it.
     struct Task {
@@ -484,6 +498,7 @@ private:
         std::uint32_t run = 0, runs = 0;    ///< its activity's, as it ended
         double percent = kUnknown;          ///< likewise
         double startTime = kUnknown, endTime = kUnknown;
+        MustFlyArea area;                   ///< a must fly's zone given with it, as laid out (4.43; its shape Count: none)
     };
     Task* findTask(TaskId id) noexcept;
     TaskStatus statusOf(const Task& t) const noexcept;
@@ -682,7 +697,17 @@ private:
     /// range, its location found - a point, another vehicle (a point in its own frame), an operational point the session
     /// keeps (UnknownGeometry) - the points it approaches through where it has a window of bearings to come from, then the
     /// location, flown over; checked as a route's (checkRoute), into the scratch plan.
-    Reason prepareMustFly(MustFlyCommand& c, const sim::VehicleState& state, CheckLog& log);
+    Reason prepareMustFly(MustFlyCommand& c, const sim::VehicleState& state, CheckLog& log, const MustFlyArea* given);
+    /// A zone given with a must fly checked (InvalidParameter, its field from 10 in `detail`) and laid out into `out` as it is
+    /// now: its frame where it is in one (4.43; MustFly.cpp).
+    Reason layOutZone(const OpZone& zone, MustFlyArea& out, CommandResult& detail) const;
+    /// A zone's must fly laid out as a route into it (4.43; MustFly.cpp): its nearest point to the aircraft - or, with a
+    /// window of bearings, its edge that way from its centre - and a little further in, at an altitude within its band.
+    Reason enterZone(const MustFlyCommand& c, MustFlyArea& area, double ingressMin, double ingressMax, const sim::VehicleState& state, CheckLog& log);
+    /// A must fly's speed (true, m/s) as it will approach - its own, or the aircraft's (a rotorcraft's cruise) - and the radius
+    /// of the turn onto its last leg at it, the wind behind it.
+    double approachSpeed(const MustFlyCommand& c, const sim::VehicleState& state, double altitudeMslM) const noexcept;
+    double approachRadius(const MustFlyCommand& c, const sim::VehicleState& state, double altitudeMslM) const noexcept;
     /// A route's arrival windows as given (4.33; Arrival.cpp), its first lap's: one past refused invalid; one at or after
     /// a loiter point, or on an aircraft without the tables its speeds come from, not implemented - the point named.
     Reason checkArrivals(const route::Plan& plan, const sim::VehicleState& state, CommandResult& detail) const noexcept;
@@ -804,7 +829,7 @@ private:
     /// A live must fly's UPDATE in slot `s` (4.42; MustFly.cpp): `next`'s fields given merged into what flies, laid out
     /// afresh from where the aircraft is and checked; then written, its route into the path store, flown afresh.
     CommandResult updateMustFly(std::size_t s, ActivityId activity, const MustFlyCommand& next, const sim::VehicleState& state, CommandResult& result,
-                                CheckLog& log) noexcept;
+                                CheckLog& log, const MustFlyArea* given = nullptr) noexcept;
     /// The scratch shape into the path store, for the pattern that flies: where it has one, or one flew before - its
     /// frame with it.
     void writeShape();

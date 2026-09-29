@@ -619,6 +619,72 @@ int alloc() {
              c.location = static_cast<double>(MustFlyLocation::Entity), c.target = static_cast<double>(id == 1 ? 2 : 1);
              if (!w.submit(id, c).accepted()) std::fprintf(stderr, "must fly: vehicle %u refused\n", id), std::exit(3);
          }},
+        // ADR-29 FA-8b1: a must fly into a polygon with a hole, given and moved every step through UPDATE - laid out afresh in
+        // its plane, into the path store, its containment tested by the behaviour every step
+        {"must fly zone update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             static std::vector<OpZone> zones(64);
+             MustFlyCommand c;
+             c.location = static_cast<double>(MustFlyLocation::Zone);
+             OpZone& z = zones[id];
+             if (k == 0) {
+                 const auto& s = *w.vehicleState(id);
+                 auto ring = [&](std::initializer_list<std::pair<double, double>> corners) {
+                     std::vector<ZoneVertex> out;
+                     for (const auto& [n, e] : corners) {
+                         const Waypoint at = waypointAt(s, n, e);
+                         ZoneVertex v;
+                         v.latitudeRad = at.latitudeRad, v.longitudeRad = at.longitudeRad;
+                         out.push_back(v);
+                     }
+                     return out;
+                 };
+                 z.shape = static_cast<double>(ZoneShape::Polygon);
+                 z.vertices = ring({{2000, 6000}, {4000, 6000}, {4000, 9000}, {2000, 9000}});
+                 z.holes = {ring({{2500, 6500}, {3000, 6500}, {2750, 7000}})};
+                 z.altitudeMinM = 1000.0, z.altitudeMaxM = 2000.0;
+                 activity[id] = w.submit(id, c, z).activity;
+                 return;
+             }
+             z.vertices[0].latitudeRad += 1e-7 * std::sin(k * 0.1); // (in place: nothing allocated here)
+             if (!w.update(activity[id], c, z).accepted()) std::fprintf(stderr, "must fly zone: update refused\n"), std::exit(3);
+         }},
+        // ...and a polygon kept by the world, flown into by its id, its speed changed every step through UPDATE - the zone read
+        // where the world keeps it, never copied
+        {"must fly op zone update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             MustFlyCommand c;
+             c.location = static_cast<double>(MustFlyLocation::OpZone), c.target = static_cast<double>(200 + id);
+             c.speed = 50.0 + std::sin(k * 0.1);
+             if (k == 0) {
+                 const auto& s = *w.vehicleState(id);
+                 OpZone z;
+                 z.id = 200 + id, z.shape = static_cast<double>(ZoneShape::Polygon);
+                 for (const auto& [n, e] : {std::pair{2000, 6000}, {4000, 6000}, {4000, 9000}, {2000, 9000}}) {
+                     const Waypoint at = waypointAt(s, n, e);
+                     ZoneVertex v;
+                     v.latitudeRad = at.latitudeRad, v.longitudeRad = at.longitudeRad;
+                     z.vertices.push_back(v);
+                 }
+                 if (w.setOpZone(z) != Reason::None) std::fprintf(stderr, "must fly op zone: vehicle %u refused\n", id), std::exit(3);
+                 activity[id] = w.submit(id, c).activity;
+                 return;
+             }
+             if (!w.update(activity[id], c).accepted()) std::fprintf(stderr, "must fly op zone: update refused\n"), std::exit(3);
+         }},
+        // ...and a zone kept by the world, moving, flown into by its id: where it is now worked out at every step
+        {"must fly into a moving zone", [&](std::uint32_t id, int k) {
+             if (k != 0) return;
+             const Waypoint at = waypointAt(*w.vehicleState(id), 3000, 8000);
+             OpZone z;
+             z.id = 100 + id, z.shape = static_cast<double>(ZoneShape::Ellipse);
+             z.latitudeRad = at.latitudeRad, z.longitudeRad = at.longitudeRad, z.semiMajorM = 800.0, z.semiMinorM = 500.0;
+             z.northMs = 10.0, z.eastMs = -5.0;
+             MustFlyCommand c;
+             c.location = static_cast<double>(MustFlyLocation::OpZone), c.target = static_cast<double>(z.id);
+             if (w.setOpZone(z) != Reason::None || !w.submit(id, c).accepted())
+                 std::fprintf(stderr, "must fly zone: vehicle %u refused\n", id), std::exit(3);
+         }},
         // step 3: an autopilot on pitch and thrust, the policy's bank updated every step
         {"axes apart each step", [&](std::uint32_t id, int k) {
              static std::vector<ActivityId> activity(64, 0);

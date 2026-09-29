@@ -129,6 +129,7 @@ void CapabilityHost::holdExtras(Waiting& w, const RouteExtras* extras) const {
     w.paths.reserve(PathStore::kRoutePaths), w.paths.clear();
     w.branches.reserve(PathStore::kRouteBranches), w.branches.clear(), w.commanded = 0;
     w.terminators.reserve(PathStore::kRouteTerminators), w.terminators.clear();
+    w.area = extras && extras->area ? *extras->area : MustFlyArea{}; // (a must fly's zone: 4.43)
     if (!extras) return;
     w.loiters.assign(extras->loiters.begin(), extras->loiters.end());
     w.states.assign(extras->states.begin(), extras->states.end());

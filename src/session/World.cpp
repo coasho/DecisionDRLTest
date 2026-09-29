@@ -400,6 +400,24 @@ control::CommandResult World::submit(std::uint32_t id, const control::RouteComma
     return r;
 }
 
+control::CommandResult World::submit(std::uint32_t id, const control::MustFlyCommand& mustFly, const control::OpZone& zone,
+                                     const control::CommandOptions& options) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::CommandResult r;
+        r.reason = control::Reason::UnknownVehicle;
+        r.commandId = options.commandId;
+        return r;
+    }
+    control::CommandResult r = e->host.submit(mustFly, &zone, options, pool_->states()[e->slot], simTime_);
+    r.commandId = options.commandId;
+    if (r.accepted()) {
+        e->commanded = r.activity;
+        levelChanged(*e);
+    }
+    return r;
+}
+
 control::CommandResult World::submit(std::uint32_t id, const control::PatternCommand& pattern, const control::PatternShape& shape,
                                      const control::CommandOptions& options) {
     Entry* e = entry(id);
@@ -534,6 +552,7 @@ std::vector<control::CommandResult> World::submitBatch(std::uint32_t id, Span<co
             else if (const auto* curve = std::get_if<control::CurveCommand>(&c))
                 out.push_back(b.nurbs.empty() ? submit(id, *curve, b.segments, b.options, b.curveShape) : submit(id, *curve, b.nurbs, b.options, b.curveShape));
             else if (const auto* pattern = std::get_if<control::PatternCommand>(&c); pattern && b.shape) out.push_back(submit(id, *pattern, *b.shape, b.options));
+            else if (const auto* mustFly = std::get_if<control::MustFlyCommand>(&c); mustFly && b.zone) out.push_back(submit(id, *mustFly, *b.zone, b.options));
             else out.push_back(submit(id, c, b.options));
         }
         if (details) {
@@ -576,6 +595,20 @@ control::CommandResult World::update(control::ActivityId activity, const control
 
 control::CommandResult World::update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape) {
     return update(control::Source::Policy, activity, pattern, shape);
+}
+
+control::CommandResult World::update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpZone& zone) {
+    return update(control::Source::Policy, activity, mustFly, zone);
+}
+
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
+                                     const control::OpZone& zone) {
+    if (Entry* e = entry(control::activityVehicle(activity))) {
+        control::CommandResult r = e->host.update(activity, mustFly, &zone, pool_->states()[e->slot], caller);
+        echo(e->host, r);
+        return r;
+    }
+    return unknownActivity(activity);
 }
 
 control::CommandResult World::cancel(control::ActivityId activity) { return cancel(control::Source::Policy, activity); }
@@ -686,7 +719,7 @@ control::Reason World::storeTask(std::uint32_t id, control::TaskId task, const c
         for (const control::BezierSegment& b : item.segments) made.push_back(control::NurbsSegment::of(b));
     const Span<const control::NurbsSegment> segments = item.nurbs.empty() ? Span<const control::NurbsSegment>(made) : item.nurbs;
     return e->host.storeTask(task, *command, item.waypoints, segments, repetition, item.shape, item.curveShape, item.loiters, item.states,
-                             item.paths, item.branches, item.terminators);
+                             item.paths, item.branches, item.terminators, item.zone);
 }
 
 control::CommandResult World::commandTask(std::uint32_t id, control::TaskId task, const control::CommandOptions& options) {

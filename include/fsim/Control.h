@@ -740,6 +740,8 @@ enum class MustFlyLocation : std::uint8_t {
     Point = 0,   ///< a place (A-GRA's Point): flown over at its altitude
     Entity = 1,  ///< another vehicle in the world (EntityID): flown over as it moves
     OpPoint = 2, ///< an operational point by its id (OpPointID; World::setOpPoint)
+    Zone = 3,    ///< a zone given with it (A-GRA's ZoneTarget; an OpZone beside the command): entered (4.43)
+    OpZone = 4,  ///< an operational zone by its id (OpZoneID; World::setOpZone): entered
     Count
 };
 
@@ -761,6 +763,75 @@ struct MustFlyCommand {
     double ingressMinRad = kHold, ingressMaxRad = kHold; ///< the bearings from the location it approaches from: both or neither
     double speed = kHold;              ///< m/s, or a Mach number; kHold: as it flies now (a rotorcraft its cruise)
     double speedReference = kHold;     ///< SpeedReference
+};
+
+/// An operational zone's shape (A-GRA's AreaChoiceType; docs/flight-autonomy.md, 4.43).
+enum class ZoneShape : std::uint8_t {
+    Polygon = 0,    ///< its vertices, and holes inside it (A-GRA's PolygonType)
+    Ellipse = 1,    ///< round its centre: its semi-axes, the major's bearing (LocatedEllipseType)
+    Rectangle = 2,  ///< round its centre: its width across and height along its bearing (LocatedRectangleType)
+    SlantRange = 3, ///< from its point: between two ranges, within two bearings (SlantRangeAreaType)
+    Count
+};
+
+/// An operational zone's id (A-GRA's OpZoneID): not 0.
+using OpZoneId = std::uint64_t;
+
+/// A vertex of a zone's polygon: on the Earth, or - the zone in a frame - along the frame's x and y.
+struct ZoneVertex {
+    double latitudeRad = kHold, longitudeRad = kHold;
+    double xM = kHold, yM = kHold;
+};
+
+/// An operational zone (A-GRA's OpZone, its ZoneType; docs/flight-autonomy.md, 4.43), kept by the world by its id for a
+/// must fly to name (World::setOpZone), or given with one: its shape - on the Earth, or in a reference frame - the band of
+/// altitudes it spans, and the velocity it moves at from a time. A field left out is kHold.
+struct OpZone {
+    OpZoneId id = 0;
+    double shape = kHold;                        ///< ZoneShape
+    std::vector<ZoneVertex> vertices;            ///< a polygon's: 3 to 32, in order - a simple polygon
+    std::vector<std::vector<ZoneVertex>> holes;  ///< its interior polygons: 4 at most, 3 to 32 vertices each, inside it
+    double latitudeRad = kHold, longitudeRad = kHold; ///< the others' centre (a slant range area's point), on the Earth
+    double xM = kHold, yM = kHold;               ///< or in the frame
+    double semiMajorM = kHold, semiMinorM = kHold; ///< an ellipse's
+    double widthM = kHold, heightM = kHold;      ///< a rectangle's: across and along its bearing
+    double rangeMinM = kHold, rangeMaxM = kHold; ///< a slant range area's, over the ground (the least left out: 0)
+    double azimuthMinRad = kHold, azimuthMaxRad = kHold; ///< its bearings from its point, the least clockwise to the most
+    double orientationRad = kHold;               ///< an ellipse's major axis's or a rectangle's height's bearing, within a quarter turn;
+                                                 ///< a slant range area's bearings turned by it (left out: 0)
+    double altitudeMinM = kHold, altitudeMaxM = kHold; ///< its band: left out, from the surface, and with no top
+    double altitudeReference = kHold;            ///< AltitudeReference of the band
+    double frame = kHold;                        ///< its points in this frame (World::createFrame's id)
+    double frameRotation = kHold;                ///< FrameRotation: its x and y turned with the frame's yaw or track (2D)
+    double northMs = kHold, eastMs = kHold;      ///< moving (A-GRA's Velocity): from where it is at `timeS`, at this velocity
+    double timeS = kHold;                        ///< World::time; left out, when it is set
+    std::uint32_t revision = 0;                  ///< read back: one more each time it is set
+};
+
+/// A must fly's area as the host laid it out (docs/flight-autonomy.md, 4.43), for the behaviour to find the aircraft in at every
+/// update: its shape in the plane at its reference point - north and east metres, or x and y along its frame's axes - the
+/// band of altitudes it spans, and how its reference moves.
+struct MustFlyArea {
+    static constexpr std::size_t kVertices = 32, kHoles = 4;
+    ZoneShape shape = ZoneShape::Count; ///< Count: none (a point's must fly)
+    std::uint8_t vertexCount = 0, holeCount = 0;
+    std::uint8_t holeSizes[kHoles] = {};
+    double vertices[kVertices][2] = {};          ///< a polygon's, from its reference
+    double holes[kHoles][kVertices][2] = {};     ///< its holes'
+    double semiMajorM = 0.0, semiMinorM = 0.0;   ///< an ellipse's
+    double widthM = 0.0, heightM = 0.0;          ///< a rectangle's: across and along its bearing
+    double rangeMinM = 0.0, rangeMaxM = 0.0;     ///< a slant range area's
+    double azimuthMinRad = 0.0, azimuthMaxRad = 0.0; ///< its bearings, the least clockwise to the most
+    double orientationRad = 0.0;                 ///< an ellipse's major axis's or a rectangle's height's bearing; a slant range's turn
+    double latitudeRad = 0.0, longitudeRad = 0.0; ///< its reference, where it is at `timeS` (not in a frame)
+    double northMs = 0.0, eastMs = 0.0, timeS = 0.0; ///< its velocity from then (World::time)
+    bool framed = false;                         ///< in the frame `frameId`: its reference `frameXM`, `frameYM` from the origin
+    FrameId frameId = 0;
+    FrameSpec frame{};
+    FrameRotation rotation = FrameRotation::Unrotated;
+    double frameXM = 0.0, frameYM = 0.0;
+    double altitudeMinM = kHold, altitudeMaxM = kHold; ///< its band, in `altitudeReference`: left out, none that way
+    AltitudeReference altitudeReference = AltitudeReference::Msl;
 };
 
 /// Where a vehicle's route, curve or pattern shape lives while it is flown
@@ -812,6 +883,8 @@ struct PathStore {
     static constexpr std::size_t kRouteTerminators = 64;
     std::uint32_t routeTerminatorCount = 0;
     RouteTerminator routeTerminators[kRouteTerminators];
+    /// A must fly's area (docs/flight-autonomy.md, 4.43): entered, it completes. Its shape Count: none.
+    MustFlyArea mustFlyArea;
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -884,6 +957,7 @@ struct BatchCommand {
     Span<const RoutePath> paths;         ///< a RouteCommand's: its paths (4.36)
     Span<const RouteBranch> branches;    ///< a RouteCommand's: its conditional branches (4.37)
     Span<const RouteTerminator> terminators; ///< a RouteCommand's: its civil path terminators' data (4.38)
+    const OpZone* zone = nullptr;        ///< a MustFlyCommand's zone given with it (4.43; null: none)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight

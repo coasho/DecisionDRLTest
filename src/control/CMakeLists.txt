@@ -50,7 +50,9 @@ add_library(fsim_control STATIC
     Schedule.cpp
     Moving.cpp
     Plans.cpp
-    MustFly.cpp)
+    MustFly.cpp
+    Zones.h
+    Zones.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

@@ -2,6 +2,8 @@
 // that name it (a must fly). Set and asked for between steps, never stepped.
 #include "session/World.h"
 
+#include "control/Zones.h"
+
 #include <cmath>
 
 namespace fsim::session {
@@ -58,6 +60,38 @@ bool World::Answers::opPoint(control::OpPointId id, control::OpPoint& out) const
     if (it == world_.opPoints_.end()) return false;
     out = it->second;
     return true;
+}
+
+control::Reason World::setOpZone(const control::OpZone& zone) {
+    const bool known = control::isHold(zone.frame) || (zone.frame == std::floor(zone.frame) && zone.frame >= 1.0 &&
+                                                      frames_.count(static_cast<control::FrameId>(zone.frame)));
+    if (zone.id == 0 || control::zones::fault(zone, known) >= 0) return control::Reason::InvalidParameter;
+    control::OpZone& kept = opZones_[zone.id];
+    const std::uint32_t revision = kept.revision + 1;
+    kept = zone;
+    kept.revision = revision;
+    if (!control::isHold(kept.northMs) && control::isHold(kept.timeS)) kept.timeS = simTime_; // (a moving zone's: from now)
+    return control::Reason::None;
+}
+
+bool World::removeOpZone(control::OpZoneId id) { return opZones_.erase(id) > 0; }
+
+std::vector<control::OpZoneId> World::opZones() const {
+    std::vector<control::OpZoneId> out;
+    out.reserve(opZones_.size());
+    for (const auto& [id, z] : opZones_) out.push_back(id);
+    return out;
+}
+
+std::optional<control::OpZone> World::opZone(control::OpZoneId id) const {
+    const auto it = opZones_.find(id);
+    if (it == opZones_.end()) return std::nullopt;
+    return it->second;
+}
+
+const control::OpZone* World::Answers::opZone(control::OpZoneId id) const {
+    const auto it = world_.opZones_.find(id);
+    return it == world_.opZones_.end() ? nullptr : &it->second;
 }
 
 } // namespace fsim::session

@@ -132,6 +132,9 @@ public:
     control::CommandResult submit(std::uint32_t id, const control::CurveCommand& curve, Span<const control::NurbsSegment> segments,
                                   const control::CommandOptions& options = {}, const control::CurveShape* shape = nullptr);
     /// NEW of a pattern (fsim.guidance.pattern) with its shape (docs/flight-autonomy.md, 4.23).
+    /// NEW of a must fly with its zone given (docs/flight-autonomy.md, 4.43): the zone checked and laid out as it is given.
+    control::CommandResult submit(std::uint32_t id, const control::MustFlyCommand& mustFly, const control::OpZone& zone,
+                                  const control::CommandOptions& options = {});
     control::CommandResult submit(std::uint32_t id, const control::PatternCommand& pattern, const control::PatternShape& shape,
                                   const control::CommandOptions& options = {});
     /// Several NEWs at once (docs/flight-autonomy.md, 4.8), made in order at
@@ -159,6 +162,8 @@ public:
                                   const control::CurveShape* shape = nullptr);
     /// UPDATE of a pattern with its shape: the fields given in either merged (kHold keeps one), flown afresh.
     control::CommandResult update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape);
+    /// UPDATE of a must fly with a zone given in place of its own (4.43).
+    control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpZone& zone);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do,
@@ -176,6 +181,8 @@ public:
                                   Span<const control::BezierSegment> segments, const control::CurveShape* shape = nullptr);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::CurveCommand& curve,
                                   Span<const control::NurbsSegment> segments, const control::CurveShape* shape = nullptr);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
+                                  const control::OpZone& zone);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
                                   const control::PatternShape& shape);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);
@@ -303,6 +310,13 @@ public:
     /// The operational points kept, by id.
     std::vector<control::OpPointId> opPoints() const;
     std::optional<control::OpPoint> opPoint(control::OpPointId id) const;
+    /// An operational zone (4.43; A-GRA's OpZone), kept by its id in place of any by it, its revision one more; a moving one's
+    /// time left out, now (Geometry.cpp). InvalidParameter for one A-GRA's schema would not take, or a frame the world does not
+    /// have.
+    control::Reason setOpZone(const control::OpZone& zone);
+    bool removeOpZone(control::OpZoneId id);
+    std::vector<control::OpZoneId> opZones() const;
+    std::optional<control::OpZone> opZone(control::OpZoneId id) const;
     // --- The performance profile (docs/flight-autonomy.md, 4.15; A-GRA's MA_FlightControlModesPerformanceProfileType) ---
     /// A flight mode's performance profile at the vehicle's condition now - HSA/CSA, waypoint or curve following -
     /// into `out`, its vectors reused (PerformanceProfile.cpp). InvalidParameter for another mode (A-GRA profiles
@@ -457,6 +471,7 @@ private:
         double simTimeS() const override { return world_.simTime_; }
         bool frame(control::FrameId id, control::FrameSpec& spec, control::FramePose& now) const override;
         bool opPoint(control::OpPointId id, control::OpPoint& out) const override;
+        const control::OpZone* opZone(control::OpZoneId id) const override;
 
     private:
         const World& world_;
@@ -506,6 +521,7 @@ private:
     std::map<control::FrameId, control::FrameSpec> frames_; ///< the reference frames, by id (4.21)
     control::FrameId lastFrame_ = 0;
     std::map<control::OpPointId, control::OpPoint> opPoints_; ///< the operational points, by id (4.42)
+    std::map<control::OpZoneId, control::OpZone> opZones_;    ///< the operational zones, by id (4.43)
 };
 
 } // namespace fsim::session

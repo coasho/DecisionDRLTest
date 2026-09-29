@@ -438,9 +438,10 @@ A c172x meets a duration in a 10 m/s wind within 0.2 %, and an IRIS within
 ### Must fly: a location flown over
 
 `fsim.guidance.must_fly` is A-GRA's must fly
-([flight-autonomy.md](../flight-autonomy.md), 4.42): a location the aircraft
-must fly over - a point, another vehicle, or an operational point the world
-keeps - approached, where it is given, from within a window of bearings.
+([flight-autonomy.md](../flight-autonomy.md), 4.42 and 4.43): a location the
+aircraft must fly over - a point, another vehicle, or an operational point the
+world keeps - or a zone it must enter, given or kept by the world, approached,
+where it is given, from within a window of bearings.
 
 ```cpp
 OpPoint ip;                                              // an operational point, kept by the world by its id
@@ -466,7 +467,23 @@ over.location = double(MustFlyLocation::Entity), over.target = double(other);
   - else it comes through a point on the window's nearer edge, three turn radii out, and so onto a leg flown on that bearing's reciprocal;
   - a turn onto that leg of more than 120 degrees is split by a point abeam of it.
 - **UPDATE** merges the fields given, and the route is laid out afresh from where the aircraft is. A location given, other than it was, replaces the location's own fields.
-- Zones, corridors and volumes are FA-8b's: the capability is partial until then.
+- **A zone** (`OpZone`; 4.43) is a polygon with up to 4 holes, an ellipse, a rectangle or a slant range area, within a band of altitudes, on the Earth or in a frame, and maybe moving. It is given with the command (`location` Zone: `v.submit(m, zone)`) or kept by the world by its id (`location` OpZone, `target` its id: `World::setOpZone`, `opZones`, `opZone`, `removeOpZone`).
+
+  ```cpp
+  OpZone box;                                              // a rectangle 1 km across, 2 km along 030, 1,000 to 2,000 m
+  box.shape = double(ZoneShape::Rectangle);
+  box.latitudeRad = lat, box.longitudeRad = lon, box.widthM = 1000.0, box.heightM = 2000.0, box.orientationRad = 30 * kDeg;
+  box.altitudeMinM = 1000.0, box.altitudeMaxM = 2000.0;
+  MustFlyCommand into;
+  into.location = double(MustFlyLocation::Zone);
+  auto z = v.submit(into, box).activity;                   // aimed a little inside its nearest edge; done once in it
+  ```
+
+  - It is aimed at a fifth of the way across from its nearest edge (200 m at most) - or, with a window, from its edge on a bearing from its centre within the window - at the altitude given (within the band and in its reference, else refused: it would never be entered), else the aircraft's held within the band.
+  - It completes once the aircraft is in it, over its area and within its band, tested each step; not at the route's end.
+  - A malformed zone is refused `invalid_parameter` naming its field from 10 on (10 its shape, 11 vertices, 12 holes, 13 centre, 14 dimensions, 15 bearings, 16 band, 17 frame, 18 velocity). An operational zone the world does not keep is refused `unknown_geometry`.
+  - An UPDATE may give a zone in place of its own (`w.update(activity, m, zone)`); given none, it keeps the one it has.
+- Corridors and volumes are FA-8b2's and FA-8b3's: the capability is partial until then.
 
 ### Grants: who may command a vehicle
 

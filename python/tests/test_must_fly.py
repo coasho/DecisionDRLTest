@@ -88,6 +88,45 @@ class MustFlyTest(unittest.TestCase):
             v.submit_must_fly(location="entity", target=v)  # (itself)
         self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_parameter", 5))
 
+    def test_zone_given_and_kept(self):
+        """A zone (docs/flight-autonomy.md, 4.43): an ellipse given with a must fly, entered; a polygon with a hole kept by the world,
+        read back and entered by its id; one updated in place of its own; one malformed refused naming its field."""
+        w, v = self.w, self.v
+        lat, lon = self.place(0.0, 4000.0)
+        a = v.submit_must_fly(zone=fsim.OpZone(0, "ellipse", latitude_rad=lat, longitude_rad=lon, semi_major_m=800.0, semi_minor_m=500.0))
+        self.assertEqual(a.setpoint().kwargs["location"], float(fsim.MustFlyLocation.ZONE))
+        for _ in range(600):
+            w.step(6)
+            if not a.live:
+                break
+        self.assertEqual(a.state, fsim.ActivityState.COMPLETED)
+        s = v.state
+        north, east = (s.latitude_rad - lat) * R, (s.longitude_rad - lon) * R * math.cos(lat)
+        self.assertLessEqual((north / 800.0) ** 2 + (east / 500.0) ** 2, 1.01)  # (in it, as it completed)
+        # a polygon with a hole, kept and read back
+        square = [self.place(n, e) for n, e in ((-1000.0, 2000.0), (1000.0, 2000.0), (1000.0, 4000.0), (-1000.0, 4000.0))]
+        hole = [self.place(n, e) for n, e in ((-200.0, 2500.0), (200.0, 2500.0), (0.0, 3000.0))]
+        w.set_op_zone(fsim.OpZone(21, fsim.ZoneShape.POLYGON, square, [hole], altitude_min_m=1000.0, altitude_max_m=2000.0))
+        back = w.op_zone(21)
+        self.assertEqual((back.id, back.revision, back.shape, len(back.vertices), len(back.holes)), (21, 1, float(fsim.ZoneShape.POLYGON), 4, 1))
+        self.assertEqual(back.vertices[1].latitude_rad, square[1][0])
+        self.assertTrue(math.isnan(back.vertices[1].x_m))
+        self.assertEqual([z.id for z in w.op_zones()], [21])
+        b = v.submit_must_fly(location="op_zone", target=21)
+        # moved: a zone given in place of its own
+        lat2, lon2 = self.place(3000.0, 3000.0)
+        b.update_must_fly(zone=fsim.OpZone(0, "rectangle", latitude_rad=lat2, longitude_rad=lon2, width_m=1000.0, height_m=1000.0), location="zone")
+        self.assertEqual(b.setpoint().kwargs["location"], float(fsim.MustFlyLocation.ZONE))
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_must_fly(zone=fsim.OpZone(0, "ellipse", latitude_rad=lat, longitude_rad=lon, semi_major_m=100.0, semi_minor_m=200.0))
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_parameter", 14))
+        with self.assertRaises(fsim.Rejected) as refused:
+            w.set_op_zone(fsim.OpZone(22, "polygon", square[:2]))  # (two vertices)
+        self.assertEqual(refused.exception.reason, "invalid_parameter")
+        self.assertTrue(w.remove_op_zone(21))
+        self.assertFalse(w.remove_op_zone(21))
+        self.assertIsNone(w.op_zone(21))
+
     def test_refused_and_updated(self):
         v = self.v
         lat, lon = self.place(0.0, 4000.0)

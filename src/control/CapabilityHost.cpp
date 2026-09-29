@@ -406,6 +406,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     if (count > 0 && c.start >= count) return bad(3);
     if (!routePlan_) routePlan_ = std::make_unique<route::Plan>();
     route::Plan& p = *routePlan_;
+    p.area.shape = ZoneShape::Count; // (a must fly's zone set after: 4.43)
     const bool hovers = (adapter_->features() & kFeatureHover) != 0;
     std::int16_t which = -1;
     auto point = [&detail](std::uint32_t i, Reason why) {
@@ -949,6 +950,7 @@ void CapabilityHost::writeRoute() {
     for (std::uint32_t k = 0; k < p.loiterCount; ++k) store.routeLoiters[k] = route::unplaced(p.loiters[k]), store.routeLoiters[k].point = p.named(p.loiters[k].point);
     store.routeStateCount = p.stateCount; // (its states placed: 4.34)
     for (std::uint32_t j = 0; j < p.stateCount; ++j) store.routeStates[j] = p.states[j], store.routeStates[j].point = p.named(p.states[j].point);
+    if (p.area.shape != ZoneShape::Count || store.mustFlyArea.shape != ZoneShape::Count) store.mustFlyArea = p.area; // (a must fly's zone: 4.43)
     ++store.revision;
 }
 
@@ -1233,7 +1235,7 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
     if (auto* route = std::get_if<RouteCommand>(&setpoint)) // its waypoints completed, and checked as its range policy says
         if (const Reason why = checkRoute(*route, waypoints, state, log, extras); why != Reason::None) return why;
     if (auto* mustFly = std::get_if<MustFlyCommand>(&setpoint)) // its location laid out as a route, and checked as one (4.42)
-        if (const Reason why = prepareMustFly(*mustFly, state, log); why != Reason::None) return why;
+        if (const Reason why = prepareMustFly(*mustFly, state, log, extras ? extras->area : nullptr); why != Reason::None) return why;
     if (auto* curve = std::get_if<CurveCommand>(&setpoint)) { // its segments checked as its range policy says (its shape into the scratch)
         curveShape_ = curveShape ? *curveShape : CurveShape{};
         if (const Reason why = checkCurve(*curve, segments, false, state, log); why != Reason::None) return why;
@@ -1367,9 +1369,11 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     }
     Command setpoint = std::move(w.command); // (it flies once: moved, never copied)
     const bool route = std::holds_alternative<RouteCommand>(setpoint);
+    const bool laid = route || std::holds_alternative<MustFlyCommand>(setpoint); // (a must fly's route written as a route's: 4.42)
     const RouteExtras extras{Span<const RouteLoiter>(w.loiters.data(), w.loiters.size()), Span<const RouteState>(w.states.data(), w.states.size()),
                              Span<const RoutePath>(w.paths.data(), w.paths.size()), Span<const RouteBranch>(w.branches.data(), w.branches.size()),
-                             Span<const RouteTerminator>(w.terminators.data(), w.terminators.size())};
+                             Span<const RouteTerminator>(w.terminators.data(), w.terminators.size()),
+                             w.area.shape != ZoneShape::Count ? &w.area : nullptr};
     if (why == Reason::None) why = prepare(record.capability, setpoint, Span<const Waypoint>(w.waypoints.data(), w.waypoints.size()),
                                            Span<const NurbsSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape, &w.curveShape,
                                            &extras);
@@ -1400,7 +1404,7 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     const auto* flown = std::get_if<RouteCommand>(&setpoint);
     const double firstStart = !isHold(w.firstStart) ? w.firstStart : flown ? flown->start : kHold;
     launch(Launch{&record, record.id, record.capability, record.axes, detail.flags, firstStart}, w.options, std::move(setpoint), std::move(w.behavior),
-           route, Span<const NurbsSegment>(w.segments.data(), w.segments.size()), now);
+           laid, Span<const NurbsSegment>(w.segments.data(), w.segments.size()), now);
     if (route) routePlan_->passed.swap(w.passed); // (the states it resumed past: Reset flies them again - 4.34)
     if (route) config_->path->routeCommanded = w.commanded; // (what the operator commanded as it waited: 4.37)
     return true;
@@ -2150,7 +2154,8 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     }
     CheckLog log{result, w.options.range, &details_};
     Command probe = next; // (fixed-size: a behaviour takes no UPDATE)
-    const RouteExtras given{held, planned, pathed, branched, terminated};
+    const MustFlyArea* area = extras && extras->area ? extras->area : w.area.shape != ZoneShape::Count ? &w.area : nullptr; // (4.43)
+    const RouteExtras given{held, planned, pathed, branched, terminated, area};
     if (const Reason why = prepare(record.capability, probe, points, pieces, state, log, &nextShape, &nextCurveShape, &given); why != Reason::None)
         return about(rejected(why, activity), result);
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
@@ -2164,6 +2169,7 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     if (terminated.data() != w.terminators.data()) w.terminators.assign(terminated.begin(), terminated.end());
     if (std::holds_alternative<RouteCommand>(setpoint)) w.commanded = 0; // (flown afresh: what the operator commanded goes - 4.37)
     if (pieces.data() != w.segments.data()) w.segments.assign(pieces.begin(), pieces.end());
+    if (area && area != &w.area) w.area = *area;
     w.shape = nextShape, w.curveShape = nextCurveShape;
     assignSetpoint(w.command, next);
     return result;

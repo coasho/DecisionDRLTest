@@ -1265,6 +1265,69 @@ int main(int argc, char** argv) {
             CHECK(isnan(pts[0].rnp_m));
         }
         {
+            /* ABI 1.40 (4.43): a must fly into a zone - a polygon with a hole kept and read back; an ellipse given with a must
+               fly, entered; a malformed one refused naming its field from 10 */
+            fsim_op_zone zone, back;
+            fsim_zone_vertex square[4], hole[3];
+            const fsim_zone_vertex* holes[1];
+            uint32_t hole_sizes[1] = {3};
+            fsim_command_result zr;
+            fsim_activity_info zi;
+            const fsim_vehicle_state* at;
+            double zfields[10];
+            uint32_t zoned = 0;
+            int32_t reason = -1;
+            int k;
+            const double sq[4][2] = {{1000.0, 3000.0}, {3000.0, 3000.0}, {3000.0, 5000.0}, {1000.0, 5000.0}};
+            const double ho[3][2] = {{1500.0, 3500.0}, {2500.0, 3500.0}, {2000.0, 4500.0}};
+            spec.name = "must-fly-zone";
+            spec.type = "jsbsim:c172x";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 55.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &zoned) == FSIM_OK);
+            at = fsim_vehicle_state_ptr(world, zoned);
+            for (k = 0; k < 4; ++k) {
+                square[k].latitude_rad = at->latitude_rad + sq[k][0] / 6371000.0;
+                square[k].longitude_rad = at->longitude_rad + sq[k][1] / (6371000.0 * cos(at->latitude_rad));
+                square[k].x_m = square[k].y_m = fsim_hold();
+            }
+            for (k = 0; k < 3; ++k) {
+                hole[k].latitude_rad = at->latitude_rad + ho[k][0] / 6371000.0;
+                hole[k].longitude_rad = at->longitude_rad + ho[k][1] / (6371000.0 * cos(at->latitude_rad));
+                hole[k].x_m = hole[k].y_m = fsim_hold();
+            }
+            holes[0] = hole;
+            fsim_op_zone_init(&zone);
+            CHECK(zone.struct_size == sizeof zone && isnan(zone.shape) && zone.vertex_count == 0 && isnan(zone.frame));
+            zone.op_zone_id = 21, zone.shape = FSIM_ZONE_POLYGON;
+            zone.vertices = square, zone.vertex_count = 4, zone.holes = holes, zone.hole_sizes = hole_sizes, zone.hole_count = 1;
+            CHECK(fsim_world_set_op_zone(world, &zone, &reason) == FSIM_OK && reason == 0);
+            fsim_op_zone_init(&back);
+            CHECK(fsim_world_op_zone_count(world) == 1 && fsim_world_get_op_zone(world, 21, &back) == FSIM_OK && back.revision == 1 &&
+                  back.vertex_count == 4 && back.hole_count == 1 && back.hole_sizes[0] == 3 && back.vertices[2].latitude_rad == square[2].latitude_rad);
+            /* by its id: accepted, and laid out into it */
+            for (k = 0; k < 10; ++k) zfields[k] = fsim_hold();
+            zfields[0] = FSIM_MUST_FLY_OP_ZONE, zfields[5] = 21.0;
+            CHECK(fsim_vehicle_submit_mode(world, zoned, FSIM_MODE_MUST_FLY, zfields, 10, &co, &zr) == FSIM_OK && zr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_cancel(world, zr.activity, &cr) == FSIM_OK);
+            /* an ellipse given with it, 2 km ahead: entered */
+            fsim_op_zone_init(&zone);
+            zone.shape = FSIM_ZONE_ELLIPSE;
+            zone.latitude_rad = at->latitude_rad, zone.longitude_rad = at->longitude_rad + 2600.0 / (6371000.0 * cos(at->latitude_rad));
+            zone.semi_major_m = 600.0, zone.semi_minor_m = 600.0;
+            for (k = 0; k < 10; ++k) zfields[k] = fsim_hold();
+            zfields[0] = FSIM_MUST_FLY_ZONE;
+            CHECK(fsim_vehicle_submit_must_fly(world, zoned, zfields, 10, &zone, &co, &zr) == FSIM_OK && zr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_world_step(world, 1800) == FSIM_OK); /* (a minute) */
+            CHECK(fsim_activity_get(world, zr.activity, &zi) == FSIM_OK && strcmp(fsim_activity_state_name(zi.state), "completed") == 0);
+            /* malformed: its minor above its major - field 14 */
+            zone.semi_minor_m = 700.0;
+            CHECK(fsim_vehicle_submit_must_fly(world, zoned, zfields, 10, &zone, &co, &zr) == FSIM_OK && zr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(zr.reason), "invalid_parameter") == 0 && zr.reserved == 15); /* (the field plus one) */
+            CHECK(fsim_world_remove_op_zone(world, 21) == FSIM_OK && fsim_world_remove_op_zone(world, 21) == FSIM_INVALID_ARGUMENT);
+        }
+        {
             /* ABI 1.39 (4.42): a must fly - an operational point kept and read back, flown over from within its window of
                bearings (from the east: its route laid out through an approach, then the point); one not kept refused */
             fsim_op_point op, back;

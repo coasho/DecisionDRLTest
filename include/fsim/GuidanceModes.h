@@ -466,7 +466,9 @@ private:
 /// 4.42). The host lays the location out as a route in the path store - the
 /// points it approaches through where it has a window of bearings to come
 /// from, then the location, flown over - and the route's follower flies it
-/// (RouteBehavior), a moving location's points in its frame as it moves. Over
+/// (RouteBehavior), a moving location's points in its frame as it moves. A
+/// zone (4.43) is entered: the route aims into it, and it completes once the
+/// aircraft is in it, over the ground and within its band. Over
 /// another vehicle, the leg to the first point is flown to where that vehicle
 /// will be as the aircraft gets there (a collision course), which closes on
 /// the vehicle itself. It completes as the location is passed, and flies on
@@ -490,11 +492,15 @@ public:
 
 private:
     bool arrival(ArrivalEstimate& out) const noexcept override;
+    /// The route flown: over another vehicle, its first leg to where that vehicle will be (4.42).
+    Command fly(const ControlContext& ctx, const Command& in);
 
     struct Lead; ///< the world as the route sees it: the vehicle flown over where it will be (MustFly.cpp)
     std::unique_ptr<RouteBehavior> route_; ///< flies the location's route: allocated with the behaviour
     std::unique_ptr<Lead> lead_;           ///< likewise
     Command options_;                      ///< the route's options (a RouteCommand): a great circle's legs, on at its end
+    bool zoned_ = false, inside_ = false;  ///< a zone's (4.43), and in it: completed
+    std::uint32_t areaRevision_ = 0;       ///< the path store's revision its zone was looked for in
 };
 
 /// Registers the modes' behaviours ("hsa", "route", "pattern", "curve", "must_fly"); registerBuiltinControllers calls it.

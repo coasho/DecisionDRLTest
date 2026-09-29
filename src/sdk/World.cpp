@@ -162,6 +162,13 @@ control::CommandResult Vehicle::submit(const control::PatternCommand& pattern, c
     return r;
 }
 
+control::CommandResult Vehicle::submit(const control::MustFlyCommand& mustFly, const control::OpZone& zone, const control::CommandOptions& options) {
+    if (world_) return world_->impl_->submit(id_, mustFly, zone, options);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownVehicle;
+    return r;
+}
+
 std::vector<control::CommandResult> Vehicle::submitBatch(Span<const control::BatchCommand> batch, std::vector<control::CommandDetails>* details) {
     if (world_) return world_->impl_->submitBatch(id_, batch, details);
     control::CommandResult r;
@@ -510,6 +517,10 @@ control::CommandResult World::update(control::ActivityId activity, const control
     return impl_->update(activity, pattern, shape);
 }
 
+control::CommandResult World::update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpZone& zone) {
+    return impl_->update(activity, mustFly, zone);
+}
+
 control::CommandResult World::cancel(control::ActivityId activity) { return impl_->cancel(activity); }
 
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::Command& setpoint) {
@@ -540,6 +551,11 @@ control::CommandResult World::update(control::Caller caller, control::ActivityId
 control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
                                      const control::PatternShape& shape) {
     return impl_->update(caller, activity, pattern, shape);
+}
+
+control::CommandResult World::update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
+                                     const control::OpZone& zone) {
+    return impl_->update(caller, activity, mustFly, zone);
 }
 
 control::CommandResult World::cancel(control::Caller caller, control::ActivityId activity) { return impl_->cancel(caller, activity); }
@@ -578,6 +594,10 @@ control::Reason World::setOpPoint(const control::OpPoint& point) { return impl_-
 bool World::removeOpPoint(control::OpPointId id) { return impl_->removeOpPoint(id); }
 std::vector<control::OpPointId> World::opPoints() const { return impl_->opPoints(); }
 std::optional<control::OpPoint> World::opPoint(control::OpPointId id) const { return impl_->opPoint(id); }
+control::Reason World::setOpZone(const control::OpZone& zone) { return impl_->setOpZone(zone); }
+bool World::removeOpZone(control::OpZoneId id) { return impl_->removeOpZone(id); }
+std::vector<control::OpZoneId> World::opZones() const { return impl_->opZones(); }
+std::optional<control::OpZone> World::opZone(control::OpZoneId id) const { return impl_->opZone(id); }
 
 bool World::removeFrame(control::FrameId id) { return impl_->removeFrame(id); }
 

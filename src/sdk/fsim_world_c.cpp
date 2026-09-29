@@ -1828,6 +1828,29 @@ FSIM_API const char* fsim_time_criticality_name(int criticality) {
 
 namespace {
 
+/// An operational zone from the caller's (ABI 1.40): false where its arrays cannot be read.
+bool zoneFromC(const fsim_op_zone& c, fsim::control::OpZone& z) {
+    if (c.struct_size < offsetof(fsim_op_zone, time_s) + sizeof c.time_s) return false;
+    if ((c.vertex_count && !c.vertices) || (c.hole_count && (!c.holes || !c.hole_sizes)) || c.vertex_count > 4096 || c.hole_count > 64) return false;
+    z = fsim::control::OpZone{};
+    z.id = c.op_zone_id, z.shape = c.shape;
+    auto vertex = [](const fsim_zone_vertex& v) { return fsim::control::ZoneVertex{v.latitude_rad, v.longitude_rad, v.x_m, v.y_m}; };
+    for (uint32_t i = 0; i < c.vertex_count; ++i) z.vertices.push_back(vertex(c.vertices[i]));
+    for (uint32_t k = 0; k < c.hole_count; ++k) {
+        if ((c.hole_sizes[k] && !c.holes[k]) || c.hole_sizes[k] > 4096) return false;
+        auto& hole = z.holes.emplace_back();
+        for (uint32_t i = 0; i < c.hole_sizes[k]; ++i) hole.push_back(vertex(c.holes[k][i]));
+    }
+    z.latitudeRad = c.latitude_rad, z.longitudeRad = c.longitude_rad, z.xM = c.x_m, z.yM = c.y_m;
+    z.semiMajorM = c.semi_major_m, z.semiMinorM = c.semi_minor_m, z.widthM = c.width_m, z.heightM = c.height_m;
+    z.rangeMinM = c.range_min_m, z.rangeMaxM = c.range_max_m;
+    z.azimuthMinRad = c.azimuth_min_rad, z.azimuthMaxRad = c.azimuth_max_rad, z.orientationRad = c.orientation_rad;
+    z.altitudeMinM = c.altitude_min_m, z.altitudeMaxM = c.altitude_max_m, z.altitudeReference = c.altitude_reference;
+    z.frame = c.frame, z.frameRotation = c.frame_rotation;
+    z.northMs = c.north_ms, z.eastMs = c.east_ms, z.timeS = c.time_s;
+    return true;
+}
+
 /// A batch item (or a task's command) into its C++ command: its waypoints and segments into `route` and `curve` (or
 /// `nurbs`: ABI 1.24, where the item's struct has them), a pattern's shape into `shape` (the item pointing at it where it
 /// has one).
@@ -1835,7 +1858,7 @@ bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::Ba
                std::vector<fsim::control::BezierSegment>& curve, std::vector<fsim::control::NurbsSegment>& nurbs, fsim::control::PatternShape& shape,
                fsim::control::CurveShape& curveShape, std::vector<fsim::control::RouteLoiter>& loiters, std::vector<fsim::control::RouteState>& states,
                std::vector<fsim::control::RoutePath>& paths, std::vector<fsim::control::RouteBranch>& branches,
-               std::vector<fsim::control::RouteTerminator>& terminators) {
+               std::vector<fsim::control::RouteTerminator>& terminators, fsim::control::OpZone& zone) {
     item.options = fromC(b.options);
     fsim::control::Command c;
     fsim::control::SupportCommand sc;
@@ -1851,6 +1874,10 @@ bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::Ba
         ok = (b.code == FSIM_MODE_HSA || b.code == FSIM_MODE_PATTERN || b.code == FSIM_MODE_MUST_FLY) && toMode(b.code, b.fields, b.count, c, &shape),
         item.command = c;
         if (ok && b.code == FSIM_MODE_PATTERN && b.count > kPatternFields) item.shape = &shape;
+        if (ok && b.code == FSIM_MODE_MUST_FLY && b.struct_size >= offsetof(fsim_batch_command, zone) + sizeof b.zone && b.zone) { // (ABI 1.40)
+            ok = zoneFromC(*b.zone, zone);
+            item.zone = &zone;
+        }
         break;
     case FSIM_BATCH_ROUTE: { // (its loiters and states where the caller's struct has them: ABI 1.28, 1.31)
         const bool loitered = b.struct_size >= offsetof(fsim_batch_command, loiter_count) + sizeof b.loiter_count;
@@ -1904,6 +1931,7 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
         std::vector<std::vector<fsim::control::RouteBranch>> brancheses;
         std::vector<std::vector<fsim::control::RouteTerminator>> terminatorses;
         std::vector<fsim::control::PatternShape> shapes(count); // (each pattern's own: the items point at them)
+        std::vector<fsim::control::OpZone> zones(count);          // (each must fly's zone given, likewise)
         std::vector<fsim::control::CurveShape> curveShapes(count); // (each curve's likewise)
         routes.reserve(count), curves.reserve(count), nurbses.reserve(count), loiterses.reserve(count), stateses.reserve(count), pathses.reserve(count);
         brancheses.reserve(count), terminatorses.reserve(count);
@@ -1919,7 +1947,7 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
             std::vector<fsim::control::RoutePath>& paths = pathses.emplace_back();
             std::vector<fsim::control::RouteBranch>& branches = brancheses.emplace_back();
             std::vector<fsim::control::RouteTerminator>& terminators = terminatorses.emplace_back();
-            if (!fromBatch(world, b, item, route, curve, nurbs, shapes[i], curveShapes[i], loiters, states, paths, branches, terminators))
+            if (!fromBatch(world, b, item, route, curve, nurbs, shapes[i], curveShapes[i], loiters, states, paths, branches, terminators, zones[i]))
                 return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_batch: item " + std::to_string(i) + " is malformed");
             item.waypoints = route, item.segments = curve, item.nurbs = nurbs, item.loiters = loiters, item.states = states, item.paths = paths;
             item.branches = branches, item.terminators = terminators;
@@ -1979,7 +2007,8 @@ FSIM_API int fsim_vehicle_store_task(fsim_world* world, uint32_t id, uint64_t ta
         std::vector<fsim::control::RoutePath> paths;
         std::vector<fsim::control::RouteBranch> branches;
         std::vector<fsim::control::RouteTerminator> terminators;
-        if (!fromBatch(world, *command, item, route, curve, nurbs, shape, curveShape, loiters, states, paths, branches, terminators) ||
+        fsim::control::OpZone zone;
+        if (!fromBatch(world, *command, item, route, curve, nurbs, shape, curveShape, loiters, states, paths, branches, terminators, zone) ||
             !std::holds_alternative<fsim::control::Command>(item.command))
             return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_store_task: a flight or guidance command, whole, is kept");
         fsim::control::TaskRepetition repetition;
@@ -2341,9 +2370,10 @@ const char* planFromC(fsim_world* world, const fsim_route_plan& plan, fsim::cont
     std::vector<NurbsSegment> nurbs;
     PatternShape shape;
     CurveShape curveShape;
+    OpZone zone; // (a route's: none)
     const Command* c = nullptr;
     if (plan.route.kind != FSIM_BATCH_ROUTE ||
-        !fromBatch(world, plan.route, item, p.waypoints, curve, nurbs, shape, curveShape, p.loiters, p.states, p.paths, p.branches, p.terminators) ||
+        !fromBatch(world, plan.route, item, p.waypoints, curve, nurbs, shape, curveShape, p.loiters, p.states, p.paths, p.branches, p.terminators, zone) ||
         !(c = std::get_if<Command>(&item.command)) || !std::holds_alternative<RouteCommand>(*c))
         return "its route cannot be read";
     if (!toPointMetadata(plan.points, plan.point_count, p.pointMetadata) || !toPathMetadata(plan.paths, plan.path_count, p.pathMetadata))
@@ -2892,6 +2922,105 @@ FSIM_API int fsim_world_get_op_point(const fsim_world* world, uint64_t id, fsim_
     const std::optional<fsim::control::OpPoint> p = world->world.opPoint(id);
     if (!p) return absent(FSIM_INVALID_ARGUMENT, "fsim_world_get_op_point: no such point");
     opPointToC(*p, *out);
+    return FSIM_OK;
+}
+
+/// A zone kept, into the caller's struct: its arrays the world's readback's.
+void zoneToC(fsim_world* w, const fsim::control::OpZone& z, fsim_op_zone& c) {
+    auto& r = w->zoneReadback;
+    auto vertex = [](const fsim::control::ZoneVertex& v) { return fsim_zone_vertex{v.latitudeRad, v.longitudeRad, v.xM, v.yM}; };
+    r.vertices.clear(), r.holes.clear(), r.holePointers.clear(), r.holeSizes.clear();
+    for (const auto& v : z.vertices) r.vertices.push_back(vertex(v));
+    for (const auto& h : z.holes) {
+        auto& hole = r.holes.emplace_back();
+        for (const auto& v : h) hole.push_back(vertex(v));
+    }
+    for (const auto& h : r.holes) r.holePointers.push_back(h.data()), r.holeSizes.push_back(static_cast<uint32_t>(h.size()));
+    const uint32_t size = c.struct_size;
+    fsim_op_zone_init(&c);
+    c.struct_size = size;
+    c.revision = z.revision, c.op_zone_id = z.id, c.shape = z.shape;
+    c.vertices = r.vertices.empty() ? nullptr : r.vertices.data(), c.vertex_count = static_cast<uint32_t>(r.vertices.size());
+    c.hole_count = static_cast<uint32_t>(r.holes.size());
+    c.holes = r.holePointers.empty() ? nullptr : r.holePointers.data(), c.hole_sizes = r.holeSizes.empty() ? nullptr : r.holeSizes.data();
+    c.latitude_rad = z.latitudeRad, c.longitude_rad = z.longitudeRad, c.x_m = z.xM, c.y_m = z.yM;
+    c.semi_major_m = z.semiMajorM, c.semi_minor_m = z.semiMinorM, c.width_m = z.widthM, c.height_m = z.heightM;
+    c.range_min_m = z.rangeMinM, c.range_max_m = z.rangeMaxM;
+    c.azimuth_min_rad = z.azimuthMinRad, c.azimuth_max_rad = z.azimuthMaxRad, c.orientation_rad = z.orientationRad;
+    c.altitude_min_m = z.altitudeMinM, c.altitude_max_m = z.altitudeMaxM, c.altitude_reference = z.altitudeReference;
+    c.frame = z.frame, c.frame_rotation = z.frameRotation;
+    c.north_ms = z.northMs, c.east_ms = z.eastMs, c.time_s = z.timeS;
+}
+
+FSIM_API void fsim_op_zone_init(fsim_op_zone* zone) {
+    if (!zone) return;
+    std::memset(zone, 0, sizeof *zone);
+    zone->struct_size = sizeof *zone;
+    const double hold = fsim::control::kHold;
+    zone->shape = hold;
+    double* fields[] = {&zone->latitude_rad, &zone->longitude_rad, &zone->x_m, &zone->y_m, &zone->semi_major_m, &zone->semi_minor_m,
+                        &zone->width_m, &zone->height_m, &zone->range_min_m, &zone->range_max_m, &zone->azimuth_min_rad, &zone->azimuth_max_rad,
+                        &zone->orientation_rad, &zone->altitude_min_m, &zone->altitude_max_m, &zone->altitude_reference, &zone->frame,
+                        &zone->frame_rotation, &zone->north_ms, &zone->east_ms, &zone->time_s};
+    for (double* f : fields) *f = hold;
+}
+
+FSIM_API int fsim_world_set_op_zone(fsim_world* world, const fsim_op_zone* zone, int32_t* reason) {
+    fsim::control::OpZone z;
+    if (!world || !zone || !reason || !zoneFromC(*zone, z)) return FSIM_INVALID_ARGUMENT;
+    *reason = static_cast<int32_t>(world->world.setOpZone(z));
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_world_remove_op_zone(fsim_world* world, uint64_t id) {
+    if (!world) return FSIM_INVALID_ARGUMENT;
+    if (!world->world.removeOpZone(id)) return absent(FSIM_INVALID_ARGUMENT, "fsim_world_remove_op_zone: no such zone");
+    return FSIM_OK;
+}
+
+FSIM_API uint32_t fsim_world_op_zone_count(const fsim_world* world) { return world ? static_cast<uint32_t>(world->world.opZones().size()) : 0u; }
+
+FSIM_API int fsim_world_get_op_zone(fsim_world* world, uint64_t id, fsim_op_zone* out) {
+    if (!world || !out || !FSIM_HAS(out, fsim_op_zone, time_s)) return FSIM_INVALID_ARGUMENT;
+    const std::optional<fsim::control::OpZone> z = world->world.opZone(id);
+    if (!z) return absent(FSIM_INVALID_ARGUMENT, "fsim_world_get_op_zone: no such zone");
+    zoneToC(world, *z, *out);
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_world_get_op_zone_at(fsim_world* world, uint32_t index, fsim_op_zone* out) {
+    if (!world || !out) return FSIM_INVALID_ARGUMENT;
+    const std::vector<fsim::control::OpZoneId> ids = world->world.opZones();
+    if (index >= ids.size()) return absent(FSIM_INVALID_ARGUMENT, "fsim_world_get_op_zone_at: no such zone");
+    return fsim_world_get_op_zone(world, ids[index], out);
+}
+
+FSIM_API int fsim_vehicle_submit_must_fly(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_op_zone* zone,
+                                          const fsim_command_options* options, fsim_command_result* result) {
+    if (!zone) return fsim_vehicle_submit_mode(world, id, FSIM_MODE_MUST_FLY, fields, count, options, result);
+    fsim::control::Command c;
+    fsim::control::OpZone z;
+    if (!world || !result || !toMode(FSIM_MODE_MUST_FLY, fields, count, c) || !zoneFromC(*zone, z))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_must_fly: a must fly takes 10 fields, and a zone's arrays whole");
+    toC(world, id, world->world.submit(id, std::get<fsim::control::MustFlyCommand>(c), z, fromC(options)), result);
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_activity_update_must_fly(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
+                                           const fsim_op_zone* zone, fsim_command_result* result) {
+    return fsim_activity_update_must_fly_by(world, activity, FSIM_SOURCE_POLICY, 0, fields, count, zone, result);
+}
+
+FSIM_API int fsim_activity_update_must_fly_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
+                                              uint32_t count, const fsim_op_zone* zone, fsim_command_result* result) {
+    if (!zone) return fsim_activity_update_by(world, activity, source, controller, fields, count, result);
+    fsim::control::Source from;
+    fsim::control::Command c;
+    fsim::control::OpZone z;
+    if (!world || !result || !toSource(source, from) || !toMode(FSIM_MODE_MUST_FLY, fields, count, c) || !zoneFromC(*zone, z))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_activity_update_must_fly: a must fly takes 10 fields, and a zone's arrays whole");
+    toC(world, fsim::control::activityVehicle(activity),
+        world->world.update(fsim::control::Caller{from, controller}, activity, std::get<fsim::control::MustFlyCommand>(c), z), result);
     return FSIM_OK;
 }
 

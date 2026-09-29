@@ -730,8 +730,9 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   location, flown over - and completes as the location is passed, flying on along its course there.
  *   fsim_activity_update merges the fields given, a location another than it was replacing the location's own. */
 enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3, FSIM_MODE_MUST_FLY = 4 /* ABI 1.39 */ };
-/* A must fly's location (ABI 1.39; A-GRA's MustFlyLocationType): a point, another vehicle, an operational point by its id */
-enum fsim_must_fly_location { FSIM_MUST_FLY_POINT = 0, FSIM_MUST_FLY_ENTITY, FSIM_MUST_FLY_OP_POINT };
+/* A must fly's location (ABI 1.39; A-GRA's MustFlyLocationType): a point, another vehicle, an operational point by its id;
+ * from ABI 1.40 a zone given with it (fsim_vehicle_submit_must_fly) or an operational zone by its id, entered */
+enum fsim_must_fly_location { FSIM_MUST_FLY_POINT = 0, FSIM_MUST_FLY_ENTITY, FSIM_MUST_FLY_OP_POINT, FSIM_MUST_FLY_ZONE, FSIM_MUST_FLY_OP_ZONE };
 enum fsim_pattern_kind { FSIM_PATTERN_ORBIT = 0, FSIM_PATTERN_RACETRACK, FSIM_PATTERN_FIGURE_EIGHT, FSIM_PATTERN_HOLD,
                          FSIM_PATTERN_HOVER /* ABI 1.23: a rotorcraft's */ };
 enum fsim_hold_turn { FSIM_HOLD_TURN_STANDARD = 0, FSIM_HOLD_TURN_MIL_POWER, FSIM_HOLD_TURN_RELAX }; /* A-GRA's MA_HoldTurnTypeEnum (ABI 1.22) */
@@ -1323,6 +1324,7 @@ typedef struct fsim_batch_command {
     uint32_t branch_count;
     const fsim_route_terminator* terminators; /* FSIM_BATCH_ROUTE's civil path terminators' data (ABI 1.35), struct_size bytes apart */
     uint32_t terminator_count;
+    const struct fsim_op_zone* zone;        /* ABI 1.40: a must fly's zone given with it (FSIM_BATCH_MODE, FSIM_MODE_MUST_FLY); NULL none */
 } fsim_batch_command;
 /* Several NEWs at once (A-GRA's several command instances in one message), `batch[0].struct_size` bytes apart, made in
  * order at this simulation time: `results[i]` answers `batch[i]`, and `details[i]` (may be NULL; `details[0].struct_size`
@@ -1719,6 +1721,58 @@ FSIM_API int fsim_world_remove_op_point(fsim_world* world, uint64_t id); /* FSIM
 FSIM_API uint32_t fsim_world_op_point_count(const fsim_world* world);
 FSIM_API int fsim_world_get_op_point_at(const fsim_world* world, uint32_t index, fsim_op_point* out);
 FSIM_API int fsim_world_get_op_point(const fsim_world* world, uint64_t id, fsim_op_point* out);
+
+/* Operational zones (ABI 1.40; docs/flight-autonomy.md, 4.43; A-GRA's OpZone and its ZoneType): kept by the world by id for a
+ * must fly to name, or given with one. Its shape: a polygon - 3 to 32 vertices, and up to 4 holes inside it of 3 to 32 each -
+ * an ellipse (semi-axes, the major's bearing from true north within a quarter turn), a rectangle (width across and height
+ * along its bearing) or a slant range area (its greatest and least range over the ground, its bearings from its point, the
+ * least clockwise to the most, turned by its orientation); on the Earth, or in a frame (its x and y along the frame's axes,
+ * turned with its yaw or track as frame_rotation says); its band of altitudes (left out, from the surface, with no top); a
+ * velocity from time_s (World::time; left out, when set). fsim_op_zone_init leaves every field out (fsim_hold(); none of
+ * its arrays). */
+enum fsim_zone_shape { FSIM_ZONE_POLYGON = 0, FSIM_ZONE_ELLIPSE, FSIM_ZONE_RECTANGLE, FSIM_ZONE_SLANT_RANGE };
+typedef struct fsim_zone_vertex {
+    double latitude_rad, longitude_rad; /* on the Earth */
+    double x_m, y_m;                    /* or in the zone's frame */
+} fsim_zone_vertex;
+typedef struct fsim_op_zone {
+    uint32_t struct_size;
+    uint32_t revision;                  /* read back: one more each time it is set (ignored as set) */
+    uint64_t op_zone_id;                /* not 0 */
+    double shape;                       /* fsim_zone_shape */
+    const fsim_zone_vertex* vertices;   /* a polygon's, vertex_count of them */
+    uint32_t vertex_count;
+    uint32_t hole_count;                /* its holes: hole_sizes[k] vertices each from holes[k] */
+    const fsim_zone_vertex* const* holes;
+    const uint32_t* hole_sizes;
+    double latitude_rad, longitude_rad, x_m, y_m; /* the others' centre (a slant range area's point): on the Earth, or in the frame */
+    double semi_major_m, semi_minor_m, width_m, height_m, range_min_m, range_max_m;
+    double azimuth_min_rad, azimuth_max_rad, orientation_rad;
+    double altitude_min_m, altitude_max_m, altitude_reference; /* fsim_altitude_reference of the band */
+    double frame, frame_rotation;       /* fsim_world_create_frame's id; fsim_frame_rotation */
+    double north_ms, east_ms, time_s;   /* moving */
+} fsim_op_zone;
+FSIM_API void fsim_op_zone_init(fsim_op_zone* zone);
+/* Kept in place of any by its id, its revision one more. `*reason` 0, or invalid_parameter for one A-GRA's schema would not
+ * take: a shape not one; a polygon not simple, its holes not inside it; a centre off the Earth; dimensions not above 0 (a
+ * least range not below the most); bearings beyond their turn; a band upside down; a frame the world does not have; a
+ * velocity with a frame. */
+FSIM_API int fsim_world_set_op_zone(fsim_world* world, const fsim_op_zone* zone, int32_t* reason);
+FSIM_API int fsim_world_remove_op_zone(fsim_world* world, uint64_t id); /* FSIM_INVALID_ARGUMENT for one not kept */
+/* The zones kept, by id; one read back, its vertices and holes the library's until the next of these reads. FSIM_INVALID_ARGUMENT
+ * for one not kept. */
+FSIM_API uint32_t fsim_world_op_zone_count(const fsim_world* world);
+FSIM_API int fsim_world_get_op_zone_at(fsim_world* world, uint32_t index, fsim_op_zone* out);
+FSIM_API int fsim_world_get_op_zone(fsim_world* world, uint64_t id, fsim_op_zone* out);
+/* A must fly (FSIM_MODE_MUST_FLY's fields, `count` of them) with its zone given (location FSIM_MUST_FLY_ZONE): the zone
+ * checked - a field at fault named from 10 - and laid out as it is given, then entered; NULL none, as fsim_vehicle_submit_mode.
+ * fsim_activity_update_must_fly: its fields merged, and a zone given replacing its own. */
+FSIM_API int fsim_vehicle_submit_must_fly(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_op_zone* zone,
+                                          const fsim_command_options* options, fsim_command_result* result);
+FSIM_API int fsim_activity_update_must_fly(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
+                                           const fsim_op_zone* zone, fsim_command_result* result);
+FSIM_API int fsim_activity_update_must_fly_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
+                                              uint32_t count, const fsim_op_zone* zone, fsim_command_result* result);
 
 /* A flight mode's performance profile (ABI 1.14; docs/flight-autonomy.md, 4.15; A-GRA's
  * MA_FlightControlModesPerformanceProfileType, VI 1.2.6.7): the guard rails a mission autonomy shapes its commands

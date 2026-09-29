@@ -878,6 +878,51 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(cameFrom[p.id] > 80.0 * kDeg);
             CHECK(cameFrom[p.id] < 100.0 * kDeg);
         });
+    // a must fly into a zone (ADR-29 FA-8b1, MFY-04): a square half a leg across, its centre a leg ahead and half a leg to the
+    // right, spanning a band from 100 m below the aircraft to 100 m above it (a rotorcraft's 20 m) - entered, and completed
+    // once in it
+    std::map<std::uint32_t, double> enteredAt, heightAt;
+    auto zoneOf = [&](const Plane& p) {
+        const double half = 0.25 * leg(p), band = p.rotor ? 20.0 : 100.0;
+        OpZone z;
+        z.shape = static_cast<double>(ZoneShape::Polygon);
+        for (const auto& [n, e] : {std::pair{-half, -half}, {half, -half}, {half, half}, {-half, half}}) {
+            const PositionCommand q = pointFrom(p.start, leg(p) + n, 0.5 * leg(p) + e, 0.0, 0.0);
+            ZoneVertex v;
+            v.latitudeRad = q.latitudeRad, v.longitudeRad = q.longitudeRad;
+            z.vertices.push_back(v);
+        }
+        z.altitudeMinM = p.start.altitudeMslM - band, z.altitudeMaxM = p.start.altitudeMslM + band;
+        return z;
+    };
+    run("fsim.guidance.must_fly", 0.0,
+        [&](const Plane& p) {
+            MustFlyCommand c;
+            c.location = static_cast<double>(MustFlyLocation::Zone);
+            const CommandResult r = w.submit(p.id, c, zoneOf(p));
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            enteredAt[p.id] = std::numeric_limits<double>::quiet_NaN();
+            return r.accepted();
+        },
+        [&](const Plane& p) { return 4.0 * leg(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) + 60.0; },
+        [&](const Plane& p) {
+            const ActivityRecord* r = w.activity(activity[p.id]);
+            if (!std::isnan(enteredAt[p.id]) || !r || r->live()) return;
+            const auto& s = *w.vehicleState(p.id);
+            const PositionCommand centre = pointFrom(p.start, leg(p), 0.5 * leg(p), 0.0, 0.0);
+            const double north = (s.latitudeRad - centre.latitudeRad) * kEarthM, east = (s.longitudeRad - centre.longitudeRad) * kEarthM * std::cos(centre.latitudeRad);
+            enteredAt[p.id] = std::max(std::abs(north), std::abs(east)) - 0.25 * leg(p); // (how far outside its edge it completed: <= 0)
+            heightAt[p.id] = s.altitudeMslM - p.start.altitudeMslM;
+        },
+        [&](const Plane& p, const Lows& lows) {
+            completed(p, lows);
+            // in it as it completed (a C-17A 30 m inside its edge, a CF2 0.02 m; 0.5 % of the half for this flat measure)
+            // and in its band (a Mirage 2000 19 m above where it began)
+            CHECK(enteredAt[p.id] <= 0.005 * 0.25 * leg(p));
+            CHECK(std::abs(heightAt[p.id]) <= (p.rotor ? 20.0 : 100.0));
+        });
     // its endurance (ADR-29 FA-3e, VAL-03): three times what it lasts, a timed pattern, is refused - a soft rejection,
     // which override_rejection overrides; five minutes straight ahead at its cruise, its prediction (read under a
     // reserve of 99.99 %, so the check reports what the flight needs) against the burn it flies, within 5 %
