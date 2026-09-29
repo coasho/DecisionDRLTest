@@ -101,7 +101,8 @@ TEST_CASE("discovery: the public features, each answered on every vehicle", "[di
     CHECK(supportOf(w, c172x, "fsim.guidance.hsa/direction/magnetic_north").support == Support::Supported);
     CHECK(supportOf(w, c172x, "fsim.guidance.route/altitude/barometric").support == Support::Supported); // (FA-6a)
     CHECK(supportOf(w, c172x, "fsim.guidance.route/path_terminators").support == Support::Supported); // (FA-6f)
-    CHECK(supportOf(w, c172x, "fsim.guidance.route/metadata").stage == 7); // (not built: the stage that builds it)
+    CHECK(supportOf(w, c172x, "fsim.guidance.route/metadata").support == Support::Supported); // (FA-7a)
+    CHECK(supportOf(w, c172x, "fsim.guidance.curve/discretized").stage == 17); // (not built: the stage that builds it)
     CHECK(supportOf(w, c172x, "fsim.guidance.route/paths").support == Support::Supported); // (FA-6e1)
     CHECK(supportOf(w, c172x, "fsim.guidance.route/conditional_segment").support == Support::Partial); // (FA-6e2a: endurance, contingency FA-6e2b's)
     CHECK(supportOf(w, c172x, "hold").support == Support::Supported); // a behaviour's id finds its feature

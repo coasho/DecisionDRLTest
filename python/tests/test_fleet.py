@@ -163,7 +163,7 @@ class FleetTwinTest(unittest.TestCase):
                     self.assertEqual(refused.exception.reason, "unavailable")
 
     def test_flight_cases(self):
-        """Velocity, HSA, loiter and formation on each class, to the C++ test's thresholds."""
+        """Velocity, HSA, loiter, a route plan and formation on each class, to the C++ test's thresholds."""
         # the velocity level: its heading, height and speed (a rotorcraft: its point)
         w = make_world()
         planes = fleet(w)
@@ -207,6 +207,28 @@ class FleetTwinTest(unittest.TestCase):
         for p in planes:
             with self.subTest(case="loiter", aircraft=p.kind):
                 self.assertLess(abs(ground_distance(p.v.state, p.start) - radius[p.kind]), 0.02 * radius[p.kind])
+
+        # a route kept as A-GRA's route plan (docs/flight-autonomy.md, 4.39): uploaded, prepared for activation, activated,
+        # and flown to its end straight ahead (a wing's legs 2 km, a rotorcraft's its scale) - its plan's execution complete
+        w = make_world()
+        planes = fleet(w)
+        legs = {p.kind: p.scale if p.rotor else 2000.0 for p in planes}
+        for p in planes:
+            s, d = p.start, legs[p.kind]
+            psi = s.euler_rad[2]
+            points = [fsim.Waypoint(s.latitude_rad + k * d * math.cos(psi) / EARTH_M,
+                                    s.longitude_rad + k * d * math.sin(psi) / (EARTH_M * math.cos(s.latitude_rad)), s.altitude_msl_m)
+                      for k in (1, 2)]
+            self.assertTrue(p.v.plan_command(1, "prepare_for_upload").completed)
+            p.v.publish_plan(fsim.RoutePlan(1, fsim.BatchCommand("submit_route", points)))
+            self.assertTrue(p.v.plan_command(1, "upload").completed)
+            self.assertTrue(p.v.plan_command(1, "prepare_for_activation").completed)
+            self.assertTrue(p.v.plan_command(1, "activate").completed)
+        w.step(steps(w, max(2.0 * legs[p.kind] / p.cruise * 1.5 + 60.0 for p in planes)))
+        for p in planes:
+            with self.subTest(case="route plan", aircraft=p.kind):
+                s = p.v.plan_status(1)
+                self.assertEqual((s.state, s.execution, s.reason), (fsim.PlanState.ACTIVATED, fsim.PlanExecution.COMPLETE, "goal_reached"))
 
         # formation: a wing 100 m behind its leader and 60 m right, from 5 s of its cruise behind; a rotorcraft its
         # cruise's metres behind and right, from three times as far

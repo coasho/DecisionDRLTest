@@ -1265,6 +1265,97 @@ int main(int argc, char** argv) {
             CHECK(isnan(pts[0].rnp_m));
         }
         {
+            /* ABI 1.36 (4.39): route plans - prepared for upload, published, uploaded and read back with its metadata;
+               prepared for activation and activated, executing once it flies, its deactivation failing while it does; FA's
+               own deactivation; a plan for planning use only failing its preparation for activation */
+            fsim_waypoint pts[2];
+            fsim_point_metadata meta;
+            fsim_path_metadata path;
+            fsim_route_plan plan, back;
+            fsim_plan_command_result pr;
+            fsim_plan_status ps;
+            double options[4];
+            const fsim_vehicle_state* at;
+            uint32_t planned = 0;
+            int32_t reason = -1;
+            int k;
+            spec.name = "cap-plans";
+            spec.type = "jsbsim:c172";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 50.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &planned) == FSIM_OK);
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            at = fsim_vehicle_state_ptr(world, planned);
+            for (k = 0; k < 2; ++k) {
+                fsim_waypoint_init(&pts[k]);
+                pts[k].latitude_rad = at->latitude_rad;
+                pts[k].longitude_rad = at->longitude_rad + (k + 1) * 3000.0 / (6371008.8 * cos(at->latitude_rad));
+                pts[k].altitude_m = 1500.0;
+            }
+            fsim_point_metadata_init(&meta);
+            CHECK(meta.struct_size == sizeof meta && meta.remarks == NULL);
+            meta.point = 1, meta.source = FSIM_POINT_OPERATOR_DEFINED, meta.locked = 1, meta.remarks = "the last", meta.fix_key = "BRAVO";
+            fsim_path_metadata_init(&path);
+            CHECK(isnan(path.fuel_kg) && isnan(path.initial.fields[0]));
+            path.fuel_kg = 80.0, path.initial.fields[2] = 1500.0, path.transition_plan = 3;
+            fsim_route_plan_init(&plan);
+            CHECK(plan.struct_size == sizeof plan && plan.route.kind == FSIM_BATCH_ROUTE && plan.route.struct_size == sizeof plan.route);
+            plan.plan_id = 61, plan.version = 2, plan.detailed = 1, plan.remarks_name = "east";
+            plan.route.fields = options, plan.route.count = 4, plan.route.waypoints = pts, plan.route.waypoint_count = 2;
+            plan.points = &meta, plan.point_count = 1, plan.paths = &path, plan.path_count = 1;
+            CHECK(fsim_vehicle_publish_plan(world, planned, &plan, &reason) == FSIM_OK && strcmp(fsim_reason_name(reason), "wrong_plan_state") == 0);
+            fsim_plan_command_result_init(&pr);
+            CHECK(fsim_vehicle_plan_command(world, planned, 61, FSIM_PLAN_PREPARE_FOR_UPLOAD, NULL, &pr) == FSIM_OK && pr.completed == 1 &&
+                  pr.state == FSIM_PLAN_READY_FOR_UPLOAD && pr.plan_id == 61);
+            CHECK(fsim_vehicle_publish_plan(world, planned, &plan, &reason) == FSIM_OK && reason == 0);
+            CHECK(fsim_vehicle_plan_command(world, planned, 61, FSIM_PLAN_UPLOAD, NULL, &pr) == FSIM_OK && pr.completed == 1 && pr.state == FSIM_PLAN_UPLOADED);
+            fsim_plan_status_init(&ps);
+            CHECK(fsim_vehicle_plan_status(world, planned, 61, &ps) == FSIM_OK && ps.version == 2 && ps.revision == 1 &&
+                  ps.execution == FSIM_PLAN_EXECUTION_NONE);
+            CHECK(fsim_vehicle_plan_count(world, planned) == 1 && fsim_vehicle_plan_at(world, planned, 0, &ps) == FSIM_OK && ps.plan_id == 61);
+            /* read back: its route and its metadata, the texts the library's */
+            fsim_route_plan_init(&back);
+            CHECK(fsim_vehicle_get_plan(world, planned, 61, &back) == FSIM_OK && back.plan_id == 61 && back.version == 2 && back.detailed == 1);
+            CHECK(back.route.kind == FSIM_BATCH_ROUTE && back.route.waypoint_count == 2 && back.route.waypoints[1].altitude_m == 1500.0);
+            CHECK(strcmp(back.remarks_name, "east") == 0 && strcmp(back.remarks, "") == 0 && back.point_count == 1 && back.path_count == 1);
+            CHECK(back.points[0].point == 1 && back.points[0].source == FSIM_POINT_OPERATOR_DEFINED && back.points[0].locked == 1);
+            CHECK(strcmp(back.points[0].remarks, "the last") == 0 && strcmp(back.points[0].fix_key, "BRAVO") == 0 &&
+                  strcmp(back.points[0].fix_system, "") == 0);
+            CHECK(back.paths[0].fuel_kg == 80.0 && back.paths[0].initial.fields[2] == 1500.0 && back.paths[0].transition_plan == 3 &&
+                  isnan(back.paths[0].endurance_s));
+            /* prepared for activation, activated: executing once it flies, and its deactivation fails while it does */
+            CHECK(fsim_vehicle_plan_command(world, planned, 61, FSIM_PLAN_PREPARE_FOR_ACTIVATION, NULL, &pr) == FSIM_OK && pr.completed == 1 &&
+                  pr.state == FSIM_PLAN_READY_FOR_ACTIVATION && pr.check.status == FSIM_COMMAND_VALID);
+            fsim_command_options_init(&co);
+            co.source = FSIM_SOURCE_OVERRIDE;
+            CHECK(fsim_vehicle_plan_command(world, planned, 61, FSIM_PLAN_ACTIVATE, &co, &pr) == FSIM_OK && pr.completed == 1 &&
+                  pr.state == FSIM_PLAN_ACTIVATED && pr.check.status == FSIM_COMMAND_ACCEPTED && pr.check.activity != 0);
+            CHECK(fsim_world_step(world, 10) == FSIM_OK);
+            CHECK(fsim_vehicle_plan_status(world, planned, 61, &ps) == FSIM_OK && ps.execution == FSIM_PLAN_EXECUTION_EXECUTING &&
+                  ps.activity == pr.check.activity);
+            CHECK(fsim_vehicle_plan_command(world, planned, 61, FSIM_PLAN_DEACTIVATE, NULL, &pr) == FSIM_OK && pr.completed == 0 &&
+                  pr.state == FSIM_PLAN_ACTIVATED && strcmp(fsim_reason_name(pr.reason), "plan_executing") == 0);
+            /* FA's own deactivation: its activity canceled */
+            CHECK(fsim_vehicle_abort_plan(world, planned, 61, 0, &pr) == FSIM_OK && pr.completed == 1 && pr.state == FSIM_PLAN_DEACTIVATED);
+            CHECK(fsim_vehicle_plan_status(world, planned, 61, &ps) == FSIM_OK && ps.execution == FSIM_PLAN_EXECUTION_CANCELED &&
+                  strcmp(fsim_reason_name(ps.reason), "restricted") == 0);
+            /* for planning use only: its preparation for activation fails */
+            plan.plan_id = 62, plan.for_planning_use_only = 1;
+            CHECK(fsim_vehicle_plan_command(world, planned, 62, FSIM_PLAN_PREPARE_FOR_UPLOAD, NULL, &pr) == FSIM_OK && pr.completed == 1);
+            CHECK(fsim_vehicle_publish_plan(world, planned, &plan, &reason) == FSIM_OK && reason == 0);
+            CHECK(fsim_vehicle_plan_command(world, planned, 62, FSIM_PLAN_UPLOAD, NULL, &pr) == FSIM_OK && pr.completed == 1);
+            CHECK(fsim_vehicle_plan_command(world, planned, 62, FSIM_PLAN_PREPARE_FOR_ACTIVATION, NULL, &pr) == FSIM_OK && pr.completed == 0 &&
+                  pr.state == FSIM_PLAN_PREPARATION_FOR_ACTIVATION_FAILED && strcmp(fsim_reason_name(pr.reason), "planning_only") == 0);
+            CHECK(fsim_vehicle_remove_plan(world, planned, 62, &reason) == FSIM_OK && reason == 0);
+            CHECK(fsim_vehicle_plan_status(world, planned, 62, &ps) == FSIM_INVALID_ARGUMENT);
+            CHECK(fsim_vehicle_plan_command(world, planned, 61, 9, NULL, &pr) == FSIM_INVALID_ARGUMENT); /* (no such command) */
+            CHECK(strcmp(fsim_plan_state_name(FSIM_PLAN_READY_FOR_ACTIVATION), "ready_for_activation") == 0);
+            CHECK(strcmp(fsim_plan_command_name(FSIM_PLAN_DEACTIVATE), "deactivate") == 0);
+            CHECK(strcmp(fsim_plan_execution_name(FSIM_PLAN_EXECUTION_SUPERSEDED), "superseded") == 0);
+            CHECK(strcmp(fsim_point_source_name(FSIM_POINT_AUTO_ROUTED), "auto_routed") == 0);
+        }
+        {
             /* ABI 1.35 (4.38): civil path terminators - a radius to fix's quarter circle round its centre, read back; a
                procedure turn (a leg its segment does not define) refused invalid_waypoint at its point (reserved: its index +
                1), a manual termination mid-route that nothing ends invalid_waypoint */
@@ -1539,8 +1630,8 @@ int main(int argc, char** argv) {
             CHECK(fsim_vehicle_submit_behavior(world, viper, &hover, NULL, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED);
             CHECK(strcmp(fsim_reason_name(cr.reason), "not_supported") == 0);
             /* applicable, not built: the stage that builds it */
-            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route/metadata", &si) == FSIM_OK);
-            CHECK(si.support == FSIM_NOT_IMPLEMENTED && si.stage == 7);
+            CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.curve/discretized", &si) == FSIM_OK);
+            CHECK(si.support == FSIM_NOT_IMPLEMENTED && si.stage == 17);
             CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.route", &si) == FSIM_OK && si.support == FSIM_PARTIAL && strlen(si.missing) > 0);
             CHECK(fsim_vehicle_support(world, viper, "fsim.guidance.warp_drive", &si) != FSIM_OK);
             /* the status as a policy is answered: what it does not offer is unavailable, with why */

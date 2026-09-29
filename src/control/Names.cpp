@@ -49,6 +49,12 @@ const char* reasonName(Reason reason) noexcept {
     case Reason::TaskActive: return "task_active";
     case Reason::InsufficientEndurance: return "insufficient_endurance";
     case Reason::TerrainConflict: return "terrain_conflict";
+    case Reason::UnknownPlan: return "unknown_plan";
+    case Reason::WrongPlanState: return "wrong_plan_state";
+    case Reason::PlanExecuting: return "plan_executing";
+    case Reason::PlanNotReceived: return "plan_not_received";
+    case Reason::PlanningOnly: return "planning_only";
+    case Reason::PlanStoreFull: return "plan_store_full";
     default: return "?";
     }
 }
@@ -96,6 +102,12 @@ const char* reasonDescription(Reason reason) noexcept {
     case Reason::TaskActive: return "the task's activity is live";
     case Reason::InsufficientEndurance: return "its flight needs more fuel or charge than the vehicle has above its reserve";
     case Reason::TerrainConflict: return "its path goes below the terrain";
+    case Reason::UnknownPlan: return "no route plan is kept by that id";
+    case Reason::WrongPlanState: return "the plan is not in a state that takes it";
+    case Reason::PlanExecuting: return "the plan executes";
+    case Reason::PlanNotReceived: return "no plan by its id was published since FA was prepared for its upload";
+    case Reason::PlanningOnly: return "the plan is for planning use only: it is never activated";
+    case Reason::PlanStoreFull: return "the vehicle keeps as many plans as it can";
     default: return "";
     }
 }
@@ -230,6 +242,54 @@ const char* taskStateName(TaskState state) noexcept {
     case TaskState::Dropped: return "dropped";
     case TaskState::Failed: return "failed";
     case TaskState::Canceled: return "canceled";
+    default: return "?";
+    }
+}
+
+const char* planCommandName(PlanCommand command) noexcept {
+    switch (command) {
+    case PlanCommand::PrepareForUpload: return "prepare_for_upload";
+    case PlanCommand::Upload: return "upload";
+    case PlanCommand::PrepareForActivation: return "prepare_for_activation";
+    case PlanCommand::Activate: return "activate";
+    case PlanCommand::Deactivate: return "deactivate";
+    default: return "?";
+    }
+}
+
+const char* planStateName(PlanState state) noexcept {
+    switch (state) {
+    case PlanState::Inactive: return "inactive";
+    case PlanState::ReadyForUpload: return "ready_for_upload";
+    case PlanState::PreparationForUploadFailed: return "preparation_for_upload_failed";
+    case PlanState::UploadFailed: return "upload_failed";
+    case PlanState::Uploaded: return "uploaded";
+    case PlanState::PreparationForActivationFailed: return "preparation_for_activation_failed";
+    case PlanState::ReadyForActivation: return "ready_for_activation";
+    case PlanState::ActivationFailed: return "activation_failed";
+    case PlanState::Activated: return "activated";
+    case PlanState::Deactivated: return "deactivated";
+    default: return "?";
+    }
+}
+
+const char* planExecutionName(PlanExecution execution) noexcept {
+    switch (execution) {
+    case PlanExecution::None: return "none";
+    case PlanExecution::Pending: return "pending";
+    case PlanExecution::Executing: return "executing";
+    case PlanExecution::Complete: return "complete";
+    case PlanExecution::Superseded: return "superseded";
+    case PlanExecution::Canceled: return "canceled";
+    case PlanExecution::Failed: return "failed";
+    default: return "?";
+    }
+}
+
+const char* pointSourceName(PointSource source) noexcept {
+    switch (source) {
+    case PointSource::AutoRouted: return "auto_routed";
+    case PointSource::OperatorDefined: return "operator_defined";
     default: return "?";
     }
 }

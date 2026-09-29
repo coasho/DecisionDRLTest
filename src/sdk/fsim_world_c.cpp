@@ -2043,141 +2043,393 @@ void supportFields(const fsim::control::SupportCommand& c, std::vector<double>& 
 
 } // namespace
 
+namespace {
+
+/// The setpoint read back (readback.setpoint) as the batch item that would command it: its arrays the readback's.
+fsim_batch_command setpointOut(fsim_world* world) {
+    using namespace fsim::control;
+    auto& r = world->readback;
+    fsim_batch_command b;
+    std::memset(&b, 0, sizeof b);
+    b.struct_size = sizeof b;
+    r.fields.clear();
+    if (const auto* support = std::get_if<SupportCommand>(&r.setpoint.command)) {
+        b.kind = FSIM_BATCH_SUPPORT, b.code = static_cast<int32_t>(support->index());
+        supportFields(*support, r.fields);
+    } else if (Command c = std::get<Command>(r.setpoint.command); const auto* behavior = std::get_if<BehaviorCommand>(&c)) {
+        b.kind = FSIM_BATCH_BEHAVIOR;
+        r.names.clear(), r.values.clear(), r.points.clear();
+        for (const auto& [name, value] : behavior->params) r.names.push_back(world->intern(name)), r.values.push_back(value);
+        for (const PositionCommand& p : behavior->points)
+            r.points.push_back(fsim_position_command{p.latitudeRad, p.longitudeRad, p.altitudeMslM, p.airspeedMs, p.captureRadiusM});
+        r.behavior = fsim_behavior_command{world->intern(behavior->id), behavior->target,           r.names.data(), r.values.data(),
+                                           static_cast<uint32_t>(r.names.size()), r.points.data(), static_cast<uint32_t>(r.points.size())};
+        b.behavior = &r.behavior;
+    } else {
+        double* slots[kMaxCommandFields];
+        const std::size_t n = commandFields(c, slots);
+        for (std::size_t i = 0; i < n; ++i) r.fields.push_back(*slots[i]);
+        if (std::holds_alternative<PatternCommand>(c)) { // (and its shape's, ABI 1.21)
+            double* shaped[PatternShape::kFields];
+            r.setpoint.shape.fields(shaped);
+            for (double* f : shaped) r.fields.push_back(*f);
+        }
+        if (std::holds_alternative<CurveCommand>(c)) { // (and its reference in a frame, ABI 1.25)
+            double* shaped[CurveShape::kFields];
+            r.setpoint.curveShape.fields(shaped);
+            for (double* f : shaped) r.fields.push_back(*f);
+        }
+        if (std::holds_alternative<HsaCommand>(c)) b.kind = FSIM_BATCH_MODE, b.code = FSIM_MODE_HSA;
+        else if (std::holds_alternative<PatternCommand>(c)) b.kind = FSIM_BATCH_MODE, b.code = FSIM_MODE_PATTERN;
+        else if (std::holds_alternative<RouteCommand>(c)) b.kind = FSIM_BATCH_ROUTE, b.code = FSIM_MODE_ROUTE;
+        else if (std::holds_alternative<CurveCommand>(c)) b.kind = FSIM_BATCH_CURVE, b.code = FSIM_MODE_CURVE;
+        else b.kind = FSIM_BATCH_LEVEL, b.code = static_cast<int32_t>(c.index()); // (up to a behaviour's, the index is the level)
+    }
+    r.waypoints.resize(r.setpoint.waypoints.size());
+    for (std::size_t i = 0; i < r.waypoints.size(); ++i) {
+        const Waypoint& p = r.setpoint.waypoints[i];
+        fsim_waypoint& w = r.waypoints[i];
+        fsim_waypoint_init(&w);
+        w.latitude_rad = p.latitudeRad, w.longitude_rad = p.longitudeRad, w.altitude_m = p.altitudeM, w.altitude_reference = p.altitudeReference;
+        w.speed = p.speed, w.speed_reference = p.speedReference, w.turn = p.turn, w.max_bank_rad = p.maxBankRad, w.climb_rate_ms = p.climbRateMs;
+        w.id = p.id;
+        w.altitude_min_m = p.altitudeMinM, w.altitude_max_m = p.altitudeMaxM, w.kind = p.kind, w.waypoint_type = p.waypointType;
+        w.frame = p.frame, w.frame_rotation = p.frameRotation, w.frame_offsets = p.frameOffsets;
+        w.frame_x_m = p.frameXM, w.frame_y_m = p.frameYM, w.frame_z_m = p.frameZM;
+        w.course_rad = p.courseRad, w.turn_radius_m = p.turnRadiusM;
+        w.speed_optimization = p.speedOptimization, w.climb_optimization = p.climbOptimization, w.acceleration_ms2 = p.accelerationMs2;
+        w.arrival_begin_s = p.arrivalBeginS, w.arrival_end_s = p.arrivalEndS;
+        w.rnp_m = p.rnpM, w.next = p.next, w.terminator = p.terminator;
+    }
+    r.segments.resize(r.setpoint.segments.size());
+    for (std::size_t i = 0; i < r.segments.size(); ++i) {
+        const BezierSegment& p = r.setpoint.segments[i];
+        fsim_bezier_segment& s = r.segments[i];
+        fsim_bezier_segment_init(&s);
+        std::copy_n(p.north, 6, s.north), std::copy_n(p.east, 6, s.east), std::copy_n(p.down, 6, s.down);
+    }
+    const bool general = b.kind == FSIM_BATCH_CURVE && r.segments.empty() && !r.setpoint.nurbs.empty(); // (not all Bezier's form: ABI 1.24)
+    r.nurbs.resize(general ? r.setpoint.nurbs.size() : 0);
+    for (std::size_t i = 0; i < r.nurbs.size(); ++i) {
+        const NurbsSegment& p = r.setpoint.nurbs[i];
+        fsim_nurbs_segment& s = r.nurbs[i];
+        fsim_nurbs_segment_init(&s);
+        s.points = p.points, s.knots = p.knots;
+        std::copy_n(p.north, 10, s.north), std::copy_n(p.east, 10, s.east), std::copy_n(p.down, 10, s.down), std::copy_n(p.weight, 10, s.weight);
+        std::copy_n(p.knot, 14, s.knot);
+        s.curvature = p.curvature, s.first_index = p.firstIndex, s.last_index = p.lastIndex;
+    }
+    if (general) b.kind = FSIM_BATCH_NURBS;
+    r.loiters.resize(r.setpoint.loiters.size()); // (a route's: ABI 1.28)
+    for (std::size_t i = 0; i < r.loiters.size(); ++i) {
+        RouteLoiter l = r.setpoint.loiters[i];
+        fsim_route_loiter& c = r.loiters[i];
+        fsim_route_loiter_init(&c);
+        c.point = l.point, c.end_time_s = l.endTimeS;
+        double* f[RouteLoiter::kFields];
+        l.fields(f);
+        for (std::size_t k = 0; k < RouteLoiter::kFields; ++k) c.fields[k] = *f[k];
+    }
+    b.loiter_count = static_cast<uint32_t>(r.loiters.size()), b.loiters = r.loiters.empty() ? nullptr : r.loiters.data();
+    r.states.resize(r.setpoint.states.size()); // (a route's: ABI 1.31)
+    for (std::size_t i = 0; i < r.states.size(); ++i) {
+        RouteState s = r.setpoint.states[i];
+        fsim_route_state& c = r.states[i];
+        fsim_route_state_init(&c);
+        c.point = s.point;
+        double* f[RouteState::kFields];
+        s.fields(f);
+        for (std::size_t k = 0; k < RouteState::kFields; ++k) c.fields[k] = *f[k];
+    }
+    b.state_count = static_cast<uint32_t>(r.states.size()), b.states = r.states.empty() ? nullptr : r.states.data();
+    r.paths.resize(r.setpoint.paths.size()); // (a route's: ABI 1.33)
+    for (std::size_t i = 0; i < r.paths.size(); ++i) {
+        const RoutePath& p = r.setpoint.paths[i];
+        fsim_route_path& c = r.paths[i];
+        fsim_route_path_init(&c);
+        c.id = p.id, c.type = p.type, c.first = p.first, c.count = p.count;
+    }
+    b.path_count = static_cast<uint32_t>(r.paths.size()), b.paths = r.paths.empty() ? nullptr : r.paths.data();
+    r.branches.resize(r.setpoint.branches.size()); // (a route's: ABI 1.34)
+    for (std::size_t i = 0; i < r.branches.size(); ++i) {
+        RouteBranch x = r.setpoint.branches[i];
+        fsim_route_branch& c = r.branches[i];
+        fsim_route_branch_init(&c);
+        c.point = x.point;
+        double* f[RouteBranch::kFields];
+        x.fields(f);
+        for (std::size_t k = 0; k < RouteBranch::kFields; ++k) c.fields[k] = *f[k];
+    }
+    b.branch_count = static_cast<uint32_t>(r.branches.size()), b.branches = r.branches.empty() ? nullptr : r.branches.data();
+    r.terminators.resize(r.setpoint.terminators.size()); // (a route's: ABI 1.35)
+    for (std::size_t i = 0; i < r.terminators.size(); ++i) {
+        RouteTerminator x = r.setpoint.terminators[i];
+        fsim_route_terminator& c = r.terminators[i];
+        fsim_route_terminator_init(&c);
+        c.point = x.point;
+        double* f[RouteTerminator::kFields];
+        x.fields(f);
+        for (std::size_t k = 0; k < RouteTerminator::kFields; ++k) c.fields[k] = *f[k];
+    }
+    b.terminator_count = static_cast<uint32_t>(r.terminators.size()), b.terminators = r.terminators.empty() ? nullptr : r.terminators.data();
+    b.count = static_cast<uint32_t>(r.fields.size()), b.fields = r.fields.empty() ? nullptr : r.fields.data();
+    b.waypoint_count = static_cast<uint32_t>(r.waypoints.size()), b.waypoints = r.waypoints.empty() ? nullptr : r.waypoints.data();
+    b.segment_count = static_cast<uint32_t>(general ? r.nurbs.size() : r.segments.size()), b.segments = r.segments.empty() ? nullptr : r.segments.data();
+    b.nurbs = r.nurbs.empty() ? nullptr : r.nurbs.data();
+    return b;
+}
+
+} // namespace
+
 FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id activity, fsim_batch_command* out) {
     if (!world || !out || out->struct_size < sizeof(uint32_t)) return FSIM_INVALID_ARGUMENT;
     return guard("fsim_activity_get_setpoint", [&]() -> int {
-        using namespace fsim::control;
-        auto& r = world->readback;
-        if (!world->world.activitySetpoint(activity, r.setpoint))
+        if (!world->world.activitySetpoint(activity, world->readback.setpoint))
             return absent(FSIM_INVALID_ARGUMENT, "fsim_activity_get_setpoint: no live activity " + std::to_string(activity));
-        fsim_batch_command b;
-        std::memset(&b, 0, sizeof b);
-        b.struct_size = sizeof b;
-        r.fields.clear();
-        if (const auto* support = std::get_if<SupportCommand>(&r.setpoint.command)) {
-            b.kind = FSIM_BATCH_SUPPORT, b.code = static_cast<int32_t>(support->index());
-            supportFields(*support, r.fields);
-        } else if (Command c = std::get<Command>(r.setpoint.command); const auto* behavior = std::get_if<BehaviorCommand>(&c)) {
-            b.kind = FSIM_BATCH_BEHAVIOR;
-            r.names.clear(), r.values.clear(), r.points.clear();
-            for (const auto& [name, value] : behavior->params) r.names.push_back(world->intern(name)), r.values.push_back(value);
-            for (const PositionCommand& p : behavior->points)
-                r.points.push_back(fsim_position_command{p.latitudeRad, p.longitudeRad, p.altitudeMslM, p.airspeedMs, p.captureRadiusM});
-            r.behavior = fsim_behavior_command{world->intern(behavior->id), behavior->target,           r.names.data(), r.values.data(),
-                                               static_cast<uint32_t>(r.names.size()), r.points.data(), static_cast<uint32_t>(r.points.size())};
-            b.behavior = &r.behavior;
-        } else {
-            double* slots[kMaxCommandFields];
-            const std::size_t n = commandFields(c, slots);
-            for (std::size_t i = 0; i < n; ++i) r.fields.push_back(*slots[i]);
-            if (std::holds_alternative<PatternCommand>(c)) { // (and its shape's, ABI 1.21)
-                double* shaped[PatternShape::kFields];
-                r.setpoint.shape.fields(shaped);
-                for (double* f : shaped) r.fields.push_back(*f);
-            }
-            if (std::holds_alternative<CurveCommand>(c)) { // (and its reference in a frame, ABI 1.25)
-                double* shaped[CurveShape::kFields];
-                r.setpoint.curveShape.fields(shaped);
-                for (double* f : shaped) r.fields.push_back(*f);
-            }
-            if (std::holds_alternative<HsaCommand>(c)) b.kind = FSIM_BATCH_MODE, b.code = FSIM_MODE_HSA;
-            else if (std::holds_alternative<PatternCommand>(c)) b.kind = FSIM_BATCH_MODE, b.code = FSIM_MODE_PATTERN;
-            else if (std::holds_alternative<RouteCommand>(c)) b.kind = FSIM_BATCH_ROUTE, b.code = FSIM_MODE_ROUTE;
-            else if (std::holds_alternative<CurveCommand>(c)) b.kind = FSIM_BATCH_CURVE, b.code = FSIM_MODE_CURVE;
-            else b.kind = FSIM_BATCH_LEVEL, b.code = static_cast<int32_t>(c.index()); // (up to a behaviour's, the index is the level)
-        }
-        r.waypoints.resize(r.setpoint.waypoints.size());
-        for (std::size_t i = 0; i < r.waypoints.size(); ++i) {
-            const Waypoint& p = r.setpoint.waypoints[i];
-            fsim_waypoint& w = r.waypoints[i];
-            fsim_waypoint_init(&w);
-            w.latitude_rad = p.latitudeRad, w.longitude_rad = p.longitudeRad, w.altitude_m = p.altitudeM, w.altitude_reference = p.altitudeReference;
-            w.speed = p.speed, w.speed_reference = p.speedReference, w.turn = p.turn, w.max_bank_rad = p.maxBankRad, w.climb_rate_ms = p.climbRateMs;
-            w.id = p.id;
-            w.altitude_min_m = p.altitudeMinM, w.altitude_max_m = p.altitudeMaxM, w.kind = p.kind, w.waypoint_type = p.waypointType;
-            w.frame = p.frame, w.frame_rotation = p.frameRotation, w.frame_offsets = p.frameOffsets;
-            w.frame_x_m = p.frameXM, w.frame_y_m = p.frameYM, w.frame_z_m = p.frameZM;
-            w.course_rad = p.courseRad, w.turn_radius_m = p.turnRadiusM;
-            w.speed_optimization = p.speedOptimization, w.climb_optimization = p.climbOptimization, w.acceleration_ms2 = p.accelerationMs2;
-            w.arrival_begin_s = p.arrivalBeginS, w.arrival_end_s = p.arrivalEndS;
-            w.rnp_m = p.rnpM, w.next = p.next, w.terminator = p.terminator;
-        }
-        r.segments.resize(r.setpoint.segments.size());
-        for (std::size_t i = 0; i < r.segments.size(); ++i) {
-            const BezierSegment& p = r.setpoint.segments[i];
-            fsim_bezier_segment& s = r.segments[i];
-            fsim_bezier_segment_init(&s);
-            std::copy_n(p.north, 6, s.north), std::copy_n(p.east, 6, s.east), std::copy_n(p.down, 6, s.down);
-        }
-        const bool general = b.kind == FSIM_BATCH_CURVE && r.segments.empty() && !r.setpoint.nurbs.empty(); // (not all Bezier's form: ABI 1.24)
-        r.nurbs.resize(general ? r.setpoint.nurbs.size() : 0);
-        for (std::size_t i = 0; i < r.nurbs.size(); ++i) {
-            const NurbsSegment& p = r.setpoint.nurbs[i];
-            fsim_nurbs_segment& s = r.nurbs[i];
-            fsim_nurbs_segment_init(&s);
-            s.points = p.points, s.knots = p.knots;
-            std::copy_n(p.north, 10, s.north), std::copy_n(p.east, 10, s.east), std::copy_n(p.down, 10, s.down), std::copy_n(p.weight, 10, s.weight);
-            std::copy_n(p.knot, 14, s.knot);
-            s.curvature = p.curvature, s.first_index = p.firstIndex, s.last_index = p.lastIndex;
-        }
-        if (general) b.kind = FSIM_BATCH_NURBS;
-        r.loiters.resize(r.setpoint.loiters.size()); // (a route's: ABI 1.28)
-        for (std::size_t i = 0; i < r.loiters.size(); ++i) {
-            RouteLoiter l = r.setpoint.loiters[i];
-            fsim_route_loiter& c = r.loiters[i];
-            fsim_route_loiter_init(&c);
-            c.point = l.point, c.end_time_s = l.endTimeS;
-            double* f[RouteLoiter::kFields];
-            l.fields(f);
-            for (std::size_t k = 0; k < RouteLoiter::kFields; ++k) c.fields[k] = *f[k];
-        }
-        b.loiter_count = static_cast<uint32_t>(r.loiters.size()), b.loiters = r.loiters.empty() ? nullptr : r.loiters.data();
-        r.states.resize(r.setpoint.states.size()); // (a route's: ABI 1.31)
-        for (std::size_t i = 0; i < r.states.size(); ++i) {
-            RouteState s = r.setpoint.states[i];
-            fsim_route_state& c = r.states[i];
-            fsim_route_state_init(&c);
-            c.point = s.point;
-            double* f[RouteState::kFields];
-            s.fields(f);
-            for (std::size_t k = 0; k < RouteState::kFields; ++k) c.fields[k] = *f[k];
-        }
-        b.state_count = static_cast<uint32_t>(r.states.size()), b.states = r.states.empty() ? nullptr : r.states.data();
-        r.paths.resize(r.setpoint.paths.size()); // (a route's: ABI 1.33)
-        for (std::size_t i = 0; i < r.paths.size(); ++i) {
-            const RoutePath& p = r.setpoint.paths[i];
-            fsim_route_path& c = r.paths[i];
-            fsim_route_path_init(&c);
-            c.id = p.id, c.type = p.type, c.first = p.first, c.count = p.count;
-        }
-        b.path_count = static_cast<uint32_t>(r.paths.size()), b.paths = r.paths.empty() ? nullptr : r.paths.data();
-        r.branches.resize(r.setpoint.branches.size()); // (a route's: ABI 1.34)
-        for (std::size_t i = 0; i < r.branches.size(); ++i) {
-            RouteBranch x = r.setpoint.branches[i];
-            fsim_route_branch& c = r.branches[i];
-            fsim_route_branch_init(&c);
-            c.point = x.point;
-            double* f[RouteBranch::kFields];
-            x.fields(f);
-            for (std::size_t k = 0; k < RouteBranch::kFields; ++k) c.fields[k] = *f[k];
-        }
-        b.branch_count = static_cast<uint32_t>(r.branches.size()), b.branches = r.branches.empty() ? nullptr : r.branches.data();
-        r.terminators.resize(r.setpoint.terminators.size()); // (a route's: ABI 1.35)
-        for (std::size_t i = 0; i < r.terminators.size(); ++i) {
-            RouteTerminator x = r.setpoint.terminators[i];
-            fsim_route_terminator& c = r.terminators[i];
-            fsim_route_terminator_init(&c);
-            c.point = x.point;
-            double* f[RouteTerminator::kFields];
-            x.fields(f);
-            for (std::size_t k = 0; k < RouteTerminator::kFields; ++k) c.fields[k] = *f[k];
-        }
-        b.terminator_count = static_cast<uint32_t>(r.terminators.size()), b.terminators = r.terminators.empty() ? nullptr : r.terminators.data();
-        b.count = static_cast<uint32_t>(r.fields.size()), b.fields = r.fields.empty() ? nullptr : r.fields.data();
-        b.waypoint_count = static_cast<uint32_t>(r.waypoints.size()), b.waypoints = r.waypoints.empty() ? nullptr : r.waypoints.data();
-        b.segment_count = static_cast<uint32_t>(general ? r.nurbs.size() : r.segments.size()), b.segments = r.segments.empty() ? nullptr : r.segments.data();
-        b.nurbs = r.nurbs.empty() ? nullptr : r.nurbs.data();
+        const fsim_batch_command b = setpointOut(world);
         return copyOut(b, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+    });
+}
+
+// --- Route plans (ABI 1.36; docs/flight-autonomy.md, 4.39) ---
+
+FSIM_API void fsim_point_metadata_init(fsim_point_metadata* metadata) {
+    if (!metadata) return;
+    std::memset(metadata, 0, sizeof *metadata);
+    metadata->struct_size = sizeof *metadata;
+}
+
+FSIM_API void fsim_path_metadata_init(fsim_path_metadata* metadata) {
+    if (!metadata) return;
+    std::memset(metadata, 0, sizeof *metadata);
+    metadata->struct_size = sizeof *metadata;
+    fsim_route_state_init(&metadata->initial);
+    metadata->endurance_s = metadata->fuel_kg = metadata->gross_weight_kg = std::numeric_limits<double>::quiet_NaN();
+}
+
+FSIM_API void fsim_route_plan_init(fsim_route_plan* plan) {
+    if (!plan) return;
+    std::memset(plan, 0, sizeof *plan);
+    plan->struct_size = sizeof *plan;
+    plan->route.struct_size = sizeof plan->route;
+    plan->route.kind = FSIM_BATCH_ROUTE, plan->route.code = FSIM_MODE_ROUTE;
+}
+
+FSIM_API void fsim_plan_status_init(fsim_plan_status* status) {
+    if (!status) return;
+    std::memset(status, 0, sizeof *status);
+    status->struct_size = sizeof *status;
+    status->percent = status->start_time = status->end_time = std::numeric_limits<double>::quiet_NaN();
+}
+
+FSIM_API void fsim_plan_command_result_init(fsim_plan_command_result* result) {
+    if (!result) return;
+    std::memset(result, 0, sizeof *result);
+    result->struct_size = sizeof *result;
+}
+
+FSIM_API const char* fsim_plan_command_name(int command) {
+    return command >= 0 && command < static_cast<int>(fsim::control::PlanCommand::Count)
+               ? fsim::control::planCommandName(static_cast<fsim::control::PlanCommand>(command))
+               : "?";
+}
+
+FSIM_API const char* fsim_plan_state_name(int state) {
+    return state >= 0 && state < static_cast<int>(fsim::control::PlanState::Count) ? fsim::control::planStateName(static_cast<fsim::control::PlanState>(state))
+                                                                                    : "?";
+}
+
+FSIM_API const char* fsim_plan_execution_name(int execution) {
+    return execution >= 0 && execution < static_cast<int>(fsim::control::PlanExecution::Count)
+               ? fsim::control::planExecutionName(static_cast<fsim::control::PlanExecution>(execution))
+               : "?";
+}
+
+FSIM_API const char* fsim_point_source_name(int source) {
+    return source >= 0 && source < static_cast<int>(fsim::control::PointSource::Count)
+               ? fsim::control::pointSourceName(static_cast<fsim::control::PointSource>(source))
+               : "?";
+}
+
+namespace {
+
+std::string text(const char* s) { return s ? std::string(s) : std::string(); }
+
+/// A plan's points' metadata as the caller's header laid it out (`[0].struct_size` apart); false if it cannot be read.
+bool toPointMetadata(const fsim_point_metadata* m, uint32_t count, std::vector<fsim::control::PointMetadata>& out) {
+    using fsim::control::PointSource;
+    out.clear();
+    if (count == 0) return true;
+    if (!m || m[0].struct_size < sizeof(fsim_point_metadata)) return false; // (its first layout)
+    const uint32_t stride = m[0].struct_size;
+    const auto* bytes = reinterpret_cast<const unsigned char*>(m);
+    out.resize(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        fsim_point_metadata c;
+        std::memcpy(&c, bytes + static_cast<std::size_t>(i) * stride, sizeof c);
+        fsim::control::PointMetadata& p = out[i];
+        p.point = c.point;
+        p.source = c.source >= 0 && c.source < static_cast<int32_t>(PointSource::Count) ? static_cast<PointSource>(c.source) : PointSource::Count;
+        p.locked = c.locked != 0, p.modified = c.modified != 0;
+        p.remarksName = text(c.remarks_name), p.remarks = text(c.remarks), p.fixKey = text(c.fix_key), p.fixSystem = text(c.fix_system);
+    }
+    return true;
+}
+
+/// A plan's paths' metadata likewise.
+bool toPathMetadata(const fsim_path_metadata* m, uint32_t count, std::vector<fsim::control::PathMetadata>& out) {
+    using fsim::control::RouteState;
+    out.clear();
+    if (count == 0) return true;
+    if (!m || m[0].struct_size < sizeof(fsim_path_metadata)) return false;
+    const uint32_t stride = m[0].struct_size;
+    const auto* bytes = reinterpret_cast<const unsigned char*>(m);
+    out.resize(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        fsim_path_metadata c;
+        std::memcpy(&c, bytes + static_cast<std::size_t>(i) * stride, sizeof c);
+        fsim::control::PathMetadata& p = out[i];
+        p.path = c.path;
+        p.initial.point = c.initial.point;
+        double* f[RouteState::kFields];
+        p.initial.fields(f);
+        for (std::size_t k = 0; k < RouteState::kFields; ++k) *f[k] = c.initial.fields[k];
+        p.enduranceS = c.endurance_s, p.fuelKg = c.fuel_kg, p.grossWeightKg = c.gross_weight_kg, p.transitionPlan = c.transition_plan;
+    }
+    return true;
+}
+
+int planStatusOut(const fsim::control::PlanStatus& s, fsim_plan_status* out) {
+    fsim_plan_status c;
+    fsim_plan_status_init(&c);
+    c.state = static_cast<int32_t>(s.state), c.plan_id = s.id, c.version = s.version, c.revision = s.revision;
+    c.execution = static_cast<int32_t>(s.execution), c.reason = static_cast<int32_t>(s.reason), c.for_planning_use_only = s.forPlanningUseOnly ? 1 : 0;
+    c.activity = s.activity, c.percent = s.percent, c.start_time = s.startTime, c.end_time = s.endTime, c.command_id = s.commandId;
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+/// Its answer into the caller's struct: a validation's or a NEW's kept as the world's last (fsim_last_command_detail).
+int planResultOut(fsim_world* world, uint32_t id, const fsim::control::PlanCommandResult& r, fsim_plan_command_result* out) {
+    using fsim::control::PlanCommand;
+    fsim_plan_command_result c;
+    fsim_plan_command_result_init(&c);
+    c.completed = r.completed ? 1 : 0, c.plan_id = r.plan, c.command = static_cast<int32_t>(r.command);
+    c.state = static_cast<int32_t>(r.state), c.reason = static_cast<int32_t>(r.reason);
+    const bool checked = r.command == PlanCommand::PrepareForActivation || r.command == PlanCommand::Activate;
+    toC(checked ? world : nullptr, id, r.check, &c.check);
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+} // namespace
+
+FSIM_API int fsim_vehicle_publish_plan(fsim_world* world, uint32_t id, const fsim_route_plan* plan, int32_t* reason) {
+    if (!world || !plan || !reason || plan->struct_size < sizeof(fsim_route_plan)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_publish_plan: bad arguments");
+    return guard("fsim_vehicle_publish_plan", [&]() -> int {
+        using namespace fsim::control;
+        BatchCommand item;
+        std::vector<BezierSegment> curve;
+        std::vector<NurbsSegment> nurbs;
+        PatternShape shape;
+        CurveShape curveShape;
+        RoutePlan p;
+        const Command* c = nullptr;
+        if (plan->route.kind != FSIM_BATCH_ROUTE ||
+            !fromBatch(world, plan->route, item, p.waypoints, curve, nurbs, shape, curveShape, p.loiters, p.states, p.paths, p.branches, p.terminators) ||
+            !(c = std::get_if<Command>(&item.command)) || !std::holds_alternative<RouteCommand>(*c))
+            return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_publish_plan: its route cannot be read");
+        if (!toPointMetadata(plan->points, plan->point_count, p.pointMetadata) || !toPathMetadata(plan->paths, plan->path_count, p.pathMetadata))
+            return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_publish_plan: its metadata cannot be read");
+        p.id = plan->plan_id, p.version = plan->version, p.forPlanningUseOnly = plan->for_planning_use_only != 0;
+        p.route = std::get<RouteCommand>(*c), p.detailed = plan->detailed != 0;
+        p.remarksName = text(plan->remarks_name), p.remarks = text(plan->remarks);
+        *reason = static_cast<int32_t>(world->world.publishPlan(id, p));
+        return FSIM_OK;
+    });
+}
+
+FSIM_API int fsim_vehicle_plan_command(fsim_world* world, uint32_t id, uint64_t plan_id, int32_t command, const fsim_command_options* options,
+                                       fsim_plan_command_result* result) {
+    if (!world || !result || command < 0 || command >= static_cast<int32_t>(fsim::control::PlanCommand::Count))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_plan_command: bad arguments");
+    return guard("fsim_vehicle_plan_command", [&]() -> int {
+        return planResultOut(world, id, world->world.planCommand(id, plan_id, static_cast<fsim::control::PlanCommand>(command), fromC(options)), result);
+    });
+}
+
+FSIM_API int fsim_vehicle_abort_plan(fsim_world* world, uint32_t id, uint64_t plan_id, int32_t reason, fsim_plan_command_result* result) {
+    if (!world || !result || reason < 0 || reason >= static_cast<int32_t>(fsim::control::Reason::Count))
+        return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_abort_plan: bad arguments");
+    return guard("fsim_vehicle_abort_plan", [&]() -> int {
+        const auto why = reason ? static_cast<fsim::control::Reason>(reason) : fsim::control::Reason::Restricted;
+        return planResultOut(world, id, world->world.abortPlan(id, plan_id, why), result);
+    });
+}
+
+FSIM_API int fsim_vehicle_remove_plan(fsim_world* world, uint32_t id, uint64_t plan_id, int32_t* reason) {
+    if (!world || !reason) return FSIM_INVALID_ARGUMENT;
+    *reason = static_cast<int32_t>(world->world.removePlan(id, plan_id));
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_vehicle_plan_status(fsim_world* world, uint32_t id, uint64_t plan_id, fsim_plan_status* out) {
+    if (!world || !out) return FSIM_INVALID_ARGUMENT;
+    const auto s = world->world.planStatus(id, plan_id);
+    if (!s) return absent(FSIM_INVALID_ARGUMENT, "fsim_vehicle_plan_status: no plan " + std::to_string(plan_id));
+    return planStatusOut(*s, out);
+}
+
+FSIM_API uint32_t fsim_vehicle_plan_count(fsim_world* world, uint32_t id) {
+    return world ? static_cast<uint32_t>(world->world.plans(id).size()) : 0;
+}
+
+FSIM_API int fsim_vehicle_plan_at(fsim_world* world, uint32_t id, uint32_t index, fsim_plan_status* out) {
+    if (!world || !out) return FSIM_INVALID_ARGUMENT;
+    const auto all = world->world.plans(id);
+    if (index >= all.size()) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_plan_at: no plan " + std::to_string(index));
+    return planStatusOut(all[index], out);
+}
+
+FSIM_API int fsim_vehicle_get_plan(fsim_world* world, uint32_t id, uint64_t plan_id, fsim_route_plan* out) {
+    if (!world || !out || out->struct_size < sizeof(uint32_t)) return FSIM_INVALID_ARGUMENT;
+    return guard("fsim_vehicle_get_plan", [&]() -> int {
+        using namespace fsim::control;
+        auto kept = world->world.plan(id, plan_id);
+        if (!kept) return absent(FSIM_INVALID_ARGUMENT, "fsim_vehicle_get_plan: no plan uploaded by id " + std::to_string(plan_id));
+        auto& pr = world->planReadback;
+        pr.plan = std::move(*kept);
+        const RoutePlan& p = pr.plan;
+        Setpoint& route = world->readback.setpoint; // (its route, as a setpoint's)
+        route = Setpoint{};
+        route.command = Command(p.route);
+        route.waypoints = p.waypoints, route.loiters = p.loiters, route.states = p.states, route.paths = p.paths;
+        route.branches = p.branches, route.terminators = p.terminators;
+        fsim_route_plan c;
+        fsim_route_plan_init(&c);
+        c.plan_id = p.id, c.version = p.version, c.for_planning_use_only = p.forPlanningUseOnly ? 1 : 0, c.detailed = p.detailed ? 1 : 0;
+        c.route = setpointOut(world);
+        c.remarks_name = p.remarksName.c_str(), c.remarks = p.remarks.c_str();
+        pr.points.resize(p.pointMetadata.size());
+        for (std::size_t i = 0; i < pr.points.size(); ++i) {
+            const PointMetadata& m = p.pointMetadata[i];
+            fsim_point_metadata& x = pr.points[i];
+            fsim_point_metadata_init(&x);
+            x.point = m.point, x.source = static_cast<int32_t>(m.source), x.locked = m.locked ? 1 : 0, x.modified = m.modified ? 1 : 0;
+            x.remarks_name = m.remarksName.c_str(), x.remarks = m.remarks.c_str(), x.fix_key = m.fixKey.c_str(), x.fix_system = m.fixSystem.c_str();
+        }
+        pr.paths.resize(p.pathMetadata.size());
+        for (std::size_t i = 0; i < pr.paths.size(); ++i) {
+            PathMetadata m = p.pathMetadata[i];
+            fsim_path_metadata& x = pr.paths[i];
+            fsim_path_metadata_init(&x);
+            x.path = m.path, x.initial.point = m.initial.point;
+            double* f[RouteState::kFields];
+            m.initial.fields(f);
+            for (std::size_t k = 0; k < RouteState::kFields; ++k) x.initial.fields[k] = *f[k];
+            x.endurance_s = m.enduranceS, x.fuel_kg = m.fuelKg, x.gross_weight_kg = m.grossWeightKg, x.transition_plan = m.transitionPlan;
+        }
+        c.points = pr.points.empty() ? nullptr : pr.points.data(), c.point_count = static_cast<uint32_t>(pr.points.size());
+        c.paths = pr.paths.empty() ? nullptr : pr.paths.data(), c.path_count = static_cast<uint32_t>(pr.paths.size());
+        return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
     });
 }
 

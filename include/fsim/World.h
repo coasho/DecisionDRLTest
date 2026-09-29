@@ -292,6 +292,21 @@ public:
     control::Reason removeTask(control::TaskId task);
     std::optional<control::TaskStatus> taskStatus(control::TaskId task) const;
     std::vector<control::TaskStatus> tasks() const;
+    // Route plans (docs/sdk/control.md, "Route plans"): A-GRA's route plans,
+    // kept by id and taken through the plan activation states before they fly.
+    /// A plan published (A-GRA's MA_RoutePlanMT): taken where FA listens for
+    /// its id - prepared for upload - else WrongPlanState; InvalidParameter
+    /// for id 0 or malformed metadata.
+    control::Reason publishPlan(const control::RoutePlan& plan);
+    /// A plan activation command, answered at once: completed or failed, the plan's state after it.
+    control::PlanCommandResult planCommand(control::PlanId plan, control::PlanCommand command, const control::CommandOptions& options = {});
+    /// FA's own deactivation (the platform's): Deactivated, its live activity canceled with `reason`.
+    control::PlanCommandResult abortPlan(control::PlanId plan, control::Reason reason = control::Reason::Restricted);
+    control::Reason removePlan(control::PlanId plan);
+    std::optional<control::PlanStatus> planStatus(control::PlanId plan) const;
+    std::vector<control::PlanStatus> plans() const;
+    /// Its content as uploaded last, its planning metadata with it.
+    std::optional<control::RoutePlan> plan(control::PlanId plan) const;
     /// The platform restricts a capability (collision avoidance, an
     /// operational restriction): a policy's NEW for it is refused with
     /// `reason`; what flies goes on. Availability::Available lifts it.

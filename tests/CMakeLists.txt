@@ -39,6 +39,7 @@ add_executable(fsim_tests
     test_route_paths.cpp
     test_route_branches.cpp
     test_route_terminators.cpp
+    test_route_plans.cpp
     test_grants.cpp
     test_control_compat.cpp
     test_profile.cpp

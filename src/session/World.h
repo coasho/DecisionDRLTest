@@ -203,6 +203,24 @@ public:
     /// A task's status; empty for one not kept (or an unknown vehicle).
     std::optional<control::TaskStatus> taskStatus(std::uint32_t id, control::TaskId task);
     std::vector<control::TaskStatus> tasks(std::uint32_t id);
+    // --- Route plans (docs/flight-autonomy.md, 4.39): kept by id, taken through the plan activation states ---
+    /// A plan published (A-GRA's MA_RoutePlanMT): taken where FA listens for its id (None: A-GRA's notification
+    /// CONFIRMED); WrongPlanState where it does not; InvalidParameter for id 0 or malformed metadata.
+    control::Reason publishPlan(std::uint32_t id, const control::RoutePlan& plan);
+    /// A plan activation command (A-GRA's), answered at once: completed or failed, and the plan's state after it.
+    control::PlanCommandResult planCommand(std::uint32_t id, control::PlanId plan, control::PlanCommand command,
+                                           const control::CommandOptions& options = {});
+    /// FA's own deactivation (VI 1.2.5.7), the platform's: a plan ready for activation or activated is Deactivated, its
+    /// live activity canceled with `reason`, its execution Canceled.
+    control::PlanCommandResult abortPlan(std::uint32_t id, control::PlanId plan, control::Reason reason = control::Reason::Restricted);
+    /// Forget a plan: UnknownPlan; WrongPlanState while its activity is live.
+    control::Reason removePlan(std::uint32_t id, control::PlanId plan);
+    /// A plan's status; empty for one not kept (or an unknown vehicle).
+    std::optional<control::PlanStatus> planStatus(std::uint32_t id, control::PlanId plan) const;
+    /// Every plan kept, in the order they were first prepared for upload (A-GRA's query for identifiers only).
+    std::vector<control::PlanStatus> plans(std::uint32_t id) const;
+    /// A plan's content as uploaded last, its metadata with it; empty for one not kept, or not yet uploaded.
+    std::optional<control::RoutePlan> plan(std::uint32_t id, control::PlanId plan) const;
     // --- Reports (docs/flight-autonomy.md, 4.12): what an activity flies, and where to ---
     /// What a live activity flies now, or waits to fly: its setpoint as
     /// updated, a route's waypoints, a curve's segments (appended ones too: its

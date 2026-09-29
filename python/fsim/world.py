@@ -305,6 +305,48 @@ class TaskState(enum.IntEnum):
     CANCELED = 6
 
 
+class PlanCommand(enum.IntEnum):
+    """A plan activation command (A-GRA's PlanActivationCommandEnum: the five the VI's route plan behaviours use;
+    docs/flight-autonomy.md, 4.39)."""
+    PREPARE_FOR_UPLOAD = 0      #: FA listens for the plan
+    UPLOAD = 1                  #: FA keeps the plan it received
+    PREPARE_FOR_ACTIVATION = 2  #: its final checks: its route checked as its NEW would be now, flying nothing
+    ACTIVATE = 3                #: fly it: its route's NEW
+    DEACTIVATE = 4              #: take it back, unless it executes
+
+
+class PlanState(enum.IntEnum):
+    """A plan's activation state (A-GRA's PlanActivationStateEnum): the states FA reaches, answering each command at
+    once and asking no approval."""
+    INACTIVE = 0                           #: not kept
+    READY_FOR_UPLOAD = 1                   #: FA listens for it
+    PREPARATION_FOR_UPLOAD_FAILED = 2      #: (a new id's, answered: not kept)
+    UPLOAD_FAILED = 3
+    UPLOADED = 4
+    PREPARATION_FOR_ACTIVATION_FAILED = 5
+    READY_FOR_ACTIVATION = 6
+    ACTIVATION_FAILED = 7
+    ACTIVATED = 8
+    DEACTIVATED = 9
+
+
+class PlanExecution(enum.IntEnum):
+    """A plan's execution (A-GRA's PlanExecutionStateEnum): its activity's, since it was activated last."""
+    NONE = 0        #: never activated
+    PENDING = 1     #: its activity waits to start, or is disabled
+    EXECUTING = 2   #: its activity flies
+    COMPLETE = 3
+    SUPERSEDED = 4  #: another command took its axes
+    CANCELED = 5    #: canceled on request or deleted, or ended by the platform (FA's abort)
+    FAILED = 6
+
+
+class PointSource(enum.IntEnum):
+    """Who made a route plan's point (A-GRA's PathSegmentSourceEnum)."""
+    AUTO_ROUTED = 0
+    OPERATOR_DEFINED = 1
+
+
 class Availability(enum.IntEnum):
     """Whether a capability can be commanded now (A-GRA's CapabilityAvailabilityEnum). DISABLED means switched off
     by the platform; a capability the vehicle does not offer is UNAVAILABLE, with the reason why
@@ -480,6 +522,21 @@ TaskStatus.__doc__ = ("A flight task's status (A-GRA's TaskStatus; docs/flight-a
                       "run flying or flown last of how many, the percent of the whole done, when it was commanded and ended, "
                       "its task command's id.")
 
+PlanStatus = collections.namedtuple(
+    "PlanStatus", "id state version revision execution reason for_planning_use_only activity percent start_time end_time command_id")
+PlanStatus.__doc__ = ("A route plan's status (A-GRA's plan activation status and route plan execution status; "
+                      "docs/flight-autonomy.md, 4.39): its fsim.PlanState; the version kept (0 before an upload) and its "
+                      "``revision``, its uploads kept; its fsim.PlanExecution, its activity's since it was activated last; why "
+                      "its last command failed or why its execution ended; whether it is for planning use only; its activity "
+                      "(0 before it was activated), the percent of its route flown, when it was activated and its activity "
+                      "ended, and its activation's command id.")
+
+PlanCommandResult = collections.namedtuple("PlanCommandResult", "plan command completed state reason activity index findings")
+PlanCommandResult.__doc__ = ("A plan command's answer (A-GRA's MA_MissionPlanActivationCommandStatus; docs/flight-autonomy.md, "
+                             "4.39): ``completed`` (A-GRA's COMPLETED; else FAILED), the plan's fsim.PlanState after it (INACTIVE: "
+                             "not kept) and why it failed; an activation's fsim.Activity (None otherwise); the waypoint a failed "
+                             "preparation for activation or activation names (-1 none), and its findings.")
+
 Finding = collections.namedtuple("Finding", "reason index constraint section associated description")
 Finding.__doc__ = ("One reason a command cannot be flown as asked (A-GRA's ValidationResult; docs/flight-autonomy.md, 4.8): the "
                    "reason, the field, route point or curve segment (-1 none), the performance limit it breaks, a curve "
@@ -652,6 +709,11 @@ def _info(t):
 
 def _task(t):
     return TaskStatus(t[0], TaskState(t[1]), _native.reason_name(t[2]), bool(t[3]), t[4], t[5], t[6], t[7], t[8], t[9], t[10])
+
+
+def _plan_status(t):
+    return PlanStatus(t[0], PlanState(t[1]), t[2], t[3], PlanExecution(t[4]), _native.reason_name(t[5]), bool(t[6]), t[7], t[8], t[9],
+                      t[10], t[11])
 
 
 def _findings(result, h):
@@ -1014,6 +1076,32 @@ RoutePath.__doc__ = ("One of a route's paths (A-GRA's MA_RoutePathType; docs/fli
                      "from ``first``, flown in order unless a point's ``next`` says otherwise - its last the route's end unless its "
                      "``next`` goes on - with its ``id`` and ``type`` (fsim.PathType or its name). At most 16, tiling the waypoints in "
                      "order; the route begins at the first path's first point.")
+
+PointMetadata = collections.namedtuple("PointMetadata", "point source locked modified remarks_name remarks fix_key fix_system",
+                                       defaults=(0, PointSource.AUTO_ROUTED, False, False, "", "", "", ""))
+PointMetadata.__doc__ = ("A route plan's point's planning metadata (A-GRA's MA_PathSegmentType's Source, Locked, Modified, Remarks "
+                         "and Fix_Identifier; docs/flight-autonomy.md, 4.39), for waypoint ``point``: its ``source`` "
+                         "(fsim.PointSource or its name), ``locked``, ``modified``, its remarks (``remarks_name``: 32 characters at "
+                         "most; ``remarks``: 1,024) and its fix's identifier (``fix_key``, ``fix_system``: 256 each). Printable ASCII. "
+                         "Kept with its plan and read back; nothing flies by it.")
+
+PathMetadata = collections.namedtuple("PathMetadata", "path initial endurance_s fuel_kg gross_weight_kg transition_plan",
+                                      defaults=(0, None, HOLD, HOLD, HOLD, 0))
+PathMetadata.__doc__ = ("A route plan's path's planning metadata (A-GRA's MA_RoutePathType.InitialConditions; "
+                        "docs/flight-autonomy.md, 4.39), for path ``path`` (0 without paths): the aircraft's state as planned or "
+                        "assessed where it begins - ``initial``, a fsim.RouteState (its point not used; None: left out), its "
+                        "endurance (``endurance_s``, ``fuel_kg``), ``gross_weight_kg``, and ``transition_plan``, a route plan's id "
+                        "(0 none). Kept with its plan and read back; nothing flies by it.")
+
+RoutePlan = collections.namedtuple(
+    "RoutePlan", "id route version for_planning_use_only detailed remarks_name remarks point_metadata path_metadata",
+    defaults=(0, False, False, "", "", (), ()))
+RoutePlan.__doc__ = ("A route plan (A-GRA's MA_RoutePlanMT; docs/flight-autonomy.md, 4.39): a route FA keeps by its ``id`` (not 0) "
+                     "and ``version``, taken through the plan activation states before it flies (Vehicle.plan_command). Its "
+                     "``route`` a fsim.BatchCommand(\"submit_route\", ...) - its waypoints and their extras, its options (its "
+                     "command options not kept: an activation gives them); ``for_planning_use_only`` never activated; its planning "
+                     "metadata - ``detailed``, its remarks (``remarks_name``, ``remarks``), fsim.PointMetadata and "
+                     "fsim.PathMetadata, one a point and one a path at most - kept and read back, flown by nothing.")
 
 
 BezierSegment = collections.namedtuple("BezierSegment", "north east down")
@@ -1788,6 +1876,90 @@ class Vehicle:
     def tasks(self):
         """Every task kept - the caller's and the platform's suggestions - in the order they were made."""
         return [_task(t) for t in self._h.tasks(self.id)]
+
+    # --- Route plans (docs/flight-autonomy.md, 4.39): A-GRA's, kept by id and taken through the activation states --------
+    def publish_plan(self, plan):
+        """Publish a route plan (fsim.RoutePlan; A-GRA's MA_RoutePlanMT): taken where FA listens for its id - prepared
+        for upload (plan_command) - A-GRA's notification CONFIRMED. fsim.Rejected: "wrong_plan_state" where FA does not
+        listen for it; "invalid_parameter" for id 0, or metadata at no point or path, twice for one, or a text that is not
+        printable ASCII or is longer than A-GRA's."""
+        route = plan.route
+        if not isinstance(route, BatchCommand) or route.method != "submit_route":
+            raise ValueError("a plan's route is a fsim.BatchCommand('submit_route', ...)")
+        item, _ = route._native(self)
+        points = []
+        for m in plan.point_metadata:
+            m = PointMetadata(**m) if isinstance(m, dict) else PointMetadata(*m)
+            source = PointSource[m.source.upper()] if isinstance(m.source, str) else PointSource(m.source)
+            points.append((int(m.point), int(source), bool(m.locked), bool(m.modified), str(m.remarks_name), str(m.remarks), str(m.fix_key),
+                           str(m.fix_system)))
+        paths = []
+        for m in plan.path_metadata:
+            m = PathMetadata(**m) if isinstance(m, dict) else PathMetadata(*m)
+            initial = _states([RouteState() if m.initial is None else m.initial])[0]
+            paths.append((int(m.path), initial, float(m.endurance_s), float(m.fuel_kg), float(m.gross_weight_kg), int(m.transition_plan)))
+        reason = self._h.publish_plan(self.id, int(plan.id), int(plan.version), bool(plan.for_planning_use_only), bool(plan.detailed),
+                                      str(plan.remarks_name), str(plan.remarks), item, points, paths)
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+
+    def plan_command(self, plan_id, command, *, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
+                     interactive=True, rank=None, interrupt=True, precedence_override=None, window=None, override_rejection=False, controller=0):
+        """A plan activation command (fsim.PlanCommand or its name: "prepare_for_upload", "upload",
+        "prepare_for_activation", "activate", "deactivate"), answered at once: a fsim.PlanCommandResult. A failure is an
+        answer, not an error - ``completed`` False, why, and the plan's state. An activation is its route's NEW with the
+        options a submit takes; a preparation for activation its validation with them; a deactivation cancels, as their
+        source and controller, an activity not flying yet (one that flies fails "plan_executing")."""
+        command = PlanCommand[command.upper()] if isinstance(command, str) else PlanCommand(command)
+        t = self._h.plan_command(self.id, int(plan_id), int(command), int(source), None, int(range), int(min_version),
+                                 _envelope(command_id, trace, interactive, False, rank, interrupt, precedence_override, window, override_rejection,
+                                           controller))
+        return self._plan_answer(t, source, controller)
+
+    def _plan_answer(self, t, source, controller=0):
+        completed, plan, command, state, reason, check = t
+        activity, index, findings = None, -1, []
+        if check is not None:
+            index = check[5]
+            if command == PlanCommand.ACTIVATE and completed:
+                activity = Activity(self._world, check[2], "route", bool(check[4]), source, check[10], bool(check[15]), controller,
+                                    bool(check[17]), _endurance(self._h) if check[17] else None)
+            elif not completed:
+                findings, _ = _findings(check, self._h)
+        return PlanCommandResult(plan, PlanCommand(command), bool(completed), PlanState(state), _native.reason_name(reason), activity, index,
+                                 findings)
+
+    def abort_plan(self, plan_id, reason="restricted"):
+        """FA's own deactivation of a plan (VI 1.2.5.7), the platform's: one ready for activation or activated is
+        deactivated, its live activity canceled with ``reason`` (a name), its execution canceled. A fsim.PlanCommandResult:
+        failed "unknown_plan", or "wrong_plan_state" in any other state."""
+        return self._plan_answer(self._h.abort_plan(self.id, int(plan_id), _reason_code(reason)), Source.OVERRIDE)
+
+    def remove_plan(self, plan_id):
+        """Forget a plan: fsim.Rejected "unknown_plan", or "wrong_plan_state" while its activity is live."""
+        reason = self._h.remove_plan(self.id, int(plan_id))
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+
+    def plan_status(self, plan_id):
+        """A route plan's fsim.PlanStatus, or None for one not kept."""
+        t = self._h.plan_status(self.id, int(plan_id))
+        return None if t is None else _plan_status(t)
+
+    def plans(self):
+        """Every route plan kept, in the order they were first prepared for upload (A-GRA's query for identifiers only)."""
+        return [_plan_status(t) for t in self._h.plans(self.id)]
+
+    def plan(self, plan_id):
+        """A route plan's content as uploaded last, its metadata with it (A-GRA's query for a route plan): a
+        fsim.RoutePlan, its route the fsim.BatchCommand that would fly it; None for one not kept, or not yet uploaded."""
+        t = self._h.get_plan(self.id, int(plan_id))
+        if t is None:
+            return None
+        pid, version, planning, detailed, remarks_name, remarks, route, points, paths = t
+        return RoutePlan(pid, _setpoint(route), version, planning, detailed, remarks_name, remarks,
+                         tuple(PointMetadata(p[0], PointSource(p[1]), *p[2:]) for p in points),
+                         tuple(PathMetadata(q[0], RouteState(int(q[1][0]), *q[1][1:]), *q[2:]) for q in paths))
 
     @property
     def commanded(self):

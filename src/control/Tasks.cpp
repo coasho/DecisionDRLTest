@@ -59,6 +59,7 @@ double percentOf(const ActivityRecord& r) noexcept {
 } // namespace
 
 void CapabilityHost::noteEnd(const ActivityRecord& r) noexcept {
+    if (planned_) notePlanEnd(r); // (a route plan's: Plans.cpp)
     for (Task& t : tasks_)
         if (t.activity == r.id) {
             t.ended = endOf(r), t.reason = r.reason, t.endTime = r.endTime;

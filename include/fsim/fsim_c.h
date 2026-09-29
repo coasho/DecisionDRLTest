@@ -1338,6 +1338,117 @@ FSIM_API int fsim_vehicle_task_status(fsim_world* world, uint32_t id, uint64_t t
 FSIM_API uint32_t fsim_vehicle_task_count(fsim_world* world, uint32_t id);
 FSIM_API int fsim_vehicle_task_at(fsim_world* world, uint32_t id, uint32_t index, fsim_task_status* out);
 
+/* Route plans (ABI 1.36; docs/flight-autonomy.md, 4.39): A-GRA's route plans, kept by id and version and taken through the
+ * plan activation states (VI 1.2.5) before they fly, with their planning metadata (WPT-23), which nothing flies by. */
+enum fsim_plan_command { FSIM_PLAN_PREPARE_FOR_UPLOAD = 0, FSIM_PLAN_UPLOAD, FSIM_PLAN_PREPARE_FOR_ACTIVATION, FSIM_PLAN_ACTIVATE,
+                         FSIM_PLAN_DEACTIVATE };
+enum fsim_plan_state { FSIM_PLAN_INACTIVE = 0, FSIM_PLAN_READY_FOR_UPLOAD, FSIM_PLAN_PREPARATION_FOR_UPLOAD_FAILED, FSIM_PLAN_UPLOAD_FAILED,
+                       FSIM_PLAN_UPLOADED, FSIM_PLAN_PREPARATION_FOR_ACTIVATION_FAILED, FSIM_PLAN_READY_FOR_ACTIVATION,
+                       FSIM_PLAN_ACTIVATION_FAILED, FSIM_PLAN_ACTIVATED, FSIM_PLAN_DEACTIVATED };
+enum fsim_plan_execution { FSIM_PLAN_EXECUTION_NONE = 0, FSIM_PLAN_EXECUTION_PENDING, FSIM_PLAN_EXECUTION_EXECUTING, FSIM_PLAN_EXECUTION_COMPLETE,
+                           FSIM_PLAN_EXECUTION_SUPERSEDED, FSIM_PLAN_EXECUTION_CANCELED, FSIM_PLAN_EXECUTION_FAILED };
+enum fsim_point_source { FSIM_POINT_AUTO_ROUTED = 0, FSIM_POINT_OPERATOR_DEFINED };
+/* A route plan's point's planning metadata (A-GRA's MA_PathSegmentType's Source, Locked, Modified, Remarks and
+ * Fix_Identifier). Its texts printable ASCII, no longer than A-GRA's: 32, 1,024, 256 and 256 characters; NULL as "". */
+typedef struct fsim_point_metadata {
+    uint32_t struct_size;
+    uint32_t point;           /* the waypoint's index */
+    int32_t source;           /* fsim_point_source */
+    int32_t locked;           /* 1: not to be modified (operator-driven) */
+    int32_t modified;         /* 1: modified in a modified route plan */
+    const char* remarks_name; /* its Remarks' DisplayName */
+    const char* remarks;      /* its Remarks' Detail */
+    const char* fix_key;      /* its Fix_Identifier's Key */
+    const char* fix_system;   /* its Fix_Identifier's SystemName */
+} fsim_point_metadata;
+FSIM_API void fsim_point_metadata_init(fsim_point_metadata* metadata);
+/* A route plan's path's planning metadata (A-GRA's MA_RoutePathType.InitialConditions): the aircraft's state as planned or
+ * assessed where the path begins. */
+typedef struct fsim_path_metadata {
+    uint32_t struct_size;
+    uint32_t path;                 /* the path's index among the route's paths; 0 without paths */
+    fsim_route_state initial;      /* its InertialState, as a planned state's fields (its point not used) */
+    double endurance_s, fuel_kg;   /* its Endurance's Duration and Fuel (NaN: left out) */
+    double gross_weight_kg;        /* its GrossWeight */
+    uint64_t transition_plan;      /* its TransitionRoute: a route plan's id; 0 none */
+} fsim_path_metadata;
+FSIM_API void fsim_path_metadata_init(fsim_path_metadata* metadata);
+/* A route plan (A-GRA's MA_RoutePlanMT): its route a FSIM_BATCH_ROUTE item - its four options, its waypoints and their
+ * extras (its command options not kept) - and its planning metadata. */
+typedef struct fsim_route_plan {
+    uint32_t struct_size;
+    uint32_t version;                  /* A-GRA's RoutePlanID.Version */
+    uint64_t plan_id;                  /* the caller's, not 0 */
+    int32_t for_planning_use_only;     /* 1: never prepared for activation, or activated */
+    int32_t detailed;                  /* A-GRA's MA_RouteType.Detailed */
+    fsim_batch_command route;
+    const char* remarks_name;          /* its route's Remarks' DisplayName */
+    const char* remarks;               /* its route's Remarks' Detail */
+    const fsim_point_metadata* points; /* one a point at most, points[0].struct_size bytes apart */
+    uint32_t point_count;
+    uint32_t path_count;
+    const fsim_path_metadata* paths;   /* one a path at most, paths[0].struct_size bytes apart */
+} fsim_route_plan;
+FSIM_API void fsim_route_plan_init(fsim_route_plan* plan);
+/* A plan's status (A-GRA's plan activation status, and its route plan's execution status). */
+typedef struct fsim_plan_status {
+    uint32_t struct_size;
+    int32_t state;                 /* fsim_plan_state */
+    uint64_t plan_id;
+    uint32_t version;              /* the version kept; 0 before an upload */
+    uint32_t revision;             /* its uploads kept: its content's revision */
+    int32_t execution;             /* fsim_plan_execution */
+    int32_t reason;                /* why its last command failed, or why its execution ended */
+    int32_t for_planning_use_only;
+    int32_t reserved;
+    fsim_activity_id activity;     /* its activity, since it was activated last; 0 before */
+    double percent;                /* of its route: as it flies, or as it ended */
+    double start_time, end_time;   /* when it was activated last; when its activity ended (NaN until) */
+    uint64_t command_id;           /* its activation's */
+} fsim_plan_status;
+FSIM_API void fsim_plan_status_init(fsim_plan_status* status);
+/* A plan command's answer (A-GRA's MA_MissionPlanActivationCommandStatus): completed or failed, and the plan's state
+ * after it. `check` is PrepareForActivation's validation or Activate's NEW as it answered - the point a refusal names
+ * (reserved: its index + 1), its activity; fsim_last_command_detail has its details - or Deactivate's CANCEL. */
+typedef struct fsim_plan_command_result {
+    uint32_t struct_size;
+    int32_t completed;             /* 1: A-GRA's COMPLETED; 0: FAILED */
+    uint64_t plan_id;
+    int32_t command;               /* fsim_plan_command */
+    int32_t state;                 /* fsim_plan_state: the plan's after it (FSIM_PLAN_INACTIVE: not kept) */
+    int32_t reason;                /* why it failed */
+    int32_t reserved;
+    fsim_command_result check;
+} fsim_plan_command_result;
+FSIM_API void fsim_plan_command_result_init(fsim_plan_command_result* result);
+/* A plan published (A-GRA's MA_RoutePlanMT): FSIM_OK and `*reason` 0 where FA listens for its id (prepared for upload: A-GRA's
+ * notification CONFIRMED); wrong_plan_state where it does not; invalid_parameter for id 0 or malformed metadata.
+ * FSIM_INVALID_ARGUMENT for a route that cannot be read. Its texts copied. */
+FSIM_API int fsim_vehicle_publish_plan(fsim_world* world, uint32_t id, const fsim_route_plan* plan, int32_t* reason);
+/* A plan activation command (fsim_plan_command), answered at once. Activate is its route's NEW with `options` (NULL:
+ * fsim_command_options_init's); PrepareForActivation its validation with them; Deactivate cancels, as their source and
+ * controller, an activity not flying yet. */
+FSIM_API int fsim_vehicle_plan_command(fsim_world* world, uint32_t id, uint64_t plan_id, int32_t command, const fsim_command_options* options,
+                                       fsim_plan_command_result* result);
+/* FA's own deactivation (VI 1.2.5.7), the platform's: a plan ready for activation or activated is deactivated, its live
+ * activity canceled with `reason` (0: restricted), its execution canceled. */
+FSIM_API int fsim_vehicle_abort_plan(fsim_world* world, uint32_t id, uint64_t plan_id, int32_t reason, fsim_plan_command_result* result);
+/* Forget a plan: `*reason` unknown_plan, or wrong_plan_state while its activity is live. */
+FSIM_API int fsim_vehicle_remove_plan(fsim_world* world, uint32_t id, uint64_t plan_id, int32_t* reason);
+/* A plan's status: FSIM_INVALID_ARGUMENT for one not kept. */
+FSIM_API int fsim_vehicle_plan_status(fsim_world* world, uint32_t id, uint64_t plan_id, fsim_plan_status* out);
+/* Every plan kept, in the order they were first prepared for upload (A-GRA's query for identifiers only). */
+FSIM_API uint32_t fsim_vehicle_plan_count(fsim_world* world, uint32_t id);
+FSIM_API int fsim_vehicle_plan_at(fsim_world* world, uint32_t id, uint32_t index, fsim_plan_status* out);
+/* A plan's content as uploaded last, its metadata with it (A-GRA's query for a route plan): its arrays and texts the
+ * library's, until the next fsim_vehicle_get_plan or fsim_activity_get_setpoint. FSIM_INVALID_ARGUMENT for one not kept,
+ * or not yet uploaded. */
+FSIM_API int fsim_vehicle_get_plan(fsim_world* world, uint32_t id, uint64_t plan_id, fsim_route_plan* out);
+FSIM_API const char* fsim_plan_command_name(int command);     /* "prepare_for_upload", "upload", ... */
+FSIM_API const char* fsim_plan_state_name(int state);         /* "inactive", "ready_for_upload", ... */
+FSIM_API const char* fsim_plan_execution_name(int execution); /* "none", "pending", "executing", ... */
+FSIM_API const char* fsim_point_source_name(int source);      /* "auto_routed", "operator_defined" */
+
 /* Reports (ABI 1.12; docs/flight-autonomy.md, 4.12): what an activity flies, and where to. */
 /* What a live activity flies now, or waits to fly (A-GRA's last flight command), as the batch item that would command
  * it: its kind and code (a level, fsim_support, fsim_mode); its fields - a level's all of them (as

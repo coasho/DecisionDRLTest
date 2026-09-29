@@ -622,6 +622,44 @@ if (!v.submit(tooFastHsa, reject).accepted())                  // refused for wh
 - A waiting activity that fails as it would start, for what Clamp would fly,
   names a suggestion in its record (`ActivityRecord::suggestion`).
 
+### Route plans
+
+A-GRA's route plans ([flight-autonomy.md](../flight-autonomy.md), 4.39;
+VI 1.2.5): a route kept by id and version, taken through the plan
+activation states before it flies, with its planning metadata, which
+nothing flies by.
+
+```cpp
+RoutePlan plan;
+plan.id = 17, plan.version = 1;
+plan.waypoints = {east3km, east6km};
+PointMetadata first;
+first.point = 0, first.source = PointSource::OperatorDefined, first.fixKey = "ALPHA";
+plan.pointMetadata = {first};
+v.planCommand(17, PlanCommand::PrepareForUpload);                // FA listens for it: ReadyForUpload
+v.publishPlan(plan);                                              // A-GRA's MA_RoutePlanMT: Reason::None, CONFIRMED
+v.planCommand(17, PlanCommand::Upload);                           // kept: Uploaded, its revision 1
+v.planCommand(17, PlanCommand::PrepareForActivation);             // its route checked as its NEW would be: ReadyForActivation
+PlanCommandResult r = v.planCommand(17, PlanCommand::Activate);   // its NEW: Activated, r.check.activity flies it
+v.planStatus(17)->execution;                                      // PlanExecution::Pending, Executing, ... Complete
+v.planCommand(17, PlanCommand::Deactivate).reason;                // Reason::PlanExecuting while it flies
+v.plan(17)->pointMetadata[0].fixKey;                              // "ALPHA": kept and read back
+```
+
+- Each command is answered at once: completed, or failed with the reason,
+  and the plan's state after it. A command the plan's state does not take
+  is refused `wrong_plan_state`, the plan unchanged; an id not kept,
+  `unknown_plan`.
+- A deactivation takes back a plan ready for activation, or activated and
+  not flown yet (waiting for its axes or its start window: its activity
+  canceled); once it flies, it fails `plan_executing`. `abortPlan` is FA's
+  own: the platform deactivates it, its activity canceled.
+- Its execution is its activity's: pending, executing, complete,
+  superseded (another command took its axes), canceled, failed.
+- A plan for planning use only is never prepared for activation, or
+  activated (`planning_only`). A vehicle keeps 32 (`plan_store_full`);
+  `removePlan` forgets one that is not flying.
+
 ### Reports: what an activity flies, and where to
 
 An activity's setpoint read back, where it flies to, and what the vehicle

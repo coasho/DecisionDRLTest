@@ -71,7 +71,24 @@ CANNOT_COMPLY = {
     "task_active": "STATE_OR_SETTINGS",
     "insufficient_endurance": "CONSTRAINT_ENDURANCE",
     "terrain_conflict": "CONSTRAINT_SAFETY",
+    "unknown_plan": "UNKNOWN_ID",
+    "wrong_plan_state": "STATE_OR_SETTINGS",
+    "plan_executing": "STATE_OR_SETTINGS",
+    "plan_not_received": "INIT_CRITERIA_NOT_MET",
+    "planning_only": "STATE_OR_SETTINGS",
+    "plan_store_full": "INSUFFICIENT_RESOURCES",
 }
+
+#: fsim.PlanState -> A-GRA's PlanActivationStateEnum (docs/flight-autonomy.md, 4.39): the states FA reaches
+PLAN_ACTIVATION_STATE = {0: "INACTIVE", 1: "READY_FOR_UPLOAD", 2: "PREPARATION_FOR_UPLOAD_FAILED", 3: "UPLOAD_FAILED", 4: "UPLOADED",
+                         5: "PREPARATION_FOR_ACTIVATION_FAILED", 6: "READY_FOR_ACTIVATION", 7: "ACTIVATION_FAILED", 8: "ACTIVATED",
+                         9: "DEACTIVATED"}
+
+#: fsim.PlanExecution -> A-GRA's PlanExecutionStateEnum (its spelling, SUPERCEDED); a plan never activated has none
+PLAN_EXECUTION_STATE = {0: None, 1: "PENDING", 2: "EXECUTING", 3: "COMPLETE", 4: "SUPERCEDED", 5: "CANCELED", 6: "FAILED"}
+
+#: fsim.PlanCommand -> A-GRA's PlanActivationCommandEnum
+PLAN_ACTIVATION_COMMAND = {0: "PREPARE_FOR_UPLOAD", 1: "UPLOAD", 2: "PREPARE_FOR_ACTIVATION", 3: "ACTIVATE", 4: "DEACTIVATE"}
 
 #: fsim.TaskState -> A-GRA's RequirementExecutionStateEnum (a task kept, not commanded, awaits approval to execute)
 REQUIREMENT_EXECUTION_STATE = {0: "AWAITING_EXECUTION_APPROVAL", 1: "EXECUTION_PENDING", 2: "EXECUTING", 3: "COMPLETED", 4: "DROPPED",
@@ -327,6 +344,20 @@ def performance_profile(profile, capacity=None):
 def task_state(status):
     """A task's status (fsim.TaskStatus) as A-GRA's RequirementExecutionStateEnum (docs/flight-autonomy.md, 4.11)."""
     return REQUIREMENT_EXECUTION_STATE[int(status.state)]
+
+
+def plan_activation_status(answer):
+    """A plan command's answer (fsim.PlanCommandResult) as A-GRA's MA_MissionPlanActivationCommandStatus's parts
+    (docs/flight-autonomy.md, 4.39): its PlanActivationCommandEnum, the plan's PlanActivationStateEnum after it, its
+    CommandStatus (COMPLETED or FAILED) and, failed, its CannotComplyEnum."""
+    return {"CommandType": PLAN_ACTIVATION_COMMAND[int(answer.command)], "PlanActivationCommandState": PLAN_ACTIVATION_STATE[int(answer.state)],
+            "CommandStatus": "COMPLETED" if answer.completed else "FAILED",
+            "Reason": None if answer.completed else CANNOT_COMPLY.get(answer.reason, "INPUT_OTHER")}
+
+
+def plan_execution_state(status):
+    """A route plan's status (fsim.PlanStatus) as A-GRA's PlanExecutionStateEnum: None for one never activated."""
+    return PLAN_EXECUTION_STATE[int(status.execution)]
 
 
 def insufficient_endurance(endurance, capacity=None):

@@ -903,7 +903,57 @@ inline const char* modeBehavior(const Command& c) noexcept {
     return nullptr;
 }
 
+/// Who made a route plan's point (A-GRA's PathSegmentSourceEnum).
+enum class PointSource : std::uint8_t { AutoRouted, OperatorDefined, Count };
+/// "auto_routed", "operator_defined".
+FSIM_API const char* pointSourceName(PointSource source) noexcept;
 
+/// A route plan's point's planning metadata (A-GRA's MA_PathSegmentType's Source, Locked, Modified, Remarks and
+/// Fix_Identifier; docs/flight-autonomy.md, 4.39): kept with its plan and read back; nothing flies by it. Its texts are
+/// printable ASCII (A-GRA's VisibleString), no longer than A-GRA's.
+struct PointMetadata {
+    std::uint32_t point = 0;       ///< the waypoint's index
+    PointSource source = PointSource::AutoRouted;
+    bool locked = false;           ///< not to be modified: operator-driven
+    bool modified = false;         ///< modified in a modified route plan
+    std::string remarksName;       ///< its Remarks' DisplayName: 32 characters at most
+    std::string remarks;           ///< its Remarks' Detail: 1,024 at most
+    std::string fixKey, fixSystem; ///< its Fix_Identifier's Key and SystemName: 256 each at most
+};
+
+/// A route plan's path's planning metadata (A-GRA's MA_RoutePathType.InitialConditions, a PlanningLocationType;
+/// docs/flight-autonomy.md, 4.39): the aircraft's state as planned or assessed where the path begins - kept with its
+/// plan and read back; nothing flies by it.
+struct PathMetadata {
+    std::uint32_t path = 0;       ///< the path's index among the route's paths (4.36); 0 without paths: the route's one
+    RouteState initial{};         ///< its InertialState, as a planned state's fields (4.34): its `point` not used
+    double enduranceS = kHold;    ///< its Endurance's Duration
+    double fuelKg = kHold;        ///< its Endurance's Fuel
+    double grossWeightKg = kHold; ///< its GrossWeight
+    PlanId transitionPlan = 0;    ///< its TransitionRoute: a route plan's id; 0 none
+};
+
+/// A route plan (A-GRA's MA_RoutePlanMT; docs/flight-autonomy.md, 4.39): a route FA keeps by its id and version,
+/// taken through the plan activation states before it flies, and its planning metadata (A-GRA's MA_RouteType's and its
+/// segments' and paths'), which nothing flies by. World::publishPlan takes one; World::plan reads one back.
+struct RoutePlan {
+    PlanId id = 0;
+    std::uint32_t version = 0;       ///< A-GRA's RoutePlanID.Version
+    bool forPlanningUseOnly = false; ///< never prepared for activation, or activated (A-GRA's ForPlanningUseOnly)
+    RouteCommand route{};            ///< its route's options, as World::submit takes a route's
+    std::vector<Waypoint> waypoints;
+    std::vector<RouteLoiter> loiters;
+    std::vector<RouteState> states;
+    std::vector<RoutePath> paths;
+    std::vector<RouteBranch> branches;
+    std::vector<RouteTerminator> terminators;
+    // its planning metadata (WPT-23)
+    bool detailed = false;           ///< A-GRA's MA_RouteType.Detailed
+    std::string remarksName;         ///< its route's Remarks' DisplayName: 32 characters at most
+    std::string remarks;             ///< its route's Remarks' Detail: 1,024 at most
+    std::vector<PointMetadata> pointMetadata; ///< one a point at most
+    std::vector<PathMetadata> pathMetadata;   ///< one a path at most
+};
 
 /// Read-only view of the world for behaviours that look at other vehicles.
 /// Implemented by the session; states are the previous step's snapshots.

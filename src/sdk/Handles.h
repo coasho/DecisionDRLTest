@@ -45,6 +45,13 @@ struct fsim_world {
         std::vector<double> values;
         std::vector<fsim_position_command> points;
     } readback;
+    /// A route plan as last read back (fsim_vehicle_get_plan): what its metadata's arrays and texts point into (its route's
+    /// arrays: `readback`'s).
+    struct PlanReadback {
+        fsim::control::RoutePlan plan;
+        std::vector<fsim_point_metadata> points;
+        std::vector<fsim_path_metadata> paths;
+    } planReadback;
     /// The performance profile last asked for (fsim_vehicle_performance_profile): what its arrays point into.
     fsim::control::PerformanceProfile profile;
 

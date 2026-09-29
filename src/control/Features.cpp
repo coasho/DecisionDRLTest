@@ -84,8 +84,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.hsa/altitude/barometric", "fsim.guidance.hsa", S, 0, 0, ""},            // HSA-07 (FA-4b)
 
     // --- waypoint following ------------------------------------------------------------------------
-    CAP("fsim.guidance.route", P, 7, 0,
-        "planning metadata (FA-7); "
+    CAP("fsim.guidance.route", P, 16, 0,
         "a branch on a mission critical or lost comms contingency (FA-16)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
@@ -124,7 +123,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/inertial_states", "fsim.guidance.route", S, 6, 0, "", false, "a planned state's time, as an arrival window's"}, // WPT-20 (FA-6d2; FA-6g3a, FA-6g3b)
     {"fsim.guidance.route/required_navigation_performance", "fsim.guidance.route", S, 0, 0, ""}, // WPT-21 (FA-6d3)
     {"fsim.guidance.route/relative_points", "fsim.guidance.route", S, 0, 0, ""},             // WPT-22 (FA-6a)
-    {"fsim.guidance.route/metadata", "fsim.guidance.route", N, 7, 0, ""},                    // WPT-23
+    {"fsim.guidance.route/metadata", "fsim.guidance.route", S, 0, 0, ""},                    // WPT-23 (FA-7a: kept with a route plan)
     CAP("fsim.guidance.taxi", N, 9, R2, ""),                                                  // WPT-26
 
     // --- curve following ----------------------------------------------------------------------------
@@ -229,7 +228,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.control/controller_identity", "", S, 0, 0, ""},                                    // AUT-06
 
     // --- route plans, settings and the supporting models a consumer uses ------------------------------
-    {"fsim.plan/store", "", N, 7, 0, ""},                        // RPL-01, 02, 05, 08..11
+    {"fsim.plan/store", "", S, 0, 0, ""},                        // RPL-01, 02, 05, 08..11 (FA-7a)
     {"fsim.plan/fa_plans", "", N, 7, 0, ""},                     // RPL-03
     {"fsim.plan/validate", "", N, 7, 0, ""},                     // RPL-06, RPL-07, ENV-10
     {"fsim.plan/airfields", "", N, 7, 0, ""},                    // RPL-04, ENV-05

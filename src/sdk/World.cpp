@@ -317,6 +317,40 @@ std::optional<control::TaskStatus> Vehicle::taskStatus(control::TaskId task) con
 
 std::vector<control::TaskStatus> Vehicle::tasks() const { return world_ ? world_->impl_->tasks(id_) : std::vector<control::TaskStatus>{}; }
 
+control::Reason Vehicle::publishPlan(const control::RoutePlan& plan) {
+    return world_ ? world_->impl_->publishPlan(id_, plan) : control::Reason::UnknownVehicle;
+}
+
+control::PlanCommandResult Vehicle::planCommand(control::PlanId plan, control::PlanCommand command, const control::CommandOptions& options) {
+    if (!world_) {
+        control::PlanCommandResult r;
+        r.plan = plan, r.command = command, r.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    return world_->impl_->planCommand(id_, plan, command, options);
+}
+
+control::PlanCommandResult Vehicle::abortPlan(control::PlanId plan, control::Reason reason) {
+    if (!world_) {
+        control::PlanCommandResult r;
+        r.plan = plan, r.command = control::PlanCommand::Deactivate, r.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    return world_->impl_->abortPlan(id_, plan, reason);
+}
+
+control::Reason Vehicle::removePlan(control::PlanId plan) { return world_ ? world_->impl_->removePlan(id_, plan) : control::Reason::UnknownVehicle; }
+
+std::optional<control::PlanStatus> Vehicle::planStatus(control::PlanId plan) const {
+    return world_ ? world_->impl_->planStatus(id_, plan) : std::nullopt;
+}
+
+std::vector<control::PlanStatus> Vehicle::plans() const { return world_ ? world_->impl_->plans(id_) : std::vector<control::PlanStatus>{}; }
+
+std::optional<control::RoutePlan> Vehicle::plan(control::PlanId plan) const {
+    return world_ ? world_->impl_->plan(id_, plan) : std::nullopt;
+}
+
 control::Reason Vehicle::setCapabilityPrecedence(std::string_view capability, std::uint32_t precedence) {
     return world_ ? world_->impl_->setCapabilityPrecedence(id_, capability, precedence) : control::Reason::UnknownVehicle;
 }

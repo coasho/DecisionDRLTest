@@ -556,8 +556,9 @@ class CapabilityTest(unittest.TestCase):
         with self.assertRaises(fsim.Rejected) as refused:
             viper.submit_behavior("hover")
         self.assertEqual(refused.exception.reason, "not_supported")
-        metadata = viper.support("fsim.guidance.route/metadata")  # (applicable, not built: the stage that builds it)
-        self.assertEqual((metadata.support, metadata.stage), (fsim.Support.NOT_IMPLEMENTED, 7))
+        discretized = viper.support("fsim.guidance.curve/discretized")  # (applicable, not built: the stage that builds it)
+        self.assertEqual((discretized.support, discretized.stage), (fsim.Support.NOT_IMPLEMENTED, 17))
+        self.assertEqual(viper.support("fsim.guidance.route/metadata").support, fsim.Support.SUPPORTED)  # (FA-7a)
         self.assertEqual(viper.support("fsim.guidance.route/path_terminators").support, fsim.Support.SUPPORTED)  # (FA-6f)
         self.assertEqual(viper.support("fsim.guidance.route/conditional_segment").support, fsim.Support.PARTIAL)  # (FA-6e2a)
         self.assertEqual(viper.support("fsim.guidance.route/paths").support, fsim.Support.SUPPORTED)  # (FA-6e1)

@@ -803,6 +803,36 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             return r.accepted();
         },
         aroundSquare, none, completed);
+    // the same route as A-GRA's route plan (ADR-29 FA-7a, RPL-01, RPL-02, RPL-10): prepared for upload, published, uploaded,
+    // prepared for activation and activated - flown as the route is, its plan's execution complete at its end
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            RoutePlan plan;
+            plan.id = 1, plan.version = 1;
+            for (const PositionCommand& q : square(p)) {
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                plan.waypoints.push_back(wp);
+            }
+            REQUIRE(w.planCommand(p.id, 1, PlanCommand::PrepareForUpload).completed);
+            REQUIRE(w.publishPlan(p.id, plan) == Reason::None);
+            REQUIRE(w.planCommand(p.id, 1, PlanCommand::Upload).completed);
+            const PlanCommandResult ready = w.planCommand(p.id, 1, PlanCommand::PrepareForActivation);
+            INFO("its preparation failed: " << reasonName(ready.reason));
+            CHECK(ready.completed);
+            const PlanCommandResult r = w.planCommand(p.id, 1, PlanCommand::Activate);
+            INFO("its activation failed: " << reasonName(r.reason));
+            CHECK(r.completed);
+            activity[p.id] = r.check.activity;
+            return r.completed;
+        },
+        aroundSquare, none,
+        [&](const Plane& p, const Lows& lows) {
+            completed(p, lows);
+            const auto s = w.planStatus(p.id, 1);
+            REQUIRE(s.has_value());
+            CHECK((s->state == PlanState::Activated && s->execution == PlanExecution::Complete && s->activity == activity[p.id]));
+        });
     // its endurance (ADR-29 FA-3e, VAL-03): three times what it lasts, a timed pattern, is refused - a soft rejection,
     // which override_rejection overrides; five minutes straight ahead at its cruise, its prediction (read under a
     // reserve of 99.99 %, so the check reports what the flight needs) against the burn it flies, within 5 %

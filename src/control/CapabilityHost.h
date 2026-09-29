@@ -223,6 +223,31 @@ public:
     /// Every task kept - the caller's and the platform's suggestions - in the order they were made.
     std::vector<TaskStatus> tasks();
 
+    // --- Route plans (docs/flight-autonomy.md, 4.39): kept by id, taken through the activation states (Plans.cpp) ---
+    /// The plans a vehicle keeps.
+    static constexpr std::size_t kPlans = 32;
+    /// A plan published (A-GRA's MA_RoutePlanMT), taken where FA listens for
+    /// its id: None (A-GRA's notification CONFIRMED). WrongPlanState where FA
+    /// does not; InvalidParameter for id 0 or malformed metadata. May allocate.
+    Reason publishPlan(const RoutePlan& plan);
+    /// A plan activation command, answered at once. Activate is the NEW of its
+    /// route with `options`; PrepareForActivation its validation with them;
+    /// Deactivate cancels, as `options`' source and controller, an activity
+    /// not flying yet. May allocate.
+    PlanCommandResult planCommand(PlanId id, PlanCommand command, const CommandOptions& options, const sim::VehicleState& state, double now);
+    /// FA's own deactivation (VI 1.2.5.7): a plan ready for activation, or
+    /// activated, Deactivated; its live activity canceled with `reason`, its
+    /// execution Canceled. UnknownPlan; WrongPlanState in any other state.
+    PlanCommandResult abortPlan(PlanId id, Reason reason, const sim::VehicleState& state, double now);
+    /// Forget a plan: UnknownPlan; WrongPlanState while it is activated and its activity is live.
+    Reason removePlan(PlanId id);
+    /// Its status; false for a plan not kept.
+    bool planStatus(PlanId id, PlanStatus& out) const;
+    /// Every plan kept, in the order they were first prepared for upload.
+    std::vector<PlanStatus> plans() const;
+    /// Its content as uploaded last, its metadata with it; false for a plan not kept, or kept before its first upload.
+    bool plan(PlanId id, RoutePlan& out) const;
+
     // --- Reports (docs/flight-autonomy.md, 4.12): what an activity flies, and where to ---
     /// What a live activity flies now, or waits to fly: its setpoint as
     /// updated, a route's waypoints, a curve's segments (appended ones too).
@@ -813,6 +838,9 @@ private:
     Reason addresses(const ActivityRecord& record, Caller caller) const noexcept;
 
     std::uint32_t vehicle_ = 0;
+    /// A plan has been prepared for upload: plans_ is made (4.39). Here, in the hole before controlPeriodS_, on the line
+    /// every NEW reads: noteEnd tests it at each activity's end, where plans_, at the host's far end, would cost a line.
+    bool planned_ = false;
     double controlPeriodS_ = 1.0 / 120.0;
     EnvelopeStatus envelope_{}; ///< since the last envelope()
     ControlStack* runtime_ = nullptr;
@@ -852,6 +880,20 @@ private:
     FrameSpec curveFrame_{};      ///< its frame's, where its reference is one's
     double curveTurn_ = 0.0;      ///< its axes' turn as placed
     FramePose curvePose_{};       ///< its frame's pose as placed: its points turned in three dimensions by its attitude
+
+    // route plans (docs/flight-autonomy.md, 4.39): Plans.cpp's, apart from the rest, last so that nothing moves
+    struct PlanStore;
+    struct PlanStoreFree {
+        void operator()(PlanStore* store) const noexcept;
+    };
+    struct PlanEntry;
+    /// An activity ended: the plan it flew (if any) takes its end - in the step, allocating nothing.
+    void notePlanEnd(const ActivityRecord& record) noexcept;
+    PlanEntry* findPlan(PlanId id) const noexcept;
+    PlanStatus planStatusOf(const PlanEntry& e) const noexcept;
+    /// Its live activity ended Canceled with `reason`, the platform's: no authority asked.
+    void endPlanActivity(ActivityId activity, Reason reason, const sim::VehicleState& state, double now) noexcept;
+    std::unique_ptr<PlanStore, PlanStoreFree> plans_; ///< made at the first plan prepared for upload
 };
 
 } // namespace fsim::control

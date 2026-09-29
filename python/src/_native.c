@@ -2054,14 +2054,8 @@ static PyObject* world_frame_point(PyObject* o, PyObject* const* args, Py_ssize_
  * `behavior` (id, target, {name: value}, [(latitude_rad, longitude_rad, altitude_msl_m, airspeed_ms, capture_radius_m)])
  * or None, `waypoints` [waypoint row] or None, `segments` [18 floats: north, east, down] or None - a curve's as A-GRA's
  * schema gives them (kind FSIM_BATCH_NURBS) [59 floats: read_nurbs's] */
-static PyObject* world_activity_setpoint(PyObject* o, PyObject* const* args, Py_ssize_t n) {
-    WorldObject* self = (WorldObject*)o;
-    uint64_t activity;
-    fsim_batch_command b;
-    if (!check_args(n, 1, 1, "activity_setpoint") || !as_u64(args[0], &activity)) return NULL;
-    memset(&b, 0, sizeof b);
-    b.struct_size = sizeof b;
-    if (fsim_activity_get_setpoint(self->world, activity, &b) != FSIM_OK) Py_RETURN_NONE;
+static PyObject* batch_tuple(const fsim_batch_command* item) {
+    const fsim_batch_command b = *item;
     PyObject* fields = PyTuple_New(b.count);
     for (uint32_t i = 0; fields && i < b.count; ++i) {
         PyObject* v = PyFloat_FromDouble(b.fields[i]);
@@ -2188,6 +2182,17 @@ static PyObject* world_activity_setpoint(PyObject* o, PyObject* const* args, Py_
         return NULL;
     }
     return Py_BuildValue("(iiNNNNNNNNN)", b.kind, b.code, fields, behavior, waypoints, segments, loiters, states, paths, branches, terminators);
+}
+
+static PyObject* world_activity_setpoint(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t activity;
+    fsim_batch_command b;
+    if (!check_args(n, 1, 1, "activity_setpoint") || !as_u64(args[0], &activity)) return NULL;
+    memset(&b, 0, sizeof b);
+    b.struct_size = sizeof b;
+    if (fsim_activity_get_setpoint(self->world, activity, &b) != FSIM_OK) Py_RETURN_NONE;
+    return batch_tuple(&b);
 }
 
 /* activity_end_points(activity, max) -> [(kind, latitude_rad, longitude_rad, altitude_m, altitude_reference, turn, id, index)] */
@@ -3138,6 +3143,218 @@ static PyObject* world_tasks(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     return out;
 }
 
+/* --- Route plans (ABI 1.36; docs/flight-autonomy.md, 4.39) --- */
+
+/* (completed, plan_id, command, state, reason, check): `check` the validation's or the NEW's result tuple (a preparation
+ * for activation's, an activation's), else None */
+static PyObject* plan_result_tuple(const fsim_world* world, const fsim_plan_command_result* r) {
+    PyObject* check = r->command == FSIM_PLAN_PREPARE_FOR_ACTIVATION || r->command == FSIM_PLAN_ACTIVATE ? result_tuple(world, &r->check)
+                                                                                                          : Py_NewRef(Py_None);
+    if (!check) return NULL;
+    return Py_BuildValue("(iKiiiN)", r->completed, (unsigned long long)r->plan_id, r->command, r->state, r->reason, check);
+}
+
+/* (plan_id, state, version, revision, execution, reason, for_planning_use_only, activity, percent, start_time, end_time,
+ * command_id) */
+static PyObject* plan_status_tuple(const fsim_plan_status* s) {
+    return Py_BuildValue("(KiIIiiOKdddK)", (unsigned long long)s->plan_id, s->state, s->version, s->revision, s->execution, s->reason,
+                         s->for_planning_use_only ? Py_True : Py_False, (unsigned long long)s->activity, s->percent, s->start_time, s->end_time,
+                         (unsigned long long)s->command_id);
+}
+
+/* A text: a str, or None (NULL); its UTF-8, the object's while it lives (the platform refuses what is not printable ASCII). */
+static int text_of(PyObject* o, const char** out) {
+    *out = NULL;
+    if (o == Py_None) return 1;
+    return (*out = as_str(o, "a text")) != NULL;
+}
+
+/* publish_plan(id, plan_id, version, for_planning_use_only, detailed, remarks_name, remarks, item, points, paths) -> reason:
+ * `item` a route's batch item; `points` [(point, source, locked, modified, remarks_name, remarks, fix_key, fix_system)];
+ * `paths` [(path, a state's row of 30 numbers (its point not used), endurance_s, fuel_kg, gross_weight_kg, transition_plan)] */
+static PyObject* world_publish_plan(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id, version;
+    uint64_t plan_id;
+    fsim_route_plan plan;
+    if (!check_args(n, 10, 10, "publish_plan") || !as_u32(args[0], &id) || !as_u64(args[1], &plan_id) || !as_u32(args[2], &version) ||
+        !WORLD_IDLE(self))
+        return NULL;
+    fsim_route_plan_init(&plan);
+    plan.plan_id = plan_id, plan.version = version;
+    plan.for_planning_use_only = PyObject_IsTrue(args[3]) == 1, plan.detailed = PyObject_IsTrue(args[4]) == 1;
+    if (!text_of(args[5], &plan.remarks_name) || !text_of(args[6], &plan.remarks)) return NULL;
+    /* (the rows held by these tuples, their texts by the rows: they live until the call is done) */
+    PyObject* points = PySequence_Tuple(args[8]);
+    PyObject* paths = points ? PySequence_Tuple(args[9]) : NULL;
+    const Py_ssize_t np = paths ? PyTuple_Size(points) : 0, nq = paths ? PyTuple_Size(paths) : 0;
+    BatchItem* it = paths ? (BatchItem*)PyMem_Calloc(1, sizeof(BatchItem)) : NULL;
+    fsim_point_metadata* pm = it ? (fsim_point_metadata*)PyMem_Calloc((size_t)(np ? np : 1), sizeof(fsim_point_metadata)) : NULL;
+    fsim_path_metadata* qm = pm ? (fsim_path_metadata*)PyMem_Calloc((size_t)(nq ? nq : 1), sizeof(fsim_path_metadata)) : NULL;
+    PyObject* out = NULL;
+    int ok = qm != NULL;
+    if (!ok && !PyErr_Occurred()) PyErr_NoMemory();
+    for (Py_ssize_t i = 0; ok && i < np; ++i) {
+        PyObject* row = PyTuple_GetItem(points, i);
+        fsim_point_metadata* m = &pm[i];
+        fsim_point_metadata_init(m);
+        ok = row && PyTuple_Check(row) && PyTuple_Size(row) == 8;
+        if (!ok && !PyErr_Occurred())
+            PyErr_SetString(PyExc_ValueError, "each point's metadata must be (point, source, locked, modified, remarks_name, remarks, fix_key, fix_system)");
+        if (ok) ok = as_u32(PyTuple_GetItem(row, 0), &m->point) && as_int(PyTuple_GetItem(row, 1), &m->source);
+        if (ok) m->locked = PyObject_IsTrue(PyTuple_GetItem(row, 2)) == 1, m->modified = PyObject_IsTrue(PyTuple_GetItem(row, 3)) == 1;
+        if (ok) ok = text_of(PyTuple_GetItem(row, 4), &m->remarks_name) && text_of(PyTuple_GetItem(row, 5), &m->remarks) &&
+                     text_of(PyTuple_GetItem(row, 6), &m->fix_key) && text_of(PyTuple_GetItem(row, 7), &m->fix_system);
+    }
+    for (Py_ssize_t i = 0; ok && i < nq; ++i) {
+        PyObject* row = PyTuple_GetItem(paths, i);
+        fsim_path_metadata* m = &qm[i];
+        fsim_path_metadata_init(m);
+        ok = row && PyTuple_Check(row) && PyTuple_Size(row) == 6;
+        if (!ok && !PyErr_Occurred())
+            PyErr_SetString(PyExc_ValueError, "each path's metadata must be (path, initial state row, endurance_s, fuel_kg, gross_weight_kg, transition_plan)");
+        if (ok) ok = as_u32(PyTuple_GetItem(row, 0), &m->path) && as_u64(PyTuple_GetItem(row, 5), &m->transition_plan);
+        if (ok) {
+            PyObject* one = PyTuple_Pack(1, PyTuple_GetItem(row, 1));
+            fsim_route_state* initial = NULL;
+            ok = one && read_states(one, &initial) == 1;
+            if (ok) m->initial = initial[0];
+            PyMem_Free(initial);
+            Py_XDECREF(one);
+        }
+        if (ok) {
+            m->endurance_s = PyFloat_AsDouble(PyTuple_GetItem(row, 2));
+            m->fuel_kg = PyFloat_AsDouble(PyTuple_GetItem(row, 3));
+            m->gross_weight_kg = PyFloat_AsDouble(PyTuple_GetItem(row, 4));
+            ok = !PyErr_Occurred();
+        }
+    }
+    if (ok) ok = read_batch_item(args[7], it, &plan.route);
+    if (ok) {
+        int32_t reason = 0;
+        plan.points = np ? pm : NULL, plan.point_count = (uint32_t)np;
+        plan.paths = nq ? qm : NULL, plan.path_count = (uint32_t)nq;
+        if (fsim_vehicle_publish_plan(self->world, id, &plan, &reason) != FSIM_OK) fail();
+        else out = PyLong_FromLong(reason);
+    }
+    if (it) batch_free(it, 1);
+    PyMem_Free(pm);
+    PyMem_Free(qm);
+    Py_XDECREF(points);
+    Py_XDECREF(paths);
+    return out;
+}
+
+/* plan_command(id, plan_id, command, source, axes, range, min_version, envelope) -> plan result tuple */
+static PyObject* world_plan_command(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t plan_id;
+    int command = 0;
+    fsim_command_options opt;
+    fsim_plan_command_result r;
+    if (!check_args(n, 3, 8, "plan_command") || !as_u32(args[0], &id) || !as_u64(args[1], &plan_id) || !as_int(args[2], &command) ||
+        !read_options(args, n, 3, &opt) || !WORLD_IDLE(self))
+        return NULL;
+    fsim_plan_command_result_init(&r);
+    if (fsim_vehicle_plan_command(self->world, id, plan_id, command, &opt, &r) != FSIM_OK) return fail();
+    return plan_result_tuple(self->world, &r);
+}
+
+/* abort_plan(id, plan_id, reason) -> plan result tuple: FA's own deactivation (0: restricted) */
+static PyObject* world_abort_plan(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t plan_id;
+    int reason = 0;
+    fsim_plan_command_result r;
+    if (!check_args(n, 2, 3, "abort_plan") || !as_u32(args[0], &id) || !as_u64(args[1], &plan_id) || (n > 2 && !as_int(args[2], &reason)) ||
+        !WORLD_IDLE(self))
+        return NULL;
+    fsim_plan_command_result_init(&r);
+    if (fsim_vehicle_abort_plan(self->world, id, plan_id, reason, &r) != FSIM_OK) return fail();
+    return plan_result_tuple(self->world, &r);
+}
+
+/* remove_plan(id, plan_id) -> reason */
+static PyObject* world_remove_plan(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t plan_id;
+    int32_t reason = 0;
+    if (!check_args(n, 2, 2, "remove_plan") || !as_u32(args[0], &id) || !as_u64(args[1], &plan_id) || !WORLD_IDLE(self)) return NULL;
+    if (fsim_vehicle_remove_plan(self->world, id, plan_id, &reason) != FSIM_OK) return fail();
+    return PyLong_FromLong(reason);
+}
+
+/* plan_status(id, plan_id) -> status tuple, or None for one not kept */
+static PyObject* world_plan_status(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t plan_id;
+    fsim_plan_status s;
+    if (!check_args(n, 2, 2, "plan_status") || !as_u32(args[0], &id) || !as_u64(args[1], &plan_id)) return NULL;
+    fsim_plan_status_init(&s);
+    if (fsim_vehicle_plan_status(self->world, id, plan_id, &s) != FSIM_OK) Py_RETURN_NONE;
+    return plan_status_tuple(&s);
+}
+
+/* plans(id) -> [status tuple] */
+static PyObject* world_plans(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    if (!check_args(n, 1, 1, "plans") || !as_u32(args[0], &id)) return NULL;
+    const uint32_t count = fsim_vehicle_plan_count(self->world, id);
+    PyObject* out = PyList_New(0);
+    for (uint32_t i = 0; out && i < count; ++i) {
+        fsim_plan_status s;
+        fsim_plan_status_init(&s);
+        if (fsim_vehicle_plan_at(self->world, id, i, &s) != FSIM_OK) continue;
+        PyObject* st = plan_status_tuple(&s);
+        if (!st || PyList_Append(out, st) < 0) Py_CLEAR(out);
+        Py_XDECREF(st);
+    }
+    return out;
+}
+
+/* get_plan(id, plan_id) -> (plan_id, version, for_planning_use_only, detailed, remarks_name, remarks, its route as
+ * activity_setpoint's tuple, [point metadata rows], [path metadata rows]) as publish_plan takes them; None for one not
+ * uploaded */
+static PyObject* world_get_plan(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t plan_id;
+    fsim_route_plan p;
+    if (!check_args(n, 2, 2, "get_plan") || !as_u32(args[0], &id) || !as_u64(args[1], &plan_id)) return NULL;
+    fsim_route_plan_init(&p);
+    if (fsim_vehicle_get_plan(self->world, id, plan_id, &p) != FSIM_OK) Py_RETURN_NONE;
+    PyObject* route = batch_tuple(&p.route);
+    PyObject* points = route ? PyList_New(0) : NULL;
+    for (uint32_t i = 0; points && i < p.point_count; ++i) {
+        const fsim_point_metadata* m = &p.points[i];
+        PyObject* row = Py_BuildValue("(IiOOssss)", m->point, m->source, m->locked ? Py_True : Py_False, m->modified ? Py_True : Py_False,
+                                      m->remarks_name, m->remarks, m->fix_key, m->fix_system);
+        if (!row || PyList_Append(points, row) < 0) Py_CLEAR(points);
+        Py_XDECREF(row);
+    }
+    PyObject* paths = points ? PyList_New(0) : NULL;
+    for (uint32_t i = 0; paths && i < p.path_count; ++i) {
+        const fsim_path_metadata* m = &p.paths[i];
+        PyObject* initial = state_row(&m->initial);
+        PyObject* row = initial ? Py_BuildValue("(INdddK)", m->path, initial, m->endurance_s, m->fuel_kg, m->gross_weight_kg,
+                                                (unsigned long long)m->transition_plan)
+                                : NULL;
+        if (!row || PyList_Append(paths, row) < 0) Py_CLEAR(paths);
+        Py_XDECREF(row);
+    }
+    if (!paths) {
+        Py_XDECREF(route), Py_XDECREF(points);
+        return NULL;
+    }
+    return Py_BuildValue("(KIOOssNNN)", (unsigned long long)p.plan_id, p.version, p.for_planning_use_only ? Py_True : Py_False,
+                         p.detailed ? Py_True : Py_False, p.remarks_name, p.remarks, route, points, paths);
+}
+
 static PyMethodDef world_methods[] = {
     FAST("step", world_step, "step(n=1): advance every vehicle by n world steps"),
     FAST("info", world_info, "time, step seconds, vehicle steps, published, vehicle count"),
@@ -3184,6 +3401,14 @@ static PyMethodDef world_methods[] = {
     FAST("remove_task", world_remove_task, "remove_task(id, task_id) -> reason"),
     FAST("task_status", world_task_status, "task_status(id, task_id) -> status, or None"),
     FAST("tasks", world_tasks, "tasks(id) -> [status]"),
+    FAST("publish_plan", world_publish_plan,
+         "publish_plan(id, plan_id, version, for_planning_use_only, detailed, remarks_name, remarks, item, points, paths) -> reason"),
+    FAST("plan_command", world_plan_command, "plan_command(id, plan_id, command, source, axes, range, min_version, envelope) -> result"),
+    FAST("abort_plan", world_abort_plan, "abort_plan(id, plan_id, reason=0) -> result: FA's own deactivation"),
+    FAST("remove_plan", world_remove_plan, "remove_plan(id, plan_id) -> reason"),
+    FAST("plan_status", world_plan_status, "plan_status(id, plan_id) -> status or None"),
+    FAST("plans", world_plans, "plans(id) -> [status]"),
+    FAST("get_plan", world_get_plan, "get_plan(id, plan_id) -> plan tuple or None"),
     FAST("activity_info", world_activity_info, "activity_info(activity) -> info or None"),
     FAST("activity_setpoint", world_activity_setpoint,
          "activity_setpoint(activity) -> (kind, code, fields, behavior, waypoints, segments, loiters, states, paths) or None"),

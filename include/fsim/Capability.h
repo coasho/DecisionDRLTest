@@ -154,6 +154,13 @@ enum class Reason : std::uint8_t {
     InsufficientEndurance, ///< NEW refused - a soft rejection, which CommandOptions::overrideRejection overrides: its flight needs more fuel or charge than the vehicle has above its reserve
     // the terrain (docs/flight-autonomy.md, 4.19)
     TerrainConflict, ///< NEW or UPDATE refused, never overridden: its path goes below the terrain (CommandDetails::terrain)
+    // route plans (docs/flight-autonomy.md, 4.39)
+    UnknownPlan,     ///< a plan command refused: the vehicle keeps no plan by that id
+    WrongPlanState,  ///< a plan command, or a plan published, refused: the plan is not in a state that takes it (VI 1.2.5's preconditions)
+    PlanExecuting,   ///< a deactivation failed: the plan executes (VI 1.2.5.4)
+    PlanNotReceived, ///< an upload failed: no plan by its id was published since FA was prepared for its upload
+    PlanningOnly,    ///< a plan for planning use only (A-GRA's ForPlanningUseOnly): never prepared for activation, or activated
+    PlanStoreFull,   ///< a preparation for upload failed: the vehicle keeps as many plans as it can
     Count
 };
 
@@ -453,6 +460,86 @@ struct TaskStatus {
     double startTime = std::numeric_limits<double>::quiet_NaN(); ///< when it was commanded
     double endTime = std::numeric_limits<double>::quiet_NaN();   ///< when its activity ended
     std::uint64_t commandId = 0;           ///< its task command's id
+};
+
+// --- Route plans (docs/flight-autonomy.md, 4.39) -------------------------------------
+
+/// A route plan's id (A-GRA's RoutePlanID): the caller's own, not 0.
+using PlanId = std::uint64_t;
+
+/// What a plan activation command asks (A-GRA's PlanActivationCommandEnum: the
+/// five the VI's route plan behaviours use, 1.2.5).
+enum class PlanCommand : std::uint8_t {
+    PrepareForUpload,     ///< FA listens for the plan (A-GRA's former CONVERT)
+    Upload,               ///< FA keeps the plan it received
+    PrepareForActivation, ///< its final checks: its route checked as its NEW would be now, flying nothing
+    Activate,             ///< fly it: the NEW of its route
+    Deactivate,           ///< take it back, unless it executes
+    Count
+};
+/// "prepare_for_upload", "upload", "prepare_for_activation", "activate", "deactivate".
+FSIM_API const char* planCommandName(PlanCommand command) noexcept;
+
+/// A plan's activation state (A-GRA's PlanActivationStateEnum): the states FA
+/// reaches, answering each command at once and asking no approval.
+enum class PlanState : std::uint8_t {
+    Inactive,                       ///< not kept
+    ReadyForUpload,                 ///< FA listens for it
+    PreparationForUploadFailed,     ///< (a new id's, answered: not kept)
+    UploadFailed,
+    Uploaded,
+    PreparationForActivationFailed,
+    ReadyForActivation,
+    ActivationFailed,
+    Activated,
+    Deactivated,
+    Count
+};
+/// "inactive", "ready_for_upload", "preparation_for_upload_failed", "upload_failed", "uploaded",
+/// "preparation_for_activation_failed", "ready_for_activation", "activation_failed", "activated", "deactivated".
+FSIM_API const char* planStateName(PlanState state) noexcept;
+
+/// A plan's execution (A-GRA's PlanExecutionStateEnum): its activity's, since it was activated last.
+enum class PlanExecution : std::uint8_t {
+    None,       ///< never activated
+    Pending,    ///< its activity waits to start, or is disabled
+    Executing,  ///< its activity flies
+    Complete,   ///< its activity completed
+    Superseded, ///< another command took its axes
+    Canceled,   ///< canceled on request or deleted, or ended by the platform (FA's abort)
+    Failed,     ///< its activity failed
+    Count
+};
+/// "none", "pending", "executing", "complete", "superseded", "canceled", "failed".
+FSIM_API const char* planExecutionName(PlanExecution execution) noexcept;
+
+/// A plan's status (A-GRA's plan activation status, and its route plan's execution status).
+struct PlanStatus {
+    PlanId id = 0;
+    std::uint32_t version = 0;          ///< the version kept (A-GRA's RoutePlanID.Version); 0 before an upload
+    std::uint32_t revision = 0;         ///< its uploads kept: its content's revision (A-GRA's hash of it stands for this)
+    PlanState state = PlanState::Inactive;
+    PlanExecution execution = PlanExecution::None;
+    Reason reason = Reason::None;       ///< why its last command failed, or why its execution ended
+    bool forPlanningUseOnly = false;    ///< the plan kept's
+    ActivityId activity = 0;            ///< its activity, since it was activated last; 0 before
+    double percent = std::numeric_limits<double>::quiet_NaN();   ///< of its route: as it flies, or as it ended
+    double startTime = std::numeric_limits<double>::quiet_NaN(); ///< when it was activated last
+    double endTime = std::numeric_limits<double>::quiet_NaN();   ///< when its activity ended
+    std::uint64_t commandId = 0;        ///< its activation's command id
+};
+
+/// The answer to a plan command (A-GRA's MA_MissionPlanActivationCommandStatus):
+/// completed or failed, and the plan's state after it.
+struct PlanCommandResult {
+    PlanId plan = 0;
+    PlanCommand command = PlanCommand::PrepareForUpload;
+    bool completed = false;                ///< A-GRA's CommandStatus: COMPLETED; else FAILED
+    PlanState state = PlanState::Inactive; ///< the plan's after it (Inactive: not kept)
+    Reason reason = Reason::None;          ///< why it failed (A-GRA's CannotComply)
+    /// PrepareForActivation's validation and Activate's NEW as they answered (the
+    /// point a refusal names, its activity), and Deactivate's CANCEL of a plan not flying yet.
+    CommandResult check{};
 };
 
 // --- Activities ---------------------------------------------------------------------

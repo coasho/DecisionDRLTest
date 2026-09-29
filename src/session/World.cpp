@@ -733,6 +733,62 @@ std::vector<control::TaskStatus> World::tasks(std::uint32_t id) {
     return e ? e->host.tasks() : std::vector<control::TaskStatus>{};
 }
 
+control::Reason World::publishPlan(std::uint32_t id, const control::RoutePlan& plan) {
+    Entry* e = entry(id);
+    return e ? e->host.publishPlan(plan) : control::Reason::UnknownVehicle;
+}
+
+control::PlanCommandResult World::planCommand(std::uint32_t id, control::PlanId plan, control::PlanCommand command,
+                                              const control::CommandOptions& options) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::PlanCommandResult r;
+        r.plan = plan, r.command = command, r.reason = control::Reason::UnknownVehicle;
+        r.check.commandId = options.commandId;
+        return r;
+    }
+    control::PlanCommandResult r = e->host.planCommand(plan, command, options, pool_->states()[e->slot], simTime_);
+    r.check.commandId = options.commandId;
+    if (r.completed && (command == control::PlanCommand::Activate || command == control::PlanCommand::Deactivate)) levelChanged(*e);
+    return r;
+}
+
+control::PlanCommandResult World::abortPlan(std::uint32_t id, control::PlanId plan, control::Reason reason) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::PlanCommandResult r;
+        r.plan = plan, r.command = control::PlanCommand::Deactivate, r.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    control::PlanCommandResult r = e->host.abortPlan(plan, reason, pool_->states()[e->slot], simTime_);
+    if (r.completed) levelChanged(*e);
+    return r;
+}
+
+control::Reason World::removePlan(std::uint32_t id, control::PlanId plan) {
+    Entry* e = entry(id);
+    return e ? e->host.removePlan(plan) : control::Reason::UnknownVehicle;
+}
+
+std::optional<control::PlanStatus> World::planStatus(std::uint32_t id, control::PlanId plan) const {
+    const Entry* e = entry(id);
+    control::PlanStatus s;
+    if (!e || !e->host.planStatus(plan, s)) return std::nullopt;
+    return s;
+}
+
+std::vector<control::PlanStatus> World::plans(std::uint32_t id) const {
+    const Entry* e = entry(id);
+    return e ? e->host.plans() : std::vector<control::PlanStatus>{};
+}
+
+std::optional<control::RoutePlan> World::plan(std::uint32_t id, control::PlanId plan) const {
+    const Entry* e = entry(id);
+    control::RoutePlan p;
+    if (!e || !e->host.plan(plan, p)) return std::nullopt;
+    return p;
+}
+
 bool World::activitySetpoint(control::ActivityId activity, control::Setpoint& out) const {
     const Entry* e = entry(control::activityVehicle(activity));
     return e && e->host.setpoint(activity, out);
