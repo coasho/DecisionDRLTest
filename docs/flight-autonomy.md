@@ -3344,6 +3344,29 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - World throughput is 99.0 to 100.0 % of FA-8c's, and 100.0 to 100.4 % from three copies. Protection costs at most 1.0 %.
 - ctest: all 362 tests pass.
 
+**The waiting work merged (2026-09-29).** Eight pieces of work written beside FA-4 to FA-8, each on its own base, were merged onto FA-8d in turn, one commit each. Each was checked on main before the next, and its note stands in its own measurements:
+- the UH-1H's slow approach to a point, its findings (docs/rotorcraft.md; 72a9077);
+- the endurance check's orbit that a short leg leads to (FA-6g2's finding; e57d96a);
+- the route's end stop flown as a loiter point's hover, and a stop just after a turn (the two entries after FA-6c2's; 98554cd);
+- a rotorcraft's airspeed held to its top level speed (4.48, and the entry after FA-4d's; 93c6c98);
+- an impact the step cannot resolve made inelastic in JSBSim (91b545a), the quadrotors' contacts sized for the step (7542026), and the helicopters' airframe contacts and rotor drive (8f062e5), all in docs/rotorcraft.md 7 and 10;
+- a reset, or a vehicle made in a reused slot, starting as a new model does (docs/FlightSim_System_Architecture_and_Design.md, 7.2; 5f3095b).
+
+The quadrotors' contacts, the helicopters' and the reset had waited for the owner's word; the owner's instruction to merge the waiting work gave it.
+- **Found in merging**, each fixed and noted where it belongs:
+  - the end stop met the terminators (4.38): a last leg its terminator ends keeps its hover as before;
+  - the end stop met the branched routes' fleet cases (FA-6e2): a helicopter's time there adds its position loop's approach;
+  - the airspeed bound's section, 4.23 where it was written, is 4.48 here.
+- **Digests:** the `reset` flight alone changed, 12 mm higher and 5 cm across (the reset's change), with protection and without. That is the new baseline; the other 19 are FA-8d's.
+- **The route probe:** the IRIS's 26 lines from 48 s changed, as the end stop names them. The rest, and the curve probe, are identical to FA-8d's.
+- **The fleet** (1,752 states as flights are judged, 2,240 as cases end): every case within its thresholds after each merge. Its flights ended diverged 39 times at FA-8d, none now.
+- The allocation gate passes. ctest: all 373 tests pass.
+- **A/B throughput** against FA-8d (43281bb), each build with its own JSBSim, each run from its own directory, in quiet windows: 5 rounds of `micro`, and 5 over three copies of each build; 9 of `command` twice, and 5 over the copies; the aligned builds' `command` likewise; 7 of `world` three times, and 3 over the copies.
+  - The micro cases are within −1.4 % to +1.2 %, and −1.2 % to +0.6 % over the copies.
+  - The command cases are within −3.0 % to +1.2 %, the aligned builds' included, but a checked UPDATE. It reads +1.6 and +0.0 % in the two runs and +3.6 % over the copies, and the aligned builds +0.8, +2.4 and +0.8 %: its minimum 0.2 to 0.8 ns more, on 25 ns. The airspeed bound's checks lie on its path (the state now passed to the limits, a rotorcraft's branch); its own A/B read +0.8 and +0.0 % there on FA-4d. Not traced further.
+  - World throughput is 99.4 to 101.0 % of FA-8d's, and 99.5 to 100.4 % over the copies. Protection costs at most 1.0 %.
+  - A first `world` run read FA-8d's own F-16C 13 % slower than FA-8d had, from the same binary in the same directory, and protection at 6 to 7 %. Nothing else was seen running. Two runs after it read as above, FA-8d's binary as it had.
+
 ## Appendix A: the inventory
 
 Status at caf03c9:
