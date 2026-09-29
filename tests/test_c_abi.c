@@ -1328,6 +1328,58 @@ int main(int argc, char** argv) {
             CHECK(fsim_world_remove_op_zone(world, 21) == FSIM_OK && fsim_world_remove_op_zone(world, 21) == FSIM_INVALID_ARGUMENT);
         }
         {
+            /* ABI 1.41 (4.44): a must fly through a corridor - a line kept and read back, flown by its id, then given in place
+               of its own; one given with a must fly, flown through; a malformed one refused naming its field from 10 */
+            fsim_op_line line, back;
+            fsim_line_vertex v[3];
+            fsim_command_result lr;
+            fsim_activity_info li;
+            const fsim_vehicle_state* at;
+            double lfields[10];
+            uint32_t lined = 0;
+            int32_t reason = -1;
+            int k;
+            const double corner[3][2] = {{0.0, 2000.0}, {0.0, 4000.0}, {2000.0, 4000.0}};
+            spec.name = "must-fly-line";
+            spec.type = "jsbsim:c172x";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 55.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &lined) == FSIM_OK);
+            at = fsim_vehicle_state_ptr(world, lined);
+            for (k = 0; k < 3; ++k) {
+                fsim_line_vertex_init(&v[k]);
+                v[k].latitude_rad = at->latitude_rad + corner[k][0] / 6371000.0;
+                v[k].longitude_rad = at->longitude_rad + corner[k][1] / (6371000.0 * cos(at->latitude_rad));
+            }
+            CHECK(isnan(v[0].x_m) && isnan(v[0].altitude_m) && isnan(v[0].left_width_m));
+            fsim_op_line_init(&line);
+            CHECK(line.struct_size == sizeof line && isnan(line.projection) && line.vertex_count == 0 && isnan(line.frame));
+            line.op_line_id = 41, line.vertices = v, line.vertex_count = 3, line.left_width_m = line.right_width_m = 500.0;
+            CHECK(fsim_world_set_op_line(world, &line, &reason) == FSIM_OK && reason == 0);
+            fsim_op_line_init(&back);
+            CHECK(fsim_world_op_line_count(world) == 1 && fsim_world_get_op_line(world, 41, &back) == FSIM_OK && back.revision == 1 &&
+                  back.vertex_count == 3 && back.vertices[2].latitude_rad == v[2].latitude_rad && back.left_width_m == 500.0);
+            /* by its id: accepted; then a line given in place of its own */
+            for (k = 0; k < 10; ++k) lfields[k] = fsim_hold();
+            lfields[0] = FSIM_MUST_FLY_OP_LINE, lfields[5] = 41.0;
+            CHECK(fsim_vehicle_submit_mode(world, lined, FSIM_MODE_MUST_FLY, lfields, 10, &co, &lr) == FSIM_OK && lr.status == FSIM_COMMAND_ACCEPTED);
+            line.op_line_id = 0;
+            for (k = 0; k < 10; ++k) lfields[k] = fsim_hold();
+            lfields[0] = FSIM_MUST_FLY_LINE;
+            CHECK(fsim_activity_update_must_fly_line(world, lr.activity, lfields, 10, &line, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_cancel(world, lr.activity, &cr) == FSIM_OK);
+            /* given with it: flown through, done as its last vertex is passed */
+            CHECK(fsim_vehicle_submit_must_fly_line(world, lined, lfields, 10, &line, &co, &lr) == FSIM_OK && lr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_world_step(world, 5400) == FSIM_OK); /* (three minutes) */
+            CHECK(fsim_activity_get(world, lr.activity, &li) == FSIM_OK && strcmp(fsim_activity_state_name(li.state), "completed") == 0);
+            /* malformed: a negative width - field 12 */
+            line.left_width_m = -1.0;
+            CHECK(fsim_vehicle_submit_must_fly_line(world, lined, lfields, 10, &line, &co, &lr) == FSIM_OK && lr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(lr.reason), "invalid_parameter") == 0 && lr.reserved == 13); /* (the field plus one) */
+            CHECK(fsim_world_remove_op_line(world, 41) == FSIM_OK && fsim_world_remove_op_line(world, 41) == FSIM_INVALID_ARGUMENT);
+        }
+        {
             /* ABI 1.39 (4.42): a must fly - an operational point kept and read back, flown over from within its window of
                bearings (from the east: its route laid out through an approach, then the point); one not kept refused */
             fsim_op_point op, back;

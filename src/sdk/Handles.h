@@ -64,6 +64,8 @@ struct fsim_world {
         std::vector<const fsim_zone_vertex*> holePointers;
         std::vector<uint32_t> holeSizes;
     } zoneReadback;
+    /// An operational line as last read back (fsim_world_get_op_line, _at): what its vertices point into.
+    std::vector<fsim_line_vertex> lineReadback;
     /// The performance profile last asked for (fsim_vehicle_performance_profile): what its arrays point into.
     fsim::control::PerformanceProfile profile;
 

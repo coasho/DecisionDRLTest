@@ -923,6 +923,61 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(enteredAt[p.id] <= 0.005 * 0.25 * leg(p));
             CHECK(std::abs(heightAt[p.id]) <= (p.rotor ? 20.0 : 100.0));
         });
+    // a must fly through a corridor (ADR-29 FA-8b2, MFY-05): from half a leg ahead, a leg on, then a leg turned 60 degrees
+    // right, half a leg wide either side - flown through: within its widths once past its first vertex, and completed as its
+    // last vertex is passed
+    std::map<std::uint32_t, double> offLine, fromEnd;
+    std::map<std::uint32_t, bool> pastFirst;
+    auto cornersOf = [&](const Plane& p) {
+        const double d = leg(p);
+        return std::vector<std::pair<double, double>>{{0.5 * d, 0.0}, {1.5 * d, 0.0}, {1.5 * d + 0.5 * d, d * std::sin(60.0 * kDeg)}};
+    };
+    run("fsim.guidance.must_fly", 0.0,
+        [&](const Plane& p) {
+            OpLine line;
+            for (const auto& [n, e] : cornersOf(p)) {
+                const PositionCommand q = pointFrom(p.start, n, e, 0.0, 0.0);
+                LineVertex v;
+                v.latitudeRad = q.latitudeRad, v.longitudeRad = q.longitudeRad;
+                line.vertices.push_back(v);
+            }
+            line.leftWidthM = line.rightWidthM = 0.5 * leg(p);
+            MustFlyCommand c;
+            c.location = static_cast<double>(MustFlyLocation::Line);
+            const CommandResult r = w.submit(p.id, c, line);
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            offLine[p.id] = 0.0, fromEnd[p.id] = std::numeric_limits<double>::quiet_NaN(), pastFirst[p.id] = false;
+            return r.accepted();
+        },
+        [&](const Plane& p) { return 4.5 * leg(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) + 60.0; },
+        [&](const Plane& p) {
+            const ActivityRecord* r = w.activity(activity[p.id]);
+            if (!r || !std::isnan(fromEnd[p.id])) return;
+            const auto& s = *w.vehicleState(p.id);
+            const double n = (s.latitudeRad - p.start.latitudeRad) * kEarthM;
+            const double e = (s.longitudeRad - p.start.longitudeRad) * kEarthM * std::cos(p.start.latitudeRad);
+            const auto corners = cornersOf(p);
+            double nearest = kInf;
+            for (std::size_t i = 0; i + 1 < corners.size(); ++i) {
+                const double an = corners[i].first, ae = corners[i].second, dn = corners[i + 1].first - an, de = corners[i + 1].second - ae;
+                const double along = ((n - an) * dn + (e - ae) * de) / (dn * dn + de * de), t = std::clamp(along, 0.0, 1.0);
+                if (i == 0 && along > 0.0) pastFirst[p.id] = true;
+                nearest = std::min(nearest, std::hypot(n - an - t * dn, e - ae - t * de));
+            }
+            if (pastFirst[p.id]) offLine[p.id] = std::max(offLine[p.id], nearest);
+            if (r->live()) return;
+            fromEnd[p.id] = std::hypot(n - corners.back().first, e - corners.back().second);
+        },
+        [&](const Plane& p, const Lows& lows) {
+            completed(p, lows);
+            // within a tenth of a leg of its line once in it (a rotorcraft's quarter), its widths half a leg - the EA-18G 0.052 of
+            // its leg off it at its turn, the UH-1H 0.125 - and done within 50 m of its last vertex (a rotorcraft's 10 m): the
+            // KC-46A 22.8 m, the UH-1H 4.8 m
+            CHECK(offLine[p.id] <= (p.rotor ? 0.25 : 0.1) * leg(p));
+            CHECK(fromEnd[p.id] <= (p.rotor ? 10.0 : 50.0));
+        });
     // its endurance (ADR-29 FA-3e, VAL-03): three times what it lasts, a timed pattern, is refused - a soft rejection,
     // which override_rejection overrides; five minutes straight ahead at its cruise, its prediction (read under a
     // reserve of 99.99 %, so the check reports what the flight needs) against the burn it flies, within 5 %

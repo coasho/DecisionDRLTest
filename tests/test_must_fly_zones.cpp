@@ -119,10 +119,11 @@ TEST_CASE("must fly: a zone of each shape entered, and completed once in it - pe
     CHECK(w.supportTable(c172)->find("fsim.guidance.must_fly")->support == Support::Partial);
 }
 
-TEST_CASE("must fly: a zone's band climbed into, and its window of bearings kept", "[modes][must_fly]") {
+TEST_CASE("must fly: a zone's band climbed into, and its window of bearings kept - on the Earth and in a turned frame", "[modes][must_fly]") {
     session::World w(options("must-fly-zone-band"));
     const auto banded = wing(w, "c172x", 1500.0, 55.0), windowed = wing(w, "c172x", 1500.0, 55.0, 3);
-    const sim::VehicleState a = *w.vehicleState(banded), b = *w.vehicleState(windowed);
+    const auto turnedWindow = wing(w, "c172x", 1500.0, 55.0, 6);
+    const sim::VehicleState a = *w.vehicleState(banded), b = *w.vehicleState(windowed), c = *w.vehicleState(turnedWindow);
     OpZone circle; // (a circle 5 km east, 1,700 to 1,900 m up: 200 m above the aircraft)
     circle.shape = static_cast<double>(ZoneShape::Ellipse);
     placeFrom(a, 0.0, 5000.0, circle.latitudeRad, circle.longitudeRad);
@@ -135,16 +136,28 @@ TEST_CASE("must fly: a zone's band climbed into, and its window of bearings kept
     const CommandResult r1 = w.submit(banded, into, circle);
     into.ingressMinRad = -10.0 * kDeg, into.ingressMaxRad = 10.0 * kDeg;
     const CommandResult r2 = w.submit(windowed, into, north);
-    REQUIRE((r1.accepted() && r2.accepted()));
+    // the same, in a frame turned 90 degrees (its x east): the window's bearings are true ones, turned into its plane
+    FrameSpec turned;
+    turned.latitudeRad = c.latitudeRad, turned.longitudeRad = c.longitudeRad, turned.altitudeMslM = 1500.0, turned.yawRad = 90.0 * kDeg;
+    const FrameId frame = w.createFrame(turned);
+    REQUIRE(frame != 0);
+    OpZone inFrame = north;
+    inFrame.latitudeRad = inFrame.longitudeRad = kHold, inFrame.xM = 6000.0, inFrame.yM = 0.0;
+    inFrame.frame = static_cast<double>(frame), inFrame.frameRotation = static_cast<double>(FrameRotation::Yaw);
+    const CommandResult r3 = w.submit(turnedWindow, into, inFrame);
+    REQUIRE((r1.accepted() && r2.accepted() && r3.accepted()));
     Setpoint sp;
     REQUIRE(w.activitySetpoint(r2.activity, sp));
     CHECK(sp.waypoints.size() >= 2); // (round to its north, then in)
-    const std::vector<Ended> ended = flyUntilEnded(w, {{banded, r1.activity}, {windowed, r2.activity}}, 300.0);
+    const std::vector<Ended> ended = flyUntilEnded(w, {{banded, r1.activity}, {windowed, r2.activity}, {turnedWindow, r3.activity}}, 300.0);
     CHECK(ended[0].state == ActivityState::Completed);
     CHECK((ended[0].altitudeM >= 1699.0 && ended[0].altitudeM <= 1901.0));
     CHECK(ended[1].state == ActivityState::Completed);
     INFO("came from " << std::remainder(ended[1].trackRad + kPi, 2.0 * kPi) / kDeg);
     CHECK(std::abs(std::remainder(ended[1].trackRad + kPi, 2.0 * kPi)) <= 12.0 * kDeg); // (heading south: from the north)
+    CHECK(ended[2].state == ActivityState::Completed);
+    INFO("in the frame, came from " << std::remainder(ended[2].trackRad + kPi, 2.0 * kPi) / kDeg);
+    CHECK(std::abs(std::remainder(ended[2].trackRad + kPi, 2.0 * kPi)) <= 12.0 * kDeg); // (from the north too, not along its x)
 }
 
 TEST_CASE("must fly: an operational zone kept by its id, one in a frame and one moving; refusals naming its fields (MFY-03, ENV-06)",

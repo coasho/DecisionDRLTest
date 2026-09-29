@@ -981,14 +981,17 @@ class HoldContext(enum.IntEnum):
 
 
 class MustFlyLocation(enum.IntEnum):
-    """Where a must fly goes (A-GRA's MustFlyLocationType; docs/flight-autonomy.md, 4.42, 4.43): a point, another vehicle, an
-    operational point by its id (World.set_op_point); a zone given with it (``zone=``), or an operational zone by its id
-    (World.set_op_zone), entered."""
+    """Where a must fly goes (A-GRA's MustFlyLocationType; docs/flight-autonomy.md, 4.42 to 4.44): a point, another vehicle,
+    an operational point by its id (World.set_op_point); a zone given with it (``zone=``), or an operational zone by its id
+    (World.set_op_zone), entered; a corridor given with it (``line=``), or an operational line by its id (World.set_op_line),
+    flown through."""
     POINT = 0
     ENTITY = 1
     OP_POINT = 2
     ZONE = 3
     OP_ZONE = 4
+    LINE = 5
+    OP_LINE = 6
 
 
 class ZoneShape(enum.IntEnum):
@@ -1188,6 +1191,25 @@ OpZone.__doc__ = ("An operational zone (A-GRA's OpZone and its ZoneType; docs/fl
                   "``altitude_min_m`` to ``altitude_max_m`` in ``altitude_reference``; ``frame_rotation`` (fsim.FrameRotation); a velocity "
                   "``north_ms``, ``east_ms`` from ``time_s``; read back, its ``revision``.")
 
+LineVertex = collections.namedtuple(
+    "LineVertex", "latitude_rad longitude_rad x_m y_m altitude_m altitude_min_m altitude_max_m altitude_reference left_width_m right_width_m",
+    defaults=(HOLD,) * 10)
+LineVertex.__doc__ = ("A vertex of a line (A-GRA's LinePoint2D_Type; docs/flight-autonomy.md, 4.44): on the Earth (``latitude_rad``, "
+                      "``longitude_rad``), or - the line in a frame - along its axes (``x_m``, ``y_m``); the ``altitude_m`` to fly it at, and "
+                      "the band there, ``altitude_min_m`` to ``altitude_max_m`` (in place of the line's), both in ``altitude_reference``; the "
+                      "widths of the segment from it, ``left_width_m`` and ``right_width_m`` (in place of the line's). A pair (latitude, "
+                      "longitude) is taken as one.")
+
+OpLine = collections.namedtuple(
+    "OpLine", "id vertices projection left_width_m right_width_m altitude_min_m altitude_max_m altitude_reference frame frame_rotation "
+              "north_ms east_ms time_s revision", defaults=((),) + (HOLD,) * 11 + (0,))
+OpLine.__doc__ = ("An operational line (A-GRA's OpLine and its LineType; docs/flight-autonomy.md, 4.44), kept by the world by its ``id`` "
+                  "(World.set_op_line) or given with a must fly as a corridor to fly through (``submit_must_fly(line=)``): its ``vertices`` "
+                  "(2 to 32, fsim.LineVertex or (latitude, longitude)) in the order flown; its segments' ``projection`` (fsim.Projection or "
+                  "its name); its widths left and right of it as it is flown, ``left_width_m`` and ``right_width_m`` (left out: none); its "
+                  "band ``altitude_min_m`` to ``altitude_max_m`` in ``altitude_reference``; its vertices in ``frame`` (``frame_rotation``: "
+                  "fsim.FrameRotation); a velocity ``north_ms``, ``east_ms`` from ``time_s``; read back, its ``revision``.")
+
 
 BezierSegment = collections.namedtuple("BezierSegment", "north east down")
 BezierSegment.__doc__ = ("One segment of a curve (A-GRA's): a quintic Bezier by its six control points - ``north``, ``east`` "
@@ -1283,6 +1305,27 @@ def _zone_tuple(zone):
 def _op_zone(t):
     """An operational zone from its native tuple."""
     return OpZone(t[0], t[1], [ZoneVertex(*r) for r in t[2]], [[ZoneVertex(*r) for r in h] for h in t[3]], *t[4:25], revision=t[25])
+
+
+def _line_tuple(line):
+    """An operational line (fsim.OpLine, a dict, or its fields in order) as the native layer takes it."""
+    l = line if isinstance(line, OpLine) else OpLine(**line) if isinstance(line, dict) else OpLine(*line)
+    codes = {"projection": Projection, "altitude_reference": AltitudeReference, "frame_rotation": FrameRotation}
+    v = {k: (codes[k][x.upper()] if k in codes and isinstance(x, str) else x) for k, x in zip(OpLine._fields, l)}
+
+    def vertex(p):
+        q = p if isinstance(p, LineVertex) else LineVertex(**p) if isinstance(p, dict) else LineVertex(*p)
+        if isinstance(q.altitude_reference, str):
+            q = q._replace(altitude_reference=AltitudeReference[q.altitude_reference.upper()])
+        return tuple(float(x) for x in q)
+
+    numbers = OpLine._fields[2:13]
+    return (int(v["id"]), [vertex(p) for p in v["vertices"]]) + tuple(float(v[k]) for k in numbers)
+
+
+def _op_line(t):
+    """An operational line from its native tuple."""
+    return OpLine(t[0], [LineVertex(*r) for r in t[1]], *t[2:13], revision=t[13])
 
 
 def _op_point(t):
@@ -1467,15 +1510,20 @@ class Activity:
         h = self.world._h
         _checked(h.activity_command_branch(self.id, int(branch), 1 if commanded else 0, int(self.source), self.controller), h)
 
-    def update_must_fly(self, zone=None, **fields):
-        """UPDATE of a must fly (docs/flight-autonomy.md, 4.42, 4.43): the fields given merged (a location another than it was
-        replacing the location's own), and a ``zone`` (fsim.OpZone) given in place of its own; laid out afresh from where the
-        aircraft is. Returns True if a value was clamped; raises fsim.Rejected."""
+    def update_must_fly(self, zone=None, line=None, **fields):
+        """UPDATE of a must fly (docs/flight-autonomy.md, 4.42 to 4.44): the fields given merged (a location another than it was
+        replacing the location's own), and a ``zone`` (fsim.OpZone) or a ``line`` (fsim.OpLine) given in place of its own; laid
+        out afresh from where the aircraft is. Returns True if a value was clamped; raises fsim.Rejected."""
+        if zone is not None and line is not None:
+            raise ValueError("a must fly takes a zone or a line, not both")
         if "target" in fields:
             fields["target"] = getattr(fields["target"], "id", fields["target"])
         h = self.world._h
         row = _row("must_fly", (), fields)
-        r = h.activity_update_must_fly(self.id, row, None if zone is None else _zone_tuple(zone), int(self.source), self.controller)
+        if line is not None:
+            r = h.activity_update_must_fly_line(self.id, row, _line_tuple(line), int(self.source), self.controller)
+        else:
+            r = h.activity_update_must_fly(self.id, row, None if zone is None else _zone_tuple(zone), int(self.source), self.controller)
         return bool(_checked(r, h)[4])
 
     def update_curve(self, segments=None, **options):
@@ -1902,18 +1950,27 @@ class Vehicle:
         it, ``ingress_min_rad`` clockwise to ``ingress_max_rad`` (both or neither; left out, an operational point's own), at
         a ``speed`` in ``speed_reference``. Laid out as a route from where the aircraft is - the points it approaches
         through, then the location, flown over - it completes as the location is passed and flies on along its course.
-        An Activity whose ``update(**fields)`` merges what it gives (a location another than it was replacing the
-        location's own); fsim.Rejected if refused ("unknown_geometry": an operational point the world does not keep). The
-        command envelope as submit's."""
-        zone = fields.pop("zone", None)
+        A zone given (``zone=``: fsim.OpZone; location "zone") or kept by its id ("op_zone", World.set_op_zone) is entered: it
+        completes once the aircraft is in it (4.43). A corridor given (``line=``: fsim.OpLine; location "line") or kept by its
+        id ("op_line", World.set_op_line) is flown through, from its first vertex to its last, each turn in it within its
+        widths (4.44). An Activity whose ``update(**fields)`` merges what it gives (a location another than it was replacing
+        the location's own; ``update_must_fly(zone=, line=)`` gives a zone or a corridor in place of its own); fsim.Rejected if
+        refused ("unknown_geometry": an operational point, zone or line the world does not keep). The command envelope as
+        submit's."""
+        zone, line = fields.pop("zone", None), fields.pop("line", None)
+        if zone is not None and line is not None:
+            raise ValueError("a must fly takes a zone or a line, not both")
         if "target" in fields:
             fields["target"] = getattr(fields["target"], "id", fields["target"])
-        if zone is not None and "location" not in fields and not values:
-            fields["location"] = MustFlyLocation.ZONE
+        if (zone is not None or line is not None) and "location" not in fields and not values:
+            fields["location"] = MustFlyLocation.ZONE if zone is not None else MustFlyLocation.LINE
         envelope = _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection, controller)
         if zone is not None:
             r = self._h.submit_must_fly(self.id, _row("must_fly", values, fields), _zone_tuple(zone), int(source), None, int(range),
                                         int(min_version), envelope)
+        elif line is not None:
+            r = self._h.submit_must_fly_line(self.id, _row("must_fly", values, fields), _line_tuple(line), int(source), None, int(range),
+                                             int(min_version), envelope)
         else:
             r = self._h.submit_mode(self.id, MODE_KINDS.index("must_fly"), _row("must_fly", values, fields), int(source), None, int(range),
                                     int(min_version), envelope)
@@ -2732,6 +2789,28 @@ class World:
     def remove_op_zone(self, zone_id):
         """Forget an operational zone; False if there was none."""
         return self._h.remove_op_zone(int(zone_id))
+
+    def set_op_line(self, line):
+        """Keep an operational line (fsim.OpLine; docs/flight-autonomy.md, 4.44) in place of any by its id, its revision one
+        more; its codes by name or member. fsim.Rejected("invalid_parameter") for one A-GRA's schema would not take: too few or
+        many vertices, a place off the Earth, two in a row at one place, a vertex's altitude outside its band, negative widths,
+        a band upside down, a frame the world does not have, a velocity with a frame."""
+        reason = self._h.set_op_line(_line_tuple(line))
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+
+    def op_lines(self):
+        """The operational lines kept (fsim.OpLine), by id."""
+        return [_op_line(t) for t in self._h.op_lines()]
+
+    def op_line(self, line_id):
+        """An operational line kept (fsim.OpLine), or None."""
+        t = self._h.op_line(int(line_id))
+        return None if t is None else _op_line(t)
+
+    def remove_op_line(self, line_id):
+        """Forget an operational line; False if there was none."""
+        return self._h.remove_op_line(int(line_id))
 
     def frame_point(self, frame, x=0.0, y=0.0, z=0.0, *, rotation=FrameRotation.UNROTATED, offsets=FrameOffsets.CARTESIAN, time_s=None):
         """Where a point in a frame is (A-GRA's relative point): ``x``, ``y``, ``z`` metres (z down) turned as ``rotation``

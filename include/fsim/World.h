@@ -195,6 +195,9 @@ public:
     /// NEW of a must fly with its zone given (docs/flight-autonomy.md, 4.43): the zone checked (a field at fault named from
     /// 10, after the must fly's own) and laid out as it is given, then entered.
     control::CommandResult submit(const control::MustFlyCommand& mustFly, const control::OpZone& zone, const control::CommandOptions& options = {});
+    /// NEW of a must fly with its corridor given (4.44): the line checked (a field at fault named from 10) and laid out as it
+    /// is given, then flown through from its first vertex to its last.
+    control::CommandResult submit(const control::MustFlyCommand& mustFly, const control::OpLine& line, const control::CommandOptions& options = {});
     /// Several NEWs at once (docs/sdk/control.md, "The command envelope"),
     /// made in order at this simulation time and each answered on its own;
     /// `details`, if given, gets each answer's commandDetails() in order.
@@ -408,8 +411,9 @@ public:
                                   const control::CurveShape* shape = nullptr);
     /// UPDATE of a pattern with its shape: the fields given in either (kHold keeps one) merged, the pattern flown afresh.
     control::CommandResult update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape);
-    /// UPDATE of a must fly with a zone given in place of its own (4.43).
+    /// UPDATE of a must fly with a zone given in place of its own (4.43), or a corridor (4.44).
     control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpZone& zone);
+    control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpLine& line);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do,
@@ -433,6 +437,8 @@ public:
                                   const control::PatternShape& shape);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
                                   const control::OpZone& zone);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
+                                  const control::OpLine& line);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);
     /// An activity command (docs/sdk/control.md, "Activity commands"): Disable
     /// (it stops flying and is kept), Enable, Reset (over from its beginning),
@@ -496,6 +502,13 @@ public:
     bool removeOpZone(control::OpZoneId id);
     std::vector<control::OpZoneId> opZones() const;
     std::optional<control::OpZone> opZone(control::OpZoneId id) const;
+    /// Operational lines (docs/flight-autonomy.md, 4.44; A-GRA's OpLine): kept as zones are - 2 to 32 vertices on the Earth or
+    /// in a frame, each with its altitude, range and widths, the line's projection, widths and band, a velocity - for a must
+    /// fly to fly through. InvalidParameter for one A-GRA's schema would not take.
+    control::Reason setOpLine(const control::OpLine& line);
+    bool removeOpLine(control::OpLineId id);
+    std::vector<control::OpLineId> opLines() const;
+    std::optional<control::OpLine> opLine(control::OpLineId id) const;
 
     /// Give every vehicle (present and future) its own effect instance.
     void addEffectToAll(std::function<std::unique_ptr<effects::Effect>()> factory);

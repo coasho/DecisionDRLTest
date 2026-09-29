@@ -1,5 +1,6 @@
-"""A must fly through Python (docs/flight-autonomy.md, 4.42): a point flown over at its altitude; an operational point kept by
-the world, read back and flown from within its window of bearings; another vehicle flown over; refusals."""
+"""A must fly through Python (docs/flight-autonomy.md, 4.42 to 4.44): a point flown over at its altitude; an operational point
+kept by the world, read back and flown from within its window of bearings; another vehicle flown over; zones entered; corridors
+flown through; refusals."""
 import math
 import unittest
 
@@ -126,6 +127,45 @@ class MustFlyTest(unittest.TestCase):
         self.assertTrue(w.remove_op_zone(21))
         self.assertFalse(w.remove_op_zone(21))
         self.assertIsNone(w.op_zone(21))
+
+    def test_line_given_and_kept(self):
+        """A corridor (docs/flight-autonomy.md, 4.44): a line with a right angle given with a must fly, flown through; one kept by
+        the world, read back and flown by its id, then given a line in place of its own; one too narrow for its turn refused;
+        one malformed refused naming its field."""
+        w, v = self.w, self.v
+        corners = [self.place(0.0, 2000.0), self.place(0.0, 5000.0), self.place(3000.0, 5000.0)]
+        line = fsim.OpLine(0, corners, left_width_m=500.0, right_width_m=500.0)
+        a = v.submit_must_fly(line=line)
+        self.assertEqual(a.setpoint().kwargs["location"], float(fsim.MustFlyLocation.LINE))
+        for _ in range(1500):
+            w.step(6)
+            if not a.live:
+                break
+        self.assertEqual(a.state, fsim.ActivityState.COMPLETED)
+        s = v.state
+        lat, lon = corners[-1]
+        self.assertLess(math.hypot((s.latitude_rad - lat) * R, (s.longitude_rad - lon) * R * math.cos(lat)), 20.0)  # (done as it is passed)
+        # kept, read back and flown by its id; then a line given in place of its own
+        w.set_op_line(fsim.OpLine(41, [fsim.LineVertex(*self.place(0.0, 2000.0), altitude_m=1600.0), self.place(0.0, 5000.0)], projection="rhumb"))
+        back = w.op_line(41)
+        self.assertEqual((back.id, back.revision, len(back.vertices), back.vertices[0].altitude_m, back.projection),
+                         (41, 1, 2, 1600.0, float(fsim.Projection.RHUMB)))
+        self.assertEqual([l.id for l in w.op_lines()], [41])
+        b = v.submit_must_fly(location="op_line", target=41)
+        b.update_must_fly(line=line, location="line")
+        self.assertEqual(b.setpoint().kwargs["location"], float(fsim.MustFlyLocation.LINE))
+        # 20 m wide with a right angle: the turn cuts inside it by more
+        narrow = fsim.OpLine(0, [self.place(0.0, 2000.0), self.place(0.0, 5000.0), self.place(3000.0, 5000.0)], left_width_m=20.0,
+                             right_width_m=20.0)
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_must_fly(line=narrow)
+        self.assertEqual(refused.exception.reason, "performance_limit")
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_must_fly(line=fsim.OpLine(0, corners[:1]))  # (one vertex)
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("invalid_parameter", 10))
+        self.assertTrue(w.remove_op_line(41))
+        self.assertFalse(w.remove_op_line(41))
+        self.assertIsNone(w.op_line(41))
 
     def test_refused_and_updated(self):
         v = self.v

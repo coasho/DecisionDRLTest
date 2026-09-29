@@ -1,9 +1,11 @@
-// A must fly (docs/flight-autonomy.md, 4.42; A-GRA's MUST_FLY): its location laid out as a route from where the aircraft is
-// - the points it approaches through where it has a window of bearings to come from, then the location, flown over - as it
-// is commanded or updated, and flown by the route's follower. In a file of its own: the host's checks and the behaviour.
+// A must fly (docs/flight-autonomy.md, 4.42 to 4.44; A-GRA's MUST_FLY): its location laid out as a route from where the
+// aircraft is - the points it approaches through where it has a window of bearings to come from, then the location, flown
+// over; a zone's point a little inside it; a corridor's vertices - as it is commanded or updated, and flown by the route's
+// follower. In a file of its own: the host's checks and the behaviour.
 #include "control/CapabilityHost.h"
 
 #include "control/Checks.h"
+#include "control/Lines.h"
 #include "control/Route.h"
 #include "control/Runtime.h"
 #include "control/Zones.h"
@@ -25,6 +27,8 @@ constexpr double kDeg = kPi / 180.0;
 constexpr double kOverEntityM = 152.4;
 /// A turn onto an approach's last leg sharper than this is split by a point abeam (4.42).
 constexpr double kMostTurnRad = 120.0 * kDeg;
+/// A corridor is entered from within this of its first segment's line, behind its first vertex, given no window (4.44).
+constexpr double kEntryRad = 10.0 * kDeg;
 
 bool code(double v, double count) noexcept { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); }
 bool finiteOr(double v) noexcept { return isHold(v) || std::isfinite(v); }
@@ -64,6 +68,31 @@ void approach(double northA, double eastA, double minRad, double maxRad, double 
     out[count][0] = n2, out[count][1] = e2, ++count;
 }
 
+/// A must fly's altitude against a band (4.43, 4.44): the altitude given, within it and in its reference (left out, the
+/// band's) - else the field at fault, 3 (outside it) or 4 (another reference); given none, the aircraft's (`own`, in the
+/// band's reference) held within it - a tenth of it in, 30 m at most and never past its middle - or kHold where it is
+/// within it already. -1 where it is fine; no band, the altitude and reference given.
+int inBand(double given, double givenReference, double lo, double hi, AltitudeReference bandReference, double own, double& altitude,
+           double& reference) noexcept {
+    altitude = given, reference = givenReference;
+    if (isHold(lo) && isHold(hi)) return -1;
+    const double band = static_cast<double>(bandReference);
+    if (!isHold(given)) {
+        if (!isHold(givenReference) && givenReference != band) return 4;
+        if ((!isHold(lo) && given < lo) || (!isHold(hi) && given > hi)) return 3;
+        reference = band;
+        return -1;
+    }
+    const double in = !isHold(lo) && !isHold(hi) ? std::min(0.1 * (hi - lo), 30.0) : 30.0;
+    if (!isHold(lo) && own < lo) altitude = !isHold(hi) ? std::min(lo + in, 0.5 * (lo + hi)) : lo + in;
+    else if (!isHold(hi) && own > hi) altitude = !isHold(lo) ? std::max(hi - in, 0.5 * (lo + hi)) : hi - in;
+    if (!isHold(altitude)) reference = band;
+    return -1;
+}
+
+/// A width left out: none that way.
+double orNone(double widthM) noexcept { return isHold(widthM) ? std::numeric_limits<double>::infinity() : widthM; }
+
 } // namespace
 
 // --- The host: laid out and checked ----------------------------------------------------------------
@@ -92,6 +121,20 @@ Reason CapabilityHost::layOutZone(const OpZone& zone, MustFlyArea& out, CommandR
     return Reason::None;
 }
 
+Reason CapabilityHost::layOutLine(const OpLine& line, MustFlyArea& out, CommandResult& detail) const {
+    FrameSpec spec;
+    FramePose pose;
+    const bool known = isHold(line.frame) ||
+                       (line.frame == std::floor(line.frame) && line.frame >= 1.0 && line.frame <= 9007199254740992.0 && sessionView_ &&
+                        sessionView_->frame(static_cast<FrameId>(line.frame), spec, pose));
+    if (const int f = lines::fault(line, known); f >= 0) {
+        detail.index = static_cast<std::int16_t>(10 + f); // (a line's fields named after the must fly's ten)
+        return Reason::InvalidParameter;
+    }
+    lines::layOut(line, isHold(line.frame) ? nullptr : &spec, sessionView_ ? sessionView_->simTimeS() : 0.0, out);
+    return Reason::None;
+}
+
 Reason CapabilityHost::prepareMustFly(MustFlyCommand& c, const sim::VehicleState& state, CheckLog& log, const MustFlyArea* given) {
     CommandResult& detail = log.result;
     auto bad = [&detail](std::int16_t field) {
@@ -112,7 +155,8 @@ Reason CapabilityHost::prepareMustFly(MustFlyCommand& c, const sim::VehicleState
     if (!isHold(c.ingressMaxRad) && std::abs(c.ingressMaxRad) > kPi) return bad(7);
     c.location = orHold(c.location, 0.0);
     const auto kind = static_cast<MustFlyLocation>(static_cast<int>(c.location));
-    const bool named = kind == MustFlyLocation::Entity || kind == MustFlyLocation::OpPoint || kind == MustFlyLocation::OpZone;
+    const bool named = kind == MustFlyLocation::Entity || kind == MustFlyLocation::OpPoint || kind == MustFlyLocation::OpZone ||
+                       kind == MustFlyLocation::OpLine;
     if (kind != MustFlyLocation::Point && (!isHold(c.latitudeRad) || !isHold(c.longitudeRad))) return bad(isHold(c.latitudeRad) ? 2 : 1);
     if (!named && !isHold(c.target)) return bad(5);
     if (named && (isHold(c.target) || !anId(c.target))) return bad(5);
@@ -124,7 +168,7 @@ Reason CapabilityHost::prepareMustFly(MustFlyCommand& c, const sim::VehicleState
     double ingressMin = c.ingressMinRad, ingressMax = c.ingressMaxRad;
     FramePose pose;       // (a location in a frame: the frame now)
     bool framed = false;
-    MustFlyArea area;     // (a zone's: 4.43)
+    MustFlyArea area;     // (a zone's or a corridor's: 4.43, 4.44)
     switch (kind) {
     case MustFlyLocation::Point:
         if (isHold(c.latitudeRad) || std::abs(c.latitudeRad) > 0.5 * kPi) return bad(1);
@@ -166,7 +210,7 @@ Reason CapabilityHost::prepareMustFly(MustFlyCommand& c, const sim::VehicleState
         break;
     }
     case MustFlyLocation::Zone: // (given with it, as it was laid out then)
-        if (!given) return bad(0);
+        if (!given || given->shape == ZoneShape::Count) return bad(0);
         area = *given;
         break;
     case MustFlyLocation::OpZone: { // (the world's, as it is now)
@@ -178,9 +222,23 @@ Reason CapabilityHost::prepareMustFly(MustFlyCommand& c, const sim::VehicleState
         }
         break;
     }
+    case MustFlyLocation::Line: // (given with it, as it was laid out then)
+        if (!given || given->lineCount == 0) return bad(0);
+        area = *given;
+        break;
+    case MustFlyLocation::OpLine: { // (the world's, as it is now)
+        const OpLine* l = sessionView_ ? sessionView_->opLine(static_cast<OpLineId>(c.target)) : nullptr;
+        CommandResult ignored;
+        if (!l || layOutLine(*l, area, ignored) != Reason::None) {
+            detail.index = 5;
+            return Reason::UnknownGeometry; // (none by that id, or its frame gone)
+        }
+        break;
+    }
     default: return bad(0);
     }
     if (area.shape != ZoneShape::Count) return enterZone(c, area, ingressMin, ingressMax, state, log);
+    if (area.lineCount) return flyLine(c, area, ingressMin, ingressMax, state, log);
 
     // its window of bearings to come from: the points it approaches through, laid out from where the location and the
     // aircraft are now - in the location's frame, where it is in one, north and east of the frame's origin
@@ -243,28 +301,18 @@ Reason CapabilityHost::enterZone(const MustFlyCommand& c, MustFlyArea& area, dou
     }
     const double now = sessionView_ ? sessionView_->simTimeS() : 0.0;
     const FramePose* at = area.framed ? &pose : nullptr;
+    const double turn = zones::turnNow(area, at); // (its plane's axes from north: bearings turned into it)
     double ax = 0.0, ay = 0.0, cx = 0.0, cy = 0.0;
     zones::toPlane(area, at, now, state.latitudeRad, state.longitudeRad, ax, ay);
     zones::centre(area, cx, cy);
     // its altitude: the one given - where it has a band, within it and in its reference (left out, the band's): else it is
     // never entered - or the aircraft's, held within its band (a tenth of it in, or 30 m where it is open)
-    double altitude = c.altitudeM, reference = c.altitudeReference;
-    const double lo = area.altitudeMinM, hi = area.altitudeMaxM;
-    if (!isHold(altitude) && (!isHold(lo) || !isHold(hi))) {
-        const double band = static_cast<double>(area.altitudeReference);
-        const int field = !isHold(reference) && reference != band ? 4 : (!isHold(lo) && altitude < lo) || (!isHold(hi) && altitude > hi) ? 3 : -1;
-        if (field >= 0) {
-            log.result.index = static_cast<std::int16_t>(field);
-            return Reason::InvalidParameter;
-        }
-        reference = band;
-    }
-    if (isHold(altitude)) {
-        const double own = altitudeNow(area.altitudeReference, state, &config_->altimeter);
-        const double in = !isHold(lo) && !isHold(hi) ? std::min(0.1 * (hi - lo), 30.0) : 30.0;
-        if (!isHold(lo) && own < lo) altitude = !isHold(hi) ? std::min(lo + in, 0.5 * (lo + hi)) : lo + in;
-        else if (!isHold(hi) && own > hi) altitude = !isHold(lo) ? std::max(hi - in, 0.5 * (lo + hi)) : hi - in;
-        if (!isHold(altitude)) reference = static_cast<double>(area.altitudeReference);
+    double altitude = kHold, reference = kHold;
+    const double own = altitudeNow(area.altitudeReference, state, &config_->altimeter);
+    if (const int field = inBand(c.altitudeM, c.altitudeReference, area.altitudeMinM, area.altitudeMaxM, area.altitudeReference, own, altitude, reference);
+        field >= 0) {
+        log.result.index = static_cast<std::int16_t>(field);
+        return Reason::InvalidParameter;
     }
     // where it goes in: its nearest point - or, with a window of bearings, its edge that way from its centre - and a little
     // further in (a fifth of the way across it, 200 m at most), aimed at over the ground
@@ -272,17 +320,18 @@ Reason CapabilityHost::enterZone(const MustFlyCommand& c, MustFlyArea& area, dou
     const bool inside = zones::contains(area, ax, ay);
     const double speed = approachSpeed(c, state, state.altitudeMslM);
     if (inside) { // (in it already, over the ground: on as it flies for ten seconds, to its altitude)
-        const double track = std::hypot(state.velocityNedMs[0], state.velocityNedMs[1]) > 0.5 ? std::atan2(state.velocityNedMs[1], state.velocityNedMs[0])
-                                                                                               : state.eulerRad[2];
+        const double track = (std::hypot(state.velocityNedMs[0], state.velocityNedMs[1]) > 0.5 ? std::atan2(state.velocityNedMs[1], state.velocityNedMs[0])
+                                                                                                : state.eulerRad[2]) -
+                             turn;
         ex = ax + 10.0 * std::max(speed, 1.0) * std::cos(track), ey = ay + 10.0 * std::max(speed, 1.0) * std::sin(track);
         inX = inY = 0.0;
     } else if (!isHold(ingressMin)) {
         // (the bearing from its centre to the aircraft, where it is within the window; else the window's nearer edge, moved in)
-        const double from = geo::wrapTwoPi(std::atan2(ay - cy, ax - cx));
-        const double width = geo::wrapTwoPi(ingressMax - ingressMin), margin = std::min(5.0 * kDeg, 0.5 * width);
-        const double bearing = geo::wrapTwoPi(from - ingressMin) <= width                                 ? from
-                               : geo::wrapTwoPi(ingressMin - from) <= geo::wrapTwoPi(from - ingressMax) ? ingressMin + margin
-                                                                                                         : ingressMax - margin;
+        const double from = geo::wrapTwoPi(std::atan2(ay - cy, ax - cx)), lo = ingressMin - turn, hi = ingressMax - turn;
+        const double width = geo::wrapTwoPi(hi - lo), margin = std::min(5.0 * kDeg, 0.5 * width);
+        const double bearing = geo::wrapTwoPi(from - lo) <= width                          ? from
+                               : geo::wrapTwoPi(lo - from) <= geo::wrapTwoPi(from - hi) ? lo + margin
+                                                                                         : hi - margin;
         zones::ray(area, bearing, ex, ey);
         const double d = std::hypot(cx - ex, cy - ey);
         inX = d > 1e-9 ? (cx - ex) / d : 0.0, inY = d > 1e-9 ? (cy - ey) / d : 0.0;
@@ -302,7 +351,7 @@ Reason CapabilityHost::enterZone(const MustFlyCommand& c, MustFlyArea& area, dou
         double out[2][2];
         int k = 0;
         const double radius = approachRadius(c, state, state.altitudeMslM);
-        approach(ax - aimX, ay - aimY, ingressMin, ingressMax, std::max(3.0 * radius, 10.0 * speed), radius, out, k);
+        approach(ax - aimX, ay - aimY, ingressMin - turn, ingressMax - turn, std::max(3.0 * radius, 10.0 * speed), radius, out, k);
         for (int j = 0; j < k; ++j) plane[n][0] = aimX + out[j][0], plane[n][1] = aimY + out[j][1], ++n;
     }
     plane[n][0] = aimX, plane[n][1] = aimY, ++n;
@@ -328,6 +377,103 @@ Reason CapabilityHost::enterZone(const MustFlyCommand& c, MustFlyArea& area, dou
     return Reason::None;
 }
 
+Reason CapabilityHost::flyLine(const MustFlyCommand& c, MustFlyArea& line, double ingressMin, double ingressMax, const sim::VehicleState& state,
+                               CheckLog& log) {
+    // the line where it is now (a frame's where the frame is), and the aircraft in its plane
+    FramePose pose;
+    if (line.framed) {
+        FrameSpec spec;
+        if (!sessionView_ || !sessionView_->frame(line.frameId, spec, pose)) {
+            log.result.index = 5;
+            return Reason::UnknownGeometry; // (its frame gone)
+        }
+    }
+    const double now = sessionView_ ? sessionView_->simTimeS() : 0.0;
+    const FramePose* at = line.framed ? &pose : nullptr;
+    const double turn = zones::turnNow(line, at);
+    double ax = 0.0, ay = 0.0;
+    zones::toPlane(line, at, now, state.latitudeRad, state.longitudeRad, ax, ay);
+    const std::uint32_t n = line.lineCount;
+    // the altitude at each vertex: the one given - within the band there, in its reference - else the vertex's own, else the
+    // aircraft's held within the band there (4.43's rule)
+    double altitude[MustFlyArea::kVertices], reference[MustFlyArea::kVertices];
+    for (std::uint32_t v = 0; v < n; ++v) {
+        if (isHold(c.altitudeM) && !isHold(line.lineAltitudeM[v])) {
+            altitude[v] = line.lineAltitudeM[v], reference[v] = static_cast<double>(line.lineAltitudeReference[v]);
+            continue;
+        }
+        const double own = altitudeNow(line.lineBandReference[v], state, &config_->altimeter);
+        if (const int field = inBand(c.altitudeM, c.altitudeReference, line.lineMinM[v], line.lineMaxM[v], line.lineBandReference[v], own, altitude[v],
+                                     reference[v]);
+            field >= 0) {
+            log.result.index = static_cast<std::int16_t>(field);
+            return Reason::InvalidParameter;
+        }
+    }
+    // its entry: onto its first segment behind its first vertex, from within 10 degrees of its line there - or from within the
+    // window given (the bearings from its first vertex, turned into its plane) - approached as a point is (4.42)
+    const double x0 = line.vertices[0][0], y0 = line.vertices[0][1];
+    const double back = std::atan2(y0 - line.vertices[1][1], x0 - line.vertices[1][0]); // (from its first vertex, away from its second)
+    const bool windowed = !isHold(ingressMin);
+    const double lo = windowed ? ingressMin - turn : back - kEntryRad, hi = windowed ? ingressMax - turn : back + kEntryRad;
+    const double speed = approachSpeed(c, state, state.altitudeMslM), radius = approachRadius(c, state, state.altitudeMslM);
+    double out[2][2];
+    int k = 0;
+    approach(ax - x0, ay - y0, lo, hi, std::max(3.0 * radius, 10.0 * speed), radius, out, k);
+    // its points: the approach, at its first vertex's altitude, then every vertex - flown by, the last flown over - in its
+    // frame where it is in one, else on the Earth (a moving line's each where it will be as the aircraft gets there)
+    Waypoint points[2 + MustFlyArea::kVertices];
+    double plane[2 + MustFlyArea::kVertices][2];
+    std::uint32_t m = 0;
+    for (int j = 0; j < k; ++j) plane[m][0] = x0 + out[j][0], plane[m][1] = y0 + out[j][1], ++m;
+    const std::uint32_t first = m; // (its first vertex's point)
+    for (std::uint32_t v = 0; v < n; ++v) plane[m][0] = line.vertices[v][0], plane[m][1] = line.vertices[v][1], ++m;
+    double along = 0.0, px = ax, py = ay;
+    for (std::uint32_t j = 0; j < m; ++j) {
+        Waypoint& w = points[j];
+        const std::uint32_t v = j < first ? 0 : j - first;
+        w.altitudeM = altitude[v], w.altitudeReference = reference[v], w.speed = c.speed, w.speedReference = c.speedReference;
+        along += std::hypot(plane[j][0] - px, plane[j][1] - py), px = plane[j][0], py = plane[j][1];
+        if (line.framed) { // (along its frame's axes from the origin, turned as the line's are: flat)
+            w.frame = static_cast<double>(line.frameId);
+            w.frameRotation = static_cast<double>(line.rotation == FrameRotation::Attitude ? FrameRotation::Yaw : line.rotation);
+            w.frameOffsets = static_cast<double>(FrameOffsets::Cartesian);
+            w.frameXM = line.frameXM + plane[j][0], w.frameYM = line.frameYM + plane[j][1];
+        } else {
+            zones::fromPlane(line, nullptr, now + along / std::max(speed, 1.0), plane[j][0], plane[j][1], w.latitudeRad, w.longitudeRad);
+        }
+    }
+    points[m - 1].kind = static_cast<double>(EndPointKind::Waypoint); // (its last vertex, flown over: done as it is passed)
+    RouteCommand laid; // (on its projection, once, on along its course at its end)
+    laid.projection = static_cast<double>(line.projection);
+    if (const Reason why = checkRoute(laid, Span<const Waypoint>(points, m), state, log); why != Reason::None) return why;
+    // its widths: each turn within it kept inside them - one flown by cuts inside by r (1 - cos(a/2)); one flown over (beyond
+    // 150 degrees) swings out by r (1 - cos a) - against the lesser width that side of the segments either side of it (at its
+    // first vertex, its first segment's): beyond it, a turn the aircraft cannot fly within it (named by its point)
+    const route::Plan& p = *routePlan_;
+    for (std::uint32_t v = 0; v + 1 < n; ++v) {
+        const std::uint32_t j = first + v;
+        const route::Turn& t = j == p.start ? p.entryTurn : p.turns[j];
+        const double in = j == p.start ? p.entry.courseInRad : p.legs[j].courseInRad, change = geo::wrapPi(p.legs[j + 1].courseOutRad - in);
+        if (std::abs(change) < kDeg) continue;
+        const bool flownBy = t.radiusM > 0.0;
+        const double off = flownBy ? t.radiusM * (1.0 - std::cos(0.5 * std::abs(change))) : radius * (1.0 - std::cos(change));
+        const bool right = (change > 0.0) == flownBy; // (the side it goes out to: inside a turn flown by, outside one flown over)
+        const double* widths = right ? line.rightWidthM : line.leftWidthM;
+        const double room = v == 0 ? orNone(widths[0]) : std::min(orNone(widths[v - 1]), orNone(widths[v]));
+        if (off > room) log.find(Reason::PerformanceLimit, static_cast<std::int16_t>(j), Constraint::MaxTurnRate);
+    }
+    routePlan_->area = line; // (after the checks, which clear it)
+    return Reason::None;
+}
+
+CommandResult CapabilityHost::submitLaidOut(const MustFlyCommand& mustFly, const MustFlyArea& area, const CommandOptions& options,
+                                            const sim::VehicleState& state, double now) {
+    RouteExtras extras;
+    extras.area = &area;
+    return submitWith(Command(mustFly), {}, {}, options, state, now, true, nullptr, nullptr, &extras);
+}
+
 CommandResult CapabilityHost::submit(const MustFlyCommand& mustFly, const OpZone* zone, const CommandOptions& options, const sim::VehicleState& state,
                                      double now) {
     if (!zone) return submitWith(Command(mustFly), {}, {}, options, state, now);
@@ -339,9 +485,21 @@ CommandResult CapabilityHost::submit(const MustFlyCommand& mustFly, const OpZone
         r.index = detail.index;
         return r;
     }
-    RouteExtras extras;
-    extras.area = &area;
-    return submitWith(Command(mustFly), {}, {}, options, state, now, true, nullptr, nullptr, &extras);
+    return submitLaidOut(mustFly, area, options, state, now);
+}
+
+CommandResult CapabilityHost::submit(const MustFlyCommand& mustFly, const OpLine* line, const CommandOptions& options, const sim::VehicleState& state,
+                                     double now) {
+    if (!line) return submitWith(Command(mustFly), {}, {}, options, state, now);
+    MustFlyArea area;
+    CommandResult detail;
+    if (const Reason why = layOutLine(*line, area, detail); why != Reason::None) {
+        details_.clear();
+        CommandResult r = rejected(why);
+        r.index = detail.index;
+        return r;
+    }
+    return submitLaidOut(mustFly, area, options, state, now);
 }
 
 CommandResult CapabilityHost::update(ActivityId activity, const MustFlyCommand& mustFly, const OpZone* zone, const sim::VehicleState& state,
@@ -355,6 +513,25 @@ CommandResult CapabilityHost::update(ActivityId activity, const MustFlyCommand& 
         r.index = detail.index;
         return r;
     }
+    return updateLaidOut(activity, mustFly, area, state, caller);
+}
+
+CommandResult CapabilityHost::update(ActivityId activity, const MustFlyCommand& mustFly, const OpLine* line, const sim::VehicleState& state,
+                                     Caller caller) {
+    if (!line) return update(activity, Command(mustFly), state, caller);
+    MustFlyArea area;
+    CommandResult detail;
+    if (const Reason why = layOutLine(*line, area, detail); why != Reason::None) {
+        details_.clear();
+        CommandResult r = rejected(why, activity);
+        r.index = detail.index;
+        return r;
+    }
+    return updateLaidOut(activity, mustFly, area, state, caller);
+}
+
+CommandResult CapabilityHost::updateLaidOut(ActivityId activity, const MustFlyCommand& mustFly, const MustFlyArea& area, const sim::VehicleState& state,
+                                            Caller caller) {
     details_.clear();
     const int found = liveSlot(activity);
     if (found < 0) {
@@ -385,10 +562,10 @@ CommandResult CapabilityHost::updateMustFly(std::size_t s, ActivityId activity, 
         result.index = isHold(next.ingressMinRad) ? 6 : 7;
         return about(rejected(Reason::InvalidParameter, activity), result);
     }
-    // a zone given with it before: the one it flies to, as it was laid out then, where none is given now (4.43)
+    // a zone or a corridor given with it before: the one it flies, as it was laid out then, where none is given now (4.43, 4.44)
     const PathStore* store = config_->path.get();
-    if (!given && store && store->mustFlyArea.shape != ZoneShape::Count && merged.location == static_cast<double>(MustFlyLocation::Zone))
-        given = &store->mustFlyArea;
+    const bool keeps = merged.location == static_cast<double>(MustFlyLocation::Zone) || merged.location == static_cast<double>(MustFlyLocation::Line);
+    if (!given && store && store->mustFlyArea.laidOut() && keeps) given = &store->mustFlyArea;
     MustFlyArea kept; // (a copy: the checks lay a route out into the scratch plan, never the store it may be in)
     if (given) kept = *given;
     if (const Reason why = prepareMustFly(merged, state, log, given ? &kept : nullptr); why != Reason::None) return about(rejected(why, activity), result);
@@ -396,10 +573,11 @@ CommandResult CapabilityHost::updateMustFly(std::size_t s, ActivityId activity, 
         Command checked = merged;
         if (const Reason why = catalog_->check(records_[s].capability, checked, log); why != Reason::None) return about(rejected(why, activity), result);
         merged = std::get<MustFlyCommand>(checked);
-        checkTerrain(checked, state, log);
-        if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
-        if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
     }
+    // what the checks found, and its terrain, whatever its range policy - as a NEW's (4.8, 4.19)
+    checkTerrain(Command(merged), state, log);
+    if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
+    if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
     writeRoute(), routePlan_->passed.clear(); // (the path store's route afresh: flown from where the aircraft is)
     std::get<MustFlyCommand>(slot.command) = merged;
     ++slot.revision;

@@ -236,6 +236,8 @@ bool toPlane(const MustFlyArea& a, const FramePose* pose, double nowS, double la
     return true;
 }
 
+double turnNow(const MustFlyArea& a, const FramePose* pose) noexcept { return a.framed && pose ? turnOf(a, *pose) : 0.0; }
+
 bool fromPlane(const MustFlyArea& a, const FramePose* pose, double nowS, double x, double y, double& lat, double& lon) noexcept {
     if (!a.framed) {
         double rlat = a.latitudeRad, rlon = a.longitudeRad;

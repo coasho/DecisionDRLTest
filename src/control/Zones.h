@@ -21,6 +21,8 @@ void layOut(const OpZone& zone, const FrameSpec* spec, double nowS, MustFlyArea&
 /// Where a place is in the area's plane now: north and east of its reference (moving: carried on from its time), or along
 /// its frame's axes, the frame as `pose` has it. False for a frame without a pose.
 bool toPlane(const MustFlyArea& a, const FramePose* pose, double nowS, double latitudeRad, double longitudeRad, double& x, double& y) noexcept;
+/// How far its plane's axes are turned from north now: its frame's yaw or track as `pose` has it (0: on the Earth, unturned).
+double turnNow(const MustFlyArea& a, const FramePose* pose) noexcept;
 /// Where a point of its plane is on the Earth now.
 bool fromPlane(const MustFlyArea& a, const FramePose* pose, double nowS, double x, double y, double& latitudeRad, double& longitudeRad) noexcept;
 

@@ -685,6 +685,52 @@ int alloc() {
              if (w.setOpZone(z) != Reason::None || !w.submit(id, c).accepted())
                  std::fprintf(stderr, "must fly zone: vehicle %u refused\n", id), std::exit(3);
          }},
+        // ADR-29 FA-8b2: a must fly through a corridor with a turn, given and moved every step through UPDATE - laid out afresh,
+        // its turn checked against its widths
+        {"must fly line update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             static std::vector<OpLine> lines(64);
+             MustFlyCommand c;
+             c.location = static_cast<double>(MustFlyLocation::Line);
+             OpLine& l = lines[id];
+             if (k == 0) {
+                 const auto& s = *w.vehicleState(id);
+                 for (const auto& [n, e] : {std::pair{0, 3000}, {0, 7000}, {4000, 7000}}) {
+                     const Waypoint at = waypointAt(s, n, e);
+                     LineVertex v;
+                     v.latitudeRad = at.latitudeRad, v.longitudeRad = at.longitudeRad;
+                     l.vertices.push_back(v);
+                 }
+                 l.leftWidthM = l.rightWidthM = 1000.0;
+                 activity[id] = w.submit(id, c, l).activity;
+                 return;
+             }
+             l.vertices[2].latitudeRad += 1e-7 * std::sin(k * 0.1); // (in place: nothing allocated here)
+             if (!w.update(activity[id], c, l).accepted()) std::fprintf(stderr, "must fly line: update refused\n"), std::exit(3);
+         }},
+        // ...and one kept by the world, its speed changed every step through UPDATE by its id - the line read where it is kept
+        {"must fly op line update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             MustFlyCommand c;
+             c.location = static_cast<double>(MustFlyLocation::OpLine), c.target = static_cast<double>(300 + id);
+             c.speed = 50.0 + std::sin(k * 0.1);
+             if (k == 0) {
+                 const auto& s = *w.vehicleState(id);
+                 OpLine l;
+                 l.id = 300 + id;
+                 for (const auto& [n, e] : {std::pair{0, 3000}, {0, 7000}, {4000, 7000}}) {
+                     const Waypoint at = waypointAt(s, n, e);
+                     LineVertex v;
+                     v.latitudeRad = at.latitudeRad, v.longitudeRad = at.longitudeRad;
+                     l.vertices.push_back(v);
+                 }
+                 l.leftWidthM = l.rightWidthM = 1000.0;
+                 if (w.setOpLine(l) != Reason::None) std::fprintf(stderr, "must fly op line: vehicle %u refused\n", id), std::exit(3);
+                 activity[id] = w.submit(id, c).activity;
+                 return;
+             }
+             if (!w.update(activity[id], c).accepted()) std::fprintf(stderr, "must fly op line: update refused\n"), std::exit(3);
+         }},
         // step 3: an autopilot on pitch and thrust, the policy's bank updated every step
         {"axes apart each step", [&](std::uint32_t id, int k) {
              static std::vector<ActivityId> activity(64, 0);

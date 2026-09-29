@@ -438,10 +438,11 @@ A c172x meets a duration in a 10 m/s wind within 0.2 %, and an IRIS within
 ### Must fly: a location flown over
 
 `fsim.guidance.must_fly` is A-GRA's must fly
-([flight-autonomy.md](../flight-autonomy.md), 4.42 and 4.43): a location the
+([flight-autonomy.md](../flight-autonomy.md), 4.42 to 4.44): a location the
 aircraft must fly over - a point, another vehicle, or an operational point the
-world keeps - or a zone it must enter, given or kept by the world, approached,
-where it is given, from within a window of bearings.
+world keeps - a zone it must enter, or a corridor it must fly through, given or
+kept by the world, approached, where it is given, from within a window of
+bearings.
 
 ```cpp
 OpPoint ip;                                              // an operational point, kept by the world by its id
@@ -483,7 +484,26 @@ over.location = double(MustFlyLocation::Entity), over.target = double(other);
   - It completes once the aircraft is in it, over its area and within its band, tested each step; not at the route's end.
   - A malformed zone is refused `invalid_parameter` naming its field from 10 on (10 its shape, 11 vertices, 12 holes, 13 centre, 14 dimensions, 15 bearings, 16 band, 17 frame, 18 velocity). An operational zone the world does not keep is refused `unknown_geometry`.
   - An UPDATE may give a zone in place of its own (`w.update(activity, m, zone)`); given none, it keeps the one it has.
-- Corridors and volumes are FA-8b2's and FA-8b3's: the capability is partial until then.
+- **A corridor** (`OpLine`; 4.44) is 2 to 32 vertices, on the Earth or in a frame, each with its altitude, the band there and the widths of the segment from it, on great circles or rhumb lines. It is given with the command (`location` Line: `v.submit(m, line)`) or kept by the world by its id (`location` OpLine: `World::setOpLine`, `opLines`, `opLine`, `removeOpLine`).
+
+  ```cpp
+  OpLine corridor;                                         // an L: 5 km east, then 4 km north, 500 m either side
+  for (auto [n, e] : {std::pair{0.0, 3000.0}, {0.0, 8000.0}, {4000.0, 8000.0}}) {
+      LineVertex v;
+      v.latitudeRad = lat + n / R, v.longitudeRad = lon + e / (R * std::cos(lat));
+      corridor.vertices.push_back(v);
+  }
+  corridor.leftWidthM = corridor.rightWidthM = 500.0;
+  MustFlyCommand through;
+  through.location = double(MustFlyLocation::Line);
+  auto c = v.submit(through, corridor).activity;          // onto its first segment, every vertex, done past its last
+  ```
+
+  - It is laid out as a route: onto its first segment from behind its first vertex (or from within a window given), then every vertex, flown by, the last flown over; it completes as the last is passed.
+  - Each turn in it is checked against its widths at the radius the route plans it with: a turn that cuts inside by more than the width there is refused `performance_limit` (`max_turn_rate`), naming its point.
+  - Each vertex flies at the altitude given (within its band), else its own, else the aircraft's held within its band.
+  - A malformed line is refused `invalid_parameter` naming its field from 10 on (10 vertices, 11 projection, 12 widths, 13 band, 14 frame, 15 velocity).
+- Volumes are FA-8b3's: the capability is partial until then.
 
 ### Grants: who may command a vehicle
 

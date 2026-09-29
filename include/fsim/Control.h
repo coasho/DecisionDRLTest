@@ -742,6 +742,8 @@ enum class MustFlyLocation : std::uint8_t {
     OpPoint = 2, ///< an operational point by its id (OpPointID; World::setOpPoint)
     Zone = 3,    ///< a zone given with it (A-GRA's ZoneTarget; an OpZone beside the command): entered (4.43)
     OpZone = 4,  ///< an operational zone by its id (OpZoneID; World::setOpZone): entered
+    Line = 5,    ///< a corridor given with it (A-GRA's LineTarget; an OpLine beside the command): flown through (4.44)
+    OpLine = 6,  ///< an operational line by its id (OpLineID; World::setOpLine): flown through
     Count
 };
 
@@ -759,7 +761,7 @@ struct MustFlyCommand {
     double latitudeRad = kHold, longitudeRad = kHold; ///< a point's
     double altitudeM = kHold;          ///< a point's, or the altitude it flies over the location at; kHold: 4.42
     double altitudeReference = kHold;  ///< AltitudeReference
-    double target = kHold;             ///< an entity's vehicle id, or an operational point's id
+    double target = kHold;             ///< an entity's vehicle id, or an operational point's, zone's or line's id
     double ingressMinRad = kHold, ingressMaxRad = kHold; ///< the bearings from the location it approaches from: both or neither
     double speed = kHold;              ///< m/s, or a Mach number; kHold: as it flies now (a rotorcraft its cruise)
     double speedReference = kHold;     ///< SpeedReference
@@ -808,9 +810,43 @@ struct OpZone {
     std::uint32_t revision = 0;                  ///< read back: one more each time it is set
 };
 
-/// A must fly's area as the host laid it out (docs/flight-autonomy.md, 4.43), for the behaviour to find the aircraft in at every
-/// update: its shape in the plane at its reference point - north and east metres, or x and y along its frame's axes - the
-/// band of altitudes it spans, and how its reference moves.
+/// An operational line's id (A-GRA's OpLineID): not 0.
+using OpLineId = std::uint64_t;
+
+/// A vertex of a line (A-GRA's LinePoint2D_Type; docs/flight-autonomy.md, 4.44): on the Earth, or - the line in a frame -
+/// along the frame's x and y; the altitude to fly it at and the band there, in their reference; the widths of the
+/// segment from it to the next, in place of the line's.
+struct LineVertex {
+    double latitudeRad = kHold, longitudeRad = kHold;
+    double xM = kHold, yM = kHold;
+    double altitudeM = kHold;                          ///< A-GRA's Altitude
+    double altitudeMinM = kHold, altitudeMaxM = kHold; ///< A-GRA's AltitudeRange: in place of the line's band here
+    double altitudeReference = kHold;                  ///< AltitudeReference of both
+    double leftWidthM = kHold, rightWidthM = kHold;    ///< the segment from it: left and right of it as it is flown
+};
+
+/// An operational line (A-GRA's OpLine, its LineType; docs/flight-autonomy.md, 4.44), kept by the world by its id for a must
+/// fly to name (World::setOpLine), or given with one as a corridor to fly through: its vertices in order - on the Earth, or
+/// in a reference frame - the projection its segments are drawn on, the widths either side of it, the band of altitudes
+/// it spans, and the velocity it moves at from a time. A field left out is kHold.
+struct OpLine {
+    OpLineId id = 0;
+    std::vector<LineVertex> vertices;            ///< 2 to 32, in the order it is flown
+    double projection = kHold;                   ///< Projection of its segments: great circles (left out) or rhumb lines
+    double leftWidthM = kHold, rightWidthM = kHold; ///< its widths, left and right of it as it is flown (left out: none)
+    double altitudeMinM = kHold, altitudeMaxM = kHold; ///< its band: a vertex's range in place of it there
+    double altitudeReference = kHold;            ///< AltitudeReference of the band
+    double frame = kHold;                        ///< its vertices in this frame (World::createFrame's id)
+    double frameRotation = kHold;                ///< FrameRotation: its x and y turned with the frame's yaw or track (2D)
+    double northMs = kHold, eastMs = kHold;      ///< moving (A-GRA's Velocity): from where it is at `timeS`, at this velocity
+    double timeS = kHold;                        ///< World::time; left out, when it is set
+    std::uint32_t revision = 0;                  ///< read back: one more each time it is set
+};
+
+/// A must fly's zone or corridor as the host laid it out (docs/flight-autonomy.md, 4.43 and 4.44), for the behaviour to find
+/// the aircraft in at every update and for an UPDATE, a waiting start or a task to fly again: its shape in the plane at its
+/// reference point - north and east metres, or x and y along its frame's axes - the band of altitudes a zone spans, a
+/// corridor's altitudes, bands and widths at each vertex, and how its reference moves.
 struct MustFlyArea {
     static constexpr std::size_t kVertices = 32, kHoles = 4;
     ZoneShape shape = ZoneShape::Count; ///< Count: none (a point's must fly)
@@ -832,6 +868,18 @@ struct MustFlyArea {
     double frameXM = 0.0, frameYM = 0.0;
     double altitudeMinM = kHold, altitudeMaxM = kHold; ///< its band, in `altitudeReference`: left out, none that way
     AltitudeReference altitudeReference = AltitudeReference::Msl;
+    // a corridor's (4.44; `shape` Count): its vertices in `vertices`, and at each the altitude to fly, the band there and the
+    // widths of the segment from it (kHold: none given)
+    std::uint8_t lineCount = 0;                  ///< its vertices: 0, none
+    Projection projection = Projection::GreatCircle;
+    double lineAltitudeM[kVertices] = {};
+    AltitudeReference lineAltitudeReference[kVertices] = {};
+    double lineMinM[kVertices] = {}, lineMaxM[kVertices] = {};
+    AltitudeReference lineBandReference[kVertices] = {};
+    double leftWidthM[kVertices] = {}, rightWidthM[kVertices] = {};
+
+    /// A zone or a corridor laid out (false: a point's must fly, or none).
+    bool laidOut() const noexcept { return shape != ZoneShape::Count || lineCount != 0; }
 };
 
 /// Where a vehicle's route, curve or pattern shape lives while it is flown
@@ -958,6 +1006,7 @@ struct BatchCommand {
     Span<const RouteBranch> branches;    ///< a RouteCommand's: its conditional branches (4.37)
     Span<const RouteTerminator> terminators; ///< a RouteCommand's: its civil path terminators' data (4.38)
     const OpZone* zone = nullptr;        ///< a MustFlyCommand's zone given with it (4.43; null: none)
+    const OpLine* line = nullptr;        ///< a MustFlyCommand's corridor given with it (4.44; null: none)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight

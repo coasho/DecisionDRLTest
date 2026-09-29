@@ -52,7 +52,9 @@ add_library(fsim_control STATIC
     Plans.cpp
     MustFly.cpp
     Zones.h
-    Zones.cpp)
+    Zones.cpp
+    Lines.h
+    Lines.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

@@ -135,6 +135,9 @@ public:
     /// NEW of a must fly with its zone given (docs/flight-autonomy.md, 4.43): the zone checked and laid out as it is given.
     control::CommandResult submit(std::uint32_t id, const control::MustFlyCommand& mustFly, const control::OpZone& zone,
                                   const control::CommandOptions& options = {});
+    /// NEW of a must fly with its corridor given (4.44): the line checked and laid out as it is given.
+    control::CommandResult submit(std::uint32_t id, const control::MustFlyCommand& mustFly, const control::OpLine& line,
+                                  const control::CommandOptions& options = {});
     control::CommandResult submit(std::uint32_t id, const control::PatternCommand& pattern, const control::PatternShape& shape,
                                   const control::CommandOptions& options = {});
     /// Several NEWs at once (docs/flight-autonomy.md, 4.8), made in order at
@@ -162,8 +165,9 @@ public:
                                   const control::CurveShape* shape = nullptr);
     /// UPDATE of a pattern with its shape: the fields given in either merged (kHold keeps one), flown afresh.
     control::CommandResult update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape);
-    /// UPDATE of a must fly with a zone given in place of its own (4.43).
+    /// UPDATE of a must fly with a zone given in place of its own (4.43), or a corridor (4.44).
     control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpZone& zone);
+    control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpLine& line);
     /// CANCEL: the activity ends; its axes fly the vehicle default.
     control::CommandResult cancel(control::ActivityId activity);
     /// UPDATE and CANCEL declaring the caller's source, as a NEW's options do,
@@ -183,6 +187,8 @@ public:
                                   Span<const control::NurbsSegment> segments, const control::CurveShape* shape = nullptr);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
                                   const control::OpZone& zone);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
+                                  const control::OpLine& line);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
                                   const control::PatternShape& shape);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);
@@ -317,6 +323,12 @@ public:
     bool removeOpZone(control::OpZoneId id);
     std::vector<control::OpZoneId> opZones() const;
     std::optional<control::OpZone> opZone(control::OpZoneId id) const;
+    /// An operational line (4.44; A-GRA's OpLine), kept as a zone is (Geometry.cpp). InvalidParameter for one A-GRA's schema
+    /// would not take, or a frame the world does not have.
+    control::Reason setOpLine(const control::OpLine& line);
+    bool removeOpLine(control::OpLineId id);
+    std::vector<control::OpLineId> opLines() const;
+    std::optional<control::OpLine> opLine(control::OpLineId id) const;
     // --- The performance profile (docs/flight-autonomy.md, 4.15; A-GRA's MA_FlightControlModesPerformanceProfileType) ---
     /// A flight mode's performance profile at the vehicle's condition now - HSA/CSA, waypoint or curve following -
     /// into `out`, its vectors reused (PerformanceProfile.cpp). InvalidParameter for another mode (A-GRA profiles
@@ -472,6 +484,7 @@ private:
         bool frame(control::FrameId id, control::FrameSpec& spec, control::FramePose& now) const override;
         bool opPoint(control::OpPointId id, control::OpPoint& out) const override;
         const control::OpZone* opZone(control::OpZoneId id) const override;
+        const control::OpLine* opLine(control::OpLineId id) const override;
 
     private:
         const World& world_;
@@ -522,6 +535,7 @@ private:
     control::FrameId lastFrame_ = 0;
     std::map<control::OpPointId, control::OpPoint> opPoints_; ///< the operational points, by id (4.42)
     std::map<control::OpZoneId, control::OpZone> opZones_;    ///< the operational zones, by id (4.43)
+    std::map<control::OpLineId, control::OpLine> opLines_;    ///< the operational lines, by id (4.44)
 };
 
 } // namespace fsim::session

@@ -406,7 +406,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     if (count > 0 && c.start >= count) return bad(3);
     if (!routePlan_) routePlan_ = std::make_unique<route::Plan>();
     route::Plan& p = *routePlan_;
-    p.area.shape = ZoneShape::Count; // (a must fly's zone set after: 4.43)
+    p.area.shape = ZoneShape::Count, p.area.lineCount = 0; // (a must fly's zone or corridor set after: 4.43, 4.44)
     const bool hovers = (adapter_->features() & kFeatureHover) != 0;
     std::int16_t which = -1;
     auto point = [&detail](std::uint32_t i, Reason why) {
@@ -950,7 +950,7 @@ void CapabilityHost::writeRoute() {
     for (std::uint32_t k = 0; k < p.loiterCount; ++k) store.routeLoiters[k] = route::unplaced(p.loiters[k]), store.routeLoiters[k].point = p.named(p.loiters[k].point);
     store.routeStateCount = p.stateCount; // (its states placed: 4.34)
     for (std::uint32_t j = 0; j < p.stateCount; ++j) store.routeStates[j] = p.states[j], store.routeStates[j].point = p.named(p.states[j].point);
-    if (p.area.shape != ZoneShape::Count || store.mustFlyArea.shape != ZoneShape::Count) store.mustFlyArea = p.area; // (a must fly's zone: 4.43)
+    if (p.area.laidOut() || store.mustFlyArea.laidOut()) store.mustFlyArea = p.area; // (a must fly's zone or corridor: 4.43, 4.44)
     ++store.revision;
 }
 
@@ -1373,7 +1373,7 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     const RouteExtras extras{Span<const RouteLoiter>(w.loiters.data(), w.loiters.size()), Span<const RouteState>(w.states.data(), w.states.size()),
                              Span<const RoutePath>(w.paths.data(), w.paths.size()), Span<const RouteBranch>(w.branches.data(), w.branches.size()),
                              Span<const RouteTerminator>(w.terminators.data(), w.terminators.size()),
-                             w.area.shape != ZoneShape::Count ? &w.area : nullptr};
+                             w.area.laidOut() ? &w.area : nullptr};
     if (why == Reason::None) why = prepare(record.capability, setpoint, Span<const Waypoint>(w.waypoints.data(), w.waypoints.size()),
                                            Span<const NurbsSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape, &w.curveShape,
                                            &extras);
@@ -2154,7 +2154,7 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
     }
     CheckLog log{result, w.options.range, &details_};
     Command probe = next; // (fixed-size: a behaviour takes no UPDATE)
-    const MustFlyArea* area = extras && extras->area ? extras->area : w.area.shape != ZoneShape::Count ? &w.area : nullptr; // (4.43)
+    const MustFlyArea* area = extras && extras->area ? extras->area : w.area.laidOut() ? &w.area : nullptr; // (4.43, 4.44)
     const RouteExtras given{held, planned, pathed, branched, terminated, area};
     if (const Reason why = prepare(record.capability, probe, points, pieces, state, log, &nextShape, &nextCurveShape, &given); why != Reason::None)
         return about(rejected(why, activity), result);

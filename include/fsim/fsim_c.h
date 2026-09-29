@@ -731,8 +731,10 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   fsim_activity_update merges the fields given, a location another than it was replacing the location's own. */
 enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3, FSIM_MODE_MUST_FLY = 4 /* ABI 1.39 */ };
 /* A must fly's location (ABI 1.39; A-GRA's MustFlyLocationType): a point, another vehicle, an operational point by its id;
- * from ABI 1.40 a zone given with it (fsim_vehicle_submit_must_fly) or an operational zone by its id, entered */
-enum fsim_must_fly_location { FSIM_MUST_FLY_POINT = 0, FSIM_MUST_FLY_ENTITY, FSIM_MUST_FLY_OP_POINT, FSIM_MUST_FLY_ZONE, FSIM_MUST_FLY_OP_ZONE };
+ * from ABI 1.40 a zone given with it (fsim_vehicle_submit_must_fly) or an operational zone by its id, entered; from ABI 1.41
+ * a corridor given with it (fsim_vehicle_submit_must_fly_line) or an operational line by its id, flown through */
+enum fsim_must_fly_location { FSIM_MUST_FLY_POINT = 0, FSIM_MUST_FLY_ENTITY, FSIM_MUST_FLY_OP_POINT, FSIM_MUST_FLY_ZONE, FSIM_MUST_FLY_OP_ZONE,
+                              FSIM_MUST_FLY_LINE, FSIM_MUST_FLY_OP_LINE };
 enum fsim_pattern_kind { FSIM_PATTERN_ORBIT = 0, FSIM_PATTERN_RACETRACK, FSIM_PATTERN_FIGURE_EIGHT, FSIM_PATTERN_HOLD,
                          FSIM_PATTERN_HOVER /* ABI 1.23: a rotorcraft's */ };
 enum fsim_hold_turn { FSIM_HOLD_TURN_STANDARD = 0, FSIM_HOLD_TURN_MIL_POWER, FSIM_HOLD_TURN_RELAX }; /* A-GRA's MA_HoldTurnTypeEnum (ABI 1.22) */
@@ -1325,6 +1327,7 @@ typedef struct fsim_batch_command {
     const fsim_route_terminator* terminators; /* FSIM_BATCH_ROUTE's civil path terminators' data (ABI 1.35), struct_size bytes apart */
     uint32_t terminator_count;
     const struct fsim_op_zone* zone;        /* ABI 1.40: a must fly's zone given with it (FSIM_BATCH_MODE, FSIM_MODE_MUST_FLY); NULL none */
+    const struct fsim_op_line* line;        /* ABI 1.41: a must fly's corridor given with it, likewise; NULL none (never with a zone) */
 } fsim_batch_command;
 /* Several NEWs at once (A-GRA's several command instances in one message), `batch[0].struct_size` bytes apart, made in
  * order at this simulation time: `results[i]` answers `batch[i]`, and `details[i]` (may be NULL; `details[0].struct_size`
@@ -1773,6 +1776,57 @@ FSIM_API int fsim_activity_update_must_fly(fsim_world* world, fsim_activity_id a
                                            const fsim_op_zone* zone, fsim_command_result* result);
 FSIM_API int fsim_activity_update_must_fly_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller, const double* fields,
                                               uint32_t count, const fsim_op_zone* zone, fsim_command_result* result);
+
+/* Operational lines (ABI 1.41; docs/flight-autonomy.md, 4.44; A-GRA's OpLine and its LineType): kept by the world by id for a
+ * must fly to name, or given with one as a corridor, flown through from its first vertex to its last. Its 2 to 32 vertices -
+ * on the Earth, or in a frame (x and y along the frame's axes, turned with its yaw or track as frame_rotation says) - each
+ * with the altitude to fly it at, the band there and the widths of the segment from it, in place of the line's; its
+ * projection (as a route's: 0 great circles, 1 rhumb lines); its widths, left and right of it as it is flown (left out:
+ * none); its band of altitudes; a velocity from time_s (World::time; left out, when set). fsim_op_line_init and
+ * fsim_line_vertex_init leave every field out (fsim_hold(); no vertices). */
+typedef struct fsim_line_vertex {
+    double latitude_rad, longitude_rad;    /* on the Earth */
+    double x_m, y_m;                       /* or in the line's frame */
+    double altitude_m;                     /* to fly it at */
+    double altitude_min_m, altitude_max_m; /* the band here, in place of the line's */
+    double altitude_reference;             /* fsim_altitude_reference of both */
+    double left_width_m, right_width_m;    /* the segment from it, in place of the line's */
+} fsim_line_vertex;
+FSIM_API void fsim_line_vertex_init(fsim_line_vertex* vertex);
+typedef struct fsim_op_line {
+    uint32_t struct_size;
+    uint32_t revision;                  /* read back: one more each time it is set (ignored as set) */
+    uint64_t op_line_id;                /* not 0 */
+    const fsim_line_vertex* vertices;   /* vertex_count of them, in the order flown */
+    uint32_t vertex_count;
+    uint32_t reserved;
+    double projection;
+    double left_width_m, right_width_m;
+    double altitude_min_m, altitude_max_m, altitude_reference; /* its band, in this fsim_altitude_reference */
+    double frame, frame_rotation;       /* fsim_world_create_frame's id; fsim_frame_rotation */
+    double north_ms, east_ms, time_s;   /* moving */
+} fsim_op_line;
+FSIM_API void fsim_op_line_init(fsim_op_line* line);
+/* Kept in place of any by its id, its revision one more. `*reason` 0, or invalid_parameter for one A-GRA's schema would not
+ * take: too few or many vertices, a place off the Earth, two in a row at one place; a vertex's altitude outside its band;
+ * negative widths; a band upside down; a frame the world does not have; a velocity with a frame. */
+FSIM_API int fsim_world_set_op_line(fsim_world* world, const fsim_op_line* line, int32_t* reason);
+FSIM_API int fsim_world_remove_op_line(fsim_world* world, uint64_t id); /* FSIM_INVALID_ARGUMENT for one not kept */
+/* The lines kept, by id; one read back, its vertices the library's until the next of these reads. FSIM_INVALID_ARGUMENT for
+ * one not kept. */
+FSIM_API uint32_t fsim_world_op_line_count(const fsim_world* world);
+FSIM_API int fsim_world_get_op_line_at(fsim_world* world, uint32_t index, fsim_op_line* out);
+FSIM_API int fsim_world_get_op_line(fsim_world* world, uint64_t id, fsim_op_line* out);
+/* A must fly (FSIM_MODE_MUST_FLY's fields) with its corridor given (location FSIM_MUST_FLY_LINE): the line checked - a field
+ * at fault named from 10 - and laid out as it is given, then flown through; each turn in it kept within its widths, else
+ * performance_limit naming the turn's point. NULL none, as fsim_vehicle_submit_mode. The UPDATEs: its fields merged, and a
+ * line given replacing its own. */
+FSIM_API int fsim_vehicle_submit_must_fly_line(fsim_world* world, uint32_t id, const double* fields, uint32_t count, const fsim_op_line* line,
+                                               const fsim_command_options* options, fsim_command_result* result);
+FSIM_API int fsim_activity_update_must_fly_line(fsim_world* world, fsim_activity_id activity, const double* fields, uint32_t count,
+                                                const fsim_op_line* line, fsim_command_result* result);
+FSIM_API int fsim_activity_update_must_fly_line_by(fsim_world* world, fsim_activity_id activity, int source, uint32_t controller,
+                                                   const double* fields, uint32_t count, const fsim_op_line* line, fsim_command_result* result);
 
 /* A flight mode's performance profile (ABI 1.14; docs/flight-autonomy.md, 4.15; A-GRA's
  * MA_FlightControlModesPerformanceProfileType, VI 1.2.6.7): the guard rails a mission autonomy shapes its commands

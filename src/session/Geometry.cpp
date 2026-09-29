@@ -1,7 +1,8 @@
-// Operational geometry (docs/flight-autonomy.md, 4.42; A-GRA's OpPoint): the world's store of it, by id, for the commands
-// that name it (a must fly). Set and asked for between steps, never stepped.
+// Operational geometry (docs/flight-autonomy.md, 4.42 to 4.44; A-GRA's OpPoint, OpZone and OpLine): the world's store of it,
+// by id, for the commands that name it (a must fly). Set and asked for between steps, never stepped.
 #include "session/World.h"
 
+#include "control/Lines.h"
 #include "control/Zones.h"
 
 #include <cmath>
@@ -92,6 +93,38 @@ std::optional<control::OpZone> World::opZone(control::OpZoneId id) const {
 const control::OpZone* World::Answers::opZone(control::OpZoneId id) const {
     const auto it = world_.opZones_.find(id);
     return it == world_.opZones_.end() ? nullptr : &it->second;
+}
+
+control::Reason World::setOpLine(const control::OpLine& line) {
+    const bool known = control::isHold(line.frame) || (line.frame == std::floor(line.frame) && line.frame >= 1.0 &&
+                                                      frames_.count(static_cast<control::FrameId>(line.frame)));
+    if (line.id == 0 || control::lines::fault(line, known) >= 0) return control::Reason::InvalidParameter;
+    control::OpLine& kept = opLines_[line.id];
+    const std::uint32_t revision = kept.revision + 1;
+    kept = line;
+    kept.revision = revision;
+    if (!control::isHold(kept.northMs) && control::isHold(kept.timeS)) kept.timeS = simTime_; // (a moving line's: from now)
+    return control::Reason::None;
+}
+
+bool World::removeOpLine(control::OpLineId id) { return opLines_.erase(id) > 0; }
+
+std::vector<control::OpLineId> World::opLines() const {
+    std::vector<control::OpLineId> out;
+    out.reserve(opLines_.size());
+    for (const auto& [id, l] : opLines_) out.push_back(id);
+    return out;
+}
+
+std::optional<control::OpLine> World::opLine(control::OpLineId id) const {
+    const auto it = opLines_.find(id);
+    if (it == opLines_.end()) return std::nullopt;
+    return it->second;
+}
+
+const control::OpLine* World::Answers::opLine(control::OpLineId id) const {
+    const auto it = world_.opLines_.find(id);
+    return it == world_.opLines_.end() ? nullptr : &it->second;
 }
 
 } // namespace fsim::session

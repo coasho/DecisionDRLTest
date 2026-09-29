@@ -88,7 +88,7 @@ TaskStatus CapabilityHost::statusOf(const Task& t) const noexcept {
 Reason CapabilityHost::storeTask(TaskId id, const Command& command, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                  TaskRepetition repetition, const PatternShape* shape, const CurveShape* curveShape, Span<const RouteLoiter> loiters,
                                  Span<const RouteState> states, Span<const RoutePath> paths, Span<const RouteBranch> branches,
-                                 Span<const RouteTerminator> terminators, const OpZone* zone) {
+                                 Span<const RouteTerminator> terminators, const OpZone* zone, const OpLine* line) {
     if (pendingSuggestions_) materialize();
     if (id == 0 || (id & kSuggestedTask)) return Reason::InvalidParameter; // (the platform's own ids)
     if (repetition.attempts == 0 || repetition.attempts > 0xFFFF) return Reason::InvalidParameter;
@@ -98,11 +98,11 @@ Reason CapabilityHost::storeTask(TaskId id, const Command& command, Span<const W
     const CapabilityDescriptor& d = catalog_->descriptor(static_cast<std::size_t>(found));
     if (!(d.interactions & kCommand)) return Reason::UnknownCapability;
     if (repetition.attempts > 1 && d.persistence != Persistence::Terminating) return Reason::InvalidParameter; // (runs of what never completes)
-    MustFlyArea area; // (a must fly's zone given, checked and laid out as it is kept: 4.43)
-    if (zone) {
+    MustFlyArea area; // (a must fly's zone or corridor given, checked and laid out as it is kept: 4.43, 4.44)
+    if (zone || line) {
         CommandResult detail;
-        if (!std::holds_alternative<MustFlyCommand>(command)) return Reason::InvalidParameter;
-        if (const Reason why = layOutZone(*zone, area, detail); why != Reason::None) return why;
+        if (!std::holds_alternative<MustFlyCommand>(command) || (zone && line)) return Reason::InvalidParameter;
+        if (const Reason why = zone ? layOutZone(*zone, area, detail) : layOutLine(*line, area, detail); why != Reason::None) return why;
     }
     Task* t = findTask(id);
     if (t && t->activity) {
@@ -155,7 +155,7 @@ CommandResult CapabilityHost::commandTask(TaskId id, CommandOptions options, con
     const std::vector<RouteTerminator> terminators = t->terminators;
     const MustFlyArea area = t->area;
     const std::uint32_t attempts = t->repetition.attempts;
-    const RouteExtras extras{loiters, states, paths, branches, terminators, area.shape != ZoneShape::Count ? &area : nullptr};
+    const RouteExtras extras{loiters, states, paths, branches, terminators, area.laidOut() ? &area : nullptr};
     CommandResult r = submitWith(command, waypoints, segments, options, state, now, true, &shape, &curveShape, &extras);
     if (!r.accepted()) return r;
     if (Task* again = findTask(id)) { // (found again: the tasks kept may have moved)

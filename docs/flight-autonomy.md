@@ -1083,7 +1083,7 @@ MA may have FA validate a route plan without flying it (VI 1.2.5.5: RoutePlanVal
 
 ### 4.42 A-GRA's must fly: points, entities, operational points and the ingress window (as FA-8a builds them)
 
-A-GRA's MUST_FLY (MA_FlightCapabilityEnum; the flight command's MustFly, MustFlyType) is a location the aircraft must fly: a point, an entity, an operational point, line, zone or volume by id, or a zone, line or volume given with it - approached, where it says so, from within a window of bearings (its IngressConstraint: "the acceptable range of bearing values at the ... Location that the System must approach from. Bearing from is defined as the true heading from the ... Location to the System"). ADR-29 plans it as MFY-01 to MFY-07, with operational geometry (ENV-06), FA-8. FA-8a builds the points, entities, operational points and the ingress window (MFY-01, MFY-02, MFY-07; MFY-03 and ENV-06 for points). FA-8b builds zones (FA-8b1: 4.43), corridors and volumes.
+A-GRA's MUST_FLY (MA_FlightCapabilityEnum; the flight command's MustFly, MustFlyType) is a location the aircraft must fly: a point, an entity, an operational point, line, zone or volume by id, or a zone, line or volume given with it - approached, where it says so, from within a window of bearings (its IngressConstraint: "the acceptable range of bearing values at the ... Location that the System must approach from. Bearing from is defined as the true heading from the ... Location to the System"). ADR-29 plans it as MFY-01 to MFY-07, with operational geometry (ENV-06), FA-8. FA-8a builds the points, entities, operational points and the ingress window (MFY-01, MFY-02, MFY-07; MFY-03 and ENV-06 for points). FA-8b builds zones (FA-8b1: 4.43), corridors (FA-8b2: 4.44) and volumes.
 
 - **The mode** (`MustFlyCommand`, fsim.guidance.must_fly): `location` (`MustFlyLocation`: a point, an entity, an operational point), a point's `latitudeRad` and `longitudeRad`, the `altitudeM` it flies over the location at and its `altitudeReference`, a `target` (an entity's vehicle id, or an operational point's id), `ingressMinRad` and `ingressMaxRad`, a `speed` and its `speedReference`. It joins the command variant no larger than its largest (4.23): ten fields. It takes NEW, UPDATE and CANCEL, as the other modes do.
 - **Laid out as a route** from where the aircraft is, when it is commanded (or starts, where it waits). The route has the points it approaches through, then the location, which is flown over (a waypoint). It is flown by the route's follower, and checked as a route is: its turns, gradients, terrain and endurance, by point (0 and 1 its approaches, the last its location). It completes as the location is passed, and flies on along its course there. Its setpoint reads back as commanded; its route is in its setpoint's waypoints and its end points.
@@ -1143,6 +1143,38 @@ A must fly may name an operational zone (A-GRA's OpZoneID) or be given a zone wi
   - C++: `OpZone`, `OpZoneId`, `ZoneShape`, `ZoneVertex`, `MustFlyArea`, and `MustFlyLocation::Zone` and `OpZone` (`fsim/Control.h`); `World::submit(vehicle, MustFlyCommand, OpZone)`, `World::update(activity, MustFlyCommand, OpZone)`; `World::setOpZone`, `removeOpZone`, `opZones`, `opZone`.
   - C ABI 1.40: `FSIM_MUST_FLY_ZONE` and `FSIM_MUST_FLY_OP_ZONE`; `enum fsim_zone_shape`, `fsim_zone_vertex`, `fsim_op_zone` (`fsim_op_zone_init`); `fsim_world_set_op_zone`, `fsim_world_remove_op_zone`, `fsim_world_op_zone_count`, `fsim_world_get_op_zone_at`, `fsim_world_get_op_zone`; `fsim_vehicle_submit_must_fly`, `fsim_activity_update_must_fly`, `fsim_activity_update_must_fly_by`; `fsim_batch_command.zone`.
   - Python: `vehicle.submit_must_fly(zone=fsim.OpZone(...), ...)` (its location Zone where a zone is given), `activity.update_must_fly(zone=None, **fields)`; `fsim.OpZone`, `fsim.ZoneVertex`, `fsim.ZoneShape`; `World.set_op_zone`, `op_zones`, `op_zone`, `remove_op_zone`.
+
+### 4.44 A-GRA's must fly: corridors, given or by id (as FA-8b2 builds them)
+
+A must fly may name an operational line (A-GRA's OpLineID) or be given a corridor with it (its LineTarget: "Use of the Line Target implies that a vehicle must fly through a corridor"). A line (A-GRA's LineType) is two vertices or more, on the Earth or in a frame. Each vertex may carry an altitude, an altitude range and widths either side for the segment from it. The line has a projection (great circles or rhumb lines), widths and a band, and an operational line may move. ADR-29 plans the must fly through a corridor as MFY-05, and lines among the operational geometry (ENV-06). FA-8b2 builds both; volumes are FA-8b3's.
+
+- **A line** (`OpLine`):
+  - 2 to 32 vertices in the order flown (`LineVertex`): a latitude and longitude, or x and y in its frame; its `altitudeM`; its range `altitudeMinM` to `altitudeMaxM`, in place of the line's band there; their `altitudeReference`; and the `leftWidthM` and `rightWidthM` of the segment from it, in place of the line's.
+  - Its `projection` (a route's: great circles, left out, or rhumb lines); its widths left and right of it as it is flown (left out: none); its band and its reference.
+  - On the Earth, or in a frame (`frame`, `frameRotation`), as a zone is (4.43); or moving, at a velocity from `timeS`.
+  - Checked as A-GRA's schema restricts it. A fault is refused `invalid_parameter`, naming the field from 10 on: 10 the vertices (too few or many; a place not finite, off the Earth or given both ways; two in a row at one place; a vertex's altitude, range, reference or widths, or its altitude outside the band there where both are in one reference), 11 the projection, 12 the widths (negative), 13 the band, 14 the frame, 15 the velocity.
+  - A-GRA's vertex Timestamp, and an OpLine's category and schedule, are not kept: nothing flies by them (D8).
+- **Laid out** in the plane as a zone is, at its vertices' mean (in a frame, the frame's origin), with the altitude, band and widths at each vertex. It is fixed-size, and kept in the path store, the waiting entry and the task as a zone is.
+- **Flown through** as a route, on the line's projection:
+  - Its entry is onto its first segment from behind its first vertex: straight in from within 10 degrees of the segment's line there, else through an approach point, as a point's window is flown (4.42). Given a window of bearings from its first vertex, it comes from within that instead.
+  - Then every vertex is flown by, and the last flown over. It completes as the last vertex is passed, and flies on along its course.
+  - The altitude at each vertex is the one given with the command, within the band there and in its reference (else refused, field 3 or 4, as a zone's). Given none, it is the vertex's own; else the aircraft's, held within the band there (4.43's rule). The approach points fly at the first vertex's.
+  - A moving line's vertices are placed where they will be as the aircraft gets there, at the speed it approaches at. A framed line's are in its frame.
+- **Its widths:** each turn inside it is checked against them, at the radius the route plans it with.
+  - A turn flown by cuts inside by r (1 - cos(a/2)). One flown over (beyond 150 degrees) swings out by r (1 - cos a).
+  - Either is held against the lesser width on that side of the segments either side of its vertex (at the first vertex, the first segment's).
+  - Beyond it, the command is refused `performance_limit` (`max_turn_rate`), naming the turn's point in the route (its approach points come first). A line without widths is not checked.
+  - Between turns the route's follower holds the line. Nothing checks the aircraft against the widths as it flies.
+- **Operational lines** (ENV-06; A-GRA's OpLine): `World::setOpLine` keeps one by its id as a zone is kept, its revision one more; with it come `opLines`, `opLine` and `removeOpLine`. Refused `invalid_parameter`: id 0, or any fault above. A must fly naming one the world does not keep, or one whose frame is gone, is refused `unknown_geometry` (field 5).
+- **The command:** its `location` is Line (the line given with it: `World::submit(vehicle, MustFlyCommand, OpLine)`) or OpLine (`target` the id).
+  - A Line without a line given is refused (field 0).
+  - An UPDATE may give a line in place of its own. Given none, a Line keeps the one it was given.
+  - A batch's must fly gives it by `BatchCommand::line`, never with a zone. A task keeps it as it was laid out.
+- **The support rows:** `fsim.guidance.must_fly` is partial on every aircraft - volumes are FA-8b3's - and so is `fsim.geometry` (operational volumes).
+- **Surfaces.**
+  - C++: `OpLine`, `OpLineId`, `LineVertex`, and `MustFlyLocation::Line` and `OpLine` (`fsim/Control.h`); `World::submit(vehicle, MustFlyCommand, OpLine)`, `World::update(activity, MustFlyCommand, OpLine)`; `World::setOpLine`, `removeOpLine`, `opLines`, `opLine`.
+  - C ABI 1.41: `FSIM_MUST_FLY_LINE` and `FSIM_MUST_FLY_OP_LINE`; `fsim_line_vertex` (`fsim_line_vertex_init`), `fsim_op_line` (`fsim_op_line_init`); `fsim_world_set_op_line`, `fsim_world_remove_op_line`, `fsim_world_op_line_count`, `fsim_world_get_op_line_at`, `fsim_world_get_op_line`; `fsim_vehicle_submit_must_fly_line`, `fsim_activity_update_must_fly_line`, `fsim_activity_update_must_fly_line_by`; `fsim_batch_command.line`.
+  - Python: `vehicle.submit_must_fly(line=fsim.OpLine(...), ...)` (its location Line where a line is given), `activity.update_must_fly(line=...)`; `fsim.OpLine`, `fsim.LineVertex`; `World.set_op_line`, `op_lines`, `op_line`, `remove_op_line`.
 
 ## 5. Applicability (D6)
 
@@ -1433,7 +1465,7 @@ Three of the missing capability types.
 **Status:** in six steps:
 - FA-8a, must fly a point, an entity or an operational point, from within a window of bearings; operational points (MFY-01, MFY-02, MFY-07; MFY-03 and ENV-06 for points; 4.42), done 2026-09-29 and measured in section 14;
 - FA-8b1, must fly a zone, given or by id; operational zones (MFY-04; MFY-03 and ENV-06 for zones; 4.43), done 2026-09-29 and measured in section 14;
-- FA-8b2, must fly a corridor, given or by id; operational lines (MFY-05; MFY-03 and ENV-06 for lines);
+- FA-8b2, must fly a corridor, given or by id; operational lines (MFY-05; MFY-03 and ENV-06 for lines; 4.44), done 2026-09-29 and measured in section 14;
 - FA-8b3, must fly a volume, given or by id; operational volumes (MFY-06; MFY-03 and ENV-06 for volumes);
 - FA-8c, the altitude stacked marshall (ASM-01);
 - FA-8d, the route intercept (RIC-01 to RIC-03; CAP-02).
@@ -2966,6 +2998,26 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - Built with every function aligned, a level switch reads within −0.7 % to +0.3 %, and a behaviour −1.7 % and −1.5 % from one copy. From three copies a behaviour reads −8.3 %: FA-8a's copies spread from 129.7 to 146.2 ns, FA-8b1's from 126.9 to 128.5.
   - World throughput is 99.5 to 99.9 % of FA-8a's, and 100.3 to 100.8 % from three copies. Protection costs at most 0.9 %.
 - ctest: all 348 tests pass.
+
+**FA-8b2, A-GRA's must fly through a corridor; operational lines (MFY-05; MFY-03 and ENV-06 for lines).**
+- What it built is 4.44, in C++, the C ABI (1.41) and Python. `fsim.guidance.must_fly` and `fsim.geometry` stay partial on every aircraft: volumes, and operational volumes, are FA-8b3's.
+- **Flown** (`test_must_fly_lines`, 4 cases, 89 checks; its Python twin, a test more; `test_c_abi`'s 1.41 block):
+  - A corridor with turns, per class: an L ahead of a C172 (a right angle, 500 m either side), a Z ahead of an F-16C (two 45-degree turns, 3 km either side), and an S ahead of a UH-60A (150 m) and of an IRIS (25 m). Past its first vertex each stayed within its widths: the C172 122 m off its line at its turn, the F-16C 170 m, the UH-60A 15 m, the IRIS 0.9 m. Each completed 0.4 to 6.5 m from its last vertex.
+  - A band above the aircraft (1,700 to 1,800 m) was climbed into, and the vertices' own altitudes flown (the last's 1,650 m, within 15 m). A corridor was entered from a window to its west, coming in within 20 degrees of east. A right angle in a corridor 20 m wide is refused `performance_limit` (`max_turn_rate`), naming its point.
+  - An operational line (31) kept, set again (revision 2) and flown by its id; one in a frame turned 90 degrees; one moving north at 10 m/s: each done within 40 m of its last vertex where it was then. One the world does not keep, or one removed, is refused `unknown_geometry`.
+  - Eight malformed lines are refused naming their fields, 10 to 15. So are an altitude given outside its band, or in another reference (fields 3 and 4), a Line given no line, and a line kept with id 0.
+  - An UPDATE's line, moved 2 km north, was flown through; an UPDATE of its speed alone kept its line. A must fly queued behind a start window with its line started 20 s later and flew it.
+- **The fleet** (`test_fleet`, a case of its own): on every aircraft, a corridor from half a leg ahead, a leg on, then a leg turned 60 degrees right, half a leg wide either side, was flown through on all 35. Past its first vertex, none was further off its line than 0.052 of a leg (the EA-18G) - a rotorcraft 0.125 (the UH-1H) - the cut of its turn. Each completed 0.03 m (the CF2) to 22.8 m (the KC-46A) from its last vertex, within 51 s (the IRIS) to 353 s (the C-17A).
+- **Found and fixed:**
+  - FA-8b1's zone in a turned frame read a window of bearings - and, over the zone already, the aircraft's track - along the frame's axes rather than from true north. A window from the north on a frame turned 90 degrees sent the aircraft in from −82 degrees. Both are turned into the zone's plane now, and a test flies it from within 12 degrees of north.
+  - A must fly's UPDATE refused what its checks found, and checked its terrain, only under a range policy. A NEW and a route's UPDATE do both whatever it is, and now so does it.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-8b1's build.
+- **Digests:** identical to FA-8b1's, with protection and without. The allocation gate passes, with two cases more: a corridor with a turn given and moved every step through UPDATE, and one kept by the world, its must fly's speed updated every step by its id.
+- **A/B throughput** against FA-8b1, both builds run from their own directories in a quiet window held throughout, as FA-8b1's were measured.
+  - The micro cases are within −1.5 % to +1.1 % from one copy, and −1.3 % to +1.7 % from three.
+  - The NEWs in the default builds: a level switch +1.2 % and −1.3 % (+0.6 % from three copies), a behaviour −1.6 % twice (+1.0 %); the same level's update and a checked update within −1.6 % to +1.5 %. Built with every function aligned, all four within −2.9 % to +3.0 %.
+  - World throughput is 98.4 to 100.8 % of FA-8b1's, and 100.0 to 100.3 % from three copies. Protection costs at most 1.5 %.
+- ctest: all 352 tests pass.
 
 ## Appendix A: the inventory
 

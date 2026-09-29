@@ -2348,6 +2348,179 @@ static PyObject* world_activity_update_must_fly(PyObject* o, PyObject* const* ar
     return result_tuple(self->world, &r);
 }
 
+/* An operational line (ABI 1.41) as its tuple: (id, vertices, projection, left_width_m, right_width_m, altitude_min_m,
+ * altitude_max_m, altitude_reference, frame, frame_rotation, north_ms, east_ms, time_s, revision) - vertices a sequence of
+ * (latitude_rad, longitude_rad, x_m, y_m, altitude_m, altitude_min_m, altitude_max_m, altitude_reference, left_width_m,
+ * right_width_m). read_line fills `l` and its vertices (PyMem: line_free frees them). */
+typedef struct {
+    fsim_op_line l;
+    fsim_line_vertex* vertices;
+} LineArrays;
+
+static void line_free(LineArrays* a) {
+    PyMem_Free(a->vertices);
+    a->vertices = NULL;
+}
+
+static int read_line(PyObject* o, LineArrays* a) {
+    fsim_op_line_init(&a->l);
+    a->vertices = NULL;
+    PyObject* t = PySequence_Tuple(o);
+    if (!t) return 0;
+    int ok = PyTuple_Size(t) >= 13;
+    if (!ok) PyErr_SetString(PyExc_ValueError, "a line is 13 items (fsim.OpLine)");
+    if (ok) ok = as_u64(PyTuple_GetItem(t, 0), &a->l.op_line_id);
+    PyObject* rows = ok ? PySequence_Tuple(PyTuple_GetItem(t, 1)) : NULL;
+    ok = ok && rows != NULL;
+    const Py_ssize_t n = ok ? PyTuple_Size(rows) : 0;
+    if (ok) {
+        a->vertices = (fsim_line_vertex*)PyMem_Calloc((size_t)(n ? n : 1), sizeof(fsim_line_vertex));
+        ok = a->vertices != NULL;
+        if (!ok) PyErr_NoMemory();
+    }
+    for (Py_ssize_t i = 0; ok && i < n; ++i) {
+        PyObject* row = PySequence_Tuple(PyTuple_GetItem(rows, i));
+        ok = row && PyTuple_Size(row) == 10;
+        if (ok) {
+            fsim_line_vertex* v = &a->vertices[i];
+            double* f[] = {&v->latitude_rad, &v->longitude_rad, &v->x_m, &v->y_m, &v->altitude_m, &v->altitude_min_m, &v->altitude_max_m,
+                           &v->altitude_reference, &v->left_width_m, &v->right_width_m};
+            for (int k = 0; ok && k < 10; ++k) {
+                *f[k] = PyFloat_AsDouble(PyTuple_GetItem(row, k));
+                ok = !PyErr_Occurred();
+            }
+        } else if (!PyErr_Occurred()) {
+            PyErr_SetString(PyExc_ValueError, "a line's vertex is 10 numbers (fsim.LineVertex)");
+        }
+        Py_XDECREF(row);
+    }
+    Py_XDECREF(rows);
+    double* fields[] = {&a->l.projection, &a->l.left_width_m, &a->l.right_width_m, &a->l.altitude_min_m, &a->l.altitude_max_m,
+                        &a->l.altitude_reference, &a->l.frame, &a->l.frame_rotation, &a->l.north_ms, &a->l.east_ms, &a->l.time_s};
+    for (int k = 0; ok && k < 11; ++k) {
+        *fields[k] = PyFloat_AsDouble(PyTuple_GetItem(t, 2 + k));
+        ok = !PyErr_Occurred();
+    }
+    Py_DECREF(t);
+    if (ok) {
+        a->l.vertices = n ? a->vertices : NULL;
+        a->l.vertex_count = (uint32_t)n;
+    } else {
+        line_free(a);
+    }
+    return ok;
+}
+
+static PyObject* line_tuple(const fsim_op_line* l) {
+    PyObject* vertices = PyList_New(0);
+    for (uint32_t i = 0; vertices && i < l->vertex_count; ++i) {
+        const fsim_line_vertex* v = &l->vertices[i];
+        PyObject* row = Py_BuildValue("(dddddddddd)", v->latitude_rad, v->longitude_rad, v->x_m, v->y_m, v->altitude_m, v->altitude_min_m,
+                                      v->altitude_max_m, v->altitude_reference, v->left_width_m, v->right_width_m);
+        if (!row || PyList_Append(vertices, row) < 0) {
+            Py_XDECREF(row);
+            Py_CLEAR(vertices);
+            break;
+        }
+        Py_DECREF(row);
+    }
+    if (!vertices) return NULL;
+    return Py_BuildValue("(KNdddddddddddI)", (unsigned long long)l->op_line_id, vertices, l->projection, l->left_width_m, l->right_width_m,
+                         l->altitude_min_m, l->altitude_max_m, l->altitude_reference, l->frame, l->frame_rotation, l->north_ms, l->east_ms,
+                         l->time_s, (unsigned int)l->revision);
+}
+
+/* set_op_line(line tuple) -> reason (0: kept) (ABI 1.41) */
+static PyObject* world_set_op_line(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    LineArrays a;
+    if (!check_args(n, 1, 1, "set_op_line") || !read_line(args[0], &a)) return NULL;
+    int32_t reason = 0;
+    const int rc = fsim_world_set_op_line(self->world, &a.l, &reason);
+    line_free(&a);
+    if (rc != FSIM_OK) return fail();
+    return PyLong_FromLong(reason);
+}
+
+/* op_lines() -> [line tuple], by id (ABI 1.41) */
+static PyObject* world_op_lines(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    (void)args;
+    if (!check_args(n, 0, 0, "op_lines")) return NULL;
+    const uint32_t count = fsim_world_op_line_count(self->world);
+    PyObject* list = PyList_New(0);
+    for (uint32_t i = 0; list && i < count; ++i) {
+        fsim_op_line l;
+        fsim_op_line_init(&l);
+        if (fsim_world_get_op_line_at(self->world, i, &l) != FSIM_OK) continue;
+        PyObject* t = line_tuple(&l);
+        if (!t || PyList_Append(list, t) < 0) {
+            Py_XDECREF(t);
+            Py_DECREF(list);
+            return NULL;
+        }
+        Py_DECREF(t);
+    }
+    return list;
+}
+
+/* op_line(id) -> line tuple, or None for one not kept (ABI 1.41) */
+static PyObject* world_op_line(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t id;
+    fsim_op_line l;
+    if (!check_args(n, 1, 1, "op_line") || !as_u64(args[0], &id)) return NULL;
+    fsim_op_line_init(&l);
+    if (fsim_world_get_op_line(self->world, id, &l) != FSIM_OK) Py_RETURN_NONE;
+    return line_tuple(&l);
+}
+
+/* remove_op_line(id) -> bool (ABI 1.41) */
+static PyObject* world_remove_op_line(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t id;
+    if (!check_args(n, 1, 1, "remove_op_line") || !as_u64(args[0], &id)) return NULL;
+    return PyBool_FromLong(fsim_world_remove_op_line(self->world, id) == FSIM_OK);
+}
+
+/* submit_must_fly_line(id, values, line tuple, source=None, axes=None, range=None, min_version=None, envelope=None) -> result
+ * (ABI 1.41) */
+static PyObject* world_submit_must_fly_line(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    double row[FSIM_PY_VALUES];
+    fsim_command_options opt;
+    fsim_command_result r;
+    LineArrays a;
+    if (!check_args(n, 3, 8, "submit_must_fly_line") || !as_u32(args[0], &id) || !WORLD_IDLE(self)) return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "submit_must_fly_line");
+    if (count < 0 || !read_options(args, n, 3, &opt) || !read_line(args[2], &a)) return NULL;
+    const int rc = fsim_vehicle_submit_must_fly_line(self->world, id, row, (uint32_t)count, &a.l, &opt, &r);
+    line_free(&a);
+    if (rc != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
+/* activity_update_must_fly_line(activity, values, line tuple, source, controller) -> result (ABI 1.41) */
+static PyObject* world_activity_update_must_fly_line(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t activity;
+    double row[FSIM_PY_VALUES];
+    fsim_command_result r;
+    int source = 0;
+    uint32_t controller = 0;
+    LineArrays a;
+    if (!check_args(n, 3, 5, "activity_update_must_fly_line") || !as_u64(args[0], &activity) || (n > 3 && !as_int(args[3], &source)) ||
+        (n > 4 && !as_u32(args[4], &controller)) || !WORLD_IDLE(self))
+        return NULL;
+    const Py_ssize_t count = read_values(args[1], row, "activity_update_must_fly_line");
+    if (count < 0 || !read_line(args[2], &a)) return NULL;
+    const int rc = fsim_activity_update_must_fly_line_by(self->world, activity, source, controller, row, (uint32_t)count, &a.l, &r);
+    line_free(&a);
+    if (rc != FSIM_OK) return fail();
+    return result_tuple(self->world, &r);
+}
+
 /* activity_setpoint(activity) -> (kind, code, fields, behavior, waypoints, segments), or None for one not live:
  * `behavior` (id, target, {name: value}, [(latitude_rad, longitude_rad, altitude_msl_m, airspeed_ms, capture_radius_m)])
  * or None, `waypoints` [waypoint row] or None, `segments` [18 floats: north, east, down] or None - a curve's as A-GRA's
@@ -3915,6 +4088,12 @@ static PyMethodDef world_methods[] = {
     FAST("remove_op_zone", world_remove_op_zone, "remove_op_zone(id) -> bool"),
     FAST("submit_must_fly", world_submit_must_fly, "submit_must_fly(id, values, zone or None, source, axes, range, min_version, envelope) -> result"),
     FAST("activity_update_must_fly", world_activity_update_must_fly, "activity_update_must_fly(activity, values, zone or None, source, controller) -> result"),
+    FAST("set_op_line", world_set_op_line, "set_op_line(line tuple) -> reason"),
+    FAST("op_lines", world_op_lines, "op_lines() -> [line tuple]"),
+    FAST("op_line", world_op_line, "op_line(id) -> line tuple or None"),
+    FAST("remove_op_line", world_remove_op_line, "remove_op_line(id) -> bool"),
+    FAST("submit_must_fly_line", world_submit_must_fly_line, "submit_must_fly_line(id, values, line, source, axes, range, min_version, envelope) -> result"),
+    FAST("activity_update_must_fly_line", world_activity_update_must_fly_line, "activity_update_must_fly_line(activity, values, line, source, controller) -> result"),
     FAST("performance_profile", world_performance_profile, "performance_profile(id, mode) -> (reason, profile or None)"),
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
     FAST("capabilities", world_capabilities, "capabilities(id) -> [capability]"),
