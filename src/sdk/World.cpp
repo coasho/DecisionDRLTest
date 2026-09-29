@@ -169,6 +169,13 @@ control::CommandResult Vehicle::submit(const control::MarshallCommand& marshall,
     return r;
 }
 
+control::CommandResult Vehicle::submit(const control::InterceptCommand& intercept, const control::CommandOptions& options) {
+    if (world_) return world_->impl_->submit(id_, intercept, options);
+    control::CommandResult r;
+    r.reason = control::Reason::UnknownVehicle;
+    return r;
+}
+
 control::CommandResult Vehicle::submit(const control::MustFlyCommand& mustFly, const control::OpZone& zone, const control::CommandOptions& options) {
     if (world_) return world_->impl_->submit(id_, mustFly, zone, options);
     control::CommandResult r;
@@ -633,6 +640,12 @@ std::optional<control::ActivityRecord> World::activity(control::ActivityId activ
 std::optional<control::Setpoint> World::activitySetpoint(control::ActivityId activity) const {
     control::Setpoint s;
     if (!impl_->activitySetpoint(activity, s)) return std::nullopt;
+    return s;
+}
+
+std::optional<control::InterceptStatus> World::interceptStatus(control::ActivityId activity) const {
+    control::InterceptStatus s;
+    if (!impl_->interceptStatus(activity, s)) return std::nullopt;
     return s;
 }
 

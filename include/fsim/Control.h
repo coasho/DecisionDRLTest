@@ -800,6 +800,36 @@ struct MarshallStack {
     double altitudeMinM = kHold, altitudeMaxM = kHold, separationM = kHold;
 };
 
+/// How a route intercept chooses where it joins its plan's route (A-GRA's MA_RouteInterceptEnum; docs/flight-autonomy.md, 4.47).
+/// Left out: at the plan's beginning.
+enum class InterceptMethod : std::uint8_t {
+    Discrete,         ///< DISCRETE: at an end point alone - the one nearest the aircraft
+    ShortestDistance, ///< SHORTEST_DISTANCE: the point of the route nearest the aircraft
+    Soonest,          ///< SOONEST: the point of the route the aircraft reaches first, turning from its track
+    Count
+};
+
+/// fsim.guidance.intercept (A-GRA's ROUTE_INTERCEPT, its MA_RoutePlanInterceptType; docs/flight-autonomy.md, 4.47): a route plan
+/// the vehicle keeps (4.39), joined where `method` chooses - between its `earliest` and `latest` segments, on `path` - and flown
+/// from there as the plan's activation flies it, the plan activated by it. Not one of the command variant's (4.46): its activity
+/// flies the plan's route, a RouteCommand, and keeps the intercept beside it. A segment is the leg into its end point, named by
+/// that point's index as given (4.36). A field left out is kHold.
+struct InterceptCommand {
+    double plan = kHold;     ///< the plan's id (A-GRA's RoutePlanID): a whole number up to 2^53
+    double path = kHold;     ///< the path it joins, its id (A-GRA's PathID; RoutePath::id); left out, any
+    double method = kHold;   ///< InterceptMethod; left out, the plan's beginning
+    double earliest = kHold; ///< the first segment it may join, by its end point's index (A-GRA's EarliestInterceptPoint)
+    double latest = kHold;   ///< the last (A-GRA's LatestInterceptPoint)
+};
+
+/// Where an intercept joined its plan's route (4.47), kept beside it: the segment's end point and - where it joined the leg into
+/// it short of that point - the point laid into the route for the join (its index the plan's count) and its place.
+struct InterceptJoin {
+    std::int32_t point = -1;
+    std::int32_t laid = -1;
+    double latitudeRad = kHold, longitudeRad = kHold;
+};
+
 /// An operational zone's shape (A-GRA's AreaChoiceType; docs/flight-autonomy.md, 4.43).
 enum class ZoneShape : std::uint8_t {
     Polygon = 0,    ///< its vertices, and holes inside it (A-GRA's PolygonType)
@@ -1022,6 +1052,9 @@ struct PathStore {
     MustFlyArea mustFlyArea;
     /// The marshall that flies (4.46): its stack, beside the pattern it flies at its slot.
     MarshallStack marshall;
+    /// The route intercept that flies (4.47): as given, and where it joined the route beside it.
+    InterceptCommand intercept;
+    InterceptJoin interceptJoin;
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -1102,6 +1135,7 @@ struct BatchCommand {
     const OpLine* line = nullptr;        ///< a MustFlyCommand's corridor given with it (4.44; null: none)
     const OpVolume* volume = nullptr;    ///< a MustFlyCommand's volume given with it (4.45; null: none)
     const MarshallCommand* marshall = nullptr; ///< a marshall (4.46), in place of `command`, its pattern's shape `shape` (null: none)
+    const InterceptCommand* intercept = nullptr; ///< a route intercept (4.47), in place of `command` (null: none)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight
@@ -1124,6 +1158,10 @@ struct Setpoint {
     /// A marshall's (4.46): as it flies - `command` its pattern at its slot, `shape` its shape - with its stack; none for
     /// any other activity.
     std::optional<MarshallCommand> marshall;
+    /// A route intercept's (4.47): as given - `command` and `waypoints` the plan's route it flies, the point laid in for its
+    /// join among them - and where it joined; none for any other activity.
+    std::optional<InterceptCommand> intercept;
+    InterceptJoin join;
 };
 
 /// Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType;
@@ -1389,6 +1427,13 @@ public:
         (void)points, (void)max;
         ends = false;
         return 0;
+    }
+    /// Where a route is along its segments, as of its last update (docs/flight-autonomy.md, 4.47): the point flown from and
+    /// when it was captured, the point flown to and how far it is, the one after it. True where it flies a route. Asked
+    /// between world steps.
+    virtual bool segments(SegmentEstimate& out) const noexcept {
+        (void)out;
+        return false;
     }
 };
 

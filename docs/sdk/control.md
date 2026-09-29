@@ -542,6 +542,28 @@ auto b = second.submit(m, PatternShape{}).activity;     // 1,804.8 m: the lowest
 - A `MarshallCommand` is not a `Command`: the activity's setpoint reads back its pattern in `command` and the marshall, its stack with it, in `marshall`. Its UPDATE is the marshall's (`world.update(activity, m)`, with a shape or without); a `PatternCommand` sent to it is refused `wrong_command_type`. In a batch or a task it goes in `BatchCommand::marshall`.
 - A marshall is never kept as a task: its slot is the stack's at its NEW.
 
+### Route intercept: joining a kept plan
+
+`fsim.guidance.intercept` is A-GRA's route intercept
+([flight-autonomy.md](../flight-autonomy.md), 4.47): a route plan the vehicle
+keeps (`World::planCommand`, 4.39) joined where its method chooses, from where
+the aircraft is, and flown from there - the plan activated by it.
+
+```cpp
+InterceptCommand c;
+c.plan = 7;                                                     // a plan uploaded to the vehicle
+c.method = static_cast<double>(InterceptMethod::Soonest);       // or Discrete, ShortestDistance; left out, its beginning
+c.earliest = 2;                                                 // (its first and last segments, by their end points)
+auto a = vehicle.submit(c).activity;
+auto s = world.interceptStatus(a);                              // its plan, its execution, where it joined, its segments
+```
+
+- **Where it joins:** left out, the plan's first point (its beginning); `Discrete`, the point nearest the aircraft; `ShortestDistance`, the place on the route nearest it - where the perpendicular from it meets a leg, or a leg's end; `Soonest`, the place it reaches first, turning from its track at its speed and 80 % of its bank (a rotorcraft at once), then straight there at its ground speed in the wind. Between `earliest` and `latest`, on `path` where given.
+- A join on a leg, short of its end point, is laid into the route as one point more (its index the plan's count), flown by, its next the leg's end point. Only a straight leg between two points is joined short of its end.
+- **The plan** must be kept and uploaded, and not for planning use only; a plan in flight is joined again - the new intercept replaces its activity, as any NEW does. Accepted, the plan is Activated, its execution the intercept's.
+- **Its status** (`InterceptStatus`): the plan and its execution; the segment it joined and the point laid in; the previous, current and next segments - each its path, its end point, the estimated capture time and distance, a loiter's orbits there, and the segment's heading with the aircraft's velocity along and across it.
+- An intercept takes no UPDATE (`not_updatable`): send a new one. It is never kept as a task (`not_implemented`). Its setpoint reads back the intercept in `intercept`, its join in `join`, and the plan's route it flies - as laid - in `command` and `waypoints`.
+
 ### Grants: who may command a vehicle
 
 By default a vehicle is `ControlMode::Open`, and every command is arbitrated

@@ -148,6 +148,9 @@ public:
     /// submitted as any NEW is; StackFull (index 3) where none is. Flown as its pattern, its stack beside it.
     control::CommandResult submit(std::uint32_t id, const control::MarshallCommand& marshall, const control::PatternShape& shape,
                                   const control::CommandOptions& options = {});
+    /// NEW of a route intercept (docs/flight-autonomy.md, 4.47; Intercepts.cpp): the vehicle's kept plan joined where its method
+    /// chooses from where the aircraft is, and flown from there - the plan activated by it.
+    control::CommandResult submit(std::uint32_t id, const control::InterceptCommand& intercept, const control::CommandOptions& options = {});
     /// Several NEWs at once (docs/flight-autonomy.md, 4.8), made in order at
     /// this simulation time, each answered on its own; `details`, if given,
     /// gets each answer's details (commandDetails()) in the same order.
@@ -177,6 +180,8 @@ public:
     /// pattern takes an UPDATE through it alone (a PatternCommand's: wrong_command_type).
     control::CommandResult update(control::ActivityId activity, const control::MarshallCommand& marshall, const control::PatternShape& shape);
     control::CommandResult update(control::ActivityId activity, const control::MarshallCommand& marshall);
+    /// A route intercept takes no UPDATE (4.47): not_updatable, a new one replacing it.
+    control::CommandResult update(control::ActivityId activity, const control::InterceptCommand& intercept);
     /// UPDATE of a must fly with a zone given in place of its own (4.43), or a corridor (4.44).
     control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpZone& zone);
     control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpLine& line);
@@ -209,6 +214,7 @@ public:
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MarshallCommand& marshall,
                                   const control::PatternShape& shape);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MarshallCommand& marshall);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::InterceptCommand& intercept);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);
     /// An activity command (docs/flight-autonomy.md, 4.10) - disable, enable,
     /// reset, delete, change its rank, unassign it - declaring the caller's
@@ -275,6 +281,8 @@ public:
     /// A live route's next point with a required time of arrival, as it estimates it now (docs/flight-autonomy.md, 4.33):
     /// when it will arrive, and that against its window; false where it has none.
     bool activityArrival(control::ActivityId activity, control::ArrivalEstimate& out) const;
+    /// A route intercept's status (4.47; A-GRA's MA_RoutePlanInterceptStatusType): false for any other activity.
+    bool interceptStatus(control::ActivityId activity, control::InterceptStatus& out) const;
     /// Where a live activity flies to (A-GRA's ActualEndPoint): the point it
     /// flies to now, then those after it, `max` at most.
     std::vector<control::EndPoint> endPoints(control::ActivityId activity, std::size_t max = 16) const;

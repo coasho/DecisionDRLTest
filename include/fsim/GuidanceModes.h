@@ -146,6 +146,9 @@ public:
     bool progress(ActivityProgress& out) const noexcept override;
     /// The points it flies from here (docs/flight-autonomy.md, 4.37): as planned, a branch taken included.
     std::uint32_t ahead(std::uint32_t* points, std::uint32_t max, bool& ends) const noexcept override;
+    /// Where it is along its segments (4.47; Intercept.cpp): the point flown from and when it was captured (its state's clock),
+    /// the point flown to and how far along the path it is, the one after it and the leg on; its loiter's orbits there.
+    bool segments(SegmentEstimate& out) const noexcept override;
 
 private:
     /// Plan the route from where the aircraft is, and fly it from its start. `branchTo` given, a branch taken (4.37;
@@ -503,13 +506,16 @@ private:
     std::uint32_t areaRevision_ = 0;       ///< the path store's revision its zone was looked for in
 };
 
-/// Registers the modes' behaviours ("hsa", "route", "pattern", "curve", "must_fly", "marshall"); registerBuiltinControllers
-/// calls it.
+/// Registers the modes' behaviours ("hsa", "route", "pattern", "curve", "must_fly", "marshall", "intercept");
+/// registerBuiltinControllers calls it.
 void registerGuidanceModes(ControllerRegistry& registry);
 /// Registers "must_fly" (MustFly.cpp); registerGuidanceModes calls it.
 void registerMustFly(ControllerRegistry& registry);
 /// Registers "marshall" (Marshall.cpp; docs/flight-autonomy.md, 4.46), its parameters its own and then its pattern's shape's:
 /// flown by a PatternBehavior, its activity's command its pattern at its slot. registerGuidanceModes calls it.
 void registerMarshall(ControllerRegistry& registry, const std::vector<ParameterInfo>& shape);
+/// Registers "intercept" (Intercept.cpp; 4.47): flown by a RouteBehavior, its activity's command its plan's route, joined where
+/// it chose. registerGuidanceModes calls it.
+void registerIntercept(ControllerRegistry& registry);
 
 } // namespace fsim::control

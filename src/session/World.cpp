@@ -581,6 +581,8 @@ std::vector<control::CommandResult> World::submitBatch(std::uint32_t id, Span<co
     for (const control::BatchCommand& b : batch) {
         if (b.marshall) { // (in place of its command: 4.46)
             out.push_back(submit(id, *b.marshall, b.shape ? *b.shape : control::PatternShape{}, b.options));
+        } else if (b.intercept) { // (likewise: 4.47)
+            out.push_back(submit(id, *b.intercept, b.options));
         } else if (const auto* support = std::get_if<control::SupportCommand>(&b.command)) {
             out.push_back(submit(id, *support, b.options));
         } else {
@@ -790,6 +792,7 @@ control::Reason World::storeTask(std::uint32_t id, control::TaskId task, const c
     const auto* command = std::get_if<control::Command>(&item.command);
     if (!command) return control::Reason::InvalidParameter; // (a flight or guidance command is kept)
     if (item.marshall) return control::Reason::InvalidParameter; // (a marshall's slot is its stack's at its NEW: never a task - 4.46)
+    if (item.intercept) return control::Reason::NotImplemented;  // (a route intercept kept as a task: not built - 4.47)
     if (std::holds_alternative<control::BehaviorCommand>(*command)) e->catalog->refresh();
     std::vector<control::NurbsSegment> made; // (Bezier segments, each made one)
     if (item.nurbs.empty())

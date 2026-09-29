@@ -128,9 +128,11 @@ struct RouteExtras {
     Span<const RouteBranch> branches; ///< its conditional branches (4.37)
     Span<const RouteTerminator> terminators; ///< its civil path terminators' data (4.38)
     const MustFlyArea* area = nullptr;       ///< a must fly's zone, corridor or volume given with it, as it was laid out then (4.43 to 4.45)
-    /// A marshall's stack (4.46): the command a PatternCommand, its pattern at its slot - the capability the marshall's, its
-    /// fields checked as a marshall's.
+    /// A mode beside the command variant (4.46, 4.47): its kind - the capability the command is the one of (Count: none) - and
+    /// its own fields: a marshall's stack beside its pattern, a route intercept beside its plan's route.
+    SetpointKind late = SetpointKind::Count;
     const MarshallStack* marshall = nullptr;
+    const InterceptCommand* intercept = nullptr; ///< null for one resumed: flown on as it was laid (4.47)
 };
 
 class CapabilityHost {
@@ -236,6 +238,16 @@ public:
                          Caller caller) noexcept;
     /// A live marshall as it flies (its pattern at its slot, its stack), allocating nothing; false for any other activity.
     bool marshall(ActivityId activity, MarshallCommand& out) const noexcept;
+    /// NEW of a route intercept (docs/flight-autonomy.md, 4.47; Intercept.cpp): its plan's route joined where its method
+    /// chooses, from where the aircraft is, and flown from there - the plan activated by it.
+    CommandResult submit(const InterceptCommand& intercept, const CommandOptions& options, const sim::VehicleState& state, double now);
+    /// An intercept takes no UPDATE (4.47: a new one replaces it): answered as any UPDATE is - not_updatable for an intercept's.
+    CommandResult update(ActivityId activity, const InterceptCommand& intercept, const sim::VehicleState& state, Caller caller) noexcept;
+    /// A live route intercept as given, and where it joined its plan's route; false for any other activity.
+    bool intercept(ActivityId activity, InterceptCommand& out, InterceptJoin& join) const noexcept;
+    /// A route intercept's status (A-GRA's MA_RoutePlanInterceptStatusType), `state` the aircraft's now: false for any other
+    /// activity, or one the vehicle no longer remembers.
+    bool interceptStatus(ActivityId activity, const sim::VehicleState& state, InterceptStatus& out) const noexcept;
     /// UPDATE of a route: its options (a field left out, kHold, keeps its
     /// value) and its waypoints - none: those it has - checked as a NEW's,
     /// then flown afresh from its start, from where the aircraft is. New
@@ -521,6 +533,8 @@ private:
         std::vector<RouteTerminator> terminators; ///< a route's civil path terminators' data (4.38)
         MustFlyArea area; ///< a must fly's zone, corridor or volume given with it, as laid out (4.43 to 4.45; laidOut() false: none)
         MarshallStack marshall; ///< a marshall's stack, beside its pattern (4.46)
+        InterceptCommand intercept; ///< a route intercept's, beside its plan's route (4.47)
+        InterceptJoin join;         ///< ...and where it joined it
     };
     /// A flight task (4.11): its command, and what became of it.
     struct Task {
@@ -889,9 +903,21 @@ private:
     /// `wrong_command_type`.
     CommandResult updatePattern(std::size_t s, ActivityId activity, const PatternCommand& next, const PatternShape* shape, const sim::VehicleState& state,
                                 CommandResult& result, CheckLog& log, bool marshall = false) noexcept;
+    /// A mode beside the command variant (4.46, 4.47): prepared as its kind is, the checks the mode it flies as.
+    Reason prepareLate(Command& setpoint, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log, const PatternShape* shape,
+                       const RouteExtras& extras);
     /// A marshall's NEW (4.46; Marshall.cpp): `pattern` its pattern, `stack` beside it - the stack's fields checked, its slot left
     /// out its least, and its pattern prepared as a pattern's, the pattern's fields named back as the marshall's.
     Reason prepareMarshall(Command& pattern, const MarshallStack& stack, const sim::VehicleState& state, CheckLog& log, const PatternShape* shape);
+    /// A route intercept's plan and fields checked (4.47; Intercept.cpp): the plan kept, or why not, and the field at fault
+    /// (-1: none).
+    const RoutePlan* interceptPlan(const InterceptCommand& intercept, Reason& why, std::int16_t& field) const noexcept;
+    /// A route intercept's join from `state` (Intercept.cpp): the plan's waypoints and paths laid into `waypoints` and `paths`
+    /// (their room reserved: nothing allocated), the join made, its route's options - its start the join - into `route`.
+    void layIntercept(const RoutePlan& plan, const InterceptCommand& intercept, const sim::VehicleState& state, std::vector<Waypoint>& waypoints,
+                      std::vector<RoutePath>& paths, RouteCommand& route, InterceptJoin& join) const noexcept;
+    /// A waiting route intercept launched (Intercept.cpp): it, and where it joined, written beside its route in the path store.
+    void launchedIntercept(const Waiting& w) noexcept;
     /// A waiting marshall's UPDATE (4.46; Marshall.cpp): merged into what it will fly, and checked as its NEW was.
     CommandResult updateWaitingMarshall(Waiting& w, const MarshallCommand& next, const PatternShape* shape, const sim::VehicleState& state,
                                         Caller caller) noexcept;
@@ -1034,6 +1060,10 @@ private:
     void notePlanEnd(const ActivityRecord& record) noexcept;
     PlanEntry* findPlan(PlanId id) const noexcept;
     PlanStatus planStatusOf(const PlanEntry& e) const noexcept;
+    /// The plan activated by a route intercept's NEW (4.47): its activity the intercept's, as Activate makes it.
+    void interceptedBy(PlanId id, ActivityId activity, std::uint64_t commandId, double now) noexcept;
+    /// The plan an activity flies or flew last (4.39, 4.47); 0 for none.
+    PlanId planOf(ActivityId activity) const noexcept;
     /// Its live activity ended Canceled with `reason`, the platform's: no authority asked.
     void endPlanActivity(ActivityId activity, Reason reason, const sim::VehicleState& state, double now) noexcept;
     /// The wind a route's checks turn in (4.41): a plan validation's while one runs, else what the air data measure now.

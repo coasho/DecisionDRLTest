@@ -10,6 +10,7 @@
 
 #include "control/Features.h"
 #include "control/Route.h"
+#include "core/Geodesy.h"
 #include "fsim/Altimeter.h"
 #include "fsim/BuiltinControllers.h"
 #include "fsim/GuidanceModes.h"
@@ -1149,6 +1150,66 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(w.activity(activity[p.id])->live());
             // (at worst a Gripen 9.1 m off its slot, a Mirage 2000 5.2 m; a rotorcraft under a centimetre)
             CHECK(slotOff[p.id] <= (p.rotor ? 0.5 : 20.0));
+        });
+    // a route intercept (ADR-29 FA-8d, RIC-01 to RIC-03): a plan of four points along the aircraft's heading, half a leg to its
+    // right, from half a leg behind it - kept, then joined by the soonest way from where the aircraft is (a wing ahead of where
+    // the perpendicular meets its leg, a rotorcraft there) and flown to its end: the plan activated by it, complete
+    std::map<std::uint32_t, double> lastPass, joinAhead;
+    std::map<std::uint32_t, std::int32_t> joinedAt;
+    auto interceptPlan = [&](const Plane& p) {
+        const double psi = p.start.eulerRad[2], d = leg(p);
+        RoutePlan plan;
+        plan.id = 40;
+        for (const double along : {-0.5, 0.5, 1.5, 2.5}) {
+            const PositionCommand q = pointFrom(p.start, along * d * std::cos(psi) - 0.5 * d * std::sin(psi), along * d * std::sin(psi) + 0.5 * d * std::cos(psi),
+                                                p.start.altitudeMslM, 0.0);
+            Waypoint wp;
+            wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+            if (p.rotor) wp.speed = p.cruiseMs, wp.speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+            plan.waypoints.push_back(wp);
+        }
+        return plan;
+    };
+    run("fsim.guidance.intercept", 0.0,
+        [&](const Plane& p) {
+            const RoutePlan plan = interceptPlan(p);
+            CHECK(w.planCommand(p.id, 40, PlanCommand::PrepareForUpload).completed);
+            CHECK(w.publishPlan(p.id, plan) == Reason::None);
+            CHECK(w.planCommand(p.id, 40, PlanCommand::Upload).completed);
+            InterceptCommand c;
+            c.plan = 40.0, c.method = static_cast<double>(InterceptMethod::Soonest);
+            const CommandResult r = w.submit(p.id, c);
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            lastPass[p.id] = kInf;
+            InterceptStatus st;
+            if (r.accepted() && w.interceptStatus(r.activity, st)) {
+                joinedAt[p.id] = st.laid >= 0 ? st.joined : -1;
+                // how far ahead of where the perpendicular from the aircraft meets the plan's line it joins, m
+                const double psi = p.start.eulerRad[2];
+                const double north = (st.joinLatitudeRad - p.start.latitudeRad) * kEarthM;
+                const double east = (st.joinLongitudeRad - p.start.longitudeRad) * kEarthM * std::cos(p.start.latitudeRad);
+                joinAhead[p.id] = north * std::cos(psi) + east * std::sin(psi);
+            }
+            return r.accepted();
+        },
+        [&](const Plane& p) { return 6.0 * leg(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) + 60.0; },
+        [&](const Plane& p) { // (how near it passes the plan's last point)
+            const auto& s = *w.vehicleState(p.id);
+            const Waypoint end = interceptPlan(p).waypoints.back();
+            lastPass[p.id] = std::min(lastPass[p.id], geo::distanceM(s.latitudeRad, s.longitudeRad, end.latitudeRad, end.longitudeRad));
+        },
+        [&](const Plane& p, const Lows& lows) {
+            completed(p, lows);
+            CHECK(w.planStatus(p.id, 40)->execution == PlanExecution::Complete);
+            // joined on a leg: a wing ahead of the perpendicular's foot (it turns toward the plan as it goes on: from the Skua's
+            // 132 m to the C-17A's 9.4 km), a rotorcraft at it; the plan's last point passed at worst 8.1 m off (the Mirage 2000's),
+            // a helicopter's 0.46 m, a multirotor's 0.05 m
+            CHECK(joinedAt[p.id] >= 1);
+            if (p.rotor) CHECK(std::abs(joinAhead[p.id]) < 1.0);
+            else CHECK(joinAhead[p.id] > 0.0);
+            CHECK(lastPass[p.id] < (p.cls == Class::FlyByWire ? 70.0 : p.cls == Class::Direct ? 20.0 : p.cls == Class::Helicopter ? 7.0 : 0.5));
         });
     // A-GRA's orbit as its schema gives it (ADR-29 FA-5a: LTR-03, LTR-06, LTR-07): a racetrack by two circles of its
     // orbit's radius, the first two radii ahead and the second three beyond, once round from where it joins it, and out

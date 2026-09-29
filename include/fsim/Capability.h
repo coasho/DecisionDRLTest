@@ -652,6 +652,50 @@ struct ArrivalEstimate {
     double deltaS = std::numeric_limits<double>::quiet_NaN();   ///< that against its window: + late, - early, 0 within
 };
 
+/// Where a route's behaviour is along its segments (docs/flight-autonomy.md, 4.47), as of its last update: asked of it apart
+/// from the progress, as ArrivalEstimate is. A segment is the leg into its end point; points are named by their index as given.
+struct SegmentEstimate {
+    static constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    std::int32_t previous = -1;     ///< the point flown from; -1: none (the route's entry)
+    double previousCaptureS = kNone; ///< when it was captured (the middle of its turn), simulation seconds
+    std::int32_t current = -1;      ///< the point flown to
+    double currentM = kNone;        ///< along the path to its capture
+    std::int32_t next = -1;         ///< the point after it; -1: the route ends there
+    double nextM = kNone;           ///< the leg on from the current point to it
+    bool loiter = false;            ///< the loiter at the current point flies
+    std::uint32_t orbits = 0;       ///< its orbits completed
+    double loiterEndS = kNone;      ///< when it will be left, where known
+};
+
+/// A segment of a plan an intercept flies (A-GRA's SegmentEstimateType; docs/flight-autonomy.md, 4.47): the leg into its end
+/// point, as the intercept's activity estimates it.
+struct SegmentStatus {
+    static constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    std::uint64_t path = 0;          ///< its path's id (A-GRA's PathID; 0 for a plan without paths)
+    std::int32_t point = -1;         ///< its end point, by its index as given
+    std::uint64_t pointId = 0;       ///< its end point's id (Waypoint::id; A-GRA's SegmentID where the plan gives one)
+    double captureTimeS = kNone;     ///< when it is estimated to reach its end point - the previous: when it did - simulation seconds
+    double captureDistanceM = kNone; ///< how far along the route that is (the previous: 0)
+    bool loiter = false;             ///< a loiter at its end point flies (A-GRA's LoiterProgress)
+    std::uint32_t orbits = 0;        ///< its orbits completed
+    double loiterEndS = kNone;       ///< when it will be left, where known
+    double headingRad = kNone;       ///< A-GRA's SegmentRelativeHeading: the course from the point before its end point to it
+    double alongMs = kNone;          ///< SegmentRelativeVelocity: the aircraft's velocity over the ground along it...
+    double acrossMs = kNone;         ///< ...and across it, + right
+};
+
+/// A route intercept's status (A-GRA's MA_RoutePlanInterceptStatusType; docs/flight-autonomy.md, 4.47).
+struct InterceptStatus {
+    static constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+    PlanId plan = 0;
+    PlanExecution execution = PlanExecution::None; ///< the plan's, as its activation's is (4.39)
+    std::int32_t joined = -1;        ///< the segment it joined, by its end point's index
+    std::int32_t laid = -1;          ///< the point laid into the route for the join, short of that end point; -1: none
+    double joinLatitudeRad = kNone, joinLongitudeRad = kNone; ///< where it joined the leg: the laid point's place
+    bool hasPrevious = false, hasCurrent = false, hasNext = false;
+    SegmentStatus previous, current, next;
+};
+
 struct ActivityRecord {
     ActivityId id = 0;
     std::uint32_t vehicle = 0;
@@ -834,6 +878,7 @@ enum class SetpointKind : std::uint8_t {
     Curve,    ///< CurveCommand and its segments (fsim.guidance.curve)
     MustFly,  ///< MustFlyCommand (fsim.guidance.must_fly)
     Marshall, ///< MarshallCommand (fsim.guidance.marshall)
+    Intercept, ///< InterceptCommand (fsim.guidance.intercept)
     Count
 };
 

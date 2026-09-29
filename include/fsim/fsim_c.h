@@ -736,9 +736,19 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   clockwise, speed, speed_reference, duration_s, altitude_min_m (its stack's least: given), altitude_max_m (its most;
  *   left out, none), separation_m (left out, 1,000 ft) - then a pattern's shape's, as FSIM_MODE_PATTERN's from its 13. The
  *   world gives it the lowest altitude of its stack clear of every other aircraft marshalling round the same point
- *   (within 100 m) by its separation, and it flies its pattern there; none clear, stack_full (index 3). */
+ *   (within 100 m) by its separation, and it flies its pattern there; none clear, stack_full (index 3).
+ * - FSIM_MODE_INTERCEPT (ABI 1.44; docs/flight-autonomy.md, 4.47) is fsim.guidance.intercept (A-GRA's route intercept):
+ *   fields plan (a plan the vehicle keeps, fsim_vehicle_plan_command's: its id, a whole number up to 2^53), path (the path it
+ *   joins, its id; NaN any), method (fsim_intercept_method; NaN the plan's beginning), earliest, latest (the first and last
+ *   segments it may join, by their end points' indices; NaN the route's first and last). It joins the plan's route where its
+ *   method chooses from where the aircraft is - a join on a leg short of its end point laid into the route as one point
+ *   more - and flies it from there, the plan activated by it. It takes no UPDATE (not_updatable); its status:
+ *   fsim_activity_intercept_status. */
 enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3, FSIM_MODE_MUST_FLY = 4 /* ABI 1.39 */,
-                 FSIM_MODE_MARSHALL = 5 /* ABI 1.43 */ };
+                 FSIM_MODE_MARSHALL = 5 /* ABI 1.43 */, FSIM_MODE_INTERCEPT = 6 /* ABI 1.44 */ };
+/* How a route intercept joins its plan's route (ABI 1.44; A-GRA's MA_RouteInterceptEnum): at the end point nearest the
+ * aircraft; at the point of the route nearest it; at the point it reaches first, turning from its track. */
+enum fsim_intercept_method { FSIM_INTERCEPT_DISCRETE = 0, FSIM_INTERCEPT_SHORTEST_DISTANCE = 1, FSIM_INTERCEPT_SOONEST = 2 };
 /* A must fly's location (ABI 1.39; A-GRA's MustFlyLocationType): a point, another vehicle, an operational point by its id;
  * from ABI 1.40 a zone given with it (fsim_vehicle_submit_must_fly) or an operational zone by its id, entered; from ABI 1.41
  * a corridor given with it (fsim_vehicle_submit_must_fly_line) or an operational line by its id, flown through; from ABI 1.42
@@ -763,9 +773,9 @@ enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER = 1,
                       FSIM_TURN_CAPTURE_OUTBOUND_COURSE = 2, FSIM_TURN_START_TURN = 3, FSIM_TURN_END_TURN = 4 };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft after a route; after a curve it circles it) */
-FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 35, curve 20, must fly 10, marshall 35 (1.14: hsa 6, pattern 12;
-                                                      1.15: hsa 7, pattern 13; 1.20: hsa 8; 1.21: pattern 25; 1.22: pattern 29; 1.25: curve 20;
-                                                      1.39: must fly; 1.43: marshall);
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 35, curve 20, must fly 10, marshall 35, intercept 5 (1.14: hsa 6,
+                                                      pattern 12; 1.15: hsa 7, pattern 13; 1.20: hsa 8; 1.21: pattern 25; 1.22: pattern 29;
+                                                      1.25: curve 20; 1.39: must fly; 1.43: marshall; 1.44: intercept);
                                                       0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result);
@@ -1569,6 +1579,38 @@ FSIM_API int fsim_vehicle_validate_stored_plan(fsim_world* world, uint32_t id, u
  * valid until the next setpoint read, world step, reset or destroy; `options` NULL. `out->struct_size` set by the
  * caller. FSIM_INVALID_ARGUMENT for an activity not live. */
 FSIM_API int fsim_activity_get_setpoint(fsim_world* world, fsim_activity_id activity, fsim_batch_command* out);
+
+/* A route intercept's status (ABI 1.44; docs/flight-autonomy.md, 4.47; A-GRA's MA_RoutePlanInterceptStatusType). A segment is
+ * the leg into its end point: its path's id, its end point's index and id, when it is estimated to reach that point and how
+ * far along the route it is (the previous: when it did, 0), a loiter's progress there, and its heading from the point
+ * before with the aircraft's ground velocity along it and across it (+ right). Flying to the point laid in for its join, the
+ * current segment is the leg it joins. NaN where not known. */
+typedef struct fsim_segment_status {
+    uint64_t path_id;
+    uint64_t point_id;
+    int32_t point;                 /* its end point's index; -1 none */
+    int32_t loiter;                /* 1: a loiter flies at its end point */
+    uint32_t orbits;               /* ...its orbits completed */
+    uint32_t reserved;
+    double capture_time_s;         /* simulation seconds */
+    double capture_distance_m;
+    double loiter_end_s;           /* when the loiter will be left, where known */
+    double heading_rad, along_ms, across_ms;
+} fsim_segment_status;
+typedef struct fsim_intercept_status {
+    uint32_t struct_size;
+    int32_t execution;             /* fsim_plan_execution: its plan's, as its activation's */
+    uint64_t plan_id;
+    int32_t joined;                /* the segment it joined, by its end point's index */
+    int32_t laid;                  /* the point laid into the route for the join, short of that end point; -1 none */
+    double join_latitude_rad, join_longitude_rad; /* where it joined the leg (NaN: at the end point) */
+    int32_t has_previous, has_current, has_next, reserved;
+    fsim_segment_status previous, current, next;
+} fsim_intercept_status;
+FSIM_API void fsim_intercept_status_init(fsim_intercept_status* status);
+/* FSIM_INVALID_ARGUMENT for an activity that is no route intercept's, or one the vehicle no longer remembers (an ended
+ * one's: its plan and execution alone). `out->struct_size` set by the caller. */
+FSIM_API int fsim_activity_intercept_status(fsim_world* world, fsim_activity_id activity, fsim_intercept_status* out);
 
 /* Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType): a point, a turn flown by or over it, a loiter. */
 enum fsim_end_point_kind { FSIM_END_POINT_WAYPOINT = 0, FSIM_END_POINT_TURN_POINT, FSIM_END_POINT_LOITER_POINT };

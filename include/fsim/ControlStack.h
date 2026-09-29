@@ -143,6 +143,8 @@ public:
     bool arrival(std::size_t slot, ArrivalEstimate& out) const noexcept;
     /// The points its route flies from here (4.37; Behavior::ahead), where the behaviour in `slot` flies one: their count.
     std::uint32_t ahead(std::size_t slot, std::uint32_t* points, std::uint32_t max, bool& ends) const noexcept;
+    /// Where its route is along its segments (4.47; Behavior::segments), where the behaviour in `slot` flies one.
+    bool segments(std::size_t slot, SegmentEstimate& out) const noexcept;
     /// The adapter whose real-time face writes the inputs (a stock JSBSim one by default).
     void setAdapter(const VehicleAdapter& adapter) noexcept;
     const VehicleAdapter& adapter() const noexcept { return *adapter_; }

@@ -798,6 +798,27 @@ int alloc() {
              }
              if (!w.update(activity[id], c).accepted()) std::fprintf(stderr, "marshall: update refused\n"), std::exit(3);
          }},
+        // ADR-29 FA-8d: a route intercept queued behind a start window, started in a step (in the steps counted) - its join laid
+        // then from where the aircraft is, into the room its NEW made
+        {"intercept started in a step", [&](std::uint32_t id, int k) {
+             if (k != 0) return;
+             const auto& s = *w.vehicleState(id);
+             RoutePlan plan;
+             plan.id = 1;
+             for (const double north : {-3000.0, 3000.0, 9000.0}) {
+                 Waypoint at = waypointAt(s, north, 2000.0);
+                 at.altitudeM = s.altitudeMslM;
+                 plan.waypoints.push_back(at);
+             }
+             if (!w.planCommand(id, 1, PlanCommand::PrepareForUpload).completed || w.publishPlan(id, plan) != Reason::None ||
+                 !w.planCommand(id, 1, PlanCommand::Upload).completed)
+                 std::fprintf(stderr, "intercept: vehicle %u: its plan refused\n", id), std::exit(3);
+             InterceptCommand c;
+             c.plan = 1.0, c.method = static_cast<double>(InterceptMethod::Soonest);
+             CommandOptions later;
+             later.window.startNotBefore = w.simTime() + 60.0 * w.dt() * w.frameSkip();
+             if (!w.submit(id, c, later).accepted()) std::fprintf(stderr, "intercept: vehicle %u refused\n", id), std::exit(3);
+         }},
         // step 3: an autopilot on pitch and thrust, the policy's bank updated every step
         {"axes apart each step", [&](std::uint32_t id, int k) {
              static std::vector<ActivityId> activity(64, 0);

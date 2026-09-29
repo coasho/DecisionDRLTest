@@ -1233,6 +1233,41 @@ A-GRA's ALTITUDE_STACKED_MARSHALL (MA_AltitudeStackedMarshallType) is a loiter f
   - C ABI 1.43: `FSIM_MODE_MARSHALL` (35 fields: its 13, then the pattern's shape's), through `fsim_vehicle_submit_mode` and `fsim_activity_update`; the reason `stack_full`.
   - Python: `vehicle.submit_marshall(...)` with its fields by name (`fsim.MODE_FIELDS["marshall"]`), `activity.update(**fields)`.
 
+### 4.47 A-GRA's route intercept (as FA-8d builds it)
+
+A-GRA's ROUTE_INTERCEPT (MA_RoutePlanInterceptType) joins a route plan the vehicle keeps. It names the plan (RoutePlanID), the path to intercept (PathID), the method (MA_RouteInterceptEnum) and the earliest and latest segments it may join (ActivationPathSegmentType: a path and a segment). The schema defines the three methods by a line each: DISCRETE, "interception limited to entering at individual Endpoints"; SHORTEST_DISTANCE, "intercept point with the shortest path length"; SOONEST, "intercept point with the shortest time to intercept". Left out, it intercepts "at the beginning of the RoutePlan". Its activity reports its status (MA_RoutePlanInterceptStatusType): the plan's execution, and the previous, current and next segments - each its plan, path and segment, the estimated capture time and distance, the loiter's progress and the aircraft's heading and velocity relative to it. A-GRA's ICD and VI volume say nothing more. ADR-29 plans it as RIC-01 to RIC-03, FA-8d.
+
+- **The mode** (`InterceptCommand`, fsim.guidance.intercept) has five fields. Like the marshall (4.46) it is not one of the command variant's: its activity flies the plan's route, a `RouteCommand`, and keeps the intercept beside it.
+  - `plan`: the plan's id (a whole number up to 2^53, as the modes' ids are).
+  - `path`: the path to join, its id as the plan gives it (`RoutePath::id`); left out, any.
+  - `method` (`InterceptMethod`): `Discrete`, `ShortestDistance` or `Soonest`; left out, the plan's beginning.
+  - `earliest`, `latest`: the first and last segments it may join, each by its end point's index as given. A-GRA's segment is the leg into its end point, and a point is named by its index everywhere (4.36).
+- **Its candidates:** the plan's points in their flight order (4.36) - from its start, once round; on a path given, from that path's first point until the path is left - from the earliest to the latest. A candidate's segment is the leg into it from the point before it in that order. The first point in that order has none.
+- **The join,** from where the aircraft is:
+  - left out: the first candidate, flown to directly - the plan's beginning;
+  - `Discrete`: the candidate point nearest the aircraft over the ground (on a tie, the earlier), flown to directly;
+  - `ShortestDistance`: the point on a candidate's segment nearest the aircraft - where the perpendicular from it meets the leg, or the leg's end;
+  - `Soonest`: the point on a candidate's segment the aircraft reaches first, turning from its track toward it at its speed and 80 % of its bank (a rotorcraft at once), then straight to it at its ground speed in the wind.
+  - A join on a leg, short of its end point, is laid into the route as one point more after the plan's, its index the plan's count: flown by, at the leg's speed and at its altitude along the profile there, its next the leg's end point. The plan's last point, where its next was left out and the plan has no paths, ends the route there (next -1). With paths, the point is in a path of its own.
+  - Only a straight leg between two points is joined short of its end point. An arc, a leg a civil path terminator lays, a leg out of a loiter point and a leg in a frame are joined at their end points. So is every leg of a plan with 256 points or 16 paths, which leaves no room for the point.
+- **Flown** from the join as the plan's activation flies it from its start (4.39): the plan's route, with its loiters, planned states, paths, branches and civil path terminators, checked as its NEW is.
+- **The plan** must be kept (`unknown_plan`), uploaded, and in a state its activation may leave from: Uploaded, ReadyForActivation, either failed state, Deactivated, or Activated (else `wrong_plan_state`). A plan for planning use only is never flown (`planning_only`).
+  - Its activity may be live - its activation's, or an intercept's: the new intercept replaces it, as any NEW does. That is the rejoin: a plan superseded by a diversion, or one flying, joined again from where the aircraft is.
+  - Accepted, the plan is Activated, its activity the intercept's, and its execution is reported as an activation's (4.39). Refused or validated, the plan is unchanged.
+- **Refused `invalid_parameter`, naming the field:** a plan id that is not a whole number above 0 (0); a path the plan does not have (1); a method that is not one (2); an earliest or a latest that is not a point in the flight order, or not on the path given (3, 4); an earliest after the latest (4).
+- **Waiting,** it keeps the plan's route as it was laid at its NEW, and chooses its join afresh as it starts, from where the aircraft is then, in room its NEW made (a start allocates nothing). A resumed one (disabled, unassigned: 4.10) resumes as a route does.
+- **No UPDATE** (`not_updatable`): a new intercept replaces it. It is never kept as a task (`not_implemented`), nor suggested as one.
+- **Its status** (`World::interceptStatus`, A-GRA's MA_RoutePlanInterceptStatusType):
+  - the plan and its execution - an ended one's, its plan while it is still that plan's last activation;
+  - the join: the segment it joined and, where a point was laid in for it, that point and its place;
+  - the previous, current and next segments. Each has its path's id, its end point (index and id), the estimated capture time and distance (along the route at the ground speed now; the previous: when it was captured), its loiter's orbits completed and end time where it loiters there, and the segment's heading (from the point before its end point) with the aircraft's ground velocity along and across it.
+  - Flying to a point laid in for the join, the current segment is the leg it joins.
+- **The support row:** `fsim.guidance.intercept` is supported on every aircraft: it needs nothing a route does not.
+- **Surfaces.**
+  - C++: `InterceptCommand`, `InterceptMethod` and `InterceptJoin` (`fsim/Control.h`); `InterceptStatus`, `SegmentStatus`, `SegmentEstimate` and `SetpointKind::Intercept` (`fsim/Capability.h`); `World::submit(vehicle, InterceptCommand)`, `World::interceptStatus(activity)`; `Setpoint::intercept` and `Setpoint::join`, `BatchCommand::intercept`, `PathStore::intercept`; `Behavior::segments`, a route's.
+  - C ABI 1.44: `FSIM_MODE_INTERCEPT` (5 fields), through `fsim_vehicle_submit_mode`; `fsim_activity_intercept_status` (`fsim_intercept_status`, `fsim_segment_status`); `enum fsim_intercept_method`.
+  - Python: `vehicle.submit_intercept(plan=, path=, method=, earliest=, latest=)`, `fsim.InterceptMethod`; `activity.intercept_status()` (`fsim.InterceptStatus`, `fsim.SegmentStatus`). A batch item's `BatchCommand("submit_intercept", ...)`: its method name is positional alone, as an intercept's field is its `method`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -1525,7 +1560,7 @@ Three of the missing capability types.
 - FA-8b2, must fly a corridor, given or by id; operational lines (MFY-05; MFY-03 and ENV-06 for lines; 4.44), done 2026-09-29 and measured in section 14;
 - FA-8b3, must fly a volume, given or by id; operational volumes (MFY-06; MFY-03 and ENV-06 for volumes; 4.45), done 2026-09-29 and measured in section 14: FA-8b done, and with it the must fly and the operational geometry;
 - FA-8c, the altitude stacked marshall (ASM-01; 4.46), done 2026-09-29 and measured in section 14;
-- FA-8d, the route intercept (RIC-01 to RIC-03; CAP-02).
+- FA-8d, the route intercept (RIC-01 to RIC-03; CAP-02; 4.47), done 2026-09-29 and measured in section 14: FA-8 done.
 
 **Accepted when:**
 
@@ -3119,6 +3154,28 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The NEWs in the default builds: a level switch +1.9 % and +2.0 % (+0.4 % from three copies), a behaviour −1.1 % and −1.2 % (−3.7 %); the same level's update and a checked update within −4.3 % to +0.0 %. Built with every function aligned: a level switch +1.9 % and +3.3 % (+1.6 % from three), a behaviour +3.8 % and +3.0 % (+1.9 %), the other two within −1.5 % to +0.4 %.
   - World throughput is 99.7 to 100.4 % of FA-8b3's, and 98.6 to 100.5 % from three copies. Protection costs at most 0.5 %.
 - ctest: all 359 tests pass.
+
+**FA-8d, A-GRA's route intercept (RIC-01 to RIC-03; CAP-02). FA-8 done.**
+- What it built is 4.47, in C++, the C ABI (1.44) and Python. `fsim.guidance.intercept` is supported on every aircraft. With it and FA-8's must fly and marshall, eight of A-GRA's ten flight capability types are offered; LAUNCH and RECOVERY are FA-9 to FA-11's (CAP-02).
+- **Flown** (`test_intercept`, 3 cases, 829 checks; its Python twin, 2 tests; `test_c_abi`'s 1.44 block):
+  - Per class - a C172, an F-16C, a UH-60A and an IRIS - a plan of six points along the aircraft's course to its left, the aircraft abeam 40 % of the leg into point 3. Each method joined where it should: the beginning at point 0; Discrete at point 2, the nearest; ShortestDistance on the leg into point 3, where the perpendicular meets it (within a metre); Soonest on that leg, a wing's ahead of that place, a rotorcraft's at it. Each flew the plan from there to its end, capturing each point in turn, the plan Activated, Executing, then Complete. The points after the join were passed within 30 m (the C172), 250 m (the F-16C: 192 m at worst, at the point after it turned back onto the plan's beginning), 10 m (the UH-60A: 7.4 m) and 3 m (the IRIS: 2.5 m) - the route follower's, as any route's.
+  - Bounds and a path: from point 4 on, Discrete joined point 4; up to point 1, ShortestDistance joined point 1; point 3 alone, Soonest joined its leg. On a path of its own (an alternate of three points 4 km to the aircraft's right), Discrete joined its first.
+  - Its status: flying to the point laid in, the current segment was the leg it joins (point 3, its id 103, its path the primary's), its heading the leg's course within half a degree, none before it; the next segment 2.9 km or more beyond. On the leg, having captured point 3: the previous segment's capture time within 1.5 s of when it did, its distance 0; the current's velocity along it the ground speed within 2 m/s, across it under 2 m/s; its capture time now plus its distance at the ground speed. A loiter of two orbits at point 4 was reported as it flew it, its orbits counted.
+  - Refused: a plan it does not keep (`unknown_plan`); one prepared for upload, never uploaded (`wrong_plan_state`); plan 0 (0), a method that is not one (2), a path the plan has not (1), an earliest that is no point (3), a latest before it (4); a plan for planning use only (`planning_only`). Validated alone, nothing flew and the plan stayed Uploaded. An UPDATE, its own or its route's, was refused `not_updatable`; a task, `not_implemented`. Its setpoint read back the intercept, its join, and the plan's six points with the one laid in. Intercepted again while it flew, the new one replaced it; diverted by an hsa, the plan's execution was Superseded; intercepted again, Executing, the plan's activity the new one's. One queued behind a start window joined the leg into point 3 at its NEW and, laid afresh as it started 45 s later, the leg into point 4.
+  - In Python the four ways joined as in C++, the soonest ahead of the perpendicular's foot; a batch item joined point 2; an UPDATE was refused `not_updatable`, an unknown plan `unknown_plan`, a method of 7 at field 2. Through the C ABI: joined on the leg into point 3, a point laid in (4); its status and setpoint read back; no UPDATE; a method of 7 refused at field 2 (reserved 3); an unknown plan refused.
+- **The fleet** (`test_fleet`, a case of its own): on every aircraft a plan of four points along its heading, half a leg to its right from half a leg behind it, was joined by Soonest on its leg into point 1 on all 35 - each rotorcraft where the perpendicular meets it, each wing ahead of that, from 132 m (the Skua) to 9.4 km (the C-17A) - and flown to its end: completed, the plan's execution Complete, its last point passed at worst 8.1 m off (the Mirage 2000), a helicopter's 0.46 m, a multirotor's 0.05 m.
+- **Found and fixed:**
+  - Abeam a point exactly, ShortestDistance chose the leg after it over the point by a floating point hair, and laid a join 0.24 m from the point. A tie is now within a billionth of the score, the earlier taken, and a join within a metre of a leg's start is that point's.
+  - A second intercept of a plan in flight was first refused `plan_executing`. The rejoin is the intercept's use, so it now replaces the plan's live activity as any NEW does.
+  - The conformance held every mode to take UPDATE; the intercept, which takes none, is named its exception.
+  - Python's batch item named its submit method `method`, as the intercept names a field: the item's is now positional alone.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-8c's build.
+- **Digests:** identical to FA-8c's, with protection and without. The allocation gate passes, with a case more: an intercept queued behind a start window, started in a counted step - its join laid then, in the room its NEW made.
+- **A/B throughput** against FA-8c, both builds run from their own directories in a quiet window held throughout, as FA-8c's were measured:
+  - The micro cases are within −0.4 % to +1.2 % from one copy, and −1.7 % to +1.5 % from three.
+  - The NEWs in the default builds: a level switch −1.0 % and −0.1 % (−0.6 % from three copies), a behaviour +2.6 % and +2.9 % (+1.1 %); the same level's update and a checked update within +0.0 % to +1.5 % (+0.0 %). Built with every function aligned: a level switch −1.9 % and −1.2 % (−1.5 % from three), a behaviour +1.2 % and +1.4 % (+1.6 %), the other two within −1.5 % to +1.5 %.
+  - World throughput is 99.0 to 100.0 % of FA-8c's, and 100.0 to 100.4 % from three copies. Protection costs at most 1.0 %.
+- ctest: all 362 tests pass.
 
 ## Appendix A: the inventory
 

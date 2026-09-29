@@ -3,7 +3,7 @@
 // their execution; FA's own plans and the airfields (4.40); their validation
 // (4.41) - CapabilityHost's. Apart from the host's other code, so that growing
 // either moves neither.
-#include "control/CapabilityHost.h"
+#include "control/PlanStore.h"
 
 #include "fsim/GuidanceModes.h"
 
@@ -12,29 +12,6 @@
 #include <utility>
 
 namespace fsim::control {
-
-struct CapabilityHost::PlanEntry {
-    PlanId id = 0;
-    RoutePlan kept;               ///< as uploaded last (revision above 0)
-    RoutePlan received;           ///< published since it was prepared for upload
-    bool hasReceived = false;
-    std::uint32_t revision = 0;   ///< uploads kept
-    PlanState state = PlanState::ReadyForUpload;
-    Reason reason = Reason::None; ///< why its last command failed, or why its execution ended
-    ActivityId activity = 0;      ///< its activity, since it was activated last
-    std::uint64_t commandId = 0;  ///< its activation's
-    PlanExecution ended = PlanExecution::None; ///< once its activity ended (or FA aborted it unflown)
-    double percent = kUnknown, startTime = kUnknown, endTime = kUnknown;
-    bool faOwned = false;         ///< FA's own: loaded by the platform, read only to MA (4.40)
-};
-
-struct CapabilityHost::PlanStore {
-    std::vector<PlanEntry> plans;    ///< in the order they were first prepared for upload, or loaded
-    std::vector<Airfield> airfields; ///< FA's (4.40), in the order they were first loaded
-    /// While a validation runs (4.41): the wind it gives, which the route's checks turn in (checkWind).
-    bool windGiven = false;
-    double windNorthMs = 0.0, windEastMs = 0.0;
-};
 
 void CapabilityHost::PlanStoreFree::operator()(PlanStore* store) const noexcept { delete store; }
 

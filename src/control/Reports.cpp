@@ -38,6 +38,8 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     out.curveShape = CurveShape{};
     out.marshall.reset();
     if (MarshallCommand m; marshall(activity, m)) out.marshall = m; // (its pattern below, its stack beside it: 4.46)
+    out.intercept.reset(), out.join = InterceptJoin{};
+    if (InterceptCommand i; intercept(activity, i, out.join)) out.intercept = i; // (its plan's route below, the intercept beside it: 4.47)
     if (const int found = liveSlot(activity); found >= 0) {
         const auto s = static_cast<std::size_t>(found);
         if (!isCascade(s)) {

@@ -1328,6 +1328,69 @@ int main(int argc, char** argv) {
             CHECK(fsim_world_remove_op_zone(world, 21) == FSIM_OK && fsim_world_remove_op_zone(world, 21) == FSIM_INVALID_ARGUMENT);
         }
         {
+            /* ABI 1.44 (4.47): a route intercept - a plan of four points north, 2 km west of an aircraft flying north, the aircraft
+               abeam 40 % of the leg into its third; joined where the perpendicular from it meets that leg, a point laid in for the
+               join; its status and its setpoint read back; no UPDATE; a malformed one refused naming its field */
+            fsim_command_result ir;
+            fsim_intercept_status ist;
+            fsim_plan_command_result ipr;
+            fsim_route_plan ip;
+            fsim_batch_command isp;
+            fsim_waypoint ipts[4];
+            double iopts[4], ifields[5];
+            const fsim_vehicle_state* ia;
+            uint32_t iv = 0;
+            int32_t ireason = -1;
+            int k;
+            CHECK(fsim_mode_field_count(FSIM_MODE_INTERCEPT) == 5);
+            spec.type = "jsbsim:c172x";
+            spec.name = "intercepting";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 55.0;
+            spec.heading_deg = 0.0;
+            spec.longitude_deg += 0.05;
+            CHECK(fsim_world_create_vehicle(world, &spec, &iv) == FSIM_OK);
+            ia = fsim_vehicle_state_ptr(world, iv);
+            for (k = 0; k < 4; ++k) iopts[k] = fsim_hold();
+            for (k = 0; k < 4; ++k) {
+                fsim_waypoint_init(&ipts[k]);
+                ipts[k].latitude_rad = ia->latitude_rad + (k - 2.4) * 3000.0 / 6371000.0;
+                ipts[k].longitude_rad = ia->longitude_rad - 2000.0 / (6371000.0 * cos(ia->latitude_rad));
+                ipts[k].altitude_m = 1500.0;
+            }
+            fsim_route_plan_init(&ip);
+            ip.plan_id = 44, ip.version = 1;
+            ip.route.fields = iopts, ip.route.count = 4, ip.route.waypoints = ipts, ip.route.waypoint_count = 4;
+            fsim_plan_command_result_init(&ipr);
+            CHECK(fsim_vehicle_plan_command(world, iv, 44, FSIM_PLAN_PREPARE_FOR_UPLOAD, NULL, &ipr) == FSIM_OK && ipr.completed == 1);
+            CHECK(fsim_vehicle_publish_plan(world, iv, &ip, &ireason) == FSIM_OK && ireason == 0);
+            CHECK(fsim_vehicle_plan_command(world, iv, 44, FSIM_PLAN_UPLOAD, NULL, &ipr) == FSIM_OK && ipr.completed == 1);
+            for (k = 0; k < 5; ++k) ifields[k] = fsim_hold();
+            ifields[0] = 44.0, ifields[2] = FSIM_INTERCEPT_SHORTEST_DISTANCE;
+            CHECK(fsim_vehicle_submit_mode(world, iv, FSIM_MODE_INTERCEPT, ifields, 0, &co, &ir) == FSIM_INVALID_ARGUMENT); /* (its plan at least) */
+            CHECK(fsim_vehicle_submit_mode(world, iv, FSIM_MODE_INTERCEPT, ifields, 5, &co, &ir) == FSIM_OK && ir.status == FSIM_COMMAND_ACCEPTED);
+            fsim_intercept_status_init(&ist);
+            CHECK(ist.struct_size == sizeof ist && ist.laid == -1 && isnan(ist.current.capture_time_s));
+            CHECK(fsim_activity_intercept_status(world, ir.activity, &ist) == FSIM_OK && ist.plan_id == 44 && ist.joined == 3 && ist.laid == 4 &&
+                  fabs((ist.join_latitude_rad - ia->latitude_rad) * 6371000.0) < 5.0);
+            memset(&isp, 0, sizeof isp);
+            isp.struct_size = sizeof isp;
+            CHECK(fsim_activity_get_setpoint(world, ir.activity, &isp) == FSIM_OK && isp.kind == FSIM_BATCH_MODE && isp.code == FSIM_MODE_INTERCEPT &&
+                  isp.count == 5 && isp.fields[0] == 44.0 && isp.fields[2] == FSIM_INTERCEPT_SHORTEST_DISTANCE && isp.waypoint_count == 5);
+            CHECK(fsim_world_step(world, 30) == FSIM_OK);
+            CHECK(fsim_activity_intercept_status(world, ir.activity, &ist) == FSIM_OK && ist.execution == FSIM_PLAN_EXECUTION_EXECUTING &&
+                  ist.has_current == 1 && ist.current.point == 3 && ist.current.capture_distance_m > 0.0);
+            CHECK(fsim_activity_update(world, ir.activity, ifields, 5, &ir) == FSIM_OK && ir.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(ir.reason), "not_updatable") == 0);
+            ifields[2] = 7.0; /* (no method) */
+            CHECK(fsim_vehicle_submit_mode(world, iv, FSIM_MODE_INTERCEPT, ifields, 5, &co, &ir) == FSIM_OK && ir.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(ir.reason), "invalid_parameter") == 0 && ir.reserved == 3); /* (field 2) */
+            ifields[0] = 45.0, ifields[2] = fsim_hold();
+            CHECK(fsim_vehicle_submit_mode(world, iv, FSIM_MODE_INTERCEPT, ifields, 5, &co, &ir) == FSIM_OK && ir.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(ir.reason), "unknown_plan") == 0);
+            CHECK(fsim_activity_intercept_status(world, 12345, &ist) == FSIM_INVALID_ARGUMENT);
+        }
+        {
             /* ABI 1.43 (4.46): an altitude stacked marshall - two aircraft round one point given its lowest two slots, read back;
                a third, its stack's most below its next slot, refused stack_full naming its slot */
             fsim_command_result mr;

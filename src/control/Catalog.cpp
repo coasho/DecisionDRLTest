@@ -43,7 +43,7 @@ CapabilityDescriptor flight(const char* name, Level level, std::vector<Parameter
 /// unless registered with a dotted id.
 std::string guidanceId(const std::string& behavior) {
     static const char* const builtin[] = {"hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics", "hover", "hsa", "route",
-                                          "pattern", "curve", "must_fly", "marshall"};
+                                          "pattern", "curve", "must_fly", "marshall", "intercept"};
     if (behavior.find('.') != std::string::npos) return behavior;
     for (const char* b : builtin)
         if (behavior == b) return "fsim.guidance." + behavior;
@@ -139,6 +139,11 @@ std::size_t marshallFields(MarshallCommand& m, double* f[kMaxCommandFields]) noe
     f[5] = &m.radiusM, f[6] = &m.clockwise, f[7] = &m.speed, f[8] = &m.speedReference, f[9] = &m.durationS;
     f[10] = &m.altitudeMinM, f[11] = &m.altitudeMaxM, f[12] = &m.separationM;
     return 13;
+}
+
+std::size_t interceptFields(InterceptCommand& c, double* f[kMaxCommandFields]) noexcept {
+    f[0] = &c.plan, f[1] = &c.path, f[2] = &c.method, f[3] = &c.earliest, f[4] = &c.latest;
+    return 5;
 }
 
 std::size_t legacyFieldCount(Level level) noexcept {
@@ -327,7 +332,8 @@ void CapabilityCatalog::addBehaviors() {
         // a behaviour's parameters are heap data: a new target is a NEW. A mode's
         // setpoint is fixed-size: it takes UPDATE (docs/vehicle-interface.md, 4.2)
         const bool mode = traits.setpoint != SetpointKind::Behavior;
-        d.interactions = mode ? kCommand | kUpdate | kCancel | kStatus : kCommand | kCancel | kStatus;
+        // (a mode takes UPDATE - but a route intercept, which a new one replaces: docs/flight-autonomy.md, 4.47)
+        d.interactions = mode && traits.setpoint != SetpointKind::Intercept ? kCommand | kUpdate | kCancel | kStatus : kCommand | kCancel | kStatus;
         d.accepted = kAcceptsCapabilityCommand | kAcceptsActivityCommand;
         d.superseded = supersededBy(id);
         d.setpoint = traits.setpoint;

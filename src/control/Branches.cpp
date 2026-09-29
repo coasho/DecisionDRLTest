@@ -131,6 +131,7 @@ void CapabilityHost::holdExtras(Waiting& w, const RouteExtras* extras) const {
     w.terminators.reserve(PathStore::kRouteTerminators), w.terminators.clear();
     w.area = extras && extras->area ? *extras->area : MustFlyArea{}; // (a must fly's zone: 4.43)
     w.marshall = extras && extras->marshall ? *extras->marshall : MarshallStack{}; // (a marshall's stack: 4.46)
+    w.intercept = extras && extras->intercept ? *extras->intercept : InterceptCommand{}; // (a route intercept: 4.47)
     if (!extras) return;
     w.loiters.assign(extras->loiters.begin(), extras->loiters.end());
     w.states.assign(extras->states.begin(), extras->states.end());

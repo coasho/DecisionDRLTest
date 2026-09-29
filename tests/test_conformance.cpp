@@ -129,6 +129,8 @@ public:
     PatternShape shape;                  ///< the last pattern's, made beside its PatternCommand (in the walks of their own)
     /// The last marshall (ADR-29 FA-8c), made in place of the command - not one of the variant's: a PatternCommand stands for it
     std::optional<MarshallCommand> marshall;
+    /// The last route intercept (ADR-29 FA-8d), likewise: a RouteCommand stands for it
+    std::optional<InterceptCommand> intercept;
     CurveShape curveShape;               ///< the last curve's reference in a frame, likewise (ADR-29 FA-5d2)
     double curveEnd[3] = {0.0, 0.0, 0.0}; ///< where they end, from their reference: an append joins there
     double curveZ = kHold, curveBase = 0.0; ///< how the last NEW's points' third reads, and its altitude (an append's read so)
@@ -139,7 +141,7 @@ public:
 
     /// A flight or guidance capability's command; false for the others.
     bool cascade(const CapabilityDescriptor& d, bool wild, Command& out) {
-        marshall.reset();
+        marshall.reset(), intercept.reset();
         if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Hsa) { // a mode: its fixed-size setpoint's fields
             out = HsaCommand{};
             double* fields[kMaxCommandFields];
@@ -532,6 +534,35 @@ public:
             out = PatternCommand{}; // (standing for it: submitMade and updateMade take the marshall)
             return true;
         }
+        if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Intercept) { // (ADR-29 FA-8d: in the walks of their own)
+            // plan 1, three points ahead - uploaded the first time - joined by a method drawn; now and then a plan it does not keep,
+            // or a field out of its range
+            if (!w_.planStatus(vehicle_, 1)) {
+                RoutePlan plan;
+                plan.id = 1;
+                for (const double m : {3000.0, 6000.0, 9000.0}) {
+                    const PositionCommand q = ahead(m);
+                    Waypoint p;
+                    p.latitudeRad = q.latitudeRad, p.longitudeRad = q.longitudeRad, p.altitudeM = q.altitudeMslM;
+                    plan.waypoints.push_back(p);
+                }
+                if (w_.planCommand(vehicle_, 1, PlanCommand::PrepareForUpload).completed && w_.publishPlan(vehicle_, plan) == Reason::None)
+                    w_.planCommand(vehicle_, 1, PlanCommand::Upload);
+            }
+            InterceptCommand c;
+            c.plan = 1.0;
+            if (wild) c.method = chance(0.3) ? kHold : static_cast<double>(pick(static_cast<std::size_t>(InterceptMethod::Count)));
+            if (wild && chance(0.1)) c.plan = static_cast<double>(2 + pick(3)); // (one it does not keep)
+            if (wild && chance(0.1)) {
+                double* fields[kMaxCommandFields];
+                const std::size_t n = std::min(interceptFields(c, fields), d.parameters.size());
+                const std::size_t i = pick(n);
+                *fields[i] = value(d.parameters[i], true);
+            }
+            intercept = c;
+            out = RouteCommand{}; // (standing for it: submitMade and updateMade take the intercept)
+            return true;
+        }
         if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::MustFly) { // (ADR-29 FA-8a: in the walks of their own)
             // a point ahead, or the vehicle it follows; now and then a window of bearings, or a field out of its range
             MustFlyCommand c;
@@ -603,8 +634,11 @@ public:
         return false;
     }
 
-    /// A capability the old walks never draw, so that each draws what it drew before (a must fly: ADR-29 FA-8a; a marshall: FA-8c).
-    static bool late(const CapabilityDescriptor& d) { return d.setpoint == SetpointKind::MustFly || d.setpoint == SetpointKind::Marshall; }
+    /// A capability the old walks never draw, so that each draws what it drew before (a must fly: ADR-29 FA-8a; a marshall: FA-8c; a
+    /// route intercept: FA-8d).
+    static bool late(const CapabilityDescriptor& d) {
+        return d.setpoint == SetpointKind::MustFly || d.setpoint == SetpointKind::Marshall || d.setpoint == SetpointKind::Intercept;
+    }
 
     static bool isSupport(const CapabilityDescriptor& d) {
         for (std::size_t k = 0; k < kSupportKinds; ++k)
@@ -682,6 +716,7 @@ private:
 /// its shape (where it made one).
 CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, const Maker& make, const CommandOptions& options = {}) {
     if (make.marshall) return w.submit(v, *make.marshall, make.shape, options); // (in place of its command: ADR-29 FA-8c)
+    if (make.intercept) return w.submit(v, *make.intercept, options);            // (likewise: FA-8d)
     if (const auto* route = std::get_if<RouteCommand>(&c))
         return w.submit(v, *route, make.waypoints, options, make.loiters, make.states, make.paths, make.branches, make.terminators);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
@@ -696,6 +731,7 @@ CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, c
 CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Caller caller = {}) {
     if (make.marshall) // (in place of its command: ADR-29 FA-8c)
         return make.shape.empty() ? w.update(caller, activity, *make.marshall) : w.update(caller, activity, *make.marshall, make.shape);
+    if (make.intercept) return w.update(caller, activity, *make.intercept); // (likewise: FA-8d)
     if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints)
         return w.update(caller, activity, *route, make.waypoints, make.loiters, make.states, make.paths, make.branches, make.terminators);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
@@ -745,7 +781,8 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
         }
         CHECK((d.interactions & (kCancel | kStatus)) == (kCancel | kStatus));
         // a behaviour's parameters are heap data; a mode's setpoint is fixed-size and takes UPDATE (docs/vehicle-interface.md, 4.2)
-        CHECK(((d.interactions & kUpdate) != 0) == (d.kind != CapabilityKind::Guidance || d.setpoint != SetpointKind::Behavior));
+        CHECK(((d.interactions & kUpdate) != 0) ==
+              ((d.kind != CapabilityKind::Guidance || d.setpoint != SetpointKind::Behavior) && d.setpoint != SetpointKind::Intercept)); // (a route intercept, which a new one replaces: ADR-29 FA-8d)
         const bool primary = (d.axes & kPrimaryAxes) != 0; // flown through the cascade, or the engines' thrust beside it
         CHECK(primary == (!Maker::isSupport(d) || d.id == "fsim.flight.engines"));
         CHECK(w.capabilityStatus(v, d.id).availability == Availability::Available);
@@ -796,9 +833,10 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
 
         // UPDATE: the same command type where the capability takes updates, another type never
         const bool live = a->live();
-        const Reason updated = support         ? w.update(r.activity, sc).reason
-                               : make.marshall ? w.update(r.activity, *make.marshall).reason // (in place of its command: ADR-29 FA-8c)
-                                               : w.update(r.activity, c).reason;
+        const Reason updated = support          ? w.update(r.activity, sc).reason
+                               : make.marshall  ? w.update(r.activity, *make.marshall).reason // (in place of its command: ADR-29 FA-8c)
+                               : make.intercept ? w.update(r.activity, *make.intercept).reason // (FA-8d)
+                                                : w.update(r.activity, c).reason;
         const Reason other = support ? w.update(r.activity, Command(VelocityCommand{})).reason : w.update(r.activity, otherType(c)).reason;
         const bool updatable = (d.interactions & kUpdate) != 0;
         if (live) {
@@ -1461,10 +1499,13 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                     item.terminators = make.terminators;
                 if (std::holds_alternative<CurveCommand>(command) && !make.curveShape.empty()) item.curveShape = &make.curveShape;
                 if (make.asNurbs && std::holds_alternative<CurveCommand>(command)) item.segments = {}, item.nurbs = make.nurbs;
-                if (make.marshall) item.marshall = &*make.marshall; // (in place of its command: ADR-29 FA-8c)
+                if (make.marshall) item.marshall = &*make.marshall;    // (in place of its command: ADR-29 FA-8c)
+                if (make.intercept) item.intercept = &*make.intercept; // (FA-8d)
                 const Reason r = w.storeTask(v, id, item, repetition);
                 if (caps[c].setpoint == SetpointKind::Marshall) // (never a task: its slot is the stack's at its NEW - ADR-29 FA-8c)
                     CHECK(among(r, {Reason::InvalidParameter, Reason::NotSupported, Reason::NotImplemented, Reason::UnknownCapability}));
+                else if (caps[c].setpoint == SetpointKind::Intercept) // (not built as a task - FA-8d)
+                    CHECK(among(r, {Reason::NotImplemented, Reason::NotSupported, Reason::UnknownCapability}));
                 else
                     CHECK(among(r, {Reason::None, Reason::TaskActive, Reason::NotSupported, Reason::NotImplemented, Reason::UnknownCapability}));
                 ++seen[std::string("task:store:") + reasonName(r)];
@@ -1548,7 +1589,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             for (std::size_t i = 0; i < caps.size(); ++i)
                 if ((caps[i].kind == CapabilityKind::Flight && !Maker::isSupport(caps[i])) ||
                     (caps[i].kind == CapabilityKind::Guidance && (make.optimise || !Maker::late(caps[i])) && make.chance(0.15) &&
-                     caps[i].setpoint != SetpointKind::Marshall)) // (a Command alone: a marshall is none - ADR-29 FA-8c)
+                     caps[i].setpoint != SetpointKind::Marshall && caps[i].setpoint != SetpointKind::Intercept)) // (a Command alone: neither is one)
                     cascade.push_back(i);
             Command c;
             done.capability = cascade[make.pick(cascade.size())];

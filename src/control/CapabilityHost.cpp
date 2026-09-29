@@ -1227,7 +1227,7 @@ Reason CapabilityHost::axesOf(std::size_t index, const Command& command, const C
 Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments,
                                const sim::VehicleState& state, CheckLog& log, const PatternShape* shape, const CurveShape* curveShape,
                                const RouteExtras* extras) {
-    if (extras && extras->marshall) return prepareMarshall(setpoint, *extras->marshall, state, log, shape); // (its pattern, its stack beside it: 4.46)
+    if (extras && extras->late != SetpointKind::Count) return prepareLate(setpoint, waypoints, state, log, shape, *extras); // (4.46, 4.47)
     const bool checked = log.range != RangePolicy::None;
     CommandResult& detail = log.result;
     auto* hsa = std::get_if<HsaCommand>(&setpoint);
@@ -1371,17 +1371,19 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
     Command setpoint = std::move(w.command); // (it flies once: moved, never copied)
     const bool route = std::holds_alternative<RouteCommand>(setpoint);
     const bool laid = route || std::holds_alternative<MustFlyCommand>(setpoint); // (a must fly's route written as a route's: 4.42)
-    const bool marshall = d.setpoint == SetpointKind::Marshall; // (its pattern, its stack beside it: 4.46)
+    // (a mode beside the command variant: a marshall's pattern, its stack beside it; an intercept's route, its join laid afresh - 4.46, 4.47)
+    const SetpointKind late = d.setpoint == SetpointKind::Marshall || d.setpoint == SetpointKind::Intercept ? d.setpoint : SetpointKind::Count;
     const RouteExtras extras{Span<const RouteLoiter>(w.loiters.data(), w.loiters.size()), Span<const RouteState>(w.states.data(), w.states.size()),
                              Span<const RoutePath>(w.paths.data(), w.paths.size()), Span<const RouteBranch>(w.branches.data(), w.branches.size()),
                              Span<const RouteTerminator>(w.terminators.data(), w.terminators.size()),
-                             w.area.laidOut() ? &w.area : nullptr, marshall ? &w.marshall : nullptr};
+                             w.area.laidOut() ? &w.area : nullptr, late, late == SetpointKind::Marshall ? &w.marshall : nullptr,
+                             late == SetpointKind::Intercept && !w.resumed ? &w.intercept : nullptr};
     if (why == Reason::None) why = prepare(record.capability, setpoint, Span<const Waypoint>(w.waypoints.data(), w.waypoints.size()),
                                            Span<const NurbsSegment>(w.segments.data(), w.segments.size()), state, log, &w.shape, &w.curveShape,
                                            &extras);
     const bool found = why == Reason::None && log.refused != Reason::None; // (refused by what the checks found, not malformed)
     if (why == Reason::None) why = log.refused;
-    if (found && w.options.range == RangePolicy::Reject && log.clampable && !marshall) { // (a marshall's slot is its stack's at its NEW: 4.46)
+    if (found && w.options.range == RangePolicy::Reject && log.clampable && late == SetpointKind::Count) { // (never a mode beside the variant: 4.46, 4.47)
         // what Clamp would fly, suggested in its place (4.11): kept in its entry until a call makes it a task
         w.command = std::move(setpoint);
         if (route && routePlan_) givenRoute(w.waypoints, w.loiters, w.states, w.paths, w.branches, w.terminators); // (within its room: as given - 4.36)
@@ -1403,7 +1405,8 @@ bool CapabilityHost::startWaiting(Waiting& w, const sim::VehicleState& state, do
         return false;
     }
     w.used = false, --waitingCount_;
-    if (marshall) config_->path->marshall = w.marshall; // (the store made at its NEW)
+    if (late == SetpointKind::Marshall) config_->path->marshall = w.marshall; // (the store made at its NEW)
+    if (late == SetpointKind::Intercept) launchedIntercept(w);
     const auto* flown = std::get_if<RouteCommand>(&setpoint);
     const double firstStart = !isHold(w.firstStart) ? w.firstStart : flown ? flown->start : kHold;
     launch(Launch{&record, record.id, record.capability, record.axes, detail.flags, firstStart}, w.options, std::move(setpoint), std::move(w.behavior),
@@ -1491,7 +1494,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
                                          const PatternShape* shape, const CurveShape* curveShape, const RouteExtras* extras) {
     if (pendingSuggestions_) materialize();
     details_.clear();
-    const int found = extras && extras->marshall ? catalog_->indexOf(SetpointKind::Marshall) : catalog_->indexOf(command); // (a marshall's: 4.46)
+    const int found = extras && extras->late != SetpointKind::Count ? catalog_->indexOf(extras->late) : catalog_->indexOf(command); // (4.46, 4.47)
     if (found < 0) return rejected(missing(featureOf(command))); // not supported, not implemented, or unknown
     const auto index = static_cast<std::size_t>(found);
     const CapabilityDescriptor& d = catalog_->descriptor(index);
@@ -1985,6 +1988,8 @@ bool CapabilityHost::retire(std::size_t s, ActivityState state) {
         }
         w->shape = std::holds_alternative<PatternCommand>(flown) && config_->path ? config_->path->pattern : PatternShape{};
         w->marshall = config_->path ? config_->path->marshall : MarshallStack{}; // (a marshall's stack: 4.46)
+        w->intercept = config_->path ? config_->path->intercept : InterceptCommand{}; // (an intercept's, and its join: 4.47)
+        w->join = config_->path ? config_->path->interceptJoin : InterceptJoin{};
         w->curveShape = std::holds_alternative<CurveCommand>(flown) && config_->path ? config_->path->curveShape : CurveShape{};
         w->command = std::move(flown);
     }

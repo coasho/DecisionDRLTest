@@ -157,7 +157,7 @@ CommandResult CapabilityHost::submit(const MarshallCommand& marshall, const Patt
         return rejected(missing("fsim.guidance.marshall"));
     }
     const MarshallStack stack = stackOf(marshall);
-    const RouteExtras extras{{}, {}, {}, {}, {}, nullptr, &stack};
+    const RouteExtras extras{{}, {}, {}, {}, {}, nullptr, SetpointKind::Marshall, &stack};
     const CommandResult r = submitWith(Command(patternOf(marshall)), {}, {}, options, state, now, true, &shape, nullptr, &extras);
     if (r.accepted() && !(r.flags & kDeferred) && config_->path) config_->path->marshall = stack; // (it flies: its stack beside its pattern)
     return r;
@@ -227,7 +227,7 @@ CommandResult CapabilityHost::updateWaitingMarshall(Waiting& w, const MarshallCo
     mergeStack(stack, next);
     CheckLog log{result, w.options.range, &details_};
     Command probe = pattern;
-    const RouteExtras extras{{}, {}, {}, {}, {}, nullptr, &stack};
+    const RouteExtras extras{{}, {}, {}, {}, {}, nullptr, SetpointKind::Marshall, &stack};
     if (const Reason why = prepare(record.capability, probe, {}, {}, state, log, &nextShape, nullptr, &extras); why != Reason::None)
         return about(rejected(why, activity), result);
     if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);

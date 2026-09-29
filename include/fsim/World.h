@@ -198,6 +198,10 @@ public:
     /// the shape. Flown as its pattern, its stack beside it: its setpoint's `marshall` reads it back.
     control::CommandResult submit(const control::MarshallCommand& marshall, const control::PatternShape& shape,
                                   const control::CommandOptions& options = {});
+    /// NEW of a route intercept (docs/flight-autonomy.md, 4.47): a plan the vehicle keeps, joined where its method chooses from
+    /// where the aircraft is - its beginning, the nearest point, the nearest place on its way, or the soonest - between its
+    /// earliest and latest segments, and flown from there, the plan activated by it; its status: World::interceptStatus.
+    control::CommandResult submit(const control::InterceptCommand& intercept, const control::CommandOptions& options = {});
     /// NEW of a must fly with its zone given (docs/flight-autonomy.md, 4.43): the zone checked (a field at fault named from
     /// 10, after the must fly's own) and laid out as it is given, then entered.
     control::CommandResult submit(const control::MustFlyCommand& mustFly, const control::OpZone& zone, const control::CommandOptions& options = {});
@@ -478,6 +482,9 @@ public:
     /// route's waypoints, a curve's segments - appended ones too, its flyout
     /// curve. Empty for an activity not live.
     std::optional<control::Setpoint> activitySetpoint(control::ActivityId activity) const;
+    /// A route intercept's status (docs/flight-autonomy.md, 4.47; A-GRA's MA_RoutePlanInterceptStatusType): its plan and its
+    /// execution, where it joined, its previous, current and next segments. Empty for any other activity.
+    std::optional<control::InterceptStatus> interceptStatus(control::ActivityId activity) const;
     /// Where a live activity flies to (A-GRA's ActualEndPoint): the point it
     /// flies to now, then those after it - a route's waypoints (a repeating
     /// route's round again), a curve's segment ends, a pattern's fix, the

@@ -4054,6 +4054,35 @@ static PyObject* world_plan_status(PyObject* o, PyObject* const* args, Py_ssize_
     return plan_status_tuple(&s);
 }
 
+/* A route intercept's segment (ABI 1.44): (path_id, point, point_id, capture_time_s, capture_distance_m, loiter, orbits,
+ * loiter_end_s, heading_rad, along_ms, across_ms), or None where it has none */
+static PyObject* segment_tuple(int has, const fsim_segment_status* g) {
+    if (!has) Py_RETURN_NONE;
+    return Py_BuildValue("(KiKddOIdddd)", (unsigned long long)g->path_id, g->point, (unsigned long long)g->point_id, g->capture_time_s,
+                         g->capture_distance_m, g->loiter ? Py_True : Py_False, g->orbits, g->loiter_end_s, g->heading_rad, g->along_ms, g->across_ms);
+}
+
+/* intercept_status(activity) -> (plan_id, execution, joined, laid, join_latitude_rad, join_longitude_rad, previous, current, next),
+ * or None for an activity that is no route intercept's (ABI 1.44) */
+static PyObject* world_intercept_status(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t activity;
+    fsim_intercept_status s;
+    if (!check_args(n, 1, 1, "intercept_status") || !as_u64(args[0], &activity)) return NULL;
+    fsim_intercept_status_init(&s);
+    if (fsim_activity_intercept_status(self->world, (fsim_activity_id)activity, &s) != FSIM_OK) Py_RETURN_NONE;
+    PyObject* previous = segment_tuple(s.has_previous, &s.previous);
+    PyObject* current = previous ? segment_tuple(s.has_current, &s.current) : NULL;
+    PyObject* next = current ? segment_tuple(s.has_next, &s.next) : NULL;
+    if (!next) {
+        Py_XDECREF(previous);
+        Py_XDECREF(current);
+        return NULL;
+    }
+    return Py_BuildValue("(KiiiddNNN)", (unsigned long long)s.plan_id, s.execution, s.joined, s.laid, s.join_latitude_rad, s.join_longitude_rad,
+                         previous, current, next);
+}
+
 /* plans(id) -> [status tuple] */
 static PyObject* world_plans(PyObject* o, PyObject* const* args, Py_ssize_t n) {
     WorldObject* self = (WorldObject*)o;
@@ -4163,6 +4192,7 @@ static PyMethodDef world_methods[] = {
     FAST("abort_plan", world_abort_plan, "abort_plan(id, plan_id, reason=0) -> result: FA's own deactivation"),
     FAST("remove_plan", world_remove_plan, "remove_plan(id, plan_id) -> reason"),
     FAST("plan_status", world_plan_status, "plan_status(id, plan_id) -> status or None"),
+    FAST("intercept_status", world_intercept_status, "intercept_status(activity) -> status or None"),
     FAST("plans", world_plans, "plans(id) -> [status]"),
     FAST("get_plan", world_get_plan, "get_plan(id, plan_id) -> plan tuple or None"),
     FAST("load_plan", world_load_plan, "load_plan(id, ...publish_plan's) -> reason: FA's own plan"),

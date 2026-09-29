@@ -28,6 +28,8 @@ inline constexpr std::size_t kMaxCommandFields = 40;
 std::size_t commandFields(Command& c, double* fields[kMaxCommandFields]) noexcept;
 /// A marshall's 13 fields (docs/flight-autonomy.md, 4.46), as commandFields gives a mode's: not one of the command variant's.
 std::size_t marshallFields(MarshallCommand& m, double* fields[kMaxCommandFields]) noexcept;
+/// A route intercept's 5 fields (4.47), likewise.
+std::size_t interceptFields(InterceptCommand& c, double* fields[kMaxCommandFields]) noexcept;
 /// How many of a level's fields it had before the rotorcraft's were appended
 /// (docs/rotorcraft.md, 3.4): what the C ABI's fixed-size calls still take.
 std::size_t legacyFieldCount(Level level) noexcept;
@@ -135,8 +137,8 @@ private:
     std::vector<CapabilityDescriptor> descriptors_;
     std::array<int, static_cast<std::size_t>(Level::Behavior)> byLevel_{};
     std::array<int, kSupportKinds> bySupport_{-1, -1, -1, -1, -1, -1};
-    std::array<int, static_cast<std::size_t>(SetpointKind::Count)> byMode_{-1, -1, -1, -1, -1, -1, -1, -1}; ///< a guidance mode's capability, by its setpoint
-    static_assert(static_cast<int>(SetpointKind::Count) == 8, "byMode_ starts -1 for every kind");
+    std::array<int, static_cast<std::size_t>(SetpointKind::Count)> byMode_{-1, -1, -1, -1, -1, -1, -1, -1, -1}; ///< a guidance mode's capability, by its setpoint
+    static_assert(static_cast<int>(SetpointKind::Count) == 9, "byMode_ starts -1 for every kind");
     std::uint64_t registryRevision_ = 0;
 };
 

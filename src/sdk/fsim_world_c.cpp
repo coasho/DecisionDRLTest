@@ -590,6 +590,18 @@ bool toMarshall(const double* fields, uint32_t count, fsim::control::MarshallCom
     for (uint32_t i = 0; i < count; ++i) *slots[i] = fields[i];
     return true;
 }
+
+/// A route intercept from its fields in order (ABI 1.44; docs/flight-autonomy.md, 4.47): its plan at least, its 5 at most; false
+/// if the count is wrong. Not one of the command variant's: apart from toMode.
+bool toIntercept(const double* fields, uint32_t count, fsim::control::InterceptCommand& out) noexcept {
+    if (!fields) return false;
+    out = fsim::control::InterceptCommand{};
+    double* slots[fsim::control::kMaxCommandFields];
+    const std::size_t n = fsim::control::interceptFields(out, slots);
+    if (count < 1 || count > n) return false;
+    for (uint32_t i = 0; i < count; ++i) *slots[i] = fields[i];
+    return true;
+}
 /// A curve's fields past its 14: its reference in a frame given (ABI 1.25).
 constexpr uint32_t kCurveFields = 14;
 
@@ -816,6 +828,7 @@ UpdateShape updateShape(fsim_world* w, fsim::control::ActivityId activity) {
     case fsim::control::SetpointKind::Curve: shape.mode = FSIM_MODE_CURVE; break;
     case fsim::control::SetpointKind::MustFly: shape.mode = FSIM_MODE_MUST_FLY; break;
     case fsim::control::SetpointKind::Marshall: shape.mode = FSIM_MODE_MARSHALL; break;
+    case fsim::control::SetpointKind::Intercept: shape.mode = FSIM_MODE_INTERCEPT; break;
     default: break;
     }
     if (shape.mode >= 0) {
@@ -845,6 +858,12 @@ fsim::control::CommandResult updateFrom(fsim_world* w, fsim::control::ActivityId
         fsim::control::PatternShape given;
         if (toMarshall(fields, count, m, &given))
             return count > kPatternFields ? w->world.update(caller, activity, m, given) : w->world.update(caller, activity, m);
+        malformed = true;
+        return {};
+    }
+    if (shape.mode == FSIM_MODE_INTERCEPT) { // (ABI 1.44: it takes no UPDATE - the host answers)
+        fsim::control::InterceptCommand ic;
+        if (toIntercept(fields, count, ic)) return w->world.update(caller, activity, ic);
         malformed = true;
         return {};
     }
@@ -1091,6 +1110,11 @@ FSIM_API uint32_t fsim_mode_field_count(int mode) {
         fsim::control::MarshallCommand m;
         double* slots[fsim::control::kMaxCommandFields];
         return static_cast<uint32_t>(fsim::control::marshallFields(m, slots) + fsim::control::PatternShape::kFields);
+    }
+    if (mode == FSIM_MODE_INTERCEPT) { // (ABI 1.44)
+        fsim::control::InterceptCommand ic;
+        double* slots[fsim::control::kMaxCommandFields];
+        return static_cast<uint32_t>(fsim::control::interceptFields(ic, slots));
     }
     fsim::control::Command c;
     if (mode == FSIM_MODE_HSA) c = fsim::control::HsaCommand{};
@@ -1444,6 +1468,13 @@ FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, 
             return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_mode: mode " + std::to_string(mode) + " takes " +
                                                    std::to_string(fsim_mode_field_count(mode)) + " fields");
         toC(world, id, world->world.submit(id, m, count > kPatternFields ? shape : fsim::control::PatternShape{}, fromC(options)), result);
+        return FSIM_OK;
+    }
+    if (fsim::control::InterceptCommand ic; world && result && mode == FSIM_MODE_INTERCEPT) { // (ABI 1.44)
+        if (!toIntercept(fields, count, ic))
+            return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_mode: mode " + std::to_string(mode) + " takes 1 to " +
+                                                   std::to_string(fsim_mode_field_count(mode)) + " fields");
+        toC(world, id, world->world.submit(id, ic, fromC(options)), result);
         return FSIM_OK;
     }
     if (!world || !result || !toMode(mode, fields, count, c, &shape))
@@ -1928,7 +1959,7 @@ bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::Ba
                fsim::control::CurveShape& curveShape, std::vector<fsim::control::RouteLoiter>& loiters, std::vector<fsim::control::RouteState>& states,
                std::vector<fsim::control::RoutePath>& paths, std::vector<fsim::control::RouteBranch>& branches,
                std::vector<fsim::control::RouteTerminator>& terminators, fsim::control::OpZone& zone, fsim::control::OpLine& line,
-               fsim::control::OpVolume& volume, fsim::control::MarshallCommand& marshall) {
+               fsim::control::OpVolume& volume, fsim::control::MarshallCommand& marshall, fsim::control::InterceptCommand& intercept) {
     item.options = fromC(b.options);
     fsim::control::Command c;
     fsim::control::SupportCommand sc;
@@ -1945,6 +1976,11 @@ bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::Ba
             ok = toMarshall(b.fields, b.count, marshall, &shape);
             item.marshall = &marshall;
             if (b.count > kPatternFields) item.shape = &shape;
+            break;
+        }
+        if (b.code == FSIM_MODE_INTERCEPT) { // (ABI 1.44: likewise)
+            ok = toIntercept(b.fields, b.count, intercept);
+            item.intercept = &intercept;
             break;
         }
         ok = (b.code == FSIM_MODE_HSA || b.code == FSIM_MODE_PATTERN || b.code == FSIM_MODE_MUST_FLY) && toMode(b.code, b.fields, b.count, c, &shape),
@@ -2019,6 +2055,7 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
         std::vector<fsim::control::OpLine> lines(count);          // (and corridor)
         std::vector<fsim::control::OpVolume> volumes(count);      // (and volume)
         std::vector<fsim::control::MarshallCommand> marshalls(count); // (each marshall's, likewise)
+        std::vector<fsim::control::InterceptCommand> intercepts(count); // (and each intercept's)
         std::vector<fsim::control::CurveShape> curveShapes(count); // (each curve's likewise)
         routes.reserve(count), curves.reserve(count), nurbses.reserve(count), loiterses.reserve(count), stateses.reserve(count), pathses.reserve(count);
         brancheses.reserve(count), terminatorses.reserve(count);
@@ -2035,7 +2072,7 @@ FSIM_API int fsim_vehicle_submit_batch(fsim_world* world, uint32_t id, const fsi
             std::vector<fsim::control::RouteBranch>& branches = brancheses.emplace_back();
             std::vector<fsim::control::RouteTerminator>& terminators = terminatorses.emplace_back();
             if (!fromBatch(world, b, item, route, curve, nurbs, shapes[i], curveShapes[i], loiters, states, paths, branches, terminators, zones[i],
-                           lines[i], volumes[i], marshalls[i]))
+                           lines[i], volumes[i], marshalls[i], intercepts[i]))
                 return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_submit_batch: item " + std::to_string(i) + " is malformed");
             item.waypoints = route, item.segments = curve, item.nurbs = nurbs, item.loiters = loiters, item.states = states, item.paths = paths;
             item.branches = branches, item.terminators = terminators;
@@ -2099,8 +2136,9 @@ FSIM_API int fsim_vehicle_store_task(fsim_world* world, uint32_t id, uint64_t ta
         fsim::control::OpLine line;
         fsim::control::OpVolume volume;
         fsim::control::MarshallCommand marshall;
+        fsim::control::InterceptCommand intercept;
         if (!fromBatch(world, *command, item, route, curve, nurbs, shape, curveShape, loiters, states, paths, branches, terminators, zone, line,
-                       volume, marshall) ||
+                       volume, marshall, intercept) ||
             !std::holds_alternative<fsim::control::Command>(item.command))
             return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_store_task: a flight or guidance command, whole, is kept");
         fsim::control::TaskRepetition repetition;
@@ -2187,6 +2225,12 @@ fsim_batch_command setpointOut(fsim_world* world) {
         double* shaped[PatternShape::kFields];
         r.setpoint.shape.fields(shaped);
         for (double* f : shaped) r.fields.push_back(*f);
+    } else if (r.setpoint.intercept) { // (its 5; the plan's route it flies, as laid, in its waypoints and paths: ABI 1.44)
+        b.kind = FSIM_BATCH_MODE, b.code = FSIM_MODE_INTERCEPT;
+        InterceptCommand ic = *r.setpoint.intercept;
+        double* slots[kMaxCommandFields];
+        const std::size_t n = interceptFields(ic, slots);
+        for (std::size_t i = 0; i < n; ++i) r.fields.push_back(*slots[i]);
     } else if (const auto* support = std::get_if<SupportCommand>(&r.setpoint.command)) {
         b.kind = FSIM_BATCH_SUPPORT, b.code = static_cast<int32_t>(support->index());
         supportFields(*support, r.fields);
@@ -2350,6 +2394,40 @@ FSIM_API void fsim_route_plan_init(fsim_route_plan* plan) {
     plan->route.kind = FSIM_BATCH_ROUTE, plan->route.code = FSIM_MODE_ROUTE;
 }
 
+FSIM_API void fsim_intercept_status_init(fsim_intercept_status* status) {
+    if (!status) return;
+    std::memset(status, 0, sizeof *status);
+    status->struct_size = sizeof *status;
+    const double none = std::numeric_limits<double>::quiet_NaN();
+    status->joined = status->laid = -1;
+    status->join_latitude_rad = status->join_longitude_rad = none;
+    for (fsim_segment_status* g : {&status->previous, &status->current, &status->next}) {
+        g->point = -1;
+        g->capture_time_s = g->capture_distance_m = g->loiter_end_s = g->heading_rad = g->along_ms = g->across_ms = none;
+    }
+}
+
+FSIM_API int fsim_activity_intercept_status(fsim_world* world, fsim_activity_id activity, fsim_intercept_status* out) {
+    if (!world || !out) return FSIM_INVALID_ARGUMENT;
+    fsim::control::InterceptStatus s;
+    if (!world->world.interceptStatus(activity, s))
+        return absent(FSIM_INVALID_ARGUMENT, "fsim_activity_intercept_status: no route intercept " + std::to_string(activity));
+    fsim_intercept_status c;
+    fsim_intercept_status_init(&c);
+    c.execution = static_cast<int32_t>(s.execution), c.plan_id = s.plan, c.joined = s.joined, c.laid = s.laid;
+    c.join_latitude_rad = s.joinLatitudeRad, c.join_longitude_rad = s.joinLongitudeRad;
+    c.has_previous = s.hasPrevious ? 1 : 0, c.has_current = s.hasCurrent ? 1 : 0, c.has_next = s.hasNext ? 1 : 0;
+    auto segment = [](const fsim::control::SegmentStatus& g, fsim_segment_status& o) {
+        o.path_id = g.path, o.point_id = g.pointId, o.point = g.point, o.loiter = g.loiter ? 1 : 0, o.orbits = g.orbits;
+        o.capture_time_s = g.captureTimeS, o.capture_distance_m = g.captureDistanceM, o.loiter_end_s = g.loiterEndS;
+        o.heading_rad = g.headingRad, o.along_ms = g.alongMs, o.across_ms = g.acrossMs;
+    };
+    if (s.hasPrevious) segment(s.previous, c.previous);
+    if (s.hasCurrent) segment(s.current, c.current);
+    if (s.hasNext) segment(s.next, c.next);
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
 FSIM_API void fsim_plan_status_init(fsim_plan_status* status) {
     if (!status) return;
     std::memset(status, 0, sizeof *status);
@@ -2475,10 +2553,11 @@ const char* planFromC(fsim_world* world, const fsim_route_plan& plan, fsim::cont
     OpLine line;
     OpVolume volume;
     MarshallCommand marshall;
+    InterceptCommand intercept;
     const Command* c = nullptr;
     if (plan.route.kind != FSIM_BATCH_ROUTE ||
         !fromBatch(world, plan.route, item, p.waypoints, curve, nurbs, shape, curveShape, p.loiters, p.states, p.paths, p.branches, p.terminators, zone,
-                   line, volume, marshall) ||
+                   line, volume, marshall, intercept) ||
         !(c = std::get_if<Command>(&item.command)) || !std::holds_alternative<RouteCommand>(*c))
         return "its route cannot be read";
     if (!toPointMetadata(plan.points, plan.point_count, p.pointMetadata) || !toPathMetadata(plan.paths, plan.path_count, p.pathMetadata))

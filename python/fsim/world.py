@@ -1008,6 +1008,30 @@ class VolumeShape(enum.IntEnum):
     GEOCENTRIC = 6
 
 
+class InterceptMethod(enum.IntEnum):
+    """How a route intercept joins its plan's route (A-GRA's MA_RouteInterceptEnum; docs/flight-autonomy.md, 4.47); left out,
+    at the plan's beginning."""
+    DISCRETE = 0           #: at the end point nearest the aircraft, flown to directly
+    SHORTEST_DISTANCE = 1  #: at the point of the route nearest it: the foot of the perpendicular on a leg, or a leg's end
+    SOONEST = 2            #: at the point of the route it reaches first, turning from its track
+
+
+SegmentStatus = collections.namedtuple(
+    "SegmentStatus", "path_id point point_id capture_time_s capture_distance_m loiter orbits loiter_end_s heading_rad along_ms across_ms")
+SegmentStatus.__doc__ = ("A segment of the plan a route intercept flies (A-GRA's SegmentEstimateType; docs/flight-autonomy.md, 4.47): "
+                         "the leg into its end point - its path's id, its end point's index and id, when it is estimated to reach "
+                         "that point and how far along the route (the previous: when it did, 0), whether a loiter flies there, its "
+                         "orbits completed and when it will be left, and the segment's heading from the point before with the "
+                         "aircraft's ground velocity along it and across it (+ right). NaN where not known.")
+
+InterceptStatus = collections.namedtuple("InterceptStatus", "plan_id execution joined laid join_latitude_rad join_longitude_rad previous current next")
+InterceptStatus.__doc__ = ("A route intercept's status (A-GRA's MA_RoutePlanInterceptStatusType; docs/flight-autonomy.md, 4.47): its "
+                           "plan and its fsim.PlanExecution; the segment it ``joined`` (its end point's index), the point ``laid`` "
+                           "into the route for the join (-1 none) and its place; its ``previous``, ``current`` and ``next`` "
+                           "fsim.SegmentStatus, each None where it has none. Flying to the point laid in, the current segment is "
+                           "the leg it joins.")
+
+
 class ZoneShape(enum.IntEnum):
     """An operational zone's shape (A-GRA's AreaChoiceType; docs/flight-autonomy.md, 4.43)."""
     POLYGON = 0
@@ -1019,7 +1043,7 @@ class ZoneShape(enum.IntEnum):
 #: The Vehicle Interface's modes (docs/vehicle-interface.md): their fixed-size setpoints' fields, in order. HOLD leaves
 #: one out: a NEW continues what a live hsa commanded (else what the aircraft flies now) and takes a route's, a
 #: pattern's or a curve's default; an UPDATE keeps it.
-MODE_KINDS = ("hsa", "route", "pattern", "curve", "must_fly", "marshall")
+MODE_KINDS = ("hsa", "route", "pattern", "curve", "must_fly", "marshall", "intercept")
 MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference", "speed_optimization",
                        "direction_reference"),
                "route": ("projection", "repeat", "end", "start"),
@@ -1036,15 +1060,17 @@ MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", 
 #: an altitude stacked marshall's (docs/flight-autonomy.md, 4.46): its own 13, then its pattern's shape's, as a pattern's
 MODE_FIELDS["marshall"] = ("pattern", "latitude_rad", "longitude_rad", "altitude_m", "altitude_reference", "radius_m", "clockwise", "speed",
                            "speed_reference", "duration_s", "altitude_min_m", "altitude_max_m", "separation_m") + MODE_FIELDS["pattern"][13:]
+#: a route intercept's (4.47): the plan, the path it joins, its method, its earliest and latest segments
+MODE_FIELDS["intercept"] = ("plan", "path", "method", "earliest", "latest")
 MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 35, "curve": (HOLD,) * 20, "must_fly": (HOLD,) * 10,
-                 "marshall": (HOLD,) * 35}
+                 "marshall": (HOLD,) * 35, "intercept": (HOLD,) * 5}
 _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "speed_optimization": SpeedOptimization,
                "direction_reference": DirectionReference,
                "projection": Projection, "end": EndBehavior,
                "turn": TurnType, "kind": EndPointKind, "waypoint_type": WaypointType, "pattern": PatternKind, "turn_type": HoldTurn, "hold_entry": HoldEntry, "hold_context": HoldContext,
                "climb_optimization": ClimbOptimization,
                "frame_rotation": FrameRotation, "frame_offsets": FrameOffsets, "point_rotation": FrameRotation, "point_offsets": FrameOffsets,
-               "point_z": CurveZ, "terminator": PathTerminator, "location": MustFlyLocation}
+               "point_z": CurveZ, "terminator": PathTerminator, "location": MustFlyLocation, "method": InterceptMethod}
 
 Waypoint = collections.namedtuple(
     "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id "
@@ -1633,6 +1659,11 @@ class Activity:
         its flyout curve, fsim.agra.flyout_curve). A waiting one's is as given. None once it is not live."""
         return self.world.activity_setpoint(self.id)
 
+    def intercept_status(self):
+        """A route intercept's status (fsim.InterceptStatus; A-GRA's MA_RoutePlanInterceptStatusType): its plan and its
+        execution, where it joined, its previous, current and next segments. None for any other activity."""
+        return self.world.intercept_status(self.id)
+
     def end_points(self, max=16):
         """Where it flies to (A-GRA's ActualEndPoint): the point it flies to now, then those after it - a route's
         waypoints (a repeating route's round again), a curve's segment ends, a pattern's fix, the position level's
@@ -1672,14 +1703,14 @@ def _options(**given):
 
 class BatchCommand:
     """One command of Vehicle.submit_batch: a submit method's name ("submit", "submit_behavior", "submit_support",
-    "submit_hsa", "submit_pattern", "submit_must_fly", "submit_marshall", "submit_route", "submit_curve") and the arguments it
-    takes."""
+    "submit_hsa", "submit_pattern", "submit_must_fly", "submit_marshall", "submit_intercept", "submit_route", "submit_curve") and
+    the arguments it takes."""
 
     __slots__ = ("method", "args", "kwargs")
     _KINDS = {"submit": 0, "submit_behavior": 1, "submit_support": 2, "submit_hsa": 3, "submit_pattern": 3, "submit_must_fly": 3,
-              "submit_marshall": 3, "submit_route": 4, "submit_curve": 5}
+              "submit_marshall": 3, "submit_intercept": 3, "submit_route": 4, "submit_curve": 5}
 
-    def __init__(self, method, *args, **kwargs):
+    def __init__(self, method, /, *args, **kwargs):  # (positional alone: an intercept's field is its `method`)
         if method not in self._KINDS:
             raise ValueError("a batch command is one of %s" % ", ".join(sorted(self._KINDS)))
         self.method, self.args, self.kwargs = method, args, dict(kwargs)
@@ -1711,7 +1742,7 @@ class BatchCommand:
         if self.method == "submit_support":
             what = args.pop(0)
             return (kind, SUPPORT_KINDS.index(what), _row(what, args, k), None, None, None, options), (what, source, validate, controller)
-        if self.method in ("submit_hsa", "submit_pattern", "submit_must_fly", "submit_marshall"):
+        if self.method in ("submit_hsa", "submit_pattern", "submit_must_fly", "submit_marshall", "submit_intercept"):
             mode = self.method[len("submit_"):]
             if "target" in k:  # (a must fly's vehicle as itself or its id)
                 k["target"] = getattr(k["target"], "id", k["target"])
@@ -2003,6 +2034,21 @@ class Vehicle:
                                 int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window,
                                                             override_rejection, controller))
         return self._answer(r, "marshall", source, validate_only, controller)
+
+    def submit_intercept(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
+                         interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,
+                         override_rejection=False, controller=0, **fields):
+        """NEW for fsim.guidance.intercept, A-GRA's route intercept (docs/flight-autonomy.md, 4.47): a route ``plan`` the
+        vehicle keeps (plan_command's, by its id), joined where ``method`` chooses from where the aircraft is - left out, its
+        beginning; fsim.InterceptMethod or "discrete" (the nearest end point), "shortest_distance" (the nearest point of the
+        route), "soonest" (the point it reaches first, turning from its track) - between its ``earliest`` and ``latest``
+        segments (their end points' indices) and on ``path`` (its id) where given, and flown from there, the plan activated by
+        it. Its status: Activity.intercept_status(). It takes no UPDATE: a new one replaces it; never a task. The command
+        envelope as submit's."""
+        r = self._h.submit_mode(self.id, MODE_KINDS.index("intercept"), _row("intercept", values, fields), int(source), None, int(range),
+                                int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window,
+                                                            override_rejection, controller))
+        return self._answer(r, "intercept", source, validate_only, controller)
 
     def submit_must_fly(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
                         interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,
@@ -2761,6 +2807,14 @@ class World:
         command it (Activity.setpoint); None for one not live."""
         t = self._h.activity_setpoint(activity.id if isinstance(activity, Activity) else int(activity))
         return None if t is None else _setpoint(t)
+
+    def intercept_status(self, activity):
+        """A route intercept's status (by Activity or id; Activity.intercept_status), or None for any other activity."""
+        t = self._h.intercept_status(activity.id if isinstance(activity, Activity) else int(activity))
+        if t is None:
+            return None
+        segments = [None if g is None else SegmentStatus(*g) for g in t[6:9]]
+        return InterceptStatus(t[0], PlanExecution(t[1]), t[2], t[3], t[4], t[5], *segments)
 
     def end_points(self, activity, max=16):
         """Where a live activity (by Activity or id) flies to, ``max`` points at most (Activity.end_points)."""
