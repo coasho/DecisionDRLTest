@@ -162,6 +162,27 @@ class FleetTwinTest(unittest.TestCase):
                         p.v.submit_support("gear", 0.0)
                     self.assertEqual(refused.exception.reason, "unavailable")
 
+    def test_rotorcraft_top_speed(self):
+        """A rotorcraft's airspeed beyond its top level speed (docs/flight-autonomy.md, 4.48): refused under reject, else
+        clamped to the most its performance profile gives at that altitude."""
+        w = make_world()
+        for p in fleet(w):
+            if not p.rotor:
+                continue
+            for most in p.v.performance_profile("hsa_csa").max_airspeed:
+                with self.subTest(aircraft=p.kind, altitude=most.altitude_msl_m):
+                    asked = dict(heading_rad=0.0, speed=2.0 * most.value, speed_reference="true_airspeed", altitude_m=most.altitude_msl_m)
+                    with self.assertRaises(fsim.Rejected) as refused:
+                        p.v.submit_hsa(range=fsim.RangePolicy.REJECT, **asked)
+                    self.assertEqual((refused.exception.reason, refused.exception.index, refused.exception.constraint),
+                                     ("performance_limit", 2, "max_airspeed"))
+                    a = p.v.submit_hsa(**asked)
+                    self.assertTrue(a.clamped)
+                    held = w.last_command_details()[1][-1]  # (a helicopter's never-exceed speed first)
+                    self.assertEqual(held.constraint, "max_airspeed")
+                    self.assertLess(abs(held.adjusted - most.value), 1e-6 * most.value)
+                    a.cancel()
+
     def test_flight_cases(self):
         """Velocity, HSA, loiter, a route plan and formation on each class, to the C++ test's thresholds."""
         # the velocity level: its heading, height and speed (a rotorcraft: its point)

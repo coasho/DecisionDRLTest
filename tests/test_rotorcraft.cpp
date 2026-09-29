@@ -8,6 +8,7 @@
 // reaches 90 % of its target, or it overshoots by more than half.
 #include "control/Adapter.h"
 #include "fsim/Control.h"
+#include "fsim/GuidanceModes.h"
 #include "session/World.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -360,5 +361,63 @@ TEST_CASE("rotorcraft: two worlds fly the same commands to the same bits", "[rot
         }
         if (run == 0) first = bits;
         else CHECK(bits == first);
+    }
+}
+
+TEST_CASE("rotorcraft: asked beyond its top speed and flown so, a multirotor's velocity loop holds its fastest at its tilt, "
+          "and comes back asked less",
+          "[rotorcraft]") {
+    // (ADR-29 FA-3e's open finding, the Crazyflie diverging asked for 25 and 30 m/s: not its loops - that repro let it fall
+    // for 5 s under the neutral vehicle default, and it struck the ground at 35 m/s, the crash docs/rotorcraft.md section 7
+    // names. Settled, unchecked - held to nothing, as a trainer's command is flown - it saturates at its tilt and holds
+    // its fastest along its nose, a little past its tables' top: the Crazyflie 18.30 m/s against 18.0, the IRIS+ 13.23 against
+    // 13.09, their heights within 0.1 mm)
+    session::World w(options("rotorcraft-saturated"));
+    const double dt = w.dt() * w.frameSkip();
+    auto nose = [](const sim::VehicleState& s) { return s.airspeedTrueMs * std::cos(s.alphaRad) * std::cos(s.betaRad); };
+    struct Case {
+        const char* type;
+        double askedMs;
+    };
+    for (const Case c : {Case{"cf2", 30.0}, Case{"iris", 40.0}}) {
+        INFO(c.type);
+        const auto id = w.createVehicle(spec(std::string(c.type) + "-saturated", c.type, 0.0));
+        REQUIRE(id != 0);
+        REQUIRE(w.submit(id, hoverHere()).accepted());
+        w.step(static_cast<unsigned>(std::lround(10.0 / dt)));
+        const sim::VehicleState start = *w.vehicleState(id);
+        const double top = topTasMs(&w.profile(id)->tables, start.altitudeMslM, start.fuelKg), tilt = w.performance(id)->maxTiltRad;
+        REQUIRE(std::isfinite(top));
+        HsaCommand fast;
+        fast.headingRad = 0.0, fast.speed = c.askedMs, fast.speedReference = static_cast<double>(SpeedReference::TrueAirspeed);
+        fast.altitudeM = start.altitudeMslM;
+        CommandOptions unchecked;
+        unchecked.range = RangePolicy::None;
+        const CommandResult r = w.submit(id, fast, unchecked);
+        REQUIRE(r.accepted());
+        CHECK((r.flags & kClamped) == 0);
+        double fastest = 0.0, worstHeightM = 0.0;
+        const auto n = static_cast<unsigned>(std::lround(90.0 / dt));
+        for (unsigned k = 0; k < n; ++k) {
+            w.step();
+            const sim::VehicleState& s = *w.vehicleState(id);
+            REQUIRE_FALSE(s.diverged);
+            if (static_cast<double>(k) * dt < 60.0) continue; // (on its way up to it)
+            fastest = std::max(fastest, nose(s));
+            worstHeightM = std::max(worstHeightM, std::abs(s.altitudeMslM - start.altitudeMslM));
+        }
+        const sim::VehicleState& held = *w.vehicleState(id);
+        INFO("its fastest " << fastest << " m/s along the nose, its tables' top " << top << ", pitched " << held.eulerRad[1] / kDeg << " deg");
+        CHECK(w.activity(r.activity)->state == ActivityState::Active);
+        CHECK(std::abs(fastest - top) < 0.03 * top);
+        CHECK(worstHeightM < 0.5);
+        CHECK(std::abs(held.eulerRad[1] + tilt) < 1.0 * kDeg); // nose down at its tilt
+        // asked half its top, it comes back to it
+        HsaCommand slower;
+        slower.speed = 0.5 * top;
+        REQUIRE(w.update(r.activity, slower).accepted());
+        w.step(static_cast<unsigned>(std::lround(30.0 / dt)));
+        CHECK(std::abs(nose(*w.vehicleState(id)) - 0.5 * top) < 0.02 * top);
+        REQUIRE(w.removeVehicle(id));
     }
 }

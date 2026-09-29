@@ -714,6 +714,36 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
                 CHECK(std::abs(flown - best) < std::max(0.05 * best, 0.5)); // (the Crazyflie's best endurance: its hover)
             });
     }
+    // beyond its top level speed (docs/flight-autonomy.md, 4.48): a rotorcraft's airspeed is held to its tables' top at the
+    // altitude and weight - refused under Reject, clamped to it otherwise - and it flies it there along its nose, its height
+    // held (a wing's is held to its envelope and profile, as before)
+    std::map<std::uint32_t, double> topMs;
+    run("fsim.guidance.hsa", 0.0,
+        [&](const Plane& p) {
+            if (!p.rotor) return false;
+            topMs[p.id] = topTasMs(&w.profile(p.id)->tables, p.start.altitudeMslM, w.vehicleState(p.id)->fuelKg);
+            REQUIRE(std::isfinite(topMs[p.id]));
+            HsaCommand h;
+            h.headingRad = p.start.eulerRad[2], h.speed = 1.5 * topMs[p.id], h.speedReference = static_cast<double>(SpeedReference::TrueAirspeed);
+            CommandOptions reject;
+            reject.range = RangePolicy::Reject, reject.validateOnly = true;
+            const CommandResult refused = w.submit(p.id, h, reject);
+            CHECK((refused.reason == Reason::PerformanceLimit && refused.index == 2 && refused.constraint == Constraint::MaxAirspeed));
+            const CommandResult r = w.submit(p.id, h);
+            CHECK((r.accepted() && (r.flags & kClamped) != 0 && r.constraint == Constraint::MaxAirspeed));
+            return r.accepted();
+        },
+        secs(0.0, 240.0), none,
+        [&](const Plane& p, const Lows&) {
+            const auto& s = *w.vehicleState(p.id);
+            const double flown = s.airspeedTrueMs * std::cos(s.alphaRad) * std::cos(s.betaRad);
+            INFO("flown " << flown << " m/s along the nose, its top " << topMs[p.id] << ", " << s.altitudeMslM - p.start.altitudeMslM << " m off its height");
+            // (the worst: the IRIS+ and the UH-1H 0.011 % short of it, every height within 2 mm. On the way, the Crazyflie's
+            // velocity loop takes over two minutes to it, its integral carrying the whole of its tilt there, and the UH-60A
+            // sags 96 m at full collective, back on its height 70 s after the command)
+            CHECK(std::abs(flown - topMs[p.id]) < 0.01 * topMs[p.id]);
+            CHECK(std::abs(s.altitudeMslM - p.start.altitudeMslM) < 0.5);
+        });
     // a barometric altitude (ADR-29 FA-4b, HSA-07): at the standard setting the altimeter reads the geopotential height;
     // set 20 hPa low, it reads 167 m less, and an hsa as high again as the climb case climbs on it, to its isobar
     std::map<std::uint32_t, double> onAltimeter;

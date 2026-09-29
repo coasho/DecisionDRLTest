@@ -341,10 +341,13 @@ void CapabilityHost::optimise(double& speed, double& reference, double optimizat
     speed = std::isfinite(best) ? best : state.airspeedTrueMs; // (above the altitudes flown: as it flies)
 }
 
-void CapabilityHost::limitHsa(HsaCommand& c, CheckLog& log) const noexcept { limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, log, 2, 4); }
+void CapabilityHost::limitHsa(HsaCommand& c, const sim::VehicleState& state, CheckLog& log) const noexcept {
+    limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, state, log, 2, 4);
+}
 
-void CapabilityHost::limitFlight(double& speed, double speedReference, double& altitude, double altitudeReference, CheckLog& log, std::int16_t speedIndex,
-                                 std::int16_t altitudeIndex, std::int16_t speedField, std::int16_t altitudeField) const noexcept {
+void CapabilityHost::limitFlight(double& speed, double speedReference, double& altitude, double altitudeReference, const sim::VehicleState& state,
+                                 CheckLog& log, std::int16_t speedIndex, std::int16_t altitudeIndex, std::int16_t speedField,
+                                 std::int16_t altitudeField) const noexcept {
     const Performance& f = performance_;
     // the altitude: under the ceiling (barometric: what the altimeter reads there); above ground, above it
     const bool barometric = altitudeReference == static_cast<double>(AltitudeReference::Barometric);
@@ -356,31 +359,40 @@ void CapabilityHost::limitFlight(double& speed, double speedReference, double& a
     auto limit = [&](double most, bool above, Constraint constraint) { bound(speed, most, above, speedIndex, constraint, log, speedField); };
     const auto reference = static_cast<SpeedReference>(static_cast<int>(orHold(speedReference, 0.0)));
     const double h = isHold(altitude) || aboveGround(altitudeReference) ? 0.0 : barometric ? barometricMslM(config_->altimeter, altitude) : altitude;
-    switch (reference) {
-    case SpeedReference::GroundSpeed:
+    if (reference == SpeedReference::GroundSpeed) {
         if (f.hovers) limit(f.maxGroundSpeedMs, true, Constraint::MaxAirspeed);
         return;
+    }
+    // the fastest through the air: a wing's profile's; a rotorcraft's, its tables' top level speed there at its weight now
+    // (along its nose, as it flies an airspeed: docs/flight-autonomy.md, 4.48); fmin passes over the NaN of one not known
+    const double most = f.hovers ? std::fmin(f.maxTasMs, topTasMs(config_->tables, h, state.fuelKg)) : f.maxTasMs;
+    switch (reference) {
     case SpeedReference::CalibratedAirspeed:
         limit(f.minCasMs, false, Constraint::MinAirspeed);
         limit(f.maxCasMs, true, Constraint::MaxAirspeed);
-        limit(isa::calibratedFromTrue(f.maxTasMs, h), true, Constraint::MaxAirspeed);
+        limit(isa::calibratedFromTrue(most, h), true, Constraint::MaxAirspeed);
         return;
     case SpeedReference::TrueAirspeed:
         limit(isa::trueFromCalibrated(f.minCasMs, h), false, Constraint::MinAirspeed);
         limit(isa::trueFromCalibrated(f.maxCasMs, h), true, Constraint::MaxAirspeed);
         limit(f.maxMach * isa::speedOfSound(h), true, Constraint::MaxAirspeed);
-        limit(f.maxTasMs, true, Constraint::MaxAirspeed);
+        limit(most, true, Constraint::MaxAirspeed);
         return;
     case SpeedReference::Mach: {
         const double a = isa::speedOfSound(h);
         limit(isa::trueFromCalibrated(f.minCasMs, h) / a, false, Constraint::MinAirspeed);
         limit(isa::trueFromCalibrated(f.maxCasMs, h) / a, true, Constraint::MaxAirspeed);
         limit(f.maxMach, true, Constraint::MaxAirspeed);
-        limit(f.maxTasMs / a, true, Constraint::MaxAirspeed);
+        limit(most / a, true, Constraint::MaxAirspeed);
         return;
     }
     default: return;
     }
+}
+
+void CapabilityHost::limitVelocity(VelocityCommand& c, const sim::VehicleState& state, CheckLog& log) const noexcept {
+    // (its field 0; a velocity over the ground, north and east, is not an airspeed)
+    bound(c.airspeedMs, topTasMs(config_->tables, state.altitudeMslM, state.fuelKg), true, 0, Constraint::MaxAirspeed, log);
 }
 
 Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log,
@@ -547,7 +559,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     for (std::uint32_t i = 0; i < p.count; ++i) {
         Waypoint& w = p.points[i];
         const auto index = static_cast<std::int16_t>(i);
-        limitFlight(w.speed, w.speedReference, w.altitudeM, w.altitudeReference, log, index, index, 4, 2);
+        limitFlight(w.speed, w.speedReference, w.altitudeM, w.altitudeReference, state, log, index, index, 4, 2);
         // its turn's bank within the aircraft's (a rotorcraft's, its tilt); a fly-by's radius given, no tighter than that bank's
         bound(w.maxBankRad, hovers ? f.maxTiltRad : f.maxBankRad, true, index, Constraint::MaxOrientation, log, 7);
         if (!isHold(w.turnRadiusM) && w.turn == static_cast<double>(TurnType::FlyBy)) {
@@ -587,7 +599,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         for (std::uint32_t k = 0; k < p.loiterCount; ++k) {
             RouteLoiter& l = p.loiters[k];
             if (l.point >= p.count) continue; // (on a point it does not fly: kept as given - 4.36)
-            limitPattern(l.pattern, l.shape, log, radiusFrom[k], static_cast<std::int16_t>(std::min<std::uint32_t>(l.point, 0x7FFF)));
+            limitPattern(l.pattern, l.shape, state, log, radiusFrom[k], static_cast<std::int16_t>(std::min<std::uint32_t>(l.point, 0x7FFF)));
             if (route::shapeFault(l.pattern, l.shape) >= 0) return point(l.point, Reason::InvalidWaypoint);
         }
     }
@@ -740,11 +752,12 @@ Reason CapabilityHost::checkShape(const PatternCommand& c, const PatternShape& s
     return Reason::None;
 }
 
-void CapabilityHost::limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, std::int16_t radiusFrom, std::int16_t point) const noexcept {
+void CapabilityHost::limitPattern(PatternCommand& c, PatternShape& shape, const sim::VehicleState& state, CheckLog& log, std::int16_t radiusFrom,
+                                  std::int16_t point) const noexcept {
     // (a route's loiter's: named by its point, its field after the point's - docs/flight-autonomy.md, 4.31)
     auto at = [point](std::int16_t field) { return point < 0 ? field : point; };
     auto of = [point](std::int16_t field) { return point < 0 ? std::int16_t{-1} : static_cast<std::int16_t>(kLoiterField + field); };
-    limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, log, at(9), at(3), of(9), of(3));
+    limitFlight(c.speed, c.speedReference, c.altitudeM, c.altitudeReference, state, log, at(9), at(3), of(9), of(3));
     // a radius the aircraft can fly at its speed: a wing's at its full bank, a rotorcraft's a metre
     const Performance& f = performance_;
     double least = 1.0, v = 0.0;
@@ -1260,8 +1273,10 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
             CommandResult why;
             if (const Reason r = admit(*b, state, performance_, why); r != Reason::None) log.find(r, why.index, why.constraint, why.from, why.to);
         }
-    if (hsa && checked) limitHsa(*hsa, log);
-    if (pattern && checked) limitPattern(*pattern, patternShape_, log, radiusFrom);
+    if (hsa && checked) limitHsa(*hsa, state, log);
+    if (pattern && checked) limitPattern(*pattern, patternShape_, state, log, radiusFrom);
+    if (checked && performance_.hovers) // a rotorcraft's airspeed at the velocity level too (docs/flight-autonomy.md, 4.48)
+        if (auto* velocity = std::get_if<VelocityCommand>(&setpoint)) limitVelocity(*velocity, state, log);
     if (pattern) // two circles that fit, their radii as limited (docs/flight-autonomy.md, 4.23)
         if (const int field = route::shapeFault(*pattern, patternShape_); field >= 0) {
             detail.index = static_cast<std::int16_t>(field);
@@ -1839,7 +1854,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
             Command checked = merged;
             if (const Reason why = catalog_->check(record.capability, checked, log); why != Reason::None) return about(rejected(why, activity), result);
             merged = std::get<HsaCommand>(checked);
-            limitHsa(merged, log);
+            limitHsa(merged, state, log);
             checkTerrain(Command(merged), state, log);
             if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
             if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;
@@ -1855,6 +1870,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
     } else {
         Command checked = setpoint; // no heap data: a behaviour takes no UPDATE
         if (const Reason why = catalog_->check(record.capability, checked, log); why != Reason::None) return about(rejected(why, activity), result);
+        if (auto* velocity = std::get_if<VelocityCommand>(&checked); velocity && performance_.hovers) limitVelocity(*velocity, state, log);
         if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);
         assignSetpoint(slot.command, checked);
         if (result.flags & kClamped) slots_[s].flags |= kActivityClamped;

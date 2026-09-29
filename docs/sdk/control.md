@@ -121,6 +121,7 @@ vehicle's are `TemporarilyUnavailable` until it is reset.
 **Updates and parameters.**
 - `update` is the per-step path of an activity. It writes the new setpoint, checked like its NEW was, and allocates nothing. A behaviour's parameters are heap data, so a behaviour takes no UPDATE; a new target is a new `submit`.
 - Range policies: by default a value outside its advertised range is clamped (`RangePolicy::Clamp`, flagged `kClamped`). `RangePolicy::Reject` refuses the command instead. A required field left at `kHold` (a position's latitude) is refused as `invalid_parameter`.
+- A rotorcraft's velocity-level airspeed is held to its performance tables' top level speed at the altitude and weight now, as its guidance modes' airspeeds are (`max_airspeed`; [flight-autonomy.md](../flight-autonomy.md), 4.48). `RangePolicy::None` flies it as asked: the velocity loop tilts as far as it may. A multirotor then holds the fastest that gives; a helicopter flies past its top and strays from its height.
 
 **Activities.**
 - An activity is `Pending` until the next step has flown it, then `Active`.
@@ -266,7 +267,7 @@ world.update(a, climb);
   - `optimalTasMs(tables, optimization, altitudeMslM, fuelKg)` (fsim/GuidanceModes.h) works it out; a behaviour finds the tables in `ControlContext::tables`.
   - An aircraft without tables (a stock one) refuses it `not_implemented`. A pattern takes one too.
 - **Left out.** A NEW continues what a live `hsa` it replaces commanded, else what the aircraft flies now (a rotorcraft's ground speed: a hovering one stays put). A reference given alone takes the aircraft's own value in it: `speedReference = Mach` alone holds the Mach it flies. In an UPDATE a reference needs its value.
-- **Checked** against the aircraft's performance: a speed beyond what it flies, below 1.2 times its stall speed or beyond its envelope, an altitude above its ceiling or below the ground, is clamped (flagged, with the field and the limit in the result) or, under `RangePolicy::Reject`, refused `performance_limit`.
+- **Checked** against the aircraft's performance: a speed beyond what it flies, below 1.2 times its stall speed or beyond its envelope, an altitude above its ceiling or below the ground, is clamped (flagged, with the field and the limit in the result) or, under `RangePolicy::Reject`, refused `performance_limit`. A rotorcraft's airspeed is held to its performance tables' top level speed at the altitude it flies to and its weight now (`topTasMs`, fsim/GuidanceModes.h; [flight-autonomy.md](../flight-autonomy.md), 4.48).
 - **Flown** as the vehicle flies:
   - A wing flies its heading, plus a slow trim on what its loops leave (the stock c172x's bank loop has no integral: untrimmed, its heading settled 1.6° off). For a course it flies the heading that holds it against the wind its own air data see, plus a slow trim. It flies the airspeed its reference asks, or the one that makes the ground speed along its track.
   - A rotorcraft flies its velocity over the ground along the heading or course, nose along the track. Given an airspeed, it flies along its nose, or into the wind to hold a course.

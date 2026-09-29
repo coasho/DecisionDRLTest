@@ -306,7 +306,7 @@ placement as ADR-26's step 5a (`designRotorLaws`):
 | --- | --- | --- |
 | Acceleration | `rotor_allocation` | body rates and the load factor to cyclic, pedals and collective, or to the mixer: rate loops on the identified responses, the hover trims fed forward; the load factor measured from the body's specific force (JSBSim's `Nlf` is aerodynamic only and leaves out the rotor's thrust) |
 | Attitude | `rotor_attitude` | roll and pitch attitude to rates, the heading to a yaw rate (not a bank), the thrust control passed through |
-| Velocity | `rotor_velocity` | a ground velocity - or an airspeed along the heading - to attitude within a tilt limit, the vertical speed to the thrust control, the heading held on its own; the integral's band smooth, not a hard band, which had left a dead zone. Its integral trims the whole tilt forward - the drag of a fast multirotor takes most of it (ADR-29 FA-3e: the Crazyflie's best range needs 22 of its 24 degrees, and had been flown 15 % short on half) - and half sideways, as an orbit needs |
+| Velocity | `rotor_velocity` | a ground velocity - or an airspeed along the heading - to attitude within a tilt limit, the vertical speed to the thrust control, the heading held on its own; the integral's band smooth, not a hard band, which had left a dead zone. Its integral trims the whole tilt forward - the drag of a fast multirotor takes most of it (ADR-29 FA-3e: the Crazyflie's best range needs 22 of its 24 degrees, and had been flown 15 % short on half) - and half sideways, as an orbit needs. Asked beyond what it can fly, it holds its tilt limit and the fastest that gives (the Crazyflie 18.30 m/s along its nose); a checked command is held to the tables' top level speed first ([flight-autonomy.md](flight-autonomy.md), 4.48) |
 | Position | `rotor_position` | the distance to go to a ground velocity that brings it to a stop there - what the velocity loop, a lag behind its command, can stop from - the height to a vertical speed, the heading on arrival |
 
 The cascade, the runtime and protection are unchanged: the acceleration
@@ -501,6 +501,14 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
   the ground at 40 to 50 m/s from a few hundred metres. There its legs'
   contacts throw the IRIS+ back up, and the Crazyflie diverges: a crash the
   contact model does not end.
+- **Left uncommanded in the air**: under the neutral vehicle default
+  (`VehicleDefault::Neutral`) a rotorcraft's thrust stands still and it
+  falls. A Crazyflie let go at 150 m for 5 s is at 27 m falling at 49 m/s.
+  Asked then for 10 m/s or more, it strikes the ground at 35 m/s and
+  diverges, as a spent battery's does. ADR-29 FA-3e took this for its
+  velocity loop diverging at 25 and 30 m/s
+  ([flight-autonomy.md](flight-autonomy.md), 4.48). Settle it first (a
+  velocity command, or `VehicleDefault::Hold`).
 - **Power and thrust at altitude**: the helicopters' engines give the
   design's rating (a transmission limit) at any height, and a quadrotor's
   thrust is its rotors' speed squared, whatever the air's density. None of

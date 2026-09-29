@@ -96,7 +96,7 @@ CommandResult CapabilityHost::updatePattern(std::size_t s, ActivityId activity, 
         return about(rejected(Reason::InvalidParameter, activity), result);
     }
     if (slots_[s].range != RangePolicy::None) {
-        limitPattern(merged, mergedShape, log, radiusFrom);
+        limitPattern(merged, mergedShape, state, log, radiusFrom);
         patternShape_ = mergedShape; // (the shape the terrain check walks)
         checkTerrain(Command(merged), state, log);
         if (log.refused != Reason::None) return about(rejected(log.refused, activity), result);

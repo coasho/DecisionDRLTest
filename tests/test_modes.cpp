@@ -387,3 +387,101 @@ TEST_CASE("hsa: what the aircraft cannot do is refused, or clamped and said so",
         CHECK(d->parameters.size() == 8); // (the speed optimisation: ADR-29 FA-3e; the direction reference last: FA-4d)
     }
 }
+
+TEST_CASE("a rotorcraft's airspeed is held to its tables' top level speed at the altitude and weight: clamped, or refused under Reject",
+          "[modes]") {
+    // (docs/flight-autonomy.md, 4.48: an hsa's, a pattern's, a route point's and the velocity level's, along the nose as
+    // it flies them. Before, a multirotor's airspeed was held to nothing and a helicopter's to its never-exceed speed)
+    session::World w(options("modes-rotor-top"));
+    CommandOptions reject, unchecked;
+    reject.range = RangePolicy::Reject;
+    unchecked.range = RangePolicy::None;
+    int index = 0;
+    for (const char* type : {"cf2", "iris", "uh1h", "uh60"}) {
+        INFO(type);
+        const auto v = rotor(w, type, 5.0, index++);
+        const VehicleProfile& profile = *w.profile(v);
+        REQUIRE_FALSE(profile.tables.empty());
+        const sim::VehicleState& s = *w.vehicleState(v);
+        auto top = [&](double altitudeM) { return topTasMs(&profile.tables, altitudeM, s.fuelKg); };
+        auto setpoint = [&](ActivityId id) {
+            Setpoint out;
+            REQUIRE(w.activitySetpoint(id, out));
+            return out;
+        };
+        auto commanded = [&](ActivityId id) { return std::get<Command>(setpoint(id).command); };
+        const double high = 1000.0, fast = 1.5 * top(high);
+        REQUIRE(std::isfinite(fast));
+
+        // an hsa at 1,000 m: refused, its field and the limit named; clamped, it flies the top there
+        const HsaCommand hsa = heading(0.0, fast, SpeedReference::TrueAirspeed, high);
+        CommandResult r = w.submit(v, hsa, reject);
+        CHECK(r.reason == Reason::PerformanceLimit);
+        CHECK((r.index == 2 && r.constraint == Constraint::MaxAirspeed));
+        r = w.submit(v, hsa);
+        REQUIRE(r.accepted());
+        CHECK((r.flags & kClamped) != 0);
+        CHECK(r.constraint == Constraint::MaxAirspeed);
+        CHECK(std::get<HsaCommand>(commanded(r.activity)).speed == top(high));
+        // an UPDATE beyond it, in each airspeed reference; at the top, as asked
+        HsaCommand next;
+        next.speed = fast;
+        CommandResult u = w.update(r.activity, next);
+        CHECK((u.accepted() && (u.flags & kClamped) != 0));
+        next.speedReference = code(SpeedReference::CalibratedAirspeed);
+        u = w.update(r.activity, next);
+        CHECK((u.accepted() && (u.flags & kClamped) != 0));
+        CHECK(std::abs(std::get<HsaCommand>(commanded(r.activity)).speed - isa::calibratedFromTrue(top(high), high)) < 1e-9);
+        next.speed = 0.5, next.speedReference = code(SpeedReference::Mach);
+        u = w.update(r.activity, next);
+        CHECK((u.accepted() && (u.flags & kClamped) != 0));
+        CHECK(std::abs(std::get<HsaCommand>(commanded(r.activity)).speed - top(high) / isa::speedOfSound(high)) < 1e-12);
+        next.speed = top(high), next.speedReference = code(SpeedReference::TrueAirspeed);
+        u = w.update(r.activity, next);
+        CHECK((u.accepted() && (u.flags & kClamped) == 0));
+        w.cancel(r.activity);
+
+        // a pattern at 1,000 m (its speed: field 9)
+        PatternCommand pattern;
+        pattern.speed = fast, pattern.speedReference = code(SpeedReference::TrueAirspeed), pattern.altitudeM = high;
+        r = w.submit(v, pattern, reject);
+        CHECK((r.reason == Reason::PerformanceLimit && r.index == 9 && r.constraint == Constraint::MaxAirspeed));
+        r = w.submit(v, pattern);
+        REQUIRE(r.accepted());
+        CHECK((r.flags & kClamped) != 0);
+        CHECK(std::get<PatternCommand>(commanded(r.activity)).speed == top(high));
+        w.cancel(r.activity);
+
+        // a route's second point, at its altitude
+        Waypoint first, second;
+        first.latitudeRad = s.latitudeRad + 300.0 / kEarthM, first.longitudeRad = s.longitudeRad, first.altitudeM = s.altitudeMslM;
+        second = first;
+        second.latitudeRad = s.latitudeRad + 600.0 / kEarthM, second.speed = fast, second.speedReference = code(SpeedReference::TrueAirspeed);
+        const Waypoint points[] = {first, second};
+        r = w.submit(v, RouteCommand{}, Span<const Waypoint>(points, 2), reject);
+        CHECK((r.reason == Reason::PerformanceLimit && r.index == 1 && r.constraint == Constraint::MaxAirspeed));
+        r = w.submit(v, RouteCommand{}, Span<const Waypoint>(points, 2));
+        REQUIRE(r.accepted());
+        CHECK((r.flags & kClamped) != 0);
+        const Setpoint route = setpoint(r.activity);
+        REQUIRE(route.waypoints.size() == 2);
+        CHECK(route.waypoints[1].speed == top(second.altitudeM));
+        w.cancel(r.activity);
+
+        // the velocity level: its airspeed (field 0) at the altitude now; unchecked, as asked
+        VelocityCommand velocity;
+        velocity.airspeedMs = 1.5 * top(s.altitudeMslM), velocity.verticalSpeedMs = 0.0, velocity.headingRad = 0.0;
+        r = w.submit(v, velocity, reject);
+        CHECK((r.reason == Reason::PerformanceLimit && r.index == 0 && r.constraint == Constraint::MaxAirspeed));
+        r = w.submit(v, velocity);
+        REQUIRE(r.accepted());
+        CHECK((r.flags & kClamped) != 0);
+        CHECK(std::get<VelocityCommand>(commanded(r.activity)).airspeedMs == top(s.altitudeMslM));
+        r = w.submit(v, velocity, unchecked);
+        REQUIRE(r.accepted());
+        CHECK((r.flags & kClamped) == 0);
+        CHECK(std::get<VelocityCommand>(commanded(r.activity)).airspeedMs == velocity.airspeedMs);
+        velocity.airspeedMs = kHold, velocity.northMs = velocity.eastMs = 0.0; // (held still while the next one settles)
+        REQUIRE(w.submit(v, velocity).accepted());
+    }
+}

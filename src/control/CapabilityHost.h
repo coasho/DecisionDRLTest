@@ -731,12 +731,17 @@ private:
     /// An hsa's speed and altitude against the aircraft's performance: each
     /// held to it and logged - clamped (kClamped), or with Reject a
     /// PerformanceLimit finding naming the field and the limit.
-    void limitHsa(HsaCommand& c, CheckLog& log) const noexcept;
+    void limitHsa(HsaCommand& c, const sim::VehicleState& state, CheckLog& log) const noexcept;
     /// A speed and an altitude in their references against the performance,
     /// as limitHsa: named `speedIndex` or `altitudeIndex` (a field, or a
-    /// waypoint - then `speedField` and `altitudeField`, its fields).
-    void limitFlight(double& speed, double speedReference, double& altitude, double altitudeReference, CheckLog& log, std::int16_t speedIndex,
-                     std::int16_t altitudeIndex, std::int16_t speedField = -1, std::int16_t altitudeField = -1) const noexcept;
+    /// waypoint - then `speedField` and `altitudeField`, its fields). A
+    /// rotorcraft's airspeed within its tables' top level speed at that
+    /// altitude, at its weight now (docs/flight-autonomy.md, 4.48).
+    void limitFlight(double& speed, double speedReference, double& altitude, double altitudeReference, const sim::VehicleState& state, CheckLog& log,
+                     std::int16_t speedIndex, std::int16_t altitudeIndex, std::int16_t speedField = -1, std::int16_t altitudeField = -1) const noexcept;
+    /// A rotorcraft's velocity command: its airspeed (along its nose) within
+    /// its tables' top level speed at the altitude and weight now, as limitHsa.
+    void limitVelocity(VelocityCommand& c, const sim::VehicleState& state, CheckLog& log) const noexcept;
     /// A route's options and waypoints (docs/vehicle-interface.md, 4.5 and
     /// 5.1), into the scratch plan: the options whole and in range
     /// (InvalidParameter), the waypoints completed (InvalidWaypoint); then,
@@ -888,7 +893,8 @@ private:
     /// from a bank or a turn rate, one it can fly; named by `radiusFrom`, the
     /// field the radius came from (radiusField). A route's loiter's at
     /// `point` (4.31): named by the point, its field after kLoiterField.
-    void limitPattern(PatternCommand& c, PatternShape& shape, CheckLog& log, std::int16_t radiusFrom = 5, std::int16_t point = -1) const noexcept;
+    void limitPattern(PatternCommand& c, PatternShape& shape, const sim::VehicleState& state, CheckLog& log, std::int16_t radiusFrom = 5,
+                      std::int16_t point = -1) const noexcept;
     /// The field a pattern's radius comes from, as completion takes them: its own (5), else its shape's bank (16),
     /// turn rate (25) or turn type (26); none: its own, filled in by default.
     static std::int16_t radiusField(const PatternCommand& c, const PatternShape& shape) noexcept {

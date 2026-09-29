@@ -409,7 +409,7 @@ A flight mode's performance profile (CAP-04 to CAP-15; A-GRA's MA_FlightControlM
   - A stock JSBSim aircraft's airspeeds come from its Performance at the altitude now, and it has no excess power and no burn.
   - A quadrotor has no climb.
   - A rotorcraft has no ceiling within the altitudes flown.
-- **A rotorcraft's airspeeds are along its nose**, as its loops fly an airspeed and its tables have it (4.13).
+- **A rotorcraft's airspeeds are along its nose**, as its loops fly an airspeed and its tables have it (4.13). Its most airspeed at each altitude is what its airspeed commands are held to there (4.48).
 - **A-GRA's schema has two gaps**, which the platform fills (`fsim.agra.performance_profile`):
   - MA_SpeedType, used by MaxDescentRate and ExcessPowerMaxClimb, carries an airspeed, an altitude and a weight, but no speed;
   - the VI names a maximum climb rate, which the type has no field for.
@@ -1273,6 +1273,38 @@ A-GRA's ROUTE_INTERCEPT (MA_RoutePlanInterceptType) joins a route plan the vehic
   - C ABI 1.44: `FSIM_MODE_INTERCEPT` (5 fields), through `fsim_vehicle_submit_mode`; `fsim_activity_intercept_status` (`fsim_intercept_status`, `fsim_segment_status`); `enum fsim_intercept_method`.
   - Python: `vehicle.submit_intercept(plan=, path=, method=, earliest=, latest=)`, `fsim.InterceptMethod`; `activity.intercept_status()` (`fsim.InterceptStatus`, `fsim.SegmentStatus`). A batch item's `BatchCommand("submit_intercept", ...)`: its method name is positional alone, as an intercept's field is its `method`.
 
+### 4.48 A rotorcraft's airspeed within its top level speed (after FA-3e)
+
+A rotorcraft asked for an airspeed it cannot fly is held to its fastest, as a wing is held to its envelope and its performance section's top speed. Before, a multirotor's airspeed was held to nothing, and a helicopter's only to its never-exceed speed, which lies above its top level speed (the UH-60A's 193 kt against 187).
+
+- **The bound** is the performance tables' top level speed (4.13) at the altitude the command flies at, and at the weight now: the fuel on board, weighed as a speed optimisation weighs it (`topTasMs`, fsim/GuidanceModes.h).
+  - It is along the nose, as a rotorcraft flies an airspeed and its tables have it.
+  - A calibrated airspeed or a Mach number is converted there through the standard atmosphere, as a wing's limits are.
+  - An altitude above the ground counts as sea level, as a wing's does: the tables' lowest row.
+  - Above the altitudes the tables fly (3,000 m) they give no top, and nothing bounds the airspeed. The performance profile gives no most there either.
+- **Where it applies:**
+  - an hsa's speed and a pattern's, at the altitude flown to;
+  - each route point's, at its own altitude;
+  - the velocity level's airspeed, at the altitude now.
+
+  A ground speed stays within the position loop's fastest, and a curve's speeds are ground speeds, as before.
+- **Checked as every limit is** (4.8):
+  - under Clamp, held to the bound and flagged `kClamped`, with `max_airspeed`;
+  - under Reject, refused `performance_limit` with `max_airspeed`, the field or point named, and with the suggestion of any clampable finding (4.11);
+  - unchecked (`RangePolicy::None`, as a trainer's per-step commands are), flown as asked.
+- **The performance profile agrees.** Its most airspeed at each of the tables' altitudes (4.15) is what a command there is held to, within a millionth on all four. The difference is the profile's weight, which is the flight model's.
+- **Flown at the bound**, each holds it: after four minutes all four are within 0.011 % of it and within 2 mm of their height (the fleet test). On the way:
+  - The Crazyflie's velocity loop takes over two minutes to reach it. At its top the loop's integral carries its whole tilt (4.17), and the integral is slow far from its target.
+  - The UH-60A sags 96 m at full collective and is back on its height 70 s after the command. It does the same accelerating to any speed near its top: 59 m to 90 m/s, none to 70.
+- **Unchecked beyond the bound:**
+  - A multirotor's velocity loop saturates at its tilt and holds its fastest, a little past its tables' top: the Crazyflie 18.30 m/s along its nose against 18.0, the IRIS+ 13.23 against 13.09. Asked less, it comes back.
+  - A helicopter's flies past its top and its never-exceed speed, and cannot hold its height. The UH-60A, asked 150 m/s, flew 99.7 and strayed 128 m from its height. The UH-1H, asked 100, flew 55 to 59 m/s and strayed 19.5 m.
+- **What FA-3e had taken for a divergence of the Crazyflie's loops.** Asked for 25 and 30 m/s, it had diverged; its loops were not the cause.
+  - The probe let the Crazyflie go for 5 s before the command. Under the neutral vehicle default (`VehicleDefault::Neutral`) its motors stood still, and it fell 124 m.
+  - The hsa began 27 m up, falling at 49 m/s. At full thrust it struck the ground at 35 m/s, was thrown up at 80 m/s tumbling at 50 to 70 rad/s, and diverged. This is the crash the contact model does not end ([rotorcraft.md](rotorcraft.md), 7).
+  - Asked for 10 m/s, it diverges the same way. Settled first, it flies its fastest at 25, 30, 40 and 60 m/s and never diverges.
+- **Surfaces.** C++: `topTasMs`. No C ABI or Python change: the answers are the existing `kClamped`, `performance_limit` and `max_airspeed` (Python: `Activity.clamped`, `fsim.Rejected`, `World.last_command_details`).
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -1444,7 +1476,8 @@ A-GRA's per-mode performance profile from hangar's data; energy management in ev
 - FA-3b, energy on board and the fuel report: fuel and batteries on all 35 aircraft, the navigation report (STS-07, 4.14), endurance against a flown burn and the rotorcraft's tables, done 2026-09-27 and measured in section 14;
 - FA-3c, the performance profile per mode (CAP-04 to CAP-15, 4.15), updated with the condition and configuration, done 2026-09-27 and measured in section 14;
 - FA-3d, energy management in every mode (HSA-10, CTG-04, 4.16): the fleet climb case, done 2026-09-27 and measured in section 14;
-- FA-3e, speed optimisation (HSA-05, LTR-17, 4.17) and endurance validation (VAL-03, 4.18), the first soft rejection override_rejection overrides, done 2026-09-27 and measured in section 14.
+- FA-3e, speed optimisation (HSA-05, LTR-17, 4.17) and endurance validation (VAL-03, 4.18), the first soft rejection override_rejection overrides, done 2026-09-27 and measured in section 14;
+- after FA-3e, a rotorcraft's airspeed held to its tables' top level speed (4.48), done 2026-09-27, merged 2026-09-29 and measured in section 14. It closes what FA-3e found: a Crazyflie asked beyond its top had seemed to diverge.
 
 **Supporting models:** Performance tables, fuel flow (SUB-02, SUB-03).
 
@@ -2367,6 +2400,37 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases are within −3.1 % to +2.0 %.
   - World throughput, over 7 rounds on a loaded machine (both builds' F-16C a sixth below the earlier runs'), is 98.4 to 100.0 % of FA-4c's. Protection costs at most 2.5 % (the gate: 97 %).
 - ctest: all 267 tests pass.
+
+**A rotorcraft's airspeed within its top level speed (after FA-3e; 4.48).**
+- **FA-3e's finding, flown again.** FA-3e's probe let the Crazyflie go at 150 m for 5 s, then asked it for 25 m/s; it diverged, and so it did at 30. The flights below are 60 s each, asked for 0, 10, 25, 30 and 40 m/s by heading and by course.
+  - Let go first, under the neutral default its motors stood still. The command found it 27 m up, falling at 49 m/s. The Crazyflie struck the ground at 35 m/s and diverged at every speed but 0, including 10 m/s. The IRIS+ struck it too, and flew on.
+  - Settled first on its velocity loop for 10 s, neither quadrotor diverged at any speed. Each flew the fastest its tilt gives: the Crazyflie 18.29 m/s along its nose (20.0 true), the IRIS+ 13.22.
+  - The velocity, attitude and allocation loops needed no change.
+- **The bound** (`test_modes`, and a probe at 150 m). On all four, an hsa, a pattern, a route point and a velocity command beyond the top are refused `performance_limit` with `max_airspeed` under Reject, the field or point named, and clamped to the top otherwise. An UPDATE is checked the same way.
+  - Asked at 150 m: the Crazyflie 30 m/s → 18.0; the IRIS+ 40 → 13.09; the UH-1H 100 → 64.25 (its never-exceed speed there), then 56.28; the UH-60A 150 → 100.0, then 96.28.
+  - A calibrated airspeed and a Mach number are converted at the altitude asked.
+  - The F-16C's 600 m/s is still held to its 446, and a wing's velocity level is checked as before.
+- **The performance profile** (`test_performance_profile`, and the Python twin's case): at each of the tables' four altitudes, a command asking twice the profile's most is clamped to it within a millionth, on all four.
+- **Flown at the bound.**
+  - The fleet's new case: every rotorcraft asked for 1.5 times its top is refused under Reject and clamped otherwise. After 240 s each flies within 0.011 % of its top (the IRIS+ and the UH-1H the furthest) and within 2 mm of its height.
+  - On the way there (a probe): the IRIS+ is at its top in 40 s, the Crazyflie at 90 % in 60 s and 99.9 % in 120 s, the UH-1H at 99.9 % in 140 s. The UH-60A sags 96 m at full collective and is back on its height 70 s after the command. Asked for 90 m/s it sags 59 m; asked for 70, not at all.
+- **Flown unchecked beyond it** (`test_rotorcraft`):
+  - The Crazyflie holds 18.30 m/s along its nose and the IRIS+ 13.23, pitched at their 24° and 28° tilt, within 0.1 mm of their height. Asked for half their top, each is back within 2 % of it in 30 s.
+  - The helicopters (a probe): the UH-60A asked for 150 m/s flies 99.7 and strays 128 m from its height; the UH-1H asked for 100 flies 55 to 59 m/s and strays 19.5 m.
+- **Changed flights:** the fleet's 765 flights, compared with the bound switched off and on: none of the 761 that were flown before changes. The 4 that do are the new case's.
+- **Digests:** identical to FA-4d's (ceaec64), with protection and without; no digest flight is a rotorcraft's. The allocation gate passes.
+- **A/B throughput** against FA-4d (ceaec64), built in the same worktree: 5 rounds of `micro` twice, 9 of `command` twice, 5 of `world`. A check every 15 s found no other session's tests running meanwhile.
+  - The micro cases are within −0.8 % to +1.7 %; no rise repeated, and every minimum is within 0.9 ns.
+  - The command cases are within −1.4 % to +1.5 %, a checked UPDATE +0.8 and +0.0 %.
+  - A behaviour's NEW reads +2.6 and +2.4 % (1.5 and 2.5 ns on its minimum). Its path, unchecked, meets only one test of a flag, and on FA-4c, before the rebase, the same change read it −1.8 to −2.2 %: layout, as FA-3c and FA-3e found.
+  - Layout moved a NEW further while the change was made. With the velocity level's check in `prepare()` written the other way round (the variant tested first), a level switch read +14.9 % and a behaviour's NEW +8.0 %, 10 ns on their minimums.
+  - World throughput is 99.5 to 100.3 % of FA-4d's. Protection costs at most 1.2 % (the gate: 97 %).
+- ctest: all 270 tests pass.
+- **Merged onto main at FA-8d** (2026-09-29), past FA-5a to FA-8d, which it was not written on. Its section, 4.23 there, is 4.48 here: main's 4.23 is the orbit's.
+  - The limits it gives the weight now have callers since: a route loiter's pattern (4.31) and a pattern's UPDATE, now in a file of its own. Each holds a rotorcraft's airspeed to its top as the rest do.
+  - The fleet's 1,752 flights, compared with the bound switched off and on: the 4 that change are this case's, and the other 1,748 are identical to the bit.
+  - `test_modes`, `test_performance_profile` and `test_rotorcraft` pass as they did. The digests, with protection and without, and the route and curve probes are unchanged. The allocation gate passes.
+  - ctest: all 368 tests pass.
 
 **FA-5a, A-GRA's orbit (LTR-03, LTR-05, LTR-06, LTR-07, LTR-10).**
 - **Two circles, per class** (`test_pattern_shapes`), off their geometry computed in the test (each line checked to touch both circles), once joined, over 1.2 laps:

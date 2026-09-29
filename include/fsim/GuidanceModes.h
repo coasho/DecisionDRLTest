@@ -47,6 +47,13 @@ FSIM_API double altitudeNow(AltitudeReference reference, const sim::VehicleState
 /// flown (a battery's) is that one. NaN without tables, for an optimisation
 /// code that is none, or where they give none (above the altitudes flown).
 FSIM_API double optimalTasMs(const TablesSection* tables, double optimization, double altitudeMslM, double fuelKg) noexcept;
+/// The top level speed the performance tables give at an altitude, at the
+/// weight `fuelKg` on board makes, as optimalTasMs weighs it: the fastest
+/// full power holds level there - a rotorcraft's along its nose, within the
+/// tilt its velocity loop flies (docs/flight-autonomy.md, 4.13). What bounds
+/// a rotorcraft's airspeed commands (4.48). NaN without tables, or where they
+/// give none (above the altitudes flown).
+FSIM_API double topTasMs(const TablesSection* tables, double altitudeMslM, double fuelKg) noexcept;
 
 /// "hsa": fsim.guidance.hsa, A-GRA's HSA/CSA (docs/vehicle-interface.md, 4.4).
 /// Flies a complete HsaCommand (the host resolves what a command leaves out):

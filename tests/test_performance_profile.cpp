@@ -202,3 +202,36 @@ TEST_CASE("performance profile: a rotorcraft's from the hover; a stock aircraft'
         REQUIRE(p.maxOrientation.size() == 1);
     }
 }
+
+TEST_CASE("performance profile: a rotorcraft's most airspeed at each altitude is what its commands are held to there", "[performance-profile]") {
+    // (docs/flight-autonomy.md, 4.48: the tables' top level speed at the altitude and weight bounds a rotorcraft's airspeed
+    // commands, as it is the profile's most there - within the millionth the profile's weight, the flight model's, allows)
+    session::World w(options("profile-rotor-top"));
+    CommandOptions validate;
+    validate.validateOnly = true;
+    int index = 0;
+    for (const char* type : {"cf2", "iris", "uh1h", "uh60"}) {
+        INFO(type);
+        const auto id = rotor(w, type, 5.0, index++);
+        PerformanceProfile p;
+        REQUIRE(w.performanceProfile(id, FlightMode::HsaCsa, p) == Reason::None);
+        REQUIRE(p.maxAirspeed.size() == w.profile(id)->tables.altitudeM.size());
+        for (const ProfilePoint& most : p.maxAirspeed) {
+            INFO(most.altitudeMslM << " m: " << most.value << " m/s");
+            HsaCommand h;
+            h.headingRad = 0.0, h.speed = 2.0 * most.value, h.speedReference = static_cast<double>(SpeedReference::TrueAirspeed);
+            h.altitudeM = most.altitudeMslM;
+            CommandResult r = w.submit(id, h, validate);
+            REQUIRE(r.status == CommandStatus::Valid);
+            CHECK((r.flags & kClamped) != 0);
+            const CommandDetails& d = *w.commandDetails(id);
+            REQUIRE(d.adjustmentCount >= 1);
+            const Adjustment& held = d.adjustments[d.adjustmentCount - 1u]; // (a helicopter's never-exceed speed first)
+            CHECK(held.constraint == Constraint::MaxAirspeed);
+            CHECK(std::abs(held.adjusted - most.value) <= 1e-6 * most.value);
+            h.speed = 0.999 * most.value; // (within it: as asked)
+            r = w.submit(id, h, validate);
+            CHECK((r.status == CommandStatus::Valid && (r.flags & kClamped) == 0));
+        }
+    }
+}

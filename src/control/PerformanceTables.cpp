@@ -6,6 +6,7 @@
 // that growing it moves nothing that flies.
 #include "control/Atmosphere.h"
 #include "control/Profile.h"
+#include "fsim/GuidanceModes.h"
 
 #include <algorithm>
 #include <charconv>
@@ -287,6 +288,15 @@ double tablesCeilingM(const TablesSection& t, double weightKg) noexcept {
     Corners c;
     if (!corners(t, t.altitudeM.front(), weightKg, c)) return kUnknown;
     return mix(ceilingAt(c.w), ceilingAt(std::min(c.w + 1, nw - 1)), c.fw);
+}
+
+double topTasMs(const TablesSection* tables, double altitudeMslM, double fuelKg) noexcept {
+    if (!tables || tables->empty()) return kUnknown;
+    const TablesSection& t = *tables;
+    // the weight as optimalTasMs has it: the fuel on board on the tables' weight with the tanks empty
+    double weight = t.weightKg.back();
+    if (t.weightKg.size() > 1 && std::isfinite(t.fuelCapacityKg) && std::isfinite(fuelKg)) weight += fuelKg - t.fuelCapacityKg;
+    return tablesAt(t, altitudeMslM, weight).maxTasMs;
 }
 
 } // namespace fsim::control
