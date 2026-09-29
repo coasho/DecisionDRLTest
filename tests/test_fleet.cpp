@@ -1343,7 +1343,7 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             hoverPoint[p.id] = q, hoverArrived[p.id] = kHold, hoverAfter[p.id] = 0.0;
             return r.accepted();
         },
-        [&](const Plane& p) { // there, and the last metres at its position loop's pace (the UH-1H's gain 0.053/s: its last 17 m took 65 s)
+        [&](const Plane& p) { // there, and the last metres at its loops' pace (the UH-1H's last 17 m took 65 s: rotorcraft.md, 7)
             const double bandwidth = perf(p).velocityBandwidthRadS;
             return 4.0 * 0.5 * p.scale() / std::max(p.cruiseMs, 0.1) + (std::isfinite(bandwidth) && bandwidth > 0.0 ? 20.0 / bandwidth : 150.0) + 40.0;
         },

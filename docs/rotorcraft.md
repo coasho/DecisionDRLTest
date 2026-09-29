@@ -524,6 +524,44 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
   moves at 0.3 m/s after 20 s). To start in trim, spawn it at its profile's hover attitude
   (`profile_value("hover/pitch_attitude_deg")` and `.../roll_attitude_deg`),
   as the manoeuvre suite does.
+- **Closing on a point** (investigated after ADR-29 FA-5c; the loops as they
+  were): over a point 150 m ahead the UH-1H came within 1 m 85 s after its
+  command, the UH-60A 17 s. Measured causes:
+  - Not its position gain, the attitude floor or its pitch power. Its loops
+    are half the UH-60A's because its flapping lag is twice as long (0.144 s,
+    TM-73254's choice, against 0.072): rates 2.63 rad/s, attitude 0.66,
+    velocity 0.22, position 0.0875/s. The 0.4 floor does not bind; the pitch
+    power, -0.704 per unit, is the teetering rotor's (thrust x hub height /
+    Iyy x cyclic per unit: 0.686) and does not enter the bandwidths.
+  - The velocity loop's integral. It winds up following the position loop's
+    deceleration and holds it on past the point (the UH-1H 2.8 deg of nose-up
+    as it stopped), so the aircraft backs away (the UH-1H to 8.6 m; to 14 m
+    from 300 m out) and returns on a closed-loop pole near a fifth of the
+    velocity bandwidth: 22 s for the UH-1H, 12 s for the UH-60A, which
+    overshoots 2.3 and 4.6 m the same way.
+  - What the identified plant leaves out: the rotor's flapping with the speed
+    a tilt builds, and the UH-1H's stabilizer bar (0.528 s through a 3.3 s
+    lag: at low frequency 10.6 1/s of roll damping and 1.8 of pitch, where the
+    1 s fit sees 2.7 and 0.45). Held against them, the UH-1H's roll attitude
+    reaches 64 % of a 5 deg step, the UH-60A's 90 %.
+  - Changes measured on all four rotorcraft and not taken: faster attitude or
+    velocity ratios alone (the UH-1H then overshoots 7 to 9 m); the integral
+    on a reference model's error (the Crazyflie's drag trim lags, 16 to 35 s
+    to settle, and a helicopter lags in turns, 9 to 23 m off the fleet's
+    curves and orbits); the same along the velocity only (the UH-1H there in
+    21 s, but 6.9 m past it); the velocity's rate of change fed forward (the
+    guidance already anticipates the loop's lag: the UH-60A 17 to 28 m off
+    routes, curves and racetracks); the stabilizer bar cancelled in the rate
+    loop (the flapping with speed still holds the attitude back). A third
+    instead of a quarter of the rates' bandwidth for the attitude also leaves
+    the UH-60A's protected bank 1 deg from the suite's limit.
+  - What would: the rotor's speed derivatives and the stabilizer bar (the
+    design gives the bar's gain and lag) in the hover section, and the loops
+    designed against them; then the integral on the reference model along the
+    velocity. With the attitude at a third, that one flew every route, curve
+    and pattern case in the tests and the fleet, and halved the UH-60A's time
+    to settle over a point (hover 35 to 25 s, 300 m out 47 to 23 s); only the
+    UH-1H's overshoot kept it out.
 - **The drawings** are operator's manuals' and a recognition manual's figures,
   within a few per cent (section 4); the IRIS+ is PX4's model of it rather than
   a 3DR drawing; the Crazyflie's heights are from a photograph. The Crazyflie's
