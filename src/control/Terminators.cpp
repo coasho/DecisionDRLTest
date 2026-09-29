@@ -28,18 +28,6 @@ void crossOf(const double a[3], const double b[3], double c[3]) noexcept {
 
 double dotOf(const double a[3], const double b[3]) noexcept { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
-/// The legs FA-6f2b builds: to a manual termination, and a hold's.
-bool later(PathTerminator t) noexcept {
-    switch (t) {
-    case PathTerminator::FixToManualTermination:
-    case PathTerminator::HoldingWithAltitudeTermination:
-    case PathTerminator::HoldingWithFixTermination:
-    case PathTerminator::HoldingWithManualTermination:
-    case PathTerminator::HeadingToManual: return true;
-    default: return false;
-    }
-}
-
 /// A leg that begins where the aircraft is: flown on a course or a heading from there (CA, CI, VA, VI, VM), straight to its
 /// point (DF, IF), onto its course (CF) - or, without a terminator, the route's own leg from there, as after a loiter.
 bool fromAircraft(PathTerminator t) noexcept {
@@ -229,11 +217,25 @@ Reason CapabilityHost::checkTerminators(route::Plan& p, Span<const Waypoint> way
         if (type == PathTerminator::RadiusToFix && (!t || isHold(t->centerLatitudeRad) || isHold(t->clockwise))) return at(k, Reason::InvalidWaypoint);
         if (undefined(type)) return at(k, Reason::InvalidWaypoint);
     }
-    // an altitude termination with its altitude (as given); a leg that ends where the aircraft is, at no loiter point
+    // an altitude termination with its altitude (as given), a hold's too; a leg that ends where the aircraft is, at no loiter
+    // point, a hold's at a loiter point (its hold checked with it: loiterFault); a manual termination with a branch at its
+    // point that takes the operator's input - else at the route's last point, on along it
+    auto operatorAt = [&p](std::uint32_t k) {
+        for (std::uint32_t j = 0; j < p.branchCount; ++j)
+            if (p.branches[j].point == k && p.branches[j].operatorInput == 1.0) return true;
+        return false;
+    };
+    const std::uint32_t flight = p.linked ? p.count : count;
+    const std::uint32_t lastGiven = flight ? (p.linked ? p.order[flight - 1] : flight - 1) : 0;
+    const bool repeats = p.linked ? p.repeat : repeat;
     for (std::uint32_t k = 0; k < count; ++k) {
         const Waypoint& w = waypoints[k];
-        if (route::endOf(w) == 1 && isHold(w.altitudeM)) return at(k, Reason::InvalidWaypoint);
+        const PathTerminator t = route::terminatorOf(w);
+        if ((route::endOf(w) == 1 || t == PathTerminator::HoldingWithAltitudeTermination) && isHold(w.altitudeM)) return at(k, Reason::InvalidWaypoint);
         if (route::floats(w) && route::loiterPoint(w)) return at(k, Reason::InvalidWaypoint);
+        if (route::held(w) && !route::loiterPoint(w)) return at(k, Reason::InvalidWaypoint);
+        const bool manual = route::endOf(w) == 3 || t == PathTerminator::HoldingWithManualTermination;
+        if (manual && !operatorAt(k) && (repeats || k != lastGiven)) return at(k, Reason::InvalidWaypoint);
     }
     // in its flight, each leg after one that ends where the aircraft is one that begins there, and an intercept's next a
     // course to fix, whose line it meets (a linked route's order its plan's; the points it does not fly, none)
@@ -252,9 +254,6 @@ Reason CapabilityHost::checkTerminators(route::Plan& p, Span<const Waypoint> way
         if (route::endOf(waypoints[k]) == 2 && next != PathTerminator::CourseToFix) return at(k, Reason::InvalidWaypoint);
         if (!fromAircraft(next)) return at(n, Reason::InvalidWaypoint);
     }
-    // not built yet (its row, partial): a leg to a manual termination, and a hold's - FA-6f2b's
-    for (std::uint32_t k = 0; k < count; ++k)
-        if (later(route::terminatorOf(waypoints[k]))) return at(k, Reason::NotImplemented);
     p.terminatorCount = static_cast<std::uint32_t>(terminators.size());
     std::copy_n(terminators.data(), p.terminatorCount, p.terminators);
     p.terminated = any;
@@ -349,6 +348,7 @@ void RouteBehavior::takeTerminators(const ControlContext& ctx) noexcept {
     if (p.terminatorCount) std::copy_n(ctx.path->routeTerminators, p.terminatorCount, p.terminators);
     p.terminated = false;
     for (std::uint32_t i = 0; i < p.count && !p.terminated; ++i) p.terminated = !isHold(p.points[i].terminator);
+    if (p.count && !p.repeat && route::endOf(p.points[p.last()]) == 3) p.end = EndBehavior::Continue; // (a manual last leg: on along it)
 }
 
 void RouteBehavior::terminated(std::uint32_t k) noexcept {
@@ -359,6 +359,48 @@ void RouteBehavior::terminated(std::uint32_t k) noexcept {
     ends_ = route::endOf(w), headed_ = route::headed(w);
     interceptM_ = kHold;
     if (headed_) headingTrim_ = 0.0, lastHeading_ = kHold;
+    if (ends_ == 3 && k == p.last() && !p.repeat) { // (the route's last point, its end the operator's: flown on, as it ends)
+        bool asked = false;
+        for (std::uint32_t j = 0; j < p.branchCount && !asked; ++j) asked = p.branches[j].point == p.named(k) && p.branches[j].operatorInput == 1.0;
+        if (!asked) ended_ = finished_ = true;
+    }
+}
+
+bool RouteBehavior::commandedHere(const ControlContext& ctx) const noexcept {
+    const route::Plan& p = *plan_;
+    if (!ctx.path) return false;
+    const std::uint32_t at = p.named(target_);
+    for (std::uint32_t k = 0; k < p.branchCount; ++k) {
+        const RouteBranch& b = p.branches[k];
+        if (b.point == at && b.operatorInput == 1.0 && (ctx.path->routeCommanded >> k & 1u) && holds(ctx, b, p.branchCaptures[k] + 1)) return true;
+    }
+    return false;
+}
+
+bool RouteBehavior::holdBegins(PatternShape& shape) const noexcept {
+    const route::Plan& p = *plan_;
+    const PathTerminator t = route::terminatorOf(p.points[target_]);
+    if (t == PathTerminator::HoldingWithFixTermination) shape.orbits = 1.0; // (once round: its entry, a lap, its fix)
+    if (t == PathTerminator::HoldingWithManualTermination) { // (its end the operator's, where a branch takes it)
+        const std::uint32_t at = p.named(target_);
+        for (std::uint32_t k = 0; k < p.branchCount; ++k)
+            if (p.branches[k].point == at && p.branches[k].operatorInput == 1.0) return true;
+        return false;
+    }
+    return t == PathTerminator::HoldingWithFixTermination || t == PathTerminator::HoldingWithAltitudeTermination;
+}
+
+void RouteBehavior::holdEnds(const ControlContext& ctx, const sim::VehicleState& s) {
+    const PathTerminator t = route::terminatorOf(plan_->points[target_]);
+    if ((t == PathTerminator::HoldingWithAltitudeTermination && holdPassed(ctx, s)) || (t == PathTerminator::HoldingWithManualTermination && commandedHere(ctx)))
+        loiter_->finishAtExit(); // (left at its fix as it next comes to it)
+}
+
+bool RouteBehavior::holdPassed(const ControlContext& ctx, const sim::VehicleState& s) const noexcept {
+    const Waypoint& w = plan_->points[target_];
+    if (route::terminatorOf(w) != PathTerminator::HoldingWithAltitudeTermination) return false;
+    const double now = altitudeNow(referenceOf(w.altitudeReference), s, ctx.altimeter); // (within 10 m, or past it)
+    return w.altitudeM >= segmentFrom_ ? now >= w.altitudeM - 10.0 : now <= w.altitudeM + 10.0;
 }
 
 bool RouteBehavior::reached(const ControlContext& ctx, const sim::VehicleState& s, const Performance& perf, const route::Fix& f) {
@@ -368,7 +410,8 @@ bool RouteBehavior::reached(const ControlContext& ctx, const sim::VehicleState& 
         const double now = altitudeNow(referenceOf(w.altitudeReference), s, ctx.altimeter);
         return w.altitudeM >= segmentFrom_ ? now >= w.altitudeM - 10.0 : now <= w.altitudeM + 10.0;
     }
-    if (ends_ != 2 || !p.leaves(target_)) return false; // (the operator's: FA-6f2b)
+    if (ends_ == 3) return commandedHere(ctx); // (the operator's: a branch at its point that takes its input)
+    if (ends_ != 2 || !p.leaves(target_)) return false;
     // the next leg's line: its cross-track to it within what the turn onto it takes at its speed and 80 % of its bank
     // (a rotorcraft's, its tilt), closing on it - or crossed since the last update
     (void)f;

@@ -2147,6 +2147,43 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(r.state == ActivityState::Completed);
             CHECK(f.endedUp > f.to - 10.5);
         });
+    // and a hold once round (FA-6f2b): a loiter point three orbit radii ahead with a hold, flown once round (its entry, a lap,
+    // its fix), and on two radii to its right: held, then completed
+    std::map<std::uint32_t, double> heldIn, heldOut;
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double R = orbitRadius(p), psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
+            auto point = [&](double ahead, double right) {
+                const PositionCommand q = pointFrom(p.start, ahead * c - right * sn, ahead * sn + right * c, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            std::vector<Waypoint> points = {point(3.0 * R, 0.0), point(3.0 * R, 2.0 * R)};
+            points[0].kind = static_cast<double>(EndPointKind::LoiterPoint);
+            points[0].terminator = static_cast<double>(PathTerminator::HoldingWithFixTermination);
+            RouteLoiter hold;
+            hold.point = 0, hold.pattern.pattern = static_cast<double>(PatternKind::Hold);
+            heldIn[p.id] = heldOut[p.id] = kHold;
+            const CommandResult res = w.submit(p.id, RouteCommand{}, points, {}, std::vector<RouteLoiter>{hold});
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index);
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        [&](const Plane& p) { return p.rotor ? 330.0 : 10.0 * orbitRadius(p) / std::max(p.start.airspeedTrueMs, 0.1) * 1.5 + 420.0; },
+        [&](const Plane& p) {
+            const ActivityProgress& g = w.activity(activity[p.id])->progress;
+            if (isHold(heldIn[p.id]) && g.segment == 0 && g.segmentPercent >= 99.9) heldIn[p.id] = w.simTime();
+            if (isHold(heldOut[p.id]) && g.segment == 1) heldOut[p.id] = w.simTime();
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            INFO(activityStateName(r.state) << "; held " << heldOut[p.id] - heldIn[p.id] << " s");
+            CHECK(r.state == ActivityState::Completed);
+            CHECK(heldOut[p.id] - heldIn[p.id] > 30.0); // (the least: a rate-one lap's 240 s, the rotorcraft's, the Skua's, the C172's;
+                                                        // the most the C-17A's 628 s, its turns at 25 degrees of bank)
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

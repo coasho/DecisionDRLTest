@@ -927,8 +927,10 @@ FSIM_API void fsim_route_branch_init(fsim_route_branch* branch);
  * before), IF and DF (straight to the point from where the aircraft is as the leg begins), CF (its course into the point:
  * fsim_route_terminator's course), RF (an arc round its centre from the point before: fsim_route_terminator's); CA, FA, VA
  * (the planned leg's course, a heading's held, until the point's altitude), CI, VI (until the next leg, a course to fix's
- * line), FC (as TF). Refused "not_implemented" (FA-6f2b): FM, HA, HF, HM, VM. Refused "invalid_waypoint", a leg its segment
- * does not define (A-GRA 6.0a gives no navaid, nor a procedure turn's data): AF, CD, CR, FD, PI, VD, VR. */
+ * line), FC (as TF); FM, VM (on until a branch at the point that takes the operator's input is commanded; at a route's last
+ * point, on along it), HA, HF, HM (the loiter point's hold ended at its altitude, once round, by the operator's branch).
+ * Refused "invalid_waypoint", a leg its segment does not define (A-GRA 6.0a gives no navaid, nor a procedure turn's data): AF,
+ * CD, CR, FD, PI, VD, VR. */
 enum fsim_path_terminator {
     FSIM_PATH_TERMINATOR_ARC_TO_FIX = 0,                        /* AF */
     FSIM_PATH_TERMINATOR_COURSE_TO_ALTITUDE,                    /* CA */

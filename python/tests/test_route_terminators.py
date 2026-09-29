@@ -56,14 +56,16 @@ class RouteTerminatorsTest(unittest.TestCase):
         with self.assertRaises(fsim.Rejected) as none:
             v.submit_route(course, terminators=[arc])
         self.assertEqual((none.exception.reason, none.exception.index), ("invalid_waypoint", 2))
-        # its course given, flown; FA-6f2b's legs not implemented yet, naming the point
+        # its course given, flown; a manual termination mid-route that nothing ends refused, naming the point - one the
+        # operator's branch ends taken
         c = v.submit_route(course, terminators=[arc, fsim.RouteTerminator(2, course_rad=math.pi)])
         self.assertEqual(c.setpoint().kwargs["terminators"][1].course_rad, math.pi)
-        altitude = list(points)
-        altitude[2] = altitude[2]._replace(terminator="fm")
-        with self.assertRaises(fsim.Rejected) as later:
-            v.submit_route(altitude, terminators=[arc])
-        self.assertEqual((later.exception.reason, later.exception.index), ("not_implemented", 2))
+        manual = list(points)
+        manual[1] = manual[1]._replace(terminator="fm")
+        with self.assertRaises(fsim.Rejected) as none:
+            v.submit_route(manual)
+        self.assertEqual((none.exception.reason, none.exception.index), ("invalid_waypoint", 1))
+        v.submit_route(manual, branches=[fsim.RouteBranch(1, 2, operator_input=1)])
 
 
 if __name__ == "__main__":

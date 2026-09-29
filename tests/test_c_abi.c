@@ -1267,7 +1267,7 @@ int main(int argc, char** argv) {
         {
             /* ABI 1.35 (4.38): civil path terminators - a radius to fix's quarter circle round its centre, read back; a
                procedure turn (a leg its segment does not define) refused invalid_waypoint at its point (reserved: its index +
-               1), a manual termination (FA-6f2b's) not_implemented */
+               1), a manual termination mid-route that nothing ends invalid_waypoint */
             fsim_waypoint pts[3];
             fsim_route_terminator rf;
             fsim_route_extras extras;
@@ -1314,9 +1314,10 @@ int main(int argc, char** argv) {
             pts[2].terminator = FSIM_PATH_TERMINATOR_PROCEDURE_TURN_TO_INTERCEPT;
             CHECK(fsim_vehicle_submit_route_extras(world, arced, options, 4, pts, 3, &extras, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
                   strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 3);
-            pts[2].terminator = FSIM_PATH_TERMINATOR_FIX_TO_MANUAL_TERMINATION;
-            CHECK(fsim_vehicle_submit_route_extras(world, arced, options, 4, pts, 3, &extras, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
-                  strcmp(fsim_reason_name(cr.reason), "not_implemented") == 0 && cr.reserved == 3);
+            pts[1].terminator = FSIM_PATH_TERMINATOR_FIX_TO_MANUAL_TERMINATION; /* (mid-route, no branch takes the operator's input) */
+            pts[2].terminator = fsim_hold();
+            CHECK(fsim_vehicle_submit_route_extras(world, arced, options, 4, pts, 3, NULL, &co, &cr) == FSIM_OK && cr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(cr.reason), "invalid_waypoint") == 0 && cr.reserved == 2);
         }
         {
             /* ABI 1.34 (4.37): conditional branches - one out of the loop once its point has been come to twice, one the

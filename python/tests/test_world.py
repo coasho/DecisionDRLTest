@@ -558,7 +558,7 @@ class CapabilityTest(unittest.TestCase):
         self.assertEqual(refused.exception.reason, "not_supported")
         metadata = viper.support("fsim.guidance.route/metadata")  # (applicable, not built: the stage that builds it)
         self.assertEqual((metadata.support, metadata.stage), (fsim.Support.NOT_IMPLEMENTED, 7))
-        self.assertEqual(viper.support("fsim.guidance.route/path_terminators").support, fsim.Support.PARTIAL)  # (FA-6f1)
+        self.assertEqual(viper.support("fsim.guidance.route/path_terminators").support, fsim.Support.SUPPORTED)  # (FA-6f)
         self.assertEqual(viper.support("fsim.guidance.route/conditional_segment").support, fsim.Support.PARTIAL)  # (FA-6e2a)
         self.assertEqual(viper.support("fsim.guidance.route/paths").support, fsim.Support.SUPPORTED)  # (FA-6e1)
         self.assertEqual(viper.support("fsim.guidance.route/altitude/barometric").support, fsim.Support.SUPPORTED)  # (FA-6a)

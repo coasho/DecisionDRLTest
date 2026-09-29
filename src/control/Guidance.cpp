@@ -559,7 +559,7 @@ route::Fix RouteBehavior::locate(const ControlContext& ctx, const sim::VehicleSt
             passHere(ctx, s, perf, f);
             continue;
         }
-        if (loiterAhead_) {
+        if (loiterAhead_ && !(p.terminated && holdPassed(ctx, s))) { // (a hold to an altitude it is at: passed - 4.38)
             finishedM_ += std::max(0.0, leg.lengthM - leadOut_);
             inPieceM_ = leadOut_ = 0.0;
             loitering_ = true;
@@ -703,7 +703,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         if (hovers_) out.northMs += frameNorthMs_, out.eastMs += frameEastMs_;
         return out;
     }
-    if (headed_ && !ended_) return headingCommand(ctx, s, perf, steer); // (a heading leg's: 4.38)
+    if (headed_ && (!ended_ || ends_ == 3)) return headingCommand(ctx, s, perf, steer); // (a heading leg's, a manual one's on past the end: 4.38)
     return route::follow(ctx, perf, wind_, hovers_, fix, ahead, steer, plan_->trims, course_, heading_);
 }
 
@@ -816,14 +816,16 @@ Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf
             const Waypoint& next = p.points[p.next(target_)];
             route::loiterExit(c, next.latitudeRad, next.longitudeRad, shape);
         }
+        const bool terminated = p.terminated && holdBegins(shape); // (a hold's terminator: its end - 4.38)
         const FrameSpec* frame = routeFrame(ctx.path, l.shape.frame);
         loiter_->embed(shape, frame ? *frame : FrameSpec{}, l.endTimeS);
         loiterCommand_ = c;
         loiter_->begin(ctx, loiterCommand_);
         loiter_->wind_ = wind_; // (the estimate it flew in)
-        const bool ends = !isHold(l.pattern.durationS) || !isHold(l.shape.orbits) || !isHold(l.endTimeS);
+        const bool ends = !isHold(l.pattern.durationS) || !isHold(l.shape.orbits) || !isHold(l.endTimeS) || terminated;
         if (!ends && target_ == p.last() && !p.repeat) ended_ = finished_ = true; // (the route's end: it loiters on)
     }
+    if (p.terminated) holdEnds(ctx, ctx.sensed); // (a hold's terminator: at its altitude, or commanded - 4.38)
     Command out = loiter_->update(ctx, loiterCommand_);
     if (const Reason why = loiter_->failure(); why != Reason::None) failure_ = why; // (its frame's vehicle gone)
     if (ended_ || !loiter_->finished()) return out;
@@ -928,6 +930,7 @@ void PatternBehavior::reset() {
     pattern_->trims = route::Trims{};
     lastTime_ = -1.0;
     planned_ = false;
+    exitNow_ = false;
 }
 
 void PatternBehavior::embed(const PatternShape& shape, const FrameSpec& frame, double endTimeS) noexcept {
@@ -1028,7 +1031,7 @@ VelocityCommand PatternBehavior::hoverInFrame(const ControlContext& ctx, const P
 
 bool PatternBehavior::due(double now) const noexcept {
     return (!isHold(resolved_.durationS) && startS_ >= 0.0 && now - startS_ >= resolved_.durationS) ||
-           (!isHold(shape_.orbits) && !entering_ && laps_ >= shape_.orbits) || (!isHold(endTimeS_) && worldNow_ >= endTimeS_);
+           (!isHold(shape_.orbits) && !entering_ && laps_ >= shape_.orbits) || (!isHold(endTimeS_) && worldNow_ >= endTimeS_) || exitNow_;
 }
 
 route::Fix PatternBehavior::locate(const sim::VehicleState& s) {

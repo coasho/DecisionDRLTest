@@ -100,8 +100,7 @@ TEST_CASE("discovery: the public features, each answered on every vehicle", "[di
     CHECK(supportOf(w, c172x, "fsim.guidance.hsa").support == Support::Supported); // (whole since FA-4)
     CHECK(supportOf(w, c172x, "fsim.guidance.hsa/direction/magnetic_north").support == Support::Supported);
     CHECK(supportOf(w, c172x, "fsim.guidance.route/altitude/barometric").support == Support::Supported); // (FA-6a)
-    CHECK(supportOf(w, c172x, "fsim.guidance.route/path_terminators").support == Support::Partial); // (FA-6f1: FA-6f2's legs)
-    CHECK(supportOf(w, c172x, "fsim.guidance.route/path_terminators").stage == 6);
+    CHECK(supportOf(w, c172x, "fsim.guidance.route/path_terminators").support == Support::Supported); // (FA-6f)
     CHECK(supportOf(w, c172x, "fsim.guidance.route/metadata").stage == 7); // (not built: the stage that builds it)
     CHECK(supportOf(w, c172x, "fsim.guidance.route/paths").support == Support::Supported); // (FA-6e1)
     CHECK(supportOf(w, c172x, "fsim.guidance.route/conditional_segment").support == Support::Partial); // (FA-6e2a: endurance, contingency FA-6e2b's)

@@ -272,11 +272,34 @@ TEST_CASE("route terminators: refused as a point is, naming it - data that is no
                                    PathTerminator::TrackFromFixToDmeDistance, PathTerminator::ProcedureTurnToIntercept,
                                    PathTerminator::HeadingToDmeDistanceTermination, PathTerminator::HeadingToRadialTermination})
         refuse("a leg not defined", with(2, t), {}, Reason::InvalidWaypoint, 2);
-    // not built: FA-6f2b's
-    for (const PathTerminator t : {PathTerminator::FixToManualTermination, PathTerminator::HoldingWithAltitudeTermination,
-                                   PathTerminator::HoldingWithFixTermination, PathTerminator::HoldingWithManualTermination,
-                                   PathTerminator::HeadingToManual})
-        refuse("FA-6f2b's", with(2, t), {}, Reason::NotImplemented, 2);
+    // a manual termination the operator cannot make (no branch at its point takes its input) but at the route's end; a
+    // hold's at no loiter point, at an orbit, with an end of its own, to an altitude without it (FA-6f2b)
+    refuse("a manual termination mid-route", with(1, PathTerminator::FixToManualTermination), {}, Reason::InvalidWaypoint, 1);
+    refuse("a heading to a manual termination mid-route", with(1, PathTerminator::HeadingToManual), {}, Reason::InvalidWaypoint, 1);
+    const CommandResult manualEnd = w.submit(v, RouteCommand{}, with(2, PathTerminator::FixToManualTermination));
+    INFO(reasonName(manualEnd.reason) << " at " << manualEnd.index);
+    CHECK(manualEnd.accepted()); // (at the route's end: on along it)
+    refuse("a hold's at no loiter point", with(1, PathTerminator::HoldingWithFixTermination), {}, Reason::InvalidWaypoint, 1);
+    auto holdAt = [&](PathTerminator t, double pattern) {
+        std::vector<Waypoint> q = with(1, t);
+        q.at(1).kind = static_cast<double>(EndPointKind::LoiterPoint), q.at(1).altitudeM = 1600.0;
+        RouteLoiter l;
+        l.point = 1, l.pattern.pattern = pattern;
+        return std::make_pair(q, l);
+    };
+    auto [orbitPoints, orbitLoiter] = holdAt(PathTerminator::HoldingWithFixTermination, static_cast<double>(PatternKind::Orbit));
+    refuse("a hold's at an orbit", orbitPoints, {}, Reason::InvalidWaypoint, 1, {}, {orbitLoiter});
+    auto [twicePoints, twice] = holdAt(PathTerminator::HoldingWithFixTermination, static_cast<double>(PatternKind::Hold));
+    twice.shape.orbits = 2.0;
+    refuse("a hold once round twice", twicePoints, {}, Reason::InvalidWaypoint, 1, {}, {twice});
+    auto [timedPoints, timed] = holdAt(PathTerminator::HoldingWithAltitudeTermination, static_cast<double>(PatternKind::Hold));
+    timed.pattern.durationS = 120.0;
+    refuse("a hold to an altitude with a duration", timedPoints, {}, Reason::InvalidWaypoint, 1, {}, {timed});
+    auto [manualPoints, manualHold] = holdAt(PathTerminator::HoldingWithManualTermination, static_cast<double>(PatternKind::Hold));
+    refuse("a hold to a manual termination mid-route", manualPoints, {}, Reason::InvalidWaypoint, 1, {}, {manualHold});
+    auto [lowPoints, lowHold] = holdAt(PathTerminator::HoldingWithAltitudeTermination, static_cast<double>(PatternKind::Hold));
+    lowPoints.at(1).altitudeM = kHold;
+    refuse("a hold to an altitude without it", lowPoints, {}, Reason::InvalidWaypoint, 1, {}, {lowHold});
     // a leg to an altitude without its altitude; one that ends where the aircraft is at a loiter point; after one, a leg
     // that begins at the point before; an intercept whose next is no course to fix, or none
     refuse("an altitude termination without its altitude", with(1, PathTerminator::CourseToAltitude), {}, Reason::InvalidWaypoint, 1);
@@ -442,6 +465,106 @@ TEST_CASE("route terminators: a course to altitude ends at its altitude, before 
     CHECK(ciOff < 20.0);
     CHECK(ciTrack < 3.0);
     for (const auto a : {rc.activity, rv.activity, ri.activity}) CHECK(w.activity(a)->state == ActivityState::Completed);
+}
+
+TEST_CASE("route terminators: a manual termination flown on until the operator ends it; at the route's end, on along it; holds "
+          "once round, to an altitude, until the operator ends them",
+          "[modes]") {
+    session::World w(options("route-terminators-held"));
+    const auto fm = wingAt(w, 37.6, 0), vm = wingAt(w, 37.6, 1), hf = wingAt(w, 37.6, 2), ha = wingAt(w, 37.6, 3), level = wingAt(w, 37.6, 4),
+               hm = wingAt(w, 37.6, 5);
+    w.step(stepsFor(w, 2.0));
+    auto origin = [&w](std::uint32_t v, double& lat, double& lon) { lat = w.vehicleState(v)->latitudeRad, lon = w.vehicleState(v)->longitudeRad; };
+    auto operatorBranch = [](std::uint32_t point, double next) {
+        RouteBranch b;
+        b.point = point, b.next = next, b.operatorInput = 1.0;
+        return b;
+    };
+    // east 3 km, then on east on its course until the operator ends it - its point 3 km on - then direct to a point north
+    double flat, flon;
+    origin(fm, flat, flon);
+    std::vector<Waypoint> fpoints = {at(flat, flon, 0.0, 3000.0), at(flat, flon, 0.0, 6000.0), at(flat, flon, 4000.0, 12000.0)};
+    fpoints.at(1).terminator = code(PathTerminator::FixToManualTermination), fpoints.at(2).terminator = code(PathTerminator::DirectToFix);
+    const CommandResult rf = w.submit(fm, RouteCommand{}, fpoints, {}, {}, {}, {}, std::vector<RouteBranch>{operatorBranch(1, 2.0)});
+    // east 3 km, then a heading to a manual termination that ends the route: on along its heading
+    double mlat, mlon;
+    origin(vm, mlat, mlon);
+    std::vector<Waypoint> mpoints = {at(mlat, mlon, 0.0, 3000.0), at(mlat, mlon, 0.0, 6000.0)};
+    mpoints.at(1).terminator = code(PathTerminator::HeadingToManual);
+    const CommandResult rm = w.submit(vm, RouteCommand{}, mpoints);
+    // holds at a point 6 km east - once round; to 1,700 m, the leg climbing to it at 0.5 m/s, and one already at 1,500 m;
+    // until the operator ends it - then 4 km on east
+    auto holdRoute = [&](std::uint32_t v, PathTerminator t, double altitude, double& lat, double& lon) {
+        origin(v, lat, lon);
+        std::vector<Waypoint> q = {at(lat, lon, 0.0, 3000.0), at(lat, lon, 0.0, 6000.0), at(lat, lon, 0.0, 10000.0)};
+        q.at(0).altitudeM = 1500.0;
+        q.at(1).kind = static_cast<double>(EndPointKind::LoiterPoint), q.at(1).terminator = static_cast<double>(t), q.at(1).altitudeM = altitude;
+        q.at(1).climbRateMs = 0.5;
+        RouteLoiter l;
+        l.point = 1, l.pattern.pattern = static_cast<double>(PatternKind::Hold);
+        const std::vector<RouteBranch> branches = t == PathTerminator::HoldingWithManualTermination ? std::vector<RouteBranch>{operatorBranch(1, 2.0)}
+                                                                                                    : std::vector<RouteBranch>{};
+        return w.submit(v, RouteCommand{}, q, {}, std::vector<RouteLoiter>{l}, {}, {}, branches);
+    };
+    double hflat, hflon, halat, halon, atlat, atlon, hmlat, hmlon;
+    const CommandResult rhf = holdRoute(hf, PathTerminator::HoldingWithFixTermination, 1500.0, hflat, hflon);
+    const CommandResult rha = holdRoute(ha, PathTerminator::HoldingWithAltitudeTermination, 1700.0, halat, halon);
+    const CommandResult rat = holdRoute(level, PathTerminator::HoldingWithAltitudeTermination, 1500.0, atlat, atlon);
+    const CommandResult rhm = holdRoute(hm, PathTerminator::HoldingWithManualTermination, 1500.0, hmlat, hmlon);
+    for (const CommandResult* r : {&rf, &rm, &rhf, &rha, &rat, &rhm}) {
+        INFO(reasonName(r->reason) << " at " << r->index);
+        REQUIRE(r->accepted());
+    }
+    double fmCommanded = kHold, vmDone = kHold, vmTrack = 0.0, vmOff = 0.0;
+    double hfIn = kHold, hfOut = kHold, haIn = kHold, haOut = kHold, haUp = kHold, atIn = kHold, atOut = kHold, hmIn = kHold, hmOut = kHold, hmAsked = kHold;
+    auto watch = [&w](const CommandResult& r, double& in, double& out) { // (its loiter point's segment begun, and the next)
+        const ActivityProgress& g = w.activity(r.activity)->progress;
+        if (isHold(in) && g.segment == 1 && g.segmentPercent >= 99.9) in = w.simTime();
+        if (isHold(out) && g.segment == 2) out = w.simTime();
+    };
+    for (unsigned k = 0; k < stepsFor(w, 900.0); ++k) {
+        w.step();
+        double n, e;
+        const auto& f = *w.vehicleState(fm);
+        apart(flat, flon, f.latitudeRad, f.longitudeRad, n, e);
+        if (isHold(fmCommanded) && e >= 9000.0) { // (3 km past its point, still on its course: ended by the operator)
+            fmCommanded = w.simTime();
+            CHECK(w.activity(rf.activity)->progress.segment == 1);
+            REQUIRE(w.commandBranch(rf.activity, 0).accepted());
+        }
+        if (isHold(vmDone) && !w.activity(rm.activity)->live()) vmDone = w.simTime();
+        if (!isHold(vmDone) && w.simTime() > vmDone + 60.0) {
+            const auto& m = *w.vehicleState(vm);
+            apart(mlat, mlon, m.latitudeRad, m.longitudeRad, n, e);
+            vmTrack = std::max(vmTrack, std::abs(std::remainder(m.eulerRad[2] - 0.5 * kPi, 2.0 * kPi)) / kDeg), vmOff = n;
+        }
+        watch(rhf, hfIn, hfOut);
+        watch(rha, haIn, haOut);
+        if (!isHold(haOut) && isHold(haUp)) haUp = w.vehicleState(ha)->altitudeMslM;
+        watch(rat, atIn, atOut);
+        watch(rhm, hmIn, hmOut);
+        if (isHold(hmAsked) && !isHold(hmIn) && w.simTime() > hmIn + 400.0) {
+            hmAsked = w.simTime();
+            REQUIRE(w.commandBranch(rhm.activity, 0).accepted());
+        }
+    }
+    std::printf("route terminators, manual and holds: a manual termination 3 km past its point at %.0f s, ended by the operator then; "
+                "a heading to one ending the route at %.0f s, then on its heading within %.1f degrees, %.0f m north; a hold once round "
+                "%.0f s, one to 1,700 m %.0f s (left at %.1f m), one already there %.0f s, one until the operator ended it %.0f s (asked "
+                "%.0f s in)\n",
+                fmCommanded, vmDone, vmTrack, vmOff, hfOut - hfIn, haOut - haIn, haUp, atOut - atIn, hmOut - hmIn, hmAsked - hmIn);
+    CHECK(!isHold(fmCommanded));
+    CHECK(w.activity(rf.activity)->state == ActivityState::Completed);
+    CHECK(!isHold(vmDone));
+    CHECK(w.activity(rm.activity)->state == ActivityState::Completed);
+    CHECK(vmTrack < 3.0);
+    CHECK((hfOut - hfIn > 100.0 && hfOut - hfIn < 400.0)); // (its entry and one lap of two minute-long legs and two turns)
+    CHECK(haOut - haIn > 100.0);
+    CHECK(haUp > 1689.0);
+    CHECK(atOut - atIn < 20.0); // (at its altitude: its fix passed)
+    CHECK(hmOut - hmAsked > 0.0);
+    CHECK(hmOut - hmIn > 400.0);
+    for (const auto a : {rhf.activity, rha.activity, rat.activity, rhm.activity}) CHECK(w.activity(a)->state == ActivityState::Completed);
 }
 
 TEST_CASE("route terminators: a stack on its own takes them too", "[modes]") {

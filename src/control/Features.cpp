@@ -84,8 +84,7 @@ const FeatureDef kFeatures[] = {
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
         "a time of arrival or a planned state at or after a loiter point, planned states beside points in moving frames, "
-        "a start turn where its links loop back, its course left out, a path terminator's leg to a manual termination, and a "
-        "hold's (FA-6); planning metadata (FA-7); "
+        "a start turn where its links loop back, its course left out (FA-6); planning metadata (FA-7); "
         "a branch on a mission critical or lost comms contingency (FA-16)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
@@ -120,7 +119,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/waypoint_type/landing", "fsim.guidance.route", N, 10, 0, ""},
     {"fsim.guidance.route/waypoint_type/hard_ditch", "fsim.guidance.route", N, 16, 0, ""},
     {"fsim.guidance.route/loiter_point", "fsim.guidance.route", S, 0, 0, ""},                // WPT-18 (FA-6b2)
-    {"fsim.guidance.route/path_terminators", "fsim.guidance.route", P, 6, 0, "a leg to a manual termination, and a hold's"}, // WPT-19 (FA-6f1, FA-6f2a)
+    {"fsim.guidance.route/path_terminators", "fsim.guidance.route", S, 0, 0, ""},            // WPT-19 (FA-6f)
     {"fsim.guidance.route/inertial_states", "fsim.guidance.route", P, 6, 0, "at or after a loiter point, beside points in moving frames"}, // WPT-20 (FA-6d2)
     {"fsim.guidance.route/required_navigation_performance", "fsim.guidance.route", S, 0, 0, ""}, // WPT-21 (FA-6d3)
     {"fsim.guidance.route/relative_points", "fsim.guidance.route", S, 0, 0, ""},             // WPT-22 (FA-6a)

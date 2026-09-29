@@ -1149,8 +1149,22 @@ int loiterFault(const Plan& p) noexcept {
         for (const double v : own)
             if (!isHold(v)) return at(l.point);
         if (!isHold(l.endTimeS) && !std::isfinite(l.endTimeS)) return at(l.point);
+        // a hold's terminator (4.38): a hold, its end the terminator's - no duration, laps or end time of its own, but a
+        // hold once round's one lap - the operator's input to a branch at its point ending a manual one
+        const PathTerminator t = l.point < p.count ? terminatorOf(p.points[l.point]) : PathTerminator::Count;
+        bool terminated = false;
+        if (t == PathTerminator::HoldingWithAltitudeTermination || t == PathTerminator::HoldingWithFixTermination ||
+            t == PathTerminator::HoldingWithManualTermination) {
+            const bool once = t == PathTerminator::HoldingWithFixTermination;
+            if (c.pattern != static_cast<double>(PatternKind::Hold) || !isHold(c.durationS) || !isHold(l.endTimeS) ||
+                !(isHold(shape.orbits) || (once && shape.orbits == 1.0)))
+                return at(l.point);
+            terminated = t != PathTerminator::HoldingWithManualTermination;
+            for (std::uint32_t j = 0; j < p.branchCount && !terminated; ++j)
+                terminated = p.branches[j].point == p.named(l.point) && p.branches[j].operatorInput == 1.0;
+        }
         // an end, but where it ends the route (a loiter it never leaves: nothing after it would be flown)
-        const bool ends = !isHold(c.durationS) || !isHold(shape.orbits) || !isHold(l.endTimeS);
+        const bool ends = !isHold(c.durationS) || !isHold(shape.orbits) || !isHold(l.endTimeS) || terminated;
         if (!ends && l.point < p.count && (p.repeat || l.point != p.last())) return at(l.point);
     }
     for (std::uint32_t i = 0; i < held; ++i)

@@ -200,6 +200,15 @@ private:
     bool reached(const ControlContext& ctx, const sim::VehicleState& s, const Performance& performance, const route::Fix& f);
     /// Past such a leg's end (4.38; Terminators.cpp): what it flew counted, on to the next point, its leg from here.
     void passHere(const ControlContext& ctx, const sim::VehicleState& s, const Performance& performance, const route::Fix& f);
+    /// A branch at the point flown to that takes the operator's input commanded, and holding (4.38, 4.37; Terminators.cpp):
+    /// what ends a manual termination.
+    bool commandedHere(const ControlContext& ctx) const noexcept;
+    /// A hold's terminator at the point flown to (4.38; Terminators.cpp): as its loiter begins, `shape` flown once round
+    /// (HF), and whether it ends; as it flies, ended at its fix once at its altitude (HA) or commanded (HM).
+    bool holdBegins(PatternShape& shape) const noexcept;
+    void holdEnds(const ControlContext& ctx, const sim::VehicleState& s);
+    /// A hold to an altitude it is at as it comes to it (4.38; Terminators.cpp): not held, its fix passed.
+    bool holdPassed(const ControlContext& ctx, const sim::VehicleState& s) const noexcept;
     /// A heading leg's command (4.38; Terminators.cpp): its heading as the hsa flies one - a wing's trimmed on what its
     /// loops leave - at the segment's speed, the route's vertical speed.
     VelocityCommand headingCommand(const ControlContext& ctx, const sim::VehicleState& s, const Performance& performance, const route::Steer& steer);
@@ -338,6 +347,8 @@ private:
     /// not the path store's, and ended at `endTimeS` too (the world's time; kHold: none).
     friend class RouteBehavior;
     void embed(const PatternShape& shape, const FrameSpec& frame, double endTimeS) noexcept;
+    /// Ended, inside a route (4.38: a hold's terminator): left as its exit point next comes, as its end had come.
+    void finishAtExit() noexcept { exitNow_ = true; }
 
     std::unique_ptr<route::Pattern> pattern_; ///< allocated with the behaviour
     WindEstimate wind_;
@@ -363,6 +374,7 @@ private:
     bool embedded_ = false;
     PatternShape embeddedShape_{};   ///< its shape as the route gives it
     double endTimeS_ = kHold, worldNow_ = 0.0; ///< its end time, and the world's time at the last update (read only with one)
+    bool exitNow_ = false;           ///< ended by the route that flies it (finishAtExit)
 };
 
 /// "curve": fsim.guidance.curve, A-GRA's curve following (docs/vehicle-interface.md,

@@ -560,6 +560,12 @@ inline std::uint8_t endOf(const Waypoint& w) noexcept {
 }
 /// A leg that ends where the aircraft is (endOf): no turn at its point, the leg after it begun from there.
 inline bool floats(const Waypoint& w) noexcept { return endOf(w) != 0; }
+/// A hold's (HA, HF, HM): its loiter point's hold ended as it says - at its altitude, once round, by the operator's hand.
+inline bool held(const Waypoint& w) noexcept {
+    const PathTerminator t = terminatorOf(w);
+    return t == PathTerminator::HoldingWithAltitudeTermination || t == PathTerminator::HoldingWithFixTermination ||
+           t == PathTerminator::HoldingWithManualTermination;
+}
 /// A heading leg (VA, VI, VM): flown on its heading, what the wind does to its track left to it.
 inline bool headed(const Waypoint& w) noexcept {
     const PathTerminator t = terminatorOf(w);

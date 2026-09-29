@@ -201,8 +201,9 @@ class PathTerminator(enum.IntEnum):
     RF, ...). Flown: TRACK_TO_FIX (the great circle from the point before), INITIAL_FIX and DIRECT_TO_FIX (straight to the
     point from where the aircraft is as the leg begins), COURSE_TO_FIX (its course into the point) and RADIUS_TO_FIX (an arc
     round its centre from the point before) - their data in an fsim.RouteTerminator; the legs to an altitude or an intercept
-    and a track for a distance, on the planned leg's course (FA-6f2a). Refused not_implemented (FA-6f2b): the legs to a
-    manual termination, and the holds. Refused invalid_waypoint, a leg its
+    and a track for a distance, on the planned leg's course (FA-6f2a); the legs to a manual termination (ended by
+    Activity.command_branch on a branch at the point with operator_input=1) and the holds (FA-6f2b). Refused invalid_waypoint, a
+    leg its
     segment does not define (A-GRA 6.0a gives no navaid, nor a procedure turn's data): AF, CD, CR, FD, PI, VD, VR."""
     ARC_TO_FIX = 0
     COURSE_TO_ALTITUDE = 1
