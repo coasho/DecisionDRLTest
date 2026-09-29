@@ -769,7 +769,7 @@ A-GRA's third end point, the LoiterPoint, gives a loiter - an orbit, a hover or 
   - the pattern's cross-track, course, altitude and speed;
   - the time to go: the pattern's (its duration's, its laps', its end time's) and the legs after it.
   Its end point is a `LoiterPoint`.
-- **The checks:** the terrain walk flies each loiter's way in and a lap from where it begins, at its point's altitude, naming the point. The endurance adds each loiter's duration, laps or time to its end time from its arrival, whichever is least.
+- **The checks:** the terrain walk flies each loiter's way in and a lap from where it begins, at its point's altitude, naming the point. The endurance adds each loiter's duration, laps or time to its end time from its arrival, whichever is least; its laps with its way in from where it begins and on round to where it is left - an orbit's from two radii out, or from where a leg shorter than that begins (section 14, FA-6g2's finding closed).
 - **Kept and read back** complete, but with its place left out, since that is its point's: a loiter read back and submitted again is taken again. An UPDATE with new waypoints takes their loiters; its options alone keep both.
 - **Surfaces.**
   - C++: `RouteLoiter`; `PathStore::routeLoiters`; `BatchCommand::loiters`, `Setpoint::loiters`; the World's route `submit` and `update` take a `Span<const RouteLoiter>`; `ControlStack::command(route, waypoints, loiters)`.
@@ -2955,6 +2955,30 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
     - That NEW commands the built-in hold behaviour, which touches nothing FA-6g2 built. Every function on its path disassembles the same in both builds, addresses aside: the 12 functions that differ are the route's own, its behaviour's constructor and factory (its plan is larger), and two that differ only in a constant's label and alignment padding. Its reading is where its code now lies, not its work.
   - World throughput is 99.1 to 99.9 % of FA-6g1's, and protection costs at most 1.1 %. Another session's build began partway through the world run.
 - ctest: all 329 tests pass.
+
+**FA-6g2's finding closed: the endurance through an orbit that a short leg leads to (4.18, 4.31).**
+- **Why it was off.** The endurance check times an orbit of so many laps as the route flies it: its way in from where its loiter begins, its laps, and on round to where it is left. Where the leg into its point is shorter than the orbit's join (two radii), the route begins the loiter where that leg begins (4.31). The check planned it from the circle's centre instead: no way in, and its laps counted from due north of the centre. FA-6g2 found the same in the schedule's measure of a loiter and fixed it there; the check kept its own copy of the old plan.
+  - How far off that was turned on where the orbit is left. Flying north on to a point north, the lap from due north round to its exit ran 290 degrees and the check read long; flying east on to a point east, it ran 19 degrees and the check read short of the flight.
+- **Fixed in the check**, as in the schedule: such an orbit is planned from where its leg begins, on the course that leg leaves on. Nothing flies differently.
+- **Measured** (an E-3G at 3,000 m heading north at 180.55 m/s, calm, its orbit the host's 7,466 m; its loiter point a minute ahead, 1.45 radii, then a point two minutes on; each read by validating under a reserve of 0.9999, then flown):
+
+  | its loiter point | laps | the check, before | the check, now | flown |
+  | --- | --- | --- | --- | --- |
+  | the first, its leg from the aircraft | 1 | 649.2 s | 529.3 s | 481 s |
+  | the first | 2 | 909.1 s | 789.1 s | 741 s |
+  | the second, its leg from a point 30 s ahead | 1 | 679.2 s | 559.3 s | 511 s |
+  | the second | 2 | 939.1 s | 819.1 s | 771 s |
+  | two radii and 30 s ahead, its leg longer than its join | 1 | 600.3 s | 600.3 s | 513 s |
+  | the same | 2 | 860.2 s | 860.2 s | 773 s |
+
+  - Here each orbit that a short leg leads to reads 119.9 s less, and its fuel with it: once round from the first point, 1,530.6 kg where it read 1,876.8 (flown, 1,439.2). Where the leg is longer than its join, the estimate is the same to the last bit.
+  - A stock C172x east at 1,500 m and 55 m/s, a 1 km orbit once round 1,450 m ahead, then 3 km on, flew it in 205.5 s. The check reads 234.3 s; it read 201.3 s, short of the flight (its orbit's own time 32.9 s less, as the test below measures it).
+  - What is left over is the model's (4.18): it counts each leg to its point, and the leg on from its point. So it counts the part of the leg into an orbit that the route leaves for its loiter (two radii of it, or a short leg's whole), and the leg on from the point rather than from where the orbit is left. The E-3G's reads 48 s (10 %) over its flight where it begins inside its join, and 87 s (17 %) where it joins two radii out; the C172x's 29 s (14 %). All read long.
+- **Tested** (`test_route_loiters`; the C172x's geometry, validated only): each orbit's own time - the route's with it less without - against its pieces: the tangent from where it is joined, a lap, and on round to its exit's tangent. Two radii out, 161.429 s (its pieces 161.430 s); where a leg of 1.45 radii begins, from the aircraft and from the point before, 153.346 s each (its pieces 153.346 s). Built against the check as it was, those two read 120.418 s, and the test fails.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6g2's build.
+- **Digests:** identical to FA-6g2's, with protection and without.
+- **Code:** only `Endurance.cpp` is compiled again, and its code is 112 bytes smaller. What `libfsim.dll` places after it - the files the control library links after it (`Terrain.cpp` to `Schedule.cpp`), then every file's template and inline functions kept out of line - lies 112 bytes earlier, from the same objects. The check runs at a NEW, never stepped; no A/B throughput was run for it.
+- ctest: all 330 tests pass.
 
 **FA-6g3a, planned states at and after a loiter point (WPT-20).**
 - **Flown** (`test_route_states`; a C172 east at 1,500 m and 55 m/s, calm): 3 km east, then a loiter point 8 km east with an orbit of 1 km for 90 s, then a point 17 km east. A state 5 km east is on the loiter point's own leg. A state 12 km east is after the loiter, within a kilometre of its leg: the leg on is laid from the orbit's exit, 0.55 km north of the state's place.

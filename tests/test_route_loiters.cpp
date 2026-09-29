@@ -1,6 +1,7 @@
 // A route's loiter points as A-GRA's schema gives them (docs/flight-autonomy.md, 4.31; ADR-29 FA-6b2): a loiter inside a
 // route - an orbit of so many laps, a hold until its end time, a rotorcraft's hover for a time - flown where the leg meets
-// it, then on along the route; a route that ends in one; its loiters read back, reported and refused as its points are.
+// it, then on along the route; a route that ends in one; its loiters read back, reported and refused as its points are; an
+// orbit's laps timed for the endurance check from where it is joined.
 #include "fsim/GuidanceModes.h"
 #include "mode_flights.h"
 
@@ -445,4 +446,55 @@ TEST_CASE("route loiters: kept by an UPDATE of its options, replaced with its wa
     REQUIRE(batch.size() == 1);
     REQUIRE(batch[0].accepted());
     CHECK(flown(w, batch[0].activity).loiters.size() == 1);
+}
+
+TEST_CASE("route loiters: the endurance times an orbit's laps from where it is joined - two radii out, or where a leg too short for that "
+          "begins",
+          "[modes]") {
+    session::World w(options("route-loiters-endurance"));
+    const auto v = wing(w, "c172x", 1500.0, 55.0); // (east)
+    w.step(stepsFor(w, 1.0));
+    NavigationSettings all = w.navigation(v);
+    all.reserveFraction = 0.9999; // (every flight refused, what it needs told: 4.18)
+    REQUIRE(w.setNavigation(v, all) == Reason::None);
+    const auto& s0 = *w.vehicleState(v);
+    const double lat0 = s0.latitudeRad, lon0 = s0.longitudeRad, r = 1000.0, speed = 55.0;
+    CommandOptions validate;
+    validate.validateOnly = true;
+    // what a route east needs, s: its points `east` metres on, at `loiterAt` (-1: none) a loiter point once round an orbit of 1 km
+    auto needs = [&](const std::vector<double>& east, int loiterAt) {
+        std::vector<Waypoint> points;
+        for (const double m : east) {
+            Waypoint p = at(lat0, lon0, 0.0, m);
+            p.altitudeM = 1500.0, p.speed = speed, p.speedReference = static_cast<double>(SpeedReference::TrueAirspeed);
+            points.push_back(p);
+        }
+        std::vector<RouteLoiter> loiters;
+        if (loiterAt >= 0) {
+            points[static_cast<std::size_t>(loiterAt)].kind = static_cast<double>(EndPointKind::LoiterPoint);
+            RouteLoiter orbit = loiter(static_cast<std::uint32_t>(loiterAt), PatternKind::Orbit);
+            orbit.pattern.radiusM = r, orbit.shape.orbits = 1.0;
+            loiters.push_back(orbit);
+        }
+        const CommandResult c = w.submit(v, RouteCommand{}, points, validate, loiters);
+        INFO(reasonName(c.reason) << " at " << c.index);
+        REQUIRE(c.reason == Reason::InsufficientEndurance);
+        return w.commandDetails(v)->endurance.requiredS;
+    };
+    // its own time (the route's with it, less without): along the tangent from where it is joined, `d` from its point, onto its
+    // circle; once round; on round (right turns) to where its tangent runs to the next point, `on` past its point
+    auto laps = [&](double d, double on) {
+        return (std::sqrt(d * d - r * r) + 2.0 * kPi * r + r * (kPi - std::acos(r / on) - std::acos(r / d))) / speed;
+    };
+    // two radii out, its leg of 3 km longer than that; a leg of 1.45 radii, joined where it begins: where the aircraft is, the
+    // point before (4.31)
+    const double joined = needs({3000.0, 6000.0}, 0) - needs({3000.0, 6000.0}, -1);
+    const double here = needs({1450.0, 4450.0}, 0) - needs({1450.0, 4450.0}, -1);
+    const double before = needs({1000.0, 2450.0, 5450.0}, 1) - needs({1000.0, 2450.0, 5450.0}, -1);
+    std::printf("route loiters, the endurance of an orbit once round: %.4f s joined two radii out (%.4f); %.4f and %.4f s where a leg of 1.45 "
+                "radii begins (%.4f)\n",
+                joined, laps(2.0 * r, 3000.0), here, before, laps(1450.0, 3000.0));
+    CHECK(std::abs(joined - laps(2.0 * r, 3000.0)) < 0.01);
+    CHECK(std::abs(here - laps(1450.0, 3000.0)) < 0.01); // (planned at its centre, as until then: 32.9 s less)
+    CHECK(std::abs(before - laps(1450.0, 3000.0)) < 0.01);
 }

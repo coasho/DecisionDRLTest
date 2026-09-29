@@ -81,16 +81,18 @@ CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, con
             double timeS = isHold(c.durationS) ? kUnknown : c.durationS;
             if (!isHold(l->shape.orbits) && c.pattern != static_cast<double>(PatternKind::Hover)) { // (from where it begins: 4.31)
                 const route::Leg& in = p.leg(i, true);
-                double lat = w.latitudeRad, lon = w.longitudeRad;
+                double lat = w.latitudeRad, lon = w.longitudeRad, course = in.courseInRad;
                 if (const double join = route::loiterJoinM(c, l->shape); join > 0.0 && in.lengthM > join)
                     geo::destination(w.latitudeRad, w.longitudeRad, geo::wrapPi(in.courseInRad + 3.14159265358979323846), join, lat, lon);
+                else if (join > 0.0) // (a leg shorter than that: joined where it begins - 4.31, as the schedule measures it: 4.33)
+                    lat = in.latA, lon = in.lonA, course = in.courseOutRad;
                 PatternShape shape = l->shape;
                 route::loiterEntry(c, lat, lon, shape);
                 if (p.leaves(i)) route::loiterExit(c, p.points[p.next(i)].latitudeRad, p.points[p.next(i)].longitudeRad, shape);
                 route::Pattern lap;
                 route::planPattern(lap, c, lat, lon, shape,
                                    l->shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth) ? yearNow() : 2025.0,
-                                   p.leg(i, true).courseInRad);
+                                   course);
                 const double laps = speed > 0.5 ? (lap.entryM() + l->shape.orbits * lap.lapM() + lap.toExitM()) / speed : kUnknown;
                 timeS = std::fmin(timeS, laps);
             }
