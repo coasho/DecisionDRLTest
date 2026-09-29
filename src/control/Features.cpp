@@ -174,7 +174,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.pattern/relative_points", "fsim.guidance.pattern", S, 0, 0, ""},         // LTR-18 (FA-5c)
 
     // --- the flight capability types not built yet (CAP-02) --------------------------------------------
-    CAP("fsim.guidance.must_fly", N, 8, 0, ""),                                               // MFY-01..07
+    CAP("fsim.guidance.must_fly", P, 8, 0, "a zone, a corridor or a volume, given or by id"), // MFY-01..07: a point, an entity, an OpPoint, the ingress window (FA-8a)
     CAP("fsim.guidance.marshall", N, 8, 0, ""),                                               // ASM-01
     {"fsim.guidance.marshall/hover", "fsim.guidance.marshall", N, 8, R1, ""},
     CAP("fsim.guidance.intercept", N, 8, 0, ""),                                              // RIC-01..03
@@ -244,7 +244,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.setting/lost_comm", "", N, 16, 0, ""},                // STS-19
     {"fsim.query/terrain", "", S, 0, 0, ""},                     // STS-11, ENV-01: the query, and the paths checked against it (FA-4a)
     {"fsim.frame", "", S, 0, 0, ""},                             // ENV-04: frames by id, and their points (FA-4c)
-    {"fsim.geometry", "", N, 8, 0, ""},                          // ENV-06
+    {"fsim.geometry", "", P, 8, 0, "operational lines, zones and volumes"}, // ENV-06: operational points (FA-8a)
     {"fsim.ship", "", N, 11, 0, ""},                             // ENV-07
     {"fsim.stores", "", N, 13, R9, ""},                          // SUB-07
     {"fsim.fault", "", N, 16, 0, ""},                            // SUB-09, STS-09
@@ -410,6 +410,7 @@ std::string featureOf(const Command& command) {
     if (std::holds_alternative<RouteCommand>(command)) return "fsim.guidance.route";
     if (std::holds_alternative<PatternCommand>(command)) return "fsim.guidance.pattern";
     if (std::holds_alternative<CurveCommand>(command)) return "fsim.guidance.curve";
+    if (std::holds_alternative<MustFlyCommand>(command)) return "fsim.guidance.must_fly";
     return "";
 }
 

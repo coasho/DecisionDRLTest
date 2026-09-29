@@ -312,7 +312,7 @@ class CapabilityTest(unittest.TestCase):
         self.assertEqual(caps["fsim.flight.velocity"].mode, "none")
         self.assertEqual(agra.flight_capabilities(v), {"CURVE_FOLLOWING": ["fsim.guidance.curve"], "FORMATION": ["fsim.guidance.formation"],
                                                        "HSA_CSA": ["fsim.guidance.hsa"], "LOITER": ["fsim.guidance.pattern"],
-                                                       "WAYPOINT_FOLLOWING": ["fsim.guidance.route"]})
+                                                       "MUST_FLY": ["fsim.guidance.must_fly"], "WAYPOINT_FOLLOWING": ["fsim.guidance.route"]})
         route.cancel()
         self.assertEqual(agra.activity_state(route.info), "FAILED")
         self.assertEqual(agra.cannot_comply(route.info.reason), "CANCELED")

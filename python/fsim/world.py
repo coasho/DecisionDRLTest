@@ -980,10 +980,18 @@ class HoldContext(enum.IntEnum):
     ATC = 2
 
 
+class MustFlyLocation(enum.IntEnum):
+    """Where a must fly goes (A-GRA's MustFlyLocationType; docs/flight-autonomy.md, 4.42): a point, another vehicle, an
+    operational point by its id (World.set_op_point)."""
+    POINT = 0
+    ENTITY = 1
+    OP_POINT = 2
+
+
 #: The Vehicle Interface's modes (docs/vehicle-interface.md): their fixed-size setpoints' fields, in order. HOLD leaves
 #: one out: a NEW continues what a live hsa commanded (else what the aircraft flies now) and takes a route's, a
 #: pattern's or a curve's default; an UPDATE keeps it.
-MODE_KINDS = ("hsa", "route", "pattern", "curve")
+MODE_KINDS = ("hsa", "route", "pattern", "curve", "must_fly")
 MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference", "speed_optimization",
                        "direction_reference"),
                "route": ("projection", "repeat", "end", "start"),
@@ -994,15 +1002,17 @@ MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", 
                            "hold_context", "frame", "frame_rotation", "frame_offsets", "frame_x_m", "frame_y_m", "frame_z_m"),
                "curve": ("latitude_rad", "longitude_rad", "altitude_m", "speed_min_ms", "speed_max_ms", "duration_s", "end", "append",
                          "altitude_reference", "altitude_min_m", "altitude_max_m", "point_rotation", "point_offsets", "point_z", "frame",
-                         "frame_rotation", "frame_offsets", "frame_x_m", "frame_y_m", "frame_z_m")}
-MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 35, "curve": (HOLD,) * 20}
+                         "frame_rotation", "frame_offsets", "frame_x_m", "frame_y_m", "frame_z_m"),
+               "must_fly": ("location", "latitude_rad", "longitude_rad", "altitude_m", "altitude_reference", "target", "ingress_min_rad",
+                            "ingress_max_rad", "speed", "speed_reference")}
+MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 35, "curve": (HOLD,) * 20, "must_fly": (HOLD,) * 10}
 _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "speed_optimization": SpeedOptimization,
                "direction_reference": DirectionReference,
                "projection": Projection, "end": EndBehavior,
                "turn": TurnType, "kind": EndPointKind, "waypoint_type": WaypointType, "pattern": PatternKind, "turn_type": HoldTurn, "hold_entry": HoldEntry, "hold_context": HoldContext,
                "climb_optimization": ClimbOptimization,
                "frame_rotation": FrameRotation, "frame_offsets": FrameOffsets, "point_rotation": FrameRotation, "point_offsets": FrameOffsets,
-               "point_z": CurveZ, "terminator": PathTerminator}
+               "point_z": CurveZ, "terminator": PathTerminator, "location": MustFlyLocation}
 
 Waypoint = collections.namedtuple(
     "Waypoint", "latitude_rad longitude_rad altitude_m altitude_reference speed speed_reference turn max_bank_rad climb_rate_ms id "
@@ -1140,6 +1150,16 @@ RoutePlan.__doc__ = ("A route plan (A-GRA's MA_RoutePlanMT; docs/flight-autonomy
                      "metadata - ``detailed``, its remarks (``remarks_name``, ``remarks``), fsim.PointMetadata and "
                      "fsim.PathMetadata, one a point and one a path at most - kept and read back, flown by nothing.")
 
+OpPoint = collections.namedtuple(
+    "OpPoint", "id latitude_rad longitude_rad altitude_m altitude_reference frame frame_rotation frame_offsets frame_x_m frame_y_m "
+               "frame_z_m ingress_min_rad ingress_max_rad revision", defaults=(HOLD,) * 12 + (0,))
+OpPoint.__doc__ = ("An operational point (A-GRA's OpPoint; docs/flight-autonomy.md, 4.42), kept by the world by its ``id`` (not 0) "
+                   "for a must fly to name (World.set_op_point): a place on the Earth - ``latitude_rad``, ``longitude_rad`` - or in "
+                   "a frame (``frame``, World.create_frame's id, and its offsets as a route point's: ``frame_rotation``, "
+                   "``frame_offsets``, ``frame_x_m``, ``frame_y_m``, ``frame_z_m``); its ``altitude_m`` in ``altitude_reference`` "
+                   "(left out, none: flown at the aircraft's); the window of bearings from it it is approached from, "
+                   "``ingress_min_rad`` clockwise to ``ingress_max_rad`` (both or neither); read back, its ``revision``.")
+
 
 BezierSegment = collections.namedtuple("BezierSegment", "north east down")
 BezierSegment.__doc__ = ("One segment of a curve (A-GRA's): a quintic Bezier by its six control points - ``north``, ``east`` "
@@ -1213,6 +1233,11 @@ def _segments(segments):
             raise ValueError("a segment is six control points each north, east and down")
         rows.append(row)
     return rows
+
+
+def _op_point(t):
+    """An operational point from its native tuple (id, revision, then its fields in order)."""
+    return OpPoint(t[0], *t[2:14], revision=t[1])
 
 
 def _waypoints(points):
@@ -1491,10 +1516,11 @@ def _options(**given):
 
 class BatchCommand:
     """One command of Vehicle.submit_batch: a submit method's name ("submit", "submit_behavior", "submit_support",
-    "submit_hsa", "submit_pattern", "submit_route", "submit_curve") and the arguments it takes."""
+    "submit_hsa", "submit_pattern", "submit_must_fly", "submit_route", "submit_curve") and the arguments it takes."""
 
     __slots__ = ("method", "args", "kwargs")
-    _KINDS = {"submit": 0, "submit_behavior": 1, "submit_support": 2, "submit_hsa": 3, "submit_pattern": 3, "submit_route": 4, "submit_curve": 5}
+    _KINDS = {"submit": 0, "submit_behavior": 1, "submit_support": 2, "submit_hsa": 3, "submit_pattern": 3, "submit_must_fly": 3, "submit_route": 4,
+              "submit_curve": 5}
 
     def __init__(self, method, *args, **kwargs):
         if method not in self._KINDS:
@@ -1528,8 +1554,10 @@ class BatchCommand:
         if self.method == "submit_support":
             what = args.pop(0)
             return (kind, SUPPORT_KINDS.index(what), _row(what, args, k), None, None, None, options), (what, source, validate, controller)
-        if self.method in ("submit_hsa", "submit_pattern"):
+        if self.method in ("submit_hsa", "submit_pattern", "submit_must_fly"):
             mode = self.method[len("submit_"):]
+            if "target" in k:  # (a must fly's vehicle as itself or its id)
+                k["target"] = getattr(k["target"], "id", k["target"])
             return (kind, MODE_KINDS.index(mode), _row(mode, args, k), None, None, None, options), (mode, source, validate, controller)
         if self.method == "submit_route":
             waypoints = args.pop(0) if args else k.pop("waypoints")
@@ -1801,6 +1829,27 @@ class Vehicle:
                                 int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection,
                                            controller))
         return self._answer(r, "pattern", source, validate_only, controller)
+
+    def submit_must_fly(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
+                        interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,
+                        override_rejection=False, controller=0, **fields):
+        """NEW for fsim.guidance.must_fly, A-GRA's must fly (docs/flight-autonomy.md, 4.42): ``location``
+        (fsim.MustFlyLocation or "point", "entity", "op_point") - a point at ``latitude_rad``, ``longitude_rad``; another
+        vehicle, ``target`` (a Vehicle or its id); an operational point, ``target`` its id (World.set_op_point) - flown over
+        at ``altitude_m`` in ``altitude_reference`` (left out: a point's the aircraft's; over a vehicle as far above it as
+        the aircraft is, at least 500 ft; an operational point's its own), approached from within a window of bearings from
+        it, ``ingress_min_rad`` clockwise to ``ingress_max_rad`` (both or neither; left out, an operational point's own), at
+        a ``speed`` in ``speed_reference``. Laid out as a route from where the aircraft is - the points it approaches
+        through, then the location, flown over - it completes as the location is passed and flies on along its course.
+        An Activity whose ``update(**fields)`` merges what it gives (a location another than it was replacing the
+        location's own); fsim.Rejected if refused ("unknown_geometry": an operational point the world does not keep). The
+        command envelope as submit's."""
+        if "target" in fields:
+            fields["target"] = getattr(fields["target"], "id", fields["target"])
+        r = self._h.submit_mode(self.id, MODE_KINDS.index("must_fly"), _row("must_fly", values, fields), int(source), None, int(range),
+                                int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window,
+                                                            override_rejection, controller))
+        return self._answer(r, "must_fly", source, validate_only, controller)
 
     def submit_curve(self, segments, *, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
                      interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,
@@ -2568,6 +2617,31 @@ class World:
     def remove_frame(self, frame):
         """Remove a frame; False if there was none."""
         return self._h.remove_frame(int(frame))
+
+    def set_op_point(self, point):
+        """Keep an operational point (fsim.OpPoint; docs/flight-autonomy.md, 4.42) in place of any by its id, its revision one
+        more; its codes by name or member. fsim.Rejected("invalid_parameter") for a malformed one: id 0; neither a place nor
+        a frame, or both; a latitude off the Earth, a value not finite; a frame the world does not have, or offsets without
+        one; an altitude reference without its altitude; a window given one way alone, or beyond half a turn."""
+        p = point if isinstance(point, OpPoint) else OpPoint(**point) if isinstance(point, dict) else OpPoint(*point)
+        codes = {"altitude_reference": AltitudeReference, "frame_rotation": FrameRotation, "frame_offsets": FrameOffsets}
+        values = [codes[k][v.upper()] if k in codes and isinstance(v, str) else v for k, v in zip(OpPoint._fields, p)]
+        reason = self._h.set_op_point(int(values[0]), *(float(v) for v in values[1:13]))
+        if reason:
+            raise Rejected(_native.reason_name(reason))
+
+    def op_points(self):
+        """The operational points kept (fsim.OpPoint), by id."""
+        return [_op_point(t) for t in self._h.op_points()]
+
+    def op_point(self, point_id):
+        """An operational point kept (fsim.OpPoint), or None."""
+        t = self._h.op_point(int(point_id))
+        return None if t is None else _op_point(t)
+
+    def remove_op_point(self, point_id):
+        """Forget an operational point; False if there was none."""
+        return self._h.remove_op_point(int(point_id))
 
     def frame_point(self, frame, x=0.0, y=0.0, z=0.0, *, rotation=FrameRotation.UNROTATED, offsets=FrameOffsets.CARTESIAN, time_s=None):
         """Where a point in a frame is (A-GRA's relative point): ``x``, ``y``, ``z`` metres (z down) turned as ``rotation``

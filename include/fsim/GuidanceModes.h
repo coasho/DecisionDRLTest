@@ -462,7 +462,44 @@ private:
     double endNorth_ = 0.0, endEast_ = 0.0; ///< its end in its plane, past it
 };
 
-/// Registers the modes' behaviours ("hsa", "route", "pattern", "curve"); registerBuiltinControllers calls it.
+/// "must_fly": fsim.guidance.must_fly, A-GRA's must fly (docs/flight-autonomy.md,
+/// 4.42). The host lays the location out as a route in the path store - the
+/// points it approaches through where it has a window of bearings to come
+/// from, then the location, flown over - and the route's follower flies it
+/// (RouteBehavior), a moving location's points in its frame as it moves. Over
+/// another vehicle, the leg to the first point is flown to where that vehicle
+/// will be as the aircraft gets there (a collision course), which closes on
+/// the vehicle itself. It completes as the location is passed, and flies on
+/// along its course there; the vehicle it flies over gone, it fails
+/// `target_lost`.
+class FSIM_API MustFlyBehavior final : public Behavior {
+public:
+    MustFlyBehavior();
+    ~MustFlyBehavior() override;
+    const char* id() const noexcept override { return "must_fly"; }
+    void begin(const ControlContext& ctx, const Command& command) override;
+    Command update(const ControlContext& ctx, const Command& in) override;
+    void reset() override;
+    bool finished() const noexcept override;
+    Reason failure() const noexcept override;
+    std::uint16_t constraints() const noexcept override;
+    /// The route's (4.42): the point flown to - an approach's, then the location's - the distance and time to go, the
+    /// cross-track, what it commands.
+    bool progress(ActivityProgress& out) const noexcept override;
+    std::uint32_t ahead(std::uint32_t* points, std::uint32_t max, bool& ends) const noexcept override;
+
+private:
+    bool arrival(ArrivalEstimate& out) const noexcept override;
+
+    struct Lead; ///< the world as the route sees it: the vehicle flown over where it will be (MustFly.cpp)
+    std::unique_ptr<RouteBehavior> route_; ///< flies the location's route: allocated with the behaviour
+    std::unique_ptr<Lead> lead_;           ///< likewise
+    Command options_;                      ///< the route's options (a RouteCommand): a great circle's legs, on at its end
+};
+
+/// Registers the modes' behaviours ("hsa", "route", "pattern", "curve", "must_fly"); registerBuiltinControllers calls it.
 void registerGuidanceModes(ControllerRegistry& registry);
+/// Registers "must_fly" (MustFly.cpp); registerGuidanceModes calls it.
+void registerMustFly(ControllerRegistry& registry);
 
 } // namespace fsim::control

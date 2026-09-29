@@ -719,8 +719,19 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   A-GRA's append does), those given with them not used. Eight or more fields
  *   are taken, the rest left out. Its segments go beside them, through
  *   fsim_vehicle_submit_curve below; fsim_activity_update with a curve's
- *   fields changes how it is flown, not where. */
-enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3 };
+ *   fields changes how it is flown, not where.
+ * - FSIM_MODE_MUST_FLY (ABI 1.39; docs/flight-autonomy.md, 4.42) is fsim.guidance.must_fly (A-GRA's must fly): fields
+ *   location (fsim_must_fly_location), latitude_rad, longitude_rad (a point's), altitude_m, altitude_reference (the
+ *   altitude it flies over the location at; left out, a point's the aircraft's, a vehicle's as far above it as the
+ *   aircraft is, at least 500 ft, an operational point's its own), target (a vehicle's id, or an operational point's:
+ *   fsim_world_set_op_point), ingress_min_rad, ingress_max_rad (the window of bearings from the location it approaches
+ *   from, the least clockwise to the most: both or neither; left out, an operational point's own), speed,
+ *   speed_reference. It is laid out as a route from where the aircraft is - the points it approaches through, then the
+ *   location, flown over - and completes as the location is passed, flying on along its course there.
+ *   fsim_activity_update merges the fields given, a location another than it was replacing the location's own. */
+enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3, FSIM_MODE_MUST_FLY = 4 /* ABI 1.39 */ };
+/* A must fly's location (ABI 1.39; A-GRA's MustFlyLocationType): a point, another vehicle, an operational point by its id */
+enum fsim_must_fly_location { FSIM_MUST_FLY_POINT = 0, FSIM_MUST_FLY_ENTITY, FSIM_MUST_FLY_OP_POINT };
 enum fsim_pattern_kind { FSIM_PATTERN_ORBIT = 0, FSIM_PATTERN_RACETRACK, FSIM_PATTERN_FIGURE_EIGHT, FSIM_PATTERN_HOLD,
                          FSIM_PATTERN_HOVER /* ABI 1.23: a rotorcraft's */ };
 enum fsim_hold_turn { FSIM_HOLD_TURN_STANDARD = 0, FSIM_HOLD_TURN_MIL_POWER, FSIM_HOLD_TURN_RELAX }; /* A-GRA's MA_HoldTurnTypeEnum (ABI 1.22) */
@@ -739,8 +750,9 @@ enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER = 1,
                       FSIM_TURN_CAPTURE_OUTBOUND_COURSE = 2, FSIM_TURN_START_TURN = 3, FSIM_TURN_END_TURN = 4 };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft after a route; after a curve it circles it) */
-FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 35, curve 20 (1.14: hsa 6, pattern 12; 1.15: hsa 7, pattern 13;
-                                                      1.20: hsa 8; 1.21: pattern 25; 1.22: pattern 29; 1.25: curve 20); 0 for an unknown mode */
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 35, curve 20, must fly 10 (1.14: hsa 6, pattern 12; 1.15: hsa 7,
+                                                      pattern 13; 1.20: hsa 8; 1.21: pattern 25; 1.22: pattern 29; 1.25: curve 20; 1.39: must fly);
+                                                      0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result);
 
@@ -1682,6 +1694,31 @@ FSIM_API void fsim_frame_offset_init(fsim_frame_offset* offset);
  * FSIM_INVALID_ARGUMENT for an unknown frame, one whose vehicle is gone, or an offset's code not one. */
 FSIM_API int fsim_world_frame_point(const fsim_world* world, uint64_t id, const fsim_frame_offset* offset, double time_s,
                                     double* latitude_rad, double* longitude_rad, double* altitude_msl_m);
+
+/* Operational points (ABI 1.39; docs/flight-autonomy.md, 4.42; A-GRA's OpPoint): kept by the world by id, for a must fly to
+ * name - a place on the Earth (latitude and longitude), or in a frame (frame and its offsets, as a route point's) - and the
+ * window of bearings from it it is approached from. fsim_op_point_init leaves every field out (fsim_hold(); frame 0). */
+typedef struct fsim_op_point {
+    uint32_t struct_size;
+    uint32_t revision;                  /* read back: one more each time it is set (ignored as set) */
+    uint64_t op_point_id;               /* not 0 */
+    double latitude_rad, longitude_rad; /* on the Earth; with a frame, left out */
+    double altitude_m, altitude_reference; /* fsim_altitude_reference; left out, none (flown at the aircraft's) */
+    double frame;                       /* in this frame (fsim_world_create_frame's id) */
+    double frame_rotation, frame_offsets; /* fsim_frame_rotation, fsim_frame_offsets */
+    double frame_x_m, frame_y_m, frame_z_m; /* its offsets (z down: given, its altitude the frame's there) */
+    double ingress_min_rad, ingress_max_rad; /* the bearings from it it is approached from: both or neither, within half a turn */
+} fsim_op_point;
+FSIM_API void fsim_op_point_init(fsim_op_point* point);
+/* Kept in place of any by its id, its revision one more. `*reason` 0, or invalid_parameter: id 0; neither a place nor a frame,
+ * or both; a latitude off the Earth, a value not finite, a code not one; a frame the world does not have, or offsets
+ * without one; an altitude reference without its altitude; a window given one way alone, or beyond half a turn. */
+FSIM_API int fsim_world_set_op_point(fsim_world* world, const fsim_op_point* point, int32_t* reason);
+FSIM_API int fsim_world_remove_op_point(fsim_world* world, uint64_t id); /* FSIM_INVALID_ARGUMENT for one not kept */
+/* The points kept, by id; one read back. FSIM_INVALID_ARGUMENT for one not kept. */
+FSIM_API uint32_t fsim_world_op_point_count(const fsim_world* world);
+FSIM_API int fsim_world_get_op_point_at(const fsim_world* world, uint32_t index, fsim_op_point* out);
+FSIM_API int fsim_world_get_op_point(const fsim_world* world, uint64_t id, fsim_op_point* out);
 
 /* A flight mode's performance profile (ABI 1.14; docs/flight-autonomy.md, 4.15; A-GRA's
  * MA_FlightControlModesPerformanceProfileType, VI 1.2.6.7): the guard rails a mission autonomy shapes its commands

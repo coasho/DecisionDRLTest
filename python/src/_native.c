@@ -2050,6 +2050,72 @@ static PyObject* world_frame_point(PyObject* o, PyObject* const* args, Py_ssize_
     return Py_BuildValue("(ddd)", lat, lon, alt);
 }
 
+/* An operational point as a tuple (ABI 1.39): (id, revision, latitude_rad, longitude_rad, altitude_m, altitude_reference,
+ * frame, frame_rotation, frame_offsets, frame_x_m, frame_y_m, frame_z_m, ingress_min_rad, ingress_max_rad) */
+static PyObject* op_point_tuple(const fsim_op_point* p) {
+    return Py_BuildValue("(KIdddddddddddd)", (unsigned long long)p->op_point_id, (unsigned int)p->revision, p->latitude_rad, p->longitude_rad,
+                         p->altitude_m, p->altitude_reference, p->frame, p->frame_rotation, p->frame_offsets, p->frame_x_m, p->frame_y_m,
+                         p->frame_z_m, p->ingress_min_rad, p->ingress_max_rad);
+}
+
+/* set_op_point(id, latitude_rad, longitude_rad, altitude_m, altitude_reference, frame, frame_rotation, frame_offsets,
+ * frame_x_m, frame_y_m, frame_z_m, ingress_min_rad, ingress_max_rad) -> reason (0: kept) (ABI 1.39) */
+static PyObject* world_set_op_point(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    fsim_op_point p;
+    if (!check_args(n, 13, 13, "set_op_point")) return NULL;
+    fsim_op_point_init(&p);
+    if (!as_u64(args[0], &p.op_point_id)) return NULL;
+    double* fields[] = {&p.latitude_rad, &p.longitude_rad, &p.altitude_m, &p.altitude_reference, &p.frame, &p.frame_rotation, &p.frame_offsets,
+                        &p.frame_x_m, &p.frame_y_m, &p.frame_z_m, &p.ingress_min_rad, &p.ingress_max_rad};
+    for (int k = 0; k < 12 && !PyErr_Occurred(); ++k) *fields[k] = PyFloat_AsDouble(args[k + 1]);
+    if (PyErr_Occurred()) return NULL;
+    int32_t reason = 0;
+    if (fsim_world_set_op_point(self->world, &p, &reason) != FSIM_OK) return fail();
+    return PyLong_FromLong(reason);
+}
+
+/* op_points() -> [op_point tuple], by id (ABI 1.39) */
+static PyObject* world_op_points(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    (void)args;
+    if (!check_args(n, 0, 0, "op_points")) return NULL;
+    const uint32_t count = fsim_world_op_point_count(self->world);
+    PyObject* list = PyList_New(0);
+    for (uint32_t i = 0; list && i < count; ++i) {
+        fsim_op_point p;
+        fsim_op_point_init(&p);
+        if (fsim_world_get_op_point_at(self->world, i, &p) != FSIM_OK) continue;
+        PyObject* t = op_point_tuple(&p);
+        if (!t || PyList_Append(list, t) < 0) {
+            Py_XDECREF(t);
+            Py_DECREF(list);
+            return NULL;
+        }
+        Py_DECREF(t);
+    }
+    return list;
+}
+
+/* op_point(id) -> op_point tuple, or None for one not kept (ABI 1.39) */
+static PyObject* world_op_point(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t id;
+    fsim_op_point p;
+    if (!check_args(n, 1, 1, "op_point") || !as_u64(args[0], &id)) return NULL;
+    fsim_op_point_init(&p);
+    if (fsim_world_get_op_point(self->world, id, &p) != FSIM_OK) Py_RETURN_NONE;
+    return op_point_tuple(&p);
+}
+
+/* remove_op_point(id) -> bool (ABI 1.39) */
+static PyObject* world_remove_op_point(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint64_t id;
+    if (!check_args(n, 1, 1, "remove_op_point") || !as_u64(args[0], &id)) return NULL;
+    return PyBool_FromLong(fsim_world_remove_op_point(self->world, id) == FSIM_OK);
+}
+
 /* activity_setpoint(activity) -> (kind, code, fields, behavior, waypoints, segments), or None for one not live:
  * `behavior` (id, target, {name: value}, [(latitude_rad, longitude_rad, altitude_msl_m, airspeed_ms, capture_radius_m)])
  * or None, `waypoints` [waypoint row] or None, `segments` [18 floats: north, east, down] or None - a curve's as A-GRA's
@@ -3607,6 +3673,10 @@ static PyMethodDef world_methods[] = {
     FAST("create_frame", world_create_frame, "create_frame(origin, vehicle, latitude_rad, longitude_rad, altitude_msl_m, yaw_rad, pitch_rad, roll_rad, north_ms, east_ms, down_ms, time_s) -> id"),
     FAST("remove_frame", world_remove_frame, "remove_frame(id) -> bool"),
     FAST("frame_point", world_frame_point, "frame_point(id, rotation, offsets, x, y, z, time_s) -> (latitude_rad, longitude_rad, altitude_msl_m) or None"),
+    FAST("set_op_point", world_set_op_point, "set_op_point(id, latitude_rad, longitude_rad, altitude_m, altitude_reference, frame, frame_rotation, frame_offsets, frame_x_m, frame_y_m, frame_z_m, ingress_min_rad, ingress_max_rad) -> reason"),
+    FAST("op_points", world_op_points, "op_points() -> [op point tuple]"),
+    FAST("op_point", world_op_point, "op_point(id) -> op point tuple or None"),
+    FAST("remove_op_point", world_remove_op_point, "remove_op_point(id) -> bool"),
     FAST("performance_profile", world_performance_profile, "performance_profile(id, mode) -> (reason, profile or None)"),
     FAST("vehicle_activities", world_vehicle_activities, "vehicle_activities(id) -> [info]"),
     FAST("capabilities", world_capabilities, "capabilities(id) -> [capability]"),

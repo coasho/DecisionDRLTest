@@ -574,6 +574,10 @@ comm::Network& World::network() { return impl_->network(); }
 std::optional<double> World::terrainHeightM(double latitudeRad, double longitudeRad) const { return impl_->terrainHeightM(latitudeRad, longitudeRad); }
 
 control::FrameId World::createFrame(const control::FrameSpec& spec) { return impl_->createFrame(spec); }
+control::Reason World::setOpPoint(const control::OpPoint& point) { return impl_->setOpPoint(point); }
+bool World::removeOpPoint(control::OpPointId id) { return impl_->removeOpPoint(id); }
+std::vector<control::OpPointId> World::opPoints() const { return impl_->opPoints(); }
+std::optional<control::OpPoint> World::opPoint(control::OpPointId id) const { return impl_->opPoint(id); }
 
 bool World::removeFrame(control::FrameId id) { return impl_->removeFrame(id); }
 

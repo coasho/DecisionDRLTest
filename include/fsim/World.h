@@ -475,6 +475,13 @@ public:
     std::optional<control::FramePose> framePose(control::FrameId id, double timeS = std::numeric_limits<double>::quiet_NaN()) const;
     std::optional<control::GeoPoint> framePoint(control::FrameId id, const control::FrameOffset& offset,
                                                 double timeS = std::numeric_limits<double>::quiet_NaN()) const;
+    /// Operational points (docs/flight-autonomy.md, 4.42; A-GRA's OpPoint): kept by id in place of any by it, its revision one
+    /// more - a place on the Earth or in a frame, and the window of bearings it is approached from - for a must fly to name.
+    /// InvalidParameter for a malformed one (id 0, neither a place nor a frame or both, a frame the world does not have, ...).
+    control::Reason setOpPoint(const control::OpPoint& point);
+    bool removeOpPoint(control::OpPointId id);
+    std::vector<control::OpPointId> opPoints() const;
+    std::optional<control::OpPoint> opPoint(control::OpPointId id) const;
 
     /// Give every vehicle (present and future) its own effect instance.
     void addEffectToAll(std::function<std::unique_ptr<effects::Effect>()> factory);

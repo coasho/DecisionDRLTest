@@ -555,6 +555,7 @@ bool toMode(int mode, const double* fields, uint32_t count, fsim::control::Comma
     else if (mode == FSIM_MODE_ROUTE) out = fsim::control::RouteCommand{};
     else if (mode == FSIM_MODE_PATTERN) out = fsim::control::PatternCommand{};
     else if (mode == FSIM_MODE_CURVE) out = fsim::control::CurveCommand{};
+    else if (mode == FSIM_MODE_MUST_FLY) out = fsim::control::MustFlyCommand{}; // (ABI 1.39)
     else return false;
     double* slots[fsim::control::kMaxCommandFields];
     std::size_t n = fsim::control::commandFields(out, slots);
@@ -800,6 +801,7 @@ UpdateShape updateShape(fsim_world* w, fsim::control::ActivityId activity) {
     case fsim::control::SetpointKind::Route: shape.mode = FSIM_MODE_ROUTE; break;
     case fsim::control::SetpointKind::Pattern: shape.mode = FSIM_MODE_PATTERN; break;
     case fsim::control::SetpointKind::Curve: shape.mode = FSIM_MODE_CURVE; break;
+    case fsim::control::SetpointKind::MustFly: shape.mode = FSIM_MODE_MUST_FLY; break;
     default: break;
     }
     if (shape.mode >= 0) {
@@ -1068,6 +1070,7 @@ FSIM_API uint32_t fsim_mode_field_count(int mode) {
     else if (mode == FSIM_MODE_ROUTE) c = fsim::control::RouteCommand{};
     else if (mode == FSIM_MODE_PATTERN) c = fsim::control::PatternCommand{};
     else if (mode == FSIM_MODE_CURVE) c = fsim::control::CurveCommand{};
+    else if (mode == FSIM_MODE_MUST_FLY) c = fsim::control::MustFlyCommand{};
     else return 0;
     double* slots[fsim::control::kMaxCommandFields];
     const auto n = static_cast<uint32_t>(fsim::control::commandFields(c, slots));
@@ -1845,7 +1848,8 @@ bool fromBatch(fsim_world* world, const fsim_batch_command& b, fsim::control::Ba
         break;
     case FSIM_BATCH_SUPPORT: ok = toSupport(b.code, b.fields, b.count, sc), item.command = sc; break;
     case FSIM_BATCH_MODE:
-        ok = (b.code == FSIM_MODE_HSA || b.code == FSIM_MODE_PATTERN) && toMode(b.code, b.fields, b.count, c, &shape), item.command = c;
+        ok = (b.code == FSIM_MODE_HSA || b.code == FSIM_MODE_PATTERN || b.code == FSIM_MODE_MUST_FLY) && toMode(b.code, b.fields, b.count, c, &shape),
+        item.command = c;
         if (ok && b.code == FSIM_MODE_PATTERN && b.count > kPatternFields) item.shape = &shape;
         break;
     case FSIM_BATCH_ROUTE: { // (its loiters and states where the caller's struct has them: ABI 1.28, 1.31)
@@ -2081,6 +2085,7 @@ fsim_batch_command setpointOut(fsim_world* world) {
         }
         if (std::holds_alternative<HsaCommand>(c)) b.kind = FSIM_BATCH_MODE, b.code = FSIM_MODE_HSA;
         else if (std::holds_alternative<PatternCommand>(c)) b.kind = FSIM_BATCH_MODE, b.code = FSIM_MODE_PATTERN;
+        else if (std::holds_alternative<MustFlyCommand>(c)) b.kind = FSIM_BATCH_MODE, b.code = FSIM_MODE_MUST_FLY;
         else if (std::holds_alternative<RouteCommand>(c)) b.kind = FSIM_BATCH_ROUTE, b.code = FSIM_MODE_ROUTE;
         else if (std::holds_alternative<CurveCommand>(c)) b.kind = FSIM_BATCH_CURVE, b.code = FSIM_MODE_CURVE;
         else b.kind = FSIM_BATCH_LEVEL, b.code = static_cast<int32_t>(c.index()); // (up to a behaviour's, the index is the level)
@@ -2824,6 +2829,69 @@ FSIM_API int fsim_world_frame_point(const fsim_world* world, uint64_t id, const 
     const std::optional<fsim::control::GeoPoint> p = world->world.framePoint(id, o, time_s);
     if (!p) return FSIM_INVALID_ARGUMENT;
     *latitude_rad = p->latitudeRad, *longitude_rad = p->longitudeRad, *altitude_msl_m = p->altitudeMslM;
+    return FSIM_OK;
+}
+
+/// An operational point from the caller's (ABI 1.39), and back.
+fsim::control::OpPoint opPointFromC(const fsim_op_point& c) noexcept {
+    fsim::control::OpPoint p;
+    p.id = c.op_point_id;
+    p.latitudeRad = c.latitude_rad, p.longitudeRad = c.longitude_rad, p.altitudeM = c.altitude_m, p.altitudeReference = c.altitude_reference;
+    p.frame = c.frame, p.frameRotation = c.frame_rotation, p.frameOffsets = c.frame_offsets;
+    p.frameXM = c.frame_x_m, p.frameYM = c.frame_y_m, p.frameZM = c.frame_z_m;
+    p.ingressMinRad = c.ingress_min_rad, p.ingressMaxRad = c.ingress_max_rad;
+    return p;
+}
+
+void opPointToC(const fsim::control::OpPoint& p, fsim_op_point& c) noexcept {
+    const uint32_t size = c.struct_size;
+    fsim_op_point_init(&c);
+    c.struct_size = size;
+    c.revision = p.revision, c.op_point_id = p.id;
+    c.latitude_rad = p.latitudeRad, c.longitude_rad = p.longitudeRad, c.altitude_m = p.altitudeM, c.altitude_reference = p.altitudeReference;
+    c.frame = p.frame, c.frame_rotation = p.frameRotation, c.frame_offsets = p.frameOffsets;
+    c.frame_x_m = p.frameXM, c.frame_y_m = p.frameYM, c.frame_z_m = p.frameZM;
+    c.ingress_min_rad = p.ingressMinRad, c.ingress_max_rad = p.ingressMaxRad;
+}
+
+FSIM_API void fsim_op_point_init(fsim_op_point* point) {
+    if (!point) return;
+    std::memset(point, 0, sizeof *point);
+    point->struct_size = sizeof *point;
+    const double hold = fsim::control::kHold;
+    point->latitude_rad = point->longitude_rad = point->altitude_m = point->altitude_reference = hold;
+    point->frame = point->frame_rotation = point->frame_offsets = point->frame_x_m = point->frame_y_m = point->frame_z_m = hold;
+    point->ingress_min_rad = point->ingress_max_rad = hold;
+}
+
+FSIM_API int fsim_world_set_op_point(fsim_world* world, const fsim_op_point* point, int32_t* reason) {
+    if (!world || !point || !reason || !FSIM_HAS(point, fsim_op_point, ingress_max_rad)) return FSIM_INVALID_ARGUMENT;
+    *reason = static_cast<int32_t>(world->world.setOpPoint(opPointFromC(*point)));
+    return FSIM_OK;
+}
+
+FSIM_API int fsim_world_remove_op_point(fsim_world* world, uint64_t id) {
+    if (!world) return FSIM_INVALID_ARGUMENT;
+    if (!world->world.removeOpPoint(id)) return absent(FSIM_INVALID_ARGUMENT, "fsim_world_remove_op_point: no such point");
+    return FSIM_OK;
+}
+
+FSIM_API uint32_t fsim_world_op_point_count(const fsim_world* world) {
+    return world ? static_cast<uint32_t>(world->world.opPoints().size()) : 0u;
+}
+
+FSIM_API int fsim_world_get_op_point_at(const fsim_world* world, uint32_t index, fsim_op_point* out) {
+    if (!world || !out || !FSIM_HAS(out, fsim_op_point, ingress_max_rad)) return FSIM_INVALID_ARGUMENT;
+    const std::vector<fsim::control::OpPointId> ids = world->world.opPoints();
+    if (index >= ids.size()) return absent(FSIM_INVALID_ARGUMENT, "fsim_world_get_op_point_at: no such point");
+    return fsim_world_get_op_point(world, ids[index], out);
+}
+
+FSIM_API int fsim_world_get_op_point(const fsim_world* world, uint64_t id, fsim_op_point* out) {
+    if (!world || !out || !FSIM_HAS(out, fsim_op_point, ingress_max_rad)) return FSIM_INVALID_ARGUMENT;
+    const std::optional<fsim::control::OpPoint> p = world->world.opPoint(id);
+    if (!p) return absent(FSIM_INVALID_ARGUMENT, "fsim_world_get_op_point: no such point");
+    opPointToC(*p, *out);
     return FSIM_OK;
 }
 

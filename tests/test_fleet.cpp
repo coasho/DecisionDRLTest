@@ -840,6 +840,44 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             REQUIRE(s.has_value());
             CHECK((s->state == PlanState::Activated && s->execution == PlanExecution::Complete && s->activity == activity[p.id]));
         });
+    // a must fly (ADR-29 FA-8a, MFY-01, MFY-07): a point a leg ahead and half a leg to the right, at its altitude,
+    // approached from the east - the aircraft coming from the south-west, round through the points laid out to come
+    // from within 80 to 100 degrees - flown over and passed
+    std::map<std::uint32_t, double> closest, cameFrom;
+    auto mustFlyPoint = [&](const Plane& p) { return pointFrom(p.start, leg(p), 0.5 * leg(p), p.start.altitudeMslM, 0.0); };
+    run("fsim.guidance.must_fly", 0.0,
+        [&](const Plane& p) {
+            const PositionCommand q = mustFlyPoint(p);
+            MustFlyCommand c;
+            c.location = static_cast<double>(MustFlyLocation::Point);
+            c.latitudeRad = q.latitudeRad, c.longitudeRad = q.longitudeRad, c.altitudeM = q.altitudeMslM;
+            c.ingressMinRad = 80.0 * kDeg, c.ingressMaxRad = 100.0 * kDeg;
+            const CommandResult r = w.submit(p.id, c);
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            closest[p.id] = kInf;
+            return r.accepted();
+        },
+        [&](const Plane& p) { return 5.0 * leg(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) + 60.0; }, // (done by 0.71 of it at most: the UH-1H)
+        [&](const Plane& p) {
+            const ActivityRecord* r = w.activity(activity[p.id]);
+            if (!r || !r->live()) return;
+            const PositionCommand q = mustFlyPoint(p);
+            const auto& s = *w.vehicleState(p.id);
+            const double north = (s.latitudeRad - q.latitudeRad) * kEarthM, east = (s.longitudeRad - q.longitudeRad) * kEarthM * std::cos(q.latitudeRad);
+            if (std::hypot(north, east) < closest[p.id])
+                closest[p.id] = std::hypot(north, east), cameFrom[p.id] = std::remainder(std::atan2(-s.velocityNedMs[1], -s.velocityNedMs[0]), 2.0 * kPi);
+        },
+        [&](const Plane& p, const Lows& lows) {
+            completed(p, lows);
+            // (the worst of the fleet: flown over 34.5 m off, the Gripen's - the other fly-by-wire jets' 14 to 30 m, the direct
+            // wings' at most 9.3 m, the UH-60A's 3.3 m, the multirotors' 0.17 m; come from 93.4 to 95.5 deg, aimed 95)
+            const double off = p.cls == Class::FlyByWire ? 70.0 : p.cls == Class::Direct ? 20.0 : p.cls == Class::Helicopter ? 7.0 : 0.5;
+            CHECK(closest[p.id] < off);
+            CHECK(cameFrom[p.id] > 80.0 * kDeg);
+            CHECK(cameFrom[p.id] < 100.0 * kDeg);
+        });
     // its endurance (ADR-29 FA-3e, VAL-03): three times what it lasts, a timed pattern, is refused - a soft rejection,
     // which override_rejection overrides; five minutes straight ahead at its cruise, its prediction (read under a
     // reserve of 99.99 %, so the check reports what the flight needs) against the burn it flies, within 5 %

@@ -27,8 +27,9 @@ double aboveSea(double altitudeM, double reference, const sim::VehicleState& s, 
 CommandDetails::Endurance CapabilityHost::endurance(const Command& setpoint, const sim::VehicleState& state, double now) const noexcept {
     CommandDetails::Endurance out;
     if (!sessionView_) return out;
-    // only a flight with an end: a route that does not repeat, a pattern timed or of so many laps, a curve
-    const auto* route = std::get_if<RouteCommand>(&setpoint);
+    // only a flight with an end: a route that does not repeat (a must fly's among them: 4.42), a pattern timed or of so
+    // many laps, a curve
+    const bool route = std::holds_alternative<RouteCommand>(setpoint) || std::holds_alternative<MustFlyCommand>(setpoint);
     const auto* pattern = std::get_if<PatternCommand>(&setpoint);
     const auto* curve = std::get_if<CurveCommand>(&setpoint);
     if (route && (!routePlan_ || routePlan_->repeat || routePlan_->count == 0)) return out;

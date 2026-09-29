@@ -64,10 +64,24 @@ public:
     virtual double utcSeconds() const = 0;
     /// The world's simulation time now, s: a route's arrival windows' clock (4.33).
     virtual double simTimeS() const = 0;
-    /// A reference frame, and where it is now (4.21, 4.25): false for one it does not have (or whose vehicle is gone).
+    /// A reference frame, and where it is now (4.21, 4.25): false for one it does not have (or whose vehicle is gone). A
+    /// vehicle's own frame is `kVehicleFrames` plus its id (a must fly over it: 4.42).
     virtual bool frame(FrameId id, FrameSpec& spec, FramePose& now) const = 0;
+    /// An operational point the world keeps (4.42; World::setOpPoint): false for one it does not.
+    virtual bool opPoint(OpPointId id, OpPoint& out) const {
+        (void)id, (void)out;
+        return false;
+    }
 };
 
+/// A vehicle's own frame, as the session answers it (SessionView::frame): this plus the vehicle's id - whole, and within the
+/// 2^53 a route point's frame is read to, where the world's own frames never reach. What a must fly flies over another
+/// vehicle through (docs/flight-autonomy.md, 4.42).
+inline constexpr FrameId kVehicleFrames = FrameId{1} << 52;
+
+/// A must fly merged as an UPDATE gives it (docs/flight-autonomy.md, 4.42; MustFly.cpp): the fields given replace the kept
+/// ones; a location given (another than it was) replaces the location's own fields - a point's place, an id - left out.
+void mergeMustFly(MustFlyCommand& dst, const MustFlyCommand& src) noexcept;
 /// A curve's shape merged as an UPDATE gives it (docs/flight-autonomy.md, 4.27): its frame's fields given replace
 /// the kept ones; a point (a latitude and longitude) given leaves the frame, and a frame given the point (Nurbs.cpp).
 void mergeCurveShape(CurveCommand& curve, CurveShape& shape, const CurveCommand& given, const CurveShape& givenShape) noexcept;
@@ -664,6 +678,11 @@ private:
     /// checked, limited as a pattern is (limitPattern at its point).
     Reason checkRoute(RouteCommand& route, Span<const Waypoint> waypoints, const sim::VehicleState& state, CheckLog& log,
                       const RouteExtras* extras = nullptr);
+    /// A must fly's location laid out as a route from where the aircraft is (4.42; MustFly.cpp): its fields whole and in
+    /// range, its location found - a point, another vehicle (a point in its own frame), an operational point the session
+    /// keeps (UnknownGeometry) - the points it approaches through where it has a window of bearings to come from, then the
+    /// location, flown over; checked as a route's (checkRoute), into the scratch plan.
+    Reason prepareMustFly(MustFlyCommand& c, const sim::VehicleState& state, CheckLog& log);
     /// A route's arrival windows as given (4.33; Arrival.cpp), its first lap's: one past refused invalid; one at or after
     /// a loiter point, or on an aircraft without the tables its speeds come from, not implemented - the point named.
     Reason checkArrivals(const route::Plan& plan, const sim::VehicleState& state, CommandResult& detail) const noexcept;
@@ -782,6 +801,10 @@ private:
     /// completed and checked; then written, the shape into the path store.
     CommandResult updatePattern(std::size_t s, ActivityId activity, const PatternCommand& next, const PatternShape* shape, const sim::VehicleState& state,
                                 CommandResult& result, CheckLog& log) noexcept;
+    /// A live must fly's UPDATE in slot `s` (4.42; MustFly.cpp): `next`'s fields given merged into what flies, laid out
+    /// afresh from where the aircraft is and checked; then written, its route into the path store, flown afresh.
+    CommandResult updateMustFly(std::size_t s, ActivityId activity, const MustFlyCommand& next, const sim::VehicleState& state, CommandResult& result,
+                                CheckLog& log) noexcept;
     /// The scratch shape into the path store, for the pattern that flies: where it has one, or one flew before - its
     /// frame with it.
     void writeShape();

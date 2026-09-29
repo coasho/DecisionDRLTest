@@ -200,7 +200,7 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         f.late = up && efficient;
     };
 
-    if (std::get_if<RouteCommand>(&setpoint) && routePlan_ && routePlan_->count > 0) {
+    if ((std::holds_alternative<RouteCommand>(setpoint) || std::holds_alternative<MustFlyCommand>(setpoint)) && routePlan_ && routePlan_->count > 0) {
         // each leg from where the one before left the aircraft, its altitude in its own reference, and its fly-by turn
         // at its point; round again once where it repeats; else what it flies after its last point, until it has
         // settled at its altitude, and a minute on (a lap, round its point)
@@ -398,7 +398,8 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
 void CapabilityHost::checkTerrain(const Command& setpoint, const sim::VehicleState& state, CheckLog& log) const noexcept {
     if (!sessionView_ || log.range == RangePolicy::None) return;
     if (!std::holds_alternative<RouteCommand>(setpoint) && !std::holds_alternative<PatternCommand>(setpoint) &&
-        !std::holds_alternative<CurveCommand>(setpoint) && !std::holds_alternative<HsaCommand>(setpoint))
+        !std::holds_alternative<CurveCommand>(setpoint) && !std::holds_alternative<HsaCommand>(setpoint) &&
+        !std::holds_alternative<MustFlyCommand>(setpoint)) // (a must fly's route: 4.42)
         return;
     const CommandDetails::Terrain hit = terrain(setpoint, state);
     if (!hit.hit) return;

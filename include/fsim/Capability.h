@@ -165,6 +165,8 @@ enum class Reason : std::uint8_t {
     ReadOnlyPlan,       ///< a plan command or a removal refused: the plan is FA's own, which MA activates but never replaces or removes
     SafetyCriticalPlan, ///< a plan published refused: a takeoff's, a departure's, an approach's or a landing's, which are FA's own alone (VI 1.2.5.2)
     UnknownAirfield,    ///< a plan loaded refused: a takeoff's or a landing's path names an airfield or a runway the vehicle does not keep
+    // operational geometry (docs/flight-autonomy.md, 4.42)
+    UnknownGeometry,    ///< a command refused: it names an operational point the world does not keep
     Count
 };
 
@@ -828,6 +830,7 @@ enum class SetpointKind : std::uint8_t {
     Route,    ///< RouteCommand and its waypoints (fsim.guidance.route)
     Pattern,  ///< PatternCommand (fsim.guidance.pattern)
     Curve,    ///< CurveCommand and its segments (fsim.guidance.curve)
+    MustFly,  ///< MustFlyCommand (fsim.guidance.must_fly)
     Count
 };
 

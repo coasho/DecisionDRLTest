@@ -293,6 +293,16 @@ public:
     /// Where a point in a frame is at a time (NaN: now).
     std::optional<control::GeoPoint> framePoint(control::FrameId id, const control::FrameOffset& offset,
                                                 double timeS = std::numeric_limits<double>::quiet_NaN()) const;
+    // --- Operational geometry (docs/flight-autonomy.md, 4.42; A-GRA's OpPoint) ---
+    /// An operational point, kept by its id in place of any by it, its revision one more (Geometry.cpp). InvalidParameter:
+    /// id 0; neither a place nor a frame, or both; a latitude off the Earth, a value not finite, a code not one; a frame
+    /// the world does not have, or offsets without one; an altitude reference without its altitude; a window of bearings
+    /// given one way alone, or beyond half a turn.
+    control::Reason setOpPoint(const control::OpPoint& point);
+    bool removeOpPoint(control::OpPointId id);
+    /// The operational points kept, by id.
+    std::vector<control::OpPointId> opPoints() const;
+    std::optional<control::OpPoint> opPoint(control::OpPointId id) const;
     // --- The performance profile (docs/flight-autonomy.md, 4.15; A-GRA's MA_FlightControlModesPerformanceProfileType) ---
     /// A flight mode's performance profile at the vehicle's condition now - HSA/CSA, waypoint or curve following -
     /// into `out`, its vectors reused (PerformanceProfile.cpp). InvalidParameter for another mode (A-GRA profiles
@@ -446,6 +456,7 @@ private:
         double utcSeconds() const override { return world_.environment_.epochUtcSeconds + world_.simTime_; }
         double simTimeS() const override { return world_.simTime_; }
         bool frame(control::FrameId id, control::FrameSpec& spec, control::FramePose& now) const override;
+        bool opPoint(control::OpPointId id, control::OpPoint& out) const override;
 
     private:
         const World& world_;
@@ -494,6 +505,7 @@ private:
     Answers answers_{*this};
     std::map<control::FrameId, control::FrameSpec> frames_; ///< the reference frames, by id (4.21)
     control::FrameId lastFrame_ = 0;
+    std::map<control::OpPointId, control::OpPoint> opPoints_; ///< the operational points, by id (4.42)
 };
 
 } // namespace fsim::session

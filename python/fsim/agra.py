@@ -80,6 +80,7 @@ CANNOT_COMPLY = {
     "read_only_plan": "INELIGIBLE_CONTROL_SOURCE",
     "safety_critical_plan": "CONSTRAINT_SAFETY",
     "unknown_airfield": "UNKNOWN_ID",
+    "unknown_geometry": "UNKNOWN_ID",
 }
 
 #: fsim.PlanState -> A-GRA's PlanActivationStateEnum (docs/flight-autonomy.md, 4.39): the states FA reaches

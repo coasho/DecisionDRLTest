@@ -1081,6 +1081,33 @@ MA may have FA validate a route plan without flying it (VI 1.2.5.5: RoutePlanVal
   - C ABI 1.38: `fsim_plan_validation` (`fsim_plan_validation_init`: as the vehicle is now), `fsim_plan_validation_result`; `fsim_vehicle_validate_plan`, `fsim_vehicle_validate_stored_plan`.
   - Python: `vehicle.validate_plan(plan_or_id, wind=, gust_ms=, origin=, modify=, parts=)`, a `fsim.PlanValidationResult` (`valid`, its `fsim.Validation`, the `index` a refusal names); `fsim.agra.route_plan_validation`.
 
+### 4.42 A-GRA's must fly: points, entities, operational points and the ingress window (as FA-8a builds them)
+
+A-GRA's MUST_FLY (MA_FlightCapabilityEnum; the flight command's MustFly, MustFlyType) is a location the aircraft must fly: a point, an entity, an operational point, line, zone or volume by id, or a zone, line or volume given with it - approached, where it says so, from within a window of bearings (its IngressConstraint: "the acceptable range of bearing values at the ... Location that the System must approach from. Bearing from is defined as the true heading from the ... Location to the System"). ADR-29 plans it as MFY-01 to MFY-07, with operational geometry (ENV-06), FA-8. FA-8a builds the points, entities, operational points and the ingress window (MFY-01, MFY-02, MFY-07; MFY-03 and ENV-06 for points). FA-8b builds zones, corridors and volumes.
+
+- **The mode** (`MustFlyCommand`, fsim.guidance.must_fly): `location` (`MustFlyLocation`: a point, an entity, an operational point), a point's `latitudeRad` and `longitudeRad`, the `altitudeM` it flies over the location at and its `altitudeReference`, a `target` (an entity's vehicle id, or an operational point's id), `ingressMinRad` and `ingressMaxRad`, a `speed` and its `speedReference`. It joins the command variant no larger than its largest (4.23): ten fields. It takes NEW, UPDATE and CANCEL, as the other modes do.
+- **Laid out as a route** from where the aircraft is, when it is commanded (or starts, where it waits). The route has the points it approaches through, then the location, which is flown over (a waypoint). It is flown by the route's follower, and checked as a route is: its turns, gradients, terrain and endurance, by point (0 and 1 its approaches, the last its location). It completes as the location is passed, and flies on along its course there. Its setpoint reads back as commanded; its route is in its setpoint's waypoints and its end points.
+- **A point** (A-GRA's Point3D): flown over at its altitude; left out, the aircraft's.
+- **An entity** (A-GRA's EntityID): another vehicle in the world, flown over as it moves - a point in its own frame (4.21, 4.29).
+  - Its altitude is the one given; left out, as far above it as the aircraft is when commanded, and never less than 500 ft (A-GRA leaves it to "the service design"). That height is kept as the vehicle climbs or descends.
+  - The leg to its first point is flown to where that vehicle will be as the aircraft gets there - carried on at its velocity, met at the aircraft's speed over the ground - so the aircraft flies a collision course that closes on the vehicle itself. Pursuing where the vehicle was instead left a jet 540 m off it (section 14).
+  - The vehicle gone, the activity fails `target_lost`, as a route's frame does. The aircraft itself, or a vehicle the world does not have, is refused `invalid_parameter` (field 5).
+- **An operational point** (A-GRA's OpPointID; ENV-06): one the world keeps by its id, its place, altitude and window used where the command gives none. One the world does not keep is refused `unknown_geometry`.
+- **The ingress window** (A-GRA's IngressConstraint): the bearings from the location to the aircraft, from the least clockwise to the most (it may wrap), each within half a turn.
+  - Where the aircraft's bearing from the location lies within it when commanded, the aircraft flies straight in.
+  - Else it approaches through a point on the window's nearer edge, moved in by 5 degrees (or half the window). That point is 3 turn radii out - the radius the route plans its turns with, at the speed commanded (else the aircraft's, a rotorcraft's cruise) plus the wind - and at least 10 seconds of flight out. The leg from it to the location is flown on that bearing's reciprocal.
+  - A turn onto that leg of more than 120 degrees is split by a point 2.5 radii to the aircraft's side of it. So a window behind the aircraft is flown round to, not reversed into.
+  - A moving location's approach points are in its frame: north and east of its origin, unturned, as the location lay when commanded.
+- **Operational points** (ENV-06; A-GRA's OpPoint): `OpPoint` - an id, a place on the Earth or in a frame (its offsets as a route point's), its altitude and reference, its window - kept by the world (`World::setOpPoint`) in place of any by its id, its revision one more; `opPoints`, `opPoint`, `removeOpPoint`.
+  - Refused `invalid_parameter`: id 0; neither a place nor a frame, or both; a latitude off the Earth, or a value that is not finite; a frame the world does not have, or offsets without one; an altitude reference without its altitude; a window given one way alone, or beyond half a turn.
+  - A-GRA's other OpPoint data (its category, schedule, turn direction, safe altitudes) are not kept: nothing flies by them (D8).
+- **Refused `invalid_parameter`,** naming the field: a code that is not one; a point without its place, or naming a target; an entity or operational point with a place, or without a whole id; a window given one way alone, or beyond half a turn; a negative speed. In an UPDATE, the fields given merge into those kept. A location given, other than it was, replaces the location's own fields (a place, an id).
+- **The support rows:** `fsim.guidance.must_fly` is partial on every aircraft - zones, corridors and volumes, given or by id, are FA-8b's - and so is `fsim.geometry` (lines, zones and volumes).
+- **Surfaces.**
+  - C++: `MustFlyCommand`, `MustFlyLocation`, `OpPoint`, `OpPointId` (`fsim/Control.h`); `SetpointKind::MustFly`; `Reason::UnknownGeometry`; `World::setOpPoint`, `removeOpPoint`, `opPoints`, `opPoint`; `MustFlyBehavior` (`fsim/GuidanceModes.h`).
+  - C ABI 1.39: `FSIM_MODE_MUST_FLY` (10 fields), `enum fsim_must_fly_location`; `fsim_op_point` (`fsim_op_point_init`), `fsim_world_set_op_point`, `fsim_world_remove_op_point`, `fsim_world_op_point_count`, `fsim_world_get_op_point_at`, `fsim_world_get_op_point`.
+  - Python: `vehicle.submit_must_fly(location=, latitude_rad=, longitude_rad=, altitude_m=, target=, ingress_min_rad=, ingress_max_rad=, speed=, ...)`, the location by name or member (`fsim.MustFlyLocation`), a target by vehicle or id; `fsim.OpPoint`; `World.set_op_point`, `op_points`, `op_point`, `remove_op_point`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -1366,6 +1393,12 @@ Three of the missing capability types.
 **Supporting models:** Operational geometry (ENV-06).
 
 **Items (13):** MFY-01, MFY-02, MFY-03, MFY-04, MFY-05, MFY-06, MFY-07; ASM-01; RIC-01, RIC-02, RIC-03; CAP-02; ENV-06.
+
+**Status:** in four steps:
+- FA-8a, must fly a point, an entity or an operational point, from within a window of bearings; operational points (MFY-01, MFY-02, MFY-07; MFY-03 and ENV-06 for points; 4.42), done 2026-09-29 and measured in section 14;
+- FA-8b, must fly a zone, a corridor or a volume, given or by id (MFY-03 to MFY-06; ENV-06);
+- FA-8c, the altitude stacked marshall (ASM-01);
+- FA-8d, the route intercept (RIC-01 to RIC-03; CAP-02).
 
 **Accepted when:**
 
@@ -2852,6 +2885,27 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - No instruction on the NEW path changed: `submitWith` is instruction for instruction FA-7b's. The one function there that changed is the command variant's destructor, where GCC now inlines part of a map's teardown (31 to 52 instructions); an empty map skips it for two more pushes and pops. The rest is where the code lies, as FA-7a's was.
   - World throughput is 99.4 to 100.7 % of FA-7b's, and 100.1 to 101.1 % run again apart. From three copies of each, a first run drifted as it went - FA-7c's later copies reading lower, 96.3 to 99.4 % - and run again read 98.6 to 101.0 %. On the step path too, the command variant's destructor is the one function that changed. Protection costs at most 1.5 %.
 - ctest: all 339 tests pass.
+
+**FA-8a, A-GRA's must fly: points, entities, operational points and the ingress window (MFY-01, MFY-02, MFY-07; MFY-03 and ENV-06 for points).**
+- What it built is 4.42, in C++, the C ABI (1.39) and Python. `fsim.guidance.must_fly` and `fsim.geometry` are partial on every aircraft: zones, corridors and volumes, and operational lines, zones and volumes, are FA-8b's.
+- **Flown** (`test_must_fly`, 5 cases, 121 checks; its Python twin, 4 tests; `test_c_abi`'s 1.39 block):
+  - A point ahead and to the side, 100 m up (a rotorcraft's 20 m), flown over and completed as it is passed, per class: a C172 within 40 m of it and 20 m of its height, an F-16C within 80 m and 30 m, a UH-60A within 15 m and 5 m, an IRIS within 5 m and 3 m. Through Python a C172 passed 5.1 m off.
+  - A window of bearings: from the south (the C172 heading east, through one approach point), from the east (behind it: round through a point abeam, then one on the window's edge), from the west (straight in), and a jet from the south. Each came from within its window.
+  - Another vehicle: an F-16C 10 km north of a C172 flying east flew over it 37 m off and 163 m above - 500 ft, given no altitude. With that vehicle removed, the must fly over it failed `target_lost`. The aircraft itself, or a vehicle the world does not have, is refused.
+  - An operational point (OpPoint 7) kept, read back and set again (revision 2), each of nine malformed ones refused, and flown with its own altitude and window. One the world does not keep, or one removed, is refused `unknown_geometry`.
+  - Each malformed field is refused naming it. An UPDATE moves the point, keeping the rest, and flies it afresh.
+- **The fleet** (`test_fleet`, a case of its own): on every aircraft, a point a leg ahead and half a leg to the right at its altitude, approached from the east - the aircraft coming from the south-west, round through the points laid out - was flown over on all 35. They passed it 0.06 m (the IRIS) to 34.5 m (the Gripen) off: the fly-by-wire jets 14 to 34.5 m, the direct wings at most 9.3 m, the helicopters 2.3 and 3.3 m, the multirotors 0.06 and 0.17 m. Each came from 93.4 to 95.5 degrees, the window 80 to 100, aimed at 95. Each completed within 39 s (the IRIS) to 456 s (the C-17A).
+- **Entities:** pursuing where the vehicle was - the route's own way with a moving point - left the F-16C 540 m off the C172, its cross-track growing as the leg swung. The must fly now aims its first leg where the vehicle will be, and closes on it.
+- **Conformance:** a must fly answers NEW, UPDATE and CANCEL as its descriptor says on every aircraft shipped. The random walks draw it only in the walks of their own, so the others draw what they drew before: drawn in all of them, it moved every walk, and the rare `task:completed` went unmet.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-7c's build.
+- **Digests:** identical to FA-7c's, with protection and without. The allocation gate passes, with two cases more: a must fly's point moved every step through UPDATE, and another vehicle flown over, its leg aimed anew every step.
+- **A/B throughput** against FA-7c, both builds run from their own directories in a quiet window held throughout (no other session's builds, tests or benchmarks): 5 rounds of `micro`, 9 of `command` twice, 7 of `world`; then 5 rounds of `micro` and of `command`, and 3 of `world`, from three copies of each; and 9 rounds of `command` twice, and 5 from three copies of each, between the two built with every function aligned to 64 bytes.
+  - The micro cases are within −1.3 % to +2.2 % from one copy, and −0.4 % to +2.4 % from three: the axes apart and the default hold 2.3 and 2.4 % (1.7 and 2.2 ns), cases that move with where the runtime's code lies.
+  - The NEWs read slower in the default builds: a level switch by 7.6 to 9.4 % (8.8 % from three copies), a behaviour by 12.3 to 12.9 %. The same level's update and a checked update are within 0.0 to +3.0 %.
+  - Built with every function aligned, a level switch reads within +0.0 % to +0.4 %, and a behaviour −4.3 % and −5.1 % from one copy and +0.4 % from three.
+  - The NEW path gains what a new mode asks: a case more in the command's copy, and the must fly's index compared in `indexOf` (2 instructions more), `prepare` (12) and `submitWith`. A NEW of anything else runs a handful of them. `axesOf` and `arbitrate` are unchanged and `launch` one instruction apart; the rest of `submitWith`'s difference is its blocks laid out afresh. The rest of the default builds' difference is where the code lies, as FA-7a's was.
+  - World throughput is 99.6 to 100.1 % of FA-7c's, and 100.0 to 100.8 % from three copies. Protection costs at most 0.9 %.
+- ctest: all 344 tests pass.
 
 ## Appendix A: the inventory
 

@@ -435,6 +435,39 @@ a quarter wider than the aircraft's planning radius, is flown within:
 A c172x meets a duration in a 10 m/s wind within 0.2 %, and an IRIS within
 0.7 % (`tests/test_curves.cpp`).
 
+### Must fly: a location flown over
+
+`fsim.guidance.must_fly` is A-GRA's must fly
+([flight-autonomy.md](../flight-autonomy.md), 4.42): a location the aircraft
+must fly over - a point, another vehicle, or an operational point the world
+keeps - approached, where it is given, from within a window of bearings.
+
+```cpp
+OpPoint ip;                                              // an operational point, kept by the world by its id
+ip.id = 7, ip.latitudeRad = lat, ip.longitudeRad = lon, ip.altitudeM = 1600.0;
+ip.ingressMinRad = 170 * kDeg, ip.ingressMaxRad = -170 * kDeg; // approached from the south: 170 to 190 degrees
+world.setOpPoint(ip);
+MustFlyCommand m;
+m.location = double(MustFlyLocation::OpPoint), m.target = 7;
+auto a = v.submit(m).activity;                           // laid out as a route: an approach, then the point
+MustFlyCommand over;                                     // another vehicle, flown over as it moves
+over.location = double(MustFlyLocation::Entity), over.target = double(other);
+```
+
+- **Laid out as a route** from where the aircraft is, when it is commanded: the points it approaches through, then the location, flown over. It is checked as a route is (its turns, gradients, terrain and endurance, by point), and flown by the route's follower. It completes as the location is passed, and flies on along its course there. The route reads back in its setpoint's waypoints and its end points.
+- **A point** is flown over at its altitude (left out, the aircraft's).
+- **Another vehicle** is flown over as it moves:
+  - at the altitude given - or, left out, as far above it as the aircraft is, at least 500 ft, followed as it climbs;
+  - on a collision course: the leg to it aims where the vehicle will be as the aircraft gets there;
+  - that vehicle gone, the activity fails `target_lost`.
+- **An operational point** (`OpPoint`: a place on the Earth or in a frame, its altitude, its window) the world keeps by its id: `World::setOpPoint` (its revision one more each time), `opPoints`, `opPoint`, `removeOpPoint`. Its altitude and window fly where the command gives none; one the world does not keep is refused `unknown_geometry`.
+- **The window** (`ingressMinRad` clockwise to `ingressMaxRad`: the bearings from the location to the aircraft, A-GRA's IngressConstraint):
+  - within it already, the aircraft flies straight in;
+  - else it comes through a point on the window's nearer edge, three turn radii out, and so onto a leg flown on that bearing's reciprocal;
+  - a turn onto that leg of more than 120 degrees is split by a point abeam of it.
+- **UPDATE** merges the fields given, and the route is laid out afresh from where the aircraft is. A location given, other than it was, replaces the location's own fields.
+- Zones, corridors and volumes are FA-8b's: the capability is partial until then.
+
 ### Grants: who may command a vehicle
 
 By default a vehicle is `ControlMode::Open`, and every command is arbitrated

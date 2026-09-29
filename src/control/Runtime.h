@@ -40,6 +40,7 @@ inline void assignSetpoint(Command& dst, const Command& src) noexcept {
     case 7: as(RouteCommand{}); break;
     case 8: as(PatternCommand{}); break;
     case 9: as(CurveCommand{}); break;
+    case 10: as(MustFlyCommand{}); break;
     default: break;
     }
 }

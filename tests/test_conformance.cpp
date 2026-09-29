@@ -512,6 +512,29 @@ public:
             }
             return true;
         }
+        if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::MustFly) { // (ADR-29 FA-8a: in the walks of their own)
+            // a point ahead, or the vehicle it follows; now and then a window of bearings, or a field out of its range
+            MustFlyCommand c;
+            const PositionCommand q = ahead(uniform(3000.0, 9000.0));
+            c.location = static_cast<double>(MustFlyLocation::Point);
+            c.latitudeRad = q.latitudeRad, c.longitudeRad = q.longitudeRad;
+            c.altitudeM = wild && chance(0.5) ? kHold : q.altitudeMslM;
+            if (target && chance(0.2)) {
+                c.location = static_cast<double>(MustFlyLocation::Entity), c.target = static_cast<double>(target);
+                c.latitudeRad = c.longitudeRad = kHold;
+            }
+            if (wild && chance(0.3)) c.ingressMinRad = uniform(-3.0, 3.0), c.ingressMaxRad = uniform(-3.0, 3.0);
+            if (wild && chance(0.1)) {
+                double* fields[kMaxCommandFields];
+                Command probe = c;
+                const std::size_t n = std::min(commandFields(probe, fields), d.parameters.size());
+                const std::size_t i = pick(n);
+                *fields[i] = value(d.parameters[i], true);
+                c = std::get<MustFlyCommand>(probe);
+            }
+            out = c;
+            return true;
+        }
         if (d.kind == CapabilityKind::Guidance) {
             BehaviorCommand b;
             b.id = wild && chance(0.5) ? d.id : d.behavior; // either id selects it
@@ -1286,7 +1309,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             }
             std::vector<std::size_t> commandable;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if (caps[i].interactions & kCommand) commandable.push_back(i);
+                if ((caps[i].interactions & kCommand) && (make.optimise || caps[i].setpoint != SetpointKind::MustFly)) commandable.push_back(i);
             done.capability = commandable[make.pick(commandable.size())];
             const CapabilityDescriptor d = caps[done.capability];
             done.options.controller = controller();
@@ -1389,7 +1412,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             if (what < 0.4 || mine.empty()) {
                 std::vector<std::size_t> flyable;
                 for (std::size_t i = 0; i < caps.size(); ++i)
-                    if ((caps[i].interactions & kCommand) && !Maker::isSupport(caps[i])) flyable.push_back(i);
+                    if ((caps[i].interactions & kCommand) && !Maker::isSupport(caps[i]) && (make.optimise || caps[i].setpoint != SetpointKind::MustFly))
+                        flyable.push_back(i);
                 const std::size_t c = flyable[static_cast<std::size_t>(draw(static_cast<int>(flyable.size())))];
                 Command command;
                 if (!make.cascade(caps[c], true, command)) break;
@@ -1442,7 +1466,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
         case Op::Precedence: {
             std::vector<std::size_t> commandable;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if (caps[i].interactions & kCommand) commandable.push_back(i);
+                if ((caps[i].interactions & kCommand) && (make.optimise || caps[i].setpoint != SetpointKind::MustFly)) commandable.push_back(i);
             done.capability = commandable[static_cast<std::size_t>(draw(static_cast<int>(commandable.size())))];
             const auto p = static_cast<std::uint32_t>(draw(4));
             precedences[done.capability] = p;
@@ -1473,9 +1497,12 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                 done.result = w.commandBranch(done.caller, done.addressed, static_cast<std::uint32_t>(make.pick(3)), make.chance(0.8));
                 break;
             }
-            // its own capability's command mostly, another now and then
+            // its own capability's command mostly, another now and then (a must fly only in the walks of their own)
             const ActivityRecord* r = w.activity(done.addressed);
-            const CapabilityDescriptor& d = caps[r && make.chance(0.7) ? r->capability : make.pick(caps.size())];
+            std::vector<std::size_t> others;
+            for (std::size_t i = 0; i < caps.size(); ++i)
+                if (make.optimise || caps[i].setpoint != SetpointKind::MustFly) others.push_back(i);
+            const CapabilityDescriptor& d = caps[r && make.chance(0.7) ? r->capability : others[make.pick(others.size())]];
             Command c;
             SupportCommand sc;
             const int kind = commandFor(d, c, sc);
@@ -1487,7 +1514,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
         case Op::Legacy: {
             std::vector<std::size_t> cascade;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if ((caps[i].kind == CapabilityKind::Flight && !Maker::isSupport(caps[i])) || (caps[i].kind == CapabilityKind::Guidance && make.chance(0.15)))
+                if ((caps[i].kind == CapabilityKind::Flight && !Maker::isSupport(caps[i])) ||
+                    (caps[i].kind == CapabilityKind::Guidance && (make.optimise || caps[i].setpoint != SetpointKind::MustFly) && make.chance(0.15)))
                     cascade.push_back(i);
             Command c;
             done.capability = cascade[make.pick(cascade.size())];
@@ -1500,7 +1528,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             // one of the calls, about a capability it can command mostly; the rules' answer and ends worked out first
             std::vector<std::size_t> commandable;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if (caps[i].interactions & kCommand) commandable.push_back(i);
+                if ((caps[i].interactions & kCommand) && (make.optimise || caps[i].setpoint != SetpointKind::MustFly)) commandable.push_back(i);
             const double a = make.uniform(0.0, 1.0);
             // what a release, a revocation or a refusal ends: mostly a capability the policy flies now
             std::vector<std::size_t> flown;

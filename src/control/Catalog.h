@@ -131,7 +131,8 @@ private:
     std::vector<CapabilityDescriptor> descriptors_;
     std::array<int, static_cast<std::size_t>(Level::Behavior)> byLevel_{};
     std::array<int, kSupportKinds> bySupport_{-1, -1, -1, -1, -1, -1};
-    std::array<int, static_cast<std::size_t>(SetpointKind::Count)> byMode_{-1, -1, -1, -1, -1, -1}; ///< a guidance mode's capability, by its setpoint
+    std::array<int, static_cast<std::size_t>(SetpointKind::Count)> byMode_{-1, -1, -1, -1, -1, -1, -1}; ///< a guidance mode's capability, by its setpoint
+    static_assert(static_cast<int>(SetpointKind::Count) == 7, "byMode_ starts -1 for every kind");
     std::uint64_t registryRevision_ = 0;
 };
 

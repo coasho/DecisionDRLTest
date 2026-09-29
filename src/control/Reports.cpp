@@ -45,7 +45,7 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
         const Command& flown = config_->slots[s].command;
         out.command = flown;
         if (const PathStore* store = config_->path.get()) { // (one route or curve flies at a time: the store's)
-            if (std::holds_alternative<RouteCommand>(flown)) {
+            if (std::holds_alternative<RouteCommand>(flown) || std::holds_alternative<MustFlyCommand>(flown)) { // (a must fly's laid out: 4.42)
                 out.waypoints.assign(store->waypoints, store->waypoints + store->count);
                 out.loiters.assign(store->routeLoiters, store->routeLoiters + store->routeLoiterCount); // (4.31)
                 out.states.assign(store->routeStates, store->routeStates + store->routeStateCount);     // (4.34)
@@ -79,7 +79,9 @@ std::vector<EndPoint> CapabilityHost::endPoints(ActivityId activity, std::size_t
     const ActivityProgress& progress = record->progress;
     const bool reported = record->waiting == ActivityWait::None && record->state != ActivityState::Disabled && progress.segments;
     const bool past = reported && progress.distanceToGoM == 0.0; // after a route's or a curve's end, flying its end behaviour
-    if (const auto* route = std::get_if<RouteCommand>(c); route && !s.waypoints.empty()) {
+    static const RouteCommand kLaid{}; // (a must fly's route: great circles, once, on at its end - 4.42)
+    const RouteCommand* route = std::holds_alternative<MustFlyCommand>(*c) ? &kLaid : std::get_if<RouteCommand>(c);
+    if (route && !s.waypoints.empty()) {
         const auto n = static_cast<std::uint32_t>(std::min<std::size_t>(s.waypoints.size(), route::Plan::kMax));
         // its flight order (a linked route's, along its points' next: 4.36), from the point flown to
         const std::uint32_t first = static_cast<std::uint32_t>(std::max(orHold(route->start, 0.0), 0.0));
@@ -235,7 +237,7 @@ VehicleCommandState CapabilityHost::commandState(const sim::VehicleState& state)
             return c;
         }
         const PathStore* store = config_->path.get();
-        if (std::holds_alternative<RouteCommand>(flown) && store && store->count) {
+        if ((std::holds_alternative<RouteCommand>(flown) || std::holds_alternative<MustFlyCommand>(flown)) && store && store->count) {
             const Waypoint& w = store->waypoints[std::min(records_[s].progress.segment, store->count - 1)];
             c.altitudeM = w.altitudeM, c.altitudeReference = w.altitudeReference;
             return c;

@@ -43,7 +43,7 @@ CapabilityDescriptor flight(const char* name, Level level, std::vector<Parameter
 /// unless registered with a dotted id.
 std::string guidanceId(const std::string& behavior) {
     static const char* const builtin[] = {"hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics", "hover", "hsa", "route",
-                                          "pattern", "curve"};
+                                          "pattern", "curve", "must_fly"};
     if (behavior.find('.') != std::string::npos) return behavior;
     for (const char* b : builtin)
         if (behavior == b) return "fsim.guidance." + behavior;
@@ -125,6 +125,11 @@ std::size_t commandFields(Command& c, double* f[kMaxCommandFields]) noexcept {
         f[5] = &k->durationS, f[6] = &k->end, f[7] = &k->append, f[8] = &k->altitudeReference, f[9] = &k->altitudeMinM;
         f[10] = &k->altitudeMaxM, f[11] = &k->pointRotation, f[12] = &k->pointOffsets, f[13] = &k->pointZ;
         return 14;
+    }
+    if (auto* m = std::get_if<MustFlyCommand>(&c)) {
+        f[0] = &m->location, f[1] = &m->latitudeRad, f[2] = &m->longitudeRad, f[3] = &m->altitudeM, f[4] = &m->altitudeReference;
+        f[5] = &m->target, f[6] = &m->ingressMinRad, f[7] = &m->ingressMaxRad, f[8] = &m->speed, f[9] = &m->speedReference;
+        return 10;
     }
     return 0;
 }
@@ -347,6 +352,7 @@ int CapabilityCatalog::indexOf(const Command& command) const noexcept {
     if (std::holds_alternative<RouteCommand>(command)) return byMode_[static_cast<std::size_t>(SetpointKind::Route)];
     if (std::holds_alternative<PatternCommand>(command)) return byMode_[static_cast<std::size_t>(SetpointKind::Pattern)];
     if (std::holds_alternative<CurveCommand>(command)) return byMode_[static_cast<std::size_t>(SetpointKind::Curve)];
+    if (std::holds_alternative<MustFlyCommand>(command)) return byMode_[static_cast<std::size_t>(SetpointKind::MustFly)];
     return byLevel_[command.index()];
 }
 

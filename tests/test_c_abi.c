@@ -1265,6 +1265,51 @@ int main(int argc, char** argv) {
             CHECK(isnan(pts[0].rnp_m));
         }
         {
+            /* ABI 1.39 (4.42): a must fly - an operational point kept and read back, flown over from within its window of
+               bearings (from the east: its route laid out through an approach, then the point); one not kept refused */
+            fsim_op_point op, back;
+            fsim_batch_command msp;
+            fsim_command_result mr;
+            const fsim_vehicle_state* at;
+            double mfields[10];
+            uint32_t flier = 0;
+            int32_t reason = -1;
+            int k;
+            spec.name = "must-fly";
+            spec.type = "jsbsim:c172x";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 55.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &flier) == FSIM_OK);
+            at = fsim_vehicle_state_ptr(world, flier);
+            CHECK(fsim_mode_field_count(FSIM_MODE_MUST_FLY) == 10);
+            fsim_op_point_init(&op);
+            CHECK(op.struct_size == sizeof op && isnan(op.latitude_rad) && isnan(op.frame) && isnan(op.ingress_min_rad));
+            op.op_point_id = 7;
+            op.latitude_rad = at->latitude_rad + 3000.0 / 6371000.0; /* 3 km north */
+            op.longitude_rad = at->longitude_rad;
+            op.altitude_m = 1500.0;
+            op.ingress_min_rad = 80.0 * 3.14159265358979 / 180.0, op.ingress_max_rad = 100.0 * 3.14159265358979 / 180.0;
+            CHECK(fsim_world_set_op_point(world, &op, &reason) == FSIM_OK && reason == 0);
+            fsim_op_point_init(&back);
+            CHECK(fsim_world_op_point_count(world) == 1 && fsim_world_get_op_point_at(world, 0, &back) == FSIM_OK && back.op_point_id == 7 &&
+                  back.revision == 1 && back.ingress_max_rad == op.ingress_max_rad && isnan(back.frame));
+            op.op_point_id = 0; /* (no id) */
+            CHECK(fsim_world_set_op_point(world, &op, &reason) == FSIM_OK && strcmp(fsim_reason_name(reason), "invalid_parameter") == 0);
+            for (k = 0; k < 10; ++k) mfields[k] = fsim_hold();
+            mfields[0] = FSIM_MUST_FLY_OP_POINT, mfields[5] = 7.0;
+            CHECK(fsim_vehicle_submit_mode(world, flier, FSIM_MODE_MUST_FLY, mfields, 10, &co, &mr) == FSIM_OK && mr.status == FSIM_COMMAND_ACCEPTED);
+            msp.struct_size = sizeof msp;
+            CHECK(fsim_activity_get_setpoint(world, mr.activity, &msp) == FSIM_OK && msp.code == FSIM_MODE_MUST_FLY && msp.count == 10 &&
+                  msp.fields[5] == 7.0 && msp.waypoint_count >= 2);
+            CHECK(fsim_activity_cancel(world, mr.activity, &cr) == FSIM_OK);
+            mfields[5] = 9.0; /* (not kept) */
+            CHECK(fsim_vehicle_submit_mode(world, flier, FSIM_MODE_MUST_FLY, mfields, 10, &co, &mr) == FSIM_OK && mr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(mr.reason), "unknown_geometry") == 0);
+            CHECK(fsim_world_remove_op_point(world, 7) == FSIM_OK && fsim_world_remove_op_point(world, 7) == FSIM_INVALID_ARGUMENT);
+            CHECK(fsim_world_get_op_point(world, 7, &back) == FSIM_INVALID_ARGUMENT);
+        }
+        {
             /* ABI 1.38 (4.41): a route plan validated without flying it - its corners' turns fit in calm air, not with 20 m/s
                behind them; modified to validate, valid; a kept plan by its id, an unknown one refused */
             fsim_waypoint pts[3];

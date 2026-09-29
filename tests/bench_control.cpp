@@ -596,6 +596,29 @@ int alloc() {
              curve[1].north[2] += 0.01 * std::sin(k * 0.1); // (in place: nothing allocated here)
              if (!w.update(activity[id], CurveCommand{}, curve).accepted()) std::fprintf(stderr, "curve: update refused\n"), std::exit(3);
          }},
+        // ADR-29 FA-8a: a must fly's point moved every step through UPDATE, approached from within a window - laid out afresh
+        // as a route, into the path store
+        {"must fly update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             static std::vector<MustFlyCommand> commands(64);
+             MustFlyCommand& c = commands[id];
+             if (k == 0) {
+                 const Waypoint at = waypointAt(*w.vehicleState(id), 3000, 8000);
+                 c.location = static_cast<double>(MustFlyLocation::Point), c.latitudeRad = at.latitudeRad, c.longitudeRad = at.longitudeRad;
+                 c.ingressMinRad = 2.8, c.ingressMaxRad = -2.8; // (from the south)
+                 activity[id] = w.submit(id, c).activity;
+                 return;
+             }
+             c.latitudeRad += 1e-6 * std::sin(k * 0.1);
+             if (!w.update(activity[id], c).accepted()) std::fprintf(stderr, "must fly: update refused\n"), std::exit(3);
+         }},
+        // ...and another vehicle flown over, its leg aimed where that vehicle will be at every step
+        {"must fly over a vehicle", [&](std::uint32_t id, int k) {
+             if (k != 0) return;
+             MustFlyCommand c;
+             c.location = static_cast<double>(MustFlyLocation::Entity), c.target = static_cast<double>(id == 1 ? 2 : 1);
+             if (!w.submit(id, c).accepted()) std::fprintf(stderr, "must fly: vehicle %u refused\n", id), std::exit(3);
+         }},
         // step 3: an autopilot on pitch and thrust, the policy's bank updated every step
         {"axes apart each step", [&](std::uint32_t id, int k) {
              static std::vector<ActivityId> activity(64, 0);

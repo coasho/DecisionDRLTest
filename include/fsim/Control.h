@@ -735,6 +735,34 @@ struct RouteState {
     }
 };
 
+/// Where a must fly goes (A-GRA's MustFlyLocationType; docs/flight-autonomy.md, 4.42).
+enum class MustFlyLocation : std::uint8_t {
+    Point = 0,   ///< a place (A-GRA's Point): flown over at its altitude
+    Entity = 1,  ///< another vehicle in the world (EntityID): flown over as it moves
+    OpPoint = 2, ///< an operational point by its id (OpPointID; World::setOpPoint)
+    Count
+};
+
+/// fsim.guidance.must_fly (A-GRA's MUST_FLY; docs/flight-autonomy.md, 4.42):
+/// a location the aircraft must fly over - a point at its altitude, another
+/// vehicle as it moves, an operational point - approached from within a
+/// window of bearings where one is given (A-GRA's IngressConstraint: the
+/// bearing from the location to the aircraft, from the least clockwise to the
+/// most). Flown as a route the host lays out from where the aircraft is: the
+/// points it approaches through, then the location, flown over. Completes as
+/// the location is passed, and flies on along its course there. A field left
+/// out (kHold) takes its default in a NEW and keeps its value in an UPDATE.
+struct MustFlyCommand {
+    double location = kHold;           ///< MustFlyLocation; kHold: a point
+    double latitudeRad = kHold, longitudeRad = kHold; ///< a point's
+    double altitudeM = kHold;          ///< a point's, or the altitude it flies over the location at; kHold: 4.42
+    double altitudeReference = kHold;  ///< AltitudeReference
+    double target = kHold;             ///< an entity's vehicle id, or an operational point's id
+    double ingressMinRad = kHold, ingressMaxRad = kHold; ///< the bearings from the location it approaches from: both or neither
+    double speed = kHold;              ///< m/s, or a Mach number; kHold: as it flies now (a rotorcraft its cruise)
+    double speedReference = kHold;     ///< SpeedReference
+};
+
 /// Where a vehicle's route, curve or pattern shape lives while it is flown
 /// (docs/vehicle-interface.md, 4.2): allocated at its first and kept, written
 /// by the host between steps, read by the mode's behaviour during them
@@ -803,7 +831,7 @@ struct BehaviorCommand {
 /// modes come after BehaviorCommand and enter at Level::Behavior (levelOf):
 /// the variant's index is a level's only up to it.
 using Command = std::variant<ActuatorCommand, AttitudeCommand, AccelerationCommand, VelocityCommand, PositionCommand, BehaviorCommand, HsaCommand,
-                             RouteCommand, PatternCommand, CurveCommand>;
+                             RouteCommand, PatternCommand, CurveCommand, MustFlyCommand>;
 
 // Support effectors (docs/control-architecture.md, 8.2): set directly, not
 // flown through the cascade; each its own capability (fsim.support.*) where
@@ -894,12 +922,14 @@ struct EndPoint {
 inline Level levelOf(const Command& c) noexcept {
     return c.index() < static_cast<std::size_t>(Level::Behavior) ? static_cast<Level>(c.index()) : Level::Behavior;
 }
-/// The registered behaviour that flies a mode's setpoint ("hsa", "route", "pattern", "curve"); null for a level's or a behaviour's command.
+/// The registered behaviour that flies a mode's setpoint ("hsa", "route", "pattern", "curve", "must_fly"); null for a level's
+/// or a behaviour's command.
 inline const char* modeBehavior(const Command& c) noexcept {
     if (std::holds_alternative<HsaCommand>(c)) return "hsa";
     if (std::holds_alternative<RouteCommand>(c)) return "route";
     if (std::holds_alternative<PatternCommand>(c)) return "pattern";
     if (std::holds_alternative<CurveCommand>(c)) return "curve";
+    if (std::holds_alternative<MustFlyCommand>(c)) return "must_fly";
     return nullptr;
 }
 
@@ -994,6 +1024,25 @@ struct RoutePlan {
     std::string remarks;             ///< its route's Remarks' Detail: 1,024 at most
     std::vector<PointMetadata> pointMetadata; ///< one a point at most
     std::vector<PathMetadata> pathMetadata;   ///< one a path at most
+};
+
+/// An operational point's id (A-GRA's OpPointID): not 0.
+using OpPointId = std::uint64_t;
+
+/// An operational point (A-GRA's OpPoint; docs/flight-autonomy.md, 4.42), kept by the world by its id (World::setOpPoint)
+/// for the commands that name it (a must fly): a place on the Earth (A-GRA's Point), or in a reference frame (its
+/// RelativePoint: `frame` and its offsets, as a route point's), and the window of bearings it is approached from (its
+/// IngressConstraint). A field left out is kHold.
+struct OpPoint {
+    OpPointId id = 0;
+    double latitudeRad = kHold, longitudeRad = kHold; ///< on the Earth; with a frame, left out
+    double altitudeM = kHold;          ///< in `altitudeReference`; left out, none (flown at the aircraft's)
+    double altitudeReference = kHold;  ///< AltitudeReference
+    double frame = kHold;              ///< in this frame (World::createFrame's id): where the frame puts its offsets
+    double frameRotation = kHold, frameOffsets = kHold; ///< its offsets' FrameRotation and FrameOffsets, as a route point's
+    double frameXM = kHold, frameYM = kHold, frameZM = kHold; ///< its offsets (z down: given, its altitude the frame's there)
+    double ingressMinRad = kHold, ingressMaxRad = kHold; ///< the bearings from it it is approached from: both or neither
+    std::uint32_t revision = 0;        ///< read back: one more each time it is set
 };
 
 /// Read-only view of the world for behaviours that look at other vehicles.

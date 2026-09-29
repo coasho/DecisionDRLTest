@@ -45,6 +45,13 @@ std::optional<control::GeoPoint> World::framePoint(control::FrameId id, const co
 }
 
 bool World::Answers::frame(control::FrameId id, control::FrameSpec& spec, control::FramePose& now) const {
+    if (id > control::kVehicleFrames && id - control::kVehicleFrames <= 0xFFFFFFFFu) { // a vehicle's own (4.42): where it is now
+        const Entry* e = world_.entry(static_cast<std::uint32_t>(id - control::kVehicleFrames));
+        if (!e) return false;
+        spec = control::FrameSpec{}, spec.origin = control::FrameOrigin::Vehicle, spec.vehicle = static_cast<std::uint32_t>(id - control::kVehicleFrames);
+        now = control::vehiclePose(world_.pool_->states()[e->slot]);
+        return true;
+    }
     const std::optional<control::FrameSpec> found = world_.frame(id);
     const std::optional<control::FramePose> pose = found ? world_.framePose(id) : std::nullopt;
     if (!pose) return false;

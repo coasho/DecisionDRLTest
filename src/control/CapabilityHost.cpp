@@ -1232,6 +1232,8 @@ Reason CapabilityHost::prepare(std::size_t index, Command& setpoint, Span<const 
         if (const Reason why = resolveHsa(*hsa, state, detail); why != Reason::None) return why;
     if (auto* route = std::get_if<RouteCommand>(&setpoint)) // its waypoints completed, and checked as its range policy says
         if (const Reason why = checkRoute(*route, waypoints, state, log, extras); why != Reason::None) return why;
+    if (auto* mustFly = std::get_if<MustFlyCommand>(&setpoint)) // its location laid out as a route, and checked as one (4.42)
+        if (const Reason why = prepareMustFly(*mustFly, state, log); why != Reason::None) return why;
     if (auto* curve = std::get_if<CurveCommand>(&setpoint)) { // its segments checked as its range policy says (its shape into the scratch)
         curveShape_ = curveShape ? *curveShape : CurveShape{};
         if (const Reason why = checkCurve(*curve, segments, false, state, log); why != Reason::None) return why;
@@ -1520,7 +1522,8 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     // its endurance (4.18): a flight with an end needs no more than the vehicle has above its reserve - a soft
     // rejection, which overrideRejection overrides (the first there is). Only a route, pattern or curve can have one.
     if (checked && sessionView_ &&
-        (std::holds_alternative<RouteCommand>(setpoint) || std::holds_alternative<PatternCommand>(setpoint) || std::holds_alternative<CurveCommand>(setpoint)))
+        (std::holds_alternative<RouteCommand>(setpoint) || std::holds_alternative<PatternCommand>(setpoint) || std::holds_alternative<CurveCommand>(setpoint) ||
+         std::holds_alternative<MustFlyCommand>(setpoint)))
         if (const CommandDetails::Endurance need = endurance(setpoint, state, now); need.energy && need.required > need.remaining) {
             details_.endurance = need;
             if (!options.overrideRejection) {
@@ -1581,7 +1584,8 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
         w.curveShape = curveShape ? *curveShape : CurveShape{};
         holdExtras(w, extras); // (a route's loiters, states, paths, branches and terminators: Branches.cpp)
         if (!config_->path) config_->path = std::make_unique<PathStore>();
-        if (std::holds_alternative<RouteCommand>(command) && !routePlan_) routePlan_ = std::make_unique<route::Plan>();
+        if ((std::holds_alternative<RouteCommand>(command) || std::holds_alternative<MustFlyCommand>(command)) && !routePlan_)
+            routePlan_ = std::make_unique<route::Plan>();
         if (std::holds_alternative<CurveCommand>(command) && !curvePlan_) curvePlan_ = std::make_unique<route::Curve>();
         ++waitingCount_;
         CommandResult r = about(accepted(id, static_cast<std::uint16_t>(flags | kDeferred), true), detail);
@@ -1590,9 +1594,10 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     }
     const auto* route = std::get_if<RouteCommand>(&setpoint);
     const double firstStart = route ? route->start : kHold;
-    if ((route || std::holds_alternative<CurveCommand>(setpoint) || std::holds_alternative<PatternCommand>(setpoint)) && !config_->path)
+    const bool routed = route || std::holds_alternative<MustFlyCommand>(setpoint); // (a must fly's laid out as a route: 4.42)
+    if ((routed || std::holds_alternative<CurveCommand>(setpoint) || std::holds_alternative<PatternCommand>(setpoint)) && !config_->path)
         config_->path = std::make_unique<PathStore>();
-    launch(Launch{nullptr, id, index, axes, flags, firstStart}, options, std::move(setpoint), std::move(behavior), route != nullptr, segments, now);
+    launch(Launch{nullptr, id, index, axes, flags, firstStart}, options, std::move(setpoint), std::move(behavior), routed, segments, now);
     schedule(state, now); // (what waits is arbitrated against it)
     return about(accepted(id, flags, true), detail);
 }
@@ -1834,6 +1839,7 @@ CommandResult CapabilityHost::update(ActivityId activity, const Command& setpoin
         return result;
     }
     if (const auto* next = std::get_if<PatternCommand>(&setpoint)) return updatePattern(s, activity, *next, shape, state, result, log);
+    if (const auto* next = std::get_if<MustFlyCommand>(&setpoint)) return updateMustFly(s, activity, *next, state, result, log);
     if (slots_[s].range == RangePolicy::None) {
         assignSetpoint(slot.command, setpoint);
     } else {
@@ -2133,6 +2139,12 @@ CommandResult CapabilityHost::updateWaiting(Waiting& w, const Command& setpoint,
         if (const Reason why = checkPattern(*pattern, true, result); why != Reason::None) return about(rejected(why, activity), result);
         if (const Reason why = checkShape(*pattern, given, true, result); why != Reason::None) return about(rejected(why, activity), result);
         mergePattern(std::get<PatternCommand>(next), nextShape, *pattern, given);
+    } else if (const auto* mustFly = std::get_if<MustFlyCommand>(&setpoint)) { // (as a live one's: 4.42)
+        if (isHold(mustFly->ingressMinRad) != isHold(mustFly->ingressMaxRad)) {
+            result.index = isHold(mustFly->ingressMinRad) ? 6 : 7;
+            return about(rejected(Reason::InvalidParameter, activity), result);
+        }
+        mergeMustFly(std::get<MustFlyCommand>(next), *mustFly);
     } else {
         assignSetpoint(next, setpoint); // a level's: replaced
     }

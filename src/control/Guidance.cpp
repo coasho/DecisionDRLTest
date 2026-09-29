@@ -1589,6 +1589,7 @@ void registerGuidanceModes(ControllerRegistry& r) {
     curve.mode = FlightMode::CurveFollowing;
     curve.setpoint = SetpointKind::Curve;
     r.addBehavior("curve", [] { return std::make_unique<CurveBehavior>(); }, std::move(curve));
+    registerMustFly(r); // (docs/flight-autonomy.md, 4.42)
 }
 
 } // namespace fsim::control
