@@ -1499,6 +1499,35 @@ FSIM_API int fsim_vehicle_get_airfield(fsim_world* world, uint32_t id, uint64_t 
  * runway the vehicle does not keep), wrong_plan_state (the plan it replaces flies), plan_store_full. */
 FSIM_API int fsim_vehicle_load_plan(fsim_world* world, uint32_t id, const fsim_route_plan* plan, int32_t* reason);
 
+/* A route plan's validation (ABI 1.38; docs/flight-autonomy.md, 4.41; A-GRA's RoutePlanValidationCommand): what it is
+ * validated in and against - each NaN, as the vehicle is now. */
+typedef struct fsim_plan_validation {
+    uint32_t struct_size;
+    uint32_t parts;                    /* A-GRA's PlanPart: bit i for fsim_path_type i - a patch's; its verdict theirs; 0 the whole plan */
+    double wind_north_ms, wind_east_ms; /* A-GRA's WindData: where it blows to; NaN, what the air data measure now */
+    double gust_ms;                    /* its gusts, behind the aircraft with it */
+    double origin_latitude_rad, origin_longitude_rad; /* A-GRA's Origin: where it is validated from; NaN, where the aircraft is */
+    double origin_altitude_m;          /* above the WGS-84 ellipsoid; NaN, the aircraft's */
+    int32_t modify_to_validate;        /* A-GRA's ModifyToValidate: 1, values held to the aircraft's limits (adjustments); 0, findings */
+    int32_t reserved;
+} fsim_plan_validation;
+FSIM_API void fsim_plan_validation_init(fsim_plan_validation* validation);
+/* Its answer (A-GRA's RoutePlanValidation): `valid` over its parts, and `check`, the route's validation as it answered - its
+ * reason and the point it names (reserved: its index + 1); fsim_last_command_detail and _finding have the rest. */
+typedef struct fsim_plan_validation_result {
+    uint32_t struct_size;
+    int32_t valid;                     /* 1: A-GRA's VALID; 0: INVALID */
+    fsim_command_result check;
+} fsim_plan_validation_result;
+FSIM_API void fsim_plan_validation_result_init(fsim_plan_validation_result* result);
+/* A route plan validated without flying it - kept or not; nothing is kept or flown. `validation` NULL: as the vehicle is now.
+ * The check's reason invalid_parameter for a malformed plan or validation. */
+FSIM_API int fsim_vehicle_validate_plan(fsim_world* world, uint32_t id, const fsim_route_plan* plan, const fsim_plan_validation* validation,
+                                        fsim_plan_validation_result* out);
+/* A kept plan's, as uploaded last: the check's reason unknown_plan, or wrong_plan_state before its first upload. */
+FSIM_API int fsim_vehicle_validate_stored_plan(fsim_world* world, uint32_t id, uint64_t plan_id, const fsim_plan_validation* validation,
+                                               fsim_plan_validation_result* out);
+
 /* Reports (ABI 1.12; docs/flight-autonomy.md, 4.12): what an activity flies, and where to. */
 /* What a live activity flies now, or waits to fly (A-GRA's last flight command), as the batch item that would command
  * it: its kind and code (a level, fsim_support, fsim_mode); its fields - a level's all of them (as

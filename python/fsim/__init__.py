@@ -91,6 +91,7 @@ from .world import (  # noqa: E402
     PlanExecution,
     PlanState,
     PlanStatus,
+    PlanValidationResult,
     PathMetadata,
     PointMetadata,
     PointSource,

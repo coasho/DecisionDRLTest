@@ -1,8 +1,11 @@
 // Route plans (docs/flight-autonomy.md, 4.39): the vehicle's store of A-GRA's
 // route plans, taken through the VI's plan activation states (1.2.5), and
-// their execution; FA's own plans and the airfields (4.40) - CapabilityHost's.
-// Apart from the host's other code, so that growing either moves neither.
+// their execution; FA's own plans and the airfields (4.40); their validation
+// (4.41) - CapabilityHost's. Apart from the host's other code, so that growing
+// either moves neither.
 #include "control/CapabilityHost.h"
+
+#include "fsim/GuidanceModes.h"
 
 #include <algorithm>
 #include <cmath>
@@ -28,6 +31,9 @@ struct CapabilityHost::PlanEntry {
 struct CapabilityHost::PlanStore {
     std::vector<PlanEntry> plans;    ///< in the order they were first prepared for upload, or loaded
     std::vector<Airfield> airfields; ///< FA's (4.40), in the order they were first loaded
+    /// While a validation runs (4.41): the wind it gives, which the route's checks turn in (checkWind).
+    bool windGiven = false;
+    double windNorthMs = 0.0, windEastMs = 0.0;
 };
 
 void CapabilityHost::PlanStoreFree::operator()(PlanStore* store) const noexcept { delete store; }
@@ -145,6 +151,25 @@ bool runwaysKept(const RoutePlan& p, const std::vector<Airfield>& airfields) noe
         if (a == airfields.end() || std::none_of(a->runways.begin(), a->runways.end(), [&](const Runway& r) { return r.id == m->runway; })) return false;
     }
     return true;
+}
+
+/// A validation's inputs well formed: a wind both ways or neither, finite; a gust not below 0; an origin's latitude and
+/// longitude both or neither, on the Earth, its altitude finite; parts of path types there are.
+bool wellFormed(const PlanValidation& v) noexcept {
+    if (std::isnan(v.windNorthMs) != std::isnan(v.windEastMs) || std::isnan(v.originLatitudeRad) != std::isnan(v.originLongitudeRad)) return false;
+    if (!given(v.windNorthMs) || !given(v.windEastMs) || !given(v.gustMs, 0.0) || !given(v.originAltitudeM)) return false;
+    if (!std::isnan(v.originLatitudeRad) && !(std::abs(v.originLatitudeRad) <= 0.5 * kPi && std::abs(v.originLongitudeRad) <= kPi)) return false;
+    if (std::isnan(v.originLatitudeRad) && !std::isnan(v.originAltitudeM)) return false; // (an altitude without its place)
+    return (v.parts >> static_cast<unsigned>(PathType::Count)) == 0;
+}
+
+/// The path type point `i` lies on: its path's (Primary left out), Primary without paths or past them.
+PathType partOf(const RoutePlan& p, std::int32_t i) noexcept {
+    for (const RoutePath& path : p.paths)
+        if (i >= 0 && static_cast<std::uint32_t>(i) >= path.first && static_cast<std::uint32_t>(i) - path.first < path.count)
+            return path.type >= 0.0 && path.type < static_cast<double>(PathType::Count) ? static_cast<PathType>(static_cast<int>(path.type))
+                                                                                     : PathType::Primary;
+    return PathType::Primary;
 }
 
 /// A plan's execution once its activity ended.
@@ -412,6 +437,76 @@ bool CapabilityHost::airfield(AirfieldId id, Airfield& out) const {
             return true;
         }
     return false;
+}
+
+PlanValidationResult CapabilityHost::validatePlan(const RoutePlan& plan, const PlanValidation& v, const sim::VehicleState& state, double now) {
+    if (pendingSuggestions_) materialize();
+    PlanValidationResult r;
+    if (!wellFormed(plan) || !wellFormed(v)) {
+        details_.clear();
+        r.check.reason = Reason::InvalidParameter;
+        return r;
+    }
+    // the aircraft as it would be: from its origin; in the wind given, its gusts behind it - which the route's checks turn
+    // in while it runs (checkWind), the aircraft's own motion as it is
+    sim::VehicleState from = state;
+    if (!std::isnan(v.originLatitudeRad)) {
+        from.latitudeRad = v.originLatitudeRad, from.longitudeRad = v.originLongitudeRad;
+        if (!std::isnan(v.originAltitudeM)) from.altitudeMslM = v.originAltitudeM;
+        const double ground = sessionView_ ? sessionView_->groundM(from.latitudeRad, from.longitudeRad) : kUnknown;
+        from.altitudeAglM = std::isfinite(ground) ? from.altitudeMslM - ground : from.altitudeMslM - (state.altitudeMslM - state.altitudeAglM);
+    }
+    WindEstimate measured;
+    measured.update(state, 0.0);
+    double north = std::isnan(v.windNorthMs) ? measured.northMs : v.windNorthMs, east = std::isnan(v.windEastMs) ? measured.eastMs : v.windEastMs;
+    if (!std::isnan(v.gustMs) && v.gustMs > 0.0) { // (along the wind; with none, from the north)
+        const double speed = std::hypot(north, east);
+        if (speed > 0.0) north *= (speed + v.gustMs) / speed, east *= (speed + v.gustMs) / speed;
+        else north = -v.gustMs, east = 0.0;
+    }
+    if (!plans_) plans_.reset(new PlanStore), planned_ = true;
+    struct Given { // (held while the checks run, and let go however they end)
+        PlanStore& store;
+        ~Given() { store.windGiven = false; }
+    } given{*plans_};
+    plans_->windGiven = !std::isnan(v.windNorthMs) || (!std::isnan(v.gustMs) && v.gustMs > 0.0);
+    plans_->windNorthMs = north, plans_->windEastMs = east;
+    CommandOptions o;
+    o.validateOnly = true;
+    o.range = v.modifyToValidate ? RangePolicy::Clamp : RangePolicy::Reject;
+    const RouteExtras extras{plan.loiters, plan.states, plan.paths, plan.branches, plan.terminators};
+    r.check = submitWith(Command(plan.route), plan.waypoints, {}, o, from, now, true, nullptr, nullptr, &extras);
+    if (r.check.status == CommandStatus::Valid) {
+        r.valid = true;
+    } else if (v.parts && details_.findingCount && details_.findingCount <= CommandDetails::kMax) {
+        // a patch: every finding outside its parts (a refusal the checks stop at finds nothing more: it cannot be vouched for)
+        const auto inParts = [&](std::int32_t i) { return i < 0 || ((v.parts >> static_cast<unsigned>(partOf(plan, i))) & 1u) != 0; };
+        r.valid = !inParts(r.check.index);
+        for (std::size_t k = 0; r.valid && k < details_.findingCount; ++k) r.valid = !inParts(details_.findings[k].index);
+    }
+    return r;
+}
+
+PlanValidationResult CapabilityHost::validatePlan(PlanId id, const PlanValidation& v, const sim::VehicleState& state, double now) {
+    const PlanEntry* e = findPlan(id);
+    if (!e || !e->revision) {
+        details_.clear();
+        PlanValidationResult r;
+        r.check.reason = e ? Reason::WrongPlanState : Reason::UnknownPlan;
+        return r;
+    }
+    const RoutePlan kept = e->kept; // (a copy: the validation may not move the store, but it runs the checks)
+    return validatePlan(kept, v, state, now);
+}
+
+WindEstimate CapabilityHost::checkWind(const sim::VehicleState& state) const noexcept {
+    WindEstimate wind;
+    if (planned_ && plans_ && plans_->windGiven) {
+        wind.northMs = plans_->windNorthMs, wind.eastMs = plans_->windEastMs, wind.valid = true;
+        return wind;
+    }
+    wind.update(state, 0.0);
+    return wind;
 }
 
 } // namespace fsim::control

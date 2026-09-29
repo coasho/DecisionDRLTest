@@ -367,6 +367,24 @@ std::optional<control::Airfield> Vehicle::airfield(control::AirfieldId airfield)
     return world_ ? world_->impl_->airfield(id_, airfield) : std::nullopt;
 }
 
+control::PlanValidationResult Vehicle::validatePlan(const control::RoutePlan& plan, const control::PlanValidation& v) {
+    if (!world_) {
+        control::PlanValidationResult r;
+        r.check.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    return world_->impl_->validatePlan(id_, plan, v);
+}
+
+control::PlanValidationResult Vehicle::validatePlan(control::PlanId plan, const control::PlanValidation& v) {
+    if (!world_) {
+        control::PlanValidationResult r;
+        r.check.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    return world_->impl_->validatePlan(id_, plan, v);
+}
+
 control::Reason Vehicle::setCapabilityPrecedence(std::string_view capability, std::uint32_t precedence) {
     return world_ ? world_->impl_->setCapabilityPrecedence(id_, capability, precedence) : control::Reason::UnknownVehicle;
 }

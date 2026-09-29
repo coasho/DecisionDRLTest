@@ -426,3 +426,72 @@ TEST_CASE("route plans: FA's own - read only to MA, activated by it; MA's for a 
     CHECK(std::string_view(reasonName(Reason::SafetyCriticalPlan)) == "safety_critical_plan");
     CHECK(w.supportTable(v)->find("fsim.plan/fa_plans")->support == Support::Supported);
 }
+
+TEST_CASE("route plans: validated without flying them - in the wind given, from an origin, a patch over its parts "
+          "(VI 1.2.5.5, 1.2.5.6)",
+          "[plan]") {
+    session::World w(options("plans-validate"));
+    const auto v = wing(w, "c172x", 1500.0, 55.0);
+    const sim::VehicleState s = *w.vehicleState(v);
+    // two corners 1,200 m apart: a C172's turns at 55 m/s fit the legs in calm air, not with 15 m/s or more behind them
+    RoutePlan corners;
+    corners.id = 91;
+    corners.waypoints = {at(s, 0.0, 3000.0, 1500.0), at(s, 1200.0, 3000.0, 1500.0), at(s, 1200.0, 4200.0, 1500.0)};
+    const std::size_t activities = w.activities(v).size();
+    PlanValidationResult r = w.validatePlan(v, corners); // (the wind its air data measure: calm)
+    CHECK((r.valid && r.check.status == CommandStatus::Valid));
+    PlanValidation windy;
+    windy.windNorthMs = 0.0, windy.windEastMs = 20.0;
+    r = w.validatePlan(v, corners, windy);
+    CHECK((!r.valid && r.check.status == CommandStatus::Rejected && r.check.reason == Reason::InvalidWaypoint && r.check.index == 0));
+    CHECK(w.commandDetails(v)->findingCount >= 1);
+    PlanValidation gusty;
+    gusty.windNorthMs = 0.0, gusty.windEastMs = 0.0, gusty.gustMs = 20.0; // (gusts count as wind behind it)
+    CHECK_FALSE(w.validatePlan(v, corners, gusty).valid);
+    windy.modifyToValidate = true; // (A-GRA's ModifyToValidate: the turns flown smaller, adjustments)
+    r = w.validatePlan(v, corners, windy);
+    CHECK((r.valid && r.check.status == CommandStatus::Valid && w.commandDetails(v)->adjustmentCount >= 1));
+    CHECK(w.activities(v).size() == activities); // (nothing flies)
+    CHECK(w.plans(v).empty());                    // (nothing is kept)
+    // from an origin 1,400 m below it: a climb steeper than the aircraft's to the first point
+    PlanValidation below;
+    below.originLatitudeRad = s.latitudeRad, below.originLongitudeRad = s.longitudeRad, below.originAltitudeM = 100.0;
+    r = w.validatePlan(v, corners, below);
+    CHECK((!r.valid && r.check.index == 0));
+    below.originAltitudeM = 1450.0;
+    CHECK(w.validatePlan(v, corners, below).valid);
+    // a patch (A-GRA's PlanPart): its verdict over its parts - the corners the primary path's, an alternate's straight on
+    RoutePlan patched = corners;
+    patched.waypoints.push_back(at(s, 1200.0, 7200.0, 1500.0));
+    patched.waypoints[1].next = 2.0; // (the primary path on into the alternate: both corners turned)
+    patched.paths = {RoutePath{1, static_cast<double>(PathType::Primary), 0, 2}, RoutePath{2, static_cast<double>(PathType::Alternate), 2, 2}};
+    PlanValidation alternate = windy;
+    alternate.modifyToValidate = false;
+    alternate.parts = 1u << static_cast<unsigned>(PathType::Alternate);
+    CHECK(w.validatePlan(v, patched, alternate).valid);
+    alternate.parts = 1u << static_cast<unsigned>(PathType::Primary);
+    CHECK_FALSE(w.validatePlan(v, patched, alternate).valid);
+    alternate.parts = 0; // (the whole plan)
+    CHECK_FALSE(w.validatePlan(v, patched, alternate).valid);
+    // a kept plan, as uploaded - one for planning use only validates as any
+    RoutePlan planning = corners;
+    planning.forPlanningUseOnly = true;
+    upload(w, v, planning);
+    CHECK(w.validatePlan(v, PlanId{91}).valid);
+    CHECK(w.validatePlan(v, PlanId{91}, windy).valid); // (modified to validate)
+    CHECK(w.validatePlan(v, PlanId{92}).check.reason == Reason::UnknownPlan);
+    REQUIRE(w.planCommand(v, 93, PlanCommand::PrepareForUpload).completed);
+    CHECK(w.validatePlan(v, PlanId{93}).check.reason == Reason::WrongPlanState); // (nothing uploaded)
+    // what it refuses to validate in
+    auto refused = [&](const std::function<void(PlanValidation&)>& spoil) {
+        PlanValidation bad;
+        spoil(bad);
+        return w.validatePlan(v, corners, bad).check.reason == Reason::InvalidParameter;
+    };
+    CHECK(refused([](PlanValidation& b) { b.windNorthMs = 5.0; }));                                   // (a wind one way alone)
+    CHECK(refused([](PlanValidation& b) { b.gustMs = -1.0; }));
+    CHECK(refused([&](PlanValidation& b) { b.originLatitudeRad = s.latitudeRad; }));                  // (without its longitude)
+    CHECK(refused([](PlanValidation& b) { b.originAltitudeM = 100.0; }));                             // (without its place)
+    CHECK(refused([](PlanValidation& b) { b.parts = 1u << static_cast<unsigned>(PathType::Count); })); // (no such path type)
+    CHECK(w.supportTable(v)->find("fsim.plan/validate")->support == Support::Supported);
+}

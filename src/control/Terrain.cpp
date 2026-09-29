@@ -276,8 +276,7 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
                 const bool differs = i > p.loop && i <= m;
                 if (differs) own = route::lapLeg(p, i, own);
                 if (differs && i == m) { // (its turn sized as the host's check planned the route: 4.30)
-                    WindEstimate wind;
-                    wind.update(state, 0.0);
+                    const WindEstimate wind = checkWind(state);
                     at = route::lapTurn(p, own, state.altitudeMslM, std::hypot(wind.northMs, wind.eastMs), performance_, hovers);
                 }
                 if (leg(i, false, differs ? own : p.leg(i, false), m > 0 && i == m + 1 ? &at : p.turnBefore(i, false), differs && i == m ? at : p.turn(i, false)))

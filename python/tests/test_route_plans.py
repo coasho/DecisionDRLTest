@@ -162,5 +162,42 @@ class RoutePlansTest(unittest.TestCase):
         self.assertEqual(agra.CANNOT_COMPLY["read_only_plan"], "INELIGIBLE_CONTROL_SOURCE")
 
 
+    def test_validated_in_the_wind_given(self):
+        """A route plan validated without flying it (docs/flight-autonomy.md, 4.41): its corners' turns fit in calm air, not
+        with 20 m/s behind them; modified to validate, valid; a patch over its parts; A-GRA's form."""
+        v = self.v
+        lat, lon = v.state.latitude_rad, v.state.longitude_rad
+        at = lambda n, e: fsim.Waypoint(lat + n / R, lon + e / (R * math.cos(lat)), 1500.0)  # noqa: E731
+        points = [at(0.0, 3000.0), at(1200.0, 3000.0), at(1200.0, 4200.0)]
+        plan = fsim.RoutePlan(91, fsim.BatchCommand("submit_route", points))
+        r = v.validate_plan(plan)
+        self.assertEqual((r.valid, r.validation.valid, r.index), (True, True, -1))
+        r = v.validate_plan(plan, wind=(0.0, 20.0))
+        self.assertEqual((r.valid, r.validation.reason, r.index), (False, "invalid_waypoint", 0))
+        self.assertTrue(r.validation.findings)
+        form = agra.route_plan_validation(plan, r)
+        self.assertEqual((form["ValidationState"], form["InvalidPath"][0]["PathID"], form["InvalidPath"][0]["InvalidSegment"][0]["PathSegmentID"]),
+                         ("INVALID", 0, 0))
+        self.assertFalse(v.validate_plan(plan, wind=(0.0, 0.0), gust_ms=20.0).valid)
+        r = v.validate_plan(plan, wind=(0.0, 20.0), modify=True)
+        self.assertTrue(r.valid and r.validation.adjustments)
+        self.assertEqual(agra.route_plan_validation(plan, r), {"ValidationState": "VALID", "InvalidPath": []})
+        # from an origin 1,400 m below
+        self.assertFalse(v.validate_plan(plan, origin=(lat, lon, 100.0)).valid)
+        # a patch over its parts: the corners the primary path's, an alternate's straight on
+        linked = list(points) + [at(1200.0, 7200.0)]
+        linked[1] = linked[1]._replace(next=2)
+        route = fsim.BatchCommand("submit_route", linked, paths=[fsim.RoutePath(1, "primary", 0, 2), fsim.RoutePath(2, "alternate", 2, 2)])
+        patched = fsim.RoutePlan(92, route)
+        self.assertTrue(v.validate_plan(patched, wind=(0.0, 20.0), parts=["alternate"]).valid)
+        self.assertFalse(v.validate_plan(patched, wind=(0.0, 20.0), parts=[fsim.PathType.PRIMARY]).valid)
+        # a kept plan by its id; one not kept
+        self.upload(plan)
+        self.assertTrue(v.validate_plan(91).valid)
+        r = v.validate_plan(93)
+        self.assertEqual((r.valid, r.validation.reason), (False, "unknown_plan"))
+        self.assertEqual(v.support("fsim.plan/validate").support, fsim.Support.SUPPORTED)
+
+
 if __name__ == "__main__":
     unittest.main()

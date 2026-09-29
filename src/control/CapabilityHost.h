@@ -23,6 +23,8 @@
 
 namespace fsim::control {
 
+struct WindEstimate; // fsim/GuidanceModes.h
+
 namespace route {
 struct Plan;
 struct Curve;
@@ -263,6 +265,14 @@ public:
     std::vector<Airfield> airfields() const;
     /// One airfield as loaded; false for one not kept.
     bool airfield(AirfieldId id, Airfield& out) const;
+    // Validation (4.41)
+    /// A route plan validated without flying it: its route checked as its
+    /// NEW would be, in `v`'s weather, from its origin, its verdict over its
+    /// parts. The plan need not be kept; nothing is kept or flown. check's
+    /// InvalidParameter for a malformed plan or validation. May allocate.
+    PlanValidationResult validatePlan(const RoutePlan& plan, const PlanValidation& v, const sim::VehicleState& state, double now);
+    /// A kept plan's, as uploaded last: UnknownPlan; WrongPlanState before its first upload.
+    PlanValidationResult validatePlan(PlanId id, const PlanValidation& v, const sim::VehicleState& state, double now);
 
     // --- Reports (docs/flight-autonomy.md, 4.12): what an activity flies, and where to ---
     /// What a live activity flies now, or waits to fly: its setpoint as
@@ -909,6 +919,8 @@ private:
     PlanStatus planStatusOf(const PlanEntry& e) const noexcept;
     /// Its live activity ended Canceled with `reason`, the platform's: no authority asked.
     void endPlanActivity(ActivityId activity, Reason reason, const sim::VehicleState& state, double now) noexcept;
+    /// The wind a route's checks turn in (4.41): a plan validation's while one runs, else what the air data measure now.
+    WindEstimate checkWind(const sim::VehicleState& state) const noexcept;
     std::unique_ptr<PlanStore, PlanStoreFree> plans_; ///< made at the first plan prepared for upload
 };
 

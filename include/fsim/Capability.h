@@ -547,6 +547,32 @@ struct PlanCommandResult {
     CommandResult check{};
 };
 
+/// What a route plan is validated in, and against (A-GRA's RoutePlanValidationCommand's inputs; docs/flight-autonomy.md,
+/// 4.41). Each left out (NaN), as the vehicle is now.
+struct PlanValidation {
+    /// A-GRA's WeatherAreaData.WindData (ENV-10): the wind - where it blows to - and its gusts. The route's turns are
+    /// checked with them behind the aircraft; left out, the wind its air data measure now.
+    double windNorthMs = std::numeric_limits<double>::quiet_NaN(), windEastMs = std::numeric_limits<double>::quiet_NaN();
+    double gustMs = std::numeric_limits<double>::quiet_NaN();
+    /// A-GRA's Origin: where it is validated from - its latitude and longitude, and its altitude above the WGS-84 ellipsoid
+    /// (left out, the aircraft's); left out, where the aircraft is.
+    double originLatitudeRad = std::numeric_limits<double>::quiet_NaN(), originLongitudeRad = std::numeric_limits<double>::quiet_NaN();
+    double originAltitudeM = std::numeric_limits<double>::quiet_NaN();
+    /// A-GRA's ModifyToValidate: a value beyond the aircraft's limits held to them, an adjustment (RangePolicy::Clamp);
+    /// false, a finding (RangePolicy::Reject).
+    bool modifyToValidate = false;
+    /// A-GRA's PlanPart: the path types a patch covers (bit i, PathType i) - the verdict is theirs alone; 0, the whole plan.
+    std::uint32_t parts = 0;
+};
+
+/// A route plan's validation answer (A-GRA's RoutePlanValidation): valid or not - over its parts, a patch's - and the
+/// route's validation as it answered: its reason and the point it names. The vehicle's command details
+/// (World::commandDetails) have its findings and adjustments.
+struct PlanValidationResult {
+    bool valid = false;    ///< A-GRA's ValidationState: VALID; else INVALID
+    CommandResult check{}; ///< Valid or Rejected, as a NEW's validation answers (CommandOptions::validateOnly)
+};
+
 // --- Activities ---------------------------------------------------------------------
 
 /// An activity's state. Disabled (docs/flight-autonomy.md, 4.10) is live - it

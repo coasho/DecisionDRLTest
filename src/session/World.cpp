@@ -811,6 +811,26 @@ std::optional<control::Airfield> World::airfield(std::uint32_t id, control::Airf
     return a;
 }
 
+control::PlanValidationResult World::validatePlan(std::uint32_t id, const control::RoutePlan& plan, const control::PlanValidation& v) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::PlanValidationResult r;
+        r.check.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    return e->host.validatePlan(plan, v, pool_->states()[e->slot], simTime_);
+}
+
+control::PlanValidationResult World::validatePlan(std::uint32_t id, control::PlanId plan, const control::PlanValidation& v) {
+    Entry* e = entry(id);
+    if (!e) {
+        control::PlanValidationResult r;
+        r.check.reason = control::Reason::UnknownVehicle;
+        return r;
+    }
+    return e->host.validatePlan(plan, v, pool_->states()[e->slot], simTime_);
+}
+
 bool World::activitySetpoint(control::ActivityId activity, control::Setpoint& out) const {
     const Entry* e = entry(control::activityVehicle(activity));
     return e && e->host.setpoint(activity, out);

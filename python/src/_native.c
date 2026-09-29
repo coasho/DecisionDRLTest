@@ -3173,13 +3173,41 @@ static int text_of(PyObject* o, const char** out) {
  * `item` a route's batch item; `points` [(point, source, locked, modified, remarks_name, remarks, fix_key, fix_system)];
  * `paths` [(path, a state's row of 30 numbers (its point not used), endurance_s, fuel_kg, gross_weight_kg, transition_plan,
  * airfield, runway)]. load_plan takes the same: FA's own (ABI 1.37). */
+/* A validation's inputs: (wind_north_ms, wind_east_ms, gust_ms, origin_latitude_rad, origin_longitude_rad, origin_altitude_m,
+ * modify_to_validate, parts), or None - as the vehicle is now (ABI 1.38). */
+static int read_validation(PyObject* t, fsim_plan_validation* v) {
+    fsim_plan_validation_init(v);
+    if (t == Py_None) return 1;
+    if (!PyTuple_Check(t) || PyTuple_Size(t) != 8) {
+        PyErr_SetString(PyExc_ValueError, "a validation must be (wind_north_ms, wind_east_ms, gust_ms, origin_latitude_rad, "
+                                          "origin_longitude_rad, origin_altitude_m, modify_to_validate, parts)");
+        return 0;
+    }
+    double* f[6] = {&v->wind_north_ms, &v->wind_east_ms, &v->gust_ms, &v->origin_latitude_rad, &v->origin_longitude_rad, &v->origin_altitude_m};
+    for (Py_ssize_t k = 0; k < 6; ++k) {
+        *f[k] = PyFloat_AsDouble(PyTuple_GetItem(t, k));
+        if (PyErr_Occurred()) return 0;
+    }
+    v->modify_to_validate = PyObject_IsTrue(PyTuple_GetItem(t, 6)) == 1;
+    return as_u32(PyTuple_GetItem(t, 7), &v->parts);
+}
+
+/* A validation's answer: (valid, the check's result tuple) */
+static PyObject* validation_tuple(const fsim_world* world, const fsim_plan_validation_result* r) {
+    PyObject* check = result_tuple(world, &r->check);
+    return check ? Py_BuildValue("(ON)", r->valid ? Py_True : Py_False, check) : NULL;
+}
+
+/* mode 0 publish_plan, 1 load_plan, 2 validate_plan (its 11th argument the validation) */
 static PyObject* plan_call(PyObject* o, PyObject* const* args, Py_ssize_t n, int load) {
     WorldObject* self = (WorldObject*)o;
     uint32_t id, version;
     uint64_t plan_id;
     fsim_route_plan plan;
-    if (!check_args(n, 10, 10, load ? "load_plan" : "publish_plan") || !as_u32(args[0], &id) || !as_u64(args[1], &plan_id) ||
-        !as_u32(args[2], &version) || !WORLD_IDLE(self))
+    fsim_plan_validation validation;
+    const Py_ssize_t count = load == 2 ? 11 : 10;
+    if (!check_args(n, count, count, load == 2 ? "validate_plan" : load ? "load_plan" : "publish_plan") || !as_u32(args[0], &id) ||
+        !as_u64(args[1], &plan_id) || !as_u32(args[2], &version) || !WORLD_IDLE(self) || (load == 2 && !read_validation(args[10], &validation)))
         return NULL;
     fsim_route_plan_init(&plan);
     plan.plan_id = plan_id, plan.version = version;
@@ -3237,9 +3265,16 @@ static PyObject* plan_call(PyObject* o, PyObject* const* args, Py_ssize_t n, int
         int32_t reason = 0;
         plan.points = np ? pm : NULL, plan.point_count = (uint32_t)np;
         plan.paths = nq ? qm : NULL, plan.path_count = (uint32_t)nq;
-        const int status = load ? fsim_vehicle_load_plan(self->world, id, &plan, &reason) : fsim_vehicle_publish_plan(self->world, id, &plan, &reason);
-        if (status != FSIM_OK) fail();
-        else out = PyLong_FromLong(reason);
+        if (load == 2) {
+            fsim_plan_validation_result r;
+            fsim_plan_validation_result_init(&r);
+            if (fsim_vehicle_validate_plan(self->world, id, &plan, &validation, &r) != FSIM_OK) fail();
+            else out = validation_tuple(self->world, &r);
+        } else {
+            const int status = load ? fsim_vehicle_load_plan(self->world, id, &plan, &reason) : fsim_vehicle_publish_plan(self->world, id, &plan, &reason);
+            if (status != FSIM_OK) fail();
+            else out = PyLong_FromLong(reason);
+        }
     }
     if (it) batch_free(it, 1);
     PyMem_Free(pm);
@@ -3250,6 +3285,24 @@ static PyObject* plan_call(PyObject* o, PyObject* const* args, Py_ssize_t n, int
 }
 
 static PyObject* world_publish_plan(PyObject* o, PyObject* const* args, Py_ssize_t n) { return plan_call(o, args, n, 0); }
+
+/* validate_plan(...publish_plan's, validation) -> (valid, result): a route plan validated without flying it (ABI 1.38) */
+static PyObject* world_validate_plan(PyObject* o, PyObject* const* args, Py_ssize_t n) { return plan_call(o, args, n, 2); }
+
+/* validate_stored_plan(id, plan_id, validation) -> (valid, result): a kept plan's */
+static PyObject* world_validate_stored_plan(PyObject* o, PyObject* const* args, Py_ssize_t n) {
+    WorldObject* self = (WorldObject*)o;
+    uint32_t id;
+    uint64_t plan_id;
+    fsim_plan_validation validation;
+    fsim_plan_validation_result r;
+    if (!check_args(n, 3, 3, "validate_stored_plan") || !as_u32(args[0], &id) || !as_u64(args[1], &plan_id) || !WORLD_IDLE(self) ||
+        !read_validation(args[2], &validation))
+        return NULL;
+    fsim_plan_validation_result_init(&r);
+    if (fsim_vehicle_validate_stored_plan(self->world, id, plan_id, &validation, &r) != FSIM_OK) return fail();
+    return validation_tuple(self->world, &r);
+}
 
 /* load_plan(...) -> reason: FA's own plan, the platform's (ABI 1.37), its arguments publish_plan's */
 static PyObject* world_load_plan(PyObject* o, PyObject* const* args, Py_ssize_t n) { return plan_call(o, args, n, 1); }
@@ -3533,6 +3586,8 @@ static PyMethodDef world_methods[] = {
     FAST("plans", world_plans, "plans(id) -> [status]"),
     FAST("get_plan", world_get_plan, "get_plan(id, plan_id) -> plan tuple or None"),
     FAST("load_plan", world_load_plan, "load_plan(id, ...publish_plan's) -> reason: FA's own plan"),
+    FAST("validate_plan", world_validate_plan, "validate_plan(id, ...publish_plan's, validation) -> (valid, result)"),
+    FAST("validate_stored_plan", world_validate_stored_plan, "validate_stored_plan(id, plan_id, validation) -> (valid, result)"),
     FAST("load_airfield", world_load_airfield, "load_airfield(id, airfield_id, icao, qnh_pa, runways) -> reason"),
     FAST("airfields", world_airfields, "airfields(id) -> [airfield tuple]"),
     FAST("get_airfield", world_get_airfield, "get_airfield(id, airfield_id) -> airfield tuple or None"),

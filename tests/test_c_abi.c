@@ -1265,6 +1265,60 @@ int main(int argc, char** argv) {
             CHECK(isnan(pts[0].rnp_m));
         }
         {
+            /* ABI 1.38 (4.41): a route plan validated without flying it - its corners' turns fit in calm air, not with 20 m/s
+               behind them; modified to validate, valid; a kept plan by its id, an unknown one refused */
+            fsim_waypoint pts[3];
+            fsim_route_plan plan;
+            fsim_plan_validation val;
+            fsim_plan_validation_result res;
+            fsim_plan_command_result pr;
+            double options[4];
+            const fsim_vehicle_state* at;
+            uint32_t checked = 0;
+            int32_t reason = -1;
+            int k;
+            const double ne[3][2] = {{0.0, 3000.0}, {1200.0, 3000.0}, {1200.0, 4200.0}};
+            spec.name = "cap-validate";
+            spec.type = "jsbsim:c172x";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 55.0;
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &checked) == FSIM_OK);
+            at = fsim_vehicle_state_ptr(world, checked);
+            for (k = 0; k < 4; ++k) options[k] = fsim_hold();
+            for (k = 0; k < 3; ++k) {
+                fsim_waypoint_init(&pts[k]);
+                pts[k].latitude_rad = at->latitude_rad + ne[k][0] / 6371000.0;
+                pts[k].longitude_rad = at->longitude_rad + ne[k][1] / (6371000.0 * cos(at->latitude_rad));
+                pts[k].altitude_m = 1500.0;
+            }
+            fsim_route_plan_init(&plan);
+            plan.plan_id = 91, plan.version = 1;
+            plan.route.fields = options, plan.route.count = 4, plan.route.waypoints = pts, plan.route.waypoint_count = 3;
+            fsim_plan_validation_init(&val);
+            CHECK(val.struct_size == sizeof val && isnan(val.wind_north_ms) && isnan(val.origin_altitude_m) && val.parts == 0);
+            fsim_plan_validation_result_init(&res);
+            CHECK(fsim_vehicle_validate_plan(world, checked, &plan, NULL, &res) == FSIM_OK && res.valid == 1 &&
+                  res.check.status == FSIM_COMMAND_VALID);
+            val.wind_north_ms = 0.0, val.wind_east_ms = 20.0;
+            CHECK(fsim_vehicle_validate_plan(world, checked, &plan, &val, &res) == FSIM_OK && res.valid == 0 &&
+                  res.check.status == FSIM_COMMAND_REJECTED && strcmp(fsim_reason_name(res.check.reason), "invalid_waypoint") == 0 &&
+                  res.check.reserved == 1);
+            val.modify_to_validate = 1;
+            CHECK(fsim_vehicle_validate_plan(world, checked, &plan, &val, &res) == FSIM_OK && res.valid == 1);
+            /* a kept plan, by its id */
+            fsim_plan_command_result_init(&pr);
+            CHECK(fsim_vehicle_plan_command(world, checked, 91, FSIM_PLAN_PREPARE_FOR_UPLOAD, NULL, &pr) == FSIM_OK && pr.completed == 1);
+            CHECK(fsim_vehicle_publish_plan(world, checked, &plan, &reason) == FSIM_OK && reason == 0);
+            CHECK(fsim_vehicle_plan_command(world, checked, 91, FSIM_PLAN_UPLOAD, NULL, &pr) == FSIM_OK && pr.completed == 1);
+            CHECK(fsim_vehicle_validate_stored_plan(world, checked, 91, NULL, &res) == FSIM_OK && res.valid == 1);
+            CHECK(fsim_vehicle_validate_stored_plan(world, checked, 92, NULL, &res) == FSIM_OK && res.valid == 0 &&
+                  strcmp(fsim_reason_name(res.check.reason), "unknown_plan") == 0);
+            val.wind_east_ms = NAN; /* (a wind one way alone) */
+            CHECK(fsim_vehicle_validate_plan(world, checked, &plan, &val, &res) == FSIM_OK && res.valid == 0 &&
+                  strcmp(fsim_reason_name(res.check.reason), "invalid_parameter") == 0);
+        }
+        {
             /* ABI 1.37 (4.40): FA's airfields and its own plans - an airfield loaded and read back; FA's landing plan loaded,
                naming its runway, and read only to MA; a path's metadata as ABI 1.36 laid it out still read */
             fsim_waypoint pts[2];

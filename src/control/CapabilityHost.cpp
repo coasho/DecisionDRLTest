@@ -525,8 +525,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
     if (const Reason why = checkStates(p, states, state, detail); why != Reason::None) return why; // (its planned states: 4.34)
     if (log.range == RangePolicy::None) { // (what it flies, the behaviour plans from where it starts: its loiters complete)
         if (p.loiterCount) {
-            WindEstimate wind;
-            wind.update(state, 0.0);
+            const WindEstimate wind = checkWind(state);
             route::plan(p, state.latitudeRad, state.longitudeRad, state.altitudeMslM, std::hypot(wind.northMs, wind.eastMs), performance_, hovers);
             completeLoiters(p, state);
             for (std::uint32_t k = 0; k < p.loiterCount; ++k) // (one on a point it does not fly kept as given: 4.36)
@@ -576,8 +575,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
                   8);
         }
     }
-    WindEstimate wind;
-    wind.update(state, 0.0);
+    const WindEstimate wind = checkWind(state);
     route::plan(p, state.latitudeRad, state.longitudeRad, state.altitudeMslM, std::hypot(wind.northMs, wind.eastMs), f, hovers);
     // its loiters where they fly (4.31), each against the performance as a pattern is - named by its point, its fields
     // after the point's - and two circles fitting as limited

@@ -1026,7 +1026,7 @@ A-GRA's route plan (MA_RoutePlanMT) is a route FA keeps by its id and version, t
 - **FA's own deactivation** (VI 1.2.5.7; RPL-09): `World::abortPlan(vehicle, plan, reason)`, the platform's. A plan ready for activation or activated is `Deactivated`, and its execution, unless done, `Canceled`: its activity, if live, canceled with the reason (`restricted` by default). So is one whose activity the platform itself ends: its grant revoked, or for collision avoidance or a restriction.
 - **Queries** (RPL-05): `World::plans(vehicle)` gives every plan kept, in the order they were first prepared for upload - its id, version, revision, state and execution (A-GRA's query for identifiers only); `planStatus(vehicle, plan)` one; `plan(vehicle, plan)` its content as uploaded last, its metadata with it. The revision stands for A-GRA's hash of a plan's content (XPT-07).
 - `World::removePlan(vehicle, plan)` forgets a plan whose activity is not live (`unknown_plan`, `wrong_plan_state`).
-- **FA-7b** keeps a plan whose paths are a takeoff's, a departure's, an approach's or a landing's FA's own, refused to MA, and adds the airfields (4.40). Validation with weather, and patches, are FA-7c's: their support row says so.
+- **FA-7b** keeps a plan whose paths are a takeoff's, a departure's, an approach's or a landing's FA's own, refused to MA, and adds the airfields (4.40). FA-7c validates plans, in weather, and patches (4.41).
 - **The support rows,** `fsim.plan/store` and `fsim.guidance.route/metadata`, are supported on every aircraft: they need nothing an aircraft may lack. The route capability's pending list now names FA-16's contingencies alone.
 - **Surfaces.**
   - C++: `PlanId`, `PlanCommand`, `PlanState`, `PlanExecution`, `PlanStatus`, `PlanCommandResult` (`fsim/Capability.h`); `PointSource`, `PointMetadata`, `PathMetadata`, `RoutePlan` (`fsim/Control.h`); `World::publishPlan`, `planCommand`, `abortPlan`, `removePlan`, `planStatus`, `plans`, `plan`, and `Vehicle::` likewise; `Reason::UnknownPlan`, `WrongPlanState`, `PlanExecuting`, `PlanNotReceived`, `PlanningOnly`, `PlanStoreFull`; `planCommandName`, `planStateName`, `planExecutionName`, `pointSourceName`.
@@ -1062,6 +1062,24 @@ FA keeps what is safety critical: the airfields and the route plans for takeoff,
   - C++: `AirfieldId`, `RunwayId`, `RunwayPoint`, `RunwayCoordinates`, `Runway`, `Airfield` (`fsim/Control.h`); `PathMetadata::airfield`, `runway`; `PlanStatus::faOwned`; `World::loadAirfield`, `airfields`, `airfield`, `loadPlan`, and `Vehicle::` likewise; `Reason::ReadOnlyPlan`, `SafetyCriticalPlan`, `UnknownAirfield`.
   - C ABI 1.37: `fsim_runway_point`, `fsim_runway_coordinates`, `fsim_runway` (`fsim_runway_init`: every place and value left out), `fsim_airfield` (`fsim_airfield_init`); `fsim_vehicle_load_airfield`, `_airfield_count`, `_get_airfield_at`, `_get_airfield`, its runways and ICAO code the library's; `fsim_vehicle_load_plan`; `fsim_path_metadata`'s `airfield` and `runway`, where the caller's `struct_size` has them; `fsim_plan_status`'s `fa_owned` (1.36's reserved word).
   - Python: `fsim.Airfield`, `fsim.Runway`, `fsim.RunwayCoordinates`, `fsim.RunwayPoint`; `vehicle.load_airfield(airfield)`, `airfields()`, `airfield(id)`, `load_plan(plan)`; `fsim.PathMetadata`'s `airfield` and `runway`, `fsim.PlanStatus.fa_owned`; `fsim.agra.airfield_report`.
+
+### 4.41 A-GRA's route plan validation, in weather, and patches (as FA-7c builds it)
+
+MA may have FA validate a route plan without flying it (VI 1.2.5.5: RoutePlanValidationCommand, answered by RoutePlanValidation). It gives the weather (WeatherAreaData) and where the plan would be flown from (Origin). It may instead verify a patch, the parts of a plan (PlanPart: path types) it would replace (1.2.5.6). ADR-29 plans these as RPL-06, RPL-07 and ENV-10, FA-7c.
+
+- **Validated** (`World::validatePlan(vehicle, plan, validation)`): its route is checked as its NEW would be - its points, their extras and its options - flying nothing and keeping nothing. The plan may be kept or not; a kept one's is by its id, as uploaded last (`unknown_plan`; `wrong_plan_state` before its first upload). A plan for planning use only validates as any other.
+- **The validation** (`PlanValidation`; each part left out, as the vehicle is now):
+  - **the weather** (A-GRA's WeatherAreaData.WindData; ENV-10): its wind - `windNorthMs`, `windEastMs`, where it blows to - and its gusts (`gustMs`, along it). The route's turns are checked in them: each turn's radius at its speed with the wind and its gusts behind it, as a NEW's turns are in the wind the air data measure. A-GRA's other weather - temperature, pressure, precipitation, visibility, icing - is not used: the checks fly in the air the aircraft is in (a minimal model, as D8 has the supporting models).
+  - **the origin** (A-GRA's Origin): where it is validated from - `originLatitudeRad`, `originLongitudeRad`, and `originAltitudeM` (left out, the aircraft's altitude). The route's first leg is from there, the aircraft's own motion as it is.
+  - **modify to validate** (A-GRA's ModifyToValidate): a value beyond the aircraft's limits is held to them, an adjustment (`RangePolicy::Clamp`). Left false, each is a finding (`RangePolicy::Reject`).
+  - **its parts** (`parts`, A-GRA's PlanPart: bit i for PathType i), a patch's: the verdict is theirs alone, valid where every finding lies on a path of another type. A refusal the checks stop at - a point they look no further past - cannot be vouched for, and is invalid. Left 0, the whole plan.
+- **Answered** (`PlanValidationResult`, A-GRA's RoutePlanValidation): `valid` (VALID; else INVALID), and `check`, the route's validation as it answered - Valid, or Rejected with its reason and the point it names. The vehicle's command details (`World::commandDetails`) have its findings and adjustments; `fsim.agra.route_plan_validation` gives A-GRA's form - InvalidPath, InvalidSegment, and each finding's RouteValidationErrorEnum, by the limit it breaks.
+- **Refused `invalid_parameter`:** a plan a publish would refuse (4.39); a wind given one way alone, or not finite; a gust below 0; an origin's latitude without its longitude, or off the Earth, or an altitude without its place; a part that is no path type.
+- **The support row,** `fsim.plan/validate`, is supported on every aircraft. With it, stage 7 has no row left: FA-7 is done.
+- **Surfaces.**
+  - C++: `PlanValidation`, `PlanValidationResult` (`fsim/Capability.h`); `World::validatePlan` (a plan, or a kept one's id), and `Vehicle::` likewise.
+  - C ABI 1.38: `fsim_plan_validation` (`fsim_plan_validation_init`: as the vehicle is now), `fsim_plan_validation_result`; `fsim_vehicle_validate_plan`, `fsim_vehicle_validate_stored_plan`.
+  - Python: `vehicle.validate_plan(plan_or_id, wind=, gust_ms=, origin=, modify=, parts=)`, a `fsim.PlanValidationResult` (`valid`, its `fsim.Validation`, the `index` a refusal names); `fsim.agra.route_plan_validation`.
 
 ## 5. Applicability (D6)
 
@@ -1328,10 +1346,10 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
 
 Plans by id and version, their activation states, FA-owned read-only plans, airfields and runways, queries, validation and patches, execution status.
 
-**Status:** in three steps:
+**Status:** done 2026-09-29 in three steps, each measured in section 14:
 - FA-7a, the plan store: its activation states, execution, queries and the route's planning metadata (RPL-01, RPL-02, RPL-05, RPL-08, RPL-09, RPL-10, RPL-11, WPT-23; 4.39), done 2026-09-29 and measured in section 14;
 - FA-7b, FA's own plans and the airfields (RPL-03, RPL-04, ENV-05; 4.40), done 2026-09-29 and measured in section 14;
-- FA-7c, validation with weather, and patches (RPL-06, RPL-07, ENV-10).
+- FA-7c, validation with weather, and patches (RPL-06, RPL-07, ENV-10; 4.41), done 2026-09-29 and measured in section 14; FA-7 done.
 
 **Supporting models:** Airfields, weather for validation (ENV-05, ENV-10).
 
@@ -2813,6 +2831,27 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases are within −3.2 % to +3.0 % from one copy - the same level's update 6.6 to 6.8 ns either way - and within −3.1 % to +0.4 % from three copies, the NEWs a little faster. Built with every function aligned to 64 bytes, a level switch reads within −1.3 % to +0.5 %, and a behaviour −3.2 % to −1.8 %.
   - World throughput is 99.7 to 100.1 % of FA-7a's (100.0 to 100.4 % from three copies), and protection costs at most 1.0 %.
 - ctest: all 338 tests pass.
+
+**FA-7c, A-GRA's route plan validation, in weather, and patches (RPL-06, RPL-07, ENV-10).**
+- What it built is 4.41, in C++, the C ABI (1.38) and Python. `fsim.plan/validate` is supported on every aircraft. Stage 7 has no row left: FA-7 is done.
+- **The VI's sequences replayed** (`test_route_plans`, 1 case more, 28 checks; its Python twin, 1 test more; `test_c_abi`'s 1.38 block), a C172 flying at 1,500 m at 55 m/s:
+  - Route Plan Validation (1.2.5.5): two corners 1,200 m apart. The C172's turns at 55 m/s fit its legs in calm air, the wind its air data measure. With 20 m/s of wind behind them, or 20 m/s of gusts, they do not: invalid, its first point named (`invalid_waypoint`), with a finding for each. Modified to validate, the turns are flown smaller: valid, with adjustments. Nothing flies, and nothing is kept.
+  - From an origin 1,400 m below it, the climb to its first point is steeper than the aircraft climbs: invalid. From 50 m below, valid.
+  - Plan Patch Verification (1.2.5.6): the corners on the primary path, an alternate's leg straight on from them. In the wind, the alternate's part is valid; the primary's is not, nor is the whole plan.
+  - A kept plan - one for planning use only - validates by its id, as uploaded. An unknown id is refused `unknown_plan`, and one prepared for upload with nothing uploaded `wrong_plan_state`. Each of five malformed validations is refused `invalid_parameter`, from a wind given one way alone to a part that is no path type.
+  - A-GRA's form (`fsim.agra.route_plan_validation`): INVALID, its first path's first segment named; VALID once modified.
+- **The fleet** (`test_fleet`'s route plan case): on every aircraft, the plan is validated first, in calm air and modified to validate, as MA would before sending it: valid on all 35, then flown as before. Unmodified, the UH-1H's alone is not: its legs, 300 m (20 s at its 15 m/s cruise), are too short for its fly-by turns at the first two points, which its route flies smaller - under Reject, a turn error each.
+- **The route checks' wind:** the validation's wind reaches the checks as the wind itself. The four places that took it from the air data now ask the host (`checkWind`), which gives the validation's while one runs, else the measurement as before. Moving the aircraft's ground velocity by the wind instead read a hovering UH-1H as flying.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-7b's build.
+- **Memory:** the validation's wind is held in the plans' store (made at the first validation) while it runs; the host does not grow.
+- **Digests:** identical to FA-7b's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-7b, both builds run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`; then 5 rounds of `micro` and of `command`, and 3 of `world`, from three copies of each; and 9 rounds of `command` twice, and 5 from three copies of each, between the two built with every function aligned to 64 bytes. Two earlier runs, which another session's helicopter flight tests disturbed, were discarded; the run now stops and starts again whenever another session's work appears.
+  - The micro cases are within −2.5 % to +2.4 % from one copy, and −2.1 % to +3.1 % from three.
+  - The NEWs read faster: a level switch by 5.0 to 7.4 % (5.9 % from three copies), a behaviour by 5.5 to 7.8 % (7.3 %). The same level's update and a checked update are within −1.5 % to +1.5 %.
+  - Built with every function aligned, a level switch reads within −0.6 % to +0.1 %, but a behaviour +9.0 % and +9.7 % from one copy - and +2.6 % from three. There, one of FA-7b's own copies read 139.5 ns against its siblings' 124.3 and 124.8: where a copy loads moves that case by 12 %.
+  - No instruction on the NEW path changed: `submitWith` is instruction for instruction FA-7b's. The one function there that changed is the command variant's destructor, where GCC now inlines part of a map's teardown (31 to 52 instructions); an empty map skips it for two more pushes and pops. The rest is where the code lies, as FA-7a's was.
+  - World throughput is 99.4 to 100.7 % of FA-7b's, and 100.1 to 101.1 % run again apart. From three copies of each, a first run drifted as it went - FA-7c's later copies reading lower, 96.3 to 99.4 % - and run again read 98.6 to 101.0 %. On the step path too, the command variant's destructor is the one function that changed. Protection costs at most 1.5 %.
+- ctest: all 339 tests pass.
 
 ## Appendix A: the inventory
 

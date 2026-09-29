@@ -363,6 +363,52 @@ def plan_execution_state(status):
     return PLAN_EXECUTION_STATE[int(status.execution)]
 
 
+#: constraint names -> A-GRA's RouteValidationErrorEnum, a route validation's finding's (docs/flight-autonomy.md, 4.41)
+ROUTE_VALIDATION_ERROR = {
+    "min_airspeed": "SPEED_ERROR",
+    "max_airspeed": "SPEED_ERROR",
+    "min_altitude": "ALTITUDE_ERROR",
+    "max_altitude": "ALTITUDE_ERROR",
+    "max_turn_rate": "TURN_ERROR",
+    "max_orientation": "BANK_ANGLE_ERROR",
+    "max_orientation_rate": "ROLL_ERROR",
+}
+
+
+def route_plan_validation(plan, result):
+    """A route plan's validation (fsim.PlanValidationResult of a fsim.RoutePlan) as A-GRA's RoutePlanValidation's parts:
+    its ValidationState (VALID or INVALID) and, invalid, each finding by the path it lies on - InvalidPath, its PathID (the
+    fsim.RoutePath's id; 0 without paths) and InvalidSegment, each its PathSegmentID (the waypoint's id where it has one,
+    else its index) and InvalidReason (RouteValidationErrorEnum: by the limit it breaks, FUEL_ERROR for an endurance,
+    OTHER_ERROR otherwise)."""
+    route = plan.route
+    points = route.args[0] if route.args else route.kwargs.get("waypoints", ())
+    paths = route.kwargs.get("paths") or ()
+
+    def path_of(index):
+        for p in paths:
+            if p.first <= index < p.first + p.count:
+                return p.id
+        return 0
+
+    def segment_of(index):
+        if 0 <= index < len(points):
+            wid = getattr(points[index], "id", 0) if not isinstance(points[index], dict) else points[index].get("id", 0)
+            if wid:
+                return int(wid)
+        return index
+
+    invalid = {}
+    found = [(f.index, f.reason, f.constraint) for f in result.validation.findings]
+    if not found and not result.valid:  # (a refusal the checks stopped at: its point, its reason)
+        found = [(result.index, result.validation.reason, "none")]
+    for index, reason, constraint in found:
+        error = "FUEL_ERROR" if reason == "insufficient_endurance" else ROUTE_VALIDATION_ERROR.get(constraint, "OTHER_ERROR")
+        invalid.setdefault(path_of(index), []).append({"PathSegmentID": segment_of(index), "InvalidReason": error})
+    return {"ValidationState": "VALID" if result.valid else "INVALID",
+            "InvalidPath": [] if result.valid else [{"PathID": pid, "InvalidSegment": segs} for pid, segs in invalid.items()]}
+
+
 def airfield_report(airfield):
     """An airfield (fsim.Airfield) as A-GRA's AirfieldReportMDT's parts (docs/flight-autonomy.md, 4.40): its AirfieldID, its
     Information's ICAO_Code and QNH_Setting (Pa), and its runways - each its RunwayID, Direction, AvailableLength and its

@@ -172,8 +172,7 @@ void CapabilityHost::completeLoiters(route::Plan& p, const sim::VehicleState& st
         optimise(l.pattern.speed, l.pattern.speedReference, l.pattern.speedOptimization, w.altitudeM, w.altitudeReference, state);
         magnetic = magnetic || l.shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth);
     }
-    WindEstimate wind;
-    wind.update(state, 0.0);
+    const WindEstimate wind = checkWind(state); // (a validation's, while one runs: 4.41)
     route::completeLoiters(p, state, performance_, (adapter_->features() & kFeatureHover) != 0, wind.northMs, wind.eastMs, &config_->altimeter,
                            magnetic ? yearNow() : 2025.0);
 }

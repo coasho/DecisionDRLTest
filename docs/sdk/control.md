@@ -683,6 +683,25 @@ v.planCommand(landing.id, PlanCommand::PrepareForUpload).reason; // Reason::Read
 - MA's own plan for a takeoff, a departure, an approach or a landing is
   refused as published (`safety_critical_plan`); a taxi route is MA's too.
 
+A plan - kept or not - is validated without flying it
+([flight-autonomy.md](../flight-autonomy.md), 4.41), in the weather given,
+from an origin, its verdict over a patch's parts:
+
+```cpp
+PlanValidation v;
+v.windNorthMs = 0.0, v.windEastMs = 20.0, v.gustMs = 5.0;       // its turns checked with them behind it
+v.parts = 1u << static_cast<unsigned>(PathType::Alternate);      // a patch's: the verdict theirs alone
+PlanValidationResult r = v1.validatePlan(plan, v);               // or a kept plan's: validatePlan(PlanId{17}, v)
+r.valid;                                                         // A-GRA's VALID
+r.check.reason, r.check.index;                                   // the route's validation, as it answered
+v1.commandDetails()->findings;                                   // every finding, and adjustments
+```
+
+- `modifyToValidate` (A-GRA's ModifyToValidate) holds values beyond the
+  aircraft's limits to them, as adjustments, instead of refusing them.
+- Its wind and gusts are the weather the checks use; A-GRA's other weather
+  is not (the checks fly in the air the aircraft is in).
+
 ### Reports: what an activity flies, and where to
 
 An activity's setpoint read back, where it flies to, and what the vehicle

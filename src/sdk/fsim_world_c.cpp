@@ -2371,6 +2371,66 @@ FSIM_API int fsim_vehicle_load_plan(fsim_world* world, uint32_t id, const fsim_r
     });
 }
 
+FSIM_API void fsim_plan_validation_init(fsim_plan_validation* validation) {
+    if (!validation) return;
+    const double nan = std::numeric_limits<double>::quiet_NaN();
+    std::memset(validation, 0, sizeof *validation);
+    validation->struct_size = sizeof *validation;
+    validation->wind_north_ms = validation->wind_east_ms = validation->gust_ms = nan;
+    validation->origin_latitude_rad = validation->origin_longitude_rad = validation->origin_altitude_m = nan;
+}
+
+FSIM_API void fsim_plan_validation_result_init(fsim_plan_validation_result* result) {
+    if (!result) return;
+    std::memset(result, 0, sizeof *result);
+    result->struct_size = sizeof *result;
+}
+
+namespace {
+
+/// A validation's inputs as the caller laid them out; NULL: as the vehicle is now. False if they cannot be read.
+bool validationFromC(const fsim_plan_validation* c, fsim::control::PlanValidation& v) {
+    if (!c) return true;
+    if (c->struct_size < sizeof(fsim_plan_validation)) return false;
+    v.parts = c->parts, v.windNorthMs = c->wind_north_ms, v.windEastMs = c->wind_east_ms, v.gustMs = c->gust_ms;
+    v.originLatitudeRad = c->origin_latitude_rad, v.originLongitudeRad = c->origin_longitude_rad, v.originAltitudeM = c->origin_altitude_m;
+    v.modifyToValidate = c->modify_to_validate != 0;
+    return true;
+}
+
+/// Its answer into the caller's struct, the check kept as the world's last (fsim_last_command_detail).
+int validationOut(fsim_world* world, uint32_t id, const fsim::control::PlanValidationResult& r, fsim_plan_validation_result* out) {
+    fsim_plan_validation_result c;
+    fsim_plan_validation_result_init(&c);
+    c.valid = r.valid ? 1 : 0;
+    toC(world, id, r.check, &c.check);
+    return copyOut(c, out) ? FSIM_OK : FSIM_INVALID_ARGUMENT;
+}
+
+} // namespace
+
+FSIM_API int fsim_vehicle_validate_plan(fsim_world* world, uint32_t id, const fsim_route_plan* plan, const fsim_plan_validation* validation,
+                                        fsim_plan_validation_result* out) {
+    if (!world || !plan || !out || plan->struct_size < sizeof(fsim_route_plan)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_validate_plan: bad arguments");
+    return guard("fsim_vehicle_validate_plan", [&]() -> int {
+        fsim::control::RoutePlan p;
+        fsim::control::PlanValidation v;
+        if (const char* why = planFromC(world, *plan, p); *why) return fail(FSIM_INVALID_ARGUMENT, std::string("fsim_vehicle_validate_plan: ") + why);
+        if (!validationFromC(validation, v)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_validate_plan: its validation cannot be read");
+        return validationOut(world, id, world->world.validatePlan(id, p, v), out);
+    });
+}
+
+FSIM_API int fsim_vehicle_validate_stored_plan(fsim_world* world, uint32_t id, uint64_t plan_id, const fsim_plan_validation* validation,
+                                               fsim_plan_validation_result* out) {
+    if (!world || !out) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_validate_stored_plan: bad arguments");
+    return guard("fsim_vehicle_validate_stored_plan", [&]() -> int {
+        fsim::control::PlanValidation v;
+        if (!validationFromC(validation, v)) return fail(FSIM_INVALID_ARGUMENT, "fsim_vehicle_validate_stored_plan: its validation cannot be read");
+        return validationOut(world, id, world->world.validatePlan(id, fsim::control::PlanId{plan_id}, v), out);
+    });
+}
+
 FSIM_API void fsim_runway_init(fsim_runway* runway) {
     if (!runway) return;
     const double nan = std::numeric_limits<double>::quiet_NaN();

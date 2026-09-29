@@ -803,8 +803,10 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             return r.accepted();
         },
         aroundSquare, none, completed);
-    // the same route as A-GRA's route plan (ADR-29 FA-7a, RPL-01, RPL-02, RPL-10): prepared for upload, published, uploaded,
-    // prepared for activation and activated - flown as the route is, its plan's execution complete at its end
+    // the same route as A-GRA's route plan (ADR-29 FA-7a, RPL-01, RPL-02, RPL-10): validated first, in calm air and modified
+    // to validate - held to the aircraft's limits, as it will be flown - as MA would before sending it (FA-7c, RPL-06);
+    // prepared for upload, published, uploaded, prepared for activation and activated - flown as the route is, its plan's
+    // execution complete at its end
     run("fsim.guidance.route", 0.0,
         [&](const Plane& p) {
             RoutePlan plan;
@@ -814,6 +816,11 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
                 wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
                 plan.waypoints.push_back(wp);
             }
+            PlanValidation calm;
+            calm.windNorthMs = calm.windEastMs = 0.0, calm.modifyToValidate = true;
+            const PlanValidationResult checked = w.validatePlan(p.id, plan, calm);
+            INFO("its validation: " << reasonName(checked.check.reason) << " at " << checked.check.index);
+            CHECK((checked.valid && checked.check.status == CommandStatus::Valid));
             REQUIRE(w.planCommand(p.id, 1, PlanCommand::PrepareForUpload).completed);
             REQUIRE(w.publishPlan(p.id, plan) == Reason::None);
             REQUIRE(w.planCommand(p.id, 1, PlanCommand::Upload).completed);

@@ -532,6 +532,13 @@ PlanStatus.__doc__ = ("A route plan's status (A-GRA's plan activation status and
                       "ended, and its activation's command id; ``fa_owned``, FA's own - loaded by the platform, read only to "
                       "MA (4.40).")
 
+PlanValidationResult = collections.namedtuple("PlanValidationResult", "valid validation index")
+PlanValidationResult.__doc__ = ("A route plan's validation answer (A-GRA's RoutePlanValidation; docs/flight-autonomy.md, 4.41): "
+                                "``valid`` - A-GRA's VALID, over a patch's parts where they are given - and the route's "
+                                "``validation`` as it answered (a fsim.Validation: its reason, findings and adjustments; "
+                                "fsim.agra.route_plan_validation gives A-GRA's form), and the ``index`` of the waypoint a "
+                                "refusal names (-1 none).")
+
 PlanCommandResult = collections.namedtuple("PlanCommandResult", "plan command completed state reason activity index findings")
 PlanCommandResult.__doc__ = ("A plan command's answer (A-GRA's MA_MissionPlanActivationCommandStatus; docs/flight-autonomy.md, "
                              "4.39): ``completed`` (A-GRA's COMPLETED; else FAILED), the plan's fsim.PlanState after it (INACTIVE: "
@@ -1973,6 +1980,31 @@ class Vehicle:
         reason = self._h.load_airfield(self.id, int(a.id), a.icao or None, float(a.qnh_pa), rows)
         if reason:
             raise Rejected(_native.reason_name(reason))
+
+    def validate_plan(self, plan, *, wind=None, gust_ms=None, origin=None, modify=False, parts=()):
+        """Validate a route plan without flying it (A-GRA's route plan validation; docs/flight-autonomy.md, 4.41): ``plan``
+        a fsim.RoutePlan - kept or not - or a kept plan's id (as uploaded last). Its route is checked as its NEW would be:
+        in the ``wind`` given - (north, east) m/s, where it blows to - and its ``gust_ms``, its turns flown with them behind
+        the aircraft (None: what its air data measure now); from ``origin`` - (latitude_rad, longitude_rad[,
+        altitude_m]) - where the aircraft is if None; ``modify`` (A-GRA's ModifyToValidate) holding values beyond the
+        aircraft's limits to them rather than refusing them; its verdict over ``parts`` (path types, fsim.PathType or their
+        names: a patch's), the whole plan if none. Nothing is kept or flown. A fsim.PlanValidationResult; its validation's
+        reason "unknown_plan" or "wrong_plan_state" for an id not kept or not uploaded, "invalid_parameter" for inputs
+        that are not."""
+        wn, we = (math.nan, math.nan) if wind is None else (float(wind[0]), float(wind[1]))
+        lat, lon, alt = math.nan, math.nan, math.nan
+        if origin is not None:
+            lat, lon = float(origin[0]), float(origin[1])
+            alt = float(origin[2]) if len(origin) > 2 else math.nan
+        mask = 0
+        for part in parts:
+            mask |= 1 << int(PathType[part.upper()] if isinstance(part, str) else PathType(part))
+        validation = (wn, we, math.nan if gust_ms is None else float(gust_ms), lat, lon, alt, bool(modify), mask)
+        if isinstance(plan, RoutePlan):
+            valid, result = self._h.validate_plan(self.id, *self._plan_native(plan), validation)
+        else:
+            valid, result = self._h.validate_stored_plan(self.id, int(plan), validation)
+        return PlanValidationResult(bool(valid), _validation(result, self._h), result[5])
 
     def airfields(self):
         """Every airfield kept (fsim.Airfield), as loaded, in the order they were first loaded (A-GRA's query for the

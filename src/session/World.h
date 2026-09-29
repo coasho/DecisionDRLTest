@@ -230,6 +230,12 @@ public:
     /// Every airfield kept, as loaded (A-GRA's query for the airfields).
     std::vector<control::Airfield> airfields(std::uint32_t id) const;
     std::optional<control::Airfield> airfield(std::uint32_t id, control::AirfieldId airfield) const;
+    /// A route plan validated without flying it (docs/flight-autonomy.md, 4.41): its route checked as its NEW would be, in
+    /// the weather given, from its origin, its verdict over its parts (a patch's). Kept or not; nothing is kept or flown.
+    /// commandDetails(id) has its findings and adjustments.
+    control::PlanValidationResult validatePlan(std::uint32_t id, const control::RoutePlan& plan, const control::PlanValidation& v = {});
+    /// A kept plan's, as uploaded last: UnknownPlan; WrongPlanState before its first upload.
+    control::PlanValidationResult validatePlan(std::uint32_t id, control::PlanId plan, const control::PlanValidation& v = {});
     // --- Reports (docs/flight-autonomy.md, 4.12): what an activity flies, and where to ---
     /// What a live activity flies now, or waits to fly: its setpoint as
     /// updated, a route's waypoints, a curve's segments (appended ones too: its

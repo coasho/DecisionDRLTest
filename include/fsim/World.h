@@ -313,6 +313,10 @@ public:
     control::Reason loadAirfield(const control::Airfield& airfield);
     std::vector<control::Airfield> airfields() const;
     std::optional<control::Airfield> airfield(control::AirfieldId airfield) const;
+    /// A route plan validated without flying it - kept or not - in the weather given, from its origin, its verdict over its
+    /// parts (a patch's); commandDetails() has its findings.
+    control::PlanValidationResult validatePlan(const control::RoutePlan& plan, const control::PlanValidation& v = {});
+    control::PlanValidationResult validatePlan(control::PlanId plan, const control::PlanValidation& v = {});
     /// The platform restricts a capability (collision avoidance, an
     /// operational restriction): a policy's NEW for it is refused with
     /// `reason`; what flies goes on. Availability::Available lifts it.
