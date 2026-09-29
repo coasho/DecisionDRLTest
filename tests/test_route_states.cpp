@@ -152,8 +152,8 @@ TEST_CASE("route states: a rotorcraft through its states; one in a frame placed 
     CHECK(w.activity(r.activity)->state == ActivityState::Completed);
 }
 
-TEST_CASE("route states: refused as a point is, naming it - malformed, off its leg, past where its loiter begins, steeper than it climbs, times "
-          "it cannot make; unchecked, flown; beside moving points, a time without tables, not implemented",
+TEST_CASE("route states: refused as a point is, naming it - malformed, off its leg (beside a moving point, where the leg will be at its time), "
+          "past where its loiter begins, steeper than it climbs, times it cannot make; unchecked, flown; a time without tables, not implemented",
           "[modes]") {
     session::World w(options("route-states-refused"));
     const auto v = wing(w, "c172", 1500.0, 55.0);
@@ -246,18 +246,24 @@ TEST_CASE("route states: refused as a point is, naming it - malformed, off its l
     const CommandResult pastJoin = atLoiter(14000.0), beforeJoin = atLoiter(9000.0);
     CHECK((pastJoin.reason == Reason::InvalidWaypoint && pastJoin.index == 1));
     CHECK(beforeJoin.accepted());
-    // not built yet: on a route with a point in a moving frame; a time without tables
-    FrameSpec drifting;
-    drifting.origin = FrameOrigin::Moving;
-    drifting.latitudeRad = p1.latitudeRad, drifting.longitudeRad = p1.longitudeRad, drifting.altitudeMslM = 1500.0, drifting.northMs = 1.0;
-    drifting.timeS = t0;
-    Waypoint carried = p1;
-    carried.frame = static_cast<double>(w.createFrame(drifting));
-    const CommandResult moves = answer({good}, {}, {p0, carried});
-    CHECK((moves.reason == Reason::NotImplemented && moves.index == 1));
+    // beside a point in a moving frame (FA-6g3b; until then not implemented): checked where its leg will be at its time - the
+    // point drifting north at 1 m/s, 100 m off at its middle by then, taken; at 10 m/s, a kilometre off, refused
+    auto beside = [&](double northMs) {
+        FrameSpec drifting;
+        drifting.origin = FrameOrigin::Moving;
+        drifting.latitudeRad = p1.latitudeRad, drifting.longitudeRad = p1.longitudeRad, drifting.altitudeMslM = 1500.0, drifting.northMs = northMs;
+        drifting.timeS = t0;
+        Waypoint carried = p1;
+        carried.frame = static_cast<double>(w.createFrame(drifting));
+        return answer({good}, {}, {p0, carried});
+    };
+    const CommandResult slowly = beside(1.0), quickly = beside(10.0);
+    CHECK(slowly.accepted());
+    CHECK((quickly.reason == Reason::InvalidWaypoint && quickly.index == 1));
     const SupportInfo* row = w.supportTable(v)->find("fsim.guidance.route/inertial_states");
     REQUIRE(row != nullptr);
-    CHECK(row->support == Support::Partial);
+    CHECK(row->support == Support::Supported);
+    // not built yet: a time without tables (its row partial there)
     const auto stock = wing(w, "c172x", 1500.0, 55.0, 3);
     const auto& x0 = *w.vehicleState(stock);
     const Waypoint x1 = at(x0.latitudeRad, x0.longitudeRad, 0.0, 3000.0), x2 = at(x0.latitudeRad, x0.longitudeRad, 0.0, 15000.0);
@@ -374,4 +380,45 @@ TEST_CASE("route states: at and after a loiter point (FA-6g3a) - placed on the l
     CHECK(std::abs(altitude - 1600.0) < 25.0);
     CHECK(std::abs(estimateIn - (plannedAt + 30.0)) < 2.0);
     CHECK(highest < 1625.0);
+}
+
+TEST_CASE("route states: beside a moving point (FA-6g3b) - checked where its leg will be at its time, placed again as the leg moves, passed "
+          "at its time and altitude",
+          "[modes]") {
+    session::World w(options("route-states-moving"));
+    const auto v = wing(w, "c172", 1500.0, 55.0);
+    w.step(stepsFor(w, 2.0));
+    const double t0 = w.simTime();
+    const auto& s0 = *w.vehicleState(v);
+    const double lat0 = s0.latitudeRad, lon0 = s0.longitudeRad;
+    // a ship 12 km east, moving north at 3 m/s; east 3 km, then to the ship. At 55 m/s it would be halfway along the leg to it
+    // some 137 s in: a state there 20 s later, 1600 m high, where the leg's middle will be then (the ship 471 m north)
+    FrameSpec ship;
+    ship.origin = FrameOrigin::Moving;
+    ship.latitudeRad = lat0, ship.longitudeRad = lon0 + 12000.0 / (kR * std::cos(lat0)), ship.altitudeMslM = 1500.0, ship.northMs = 3.0, ship.timeS = t0;
+    const FrameId shipId = w.createFrame(ship);
+    Waypoint p0 = at(lat0, lon0, 0.0, 3000.0), p1;
+    p0.speed = 55.0, p0.altitudeM = 1500.0;
+    p1.frame = static_cast<double>(shipId), p1.frameXM = p1.frameYM = 0.0, p1.altitudeM = 1500.0;
+    const double due = 157.0, middleNorth = 0.5 * 3.0 * due;
+    const RouteState st = stateAt(1, lat0, lon0, middleNorth, 7500.0, 1600.0, t0 + due);
+    const CommandResult r = w.submit(v, RouteCommand{}, std::vector<Waypoint>{p0, p1}, {}, {}, std::vector<RouteState>{st});
+    INFO(reasonName(r.reason) << " at " << r.index);
+    REQUIRE(r.accepted());
+    double passed = kHold, altitude = kHold, estimate = kHold;
+    for (unsigned k = 0; k < stepsFor(w, 300.0) && isHold(passed); ++k) {
+        w.step();
+        double north = 0.0, e = 0.0;
+        const auto& s = *w.vehicleState(v);
+        offset(s, lat0, lon0, north, e);
+        ArrivalEstimate est;
+        if (isHold(estimate) && e > 5000.0 && w.activityArrival(r.activity, est)) estimate = est.arrivalS - t0;
+        if (e >= 7500.0) passed = w.simTime() - t0, altitude = s.altitudeMslM;
+    }
+    std::printf("route states beside a moving point: due at %.0f s, 1600 m high, halfway to a ship moving north, it passed at %.1f s, %.1f m high "
+                "(its estimate 5 km east %.1f s)\n",
+                due, passed, altitude, estimate);
+    REQUIRE(!isHold(passed));
+    CHECK(std::abs(passed - due) < 2.0); // (FA-6's acceptance: within 2 s)
+    CHECK(std::abs(altitude - 1600.0) < 25.0);
 }

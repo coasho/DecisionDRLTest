@@ -612,6 +612,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
             return hold;
         }
         if (!ended_) route::replan(q, at, firstLap_, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
+        if (!ended_ && q.stateCount) route::placeStates(q); // (its states on the legs as they are now: 4.34)
         // flown over the frame the piece is in: its point's and the one before's, one moving frame (past the end, the last point's)
         const Waypoint& w = q.points[at];
         const Waypoint& b = q.points[q.before(at, firstLap_)]; // (a leg from where a loiter ended is in no frame: 4.31)

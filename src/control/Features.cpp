@@ -36,6 +36,8 @@ struct FeatureDef {
     /// Flown from the performance tables (a speed optimisation): not implemented
     /// on an aircraft hangar has flown none for - a stock one (FA-3's: stage 3).
     bool tables = false;
+    /// Part of it flown from the performance tables: partial on such an aircraft, this missing (at `stage`).
+    const char* withoutTables = nullptr;
 };
 
 #define CAP(id, built, stage, rules, missing) {id, id, built, stage, rules, missing}
@@ -83,7 +85,7 @@ const FeatureDef kFeatures[] = {
 
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
-        "planned states beside points in moving frames (FA-6); planning metadata (FA-7); "
+        "planning metadata (FA-7); "
         "a branch on a mission critical or lost comms contingency (FA-16)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
@@ -119,7 +121,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/waypoint_type/hard_ditch", "fsim.guidance.route", N, 16, 0, ""},
     {"fsim.guidance.route/loiter_point", "fsim.guidance.route", S, 0, 0, ""},                // WPT-18 (FA-6b2)
     {"fsim.guidance.route/path_terminators", "fsim.guidance.route", S, 0, 0, ""},            // WPT-19 (FA-6f)
-    {"fsim.guidance.route/inertial_states", "fsim.guidance.route", P, 6, 0, "beside points in moving frames"}, // WPT-20 (FA-6d2; at or after a loiter point FA-6g3a)
+    {"fsim.guidance.route/inertial_states", "fsim.guidance.route", S, 6, 0, "", false, "a planned state's time, as an arrival window's"}, // WPT-20 (FA-6d2; FA-6g3a, FA-6g3b)
     {"fsim.guidance.route/required_navigation_performance", "fsim.guidance.route", S, 0, 0, ""}, // WPT-21 (FA-6d3)
     {"fsim.guidance.route/relative_points", "fsim.guidance.route", S, 0, 0, ""},             // WPT-22 (FA-6a)
     {"fsim.guidance.route/metadata", "fsim.guidance.route", N, 7, 0, ""},                    // WPT-23
@@ -456,6 +458,11 @@ SupportTable::SupportTable(const VehicleProfile& profile, const CapabilityCatalo
             row.support = Support::NotImplemented; // flown from performance tables it has none of
             row.stage = f.stage;
             row.missing = "";
+        }
+        if (f.withoutTables && profile.tables.empty() && row.support == Support::Supported) {
+            row.support = Support::Partial; // part of it flown from performance tables it has none of
+            row.stage = f.stage;
+            row.missing = f.withoutTables;
         }
     };
     for (std::size_t i = 0; i < kFeatureCount; ++i) judge(kFeatures[i], rows_[i], evidence_[i]);

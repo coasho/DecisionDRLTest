@@ -132,10 +132,7 @@ Reason CapabilityHost::checkStates(route::Plan& p, Span<const RouteState> states
     if (states.size() > PathStore::kRouteStates) return at(states[PathStore::kRouteStates].point, Reason::InvalidWaypoint);
     auto code = [](double v, double count) { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); };
     const double now = sessionView_ ? sessionView_->simTimeS() : state.simTime;
-    // what is not built yet (its row, partial): a state on a route with a point in a moving frame, whose legs move; a time
-    // where the tables its speeds come from are missing, as an arrival window's is (4.33)
-    bool moving = false;
-    for (std::uint32_t k = 0; k < p.frameCount; ++k) moving = moving || p.frames[k].origin != FrameOrigin::Fixed;
+    // what is not built where it has no tables (its row, partial there): a time, as an arrival window's is (4.33)
     const SupportInfo* timed = support_ ? support_->find("fsim.guidance.route/required_time_of_arrival") : nullptr;
     double before = -std::numeric_limits<double>::infinity();
     std::uint32_t last = 0;
@@ -182,7 +179,6 @@ Reason CapabilityHost::checkStates(route::Plan& p, Span<const RouteState> states
         }
         // one profile: an altitude beside a climb rate or optimisation is two
         if (!isHold(s.altitudeM) && (!isHold(w.climbRateMs) || !isHold(w.climbOptimization))) return at(k, Reason::InvalidWaypoint);
-        if (moving) return at(k, Reason::NotImplemented);
         if (!isHold(s.timeS) && (!timed || timed->support == Support::NotImplemented)) return at(k, Reason::NotImplemented);
         p.states[j] = s;
     }
@@ -200,11 +196,14 @@ Reason CapabilityHost::limitStates(route::Plan& p, const sim::VehicleState& stat
     }
     route::placeStates(p);
     CommandResult& detail = log.result;
-    // each on its leg as planned - after a loiter point, as laid from where the loiter is left - within its uncertainty (50 m
-    // at least, or 1 % of the leg), behind none before it; on a loiter point's own leg, before where its loiter begins
+    bool moving = false; // (a point in a moving frame: its legs move - FA-6g3b)
+    for (std::uint32_t k = 0; k < p.frameCount; ++k) moving = moving || p.frames[k].origin != FrameOrigin::Fixed;
+    // each on its leg as planned - after a loiter point, as laid from where the loiter is left; beside a moving point, where
+    // the leg will be at its time - within its uncertainty (50 m at least, or 1 % of the leg), behind none before it; on a
+    // loiter point's own leg, before where its loiter begins
     for (std::uint32_t j = 0; j < p.stateCount; ++j) {
         const RouteState& s = p.states[j];
-        const route::Leg leg = route::stateLeg(p, s.point);
+        const route::Leg leg = moving && !isHold(s.timeS) && !route::afterLoiter(p, s.point) ? legAt(p, s.point, s.timeS, state) : route::stateLeg(p, s.point);
         const route::Fix fix = route::onLeg(leg, s.latitudeRad, s.longitudeRad);
         const double within = std::max({50.0, isHold(s.uncertaintyM) ? 0.0 : s.uncertaintyM, 0.01 * leg.lengthM});
         const bool behind = j > 0 && p.states[j - 1].point == s.point && fix.alongM < p.stateAlongM[j - 1];

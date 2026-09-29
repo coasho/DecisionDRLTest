@@ -871,9 +871,11 @@ A-GRA's path segment carries planned inertial states (MA_PathSegmentType.Inertia
   - The leg after a loiter point is flown from where the loiter is left (4.31): an orbit's exit toward the next point, a hold's fix, a hover's point. A state on it is placed on that leg, where it will be laid, and placed again on the leg as laid once the loiter is left. It is checked against that leg, within its uncertainty, as any state is on its own.
   - Its time is scheduled through the loiters on its way, as a window's is (4.33): each loiter's own time counted, the legs' speed paced round it.
   - Until FA-6g3a, a state at or after a loiter point was not implemented.
-- **Not implemented** (as its support row, `fsim.guidance.route/inertial_states`, says: partial):
-  - on a route with a point in a moving frame, whose legs move;
-  - a timed state on an aircraft without performance tables, as a window's (4.33).
+- **Beside points in moving frames** (FA-6g3b): its legs move with their points (4.29).
+  - A state with a time is checked on its leg where the leg will be at that time, its ends where their frames carry them - a moving frame's at its velocity, a vehicle's where its velocity now carries it - within its uncertainty. One without a time is checked where the leg is now.
+  - In flight it is placed again on its leg as the leg is planned again, each update.
+  - Until FA-6g3b it was not implemented.
+- **Partial** (as its support row, `fsim.guidance.route/inertial_states`, says, where the aircraft has no performance tables): a timed state there is not implemented, as a window is (4.33). With tables the row is supported, since FA-6g3b.
 - **Kept** as the loiters are: an UPDATE's new waypoints come with their states, and without new waypoints it keeps its own. A route kept waiting (disabled, unassigned) resumes at the point it flew to, with the states beyond it. Reset, it flies all its states again, those it flew past too (since FA-6e1: 4.36).
 - **Reported:** the arrival estimate (4.33) is the next timed target's, a state's time too. The setpoint reads its states back as placed: one in a frame with its latitude, longitude and altitude where the frame was at its time.
 - **A route's times taken together** (a named change to 4.33): FA-6d1 checked each window from now alone. A route's windows and its states' times are now checked in turn along its first lap, each from the earliest and the latest the aircraft can be at the one before, and its climbs no faster than it climbs them. So two windows it could make each alone, but not both, are refused (`MaxAirspeed` at the second). The first is checked as before.
@@ -1224,7 +1226,7 @@ Laps, entry and exit points, legs by time, turns by bank, rate or type, hold con
 
 Paths with ids and types, links and conditional branches, turn points, loiter points, per-segment optimisation, climb and acceleration, required times of arrival in 4D, altitude blocks, civil path terminators, planned states, RNP monitoring, relative points.
 
-**Status:** in progress, in seven steps, each measured in section 14:
+**Status:** done 2026-09-29 in seven steps, each measured in section 14:
 - FA-6a, the waypoint as the schema gives it: altitude blocks and the barometric reference, waypoints and their types, points in frames (WPT-12, WPT-17, WPT-22; 4.29), done 2026-09-28 and measured in section 14;
 - FA-6b, turn points and loiter points, in two steps:
   - FA-6b1, turn points: capturing the outbound course, starting and ending a turn, a course at the point, a turn's radius (WPT-04; 4.30), done 2026-09-28 and measured in section 14;
@@ -1251,7 +1253,7 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
   - FA-6g2, a time of arrival at or after a loiter point (WPT-11; 4.33), done 2026-09-28 and measured in section 14;
   - FA-6g3, planned states (WPT-20; 4.34), in two steps:
     - FA-6g3a, at or after a loiter point, done 2026-09-29 and measured in section 14;
-    - FA-6g3b, beside points in moving frames.
+    - FA-6g3b, beside points in moving frames, done 2026-09-29 and measured in section 14; FA-6g done, and FA-6 with it.
 
 **Items (15):** WPT-04, WPT-06, WPT-08, WPT-10, WPT-11, WPT-12, WPT-13, WPT-14, WPT-15, WPT-17, WPT-18, WPT-19, WPT-20, WPT-21, WPT-22.
 
@@ -2690,6 +2692,22 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases, from one copy, are within −2.8 % to +3.0 % (the same level's update, 6.6 ns, moves 0.2 ns); from three copies, −1.5 % to +0.4 %.
   - World throughput is 98.2 to 99.0 % of FA-6g2's, and protection costs at most 1.8 %. The world benchmark flies attitude commands alone. Every function on its path disassembles the same in both builds, addresses aside: the 20 that differ are the route's own and its plan's allocation. Its reading is where its code now lies, not its work.
 - ctest: all 330 tests pass.
+
+**FA-6g3b, planned states beside points in moving frames (WPT-20); FA-6 done.**
+- **Flown** (`test_route_states`; a C172 east at 1,500 m and 55 m/s, calm): 3 km east, then on to a ship 12 km east moving north at 3 m/s. A state halfway along the leg to the ship is due 157 s in, 20 s later than 55 m/s would make it, at 1,600 m, placed where the leg's middle will be then (the ship 471 m north).
+  - It passed the state's place at 157.0 s, 1,600.1 m high; its estimate 5 km east read 157.0 s.
+- **Checked where the leg will be at the state's time:** beside a point drifting north at 1 m/s, the leg's middle is 100 m off the state's place by then, within its uncertainty: taken. At 10 m/s it is a kilometre off: refused `invalid_waypoint`, naming the point, though the leg passes through the place now. Until FA-6g3b a state beside a moving point was refused `not_implemented`.
+- **Placed again** each update, as the leg is planned again: the altitude profile and the schedule follow the state's place on the leg as it moves.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6g3a's build.
+- **The support table:** `route/inertial_states` is supported on every aircraft with performance tables, and partial on the stock C172x, which has none: a planned state's time, as an arrival window's (the feature table's new `withoutTables`). FA-6 is done; its route capability's pending list names FA-7's metadata and FA-16's contingencies.
+- **Memory:** unchanged.
+- **Digests:** identical to FA-6g3a's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6g3a, both builds run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`; then 5 rounds of `micro` and of `command` from three copies of each; later 7 rounds of `world` again, and 3 from three copies of each.
+  - No other session's work ran during any of it, but for one more run of `world`, which another session's build overlapped: it is left out. From one copy of each, the micro cases are within −3.6 % to +1.9 %; from three copies, −1.5 % to +1.8 %.
+  - The command cases, from one copy, are within −1.5 % to +2.8 %; from three copies, −0.6 % to +2.2 %.
+  - World throughput from one copy of each read 100.9 to 108.9 % of FA-6g3a's, twice: the FA-6g3a build itself read 2 to 8 % below what it read an hour before, in its own A/B. From three copies of each, it is 99.0 to 100.6 %. FA-6g3a's copies read 857,036 to 859,521 vehicle-steps a second on the C172x, as FA-6g3b's do (856,116 to 864,264). Protection costs at most 1.0 %.
+  - Addresses aside, these functions differ between the builds: the host's state checks (`checkStates`, `limitStates`), the new `legAt`, the support table's two, and the route behaviour's update. That last one's new call is on a moving route's path alone. On every other path it differs by one register's name, and by where two blocks it does not run lie. Four more functions differ only in their padding. None is on the path of the curve case (+1.9 % and +1.8 %, a curve's behaviour), the behaviour case (+2.8 % and +2.2 %, a hold) or the world benchmark (attitude commands). Their readings are where their code now lies, not their work.
+- ctest: all 331 tests pass.
 
 ## Appendix A: the inventory
 

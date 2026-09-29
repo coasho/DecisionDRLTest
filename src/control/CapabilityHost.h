@@ -26,6 +26,7 @@ namespace fsim::control {
 namespace route {
 struct Plan;
 struct Curve;
+struct Leg;
 }
 
 class SupportTable;
@@ -681,6 +682,10 @@ private:
     /// turn after them flown smaller than its legs allow as the first lap's, a gradient steeper than it climbs flown at its
     /// rate - what the first lap's check found not found again.
     Reason checkLaps(route::Plan& plan, const sim::VehicleState& state, double windMs, CheckLog& log, CommandResult& detail) const noexcept;
+    /// The leg into point k at the world's time `timeS` (docs/flight-autonomy.md, 4.29, 4.34; Moving.cpp; `plan` placed now):
+    /// its ends where their frames will be then - a moving frame's at its velocity, a vehicle's where its velocity now carries
+    /// it; a point in no frame, or a fixed one, where it is - the route's start from where the aircraft is.
+    route::Leg legAt(const route::Plan& plan, std::uint32_t k, double timeS, const sim::VehicleState& state) const noexcept;
     /// The most a route's segment accelerates from `fromMs` to `toMs` (4.32): a rotorcraft's (Performance), a wing's from
     /// its tables at the fuel on board - full power's excess faster, idle's slower, the least over the speeds between - as
     /// a rate; NaN where not known.
