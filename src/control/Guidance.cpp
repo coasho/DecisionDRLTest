@@ -384,7 +384,7 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     loiterAhead_ = nullptr, reachM_ = 0.0, loitering_ = false;
     rampFromMs_ = speedFlown_ = referenceFlown_ = kHold;
     climbTarget_ = climbMid_ = kHold, climbRest_ = false;
-    arrivalPoint_ = arrivalState_ = -1, arrivalAimS_ = arrivalSpeedMs_ = arrivalS_ = arrivalDeltaS_ = kHold;
+    arrivalPoint_ = arrivalState_ = -1, arrivalAimS_ = arrivalSpeedMs_ = arrivalS_ = arrivalDeltaS_ = kHold, arrivalShiftM_ = 0.0;
     segmentFirstLap_ = true, stateAltitudes_ = false;
     firstLap_ = true, onArc_ = midway_ = ended_ = finished_ = false;
     failure_ = Reason::None;
@@ -451,6 +451,7 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
         for (std::uint32_t k = 0; k < p.loiterCount; ++k)
             magnetic = magnetic || p.loiters[k].shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth);
         route::completeLoiters(p, s, perf, hovers_, wind_.northMs, wind_.eastMs, ctx.altimeter, magnetic ? worldYear(ctx, s) : 2025.0);
+        if (p.timed()) route::measureLoiters(p, s, perf, hovers_, ctx.altimeter, magnetic ? worldYear(ctx, s) : 2025.0); // (for its schedule: 4.33)
     }
     aim(p.start, perf);
     lapM_ = p.lapM(true);
@@ -567,6 +568,7 @@ route::Fix RouteBehavior::locate(const ControlContext& ctx, const sim::VehicleSt
             return f;
         }
         finishedM_ += std::max(0.0, leg.lengthM - leadOut_);
+        if (loiterAhead_ && firstLap_ && target_ != p.last()) arrivalShiftM_ = p.exitM(target_) - (finishedM_ - lapStartM_); // (its hold passed: 4.33)
         if (branchAt(ctx, perf, false, 0.0)) continue; // (a branch taken: on from here - 4.37)
         if (p.leaves(target_)) beginSegment(p.next(target_), s, finishedM_, 0.0, 0.0, firstLap_ && target_ != p.last(), true);
         leadOut_ = 0.0;
@@ -768,11 +770,12 @@ bool RouteBehavior::arrival(ArrivalEstimate& out) const noexcept {
 
 void RouteBehavior::scheduleArrival(const ControlContext& ctx, const Performance& perf, double routeM, route::Steer& steer) {
     const route::Plan& p = *plan_;
+    if (p.loiterCount && loitersAhead()) return scheduleThroughLoiters(ctx, perf, routeM, steer); // (a loiter on its way: 4.33)
     const auto& s = ctx.sensed;
     const bool state = arrivalState_ >= 0; // (a state's time: a window of none at its place - 4.34)
     const auto i = static_cast<std::uint32_t>(arrivalPoint_), j = static_cast<std::uint32_t>(arrivalState_);
     const double now = ctx.world ? ctx.world->simTime() : s.simTime; // (its window's clock: the world's)
-    const double fromM = routeM - lapStartM_, toM = state ? p.stateLapM[j] : p.arrivalM(i, true), toGoM = std::max(toM - fromM, 0.0);
+    const double fromM = routeM - lapStartM_ + arrivalShiftM_, toM = state ? p.stateLapM[j] : p.arrivalM(i, true), toGoM = std::max(toM - fromM, 0.0);
     // as planned: its speed over the ground, in the wind now along its course - its climbs no faster than it climbs them (4.34)
     const double along = isHold(course_) ? 0.0 : wind_.northMs * std::cos(course_) + wind_.eastMs * std::sin(course_);
     double speed = steer.reference == SpeedReference::GroundSpeed ? steer.speed : trueAirspeedOf(steer.speed, steer.reference, s) + along;
@@ -825,10 +828,12 @@ Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf
         loiter_->wind_ = wind_; // (the estimate it flew in)
         const bool ends = !isHold(l.pattern.durationS) || !isHold(l.shape.orbits) || !isHold(l.endTimeS) || terminated;
         if (!ends && target_ == p.last() && !p.repeat) ended_ = finished_ = true; // (the route's end: it loiters on)
+        loiterBegun(ctx, c, shape); // (a window at its point met, and when it will be left: 4.33)
     }
     if (p.terminated) holdEnds(ctx, ctx.sensed); // (a hold's terminator: at its altitude, or commanded - 4.38)
     Command out = loiter_->update(ctx, loiterCommand_);
     if (const Reason why = loiter_->failure(); why != Reason::None) failure_ = why; // (its frame's vehicle gone)
+    if (arrivalPoint_ >= 0 && !ended_) loiterArrival(ctx, perf); // (its estimate through it: 4.33)
     if (ended_ || !loiter_->finished()) return out;
     if (branchAt(ctx, perf, false, 0.0)) return out; // (a branch taken as it ends: on from here - 4.37)
     // its end: the route's, if it is its last point (and the pattern flies on); else on to the next point, the leg to it
@@ -839,6 +844,7 @@ Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf
     }
     const sim::VehicleState& s = ctx.sensed;
     loitering_ = false;
+    if (firstLap_ && target_ != p.last()) arrivalShiftM_ = p.exitM(target_) - (finishedM_ - lapStartM_); // (the leg on, in its first lap's measure: 4.33)
     advance(s, perf);
     route::Plan& q = *plan_;
     route::Leg& in = firstLap_ && target_ == q.start ? q.entry : q.looped(target_, firstLap_) ? q.loopLeg : q.legs[target_];

@@ -142,7 +142,7 @@ TEST_CASE("route arrivals: a rotorcraft slowed over the ground; a window between
 }
 
 TEST_CASE("route arrivals: refused as a point is, naming it - a window upside down or not finite, one past, one it cannot make at the speeds it "
-          "flies level; unchecked, flown; at or after a loiter point, not implemented",
+          "flies level, through a loiter too; unchecked, flown",
           "[modes]") {
     session::World w(options("route-arrivals-refused"));
     const auto v = wing(w, "c172", 1500.0, 55.0);
@@ -183,18 +183,25 @@ TEST_CASE("route arrivals: refused as a point is, naming it - a window upside do
     CommandOptions unchecked;
     unchecked.range = RangePolicy::None;
     CHECK(w.submit(v, RouteCommand{}, std::vector<Waypoint>{p0, soon}, unchecked).accepted()); // (flown at its fastest)
-    // a window at or after a loiter point: not implemented, naming it
+    // a window after a loiter point (FA-6g2; until then not implemented): its loiter's own time, a minute, counted - too soon
+    // for its fastest, too late for its slowest, refused; one it can make, taken
     Waypoint loiterAt = p0;
     loiterAt.kind = static_cast<double>(EndPointKind::LoiterPoint);
     RouteLoiter l;
     l.point = 0, l.pattern.durationS = 60.0;
-    Waypoint after = p1;
+    auto afterLoiter = [&](const Waypoint& after) { return w.submit(v, RouteCommand{}, std::vector<Waypoint>{loiterAt, after}, {}, std::vector<RouteLoiter>{l}); };
+    Waypoint soonAfter = p1, lateAfter = p1, after = p1;
+    soonAfter.arrivalEndS = t0 + 60.0 + 0.8 * 12000.0 / most;
+    lateAfter.arrivalBeginS = t0 + 60.0 + 1.25 * 15000.0 / least;
     after.arrivalEndS = t0 + 600.0;
-    const CommandResult r = w.submit(v, RouteCommand{}, std::vector<Waypoint>{loiterAt, after}, {}, std::vector<RouteLoiter>{l});
-    CHECK((r.reason == Reason::NotImplemented && r.index == 1));
+    const CommandResult rs = afterLoiter(soonAfter), rl = afterLoiter(lateAfter), r = afterLoiter(after);
+    CHECK((rs.reason == Reason::PerformanceLimit && rs.index == 1 && rs.constraint == Constraint::MaxAirspeed));
+    CHECK((rl.reason == Reason::PerformanceLimit && rl.index == 1 && rl.constraint == Constraint::MinAirspeed));
+    INFO(reasonName(r.reason) << " at " << r.index);
+    CHECK(r.accepted());
     const SupportInfo* row = w.supportTable(v)->find("fsim.guidance.route/required_time_of_arrival");
     REQUIRE(row != nullptr);
-    CHECK(row->support == Support::Partial);
+    CHECK(row->support == Support::Supported);
     // the stock C172x, without the tables its speeds would come from: not implemented, naming the point
     const auto stock = wing(w, "c172x", 1500.0, 55.0, 3);
     const auto& x0 = *w.vehicleState(stock);
@@ -203,4 +210,104 @@ TEST_CASE("route arrivals: refused as a point is, naming it - a window upside do
     const CommandResult none = w.submit(stock, RouteCommand{}, std::vector<Waypoint>{at(x0.latitudeRad, x0.longitudeRad, 0.0, 3000.0), timed});
     CHECK((none.reason == Reason::NotImplemented && none.index == 1));
     CHECK(w.supportTable(stock)->find("fsim.guidance.route/required_time_of_arrival")->support == Support::NotImplemented);
+}
+
+TEST_CASE("route arrivals: through a loiter (FA-6g2) - its own time counted, the legs slowed round it to arrive in a window after it; a window "
+          "at a loiter point met where the loiter begins; its estimate through the loiter; after a hold the operator ends, from where it ends",
+          "[modes]") {
+    // east 3 km; a loiter point 8 km east, an orbit for 90 s; a point 17 km east. First as planned (a window it is inside), to
+    // find when it begins its loiter and arrives
+    auto route = [](const sim::VehicleState& s0, double loiterBegin, double loiterEnd, double begin, double end) {
+        std::vector<Waypoint> q = {at(s0.latitudeRad, s0.longitudeRad, 0.0, 3000.0), at(s0.latitudeRad, s0.longitudeRad, 0.0, 8000.0),
+                                   at(s0.latitudeRad, s0.longitudeRad, 0.0, 17000.0)};
+        q.at(0).speed = 55.0;
+        q.at(1).kind = static_cast<double>(EndPointKind::LoiterPoint);
+        q.at(1).arrivalBeginS = loiterBegin, q.at(1).arrivalEndS = loiterEnd;
+        q.at(2).arrivalBeginS = begin, q.at(2).arrivalEndS = end;
+        return q;
+    };
+    RouteLoiter orbit;
+    orbit.point = 1, orbit.pattern.durationS = 90.0;
+    const std::vector<RouteLoiter> loiters = {orbit};
+    auto begun = [](const ActivityRecord& r) { return r.progress.segment == 1 && r.progress.segmentPercent >= 99.9; }; // (its loiter flies)
+    double plannedIn = kHold, plannedAt = kHold;
+    {
+        session::World w(options("route-arrivals-loiter"));
+        const auto v = wing(w, "c172", 1500.0, 55.0);
+        w.step(stepsFor(w, 2.0));
+        const double t0 = w.simTime();
+        const CommandResult r = w.submit(v, RouteCommand{}, route(*w.vehicleState(v), kHold, kHold, t0, t0 + 2000.0), {}, loiters);
+        INFO(reasonName(r.reason) << " at " << r.index);
+        REQUIRE(r.accepted());
+        for (unsigned k = 0; k < stepsFor(w, 600.0) && isHold(plannedAt); ++k) {
+            w.step();
+            const ActivityRecord& rr = *w.activity(r.activity);
+            if (isHold(plannedIn) && begun(rr)) plannedIn = w.simTime() - t0;
+            if (!rr.live()) plannedAt = w.simTime() - t0;
+        }
+    }
+    REQUIRE(!isHold(plannedIn));
+    REQUIRE(!isHold(plannedAt));
+    // then again: one to arrive 50 to 60 s later than it did (its legs slowed round the loiter), one to begin its loiter 20
+    // to 30 s later (a window at the loiter point: where its loiter begins); one to a hold the operator ends, 60 s held,
+    // then 9 km on to a window 150 to 450 s after it would have arrived
+    session::World w(options("route-arrivals-loiter"));
+    const auto slowed = wing(w, "c172", 1500.0, 55.0), atLoiter = wing(w, "c172", 1500.0, 55.0, 3), manual = wing(w, "c172", 1500.0, 55.0, 6);
+    w.step(stepsFor(w, 2.0));
+    const double t0 = w.simTime();
+    const CommandResult rs = w.submit(slowed, RouteCommand{}, route(*w.vehicleState(slowed), kHold, kHold, t0 + plannedAt + 50.0, t0 + plannedAt + 60.0), {}, loiters);
+    const CommandResult ra =
+        w.submit(atLoiter, RouteCommand{}, route(*w.vehicleState(atLoiter), t0 + plannedIn + 20.0, t0 + plannedIn + 30.0, kHold, kHold), {}, loiters);
+    std::vector<Waypoint> held = route(*w.vehicleState(manual), kHold, kHold, t0 + plannedAt + 150.0, t0 + plannedAt + 450.0);
+    held.at(1).terminator = static_cast<double>(PathTerminator::HoldingWithManualTermination);
+    RouteLoiter hold;
+    hold.point = 1, hold.pattern.pattern = static_cast<double>(PatternKind::Hold);
+    RouteBranch operatorBranch;
+    operatorBranch.point = 1, operatorBranch.next = 2.0, operatorBranch.operatorInput = 1.0;
+    const CommandResult rm = w.submit(manual, RouteCommand{}, held, {}, std::vector<RouteLoiter>{hold}, {}, {}, std::vector<RouteBranch>{operatorBranch});
+    for (const CommandResult* r : {&rs, &ra, &rm}) {
+        INFO(reasonName(r->reason) << " at " << r->index);
+        REQUIRE(r->accepted());
+    }
+    double slowedAt = kHold, loiterIn = kHold, manualIn = kHold, manualAsked = kHold, manualOut = kHold, manualAt = kHold;
+    double estimateIn = kHold, worstIn = 0.0, deltaIn = 0.0, estimatedBefore = 0.0, estimateAfter = kHold;
+    for (unsigned k = 0; k < stepsFor(w, 1100.0); ++k) {
+        w.step();
+        const double t = w.simTime() - t0;
+        const ActivityRecord& a = *w.activity(rs.activity);
+        ArrivalEstimate e;
+        if (a.live() && begun(a) && w.activityArrival(rs.activity, e)) { // (through its loiter: its estimate, and its delta)
+            if (isHold(estimateIn)) estimateIn = e.arrivalS - t0;
+            worstIn = std::max(worstIn, std::abs(e.arrivalS - t0 - estimateIn)), deltaIn = std::max(deltaIn, std::abs(e.deltaS));
+        }
+        if (isHold(slowedAt) && !a.live()) slowedAt = t;
+        if (isHold(loiterIn) && begun(*w.activity(ra.activity))) loiterIn = t;
+        const ActivityRecord& m = *w.activity(rm.activity);
+        if (isHold(manualIn) && begun(m)) manualIn = t;
+        if (isHold(manualOut) && !isHold(manualAsked) && m.progress.segment == 2) manualOut = t;
+        if (m.live() && isHold(manualOut) && w.activityArrival(rm.activity, e)) estimatedBefore += 1.0; // (not known before it ends)
+        if (m.live() && !isHold(manualOut) && isHold(estimateAfter) && w.activityArrival(rm.activity, e)) estimateAfter = e.arrivalS - t0;
+        if (isHold(manualAsked) && !isHold(manualIn) && t > manualIn + 60.0) {
+            manualAsked = t;
+            REQUIRE(w.commandBranch(rm.activity, 0).accepted());
+        }
+        if (isHold(manualAt) && !m.live()) manualAt = t;
+    }
+    std::printf("route arrivals through a loiter: as planned its orbit begun at %.1f s, arrived at %.1f s; slowed to %.0f-%.0f s arrived at %.1f s "
+                "(aimed %.1f; its estimate through the orbit %.1f, within %.2f s, delta %.2f s); a window at its loiter point %.0f-%.0f s, "
+                "begun at %.1f s (aimed %.1f); a hold the operator ended at %.0f s, left at %.0f s, estimated then %.1f s, arrived at %.1f s "
+                "(its window %.0f-%.0f s)\n",
+                plannedIn, plannedAt, plannedAt + 50.0, plannedAt + 60.0, slowedAt, plannedAt + 52.5, estimateIn, worstIn, deltaIn,
+                plannedIn + 20.0, plannedIn + 30.0, loiterIn, plannedIn + 22.5, manualAsked, manualOut, estimateAfter, manualAt,
+                plannedAt + 150.0, plannedAt + 450.0);
+    REQUIRE(!isHold(slowedAt));
+    CHECK(std::abs(slowedAt - (plannedAt + 52.5)) < 2.0); // (FA-6's acceptance: within 2 s)
+    CHECK(std::abs(estimateIn - (plannedAt + 52.5)) < 2.0);
+    CHECK(deltaIn == 0.0); // (scheduled into its window through the loiter)
+    REQUIRE(!isHold(loiterIn));
+    CHECK(std::abs(loiterIn - (plannedIn + 22.5)) < 2.0);
+    REQUIRE(!isHold(manualAt));
+    CHECK(estimatedBefore == 0.0);
+    CHECK(!isHold(estimateAfter));
+    CHECK((manualAt > plannedAt + 150.0 && manualAt < plannedAt + 450.0));
 }

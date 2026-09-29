@@ -153,6 +153,13 @@ double stoppingLimit(const Performance& performance, double toGoM) noexcept;
 /// How far on it stops from `speedMs`, so: where stoppingLimit allows that speed.
 double stoppingDistanceM(const Performance& performance, double speedMs) noexcept;
 
+/// A loiter's measure for its own time (docs/flight-autonomy.md, 4.33): from where it is joined, its way in, a lap, its exit
+/// point along the lap from the lap's start (-1: none, left where it is due) and its speed; a hover's time to come to its
+/// point, s; how much shorter the leg on is from where it is left than from its point (an orbit's, left along a tangent).
+struct LoiterMeasure {
+    double entryM = 0.0, lapM = 0.0, exitM = -1.0, speedMs = 0.0, approachS = 0.0, shortM = 0.0;
+};
+
 /// What a route flies, planned from its complete waypoints: fixed arrays, so
 /// the behaviour that holds it allocates nothing in flight.
 struct Plan {
@@ -185,6 +192,8 @@ struct Plan {
     /// The loiters its loiter points fly (4.31), complete (completeLoiter): the host's check's, the behaviour's to fly.
     std::uint32_t loiterCount = 0;
     RouteLoiter loiters[PathStore::kRouteLoiters];
+    /// Each one's measure for its own time (4.33; measureLoiters), for a route with a time to arrive at.
+    LoiterMeasure loiterMeasures[PathStore::kRouteLoiters];
     /// Its planned states (4.34), placed and complete: the host's check's, the behaviour's to fly. Where each is
     /// (placeStates): along its segment's leg as the first lap flies it (the entry's from where the aircraft was), and
     /// along that lap; -1 on a segment the first lap does not fly.
@@ -270,6 +279,14 @@ struct Plan {
     double lapM(bool firstLap) const noexcept;
     /// How far along a lap point k is reached (its segment's end: its turn's middle), from the lap's start (4.33).
     double arrivalM(std::uint32_t k, bool firstLap) const noexcept;
+    /// How far along its first lap loiter point k's loiter begins (4.33; Schedule.cpp): the leg to it flown to where it meets
+    /// its loiter, `reachM` before the point (loiterReachM).
+    double joinM(std::uint32_t k, double reachM) const noexcept;
+    /// Where the leg on from loiter point k begins, in its first lap's measure (4.33; Schedule.cpp): the leg from its point,
+    /// less the turn planned there, which its loiter replaces - laid from where the loiter is left.
+    double exitM(std::uint32_t k) const noexcept;
+    /// A point with an arrival window (4.33).
+    bool timed() const noexcept;
     /// How long its first lap takes from `fromM` to `toM` along it at `speedMs` (4.34; States.cpp), its climbs no faster
     /// than it climbs them (`alongMs`: the wind's part of a wing's speed over the ground).
     double climbTimeS(double fromM, double toM, double speedMs, double alongMs) const noexcept;
@@ -636,6 +653,23 @@ VelocityCommand hoverOver(const sim::VehicleState& s, const Performance& perform
 /// from where its loiter ended: 4.31), the leg out of it and its fly-by turn between them, sized as plan() sizes it and
 /// made no longer than those legs leave it beside the turns at their other ends.
 void replan(Plan& p, std::uint32_t i, bool firstLap, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept;
+/// How far before loiter point k its loiter begins (4.31): a rotorcraft's hover, where it would stop from its speed; any
+/// other, where it is joined (loiterJoinM) - as the behaviour reaches it (Schedule.cpp).
+double loiterReachM(const Plan& p, std::uint32_t k, const Performance& performance, bool hovers) noexcept;
+/// A loiter's own time from where it begins (4.33; Schedule.cpp), `m` its measure: the first of its ends due - its laps flown
+/// (`orbits`), its duration, its end time `untilS` on (NaN: none) - then on round to its exit point, where the leg on
+/// begins. Where it will be round its lap at its end time is known only once it has begun (`begun`): until then it is taken
+/// to be left then. A hover's: its way to its point, then its duration; its end time where sooner. NaN where none of its
+/// ends is known (a hold to an altitude, or one the operator ends: 4.38).
+double loiterTimeS(const LoiterMeasure& m, bool hover, double orbits, double durationS, double untilS, bool begun) noexcept;
+/// Each loiter's measure (Plan::loiterMeasures; 4.33; Schedule.cpp), `p` planned and its loiters complete: planned where it
+/// is joined, on the course the leg into it arrives on, at its point's altitude, as the endurance estimate plans one.
+void measureLoiters(Plan& p, const sim::VehicleState& state, const Performance& performance, bool hovers, const Altimeter* altimeter,
+                    double magneticYear) noexcept;
+/// Loiter point k's own time begun at `beginS` (the world's seconds; 4.33): loiterTimeS, as measured; 0 for none.
+double loiterS(const Plan& p, std::uint32_t k, double beginS) noexcept;
+/// How much shorter the leg on from loiter point k is, laid from where its loiter is left (LoiterMeasure::shortM).
+double loiterShortM(const Plan& p, std::uint32_t k) noexcept;
 /// A later lap's leg into point i where its laps' legs differ from its first's (Plan::lapLegsTo; 4.36): from the point
 /// before, the arc a start turn there begins on the course `before` - the leg into that point as a later lap flies it -
 /// arrives on (the leg back to the point the laps come back to, for the first after it).

@@ -33,15 +33,13 @@ bool CapabilityHost::arrival(ActivityId activity, ArrivalEstimate& out) const no
 
 Reason CapabilityHost::checkArrivals(const route::Plan& p, const sim::VehicleState& state, CommandResult& detail) const noexcept {
     const double worldNow = sessionView_ ? sessionView_->simTimeS() : state.simTime;
-    bool afterLoiter = false;
     for (std::uint32_t i = p.start; i < p.count; ++i) {
         const Waypoint& w = p.points[i];
-        afterLoiter = afterLoiter || route::loiterPoint(w);
         if (isHold(w.arrivalBeginS) && isHold(w.arrivalEndS)) continue;
         detail.index = static_cast<std::int16_t>(std::min<std::uint32_t>(i, 0x7FFF));
         if (w.arrivalEndS < worldNow) return Reason::InvalidWaypoint;
         const SupportInfo* row = support_ ? support_->find("fsim.guidance.route/required_time_of_arrival") : nullptr;
-        if (afterLoiter || !row || row->support == Support::NotImplemented) return Reason::NotImplemented;
+        if (!row || row->support == Support::NotImplemented) return Reason::NotImplemented;
         detail.index = -1;
     }
     return Reason::None;
@@ -76,6 +74,17 @@ void CapabilityHost::limitArrivals(route::Plan& p, const sim::VehicleState& stat
             if (latest < earliest) latest = earliest; // (within its second's slack)
         }
     };
+    // a loiter on the way to one (FA-6g2): arriving where it begins (a window at its point met there), then its own time -
+    // the first of its ends, its duration, its laps or its end time, from when it begins - and the legs on from where it is
+    // left; one whose end is not known ahead (a hold to an altitude, or the operator's: 4.38), as early as at once, as late as
+    // may be
+    std::uint32_t lastTimed = p.start;
+    bool magnetic = false;
+    for (std::uint32_t i = p.start; i < p.count; ++i)
+        if (!isHold(p.points[i].arrivalBeginS) || !isHold(p.points[i].arrivalEndS)) lastTimed = i;
+    for (std::uint32_t k = 0; k < p.loiterCount; ++k)
+        magnetic = magnetic || p.loiters[k].shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth);
+    if (p.loiterCount && lastTimed > p.start) route::measureLoiters(p, state, performance_, hovers, &config_->altimeter, magnetic ? yearNow() : 2025.0);
     std::uint32_t j = 0;
     for (std::uint32_t i = p.start; i < p.count; ++i) {
         const Waypoint& w = p.points[i];
@@ -84,7 +93,15 @@ void CapabilityHost::limitArrivals(route::Plan& p, const sim::VehicleState& stat
             if (s.point == i && !isHold(s.timeS))
                 target(p.stateLapM[j], s.timeS, s.timeS, isHold(s.altitudeM) ? w.altitudeM : s.altitudeM, w.altitudeReference, i);
         }
-        if (!isHold(w.arrivalBeginS) || !isHold(w.arrivalEndS)) target(p.arrivalM(i, true), w.arrivalBeginS, w.arrivalEndS, w.altitudeM, w.altitudeReference, i);
+        const bool loiter = i <= lastTimed && route::loiterPoint(w) && p.loiterAt(i);
+        const double joinM = loiter ? p.joinM(i, route::loiterReachM(p, i, performance_, hovers)) : 0.0;
+        if (!isHold(w.arrivalBeginS) || !isHold(w.arrivalEndS)) target(loiter ? joinM : p.arrivalM(i, true), w.arrivalBeginS, w.arrivalEndS, w.altitudeM, w.altitudeReference, i);
+        if (!loiter || i == lastTimed) continue;
+        if (isHold(w.arrivalBeginS) && isHold(w.arrivalEndS)) target(joinM, kHold, kHold, w.altitudeM, w.altitudeReference, i);
+        const double early = route::loiterS(p, i, earliest), late = route::loiterS(p, i, latest);
+        earliest += std::isnan(early) ? 0.0 : early;
+        latest = std::isnan(late) ? std::numeric_limits<double>::infinity() : latest + late;
+        fromM = p.exitM(i) + route::loiterShortM(p, i); // (the leg on, laid from where it is left)
     }
 }
 

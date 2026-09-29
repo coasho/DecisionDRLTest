@@ -178,6 +178,16 @@ private:
     /// while that arrives within it; else, from then to it, the ground speed that arrives a little inside it (at a state's
     /// time), within the speeds it flies level. Its estimate kept.
     void scheduleArrival(const ControlContext& ctx, const Performance& performance, double routeM, route::Steer& steer);
+    /// A loiter on its way to its next arrival window, or at the window's point (4.33; Schedule.cpp).
+    bool loitersAhead() const noexcept;
+    /// Its speed scheduled to its next arrival window through the loiters on its way (4.33; Schedule.cpp): each loiter's own
+    /// time counted, its legs at one speed; flown as planned, and not estimated, where one's end is not known ahead.
+    void scheduleThroughLoiters(const ControlContext& ctx, const Performance& performance, double routeM, route::Steer& steer);
+    /// Its estimate through the loiter it flies (4.33; Schedule.cpp): what the loiter has left, then the legs on.
+    void loiterArrival(const ControlContext& ctx, const Performance& performance);
+    /// Its loiter begun (4.33; Schedule.cpp), `c` and `shape` as flown: a window at its point met - on to the next point's -
+    /// and when it will be left, where one is ahead.
+    void loiterBegun(const ControlContext& ctx, const PatternCommand& c, const PatternShape& shape);
     /// Its planned states from the path store (4.34; States.cpp): false for one without a place, or past the route.
     bool takeStates(const ControlContext& ctx) noexcept;
     /// A linked route's points from the path store in its flight order (docs/flight-autonomy.md, 4.36; Paths.cpp): true
@@ -269,6 +279,9 @@ private:
     double arrivalAimS_ = kHold;       ///< when it is to arrive there, once its schedule has begun; kHold: as planned
     double arrivalSpeedMs_ = kHold;    ///< the ground speed its schedule last asked (held through its last second)
     double arrivalS_ = kHold, arrivalDeltaS_ = kHold; ///< when it is estimated to arrive there, and that against its window
+    double arrivalShiftM_ = 0.0;       ///< past a loiter on its first lap: the lap's measure less its own, where the leg on began
+    double loiterEndsS_ = kHold;       ///< when the loiter it flies will be left (the world's seconds), a window ahead; kHold: not known
+    double loiterShortM_ = 0.0;        ///< and how much shorter the leg on is from where it is left than from its point
     // its points in moving frames (4.29)
     bool moving_ = false;              ///< placed and planned again as it flies them
     bool overFrame_ = false;           ///< the piece flown is in one moving frame: flown over it

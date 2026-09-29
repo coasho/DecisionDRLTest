@@ -1750,6 +1750,89 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             CHECK(std::abs(f.arrivedS - f.aimS) < 2.0); // (FA-6's acceptance: within 2 s of a feasible time of arrival)
             CHECK(std::abs(f.estimateS - f.arrivedS) < 2.0);
         });
+    // and through a loiter (ADR-29 FA-6g2): a loiter point a minute on at its speed - or, where its orbit is joined two radii
+    // out, half a minute past that - an orbit of 1.25 times its turn's radius for 30 s, then a point two minutes on. First flown
+    // as planned; once it tells when it would arrive, the route again from where it is, the point given a window of 10 s later
+    // by 8 % of the time its legs take - to the join, from the orbit's tangent on - slowed, or, where its slowest cannot take a
+    // tenth, as much sooner. It arrives within 2 s of when it aimed; its estimate as its orbit began, against when it arrived,
+    // told
+    struct LoiterArrival {
+        double planned = kHold, aimS = kHold, begun = kHold, arrivedS = kHold, legsS = kHold;
+        bool slowed = true;
+        Waypoint a, b;
+        RouteLoiter orbit;
+    };
+    std::map<std::uint32_t, LoiterArrival> loiterArrivals;
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
+            const double v = p.rotor ? p.cruiseMs : p.start.airspeedTrueMs;
+            LoiterArrival& f = loiterArrivals[p.id];
+            f = LoiterArrival{};
+            double slowest = kHold, fastest = kHold;
+            route::levelSpeedsMs(&w.profile(p.id)->tables, perf(p), p.rotor, p.start.altitudeMslM, p.start.fuelKg, slowest, fastest);
+            f.slowed = !(slowest > v / 1.1 - 1.0);
+            auto point = [&](double ahead) {
+                const PositionCommand q = pointFrom(p.start, ahead * c, ahead * sn, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            const double radius = 1.25 * orbitRadius(p), toLoiter = std::max(60.0 * v, 2.0 * radius + 30.0 * v), after = 120.0 * v;
+            f.a = point(toLoiter), f.b = point(toLoiter + after);
+            f.legsS = (toLoiter - 2.0 * radius + std::sqrt(std::max(after * after - radius * radius, 0.0))) / std::max(v, 0.1);
+            f.a.speed = v, f.a.kind = static_cast<double>(EndPointKind::LoiterPoint);
+            if (p.rotor) f.a.speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+            f.orbit.point = 0, f.orbit.pattern.pattern = static_cast<double>(PatternKind::Orbit), f.orbit.pattern.durationS = 30.0;
+            f.orbit.pattern.radiusM = radius;
+            Waypoint open = f.b; // (as planned: a window it is inside)
+            open.arrivalBeginS = w.simTime(), open.arrivalEndS = w.simTime() + 7200.0;
+            const CommandResult res = w.submit(p.id, RouteCommand{}, std::vector<Waypoint>{f.a, open}, {}, std::vector<RouteLoiter>{f.orbit});
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index << " (its level speeds " << slowest << " to " << fastest << ", at " << v << ")");
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        [&](const Plane& p) {
+            const double v = std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1), radius = 1.25 * orbitRadius(p);
+            return 1.1 * (std::max(60.0, 2.0 * radius / v + 30.0) + 120.0) + 30.0 + (2.0 * kPi + 2.0) * radius / v + 60.0;
+        },
+        [&](const Plane& p) {
+            LoiterArrival& f = loiterArrivals[p.id];
+            if (!isHold(f.arrivedS)) return;
+            ArrivalEstimate e;
+            if (isHold(f.planned)) { // (as planned, when it would arrive: the route again from here, its window from that)
+                if (!w.activityArrival(activity[p.id], e)) return;
+                f.planned = e.arrivalS;
+                const double shift = (f.slowed ? 0.08 : -0.08) * f.legsS;
+                f.b.arrivalBeginS = f.planned + shift - 5.0, f.b.arrivalEndS = f.planned + shift + 5.0;
+                f.aimS = f.slowed ? f.b.arrivalBeginS + 2.5 : f.b.arrivalEndS - 2.5;
+                const CommandResult res = w.submit(p.id, RouteCommand{}, std::vector<Waypoint>{f.a, f.b}, {}, std::vector<RouteLoiter>{f.orbit});
+                INFO(p.type << " refused: " << reasonName(res.reason) << " at " << res.index << " (" << constraintName(res.constraint) << "), its legs "
+                            << f.legsS << " s, " << (f.slowed ? "slowed" : "sped up"));
+                CHECK(res.accepted());
+                if (res.accepted()) activity[p.id] = res.activity; // (else on as planned: the aim missed, told)
+                return;
+            }
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            if (!r.live()) {
+                f.arrivedS = w.simTime();
+                return;
+            }
+            if (isHold(f.begun) && r.progress.segment == 0 && r.progress.segmentPercent >= 99.9 && w.activityArrival(activity[p.id], e)) f.begun = e.arrivalS;
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const LoiterArrival& f = loiterArrivals[p.id];
+            INFO(activityStateName(r.state) << "; " << (f.slowed ? "slowed" : "sped up") << ": aimed " << f.aimS - f.planned << " s from as planned, arrived "
+                                            << f.arrivedS - f.aimS << " s from its aim; its estimate as its orbit began " << f.begun - f.arrivedS
+                                            << " s from when it arrived");
+            CHECK(r.state == ActivityState::Completed);
+            REQUIRE((!isHold(f.arrivedS) && !isHold(f.begun)));
+            // (the worst: every one within 0.06 s of its aim, a control period or two - 34 slowed, the Crazyflie sped up - its estimate
+            // as its orbit began within as much of when it arrived)
+            CHECK(std::abs(f.arrivedS - f.aimS) < 2.0); // (FA-6's acceptance: within 2 s of a feasible time of arrival)
+        });
     // A-GRA's planned inertial states (ADR-29 FA-6d2: WPT-20): a point half a minute on at its speed, and another two and a half
     // minutes on; between them two states - up, a minute on from the first point, by what it climbs in 20 s at a third of its
     // most (60 m at the most), and back down a minute later - each timed a tenth later than its speed makes it (slowed), or

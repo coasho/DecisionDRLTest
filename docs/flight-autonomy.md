@@ -820,9 +820,19 @@ A-GRA's path segment gives a required time of arrival at its end point (MA_PathS
   - since FA-6d2, a climb steeper than the aircraft climbs at its fastest level speed is flown no faster than it climbs it, and the rest paced to make up for it (4.34).
   The point after the window is flown at its own speed again.
 - **Checked:** the time it would arrive at the fastest and the slowest of those speeds (in calm air) against the window: since FA-6d2, from the earliest and the latest it can be at the timed target before it - a window, a planned state's time - the first from now, its climbs no faster than it climbs them (4.34). A window it cannot make is refused `performance_limit` naming the point, whatever the range policy: `MaxAirspeed` where even its fastest arrives after it, `MinAirspeed` where even a wing's slowest arrives before it. Unchecked (`RangePolicy::None`), it is flown at its limit.
-- **Not implemented** (as its support row, `fsim.guidance.route/required_time_of_arrival`, says, partial):
-  - a window at or after a loiter point: the time a loiter takes is its end time's to set (4.31);
-  - an aircraft without performance tables, whose speeds it would have no floor for (a stock JSBSim aircraft): its row reads not implemented, as the speed optimisation's does.
+- **Through a loiter** (FA-6g2):
+  - **A window at a loiter point** is met where its loiter begins, the leg flown to where it meets the loiter (4.31).
+  - **Past one,** the schedule counts the loiter's own time from when it begins: the first of its ends to fall due - its laps flown, its duration, its end time - then on round its pattern to where it is left, where the leg on begins (an orbit's exit toward the next point, a hold's fix). An orbit due between its exits flies on to the next. The leg on is measured from where the loiter is left: an orbit's exit tangent is nearer the next point than its centre is. A rotorcraft's hover counts its duration from its arrival over its point, taken to slow evenly from where it began to stop. One speed is scheduled for the legs before the loiter and after it; the loiter flies its own, and the legs after it make up what it took. A loiter's laps and duration take the same time whenever it begins. For an end time, where the aircraft will be round its lap at that time is known only once the loiter has begun: until then the loiter is taken to be left at its end time, and the legs after it make up the rest of the way to its exit.
+  - **A loiter whose end is not known ahead** - a hold to an altitude, or one the operator ends (4.38) - is not scheduled through: the legs before it are flown as planned, no estimate is given, and the schedule begins where the loiter ends.
+  - **The estimate through a loiter it flies:** what the loiter has left, as it began (its way in, its laps, its exit), then the legs on at the speed last asked (the next point's, where none was), and the loiters after it. A hover's duration is known once it is over its point; until then, at least its duration is left.
+  - **How near the estimate comes** is the loiter's pieces' measure against how the aircraft flies them (section 14, FA-6g2):
+    - where the route joins an orbit two radii out, within about a second as planned (the B-52H, C-130J and F-16C); scheduled, every aircraft of the fleet arrived within 0.06 s of its aim;
+    - a route that begins inside its orbit's join turns onto its way in more sharply than it can: the E-3G, KC-46A and C-17A, 1.45 radii out, took 10 to 12 s longer, and missed a window after it by what the legs after could not make up (up to 6.4 s). A C172 on a 206 m orbit took 6.6 s longer, rolling into and out of it;
+    - through a hover, the Crazyflie and the IRIS came within 0.7 s. The UH-60A and UH-1H took 23 and 72 s longer to settle over the point: their position loops close slowly from where they would stop (FA-6b2 found the UH-1H over its point 95 s into its loiter).
+    The host's check measures a loiter as its pieces do.
+  - **Checked** as before, each window from the earliest and the latest the aircraft can be at the timed target before it, a loiter's own time between (one whose end is not known ahead, from none to without end).
+  - Until FA-6g2, a window at or after a loiter point was not implemented: the time a loiter takes is its end time's to set (4.31).
+- **Not implemented** (as its support row, `fsim.guidance.route/required_time_of_arrival`, says): an aircraft without performance tables, whose speeds it would have no floor for (a stock JSBSim aircraft), as the speed optimisation's is.
 - **Reported:** the estimated arrival at the next point with a window (the aim, once scheduled; a planned state's time, 4.34), and that against its window: + late, − early, 0 within (to a microsecond). C++ asks the route for it (`World::activityArrival`, an `ArrivalEstimate`), apart from the progress: every activity record carries a progress, and the host holds 26 records a vehicle, so 16 bytes more there cost a level switch's NEW 9 % (section 14). The C ABI's and Python's progress carry it, NaN where there is none. The speed the progress reports is the ground speed its schedule asks.
 - **Surfaces.**
   - C++: `Waypoint::arrivalBeginS`, `arrivalEndS`; `World::activityArrival` and `ArrivalEstimate`; `Behavior::arrival`.
@@ -896,7 +906,7 @@ A-GRA's route is a set of paths (MA_RouteType.Path, each an MA_RoutePathType): a
 - **Its flight order:** from its start (`RouteCommand::start`, point 0 by default) along each point's next, until the route's end or a point it has flown before. Its laps go round from there, on and on. A route given `repeat` whose flight ends goes back to its first point (0), as an unlinked one does (until FA-6e2, to where it began: 4.37).
   - Its points are flown in that order, as any route's are: each turn by the legs into and out of its point in that order, and a lap's last leg from its last point back to the point it goes round from, with the turn there.
   - A point it never comes to is not flown, but it is checked as a point is, in their order as given. A loiter on one is kept as given: checked as a loiter, not completed - completed and flown where a branch takes the route there (4.37). An arrival window there is due only so. A planned state there is refused, as one on a segment its first lap does not fly (4.34).
-  - Its loiters (4.31), arrival windows (4.33) and planned states (4.34) are at their points as flown: a window or a state at or after a loiter point in that order is not implemented, as before.
+  - Its loiters (4.31), arrival windows (4.33) and planned states (4.34) are at their points as flown: a window at or after a loiter point in that order is scheduled through it (FA-6g2), and a state there is not implemented, as before.
 - **Named as given:** a point is named everywhere by its index as given - a refusal's, a finding's and an adjustment's index, its progress's segment (its segments the points given), its end points, and its loiters' and states' points read back. Its end points come in its flight order, round its laps.
 - **The end of a path** (A-GRA's END_OF_PATH; a named change to 4.29): taken at its path's last point - a route without paths, its last - and at a point whose next is -1. Where its path goes on it is none, refused `invalid_waypoint` naming the point. Until FA-6e1 it was `not_implemented`, the end of a path before the route's end.
 - **Refused `invalid_waypoint`, naming the point:**
@@ -1234,7 +1244,7 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
     - FA-6f2b, the legs to a manual termination, and the holds, done 2026-09-28 and measured in section 14; FA-6f done;
 - FA-6g, what FA-6 has left, in three steps:
   - FA-6g1, a start turn where its links loop back, its course left out (WPT-14; 4.36), done 2026-09-28 and measured in section 14;
-  - FA-6g2, a time of arrival at or after a loiter point (WPT-11; 4.33);
+  - FA-6g2, a time of arrival at or after a loiter point (WPT-11; 4.33), done 2026-09-28 and measured in section 14;
   - FA-6g3, planned states at or after a loiter point, and beside points in moving frames (WPT-20; 4.34).
 
 **Items (15):** WPT-04, WPT-06, WPT-08, WPT-10, WPT-11, WPT-12, WPT-13, WPT-14, WPT-15, WPT-17, WPT-18, WPT-19, WPT-20, WPT-21, WPT-22.
@@ -2630,6 +2640,32 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases are within −1.5 % to 0.0 % from one copy, and −1.5 % to +1.6 % from three (a level switch's NEW, which nothing here touches: one copy read 66.8 ns where the others read 67.9 and 68.1).
   - World throughput is 98.9 to 100.4 % of FA-6f2b's; protection costs at most 1.3 %.
 - ctest: all 328 tests pass.
+
+**FA-6g2, a time of arrival at or after a loiter point (WPT-11).**
+- **Flown** (`test_route_arrivals`; C172s east at 1,500 m and 55 m/s, calm): 3 km east, then a loiter point 8 km east with an orbit for 90 s, then a point 17 km east.
+  - As planned (a window it was inside), its orbit began 130.3 s in and it arrived 407.1 s in.
+  - Given a window 50 to 60 s later, it was slowed round the orbit and arrived at 459.6 s, aiming at 459.6 s. Its estimate through the orbit read 459.6 s, within 0.01 s, its delta 0.
+  - Given a window at the loiter point 20 to 30 s later than it began its orbit as planned, it began at 152.8 s, aiming at 152.8 s.
+  - A hold the operator ended: no estimate before it ended. The operator commanded its end 206 s in; it left the hold at 386 s and arrived at 562.1 s, inside its window of 557 to 857 s.
+- **Refused `performance_limit`, naming the point**, as before (a C172, a one-minute orbit 3 km east, then 12 km on): a window after the loiter too soon for its fastest (`MaxAirspeed`) or too late for its slowest (`MinAirspeed`). A window it can make is taken; until FA-6g2 it was refused `not_implemented`.
+- **The fleet** (`test_fleet`): each aircraft's loiter point was a minute ahead at its speed - or, where its orbit is joined two radii out, half a minute past that - with an orbit of 1.25 times its turn's radius for 30 s, then a point two minutes on. It flew first as planned. Once it told when it would arrive, the route was given again with a window 10 s wide: later by 8 % of its legs' time (slowed), or as much sooner where its slowest cannot take a tenth (the Crazyflie). All 35 arrived within 0.06 s of their aim, and their estimates as the orbit began were within as much of when they arrived.
+  - First, nine heavies' windows were refused `performance_limit`. The host's check had measured an orbit joined where a leg too short for its join begins as if it were joined at its centre; it is now measured from where the leg begins.
+  - With every loiter point a minute ahead, the E-3G's, KC-46A's and C-17A's routes began inside their orbit's join, 1.45 radii out. Turning 44 degrees onto their way in, more sharply than their turn allows, they took 10 to 12 s longer than the orbit's pieces measure, and arrived 4.7 to 6.4 s after their aim: the legs after could not make up the rest.
+- **The estimate as planned, before the loiter** (a minute ahead, the host's default orbit, a hover for a rotorcraft):
+  - Where the route joins an orbit two radii out, it came within 1.1 s (the B-52H, C-130J and F-16C). That is once the leg on is measured from the orbit's tangent: before that, the C-130J, H-6K, B-52H and KC-135R read up to 3.3 s late, and the E-3G's leg on was 7.3 s shorter than from the centre.
+  - A C172 on a 206 m orbit came within 6.6 s, rolling into and out of it.
+  - Through a hover, the Crazyflie and IRIS came within 0.7 s. The UH-60A and UH-1H took 23 and 72 s longer to settle over the point: their position loops close slowly from where they would stop, as FA-6b2 found.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6g1's build.
+- **The support table:** `route/required_time_of_arrival` is supported wherever the aircraft has performance tables, and not implemented where it has none, as before. The route capability's pending list no longer names a time of arrival.
+- **Conformance:** the optimise walks draw windows at and after loiter points, and links beside them.
+- **Memory:** a route's plan holds a measure for each of its 16 loiters (6 numbers each); its behaviour holds three more numbers.
+- **Digests:** identical to FA-6g1's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6g1, both builds run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`; then 5 rounds of `micro` and of `command` from three copies of each.
+  - From one copy of each, with no other session's work in either run, the micro cases are within −0.7 % to +0.9 %. The one exception is the curve's −9.4 %: FA-6g1's own median read 303.6 ns where its copies read 274.6 to 275.8. From three copies of each, with another session's tests running, they are within −0.9 % to +0.8 %.
+  - The command cases, from one copy with no other session's work, are within −0.4 % to +1.5 %, but for a behaviour's NEW: +3.1 % and +1.6 %. From three copies, with another session's tests running, they are within −1.5 % to +0.6 % and the NEW +4.1 %.
+    - That NEW commands the built-in hold behaviour, which touches nothing FA-6g2 built. Every function on its path disassembles the same in both builds, addresses aside: the 12 functions that differ are the route's own, its behaviour's constructor and factory (its plan is larger), and two that differ only in a constant's label and alignment padding. Its reading is where its code now lies, not its work.
+  - World throughput is 99.1 to 99.9 % of FA-6g1's, and protection costs at most 1.1 %. Another session's build began partway through the world run.
+- ctest: all 329 tests pass.
 
 ## Appendix A: the inventory
 
