@@ -304,6 +304,12 @@ struct Plan {
     /// A must fly's zone, as its route was laid out to it (docs/flight-autonomy.md, 4.43): written with it into the path
     /// store. Its shape Count: none (every other route; checkRoute clears it).
     MustFlyArea area;
+    /// A rotorcraft stops at point i (docs/flight-autonomy.md, 4.31): a loiter point whose loiter is a hover, or the last
+    /// point of a route that does not repeat and ends in a loiter.
+    bool stopsAt(std::uint32_t i) const noexcept;
+    /// Along the pieces from the end of point i's - its fly-by turn's arc, or the point itself where it has none - to the
+    /// next point a rotorcraft stops at, if that is nearer than `withinM`; else infinity.
+    double toStopM(std::uint32_t i, bool firstLap, double withinM) const noexcept;
 };
 
 // --- Loiter patterns (4.6) ---------------------------------------------------------

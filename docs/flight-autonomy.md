@@ -760,10 +760,15 @@ A-GRA's third end point, the LoiterPoint, gives a loiter - an orbit, a hover or 
 - **Flown.** A loiter point has no turn of its own: a fly-by or a fly-over flies over it, and the other turn types, or a turn radius, are refused. The leg into it is flown until its pattern takes the aircraft on:
   - an orbit (or two circles, the first), a radius outside its circle. It is entered along the tangent from there, and joins the circle on its course;
   - a hold, a racetrack or a figure-eight, at its point, which is on the pattern. It is flown into as a pattern from there: a hold by its way in, direct or ATC's for the side the aircraft comes from;
-  - a rotorcraft's hover, where the aircraft would stop from its speed, its velocity loop's lag counted. Its position loop then makes the approach, as the hover pattern's does.
-  On the leg, a rotorcraft slows for the loiter's radius, or to stop for a hover.
+  - a rotorcraft's hover, where the aircraft would stop from its speed, its velocity loop's lag counted. Its position loop then makes the approach, as the hover pattern's does, but its nose held on the course the leg arrives on.
+  On the leg, a rotorcraft slows for the loiter's radius, or to stop for a hover. Where a turn just before a hover leaves less than its stopping distance, it slows on the turn, and before it as far back as the stop reaches: no faster than stops it at the point, along what is left of the route.
 - **Left** for the next point, unless its exit point is given: an orbit where its circle's tangent runs to the next point; a hold, a racetrack or a figure-eight at its point, as a hold is left at its fix. The leg to the next point then runs from where the aircraft left, as the route's entry runs from where the route began, and the turn at the next point is planned again.
 - **The last point's** loiter: the route completes at its end (with no end, as it begins), and the pattern flies on, round or out along its exit. The route's `end` does not apply.
+- **The route's own end stop** (`EndBehavior::Loiter`, a rotorcraft's, its last point no loiter point) is flown as a hover's too, since the task FA-6b2 raised (section 14). It is handed to the position loop where the aircraft would stop from its segment's speed, and the path slows for it with the velocity loop's lag counted. The position loop hovers it over the point, no faster than that speed. The route still completes within a metre of its point along its last leg, then hovers on. Handed over within a metre, as it was, a UH-1H swung 42 m past its point.
+  - A turn just before the point that leaves less than the stopping distance slows the aircraft as it does for a loiter point's hover (above), since the task the end stop raised (section 14).
+  - Both stops hold the nose on the course the leg into the point arrives on. The position loop turns a nose to its point from beyond 20 m of it, as the hover pattern's still does. Coming out of a turn off its leg, a UH-1H's nose swung up to 75° with that bearing, its velocity loop's trims with it, and it swung past its point.
+  - A last leg that ends where the aircraft is (4.38: an altitude's) is not stopped from where the aircraft would stop: it ends where it ends, perhaps past its point. The position loop then takes the aircraft over the point as before, its nose turned to it - not held on the leg, which would fly it back tail first.
+  - A UH-1H still leaves a fly-by turn at its cruise some 25 m off its leg, and passes a point just after it up to 22 m to its side (section 14).
 - **Progress** while it loiters:
   - its point's segment, flown (100 %);
   - the pattern's cross-track, course, altitude and speed;
@@ -2589,7 +2594,7 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - It arrived at 25.7 s and left at 40.7 s: 15.0 s there, counted from its arrival, within 0.95 m of its point.
   - It completed on arriving at its last point, and hovered on within 0.60 m of it.
   - A UH-1H handed over within a metre of its point, as the route's end stop is, arrived at 12.4 m/s and swung 49 m past it. Braking with its velocity loop's lag counted, it swung 16 m. Handed over where it would stop from its speed, its position loop brought it in within 3.0 m, as the hover pattern's does.
-  - The route's own end stop (`EndBehavior::Loiter`) still swings a UH-1H 49 m past its last point: raised as a task of its own.
+  - The route's own end stop (`EndBehavior::Loiter`) still swings a UH-1H 49 m past its last point: raised as a task of its own, since done (the end stop's block, after FA-6c1's).
 - **A hold** (a C172x): at a fix 10 km east until 300 s, its exit at its fix; then an orbit 5 km north that ends the route.
   - Its inbound course was the leg's (east), its legs 3,269 m and its turns 1,040 m. It flew 1,034 m past its fix, 4,309 m back and 2,080 m to its right: the racetrack.
   - It left 424 s in (its end time was 300 s, then on round to its fix), 0.6 m from its fix.
@@ -2686,6 +2691,80 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - World throughput is 99.0 to 101.0 % of FA-6c1's; protection costs at most 1.4 %.
 - ctest: all 301 tests pass.
 
+**The route's end stop, flown as a loiter point's hover (the task FA-6b2 raised).**
+- **The change:** a rotorcraft whose route ends in a loiter (`EndBehavior::Loiter`) braked along its last leg at 80 % of its deceleration, its velocity loop's lag not counted (`route::brakingLimit`), and was handed to its position loop within a metre of its point. Now, as a loiter point's hover (4.31):
+  - it is handed over where it would stop from its segment's speed (`route::stoppingDistanceM`), the leg held to the stopping speed with the lag counted (`route::stoppingLimit`);
+  - the position loop takes it over the point, no faster than the segment's speed, as the hover pattern's does;
+  - the route still completes within a metre of its point along its last leg.
+- **Compared** (`test_route_loiters`, calm): each rotorcraft flies to a point eight turn radii east at its cruise over the ground, three ways: the hover pattern, a route to a loiter point with a hover, and a route that ends in a loiter. How far past its point the end stop swung, before and after (the pattern's; a loiter point's):
+  - the Crazyflie 1.40 → 0.78 m (0.61; 0.78), the IRIS 1.20 → 0.61 m (0.61; 0.61);
+  - the UH-60A 12.4 → 0.0 m (0.0; 0.0) and the UH-1H 42.2 → 0.0 m (0.0; 0.0). Once within a metre of its point, the UH-1H swung out to 49.1 m; now 1.0 m. Handed over within a metre, the two passed their points at 8.4 and 12.1 m/s.
+  - The end stop now flies as the loiter point's hover does, the same to the printed precision. The loiter point's route completes as its loiter begins (the UH-1H's 101 s in, 194 m out); the end stop's as it gets within a metre of its point, as before.
+  - The helicopters complete later: the UH-1H at 196.4 s where it passed its point at 114.4 s, the UH-60A at 91.4 s where at 61.7 s. Their position loop's approach is slow (FA-5c's finding: the UH-1H closed the last 17 m in 65 s).
+  - Within a metre for good, the helicopters are there a little later than their swing came back: the UH-1H at 196.4 s against 188.0 s, the UH-60A at 91.5 s against 84.5 s. The multirotors are there sooner: the Crazyflie at 56.6 s against 67.0 s, the IRIS at 16.5 s against 19.3 s.
+- **The fleet** (`test_fleet`): each rotorcraft flies three orbit radii ahead, then to its last point eight ahead, its route ending in a loiter. All four complete.
+  - Past its point, before and after: the Crazyflie 1.41 → 0.78 m, the IRIS 1.21 → 0.62 m, the UH-60A 12.4 → 0.0 m, the UH-1H 42.3 → 0.0 m (then out to 49.0 m, now 1.0 m).
+  - Completed 0.98 to 1.01 m from its point, then held within 1.01 m. The UH-1H completes 82 s later than it did, the UH-60A 30 s, the multirotors 0.2 and 0.3 s.
+  - Flown on the old code with looser first thresholds (5 % of its scale), the case failed the UH-1H's two checks. Its thresholds, twice the fleet's worst now, would fail the UH-60A's too.
+- **Where it still swings past** (a probe; the tests fly calm air): `examples/python/vehicle_interface.py`'s UH-60A hops, 400 m legs at 20 m/s over the ground in an 8 m/s wind from the north, the last leg south after a fly-by turn, flown by a UH-60A and a UH-1H on flat ground.
+  - Swung past its last point along its last leg, before and after: the UH-60A 15.3 → 3.1 m; the UH-1H 54.6 → 0.0 m, but 24 m to the leg's side over its last 100 m, and out to 14.1 m from the point once past it. A loiter point's hover there flies the same, to the printed precision. (First read as 9.1 and 25.9 m, measured over the whole flight: the first leg runs east along the last point's latitude, and the wind's drift there as they set off read as a swing past it. Corrected by the next block.)
+  - The turn before the point leaves less than the stopping distance from 20 m/s: the UH-60A's 272 m after 255 m, the UH-1H's 315 m after 200 m (its turns shrunk to R 200 m by the 400 m legs). The path's speed on the turn does not count the stop after it. So the aircraft is handed over as the turn ends. (That this carried them past did not hold here: the next block.)
+  - With a last leg of 800 m, where the stop fits after the turn, the UH-60A swings 0.0 m past, but the UH-1H 12.2 m. The tailwind carried it to 21.4 m/s over the ground as it was handed over, whose stopping distance is 354 m. Slowing through no airspeed, its nose swung from 180° to 149° and it drifted 17 m sideways. The hover pattern, flown from a kilometre out in the same wind, swung none.
+  - Passing its point abeam with such a swing, the route completes a few metres from it: 3.1 and 10.8 m (before, 2.3 and 21.7 m). Within a metre for good, the UH-60A was there at 89.0 s (101.5 s), the UH-1H at 170.1 s (169.1 s).
+  - Not changed here: both would change a loiter point's hover as well. Raised as a task of their own, since done (the next block).
+- **Changed, named:**
+  - the route probe's IRIS, whose short legs end in a hover: its 26 lines from 48 s. It flew the same to 42 s, 10 m before its point. It was then at most 0.32 m from where it had been (at 48 s: 0.58 m from its hover, where it was 0.90 m), and hovers where it did, within a millimetre, from 66 s. Its cross-track as it completed reads 0.0125 m where it read 0.0027. The wing's and the F-16C's lines are identical;
+  - every rotorcraft route that ends in a loiter. The tests' flights print what they did: the IRIS's 40 m hop (`test_routes`, 0.00 m from its point and still) and the IRIS over a point a frame carries (`test_route_points`, within 0.03 m). The Python example's UH-60A hops (`examples/python/vehicle_interface.py`) end in one.
+
+  The new baseline awaits the owner's approval.
+- **Unchanged, to the last bit:** the digests, with protection and without; the curve probe (64 lines). A loiter point's hover is reached and flown by the same expressions as before. The allocation gate passes.
+- **A/B throughput** against main at FA-6c1, both builds from this change's worktree, each run from its own directory: 5 rounds of `micro` twice, 9 of `command` twice, 7 of `world`.
+  - The micro cases are within −2.6 % to +1.3 % (the route's +0.2 % in both runs), but one: "apart, pseudo" read −5.8 % and −6.3 %, faster. It runs no guidance. The worktree's build of FA-6c1 read it at 93 ns where FA-6c1's own build read 87, and this build reads 87: layout, as these runtime-only cases move.
+  - The command cases are within −1.2 % to +3.0 %. The +3.0 % is a same-level update's 6.9 ns against 6.7, its minimum the same, then +0.0 %. A level switch's NEW, which runs no route, read +1.6 % and +2.2 %.
+  - World throughput is 99.2 to 101.2 % of FA-6c1's in three runs, two of them watched: nothing else used the processor. Protection costs at most 1.9 %. A first run read the F-16C at 96.5 % (the others 98.2 and 101.5 %), with nothing else seen running before or after. In another, the same build read protection as costing 7 to 9 %, where it costs at most 1.9 % in every other run: something else was running then, and it read 83 to 94 %.
+- ctest: all 299 tests pass.
+
+**A stop just after a turn: slowed on the turn, the nose held on the leg (the task the end stop raised).**
+- **Measured again first,** on the last leg alone (above): in the hops the end stop left the UH-60A 3.1 m past its point and the UH-1H none, but 24 m to the leg's side. Calm, the UH-60A swung 2.8 m past and the UH-1H 9.8 m, then out to 24.8 m from its point. The 800 m leg's 0.0 and 12.2 m stand; before the end stop, 11.0 and 59.7 m.
+- **Why, traced second by second:**
+  - the stop after the turn left the position loop room in the hops. It stops on its full deceleration, the UH-60A from 20 m/s in some 160 m, and the UH-1H flies its turn at 14.6 m/s (a turn rate a third of its velocity loop's bandwidth, on its shrunk 200 m radius), which it stops from within the 200 m left. A shorter leg after the turn puts the stop into the turn: with a last leg of 200 m, calm, the UH-60A swung 17.4 m past, the UH-1H 62.8 m;
+  - the nose: the position loop turns it to its point from beyond 20 m (`RotorPosition`). An aircraft that leaves a turn off its leg swings its nose with that bearing - the UH-1H's from 180° to 149° on the 800 m leg - and the velocity loop's integrals, kept along the nose and to its right, turn with it. The hover pattern, flown straight at its point, keeps its bearing and its nose;
+  - a UH-1H leaves a fly-by turn at its cruise some 25 m wide of its leg, calm or not, and its velocity loop (0.22 rad/s) overshoots a speed step after a turn: 21.4 m/s on a 20 m/s leg, carried through the stop.
+- **The change:**
+  - a rotorcraft whose stop - its route's end where it loiters, or a loiter point's hover - lies beyond the point it flies to, nearer than it stops from its pace, flies no faster than stops it there along what is left of the route: its velocity loop's lag counted, at half its deceleration (`route::stoppingLimit`; `route::Plan::stopsAt`, `toStopM`). It binds only where the stop reaches back past the leg into its point, so the straight approaches fly as before, to the last bit;
+  - both stops hold the nose on the course the leg into the point arrives on (`PositionCommand::headingRad`; a leg under a metre has none, and leaves it to the position loop). The hover pattern still turns its nose to its point, which it may start from facing anywhere.
+- **Compared** (`test_route_loiters`, new): every rotorcraft 4R east at its cruise over the ground, a fly-by turn right, then its last point R and half its stopping distance south, calm and in a tailwind at 0.4 of its cruise: a route that ends in a loiter, and one to a loiter point with a hover, which flew alike. How far past its point, then from it, and its nose's angle off the course over it - before, with the turn slowed alone, and with the nose held too:
+  - the UH-1H, calm: 14.4 m, 17.5 m, 75°; 10.4 m, 18.6 m, 81°; 0.0 m, 1.73 m, 0°. In its tailwind: 0.0 m, 1.03 m, 74°; 0.0, 1.03, 40°; 0.0, 1.30, 0°;
+  - the UH-60A, calm: 0.21 m, 6.33 m, 9°; 0.0, 1.26, 1°; 0.0, 1.22, 0°. In its tailwind: 0.60, 4.44, 15°; 0.0, 1.29, 4°; 0.0, 1.27, 0°;
+  - the IRIS 0.75 → 0.41 m past calm and 1.12 → 0.87 m in its tailwind, then within 1.02 → 0.99 and 1.18 → 1.11 m; the Crazyflie 1.23 → 0.99 and 1.59 → 1.40 m, then within 1.23 → 1.08 and 1.62 → 1.42 m.
+  - Its thresholds are about twice the worst now: 3.0 m past, 3.5 m from its point, the nose within 2°. Before, the UH-1H fails all three and the UH-60A two, and only the IRIS's nose was within 2° of the course; with the turn slowed alone, the UH-1H in calm air still fails all three.
+- **The hops** (the UH-60A, then the UH-1H; before, and after):
+  - as the example flies them (400 m legs, 8 m/s from the north): 3.1 → 2.9 m and 0.0 → 3.1 m past; out to 3.8 → 3.5 m and 14.1 → 13.4 m from the point; completed 3.1 → 2.6 m and 10.8 → 4.2 m from it; within a metre for good at 89.0 → 90.1 s and 170.1 → 151.8 s. A loiter point's hover there flies alike;
+  - calm: 2.8 → 2.7 m and 9.8 → 3.1 m past; out to 3.9 → 4.1 m and 24.8 → 22.1 m;
+  - the 800 m leg: 0.0 → 0.0 m and 12.2 → 3.4 m past; out to 1.0 → 1.0 m and 25.4 → 16.1 m;
+  - a last leg of 200 m, calm: 17.4 → 0.0 m and 62.8 → 11.4 m past; out to 17.6 → 1.1 m and 76.1 → 16.2 m. At 30 m/s: 6.1 → 5.4 m and 20.8 → 1.9 m past.
+- **Not taken, measured:**
+  - handing over where it would stop from its ground speed, where that is above the segment's: the UH-1H's 12.19 m became 12.20 m. Between the two distances the leg and the position loop both command the segment's speed;
+  - handing over only once its velocity points at the point, or within a metre of it: the UH-60A no worse, the UH-1H worse in two of three hops (19.6 m past on the 800 m leg, where it read 12.2).
+- **Still:** after a turn the UH-1H passes its point up to 22 m to its side (the hops, calm). It leaves the turn some 25 m wide, and its position loop closes that at its velocity loop's pace. Its velocity loop's overshoot after a speed step is the rest. Both are its loops' (FA-5c's finding, left to a separate look), not the stop's.
+- **Completion** is unchanged: within a metre of the point along the last leg. After a turn the UH-1H completes 4 to 18 m from its point over the hops' variants (4.2 m as the example flies them), the UH-60A 1.0 to 3.3 m; straight at it, both within 1.01 m. Asked whether a stop handed to the position loop should complete within a metre of the point itself instead, the owner kept it along the leg (2026-09-28).
+- **Changed, named:**
+  - the route probe's IRIS, the same 26 lines from 48 s the end stop changed: within 2.3 mm of where it was, its nose on its last leg's course over its point (153.44°, where it read 153.29°), its cross-track as it completed 0.0146 m where it read 0.0125. The wing's and the F-16C's lines are identical;
+  - every rotorcraft's route stop holds its nose on its last leg's course, and a stop just after a turn slows on the turn. The end stop's comparison (`test_route_loiters`) reads as before to its printed precision, the UH-1H completing at 196.5 s where 196.4, the UH-60A at 91.3 s where 91.4. The Python example's hops end in such a stop.
+
+  The owner approved the new baseline, the nose held on the leg with it (2026-09-28).
+- **Unchanged, to the last bit:** the digests, with protection and without; the curve probe (64 lines). The allocation gate passes. The end stop rebased onto FA-6c2 (1ca8534) reads its digests and probes as on FA-6c1, and ctest 302.
+- **Memory:** a pattern behaviour holds one more double, its hover's heading as a route gives it.
+- **A/B throughput** against the end stop on FA-6c2, both builds run from their own directories, nothing else running (watched): 5 rounds of `micro` twice, 9 of `command` four times, 7 of `world`.
+  - The micro cases are within −0.5 % to +3.1 %, then −3.6 % to +1.4 %: the route's +0.4 %, then −1.7 %; the curve's +2.2 %, then −0.2 %.
+  - The command cases are within −1.5 % to +0.8 %, but a behaviour's NEW: +7.1 % and +8.5 % in the first two runs (its minimum 128 ns, now 138), +1.9 % and +1.2 % in the next two (129 ns). Of the 220 functions on its path, six calls deep, all but one are the same instructions in both builds, and 130 of them moved (the 2 KB these add sits before them). The one is the guidance modes' registration, which runs once. Layout, as FA-3b, FA-6b2 and FA-6c2 recorded for this case.
+  - World throughput is 100.3 to 100.9 % of the end stop's; protection costs at most 0.7 %.
+- ctest: all 303 tests pass.
+- **Merged onto main at FA-8d** (2026-09-29), both blocks, past FA-6d to FA-8d, which they were not written on:
+  - `test_route_loiters` reads as above, to the printed precision; the route probe's IRIS the same 26 lines from 48 s, as the blocks name them (its nose 153.44° over its point, its cross-track as it completed 0.0146 m), its other lines FA-8d's to the bit; the digests, with protection and without, and the curve probe unchanged. The allocation gate passes.
+  - A last leg a terminator ends where the aircraft is (4.38, since) ends as it did: the aircraft is taken over its point from there, its nose turned to it by the position loop. With the nose held on the leg as the stop holds it, an IRIS whose course to an altitude ended 52 m past its point flew back to it tail first (a probe; no test flies it).
+  - The fleet's routes with a branch (FA-6e2's two cases, since) gave a rotorcraft 330 and 250 s. The UH-1H now completes at 340.9 and 241.9 s, the UH-60A at 308.2 and 202.5 s. A helicopter's time there now adds its position loop's approach, 20 s over its velocity bandwidth (the UH-1H's 91 s, the UH-60A's 48 s), as the end stop's own case does. The multirotors' is as it was: the Crazyflie, done at 282.8 s, has 19 % of its charge left at 330 s, and given 520 s it came down.
+  - ctest: all 365 tests pass.
 **FA-6d1, A-GRA's required time of arrival (WPT-11).**
 - **Flown** (`test_route_arrivals`, calm):
   - three C172s east, 3 km, then 12 km on to a point with a window, some 273 s away at 55 m/s. Given 330 to 340 s, one was slowed and arrived at 332.5 s, its aim (a quarter of the window inside it); its estimate, from a third of the way on, was its aim. One at 45 m/s given 280 to 290 s was sped up and arrived at 287.5 s. One given 260 to 300 s flew as planned, at its own speed, and arrived at 273.5 s;

@@ -1029,6 +1029,28 @@ double Plan::arrivalM(std::uint32_t k, bool firstLap) const noexcept {
     return m + pieceM(k, firstLap) + 0.5 * t.radiusM * std::abs(t.angleRad);
 }
 
+bool Plan::stopsAt(std::uint32_t i) const noexcept {
+    if (loiterPoint(points[i])) { // (a loiter point's loiter, whatever the route's end says)
+        const RouteLoiter* l = loiterAt(i);
+        return l && l->pattern.pattern == static_cast<double>(PatternKind::Hover);
+    }
+    return end == EndBehavior::Loiter && !repeat && i == last();
+}
+
+double Plan::toStopM(std::uint32_t i, bool firstLap, double withinM) const noexcept {
+    double m = 0.0;
+    for (std::uint32_t n = 0; n < count && m < withinM && leaves(i); ++n) {
+        if (i == last()) firstLap = false; // (round again: the laps after the first)
+        i = next(i);
+        m += pieceM(i, firstLap);
+        if (!(m < withinM)) break;
+        if (stopsAt(i)) return m;
+        const Turn& t = turn(i, firstLap);
+        m += t.radiusM * std::abs(t.angleRad);
+    }
+    return std::numeric_limits<double>::infinity();
+}
+
 Reason complete(Waypoint* out, const Waypoint* in, std::uint32_t count, bool repeat, const sim::VehicleState& state, const Performance& performance,
                 bool hovers, std::int16_t& bad, const Altimeter* altimeter, std::uint32_t loop) noexcept {
     auto invalid = [&bad](std::uint32_t i) {

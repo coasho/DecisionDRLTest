@@ -310,6 +310,10 @@ const FrameSpec* routeFrame(const PathStore* store, double frame) noexcept {
 
 bool moves(const FrameSpec* f) noexcept { return f && f->origin != FrameOrigin::Fixed; }
 
+/// A rotorcraft's heading as it stops at the end of `leg` (4.31): the course the leg arrives on; none (the position
+/// loop's) for a leg under a metre, which has no course.
+double arrivalHeading(const route::Leg& leg) noexcept { return leg.lengthM > 1.0 ? leg.courseInRad : kHold; }
+
 } // namespace
 
 bool RouteBehavior::place(const ControlContext& ctx, std::uint32_t i, FramePose& pose) {
@@ -355,13 +359,12 @@ void RouteBehavior::aim(std::uint32_t k, const Performance& perf) noexcept {
     pursuing_ = headed_ = false, ends_ = 0;
     if (p.terminated) terminated(k); // (how its leg is flown and ends, as its terminator says: 4.38)
     loiterAhead_ = route::loiterPoint(p.points[k]) ? p.loiterAt(k) : nullptr;
-    reachM_ = stops() ? 1.0 : 0.0;
-    if (loiterAhead_) { // (4.31: where the leg meets it; a rotorcraft's hover, where it would stop from its speed - its position loop's)
-        const bool hover = loiterAhead_->pattern.pattern == static_cast<double>(PatternKind::Hover);
-        const Waypoint& w = p.points[k];
-        reachM_ = hovers_ && hover ? std::max(route::stoppingDistanceM(perf, route::plannedSpeed(w.speed, w.speedReference, 0.0)), 1.0)
-                                   : route::loiterJoinM(loiterAhead_->pattern, loiterAhead_->shape);
-    }
+    // (4.31: where the leg meets its loiter; a rotorcraft's hover - a loiter point's, or the stop at the route's end - where it
+    // would stop from its speed: its position loop's from there)
+    const bool hover = loiterAhead_ ? hovers_ && loiterAhead_->pattern.pattern == static_cast<double>(PatternKind::Hover) : stops();
+    const Waypoint& w = p.points[k];
+    reachM_ = hover ? std::max(route::stoppingDistanceM(perf, route::plannedSpeed(w.speed, w.speedReference, 0.0)), 1.0)
+                    : loiterAhead_ ? route::loiterJoinM(loiterAhead_->pattern, loiterAhead_->shape) : 0.0;
 }
 
 void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& command, double branchTo, bool fromPoint) {
@@ -381,7 +384,7 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
         finishedM_ = 0.0;
     }
     target_ = 0;
-    loiterAhead_ = nullptr, reachM_ = 0.0, loitering_ = false;
+    loiterAhead_ = nullptr, reachM_ = 0.0, loitering_ = stopping_ = false;
     rampFromMs_ = speedFlown_ = referenceFlown_ = kHold;
     climbTarget_ = climbMid_ = kHold, climbRest_ = false;
     arrivalPoint_ = arrivalState_ = -1, arrivalAimS_ = arrivalSpeedMs_ = arrivalS_ = arrivalDeltaS_ = kHold, arrivalShiftM_ = 0.0;
@@ -555,8 +558,9 @@ route::Fix RouteBehavior::locate(const ControlContext& ctx, const sim::VehicleSt
             onArc_ = true, midway_ = false;
             continue;
         }
-        // no arc: the point is passed abeam (a rotorcraft that stops there, within a metre of it); a loiter point's
-        // loiter begins where the leg meets it (4.31), the leg flown; a leg that ends where the aircraft is, there (4.38)
+        // no arc: the point is passed abeam; a loiter point's loiter begins where the leg meets it (4.31), the leg flown; a leg
+        // that ends where the aircraft is, there (4.38). A rotorcraft that stops at the end leaves the stop to its position loop
+        // from where it would stop, as a loiter point's hover, and is there within a metre of it
         if (ends_ ? !reached(ctx, s, perf, f) : f.alongM < leg.lengthM - reachM_ && !abeam_) return f;
         if (ends_) {
             passHere(ctx, s, perf, f);
@@ -567,6 +571,10 @@ route::Fix RouteBehavior::locate(const ControlContext& ctx, const sim::VehicleSt
             inPieceM_ = leadOut_ = 0.0;
             loitering_ = true;
             return f;
+        }
+        if (stops()) {
+            stopping_ = true;
+            if (f.alongM < leg.lengthM - 1.0) return f;
         }
         finishedM_ += std::max(0.0, leg.lengthM - leadOut_);
         if (loiterAhead_ && firstLap_ && target_ != p.last()) { // (its hold passed: 4.33 - its states on the leg on as they are)
@@ -613,10 +621,11 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         }
         if (!ended_) route::replan(q, at, firstLap_, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
         if (!ended_ && q.stateCount) route::placeStates(q); // (its states on the legs as they are now: 4.34)
-        // flown over the frame the piece is in: its point's and the one before's, one moving frame (past the end, the last point's)
+        // flown over the frame the piece is in: its point's and the one before's, one moving frame (stopping at the end, or past
+        // it, the last point's)
         const Waypoint& w = q.points[at];
         const Waypoint& b = q.points[q.before(at, firstLap_)]; // (a leg from where a loiter ended is in no frame: 4.31)
-        overFrame_ = moves(routeFrame(ctx.path, w.frame)) && (ended_ || (before && b.frame == w.frame && !route::loiterPoint(b)));
+        overFrame_ = moves(routeFrame(ctx.path, w.frame)) && (ended_ || stopping_ || (before && b.frame == w.frame && !route::loiterPoint(b)));
         frameNorthMs_ = overFrame_ ? pose.northMs : 0.0, frameEastMs_ = overFrame_ ? pose.eastMs : 0.0;
     }
     if (pursuing_ && !ended_) direct(s, perf); // (a direct to fix's leg, from where it is: 4.38)
@@ -648,13 +657,20 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     else if (!wasEnded) crossTrack_ = lastCross_;
     // off its path by more than the segment's required navigation performance (4.35): its exact navigation's total error its cross-track
     if (!ended_ && !isHold(segment.rnpM) && std::abs(fix.crossTrackM) > segment.rnpM) constraints_ = kActivityNavigationPerformance;
-    if (hovers_ && ended_ && p.end == EndBehavior::Loiter) { // stopped: hover over the last point
+    // stopping, then stopped: over the last point by its position loop, no faster than its segment, as the hover pattern; a
+    // last leg its terminator ended (4.38), from wherever that left it - its point perhaps behind it - as that loop turns it
+    if (stopping_ || (hovers_ && ended_ && p.end == EndBehavior::Loiter)) {
         const Waypoint& last = p.points[p.last()];
+        const double transit = route::plannedSpeed(last.speed, last.speedReference, s.altitudeMslM);
         course_ = heading_ = kHold;
         if (overFrame_) // (a point a moving frame carries: over it, closing on it as the hover pattern does - 4.25)
-            return route::hoverOver(s, perf, last.latitudeRad, last.longitudeRad, route::plannedSpeed(last.speed, last.speedReference, s.altitudeMslM),
-                                    frameNorthMs_, frameEastMs_, route::verticalSpeedTo(altitudeMsl_, 0.0, s, perf, true));
-        return PositionCommand{last.latitudeRad, last.longitudeRad, altitudeMsl_, kHold, 1.0, kHold};
+            return route::hoverOver(s, perf, last.latitudeRad, last.longitudeRad, transit, frameNorthMs_, frameEastMs_,
+                                    route::verticalSpeedTo(altitudeMsl_, 0.0, s, perf, true));
+        if (!stopping_) return PositionCommand{last.latitudeRad, last.longitudeRad, altitudeMsl_, kHold, 1.0, kHold};
+        // (its nose held on the course the last leg arrives on, as a loiter point's hover: turned to the point as it closes,
+        // it swung with any offset the turn before left, and the velocity loop's trims with it)
+        heading_ = arrivalHeading(p.leg(p.last(), firstLap_));
+        return PositionCommand{last.latitudeRad, last.longitudeRad, altitudeMsl_, transit, 1.0, heading_};
     }
     route::Steer steer;
     steer.speed = segment.speed;
@@ -679,8 +695,8 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
                 ahead.curvature = (turn.angleRad >= 0.0 ? 1.0 : -1.0) / turn.radiusM;
                 steer.speedLimitMs = route::brakingLimit(perf, route::lateralLimit(perf, turn.radiusM), toGo);
             }
-        } else if (stops()) {
-            steer.speedLimitMs = std::max(route::brakingLimit(perf, 0.0, toGo), 0.5);
+        } else if (stops()) { // (stopping for its hover at the end, as for a loiter point's: its velocity loop's lag counted)
+            steer.speedLimitMs = std::max(route::stoppingLimit(perf, toGo), 0.5);
         } else if (hovers_ && loiterAhead_) { // (4.31: stopping for a hover, else slowing to its radius's pace where it is met)
             const PatternCommand& c = loiterAhead_->pattern;
             steer.speedLimitMs = c.pattern == static_cast<double>(PatternKind::Hover)
@@ -699,6 +715,20 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
                 const double after = next && next->arcRadiusM > 0.0 ? route::brakingLimit(perf, route::lateralLimit(perf, next->arcRadiusM), toGo)
                                                                     : std::numeric_limits<double>::infinity();
                 if (std::isfinite(std::min(here, after))) steer.speedLimitMs = std::fmin(steer.speedLimitMs, std::min(here, after));
+            }
+        }
+        // a rotorcraft's stop beyond the point flown to, nearer than it stops from its pace - a turn just before the stop
+        // leaves less than that on the leg to it (4.31): no faster than stops it there, along what is left of the route
+        if (hovers_ && !p.stopsAt(target_)) {
+            const double arc = turn.radiusM * std::abs(turn.angleRad);
+            const double here = onArc_ ? std::max(arc - inPieceM_, 0.0) : toGo + arc; // (to the end of this piece)
+            const double pace = steer.reference == SpeedReference::GroundSpeed
+                                    ? steer.speed
+                                    : trueAirspeedOf(steer.speed, steer.reference, s) + std::hypot(wind_.northMs, wind_.eastMs);
+            const double reach = route::stoppingDistanceM(perf, std::fmin(pace, steer.speedLimitMs));
+            if (here < reach) {
+                const double rest = here + p.toStopM(target_, firstLap_, reach - here);
+                if (std::isfinite(rest)) steer.speedLimitMs = std::fmin(steer.speedLimitMs, std::max(route::stoppingLimit(perf, rest), 0.5));
             }
         }
     }
@@ -827,7 +857,8 @@ Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf
         }
         const bool terminated = p.terminated && holdBegins(shape); // (a hold's terminator: its end - 4.38)
         const FrameSpec* frame = routeFrame(ctx.path, l.shape.frame);
-        loiter_->embed(shape, frame ? *frame : FrameSpec{}, l.endTimeS);
+        const bool hover = hovers_ && l.pattern.pattern == static_cast<double>(PatternKind::Hover); // (its nose on the leg's course)
+        loiter_->embed(shape, frame ? *frame : FrameSpec{}, l.endTimeS, hover ? arrivalHeading(p.leg(target_, firstLap_)) : kHold);
         loiterCommand_ = c;
         loiter_->begin(ctx, loiterCommand_);
         loiter_->wind_ = wind_; // (the estimate it flew in)
@@ -952,9 +983,9 @@ void PatternBehavior::reset() {
     exitNow_ = false;
 }
 
-void PatternBehavior::embed(const PatternShape& shape, const FrameSpec& frame, double endTimeS) noexcept {
+void PatternBehavior::embed(const PatternShape& shape, const FrameSpec& frame, double endTimeS, double headingRad) noexcept {
     embedded_ = true;
-    embeddedShape_ = shape, frame_ = frame, endTimeS_ = endTimeS;
+    embeddedShape_ = shape, frame_ = frame, endTimeS_ = endTimeS, hoverHeadingRad_ = headingRad;
 }
 
 void PatternBehavior::plan(const ControlContext& ctx, const PatternCommand& c) {
@@ -1137,7 +1168,8 @@ Command PatternBehavior::update(const ControlContext& ctx, const Command& in) {
         const double transit = reference == SpeedReference::GroundSpeed ? resolved_.speed : trueAirspeedOf(resolved_.speed, reference, s);
         crossTrack_ = off, course_ = heading_ = kHold, speedFlown_ = transit;
         if (frameMoves_) return hoverInFrame(ctx, perf, transit);
-        return PositionCommand{p.lat0, p.lon0, altitudeMsl_, transit, 1.0, kHold};
+        heading_ = hoverHeadingRad_; // (a route's loiter point's: the leg's course; else as the position loop turns it)
+        return PositionCommand{p.lat0, p.lon0, altitudeMsl_, transit, 1.0, hoverHeadingRad_};
     }
     if (startS_ < 0.0) startS_ = s.simTime;
     const route::Fix fix = locate(s);

@@ -1795,6 +1795,66 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
                 CHECK(f.worst < std::max(20.0, 0.05 * f.radiusM));
             }
         });
+    // A route that ends in a loiter (EndBehavior::Loiter): three orbit radii ahead, then its last point eight ahead, where a
+    // rotorcraft stops and hovers - its stop its position loop's from where it would stop from its speed, as a loiter point's
+    // hover (4.31): no farther past its point than that hover, the route completed at its point, and over it after. (A wing
+    // orbits its last point: test_routes)
+    struct EndStop {
+        PositionCommand point;
+        double past = -1e9, completedOff = kHold, after = 0.0;
+    };
+    std::map<std::uint32_t, EndStop> endStops;
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            if (!p.rotor) return false;
+            const double R = orbitRadius(p), psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
+            auto point = [&](double ahead) {
+                const PositionCommand q = pointFrom(p.start, ahead * c, ahead * sn, p.start.altitudeMslM, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            EndStop& f = endStops[p.id];
+            f = EndStop{};
+            f.point = pointFrom(p.start, 8.0 * R * c, 8.0 * R * sn, p.start.altitudeMslM, 0.0);
+            RouteCommand stop;
+            stop.end = static_cast<double>(EndBehavior::Loiter);
+            const CommandResult res = w.submit(p.id, stop, std::vector<Waypoint>{point(3.0 * R), point(8.0 * R)});
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index);
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        [&](const Plane& p) { // there, and its position loop's approach from where it would stop (the UH-1H's 95 s)
+            const double bandwidth = perf(p).velocityBandwidthRadS;
+            return 8.0 * orbitRadius(p) / std::max(p.cruiseMs, 0.1) * 1.5 + (std::isfinite(bandwidth) && bandwidth > 0.0 ? 20.0 / bandwidth : 150.0) + 40.0;
+        },
+        [&](const Plane& p) {
+            EndStop& f = endStops[p.id];
+            const auto& s = *w.vehicleState(p.id);
+            double north, east;
+            offset(s, f.point.latitudeRad, f.point.longitudeRad, north, east);
+            const double psi = p.start.eulerRad[2];
+            f.past = std::max(f.past, north * std::cos(psi) + east * std::sin(psi)); // (along its way there)
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            if (r.state != ActivityState::Completed) return;
+            if (isHold(f.completedOff)) f.completedOff = std::hypot(north, east);
+            f.after = std::max(f.after, std::hypot(north, east));
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const EndStop& f = endStops[p.id];
+            INFO(activityStateName(r.state) << "; " << f.past << " m past its last point; completed " << f.completedOff << " m from it, then within "
+                                            << f.after << " m");
+            CHECK(r.state == ActivityState::Completed);
+            // (the worst: the Crazyflie 0.78 m past its point, the IRIS 0.62 m, the helicopters none - handed over within a metre
+            // of it, the UH-1H swung 42 m past it and the UH-60A 12 m. Completed 0.98 to 1.01 m from it, within a metre along its
+            // leg, then held within 1.01 m, the UH-60A's. Its position loop's approach completes the helicopters later than
+            // their swing did: the UH-1H by 82 s, the UH-60A by 30 s)
+            CHECK(f.past < 1.5);
+            CHECK(f.completedOff < 1.5);
+            CHECK(f.after < 2.0);
+        });
     // A-GRA's segment performance (ADR-29 FA-6c1: WPT-06, WPT-10): segments at the tables' best range speed now, their
     // speed replaced - flown at it in the second's middle - and a speed change made at a segment's acceleration, either
     // held to what the aircraft can: a wing's from that speed to 90 % of it over 40 s through the air, once settled; a
@@ -2327,6 +2387,12 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
     // branch there out to a third - a point half a minute to its right - once it has come there twice. It flies round twice,
     // then out, and the route completes there
     std::map<std::uint32_t, std::vector<std::uint32_t>> branchedOrders;
+    // (a helicopter's stop at a route's end: its position loop's approach from where it would stop, slow - as the end stop's
+    // case gives it time: the UH-1H's 91 s, the UH-60A's 48 s. A multirotor's is quick, and the Crazyflie's battery short)
+    auto approachS = [&](const Plane& p) {
+        const double bandwidth = perf(p).velocityBandwidthRadS;
+        return p.cls != Class::Helicopter ? 0.0 : std::isfinite(bandwidth) && bandwidth > 0.0 ? 20.0 / bandwidth : 150.0;
+    };
     run("fsim.guidance.route", 0.0,
         [&](const Plane& p) {
             const double psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi);
@@ -2355,9 +2421,9 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             activity[p.id] = res.activity;
             return res.accepted();
         },
-        // (a rotorcraft's done within five minutes, inside the Crazyflie's battery; a heavy's turns, wider than the square's
-        // sides, take it past eight)
-        [&](const Plane& p) { return p.rotor ? 330.0 : 600.0; },
+        // (a rotorcraft's done within five minutes, inside the Crazyflie's battery, a helicopter's stop at its end after; a
+        // heavy's turns, wider than the square's sides, take it past eight)
+        [&](const Plane& p) { return p.rotor ? 330.0 + approachS(p) : 600.0; },
         [&](const Plane& p) {
             const ActivityRecord& r = *w.activity(activity[p.id]);
             std::vector<std::uint32_t>& order = branchedOrders[p.id];
@@ -2404,7 +2470,7 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             activity[p.id] = res.activity;
             return res.accepted();
         },
-        [&](const Plane& p) { return p.rotor ? 250.0 : 420.0; },
+        [&](const Plane& p) { return p.rotor ? 250.0 + approachS(p) : 420.0; },
         [&](const Plane& p) {
             const ActivityRecord& r = *w.activity(activity[p.id]);
             std::vector<std::uint32_t>& order = enduranceOrders[p.id];

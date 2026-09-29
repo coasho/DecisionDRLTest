@@ -1,7 +1,9 @@
 // A route's loiter points as A-GRA's schema gives them (docs/flight-autonomy.md, 4.31; ADR-29 FA-6b2): a loiter inside a
 // route - an orbit of so many laps, a hold until its end time, a rotorcraft's hover for a time - flown where the leg meets
-// it, then on along the route; a route that ends in one; its loiters read back, reported and refused as its points are; an
-// orbit's laps timed for the endurance check from where it is joined.
+// it, then on along the route; a route that ends in one; a rotorcraft's stop at a route's end, flown as that hover; its
+// loiters read back, reported and refused as its points are; an orbit's laps timed for the endurance check from where it
+// is joined.
+#include "control/Route.h"
 #include "fsim/GuidanceModes.h"
 #include "mode_flights.h"
 
@@ -165,6 +167,177 @@ TEST_CASE("route loiters: a rotorcraft stops and hovers at a point inside its ro
     CHECK(!isHold(completedAt));
     CHECK(drift < 1.0);
     CHECK(w.activity(c.activity)->state == ActivityState::Completed);
+}
+
+TEST_CASE("route loiters: a route that ends in a hover stops as the hover pattern and a loiter point's hover do - its position loop's "
+          "approach from where it would stop - and completes at its point",
+          "[modes]") {
+    // every rotorcraft three ways to a point eight turn radii east at its cruise over the ground: the hover pattern, its
+    // position loop all the way; a route to a loiter point with a hover (4.31); a route that ends in a loiter, its end stop -
+    // how far each swings past its point, and where the route that ends in a loiter completes
+    session::World w(options("route-loiters-stops"));
+    const char* const types[] = {"cf2", "iris", "uh1h", "uh60"};
+    const char* const ways[] = {"pattern", "loiter point", "end"};
+    struct Stop {
+        std::uint32_t v = 0;
+        ActivityId a = 0;
+        Waypoint point;
+        double past = -1e9, speedAbeam = kHold, arrived = kHold, settled = kHold, after = 0.0, completed = kHold, offAtCompletion = kHold;
+    };
+    Stop stops[4][3];
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 3; ++j) stops[i][j].v = rotor(w, types[i], 0.0, 3 * i + j);
+    w.step(stepsFor(w, 15.0)); // (settled together: one let go flies its neutral default and falls)
+    const double t0 = w.simTime();
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 3; ++j) {
+            Stop& s = stops[i][j];
+            const auto& s0 = *w.vehicleState(s.v);
+            const Performance& perf = *w.performance(s.v);
+            const double cruise = perf.cruiseTasMs, r = perf.turnRadiusM(cruise);
+            s.point = at(s0.latitudeRad, s0.longitudeRad, 0.0, 8.0 * r);
+            s.point.altitudeM = s0.altitudeMslM;
+            s.point.speed = cruise, s.point.speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+            CommandResult c;
+            if (j == 0) {
+                PatternCommand hover;
+                hover.pattern = static_cast<double>(PatternKind::Hover);
+                hover.latitudeRad = s.point.latitudeRad, hover.longitudeRad = s.point.longitudeRad, hover.altitudeM = s.point.altitudeM;
+                hover.speed = s.point.speed, hover.speedReference = s.point.speedReference;
+                c = w.submit(s.v, hover);
+            } else if (j == 1) {
+                c = w.submit(s.v, RouteCommand{}, std::vector<Waypoint>{loiterPoint(s.point)}, {}, std::vector<RouteLoiter>{loiter(0, PatternKind::Hover)});
+            } else {
+                RouteCommand stop;
+                stop.end = static_cast<double>(EndBehavior::Loiter);
+                c = w.submit(s.v, stop, std::vector<Waypoint>{s.point});
+            }
+            INFO(types[i] << " " << ways[j] << ": " << reasonName(c.reason) << " at " << c.index);
+            REQUIRE(c.accepted());
+            s.a = c.activity;
+        }
+    for (unsigned k = 0; k < stepsFor(w, 300.0); ++k) {
+        w.step();
+        const double t = w.simTime() - t0;
+        for (auto& row : stops)
+            for (Stop& s : row) {
+                const auto& v = *w.vehicleState(s.v);
+                double n, e;
+                apart(s.point.latitudeRad, s.point.longitudeRad, v.latitudeRad, v.longitudeRad, n, e);
+                const double off = std::hypot(n, e);
+                s.past = std::max(s.past, e); // (along its way there, east: past it)
+                if (isHold(s.speedAbeam) && e > -1.0) s.speedAbeam = groundSpeed(v);
+                if (isHold(s.arrived) && off < 1.0) s.arrived = t;
+                if (!isHold(s.arrived)) s.after = std::max(s.after, off);
+                if (!isHold(s.arrived) && (isHold(s.settled) || off >= 1.0)) s.settled = off < 1.0 ? t : kHold; // (within the metre for good)
+                if (isHold(s.completed) && w.activity(s.a)->state == ActivityState::Completed) s.completed = t, s.offAtCompletion = off;
+            }
+    }
+    for (int i = 0; i < 4; ++i) {
+        const Stop &pattern = stops[i][0], &loiterHover = stops[i][1], &end = stops[i][2];
+        const Performance& perf = *w.performance(end.v);
+        std::printf("route stops, %s (R %.1f m, stopping %.1f m from %.2f m/s): past its point the pattern's %.2f m, a loiter point's %.2f m, its "
+                    "end's %.2f m (abeam at %.2f m/s); its end within a metre at %.1f s, for good from %.1f s, then within %.2f m; completed "
+                    "at %.1f s, %.2f m from it\n",
+                    types[i], perf.turnRadiusM(perf.cruiseTasMs), route::stoppingDistanceM(perf, perf.cruiseTasMs), perf.cruiseTasMs, pattern.past,
+                    loiterHover.past, end.past, end.speedAbeam, end.arrived, end.settled, end.after, end.completed, end.offAtCompletion);
+        INFO(types[i]);
+        for (const Stop* s : {&pattern, &loiterHover, &end}) {
+            INFO(ways[s - stops[i]]);
+            REQUIRE(!isHold(s->arrived));
+        }
+        // as the hover pattern and a loiter point's hover: no farther past it (the worst: the Crazyflie's 0.78 m, a loiter
+        // point's too; handed over within a metre of it, it swung 1.40 m past it, the IRIS 1.20 m, the UH-60A 12.4 m and the
+        // UH-1H 42.2 m, then 49.1 m from it)
+        CHECK(end.past < std::max(pattern.past, loiterHover.past) + 0.1);
+        CHECK(end.past < 1.0);
+        CHECK(end.after < 1.5);
+        // completed at its point, as it gets there: within a metre of it along its leg
+        CHECK(end.offAtCompletion < 1.5);
+        CHECK(std::abs(end.completed - end.arrived) < 1.0);
+    }
+}
+
+TEST_CASE("route loiters: a rotorcraft whose stop reaches back into the turn before its point slows on the turn and stops at the point, "
+          "calm and in a tailwind - a route's end and a loiter point's hover alike, its nose on the last leg's course",
+          "[modes]") {
+    // every rotorcraft from its hover 4R east at its cruise over the ground (R its turn radius there), a fly-by turn right,
+    // then its last point R and half its stopping distance south: its stop reaches back into the turn's arc by half that
+    // distance (4.31). Calm, and a tailwind on its last leg at 0.4 of its cruise (the world's wind: a world each); a route that
+    // ends in a loiter, and one whose last point is a loiter point with a hover - how far past its point along its last leg,
+    // how far from it once it passed it, and its nose over it
+    const char* const types[] = {"cf2", "iris", "uh1h", "uh60"};
+    const char* const ways[] = {"end", "loiter point"};
+    for (const char* type : types)
+        for (const double tailwind : {0.0, 0.4}) {
+            session::World w(options("route-loiters-turn-stop"));
+            std::uint32_t v[2];
+            for (int j = 0; j < 2; ++j) v[j] = rotor(w, type, 0.0, j);
+            const Performance& perf = *w.performance(v[0]);
+            const double cruise = perf.cruiseTasMs, r = perf.turnRadiusM(cruise), stop = route::stoppingDistanceM(perf, cruise);
+            setWind(w, 0.0, tailwind * cruise); // (from the north: behind it on its last leg, south)
+            w.step(stepsFor(w, 15.0));          // (settled together, in the wind: one let go flies its neutral default and falls)
+            struct Stop {
+                ActivityId a = 0;
+                Waypoint point;
+                double past = 0.0, passed = kHold, after = 0.0, settled = kHold, heading = kHold, completedOff = kHold;
+            } stops[2];
+            for (int j = 0; j < 2; ++j) {
+                Stop& s = stops[j];
+                const auto& s0 = *w.vehicleState(v[j]);
+                Waypoint turn = at(s0.latitudeRad, s0.longitudeRad, 0.0, 4.0 * r);
+                turn.speed = cruise, turn.speedReference = static_cast<double>(SpeedReference::GroundSpeed);
+                s.point = at(s0.latitudeRad, s0.longitudeRad, -(r + 0.5 * stop), 4.0 * r);
+                CommandResult c;
+                if (j == 0) {
+                    RouteCommand end;
+                    end.end = static_cast<double>(EndBehavior::Loiter);
+                    c = w.submit(v[j], end, std::vector<Waypoint>{turn, s.point});
+                } else {
+                    c = w.submit(v[j], RouteCommand{}, std::vector<Waypoint>{turn, loiterPoint(s.point)}, {},
+                                 std::vector<RouteLoiter>{loiter(1, PatternKind::Hover)});
+                }
+                INFO(type << " " << ways[j] << ": " << reasonName(c.reason) << " at " << c.index);
+                REQUIRE(c.accepted());
+                s.a = c.activity;
+            }
+            const double t0 = w.simTime();
+            for (unsigned k = 0; k < stepsFor(w, 9.0 * r / cruise + 20.0 / perf.velocityBandwidthRadS + 60.0); ++k) {
+                w.step();
+                const double t = w.simTime() - t0;
+                for (Stop& s : stops) {
+                    const auto& vs = *w.vehicleState(v[&s - stops]);
+                    const ActivityRecord& a = *w.activity(s.a);
+                    double n, e;
+                    apart(s.point.latitudeRad, s.point.longitudeRad, vs.latitudeRad, vs.longitudeRad, n, e);
+                    const double off = std::hypot(n, e);
+                    const bool last = a.progress.segment == 1 || a.state == ActivityState::Completed; // (on its last leg, or there)
+                    if (last) s.past = std::max(s.past, -n); // (its last leg runs south: past it, south of it)
+                    if (last && isHold(s.passed) && -n >= -1.0) s.passed = t;
+                    if (!isHold(s.passed)) s.after = std::max(s.after, off);
+                    s.settled = off >= 1.0 ? kHold : isHold(s.settled) ? t : s.settled; // (within the metre for good)
+                    s.heading = vs.eulerRad[2];
+                    if (isHold(s.completedOff) && a.state == ActivityState::Completed) s.completedOff = off;
+                }
+            }
+            for (const Stop& s : stops) {
+                const char* way = ways[&s - stops];
+                std::printf("route turn stops, %s %s (R %.1f m, stopping %.1f m from %.2f m/s; tailwind %.2f m/s): past its point %.2f m, then "
+                            "within %.2f m of it; within a metre for good from %.1f s; its nose %.2f deg off the leg's course; completed %.2f m "
+                            "from it\n",
+                            type, way, r, stop, cruise, tailwind * cruise, s.past, s.after, s.settled, degreesApart(s.heading, kPi), s.completedOff);
+                INFO(type << " " << way << ", tailwind " << tailwind * cruise << " m/s");
+                CHECK(w.activity(s.a)->state == ActivityState::Completed);
+                CHECK(!isHold(s.settled));
+                // (the worst: the Crazyflie 1.40 m past its point in the tailwind, the UH-1H 1.73 m from it once there, calm,
+                // every nose on the course. Its stop not counted on the turn and its nose turned to the point, the UH-1H
+                // swung 14.4 m past it, then to 17.5 m from it, its nose 75 degrees off the course, and the UH-60A to 6.3 m
+                // from it. Slowed on the turn alone, the UH-1H 10.4 m past and 18.6 m from it; the UH-60A 1.26 m)
+                CHECK(s.past < 3.0);
+                CHECK(s.after < 3.5);
+                CHECK(std::abs(degreesApart(s.heading, kPi)) < 2.0);
+            }
+        }
 }
 
 TEST_CASE("route loiters: a wing holds at a fix until its end time and leaves at the fix; a loiter on a moving point moves with it; a route "

@@ -111,8 +111,11 @@ class PatternBehavior;
 /// forward, from the vehicle's course bandwidth (Performance):
 /// - a wing flies it as a turn rate, with a slow trim on the cross-track;
 /// - a rotorcraft as its velocity over the ground, the nose along the track,
-///   slowing for a turn only as much as its radius asks, and to stop at the
-///   end when it is to loiter there.
+///   slowing for a turn only as much as its radius asks, and for a stop - its
+///   end where it loiters, a loiter point's hover - no faster than stops it
+///   there along what is left of the route; it leaves the stop to its
+///   position loop from where it would stop from its speed, as a loiter
+///   point's hover, the nose held on the course the leg arrives on.
 /// The altitude runs straight from point to point, or climbs at a segment's
 /// rate; the speed is each segment's, in its reference - or the tables' best
 /// at the altitude and weight now where it optimises it, reached at its
@@ -293,7 +296,7 @@ private:
     std::unique_ptr<PatternBehavior> loiter_; ///< flies them: allocated with the behaviour
     Command loiterCommand_{};          ///< the one flown's pattern
     const RouteLoiter* loiterAhead_ = nullptr; ///< the point flown to's (the plan's); null for none
-    double reachM_ = 0.0;              ///< how far before the point flown to it is reached: a loiter's join, a stop's metre
+    double reachM_ = 0.0;              ///< how far before the point flown to it is reached: a loiter's join, a hover's stopping distance
     bool loitering_ = false;           ///< its loiter flies
     // the leg to the point flown to and the turn there, as this lap flies them (the plan's: the entry, a later lap's own
     // where it comes back to - 4.36 - or the legs' and turns'): chosen as it aims, read as it flies
@@ -306,6 +309,7 @@ private:
     bool headed_ = false;   ///< the leg to it a heading's (4.38)
     double interceptM_ = kHold; ///< an intercept's: its cross-track to the next leg at the last update
     double headingTrim_ = 0.0, lastHeading_ = kHold; ///< a heading leg's trim and the heading it last saw, as the hsa's
+    bool stopping_ = false;            ///< a rotorcraft's stop at the end: its position loop's, from where it would stop (until canceled)
 };
 
 /// "pattern": fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md,
@@ -360,9 +364,10 @@ private:
     /// stop closing (a formation's), no faster than `transit`.
     VelocityCommand hoverInFrame(const ControlContext& ctx, const Performance& perf, double transit) const noexcept;
     /// Flown inside a route, as a loiter point's loiter (docs/flight-autonomy.md, 4.31): its shape and its frame given,
-    /// not the path store's, and ended at `endTimeS` too (the world's time; kHold: none).
+    /// not the path store's, and ended at `endTimeS` too (the world's time; kHold: none); a hover with its nose held on
+    /// `headingRad`, the course the leg into it arrives on (kHold: as the position loop turns it).
     friend class RouteBehavior;
-    void embed(const PatternShape& shape, const FrameSpec& frame, double endTimeS) noexcept;
+    void embed(const PatternShape& shape, const FrameSpec& frame, double endTimeS, double headingRad) noexcept;
     /// Ended, inside a route (4.38: a hold's terminator): left as its exit point next comes, as its end had come.
     void finishAtExit() noexcept { exitNow_ = true; }
 
@@ -391,6 +396,7 @@ private:
     PatternShape embeddedShape_{};   ///< its shape as the route gives it
     double endTimeS_ = kHold, worldNow_ = 0.0; ///< its end time, and the world's time at the last update (read only with one)
     bool exitNow_ = false;           ///< ended by the route that flies it (finishAtExit)
+    double hoverHeadingRad_ = kHold; ///< a hover's heading as the route gives it (kHold: the position loop's)
 };
 
 /// "curve": fsim.guidance.curve, A-GRA's curve following (docs/vehicle-interface.md,
