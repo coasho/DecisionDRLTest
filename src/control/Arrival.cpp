@@ -48,6 +48,16 @@ Reason CapabilityHost::checkArrivals(const route::Plan& p, const sim::VehicleSta
 void CapabilityHost::limitArrivals(route::Plan& p, const sim::VehicleState& state, CheckLog& log) const noexcept {
     const double worldNow = sessionView_ ? sessionView_->simTimeS() : state.simTime;
     const bool hovers = (adapter_->features() & kFeatureHover) != 0;
+    // (its loiters measured first: their own times, and the legs on from where they are left - 4.33)
+    std::uint32_t lastTimed = p.start;
+    bool magnetic = false;
+    for (std::uint32_t i = p.start; i < p.count; ++i)
+        if (!isHold(p.points[i].arrivalBeginS) || !isHold(p.points[i].arrivalEndS)) lastTimed = i;
+    for (std::uint32_t j = 0; j < p.stateCount; ++j)
+        if (!isHold(p.states[j].timeS)) lastTimed = std::max(lastTimed, p.states[j].point);
+    for (std::uint32_t k = 0; k < p.loiterCount; ++k)
+        magnetic = magnetic || p.loiters[k].shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth);
+    if (p.loiterCount && lastTimed > p.start) route::measureLoiters(p, state, performance_, hovers, &config_->altimeter, magnetic ? yearNow() : 2025.0);
     route::limitClimbs(p, state, config_->tables, performance_, hovers, &config_->altimeter); // (its climbs, no faster than it climbs them)
     // each timed target in turn along its first lap - its states' times (4.34), then its point's window - from the
     // earliest and the latest it can be at the one before (at first, where the aircraft is now), at the speeds it flies
@@ -78,13 +88,6 @@ void CapabilityHost::limitArrivals(route::Plan& p, const sim::VehicleState& stat
     // the first of its ends, its duration, its laps or its end time, from when it begins - and the legs on from where it is
     // left; one whose end is not known ahead (a hold to an altitude, or the operator's: 4.38), as early as at once, as late as
     // may be
-    std::uint32_t lastTimed = p.start;
-    bool magnetic = false;
-    for (std::uint32_t i = p.start; i < p.count; ++i)
-        if (!isHold(p.points[i].arrivalBeginS) || !isHold(p.points[i].arrivalEndS)) lastTimed = i;
-    for (std::uint32_t k = 0; k < p.loiterCount; ++k)
-        magnetic = magnetic || p.loiters[k].shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth);
-    if (p.loiterCount && lastTimed > p.start) route::measureLoiters(p, state, performance_, hovers, &config_->altimeter, magnetic ? yearNow() : 2025.0);
     std::uint32_t j = 0;
     for (std::uint32_t i = p.start; i < p.count; ++i) {
         const Waypoint& w = p.points[i];

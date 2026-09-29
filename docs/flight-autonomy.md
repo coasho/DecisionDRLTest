@@ -866,8 +866,12 @@ A-GRA's path segment carries planned inertial states (MA_PathSegmentType.Inertia
   - a piece of its profile steeper than the aircraft climbs or descends (`MaxClimbRate`, `MaxDescentRate`): at its point's speed, or between two times in the time between them;
   - a time it cannot make (`MaxAirspeed`, `MinAirspeed`), as a window's (4.33).
 - **Checked** by the terrain walk too: its first lap through its states' altitudes.
+- **At and after a loiter point** (FA-6g3a):
+  - A state on a loiter point's own leg is flown before its loiter; one past where the loiter begins (4.31) is refused `invalid_waypoint`, naming the point.
+  - The leg after a loiter point is flown from where the loiter is left (4.31): an orbit's exit toward the next point, a hold's fix, a hover's point. A state on it is placed on that leg, where it will be laid, and placed again on the leg as laid once the loiter is left. It is checked against that leg, within its uncertainty, as any state is on its own.
+  - Its time is scheduled through the loiters on its way, as a window's is (4.33): each loiter's own time counted, the legs' speed paced round it.
+  - Until FA-6g3a, a state at or after a loiter point was not implemented.
 - **Not implemented** (as its support row, `fsim.guidance.route/inertial_states`, says: partial):
-  - a state at or after a loiter point, whose leg after the loiter is flown from where it ends;
   - on a route with a point in a moving frame, whose legs move;
   - a timed state on an aircraft without performance tables, as a window's (4.33).
 - **Kept** as the loiters are: an UPDATE's new waypoints come with their states, and without new waypoints it keeps its own. A route kept waiting (disabled, unassigned) resumes at the point it flew to, with the states beyond it. Reset, it flies all its states again, those it flew past too (since FA-6e1: 4.36).
@@ -906,7 +910,7 @@ A-GRA's route is a set of paths (MA_RouteType.Path, each an MA_RoutePathType): a
 - **Its flight order:** from its start (`RouteCommand::start`, point 0 by default) along each point's next, until the route's end or a point it has flown before. Its laps go round from there, on and on. A route given `repeat` whose flight ends goes back to its first point (0), as an unlinked one does (until FA-6e2, to where it began: 4.37).
   - Its points are flown in that order, as any route's are: each turn by the legs into and out of its point in that order, and a lap's last leg from its last point back to the point it goes round from, with the turn there.
   - A point it never comes to is not flown, but it is checked as a point is, in their order as given. A loiter on one is kept as given: checked as a loiter, not completed - completed and flown where a branch takes the route there (4.37). An arrival window there is due only so. A planned state there is refused, as one on a segment its first lap does not fly (4.34).
-  - Its loiters (4.31), arrival windows (4.33) and planned states (4.34) are at their points as flown: a window at or after a loiter point in that order is scheduled through it (FA-6g2), and a state there is not implemented, as before.
+  - Its loiters (4.31), arrival windows (4.33) and planned states (4.34) are at their points as flown: a window or a state at or after a loiter point in that order is scheduled through it (FA-6g2, FA-6g3a).
 - **Named as given:** a point is named everywhere by its index as given - a refusal's, a finding's and an adjustment's index, its progress's segment (its segments the points given), its end points, and its loiters' and states' points read back. Its end points come in its flight order, round its laps.
 - **The end of a path** (A-GRA's END_OF_PATH; a named change to 4.29): taken at its path's last point - a route without paths, its last - and at a point whose next is -1. Where its path goes on it is none, refused `invalid_waypoint` naming the point. Until FA-6e1 it was `not_implemented`, the end of a path before the route's end.
 - **Refused `invalid_waypoint`, naming the point:**
@@ -1245,7 +1249,9 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
 - FA-6g, what FA-6 has left, in three steps:
   - FA-6g1, a start turn where its links loop back, its course left out (WPT-14; 4.36), done 2026-09-28 and measured in section 14;
   - FA-6g2, a time of arrival at or after a loiter point (WPT-11; 4.33), done 2026-09-28 and measured in section 14;
-  - FA-6g3, planned states at or after a loiter point, and beside points in moving frames (WPT-20; 4.34).
+  - FA-6g3, planned states (WPT-20; 4.34), in two steps:
+    - FA-6g3a, at or after a loiter point, done 2026-09-29 and measured in section 14;
+    - FA-6g3b, beside points in moving frames.
 
 **Items (15):** WPT-04, WPT-06, WPT-08, WPT-10, WPT-11, WPT-12, WPT-13, WPT-14, WPT-15, WPT-17, WPT-18, WPT-19, WPT-20, WPT-21, WPT-22.
 
@@ -2666,6 +2672,24 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
     - That NEW commands the built-in hold behaviour, which touches nothing FA-6g2 built. Every function on its path disassembles the same in both builds, addresses aside: the 12 functions that differ are the route's own, its behaviour's constructor and factory (its plan is larger), and two that differ only in a constant's label and alignment padding. Its reading is where its code now lies, not its work.
   - World throughput is 99.1 to 99.9 % of FA-6g1's, and protection costs at most 1.1 %. Another session's build began partway through the world run.
 - ctest: all 329 tests pass.
+
+**FA-6g3a, planned states at and after a loiter point (WPT-20).**
+- **Flown** (`test_route_states`; a C172 east at 1,500 m and 55 m/s, calm): 3 km east, then a loiter point 8 km east with an orbit of 1 km for 90 s, then a point 17 km east. A state 5 km east is on the loiter point's own leg. A state 12 km east is after the loiter, within a kilometre of its leg: the leg on is laid from the orbit's exit, 0.55 km north of the state's place.
+  - As planned, it crossed 12 km east 338.4 s in.
+  - Given that state a time 30 s later and 1,600 m, it crossed 12 km east at 367.1 s, 1,598.7 m high, and stayed below 1,625 m on that leg. Its estimate as its orbit began read 368.4 s, the state's time. On the leg flown, which runs from the orbit's exit at 6.4 degrees from its centre, the state's place falls 61 m past 12 km east: that is the 1.3 s it crossed 12 km early.
+- **Refused `invalid_waypoint`, naming the point:** a state on a loiter point's own leg past where its loiter begins, two radii out; one before it is taken. Until FA-6g3a, a state at or after a loiter point was refused `not_implemented`.
+- **Its time through the loiter** is scheduled as a window's is (FA-6g2), a state's time a window of none; the fleet measured that schedule through an orbit on every aircraft.
+- **Its climbs after a loiter** are measured from where the leg on begins, not from the loiter's point.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6g2's build.
+- **The support table:** `route/inertial_states` is partial on every aircraft, now only beside points in moving frames (FA-6g3b). The route capability's pending list names only those.
+- **Conformance:** the optimise walks draw states on any segment, at and after loiter points too, and links beside them.
+- **Memory:** each loiter's measure holds its exit's place, and a route's plan holds the points its loiters have been left before.
+- **Digests:** identical to FA-6g2's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6g2, both builds run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`; then 5 rounds of `micro` and of `command` from three copies of each.
+  - No other session's work ran during any of it. From one copy of each, the micro cases are within −1.3 % to +0.3 %; from three copies, −1.5 % to +1.9 % (the waypoints' copies read 152.0 to 157.9 either way).
+  - The command cases, from one copy, are within −2.8 % to +3.0 % (the same level's update, 6.6 ns, moves 0.2 ns); from three copies, −1.5 % to +0.4 %.
+  - World throughput is 98.2 to 99.0 % of FA-6g2's, and protection costs at most 1.8 %. The world benchmark flies attitude commands alone. Every function on its path disassembles the same in both builds, addresses aside: the 20 that differ are the route's own and its plan's allocation. Its reading is where its code now lies, not its work.
+- ctest: all 330 tests pass.
 
 ## Appendix A: the inventory
 

@@ -152,8 +152,8 @@ TEST_CASE("route states: a rotorcraft through its states; one in a frame placed 
     CHECK(w.activity(r.activity)->state == ActivityState::Completed);
 }
 
-TEST_CASE("route states: refused as a point is, naming it - malformed, off its leg, steeper than it climbs, times it cannot make; unchecked, flown; "
-          "at or after a loiter point, beside moving points, a time without tables, not implemented",
+TEST_CASE("route states: refused as a point is, naming it - malformed, off its leg, past where its loiter begins, steeper than it climbs, times "
+          "it cannot make; unchecked, flown; beside moving points, a time without tables, not implemented",
           "[modes]") {
     session::World w(options("route-states-refused"));
     const auto v = wing(w, "c172", 1500.0, 55.0);
@@ -233,13 +233,20 @@ TEST_CASE("route states: refused as a point is, naming it - malformed, off its l
     CommandOptions unchecked;
     unchecked.range = RangePolicy::None;
     CHECK(answer({stateAt(1, lat0, lon0, 1000.0, 9000.0, kHold, kHold)}, unchecked).accepted());
-    // not built yet: at or after a loiter point; on a route with a point in a moving frame; a time without tables
-    Waypoint loiterAt = p0;
+    // on a loiter point's own leg (FA-6g3a; until then not implemented): past where its loiter begins, two radii out, refused;
+    // before it, taken
+    Waypoint loiterAt = p1;
     loiterAt.kind = static_cast<double>(EndPointKind::LoiterPoint);
     RouteLoiter l;
-    l.point = 0, l.pattern.durationS = 60.0;
-    const CommandResult afterLoiter = w.submit(v, RouteCommand{}, std::vector<Waypoint>{loiterAt, p1}, {}, std::vector<RouteLoiter>{l}, std::vector<RouteState>{good});
-    CHECK((afterLoiter.reason == Reason::NotImplemented && afterLoiter.index == 1));
+    l.point = 1, l.pattern.durationS = 60.0, l.pattern.radiusM = 1000.0;
+    auto atLoiter = [&](double east) {
+        return w.submit(v, RouteCommand{}, std::vector<Waypoint>{p0, loiterAt}, {}, std::vector<RouteLoiter>{l},
+                        std::vector<RouteState>{stateAt(1, lat0, lon0, 0.0, east, kHold, kHold)});
+    };
+    const CommandResult pastJoin = atLoiter(14000.0), beforeJoin = atLoiter(9000.0);
+    CHECK((pastJoin.reason == Reason::InvalidWaypoint && pastJoin.index == 1));
+    CHECK(beforeJoin.accepted());
+    // not built yet: on a route with a point in a moving frame; a time without tables
     FrameSpec drifting;
     drifting.origin = FrameOrigin::Moving;
     drifting.latitudeRad = p1.latitudeRad, drifting.longitudeRad = p1.longitudeRad, drifting.altitudeMslM = 1500.0, drifting.northMs = 1.0;
@@ -293,4 +300,78 @@ TEST_CASE("route states: an UPDATE's new waypoints come with theirs, none keeps 
     CHECK((both.reason == Reason::PerformanceLimit && both.index == 2 && both.constraint == Constraint::MaxAirspeed));
     c.arrivalBeginS = t0 + 330.0, c.arrivalEndS = t0 + 340.0;
     CHECK(w.submit(v, RouteCommand{}, std::vector<Waypoint>{a, b, c}).accepted());
+}
+
+TEST_CASE("route states: at and after a loiter point (FA-6g3a) - placed on the leg as it is flown from where the loiter is left, through each "
+          "state's altitude, at its time through the loiter",
+          "[modes]") {
+    // east 3 km at 55 m/s; a loiter point 8 km east, an orbit of 1 km for 90 s; a point 17 km east. A state 5 km east on the
+    // loiter point's leg; one after the loiter 12 km east, 1600 m high, placed within a kilometre of its leg (the leg on is
+    // laid from the orbit's exit, not its centre). First as planned, to find when it passes it; then due 30 s later
+    auto route = [](double lat0, double lon0) {
+        std::vector<Waypoint> q = {at(lat0, lon0, 0.0, 3000.0), at(lat0, lon0, 0.0, 8000.0), at(lat0, lon0, 0.0, 17000.0)};
+        q.at(0).speed = 55.0;
+        for (Waypoint& p : q) p.altitudeM = 1500.0;
+        q.at(1).kind = static_cast<double>(EndPointKind::LoiterPoint);
+        return q;
+    };
+    RouteLoiter orbit;
+    orbit.point = 1, orbit.pattern.durationS = 90.0, orbit.pattern.radiusM = 1000.0;
+    const std::vector<RouteLoiter> loiters = {orbit};
+    auto states = [](double lat0, double lon0, double due) {
+        RouteState after = stateAt(2, lat0, lon0, 0.0, 12000.0, 1600.0, due);
+        after.uncertaintyM = 1000.0;
+        return std::vector<RouteState>{stateAt(1, lat0, lon0, 0.0, 5000.0, kHold, kHold), after};
+    };
+    double plannedAt = kHold;
+    {
+        session::World w(options("route-states-loiter"));
+        const auto v = wing(w, "c172", 1500.0, 55.0);
+        w.step(stepsFor(w, 2.0));
+        const double t0 = w.simTime();
+        const auto& s0 = *w.vehicleState(v);
+        const double lat0 = s0.latitudeRad, lon0 = s0.longitudeRad;
+        std::vector<RouteState> untimed = states(lat0, lon0, kHold);
+        untimed.at(1).altitudeM = kHold;
+        const CommandResult r = w.submit(v, RouteCommand{}, route(lat0, lon0), {}, loiters, untimed);
+        INFO(reasonName(r.reason) << " at " << r.index);
+        REQUIRE(r.accepted());
+        for (unsigned k = 0; k < stepsFor(w, 600.0) && isHold(plannedAt); ++k) {
+            w.step();
+            double north = 0.0, e = 0.0;
+            offset(*w.vehicleState(v), lat0, lon0, north, e);
+            if (w.activity(r.activity)->progress.segment == 2 && e >= 12000.0) plannedAt = w.simTime() - t0;
+        }
+    }
+    REQUIRE(!isHold(plannedAt));
+    session::World w(options("route-states-loiter"));
+    const auto v = wing(w, "c172", 1500.0, 55.0);
+    w.step(stepsFor(w, 2.0));
+    const double t0 = w.simTime();
+    const auto& s0 = *w.vehicleState(v);
+    const double lat0 = s0.latitudeRad, lon0 = s0.longitudeRad;
+    const CommandResult r = w.submit(v, RouteCommand{}, route(lat0, lon0), {}, loiters, states(lat0, lon0, t0 + plannedAt + 30.0));
+    INFO(reasonName(r.reason) << " at " << r.index);
+    REQUIRE(r.accepted());
+    double passed = kHold, altitude = kHold, estimateIn = kHold, highest = 0.0;
+    for (unsigned k = 0; k < stepsFor(w, 700.0) && isHold(passed); ++k) {
+        w.step();
+        const ActivityRecord& a = *w.activity(r.activity);
+        const auto& s = *w.vehicleState(v);
+        double north = 0.0, e = 0.0;
+        offset(s, lat0, lon0, north, e);
+        ArrivalEstimate est;
+        if (isHold(estimateIn) && a.progress.segment == 1 && a.progress.segmentPercent >= 99.9 && w.activityArrival(r.activity, est))
+            estimateIn = est.arrivalS - t0; // (as its orbit began)
+        if (a.progress.segment == 2) highest = std::max(highest, s.altitudeMslM);
+        if (a.progress.segment == 2 && e >= 12000.0) passed = w.simTime() - t0, altitude = s.altitudeMslM;
+    }
+    std::printf("route states after a loiter: as planned it passed 12 km east at %.1f s; due 30 s later, %.1f m high, it passed at %.1f s, %.1f m high "
+                "(its estimate as its orbit began %.1f s)\n",
+                plannedAt, 1600.0, passed, altitude, estimateIn);
+    REQUIRE(!isHold(passed));
+    CHECK(std::abs(passed - (plannedAt + 30.0)) < 2.0); // (FA-6's acceptance: within 2 s)
+    CHECK(std::abs(altitude - 1600.0) < 25.0);
+    CHECK(std::abs(estimateIn - (plannedAt + 30.0)) < 2.0);
+    CHECK(highest < 1625.0);
 }

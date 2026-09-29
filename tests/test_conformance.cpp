@@ -373,15 +373,13 @@ public:
                 }
                 waypoints.push_back(p);
             }
-            // its planned states (FA-6d2): now and then one to three on its segments before any loiter point, halfway along
-            // their legs - up or down, a time it may make or not; now and then one off its leg, one not finite, some out of order
+            // its planned states (FA-6d2): now and then one to three on its segments, at or after its loiter points too (FA-6g3a),
+            // halfway along their legs - up or down, a time it may make or not; now and then one off its leg, one not finite, some
+            // out of order
             if (wild && optimise && chance(0.1)) {
-                int before = points; // (the first loiter point: a state at or after it is not implemented)
-                for (int k = 0; k < points && before == points; ++k)
-                    if (waypoints[static_cast<std::size_t>(k)].kind == static_cast<double>(EndPointKind::LoiterPoint)) before = k;
                 const int n = 1 + static_cast<int>(pick(3));
-                for (int i = 0; i < n && before > 0; ++i) {
-                    const auto k = static_cast<std::size_t>(pick(static_cast<std::size_t>(before)));
+                for (int i = 0; i < n; ++i) {
+                    const auto k = static_cast<std::size_t>(pick(static_cast<std::size_t>(points)));
                     const Waypoint& to = waypoints[k];
                     const double fromLat = k == 0 ? s.latitudeRad : waypoints[k - 1].latitudeRad, fromLon = k == 0 ? s.longitudeRad : waypoints[k - 1].longitudeRad;
                     RouteState st;
@@ -417,12 +415,9 @@ public:
                 if (chance(0.05)) paths.back().count += 1;                                  // (past the last point)
                 if (chance(0.05) && paths.size() > 1) paths.back().id = paths.front().id; // (an id twice)
             }
-            // (points' next only where what they may reorder is built: no planned state beside a loiter point - one after it
-            // is not implemented; an arrival window after one is, FA-6g2, and a start turn looped back to, its course left
-            // out, FA-6g1)
-            bool loiterPoint = false;
-            for (const Waypoint& q : waypoints) loiterPoint = loiterPoint || q.kind == static_cast<double>(EndPointKind::LoiterPoint);
-            if (wild && optimise && chance(0.3) && !(loiterPoint && !states.empty())) {
+            // (points' next anywhere: what they may reorder is built - a window or a state after a loiter point, FA-6g2 and
+            // FA-6g3a, and a start turn looped back to, its course left out, FA-6g1)
+            if (wild && optimise && chance(0.3)) {
                 const auto n = static_cast<std::size_t>(points), how = pick(10);
                 Waypoint& from = waypoints[pick(n)];
                 if (how < 4 && n > 1) waypoints.back().next = static_cast<double>(pick(n - 1));

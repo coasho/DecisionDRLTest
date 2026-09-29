@@ -115,6 +115,7 @@ void measureLoiters(Plan& p, const sim::VehicleState& state, const Performance& 
             const Waypoint& next = p.points[p.next(l.point)];
             m.shortM = makeLeg(w.latitudeRad, w.longitudeRad, next.latitudeRad, next.longitudeRad, p.rhumb).lengthM -
                        makeLeg(shape.exitLatitudeRad, shape.exitLongitudeRad, next.latitudeRad, next.longitudeRad, p.rhumb).lengthM;
+            m.exitLatitudeRad = shape.exitLatitudeRad, m.exitLongitudeRad = shape.exitLongitudeRad;
         }
     }
 }
@@ -135,24 +136,50 @@ double loiterShortM(const Plan& p, std::uint32_t k) noexcept {
     return 0.0;
 }
 
+bool afterLoiter(const Plan& p, std::uint32_t k) noexcept { return k > p.start && k < p.count && loiterPoint(p.points[k - 1]) && p.loiterAt(k - 1); }
+
+Leg stateLeg(const Plan& p, std::uint32_t k) noexcept {
+    if (!afterLoiter(p, k) || k - 1 < p.loitersLeftTo) return p.leg(k, true);
+    double lat = p.points[k - 1].latitudeRad, lon = p.points[k - 1].longitudeRad; // (where its loiter is left: its exit, or its point)
+    for (std::uint32_t n = 0; n < p.loiterCount; ++n)
+        if (p.loiters[n].point == k - 1 && !isHold(p.loiterMeasures[n].exitLatitudeRad))
+            lat = p.loiterMeasures[n].exitLatitudeRad, lon = p.loiterMeasures[n].exitLongitudeRad;
+    const Waypoint& b = p.points[k];
+    return p.terminated ? legFrom(p, k, lat, lon, &p.points[k - 1]) : makeLeg(lat, lon, b.latitudeRad, b.longitudeRad, p.rhumb); // (as laid there: 4.38)
+}
+
+void placeAfterLoiter(Plan& p, std::uint32_t j) noexcept {
+    const RouteState& s = p.states[j];
+    const std::uint32_t k = s.point, m = k - 1;
+    const bool left = m < p.loitersLeftTo;
+    const Leg in = stateLeg(p, k);
+    const Fix f = onLeg(in, s.latitudeRad, s.longitudeRad);
+    const double piece = std::max(0.0, in.lengthM - p.turn(k, true).leadM); // (none at its start: the loiter's in its place)
+    p.stateAlongM[j] = f.alongM;
+    p.stateLapM[j] = p.exitM(m) + (left ? 0.0 : loiterShortM(p, m)) + std::clamp(f.alongM, 0.0, piece);
+}
+
 } // namespace route
 
 namespace {
 
-/// The loiters on the way from point `from` to point i's window (4.33): where each begins and where the leg on from it
-/// begins, in the first lap's measure, and which it is; where it arrives - at a loiter point, where its loiter begins.
+/// The loiters on the way from point `from` to its next timed target (4.33, 4.34) - point i's window, or state j's time,
+/// on the leg into its point, before that point's loiter - where each begins and where the leg on from it begins, in the first
+/// lap's measure, and which it is; where it arrives: at a loiter point, where its loiter begins.
 struct Ahead {
     double joinM[PathStore::kRouteLoiters] = {}, exitM[PathStore::kRouteLoiters] = {};
     std::uint32_t point[PathStore::kRouteLoiters] = {};
     std::uint32_t count = 0;
     double toM = 0.0;
 
-    Ahead(const route::Plan& p, std::uint32_t from, std::uint32_t i, const Performance& performance, bool hovers) noexcept {
-        toM = p.arrivalM(i, true);
-        for (std::uint32_t k = from; k <= i; ++k) {
-            if (!route::loiterPoint(p.points[k]) || !p.loiterAt(k)) continue;
+    Ahead(const route::Plan& p, std::uint32_t from, std::int32_t i, std::int32_t j, const Performance& performance, bool hovers) noexcept {
+        const bool state = j >= 0;
+        const std::uint32_t to = state ? p.states[j].point : static_cast<std::uint32_t>(i);
+        toM = state ? p.stateLapM[j] : p.arrivalM(to, true);
+        for (std::uint32_t k = from; k <= to; ++k) {
+            if (!route::loiterPoint(p.points[k]) || !p.loiterAt(k) || (state && k == to)) continue;
             const double join = p.joinM(k, route::loiterReachM(p, k, performance, hovers));
-            if (k == i) {
+            if (k == to) {
                 toM = join;
                 break;
             }
@@ -180,7 +207,12 @@ struct Ahead {
 
 bool RouteBehavior::loitersAhead() const noexcept {
     const route::Plan& p = *plan_;
-    if (arrivalPoint_ < 0 || arrivalState_ >= 0) return false;
+    if (arrivalState_ >= 0) { // (a state's: on the leg into its point, before that point's loiter)
+        for (std::uint32_t k = segment_; k < p.states[arrivalState_].point; ++k)
+            if (route::loiterPoint(p.points[k])) return true;
+        return false;
+    }
+    if (arrivalPoint_ < 0) return false;
     for (std::uint32_t k = segment_; k <= static_cast<std::uint32_t>(arrivalPoint_); ++k)
         if (route::loiterPoint(p.points[k])) return true;
     return false;
@@ -189,9 +221,9 @@ bool RouteBehavior::loitersAhead() const noexcept {
 void RouteBehavior::scheduleThroughLoiters(const ControlContext& ctx, const Performance& perf, double routeM, route::Steer& steer) {
     const route::Plan& p = *plan_;
     const auto& s = ctx.sensed;
-    const auto i = static_cast<std::uint32_t>(arrivalPoint_);
+    const bool state = arrivalState_ >= 0; // (a state's time: a window of none at its place - 4.34)
     const double now = ctx.world ? ctx.world->simTime() : s.simTime; // (its window's clock: the world's)
-    const Ahead ahead(p, segment_, i, perf, hovers_);
+    const Ahead ahead(p, segment_, arrivalPoint_, arrivalState_, perf, hovers_);
     const double fromM = routeM - lapStartM_ + arrivalShiftM_;
     // as planned: its speed over the ground, in the wind now along its course; each loiter on its way its own time
     const double along = isHold(course_) ? 0.0 : wind_.northMs * std::cos(course_) + wind_.eastMs * std::sin(course_);
@@ -205,7 +237,8 @@ void RouteBehavior::scheduleThroughLoiters(const ControlContext& ctx, const Perf
     }
     // beyond its window: to arrive a quarter of its width inside it (5 s at most, and past a side alone; a point window, at
     // it), within the speeds it flies level - the legs' one speed, the loiters flying their own
-    const double begin = p.points[i].arrivalBeginS, end = p.points[i].arrivalEndS;
+    const double begin = state ? p.states[arrivalState_].timeS : p.points[arrivalPoint_].arrivalBeginS;
+    const double end = state ? p.states[arrivalState_].timeS : p.points[arrivalPoint_].arrivalEndS;
     const double inside = !isHold(begin) && !isHold(end) ? std::min(0.25 * (end - begin), 5.0) : 5.0;
     if (isHold(arrivalAimS_)) arrivalAimS_ = eta < begin ? begin + inside : eta > end ? end - inside : kHold; // (a side left out: never beyond it)
     const double aim = arrivalAimS_;
@@ -256,7 +289,7 @@ void RouteBehavior::loiterBegun(const ControlContext& ctx, const PatternCommand&
         arrivalAimS_ = arrivalSpeedMs_ = arrivalS_ = arrivalDeltaS_ = kHold;
     }
     loiterEndsS_ = kHold;
-    if (arrivalPoint_ < 0) return;
+    if (arrivalPoint_ < 0 && arrivalState_ < 0) return;
     // when it will be left, as it begins here: its pattern's way in, lap and exit point, its phase round it known
     const RouteLoiter& l = *loiterAhead_;
     const double now = ctx.world ? ctx.world->simTime() : s.simTime;
@@ -283,7 +316,7 @@ void RouteBehavior::loiterBegun(const ControlContext& ctx, const PatternCommand&
 
 void RouteBehavior::loiterArrival(const ControlContext& ctx, const Performance& perf) {
     const route::Plan& p = *plan_;
-    const auto i = static_cast<std::uint32_t>(arrivalPoint_);
+    const bool state = arrivalState_ >= 0;
     const double now = ctx.world ? ctx.world->simTime() : ctx.sensed.simTime;
     // (a hover's duration counts from its arrival over its point, known then; until then, at least its duration on - 4.25)
     double ends = loiterEndsS_;
@@ -302,13 +335,14 @@ void RouteBehavior::loiterArrival(const ControlContext& ctx, const Performance& 
     const double left = std::max(ends - now, 0.0);
     const Waypoint& next = p.points[p.next(target_)];
     const double v = !isHold(arrivalSpeedMs_) ? arrivalSpeedMs_ : route::plannedSpeed(next.speed, next.speedReference, ctx.sensed.altitudeMslM);
-    const Ahead ahead(p, target_ + 1, i, perf, hovers_);
+    const Ahead ahead(p, target_ + 1, arrivalPoint_, arrivalState_, perf, hovers_);
     const double t = left + ahead.takesS(p, p.exitM(target_) + loiterShortM_, v, 0.0, now + left);
     if (std::isnan(t)) {
         arrivalS_ = arrivalDeltaS_ = kHold;
         return;
     }
-    const double begin = p.points[i].arrivalBeginS, end = p.points[i].arrivalEndS;
+    const double begin = state ? p.states[arrivalState_].timeS : p.points[arrivalPoint_].arrivalBeginS;
+    const double end = state ? p.states[arrivalState_].timeS : p.points[arrivalPoint_].arrivalEndS;
     arrivalS_ = now + t;
     arrivalDeltaS_ = arrivalS_ < begin - 1e-6 ? arrivalS_ - begin : arrivalS_ > end + 1e-6 ? arrivalS_ - end : 0.0; // (within it, to a microsecond)
 }

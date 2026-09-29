@@ -155,9 +155,11 @@ double stoppingDistanceM(const Performance& performance, double speedMs) noexcep
 
 /// A loiter's measure for its own time (docs/flight-autonomy.md, 4.33): from where it is joined, its way in, a lap, its exit
 /// point along the lap from the lap's start (-1: none, left where it is due) and its speed; a hover's time to come to its
-/// point, s; how much shorter the leg on is from where it is left than from its point (an orbit's, left along a tangent).
+/// point, s; how much shorter the leg on is from where it is left than from its point (an orbit's, left along a tangent),
+/// and where that is (kHold: its point).
 struct LoiterMeasure {
     double entryM = 0.0, lapM = 0.0, exitM = -1.0, speedMs = 0.0, approachS = 0.0, shortM = 0.0;
+    double exitLatitudeRad = kHold, exitLongitudeRad = kHold;
 };
 
 /// What a route flies, planned from its complete waypoints: fixed arrays, so
@@ -192,8 +194,11 @@ struct Plan {
     /// The loiters its loiter points fly (4.31), complete (completeLoiter): the host's check's, the behaviour's to fly.
     std::uint32_t loiterCount = 0;
     RouteLoiter loiters[PathStore::kRouteLoiters];
-    /// Each one's measure for its own time (4.33; measureLoiters), for a route with a time to arrive at.
+    /// Each one's measure for its own time (4.33; measureLoiters), for a route with a time to arrive at or planned states.
     LoiterMeasure loiterMeasures[PathStore::kRouteLoiters];
+    /// A behaviour's: the points before which its loiters have been left on its first lap, the legs on laid from where
+    /// they were (4.31, 4.34) - its states after them placed on those.
+    std::uint32_t loitersLeftTo = 0;
     /// Its planned states (4.34), placed and complete: the host's check's, the behaviour's to fly. Where each is
     /// (placeStates): along its segment's leg as the first lap flies it (the entry's from where the aircraft was), and
     /// along that lap; -1 on a segment the first lap does not fly.
@@ -670,6 +675,15 @@ void measureLoiters(Plan& p, const sim::VehicleState& state, const Performance& 
 double loiterS(const Plan& p, std::uint32_t k, double beginS) noexcept;
 /// How much shorter the leg on from loiter point k is, laid from where its loiter is left (LoiterMeasure::shortM).
 double loiterShortM(const Plan& p, std::uint32_t k) noexcept;
+/// The point before point k on its first lap is a loiter point (4.34; Schedule.cpp): the leg into k is flown from where its
+/// loiter is left.
+bool afterLoiter(const Plan& p, std::uint32_t k) noexcept;
+/// The leg a first lap's states on segment k are placed on (4.34; Schedule.cpp): after a loiter point, the leg as it is laid
+/// from where the loiter is left (its exit as measured; once left, the plan's own); else the leg as planned.
+Leg stateLeg(const Plan& p, std::uint32_t k) noexcept;
+/// State j placed on the leg after a loiter point (4.34; Schedule.cpp): along it from where the loiter is left, and along
+/// the first lap in its measure (its exit's place in it, the shorter leg on counted until it is laid).
+void placeAfterLoiter(Plan& p, std::uint32_t j) noexcept;
 /// A later lap's leg into point i where its laps' legs differ from its first's (Plan::lapLegsTo; 4.36): from the point
 /// before, the arc a start turn there begins on the course `before` - the leg into that point as a later lap flies it -
 /// arrives on (the leg back to the point the laps come back to, for the first after it).

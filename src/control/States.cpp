@@ -32,6 +32,10 @@ void placeStates(Plan& p) noexcept {
         const std::uint32_t k = s.point;
         p.stateAlongM[j] = p.stateLapM[j] = -1.0;
         if (k < p.start || k >= p.count) continue; // (a segment its first lap does not fly)
+        if (afterLoiter(p, k)) { // (the leg after a loiter point: from where the loiter is left - Schedule.cpp)
+            placeAfterLoiter(p, j);
+            continue;
+        }
         const Fix f = onLeg(p.leg(k, true), s.latitudeRad, s.longitudeRad);
         const Turn* before = p.turnBefore(k, true);
         const Turn& turn = p.turn(k, true);
@@ -55,7 +59,9 @@ void limitClimbs(Plan& p, const sim::VehicleState& state, const TablesSection* t
     double segmentFromM = 0.0;
     for (std::uint32_t k = p.start; k < p.count; ++k) {
         const Waypoint& w = p.points[k];
-        const double fromM = segmentFromM, toM = p.arrivalM(k, true);
+        // (after a loiter point, from where its loiter is left: its span its own - 4.33)
+        const double fromM = afterLoiter(p, k) ? p.exitM(k - 1) + (k - 1 < p.loitersLeftTo ? 0.0 : loiterShortM(p, k - 1)) : segmentFromM;
+        const double toM = p.arrivalM(k, true);
         segmentFromM = toM;
         if (aboveGround(w.altitudeReference) || !isHold(w.climbRateMs) || !isHold(w.climbOptimization) || isHold(w.altitudeM)) continue;
         // from where it climbs from - the aircraft's altitude now for its first, else the point before's in its reference - through
@@ -126,12 +132,8 @@ Reason CapabilityHost::checkStates(route::Plan& p, Span<const RouteState> states
     if (states.size() > PathStore::kRouteStates) return at(states[PathStore::kRouteStates].point, Reason::InvalidWaypoint);
     auto code = [](double v, double count) { return isHold(v) || (v == std::floor(v) && v >= 0.0 && v < count); };
     const double now = sessionView_ ? sessionView_->simTimeS() : state.simTime;
-    // what is not built yet (its row, partial): a state at or after a loiter point - the leg after a loiter is flown from
-    // where it ends - or on a route with a point in a moving frame, whose legs move; a time where the tables its speeds
-    // come from are missing, as an arrival window's is (4.33)
-    std::uint32_t loiter = p.count;
-    for (std::uint32_t i = p.start; i < p.count && loiter == p.count; ++i)
-        if (route::loiterPoint(p.points[i])) loiter = i;
+    // what is not built yet (its row, partial): a state on a route with a point in a moving frame, whose legs move; a time
+    // where the tables its speeds come from are missing, as an arrival window's is (4.33)
     bool moving = false;
     for (std::uint32_t k = 0; k < p.frameCount; ++k) moving = moving || p.frames[k].origin != FrameOrigin::Fixed;
     const SupportInfo* timed = support_ ? support_->find("fsim.guidance.route/required_time_of_arrival") : nullptr;
@@ -180,7 +182,7 @@ Reason CapabilityHost::checkStates(route::Plan& p, Span<const RouteState> states
         }
         // one profile: an altitude beside a climb rate or optimisation is two
         if (!isHold(s.altitudeM) && (!isHold(w.climbRateMs) || !isHold(w.climbOptimization))) return at(k, Reason::InvalidWaypoint);
-        if (k >= loiter || moving) return at(k, Reason::NotImplemented);
+        if (moving) return at(k, Reason::NotImplemented);
         if (!isHold(s.timeS) && (!timed || timed->support == Support::NotImplemented)) return at(k, Reason::NotImplemented);
         p.states[j] = s;
     }
@@ -190,16 +192,24 @@ Reason CapabilityHost::checkStates(route::Plan& p, Span<const RouteState> states
 
 Reason CapabilityHost::limitStates(route::Plan& p, const sim::VehicleState& state, CheckLog& log) const noexcept {
     if (!p.stateCount) return Reason::None;
+    if (p.loiterCount) { // (the legs on from its loiters, laid from where they are left: FA-6g3a)
+        bool magnetic = false;
+        for (std::uint32_t k = 0; k < p.loiterCount; ++k)
+            magnetic = magnetic || p.loiters[k].shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth);
+        route::measureLoiters(p, state, performance_, (adapter_->features() & kFeatureHover) != 0, &config_->altimeter, magnetic ? yearNow() : 2025.0);
+    }
     route::placeStates(p);
     CommandResult& detail = log.result;
-    // each on its leg as planned, within its uncertainty (50 m at least, or 1 % of the leg), behind none before it
+    // each on its leg as planned - after a loiter point, as laid from where the loiter is left - within its uncertainty (50 m
+    // at least, or 1 % of the leg), behind none before it; on a loiter point's own leg, before where its loiter begins
     for (std::uint32_t j = 0; j < p.stateCount; ++j) {
         const RouteState& s = p.states[j];
-        const route::Leg& leg = p.leg(s.point, true);
+        const route::Leg leg = route::stateLeg(p, s.point);
         const route::Fix fix = route::onLeg(leg, s.latitudeRad, s.longitudeRad);
         const double within = std::max({50.0, isHold(s.uncertaintyM) ? 0.0 : s.uncertaintyM, 0.01 * leg.lengthM});
         const bool behind = j > 0 && p.states[j - 1].point == s.point && fix.alongM < p.stateAlongM[j - 1];
-        if (std::abs(fix.crossTrackM) > within || fix.alongM < -within || fix.alongM > leg.lengthM + within || behind) {
+        const double reach = route::loiterPoint(p.points[s.point]) ? route::loiterReachM(p, s.point, performance_, (adapter_->features() & kFeatureHover) != 0) : 0.0;
+        if (std::abs(fix.crossTrackM) > within || fix.alongM < -within || fix.alongM > leg.lengthM - reach + within || behind) {
             detail.index = static_cast<std::int16_t>(std::min<std::uint32_t>(s.point, 0x7FFF));
             return Reason::InvalidWaypoint;
         }
@@ -238,7 +248,7 @@ Reason CapabilityHost::limitStates(route::Plan& p, const sim::VehicleState& stat
             const RouteState& s = p.states[j];
             if (s.point == k && !isHold(s.altitudeM)) steep = piece(p.stateAlongM[j], s.altitudeM, s.timeS);
         }
-        if (!steep) piece(p.leg(k, true).lengthM, w.altitudeM, kHold);
+        if (!steep) piece(route::stateLeg(p, k).lengthM, w.altitudeM, kHold);
     }
     return Reason::None;
 }
@@ -323,7 +333,7 @@ double RouteBehavior::stateAltitude(double routeM, double& feedforward) const no
     for (std::uint32_t j = 0; j < p.stateCount; ++j) { // (the nearest behind it, and ahead: in its point's reference)
         const RouteState& s = p.states[j];
         if (s.point != segment_ || isHold(s.altitudeM) || s.altitudeReference != to.altitudeReference) continue;
-        const double x = lapStartM_ + p.stateLapM[j];
+        const double x = lapStartM_ + p.stateLapM[j] - arrivalShiftM_; // (past a loiter, in the route's own measure: 4.33)
         if (x <= routeM && x >= x0) x0 = x, h0 = s.altitudeM;
         else if (x > routeM && x < x1) x1 = x, h1 = s.altitudeM;
     }

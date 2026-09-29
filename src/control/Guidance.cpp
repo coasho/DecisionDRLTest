@@ -444,15 +444,16 @@ void RouteBehavior::restart(const ControlContext& ctx, const RouteCommand& comma
     takeTerminators(ctx); // (its civil path terminators' data: 4.38)
     p.start = linked ? 0 : static_cast<std::uint32_t>(option(command.start, static_cast<double>(count))); // (a linked one's order begins at it)
     route::plan(p, s.latitudeRad, s.longitudeRad, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
-    if (p.stateCount) route::placeStates(p);
-    route::limitClimbs(p, s, ctx.tables, perf, hovers_, ctx.altimeter); // (a route with times to arrive at: 4.34)
+    p.loitersLeftTo = 0;
     if (p.loiterCount) { // (each at its point: what the host left out, nothing)
         bool magnetic = false;
         for (std::uint32_t k = 0; k < p.loiterCount; ++k)
             magnetic = magnetic || p.loiters[k].shape.directionReference == static_cast<double>(DirectionReference::MagneticNorth);
         route::completeLoiters(p, s, perf, hovers_, wind_.northMs, wind_.eastMs, ctx.altimeter, magnetic ? worldYear(ctx, s) : 2025.0);
-        if (p.timed()) route::measureLoiters(p, s, perf, hovers_, ctx.altimeter, magnetic ? worldYear(ctx, s) : 2025.0); // (for its schedule: 4.33)
+        if (p.timed() || p.stateCount) route::measureLoiters(p, s, perf, hovers_, ctx.altimeter, magnetic ? worldYear(ctx, s) : 2025.0); // (4.33, 4.34)
     }
+    if (p.stateCount) route::placeStates(p);
+    route::limitClimbs(p, s, ctx.tables, perf, hovers_, ctx.altimeter); // (a route with times to arrive at: 4.34)
     aim(p.start, perf);
     lapM_ = p.lapM(true);
     beginSegment(p.start, s, finishedM_, 0.0, 0.0, true, false);
@@ -487,7 +488,7 @@ void RouteBehavior::beginSegment(std::uint32_t k, const sim::VehicleState& s, do
         climbTarget_ = segmentFrom_, climbLastS_ = s.simTime;
     // the next timed target this lap (4.33, 4.34), and its states' altitudes
     segmentFirstLap_ = firstLap;
-    nextArrival(atM - lapStartM_);
+    nextArrival(atM - lapStartM_ + arrivalShiftM_);
 }
 
 void RouteBehavior::advance(const sim::VehicleState& s, const Performance& perf) {
@@ -568,7 +569,10 @@ route::Fix RouteBehavior::locate(const ControlContext& ctx, const sim::VehicleSt
             return f;
         }
         finishedM_ += std::max(0.0, leg.lengthM - leadOut_);
-        if (loiterAhead_ && firstLap_ && target_ != p.last()) arrivalShiftM_ = p.exitM(target_) - (finishedM_ - lapStartM_); // (its hold passed: 4.33)
+        if (loiterAhead_ && firstLap_ && target_ != p.last()) { // (its hold passed: 4.33 - its states on the leg on as they are)
+            arrivalShiftM_ = p.exitM(target_) - (finishedM_ - lapStartM_);
+            plan_->loitersLeftTo = target_ + 1;
+        }
         if (branchAt(ctx, perf, false, 0.0)) continue; // (a branch taken: on from here - 4.37)
         if (p.leaves(target_)) beginSegment(p.next(target_), s, finishedM_, 0.0, 0.0, firstLap_ && target_ != p.last(), true);
         leadOut_ = 0.0;
@@ -655,7 +659,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     steer.speed = segment.speed;
     steer.reference = speedReferenceOf(segment.speedReference, hovers_ ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
     if (!isHold(segment.speedOptimization) || !isHold(rampFromMs_)) chooseSpeed(ctx, segment, steer); // (4.32)
-    if (arrivalState_ >= 0 && routeM - lapStartM_ >= p.stateLapM[arrivalState_]) nextArrival(routeM - lapStartM_); // (one passed: 4.34)
+    if (arrivalState_ >= 0 && routeM - lapStartM_ + arrivalShiftM_ >= p.stateLapM[arrivalState_]) nextArrival(routeM - lapStartM_ + arrivalShiftM_); // (one passed: 4.34)
     if ((arrivalPoint_ >= 0 || arrivalState_ >= 0) && !ended_) scheduleArrival(ctx, perf, routeM, steer);          // (4.33)
     steer.verticalSpeedMs = route::verticalSpeedTo(altitudeMsl_, feedforward, s, perf, hovers_);
     // what comes next: the turn at the point flown to - and, for a rotorcraft,
@@ -833,7 +837,7 @@ Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf
     if (p.terminated) holdEnds(ctx, ctx.sensed); // (a hold's terminator: at its altitude, or commanded - 4.38)
     Command out = loiter_->update(ctx, loiterCommand_);
     if (const Reason why = loiter_->failure(); why != Reason::None) failure_ = why; // (its frame's vehicle gone)
-    if (arrivalPoint_ >= 0 && !ended_) loiterArrival(ctx, perf); // (its estimate through it: 4.33)
+    if ((arrivalPoint_ >= 0 || arrivalState_ >= 0) && !ended_) loiterArrival(ctx, perf); // (its estimate through it: 4.33, 4.34)
     if (ended_ || !loiter_->finished()) return out;
     if (branchAt(ctx, perf, false, 0.0)) return out; // (a branch taken as it ends: on from here - 4.37)
     // its end: the route's, if it is its last point (and the pattern flies on); else on to the next point, the leg to it
@@ -844,13 +848,20 @@ Command RouteBehavior::loiter(const ControlContext& ctx, const Performance& perf
     }
     const sim::VehicleState& s = ctx.sensed;
     loitering_ = false;
-    if (firstLap_ && target_ != p.last()) arrivalShiftM_ = p.exitM(target_) - (finishedM_ - lapStartM_); // (the leg on, in its first lap's measure: 4.33)
+    const bool shifted = firstLap_ && target_ != p.last();
+    if (shifted) arrivalShiftM_ = p.exitM(target_) - (finishedM_ - lapStartM_); // (the leg on, in its first lap's measure: 4.33)
+    const std::uint32_t left = target_;
     advance(s, perf);
     route::Plan& q = *plan_;
     route::Leg& in = firstLap_ && target_ == q.start ? q.entry : q.looped(target_, firstLap_) ? q.loopLeg : q.legs[target_];
     in = q.terminated ? route::legFrom(q, target_, s.latitudeRad, s.longitudeRad, &q.points[q.before(target_, firstLap_)]) // (4.38)
                       : route::makeLeg(s.latitudeRad, s.longitudeRad, q.points[target_].latitudeRad, q.points[target_].longitudeRad, q.rhumb);
     route::replan(q, target_, firstLap_, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
+    if (shifted && q.stateCount) { // (its states after it on the leg as laid, and its climbs through them: 4.34)
+        q.loitersLeftTo = left + 1;
+        route::placeStates(q);
+        route::limitClimbs(q, s, ctx.tables, perf, hovers_, ctx.altimeter);
+    }
     beginSegment(target_, s, finishedM_, 0.0, 0.0, firstLap_, true);
     return out;
 }
