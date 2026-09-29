@@ -36,6 +36,8 @@ bool CapabilityHost::setpoint(ActivityId activity, Setpoint& out) const {
     out.branches.clear(), out.terminators.clear();
     out.shape = PatternShape{};
     out.curveShape = CurveShape{};
+    out.marshall.reset();
+    if (MarshallCommand m; marshall(activity, m)) out.marshall = m; // (its pattern below, its stack beside it: 4.46)
     if (const int found = liveSlot(activity); found >= 0) {
         const auto s = static_cast<std::size_t>(found);
         if (!isCascade(s)) {

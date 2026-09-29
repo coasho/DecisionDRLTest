@@ -310,7 +310,8 @@ class CapabilityTest(unittest.TestCase):
         caps = {cap.id: cap for cap in v.capabilities()}
         self.assertEqual(caps["fsim.guidance.formation"].mode, "formation")
         self.assertEqual(caps["fsim.flight.velocity"].mode, "none")
-        self.assertEqual(agra.flight_capabilities(v), {"CURVE_FOLLOWING": ["fsim.guidance.curve"], "FORMATION": ["fsim.guidance.formation"],
+        self.assertEqual(agra.flight_capabilities(v), {"ALTITUDE_STACKED_MARSHALL": ["fsim.guidance.marshall"],
+                                                       "CURVE_FOLLOWING": ["fsim.guidance.curve"], "FORMATION": ["fsim.guidance.formation"],
                                                        "HSA_CSA": ["fsim.guidance.hsa"], "LOITER": ["fsim.guidance.pattern"],
                                                        "MUST_FLY": ["fsim.guidance.must_fly"], "WAYPOINT_FOLLOWING": ["fsim.guidance.route"]})
         route.cancel()

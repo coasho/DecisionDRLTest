@@ -192,6 +192,12 @@ public:
     /// index after the pattern's 13.
     control::CommandResult submit(const control::PatternCommand& pattern, const control::PatternShape& shape,
                                   const control::CommandOptions& options = {});
+    /// NEW of an altitude stacked marshall with its pattern's shape (docs/flight-autonomy.md, 4.46): its slot chosen by the
+    /// world - the lowest of its stack clear of every other aircraft marshalling round the same point, or the one asked for -
+    /// and read back in its altitude; StackFull where none is. A racetrack's or a figure-eight's second circle, and laps, in
+    /// the shape. Flown as its pattern, its stack beside it: its setpoint's `marshall` reads it back.
+    control::CommandResult submit(const control::MarshallCommand& marshall, const control::PatternShape& shape,
+                                  const control::CommandOptions& options = {});
     /// NEW of a must fly with its zone given (docs/flight-autonomy.md, 4.43): the zone checked (a field at fault named from
     /// 10, after the must fly's own) and laid out as it is given, then entered.
     control::CommandResult submit(const control::MustFlyCommand& mustFly, const control::OpZone& zone, const control::CommandOptions& options = {});
@@ -414,6 +420,10 @@ public:
                                   const control::CurveShape* shape = nullptr);
     /// UPDATE of a pattern with its shape: the fields given in either (kHold keeps one) merged, the pattern flown afresh.
     control::CommandResult update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape);
+    /// UPDATE of a marshall, with its pattern's shape or without: its slot chosen afresh where its stack moves (4.46). Its
+    /// pattern takes an UPDATE through it alone (a PatternCommand's: wrong_command_type).
+    control::CommandResult update(control::ActivityId activity, const control::MarshallCommand& marshall, const control::PatternShape& shape);
+    control::CommandResult update(control::ActivityId activity, const control::MarshallCommand& marshall);
     /// UPDATE of a must fly with a zone given in place of its own (4.43), or a corridor (4.44).
     control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpZone& zone);
     control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpLine& line);
@@ -439,6 +449,9 @@ public:
                                   Span<const control::NurbsSegment> segments, const control::CurveShape* shape = nullptr);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
                                   const control::PatternShape& shape);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MarshallCommand& marshall,
+                                  const control::PatternShape& shape);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MarshallCommand& marshall);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,
                                   const control::OpZone& zone);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MustFlyCommand& mustFly,

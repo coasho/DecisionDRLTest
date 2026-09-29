@@ -127,6 +127,8 @@ public:
     std::vector<NurbsSegment> nurbs;     ///< the same as cubics, as A-GRA's schema gives them (ADR-29 FA-5d1), where asNurbs
     bool asNurbs = false;                ///< given so: now and then, in the walks drawn since
     PatternShape shape;                  ///< the last pattern's, made beside its PatternCommand (in the walks of their own)
+    /// The last marshall (ADR-29 FA-8c), made in place of the command - not one of the variant's: a PatternCommand stands for it
+    std::optional<MarshallCommand> marshall;
     CurveShape curveShape;               ///< the last curve's reference in a frame, likewise (ADR-29 FA-5d2)
     double curveEnd[3] = {0.0, 0.0, 0.0}; ///< where they end, from their reference: an append joins there
     double curveZ = kHold, curveBase = 0.0; ///< how the last NEW's points' third reads, and its altitude (an append's read so)
@@ -137,6 +139,7 @@ public:
 
     /// A flight or guidance capability's command; false for the others.
     bool cascade(const CapabilityDescriptor& d, bool wild, Command& out) {
+        marshall.reset();
         if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Hsa) { // a mode: its fixed-size setpoint's fields
             out = HsaCommand{};
             double* fields[kMaxCommandFields];
@@ -512,6 +515,23 @@ public:
             }
             return true;
         }
+        if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::Marshall) { // (ADR-29 FA-8c: in the walks of their own)
+            // an orbit ahead, its stack from where the aircraft flies; now and then its most below its least, no separation, or a
+            // field out of its range
+            MarshallCommand c;
+            const PositionCommand q = ahead(uniform(3000.0, 9000.0));
+            c.latitudeRad = q.latitudeRad, c.longitudeRad = q.longitudeRad, c.altitudeMinM = q.altitudeMslM;
+            if (wild && chance(0.3)) c.altitudeMaxM = q.altitudeMslM + uniform(-200.0, 1500.0), c.separationM = uniform(-50.0, 400.0);
+            if (wild && chance(0.1)) {
+                double* fields[kMaxCommandFields];
+                const std::size_t n = std::min(marshallFields(c, fields), d.parameters.size());
+                const std::size_t i = pick(n);
+                *fields[i] = value(d.parameters[i], true);
+            }
+            marshall = c, shape = PatternShape{};
+            out = PatternCommand{}; // (standing for it: submitMade and updateMade take the marshall)
+            return true;
+        }
         if (d.kind == CapabilityKind::Guidance && d.setpoint == SetpointKind::MustFly) { // (ADR-29 FA-8a: in the walks of their own)
             // a point ahead, or the vehicle it follows; now and then a window of bearings, or a field out of its range
             MustFlyCommand c;
@@ -582,6 +602,9 @@ public:
         }
         return false;
     }
+
+    /// A capability the old walks never draw, so that each draws what it drew before (a must fly: ADR-29 FA-8a; a marshall: FA-8c).
+    static bool late(const CapabilityDescriptor& d) { return d.setpoint == SetpointKind::MustFly || d.setpoint == SetpointKind::Marshall; }
 
     static bool isSupport(const CapabilityDescriptor& d) {
         for (std::size_t k = 0; k < kSupportKinds; ++k)
@@ -658,6 +681,7 @@ private:
 /// NEW of what the maker made: a route with the waypoints it made beside it, a curve with its segments, a pattern with
 /// its shape (where it made one).
 CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, const Maker& make, const CommandOptions& options = {}) {
+    if (make.marshall) return w.submit(v, *make.marshall, make.shape, options); // (in place of its command: ADR-29 FA-8c)
     if (const auto* route = std::get_if<RouteCommand>(&c))
         return w.submit(v, *route, make.waypoints, options, make.loiters, make.states, make.paths, make.branches, make.terminators);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
@@ -670,6 +694,8 @@ CommandResult submitMade(session::World& w, std::uint32_t v, const Command& c, c
 
 /// UPDATE with what the maker made: a route's or a curve's options, and now and then its waypoints or segments.
 CommandResult updateMade(session::World& w, ActivityId activity, const Command& c, const Maker& make, bool waypoints, Caller caller = {}) {
+    if (make.marshall) // (in place of its command: ADR-29 FA-8c)
+        return make.shape.empty() ? w.update(caller, activity, *make.marshall) : w.update(caller, activity, *make.marshall, make.shape);
     if (const auto* route = std::get_if<RouteCommand>(&c); route && waypoints)
         return w.update(caller, activity, *route, make.waypoints, make.loiters, make.states, make.paths, make.branches, make.terminators);
     const CurveShape* curveShape = make.curveShape.empty() ? nullptr : &make.curveShape;
@@ -770,7 +796,9 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
 
         // UPDATE: the same command type where the capability takes updates, another type never
         const bool live = a->live();
-        const Reason updated = support ? w.update(r.activity, sc).reason : w.update(r.activity, c).reason;
+        const Reason updated = support         ? w.update(r.activity, sc).reason
+                               : make.marshall ? w.update(r.activity, *make.marshall).reason // (in place of its command: ADR-29 FA-8c)
+                                               : w.update(r.activity, c).reason;
         const Reason other = support ? w.update(r.activity, Command(VelocityCommand{})).reason : w.update(r.activity, otherType(c)).reason;
         const bool updatable = (d.interactions & kUpdate) != 0;
         if (live) {
@@ -1309,7 +1337,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             }
             std::vector<std::size_t> commandable;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if ((caps[i].interactions & kCommand) && (make.optimise || caps[i].setpoint != SetpointKind::MustFly)) commandable.push_back(i);
+                if ((caps[i].interactions & kCommand) && (make.optimise || !Maker::late(caps[i]))) commandable.push_back(i);
             done.capability = commandable[make.pick(commandable.size())];
             const CapabilityDescriptor d = caps[done.capability];
             done.options.controller = controller();
@@ -1412,7 +1440,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             if (what < 0.4 || mine.empty()) {
                 std::vector<std::size_t> flyable;
                 for (std::size_t i = 0; i < caps.size(); ++i)
-                    if ((caps[i].interactions & kCommand) && !Maker::isSupport(caps[i]) && (make.optimise || caps[i].setpoint != SetpointKind::MustFly))
+                    if ((caps[i].interactions & kCommand) && !Maker::isSupport(caps[i]) && (make.optimise || !Maker::late(caps[i])))
                         flyable.push_back(i);
                 const std::size_t c = flyable[static_cast<std::size_t>(draw(static_cast<int>(flyable.size())))];
                 Command command;
@@ -1433,8 +1461,12 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
                     item.terminators = make.terminators;
                 if (std::holds_alternative<CurveCommand>(command) && !make.curveShape.empty()) item.curveShape = &make.curveShape;
                 if (make.asNurbs && std::holds_alternative<CurveCommand>(command)) item.segments = {}, item.nurbs = make.nurbs;
+                if (make.marshall) item.marshall = &*make.marshall; // (in place of its command: ADR-29 FA-8c)
                 const Reason r = w.storeTask(v, id, item, repetition);
-                CHECK(among(r, {Reason::None, Reason::TaskActive, Reason::NotSupported, Reason::NotImplemented, Reason::UnknownCapability}));
+                if (caps[c].setpoint == SetpointKind::Marshall) // (never a task: its slot is the stack's at its NEW - ADR-29 FA-8c)
+                    CHECK(among(r, {Reason::InvalidParameter, Reason::NotSupported, Reason::NotImplemented, Reason::UnknownCapability}));
+                else
+                    CHECK(among(r, {Reason::None, Reason::TaskActive, Reason::NotSupported, Reason::NotImplemented, Reason::UnknownCapability}));
                 ++seen[std::string("task:store:") + reasonName(r)];
                 if (r == Reason::None) taskCapability[id] = c;
             } else if (what < 0.85) {
@@ -1466,7 +1498,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
         case Op::Precedence: {
             std::vector<std::size_t> commandable;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if ((caps[i].interactions & kCommand) && (make.optimise || caps[i].setpoint != SetpointKind::MustFly)) commandable.push_back(i);
+                if ((caps[i].interactions & kCommand) && (make.optimise || !Maker::late(caps[i]))) commandable.push_back(i);
             done.capability = commandable[static_cast<std::size_t>(draw(static_cast<int>(commandable.size())))];
             const auto p = static_cast<std::uint32_t>(draw(4));
             precedences[done.capability] = p;
@@ -1501,7 +1533,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             const ActivityRecord* r = w.activity(done.addressed);
             std::vector<std::size_t> others;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if (make.optimise || caps[i].setpoint != SetpointKind::MustFly) others.push_back(i);
+                if (make.optimise || !Maker::late(caps[i])) others.push_back(i);
             const CapabilityDescriptor& d = caps[r && make.chance(0.7) ? r->capability : others[make.pick(others.size())]];
             Command c;
             SupportCommand sc;
@@ -1515,7 +1547,8 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             std::vector<std::size_t> cascade;
             for (std::size_t i = 0; i < caps.size(); ++i)
                 if ((caps[i].kind == CapabilityKind::Flight && !Maker::isSupport(caps[i])) ||
-                    (caps[i].kind == CapabilityKind::Guidance && (make.optimise || caps[i].setpoint != SetpointKind::MustFly) && make.chance(0.15)))
+                    (caps[i].kind == CapabilityKind::Guidance && (make.optimise || !Maker::late(caps[i])) && make.chance(0.15) &&
+                     caps[i].setpoint != SetpointKind::Marshall)) // (a Command alone: a marshall is none - ADR-29 FA-8c)
                     cascade.push_back(i);
             Command c;
             done.capability = cascade[make.pick(cascade.size())];
@@ -1528,7 +1561,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             // one of the calls, about a capability it can command mostly; the rules' answer and ends worked out first
             std::vector<std::size_t> commandable;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if ((caps[i].interactions & kCommand) && (make.optimise || caps[i].setpoint != SetpointKind::MustFly)) commandable.push_back(i);
+                if ((caps[i].interactions & kCommand) && (make.optimise || !Maker::late(caps[i]))) commandable.push_back(i);
             const double a = make.uniform(0.0, 1.0);
             // what a release, a revocation or a refusal ends: mostly a capability the policy flies now
             std::vector<std::size_t> flown;

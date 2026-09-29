@@ -728,8 +728,17 @@ FSIM_API int fsim_vehicle_commanded(const fsim_world* world, uint32_t id, fsim_c
  *   from, the least clockwise to the most: both or neither; left out, an operational point's own), speed,
  *   speed_reference. It is laid out as a route from where the aircraft is - the points it approaches through, then the
  *   location, flown over - and completes as the location is passed, flying on along its course there.
- *   fsim_activity_update merges the fields given, a location another than it was replacing the location's own. */
-enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3, FSIM_MODE_MUST_FLY = 4 /* ABI 1.39 */ };
+ *   fsim_activity_update merges the fields given, a location another than it was replacing the location's own.
+ * - FSIM_MODE_MARSHALL (ABI 1.43; docs/flight-autonomy.md, 4.46) is fsim.guidance.marshall (A-GRA's altitude stacked
+ *   marshall): fields pattern (fsim_pattern_kind: an orbit, left out, a racetrack or a figure-eight - their second circle
+ *   in the shape - or a rotorcraft's hover; never a hold), latitude_rad, longitude_rad (its centre, a hover's point),
+ *   altitude_m (its slot: the world's choice, read back; given, the slot asked for), altitude_reference, radius_m,
+ *   clockwise, speed, speed_reference, duration_s, altitude_min_m (its stack's least: given), altitude_max_m (its most;
+ *   left out, none), separation_m (left out, 1,000 ft) - then a pattern's shape's, as FSIM_MODE_PATTERN's from its 13. The
+ *   world gives it the lowest altitude of its stack clear of every other aircraft marshalling round the same point
+ *   (within 100 m) by its separation, and it flies its pattern there; none clear, stack_full (index 3). */
+enum fsim_mode { FSIM_MODE_HSA = 0, FSIM_MODE_ROUTE = 1, FSIM_MODE_PATTERN = 2, FSIM_MODE_CURVE = 3, FSIM_MODE_MUST_FLY = 4 /* ABI 1.39 */,
+                 FSIM_MODE_MARSHALL = 5 /* ABI 1.43 */ };
 /* A must fly's location (ABI 1.39; A-GRA's MustFlyLocationType): a point, another vehicle, an operational point by its id;
  * from ABI 1.40 a zone given with it (fsim_vehicle_submit_must_fly) or an operational zone by its id, entered; from ABI 1.41
  * a corridor given with it (fsim_vehicle_submit_must_fly_line) or an operational line by its id, flown through; from ABI 1.42
@@ -754,8 +763,9 @@ enum fsim_turn_type { FSIM_TURN_FLY_BY = 0, FSIM_TURN_FLY_OVER = 1,
                       FSIM_TURN_CAPTURE_OUTBOUND_COURSE = 2, FSIM_TURN_START_TURN = 3, FSIM_TURN_END_TURN = 4 };
 enum fsim_projection { FSIM_PROJECTION_GREAT_CIRCLE = 0, FSIM_PROJECTION_RHUMB };
 enum fsim_end_behavior { FSIM_END_CONTINUE = 0, FSIM_END_LOITER }; /* after the last point: on along its leg; orbit it (a wing), hover over it (a rotorcraft after a route; after a curve it circles it) */
-FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 35, curve 20, must fly 10 (1.14: hsa 6, pattern 12; 1.15: hsa 7,
-                                                      pattern 13; 1.20: hsa 8; 1.21: pattern 25; 1.22: pattern 29; 1.25: curve 20; 1.39: must fly);
+FSIM_API uint32_t fsim_mode_field_count(int mode); /* hsa 8, route 4, pattern 35, curve 20, must fly 10, marshall 35 (1.14: hsa 6, pattern 12;
+                                                      1.15: hsa 7, pattern 13; 1.20: hsa 8; 1.21: pattern 25; 1.22: pattern 29; 1.25: curve 20;
+                                                      1.39: must fly; 1.43: marshall);
                                                       0 for an unknown mode */
 FSIM_API int fsim_vehicle_submit_mode(fsim_world* world, uint32_t id, int mode, const double* fields, uint32_t count,
                                       const fsim_command_options* options, fsim_command_result* result);

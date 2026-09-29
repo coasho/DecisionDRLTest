@@ -56,7 +56,8 @@ add_library(fsim_control STATIC
     Lines.h
     Lines.cpp
     Volumes.h
-    Volumes.cpp)
+    Volumes.cpp
+    Marshall.cpp)
 add_library(fsim::control ALIAS fsim_control)
 
 target_include_directories(fsim_control PUBLIC ${CMAKE_SOURCE_DIR}/src)

@@ -1328,6 +1328,42 @@ int main(int argc, char** argv) {
             CHECK(fsim_world_remove_op_zone(world, 21) == FSIM_OK && fsim_world_remove_op_zone(world, 21) == FSIM_INVALID_ARGUMENT);
         }
         {
+            /* ABI 1.43 (4.46): an altitude stacked marshall - two aircraft round one point given its lowest two slots, read back;
+               a third, its stack's most below its next slot, refused stack_full naming its slot */
+            fsim_command_result mr;
+            fsim_batch_command sp;
+            const fsim_vehicle_state* at;
+            double mfields[13];
+            uint32_t m1 = 0, m2 = 0, m3 = 0;
+            int k;
+            CHECK(fsim_mode_field_count(FSIM_MODE_MARSHALL) == 35);
+            spec.type = "jsbsim:c172x";
+            spec.altitude_msl_m = 1500.0;
+            spec.airspeed_ms = 55.0;
+            spec.name = "marshall-1";
+            spec.longitude_deg += 0.02;
+            CHECK(fsim_world_create_vehicle(world, &spec, &m1) == FSIM_OK);
+            spec.name = "marshall-2";
+            spec.latitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &m2) == FSIM_OK);
+            spec.name = "marshall-3";
+            spec.latitude_deg += 0.01;
+            CHECK(fsim_world_create_vehicle(world, &spec, &m3) == FSIM_OK);
+            at = fsim_vehicle_state_ptr(world, m1);
+            for (k = 0; k < 13; ++k) mfields[k] = fsim_hold();
+            mfields[1] = at->latitude_rad + 3000.0 / 6371000.0, mfields[2] = at->longitude_rad; /* its centre, 3 km north */
+            mfields[10] = 1500.0, mfields[11] = 1900.0, mfields[12] = 300.0;                  /* 1,500 to 1,900 m, 300 m apart */
+            CHECK(fsim_vehicle_submit_mode(world, m1, FSIM_MODE_MARSHALL, mfields, 13, &co, &mr) == FSIM_OK && mr.status == FSIM_COMMAND_ACCEPTED);
+            memset(&sp, 0, sizeof sp);
+            sp.struct_size = sizeof sp;
+            CHECK(fsim_activity_get_setpoint(world, mr.activity, &sp) == FSIM_OK && sp.kind == FSIM_BATCH_MODE && sp.code == FSIM_MODE_MARSHALL &&
+                  sp.count == 35 && sp.fields[3] == 1500.0 && sp.fields[12] == 300.0);
+            CHECK(fsim_vehicle_submit_mode(world, m2, FSIM_MODE_MARSHALL, mfields, 13, &co, &mr) == FSIM_OK && mr.status == FSIM_COMMAND_ACCEPTED);
+            CHECK(fsim_activity_get_setpoint(world, mr.activity, &sp) == FSIM_OK && sp.fields[3] == 1800.0); /* (the next slot) */
+            CHECK(fsim_vehicle_submit_mode(world, m3, FSIM_MODE_MARSHALL, mfields, 13, &co, &mr) == FSIM_OK && mr.status == FSIM_COMMAND_REJECTED &&
+                  strcmp(fsim_reason_name(mr.reason), "stack_full") == 0 && mr.reserved == 4); /* (its slot: the field plus one) */
+        }
+        {
             /* ABI 1.42 (4.45): a must fly into a volume - a sphere kept and read back, flown by its id, then given in place of its
                own; one given with a must fly, entered; a malformed one refused naming its field from 10 */
             fsim_op_volume volume, back;

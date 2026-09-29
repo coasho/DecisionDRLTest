@@ -97,6 +97,18 @@ public:
 /// vehicle through (docs/flight-autonomy.md, 4.42).
 inline constexpr FrameId kVehicleFrames = FrameId{1} << 52;
 
+/// A marshall's pattern (docs/flight-autonomy.md, 4.46; Marshall.cpp): its kind (left out, an orbit), place, slot, circle, turn,
+/// speed and duration - what its activity flies; `takeBack` those again into the marshall, as a pattern's checks completed them.
+PatternCommand patternOf(const MarshallCommand& marshall) noexcept;
+void takeBack(MarshallCommand& marshall, const PatternCommand& pattern) noexcept;
+/// Its stack, kept beside its pattern; and the marshall again from the two, its separation left out 1,000 ft.
+MarshallStack stackOf(const MarshallCommand& marshall) noexcept;
+MarshallCommand marshallOf(const PatternCommand& pattern, const MarshallStack& stack) noexcept;
+/// A marshall merged as an UPDATE gives it: every field given replaces the kept one.
+void mergeMarshall(MarshallCommand& dst, const MarshallCommand& src) noexcept;
+/// The first of a marshall's fields at fault (-1: none): its kind (0: never a hold), a racetrack's or a figure-eight's second
+/// circle (18: its shape's), its reference (4), its stack's least (10), most (11) and separation (12), its slot within them (3).
+int marshallFault(const MarshallCommand& marshall, const PatternShape* shape) noexcept;
 /// A must fly merged as an UPDATE gives it (docs/flight-autonomy.md, 4.42; MustFly.cpp): the fields given replace the kept
 /// ones; a location given (another than it was) replaces the location's own fields - a point's place, an id - left out.
 void mergeMustFly(MustFlyCommand& dst, const MustFlyCommand& src) noexcept;
@@ -116,6 +128,9 @@ struct RouteExtras {
     Span<const RouteBranch> branches; ///< its conditional branches (4.37)
     Span<const RouteTerminator> terminators; ///< its civil path terminators' data (4.38)
     const MustFlyArea* area = nullptr;       ///< a must fly's zone, corridor or volume given with it, as it was laid out then (4.43 to 4.45)
+    /// A marshall's stack (4.46): the command a PatternCommand, its pattern at its slot - the capability the marshall's, its
+    /// fields checked as a marshall's.
+    const MarshallStack* marshall = nullptr;
 };
 
 class CapabilityHost {
@@ -209,6 +224,18 @@ public:
     /// pattern flown afresh (docs/flight-autonomy.md, 4.23).
     CommandResult update(ActivityId activity, const PatternCommand& pattern, const PatternShape& shape, const sim::VehicleState& state,
                          Caller caller) noexcept;
+    /// A NEW or UPDATE the world refused before the host saw it (a marshall's full stack: 4.46), answered as the host answers its
+    /// own: `index` the field, the details cleared.
+    CommandResult refused(Reason why, std::int16_t index, ActivityId activity = 0) noexcept;
+    /// NEW and UPDATE of a marshall with its pattern's shape (docs/flight-autonomy.md, 4.46; Marshall.cpp): its slot as the world
+    /// chose it, its pattern prepared and updated as a pattern's - flown as one, its stack kept beside it. An UPDATE's shape null:
+    /// none given.
+    CommandResult submit(const MarshallCommand& marshall, const PatternShape& shape, const CommandOptions& options, const sim::VehicleState& state,
+                         double now);
+    CommandResult update(ActivityId activity, const MarshallCommand& marshall, const PatternShape* shape, const sim::VehicleState& state,
+                         Caller caller) noexcept;
+    /// A live marshall as it flies (its pattern at its slot, its stack), allocating nothing; false for any other activity.
+    bool marshall(ActivityId activity, MarshallCommand& out) const noexcept;
     /// UPDATE of a route: its options (a field left out, kHold, keeps its
     /// value) and its waypoints - none: those it has - checked as a NEW's,
     /// then flown afresh from its start, from where the aircraft is. New
@@ -493,6 +520,7 @@ private:
         std::uint32_t commanded = 0;      ///< the branches the operator has commanded (4.37: bit k, branch k)
         std::vector<RouteTerminator> terminators; ///< a route's civil path terminators' data (4.38)
         MustFlyArea area; ///< a must fly's zone, corridor or volume given with it, as laid out (4.43 to 4.45; laidOut() false: none)
+        MarshallStack marshall; ///< a marshall's stack, beside its pattern (4.46)
     };
     /// A flight task (4.11): its command, and what became of it.
     struct Task {
@@ -857,8 +885,16 @@ private:
     void completePattern(PatternCommand& c, PatternShape& shape, const sim::VehicleState& state) const noexcept;
     /// A live pattern's UPDATE in slot `s` (Patterns.cpp): `next` and its `shape`, if given, merged into what flies,
     /// completed and checked; then written, the shape into the path store.
+    /// A marshall's pattern (4.46) takes one through its own UPDATE alone (`marshall`): as a pattern's, refused
+    /// `wrong_command_type`.
     CommandResult updatePattern(std::size_t s, ActivityId activity, const PatternCommand& next, const PatternShape* shape, const sim::VehicleState& state,
-                                CommandResult& result, CheckLog& log) noexcept;
+                                CommandResult& result, CheckLog& log, bool marshall = false) noexcept;
+    /// A marshall's NEW (4.46; Marshall.cpp): `pattern` its pattern, `stack` beside it - the stack's fields checked, its slot left
+    /// out its least, and its pattern prepared as a pattern's, the pattern's fields named back as the marshall's.
+    Reason prepareMarshall(Command& pattern, const MarshallStack& stack, const sim::VehicleState& state, CheckLog& log, const PatternShape* shape);
+    /// A waiting marshall's UPDATE (4.46; Marshall.cpp): merged into what it will fly, and checked as its NEW was.
+    CommandResult updateWaitingMarshall(Waiting& w, const MarshallCommand& next, const PatternShape* shape, const sim::VehicleState& state,
+                                        Caller caller) noexcept;
     /// A live must fly's UPDATE in slot `s` (4.42; MustFly.cpp): `next`'s fields given merged into what flies, laid out
     /// afresh from where the aircraft is and checked; then written, its route into the path store, flown afresh.
     CommandResult updateMustFly(std::size_t s, ActivityId activity, const MustFlyCommand& next, const sim::VehicleState& state, CommandResult& result,

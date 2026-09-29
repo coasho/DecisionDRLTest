@@ -1121,6 +1121,35 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             // (the worst: a wing 3.6 % of its radius, 7.9 % the Skua's 132 m; a rotorcraft 3.0 %, from its second lap)
             CHECK(least[p.id] < (p.rotor ? std::max(0.5, 0.1 * orbitRadius(p)) : std::max(20.0, 0.05 * orbitRadius(p))));
         });
+    // an altitude stacked marshall (ADR-29 FA-8c, ASM-01): each aircraft alone in a stack round where it is - a wing orbiting, a
+    // rotorcraft hovering - its least 100 m above it (a rotorcraft's 20 m): given that slot, climbed to and held
+    std::map<std::uint32_t, double> slotOff, marshalledAt, marshallFor;
+    run("fsim.guidance.marshall", 0.0,
+        [&](const Plane& p) {
+            MarshallCommand m;
+            m.altitudeMinM = p.start.altitudeMslM + (p.rotor ? 20.0 : 100.0);
+            if (p.rotor) m.pattern = static_cast<double>(PatternKind::Hover);
+            const CommandResult r = w.submit(p.id, m, PatternShape{});
+            INFO("refused: " << reasonName(r.reason) << " at " << r.index);
+            CHECK(r.accepted());
+            activity[p.id] = r.activity;
+            slotOff[p.id] = 0.0, marshalledAt[p.id] = w.simTime();
+            marshallFor[p.id] = (1.0 + 2.5 * kPi) * orbitRadius(p) / std::max(p.cruiseMs, 0.1) + 120.0;
+            Setpoint sp;
+            if (r.accepted() && w.activitySetpoint(r.activity, sp)) CHECK((sp.marshall && sp.marshall->altitudeM == m.altitudeMinM));
+            return r.accepted();
+        },
+        [&](const Plane& p) { return marshallFor[p.id]; },
+        [&](const Plane& p) { // (its last 30 s: how far off its slot)
+            if (w.simTime() - marshalledAt[p.id] < marshallFor[p.id] - 30.0) return;
+            const double slot = p.start.altitudeMslM + (p.rotor ? 20.0 : 100.0);
+            slotOff[p.id] = std::max(slotOff[p.id], std::abs(w.vehicleState(p.id)->altitudeMslM - slot));
+        },
+        [&](const Plane& p, const Lows&) {
+            CHECK(w.activity(activity[p.id])->live());
+            // (at worst a Gripen 9.1 m off its slot, a Mirage 2000 5.2 m; a rotorcraft under a centimetre)
+            CHECK(slotOff[p.id] <= (p.rotor ? 0.5 : 20.0));
+        });
     // A-GRA's orbit as its schema gives it (ADR-29 FA-5a: LTR-03, LTR-06, LTR-07): a racetrack by two circles of its
     // orbit's radius, the first two radii ahead and the second three beyond, once round from where it joins it, and out
     // at the far end of the second - completed there, a lap counted

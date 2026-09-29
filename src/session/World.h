@@ -143,6 +143,11 @@ public:
                                   const control::CommandOptions& options = {});
     control::CommandResult submit(std::uint32_t id, const control::PatternCommand& pattern, const control::PatternShape& shape,
                                   const control::CommandOptions& options = {});
+    /// NEW of a marshall with its pattern's shape (docs/flight-autonomy.md, 4.46; Marshalls.cpp): its slot chosen first - the
+    /// altitude asked for, else the lowest of its stack clear of every other aircraft's marshall round the same point - then
+    /// submitted as any NEW is; StackFull (index 3) where none is. Flown as its pattern, its stack beside it.
+    control::CommandResult submit(std::uint32_t id, const control::MarshallCommand& marshall, const control::PatternShape& shape,
+                                  const control::CommandOptions& options = {});
     /// Several NEWs at once (docs/flight-autonomy.md, 4.8), made in order at
     /// this simulation time, each answered on its own; `details`, if given,
     /// gets each answer's details (commandDetails()) in the same order.
@@ -168,6 +173,10 @@ public:
                                   const control::CurveShape* shape = nullptr);
     /// UPDATE of a pattern with its shape: the fields given in either merged (kHold keeps one), flown afresh.
     control::CommandResult update(control::ActivityId activity, const control::PatternCommand& pattern, const control::PatternShape& shape);
+    /// UPDATE of a marshall, with its pattern's shape or without: its slot chosen afresh where its stack moves (4.46). Its
+    /// pattern takes an UPDATE through it alone (a PatternCommand's: wrong_command_type).
+    control::CommandResult update(control::ActivityId activity, const control::MarshallCommand& marshall, const control::PatternShape& shape);
+    control::CommandResult update(control::ActivityId activity, const control::MarshallCommand& marshall);
     /// UPDATE of a must fly with a zone given in place of its own (4.43), or a corridor (4.44).
     control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpZone& zone);
     control::CommandResult update(control::ActivityId activity, const control::MustFlyCommand& mustFly, const control::OpLine& line);
@@ -197,6 +206,9 @@ public:
                                   const control::OpVolume& volume);
     control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::PatternCommand& pattern,
                                   const control::PatternShape& shape);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MarshallCommand& marshall,
+                                  const control::PatternShape& shape);
+    control::CommandResult update(control::Caller caller, control::ActivityId activity, const control::MarshallCommand& marshall);
     control::CommandResult cancel(control::Caller caller, control::ActivityId activity);
     /// An activity command (docs/flight-autonomy.md, 4.10) - disable, enable,
     /// reset, delete, change its rank, unassign it - declaring the caller's
@@ -505,6 +517,12 @@ private:
 
     Entry* entry(std::uint32_t id) noexcept;
     const Entry* entry(std::uint32_t id) const noexcept;
+    /// A marshall's slot (4.46; Marshalls.cpp): into `m`'s altitude - the one asked for, clear of the others, or the lowest of
+    /// its stack clear of every other aircraft's live or waiting marshall round the same point - else StackFull.
+    control::Reason slotMarshall(const Entry& e, control::MarshallCommand& m) const;
+    /// A marshall's UPDATE: its slot chosen afresh where its stack moves or a slot is asked for, then the host's.
+    control::CommandResult updateMarshall(control::Caller caller, control::ActivityId activity, const control::MarshallCommand& marshall,
+                                          const control::PatternShape* shape);
     void preStep(std::size_t slot, int subStep, sim::FlightModel& model, sim::ControlInputs& inputs);
     void applyEnvironment(sim::FlightModel& model) const;
     void levelChanged(Entry& e);

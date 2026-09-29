@@ -1205,6 +1205,34 @@ A must fly may name an operational volume (A-GRA's OpVolumeID) or be given a vol
   - C ABI 1.42: `FSIM_MUST_FLY_VOLUME` and `FSIM_MUST_FLY_OP_VOLUME`; `enum fsim_volume_shape`, `fsim_op_volume` (`fsim_op_volume_init`); `fsim_world_set_op_volume`, `fsim_world_remove_op_volume`, `fsim_world_op_volume_count`, `fsim_world_get_op_volume_at`, `fsim_world_get_op_volume`; `fsim_vehicle_submit_must_fly_volume`, `fsim_activity_update_must_fly_volume`, `fsim_activity_update_must_fly_volume_by`; `fsim_batch_command.volume`.
   - Python: `vehicle.submit_must_fly(volume=fsim.OpVolume(...), ...)` (its location Volume where a volume is given), `activity.update_must_fly(volume=...)`; `fsim.OpVolume`, `fsim.VolumeShape`; `World.set_op_volume`, `op_volumes`, `op_volume`, `remove_op_volume`.
 
+### 4.46 A-GRA's altitude stacked marshall (as FA-8c builds it)
+
+A-GRA's ALTITUDE_STACKED_MARSHALL (MA_AltitudeStackedMarshallType) is a loiter flown by each aircraft of a stack at an altitude of its own. The loiter is an orbit - a circle, or a racetrack or figure-eight by two circles, with a turn direction and a duration by time or laps - or a hover at a point for a duration. The stack has a minimum altitude, and optionally a maximum and a minimum separation. The inventory reads it as "each vehicle takes and keeps a slot in the stack with its peers" (ASM-01). ADR-29 plans it as ASM-01, FA-8c.
+
+- **The mode** (`MarshallCommand`, fsim.guidance.marshall) has thirteen fields, then the pattern's shape. It is not one of the command variant's (below): its activity flies its pattern.
+  - Its pattern (`PatternKind`): an orbit, left out; a racetrack or a figure-eight, their second circle in the pattern's shape as A-GRA gives it; or a rotorcraft's hover.
+  - Its centre, its circle's radius and turn, a speed and its reference, and a duration (its laps in the shape's `orbits`).
+  - Its stack: `altitudeMinM` (given), `altitudeMaxM` (left out: none) and `separationM` (left out: 1,000 ft).
+  - Its slot reads back in `altitudeM`. Given in a NEW, it is the slot asked for.
+  - Refused `invalid_parameter`, naming the field: a hold, which is ATC's, not a marshall's (0); a racetrack or a figure-eight without its second circle (18); a reference that is not one (4); the stack's least left out or not finite (10); a most below it (11); a separation not above 0 (12); a slot asked for outside them (3).
+- **Its slot** is the world's choice, made between steps on the caller's thread, so the same commands choose the same slots.
+  - It is the lowest from the stack's least in steps of its separation that is clear by the separation of every other aircraft's marshall round the same point - their centres within 100 m, live or waiting, in the same altitude reference - and no higher than its most. One asked for must be clear of the others.
+  - None clear: refused `stack_full`, a reason of its own, naming field 3.
+  - An UPDATE that moves the stack - its least, most, separation, centre or reference, or a slot asked for - chooses afresh. One that leaves it (a speed, a radius) keeps its slot. A slot freed as a marshall ends goes to the next NEW, and a waiting marshall holds its slot.
+- **Flown** as its pattern at its slot, by fsim.guidance.pattern's follower: a wing orbits there, a rotorcraft hovers there (the hover a rotorcraft's, R1, as the pattern's). Its NEW and UPDATE are checked as a pattern's, the pattern's fields named back as the marshall's. With a duration or laps it completes, and flies on.
+- **Beside the command variant, not in it.** The activity's command is its pattern - a `PatternCommand` at its slot, the one its follower flies - and its stack (`MarshallStack`: its least, most and separation) is kept beside it, in the path store while it flies and in its waiting entry while it waits, as a must fly's zone is (4.43).
+  - Why: libstdc++ visits a variant of eleven alternatives or fewer through a switch, and one of more through a table of calls. The command variant has eleven since the must fly (4.42). A twelfth made every copy, move and visit of a command dispatch through that table: measured against FA-8b3, the step cases that run the control stack's merged path 2 to 4 % slower from three copies each, and a NEW of another level 4 % slower, in both builds. `ControlStack::flyMerged` itself compiled 31 instructions shorter, the variant's move-assignment inlined through the table where it had been a call.
+  - As built, the variant is FA-8b3's: `flyMerged` the same instruction for instruction, and a static assertion holds the variant to eleven. A mode after it flies as one of the eleven, with its own fields beside it.
+  - A marshall's pattern takes an UPDATE through the marshall's alone: a `PatternCommand`'s is refused `wrong_command_type`.
+  - Read back: the setpoint's `command` is its pattern at its slot, and its `marshall` the marshall, its stack with it (none for any other activity). A batch item or a task gives one in place of its command (`BatchCommand::marshall`).
+- **Never a task:** its slot is the stack's at its NEW, so a marshall is not kept as a task (refused `invalid_parameter`), nor suggested as one.
+- **On the way to its slot** the aircraft climbs or descends from where it is; nothing keeps it apart from the others on the way. A stack's entry is its tasking's.
+- **The support rows:** `fsim.guidance.marshall` is supported on every aircraft, and `fsim.guidance.marshall/hover` as `fsim.guidance.pattern/hover` is (R1).
+- **Surfaces.**
+  - C++: `MarshallCommand`, `MarshallStack` and `kMarshallSeparationM` (`fsim/Control.h`), `Reason::StackFull` and `SetpointKind::Marshall` (`fsim/Capability.h`); `World::submit(vehicle, MarshallCommand, PatternShape)`, `World::update(activity, MarshallCommand[, PatternShape])`; `Setpoint::marshall`, `BatchCommand::marshall`, `PathStore::marshall`.
+  - C ABI 1.43: `FSIM_MODE_MARSHALL` (35 fields: its 13, then the pattern's shape's), through `fsim_vehicle_submit_mode` and `fsim_activity_update`; the reason `stack_full`.
+  - Python: `vehicle.submit_marshall(...)` with its fields by name (`fsim.MODE_FIELDS["marshall"]`), `activity.update(**fields)`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -1496,7 +1524,7 @@ Three of the missing capability types.
 - FA-8b1, must fly a zone, given or by id; operational zones (MFY-04; MFY-03 and ENV-06 for zones; 4.43), done 2026-09-29 and measured in section 14;
 - FA-8b2, must fly a corridor, given or by id; operational lines (MFY-05; MFY-03 and ENV-06 for lines; 4.44), done 2026-09-29 and measured in section 14;
 - FA-8b3, must fly a volume, given or by id; operational volumes (MFY-06; MFY-03 and ENV-06 for volumes; 4.45), done 2026-09-29 and measured in section 14: FA-8b done, and with it the must fly and the operational geometry;
-- FA-8c, the altitude stacked marshall (ASM-01);
+- FA-8c, the altitude stacked marshall (ASM-01; 4.46), done 2026-09-29 and measured in section 14;
 - FA-8d, the route intercept (RIC-01 to RIC-03; CAP-02).
 
 **Accepted when:**
@@ -3068,6 +3096,29 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The NEWs in the default builds: a level switch +0.6 % and −0.9 % (−1.0 % from three copies), a behaviour +0.7 % and +1.4 % (−2.2 %); the same level's update and a checked update within −1.5 % to +1.2 %. Built with every function aligned, all four within −3.6 % to +2.9 %.
   - World throughput from three copies first read 98.0 to 99.4 % of FA-8b2's, one directory's drifting as before (FA-7c's). Run again apart, it read 99.4 to 100.2 % from one copy and 99.5 to 100.3 % from three. Protection costs at most 1.1 %.
 - ctest: all 356 tests pass.
+
+**FA-8c, A-GRA's altitude stacked marshall (ASM-01).**
+- What it built is 4.46, in C++, the C ABI (1.43) and Python. `fsim.guidance.marshall` is supported on every aircraft, its hover as the pattern's is (R1).
+- **Flown** (`test_marshall`, 3 cases, 1,192 checks; its Python twin; `test_c_abi`'s 1.43 block):
+  - A stack of four per class, each NEW given the lowest slot left, then flown 150 s and measured for a minute more:
+    - four C172s orbiting from 1,500 m, 1,000 ft apart: at worst 0.43 m off their slots, every two at least 304.05 m apart;
+    - four F-16Cs from 3,000 m: 1.62 m, and 304.62 m;
+    - four UH-60As hovering 30 m apart, and four IRIS 10 m apart: under a millimetre off, their separations held.
+  - The slots of a stack of three, 1,500 to 2,100 m and 300 m apart: the top asked for and given; the others the lowest left; a fourth refused `stack_full` naming field 3, as was one asking for a slot taken. Another point 5 km away had a stack of its own. A slot freed by a CANCEL went to the next NEW. An UPDATE that moved the stack to the other point chose afresh (1,800 m: its 1,500 m taken). One that left it (a speed) kept its slot. A `PatternCommand` sent to it was refused `wrong_command_type`.
+  - Refused, naming their fields: a hold (0), a racetrack without its second circle (18), the least left out (10), a most below it (11), a separation of 0 (12), a reference that is not one (4). A hover on the hangar's C172, which declares it hovers not, was refused `not_supported`, as its row says. A racetrack by two circles was accepted, its second circle read back. A marshall kept as a task was refused `invalid_parameter`. One queued behind a start window held its slot as it waited - the next NEW took 1,804.8 m - and started 20 s later.
+  - In Python, two C172s were given 1,500 and 1,800 m of a stack that stops at 1,900 m, and a third was refused `stack_full` at field 3 (A-GRA's INSUFFICIENT_RESOURCES). An UPDATE of the speed kept its slot, and both flew within 5 m of their slots after a minute. Through the C ABI, the two lowest slots read back, and a third was refused `stack_full` with its slot named (reserved 4).
+- **The fleet** (`test_fleet`, a case of its own): every aircraft alone in a stack round where it is, its least 100 m above it (a rotorcraft's 20 m, hovering), was given that slot on all 35, climbed to it and held it. Over its last 30 s it was at worst 9.09 m off (the Gripen), then 5.17 m (the Mirage 2000) and 4.03 m (the Typhoon); every rotorcraft under a centimetre.
+- **Found and fixed:**
+  - The marshall first joined the command variant as its twelfth alternative. The A/B read the step cases that run the control stack's merged path 2 to 4 % slower from three copies - twelve of them, the design's, the pseudo-controls', the limits' and the reports' among them - and a NEW of another level 4.0 % slower, 4.6 % built with every function aligned. `ControlStack::flyMerged`, whose source had not changed, compiled differently: libstdc++ visits a variant of eleven alternatives or fewer through a switch, and one of more through a table of calls. The marshall now flies as its pattern with its stack beside it (4.46), and the variant is FA-8b3's again: `flyMerged` the same instruction for instruction. A static assertion holds the variant to eleven.
+  - The catalog named the marshall's capability `user.guidance.marshall` until the built-in modes' list took it.
+  - A malformed stack was refused `stack_full` by the world's slot choice before the host saw it. The world now passes such a marshall on, and the host names its field.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-8b3's build. The flights are the same after the rework: every stack's and every fleet aircraft's numbers above to the last digit printed.
+- **Digests:** identical to FA-8b3's, with protection and without. The allocation gate passes, with a case more: a marshall round a point ahead, its speed updated every step - its stack left, its slot kept.
+- **A/B throughput** against FA-8b3, both builds run from their own directories in a quiet window held throughout, as FA-8b3's were measured:
+  - The micro cases are within −1.7 % to +1.4 % from one copy, and −1.5 % to +1.2 % from three.
+  - The NEWs in the default builds: a level switch +1.9 % and +2.0 % (+0.4 % from three copies), a behaviour −1.1 % and −1.2 % (−3.7 %); the same level's update and a checked update within −4.3 % to +0.0 %. Built with every function aligned: a level switch +1.9 % and +3.3 % (+1.6 % from three), a behaviour +3.8 % and +3.0 % (+1.9 %), the other two within −1.5 % to +0.4 %.
+  - World throughput is 99.7 to 100.4 % of FA-8b3's, and 98.6 to 100.5 % from three copies. Protection costs at most 0.5 %.
+- ctest: all 359 tests pass.
 
 ## Appendix A: the inventory
 

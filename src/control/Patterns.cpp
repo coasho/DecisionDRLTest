@@ -69,7 +69,9 @@ CommandResult CapabilityHost::update(ActivityId activity, const PatternCommand& 
 }
 
 CommandResult CapabilityHost::updatePattern(std::size_t s, ActivityId activity, const PatternCommand& next, const PatternShape* shape,
-                                            const sim::VehicleState& state, CommandResult& result, CheckLog& log) noexcept {
+                                            const sim::VehicleState& state, CommandResult& result, CheckLog& log, bool marshall) noexcept {
+    if (!marshall && catalog_->descriptor(records_[s].capability).setpoint == SetpointKind::Marshall) // (through its own UPDATE: 4.46)
+        return rejected(Reason::WrongCommandType, activity);
     // a partial pattern (docs/vehicle-interface.md, 4.6): the fields given replace the commanded ones - and its
     // shape's, the path store's (docs/flight-autonomy.md, 4.23)
     const PatternShape given = shape ? *shape : PatternShape{};

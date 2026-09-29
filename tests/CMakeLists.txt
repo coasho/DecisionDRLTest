@@ -44,6 +44,7 @@ add_executable(fsim_tests
     test_must_fly_zones.cpp
     test_must_fly_lines.cpp
     test_must_fly_volumes.cpp
+    test_marshall.cpp
     test_grants.cpp
     test_control_compat.cpp
     test_profile.cpp

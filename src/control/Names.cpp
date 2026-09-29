@@ -59,6 +59,7 @@ const char* reasonName(Reason reason) noexcept {
     case Reason::SafetyCriticalPlan: return "safety_critical_plan";
     case Reason::UnknownAirfield: return "unknown_airfield";
     case Reason::UnknownGeometry: return "unknown_geometry";
+    case Reason::StackFull: return "stack_full";
     default: return "?";
     }
 }
@@ -116,6 +117,7 @@ const char* reasonDescription(Reason reason) noexcept {
     case Reason::SafetyCriticalPlan: return "a takeoff's, a departure's, an approach's or a landing's plan is FA's own alone";
     case Reason::UnknownAirfield: return "a takeoff's or a landing's path names an airfield or a runway the vehicle does not keep";
     case Reason::UnknownGeometry: return "it names an operational point the world does not keep";
+    case Reason::StackFull: return "no altitude of its stack is free of the other aircraft marshalling round its point";
     default: return "";
     }
 }

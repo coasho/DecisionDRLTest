@@ -222,6 +222,7 @@ CapabilityHost::Task& CapabilityHost::newSuggestion(TaskId id) {
 
 TaskId CapabilityHost::suggest(const Command& setpoint, Span<const Waypoint> waypoints, Span<const NurbsSegment> segments, const PatternShape* shape,
                               const CurveShape* curveShape, const RouteExtras* extras) {
+    if (extras && extras->marshall) return 0; // (a marshall's slot is its stack's at its NEW: never a task - 4.46)
     Task& t = newSuggestion(kSuggestedTask | ++suggestionSerial_);
     t.command = setpoint;
     if (shape && std::holds_alternative<PatternCommand>(setpoint)) t.shape = *shape;

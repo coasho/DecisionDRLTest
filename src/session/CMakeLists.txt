@@ -9,7 +9,8 @@ add_library(fsim_session STATIC
     PerformanceProfile.cpp
     StateData.cpp
     Frames.cpp
-    Geometry.cpp)
+    Geometry.cpp
+    Marshalls.cpp)
 add_library(fsim::session ALIAS fsim_session)
 target_include_directories(fsim_session PUBLIC ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(fsim_session PUBLIC fsim::control fsim::effects fsim::comm fsim::ipc fsim::sim fsim::io fsim::core)

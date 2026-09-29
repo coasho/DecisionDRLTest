@@ -1561,6 +1561,7 @@ void registerGuidanceModes(ControllerRegistry& r) {
     pattern.uses = {"fsim.flight.velocity"};
     pattern.mode = FlightMode::Loiter;
     pattern.setpoint = SetpointKind::Pattern;
+    const std::vector<ParameterInfo> patternShape(pattern.parameters.begin() + 13, pattern.parameters.end()); // (a marshall's too: 4.46)
     r.addBehavior("pattern", [] { return std::make_unique<PatternBehavior>(); }, std::move(pattern));
     // the curve's options; its segments go beside them into the path store
     BehaviorTraits curve;
@@ -1590,6 +1591,7 @@ void registerGuidanceModes(ControllerRegistry& r) {
     curve.setpoint = SetpointKind::Curve;
     r.addBehavior("curve", [] { return std::make_unique<CurveBehavior>(); }, std::move(curve));
     registerMustFly(r); // (docs/flight-autonomy.md, 4.42)
+    registerMarshall(r, patternShape); // (4.46)
 }
 
 } // namespace fsim::control

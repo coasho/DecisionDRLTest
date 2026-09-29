@@ -503,9 +503,13 @@ private:
     std::uint32_t areaRevision_ = 0;       ///< the path store's revision its zone was looked for in
 };
 
-/// Registers the modes' behaviours ("hsa", "route", "pattern", "curve", "must_fly"); registerBuiltinControllers calls it.
+/// Registers the modes' behaviours ("hsa", "route", "pattern", "curve", "must_fly", "marshall"); registerBuiltinControllers
+/// calls it.
 void registerGuidanceModes(ControllerRegistry& registry);
 /// Registers "must_fly" (MustFly.cpp); registerGuidanceModes calls it.
 void registerMustFly(ControllerRegistry& registry);
+/// Registers "marshall" (Marshall.cpp; docs/flight-autonomy.md, 4.46), its parameters its own and then its pattern's shape's:
+/// flown by a PatternBehavior, its activity's command its pattern at its slot. registerGuidanceModes calls it.
+void registerMarshall(ControllerRegistry& registry, const std::vector<ParameterInfo>& shape);
 
 } // namespace fsim::control

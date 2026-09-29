@@ -167,6 +167,8 @@ enum class Reason : std::uint8_t {
     UnknownAirfield,    ///< a plan loaded refused: a takeoff's or a landing's path names an airfield or a runway the vehicle does not keep
     // operational geometry (docs/flight-autonomy.md, 4.42)
     UnknownGeometry,    ///< a command refused: it names an operational point the world does not keep
+    // the altitude stacked marshall (docs/flight-autonomy.md, 4.46)
+    StackFull,          ///< a marshall refused: no altitude of its stack is free of the other aircraft marshalling round its point
     Count
 };
 
@@ -831,6 +833,7 @@ enum class SetpointKind : std::uint8_t {
     Pattern,  ///< PatternCommand (fsim.guidance.pattern)
     Curve,    ///< CurveCommand and its segments (fsim.guidance.curve)
     MustFly,  ///< MustFlyCommand (fsim.guidance.must_fly)
+    Marshall, ///< MarshallCommand (fsim.guidance.marshall)
     Count
 };
 

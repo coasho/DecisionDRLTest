@@ -175,8 +175,8 @@ const FeatureDef kFeatures[] = {
 
     // --- the flight capability types not built yet (CAP-02) --------------------------------------------
     CAP("fsim.guidance.must_fly", S, 0, 0, ""), // MFY-01..07: a point, an entity, an OpPoint, the ingress window (FA-8a); zones (FA-8b1); corridors (FA-8b2); volumes (FA-8b3)
-    CAP("fsim.guidance.marshall", N, 8, 0, ""),                                               // ASM-01
-    {"fsim.guidance.marshall/hover", "fsim.guidance.marshall", N, 8, R1, ""},
+    CAP("fsim.guidance.marshall", S, 0, 0, ""),                                               // ASM-01 (FA-8c)
+    {"fsim.guidance.marshall/hover", "fsim.guidance.marshall", S, 0, R1, ""},
     CAP("fsim.guidance.intercept", N, 8, 0, ""),                                              // RIC-01..03
     CAP("fsim.guidance.launch", N, 9, 0, ""),                                                 // LCH-01
     {"fsim.guidance.launch/runway", "fsim.guidance.launch", N, 9, 0, ""},

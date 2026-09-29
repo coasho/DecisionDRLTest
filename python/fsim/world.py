@@ -1019,7 +1019,7 @@ class ZoneShape(enum.IntEnum):
 #: The Vehicle Interface's modes (docs/vehicle-interface.md): their fixed-size setpoints' fields, in order. HOLD leaves
 #: one out: a NEW continues what a live hsa commanded (else what the aircraft flies now) and takes a route's, a
 #: pattern's or a curve's default; an UPDATE keeps it.
-MODE_KINDS = ("hsa", "route", "pattern", "curve", "must_fly")
+MODE_KINDS = ("hsa", "route", "pattern", "curve", "must_fly", "marshall")
 MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", "altitude_m", "altitude_reference", "speed_optimization",
                        "direction_reference"),
                "route": ("projection", "repeat", "end", "start"),
@@ -1033,7 +1033,11 @@ MODE_FIELDS = {"hsa": ("heading_rad", "course_rad", "speed", "speed_reference", 
                          "frame_rotation", "frame_offsets", "frame_x_m", "frame_y_m", "frame_z_m"),
                "must_fly": ("location", "latitude_rad", "longitude_rad", "altitude_m", "altitude_reference", "target", "ingress_min_rad",
                             "ingress_max_rad", "speed", "speed_reference")}
-MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 35, "curve": (HOLD,) * 20, "must_fly": (HOLD,) * 10}
+#: an altitude stacked marshall's (docs/flight-autonomy.md, 4.46): its own 13, then its pattern's shape's, as a pattern's
+MODE_FIELDS["marshall"] = ("pattern", "latitude_rad", "longitude_rad", "altitude_m", "altitude_reference", "radius_m", "clockwise", "speed",
+                           "speed_reference", "duration_s", "altitude_min_m", "altitude_max_m", "separation_m") + MODE_FIELDS["pattern"][13:]
+MODE_DEFAULTS = {"hsa": (HOLD,) * 8, "route": (HOLD,) * 4, "pattern": (HOLD,) * 35, "curve": (HOLD,) * 20, "must_fly": (HOLD,) * 10,
+                 "marshall": (HOLD,) * 35}
 _REFERENCES = {"speed_reference": SpeedReference, "altitude_reference": AltitudeReference, "speed_optimization": SpeedOptimization,
                "direction_reference": DirectionReference,
                "projection": Projection, "end": EndBehavior,
@@ -1668,11 +1672,12 @@ def _options(**given):
 
 class BatchCommand:
     """One command of Vehicle.submit_batch: a submit method's name ("submit", "submit_behavior", "submit_support",
-    "submit_hsa", "submit_pattern", "submit_must_fly", "submit_route", "submit_curve") and the arguments it takes."""
+    "submit_hsa", "submit_pattern", "submit_must_fly", "submit_marshall", "submit_route", "submit_curve") and the arguments it
+    takes."""
 
     __slots__ = ("method", "args", "kwargs")
-    _KINDS = {"submit": 0, "submit_behavior": 1, "submit_support": 2, "submit_hsa": 3, "submit_pattern": 3, "submit_must_fly": 3, "submit_route": 4,
-              "submit_curve": 5}
+    _KINDS = {"submit": 0, "submit_behavior": 1, "submit_support": 2, "submit_hsa": 3, "submit_pattern": 3, "submit_must_fly": 3,
+              "submit_marshall": 3, "submit_route": 4, "submit_curve": 5}
 
     def __init__(self, method, *args, **kwargs):
         if method not in self._KINDS:
@@ -1706,7 +1711,7 @@ class BatchCommand:
         if self.method == "submit_support":
             what = args.pop(0)
             return (kind, SUPPORT_KINDS.index(what), _row(what, args, k), None, None, None, options), (what, source, validate, controller)
-        if self.method in ("submit_hsa", "submit_pattern", "submit_must_fly"):
+        if self.method in ("submit_hsa", "submit_pattern", "submit_must_fly", "submit_marshall"):
             mode = self.method[len("submit_"):]
             if "target" in k:  # (a must fly's vehicle as itself or its id)
                 k["target"] = getattr(k["target"], "id", k["target"])
@@ -1981,6 +1986,23 @@ class Vehicle:
                                 int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window, override_rejection,
                                            controller))
         return self._answer(r, "pattern", source, validate_only, controller)
+
+    def submit_marshall(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
+                        interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,
+                        override_rejection=False, controller=0, **fields):
+        """NEW for fsim.guidance.marshall, A-GRA's altitude stacked marshall (docs/flight-autonomy.md, 4.46): a ``pattern``
+        (fsim.PatternKind or "orbit", "racetrack", "figure_eight", "hover"; never a hold) round ``latitude_rad``,
+        ``longitude_rad`` with ``radius_m``, ``clockwise``, a ``speed`` in ``speed_reference`` and ``duration_s``, flown by each
+        aircraft of a stack at an altitude of its own: the world gives it the lowest from ``altitude_min_m`` (given), in steps
+        of ``separation_m`` (left out, 1,000 ft), clear by that of every other aircraft marshalling round the same point, and
+        no higher than ``altitude_max_m`` - read back in ``altitude_m`` (given, the slot it asks for) - or refuses it
+        "stack_full". A racetrack's or a figure-eight's second circle (``latitude2_rad``, ``longitude2_rad``, ``radius2_m``),
+        laps (``orbits``) and the rest of a pattern's shape as submit_pattern's. An Activity whose ``update(**fields)`` merges
+        what it gives, its slot chosen afresh where its stack moves; never a task. The command envelope as submit's."""
+        r = self._h.submit_mode(self.id, MODE_KINDS.index("marshall"), _row("marshall", values, fields), int(source), None, int(range),
+                                int(min_version), _envelope(command_id, trace, interactive, validate_only, rank, interrupt, precedence_override, window,
+                                                            override_rejection, controller))
+        return self._answer(r, "marshall", source, validate_only, controller)
 
     def submit_must_fly(self, *values, source=Source.POLICY, range=RangePolicy.CLAMP, min_version=0, command_id=0, trace=(),
                         interactive=True, validate_only=False, rank=None, interrupt=True, precedence_override=None, window=None,

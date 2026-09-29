@@ -769,6 +769,37 @@ struct MustFlyCommand {
     double speedReference = kHold;     ///< SpeedReference
 };
 
+/// fsim.guidance.marshall (A-GRA's ALTITUDE_STACKED_MARSHALL, its MA_AltitudeStackedMarshallType; docs/flight-autonomy.md,
+/// 4.46): a loiter - an orbit, a racetrack or a figure-eight (A-GRA's orbit: a racetrack's or a figure-eight's second circle,
+/// and its laps, in the pattern's shape beside it) or a rotorcraft's hover - flown by each aircraft of a stack at an altitude
+/// of its own: the lowest from `altitudeMinM`, in steps of `separationM`, at least that apart from every other aircraft
+/// marshalling round the same point, and no higher than `altitudeMaxM`. The world chooses it at the NEW (or an UPDATE that
+/// moves the stack), and it reads back in `altitudeM`; flown as the pattern at it. A field left out (kHold) takes its default
+/// in a NEW and keeps its value in an UPDATE. Not one of the command variant's: its activity flies its pattern, a
+/// PatternCommand at its slot, and keeps its stack beside it (MarshallStack) - World::submit and World::update take it.
+struct MarshallCommand {
+    double pattern = kHold;            ///< PatternKind: an orbit (left out), a racetrack, a figure-eight or a hover (no hold: ATC's)
+    double latitudeRad = kHold, longitudeRad = kHold; ///< its centre (a racetrack's or a figure-eight's first circle's), a hover's point
+    double altitudeM = kHold;          ///< its slot, as the world chose it; given in a NEW, the slot it asks for
+    double altitudeReference = kHold;  ///< AltitudeReference of its altitudes
+    double radiusM = kHold;            ///< its (first) circle's (A-GRA's Radius)
+    double clockwise = kHold;          ///< 1 right turns, 0 left (A-GRA's TurnDirection)
+    double speed = kHold;              ///< m/s, or a Mach number
+    double speedReference = kHold;     ///< SpeedReference
+    double durationS = kHold;          ///< A-GRA's Duration by time (by laps: the shape's orbits), a hover's from its arrival; kHold: until canceled
+    double altitudeMinM = kHold;       ///< A-GRA's MinimumAltitude: the stack's lowest (given in a NEW)
+    double altitudeMaxM = kHold;       ///< MaximumAltitude: its highest (left out: none)
+    double separationM = kHold;        ///< MinimumAltitudeSeparation (left out: 1,000 ft)
+};
+/// A marshall's separation left out: 1,000 ft (docs/flight-autonomy.md, 4.46).
+inline constexpr double kMarshallSeparationM = 304.8;
+
+/// A marshall's stack (docs/flight-autonomy.md, 4.46), kept beside the pattern its activity flies - its slot that pattern's
+/// altitude - as its MarshallCommand gave it: a field left out, its default.
+struct MarshallStack {
+    double altitudeMinM = kHold, altitudeMaxM = kHold, separationM = kHold;
+};
+
 /// An operational zone's shape (A-GRA's AreaChoiceType; docs/flight-autonomy.md, 4.43).
 enum class ZoneShape : std::uint8_t {
     Polygon = 0,    ///< its vertices, and holes inside it (A-GRA's PolygonType)
@@ -989,6 +1020,8 @@ struct PathStore {
     RouteTerminator routeTerminators[kRouteTerminators];
     /// A must fly's area (docs/flight-autonomy.md, 4.43): entered, it completes. Its shape Count: none.
     MustFlyArea mustFlyArea;
+    /// The marshall that flies (4.46): its stack, beside the pattern it flies at its slot.
+    MarshallStack marshall;
 };
 
 /// A registered behaviour with its parameters (design 9.3 "Behavior").
@@ -1009,6 +1042,10 @@ struct BehaviorCommand {
 /// the variant's index is a level's only up to it.
 using Command = std::variant<ActuatorCommand, AttitudeCommand, AccelerationCommand, VelocityCommand, PositionCommand, BehaviorCommand, HsaCommand,
                              RouteCommand, PatternCommand, CurveCommand, MustFlyCommand>;
+static_assert(sizeof(Command) == 120, "a mode joins the command variant no larger than its largest (docs/flight-autonomy.md, 4.23)");
+static_assert(std::variant_size_v<Command> <= 11,
+              "libstdc++ visits a variant of eleven alternatives or fewer through a switch, and one of more through a table of calls - "
+              "every copy of a command then slower: a mode past them flies as one of them, its own fields beside it (4.46)");
 
 // Support effectors (docs/control-architecture.md, 8.2): set directly, not
 // flown through the cascade; each its own capability (fsim.support.*) where
@@ -1054,7 +1091,7 @@ struct BatchCommand {
     Span<const BezierSegment> segments; ///< a CurveCommand's
     CommandOptions options;
     Span<const NurbsSegment> nurbs;     ///< a CurveCommand's as A-GRA's schema gives them (instead of `segments`)
-    const PatternShape* shape = nullptr; ///< a PatternCommand's (null: none)
+    const PatternShape* shape = nullptr; ///< a PatternCommand's or `marshall`'s (null: none)
     const CurveShape* curveShape = nullptr; ///< a CurveCommand's reference in a frame (null: none)
     Span<const RouteLoiter> loiters;     ///< a RouteCommand's: the loiters its loiter points fly (docs/flight-autonomy.md, 4.31)
     Span<const RouteState> states;       ///< a RouteCommand's: its planned inertial states (4.34)
@@ -1064,6 +1101,7 @@ struct BatchCommand {
     const OpZone* zone = nullptr;        ///< a MustFlyCommand's zone given with it (4.43; null: none)
     const OpLine* line = nullptr;        ///< a MustFlyCommand's corridor given with it (4.44; null: none)
     const OpVolume* volume = nullptr;    ///< a MustFlyCommand's volume given with it (4.45; null: none)
+    const MarshallCommand* marshall = nullptr; ///< a marshall (4.46), in place of `command`, its pattern's shape `shape` (null: none)
 };
 
 /// What a live activity flies now, or waits to fly (A-GRA's last flight
@@ -1083,6 +1121,9 @@ struct Setpoint {
     std::vector<RoutePath> paths;        ///< a route's paths (4.36)
     std::vector<RouteBranch> branches;   ///< a route's conditional branches (4.37)
     std::vector<RouteTerminator> terminators; ///< a route's civil path terminators' data (4.38)
+    /// A marshall's (4.46): as it flies - `command` its pattern at its slot, `shape` its shape - with its stack; none for
+    /// any other activity.
+    std::optional<MarshallCommand> marshall;
 };
 
 /// Where an activity flies to (A-GRA's ActualEndPoint, MA_EndPointType;

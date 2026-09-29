@@ -782,6 +782,22 @@ int alloc() {
              c.location = static_cast<double>(MustFlyLocation::Volume);
              if (!frame || !w.submit(id, c, v).accepted()) std::fprintf(stderr, "must fly round a vehicle: vehicle %u refused\n", id), std::exit(3);
          }},
+        // ADR-29 FA-8c: a marshall round a point ahead, its speed changed every step through UPDATE - its stack left, its slot
+        // kept - flown as its pattern at its slot
+        {"marshall update each step", [&](std::uint32_t id, int k) {
+             static std::vector<ActivityId> activity(64, 0);
+             MarshallCommand c;
+             c.speed = 50.0 + std::sin(k * 0.1);
+             if (k == 0) {
+                 const auto& s = *w.vehicleState(id);
+                 const Waypoint at = waypointAt(s, 3000, 3000);
+                 c.latitudeRad = at.latitudeRad, c.longitudeRad = at.longitudeRad, c.altitudeMinM = s.altitudeMslM;
+                 activity[id] = w.submit(id, c, PatternShape{}).activity;
+                 if (!activity[id]) std::fprintf(stderr, "marshall: vehicle %u refused\n", id), std::exit(3);
+                 return;
+             }
+             if (!w.update(activity[id], c).accepted()) std::fprintf(stderr, "marshall: update refused\n"), std::exit(3);
+         }},
         // step 3: an autopilot on pitch and thrust, the policy's bank updated every step
         {"axes apart each step", [&](std::uint32_t id, int k) {
              static std::vector<ActivityId> activity(64, 0);

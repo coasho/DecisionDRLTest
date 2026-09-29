@@ -520,6 +520,28 @@ over.location = double(MustFlyLocation::Entity), over.target = double(other);
   - A volume in the frame that follows another vehicle (`FrameOrigin::Vehicle`), its altitude left out, is round that vehicle: flown into as it moves.
   - A malformed volume is refused `invalid_parameter` naming its field from 10 on (10 shape, 11 point, 12 dimensions, 13 attitude, 14 geocentric bounds, 15 frame, 16 velocity). A-GRA's orbital volumes are none of an aircraft's: the SDK does not express them.
 
+### Altitude stacked marshall: a slot in a stack
+
+`fsim.guidance.marshall` is A-GRA's altitude stacked marshall
+([flight-autonomy.md](../flight-autonomy.md), 4.46): a pattern - an orbit, a
+racetrack or a figure-eight (by two circles, as A-GRA gives them), or a
+rotorcraft's hover - flown by each aircraft of a stack at an altitude of its
+own, which the world chooses.
+
+```cpp
+MarshallCommand m;                                       // round a point, from 1,500 m up, 1,000 ft apart
+m.latitudeRad = lat, m.longitudeRad = lon, m.radiusM = 1500.0;
+m.altitudeMinM = 1500.0;                                 // (altitudeMaxM: its top; separationM: 304.8 m left out)
+auto a = first.submit(m, PatternShape{}).activity;      // its slot: 1,500 m
+auto b = second.submit(m, PatternShape{}).activity;     // 1,804.8 m: the lowest clear of the first's
+```
+
+- **Its slot** is the lowest from `altitudeMinM`, in steps of `separationM`, clear by the separation of every other aircraft's marshall round the same point (within 100 m, live or waiting), and no higher than `altitudeMaxM`. It reads back in `altitudeM`; given in a NEW, it is the slot asked for. None clear: refused `stack_full`.
+- It is chosen at the NEW, between steps, so the same commands choose the same slots. An UPDATE that moves the stack (its least, most, separation, centre or reference) chooses afresh; one that leaves it keeps its slot.
+- It is flown as its pattern at its slot - a wing orbits there, a rotorcraft hovers - and checked as a pattern's. A racetrack or a figure-eight takes its second circle in the pattern's shape; a hold is ATC's and is refused.
+- A `MarshallCommand` is not a `Command`: the activity's setpoint reads back its pattern in `command` and the marshall, its stack with it, in `marshall`. Its UPDATE is the marshall's (`world.update(activity, m)`, with a shape or without); a `PatternCommand` sent to it is refused `wrong_command_type`. In a batch or a task it goes in `BatchCommand::marshall`.
+- A marshall is never kept as a task: its slot is the stack's at its NEW.
+
 ### Grants: who may command a vehicle
 
 By default a vehicle is `ControlMode::Open`, and every command is arbitrated

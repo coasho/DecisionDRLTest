@@ -26,6 +26,8 @@ inline constexpr std::size_t kMaxCommandFields = 40;
 /// mode's setpoint, in declaration order (the C ABI's order too): pointers
 /// into `c`. Returns how many (0 for a BehaviorCommand).
 std::size_t commandFields(Command& c, double* fields[kMaxCommandFields]) noexcept;
+/// A marshall's 13 fields (docs/flight-autonomy.md, 4.46), as commandFields gives a mode's: not one of the command variant's.
+std::size_t marshallFields(MarshallCommand& m, double* fields[kMaxCommandFields]) noexcept;
 /// How many of a level's fields it had before the rotorcraft's were appended
 /// (docs/rotorcraft.md, 3.4): what the C ABI's fixed-size calls still take.
 std::size_t legacyFieldCount(Level level) noexcept;
@@ -84,6 +86,8 @@ public:
     int indexOf(const Command& command) const noexcept;
     /// A support effector's capability; -1 if the aircraft has none.
     int indexOf(const SupportCommand& command) const noexcept { return bySupport_[command.index()]; }
+    /// A guidance mode's capability by its setpoint's kind (a marshall's: 4.46); -1 if the vehicle has none.
+    int indexOf(SetpointKind mode) const noexcept { return byMode_[static_cast<std::size_t>(mode)]; }
     /// The SupportCommand alternative a capability sets; -1 if it is not a support effector's.
     int supportKindOf(std::size_t index) const noexcept {
         for (std::size_t k = 0; k < kSupportKinds; ++k)
@@ -131,8 +135,8 @@ private:
     std::vector<CapabilityDescriptor> descriptors_;
     std::array<int, static_cast<std::size_t>(Level::Behavior)> byLevel_{};
     std::array<int, kSupportKinds> bySupport_{-1, -1, -1, -1, -1, -1};
-    std::array<int, static_cast<std::size_t>(SetpointKind::Count)> byMode_{-1, -1, -1, -1, -1, -1, -1}; ///< a guidance mode's capability, by its setpoint
-    static_assert(static_cast<int>(SetpointKind::Count) == 7, "byMode_ starts -1 for every kind");
+    std::array<int, static_cast<std::size_t>(SetpointKind::Count)> byMode_{-1, -1, -1, -1, -1, -1, -1, -1}; ///< a guidance mode's capability, by its setpoint
+    static_assert(static_cast<int>(SetpointKind::Count) == 8, "byMode_ starts -1 for every kind");
     std::uint64_t registryRevision_ = 0;
 };
 
