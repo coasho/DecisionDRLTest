@@ -65,7 +65,166 @@
       <brake_group> NONE </brake_group>
       <retractable> 0 </retractable>
     </contact>
+    <contact type="STRUCTURE" name="deck front">
+      <location unit="IN"> <x> 215 </x> <y> 3.4543315 </y> <z> 270.41478 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 595396 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 19847 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 19847 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="drag beam left front">
+      <location unit="IN"> <x> 290.55118 </x> <y> -47.007874 </y> <z> 196.85039 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 752880 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 25096 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 25096 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="drag beam right front">
+      <location unit="IN"> <x> 290.55118 </x> <y> 47.007874 </y> <z> 196.85039 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 752880 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 25096 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 25096 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="fuselage left front">
+      <location unit="IN"> <x> 214.29134 </x> <y> -39.484847 </y> <z> 252.39966 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 536377 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 17879 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 17879 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="fuselage left front 2">
+      <location unit="IN"> <x> 181.85039 </x> <y> -38.084555 </y> <z> 214.25722 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 311071 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 10369 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 10369 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="fuselage left front 3">
+      <location unit="IN"> <x> 158.30709 </x> <y> -17.429796 </y> <z> 222.08318 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 315043 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 10501 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 10501 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="fuselage rear">
+      <location unit="IN"> <x> 593.8189 </x> <y> -2.3913571e-13 </y> <z> 206.33858 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 416834 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 13894 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 13894 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="fuselage right front">
+      <location unit="IN"> <x> 158.30709 </x> <y> 17.429796 </y> <z> 222.08318 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 315043 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 10501 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 10501 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="fuselage right front 2">
+      <location unit="IN"> <x> 181.85039 </x> <y> 38.084555 </y> <z> 214.25722 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 311071 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 10369 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 10369 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="fuselage right front 3">
+      <location unit="IN"> <x> 214.29134 </x> <y> 39.484847 </y> <z> 252.39966 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 536377 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 17879 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 17879 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="main rotor hub front">
+      <location unit="IN"> <x> 340.56228 </x> <y> 0 </y> <z> 327.16834 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 1246543 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 41551 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 41551 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="nacelle left front">
+      <location unit="IN"> <x> 320.27339 </x> <y> -47.722985 </y> <z> 285.85886 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 1756033 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 58534 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 58534 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="nacelle right front">
+      <location unit="IN"> <x> 320.27339 </x> <y> 47.722985 </y> <z> 285.85886 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 1756033 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 58534 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 58534 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="stabilator left rear">
+      <location unit="IN"> <x> 718.18898 </x> <y> -86.338583 </y> <z> 240.7874 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 378462 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 12615 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 12615 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="stabilator rear">
+      <location unit="IN"> <x> 735.82677 </x> <y> 0 </y> <z> 240.7874 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 448634 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 14954 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 14954 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="stabilator right rear">
+      <location unit="IN"> <x> 718.18898 </x> <y> 86.338583 </y> <z> 240.7874 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 378462 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 12615 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 12615 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="tail rotor gearbox rear">
+      <location unit="IN"> <x> 766.14173 </x> <y> 2.992126 </y> <z> 324.01575 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 175963 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 5865 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 5865 </damping_coeff_rebound>
+    </contact>
+    <contact type="STRUCTURE" name="tail rotor hub right rear">
+      <location unit="IN"> <x> 732 </x> <y> 18.793852 </y> <z> 331.5404 </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> 192417 </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> 6414 </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> 6414 </damping_coeff_rebound>
+    </contact>
   </ground_reactions>
+  <external_reactions>
+    <!-- The airframe feels the rotors' drive, not their blades. JSBSim applies each rotor's aerodynamic
+         torque to the airframe, as though the airframe held the rotor's speed; here the rotor speed is a
+         state of the flight control system - the engine's torque less the rotors' spins them up - and the
+         engine drives through a freewheel. What the drive does not carry (the rotors' spin-up, and all of
+         an air-driven rotor's torque) is given back about the main rotor's shaft. -->
+    <moment name="rotor-drive" frame="BODY">
+      <function> <product> <value> 1 </value> <property> fcs/uh60/armed </property>
+        <difference> <property> fcs/uh60/drive-torque </property>
+          <sum> <property> propulsion/engine[0]/torque-lbsft </property>
+            <product> <property> propulsion/engine[1]/torque-lbsft </property> <value> 4.6154443 </value> </product> </sum>
+        </difference> </product> </function>
+      <direction> <x> -0.052335956 </x> <y> 0 </y> <z> 0.99862953 </z> </direction>
+    </moment>
+  </external_reactions>
   <propulsion>
     <engine file="uh60_engine">
         <feed>0</feed>
@@ -123,292 +282,292 @@
     <property value="0.028791">fsim/hover/aileron_trim</property>
     <property value="100">fsim/hover/altitude_m</property>
     <property value="-0.0448501">fsim/hover/elevator_trim</property>
-    <property value="0.626234">fsim/hover/heave/damping</property>
+    <property value="0.626216">fsim/hover/heave/damping</property>
     <property value="0.072">fsim/hover/heave/lag_s</property>
-    <property value="26.6672">fsim/hover/heave/power</property>
+    <property value="26.6652">fsim/hover/heave/power</property>
     <property value="7438.91">fsim/hover/mass_kg</property>
-    <property value="1.10767">fsim/hover/pitch/damping</property>
+    <property value="1.10754">fsim/hover/pitch/damping</property>
     <property value="0.072">fsim/hover/pitch/lag_s</property>
-    <property value="-1.72993">fsim/hover/pitch/power</property>
+    <property value="-1.72983">fsim/hover/pitch/power</property>
     <property value="4.78471">fsim/hover/pitch_attitude_deg</property>
-    <property value="3.32986">fsim/hover/roll/damping</property>
+    <property value="3.32997">fsim/hover/roll/damping</property>
     <property value="0.072">fsim/hover/roll/lag_s</property>
-    <property value="6.42879">fsim/hover/roll/power</property>
+    <property value="6.42911">fsim/hover/roll/power</property>
     <property value="-2.22732">fsim/hover/roll_attitude_deg</property>
     <property value="0.401595">fsim/hover/rudder_trim</property>
     <property value="0.579932">fsim/hover/throttle_trim</property>
-    <property value="0.46311">fsim/hover/yaw/damping</property>
+    <property value="0.462173">fsim/hover/yaw/damping</property>
     <property value="0.0380055">fsim/hover/yaw/lag_s</property>
-    <property value="-1.99907">fsim/hover/yaw/power</property>
+    <property value="-1.99819">fsim/hover/yaw/power</property>
     <property value="1">fsim/tables/version</property>
     <property value="1">fsim/tables/provenance</property>
     <property value="100">fsim/tables/altitude_m/h0</property>
     <property value="1000">fsim/tables/altitude_m/h1</property>
     <property value="2000">fsim/tables/altitude_m/h2</property>
     <property value="3000">fsim/tables/altitude_m/h3</property>
-    <property value="0.0593384">fsim/tables/best_endurance_fuel_kg_s/h0/w0</property>
+    <property value="0.0593383">fsim/tables/best_endurance_fuel_kg_s/h0/w0</property>
     <property value="0.063097">fsim/tables/best_endurance_fuel_kg_s/h0/w1</property>
-    <property value="0.0669787">fsim/tables/best_endurance_fuel_kg_s/h0/w2</property>
-    <property value="0.0587005">fsim/tables/best_endurance_fuel_kg_s/h1/w0</property>
-    <property value="0.0626237">fsim/tables/best_endurance_fuel_kg_s/h1/w1</property>
-    <property value="0.0666875">fsim/tables/best_endurance_fuel_kg_s/h1/w2</property>
-    <property value="0.058273">fsim/tables/best_endurance_fuel_kg_s/h2/w0</property>
-    <property value="0.0624074">fsim/tables/best_endurance_fuel_kg_s/h2/w1</property>
-    <property value="0.0667475">fsim/tables/best_endurance_fuel_kg_s/h2/w2</property>
-    <property value="0.058205">fsim/tables/best_endurance_fuel_kg_s/h3/w0</property>
-    <property value="0.0625856">fsim/tables/best_endurance_fuel_kg_s/h3/w1</property>
-    <property value="0.0671305">fsim/tables/best_endurance_fuel_kg_s/h3/w2</property>
-    <property value="34.8558">fsim/tables/best_endurance_tas_ms/h0/w0</property>
-    <property value="36.446">fsim/tables/best_endurance_tas_ms/h0/w1</property>
-    <property value="37.9263">fsim/tables/best_endurance_tas_ms/h0/w2</property>
-    <property value="36.7869">fsim/tables/best_endurance_tas_ms/h1/w0</property>
-    <property value="38.3754">fsim/tables/best_endurance_tas_ms/h1/w1</property>
-    <property value="39.8288">fsim/tables/best_endurance_tas_ms/h1/w2</property>
-    <property value="38.9794">fsim/tables/best_endurance_tas_ms/h2/w0</property>
-    <property value="40.5107">fsim/tables/best_endurance_tas_ms/h2/w1</property>
-    <property value="42.1149">fsim/tables/best_endurance_tas_ms/h2/w2</property>
-    <property value="41.2183">fsim/tables/best_endurance_tas_ms/h3/w0</property>
-    <property value="42.9553">fsim/tables/best_endurance_tas_ms/h3/w1</property>
-    <property value="44.5597">fsim/tables/best_endurance_tas_ms/h3/w2</property>
-    <property value="0.0756072">fsim/tables/best_range_fuel_kg_s/h0/w0</property>
-    <property value="0.0797929">fsim/tables/best_range_fuel_kg_s/h0/w1</property>
-    <property value="0.084232">fsim/tables/best_range_fuel_kg_s/h0/w2</property>
-    <property value="0.0740734">fsim/tables/best_range_fuel_kg_s/h1/w0</property>
-    <property value="0.0785972">fsim/tables/best_range_fuel_kg_s/h1/w1</property>
-    <property value="0.0832803">fsim/tables/best_range_fuel_kg_s/h1/w2</property>
-    <property value="0.0729493">fsim/tables/best_range_fuel_kg_s/h2/w0</property>
-    <property value="0.0776567">fsim/tables/best_range_fuel_kg_s/h2/w1</property>
-    <property value="0.0827617">fsim/tables/best_range_fuel_kg_s/h2/w2</property>
-    <property value="0.0721588">fsim/tables/best_range_fuel_kg_s/h3/w0</property>
-    <property value="0.0773666">fsim/tables/best_range_fuel_kg_s/h3/w1</property>
-    <property value="0.0826499">fsim/tables/best_range_fuel_kg_s/h3/w2</property>
-    <property value="60.162">fsim/tables/best_range_tas_ms/h0/w0</property>
-    <property value="61.5724">fsim/tables/best_range_tas_ms/h0/w1</property>
+    <property value="0.0669786">fsim/tables/best_endurance_fuel_kg_s/h0/w2</property>
+    <property value="0.0587004">fsim/tables/best_endurance_fuel_kg_s/h1/w0</property>
+    <property value="0.0626236">fsim/tables/best_endurance_fuel_kg_s/h1/w1</property>
+    <property value="0.0666873">fsim/tables/best_endurance_fuel_kg_s/h1/w2</property>
+    <property value="0.0582729">fsim/tables/best_endurance_fuel_kg_s/h2/w0</property>
+    <property value="0.0624073">fsim/tables/best_endurance_fuel_kg_s/h2/w1</property>
+    <property value="0.0667473">fsim/tables/best_endurance_fuel_kg_s/h2/w2</property>
+    <property value="0.0582049">fsim/tables/best_endurance_fuel_kg_s/h3/w0</property>
+    <property value="0.0625853">fsim/tables/best_endurance_fuel_kg_s/h3/w1</property>
+    <property value="0.0671302">fsim/tables/best_endurance_fuel_kg_s/h3/w2</property>
+    <property value="34.8559">fsim/tables/best_endurance_tas_ms/h0/w0</property>
+    <property value="36.4462">fsim/tables/best_endurance_tas_ms/h0/w1</property>
+    <property value="37.9264">fsim/tables/best_endurance_tas_ms/h0/w2</property>
+    <property value="36.7871">fsim/tables/best_endurance_tas_ms/h1/w0</property>
+    <property value="38.3755">fsim/tables/best_endurance_tas_ms/h1/w1</property>
+    <property value="39.829">fsim/tables/best_endurance_tas_ms/h1/w2</property>
+    <property value="38.9796">fsim/tables/best_endurance_tas_ms/h2/w0</property>
+    <property value="40.5108">fsim/tables/best_endurance_tas_ms/h2/w1</property>
+    <property value="42.1151">fsim/tables/best_endurance_tas_ms/h2/w2</property>
+    <property value="41.2185">fsim/tables/best_endurance_tas_ms/h3/w0</property>
+    <property value="42.9555">fsim/tables/best_endurance_tas_ms/h3/w1</property>
+    <property value="44.5599">fsim/tables/best_endurance_tas_ms/h3/w2</property>
+    <property value="0.0756064">fsim/tables/best_range_fuel_kg_s/h0/w0</property>
+    <property value="0.0797928">fsim/tables/best_range_fuel_kg_s/h0/w1</property>
+    <property value="0.0842317">fsim/tables/best_range_fuel_kg_s/h0/w2</property>
+    <property value="0.0740733">fsim/tables/best_range_fuel_kg_s/h1/w0</property>
+    <property value="0.0785965">fsim/tables/best_range_fuel_kg_s/h1/w1</property>
+    <property value="0.0832794">fsim/tables/best_range_fuel_kg_s/h1/w2</property>
+    <property value="0.0729489">fsim/tables/best_range_fuel_kg_s/h2/w0</property>
+    <property value="0.077656">fsim/tables/best_range_fuel_kg_s/h2/w1</property>
+    <property value="0.0827611">fsim/tables/best_range_fuel_kg_s/h2/w2</property>
+    <property value="0.0721583">fsim/tables/best_range_fuel_kg_s/h3/w0</property>
+    <property value="0.0773658">fsim/tables/best_range_fuel_kg_s/h3/w1</property>
+    <property value="0.082649">fsim/tables/best_range_fuel_kg_s/h3/w2</property>
+    <property value="60.1614">fsim/tables/best_range_tas_ms/h0/w0</property>
+    <property value="61.5725">fsim/tables/best_range_tas_ms/h0/w1</property>
     <property value="62.9196">fsim/tables/best_range_tas_ms/h0/w2</property>
-    <property value="61.8464">fsim/tables/best_range_tas_ms/h1/w0</property>
-    <property value="63.3033">fsim/tables/best_range_tas_ms/h1/w1</property>
-    <property value="64.6902">fsim/tables/best_range_tas_ms/h1/w2</property>
+    <property value="61.8465">fsim/tables/best_range_tas_ms/h1/w0</property>
+    <property value="63.3031">fsim/tables/best_range_tas_ms/h1/w1</property>
+    <property value="64.6897">fsim/tables/best_range_tas_ms/h1/w2</property>
     <property value="63.832">fsim/tables/best_range_tas_ms/h2/w0</property>
-    <property value="65.318">fsim/tables/best_range_tas_ms/h2/w1</property>
+    <property value="65.3178">fsim/tables/best_range_tas_ms/h2/w1</property>
     <property value="67.0566">fsim/tables/best_range_tas_ms/h2/w2</property>
     <property value="65.9378">fsim/tables/best_range_tas_ms/h3/w0</property>
-    <property value="67.9084">fsim/tables/best_range_tas_ms/h3/w1</property>
-    <property value="69.5614">fsim/tables/best_range_tas_ms/h3/w2</property>
+    <property value="67.9082">fsim/tables/best_range_tas_ms/h3/w1</property>
+    <property value="69.5611">fsim/tables/best_range_tas_ms/h3/w2</property>
     <property value="22.4013">fsim/tables/climb_tas_ms/h0/w0</property>
-    <property value="23.2794">fsim/tables/climb_tas_ms/h0/w1</property>
-    <property value="24.2636">fsim/tables/climb_tas_ms/h0/w2</property>
-    <property value="22.8985">fsim/tables/climb_tas_ms/h1/w0</property>
-    <property value="23.8007">fsim/tables/climb_tas_ms/h1/w1</property>
-    <property value="24.859">fsim/tables/climb_tas_ms/h1/w2</property>
-    <property value="23.4216">fsim/tables/climb_tas_ms/h2/w0</property>
-    <property value="24.3926">fsim/tables/climb_tas_ms/h2/w1</property>
-    <property value="25.4612">fsim/tables/climb_tas_ms/h2/w2</property>
-    <property value="23.5242">fsim/tables/climb_tas_ms/h3/w0</property>
-    <property value="24.9602">fsim/tables/climb_tas_ms/h3/w1</property>
-    <property value="26.1411">fsim/tables/climb_tas_ms/h3/w2</property>
+    <property value="23.2793">fsim/tables/climb_tas_ms/h0/w1</property>
+    <property value="24.2633">fsim/tables/climb_tas_ms/h0/w2</property>
+    <property value="22.8984">fsim/tables/climb_tas_ms/h1/w0</property>
+    <property value="23.8005">fsim/tables/climb_tas_ms/h1/w1</property>
+    <property value="24.8587">fsim/tables/climb_tas_ms/h1/w2</property>
+    <property value="23.4215">fsim/tables/climb_tas_ms/h2/w0</property>
+    <property value="24.3924">fsim/tables/climb_tas_ms/h2/w1</property>
+    <property value="25.461">fsim/tables/climb_tas_ms/h2/w2</property>
+    <property value="23.5241">fsim/tables/climb_tas_ms/h3/w0</property>
+    <property value="24.9601">fsim/tables/climb_tas_ms/h3/w1</property>
+    <property value="26.1409">fsim/tables/climb_tas_ms/h3/w2</property>
     <property value="1061.41">fsim/tables/fuel_capacity_kg</property>
     <property value="0.103968">fsim/tables/fuel_kg_s/h0/w0/v0</property>
     <property value="0.0980373">fsim/tables/fuel_kg_s/h0/w0/v1</property>
-    <property value="0.0775201">fsim/tables/fuel_kg_s/h0/w0/v10</property>
-    <property value="0.0868995">fsim/tables/fuel_kg_s/h0/w0/v11</property>
-    <property value="0.0984437">fsim/tables/fuel_kg_s/h0/w0/v12</property>
-    <property value="0.113531">fsim/tables/fuel_kg_s/h0/w0/v13</property>
-    <property value="0.137319">fsim/tables/fuel_kg_s/h0/w0/v14</property>
-    <property value="0.160951">fsim/tables/fuel_kg_s/h0/w0/v15</property>
-    <property value="0.0851616">fsim/tables/fuel_kg_s/h0/w0/v2</property>
-    <property value="0.071935">fsim/tables/fuel_kg_s/h0/w0/v3</property>
-    <property value="0.0626651">fsim/tables/fuel_kg_s/h0/w0/v4</property>
+    <property value="0.07752">fsim/tables/fuel_kg_s/h0/w0/v10</property>
+    <property value="0.0868997">fsim/tables/fuel_kg_s/h0/w0/v11</property>
+    <property value="0.0984445">fsim/tables/fuel_kg_s/h0/w0/v12</property>
+    <property value="0.113533">fsim/tables/fuel_kg_s/h0/w0/v13</property>
+    <property value="0.137322">fsim/tables/fuel_kg_s/h0/w0/v14</property>
+    <property value="0.160945">fsim/tables/fuel_kg_s/h0/w0/v15</property>
+    <property value="0.0851617">fsim/tables/fuel_kg_s/h0/w0/v2</property>
+    <property value="0.0719352">fsim/tables/fuel_kg_s/h0/w0/v3</property>
+    <property value="0.0626653">fsim/tables/fuel_kg_s/h0/w0/v4</property>
     <property value="0.0597587">fsim/tables/fuel_kg_s/h0/w0/v5</property>
-    <property value="0.059465">fsim/tables/fuel_kg_s/h0/w0/v6</property>
-    <property value="0.0612023">fsim/tables/fuel_kg_s/h0/w0/v7</property>
-    <property value="0.0647326">fsim/tables/fuel_kg_s/h0/w0/v8</property>
-    <property value="0.0701661">fsim/tables/fuel_kg_s/h0/w0/v9</property>
+    <property value="0.0594649">fsim/tables/fuel_kg_s/h0/w0/v6</property>
+    <property value="0.0612022">fsim/tables/fuel_kg_s/h0/w0/v7</property>
+    <property value="0.0647325">fsim/tables/fuel_kg_s/h0/w0/v8</property>
+    <property value="0.0701659">fsim/tables/fuel_kg_s/h0/w0/v9</property>
     <property value="0.112913">fsim/tables/fuel_kg_s/h0/w1/v0</property>
     <property value="0.106597">fsim/tables/fuel_kg_s/h0/w1/v1</property>
-    <property value="0.0804013">fsim/tables/fuel_kg_s/h0/w1/v10</property>
-    <property value="0.0897681">fsim/tables/fuel_kg_s/h0/w1/v11</property>
-    <property value="0.101316">fsim/tables/fuel_kg_s/h0/w1/v12</property>
-    <property value="0.11647">fsim/tables/fuel_kg_s/h0/w1/v13</property>
-    <property value="0.13989">fsim/tables/fuel_kg_s/h0/w1/v14</property>
-    <property value="0.162309">fsim/tables/fuel_kg_s/h0/w1/v15</property>
-    <property value="0.0928992">fsim/tables/fuel_kg_s/h0/w1/v2</property>
-    <property value="0.0782609">fsim/tables/fuel_kg_s/h0/w1/v3</property>
-    <property value="0.0676264">fsim/tables/fuel_kg_s/h0/w1/v4</property>
+    <property value="0.0804012">fsim/tables/fuel_kg_s/h0/w1/v10</property>
+    <property value="0.089768">fsim/tables/fuel_kg_s/h0/w1/v11</property>
+    <property value="0.101317">fsim/tables/fuel_kg_s/h0/w1/v12</property>
+    <property value="0.116471">fsim/tables/fuel_kg_s/h0/w1/v13</property>
+    <property value="0.139891">fsim/tables/fuel_kg_s/h0/w1/v14</property>
+    <property value="0.162314">fsim/tables/fuel_kg_s/h0/w1/v15</property>
+    <property value="0.0928993">fsim/tables/fuel_kg_s/h0/w1/v2</property>
+    <property value="0.0782611">fsim/tables/fuel_kg_s/h0/w1/v3</property>
+    <property value="0.0676267">fsim/tables/fuel_kg_s/h0/w1/v4</property>
     <property value="0.0639285">fsim/tables/fuel_kg_s/h0/w1/v5</property>
     <property value="0.0631144">fsim/tables/fuel_kg_s/h0/w1/v6</property>
-    <property value="0.0644934">fsim/tables/fuel_kg_s/h0/w1/v7</property>
-    <property value="0.0678041">fsim/tables/fuel_kg_s/h0/w1/v8</property>
-    <property value="0.0731086">fsim/tables/fuel_kg_s/h0/w1/v9</property>
+    <property value="0.0644933">fsim/tables/fuel_kg_s/h0/w1/v7</property>
+    <property value="0.0678039">fsim/tables/fuel_kg_s/h0/w1/v8</property>
+    <property value="0.0731085">fsim/tables/fuel_kg_s/h0/w1/v9</property>
     <property value="0.122218">fsim/tables/fuel_kg_s/h0/w2/v0</property>
     <property value="0.115585">fsim/tables/fuel_kg_s/h0/w2/v1</property>
-    <property value="0.083236">fsim/tables/fuel_kg_s/h0/w2/v10</property>
-    <property value="0.0925073">fsim/tables/fuel_kg_s/h0/w2/v11</property>
-    <property value="0.103965">fsim/tables/fuel_kg_s/h0/w2/v12</property>
-    <property value="0.119051">fsim/tables/fuel_kg_s/h0/w2/v13</property>
-    <property value="0.141929">fsim/tables/fuel_kg_s/h0/w2/v14</property>
-    <property value="0.163363">fsim/tables/fuel_kg_s/h0/w2/v15</property>
+    <property value="0.0832357">fsim/tables/fuel_kg_s/h0/w2/v10</property>
+    <property value="0.0925071">fsim/tables/fuel_kg_s/h0/w2/v11</property>
+    <property value="0.103966">fsim/tables/fuel_kg_s/h0/w2/v12</property>
+    <property value="0.119053">fsim/tables/fuel_kg_s/h0/w2/v13</property>
+    <property value="0.141928">fsim/tables/fuel_kg_s/h0/w2/v14</property>
+    <property value="0.163374">fsim/tables/fuel_kg_s/h0/w2/v15</property>
     <property value="0.101108">fsim/tables/fuel_kg_s/h0/w2/v2</property>
-    <property value="0.0849975">fsim/tables/fuel_kg_s/h0/w2/v3</property>
+    <property value="0.0849976">fsim/tables/fuel_kg_s/h0/w2/v3</property>
     <property value="0.0736117">fsim/tables/fuel_kg_s/h0/w2/v4</property>
-    <property value="0.0683959">fsim/tables/fuel_kg_s/h0/w2/v5</property>
-    <property value="0.0669899">fsim/tables/fuel_kg_s/h0/w2/v6</property>
-    <property value="0.0679503">fsim/tables/fuel_kg_s/h0/w2/v7</property>
-    <property value="0.0709745">fsim/tables/fuel_kg_s/h0/w2/v8</property>
-    <property value="0.0760799">fsim/tables/fuel_kg_s/h0/w2/v9</property>
+    <property value="0.0683958">fsim/tables/fuel_kg_s/h0/w2/v5</property>
+    <property value="0.0669898">fsim/tables/fuel_kg_s/h0/w2/v6</property>
+    <property value="0.0679502">fsim/tables/fuel_kg_s/h0/w2/v7</property>
+    <property value="0.0709742">fsim/tables/fuel_kg_s/h0/w2/v8</property>
+    <property value="0.0760797">fsim/tables/fuel_kg_s/h0/w2/v9</property>
     <property value="0.105451">fsim/tables/fuel_kg_s/h1/w0/v0</property>
     <property value="0.0995724">fsim/tables/fuel_kg_s/h1/w0/v1</property>
-    <property value="0.074506">fsim/tables/fuel_kg_s/h1/w0/v10</property>
-    <property value="0.0831509">fsim/tables/fuel_kg_s/h1/w0/v11</property>
-    <property value="0.0938214">fsim/tables/fuel_kg_s/h1/w0/v12</property>
-    <property value="0.107877">fsim/tables/fuel_kg_s/h1/w0/v13</property>
-    <property value="0.129483">fsim/tables/fuel_kg_s/h1/w0/v14</property>
-    <property value="0.152231">fsim/tables/fuel_kg_s/h1/w0/v15</property>
-    <property value="0.0868399">fsim/tables/fuel_kg_s/h1/w0/v2</property>
-    <property value="0.0730923">fsim/tables/fuel_kg_s/h1/w0/v3</property>
-    <property value="0.0630607">fsim/tables/fuel_kg_s/h1/w0/v4</property>
+    <property value="0.0745058">fsim/tables/fuel_kg_s/h1/w0/v10</property>
+    <property value="0.0831507">fsim/tables/fuel_kg_s/h1/w0/v11</property>
+    <property value="0.093822">fsim/tables/fuel_kg_s/h1/w0/v12</property>
+    <property value="0.107878">fsim/tables/fuel_kg_s/h1/w0/v13</property>
+    <property value="0.129484">fsim/tables/fuel_kg_s/h1/w0/v14</property>
+    <property value="0.152244">fsim/tables/fuel_kg_s/h1/w0/v15</property>
+    <property value="0.08684">fsim/tables/fuel_kg_s/h1/w0/v2</property>
+    <property value="0.0730925">fsim/tables/fuel_kg_s/h1/w0/v3</property>
+    <property value="0.0630609">fsim/tables/fuel_kg_s/h1/w0/v4</property>
     <property value="0.0595462">fsim/tables/fuel_kg_s/h1/w0/v5</property>
-    <property value="0.0587082">fsim/tables/fuel_kg_s/h1/w0/v6</property>
-    <property value="0.0599111">fsim/tables/fuel_kg_s/h1/w0/v7</property>
-    <property value="0.0629213">fsim/tables/fuel_kg_s/h1/w0/v8</property>
-    <property value="0.0677887">fsim/tables/fuel_kg_s/h1/w0/v9</property>
+    <property value="0.0587081">fsim/tables/fuel_kg_s/h1/w0/v6</property>
+    <property value="0.0599109">fsim/tables/fuel_kg_s/h1/w0/v7</property>
+    <property value="0.0629211">fsim/tables/fuel_kg_s/h1/w0/v8</property>
+    <property value="0.0677885">fsim/tables/fuel_kg_s/h1/w0/v9</property>
     <property value="0.114854">fsim/tables/fuel_kg_s/h1/w1/v0</property>
     <property value="0.10866">fsim/tables/fuel_kg_s/h1/w1/v1</property>
-    <property value="0.0773711">fsim/tables/fuel_kg_s/h1/w1/v10</property>
-    <property value="0.0859119">fsim/tables/fuel_kg_s/h1/w1/v11</property>
-    <property value="0.0964778">fsim/tables/fuel_kg_s/h1/w1/v12</property>
-    <property value="0.110465">fsim/tables/fuel_kg_s/h1/w1/v13</property>
-    <property value="0.131571">fsim/tables/fuel_kg_s/h1/w1/v14</property>
-    <property value="0.153497">fsim/tables/fuel_kg_s/h1/w1/v15</property>
-    <property value="0.0951604">fsim/tables/fuel_kg_s/h1/w1/v2</property>
-    <property value="0.0799329">fsim/tables/fuel_kg_s/h1/w1/v3</property>
-    <property value="0.0694421">fsim/tables/fuel_kg_s/h1/w1/v4</property>
+    <property value="0.0773708">fsim/tables/fuel_kg_s/h1/w1/v10</property>
+    <property value="0.0859118">fsim/tables/fuel_kg_s/h1/w1/v11</property>
+    <property value="0.0964783">fsim/tables/fuel_kg_s/h1/w1/v12</property>
+    <property value="0.110466">fsim/tables/fuel_kg_s/h1/w1/v13</property>
+    <property value="0.13157">fsim/tables/fuel_kg_s/h1/w1/v14</property>
+    <property value="0.15351">fsim/tables/fuel_kg_s/h1/w1/v15</property>
+    <property value="0.0951605">fsim/tables/fuel_kg_s/h1/w1/v2</property>
+    <property value="0.079933">fsim/tables/fuel_kg_s/h1/w1/v3</property>
+    <property value="0.0694422">fsim/tables/fuel_kg_s/h1/w1/v4</property>
     <property value="0.0640908">fsim/tables/fuel_kg_s/h1/w1/v5</property>
-    <property value="0.0626497">fsim/tables/fuel_kg_s/h1/w1/v6</property>
-    <property value="0.0634244">fsim/tables/fuel_kg_s/h1/w1/v7</property>
-    <property value="0.0661388">fsim/tables/fuel_kg_s/h1/w1/v8</property>
-    <property value="0.0707987">fsim/tables/fuel_kg_s/h1/w1/v9</property>
+    <property value="0.0626496">fsim/tables/fuel_kg_s/h1/w1/v6</property>
+    <property value="0.0634242">fsim/tables/fuel_kg_s/h1/w1/v7</property>
+    <property value="0.0661386">fsim/tables/fuel_kg_s/h1/w1/v8</property>
+    <property value="0.0707985">fsim/tables/fuel_kg_s/h1/w1/v9</property>
     <property value="0.124639">fsim/tables/fuel_kg_s/h1/w2/v0</property>
     <property value="0.118122">fsim/tables/fuel_kg_s/h1/w2/v1</property>
-    <property value="0.0804196">fsim/tables/fuel_kg_s/h1/w2/v10</property>
-    <property value="0.0888524">fsim/tables/fuel_kg_s/h1/w2/v11</property>
-    <property value="0.0993447">fsim/tables/fuel_kg_s/h1/w2/v12</property>
-    <property value="0.11329">fsim/tables/fuel_kg_s/h1/w2/v13</property>
-    <property value="0.134106">fsim/tables/fuel_kg_s/h1/w2/v14</property>
-    <property value="0.154797">fsim/tables/fuel_kg_s/h1/w2/v15</property>
+    <property value="0.0804194">fsim/tables/fuel_kg_s/h1/w2/v10</property>
+    <property value="0.0888523">fsim/tables/fuel_kg_s/h1/w2/v11</property>
+    <property value="0.0993451">fsim/tables/fuel_kg_s/h1/w2/v12</property>
+    <property value="0.113291">fsim/tables/fuel_kg_s/h1/w2/v13</property>
+    <property value="0.134101">fsim/tables/fuel_kg_s/h1/w2/v14</property>
+    <property value="0.15481">fsim/tables/fuel_kg_s/h1/w2/v15</property>
     <property value="0.103858">fsim/tables/fuel_kg_s/h1/w2/v2</property>
-    <property value="0.0871933">fsim/tables/fuel_kg_s/h1/w2/v3</property>
-    <property value="0.0758852">fsim/tables/fuel_kg_s/h1/w2/v4</property>
-    <property value="0.0689344">fsim/tables/fuel_kg_s/h1/w2/v5</property>
-    <property value="0.0668522">fsim/tables/fuel_kg_s/h1/w2/v6</property>
-    <property value="0.0671689">fsim/tables/fuel_kg_s/h1/w2/v7</property>
-    <property value="0.0695658">fsim/tables/fuel_kg_s/h1/w2/v8</property>
-    <property value="0.0740024">fsim/tables/fuel_kg_s/h1/w2/v9</property>
+    <property value="0.0871936">fsim/tables/fuel_kg_s/h1/w2/v3</property>
+    <property value="0.0758853">fsim/tables/fuel_kg_s/h1/w2/v4</property>
+    <property value="0.0689343">fsim/tables/fuel_kg_s/h1/w2/v5</property>
+    <property value="0.066852">fsim/tables/fuel_kg_s/h1/w2/v6</property>
+    <property value="0.0671687">fsim/tables/fuel_kg_s/h1/w2/v7</property>
+    <property value="0.0695656">fsim/tables/fuel_kg_s/h1/w2/v8</property>
+    <property value="0.0740022">fsim/tables/fuel_kg_s/h1/w2/v9</property>
     <property value="0.107617">fsim/tables/fuel_kg_s/h2/w0/v0</property>
     <property value="0.101873">fsim/tables/fuel_kg_s/h2/w0/v1</property>
-    <property value="0.0713761">fsim/tables/fuel_kg_s/h2/w0/v10</property>
-    <property value="0.0791368">fsim/tables/fuel_kg_s/h2/w0/v11</property>
-    <property value="0.0887643">fsim/tables/fuel_kg_s/h2/w0/v12</property>
-    <property value="0.101555">fsim/tables/fuel_kg_s/h2/w0/v13</property>
-    <property value="0.120726">fsim/tables/fuel_kg_s/h2/w0/v14</property>
-    <property value="0.140622">fsim/tables/fuel_kg_s/h2/w0/v15</property>
-    <property value="0.0893612">fsim/tables/fuel_kg_s/h2/w0/v2</property>
-    <property value="0.0750085">fsim/tables/fuel_kg_s/h2/w0/v3</property>
-    <property value="0.0654932">fsim/tables/fuel_kg_s/h2/w0/v4</property>
+    <property value="0.0713758">fsim/tables/fuel_kg_s/h2/w0/v10</property>
+    <property value="0.0791366">fsim/tables/fuel_kg_s/h2/w0/v11</property>
+    <property value="0.0887646">fsim/tables/fuel_kg_s/h2/w0/v12</property>
+    <property value="0.101556">fsim/tables/fuel_kg_s/h2/w0/v13</property>
+    <property value="0.120724">fsim/tables/fuel_kg_s/h2/w0/v14</property>
+    <property value="0.140632">fsim/tables/fuel_kg_s/h2/w0/v15</property>
+    <property value="0.0893613">fsim/tables/fuel_kg_s/h2/w0/v2</property>
+    <property value="0.0750087">fsim/tables/fuel_kg_s/h2/w0/v3</property>
+    <property value="0.0654933">fsim/tables/fuel_kg_s/h2/w0/v4</property>
     <property value="0.0598422">fsim/tables/fuel_kg_s/h2/w0/v5</property>
-    <property value="0.0583294">fsim/tables/fuel_kg_s/h2/w0/v6</property>
-    <property value="0.0588856">fsim/tables/fuel_kg_s/h2/w0/v7</property>
-    <property value="0.0612551">fsim/tables/fuel_kg_s/h2/w0/v8</property>
-    <property value="0.065431">fsim/tables/fuel_kg_s/h2/w0/v9</property>
+    <property value="0.0583293">fsim/tables/fuel_kg_s/h2/w0/v6</property>
+    <property value="0.0588854">fsim/tables/fuel_kg_s/h2/w0/v7</property>
+    <property value="0.0612549">fsim/tables/fuel_kg_s/h2/w0/v8</property>
+    <property value="0.0654309">fsim/tables/fuel_kg_s/h2/w0/v9</property>
     <property value="0.117575">fsim/tables/fuel_kg_s/h2/w1/v0</property>
     <property value="0.111535">fsim/tables/fuel_kg_s/h2/w1/v1</property>
-    <property value="0.074321">fsim/tables/fuel_kg_s/h2/w1/v10</property>
-    <property value="0.0818925">fsim/tables/fuel_kg_s/h2/w1/v11</property>
-    <property value="0.0913525">fsim/tables/fuel_kg_s/h2/w1/v12</property>
+    <property value="0.0743206">fsim/tables/fuel_kg_s/h2/w1/v10</property>
+    <property value="0.0818922">fsim/tables/fuel_kg_s/h2/w1/v11</property>
+    <property value="0.0913526">fsim/tables/fuel_kg_s/h2/w1/v12</property>
     <property value="0.103946">fsim/tables/fuel_kg_s/h2/w1/v13</property>
-    <property value="0.122493">fsim/tables/fuel_kg_s/h2/w1/v14</property>
-    <property value="0.141391">fsim/tables/fuel_kg_s/h2/w1/v15</property>
-    <property value="0.0983114">fsim/tables/fuel_kg_s/h2/w1/v2</property>
-    <property value="0.082577">fsim/tables/fuel_kg_s/h2/w1/v3</property>
-    <property value="0.0715729">fsim/tables/fuel_kg_s/h2/w1/v4</property>
-    <property value="0.0648748">fsim/tables/fuel_kg_s/h2/w1/v5</property>
-    <property value="0.0626671">fsim/tables/fuel_kg_s/h2/w1/v6</property>
-    <property value="0.0627181">fsim/tables/fuel_kg_s/h2/w1/v7</property>
-    <property value="0.0647125">fsim/tables/fuel_kg_s/h2/w1/v8</property>
-    <property value="0.0686023">fsim/tables/fuel_kg_s/h2/w1/v9</property>
+    <property value="0.122486">fsim/tables/fuel_kg_s/h2/w1/v14</property>
+    <property value="0.141401">fsim/tables/fuel_kg_s/h2/w1/v15</property>
+    <property value="0.0983116">fsim/tables/fuel_kg_s/h2/w1/v2</property>
+    <property value="0.0825773">fsim/tables/fuel_kg_s/h2/w1/v3</property>
+    <property value="0.071573">fsim/tables/fuel_kg_s/h2/w1/v4</property>
+    <property value="0.0648747">fsim/tables/fuel_kg_s/h2/w1/v5</property>
+    <property value="0.062667">fsim/tables/fuel_kg_s/h2/w1/v6</property>
+    <property value="0.0627179">fsim/tables/fuel_kg_s/h2/w1/v7</property>
+    <property value="0.0647123">fsim/tables/fuel_kg_s/h2/w1/v8</property>
+    <property value="0.0686021">fsim/tables/fuel_kg_s/h2/w1/v9</property>
     <property value="0.127941">fsim/tables/fuel_kg_s/h2/w2/v0</property>
-    <property value="0.121643">fsim/tables/fuel_kg_s/h2/w2/v1</property>
-    <property value="0.0773096">fsim/tables/fuel_kg_s/h2/w2/v10</property>
-    <property value="0.0846124">fsim/tables/fuel_kg_s/h2/w2/v11</property>
+    <property value="0.121644">fsim/tables/fuel_kg_s/h2/w2/v1</property>
+    <property value="0.0773092">fsim/tables/fuel_kg_s/h2/w2/v10</property>
+    <property value="0.0846119">fsim/tables/fuel_kg_s/h2/w2/v11</property>
     <property value="0.0938179">fsim/tables/fuel_kg_s/h2/w2/v12</property>
     <property value="0.106114">fsim/tables/fuel_kg_s/h2/w2/v13</property>
-    <property value="0.123764">fsim/tables/fuel_kg_s/h2/w2/v14</property>
-    <property value="0.141871">fsim/tables/fuel_kg_s/h2/w2/v15</property>
+    <property value="0.123756">fsim/tables/fuel_kg_s/h2/w2/v14</property>
+    <property value="0.141879">fsim/tables/fuel_kg_s/h2/w2/v15</property>
     <property value="0.107727">fsim/tables/fuel_kg_s/h2/w2/v2</property>
-    <property value="0.090725">fsim/tables/fuel_kg_s/h2/w2/v3</property>
-    <property value="0.0781377">fsim/tables/fuel_kg_s/h2/w2/v4</property>
-    <property value="0.0703159">fsim/tables/fuel_kg_s/h2/w2/v5</property>
-    <property value="0.0673335">fsim/tables/fuel_kg_s/h2/w2/v6</property>
-    <property value="0.0668117">fsim/tables/fuel_kg_s/h2/w2/v7</property>
-    <property value="0.0683602">fsim/tables/fuel_kg_s/h2/w2/v8</property>
-    <property value="0.071892">fsim/tables/fuel_kg_s/h2/w2/v9</property>
+    <property value="0.0907253">fsim/tables/fuel_kg_s/h2/w2/v3</property>
+    <property value="0.0781381">fsim/tables/fuel_kg_s/h2/w2/v4</property>
+    <property value="0.0703158">fsim/tables/fuel_kg_s/h2/w2/v5</property>
+    <property value="0.0673333">fsim/tables/fuel_kg_s/h2/w2/v6</property>
+    <property value="0.0668115">fsim/tables/fuel_kg_s/h2/w2/v7</property>
+    <property value="0.0683599">fsim/tables/fuel_kg_s/h2/w2/v8</property>
+    <property value="0.0718916">fsim/tables/fuel_kg_s/h2/w2/v9</property>
     <property value="0.110365">fsim/tables/fuel_kg_s/h3/w0/v0</property>
     <property value="0.104767">fsim/tables/fuel_kg_s/h3/w0/v1</property>
-    <property value="0.0686425">fsim/tables/fuel_kg_s/h3/w0/v10</property>
-    <property value="0.0754917">fsim/tables/fuel_kg_s/h3/w0/v11</property>
-    <property value="0.0841108">fsim/tables/fuel_kg_s/h3/w0/v12</property>
-    <property value="0.0955835">fsim/tables/fuel_kg_s/h3/w0/v13</property>
-    <property value="0.112198">fsim/tables/fuel_kg_s/h3/w0/v14</property>
-    <property value="0.129028">fsim/tables/fuel_kg_s/h3/w0/v15</property>
-    <property value="0.0924918">fsim/tables/fuel_kg_s/h3/w0/v2</property>
-    <property value="0.0777227">fsim/tables/fuel_kg_s/h3/w0/v3</property>
-    <property value="0.067166">fsim/tables/fuel_kg_s/h3/w0/v4</property>
+    <property value="0.0686421">fsim/tables/fuel_kg_s/h3/w0/v10</property>
+    <property value="0.0754913">fsim/tables/fuel_kg_s/h3/w0/v11</property>
+    <property value="0.0841107">fsim/tables/fuel_kg_s/h3/w0/v12</property>
+    <property value="0.095583">fsim/tables/fuel_kg_s/h3/w0/v13</property>
+    <property value="0.112192">fsim/tables/fuel_kg_s/h3/w0/v14</property>
+    <property value="0.129036">fsim/tables/fuel_kg_s/h3/w0/v15</property>
+    <property value="0.092492">fsim/tables/fuel_kg_s/h3/w0/v2</property>
+    <property value="0.0777229">fsim/tables/fuel_kg_s/h3/w0/v3</property>
+    <property value="0.0671662">fsim/tables/fuel_kg_s/h3/w0/v4</property>
     <property value="0.0607526">fsim/tables/fuel_kg_s/h3/w0/v5</property>
-    <property value="0.0585049">fsim/tables/fuel_kg_s/h3/w0/v6</property>
-    <property value="0.058371">fsim/tables/fuel_kg_s/h3/w0/v7</property>
-    <property value="0.0600559">fsim/tables/fuel_kg_s/h3/w0/v8</property>
-    <property value="0.0635027">fsim/tables/fuel_kg_s/h3/w0/v9</property>
+    <property value="0.0585047">fsim/tables/fuel_kg_s/h3/w0/v6</property>
+    <property value="0.0583708">fsim/tables/fuel_kg_s/h3/w0/v7</property>
+    <property value="0.0600556">fsim/tables/fuel_kg_s/h3/w0/v8</property>
+    <property value="0.0635024">fsim/tables/fuel_kg_s/h3/w0/v9</property>
     <property value="0.12093">fsim/tables/fuel_kg_s/h3/w1/v0</property>
     <property value="0.115104">fsim/tables/fuel_kg_s/h3/w1/v1</property>
-    <property value="0.0716054">fsim/tables/fuel_kg_s/h3/w1/v10</property>
-    <property value="0.0781214">fsim/tables/fuel_kg_s/h3/w1/v11</property>
-    <property value="0.0863928">fsim/tables/fuel_kg_s/h3/w1/v12</property>
-    <property value="0.0974809">fsim/tables/fuel_kg_s/h3/w1/v13</property>
-    <property value="0.113156">fsim/tables/fuel_kg_s/h3/w1/v14</property>
-    <property value="0.129157">fsim/tables/fuel_kg_s/h3/w1/v15</property>
+    <property value="0.071605">fsim/tables/fuel_kg_s/h3/w1/v10</property>
+    <property value="0.0781209">fsim/tables/fuel_kg_s/h3/w1/v11</property>
+    <property value="0.0863926">fsim/tables/fuel_kg_s/h3/w1/v12</property>
+    <property value="0.0974801">fsim/tables/fuel_kg_s/h3/w1/v13</property>
+    <property value="0.113149">fsim/tables/fuel_kg_s/h3/w1/v14</property>
+    <property value="0.129164">fsim/tables/fuel_kg_s/h3/w1/v15</property>
     <property value="0.102159">fsim/tables/fuel_kg_s/h3/w1/v2</property>
-    <property value="0.0861939">fsim/tables/fuel_kg_s/h3/w1/v3</property>
-    <property value="0.0740849">fsim/tables/fuel_kg_s/h3/w1/v4</property>
-    <property value="0.0664128">fsim/tables/fuel_kg_s/h3/w1/v5</property>
-    <property value="0.0633477">fsim/tables/fuel_kg_s/h3/w1/v6</property>
-    <property value="0.0625982">fsim/tables/fuel_kg_s/h3/w1/v7</property>
-    <property value="0.0637874">fsim/tables/fuel_kg_s/h3/w1/v8</property>
-    <property value="0.0668236">fsim/tables/fuel_kg_s/h3/w1/v9</property>
+    <property value="0.0861942">fsim/tables/fuel_kg_s/h3/w1/v3</property>
+    <property value="0.0740854">fsim/tables/fuel_kg_s/h3/w1/v4</property>
+    <property value="0.0664127">fsim/tables/fuel_kg_s/h3/w1/v5</property>
+    <property value="0.0633475">fsim/tables/fuel_kg_s/h3/w1/v6</property>
+    <property value="0.062598">fsim/tables/fuel_kg_s/h3/w1/v7</property>
+    <property value="0.0637871">fsim/tables/fuel_kg_s/h3/w1/v8</property>
+    <property value="0.0668232">fsim/tables/fuel_kg_s/h3/w1/v9</property>
     <property value="0.131934">fsim/tables/fuel_kg_s/h3/w2/v0</property>
     <property value="0.12589">fsim/tables/fuel_kg_s/h3/w2/v1</property>
-    <property value="0.0748265">fsim/tables/fuel_kg_s/h3/w2/v10</property>
-    <property value="0.0809969">fsim/tables/fuel_kg_s/h3/w2/v11</property>
-    <property value="0.088962">fsim/tables/fuel_kg_s/h3/w2/v12</property>
-    <property value="0.0997347">fsim/tables/fuel_kg_s/h3/w2/v13</property>
-    <property value="0.114316">fsim/tables/fuel_kg_s/h3/w2/v14</property>
-    <property value="0.129477">fsim/tables/fuel_kg_s/h3/w2/v15</property>
+    <property value="0.0748259">fsim/tables/fuel_kg_s/h3/w2/v10</property>
+    <property value="0.0809964">fsim/tables/fuel_kg_s/h3/w2/v11</property>
+    <property value="0.0889615">fsim/tables/fuel_kg_s/h3/w2/v12</property>
+    <property value="0.0997334">fsim/tables/fuel_kg_s/h3/w2/v13</property>
+    <property value="0.114309">fsim/tables/fuel_kg_s/h3/w2/v14</property>
+    <property value="0.129483">fsim/tables/fuel_kg_s/h3/w2/v15</property>
     <property value="0.112313">fsim/tables/fuel_kg_s/h3/w2/v2</property>
-    <property value="0.0952025">fsim/tables/fuel_kg_s/h3/w2/v3</property>
-    <property value="0.0816006">fsim/tables/fuel_kg_s/h3/w2/v4</property>
-    <property value="0.0724793">fsim/tables/fuel_kg_s/h3/w2/v5</property>
-    <property value="0.0685727">fsim/tables/fuel_kg_s/h3/w2/v6</property>
-    <property value="0.0671641">fsim/tables/fuel_kg_s/h3/w2/v7</property>
-    <property value="0.0678234">fsim/tables/fuel_kg_s/h3/w2/v8</property>
-    <property value="0.0704227">fsim/tables/fuel_kg_s/h3/w2/v9</property>
+    <property value="0.0952029">fsim/tables/fuel_kg_s/h3/w2/v3</property>
+    <property value="0.0816012">fsim/tables/fuel_kg_s/h3/w2/v4</property>
+    <property value="0.0724792">fsim/tables/fuel_kg_s/h3/w2/v5</property>
+    <property value="0.0685725">fsim/tables/fuel_kg_s/h3/w2/v6</property>
+    <property value="0.0671638">fsim/tables/fuel_kg_s/h3/w2/v7</property>
+    <property value="0.067823">fsim/tables/fuel_kg_s/h3/w2/v8</property>
+    <property value="0.0704222">fsim/tables/fuel_kg_s/h3/w2/v9</property>
     <property value="19.5239">fsim/tables/max_climb_ms/h0/w0</property>
-    <property value="17.7175">fsim/tables/max_climb_ms/h0/w1</property>
+    <property value="17.7176">fsim/tables/max_climb_ms/h0/w1</property>
     <property value="16.0449">fsim/tables/max_climb_ms/h0/w2</property>
     <property value="19.5416">fsim/tables/max_climb_ms/h1/w0</property>
-    <property value="17.6629">fsim/tables/max_climb_ms/h1/w1</property>
+    <property value="17.663">fsim/tables/max_climb_ms/h1/w1</property>
     <property value="15.9467">fsim/tables/max_climb_ms/h1/w2</property>
     <property value="19.4759">fsim/tables/max_climb_ms/h2/w0</property>
     <property value="17.5254">fsim/tables/max_climb_ms/h2/w1</property>
     <property value="15.7339">fsim/tables/max_climb_ms/h2/w2</property>
-    <property value="19.1628">fsim/tables/max_climb_ms/h3/w0</property>
+    <property value="19.1629">fsim/tables/max_climb_ms/h3/w0</property>
     <property value="17.2863">fsim/tables/max_climb_ms/h3/w1</property>
     <property value="15.4233">fsim/tables/max_climb_ms/h3/w2</property>
     <property value="95.5">fsim/tables/max_tas_ms/h0/w0</property>
@@ -437,172 +596,173 @@
     <property value="0">fsim/tables/min_tas_ms/h3/w2</property>
     <property value="18.2176">fsim/tables/ps_full_ms/h0/w0/v0</property>
     <property value="18.631">fsim/tables/ps_full_ms/h0/w0/v1</property>
-    <property value="13.8953">fsim/tables/ps_full_ms/h0/w0/v11</property>
-    <property value="12.2886">fsim/tables/ps_full_ms/h0/w0/v12</property>
-    <property value="10.0982">fsim/tables/ps_full_ms/h0/w0/v13</property>
-    <property value="7.3862">fsim/tables/ps_full_ms/h0/w0/v14</property>
+    <property value="13.895">fsim/tables/ps_full_ms/h0/w0/v11</property>
+    <property value="12.2883">fsim/tables/ps_full_ms/h0/w0/v12</property>
+    <property value="10.0979">fsim/tables/ps_full_ms/h0/w0/v13</property>
+    <property value="7.38583">fsim/tables/ps_full_ms/h0/w0/v14</property>
     <property value="19.0637">fsim/tables/ps_full_ms/h0/w0/v2</property>
     <property value="19.2844">fsim/tables/ps_full_ms/h0/w0/v3</property>
     <property value="19.4383">fsim/tables/ps_full_ms/h0/w0/v4</property>
-    <property value="18.3669">fsim/tables/ps_full_ms/h0/w0/v5</property>
-    <property value="18.0523">fsim/tables/ps_full_ms/h0/w0/v6</property>
-    <property value="14.4261">fsim/tables/ps_full_ms/h0/w0/v9</property>
+    <property value="18.3667">fsim/tables/ps_full_ms/h0/w0/v5</property>
+    <property value="18.0522">fsim/tables/ps_full_ms/h0/w0/v6</property>
     <property value="16.1491">fsim/tables/ps_full_ms/h0/w1/v0</property>
     <property value="16.5462">fsim/tables/ps_full_ms/h0/w1/v1</property>
-    <property value="14.1868">fsim/tables/ps_full_ms/h0/w1/v10</property>
-    <property value="12.9076">fsim/tables/ps_full_ms/h0/w1/v11</property>
-    <property value="11.407">fsim/tables/ps_full_ms/h0/w1/v12</property>
-    <property value="9.33978">fsim/tables/ps_full_ms/h0/w1/v13</property>
-    <property value="6.8017">fsim/tables/ps_full_ms/h0/w1/v14</property>
+    <property value="14.1865">fsim/tables/ps_full_ms/h0/w1/v10</property>
+    <property value="12.9073">fsim/tables/ps_full_ms/h0/w1/v11</property>
+    <property value="11.4067">fsim/tables/ps_full_ms/h0/w1/v12</property>
+    <property value="9.33948">fsim/tables/ps_full_ms/h0/w1/v13</property>
+    <property value="6.80137">fsim/tables/ps_full_ms/h0/w1/v14</property>
     <property value="17.0269">fsim/tables/ps_full_ms/h0/w1/v2</property>
-    <property value="17.3954">fsim/tables/ps_full_ms/h0/w1/v3</property>
-    <property value="17.6813">fsim/tables/ps_full_ms/h0/w1/v4</property>
-    <property value="16.8197">fsim/tables/ps_full_ms/h0/w1/v5</property>
-    <property value="16.6332">fsim/tables/ps_full_ms/h0/w1/v6</property>
-    <property value="16.0591">fsim/tables/ps_full_ms/h0/w1/v7</property>
-    <property value="15.3455">fsim/tables/ps_full_ms/h0/w1/v8</property>
+    <property value="17.3955">fsim/tables/ps_full_ms/h0/w1/v3</property>
+    <property value="17.6814">fsim/tables/ps_full_ms/h0/w1/v4</property>
+    <property value="16.8196">fsim/tables/ps_full_ms/h0/w1/v5</property>
+    <property value="16.633">fsim/tables/ps_full_ms/h0/w1/v6</property>
+    <property value="16.0589">fsim/tables/ps_full_ms/h0/w1/v7</property>
+    <property value="15.3514">fsim/tables/ps_full_ms/h0/w1/v8</property>
+    <property value="14.1008">fsim/tables/ps_full_ms/h0/w1/v9</property>
     <property value="14.1337">fsim/tables/ps_full_ms/h0/w2/v0</property>
     <property value="14.5366">fsim/tables/ps_full_ms/h0/w2/v1</property>
-    <property value="13.2061">fsim/tables/ps_full_ms/h0/w2/v10</property>
-    <property value="12.0258">fsim/tables/ps_full_ms/h0/w2/v11</property>
-    <property value="10.628">fsim/tables/ps_full_ms/h0/w2/v12</property>
-    <property value="8.69511">fsim/tables/ps_full_ms/h0/w2/v13</property>
-    <property value="6.32886">fsim/tables/ps_full_ms/h0/w2/v14</property>
+    <property value="13.2058">fsim/tables/ps_full_ms/h0/w2/v10</property>
+    <property value="12.0256">fsim/tables/ps_full_ms/h0/w2/v11</property>
+    <property value="10.6277">fsim/tables/ps_full_ms/h0/w2/v12</property>
+    <property value="8.69482">fsim/tables/ps_full_ms/h0/w2/v13</property>
+    <property value="6.32852">fsim/tables/ps_full_ms/h0/w2/v14</property>
     <property value="15.1282">fsim/tables/ps_full_ms/h0/w2/v2</property>
     <property value="15.6227">fsim/tables/ps_full_ms/h0/w2/v3</property>
     <property value="16.0404">fsim/tables/ps_full_ms/h0/w2/v4</property>
-    <property value="15.4083">fsim/tables/ps_full_ms/h0/w2/v5</property>
-    <property value="15.3258">fsim/tables/ps_full_ms/h0/w2/v6</property>
-    <property value="14.4816">fsim/tables/ps_full_ms/h0/w2/v8</property>
-    <property value="14.1639">fsim/tables/ps_full_ms/h0/w2/v9</property>
+    <property value="15.4082">fsim/tables/ps_full_ms/h0/w2/v5</property>
+    <property value="15.3256">fsim/tables/ps_full_ms/h0/w2/v6</property>
+    <property value="14.4876">fsim/tables/ps_full_ms/h0/w2/v8</property>
+    <property value="14.1637">fsim/tables/ps_full_ms/h0/w2/v9</property>
     <property value="18.1122">fsim/tables/ps_full_ms/h1/w0/v0</property>
     <property value="18.5185">fsim/tables/ps_full_ms/h1/w0/v1</property>
-    <property value="14.4877">fsim/tables/ps_full_ms/h1/w0/v11</property>
-    <property value="13.0026">fsim/tables/ps_full_ms/h1/w0/v12</property>
-    <property value="10.6696">fsim/tables/ps_full_ms/h1/w0/v13</property>
-    <property value="7.52881">fsim/tables/ps_full_ms/h1/w0/v14</property>
-    <property value="4.07288">fsim/tables/ps_full_ms/h1/w0/v15</property>
+    <property value="12.6063">fsim/tables/ps_full_ms/h1/w0/v10</property>
+    <property value="14.4874">fsim/tables/ps_full_ms/h1/w0/v11</property>
+    <property value="13.0023">fsim/tables/ps_full_ms/h1/w0/v12</property>
+    <property value="10.6693">fsim/tables/ps_full_ms/h1/w0/v13</property>
+    <property value="7.52839">fsim/tables/ps_full_ms/h1/w0/v14</property>
+    <property value="4.1013">fsim/tables/ps_full_ms/h1/w0/v15</property>
     <property value="18.9794">fsim/tables/ps_full_ms/h1/w0/v2</property>
     <property value="19.2589">fsim/tables/ps_full_ms/h1/w0/v3</property>
-    <property value="19.4778">fsim/tables/ps_full_ms/h1/w0/v4</property>
-    <property value="18.4679">fsim/tables/ps_full_ms/h1/w0/v5</property>
-    <property value="18.2266">fsim/tables/ps_full_ms/h1/w0/v6</property>
-    <property value="17.3722">fsim/tables/ps_full_ms/h1/w0/v7</property>
+    <property value="19.4779">fsim/tables/ps_full_ms/h1/w0/v4</property>
+    <property value="18.4678">fsim/tables/ps_full_ms/h1/w0/v5</property>
+    <property value="18.2265">fsim/tables/ps_full_ms/h1/w0/v6</property>
+    <property value="17.3718">fsim/tables/ps_full_ms/h1/w0/v7</property>
     <property value="15.9433">fsim/tables/ps_full_ms/h1/w1/v0</property>
     <property value="16.3388">fsim/tables/ps_full_ms/h1/w1/v1</property>
-    <property value="14.6365">fsim/tables/ps_full_ms/h1/w1/v10</property>
-    <property value="13.4727">fsim/tables/ps_full_ms/h1/w1/v11</property>
-    <property value="12.0981">fsim/tables/ps_full_ms/h1/w1/v12</property>
-    <property value="10.0917">fsim/tables/ps_full_ms/h1/w1/v13</property>
-    <property value="7.15075">fsim/tables/ps_full_ms/h1/w1/v14</property>
-    <property value="3.89078">fsim/tables/ps_full_ms/h1/w1/v15</property>
-    <property value="16.8533">fsim/tables/ps_full_ms/h1/w1/v2</property>
-    <property value="17.2897">fsim/tables/ps_full_ms/h1/w1/v3</property>
+    <property value="14.6363">fsim/tables/ps_full_ms/h1/w1/v10</property>
+    <property value="13.4724">fsim/tables/ps_full_ms/h1/w1/v11</property>
+    <property value="12.0978">fsim/tables/ps_full_ms/h1/w1/v12</property>
+    <property value="10.0914">fsim/tables/ps_full_ms/h1/w1/v13</property>
+    <property value="7.15038">fsim/tables/ps_full_ms/h1/w1/v14</property>
+    <property value="3.91343">fsim/tables/ps_full_ms/h1/w1/v15</property>
+    <property value="16.8534">fsim/tables/ps_full_ms/h1/w1/v2</property>
+    <property value="17.2898">fsim/tables/ps_full_ms/h1/w1/v3</property>
     <property value="17.646">fsim/tables/ps_full_ms/h1/w1/v4</property>
-    <property value="16.8685">fsim/tables/ps_full_ms/h1/w1/v5</property>
-    <property value="16.7528">fsim/tables/ps_full_ms/h1/w1/v6</property>
-    <property value="16.2874">fsim/tables/ps_full_ms/h1/w1/v7</property>
-    <property value="15.6683">fsim/tables/ps_full_ms/h1/w1/v8</property>
-    <property value="14.4345">fsim/tables/ps_full_ms/h1/w1/v9</property>
+    <property value="16.8684">fsim/tables/ps_full_ms/h1/w1/v5</property>
+    <property value="16.7527">fsim/tables/ps_full_ms/h1/w1/v6</property>
+    <property value="16.2873">fsim/tables/ps_full_ms/h1/w1/v7</property>
+    <property value="15.672">fsim/tables/ps_full_ms/h1/w1/v8</property>
+    <property value="14.4317">fsim/tables/ps_full_ms/h1/w1/v9</property>
     <property value="13.8298">fsim/tables/ps_full_ms/h1/w2/v0</property>
     <property value="14.2381">fsim/tables/ps_full_ms/h1/w2/v1</property>
-    <property value="13.5972">fsim/tables/ps_full_ms/h1/w2/v10</property>
-    <property value="12.5274">fsim/tables/ps_full_ms/h1/w2/v11</property>
-    <property value="11.2495">fsim/tables/ps_full_ms/h1/w2/v12</property>
-    <property value="9.44268">fsim/tables/ps_full_ms/h1/w2/v13</property>
-    <property value="6.72021">fsim/tables/ps_full_ms/h1/w2/v14</property>
-    <property value="3.6648">fsim/tables/ps_full_ms/h1/w2/v15</property>
+    <property value="13.597">fsim/tables/ps_full_ms/h1/w2/v10</property>
+    <property value="12.5271">fsim/tables/ps_full_ms/h1/w2/v11</property>
+    <property value="11.2492">fsim/tables/ps_full_ms/h1/w2/v12</property>
+    <property value="9.4424">fsim/tables/ps_full_ms/h1/w2/v13</property>
+    <property value="6.71989">fsim/tables/ps_full_ms/h1/w2/v14</property>
+    <property value="3.67985">fsim/tables/ps_full_ms/h1/w2/v15</property>
     <property value="14.8833">fsim/tables/ps_full_ms/h1/w2/v2</property>
-    <property value="15.4466">fsim/tables/ps_full_ms/h1/w2/v3</property>
+    <property value="15.4467">fsim/tables/ps_full_ms/h1/w2/v3</property>
     <property value="15.9465">fsim/tables/ps_full_ms/h1/w2/v4</property>
-    <property value="15.3885">fsim/tables/ps_full_ms/h1/w2/v5</property>
-    <property value="15.39">fsim/tables/ps_full_ms/h1/w2/v6</property>
-    <property value="15.0382">fsim/tables/ps_full_ms/h1/w2/v7</property>
-    <property value="14.772">fsim/tables/ps_full_ms/h1/w2/v8</property>
+    <property value="15.3884">fsim/tables/ps_full_ms/h1/w2/v5</property>
+    <property value="15.3899">fsim/tables/ps_full_ms/h1/w2/v6</property>
+    <property value="15.0381">fsim/tables/ps_full_ms/h1/w2/v7</property>
+    <property value="14.7758">fsim/tables/ps_full_ms/h1/w2/v8</property>
     <property value="17.9005">fsim/tables/ps_full_ms/h2/w0/v0</property>
     <property value="18.2991">fsim/tables/ps_full_ms/h2/w0/v1</property>
-    <property value="12.3891">fsim/tables/ps_full_ms/h2/w0/v12</property>
-    <property value="9.84517">fsim/tables/ps_full_ms/h2/w0/v13</property>
-    <property value="6.8919">fsim/tables/ps_full_ms/h2/w0/v14</property>
-    <property value="3.61773">fsim/tables/ps_full_ms/h2/w0/v15</property>
+    <property value="12.3888">fsim/tables/ps_full_ms/h2/w0/v12</property>
+    <property value="9.84489">fsim/tables/ps_full_ms/h2/w0/v13</property>
+    <property value="6.89162">fsim/tables/ps_full_ms/h2/w0/v14</property>
+    <property value="3.62199">fsim/tables/ps_full_ms/h2/w0/v15</property>
     <property value="18.7942">fsim/tables/ps_full_ms/h2/w0/v2</property>
-    <property value="19.1424">fsim/tables/ps_full_ms/h2/w0/v3</property>
+    <property value="19.1425">fsim/tables/ps_full_ms/h2/w0/v3</property>
     <property value="19.4405">fsim/tables/ps_full_ms/h2/w0/v4</property>
-    <property value="18.5199">fsim/tables/ps_full_ms/h2/w0/v5</property>
-    <property value="18.0933">fsim/tables/ps_full_ms/h2/w0/v6</property>
-    <property value="17.5577">fsim/tables/ps_full_ms/h2/w0/v7</property>
-    <property value="17.6035">fsim/tables/ps_full_ms/h2/w0/v8</property>
+    <property value="18.5198">fsim/tables/ps_full_ms/h2/w0/v5</property>
+    <property value="18.0936">fsim/tables/ps_full_ms/h2/w0/v6</property>
+    <property value="17.5576">fsim/tables/ps_full_ms/h2/w0/v7</property>
+    <property value="17.6034">fsim/tables/ps_full_ms/h2/w0/v8</property>
     <property value="15.6115">fsim/tables/ps_full_ms/h2/w1/v0</property>
     <property value="16.0063">fsim/tables/ps_full_ms/h2/w1/v1</property>
-    <property value="13.6675">fsim/tables/ps_full_ms/h2/w1/v11</property>
-    <property value="11.7287">fsim/tables/ps_full_ms/h2/w1/v12</property>
-    <property value="9.3126">fsim/tables/ps_full_ms/h2/w1/v13</property>
-    <property value="6.51571">fsim/tables/ps_full_ms/h2/w1/v14</property>
-    <property value="3.4352">fsim/tables/ps_full_ms/h2/w1/v15</property>
+    <property value="13.6672">fsim/tables/ps_full_ms/h2/w1/v11</property>
+    <property value="11.7284">fsim/tables/ps_full_ms/h2/w1/v12</property>
+    <property value="9.31233">fsim/tables/ps_full_ms/h2/w1/v13</property>
+    <property value="6.51545">fsim/tables/ps_full_ms/h2/w1/v14</property>
+    <property value="3.43418">fsim/tables/ps_full_ms/h2/w1/v15</property>
     <property value="16.5668">fsim/tables/ps_full_ms/h2/w1/v2</property>
     <property value="17.0786">fsim/tables/ps_full_ms/h2/w1/v3</property>
     <property value="17.5199">fsim/tables/ps_full_ms/h2/w1/v4</property>
-    <property value="16.8519">fsim/tables/ps_full_ms/h2/w1/v5</property>
-    <property value="16.8214">fsim/tables/ps_full_ms/h2/w1/v6</property>
-    <property value="16.5584">fsim/tables/ps_full_ms/h2/w1/v7</property>
-    <property value="13.3772">fsim/tables/ps_full_ms/h2/w2/v0</property>
+    <property value="16.8518">fsim/tables/ps_full_ms/h2/w1/v5</property>
+    <property value="16.8213">fsim/tables/ps_full_ms/h2/w1/v6</property>
+    <property value="16.5583">fsim/tables/ps_full_ms/h2/w1/v7</property>
+    <property value="13.377">fsim/tables/ps_full_ms/h2/w2/v0</property>
     <property value="13.7934">fsim/tables/ps_full_ms/h2/w2/v1</property>
-    <property value="14.0248">fsim/tables/ps_full_ms/h2/w2/v10</property>
-    <property value="12.9256">fsim/tables/ps_full_ms/h2/w2/v11</property>
-    <property value="11.1067">fsim/tables/ps_full_ms/h2/w2/v12</property>
-    <property value="8.82393">fsim/tables/ps_full_ms/h2/w2/v13</property>
-    <property value="6.18347">fsim/tables/ps_full_ms/h2/w2/v14</property>
-    <property value="3.27355">fsim/tables/ps_full_ms/h2/w2/v15</property>
+    <property value="14.0245">fsim/tables/ps_full_ms/h2/w2/v10</property>
+    <property value="12.9253">fsim/tables/ps_full_ms/h2/w2/v11</property>
+    <property value="11.1065">fsim/tables/ps_full_ms/h2/w2/v12</property>
+    <property value="8.8237">fsim/tables/ps_full_ms/h2/w2/v13</property>
+    <property value="6.18322">fsim/tables/ps_full_ms/h2/w2/v14</property>
+    <property value="3.27118">fsim/tables/ps_full_ms/h2/w2/v15</property>
     <property value="14.4996">fsim/tables/ps_full_ms/h2/w2/v2</property>
-    <property value="15.1395">fsim/tables/ps_full_ms/h2/w2/v3</property>
-    <property value="15.7307">fsim/tables/ps_full_ms/h2/w2/v4</property>
-    <property value="15.3015">fsim/tables/ps_full_ms/h2/w2/v5</property>
-    <property value="15.3947">fsim/tables/ps_full_ms/h2/w2/v6</property>
-    <property value="15.2161">fsim/tables/ps_full_ms/h2/w2/v7</property>
-    <property value="15.0321">fsim/tables/ps_full_ms/h2/w2/v8</property>
-    <property value="14.1902">fsim/tables/ps_full_ms/h2/w2/v9</property>
+    <property value="15.1396">fsim/tables/ps_full_ms/h2/w2/v3</property>
+    <property value="15.7308">fsim/tables/ps_full_ms/h2/w2/v4</property>
+    <property value="15.3014">fsim/tables/ps_full_ms/h2/w2/v5</property>
+    <property value="15.3946">fsim/tables/ps_full_ms/h2/w2/v6</property>
+    <property value="15.2158">fsim/tables/ps_full_ms/h2/w2/v7</property>
+    <property value="15.0344">fsim/tables/ps_full_ms/h2/w2/v8</property>
+    <property value="14.1906">fsim/tables/ps_full_ms/h2/w2/v9</property>
     <property value="17.5766">fsim/tables/ps_full_ms/h3/w0/v0</property>
     <property value="17.9695">fsim/tables/ps_full_ms/h3/w0/v1</property>
-    <property value="13.2315">fsim/tables/ps_full_ms/h3/w0/v11</property>
-    <property value="11.3145">fsim/tables/ps_full_ms/h3/w0/v12</property>
-    <property value="8.93581">fsim/tables/ps_full_ms/h3/w0/v13</property>
-    <property value="6.19195">fsim/tables/ps_full_ms/h3/w0/v14</property>
-    <property value="3.15393">fsim/tables/ps_full_ms/h3/w0/v15</property>
+    <property value="13.2313">fsim/tables/ps_full_ms/h3/w0/v11</property>
+    <property value="11.3142">fsim/tables/ps_full_ms/h3/w0/v12</property>
+    <property value="8.93559">fsim/tables/ps_full_ms/h3/w0/v13</property>
+    <property value="6.19175">fsim/tables/ps_full_ms/h3/w0/v14</property>
+    <property value="3.15212">fsim/tables/ps_full_ms/h3/w0/v15</property>
     <property value="18.5013">fsim/tables/ps_full_ms/h3/w0/v2</property>
     <property value="18.9233">fsim/tables/ps_full_ms/h3/w0/v3</property>
-    <property value="19.1362">fsim/tables/ps_full_ms/h3/w0/v4</property>
+    <property value="19.1363">fsim/tables/ps_full_ms/h3/w0/v4</property>
     <property value="18.4947">fsim/tables/ps_full_ms/h3/w0/v5</property>
-    <property value="18.105">fsim/tables/ps_full_ms/h3/w0/v6</property>
-    <property value="17.5844">fsim/tables/ps_full_ms/h3/w0/v7</property>
-    <property value="15.1547">fsim/tables/ps_full_ms/h3/w1/v0</property>
-    <property value="15.5529">fsim/tables/ps_full_ms/h3/w1/v1</property>
-    <property value="13.209">fsim/tables/ps_full_ms/h3/w1/v10</property>
-    <property value="12.4836">fsim/tables/ps_full_ms/h3/w1/v11</property>
-    <property value="10.6729">fsim/tables/ps_full_ms/h3/w1/v12</property>
-    <property value="8.45129">fsim/tables/ps_full_ms/h3/w1/v13</property>
-    <property value="5.88761">fsim/tables/ps_full_ms/h3/w1/v14</property>
-    <property value="3.06857">fsim/tables/ps_full_ms/h3/w1/v15</property>
+    <property value="18.1049">fsim/tables/ps_full_ms/h3/w0/v6</property>
+    <property value="17.5842">fsim/tables/ps_full_ms/h3/w0/v7</property>
+    <property value="15.1545">fsim/tables/ps_full_ms/h3/w1/v0</property>
+    <property value="15.5528">fsim/tables/ps_full_ms/h3/w1/v1</property>
+    <property value="13.2095">fsim/tables/ps_full_ms/h3/w1/v10</property>
+    <property value="12.4834">fsim/tables/ps_full_ms/h3/w1/v11</property>
+    <property value="10.6727">fsim/tables/ps_full_ms/h3/w1/v12</property>
+    <property value="8.4511">fsim/tables/ps_full_ms/h3/w1/v13</property>
+    <property value="5.88743">fsim/tables/ps_full_ms/h3/w1/v14</property>
+    <property value="3.06741">fsim/tables/ps_full_ms/h3/w1/v15</property>
     <property value="16.1659">fsim/tables/ps_full_ms/h3/w1/v2</property>
     <property value="16.7516">fsim/tables/ps_full_ms/h3/w1/v3</property>
     <property value="17.2863">fsim/tables/ps_full_ms/h3/w1/v4</property>
-    <property value="16.7492">fsim/tables/ps_full_ms/h3/w1/v5</property>
-    <property value="16.839">fsim/tables/ps_full_ms/h3/w1/v6</property>
-    <property value="16.439">fsim/tables/ps_full_ms/h3/w1/v7</property>
-    <property value="12.7992">fsim/tables/ps_full_ms/h3/w2/v0</property>
+    <property value="16.7491">fsim/tables/ps_full_ms/h3/w1/v5</property>
+    <property value="16.8392">fsim/tables/ps_full_ms/h3/w1/v6</property>
+    <property value="16.4388">fsim/tables/ps_full_ms/h3/w1/v7</property>
+    <property value="12.7991">fsim/tables/ps_full_ms/h3/w2/v0</property>
     <property value="13.2192">fsim/tables/ps_full_ms/h3/w2/v1</property>
-    <property value="13.2158">fsim/tables/ps_full_ms/h3/w2/v10</property>
-    <property value="11.7143">fsim/tables/ps_full_ms/h3/w2/v11</property>
-    <property value="9.99784">fsim/tables/ps_full_ms/h3/w2/v12</property>
-    <property value="7.91438">fsim/tables/ps_full_ms/h3/w2/v13</property>
-    <property value="5.50899">fsim/tables/ps_full_ms/h3/w2/v14</property>
-    <property value="2.88539">fsim/tables/ps_full_ms/h3/w2/v15</property>
+    <property value="13.2156">fsim/tables/ps_full_ms/h3/w2/v10</property>
+    <property value="11.7141">fsim/tables/ps_full_ms/h3/w2/v11</property>
+    <property value="9.99764">fsim/tables/ps_full_ms/h3/w2/v12</property>
+    <property value="7.91421">fsim/tables/ps_full_ms/h3/w2/v13</property>
+    <property value="5.50882">fsim/tables/ps_full_ms/h3/w2/v14</property>
+    <property value="2.88092">fsim/tables/ps_full_ms/h3/w2/v15</property>
     <property value="13.9903">fsim/tables/ps_full_ms/h3/w2/v2</property>
     <property value="14.7136">fsim/tables/ps_full_ms/h3/w2/v3</property>
     <property value="15.4021">fsim/tables/ps_full_ms/h3/w2/v4</property>
-    <property value="15.1207">fsim/tables/ps_full_ms/h3/w2/v5</property>
-    <property value="15.3103">fsim/tables/ps_full_ms/h3/w2/v6</property>
-    <property value="15.2694">fsim/tables/ps_full_ms/h3/w2/v7</property>
-    <property value="15.1728">fsim/tables/ps_full_ms/h3/w2/v8</property>
+    <property value="15.1206">fsim/tables/ps_full_ms/h3/w2/v5</property>
+    <property value="15.3102">fsim/tables/ps_full_ms/h3/w2/v6</property>
+    <property value="15.2693">fsim/tables/ps_full_ms/h3/w2/v7</property>
+    <property value="15.1723">fsim/tables/ps_full_ms/h3/w2/v8</property>
     <property value="95.5">fsim/tables/reach_tas_ms/h0/w0</property>
     <property value="96">fsim/tables/reach_tas_ms/h0/w1</property>
     <property value="96.25">fsim/tables/reach_tas_ms/h0/w2</property>
@@ -776,6 +936,12 @@
       </fcs_function>
       <pid name="fcs/uh60/delta-omega"> <input> fcs/uh60/net-torque </input>
         <kp> 0 </kp> <ki type="trap"> 0.00014681292 </ki> <kd> 0 </kd> </pid>
+      <!-- the engine's torque on the main rotor's shaft: what the airframe feels of the rotors (the
+           external reaction rotor-drive) -->
+      <fcs_function name="fcs/uh60/drive-torque">
+        <function> <quotient> <product> <property> fcs/uh60/power </property> <value> 1555400 </value> <property> fcs/uh60/fed </property> </product>
+          <max> <value> 1 </value> <property> fcs/uh60/omega </property> </max> </quotient> </function>
+      </fcs_function>
       <fcs_function name="fcs/uh60/rotor-rpm">
         <function> <product> <sum> <value> 26.999894 </value> <property> fcs/uh60/delta-omega </property> </sum> <value> 9.5492966 </value> </product> </function>
         <output> propulsion/engine[0]/x-rpm-dict </output>

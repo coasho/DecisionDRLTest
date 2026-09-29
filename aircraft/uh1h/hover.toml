@@ -1,4 +1,4 @@
-# Written by hangar fly (2026-09-26 14:28) for uh1h.toml: its hover, identified in the platform's own JSBSim
+# Written by hangar fly (2026-09-29 04:16) for uh1h.toml: its hover, identified in the platform's own JSBSim
 # (docs/rotorcraft.md, 3.5) - the commands that hold it, the attitude it hovers at, and each axis's
 # response: the body acceleration per unit of the platform's command (the heave's vertical, m/s2;
 # signed, the platform's senses), its damping (1/s) and the actuator's lag (s). The build writes
@@ -11,13 +11,13 @@ mass_kg = 2793.22
 [trim]   # the commands and the attitude of the hover
 throttle = 0.354523
 aileron = 0.154113
-elevator = -0.00433047
-rudder = -0.0267005
+elevator = -0.00433051
+rudder = -0.0267006
 roll_attitude_deg = -1.68844
 pitch_attitude_deg = 4.58023
 
 [identified]   # per unit aileron, elevator, rudder (body rates p, q, r) and throttle (heave)
-roll = { power = 3.51448, damping = 2.69545, lag_s = 0.144 }
-pitch = { power = -0.704006, damping = 0.453821, lag_s = 0.144 }
-yaw = { power = -2.64753, damping = 1.29812, lag_s = 0.022973 }
-heave = { power = 35.2161, damping = 0.436392, lag_s = 0.2 }
+roll = { power = 3.5151, damping = 2.69544, lag_s = 0.144 }
+pitch = { power = -0.704024, damping = 0.453848, lag_s = 0.144 }
+yaw = { power = -2.64693, damping = 1.29737, lag_s = 0.022973 }
+heave = { power = 35.2157, damping = 0.4364, lag_s = 0.2 }

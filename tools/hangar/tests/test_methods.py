@@ -1526,6 +1526,36 @@ class Contacts(unittest.TestCase):
         with self.assertRaises(ValueError):
             multi.contacts(spec)
 
+    def test_a_helicopter_meets_the_ground_on_its_airframe_where_its_gear_is_not(self):
+        # the helicopters' structure contacts (rotorcraft/heli.py): what a crash meets besides the gear -
+        # the tail skid or tail cone, the stabilizer's tips, the nose, the main rotor's hub, the tail rotor's
+        # gearbox - none on the gear or near the ground the aircraft stands on, each soft enough for the step
+        import tomllib
+        from hangar import jsbsim
+        from hangar.rotorcraft import heli
+        for name, expected in (("uh1h", [(12.28, 0.0, 1.32), (9.685, 1.426, 1.448), (9.685, -1.426, 1.448), (-0.302, 0.0, 0.838),
+                                         (3.379, 0.0, 3.607), (12.34, -0.06, 2.98)]),
+                               ("uh60", [(15.083, 0.0, 5.241), (18.242, 2.193, 6.116), (18.242, -2.193, 6.116), (8.65, 0.0, 8.31),
+                                         (19.46, 0.076, 8.23)])):
+            with open(repo("aircraft/%s/%s.toml" % (name, name)), "rb") as f:
+                spec = tomllib.load(f)
+            contacts = heli.structure_contacts(spec)
+            pts = np.array([p for _, p, _, _ in contacts])
+            with self.subTest(design=name):
+                for q in expected:
+                    self.assertLess(np.min(np.linalg.norm(pts - np.array(q), axis=1)), 0.05, q)
+                gear = np.array(spec["ground"]["contacts_in"], float) * heli.IN
+                plane = np.linalg.lstsq(np.column_stack([np.ones(len(gear)), gear[:, 0], gear[:, 1]]), gear[:, 2], rcond=None)[0]
+                self.assertGreaterEqual(float(np.min(pts[:, 2] - plane[0] - plane[1] * pts[:, 0] - plane[2] * pts[:, 1])),
+                                        heli.GEAR_CLEARANCE_M)
+                m = spec["mass"]
+                mass = (m["weight_lb"] - spec["fuel"]["capacity_lb"]) * heli.LB  # empty: the lightest
+                J = np.array([[m["ixx"], 0.0, -m["ixz"]], [0.0, m["iyy"], 0.0], [-m["ixz"], 0.0, m["izz"]]]) * heli.SLUG_FT2
+                for _, p, k, c in contacts:
+                    m_eff = jsbsim.apparent_mass(p - np.array(m["cg_in"]) * heli.IN, mass, J)
+                    self.assertLessEqual(math.sqrt(k / m_eff), jsbsim.STRUCTURE_OMEGA + 1e-9)
+                    self.assertLessEqual(c / m_eff * (1.0 / 120.0), 0.3)
+
 
 class Model3D(unittest.TestCase):
     def test_control_surfaces_hinge_the_way_jsbsim_deflects(self):

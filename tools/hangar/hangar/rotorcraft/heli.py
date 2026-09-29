@@ -10,7 +10,12 @@ flight control system carries the aircraft's mechanical controls - linkages, rig
 stabilizer bar, a mixing unit and rate feedbacks, a scheduled stabilator, a pitch bias actuator -
 and the airframe's forces are one of two published models: "tm73254" (the UH-1H report's
 fuselage, stabilizer and fin, in its shaft axes) or "tm85890" (the UH-60 report's wind-tunnel
-fuselage and TM-84281's stabilizer and fin through 360 deg).
+fuselage and TM-84281's stabilizer and fin through 360 deg). The airframe takes the engine's
+torque, not the rotors' (an external moment: JSBSim applies theirs as though the airframe held
+their speed).
+
+On the ground it stands on its skids or wheels ([ground]) and, struck hard or turned over, on its
+airframe: structure contacts on its drawn hull and its hubs, as a fixed wing's (structure_contacts).
 
 Senses, the platform's: fcs/elevator-cmd-norm + nose down (stick forward), aileron + right,
 rudder + nose left (left pedal: JSBSim's, trailing edge left), throttle-cmd-norm the collective
@@ -29,6 +34,9 @@ from ..applicability import references_xml
 RHO0 = 0.002377  # slug/ft3
 HP = 550.0       # ft lb/s
 W_PER_HP = 745.7
+IN = 0.0254      # m
+LB = 0.45359237  # kg
+SLUG_FT2 = 1.3558179  # kg m2
 
 
 def _f(x):
@@ -52,6 +60,84 @@ def fuel_of(spec):
     if "capacity_lb" not in fuel or "sfc_lb_per_shp_h" not in eng:
         return None
     return {"capacity_lb": float(fuel["capacity_lb"]), "sfc": float(eng["sfc_lb_per_shp_h"])}
+
+
+# Structure contacts: what meets the ground, in any attitude, other than the gear - the airframe's
+# convex hull (the fuselage, the tail boom, the pylon and the stabilizer, a tail skid) and the rotors'
+# hubs - sized as a fixed wing's are for the 120 Hz step (jsbsim.STRUCTURE_OMEGA on the apparent mass
+# at each point). A part that reaches within GEAR_CLEARANCE_M of the ground the aircraft stands on is
+# the gear (a skid, its cross tubes), which gives way with it: the hull is made of the rest - so the
+# belly the skids stand above is part of it - and the gear's contacts stand for the gear.
+GEAR_CLEARANCE_M = 0.15
+
+
+def hubs(spec):
+    """The rotors' hubs as the model draws them (rotorcraft/model.py, design frame, m): the main
+    rotor's at the top of what turns on its mast (its hub, or a vibration absorber above it), the
+    tail rotor's at its hub - on their shafts, `offset_m` along them. [(name, point)]."""
+    look = spec.get("model", {})
+    out = []
+    for key, name in (("main", "main rotor hub"), ("tail", "tail rotor hub")):
+        r = spec["rotor"][key]
+        lk = look.get("%s_rotor" % key, {})
+        if key == "main":
+            tilt = math.radians(r.get("mast_tilt_deg", 0.0))
+            t = (-math.sin(tilt), 0.0, math.cos(tilt))
+            top = 0.7 * lk.get("hub_radius", 0.08 * r["radius_ft"] * 0.3048)
+            if "absorber" in lk:
+                b = lk["absorber"]
+                top = max(top, b.get("above_m", 0.35) + 0.7 * b["weight_m"])
+        else:
+            side = 1.0 if r.get("thrust", "right") == "right" else -1.0
+            cant = math.radians(r.get("cant_deg", 0.0))
+            t = (0.0, side * math.cos(cant), math.sin(cant))
+            top = 0.0
+        along = lk.get("offset_m", 0.0) + top
+        out.append((name, [c * IN + along * d for c, d in zip(r["hub_in"], t)]))
+    return out
+
+
+def structure_contacts(spec):
+    """[(name, point m, spring N/m, damping N s/m)]: the helicopter's structure contacts (above), sized
+    on the empty aircraft (the lightest, so the fastest; its fuel is at the c.g.)."""
+    import numpy as np
+    from .. import jsbsim
+    from ..geometry.aircraft import Aircraft
+    shape = Aircraft.shape(spec)
+    # the ground the aircraft stands on: the plane through its gear's contacts
+    gear = np.array(spec["ground"]["contacts_in"], float) * IN
+    A = np.column_stack([np.ones(len(gear)), gear[:, 0], gear[:, 1]])
+    plane = np.linalg.lstsq(A, gear[:, 2], rcond=None)[0]
+
+    def clear(P):  # the least height of points above that ground
+        P = np.atleast_2d(np.asarray(P, float))
+        return float(np.min(P[:, 2] - (plane[0] + plane[1] * P[:, 0] + plane[2] * P[:, 1])))
+
+    shape.bodies = [b for b in shape.bodies if clear(b.skin(32, 20)[0]) >= GEAR_CLEARANCE_M]
+    shape.surfaces = [f for f in shape.surfaces if clear(f.skin(20, 14)[0]) >= GEAR_CLEARANCE_M]
+    shape.struts = [s for s in shape.struts if clear([s.a, s.b]) >= GEAR_CLEARANCE_M]
+    more = hubs(spec)
+    for s in shape.struts:  # drawn bars - a tail skid: their ends
+        for q in (s.a, s.b):
+            more.append((s.name, q))
+            if s.mirror and abs(q[1]) > 1e-6:
+                more.append((s.name, q * np.array([1.0, -1.0, 1.0])))
+    points = jsbsim.structure_points(shape, more=more)
+    m = spec["mass"]
+    fuel = fuel_of(spec)
+    mass = (m["weight_lb"] - (fuel["capacity_lb"] if fuel else 0.0)) * LB
+    J = np.array([[m["ixx"], 0.0, -m.get("ixz", 0.0)], [0.0, m["iyy"], 0.0], [-m.get("ixz", 0.0), 0.0, m["izz"]]]) * SLUG_FT2
+    cg = np.array(m["cg_in"], float) * IN
+    lo, hi = shape.extent()
+    near = jsbsim.STRUCTURE_SHARE * float(np.max(hi - lo))
+    everything = np.array([p for _, p in points] + list(gear))
+    w = jsbsim.STRUCTURE_OMEGA
+    out = []
+    for name, p in points:
+        m_eff = jsbsim.apparent_mass(p - cg, mass, J)
+        share = int(np.sum(np.linalg.norm(everything - p, axis=1) < near))  # itself included
+        out.append((name, p, m_eff * w ** 2 / share, 2.0 * jsbsim.STRUCTURE_ZETA * m_eff * w / share))
+    return out
 
 
 def rotor_data(spec):
@@ -176,6 +262,15 @@ def write(spec, out_dir, profile_xml=""):
     </contact>""" % ("skid" if skid else "wheel", i, _f(pt[0]), _f(pt[1]), _f(pt[2]), "0.6" if skid else "0.8",
                      "0.5" if skid else "0.02", _f(k), _f(c), "0" if skid or side != "centre" else "360",
                      "NONE" if skid or side == "centre" else side.upper()))
+    for name_s, p, k, c in structure_contacts(spec):
+        contacts.append("""    <contact type="STRUCTURE" name="%s">
+      <location unit="IN"> <x> %s </x> <y> %s </y> <z> %s </z> </location>
+      <static_friction> 0.8 </static_friction>
+      <dynamic_friction> 0.6 </dynamic_friction>
+      <spring_coeff unit="N/M"> %.0f </spring_coeff>
+      <damping_coeff unit="N/M/SEC"> %.0f </damping_coeff>
+      <damping_coeff_rebound unit="N/M/SEC"> %.0f </damping_coeff_rebound>
+    </contact>""" % (name_s, _f(p[0] / IN), _f(p[1] / IN), _f(p[2] / IN), k, c, c))
     tr_yaw = 90 if tr.get("thrust", "right") == "right" else -90
     xml = """<?xml version="1.0"?>
 <fdm_config name="%(n)s" version="2.0" release="BETA">
@@ -205,6 +300,21 @@ def write(spec, out_dir, profile_xml=""):
   <ground_reactions>
 %(gear)s
   </ground_reactions>
+  <external_reactions>
+    <!-- The airframe feels the rotors' drive, not their blades. JSBSim applies each rotor's aerodynamic
+         torque to the airframe, as though the airframe held the rotor's speed; here the rotor speed is a
+         state of the flight control system - the engine's torque less the rotors' spins them up - and the
+         engine drives through a freewheel. What the drive does not carry (the rotors' spin-up, and all of
+         an air-driven rotor's torque) is given back about the main rotor's shaft. -->
+    <moment name="rotor-drive" frame="BODY">
+      <function> <product> <value> %(sense)d </value> <property> fcs/%(n)s/armed </property>
+        <difference> <property> fcs/%(n)s/drive-torque </property>
+          <sum> <property> propulsion/engine[0]/torque-lbsft </property>
+            <product> <property> propulsion/engine[1]/torque-lbsft </property> <value> %(trk)s </value> </product> </sum>
+        </difference> </product> </function>
+      <direction> <x> %(sx)s </x> <y> 0 </y> <z> %(sz)s </z> </direction>
+    </moment>
+  </external_reactions>
   <propulsion>
     <engine file="%(n)s_engine">
 %(feed)s      <thruster file="%(n)s_rotor">
@@ -240,7 +350,9 @@ def write(spec, out_dir, profile_xml=""):
            hx=_f(mr["hub_in"][0]), hy=_f(mr["hub_in"][1]), hz=_f(mr["hub_in"][2]), mast=_f(90.0 - mr.get("mast_tilt_deg", 0.0)),
            sense=1 if mr.get("sense", "ccw") == "ccw" else -1, tx=_f(tr["hub_in"][0]), ty=_f(tr["hub_in"][1]),
            tz=_f(tr["hub_in"][2]), cant=_f(tr.get("cant_deg", 0.0)), tyaw=tr_yaw, profile=profile_xml,
-           fcs=_fcs(spec, rd, p_max), aero=_aero(spec, rd))
+           fcs=_fcs(spec, rd, p_max), aero=_aero(spec, rd), trk=_f(rd["tr_omega"] / rd["omega"]),
+           # the main rotor's shaft, down along it (JSBSim's body axes: x forward, z down), which its torque turns about
+           sx=_f(-math.sin(math.radians(mr.get("mast_tilt_deg", 0.0)))), sz=_f(math.cos(math.radians(mr.get("mast_tilt_deg", 0.0)))))
     _write(os.path.join(out_dir, name + ".xml"), xml)
     return dict(rd, p_max=p_max)
 
@@ -474,6 +586,12 @@ def _engine_channel(spec, rd, p_max, p):
       </fcs_function>
       <pid name="%(p)sdelta-omega"> <input> %(p)snet-torque </input>
         <kp> 0 </kp> <ki type="trap"> %(jinv)s </ki> <kd> 0 </kd> </pid>
+      <!-- the engine's torque on the main rotor's shaft: what the airframe feels of the rotors (the
+           external reaction rotor-drive) -->
+      <fcs_function name="%(p)sdrive-torque">
+        <function> <quotient> <product> <property> %(p)spower </property> <value> %(pmax)s </value>%(fed_term)s </product>
+          <max> <value> 1 </value> <property> %(p)somega </property> </max> </quotient> </function>
+      </fcs_function>
       <fcs_function name="%(p)srotor-rpm">
         <function> <product> <sum> <value> %(om)s </value> <property> %(p)sdelta-omega </property> </sum> <value> %(rpmk)s </value> </product> </function>
         <output> propulsion/engine[0]/x-rpm-dict </output>

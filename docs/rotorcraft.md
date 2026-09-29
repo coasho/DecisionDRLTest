@@ -144,7 +144,12 @@ platform.
   rate feedbacks (table 2), its scheduled stabilator (figure 10) and pitch bias
   actuator (figure 11). The fuselage and tail: TM-73254's forms for the UH-1H;
   TM-85890's wind-tunnel regressions and TM-84281's stabilizer and fin through
-  360 deg for the UH-60A.
+  360 deg for the UH-60A. Each stands on its skids or wheels (JSBSim BOGEY
+  contacts) and, struck hard or turned over, on its airframe: structure
+  contacts on its convex hull and its hubs, as a fixed wing's. The airframe
+  takes the engine's torque, not the rotors' aerodynamic torque, which JSBSim
+  applies as though the airframe held their speed: an external moment gives
+  back the difference (section 7).
 - **The rotor patch** (`cmake/JsbsimPatches.cmake`, shipped, noted in
   THIRD_PARTY_NOTICES): a reset restarts a rotor as a load does instead of
   from what the previous run left, the first calculation converges the inflow
@@ -338,7 +343,9 @@ rotorcraft needed added to hangar in general rather than for these four:
   pitch, precone, swept tips, the hub (grips, a stabilizer bar, a bifilar
   absorber, a spinner), colours, and `offset_m` along the shaft (section 2);
 - a multirotor's feet where they are drawn (`[ground] feet_m`) and its top
-  contacts (`top_m`);
+  contacts (`top_m`); a helicopter's structure contacts, found on its drawn
+  airframe and hubs and sized as a fixed wing's, and the rotors' drive
+  (section 7);
 - the model stage's checks: the airframe closed and in one piece, its length
   and rotors' diameters against the drawings', each rotor node at its hub, on
   the flight model's line of thrust and turning about its shaft, its blades
@@ -531,11 +538,68 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
   upside down. On its side an airframe rests on some of each, which it does
   not size: the IRIS+ fallen on its side comes to rest in 5.4 s, but with
   softer springs it kept rocking.
-- **The helicopters on the ground, left uncommanded** (found with the
-  above; unchanged): the UH-1H settles on its skids, then pitches up and
-  rolls over, and with no contact but its skids it sinks into the ground and
-  diverges; the UH-60A settles on its wheels and stays. Dropped upside down,
-  the UH-60A falls through the ground: its wheels are its only contacts.
+- **The helicopters on the ground** (found with the above). Let go from its
+  hover at 150 m (the vehicle default's neutral: the collective down, the
+  governor holding the rotors' speed), the UH-1H struck its skids at 16 m/s,
+  pitched up and rolled over, and diverged 1.2 s later: the fleet test's
+  three diverged flights. Dropped on its back or side, the UH-1H diverged and
+  the UH-60A fell 440 m through the ground. Three things did it (section 10):
+  - **The skids pitched it up.** Its four skid contacts have the same spring
+    and damper, but its c.g. (station 140) is 15 in ahead of the rear pair
+    (155) and 105 in behind the front pair (35). In a level strike the front
+    pair's push has seven times the lever arm: at 7.7 m/s it pitched up at
+    0.7 rad/s about the rear contacts, past their 14.6 deg tip-back angle,
+    with nothing to catch its tail. It stood on its tail and rolled over. A
+    strike at 4.4 m/s or more did it; 3.2 m/s did not. The rotor is not the
+    cause: at flat pitch it pushes some 30 lb, and with the stabilizer bar,
+    the ground effect or the skids' friction taken out in turn, the UH-1H
+    tipped over as before. (Without the bar, the uncommanded UH-1H diverges
+    in the air 6.5 s into its fall.)
+  - **Its gear was all it touched with.** On its back or side, its skids or
+    wheels point up, and the airframe sank into the ground.
+  - **The rotor's torque gave it energy.** JSBSim applies a rotor's
+    aerodynamic torque to the airframe, as though the airframe held the
+    rotor's speed both ways. When the airframe rotates, the rotor's disc lags
+    behind its shaft (the flapping lag, 0.14 s, times the rate). The torque
+    then falls below zero as the square of the rates: the air drives the
+    rotor, and the airframe took that torque too. Dropped on its back and
+    sinking through the ground, touching nothing, the UH-1H gained its
+    rotational energy from the work that torque did on it. The torque reached
+    -1.1 million lb ft 2.6 s after the drop, with the rotor at its 130 % stop,
+    and the airframe diverged at 3.2 s. The fall from the hover ended the
+    same way: tumbling on its tail, then flung off by its skids, which came
+    back up through the ground from metres below it.
+  - **The change** (in hangar). Its
+    airframe meets the ground: hangar gives a helicopter structure contacts
+    as it does a fixed wing (docs/hangar.md), on its convex hull and its
+    hubs, sized for the step. The UH-1H gets its tail skid, stabilizer tips,
+    nose and cabin roof, belly (where its cross tubes pass under it), main
+    rotor hub and tail rotor gearbox. The UH-60A gets its nose, deck and
+    nacelles, drag beams, tail cone, stabilator, main rotor hub, and tail
+    rotor hub and gearbox. And the airframe takes the rotors' drive: the
+    flight control system's rotor speed already takes the difference between
+    the engine's torque and the rotors'. An external moment about the main
+    rotor's shaft now gives back what JSBSim applies beyond the engine's
+    torque, which the freewheel keeps from falling below zero. Let go from
+    its hover, the UH-1H tips back 11 deg onto its tail skid and settles on
+    its skids. Dropped on their backs or sides, both come to rest on their
+    sides.
+  - **What is left.**
+    - A strike still pitches the UH-1H up onto its tail skid (8 deg at
+      3.2 m/s, 11 at 16). Springs and dampers in proportion to the load each
+      skid contact carries, as hangar sizes a fixed wing's wheels, keep a
+      level strike level (0.1 deg at 7.7 m/s, measured). They would also
+      make it sit level (it sits 0.7 deg nose up). That is a change to its
+      landings, and it is not made.
+    - After a crash the rotors keep turning at their governed speed: no blade
+      strikes the ground, and nothing shuts the engines down. The UH-1H,
+      lying on its side, rocks under its tail rotor's 340 lb of thrust (at
+      up to 1.2 m/s). Let go, the UH-60A turns on its wheels at 0.74 rad/s,
+      as it did before.
+    - The flight control system's rotor speed has no stop of its own: past
+      JSBSim's 130 % it winds on (to 1,800 rad/s in the old tumble), and the
+      governor waits for it to come down. No case flown since reaches the
+      stop.
 - **Power and thrust at altitude**: the helicopters' engines give the
   design's rating (a transmission limit) at any height, and a quadrotor's
   thrust is its rotors' speed squared, whatever the air's density. None of
@@ -874,3 +938,146 @@ Considered: EASA TCDS R.011 (Bo 105); FlightGear FGAddon `UH-1` and `UH-60`; JSB
     tumbling as its battery ran out (0.11 m/s). Control digests, with
     protection and without, and the route and curve probes are unchanged;
     `ctest`: 371 of 371.
+- **The helicopters on the ground** (section 7), traced with the Python
+  SDK, left uncommanded (the vehicle default's neutral) in a world with no
+  terrain. The change was held for the owner's word, and merged on the
+  owner's instruction to merge the waiting work (2026-09-29).
+  - Found in the fleet test: the UH-1H let go from its hover, in the
+    aerobatics and formation cases, diverged at 22.97 s (released at 10 s).
+    The same fall, flown alone, struck the skids at 16.3 m/s. Dropped level
+    with its c.g. 5.1 m up, it strikes at 7.7 m/s, having rolled 3.4 deg
+    right in the fall under its tail rotor's thrust.
+    - At the first contact step the right skid's contacts are 161 and
+      168 mm deep, the left's 30 and 36. Their normal forces pitch it nose
+      up with 370,000 lb ft, and within five steps it turns at 0.72 rad/s,
+      rotating about the rear contacts.
+    - Carrying the c.g. over those contacts lifts it 0.05 m (985 ft lb), so
+      any rate above 0.34 rad/s about them tips it over. It passes 14.5 deg
+      at 1.31 s, stands at 70 deg at 2.5 s, rolls over, and its skids leave
+      the ground at 2.66 s.
+    - Upside down in the ground, its rates grow, and at 3.16 s the skids come
+      back up through the ground, 1.2 to 4.4 m deep. They throw it off at
+      48 m/s, then 189, and it diverges at 3.28 s.
+  - Dropped level from lower: struck at 1.6 m/s it pitches 2.3 deg and at
+    3.2 m/s 8.3 deg, and both stay upright. At 4.4 m/s (rolled 30 deg), 5.2
+    and 7.7 m/s it tips over and diverges.
+  - Suspects taken out one at a time (variant files through
+    `FSIM_AIRCRAFT_PATH`), each flown in the 5.1 m and 3 m drops, the
+    rolled drop and the fall from the hover:
+    - Tipped over and diverged as before in both drops and the fall from
+      the hover: without the stabilizer bar, the ground effect or the skids'
+      friction; with the dampers four times as strong or a quarter; with the
+      rear contacts at the skid's heel (station 158.7). Without the friction,
+      with the stronger dampers or at the heel, the rolled drop stayed
+      upright.
+    - Level (0.1 deg): springs and dampers in proportion to each contact's
+      static load, their totals kept. The fall from the hover (16 m/s) still
+      diverged with them.
+    - Upright after every case: a contact at the tail skid.
+  - The energy, traced a step at a time on the UH-1H dropped on its back
+    from 10 m (the old file): it touches nothing - its skids point up - and
+    sinks through the ground. Its rotational energy grows from 900 ft lb
+    (1.2 s) to 100,000 (2.2 s) and 55 million (3.0 s). No ground force acts:
+    the rotors' moment does work on it at least as fast as it grows, and the
+    airframe's aerodynamics take the rest.
+    - The main rotor's torque goes from +3,630 lb ft at the drop to
+      -120,000 at 2.0 s and -8.3 million at 2.8 s, the rotor at its
+      420.8 rpm stop from 2.2 s.
+    - The flight control system's rotor speed, which no stop holds, reaches
+      1,800 rad/s.
+  - The change, in hangar:
+    - Structure contacts: the UH-1H gets 16, the UH-60A 18. Springs are
+      0.12 to 0.70 MN/m (the UH-1H) and 0.18 to 1.8 MN/m (the UH-60A), each
+      contact's own mode at 30 rad/s on its apparent mass, as a fixed
+      wing's.
+    - The rotors' drive: an external moment about the main rotor's shaft.
+    - The UH-1H's skids and cross tubes reach within 0.15 m of the ground
+      it stands on, so the hull is found without them.
+  - The same cases after (`test_rotorcraft`'s new case). In each: the speed
+    at the strike, the fastest after it, the c.g.'s least height after it,
+    and the state at the case's end (45 s after the drop; 35 s after the
+    release).
+
+    | case | strike | fastest after | c.g. least | then |
+    | --- | --- | --- | --- | --- |
+    | UH-1H let go from its hover | 16.24 m/s | 16.25 | 1.30 m | on its skids, still |
+    | UH-1H dropped on its back from 10 m | 10.53 | 10.56 | 1.00 | on its side, rocking at 1.2 m/s |
+    | UH-1H dropped on its side from 5 m | 8.07 | 8.18 | 0.82 | on its side, still |
+    | UH-60A let go from its hover | 23.05 | 23.05 | 1.15 | on its wheels, turning at 0.74 rad/s (as before) |
+    | UH-60A dropped on its back from 10 m | 11.94 | 12.01 | 1.27 | on its side, still |
+    | UH-60A dropped on its side from 5 m | 7.92 | 8.00 | 1.22 | on its side, still |
+
+    Before, the UH-1H let go or dropped on its back diverged, and dropped on
+    its side sank 13 m into the ground; the UH-60A fell 440 m and 160 m
+    through the ground. With the structure contacts alone, the UH-1H dropped
+    on its back still diverged, at 4.5 s: stood on its hub, the rotor's
+    torque spun it. The new case fails on both older files. The probe's
+    other drops all end whole and on the ground. Level or rolled, the UH-1H
+    stays upright, tipped back onto its tail skid (8 to 11 deg) when it
+    strikes at 3.2 m/s or more. Nose first, both end on their gear;
+    dropped tail first, the UH-1H falls onto its side. Parked, both are as
+    they were.
+  - What the drive changes in flight, measured by flying hangar's fly and
+    performance stages again:
+    - The identified hover moves by up to 0.06 % on the UH-1H (its yaw
+      damping) and 0.2 % on the UH-60A (its yaw damping, 0.46311 to
+      0.462173).
+    - At the same speeds, the tables' power and fuel move by at most 1e-5
+      (the UH-1H) and 9e-5 (the UH-60A), and the full-power climb by
+      1.5e-4 (the UH-60A's ringing climb at 93 m/s by 0.7 %).
+    - In two of the UH-1H's rows the top level speed moves by one step of
+      its bisection, 0.125 m/s. That moves those rows' speeds, and with them
+      their values: the climb at the top speed goes from 3.10 to 2.99 m/s.
+    - `hover.toml` and the files' profiles are written again. A second run
+      leaves them as they are.
+    - The alternative, the freewheel alone (the airframe never takes a
+      negative main-rotor torque), leaves the UH-1H's flight tests bit for
+      bit but not the UH-60A's. A collective drop dips the UH-60A's torque to
+      -11,000 lb ft for a step or two while its engine still gives 60 %
+      power, and the airframe's torque would still jump there.
+  - The fleet test, flown three times with every flight's end state printed
+    (docs/flight-autonomy.md, section 14): the committed files, the
+    structure contacts alone, and both changes. Each run has 3,284 states.
+    - The contacts alone change 9 states:
+      - The three UH-1H flights that diverged now last to their cases' ends,
+        on the ground.
+      - The UH-60A let go in the same three cases strikes at 23 m/s, touches
+        its new contacts, and rests 1.7 to 2.1 m and 41 deg of heading from
+        where it did.
+      - Let go after the engines case, the UH-60A strikes the ground a
+        second before its state is printed, touches its new contacts, and
+        is 1.5 m and 16 deg of heading from where it was.
+      - Two parked helicopters end within 1e-8 m of where they did. JSBSim's
+        ground trim, run as they spawn, sees the new contacts.
+    - Both changes: every helicopter state changes (188), and every other
+      aircraft's 3,096 are identical.
+      - All 82 judged helicopter states pass their thresholds. They moved by
+        a median of 1.4 cm; the largest are the UH-1H's loiter (4.0 m after
+        158 s) and the UH-60A's (0.97 m).
+      - Diverged endings: 3 before, none after.
+  - Control digests (`fsim_control_bench digest`, 20 flights, protection on
+    and off): identical. They fly no helicopter.
+  - Cost: a world of 10 UH-1H and 10 UH-60A, before and after in turn, in
+    fresh processes, seven rounds.
+    - A vehicle's step, parked: 6.58 us before, 7.98 after (medians).
+      Hovering under the velocity loop: 5.85 before, 7.38 after.
+    - The contacts account for 1.3 us (0.08 us each), the drive's moment
+      for 0.2 us.
+    - The helicopters now carry as many structure contacts as the C-130J,
+      the F-35A and the C-17A (the fleet's designs carry 5 to 18).
+  - Tests: `hangar` gains the helicopters' contacts (on the airframe, clear
+    of the gear, each soft enough for the step); `test_rotorcraft` gains the
+    case above.
+  - Merged onto main at FA-8d (2026-09-29), after the quadrotors' contacts,
+    and measured there the same way. hangar's paths for the two do not
+    meet (the legs' check is a multirotor's; `structure_points` takes more
+    points for the helicopters alone), so each change's aircraft files
+    stand as built. Of the fleet test's 3,992 states, the 232 that change
+    are every helicopter state: 104 as flights are judged (1.4 cm apart at
+    the median, 4.0 m at most, round an orbit) and 128 as cases end. The
+    other 3,760 are identical. The fleet's flights ended diverged 3 times;
+    now none. The route end stop's helicopters (flight-autonomy.md,
+    section 14) read as they did to the printed precision, but for the
+    UH-1H after a turn in its tailwind: within 1.31 m of its point, where
+    1.30. Control digests, with protection and without, and the route and
+    curve probes are unchanged; `ctest`: 372 of 372.

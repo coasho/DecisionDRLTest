@@ -10,6 +10,7 @@
 #include "fsim/Control.h"
 #include "fsim/GuidanceModes.h"
 #include "session/World.h"
+#include "sim/FlightModel.h"
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -601,4 +602,101 @@ TEST_CASE("rotorcraft: a Crazyflie commanded after it has fallen 124 m strikes t
     INFO(nearMs << " m/s 1 m up, the fastest after " << fastest << " m/s");
     CHECK(nearMs > 30.0);
     CHECK(fastest < 1.05 * nearMs);
+}
+
+TEST_CASE("rotorcraft: a helicopter let go from its hover, or dropped on its back or its side, stays whole on the ground", "[rotorcraft]") {
+    // docs/rotorcraft.md, 7 ("The helicopters on the ground"). Let go from its hover at 150 m (the fleet test's case),
+    // the UH-1H struck its skids at 16 m/s, pitched up over their rear ends, rolled over and diverged. Dropped on
+    // their backs or sides, their only contacts - skids or wheels - pointing up, the airframes sank into the ground:
+    // the UH-1H's main rotor, the air turning it faster, spun the airframe until it diverged; the UH-60A fell 440 m
+    // through. Now the airframe meets the ground where no gear is (hangar's structure contacts: the tail skid, the
+    // stabilizer, the nose, the hubs), and it feels the rotors' drive - the engine's torque - not an air-driven
+    // rotor's.
+    struct Case {
+        const char* name;
+        double altitudeM, rollDeg;
+        bool fromHover; ///< held in its hover 10 s at its hover attitude, then let go (the vehicle default's neutral)
+    };
+    const Case cases[] = {{"let go from its hover", 150.0, 0.0, true}, {"dropped on its back", 10.0, 180.0, false},
+                          {"dropped on its side", 5.0, 90.0, false}};
+    for (const char* type : {"uh1h", "uh60"}) {
+        session::WorldOptions o = options("rotorcraft-helicopter-ground");
+        o.frameSkip = 1; // every step of the flight model seen
+        session::World w(o);
+        const double stepS = w.dt() * w.frameSkip();
+        double pitchDeg = 0.0, rollDeg = 0.0; // its hover's attitude
+        {
+            const std::uint32_t probe = w.createVehicle(spec(std::string(type) + "-probe", type, 0.5));
+            REQUIRE(probe != 0);
+            const auto& hover = w.profile(probe)->hover;
+            if (std::isfinite(hover.pitchAttitudeRad)) pitchDeg = hover.pitchAttitudeRad / kDeg;
+            if (std::isfinite(hover.rollAttitudeRad)) rollDeg = hover.rollAttitudeRad / kDeg;
+            REQUIRE(w.removeVehicle(probe));
+        }
+        struct Flight {
+            const Case* c;
+            std::uint32_t id = 0;
+            ActivityId held{};
+            double fallMs = 0.0;      ///< its fastest before the ground first pushes on it (skids, wheels or airframe)
+            double strikeS = -1.0;    ///< when it does
+            double fastestMs = 0.0;   ///< its fastest from then on
+            double lowestM = kInf;    ///< its c.g.'s least height from then on
+        };
+        std::vector<Flight> flights;
+        for (const auto& c : cases) {
+            session::VehicleSpec s = spec(std::string(type) + " " + c.name, type, 0.01 * static_cast<double>(flights.size() + 1));
+            s.initial.altitudeMslM = c.altitudeM;
+            s.initial.pitchDeg = c.fromHover ? pitchDeg : 0.0;
+            s.initial.rollDeg = c.fromHover ? rollDeg : c.rollDeg;
+            Flight f{&c, w.createVehicle(s)};
+            REQUIRE(f.id != 0);
+            if (c.fromHover) {
+                const auto r = w.submit(f.id, hoverHere());
+                REQUIRE(r.accepted());
+                f.held = r.activity;
+            }
+            flights.push_back(f);
+        }
+        const long holdSteps = std::lround(10.0 / stepS);
+        for (long k = 0; k < std::lround(45.0 / stepS); ++k) {
+            if (k == holdSteps)
+                for (const auto& f : flights)
+                    if (f.c->fromHover) REQUIRE(w.cancel(f.held).status == CommandStatus::Canceled);
+            w.step();
+            for (auto& f : flights) {
+                const auto& s = *w.vehicleState(f.id);
+                INFO(type << " " << f.c->name << " at " << s.simTime << " s");
+                REQUIRE_FALSE(s.diverged);
+                const double speed = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1], s.velocityNedMs[2]);
+                auto* m = w.model(f.id);
+                if (f.strikeS < 0.0 && std::hypot(m->property("forces/fbx-gear-lbs").get(), m->property("forces/fby-gear-lbs").get(),
+                                                  m->property("forces/fbz-gear-lbs").get()) > 0.0)
+                    f.strikeS = s.simTime;
+                if (f.strikeS < 0.0) f.fallMs = std::max(f.fallMs, speed);
+                else {
+                    f.fastestMs = std::max(f.fastestMs, speed);
+                    f.lowestM = std::min(f.lowestM, s.altitudeAglM);
+                }
+            }
+        }
+        for (const auto& f : flights) {
+            const auto& s = *w.vehicleState(f.id);
+            const double speed = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1], s.velocityNedMs[2]);
+            INFO(type << " " << f.c->name << ": " << f.fallMs << " m/s as it struck, the fastest after " << f.fastestMs
+                      << " m/s, its c.g. at least " << f.lowestM << " m up; at the end " << speed << " m/s, roll "
+                      << s.eulerRad[0] / kDeg << ", pitch " << s.eulerRad[1] / kDeg << " deg, " << s.altitudeAglM << " m up");
+            REQUIRE(f.strikeS > 0.0);
+            // (let go, the UH-1H strikes at 16 m/s, the UH-60A at 23; dropped, at 8 to 12)
+            CHECK(f.fastestMs < 1.05 * f.fallMs);
+            // its airframe on the ground, not in it (its c.g. at least 0.8 m up; parked, 1.4 and 1.6 m)
+            CHECK(f.lowestM > 0.5);
+            // still or nearly: its rotors turn on at their governed speed, and the UH-1H on its side rocks under its
+            // tail rotor's thrust (0.9 m/s at most); let go, the UH-60A turns on its wheels at 1.3 m/s, as it did
+            CHECK(speed < 2.0);
+            if (f.c->fromHover) { // on its gear: tipped onto the UH-1H's tail skid, never over
+                CHECK(std::abs(s.eulerRad[0]) < 20.0 * kDeg);
+                CHECK(std::abs(s.eulerRad[1]) < 20.0 * kDeg);
+            }
+        }
+    }
 }

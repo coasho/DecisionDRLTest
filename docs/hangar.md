@@ -313,7 +313,8 @@ stage end to end through the platform (`ctest -R hangar`).
   edges. Each point's spring is sized from the mass it moves (small at a
   wingtip, where the aircraft rolls easily), so JSBSim's 120 Hz step
   integrates it stably. Points close together share that budget. The fly
-  stage checks the result by crashing the aircraft six ways. The wheels
+  stage checks the result by crashing the aircraft six ways. A helicopter's
+  are found and sized the same way (Rotorcraft, below). The wheels
   stay JSBSim's; flightsim's build of JSBSim fixes their force when one
   lands on its side, and makes an impact the step cannot resolve inelastic
   (THIRD_PARTY_NOTICES.md, "Changes to JSBSim"; docs/rotorcraft.md, 7). A
@@ -1326,6 +1327,25 @@ design gives none, and one that still gives `spring_n_per_m` or
   2.9 mm of their 18 mm (22.9 N/m and 0.445 N s/m on each of its nine
   contacts); the IRIS+'s 4.1 mm of their 54 mm (its feet 903 N/m and
   17.6 N s/m, its tops 854 N/m and 16.6 N s/m).
+
+A helicopter on the ground (docs/rotorcraft.md, 7):
+
+- **Its gear.** `[ground] contacts_in` are its skids' or wheels' contacts,
+  with the design's springs and dampers.
+- **Its airframe.** Besides the gear, `build` gives it structure contacts as
+  a fixed wing gets them (Methods, Ground contacts): the extreme points of
+  its drawn airframe's convex hull, the ends of its struts (a tail skid) and
+  its rotors' hubs, the main rotor's at the top of what turns on its mast.
+  Each is sized for the step on the mass it moves. A part that reaches
+  within 0.15 m of the ground the aircraft stands on (a skid, its cross
+  tubes) is the gear, which gives way with it, so the hull is found without
+  it. The belly the skids stand over is part of the hull.
+- **The rotors' drive.** JSBSim applies a rotor's aerodynamic torque to the
+  airframe as though the airframe held the rotor's speed. The flight control
+  system's rotor speed already takes the difference between the engine's
+  torque and the rotors'. An external moment about the main rotor's shaft
+  gives back the rest, so the airframe takes the engine's torque, and never
+  an air-driven rotor's.
 
 A rotorcraft's shape is drawn as a fixed wing's is:
 `[[body]]`, `[[surface]]` (a control on one moves: the UH-60A's stabilator

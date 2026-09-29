@@ -260,7 +260,7 @@ STRUCTURE_ZETA = 0.5
 STRUCTURE_SHARE = 0.10  # contacts closer than this times the aircraft's size share
 
 
-def structure_points(aircraft, directions=1500, depth=0.02):
+def structure_points(aircraft, directions=1500, depth=0.02, more=()):
     """The points that touch the ground first, whatever the attitude.
 
     For directions spread over the sphere, the airframe's farthest point in
@@ -272,12 +272,17 @@ def structure_points(aircraft, directions=1500, depth=0.02):
     top of every body and the edges of every surface are added where they
     lie on the hull (flat or straight there, so few directions find them).
     A symmetric aircraft is done for its right half and mirrored. Wheels are
-    the gear's contacts; a propeller counts as its disc.
+    the gear's contacts; a propeller counts as its disc. `more` - [(name,
+    point)] - are more of the airframe's points (a rotorcraft's hubs, the
+    ends of its struts).
     Returns [(name, point)]."""
     verts, labels = [], []
     for name, _, v, _, _ in aircraft.mesh(fine=False):
         verts.append(v)
         labels += [name] * len(v)
+    for name, p in more:
+        verts.append(np.asarray(p, float)[None, :])
+        labels.append(name)
     for e in aircraft.engines:
         if not e.has_propeller:
             continue
@@ -302,7 +307,8 @@ def structure_points(aircraft, directions=1500, depth=0.02):
     reach = support.max(axis=0)  # the hull's extent in each direction
     symmetric = (all(s.mirror or abs(s.sections[0].le[1]) < 1e-6 for s in aircraft.surfaces)
                  and all(b.mirror or abs(float(np.max(np.abs(b.y)))) < 1e-6 for b in aircraft.bodies)
-                 and all(e.mirror or abs(e.prop_position[1]) < 1e-6 for e in aircraft.engines))
+                 and all(e.mirror or abs(e.prop_position[1]) < 1e-6 for e in aircraft.engines)
+                 and all(abs(float(np.asarray(p, float)[1])) < 1e-6 for _, p in more))
     serve = D[:, 1] >= -1e-9 if symmetric else np.ones(len(D), bool)  # the right half's directions
     best = np.argmax(support, axis=0)
     chosen, counts = np.unique(best[serve], return_counts=True)
