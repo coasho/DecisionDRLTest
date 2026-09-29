@@ -36,7 +36,7 @@ them locally; using them is subject to the providers' terms:
 ## Changes to JSBSim
 
 flightsim builds JSBSim 1.3.1 from the unmodified submodule in `third_party/jsbsim`, with
-four changes:
+these changes:
 
 - In `src/models/FGLGear.cpp`, the projection of a wheel's strut on the ground normal is
   bounded at 45 degrees. Upstream divides the wheel's compression and ground force by that
@@ -63,6 +63,15 @@ four changes:
   than it came in, the step applies instead the forces that stop the contact points'
   approach, each no more than its contact's own, solved as JSBSim solves its friction, and
   bounds the friction by them. Otherwise the ground's forces are upstream's, bit for bit.
+- A reset (`ResetToInitialConditions`) returns what a load leaves, where upstream's kept
+  what the last run left: in `src/models/flight_control/FGActuator.cpp`, an actuator's first
+  run after a reset passes its input through, as a new actuator's does; in
+  `src/models/FGAerodynamics.cpp`, a reset has no lift from the last run (the next run's
+  `aero/cl-squared`) and keeps the stall hysteresis's limits and the aerodynamic reference
+  point's shift the aircraft loaded (upstream's cleared both for good); in
+  `src/models/FGMassBalance.cpp`, the centre of gravity starts where a new model's does. A
+  vehicle started on a reset model then starts as the same start on a new one, to the bit
+  (docs/FlightSim_System_Architecture_and_Design.md, 7.2). Between resets nothing changes.
 
 `cmake/JsbsimPatches.cmake` makes the changes: it writes the changed files into the build
 tree, with each edit marked "flightsim patch" (two files the rotor's header reaches,

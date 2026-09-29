@@ -8,6 +8,7 @@
 
 namespace JSBSim {
 class FGFDMExec;
+class FGGroundCallback;
 }
 
 namespace fsim::sim {
@@ -54,13 +55,15 @@ private:
     void startEngines();
     void applyInitialConditions(const InitialConditions& ic);
     void settleOnGround(const InitialConditions& ic);
-    void seedIntegrators();
     void cacheCommandNodes();
+    void saveInitialProperties();
+    void restoreInitialProperties();
     bool checkDivergence();
 
     double dt_;
     std::shared_ptr<const GroundProvider> ground_;
     std::unique_ptr<JSBSim::FGFDMExec> fdm_;
+    JSBSim::FGGroundCallback* groundCallback_ = nullptr; ///< the terrain's, which fdm_ owns
     bool loaded_ = false;
     bool diverged_ = false;
     std::uint32_t stepCount_ = 0;
@@ -84,6 +87,9 @@ private:
     /// a direct thruster whose rotor the flight control system spins (a
     /// multirotor's motors: propulsion/engine[i]/rotor-rpm, docs/rotorcraft.md)
     std::vector<PropertyHandle> rotorRpm_;
+    /// The properties JSBSim's own reset leaves as the last vehicle left them, as loaded (saveInitialProperties)
+    struct InitialProperty;
+    std::vector<InitialProperty> initialProperties_;
 };
 
 } // namespace fsim::sim

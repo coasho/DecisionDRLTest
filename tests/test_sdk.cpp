@@ -9,10 +9,13 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
+#include <iterator>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace fsim;
@@ -306,4 +309,130 @@ TEST_CASE("grants and the performance through the SDK", "[sdk][control]") {
     REQUIRE_FALSE(v.controlStatus("fsim.guidance.hsa").allowed);
     REQUIRE(v.revokeControl("fsim.guidance.hsa") == control::Reason::None);
     REQUIRE(v.controlMode() == control::ControlMode::Granted);
+}
+
+namespace {
+
+/// Every value of a vehicle's state in order (bit for bit, without the padding between them).
+std::vector<double> values(const VehicleState& s) {
+    std::vector<double> v;
+    auto add = [&v](const auto& field) {
+        if constexpr (std::is_array_v<std::remove_reference_t<decltype(field)>>) v.insert(v.end(), std::begin(field), std::end(field));
+        else v.push_back(static_cast<double>(field));
+    };
+    add(s.simTime), add(s.positionEcef), add(s.attitudeEcefToBody), add(s.latitudeRad), add(s.longitudeRad), add(s.altitudeMslM);
+    add(s.altitudeAglM), add(s.eulerRad), add(s.velocityBodyMs), add(s.velocityNedMs), add(s.angularRateBodyRadS);
+    add(s.accelerationBodyMs2), add(s.airspeedTrueMs), add(s.airspeedCalibratedMs), add(s.mach), add(s.alphaRad), add(s.betaRad);
+    add(s.loadFactor), add(s.aileronRad), add(s.elevatorRad), add(s.rudderRad), add(s.flapsRad), add(s.gearPosition);
+    add(s.engineCount), add(s.throttlePosition), add(s.thrustN), add(s.fuelKg), add(s.stepCount), add(s.onGround), add(s.diverged);
+    add(s.rotationBodyToEcef), add(s.engineRpm), add(s.engineN2), add(s.afterburner), add(s.nozzlePosition), add(s.leadingEdgeFlapRad);
+    add(s.wheelCount), add(s.wheelCompressionM), add(s.wheelSteerRad), add(s.wheelSpeedMs);
+    return v;
+}
+
+bool sameBits(const std::vector<double>& a, const std::vector<double>& b) {
+    return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(double)) == 0;
+}
+
+} // namespace
+
+TEST_CASE("a vehicle in a reused slot, or reset, starts and flies as the same spawn in a new world, to the bit", "[sdk][determinism]") {
+    // A World gives a new vehicle the flight model of a removed one of the same aircraft, and a reset
+    // (each VecEnv episode) the vehicle's own. What that model flew must not reach the next start
+    // (design 7.2): after a vehicle of the same aircraft parked, crashed or flew far away - with the
+    // other altitude reference, on the ground (AGL) or in the air (MSL) - the same spawn starts and
+    // flies as it does in a new world. In wind and on a hot day: a flight model's reset clears its air.
+    struct Flown {
+        std::vector<double> start, later;
+    };
+    WorldOptions o;
+    o.name = "sdk-reuse";
+    o.publish = false;
+    o.workers = 1;
+    o.pinWorkers = false;
+    o.jsbsimRoot = FSIM_TEST_JSBSIM_ROOT;
+    auto world = [&o] {
+        auto w = std::make_unique<World>(o);
+        w->environment().setWind(Wind{270.0, 12.0, 0.0, 0.0});
+        w->environment().setAtmosphere(Atmosphere{303.15, 100500.0, 0.0});
+        return w;
+    };
+    auto fly = [](World& w, Vehicle v) {
+        Flown f;
+        f.start = values(v.state());
+        w.step(100);
+        f.later = values(v.state());
+        return f;
+    };
+    // the Crazyflie of the finding, the stock c172x, a fighter's fly-by-wire (its actuators, its lift), a helicopter's rotor
+    for (const char* type : {"cf2", "c172x", "f16c", "uh1h"}) {
+        const bool rotor = std::string(type) == "cf2" || std::string(type) == "uh1h";
+        VehicleSpec air;
+        air.type = std::string("jsbsim:") + type;
+        air.initial.latitudeDeg = 42.0;
+        air.initial.longitudeDeg = 0.0;
+        air.initial.altitudeMslM = rotor ? 150.0 : 1500.0;
+        air.initial.headingDeg = 90.0;
+        air.initial.airspeedTrueMs = rotor ? 0.0 : (std::string(type) == "c172x" ? 50.0 : 140.0);
+        VehicleSpec ground = air;
+        ground.initial.latitudeDeg = 42.5;
+        ground.initial.longitudeDeg = 0.25;
+        ground.initial.headingDeg = 30.0;
+        ground.initial.airspeedTrueMs = 0.0;
+        ground.initial.onGround = true;
+        for (const VehicleSpec& spec : {air, ground}) {
+            Flown fresh;
+            {
+                auto w = world();
+                fresh = fly(*w, w->createVehicle(spec));
+            }
+            struct History {
+                const char* name;
+                InitialConditions initial;
+                unsigned steps;
+            };
+            InitialConditions parked = spec.initial;
+            parked.onGround = true;
+            parked.airspeedTrueMs = 0.0;
+            InitialConditions crashed = spec.initial;
+            crashed.onGround = false;
+            crashed.altitudeMslM = 60.0;
+            crashed.pitchDeg = -40.0;
+            crashed.rollDeg = 70.0;
+            crashed.headingDeg = 250.0;
+            crashed.airspeedTrueMs = 40.0;
+            InitialConditions far = spec.initial;
+            far.onGround = false;
+            far.latitudeDeg += 3.0;
+            far.longitudeDeg -= 40.0;
+            far.altitudeMslM = 5000.0;
+            far.headingDeg = 137.0;
+            far.pitchDeg = 3.0;
+            far.rollDeg = -20.0;
+            far.airspeedTrueMs = rotor ? 10.0 : 95.0;
+            for (const History& h : {History{"parked", parked, 150}, History{"crashed", crashed, 300}, History{"far away", far, 150}}) {
+                INFO(type << (spec.initial.onGround ? " on the ground" : " in the air") << ", after one " << h.name);
+                VehicleSpec before = spec;
+                before.initial = h.initial;
+                {
+                    auto w = world(); // a new vehicle in the slot another of its aircraft left
+                    Vehicle first = w->createVehicle(before);
+                    w->step(h.steps);
+                    REQUIRE(first.remove());
+                    const Flown reused = fly(*w, w->createVehicle(spec));
+                    CHECK(sameBits(reused.start, fresh.start));
+                    CHECK(sameBits(reused.later, fresh.later));
+                }
+                {
+                    auto w = world(); // the same vehicle, reset
+                    Vehicle v = w->createVehicle(before);
+                    w->step(h.steps);
+                    REQUIRE(v.reset(spec.initial));
+                    const Flown reset = fly(*w, v);
+                    CHECK(sameBits(reset.start, fresh.start));
+                    CHECK(sameBits(reset.later, fresh.later));
+                }
+            }
+        }
+    }
 }

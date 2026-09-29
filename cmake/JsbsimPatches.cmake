@@ -17,6 +17,11 @@ function(_fsim_jsbsim_edit text_var old_var new_var file what)
         message(FATAL_ERROR "JSBSim fix '${what}' no longer applies to ${file}: upstream changed it. "
                             "Review cmake/JsbsimPatches.cmake.")
     endif()
+    string(FIND "${${text_var}}" "${${old_var}}" _last REVERSE)
+    if(NOT _last EQUAL _at)
+        message(FATAL_ERROR "JSBSim fix '${what}' names text that ${file} has more than once: "
+                            "widen it in cmake/JsbsimPatches.cmake until it is unique.")
+    endif()
     string(REPLACE "${${old_var}}" "${${new_var}}" _text "${${text_var}}")
     set(${text_var} "${_text}" PARENT_SCOPE)
 endfunction()
@@ -542,3 +547,105 @@ set(_new [=[  const FGColumnVector3 lastUVWidot = vUVWidot; // flightsim patch: 
 ]=])
 _fsim_jsbsim_edit(_text _old _new FGAccelerations.cpp "the call")
 _fsim_jsbsim_write(models/FGAccelerations.cpp _text Models)
+
+# ---------------------------------------------------------------------------
+# models/flight_control/FGActuator.cpp: an actuator after a reset.
+#
+# A new actuator's first run passes its input straight through - no lag, no
+# rate limit - and the runs after it move from there. A reset (the flight
+# control system's InitModel, through ResetPastStates) zeroed the actuator's
+# output and its lag and rate-limit memory, but not the flag that tells the
+# first run apart: after a reset the actuator crawled from zero at its rate
+# limit where a new one starts at its input. A vehicle started on a reset
+# model began from other surface positions than the same start on a new one
+# (the F-16C's elevator 1 degree against 10 after the start's two passes,
+# docs/FlightSim_System_Architecture_and_Design.md 7.2). Now a reset actuator
+# starts as a new one does.
+# ---------------------------------------------------------------------------
+_fsim_jsbsim_read(models/flight_control/FGActuator.cpp _text)
+set(_old [=[  PreviousOutput = PreviousHystOutput = PreviousRateLimOutput
+    = PreviousLagInput = PreviousLagOutput = Output = 0.0;
+}
+]=])
+set(_new [=[  PreviousOutput = PreviousHystOutput = PreviousRateLimOutput
+    = PreviousLagInput = PreviousLagOutput = Output = 0.0;
+  // flightsim patch (cmake/JsbsimPatches.cmake): its first run after a reset
+  // passes the input through, as a new actuator's does
+  initialized = 0;
+}
+]=])
+_fsim_jsbsim_edit(_text _old _new FGActuator.cpp "reset")
+_fsim_jsbsim_write(models/flight_control/FGActuator.cpp _text FlightControl)
+target_include_directories(FlightControl PRIVATE ${FSIM_JSBSIM_SOURCE_DIR}/src/models/flight_control) # its #include "FGActuator.h"
+
+# ---------------------------------------------------------------------------
+# models/FGAerodynamics.cpp: the aerodynamics after a reset.
+#
+# 1. A run takes aero/cl-squared (the induced drag's) from the lift of the run
+#    before it, before it computes its forces. A new model has no lift yet; a
+#    reset kept the last run's (InitModel cleared the forces in body axes, not
+#    in wind axes). So the first pass of the next start - whose accelerations
+#    seed the integrators - drew the last vehicle's induced drag, and a vehicle
+#    started on a reset model flew apart from the same start on a new one
+#    within seconds (the F-16C, C-130J and B-52H by 0.26 to 1.9 mm in 6.7 s,
+#    and by more with time). Now a reset has no lift, as a new model has none.
+# 2. InitModel also cleared two things the aircraft's file sets, for good: the
+#    stall hysteresis's limits (<hysteresis_limits>: the stock C172x's and
+#    C172P's - after a reset their stall hysteresis never engaged), and the
+#    aerodynamic reference point's shift (<aero_ref_pt_shift_x>: the stock
+#    Concorde's and F-22's, which it also leaked - after a reset the Concorde
+#    flew 114 m from the same start on a new model within 6.7 s). A reset now
+#    keeps what the aircraft loaded, as it keeps the lift coefficient's limits.
+# ---------------------------------------------------------------------------
+_fsim_jsbsim_read(models/FGAerodynamics.cpp _text)
+set(_old [=[  alphaclmax = alphaclmax0;
+  alphahystmin = alphahystmax = 0.0;
+  clsq = lod = 0.0;
+  alphaw = 0.0;
+  bi2vel = ci2vel = 0.0;
+  AeroRPShift = 0;
+  vDeltaRP.InitMatrix();
+]=])
+set(_new [=[  alphaclmax = alphaclmax0;
+  clsq = lod = 0.0;
+  alphaw = 0.0;
+  bi2vel = ci2vel = 0.0;
+  // flightsim patch (cmake/JsbsimPatches.cmake): no lift yet, as a new model
+  // has none (the next run takes aero/cl-squared from it before computing its
+  // forces); the stall hysteresis's limits and the reference point's shift as
+  // loaded (a reset cleared them)
+  vFw.InitMatrix();
+  vDeltaRP.InitMatrix();
+]=])
+_fsim_jsbsim_edit(_text _old _new FGAerodynamics.cpp "reset")
+_fsim_jsbsim_write(models/FGAerodynamics.cpp _text Models)
+
+# ---------------------------------------------------------------------------
+# models/FGMassBalance.cpp: the centre of gravity after a reset.
+#
+# A pass takes the tanks' inertia about the CG the mass balance last computed,
+# before the mass balance runs in it. A new model's CG is at the origin until
+# its first run; a reset kept the last vehicle's. So the first pass of the next
+# start took the tanks' inertia about another point (the F-16C's pitch inertia
+# 57,790 slug ft2 against a new model's 212,422), and where it reaches the
+# start - the stock F-16 by 0.13 mm in 6.7 s - a vehicle started on a reset
+# model flew apart from the same start on a new one, by an amount that depended
+# on where the last vehicle's fuel had left its CG. Now a reset starts the CG
+# where a new model has it.
+# ---------------------------------------------------------------------------
+_fsim_jsbsim_read(models/FGMassBalance.cpp _text)
+set(_old [=[  if (!FGModel::InitModel()) return false;
+
+  vLastXYZcg.InitMatrix();
+  vDeltaXYZcg.InitMatrix();
+]=])
+set(_new [=[  if (!FGModel::InitModel()) return false;
+
+  vLastXYZcg.InitMatrix();
+  vDeltaXYZcg.InitMatrix();
+  // flightsim patch (cmake/JsbsimPatches.cmake): the CG where a new model has
+  // it until its first run (a reset kept the last run's)
+  vXYZcg.InitMatrix();
+]=])
+_fsim_jsbsim_edit(_text _old _new FGMassBalance.cpp "reset")
+_fsim_jsbsim_write(models/FGMassBalance.cpp _text Models)

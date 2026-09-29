@@ -266,6 +266,8 @@ bool World::resetVehicle(std::uint32_t id, const sim::InitialConditions* ic) {
         terrain_->prefetch(units::degreesToRadians(ic->latitudeDeg), units::degreesToRadians(ic->longitudeDeg), options_.terrainPrefetchRadiusM);
     sim::FlightModel& model = pool_->vehicle(e->slot);
     if (!model.reset(e->info.initial)) return false;
+    // A flight model's reset returns its air to calm and standard: the world's, as a new vehicle's (design 7.2)
+    applyEnvironment(model);
     e->inputs = sim::ControlInputs{};
     e->inputs.setThrottleAll(e->info.initial.onGround ? 0.0 : 0.65);
     e->inputs.gearDown = e->info.initial.onGround ? 1.0 : 0.0;

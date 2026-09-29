@@ -94,6 +94,10 @@ public:
         return alt - terrainFt;
     }
 
+    /// Drops the step's frame: the next query starts a new one, as a new
+    /// callback's first does.
+    void forget() noexcept { t0_ = -1.0; }
+
     // JSBSim may try to move the terrain (IC files, scripts); the provider is
     // authoritative, so these are deliberately ignored.
     void SetTerrainElevation(double) override {}
@@ -127,6 +131,72 @@ constexpr const char* kNullDevice = "/dev/null";
 
 } // namespace
 
+/// A property's value as the aircraft was loaded.
+struct JsbsimModel::InitialProperty {
+    SGPropertyNode* node;
+    simgear::props::Type type;
+    double value; ///< a double's or float's, else an integer's or a bool's, exactly
+};
+
+namespace {
+
+void collectPlain(SGPropertyNode* n, std::vector<SGPropertyNode*>& out) {
+    for (int i = 0; i < n->nChildren(); ++i) {
+        SGPropertyNode* c = n->getChild(i);
+        if (!c->isTied()) switch (c->getType()) {
+            case simgear::props::BOOL:
+            case simgear::props::INT:
+            case simgear::props::LONG:
+            case simgear::props::FLOAT:
+            case simgear::props::DOUBLE: out.push_back(c); break;
+            default: break;
+            }
+        if (c->nChildren() > 0) collectPlain(c, out);
+    }
+}
+
+} // namespace
+
+// JSBSim's reset (each model's InitModel) returns the models' own state, and
+// with it the properties they tie, to where a load leaves them - but not the
+// plain properties: what the flight control system's components and the
+// aircraft's functions last wrote stays, and the first pass of the next start
+// reads it before they write it again. So they are kept as loaded, and put
+// back on reset, with the few tied ones JSBSim's reset leaves.
+void JsbsimModel::saveInitialProperties() {
+    std::vector<SGPropertyNode*> nodes;
+    collectPlain(fdm_->GetPropertyManager()->GetNode(), nodes);
+    // The flight control system's commands its own reset leaves (FGFCS::InitModel):
+    // the gear (a new model's is down), the brakes and the propeller levers.
+    auto pm = fdm_->GetPropertyManager();
+    for (const char* path : {"gear/gear-cmd-norm", "gear/gear-pos-norm", "fcs/left-brake-cmd-norm", "fcs/right-brake-cmd-norm",
+                             "fcs/center-brake-cmd-norm"})
+        if (auto* n = pm->GetNode(path)) nodes.push_back(n);
+    for (unsigned i = 0; i < fdm_->GetPropulsion()->GetNumEngines(); ++i)
+        for (const char* path : {"fcs/advance-cmd-norm", "fcs/feather-cmd-norm"})
+            if (auto* n = pm->GetNode(path, static_cast<int>(i))) nodes.push_back(n);
+    initialProperties_.clear();
+    initialProperties_.reserve(nodes.size());
+    for (SGPropertyNode* n : nodes) {
+        const auto type = n->getType();
+        const double v = type == simgear::props::BOOL   ? (n->getBoolValue() ? 1.0 : 0.0)
+                         : type == simgear::props::INT  ? static_cast<double>(n->getIntValue())
+                         : type == simgear::props::LONG ? static_cast<double>(n->getLongValue())
+                                                        : n->getDoubleValue();
+        initialProperties_.push_back({n, type, v});
+    }
+}
+
+void JsbsimModel::restoreInitialProperties() {
+    for (const auto& p : initialProperties_) switch (p.type) {
+        case simgear::props::BOOL: p.node->setBoolValue(p.value != 0.0); break;
+        case simgear::props::INT: p.node->setIntValue(static_cast<int>(p.value)); break;
+        case simgear::props::LONG: p.node->setLongValue(static_cast<long>(p.value)); break;
+        case simgear::props::FLOAT: p.node->setFloatValue(static_cast<float>(p.value)); break;
+        default: p.node->setDoubleValue(p.value); break;
+        }
+}
+
 JsbsimModel::JsbsimModel(double dt, std::shared_ptr<const GroundProvider> ground)
     : dt_(dt), ground_(std::move(ground)) {
     installJsbsimLogBridge();
@@ -140,8 +210,8 @@ JsbsimModel::JsbsimModel(double dt, std::shared_ptr<const GroundProvider> ground
     fdm_->DisableOutput();
 
     auto inertial = fdm_->GetInertial();
-    inertial->SetGroundCallback(
-        new ProviderGroundCallback(ground_, inertial->GetSemimajor(), inertial->GetSemiminor()));
+    groundCallback_ = new ProviderGroundCallback(ground_, inertial->GetSemimajor(), inertial->GetSemiminor());
+    inertial->SetGroundCallback(groundCallback_);
 }
 
 JsbsimModel::~JsbsimModel() = default;
@@ -174,6 +244,7 @@ bool JsbsimModel::load(const AircraftSpec& aircraft, const InitialConditions& ic
     silenceOutputs();
     installExternalReaction();
     cacheCommandNodes();
+    saveInitialProperties();
 
     try {
         applyInitialConditions(ic);
@@ -194,51 +265,46 @@ bool JsbsimModel::load(const AircraftSpec& aircraft, const InitialConditions& ic
     return true;
 }
 
+// A reset starts the vehicle as a load of the same aircraft with the same
+// conditions does, to the bit, whatever the model flew before (design 7.2):
+// the models are put back where a load leaves them, and then the start is a
+// load's - the same conditions, the same passes, in the same order. A reused
+// model then flies as a new one would, and an episode's start depends on its
+// conditions alone.
 bool JsbsimModel::reset(const InitialConditions& ic) {
     if (!loaded_) return false;
     diverged_ = false;
     stepCount_ = 0;
     try {
-        applyInitialConditions(ic);
         // RunIC() reopens every output file; JSBSim only closes them when a
         // new output is started, so close them first (keeping the null name)
         // or the reopen fails and is logged on every reset.
         silenceOutputs();
         fdm_->GetOutput()->SetStartNewOutput();
-        // JSBSim's reset keeps a propeller's RPM (FGPropeller::ResetToIC
-        // clears only the induced velocity): after a blow-up the reset pass
-        // would compute thrust from it. Start the propellers as a load does.
+        // Every model back to its initial state (InitModel), without the IC
+        // pass; JSBSim is built with what its own reset missed (an actuator's
+        // first run, the last lift, the stall hysteresis's limits and the
+        // reference point's shift, the CG: cmake/JsbsimPatches.cmake).
+        fdm_->ResetToInitialConditions(JSBSim::FGFDMExec::DONT_EXECUTE_RUN_IC);
+        // What it leaves behind: a propeller's RPM (FGPropeller::ResetToIC
+        // clears only the induced velocity; after a blow-up the start's passes
+        // computed thrust from it), and properties (saveInitialProperties).
         auto propulsion = fdm_->GetPropulsion();
         for (unsigned i = 0; i < propulsion->GetNumEngines(); ++i)
             if (auto* thruster = propulsion->GetEngine(i)->GetThruster()) thruster->SetRPM(0.0);
-        // Mode 0: reinitialise models and run the IC pass (design 7.2).
-        fdm_->ResetToInitialConditions(0);
+        restoreInitialProperties();
+        applyInitialConditions(ic);
+        if (!fdm_->RunIC()) {
+            LOG_ERROR("sim") << "JSBSim RunIC failed on reset";
+            return false;
+        }
         startEngines();
         settleOnGround(ic);
-        seedIntegrators();
     } catch (const std::exception& e) {
         LOG_ERROR("sim") << "JSBSim exception on reset: " << e.what();
         return false;
     }
     return true;
-}
-
-// The integrators (Adams-Bashforth) remember past accelerations. RunIC()
-// seeds that memory from what Propagate read at the start of its pass: the
-// last step's accelerations before a reset, since Accelerations runs after
-// Propagate. After a violent step or a blow-up, the first step after the
-// reset replayed them - and blew up again. Evaluate the models once at the
-// new state, without integrating, and seed it from that (as JSBSim's own
-// SetHoldDown() does).
-void JsbsimModel::seedIntegrators() {
-    fdm_->SuspendIntegration();
-    fdm_->Run();
-    fdm_->ResumeIntegration();
-    auto propagate = fdm_->GetPropagate();
-    const auto accelerations = fdm_->GetAccelerations();
-    propagate->in.vPQRidot = accelerations->GetPQRidot();
-    propagate->in.vUVWidot = accelerations->GetUVWidot();
-    propagate->InitializeDerivatives();
 }
 
 // Aircraft files may declare their own <output> (CSV/socket). The platform
@@ -378,7 +444,16 @@ void JsbsimModel::seed(std::uint64_t value) {
 }
 
 void JsbsimModel::applyInitialConditions(const InitialConditions& ic) {
+    // JSBSim's IC setters each start from what was set before them: the
+    // latitude re-places the position at the altitude last set, the angles
+    // turn the velocity last set. So the conditions start from the IC a new
+    // model has, and the terrain's queries from a new callback's (no frame
+    // kept from the last query) - from where a reused model's last vehicle
+    // left them, the same conditions gave another start in the last bits
+    // (design 7.2).
+    static_cast<ProviderGroundCallback*>(groundCallback_)->forget();
     auto IC = fdm_->GetIC();
+    IC->InitializeIC();
     IC->SetGeodLatitudeDegIC(ic.latitudeDeg); // geodetic; SetLatitudeDegIC would be geocentric
     IC->SetLongitudeDegIC(ic.longitudeDeg);
     IC->SetPsiDegIC(ic.headingDeg);

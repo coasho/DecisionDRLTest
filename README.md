@@ -69,7 +69,7 @@ push, not yet tagged:
 
 - **Vehicle SDK** (`include/fsim/World.h`, `libfsim.dll`): `World` / `Vehicle` object model over a
   lockstep worker pool; vehicles by name and type; per-vehicle random streams; determinism for any
-  worker count (tested).
+  worker count, and a reset or a reused slot starts as a new vehicle, to the bit (tested).
 - **Multi-level control stack** (`fsim/Control.h`): six strictly ordered levels, one command variant,
   controllers that cascade to any lower level, built-in PID loops (attitude, acceleration, velocity,
   position) and behaviours (hold, waypoints, loiter, pursuit, evade, formation, aerobatics), a registry to

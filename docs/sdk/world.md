@@ -138,3 +138,13 @@ results are bit-identical for any worker count. Each vehicle has its own
 random stream (`Rng`, seeded from `WorldOptions::seed` and the vehicle id) used
 by effects and JSBSim's turbulence. Behaviours that look at other vehicles
 read the *previous* step's states, so they are deterministic too.
+
+A start depends on its conditions alone. `Vehicle::reset` (each `VecEnv`
+episode), or a new vehicle in the slot a removed one of the same aircraft left
+(the world keeps its flight model loaded, so it is quick), starts and flies as
+the same start in a new world, to the bit - whatever that model flew before,
+and in the world's wind and air (design 7.2). So a reset also puts the
+aircraft's own properties back as it loaded them, a value you wrote to one with
+`Vehicle::property` included: write it again after the reset. What a reset does
+not restart is the vehicle's random stream: with turbulence, an episode's gusts
+follow on from the episodes before it.
