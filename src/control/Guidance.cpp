@@ -352,7 +352,8 @@ void RouteBehavior::aim(std::uint32_t k, const Performance& perf) noexcept {
     target_ = k;
     legTo_ = &p.leg(k, firstLap_), turnAt_ = &p.turn(k, firstLap_);
     decided_ = false;
-    pursuing_ = p.terminated && route::direct(p.points[k]) && !(leadOut_ > 0.0); // (a direct to fix's, but after a turn onto it: 4.38)
+    pursuing_ = headed_ = false, ends_ = 0;
+    if (p.terminated) terminated(k); // (how its leg is flown and ends, as its terminator says: 4.38)
     loiterAhead_ = route::loiterPoint(p.points[k]) ? p.loiterAt(k) : nullptr;
     reachM_ = stops() ? 1.0 : 0.0;
     if (loiterAhead_) { // (4.31: where the leg meets it; a rotorcraft's hover, where it would stop from its speed - its position loop's)
@@ -544,7 +545,7 @@ route::Fix RouteBehavior::locate(const ControlContext& ctx, const sim::VehicleSt
         inPieceM_ = f.alongM - leadOut_;
         lastCross_ = f.crossTrackM;
         if (!more) return f;
-        if (turn.radiusM > 0.0) {
+        if (turn.radiusM > 0.0 && !abeam_) { // (a direct to fix's point come abeam: passed, flown over - 4.38)
             if (f.alongM < leg.lengthM - turn.leadM) return f;
             if (branchAt(ctx, perf, true, std::max(0.0, inPieceM_))) continue; // (a branch taken there: its turn planned again from here - 4.37)
             finishedM_ += std::max(0.0, leg.lengthM - leadOut_ - turn.leadM);
@@ -552,8 +553,12 @@ route::Fix RouteBehavior::locate(const ControlContext& ctx, const sim::VehicleSt
             continue;
         }
         // no arc: the point is passed abeam (a rotorcraft that stops there, within a metre of it); a loiter point's
-        // loiter begins where the leg meets it (4.31), the leg flown
-        if (f.alongM < leg.lengthM - reachM_) return f;
+        // loiter begins where the leg meets it (4.31), the leg flown; a leg that ends where the aircraft is, there (4.38)
+        if (ends_ ? !reached(ctx, s, perf, f) : f.alongM < leg.lengthM - reachM_ && !abeam_) return f;
+        if (ends_) {
+            passHere(ctx, s, perf, f);
+            continue;
+        }
         if (loiterAhead_) {
             finishedM_ += std::max(0.0, leg.lengthM - leadOut_);
             inPieceM_ = leadOut_ = 0.0;
@@ -698,6 +703,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
         if (hovers_) out.northMs += frameNorthMs_, out.eastMs += frameEastMs_;
         return out;
     }
+    if (headed_ && !ended_) return headingCommand(ctx, s, perf, steer); // (a heading leg's: 4.38)
     return route::follow(ctx, perf, wind_, hovers_, fix, ahead, steer, plan_->trims, course_, heading_);
 }
 

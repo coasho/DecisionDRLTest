@@ -458,10 +458,12 @@ public:
                     branches.push_back(b);
                 }
             }
-            // its civil path terminators (FA-6f1): now and then a point's leg a track to fix, a direct to fix, an initial fix, a
-            // course to fix - mostly on the course from the point before - or a radius to fix round a centre on its chord's
-            // bisector, either way round (the long way refused, as one sweeping too far); now and then a leg its segment does
-            // not define, a code that is none, or data that is none (FA-6f2's legs, not built, are not drawn)
+            // its civil path terminators (FA-6f1, FA-6f2a): now and then a point's leg a track to fix, a direct to fix, an initial
+            // fix, a course to fix - mostly on the course from the point before - or a radius to fix round a centre on its
+            // chord's bisector, either way round (the long way refused, as one sweeping too far); a course, a track or a heading
+            // to an altitude (now and then without it), an intercept (refused but before a course to fix), a track for a
+            // distance; now and then a leg its segment does not define, a code that is none, or data that is none (FA-6f2b's
+            // legs, not built, are not drawn)
             if (wild && optimise && chance(0.2)) {
                 const auto n = static_cast<std::size_t>(points);
                 for (std::size_t k = 1 + pick(2); k > 0; --k) {
@@ -471,7 +473,7 @@ public:
                     const double dn = (q.latitudeRad - fromLat) * kEarthRadiusM, de = (q.longitudeRad - fromLon) * kEarthRadiusM * std::cos(q.latitudeRad);
                     RouteTerminator t;
                     t.point = static_cast<std::uint32_t>(i);
-                    switch (pick(7)) {
+                    switch (pick(10)) {
                     case 0: q.terminator = static_cast<double>(PathTerminator::TrackToFix); break;
                     case 1: q.terminator = static_cast<double>(PathTerminator::DirectToFix); break;
                     case 2: q.terminator = static_cast<double>(PathTerminator::InitialFix); break;
@@ -498,6 +500,14 @@ public:
                         q.terminator = static_cast<double>(undefined[pick(7)]);
                         break;
                     }
+                    case 6: { // (to an altitude: FA-6f2a)
+                        const PathTerminator altitude[] = {PathTerminator::CourseToAltitude, PathTerminator::TrackToAltitude, PathTerminator::HeadingToAltitude};
+                        q.terminator = static_cast<double>(altitude[pick(3)]);
+                        if (chance(0.9)) q.altitudeM = s.altitudeMslM + uniform(-150.0, 250.0);
+                        break;
+                    }
+                    case 7: q.terminator = static_cast<double>(chance(0.5) ? PathTerminator::CourseToIntercept : PathTerminator::HeadingToIntercept); break;
+                    case 8: q.terminator = static_cast<double>(PathTerminator::TrackFromFixToDistanceAlongTrack); break;
                     default: q.terminator = static_cast<double>(PathTerminator::Count); break; // (none)
                     }
                 }

@@ -544,6 +544,27 @@ inline PathTerminator terminatorOf(const Waypoint& w) noexcept {
 inline bool direct(const Waypoint& w) noexcept {
     return w.terminator == static_cast<double>(PathTerminator::DirectToFix) || w.terminator == static_cast<double>(PathTerminator::InitialFix);
 }
+/// How a leg ends: 0 at its point; 1 at its altitude (CA, FA, VA); 2 as it meets the next leg (CI, VI); 3 by the
+/// operator's hand (FM, VM).
+inline std::uint8_t endOf(const Waypoint& w) noexcept {
+    switch (terminatorOf(w)) {
+    case PathTerminator::CourseToAltitude:
+    case PathTerminator::TrackToAltitude:
+    case PathTerminator::HeadingToAltitude: return 1;
+    case PathTerminator::CourseToIntercept:
+    case PathTerminator::HeadingToIntercept: return 2;
+    case PathTerminator::FixToManualTermination:
+    case PathTerminator::HeadingToManual: return 3;
+    default: return 0;
+    }
+}
+/// A leg that ends where the aircraft is (endOf): no turn at its point, the leg after it begun from there.
+inline bool floats(const Waypoint& w) noexcept { return endOf(w) != 0; }
+/// A heading leg (VA, VI, VM): flown on its heading, what the wind does to its track left to it.
+inline bool headed(const Waypoint& w) noexcept {
+    const PathTerminator t = terminatorOf(w);
+    return t == PathTerminator::HeadingToAltitude || t == PathTerminator::HeadingToIntercept || t == PathTerminator::HeadingToManual;
+}
 /// A radius to fix's arc from a to b round the centre (latC, lonC), clockwise where `right`: in the plane at a, as a start
 /// turn point's is (makeArc), its radius a's distance from the centre, its sweep from a's bearing from it round to b's.
 Leg makeRadiusArc(double latA, double lonA, double latB, double lonB, double latC, double lonC, bool right) noexcept;

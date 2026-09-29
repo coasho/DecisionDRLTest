@@ -2096,6 +2096,57 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             // start turn point's is, and read in the flat plane this file lays points out in, the C-17A's 28 km arc read 72 m off)
             CHECK(f.worst < (p.rotor ? std::max(0.5, 0.05 * f.radiusM) : 20.0));
         });
+    // and a course to altitude (FA-6f2a): two orbit radii ahead, then up on its course - 30 s of its best climb, 300 m at
+    // most (a Crazyflie's battery takes it no higher) - its point four radii on, where its gradient climbs it, and direct
+    // to a point two radii to the right of that: its course ended at its altitude (within 10 m), wherever it came to it,
+    // the route completed
+    struct AltitudeRoute {
+        double to = 0.0, endedUp = kHold, endedAlongM = kHold, planM = 0.0;
+        PositionCommand start;
+    };
+    std::map<std::uint32_t, AltitudeRoute> caRoutes;
+    auto climbOf = [&](const Plane& p) { // (its most climb, as its performance says: 2 m/s where it says none)
+        const Performance* most = w.performance(p.id);
+        return most && std::isfinite(most->maxClimbMs) && most->maxClimbMs > 0.0 ? most->maxClimbMs : 2.0;
+    };
+    run("fsim.guidance.route", 0.0,
+        [&](const Plane& p) {
+            const double R = orbitRadius(p), psi = p.start.eulerRad[2], c = std::cos(psi), sn = std::sin(psi), rise = std::min(300.0, 30.0 * climbOf(p));
+            auto point = [&](double ahead, double right, double up) {
+                const PositionCommand q = pointFrom(p.start, ahead * c - right * sn, ahead * sn + right * c, p.start.altitudeMslM + up, 0.0);
+                Waypoint wp;
+                wp.latitudeRad = q.latitudeRad, wp.longitudeRad = q.longitudeRad, wp.altitudeM = q.altitudeMslM;
+                return wp;
+            };
+            std::vector<Waypoint> points = {point(2.0 * R, 0.0, 0.0), point(6.0 * R, 0.0, rise), point(6.0 * R, 2.0 * R, rise)};
+            points[1].terminator = static_cast<double>(PathTerminator::CourseToAltitude);
+            points[2].terminator = static_cast<double>(PathTerminator::DirectToFix);
+            AltitudeRoute& f = caRoutes[p.id];
+            f = AltitudeRoute{};
+            f.to = p.start.altitudeMslM + rise, f.planM = 4.0 * R;
+            f.start = pointFrom(p.start, 2.0 * R * c, 2.0 * R * sn, p.start.altitudeMslM, 0.0);
+            const CommandResult res = w.submit(p.id, RouteCommand{}, points);
+            INFO("refused: " << reasonName(res.reason) << " at " << res.index);
+            CHECK(res.accepted());
+            activity[p.id] = res.activity;
+            return res.accepted();
+        },
+        [&](const Plane& p) { return (10.0 * orbitRadius(p) / std::max(p.rotor ? p.cruiseMs : p.start.airspeedTrueMs, 0.1) + 30.0) * 1.5 + 120.0; },
+        [&](const Plane& p) {
+            AltitudeRoute& f = caRoutes[p.id];
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            if (!isHold(f.endedUp) || r.progress.segment != 2) return;
+            const auto& s = *w.vehicleState(p.id);
+            f.endedUp = s.altitudeMslM, f.endedAlongM = distanceTo(s, f.start);
+        },
+        [&](const Plane& p, const Lows&) {
+            const ActivityRecord& r = *w.activity(activity[p.id]);
+            const AltitudeRoute& f = caRoutes[p.id];
+            INFO(activityStateName(r.state) << "; its course ended at " << f.endedUp << " m (" << f.to << "), " << f.endedAlongM << " m on (planned "
+                                            << f.planM << ")");
+            CHECK(r.state == ActivityState::Completed);
+            CHECK(f.endedUp > f.to - 10.5);
+        });
     run("fsim.guidance.hover", 0.0, [&](const Plane& p) { return w.submit(p.id, behavior("hover")).accepted(); }, secs(30.0, 30.0), none,
         [&](const Plane& p, const Lows&) {
             const auto& s = *w.vehicleState(p.id);

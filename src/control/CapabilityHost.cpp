@@ -470,7 +470,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
         return r;
     }
     if (const Reason why = checkBranches(p, waypoints, branches, c.repeat == 1.0, detail); why != Reason::None) return why; // (its branches: 4.37)
-    if (const Reason why = checkTerminators(p, waypoints, terminators, detail); why != Reason::None) return why; // (its terminators: 4.38)
+    if (const Reason why = checkTerminators(p, waypoints, terminators, c.repeat == 1.0, detail); why != Reason::None) return why; // (its terminators: 4.38)
     // what is not built yet: the actions a point's type asks - answered as its row in the support table says: not
     // supported where the aircraft cannot (a taxi's, without its rule), else not implemented (a taxi's, a runway's and a
     // takeoff's points FA-9's, an approach's and a touchdown FA-10's, a ditch FA-16's). The end of a path where its path

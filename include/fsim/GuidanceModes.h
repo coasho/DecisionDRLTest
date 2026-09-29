@@ -189,8 +189,20 @@ private:
     /// Its civil path terminators' data from the path store (4.38; Terminators.cpp), and whether a point it flies has one.
     void takeTerminators(const ControlContext& ctx) noexcept;
     /// A direct to fix's leg, from where the aircraft is (4.38; Terminators.cpp): made again from here - what it flew since
-    /// counted - with the turn at its point, until its track is within a degree of it; then that leg.
+    /// counted - with the turn at its point, until its track is within a degree of it; then that leg. Its point come abeam
+    /// first (too near to turn to it), it is passed, as a point is passed abeam.
     void direct(const sim::VehicleState& s, const Performance& performance);
+    /// How the leg to point k is flown and ends, as its terminator says (4.38; Terminators.cpp): pursued, at an altitude,
+    /// as it meets the next leg, on a heading.
+    void terminated(std::uint32_t k) noexcept;
+    /// A leg that ends where the aircraft is (4.38; Terminators.cpp), `f` the aircraft on it: at its altitude (within 10 m, or
+    /// past it), or as it meets the next leg - its cross-track to it within the turn onto it, closing, or crossed.
+    bool reached(const ControlContext& ctx, const sim::VehicleState& s, const Performance& performance, const route::Fix& f);
+    /// Past such a leg's end (4.38; Terminators.cpp): what it flew counted, on to the next point, its leg from here.
+    void passHere(const ControlContext& ctx, const sim::VehicleState& s, const Performance& performance, const route::Fix& f);
+    /// A heading leg's command (4.38; Terminators.cpp): its heading as the hsa flies one - a wing's trimmed on what its
+    /// loops leave - at the segment's speed, the route's vertical speed.
+    VelocityCommand headingCommand(const ControlContext& ctx, const sim::VehicleState& s, const Performance& performance, const route::Steer& steer);
     /// The point flown to come to (4.37; Branches.cpp): captured, its branches tried in their order - the first that holds
     /// taken, the route planned again from here (`flownM` more of it flown), on from the point (`fromPoint`: where it has a
     /// turn ahead) or from the branch's next. True where one was; once each time it comes to it.
@@ -264,6 +276,11 @@ private:
     const route::Turn* turnAt_ = nullptr;
     bool decided_ = false; ///< the point flown to's branches tried (4.37): once each time it comes to it
     bool pursuing_ = false; ///< the leg to the point flown to, a direct to fix's, made from where it is as it turns to it (4.38)
+    std::uint8_t ends_ = 0; ///< how the leg to it ends (4.38; route::endOf): 0 at it, else where the aircraft is
+    bool abeam_ = false;    ///< a direct to fix's point come abeam as it turned to it: passed (4.38)
+    bool headed_ = false;   ///< the leg to it a heading's (4.38)
+    double interceptM_ = kHold; ///< an intercept's: its cross-track to the next leg at the last update
+    double headingTrim_ = 0.0, lastHeading_ = kHold; ///< a heading leg's trim and the heading it last saw, as the hsa's
 };
 
 /// "pattern": fsim.guidance.pattern, A-GRA's loiter (docs/vehicle-interface.md,

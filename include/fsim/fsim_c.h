@@ -925,9 +925,10 @@ FSIM_API void fsim_route_branch_init(fsim_route_branch* branch);
 /* A-GRA's civil path terminators (CivilPathTerminatorType; ABI 1.35; docs/flight-autonomy.md, 4.38): the ARINC 424 leg type
  * of the leg into a waypoint, in the schema's order, ARINC 424's code beside each. Flown: TF (the great circle from the point
  * before), IF and DF (straight to the point from where the aircraft is as the leg begins), CF (its course into the point:
- * fsim_route_terminator's course), RF (an arc round its centre from the point before: fsim_route_terminator's). Refused
- * "not_implemented" (FA-6f2): CA, CI, FA, FC, FM, HA, HF, HM, VA, VI, VM. Refused "invalid_waypoint", a leg its segment does
- * not define (A-GRA 6.0a gives no navaid, nor a procedure turn's data): AF, CD, CR, FD, PI, VD, VR. */
+ * fsim_route_terminator's course), RF (an arc round its centre from the point before: fsim_route_terminator's); CA, FA, VA
+ * (the planned leg's course, a heading's held, until the point's altitude), CI, VI (until the next leg, a course to fix's
+ * line), FC (as TF). Refused "not_implemented" (FA-6f2b): FM, HA, HF, HM, VM. Refused "invalid_waypoint", a leg its segment
+ * does not define (A-GRA 6.0a gives no navaid, nor a procedure turn's data): AF, CD, CR, FD, PI, VD, VR. */
 enum fsim_path_terminator {
     FSIM_PATH_TERMINATOR_ARC_TO_FIX = 0,                        /* AF */
     FSIM_PATH_TERMINATOR_COURSE_TO_ALTITUDE,                    /* CA */

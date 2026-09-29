@@ -272,13 +272,31 @@ TEST_CASE("route terminators: refused as a point is, naming it - data that is no
                                    PathTerminator::TrackFromFixToDmeDistance, PathTerminator::ProcedureTurnToIntercept,
                                    PathTerminator::HeadingToDmeDistanceTermination, PathTerminator::HeadingToRadialTermination})
         refuse("a leg not defined", with(2, t), {}, Reason::InvalidWaypoint, 2);
-    // not built: FA-6f2's
-    for (const PathTerminator t : {PathTerminator::CourseToAltitude, PathTerminator::CourseToIntercept, PathTerminator::TrackToAltitude,
-                                   PathTerminator::TrackFromFixToDistanceAlongTrack, PathTerminator::FixToManualTermination,
-                                   PathTerminator::HoldingWithAltitudeTermination, PathTerminator::HoldingWithFixTermination,
-                                   PathTerminator::HoldingWithManualTermination, PathTerminator::HeadingToAltitude,
-                                   PathTerminator::HeadingToIntercept, PathTerminator::HeadingToManual})
-        refuse("FA-6f2's", with(2, t), {}, Reason::NotImplemented, 2);
+    // not built: FA-6f2b's
+    for (const PathTerminator t : {PathTerminator::FixToManualTermination, PathTerminator::HoldingWithAltitudeTermination,
+                                   PathTerminator::HoldingWithFixTermination, PathTerminator::HoldingWithManualTermination,
+                                   PathTerminator::HeadingToManual})
+        refuse("FA-6f2b's", with(2, t), {}, Reason::NotImplemented, 2);
+    // a leg to an altitude without its altitude; one that ends where the aircraft is at a loiter point; after one, a leg
+    // that begins at the point before; an intercept whose next is no course to fix, or none
+    refuse("an altitude termination without its altitude", with(1, PathTerminator::CourseToAltitude), {}, Reason::InvalidWaypoint, 1);
+    p = with(1, PathTerminator::CourseToAltitude);
+    p.at(1).altitudeM = 1600.0;
+    p.at(2).terminator = code(PathTerminator::TrackToFix);
+    refuse("a track to fix after an altitude termination", p, {}, Reason::InvalidWaypoint, 2);
+    p.at(2).terminator = code(PathTerminator::DirectToFix);
+    const CommandResult direct = w.submit(v, RouteCommand{}, p);
+    INFO(reasonName(direct.reason) << " at " << direct.index);
+    CHECK(direct.accepted()); // (a direct to fix after it: from where the aircraft is)
+    p = with(1, PathTerminator::CourseToIntercept);
+    p.at(2).terminator = code(PathTerminator::TrackToFix);
+    refuse("an intercept of no course to fix", p, {}, Reason::InvalidWaypoint, 1);
+    refuse("an intercept at the route's end", with(2, PathTerminator::HeadingToIntercept), {}, Reason::InvalidWaypoint, 2);
+    p = with(1, PathTerminator::CourseToAltitude);
+    p.at(1).altitudeM = 1600.0, p.at(1).kind = static_cast<double>(EndPointKind::LoiterPoint);
+    RouteLoiter held;
+    held.point = 1, held.pattern.pattern = static_cast<double>(PatternKind::Hold), held.pattern.durationS = 60.0;
+    refuse("an altitude termination at a loiter point", p, {}, Reason::InvalidWaypoint, 1, {}, {held});
     // an arc not its own: its end off its circle, the long way round, a radius, courses, places or lengths not its
     p = with(1, PathTerminator::RadiusToFix);
     p.at(1) = at(lat0, lon0, -r + 100.0, 3000.0 + r - 100.0);
@@ -354,6 +372,76 @@ TEST_CASE("route terminators: refused as a point is, naming it - data that is no
     const CommandResult ok = w.submit(v, RouteCommand{}, with(1, PathTerminator::RadiusToFix), {}, {}, {}, {}, {}, std::vector<RouteTerminator>{arc});
     INFO(reasonName(ok.reason) << " at " << ok.index);
     CHECK(ok.accepted());
+}
+
+TEST_CASE("route terminators: a course to altitude ends at its altitude, before its point; a heading to altitude drifts with the "
+          "wind; a course to intercept meets a course to fix's line",
+          "[modes]") {
+    session::World w(options("route-terminators-floating"));
+    const auto ca = wingAt(w, 37.6, 0), va = wingAt(w, 37.6, 1), ci = wingAt(w, 37.6, 2);
+    setWind(w, 0.0, 10.0); // (from the north: across their legs east)
+    w.step(stepsFor(w, 5.0));
+    auto origin = [&w](std::uint32_t v, double& lat, double& lon) { lat = w.vehicleState(v)->latitudeRad, lon = w.vehicleState(v)->longitudeRad; };
+    // east 3 km, then 6 km east to 150 m up at 3 m/s - a course or a heading to it - then direct to a point 3 km north
+    double alat, alon, vlat, vlon, clat, clon;
+    origin(ca, alat, alon), origin(va, vlat, vlon), origin(ci, clat, clon);
+    auto climb = [](double lat0, double lon0, PathTerminator t) {
+        std::vector<Waypoint> p = {at(lat0, lon0, 0.0, 3000.0), at(lat0, lon0, 0.0, 9000.0), at(lat0, lon0, 3000.0, 9000.0)};
+        p.at(0).altitudeM = 1500.0;
+        p.at(1).terminator = static_cast<double>(t), p.at(1).altitudeM = 1650.0, p.at(1).climbRateMs = 3.0;
+        p.at(2).terminator = static_cast<double>(PathTerminator::DirectToFix);
+        return p;
+    };
+    const CommandResult rc = w.submit(ca, RouteCommand{}, climb(alat, alon, PathTerminator::CourseToAltitude));
+    const CommandResult rv = w.submit(va, RouteCommand{}, climb(vlat, vlon, PathTerminator::HeadingToAltitude));
+    INFO(reasonName(rc.reason) << " at " << rc.index << "; " << reasonName(rv.reason) << " at " << rv.index);
+    REQUIRE(rc.accepted());
+    REQUIRE(rv.accepted());
+    // east 3 km, then a course to intercept - its point where it meets the line - and a course to fix due north 4 km on
+    std::vector<Waypoint> cpoints = {at(clat, clon, 0.0, 3000.0), at(clat, clon, 1000.0, 6000.0), at(clat, clon, 5000.0, 6000.0),
+                                     at(clat, clon, 8000.0, 6000.0)};
+    cpoints.at(1).terminator = code(PathTerminator::CourseToIntercept), cpoints.at(2).terminator = code(PathTerminator::CourseToFix);
+    RouteTerminator north;
+    north.point = 2, north.courseRad = 0.0;
+    const CommandResult ri = w.submit(ci, RouteCommand{}, cpoints, {}, {}, {}, {}, {}, std::vector<RouteTerminator>{north});
+    INFO(reasonName(ri.reason) << " at " << ri.index);
+    REQUIRE(ri.accepted());
+    double caEast = kHold, caUp = kHold, caOff = 0.0, vaEast = kHold, vaOff = kHold, ciEast = kHold, ciNorth = kHold, ciOff = 0.0, ciTrack = 0.0;
+    int ciSamples = 0;
+    for (unsigned k = 0; k < stepsFor(w, 600.0); ++k) {
+        w.step();
+        double n, e;
+        const auto& a = *w.vehicleState(ca);
+        apart(alat, alon, a.latitudeRad, a.longitudeRad, n, e);
+        if (w.activity(rc.activity)->progress.segment == 1) caOff = std::max(caOff, std::abs(n));
+        if (isHold(caEast) && w.activity(rc.activity)->progress.segment == 2) caEast = e, caUp = a.altitudeMslM;
+        const auto& h = *w.vehicleState(va);
+        apart(vlat, vlon, h.latitudeRad, h.longitudeRad, n, e);
+        if (isHold(vaEast) && w.activity(rv.activity)->progress.segment == 2) vaEast = e, vaOff = n;
+        const auto& c = *w.vehicleState(ci);
+        apart(clat, clon, c.latitudeRad, c.longitudeRad, n, e);
+        if (isHold(ciEast) && w.activity(ri.activity)->progress.segment == 2) ciEast = e, ciNorth = n;
+        if (w.activity(ri.activity)->live() && w.activity(ri.activity)->progress.segment == 2 && n >= 3000.0 && n <= 5000.0) {
+            ciOff = std::max(ciOff, std::abs(e - 6000.0));
+            ciTrack = std::max(ciTrack, std::abs(route::trackOf(c)) / kDeg);
+            ++ciSamples;
+        }
+    }
+    std::printf("route terminators, floating ends: a course to altitude ended %.0f m east (its point 9,000) at %.1f m (1,650), within "
+                "%.1f m of its course in a 10 m/s wind; a heading to altitude ended %.0f m east, %.0f m off it; a course to "
+                "intercept met its course to fix's line %.0f m east and %.0f m north (its point 6,000, 1,000), then within %.1f m "
+                "of it and %.2f degrees of its course (%d samples)\n",
+                caEast, caUp, caOff, vaEast, vaOff, ciEast, ciNorth, ciOff, ciTrack, ciSamples);
+    CHECK(caEast < 7500.0);
+    CHECK(caUp > 1639.0);
+    CHECK(caOff < 30.0);
+    CHECK(vaEast < 7500.0);
+    CHECK(vaOff < -200.0); // (drifted south, the wind's way)
+    CHECK(std::abs(ciEast - 6000.0) < 400.0);
+    CHECK(ciSamples > 20);
+    CHECK(ciOff < 20.0);
+    CHECK(ciTrack < 3.0);
+    for (const auto a : {rc.activity, rv.activity, ri.activity}) CHECK(w.activity(a)->state == ActivityState::Completed);
 }
 
 TEST_CASE("route terminators: a stack on its own takes them too", "[modes]") {

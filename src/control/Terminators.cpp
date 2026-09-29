@@ -28,22 +28,50 @@ void crossOf(const double a[3], const double b[3], double c[3]) noexcept {
 
 double dotOf(const double a[3], const double b[3]) noexcept { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 
-/// The legs FA-6f2 builds: to an altitude, an intercept, a distance or a manual termination, and a hold's.
+/// The legs FA-6f2b builds: to a manual termination, and a hold's.
 bool later(PathTerminator t) noexcept {
     switch (t) {
-    case PathTerminator::CourseToAltitude:
-    case PathTerminator::CourseToIntercept:
-    case PathTerminator::TrackToAltitude:
-    case PathTerminator::TrackFromFixToDistanceAlongTrack:
     case PathTerminator::FixToManualTermination:
     case PathTerminator::HoldingWithAltitudeTermination:
     case PathTerminator::HoldingWithFixTermination:
     case PathTerminator::HoldingWithManualTermination:
+    case PathTerminator::HeadingToManual: return true;
+    default: return false;
+    }
+}
+
+/// A leg that begins where the aircraft is: flown on a course or a heading from there (CA, CI, VA, VI, VM), straight to its
+/// point (DF, IF), onto its course (CF) - or, without a terminator, the route's own leg from there, as after a loiter.
+bool fromAircraft(PathTerminator t) noexcept {
+    switch (t) {
+    case PathTerminator::Count:
+    case PathTerminator::CourseToAltitude:
+    case PathTerminator::CourseToIntercept:
+    case PathTerminator::HeadingToAltitude:
+    case PathTerminator::HeadingToIntercept:
+    case PathTerminator::HeadingToManual:
+    case PathTerminator::DirectToFix:
+    case PathTerminator::InitialFix:
+    case PathTerminator::CourseToFix: return true;
+    default: return false;
+    }
+}
+
+/// A leg flown on a course or a heading from where it begins (CA, CI, VA, VI, VM): the planned leg's, from the point before.
+bool coursed(PathTerminator t) noexcept {
+    switch (t) {
+    case PathTerminator::CourseToAltitude:
+    case PathTerminator::CourseToIntercept:
     case PathTerminator::HeadingToAltitude:
     case PathTerminator::HeadingToIntercept:
     case PathTerminator::HeadingToManual: return true;
     default: return false;
     }
+}
+
+AltitudeReference referenceOf(double code) noexcept { // (as the route's: above mean sea level left out)
+    if (isHold(code) || code < 0.0 || code >= static_cast<double>(AltitudeReference::Count)) return AltitudeReference::Msl;
+    return static_cast<AltitudeReference>(static_cast<int>(code));
 }
 
 /// The legs A-GRA 6.0a's segment does not define: a navaid's DME distance, radial or arc (none is given, nor has the world
@@ -120,6 +148,12 @@ Leg legFrom(const Plan& p, std::uint32_t i, double lat, double lon, const Waypoi
     Leg leg;
     if (type == PathTerminator::CourseToFix && t && !isHold(t->courseRad) && makeCourseLeg(b.latitudeRad, b.longitudeRad, t->courseRad, lat, lon, leg))
         return leg;
+    if (coursed(type) && before && !(lat == before->latitudeRad && lon == before->longitudeRad)) { // (its course from elsewhere, as far)
+        const Leg planned = makeLeg(before->latitudeRad, before->longitudeRad, b.latitudeRad, b.longitudeRad, false);
+        double latB, lonB;
+        geo::destination(lat, lon, planned.courseOutRad, planned.lengthM, latB, lonB);
+        return makeLeg(lat, lon, latB, lonB, false);
+    }
     return makeLeg(lat, lon, b.latitudeRad, b.longitudeRad, false); // (a track to fix's, a direct one's, an initial fix's: the great circle)
 }
 
@@ -143,7 +177,7 @@ void planTerminators(Plan& p) noexcept {
 
 // --- the host's ------------------------------------------------------------------------------
 
-Reason CapabilityHost::checkTerminators(route::Plan& p, Span<const Waypoint> waypoints, Span<const RouteTerminator> terminators,
+Reason CapabilityHost::checkTerminators(route::Plan& p, Span<const Waypoint> waypoints, Span<const RouteTerminator> terminators, bool repeat,
                                         CommandResult& detail) const noexcept {
     p.terminatorCount = 0, p.terminated = false;
     const auto count = static_cast<std::uint32_t>(std::min<std::size_t>(waypoints.size(), route::Plan::kMax));
@@ -195,8 +229,30 @@ Reason CapabilityHost::checkTerminators(route::Plan& p, Span<const Waypoint> way
         if (type == PathTerminator::RadiusToFix && (!t || isHold(t->centerLatitudeRad) || isHold(t->clockwise))) return at(k, Reason::InvalidWaypoint);
         if (undefined(type)) return at(k, Reason::InvalidWaypoint);
     }
-    // not built yet (its row, partial): a leg to an altitude, an intercept, a distance or a manual termination, and a
-    // hold's - FA-6f2's
+    // an altitude termination with its altitude (as given); a leg that ends where the aircraft is, at no loiter point
+    for (std::uint32_t k = 0; k < count; ++k) {
+        const Waypoint& w = waypoints[k];
+        if (route::endOf(w) == 1 && isHold(w.altitudeM)) return at(k, Reason::InvalidWaypoint);
+        if (route::floats(w) && route::loiterPoint(w)) return at(k, Reason::InvalidWaypoint);
+    }
+    // in its flight, each leg after one that ends where the aircraft is one that begins there, and an intercept's next a
+    // course to fix, whose line it meets (a linked route's order its plan's; the points it does not fly, none)
+    const std::uint32_t flown = p.linked ? p.count : count;
+    auto given = [&p](std::uint32_t j) { return p.linked ? p.order[j] : j; };
+    for (std::uint32_t j = 0; j < flown; ++j) {
+        const std::uint32_t k = given(j);
+        if (!route::floats(waypoints[k])) continue;
+        const bool last = j + 1 == flown;
+        if (last && !(p.linked ? p.repeat : repeat)) { // (the route's end: on along it - an intercept has none to meet)
+            if (route::endOf(waypoints[k]) == 2) return at(k, Reason::InvalidWaypoint);
+            continue;
+        }
+        const std::uint32_t n = given(!last ? j + 1 : p.linked ? p.loop : 0);
+        const PathTerminator next = route::terminatorOf(waypoints[n]);
+        if (route::endOf(waypoints[k]) == 2 && next != PathTerminator::CourseToFix) return at(k, Reason::InvalidWaypoint);
+        if (!fromAircraft(next)) return at(n, Reason::InvalidWaypoint);
+    }
+    // not built yet (its row, partial): a leg to a manual termination, and a hold's - FA-6f2b's
     for (std::uint32_t k = 0; k < count; ++k)
         if (later(route::terminatorOf(waypoints[k]))) return at(k, Reason::NotImplemented);
     p.terminatorCount = static_cast<std::uint32_t>(terminators.size());
@@ -295,6 +351,85 @@ void RouteBehavior::takeTerminators(const ControlContext& ctx) noexcept {
     for (std::uint32_t i = 0; i < p.count && !p.terminated; ++i) p.terminated = !isHold(p.points[i].terminator);
 }
 
+void RouteBehavior::terminated(std::uint32_t k) noexcept {
+    const route::Plan& p = *plan_;
+    const Waypoint& w = p.points[k];
+    pursuing_ = route::direct(w) && !(leadOut_ > 0.0); // (a direct to fix's, but after a turn onto it)
+    abeam_ = false;
+    ends_ = route::endOf(w), headed_ = route::headed(w);
+    interceptM_ = kHold;
+    if (headed_) headingTrim_ = 0.0, lastHeading_ = kHold;
+}
+
+bool RouteBehavior::reached(const ControlContext& ctx, const sim::VehicleState& s, const Performance& perf, const route::Fix& f) {
+    const route::Plan& p = *plan_;
+    const Waypoint& w = p.points[target_];
+    if (ends_ == 1) { // (its altitude, in its reference, as the route reads it: within 10 m, or past it)
+        const double now = altitudeNow(referenceOf(w.altitudeReference), s, ctx.altimeter);
+        return w.altitudeM >= segmentFrom_ ? now >= w.altitudeM - 10.0 : now <= w.altitudeM + 10.0;
+    }
+    if (ends_ != 2 || !p.leaves(target_)) return false; // (the operator's: FA-6f2b)
+    // the next leg's line: its cross-track to it within what the turn onto it takes at its speed and 80 % of its bank
+    // (a rotorcraft's, its tilt), closing on it - or crossed since the last update
+    (void)f;
+    const route::Fix g = route::onLeg(p.legOut(target_), s.latitudeRad, s.longitudeRad);
+    const double v = std::max(std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]), 1.0);
+    const double bank = 0.8 * (hovers_ ? perf.maxTiltRad : perf.maxBankRad);
+    const double r = std::isfinite(bank) && bank > 0.0 ? v * v / (9.80665 * std::tan(bank)) : 0.0;
+    const double off = geo::wrapPi(route::trackOf(s) - g.courseRad); // (+ right of it)
+    const bool closing = g.crossTrackM * std::sin(off) < 0.0;
+    const bool crossed = !isHold(interceptM_) && (interceptM_ > 0.0) != (g.crossTrackM > 0.0);
+    interceptM_ = g.crossTrackM;
+    return crossed || (closing && std::abs(g.crossTrackM) <= r * (1.0 - std::cos(std::min(std::abs(off), 0.5 * kPi))) + 1.0);
+}
+
+void RouteBehavior::passHere(const ControlContext& ctx, const sim::VehicleState& s, const Performance& perf, const route::Fix& f) {
+    finishedM_ += std::max(0.0, f.alongM - leadOut_);
+    leadOut_ = 0.0;
+    if (branchAt(ctx, perf, false, 0.0)) return; // (a branch taken: on from here - 4.37)
+    route::Plan& q = *plan_;
+    const bool last = target_ == q.last() && !q.repeat;
+    advance(s, perf);
+    if (last) return; // (the route's end: on along its last leg)
+    route::Leg& in = firstLap_ && target_ == q.start ? q.entry : q.looped(target_, firstLap_) ? q.loopLeg : q.legs[target_];
+    in = route::legFrom(q, target_, s.latitudeRad, s.longitudeRad, &q.points[q.before(target_, firstLap_)]);
+    route::replan(q, target_, firstLap_, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
+    beginSegment(target_, s, finishedM_, 0.0, 0.0, firstLap_, true);
+}
+
+VelocityCommand RouteBehavior::headingCommand(const ControlContext& ctx, const sim::VehicleState& s, const Performance& perf, const route::Steer& steer) {
+    const double direction = legTo_->courseOutRad; // (its heading: the course its leg leaves on)
+    VelocityCommand out;
+    out.verticalSpeedMs = steer.verticalSpeedMs;
+    const double tn = std::cos(direction), te = std::sin(direction);
+    if (hovers_) { // (as the hsa flies a heading: over the ground along it at a speed over the ground, else through the air)
+        if (steer.reference == SpeedReference::GroundSpeed) {
+            const double v = std::min(steer.speed, steer.speedLimitMs);
+            out.northMs = v * tn, out.eastMs = v * te;
+        } else {
+            out.airspeedMs = std::min(trueAirspeedOf(steer.speed, steer.reference, s), steer.speedLimitMs);
+        }
+        out.headingRad = direction;
+        course_ = heading_ = direction;
+        return out;
+    }
+    double tas = trueAirspeedOf(steer.speed, steer.reference, s);
+    if (steer.reference == SpeedReference::GroundSpeed) { // (along the heading: |tas h + wind| = the speed)
+        const double windAlong = wind_.northMs * tn + wind_.eastMs * te, w2 = wind_.northMs * wind_.northMs + wind_.eastMs * wind_.eastMs;
+        tas = -windAlong + std::sqrt(std::max(windAlong * windAlong - w2 + steer.speed * steer.speed, 0.0));
+    }
+    out.airspeedMs = std::max(tas, 0.0);
+    // the hsa's trim on what the loops below leave, once near the heading while the bank holds (4.12: FA-4d's finding)
+    const double bandwidth = perf.courseBandwidthRadS(std::max(s.airspeedTrueMs, 10.0));
+    const double psi = s.eulerRad[2], error = geo::wrapPi(direction - psi);
+    if (!isHold(lastHeading_) && std::abs(error) < 0.2 && std::abs(s.angularRateBodyRadS[0]) < 0.5 * kDegree)
+        headingTrim_ = std::clamp(headingTrim_ + 0.25 * (bandwidth * error * ctx.dt - geo::wrapPi(psi - lastHeading_)), -0.1, 0.1);
+    lastHeading_ = psi;
+    out.headingRad = geo::wrapPi(direction + headingTrim_);
+    course_ = kHold, heading_ = out.headingRad;
+    return out;
+}
+
 void RouteBehavior::direct(const sim::VehicleState& s, const Performance& perf) {
     if (onArc_) { // (in the turn at its point: the leg flown)
         pursuing_ = false;
@@ -303,10 +438,18 @@ void RouteBehavior::direct(const sim::VehicleState& s, const Performance& perf) 
     route::Plan& p = *plan_;
     const std::uint32_t k = target_;
     route::Leg& in = firstLap_ && k == p.start ? p.entry : p.looped(k, firstLap_) ? p.loopLeg : p.legs[k];
-    // what it flew toward its point since the leg was made, then the leg from here - the turn there planned again
+    // what it flew toward its point since the leg was made, then the leg from here - the turn there planned again; its
+    // point come abeam or behind as it turned, too near to turn to (within twice the turn at its speed and 80 % of its
+    // bank, a rotorcraft's tilt), passed there
     finishedM_ += std::max(route::onLeg(in, s.latitudeRad, s.longitudeRad).alongM, 0.0);
     const Waypoint& w = p.points[k];
     in = route::makeLeg(s.latitudeRad, s.longitudeRad, w.latitudeRad, w.longitudeRad, false);
+    const double v = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]), bank = 0.8 * (hovers_ ? perf.maxTiltRad : perf.maxBankRad);
+    if (v > 1.0 && std::abs(geo::wrapPi(in.courseOutRad - route::trackOf(s))) >= 0.5 * kPi && std::isfinite(bank) && bank > 0.0 &&
+        in.lengthM < 2.0 * v * v / (9.80665 * std::tan(bank))) {
+        pursuing_ = false, abeam_ = true;
+        return;
+    }
     route::replan(p, k, firstLap_, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_);
     if (std::abs(geo::wrapPi(route::trackOf(s) - in.courseOutRad)) < kDegree) pursuing_ = false; // (on course to it: that leg flown)
 }

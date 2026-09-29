@@ -664,7 +664,7 @@ private:
     /// two for one point, a field not finite or a code not whole, data its point's leg has none of, a course to fix without
     /// its course, a radius to fix without its centre or its way round - and for a leg its segment does not define (a
     /// navaid's, a procedure turn's); NotImplemented for FA-6f2's legs.
-    Reason checkTerminators(route::Plan& plan, Span<const Waypoint> waypoints, Span<const RouteTerminator> terminators,
+    Reason checkTerminators(route::Plan& plan, Span<const Waypoint> waypoints, Span<const RouteTerminator> terminators, bool repeat,
                             CommandResult& detail) const noexcept;
     /// Its terminators' legs as laid out (4.38; Terminators.cpp; `plan` planned, as 4.30's turn points are checked):
     /// InvalidWaypoint naming the point for a leg that is none - an arc where the route never flies it from the point

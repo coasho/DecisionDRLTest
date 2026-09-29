@@ -1246,7 +1246,9 @@ void plan(Plan& p, double lat, double lon, double altitudeMslM, double windMs, c
     }
 
     auto radius = [&](std::uint32_t i) { return turnRadiusAt(p, i, altitudeMslM, windMs, performance, hovers); };
-    auto flyBy = [&](std::uint32_t i) { return point(i).turn == static_cast<double>(TurnType::FlyBy) && !noTurn(point(i)); }; // (a waypoint: flown over)
+    auto flyBy = [&](std::uint32_t i) { // (a waypoint: flown over; a leg that ends where the aircraft is: none - 4.38)
+        return point(i).turn == static_cast<double>(TurnType::FlyBy) && !noTurn(point(i)) && !(p.terminated && floats(point(i)));
+    };
     for (std::uint32_t i = 0; i < n; ++i)
         if (p.leaves(i) && (i > 0 || (p.repeat && p.loop == 0)) && flyBy(i)) p.turns[i] = makeTurn(p.legs[i].courseInRad, out(i).courseOutRad, radius(i));
     if (p.repeat && p.loop > 0 && flyBy(p.loop)) p.loopTurn = makeTurn(p.loopLeg.courseInRad, out(p.loop).courseOutRad, radius(p.loop));
@@ -1311,8 +1313,10 @@ void replan(Plan& p, std::uint32_t i, bool firstLap, double altitudeMslM, double
     const Waypoint& w = p.points[i];
     const bool entry = firstLap && i == p.start, looped = p.looped(i, firstLap);
     const bool preceded = i > 0 || (p.repeat && p.loop == 0) || looped; // (a leg into it: 4.36)
-    // (after a loiter, from where it ended: 4.31; a direct to fix's, from where it began - 4.38)
-    const bool kept = entry || (preceded && loiterPoint(p.points[p.before(i, firstLap)])) || (p.terminated && direct(w));
+    // (after a loiter, from where it ended: 4.31; a direct to fix's, and after a leg that ends where the aircraft is, from
+    // where it began - 4.38)
+    const bool kept = entry || (preceded && loiterPoint(p.points[p.before(i, firstLap)])) ||
+                      (p.terminated && (direct(w) || (preceded && floats(p.points[p.before(i, firstLap)]))));
     Leg& in = entry ? p.entry : looped ? p.loopLeg : p.legs[i];
     if (kept) {
         in = p.terminated ? legFrom(p, i, in.latA, in.lonA, entry ? nullptr : &p.points[p.before(i, firstLap)])
@@ -1327,7 +1331,7 @@ void replan(Plan& p, std::uint32_t i, bool firstLap, double altitudeMslM, double
     const std::uint32_t j = p.next(i);
     Leg& out = i + 1 < p.count ? p.legs[j] : p.loop > 0 ? p.loopLeg : p.legs[0];
     out = legTo(p, i, j, in.courseInRad);
-    if (w.turn != static_cast<double>(TurnType::FlyBy) || noTurn(w) || (!entry && !preceded)) return;
+    if (w.turn != static_cast<double>(TurnType::FlyBy) || noTurn(w) || (!entry && !preceded) || (p.terminated && floats(w))) return;
     t = makeTurn(in.courseInRad, out.courseOutRad, turnRadiusAt(p, i, altitudeMslM, windMs, performance, hovers));
     if (entry && t.leadM > in.lengthM) { // (too near its point to turn before it: flown over)
         t = Turn{};
