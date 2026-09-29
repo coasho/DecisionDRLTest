@@ -315,7 +315,8 @@ stage end to end through the platform (`ctest -R hangar`).
   integrates it stably. Points close together share that budget. The fly
   stage checks the result by crashing the aircraft six ways. The wheels
   stay JSBSim's; flightsim's build of JSBSim fixes their force when one
-  lands on its side (THIRD_PARTY_NOTICES.md, "Changes to JSBSim").
+  lands on its side, and makes an impact the step cannot resolve inelastic
+  (THIRD_PARTY_NOTICES.md, "Changes to JSBSim"; docs/rotorcraft.md, 7).
 - **Propeller.** Blade-element momentum theory with Prandtl's tip and hub
   losses.
 - **Engines.** Piston engines use JSBSim's piston engine; hangar's control

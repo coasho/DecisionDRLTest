@@ -350,3 +350,195 @@ set(_new [=[double FGElectric::CalcFuelNeed(void)
 ]=])
 _fsim_jsbsim_edit(_text _old _new FGElectric.cpp "fuel need")
 _fsim_jsbsim_write(models/propulsion/FGElectric.cpp _text Propulsion)
+
+# ---------------------------------------------------------------------------
+# models/FGAccelerations.cpp: an impact the step cannot resolve.
+#
+# A contact's normal force is a spring and a damper, evaluated as a step
+# begins and applied for the whole step - one and a half times over, as the
+# translational rate is integrated by Adams-Bashforth 2. An aircraft that
+# strikes the ground faster than its contacts can take in a step is deep in
+# it before they see it (a Crazyflie at 35 m/s moves 0.29 m a step, sixteen
+# times its 18 mm legs), and the force they then apply sends its contact
+# points back out several times faster than they came in: the ground adds
+# energy. The Crazyflie was thrown back up at 80 m/s, tumbling, and its state
+# overflowed a second later. Now, when the ground's forces would send a
+# contact point back out faster than it came in, by more than 5 m/s, the step
+# applies instead the forces that stop the contact points' approach - each no
+# more than its gear's, none leaving the ground faster than 0.5 m/s - solved
+# as JSBSim solves its friction (projected Gauss-Seidel), and bounds the
+# friction by them: an inelastic impact. Otherwise nothing changes, bit for
+# bit: the check only reads the step's forces.
+# ---------------------------------------------------------------------------
+_fsim_jsbsim_read(models/FGAccelerations.cpp _text)
+set(_old [=[#include "input_output/FGLog.h"
+]=])
+set(_new [=[#include "input_output/FGLog.h"
+#include "FGGroundReactions.h" // flightsim patch: the impact limit's
+]=])
+_fsim_jsbsim_edit(_text _old _new FGAccelerations.cpp "include")
+set(_old [=[namespace JSBSim {
+]=])
+set(_new [=[namespace JSBSim {
+
+// flightsim patch (cmake/JsbsimPatches.cmake): an impact the step cannot
+// resolve. The ground's forces - each contact's spring and damper - are
+// applied for the whole step from the state it begins with; when they would
+// send a contact point back out of the ground faster than it came in, they
+// add energy. The step then applies instead the forces that stop the contact
+// points' approach (an inelastic impact), and bounds the friction by them.
+namespace {
+
+// How much faster than it came in the ground's forces may send a contact
+// point back out in a step before they are taken to add energy. The contacts
+// a step integrates stay well within it: a Crazyflie parked on its legs (whose
+// springs and dampers are stiff for the step: it hops) reaches 0.4 m/s, one
+// dropped on its back from 0.3 m 4 m/s; its strikes of 10 m/s and more, tens.
+const double kImpactMargin = 5.0 / 0.3048; // ft/s
+// How fast a contact point so limited may leave the ground: an airframe
+// driven into it comes back up at a walk.
+const double kImpactRecovery = 0.5 / 0.3048; // ft/s
+// JSBSim's default rate integrators, which flightsim keeps: the translational
+// rate's Adams-Bashforth 2 applies 1.5 times the step's acceleration (less
+// half the last step's), the rotational rate's Euler the step's.
+const double kTranslationalGain = 1.5;
+
+// a contact point the ground pushes
+struct ImpactPoint {
+  FGColumnVector3 n;   // the ground's normal, body axes, out of the ground
+  FGColumnVector3 r;   // where its gear's force acts, body axes from the CG (ft)
+  double force;        // its gear's force along n (lbf)
+  double lambda;       // the force the step applies (lbf)
+  double free;         // its speed along n after the step, the ground's forces left out (ft/s)
+  size_t first, count; // its friction's multipliers
+};
+
+void LimitImpact(FGFDMExec* fdm, FGAccelerations::Inputs& in, double dt, const FGColumnVector3& lastUVWidot,
+                 FGColumnVector3& uvwdot, FGColumnVector3& uvwidot, FGColumnVector3& pqrdot,
+                 FGColumnVector3& pqridot, FGColumnVector3& bodyAccel)
+{
+  vector<LagrangeMultiplier*>& multipliers = *in.MultipliersList;
+  if (multipliers.empty() || dt <= 0.0 || fdm->GetTrimStatus()) return;
+
+  // What the ground's forces do to the step's speed and rate. When no contact
+  // point can gain the margin from them, whatever its approach, nothing more
+  // is done: the usual case.
+  const FGColumnVector3 dv = (kTranslationalGain * dt / in.Mass) * in.GroundForce;
+  const FGColumnVector3 dw = dt * (in.Jinv * in.GroundMoment);
+  double reach = 0.0;
+  for (const LagrangeMultiplier* m : multipliers) reach = max(reach, DotProduct(m->LeverArm, m->LeverArm));
+  if (dv.Magnitude() + dw.Magnitude() * sqrt(reach) <= kImpactMargin) return;
+
+  // Each contact point the ground pushes: does it leave faster than it came
+  // in? Each gear in contact registered its friction's multipliers in turn -
+  // its roll and side friction (LMultiplier[ftRoll] and [ftSide], adjacent) or
+  // its sliding friction alone - the first's lever arm the point its force
+  // acts at.
+  const FGColumnVector3 v = in.vUVW - in.Tec2b * in.TerrainVelocity;
+  const FGColumnVector3 w = in.vPQR - in.Tec2b * in.TerrainAngularVel;
+  const auto ground = fdm->GetGroundReactions();
+  vector<ImpactPoint> points;
+  bool over = false;
+  size_t k = 0;
+  for (int g = 0; g < ground->GetNumGearUnits(); ++g) {
+    const auto gear = ground->GetGearUnit(g);
+    if (!gear->GetWOW()) continue;
+    if (k >= multipliers.size()) return; // not as registered: the step is left as it is
+    const size_t count = k + 1 < multipliers.size() && multipliers[k + 1] == multipliers[k] + 1 ? 2 : 1;
+    const FGForce& f = *gear;
+    const FGColumnVector3 fb(f.GetBodyXForce(), f.GetBodyYForce(), f.GetBodyZForce());
+    const double force = fb.Magnitude();
+    if (force > 0.0) {
+      ImpactPoint p;
+      p.n = fb / force;
+      p.r = multipliers[k]->LeverArm;
+      p.force = p.lambda = force;
+      p.free = 0.0;
+      p.first = k;
+      p.count = count;
+      const double approach = -DotProduct(p.n, v + w * p.r);
+      if (DotProduct(p.n, dv + dw * p.r) > 2.0 * max(approach, 0.0) + kImpactMargin) over = true;
+      points.push_back(p);
+    }
+    k += count;
+  }
+  if (!over || k != multipliers.size()) return;
+
+  // The forces that stop the points' approach in the step, none leaving
+  // faster than kImpactRecovery, each no more than its gear's: a[i*n+j] is
+  // the speed along n_i a unit force at j gives in the step.
+  const size_t n = points.size();
+  vector<double> a(n * n);
+  for (size_t j = 0; j < n; ++j) {
+    const FGColumnVector3 dvj = (kTranslationalGain * dt / in.Mass) * points[j].n;
+    const FGColumnVector3 dwj = dt * (in.Jinv * (points[j].r * points[j].n));
+    for (size_t i = 0; i < n; ++i) a[i * n + j] = DotProduct(points[i].n, dvj + dwj * points[i].r);
+  }
+  // the body's speed and rate after the step, as the integrators will make
+  // them, and each point's speed along its normal without the ground's forces
+  const FGColumnVector3 vNext = v + dt * (in.Ti2b * (kTranslationalGain * uvwidot - (kTranslationalGain - 1.0) * lastUVWidot));
+  const FGColumnVector3 wNext = w + dt * pqridot;
+  for (size_t i = 0; i < n; ++i) {
+    double theirs = 0.0;
+    for (size_t j = 0; j < n; ++j) theirs += a[i * n + j] * points[j].force;
+    points[i].free = DotProduct(points[i].n, vNext + wNext * points[i].r) - theirs;
+  }
+  // projected Gauss-Seidel, from the gears' own forces down
+  for (int iter = 0; iter < 100; ++iter) {
+    double change = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+      double speed = points[i].free;
+      for (size_t j = 0; j < n; ++j) speed += a[i * n + j] * points[j].lambda;
+      const double lambda = min(max(points[i].lambda + (kImpactRecovery - speed) / a[i * n + i], 0.0), points[i].force);
+      change += fabs(lambda - points[i].lambda) * a[i * n + i];
+      points[i].lambda = lambda;
+    }
+    if (change < 1e-6) break;
+  }
+  // what the step applies instead, and each gear's friction bounded by it
+  FGColumnVector3 dF, dM;
+  for (const ImpactPoint& p : points) {
+    const FGColumnVector3 d = (p.lambda - p.force) * p.n;
+    dF += d;
+    dM += p.r * d;
+    const double scale = p.lambda / p.force;
+    for (size_t m = p.first; m < p.first + p.count; ++m) {
+      multipliers[m]->Max *= scale;
+      multipliers[m]->Min *= scale;
+      multipliers[m]->value = min(max(multipliers[m]->value, multipliers[m]->Min), multipliers[m]->Max);
+    }
+  }
+  const FGColumnVector3 accel = dF / in.Mass;
+  const FGColumnVector3 alpha = in.Jinv * dM;
+  bodyAccel += accel;
+  uvwdot += accel;
+  uvwidot += in.Tb2i * accel;
+  pqrdot += alpha;
+  pqridot += alpha;
+  in.Force += dF;
+  in.Moment += dM;
+  in.GroundForce += dF;
+  in.GroundMoment += dM;
+}
+
+} // namespace
+]=])
+_fsim_jsbsim_edit(_text _old _new FGAccelerations.cpp "the limit")
+set(_old [=[  CalculatePQRdot();   // Angular rate derivative
+  CalculateUVWdot();   // Translational rate derivative
+
+  if (!FDMExec->GetHoldDown())
+    CalculateFrictionForces(in.DeltaT * rate);  // Update rate derivatives with friction forces
+]=])
+set(_new [=[  const FGColumnVector3 lastUVWidot = vUVWidot; // flightsim patch: the integrator's last, for LimitImpact
+  CalculatePQRdot();   // Angular rate derivative
+  CalculateUVWdot();   // Translational rate derivative
+
+  if (!FDMExec->GetHoldDown()) {
+    // flightsim patch: an impact the step cannot resolve
+    LimitImpact(FDMExec, in, in.DeltaT * rate, lastUVWidot, vUVWdot, vUVWidot, vPQRdot, vPQRidot, vBodyAccel);
+    CalculateFrictionForces(in.DeltaT * rate);  // Update rate derivatives with friction forces
+  }
+]=])
+_fsim_jsbsim_edit(_text _old _new FGAccelerations.cpp "the call")
+_fsim_jsbsim_write(models/FGAccelerations.cpp _text Models)

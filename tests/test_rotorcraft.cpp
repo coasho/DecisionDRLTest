@@ -421,3 +421,102 @@ TEST_CASE("rotorcraft: asked beyond its top speed and flown so, a multirotor's v
         REQUIRE(w.removeVehicle(id));
     }
 }
+
+TEST_CASE("rotorcraft: a quadrotor that strikes the ground comes to rest, whatever its attitude", "[rotorcraft]") {
+    // Dropped with its motors off (the vehicle default's neutral) from 62 m, it meets the ground at 35 m/s: the
+    // Crazyflie moves sixteen times its legs' length in a step. The ground's forces, applied for a step, sent its
+    // contacts back out faster than they came in, and the Crazyflie diverged (docs/rotorcraft.md, 7; JSBSim's
+    // FGAccelerations, patched). Now no contact throws it back faster than it struck, and it comes to rest.
+    struct Drop {
+        const char* name;
+        double pitchDeg, rollDeg;
+    };
+    const Drop drops[] = {{"level", 0.0, 0.0}, {"tilted", 10.0, 25.0}, {"nose first", -60.0, 0.0}, {"on its edge", 0.0, 80.0},
+                          {"inverted", 0.0, 180.0}};
+    for (const char* type : {"cf2", "iris"}) {
+        session::WorldOptions o = options("rotorcraft-impact");
+        o.frameSkip = 1; // every step of the flight model seen
+        session::World w(o);
+        struct Flight {
+            const Drop* drop;
+            std::uint32_t id = 0;
+            double nearMs = -1.0;   ///< its speed 1 m above the ground
+            double nearS = -1.0;    ///< and when
+            double fastestMs = 0.0; ///< its fastest from there on
+        };
+        std::vector<Flight> flights;
+        for (const auto& d : drops) {
+            session::VehicleSpec s = spec(std::string(type) + " " + d.name, type, 0.01 * static_cast<double>(flights.size() + 1));
+            s.initial.altitudeMslM = 62.0;
+            s.initial.pitchDeg = d.pitchDeg;
+            s.initial.rollDeg = d.rollDeg;
+            flights.push_back({&d, w.createVehicle(s)});
+            REQUIRE(flights.back().id != 0);
+        }
+        for (int k = 0; k < 8 * 120; ++k) {
+            w.step();
+            for (auto& f : flights) {
+                const auto& s = *w.vehicleState(f.id);
+                INFO(type << " " << f.drop->name << " at " << s.simTime << " s");
+                REQUIRE_FALSE(s.diverged);
+                const double speed = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1], s.velocityNedMs[2]);
+                if (f.nearS < 0.0 && s.altitudeAglM < 1.0) {
+                    f.nearMs = speed;
+                    f.nearS = s.simTime;
+                }
+                if (f.nearS >= 0.0) f.fastestMs = std::max(f.fastestMs, speed);
+            }
+        }
+        for (const auto& f : flights) {
+            const auto& s = *w.vehicleState(f.id);
+            INFO(type << " " << f.drop->name << ": " << f.nearMs << " m/s 1 m up, the fastest after " << f.fastestMs
+                      << " m/s; 8 s on " << std::hypot(s.velocityNedMs[0], s.velocityNedMs[1], s.velocityNedMs[2])
+                      << " m/s, " << s.altitudeAglM << " m up");
+            REQUIRE(f.nearS > 0.0);
+            CHECK(f.nearMs > 30.0);
+            // (the last metre's fall adds 1 %; before, the Crazyflie left the ground 1.6 to 6.4 times as fast, and
+            // three of the five diverged; the IRIS+ up to 4.3 times)
+            CHECK(f.fastestMs < 1.05 * f.nearMs);
+            // at rest on the ground at least 4 s after it struck (the worst: 0.24 m/s, rocking on its back; the
+            // IRIS+ on its side, its centre of gravity 0.21 m up)
+            CHECK(s.simTime - f.nearS > 4.0);
+            CHECK(std::hypot(s.velocityNedMs[0], s.velocityNedMs[1], s.velocityNedMs[2]) < 0.5);
+            CHECK(s.altitudeAglM < 0.3);
+        }
+    }
+}
+
+TEST_CASE("rotorcraft: a Crazyflie commanded after it has fallen 124 m strikes the ground and flies on or lies there", "[rotorcraft]") {
+    // The case the finding was traced in: 5 s with no command (its motors off) from 150 m, then an HSA. It meets the
+    // ground at 35 m/s as its motors spin up; it was thrown back up at 84 m/s, tumbling, and diverged a second later.
+    session::WorldOptions o = options("rotorcraft-impact-hsa");
+    o.seed = 0;
+    session::World w(o);
+    session::VehicleSpec s = spec("cf2", "cf2", 0.0);
+    s.initial.latitudeDeg = 30.0; // where it was found
+    s.initial.longitudeDeg = 0.0;
+    s.initial.altitudeMslM = 150.0;
+    const auto id = w.createVehicle(s);
+    REQUIRE(id != 0);
+    const double stepS = w.dt() * w.frameSkip();
+    w.step(static_cast<unsigned>(std::lround(5.0 / stepS)));
+    HsaCommand hsa;
+    hsa.headingRad = 0.0;
+    hsa.speed = 10.0;
+    hsa.speedReference = static_cast<double>(SpeedReference::TrueAirspeed);
+    REQUIRE(w.submit(id, hsa).accepted());
+    double nearMs = -1.0, fastest = 0.0; // its speed 1 m above the ground, and its fastest from there on
+    for (long k = 0; k < std::lround(10.0 / stepS); ++k) {
+        w.step();
+        const auto& st = *w.vehicleState(id);
+        INFO("at " << st.simTime << " s");
+        REQUIRE_FALSE(st.diverged);
+        const double speed = std::hypot(st.velocityNedMs[0], st.velocityNedMs[1], st.velocityNedMs[2]);
+        if (nearMs < 0.0 && st.altitudeAglM < 1.0) nearMs = speed;
+        if (nearMs >= 0.0) fastest = std::max(fastest, speed);
+    }
+    // (it strikes at 35 m/s, its motors spinning up; it was thrown back up at 84)
+    INFO(nearMs << " m/s 1 m up, the fastest after " << fastest << " m/s");
+    CHECK(nearMs > 30.0);
+    CHECK(fastest < 1.05 * nearMs);
+}

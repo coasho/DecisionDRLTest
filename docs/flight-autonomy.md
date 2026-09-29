@@ -1301,8 +1301,8 @@ A rotorcraft asked for an airspeed it cannot fly is held to its fastest, as a wi
   - A helicopter's flies past its top and its never-exceed speed, and cannot hold its height. The UH-60A, asked 150 m/s, flew 99.7 and strayed 128 m from its height. The UH-1H, asked 100, flew 55 to 59 m/s and strayed 19.5 m.
 - **What FA-3e had taken for a divergence of the Crazyflie's loops.** Asked for 25 and 30 m/s, it had diverged; its loops were not the cause.
   - The probe let the Crazyflie go for 5 s before the command. Under the neutral vehicle default (`VehicleDefault::Neutral`) its motors stood still, and it fell 124 m.
-  - The hsa began 27 m up, falling at 49 m/s. At full thrust it struck the ground at 35 m/s, was thrown up at 80 m/s tumbling at 50 to 70 rad/s, and diverged. This is the crash the contact model does not end ([rotorcraft.md](rotorcraft.md), 7).
-  - Asked for 10 m/s, it diverges the same way. Settled first, it flies its fastest at 25, 30, 40 and 60 m/s and never diverges.
+  - The hsa began 27 m up, falling at 49 m/s. At full thrust it struck the ground at 35 m/s, was thrown up at 80 m/s tumbling at 50 to 70 rad/s, and diverged. This was a crash the contact model did not end, until such an impact was made inelastic ([rotorcraft.md](rotorcraft.md), 7): now it strikes and is thrown up no faster than it struck.
+  - Asked for 10 m/s, it diverged the same way. Settled first, it flies its fastest at 25, 30, 40 and 60 m/s and never diverges.
 - **Surfaces.** C++: `topTasMs`. No C ABI or Python change: the answers are the existing `kClamped`, `performance_limit` and `max_airspeed` (Python: `Activity.clamped`, `fsim.Rejected`, `World.last_command_details`).
 
 ## 5. Applicability (D6)

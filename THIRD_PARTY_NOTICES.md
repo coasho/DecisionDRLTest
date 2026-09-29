@@ -36,7 +36,7 @@ them locally; using them is subject to the providers' terms:
 ## Changes to JSBSim
 
 flightsim builds JSBSim 1.3.1 from the unmodified submodule in `third_party/jsbsim`, with
-three changes:
+four changes:
 
 - In `src/models/FGLGear.cpp`, the projection of a wheel's strut on the ground normal is
   bounded at 45 degrees. Upstream divides the wheel's compression and ground force by that
@@ -55,6 +55,14 @@ three changes:
   tanks feeding it, and gives no power once they are empty (hangar's helicopters fly their
   turboshafts as such a governed power source). An electric engine without one burns
   nothing and runs as upstream's does.
+- In `src/models/FGAccelerations.cpp`, an impact the step cannot resolve is made inelastic.
+  The ground contacts' springs and dampers act for a whole step from the state it begins
+  with, so an aircraft striking the ground faster than its contacts can take in a step
+  (docs/rotorcraft.md: a 27 g quadrotor at 35 m/s) was sent back up faster than it came
+  down. When the ground's forces would send a contact point back out more than 5 m/s faster
+  than it came in, the step applies instead the forces that stop the contact points'
+  approach, each no more than its contact's own, solved as JSBSim solves its friction, and
+  bounds the friction by them. Otherwise the ground's forces are upstream's, bit for bit.
 
 `cmake/JsbsimPatches.cmake` makes the changes: it writes the changed files into the build
 tree, with each edit marked "flightsim patch" (two files the rotor's header reaches,

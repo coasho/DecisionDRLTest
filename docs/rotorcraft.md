@@ -492,23 +492,40 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
 - **The UH-60A's tail rotor** is where TM-85890 puts it, on the centre line;
   drawn 20 in along its shaft. The thrust's moments are the same; the moments
   of the rotor's in-plane forces differ by that offset.
-- **The Crazyflie at extreme rates**: tumbling into the ground at ~100 rad/s
-  (two motors at 90 % for 0.4 s), its 1.4e-5 kg m2 inertia spins up beyond
-  what the platform's fixed 120 Hz step can integrate; the platform reports
-  the divergence (`VehicleState::diverged`). A gentler tumble comes to rest on
-  its back, rocking a few degrees on its top contacts.
-- **A spent battery**: a quadrotor whose battery is spent falls, and strikes
-  the ground at 40 to 50 m/s from a few hundred metres. There its legs'
-  contacts throw the IRIS+ back up, and the Crazyflie diverges: a crash the
-  contact model does not end.
+- **Striking the ground**: the contacts are JSBSim's springs and dampers,
+  each applied for the platform's whole 120 Hz step. A quadrotor striking
+  the ground faster than its contacts can take in a step (the Crazyflie at
+  35 m/s moves 0.29 m a step on 18 mm legs) was sent back up faster than it
+  came down: the IRIS+ bounced, and the Crazyflie, thrown up tumbling,
+  diverged. Such an impact is now inelastic (flightsim's JSBSim,
+  THIRD_PARTY_NOTICES.md): a quadrotor whose battery is spent, striking at
+  40 to 50 m/s, or a Crazyflie tumbled into the ground at 150 rad/s (two
+  motors at 90 % for 0.4 s), comes to rest where it strikes, within a hop of
+  2 m (section 10).
 - **Left uncommanded in the air**: under the neutral vehicle default
   (`VehicleDefault::Neutral`) a rotorcraft's thrust stands still and it
   falls. A Crazyflie let go at 150 m for 5 s is at 27 m falling at 49 m/s.
-  Asked then for 10 m/s or more, it strikes the ground at 35 m/s and
-  diverges, as a spent battery's does. ADR-29 FA-3e took this for its
-  velocity loop diverging at 25 and 30 m/s
-  ([flight-autonomy.md](flight-autonomy.md), 4.48). Settle it first (a
-  velocity command, or `VehicleDefault::Hold`).
+  Asked then for 10 m/s or more, it strikes the ground at 35 m/s. It
+  diverged there, as a spent battery's did, until such an impact was made
+  inelastic (above): it now leaves the ground no faster than it struck, and
+  flies on or lies there. ADR-29 FA-3e took the divergence for its velocity
+  loop's at 25 and 30 m/s ([flight-autonomy.md](flight-autonomy.md), 4.48).
+  Settle it first (a velocity command, or `VehicleDefault::Hold`).
+- **The Crazyflie's contacts are stiff for the step**: short of such an
+  impact they act as they did. Their springs and dampers (60 N/m and
+  1.2 N s/m each, on 27 g) are more than the 120 Hz step integrates, and at
+  a small scale they still add energy: parked on its legs the Crazyflie
+  hops, its feet leaving the ground by up to 4 mm at up to 0.4 m/s; dropped
+  on its back from 5 cm it bounces 0.2 m on its top contacts (and may land
+  on its legs), and from 10 cm it is still rocking on its back 10 s later.
+  hangar sizes a fixed-wing design's structure contacts for the step from
+  the mass each moves (docs/hangar.md); the quadrotors' come from their
+  design files.
+- **The helicopters on the ground, left uncommanded** (found with the
+  above; unchanged): the UH-1H settles on its skids, then pitches up and
+  rolls over, and with no contact but its skids it sinks into the ground and
+  diverges; the UH-60A settles on its wheels and stays. Dropped upside down,
+  the UH-60A falls through the ground: its wheels are its only contacts.
 - **Power and thrust at altitude**: the helicopters' engines give the
   design's rating (a transmission limit) at any height, and a quadrotor's
   thrust is its rotors' speed squared, whatever the air's density. None of
@@ -646,3 +663,91 @@ Considered: EASA TCDS R.011 (Bo 105); FlightGear FGAddon `UH-1` and `UH-60`; JSB
   - At 6 m/s forward its vertical speed holds six times tighter, and it
     draws 2.3 % more power, where before it drew less the faster it flew.
   - The IRIS+'s file is unchanged, byte for byte.
+- **The ground impact**, a named, measured change (flightsim's JSBSim:
+  `FGAccelerations.cpp` in `cmake/JsbsimPatches.cmake`; section 7).
+  - Found as a Crazyflie left 5 s with no command (its motors off) from
+    150 m, then flown an HSA at 10 m/s: diverged. Traced a JSBSim step at a
+    time, it strikes the ground at 35 m/s, 9 deg nose down, its motors
+    spinning up.
+    - In the step it first touches, its nine contacts are 5 to 32 mm deep.
+      JSBSim's limit on the damping of a contact just touching down holds
+      them to 32 N, whose moment pitches its 1.4e-5 kg m2 at 134 rad/s in
+      that step.
+    - A step later it is 0.29 m deeper, sixteen times its legs' 18 mm, and
+      the contacts, 0.30 to 0.33 m deep, apply 350 N for the step: their
+      springs 18 N each, their dampers the rest. The nine together damp at
+      400 1/s on 27 g, 3.3 times the step's rate (120 1/s). Applied for a
+      whole step, a damper beyond once the step's rate does not stop the
+      speed it damps but reverses it, and beyond twice sends it back faster.
+    - 350 N for a step is 2.9 N s against the 0.53 N s it carries, and
+      JSBSim's translational integrator (Adams-Bashforth 2) applies it 1.5
+      times over: from 19.8 m/s down to 138 m/s up. The step after, the
+      contacts left behind, the integrator takes back half: it leaves at
+      83 m/s with 95 J of the 16.6 J it struck with, tumbling at 50 to
+      70 rad/s.
+    - In the air, its motors fighting the tumble, its rates grow to
+      1,800 rad/s in 1.1 s, and JSBSim's integration of them overflows at
+      step 833.
+  - The change: where the ground's forces would send a contact point back
+    out more than 5 m/s faster than it came in, the step applies instead the
+    forces that stop the points' approach, none leaving faster than 0.5 m/s.
+    Short of that the forces are JSBSim's, bit for bit. The margin stays
+    well above what contacts reach that the step integrates, or nearly
+    does: a parked Crazyflie 0.4 m/s (it hops), one dropped on its back
+    from 30 cm 4 m/s; strikes of 10 m/s and more reach tens of m/s.
+  - The found case now strikes at 35.2 m/s, is never faster after it, and
+    25 s on lies on its back, its motors (still flying the HSA) pressing it
+    down.
+  - Dropped with their motors off, level from 5, 20, 62 and 128 m (10 to
+    50 m/s), and from 62 m tilted, nose first, on an edge and upside down:
+    - The Crazyflie left the ground up to 5.5 times as fast as it struck,
+      bounced up to 187 m, and 3 of the 9 diverged. Now none is faster after
+      it strikes than as it struck, save its 10 m/s drop on its back (1.09
+      times, as before: the limit does not engage); it bounces 0.3 to 2.0 m
+      and 3 s later is at rest (0.23 m/s at most).
+    - The IRIS+ left the ground up to 4.3 times as fast and bounced up to
+      173 m (flown as the found case, 3.1 times and 260 m). Now none is
+      faster after; it bounces 0.15 to 0.85 m and is at rest 3 s later
+      (0.04 m/s).
+    - The UH-60A's drops are the same as before; the UH-1H's diverge, as
+      before, from another cause (section 7).
+  - The Crazyflie tumbled into the ground from 5 to 50 m, two of its motors
+    at 90 % for 0.4 s (154 to 158 rad/s), then all off: 7 of the 8
+    diverged, 6 of them thrown back up faster than they struck (at up to
+    144 m/s). Now all 8 come to rest.
+  - `test_rotorcraft` gains both: the quadrotors' drops, five attitudes
+    each, and the found case. Both fail on the unpatched JSBSim.
+  - Control digests (`fsim_control_bench digest`, 20 flights): identical,
+    with protection and without.
+  - Its cost: a world of 30 vehicles of ten types, before and after in
+    turn, three rounds each. Parked, where the check runs every step, a
+    vehicle's step took 8.68 us before and 8.60 after (medians); in the air,
+    where it does not, 7.28 and 7.16: within the rounds' spread.
+  - The fleet test, flown before and after with every flight's end state
+    printed (docs/flight-autonomy.md, section 14): 3,284 states, each flight
+    as it is judged and every vehicle as its case ends. 3,245 are identical,
+    every judged state among them. The 39 that change all strike the ground
+    after their judgement, or are vehicles a case leaves uncommanded:
+    - 27 quadrotor flights that diverged come to rest instead: 20
+      Crazyflies and 7 IRIS+, 20 of them after their batteries ran out and
+      7 left uncommanded in cases flown by other aircraft. Two IRIS+ and a
+      Crazyflie whose batteries ran out near their cases' ends strike
+      differently.
+    - 9 wings a case leaves uncommanded dive into the ground at 33 to
+      235 m/s: the A-10C and the Su-25 three times, the E-3G twice, the
+      Su-57 once. Their wrecks come to rest differently; none diverged
+      before.
+    - The fleet's flights ended diverged 30 times; now 3 times, the UH-1H's
+      left uncommanded (section 7), as before, bit for bit.
+  - `ctest`: 328 of 328, the two new cases among them.
+  - Merged onto main at FA-8d (2026-09-29), past FA-6f2a to FA-8d, which it
+    was not written on, and measured there the same way. The fleet test
+    has 3,992 states now: 1,752 as flights are judged, 2,240 as cases end.
+    Every judged state is identical. 63 end states change, all after
+    their judgement: 39 quadrotors', 36 of which diverged and now come to
+    rest, and 24 of wings a case leaves uncommanded, whose wrecks come to
+    rest differently (the A-10C and the Su-25 five times each, the E-3G
+    four, the Su-57 three, the F-22A, J-10A and J-20A twice, the F/A-18C
+    once). The fleet's flights ended diverged 39 times; now 3, the UH-1H's,
+    as before. Control digests, with protection and without, and the
+    route and curve probes are unchanged; `ctest`: 370 of 370.

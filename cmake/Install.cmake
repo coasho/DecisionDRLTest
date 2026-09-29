@@ -126,6 +126,7 @@ if(TARGET flightsim-viewer)
             DESTINATION share/doc/flightsim RENAME LICENSE-JSBSim.txt COMPONENT viewer OPTIONAL)
     # JSBSim is LGPL: the files flightsim changes, as built, and how (THIRD_PARTY_NOTICES.md)
     install(FILES ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/FGLGear.cpp
+                  ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/FGAccelerations.cpp
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGRotor.h
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGRotor.cpp
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGElectric.cpp
