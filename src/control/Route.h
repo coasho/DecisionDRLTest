@@ -202,6 +202,11 @@ struct Plan {
     /// A later lap's leg into point `loop` and its turn there (4.36), where it is above 0.
     Leg loopLeg;
     Turn loopTurn;
+    /// Where its later laps' legs differ from its first's (4.36): a start turn at point `loop`, its course left out, leaves on
+    /// the course the laps come back to it on, and each start turn after it whose course is left out on the arc before's - so
+    /// the legs into the points after `loop` up to this one, and the turn at it, are a later lap's own (lapLeg, lapTurn), laid
+    /// in place of the first lap's once it has flown them (layLaps). 0: none.
+    std::uint32_t lapLegsTo = 0;
     /// A linked route's (4.36): its waypoints as given - `given` of them - in its flight order, the `count` it flies first,
     /// the rest after; `order`, each one's index as given, and `position` each given one's here. Its paths as given.
     bool linked = false;
@@ -631,5 +636,15 @@ VelocityCommand hoverOver(const sim::VehicleState& s, const Performance& perform
 /// from where its loiter ended: 4.31), the leg out of it and its fly-by turn between them, sized as plan() sizes it and
 /// made no longer than those legs leave it beside the turns at their other ends.
 void replan(Plan& p, std::uint32_t i, bool firstLap, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept;
+/// A later lap's leg into point i where its laps' legs differ from its first's (Plan::lapLegsTo; 4.36): from the point
+/// before, the arc a start turn there begins on the course `before` - the leg into that point as a later lap flies it -
+/// arrives on (the leg back to the point the laps come back to, for the first after it).
+Leg lapLeg(const Plan& p, std::uint32_t i, const Leg& before) noexcept;
+/// The fly-by turn at point `p.lapLegsTo` as a later lap flies it, from its leg in (`in`, lapLeg's): sized as plan() sizes
+/// one, and made no longer than its legs leave it beside the turn at the far end of the leg out (none at its near end: the
+/// point before begins an arc).
+Turn lapTurn(const Plan& p, const Leg& in, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept;
+/// A later lap's own legs and turn (lapLeg, lapTurn) in place of its first lap's, once that has flown them: a behaviour's.
+void layLaps(Plan& p, double altitudeMslM, double windMs, const Performance& performance, bool hovers) noexcept;
 
 } // namespace fsim::control::route

@@ -905,11 +905,14 @@ A-GRA's route is a set of paths (MA_RouteType.Path, each an MA_RoutePathType): a
   - a type not one of the twenty, or an id twice (the path's first point);
   - a next that is neither a point's index nor -1;
   - a lap round one point: that is a loiter point's loiter (4.31).
-- **Not implemented** (as its support row, `fsim.guidance.route/next_segment`, says: partial): a start turn (4.30) at the point its links go round from, its course left out. Its arc's tangent is the course of the leg into it, and its laps come to it from another point than its first lap does. It is named after the checks a point has.
+- **A start turn at the point its links go round from** (4.30), its course left out (FA-6g1): its arc leaves on the course the leg into it arrives on, and its laps come to it from another point than its first lap does - so each flies its own arc: the first lap's on from the point before, a later lap's on from the last. So does each start turn after it whose course is left out (its tangent the arc before's end), and the fly-by turn at the point after them, fitted to its legs as a turn is. A later lap's own are laid in place of the first lap's once it has flown them.
+  - **Checked** as the first lap's are, what the first lap's found not found again: a later lap's arc beyond 170 degrees, or other than its radius given, refused `invalid_waypoint` naming the point it reaches (so is an end whose course is not its arc's there); one the aircraft cannot turn, a finding; the turn after them, too big for its legs, flown smaller, and a gradient steeper than the aircraft climbs, flown at its rate - each a finding under `RangePolicy::Reject`, as the first lap's. The terrain walk walks a later lap's own.
+  - **Where they run on to the last point,** the leg back from there is the first lap's, which every lap flies on from: a later lap comes to the last point on its own arc, and the corner there is flown over (4.30's corners). A loiter point ends them: after it, the leg on is laid from where its loiter ended, on every lap (4.31).
+  - Until FA-6g1 it was not implemented, as its support row said.
 - **Kept** as the loiters are: an UPDATE's new waypoints come with their paths (none given: one path), and without new waypoints it keeps its own. A route kept waiting (disabled, unassigned: 4.10) resumes at the point it flew to along its links, with the states beyond it in its flight order.
 - **Reset** (4.10; a named change to 4.34): over from its first start, a linked route along its links from there, with all its states - those it flew past before it was kept waiting too. Until FA-6e1 a route reset after it had resumed flew without those, and a linked one would have gone on from where it resumed.
 - **A stack on its own** (`ControlStack::command`, unchecked) takes its paths too, and flies along its links from its start; links it cannot fly leave it nothing to fly, and its behaviour fails.
-- **The support rows,** `fsim.guidance.route/paths` supported and `fsim.guidance.route/next_segment` partial (the start turn above), are the same on every aircraft: they need nothing an aircraft may lack.
+- **The support rows,** `fsim.guidance.route/paths` and `fsim.guidance.route/next_segment` supported (the start turn above since FA-6g1), are the same on every aircraft: they need nothing an aircraft may lack.
 - **Surfaces.**
   - C++: `RoutePath` and `PathType` (`fsim/Control.h`); `Waypoint::next`; a `Span<const RoutePath>` after the states in `World::submit` and `World::update` (a route's), `ControlStack::command`, `BatchCommand::paths`, `Setpoint::paths`; `PathStore::routePaths`, and the flight order beside the points as given.
   - C ABI 1.33: `fsim_route_path` (`fsim_route_path_init`: none of it given) and `enum fsim_path_type`; `fsim_waypoint`'s `next`, where the caller's `struct_size` has it (`fsim_waypoint_init` leaves it out); `fsim_route_extras` (a route's loiters, states and paths together; `fsim_route_extras_init`: none), taken by `fsim_vehicle_submit_route_extras` and `fsim_activity_update_route_extras`; `fsim_batch_command`'s `paths` and `path_count`, filled by `fsim_activity_get_setpoint`.
@@ -1229,7 +1232,10 @@ Paths with ids and types, links and conditional branches, turn points, loiter po
   - FA-6f2, the legs A-GRA gives no data for, in two steps:
     - FA-6f2a, the legs to an altitude, an intercept and a distance, and the heading legs, done 2026-09-28 and measured in section 14;
     - FA-6f2b, the legs to a manual termination, and the holds, done 2026-09-28 and measured in section 14; FA-6f done;
-- FA-6g, what FA-6 has left: a time of arrival and planned states at or after a loiter point, planned states beside points in moving frames, a start turn where its links loop back, its course left out.
+- FA-6g, what FA-6 has left, in three steps:
+  - FA-6g1, a start turn where its links loop back, its course left out (WPT-14; 4.36), done 2026-09-28 and measured in section 14;
+  - FA-6g2, a time of arrival at or after a loiter point (WPT-11; 4.33);
+  - FA-6g3, planned states at or after a loiter point, and beside points in moving frames (WPT-20; 4.34).
 
 **Items (15):** WPT-04, WPT-06, WPT-08, WPT-10, WPT-11, WPT-12, WPT-13, WPT-14, WPT-15, WPT-17, WPT-18, WPT-19, WPT-20, WPT-21, WPT-22.
 
@@ -2607,6 +2613,23 @@ All 183 comparisons are within 5 %: 57 top speeds, 80 climbs, 15 stalls and 31 c
   - The command cases are within −2.0 % to +0.6 % from one copy; from three, first 0.0 to +2.1 % (a level switch's NEW: one copy read 77.4 ns where the others read 68.6), then +0.1 % to +1.5 %.
   - World throughput is 99.8 to 100.4 % of FA-6f2a's; protection costs at most 1.3 %.
 - ctest: all 327 tests pass.
+
+**FA-6g1, a start turn where its links loop back, its course left out (WPT-14).**
+- **Flown** (`test_route_paths`; a C172 east at 1,500 m and 55 m/s, calm): a path of one point, 3 km east, on into a loop of five. The loop's first point, 6 km east, is a start turn, its course left out, whose arc runs to a point 2 km north and 2 km further east. The first lap comes to it heading east; the later laps come heading north, from the loop's last point 3 km south:
+  - each lap began its arc on the course it came on: 90.0 degrees on the first lap, 0.0 on the next two. It was at most 5.0 m off the arc on each lap (the first 60 % of the segment, before the first lap's turn at its end);
+  - each lap passed through its own arc's middle: the first lap within 3 m, the next two within 1 m, and a later lap more than a kilometre from the first lap's middle;
+  - checked once and not kept: flying the first lap's arc on every lap, the later laps were 357 m off it and passed its middle 1,020 m away.
+- **Refused `invalid_waypoint`, naming the point:** the paths test's loop, with B's first point a start turn whose course is left out. Its first lap's arc sweeps 90 degrees and its later laps' 180, so it is refused as any arc beyond 170 degrees is, naming the point the arc reaches. Until FA-6g1 it was refused `not_implemented`, naming the start.
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), identical to FA-6f2b's build.
+- **The support table:** `route/next_segment` is supported on every aircraft, and the route capability's pending list no longer names the start turn.
+- **Conformance:** the optimise walks draw links where a start turn's course is left out too.
+- **Memory:** a route's plan holds one more index, where its later laps' legs differ; its behaviour lays them in place of the first lap's.
+- **Digests:** identical to FA-6f2b's, with protection and without. The allocation gate passes.
+- **A/B throughput** against FA-6f2b, both builds run from their own directories once two minutes had passed with no other session's builds, tests or benchmarks: 5 rounds of `micro`, 9 of `command` twice, 7 of `world`; then 5 rounds of `micro` and of `command` from three copies of each.
+  - From one copy of each, the micro cases are within −6.1 % to +0.5 %: FA-6f2b's own actuator median read high (34.5 ns, its least 32.4), and everything else is within ±1.4 %. From three copies of each, they are within −1.5 % to +0.4 %. Another session's build began in that run's last 16 s.
+  - The command cases are within −1.5 % to 0.0 % from one copy, and −1.5 % to +1.6 % from three (a level switch's NEW, which nothing here touches: one copy read 66.8 ns where the others read 67.9 and 68.1).
+  - World throughput is 98.9 to 100.4 % of FA-6f2b's; protection costs at most 1.3 %.
+- ctest: all 328 tests pass.
 
 ## Appendix A: the inventory
 

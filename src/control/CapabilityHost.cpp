@@ -460,10 +460,6 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
             detail.index = which;
             return r;
         }
-        // not built: a start turn where its links loop back, its course left out - its arc's tangent the leg in's, which
-        // the laps fly from two points (its row, partial)
-        const Waypoint& back = p.points[p.loop];
-        if (p.loop > 0 && back.turn == static_cast<double>(TurnType::StartTurn) && isHold(back.courseRad)) return point(p.loop, Reason::NotImplemented);
     } else if (const Reason r = route::complete(p.points, p.points, count, c.repeat == 1.0, state, performance_, hovers, which, &config_->altimeter);
                r != Reason::None) {
         detail.index = which;
@@ -659,7 +655,7 @@ Reason CapabilityHost::checkRoute(RouteCommand& c, Span<const Waypoint> waypoint
             break;
         }
     }
-    return Reason::None;
+    return checkLaps(p, state, std::hypot(wind.northMs, wind.eastMs), log, detail); // (its later laps' own legs: 4.36)
 }
 
 double CapabilityHost::accelerationLimit(double fromMs, double toMs, double altitudeMslM, const sim::VehicleState& state) const noexcept {

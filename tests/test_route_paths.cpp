@@ -187,7 +187,7 @@ TEST_CASE("route paths: refused as a point is, naming it - paths that do not til
     const SupportInfo* row = w.supportTable(v)->find("fsim.guidance.route/paths");
     REQUIRE(row != nullptr);
     CHECK(row->support == Support::Supported);
-    CHECK(w.supportTable(v)->find("fsim.guidance.route/next_segment")->support == Support::Partial); // (a start turn looped back to, its course left out)
+    CHECK(w.supportTable(v)->find("fsim.guidance.route/next_segment")->support == Support::Supported); // (a start turn looped back to too: FA-6g1)
 }
 
 TEST_CASE("route paths: disabled and enabled, it resumes at the point it flew to along its links - its planned states beyond it in "
@@ -285,7 +285,7 @@ TEST_CASE("route paths: a stack on its own flies them along its links too; links
 }
 
 TEST_CASE("route paths: a path it does not fly held as given - its points checked as points, a loiter there kept, not flown; the end of a "
-          "path at its last point, where it links on too; a start turn looped back to, its course left out, not implemented",
+          "path at its last point, where it links on too; a start turn looped back to, its course left out, its later laps' arc checked too",
           "[modes]") {
     session::World w(options("route-paths-held"));
     const auto v = wing(w, "c172", 1500.0, 55.0);
@@ -332,12 +332,66 @@ TEST_CASE("route paths: a path it does not fly held as given - its points checke
     std::vector<Waypoint> early = points;
     early[3].waypointType = static_cast<double>(WaypointType::EndOfPath);
     refused(early, holds, {}, Reason::InvalidWaypoint, 3, "the end of a path in B's middle");
-    // not built: a start turn where the links loop back (B's first), its course left out - named; its course given, the
-    // rest of what a start turn needs is checked as before (here, a radius the arc does not have)
+    // a start turn where the links loop back (B's first), its course left out: its first lap's arc (on from A, north-east)
+    // sweeps 90 degrees, its later laps' (on from B's last, west) 180 - refused as any start's arc beyond 170 degrees is,
+    // naming the point it reaches (FA-6g1; until then, not implemented); its course given, as any start turn
     std::vector<Waypoint> arc = points;
     arc[2].turn = static_cast<double>(TurnType::StartTurn);
-    refused(arc, holds, {}, Reason::NotImplemented, 2, "a start turn looped back to");
+    refused(arc, holds, {}, Reason::InvalidWaypoint, 3, "a start turn looped back to, its later laps' arc 180 degrees round");
     arc[2].turn = static_cast<double>(TurnType::StartTurn), arc[2].courseRad = 0.0, arc[2].turnRadiusM = 50.0;
     const CommandResult given = w.submit(v, RouteCommand{}, arc, {}, holds, {}, paths);
     CHECK(given.reason != Reason::NotImplemented);
+}
+
+TEST_CASE("route paths: a start turn looped back to, its course left out, begins each lap's arc on the course that lap comes to it on - "
+          "the first lap's from the path before, a later lap's from the loop's last point (FA-6g1)",
+          "[modes]") {
+    session::World w(options("route-paths-looped-arc"));
+    const auto v = wing(w, "c172", 1500.0, 55.0);
+    w.step(stepsFor(w, 2.0));
+    const auto& s0 = *w.vehicleState(v);
+    // A, 3 km east, on into B: its first 6 km east, a start turn whose arc runs to (2, 8) km, then (2, 12), (-3, 12) and
+    // (-3, 6), and back to its first from the south. The first lap comes to it heading east: a left arc of 2 km, 90 degrees
+    // round, north at its end, then a right turn onto the leg east; a later lap comes heading north: a right arc, east at its
+    // end, straight on east.
+    const double ne[6][2] = {{0, 3}, {0, 6}, {2, 8}, {2, 12}, {-3, 12}, {-3, 6}};
+    std::vector<Waypoint> points;
+    for (const auto& q : ne) points.push_back(at(s0.latitudeRad, s0.longitudeRad, q[0] * 1000.0, q[1] * 1000.0));
+    points[1].turn = static_cast<double>(TurnType::StartTurn);
+    points[0].next = 1.0; // (A's last on into B)
+    points[5].next = 1.0; // (B round again)
+    const std::vector<RoutePath> paths = {RoutePath{1, kHold, 0, 1}, RoutePath{2, kHold, 1, 5}};
+    const CommandResult r = w.submit(v, RouteCommand{}, points, {}, {}, {}, paths);
+    INFO(reasonName(r.reason) << " at " << r.index);
+    REQUIRE(r.accepted());
+    // each arc's middle: the first lap's round (2, 6) km, a later lap's round (0, 8)
+    const double h = 1000.0 * std::sqrt(0.5) * 2.0;
+    const Waypoint firstMiddle = at(s0.latitudeRad, s0.longitudeRad, 2000.0 - h, 6000.0 + h), laterMiddle = at(s0.latitudeRad, s0.longitudeRad, h, 8000.0 - h);
+    // on the arc (the segment to point 2), each lap round: the most it is off it (on its first 60 %), the course it begins it
+    // on, how near it comes to each lap's middle
+    double off[3] = {0.0, 0.0, 0.0}, begun[3] = {kHold, kHold, kHold}, nearFirst[3] = {1e30, 1e30, 1e30}, nearLater[3] = {1e30, 1e30, 1e30};
+    auto distance = [&](const Waypoint& q, const sim::VehicleState& s) {
+        return std::hypot((q.latitudeRad - s.latitudeRad) * kR, (q.longitudeRad - s.longitudeRad) * kR * std::cos(s.latitudeRad));
+    };
+    for (unsigned k = 0; k < stepsFor(w, 1000.0); ++k) {
+        w.step();
+        const ActivityProgress& g = w.activity(r.activity)->progress;
+        if (g.segment != 2 || g.laps > 2) continue;
+        const auto& s = *w.vehicleState(v);
+        const std::size_t lap = g.laps;
+        if (g.segmentPercent < 60.0) off[lap] = std::max(off[lap], std::abs(g.crossTrackM)); // (its arc: the first lap's turn at its end left out)
+        if (isHold(begun[lap])) begun[lap] = std::atan2(s.velocityNedMs[1], s.velocityNedMs[0]) * 180.0 / 3.14159265358979323846;
+        nearFirst[lap] = std::min(nearFirst[lap], distance(firstMiddle, s)), nearLater[lap] = std::min(nearLater[lap], distance(laterMiddle, s));
+    }
+    std::printf("route paths: a start turn looped back to - its arc begun heading %.1f, %.1f, %.1f deg on laps 0, 1, 2; the most off it %.1f, %.1f, "
+                "%.1f m; the first lap's middle passed at %.0f m, a later lap's at %.0f and %.0f m\n",
+                begun[0], begun[1], begun[2], off[0], off[1], off[2], nearFirst[0], nearLater[1], nearLater[2]);
+    CHECK(std::abs(begun[0] - 90.0) < 5.0); // (east, from A)
+    CHECK(std::abs(begun[1]) < 5.0);        // (north, from B's last)
+    CHECK(std::abs(begun[2]) < 5.0);
+    for (const double m : off) CHECK(m < 20.0); // (on each lap's arc from its start: none begun across it)
+    CHECK(nearFirst[0] < 40.0);
+    CHECK(nearLater[1] < 40.0);
+    CHECK(nearLater[2] < 40.0);
+    CHECK(nearFirst[1] > 1000.0); // (a later lap flies its own arc, not the first's)
 }

@@ -504,6 +504,7 @@ void RouteBehavior::advance(const sim::VehicleState& s, const Performance& perf)
         return;
     }
     if (target_ == p.last()) { // a lap flown: the route again from its first point
+        if (firstLap_) route::layLaps(p, s.altitudeMslM, std::hypot(wind_.northMs, wind_.eastMs), perf, hovers_); // (a later lap's own legs: 4.36)
         firstLap_ = false;
         ++laps_;
         lapStartM_ = finishedM_;

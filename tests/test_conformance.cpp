@@ -420,14 +420,13 @@ public:
                 if (chance(0.05) && paths.size() > 1) paths.back().id = paths.front().id; // (an id twice)
             }
             // (points' next only where what they may reorder is built: no arrival window or state beside a loiter point -
-            // one after it is not implemented - and no start turn with its course left out, which they may loop back to)
-            bool reorderable = true, loiterPoint = false, planned = !states.empty();
+            // one after it is not implemented; a start turn looped back to, its course left out, is: FA-6g1)
+            bool loiterPoint = false, planned = !states.empty();
             for (const Waypoint& q : waypoints) {
                 loiterPoint = loiterPoint || q.kind == static_cast<double>(EndPointKind::LoiterPoint);
                 planned = planned || !isHold(q.arrivalBeginS) || !isHold(q.arrivalEndS);
-                reorderable = reorderable && !(q.turn == static_cast<double>(TurnType::StartTurn) && isHold(q.courseRad));
             }
-            if (wild && optimise && chance(0.3) && reorderable && !(loiterPoint && planned)) {
+            if (wild && optimise && chance(0.3) && !(loiterPoint && planned)) {
                 const auto n = static_cast<std::size_t>(points), how = pick(10);
                 Waypoint& from = waypoints[pick(n)];
                 if (how < 4 && n > 1) waypoints.back().next = static_cast<double>(pick(n - 1));

@@ -83,8 +83,8 @@ const FeatureDef kFeatures[] = {
 
     // --- waypoint following ------------------------------------------------------------------------
     CAP("fsim.guidance.route", P, 7, 0,
-        "a time of arrival or a planned state at or after a loiter point, planned states beside points in moving frames, "
-        "a start turn where its links loop back, its course left out (FA-6); planning metadata (FA-7); "
+        "a time of arrival or a planned state at or after a loiter point, planned states beside points in moving frames (FA-6); "
+        "planning metadata (FA-7); "
         "a branch on a mission critical or lost comms contingency (FA-16)"), // WPT-01, 16, 24, 25
     {"fsim.guidance.route/projection/great_circle", "fsim.guidance.route", S, 0, 0, ""},     // WPT-02
     {"fsim.guidance.route/projection/rhumb_line", "fsim.guidance.route", S, 0, 0, ""},
@@ -110,7 +110,7 @@ const FeatureDef kFeatures[] = {
     {"fsim.guidance.route/altitude/barometric", "fsim.guidance.route", S, 0, 0, ""},          // (FA-6a)
     {"fsim.guidance.route/altitude_block", "fsim.guidance.route", S, 0, 0, ""},              // (FA-6a)
     {"fsim.guidance.route/paths", "fsim.guidance.route", S, 0, 0, ""},                       // WPT-13 (FA-6e1)
-    {"fsim.guidance.route/next_segment", "fsim.guidance.route", P, 6, 0, "a start turn where the links loop back, its course left out"}, // WPT-14
+    {"fsim.guidance.route/next_segment", "fsim.guidance.route", S, 0, 0, ""}, // WPT-14 (FA-6g1: a start turn looped back to)
     {"fsim.guidance.route/conditional_segment", "fsim.guidance.route", P, 16, 0, "a mission critical or lost comms contingency"}, // WPT-15 (FA-6e2)
     {"fsim.guidance.route/waypoint_type", "fsim.guidance.route", S, 0, 0, ""},               // WPT-17 (FA-6a: nav only, passive, end of path)
     {"fsim.guidance.route/waypoint_type/taxi", "fsim.guidance.route", N, 9, R2, ""},          //   the points each action flies

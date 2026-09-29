@@ -208,9 +208,8 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
         spacing(p.lapM(true) * (p.repeat ? 2.0 : 1.0));
         double fromMsl = state.altitudeMslM;
         Profile last;
-        auto leg = [&](std::uint32_t i, bool firstLap) {
+        auto leg = [&](std::uint32_t i, bool firstLap, const route::Leg& l, const route::Turn* before, const route::Turn& turn) {
             const Waypoint& w = p.points[i];
-            const route::Leg& l = p.leg(i, firstLap);
             const bool above = aboveGround(w.altitudeReference);
             Profile f;
             f.from = firstLap && i == p.start ? (above ? state.altitudeAglM : state.altitudeMslM)
@@ -234,8 +233,6 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
             const RouteLoiter* loiter = route::loiterPoint(w) ? p.loiterAt(i) : nullptr;
             const double joinM = loiter ? route::loiterJoinM(loiter->pattern, loiter->shape) : 0.0;
             f.lengthM = loiter ? std::max(l.lengthM - joinM, 0.0) : l.lengthM;
-            const route::Turn* before = p.turnBefore(i, firstLap);
-            const route::Turn& turn = p.turn(i, firstLap);
             const bool turns = (i + 1 < p.count || p.repeat) && turn.radiusM > 0.0;
             const double start = before ? before->leadM : 0.0;
             const double end = loiter ? std::max(start, l.lengthM - joinM) : l.lengthM - (turns ? turn.leadM : 0.0);
@@ -269,10 +266,23 @@ CommandDetails::Terrain CapabilityHost::terrain(const Command& setpoint, const s
             return false;
         };
         for (std::uint32_t i = p.start; i < p.count; ++i)
-            if (leg(i, true)) return walk.hit;
+            if (leg(i, true, p.leg(i, true), p.turnBefore(i, true), p.turn(i, true))) return walk.hit;
         if (p.repeat) {
-            for (std::uint32_t i = p.loop; i < p.count; ++i) // (a lap on, from where it repeats from: 4.36)
-                if (leg(i, false)) return walk.hit;
+            // a lap on, from where it repeats from (4.36): its own legs where they differ from the first's, and the turn after them
+            const std::uint32_t m = p.lapLegsTo;
+            route::Leg own = p.loopLeg;
+            route::Turn at;
+            for (std::uint32_t i = p.loop; i < p.count; ++i) {
+                const bool differs = i > p.loop && i <= m;
+                if (differs) own = route::lapLeg(p, i, own);
+                if (differs && i == m) { // (its turn sized as the host's check planned the route: 4.30)
+                    WindEstimate wind;
+                    wind.update(state, 0.0);
+                    at = route::lapTurn(p, own, state.altitudeMslM, std::hypot(wind.northMs, wind.eastMs), performance_, hovers);
+                }
+                if (leg(i, false, differs ? own : p.leg(i, false), m > 0 && i == m + 1 ? &at : p.turnBefore(i, false), differs && i == m ? at : p.turn(i, false)))
+                    return walk.hit;
+            }
             return walk.hit;
         }
         const Waypoint& w = p.points[p.last()];

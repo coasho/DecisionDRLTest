@@ -663,7 +663,8 @@ private:
     /// `waypoints` as given: InvalidWaypoint naming the point for data that is none - 65 or more, at a point it has not,
     /// two for one point, a field not finite or a code not whole, data its point's leg has none of, a course to fix without
     /// its course, a radius to fix without its centre or its way round - and for a leg its segment does not define (a
-    /// navaid's, a procedure turn's); NotImplemented for FA-6f2's legs.
+    /// navaid's, a procedure turn's); for a manual termination nothing ends but at a route's last point, and a hold's
+    /// terminator at no hold (FA-6f2b).
     Reason checkTerminators(route::Plan& plan, Span<const Waypoint> waypoints, Span<const RouteTerminator> terminators, bool repeat,
                             CommandResult& detail) const noexcept;
     /// Its terminators' legs as laid out (4.38; Terminators.cpp; `plan` planned, as 4.30's turn points are checked):
@@ -673,6 +674,13 @@ private:
     /// its start turn's; a course to fix whose point before is past it; after a start turn point anything but an arc,
     /// after a capture anything but a track or a course to fix on its course. An arc the aircraft cannot turn, a finding.
     Reason checkLegs(const route::Plan& plan, CheckLog& log) const noexcept;
+    /// Its later laps' legs where they differ from its first's (docs/flight-autonomy.md, 4.36; Laps.cpp; `plan` planned, its
+    /// first lap checked): the arcs from a start turn at the point it loops back to, its course left out, checked as the first
+    /// lap's are (4.30) - InvalidWaypoint naming the point an arc reaches for one sweeping more than 170 degrees or other than
+    /// its radius given, and naming an end whose course is not its arc's there; an arc the aircraft cannot turn a finding, the
+    /// turn after them flown smaller than its legs allow as the first lap's, a gradient steeper than it climbs flown at its
+    /// rate - what the first lap's check found not found again.
+    Reason checkLaps(route::Plan& plan, const sim::VehicleState& state, double windMs, CheckLog& log, CommandResult& detail) const noexcept;
     /// The most a route's segment accelerates from `fromMs` to `toMs` (4.32): a rotorcraft's (Performance), a wing's from
     /// its tables at the fuel on board - full power's excess faster, idle's slower, the least over the speeds between - as
     /// a rate; NaN where not known.
