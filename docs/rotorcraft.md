@@ -587,12 +587,11 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
     its skids. Dropped on their backs or sides, both come to rest on their
     sides.
   - **What is left.**
-    - A strike still pitches the UH-1H up onto its tail skid (8 deg at
-      3.2 m/s, 11 at 16). Springs and dampers in proportion to the load each
-      skid contact carries, as hangar sizes a fixed wing's wheels, keep a
-      level strike level (0.1 deg at 7.7 m/s, measured). They would also
-      make it sit level (it sits 0.7 deg nose up). That is a change to its
-      landings, and it is not made.
+    - A strike pitched the UH-1H up onto its tail skid (8 deg at 3.2 m/s, 11
+      at 16), and it sat 0.7 deg nose up. Its skid contacts now take springs
+      and dampers in proportion to the load each carries, as hangar sizes a
+      fixed wing's wheels: it sits level, and a level strike stays level
+      (section 10).
     - After a crash the rotors keep turning at their governed speed: no blade
       strikes the ground, and nothing shuts the engines down. The UH-1H,
       lying on its side, rocks under its tail rotor's 340 lb of thrust (at
@@ -1110,3 +1109,16 @@ Considered: EASA TCDS R.011 (Bo 105); FlightGear FGAddon `UH-1` and `UH-60`; JSB
   end, those that fell coming to rest elsewhere (3 cm at the median,
   0.36 m at most). Control digests and the route and curve probes are
   unchanged; `ctest`: 376 of 376.
+- **The UH-1H's skids sized by the load they carry** (2026-09-30; hangar's
+  `heli.py`, `skid_shares`). Its four skid contacts had the design's spring
+  and damper alike, but its c.g. stands 15 in ahead of the rear pair and
+  105 in behind the front: the rear pair carries seven eighths of the
+  weight. Each contact now takes its share by the lever rule, the design's
+  values their mean: 5,000 lbf/ft and 500 lbf s/ft at the front, 35,000 and
+  3,500 at the rear. Standing, each sinks alike. Parked 10 s it sits at
+  -0.01 deg of pitch, where it sat at +0.67 deg. Dropped level,
+  uncommanded, striking at 3.8, 6.1 and 12.3 m/s, it pitches up by 0.0 deg,
+  where it pitched +9.5, +10.2 and +9.1 deg onto its tail skid. The UH-60A,
+  on its wheels, is unchanged. The fleet test's judged states are
+  identical; 4 end states change, the UH-1H on the ground as its cases end
+  (let go, it comes to rest 0.6 m from where it did). `ctest`: 376 of 376.

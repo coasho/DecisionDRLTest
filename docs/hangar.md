@@ -1335,7 +1335,11 @@ design gives none, and one that still gives `spring_n_per_m` or
 A helicopter on the ground (docs/rotorcraft.md, 7):
 
 - **Its gear.** `[ground] contacts_in` are its skids' or wheels' contacts,
-  with the design's springs and dampers.
+  with the design's springs and dampers. A skid's contacts, given one spring
+  and one damper, take them in proportion to the weight each carries (the
+  lever rule between its two stations, the design's values their mean), as a
+  fixed wing's wheels do: standing, each sinks alike, and the aircraft sits
+  as drawn.
 - **Its airframe.** Besides the gear, `build` gives it structure contacts as
   a fixed wing gets them (Methods, Ground contacts): the extreme points of
   its drawn airframe's convex hull, the ends of its struts (a tail skid) and

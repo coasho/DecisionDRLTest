@@ -73,6 +73,22 @@ ROTOR_MAX_SHARE = 1.3
 GEAR_CLEARANCE_M = 0.15
 
 
+def skid_shares(contacts_in, cg_in):
+    """Each skid contact's share of the weight standing, by the lever rule along the skids: the contacts stand at
+    two stations, fore and aft, each carrying the weight in proportion to the other's distance from the c.g., its
+    contacts alike (the skids side by side, the c.g. between them)."""
+    xs = sorted({float(c[0]) for c in contacts_in})
+    if len(xs) != 2:
+        raise ValueError("[ground] contacts_in: a skid's contacts stand at two stations, fore and aft")
+    fore, aft = xs
+    x = float(cg_in[0])
+    if not fore < x < aft:
+        raise ValueError("[ground] contacts_in: the c.g. (station %g) must lie between the skid's stations" % x)
+    per = {fore: (aft - x) / (aft - fore), aft: (x - fore) / (aft - fore)}
+    n = {st: sum(1 for c in contacts_in if float(c[0]) == st) for st in xs}
+    return [per[float(c[0])] / n[float(c[0])] for c in contacts_in]
+
+
 def hubs(spec):
     """The rotors' hubs as the model draws them (rotorcraft/model.py, design frame, m): the main
     rotor's at the top of what turns on its mast (its hub, or a vibration absorber above it), the
@@ -249,6 +265,14 @@ def write(spec, out_dir, profile_xml=""):
     springs = g["spring_lbf_per_ft"] if isinstance(g["spring_lbf_per_ft"], list) else [g["spring_lbf_per_ft"]] * len(g["contacts_in"])
     dampers = g["damping_lbf_per_fps"] if isinstance(g["damping_lbf_per_fps"], list) else [g["damping_lbf_per_fps"]] * len(g["contacts_in"])
     skid = g.get("kind") == "skid"
+    if skid and not isinstance(g["spring_lbf_per_ft"], list):
+        # a skid's contacts sized as a fixed wing's wheels are: each its share of the weight (skid_shares), the
+        # design's spring and damper their mean - standing, each sinks alike and the aircraft sits as drawn, and
+        # a level strike stays level (equal ones, the c.g. 15 in ahead of the rear pair, pitched a UH-1H up
+        # onto its tail: docs/rotorcraft.md, 7)
+        shares = skid_shares(g["contacts_in"], cg)
+        springs = [len(shares) * share * g["spring_lbf_per_ft"] for share in shares]
+        dampers = [len(shares) * share * g["damping_lbf_per_fps"] for share in shares]
     for i, (pt, k, c) in enumerate(zip(g["contacts_in"], springs, dampers)):
         side = "left" if pt[1] < 0 else ("right" if pt[1] > 0 else "centre")
         contacts.append("""    <contact type="BOGEY" name="%s %d">
