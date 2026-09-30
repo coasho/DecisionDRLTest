@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <vector>
@@ -729,4 +730,26 @@ TEST_CASE("rotorcraft: a helicopter's rotor speed stops where its rotors' does, 
         CHECK(rotorMost > 1.29 * nominal); // (driven to the stop)
         CHECK(most <= 1.3 * nominal + 1e-6);
     }
+}
+
+TEST_CASE("rotorcraft: the stock AH-1S's engine starts in a reused slot as on a new model", "[rotorcraft]") {
+    // Its rotor is driven through a transmission whose free-wheel unit lags its coupling. The rotor's reset left that
+    // lag as the last run did, and the engine started 2 % faster than on a new model (JSBSim's FGTransmission and
+    // FGRotor, patched: cmake/JsbsimPatches.cmake).
+    auto engineAtStart = [](bool reused) {
+        session::World w(options("rotorcraft-ah1s-reuse"));
+        session::VehicleSpec s = spec("ah1s", "ah1s", 0.0);
+        s.initial.altitudeMslM = 150.0;
+        if (reused) {
+            const auto first = w.createVehicle(s);
+            REQUIRE(first != 0);
+            REQUIRE(w.removeVehicle(first));
+        }
+        const auto id = w.createVehicle(s);
+        REQUIRE(id != 0);
+        return w.model(id)->property("propulsion/engine/engine-rpm").get();
+    };
+    const double fresh = engineAtStart(false), reused = engineAtStart(true);
+    INFO("engine rpm at the start: " << fresh << " on a new model, " << reused << " in a reused slot");
+    CHECK(std::memcmp(&fresh, &reused, sizeof(double)) == 0);
 }

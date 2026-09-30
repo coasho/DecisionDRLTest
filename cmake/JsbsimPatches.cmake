@@ -195,6 +195,7 @@ void FGRotor::ResetToIC(void)
     RPM = 0.0;
     Transmission->SetEngineRPM(0.0);
     Transmission->SetThrusterRPM(0.0);
+    Transmission->ResetFreeWheel(dt);
   }
 }
 ]=])
@@ -301,6 +302,26 @@ foreach(_includer FGEngine.cpp FGTurboProp.cpp)
     _fsim_jsbsim_read(models/propulsion/${_includer} _text)
     _fsim_jsbsim_write(models/propulsion/${_includer} _text Propulsion)
 endforeach()
+
+# The rotor's transmission (FGTransmission.h): its free-wheel unit keeps a lag
+# on its coupling, which the rotor's reset left as the last run did. The stock
+# AH-1S in a reused slot then started with its engine 2 % faster than on a new
+# model (35,042 rpm against 34,243), though its rotor did not. Its header gains
+# the reset, inline, which the rotor's calls; FGTransmission.cpp is compiled
+# from the build tree against it, unchanged. The class keeps its members, and
+# only these two files include it.
+_fsim_jsbsim_read(models/propulsion/FGTransmission.h _text)
+set(_old [=[  double GetEngineRPM() {return EngineRPM;}
+]=])
+set(_new [=[  double GetEngineRPM() {return EngineRPM;}
+  // flightsim patch (cmake/JsbsimPatches.cmake): the free-wheel unit as a load
+  // leaves it (locked, its lag at rest)
+  void ResetFreeWheel(double dt) { FreeWheelTransmission = 1.0; FreeWheelLag = Filter(200.0, dt); }
+]=])
+_fsim_jsbsim_edit(_text _old _new FGTransmission.h "reset")
+_fsim_jsbsim_write(models/propulsion/FGTransmission.h _text "")
+_fsim_jsbsim_read(models/propulsion/FGTransmission.cpp _text)
+_fsim_jsbsim_write(models/propulsion/FGTransmission.cpp _text Propulsion)
 target_include_directories(Propulsion PRIVATE ${FSIM_JSBSIM_SOURCE_DIR}/src/models/propulsion) # their other headers
 
 # ---------------------------------------------------------------------------

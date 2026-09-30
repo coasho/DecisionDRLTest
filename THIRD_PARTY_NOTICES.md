@@ -71,7 +71,8 @@ these changes:
   point's shift the aircraft loaded (upstream's cleared both for good); in
   `src/models/FGMassBalance.cpp`, the centre of gravity starts where a new model's does; in
   `src/models/propulsion/FGPropeller.cpp`, a constant-speed propeller's pitch starts at its
-  least, where a load sets it. A
+  least, where a load sets it; in `src/models/propulsion/FGTransmission.h`, a rotor's
+  free-wheel unit starts locked, its lag at rest. A
   vehicle started on a reset model then starts as the same start on a new one, to the bit
   (docs/FlightSim_System_Architecture_and_Design.md, 7.2). Between resets nothing changes.
 
