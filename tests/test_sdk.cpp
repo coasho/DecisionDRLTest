@@ -437,3 +437,45 @@ TEST_CASE("a vehicle in a reused slot, or reset, starts and flies as the same sp
         }
     }
 }
+
+TEST_CASE("a reset with a seed restarts the vehicle's random stream: in turbulence, with the world's seed it flies as a "
+          "new vehicle does, to the bit; without one, its gusts go on",
+          "[sdk][determinism]") {
+    // (design 7.2: each VecEnv episode seeds its vehicles' streams from its own seed and number, as it does their starts)
+    WorldOptions o;
+    o.name = "sdk-reset-seed";
+    o.publish = false;
+    o.workers = 1;
+    o.pinWorkers = false;
+    o.seed = 11;
+    o.jsbsimRoot = FSIM_TEST_JSBSIM_ROOT;
+    auto world = [&o] {
+        auto w = std::make_unique<World>(o);
+        w->environment().setWind(Wind{270.0, 8.0, 0.0, 0.6});
+        return w;
+    };
+    VehicleSpec spec;
+    spec.type = "jsbsim:c172x";
+    spec.initial.latitudeDeg = 42.0;
+    spec.initial.altitudeMslM = 1500.0;
+    spec.initial.headingDeg = 90.0;
+    spec.initial.airspeedTrueMs = 50.0;
+    std::vector<double> fresh;
+    {
+        auto w = world();
+        Vehicle v = w->createVehicle(spec);
+        w->step(300);
+        fresh = values(v.state());
+    }
+    auto afterReset = [&](bool seeded) {
+        auto w = world();
+        Vehicle v = w->createVehicle(spec);
+        w->step(300); // (its stream drawn on)
+        const bool reset = seeded ? v.reset(spec.initial, o.seed) : v.reset(spec.initial);
+        REQUIRE(reset);
+        w->step(300);
+        return values(v.state());
+    };
+    CHECK(sameBits(afterReset(true), fresh));
+    CHECK_FALSE(sameBits(afterReset(false), fresh)); // (the gusts went on: the turbulence is on)
+}

@@ -452,6 +452,7 @@ bool Vehicle::use(control::Level level, std::string_view controllerId) {
 
 bool Vehicle::reset() { return world_ && world_->impl_->resetVehicle(id_); }
 bool Vehicle::reset(const InitialConditions& initial) { return world_ && world_->impl_->resetVehicle(id_, &initial); }
+bool Vehicle::reset(const InitialConditions& initial, std::uint64_t seed) { return world_ && world_->impl_->resetVehicle(id_, &initial, seed); }
 bool Vehicle::remove() { return world_ && world_->impl_->removeVehicle(id_); }
 bool Vehicle::addEffect(std::unique_ptr<effects::Effect> effect) { return world_ && world_->impl_->addEffect(id_, std::move(effect)); }
 

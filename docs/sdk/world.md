@@ -145,6 +145,9 @@ episode), or a new vehicle in the slot a removed one of the same aircraft left
 the same start in a new world, to the bit - whatever that model flew before,
 and in the world's wind and air (design 7.2). So a reset also puts the
 aircraft's own properties back as it loaded them, a value you wrote to one with
-`Vehicle::property` included: write it again after the reset. What a reset does
-not restart is the vehicle's random stream: with turbulence, an episode's gusts
-follow on from the episodes before it.
+`Vehicle::property` included: write it again after the reset. The vehicle's
+random stream goes on through a reset, unless the reset is given a seed:
+`Vehicle::reset(initial, seed)` restarts it from that seed as a new vehicle's
+starts from the world's (the world's own seed gives a new vehicle's, to the
+bit). Each `VecEnv` episode seeds its vehicles so, from the seed and episode
+number its start comes from: with turbulence, an episode's gusts are its own.

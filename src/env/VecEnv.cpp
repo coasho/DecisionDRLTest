@@ -98,7 +98,9 @@ void VecEnv::resetEnv(unsigned env, bool) {
         ic.headingDeg += rng.uniform(-r.headingJitterDeg, r.headingJitterDeg);
         ic.airspeedTrueMs += rng.uniform(-r.airspeedJitterMs, r.airspeedJitterMs);
         initialConditions_[i] = ic;
-        world_->resetVehicle(ids_[i], &ic);
+        // (its random stream too, from the same seed and episode as its start: an episode's turbulence and sensor
+        // noise are its own, whatever the episodes before it did - design 7.2)
+        world_->resetVehicle(ids_[i], &ic, Rng::forVehicle(seed_ ^ (episode * 0x9E3779B97F4A7C15ull), env, v).next());
         // Neutral command until the first action: cruise power, gear up.
         control::ActuatorCommand neutral;
         neutral.throttle = 0.6;

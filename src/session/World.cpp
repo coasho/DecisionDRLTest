@@ -258,7 +258,7 @@ bool World::removeVehicle(std::uint32_t id) {
     return true;
 }
 
-bool World::resetVehicle(std::uint32_t id, const sim::InitialConditions* ic) {
+bool World::resetVehicle(std::uint32_t id, const sim::InitialConditions* ic, std::optional<std::uint64_t> seed) {
     Entry* e = entry(id);
     if (!e) return false;
     if (ic) e->info.initial = *ic;
@@ -266,6 +266,10 @@ bool World::resetVehicle(std::uint32_t id, const sim::InitialConditions* ic) {
         terrain_->prefetch(units::degreesToRadians(ic->latitudeDeg), units::degreesToRadians(ic->longitudeDeg), options_.terrainPrefetchRadiusM);
     sim::FlightModel& model = pool_->vehicle(e->slot);
     if (!model.reset(e->info.initial)) return false;
+    if (seed) { // its random stream from `seed`, as a new vehicle's from the world's
+        e->rng = Rng::forVehicle(*seed, 0, id);
+        model.seed(e->rng.next());
+    }
     // A flight model's reset returns its air to calm and standard: the world's, as a new vehicle's (design 7.2)
     applyEnvironment(model);
     e->inputs = sim::ControlInputs{};

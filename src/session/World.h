@@ -92,8 +92,10 @@ public:
     /// Create (load) a vehicle. Returns its id, or 0 on failure (logged).
     std::uint32_t createVehicle(const VehicleSpec& spec);
     bool removeVehicle(std::uint32_t id);
-    /// Re-apply initial conditions (`ic` null = the spec's) and reset controls/effects.
-    bool resetVehicle(std::uint32_t id, const sim::InitialConditions* ic = nullptr);
+    /// Re-apply initial conditions (`ic` null = the spec's) and reset controls/effects. With `seed`, the vehicle's
+    /// random stream (its effects', JSBSim's turbulence and sensor noise) restarts from it, as a new vehicle's does from
+    /// the world's seed and its id - the world's seed gives a new vehicle's, to the bit; without, it goes on (design 7.2).
+    bool resetVehicle(std::uint32_t id, const sim::InitialConditions* ic = nullptr, std::optional<std::uint64_t> seed = std::nullopt);
     bool alive(std::uint32_t id) const noexcept;
     const VehicleInfo* info(std::uint32_t id) const noexcept;
     std::uint32_t find(const std::string& name) const noexcept;

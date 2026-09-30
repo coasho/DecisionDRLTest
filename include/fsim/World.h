@@ -364,6 +364,9 @@ public:
     // Lifecycle
     bool reset();
     bool reset(const InitialConditions& initial);
+    /// Reset, its random stream (effects, JSBSim's turbulence and sensor noise) restarted from `seed` as a new vehicle's
+    /// is from the world's: the world's seed gives a new vehicle's, to the bit. The other resets let it go on.
+    bool reset(const InitialConditions& initial, std::uint64_t seed);
     bool remove();
 
     // Effects, properties, communication
