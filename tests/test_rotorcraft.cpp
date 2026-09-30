@@ -700,3 +700,33 @@ TEST_CASE("rotorcraft: a helicopter let go from its hover, or dropped on its bac
         }
     }
 }
+
+TEST_CASE("rotorcraft: a helicopter's rotor speed stops where its rotors' does, driven past it", "[rotorcraft]") {
+    // Collective down and the cyclic forward from 2,000 m, the engine left to its governor: the air drives the rotor
+    // up to FGRotor's 130 % stop. The flight control system's rotor speed, which drives the engine and the rotor-drive
+    // moment, had no stop of its own and wound on past it (the UH-1H to 895 %); now it stops there too
+    // (docs/rotorcraft.md, 7).
+    for (const char* type : {"uh1h", "uh60"}) {
+        session::World w(options("rotorcraft-rotor-stop"));
+        session::VehicleSpec s = spec(type, type, 0.0);
+        s.initial.altitudeMslM = 2000.0;
+        s.initial.airspeedTrueMs = 40.0;
+        const auto id = w.createVehicle(s);
+        REQUIRE(id != 0);
+        const double stepS = w.dt() * w.frameSkip();
+        w.step(static_cast<unsigned>(std::lround(2.0 / stepS)));
+        const std::string fcs = std::string("fcs/") + type + "/rotor-rpm";
+        const double nominal = w.model(id)->property(fcs).get();
+        REQUIRE(w.submit(id, ActuatorCommand{0.0, 0.6, 0.0, 0.0, 0.0, kHold, 0.0, 0.0}).accepted());
+        double most = 0.0, rotorMost = 0.0;
+        for (long k = 0; k < std::lround(40.0 / stepS); ++k) {
+            w.step();
+            REQUIRE_FALSE(w.vehicleState(id)->diverged);
+            most = std::max(most, w.model(id)->property(fcs).get());
+            rotorMost = std::max(rotorMost, w.model(id)->property("propulsion/engine[0]/rotor-rpm").get());
+        }
+        INFO(type << ": the flight control system's rotor speed at most " << most << " rpm, the rotor's " << rotorMost << ", nominal " << nominal);
+        CHECK(rotorMost > 1.29 * nominal); // (driven to the stop)
+        CHECK(most <= 1.3 * nominal + 1e-6);
+    }
+}

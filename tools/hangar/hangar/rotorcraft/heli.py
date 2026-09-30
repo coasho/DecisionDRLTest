@@ -68,6 +68,8 @@ def fuel_of(spec):
 # at each point). A part that reaches within GEAR_CLEARANCE_M of the ground the aircraft stands on is
 # the gear (a skid, its cross tubes), which gives way with it: the hull is made of the rest - so the
 # belly the skids stand above is part of it - and the gear's contacts stand for the gear.
+ROTOR_MIN_RPM = 50.0    # FGRotor's rpm limits: the least, and the most as a share of the design's
+ROTOR_MAX_SHARE = 1.3
 GEAR_CLEARANCE_M = 0.15
 
 
@@ -198,7 +200,7 @@ def write(spec, out_dir, profile_xml=""):
   <numblades> %(b)d </numblades>
   <gearratio> 1.0 </gearratio>
   <nominalrpm> %(rpm)s </nominalrpm>
-  <minrpm> 50 </minrpm>
+  <minrpm> %(minrpm)s </minrpm>
   <maxrpm> %(maxrpm)s </maxrpm>
   <chord unit="FT"> %(c)s </chord>
   <liftcurveslope Xunit="1/RAD"> %(a)s </liftcurveslope>
@@ -212,7 +214,7 @@ def write(spec, out_dir, profile_xml=""):
   <ExternalRPM> -1 </ExternalRPM>
   <model> %(model)s </model>
 %(ge)s</rotor>
-""" % dict(n=name, d=_f(2 * mr["radius_ft"]), b=mr["blades"], rpm=_f(rd["rpm"]), maxrpm=_f(1.3 * rd["rpm"]),
+""" % dict(n=name, d=_f(2 * mr["radius_ft"]), b=mr["blades"], rpm=_f(rd["rpm"]), maxrpm=_f(ROTOR_MAX_SHARE * rd["rpm"]), minrpm=_f(ROTOR_MIN_RPM),
            c=_f(mr["chord_ft"]), a=_f(mr["lift_slope"]), tw=_f(mr["twist_deg"]), e=_f(hinge), ib=_f(rd["ib"]),
            sb=_f(rd["sb"]), jp=_f(mr["blades"] * rd["ib"]), lag=_f(mr.get("inflow_lag_s", 0.1)),
            tl=_f(mr.get("tip_loss", 1.0)), model=mr.get("force_model", "heffley"), ge=ge))
@@ -222,7 +224,7 @@ def write(spec, out_dir, profile_xml=""):
   <numblades> %(b)d </numblades>
   <gearratio> %(g)s </gearratio>
   <nominalrpm> %(rpm)s </nominalrpm>
-  <minrpm> 50 </minrpm>
+  <minrpm> %(minrpm)s </minrpm>
   <maxrpm> %(maxrpm)s </maxrpm>
   <chord unit="FT"> %(c)s </chord>
   <liftcurveslope Xunit="1/RAD"> %(a)s </liftcurveslope>
@@ -237,7 +239,7 @@ def write(spec, out_dir, profile_xml=""):
   <model> %(model)s </model>
 </rotor>
 """ % dict(n=name, d=_f(2 * tr["radius_ft"]), b=tr["blades"], g=_f(rd["rpm"] / rd["tr_rpm"]), rpm=_f(rd["tr_rpm"]),
-           maxrpm=_f(1.3 * rd["tr_rpm"]), c=_f(rd["tr_chord"]), a=_f(tr["lift_slope"]), tw=_f(tr.get("twist_deg", 0.0)),
+           maxrpm=_f(ROTOR_MAX_SHARE * rd["tr_rpm"]), minrpm=_f(ROTOR_MIN_RPM), c=_f(rd["tr_chord"]), a=_f(tr["lift_slope"]), tw=_f(tr.get("twist_deg", 0.0)),
            ib=_f(rd["tr_ib"]), jp=_f(tr["blades"] * rd["tr_ib"]), lag=_f(tr.get("inflow_lag_s", 0.1)),
            tl=_f(tr.get("tip_loss", 1.0)), model=tr.get("force_model", "heffley")))
 
@@ -584,8 +586,19 @@ def _engine_channel(spec, rd, p_max, p):
             <product> <property> propulsion/engine[1]/torque-lbsft </property> <value> %(trk)s </value> </product> </sum>
         </difference> </product> </function>
       </fcs_function>
+      <!-- the rotor speed stops where the rotors' do (FGRotor's minimum and 130 %%): past it, and pushed further,
+           it is held there, the integration stopped -->
+      <fcs_function name="%(p)somega-stop">
+        <function> <or>
+          <and> <ge> <property> %(p)sdelta-omega </property> <value> %(hi)s </value> </ge>
+            <gt> <property> %(p)snet-torque </property> <value> 0 </value> </gt> </and>
+          <and> <le> <property> %(p)sdelta-omega </property> <value> %(lo)s </value> </le>
+            <lt> <property> %(p)snet-torque </property> <value> 0 </value> </lt> </and>
+        </or> </function>
+      </fcs_function>
       <pid name="%(p)sdelta-omega"> <input> %(p)snet-torque </input>
-        <kp> 0 </kp> <ki type="trap"> %(jinv)s </ki> <kd> 0 </kd> </pid>
+        <kp> 0 </kp> <ki type="trap"> %(jinv)s </ki> <kd> 0 </kd>
+        <trigger> %(p)somega-stop </trigger> <clipto> <min> %(lo)s </min> <max> %(hi)s </max> </clipto> </pid>
       <!-- the engine's torque on the main rotor's shaft: what the airframe feels of the rotors (the
            external reaction rotor-drive) -->
       <fcs_function name="%(p)sdrive-torque">
@@ -599,7 +612,7 @@ def _engine_channel(spec, rd, p_max, p):
     </channel>
 """ % dict(p=p, om=_f(rd["omega"]), kp=_f(gov.get("kp", 0.3)), ki=_f(gov.get("ki", 0.3)), kd=_f(gov.get("kd", 0.0)),
            lag=lag_xml, gout=governor_out, trk=_f(trk), pmax=_f(p_max), jinv=_f(1.0 / rd["j"]), rpmk=_f(60 / (2 * math.pi)),
-           fed=fed, fed_term=fed_term)
+           fed=fed, fed_term=fed_term, hi=_f((ROTOR_MAX_SHARE - 1.0) * rd["omega"]), lo=_f(ROTOR_MIN_RPM * 2 * math.pi / 60 - rd["omega"]))
 
 
 # --- the airframe -------------------------------------------------------------------------------

@@ -596,10 +596,10 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
       lying on its side, rocks under its tail rotor's 340 lb of thrust (at
       up to 1.2 m/s). Let go, the UH-60A turns on its wheels at 0.74 rad/s,
       as it did before.
-    - The flight control system's rotor speed has no stop of its own: past
-      JSBSim's 130 % it winds on (to 1,800 rad/s in the old tumble), and the
-      governor waits for it to come down. No case flown since reaches the
-      stop.
+    - The flight control system's rotor speed had no stop of its own: past
+      JSBSim's 130 % it wound on (to 1,800 rad/s in the old tumble), and the
+      governor waited for it to come down. It now stops where the rotors'
+      does, at FGRotor's 50 rpm and 130 % (section 10).
 - **Power and thrust at altitude**: the helicopters' engines give the
   design's rating (a transmission limit) at any height, and a quadrotor's
   thrust is its rotors' speed squared, whatever the air's density. None of
@@ -1081,3 +1081,16 @@ Considered: EASA TCDS R.011 (Bo 105); FlightGear FGAddon `UH-1` and `UH-60`; JSB
     UH-1H after a turn in its tailwind: within 1.31 m of its point, where
     1.30. Control digests, with protection and without, and the route and
     curve probes are unchanged; `ctest`: 372 of 372.
+- **The helicopters' rotor speed stopped with the rotors'** (2026-09-30;
+  hangar's `heli.py`, section 7). The flight control system integrates the
+  rotor speed from the engine's torque less the rotors', and it drives the
+  governor and the rotor-drive moment. FGRotor stops at 50 rpm and 130 %;
+  the integration did not. Collective down and the cyclic forward from
+  2,000 m, the air drives the rotor to FGRotor's stop, and the flight
+  control system's rotor speed wound on: the UH-1H's to 895 % in 40 s, the
+  UH-60A's to 480 %. Now, past a stop and pushed further, the integration is
+  held and its output clipped there. Flown so again, both read the rotor's
+  own most, to the hundredth of an rpm (420.81 and 335.18 rpm). No flight
+  had reached the stop: the fleet test's 3,992 states are identical, bit
+  for bit. `test_rotorcraft` gains the dive, which fails on the old files
+  (2,152 and 1,238 rpm).

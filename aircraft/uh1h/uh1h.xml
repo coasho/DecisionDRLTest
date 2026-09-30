@@ -937,8 +937,19 @@
             <product> <property> propulsion/engine[1]/torque-lbsft </property> <value> 5.1365494 </value> </product> </sum>
         </difference> </product> </function>
       </fcs_function>
+      <!-- the rotor speed stops where the rotors' do (FGRotor's minimum and 130 %): past it, and pushed further,
+           it is held there, the integration stopped -->
+      <fcs_function name="fcs/uh1h/omega-stop">
+        <function> <or>
+          <and> <ge> <property> fcs/uh1h/delta-omega </property> <value> 10.169335 </value> </ge>
+            <gt> <property> fcs/uh1h/net-torque </property> <value> 0 </value> </gt> </and>
+          <and> <le> <property> fcs/uh1h/delta-omega </property> <value> -28.661797 </value> </le>
+            <lt> <property> fcs/uh1h/net-torque </property> <value> 0 </value> </lt> </and>
+        </or> </function>
+      </fcs_function>
       <pid name="fcs/uh1h/delta-omega"> <input> fcs/uh1h/net-torque </input>
-        <kp> 0 </kp> <ki type="trap"> 0.00018299485 </ki> <kd> 0 </kd> </pid>
+        <kp> 0 </kp> <ki type="trap"> 0.00018299485 </ki> <kd> 0 </kd>
+        <trigger> fcs/uh1h/omega-stop </trigger> <clipto> <min> -28.661797 </min> <max> 10.169335 </max> </clipto> </pid>
       <!-- the engine's torque on the main rotor's shaft: what the airframe feels of the rotors (the
            external reaction rotor-drive) -->
       <fcs_function name="fcs/uh1h/drive-torque">
