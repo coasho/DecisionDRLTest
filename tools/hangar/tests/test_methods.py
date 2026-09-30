@@ -1526,6 +1526,23 @@ class Contacts(unittest.TestCase):
         with self.assertRaises(ValueError):
             multi.contacts(spec)
 
+    def test_a_skids_contacts_carry_the_weight_by_the_lever_rule(self):
+        # the UH-1H's c.g. at station 140, its skids' contacts at 35 and 155: the rear pair carries 7/8 of the
+        # weight, each contact of it 7/16; standing, springs in that proportion sink each alike
+        import tomllib
+        from hangar.rotorcraft import heli
+        with open(repo("aircraft/uh1h/uh1h.toml"), "rb") as f:
+            spec = tomllib.load(f)
+        g = spec["ground"]
+        shares = heli.skid_shares(g["contacts_in"], spec["mass"]["cg_in"])
+        self.assertAlmostEqual(sum(shares), 1.0, places=12)
+        self.assertEqual([round(x, 12) for x in shares], [0.0625, 0.4375, 0.0625, 0.4375])
+        springs = [len(shares) * x * g["spring_lbf_per_ft"] for x in shares]
+        sinks = [x / k for x, k in zip(shares, springs)]
+        self.assertAlmostEqual(max(sinks), min(sinks), places=15)
+        with self.assertRaises(ValueError):  # (a c.g. outside the skids)
+            heli.skid_shares(g["contacts_in"], [30.0, 0.0, 55.0])
+
     def test_a_helicopter_meets_the_ground_on_its_airframe_where_its_gear_is_not(self):
         # the helicopters' structure contacts (rotorcraft/heli.py): what a crash meets besides the gear -
         # the tail skid or tail cone, the stabilizer's tips, the nose, the main rotor's hub, the tail rotor's
