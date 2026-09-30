@@ -32,25 +32,25 @@
   </mass_balance>
   <ground_reactions>
     <contact type="BOGEY" name="leg 0">
-      <location unit="IN"> <x> -4.7834646 </x> <y> 8.3464567 </y> <z> -2.1259843 </z> </location>
+      <location unit="IN"> <x> -4.7834646 </x> <y> 8.3464567 </y> <z> -2.2862336 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
       <spring_coeff unit="N/M"> 903.48717 </spring_coeff> <damping_coeff unit="N/M/SEC"> 17.567806 </damping_coeff>
       <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
     </contact>
     <contact type="BOGEY" name="leg 1">
-      <location unit="IN"> <x> 5.2362205 </x> <y> -7.7362205 </y> <z> -2.1259843 </z> </location>
+      <location unit="IN"> <x> 5.2362205 </x> <y> -7.7362205 </y> <z> -2.2862336 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
       <spring_coeff unit="N/M"> 903.48717 </spring_coeff> <damping_coeff unit="N/M/SEC"> 17.567806 </damping_coeff>
       <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
     </contact>
     <contact type="BOGEY" name="leg 2">
-      <location unit="IN"> <x> -4.7834646 </x> <y> -8.3464567 </y> <z> -2.1259843 </z> </location>
+      <location unit="IN"> <x> -4.7834646 </x> <y> -8.3464567 </y> <z> -2.2862336 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
       <spring_coeff unit="N/M"> 903.48717 </spring_coeff> <damping_coeff unit="N/M/SEC"> 17.567806 </damping_coeff>
       <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>
     </contact>
     <contact type="BOGEY" name="leg 3">
-      <location unit="IN"> <x> 5.2362205 </x> <y> 7.7362205 </y> <z> -2.1259843 </z> </location>
+      <location unit="IN"> <x> 5.2362205 </x> <y> 7.7362205 </y> <z> -2.2862336 </z> </location>
       <static_friction> 0.8 </static_friction> <dynamic_friction> 0.6 </dynamic_friction> <rolling_friction> 0.6 </rolling_friction>
       <spring_coeff unit="N/M"> 903.48717 </spring_coeff> <damping_coeff unit="N/M/SEC"> 17.567806 </damping_coeff>
       <max_steer unit="DEG"> 0 </max_steer> <brake_group> NONE </brake_group> <retractable> 0 </retractable>

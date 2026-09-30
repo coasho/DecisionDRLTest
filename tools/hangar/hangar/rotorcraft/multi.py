@@ -104,7 +104,8 @@ def contacts(spec):
     """{"feet": [(x, y, z)], "tops": [...], ...}: where it stands and what it lands on upside down - the rotors'
     hubs and the top of the airframe ([ground] top_m above the c.g.), so a tumble on the ground comes to rest
     instead of sinking through it - each set with its spring and damper (contact_set) and the legs' static
-    deflection under the aircraft's weight."""
+    deflection under the aircraft's weight. The feet's contacts are that deflection below the drawn feet, so
+    that at rest the feet the viewer draws stand on the ground."""
     g, r = spec["ground"], spec["rotors"]
     old = [key for key in ("spring_n_per_m", "damping_n_per_mps") if key in g]
     if old:
@@ -116,7 +117,8 @@ def contacts(spec):
     k_feet, c_feet = contact_set(spec, feet_pts)
     k_tops, c_tops = contact_set(spec, tops)
     sag = spec["mass"]["mass_kg"] * 9.80665 / (len(feet_pts) * k_feet)
-    return {"feet": feet_pts, "feet_spring_n_per_m": k_feet, "feet_damping_n_per_mps": c_feet,
+    stands = [(xf, yl, zu - sag) for xf, yl, zu in feet_pts]  # (sunk by the sag, on the drawn feet)
+    return {"feet": stands, "feet_spring_n_per_m": k_feet, "feet_damping_n_per_mps": c_feet,
             "tops": tops, "tops_spring_n_per_m": k_tops, "tops_damping_n_per_mps": c_tops,
             "leg_sag_m": sag, "leg_height_m": g["leg_height_m"]}
 

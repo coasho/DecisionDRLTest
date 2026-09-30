@@ -531,7 +531,9 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
 
   hangar now sizes them from the modes the contacts standing together make
   (docs/hangar.md, Rotorcraft). Parked, both stand still, their legs sunk
-  2.9 mm and 4.1 mm. Dropped from up to 30 cm, level or on the back, neither
+  2.9 mm and 4.1 mm - their contacts placed that far below the drawn feet,
+  so the feet stand on the ground as drawn. Dropped from up to 30 cm, level
+  or on the back, neither
   moves up faster than 0.81 of the speed it struck at, nor rises more than
   a centimetre off the ground, and both come to rest, the IRIS+ on its back
   within 4.4 s (section 10). The rule sizes the feet standing and the tops
@@ -1094,3 +1096,17 @@ Considered: EASA TCDS R.011 (Bo 105); FlightGear FGAddon `UH-1` and `UH-60`; JSB
   had reached the stop: the fleet test's 3,992 states are identical, bit
   for bit. `test_rotorcraft` gains the dive, which fails on the old files
   (2,152 and 1,238 rpm).
+- **The quadrotors' feet on the ground as drawn** (2026-09-30; hangar's
+  `multi.py`). Sized for the step, the feet's contacts sink 2.9 mm (the
+  Crazyflie) and 4.1 mm (the IRIS+) under the weight, and the contacts were
+  at the drawn feet: at rest the viewer drew the feet into the ground. The
+  contacts are now that deflection lower, the springs and dampers the same
+  (they are sized from the feet's places across the airframe, not their
+  height). Parked, each stands its legs' height up, to 0.1 mm (it stood
+  2.89 and 4.08 mm lower); `test_rotorcraft` checks it, and fails on the
+  old files. The model stage's check now takes where the contacts settle
+  (0.08 mm and 0 from the drawn skin). The fleet test's judged states are
+  identical; 42 end states change, quadrotors on the ground as their cases
+  end, those that fell coming to rest elsewhere (3 cm at the median,
+  0.36 m at most). Control digests and the route and curve probes are
+  unchanged; `ctest`: 376 of 376.

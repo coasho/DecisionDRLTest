@@ -562,6 +562,9 @@ TEST_CASE("rotorcraft: a quadrotor parked stays still, and dropped a little come
                 CHECK(f.fastestUp < impactMs);
             } else {
                 CHECK(f.offGround == 0);
+                // its drawn feet on the ground: its contacts sunk by the legs' deflection under its weight, the c.g.
+                // the legs' height up (it stood 2.9 and 4.1 mm lower, its feet drawn into the ground)
+                CHECK(std::abs(s.altitudeAglM - t.legM) < 1e-4);
             }
             // at rest (the last to settle: the IRIS+ on its back, 4.2 s after it was let go)
             CHECK(speed < 1e-3);

@@ -446,13 +446,15 @@ def checks(spec, report, path):
         out.append(_check("ground contacts on the wheels", worst if len(legs) == len(pts) else len(legs), "m",
                           "0 +- 0.02", ok, "the flight model's contact points, in order, against the drawn tyres' bottoms"))
     elif spec["aircraft"]["kind"] == "multirotor" and "leg_height_m" in ground:
-        # the feet: each point the flight model stands on (multi.feet: the drawn feet, or under the
-        # rotors; leg_height below the c.g.) on the drawn airframe's skin - its signed distance there
+        # the feet: each point the flight model stands on, where its contact settles under the weight
+        # (multi.contacts: the leg's static deflection above the contact), on the drawn airframe's skin -
+        # its signed distance there
         from . import multi
         from ..shape import meshkit as mk
-        pts = np.array([[-x, -y, -ground["leg_height_m"]] for x, y in multi.feet(spec)])
+        g = multi.contacts(spec)
+        pts = np.array([[-x, -y, z + g["leg_sag_m"]] for x, y, z in g["feet"]])
         d, _ = mk.evaluate(sh.airframe(Aircraft.shape(spec)), pts)
         worst = float(np.max(np.abs(d)))
         out.append(_check("ground contacts on the feet", worst, "m", "0 +- 0.002", worst <= 0.002,
-                          "the airframe's signed distance at the flight model's contact points"))
+                          "the airframe's signed distance where the flight model's contacts settle"))
     return out

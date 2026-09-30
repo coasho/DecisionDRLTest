@@ -1327,6 +1327,10 @@ design gives none, and one that still gives `spring_n_per_m` or
   2.9 mm of their 18 mm (22.9 N/m and 0.445 N s/m on each of its nine
   contacts); the IRIS+'s 4.1 mm of their 54 mm (its feet 903 N/m and
   17.6 N s/m, its tops 854 N/m and 16.6 N s/m).
+- **Where the feet stand.** The feet's contacts are placed that deflection
+  below the drawn feet, so at rest the feet the viewer draws stand on the
+  ground (they were drawn 2.9 and 4.1 mm into it). The model stage checks
+  where the contacts settle against the drawn airframe's skin (2 mm).
 
 A helicopter on the ground (docs/rotorcraft.md, 7):
 
