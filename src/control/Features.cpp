@@ -182,7 +182,7 @@ const FeatureDef kFeatures[] = {
     CAP("fsim.guidance.intercept", S, 0, 0, ""),                                              // RIC-01..03 (FA-8d)
     CAP("fsim.guidance.launch", S, 9, 0, ""),                                                 // LCH-01
     {"fsim.guidance.launch/runway", "fsim.guidance.launch", S, 9, 0, "", false, nullptr, true},
-    {"fsim.guidance.launch/rejected_takeoff", "fsim.guidance.launch", N, 9, 0, ""},           // LCH-02
+    {"fsim.guidance.launch/rejected_takeoff", "fsim.guidance.launch", S, 9, 0, "", false, nullptr, true}, // LCH-02
     {"fsim.guidance.launch/vertical", "fsim.guidance.launch", S, 9, R1, ""},                  // LCH-04
     {"fsim.guidance.launch/emergency_divert", "fsim.guidance.launch", N, 16, 0, ""},          // LCH-03
     {"fsim.guidance.launch/carrier_catapult", "fsim.guidance.launch", N, 11, R3, ""},         // LCH-05

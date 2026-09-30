@@ -717,6 +717,66 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             fleet.covered(p, "fsim.guidance.launch");
         }
     }
+    // --- a rejected takeoff (ADR-29 FA-9b, LCH-02): each wing's launch canceled by its policy at half its rotation speed -
+    // FA's own activity takes the rest and stops it on the runway ---------------------------------------------------------
+    {
+        fleet.park();
+        std::map<std::uint32_t, ActivityId> launched, own;
+        std::map<std::uint32_t, double> vr, cross;
+        std::map<std::uint32_t, sim::VehicleState> ended;
+        for (const auto& p : planes) {
+            if (p.rotor || !p.offered.count("fsim.guidance.launch")) continue;
+            const double ground = p.start.altitudeMslM - p.start.altitudeAglM;
+            Runway r;
+            r.id = 3;
+            r.takeoff.start = RunwayPoint{p.start.latitudeRad, p.start.longitudeRad, ground};
+            r.takeoff.limit = RunwayPoint{p.start.latitudeRad + 3500.0 / kEarthM, p.start.longitudeRad, ground};
+            Airfield field;
+            field.id = 7;
+            field.runways = {r};
+            REQUIRE(w.loadAirfield(p.id, field) == Reason::None);
+            BehaviorCommand b = behavior("launch");
+            b.params = {{"airfield", 7.0}, {"runway", 3.0}};
+            const CommandResult c = w.submit(p.id, b);
+            REQUIRE(c.accepted());
+            launched[p.id] = c.activity, cross[p.id] = 0.0;
+            const VehicleProfile& pr = *w.profile(p.id);
+            const double stall = std::isfinite(pr.performance.stallFlapsCasMs) ? pr.performance.stallFlapsCasMs : pr.performance.stallCasMs;
+            vr[p.id] = 1.1 * (std::isfinite(stall) ? stall : p.minCasMs);
+        }
+        for (double t = 0.0; t < 180.0 && ended.size() < launched.size(); t += 1.0)
+            fleet.fly(1.0, [&] {
+                for (const auto& [id, a] : launched) {
+                    if (ended.count(id)) continue;
+                    const auto& s = *w.vehicleState(id);
+                    const auto& p = *std::find_if(planes.begin(), planes.end(), [id = id](const Plane& x) { return x.id == id; });
+                    double north, east;
+                    offset(s, p.start.latitudeRad, p.start.longitudeRad, north, east);
+                    cross[id] = std::max(cross[id], std::abs(east));
+                    if (!own.count(id) && s.airspeedCalibratedMs >= 0.5 * vr[id]) {
+                        const CommandResult c = w.cancel(a);
+                        CHECK(c.status == CommandStatus::Canceled);
+                        own[id] = c.other;
+                    }
+                    if (own.count(id) && !(own[id] && w.activity(own[id])->live())) ended[id] = s;
+                }
+            });
+        for (const auto& p : planes) {
+            if (!launched.count(p.id)) continue;
+            INFO(p.type << " (" << className(p.cls) << "): its launch canceled at half its rotation speed");
+            REQUIRE(own.count(p.id));
+            REQUIRE(own[p.id] != 0);
+            CHECK(w.activity(own[p.id])->source == Source::Autopilot);
+            CHECK(w.activity(own[p.id])->state == ActivityState::Completed);
+            REQUIRE(ended.count(p.id));
+            const sim::VehicleState& s = ended[p.id];
+            double north, east;
+            offset(s, p.start.latitudeRad, p.start.longitudeRad, north, east);
+            CHECK(groundSpeed(s) < 0.5); // stopped on the runway (the most it rolled: the C-17A, 660 m; the most off its line: the U-2S, 1.97 m)
+            CHECK((north > 0.0 && north < 3500.0));
+            CHECK(cross[p.id] < 22.5);
+        }
+    }
 
     // --- guidance ------------------------------------------------------------------------------------
     // a new heading, a quarter turn right, and a new altitude: a wing 200 m higher - the fleet climb case (ADR-29

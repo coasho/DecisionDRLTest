@@ -1615,8 +1615,11 @@ class Activity:
         return self.update_curve(segments, append=1, **options)
 
     def cancel(self):
-        """End it: its axes fly the vehicle default. Raises fsim.Rejected if it had already ended."""
-        _checked(self.world._h.activity_cancel(self.id, int(self.source), self.controller), self.world._h)
+        """End it: its axes fly the vehicle default. Raises fsim.Rejected if it had already ended. Returns None - or,
+        for a policy's takeoff canceled on the runway, FA's own Activity that flies the rest (docs/flight-autonomy.md,
+        4.50): its rejection below its decision speed, its continuation above."""
+        r = _checked(self.world._h.activity_cancel(self.id, int(self.source), self.controller), self.world._h)
+        return Activity(self.world, r[3], "behavior", source=Source.AUTOPILOT) if r[3] else None
 
     # Activity commands (docs/flight-autonomy.md, 4.10; A-GRA's ActivityCommandBaseType), declaring the source it was
     # submitted with. Each raises fsim.Rejected: "not_interactive" where its command said interactive=False,

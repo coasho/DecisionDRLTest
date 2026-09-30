@@ -141,6 +141,8 @@ public:
     bool progress(std::size_t slot, ActivityProgress& out) const noexcept;
     /// Its behaviour's arrival estimate (docs/flight-autonomy.md, 4.33), where the behaviour in `slot` has one.
     bool arrival(std::size_t slot, ArrivalEstimate& out) const noexcept;
+    /// What the slot's behaviour hands on when a policy cancels it (Behavior::handOver; docs/flight-autonomy.md, 4.50).
+    bool handOver(std::size_t slot, BehaviorCommand& out) const;
     /// The points its route flies from here (4.37; Behavior::ahead), where the behaviour in `slot` flies one: their count.
     std::uint32_t ahead(std::size_t slot, std::uint32_t* points, std::uint32_t max, bool& ends) const noexcept;
     /// Where its route is along its segments (4.47; Behavior::segments), where the behaviour in `slot` flies one.

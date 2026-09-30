@@ -66,6 +66,37 @@ class LaunchTest(unittest.TestCase):
         up = (s.altitude_msl_m - s0.altitude_msl_m) - (2.0 - s0.altitude_agl_m)
         self.assertLess(math.hypot(math.hypot(north, east), up), 1.0)
 
+    def test_a_rejected_takeoff(self):
+        # a policy's CANCEL at half its rotation speed: FA's own activity stops it on the runway (4.50)
+        w = world("py-rto")
+        v, lat0, lon0 = parked(w, "f16c")
+        a = v.submit_behavior("launch", airfield=7, runway=3)
+        vr = 1.1 * v.profile_value("envelope/clean/cas_min_ms")
+        while v.state.airspeed_calibrated_ms < 0.5 * vr:
+            w.step(3)
+        own = a.cancel()
+        self.assertIsNotNone(own)
+        self.assertEqual(own.source, fsim.Source.AUTOPILOT)
+        fly(w, own, 120)
+        self.assertEqual((a.info.state, own.info.state), (fsim.ActivityState.CANCELED, fsim.ActivityState.COMPLETED))
+        s = v.state
+        self.assertLess(math.hypot(s.velocity_ned_ms[0], s.velocity_ned_ms[1]), 0.5)
+        self.assertLess((s.latitude_rad - lat0) * R, 3500.0)
+        # its fuel gone below its decision speed: the launch fails "takeoff_rejected", stopped on the runway
+        w = world("py-rto-engine")
+        v, lat0, lon0 = parked(w, "c172")
+        a = v.submit_behavior("launch", airfield=7, runway=3)
+        while v.state.airspeed_calibrated_ms < 15.0:
+            w.step(3)
+        for _ in range(240):
+            v.set_property("propulsion/tank[0]/contents-lbs", 0.0)
+            v.set_property("propulsion/tank[1]/contents-lbs", 0.0)
+            w.step(int(round(0.5 / w.step_seconds)))
+            if a.info.state not in (fsim.ActivityState.PENDING, fsim.ActivityState.ACTIVE):
+                break
+        self.assertEqual((a.info.state, a.info.reason), (fsim.ActivityState.FAILED, "takeoff_rejected"))
+        self.assertLess(math.hypot(v.state.velocity_ned_ms[0], v.state.velocity_ned_ms[1]), 0.5)
+
     def test_refusals(self):
         w = world("py-launch-refused")
         v, _, _ = parked(w, "c172")

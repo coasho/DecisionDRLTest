@@ -392,29 +392,39 @@ private:
 /// and climbs out on the runway's course, holding its speed with its pitch - its gear up once it climbs, its flaps up at
 /// 120 m - to complete_agl_m, all at the actuator level; then holds that height on the course at the velocity level. A
 /// rotorcraft lifts straight up to hover_agl_m over where it stood, facing the runway's course, at the position level.
+/// Below its decision speed a wing rejects its takeoff (4.50) - when it can no longer reach its rotation speed in the runway
+/// left, or loses its line - and stops on the runway: then its activity fails TakeoffRejected. Canceled by a policy on the
+/// runway, it hands the rest to FA (handOver): its rejection below the decision speed, its continuation above.
 class FSIM_API LaunchBehavior final : public Behavior {
 public:
-    enum class Phase : std::uint8_t { LineUp, Roll, Rotate, Climb, Done, Lift };
+    enum class Phase : std::uint8_t { LineUp, Roll, Rotate, Climb, Done, Lift, Reject, Stopped };
 
     const char* id() const noexcept override { return "launch"; }
     void start(const ControlContext& ctx, const BehaviorCommand& command) override;
     Command update(const ControlContext& ctx, const Command& in) override;
     void reset() override;
-    bool finished() const noexcept override { return phase_ == Phase::Done; }
-    Reason failure() const noexcept override { return failure_; }
+    bool finished() const noexcept override { return phase_ == Phase::Done || (phase_ == Phase::Stopped && own_); }
+    Reason failure() const noexcept override { return phase_ == Phase::Stopped && !own_ ? Reason::TakeoffRejected : failure_; }
     bool progress(ActivityProgress& out) const noexcept override;
+    bool handOver(BehaviorCommand& out) const override;
 
     Phase phase() const noexcept { return phase_; }
+    /// Whether it could stop on the runway from `speedMs` where it is now: a second's reaction, then its brakes.
+    bool canStop(double speedMs) const noexcept;
 
 private:
     Command roll(const ControlContext& ctx);
+    Command reject(const ControlContext& ctx);
     Command climb(const ControlContext& ctx);
     double pitchHold(double theta, double q, double dt, bool onWheels);
     Command lift(const ControlContext& ctx);
+    double steer(const sim::VehicleState& s, double dt);
 
     Phase phase_ = Phase::LineUp;
     Reason failure_ = Reason::None;
-    bool hovers_ = false;
+    bool hovers_ = false, own_ = false, onGround_ = true;
+    double airfield_ = 0.0, runway_ = 0.0, parkedRad_ = 0.0, rollStartS_ = -1.0, accelMs2_ = 0.0, lastGroundSpeed_ = 0.0;
+    double stoppedS_ = 0.0, casMs_ = 0.0, noGoS_ = 0.0;
     double startLat_ = 0.0, startLon_ = 0.0, courseRad_ = 0.0, lengthM_ = 0.0;
     double vrCasMs_ = 0.0, climbCasMs_ = 0.0, completeAglM_ = 450.0, hoverAglM_ = 10.0, groundAglM_ = 0.0, hoverMslM_ = 0.0;
     double rotateStartS_ = -1.0, airborneS_ = -1.0, pitchRefRad_ = 0.0, rotationRad_ = 0.0, rotateFromRad_ = 0.0, pitchIntegral_ = 0.0;

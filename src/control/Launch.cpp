@@ -3,6 +3,7 @@
 // and clean-up; a rotorcraft's lift to a hover.
 #include "control/CapabilityHost.h"
 #include "core/Geodesy.h"
+#include "fsim/ControlStack.h"
 #include "fsim/BuiltinControllers.h"
 
 #include <algorithm>
@@ -23,6 +24,14 @@ constexpr double kTailMarginRad = 2.0 * kDeg; // short of the attitude its tail 
 constexpr double kRotationRateRadS = 3.0 * kDeg;
 constexpr double kSlipGain = -2.0;    // rudder per rad of sideslip
 constexpr double kGearUpAglM = 10.0, kFlapsUpAglM = 120.0;
+// a rejected takeoff (4.50): stopped with a second's reaction and its brakes' 2.5 m/s^2 (a wet runway's; dry runways give
+// twice that), 30 m short of the runway's end; rejected when it cannot reach its rotation speed and rotate (5 s) in the runway
+// left at the acceleration it makes, or when it is a quarter of the runway's width off its line, for a second on end - judged
+// once it makes 30 % of its rotation speed, its engines spooled up (5 s in, a heavy's projection read kilometres at 2 m/s),
+// or after 40 s of roll short of it
+constexpr double kReactionS = 1.0, kBrakeMs2 = 2.5, kEndMarginM = 30.0, kRotateS = 5.0, kLineLostM = 11.25;
+constexpr double kJudgeFromShare = 0.3, kJudgeAfterS = 40.0, kNoGoS = 1.0;
+constexpr double kStoppedMs = 0.3; // stopped: slower than this for a second
 
 double clamp1(double x) noexcept { return std::clamp(x, -1.0, 1.0); }
 
@@ -41,6 +50,9 @@ Reason CapabilityHost::prepareLaunch(BehaviorCommand& b, const sim::VehicleState
         detail.index = field;
         return why;
     };
+    // a policy's parameters are its own: what the host writes ("_...": its resolutions, FA's hand-over, 4.50) it cannot
+    // give ('_' to '`', the characters' order)
+    if (policyNew_) b.params.erase(b.params.lower_bound("_"), b.params.lower_bound("`"));
     // its airfield and runway, the vehicle's (4.40); the runway's takeoff line: its start, on its direction (else to its
     // limit), as long as it is (else to its limit)
     const double af = b.param("airfield", 0.0), rw = b.param("runway", 0.0);
@@ -58,11 +70,13 @@ Reason CapabilityHost::prepareLaunch(BehaviorCommand& b, const sim::VehicleState
         if (isHold(length)) length = geo::distanceM(t.start.latitudeRad, t.start.longitudeRad, t.limit.latitudeRad, t.limit.longitudeRad);
     }
     if (isHold(course) || isHold(length) || !(length > 0.0)) return at(1, Reason::InvalidParameter);
-    // a wing on the runway: within half its width of the centre line, facing along it, short of its middle
+    // a wing on the runway: within half its width of the centre line, facing along it, short of its middle - where it
+    // starts; FA's own rejection or continuation of a takeoff a policy canceled (4.50) goes on from wherever it is
     double along, cross;
     onLine(t.start.latitudeRad, t.start.longitudeRad, course, state.latitudeRad, state.longitudeRad, along, cross);
-    if (!performance_.hovers && (std::abs(cross) > kHalfWidthM || along < -kBehindStartM || along > 0.5 * length ||
-                                 std::abs(geo::wrapPi(state.eulerRad[2] - course)) > kHeadingOffRad))
+    if (!performance_.hovers && b.params.count("_mode") == 0 &&
+        (std::abs(cross) > kHalfWidthM || along < -kBehindStartM || along > 0.5 * length ||
+         std::abs(geo::wrapPi(state.eulerRad[2] - course)) > kHeadingOffRad))
         return at(1, Reason::InvalidParameter);
     // a wing's rotation and climb speeds: 1.1 and 1.3 times its stall speed with its flaps out (else clean; else the
     // envelope's least - a fly-by-wire fighter's, whose limiter keeps it from stalling)
@@ -82,12 +96,31 @@ Reason CapabilityHost::prepareLaunch(BehaviorCommand& b, const sim::VehicleState
     return Reason::None;
 }
 
+bool ControlStack::handOver(std::size_t slot, BehaviorCommand& out) const {
+    if (slot >= kSlotCount || !behaviors_[slot] || started_[slot] != config_->slots[slot].generation) return false;
+    return behaviors_[slot]->handOver(out);
+}
+
+ActivityId CapabilityHost::handOver(const BehaviorCommand& next, const sim::VehicleState& state, double now) {
+    // FA's own (4.50): the rest of a takeoff a policy canceled, flown at once on the axes the cancel freed
+    CommandOptions own;
+    own.source = Source::Autopilot;
+    own.range = RangePolicy::Clamp;
+    try {
+        const CommandResult r = submitWith(Command(next), {}, {}, own, state, now, false);
+        return r.accepted() ? r.activity : 0;
+    } catch (...) {
+        return 0; // (no memory for its parameters: the axes go, as any canceled activity's)
+    }
+}
+
 void LaunchBehavior::reset() {
     phase_ = Phase::LineUp;
     failure_ = Reason::None;
-    rotateStartS_ = airborneS_ = lastS_ = -1.0;
-    crossIntegral_ = settledS_ = pitchIntegral_ = pitchRefRad_ = rotateFromRad_ = 0.0;
-    gearUp_ = flapsUp_ = false;
+    rotateStartS_ = airborneS_ = lastS_ = rollStartS_ = -1.0;
+    crossIntegral_ = settledS_ = pitchIntegral_ = pitchRefRad_ = rotateFromRad_ = accelMs2_ = lastGroundSpeed_ = stoppedS_ = casMs_ = noGoS_ = 0.0;
+    gearUp_ = flapsUp_ = own_ = false;
+    onGround_ = true;
 }
 
 void LaunchBehavior::start(const ControlContext& ctx, const BehaviorCommand& command) {
@@ -101,7 +134,36 @@ void LaunchBehavior::start(const ControlContext& ctx, const BehaviorCommand& com
     groundAglM_ = s.altitudeAglM;
     rotationRad_ = command.param("_rotate", kRotationRad); // (the host's, from its envelope)
     hoverMslM_ = s.altitudeMslM - s.altitudeAglM + hoverAglM_; // (the c.g. that high over the ground it stands on)
+    airfield_ = command.param("airfield", 0.0), runway_ = command.param("runway", 0.0);
+    parkedRad_ = command.param("_parked", s.eulerRad[1]);
+    lastGroundSpeed_ = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
     if (hovers_) startLat_ = s.latitudeRad, startLon_ = s.longitudeRad, phase_ = Phase::Lift; // (straight up, from where it is)
+    // FA's own, handed on from a takeoff a policy canceled on the runway (4.50): its rejection, or its continuation - rolling
+    // on, or rotating from where the nose is
+    const double mode = command.param("_mode", 0.0);
+    if (!hovers_ && mode != 0.0) {
+        own_ = true;
+        pitchRefRad_ = parkedRad_, rollStartS_ = s.simTime;
+        if (mode == 1.0) phase_ = Phase::Reject;
+        else if (s.airspeedCalibratedMs < vrCasMs_) phase_ = Phase::Roll;
+        else phase_ = Phase::Rotate, rotateStartS_ = s.simTime, rotateFromRad_ = s.eulerRad[1];
+    }
+}
+
+bool LaunchBehavior::canStop(double speedMs) const noexcept {
+    return alongM_ + speedMs * kReactionS + speedMs * speedMs / (2.0 * kBrakeMs2) <= lengthM_ - kEndMarginM;
+}
+
+bool LaunchBehavior::handOver(BehaviorCommand& out) const {
+    // a wing on the runway, not yet flying: stopped where it could still stop (below its decision speed), flown off where
+    // it could not; once it flies, or stopped, its axes may go
+    if (hovers_ || !onGround_ || phase_ == Phase::Stopped || phase_ == Phase::Climb || phase_ == Phase::Done) return false;
+    const bool stop = phase_ == Phase::LineUp || phase_ == Phase::Reject || (phase_ == Phase::Roll && casMs_ < vrCasMs_ && canStop(lastGroundSpeed_));
+    out = BehaviorCommand{};
+    out.id = "launch";
+    out.params = {{"airfield", airfield_}, {"runway", runway_}, {"complete_agl_m", completeAglM_}, {"hover_agl_m", hoverAglM_},
+                  {"_mode", stop ? 1.0 : 2.0}, {"_parked", parkedRad_}};
+    return true;
 }
 
 Command LaunchBehavior::update(const ControlContext& ctx, const Command&) {
@@ -115,38 +177,88 @@ Command LaunchBehavior::update(const ControlContext& ctx, const Command&) {
     case Phase::Rotate: out = roll(ctx); break;
     case Phase::Climb:
     case Phase::Done: out = climb(ctx); break;
+    case Phase::Reject:
+    case Phase::Stopped: out = reject(ctx); break;
     }
     lastS_ = s.simTime;
+    onGround_ = s.onGround, casMs_ = s.airspeedCalibratedMs;
     return out;
+}
+
+double LaunchBehavior::steer(const sim::VehicleState& s, double dt) {
+    // on the wheels: the nose on a point ahead on the centre line - the offset's integral against a crosswind - the yaw
+    // rate damped (the rudder steers the nose or tail wheel: + yaws left)
+    if (!s.onGround) return clamp1(0.5 * s.angularRateBodyRadS[2]);
+    if (phase_ != Phase::LineUp) crossIntegral_ = std::clamp(crossIntegral_ + crossM_ * dt, -200.0, 200.0);
+    const double ahead = phase_ == Phase::LineUp ? 20.0 : 60.0;
+    const double err = geo::wrapPi(courseRad_ - std::atan2(crossM_ + 0.1 * crossIntegral_, ahead) - s.eulerRad[2]);
+    return clamp1(-2.0 * err + 0.5 * s.angularRateBodyRadS[2]);
+}
+
+Command LaunchBehavior::reject(const ControlContext& ctx) {
+    // the rejected takeoff (4.50): idle, full brakes, still steered on the centre line, its wings level and its nose held
+    // down; stopped - slower than kStoppedMs for a second - it holds its brakes, and its activity ends
+    const auto& s = ctx.sensed;
+    const double dt = lastS_ < 0.0 ? 0.0 : std::max(s.simTime - lastS_, 0.0);
+    const double groundSpeed = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
+    ActuatorCommand a;
+    a.throttle = 0.0, a.brakeLeft = a.brakeRight = 1.0;
+    a.gearDown = 1.0, a.flaps = kTakeoffFlaps;
+    a.rudder = steer(s, dt);
+    a.aileron = clamp1(-2.0 * s.eulerRad[0] - 0.5 * s.angularRateBodyRadS[0]);
+    // its nose held at its parked attitude: down only - a tricycle's nose wheel kept loaded to steer, its strut's give
+    // allowed - unless it pitches onto its nose, more than 2 deg under (braking the U-2S's single main wheel lifted its tail
+    // wheel, and it turned 37 deg off its line across the wind)
+    pitchRefRad_ = parkedRad_;
+    const double hold = pitchHold(s.eulerRad[1], s.angularRateBodyRadS[1], dt, true);
+    if (s.eulerRad[1] < parkedRad_ - 2.0 * kDeg) {
+        a.elevator = hold;
+    } else {
+        a.elevator = std::max(hold, 0.0);
+        pitchIntegral_ = std::min(pitchIntegral_, 0.0);
+    }
+    stoppedS_ = groundSpeed < kStoppedMs ? stoppedS_ + dt : 0.0;
+    if (phase_ == Phase::Reject && stoppedS_ >= 1.0) phase_ = Phase::Stopped;
+    lastGroundSpeed_ = groundSpeed;
+    return a;
 }
 
 Command LaunchBehavior::roll(const ControlContext& ctx) {
     const auto& s = ctx.sensed;
     const double dt = lastS_ < 0.0 ? 0.0 : std::max(s.simTime - lastS_, 0.0);
     const double phi = s.eulerRad[0], theta = s.eulerRad[1], psi = s.eulerRad[2];
-    const double p = s.angularRateBodyRadS[0], q = s.angularRateBodyRadS[1], r = s.angularRateBodyRadS[2];
+    const double p = s.angularRateBodyRadS[0], q = s.angularRateBodyRadS[1];
     const double groundSpeed = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]);
     ActuatorCommand a;
     a.gearDown = 1.0, a.flaps = kTakeoffFlaps;
-    // on the wheels: the nose on a point ahead on the centre line - the offset's integral against a crosswind - the yaw
-    // rate damped (the rudder steers the nose or tail wheel: + yaws left); the wings held level
-    if (s.onGround) {
-        if (phase_ != Phase::LineUp) crossIntegral_ = std::clamp(crossIntegral_ + crossM_ * dt, -200.0, 200.0);
-        const double ahead = phase_ == Phase::LineUp ? 20.0 : 60.0;
-        const double err = geo::wrapPi(courseRad_ - std::atan2(crossM_ + 0.1 * crossIntegral_, ahead) - psi);
-        a.rudder = clamp1(-2.0 * err + 0.5 * r);
-    } else {
-        a.rudder = clamp1(0.5 * r);
-    }
+    a.rudder = steer(s, dt); // (on its line; the wings held level)
     a.aileron = clamp1(-2.0 * phi - 0.5 * p);
+    // its acceleration along the ground, smoothed over a second: what its go or no-go judges by
+    if (dt > 0.0) accelMs2_ += std::min(dt, 1.0) * ((groundSpeed - lastGroundSpeed_) / dt - accelMs2_);
+    lastGroundSpeed_ = groundSpeed;
     if (phase_ == Phase::LineUp) { // onto the centre line at a walking pace, then the roll
         a.throttle = std::clamp(0.1 + 0.2 * (5.0 - groundSpeed), 0.0, 0.6);
         a.brakeLeft = a.brakeRight = groundSpeed > 7.0 ? 0.3 : 0.0;
         a.elevator = 0.0;
-        if (std::abs(crossM_) < 2.0 && std::abs(geo::wrapPi(courseRad_ - psi)) < 3.0 * kDeg) phase_ = Phase::Roll, pitchRefRad_ = theta;
+        if (std::abs(crossM_) < 2.0 && std::abs(geo::wrapPi(courseRad_ - psi)) < 3.0 * kDeg)
+            phase_ = Phase::Roll, pitchRefRad_ = parkedRad_ = theta, rollStartS_ = s.simTime;
         return a;
     }
     a.throttle = 1.0, a.brakeLeft = a.brakeRight = 0.0;
+    // go or no-go (4.50): below its rotation speed, where it can still stop, it rejects its takeoff when it can no longer
+    // reach that speed and rotate in the runway left at the acceleration it makes (an engine lost; a runway too short), or
+    // when it has lost its line
+    if (phase_ == Phase::Roll && s.onGround && canStop(groundSpeed) &&
+        (s.airspeedCalibratedMs >= kJudgeFromShare * vrCasMs_ || s.simTime - rollStartS_ >= kJudgeAfterS)) {
+        const double vr = std::max(vrCasMs_, s.airspeedCalibratedMs), gain = groundSpeed / std::max(s.airspeedCalibratedMs, 1.0);
+        const double toVr = accelMs2_ > 0.05 ? (std::pow(vr * gain, 2) - groundSpeed * groundSpeed) / (2.0 * accelMs2_) : 1e9;
+        const bool noGo = alongM_ + toVr + kRotateS * vr * gain > lengthM_ - kEndMarginM || std::abs(crossM_) > kLineLostM;
+        noGoS_ = noGo ? noGoS_ + dt : 0.0;
+        if (noGoS_ >= kNoGoS) {
+            phase_ = Phase::Reject;
+            return reject(ctx);
+        }
+    }
     if (phase_ == Phase::Roll) {
         // the nose held down at its parked attitude until the rotation speed (a pitch-up of its own - engines under the
         // wing, the flaps: the E-7A's at 45 m/s - sat it on its tail): nose-down elevator only, its integral too
@@ -236,6 +348,8 @@ bool LaunchBehavior::progress(ActivityProgress& out) const noexcept {
     case Phase::Climb: out.percent = 50.0; break;
     case Phase::Lift: out.percent = 50.0; break;
     case Phase::Done: out.percent = 100.0; break;
+    case Phase::Reject: out.percent = 10.0; break;   // (as far as it went: it stops)
+    case Phase::Stopped: out.percent = own_ ? 100.0 : 10.0; break;
     }
     return true;
 }

@@ -1329,9 +1329,30 @@ A-GRA's LAUNCH takes an aircraft from an airfield's runway into the air (LCH-01)
   - **Climb-out:** its pitch set for its climb speed at full thrust (2° to 15°). It flies the runway's course over the ground, crabbed into a crosswind, by a bank of at most 15°. The rudder flies the sideslip out: a long wing's adverse yaw from the aileron swung the RQ-4B's nose 50° off its path. The gear comes up above 10 m while climbing, the flaps at 120 m.
   - **Done** at `complete_agl_m` with the gear and flaps up. It holds that height on the runway's course while the activity completes, and what it flies next is its caller's.
 - **A rotorcraft** lifts straight up to `hover_agl_m` over where it stands, facing the runway's course, through its position loop. It completes within a metre of that point and under 0.3 m/s, held for 2 s. The runway is only its airfield's reference. A running takeoff is not built, so `launch/runway` is `not_implemented` on an aircraft that hovers.
-- **The support table:** `fsim.guidance.launch` and `launch/vertical` (R1) are supported, and `launch/runway` on every wing. `launch/rejected_takeoff` stays not implemented (FA-9b), and a taxi (`fsim.guidance.taxi`, FA-9c) too.
+- **The support table:** `fsim.guidance.launch` and `launch/vertical` (R1) are supported, and `launch/runway` on every wing. `launch/rejected_takeoff` is FA-9b's (4.50), and a taxi (`fsim.guidance.taxi`) FA-9c's.
 - **What the aircraft needed:** hangar's fly-by-wire law resets its integrators on the wheels and gives the stick the elevator directly there (the F-35A lifted off at 188 m/s; [hangar.md](hangar.md), Methods, Fly-by-wire). A tail wheel now steers with the rudder. The profile gives the tail-down attitude. The Su-25 was rebalanced: it had sat on its tail.
 - **Surfaces.** C++: the "launch" behaviour, `LaunchBehavior` (fsim/BuiltinControllers.h), `CapabilityHost::prepareLaunch`, `BehaviorTraits::axes`, the profile's `EnvelopeSection::groundPitchMaxRad`. No C ABI change: a behaviour goes by its id (`fsim_vehicle_submit_behavior`), and Python's `Vehicle.submit_behavior("launch", airfield=, runway=)`.
+
+### 4.50 A rejected takeoff (as FA-9b builds it)
+
+A-GRA puts "Rejected Take Off and Abort commands" among Flight Autonomy's own functions (VI 1.4, row 10.2), and commands an abort as a CANCEL (the ICD's C2 Commanded Abort, CommandState CANCEL). A takeoff on the runway is never simply let go: below its decision speed it is stopped on the runway, above it flown off (LCH-02). The aborted takeoff's taxi route off the runway, a plan's path chained to the takeoff's, is FA-9c's and FA-9d's.
+
+- **The decision speed (V1)** is where the aircraft can no longer stop in the runway left. It can stop from a speed if a second's reaction at that speed, then braking at 2.5 m/s² (a wet runway's; a dry one gives about twice that), ends 30 m short of the runway's end. Below its rotation speed, where it can still stop, it is below its decision speed. On a long runway V1 is Vr. The E-3G and the C-17A, slow to accelerate, are past theirs before 97 % of Vr on 3,500 m.
+- **FA rejects a takeoff itself** below its decision speed, when for a second on end either:
+  - it can no longer reach its rotation speed and rotate (5 s) in the runway left, at the acceleration it makes, smoothed over a second: an engine lost, a runway too short, a brake dragging; or
+  - it is a quarter of the runway's width (11.25 m) off its line.
+
+  It judges once the aircraft makes 30 % of its rotation speed, its engines spooled up, or after 40 s of roll short of that. Judged 5 s into the roll, the C-17A's and the RC-135W's spooling engines projected a run of kilometres, and they rejected at 2 m/s.
+- **The rejection:** idle, full brakes, the aircraft still steered on the centre line and its wings held level. Its nose is held down at its parked attitude, keeping a tricycle's nose wheel loaded to steer. Only if it pitches onto its nose, more than 2° under, is the nose pulled up: braking the U-2S's single main wheel lifted its tail wheel. Stopped, slower than 0.3 m/s for a second, it holds its brakes, and the launch **fails `takeoff_rejected`** (A-GRA's cannot-comply CONSTRAINT_SAFETY). Its progress stays at the roll's 10 %.
+- **A policy's CANCEL on the runway** ends the policy's launch, `canceled` as every CANCEL does, and FA flies the rest at once as its own activity (`Source::Autopilot`, the platform's own). The CANCEL's answer names it in `CommandResult::other`:
+  - below its decision speed, or lining up, or rejecting: its rejection, completed once stopped;
+  - above it, still on the wheels: its continuation, rolling on or rotating from where the nose is, completed climbed out and cleaned up, as a launch is;
+  - once it flies, or stopped: nothing. The axes go to the vehicle default, as any canceled activity's do.
+
+  The behaviour says what it hands on (`Behavior::handOver`, a new virtual). The host submits it on the axes the cancel freed, before anything waiting is scheduled (`CapabilityHost::handOver`). Such a launch starts from wherever the aircraft is on the runway (its host parameters `_mode` and `_parked`).
+- **A policy's parameters are its own.** The host's resolutions, those beginning "_", are dropped from a policy's launch as its NEW is prepared, so no policy can forge FA's hand-over. The strip is the launch's alone: done at every policy behaviour's NEW, it cost the NEW 6 to 8 %.
+- **The support table:** `launch/rejected_takeoff` is supported on every wing, and not implemented on an aircraft that hovers, as `launch/runway`.
+- **Surfaces.** C++: `Reason::TakeoffRejected`, `Behavior::handOver`, `LaunchBehavior::canStop`, `CommandResult::other` on a CANCEL. The C ABI's result already carries `other`. Python: `Activity.cancel()` returns FA's own `Activity` where it hands on, else None; the reason's name "takeoff_rejected" and its A-GRA mapping.
 
 ## 5. Applicability (D6)
 
@@ -3420,6 +3441,28 @@ The quadrotors' contacts, the helicopters' and the reset had waited for the owne
   - The NEWs and updates: a level switch +1.6 % and +1.2 % (+0.3 % from three copies), a behaviour −1.4 % and −1.0 % (−0.8 %), the same level's update and a checked update within −1.5 % to +1.5 %.
   - World throughput is 98.9 to 100.2 % of HEAD's, and 99.1 to 100.2 % from three copies. Protection costs at most 0.5 %.
 - ctest: all 380 tests pass.
+
+**FA-9b, a rejected takeoff (LCH-02).**
+- What it built is 4.50, in C++ and Python. `launch/rejected_takeoff` is supported on every wing.
+- **Flown**, every wing parked at the start of a 3,500 m runway to the north (a probe, then `test_launch`, `test_fleet` and the Python twin):
+  - Every fuel tank emptied at 60 % of its rotation speed (a flame-out): 30 wings rejected their takeoffs and stopped on the runway, 2,414 m short of its end at least (the C-17A), within 7.0 m of the centre line (the U-2S; the rest within 0.9 m). Each launch failed `takeoff_rejected`. The Skua, electric, has no fuel to lose: it took off.
+  - A policy's CANCEL at half the rotation speed: FA's own activity stopped all 31 on the runway, 2,835 m short of its end at least, within 2.0 m of the line.
+  - A CANCEL at 97 % of Vr: 29 stopped, 805 m short of the end at least (the KC-46A). The C-17A and the E-3G, past their decision speeds 2 km along, were flown off and climbed out.
+  - A runway too short: the B-52H on 700 m rejected at 30 % of its rotation speed and stopped 142 m along.
+  - The normal takeoffs of 4.49 are unchanged on all 35.
+- **In the 10 m/s crosswind** every wing but the U-2S stopped within 6.9 m of the line (the E-7A; 4.0 m in the flame-out: the C172). The C-17A, flown off, was 8.6 m off on its roll. The U-2S left the runway's side: 24 m after its flame-out, 69 m after a CANCEL at 97 % of Vr. Its tail wheel is off the ground in the roll and its rudder saturated before the stop. 10 m/s across is beyond the real one's limit (about 15 kt, with its pogos and a chase car). Pulling its nose up throughout the stop drove it 150 m off; that is not done.
+- **The braking** assumed, 2.5 m/s² after a second's reaction, is conservative on every wing that stopped: the stops took 0.39 (the MiG-29A) to 0.95 (the B-52H) of the distance it gives.
+- **The fleet** (`test_fleet`, a case of its own): every wing's launch canceled at half its rotation speed was handed to FA's own activity, which stopped it on the runway, 660 m along at most (the C-17A), within 1.97 m of the line (the U-2S). The fleet's other states are identical to FA-9a's to the bit: 1,751 judged and 2,275 as cases end, the new case's group aside.
+- **Found and fixed:**
+  - Judged from 5 s into the roll, the heavies' spooling engines made the go or no-go reject at 2 m/s: now judged from 30 % of the rotation speed.
+  - The U-2S pitched onto its nose under its main wheel's brake, its tail wheel off the ground: the stop now pulls a nose more than 2° under its parked attitude up.
+  - The discovery test's example of a feature not built yet is now the taxi (stage 9).
+- **Unchanged, to the last bit:** the digests with protection and without, the route probe and the curve probe. The allocation gate passes.
+- **A/B throughput** against FA-9a (7c0f9b6), each build from its own directory and from three copies, in quiet windows:
+  - A first run read a behaviour's NEW 7.3 % and 8.3 % slower, 5.6 % from three copies: the strip of a policy's "_" parameters, then made at every policy behaviour's NEW. Made in the launch's preparation alone, it reads +0.0 % and +0.7 %, +1.2 % from three copies.
+  - The other NEWs and updates are within −1.5 % to +3.1 % (the largest a same level update's 0.2 ns on 6.5), the micro cases within −1.0 % to +1.6 %, and −0.5 % to +0.9 % from three copies.
+  - World throughput is 101.1 to 101.8 % of FA-9a's, and 100.0 to 100.1 % from three copies. Protection costs at most 0.7 %.
+- ctest: all 382 tests pass.
 
 ## Appendix A: the inventory
 

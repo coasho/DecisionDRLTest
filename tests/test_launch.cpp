@@ -192,6 +192,7 @@ TEST_CASE("launch: refusals naming their fields; only on the ground; a wing's ru
     CHECK(w.support(id, "fsim.guidance.launch")->support == Support::Supported);
     CHECK(w.support(id, "fsim.guidance.launch/runway")->support == Support::Supported);
     CHECK(w.support(id, "fsim.guidance.launch/vertical")->support == Support::NotSupported);
+    CHECK(w.support(id, "fsim.guidance.launch/rejected_takeoff")->support == Support::Supported);
 
     // airborne: unavailable
     const auto flying = wing(w, "c172", 1000.0, 50.0, 1);
@@ -207,4 +208,123 @@ TEST_CASE("launch: refusals naming their fields; only on the ground; a wing's ru
     CHECK(r.support(heli, "fsim.guidance.launch")->support == Support::Supported);
     CHECK(r.support(heli, "fsim.guidance.launch/vertical")->support == Support::Supported);
     CHECK(r.support(heli, "fsim.guidance.launch/runway")->support == Support::NotImplemented);
+    CHECK(r.support(heli, "fsim.guidance.launch/rejected_takeoff")->support == Support::NotImplemented); // (a wing's)
+}
+
+namespace {
+
+/// Where a rejected takeoff ends: its activity's end, how far along the runway and across it the aircraft stopped (the worst
+/// across on the way), and FA's own activity where a CANCEL handed it on.
+struct Rejection {
+    ActivityState state = ActivityState::Pending;
+    Reason reason = Reason::None;
+    ActivityId own = 0;
+    ActivityState ownState = ActivityState::Pending;
+    Source ownSource = Source::Policy;
+    double alongM = 0.0, worstCrossM = 0.0, groundSpeedMs = 0.0, aglM = 0.0;
+};
+
+/// A wing's launch on a runway of `lengthM`, disturbed at `share` of its rotation speed: every fuel tank emptied (a flame-out,
+/// its engines starved: `cancel` false) or its launch canceled by its policy; flown until nothing it started is live.
+Rejection rejected(const std::string& type, double share, bool cancel, double lengthM = 3500.0) {
+    session::World w(options(("rto-" + type).c_str()));
+    const auto id = parked(w, type);
+    runwayNorth(w, id, lengthM);
+    const sim::VehicleState s0 = *w.vehicleState(id);
+    const double vr = rotationSpeed(w, id);
+    std::vector<sim::PropertyHandle> tanks;
+    for (int i = 0; i < 16; ++i)
+        if (auto h = w.model(id)->property("propulsion/tank[" + std::to_string(i) + "]/contents-lbs"); h.valid()) tanks.push_back(h);
+    const CommandResult r = w.submit(id, launch());
+    REQUIRE(r.accepted());
+    Rejection out;
+    bool struck = false;
+    for (double time = 0.0; time < 240.0; time += 0.1) {
+        w.step(stepsFor(w, 0.1));
+        const sim::VehicleState& s = *w.vehicleState(id);
+        double north, east;
+        offset(s, s0.latitudeRad, s0.longitudeRad, north, east);
+        if (s.onGround) out.worstCrossM = std::max(out.worstCrossM, std::abs(east));
+        if (!struck && s.airspeedCalibratedMs >= share * vr) {
+            struck = true;
+            if (cancel) {
+                const CommandResult c = w.cancel(r.activity);
+                REQUIRE(c.status == CommandStatus::Canceled);
+                out.own = c.other;
+            }
+        }
+        if (struck && !cancel)
+            for (auto& h : tanks) h.set(0.0);
+        const bool live = w.activity(r.activity)->live() || (out.own && w.activity(out.own)->live());
+        if (!live) break;
+    }
+    const sim::VehicleState& s = *w.vehicleState(id);
+    double north, east;
+    offset(s, s0.latitudeRad, s0.longitudeRad, north, east);
+    out.alongM = north, out.groundSpeedMs = groundSpeed(s), out.aglM = s.altitudeAglM - s0.altitudeAglM;
+    out.state = w.activity(r.activity)->state, out.reason = w.activity(r.activity)->reason;
+    if (out.own) out.ownState = w.activity(out.own)->state, out.ownSource = w.activity(out.own)->source;
+    return out;
+}
+
+} // namespace
+
+TEST_CASE("launch: an engine lost below its decision speed - the takeoff rejected, stopped on the runway (LCH-02)", "[modes][launch]") {
+    for (const char* type : {"c172", "f16c", "b52h", "e7a", "su25"}) {
+        INFO(type);
+        const Rejection r = rejected(type, 0.6, false);
+        CHECK(r.state == ActivityState::Failed);
+        CHECK(r.reason == Reason::TakeoffRejected);
+        CHECK(r.groundSpeedMs < 0.5);                    // stopped...
+        CHECK((r.alongM > 0.0 && r.alongM < 3500.0));    // ...on the runway (the worst: the B-52H 462 m along)
+        CHECK(r.worstCrossM < kHalfWidthM);
+    }
+    // a runway too short to take off from: rejected as soon as it is judged, at 30 % of its rotation speed, and stopped on it
+    // (the B-52H on 700 m: 142 m along)
+    const Rejection shortRunway = rejected("b52h", 2.0, false, 700.0);
+    CHECK(shortRunway.reason == Reason::TakeoffRejected);
+    CHECK(shortRunway.groundSpeedMs < 0.5);
+    CHECK(shortRunway.alongM < 700.0);
+}
+
+TEST_CASE("launch: a policy's CANCEL on the runway - FA stops it below its decision speed, flies it off above (LCH-02)", "[modes][launch]") {
+    // below: FA's own rejection, completed stopped on the runway; the policy's launch canceled
+    for (const char* type : {"c172", "f16c", "kc46a"}) {
+        INFO(type << " canceled at half its rotation speed");
+        const Rejection r = rejected(type, 0.5, true);
+        CHECK(r.state == ActivityState::Canceled);
+        REQUIRE(r.own != 0);
+        CHECK(r.ownSource == Source::Autopilot);
+        CHECK(r.ownState == ActivityState::Completed);
+        CHECK(r.groundSpeedMs < 0.5);
+        CHECK((r.alongM > 0.0 && r.alongM < 3500.0));
+        CHECK(r.worstCrossM < kHalfWidthM);
+    }
+    // above: the E-3G reaches 97 % of its rotation speed 2 km along, where it could no longer stop - FA flies it off
+    const Rejection go = rejected("e3g", 0.97, true);
+    REQUIRE(go.own != 0);
+    CHECK(go.ownState == ActivityState::Completed);
+    CHECK(go.aglM > 400.0);
+
+    // once it flies, a CANCEL hands nothing on; a policy's own "_" parameters are not its to give
+    session::World w(options("launch-flown"));
+    const auto id = parked(w, "f16c");
+    runwayNorth(w, id);
+    const CommandResult r = w.submit(id, launch());
+    REQUIRE(r.accepted());
+    for (int i = 0; i < 600 && !(w.activity(r.activity)->progress.percent >= 50.0); ++i) w.step(stepsFor(w, 0.1)); // (climbing out)
+    REQUIRE(!w.vehicleState(id)->onGround);
+    const CommandResult c = w.cancel(r.activity);
+    CHECK(c.status == CommandStatus::Canceled);
+    CHECK(c.other == 0);
+    session::World g(options("launch-forged"));
+    const auto parkedId = parked(g, "f16c");
+    runwayNorth(g, parkedId);
+    BehaviorCommand forged = launch();
+    forged.params["_mode"] = 1.0; // (FA's rejection: stripped, it lines up and rolls)
+    const CommandResult f = g.submit(parkedId, forged);
+    REQUIRE(f.accepted());
+    g.step(stepsFor(g, 8.0));
+    CHECK(g.activity(f.activity)->state == ActivityState::Active);
+    CHECK(groundSpeed(*g.vehicleState(parkedId)) > 10.0);
 }

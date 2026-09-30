@@ -1435,6 +1435,13 @@ public:
         (void)out;
         return false;
     }
+    /// What FA flies in its place when a policy cancels its activity (docs/flight-autonomy.md, 4.50): a takeoff on the
+    /// runway, which must not be let go, hands on its rejection below its decision speed or its continuation above - into
+    /// `out`, and true; false where its axes may simply go. Asked between world steps, as the CANCEL is answered.
+    virtual bool handOver(BehaviorCommand& out) const {
+        (void)out;
+        return false;
+    }
 };
 
 /// What the cascade asked for in its last control update, level by level

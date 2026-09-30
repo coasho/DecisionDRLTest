@@ -919,6 +919,9 @@ private:
     /// wing's rotation and climb speeds, written into the behaviour's parameters. UnknownAirfield or InvalidParameter with the
     /// field (0 the airfield, 1 the runway); NotImplemented for a wing with no speed to rotate at.
     Reason prepareLaunch(BehaviorCommand& launch, const sim::VehicleState& state, CommandResult& detail);
+    /// FA's own rest of a takeoff a policy canceled on the runway (4.50): its rejection or its continuation, submitted at
+    /// once on the freed axes; its activity, or 0 (Launch.cpp).
+    ActivityId handOver(const BehaviorCommand& next, const sim::VehicleState& state, double now);
     /// A route intercept's plan and fields checked (4.47; Intercept.cpp): the plan kept, or why not, and the field at fault
     /// (-1: none).
     const RoutePlan* interceptPlan(const InterceptCommand& intercept, Reason& why, std::int16_t& field) const noexcept;
@@ -1020,6 +1023,9 @@ private:
     /// A plan has been prepared for upload: plans_ is made (4.39). Here, in the hole before controlPeriodS_, on the line
     /// every NEW reads: noteEnd tests it at each activity's end, where plans_, at the host's far end, would cost a line.
     bool planned_ = false;
+    /// The NEW being prepared is a policy's: a launch drops the host's own parameters from it (4.50). In the same hole: a
+    /// strip of every policy behaviour's parameters at its NEW cost a behaviour's NEW 6-8 %.
+    bool policyNew_ = false;
     double controlPeriodS_ = 1.0 / 120.0;
     EnvelopeStatus envelope_{}; ///< since the last envelope()
     ControlStack* runtime_ = nullptr;

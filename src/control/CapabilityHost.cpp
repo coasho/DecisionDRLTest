@@ -1536,6 +1536,7 @@ CommandResult CapabilityHost::submitWith(const Command& command, Span<const Wayp
     }
 
     Command setpoint = command;
+    policyNew_ = options.source == Source::Policy;
     CommandResult detail; // what the checks found: kClamped, the first finding's detail
     CheckLog log{detail, options.range, &details_};
     if (const Reason why = prepare(index, setpoint, waypoints, segments, state, log, shape, curveShape, extras); why != Reason::None)
@@ -1923,8 +1924,16 @@ CommandResult CapabilityHost::cancel(ActivityId activity, const sim::VehicleStat
     const auto s = static_cast<std::size_t>(found);
     if (const Reason why = addresses(records_[s], caller); why != Reason::None) return rejected(why, activity, activity);
     r.commandId = records_[s].commandId;
+    // a policy's takeoff on the runway is not let go: FA flies the rest as its own (4.50)
+    BehaviorCommand next;
+    bool hand = false;
+    try {
+        hand = records_[s].source == Source::Policy && isCascade(s) && runtime_->handOver(s, next);
+    } catch (...) {
+    }
     end(s, ActivityState::Canceled, Reason::Requested, 0, now);
     release(s); // its axes: the vehicle default...
+    if (hand) r.other = handOver(next, state, now); // ...FA's own rest of a takeoff...
     schedule(state, now); // ...or what waited for them
     return r;
 }

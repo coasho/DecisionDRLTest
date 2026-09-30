@@ -169,6 +169,8 @@ enum class Reason : std::uint8_t {
     UnknownGeometry,    ///< a command refused: it names an operational point the world does not keep
     // the altitude stacked marshall (docs/flight-autonomy.md, 4.46)
     StackFull,          ///< a marshall refused: no altitude of its stack is free of the other aircraft marshalling round its point
+    // a launch (docs/flight-autonomy.md, 4.50)
+    TakeoffRejected,    ///< a launch Failed: FA rejected the takeoff below its decision speed - it could not reach its rotation speed in the runway left, or lost its line - and stopped on the runway
     Count
 };
 
@@ -344,7 +346,9 @@ struct CommandResult {
     Reason reason = Reason::None;
     ActivityId activity = 0; ///< the new (NEW) or addressed (UPDATE, CANCEL) activity
     /// An id the reason is about (A-GRA's AssociatedID): the activity that
-    /// holds the authority (AuthorityHeld), or that a deferred NEW waits for; 0 none.
+    /// holds the authority (AuthorityHeld), or that a deferred NEW waits for;
+    /// a CANCEL's: FA's own that flies the rest of a takeoff canceled on the
+    /// runway (docs/flight-autonomy.md, 4.50); 0 none.
     ActivityId other = 0;
     std::uint16_t flags = 0; ///< CommandFlag bits
     // What a rejection or a clamp was about (docs/vehicle-interface.md, 5.1):
