@@ -662,6 +662,62 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
         }
     }
 
+    // --- a launch (ADR-29 FA-9a, LCH-01, LCH-04): parked, each on a runway of its own 3,500 m north - a wing takes off
+    // within half its width of the centre line and climbs out; a rotorcraft lifts to its hover over where it stands ---------
+    {
+        fleet.park();
+        std::map<std::uint32_t, ActivityId> launched;
+        std::map<std::uint32_t, double> cross;
+        std::map<std::uint32_t, sim::VehicleState> ended;
+        for (const auto& p : planes) {
+            if (!p.offered.count("fsim.guidance.launch")) continue;
+            INFO(p.type << ": launch");
+            const double ground = p.start.altitudeMslM - p.start.altitudeAglM;
+            Runway r;
+            r.id = 3;
+            r.takeoff.start = RunwayPoint{p.start.latitudeRad, p.start.longitudeRad, ground};
+            r.takeoff.limit = RunwayPoint{p.start.latitudeRad + 3500.0 / kEarthM, p.start.longitudeRad, ground};
+            Airfield field;
+            field.id = 7;
+            field.runways = {r};
+            REQUIRE(w.loadAirfield(p.id, field) == Reason::None);
+            BehaviorCommand b = behavior("launch");
+            b.params = {{"airfield", 7.0}, {"runway", 3.0}};
+            const CommandResult c = w.submit(p.id, b);
+            CHECK(c.accepted());
+            if (c.accepted()) launched[p.id] = c.activity, cross[p.id] = 0.0;
+        }
+        for (double t = 0.0; t < 240.0 && ended.size() < launched.size(); t += 1.0)
+            fleet.fly(1.0, [&] {
+                for (const auto& [id, a] : launched) {
+                    if (ended.count(id)) continue;
+                    const auto& s = *w.vehicleState(id);
+                    const auto& p = *std::find_if(planes.begin(), planes.end(), [id = id](const Plane& x) { return x.id == id; });
+                    double north, east;
+                    offset(s, p.start.latitudeRad, p.start.longitudeRad, north, east);
+                    if (s.onGround) cross[id] = std::max(cross[id], std::abs(east));
+                    if (!w.activity(a)->live()) ended[id] = s;
+                }
+            });
+        for (const auto& p : planes) {
+            if (!launched.count(p.id)) continue;
+            INFO(p.type << " (" << className(p.cls) << "): launch " << activityStateName(w.activity(launched[p.id])->state));
+            CHECK(w.activity(launched[p.id])->state == ActivityState::Completed);
+            REQUIRE(ended.count(p.id));
+            const sim::VehicleState& s = ended[p.id];
+            if (p.rotor) {
+                // its c.g. 10 m over the ground it stood on, over where it stood (the worst: 0.67 m)
+                const double up = s.altitudeMslM - (p.start.altitudeMslM - p.start.altitudeAglM + 10.0);
+                CHECK(std::hypot(groundDistance(s, p.start), up) < 1.0);
+            } else {
+                CHECK(cross[p.id] < 22.5);        // (the worst: the U-2S's 2.8 m, on its wingtip skid)
+                CHECK(s.altitudeAglM > 400.0);    // climbed out to 450 m, cleaned up
+                if (p.offered.count("fsim.support.gear")) CHECK(s.gearPosition < 0.1);
+            }
+            fleet.covered(p, "fsim.guidance.launch");
+        }
+    }
+
     // --- guidance ------------------------------------------------------------------------------------
     // a new heading, a quarter turn right, and a new altitude: a wing 200 m higher - the fleet climb case (ADR-29
     // FA-3d): energy management keeps its calibrated airspeed at 1.1 times its least or more, where a C172 once

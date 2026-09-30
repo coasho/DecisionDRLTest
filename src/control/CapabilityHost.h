@@ -915,6 +915,10 @@ private:
     /// A marshall's NEW (4.46; Marshall.cpp): `pattern` its pattern, `stack` beside it - the stack's fields checked, its slot left
     /// out its least, and its pattern prepared as a pattern's, the pattern's fields named back as the marshall's.
     Reason prepareMarshall(Command& pattern, const MarshallStack& stack, const sim::VehicleState& state, CheckLog& log, const PatternShape* shape);
+    /// A launch's NEW (4.49; Launch.cpp): its airfield and runway the vehicle's, a wing on the runway; the takeoff line, and a
+    /// wing's rotation and climb speeds, written into the behaviour's parameters. UnknownAirfield or InvalidParameter with the
+    /// field (0 the airfield, 1 the runway); NotImplemented for a wing with no speed to rotate at.
+    Reason prepareLaunch(BehaviorCommand& launch, const sim::VehicleState& state, CommandResult& detail);
     /// A route intercept's plan and fields checked (4.47; Intercept.cpp): the plan kept, or why not, and the field at fault
     /// (-1: none).
     const RoutePlan* interceptPlan(const InterceptCommand& intercept, Reason& why, std::int16_t& field) const noexcept;

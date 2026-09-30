@@ -640,6 +640,10 @@ public:
         return d.setpoint == SetpointKind::MustFly || d.setpoint == SetpointKind::Marshall || d.setpoint == SetpointKind::Intercept;
     }
 
+    /// What a walk draws: the later stages' capabilities where it optimises; never a ground mode - it flies (a launch: its
+    /// NEW and lifecycle are test_launch.cpp's)
+    bool drawable(const CapabilityDescriptor& d) const { return (optimise || !late(d)) && d.mode != FlightMode::Launch; }
+
     static bool isSupport(const CapabilityDescriptor& d) {
         for (std::size_t k = 0; k < kSupportKinds; ++k)
             if (d.id == supportCapability(k)) return true;
@@ -785,6 +789,14 @@ void lifecycle(session::World& w, std::uint32_t v, Maker& make) {
               ((d.kind != CapabilityKind::Guidance || d.setpoint != SetpointKind::Behavior) && d.setpoint != SetpointKind::Intercept)); // (a route intercept, which a new one replaces: ADR-29 FA-8d)
         const bool primary = (d.axes & kPrimaryAxes) != 0; // flown through the cascade, or the engines' thrust beside it
         CHECK(primary == (!Maker::isSupport(d) || d.id == "fsim.flight.engines"));
+        if (d.mode == FlightMode::Launch) { // a ground mode, the vehicle flying: unavailable, and refused so (its lifecycle: test_launch.cpp)
+            const CapabilityStatus st = w.capabilityStatus(v, d.id);
+            CHECK((st.availability == Availability::TemporarilyUnavailable && st.reason == Reason::Airborne));
+            BehaviorCommand b;
+            b.id = d.behavior;
+            CHECK(w.submit(v, b).reason == Reason::Airborne);
+            continue;
+        }
         CHECK(w.capabilityStatus(v, d.id).availability == Availability::Available);
 
         // NEW: pending, owning the capability's axes
@@ -893,10 +905,13 @@ struct AuthorityModel {
     ControlMode mode = ControlMode::Open;
     std::vector<ControlStatus> control;       ///< per capability
     std::vector<CapabilityStatus> restricted; ///< per capability: the platform's
+    std::vector<CapabilityStatus> phase;      ///< per capability: the flight phase's (a ground mode's, flying: a launch's)
+    /// Its status as the platform reports it: the flight phase's, else its restriction.
+    const CapabilityStatus& status(std::size_t c) const { return phase[c].availability != Availability::Available ? phase[c] : restricted[c]; }
     /// Why the policy's `controller` may not command capability `c` now, as the rules have it; None if it may.
     Reason refuses(std::size_t c, ControllerId controller = 0) const {
         if (mode == ControlMode::Granted && !(control[c].granted && control[c].holder == controller)) return Reason::NotGranted;
-        if (restricted[c].availability != Availability::Available) return restricted[c].reason;
+        if (restricted[c].availability != Availability::Available) return restricted[c].reason; // (a NEW's: the phase after, checked)
         return Reason::None;
     }
 };
@@ -955,13 +970,14 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
         if (done.result.flags & kClamped) ++seen["clamped"];
     }
     if (made) {
+        INFO("answered " << reasonName(done.result.reason) << ", the rules refusing " << reasonName(done.refused));
         if (done.result.accepted()) CHECK(done.result.reason == Reason::None);
         else CHECK(among(done.result.reason, {Reason::UnknownCapability, Reason::Unavailable, Reason::VersionUnsupported, Reason::InvalidParameter,
                                               Reason::OutOfRange, Reason::InvalidAxes, Reason::AuthorityHeld, Reason::ControllerNotAxisAware,
                                               Reason::PerformanceLimit, Reason::InvalidWaypoint, Reason::InvalidCurve, Reason::NotGranted,
                                               Reason::CollisionAvoidance, Reason::Restricted, Reason::Diverged,
                                               // what the vehicle cannot do at all, and the flight phase (docs/flight-autonomy.md, 4.3)
-                                              Reason::NotSupported, Reason::NotImplemented, Reason::OnGround,
+                                              Reason::NotSupported, Reason::NotImplemented, Reason::OnGround, Reason::Airborne,
                                               // a precedence override from a policy, a window it cannot meet, no room to wait (4.9)
                                               Reason::NotAllowed, Reason::TimeConstraint, Reason::QueueFull,
                                               // a task's (4.11)
@@ -1328,6 +1344,9 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
     std::map<TaskId, std::size_t> taskCapability;                         // the caller's tasks' capabilities
     authority.control.assign(w.capabilities(v).size(), ControlStatus{});
     authority.restricted.assign(w.capabilities(v).size(), CapabilityStatus{});
+    authority.phase.assign(w.capabilities(v).size(), CapabilityStatus{});
+    for (std::size_t i = 0; i < w.capabilities(v).size(); ++i) // (it flies: a ground mode waits for the ground)
+        if (w.capabilities(v)[i].mode == FlightMode::Launch) authority.phase[i] = {Availability::TemporarilyUnavailable, Reason::Airborne};
 
     for (int k = 0; k < operations; ++k) {
         if (k % 120 == 60) {
@@ -1375,7 +1394,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             }
             std::vector<std::size_t> commandable;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if ((caps[i].interactions & kCommand) && (make.optimise || !Maker::late(caps[i]))) commandable.push_back(i);
+                if ((caps[i].interactions & kCommand) && make.drawable(caps[i])) commandable.push_back(i);
             done.capability = commandable[make.pick(commandable.size())];
             const CapabilityDescriptor d = caps[done.capability];
             done.options.controller = controller();
@@ -1478,7 +1497,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             if (what < 0.4 || mine.empty()) {
                 std::vector<std::size_t> flyable;
                 for (std::size_t i = 0; i < caps.size(); ++i)
-                    if ((caps[i].interactions & kCommand) && !Maker::isSupport(caps[i]) && (make.optimise || !Maker::late(caps[i])))
+                    if ((caps[i].interactions & kCommand) && !Maker::isSupport(caps[i]) && make.drawable(caps[i]))
                         flyable.push_back(i);
                 const std::size_t c = flyable[static_cast<std::size_t>(draw(static_cast<int>(flyable.size())))];
                 Command command;
@@ -1539,7 +1558,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
         case Op::Precedence: {
             std::vector<std::size_t> commandable;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if ((caps[i].interactions & kCommand) && (make.optimise || !Maker::late(caps[i]))) commandable.push_back(i);
+                if ((caps[i].interactions & kCommand) && make.drawable(caps[i])) commandable.push_back(i);
             done.capability = commandable[static_cast<std::size_t>(draw(static_cast<int>(commandable.size())))];
             const auto p = static_cast<std::uint32_t>(draw(4));
             precedences[done.capability] = p;
@@ -1574,7 +1593,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             const ActivityRecord* r = w.activity(done.addressed);
             std::vector<std::size_t> others;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if (make.optimise || !Maker::late(caps[i])) others.push_back(i);
+                if (make.drawable(caps[i])) others.push_back(i);
             const CapabilityDescriptor& d = caps[r && make.chance(0.7) ? r->capability : others[make.pick(others.size())]];
             Command c;
             SupportCommand sc;
@@ -1588,7 +1607,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             std::vector<std::size_t> cascade;
             for (std::size_t i = 0; i < caps.size(); ++i)
                 if ((caps[i].kind == CapabilityKind::Flight && !Maker::isSupport(caps[i])) ||
-                    (caps[i].kind == CapabilityKind::Guidance && (make.optimise || !Maker::late(caps[i])) && make.chance(0.15) &&
+                    (caps[i].kind == CapabilityKind::Guidance && make.drawable(caps[i]) && make.chance(0.15) &&
                      caps[i].setpoint != SetpointKind::Marshall && caps[i].setpoint != SetpointKind::Intercept)) // (a Command alone: neither is one)
                     cascade.push_back(i);
             Command c;
@@ -1602,7 +1621,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             // one of the calls, about a capability it can command mostly; the rules' answer and ends worked out first
             std::vector<std::size_t> commandable;
             for (std::size_t i = 0; i < caps.size(); ++i)
-                if ((caps[i].interactions & kCommand) && (make.optimise || !Maker::late(caps[i]))) commandable.push_back(i);
+                if ((caps[i].interactions & kCommand) && make.drawable(caps[i])) commandable.push_back(i);
             const double a = make.uniform(0.0, 1.0);
             // what a release, a revocation or a refusal ends: mostly a capability the policy flies now
             std::vector<std::size_t> flown;
@@ -1628,7 +1647,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             } else if (a < 0.55) {
                 done.authority = "request";
                 const CapabilityStatus own = w.vehicleState(v)->diverged ? CapabilityStatus{Availability::TemporarilyUnavailable, Reason::Diverged}
-                                                                          : authority.restricted[c];
+                                                                          : authority.status(c);
                 const ControllerId by = controller();
                 const Reason expected = !authority.control[c].allowed                                      ? Reason::NotAllowed
                                         : own.availability != Availability::Available                      ? own.reason
@@ -1751,7 +1770,7 @@ std::vector<double> randomSequence(const Aircraft& aircraft, std::uint64_t seed,
             CHECK((st.allowed == authority.control[i].allowed && st.granted == authority.control[i].granted && st.holder == authority.control[i].holder));
             if (!diverged) {
                 const CapabilityStatus a = w.capabilityStatus(v, caps[i].id);
-                CHECK((a.availability == authority.restricted[i].availability && a.reason == authority.restricted[i].reason));
+                CHECK((a.availability == authority.status(i).availability && a.reason == authority.status(i).reason));
             }
         }
         const bool changes = done.op == Op::Step || done.op == Op::Reset || (done.op == Op::New && done.result.accepted()) ||

@@ -384,6 +384,46 @@ private:
     double altitude_ = 0.0, airspeed_ = kHold, floorAglM_ = 150.0;
 };
 
+/// "launch": A-GRA's LAUNCH from an airfield's runway (docs/flight-autonomy.md, 4.49). params: airfield and runway (their
+/// ids: the vehicle's, 4.40), complete_agl_m (450: where a wing's departure ends, climbed out and cleaned up) and hover_agl_m
+/// (10: a rotorcraft's hover). The host resolves the runway at the NEW into the parameters it flies by (its takeoff line,
+/// course and elevation; a wing's rotation and climb speeds). A wing lines up on the runway's centre line, rolls at full
+/// power steering on it with the nose wheel and the rudder and holding its wings level, rotates at its rotation speed,
+/// and climbs out on the runway's course, holding its speed with its pitch - its gear up once it climbs, its flaps up at
+/// 120 m - to complete_agl_m, all at the actuator level; then holds that height on the course at the velocity level. A
+/// rotorcraft lifts straight up to hover_agl_m over where it stood, facing the runway's course, at the position level.
+class FSIM_API LaunchBehavior final : public Behavior {
+public:
+    enum class Phase : std::uint8_t { LineUp, Roll, Rotate, Climb, Done, Lift };
+
+    const char* id() const noexcept override { return "launch"; }
+    void start(const ControlContext& ctx, const BehaviorCommand& command) override;
+    Command update(const ControlContext& ctx, const Command& in) override;
+    void reset() override;
+    bool finished() const noexcept override { return phase_ == Phase::Done; }
+    Reason failure() const noexcept override { return failure_; }
+    bool progress(ActivityProgress& out) const noexcept override;
+
+    Phase phase() const noexcept { return phase_; }
+
+private:
+    Command roll(const ControlContext& ctx);
+    Command climb(const ControlContext& ctx);
+    double pitchHold(double theta, double q, double dt, bool onWheels);
+    Command lift(const ControlContext& ctx);
+
+    Phase phase_ = Phase::LineUp;
+    Reason failure_ = Reason::None;
+    bool hovers_ = false;
+    double startLat_ = 0.0, startLon_ = 0.0, courseRad_ = 0.0, lengthM_ = 0.0;
+    double vrCasMs_ = 0.0, climbCasMs_ = 0.0, completeAglM_ = 450.0, hoverAglM_ = 10.0, groundAglM_ = 0.0, hoverMslM_ = 0.0;
+    double rotateStartS_ = -1.0, airborneS_ = -1.0, pitchRefRad_ = 0.0, rotationRad_ = 0.0, rotateFromRad_ = 0.0, pitchIntegral_ = 0.0;
+    double crossIntegral_ = 0.0;
+    double lastS_ = -1.0;
+    double alongM_ = 0.0, crossM_ = 0.0, settledS_ = 0.0;
+    bool gearUp_ = false, flapsUp_ = false;
+};
+
 /// "formation": hold a slot relative to `target` (leader). params: ahead_m,
 /// right_m, below_m (in the leader's heading frame), closure_gain (1/s; left
 /// out, half its speed loop's bandwidth: a wing's 0.05). It closes on the slot

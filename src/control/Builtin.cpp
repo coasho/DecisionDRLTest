@@ -890,6 +890,13 @@ void registerBuiltinControllers(ControllerRegistry& r) {
     r.addBehavior("evade", [] { return std::make_unique<EvadeBehavior>(); },
                   traits(Persistence::Persistent, {p("altitude_delta_m", "m", -300.0), p("airspeed_ms", "m/s", now, 0.0), p("floor_agl_m", "m", 150.0, 0.0)},
                          {velocity}, true));
+    auto launch = traits(Persistence::Terminating, // (A-GRA's LAUNCH from an airfield's runway: docs/flight-autonomy.md, 4.49)
+                         {p("airfield", "", now, 1.0, 4294967295.0), p("runway", "", now, 1.0, 4294967295.0), p("complete_agl_m", "m", 450.0, 10.0),
+                          p("hover_agl_m", "m", 10.0, 1.0)},
+                         {"fsim.flight.actuator", velocity, position});
+    launch.mode = FlightMode::Launch;
+    launch.axes = axisBit(Axis::Gear) | axisBit(Axis::Flaps) | axisBit(Axis::Brakes);
+    r.addBehavior("launch", [] { return std::make_unique<LaunchBehavior>(); }, std::move(launch));
     auto formation = traits(Persistence::Persistent,
                             {p("ahead_m", "m", -100.0), p("right_m", "m", 60.0), p("below_m", "m", 0.0), p("closure_gain", "1/s", now, 0.0)},
                             {velocity}, true);

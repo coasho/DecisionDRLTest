@@ -320,6 +320,19 @@ stage end to end through the platform (`ctest -R hangar`).
   (THIRD_PARTY_NOTICES.md, "Changes to JSBSim"; docs/rotorcraft.md, 7). A
   multirotor's feet and tops are sized for the step too, as sets
   (Rotorcraft, below).
+- **Gear.** The wheels share the weight at rest by the lever rule. The
+  rudder command steers every steerable wheel the same way, so a wheel
+  behind the CG (a tail wheel) is written to turn the other way to a nose
+  wheel, and the aircraft yaws the way its rudder yaws it. (The U-2S's tail
+  wheel, steering as a nose wheel does, steered it off the runway against
+  its rudder.) The mass stage checks a tricycle's balance at its parked
+  attitude, as Raymer (ch. 11) does: 5 to 25 % of the loaded weight on the
+  nose wheel (8-15 % is typical), the empty aircraft on its nose wheel and
+  not its tail, and a warning under 15° of tip-back off the vertical from
+  the main wheels to the CG. The profile gives the attitude at which the
+  aircraft, pivoting on its aftmost wheels, touches the ground behind them
+  (`envelope/ground_pitch_max_deg`: the E-7A's 7.3°, the Rafale's 19.6°): a
+  takeoff rotates short of it.
 - **Propeller.** Blade-element momentum theory with Prandtl's tip and hub
   losses.
 - **Engines.** Piston engines use JSBSim's piston engine; hangar's control
@@ -476,6 +489,15 @@ For fighters:
   pressure and Mach number (`hangar/fcs.py`):
   - Pitch: angle-of-attack and pitch-rate feedback give the short period
     CAP 1 and damping 0.8. A load-factor command follows a model response.
+  - On the wheels: the integrators are reset below 60 kt and while a wheel
+    carries weight, and the stick moves the elevator over its travel
+    directly, faded in and out over half a second with the weight on the
+    wheels. On the runway the wheels, not the wing, set the load factor;
+    reset only below 60 kt, the pitch integrator wound the tail to its
+    nose-down stop within seconds. The load-factor command has no room
+    there either: at the rotation speed the angle of attack left gives
+    about 1 g. With neither, full back stick gave the F-35A 10° of its 30,
+    and it lifted off at 188 m/s. The fighters now lift off at 96-111 m/s.
   - Angle-of-attack limits: near a limit the command is cut to the load
     factor the aircraft pulls plus what the angle of attack left gives,
     counting its rise over the next 0.35 s. At the limit the integrator,
@@ -871,7 +893,18 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   300 mph at 20,000 ft.
 - The Su-25 flies at 13.1 t, full of fuel. It stands 5 deg nose-high on its
   gear (its height is measured so), its main wheels fold into open wells in
-  the nacelles. Its estimated zero-lift drag leaves out its ten pylons:
+  the nacelles. Its main wheels stand the published wheelbase, 3.57 m,
+  behind the nose wheel, and its estimated empty CG at 7.12 m. With the
+  three-view's 7.25 m and the CG at 7.20 m the loaded CG stood 5 cm ahead
+  of the main wheels: it sat on its tail at 19°. Now 6.8 % of its weight is
+  on the nose wheel, 1.2 % empty. Its CG is tall, 2 m over the ground, so
+  its tip-back is 7° (the check warns). Further forward, its elevator
+  could not pull its wing to its most lift: at 7.05 m it stalled at 13°
+  and 76 m/s, against 15° and 72 m/s now. The trade costs short-period
+  damping, which the linear model puts at 0.29 against level 1's 0.30
+  (the build fails it; the real one has no pitch damper). Its thrust line
+  runs 0.33 m under the CG, so full thrust at a walking pace rocks it back;
+  a takeoff eases the thrust as the nose rises. Its estimated zero-lift drag leaves out its ten pylons:
   calibration holds its sea-level top speed with the most wave drag it
   allows, and it climbs 17,000 ft/min against the published 11,400.
 - The C-17A flies through its own fly-by-wire, with a transport's limits
@@ -893,7 +926,9 @@ way, on direct (hydraulic) controls or their own fly-by-wire. Each is
   the main gear's bays.
 - The U-2S flies at 12.6 t, half its fuel. On its bicycle gear the main and
   tail wheels share the weight by the lever rule, both pedals brake the main
-  wheel, and parked it stands 4 deg nose-high (its height is measured so).
+  wheel, the tail wheel steers with the rudder (Methods, Gear), and parked
+  it stands 4 deg nose-high on its left wingtip skid (its height is
+  measured so; it has no pogos).
   hangar has no buffet boundary: at 60,000 ft its F118 takes it to Mach
   0.82, past the 0.715 where the real one's Mach buffet holds it - the
   coffin corner. It is not calibrated. At half fuel it climbs to 64,800 ft,
@@ -1042,7 +1077,7 @@ and the platform treats it as unknown:
 | --- | --- |
 | `identity` | the design's category (fighter, transport, ...) and its law: fly-by-wire or surfaces |
 | `effectors` | the law again, for what the stick means: a load-factor and roll-rate demand, or the surfaces. Also the effectors the design has: flaps if it has a flap channel (which writes their position in degrees and, as JSBSim's `fcs/flap-pos-norm`, as a fraction of their travel: how the platform knows a flap command is done), retractable gear, wheel brakes, and pitch trim where the elevator channel sums one |
-| `envelope` | the `[flight_control]` limits the design states (g, angle of attack, roll rate), and, for an aircraft without a limiting law, the stall its flight tests flew (its speed and angle). An aircraft whose law will not let a stall be flown has its least speed from the performance tables: their stall at the lowest altitude, at the weight it spawns at (the platform's energy management keeps a margin over it: [flight-autonomy.md](flight-autonomy.md), 4.16). A fly-by-wire design's also says which of them its law enforces (`law_load_factor`, `law_alpha`, `law_roll_rate`): the platform's envelope protection clamps setpoints to those and adds no limiter of its own ([control.md](sdk/control.md#envelope-protection)) |
+| `envelope` | the pitch attitude its tail touches the ground at on its wheels (`ground_pitch_max_deg`: Methods, Gear); the `[flight_control]` limits the design states (g, angle of attack, roll rate), and, for an aircraft without a limiting law, the stall its flight tests flew (its speed and angle). An aircraft whose law will not let a stall be flown has its least speed from the performance tables: their stall at the lowest altitude, at the weight it spawns at (the platform's energy management keeps a margin over it: [flight-autonomy.md](flight-autonomy.md), 4.16). A fly-by-wire design's also says which of them its law enforces (`law_load_factor`, `law_alpha`, `law_roll_rate`): the platform's envelope protection clamps setpoints to those and adds no limiter of its own ([control.md](sdk/control.md#envelope-protection)) |
 | `propulsion` | the engines, their type, afterburning, and the thrust lag the autopilot identified |
 | `plant` | the autopilot's `[reference]` and `[identified]` tables in `autopilot.toml`: the responses to aileron, elevator, rudder and throttle there, each with its lag; and the trim law and zero-lift angle the gains use |
 | `performance` | the flight tests' stall speed, maximum speed, ceiling and climb (`out/fly.json`) |

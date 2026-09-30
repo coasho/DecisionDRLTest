@@ -202,6 +202,44 @@ def gear_loads(aircraft, mass, cg):
     return out
 
 
+def gear_balance(aircraft, cg):
+    """A tricycle gear's balance at rest (Raymer 11.2): (its parked pitch attitude,
+    deg, nose up; the nose wheel's share of the weight, %; the tip-back angle, deg -
+    off the vertical from the main wheels' contact to the CG) with the struts at their
+    static deflection, or None for a tail wheel, a bicycle or no gear."""
+    wheels = [(g, pos + np.array([0.0, 0.0, g.static_deflection])) for g in aircraft.gear for _, pos in g.positions()]
+    single = [abs(p[1]) < 0.1 or not g.mirror for g, p in wheels]
+    centre = [p for (_, p), s in zip(wheels, single) if s]
+    pairs = [p for (_, p), s in zip(wheels, single) if not s]
+    if not centre or not pairs:
+        return None
+    n, m = np.mean(centre, axis=0), np.mean(pairs, axis=0)
+    if n[0] >= m[0]:
+        return None
+    th = math.atan2(m[2] - n[2], m[0] - n[0])  # nose up when the nose wheel's contact is the lower
+
+    def level(p):  # (aft, up) in the ground's frame, the aircraft at its parked attitude
+        return p[0] * math.cos(th) + p[2] * math.sin(th), p[2] * math.cos(th) - p[0] * math.sin(th)
+    (xn, _), (xm, zm), (xc, zc) = level(n), level(m), level(np.asarray(cg, float))
+    return math.degrees(th), (xm - xc) / (xm - xn) * 100.0, math.degrees(math.atan2(xm - xc, zc - zm))
+
+
+def tail_down_deg(aircraft):
+    """The pitch attitude (deg, nose up) at which the aircraft, pivoting on its
+    aftmost wheels with the struts at their static deflection, touches the ground
+    with the structure behind them - the most a rotation may take (the E-7A's
+    7.3 deg). Structure already on the ground's level there (a skid) is not the
+    tail. None for no gear, or nothing behind the wheels."""
+    wheels = [pos + np.array([0.0, 0.0, g.static_deflection]) for g in aircraft.gear for _, pos in g.positions()]
+    if not wheels:
+        return None
+    aft = max(p[0] for p in wheels)
+    pivot = np.mean([p for p in wheels if p[0] > aft - 0.3], axis=0)
+    angles = [math.degrees(math.atan2(p[2] - pivot[2], p[0] - pivot[0])) for _, p in structure_points(aircraft)
+              if p[0] > pivot[0] + 0.1 and p[2] - pivot[2] > 0.02]
+    return min(angles) if angles else None
+
+
 def ground_reactions_xml(aircraft, mass_model):
     m, cg = mass_model.loaded()
     loads = gear_loads(aircraft, m, cg)
@@ -210,6 +248,11 @@ def ground_reactions_xml(aircraft, mass_model):
         for name, pos in g.positions():
             f = max(loads.get(name, m * G0 / 3), 100.0)
             k = f / g.static_deflection
+            # a steerable wheel behind the CG (a tail wheel) turns the other way to the
+            # pedal's: the aircraft yaws the way the rudder yaws it (JSBSim's steer
+            # angle is the command times max_steer; the U-2S's tail wheel, turning as a
+            # nose wheel does, steered it off the runway against its rudder)
+            steer = (g.max_steer_deg if pos[0] < cg[0] or g.max_steer_deg >= 360.0 else -g.max_steer_deg) if g.steerable else 0.0
             c = 2 * 0.5 * math.sqrt(k * f / G0)
             if g.brake == "auto":
                 brake = "NONE" if g.steerable or abs(pos[1]) < 0.1 else ("LEFT" if pos[1] < 0 else "RIGHT")
@@ -228,7 +271,7 @@ def ground_reactions_xml(aircraft, mass_model):
         <max_steer unit="DEG"> %.1f </max_steer>
         <brake_group> %s </brake_group>
         <retractable> %d </retractable>
-      </contact>""" % (name, _loc(pos, 10), k, c, 2 * c, g.max_steer_deg if g.steerable else 0.0, brake, int(g.retractable)))
+      </contact>""" % (name, _loc(pos, 10), k, c, 2 * c, steer, brake, int(g.retractable)))
     # structure: the points that touch first in a crash, whatever the attitude
     for name, p, k_s, c_s in structure_contacts(aircraft, mass_model):
         parts.append("""      <contact type="STRUCTURE" name="%s">

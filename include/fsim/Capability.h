@@ -973,6 +973,8 @@ struct BehaviorTraits {
     /// kFeatureHover); 0: every aircraft.
     std::uint32_t features = 0;
     FlightMode mode = FlightMode::None; ///< the A-GRA flight capability type it is
+    /// The support axes it owns beside the primary ones (a launch: the gear, the flaps and the brakes it sets as it flies).
+    AxisMask axes = 0;
     /// Behavior: parameters in a BehaviorCommand. A guidance mode's fixed-size
     /// setpoint (SetpointKind::Hsa, ...) makes it a mode: it takes UPDATE.
     SetpointKind setpoint = SetpointKind::Behavior;

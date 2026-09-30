@@ -38,6 +38,8 @@ struct FeatureDef {
     bool tables = false;
     /// Part of it flown from the performance tables: partial on such an aircraft, this missing (at `stage`).
     const char* withoutTables = nullptr;
+    /// A wing's way of it: not built for an aircraft that hovers (a rotorcraft's running takeoff: at `stage`).
+    bool wingsOnly = false;
 };
 
 #define CAP(id, built, stage, rules, missing) {id, id, built, stage, rules, missing}
@@ -178,10 +180,10 @@ const FeatureDef kFeatures[] = {
     CAP("fsim.guidance.marshall", S, 0, 0, ""),                                               // ASM-01 (FA-8c)
     {"fsim.guidance.marshall/hover", "fsim.guidance.marshall", S, 0, R1, ""},
     CAP("fsim.guidance.intercept", S, 0, 0, ""),                                              // RIC-01..03 (FA-8d)
-    CAP("fsim.guidance.launch", N, 9, 0, ""),                                                 // LCH-01
-    {"fsim.guidance.launch/runway", "fsim.guidance.launch", N, 9, 0, ""},
+    CAP("fsim.guidance.launch", S, 9, 0, ""),                                                 // LCH-01
+    {"fsim.guidance.launch/runway", "fsim.guidance.launch", S, 9, 0, "", false, nullptr, true},
     {"fsim.guidance.launch/rejected_takeoff", "fsim.guidance.launch", N, 9, 0, ""},           // LCH-02
-    {"fsim.guidance.launch/vertical", "fsim.guidance.launch", N, 9, R1, ""},                  // LCH-04
+    {"fsim.guidance.launch/vertical", "fsim.guidance.launch", S, 9, R1, ""},                  // LCH-04
     {"fsim.guidance.launch/emergency_divert", "fsim.guidance.launch", N, 16, 0, ""},          // LCH-03
     {"fsim.guidance.launch/carrier_catapult", "fsim.guidance.launch", N, 11, R3, ""},         // LCH-05
     {"fsim.guidance.launch/carrier_proceed", "fsim.guidance.launch", N, 11, R3 | R4, ""},     // LCH-06
@@ -452,6 +454,11 @@ SupportTable::SupportTable(const VehicleProfile& profile, const CapabilityCatalo
         if (f.capability != f.id && f.rules == R1 && f.built != Support::NotImplemented && !(catalog.features() & kFeatureHover)) {
             row.support = Support::NotImplemented; // a hover option, its rule undecided (no declaration), and a model that does not hover:
             row.stage = f.stage;                   // as the hover capability is for it (ADR-29 FA-5c)
+            row.missing = "";
+        }
+        if (f.wingsOnly && (catalog.features() & kFeatureHover) && row.support == Support::Supported) {
+            row.support = Support::NotImplemented; // a wing's way of it, not built for one that hovers
+            row.stage = f.stage;
             row.missing = "";
         }
         if (f.tables && profile.tables.empty() && row.support != Support::NotImplemented) {

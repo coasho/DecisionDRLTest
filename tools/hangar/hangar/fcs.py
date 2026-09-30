@@ -822,6 +822,34 @@ def vectoring_xml(aircraft):
     return "\n".join(parts)
 
 
+def _ground_mode(de_lo, de_hi):
+    """The pitch channel's ground mode: on the wheels the stick moves the elevator over
+    its travel directly (the load-factor command has no room there: at the rotation
+    speed the angle of attack left gives about 1 g, and the reset integrator adds
+    nothing - full back stick gave the F-35A 10 deg of its 30 and it lifted off at
+    147 m/s), faded out over half a second once the wheels leave the ground while the
+    integrator takes over, and in over as long at touchdown."""
+    return """        <lag_filter name="fcs/fbw/ground">
+          <input>gear/wow</input>
+          <c1>2.0</c1>
+        </lag_filter>
+        <fcs_function name="fcs/fbw/ground-direct">
+          <function>
+            <product>
+              <property>fcs/fbw/ground</property>
+              <table>
+                <independentVar lookup="row">fcs/pitch-trim-sum</independentVar>
+                <tableData>
+                  -1.0  %.5f
+                   0.0  0.0
+                   1.0  %.5f
+                </tableData>
+              </table>
+            </product>
+          </function>
+        </fcs_function>""" % (de_lo, de_hi)
+
+
 def channels_xml(aircraft, fbw):
     """The fly-by-wire Pitch, Roll and Yaw channels (JSBSim <channel>s) with
     their gain tables, writing the same surface positions the direct
@@ -831,11 +859,16 @@ def channels_xml(aircraft, fbw):
     de_lo, de_hi = (rad(x) for x in aircraft.channel_limits("elevator"))
     dr_max = rad(max(abs(x) for x in aircraft.channel_limits("rudder"))) if "rudder" in aircraft.channels() else 0.0
     parts = []
-    hold = """        <!-- the integrators are reset below 60 kt (on the ground, taking off) -->
+    # (above 60 kt on the runway the wheels' load factor, not the wing's, fed the pitch
+    # integrator: it wound the tail to its nose-down stop in seconds, and the F-35A
+    # lifted off at 188 m/s)
+    hold = """        <!-- the integrators are reset below 60 kt and while a wheel carries weight
+             (on the ground, taking off and landing) -->
         <switch name="fcs/fbw/reset">
           <default value="0"/>
-          <test value="-1">
+          <test logic="OR" value="-1">
             velocities/vc-kts lt 60
+            gear/wow gt 0
           </test>
         </switch>"""
     # thrust vectoring: the axes the nozzles add power about, their gains as moments
@@ -993,12 +1026,13 @@ def channels_xml(aircraft, fbw):
         <fcs_function name="fcs/fbw/pitch-error-rate">
           <function><product><property>fcs/fbw/k-i</property><property>fcs/fbw/pitch-error</property></product></function>
         </fcs_function>
-        <!-- the integrator: reset below 60 kt, held while the elevator is at a stop
-             it would push further into (anti-windup) -->
+        <!-- the integrator: reset below 60 kt and on the wheels, held while the
+             elevator is at a stop it would push further into (anti-windup) -->
         <switch name="fcs/fbw/pitch-hold">
           <default value="0"/>
-          <test value="-1">
+          <test logic="OR" value="-1">
             velocities/vc-kts lt 60
+            gear/wow gt 0
           </test>
           <test logic="AND" value="1">
             fcs/fbw/elevator-raw gt %.5f
@@ -1023,9 +1057,10 @@ def channels_xml(aircraft, fbw):
             </difference>
           </function>
         </fcs_function>
+%s
         <!-- the elevator: the push, the moment compensation, angle-of-attack and
              pitch-rate feedback, the feedforward of the limited command, the
-             integrator -->
+             integrator, the ground mode's direct stick -->
         <fcs_function name="fcs/fbw/elevator-raw">
           <function>
             <sum>
@@ -1035,6 +1070,7 @@ def channels_xml(aircraft, fbw):
               <product><value>-1</value><property>fcs/fbw/k-q</property><property>velocities/q-rad_sec</property></product>
               <product><property>fcs/fbw/k-ff</property><property>fcs/fbw/dn-limited</property></product>
               <property>fcs/fbw/pitch-integral</property>
+              <property>fcs/fbw/ground-direct</property>
             </sum>
           </function>
         </fcs_function>
@@ -1058,7 +1094,7 @@ def channels_xml(aircraft, fbw):
                        _integrator("pitch-integral", "pitch-error-rate", "fcs/fbw/pitch-hold", 0.5,
                                    "md" if powered["pitch"] else None, POWER_SIGN["md"], fmt="%g"),
                        de_hi / rad(4.0), rad(o["alpha_max_deg"]), -de_lo / rad(4.0), rad(o["alpha_min_deg"]),
-                       de_lo, de_hi, max(1.05, (de_hi - de_lo) / 0.83)))
+                       _ground_mode(de_lo, de_hi), de_lo, de_hi, max(1.05, (de_hi - de_lo) / 0.83)))
     if "aileron" in aircraft.channels():
         da = rad(max(abs(x) for x in aircraft.channel_limits("aileron")))
         p_max = _gain_table("p-max", fbw, "p_max")

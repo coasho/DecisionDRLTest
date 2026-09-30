@@ -42,7 +42,7 @@ CapabilityDescriptor flight(const char* name, Level level, std::vector<Parameter
 /// The platform's own behaviours are fsim.guidance.<id>; others user.guidance.<id>
 /// unless registered with a dotted id.
 std::string guidanceId(const std::string& behavior) {
-    static const char* const builtin[] = {"hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics", "hover", "hsa", "route",
+    static const char* const builtin[] = {"hold", "waypoints", "loiter", "pursuit", "evade", "formation", "aerobatics", "hover", "launch", "hsa", "route",
                                           "pattern", "curve", "must_fly", "marshall", "intercept"};
     if (behavior.find('.') != std::string::npos) return behavior;
     for (const char* b : builtin)
@@ -338,7 +338,7 @@ void CapabilityCatalog::addBehaviors() {
         d.superseded = supersededBy(id);
         d.setpoint = traits.setpoint;
         d.level = Level::Behavior;
-        d.axes = kPrimaryAxes;
+        d.axes = kPrimaryAxes | traits.axes;
         d.persistence = traits.persistence;
         d.parameters = traits.parameters;
         d.uses = traits.uses;

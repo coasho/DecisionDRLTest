@@ -1305,6 +1305,34 @@ A rotorcraft asked for an airspeed it cannot fly is held to its fastest, as a wi
   - Asked for 10 m/s, it diverged the same way. Settled first, it flies its fastest at 25, 30, 40 and 60 m/s and never diverges.
 - **Surfaces.** C++: `topTasMs`. No C ABI or Python change: the answers are the existing `kClamped`, `performance_limit` and `max_airspeed` (Python: `Activity.clamped`, `fsim.Rejected`, `World.last_command_details`).
 
+### 4.49 A-GRA's launch from a runway (as FA-9a builds it)
+
+A-GRA's LAUNCH takes an aircraft from an airfield's runway into the air (LCH-01), and a rotorcraft up to a hover (LCH-04). It is the platform behaviour `fsim.guidance.launch`, flight capability type LAUNCH. The command variant stays at eleven alternatives (4.46): the launch is a `BehaviorCommand`, its parameters by name.
+
+- **Its parameters:**
+  - `airfield` and `runway`: ids of an airfield the vehicle keeps (4.40) and one of its runways;
+  - `complete_agl_m`, 450 by default: the height a wing completes at, climbed out and cleaned up;
+  - `hover_agl_m`, 10 by default: the height of a rotorcraft's c.g. over the ground it stood on.
+- **Its NEW** resolves the runway before anything flies (`CapabilityHost::prepareLaunch`, Launch.cpp):
+  - The airfield must be the vehicle's, else `unknown_airfield` naming field 0; the runway must be that airfield's, else `unknown_airfield` naming field 1.
+  - The takeoff line is the runway's takeoff start, on its direction and as long as its available length, or, where either is not given, to its takeoff limit. A runway with no takeoff coordinates (one for landing only) or without a line is refused `invalid_parameter`, field 1.
+  - A wing must be on it: within half its width of the centre line (22.5 m: A-GRA gives no width, and 45 m is ICAO code letter E's), no more than 60 m short of its start and short of its middle, facing within 30° of its course. Else `invalid_parameter`, field 1.
+  - A wing's speeds: it rotates at 1.1 times its stall speed with flaps (else clean, else the envelope's least: a fly-by-wire fighter's, whose law will not let it stall) and climbs at 1.3 times it. A wing with none, as a stock JSBSim model has none, is refused `not_implemented`.
+  - Its rotation attitude: 0.6 of its angle-of-attack limit, between 7° and 12° (10° where there is none), and 2° short of the attitude its tail touches the ground at (the profile's `envelope/ground_pitch_max_deg`, [hangar.md](hangar.md), Methods, Gear). The E-7A's is 7.3°, so it rotates to 5.3°.
+- **Only on the ground.** It is the first ground mode: its status is `temporarily_unavailable`, `airborne`, while the vehicle flies, and a policy's NEW is refused so when the range is checked (4.5; the airborne guidance's `on_ground` the other way round).
+- **Its axes** are the primary ones with the gear, the flaps and the wheel brakes (a behaviour's traits may now name support axes: `BehaviorTraits::axes`). A wing flies its departure at the actuator level through the clean-up, so its own gear, flap and brake settings reach the aircraft.
+- **A wing flies it** in phases (its progress 0, 10, 25, 50 and 100 %):
+  - **Line-up:** onto the centre line at a walking pace (5 m/s), steering its nose on a point 20 m ahead on the line, until within 2 m of it and 3° of its course.
+  - **Roll:** full thrust and takeoff flaps (0.3). The nose wheel steers on a point 60 m ahead, and an integral of the offset holds it against a crosswind. A positive rudder command yaws the nose left, on the wheels as in the air, and a tail wheel is written to steer as the rudder does ([hangar.md](hangar.md), Methods, Gear). The ailerons hold the wings level.
+  - **Nose held down in the roll.** Until the rotation speed the nose is held at its parked attitude: nose-down elevator only, with its integral. Too slow for the elevator, the thrust is eased as the nose rises past a degree above it, to 30 % at 3°. The E-7A's own pitch-up (engines under the wing, the flaps) sat it on its tail at 45 m/s. The Su-25's thrust line, 0.33 m under its CG, rocked it back at a walking pace.
+  - **Rotation at Vr:** the nose up at 3°/s from where it stands (the Su-25 parks 5° nose-high) to its rotation attitude, then held. The pitch hold is stiffer on the wheels, and its integral trims the nose wheel's load.
+  - **Climb-out:** its pitch set for its climb speed at full thrust (2° to 15°). It flies the runway's course over the ground, crabbed into a crosswind, by a bank of at most 15°. The rudder flies the sideslip out: a long wing's adverse yaw from the aileron swung the RQ-4B's nose 50° off its path. The gear comes up above 10 m while climbing, the flaps at 120 m.
+  - **Done** at `complete_agl_m` with the gear and flaps up. It holds that height on the runway's course while the activity completes, and what it flies next is its caller's.
+- **A rotorcraft** lifts straight up to `hover_agl_m` over where it stands, facing the runway's course, through its position loop. It completes within a metre of that point and under 0.3 m/s, held for 2 s. The runway is only its airfield's reference. A running takeoff is not built, so `launch/runway` is `not_implemented` on an aircraft that hovers.
+- **The support table:** `fsim.guidance.launch` and `launch/vertical` (R1) are supported, and `launch/runway` on every wing. `launch/rejected_takeoff` stays not implemented (FA-9b), and a taxi (`fsim.guidance.taxi`, FA-9c) too.
+- **What the aircraft needed:** hangar's fly-by-wire law resets its integrators on the wheels and gives the stick the elevator directly there (the F-35A lifted off at 188 m/s; [hangar.md](hangar.md), Methods, Fly-by-wire). A tail wheel now steers with the rudder. The profile gives the tail-down attitude. The Su-25 was rebalanced: it had sat on its tail.
+- **Surfaces.** C++: the "launch" behaviour, `LaunchBehavior` (fsim/BuiltinControllers.h), `CapabilityHost::prepareLaunch`, `BehaviorTraits::axes`, the profile's `EnvelopeSection::groundPitchMaxRad`. No C ABI change: a behaviour goes by its id (`fsim_vehicle_submit_behavior`), and Python's `Vehicle.submit_behavior("launch", airfield=, runway=)`.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -3366,6 +3394,32 @@ The quadrotors' contacts, the helicopters' and the reset had waited for the owne
   - The command cases are within −3.0 % to +1.2 %, the aligned builds' included, but a checked UPDATE. It reads +1.6 and +0.0 % in the two runs and +3.6 % over the copies, and the aligned builds +0.8, +2.4 and +0.8 %: its minimum 0.2 to 0.8 ns more, on 25 ns. The airspeed bound's checks lie on its path (the state now passed to the limits, a rotorcraft's branch); its own A/B read +0.8 and +0.0 % there on FA-4d. Not traced further.
   - World throughput is 99.4 to 101.0 % of FA-8d's, and 99.5 to 100.4 % over the copies. Protection costs at most 1.0 %.
   - A first `world` run read FA-8d's own F-16C 13 % slower than FA-8d had, from the same binary in the same directory, and protection at 6 to 7 %. Nothing else was seen running. Two runs after it read as above, FA-8d's binary as it had.
+
+**FA-9a, A-GRA's launch from a runway (LCH-01, LCH-04; CAP-02).**
+- What it built is 4.49, in C++ and Python (no C ABI change: a behaviour by its id). `fsim.guidance.launch` is supported on every aircraft; with it, nine of A-GRA's ten flight capability types are offered, RECOVERY FA-10's.
+- **Flown**, every aircraft parked at the start of a 3,500 m runway to the north, calm and in 10 m/s from the west, square across it (a probe, then `test_launch`, `test_fleet` and the Python twin):
+  - All 35 completed, both ways. On the wheels every wing kept within 2.8 m of the centre line in calm air (the U-2S, on its wingtip skid; the rest within 1.0 m) and within 13.1 m in the crosswind (the U-2S; then the C-17A 8.3, the E-7A 6.9, the C172 6.1 m): half a runway is 22.5 m.
+  - Each rotated at its Vr, within a step's acceleration of it, and lifted off where its rotation attitude and its tail allow: the C172 at 32.6 m/s, the E-7A at 77, the fighters at 95 to 111 m/s. No structure touched the runway but the U-2S's wingtip skid, which it stands on.
+  - Every retractable gear came up; every wing reached 450 m cleaned up and on the runway's course, crabbed into the crosswind.
+  - The rotorcraft lifted to their hovers 10 m up and settled within a metre of them (horizontally within 0.67 m calm, 0.96 m in the wind: the IRIS).
+  - `test_launch` (3 cases): the C172, F-35A, E-7A, Su-25, U-2S and RQ-4B, calm and across, within 22.5 m and rotating within 5 kt of Vr, their tails clear; the Crazyflie, UH-1H and UH-60A within a metre of their hovers; the refusals, naming field 0 or 1; unavailable in the air; its lifecycle on the ground (NEW pending on the primary axes, the gear, flaps and brakes; active after a step; canceled).
+  - The fleet test flies it on all 35 at once, from their standard places: completed, the wings at worst 2.82 m off the centre line on the wheels (the U-2S; the rest within 0.97 m) and 451 to 454 m up, their gear up; the rotorcraft within 0.67 m of their hover points (the UH-60A).
+- **Found and fixed, each where it belongs:**
+  - The fly-by-wire fighters could not rotate. On the runway the wheels, not the wing, set the load factor, and above 60 kt the pitch integrator wound the tail to its nose-down stop; the stick's load-factor demand had no room at the rotation speed. The F-35A lifted off at 188 m/s. hangar's law now resets its integrators on the wheels and gives the stick the elevator there ([hangar.md](hangar.md), Methods, Fly-by-wire). The fighters lift off at 95 to 111 m/s. In flight nothing changed: the new terms are exactly zero off the wheels.
+  - The Su-25 sat on its tail at 19°: its loaded CG stood 5 cm ahead of its main wheels. Its main wheels now stand the published wheelbase behind the nose wheel and its estimated CG is further forward ([hangar.md](hangar.md), the Su-25). Its thrust line, 0.33 m under the CG, still rocked it back at a walking pace until the launch eased the thrust as the nose rose.
+  - The U-2S's tail wheel steered as a nose wheel does, against its rudder, and ran it 108 m off the runway. hangar now writes a steerable wheel behind the CG to turn the other way.
+  - The E-7A's nose rose by itself in the roll, and its tail, 7.3° from the ground as it pivots on its main wheels, scraped. The roll now holds the nose down, and the profile gives the tail-down attitude the rotation stays 2° short of.
+  - The RQ-4B's long wing yawed its nose 50° off its path against the aileron in the crosswind climb, and it wandered 2 km downwind. The climb now flies the sideslip out with the rudder and the course over the ground.
+  - A ramp from 0° asked the Su-25, parked 5° nose-high, to push its nose down first; the rotation now starts where the nose is.
+- **The builtin attitude loops' rudder** (`rudder.beta_gain`, +1 per radian of sideslip) looks opposite to the sign measured here. A positive rudder command yaws the nose left and a negative sideslip is the nose right of the air's path, so the launch's climb flies `rudder = -2 beta`. Not changed here; it is FA-3's to examine.
+- **The aircraft rebuilt:** the 16 fly-by-wire designs (their pitch channel), the Su-25 (its gear and CG: every stage), the U-2S (its tail wheel), and every wing's profile (`envelope/ground_pitch_max_deg`). hangar's tests: 118, four new (the ground mode; the tail wheel's steering, the tail-down attitude, a tricycle's balance). The mass stage now checks a tricycle's balance. None fails it. Five warn for their empty share, under 5 % (the Su-25's 1.2 %, the KC-135R's 3.5, the A-10C's 3.7, the H-6K's 4.6, the KC-46A's 4.8), and six for a tip-back under 15° (the Su-25's 7.3°, the C-130J's 9.5, the EC-130H's 11.4, the C172's 13.3, the A-10C's 13.5, the H-6K's 14.5).
+- **The fleet** (1,752 states as flights are judged, 2,240 as cases end, against the merge's): every state identical to the bit but the Su-25's (50 judged, 64 ended). Its loop is now refused for its entry speed, one of the answers the case allows. The launch case adds its own. Its flights changed with its balance: its stall is 72.4 m/s against 67.9 (its elevator stops it at 14.8° of angle of attack, not 17.0°).
+- **Unchanged, to the last bit:** the route probe (120 lines) and the curve probe (64), and the digests with protection and without, the same as the merge's. The allocation gate passes.
+- **A/B throughput** against 1e7efff (HEAD, built from an exported tree), the default builds, each run from its own directory and from three copies, in a quiet window held throughout:
+  - The micro cases are within −2.3 % to +1.6 % from one copy, and −2.3 % to +0.4 % from three.
+  - The NEWs and updates: a level switch +1.6 % and +1.2 % (+0.3 % from three copies), a behaviour −1.4 % and −1.0 % (−0.8 %), the same level's update and a checked update within −1.5 % to +1.5 %.
+  - World throughput is 98.9 to 100.2 % of HEAD's, and 99.1 to 100.2 % from three copies. Protection costs at most 0.5 %.
+- ctest: all 380 tests pass.
 
 ## Appendix A: the inventory
 

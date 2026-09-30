@@ -94,7 +94,7 @@ def table_fields(tables):
     return out
 
 
-def sections(aircraft, fbw, reference, identified, flown, tables=None):
+def sections(aircraft, fbw, reference, identified, flown, tables=None, tail_down=None):
     """{section: {field: value}} for the JSBSim file.
 
     aircraft   the design (geometry.aircraft.Aircraft)
@@ -103,6 +103,7 @@ def sections(aircraft, fbw, reference, identified, flown, tables=None):
     identified autopilot.toml's [identified]: the responses measured there, or {}
     flown      the flight tests' results (fly_results), or {}
     tables     the performance tables (performance_tables), or {}
+    tail_down  the pitch attitude its tail touches the ground at (jsbsim.tail_down_deg), deg, or None
     """
     spec = aircraft.spec
     control = spec.get("flight_control", {})
@@ -152,8 +153,13 @@ def sections(aircraft, fbw, reference, identified, flown, tables=None):
         # the law's angle of attack - at the lowest altitude, as the aircraft spawns (ADR-29 FA-3d: the least it is
         # flown at, which energy management keeps a margin over)
         clean["cas_min_ms"] = spawn_stall(tables)
-    if clean:
-        out["envelope"] = dict({"clean/" + k: v for k, v in clean.items()}, **law)
+    envelope = dict({"clean/" + k: v for k, v in clean.items()}, **law)
+    # on the wheels: the pitch attitude the tail touches at, pivoting on the aftmost
+    # wheels (a launch rotates short of it)
+    if tail_down is not None and 0.0 < tail_down < 90.0:
+        envelope["ground_pitch_max_deg"] = round(tail_down, 2)
+    if envelope:
+        out["envelope"] = envelope
 
     # propulsion
     engines = aircraft.engines

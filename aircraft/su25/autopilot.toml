@@ -1,4 +1,4 @@
-# Written by hangar autopilot (2026-09-26 00:44) for su25.toml: the aircraft's responses to its
+# Written by hangar autopilot (2026-09-30 11:17) for su25.toml: the aircraft's responses to its
 # controls, identified at a reference condition (docs/hangar.md, The autopilot). The
 # build writes them into the JSBSim aircraft's plant section; the platform designs its
 # control loops from them. Delete this file to fly the platform's shared defaults.
@@ -10,11 +10,11 @@ altitude_m = 3000
 [identified]   # the responses at the reference: per unit of aileron (roll rate, rad/s), elevator (load factor,
                # g), rudder (sideslip, rad) and throttle (acceleration, m/s2), each with its lag (s); level
                # flight's throttle, a surface-controlled aircraft's trim law, the zero-lift angle of attack
-roll = { gain = 3.49367, lag_s = 0.172886 }
-pitch = { gain = 9.09177, lag_s = 0.51395 }
-yaw = { gain = 1.30113 }
-speed = { gain = 4.59743, lag_s = 0.125206 }
-throttle_trim = 0.364233
-elevator_trim = -0.122746
-elevator_trim_lift = -0.130562
-alpha_zero_lift_rad = -0.0228793
+roll = { gain = 3.49206, lag_s = 0.172886 }
+pitch = { gain = 7.43295, lag_s = 0.448615 }
+yaw = { gain = 1.26944 }
+speed = { gain = 4.60746, lag_s = 0.125206 }
+throttle_trim = 0.365129
+elevator_trim = -0.148324
+elevator_trim_lift = -0.161426
+alpha_zero_lift_rad = -0.0229189

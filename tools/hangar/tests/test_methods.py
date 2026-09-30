@@ -631,6 +631,25 @@ class FlyByWire(unittest.TestCase):
         self.assertIn("fcs/fbw/moment-comp", summed)
         self.assertIsNotNone(root.find(".//fcs_function[@name='fcs/fbw/alpha-push']"))
 
+    def test_on_the_wheels_the_stick_moves_the_elevator(self):
+        # on the runway the integrators are reset (above 60 kt the wheels' load
+        # factor wound the pitch integrator to its nose-down stop: the F-35A lifted
+        # off at 188 m/s), and the stick moves the elevator over its travel directly -
+        # faded in and out over half a second with the weight on the wheels
+        root, _ = self.pitch_channel("f35a")
+        for name in ("fcs/fbw/reset", "fcs/fbw/pitch-hold"):
+            test = root.find(".//switch[@name='%s']/test" % name)
+            self.assertEqual((test.get("logic"), test.get("value")), ("OR", "-1"))
+            self.assertEqual([line.split()[0] for line in test.text.strip().splitlines()], ["velocities/vc-kts", "gear/wow"])
+        fade = root.find(".//lag_filter[@name='fcs/fbw/ground']")
+        self.assertEqual((fade.find("input").text, float(fade.find("c1").text)), ("gear/wow", 2.0))
+        direct = root.find(".//fcs_function[@name='fcs/fbw/ground-direct']")
+        rows = [[float(x) for x in line.split()] for line in direct.find(".//tableData").text.strip().splitlines()]
+        lo, hi = (math.radians(x) for x in Aircraft.load(repo("aircraft/f35a/f35a.toml")).channel_limits("elevator"))
+        np.testing.assert_allclose(rows, [[-1.0, lo], [0.0, 0.0], [1.0, hi]], atol=1e-5)
+        raw = root.find(".//fcs_function[@name='fcs/fbw/elevator-raw']/function/sum")
+        self.assertIn("fcs/fbw/ground-direct", [q.text for q in raw.findall("property")])
+
     def test_limiter_limits_the_command(self):
         # at an angle-of-attack limit the feedforward acts on the command
         # limited to the load factor the aircraft pulls plus what the angle of
@@ -1440,6 +1459,61 @@ class BicycleGear(unittest.TestCase):
         h, pitch = model3d.parked_height(Aircraft(self.u2(tail_z=-1.6)), [top])
         self.assertEqual(pitch, 0.0)
         self.assertAlmostEqual(h, 4.5)
+
+
+class GroundGeometry(unittest.TestCase):
+    def test_a_tail_wheel_steers_as_the_rudder_does(self):
+        # the rudder command steers every wheel the same way (fcs/steer-cmd-norm):
+        # a tail wheel behind the CG turns the other way to a nose wheel, so its
+        # max_steer is negative - the U-2S's steered it off the runway against its rudder
+        from hangar import jsbsim
+        from hangar.mass import MassModel
+
+        def steer(name):
+            a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
+            root = ET.fromstring("<fdm>%s</fdm>" % jsbsim.ground_reactions_xml(a, MassModel(a)))
+            return {c.get("name"): float(c.find("max_steer").text) for c in root.iter("contact") if c.get("type") == "BOGEY"}
+        self.assertEqual(steer("u2s"), {"Main Gear": 0.0, "Tail Gear": -15.0})
+        self.assertGreater(steer("c172")["Nose Gear"], 0.0)
+
+    def test_the_tail_down_attitude(self):
+        # pivoting on its aftmost wheels, the attitude its structure behind them
+        # touches at: level wheels and a tail 1 m up and 10 m behind them, 5.7 deg
+        from hangar import jsbsim
+        a = Aircraft(BicycleGear.u2(tail_z=-1.6))
+        a.gear = a.gear[:1]  # its main wheel alone
+        a.gear[0].position = np.array([0.0, 0.0, -1.1])  # (its static deflection 0.1: the pivot at -1.0)
+        pts = [("tail", np.array([10.0, 0.0, 0.0])), ("skid", np.array([4.0, 0.0, -1.0])), ("nose", np.array([-5.0, 0.0, -0.5]))]
+        orig = jsbsim.structure_points
+        jsbsim.structure_points = lambda aircraft, **kw: pts
+        try:
+            self.assertAlmostEqual(jsbsim.tail_down_deg(a), math.degrees(math.atan2(1.0, 10.0)), places=9)
+        finally:
+            jsbsim.structure_points = orig
+        # the library's: the E-7A's is its least
+        e7a = jsbsim.tail_down_deg(Aircraft.load(repo("aircraft/e7a/e7a.toml")))
+        self.assertTrue(6.0 < e7a < 8.5, e7a)
+
+    def test_a_tricycles_balance(self):
+        # the nose wheel's share and the tip-back angle at the parked attitude:
+        # the lever rule along the ground, with a nose-high stance moving the CG aft
+        from hangar import jsbsim
+        spec = {"aircraft": {"name": "t"},
+                "surface": [{"name": "wing", "sections": [{"le": [0.0, 0.0, 0.0], "chord": 2.0},
+                                                          {"le": [0.0, 10.0, 0.0], "chord": 1.0}]}],
+                "gear": [{"name": "Nose Gear", "position": [0.0, 0.0, -2.1], "steerable": True, "static_deflection": 0.1},
+                         {"name": "Main Gear", "position": [4.0, 1.0, -2.1], "mirror": True, "static_deflection": 0.1}]}
+        parked, share, tip = jsbsim.gear_balance(Aircraft(spec), [3.6, 0.0, 0.0])
+        self.assertAlmostEqual(parked, 0.0, places=9)
+        self.assertAlmostEqual(share, 10.0, places=9)
+        self.assertAlmostEqual(tip, math.degrees(math.atan2(0.4, 2.0)), places=9)
+        spec["gear"][0]["position"] = [0.0, 0.0, -2.1 - 4.0 * math.tan(math.radians(5.0))]  # the nose wheel lower: 5 deg nose up
+        parked, share, _ = jsbsim.gear_balance(Aircraft(spec), [3.6, 0.0, 0.0])
+        self.assertAlmostEqual(parked, 5.0, places=9)
+        self.assertLess(share, 10.0 - 4.0)  # the CG, 2 m up, 0.17 m further aft over the ground
+        # a tail wheel: none
+        spec["gear"][0]["position"] = [8.0, 0.0, -2.1]
+        self.assertIsNone(jsbsim.gear_balance(Aircraft(spec), [3.6, 0.0, 0.0]))
 
 
 class Contacts(unittest.TestCase):

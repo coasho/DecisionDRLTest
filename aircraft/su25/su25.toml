@@ -196,8 +196,9 @@ position = [10.360, 0.810, -0.780]
 diameter = 0.620              # estimate (the engine is 0.805 m across)
 length = 0.300
 
-# The gear where the three-view has its wheels: the main axles 7.25 m and the
-# nose axle 3.76 m behind the nose's tip (published wheelbase 3.57 m), the
+# The gear where the three-view has its wheels: the nose axle 3.76 m behind the
+# nose's tip, the main axles the published wheelbase, 3.57 m, behind it (the
+# three-view's 7.25 m, 3.49 m, left the CG over them), the
 # published 2.51 m track; the nose wheel stands lower, so the aircraft sits
 # 5 deg nose-up. The nose wheel is set right of the centre line, clear of the
 # gun (Russian sources; 0.10 m: estimate). Tyres 840x360 and 660x200. The
@@ -218,7 +219,7 @@ attach = [3.950, 0.100, -1.100]
 [[gear]]
 name = "Main Gear"
 mirror = true
-position = [7.250, 1.255, -2.420]
+position = [7.330, 1.255, -2.420]
 wheel_diameter = 0.840
 wheel_width = 0.360
 retractable = true
@@ -238,7 +239,10 @@ n_max = 6.5
 
 [mass]
 empty = 9800                  # Wikipedia (late production)
-empty_cg = [7.200, 0.0, -0.450]  # estimate: placed from the neutral point (see the checks)
+empty_cg = [7.120, 0.0, -0.450]  # estimate: placed from the neutral point and the gear (see the checks):
+                                 # 7 % of the loaded weight on the nose wheel, 1 % empty (at 7.20 m, with
+                                 # the three-view's main wheels, it sat on its tail); further forward the
+                                 # elevator stalls it short of its wing's lift (7.05 m: 13 deg, 76 m/s)
 [[mass.item]]
 name = "titanium cockpit"      # welded 10-24 mm titanium armour (estimate of its mass)
 mass = 595

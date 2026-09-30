@@ -420,6 +420,19 @@ class Design:
             else:
                 m_e, cg_e = mm.loaded(fuel_fraction=0.0, payload=False)
                 checks.append(check("static margin (empty)", (np_x - cg_e[0]) / a.c * 100, 0.0, 45.0, "% MAC", level="warn"))
+        # a tricycle gear's balance (Raymer 11.2): the nose wheel carries some of the weight
+        # (8-15 % typical; too little and it neither steers nor stays down), the empty aircraft
+        # on its wheels, not its tail (the Su-25's CG an estimate 5 cm ahead of its main
+        # wheels: it sat on its tail at 19 deg); the CG well ahead of the main wheels'
+        # vertical so a rotation does not tip it back
+        from .jsbsim import gear_balance
+        bal, bal_e = gear_balance(a, cg), gear_balance(a, mm.loaded(fuel_fraction=0.0, payload=False)[1])
+        if bal is not None:
+            checks.append(check("nose wheel share (loaded)", bal[1], 5.0, 25.0, "%", note="Raymer: 8-15 %%; parked %.1f deg nose up" % bal[0]))
+            checks.append(check("nose wheel share (empty)", bal_e[1], 5.0, 30.0, "%", level="fail" if bal_e[1] < 0.0 else "warn",
+                                note="below 0: it sits on its tail"))
+            checks.append(check("tip-back angle (loaded)", bal[2], 15.0, None, "deg", level="warn",
+                                note="Raymer: at least 15 deg off the vertical from the main wheels to the CG"))
         if mm.spec.get("gyration") is not None:
             checks += [info("radii of gyration R_x, R_y, R_z", "%.3f, %.3f, %.3f" % (g["Rx"], g["Ry"], g["Rz"]),
                             note="given in [mass] gyration")]
@@ -594,7 +607,8 @@ class Design:
         from .profile import fly_results, performance_tables, sections
         autopilot = load_settings(os.path.join(self.dir, "autopilot.toml"))
         reference, identified = load_identification(os.path.join(self.dir, "autopilot.toml"))
-        profile = sections(a, fbw, reference, identified, fly_results(self.dir), performance_tables(self.dir))
+        profile = sections(a, fbw, reference, identified, fly_results(self.dir), performance_tables(self.dir),
+                           tail_down=jsbsim.tail_down_deg(a))
         text = keep_date(xml_path, jsbsim.aircraft_xml(a, tabs, mm, files, fbw=fbw, yaw_damper=yd, autopilot=autopilot, profile=profile))
         with open(xml_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)

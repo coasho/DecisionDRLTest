@@ -101,6 +101,8 @@ struct EnvelopeSection {
     EnvelopeLimits clean, flaps;   ///< flaps: beyond `flapsThreshold`
     double flapsThreshold = 0.05;  ///< normalised flap position
     double gearCasMaxMs = kUnknown;
+    /// On its wheels: the pitch attitude its tail touches at, pivoting on its aftmost wheels (a launch rotates short of it).
+    double groundPitchMaxRad = kUnknown;
     // Limits the aircraft's own flight control law already enforces (a
     // fly-by-wire law's g and alpha limiters): protection clamps setpoints to
     // them but adds no feedback limiter of its own, so the two cannot fight.
