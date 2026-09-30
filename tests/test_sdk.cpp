@@ -364,8 +364,9 @@ TEST_CASE("a vehicle in a reused slot, or reset, starts and flies as the same sp
         f.later = values(v.state());
         return f;
     };
-    // the Crazyflie of the finding, the stock c172x, a fighter's fly-by-wire (its actuators, its lift), a helicopter's rotor
-    for (const char* type : {"cf2", "c172x", "f16c", "uh1h"}) {
+    // the Crazyflie of the finding, the stock c172x, a fighter's fly-by-wire (its actuators, its lift), a helicopter's rotor,
+    // the stock PC-7's constant-speed propeller (its pitch: JSBSim's FGPropeller, patched)
+    for (const char* type : {"cf2", "c172x", "f16c", "uh1h", "pc7"}) {
         const bool rotor = std::string(type) == "cf2" || std::string(type) == "uh1h";
         VehicleSpec air;
         air.type = std::string("jsbsim:") + type;
@@ -373,7 +374,7 @@ TEST_CASE("a vehicle in a reused slot, or reset, starts and flies as the same sp
         air.initial.longitudeDeg = 0.0;
         air.initial.altitudeMslM = rotor ? 150.0 : 1500.0;
         air.initial.headingDeg = 90.0;
-        air.initial.airspeedTrueMs = rotor ? 0.0 : (std::string(type) == "c172x" ? 50.0 : 140.0);
+        air.initial.airspeedTrueMs = rotor ? 0.0 : std::string(type) == "c172x" ? 50.0 : std::string(type) == "pc7" ? 80.0 : 140.0;
         VehicleSpec ground = air;
         ground.initial.latitudeDeg = 42.5;
         ground.initial.longitudeDeg = 0.25;

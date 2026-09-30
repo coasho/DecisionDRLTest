@@ -130,6 +130,7 @@ if(TARGET flightsim-viewer)
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGRotor.h
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGRotor.cpp
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGElectric.cpp
+                  ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/propulsion/FGPropeller.cpp
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/flight_control/FGActuator.cpp
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/FGAerodynamics.cpp
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/FGMassBalance.cpp

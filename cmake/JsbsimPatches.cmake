@@ -304,6 +304,33 @@ endforeach()
 target_include_directories(Propulsion PRIVATE ${FSIM_JSBSIM_SOURCE_DIR}/src/models/propulsion) # their other headers
 
 # ---------------------------------------------------------------------------
+# models/propulsion/FGPropeller.cpp: a constant-speed propeller after a reset.
+#
+# A propeller's reset cleared its induced velocity, but not a constant-speed
+# propeller's pitch, which its governor moves as it flies and a load sets to
+# the least. A reset started from the pitch the last run left: the stock PC-7
+# reset after a flight at 5,000 m started with other accelerations than the
+# same start on a new model, and ended 12.8 m from it (docs/FlightSim_System_
+# Architecture_and_Design.md, 7.2). Now the reset, which a load calls too,
+# sets the pitch to the least. The PC-7's turboprop (FGTurboProp) has no reset
+# of its own either, but its start rewrites what of it reaches the forces
+# (N1 from idle, its torque limiter's memory each pass): reset after 20 s with
+# that limiter at work, a PC-7 flew as a new one, to the bit, with this alone.
+# ---------------------------------------------------------------------------
+_fsim_jsbsim_read(models/propulsion/FGPropeller.cpp _text)
+set(_old [=[  FGThruster::ResetToIC();
+  Vinduced = 0.0;
+]=])
+set(_new [=[  FGThruster::ResetToIC();
+  Vinduced = 0.0;
+  // flightsim patch (cmake/JsbsimPatches.cmake): a constant-speed propeller's
+  // pitch as a load leaves it
+  Pitch = MinPitch;
+]=])
+_fsim_jsbsim_edit(_text _old _new FGPropeller.cpp "reset")
+_fsim_jsbsim_write(models/propulsion/FGPropeller.cpp _text Propulsion)
+
+# ---------------------------------------------------------------------------
 # models/propulsion/FGElectric.cpp: a power source that burns fuel.
 #
 # hangar's helicopters fly their turboshafts as one governed power source: an
