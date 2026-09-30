@@ -68,7 +68,8 @@ def fuel_of(spec):
 # at each point). A part that reaches within GEAR_CLEARANCE_M of the ground the aircraft stands on is
 # the gear (a skid, its cross tubes), which gives way with it: the hull is made of the rest - so the
 # belly the skids stand above is part of it - and the gear's contacts stand for the gear.
-ROTOR_MIN_RPM = 50.0    # FGRotor's rpm limits: the least, and the most as a share of the design's
+STRIKE_STOP_S = 2.0       # a rotor whose blades strike the ground stops in this (to its least rpm)
+ROTOR_MIN_RPM = 1.0     # FGRotor's rpm limits: the least (its own floor: a rotor stopped), and the most as a share of the design's
 ROTOR_MAX_SHARE = 1.3
 GEAR_CLEARANCE_M = 0.15
 
@@ -547,6 +548,49 @@ def _fcs(spec, rd, p_max):
     return "".join(out)
 
 
+def _strike_channel(spec, p):
+    """The blades striking the ground: the main rotor's disc, its hub the shaft's top, reaching the ground as the
+    aircraft rolls or pitches over - the hub's height above the ground (the c.g.'s, less the hub's offset turned
+    by the attitude) below the most the disc's edge drops under it at its tilt (its radius times the sine of the
+    shaft's angle from the vertical). Once struck, it stays struck ('blades-struck', 1): the engine gives nothing
+    and the rotor is braked to its least speed (the engine channel)."""
+    mr, cg = spec["rotor"]["main"], spec["mass"]["cg_in"]
+    # the hub from the c.g. in body axes (x forward, y right, z down; ft), and the shaft (up, tilted forward)
+    xb, yb, zb = -(mr["hub_in"][0] - cg[0]) / 12.0, (mr["hub_in"][1] - cg[1]) / 12.0, -(mr["hub_in"][2] - cg[2]) / 12.0
+    mt = math.radians(mr.get("mast_tilt_deg", 0.0))
+    return """    <channel name="blade strike">
+      <!-- the shaft's up component (its angle from the vertical's cosine) and the hub's height above the ground;
+           a strike counts once the flight has begun (a start's ground trim, at time 0, searches through the
+           ground) -->
+      <fcs_function name="%(p)sshaft-up">
+        <function> <sum>
+          <product> <sin> <property> attitude/theta-rad </property> </sin> <value> %(smt)s </value> </product>
+          <product> <cos> <property> attitude/phi-rad </property> </cos> <cos> <property> attitude/theta-rad </property> </cos> <value> %(cmt)s </value> </product>
+        </sum> </function>
+      </fcs_function>
+      <fcs_function name="%(p)shub-agl-ft">
+        <function> <difference> <property> position/h-agl-ft </property> <sum>
+          <product> <value> %(mxb)s </value> <sin> <property> attitude/theta-rad </property> </sin> </product>
+          <product> <value> %(yb)s </value> <sin> <property> attitude/phi-rad </property> </sin> <cos> <property> attitude/theta-rad </property> </cos> </product>
+          <product> <value> %(zb)s </value> <cos> <property> attitude/phi-rad </property> </cos> <cos> <property> attitude/theta-rad </property> </cos> </product>
+        </sum> </difference> </function>
+      </fcs_function>
+      <fcs_function name="%(p)sblades-strike">
+        <function> <and> <gt> <property> simulation/sim-time-sec </property> <value> 0 </value> </gt>
+          <lt> <property> %(p)shub-agl-ft </property> <product> <value> %(r)s </value>
+          <sqrt> <max> <value> 0 </value> <difference> <value> 1 </value> <product> <property> %(p)sshaft-up </property> <property> %(p)sshaft-up </property> </product> </difference> </max> </sqrt>
+        </product> </lt> </and> </function>
+      </fcs_function>
+      <!-- held once struck: the integral of the strike, clipped at 1 (a reset clears it) -->
+      <pid name="%(p)sblades-struck-sum"> <input> %(p)sblades-strike </input>
+        <kp> 0 </kp> <ki> 1000 </ki> <kd> 0 </kd> <clipto> <min> 0 </min> <max> 1 </max> </clipto> </pid>
+      <fcs_function name="%(p)sblades-struck">
+        <function> <gt> <property> %(p)sblades-struck-sum </property> <value> 0 </value> </gt> </function>
+      </fcs_function>
+    </channel>
+""" % dict(p=p, smt=_f(math.sin(mt)), cmt=_f(math.cos(mt)), mxb=_f(-xb), yb=_f(yb), zb=_f(zb), r=_f(mr["radius_ft"]))
+
+
 def _engine_channel(spec, rd, p_max, p):
     gov = spec["engine"].get("governor", {})
     fuel = fuel_of(spec)
@@ -565,7 +609,7 @@ def _engine_channel(spec, rd, p_max, p):
         lag_xml = """      <lag_filter name="%(p)sgovernor-power"> <input> %(p)sgovernor </input> <c1> %(c)s </c1> </lag_filter>
 """ % dict(p=p, c=_f(1.0 / lag))
         governor_out = "%sgovernor-power" % p
-    return """    <channel name="engine">
+    return _strike_channel(spec, p) + """    <channel name="engine">
       <!-- The rotor speed is a state here: the engine's power less the rotors' drives it through the
            drive's inertia; a governor holds the design's rpm, the load fed forward. 'armed' is 0 on
            the first frame after a load or a reset, 1 after: JSBSim resets the components' states but
@@ -594,7 +638,8 @@ def _engine_channel(spec, rd, p_max, p):
         <function> <sum> <property> %(p)sload-power </property> <property> %(gout)s </property> </sum> </function>
       </fcs_function>
       <fcs_function name="%(p)spower">
-        <function> <max> <value> 0 </value> <min> <value> 1 </value> <property> %(p)spower-demand </property> </min> </max> </function>
+        <function> <product> <difference> <value> 1 </value> <property> %(p)sblades-struck </property> </difference>
+          <max> <value> 0 </value> <min> <value> 1 </value> <property> %(p)spower-demand </property> </min> </max> </product> </function>
         <output> fcs/throttle-pos-norm[0] </output>
       </fcs_function>
       <fcs_function name="%(p)spower-saturated">
@@ -608,6 +653,7 @@ def _engine_channel(spec, rd, p_max, p):
             <max> <value> 1 </value> <property> %(p)somega </property> </max> </quotient>
           <sum> <property> propulsion/engine[0]/torque-lbsft </property>
             <product> <property> propulsion/engine[1]/torque-lbsft </property> <value> %(trk)s </value> </product> </sum>
+          <product> <property> %(p)sblades-struck </property> <value> %(brake)s </value> </product>
         </difference> </product> </function>
       </fcs_function>
       <!-- the rotor speed stops where the rotors' do (FGRotor's minimum and 130 %%): past it, and pushed further,
@@ -636,7 +682,7 @@ def _engine_channel(spec, rd, p_max, p):
     </channel>
 """ % dict(p=p, om=_f(rd["omega"]), kp=_f(gov.get("kp", 0.3)), ki=_f(gov.get("ki", 0.3)), kd=_f(gov.get("kd", 0.0)),
            lag=lag_xml, gout=governor_out, trk=_f(trk), pmax=_f(p_max), jinv=_f(1.0 / rd["j"]), rpmk=_f(60 / (2 * math.pi)),
-           fed=fed, fed_term=fed_term, hi=_f((ROTOR_MAX_SHARE - 1.0) * rd["omega"]), lo=_f(ROTOR_MIN_RPM * 2 * math.pi / 60 - rd["omega"]))
+           fed=fed, fed_term=fed_term, brake=_f(rd["j"] * rd["omega"] / STRIKE_STOP_S), hi=_f((ROTOR_MAX_SHARE - 1.0) * rd["omega"]), lo=_f(ROTOR_MIN_RPM * 2 * math.pi / 60 - rd["omega"]))
 
 
 # --- the airframe -------------------------------------------------------------------------------

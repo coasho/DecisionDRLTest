@@ -756,3 +756,35 @@ TEST_CASE("rotorcraft: the stock AH-1S's engine starts in a reused slot as on a 
     INFO("engine rpm at the start: " << fresh << " on a new model, " << reused << " in a reused slot");
     CHECK(std::memcmp(&fresh, &reused, sizeof(double)) == 0);
 }
+
+TEST_CASE("rotorcraft: a helicopter whose blades strike the ground cuts its engine and its rotor stops", "[rotorcraft]") {
+    // Dropped on its side, uncommanded, the main rotor's disc reaches the ground: the blades have struck, the engine
+    // gives nothing and the rotor is braked to a stop (hangar's heli.py: before, it turned on at its governed speed).
+    // Parked, or hovering low, the disc never reaches the ground (docs/rotorcraft.md, 7).
+    for (const char* type : {"uh1h", "uh60"}) {
+        session::World w(options("rotorcraft-blade-strike"));
+        const std::string fcs = std::string("fcs/") + type + "/";
+        session::VehicleSpec side = spec(std::string(type) + " side", type, 0.0);
+        side.initial.altitudeMslM = 5.0;
+        side.initial.rollDeg = 90.0;
+        session::VehicleSpec parked = spec(std::string(type) + " parked", type, 0.01);
+        parked.initial.onGround = true;
+        session::VehicleSpec hover = spec(std::string(type) + " hover", type, 0.02);
+        hover.initial.altitudeMslM = 3.0;
+        const auto s = w.createVehicle(side), p = w.createVehicle(parked), h = w.createVehicle(hover);
+        REQUIRE((s != 0 && p != 0 && h != 0));
+        REQUIRE(w.submit(h, hoverHere()).accepted());
+        const double stepS = w.dt() * w.frameSkip();
+        w.step(static_cast<unsigned>(std::lround(10.0 / stepS)));
+        auto value = [&w](std::uint32_t id, const std::string& path) { return w.model(id)->property(path).get(); };
+        INFO(type << ": on its side struck " << value(s, fcs + "blades-struck") << ", its rotor " << value(s, "propulsion/engine[0]/rotor-rpm")
+                  << " rpm, its engine " << value(s, "fcs/throttle-pos-norm[0]") << "; parked " << value(p, fcs + "blades-struck")
+                  << ", hovering " << value(h, fcs + "blades-struck"));
+        CHECK(value(s, fcs + "blades-struck") == 1.0);
+        CHECK(value(s, "propulsion/engine[0]/rotor-rpm") < 2.0);
+        CHECK(value(s, "fcs/throttle-pos-norm[0]") == 0.0);
+        CHECK(value(p, fcs + "blades-struck") == 0.0);
+        CHECK(value(h, fcs + "blades-struck") == 0.0);
+        CHECK(value(p, "propulsion/engine[0]/rotor-rpm") > 200.0);
+    }
+}

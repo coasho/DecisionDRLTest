@@ -592,15 +592,23 @@ All within the tolerances except the collective at 140 kt, 0.02 in outside
       and dampers in proportion to the load each carries, as hangar sizes a
       fixed wing's wheels: it sits level, and a level strike stays level
       (section 10).
-    - After a crash the rotors keep turning at their governed speed: no blade
-      strikes the ground, and nothing shuts the engines down. The UH-1H,
-      lying on its side, rocks under its tail rotor's 340 lb of thrust (at
-      up to 1.2 m/s). Let go, the UH-60A turns on its wheels at 0.74 rad/s,
-      as it did before.
+    - After a crash the rotors kept turning at their governed speed. Now the
+      blades strike the ground when the main rotor's disc reaches it, and
+      then the engine gives nothing and the rotor stops (section 10).
+    - The UH-1H lying on its side can still rock (at up to 1.5 m/s after
+      20 s, in 4 of 16 drops). It was thought to rock under its tail rotor's
+      thrust; it rocks as much with its rotors stopped. Its structure
+      contacts are sized one by one, and several of them resting at once
+      together damp a mode more than the step integrates: with their damping
+      halved, a UH-1H dropped on its back came to rest, but in other drops it
+      rocked more and bounced twice as high. Not changed; the contacts want
+      sizing as a set, as the quadrotors' are.
+    - Let go on its wheels, the UH-60A turns on them at 0.74 rad/s under its
+      tail rotor (its rotor turning, as it should upright).
     - The flight control system's rotor speed had no stop of its own: past
       JSBSim's 130 % it wound on (to 1,800 rad/s in the old tumble), and the
       governor waited for it to come down. It now stops where the rotors'
-      does, at FGRotor's 50 rpm and 130 % (section 10).
+      does, at FGRotor's least and 130 % (section 10).
 - **Power and thrust at altitude**: the helicopters' engines give the
   design's rating (a transmission limit) at any height, and a quadrotor's
   thrust is its rotors' speed squared, whatever the air's density. None of
@@ -1085,7 +1093,8 @@ Considered: EASA TCDS R.011 (Bo 105); FlightGear FGAddon `UH-1` and `UH-60`; JSB
 - **The helicopters' rotor speed stopped with the rotors'** (2026-09-30;
   hangar's `heli.py`, section 7). The flight control system integrates the
   rotor speed from the engine's torque less the rotors', and it drives the
-  governor and the rotor-drive moment. FGRotor stops at 50 rpm and 130 %;
+  governor and the rotor-drive moment. FGRotor stopped at 50 rpm (hangar's
+  least, since 1 rpm: the next block) and 130 %;
   the integration did not. Collective down and the cyclic forward from
   2,000 m, the air drives the rotor to FGRotor's stop, and the flight
   control system's rotor speed wound on: the UH-1H's to 895 % in 40 s, the
@@ -1095,6 +1104,23 @@ Considered: EASA TCDS R.011 (Bo 105); FlightGear FGAddon `UH-1` and `UH-60`; JSB
   had reached the stop: the fleet test's 3,992 states are identical, bit
   for bit. `test_rotorcraft` gains the dive, which fails on the old files
   (2,152 and 1,238 rpm).
+- **The blades strike the ground** (2026-09-30; hangar's `heli.py`, its FCS
+  channel "blade strike"). When the main rotor's disc reaches the ground -
+  the hub's height above it (the c.g.'s, less the hub's offset turned by
+  the attitude) below the most the disc's edge drops under the hub at the
+  shaft's tilt - the blades have struck, and stay so until a reset. The
+  engine then gives nothing, and the rotor is braked to a stop in 2 s: its
+  least speed is now FGRotor's own 1 rpm (hangar gave 50, at which the
+  UH-1H's rotor still made 2.4 % of its hover thrust). The strike counts
+  once the flight has begun: a start's ground trim, at time 0, searches
+  through the ground (it first latched every parked helicopter).
+  - Dropped on its side or back from 5 and 6 m, both strike, their engines
+    cut and their rotors at 1 rpm; parked or hovering at 3 m, neither does.
+    `test_rotorcraft` checks it (it fails on the old files).
+  - No fleet flight strikes: its 3,992 states are identical, bit for bit;
+    digests unchanged; `ctest`: 377 of 377.
+  - The UH-1H on its side still rocks in some drops: its structure
+    contacts', not its tail rotor's (section 7).
 - **The quadrotors' feet on the ground as drawn** (2026-09-30; hangar's
   `multi.py`). Sized for the step, the feet's contacts sink 2.9 mm (the
   Crazyflie) and 4.1 mm (the IRIS+) under the weight, and the contacts were

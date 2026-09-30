@@ -1353,7 +1353,12 @@ A helicopter on the ground (docs/rotorcraft.md, 7):
   system's rotor speed already takes the difference between the engine's
   torque and the rotors'. An external moment about the main rotor's shaft
   gives back the rest, so the airframe takes the engine's torque, and never
-  an air-driven rotor's.
+  an air-driven rotor's. The rotor speed stops where FGRotor's does (1 rpm
+  and 130 %).
+- **The blades striking the ground.** When the main rotor's disc reaches the
+  ground (the hub's height against the disc's edge at the shaft's tilt),
+  the flight control system cuts the engine and brakes the rotor to a stop,
+  until a reset.
 
 A rotorcraft's shape is drawn as a fixed wing's is:
 `[[body]]`, `[[surface]]` (a control on one moves: the UH-60A's stabilator

@@ -885,6 +885,36 @@
         <output> propulsion/engine[1]/antitorque-ctrl-rad </output>
       </fcs_function>
     </channel>
+    <channel name="blade strike">
+      <!-- the shaft's up component (its angle from the vertical's cosine) and the hub's height above the ground;
+           a strike counts once the flight has begun (a start's ground trim, at time 0, searches through the
+           ground) -->
+      <fcs_function name="fcs/uh60/shaft-up">
+        <function> <sum>
+          <product> <sin> <property> attitude/theta-rad </property> </sin> <value> 0.052335956 </value> </product>
+          <product> <cos> <property> attitude/phi-rad </property> </cos> <cos> <property> attitude/theta-rad </property> </cos> <value> 0.99862953 </value> </product>
+        </sum> </function>
+      </fcs_function>
+      <fcs_function name="fcs/uh60/hub-agl-ft">
+        <function> <difference> <property> position/h-agl-ft </property> <sum>
+          <product> <value> -1.6 </value> <sin> <property> attitude/theta-rad </property> </sin> </product>
+          <product> <value> 0 </value> <sin> <property> attitude/phi-rad </property> </sin> <cos> <property> attitude/theta-rad </property> </cos> </product>
+          <product> <value> -5.65 </value> <cos> <property> attitude/phi-rad </property> </cos> <cos> <property> attitude/theta-rad </property> </cos> </product>
+        </sum> </difference> </function>
+      </fcs_function>
+      <fcs_function name="fcs/uh60/blades-strike">
+        <function> <and> <gt> <property> simulation/sim-time-sec </property> <value> 0 </value> </gt>
+          <lt> <property> fcs/uh60/hub-agl-ft </property> <product> <value> 26.83 </value>
+          <sqrt> <max> <value> 0 </value> <difference> <value> 1 </value> <product> <property> fcs/uh60/shaft-up </property> <property> fcs/uh60/shaft-up </property> </product> </difference> </max> </sqrt>
+        </product> </lt> </and> </function>
+      </fcs_function>
+      <!-- held once struck: the integral of the strike, clipped at 1 (a reset clears it) -->
+      <pid name="fcs/uh60/blades-struck-sum"> <input> fcs/uh60/blades-strike </input>
+        <kp> 0 </kp> <ki> 1000 </ki> <kd> 0 </kd> <clipto> <min> 0 </min> <max> 1 </max> </clipto> </pid>
+      <fcs_function name="fcs/uh60/blades-struck">
+        <function> <gt> <property> fcs/uh60/blades-struck-sum </property> <value> 0 </value> </gt> </function>
+      </fcs_function>
+    </channel>
     <channel name="engine">
       <!-- The rotor speed is a state here: the engine's power less the rotors' drives it through the
            drive's inertia; a governor holds the design's rpm, the load fed forward. 'armed' is 0 on
@@ -915,7 +945,8 @@
         <function> <sum> <property> fcs/uh60/load-power </property> <property> fcs/uh60/governor-power </property> </sum> </function>
       </fcs_function>
       <fcs_function name="fcs/uh60/power">
-        <function> <max> <value> 0 </value> <min> <value> 1 </value> <property> fcs/uh60/power-demand </property> </min> </max> </function>
+        <function> <product> <difference> <value> 1 </value> <property> fcs/uh60/blades-struck </property> </difference>
+          <max> <value> 0 </value> <min> <value> 1 </value> <property> fcs/uh60/power-demand </property> </min> </max> </product> </function>
         <output> fcs/throttle-pos-norm[0] </output>
       </fcs_function>
       <fcs_function name="fcs/uh60/power-saturated">
@@ -932,6 +963,7 @@
             <max> <value> 1 </value> <property> fcs/uh60/omega </property> </max> </quotient>
           <sum> <property> propulsion/engine[0]/torque-lbsft </property>
             <product> <property> propulsion/engine[1]/torque-lbsft </property> <value> 4.6154443 </value> </product> </sum>
+          <product> <property> fcs/uh60/blades-struck </property> <value> 91953.4 </value> </product>
         </difference> </product> </function>
       </fcs_function>
       <!-- the rotor speed stops where the rotors' do (FGRotor's minimum and 130 %): past it, and pushed further,
@@ -940,13 +972,13 @@
         <function> <or>
           <and> <ge> <property> fcs/uh60/delta-omega </property> <value> 8.0999683 </value> </ge>
             <gt> <property> fcs/uh60/net-torque </property> <value> 0 </value> </gt> </and>
-          <and> <le> <property> fcs/uh60/delta-omega </property> <value> -21.763907 </value> </le>
+          <and> <le> <property> fcs/uh60/delta-omega </property> <value> -26.895175 </value> </le>
             <lt> <property> fcs/uh60/net-torque </property> <value> 0 </value> </lt> </and>
         </or> </function>
       </fcs_function>
       <pid name="fcs/uh60/delta-omega"> <input> fcs/uh60/net-torque </input>
         <kp> 0 </kp> <ki type="trap"> 0.00014681292 </ki> <kd> 0 </kd>
-        <trigger> fcs/uh60/omega-stop </trigger> <clipto> <min> -21.763907 </min> <max> 8.0999683 </max> </clipto> </pid>
+        <trigger> fcs/uh60/omega-stop </trigger> <clipto> <min> -26.895175 </min> <max> 8.0999683 </max> </clipto> </pid>
       <!-- the engine's torque on the main rotor's shaft: what the airframe feels of the rotors (the
            external reaction rotor-drive) -->
       <fcs_function name="fcs/uh60/drive-torque">

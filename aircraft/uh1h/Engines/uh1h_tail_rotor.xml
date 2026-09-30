@@ -4,7 +4,7 @@
   <numblades> 2 </numblades>
   <gearratio> 0.19468322 </gearratio>
   <nominalrpm> 1662.7011 </nominalrpm>
-  <minrpm> 50 </minrpm>
+  <minrpm> 1 </minrpm>
   <maxrpm> 2161.5114 </maxrpm>
   <chord unit="FT"> 0.7 </chord>
   <liftcurveslope Xunit="1/RAD"> 5.73 </liftcurveslope>
