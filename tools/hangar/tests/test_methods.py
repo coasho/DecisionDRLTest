@@ -2457,6 +2457,71 @@ class Profile(unittest.TestCase):
             self.assertEqual(load_settings(path), {"pid_attitude": {"roll.kp": 0.5}})
 
 
+class DragDevices(unittest.TestCase):
+    """Drag devices (hangar/drag.py; docs/flight-autonomy.md, 4.55): airbrake plates, spoilers, surfaces deflected as one -
+    their functions in the aircraft file, and what the profile tells the platform."""
+
+    def test_an_airbrake_plate(self):
+        # the F-15C's dorsal speed brake: a plate's drag, PLATE_CN sin^2 d on its area, and its pitching moment from above the
+        # reference point; opened on an approach
+        from hangar.drag import PLATE_CN, drag_devices
+        from hangar.jsbsim import drag_device_functions
+        a = Aircraft.load(repo("aircraft/f15c/f15c.toml"))
+        (d,) = drag_devices(a)
+        self.assertEqual((d.kind, d.area, d.max_deg, d.in_flight), ("airbrake", 2.93, 45.0, True))
+        fs = drag_device_functions(d, None, a)
+        self.assertEqual([axis for axis, _ in fs], ["DRAG", "PITCH"])
+        self.assertIn("<value>%.6g</value>" % (PLATE_CN * 2.93 / a.S), fs[0][1])
+        self.assertIn("<value>%.6g</value>" % math.radians(45.0), fs[0][1])
+
+    def test_spoilers(self):
+        # the E-7A's: their panels' drag, the lift of the wing behind them lost - SPOILER_LIFT_LOSS of it, over alpha - and
+        # that lift's moment; not opened on an approach (they dump lift)
+        from hangar.drag import SPOILER_LIFT_LOSS, drag_devices
+        from hangar.jsbsim import drag_device_functions
+        a = Aircraft.load(repo("aircraft/e7a/e7a.toml"))
+        (d,) = drag_devices(a)
+        self.assertFalse(d.in_flight)
+        self.assertTrue(0.0 < d.area < d.wing_area < a.S)
+        tables = {"alpha": [0.0, 10.0], "beta": [-5.0, 0.0, 5.0], "base": {"CL": [[0.3, 0.2, 0.3], [1.1, 1.0, 1.1]]}}
+        fs = drag_device_functions(d, tables, a)
+        self.assertEqual([axis for axis, _ in fs], ["DRAG", "PITCH", "LIFT", "PITCH"])
+        lift = fs[2][1]
+        for cl in (0.2, 1.0):  # (at no sideslip)
+            self.assertIn("%10.5f" % (-SPOILER_LIFT_LOSS * d.wing_area / a.S * cl), lift)
+
+    def test_surfaces_deflected_as_one(self):
+        # the F-22A's: its rudders' and ailerons' drag from their own tables at their deflections, its forces cancelling
+        from hangar.drag import drag_devices
+        from hangar.jsbsim import drag_device_functions, speedbrake_xml
+        a = Aircraft.load(repo("aircraft/f22a/f22a.toml"))
+        (d,) = drag_devices(a)
+        self.assertEqual(d.channels, {"rudder": 25.0, "aileron": 20.0})
+        controls = {ch: {"deflection": [-20.0, 0.0, 20.0], "CD": [[0.01, 0.0, 0.01], [0.02, 0.0, 0.02]]} for ch in d.channels}
+        fs = drag_device_functions(d, {"alpha": [0.0, 10.0], "controls": controls}, a)
+        self.assertEqual([axis for axis, _ in fs], ["DRAG", "DRAG"])
+        self.assertIn("fcs/speedbrake-rudder-deg", fs[0][1])
+        self.assertIn("<output>fcs/speedbrake-aileron-deg</output>", speedbrake_xml([d]))
+
+    def test_the_profile_tells_the_platform(self):
+        # effectors/speedbrake where it has any; speedbrake_approach where all of them may be opened on an approach (one
+        # speedbrake opens them all: the U-2S's airbrakes would open its spoilers too)
+        from hangar.profile import sections
+        for name, speedbrake, approach in (("f15c", 1, 1), ("e7a", 1, None), ("u2s", 1, None), ("b52h", 1, 1), ("c172", 0, None)):
+            a = Aircraft.load(repo("aircraft/%s/%s.toml" % (name, name)))
+            e = sections(a, None, {}, {}, {})["effectors"]
+            self.assertEqual((e["speedbrake"], e.get("speedbrake_approach")), (speedbrake, approach), name)
+
+    def test_a_device_refused(self):
+        from hangar.drag import DragDevice
+        a = Aircraft.load(repo("aircraft/e7a/e7a.toml"))
+        for spec in ({"kind": "parachute"}, {"kind": "spoiler", "surface": "canard", "span": [0.1, 0.5]},
+                     {"kind": "spoiler", "surface": "wing", "span": [0.6, 0.5]}, {"kind": "airbrake", "area": 0.0, "position": [1, 0, 0]},
+                     {"kind": "surfaces", "channels": {"spoiler": 20}}, {"kind": "airbrake", "area": 1.0, "position": [1, 0, 0], "max_deg": 95}):
+            with self.assertRaises(ValueError, msg=str(spec)):
+                DragDevice(spec, a)
+
+
 if __name__ == "__main__":
     unittest.main()
 

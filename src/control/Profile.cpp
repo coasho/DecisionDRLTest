@@ -61,6 +61,7 @@ const Field kFields[] = {
     {"effectors", "retractable_gear", Kind::Flag, 0, 1, 1, AT(effectors.retractableGear)},
     {"effectors", "wheel_brakes", Kind::Flag, 0, 1, 1, AT(effectors.wheelBrakes)},
     {"effectors", "speedbrake", Kind::Flag, 0, 1, 1, AT(effectors.speedbrake)},
+    {"effectors", "speedbrake_approach", Kind::Flag, 0, 1, 1, AT(effectors.speedbrakeApproach)},
     {"effectors", "pitch_trim", Kind::Flag, 0, 1, 1, AT(effectors.pitchTrim)},
     {"effectors", "flaps_transit_s", Kind::Real, 0, 600, 1, AT(effectors.flapsTransitS)},
     {"effectors", "gear_transit_s", Kind::Real, 0, 600, 1, AT(effectors.gearTransitS)},

@@ -992,7 +992,9 @@ std::uint32_t keepsTheRules(session::World& w, std::uint32_t v, const std::map<A
                                               // a task's (4.11)
                                               Reason::UnknownTask, Reason::TaskActive,
                                               // further than its fuel or battery takes it (4.18), into the ground (4.19)
-                                              Reason::InsufficientEndurance, Reason::TerrainConflict}));
+                                              Reason::InsufficientEndurance, Reason::TerrainConflict,
+                                              // a route intercept of a plan it does not keep (4.47: a wild draw's)
+                                              Reason::UnknownPlan}));
         // a policy's precedence override is refused; one that waits was accepted to (4.9)
         if (done.options.source == Source::Policy && done.options.precedenceOverride != kNoPrecedenceOverride) CHECK_FALSE(done.result.accepted());
         if (done.result.reason == Reason::NotAllowed) CHECK(done.options.precedenceOverride != kNoPrecedenceOverride);
@@ -1872,7 +1874,8 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
     // cannot fly and a curve with a segment it cannot fly (docs/vehicle-interface.md, 5.1), an append where
     // the curve does not end, and every answer and end the grants give (6). A walk meets some of them once
     // or twice, and any change to what a command draws moves it: more seeded walks, the same every run,
-    // until each has appeared (at most twelve more).
+    // until each has appeared (at most forty more: twelve sufficed until the R8 aircraft gained a speedbrake, FA-10c; a task
+    // completing - its activity, two or three times over, before a later command takes its axes - is the rarest).
     static const char* const kRare[] = {"failed:target_lost", "new:invalid_waypoint", "new:invalid_curve", "update:invalid_curve",
                                         "new:not_granted", "request:none", "request:not_allowed", "canceled:released", "canceled:revoked",
                                         "canceled:not_granted", "canceled:collision_avoidance", "mode", "release", "revoke", "allow",
@@ -1886,7 +1889,7 @@ TEST_CASE("conformance: one aircraft per adapter keeps the lifecycle's rules thr
                                         // named controllers (4.12)
                                         "request:authority_held", "release:not_granted", "controller:held"};
     auto missing = [&all] { return std::any_of(std::begin(kRare), std::end(kRare), [&all](const char* what) { return all[what] == 0; }); };
-    for (std::uint64_t seed = 20260927; missing() && seed < 20260927 + 12; ++seed)
+    for (std::uint64_t seed = 20260927; missing() && seed < 20260927 + 40; ++seed)
         for (const Aircraft& a : kAdapters) {
             std::map<std::string, int> more;
             randomSequence(a, seed, 600, more, 0); // (only for the rare answers: no least number of activities)

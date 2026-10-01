@@ -474,6 +474,18 @@ max_mach = 0.86
 max_mach_altitude_ft = 30000
 operational_ceiling_ft = 50000  # USAF fact sheet: a clearance, not reached at 100 t
 
+# Its drag device (docs/flight-autonomy.md, 4.55): the C-135's spoilers,
+# inboard and outboard of its inboard aileron: a tenth of the wing's chord,
+# opened 60 deg (estimates).
+[[drag_device]]
+name = "spoilers"
+kind = "spoiler"
+surface = "wing"
+span = [0.12, 0.66]
+chord_fraction = 0.1
+hinge = 0.62
+max_deg = 60
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # KC-135: 25 kt (The War Zone, "Watch This RC-135 Spy Plane Make A

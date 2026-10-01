@@ -388,6 +388,15 @@ max_mach = 1.8                # at 40,000 ft, full afterburner (calibrates the e
 max_mach_altitude_ft = 40000
 operational_ceiling_ft = 50000 # published "50,000+": the clearance, not where the climb runs out
 
+# Its drag device (docs/flight-autonomy.md, 4.55): no dorsal speed brake:
+# its flight control system toes its rudders and deflects its flaps and
+# ailerons against each other (US Navy F/A-18E/F data): the drag of its
+# rudders at 30 deg and its flaps at 20 (estimates), their forces cancelling.
+[[drag_device]]
+name = "surfaces"
+kind = "surfaces"
+channels = { rudder = 30, flap = 20 }
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # MIL-F-8785C 3.3.7 (Table XI): the 90 deg crosswind a Class II to IV

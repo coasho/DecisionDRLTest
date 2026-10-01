@@ -288,6 +288,18 @@ max_mach = 0.796              # 975 km/h, 526 kt
 max_mach_altitude_ft = 0
 max_speed_ktas = 526
 
+# Its drag device (docs/flight-autonomy.md, 4.55): its split airbrakes in
+# the wing-tip pods, opening up and down (Wikipedia, Sukhoi Su-25); opened
+# 60 deg (an estimate); sized as the F-15's is to its wing (31.5 ft2 on 608
+# ft2: 5.2 %), 1.55 m2 - no area is published - and placed after the type's
+# description; an estimate, their drag above and below cancelling in pitch.
+[[drag_device]]
+name = "airbrakes"
+kind = "airbrake"
+area = 1.551
+position = [8.81, 0, -0.3]
+max_deg = 60
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # MIL-F-8785C 3.3.7 (Table XI): the 90 deg crosswind a Class II to IV

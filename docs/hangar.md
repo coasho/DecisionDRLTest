@@ -244,6 +244,17 @@ from = [0.99, 0.50, 0.15]        # extra drag area): its ends, mirrored unless m
 to = [1.21, 2.50, 1.54]
 chord = 0.16                     # m; thickness 0.35 of it unless given
 
+[[drag_device]]                  # an airbrake, spoilers or surfaces deflected as one (rule R8):
+name = "speed brake"             # one speedbrake opens them all
+kind = "airbrake"                # plates: area (m2), their centroid opened, opened max_deg
+area = 2.93
+position = [9.3, 0.0, 1.0]
+max_deg = 45                     # spoilers: surface, span, chord_fraction, hinge; surfaces:
+                                 # channels = { rudder = 25 }; in_flight: opened on an approach
+
+[operations]
+crosswind_kt = 25                # the 90 deg crosswind it lands and takes off in, its source beside it
+
 [dimensions]                     # published: the model is checked against them
 length = 15.06
 span = 9.45
@@ -284,6 +295,15 @@ stage end to end through the platform (`ctest -R hangar`).
   trailing vortices wash the front of the root down, and forward towards a
   swept wing's tips (Küchemann's centre and tip effects). So in the linear
   range the strips give the lattice's pitching moment as well as its lift.
+- **Drag devices.** An airbrake's plates: a flat plate's normal force, 1.2
+  of its area's dynamic pressure at 90 deg (Hoerner, Fluid-Dynamic Drag),
+  times sin d, so a drag of 1.2 sin^2 d on its area, with that drag's
+  pitching moment from the reference point's height. A spoiler's panels the
+  same, and 0.7 of the lift of the wing behind them lost at 45 deg and beyond
+  (an estimate after Hoerner, Fluid-Dynamic Lift), from the design's own lift
+  table, with that lift's moment. Surfaces deflected as one: their drag from
+  the design's own control tables. Written as functions of
+  `fcs/speedbrake-pos-norm` (`drag.py`; [flight-autonomy.md](flight-autonomy.md), 4.55).
 - **Induced drag.** By default each strip's lift is tilted by its own
   induced angle. That overstates the induced drag of the lattice's loading:
   by about 15 % on a plain wing of aspect ratio 6-10, and by a factor of 1.5
@@ -1084,8 +1104,8 @@ and the platform treats it as unknown:
 | Section | From |
 | --- | --- |
 | `identity` | the design's category (fighter, transport, ...) and its law: fly-by-wire or surfaces |
-| `effectors` | the law again, for what the stick means: a load-factor and roll-rate demand, or the surfaces. Also the effectors the design has: flaps if it has a flap channel (which writes their position in degrees and, as JSBSim's `fcs/flap-pos-norm`, as a fraction of their travel: how the platform knows a flap command is done), retractable gear, wheel brakes, and pitch trim where the elevator channel sums one |
-| `envelope` | the pitch attitude its tail touches the ground at on its wheels (`ground_pitch_max_deg`: Methods, Gear); the `[flight_control]` limits the design states (g, angle of attack, roll rate), and, for an aircraft without a limiting law, the stall its flight tests flew (its speed and angle). An aircraft whose law will not let a stall be flown has its least speed from the performance tables: their stall at the lowest altitude, at the weight it spawns at (the platform's energy management keeps a margin over it: [flight-autonomy.md](flight-autonomy.md), 4.16). A fly-by-wire design's also says which of them its law enforces (`law_load_factor`, `law_alpha`, `law_roll_rate`): the platform's envelope protection clamps setpoints to those and adds no limiter of its own ([control.md](sdk/control.md#envelope-protection)) |
+| `effectors` | the law again, for what the stick means: a load-factor and roll-rate demand, or the surfaces. Also the effectors the design has: flaps if it has a flap channel (which writes their position in degrees and, as JSBSim's `fcs/flap-pos-norm`, as a fraction of their travel: how the platform knows a flap command is done), retractable gear, wheel brakes, and pitch trim where the elevator channel sums one; a speedbrake where it has drag devices, and whether all of them may be opened on an approach (`speedbrake_approach`: airbrakes and surfaces, not spoilers that dump lift) |
+| `envelope` | the pitch attitude its tail touches the ground at on its wheels (`ground_pitch_max_deg`: Methods, Gear); the crosswind it lands and takes off in at most (`crosswind_max_ms`, from the design's `[operations] crosswind_kt`: [flight-autonomy.md](flight-autonomy.md), 4.54); the `[flight_control]` limits the design states (g, angle of attack, roll rate), and, for an aircraft without a limiting law, the stall its flight tests flew (its speed and angle). An aircraft whose law will not let a stall be flown has its least speed from the performance tables: their stall at the lowest altitude, at the weight it spawns at (the platform's energy management keeps a margin over it: [flight-autonomy.md](flight-autonomy.md), 4.16). A fly-by-wire design's also says which of them its law enforces (`law_load_factor`, `law_alpha`, `law_roll_rate`): the platform's envelope protection clamps setpoints to those and adds no limiter of its own ([control.md](sdk/control.md#envelope-protection)) |
 | `propulsion` | the engines, their type, afterburning, and the thrust lag the autopilot identified |
 | `plant` | the autopilot's `[reference]` and `[identified]` tables in `autopilot.toml`: the responses to aileron, elevator, rudder and throttle there, each with its lag; and the trim law and zero-lift angle the gains use |
 | `performance` | the flight tests' stall speed, maximum speed, ceiling and climb (`out/fly.json`) |

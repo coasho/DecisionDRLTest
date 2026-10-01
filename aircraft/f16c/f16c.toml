@@ -339,6 +339,19 @@ reference = "jsbsim:f16"
 # yaw control power are 1/2.865 and 1/1.910 of NASA's
 reference_control_scale = { aileron = 2.865, rudder = 1.910 }
 
+# Its drag device (docs/flight-autonomy.md, 4.55): its split speed brakes,
+# two pairs of clamshells either side of the nozzle, open 60 deg (the F-16
+# flight manual, as F-16.net quotes it: 43 deg with the gear down, not
+# modelled); sized as the F-15's is to its wing (31.5 ft2 on 608 ft2: 5.2
+# %), 1.44 m2 - no area is published - and placed after the type's
+# description; an estimate, their drag above and below cancelling in pitch.
+[[drag_device]]
+name = "speed brakes"
+kind = "airbrake"
+area = 1.444
+position = [14.01, 0, 0]
+max_deg = 60
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # F-16 flight manual (-1), Block 10/15 MLU: 25 kt on a dry runway (f-16.net).

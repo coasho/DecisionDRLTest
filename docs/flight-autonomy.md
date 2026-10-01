@@ -1453,6 +1453,22 @@ A-GRA lists among FA's own functions "Automatic Landing Wave off (e.g. Crosswind
 - **The support table:** `fsim.guidance.recovery/go_around` and `/missed_approach` are supported on every wing, not implemented on a rotorcraft (FA-10, the backlog's B-9).
 - **Surfaces.** C++: `Reason::CrosswindLimit`, `Reason::LandingAbandoned`; `RecoveryBehavior::GoAround`, `lastGoAround()`, `goArounds()`; `EnvelopeSection::crosswindMaxMs`; `CapabilityHost::beyondCrosswind`; `route::Steer::bankRad`. Python: the reasons' names, `profile_value("envelope/crosswind_max_ms")`. hangar: `[operations] crosswind_kt`.
 
+### 4.55 Drag devices (as FA-10c builds them)
+
+Rule R8 (5.1) names the aircraft that have spoilers, airbrakes or surfaces their flight control system deflects as a speedbrake: 19 declare devices, 4 surfaces. FA-10c gives hangar's models them (SUB-04), and with them `fsim.support.speedbrake` (STS-16).
+
+- **A design's drag devices** are its `[[drag_device]]`s (hangar's `drag.py`), each with its source beside it, each one of:
+  - `airbrake`: plates hinged into the flow - a dorsal brake, split brakes at the tail or in the wing-tip pods, split ailerons (decelerons). Its drag is a flat plate's normal force, 1.2 of its area's dynamic pressure at 90 deg (Hoerner, Fluid-Dynamic Drag), times sin d, its drag share sin d again: 1.2 sin^2 d on its area; its pitching moment that drag's from the reference point's height;
+  - `spoiler`: panels on a wing's upper surface over a span: their plate drag, and 0.7 of the lift of the wing behind them lost at 45 deg and beyond (an estimate after Hoerner, Fluid-Dynamic Lift), from the design's own lift tables over alpha, with that lift's pitching moment;
+  - `surfaces`: control surfaces deflected against each other - the F-22A's rudders and ailerons, the Rafale's canards and elevons - their drag from the design's own control tables at those deflections, their forces cancelling.
+- **Sized from published data where there is any** - the F-15's dorsal brake, 31.5 ft2 (2.93 m2) opened 45 deg (J. Baugher); the F-16's clamshells opened 60 deg (its flight manual) - and else as estimates the designs name: a fighter's airbrake as the F-15's is to its wing, 5.2 %, placed where the type's is described; spoilers over the spans each type's layout describes; surfaces at deflections estimated. Opened fully, the airbrakes add 0.029 to 0.052 to the drag coefficient, the spoilers 0.047 to 0.077 and dump 0.10 to 0.66 of lift, the surfaces 0.008 (the F-35A's rudders) to 0.098 (the EA-18G's).
+- **One speedbrake opens them all:** `fcs/speedbrake-cmd-norm` to `fcs/speedbrake-pos-norm` over the longest one's transit (2 s by default). The profile says the aircraft has a speedbrake (`effectors/speedbrake`), and whether all of its drag devices may be opened on an approach (`effectors/speedbrake_approach`): airbrakes and surfaces may, spoilers that dump lift may not unless they are the type's airbrakes (the B-52H's, `in_flight = true`). One speedbrake opens them all, so the U-2S's airbrakes would open its spoilers too: it has none for its approach.
+- **The support table:** `fsim.support.speedbrake` is supported on the 23 R8 aircraft and not supported on the other 8 (rule R8, their declarations). The H-6K, J-20A, RQ-4B and Su-57 have no declaration yet: their row stays not implemented, the backlog's B-11.
+- **The recovery** (4.53) takes the speedbrake axis. On its approach, where its profile allows, it opens its drag devices while its throttle is at idle and it still runs faster than its approach speed and gains speed (over 5 s, 10 s down the glide slope at least), never closing them there: the B-52H, nose low, its flaps at a takeoff's, gained 6 m/s down the slope at idle and went around; on its spoilers it lands. Opened as it pushed over onto its glide slope, the E-7A's spoilers dumped its lift, and it oscillated and went around. From its touchdown on, all of them: a transport's ground spoilers, a fighter's airbrakes. A go-around and a missed approach close them.
+- **A behaviour's speedbrake** (`Behavior::speedbrake`, 0..1 or kHold): a behaviour whose activity owns the speedbrake axis, flying above the actuators, sets it as it sets the gear, flaps and brakes it owns (4.53).
+- **Not drawn:** the 3D models do not show the drag devices open.
+- **Surfaces.** C++: `Behavior::speedbrake`; `EffectorsSection::speedbrakeApproach`. hangar: `[[drag_device]]` (`kind`, `area`, `position`, `surface`, `span`, `chord_fraction`, `hinge`, `channels`, `max_deg`, `transit_s`, `in_flight`), `drag.py`, the profile's `effectors/speedbrake` and `speedbrake_approach`. No C ABI change.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -1466,7 +1482,7 @@ A-GRA lists among FA's own functions "Automatic Landing Wave off (e.g. Crosswind
 | **R5** Arrester hook | SetArresterHook and the hook in CleanUp and DirtyUp apply where R3 does. | `carrier = catapult_arrested` | As R3 | 33: a10c, b52h, c130j, c172, c17a, cf2, e3g, e7a, ec130h, f15c, f16c, f22a, f35a, gripen, h6k, iris, j10a, j20a, kc135r, kc46a, mig29a, mirage2000, rafale, rc135w, rq4b, skua, su25, su27s, su57, typhoon, u2s, uh1h, uh60 |
 | **R6** Retractable gear | Gear retraction and extension (a vehicle action, CleanUp, DirtyUp, StayClean) applies to aircraft with retractable gear. | `retractable_gear = true` | fsim/effectors/retractable_gear in the aircraft file, and the design's gear | 6: c172, cf2, iris, skua, uh1h, uh60 |
 | **R7** Trailing-edge flaps | Flaps in configuration commands apply to aircraft with a flap function. | `flaps = true` | fsim/effectors/flaps in the aircraft file, and the type's trailing-edge surfaces | 5: cf2, iris, mirage2000, uh1h, uh60; pending evidence: gripen, rafale, typhoon |
-| **R8** Drag devices | Spoiler and airbrake actions, and deceleration by them, apply to aircraft that have spoilers, airbrakes or surfaces the flight control system deploys as a speedbrake. | `drag_devices != none` | The type's data | 8: c130j, c172, cf2, ec130h, iris, skua, uh1h, uh60; pending evidence: h6k |
+| **R8** Drag devices | Spoiler and airbrake actions, and deceleration by them, apply to aircraft that have spoilers, airbrakes or surfaces the flight control system deploys as a speedbrake. | `drag_devices != none` | The type's data | 8: c130j, c172, cf2, ec130h, iris, skua, uh1h, uh60; pending evidence: h6k, j20a, rq4b, su57 (the backlog's B-11) |
 | **R9** Releasable stores | The release envelope applies to aircraft that carry and release weapon stores: on stations, from a bay, as palletized munitions from the hold, or from dispensers. | `releasable_stores != none` | The type's data | 12: c172, cf2, e3g, e7a, ec130h, iris, kc135r, kc46a, rc135w, rq4b, skua, u2s |
 | **R10** Aerobatic type (platform behaviour) | fsim.guidance.aerobatics is offered to fixed-wing types cleared for aerobatic manoeuvres. Not an A-GRA item. | `aerobatic = true (and n_max >= 6 g)` | The envelope's n_max in the aircraft file, and the type's category | 18: b52h, c130j, c172, c17a, cf2, e3g, e7a, ec130h, h6k, iris, kc135r, kc46a, rc135w, rq4b, skua, u2s, uh1h, uh60 |
 | **R11** Wheel brakes (platform effector; FA-1) | fsim.support.wheel_brakes applies to aircraft that roll on wheels. | `ground_contact = wheels` | fsim/effectors/wheel_brakes in the aircraft file | 3: cf2, iris, uh1h |
@@ -1594,6 +1610,7 @@ Findings the stages have measured and not yet fixed. Each has a step that owns i
 | B-7 | **The placards are inert:** no hangar design records its gear or flap speeds (FA-1c). | FA-10c: CleanUp and DirtyUp configure by them | every design records them from a published source, or names why it cannot; DirtyUp refused above them |
 | B-9 | **A rotorcraft's go-around and wind limit:** its recovery descends to its spot whatever the wind; no rotorcraft design records a wind limit (FA-10b). | FA-10e | each design records its published wind limit (else its flying qualities' requirement); its recovery holds its hover and fails beyond it, its go-around climbs back to its approach point; `/go_around` and `/missed_approach` supported on it |
 | B-10 | **The U-2S's rollout within its limit:** across 7 m/s (13.6 kt, its limit 15) it runs 34.5 m off the line, and 48 m across 4 m/s with its brakes eased. It lands on its single main wheel 4 deg nose down; its steerable tail wheel never touches, and braked, ahead of its centre of gravity, it pitches nose down - a ground loop held only by its rudder. Released brakes, a raised attitude below most of its rotation speed and a longer steering look-ahead each made it worse or flew it off; a two-point landing at +4 deg floated it past its touchdown zone every time (FA-10b, tried and not kept). The real one is stalled onto the runway, main and tail wheel together. | FA-10e: a tail-wheel landing - its approach flown near its stall, a two-point touchdown, its tail held down to steer by | within its limit it lands and stops within the acceptance; its rejected takeoffs and taxi re-measured within it |
+| B-11 | **Four types' drag devices undeclared:** the H-6K, J-20A, RQ-4B and Su-57 declare none either way (5.2): no public source for how each makes drag was found - the RQ-4B's spoilers are attested only by simulator models' descriptions (FA-10c1). Their speedbrake stays not implemented. | FA-10e | each declared from a public source and, where it has devices, modelled; or named here as unknowable from public data |
 | B-8 | **Carried findings** with no stage of their own: a loop given up at its top levels out and loses more speed than pulling through (the Gripen 48.6 to 38.0 m/s, FA-3d); FA-1d's waypoint check costs 5.3 % per call; a reused slot of the stock AH-1S flies 8 um to 0.1 mm from a fresh one over 6.7 s, its cause not found, and JSBSim's FGTurboProp has no reset of its own (the stock PC-7's drift was its propeller's, fixed; the reset's determinism); hangar's post-stall strips have two branches past 55 deg of angle of attack with sideslip (its table-smoothness warning on every fighter). | FA-10e, after FA-10d | each fixed and measured, or closed in section 14 with its evidence and the reason it stays |
 
 ### FA-1: Discovery that tells the truth; platform behaviours fixed (M)
@@ -1790,9 +1807,12 @@ RECOVERY at airfields for every family, go-around, missed approach, CleanUp and 
 **Status:** in five steps:
 - FA-10a, the recovery to a runway: a wing's approach, glide slope, flare, touchdown and rollout; a rotorcraft's approach to a hover and vertical landing (RCV-01, RCV-04; CAP-02; 4.53), done 2026-09-30 and measured in section 14;
 - FA-10b, the go-around and the automatic wave-off, the missed approach, and each type's published crosswind limit (RCV-02, RCV-03; 4.54), done 2026-10-01 and measured in section 14; with them the backlog's B-2, B-3 and B-6 closed, B-4's limits, and B-9 and B-10 found;
-- FA-10c, drag devices where rule R8 applies, the speedbrake, CleanUp and DirtyUp (SUB-04, STS-16, RCV-08): the B-52H's airbrakes among them; with them B-1 and B-7;
+- FA-10c, in three steps:
+  - FA-10c1, drag devices where rule R8 applies and the speedbrake (SUB-04, STS-16; 4.55), done 2026-10-01 and measured in section 14: the B-52H lands on its airbrakes;
+  - FA-10c2, the C-130J's flight idle (the backlog's B-1);
+  - FA-10c3, the placards (B-7), then CleanUp and DirtyUp (RCV-08);
 - FA-10d, a route that ends in a landing - its approach's and touchdown points, FA's own plan's landing path - and a taxi after it; with it B-5;
-- FA-10e, the carried findings (B-8), a rotorcraft's go-around and wind limit (B-9) and a tail-wheel landing (B-10).
+- FA-10e, the carried findings (B-8), a rotorcraft's go-around and wind limit (B-9), a tail-wheel landing (B-10) and the undeclared drag devices (B-11).
 
 **Accepted when:**
 
@@ -3690,6 +3710,20 @@ The quadrotors' contacts, the helicopters' and the reset had waited for the owne
   - World throughput is 98.0 to 100.6 % of FA-10a's, and 98.9 to 100.0 % from three copies (the F-16C's the lowest).
 - ctest: all 396 tests pass.
 
+**FA-10c1, drag devices and the speedbrake (SUB-04, STS-16).**
+- What it built is 4.55: the 23 R8 aircraft's drag devices in hangar's designs and models, the speedbrake on each, and the recovery's use of them.
+- **Opened fully** at 1.5 times its least speed, 2,000 m up, each type's drag devices add to its drag coefficient (from their own functions): the airbrakes 0.029 (the F-15C) to 0.052 (the A-10C's decelerons); the spoilers 0.047 (the B-52H, the U-2S) to 0.077 (the KC-46A), dumping 0.10 (the U-2S) to 0.66 (the C-17A) of lift; the surfaces 0.008 (the F-35A's rudders) to 0.098 (the EA-18G). The B-52H's, on its swept outer wing, pitch it 0.16 nose up. The F-15C's, from 200 m/s at idle, slow it 1.12 m/s2 more: q S 0.031, 32 kN on its 20 t, falling as it slows.
+- **The support table:** the speedbrake supported on the 23, not supported on the 8 without (the C172, the C-130J, ...); the H-6K, J-20A, RQ-4B and Su-57, undeclared, not implemented (the backlog's B-11).
+- **Landing** (FA-10a's probe, every wing 1,000 m up 15.8 km out; calm and across 10 m/s):
+  - the B-52H lands on its airbrakes, 242 m along at 2.56 m/s calm, 264 m at 2.45 m/s across, and stops by 1,078 m, where it went around from both approaches and failed (4.54). Down its glide slope at idle it gained 6 m/s; its spoilers out to 0.82, it flies its approach on power again;
+  - every R8 aircraft's rollout is shorter, its lift dumped onto its wheels: by 10 to 260 m (the F-35A 10 m, its rudders' little drag; the KC-46A 257 m), the E-7A's hop at touchdown 0.97 m to 0.28;
+  - every touchdown but the B-52H's is where it was, to the metre (the U-2S stops by 693 m, not 744).
+- **Tried, and not kept:** the drag devices opened while 8 % fast with the flaps all out (the B-52H's never were: nose low, its flaps stay at a takeoff's on its level segment), or to half at most (0.016 of drag: it still went around); opened at idle whenever faster than its approach speed (the E-7A's spoilers opened as it pushed over onto its glide slope, it oscillated and went around, both approaches; the KC-135R touched down up to 160 m later and 11 m/s faster), then only 4 % fast (too late for the B-52H, calm), then while gaining speed over 2 s (the E-7A again). Opened on an approach only where all of a type's devices may be (the profile's `speedbrake_approach`), while gaining speed over 5 s and 10 s down the slope, they are kept: the U-2S's airbrakes would have opened its spoilers - the first such flag, any device's, sent it around.
+- **The conformance walks** (test_conformance): the R8 aircraft's new support capability moved what every walk draws. A wild intercept of a plan the vehicle keeps none of, always drawable, was now drawn, answered `unknown_plan`, which the rules had left out: added. A task completing, the rarest answer, took more seeded walks: twelve sufficed, now forty at most (the walks stop at the first that meets every answer).
+- **Unchanged, to the last bit:** the digests with protection and without; the route probe (120 lines) and the curve probe (64); every one of the fleet's 1,751 states as flights are judged. As cases end, 2,369 of 2,415: the support effectors' case's (the 23 flying their speedbrake: 9.1 m at most) and the recovery case's (their rollouts; the B-52H landing where it flew its circuits, 31.8 km). The allocation gate passes.
+- **A/B throughput** against FA-10b (b09e5f1), each build from its own directory and from three copies, in a quiet window: the micro cases within -1.2 % to +1.4 % from three copies (single directories -2.8 % to +3.0 %); a behaviour's NEW -1.5 %, level switches +2.0 %, updates within 0.8 %; world throughput 100.1 to 101.1 % from three copies - the F-16C's and the B-52H's drag devices, closed, cost nothing measurable.
+- ctest: all 398 tests pass.
+
 ## Appendix A: the inventory
 
 Status at caf03c9:
@@ -4000,7 +4034,7 @@ Status at caf03c9:
 | STS-13 | FA health (subsystem status) | VI 1.2.6.1, 1.2.6.10 | missing | - | FA state nominal, degraded, failed |  | FA-16 | - |
 | STS-14 | Execution status of executing and queued activities, routes and plans | VI 1.2.6.6 | partial | Activities and progress | Queued activities (CMD-06) and plans (RPL-10) |  | FA-2 | - |
 | STS-15 | Vehicle settings: gear extend and retract | XSD VehicleActionEnum | works | fsim.support.gear (29 aircraft with retractable gear) | - | R6 |  | `fsim.support.gear` |
-| STS-16 | Vehicle settings: spoilers enable and disable | XSD VehicleActionEnum | missing | The speedbrake axis exists; no aircraft declares a drag device (all 35: speedbrake 0) | Spoilers and airbrakes in hangar where the type has them; the command | R8 | FA-10 | `fsim.support.speedbrake` |
+| STS-16 | Vehicle settings: spoilers enable and disable | XSD VehicleActionEnum | works | The speedbrake on the 23 R8 aircraft (FA-10c1, 4.55) | - | R8 | FA-10 | `fsim.support.speedbrake` |
 | STS-17 | Vehicle settings: lights, antennas, transponder, radio channels, RF transmit, IFF, comm allocation | XSD VehicleActionEnum, MA_VehicleCommandDataType | missing | - | Settings kept and reported (no flight effect) |  | FA-14 | `fsim.setting/lights`, `fsim.setting/antennas`, `fsim.setting/transponder`, `fsim.setting/radio`, `fsim.setting/rf_transmit`, `fsim.setting/iff`, `fsim.setting/comm_allocation` |
 | STS-18 | Vehicle settings: survivability mode | XSD VehicleSurvivabilityModeEnum | missing | - | A mode that constrains configuration use (flaps, gear, bay doors) |  | FA-14 | `fsim.setting/survivability` |
 | STS-19 | Vehicle settings: lost-comm timeout, LOS backup, loss-of-link processing | XSD MA_VehicleCommandDataType | missing | - | With CTG-09 |  | FA-16 | `fsim.setting/lost_comm` |
@@ -4089,7 +4123,7 @@ Status at caf03c9:
 | SUB-01 | Applicability declarations with per-aircraft evidence | Owner direction D6; for CAP-31 | missing | - | Each aircraft's design declares its physical characteristics (section 5.2) with a source; built into its profile; a test checks them against the model |  | FA-1 | - |
 | SUB-02 | Performance tables | For CAP-04 to CAP-15 | partial | The profile's envelope and performance sections (single values) | hangar computes speeds, climb, excess power, turn and rate limits against altitude and weight from its own aerodynamics and engines |  | FA-3 | - |
 | SUB-03 | Fuel flow and endurance | For CAP-14, VAL-03, STS-07 | partial | Fuel mass in the state | Fuel flow tables, tank capacity, percent, endurance and playtime |  | FA-3 | - |
-| SUB-04 | Drag devices: spoilers, airbrakes, speedbrake surfaces | For STS-16, CAP-13, RCV-08 | missing | The speedbrake axis exists; no aircraft declares one | hangar models them where the type has them (rule R8) | R8 | FA-10 | `fsim.support.speedbrake` |
+| SUB-04 | Drag devices: spoilers, airbrakes, speedbrake surfaces | For STS-16, CAP-13, RCV-08 | works | hangar models the 23 R8 aircraft's (FA-10c1, 4.55); four types' undeclared (the backlog's B-11) | - | R8 | FA-10 | `fsim.support.speedbrake` |
 | SUB-05 | Tailhook and launch bar | For RCV-09, LCH-05 | missing | - | On the F/A-18C and EA-18G (rule R3) | R3 | FA-11 | - |
 | SUB-06 | Catapult and arresting gear | For LCH-05, RCV-05 | missing | - | Minimal and deterministic (D8): a launch force profile to an end speed, an arresting force profile to a stop | R3 | FA-11 | - |
 | SUB-07 | Stores | VI 1.2.7.1; for WPN-01 | missing | - | Minimal and deterministic (D8): stations, mass and drag, release (rule R9) | R9 | FA-13 | `fsim.stores` |
@@ -4188,12 +4222,12 @@ Model evidence cites the aircraft files at caf03c9. "Not probative" means the mo
 |  | R10 (platform) | PLT-07 aerobatics | No n_max in the aircraft file's envelope | Bomber: load factor limit below 6 g, not cleared for aerobatics |
 | c130j (C-130J) | R1 | LTR-15 hover loiter; ASM-01's hover option; vertical deck operations (R4) | `aircraft/c130j/c130j.xml:469` family 1 (direct) | Conventional takeoff and landing type: no rotors, lift fans or vectored lift for hovering |
 |  | R3, R5 | LCH-05 to LCH-07, RCV-05 to RCV-07, RCV-09, RCV-10 (catapult, arrested landing, arrester hook) | Not probative: no aircraft models a hook or launch bar yet | Land-based transport (the 1963 KC-130F carrier trials used neither catapult nor hook) |
-|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Not probative: no aircraft models a drag device yet (all speedbrake 0) | No spoilers or airbrakes |
+|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Its model has no drag device: `fsim/effectors/speedbrake` 0 (the 23 R8 aircraft's are modelled: 4.55) | No spoilers or airbrakes |
 |  | R10 (platform) | PLT-07 aerobatics | No n_max in the aircraft file's envelope | Transport: load factor limit below 6 g, not cleared for aerobatics |
 | c172 (Cessna 172P) | R1 | LTR-15 hover loiter; ASM-01's hover option; vertical deck operations (R4) | `aircraft/c172/c172.xml:333` family 1 (direct) | Conventional takeoff and landing type: no rotors, lift fans or vectored lift for hovering |
 |  | R3, R5 | LCH-05 to LCH-07, RCV-05 to RCV-07, RCV-09, RCV-10 (catapult, arrested landing, arrester hook) | Not probative: no aircraft models a hook or launch bar yet | Civil light aircraft |
 |  | R6 | STS-15 gear action; the gear in RCV-08 and RCV-10 | `aircraft/c172/c172.xml:341` retractable_gear 0 | Fixed tricycle gear |
-|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Not probative: no aircraft models a drag device yet (all speedbrake 0) | No spoilers or airbrakes |
+|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Its model has no drag device: `fsim/effectors/speedbrake` 0 (the 23 R8 aircraft's are modelled: 4.55) | No spoilers or airbrakes |
 |  | R9 | WPN-01 release envelope | Not probative: no aircraft models stores yet | Civil type with no stores provisions |
 |  | R10 (platform) | PLT-07 aerobatics | No n_max in the aircraft file's envelope | Light aircraft (utility category): load factor limit below 6 g, not cleared for aerobatics |
 | e3g (E-3G) | R1 | LTR-15 hover loiter; ASM-01's hover option; vertical deck operations (R4) | `aircraft/e3g/e3g.xml:456` family 1 (direct) | Conventional takeoff and landing type: no rotors, lift fans or vectored lift for hovering |
@@ -4206,7 +4240,7 @@ Model evidence cites the aircraft files at caf03c9. "Not probative" means the mo
 |  | R10 (platform) | PLT-07 aerobatics | No n_max in the aircraft file's envelope | AEW&C aircraft: load factor limit below 6 g, not cleared for aerobatics |
 | ec130h (EC-130H) | R1 | LTR-15 hover loiter; ASM-01's hover option; vertical deck operations (R4) | `aircraft/ec130h/ec130h.xml:469` family 1 (direct) | Conventional takeoff and landing type: no rotors, lift fans or vectored lift for hovering |
 |  | R3, R5 | LCH-05 to LCH-07, RCV-05 to RCV-07, RCV-09, RCV-10 (catapult, arrested landing, arrester hook) | Not probative: no aircraft models a hook or launch bar yet | Land-based C-130H derivative |
-|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Not probative: no aircraft models a drag device yet (all speedbrake 0) | No spoilers or airbrakes (C-130H airframe) |
+|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Its model has no drag device: `fsim/effectors/speedbrake` 0 (the 23 R8 aircraft's are modelled: 4.55) | No spoilers or airbrakes (C-130H airframe) |
 |  | R9 | WPN-01 release envelope | Not probative: no aircraft models stores yet | EW mission equipment fills the hold; no stations |
 |  | R10 (platform) | PLT-07 aerobatics | No n_max in the aircraft file's envelope | EW aircraft: load factor limit below 6 g, not cleared for aerobatics |
 | h6k (H-6K) | R1 | LTR-15 hover loiter; ASM-01's hover option; vertical deck operations (R4) | `aircraft/h6k/h6k.xml:347` family 1 (direct) | Conventional takeoff and landing type: no rotors, lift fans or vectored lift for hovering |
@@ -4232,7 +4266,7 @@ Model evidence cites the aircraft files at caf03c9. "Not probative" means the mo
 | skua (Skua (hypothetical)) | R1 | LTR-15 hover loiter; ASM-01's hover option; vertical deck operations (R4) | `aircraft/skua/skua.xml:270` family 1 (direct) | Conventional takeoff and landing type: no rotors, lift fans or vectored lift for hovering |
 |  | R3, R5 | LCH-05 to LCH-07, RCV-05 to RCV-07, RCV-09, RCV-10 (catapult, arrested landing, arrester hook) | Not probative: no aircraft models a hook or launch bar yet | Hypothetical land-based UAV (its design file defines no hook or launch bar) |
 |  | R6 | STS-15 gear action; the gear in RCV-08 and RCV-10 | `aircraft/skua/skua.xml:278` retractable_gear 0 | Fixed gear (its design) |
-|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Not probative: no aircraft models a drag device yet (all speedbrake 0) | Hypothetical; its design file defines flaps only |
+|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Its model has no drag device: `fsim/effectors/speedbrake` 0 (the 23 R8 aircraft's are modelled: 4.55) | Hypothetical; its design file defines flaps only |
 |  | R9 | WPN-01 release envelope | Not probative: no aircraft models stores yet | Hypothetical; its design file defines no stations |
 |  | R10 (platform) | PLT-07 aerobatics | No n_max in the aircraft file's envelope | UAV: load factor limit below 6 g, not cleared for aerobatics |
 | su25 (Su-25) | R1 | LTR-15 hover loiter; ASM-01's hover option; vertical deck operations (R4) | `aircraft/su25/su25.xml:336` family 1 (direct) | Conventional takeoff and landing type: no rotors, lift fans or vectored lift for hovering |
@@ -4281,20 +4315,20 @@ Model evidence cites the aircraft files at caf03c9. "Not probative" means the mo
 |  | R6 | STS-15 gear action; the gear in RCV-08 and RCV-10 | `aircraft/uh1h/uh1h.xml:101` retractable_gear 0; `aircraft/uh1h/uh1h.toml:108 kind = "skid"` | Skids |
 |  | R7 | The flaps in RCV-08 and RCV-10 | `aircraft/uh1h/uh1h.xml:97` flaps 0 | Rotorcraft: no flaps |
 |  | R5, R6, R7 | RCV-08 CleanUp and DirtyUp as a whole (nothing to retract or deploy) | `aircraft/uh1h/uh1h.xml:101` retractable_gear 0, `aircraft/uh1h/uh1h.xml:97` flaps 0 | No retractable gear, flaps or hook |
-|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Not probative: no aircraft models a drag device yet (all speedbrake 0) | Rotorcraft: no drag devices |
+|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Its model has no drag device: `fsim/effectors/speedbrake` 0 (the 23 R8 aircraft's are modelled: 4.55) | Rotorcraft: no drag devices |
 |  | R10 (platform) | PLT-07 aerobatics | `aircraft/uh1h/uh1h.xml:94` family 3 (rotorcraft) | Rotorcraft: the manoeuvres are a wing's |
 | uh60 (UH-60A) | R3, R5 | Catapult launch, arrested landing, arrester hook (deck operations under R4 still apply) | `aircraft/uh60/uh60.xml:83` family 3 (rotorcraft) | Rotorcraft: takes off and lands vertically; no launch bar or arrester hook |
 |  | R6 | STS-15 gear action; the gear in RCV-08 and RCV-10 | `aircraft/uh60/uh60.xml:90` retractable_gear 0; `aircraft/uh60/uh60.toml:106 kind = "wheels" (fixed)` | Fixed wheeled gear |
 |  | R7 | The flaps in RCV-08 and RCV-10 | `aircraft/uh60/uh60.xml:86` flaps 0 | Rotorcraft: no flaps |
 |  | R5, R6, R7 | RCV-08 CleanUp and DirtyUp as a whole (nothing to retract or deploy) | `aircraft/uh60/uh60.xml:90` retractable_gear 0, `aircraft/uh60/uh60.xml:86` flaps 0 | No retractable gear, flaps or hook |
-|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Not probative: no aircraft models a drag device yet (all speedbrake 0) | Rotorcraft: no drag devices |
+|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Its model has no drag device: `fsim/effectors/speedbrake` 0 (the 23 R8 aircraft's are modelled: 4.55) | Rotorcraft: no drag devices |
 |  | R10 (platform) | PLT-07 aerobatics | `aircraft/uh60/uh60.xml:83` family 3 (rotorcraft) | Rotorcraft: the manoeuvres are a wing's |
 | cf2 (Crazyflie 2.0) | R2 | WPT-26 taxi paths | `aircraft/cf2/cf2.toml:43 leg_height_m (legs, no wheels)` | Legs, no wheels: it cannot roll |
 |  | R3, R5 | Catapult launch, arrested landing, arrester hook (deck operations under R4 still apply) | `aircraft/cf2/cf2.xml:108` family 4 (rotorcraft) | Rotorcraft: takes off and lands vertically; no launch bar or arrester hook |
 |  | R6 | STS-15 gear action; the gear in RCV-08 and RCV-10 | `aircraft/cf2/cf2.xml:115` retractable_gear 0; `aircraft/cf2/cf2.toml:43 leg_height_m (legs, no wheels)` | Fixed legs |
 |  | R7 | The flaps in RCV-08 and RCV-10 | `aircraft/cf2/cf2.xml:111` flaps 0 | Rotorcraft: no flaps |
 |  | R5, R6, R7 | RCV-08 CleanUp and DirtyUp as a whole (nothing to retract or deploy) | `aircraft/cf2/cf2.xml:115` retractable_gear 0, `aircraft/cf2/cf2.xml:111` flaps 0 | No retractable gear, flaps or hook |
-|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Not probative: no aircraft models a drag device yet (all speedbrake 0) | Rotorcraft: no drag devices |
+|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Its model has no drag device: `fsim/effectors/speedbrake` 0 (the 23 R8 aircraft's are modelled: 4.55) | Rotorcraft: no drag devices |
 |  | R9 | WPN-01 release envelope | Not probative: no aircraft models stores yet | No stations or release mechanism |
 |  | R10 (platform) | PLT-07 aerobatics | `aircraft/cf2/cf2.xml:108` family 4 (rotorcraft) | Rotorcraft: the manoeuvres are a wing's |
 | iris (IRIS+) | R2 | WPT-26 taxi paths | `aircraft/iris/iris.toml:38 leg_height_m (legs, no wheels)` | Legs, no wheels: it cannot roll |
@@ -4302,7 +4336,7 @@ Model evidence cites the aircraft files at caf03c9. "Not probative" means the mo
 |  | R6 | STS-15 gear action; the gear in RCV-08 and RCV-10 | `aircraft/iris/iris.xml:115` retractable_gear 0; `aircraft/iris/iris.toml:38 leg_height_m (legs, no wheels)` | Fixed legs |
 |  | R7 | The flaps in RCV-08 and RCV-10 | `aircraft/iris/iris.xml:111` flaps 0 | Rotorcraft: no flaps |
 |  | R5, R6, R7 | RCV-08 CleanUp and DirtyUp as a whole (nothing to retract or deploy) | `aircraft/iris/iris.xml:115` retractable_gear 0, `aircraft/iris/iris.xml:111` flaps 0 | No retractable gear, flaps or hook |
-|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Not probative: no aircraft models a drag device yet (all speedbrake 0) | Rotorcraft: no drag devices |
+|  | R8 | STS-16 spoilers and airbrakes; deceleration by them | Its model has no drag device: `fsim/effectors/speedbrake` 0 (the 23 R8 aircraft's are modelled: 4.55) | Rotorcraft: no drag devices |
 |  | R9 | WPN-01 release envelope | Not probative: no aircraft models stores yet | No stations or release mechanism |
 |  | R10 (platform) | PLT-07 aerobatics | `aircraft/iris/iris.xml:108` family 4 (rotorcraft) | Rotorcraft: the manoeuvres are a wing's |
 

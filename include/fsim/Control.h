@@ -1474,6 +1474,8 @@ public:
     /// Those it sets, as of its last update, into the actuator command the levels below it made: a field left as it is, not set.
     /// Only the axes its activity owns are taken from it.
     virtual void configure(ActuatorCommand& out) const noexcept { (void)out; }
+    /// The speedbrake it sets, 0..1, as of its last update, where its activity owns that axis (4.55); kHold leaves it as it is.
+    virtual double speedbrake() const noexcept { return kHold; }
 };
 
 /// What the cascade asked for in its last control update, level by level

@@ -177,6 +177,20 @@ class LaunchTest(unittest.TestCase):
             flying.submit_route(taxi + runway + air)
         self.assertEqual(refused.exception.reason, "airborne")
 
+    def test_a_speedbrake(self):
+        # the F-15C's dorsal speed brake (4.55): supported, opened by the speedbrake, its drag felt; none on the C172
+        w = world("py-speedbrake")
+        v = w.create_vehicle("f15c", "jsbsim:f15c", latitude_deg=40.0, longitude_deg=0.0, altitude_msl_m=3000.0, heading_deg=0.0, airspeed_ms=200.0)
+        w.step(10)
+        self.assertEqual(v.support("fsim.support.speedbrake").support, fsim.Support.SUPPORTED)
+        self.assertEqual(v.profile_value("effectors/speedbrake_approach"), 1.0)
+        v.submit_support("speedbrake", 1.0)
+        w.step(int(round(4.0 / w.step_seconds)))
+        self.assertAlmostEqual(v.get_property("fcs/speedbrake-pos-norm"), 1.0)
+        self.assertGreater(v.get_property("aero/coefficient/CD_speed_brake"), 0.0)
+        c = w.create_vehicle("c172", "jsbsim:c172", latitude_deg=40.1, longitude_deg=0.0, altitude_msl_m=1000.0, heading_deg=0.0, airspeed_ms=50.0)
+        self.assertEqual(c.support("fsim.support.speedbrake").support, fsim.Support.NOT_SUPPORTED)
+
     def test_a_crosswind_limit(self):
         # beyond the C172's 15 kt (4.54): its launch refused crosswind_limit, A-GRA's CAPABILITY_PERFORMANCE; within it, flown
         w = world("py-crosswind", wind=10.0)

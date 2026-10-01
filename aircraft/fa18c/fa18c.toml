@@ -251,6 +251,17 @@ max_mach_altitude_ft = 40000
 climb_rate_fpm = 45000
 operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out
 
+# Its drag device (docs/flight-autonomy.md, 4.55): its dorsal speed brake
+# between the fins (Jane's); opened 60 deg (an estimate); sized as the
+# F-15's is to its wing (31.5 ft2 on 608 ft2: 5.2 %), 1.88 m2 - no area is
+# published - and placed after the type's description; an estimate.
+[[drag_device]]
+name = "speed brake"
+kind = "airbrake"
+area = 1.88
+position = [12.8, 0, 0.9]
+max_deg = 60
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # MIL-F-8785C 3.3.7 (Table XI): the 90 deg crosswind a Class II to IV

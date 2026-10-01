@@ -351,7 +351,8 @@
       <property value="0.0">fsim/effectors/pitch_trim</property>
       <property value="1">fsim/effectors/retractable_gear</property>
       <property value="1">fsim/effectors/roll</property>
-      <property value="0.0">fsim/effectors/speedbrake</property>
+      <property value="1">fsim/effectors/speedbrake</property>
+      <property value="1">fsim/effectors/speedbrake_approach</property>
       <property value="1">fsim/effectors/wheel_brakes</property>
       <property value="0.0">fsim/effectors/yaw</property>
       <property value="1">fsim/envelope/version</property>
@@ -2582,6 +2583,16 @@
           <output>fcs/flap-pos-norm</output>
         </pure_gain>
       </channel>
+      <channel name="Speedbrake">
+        <kinematic name="fcs/speedbrake-control">
+          <input>fcs/speedbrake-cmd-norm</input>
+          <traverse>
+            <setting> <position>0</position> <time>0</time> </setting>
+            <setting> <position>1</position> <time>2.00</time> </setting>
+          </traverse>
+          <output>fcs/speedbrake-pos-norm</output>
+        </kinematic>
+      </channel>
       <channel name="Throttle 0">
         <fcs_function name="fcs/throttle-lever-0">
           <function>
@@ -3528,6 +3539,23 @@
                     1.10   -0.00322
             </tableData>
           </table>
+          </product>
+        </function>
+        <function name="aero/coefficient/CD_speed_brake">
+          <description>speed brake: drag of its airbrake plates, 2.93 m2 opened to 45 deg (hangar)</description>
+          <product>
+            <property>aero/qbar-psf</property>
+            <property>metrics/Sw-sqft</property>
+            <value>0.0588345</value>
+            <pow>
+              <sin>
+                <product>
+                  <property>fcs/speedbrake-pos-norm</property>
+                  <value>0.785398</value>
+                </product>
+              </sin>
+              <value>2</value>
+            </pow>
           </product>
         </function>
       </axis>
@@ -5390,6 +5418,24 @@
             <property>aero/alphadot-rad_sec</property>
             <value>-0.67126</value>
             <property>aero/function/mach-lift</property>
+          </product>
+        </function>
+        <function name="aero/coefficient/Cm_speed_brake">
+          <description>speed brake: its drag's pitching moment, 1.00 m from the reference point's height</description>
+          <product>
+            <property>aero/qbar-psf</property>
+            <property>metrics/Sw-sqft</property>
+            <property>metrics/cbarw-ft</property>
+            <value>0.0110154</value>
+            <pow>
+              <sin>
+                <product>
+                  <property>fcs/speedbrake-pos-norm</property>
+                  <value>0.785398</value>
+                </product>
+              </sin>
+              <value>2</value>
+            </pow>
           </product>
         </function>
       </axis>

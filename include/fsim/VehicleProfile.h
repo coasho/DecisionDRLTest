@@ -88,6 +88,7 @@ struct EffectorsSection {
     bool retractableGear = true;
     bool wheelBrakes = true;
     bool speedbrake = false;
+    bool speedbrakeApproach = false; ///< its drag devices are opened on an approach: airbrakes, not spoilers that dump lift (4.55)
     bool pitchTrim = false;
     double flapsTransitS = kUnknown; ///< full travel, s
     double gearTransitS = kUnknown;

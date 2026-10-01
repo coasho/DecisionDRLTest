@@ -128,11 +128,17 @@ def sections(aircraft, fbw, reference, identified, flown, tables=None, tail_down
         "flaps": 1 if "flap" in channels else 0,
         "retractable_gear": 1 if any(g.retractable for g in aircraft.gear) else 0,
         "wheel_brakes": 1 if aircraft.gear else 0,
-        "speedbrake": 0,
+        "speedbrake": 1 if aircraft.spec.get("drag_device") else 0,  # its drag devices (4.55)...
         "pitch_trim": 1 if fbw is None and "elevator" in channels else 0,  # the elevator channel sums fcs/pitch-trim-cmd-norm
     }
     if "flap" in channels:
         effectors["flaps_transit_s"] = FLAPS_TRANSIT_S
+    # ...and whether they are opened on an approach: airbrakes and surfaces, not spoilers that dump lift - one speedbrake opens
+    # them all, so all of them (the U-2S's airbrakes open its spoilers too: 4.55)
+    from .drag import drag_devices
+    brakes = drag_devices(aircraft)
+    if brakes and all(d.in_flight for d in brakes):
+        effectors["speedbrake_approach"] = 1
     out["effectors"] = effectors
 
     # envelope: the law's limits as the design states them, and the stall as flown;

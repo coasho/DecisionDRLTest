@@ -468,7 +468,7 @@ A capability the aircraft does not have is simply absent from its catalog.
 | `fsim.support.gear` | support | gear | terminating: completes when the gear is there | down 0/1; retraction unavailable on the ground; operation above `gear_cas_max_ms` unavailable | 2 |
 | `fsim.support.flaps` | support | flaps | terminating: completes at the commanded position | position 0..1; extension beyond `flaps_threshold` above the flaps configuration's `cas_max_ms` unavailable | 2 |
 | `fsim.support.wheel_brakes` | support | brakes | persistent | left, right 0..1 | 2 |
-| `fsim.support.speedbrake` | support | speedbrake | persistent | position 0..1; only where the aircraft has one | 2 |
+| `fsim.support.speedbrake` | support | speedbrake | persistent | position 0..1; only where the aircraft has one: its drag devices, hangar's ([flight-autonomy.md](flight-autonomy.md), 4.55) | 2 |
 | `fsim.support.pitch_trim` | support | pitch trim | persistent | position −1..1; only where the flight model has a trim channel | 2 |
 | `fsim.envelope.protection` | status (settings, status) | none | none | mode: off, report or limit (its one parameter; limit by default); status: `envelope()`, per limit what was limited and what was exceeded since the last read. The limits themselves are the profile's. Offered where the profile has an envelope section | 4 |
 

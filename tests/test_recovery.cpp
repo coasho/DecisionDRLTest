@@ -72,8 +72,9 @@ TEST_CASE("recovery: a wing touches down in the touchdown zone below its sink-ra
           "crosswind (RCV-01)",
           "[modes][recovery]") {
     // a light single, a fighter that approaches nose high (its speed raised for room to flare), a delta, two heavies (the
-    // E-7A, stopped across the wind, was thrown off the runway by its angle of attack's rate: 4.54), a glider
-    for (const char* type : {"c172", "f16c", "mirage2000", "kc135r", "e7a", "rq4b"}) {
+    // E-7A, stopped across the wind, was thrown off the runway by its angle of attack's rate: 4.54), the B-52H on its airbrakes
+    // (it floated past its touchdown zone without them: 4.55), a glider
+    for (const char* type : {"c172", "f16c", "mirage2000", "kc135r", "e7a", "b52h", "rq4b"}) {
         for (double wind : {0.0, 10.0}) {
             if (wind > 0.0 && (std::string(type) == "rq4b" || std::string(type) == "c172")) continue; // (the C172's limit is 15 kt)
             INFO(type << " in a " << wind << " m/s crosswind");

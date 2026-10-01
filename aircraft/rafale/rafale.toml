@@ -310,6 +310,14 @@ max_speed_ktas = 750          # sea level
 climb_rate_fpm = 60000        # 305 m/s
 operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out
 
+# Its drag device (docs/flight-autonomy.md, 4.55): no dedicated airbrake:
+# its canards and elevons deflect as one (Dassault Aviation): the drag of
+# its canards and elevons at 20 deg (an estimate), their forces cancelling.
+[[drag_device]]
+name = "surfaces"
+kind = "surfaces"
+channels = { elevator = 20 }
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # MIL-F-8785C 3.3.7 (Table XI): the 90 deg crosswind a Class II to IV

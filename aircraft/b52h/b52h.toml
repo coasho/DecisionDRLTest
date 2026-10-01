@@ -487,6 +487,22 @@ max_mach_altitude_ft = 20700
 service_ceiling_ft = 50000    # USAF fact sheet; the SAC charts give 46,900-47,700 ft at combat weight
 # climb: 6,270 ft/min (Wikipedia) - at an unstated weight, so not a target
 
+# Its drag device (docs/flight-autonomy.md, 4.55): its spoilers, seven
+# panels a wing, which roll the H (it has no ailerons) and serve as its
+# airbrakes (B. Schiff, AOPA Pilot, May 2015): spanned over the outer wing
+# as this design draws it, a tenth of its chord, opened 60 deg (estimates;
+# this design rolls on ailerons, as the B-52's earlier marks did). They are
+# its airbrakes: opened on its approach.
+[[drag_device]]
+name = "spoilers"
+kind = "spoiler"
+surface = "wing"
+span = [0.3, 0.82]
+chord_fraction = 0.1
+hinge = 0.62
+max_deg = 60
+in_flight = true
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # B-52 Stratofortress Association, pilots on the B-52G/H flight manual: 41 kt

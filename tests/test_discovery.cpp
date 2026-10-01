@@ -153,11 +153,12 @@ TEST_CASE("discovery: a physical exception is not supported, with its rule and t
 TEST_CASE("discovery: applicable but not built is not implemented, with the stage that builds it", "[discovery]") {
     session::World w(options("discovery-unbuilt"));
     const auto viper = wing(w, "f16c", 3000.0, 160.0);
-    const SupportInfo& speedbrake = supportOf(w, viper, "fsim.support.speedbrake");
-    CHECK(speedbrake.support == Support::NotImplemented); // the type has one, the model not yet
-    CHECK(speedbrake.stage == 10);
-    CHECK(w.submit(viper, SpeedbrakeCommand{1.0}).reason == Reason::NotImplemented);
-    CHECK(w.capabilityStatus(viper, "fsim.support.speedbrake").reason == Reason::NotImplemented);
+    const SupportInfo& stores = supportOf(w, viper, "fsim.stores");
+    CHECK(stores.support == Support::NotImplemented); // the type carries stores, the model not yet
+    CHECK(stores.stage == 13);
+    CHECK(w.capabilityStatus(viper, "fsim.stores").reason == Reason::NotImplemented);
+    CHECK(supportOf(w, viper, "fsim.support.speedbrake").support == Support::Supported); // (its speed brakes: FA-10c, 4.55)
+    CHECK(w.submit(viper, SpeedbrakeCommand{1.0}).accepted());
     CHECK(supportOf(w, viper, "fsim.guidance.launch").support == Support::Supported); // (built by FA-9a)
     CHECK(supportOf(w, viper, "fsim.guidance.recovery").support == Support::Supported); // (built by FA-10a)
     CHECK(supportOf(w, viper, "fsim.guidance.recovery/go_around").support == Support::Supported); // (built by FA-10b)

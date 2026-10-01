@@ -241,6 +241,18 @@ max_mach = 2.0                # at altitude, full afterburner
 max_mach_altitude_ft = 36000
 operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out
 
+# Its drag device (docs/flight-autonomy.md, 4.55): its two airbrakes on the
+# rear fuselage's sides (Saab JAS 39C data); opened 50 deg (an estimate);
+# sized as the F-15's is to its wing (31.5 ft2 on 608 ft2: 5.2 %), 1.52 m2 -
+# no area is published - and placed after the type's description; an
+# estimate.
+[[drag_device]]
+name = "airbrakes"
+kind = "airbrake"
+area = 1.524
+position = [11.98, 0, 0]
+max_deg = 50
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # MIL-F-8785C 3.3.7 (Table XI): the 90 deg crosswind a Class II to IV

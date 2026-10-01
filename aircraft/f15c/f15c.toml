@@ -267,6 +267,19 @@ max_speed_ktas = 800          # Mach 1.2 at sea level
 climb_rate_fpm = 50000
 service_ceiling_ft = 65000
 
+# Its drag device (docs/flight-autonomy.md, 4.55): the dorsal speed brake on
+# the spine behind the canopy, hinged at its front. Its area grew from 20 to
+# 31.5 ft2 (2.93 m2) in flight test, opened less far to cure its buffet
+# (J. Baugher, F-15 airframe and flight controls); opened 45 deg (DCS F-15C
+# documentation). Its centroid opened: an estimate from the drawing.
+[[drag_device]]
+name = "speed brake"
+kind = "airbrake"
+area = 2.93
+position = [9.3, 0.0, 1.0]
+max_deg = 45
+transit_s = 2.0
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # MIL-F-8785C 3.3.7 (Table XI): the 90 deg crosswind a Class II to IV

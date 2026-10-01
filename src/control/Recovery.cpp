@@ -48,6 +48,15 @@ constexpr double kFlareBankRad = 10.0 * kDeg; // its bank in the flare: its head
 constexpr double kFlareRoomRad = 6.0 * kDeg;
 constexpr double kAdjustMsPerDegS = 0.5, kMostRaise = 0.3;
 constexpr double kFlareSpeedShare = 0.9;      // of its approach speed: the throttle back in the flare
+// its drag devices (4.55): opened on an approach where they are (its profile's: airbrakes, not spoilers that dump lift - the
+// E-7A, its spoilers opened as it pushed over onto its glide slope, oscillated and went around), out on the glide slope while
+// its throttle is at idle and it still runs fast, never back, to kSpeedbrakeAir at most, and all out from its touchdown on: a transport's ground spoilers, a
+// fighter's airbrakes
+constexpr double kSpeedbrakeAir = 1.0;
+constexpr double kIdleThrottle = 0.02;       // ...its throttle this far back: at idle...
+constexpr double kGainingMs2 = 0.05;          // ...gaining speed still, its calibrated airspeed's rate over kRateS, kSlopeS on the
+constexpr double kRateS = 5.0;                // glide slope at least (as it pushes over onto it, it gains a little for a while; the
+constexpr double kSlopeS = 10.0;              // B-52H gained 6 m/s over half a minute)
 // a rotorcraft's approach point on the centre line, 60 s of its cruise out and 10 s up - 30 m to 1 km, 100 m at most - then its
 // hover 2 s up (1.5 to 10 m) this far beyond the threshold: 1 km out and 100 m up, the Crazyflie fell
 constexpr double kRotorApproachS = 60.0, kRotorApproachUpS = 10.0, kRotorHoverS = 2.0;
@@ -236,6 +245,7 @@ Reason CapabilityHost::prepareRecovery(BehaviorCommand& b, const sim::VehicleSta
         b.params["_vapp"] = vapp, b.params["_aim"] = aim, b.params["_missed"] = count > 4 ? 4.0 : 0.0;
         b.params["_circuit"] = std::max(points[1].altitudeM, elevation + kCircuitLeastAglM);
         if (profile_ && std::isfinite(profile_->envelope.crosswindMaxMs)) b.params["_xwind"] = profile_->envelope.crosswindMaxMs;
+        if (profile_ && profile_->effectors.speedbrakeApproach) b.params["_sb_air"] = 1.0; // (4.55)
     }
     b.params["_thr_lat"] = lat0, b.params["_thr_lon"] = lon0, b.params["_course"] = course, b.params["_length"] = line.lengthM;
     b.params["_elev"] = elevation, b.params["_end"] = laid.end;
@@ -261,10 +271,11 @@ void RecoveryBehavior::start(const ControlContext& ctx, const BehaviorCommand& b
     o = RouteCommand{};
     o.end = b.param("_end", 0.0);
     phase_ = Phase::Approach, configured_ = false, settledS_ = 0.0, lastS_ = -1.0, descentMslM_ = kHold, speedAddMs_ = 0.0;
-    flaps_ = kLeastFlaps;
+    flaps_ = kLeastFlaps, speedbrake_ = 0.0, casRateMs2_ = 0.0, lastCasMs_ = ctx.sensed.airspeedCalibratedMs, slopeS_ = 0.0;
     // its go-arounds (4.54)
     crosswindMaxMs_ = b.param("_xwind", kHold), circuitMslM_ = b.param("_circuit", elevationM_ + kCircuitLeastAglM);
     missedFrom_ = static_cast<std::uint32_t>(b.param("_missed", 0.0));
+    airbrakes_ = b.param("_sb_air", 0.0) != 0.0;
     zoneEndM_ = std::min(std::max(aimM_ + kZoneM, lengthM_ / 3.0), lengthM_ / 2.0);
     wind_.reset();
     touchAglM_ = unstableS_ = crosswindS_ = 0.0;
@@ -277,7 +288,7 @@ void RecoveryBehavior::goAroundFrom(GoAround cause) noexcept {
     // up once it climbs (ICAO Doc 8168's missed approach: the climb straight on, then the turn)
     phase_ = Phase::GoAround, cause_ = cause, ++goArounds_;
     lastApproach_ = goArounds_ >= kApproaches;
-    flaps_ = kLeastFlaps, speedAddMs_ = 0.0, unstableS_ = crosswindS_ = 0.0;
+    flaps_ = kLeastFlaps, speedbrake_ = 0.0, speedAddMs_ = 0.0, unstableS_ = crosswindS_ = 0.0;
 }
 
 void RecoveryBehavior::approachAgain(const ControlContext& ctx, std::uint32_t from) {
@@ -286,7 +297,7 @@ void RecoveryBehavior::approachAgain(const ControlContext& ctx, std::uint32_t fr
     o.start = static_cast<double>(from); // (kept: the route plans afresh when its options change)
     route_->begin(ctx, options_);
     phase_ = from == 0 ? Phase::Approach : Phase::Missed;
-    configured_ = gearUp_ = false, flaps_ = kLeastFlaps, speedAddMs_ = 0.0;
+    configured_ = gearUp_ = false, flaps_ = kLeastFlaps, speedbrake_ = 0.0, speedAddMs_ = 0.0, slopeS_ = 0.0;
 }
 
 Command RecoveryBehavior::goAround(const ControlContext& ctx, double alongM, double crossM) {
@@ -386,8 +397,16 @@ Command RecoveryBehavior::runway(const ControlContext& ctx, const Command& in, d
     // down the slope its flaps put out, never back, while it runs fast - their drag (the C-130J, its flight idle's thrust more than
     // its drag, gained 13 m/s down the slope) - and its speed raised, never lowered, while it comes down over that attitude still
     // (straight in, the EA-18G never settled level, and touched down at 6 m/s)
+    if (dt > 0.0) casRateMs2_ += std::min(dt / kRateS, 1.0) * ((s.airspeedCalibratedMs - lastCasMs_) / dt - casRateMs2_);
+    lastCasMs_ = s.airspeedCalibratedMs;
     if (flownTo == 3 && phase_ == Phase::Approach) {
         if (s.airspeedCalibratedMs > kFastShare * (vappMs_ + speedAddMs_)) flaps_ = std::min(flaps_ + kFlapsPerS * dt, kLandingFlaps);
+        // its drag devices once its throttle is at idle and it still runs fast: the B-52H, nose low, its flaps at a takeoff's,
+        // gained 6 m/s down the slope at idle, was above it by the gate and went around
+        slopeS_ += dt;
+        if (airbrakes_ && s.airspeedCalibratedMs > vappMs_ + speedAddMs_ && s.throttlePosition[0] <= kIdleThrottle &&
+            casRateMs2_ > kGainingMs2 && slopeS_ >= kSlopeS)
+            speedbrake_ = std::min(speedbrake_ + kFlapsPerS * dt, kSpeedbrakeAir);
         if (attitude > high) speedAddMs_ = std::min(speedAddMs_ + kAdjustMsPerDegS * ((attitude - high) / kDeg) * dt, kMostRaise * vappMs_);
     }
     if (auto* fly = std::get_if<VelocityCommand>(&out); fly && phase_ == Phase::Approach) {
@@ -479,6 +498,12 @@ void RecoveryBehavior::configure(ActuatorCommand& out) const noexcept {
     if (!hovers_) out.flaps = phase_ == Phase::Rollout ? 0.0 : flaps_;
 }
 
+double RecoveryBehavior::speedbrake() const noexcept {
+    if (hovers_) return kHold;
+    if (phase_ == Phase::Rollout) return 1.0; // (its ground spoilers, its airbrakes: its lift dumped onto its wheels)
+    return phase_ == Phase::Approach || phase_ == Phase::Flare ? speedbrake_ : 0.0;
+}
+
 void registerRecovery(ControllerRegistry& r) {
     const double now = kHold;
     auto p = [](const char* name, const char* unit, double def, double lo, double hi) { return ParameterInfo{name, unit, lo, hi, def, true}; };
@@ -487,7 +512,7 @@ void registerRecovery(ControllerRegistry& r) {
     recovery.parameters = {p("airfield", "", now, 1.0, 4294967295.0), p("runway", "", now, 1.0, 4294967295.0)};
     recovery.uses = {"fsim.flight.actuator", "fsim.flight.velocity", "fsim.flight.position"};
     recovery.mode = FlightMode::Recovery;
-    recovery.axes = axisBit(Axis::Gear) | axisBit(Axis::Flaps) | axisBit(Axis::Brakes);
+    recovery.axes = axisBit(Axis::Gear) | axisBit(Axis::Flaps) | axisBit(Axis::Brakes) | axisBit(Axis::Speedbrake);
     r.addBehavior("recovery", [] { return std::make_unique<RecoveryBehavior>(); }, std::move(recovery));
 }
 

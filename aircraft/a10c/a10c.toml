@@ -355,6 +355,18 @@ max_mach = 0.576              # 381 kt
 max_mach_altitude_ft = 0
 max_speed_ktas = 381          # at sea level, clean
 
+# Its drag device (docs/flight-autonomy.md, 4.55): its decelerons: each
+# aileron split into an upper and a lower half that open apart (USAF fact
+# sheet, Jenkins). Each split aileron counted as one plate of its area, as
+# this design draws them (4.95 m2 both), its halves opened 40 deg each (an
+# estimate); their drag above and below cancelling in pitch.
+[[drag_device]]
+name = "decelerons"
+kind = "airbrake"
+area = 4.95
+position = [9.41, 0, 0.35]
+max_deg = 40
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # MIL-F-8785C 3.3.7 (Table XI): the 90 deg crosswind a Class II to IV

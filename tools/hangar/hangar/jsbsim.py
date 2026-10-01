@@ -76,6 +76,91 @@ def mach_channel(ch):
     return "aero/function/mach-" + ch
 
 
+def _speedbrake_angle(max_deg, indent):
+    """The opening (rad) of a device opened to max_deg at the full speedbrake: XML for a function's operand."""
+    pad = " " * indent
+    return ("%s<product>\n%s  <property>fcs/speedbrake-pos-norm</property>\n%s  <value>%.6g</value>\n%s</product>"
+            % (pad, pad, pad, math.radians(max_deg), pad))
+
+
+def _sin_squared(max_deg, indent):
+    pad = " " * indent
+    return ("%s<pow>\n%s  <sin>\n%s\n%s  </sin>\n%s  <value>2</value>\n%s</pow>"
+            % (pad, pad, _speedbrake_angle(max_deg, indent + 4), pad, pad, pad))
+
+
+def drag_device_functions(device, tables, aircraft, indent=6):
+    """[(axis, function XML)] for a drag device (drag.DragDevice; docs/flight-autonomy.md, 4.55), opened by
+    fcs/speedbrake-pos-norm: an airbrake's and a spoiler's plate drag (drag.PLATE_CN sin^2 d on their area) and its
+    pitching moment from the reference point's height; a spoiler's lift lost behind it and that lift's moment; a set
+    of surfaces' drag from their own tables."""
+    from . import drag
+    qs = ["aero/qbar-psf", "metrics/Sw-sqft"]
+    slug = device.name.replace(" ", "_").replace("-", "_")
+    out = []
+    S, c, arp = aircraft.S, aircraft.c, aircraft.aero_point
+    if device.kind in ("airbrake", "spoiler"):
+        k = drag.PLATE_CN * device.area / S
+        what = "airbrake plates" if device.kind == "airbrake" else "spoiler panels"
+        out.append(("DRAG", _function("CD_%s" % slug, "%s: drag of its %s, %.3g m2 opened to %.0f deg (hangar)"
+                                      % (device.name, what, device.area, device.max_deg), qs + ["value:%.6g" % k],
+                                      _sin_squared(device.max_deg, indent + 4), indent)))
+        arm = (device.position[2] - arp[2]) / c  # (drag above the reference point pitches the nose up)
+        if abs(arm) > 1e-6:
+            out.append(("PITCH", _function("Cm_%s" % slug, "%s: its drag's pitching moment, %.2f m from the reference point's height"
+                                           % (device.name, device.position[2] - arp[2]), qs + [REF_LENGTH["Cm"], "value:%.6g" % (k * arm)],
+                                           _sin_squared(device.max_deg, indent + 4), indent)))
+    if device.kind == "spoiler":
+        a = np.asarray(tables["alpha"], float)
+        b = list(np.asarray(tables["beta"], float))
+        cl0 = np.asarray(tables["base"]["CL"], float)[:, b.index(min(b, key=abs))]
+        loss = -drag.SPOILER_LIFT_LOSS * device.wing_area / S * cl0
+        pad = " " * (indent + 4)
+        scale = ("%s<min>\n%s  <value>1</value>\n%s  <product>\n%s    <property>fcs/speedbrake-pos-norm</property>\n"
+                 "%s    <value>%.6g</value>\n%s  </product>\n%s</min>"
+                 % (pad, pad, pad, pad, pad, device.max_deg / drag.SPOILER_FULL_DEG, pad, pad))
+        out.append(("LIFT", _function("CL_%s" % slug, "%s: the lift lost behind them, %.3g m2 of wing, over alpha (hangar)"
+                                      % (device.name, device.wing_area), qs, _table1(a, loss, "aero/alpha-deg", indent + 4) + "\n" + scale,
+                                      indent)))
+        moment = -loss * (device.lift_x - arp[0]) / c  # (lift lost aft of the reference point pitches the nose up)
+        out.append(("PITCH", _function("Cm_%s_lift" % slug, "%s: the lift lost's pitching moment, %.2f m from the reference point"
+                                       % (device.name, device.lift_x - arp[0]), qs + [REF_LENGTH["Cm"]],
+                                       _table1(a, moment, "aero/alpha-deg", indent + 4) + "\n" + scale, indent)))
+    if device.kind == "surfaces":
+        a = tables["alpha"]
+        for ch, deg in device.channels.items():
+            t = tables["controls"][ch]
+            out.append(("DRAG", _function("CD_%s_%s" % (slug, ch), "%s: the drag of its %s deflected %.0f deg at the full speedbrake, "
+                                          "its forces cancelling (hangar)" % (device.name, ch, deg), qs,
+                                          _table2(a, t["deflection"], t["CD"], "aero/alpha-deg", "fcs/speedbrake-%s-deg" % ch, indent + 4),
+                                          indent)))
+    return out
+
+
+def speedbrake_xml(devices):
+    """The speedbrake channel: fcs/speedbrake-cmd-norm to fcs/speedbrake-pos-norm over the longest device's transit,
+    and each set of surfaces' deflections from it."""
+    transit = max(d.transit_s for d in devices)
+    parts = ["""      <channel name="Speedbrake">
+        <kinematic name="fcs/speedbrake-control">
+          <input>fcs/speedbrake-cmd-norm</input>
+          <traverse>
+            <setting> <position>0</position> <time>0</time> </setting>
+            <setting> <position>1</position> <time>%.2f</time> </setting>
+          </traverse>
+          <output>fcs/speedbrake-pos-norm</output>
+        </kinematic>""" % transit]
+    for d in devices:
+        for ch, deg in d.channels.items():
+            parts.append("""        <pure_gain name="fcs/speedbrake-%s">
+          <input>fcs/speedbrake-pos-norm</input>
+          <gain>%.6g</gain>
+          <output>fcs/speedbrake-%s-deg</output>
+        </pure_gain>""" % (ch, deg, ch))
+    parts.append("      </channel>")
+    return "\n".join(parts)
+
+
 def aerodynamics_xml(tables, aircraft, ge_e=0.85):
     """The <aerodynamics> element from the tables (tables.build)."""
     a = tables["alpha"]
@@ -159,6 +244,11 @@ def aerodynamics_xml(tables, aircraft, ge_e=0.85):
                        "%s    <property>aero/cl-squared</property>\n%s    <value>%.5f</value>\n%s\n%s  </product>\n%s</function>"
                        % (pad, pad, pad, pad, pad, pad, pad, 1.0 / (math.pi * A * ge_e),
                           _table1(ge["h_b"], ge_drag, "aero/h_b-mac-ft", 8), pad, pad))
+    # its drag devices (docs/flight-autonomy.md, 4.55)
+    from .drag import drag_devices
+    for device in drag_devices(aircraft):
+        for axis, f in drag_device_functions(device, tables, aircraft):
+            out[axis].append(f)
     parts = ["    <aerodynamics>"] + ["\n".join("  " + line for line in f.split("\n")) for f in pre]
     for axis in ("DRAG", "SIDE", "LIFT", "ROLL", "PITCH", "YAW"):
         parts.append("      <axis name=\"%s\">" % axis)
@@ -600,6 +690,10 @@ def flight_control_xml(aircraft, fbw=None, yaw_damper=None, autopilot=None, prof
           <output>fcs/flap-pos-norm</output>
         </pure_gain>
       </channel>""" % (settings, 1.0 / hi if hi > 0.0 else 0.0))
+    from .drag import drag_devices
+    brakes = drag_devices(aircraft)
+    if brakes:
+        parts.append(speedbrake_xml(brakes))
     devices = [d for _, d in aircraft.leading_devices()]
     if devices:
         # the leading-edge flaps on their schedule, a alpha - m qbar/p + b deg,

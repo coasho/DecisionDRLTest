@@ -285,6 +285,28 @@ max_mach = 0.715
 max_mach_altitude_ft = 60000
 service_ceiling_ft = 70000    # "above 70,000 ft" (USAF); at full weight it starts lower
 
+# Its drag device (docs/flight-autonomy.md, 4.55): its spoilers (Lockheed
+# Martin U-2S data): over its flaps, a twelfth of its chord, opened 60 deg
+# (estimates).
+[[drag_device]]
+name = "spoilers"
+kind = "spoiler"
+surface = "wing"
+span = [0.1, 0.55]
+chord_fraction = 0.08
+hinge = 0.62
+max_deg = 60
+
+# Its drag device (docs/flight-autonomy.md, 4.55): its aft-fuselage speed
+# brakes, one a side (Lockheed Martin U-2S data): 0.93 m2, opened 50 deg -
+# estimates from photographs; their drag either side cancelling in yaw.
+[[drag_device]]
+name = "speed brakes"
+kind = "airbrake"
+area = 0.929
+position = [12.48, 0, 0]
+max_deg = 50
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # AOPA Pilot, "Flying the U-2" (January 2001): "Maximum allowable crosswind is

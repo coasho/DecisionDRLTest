@@ -566,6 +566,7 @@ public:
     bool handOver(BehaviorCommand& out) const override;
     bool configures() const noexcept override { return true; }
     void configure(ActuatorCommand& out) const noexcept override;
+    double speedbrake() const noexcept override;
     Phase phase() const noexcept { return phase_; }
     GoAround lastGoAround() const noexcept { return cause_; }
     std::uint32_t goArounds() const noexcept { return goArounds_; }
@@ -586,6 +587,8 @@ private:
     double tailRad_ = kHold, flarePitchRad_ = 0.0, flareIntegral_ = 0.0; ///< its tail's touching attitude; its flare's
     double speedAddMs_ = 0.0; ///< its approach speed's change for the attitude it comes down at (calibrated)
     double flaps_ = 1.0;      ///< its flaps for landing, eased for that attitude
+    double speedbrake_ = 0.0; ///< its drag devices down the glide slope (4.55)
+    double casRateMs2_ = 0.0, lastCasMs_ = 0.0, slopeS_ = 0.0; ///< its calibrated airspeed's rate, smoothed; its time down the slope
     // its go-arounds (4.54)
     WindEstimate wind_;
     double crosswindMaxMs_ = kHold, circuitMslM_ = 0.0, zoneEndM_ = 0.0; ///< its limit; the go-around's altitude; touched down by
@@ -593,7 +596,7 @@ private:
     std::uint32_t missedFrom_ = 0;   ///< the approach route's first point of FA's chained missed approach; 0: the circuit
     std::uint32_t goArounds_ = 0;
     GoAround cause_ = GoAround::None;
-    bool gearUp_ = false, lastApproach_ = false;
+    bool gearUp_ = false, lastApproach_ = false, airbrakes_ = false;
     Reason failed_ = Reason::None;
 };
 /// Registers "recovery" (Recovery.cpp); registerGuidanceModes calls it.

@@ -351,6 +351,18 @@ max_mach = 0.80
 max_mach_altitude_ft = 35000
 operational_ceiling_ft = 41000  # Wikipedia
 
+# Its drag device (docs/flight-autonomy.md, 4.55): the Boeing 737-700's
+# flight and ground spoilers, four and two a wing, over its flaps: an eighth
+# of the wing's chord, opened 60 deg (estimates).
+[[drag_device]]
+name = "spoilers"
+kind = "spoiler"
+surface = "wing"
+span = [0.12, 0.7]
+chord_fraction = 0.12
+hinge = 0.62
+max_deg = 60
+
 # The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
 # 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
 # Boeing 737-700 without winglets (b737.org.uk, Boeing's FCTM): 33 kt landing,

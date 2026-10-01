@@ -612,7 +612,8 @@
       <property value="1">fsim/effectors/pitch_trim</property>
       <property value="1">fsim/effectors/retractable_gear</property>
       <property value="0.0">fsim/effectors/roll</property>
-      <property value="0.0">fsim/effectors/speedbrake</property>
+      <property value="1">fsim/effectors/speedbrake</property>
+      <property value="1">fsim/effectors/speedbrake_approach</property>
       <property value="1">fsim/effectors/wheel_brakes</property>
       <property value="0.0">fsim/effectors/yaw</property>
       <property value="1">fsim/envelope/version</property>
@@ -2157,6 +2158,16 @@
           <output>fcs/flap-pos-norm</output>
         </pure_gain>
       </channel>
+      <channel name="Speedbrake">
+        <kinematic name="fcs/speedbrake-control">
+          <input>fcs/speedbrake-cmd-norm</input>
+          <traverse>
+            <setting> <position>0</position> <time>0</time> </setting>
+            <setting> <position>1</position> <time>2.00</time> </setting>
+          </traverse>
+          <output>fcs/speedbrake-pos-norm</output>
+        </kinematic>
+      </channel>
       <channel name="Throttle 4">
         <pure_gain name="fcs/throttle-lever-4">
           <input>fcs/throttle-cmd-norm[0]</input>
@@ -3103,6 +3114,23 @@
           </table>
           </product>
         </function>
+        <function name="aero/coefficient/CD_spoilers">
+          <description>spoilers: drag of its spoiler panels, 19.2 m2 opened to 60 deg (hangar)</description>
+          <product>
+            <property>aero/qbar-psf</property>
+            <property>metrics/Sw-sqft</property>
+            <value>0.0620188</value>
+            <pow>
+              <sin>
+                <product>
+                  <property>fcs/speedbrake-pos-norm</property>
+                  <value>1.0472</value>
+                </product>
+              </sin>
+              <value>2</value>
+            </pow>
+          </product>
+        </function>
       </axis>
       <axis name="SIDE">
         <function name="aero/coefficient/CY_base">
@@ -3993,6 +4021,114 @@
             <property>aero/alphadot-rad_sec</property>
             <value>1.09780</value>
             <property>aero/function/mach-lift</property>
+          </product>
+        </function>
+        <function name="aero/coefficient/CL_spoilers">
+          <description>spoilers: the lift lost behind them, 192 m2 of wing, over alpha (hangar)</description>
+          <product>
+            <property>aero/qbar-psf</property>
+            <property>metrics/Sw-sqft</property>
+            <table>
+              <independentVar lookup="row">aero/alpha-deg</independentVar>
+              <tableData>
+                   -180.00   -0.20694
+                   -165.00   -0.19645
+                   -150.00   -0.29197
+                   -135.00   -0.31469
+                   -120.00   -0.25093
+                   -105.00   -0.11339
+                    -90.00    0.06192
+                    -80.00    0.18051
+                    -70.00    0.28462
+                    -60.00    0.36369
+                    -55.00    0.39078
+                    -50.00    0.41007
+                    -46.00    0.42144
+                    -42.00    0.42869
+                    -38.00    0.43397
+                    -35.00    0.43995
+                    -32.00    0.45366
+                    -30.00    0.47875
+                    -27.00    0.56075
+                    -24.00    0.52998
+                    -22.00    0.48320
+                    -20.00    0.42172
+                    -19.00    0.38921
+                    -18.00    0.35627
+                    -17.00    0.32300
+                    -16.00    0.28948
+                    -15.00    0.25574
+                    -14.00    0.22178
+                    -13.00    0.18771
+                    -12.00    0.15357
+                    -11.00    0.11938
+                    -10.00    0.08518
+                     -9.00    0.05102
+                     -8.00    0.01693
+                     -7.00   -0.01707
+                     -6.00   -0.05095
+                     -5.00   -0.08481
+                     -4.00   -0.11854
+                     -3.00   -0.15239
+                     -2.00   -0.18616
+                     -1.00   -0.22000
+                      0.00   -0.25382
+                      1.00   -0.28755
+                      2.00   -0.32119
+                      3.00   -0.35470
+                      4.00   -0.38804
+                      5.00   -0.42137
+                      6.00   -0.45442
+                      7.00   -0.48729
+                      8.00   -0.51946
+                      9.00   -0.54973
+                     10.00   -0.57523
+                     11.00   -0.59404
+                     12.00   -0.60370
+                     13.00   -0.59832
+                     14.00   -0.56905
+                     15.00   -0.52741
+                     16.00   -0.50073
+                     17.00   -0.48926
+                     18.00   -0.48192
+                     19.00   -0.47764
+                     20.00   -0.47531
+                     21.00   -0.47365
+                     22.00   -0.47232
+                     23.00   -0.47081
+                     24.00   -0.46806
+                     25.00   -0.44186
+                     26.00   -0.43489
+                     27.00   -0.42976
+                     28.00   -0.42514
+                     29.00   -0.42085
+                     30.00   -0.41681
+                     32.00   -0.40930
+                     35.00   -0.39907
+                     38.00   -0.38878
+                     42.00   -0.37424
+                     46.00   -0.35803
+                     50.00   -0.33970
+                     55.00   -0.31233
+                     60.00   -0.27534
+                     70.00   -0.17417
+                     80.00   -0.05811
+                     90.00    0.06043
+                    105.00    0.21808
+                    120.00    0.31140
+                    135.00    0.31469
+                    150.00    0.23143
+                    165.00    0.21100
+                    180.00   -0.20694
+              </tableData>
+            </table>
+            <min>
+              <value>1</value>
+              <product>
+                <property>fcs/speedbrake-pos-norm</property>
+                <value>1.33333</value>
+              </product>
+            </min>
           </product>
         </function>
       </axis>
@@ -4963,6 +5099,133 @@
             <property>aero/alphadot-rad_sec</property>
             <value>-2.91789</value>
             <property>aero/function/mach-lift</property>
+          </product>
+        </function>
+        <function name="aero/coefficient/Cm_spoilers">
+          <description>spoilers: its drag's pitching moment, -0.20 m from the reference point's height</description>
+          <product>
+            <property>aero/qbar-psf</property>
+            <property>metrics/Sw-sqft</property>
+            <property>metrics/cbarw-ft</property>
+            <value>-0.00166185</value>
+            <pow>
+              <sin>
+                <product>
+                  <property>fcs/speedbrake-pos-norm</property>
+                  <value>1.0472</value>
+                </product>
+              </sin>
+              <value>2</value>
+            </pow>
+          </product>
+        </function>
+        <function name="aero/coefficient/Cm_spoilers_lift">
+          <description>spoilers: the lift lost's pitching moment, 2.31 m from the reference point</description>
+          <product>
+            <property>aero/qbar-psf</property>
+            <property>metrics/Sw-sqft</property>
+            <property>metrics/cbarw-ft</property>
+            <table>
+              <independentVar lookup="row">aero/alpha-deg</independentVar>
+              <tableData>
+                   -180.00    0.06422
+                   -165.00    0.06097
+                   -150.00    0.09061
+                   -135.00    0.09766
+                   -120.00    0.07788
+                   -105.00    0.03519
+                    -90.00   -0.01922
+                    -80.00   -0.05602
+                    -70.00   -0.08833
+                    -60.00   -0.11287
+                    -55.00   -0.12128
+                    -50.00   -0.12726
+                    -46.00   -0.13079
+                    -42.00   -0.13304
+                    -38.00   -0.13468
+                    -35.00   -0.13653
+                    -32.00   -0.14079
+                    -30.00   -0.14858
+                    -27.00   -0.17402
+                    -24.00   -0.16448
+                    -22.00   -0.14996
+                    -20.00   -0.13088
+                    -19.00   -0.12079
+                    -18.00   -0.11056
+                    -17.00   -0.10024
+                    -16.00   -0.08984
+                    -15.00   -0.07937
+                    -14.00   -0.06883
+                    -13.00   -0.05826
+                    -12.00   -0.04766
+                    -11.00   -0.03705
+                    -10.00   -0.02643
+                     -9.00   -0.01583
+                     -8.00   -0.00525
+                     -7.00    0.00530
+                     -6.00    0.01581
+                     -5.00    0.02632
+                     -4.00    0.03679
+                     -3.00    0.04729
+                     -2.00    0.05777
+                     -1.00    0.06828
+                      0.00    0.07877
+                      1.00    0.08924
+                      2.00    0.09968
+                      3.00    0.11008
+                      4.00    0.12043
+                      5.00    0.13077
+                      6.00    0.14103
+                      7.00    0.15123
+                      8.00    0.16121
+                      9.00    0.17060
+                     10.00    0.17852
+                     11.00    0.18436
+                     12.00    0.18735
+                     13.00    0.18569
+                     14.00    0.17660
+                     15.00    0.16368
+                     16.00    0.15540
+                     17.00    0.15184
+                     18.00    0.14956
+                     19.00    0.14823
+                     20.00    0.14751
+                     21.00    0.14700
+                     22.00    0.14658
+                     23.00    0.14611
+                     24.00    0.14526
+                     25.00    0.13713
+                     26.00    0.13496
+                     27.00    0.13337
+                     28.00    0.13194
+                     29.00    0.13061
+                     30.00    0.12935
+                     32.00    0.12702
+                     35.00    0.12385
+                     38.00    0.12065
+                     42.00    0.11614
+                     46.00    0.11111
+                     50.00    0.10542
+                     55.00    0.09693
+                     60.00    0.08545
+                     70.00    0.05405
+                     80.00    0.01803
+                     90.00   -0.01875
+                    105.00   -0.06768
+                    120.00   -0.09664
+                    135.00   -0.09766
+                    150.00   -0.07182
+                    165.00   -0.06548
+                    180.00    0.06422
+              </tableData>
+            </table>
+            <min>
+              <value>1</value>
+              <product>
+                <property>fcs/speedbrake-pos-norm</property>
+                <value>1.33333</value>
+              </product>
+            </min>
           </product>
         </function>
       </axis>

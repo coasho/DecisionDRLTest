@@ -686,6 +686,8 @@ void ControlStack::actuate(const ActuatorCommand& a, sim::ControlInputs& out) no
     if (owner(Axis::Thrust) == RuntimeConfig::kEngines)
         for (std::size_t i = 0; i < c.engines.size(); ++i) out.throttle[i] = clamp01(orHold(c.engines[i], last_.throttle[i]));
     effectors_.speedbrake = owner(Axis::Speedbrake) == RuntimeConfig::kSupport ? demand(Axis::Speedbrake).value : kHold;
+    if (const std::uint8_t o = owner(Axis::Speedbrake); o < kSlotCount && configures_[o] && behaviors_[o]) // (a behaviour's: 4.55)
+        effectors_.speedbrake = behaviors_[o]->speedbrake();
     effectors_.pitchTrim = owner(Axis::PitchTrim) == RuntimeConfig::kSupport ? demand(Axis::PitchTrim).value : kHold;
     last_ = out;
 
