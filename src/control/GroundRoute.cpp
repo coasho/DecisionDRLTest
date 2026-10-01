@@ -137,6 +137,9 @@ Reason CapabilityHost::prepareGroundRoute(RouteCommand& route, Span<const Waypoi
         }
     }
     if (!performance_.hovers && !takeoffSpeeds(g)) return at(fromPoints ? i : air, Reason::NotImplemented); // (no speed to rotate at)
+    // a wind beyond its type's crosswind limit (4.54): across its runway; with a taxi first, from any side
+    if (!performance_.hovers && beyondCrosswind(taxi.empty() ? g.courseRad : kHold, state))
+        return at(taxi.empty() ? (fromPoints ? i : air) : taxi.front(), Reason::CrosswindLimit);
     // its taxi to the runway's start, checked as a taxi's (4.51): its corners' arcs fit its legs; with none, on the runway
     if (!taxi.empty()) {
         const Waypoint& first = waypoints[taxi.front()];

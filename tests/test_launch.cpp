@@ -102,12 +102,14 @@ Takeoff takeoff(const std::string& type, double windMs) {
 
 } // namespace
 
-TEST_CASE("launch: wings take off along their runway, calm and in a 10 m/s crosswind - rotated at Vr, the tail clear (LCH-01)",
+TEST_CASE("launch: wings take off along their runway, calm and in a 10 m/s crosswind (7 m/s for a type whose limit is 15 kt) - "
+          "rotated at Vr, the tail clear (LCH-01)",
           "[modes][launch]") {
     // a light single, a fly-by-wire fighter, an airliner with little tail clearance and a pitch-up of its own, an attack
     // aircraft parked nose-high, a tail-wheel glider-winged one on its wingtip skid, a long-winged one with adverse yaw
     for (const char* type : {"c172", "f35a", "e7a", "su25", "u2s", "rq4b"}) {
-        for (double wind : {0.0, 10.0}) {
+        const bool light = std::string(type) == "c172" || std::string(type) == "u2s"; // (their limit 15 kt: 4.54)
+        for (double wind : {0.0, light ? 7.0 : 10.0}) {
             INFO(type << " in a " << wind << " m/s crosswind");
             const Takeoff t = takeoff(type, wind);
             CHECK(t.state == ActivityState::Completed);
@@ -268,6 +270,33 @@ Rejection rejected(const std::string& type, double share, bool cancel, double le
 }
 
 } // namespace
+
+TEST_CASE("launch: a wind across the runway beyond the type's limit refused crosswind_limit, and a taxi in a wind beyond it (4.54)",
+          "[modes][launch]") {
+    // the C172's limit is 15 kt (7.72 m/s)
+    for (const double wind : {5.0, 10.0}) {
+        INFO(wind << " m/s across");
+        session::World w(options("launch-crosswind"));
+        setWind(w, 270.0, wind);
+        const auto id = parked(w, "c172");
+        runwayNorth(w, id);
+        w.step(stepsFor(w, 2.0));
+        const CommandResult r = w.submit(id, launch());
+        BehaviorCommand taxi;
+        taxi.id = "taxi";
+        const sim::VehicleState& s = *w.vehicleState(id);
+        PositionCommand ahead;
+        ahead.latitudeRad = s.latitudeRad + 200.0 / kEarthM, ahead.longitudeRad = s.longitudeRad;
+        taxi.points = {ahead};
+        if (wind > 7.72) {
+            CHECK(r.reason == Reason::CrosswindLimit);
+            CHECK(r.index == -1);
+            CHECK(w.submit(id, taxi).reason == Reason::CrosswindLimit);
+        } else {
+            CHECK(r.accepted());
+        }
+    }
+}
 
 TEST_CASE("launch: an engine lost below its decision speed - the takeoff rejected, stopped on the runway (LCH-02)", "[modes][launch]") {
     for (const char* type : {"c172", "f16c", "b52h", "e7a", "su25"}) {

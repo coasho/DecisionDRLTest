@@ -135,6 +135,7 @@ if(TARGET flightsim-viewer)
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/flight_control/FGActuator.cpp
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/FGAerodynamics.cpp
                   ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/FGMassBalance.cpp
+                  ${CMAKE_BINARY_DIR}/third_party/jsbsim-patched/models/FGAuxiliary.cpp
                   ${CMAKE_SOURCE_DIR}/cmake/JsbsimPatches.cmake
             DESTINATION share/doc/flightsim/jsbsim-changes COMPONENT viewer)
 endif()

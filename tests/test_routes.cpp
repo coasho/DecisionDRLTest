@@ -145,6 +145,37 @@ std::uint32_t wingAt(session::World& w, const std::string& type, double latitude
 
 } // namespace
 
+TEST_CASE("route: a wing's turn no steeper than its planned bank allows, and a margin over its stall - the EA-18G turns about at "
+          "1.6 times its least speed (4.54)",
+          "[modes]") {
+    // its points' bank 25 deg: its capture of its first leg, behind it, banked to 81 deg and departed (FA-10a)
+    session::World w(options("route-turn-bound"));
+    const auto id = wing(w, "ea18g", 1000.0, 100.0);
+    const sim::VehicleState s0 = *w.vehicleState(id);
+    const auto point = [&](double north, double east) {
+        Waypoint p;
+        p.latitudeRad = s0.latitudeRad + north / kEarthM, p.longitudeRad = s0.longitudeRad + east / (kEarthM * std::cos(s0.latitudeRad));
+        p.altitudeM = s0.altitudeMslM, p.altitudeReference = static_cast<double>(AltitudeReference::Msl);
+        p.speed = 102.0, p.speedReference = static_cast<double>(SpeedReference::CalibratedAirspeed), p.maxBankRad = 25.0 * kDeg;
+        return p;
+    };
+    RouteCommand route;
+    const CommandResult r = w.submit(id, route, std::vector<Waypoint>{point(-15000.0, -6000.0), point(-15000.0, 4000.0)});
+    REQUIRE(r.accepted());
+    double worstRoll = 0.0, leastCas = 1e9, lowest = s0.altitudeMslM;
+    for (double t = 0.0; t < 90.0; t += 0.5) {
+        w.step(stepsFor(w, 0.5));
+        const sim::VehicleState& s = *w.vehicleState(id);
+        worstRoll = std::max(worstRoll, std::abs(s.eulerRad[0]) / kDeg), leastCas = std::min(leastCas, s.airspeedCalibratedMs);
+        lowest = std::min(lowest, s.altitudeMslM);
+    }
+    INFO("banked " << worstRoll << " deg at most, " << leastCas << " m/s calibrated at least, " << s0.altitudeMslM - lowest << " m lost");
+    CHECK(worstRoll < 40.0);  // (atan(1.5 tan 25 deg) = 35 deg: 37.9, its roll loop overshooting)
+    CHECK(leastCas > 95.0);
+    CHECK(s0.altitudeMslM - lowest < 100.0);
+    CHECK(std::abs(degreesApart(w.vehicleState(id)->eulerRad[2], 0.0)) > 120.0); // (turned about)
+}
+
 TEST_CASE("route: every class flies its legs, fly-by turns and a fly-over point, calm and in a crosswind", "[modes]") {
     struct Aircraft {
         const char* type;

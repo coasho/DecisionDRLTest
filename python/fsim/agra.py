@@ -83,6 +83,8 @@ CANNOT_COMPLY = {
     "unknown_geometry": "UNKNOWN_ID",
     "stack_full": "INSUFFICIENT_RESOURCES",
     "takeoff_rejected": "CONSTRAINT_SAFETY",
+    "crosswind_limit": "CAPABILITY_PERFORMANCE",
+    "landing_abandoned": "CONSTRAINT_ATTEMPTS",
 }
 
 #: fsim.PlanState -> A-GRA's PlanActivationStateEnum (docs/flight-autonomy.md, 4.39): the states FA reaches

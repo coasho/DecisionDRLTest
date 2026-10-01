@@ -104,6 +104,9 @@ Reason CapabilityHost::prepareTaxi(BehaviorCommand& b, const sim::VehicleState& 
         return why;
     };
     if (performance_.hovers) return at(-1, Reason::NotImplemented); // (a rotorcraft's ground taxi is not built)
+    // a wind beyond its type's crosswind limit, from whichever side its path turns it to (4.54): no type publishes one for a
+    // taxi, so the takeoff's and landing's stands in (the U-2S ran 2.55 m off its path in 10 m/s, its limit 15 kt)
+    if (beyondCrosswind(kHold, state)) return at(-1, Reason::CrosswindLimit);
     const std::size_t n = b.points.size();
     if (n == 0 || n > TaxiBehavior::kMaxPoints) return at(static_cast<std::int16_t>(std::min<std::size_t>(n, 0x7FFF)), Reason::InvalidWaypoint);
     // its corners' arcs, a quarter wider than its tightest turn on its wheels: each leg must hold the arcs at its ends, each

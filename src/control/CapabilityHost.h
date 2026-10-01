@@ -934,6 +934,9 @@ private:
     /// A recovery's NEW (4.53; Recovery.cpp): its runway resolved, its approach laid out as a route (laidRoute_), the parameters
     /// its behaviour flies by written ("_...").
     Reason prepareRecovery(BehaviorCommand& recovery, const sim::VehicleState& state, CheckLog& log);
+    /// The wind where the aircraft is beyond its crosswind limit (4.54; Recovery.cpp): its component across `courseRad`, or with
+    /// no course (kHold: a taxi, which turns every way) all of it. False where its profile gives no limit.
+    bool beyondCrosswind(double courseRad, const sim::VehicleState& state) const noexcept;
     /// A taxi's corner radius, tightest turn, yaw acceleration and arc speed at `speed` into `out` (4.51; Taxi.cpp).
     void taxiHandling(double speed, RouteGround& out) const noexcept;
     /// The point (0 the first) whose corner or leg a taxi from (lat0, lon0) through `n` points cannot draw with corners of

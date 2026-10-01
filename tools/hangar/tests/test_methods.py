@@ -1517,6 +1517,14 @@ class GroundGeometry(unittest.TestCase):
                          (15.0, 6.7, 0.6987))
         self.assertNotIn("ground_turn_radius_m", sections(Profile().fighter(), {"options": {}}, {}, {}, {})["envelope"])
 
+    def test_the_profile_carries_its_crosswind_limit(self):
+        # the design's [operations] crosswind_kt, in m/s (4.54); none given, none written
+        from hangar.profile import sections
+        aircraft = Profile().fighter()
+        aircraft.spec["operations"] = {"crosswind_kt": 25.0}
+        self.assertEqual(sections(aircraft, {"options": {}}, {}, {}, {})["envelope"]["crosswind_max_ms"], 12.86)
+        self.assertNotIn("crosswind_max_ms", sections(Profile().fighter(), {"options": {}}, {}, {}, {})["envelope"])
+
     def test_a_tricycles_balance(self):
         # the nose wheel's share and the tip-back angle at the parked attitude:
         # the lever rule along the ground, with a nose-high stance moving the CG aft

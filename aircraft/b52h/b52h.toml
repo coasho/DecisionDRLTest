@@ -487,6 +487,14 @@ max_mach_altitude_ft = 20700
 service_ceiling_ft = 50000    # USAF fact sheet; the SAC charts give 46,900-47,700 ft at combat weight
 # climb: 6,270 ft/min (Wikipedia) - at an unstated weight, so not a target
 
+# The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
+# 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
+# B-52 Stratofortress Association, pilots on the B-52G/H flight manual: 41 kt
+# at 90 deg at the maximum gross weight, less when lighter, landed crabbed on its
+# crosswind gear (not modelled: it lands crabbed on gear that is not).
+[operations]
+crosswind_kt = 41
+
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into
 # the profile's applicability section and the sources into the file header. A characteristic

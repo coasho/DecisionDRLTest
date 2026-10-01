@@ -216,6 +216,22 @@ namespace {
 
 double known(double v, double fallback) noexcept { return std::isnan(v) ? fallback : v; }
 
+// a wing's turn rate at most (docs/flight-autonomy.md, 4.54): its planned bank, half as steep again - what the wind's track
+// and a crosswind's correction ask beyond it (the recovery's approach, planned at 25 deg and held to 25, wound up its course
+// trim: the RC-135W came onto its final 268 m off), 15 deg at least (a point planned level still turns onto its leg),
+// within its most - and no steeper than leaves its lift a margin over its stall at the airspeed it flies (its least
+// airspeed's load factor over 1.3), 15 deg at least. Bounded only by its loops' most, a route's capture of a leg behind it
+// banked the EA-18G at 1.6 times its least speed to 81 deg, and it departed
+double mostTurnRate(const Performance& f, const sim::VehicleState& s, double plannedBankRad) noexcept {
+    double bank = std::max(std::atan(1.5 * std::tan(isHold(plannedBankRad) ? 0.8 * known(f.maxBankRad, 0.52) : plannedBankRad)), 15.0 * kDeg);
+    if (!std::isnan(f.maxBankRad)) bank = std::min(bank, f.maxBankRad);
+    if (f.minCasMs > 0.0) {
+        const double ratio = std::max(s.airspeedCalibratedMs, 0.0) / f.minCasMs, n = ratio * ratio / 1.3;
+        bank = std::min(bank, std::max(n > 1.0 ? std::acos(1.0 / n) : 0.0, 15.0 * kDeg));
+    }
+    return kG * std::tan(bank) / std::max(s.airspeedTrueMs, 10.0);
+}
+
 double lateralAcceleration(const Performance& f) noexcept { return 0.8 * known(f.maxAccelerationMs2, kG * std::tan(0.35)); }
 double braking(const Performance& f) noexcept { return 0.8 * known(f.maxDecelerationMs2, known(f.maxAccelerationMs2, kG * std::tan(0.35))); }
 
@@ -330,7 +346,9 @@ VelocityCommand follow(const ControlContext& ctx, const sim::VehicleState& s, co
     const double gn = s.velocityNedMs[0], ge = s.velocityNedMs[1], g2 = gn * gn + ge * ge;
     const double dot = gn * (gn - wind.northMs) + ge * (ge - wind.eastMs); // (ground . air velocity)
     const double toHeading = g2 > 25.0 && dot > 0.25 * g2 ? std::clamp(g2 / dot, 0.5, 2.0) : 1.0;
-    return VelocityCommand{std::max(tas, 0.0), steer.verticalSpeedMs, kHold, toHeading * (curvature * vg + bandwidth * error) + trims.courseRadS, kHold, kHold};
+    const double most = mostTurnRate(perf, s, steer.bankRad);
+    return VelocityCommand{std::max(tas, 0.0), steer.verticalSpeedMs, kHold,
+                           std::clamp(toHeading * (curvature * vg + bandwidth * error) + trims.courseRadS, -most, most), kHold, kHold};
 }
 
 Fix onLine(const Line& line, double lat0, double lon0, double lat, double lon) noexcept {

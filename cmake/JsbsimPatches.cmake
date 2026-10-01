@@ -697,3 +697,29 @@ set(_new [=[  if (!FGModel::InitModel()) return false;
 ]=])
 _fsim_jsbsim_edit(_text _old _new FGMassBalance.cpp "reset")
 _fsim_jsbsim_write(models/FGMassBalance.cpp _text Models)
+
+# ---------------------------------------------------------------------------
+# models/FGAuxiliary.cpp: the angle of attack's rate in a flow from the side.
+#
+# The angle of attack's rate is (u w' - w u') / (u^2 + w^2): the turn of the
+# flow in the aircraft's plane of symmetry, divided by its speed in that plane
+# squared. As the flow turns to come from the side - an aircraft stopped on a
+# runway in a crosswind, its flow 90 degrees of sideslip - u and w fall towards
+# zero while the flow is still felt, and the rate grows without bound: the
+# E-7A, stopped in a 10 m/s wind from its side, read 38 rad/s, its lift and
+# pitching moment's rate terms gave 33,000 lbf and 1.8 million lbf ft, and it
+# was thrown 15 m off the runway (docs/flight-autonomy.md, 4.54). Beyond 60
+# degrees of sideslip the rate is now faded with the share of the flow in that
+# plane, to nothing in a flow from the side; within 60 degrees nothing changes.
+# ---------------------------------------------------------------------------
+_fsim_jsbsim_read(models/FGAuxiliary.cpp _text)
+set(_old [=[      adot = (vAeroUVW(eU)*in.vUVWdot(eW) - vAeroUVW(eW)*in.vUVWdot(eU))/mUW;
+]=])
+set(_new [=[      adot = (vAeroUVW(eU)*in.vUVWdot(eW) - vAeroUVW(eW)*in.vUVWdot(eU))/mUW;
+      // flightsim patch (cmake/JsbsimPatches.cmake): beyond 60 deg of sideslip
+      // faded with the share of the flow in the plane of symmetry (it grew
+      // without bound as the flow turned to come from the side)
+      if (mUW < 0.25*Vt2) adot *= mUW/(0.25*Vt2);
+]=])
+_fsim_jsbsim_edit(_text _old _new FGAuxiliary.cpp "sideslip")
+_fsim_jsbsim_write(models/FGAuxiliary.cpp _text Models)

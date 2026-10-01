@@ -65,7 +65,8 @@ TEST_CASE("taxi: a wing taxies its route within 2 m of its path and stops at its
     const std::vector<std::pair<double, double>> route = {{150.0, 0.0}, {150.0, 200.0}, {350.0, 200.0}, {350.0, 50.0}};
     const std::vector<std::pair<double, double>> path = {{0.0, 0.0}, {150.0, 0.0}, {150.0, 200.0}, {350.0, 200.0}, {350.0, 50.0}}; // (from where it starts)
     for (const char* type : {"c172", "f16c", "kc135r", "c130j", "b52h", "u2s"}) {
-        for (double wind : {0.0, 10.0}) {
+        const bool light = std::string(type) == "c172" || std::string(type) == "u2s"; // (their limit 15 kt: 4.54)
+        for (double wind : {0.0, light ? 7.0 : 10.0}) {
             if (wind > 0.0 && std::string(type) == "u2s") continue; // (2.55 m across the wind on its wingtip skid: 4.51)
             INFO(type << " in a " << wind << " m/s crosswind");
             session::World w(options(("taxi-" + std::string(type)).c_str()));

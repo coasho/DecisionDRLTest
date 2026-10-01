@@ -108,6 +108,10 @@ struct EnvelopeSection {
     /// On its wheels: the yaw acceleration its steering gives it, full over, rad/s^2 - how quickly a turn there builds (a
     /// heavy's 0.03 to 0.07, a fighter's 0.4 to 0.7).
     double groundYawAccelRadS2 = kUnknown;
+    /// The 90 deg crosswind it lands and takes off in at most, m/s: its type's published one, else its flying qualities'
+    /// requirement (its design's [operations]; docs/flight-autonomy.md, 4.54). Beyond it a recovery waves off, and a
+    /// launch or a taxi is refused.
+    double crosswindMaxMs = kUnknown;
     // Limits the aircraft's own flight control law already enforces (a
     // fly-by-wire law's g and alpha limiters): protection clamps setpoints to
     // them but adds no feedback limiter of its own, so the two cannot fight.

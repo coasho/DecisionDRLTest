@@ -285,6 +285,13 @@ max_mach = 0.715
 max_mach_altitude_ft = 60000
 service_ceiling_ft = 70000    # "above 70,000 ft" (USAF); at full weight it starts lower
 
+# The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
+# 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
+# AOPA Pilot, "Flying the U-2" (January 2001): "Maximum allowable crosswind is
+# 15 kt."
+[operations]
+crosswind_kt = 15
+
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into
 # the profile's applicability section and the sources into the file header. A characteristic

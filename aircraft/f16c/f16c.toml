@@ -339,6 +339,12 @@ reference = "jsbsim:f16"
 # yaw control power are 1/2.865 and 1/1.910 of NASA's
 reference_control_scale = { aileron = 2.865, rudder = 1.910 }
 
+# The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
+# 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
+# F-16 flight manual (-1), Block 10/15 MLU: 25 kt on a dry runway (f-16.net).
+[operations]
+crosswind_kt = 25
+
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into
 # the profile's applicability section and the sources into the file header. A characteristic

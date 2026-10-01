@@ -63,6 +63,10 @@ these changes:
   than it came in, the step applies instead the forces that stop the contact points'
   approach, each no more than its contact's own, solved as JSBSim solves its friction, and
   bounds the friction by them. Otherwise the ground's forces are upstream's, bit for bit.
+- In `src/models/FGAuxiliary.cpp`, the angle of attack's rate fades beyond 60 degrees of sideslip with the share of the
+  flow in the aircraft's plane of symmetry, to nothing in a flow from the side. Upstream's grows without bound as that
+  share falls to nothing: an aircraft stopped on a runway in a crosswind read 38 rad/s and was thrown off it by its rate
+  terms (docs/flight-autonomy.md, 4.54). Within 60 degrees it is upstream's, bit for bit.
 - A reset (`ResetToInitialConditions`) returns what a load leaves, where upstream's kept
   what the last run left: in `src/models/flight_control/FGActuator.cpp`, an actuator's first
   run after a reset passes its input through, as a new actuator's does; in

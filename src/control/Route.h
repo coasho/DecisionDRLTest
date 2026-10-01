@@ -113,6 +113,7 @@ struct Steer {
     SpeedReference reference = SpeedReference::TrueAirspeed;
     double speedLimitMs = std::numeric_limits<double>::infinity(); ///< a rotorcraft's path speed at most: a curve's, a stop
     double verticalSpeedMs = 0.0;           ///< what the altitude profile asks
+    double bankRad = kHold;                 ///< a wing's: the bank its path's turns are planned with; kHold: 80 % of its most
 };
 
 /// What the follower integrates.

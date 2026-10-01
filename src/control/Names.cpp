@@ -61,6 +61,8 @@ const char* reasonName(Reason reason) noexcept {
     case Reason::UnknownGeometry: return "unknown_geometry";
     case Reason::StackFull: return "stack_full";
     case Reason::TakeoffRejected: return "takeoff_rejected";
+    case Reason::CrosswindLimit: return "crosswind_limit";
+    case Reason::LandingAbandoned: return "landing_abandoned";
     default: return "?";
     }
 }
@@ -120,6 +122,8 @@ const char* reasonDescription(Reason reason) noexcept {
     case Reason::UnknownGeometry: return "it names an operational point the world does not keep";
     case Reason::StackFull: return "no altitude of its stack is free of the other aircraft marshalling round its point";
     case Reason::TakeoffRejected: return "it rejected its takeoff below its decision speed and stopped on the runway";
+    case Reason::CrosswindLimit: return "the wind across the runway is beyond the aircraft's limit";
+    case Reason::LandingAbandoned: return "it went around from its last approach and flew its missed approach";
     default: return "";
     }
 }

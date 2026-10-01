@@ -1077,6 +1077,49 @@ int alloc() {
             ++failures;
         }
     }
+    {
+        // a recovery waved off (docs/flight-autonomy.md, 4.54): the F-16C across 15 m/s, beyond its 25 kt - its go-arounds, its
+        // circuit and second approach begun inside steps, its failure - counted from its first step until it ends
+        session::World rw(benchWorld("bench-alloc-goaround", 1));
+        sim::EnvironmentState e = rw.environment();
+        e.windDirectionDeg = 270.0, e.windSpeedMs = 15.0;
+        rw.setEnvironment(e);
+        session::VehicleSpec flying = flights::spec("f16c-goaround", "jsbsim:f16c", 0, 300.0, 100.0);
+        flying.initial.headingDeg = 0.0;
+        const auto id = rw.createVehicle(flying);
+        for (int k = 0; k < 30; ++k) rw.step();
+        const sim::VehicleState s0 = *rw.vehicleState(id);
+        constexpr double kR = 6371000.0;
+        const double field = s0.altitudeMslM - s0.altitudeAglM, lat0 = s0.latitudeRad + 20000.0 / kR;
+        Runway runway;
+        runway.id = 3;
+        runway.landing.start = runway.landing.threshold = RunwayPoint{lat0, s0.longitudeRad, field};
+        runway.landing.limit = RunwayPoint{lat0 + 3000.0 / kR, s0.longitudeRad, field};
+        Airfield airfield;
+        airfield.id = 7;
+        airfield.runways = {runway};
+        if (rw.loadAirfield(id, airfield) != Reason::None) std::fprintf(stderr, "go-around: airfield refused\n"), std::exit(3);
+        BehaviorCommand b;
+        b.id = "recovery";
+        b.params = {{"airfield", 7.0}, {"runway", 3.0}};
+        const CommandResult r = rw.submit(id, b);
+        if (!r.accepted()) std::fprintf(stderr, "go-around: refused %s\n", reasonName(r.reason)), std::exit(3);
+        std::uint64_t n, fm;
+        {
+            Counting counting;
+            const int steps = static_cast<int>(3000.0 / (rw.dt() * rw.frameSkip())); // (3,000 s at most: it fails in about 1,000)
+            for (int k = 0; k < steps && rw.activity(r.activity)->live(); ++k) rw.step();
+            n = counting.count();
+            fm = counting.flightModel();
+        }
+        const bool wavedOff = rw.activity(r.activity)->state == ActivityState::Failed && rw.activity(r.activity)->reason == Reason::CrosswindLimit;
+        std::printf("world: %-19s %12llu   (JSBSim: %llu)\n", "go-around", static_cast<unsigned long long>(n), static_cast<unsigned long long>(fm));
+        failures += n != 0;
+        if (!wavedOff) {
+            std::printf("FAIL: the recovery was not waved off\n");
+            ++failures;
+        }
+    }
     std::printf(failures ? "FAIL: %d case(s) allocate\n" : "no allocations\n", failures);
     return failures ? 1 : 0;
 }

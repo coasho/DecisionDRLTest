@@ -319,6 +319,14 @@ max_mach = 1.6                # at altitude, full afterburner
 max_mach_altitude_ft = 40000
 operational_ceiling_ft = 50000 # published: the clearance, not where the climb runs out
 
+# The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
+# 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
+# MIL-F-8785C 3.3.7 (Table XI): the 90 deg crosswind a Class II to IV
+# aeroplane is to take off and land in (Level 1). No limit is published for
+# the type: its flying qualities' requirement stands in for it.
+[operations]
+crosswind_kt = 30
+
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into
 # the profile's applicability section and the sources into the file header. A characteristic

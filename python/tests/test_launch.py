@@ -5,6 +5,7 @@ import math
 import unittest
 
 import fsim
+import fsim.agra
 
 R = 6371008.8  # the platform's mean radius
 
@@ -36,7 +37,7 @@ def fly(w, activity, seconds):
 
 class LaunchTest(unittest.TestCase):
     def test_a_wing_takes_off_along_its_runway(self):
-        for wind in (0.0, 10.0):
+        for wind in (0.0, 7.0):  # (the C172's crosswind limit: 15 kt, 7.72 m/s - 4.54)
             with self.subTest(wind=wind):
                 w = world("py-launch", wind)
                 v, lat0, lon0 = parked(w, "c172")
@@ -51,7 +52,7 @@ class LaunchTest(unittest.TestCase):
                     if a.info.state not in (fsim.ActivityState.PENDING, fsim.ActivityState.ACTIVE):
                         break
                 self.assertEqual(a.info.state, fsim.ActivityState.COMPLETED)
-                self.assertLess(worst, 22.5)  # (half a runway: 0.2 m calm, 6.1 m in 10 m/s across it)
+                self.assertLess(worst, 22.5)  # (half a runway)
                 self.assertGreater(v.state.altitude_agl_m, 400.0)
 
     def test_a_rotorcraft_lifts_to_its_hover(self):
@@ -175,6 +176,21 @@ class LaunchTest(unittest.TestCase):
         with self.assertRaises(fsim.Rejected) as refused:
             flying.submit_route(taxi + runway + air)
         self.assertEqual(refused.exception.reason, "airborne")
+
+    def test_a_crosswind_limit(self):
+        # beyond the C172's 15 kt (4.54): its launch refused crosswind_limit, A-GRA's CAPABILITY_PERFORMANCE; within it, flown
+        w = world("py-crosswind", wind=10.0)
+        v, _, _ = parked(w, "c172")
+        with self.assertRaises(fsim.Rejected) as refused:
+            v.submit_behavior("launch", airfield=7, runway=3)
+        self.assertEqual((refused.exception.reason, refused.exception.index), ("crosswind_limit", -1))
+        self.assertEqual(fsim.agra.CANNOT_COMPLY["crosswind_limit"], "CAPABILITY_PERFORMANCE")
+        self.assertEqual(fsim.agra.CANNOT_COMPLY["landing_abandoned"], "CONSTRAINT_ATTEMPTS")
+        self.assertAlmostEqual(v.profile_value("envelope/crosswind_max_ms"), 7.72)
+        self.assertEqual(v.support("fsim.guidance.recovery/go_around").support, fsim.Support.SUPPORTED)
+        w = world("py-crosswind-within", wind=5.0)
+        v, _, _ = parked(w, "c172")
+        self.assertEqual(v.submit_behavior("launch", airfield=7, runway=3).info.state, fsim.ActivityState.PENDING)
 
     def test_a_recovery(self):
         # RECOVERY to a runway 8 km ahead (4.53): down the glide slope, touched down in the zone below its sink-rate limit, stopped

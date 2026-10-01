@@ -334,6 +334,12 @@ height = 11.66                  # 38 ft 3 in
 max_speed_ktas = 261            # at max_speed_altitude_ft: calibrates the extra drag
 max_speed_altitude_ft = 20000
 
+# The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
+# 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
+# C-130H operating limits (baseops.net): 35 kt on a dry runway.
+[operations]
+crosswind_kt = 35
+
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into
 # the profile's applicability section and the sources into the file header. A characteristic

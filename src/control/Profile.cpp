@@ -84,6 +84,7 @@ const Field kFields[] = {
     {"envelope", "ground_pitch_max_deg", Kind::Real, 0, 90, kDeg, AT(envelope.groundPitchMaxRad)},
     {"envelope", "ground_turn_radius_m", Kind::Real, 0, 1000, 1, AT(envelope.groundTurnRadiusM)},
     {"envelope", "ground_yaw_accel_rad_s2", Kind::Real, 0, 100, 1, AT(envelope.groundYawAccelRadS2)},
+    {"envelope", "crosswind_max_ms", Kind::Real, 0, 100, 1, AT(envelope.crosswindMaxMs)},
     {"envelope", "law_load_factor", Kind::Flag, 0, 1, 1, AT(envelope.lawLoadFactor)},
     {"envelope", "law_alpha", Kind::Flag, 0, 1, 1, AT(envelope.lawAlpha)},
     {"envelope", "law_roll_rate", Kind::Flag, 0, 1, 1, AT(envelope.lawRollRate)},

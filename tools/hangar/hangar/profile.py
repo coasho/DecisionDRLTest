@@ -165,6 +165,11 @@ def sections(aircraft, fbw, reference, identified, flown, tables=None, tail_down
         envelope["ground_turn_radius_m"] = round(turn_radius, 2)
     if yaw_accel is not None and 0.0 < yaw_accel < 100.0:
         envelope["ground_yaw_accel_rad_s2"] = round(yaw_accel, 4)
+    # the 90 deg crosswind it lands and takes off in at most: its type's published one, else its flying qualities'
+    # requirement - the design's [operations], its source beside it (docs/flight-autonomy.md, 4.54)
+    crosswind = spec.get("operations", {}).get("crosswind_kt")
+    if crosswind is not None and 0.0 < float(crosswind) < 200.0:
+        envelope["crosswind_max_ms"] = round(float(crosswind) * KT, 2)
     if envelope:
         out["envelope"] = envelope
 

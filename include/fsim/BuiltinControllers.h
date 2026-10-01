@@ -102,7 +102,10 @@ public:
     Pid pitch{2.5, 0.4, 0.5, 0.5};
     Pid airspeed{0.06, 0.02, 0.0, 0.5, 0.0, 1.0};
     double headingGain = 1.5;      ///< rad roll per rad heading error
-    double rudderBetaGain = 1.0;   ///< rudder per rad sideslip
+    /// rudder per rad sideslip: a positive rudder yaws the nose left and a positive sideslip is the nose left of the air's
+    /// path, so it is negative - in a 30 deg bank the stock C172P slipped 1.12 deg at +1, 0.65 at -1 (docs/flight-autonomy.md,
+    /// 4.54). An aircraft's law sets its own from its rudder's measured step (Laws.cpp)
+    double rudderBetaGain = -1.0;
     double throttleFeedforward = 0.55;
     double maxRollRateRadS = 1.5;  ///< roll setpoint slew
     AirspeedSchedule schedule;     ///< "schedule.tas_ms", "schedule.eas_ms"
@@ -183,7 +186,7 @@ public:
     Pid loadFactor{0.35, 0.3, 0.15, 0.6};
     Pid rollRate{0.8, 0.2, 0.0, 0.5};
     Pid longitudinal{0.15, 0.05, 0.0, 0.5, 0.0, 1.0};
-    double rudderBetaGain = 1.0;
+    double rudderBetaGain = -1.0; ///< as the attitude loop's
     double throttleFeedforward = 0.6;
     double loadFactorFeedforward = 0.0; ///< nose-up stick per g beyond what neutral stick gives; 0 = none
     /// What neutral stick gives: 1 = cos(pitch) cos(roll) - it holds the flight

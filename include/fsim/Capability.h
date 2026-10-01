@@ -171,6 +171,9 @@ enum class Reason : std::uint8_t {
     StackFull,          ///< a marshall refused: no altitude of its stack is free of the other aircraft marshalling round its point
     // a launch (docs/flight-autonomy.md, 4.50)
     TakeoffRejected,    ///< a launch Failed: FA rejected the takeoff below its decision speed - it could not reach its rotation speed in the runway left, or lost its line - and stopped on the runway
+    // go-arounds and crosswinds (docs/flight-autonomy.md, 4.54)
+    CrosswindLimit,     ///< a launch or a taxi refused, or a recovery Failed (waved off on its last approach): the wind across the runway is beyond the aircraft's limit
+    LandingAbandoned,   ///< a recovery Failed: it went around from its last approach - not stable, bounced, or not down in the touchdown zone - and flew its missed approach
     Count
 };
 

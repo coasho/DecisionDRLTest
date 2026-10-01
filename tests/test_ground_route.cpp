@@ -127,7 +127,7 @@ TEST_CASE("ground route: a wing taxies its taxi points, takes off along its runw
           "[modes][ground_route]") {
     // a light single, a fighter, a heavy, and the two that flew into the ground at their climb speeds in the first turn
     for (const char* type : {"c172", "f16c", "kc135r", "ea18g", "rq4b"}) {
-        for (double wind : {0.0, 10.0}) {
+        for (double wind : {0.0, std::string(type) == "c172" ? 7.0 : 10.0}) { // (the C172's limit 15 kt: 4.54)
             if (wind > 0.0 && (std::string(type) == "ea18g" || std::string(type) == "rq4b")) continue;
             INFO(type << " in a " << wind << " m/s crosswind");
             session::World w(options(("ground-route-" + std::string(type)).c_str()));

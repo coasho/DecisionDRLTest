@@ -682,6 +682,7 @@ Command RouteBehavior::update(const ControlContext& ctx, const Command& in) {
     route::Steer steer;
     steer.speed = segment.speed;
     steer.reference = speedReferenceOf(segment.speedReference, hovers_ ? SpeedReference::GroundSpeed : SpeedReference::TrueAirspeed);
+    steer.bankRad = segment.maxBankRad;
     if (!isHold(segment.speedOptimization) || !isHold(rampFromMs_)) chooseSpeed(ctx, segment, steer); // (4.32)
     if (arrivalState_ >= 0 && routeM - lapStartM_ + arrivalShiftM_ >= p.stateLapM[arrivalState_]) nextArrival(routeM - lapStartM_ + arrivalShiftM_); // (one passed: 4.34)
     if ((arrivalPoint_ >= 0 || arrivalState_ >= 0) && !ended_) scheduleArrival(ctx, perf, routeM, steer);          // (4.33)

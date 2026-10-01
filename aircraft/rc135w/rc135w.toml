@@ -428,6 +428,13 @@ max_mach = 0.86
 max_mach_altitude_ft = 30000
 operational_ceiling_ft = 50000  # USAF fact sheet: a clearance
 
+# The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
+# 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
+# the KC-135's, its airframe's: 25 kt (The War Zone, on an RC-135's crosswind
+# landing at RAF Mildenhall).
+[operations]
+crosswind_kt = 25
+
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into
 # the profile's applicability section and the sources into the file header. A characteristic

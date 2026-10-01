@@ -351,6 +351,13 @@ max_mach = 0.80
 max_mach_altitude_ft = 35000
 operational_ceiling_ft = 41000  # Wikipedia
 
+# The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
+# 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
+# Boeing 737-700 without winglets (b737.org.uk, Boeing's FCTM): 33 kt landing,
+# the maximum demonstrated.
+[operations]
+crosswind_kt = 33
+
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into
 # the profile's applicability section and the sources into the file header. A characteristic

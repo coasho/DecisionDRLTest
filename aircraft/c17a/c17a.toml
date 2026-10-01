@@ -406,6 +406,12 @@ max_mach = 0.875
 max_mach_altitude_ft = 28000
 operational_ceiling_ft = 45000  # FL450 (USAF): a clearance
 
+# The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
+# 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
+# C-17 flight manual's 25 kt on a paved runway, as c17pilot.com reports it.
+[operations]
+crosswind_kt = 25
+
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into
 # the profile's applicability section and the sources into the file header. A characteristic

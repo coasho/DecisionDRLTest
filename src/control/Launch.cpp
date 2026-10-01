@@ -117,6 +117,9 @@ Reason CapabilityHost::prepareLaunch(BehaviorCommand& b, const sim::VehicleState
     // from wherever it is
     if (!performance_.hovers && b.params.count("_mode") == 0 && !onRunway(line, state)) return detail.index = 1, Reason::InvalidParameter;
     if (!performance_.hovers && !takeoffSpeeds(line)) return detail.index = 1, Reason::NotImplemented; // (no speed to rotate at)
+    // a wind across the runway beyond its type's limit (4.54): the U-2S, its limit 15 kt, ran 24 to 69 m off the line rejecting
+    // its takeoffs in 10 m/s
+    if (!performance_.hovers && beyondCrosswind(line.courseRad, state)) return detail.index = -1, Reason::CrosswindLimit;
     LaunchBehavior::write(line, b);
     return Reason::None;
 }

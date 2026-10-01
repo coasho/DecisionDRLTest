@@ -3,7 +3,9 @@
 // its glide slope, a rotorcraft's to a hover over the runway - and the "recovery" behaviour flies it, then a wing's flare,
 // touchdown and rollout, a rotorcraft's vertical descent to the ground.
 #include "control/CapabilityHost.h"
+#include "control/PlanStore.h"
 #include "control/Registry.h"
+#include "control/Route.h"
 #include "core/Geodesy.h"
 #include "fsim/ControllerRegistry.h"
 #include "fsim/BuiltinControllers.h"
@@ -54,6 +56,25 @@ constexpr double kHoverLeastAglM = 1.5, kHoverMostAglM = 10.0;
 constexpr double kHoverAlongM = 60.0;
 constexpr double kDescentMs = 0.7;            // its vertical descent
 constexpr double kSettledS = 1.0;             // on the ground so long: landed
+// its go-arounds (4.54): an approach not stable below kGateAglM - off the centre line more than kLateralShare of its way to the
+// aim (kLateralLeastM at least), off the glide slope more than kVerticalRad (one dot: kVerticalLeastM at least), slower than
+// its approach speed by kSlowMs or faster by kFastMs, or sinking kSinkMarginMs faster than the slope asks (kSinkLeastMs at
+// least) - for kUnstableS; a crosswind beyond its limit on the centre line for as long; a bounce of kBounceM; no touchdown
+// by the touchdown zone's end, the farther of kZoneM beyond its aim and a third of the runway (a half at most). It
+// approaches kApproaches times at most, then flies its missed approach and fails
+constexpr double kGateAglM = 150.0;           // 500 ft: the stabilized approach's gate in sight of the runway (FSF ALAR 7.1)
+constexpr double kLateralShare = 0.02, kLateralLeastM = 15.0;
+constexpr double kVerticalRad = 0.35 * kDeg, kVerticalLeastM = 8.0;
+constexpr double kSlowMs = 5.0 * 0.514444, kFastMs = 20.0 * 0.514444; // Vref -5 kt to +20 kt (FSF ALAR 7.1)
+constexpr double kSinkLeastMs = 1000.0 * 0.3048 / 60.0, kSinkMarginMs = 2.0; // 1,000 ft/min, or the slope's sink and 2 m/s
+constexpr double kUnstableS = 2.0;
+constexpr double kBounceM = 3.0;
+constexpr double kZoneM = 450.0;
+constexpr std::uint32_t kApproaches = 2;
+constexpr double kCircuitLeastAglM = 300.0;   // its go-around's climb to its intermediate fix's altitude, this high at least
+constexpr double kClimbedM = 30.0;            // ...within this of it, past the runway's end: its missed approach
+constexpr std::uint32_t kMissedMost = 16;     // FA's chained missed approach: so many of its points at most
+constexpr double kGoAroundLookM = 2000.0;     // its go-around back onto the centre line, on a point this far ahead
 
 /// Along and across (+ right) the line from (lat0, lon0) on `course`.
 void onLine(double lat0, double lon0, double course, double lat, double lon, double& along, double& cross) noexcept {
@@ -109,6 +130,14 @@ Reason CapabilityHost::landingLine(double airfieldId, double runwayId, RouteGrou
     return Reason::None;
 }
 
+bool CapabilityHost::beyondCrosswind(double courseRad, const sim::VehicleState& state) const noexcept {
+    if (!profile_ || !std::isfinite(profile_->envelope.crosswindMaxMs)) return false;
+    const WindEstimate wind = checkWind(state);
+    const double across = isHold(courseRad) ? std::hypot(wind.northMs, wind.eastMs)
+                                            : std::abs(-wind.northMs * std::sin(courseRad) + wind.eastMs * std::cos(courseRad));
+    return wind.valid && across > profile_->envelope.crosswindMaxMs;
+}
+
 Reason CapabilityHost::prepareRecovery(BehaviorCommand& b, const sim::VehicleState& state, CheckLog& log) {
     CommandResult& detail = log.result;
     // a policy's parameters are its own: what the host writes ("_...") it cannot give (4.50)
@@ -118,7 +147,7 @@ Reason CapabilityHost::prepareRecovery(BehaviorCommand& b, const sim::VehicleSta
     if (const Reason why = landingLine(b.param("airfield", 0.0), b.param("runway", 0.0), line, detail); why != Reason::None) return why;
     const double elevation = line.elevationM, course = line.courseRad;
     const double lat0 = line.startLatitudeRad, lon0 = line.startLongitudeRad;
-    Waypoint points[4];
+    Waypoint points[4 + kMissedMost];
     RouteCommand laid;
     if (performance_.hovers) {
         // a rotorcraft: onto the centre line 1 km out, 100 m up, then to a hover 10 m over the runway, stopped there
@@ -171,10 +200,42 @@ Reason CapabilityHost::prepareRecovery(BehaviorCommand& b, const sim::VehicleSta
         points[1] = along(lat0, lon0, course, -fixM, elevation + height, vfix, cas);
         points[2] = along(lat0, lon0, course, -finalM, elevation + height, vapp, cas);
         points[3] = along(lat0, lon0, course, aim, elevation, vapp, cas);
-        for (Waypoint& w : points) w.maxBankRad = kApproachBankRad;
+        for (std::uint32_t k = 0; k < 4; ++k) points[k].maxBankRad = kApproachBankRad;
         points[2].kind = points[3].kind = static_cast<double>(EndPointKind::Waypoint); // (flown over: onto the line, down it)
-        if (const Reason why = checkRoute(laid, Span<const Waypoint>(points, 4), state, log); why != Reason::None) return why;
-        b.params["_vapp"] = vapp, b.params["_aim"] = aim;
+        // its missed approach (RCV-03): FA's own landing path for this runway - a path of a plan FA keeps, its type Landing, its
+        // airfield and runway these - and the path a branch of it leads to, from where it leads on to its end, laid after the
+        // approach (VI 1.2.6.3: "additional defined Path for missed approach hold procedure, along with conditional chaining to
+        // tie it to the main approach route"). Without one, the circuit back to the approach
+        std::uint32_t count = 4;
+        static const std::vector<PlanEntry> kNoPlans;
+        for (const PlanEntry& e : plans_ ? plans_->plans : kNoPlans) {
+            const RoutePlan& p = e.kept;
+            for (std::size_t i = 0; e.faOwned && count == 4 && i < p.paths.size(); ++i) {
+                const bool here = p.paths[i].type == static_cast<double>(PathType::Landing);
+                bool named = false;
+                for (const PathMetadata& m : p.pathMetadata)
+                    named = named || (m.path == i && static_cast<double>(m.airfield) == line.airfield && static_cast<double>(m.runway) == line.runway);
+                if (!here || !named) continue;
+                const RoutePath& landing = p.paths[i];
+                for (const RouteBranch& branch : p.branches) {
+                    if (count > 4 || branch.point < landing.first || branch.point >= landing.first + landing.count || !(branch.next >= 0.0)) continue;
+                    const auto next = static_cast<std::uint32_t>(branch.next);
+                    for (const RoutePath& q : p.paths) {
+                        if (&q == &landing || next < q.first || next >= q.first + q.count) continue;
+                        for (std::uint32_t k = next; k < q.first + q.count && k < p.waypoints.size() && count < 4 + kMissedMost; ++k) {
+                            points[count] = p.waypoints[k];
+                            points[count].next = points[count].terminator = kHold; // (flown in order, its legs straight)
+                            ++count;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        if (const Reason why = checkRoute(laid, Span<const Waypoint>(points, count), state, log); why != Reason::None) return why;
+        b.params["_vapp"] = vapp, b.params["_aim"] = aim, b.params["_missed"] = count > 4 ? 4.0 : 0.0;
+        b.params["_circuit"] = std::max(points[1].altitudeM, elevation + kCircuitLeastAglM);
+        if (profile_ && std::isfinite(profile_->envelope.crosswindMaxMs)) b.params["_xwind"] = profile_->envelope.crosswindMaxMs;
     }
     b.params["_thr_lat"] = lat0, b.params["_thr_lon"] = lon0, b.params["_course"] = course, b.params["_length"] = line.lengthM;
     b.params["_elev"] = elevation, b.params["_end"] = laid.end;
@@ -201,7 +262,54 @@ void RecoveryBehavior::start(const ControlContext& ctx, const BehaviorCommand& b
     o.end = b.param("_end", 0.0);
     phase_ = Phase::Approach, configured_ = false, settledS_ = 0.0, lastS_ = -1.0, descentMslM_ = kHold, speedAddMs_ = 0.0;
     flaps_ = kLeastFlaps;
+    // its go-arounds (4.54)
+    crosswindMaxMs_ = b.param("_xwind", kHold), circuitMslM_ = b.param("_circuit", elevationM_ + kCircuitLeastAglM);
+    missedFrom_ = static_cast<std::uint32_t>(b.param("_missed", 0.0));
+    zoneEndM_ = std::min(std::max(aimM_ + kZoneM, lengthM_ / 3.0), lengthM_ / 2.0);
+    wind_.reset();
+    touchAglM_ = unstableS_ = crosswindS_ = 0.0;
+    goArounds_ = 0, cause_ = GoAround::None, gearUp_ = lastApproach_ = false, failed_ = Reason::None;
     route_->begin(ctx, options_);
+}
+
+void RecoveryBehavior::goAroundFrom(GoAround cause) noexcept {
+    // full power, climbing straight ahead at the speed it turned onto its approach at, its flaps back to a takeoff's; its gear
+    // up once it climbs (ICAO Doc 8168's missed approach: the climb straight on, then the turn)
+    phase_ = Phase::GoAround, cause_ = cause, ++goArounds_;
+    lastApproach_ = goArounds_ >= kApproaches;
+    flaps_ = kLeastFlaps, speedAddMs_ = 0.0, unstableS_ = crosswindS_ = 0.0;
+}
+
+void RecoveryBehavior::approachAgain(const ControlContext& ctx, std::uint32_t from) {
+    // its route again from `from`: the approach's base point (0), or its chained missed approach's first
+    auto& o = std::get<RouteCommand>(options_);
+    o.start = static_cast<double>(from); // (kept: the route plans afresh when its options change)
+    route_->begin(ctx, options_);
+    phase_ = from == 0 ? Phase::Approach : Phase::Missed;
+    configured_ = gearUp_ = false, flaps_ = kLeastFlaps, speedAddMs_ = 0.0;
+}
+
+Command RecoveryBehavior::goAround(const ControlContext& ctx, double alongM, double crossM) {
+    const auto& s = ctx.sensed;
+    static const Performance kNone{};
+    const Performance& perf = ctx.performance ? *ctx.performance : kNone;
+    // its gear up once it climbs - or level at its altitude, waved off there - clear of the ground
+    if (!gearUp_ && (-s.velocityNedMs[2] > 1.0 || s.altitudeMslM >= circuitMslM_ - kClimbedM) && s.altitudeAglM > 15.0) gearUp_ = true;
+    if (s.altitudeMslM >= circuitMslM_ - kClimbedM && alongM >= lengthM_) { // climbed out: its missed approach
+        if (lastApproach_ && missedFrom_ == 0) {
+            failed_ = cause_ == GoAround::Crosswind ? Reason::CrosswindLimit : Reason::LandingAbandoned;
+        } else {
+            approachAgain(ctx, missedFrom_);
+            return route_->update(ctx, options_);
+        }
+    }
+    // along the extended centre line, its heading crabbed into the wind (on the runway's heading alone, the F-16C drifted 2.8 km
+    // across 15 m/s before its missed approach), to the runway's end - its missed approach point - and its altitude
+    const double tasPerCas = s.airspeedTrueMs / std::max(s.airspeedCalibratedMs, 1.0);
+    const double across = -wind_.northMs * std::sin(courseRad_) + wind_.eastMs * std::cos(courseRad_); // (to the right of it)
+    const double track = courseRad_ - std::clamp(std::atan(crossM / kGoAroundLookM), -0.5, 0.5);
+    const double heading = geo::wrapPi(track - std::asin(std::clamp(across / std::max(s.airspeedTrueMs, 10.0), -0.5, 0.5)));
+    return VelocityCommand{kManoeuvreShare * vappMs_ * tasPerCas, route::verticalSpeedTo(circuitMslM_, 0.0, s, perf, false), heading, kHold, kHold, kHold};
 }
 
 Command RecoveryBehavior::update(const ControlContext& ctx, const Command& in) {
@@ -213,22 +321,60 @@ Command RecoveryBehavior::update(const ControlContext& ctx, const Command& in) {
 
 Command RecoveryBehavior::runway(const ControlContext& ctx, const Command& in, double dt) {
     const auto& s = ctx.sensed;
-    if (phase_ == Phase::Rollout) return rollout_->update(ctx, in);
+    wind_.update(s, dt);
+    double alongM, crossM;
+    onLine(thrLat_, thrLon_, courseRad_, s.latitudeRad, s.longitudeRad, alongM, crossM);
+    if (phase_ == Phase::Rollout) {
+        // a bounce of more than kBounceM, still fast: a balked landing - it goes around (4.54)
+        if (s.onGround || s.altitudeAglM - touchAglM_ <= kBounceM || s.airspeedCalibratedMs < 0.8 * vappMs_) return rollout_->update(ctx, in);
+        goAroundFrom(GoAround::Bounce);
+    }
+    if (phase_ == Phase::GoAround) return goAround(ctx, alongM, crossM);
+    if (phase_ == Phase::Missed) { // its chained missed approach flown: approaching again, or on its last, failed at its end
+        Command out = route_->update(ctx, options_);
+        if (!route_->finished()) return out;
+        if (lastApproach_) failed_ = cause_ == GoAround::Crosswind ? Reason::CrosswindLimit : Reason::LandingAbandoned;
+        else approachAgain(ctx, 0);
+        return route_->update(ctx, options_);
+    }
     if (s.onGround) { // touched down: the rollout - idle, its brakes, steered onto the centre line, its nose down, to a stop
         RouteGround line;
         line.startLatitudeRad = thrLat_, line.startLongitudeRad = thrLon_, line.courseRad = courseRad_, line.lengthM = lengthM_;
         line.airfield = airfield_, line.runway = runway_;
         rollout_->startRollout(ctx, line);
-        phase_ = Phase::Rollout;
+        phase_ = Phase::Rollout, touchAglM_ = s.altitudeAglM;
         return rollout_->update(ctx, in);
     }
     Command out = route_->update(ctx, options_);
     ActivityProgress p;
     const std::uint32_t flownTo = route_->progress(p) ? p.segment : 0;
+    // on its final, not down by the touchdown zone's end: it goes around (the B-52H, with no airbrakes, floated 3.9 km and
+    // touched down past the runway's end)
+    if (alongM > zoneEndM_ && (phase_ == Phase::Flare || flownTo == 3)) {
+        goAroundFrom(GoAround::Long);
+        return goAround(ctx, alongM, crossM);
+    }
     const double tasPerCas = s.airspeedTrueMs / std::max(s.airspeedCalibratedMs, 1.0);
+    // on the centre line: a crosswind beyond its limit waves it off (the Skua, its approach speed 17 m/s, never reached its
+    // glide slope across 10 m/s); below the gate, an approach not stable sends it around
+    if ((flownTo == 2 || flownTo == 3) && phase_ == Phase::Approach) {
+        const double across = std::abs(-wind_.northMs * std::sin(courseRad_) + wind_.eastMs * std::cos(courseRad_));
+        crosswindS_ = std::isfinite(crosswindMaxMs_) && wind_.valid && across > crosswindMaxMs_ ? crosswindS_ + dt : 0.0;
+        const double h = s.altitudeMslM - elevationM_, toAim = std::max(aimM_ - alongM, 0.0);
+        const double sink = s.velocityNedMs[2], slopeSink = std::hypot(s.velocityNedMs[0], s.velocityNedMs[1]) * std::tan(kGlideRad);
+        const double speed = s.airspeedCalibratedMs - (vappMs_ + speedAddMs_);
+        const bool unstable = h < kGateAglM && (std::abs(crossM) > std::max(kLateralLeastM, kLateralShare * toAim) ||
+                                                std::abs(h - toAim * std::tan(kGlideRad)) > std::max(kVerticalLeastM, toAim * std::tan(kVerticalRad)) ||
+                                                speed < -kSlowMs || speed > kFastMs || sink > std::max(kSinkLeastMs, slopeSink + kSinkMarginMs));
+        unstableS_ = unstable ? unstableS_ + dt : 0.0;
+        if (crosswindS_ >= kUnstableS || unstableS_ >= kUnstableS) {
+            goAroundFrom(crosswindS_ >= kUnstableS ? GoAround::Crosswind : GoAround::Unstable);
+            return goAround(ctx, alongM, crossM);
+        }
+    }
     // its gear and flaps out from the intermediate fix on, on the centre line, where it slows to its approach speed - a heavy's
     // drag to slow on (the C-130J, configured at the final fix, came down the glide slope at 107 m/s against its 71)
-    if (flownTo >= 2) configured_ = true;
+    if (flownTo >= 2 && flownTo <= 3) configured_ = true;
     const double high = std::isfinite(tailRad_) ? tailRad_ - kFlareRoomRad : 1e9, attitude = s.eulerRad[1];
     // level to the final fix, at its approach speed: its flaps out, then its speed raised, until it would come down the slope
     // under that attitude - then held down the slope (changed on it, they hunted: the E-7A and the Mirage 2000 porpoised)
@@ -240,27 +386,21 @@ Command RecoveryBehavior::runway(const ControlContext& ctx, const Command& in, d
     // down the slope its flaps put out, never back, while it runs fast - their drag (the C-130J, its flight idle's thrust more than
     // its drag, gained 13 m/s down the slope) - and its speed raised, never lowered, while it comes down over that attitude still
     // (straight in, the EA-18G never settled level, and touched down at 6 m/s)
-    if (flownTo >= 3 && phase_ == Phase::Approach) {
+    if (flownTo == 3 && phase_ == Phase::Approach) {
         if (s.airspeedCalibratedMs > kFastShare * (vappMs_ + speedAddMs_)) flaps_ = std::min(flaps_ + kFlapsPerS * dt, kLandingFlaps);
         if (attitude > high) speedAddMs_ = std::min(speedAddMs_ + kAdjustMsPerDegS * ((attitude - high) / kDeg) * dt, kMostRaise * vappMs_);
     }
     if (auto* fly = std::get_if<VelocityCommand>(&out); fly && phase_ == Phase::Approach) {
         if (speedAddMs_ != 0.0 && !isHold(fly->airspeedMs)) fly->airspeedMs += speedAddMs_ * tasPerCas;
-        // its turns no steeper than kTurnBankRad: the route's capture of its first leg - a turn rate on its course's error -
-        // banked the EA-18G to 81 deg at 1.6 times its least speed, and it departed (its points' banks are their turns'). Above
-        // the route's own turns' kApproachBankRad: held to those, the RC-135W in a crosswind came onto its final 268 m off, the
-        // route's course trim wound up
-        const double most = 9.80665 * std::tan(kTurnBankRad) / std::max(s.airspeedTrueMs, 1.0);
-        if (!isHold(fly->turnRateRadS)) fly->turnRateRadS = std::clamp(fly->turnRateRadS, -most, most);
+        // its route's turns are bounded by their planned bank (4.54); a heading far off is turned to at kTurnBankRad
         const double off = isHold(fly->headingRad) ? 0.0 : geo::wrapPi(fly->headingRad - s.eulerRad[2]);
-        if (std::abs(off) > kCaptureRad) fly->turnRateRadS = std::copysign(most, off), fly->headingRad = kHold;
+        if (std::abs(off) > kCaptureRad)
+            fly->turnRateRadS = std::copysign(9.80665 * std::tan(kTurnBankRad) / std::max(s.airspeedTrueMs, 1.0), off), fly->headingRad = kHold;
     }
     // the flare: near the runway, on the glide slope's last segment, its sink eased to the height over kFlareS - the shallower of
     // that and the glide slope's - and its speed bled off
-    double alongM, crossM;
-    onLine(thrLat_, thrLon_, courseRad_, s.latitudeRad, s.longitudeRad, alongM, crossM);
     const auto* v = std::get_if<VelocityCommand>(&out);
-    if (!v || flownTo < 3 || alongM < -1500.0) return out;
+    if (!v || flownTo != 3 || alongM < -1500.0) return out;
     const double h = std::max(s.altitudeMslM - elevationM_, 0.0);
     const double sink = -std::max(kFlareSinkMs, h / kFlareS); // (its vertical speed, + up)
     if (phase_ == Phase::Approach) {
@@ -305,9 +445,14 @@ bool RecoveryBehavior::finished() const noexcept {
     return hovers_ ? phase_ == Phase::Landed && settledS_ >= 2.0 * kSettledS : phase_ == Phase::Rollout && rollout_->finished();
 }
 
-Reason RecoveryBehavior::failure() const noexcept { return phase_ == Phase::Rollout ? Reason::None : route_->failure(); }
+Reason RecoveryBehavior::failure() const noexcept {
+    if (failed_ != Reason::None) return failed_;
+    return phase_ == Phase::Rollout || phase_ == Phase::GoAround ? Reason::None : route_->failure();
+}
 
-std::uint16_t RecoveryBehavior::constraints() const noexcept { return phase_ == Phase::Approach ? route_->constraints() : 0; }
+std::uint16_t RecoveryBehavior::constraints() const noexcept {
+    return phase_ == Phase::Approach || phase_ == Phase::Missed ? route_->constraints() : 0;
+}
 
 bool RecoveryBehavior::progress(ActivityProgress& out) const noexcept {
     if (phase_ == Phase::Rollout) return rollout_->progress(out);
@@ -319,6 +464,14 @@ bool RecoveryBehavior::handOver(BehaviorCommand& out) const {
 }
 
 void RecoveryBehavior::configure(ActuatorCommand& out) const noexcept {
+    if (phase_ == Phase::GoAround) { // (its flaps a takeoff's, its gear up once it climbs, its brakes off)
+        out.flaps = flaps_, out.gearDown = gearUp_ ? 0.0 : 1.0, out.brakeLeft = out.brakeRight = 0.0;
+        return;
+    }
+    if (phase_ == Phase::Missed) { // (its chained missed approach flown clean)
+        out.flaps = 0.0, out.gearDown = 0.0;
+        return;
+    }
     if (!configured_) return;
     out.gearDown = 1.0;
     // its flaps up on the runway, its lift dumped onto its wheels: with them out, at its touchdown speed, the C-130J and the

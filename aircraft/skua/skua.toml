@@ -138,6 +138,13 @@ position = [0.200, 0.0, -0.080]
 [battery]                    # the pack in [mass]: 12S Li-ion, 6.5 kg at 180 Wh/kg
 capacity_wh = 1170
 
+# The 90 deg crosswind it lands and takes off in at most (docs/flight-autonomy.md,
+# 4.54): beyond it a recovery waves off, and a launch or a taxi is refused. Source:
+# a design choice for a hypothetical aircraft: FAR 23.233(a)'s least
+# demonstrated crosswind, 0.2 times its stall speed (13.9 m/s).
+[operations]
+crosswind_kt = 5.4
+
 # What the platform's discovery rests on (docs/flight-autonomy.md, section 5.2): the
 # aircraft's physical characteristics, each with its public source. hangar writes them into
 # the profile's applicability section and the sources into the file header. A characteristic

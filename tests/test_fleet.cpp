@@ -955,7 +955,7 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
                 if (w.activity(l.activity)->live()) return true;
             return false;
         };
-        for (double t = 0.0; t < 1500.0 && live(); t += 1.0)
+        for (double t = 0.0; t < 3000.0 && live(); t += 1.0) // (two approaches and their missed approaches: 4.54)
             fleet.fly(1.0, [&] {
                 for (auto& [id, l] : landing) {
                     const sim::VehicleState& s = *w.vehicleState(id);
@@ -976,12 +976,17 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             INFO(p.type << " (" << className(p.cls) << "): recovery " << activityStateName(a.state) << " " << reasonName(a.reason) << "; touched down "
                         << l.touchAlong << " m along, " << l.touchCross << " m across, sinking " << l.touchSink << " m/s; bounced " << l.hop
                         << " m; worst " << l.worstCross << " m across");
+            // the B-52H, no airbrakes yet, floats past its touchdown zone; the C-130J, its flight idle's thrust about its drag,
+            // comes down its glide slope fast and bounces: each goes around from both its approaches and fails (4.54; the backlog's
+            // B-1, FA-10c's drag devices)
+            if (p.type == "b52h" || p.type == "c130j") {
+                CHECK(a.state == ActivityState::Failed);
+                CHECK(a.reason == Reason::LandingAbandoned);
+                continue;
+            }
             CHECK(a.state == ActivityState::Completed);
             CHECK(l.touched);
             CHECK(l.endSpeed < 0.5); // (stopped)
-            // the B-52H, no airbrakes yet, floats past the runway; the C-130J, its flight idle's thrust about its drag, comes
-            // down its glide slope nose low and bounces (4.53: FA-10c's drag devices, a hangar finding)
-            if (p.type == "b52h" || p.type == "c130j") continue;
             if (p.rotor) {
                 CHECK(std::hypot(l.touchAlong - 60.0, l.touchCross) < 3.0); // (on its spot: the worst, the UH-1H's 1.4 m)
                 CHECK(l.touchSink < 1.0);
@@ -994,7 +999,7 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             fleet.covered(p, "fsim.guidance.recovery");
         }
         for (const auto& p : planes)
-            if (p.type == "b52h" || p.type == "c130j") fleet.covered(p, "fsim.guidance.recovery"); // (flown, completed: above)
+            if (p.type == "b52h" || p.type == "c130j") fleet.covered(p, "fsim.guidance.recovery"); // (flown, gone around: above)
     }
 
     // --- guidance ------------------------------------------------------------------------------------

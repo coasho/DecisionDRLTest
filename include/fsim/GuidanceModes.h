@@ -542,9 +542,17 @@ private:
 /// its gear and flaps out from the intermediate fix on; flares - its sink eased to its height over 3 s, its speed bled off -
 /// touches down and rolls out as a rejected takeoff stops, on the centre line, then completes stopped. A rotorcraft flies to a
 /// hover 10 m over the runway, descends straight down and completes on the ground, its collective down.
+///
+/// A wing goes around (4.54) from an approach not stable below 150 m, a crosswind beyond its limit down the glide slope, a
+/// bounce of more than 3 m, or no touchdown by the touchdown zone's end: climbing straight ahead to the circuit's altitude, its
+/// flaps back to a takeoff's and its gear up, then its missed approach - FA's own landing path's chained one where FA keeps one
+/// for the runway, else the circuit back to its approach - and a second approach. Going around from that, it flies its missed
+/// approach and fails: CrosswindLimit if the wind waved it off, else LandingAbandoned.
 class FSIM_API RecoveryBehavior final : public Behavior {
 public:
-    enum class Phase : std::uint8_t { Approach, Flare, Rollout, Descent, Landed };
+    enum class Phase : std::uint8_t { Approach, Flare, Rollout, Descent, Landed, GoAround, Missed };
+    /// Why it went around last.
+    enum class GoAround : std::uint8_t { None, Unstable, Crosswind, Bounce, Long };
     RecoveryBehavior();
     ~RecoveryBehavior() override;
     const char* id() const noexcept override { return "recovery"; }
@@ -559,10 +567,15 @@ public:
     bool configures() const noexcept override { return true; }
     void configure(ActuatorCommand& out) const noexcept override;
     Phase phase() const noexcept { return phase_; }
+    GoAround lastGoAround() const noexcept { return cause_; }
+    std::uint32_t goArounds() const noexcept { return goArounds_; }
 
 private:
     Command runway(const ControlContext& ctx, const Command& in, double dt);
     Command vertical(const ControlContext& ctx, double dt);
+    Command goAround(const ControlContext& ctx, double alongM, double crossM);
+    void goAroundFrom(GoAround cause) noexcept;
+    void approachAgain(const ControlContext& ctx, std::uint32_t from);
     std::unique_ptr<RouteBehavior> route_;    ///< flies the approach: allocated with the behaviour
     std::unique_ptr<LaunchBehavior> rollout_; ///< a wing's rollout: likewise
     Command options_;                         ///< the approach route's options (a RouteCommand)
@@ -573,6 +586,15 @@ private:
     double tailRad_ = kHold, flarePitchRad_ = 0.0, flareIntegral_ = 0.0; ///< its tail's touching attitude; its flare's
     double speedAddMs_ = 0.0; ///< its approach speed's change for the attitude it comes down at (calibrated)
     double flaps_ = 1.0;      ///< its flaps for landing, eased for that attitude
+    // its go-arounds (4.54)
+    WindEstimate wind_;
+    double crosswindMaxMs_ = kHold, circuitMslM_ = 0.0, zoneEndM_ = 0.0; ///< its limit; the go-around's altitude; touched down by
+    double touchAglM_ = 0.0, unstableS_ = 0.0, crosswindS_ = 0.0;      ///< its height as it touched; how long each has held
+    std::uint32_t missedFrom_ = 0;   ///< the approach route's first point of FA's chained missed approach; 0: the circuit
+    std::uint32_t goArounds_ = 0;
+    GoAround cause_ = GoAround::None;
+    bool gearUp_ = false, lastApproach_ = false;
+    Reason failed_ = Reason::None;
 };
 /// Registers "recovery" (Recovery.cpp); registerGuidanceModes calls it.
 void registerRecovery(ControllerRegistry& registry);
