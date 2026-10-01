@@ -1545,6 +1545,14 @@ The backlog's B-15: the C-17A's takeoff across 10 m/s ran 8.6 m off the centre l
 - **The same law across the rollouts:** a landing's rollout across 10 m/s ran the MiG-29A 21 m off the line, the EA-18G 17, the Mirage 2000 13: now 8.0, 2.8 and 3.5 (B-18 stays open for the MiG-29A).
 - **Surfaces.** hangar: the fly-by-wire Yaw channel's `fcs/fbw/rudder` faded with `fcs/fbw/ground`. Nothing in the platform changed.
 
+### 4.62 The gear's drag (as FA-10e3a builds it)
+
+The backlog's B-13: hangar's retractable gear made no aerodynamic force - down or up, the C-17A's approach was the same to the bit, and its gear's placard (4.57) changed nothing.
+
+- **Raymer's components** (Aircraft Design: A Conceptual Approach, 12.5.6, Table 12.6): each leg's first axle's wheels at 0.25 of their diameter by width, a bogie's further axles' and a leg's in the wake of one ahead at 0.15 (the C-17A's aft main legs), its strut, hinge to axle, at 0.30 of its diameter by length; acting at their centroid, so with its pitching moment - nose down, below the reference point. Over `gear/gear-pos-norm`: as far as the gear is out, its doors' transit too. A lower bound: doors, wells and the components' interference uncounted. ΔCD 0.003 (the RQ-4B) to 0.013 (the Su-25); the fighters 0.005 to 0.011, the heavies 0.005 to 0.007. Fixed gear's was in the drag area, and stays (docs/hangar.md, Gear drag).
+- **hangar's verify stage** adds it as far as the gear is out where it compares JSBSim's forces with the tables (its airborne states retract their gear as they are sampled).
+- **Surfaces.** hangar: `drag.gear_drag`, `jsbsim.gear_drag_functions` (`aero/coefficient/CD_gear`, `Cm_gear`). The 29 retractable-gear designs' builds rewritten (only their aerodynamics gained the two functions). Nothing in the platform changed.
+
 ## 5. Applicability (D6)
 
 ### 5.1 The rules
@@ -1689,7 +1697,7 @@ Findings the stages have measured and not yet fixed. Each has a step that owns i
 | B-18 | **The MiG-29A's rollout across 10 m/s** runs 18 to 21 m off the centre line (FA-10a's probe, measured again by FA-10e1 from four sides), half a runway 22.5 m; the rest within 4.2 m. With the fly-by-wire ground law (FA-10e2, 4.61) 8.0 m, the rest within 4.1. | FA-10e, with B-10 | within the rollouts' acceptance as the others are, or its cause named |
 | B-6 | **The builtin attitude loops' rudder** (`rudder.beta_gain`, +1 per radian of sideslip) looks opposite to the sign measured: a positive rudder command yaws the nose left, so FA-9a's climb flies `rudder = -2 beta` (FA-9a). | FA-10b | **closed by FA-10b** (4.54): measured on four stock models, the default is -1; the laws set their own from their measured step |
 | B-7 | **The placards are inert:** no hangar design records its gear or flap speeds (FA-1c). | FA-10c: CleanUp and DirtyUp configure by them | **closed by FA-10c3** (4.57, 4.58): every design records them from a published source, or names why it cannot (13 record them, 18 name why not); DirtyUp refused above them |
-| B-13 | **hangar's gear makes no drag:** a design's gear moves (`gear/gear-pos-norm`) and makes no aerodynamic force; down or up, the C-17A's approach is the same to the bit (FA-10c3b) - its gear's placard holds it up 14 s longer, and changes nothing. A gear's drag is part of how an aircraft slows on its approach and holds its glide slope at its speed. | FA-10e, with B-12 | each design's gear makes its drag (and its pitching moment) from a published method, its flights measured |
+| B-13 | **hangar's gear makes no drag:** a design's gear moves (`gear/gear-pos-norm`) and makes no aerodynamic force; down or up, the C-17A's approach is the same to the bit (FA-10c3b) - its gear's placard holds it up 14 s longer, and changes nothing. A gear's drag is part of how an aircraft slows on its approach and holds its glide slope at its speed. | FA-10e, with B-12 | **closed by FA-10e3a** (4.62): Raymer's components, its drag and pitching moment over the gear's position (ΔCD 0.003 to 0.013); every landing within 2.49 m/s, every takeoff as before |
 | B-12 | **Approach speeds from the clean stall:** a wing's approach speed is 1.3 times its stall clean (4.53), 20 to 40 kt above the reference speeds its type flies on its landing flaps (the KC-135R's 178 kt against 130 to 140). On the C-17A it is above its flap placard (4.57): its model's stall is 167 kt clean, 146 kt with its flaps all out - without the lift of its externally blown flaps, its engines' exhaust over them - so it approaches on its takeoff flaps. FA-10c2 tried 1.3 times the stall with the flaps all out for every flapped wing: the B-52H and the E-7A hunted down their glide slopes at those speeds and went around. | FA-10e | each wing approaches at its landing configuration's reference speed and lands as now; the C-17A's powered lift modelled, or named here as hangar's limit |
 | B-9 | **A rotorcraft's go-around and wind limit:** its recovery descends to its spot whatever the wind; no rotorcraft design records a wind limit (FA-10b). | FA-10e | each design records its published wind limit (else its flying qualities' requirement); its recovery holds its hover and fails beyond it, its go-around climbs back to its approach point; `/go_around` and `/missed_approach` supported on it |
 | B-10 | **The U-2S's rollout within its limit:** across 7 m/s (13.6 kt, its limit 15) it runs 34.5 m off the line, and 48 m across 4 m/s with its brakes eased. It lands on its single main wheel 4 deg nose down; its steerable tail wheel never touches, and braked, ahead of its centre of gravity, it pitches nose down - a ground loop held only by its rudder. Released brakes, a raised attitude below most of its rotation speed and a longer steering look-ahead each made it worse or flew it off; a two-point landing at +4 deg floated it past its touchdown zone every time (FA-10b, tried and not kept). The real one is stalled onto the runway, main and tail wheel together. | FA-10e: a tail-wheel landing - its approach flown near its stall, a two-point touchdown, its tail held down to steer by | within its limit it lands and stops within the acceptance; its rejected takeoffs and taxi re-measured within it |
@@ -1900,7 +1908,10 @@ RECOVERY at airfields for every family, go-around, missed approach, CleanUp and 
 - FA-10e, the backlog's items for FA-10, in six steps:
   - FA-10e1, a route's low-speed departures (B-14) and the recovery's touchdown by its approach's side (B-16): a wing's pitch loop and flare at its low speeds (4.60), done 2026-10-01 and measured in section 14; found with them B-17 and B-18;
   - FA-10e2, the C-17A's takeoff across the wind (B-15): a fly-by-wire wing on its wheels (4.61), done 2026-10-01 and measured in section 14;
-  - FA-10e3, the approach speeds (B-12), the gear's drag (B-13) and the EA-18G's deep stall (B-17);
+  - FA-10e3, in three steps:
+    - FA-10e3a, the gear's drag (B-13; 4.62), done 2026-10-01 and measured in section 14;
+    - FA-10e3b, the approach speeds (B-12);
+    - FA-10e3c, the EA-18G's deep stall (B-17);
   - FA-10e4, a tail-wheel landing (B-10) and the MiG-29A's rollout (B-18);
   - FA-10e5, a rotorcraft's go-around and wind limit (B-9);
   - FA-10e6, the undeclared drag devices (B-11) and the carried findings (B-8).
@@ -3875,6 +3886,11 @@ The quadrotors' contacts, the helicopters' and the reset had waited for the owne
 - **The takeoffs** (FA-9d's ground routes): across 10 m/s the C-17A 1.0 m off its line (8.6), the fleet's worst 6.6 (the KC-135R, on surfaces); the fly-by-wire wings within 2.6 m (the J-10A; they moved under a metre each way); calm, the same to the decimetre. The launch probe: the C-17A 0.7 m (8.2).
 - **The rollouts** (the recovery's probe from four sides, across 10 m/s): the MiG-29A 7.9 to 8.0 m off the line (20.7 to 21.4), the EA-18G 2.7 to 2.8 (16.6 to 17.2), the Mirage 2000 3.4 to 3.5 (11.8 to 13.0), the rest within 4.1; calm, unchanged. Every touchdown the same to the bit (the law's the same in the air).
 - **Unchanged, to the last bit:** the digests with protection and without, the route and curve probes; the fleet's 1,751 states as flights are judged - 95 of its 2,415 as cases end moved, fly-by-wire wings on their wheels, 1.07 m at most. No A/B: no platform code changed.
+
+**FA-10e3a, the gear's drag (the backlog's B-13 closed).**
+- What it built is 4.62, in hangar: the retractable gear's drag extended by Raymer's components, with its pitching moment, over the gear's position; the 29 retractable-gear designs' aerodynamics gained the two functions (each verified: JSBSim's forces against the tables, the gear's added as far as it was out, within 0.0005). Nothing in the platform changed.
+- **The landings:** FA-10d's landing route, calm and across 10 m/s, every wing within 2.49 m/s (2.27), the means 1.25 (1.23 calm, 1.21 across); the recovery's probe from four sides within 2.18 m/s (2.12), the means up 0.02 m/s - every outcome as before. **The takeoffs** (FA-9d's ground routes): the same worst taxi and centre line (calm 2.7 m; across 6.3, 6.6 before), each wing within 10 m of its height at the probe's end.
+- **What else moved:** the digests, 4 of 20 - the F-16C's and B-52H's cases begun in the air, their gear coming up as they start; the route probe's F-16C, likewise; the curve probe identical. The fleet: 1,446 of 1,751 states as flights are judged moved, every judgement passes (its airborne starts retract their gear). No A/B: no platform code changed.
 
 ## Appendix A: the inventory
 

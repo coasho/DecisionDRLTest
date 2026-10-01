@@ -307,6 +307,18 @@ stage end to end through the platform (`ctest -R hangar`).
   table, with that lift's moment. Surfaces deflected as one: their drag from
   the design's own control tables. Written as functions of
   `fcs/speedbrake-pos-norm` (`drag.py`; [flight-autonomy.md](flight-autonomy.md), 4.55).
+- **Gear drag.** Retractable gear extended: Raymer's components (Aircraft
+  Design: A Conceptual Approach, 12.5.6, Table 12.6), drag per frontal area
+  - each leg's first axle's wheels 0.25 of their diameter by width, a
+  bogie's further axles and a leg in the wake of one ahead of it 0.15, its
+  strut, hinge to axle, 0.30 of its diameter by length - acting at their
+  centroid, so with its pitching moment from below the reference point.
+  Written over `gear/gear-pos-norm` (`drag.gear_drag`); the verify stage
+  adds it as far as the gear is out. Doors, wells and the components'
+  interference are not counted: a lower bound - ΔCD 0.003 (the RQ-4B) to
+  0.013 (the Su-25), the C-17A's 0.0068. Fixed gear's stays in the drag
+  area. Without it, gear down or up an approach was the same to the bit
+  ([flight-autonomy.md](flight-autonomy.md), B-13).
 - **Induced drag.** By default each strip's lift is tilted by its own
   induced angle. That overstates the induced drag of the lattice's loading:
   by about 15 % on a plain wing of aspect ratio 6-10, and by a factor of 1.5

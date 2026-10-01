@@ -96,7 +96,7 @@ def sample_states(f, n=120, seed=3, seconds=0.6):
             "adot": g("aero/alphadot-rad_sec"), "qbar": g("aero/qbar-psf") * PSF,
             "de": g("fcs/elevator-pos-deg"), "da": g("fcs/left-aileron-pos-deg"), "dr": g("fcs/rudder-pos-deg"),
             "df": g("fcs/flap-pos-deg"), "hb": g("aero/h_b-mac-ft"), "mach": g("velocities/mach"),
-            "cl2": g("aero/cl-squared"),
+            "cl2": g("aero/cl-squared"), "gear": g("gear/gear-pos-norm"),
             "F": np.array([g("forces/fbx-aero-lbs"), g("forces/fby-aero-lbs"), g("forces/fbz-aero-lbs")]) * LBF,
             "M": np.array([g("moments/l-aero-lbsft"), g("moments/m-aero-lbsft"), g("moments/n-aero-lbsft")]) * LBF * FT,
             "cg": np.array([g("inertia/cg-x-in"), g("inertia/cg-y-in"), g("inertia/cg-z-in")]) * 0.0254,
@@ -108,9 +108,11 @@ def sample_states(f, n=120, seed=3, seconds=0.6):
 def compare(rows, tables, aircraft, model=None):
     """JSBSim vs the tables (and the tables vs the full model), as
     coefficient errors per state."""
+    from .drag import gear_drag
     tm = TableModel(tables)
     S, b, c = aircraft.S, aircraft.b, aircraft.c
     arp = aircraft.aero_point
+    gear = gear_drag(aircraft)  # (its retractable gear's drag as far as it is out: drag.gear_drag)
     out = []
     for s in rows:
         if s["hb"] < 1.2 or not np.isfinite(s["alpha"]):
@@ -119,6 +121,9 @@ def compare(rows, tables, aircraft, model=None):
         nd = dict(p=s["p"] * b / (2 * V), q=s["q"] * c / (2 * V), r=s["r"] * b / (2 * V), adot=s["adot"] * c / (2 * V))
         ctl = {"elevator": s["de"], "aileron": s["da"], "rudder": s["dr"], "flap": s["df"]}
         coef = tm.evaluate(math.degrees(s["alpha"]), math.degrees(s["beta"]), controls_deg=ctl, mach=s["mach"], cl2=s["cl2"], **nd)
+        if gear is not None and s.get("gear", 0.0) > 0.0:
+            coef["CD"] += s["gear"] * gear[0] / S
+            coef["Cm"] += s["gear"] * gear[0] / S * (gear[1][2] - arp[2]) / c
         F, M = body_forces(coef, s["alpha"], s["beta"], s["qbar"], S, b, c)
         # JSBSim's moments are about the CG: move ours from the aero reference point
         d = arp - s["cg"]

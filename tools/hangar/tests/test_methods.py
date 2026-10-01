@@ -2625,6 +2625,41 @@ class DragDevices(unittest.TestCase):
         self.assertIn("fcs/speedbrake-rudder-deg", fs[0][1])
         self.assertIn("<output>fcs/speedbrake-aileron-deg</output>", speedbrake_xml([d]))
 
+    def test_the_gear_extended(self):
+        # Raymer's components (B-13): each leg's first axle's wheels at GEAR_WHEEL of d x w, a bogie's further axles' and a leg's
+        # in the wake of one ahead at GEAR_TANDEM, its strut at GEAR_STRUT of its diameter by its length; where it acts, their
+        # centroid. The C-17A's aft main legs run in the wake of its forward ones; fixed gear has none (it is in the drag area)
+        from hangar import drag
+        from hangar.shape.gear import legs
+        a = Aircraft.load(repo("aircraft/c17a/c17a.toml"))
+        area, at = drag.gear_drag(a)
+        expect, moment = 0.0, np.zeros(3)
+        for leg in legs(a):
+            k = drag.GEAR_TANDEM if leg.name.endswith("Aft") else drag.GEAR_WHEEL
+            wheels = k * leg.wheels * 2.0 * leg.r * leg.w + drag.GEAR_TANDEM * leg.wheels * (leg.axles - 1) * 2.0 * leg.r * leg.w
+            strut = drag.GEAR_STRUT * 2.0 * leg.strut_r * float(np.linalg.norm(leg.hinge - leg.axle))
+            expect += wheels + strut
+            moment += wheels * leg.axle + strut * 0.5 * (leg.hinge + leg.axle)
+        self.assertAlmostEqual(area, expect, places=12)
+        np.testing.assert_allclose(at, moment / expect, atol=1e-12)
+        self.assertIsNone(drag.gear_drag(Aircraft.load(repo("aircraft/c172/c172.toml"))))
+
+    def test_the_gear_in_the_file(self):
+        # its drag over gear/gear-pos-norm, and its pitching moment from its height under the reference point: nose down
+        from hangar import drag
+        from hangar.jsbsim import gear_drag_functions
+        a = Aircraft.load(repo("aircraft/c17a/c17a.toml"))
+        area, at = drag.gear_drag(a)
+        fs = gear_drag_functions(a)
+        self.assertEqual([axis for axis, _ in fs], ["DRAG", "PITCH"])
+        for _, f in fs:
+            self.assertIn("<property>gear/gear-pos-norm</property>", f)
+        self.assertIn("<value>%.6g</value>" % (area / a.S), fs[0][1])
+        arm = (at[2] - a.aero_point[2]) / a.c
+        self.assertLess(arm, 0.0)
+        self.assertIn("<value>%.6g</value>" % (area / a.S * arm), fs[1][1])
+        self.assertEqual(gear_drag_functions(Aircraft.load(repo("aircraft/c172/c172.toml"))), [])
+
     def test_the_profile_tells_the_platform(self):
         # effectors/speedbrake where it has any; speedbrake_approach where all of them may be opened on an approach (one
         # speedbrake opens them all: the U-2S's airbrakes would open its spoilers too)

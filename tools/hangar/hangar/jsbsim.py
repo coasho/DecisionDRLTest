@@ -137,6 +137,27 @@ def drag_device_functions(device, tables, aircraft, indent=6):
     return out
 
 
+def gear_drag_functions(aircraft, indent=6):
+    """[(axis, function XML)] for the retractable gear's drag extended (drag.gear_drag, Raymer's components), scaled by
+    gear/gear-pos-norm, and its pitching moment from its height under the reference point; none without retractable gear."""
+    from .drag import gear_drag
+    found = gear_drag(aircraft)
+    if found is None:
+        return []
+    area, at = found
+    qs = ["aero/qbar-psf", "metrics/Sw-sqft"]
+    S, c, arp = aircraft.S, aircraft.c, aircraft.aero_point
+    pad = " " * (indent + 4)
+    extended = "%s<property>gear/gear-pos-norm</property>" % pad
+    out = [("DRAG", _function("CD_gear", "the gear extended: its wheels' and struts' drag by Raymer's components, %.3g m2 (hangar)"
+                              % area, qs + ["value:%.6g" % (area / S)], extended, indent))]
+    arm = (at[2] - arp[2]) / c  # (drag below the reference point pitches the nose down)
+    if abs(arm) > 1e-6:
+        out.append(("PITCH", _function("Cm_gear", "the gear's drag's pitching moment, %.2f m from the reference point's height"
+                                       % (at[2] - arp[2]), qs + [REF_LENGTH["Cm"], "value:%.6g" % (area / S * arm)], extended, indent)))
+    return out
+
+
 def speedbrake_xml(devices):
     """The speedbrake channel: fcs/speedbrake-cmd-norm to fcs/speedbrake-pos-norm over the longest device's transit,
     and each set of surfaces' deflections from it."""
@@ -249,6 +270,9 @@ def aerodynamics_xml(tables, aircraft, ge_e=0.85):
     for device in drag_devices(aircraft):
         for axis, f in drag_device_functions(device, tables, aircraft):
             out[axis].append(f)
+    # its retractable gear's drag extended (docs/hangar.md, Gear drag)
+    for axis, f in gear_drag_functions(aircraft):
+        out[axis].append(f)
     parts = ["    <aerodynamics>"] + ["\n".join("  " + line for line in f.split("\n")) for f in pre]
     for axis in ("DRAG", "SIDE", "LIFT", "ROLL", "PITCH", "YAW"):
         parts.append("      <axis name=\"%s\">" % axis)

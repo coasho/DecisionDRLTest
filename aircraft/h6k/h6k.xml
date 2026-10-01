@@ -2697,6 +2697,15 @@
           </table>
           </product>
         </function>
+        <function name="aero/coefficient/CD_gear">
+          <description>the gear extended: its wheels' and struts' drag by Raymer's components, 1.13 m2 (hangar)</description>
+          <product>
+            <property>aero/qbar-psf</property>
+            <property>metrics/Sw-sqft</property>
+            <value>0.00685158</value>
+            <property>gear/gear-pos-norm</property>
+          </product>
+        </function>
       </axis>
       <axis name="SIDE">
         <function name="aero/coefficient/CY_base">
@@ -4557,6 +4566,16 @@
             <property>aero/alphadot-rad_sec</property>
             <value>-2.64954</value>
             <property>aero/function/mach-lift</property>
+          </product>
+        </function>
+        <function name="aero/coefficient/Cm_gear">
+          <description>the gear's drag's pitching moment, -2.54 m from the reference point's height</description>
+          <product>
+            <property>aero/qbar-psf</property>
+            <property>metrics/Sw-sqft</property>
+            <property>metrics/cbarw-ft</property>
+            <value>-0.00326415</value>
+            <property>gear/gear-pos-norm</property>
           </product>
         </function>
       </axis>

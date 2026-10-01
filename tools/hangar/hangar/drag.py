@@ -99,3 +99,36 @@ class DragDevice:
 
 def drag_devices(aircraft):
     return [DragDevice(d, aircraft) for d in aircraft.spec.get("drag_device", [])]
+
+
+#: a landing gear's components' drag per their frontal area (Raymer, Aircraft Design: A Conceptual Approach, 12.5.6,
+#: Table 12.6): a regular wheel and tyre (its diameter by its width), a wheel and tyre in tandem behind another, and a
+#: round strut (its diameter by its length)
+GEAR_WHEEL = 0.25
+GEAR_TANDEM = 0.15
+GEAR_STRUT = 0.30
+
+
+def gear_drag(aircraft):
+    """The retractable gear's drag extended, by Raymer's component buildup (docs/hangar.md, Gear drag): each leg's wheels -
+    its first axle's at GEAR_WHEEL, a bogie's further axles' and a leg's in the wake of one ahead of it at GEAR_TANDEM -
+    and its strut, from its hinge to its axle, at GEAR_STRUT. (D/q in m2, where it acts [x, y, z]), or None without
+    retractable gear; fixed gear's is in the drag area already (aero.model, Raymer 12.5.6)."""
+    from .shape.gear import legs
+    out = [leg for leg in legs(aircraft) if leg.retractable]
+    if not out:
+        return None
+    total, moment = 0.0, np.zeros(3)
+    for leg in out:
+        centres, span = leg.wheel_centres(0)
+        # in the wake of a leg ahead of it: on its side, overlapping it across, within five of its wheels' diameters
+        wake = any(o is not leg and leg.axle[0] - 10.0 * o.r < o.axle[0] < leg.axle[0] - 1e-6 and
+                   abs(o.axle[1] - leg.axle[1]) < 0.5 * (span + o.wheel_centres(0)[1]) for o in out)
+        wheel = 2.0 * leg.r * leg.w
+        first = (GEAR_TANDEM if wake else GEAR_WHEEL) * wheel * leg.wheels
+        rest = GEAR_TANDEM * wheel * leg.wheels * (leg.axles - 1)
+        length = float(np.linalg.norm(leg.hinge - leg.axle))
+        strut = GEAR_STRUT * 2.0 * leg.strut_r * length
+        total += first + rest + strut
+        moment += (first + rest) * leg.axle + strut * 0.5 * (leg.hinge + leg.axle)
+    return total, moment / total
