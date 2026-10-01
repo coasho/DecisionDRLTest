@@ -1234,7 +1234,9 @@ class Turboprops(unittest.TestCase):
         self.assertEqual(eng.tag, "turboprop_engine")
         self.assertAlmostEqual(float(eng.find("maxpower").text), 1000e3 / P.HP, delta=0.1)
         self.assertAlmostEqual(float(eng.find("psfc").text), 0.30 * 1.644, places=3)   # lb/(hp h)
-        self.assertEqual((float(eng.find("idlen1").text), float(eng.find("maxn1").text)), (P.TP_IDLE_N1, 100.0))
+        # flight idle: its ground idle's N1, next to no shaft power to spare
+        self.assertEqual((float(eng.find("idlen1").text), float(eng.find("maxn1").text)), (round(P.flight_idle_n1(e), 1), 100.0))
+        self.assertLess(float(P.core_power(P.flight_idle_n1(e))), 0.05)
         self.assertIsNotNone(eng.find("function[@name='EnginePowerVC']/product"))
         self.assertEqual({t.get("name") for t in eng.findall("table")},
                          {"EnginePowerRPM_N1", "ITT_N1", "CombustionEfficiency_N1"})
@@ -1299,7 +1301,7 @@ class Turboprops(unittest.TestCase):
         self.assertTrue(np.all(np.diff(standing) > 0.0), standing)
         self.assertLess(float(np.interp(0.3, beta["J"], beta["CT"][:, 0])), -0.05)
         # the fuel control: at ground idle the engine's N1 gives the power the
-        # blades take at the governed speed - below flight idle, above its least
+        # blades take at the governed speed - flight idle's, above its least
         g = P.ground_range(e)
         self.assertEqual(g["ground_idle_deg"], gi)
         self.assertEqual(g["blade_angle_deg"][-2], lo)
@@ -1307,7 +1309,7 @@ class Turboprops(unittest.TestCase):
         row = t["EnginePowerRPM_N1"][P.TP_RPM.index(1.0)]
         self.assertAlmostEqual(float(np.interp(g["n1"][0], t["n1"], row)), g["power_hp"][0], places=6)
         self.assertAlmostEqual(g["power_hp"][0], beta["CP"][0, 0] * P.RHO0 * (p.rpm / 60.0) ** 3 * p.D ** 5 / P.HP, places=6)
-        self.assertTrue(P.TP_BETA_MIN_N1 < g["n1"][0] < P.TP_IDLE_N1, g["n1"][0])
+        self.assertTrue(P.TP_BETA_MIN_N1 < g["n1"][0] == P.flight_idle_n1(e), g["n1"][0])
         self.assertTrue(np.all(np.diff(g["n1"]) > 0.0))
         self.assertGreater(g["k_n1"], 0.0)
         self.assertGreater(g["k_blade"], 0.0)

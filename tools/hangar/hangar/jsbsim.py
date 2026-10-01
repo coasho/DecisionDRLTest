@@ -869,8 +869,8 @@ def governor_xml(aircraft):
     and set its blades while time stands still; and its ground range
     (propulsion.ground_range): on the ground, at the bottom of the throttle,
     the blades set by the throttle and N1 holding the propeller's speed."""
-    from .propulsion import (GOVERNOR_CP, GOVERNOR_RANGE, HP, TP_IDLE_N1, TP_SPOOL_S, TP_SUSTAIN_N1, Propeller,
-                             blade_angles_for_power, blades_mass, ground_range, power_lapse_xml)
+    from .propulsion import (GOVERNOR_CP, GOVERNOR_RANGE, HP, TP_SPOOL_S, TP_SUSTAIN_N1, Propeller,
+                             blade_angles_for_power, blades_mass, flight_idle_n1, ground_range, power_lapse_xml)
     lo, hi = GOVERNOR_RANGE
     out = []
     for i, (e, name) in enumerate(_engine_units(aircraft)):
@@ -887,13 +887,15 @@ def governor_xml(aircraft):
         head = "                " + "".join("%8.2f" % c for c in GOVERNOR_CP)
         rows = "\n".join("            %6.2f " % j + "".join("%8.2f" % b for b in row) for j, row in zip(tab["J"], angles))
         g = ground_range(e)
+        idle = float(g["n1"][0])  # flight idle: ground idle's N1 (flight_idle_n1)
         n1_rows = "\n".join("                      %8.2f %9.4f" % (b, v) for b, v in zip(g["blade_angle_deg"], g["n1"]))
         out.append("""      <channel name="Propeller Governor %(i)d">
         <!-- %(name)s: the propeller governed at %(rpm).0f rpm. The ground range: with weight
              on the wheels and time running, a throttle below %(beta_t)g sets the blades, from
              ground idle's %(gi).2f deg (no thrust standing still) to the low stop, %(lo_deg).1f,
-             and N1 holds the propeller's speed - not below %(min_n1).1f %%, nor above the flight
-             range's N1 at the throttle; past %(os_rpm).0f rpm the blades open further -->
+             and N1 holds the propeller's speed - not below %(min_n1).1f %%, nor above %(cap0_n1).1f %% at
+             ground idle rising to the flight range's where it takes over, %(cap_n1).1f %%; past
+             %(os_rpm).0f rpm the blades open further -->
         <fcs_function name="fcs/propeller-ground-range-%(i)d">
           <function>
             <and>
@@ -921,9 +923,9 @@ def governor_xml(aircraft):
           <function>
             <min>
               <sum>
-                <value>%(idle_n1).4f</value>
+                <value>%(cap0_n1).4f</value>
                 <product>
-                  <value>%(n1_span).4f</value>
+                  <value>%(cap_slope).4f</value>
                   <max> <value>0</value> <property>fcs/throttle-cmd-norm[%(i)d]</property> </max>
                 </product>
               </sum>
@@ -1135,15 +1137,16 @@ def governor_xml(aircraft):
           <output>propulsion/engine[%(i)d]/blade-angle</output>
         </fcs_function>
       </channel>""" % {
-            "i": i, "name": name, "rpm": e.prop_rpm, "lead": GOVERNOR_LEAD_S, "idle_n1": TP_IDLE_N1,
-            "n1_span": 100.0 - TP_IDLE_N1, "neg_spool": -TP_SPOOL_S,
+            "i": i, "name": name, "rpm": e.prop_rpm, "lead": GOVERNOR_LEAD_S, "idle_n1": idle,
+            "n1_span": 100.0 - idle, "neg_spool": -TP_SPOOL_S,
             "inertia": inertia, "inertia_min": inertia * 0.1 * e.prop_rpm,
             "a0": (1.0 - lo) * e.prop_rpm, "span": (hi - lo) * e.prop_rpm,
             "nd": n * d_ft, "rating": e.power_kw * 1000.0 / HP, "thermo": e.thermo_power_kw * 1000.0 / HP,
-            "idle": TP_IDLE_N1 / 100.0, "span_n1": 1.0 - TP_IDLE_N1 / 100.0, "s3": s3, "s3c": 1.0 - s3,
+            "idle": idle / 100.0, "span_n1": 1.0 - idle / 100.0, "s3": s3, "s3c": 1.0 - s3,
             "lapse": power_lapse_xml(e, 18), "scale": n**3 * d_ft**5 / 550.0, "head": head, "rows": rows,
             "beta_t": g["throttle"], "gi": g["ground_idle_deg"], "lo_deg": g["low_stop_deg"], "hi_deg": g["high_stop_deg"],
             "beta_gain": (g["low_stop_deg"] - g["ground_idle_deg"]) / g["throttle"], "min_n1": g["min_n1"],
+            "cap_n1": g["cap_n1"], "cap0_n1": g["cap0_n1"], "cap_slope": (g["cap_n1"] - g["cap0_n1"]) / g["throttle"],
             "k_n1": g["k_n1"], "k_blade": g["k_blade"], "os_rpm": g["overspeed_rpm"], "n1_rows": n1_rows,
             "neg_spool_down": -2.4 * TP_SPOOL_S})
     return out

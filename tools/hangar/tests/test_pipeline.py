@@ -268,7 +268,10 @@ class TurbopropStart(unittest.TestCase):
             for k in (0.25, 0.5, 0.75, 0.999, 1.0, 1.5):
                 fly(v, k * TP_BETA_THROTTLE, 15.0, brakes=1.0)
                 thrust.append(sum(v.get_property("propulsion/engine[%d]/thrust-lbs" % i) for i in range(n)))
-            self.assertTrue(all(b > a > 0.0 for a, b in zip(thrust, thrust[1:])), thrust)
+            # rising through the ground range, and on in the flight range; where one hands over to the other
+            # (both at the flight range's N1 there) no step
+            self.assertTrue(all(b > a > 0.0 for a, b in zip(thrust[:3], thrust[1:4])), thrust)
+            self.assertGreater(thrust[5], thrust[4], thrust)
             self.assertLess(abs(thrust[4] / thrust[3] - 1.0), 0.02, thrust)
             v.remove()
             v = spawn("rolling", 50.0)

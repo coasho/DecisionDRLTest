@@ -504,7 +504,6 @@ def turbofan_xml(engine):
 # output shaft's rpm and N1, times EnginePowerVC for the flight condition. The
 # tables here come from these stated physics (and these numbers, estimates
 # for a turboprop of today):
-TP_IDLE_N1 = 60.0       # flight idle, % of the gas generator's full speed
 TP_SUSTAIN_N1 = 50.0    # its self-sustaining speed: the core has no power to spare
 TP_SPOOL_S = 1.0        # N1's time constant, s (JSBSim's own default)
 TP_ITT_C = (500.0, 800.0)  # the inter-turbine temperature at idle and full power, deg C
@@ -531,16 +530,30 @@ TP_RPM = (0.0, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0, 1.0
 # to the low stop at TP_BETA_THROTTLE, where the flight range takes over. The
 # fuel control holds the governed speed (proportional on N1, a
 # TP_BETA_BANDWIDTH loop through N1's lag), never below TP_BETA_MIN_N1 and
-# never above the flight range's N1 at that throttle, so the thrust rises
-# into the flight range without a step. Past TP_BETA_OVERSPEED of the
+# never above a cap: at ground idle (flight idle's N1) by as much again as
+# brings the propeller back from TP_BETA_UNDERSPEED of its speed, rising
+# with the throttle to the flight range's N1 at TP_BETA_THROTTLE, so the
+# thrust rises into the flight range without a step. Past TP_BETA_OVERSPEED of the
 # governed speed - the flat blades windmilling in a landing roll - the blades
 # open beyond the schedule to hold it (proportional, a
 # TP_BETA_BLADE_BANDWIDTH loop at ground idle). In the air nothing changes.
 TP_BETA_THROTTLE = 0.2
 TP_BETA_MIN_N1 = TP_SUSTAIN_N1 + 1.0   # the fuel control's least: the core keeps a little power over its own need
 TP_BETA_OVERSPEED = 1.01
+TP_BETA_UNDERSPEED = 0.96              # the C-130's governed band's foot (96-103 %)
 TP_BETA_BANDWIDTH = 0.25               # rad/s
 TP_BETA_BLADE_BANDWIDTH = 3.0          # rad/s
+
+# Flight idle (flight_idle_n1). The fuel control's least in the air is its
+# ground idle's: the gas generator's speed that turns the propeller at its
+# governed speed with its blades flat - next to no shaft power to spare. In
+# a descent at flight idle a T56's torque goes negative, its propellers
+# driving it and its negative torque system working: "Flight Idle engine
+# power available may not be sufficient to maintain positive torque"
+# (C-130 crews, c-130hercules.net, "C-130 descent technique"). hangar's
+# flight idle was 60 % before (an estimate): a C-130J's propellers made
+# 26 kN at 70 m/s there, more than half its drag with its gear and flaps
+# out, and it could not come down a glide slope at its approach speed.
 
 
 def blades_mass(engine):
@@ -603,6 +616,11 @@ def turboprop_power_lapse(mach, h_m=None, tr=1.0, t_k=None, p_pa=None):
     return float(lapse) if np.ndim(lapse) == 0 else lapse
 
 
+def flight_idle_n1(engine):
+    """A turboprop's flight idle, N1 (%): its ground idle's (ground_range)."""
+    return float(ground_range(engine)["n1"][0])
+
+
 def turboprop_tables(engine):
     """JSBSim's EnginePowerRPM_N1 (shaft power, hp, over the output shaft's
     rpm and N1), ITT_N1 (deg C, over N1, not burning and burning) and
@@ -615,10 +633,11 @@ def turboprop_tables(engine):
     power = hp * turbine_speed_power(np.asarray(TP_RPM), omega)[:, None] * core_power(n1)[None, :]
     # the inter-turbine temperature rises with the power, from idle's to full power's
     p = core_power(n1)
-    p_idle = float(core_power(TP_IDLE_N1))
+    idle = flight_idle_n1(engine)
+    p_idle = float(core_power(idle))
     t_idle, t_max = TP_ITT_C
-    itt = np.where(n1 >= TP_IDLE_N1, t_idle + (t_max - t_idle) * (p - p_idle) / (1.0 - p_idle),
-                   15.0 + (t_idle - 15.0) * n1 / TP_IDLE_N1)
+    itt = np.where(n1 >= idle, t_idle + (t_max - t_idle) * (p - p_idle) / (1.0 - p_idle),
+                   15.0 + (t_idle - 15.0) * n1 / idle)
     # the Willans line: fuel flow c + (1 - c) p of the full-power flow at a
     # power fraction p, so the specific consumption rises at part power by
     # (c + (1 - c) p) / p; JSBSim divides its psfc by this "efficiency"
@@ -642,8 +661,8 @@ def ground_range(engine):
     angles = np.concatenate([beta["blade_angle"], tab["blade_angle"]])
     n = p.rpm / 60.0
     hp = np.concatenate([beta["CP"][0], tab["CP"][0]]) * RHO0 * n**3 * p.D**5 / HP
-    t = turboprop_tables(engine)
-    row, n1 = t["EnginePowerRPM_N1"][TP_RPM.index(1.0)], t["n1"]
+    n1 = np.asarray(TP_N1)
+    row = engine.thermo_power_kw * 1000.0 / HP * core_power(n1)  # turboprop_tables' power at the design speed
     run = n1 >= TP_SUSTAIN_N1             # from the self-sustaining speed up the power rises with N1
     n1_hp = np.interp(hp, row[run], n1[run])
     # the fuel control: N1 -> power (the table's slope at ground idle) -> the
@@ -660,10 +679,13 @@ def ground_range(engine):
     hp_per_deg = (hp[1] - hp[0]) / (angles[1] - angles[0])
     k_blade = TP_BETA_BLADE_BANDWIDTH / (hp_per_deg * rpm_per_hp)
     upto = len(beta["blade_angle"]) + 2     # ground idle to the low stop, and one column past it
+    idle = float(n1_hp[0])                  # flight idle's N1 (flight_idle_n1)
+    cap0 = idle + k_n1 * (1.0 - TP_BETA_UNDERSPEED) * p.rpm
     return {"ground_idle_deg": float(angles[0]), "low_stop_deg": float(tab["blade_angle"][0]),
             "high_stop_deg": float(tab["blade_angle"][-1]), "blade_angle_deg": angles[:upto], "power_hp": hp[:upto],
             "n1": n1_hp[:upto], "k_n1": k_n1, "k_blade": k_blade, "rpm": p.rpm, "overspeed_rpm": TP_BETA_OVERSPEED * p.rpm,
-            "min_n1": TP_BETA_MIN_N1, "throttle": TP_BETA_THROTTLE}
+            "min_n1": TP_BETA_MIN_N1, "throttle": TP_BETA_THROTTLE,
+            "cap0_n1": cap0, "cap_n1": idle + (100.0 - idle) * TP_BETA_THROTTLE}
 
 
 def power_lapse_xml(engine, indent):
@@ -749,7 +771,7 @@ def turboprop_xml(engine):
   </table>
 </turboprop_engine>
 """ % (engine.power_kw, rating, (", its core %.0f kW" % engine.thermo_power_kw) if engine.thermo_power_kw > engine.power_kw else "",
-       engine.psfc, engine.prop_rpm, engine.gear_ratio, engine.throttle_ratio, engine.name, rating, psfc, TP_IDLE_N1,
+       engine.psfc, engine.prop_rpm, engine.gear_ratio, engine.throttle_ratio, engine.name, rating, psfc, flight_idle_n1(engine),
        TP_SPOOL_S, power_lapse_xml(engine, 4), head, power, itt, eff)
 
 

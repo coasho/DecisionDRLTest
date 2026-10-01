@@ -482,15 +482,24 @@ For fighters:
   at its governed speed (the C-130J's -5.15 deg at 75 % radius, taking 144
   hp; with the blades' twist that is +5.3 deg at 52 % radius, the 42-inch
   station, if that is where the 54H60's angles are measured - the sources
-  do not say), and N1 holds that speed (52.5 %, below flight idle's 60: the
-  engine's throttle position, the SDK's `throttle_position`, reads below 0
-  there). The blades open with the throttle to the governor's low stop, N1 capped
-  at the flight range's, which takes over at 0.2 without a step. Rolling
+  do not say), and N1 holds that speed (52.5 %). The blades open with the
+  throttle to the governor's low stop, N1 capped: at ground idle as far above
+  it as brings the propeller back from 96 % of its speed, rising to the flight
+  range's N1 where that takes over, at 0.2, without a step. Rolling
   at idle the flat blades brake, opening past 101 % of the propeller's
   speed to hold it. Governed at flight idle on its low stop, as before, a
   parked C-130J made 3,440 lbf a propeller and rolled from rest to 11 m/s
   in 5 s; now it makes -1 lbf and stands still. In the air nothing changes:
   the flight tests' reports are identical, value for value.
+- **Flight idle.** A turboprop's flight idle is its ground idle's N1: the
+  fuel control's least that turns the propeller at its governed speed with
+  its blades flat - the core a little over its own need, next to no shaft
+  power. In a descent at flight idle a T56's torque goes negative, its
+  propellers driving it (its negative torque system; C-130 crews,
+  c-130hercules.net, "C-130 descent technique"). hangar's flight idle was a
+  guessed 60 %, a tenth of the core's power: the C-130J's propellers pushed
+  26 kN at 70 m/s and it could not come down a glide slope; on 52.5 % they
+  make 8 kN ([flight-autonomy.md](flight-autonomy.md), 4.56).
 - **Large aircraft.** A jet climbs best well above a propeller aircraft's
   speeds, at up to 2.8 times its stall speed. A heavy jet's stall run goes
   on until the stall breaks, and every crash test starts with the lowest

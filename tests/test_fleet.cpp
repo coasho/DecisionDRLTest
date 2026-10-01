@@ -976,13 +976,7 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             INFO(p.type << " (" << className(p.cls) << "): recovery " << activityStateName(a.state) << " " << reasonName(a.reason) << "; touched down "
                         << l.touchAlong << " m along, " << l.touchCross << " m across, sinking " << l.touchSink << " m/s; bounced " << l.hop
                         << " m; worst " << l.worstCross << " m across");
-            // the C-130J, its flight idle's thrust about its drag, comes down its glide slope fast and bounces: it goes around
-            // from both its approaches and fails (4.54; the backlog's B-1). (The B-52H lands on its airbrakes: 4.55)
-            if (p.type == "c130j") {
-                CHECK(a.state == ActivityState::Failed);
-                CHECK(a.reason == Reason::LandingAbandoned);
-                continue;
-            }
+            // (the C-130J lands at a flight idle of next to no power, 4.56; the B-52H on its airbrakes, 4.55)
             CHECK(a.state == ActivityState::Completed);
             CHECK(l.touched);
             CHECK(l.endSpeed < 0.5); // (stopped)
@@ -997,8 +991,6 @@ TEST_CASE("fleet: every advertised capability flies its case within its class's 
             }
             fleet.covered(p, "fsim.guidance.recovery");
         }
-        for (const auto& p : planes)
-            if (p.type == "c130j") fleet.covered(p, "fsim.guidance.recovery"); // (flown, gone around: above)
     }
 
     // --- guidance ------------------------------------------------------------------------------------

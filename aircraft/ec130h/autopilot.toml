@@ -1,20 +1,20 @@
-# Written by hangar autopilot (2026-09-26 00:37) for ec130h.toml: the aircraft's responses to its
+# Written by hangar autopilot (2026-10-01 03:29) for ec130h.toml: the aircraft's responses to its
 # controls, identified at a reference condition (docs/hangar.md, The autopilot). The
 # build writes them into the JSBSim aircraft's plant section; the platform designs its
 # control loops from them. Delete this file to fly the platform's shared defaults.
 [reference]   # where they were measured
 tas_ms = 107.634
-eas_ms = 93.1071
+eas_ms = 93.1073
 altitude_m = 3000
 
 [identified]   # the responses at the reference: per unit of aileron (roll rate, rad/s), elevator (load factor,
                # g), rudder (sideslip, rad) and throttle (acceleration, m/s2), each with its lag (s); level
                # flight's throttle, a surface-controlled aircraft's trim law, the zero-lift angle of attack
-roll = { gain = 0.681552, lag_s = 0.364466 }
-pitch = { gain = 3.08917, lag_s = 0.409934 }
-yaw = { gain = 0.761855 }
-speed = { gain = 1.33153, lag_s = 0.892924 }
-throttle_trim = 0.591718
-elevator_trim = 0.000353596
-elevator_trim_lift = -0.342211
-alpha_zero_lift_rad = -0.075786
+roll = { gain = 0.681588, lag_s = 0.364466 }
+pitch = { gain = 3.08932, lag_s = 0.409934 }
+yaw = { gain = 0.761867 }
+speed = { gain = 1.56834, lag_s = 0.947696 }
+throttle_trim = 0.647285
+elevator_trim = 0.000353603
+elevator_trim_lift = -0.342213
+alpha_zero_lift_rad = -0.0757865
