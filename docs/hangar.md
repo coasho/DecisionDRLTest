@@ -545,6 +545,11 @@ For fighters:
     there either: at the rotation speed the angle of attack left gives
     about 1 g. With neither, full back stick gave the F-35A 10° of its 30,
     and it lifted off at 188 m/s. The fighters now lift off at 96-111 m/s.
+    The yaw law fades out the same way, and the pedals move the rudder over
+    its travel directly (a ground law, as fly-by-wire airliners have): its
+    sideslip feedback, on a runway the crosswind's, turned the nose into
+    that wind, and as the C-17A's nose wheel unloaded towards its rotation
+    the rudder won - 8.2 m off its line across 10 m/s, now 0.7.
   - Angle-of-attack limits: near a limit the command is cut to the load
     factor the aircraft pulls plus what the angle of attack left gives,
     counting its rise over the next 0.35 s. At the limit the integrator,

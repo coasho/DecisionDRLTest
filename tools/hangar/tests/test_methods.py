@@ -650,6 +650,21 @@ class FlyByWire(unittest.TestCase):
         raw = root.find(".//fcs_function[@name='fcs/fbw/elevator-raw']/function/sum")
         self.assertIn("fcs/fbw/ground-direct", [q.text for q in raw.findall("property")])
 
+    def test_on_the_wheels_the_pedals_move_the_rudder(self):
+        # the yaw law faded out on the wheels as the pitch's is (fcs/fbw/ground), the
+        # pedals moving the rudder over its travel directly: its sideslip feedback,
+        # there the crosswind's, turned the C-17A into it as its nose wheel unloaded
+        root, _ = self.pitch_channel("c17a")
+        dr = math.radians(max(abs(x) for x in Aircraft.load(repo("aircraft/c17a/c17a.toml")).channel_limits("rudder")))
+        top = root.find(".//fcs_function[@name='fcs/fbw/rudder']/function/sum")
+        law, direct = top.findall("product")
+        fade = law.find("difference")
+        self.assertEqual((float(fade.find("value").text), fade.find("property").text), (1.0, "fcs/fbw/ground"))
+        terms = [p.find("property").text for p in law.find("sum").findall("product")]
+        self.assertEqual(terms, ["fcs/fbw/k-pedal", "fcs/fbw/k-yaw-beta", "fcs/fbw/k-yaw-r"])  # the pedal, the sideslip, its rate
+        self.assertEqual([p.text for p in direct.findall("property")], ["fcs/fbw/ground", "fcs/yaw-trim-sum"])
+        self.assertAlmostEqual(float(direct.find("value").text), dr, places=5)
+
     def test_limiter_limits_the_command(self):
         # at an angle-of-attack limit the feedforward acts on the command
         # limited to the load factor the aircraft pulls plus what the angle of

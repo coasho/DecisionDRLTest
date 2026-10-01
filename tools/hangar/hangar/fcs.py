@@ -1223,14 +1223,24 @@ def channels_xml(aircraft, fbw):
              flight path and in a steady sideslip - it coordinates those as long as they
              last (a damper on the washed-out yaw rate stopped coordinating a sustained
              roll, and at low speed the roll turned the angle of attack into sideslip) -->
+        <!-- on the wheels (the pitch's ground mode, fcs/fbw/ground) the pedals move the rudder
+             directly over its travel, a ground law: the sideslip feedback, there the
+             crosswind's, turned the nose into it, and as the C-17A's nose wheel unloaded
+             towards its rotation it ran 8.6 m off its line across 10 m/s -->
         <fcs_function name="fcs/fbw/rudder">
           <function>
             <sum>
-              <product><property>fcs/fbw/k-pedal</property><property>fcs/yaw-trim-sum</property></product>
-              <product><value>-1</value><property>fcs/fbw/k-yaw-beta</property>
-                <difference><property>aero/beta-rad</property>
-                  <product><value>%.5f</value><property>fcs/yaw-trim-sum</property></product></difference></product>
-              <product><property>fcs/fbw/k-yaw-r</property><property>aero/betadot-rad_sec</property></product>
+              <product>
+                <difference><value>1</value><property>fcs/fbw/ground</property></difference>
+                <sum>
+                  <product><property>fcs/fbw/k-pedal</property><property>fcs/yaw-trim-sum</property></product>
+                  <product><value>-1</value><property>fcs/fbw/k-yaw-beta</property>
+                    <difference><property>aero/beta-rad</property>
+                      <product><value>%.5f</value><property>fcs/yaw-trim-sum</property></product></difference></product>
+                  <product><property>fcs/fbw/k-yaw-r</property><property>aero/betadot-rad_sec</property></product>
+                </sum>
+              </product>
+              <product><property>fcs/fbw/ground</property><value>%.5f</value><property>fcs/yaw-trim-sum</property></product>
             </sum>
           </function>
           <clipto> <min>%.5f</min> <max>%.5f</max> </clipto>
@@ -1249,5 +1259,5 @@ def channels_xml(aircraft, fbw):
           <output>fcs/steer-cmd-norm</output>
         </pure_gain>
       </channel>""" % (gain("k-yaw-r", "k_yaw_r"), gain("k-yaw-beta", "k_yaw_beta"), gain("k-pedal", "k_pedal"),
-                       rad(o["sideslip_deg"]), -dr, dr))
+                       rad(o["sideslip_deg"]), dr, -dr, dr))
     return parts
